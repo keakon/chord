@@ -27,7 +27,7 @@ func TestGenerateUnifiedDiffSummaryRendersFullDiffWithoutTruncation(t *testing.T
 func TestGenerateUnifiedDiffGroupsDeletesBeforeInsertsForTwoLineReplacement(t *testing.T) {
 	old := "lineA old\nlineB old\n"
 	new := "lineA new\nlineB new\n"
-	out := GenerateUnifiedDiff(old, new, "f.go")
+	out := GenerateUnifiedDiffSummary(old, new, "f.go").Text
 	// Documented layout: consecutive '-' lines then consecutive '+' lines inside the hunk.
 	want := "-lineA old\n-lineB old\n+lineA new\n+lineB new\n"
 	if !strings.Contains(out, want) {

@@ -45,7 +45,7 @@ func (t *OverlayTable) invalidateRenderCache() {
 }
 
 // SetShowSelection controls whether the table renders a cursor highlight and ▸ gutter.
-// Model pickers should leave this on; read-only stats tables should turn it off.
+// Read-only stats tables turn it off.
 func (t *OverlayTable) SetShowSelection(on bool) {
 	t.showSelection = on
 	t.invalidateRenderCache()
@@ -56,37 +56,6 @@ func (t *OverlayTable) statusGutterWidth() int {
 		return 3
 	}
 	return 0
-}
-
-func (t *OverlayTable) SetItems(items []OverlayTableItem) {
-	t.items = append([]OverlayTableItem(nil), items...)
-	listItems := make([]OverlayListItem, len(items))
-	for i, item := range items {
-		listItems[i] = item.OverlayListItem
-	}
-	t.list.SetItems(listItems)
-	t.invalidateRenderCache()
-}
-
-func (t *OverlayTable) CursorDown() {
-	t.list.CursorDown()
-	t.invalidateRenderCache()
-}
-func (t *OverlayTable) CursorAt() int { return t.list.CursorAt() }
-
-func (t *OverlayTable) RenderVersion() uint64 {
-	if t == nil {
-		return 0
-	}
-	return t.renderCache.version
-}
-
-func (t *OverlayTable) SelectedItem() (OverlayTableItem, bool) {
-	idx := t.list.CursorAt()
-	if idx < 0 || idx >= len(t.items) {
-		return OverlayTableItem{}, false
-	}
-	return t.items[idx], true
 }
 
 func (t *OverlayTable) WindowRange() (start, end int) {

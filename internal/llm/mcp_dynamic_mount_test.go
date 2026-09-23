@@ -93,7 +93,7 @@ func TestDynamicMCPWireItemsPreserveMessagePosition(t *testing.T) {
 		{Role: message.RoleUser, Content: "second"},
 	}
 
-	chat := convertMessagesToOpenAI("", "openai_chat", "", messages)
+	chat := convertMessagesToOpenAIWithOptions("", "openai_chat", "", messages, openAIConvertOptions{})
 	if len(chat) != 4 || len(chat[1].Tools) != 1 || chat[1].Tools[0].Function.Name != "mcp_sample_lookup" {
 		t.Fatalf("chat dynamic mount = %#v", chat)
 	}

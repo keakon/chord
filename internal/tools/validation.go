@@ -156,19 +156,12 @@ func dropIgnoredArgsUnder(ignored *[]message.IgnoredToolArg, parent string) {
 	*ignored = out
 }
 
-// SanitizeUnknownArgs validates raw JSON against the tool schema while
-// retaining metadata for values that will not participate in execution.
-// Required fields, types, enums, and array coercion remain strict. Fields under
-// "additionalProperties": false are stripped, and duplicate object keys use
-// last-value-wins semantics while recording every shadowed earlier value.
-func SanitizeUnknownArgs(tool Tool, args json.RawMessage) (json.RawMessage, []message.IgnoredToolArg, error) {
-	sanitized, ignored, _, err := SanitizeUnknownArgsWithDiagnostics(tool, args)
-	return sanitized, ignored, err
-}
-
 // SanitizeUnknownArgsWithDiagnostics validates and sanitizes tool arguments,
 // retaining both values that will be ignored and fields that caused schema
-// validation to fail. The latter is kept separate because an invalid value
+// validation to fail. Required fields, types, enums, and array coercion remain
+// strict. Fields under "additionalProperties": false are stripped, and
+// duplicate object keys use last-value-wins semantics while recording every
+// shadowed earlier value. The latter is kept separate because an invalid value
 // must be rendered in an error style, while an unrecognized value is merely
 // not part of the effective execution arguments.
 func SanitizeUnknownArgsWithDiagnostics(tool Tool, args json.RawMessage) (json.RawMessage, []message.IgnoredToolArg, []message.InvalidToolArg, error) {
@@ -206,12 +199,13 @@ func sortToolArgDiagnostics(ignored []message.IgnoredToolArg, invalid []message.
 	})
 }
 
-// ValidateToolArgs is the strict half of SanitizeUnknownArgs: it validates raw
-// JSON against the tool schema and returns the first error, for callers that
-// only care whether arguments are rejected. Unrecognized fields are stripped
-// rather than rejected, so they never surface as an error here; passing a nil
-// ignored sink skips both recording and encoding what was stripped, which is
-// the whole cost difference from SanitizeUnknownArgs.
+// ValidateToolArgs is the strict half of SanitizeUnknownArgsWithDiagnostics: it
+// validates raw JSON against the tool schema and returns the first error, for
+// callers that only care whether arguments are rejected. Unrecognized fields
+// are stripped rather than rejected, so they never surface as an error here;
+// passing a nil ignored sink skips both recording and encoding what was
+// stripped, which is the whole cost difference from
+// SanitizeUnknownArgsWithDiagnostics.
 func ValidateToolArgs(tool Tool, args json.RawMessage) error {
 	if tool == nil {
 		return nil

@@ -208,34 +208,3 @@ func Load(opts LoadOptions) ([]*Definition, []string) {
 	allWarnings = append(allWarnings, w...)
 	return merged, allWarnings
 }
-
-// ParseInput splits a trimmed slash line into (commandName, arguments).
-// commandName is without the leading "/", e.g. "review".
-// arguments is everything after the first whitespace-separated token.
-// Returns ("", "") if input does not start with "/".
-func ParseInput(trimmedLine string) (name, args string) {
-	if !strings.HasPrefix(trimmedLine, "/") {
-		return "", ""
-	}
-	rest := trimmedLine[1:]
-	idx := strings.IndexAny(rest, " \t")
-	if idx < 0 {
-		return normalizeName(rest), ""
-	}
-	return normalizeName(rest[:idx]), strings.TrimSpace(rest[idx+1:])
-}
-
-// Expand applies the $ARGUMENTS substitution rule to a template.
-// If template contains $ARGUMENTS, all occurrences are replaced with args.
-// If template does not contain $ARGUMENTS and args is non-empty, args is
-// appended after two newlines.
-// If args is empty and template has no $ARGUMENTS, template is returned as-is.
-func Expand(template, args string) string {
-	if strings.Contains(template, "$ARGUMENTS") {
-		return strings.ReplaceAll(template, "$ARGUMENTS", args)
-	}
-	if args != "" {
-		return template + "\n\n" + args
-	}
-	return template
-}

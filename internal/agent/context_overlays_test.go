@@ -619,7 +619,7 @@ func TestCompactContextPermissionActionHonoursArgumentRules(t *testing.T) {
 			if got := compactContextPermissionAction(tc.ruleset); got != tc.want {
 				t.Fatalf("compactContextPermissionAction = %v, want %v", got, tc.want)
 			}
-			decision := evaluateToolPermission(tc.ruleset, tools.NameCompactContext, json.RawMessage(`{}`))
+			decision := evaluateToolPermissionInDir(tc.ruleset, tools.NameCompactContext, json.RawMessage(`{}`), permission.PathScope{})
 			if decision.Action != tc.want {
 				t.Fatalf("evaluateToolPermission action = %v, want %v", decision.Action, tc.want)
 			}

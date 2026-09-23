@@ -2459,7 +2459,7 @@ func detectRepeatedToolOutputs(messages []message.Message, meta map[string]toolC
 		// exists later": explicit failures/cancellations must not make the
 		// repeated marker point at an unsuccessful run. Content sniffing is
 		// reserved for status-less legacy transcripts (matching the rendered
-		// "Error:" prefix, as in classifyRequestReductionToolOutput): an
+		// "Error:" prefix, as in message.ClassifyToolResultContent): an
 		// explicit success that merely mentions "Error:" mid-output — a grep
 		// over error handling, a log dump — is still a trustworthy copy.
 		trustworthy := memo.toolResultTrustworthy(msg.ToolCallID, msg.ToolStatus, msg.Content)

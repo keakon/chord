@@ -204,13 +204,6 @@ type CommandEngine struct {
 	hooks map[string][]HookDef
 }
 
-func NewCommandEngine(hooks map[string][]HookDef) *CommandEngine {
-	if hooks == nil {
-		hooks = make(map[string][]HookDef)
-	}
-	return &CommandEngine{hooks: hooks}
-}
-
 func NewCommandEngineFromList(defs []HookDef) *CommandEngine {
 	hooks := make(map[string][]HookDef)
 	for _, d := range defs {

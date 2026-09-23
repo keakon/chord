@@ -169,10 +169,6 @@ func (m *Model) currentTitleMode() terminalTitleMode {
 	return m.deriveTerminalTitleState().mode
 }
 
-func (m *Model) currentTitleTickerDelay() time.Duration {
-	return m.deriveTerminalTitleState().tickerDelay
-}
-
 func (m *Model) syncTerminalTitleState() tea.Cmd {
 	if m == nil {
 		return nil

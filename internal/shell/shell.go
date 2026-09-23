@@ -130,22 +130,6 @@ func GetShellCommand(shellType ShellType, command string) (string, []string) {
 	}
 }
 
-// GetShellDescription returns a description for the given shell type
-func GetShellDescription(shellType ShellType) string {
-	switch shellType {
-	case ShellBash:
-		return "Execute a shell command via bash."
-	case ShellPowerShell:
-		return "Execute a shell command via PowerShell."
-	case ShellGitBash:
-		return "Execute a shell command via Git Bash."
-	case ShellPOSIX:
-		return "Execute a shell command (POSIX sh; avoid bash-specific syntax like [[ ]])."
-	default:
-		return "Execute a shell command."
-	}
-}
-
 // ParseShellType converts a shell type string (e.g. "bash", "powershell",
 // "git-bash", "posix") back to a ShellType. Unknown values fall back to bash.
 func ParseShellType(s string) ShellType {

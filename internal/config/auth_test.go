@@ -716,19 +716,3 @@ func TestRefreshOAuthToken_ReusesExistingAccessWhenResponseOmitsAccessToken(t *t
 		t.Fatalf("Expires = %d, want updated value different from %d", updated.Expires, cred.Expires)
 	}
 }
-
-func TestLoadAuthFromEnv(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "ant-key")
-	t.Setenv("OPENAI_API_KEY", "oai-key")
-
-	auth := LoadAuthFromEnv()
-
-	antCreds := auth["anthropic"]
-	if len(antCreds) != 1 || antCreds[0].APIKey != "ant-key" {
-		t.Errorf("unexpected anthropic creds: %v", antCreds)
-	}
-	oaiCreds := auth["openai"]
-	if len(oaiCreds) != 1 || oaiCreds[0].APIKey != "oai-key" {
-		t.Errorf("unexpected openai creds: %v", oaiCreds)
-	}
-}

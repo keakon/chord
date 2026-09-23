@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -24,6 +25,20 @@ func mustExportForProjection(t *testing.T, msgs []message.Message) *ExportedSess
 		t.Fatalf("Export: %v", err)
 	}
 	return exported
+}
+
+// projectTurnsForTest mirrors the encoding path production uses through
+// ProjectJSONLWithLimits: build the turns, then enforce the byte budget against
+// the encoded result.
+func projectTurnsForTest(exported *ExportedSession, limits ProjectionLimits) ([]ProjectedTurn, error) {
+	if exported == nil {
+		return nil, fmt.Errorf("session is nil")
+	}
+	turns := buildProjectedTurns(exported, limits)
+	if _, err := enforceProjectionBudget(turns, limits); err != nil {
+		return nil, err
+	}
+	return turns, nil
 }
 
 func TestProjectSegmentsTurnsOnUserMessages(t *testing.T) {
@@ -47,9 +62,9 @@ func TestProjectSegmentsTurnsOnUserMessages(t *testing.T) {
 		{Role: message.RoleUser, Content: "second request"},
 		{Role: message.RoleAssistant, Content: "done with second"},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 2 {
 		t.Fatalf("len(turns) = %d, want 2", len(turns))
@@ -93,9 +108,9 @@ func TestProjectUnknownTriggerWithoutLeadingUser(t *testing.T) {
 		{Role: message.RoleAssistant, Content: "continued work"},
 		{Role: message.RoleUser, Content: "real request"},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 2 {
 		t.Fatalf("len(turns) = %d, want 2", len(turns))
@@ -112,7 +127,7 @@ func TestProjectUnknownTriggerWithoutLeadingUser(t *testing.T) {
 }
 
 func TestProjectNilSessionErrors(t *testing.T) {
-	if _, err := Project(nil); err == nil {
+	if _, err := projectTurnsForTest(nil, DefaultProjectionLimits()); err == nil {
 		t.Fatal("nil session must fail instead of emitting empty output")
 	}
 }
@@ -122,9 +137,9 @@ func TestProjectMailboxStarterIsInferred(t *testing.T) {
 		{Role: message.RoleUser, Content: "worker handoff", Kind: message.KindSubAgentMailbox},
 		{Role: message.RoleAssistant, Content: "ack"},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 1 || turns[0].Trigger != TriggerInferred {
 		t.Fatalf("turns = %#v, want one inferred turn", turns)
@@ -141,9 +156,9 @@ func TestProjectSyntheticSignalsStayInTurn(t *testing.T) {
 		{Role: message.RoleUser, Content: "pressure reminder", Kind: message.KindContextNotice},
 		{Role: message.RoleUser, Content: "job finished", Kind: message.KindBackgroundResult},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	// Context notice attaches to the open turn; the background result opens
 	// an inferred turn.
@@ -168,9 +183,9 @@ func TestProjectCompactionSummaryIsBoundaryNotFact(t *testing.T) {
 		{Role: message.RoleUser, Content: "[Context Summary]\ncondensed history", IsCompactionSummary: true},
 		{Role: message.RoleAssistant, Content: "after compaction"},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 2 {
 		t.Fatalf("len(turns) = %d, want 2", len(turns))
@@ -219,9 +234,9 @@ func TestProjectRejectedCompactCallStaysInTurn(t *testing.T) {
 			ToolStatus: message.ToolStatusSuccess,
 		},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 1 {
 		t.Fatalf("rejected compact call must not cut a new turn: got %d turns", len(turns))
@@ -263,9 +278,9 @@ func TestProjectRecoveryBarrierAndUnknownAreExplicit(t *testing.T) {
 			ToolRecoveryState: message.ToolRecoveryStateOutcomeUnknown,
 		},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 1 || len(turns[0].ToolCalls) != 2 {
 		t.Fatalf("turns = %#v", turns)
@@ -323,9 +338,9 @@ func TestProjectFileAttribution(t *testing.T) {
 			ToolStatus: message.ToolStatusSuccess,
 		},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 1 {
 		t.Fatalf("len(turns) = %d, want 1", len(turns))
@@ -370,9 +385,9 @@ func TestProjectMoveAndDeleteOps(t *testing.T) {
 			},
 		},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	changes := turns[0].FileChanges
 	if len(changes) != 2 {
@@ -417,9 +432,9 @@ func TestProjectFileFallbacksWithoutChanges(t *testing.T) {
 			ToolChangedPaths: []string{"legacy.go"},
 		},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	changes := turns[0].FileChanges
 	if len(changes) != 3 {
@@ -445,9 +460,9 @@ func TestProjectTextBudgetMarksTruncation(t *testing.T) {
 	exported := mustExportForProjection(t, msgs)
 	limits := DefaultProjectionLimits()
 	limits.MaxUserTextRunes = 10
-	turns, err := ProjectWithLimits(exported, limits)
+	turns, err := projectTurnsForTest(exported, limits)
 	if err != nil {
-		t.Fatalf("ProjectWithLimits: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if turns[0].UserText.Text != strings.Repeat("a", 10) || !turns[0].UserText.Truncated {
 		t.Fatalf("user text = %#v, want truncated at 10 runes", turns[0].UserText)
@@ -468,7 +483,7 @@ func TestProjectTotalBudgetErrors(t *testing.T) {
 	exported := mustExportForProjection(t, msgs)
 	limits := DefaultProjectionLimits()
 	limits.MaxTotalBytes = 10
-	if _, err := ProjectWithLimits(exported, limits); err == nil {
+	if _, err := projectTurnsForTest(exported, limits); err == nil {
 		t.Fatal("over-budget projection must fail instead of silently dropping turns")
 	}
 }
@@ -483,9 +498,9 @@ func TestProjectOrphanResultsAreDeterministic(t *testing.T) {
 	exported := mustExportForProjection(t, msgs)
 	var first []byte
 	for i := range 200 {
-		turns, err := Project(exported)
+		turns, err := projectTurnsForTest(exported, DefaultProjectionLimits())
 		if err != nil {
-			t.Fatalf("Project: %v", err)
+			t.Fatalf("projectTurnsForTest: %v", err)
 		}
 		data, err := MarshalProjectedTurnsJSONL(turns)
 		if err != nil {
@@ -499,9 +514,9 @@ func TestProjectOrphanResultsAreDeterministic(t *testing.T) {
 			t.Fatalf("iteration %d differs: orphan order must follow message index", i)
 		}
 	}
-	turns, err := Project(exported)
+	turns, err := projectTurnsForTest(exported, DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 1 || len(turns[0].ToolCalls) != 2 {
 		t.Fatalf("turns = %#v", turns)
@@ -522,13 +537,13 @@ func TestProjectIsDeterministic(t *testing.T) {
 		{Role: message.RoleTool, Content: "output", ToolCallID: "c1", ToolStatus: message.ToolStatusSuccess},
 	}
 	exported := mustExportForProjection(t, msgs)
-	first, err := Project(exported)
+	first, err := projectTurnsForTest(exported, DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
-	second, err := Project(exported)
+	second, err := projectTurnsForTest(exported, DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	a, err := MarshalProjectedTurnsJSONL(first)
 	if err != nil {
@@ -597,9 +612,9 @@ func TestProjectReadsV1FixtureWithoutNewFields(t *testing.T) {
 	if len(imported.Messages) != 1 || imported.Messages[0].Kind != "" || imported.Messages[0].FileState != nil {
 		t.Fatalf("v1 message = %#v", imported.Messages[0])
 	}
-	turns, err := Project(&imported)
+	turns, err := projectTurnsForTest(&imported, DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 1 || turns[0].Trigger != TriggerUserMessage {
 		t.Fatalf("turns = %#v", turns)
@@ -657,9 +672,9 @@ func TestProjectToolCallOriginDistinguishesUserSkillLoad(t *testing.T) {
 		},
 		{Role: message.RoleTool, ToolCallID: "model-skill-1", Content: "<skill/>", ToolStatus: message.ToolStatusSuccess},
 	}
-	turns, err := Project(mustExportForProjection(t, msgs))
+	turns, err := projectTurnsForTest(mustExportForProjection(t, msgs), DefaultProjectionLimits())
 	if err != nil {
-		t.Fatalf("Project: %v", err)
+		t.Fatalf("projectTurnsForTest: %v", err)
 	}
 	if len(turns) != 2 {
 		t.Fatalf("len(turns) = %d, want 2", len(turns))

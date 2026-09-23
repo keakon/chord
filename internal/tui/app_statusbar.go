@@ -31,19 +31,6 @@ func writeStatusBarSpaces(b *strings.Builder, count int) {
 	}
 }
 
-func (m *Model) statusBarDynamicCacheKeyAt(now time.Time) string {
-	focused := m.focusedAgentIDOrMain()
-	latestStatusStart := m.focusedAgentCanShowIdleSince()
-	return m.statusBarDynamicCacheKeyFromState(
-		now,
-		m.viewport != nil && m.viewport.HasUserLocalShellPending(),
-		m.renderRequestProgressSummary(focused),
-		m.activityForAgent(focused).Type == agent.ActivityCompacting,
-		m.isFocusedAgentBusy(),
-		latestStatusStart,
-	)
-}
-
 func (m *Model) statusBarDynamicCacheKeyFromState(now time.Time, localShellPending bool, progress string, compacting, busy, latestStatusStart bool) string {
 	if localShellPending {
 		return m.visualAnimationCacheKeyAt(now)

@@ -64,7 +64,7 @@ func TestNormalizeMessagesForPoolTarget_PreservesAnthropicThinkingForAnthropicTa
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		Provenance:     &message.MessageProvenance{Source: "import:claude", WireFamily: modelcompat.WireFamilyAnthropic},
 	}}
-	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled"}})
+	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled"}}, modelcompat.ReplayCompatNative)
 	if len(out) != 1 || len(out[0].ThinkingBlocks) != 1 {
 		t.Fatalf("thinking unexpectedly removed: %+v", out)
 	}
@@ -92,7 +92,7 @@ func TestNormalizeMessagesForPoolTarget_UsesAnthropicUnsignedContinuity(t *testi
 		},
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
 	}
-	out, report := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, tuningForPoolTarget(FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}))
+	out, report := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, tuningForPoolTarget(FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}), modelcompat.ReplayCompatNative)
 	if len(out) != 2 || len(out[0].ThinkingBlocks) != 1 || len(out[0].ToolCalls) != 1 || report.DroppedThinkingBlocks != 0 {
 		t.Fatalf("unsigned continuity = %+v (report %+v)", out, report)
 	}
@@ -119,7 +119,7 @@ func TestNormalizeMessagesForPoolTarget_ConvertsOpenAIReasoningToAnthropicUnsign
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
 	}
 	target := FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}
-	out, report := normalizeMessagesForPoolTarget(msgs, target, tuningForPoolTarget(target))
+	out, report := normalizeMessagesForPoolTargetWithOptions(msgs, target, tuningForPoolTarget(target), modelcompat.ReplayCompatNative)
 	if len(out) != 2 || out[0].ReasoningContent != "" || len(out[0].ThinkingBlocks) != 1 || out[0].ThinkingBlocks[0].Thinking != "portable reasoning" {
 		t.Fatalf("converted messages = %+v (report %+v)", out, report)
 	}
@@ -127,7 +127,7 @@ func TestNormalizeMessagesForPoolTarget_ConvertsOpenAIReasoningToAnthropicUnsign
 		t.Fatalf("report = %+v", report)
 	}
 
-	converted := convertMessages(out)
+	converted, _ := convertMessagesWithMap(out)
 	if len(converted) != 2 {
 		t.Fatalf("wire messages = %+v", converted)
 	}
@@ -163,7 +163,7 @@ func TestNormalizeMessagesForPoolTarget_ConvertsAnthropicThinkingToOpenAIReasoni
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
 	}
 	target := FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}
-	out, report := normalizeMessagesForPoolTarget(msgs, target, tuningForPoolTarget(target))
+	out, report := normalizeMessagesForPoolTargetWithOptions(msgs, target, tuningForPoolTarget(target), modelcompat.ReplayCompatNative)
 	if len(out) != 2 || out[0].ReasoningContent != "visible thinking" || len(out[0].ThinkingBlocks) != 0 || len(out[0].ToolCalls) != 1 {
 		t.Fatalf("converted messages = %+v (report %+v)", out, report)
 	}
@@ -171,7 +171,7 @@ func TestNormalizeMessagesForPoolTarget_ConvertsAnthropicThinkingToOpenAIReasoni
 		t.Fatalf("report = %+v", report)
 	}
 
-	wire := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, out)
+	wire := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, out, openAIConvertOptions{})
 	var assistant *openAIMessage
 	for i := range wire {
 		if wire[i].Role == "assistant" {
@@ -206,7 +206,7 @@ func TestNormalizeMessagesForPoolTarget_ConvertsResponsesSummaryToOpenAIReasonin
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "result"},
 	}
 	target := FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}
-	out, report := normalizeMessagesForPoolTarget(msgs, target, tuningForPoolTarget(target))
+	out, report := normalizeMessagesForPoolTargetWithOptions(msgs, target, tuningForPoolTarget(target), modelcompat.ReplayCompatNative)
 	if len(out) != 2 || out[0].ReasoningContent != "public reasoning summary" || len(out[0].ResponsesOutput) != 0 || len(out[0].ToolCalls) != 1 {
 		t.Fatalf("converted messages = %+v (report %+v)", out, report)
 	}
@@ -238,7 +238,7 @@ func TestNormalizeMessagesForPoolTarget_ConvertsGeminiThoughtToAnthropicUnsigned
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
 	}
 	target := FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}
-	out, report := normalizeMessagesForPoolTarget(msgs, target, tuningForPoolTarget(target))
+	out, report := normalizeMessagesForPoolTargetWithOptions(msgs, target, tuningForPoolTarget(target), modelcompat.ReplayCompatNative)
 	if len(out) != 2 || len(out[0].GeminiParts) != 0 || len(out[0].ThinkingBlocks) != 1 || out[0].ThinkingBlocks[0].Thinking != "gemini thought" || len(out[0].ToolCalls) != 1 {
 		t.Fatalf("converted messages = %+v (report %+v)", out, report)
 	}
@@ -258,7 +258,7 @@ func TestNormalizeMessagesForPoolTarget_DropsAnthropicThinkingWithoutConfiguredT
 		},
 		{Role: message.RoleTool, ToolCallID: "toolu_1", Content: "/tmp\n"},
 	}
-	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{})
+	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if len(out) != 2 || len(out[0].ThinkingBlocks) != 0 || len(out[0].ToolCalls) != 1 {
 		t.Fatalf("thinking should be removed without configured thinking: %+v", out)
 	}
@@ -275,7 +275,7 @@ func TestNormalizeMessagesForPoolTarget_PreservesAnthropicThinkingWhenConfigured
 		ToolCalls:      []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: json.RawMessage(`{"command":"pwd"}`)}},
 		Provenance:     &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", WireFamily: modelcompat.WireFamilyAnthropic},
 	}}
-	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}})
+	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}, modelcompat.ReplayCompatNative)
 	if len(out) != 1 || len(out[0].ThinkingBlocks) != 1 {
 		t.Fatalf("thinking unexpectedly removed with configured thinking: %+v", out)
 	}
@@ -295,7 +295,7 @@ func TestNormalizeMessagesForPoolTarget_DropsOpenAIReasoningForResponsesTarget(t
 		},
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "/tmp/project\n"},
 	}
-	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{})
+	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if len(out) != 2 || out[0].ReasoningContent != "" || len(out[0].ToolCalls) != 1 {
 		t.Fatalf("reasoning should be dropped while tool call survives for responses target: %+v", out)
 	}
@@ -318,7 +318,7 @@ func TestNormalizeMessagesForPoolTarget_DropsOpenAIReasoningWhenSwitchingToAnthr
 		},
 		{Role: message.RoleTool, ToolCallID: "toolu_1", Content: "/tmp\n"},
 	}
-	out, _ := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{})
+	out, _ := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if len(out) != 2 {
 		t.Fatalf("len(out)=%d, want 2", len(out))
 	}
@@ -344,7 +344,7 @@ func TestNormalizeMessagesForPoolTarget_PreservesOpenAIVisibleReasoningWhenCompa
 		ToolCalls:        []message.ToolCall{{ID: "call_1", Name: "Shell", Args: json.RawMessage(`{"command":"pwd"}`)}},
 		Provenance:       &message.MessageProvenance{Source: "chord", ProviderID: "glm-main", ModelID: "glm-5.2", WireFamily: modelcompat.WireFamilyOpenAIChat},
 	}, {Role: message.RoleTool, ToolCallID: "call_1", Content: "/tmp/project\n"}}
-	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}, RequestTuning{})
+	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if len(out) != 2 || out[0].ReasoningContent != "preserved reasoning" {
 		t.Fatalf("reasoning should be preserved for openai_visible target: %+v", out)
 	}
@@ -382,7 +382,7 @@ func TestNormalizeMessagesForPoolTarget_DropsNonOpenAIChatReasoningWhenOpenAIVis
 				Provenance:       tt.provenance,
 			}, {Role: message.RoleTool, ToolCallID: "call_1", Content: "/tmp/project\n"}}
 
-			out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}, RequestTuning{})
+			out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "glm-5.2"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 			if len(out) != 2 || out[0].ReasoningContent != "" {
 				t.Fatalf("reasoning should be dropped for non-openai-chat provenance: %+v", out)
 			}
@@ -406,7 +406,7 @@ func TestNormalizeMessagesForPoolTarget_IgnoresOpenAIVisibleCompatForResponsesTa
 			ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible"},
 		},
 	}, nil)
-	out, rep := normalizeMessagesForPoolTarget(sourceMsgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{})
+	out, rep := normalizeMessagesForPoolTargetWithOptions(sourceMsgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if len(out) != 2 || out[0].ReasoningContent != "" {
 		t.Fatalf("reasoning should be dropped for responses target even when openai_visible is configured: %+v", out)
 	}
@@ -428,7 +428,7 @@ func TestNormalizeMessagesForPoolTarget_ReplaysOpenAIToolCallsForAnthropicTarget
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: " M internal/modelcompat/normalize.go\n"},
 	}
 
-	normalized, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{})
+	normalized, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if rep.DowngradedToolCalls != 0 {
 		t.Fatalf("DowngradedToolCalls=%d, want 0", rep.DowngradedToolCalls)
 	}
@@ -439,7 +439,7 @@ func TestNormalizeMessagesForPoolTarget_ReplaysOpenAIToolCallsForAnthropicTarget
 		t.Fatalf("did not expect imported tool marker in normalized content: %q", normalized[1].Content)
 	}
 
-	anthropicMessages := convertMessages(normalized)
+	anthropicMessages, _ := convertMessagesWithMap(normalized)
 	if len(anthropicMessages) != 3 {
 		t.Fatalf("len(anthropicMessages)=%d, want 3", len(anthropicMessages))
 	}
@@ -470,7 +470,7 @@ func TestNormalizeMessagesForPoolTarget_DropsThinkingForOpenAITarget(t *testing.
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		Provenance:     &message.MessageProvenance{Source: "import:claude", WireFamily: modelcompat.WireFamilyAnthropic},
 	}}
-	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{})
+	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if len(out[0].ThinkingBlocks) != 0 {
 		t.Fatalf("thinking should be dropped for OpenAI target: %+v", out[0])
 	}
@@ -492,7 +492,7 @@ func TestNormalizeMessagesForPoolTarget_ResponsesConversionDoesNotReplayReasonin
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "/tmp/project\n"},
 	}
 
-	normalized, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{})
+	normalized, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if rep.DowngradedToolCalls != 0 {
 		t.Fatalf("DowngradedToolCalls=%d, want 0", rep.DowngradedToolCalls)
 	}
@@ -530,7 +530,7 @@ func TestNormalizeMessagesForPoolTarget_DowngradesMissingToolResultForAnthropic(
 		ToolCalls:  []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: args}},
 		Provenance: &message.MessageProvenance{Source: "import:claude", Imported: true, WireFamily: modelcompat.WireFamilyAnthropic},
 	}}
-	out, rep := normalizeMessagesForPoolTarget(msgs, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled"}})
+	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled"}}, modelcompat.ReplayCompatNative)
 	if len(out) != 1 || len(out[0].ToolCalls) != 0 || out[0].Role != message.RoleAssistant {
 		t.Fatalf("expected downgrade to assistant text, got %+v", out)
 	}
@@ -555,12 +555,12 @@ func TestNormalizeMessagesForPoolTarget_ResponsesToMessagesPreservesToolFacts(t 
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "README contents"},
 	}
 
-	normalized, report := normalizeMessagesForPoolTarget(source, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}})
+	normalized, report := normalizeMessagesForPoolTargetWithOptions(source, FallbackModel{ProviderConfig: provider, ModelID: "claude-sonnet"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}, modelcompat.ReplayCompatNative)
 	if len(normalized) != 3 || len(normalized[1].ResponsesOutput) != 0 || len(normalized[1].ToolCalls) != 1 || normalized[2].ToolCallID != "call_1" {
 		t.Fatalf("Responses history lost portable tool facts: %+v (report %+v)", normalized, report)
 	}
 
-	converted := convertMessages(normalized)
+	converted, _ := convertMessagesWithMap(normalized)
 	if len(converted) != 3 {
 		t.Fatalf("Anthropic messages = %#v, want user/assistant/tool-result", converted)
 	}
@@ -587,7 +587,7 @@ func TestNormalizeMessagesForPoolTarget_MessagesToResponsesPreservesToolFacts(t 
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "README contents"},
 	}
 
-	normalized, report := normalizeMessagesForPoolTarget(source, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{})
+	normalized, report := normalizeMessagesForPoolTargetWithOptions(source, FallbackModel{ProviderConfig: provider, ModelID: "gpt-5"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if len(normalized) != 3 || len(normalized[1].ThinkingBlocks) != 0 || len(normalized[1].ToolCalls) != 1 || normalized[2].ToolCallID != "call_1" {
 		t.Fatalf("Messages history lost portable tool facts: %+v (report %+v)", normalized, report)
 	}
@@ -618,11 +618,11 @@ func TestNormalizeMessagesForPoolTarget_ChatToMessagesDropsOnlyReasoning(t *test
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "README contents"},
 	}
 
-	normalized, report := normalizeMessagesForPoolTarget(source, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}})
+	normalized, report := normalizeMessagesForPoolTargetWithOptions(source, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}, modelcompat.ReplayCompatNative)
 	if len(normalized) != 3 || normalized[1].ReasoningContent != "" || len(normalized[1].ToolCalls) != 1 || report.DowngradedReasoning != 1 {
 		t.Fatalf("Chat reasoning should be dropped while tool facts survive: %+v (report %+v)", normalized, report)
 	}
-	converted := convertMessages(normalized)
+	converted, _ := convertMessagesWithMap(normalized)
 	blocks, ok := converted[1].Content.([]anthropicContent)
 	if !ok || !anthropicBlocksContainToolUse(blocks, "call_1") || anthropicBlocksContainText(blocks, "visible chat reasoning") {
 		t.Fatalf("Anthropic conversion lost tool_use or leaked reasoning into text: %#v", converted[1].Content)
@@ -642,11 +642,11 @@ func TestNormalizeMessagesForPoolTarget_MessagesToChatDropsOnlyThinking(t *testi
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "README contents"},
 	}
 
-	normalized, report := normalizeMessagesForPoolTarget(source, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{})
+	normalized, report := normalizeMessagesForPoolTargetWithOptions(source, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if len(normalized) != 3 || len(normalized[1].ThinkingBlocks) != 0 || len(normalized[1].ToolCalls) != 1 || report.DroppedThinkingBlocks != 1 {
 		t.Fatalf("Messages thinking should be dropped while tool facts survive: %+v (report %+v)", normalized, report)
 	}
-	converted := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, normalized)
+	converted := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, normalized, openAIConvertOptions{})
 	var foundCall, foundResult bool
 	for _, msg := range converted {
 		if msg.Role == "assistant" && len(msg.ToolCalls) == 1 && msg.ToolCalls[0].ID == "call_1" {

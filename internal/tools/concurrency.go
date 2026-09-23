@@ -143,10 +143,6 @@ func splitConcurrencyResource(resource string) (kind, path string, ok bool) {
 	return resource[:idx], filepath.Clean(resource[idx+1:]), true
 }
 
-func fileToolConcurrencyPolicy(args json.RawMessage, readOnly bool) ConcurrencyPolicy {
-	return fileToolConcurrencyPolicyInDir(args, readOnly, "")
-}
-
 func fileToolConcurrencyPolicyInDir(args json.RawMessage, readOnly bool, baseDir string) ConcurrencyPolicy {
 	var parsed struct {
 		Path string `json:"path"`

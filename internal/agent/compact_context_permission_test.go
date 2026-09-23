@@ -102,7 +102,7 @@ func TestEvaluateToolPermissionCompactContextIgnoresWildcardDeny(t *testing.T) {
 "*": deny
 read: allow
 `)
-	dec := evaluateToolPermission(rs, tools.NameCompactContext, json.RawMessage(`{}`))
+	dec := evaluateToolPermissionInDir(rs, tools.NameCompactContext, json.RawMessage(`{}`), permission.PathScope{})
 	if dec.Action != permission.ActionAllow {
 		t.Fatalf("compact_context under wildcard-only deny must evaluate to allow, got %q", dec.Action)
 	}
@@ -120,7 +120,7 @@ func TestEvaluateToolPermissionCompactContextExplicitRulesWin(t *testing.T) {
 		rs := permissionRuleset(t, `
 "*": deny
 compact_context: `+tc.rule)
-		dec := evaluateToolPermission(rs, tools.NameCompactContext, json.RawMessage(`{}`))
+		dec := evaluateToolPermissionInDir(rs, tools.NameCompactContext, json.RawMessage(`{}`), permission.PathScope{})
 		if dec.Action != tc.want {
 			t.Fatalf("explicit compact_context %s must evaluate to %s, got %s", tc.rule, tc.want, dec.Action)
 		}
@@ -140,7 +140,7 @@ func TestCompactContextPermissionHonorsNarrowToolGlob(t *testing.T) {
 			rs := permissionRuleset(t, `
 "*": deny
 compact_*: `+tc.rule)
-			decision := evaluateToolPermission(rs, tools.NameCompactContext, json.RawMessage(`{}`))
+			decision := evaluateToolPermissionInDir(rs, tools.NameCompactContext, json.RawMessage(`{}`), permission.PathScope{})
 			if decision.Action != tc.want {
 				t.Fatalf("compact_* %s must evaluate to %s, got %s", tc.rule, tc.want, decision.Action)
 			}

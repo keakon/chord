@@ -210,10 +210,6 @@ var (
 	preservedInterruptionCooldownMax  = 8 * time.Second
 )
 
-func shouldContinueRetry(retryCount, maxAttempts int, lastErr error) bool {
-	return shouldContinueRetryMode(retryCount, maxAttempts, lastErr, false)
-}
-
 func shouldContinueRetryMode(retryCount, maxAttempts int, lastErr error, hardCap bool) bool {
 	if maxAttempts <= 0 {
 		return true

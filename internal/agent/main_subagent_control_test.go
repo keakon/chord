@@ -3920,12 +3920,12 @@ func TestWaitingMainLifecycleSweepNotifiesAndExpiresForLiveWaitingMainWorker(t *
 // as a candidate, so the trigger stays silent for sessions that never delegate.
 func TestWaitingMainLifecycleSweepCandidatesPinsLiveAndParkedWaits(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	if a.hasWaitingMainExpiryCandidates() {
+	if a.waitingMainExpiryCandidatesAmong(a.subs.snapshotSubAgents()) {
 		t.Fatal("empty session must not produce expiry candidates")
 	}
 	live := newControllableTestSubAgent(t, a, "adhoc-candidate-live")
 	live.setState(SubAgentStateWaitingMain, "waiting")
-	if !a.hasWaitingMainExpiryCandidates() {
+	if !a.waitingMainExpiryCandidatesAmong(a.subs.snapshotSubAgents()) {
 		t.Fatal("live waiting_main worker not detected as candidate")
 	}
 	live.setState(SubAgentStateRunning, "")
@@ -3939,13 +3939,13 @@ func TestWaitingMainLifecycleSweepCandidatesPinsLiveAndParkedWaits(t *testing.T)
 	a.subs.mu.Lock()
 	a.subs.taskRecords[rec.TaskID] = rec
 	a.subs.mu.Unlock()
-	if !a.hasWaitingMainExpiryCandidates() {
+	if !a.waitingMainExpiryCandidatesAmong(a.subs.snapshotSubAgents()) {
 		t.Fatal("parked waiting_main record not detected as candidate")
 	}
 	a.subs.mu.Lock()
 	a.subs.taskRecords[rec.TaskID].State = string(SubAgentStateCancelled)
 	a.subs.mu.Unlock()
-	if a.hasWaitingMainExpiryCandidates() {
+	if a.waitingMainExpiryCandidatesAmong(a.subs.snapshotSubAgents()) {
 		t.Fatal("terminal parked record must not remain an expiry candidate")
 	}
 }

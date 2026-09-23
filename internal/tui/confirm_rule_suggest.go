@@ -23,15 +23,13 @@ type PatternCandidate struct {
 
 const maxPatternCandidates = 6
 
-// suggestRulePatterns generates pattern candidates for a tool invocation.
+// suggestRulePatternsWithContext generates pattern candidates for a tool
+// invocation.
 // toolName: the tool name (e.g. "Shell", "Write")
 // argsJSON: the tool arguments as JSON
 // needsApproval: explicit paths that need approval (for Delete)
+// needsApprovalRules: ask rules that already matched, offered as candidates
 // cwd: current working directory (for relative path generation)
-func suggestRulePatterns(toolName, argsJSON string, needsApproval []string, cwd string) []PatternCandidate {
-	return suggestRulePatternsWithContext(toolName, argsJSON, needsApproval, nil, cwd)
-}
-
 func suggestRulePatternsWithContext(toolName, argsJSON string, needsApproval []string, needsApprovalRules []string, cwd string) []PatternCandidate {
 	switch toolNameKey(toolName) {
 	case tools.NameShell:

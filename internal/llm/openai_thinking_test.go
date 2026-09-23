@@ -28,9 +28,9 @@ func TestParseOpenAISSEStream_ThinkingEndBeforeToolUse(t *testing.T) {
 		deltas = append(deltas, delta)
 	}
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), cb, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), cb, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
@@ -85,9 +85,9 @@ func TestParseOpenAISSEStream_ThinkingEndNotEmittedWhenNoToolCalls(t *testing.T)
 		}
 	}
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), cb, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), cb, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
@@ -118,9 +118,9 @@ func TestParseOpenAISSEStream_ThinkingEndNotDoubleEmittedWithToolAndContent(t *t
 		}
 	}
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), cb, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), cb, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
@@ -141,9 +141,9 @@ func TestParseOpenAISSEStream_PreservesReasoningContentWithoutMarkers(t *testing
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
@@ -201,16 +201,16 @@ func TestParseOpenAISSEStream_AcceptsReasoningAliasesWithoutDuplication(t *testi
 
 			var thinkingDeltas []string
 			var thinkingEndCount int
-			resp, err := parseOpenAISSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+			resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), func(delta message.StreamDelta) {
 				switch delta.Type {
 				case message.StreamDeltaThinking:
 					thinkingDeltas = append(thinkingDeltas, delta.Text)
 				case message.StreamDeltaThinkingEnd:
 					thinkingEndCount++
 				}
-			}, nil)
+			}, nil, false)
 			if err != nil {
-				t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+				t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 			}
 			if resp == nil {
 				t.Fatal("expected non-nil response")
@@ -236,9 +236,9 @@ func TestParseOpenAISSEStream_IgnoresNonStringReasoningAliases(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil || resp.Content != "answer" || resp.ReasoningContent != "" {
 		t.Fatalf("response = %#v, want answer without reasoning", resp)
@@ -247,8 +247,8 @@ func TestParseOpenAISSEStream_IgnoresNonStringReasoningAliases(t *testing.T) {
 
 func TestParseOpenAISSEStream_StillRejectsMalformedJSON(t *testing.T) {
 	stream := "data: {\"choices\":[{\"delta\":{\"reasoning\":{}}}]\n"
-	if _, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil); err == nil || !strings.Contains(err.Error(), "parse stream chunk") {
-		t.Fatalf("parseOpenAISSEStream error = %v, want malformed chunk error", err)
+	if _, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false); err == nil || !strings.Contains(err.Error(), "parse stream chunk") {
+		t.Fatalf("parseOpenAISSEStreamOptions error = %v, want malformed chunk error", err)
 	}
 }
 
@@ -268,16 +268,16 @@ func TestParseOpenAISSEStream_AliasSwitchMidStreamContinuesOneThinkingBlock(t *t
 
 	var thinkingDeltas []string
 	var thinkingEndCount int
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), func(delta message.StreamDelta) {
 		switch delta.Type {
 		case message.StreamDeltaThinking:
 			thinkingDeltas = append(thinkingDeltas, delta.Text)
 		case message.StreamDeltaThinkingEnd:
 			thinkingEndCount++
 		}
-	}, nil)
+	}, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
@@ -301,9 +301,9 @@ func TestParseOpenAISSEStream_AggregatesPromptCacheUsage(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil || resp.Usage == nil {
 		t.Fatal("expected non-nil response usage")
@@ -327,9 +327,9 @@ func TestParseOpenAISSEStream_AggregatesDeepSeekCacheReadUsage(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil || resp.Usage == nil {
 		t.Fatal("expected non-nil response usage")
@@ -356,9 +356,9 @@ func TestParseOpenAISSEStream_AggregatesOpenAIPromptTokenDetails(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil || resp.Usage == nil {
 		t.Fatal("expected non-nil response usage")
@@ -392,9 +392,9 @@ func TestParseOpenAISSEStream_NoThinkingEndWithoutReasoning(t *testing.T) {
 		}
 	}
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), cb, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), cb, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")

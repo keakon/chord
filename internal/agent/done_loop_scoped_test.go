@@ -83,7 +83,7 @@ read: allow
 	}
 	// Outside a loop nothing requires done, so it keeps plain wildcard
 	// semantics rather than a standing exemption.
-	outsideLoop := evaluateToolPermission(rs, tools.NameDone, json.RawMessage(`{}`))
+	outsideLoop := evaluateToolPermissionInDir(rs, tools.NameDone, json.RawMessage(`{}`), permission.PathScope{})
 	if outsideLoop.Action != permission.ActionDeny {
 		t.Fatalf("done outside a loop under a wildcard-only deny = %q, want deny", outsideLoop.Action)
 	}

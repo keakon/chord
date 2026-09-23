@@ -50,16 +50,16 @@ func TestFreshToolOutputsAreNeverSummarizedAtFirstSight(t *testing.T) {
 		{name: "edit diagnostics", ctx: requestReductionContext{ToolName: tools.NameEdit, Content: diagnostics, Policy: policy}, reducibleAt: policy.ErrorAgeTurns},
 	} {
 		tc.ctx.Age = 1
-		if got := classifyRequestReductionToolOutput(tc.ctx); got != requestReductionNone {
+		if got := classifyRequestReduction(tc.ctx).Class; got != requestReductionNone {
 			t.Fatalf("%s at first sight (age 1) classified %q, want none", tc.name, got)
 		}
 		tc.ctx.Age = tc.reducibleAt
-		if got := classifyRequestReductionToolOutput(tc.ctx); got == requestReductionNone {
+		if got := classifyRequestReduction(tc.ctx).Class; got == requestReductionNone {
 			t.Fatalf("%s at age %d should be reducible, got none", tc.name, tc.reducibleAt)
 		}
 	}
 	diagCtx := requestReductionContext{ToolName: tools.NameEdit, Content: diagnostics, Age: policy.ErrorAgeTurns, Policy: policy}
-	if got := classifyRequestReductionToolOutput(diagCtx); got != requestReductionDiagnostics {
+	if got := classifyRequestReduction(diagCtx).Class; got != requestReductionDiagnostics {
 		t.Fatalf("edit diagnostics at ErrorAgeTurns classified %q, want diagnostics", got)
 	}
 	// Validity markers are not payload thinning: a stale read renders its
@@ -71,7 +71,7 @@ func TestFreshToolOutputsAreNeverSummarizedAtFirstSight(t *testing.T) {
 		Age:             1,
 		ReadInvalidated: true,
 	}
-	if got := classifyRequestReductionToolOutput(staleRead); got != requestReductionReadLike {
+	if got := classifyRequestReduction(staleRead).Class; got != requestReductionReadLike {
 		t.Fatalf("invalidated read at age 1 classified %q, want read_like validity marker", got)
 	}
 }
@@ -92,11 +92,11 @@ func TestFailedToolOutputStaysCompleteUntilErrorAge(t *testing.T) {
 		Age:        policy.ErrorAgeTurns - 1,
 		Policy:     policy,
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionNone {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionNone {
 		t.Fatalf("young failed output classified %q, want none (keep complete)", got)
 	}
 	ctx.Age = policy.ErrorAgeTurns
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionToolError {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionToolError {
 		t.Fatalf("aged failed output classified %q, want tool_error", got)
 	}
 	reduced, rule, ok := reduceRequestToolOutput(requestReductionToolError, ctx)
@@ -121,7 +121,7 @@ func TestCancelledToolOutputIsNotTreatedAsFailed(t *testing.T) {
 		Age:        policy.ErrorAgeTurns + 2,
 		Policy:     policy,
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got == requestReductionToolError {
+	if got := classifyRequestReduction(ctx).Class; got == requestReductionToolError {
 		t.Fatalf("cancelled output classified as tool_error, want a non-error class")
 	}
 }
@@ -138,11 +138,11 @@ func TestDiagnosticsReductionAgeComesFromPolicy(t *testing.T) {
 		Policy:   policy,
 		Age:      3,
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionNone {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionNone {
 		t.Fatalf("edit diagnostics below the configured age classified %q, want none", got)
 	}
 	ctx.Age = policy.ErrorAgeTurns
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionDiagnostics {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionDiagnostics {
 		t.Fatalf("edit diagnostics at the configured age classified %q, want diagnostics", got)
 	}
 }
@@ -162,11 +162,11 @@ func TestEditDiagnosticsLargeOutputStaysCompleteBeforeSummaryAge(t *testing.T) {
 	if len(ctx.Content) <= policy.ReadLikeOutputBytes {
 		t.Fatalf("test fixture must exceed the read-like size gate (%d bytes)", policy.ReadLikeOutputBytes)
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionNone {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionNone {
 		t.Fatalf("young large diagnostics classified %q, want none (keep complete)", got)
 	}
 	ctx.Age = policy.ErrorAgeTurns
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionDiagnostics {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionDiagnostics {
 		t.Fatalf("large diagnostics at the summary age classified %q, want diagnostics", got)
 	}
 	reduced, rule, ok := reduceRequestToolOutput(requestReductionDiagnostics, ctx)
@@ -193,7 +193,7 @@ func TestDiffReductionUsesReviewSummaryInsteadOfLogSummary(t *testing.T) {
 		}(),
 	}
 	ctx.Age = ctx.Policy.DiffProtectAgeTurns
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionDiff {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionDiff {
 		t.Fatalf("class = %q, want diff", got)
 	}
 	reduced, rule, ok := reduceRequestToolOutput(requestReductionDiff, ctx)
@@ -221,7 +221,7 @@ func TestDiffReductionProtectsReviewEvidenceUntilDedicatedAge(t *testing.T) {
 		{age: policy.DiffProtectAgeTurns, want: requestReductionDiff},
 	} {
 		ctx := requestReductionContext{ToolName: tools.NameShell, Content: content, Age: tc.age, Policy: policy}
-		if got := classifyRequestReductionToolOutput(ctx); got != tc.want {
+		if got := classifyRequestReduction(ctx).Class; got != tc.want {
 			t.Fatalf("age %d class = %q, want %q", tc.age, got, tc.want)
 		}
 	}
@@ -237,7 +237,7 @@ func TestFailedDiffKeepsToolErrorSemantics(t *testing.T) {
 		Age:        policy.DiffProtectAgeTurns,
 		Policy:     policy,
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionToolError {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionToolError {
 		t.Fatalf("failed diff class = %q, want tool error", got)
 	}
 }
@@ -315,7 +315,7 @@ func TestDiffRecognitionProtectsBinaryModeAndRenameEvidence(t *testing.T) {
 		{content: "diff --git a/old.go b/new.go\nsimilarity index 95%\nrename from old.go\nrename to new.go\n", name: "new.go", kind: "rename"},
 	} {
 		ctx := requestReductionContext{ToolName: tools.NameShell, Content: tc.content, Age: 1, Policy: policy}
-		if got := classifyRequestReductionToolOutput(ctx); got != requestReductionNone {
+		if got := classifyRequestReduction(ctx).Class; got != requestReductionNone {
 			t.Fatalf("diff metadata was not protected: class=%q content=%q", got, tc.content)
 		}
 		summary := reduceDiffOutputSummary(tc.content)
@@ -354,7 +354,7 @@ func TestRepeatedInvalidatedReadClassifiesAsReadLikeNotRepeated(t *testing.T) {
 		ctx := base
 		ctx.ReadInvalidated = tc.invalidated
 		ctx.ReadSuperseded = tc.superseded
-		if got := classifyRequestReductionToolOutput(ctx); got != tc.want {
+		if got := classifyRequestReduction(ctx).Class; got != tc.want {
 			t.Fatalf("%s: class = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -403,7 +403,7 @@ func TestInvalidatedReadRendersValidityMarkerBelowSizeGate(t *testing.T) {
 		ctx := base
 		ctx.ReadInvalidated = tc.invalidated
 		ctx.ReadSuperseded = tc.superseded
-		if got := classifyRequestReductionToolOutput(ctx); got != tc.want {
+		if got := classifyRequestReduction(ctx).Class; got != tc.want {
 			t.Fatalf("%s: class = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -470,11 +470,11 @@ func TestTestRunnerFailureLinesAreRecognizedAsFailureEvidence(t *testing.T) {
 	if !isHighRiskToolOutput(ctx) {
 		t.Fatal("a failing test run must count as recent high-risk output")
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionNone {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionNone {
 		t.Fatalf("class = %q, want the recent high-risk protection", got)
 	}
 	ctx.Age = ctx.Policy.HighRiskProtectAgeTurns
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionLongLog {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionLongLog {
 		t.Fatalf("aged class = %q, want long_log", got)
 	}
 	summary := reduceLongLogOutputSummary(ctx)

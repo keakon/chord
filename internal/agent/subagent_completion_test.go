@@ -732,7 +732,7 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 		LastCompletion:     &CompletionEnvelope{Summary: "research complete", FilesChanged: []string{"internal/a.go"}},
 		ExpectedWriteScope: tools.WriteScope{Files: []string{"internal/a.go"}},
 	}
-	block := a.buildCoordinationSnapshotOverlay()
+	block := a.buildCoordinationSnapshotOverlayForRequest(nil)
 	for _, want := range []string{"SubAgent coordination snapshot", "task_id: task-1", "agent_type: explorer", "artifact_refs: artifacts/subagents/worker-1/report.md(research_report)", "files_changed: internal/a.go", "write_scope: file:internal/a.go"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("snapshot missing %q:\n%s", want, block)
@@ -761,7 +761,7 @@ func TestCoordinationSnapshotCapsCompletionLists(t *testing.T) {
 			KnownRisks:           []string{"r-1", "r-2", "r-3", "r-4"},
 		},
 	}
-	block := a.buildCoordinationSnapshotOverlay()
+	block := a.buildCoordinationSnapshotOverlayForRequest(nil)
 	for _, want := range []string{
 		"files_changed: f-1, f-2, f-3, ...2 more",
 		"remaining_limitations: l-1, l-2, l-3, ...3 more",
@@ -805,7 +805,7 @@ func TestCoordinationSnapshotOmitsCompletionDeliveredByInjectedMailbox(t *testin
 	// Control: without the mailbox in the request the same completion is still
 	// listed, so the snapshot remains the fallback that keeps terminal
 	// completions visible when no mailbox text expresses them.
-	block = a.buildCoordinationSnapshotOverlay()
+	block = a.buildCoordinationSnapshotOverlayForRequest(nil)
 	if !strings.Contains(block, "task_id: task-1") || !strings.Contains(block, "files_changed: internal/a.go") {
 		t.Fatalf("snapshot missing completion without injected mailbox:\n%s", block)
 	}
@@ -833,7 +833,7 @@ func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingMain(t *testing
 	// request-dispatch boundary (buildTurnOverlayMessages), so the test invokes
 	// the same refresh explicitly before rendering the snapshot.
 	a.updateSubAgentStallMarkers()
-	block := a.buildCoordinationSnapshotOverlay()
+	block := a.buildCoordinationSnapshotOverlayForRequest(nil)
 	if !strings.Contains(block, "task_id: task-running") || !strings.Contains(block, "suspected_stall: running with no recent state/progress update") {
 		t.Fatalf("snapshot missing running stall:\n%s", block)
 	}
@@ -1250,7 +1250,7 @@ func TestCoordinationSnapshotDoesNotDeadlockOnWaitingDescendant(t *testing.T) {
 	a.subs.mu.Unlock()
 	done := make(chan string, 1)
 	go func() {
-		done <- a.buildCoordinationSnapshotOverlay()
+		done <- a.buildCoordinationSnapshotOverlayForRequest(nil)
 	}()
 	select {
 	case out := <-done:

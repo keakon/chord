@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -324,8 +323,4 @@ func countProjectsAndSessions(sessionsRoot string, warnings *[]string) (projects
 func pathExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func SortCandidates(candidates []CleanupCandidate) {
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Path < candidates[j].Path })
 }

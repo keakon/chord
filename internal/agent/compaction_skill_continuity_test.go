@@ -251,7 +251,7 @@ func TestSubAgentCheckpointRecordsLoadedSkills(t *testing.T) {
 	if got := subAgentCheckpointSkills(sub, nil); got != "none" {
 		t.Fatalf("skills line with nothing loaded = %q, want \"none\"", got)
 	}
-	if names, omitted := parseSubAgentCheckpointSkillNames(buildSubAgentStructuredCheckpoint(sub, nil, 7, "proactive", "archives/sub-0.md")); len(names) != 0 || omitted != 0 {
+	if names, omitted, _ := parseSubAgentCheckpointSkills(buildSubAgentStructuredCheckpoint(sub, nil, 7, "proactive", "archives/sub-0.md")); len(names) != 0 || omitted != 0 {
 		t.Fatalf("parsing a skill-free checkpoint = %v / %d, want none", names, omitted)
 	}
 
@@ -337,7 +337,7 @@ func TestSubAgentCheckpointSkillsCarryOverflow(t *testing.T) {
 		sub.MarkSkillInvoked(&skill.Meta{Name: fmt.Sprintf("skill-%02d", i)})
 	}
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 9, "proactive", "archives/sub-1.md")
-	names, omitted := parseSubAgentCheckpointSkillNames(checkpoint)
+	names, omitted, _ := parseSubAgentCheckpointSkills(checkpoint)
 	if len(names) != checkpointMaxSkillNames || omitted != 3 {
 		t.Fatalf("parsed %d names / omitted %d, want %d / 3", len(names), omitted, checkpointMaxSkillNames)
 	}
@@ -352,14 +352,14 @@ func TestSubAgentCheckpointSkillsDeduplicatesCarriedOverflow(t *testing.T) {
 		sub.MarkSkillInvoked(&skill.Meta{Name: fmt.Sprintf("skill-%02d", i)})
 	}
 	first := buildSubAgentStructuredCheckpoint(sub, nil, 9, "proactive", "archives/sub-1.md")
-	names, omitted := parseSubAgentCheckpointSkillNames(first)
+	names, omitted, _ := parseSubAgentCheckpointSkills(first)
 	if len(names) != checkpointMaxSkillNames || omitted != 1 {
 		t.Fatalf("first checkpoint parsed %d names / omitted %d, want %d / 1", len(names), omitted, checkpointMaxSkillNames)
 	}
 
 	// The overflowed name becomes visible again before the next checkpoint.
 	sub.MarkSkillInvoked(&skill.Meta{Name: fmt.Sprintf("skill-%02d", total-1)})
-	names, omitted = collectSubAgentCheckpointSkillNames(sub, []message.Message{
+	names, omitted, _ = collectSubAgentCheckpointSkillNamesWithOverflow(sub, []message.Message{
 		{
 			Role:                message.RoleUser,
 			IsCompactionSummary: true,

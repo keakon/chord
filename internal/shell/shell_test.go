@@ -25,25 +25,6 @@ func TestDetectShell(t *testing.T) {
 	t.Logf("Detected shell: %s", shellType.String())
 }
 
-func TestGetShellDescription(t *testing.T) {
-	testCases := []struct {
-		shellType    ShellType
-		expectedDesc string
-	}{
-		{ShellBash, "Execute a shell command via bash."},
-		{ShellPowerShell, "Execute a shell command via PowerShell."},
-		{ShellGitBash, "Execute a shell command via Git Bash."},
-		{ShellPOSIX, "Execute a shell command (POSIX sh; avoid bash-specific syntax like [[ ]])."},
-	}
-
-	for _, tc := range testCases {
-		desc := GetShellDescription(tc.shellType)
-		if desc != tc.expectedDesc {
-			t.Errorf("GetShellDescription(%v) = %q, want %q", tc.shellType, desc, tc.expectedDesc)
-		}
-	}
-}
-
 func TestGetShellCommand(t *testing.T) {
 	testCases := []struct {
 		shellType       ShellType

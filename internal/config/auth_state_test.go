@@ -134,7 +134,7 @@ func mustReadFile(t *testing.T, path string) []byte {
 	return data
 }
 
-func TestRemoveInvalidOAuthStateRecords(t *testing.T) {
+func TestRemoveOAuthStateRecordsRemovesInvalidRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "auth.state.json")
 	_, _, _, err := UpsertOAuthStateRecord(path, OAuthStateKey{Provider: "openai", AccountUserID: "user-ok__acc-ok", AccountID: "acc-ok"}, func(record *OAuthStateRecord) (bool, error) {
 		record.Status = OAuthStatusNormal
@@ -150,9 +150,11 @@ func TestRemoveInvalidOAuthStateRecords(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Upsert expired: %v", err)
 	}
-	state, removed, err := RemoveInvalidOAuthStateRecords(path)
+	state, removed, err := RemoveOAuthStateRecords(path, func(_ string, _ string, record OAuthStateRecord) bool {
+		return !record.Status.IsValid()
+	})
 	if err != nil {
-		t.Fatalf("RemoveInvalidOAuthStateRecords: %v", err)
+		t.Fatalf("RemoveOAuthStateRecords: %v", err)
 	}
 	if len(removed) != 1 {
 		t.Fatalf("len(removed) = %d, want 1", len(removed))

@@ -434,12 +434,8 @@ func reducedVerdict(class requestReductionClass) requestReductionVerdict {
 	return requestReductionVerdict{Class: class, Reason: string(class)}
 }
 
-// classifyRequestReductionToolOutput reports only the class. Callers that also
-// report why a result survived use classifyRequestReduction.
-func classifyRequestReductionToolOutput(ctx requestReductionContext) requestReductionClass {
-	return classifyRequestReduction(ctx).Class
-}
-
+// classifyRequestReduction returns the verdict for one tool result: the class a
+// shape rule claimed, or the reason the result survived reduction.
 func classifyRequestReduction(ctx requestReductionContext) requestReductionVerdict {
 	// An invalidated or superseded read must render its validity marker rather
 	// than stay as full content — stale file content is misleading at any age
@@ -2012,7 +2008,7 @@ func commandDerivedShellShape(ctx requestReductionContext) (requestReductionClas
 	return shellOutputShapeFromCommandMemo(ctx.parseMemo, ctx.ToolCallID, ctx.Meta.Args)
 }
 
-// shellOutputShapeFromCommand returns the reduction class a shell result takes
+// shellOutputShapeFromCommandMemo returns the reduction class a shell result takes
 // when the command that produced it settles the shape, and false when it does
 // not. Reading the command beats sniffing the bytes it printed: the reduction
 // layer holds the exact command line, while the shape rules below it inspect
@@ -2027,10 +2023,6 @@ func commandDerivedShellShape(ctx requestReductionContext) (requestReductionClas
 // that reshapes the output (`... | jq`) keeps the heuristics. Everything
 // unmapped falls through unchanged, which makes this a subtraction from the
 // sniffing surface rather than a replacement for it.
-func shellOutputShapeFromCommand(argsJSON string) (requestReductionClass, bool) {
-	return shellOutputShapeFromCommandMemo(nil, "", argsJSON)
-}
-
 func shellOutputShapeFromCommandMemo(memo *reductionToolCallMemo, toolCallID, argsJSON string) (requestReductionClass, bool) {
 	literal, ok := memo.shellInvocationLiteralArgs(toolCallID, argsJSON, "git")
 	if !ok || literal[0] != "git" {

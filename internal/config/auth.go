@@ -600,15 +600,3 @@ func mergeOAuthRefreshResponse(cred *OAuthCredential, tr tokenResponse) *OAuthCr
 		// Status is cleared on successful refresh (credential is now valid)
 	}
 }
-
-// LoadAuthFromEnv loads authentication configuration from environment variables.
-func LoadAuthFromEnv() AuthConfig {
-	auth := make(AuthConfig)
-	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
-		auth["anthropic"] = append(auth["anthropic"], ProviderCredential{APIKey: key})
-	}
-	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
-		auth["openai"] = append(auth["openai"], ProviderCredential{APIKey: key})
-	}
-	return auth
-}

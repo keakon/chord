@@ -95,13 +95,9 @@ func (v fileEvidenceView) validityByMessage() map[int]readValidity {
 	return result
 }
 
-// buildFileEvidenceView derives file observations from the same tool metadata
+// buildFileEvidenceViewWithMeta derives file observations from the same tool metadata
 // and read-validity analysis used by reduction. It is intentionally disposable:
 // the messages and current filesystem remain the authorities.
-func buildFileEvidenceView(messages []message.Message) fileEvidenceView {
-	return buildFileEvidenceViewWithMeta(messages, buildToolCallMeta(messages))
-}
-
 func buildFileEvidenceViewWithMeta(messages []message.Message, meta map[string]toolCallMeta) fileEvidenceView {
 	validity := analyzeReadValidity(messages, meta)
 	view := make(fileEvidenceView)

@@ -46,9 +46,9 @@ func TestConvertMessagesToGemini_WithPDFPart(t *testing.T) {
 
 func TestConvertMessagesToAnthropic_WithPDFPart(t *testing.T) {
 	msgs, wantB64 := pdfTestParts()
-	got := convertMessages(msgs)
+	got, _ := convertMessagesWithMap(msgs)
 	if len(got) != 1 {
-		t.Fatalf("convertMessages() len = %d, want 1", len(got))
+		t.Fatalf("convertMessagesWithMap() len = %d, want 1", len(got))
 	}
 	blocks, ok := got[0].Content.([]anthropicContent)
 	if !ok {
@@ -73,7 +73,7 @@ func TestConvertMessagesToAnthropic_WithPDFPart(t *testing.T) {
 }
 
 func TestConvertMessagesToAnthropic_ToolOutputWithImageParts(t *testing.T) {
-	got := convertMessages([]message.Message{{
+	got, _ := convertMessagesWithMap([]message.Message{{
 		Role:       "tool",
 		ToolCallID: "toolu_1",
 		Content:    "Loaded image",
@@ -84,7 +84,7 @@ func TestConvertMessagesToAnthropic_ToolOutputWithImageParts(t *testing.T) {
 	}})
 
 	if len(got) != 1 || got[0].Role != "user" {
-		t.Fatalf("convertMessages() = %#v, want one user tool_result message", got)
+		t.Fatalf("convertMessagesWithMap() = %#v, want one user tool_result message", got)
 	}
 	blocks, ok := got[0].Content.([]anthropicContent)
 	if !ok || len(blocks) != 1 || blocks[0].Type != "tool_result" || blocks[0].ToolUseID != "toolu_1" {
@@ -103,7 +103,7 @@ func TestConvertMessagesToAnthropic_ToolOutputWithImageParts(t *testing.T) {
 }
 
 func TestConvertMessagesToAnthropic_ToolOutputWithOnlyImageSkipsEmptyTextPart(t *testing.T) {
-	got := convertMessages([]message.Message{{
+	got, _ := convertMessagesWithMap([]message.Message{{
 		Role:       "tool",
 		ToolCallID: "toolu_1",
 		Parts: []message.ContentPart{
@@ -123,14 +123,14 @@ func TestConvertMessagesToAnthropic_EmptyToolOutputPreserved(t *testing.T) {
 	// A successful tool with empty output must still serialize a "content" field
 	// rather than omitting it; this mirrors the Responses empty-output guard and
 	// locks the string->any switch so empty content is not dropped by omitempty.
-	got := convertMessages([]message.Message{{
+	got, _ := convertMessagesWithMap([]message.Message{{
 		Role:       "tool",
 		ToolCallID: "toolu_1",
 		Content:    "",
 	}})
 
 	if len(got) != 1 || got[0].Role != "user" {
-		t.Fatalf("convertMessages() = %#v, want one user tool_result message", got)
+		t.Fatalf("convertMessagesWithMap() = %#v, want one user tool_result message", got)
 	}
 	blocks, ok := got[0].Content.([]anthropicContent)
 	if !ok || len(blocks) != 1 || blocks[0].Type != "tool_result" || blocks[0].ToolUseID != "toolu_1" {
@@ -154,7 +154,7 @@ func TestConvertMessagesToAnthropic_EmptyToolOutputPreserved(t *testing.T) {
 
 func TestConvertMessagesToOpenAI_WithPDFPart(t *testing.T) {
 	msgs, wantB64 := pdfTestParts()
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
 
 	var userMsg *openAIMessage
 	for i := range out {
@@ -244,7 +244,7 @@ func TestConvertMessages_ImageAndPDFCoexist(t *testing.T) {
 		},
 	}}
 
-	got := convertMessages(msgs)
+	got, _ := convertMessagesWithMap(msgs)
 	blocks, ok := got[0].Content.([]anthropicContent)
 	if !ok || len(blocks) != 2 {
 		t.Fatalf("anthropic blocks = %#v", got[0].Content)
@@ -268,7 +268,7 @@ func TestConvertMessages_MergesAdjacentTextParts(t *testing.T) {
 			{Type: "text", Text: "verify"},
 		},
 	}}
-	got := convertMessages(msgs)
+	got, _ := convertMessagesWithMap(msgs)
 	blocks, ok := got[0].Content.([]anthropicContent)
 	if !ok || len(blocks) != 1 {
 		t.Fatalf("anthropic blocks = %#v, want one merged text block", got[0].Content)
@@ -295,7 +295,7 @@ func TestConvertMessages_MergeKeepsImageBlock(t *testing.T) {
 			{Type: "text", Text: "then fix"},
 		},
 	}}
-	got := convertMessages(msgs)
+	got, _ := convertMessagesWithMap(msgs)
 	blocks, ok := got[0].Content.([]anthropicContent)
 	if !ok || len(blocks) != 3 {
 		t.Fatalf("anthropic blocks = %#v, want 3 (merged text + image + merged text)", got[0].Content)
@@ -316,7 +316,7 @@ func TestConvertMessages_AddsEmptyTextBlockForEmptyTextOnlyParts(t *testing.T) {
 		Role:  "user",
 		Parts: []message.ContentPart{{Type: "text", Text: ""}, {Type: "text", Text: ""}},
 	}}
-	got := convertMessages(msgs)
+	got, _ := convertMessagesWithMap(msgs)
 	blocks, ok := got[0].Content.([]anthropicContent)
 	if !ok || len(blocks) != 1 || blocks[0].Type != "text" || blocks[0].Text != "" {
 		t.Fatalf("anthropic blocks = %#v, want one empty text block", got[0].Content)

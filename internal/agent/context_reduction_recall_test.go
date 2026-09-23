@@ -42,7 +42,7 @@ func TestClassifyReadOnlyShellWaitsForReadOnlyAge(t *testing.T) {
 			Policy:        policy,
 			ShellReadOnly: true,
 		}
-		if got := classifyRequestReductionToolOutput(ctx); got != tc.want {
+		if got := classifyRequestReduction(ctx).Class; got != tc.want {
 			t.Fatalf("age %d: class = %q, want %q", tc.age, got, tc.want)
 		}
 	}
@@ -53,7 +53,7 @@ func TestClassifyReadOnlyShellWaitsForReadOnlyAge(t *testing.T) {
 		Age:      policy.ShellSuccessAgeTurns,
 		Policy:   policy,
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionShellOK {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionShellOK {
 		t.Fatalf("mutating shell class = %q, want shell success", got)
 	}
 }
@@ -78,7 +78,7 @@ func TestClassifyJSONDocumentWaitsForStaleAge(t *testing.T) {
 			Age:      tc.age,
 			Policy:   policy,
 		}
-		if got := classifyRequestReductionToolOutput(ctx); got != tc.want {
+		if got := classifyRequestReduction(ctx).Class; got != tc.want {
 			t.Fatalf("age %d: class = %q, want %q", tc.age, got, tc.want)
 		}
 	}
@@ -90,7 +90,7 @@ func TestClassifyJSONDocumentWaitsForStaleAge(t *testing.T) {
 		Age:      policy.ShellSuccessAgeTurns,
 		Policy:   policy,
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionJSON {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionJSON {
 		t.Fatalf("ndjson class = %q, want json", got)
 	}
 }
@@ -108,7 +108,7 @@ func TestClassifyStaleWebFetchJSONKeepsReadLikeSummary(t *testing.T) {
 		Policy:      policy,
 		ToolResults: policy.MinToolResultsPrune,
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionReadLike {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionReadLike {
 		t.Fatalf("web fetch class = %q, want read-like", got)
 	}
 }

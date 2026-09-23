@@ -1152,7 +1152,7 @@ func TestRenderFileDiffCallDeletionContextDoesNotDecreaseLineNumbers(t *testing.
 func TestRenderFileDiffCallGroupedMinusPlusBlockUsesInlineOneSidedPairs(t *testing.T) {
 	old := "\t\t// separator(1) + content(lines) + bottom margin(1) + extra bars\n\t\treturn lines + 2 + extraBars\n"
 	new := "\t\t// separator(1) + content(lines) + bottom margin(1)\n\t\treturn lines + 2\n"
-	diff := tools.GenerateUnifiedDiff(old, new, "example.go")
+	diff := tools.GenerateUnifiedDiffSummary(old, new, "example.go").Text
 	if diff == "" {
 		t.Fatal("expected non-empty unified diff")
 	}
@@ -1199,7 +1199,7 @@ func TestRenderFileDiffCallUnequalMinusPlusBlocksUseWholeLineBackground(t *testi
 			ApplyTheme(DefaultTheme())
 			old := strings.Join(tt.oldLines, "\n") + "\n"
 			new := strings.Join(tt.newLines, "\n") + "\n"
-			diff := tools.GenerateUnifiedDiff(old, new, "example.go")
+			diff := tools.GenerateUnifiedDiffSummary(old, new, "example.go").Text
 			if diff == "" {
 				t.Fatal("expected non-empty unified diff")
 			}

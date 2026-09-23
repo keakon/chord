@@ -108,7 +108,3 @@ func setDefaultLogger(logger *golog.Logger) {
 	defaultLogger = logger
 	glog.SetDefaultLogger(logger)
 }
-
-func getDefaultLogger() *golog.Logger {
-	return defaultLogger
-}

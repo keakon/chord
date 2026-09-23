@@ -73,10 +73,6 @@ func suggestExistingToolPathsInDir(path string, baseDir string, kind PathTargetK
 	return suggestExistingToolPathsWithOptionsInDir(path, baseDir, kind, defaultPathSuggestionOptions())
 }
 
-func suggestExistingToolPathsWithOptions(path string, kind PathTargetKind, opts pathSuggestionOptions) []string {
-	return suggestExistingToolPathsWithOptionsInDir(path, "", kind, opts)
-}
-
 func suggestExistingToolPathsWithOptionsInDir(path string, baseDir string, kind PathTargetKind, opts pathSuggestionOptions) []string {
 	if strings.TrimSpace(path) == "" {
 		return nil
@@ -205,10 +201,6 @@ func suggestExistingToolPathsWithOptionsInDir(path string, baseDir string, kind 
 		}
 	}
 	return out
-}
-
-func suggestWhitespacePathRepair(path string, kind PathTargetKind) (string, bool) {
-	return suggestWhitespacePathRepairInDir(path, "", kind)
 }
 
 func suggestWhitespacePathRepairInDir(path, baseDir string, kind PathTargetKind) (string, bool) {

@@ -58,9 +58,9 @@ func TestParseResponsesSSEOutOfOrderItemDoneKeepsTerminalOrder(t *testing.T) {
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}`,
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"Read","arguments":"{}"}]}}`,
 	})
-	resp, err := parseResponsesSSE(stream, nil, nil)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
 	if err != nil {
-		t.Fatalf("parseResponsesSSE: %v", err)
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
 	if len(resp.ResponsesOutput) != 2 {
 		t.Fatalf("ResponsesOutput = %+v, want 2 items", resp.ResponsesOutput)
@@ -85,13 +85,13 @@ func TestParseResponsesSSECustomToolCallEmitsInputDeltas(t *testing.T) {
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"custom_tool_call","id":"item_1","name":"apply_patch","input":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"}]}}`,
 	})
 	var got []string
-	resp, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, func(delta message.StreamDelta) {
 		if delta.Type == message.StreamDeltaToolUseDelta && delta.ToolCall != nil {
 			got = append(got, delta.ToolCall.InputText)
 		}
-	}, nil)
+	}, nil, nil, "", false)
 	if err != nil {
-		t.Fatalf("parseResponsesSSE: %v", err)
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
 	want := []string{
 		"*** Begin Patch\n",
@@ -129,12 +129,12 @@ func TestParseResponsesSSEEmitsReasoningItemDeltaOnDone(t *testing.T) {
 		`{"type":"[DONE]"}`,
 	})
 	var got []message.ResponsesOutputItem
-	if _, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+	if _, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, func(delta message.StreamDelta) {
 		if delta.Type == message.StreamDeltaReasoningItem && delta.ReasoningItem != nil {
 			got = append(got, *delta.ReasoningItem)
 		}
-	}, nil); err != nil {
-		t.Fatalf("parseResponsesSSE: %v", err)
+	}, nil, nil, "", false); err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("reasoning_item delta count = %d, want 1 (%+v)", len(got), got)
@@ -158,12 +158,12 @@ func TestParseResponsesSSESkipsReasoningItemWithoutEncryptedContent(t *testing.T
 		`{"type":"[DONE]"}`,
 	})
 	var got []message.ResponsesOutputItem
-	if _, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+	if _, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, func(delta message.StreamDelta) {
 		if delta.Type == message.StreamDeltaReasoningItem && delta.ReasoningItem != nil {
 			got = append(got, *delta.ReasoningItem)
 		}
-	}, nil); err != nil {
-		t.Fatalf("parseResponsesSSE: %v", err)
+	}, nil, nil, "", false); err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
 	if len(got) != 0 {
 		t.Fatalf("reasoning_item deltas = %+v, want none for an item with no encrypted payload", got)
@@ -182,12 +182,12 @@ func TestParseResponsesSSEEmitsReasoningItemDeltaPerFinalizedItem(t *testing.T) 
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"a"},{"type":"reasoning","id":"rs_2","encrypted_content":"b"}]}}`,
 	})
 	var got []string
-	if _, err := parseResponsesSSE(stream, func(delta message.StreamDelta) {
+	if _, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, func(delta message.StreamDelta) {
 		if delta.Type == message.StreamDeltaReasoningItem && delta.ReasoningItem != nil {
 			got = append(got, delta.ReasoningItem.ID)
 		}
-	}, nil); err != nil {
-		t.Fatalf("parseResponsesSSE: %v", err)
+	}, nil, nil, "", false); err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
 	want := []string{"rs_1", "rs_2"}
 	if len(got) != len(want) {

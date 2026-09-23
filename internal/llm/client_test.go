@@ -322,7 +322,10 @@ func callCompleteStreamWithRetryForTest(
 	maxAttempts int,
 	status *CallStatus,
 ) (*message.Response, error) {
-	generation, changedCh := c.routingSnapshot()
+	c.mu.RLock()
+	generation := c.routingGeneration.Load()
+	changedCh := c.routingChangedCh
+	c.mu.RUnlock()
 	return c.completeStreamWithRetry(
 		ctx,
 		startProvider,

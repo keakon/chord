@@ -21,13 +21,13 @@ permission:
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	changed, err := UpsertAgentPermissionRule(path, permission.Rule{
+	changed, err := UpsertAgentPermissionRuleForAgent(path, nil, permission.Rule{
 		Permission: "write",
 		Pattern:    ".chord/plans/*",
 		Action:     permission.ActionAllow,
 	})
 	if err != nil {
-		t.Fatalf("UpsertAgentPermissionRule: %v", err)
+		t.Fatalf("UpsertAgentPermissionRuleForAgent: %v", err)
 	}
 	if !changed {
 		t.Fatal("changed = false, want true")
@@ -64,16 +64,16 @@ permission:
 	}
 
 	rule := permission.Rule{Permission: "write", Pattern: ".chord/plans/*", Action: permission.ActionAllow}
-	changed, err := UpsertAgentPermissionRule(path, rule)
+	changed, err := UpsertAgentPermissionRuleForAgent(path, nil, rule)
 	if err != nil {
-		t.Fatalf("UpsertAgentPermissionRule(update): %v", err)
+		t.Fatalf("UpsertAgentPermissionRuleForAgent(update): %v", err)
 	}
 	if !changed {
 		t.Fatal("changed = false, want true")
 	}
-	changed, err = UpsertAgentPermissionRule(path, rule)
+	changed, err = UpsertAgentPermissionRuleForAgent(path, nil, rule)
 	if err != nil {
-		t.Fatalf("UpsertAgentPermissionRule(dedup): %v", err)
+		t.Fatalf("UpsertAgentPermissionRuleForAgent(dedup): %v", err)
 	}
 	if changed {
 		t.Fatal("changed = true for duplicate unchanged rule, want false")

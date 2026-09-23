@@ -688,7 +688,7 @@ done: allow
 
 func TestEvaluateToolPermission_TreatsQuestionAskAsAllow(t *testing.T) {
 	ruleset := permission.Ruleset{{Permission: tools.NameQuestion, Pattern: "*", Action: permission.ActionAsk}}
-	decision := evaluateToolPermission(ruleset, tools.NameQuestion, []byte(`{"questions":[{"header":"Next","question":"What next?","options":[]}]}`))
+	decision := evaluateToolPermissionInDir(ruleset, tools.NameQuestion, []byte(`{"questions":[{"header":"Next","question":"What next?","options":[]}]}`), permission.PathScope{})
 	if decision.Action != permission.ActionAllow {
 		t.Fatalf("Question permission action = %q, want allow", decision.Action)
 	}

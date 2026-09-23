@@ -103,22 +103,6 @@ func TestShiftRampEmpty(t *testing.T) {
 	}
 }
 
-func TestAnimationPhase(t *testing.T) {
-	phase := AnimationPhase(time.Second, 10)
-	if phase < 0 || phase >= 10 {
-		t.Fatalf("AnimationPhase = %d, want [0,10)", phase)
-	}
-}
-
-func TestAnimationPhaseZero(t *testing.T) {
-	if got := AnimationPhase(0, 10); got != 0 {
-		t.Fatalf("AnimationPhase(0, 10) = %d, want 0", got)
-	}
-	if got := AnimationPhase(time.Second, 0); got != 0 {
-		t.Fatalf("AnimationPhase(1s, 0) = %d, want 0", got)
-	}
-}
-
 func TestAnimationFloat(t *testing.T) {
 	f := AnimationFloat(time.Second)
 	if f < 0 || f >= 1 {

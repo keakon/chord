@@ -54,7 +54,7 @@ func TestGitLogListingIsNotClassifiedAsBuildLog(t *testing.T) {
 	}
 
 	ctx := commandShapeContext(t, "git log --oneline -40", content)
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionListing {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionListing {
 		t.Fatalf("git log classified as %q, want %q", got, requestReductionListing)
 	}
 	reduced, rule, ok := reduceRequestToolOutput(requestReductionListing, ctx)
@@ -101,7 +101,7 @@ func TestGitStatusIsClassifiedAsListing(t *testing.T) {
 		fmt.Fprintf(&b, "\tmodified:   internal/agent/file_%d.go\n", i)
 	}
 	ctx := commandShapeContext(t, "git status", b.String())
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionListing {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionListing {
 		t.Fatalf("git status classified as %q, want %q", got, requestReductionListing)
 	}
 }
@@ -109,7 +109,7 @@ func TestGitStatusIsClassifiedAsListing(t *testing.T) {
 // A pipeline reshapes the output, so the command no longer describes it and the
 // content heuristics stay in charge.
 func TestPipedGitLogFallsBackToContentHeuristics(t *testing.T) {
-	if _, ok := shellOutputShapeFromCommand(`{"command":"git log --oneline | rg fix"}`); ok {
+	if _, ok := shellOutputShapeFromCommandMemo(nil, "", `{"command":"git log --oneline | rg fix"}`); ok {
 		t.Fatal("a pipeline must not claim a command-derived shape")
 	}
 }
@@ -118,7 +118,7 @@ func TestPipedGitLogFallsBackToContentHeuristics(t *testing.T) {
 // print JSON, source or a log, and the command name says nothing about which.
 func TestUnmappedShellCommandsKeepHeuristicShape(t *testing.T) {
 	for _, command := range []string{"cat internal/agent/main.go", "go test ./...", "rg pattern internal"} {
-		if shape, ok := shellOutputShapeFromCommand(fmt.Sprintf(`{"command":%q}`, command)); ok {
+		if shape, ok := shellOutputShapeFromCommandMemo(nil, "", fmt.Sprintf(`{"command":%q}`, command)); ok {
 			t.Fatalf("%q claimed shape %q; it must fall through to the heuristics", command, shape)
 		}
 	}
@@ -135,7 +135,7 @@ func TestGitDiffStillClassifiesAsDiff(t *testing.T) {
 	}
 	ctx := commandShapeContext(t, "git diff", b.String())
 	ctx.Age = ctx.Policy.DiffProtectAgeTurns + 1
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionDiff {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionDiff {
 		t.Fatalf("git diff classified as %q, want %q", got, requestReductionDiff)
 	}
 }

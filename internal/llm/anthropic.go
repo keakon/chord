@@ -661,14 +661,6 @@ func computeAnthropicMetadataUserIDPayload(provider *ProviderConfig) string {
 	return fmt.Sprintf(`{"device_id":"%s","account_uuid":"","session_id":"%s"}`, deviceID, sessionID)
 }
 
-// convertMessages converts internal Message slices to Anthropic API format.
-// Adjacent tool results (Role="tool") are merged into a single user message
-// with multiple tool_result content blocks.
-func convertMessages(msgs []message.Message) []anthropicMessage {
-	result, _ := convertMessagesWithMap(msgs)
-	return result
-}
-
 type anthropicMessageMapEntry struct {
 	MessageIndex int
 	BlockIndex   int

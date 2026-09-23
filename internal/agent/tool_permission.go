@@ -182,15 +182,11 @@ type toolPermissionContext struct {
 	LoopExitAuthorized bool
 }
 
-func evaluateToolPermission(ruleset permission.Ruleset, toolName string, args json.RawMessage) toolPermissionDecision {
-	return evaluateToolPermissionInDir(ruleset, toolName, args, permission.PathScope{})
-}
-
 // evaluateToolPermissionInDir is the scope-aware entry point. scope carries the
 // tool base dir plus the repository's checkout roots, so relative and absolute
 // spellings of one repository file converge on one rule regardless of which
-// checkout the agent stands in. A zero scope degrades to the plain lexical
-// matching of evaluateToolPermission.
+// checkout the agent stands in. A zero scope degrades to plain lexical
+// matching.
 //
 // It evaluates with a zero toolPermissionContext, so the loop-gated done
 // exemption is off. Callers that own the loop state must use

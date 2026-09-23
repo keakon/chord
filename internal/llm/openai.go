@@ -659,11 +659,6 @@ func fillCurrentTurnEmptyReasoning(apiMessages []openAIMessage) {
 
 const assistantAfterToolResultText = "I have processed the tool results."
 
-// convertMessagesToOpenAI converts internal messages to OpenAI API format.
-func convertMessagesToOpenAI(systemPrompt, targetWireFamily, continuityMode string, msgs []message.Message) []openAIMessage {
-	return convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continuityMode, msgs, openAIConvertOptions{})
-}
-
 type openAIConvertOptions struct {
 	requiresToolResultName           bool
 	requiresAssistantAfterToolResult bool
@@ -964,12 +959,6 @@ func hasThinkingToolcallMarkers(text string) bool {
 	hasMarker := (hasCallBegin || hasSectionBegin) && hasArgBegin
 	hasFuncPattern := thinkingToolcallFunctionPattern.MatchString(text)
 	return hasMarker && hasFuncPattern
-}
-
-// parseOpenAISSEStream reads an OpenAI SSE stream and calls cb for each delta.
-// If collector is non-nil, raw SSE data lines are recorded for debug dumps.
-func parseOpenAISSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
-	return parseOpenAISSEStreamOptions(reader, cb, collector, false)
 }
 
 func parseOpenAISSEStreamOptions(reader io.Reader, cb StreamCallback, collector *SSECollector, inferFinishReason bool) (*message.Response, error) {

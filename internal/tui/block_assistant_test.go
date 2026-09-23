@@ -975,17 +975,17 @@ These accounts need to sign in again before new tokens can be issued.`}
 
 func TestAssistantMarkdownRenderWidthUsesWiderLimitForTables(t *testing.T) {
 	prose := "This is a long ordinary paragraph without a table."
-	if got := assistantMarkdownRenderWidth(prose, 202); got != maxProseWidth {
+	if got := markdownRenderWidthWithTable(containsMarkdownTable(prose), 202); got != maxProseWidth {
 		t.Fatalf("ordinary markdown width = %d, want %d", got, maxProseWidth)
 	}
 
 	table := "| commit | reason | follow-up |\n|---|---|---|\n| abc123 | done | none |"
-	if got := assistantMarkdownRenderWidth(table, 202); got != 200 {
+	if got := markdownRenderWidthWithTable(containsMarkdownTable(table), 202); got != 200 {
 		t.Fatalf("table markdown width = %d, want 200", got)
 	}
 
 	fencedTable := "```md\n| commit | reason |\n|---|---|\n| abc123 | done |\n```"
-	if got := assistantMarkdownRenderWidth(fencedTable, 202); got != maxProseWidth {
+	if got := markdownRenderWidthWithTable(containsMarkdownTable(fencedTable), 202); got != maxProseWidth {
 		t.Fatalf("fenced table markdown width = %d, want %d", got, maxProseWidth)
 	}
 }

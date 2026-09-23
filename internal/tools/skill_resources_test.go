@@ -88,7 +88,7 @@ func TestSkillToolExecute_PrependsResourceWarningBeforeBody(t *testing.T) {
 	if !strings.Contains(clean, body) {
 		t.Fatalf("stripped output should keep the body, got %q", clean)
 	}
-	if HasSkillResourceWarning(clean) {
+	if len(ExtractSkillResourceWarningLines(clean)) != 0 {
 		t.Fatalf("stripped output should carry no warning, got %q", clean)
 	}
 }
@@ -114,7 +114,7 @@ func TestSkillToolExecute_NoWarningWhenResourcesHealthy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	if HasSkillResourceWarning(got) {
+	if len(ExtractSkillResourceWarningLines(got)) != 0 {
 		t.Fatalf("healthy resources should produce no warning, got %q", got)
 	}
 	if !strings.Contains(got, body) {

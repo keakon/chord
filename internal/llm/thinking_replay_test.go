@@ -67,7 +67,7 @@ func TestAnthropicHistoryReplaysRedactedThinking(t *testing.T) {
 			Content: "done",
 		},
 	}
-	converted := convertMessages(msgs)
+	converted, _ := convertMessagesWithMap(msgs)
 	if len(converted) != 2 {
 		t.Fatalf("expected 2 messages, got %d", len(converted))
 	}
@@ -95,7 +95,7 @@ func TestAnthropicHistoryReplaysOmittedThinking(t *testing.T) {
 	if !block.Replayable() {
 		t.Fatal("signature-only thinking block must be replayable")
 	}
-	converted := convertMessages([]message.Message{{
+	converted, _ := convertMessagesWithMap([]message.Message{{
 		Role:           message.RoleAssistant,
 		ThinkingBlocks: []message.ThinkingBlock{block},
 		ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},

@@ -294,7 +294,7 @@ func TestPrepareMessagesDefersExternalReadInvalidation(t *testing.T) {
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u1"},
 		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: readContent, FileState: buildReadFileState(path)},
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: readContent, FileState: readFileStateForTest(path)},
 		{Role: message.RoleAssistant, Content: bigTail},
 	}
 	setTestRequestBatch(a, msgs, 1)
@@ -357,9 +357,9 @@ func TestPrepareMessagesKeepsFrozenReadMarkerWhenSuperseded(t *testing.T) {
 	firstMessages := []message.Message{
 		{Role: message.RoleUser, Content: "u1"},
 		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "r1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "r1", ToolStatus: "success", Content: readContent, FileState: buildReadFileState(path)},
+		{Role: message.RoleTool, ToolCallID: "r1", ToolStatus: "success", Content: readContent, FileState: readFileStateForTest(path)},
 		{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "r2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "r2", ToolStatus: "success", Content: readContent, FileState: buildReadFileState(path)},
+		{Role: message.RoleTool, ToolCallID: "r2", ToolStatus: "success", Content: readContent, FileState: readFileStateForTest(path)},
 	}
 	setTestRequestBatch(a, firstMessages, 2)
 	turnCtx, turnCancel := context.WithCancel(context.Background())

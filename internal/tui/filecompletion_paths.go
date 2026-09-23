@@ -326,10 +326,6 @@ func parseAtMentionLineRangeRef(candidate, workingDir string, tried map[string]b
 	return atMentionFileRef{Path: path, Lines: filectx.LineRange{Start: start, End: end}}, true
 }
 
-func atMentionFileRefs(texts []string, workingDir string) []string {
-	return displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs(texts, workingDir), workingDir))
-}
-
 func atMentionStructuredFileRefs(texts []string, workingDir string) []atMentionFileRef {
 	var refs []atMentionFileRef
 	seen := make(map[string]bool)
@@ -1033,14 +1029,6 @@ func atMentionSortTieBreak(a, b string, query string) int {
 		return 1
 	}
 	return strings.Compare(a, b)
-}
-
-func atMentionFuzzyMatches(files []string, query string) []atMentionOption {
-	return atMentionFuzzyMatchesWithLower(files, nil, query)
-}
-
-func atMentionFuzzyMatchesWithLower(files []string, lowerByFile map[string]string, query string) []atMentionOption {
-	return atMentionFuzzyMatchesNarrowable(files, lowerByFile, query, nil)
 }
 
 // atMentionNarrowCache carries the previous fuzzy match's full candidate set so

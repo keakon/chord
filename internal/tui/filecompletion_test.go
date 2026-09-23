@@ -797,13 +797,13 @@ func TestAtMentionOptionsMissingFromIndex(t *testing.T) {
 
 func TestAtMentionFuzzyMatchesMultiStepPath(t *testing.T) {
 	query := "docs/file.md"
-	matches := atMentionFuzzyMatches([]string{
+	matches := atMentionFuzzyMatchesNarrowable([]string{
 		"docs/architecture/file-mentions.md",
 		"docs/other-file.md",
 		"internal/tui/filecompletion.go",
-	}, query)
+	}, nil, query, nil)
 	if len(matches) == 0 {
-		t.Fatal("atMentionFuzzyMatches() returned no matches")
+		t.Fatal("atMentionFuzzyMatchesNarrowable() returned no matches")
 	}
 	if got := matches[0].Path; got != "docs/architecture/file-mentions.md" {
 		t.Fatalf("top fuzzy match = %q, want %q", got, "docs/architecture/file-mentions.md")
@@ -811,10 +811,10 @@ func TestAtMentionFuzzyMatchesMultiStepPath(t *testing.T) {
 }
 
 func TestAtMentionFuzzyMatchesKeepsLowScoreMatches(t *testing.T) {
-	matches := atMentionFuzzyMatches([]string{
+	matches := atMentionFuzzyMatchesNarrowable([]string{
 		"reports/stage1_stage2_design_doc.md",
 		"docs/other-file.md",
-	}, "s1s2doc")
+	}, nil, "s1s2doc", nil)
 	if len(matches) != 1 {
 		t.Fatalf("len(matches) = %d, want 1", len(matches))
 	}
@@ -830,7 +830,7 @@ func TestAtMentionFuzzyMatchesPreferShallowerPaths(t *testing.T) {
 	}
 	files = append(files, "orbit/AtlasGuide.txt", "AtlasGuide.txt")
 
-	matches := atMentionFuzzyMatches(files, "A")
+	matches := atMentionFuzzyMatchesNarrowable(files, nil, "A", nil)
 
 	if len(matches) != 50 {
 		t.Fatalf("len(matches) = %d, want capped result list", len(matches))
@@ -856,7 +856,7 @@ func TestAtMentionFuzzyMatchesHidesHiddenPathsUntilQueryIncludesDotSegment(t *te
 		"src/main.go",
 	}
 
-	got := atMentionFuzzyMatches(files, "")
+	got := atMentionFuzzyMatchesNarrowable(files, nil, "", nil)
 	if len(got) != 2 {
 		t.Fatalf("len(matches) = %d, want 2 visible non-hidden matches", len(got))
 	}
@@ -864,7 +864,7 @@ func TestAtMentionFuzzyMatchesHidesHiddenPathsUntilQueryIncludesDotSegment(t *te
 		t.Fatalf("bare @ matches = %#v, want only non-hidden paths", got)
 	}
 
-	got = atMentionFuzzyMatches(files, ".c")
+	got = atMentionFuzzyMatchesNarrowable(files, nil, ".c", nil)
 	if len(got) == 0 {
 		t.Fatal("dot-prefixed query returned no hidden matches")
 	}
@@ -1078,10 +1078,10 @@ func TestAtMentionFileRefsHandlesEscapedSpacesAndDedupes(t *testing.T) {
 		`again @dir\ with\ space/a\ file.txt!`,
 		`and @plain.txt)`}, " ")
 
-	got := atMentionFileRefs([]string{text}, wd)
+	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{text}, wd), wd))
 	want := []string{`dir with space/a file.txt`, `plain.txt`}
 	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1089,10 +1089,10 @@ func TestAtMentionFileRefsParsesLineRanges(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "main.go"), "content")
 
-	got := atMentionFileRefs([]string{"review @main.go:12 and @main.go:20-25 and @main.go:bad"}, wd)
+	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"review @main.go:12 and @main.go:20-25 and @main.go:bad"}, wd), wd))
 	want := []string{"main.go:12", "main.go:20-25", "main.go"}
 	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1100,10 +1100,10 @@ func TestAtMentionFileRefsOnlyTreatsNumericColonSuffixAsLineRange(t *testing.T) 
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "main.go"), "content")
 
-	got := atMentionFileRefs([]string{"review @main.go:abc"}, wd)
+	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"review @main.go:abc"}, wd), wd))
 	want := []string{"main.go"}
 	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1112,10 +1112,10 @@ func TestAtMentionFileRefsPrefersColonFilenameOverLineRange(t *testing.T) {
 	mustWriteFile(t, filepath.Join(wd, "note:12"), "colon")
 	mustWriteFile(t, filepath.Join(wd, "note"), "plain")
 
-	got := atMentionFileRefs([]string{"review @note:12"}, wd)
+	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"review @note:12"}, wd), wd))
 	want := []string{"note:12"}
 	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1123,10 +1123,10 @@ func TestAtMentionFileRefsDedupesByPathAndLineRange(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "main.go"), "content")
 
-	got := atMentionFileRefs([]string{"@main.go:1 @./main.go:1 @main.go:2 @main.go"}, wd)
+	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"@main.go:1 @./main.go:1 @main.go:2 @main.go"}, wd), wd))
 	want := []string{"main.go:1", "main.go:2", "main.go"}
 	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1143,10 +1143,10 @@ func TestAtMentionFileRefsFallsBackToLongestProseDelimitedPath(t *testing.T) {
 		`Finally inspect @docs/a,b.md, then analyze`,
 	}, "\n")
 
-	got := atMentionFileRefs([]string{text}, wd)
+	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{text}, wd), wd))
 	want := []string{`AGENTS.md`, `docs/requirements,first-draft.md`, `docs/a,b.md`}
 	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1155,10 +1155,10 @@ func TestAtMentionFileRefsPrefersFullCandidateBeforeProseDelimiterFallback(t *te
 	mustWriteFile(t, filepath.Join(wd, "docs", "note,analysis"), "full")
 	mustWriteFile(t, filepath.Join(wd, "docs", "note"), "short")
 
-	got := atMentionFileRefs([]string{`Review @docs/note,analysis`}, wd)
+	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{`Review @docs/note,analysis`}, wd), wd))
 	want := []string{`docs/note,analysis`}
 	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1186,10 +1186,10 @@ func TestAtMentionFileRefsPunctuationBoundaries(t *testing.T) {
 		"\t@notes.md",           // Tab (existing)
 	}
 	for _, text := range cases {
-		got := atMentionFileRefs([]string{text}, wd)
+		got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{text}, wd), wd))
 		want := []string{"notes.md"}
 		if !slices.Equal(got, want) {
-			t.Errorf("atMentionFileRefs(%q) = %#v, want %#v", text, got, want)
+			t.Errorf("displayAtMentionFileRefs(%q) = %#v, want %#v", text, got, want)
 		}
 	}
 }
@@ -1208,9 +1208,9 @@ func TestAtMentionFileRefsRejectsIdentifierPrefix(t *testing.T) {
 		"func123@file.md",      // identifier with digits
 	}
 	for _, text := range cases {
-		got := atMentionFileRefs([]string{text}, wd)
+		got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{text}, wd), wd))
 		if len(got) > 0 {
-			t.Errorf("atMentionFileRefs(%q) = %#v, want empty (should reject identifier prefix)", text, got)
+			t.Errorf("displayAtMentionFileRefs(%q) = %#v, want empty (should reject identifier prefix)", text, got)
 		}
 	}
 }
@@ -1220,10 +1220,10 @@ func TestAtMentionFileRefsSkipsRemovedComposerReference(t *testing.T) {
 	mustWriteFile(t, filepath.Join(wd, "keep.txt"), "keep")
 	mustWriteFile(t, filepath.Join(wd, "drop.txt"), "drop")
 
-	got := atMentionFileRefs([]string{"keep @keep.txt only"}, wd)
+	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"keep @keep.txt only"}, wd), wd))
 	want := []string{"keep.txt"}
 	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionFileRefs() = %#v, want %#v", got, want)
+		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
 	}
 }
 

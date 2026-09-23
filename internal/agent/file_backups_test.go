@@ -117,9 +117,9 @@ func TestFileBackupManagerRejectsSessionByteLimit(t *testing.T) {
 // in place when it was not.
 func TestBackupNotesAreIdenticalForModelAndUser(t *testing.T) {
 	backupPath := filepath.Join(t.TempDir(), "backups", "before.txt")
-	created := appendBackupNotes("updated", tools.NameEdit, driftReport{stale: true, paths: 1}, fileBackupOutcome{
+	created := appendNotes("updated", backupNotes(tools.NameEdit, driftReport{stale: true, paths: 1}, fileBackupOutcome{
 		Records: []fileBackupRecord{{Path: backupPath}},
-	})
+	}))
 	if !strings.Contains(created, "Backup saved to: "+backupPath) {
 		t.Fatalf("result missing backup location: %q", created)
 	}
@@ -130,7 +130,7 @@ func TestBackupNotesAreIdenticalForModelAndUser(t *testing.T) {
 		t.Fatalf("a record without a source path must not claim one: %q", created)
 	}
 
-	failed := appendBackupNotes("updated", tools.NameEdit, driftReport{stale: true, paths: 1}, fileBackupOutcome{})
+	failed := appendNotes("updated", backupNotes(tools.NameEdit, driftReport{stale: true, paths: 1}, fileBackupOutcome{}))
 	if strings.Contains(failed, "Backup") {
 		t.Fatalf("a failed backup must not claim anything about a backup: %q", failed)
 	}
@@ -155,12 +155,12 @@ func TestBackupNotesForMultiFileMutationStatePerSourcePerPath(t *testing.T) {
 		filepath.Join("session", "backups", "111", "000000000001-before-apply_patch-a.go"),
 		filepath.Join("session", "backups", "222", "000000000002-before-apply_patch-a.go"),
 	}
-	notes := appendBackupNotes("updated", tools.NameApplyPatch, driftReport{stale: true, paths: 2}, fileBackupOutcome{
+	notes := appendNotes("updated", backupNotes(tools.NameApplyPatch, driftReport{stale: true, paths: 2}, fileBackupOutcome{
 		Records: []fileBackupRecord{
 			{SourcePath: sources[0], Path: backups[0]},
 			{SourcePath: sources[1], Path: backups[1]},
 		},
-	})
+	}))
 
 	gotSources := backupSourcesFromResult(notes)
 	gotPaths := backupPathsFromResult(notes)
@@ -184,14 +184,14 @@ func TestBackupNotesForMultiFileMutationStatePerSourcePerPath(t *testing.T) {
 }
 
 func TestWriteBackupNoteDoesNotClaimValidation(t *testing.T) {
-	note := appendBackupNotes("wrote 1 line", tools.NameWrite, driftReport{stale: true, paths: 1}, fileBackupOutcome{})
+	note := appendNotes("wrote 1 line", backupNotes(tools.NameWrite, driftReport{stale: true, paths: 1}, fileBackupOutcome{}))
 	if strings.Contains(note, "validated") {
 		t.Fatalf("write drift warning claims validation: %q", note)
 	}
 	if !strings.Contains(note, "replaced by this write") {
 		t.Fatalf("write drift warning does not say the contents were replaced: %q", note)
 	}
-	edit := appendBackupNotes("edited", tools.NameEdit, driftReport{stale: true, paths: 1}, fileBackupOutcome{})
+	edit := appendNotes("edited", backupNotes(tools.NameEdit, driftReport{stale: true, paths: 1}, fileBackupOutcome{}))
 	if !strings.Contains(edit, "validated current contents") {
 		t.Fatalf("edit drift warning lost its validation wording: %q", edit)
 	}
@@ -249,7 +249,7 @@ func TestDriftWarningIncludesRecentAge(t *testing.T) {
 	if strings.Contains(predates, "ago") {
 		t.Fatalf("drift predating the runtime start must omit the age: %q", predates)
 	}
-	writeNote := appendBackupNotes("wrote", tools.NameWrite, driftReport{stale: true, paths: 1, modTime: recent, runtimeStartedAt: runtimeStart}, fileBackupOutcome{})
+	writeNote := appendNotes("wrote", backupNotes(tools.NameWrite, driftReport{stale: true, paths: 1, modTime: recent, runtimeStartedAt: runtimeStart}, fileBackupOutcome{}))
 	if !strings.Contains(writeNote, "(about 45s ago)") {
 		t.Fatalf("write drift warning must carry the recent age: %q", writeNote)
 	}
@@ -262,17 +262,17 @@ func TestTrackedSnapshotWarningsPunctuateAlike(t *testing.T) {
 	runtimeStart := time.Now().Add(-time.Hour)
 	const clause = "; the tool validated current contents before writing and continued."
 
-	single := appendBackupNotes("edited", tools.NameEdit, driftReport{stale: true, paths: 1}, fileBackupOutcome{})
+	single := appendNotes("edited", backupNotes(tools.NameEdit, driftReport{stale: true, paths: 1}, fileBackupOutcome{}))
 	if !strings.HasSuffix(single, "snapshot"+clause) {
 		t.Fatalf("single-file warning lost the semicolon: %q", single)
 	}
-	plural := appendBackupNotes("patched", tools.NameApplyPatch, driftReport{stale: true, paths: 2}, fileBackupOutcome{})
+	plural := appendNotes("patched", backupNotes(tools.NameApplyPatch, driftReport{stale: true, paths: 2}, fileBackupOutcome{}))
 	if !strings.HasSuffix(plural, "snapshot"+clause) {
 		t.Fatalf("multi-file warning changed shape: %q", plural)
 	}
-	aged := appendBackupNotes("edited", tools.NameEdit, driftReport{
+	aged := appendNotes("edited", backupNotes(tools.NameEdit, driftReport{
 		stale: true, paths: 1, modTime: time.Now().Add(-45 * time.Second), runtimeStartedAt: runtimeStart,
-	}, fileBackupOutcome{})
+	}, fileBackupOutcome{}))
 	if !strings.HasSuffix(aged, "snapshot (about 45s ago)"+clause) {
 		t.Fatalf("aged warning must keep the semicolon after the age: %q", aged)
 	}

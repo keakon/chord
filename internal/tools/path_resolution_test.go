@@ -105,7 +105,7 @@ func TestFileToolConcurrencyPolicyExpandsTilde(t *testing.T) {
 	setHomeEnvForTest(t, home)
 	args := mustMarshal(t, map[string]any{"path": tildePathForTest("demo.txt")})
 
-	policy := fileToolConcurrencyPolicy(args, true)
+	policy := fileToolConcurrencyPolicyInDir(args, true, "")
 	want := "file:" + filepath.Join(home, "demo.txt")
 	if policy.Resource != want {
 		t.Fatalf("Resource = %q, want %q", policy.Resource, want)

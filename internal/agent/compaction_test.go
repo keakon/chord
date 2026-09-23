@@ -704,7 +704,7 @@ func TestPrepareMessagesForLLM_ReducedReadBecomesStaleAfterMutatingShell(t *test
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u"},
 		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100), FileState: buildReadFileState(path)},
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100), FileState: readFileStateForTest(path)},
 	}
 	setTestRequestBatch(a, msgs, 2)
 	first := a.prepareMessagesForLLM(msgs)
@@ -748,7 +748,7 @@ func TestPrepareMessagesForLLM_ShellInvalidationVerdictMemoizedPerShell(t *testi
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u"},
 		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100), FileState: buildReadFileState(path)},
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: "success", Content: "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100), FileState: readFileStateForTest(path)},
 		{Role: message.RoleAssistant, RequestBatch: 2, ToolCalls: []message.ToolCall{{ID: "shell1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"touch other"}`)}}},
 		{Role: message.RoleTool, ToolCallID: "shell1", ToolStatus: "success", Content: "ok"},
 	}
@@ -787,7 +787,7 @@ func TestMutatingShellInvalidationSkipsReadOnlyShells(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile initial: %v", err)
 	}
-	readState := buildReadFileState(path)
+	readState := readFileStateForTest(path)
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile changed: %v", err)
 	}
@@ -821,7 +821,7 @@ func TestPrepareMessagesForLLM_RestoredReadBecomesStaleAfterMutatingShell(t *tes
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile initial: %v", err)
 	}
-	readState := buildReadFileState(path)
+	readState := readFileStateForTest(path)
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile changed: %v", err)
 	}
@@ -859,11 +859,11 @@ func TestPrepareMessagesForLLM_RestoredShellOnlyInvalidatesEarlierReads(t *testi
 			t.Fatalf("WriteFile %s: %v", path, err)
 		}
 	}
-	stateA := buildReadFileState(pathA)
+	stateA := readFileStateForTest(pathA)
 	if err := os.WriteFile(pathA, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile changed A: %v", err)
 	}
-	stateB := buildReadFileState(pathB)
+	stateB := readFileStateForTest(pathB)
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
@@ -5906,7 +5906,7 @@ func TestClassifyRequestReductionToolOutputUsesToolStatusError(t *testing.T) {
 		Age:        compactErrorAgeTurns,
 		Policy:     defaultContextReductionPolicy(),
 	}
-	if got := classifyRequestReductionToolOutput(ctx); got != requestReductionToolError {
+	if got := classifyRequestReduction(ctx).Class; got != requestReductionToolError {
 		t.Fatalf("class = %q, want %q", got, requestReductionToolError)
 	}
 }

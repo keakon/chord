@@ -142,11 +142,9 @@ func TestNoopEngine(t *testing.T) {
 }
 
 func TestCommandEngine_SyncBlockAndModify(t *testing.T) {
-	e := NewCommandEngine(map[string][]HookDef{
-		OnToolCall: {
-			shellHook("modify", OnToolCall, `echo '{"action":"modify","data":{"tool_name":"Shell","args":{"command":"echo safe"}}}'`),
-			shellHook("block", OnToolCall, `echo '{"action":"block","message":"denied"}'`),
-		},
+	e := NewCommandEngineFromList([]HookDef{
+		shellHook("modify", OnToolCall, `echo '{"action":"modify","data":{"tool_name":"Shell","args":{"command":"echo safe"}}}'`),
+		shellHook("block", OnToolCall, `echo '{"action":"block","message":"denied"}'`),
 	})
 
 	result, err := e.Fire(context.Background(), testEnv(OnToolCall, map[string]any{
@@ -165,10 +163,8 @@ func TestCommandEngine_SyncBlockAndModify(t *testing.T) {
 }
 
 func TestCommandEngine_SyncModifyCarriesData(t *testing.T) {
-	e := NewCommandEngine(map[string][]HookDef{
-		OnBeforeToolResultAppend: {
-			shellHook("modify", OnBeforeToolResultAppend, `echo '{"action":"modify","data":{"display_result":"masked","context_result":"masked-ctx"}}'`),
-		},
+	e := NewCommandEngineFromList([]HookDef{
+		shellHook("modify", OnBeforeToolResultAppend, `echo '{"action":"modify","data":{"display_result":"masked","context_result":"masked-ctx"}}'`),
 	})
 
 	result, err := e.Fire(context.Background(), testEnv(OnBeforeToolResultAppend, map[string]any{
@@ -193,13 +189,13 @@ func TestCommandEngine_SyncModifyCarriesData(t *testing.T) {
 
 func TestCommandEngine_ToolFilter(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
-	e := NewCommandEngine(map[string][]HookDef{
-		OnToolCall: {{
+	e := NewCommandEngineFromList([]HookDef{
+		{
 			Name:    "shell-only",
 			Point:   OnToolCall,
 			Command: Command{Shell: fmt.Sprintf(`touch %s && echo '{"action":"continue"}'`, marker)},
 			Tools:   []string{"Shell"},
-		}},
+		},
 	})
 
 	_, err := e.Fire(context.Background(), testEnv(OnToolCall, map[string]any{
@@ -215,14 +211,14 @@ func TestCommandEngine_ToolFilter(t *testing.T) {
 
 func TestCommandEngine_PathFilter(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
-	e := NewCommandEngine(map[string][]HookDef{
-		OnToolBatchComplete: {{
+	e := NewCommandEngineFromList([]HookDef{
+		{
 			Name:    "go-only",
 			Point:   OnToolBatchComplete,
 			Command: Command{Shell: fmt.Sprintf(`touch %s && echo '{"status":"success","summary":"ok"}'`, marker)},
 			Paths:   []string{"**/*.go"},
 			Join:    JoinBeforeNextLLM,
-		}},
+		},
 	})
 
 	_, err := e.RunAutomation(context.Background(), testEnv(OnToolBatchComplete, map[string]any{
@@ -241,13 +237,13 @@ func TestCommandEngine_PathFilter(t *testing.T) {
 
 func TestCommandEngine_PathFilterForToolEventUsesPathAndPaths(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "ran")
-	e := NewCommandEngine(map[string][]HookDef{
-		OnToolCall: {{
+	e := NewCommandEngineFromList([]HookDef{
+		{
 			Name:    "go-only",
 			Point:   OnToolCall,
 			Command: Command{Shell: fmt.Sprintf(`touch %s && echo '{"action":"continue"}'`, marker)},
 			Paths:   []string{"**/*.go"},
-		}},
+		},
 	})
 
 	_, err := e.Fire(context.Background(), testEnv(OnToolCall, map[string]any{
@@ -268,12 +264,12 @@ func TestCommandEngine_ObserverReceivesEnvelopeAndEnvVars(t *testing.T) {
 	envFile := filepath.Join(t.TempDir(), "hook-env.txt")
 	cmd := fmt.Sprintf(`cat > %s; printf '%%s' "$CHORD_HOOK_POINT" > %s`, inputFile, envFile)
 
-	e := NewCommandEngine(map[string][]HookDef{
-		OnSessionStart: {{
+	e := NewCommandEngineFromList([]HookDef{
+		{
 			Name:    "inspect",
 			Point:   OnSessionStart,
 			Command: Command{Shell: cmd},
-		}},
+		},
 	})
 
 	if _, err := e.Fire(context.Background(), testEnv(OnSessionStart, map[string]any{"hello": "world"})); err != nil {
@@ -302,12 +298,12 @@ func TestCommandEngine_ObserverReceivesEnvelopeAndEnvVars(t *testing.T) {
 }
 
 func TestCommandEngine_ArgvMode(t *testing.T) {
-	e := NewCommandEngine(map[string][]HookDef{
-		OnToolCall: {{
+	e := NewCommandEngineFromList([]HookDef{
+		{
 			Name:    "argv",
 			Point:   OnToolCall,
 			Command: Command{Args: []string{"sh", "-c", `echo '{"action":"continue"}'`}},
-		}},
+		},
 	})
 
 	result, err := e.Fire(context.Background(), testEnv(OnToolCall, map[string]any{
@@ -323,21 +319,19 @@ func TestCommandEngine_ArgvMode(t *testing.T) {
 
 func TestCommandEngine_RunAutomationJoinAndBackground(t *testing.T) {
 	bgMarker := filepath.Join(t.TempDir(), "background")
-	e := NewCommandEngine(map[string][]HookDef{
-		OnToolBatchComplete: {
-			{
-				Name:    "background",
-				Point:   OnToolBatchComplete,
-				Command: Command{Shell: fmt.Sprintf(`touch %s && echo '{"status":"success","summary":"bg"}'`, bgMarker)},
-				Join:    JoinBackground,
-			},
-			{
-				Name:    "join",
-				Point:   OnToolBatchComplete,
-				Command: Command{Shell: `printf '%s' '{"status":"failed","summary":"tests failed","body":"line1\\nline2","severity":"error"}'`},
-				Join:    JoinBeforeNextLLM,
-				Result:  ResultAppendOnFailure,
-			},
+	e := NewCommandEngineFromList([]HookDef{
+		{
+			Name:    "background",
+			Point:   OnToolBatchComplete,
+			Command: Command{Shell: fmt.Sprintf(`touch %s && echo '{"status":"success","summary":"bg"}'`, bgMarker)},
+			Join:    JoinBackground,
+		},
+		{
+			Name:    "join",
+			Point:   OnToolBatchComplete,
+			Command: Command{Shell: `printf '%s' '{"status":"failed","summary":"tests failed","body":"line1\\nline2","severity":"error"}'`},
+			Join:    JoinBeforeNextLLM,
+			Result:  ResultAppendOnFailure,
 		},
 	})
 

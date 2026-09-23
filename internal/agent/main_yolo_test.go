@@ -39,16 +39,16 @@ func TestYoloRulesetKeepsProtectedRulesAndDropsOthers(t *testing.T) {
 		}
 	}
 	// Protected rules survive with their original action (Handoff allow, Delegate ask, Cancel deny, Done allow).
-	if got := evaluateToolPermission(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`)); got.Action != permission.ActionAllow {
+	if got := evaluateToolPermissionInDir(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`), permission.PathScope{}); got.Action != permission.ActionAllow {
 		t.Fatalf("Handoff action = %v, want allow", got.Action)
 	}
-	if got := evaluateToolPermission(filtered, tools.NameDelegate, json.RawMessage(`{"agent_type":"builder"}`)); got.Action != permission.ActionAsk {
+	if got := evaluateToolPermissionInDir(filtered, tools.NameDelegate, json.RawMessage(`{"agent_type":"builder"}`), permission.PathScope{}); got.Action != permission.ActionAsk {
 		t.Fatalf("Delegate action = %v, want ask", got.Action)
 	}
-	if got := evaluateToolPermission(filtered, tools.NameCancel, json.RawMessage(`{}`)); got.Action != permission.ActionDeny {
+	if got := evaluateToolPermissionInDir(filtered, tools.NameCancel, json.RawMessage(`{}`), permission.PathScope{}); got.Action != permission.ActionDeny {
 		t.Fatalf("Cancel action = %v, want deny", got.Action)
 	}
-	if got := evaluateToolPermission(filtered, tools.NameDone, json.RawMessage(`{"report":"done"}`)); got.Action != permission.ActionAllow {
+	if got := evaluateToolPermissionInDir(filtered, tools.NameDone, json.RawMessage(`{"report":"done"}`), permission.PathScope{}); got.Action != permission.ActionAllow {
 		t.Fatalf("Done action = %v, want allow", got.Action)
 	}
 }
@@ -69,7 +69,7 @@ func TestEvaluateDelegatePermissionMatchesAgentType(t *testing.T) {
 		{agentType: "builder", want: permission.ActionDeny},
 	} {
 		args := json.RawMessage(`{"agent_type":"` + tc.agentType + `"}`)
-		got := evaluateToolPermission(ruleset, tools.NameDelegate, args)
+		got := evaluateToolPermissionInDir(ruleset, tools.NameDelegate, args, permission.PathScope{})
 		if got.Action != tc.want {
 			t.Errorf("Delegate(%q) action = %v, want %v", tc.agentType, got.Action, tc.want)
 		}
@@ -211,7 +211,7 @@ func TestYoloBusyToggleDefersPromptAndToolSurfaceUntilNextRequest(t *testing.T) 
 	if !a.YoloEnabled() {
 		t.Fatal("YOLO should enable while busy")
 	}
-	decision := evaluateToolPermission(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"patterns":["*"]}`))
+	decision := evaluateToolPermissionInDir(a.effectiveRuleset(), tools.NameGlob, json.RawMessage(`{"patterns":["*"]}`), permission.PathScope{})
 	if decision.Action != permission.ActionDeny {
 		t.Fatalf("effective Glob action after YOLO = %v, want deny via empty YOLO ruleset", decision.Action)
 	}
@@ -302,15 +302,15 @@ func TestYoloRulesetKeepsNarrowGlobRules(t *testing.T) {
 	if got := compactContextPermissionAction(filtered); got != permission.ActionDeny {
 		t.Fatalf("compact_* deny must survive YOLO, got %v", got)
 	}
-	if got := evaluateToolPermission(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`)); got.Action != permission.ActionAsk {
+	if got := evaluateToolPermissionInDir(filtered, tools.NameHandoff, json.RawMessage(`{"agent":"planner"}`), permission.PathScope{}); got.Action != permission.ActionAsk {
 		t.Fatalf("handoff* ask must survive YOLO, got %v", got.Action)
 	}
 	// The wildcard deny mirror keeps an allowlist role's default: delegate and
 	// cancel stay denied even though the wildcard rule itself is gone.
-	if got := evaluateToolPermission(filtered, tools.NameDelegate, json.RawMessage(`{"agent_type":"builder"}`)); got.Action != permission.ActionDeny {
+	if got := evaluateToolPermissionInDir(filtered, tools.NameDelegate, json.RawMessage(`{"agent_type":"builder"}`), permission.PathScope{}); got.Action != permission.ActionDeny {
 		t.Fatalf("delegate must keep the wildcard deny default under YOLO, got %v", got.Action)
 	}
-	if got := evaluateToolPermission(filtered, tools.NameCancel, json.RawMessage(`{}`)); got.Action != permission.ActionDeny {
+	if got := evaluateToolPermissionInDir(filtered, tools.NameCancel, json.RawMessage(`{}`), permission.PathScope{}); got.Action != permission.ActionDeny {
 		t.Fatalf("cancel must keep the wildcard deny default under YOLO, got %v", got.Action)
 	}
 	// A glob that only reaches unprotected tools is still dropped.

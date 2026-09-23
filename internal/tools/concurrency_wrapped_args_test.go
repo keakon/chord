@@ -18,7 +18,7 @@ func (wrappedPolicyTool) Execute(ctx context.Context, args json.RawMessage) (str
 }
 func (wrappedPolicyTool) IsReadOnly() bool { return true }
 func (wrappedPolicyTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
-	return fileToolConcurrencyPolicy(args, true)
+	return fileToolConcurrencyPolicyInDir(args, true, "")
 }
 
 func TestPolicyForToolUnwrapsWrappedArgs(t *testing.T) {

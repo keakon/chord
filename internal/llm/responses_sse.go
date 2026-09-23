@@ -335,21 +335,6 @@ func (s responsesPartialCompletionState) outputItemsComplete() bool {
 	return len(s.openOutputItems) == 0
 }
 
-// parseResponsesSSE reads a Responses API SSE stream and calls cb for each delta.
-// Supports both combined format (data line has {"type":"...","data":...}) and
-// standard SSE (event type on "event:" line, payload on "data:" line).
-func parseResponsesSSE(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, collector, nil, "", false)
-	return resp, err
-}
-
-// parseResponsesSSEWithOutputItems behaves like parseResponsesSSE and also
-// returns normalized output items from response.completed / response.incomplete.
-// These items are used by the WebSocket incremental baseline chain.
-func parseResponsesSSEWithOutputItems(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, []responsesInputItem, error) {
-	return parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, collector, nil, "", false)
-}
-
 func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCallback, collector *SSECollector, turnState *ResponsesTurnState, turnStateID string, freeform bool) (*message.Response, []responsesInputItem, error) {
 	phaser, _ := reader.(chunkPhaser)
 	br := bufio.NewReaderSize(reader, sseInitialBufferSize)

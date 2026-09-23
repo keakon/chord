@@ -261,7 +261,7 @@ func TestGologLoggerWithContextOmitsMainAgent(t *testing.T) {
 
 func TestLogEffectiveProxy(t *testing.T) {
 	var buf bytes.Buffer
-	old := getDefaultLogger()
+	old := defaultLogger
 	setDefaultLogger(newGologLogger(&buf, golog.DebugLevel))
 	t.Cleanup(func() { setDefaultLogger(old) })
 

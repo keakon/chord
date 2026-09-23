@@ -1492,17 +1492,6 @@ func LoadConfigFromPath(path string) (*Config, error) {
 	return loadConfigData(path, data, true)
 }
 
-// LoadConfigOverrideFromPath loads a config file without applying built-in
-// defaults. This is used for project-level overrides so omitted fields stay
-// unset and do not accidentally shadow global defaults.
-func LoadConfigOverrideFromPath(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config %s: %w", path, err)
-	}
-	return loadConfigData(path, data, false)
-}
-
 // MergeProjectConfig overlays a project-level .chord/config.yaml onto an
 // already-loaded global config. Missing configs are ignored. Malformed YAML is
 // a fatal error: it prevents startup rather than silently dropping the file.

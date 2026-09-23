@@ -33,7 +33,7 @@ func BenchmarkClassifyProtectedShellOutput(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(int64(len(ctx.Content)))
 	for b.Loop() {
-		if class := classifyRequestReductionToolOutput(ctx); class != requestReductionNone {
+		if class := classifyRequestReduction(ctx).Class; class != requestReductionNone {
 			b.Fatalf("class = %q, want the protected class", class)
 		}
 	}

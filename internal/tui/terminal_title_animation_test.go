@@ -243,7 +243,7 @@ func TestHandleFocusMsgStopsBlinkingButKeepsRequestTitle(t *testing.T) {
 	if m.currentTitleMode() != terminalTitleModeRequest {
 		t.Fatalf("title mode = %v, want request", m.currentTitleMode())
 	}
-	if delay := m.currentTitleTickerDelay(); delay != 0 {
+	if delay := m.deriveTerminalTitleState().tickerDelay; delay != 0 {
 		t.Fatalf("title ticker delay after focus = %s, want 0", delay)
 	}
 

@@ -17,12 +17,12 @@ func TestParseOpenAISSEStreamLargeDataLine(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
-		t.Fatal("parseOpenAISSEStream returned nil response")
+		t.Fatal("parseOpenAISSEStreamOptions returned nil response")
 	}
 	if resp.Content != content {
 		t.Fatalf("large SSE content length = %d, want %d", len(resp.Content), len(content))
@@ -36,7 +36,7 @@ func TestParseOpenAISSEStreamErrorEventAfterTextReturnsAPIError(t *testing.T) {
 		`data: {"error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
 		"",
 	}, "\n")
-	_, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	_, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr.Code != "upstream_connection_error" {
 		t.Fatalf("err = %T %v, want provider API error (partial stays on screen, no rollback)", err, err)
@@ -49,7 +49,7 @@ func TestParseOpenAISSEStreamPreservesStatuslessErrorEnvelope(t *testing.T) {
 		"",
 	}, "\n")
 
-	_, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	_, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr.Origin != APIErrorOriginSSEEvent || apiErr.StatusCode != 0 || apiErr.Param != "messages" {
 		t.Fatalf("err = %T %v, want status-less Chat SSE APIError", err, err)
@@ -65,9 +65,9 @@ func TestParseOpenAISSEStream_ThinkingToolcallMarkerHit(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
@@ -98,9 +98,9 @@ func TestParseOpenAISSEStream_ThinkingToolcallMarkerSplitAcrossChunks(t *testing
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
@@ -119,9 +119,9 @@ func TestParseOpenAISSEStream_NormalToolCallsWithoutReasoning_LeavesReasoningCon
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
@@ -150,13 +150,13 @@ func TestParseOpenAISSEStream_DoesNotEmitToolCallbacksForMalformedToolCall(t *te
 	}, "\n")
 
 	var callbacks []string
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), func(delta message.StreamDelta) {
 		if delta.Type == message.StreamDeltaToolUseStart || delta.Type == message.StreamDeltaToolUseDelta || delta.Type == message.StreamDeltaToolUseEnd {
 			callbacks = append(callbacks, delta.Type)
 		}
-	}, nil)
+	}, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
@@ -179,13 +179,13 @@ func TestParseOpenAISSEStream_EmitsPairedCallbacksForValidToolCall(t *testing.T)
 	}, "\n")
 
 	var events []string
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), func(delta message.StreamDelta) {
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), func(delta message.StreamDelta) {
 		if delta.ToolCall != nil {
 			events = append(events, delta.Type+":"+delta.ToolCall.ID+":"+delta.ToolCall.Name)
 		}
-	}, nil)
+	}, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil || len(resp.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %#v, want one valid call", resp)
@@ -209,9 +209,9 @@ func TestParseOpenAISSEStream_InterruptedTextWithoutDoneIsNotNormalSuccess(t *te
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil || resp.Content != "partial answer" || resp.StopReason != "interrupted" {
 		t.Fatalf("resp = %#v, want interrupted partial text", resp)
@@ -227,9 +227,9 @@ func TestParseOpenAISSEStream_InterruptedTextDropsPartialToolAndReasoning(t *tes
 		"",
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream returned error: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions returned error: %v", err)
 	}
 	if resp == nil || resp.Content != "visible text" || resp.StopReason != "interrupted" {
 		t.Fatalf("resp = %#v, want interrupted partial text", resp)

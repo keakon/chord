@@ -126,11 +126,11 @@ func TestProviderSkipReason(t *testing.T) {
 func TestShouldContinueRetryKeepsRetryingConcurrent429AfterDefaultCap(t *testing.T) {
 	t.Parallel()
 	concurrentErr := &APIError{StatusCode: 429, Message: `{"error":"Too many concurrent requests for this model"}`}
-	if !shouldContinueRetry(DefaultStreamRetryRounds, DefaultStreamRetryRounds, concurrentErr) {
+	if !shouldContinueRetryMode(DefaultStreamRetryRounds, DefaultStreamRetryRounds, concurrentErr, false) {
 		t.Fatal("concurrent-request 429 should continue retrying past the default cap")
 	}
 	quotaErr := &APIError{StatusCode: 429, Message: "daily quota exceeded"}
-	if shouldContinueRetry(DefaultStreamRetryRounds, DefaultStreamRetryRounds, quotaErr) {
+	if shouldContinueRetryMode(DefaultStreamRetryRounds, DefaultStreamRetryRounds, quotaErr, false) {
 		t.Fatal("ordinary 429 should still stop at the default retry cap")
 	}
 }

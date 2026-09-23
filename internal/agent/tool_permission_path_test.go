@@ -94,7 +94,7 @@ delete:
 `)
 	ruleset := permission.ParsePermission(&node)
 	args := mustDeletePermissionArgs(t, []string{"tmp/build.out"})
-	lexical := evaluateToolPermission(ruleset, "delete", args)
+	lexical := evaluateToolPermissionInDir(ruleset, "delete", args, permission.PathScope{})
 	inDir := evaluateToolPermissionInDir(ruleset, "delete", args, permission.PathScope{})
 	if lexical.Action != inDir.Action || lexical.MatchArgument != inDir.MatchArgument {
 		t.Fatalf("empty-cwd InDir = %#v, want identical to lexical %#v", inDir, lexical)

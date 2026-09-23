@@ -40,20 +40,20 @@ func TestRenderExecutingSummaryStartsFromZero(t *testing.T) {
 func TestRenderActivityExecutingUsesElapsedStyle(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-12 * time.Second)
-	out := stripANSI(m.renderActivity(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200))
+	out := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200, time.Now()))
 	if !strings.Contains(out, "⚙ 12s") {
-		t.Fatalf("renderActivity(executing) = %q, want elapsed time", out)
+		t.Fatalf("renderActivityAt(executing) = %q, want elapsed time", out)
 	}
 	if strings.Contains(out, "Loop:") {
-		t.Fatalf("renderActivity(executing) should not include loop phase label; got %q", out)
+		t.Fatalf("renderActivityAt(executing) should not include loop phase label; got %q", out)
 	}
 }
 
 func TestRenderActivityExecutingWithoutStartShowsActivityGlyph(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
-	out := stripANSI(m.renderActivity(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200))
+	out := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200, time.Now()))
 	if out != "⚙" {
-		t.Fatalf("renderActivity(executing without start) = %q, want activity glyph without elapsed", out)
+		t.Fatalf("renderActivityAt(executing without start) = %q, want activity glyph without elapsed", out)
 	}
 	if got := m.renderExecutingSummary("main"); got != "⚙" {
 		t.Fatalf("renderExecutingSummary without start = %q, want activity glyph", got)
@@ -256,7 +256,7 @@ func TestRenderActivityStreamingUsesElapsedWhenNoProgress(t *testing.T) {
 	started := time.Now().Add(-90 * time.Second)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hi", StartedAt: started})
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
-	out := stripANSI(m.renderActivity(a, 200))
+	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "⣿") && !strings.Contains(out, "⣶") {
 		t.Fatalf("expected streaming icon in %q", out)
 	}
@@ -269,7 +269,7 @@ func TestRenderActivityCompactingUsesUnifiedProgressStyle(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-8 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main", Detail: "context"}
-	out := stripANSI(m.renderActivity(a, 200))
+	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "■") && !strings.Contains(out, "▪") {
 		t.Fatalf("compacting render should still show icon, got %q", out)
 	}
@@ -282,7 +282,7 @@ func TestRenderActivityRetryingShowsDetailAndElapsed(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-17 * time.Second)
 
-	retrying := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 6"}, 200))
+	retrying := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 6"}, 200, time.Now()))
 	if !strings.Contains(retrying, "↺") {
 		t.Fatalf("retrying render should still show icon, got %q", retrying)
 	}
@@ -290,7 +290,7 @@ func TestRenderActivityRetryingShowsDetailAndElapsed(t *testing.T) {
 		t.Fatalf("retrying render should show the detail and the phase timer, got %q", retrying)
 	}
 
-	fallback := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback: fallback-model (5xx)"}, 200))
+	fallback := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback: fallback-model (5xx)"}, 200, time.Now()))
 	if !strings.Contains(fallback, "fallback: fallback-model (5xx)") || !strings.Contains(fallback, "17s") {
 		t.Fatalf("fallback wait render should name the target, reason, and elapsed time, got %q", fallback)
 	}
@@ -369,7 +369,7 @@ func TestRenderActivityCoolingFallsBackToElapsedWithoutDeadline(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s"}
 
-	out := stripANSI(m.renderActivity(a, 200))
+	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if strings.Contains(out, "left") {
 		t.Fatalf("cooling without a deadline should not claim a countdown, got %q", out)
 	}
@@ -411,7 +411,7 @@ func TestRenderActivityWaitingUsesExplicitElapsedLabel(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}
-	out := stripANSI(m.renderActivity(a, 200))
+	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, " 7s") {
 		t.Fatalf("waiting render should keep phase timer in parens, got %q", out)
 	}
@@ -421,7 +421,7 @@ func TestRenderActivityWaitingTokenUsesDistinctLabel(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}
-	out := stripANSI(m.renderActivity(a, 200))
+	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, " 7s") {
 		t.Fatalf("waiting_token render should keep phase timer in parens, got %q", out)
 	}
@@ -431,12 +431,12 @@ func TestRenderActivityUsesCompactParenStyleWhenWidthIsTight(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 
-	waiting := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}, 32))
+	waiting := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}, 32, time.Now()))
 	if !strings.Contains(waiting, "↺ 7s") {
 		t.Fatalf("narrow waiting render should use icon+elapsed style, got %q", waiting)
 	}
 
-	waitingToken := stripANSI(m.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}, 64))
+	waitingToken := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}, 64, time.Now()))
 	if !strings.Contains(waitingToken, "↺ 7s") {
 		t.Fatalf("waiting_token render should use icon+elapsed style, got %q", waitingToken)
 	}
@@ -446,7 +446,7 @@ func TestRenderActivityShowsTimeFromZeroSeconds(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-4 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}
-	out := stripANSI(m.renderActivity(a, 200))
+	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, " 4s") {
 		t.Fatalf("phase timer should start from 0s, got %q", out)
 	}
@@ -454,7 +454,7 @@ func TestRenderActivityShowsTimeFromZeroSeconds(t *testing.T) {
 	m2 := NewModelWithSize(nil, 200, 24)
 	started := time.Now().Add(-4 * time.Second)
 	m2.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hi", StartedAt: started})
-	out = stripANSI(m2.renderActivity(agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}, 200))
+	out = stripANSI(m2.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}, 200, time.Now()))
 	if !strings.Contains(out, " 4s") && !strings.Contains(out, " 0s") {
 		t.Fatalf("streaming elapsed should be shown immediately, got %q", out)
 	}
@@ -467,7 +467,7 @@ func TestRenderActivityTruncatesToCoreWhenWidthIsTight(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-2 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	wide := stripANSI(m.renderActivity(a, 200))
+	wide := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(wide, "⣿") && !strings.Contains(wide, "⣶") {
 		t.Fatalf("wide render should include streaming icon; got %q", wide)
 	}
@@ -475,7 +475,7 @@ func TestRenderActivityTruncatesToCoreWhenWidthIsTight(t *testing.T) {
 		t.Fatalf("wide render should show phase timer from 0s; got %q", wide)
 	}
 
-	narrow := stripANSI(m.renderActivity(a, 24))
+	narrow := stripANSI(m.renderActivityAt(a, 24, time.Now()))
 	if strings.Contains(narrow, statusBarTotalLabel()) {
 		t.Fatalf("narrow render should drop total label first; got %q", narrow)
 	}
@@ -491,7 +491,7 @@ func TestRenderActivityUsesCompactLastLabelInCompactExtras(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-2 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	compact := stripANSI(m.renderActivity(a, 46))
+	compact := stripANSI(m.renderActivityAt(a, 46, time.Now()))
 	if !strings.Contains(compact, "⣿") && !strings.Contains(compact, "⣶") {
 		t.Fatalf("compact render should keep streaming icon; got %q", compact)
 	}
@@ -504,7 +504,7 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 	m.activityStartTime["main"] = time.Now().Add(-20 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	full := stripANSI(m.renderActivity(a, 200))
+	full := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(full, "⣿") && !strings.Contains(full, "⣶") {
 		t.Fatalf("full render should keep streaming icon, got %q", full)
 	}
@@ -512,7 +512,7 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 		t.Fatalf("full render should keep phase elapsed, got %q", full)
 	}
 
-	noElapsed := stripANSI(m.renderActivity(a, 40))
+	noElapsed := stripANSI(m.renderActivityAt(a, 40, time.Now()))
 	if strings.Contains(noElapsed, statusBarTotalLabel()) {
 		t.Fatalf("medium render should hide anchor elapsed first, got %q", noElapsed)
 	}
@@ -520,7 +520,7 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 		t.Fatalf("medium render should retain phase timer, got %q", noElapsed)
 	}
 
-	noSince := stripANSI(m.renderActivity(a, 28))
+	noSince := stripANSI(m.renderActivityAt(a, 28, time.Now()))
 	if strings.Contains(noSince, statusBarTotalLabel()) {
 		t.Fatalf("narrower render should not restore total label, got %q", noSince)
 	}
@@ -624,7 +624,7 @@ func TestRenderActivityUsesQueuedDraftStartForTotal(t *testing.T) {
 	queuedAt := time.Now().Add(-90 * time.Second)
 	m.queuedDrafts = []queuedDraft{{ID: "draft-1", Content: "queued", DisplayContent: "queued", QueuedAt: queuedAt}}
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
-	out := stripANSI(m.renderActivity(a, 200))
+	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "⣿") && !strings.Contains(out, "⣶") {
 		t.Fatalf("expected streaming icon in %q", out)
 	}
@@ -637,7 +637,7 @@ func TestRenderActivityPrefersNewerToolStartOverEarlierSettledBlock(t *testing.T
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "done", SettledAt: older})
 	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "shell", StartedAt: newer})
 	a := agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
-	out := stripANSI(m.renderActivity(a, 200))
+	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "⚙ 1m30s") {
 		t.Fatalf("expected newer tool start to anchor executing elapsed; got %q", out)
 	}
@@ -649,7 +649,7 @@ func TestRenderActivityShowsUnifiedBusyElapsedStyle(t *testing.T) {
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hi", StartedAt: started})
 	m.activityStartTime["main"] = time.Now().Add(-20 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityConnecting, AgentID: "main"}
-	out := stripANSI(m.renderActivity(a, 200))
+	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "⇋ 20s") {
 		t.Fatalf("expected unified busy elapsed style in %q", out)
 	}

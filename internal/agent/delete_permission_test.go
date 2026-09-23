@@ -41,7 +41,7 @@ delete:
 	ruleset := permission.ParsePermission(&node)
 	args := mustDeletePermissionArgs(t, []string{"tmp/build.out", "gen/client_old.go"})
 
-	got := evaluateToolPermission(ruleset, "delete", args)
+	got := evaluateToolPermissionInDir(ruleset, "delete", args, permission.PathScope{})
 	if got.Action != permission.ActionAsk {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 	}
@@ -67,7 +67,7 @@ delete:
 	ruleset := permission.ParsePermission(&node)
 	args := mustDeletePermissionArgs(t, []string{"gen/client_old.go", "secret/plan.txt", "tmp/build.out"})
 
-	got := evaluateToolPermission(ruleset, "delete", args)
+	got := evaluateToolPermissionInDir(ruleset, "delete", args, permission.PathScope{})
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -89,7 +89,7 @@ apply_patch:
 	ruleset := permission.ParsePermission(&node)
 	args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: allowed/ok.txt\n+ok\n*** Add File: secret/no.txt\n+no\n*** End Patch"}`)
 
-	got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+	got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, args, permission.PathScope{})
 	if got.Action != permission.ActionDeny || got.MatchArgument != "secret/no.txt" {
 		t.Fatalf("decision = %#v, want secret target denial", got)
 	}
@@ -108,7 +108,7 @@ apply_patch: allow
 delete: ask
 `)
 		ruleset := permission.ParsePermission(&node)
-		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, deletePatch)
+		got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, deletePatch, permission.PathScope{})
 		if got.Action != permission.ActionAsk {
 			t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 		}
@@ -131,7 +131,7 @@ delete:
   "tmp/*": deny
 `)
 		ruleset := permission.ParsePermission(&node)
-		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, deletePatch)
+		got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, deletePatch, permission.PathScope{})
 		if got.Action != permission.ActionDeny || got.MatchArgument != "tmp/obsolete.txt" {
 			t.Fatalf("decision = %#v, want delete-rule denial of tmp/obsolete.txt", got)
 		}
@@ -142,7 +142,7 @@ delete:
 "*": allow
 `)
 		ruleset := permission.ParsePermission(&node)
-		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, deletePatch)
+		got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, deletePatch, permission.PathScope{})
 		if got.Action != permission.ActionAllow {
 			t.Fatalf("action = %q, want %q (wildcard allow must not be escalated)", got.Action, permission.ActionAllow)
 		}
@@ -155,7 +155,7 @@ apply_patch: ask
 delete: allow
 `)
 		ruleset := permission.ParsePermission(&node)
-		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, deletePatch)
+		got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, deletePatch, permission.PathScope{})
 		if got.Action != permission.ActionAsk {
 			t.Fatalf("action = %q, want %q (stricter action wins)", got.Action, permission.ActionAsk)
 		}
@@ -172,7 +172,7 @@ write:
 		ruleset := permission.ParsePermission(&node)
 		args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: generated/client.go\n+package generated\n*** End Patch"}`)
 
-		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+		got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, args, permission.PathScope{})
 		if got.Action != permission.ActionAsk || got.MatchArgument != "generated/client.go" {
 			t.Fatalf("decision = %#v, want write-rule approval", got)
 		}
@@ -187,7 +187,7 @@ delete:
 		ruleset := permission.ParsePermission(&node)
 		args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: protected/key.txt\n*** Move to: archive/key.txt\n@@\n-secret\n+archived\n*** End Patch"}`)
 
-		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+		got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, args, permission.PathScope{})
 		if got.Action != permission.ActionDeny || got.MatchArgument != "protected/key.txt" {
 			t.Fatalf("decision = %#v, want delete-rule denial of move source", got)
 		}
@@ -202,7 +202,7 @@ write:
 		ruleset := permission.ParsePermission(&node)
 		args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: src/key.txt\n*** Move to: protected/key.txt\n@@\n-secret\n+archived\n*** End Patch"}`)
 
-		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+		got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, args, permission.PathScope{})
 		if got.Action != permission.ActionAsk || got.MatchArgument != "protected/key.txt" {
 			t.Fatalf("decision = %#v, want write-rule approval for move target", got)
 		}
@@ -220,7 +220,7 @@ delete:
 		ruleset := permission.ParsePermission(&node)
 		args := json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: plans/current.md\n*** Move to: plans/archive/old.md\n@@\n-old\n+archived\n*** Add File: plans/current.md\n+new\n*** End Patch"}`)
 
-		got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+		got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, args, permission.PathScope{})
 		if got.Action != permission.ActionAsk {
 			t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 		}
@@ -240,7 +240,7 @@ glob:
 	ruleset := permission.ParsePermission(&node)
 	args := json.RawMessage(`{"patterns":["allowed/**","secret/**"]}`)
 
-	got := evaluateToolPermission(ruleset, "glob", args)
+	got := evaluateToolPermissionInDir(ruleset, "glob", args, permission.PathScope{})
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -259,7 +259,7 @@ glob:
 	ruleset := permission.ParsePermission(&node)
 	args := json.RawMessage(`{"patterns":["allowed/**","ask/**"]}`)
 
-	got := evaluateToolPermission(ruleset, "glob", args)
+	got := evaluateToolPermissionInDir(ruleset, "glob", args, permission.PathScope{})
 	if got.Action != permission.ActionAsk {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 	}
@@ -281,7 +281,7 @@ glob:
 	ruleset := permission.ParsePermission(&node)
 	args := json.RawMessage(`{"patterns":["**/*.go","**/*.md"]}`)
 
-	got := evaluateToolPermission(ruleset, "glob", args)
+	got := evaluateToolPermissionInDir(ruleset, "glob", args, permission.PathScope{})
 	if got.Action != permission.ActionAllow {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAllow)
 	}
@@ -298,8 +298,8 @@ glob:
 	arrayArgs := json.RawMessage(`{"patterns":["secret/**"]}`)
 	scalarArgs := json.RawMessage(`{"patterns":"secret/**"}`)
 
-	arrayGot := evaluateToolPermission(ruleset, "glob", arrayArgs)
-	scalarGot := evaluateToolPermission(ruleset, "glob", scalarArgs)
+	arrayGot := evaluateToolPermissionInDir(ruleset, "glob", arrayArgs, permission.PathScope{})
+	scalarGot := evaluateToolPermissionInDir(ruleset, "glob", scalarArgs, permission.PathScope{})
 
 	if arrayGot.Action != permission.ActionDeny {
 		t.Fatalf("array action = %q, want %q", arrayGot.Action, permission.ActionDeny)
@@ -324,7 +324,7 @@ shell:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `cd build && rm out.txt`)
 
-	got := evaluateToolPermission(ruleset, "shell", args)
+	got := evaluateToolPermissionInDir(ruleset, "shell", args, permission.PathScope{})
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -343,7 +343,7 @@ shell:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `git status && pwd`)
 
-	got := evaluateToolPermission(ruleset, "shell", args)
+	got := evaluateToolPermissionInDir(ruleset, "shell", args, permission.PathScope{})
 	if got.Action != permission.ActionAsk {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 	}
@@ -375,7 +375,7 @@ shell:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `git reset HEAD^ && git add CHANGELOG.md && git commit -m fix`)
 
-	got := evaluateToolPermission(ruleset, "shell", args)
+	got := evaluateToolPermissionInDir(ruleset, "shell", args, permission.PathScope{})
 	if got.Action != permission.ActionAsk {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 	}
@@ -397,7 +397,7 @@ shell:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `git status && git diff --stat`)
 
-	got := evaluateToolPermission(ruleset, "shell", args)
+	got := evaluateToolPermissionInDir(ruleset, "shell", args, permission.PathScope{})
 	if got.Action != permission.ActionAllow {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAllow)
 	}
@@ -423,7 +423,7 @@ shell:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `cd build && rm out.txt`)
 
-	got := evaluateToolPermission(ruleset, "shell", args)
+	got := evaluateToolPermissionInDir(ruleset, "shell", args, permission.PathScope{})
 	if got.Action != permission.ActionAllow {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAllow)
 	}
@@ -444,7 +444,7 @@ shell:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `FOO=bar rm out.txt`)
 
-	got := evaluateToolPermission(ruleset, "shell", args)
+	got := evaluateToolPermissionInDir(ruleset, "shell", args, permission.PathScope{})
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -463,7 +463,7 @@ shell:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `echo hi &&`)
 
-	got := evaluateToolPermission(ruleset, "shell", args)
+	got := evaluateToolPermissionInDir(ruleset, "shell", args, permission.PathScope{})
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -485,7 +485,7 @@ shell:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `git status; "`)
 
-	got := evaluateToolPermission(ruleset, "shell", args)
+	got := evaluateToolPermissionInDir(ruleset, "shell", args, permission.PathScope{})
 	if got.Action != permission.ActionAsk {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 	}
@@ -509,7 +509,7 @@ shell:
 	ruleset := permission.ParsePermission(&node)
 	args := mustBashPermissionArgs(t, `echo hi &&`)
 
-	got := evaluateToolPermission(ruleset, "shell", args)
+	got := evaluateToolPermissionInDir(ruleset, "shell", args, permission.PathScope{})
 	if got.Action != permission.ActionAsk {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAsk)
 	}
@@ -527,7 +527,7 @@ cancel: allow
 	ruleset := permission.ParsePermission(&node)
 	args := mustCancelPermissionArgs(t, "adhoc-1")
 
-	got := evaluateToolPermission(ruleset, "cancel", args)
+	got := evaluateToolPermissionInDir(ruleset, "cancel", args, permission.PathScope{})
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -541,7 +541,7 @@ web_fetch:
 `)
 	ruleset := permission.ParsePermission(&node)
 
-	got := evaluateToolPermission(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, "http://localhost:8000/docs/index.html"))
+	got := evaluateToolPermissionInDir(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, "http://localhost:8000/docs/index.html"), permission.PathScope{})
 	if got.Action != permission.ActionDeny {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionDeny)
 	}
@@ -549,7 +549,7 @@ web_fetch:
 		t.Fatalf("match argument = %q", got.MatchArgument)
 	}
 
-	got = evaluateToolPermission(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, "http://localhost:9000/docs/index.html"))
+	got = evaluateToolPermissionInDir(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, "http://localhost:9000/docs/index.html"), permission.PathScope{})
 	if got.Action != permission.ActionAllow {
 		t.Fatalf("action = %q, want %q", got.Action, permission.ActionAllow)
 	}
@@ -620,7 +620,7 @@ apply_patch:
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := evaluateToolPermission(ruleset, tools.NameApplyPatch, args)
+			got := evaluateToolPermissionInDir(ruleset, tools.NameApplyPatch, args, permission.PathScope{})
 			if got.Action != permission.ActionDeny || got.MatchArgument != "secret/no.txt" {
 				t.Fatalf("decision = %#v, want cleaned secret target denial", got)
 			}

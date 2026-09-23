@@ -125,7 +125,7 @@ func TestRunningWorkerActivityHeartbeatClearsSuspectedStall(t *testing.T) {
 	// that same refresh before rendering.
 	sub.runtimeState.stateChangedAt = time.Now().Add(-coordinationSnapshotStallAfter - time.Minute)
 	a.updateSubAgentStallMarkers()
-	block := a.buildCoordinationSnapshotOverlay()
+	block := a.buildCoordinationSnapshotOverlayForRequest(nil)
 	if !strings.Contains(block, "suspected_stall: running with no recent state/progress update") {
 		t.Fatalf("stale-running worker not flagged before heartbeat refresh:\n%s", block)
 	}
@@ -137,7 +137,7 @@ func TestRunningWorkerActivityHeartbeatClearsSuspectedStall(t *testing.T) {
 		sub.markActivity()
 	}
 	a.updateSubAgentStallMarkers()
-	block = a.buildCoordinationSnapshotOverlay()
+	block = a.buildCoordinationSnapshotOverlayForRequest(nil)
 	if strings.Contains(block, "suspected_stall:") {
 		t.Fatalf("busy running worker flagged as suspected_stall after heartbeat refresh:\n%s", block)
 	}

@@ -158,10 +158,6 @@ func ensureDirectoryPath(path string, info os.FileInfo) error {
 	return nil
 }
 
-func resolveExistingToolPath(path string, kind PathTargetKind, action string) (string, os.FileInfo, error) {
-	return resolveExistingToolPathInDir(path, "", kind, action)
-}
-
 func resolveExistingToolPathInDir(path, baseDir string, kind PathTargetKind, action string) (string, os.FileInfo, error) {
 	resolvedPath, err := resolveToolPathInDir(path, baseDir)
 	if err != nil {

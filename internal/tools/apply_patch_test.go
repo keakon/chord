@@ -1215,7 +1215,7 @@ func TestApplyPatchAmbiguousCandidatesSkipClosest(t *testing.T) {
 	// candidates the hunk is ambiguous, so the single closest-match line must
 	// not be emitted (it would masquerade as the unique suggestion).
 	fileLines := []string{"foo bar", "foobar"}
-	err := applyPatchHunkNotFoundError(fileLines, []string{"foo bar", "unrelated"}, 0, 0, 1, false, []int{0, 1})
+	err := applyPatchHunkNotFoundErrorWithHints(fileLines, []string{"foo bar", "unrelated"}, 0, 0, 1, false, []int{0, 1}, nil, false)
 	msg := err.Error()
 	if !strings.Contains(msg, "ambiguous") {
 		t.Fatalf("error = %q, want the ambiguity note", msg)
@@ -1226,7 +1226,7 @@ func TestApplyPatchAmbiguousCandidatesSkipClosest(t *testing.T) {
 
 	// Sanity: a single candidate is unambiguous and the closest path still
 	// works when the hunk line is genuinely close to a file line.
-	err = applyPatchHunkNotFoundError(fileLines, []string{"foobqr"}, 0, 0, 1, false, []int{0})
+	err = applyPatchHunkNotFoundErrorWithHints(fileLines, []string{"foobqr"}, 0, 0, 1, false, []int{0}, nil, false)
 	msg = err.Error()
 	if !strings.Contains(msg, "closest file line") {
 		t.Fatalf("error = %q, want closest-match for a unique candidate", msg)

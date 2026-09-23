@@ -315,12 +315,6 @@ func RemoveOAuthStateRecords(path string, remove func(provider, stateKey string,
 	return state, removed, nil
 }
 
-func RemoveInvalidOAuthStateRecords(path string) (AuthStateFile, []RemovedOAuthStateEntry, error) {
-	return RemoveOAuthStateRecords(path, func(_ string, _ string, record OAuthStateRecord) bool {
-		return !record.Status.IsValid()
-	})
-}
-
 func normalizeAuthStateFile(raw AuthStateFile) AuthStateFile {
 	state := make(AuthStateFile)
 	for provider, entries := range raw {

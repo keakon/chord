@@ -103,15 +103,6 @@ func isRelevantCoordinationTask(rec *DurableTaskRecord, currentTurn uint64) bool
 	return false
 }
 
-// buildCoordinationSnapshotOverlay formats the relevant task records without a
-// request context (no mailbox-dedupe input, stall markers not refreshed here).
-// It exists for callers that render the snapshot outside request assembly
-// (tests); the production request path uses
-// buildCoordinationSnapshotOverlayForRequest.
-func (a *MainAgent) buildCoordinationSnapshotOverlay() string {
-	return a.buildCoordinationSnapshotOverlayForRequest(nil)
-}
-
 // buildCoordinationSnapshotOverlayForRequest formats the relevant task records
 // for the request being assembled. It is deliberately side-effect free: stall
 // markers are refreshed by the caller at the request-dispatch boundary
@@ -293,7 +284,8 @@ func formatWriteScope(scope tools.WriteScope) string {
 // heartbeat. It is the only writer of that marker and is invoked at the main
 // request-dispatch boundary (buildTurnOverlayMessages) so the coordination
 // snapshot that reads the marker for relevance and rendering always sees a
-// fresh evaluation; buildCoordinationSnapshotOverlay itself stays read-only.
+// fresh evaluation; buildCoordinationSnapshotOverlayForRequest itself stays
+// read-only.
 func (a *MainAgent) updateSubAgentStallMarkers() {
 	if a == nil {
 		return

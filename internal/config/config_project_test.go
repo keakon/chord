@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-func TestLoadConfigOverrideFromPathDoesNotApplyDefaults(t *testing.T) {
+func TestMergeProjectConfigDoesNotApplyDefaults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "project.yaml")
 	writeTestFile(t, path, "commands:\n  /review: summarize changes\n")
 
-	cfg, err := LoadConfigOverrideFromPath(path)
+	cfg, _, err := MergeProjectConfig(DefaultConfig(), path)
 	if err != nil {
-		t.Fatalf("LoadConfigOverrideFromPath: %v", err)
+		t.Fatalf("MergeProjectConfig: %v", err)
 	}
 	if cfg.Context.Compaction.Profile != "" {
 		t.Fatalf("project override should not inherit default compaction profile, got %q", cfg.Context.Compaction.Profile)

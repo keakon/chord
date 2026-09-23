@@ -670,10 +670,6 @@ func renderAssistantMarkdownContent(content, codeSample string, width, continuat
 	return out, synthetic, softWraps
 }
 
-func assistantMarkdownRenderWidth(content string, innerWidth int) int {
-	return markdownRenderWidthWithTable(containsMarkdownTable(content), innerWidth)
-}
-
 func markdownRenderWidthWithTable(hasTable bool, innerWidth int) int {
 	contentWidth := max(innerWidth-2, 10)
 	limit := maxProseWidth

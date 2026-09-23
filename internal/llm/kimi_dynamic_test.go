@@ -86,7 +86,7 @@ func TestConvertMessagesToOpenAIRendersSystemToolsMessage(t *testing.T) {
 			InputSchema: map[string]any{"type": "object"},
 		}}),
 	}
-	converted := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, messages)
+	converted := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, messages, openAIConvertOptions{})
 	if len(converted) != 2 || converted[1].Role != "system" || len(converted[1].Tools) != 1 {
 		t.Fatalf("converted dynamic tools = %#v", converted)
 	}
@@ -111,7 +111,7 @@ func TestConvertMessagesToOpenAIKeepsNullContentOnToolCallMessages(t *testing.T)
 		{Role: message.RoleUser, Content: "hello"},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: "lookup", Args: json.RawMessage(`{}`)}}},
 	}
-	converted := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, messages)
+	converted := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, messages, openAIConvertOptions{})
 	if len(converted) != 2 || len(converted[1].ToolCalls) != 1 {
 		t.Fatalf("converted messages = %#v", converted)
 	}

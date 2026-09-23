@@ -88,9 +88,9 @@ func TestParseResponsesSSE_SeparatesFlattenedSummaryHeadings(t *testing.T) {
 		`data: {"type":"response.completed","response":{"id":"resp_summary","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}}`,
 	}, "\n\n") + "\n\n"
 
-	resp, err := parseResponsesSSE(strings.NewReader(raw), nil, nil)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(strings.NewReader(raw), nil, nil, nil, "", false)
 	if err != nil {
-		t.Fatalf("parseResponsesSSE: %v", err)
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
 	if len(resp.ThinkingBlocks) != 1 {
 		t.Fatalf("ThinkingBlocks = %+v, want one block", resp.ThinkingBlocks)

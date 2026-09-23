@@ -37,7 +37,7 @@ func TestLifecycleSweepCandidateStaysAliveForStrandedOwnedTerminalMailbox(t *tes
 	seedTerminalOwnerAndLateChild(a, ownerInstanceID, ownerTaskID, childInstanceID, childTaskID)
 	a.enqueueOwnedSubAgentMailbox(lateChildCompletion(ownerInstanceID, ownerTaskID, childInstanceID, childTaskID, messageID))
 
-	if a.hasWaitingMainExpiryCandidates() {
+	if a.waitingMainExpiryCandidatesAmong(a.subs.snapshotSubAgents()) {
 		t.Fatal("terminal task records must not be waiting_main expiry candidates")
 	}
 	if a.hasActiveSubAgentWork() {

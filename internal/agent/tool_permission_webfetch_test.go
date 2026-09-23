@@ -29,7 +29,7 @@ web_fetch:
 		{"http://public.example:7000/", permission.ActionAllow},
 	}
 	for _, tc := range cases {
-		got := evaluateToolPermission(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, tc.url))
+		got := evaluateToolPermissionInDir(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, tc.url), permission.PathScope{})
 		if got.Action != tc.want {
 			t.Fatalf("web_fetch %q action = %q, want %q", tc.url, got.Action, tc.want)
 		}
@@ -48,10 +48,10 @@ web_fetch:
 `)
 	ruleset := permission.ParsePermission(&node)
 
-	if got := evaluateToolPermission(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, "http://localhost:8000/admin")); got.Action != permission.ActionAllow {
+	if got := evaluateToolPermissionInDir(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, "http://localhost:8000/admin"), permission.PathScope{}); got.Action != permission.ActionAllow {
 		t.Fatalf("unsupported path rule should not match, got %q", got.Action)
 	}
-	if got := evaluateToolPermission(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, "http://localhost:9000/admin")); got.Action != permission.ActionAllow {
+	if got := evaluateToolPermissionInDir(ruleset, "web_fetch", mustWebFetchPermissionArgs(t, "http://localhost:9000/admin"), permission.PathScope{}); got.Action != permission.ActionAllow {
 		t.Fatalf("non-matching path glob should allow, got %q", got.Action)
 	}
 }

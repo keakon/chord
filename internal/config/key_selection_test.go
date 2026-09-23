@@ -51,12 +51,12 @@ func TestLoadConfigFromPathMalformedYAMLErrors(t *testing.T) {
 	}
 }
 
-func TestLoadConfigOverrideFromPathMalformedYAMLErrors(t *testing.T) {
+func TestMergeProjectConfigMalformedOverrideErrors(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "project.yaml")
 	if err := os.WriteFile(path, []byte("commands: [\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if _, err := LoadConfigOverrideFromPath(path); err == nil {
+	if _, _, err := MergeProjectConfig(DefaultConfig(), path); err == nil {
 		t.Fatal("malformed override config must fail to load")
 	}
 }

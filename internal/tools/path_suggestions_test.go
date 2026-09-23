@@ -122,7 +122,7 @@ func TestSuggestWhitespacePathRepairHandlesVariousSpacePositions(t *testing.T) {
 		"~/alp ha/beta/file.txt", // space inside a token
 	}
 	for _, broken := range cases {
-		got, ok := suggestWhitespacePathRepair(broken, PathTargetRegularFile)
+		got, ok := suggestWhitespacePathRepairInDir(broken, "", PathTargetRegularFile)
 		if !ok {
 			t.Errorf("%q: want repair, got none", broken)
 			continue
@@ -138,11 +138,11 @@ func TestSuggestWhitespacePathRepairNoMatchWhenRepairedAbsent(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	// No space and no file: nothing to repair.
-	if _, ok := suggestWhitespacePathRepair("~/alpha/beta/file.txt", PathTargetRegularFile); ok {
+	if _, ok := suggestWhitespacePathRepairInDir("~/alpha/beta/file.txt", "", PathTargetRegularFile); ok {
 		t.Fatal("want no repair for path without spaces")
 	}
 	// Space present but the de-spaced path does not exist either: no false match.
-	if got, ok := suggestWhitespacePathRepair("~/alp ha/beta/file.txt", PathTargetRegularFile); ok {
+	if got, ok := suggestWhitespacePathRepairInDir("~/alp ha/beta/file.txt", "", PathTargetRegularFile); ok {
 		t.Fatalf("want no repair when repaired path is absent, got %q", got)
 	}
 	// A legitimately spaced path that exists as typed is never reached by repair
@@ -156,7 +156,7 @@ func TestSuggestWhitespacePathRepairNoMatchWhenRepairedAbsent(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	// Removing the space from the legitimate component yields a non-existent path.
-	if got, ok := suggestWhitespacePathRepair("~/withspace/file.txt", PathTargetRegularFile); ok {
+	if got, ok := suggestWhitespacePathRepairInDir("~/withspace/file.txt", "", PathTargetRegularFile); ok {
 		t.Fatalf("want no repair to non-existent de-spaced path, got %q", got)
 	}
 }
@@ -231,7 +231,7 @@ func TestPathSuggestionsFindsDirectoryTypoWithinBoundedAncestor(t *testing.T) {
 	}
 
 	missingPath := filepath.Join(dir, "internal", "lmm", "responses.go")
-	got := suggestExistingToolPathsWithOptions(missingPath, PathTargetRegularFile, pathSuggestionOptions{
+	got := suggestExistingToolPathsWithOptionsInDir(missingPath, "", PathTargetRegularFile, pathSuggestionOptions{
 		Timeout:        time.Second,
 		MaxVisited:     100,
 		MaxCandidates:  100,
@@ -239,7 +239,7 @@ func TestPathSuggestionsFindsDirectoryTypoWithinBoundedAncestor(t *testing.T) {
 		MinScore:       pathSuggestionMinScore,
 	})
 	if len(got) == 0 || got[0] != filepath.ToSlash(filepath.Join("~", "proj", "internal", "llm", "responses.go")) {
-		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want first ~/proj/internal/llm/responses.go", got)
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want first ~/proj/internal/llm/responses.go", got)
 	}
 }
 
@@ -273,7 +273,7 @@ func TestPathSuggestionsFindsTopLevelRelativeTypoFromProjectRoot(t *testing.T) {
 		}
 	}()
 
-	got := suggestExistingToolPathsWithOptions("internl/llm/responses.go", PathTargetRegularFile, pathSuggestionOptions{
+	got := suggestExistingToolPathsWithOptionsInDir("internl/llm/responses.go", "", PathTargetRegularFile, pathSuggestionOptions{
 		Timeout:        time.Second,
 		MaxVisited:     100,
 		MaxCandidates:  100,
@@ -281,7 +281,7 @@ func TestPathSuggestionsFindsTopLevelRelativeTypoFromProjectRoot(t *testing.T) {
 		MinScore:       pathSuggestionMinScore,
 	})
 	if len(got) == 0 || got[0] != filepath.Join("internal", "llm", "responses.go") {
-		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want relative internal/llm/responses.go first", got)
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want relative internal/llm/responses.go first", got)
 	}
 }
 
@@ -340,7 +340,7 @@ func TestPathSuggestionsDoNotWalkPlainCurrentDirectory(t *testing.T) {
 		}
 	}()
 
-	got := suggestExistingToolPathsWithOptions("internl/llm/responses.go", PathTargetRegularFile, pathSuggestionOptions{
+	got := suggestExistingToolPathsWithOptionsInDir("internl/llm/responses.go", "", PathTargetRegularFile, pathSuggestionOptions{
 		Timeout:        time.Second,
 		MaxVisited:     100,
 		MaxCandidates:  100,
@@ -348,7 +348,7 @@ func TestPathSuggestionsDoNotWalkPlainCurrentDirectory(t *testing.T) {
 		MinScore:       pathSuggestionMinScore,
 	})
 	if len(got) != 0 {
-		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want no scan from unmarked cwd", got)
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want no scan from unmarked cwd", got)
 	}
 }
 
@@ -363,7 +363,7 @@ func TestPathSuggestionsSkipIgnoredDirectories(t *testing.T) {
 	}
 
 	missingPath := filepath.Join(dir, "internal", "llm", "responses.go")
-	got := suggestExistingToolPathsWithOptions(missingPath, PathTargetRegularFile, pathSuggestionOptions{
+	got := suggestExistingToolPathsWithOptionsInDir(missingPath, "", PathTargetRegularFile, pathSuggestionOptions{
 		Timeout:        time.Second,
 		MaxVisited:     100,
 		MaxCandidates:  100,
@@ -371,7 +371,7 @@ func TestPathSuggestionsSkipIgnoredDirectories(t *testing.T) {
 		MinScore:       pathSuggestionMinScore,
 	})
 	if len(got) != 0 {
-		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want no ignored-dir suggestions", got)
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want no ignored-dir suggestions", got)
 	}
 }
 
@@ -381,7 +381,7 @@ func TestPathSuggestionsOmitLowConfidenceCandidates(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	got := suggestExistingToolPathsWithOptions(filepath.Join(dir, "responses.go"), PathTargetRegularFile, pathSuggestionOptions{
+	got := suggestExistingToolPathsWithOptionsInDir(filepath.Join(dir, "responses.go"), "", PathTargetRegularFile, pathSuggestionOptions{
 		Timeout:        time.Second,
 		MaxVisited:     100,
 		MaxCandidates:  100,
@@ -389,7 +389,7 @@ func TestPathSuggestionsOmitLowConfidenceCandidates(t *testing.T) {
 		MinScore:       pathSuggestionMinScore,
 	})
 	if len(got) != 0 {
-		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want no low-confidence suggestions", got)
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want no low-confidence suggestions", got)
 	}
 }
 
@@ -399,7 +399,7 @@ func TestPathSuggestionsRejectUnrelatedSameExtensionSibling(t *testing.T) {
 		t.Fatalf("WriteFile keymap.go: %v", err)
 	}
 
-	got := suggestExistingToolPathsWithOptions(filepath.Join(dir, "format.go"), PathTargetRegularFile, pathSuggestionOptions{
+	got := suggestExistingToolPathsWithOptionsInDir(filepath.Join(dir, "format.go"), "", PathTargetRegularFile, pathSuggestionOptions{
 		Timeout:        time.Second,
 		MaxVisited:     100,
 		MaxCandidates:  100,
@@ -407,7 +407,7 @@ func TestPathSuggestionsRejectUnrelatedSameExtensionSibling(t *testing.T) {
 		MinScore:       pathSuggestionMinScore,
 	})
 	if len(got) != 0 {
-		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want no unrelated same-extension suggestion", got)
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want no unrelated same-extension suggestion", got)
 	}
 }
 
@@ -499,7 +499,7 @@ func TestPathSuggestionsRejectDistantSimilarBasename(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	got := suggestExistingToolPathsWithOptions(filepath.Join(dir, "a", "b", "data.txt"), PathTargetRegularFile, pathSuggestionOptions{
+	got := suggestExistingToolPathsWithOptionsInDir(filepath.Join(dir, "a", "b", "data.txt"), "", PathTargetRegularFile, pathSuggestionOptions{
 		Timeout:        time.Second,
 		MaxVisited:     100,
 		MaxCandidates:  100,
@@ -507,7 +507,7 @@ func TestPathSuggestionsRejectDistantSimilarBasename(t *testing.T) {
 		MinScore:       pathSuggestionMinScore,
 	})
 	if len(got) != 0 {
-		t.Fatalf("suggestExistingToolPathsWithOptions() = %#v, want no distant basename-only suggestions", got)
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() = %#v, want no distant basename-only suggestions", got)
 	}
 }
 
@@ -524,7 +524,7 @@ func TestPathSuggestionsRespectCandidateLimit(t *testing.T) {
 		}
 	}
 
-	got := suggestExistingToolPathsWithOptions(filepath.Join(dir, "responses.go"), PathTargetRegularFile, pathSuggestionOptions{
+	got := suggestExistingToolPathsWithOptionsInDir(filepath.Join(dir, "responses.go"), "", PathTargetRegularFile, pathSuggestionOptions{
 		Timeout:        time.Second,
 		MaxVisited:     100,
 		MaxCandidates:  100,
@@ -532,7 +532,7 @@ func TestPathSuggestionsRespectCandidateLimit(t *testing.T) {
 		MinScore:       pathSuggestionMinScore,
 	})
 	if len(got) != 2 {
-		t.Fatalf("suggestExistingToolPathsWithOptions() len = %d, want 2; got %#v", len(got), got)
+		t.Fatalf("suggestExistingToolPathsWithOptionsInDir() len = %d, want 2; got %#v", len(got), got)
 	}
 }
 

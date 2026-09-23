@@ -24,14 +24,6 @@ func computeFileHash(path string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func buildReadFileState(path string) *message.ToolFileState {
-	state := trackedExistingFileState(path)
-	if state == nil {
-		return nil
-	}
-	return &message.ToolFileState{Reads: []message.TrackedFileState{*state}}
-}
-
 func buildObservedReadFileState(observation tools.ReadObservation) *message.ToolFileState {
 	path := strings.TrimSpace(observation.Path)
 	hash := strings.TrimSpace(observation.SHA256)

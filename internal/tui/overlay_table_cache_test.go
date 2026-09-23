@@ -13,23 +13,13 @@ func benchmarkOverlayTable() *OverlayTable {
 	return NewOverlayTable([]TableColumn{{Title: "Name"}, {Title: "Value", Align: 1}, {Title: "Detail"}}, items, 8)
 }
 
-func TestOverlayTableRenderCacheInvalidatesOnCursorChange(t *testing.T) {
+func TestOverlayTableRenderCacheInvalidatesOnShowSelectionChange(t *testing.T) {
 	tbl := benchmarkOverlayTable()
 	first := tbl.Render(48)
-	tbl.CursorDown()
+	tbl.SetShowSelection(false)
 	second := tbl.Render(48)
 	if first == second {
-		t.Fatal("Render() did not change after cursor moved")
-	}
-}
-
-func TestOverlayTableRenderCacheInvalidatesOnSetItems(t *testing.T) {
-	tbl := benchmarkOverlayTable()
-	first := tbl.Render(48)
-	tbl.SetItems([]OverlayTableItem{{Label: "beta", Cells: []string{"beta", "2", "changed"}}})
-	second := tbl.Render(48)
-	if first == second {
-		t.Fatal("Render() did not change after items changed")
+		t.Fatal("Render() did not change after the selection gutter was toggled")
 	}
 }
 
@@ -45,8 +35,10 @@ func BenchmarkOverlayTableRenderCacheHit(b *testing.B) {
 func BenchmarkOverlayTableRenderCacheMiss(b *testing.B) {
 	tbl := benchmarkOverlayTable()
 	b.ReportAllocs()
+	showSelection := true
 	for b.Loop() {
-		tbl.CursorDown()
+		showSelection = !showSelection
+		tbl.SetShowSelection(showSelection)
 		_ = tbl.Render(48)
 	}
 }

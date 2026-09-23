@@ -303,17 +303,6 @@ func (c *Client) startCodexWarmup() {
 	c.mu.Unlock()
 }
 
-func (c *Client) routingSnapshot() (generation uint64, changed <-chan struct{}) {
-	if c == nil {
-		return 0, nil
-	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	changed = c.routingChangedCh
-	generation = c.routingGeneration.Load()
-	return
-}
-
 func (c *Client) routingInvalidated(startGeneration uint64) (uint64, bool) {
 	if c == nil {
 		return 0, false
@@ -1464,10 +1453,6 @@ func reorderFallbacksByScore(fallbacks []FallbackModel, score func(modelRef stri
 		start = end
 	}
 	return out
-}
-
-func normalizeMessagesForPoolTarget(msgs []message.Message, target FallbackModel, tuning RequestTuning) ([]message.Message, modelcompat.NormalizeReport) {
-	return normalizeMessagesForPoolTargetWithOptions(msgs, target, tuning, modelcompat.ReplayCompatNative)
 }
 
 // normalizeMessagesForPoolTargetWithOptions normalizes messages for a pool

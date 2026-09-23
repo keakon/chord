@@ -17,19 +17,13 @@ type DiffSummary struct {
 	Removed int
 }
 
-// GenerateUnifiedDiff produces a unified-diff string comparing oldContent to
-// newContent. filename is used only in the header lines. Returns an empty
-// string when there are no differences. The edit script is computed on the
-// middle region after stripping common prefix/suffix lines so typical small
-// edits in large files avoid a full-file LCS. Very long diff output is
-// rendered in full: consumers rely on the TUI viewport spill/fold machinery
-// rather than content loss for very large diffs. Diff output is never truncated.
-func GenerateUnifiedDiff(oldContent, newContent, filename string) string {
-	return GenerateUnifiedDiffSummary(oldContent, newContent, filename).Text
-}
-
 // GenerateUnifiedDiffSummary returns the rendered unified diff plus the exact
-// full add/remove counts computed from the full edit script.
+// full add/remove counts computed from the full edit script. filename is used
+// only in the header lines. The edit script is computed on the middle region
+// after stripping common prefix/suffix lines so typical small edits in large
+// files avoid a full-file LCS. Very long diff output is rendered in full:
+// consumers rely on the TUI viewport spill/fold machinery rather than content
+// loss for very large diffs. Diff output is never truncated.
 func GenerateUnifiedDiffSummary(oldContent, newContent, filename string) DiffSummary {
 	return generateMultiFileUnifiedDiffSummary([]unifiedFileDiff{{
 		OldContent:  oldContent,

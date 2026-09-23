@@ -156,46 +156,6 @@ func TestMerge_MDOverridesYAML(t *testing.T) {
 	}
 }
 
-func TestParseInput(t *testing.T) {
-	cases := []struct {
-		input    string
-		wantName string
-		wantArgs string
-	}{
-		{"/review", "review", ""},
-		{"/review fix nil", "review", "fix nil"},
-		{"/foo/bar aaa bbb", "foo/bar", "aaa bbb"},
-		{"not a slash", "", ""},
-		{"/reviewer", "reviewer", ""},
-	}
-	for _, c := range cases {
-		name, args := ParseInput(c.input)
-		if name != c.wantName || args != c.wantArgs {
-			t.Errorf("ParseInput(%q) = (%q, %q), want (%q, %q)",
-				c.input, name, args, c.wantName, c.wantArgs)
-		}
-	}
-}
-
-func TestExpand(t *testing.T) {
-	cases := []struct {
-		tmpl string
-		args string
-		want string
-	}{
-		{"do $ARGUMENTS now", "fix nil", "do fix nil now"},
-		{"do $ARGUMENTS now", "", "do  now"},
-		{"no placeholder", "extra args", "no placeholder\n\nextra args"},
-		{"no placeholder", "", "no placeholder"},
-	}
-	for _, c := range cases {
-		got := Expand(c.tmpl, c.args)
-		if got != c.want {
-			t.Errorf("Expand(%q, %q) = %q, want %q", c.tmpl, c.args, got, c.want)
-		}
-	}
-}
-
 func TestLoad_integration(t *testing.T) {
 	projectRoot := t.TempDir()
 	chordHome := t.TempDir()

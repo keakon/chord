@@ -480,10 +480,6 @@ func hunkHasWhitespaceOnlyContext(hunk applyPatchHunk) bool {
 	return false
 }
 
-func applyPatchHunkNotFoundError(fileLines, oldSeq []string, searchStart, index, total int, hunkEndOfFile bool, punctuationCandidates []int) error {
-	return applyPatchHunkNotFoundErrorWithHints(fileLines, oldSeq, searchStart, index, total, hunkEndOfFile, punctuationCandidates, nil, false)
-}
-
 func applyPatchHunkNotFoundErrorWithHints(fileLines, oldSeq []string, searchStart, index, total int, hunkEndOfFile bool, punctuationCandidates, fuzzyCandidates []int, whitespaceOnlyContext bool) error {
 	parts := []string{fmt.Sprintf("hunk not found (%d/%d)", index+1, total)}
 	if whitespaceOnlyContext {
@@ -687,10 +683,10 @@ func applyPatchHunkMismatchLine(fileLines, oldSeq []string, searchStart int, eof
 
 // applyPatchExpectedLineMissing reports whether the first expected line of
 // oldSeq exists anywhere in fileLines under the tolerance normalizer (or as a
-// substring of a longer line, which applyPatchHunkNotFoundError reports
-// separately). The tool matches the on-disk file only — read history is the
-// model's context, not a matching source — so a missing line means the patch
-// is based on stale or invented content and the model should re-read.
+// substring of a longer line, which applyPatchHunkNotFoundErrorWithHints
+// reports separately). The tool matches the on-disk file only — read history
+// is the model's context, not a matching source — so a missing line means the
+// patch is based on stale or invented content and the model should re-read.
 func applyPatchExpectedLineMissing(fileLines, oldSeq []string) bool {
 	if len(oldSeq) == 0 {
 		return false

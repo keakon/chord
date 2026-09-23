@@ -64,7 +64,7 @@ type speculativeFileMutation struct {
 	unobserved bool
 	// staleModTime is the modification time of a stale file, so the drift
 	// reminder can say how recently it changed. Only the single-path wording
-	// names an age — appendBackupNotes switches on the path count and never
+	// names an age — backupNotes switches on the path count and never
 	// reads this in the plural branch, where any one file's time would mislead
 	// about the others.
 	staleModTime time.Time

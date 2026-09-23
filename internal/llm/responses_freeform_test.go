@@ -634,9 +634,9 @@ func TestParseResponsesSSE_CustomToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":1,"item":{"type":"custom_tool_call","id":"ct_1","name":"apply_patch","status":"completed","input":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"}}`,
 			"[DONE]",
 		})
-		resp, err := parseResponsesSSE(stream, nil, nil)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
 		if err != nil {
-			t.Fatalf("parseResponsesSSE: %v", err)
+			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
 		if len(resp.ToolCalls) != 1 {
 			t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
@@ -665,9 +665,9 @@ func TestParseResponsesSSE_CustomToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":2,"item":{"type":"custom_tool_call","id":"ct_x","name":"apply_patch","status":"completed"}}`,
 			"[DONE]",
 		})
-		resp, err := parseResponsesSSE(stream, nil, nil)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
 		if err != nil {
-			t.Fatalf("parseResponsesSSE: %v", err)
+			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
 		if len(resp.ToolCalls) != 1 {
 			t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
@@ -689,9 +689,9 @@ func TestParseResponsesSSE_CustomToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":3,"item":{"type":"custom_tool_call","id":"ct_y","name":"apply_patch","status":"completed","input":"*** Begin Patch\n*** End Patch"}}`,
 			"[DONE]",
 		})
-		resp, err := parseResponsesSSE(stream, nil, nil)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
 		if err != nil {
-			t.Fatalf("parseResponsesSSE: %v", err)
+			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
 		if len(resp.ToolCalls) != 1 {
 			t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
@@ -719,9 +719,9 @@ func TestParseResponsesSSE_CustomToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":1,"item":{"type":"custom_tool_call","id":"ct_1","name":"apply_patch","status":"completed","input":"*** Begin Patch\n*** End Patch"}}`,
 			"[DONE]",
 		})
-		resp, err := parseResponsesSSE(stream, nil, nil)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
 		if err != nil {
-			t.Fatalf("parseResponsesSSE: %v", err)
+			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
 		if len(resp.ToolCalls) != 2 {
 			t.Fatalf("got %d tool calls, want 2", len(resp.ToolCalls))

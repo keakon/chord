@@ -232,7 +232,7 @@ func TestValidReadsNeverReducedRegardlessOfAgeOrVolume(t *testing.T) {
 
 	for _, age := range []int{policy.ReadLikeAgeTurns, 8, 50, 1000} {
 		ctx := newReadReductionContext(largeReadContent(), age)
-		if class := classifyRequestReductionToolOutput(ctx); class != requestReductionNone {
+		if class := classifyRequestReduction(ctx).Class; class != requestReductionNone {
 			t.Fatalf("still-valid read at age %d should be retained, got %q", age, class)
 		}
 	}
@@ -246,7 +246,7 @@ func TestSameBatchReadsShareRetentionDecision(t *testing.T) {
 	var classes []requestReductionClass
 	for range 5 {
 		ctx := newReadReductionContext(largeReadContent(), 6)
-		classes = append(classes, classifyRequestReductionToolOutput(ctx))
+		classes = append(classes, classifyRequestReduction(ctx).Class)
 	}
 	for i, class := range classes {
 		if class != classes[0] {
@@ -277,13 +277,13 @@ func TestClassifyInvalidatedOrSupersededReadReduces(t *testing.T) {
 
 	invalidated := newReadReductionContext(largeReadContent(), policy.ReadLikeAgeTurns)
 	invalidated.ReadInvalidated = true
-	if class := classifyRequestReductionToolOutput(invalidated); class != requestReductionReadLike {
+	if class := classifyRequestReduction(invalidated).Class; class != requestReductionReadLike {
 		t.Fatalf("invalidated read at base age should reduce, got %q", class)
 	}
 
 	superseded := newReadReductionContext(largeReadContent(), policy.ReadLikeAgeTurns)
 	superseded.ReadSuperseded = true
-	if class := classifyRequestReductionToolOutput(superseded); class != requestReductionReadLike {
+	if class := classifyRequestReduction(superseded).Class; class != requestReductionReadLike {
 		t.Fatalf("superseded read at base age should reduce, got %q", class)
 	}
 }

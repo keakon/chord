@@ -26,13 +26,13 @@ func TestAnthropicBetaHeaderDefaultAndThinking(t *testing.T) {
 }
 
 func TestConvertMessagesMarksInterruptedAssistant(t *testing.T) {
-	got := convertMessages([]message.Message{{Role: "assistant", Content: "partial", StopReason: "interrupted"}})
+	got, _ := convertMessagesWithMap([]message.Message{{Role: "assistant", Content: "partial", StopReason: "interrupted"}})
 	if len(got) != 1 || got[0].Role != "assistant" {
-		t.Fatalf("convertMessages() = %#v", got)
+		t.Fatalf("convertMessagesWithMap() = %#v", got)
 	}
 	blocks, ok := got[0].Content.([]anthropicContent)
 	if !ok || len(blocks) != 1 {
-		t.Fatalf("convertMessages() = %#v", got)
+		t.Fatalf("convertMessagesWithMap() = %#v", got)
 	}
 	text := blocks[0].Text
 	if !strings.Contains(text, "partial") || !strings.Contains(text, "interrupted before completion") {
@@ -41,14 +41,14 @@ func TestConvertMessagesMarksInterruptedAssistant(t *testing.T) {
 }
 
 func TestConvertMessagesSkipsEmptyAssistant(t *testing.T) {
-	got := convertMessages([]message.Message{
+	got, _ := convertMessagesWithMap([]message.Message{
 		{Role: "user", Content: "before"},
 		{Role: "assistant", StopReason: "max_tokens"},
 		{Role: "assistant", ThinkingBlocks: []message.ThinkingBlock{{}}, StopReason: "max_tokens"},
 		{Role: "user", Content: "after"},
 	})
 	if len(got) != 1 {
-		t.Fatalf("convertMessages() len = %d, want 1: %#v", len(got), got)
+		t.Fatalf("convertMessagesWithMap() len = %d, want 1: %#v", len(got), got)
 	}
 	if got[0].Role != "user" {
 		t.Fatalf("empty assistant message was not skipped: %#v", got)
@@ -1255,7 +1255,7 @@ func TestAnthropicCompleteStreamReplaysThinkingBlocksInAssistantHistory(t *testi
 }
 
 func TestConvertMessagesReplaysUnsignedThinkingWithoutSignature(t *testing.T) {
-	converted := convertMessages([]message.Message{{
+	converted, _ := convertMessagesWithMap([]message.Message{{
 		Role:           message.RoleAssistant,
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "provider-visible reasoning"}},
 		ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
@@ -1274,7 +1274,7 @@ func TestConvertMessagesReplaysUnsignedThinkingWithoutSignature(t *testing.T) {
 		t.Fatalf("tool block = %#v", blocks[1])
 	}
 
-	convertedNoReplay := convertMessages([]message.Message{{
+	convertedNoReplay, _ := convertMessagesWithMap([]message.Message{{
 		Role:           message.RoleAssistant,
 		ThinkingBlocks: []message.ThinkingBlock{{}},
 		ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},

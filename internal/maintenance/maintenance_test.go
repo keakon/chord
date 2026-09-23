@@ -40,12 +40,6 @@ func TestMaintenanceHelpers(t *testing.T) {
 	if !pathExists(file) || pathExists(filepath.Join(dir, "missing")) {
 		t.Fatal("pathExists returned unexpected result")
 	}
-
-	candidates := []CleanupCandidate{{Path: "z"}, {Path: "a"}, {Path: "m"}}
-	SortCandidates(candidates)
-	if candidates[0].Path != "a" || candidates[2].Path != "z" {
-		t.Fatalf("SortCandidates = %+v", candidates)
-	}
 }
 
 func TestCleanupLogsDryRunAndMissingRoot(t *testing.T) {

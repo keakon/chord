@@ -314,7 +314,7 @@ func TestCodexWSBuildBaselineMatchesStoreItemIDShape(t *testing.T) {
 // TestCodexWSBaselineSignatureMatchesNextTurnConversion feeds one provider
 // output payload through both production paths — the chain-side baseline
 // (responsesOutputToInputItems → codexWSBuildBaseline) and the next turn's
-// message-side conversion (collectResponsesOutput → convertMessages) — and
+// message-side conversion (collectResponsesOutput → convertMessagesWithMap) — and
 // asserts the prefix signatures agree. If these paths ever drift again, the
 // incremental WebSocket reuse silently degrades to full-input resends.
 func TestCodexWSBaselineSignatureMatchesNextTurnConversion(t *testing.T) {

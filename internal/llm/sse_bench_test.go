@@ -94,7 +94,7 @@ func loadFixedCallbackFixtures() []fixedSSEBenchFixture {
 func TestOpenAIFixedSSEParseAllocsGuard(t *testing.T) {
 	var parsed *message.Response
 	allocs := testing.AllocsPerRun(50, func() {
-		resp, err := parseOpenAISSEStream(bytes.NewReader(openAICallbackFixedFixture), nil, nil)
+		resp, err := parseOpenAISSEStreamOptions(bytes.NewReader(openAICallbackFixedFixture), nil, nil, false)
 		if err != nil {
 			t.Fatalf("parse fixed OpenAI SSE: %v", err)
 		}
@@ -160,9 +160,9 @@ func BenchmarkSSEParseWithCallback(b *testing.B) {
 				)
 				switch provider {
 				case "openai":
-					resp, err = parseOpenAISSEStream(reader, cb, nil)
+					resp, err = parseOpenAISSEStreamOptions(reader, cb, nil, false)
 				case "responses", "responses_ws":
-					resp, err = parseResponsesSSE(reader, cb, nil)
+					resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, nil, nil, "", false)
 				default:
 					b.Fatalf("unsupported provider %q", provider)
 				}
@@ -221,9 +221,9 @@ func BenchmarkSSEParseWithCollector(b *testing.B) {
 				)
 				switch provider {
 				case "openai":
-					resp, err = parseOpenAISSEStream(reader, nil, collector)
+					resp, err = parseOpenAISSEStreamOptions(reader, nil, collector, false)
 				case "responses", "responses_ws":
-					resp, err = parseResponsesSSE(reader, nil, collector)
+					resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, collector, nil, "", false)
 				default:
 					b.Fatalf("unsupported provider %q", provider)
 				}
@@ -340,9 +340,10 @@ func parseSSEBenchFixture(fixture sseBenchFixture) (*message.Response, error) {
 	case "anthropic":
 		return parseSSEStream(reader, nil, nil)
 	case "openai":
-		return parseOpenAISSEStream(reader, nil, nil)
+		return parseOpenAISSEStreamOptions(reader, nil, nil, false)
 	case "responses", "responses_ws":
-		return parseResponsesSSE(reader, nil, nil)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false)
+		return resp, err
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", fixture.Provider)
 	}

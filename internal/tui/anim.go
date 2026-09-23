@@ -172,17 +172,6 @@ func ShiftRamp(ramp NeonRamp, offset, width int) NeonRamp {
 // Unified phase helpers
 // ---------------------------------------------------------------------------
 
-// AnimationPhase returns an integer phase index cycling through [0, cycle)
-// with the given period.
-func AnimationPhase(period time.Duration, cycle int) int {
-	if cycle <= 0 || period <= 0 {
-		return 0
-	}
-	ms := time.Now().UnixNano() / int64(time.Millisecond)
-	periodMs := int64(period / time.Millisecond)
-	return int(ms % periodMs * int64(cycle) / periodMs)
-}
-
 // AnimationFloat returns a float64 in [0,1) that cycles with the given period.
 func AnimationFloat(period time.Duration) float64 {
 	if period <= 0 {

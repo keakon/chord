@@ -2,66 +2,27 @@
 # Identity: <import path>.<symbol>. Positions are diagnostics and never stored here.
 # Regenerate: CHORD_DEADCODE_UPDATE=1 scripts/check_deadcode.sh
 # Additions need their own commit with a classification and a reason per entry.
-github.com/keakon/chord/cmd/chord.getDefaultLogger
-github.com/keakon/chord/internal/agent.MainAgent.buildCoordinationSnapshotOverlay
-github.com/keakon/chord/internal/agent.MainAgent.hasWaitingMainExpiryCandidates
-github.com/keakon/chord/internal/agent.appendBackupNotes
-github.com/keakon/chord/internal/agent.buildFileEvidenceView
-github.com/keakon/chord/internal/agent.buildReadFileState
-github.com/keakon/chord/internal/agent.classifyRequestReductionToolOutput
-github.com/keakon/chord/internal/agent.collectSubAgentCheckpointSkillNames
-github.com/keakon/chord/internal/agent.evaluateToolPermission
-github.com/keakon/chord/internal/agent.parseSubAgentCheckpointSkillNames
-github.com/keakon/chord/internal/agent.shellOutputShapeFromCommand
-github.com/keakon/chord/internal/command.Expand
-github.com/keakon/chord/internal/command.ParseInput
-github.com/keakon/chord/internal/config.LoadAuthFromEnv
-github.com/keakon/chord/internal/config.LoadConfigOverrideFromPath
-github.com/keakon/chord/internal/config.RemoveInvalidOAuthStateRecords
+# --- classifications ---
+# public-api: retained intentionally; no live caller today but part of the supported surface.
+# test-helper: cross-package test helper; must live in a non-test file.
+# test-support: helper for unit tests; retained for test builds.
+# platform: reachable on another GOOS/GOARCH; baseline differs per platform.
+# config.SaveAuthConfig: public-api; write side of LoadAuthConfig, exercised by tests.
 github.com/keakon/chord/internal/config.SaveAuthConfig
-github.com/keakon/chord/internal/config.UpsertAgentPermissionRule
-github.com/keakon/chord/internal/hook.NewCommandEngine
-github.com/keakon/chord/internal/llm.Client.routingSnapshot
-github.com/keakon/chord/internal/llm.convertMessages
-github.com/keakon/chord/internal/llm.convertMessagesToOpenAI
-github.com/keakon/chord/internal/llm.normalizeMessagesForPoolTarget
-github.com/keakon/chord/internal/llm.parseOpenAISSEStream
-github.com/keakon/chord/internal/llm.parseResponsesSSE
-github.com/keakon/chord/internal/llm.parseResponsesSSEWithOutputItems
-github.com/keakon/chord/internal/llm.shouldContinueRetry
+# logtest: test-support; testing logger used by unit tests.
 github.com/keakon/chord/internal/logtest.NewLogger
 github.com/keakon/chord/internal/logtest.WithDefault
 github.com/keakon/chord/internal/logtest.nopWriteCloser.Close
-github.com/keakon/chord/internal/maintenance.SortCandidates
+# memory.LoadFailure: public-api; read side of SaveFailure, exercised by tests and diagnostics.
 github.com/keakon/chord/internal/memory.LoadFailure
-github.com/keakon/chord/internal/session.Project
-github.com/keakon/chord/internal/session.ProjectWithLimits
-github.com/keakon/chord/internal/shell.GetShellDescription
+# tools.ExecuteJobForTest / ResetJobRegistryForTest: test-helper; cross-package job control for tests.
 github.com/keakon/chord/internal/tools.ExecuteJobForTest
-github.com/keakon/chord/internal/tools.GenerateUnifiedDiff
-github.com/keakon/chord/internal/tools.HasSkillResourceWarning
-github.com/keakon/chord/internal/tools.ListArtifactFiles
 github.com/keakon/chord/internal/tools.ResetJobRegistryForTest
-github.com/keakon/chord/internal/tools.SanitizeUnknownArgs
-github.com/keakon/chord/internal/tools.applyPatchHunkNotFoundError
-github.com/keakon/chord/internal/tools.fileToolConcurrencyPolicy
-github.com/keakon/chord/internal/tools.resolveExistingToolPath
-github.com/keakon/chord/internal/tools.suggestExistingToolPathsWithOptions
-github.com/keakon/chord/internal/tools.suggestWhitespacePathRepair
-github.com/keakon/chord/internal/tui.AnimationPhase
-github.com/keakon/chord/internal/tui.Model.currentTitleTickerDelay
-github.com/keakon/chord/internal/tui.Model.renderActivity
-github.com/keakon/chord/internal/tui.Model.statusBarDynamicCacheKeyAt
+# tools.ListArtifactFiles: public-api; artifact listing exercised by pipeline tests.
+github.com/keakon/chord/internal/tools.ListArtifactFiles
+# tui.NewModel: public-api; 80x24 convenience over NewModelWithSize, exercised by tests.
 github.com/keakon/chord/internal/tui.NewModel
-github.com/keakon/chord/internal/tui.OverlayTable.CursorAt
-github.com/keakon/chord/internal/tui.OverlayTable.CursorDown
-github.com/keakon/chord/internal/tui.OverlayTable.RenderVersion
-github.com/keakon/chord/internal/tui.OverlayTable.SelectedItem
-github.com/keakon/chord/internal/tui.OverlayTable.SetItems
-github.com/keakon/chord/internal/tui.assistantMarkdownRenderWidth
-github.com/keakon/chord/internal/tui.atMentionFileRefs
-github.com/keakon/chord/internal/tui.atMentionFuzzyMatches
-github.com/keakon/chord/internal/tui.atMentionFuzzyMatchesWithLower
-github.com/keakon/chord/internal/tui.suggestRulePatterns
+# tui/markdownutil.FindStreamingSettledFrontier: public-api; streaming render helper, no live caller today.
 github.com/keakon/chord/internal/tui/markdownutil.FindStreamingSettledFrontier
+# tui/modelref.EnsureRefShowsVariant: public-api; ref formatting helper, no live caller today.
 github.com/keakon/chord/internal/tui/modelref.EnsureRefShowsVariant

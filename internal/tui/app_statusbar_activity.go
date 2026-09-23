@@ -366,10 +366,6 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 	return display
 }
 
-func (m Model) renderActivity(a agent.AgentActivityEvent, maxWidth int) string {
-	return m.renderActivityAt(a, maxWidth, time.Now())
-}
-
 func (m Model) renderActivityAt(a agent.AgentActivityEvent, maxWidth int, now time.Time) string {
 	display := m.buildStatusBarActivityDisplayAt(a, now)
 	icon := display.Icon

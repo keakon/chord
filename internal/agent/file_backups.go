@@ -311,25 +311,22 @@ func formatChangeAge(modTime, runtimeStartedAt time.Time) string {
 	}
 }
 
-// appendBackupNotes reports what happened to a file whose on-disk contents had
-// drifted from the model's last observation. The model and the user see exactly
-// the same text: a backup is best effort, so a claim that one exists must never
-// be made to one audience and withheld from the other. drift carries which kind
-// of drift was detected and, when meaningful, how recently it happened so the
+// backupNotes renders the drift and backup warnings that follow a tool's
+// payload. They are discrete lines rather than one joined string so the runtime
+// can record them beside the clean payload; the UI then never has to split them
+// back out of the combined model-visible text.
+//
+// They report what happened to a file whose on-disk contents had drifted from
+// the model's last observation. The model and the user see exactly the same
+// text: a backup is best effort, so a claim that one exists must never be made
+// to one audience and withheld from the other. drift carries which kind of
+// drift was detected and, when meaningful, how recently it happened so the
 // model can judge whether an external writer is still active.
 //
 // Nothing is appended when a backup could not be created. The absence of the
 // "Backup saved to" line is the honest signal — stating a reason would still be
 // telling the reader a safety net was expected. The failure and its cause are
 // logged locally by the caller.
-func appendBackupNotes(result, toolName string, drift driftReport, outcome fileBackupOutcome) string {
-	return appendNotes(result, backupNotes(toolName, drift, outcome))
-}
-
-// backupNotes renders the drift and backup warnings that follow a tool's
-// payload. They are discrete lines rather than one joined string so the runtime
-// can record them beside the clean payload; the UI then never has to split them
-// back out of the combined model-visible text.
 func backupNotes(toolName string, drift driftReport, outcome fileBackupOutcome) []string {
 	var notes []string
 	if drift.stale {

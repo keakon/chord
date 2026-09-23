@@ -58,15 +58,10 @@ func subAgentCheckpointSkills(s *SubAgent, messages []message.Message) string {
 	return result
 }
 
-// collectSubAgentCheckpointSkillNames returns the skills whose instructions
+// collectSubAgentCheckpointSkillNamesWithOverflow returns the skills whose instructions
 // the subagent currently holds, merged with the names its newest checkpoint
 // already recorded, plus the number dropped by the cap. Only the newest
 // checkpoint is read: it has itself merged everything older.
-func collectSubAgentCheckpointSkillNames(s *SubAgent, messages []message.Message) ([]string, int) {
-	names, omitted, _ := collectSubAgentCheckpointSkillNamesWithOverflow(s, messages)
-	return names, omitted
-}
-
 func collectSubAgentCheckpointSkillNamesWithOverflow(s *SubAgent, messages []message.Message) ([]string, int, []string) {
 	seen := make(map[string]struct{})
 	for _, name := range s.invokedSkillNamesSnapshot() {
@@ -106,15 +101,10 @@ func collectSubAgentCheckpointSkillNamesWithOverflow(s *SubAgent, messages []mes
 	return names, omitted, omittedNames
 }
 
-// parseSubAgentCheckpointSkillNames lifts the recorded names and the carried
+// parseSubAgentCheckpointSkills lifts the recorded names and the carried
 // omission count out of a subagent structured checkpoint. Names are single
 // tokens (optionally `plugin:skill`), and the line's trailing prose is not an
 // entry, so isCheckpointSkillName rejects anything that is not a name.
-func parseSubAgentCheckpointSkillNames(content string) ([]string, int) {
-	names, omitted, _ := parseSubAgentCheckpointSkills(content)
-	return names, omitted
-}
-
 func parseSubAgentCheckpointSkills(content string) ([]string, int, []string) {
 	var value string
 	var carriedNames []string

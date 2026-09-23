@@ -172,25 +172,6 @@ type ProjectedTurn struct {
 	Provenance         ProjectedProvenance   `json:"provenance"`
 }
 
-// Project projects an exported session with the default budget. It is a pure
-// function of its input: the same session always yields byte-identical JSONL.
-func Project(exported *ExportedSession) ([]ProjectedTurn, error) {
-	return ProjectWithLimits(exported, DefaultProjectionLimits())
-}
-
-// ProjectWithLimits projects with an explicit budget. It returns the turns and
-// discards the encoding enforceProjectionBudget produced to measure them.
-func ProjectWithLimits(exported *ExportedSession, limits ProjectionLimits) ([]ProjectedTurn, error) {
-	if exported == nil {
-		return nil, fmt.Errorf("session is nil")
-	}
-	turns := buildProjectedTurns(exported, limits)
-	if _, err := enforceProjectionBudget(turns, limits); err != nil {
-		return nil, err
-	}
-	return turns, nil
-}
-
 // ProjectJSONLWithLimits projects a session and returns the encoded JSONL
 // bytes. The budget is enforced against the very bytes the caller receives, so
 // a large session is encoded once rather than once to measure it and again to

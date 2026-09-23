@@ -179,9 +179,9 @@ func TestParseOpenAISSEStreamChatThinkingState(t *testing.T) {
 		`data: [DONE]`,
 	}, "\n")
 
-	resp, err := parseOpenAISSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseOpenAISSEStreamOptions(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
-		t.Fatalf("parseOpenAISSEStream: %v", err)
+		t.Fatalf("parseOpenAISSEStreamOptions: %v", err)
 	}
 	if len(resp.ToolCalls) != 2 {
 		t.Fatalf("tool calls = %#v, want 2", resp.ToolCalls)

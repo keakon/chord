@@ -265,11 +265,6 @@ func ExtractSkillResourceWarningLines(s string) []string {
 	return out
 }
 
-// HasSkillResourceWarning reports whether a skill result carries a warning block.
-func HasSkillResourceWarning(s string) bool {
-	return len(ExtractSkillResourceWarningLines(s)) > 0
-}
-
 // StripSkillResourceWarningBlock removes the warning block from a skill body,
 // leaving the original content intact for display and assertions.
 func StripSkillResourceWarningBlock(s string) string {

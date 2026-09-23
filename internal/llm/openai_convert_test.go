@@ -38,7 +38,7 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningContentByDefault(t *testi
 		{Role: "tool", ToolCallID: "c1", Content: "hi\n"},
 	}
 
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
 	if len(out) < 2 {
 		t.Fatalf("got %d messages, want >= 2", len(out))
 	}
@@ -71,7 +71,7 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningContentForOpenAIChatByDef
 		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)}},
 	}}
 
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
 	var replayed bool
 	for _, m := range out {
 		if m.Role == "assistant" && wireRC(m) == "deepseek thinking" && len(m.ToolCalls) > 0 {
@@ -92,7 +92,7 @@ func TestConvertMessagesToOpenAI_ReplaysReasoningContentWhenOpenAIVisibleContinu
 		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{"path":"README.md"}`)}},
 	}}
 
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs, openAIConvertOptions{})
 	var replayed bool
 	for _, m := range out {
 		if m.Role == "assistant" && wireRC(m) == "glm preserved reasoning" && len(m.ToolCalls) > 0 {
@@ -106,13 +106,13 @@ func TestConvertMessagesToOpenAI_ReplaysReasoningContentWhenOpenAIVisibleContinu
 }
 
 func TestConvertMessagesToOpenAI_SkipsReasoningOnlyAssistant(t *testing.T) {
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, []message.Message{
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, []message.Message{
 		{Role: "user", Content: "before"},
 		{Role: "assistant", ReasoningContent: "hidden", Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat}},
 		{Role: "user", Content: "after"},
-	})
+	}, openAIConvertOptions{})
 	if len(out) != 2 {
-		t.Fatalf("convertMessagesToOpenAI() len = %d, want 2: %#v", len(out), out)
+		t.Fatalf("convertMessagesToOpenAIWithOptions(, openAIConvertOptions{}) len = %d, want 2: %#v", len(out), out)
 	}
 	for _, msg := range out {
 		if msg.Role == "assistant" {
@@ -128,7 +128,7 @@ func TestConvertMessagesToOpenAI_DoesNotReplayReasoningForNonOpenAITarget(t *tes
 		Provenance:       &message.MessageProvenance{WireFamily: modelcompat.WireFamilyOpenAIChat},
 		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)}},
 	}}
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyAnthropic, modelcompat.ReasoningContinuityNone, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyAnthropic, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
 	for _, m := range out {
 		if wireRC(m) != "" {
 			t.Fatalf("unexpected reasoning replay for non-openai target: %#v", m)
@@ -142,7 +142,7 @@ func TestConvertMessagesToOpenAI_ReplaysPortableReasoningWithoutProvenance(t *te
 		ReasoningContent: "hidden reasoning",
 		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)}},
 	}}
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs, openAIConvertOptions{})
 	var replayed bool
 	for _, m := range out {
 		if m.Role == "assistant" && wireRC(m) == "hidden reasoning" && len(m.ToolCalls) > 0 {
@@ -162,7 +162,7 @@ func TestConvertMessagesToOpenAI_ReplaysPortableReasoningWithNonOpenAIChatProven
 		Provenance:       &message.MessageProvenance{WireFamily: modelcompat.WireFamilyGemini},
 		ToolCalls:        []message.ToolCall{{ID: "c1", Name: "Shell", Args: json.RawMessage(`{"command":"echo hi"}`)}},
 	}}
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs, openAIConvertOptions{})
 	var replayed bool
 	for _, m := range out {
 		if m.Role == "assistant" && wireRC(m) == "foreign reasoning" && len(m.ToolCalls) > 0 {
@@ -176,9 +176,9 @@ func TestConvertMessagesToOpenAI_ReplaysPortableReasoningWithNonOpenAIChatProven
 }
 
 func TestConvertMessagesToOpenAIMarksInterruptedAssistant(t *testing.T) {
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, []message.Message{{Role: "assistant", Content: "partial", StopReason: "interrupted"}})
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, []message.Message{{Role: "assistant", Content: "partial", StopReason: "interrupted"}}, openAIConvertOptions{})
 	if len(out) != 1 || out[0].Role != "assistant" {
-		t.Fatalf("convertMessagesToOpenAI() = %#v", out)
+		t.Fatalf("convertMessagesToOpenAIWithOptions(, openAIConvertOptions{}) = %#v", out)
 	}
 	text, ok := out[0].Content.(string)
 	if !ok {
@@ -200,7 +200,7 @@ func TestConvertMessagesToOpenAI_ToolOutputWithImageParts(t *testing.T) {
 		},
 	}}
 
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
 	if len(out) != 1 || out[0].Role != "tool" || out[0].ToolCallID != "c1" {
 		t.Fatalf("tool message = %#v", out)
 	}
@@ -219,7 +219,7 @@ func TestConvertMessagesToOpenAIWithOptions_ToolResultName(t *testing.T) {
 		t.Fatalf("tool result name not emitted: %#v", out)
 	}
 
-	out = convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	out = convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
 	if len(out) != 2 || out[1].Name != "" {
 		t.Fatalf("tool result name must be omitted by default: %#v", out)
 	}
@@ -258,7 +258,7 @@ func TestConvertMessagesToOpenAIWithOptions_AssistantAfterToolResult(t *testing.
 		t.Fatalf("user message misplaced: %#v", out[3])
 	}
 
-	out = convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	out = convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
 	if len(out) != 3 {
 		t.Fatalf("len = %d, want 3 without the compat flag: %#v", len(out), out)
 	}
@@ -548,7 +548,7 @@ func TestFillCurrentTurnEmptyReasoning(t *testing.T) {
 		{Role: "tool", ToolCallID: "c2", Content: "ok"},
 		{Role: "assistant", Content: "done"},
 	}
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs, openAIConvertOptions{})
 	fillCurrentTurnEmptyReasoning(out)
 
 	byToolID := func(id string) *openAIMessage {
@@ -619,7 +619,7 @@ func TestFillCurrentTurnEmptyReasoning_SkipsTurnOverlayBoundary(t *testing.T) {
 		{Role: "tool", ToolCallID: "c2", Content: "ok"},
 		{Role: message.RoleUser, Content: "<system-reminder>\n## Bug Triage Workflow\n</system-reminder>", Kind: message.KindTurnOverlay},
 	}
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs, openAIConvertOptions{})
 	fillCurrentTurnEmptyReasoning(out)
 
 	byToolID := func(id string) *openAIMessage {
@@ -789,7 +789,7 @@ func TestConvertMessagesToOpenAI_MergesAdjacentTextParts(t *testing.T) {
 			{Type: "text", Text: "verify"},
 		},
 	}}
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
 	if len(out) != 1 || out[0].Role != "user" {
 		t.Fatalf("out = %#v, want single user message", out)
 	}
@@ -817,7 +817,7 @@ func TestConvertMessagesToOpenAI_MergeKeepsImageBlock(t *testing.T) {
 			{Type: "text", Text: "then fix"},
 		},
 	}}
-	out := convertMessagesToOpenAI("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs)
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
 	if len(out) != 1 {
 		t.Fatalf("out len = %d, want 1", len(out))
 	}

@@ -12,14 +12,6 @@ import (
 	"github.com/keakon/chord/internal/permission"
 )
 
-// UpsertAgentPermissionRule inserts or updates a permission rule in an agent YAML file.
-// It preserves existing YAML comments via yaml.Node, but the file is re-encoded with
-// standard indentation. Markdown-frontmatter agents are intentionally not modified by
-// this helper; use YAML agent files for runtime-persisted permission changes.
-func UpsertAgentPermissionRule(path string, rule permission.Rule) (bool, error) {
-	return UpsertAgentPermissionRuleForAgent(path, nil, rule)
-}
-
 // UpsertAgentPermissionRuleForAgent inserts or updates a permission rule in an
 // agent YAML file. When the file does not exist, base is used to create a full
 // agent document before adding the rule so built-in/default agent metadata and

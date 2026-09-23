@@ -635,14 +635,10 @@ func (a *MainAgent) hasDeferredMailboxDeliveries() bool {
 	return len(a.subAgentInbox.deferredProgress) > 0
 }
 
-// hasWaitingMainExpiryCandidates reports whether a live worker or a parked task
-// record is currently in waiting_main, i.e. a lifecycle sweep could find
+// waitingMainExpiryCandidatesAmong reports whether a live worker or a parked
+// task record is currently in waiting_main, i.e. a lifecycle sweep could find
 // something to expire. The periodic trigger gates on it so sessions that never
 // delegate do not wake the event loop.
-func (a *MainAgent) hasWaitingMainExpiryCandidates() bool {
-	return a.waitingMainExpiryCandidatesAmong(a.subs.snapshotSubAgents())
-}
-
 func (a *MainAgent) waitingMainExpiryCandidatesAmong(subs []*SubAgent) bool {
 	for _, sub := range subs {
 		if sub != nil && sub.State() == SubAgentStateWaitingMain {
