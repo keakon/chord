@@ -319,7 +319,6 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.resetTaskCoordination(a.sessionEpoch, nil)
 	a.resetAgentRequests(nil)
 	a.explicitUserTurnCount.Store(0)
-	a.consecutiveIdleWakes.Store(0)
 	a.subs.resetStateEnteredTurns()
 }
 

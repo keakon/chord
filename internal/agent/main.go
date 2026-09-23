@@ -593,9 +593,6 @@ type MainAgent struct {
 	subAgentInboxSummaryMu   sync.RWMutex
 	subAgentUrgentCounts     map[string]int
 	explicitUserTurnCount    atomic.Uint64
-	// consecutiveIdleWakes counts back-to-back idle turns opened by mailbox
-	// delivery with no user input between them; see maxConsecutiveIdleWakes.
-	consecutiveIdleWakes atomic.Int32
 
 	// mcpServerCache maps scoped server keys to connections. Main-agent servers
 	// are registered as sentinels (Mgr==nil); SubAgent-exclusive servers are

@@ -398,11 +398,6 @@ func (a *MainAgent) handleContinueFromContext() {
 	// Staging here is idempotent-safe: the consume below merges rather than
 	// replaces, and the request takes the pending batch at most once.
 	a.stageNextSubAgentMailboxBatch()
-	// Continue is a user action: a parked queue resumes and rides this turn,
-	// and the user's involvement resets the consecutive-wake budget the same
-	// way a committed user message does — results delivered here must not
-	// leave the budget spent for the chain that follows.
-	a.consecutiveIdleWakes.Store(0)
 	a.resumePendingUserDrain()
 	a.applyPendingCompactionResumeOverlaysForContinue()
 	if a.loopState.Enabled {

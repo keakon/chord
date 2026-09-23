@@ -124,6 +124,8 @@ Stopping a job yourself does not raise a toast. When the job ends, its owner sti
 
 `Esc` and `Ctrl+C` do not stop a background job, including one still running inside the current turn: a long command that outran the foreground budget has already become a job. Confirming the stop dialog (reached by clicking `x`, or with `ctrl+j` then `j` / `k` and `Enter`) is the only way to stop one. Jobs do not outlive Chord itself: quitting or switching sessions terminates all of them.
 
+Cancelling a turn does not mute the jobs it left behind either. When one finishes later, its result still arrives and opens a new turn — Chord wakes the main agent for every delivery rather than dropping a result nobody asked for — so a cancelled turn can be followed by a short result turn per job that completes. Stop those jobs, or quit Chord, if you want the session to stay quiet.
+
 ### Terminal title
 
 The terminal title spinner keeps turning while only background jobs are running. With the window unfocused, that spinner is the only sign of life.
