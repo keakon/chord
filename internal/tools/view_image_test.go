@@ -66,7 +66,7 @@ func TestViewImageToolMetadata(t *testing.T) {
 		t.Fatalf("IsReadOnly() = false, want true")
 	}
 	desc := tool.Description()
-	for _, want := range []string{"PNG or JPEG", "may be sent to a remote provider"} {
+	for _, want := range []string{"PNG, JPEG, WebP, GIF, BMP and TIFF", "scaled down", "may be sent to a remote provider"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
 		}
@@ -200,4 +200,27 @@ func TestViewImageToolExecuteErrors(t *testing.T) {
 			t.Fatalf("expected error for invalid arguments")
 		}
 	})
+}
+
+func TestViewImageToolExecuteReportsScaling(t *testing.T) {
+	dir := t.TempDir()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 3000, 1500))); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	path := filepath.Join(dir, "wide.png")
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		t.Fatalf("write png: %v", err)
+	}
+
+	tool := NewViewImageTool(stubImageCapability{image: true})
+	ctx := WithImageSink(context.Background(), &ImageCollector{})
+	args, _ := json.Marshal(map[string]any{"path": path})
+	out, err := tool.Execute(ctx, args)
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+	if !strings.Contains(out, "3000x1500 -> 2000x1000") {
+		t.Fatalf("Execute() output %q does not report the original and final size", out)
+	}
 }

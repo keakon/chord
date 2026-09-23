@@ -86,7 +86,7 @@ ime_switch_target: com.apple.keylayout.ABC          # macOS 示例
 
 `Ctrl+V` 或 `Alt+V` 会从系统剪贴板读取图片或 PDF 并作为附件添加。读取及图片转换都在后台异步执行，因此 TUI 不会被阻塞；读取完成前会暂时阻止发送。普通终端 paste 事件（包括 macOS 常见的 `Cmd+V`）只粘贴文本，绝不会探测剪贴板附件。
 
-Chord 通过各平台自己的后端读取剪贴板：Linux 和 Windows 用原生库，macOS 用系统 `osascript`。剪贴板图片按 PNG、macOS 的 TIFF、JPEG、WebP、BMP 的顺序读取；TIFF/BMP/WebP 会先归一化为 PNG/JPEG。若同时提供 PDF 和图片表示，优先附加 PDF；如果没有支持的附件，会显示提示且不会回退为文本。
+Chord 通过各平台自己的后端读取剪贴板：Linux 和 Windows 用原生库，macOS 用系统 `osascript`。剪贴板图片按 PNG、macOS 的 TIFF、JPEG、WebP、BMP、GIF 的顺序读取；PNG 与 JPEG 以外的格式会归一化为两者之一；长边超过 2000px 的图片会缩小，PNG 和 JPEG 也不例外（动画 WebP 和 GIF 取首帧）。若同时提供 PDF 和图片表示，优先附加 PDF；如果没有支持的附件，会显示提示且不会回退为文本。
 
 每条输入框消息最多支持 5 张 inline 图片附件。手动输入 `[image1]` 这类占位符文本本身不会附加图片；只有 Chord 内部插入的 inline 占位符才会绑定真实附件。
 

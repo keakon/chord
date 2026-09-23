@@ -388,13 +388,13 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 - 当前模型支持对应输入类型时，把图片或 PDF 文件作为附件发送给当前聚焦的 Agent
 - 在支持的终端里直接查看图片；PDF 会发送给模型，并在转录区显示为文件 chip，但不会 inline 预览
 - 编辑含图片或 PDF 的历史用户消息；如果这条消息已经在转录尾部，就直接在当前会话里回填编辑，否则会 fork 新会话；按路径恢复的附件会在重新发送该消息时再次加载
-- 当工具被权限规则允许、有效 model pool 的第一个模型支持 image 输入且这个第一个模型不是 OpenAI Chat Completions API 时，模型可以调用内置 `view_image` 工具把本地 PNG/JPEG 载入上下文。该工具使用与 `read` 相同的本地路径权限处理。
+- 当工具被权限规则允许、有效 model pool 的第一个模型支持 image 输入且这个第一个模型不是 OpenAI Chat Completions API 时，模型可以调用内置 `view_image` 工具把本地 PNG/JPEG/WebP/GIF/BMP/TIFF 图片载入上下文（统一归一化为 PNG 或 JPEG，长边超过 2000px 时缩小，动画 WebP/GIF/TIFF 取首帧）。该工具使用与 `read` 相同的本地路径权限处理。
 
 `view_image` 是否可用由有效模型池中的第一个模型决定。使用 OpenAI 模型且工具需要返回图片或文件时，请使用 Responses API；Chat Completions 可以接收用户消息中的图片，但不能接收工具返回的图片。会话中出现图片 / PDF 工具结果后，Chord 会跳过无法安全重放这些内容的备用模型。
 
 常用操作：
 
-- 主输入框中的 `Ctrl+V` 或 `Alt+V`：异步读取系统剪贴板中的图片或 PDF。PNG/JPEG 可直接使用，BMP/WebP 会归一化为 PNG/JPEG。图片会插入类似 `[image1.png]` 的 inline 占位符；PDF 会作为文件附件添加。读取期间按 Enter 会提示等待，因此立即发送不会丢失附件。Windows Terminal 以及由其承载的 WSL 会话请使用 `Alt+V`。
+- 主输入框中的 `Ctrl+V` 或 `Alt+V`：异步读取系统剪贴板中的图片或 PDF。PNG/JPEG 可直接使用，WebP/GIF/BMP/TIFF 会归一化为 PNG 或 JPEG，长边超过 2000px 时缩小（动画 WebP/GIF/TIFF 取首帧；HEIC/HEIF/AVIF/SVG 会被拒绝并提示转换）。图片会插入类似 `[image1.png]` 的 inline 占位符；PDF 会作为文件附件添加。读取期间按 Enter 会提示等待，因此立即发送不会丢失附件。Windows Terminal 以及由其承载的 WSL 会话请使用 `Alt+V`。
 - `Cmd+V`、右键粘贴、菜单粘贴及其他终端 paste 事件：只粘贴文本，绝不会检查剪贴板附件。
 - 权限确认弹窗文本框中的 `Cmd+V`：只粘贴文本。
 - 每条输入框消息最多支持 5 张 inline 图片附件

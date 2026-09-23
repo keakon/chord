@@ -67,7 +67,7 @@ func Read() ([]byte, string, error) {
 }
 
 // normalizeAttachment applies the limits and conversions the attachment path
-// expects: PDFs stay as they are, everything else goes through the clipboard
+// expects: PDFs stay as they are, everything else goes through the shared
 // image normalizer, which re-encodes formats a provider does not accept (TIFF
 // among them) and enforces the size and pixel limits.
 func normalizeAttachment(data []byte, mimeType string) ([]byte, string, error) {
@@ -77,7 +77,7 @@ func normalizeAttachment(data []byte, mimeType string) ([]byte, string, error) {
 		}
 		return data, "application/pdf", nil
 	}
-	return imageutil.NormalizeClipboardImage(data, mimeType)
+	return imageutil.NormalizeImageBytes(data, mimeType)
 }
 
 // readerError turns the reader's exit status into the error the user sees. The

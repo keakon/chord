@@ -412,7 +412,7 @@ func TestCompleteStreamDropsUnsupportedImageToolResultPartsForFallback(t *testin
 		Content:    "Loaded image",
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "Loaded image"},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 		},
 	}}
 
@@ -465,7 +465,7 @@ func TestCompleteStreamDropsUnsupportedUserImagePartsForFallback(t *testing.T) {
 		Role: "user",
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "what is in this image?"},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 		},
 	}}
 
@@ -516,7 +516,7 @@ func TestCompleteStreamDropsUnsupportedBinaryPartsForFallbackWithMissingModelCon
 		Role: "user",
 		Parts: []message.ContentPart{
 			{Type: message.ContentPartText, Text: "what is in this image?"},
-			{Type: message.ContentPartImage, MimeType: "image/png", Data: []byte("png")},
+			{Type: message.ContentPartImage, MimeType: "image/png", Data: tinyPNG},
 		},
 	}}
 

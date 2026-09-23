@@ -35,12 +35,16 @@ func (a *MainAgent) cloneMessageForForkSeed(msg message.Message) message.Message
 			continue
 		}
 		if len(parts[i].Data) == 0 && parts[i].ImagePath != "" {
-			data, err := a.resolveBinaryPart(parts[i])
+			data, mime, err := a.resolveBinaryPart(parts[i])
 			if err != nil {
 				log.Warnf("fork session: keeping source attachment path, payload unavailable path=%v error=%v", parts[i].ImagePath, err)
 				continue
 			}
+			// The resolver may have normalized the payload, so the MIME type
+			// must travel with the bytes or the fork would store a mismatched
+			// pair.
 			parts[i].Data = data
+			parts[i].MimeType = mime
 		}
 		if len(parts[i].Data) == 0 {
 			continue

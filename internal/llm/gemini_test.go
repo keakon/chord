@@ -17,9 +17,9 @@ import (
 
 func TestConvertMessagesToGemini(t *testing.T) {
 	msgs := []message.Message{
-		{Role: "user", Parts: []message.ContentPart{{Type: "text", Text: "hello"}, {Type: "image", MimeType: "image/png", Data: []byte("png")}}},
+		{Role: "user", Parts: []message.ContentPart{{Type: "text", Text: "hello"}, {Type: "image", MimeType: "image/png", Data: tinyPNG}}},
 		{Role: "assistant", Content: "hi", ToolCalls: []message.ToolCall{{ID: "call_1", Name: "get_weather", Args: json.RawMessage(`{"city":"BJ"}`)}}},
-		{Role: "tool", ToolCallID: "call_1", Content: "sunny", Parts: []message.ContentPart{{Type: "text", Text: "sunny"}, {Type: "image", MimeType: "image/png", Data: []byte("png"), FileName: "weather.png"}}},
+		{Role: "tool", ToolCallID: "call_1", Content: "sunny", Parts: []message.ContentPart{{Type: "text", Text: "sunny"}, {Type: "image", MimeType: "image/png", Data: tinyPNG, FileName: "weather.png"}}},
 		{Role: "tool", ToolCallID: "call_2", Content: "fallback name"},
 	}
 
@@ -30,7 +30,7 @@ func TestConvertMessagesToGemini(t *testing.T) {
 	if got[0].Role != "user" || got[0].Parts[0].Text != "hello" {
 		t.Fatalf("first message = %#v", got[0])
 	}
-	if got[0].Parts[1].InlineData == nil || got[0].Parts[1].InlineData.MimeType != "image/png" || got[0].Parts[1].InlineData.Data != "cG5n" {
+	if got[0].Parts[1].InlineData == nil || got[0].Parts[1].InlineData.MimeType != "image/png" || got[0].Parts[1].InlineData.Data != tinyPNGBase64 {
 		t.Fatalf("image part = %#v", got[0].Parts[1].InlineData)
 	}
 	if got[1].Role != "model" || got[1].Parts[0].Text != "hi" {
@@ -45,7 +45,7 @@ func TestConvertMessagesToGemini(t *testing.T) {
 	}
 	if fr := got[2].Parts[0].FunctionResponse; fr == nil || fr.Name != "get_weather" || fr.Response["result"] != "sunny" || len(fr.Parts) != 1 {
 		t.Fatalf("first functionResponse = %#v", fr)
-	} else if fr.Parts[0].InlineData == nil || fr.Parts[0].InlineData.MimeType != "image/png" || fr.Parts[0].InlineData.Data != "cG5n" || fr.Parts[0].InlineData.DisplayName != "weather.png" {
+	} else if fr.Parts[0].InlineData == nil || fr.Parts[0].InlineData.MimeType != "image/png" || fr.Parts[0].InlineData.Data != tinyPNGBase64 || fr.Parts[0].InlineData.DisplayName != "weather.png" {
 		t.Fatalf("first functionResponse parts = %#v", fr.Parts)
 	}
 	if fr := got[2].Parts[1].FunctionResponse; fr == nil || fr.Name != "call_2" || fr.Response["result"] != "fallback name" {
@@ -531,7 +531,7 @@ func TestGeminiUserParts_MergeKeepsImagePart(t *testing.T) {
 	got := geminiUserParts(message.Message{Parts: []message.ContentPart{
 		{Type: "text", Text: "before"},
 		{Type: "text", Text: "and after"},
-		{Type: "image", MimeType: "image/png", Data: []byte("png")},
+		{Type: "image", MimeType: "image/png", Data: tinyPNG},
 		{Type: "text", Text: "see this"},
 		{Type: "text", Text: "then fix"},
 	}})

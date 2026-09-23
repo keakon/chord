@@ -390,13 +390,13 @@ Currently supported:
 - Attach image and PDF files to the currently focused agent's message when the active model supports that input type
 - View images directly in supported terminals; PDFs are sent to the model and shown as file chips in the transcript, but are not previewed inline
 - Edit historical user messages that contain images or PDFs; tail messages reopen in the current session, while earlier messages fork a new session, and path-restored attachments are reloaded when the edited message is sent again
-- Let the model use the built-in `view_image` tool to load a local PNG/JPEG into context when the tool is permitted, the first model in the effective model pool supports image input, and that first model does not use the OpenAI Chat Completions API. The tool uses the same local-path permission handling as `read`.
+- Let the model use the built-in `view_image` tool to load a local PNG/JPEG/WebP/GIF/BMP/TIFF image into context (normalized to PNG or JPEG, scaled down to 2000px on the longest edge, first frame for animated WebP/GIF/TIFF) when the tool is permitted, the first model in the effective model pool supports image input, and that first model does not use the OpenAI Chat Completions API. The tool uses the same local-path permission handling as `read`.
 
 `view_image` availability follows the first model in the effective pool. For OpenAI models, use the Responses API when tools need to return images or files; Chat Completions accepts images in user messages but not in tool results. After an image/PDF tool result enters the conversation, Chord skips fallback models that cannot replay it safely.
 
 Common actions:
 
-- `Ctrl+V` or `Alt+V` in the main composer: asynchronously read an image or PDF from the system clipboard. PNG/JPEG are accepted directly; BMP/WebP are normalized to PNG/JPEG. Images get an inline placeholder such as `[image1.png]`; PDFs are added as file attachments. Pressing Enter while the read is pending asks you to wait, so an immediate submit cannot lose the attachment. Use `Alt+V` in Windows Terminal and WSL sessions hosted by it.
+- `Ctrl+V` or `Alt+V` in the main composer: asynchronously read an image or PDF from the system clipboard. PNG/JPEG are accepted directly; WebP/GIF/BMP/TIFF are normalized to PNG or JPEG and scaled down to 2000px on the longest edge (animated WebP/GIF/TIFF use their first frame; HEIC/HEIF/AVIF/SVG are rejected with a conversion hint). Images get an inline placeholder such as `[image1.png]`; PDFs are added as file attachments. Pressing Enter while the read is pending asks you to wait, so an immediate submit cannot lose the attachment. Use `Alt+V` in Windows Terminal and WSL sessions hosted by it.
 - `Cmd+V`, right-click paste, menu paste, and other terminal paste events: paste text only and never inspect clipboard attachments.
 - `Cmd+V` in confirmation-dialog text fields: paste text only.
 - Inline image attachments are capped at 5 per composer message

@@ -102,7 +102,7 @@ func TestConvertMessagesToResponses_WithImageParts(t *testing.T) {
 		Role: "user",
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "what is in this image?"},
-			{Type: "image", MimeType: "image/png", Data: []byte{0x89, 0x50, 0x4e, 0x47}},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 		},
 	}})
 	if len(items) != 1 {
@@ -174,7 +174,7 @@ func TestConvertMessagesToResponses_MergesTextAcrossNonTextBlocks(t *testing.T) 
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "before"},
 			{Type: "text", Text: "and after"},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 			{Type: "text", Text: "see this chart"},
 			{Type: "text", Text: "then fix"},
 		},
@@ -189,7 +189,7 @@ func TestConvertMessagesToResponses_MergesTextAcrossNonTextBlocks(t *testing.T) 
 	if blocks[0].Type != "input_text" || blocks[0].Text != "before\nand after" {
 		t.Fatalf("leading text block = %#v", blocks[0])
 	}
-	if blocks[1].Type != "input_image" || blocks[1].ImageURL != "data:image/png;base64,cG5n" {
+	if blocks[1].Type != "input_image" || blocks[1].ImageURL != "data:image/png;base64,"+tinyPNGBase64 {
 		t.Fatalf("image block = %#v", blocks[1])
 	}
 	if blocks[2].Type != "input_text" || blocks[2].Text != "see this chart\nthen fix" {
@@ -665,7 +665,7 @@ func TestConvertMessagesToResponses_ToolOutputWithImageParts(t *testing.T) {
 		Content:    "Loaded image",
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "Loaded image"},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 		},
 	}})
 
@@ -679,7 +679,7 @@ func TestConvertMessagesToResponses_ToolOutputWithImageParts(t *testing.T) {
 	if len(blocks) != 2 || blocks[0].Type != "input_text" || blocks[0].Text != "Loaded image" {
 		t.Fatalf("text output block = %#v", blocks)
 	}
-	if blocks[1].Type != "input_image" || blocks[1].ImageURL != "data:image/png;base64,cG5n" || blocks[1].Detail != "auto" {
+	if blocks[1].Type != "input_image" || blocks[1].ImageURL != "data:image/png;base64,"+tinyPNGBase64 || blocks[1].Detail != "auto" {
 		t.Fatalf("image output block = %#v", blocks[1])
 	}
 }

@@ -9,6 +9,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -381,11 +382,15 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				for i, a := range m.attachments {
 					loaded[i] = a
 					if len(loaded[i].Data) == 0 && strings.TrimSpace(loaded[i].ImagePath) != "" {
-						data, err := os.ReadFile(loaded[i].ImagePath)
+						data, mimeType, err := imageutil.ReadAttachmentFile(loaded[i].ImagePath)
 						if err != nil {
 							return m.enqueueToast(fmt.Sprintf("Failed to read image %s: %v", loaded[i].FileName, err), "error")
 						}
+						// Re-reading a restored draft must re-normalize and adopt
+						// the MIME type that matches the bytes it produced.
 						loaded[i].Data = data
+						loaded[i].MimeType = mimeType
+						loaded[i] = m.markAttachmentSupport(loaded[i])
 					}
 				}
 				parts = interleaveAttachments(parts, loaded)

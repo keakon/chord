@@ -238,6 +238,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 	// runtime can attach them to the model context after the tool batch.
 	var text string
 	var images []message.ContentPart
+	var imageFailures []error
 	for _, block := range result.Content {
 		switch block.Type {
 		case "text":
@@ -254,17 +255,23 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 				log.Warnf("mcp tools/call %s/%s: skipping image block with undecodable base64 error=%v", c.name, toolName, decErr)
 				continue
 			}
-			mime := block.MimeType
-			if mime == "" {
-				mime = "image/png"
-			}
-			raw, mime = imageutil.CompressIfPNG(raw, mime)
-			if err := imageutil.CheckImageSize(raw); err != nil {
-				log.Warnf("mcp tools/call %s/%s: skipping oversized image block error=%v", c.name, toolName, err)
+			normalized, normalizedMime, normErr := imageutil.NormalizeImageBytes(raw, block.MimeType)
+			if normErr != nil {
+				log.Warnf("mcp tools/call %s/%s: omitting image block error=%v", c.name, toolName, normErr)
+				imageFailures = append(imageFailures, normErr)
 				continue
 			}
-			images = append(images, message.ContentPart{Type: "image", MimeType: mime, Data: raw})
+			images = append(images, message.ContentPart{Type: "image", MimeType: normalizedMime, Data: normalized})
 		}
+	}
+	if len(imageFailures) > 0 {
+		// Keep the failure model-visible: the text result stays intact, but the
+		// model must know that an image in this result was not attached.
+		if text != "" {
+			text += "\n"
+		}
+		text += fmt.Sprintf("%d image attachment(s) in this result could not be read and were omitted: %v",
+			len(imageFailures), imageFailures[0])
 	}
 	return text, images, nil
 }

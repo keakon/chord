@@ -79,7 +79,7 @@ func TestConvertMessagesToAnthropic_ToolOutputWithImageParts(t *testing.T) {
 		Content:    "Loaded image",
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "Loaded image"},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 		},
 	}})
 
@@ -97,7 +97,7 @@ func TestConvertMessagesToAnthropic_ToolOutputWithImageParts(t *testing.T) {
 	if len(content) != 2 || content[0].Type != "text" || content[0].Text != "Loaded image" {
 		t.Fatalf("text content = %#v", content)
 	}
-	if content[1].Type != "image" || content[1].Source == nil || content[1].Source.MediaType != "image/png" || content[1].Source.Data != "cG5n" {
+	if content[1].Type != "image" || content[1].Source == nil || content[1].Source.MediaType != "image/png" || content[1].Source.Data != tinyPNGBase64 {
 		t.Fatalf("image content = %#v", content[1])
 	}
 }
@@ -108,7 +108,7 @@ func TestConvertMessagesToAnthropic_ToolOutputWithOnlyImageSkipsEmptyTextPart(t 
 		ToolCallID: "toolu_1",
 		Parts: []message.ContentPart{
 			{Type: "text", Text: ""},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 		},
 	}})
 
@@ -223,7 +223,7 @@ func TestConvertMessagesToResponses_ToolOutputWithOnlyImageSkipsEmptyTextPart(t 
 		ToolCallID: "call_1",
 		Parts: []message.ContentPart{
 			{Type: "text", Text: ""},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 		},
 	}})
 
@@ -239,7 +239,7 @@ func TestConvertMessages_ImageAndPDFCoexist(t *testing.T) {
 	msgs := []message.Message{{
 		Role: "user",
 		Parts: []message.ContentPart{
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 			{Type: "pdf", MimeType: "application/pdf", Data: []byte("pdf"), FileName: "a.pdf"},
 		},
 	}}
@@ -290,7 +290,7 @@ func TestConvertMessages_MergeKeepsImageBlock(t *testing.T) {
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "before"},
 			{Type: "text", Text: "and after"},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 			{Type: "text", Text: "see this"},
 			{Type: "text", Text: "then fix"},
 		},

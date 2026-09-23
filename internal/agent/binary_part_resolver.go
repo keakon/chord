@@ -6,9 +6,19 @@ import (
 	"os"
 	"sync"
 
+	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
+
+// binaryPartCacheEntry is one cached attachment payload. Data and MIME are one
+// inseparable value: the MIME type must always describe the cached bytes,
+// because normalization rewrites both together.
+type binaryPartCacheEntry struct {
+	path string
+	data []byte
+	mime string
+}
 
 // binaryPartReadCache is a bounded LRU of lazily resolved attachment payloads,
 // keyed by the persisted file path. Attachment files are write-once (their
@@ -28,11 +38,6 @@ type binaryPartReadCache struct {
 	budget  int64
 }
 
-type binaryPartCacheEntry struct {
-	path string
-	data []byte
-}
-
 const binaryPartReadCacheBudget = 64 << 20 // 64 MiB
 
 func newBinaryPartReadCache() *binaryPartReadCache {
@@ -43,7 +48,7 @@ func newBinaryPartReadCache() *binaryPartReadCache {
 	}
 }
 
-func (c *binaryPartReadCache) get(path string) ([]byte, bool) {
+func (c *binaryPartReadCache) get(path string) (*binaryPartCacheEntry, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	elem, ok := c.entries[path]
@@ -51,55 +56,93 @@ func (c *binaryPartReadCache) get(path string) ([]byte, bool) {
 		return nil, false
 	}
 	c.order.MoveToBack(elem)
-	return elem.Value.(*binaryPartCacheEntry).data, true
+	return elem.Value.(*binaryPartCacheEntry), true
 }
 
-func (c *binaryPartReadCache) put(path string, data []byte) {
+func (c *binaryPartReadCache) put(entry *binaryPartCacheEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if elem, ok := c.entries[path]; ok {
+	if elem, ok := c.entries[entry.path]; ok {
 		c.order.MoveToBack(elem)
 		return
 	}
-	if int64(len(data)) > c.budget {
+	if int64(len(entry.data)) > c.budget {
 		return
 	}
-	for c.bytes+int64(len(data)) > c.budget && c.order.Len() > 0 {
+	for c.bytes+int64(len(entry.data)) > c.budget && c.order.Len() > 0 {
 		oldest := c.order.Front()
-		entry := oldest.Value.(*binaryPartCacheEntry)
+		evicted := oldest.Value.(*binaryPartCacheEntry)
 		c.order.Remove(oldest)
-		delete(c.entries, entry.path)
-		c.bytes -= int64(len(entry.data))
+		delete(c.entries, evicted.path)
+		c.bytes -= int64(len(evicted.data))
 	}
-	c.entries[path] = c.order.PushBack(&binaryPartCacheEntry{path: path, data: data})
-	c.bytes += int64(len(data))
+	c.entries[entry.path] = c.order.PushBack(entry)
+	c.bytes += int64(len(entry.data))
 }
 
-// resolveBinaryPart loads a persisted attachment for the wire converter. The
-// resolver is installed once per process; the paths inside a part are absolute
-// session paths, so reads need no session-dir context and stay valid across a
-// session switch for messages that still reference the previous session.
-func (a *MainAgent) resolveBinaryPart(part message.ContentPart) ([]byte, error) {
+// resolveBinaryPart loads and normalizes a persisted attachment for the wire
+// converter. The resolver is installed once per process; the paths inside a
+// part are absolute session paths, so reads need no session-dir context and
+// stay valid across a session switch for messages that still reference the
+// previous session.
+//
+// The returned MIME type always describes the returned bytes: images are
+// normalized here so every wire sees a provider-ready PNG/JPEG pair, while
+// PDFs pass through unchanged.
+func (a *MainAgent) resolveBinaryPart(part message.ContentPart) ([]byte, string, error) {
 	path := part.ImagePath
 	if path == "" {
-		return nil, fmt.Errorf("binary part has no image path")
+		return nil, "", fmt.Errorf("binary part has no image path")
 	}
 	if a.binaryPartCache != nil {
-		if data, ok := a.binaryPartCache.get(path); ok {
-			return data, nil
+		if entry, ok := a.binaryPartCache.get(path); ok {
+			return entry.data, entry.mime, nil
 		}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read attachment: %w", err)
+		return nil, "", fmt.Errorf("read attachment: %w", err)
+	}
+	mime := part.MimeType
+	if part.Type == message.ContentPartImage {
+		data, mime, err = imageutil.NormalizeImageBytes(data, part.MimeType)
+		if err != nil {
+			return nil, "", fmt.Errorf("normalize attachment: %w", err)
+		}
 	}
 	if a.binaryPartCache != nil {
-		a.binaryPartCache.put(path, data)
+		a.binaryPartCache.put(&binaryPartCacheEntry{path: path, data: data, mime: mime})
 	}
-	return data, nil
+	return data, mime, nil
+}
+
+// noteBinaryPartDrop records a binary part the wire layer had to omit so the
+// user learns about it. The agent owns counting and toasts; internal/llm only
+// reports the drop.
+func (a *MainAgent) noteBinaryPartDrop(part message.ContentPart, err error) {
+	counts := unsupportedPartCounts{}
+	switch part.Type {
+	case message.ContentPartImage:
+		counts.Images = 1
+	case message.ContentPartPDF:
+		counts.PDFs = 1
+	}
+	if !counts.any() {
+		return
+	}
+	a.llmMu.RLock()
+	modelName := a.modelName
+	a.llmMu.RUnlock()
+	if a.unsupportedPartToast.first(modelName, toastCategoryInput, counts.summary()) {
+		a.emitToTUI(ToastEvent{
+			Message: "An attachment could not be prepared for the current model and was ignored: " + err.Error(),
+			Level:   "warn",
+		})
+	}
 }
 
 func (a *MainAgent) installBinaryPartResolver() {
 	a.binaryPartCache = newBinaryPartReadCache()
 	llm.SetBinaryPartResolver(a.resolveBinaryPart)
+	llm.SetBinaryPartDropReporter(a.noteBinaryPartDrop)
 }

@@ -225,16 +225,24 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 				for _, p := range msg.Parts {
 					switch p.Type {
 					case "image":
+						data, mime, ok := binaryPartForWire(p)
+						if !ok {
+							continue
+						}
 						content = append(content, responsesContentBlock{
 							Type:     "input_image",
-							ImageURL: binaryPartDataURL(p.MimeType, binaryPartPayload(p)),
+							ImageURL: binaryPartDataURL(mime, data),
 							Detail:   "auto",
 						})
 					case "pdf":
+						data, mime, ok := binaryPartForWire(p)
+						if !ok {
+							continue
+						}
 						content = append(content, responsesContentBlock{
 							Type:     "input_file",
 							Filename: defaultPDFFilename(p.FileName),
-							FileData: binaryPartDataURL(defaultPDFMediaType(p.MimeType), binaryPartPayload(p)),
+							FileData: binaryPartDataURL(defaultPDFMediaType(mime), data),
 						})
 					default:
 						appendResponsesTextBlock(&content, p.Text)
@@ -495,16 +503,24 @@ func responsesToolOutput(msg message.Message) any {
 	for _, p := range msg.Parts {
 		switch p.Type {
 		case "image":
+			data, mime, ok := binaryPartForWire(p)
+			if !ok {
+				continue
+			}
 			content = append(content, responsesContentBlock{
 				Type:     "input_image",
-				ImageURL: binaryPartDataURL(p.MimeType, binaryPartPayload(p)),
+				ImageURL: binaryPartDataURL(mime, data),
 				Detail:   "auto",
 			})
 		case "pdf":
+			data, mime, ok := binaryPartForWire(p)
+			if !ok {
+				continue
+			}
 			content = append(content, responsesContentBlock{
 				Type:     "input_file",
 				Filename: defaultPDFFilename(p.FileName),
-				FileData: binaryPartDataURL(defaultPDFMediaType(p.MimeType), binaryPartPayload(p)),
+				FileData: binaryPartDataURL(defaultPDFMediaType(mime), data),
 			})
 		default:
 			if p.Text == "" {

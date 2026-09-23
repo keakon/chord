@@ -11,6 +11,7 @@
 - headless 的提问协议换了形状。`question_request` 不再带 `default_answer` 和 `timeout_ms`，改为带 `deadline`——Chord 关闭该问题的绝对 RFC 3339 时刻（未设置 `question_timeout` 时省略）。Chord 也不再拿第一个选项当兜底默认答案。`question` 命令用 `reason`（`answered` 或 `declined`）取代 `cancelled`，问题关闭改由新增的 `question_resolved` 事件通知，不再靠之后的快照推断。
 - worktree 会话现在按仓库共享：同一仓库的所有 checkout 共用一个 store，在 worktree 里开的会话能在主工作区列出、继续，反过来也一样。旧版本按 checkout 分片写入的会话不会迁移：它们仍留在自己那个 key 下，但 Chord 不再列出、不再恢复，也不会随 worktree 一起清理。
 - 点名仓库内路径的权限规则现在对同一仓库的每个 checkout 生效。主工作区里写的 `write src/**: allow`，在 `<worktree>/src/` 下同样允许；也没法写出「只允许某一个 checkout」的规则——Chord 按仓库相对拼写匹配仓库内的路径，绝对路径规则永远匹配不到它们。
+- 已经是 PNG 或 JPEG 的图片现在按原字节发给上游，不再先统一转成 JPEG。截图、图表和文字截图因此保留原画质，代价是过去会被重新压缩的图片上传体积变大。原样直传只适用于不需要任何变换的图片：长边超过 2000px、带 EXIF 旋转信息、或超出体积预算的 PNG / JPEG 仍会重新编码。需要转换或缩放的图片仍优先输出 PNG，只有在结果超过体积预算时才退回 JPEG。
 
 ### 新功能
 
@@ -36,6 +37,7 @@
 - 初始安装向导现在会为新装的 Codex OAuth 写入 GPT-6 Sol（`gpt-6-sol`）和 GPT-6 Luna（`gpt-6-luna`），分配与 GPT-6 Astra 相同（`1050000 / 922000 / 128000`），落进 `providers.models` 和默认模型池；[模型配置速查](./docs/model-configs_CN.md#codex-oauth-preset) 里同样列出了这两个模型。已有的 `config.yaml` 不受影响，保持你原本的配置。
 - 新增 skill frontmatter 字段 `disable-model-invocation: true`：声明后该 skill 不进模型目录，`Available Skills` 列表和 `skill` 工具列表里都没有它，模型即使点名也加载不了；你仍可以用 `/skill <name>` 自己加载。某个角色配的技能全是这种时，它连 `skill` 工具都不会注册。TUI 的 SKILLS 面板改为用字形表示模型可见性（`○`/`●` 是模型可加载，`◌` 是只留给显式加载），颜色仍表示加载状态；`chord doctor skills` 的可见性依旧只看 ruleset，因此这类 skill 在那里照样报 `visible`，尽管它从不到达模型。
 - 新增 `/skill <name> [args]` 显式加载：Chord 把这行当普通用户消息提交，并在同一回合里把 skill 正文作为 `skill` 工具结果追加进去，模型不用自己决定调用工具就能拿到正文；名字之后的内容替换正文里的 `${CHORD_SKILL_ARGS}`。这行跟着当前聚焦的 Agent，所以子 Agent 也能用同样方式载入技能。TUI 里只敲 `/skill` 则打开选择器，列出当前 Agent 可加载的全部技能（只留给显式加载的排在前面），选中后回填 `/skill <name> ` 供你接着输参数；被 ruleset 拒绝的技能显示为不可用并给出原因，名字不存在则弹 toast 拒绝。这样合成的加载在各处都算一次真实加载：继续会话时恢复，持久压缩把这对消息归档后与重启一样清掉。
+- `view_image`、图片附件、剪贴板粘贴以及 MCP 工具返回的图片现在除了 PNG/JPEG 外还接受 WebP、GIF、BMP 和 TIFF。所有图片在送达上游前都会归一化为 PNG 或 JPEG，长边超过 2000px 时缩小（动画 WebP、GIF 和 TIFF 只取首帧）。HEIC、HEIF、AVIF、SVG 会被拒绝并提示先转换。JPEG 带 EXIF `Orientation` 时会把方向烧进像素，不再留给模型自行解读；`view_image` 只要做过缩放，就会在结果里报告原始尺寸与最终尺寸。
 
 ### 改进
 

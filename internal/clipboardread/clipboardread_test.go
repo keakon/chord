@@ -57,7 +57,7 @@ func TestDecodeReaderOutputRejectsMalformedHeader(t *testing.T) {
 		"bad length":        readerProtocolMagic + "\nimage/png\none\nAQ==\n",
 		"zero length":       readerProtocolMagic + "\nimage/png\n0\n",
 		"truncated payload": readerProtocolMagic + "\nimage/png\n8\nAQ==\n",
-		"oversized image":   fmt.Sprintf("%s\nimage/png\n%d\n", readerProtocolMagic, imageutil.MaxClipboardImageSourceBytes+1),
+		"oversized image":   fmt.Sprintf("%s\nimage/png\n%d\n", readerProtocolMagic, imageutil.MaxImageSourceBytes+1),
 		"unpadded base64":   readerProtocolMagic + "\nimage/png\n2\nAQ\n",
 	}
 	for name, output := range cases {

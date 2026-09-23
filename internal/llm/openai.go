@@ -706,18 +706,26 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 				for _, p := range msg.Parts {
 					switch p.Type {
 					case "image":
+						data, mime, ok := binaryPartForWire(p)
+						if !ok {
+							continue
+						}
 						blocks = append(blocks, openAIContentBlock{
 							Type: "image_url",
 							ImageURL: &openAIImageURL{
-								URL: binaryPartDataURL(p.MimeType, binaryPartPayload(p)),
+								URL: binaryPartDataURL(mime, data),
 							},
 						})
 					case "pdf":
+						data, mime, ok := binaryPartForWire(p)
+						if !ok {
+							continue
+						}
 						blocks = append(blocks, openAIContentBlock{
 							Type: "file",
 							File: &openAIFile{
 								Filename: defaultPDFFilename(p.FileName),
-								FileData: binaryPartDataURL(defaultPDFMediaType(p.MimeType), binaryPartPayload(p)),
+								FileData: binaryPartDataURL(defaultPDFMediaType(mime), data),
 							},
 						})
 					default: // "text"

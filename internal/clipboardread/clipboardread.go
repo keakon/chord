@@ -33,7 +33,7 @@ const readerProtocolMagic = "CHORD-CLIPBOARD/1"
 // maxAttachmentBytes bounds the payload the reader sends back. Sizing the limit
 // into the script keeps one oversized pasteboard item from being buffered as
 // base64 in the reader, piped through the main process, and only then rejected.
-const maxAttachmentBytes = max(imageutil.MaxPDFBytes, imageutil.MaxClipboardImageSourceBytes)
+const maxAttachmentBytes = max(imageutil.MaxPDFBytes, imageutil.MaxImageSourceBytes)
 
 // readerScript is the JXA program the darwin read runs. The candidate order is
 // the probe order of the in-process read: PDF first, then the image types,
@@ -60,10 +60,12 @@ function readAttachment() {
 		['public.jpeg', 'image/jpeg'],
 		['public.webp', 'image/webp'],
 		['com.microsoft.bmp', 'image/bmp'],
+		['com.compuserve.gif', 'image/gif'],
 		['image/png', 'image/png'],
 		['image/jpeg', 'image/jpeg'],
 		['image/webp', 'image/webp'],
 		['image/bmp', 'image/bmp'],
+		['image/gif', 'image/gif'],
 	];
 	for (let i = 0; i < candidates.length; i++) {
 		const type = candidates[i][0];
@@ -122,7 +124,7 @@ func decodeReaderOutput(r io.Reader) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("clipboard reader reported payload length %q", lengthLine)
 	}
 
-	limit := imageutil.MaxClipboardImageSourceBytes
+	limit := imageutil.MaxImageSourceBytes
 	if mimeType == "application/pdf" {
 		limit = imageutil.MaxPDFBytes
 	}

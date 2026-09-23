@@ -684,21 +684,29 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 				for _, p := range msg.Parts {
 					switch p.Type {
 					case "image":
+						data, mime, ok := binaryPartForWire(p)
+						if !ok {
+							continue
+						}
 						blocks = append(blocks, anthropicContent{
 							Type: "image",
 							Source: &anthropicImageSource{
 								Type:      "base64",
-								MediaType: p.MimeType,
-								Data:      encodeBase64Cached(binaryPartPayload(p)),
+								MediaType: mime,
+								Data:      encodeBase64Cached(data),
 							},
 						})
 					case "pdf":
+						data, mime, ok := binaryPartForWire(p)
+						if !ok {
+							continue
+						}
 						blocks = append(blocks, anthropicContent{
 							Type: "document",
 							Source: &anthropicImageSource{
 								Type:      "base64",
-								MediaType: defaultPDFMediaType(p.MimeType),
-								Data:      encodeBase64Cached(binaryPartPayload(p)),
+								MediaType: defaultPDFMediaType(mime),
+								Data:      encodeBase64Cached(data),
 							},
 						})
 					default: // "text"
@@ -890,21 +898,29 @@ func anthropicToolResultContent(msg message.Message) any {
 	for _, p := range msg.Parts {
 		switch p.Type {
 		case "image":
+			data, mime, ok := binaryPartForWire(p)
+			if !ok {
+				continue
+			}
 			blocks = append(blocks, anthropicContent{
 				Type: "image",
 				Source: &anthropicImageSource{
 					Type:      "base64",
-					MediaType: p.MimeType,
-					Data:      encodeBase64Cached(binaryPartPayload(p)),
+					MediaType: mime,
+					Data:      encodeBase64Cached(data),
 				},
 			})
 		case "pdf":
+			data, mime, ok := binaryPartForWire(p)
+			if !ok {
+				continue
+			}
 			blocks = append(blocks, anthropicContent{
 				Type: "document",
 				Source: &anthropicImageSource{
 					Type:      "base64",
-					MediaType: defaultPDFMediaType(p.MimeType),
-					Data:      encodeBase64Cached(binaryPartPayload(p)),
+					MediaType: defaultPDFMediaType(mime),
+					Data:      encodeBase64Cached(data),
 				},
 			})
 		default:

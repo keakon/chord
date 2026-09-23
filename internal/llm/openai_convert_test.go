@@ -196,7 +196,7 @@ func TestConvertMessagesToOpenAI_ToolOutputWithImageParts(t *testing.T) {
 		Content:    "Loaded image",
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "Loaded image"},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 		},
 	}}
 
@@ -812,7 +812,7 @@ func TestConvertMessagesToOpenAI_MergeKeepsImageBlock(t *testing.T) {
 		Parts: []message.ContentPart{
 			{Type: "text", Text: "before"},
 			{Type: "text", Text: "and after"},
-			{Type: "image", MimeType: "image/png", Data: []byte("png")},
+			{Type: "image", MimeType: "image/png", Data: tinyPNG},
 			{Type: "text", Text: "see this"},
 			{Type: "text", Text: "then fix"},
 		},

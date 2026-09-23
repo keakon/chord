@@ -4828,10 +4828,10 @@ func TestForkSessionEventSubmitReloadsImagePathOnlyAttachment(t *testing.T) {
 	m := NewModel(backend)
 	m.mode = ModeNormal
 
-	imagePath := filepath.Join(t.TempDir(), "screenshot.png")
-	imageData := []byte{0x89, 'P', 'N', 'G'}
-	if err := os.WriteFile(imagePath, imageData, 0o600); err != nil {
-		t.Fatalf("write image fixture: %v", err)
+	imagePath := writeTinyPNG(t)
+	imageData, err := os.ReadFile(imagePath)
+	if err != nil {
+		t.Fatalf("read image fixture: %v", err)
 	}
 
 	parts := []message.ContentPart{
@@ -4859,6 +4859,9 @@ func TestForkSessionEventSubmitReloadsImagePathOnlyAttachment(t *testing.T) {
 	}
 	if img.ImagePath != imagePath {
 		t.Fatalf("sent image path = %q, want %q", img.ImagePath, imagePath)
+	}
+	if img.MimeType != "image/png" {
+		t.Fatalf("sent image mime = %q, want image/png", img.MimeType)
 	}
 }
 

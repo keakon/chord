@@ -10,11 +10,18 @@ import (
 func TestBinaryPartReadCacheEvictsLeastRecentlyUsedWithinBudget(t *testing.T) {
 	c := newBinaryPartReadCache()
 	c.budget = 30
-	blob := func(n int) []byte { return []byte(strings.Repeat("x", n)) }
+	blob := func(n int) *binaryPartCacheEntry {
+		return &binaryPartCacheEntry{data: []byte(strings.Repeat("x", n)), mime: "image/png"}
+	}
+	put := func(path string, n int) {
+		entry := blob(n)
+		entry.path = path
+		c.put(entry)
+	}
 
-	c.put("a", blob(10))
-	c.put("b", blob(10))
-	c.put("c", blob(10))
+	put("a", 10)
+	put("b", 10)
+	put("c", 10)
 	for _, path := range []string{"a", "b", "c"} {
 		if _, ok := c.get(path); !ok {
 			t.Fatalf("%s evicted while the cache was within budget", path)
@@ -25,7 +32,7 @@ func TestBinaryPartReadCacheEvictsLeastRecentlyUsedWithinBudget(t *testing.T) {
 	// loop above, and reading "a" first made it the oldest again).
 	c.get("b")
 	c.get("c")
-	c.put("d", blob(10))
+	put("d", 10)
 	if _, ok := c.get("a"); ok {
 		t.Fatal("a survived, want the least recently used entry evicted")
 	}
@@ -47,8 +54,8 @@ func TestBinaryPartReadCacheEvictsLeastRecentlyUsedWithinBudget(t *testing.T) {
 func TestBinaryPartReadCacheRejectsOversizedPayload(t *testing.T) {
 	c := newBinaryPartReadCache()
 	c.budget = 10
-	c.put("small", []byte("12345"))
-	c.put("huge", []byte(strings.Repeat("x", 100)))
+	c.put(&binaryPartCacheEntry{path: "small", data: []byte("12345"), mime: "image/png"})
+	c.put(&binaryPartCacheEntry{path: "huge", data: []byte(strings.Repeat("x", 100)), mime: "image/png"})
 	if _, ok := c.get("huge"); ok {
 		t.Fatal("oversized payload cached, want rejected")
 	}
@@ -60,9 +67,9 @@ func TestBinaryPartReadCacheRejectsOversizedPayload(t *testing.T) {
 // Re-putting a known path refreshes recency without double-counting its bytes.
 func TestBinaryPartReadCacheRePutDoesNotDoubleCount(t *testing.T) {
 	c := newBinaryPartReadCache()
-	c.put("a", []byte("1234567890"))
+	c.put(&binaryPartCacheEntry{path: "a", data: []byte("1234567890"), mime: "image/png"})
 	before := c.bytes
-	c.put("a", []byte("1234567890"))
+	c.put(&binaryPartCacheEntry{path: "a", data: []byte("1234567890"), mime: "image/png"})
 	if c.bytes != before {
 		t.Fatalf("resident bytes = %d after re-put, want %d", c.bytes, before)
 	}

@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -203,7 +205,7 @@ func TestClient_CallTool(t *testing.T) {
 func TestClient_CallTool_MultipleContent(t *testing.T) {
 	ft := newFakeTransport()
 	ft.onMethod("initialize", initializeResult{})
-	imgBytes := []byte{0x89, 0x50, 0x4e, 0x47}
+	imgBytes := encodeToolPNG(t)
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
 			{Type: "text", Text: "line1"},
@@ -234,7 +236,16 @@ func TestClient_CallTool_MultipleContent(t *testing.T) {
 	}
 }
 
-func TestClient_CallTool_SkipsOversizedImage(t *testing.T) {
+func encodeToolPNG(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestClient_CallTool_SkipsUnreadableImage(t *testing.T) {
 	ft := newFakeTransport()
 	ft.onMethod("initialize", initializeResult{})
 	ft.onMethod("tools/call", toolCallResult{
@@ -252,11 +263,11 @@ func TestClient_CallTool_SkipsOversizedImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool failed: %v", err)
 	}
-	if result != "ok" {
-		t.Errorf("CallTool result = %q, want %q", result, "ok")
-	}
 	if len(images) != 0 {
 		t.Fatalf("CallTool returned %d images, want 0", len(images))
+	}
+	if !strings.HasPrefix(result, "ok\n") || !strings.Contains(result, "could not be read") {
+		t.Errorf("CallTool result = %q, want the text result plus an omission note", result)
 	}
 }
 

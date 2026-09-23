@@ -257,7 +257,7 @@ func TestCheckpointRetainedFailureRecordsElidesSuccessPayloadInKeptBatch(t *test
 
 // TestElideRetainedResultDropsBinaryPayloadEntirely pins that no elided
 // successful result can still reach the provider with its blob: a part left
-// with only ImagePath would be resolved back from disk by binaryPartPayload at
+// with only ImagePath would be resolved back from disk by binaryPartForWire at
 // request time, so elision must drop the parts outright and the message must
 // report zero payload bytes to the estimator afterwards.
 func TestElideRetainedResultDropsBinaryPayloadEntirely(t *testing.T) {

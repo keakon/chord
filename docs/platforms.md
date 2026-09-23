@@ -86,7 +86,7 @@ Terminals not listed here may ignore BEL entirely or only flash the window; chec
 
 `Ctrl+V` or `Alt+V` reads an image or PDF from the system clipboard and adds it as an attachment. The read and any image conversion run asynchronously, so the TUI remains responsive; sending is temporarily held until the read finishes. Ordinary terminal paste events, including the usual macOS `Cmd+V`, are text-only and never probe clipboard attachments.
 
-Chord reads the clipboard through each platform's own backend: the native library on Linux and Windows, and the system `osascript` on macOS. Clipboard PNG is preferred, then TIFF on macOS, followed by JPEG, WebP, and BMP; TIFF/BMP/WebP are normalized to PNG/JPEG before attachment. If both PDF and image representations are present, PDF takes priority. If no supported attachment is available, Chord shows a warning and does not fall back to text.
+Chord reads the clipboard through each platform's own backend: the native library on Linux and Windows, and the system `osascript` on macOS. Clipboard PNG is preferred, then TIFF on macOS, followed by JPEG, WebP, BMP, and GIF. Formats other than PNG and JPEG are converted to one of the two; any image longer than 2000px on its longest edge is scaled down, PNG and JPEG included (animated WebP and GIF use their first frame). If both PDF and image representations are present, PDF takes priority. If no supported attachment is available, Chord shows a warning and does not fall back to text.
 
 Inline image attachments are capped at 5 per composer message. Literal placeholder text like `[image1]` is not special by itself; only Chord-inserted inline placeholders are backed by real attachments.
 

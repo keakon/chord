@@ -37,9 +37,11 @@ type viewImageArgs struct {
 func (*ViewImageTool) Name() string { return NameViewImage }
 
 func (*ViewImageTool) Description() string {
-	return "View a local PNG or JPEG image by loading its contents into the conversation so you can see it directly. " +
+	return "View a local image file by loading its contents into the conversation so you can see it directly. " +
 		"Use this to inspect a screenshot, diagram, or rendered output on disk (for example to verify a UI change you just made). " +
-		"The path must point to a PNG or JPEG file readable on this machine. " +
+		"PNG, JPEG, WebP, GIF, BMP and TIFF files are supported; animated WebP, GIF and TIFF use their first frame, and images larger than " +
+		fmt.Sprintf("%dpx", imageutil.MaxImageEdge) + " on the longest edge are scaled down to fit, which the result reports. " +
+		"HEIC/HEIF/AVIF/SVG files must be converted to PNG or JPEG first. " +
 		"Note: the image content enters the model context and may be sent to a remote provider."
 }
 
@@ -49,7 +51,7 @@ func (*ViewImageTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Relative (preferred) or absolute path to a PNG or JPEG file. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
+				"description": "Relative (preferred) or absolute path to an image file (PNG, JPEG, WebP, GIF, BMP or TIFF). Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
 			},
 			"label": map[string]any{
 				"type":        "string",
@@ -106,9 +108,9 @@ func (t *ViewImageTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		return "", err
 	}
 
-	// Read and (for PNG) compress; ReadImageFile rejects non-PNG/JPEG inputs and
-	// enforces the shared size limit.
-	data, mimeType, err := imageutil.ReadImageFile(resolvedPath)
+	// Read and normalize; ReadImageFile rejects unsupported or oversized inputs
+	// and reports how the image was transformed.
+	normalized, err := imageutil.ReadImageFile(resolvedPath)
 	if err != nil {
 		return "", err
 	}
@@ -117,8 +119,8 @@ func (t *ViewImageTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	// store; the original on-disk file may be transient (e.g. a screenshot).
 	sink.AddImage(message.ContentPart{
 		Type:     "image",
-		MimeType: mimeType,
-		Data:     data,
+		MimeType: normalized.MimeType,
+		Data:     normalized.Data,
 		FileName: filepath.Base(resolvedPath),
 	})
 
@@ -126,5 +128,16 @@ func (t *ViewImageTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	if label == "" {
 		label = filepath.Base(resolvedPath)
 	}
-	return fmt.Sprintf("Loaded image %q into context.", label), nil
+	return fmt.Sprintf("Loaded image %q into context (%s).", label, describeImageSize(normalized)), nil
+}
+
+// describeImageSize reports the final size, and the original size when scaling
+// dropped detail, so the model knows a long screenshot lost resolution.
+func describeImageSize(image imageutil.NormalizedImage) string {
+	size := fmt.Sprintf("%dx%d", image.Width, image.Height)
+	if !image.WasScaled() {
+		return size
+	}
+	return fmt.Sprintf("%dx%d -> %s (scaled to %dpx max edge)",
+		image.OriginalWidth, image.OriginalHeight, size, imageutil.MaxImageEdge)
 }
