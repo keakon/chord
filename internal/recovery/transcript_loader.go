@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -16,14 +15,11 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-// sessionIDPattern matches local wall-clock session directory names
-// (YYYYMMDDHHmmSSfff, digits only) produced by SessionIDForTime.
-var sessionIDPattern = regexp.MustCompile(`^\d{17}$`)
-
 // ReadOnlyTranscriptLoader reads main.jsonl transcripts strictly read-only. It
 // is the only loader Memory extraction (and the cross-session reference
-// surface) may use: it validates the session directory against the project
-// sessions root, rejects path/symlink escape, never acquires the owner session
+// surface) may use: LoadDir takes an already-resolved session directory and
+// still enforces containment against the project sessions root, so a path or
+// symlink escaping the root is refused. It never acquires the owner session
 // lock, never loads attachments, and never modifies or normalizes the source
 // session. Concurrent appends are handled by the same stable full-record and
 // bounded-retry semantics as session restore.
@@ -35,50 +31,6 @@ type ReadOnlyTranscriptLoader struct {
 // directory.
 func NewReadOnlyTranscriptLoader(sessionsRoot string) *ReadOnlyTranscriptLoader {
 	return &ReadOnlyTranscriptLoader{sessionsRoot: sessionsRoot}
-}
-
-// ValidateSessionID reports whether id is a valid local session directory name.
-func ValidateSessionID(id string) bool {
-	return sessionIDPattern.MatchString(id)
-}
-
-// resolveSessionDir resolves and validates a session directory under the
-// sessions root. It refuses anything that is not a direct child, escapes the
-// root through "..", or resolves through a symlink to outside the root.
-func (l *ReadOnlyTranscriptLoader) resolveSessionDir(sessionID string) (string, error) {
-	if !ValidateSessionID(sessionID) {
-		return "", fmt.Errorf("invalid session id %q", sessionID)
-	}
-	if l == nil || l.sessionsRoot == "" {
-		return "", fmt.Errorf("transcript loader has no sessions root")
-	}
-	root, err := filepath.EvalSymlinks(l.sessionsRoot)
-	if err != nil {
-		return "", fmt.Errorf("resolve sessions root: %w", err)
-	}
-	dir := filepath.Join(root, sessionID)
-	resolved, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", fmt.Errorf("session %s not found", sessionID)
-		}
-		return "", fmt.Errorf("resolve session dir: %w", err)
-	}
-	if filepath.Clean(resolved) != filepath.Clean(dir) {
-		return "", fmt.Errorf("session %s resolves outside the sessions root", sessionID)
-	}
-	return dir, nil
-}
-
-// Load reads the main transcript of sessionID, returning parsed messages in
-// order. A truncated trailing record (crash mid-write) is skipped like session
-// restore. Attachments (image/PDF bytes) are never loaded.
-func (l *ReadOnlyTranscriptLoader) Load(sessionID string) ([]message.Message, error) {
-	dir, err := l.resolveSessionDir(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	return l.LoadDir(dir)
 }
 
 // LoadDir reads the main transcript from an already-validated session

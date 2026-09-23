@@ -69,8 +69,8 @@ func TestSessionOrderUsesLastActivityTime(t *testing.T) {
 	if list[0].ID != olderID || list[1].ID != newerID {
 		t.Fatalf("order = %q, %q; want recently active %q first", list[0].ID, list[1].ID, olderID)
 	}
-	if got := FindMostRecentSession(sessionsDir, ""); got != olderSession {
-		t.Fatalf("FindMostRecentSession = %q, want %q", got, olderSession)
+	if got := RecentSessionCandidates(sessionsDir, ""); len(got) != 2 || got[0] != olderSession {
+		t.Fatalf("RecentSessionCandidates = %v, want %q first", got, olderSession)
 	}
 }
 
@@ -95,15 +95,16 @@ func TestSessionOrderUsesCachedActivityNewerThanTranscript(t *testing.T) {
 	if list[0].ID != activeID {
 		t.Fatalf("first = %q, want recently active session %q", list[0].ID, activeID)
 	}
-	if got := FindMostRecentSession(sessionsDir, ""); got != activeSession {
-		t.Fatalf("FindMostRecentSession = %q, want %q", got, activeSession)
+	if got := RecentSessionCandidates(sessionsDir, ""); len(got) != 2 || got[0] != activeSession {
+		t.Fatalf("RecentSessionCandidates = %v, want %q first", got, activeSession)
 	}
 }
 
 // Equal activity timestamps are routine: `cp -p`/`rsync -a` preserve mtimes, and
 // filesystems with one-second mtime granularity (FAT/exFAT, some SMB and NFS
 // mounts) collapse nearby writes onto the same value. The tie must then be
-// broken deterministically and identically by both the list and --continue.
+// broken deterministically and identically by both ListSessions and
+// RecentSessionCandidates, so the picker's first row and resume agree.
 func TestSessionOrderTieBreaksOnDescendingIDDeterministically(t *testing.T) {
 	sessionsDir := t.TempDir()
 	lowerID := "20261031120000123"
@@ -125,16 +126,17 @@ func TestSessionOrderTieBreaksOnDescendingIDDeterministically(t *testing.T) {
 		if list[0].ID != higherID || list[1].ID != lowerID {
 			t.Fatalf("order = %q, %q; want descending ID %q first on equal activity", list[0].ID, list[1].ID, higherID)
 		}
-		if got := FindMostRecentSession(sessionsDir, ""); got != higherSession {
-			t.Fatalf("FindMostRecentSession = %q, want %q (must match the list's first row)", got, higherSession)
+		if got := RecentSessionCandidates(sessionsDir, ""); len(got) != 2 || got[0] != higherSession {
+			t.Fatalf("RecentSessionCandidates = %v, want %q first (must match the list's first row)", got, higherSession)
 		}
 	}
 }
 
-// A session another live process owns cannot be opened, so it is not a
-// candidate for --continue or in-app /resume even when it is the most recent.
-// It still appears in the list, marked Locked, for the picker to render.
-func TestFindMostRecentSessionSkipsSessionOwnedByAnotherProcess(t *testing.T) {
+// A session another live process owns stays in the activity order: ownership is
+// probed by trying to acquire the lock (the caller falls through to the next
+// candidate), which is race-free where a pre-check is not. The list still marks
+// it Locked for the picker to render.
+func TestRecentSessionCandidatesOrderIncludesLockedSession(t *testing.T) {
 	sessionsDir := t.TempDir()
 	idleID := "20261031120000123"
 	busyID := "20261031130000456"
@@ -152,9 +154,6 @@ func TestFindMostRecentSessionSkipsSessionOwnedByAnotherProcess(t *testing.T) {
 
 	if got := RecentSessionCandidates(sessionsDir, ""); len(got) != 2 || got[0] != busySession {
 		t.Fatalf("RecentSessionCandidates = %v, want the busy session ordered first", got)
-	}
-	if got := FindMostRecentSession(sessionsDir, ""); got != idleSession {
-		t.Fatalf("FindMostRecentSession = %q, want %q (the busy session is owned elsewhere)", got, idleSession)
 	}
 	list, err := ListSessions(sessionsDir, "")
 	if err != nil {

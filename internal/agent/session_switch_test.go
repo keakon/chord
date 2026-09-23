@@ -728,15 +728,13 @@ func TestHandleForkSessionCommandSeedsPrefixAndRestoresDerivedState(t *testing.T
 	if len(persisted) != 2 {
 		t.Fatalf("len(persisted) = %d, want 2", len(persisted))
 	}
-	if info := recovery.SessionInfoForDir(a.sessionDir); info == nil || info.ForkedFrom != filepath.Base(oldSessionDir) {
-		t.Fatalf("SessionInfoForDir(a.sessionDir) = %+v, want ForkedFrom %q", info, filepath.Base(oldSessionDir))
-	}
 	if summary := a.GetSessionSummary(); summary == nil || summary.ForkedFrom != filepath.Base(oldSessionDir) {
 		t.Fatalf("GetSessionSummary() = %+v, want ForkedFrom %q", summary, filepath.Base(oldSessionDir))
 	}
 	if forkMeta, err := recovery.LoadSessionMeta(a.sessionDir); err != nil || forkMeta == nil ||
+		forkMeta.ForkedFrom != filepath.Base(oldSessionDir) ||
 		!slices.Equal(forkMeta.MCPEnabledServers, []string{"manual-files", "manual-search"}) {
-		t.Fatalf("fork MCP intent = %#v, %v; want [manual-files manual-search]", forkMeta, err)
+		t.Fatalf("fork meta = %#v, %v; want ForkedFrom %q and MCP intent [manual-files manual-search]", forkMeta, err, filepath.Base(oldSessionDir))
 	}
 
 	evt := <-a.Events()

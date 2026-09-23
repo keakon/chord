@@ -99,7 +99,7 @@ func BenchmarkLoadMessagesBySize(b *testing.B) {
 	}
 }
 
-func BenchmarkFindMostRecentSessionCachedActivity(b *testing.B) {
+func BenchmarkRecentSessionCandidatesCachedActivity(b *testing.B) {
 	sessionsDir := b.TempDir()
 	const sessionCount = 200
 	largeAggregate := strings.Repeat(`"provider/model":{"llm_calls":1},`, 500)
@@ -120,8 +120,8 @@ func BenchmarkFindMostRecentSessionCachedActivity(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if got := FindMostRecentSession(sessionsDir, ""); got == "" {
-			b.Fatal("FindMostRecentSession returned empty path")
+		if got := RecentSessionCandidates(sessionsDir, ""); len(got) != sessionCount {
+			b.Fatalf("RecentSessionCandidates = %d sessions, want %d", len(got), sessionCount)
 		}
 	}
 }

@@ -850,63 +850,6 @@ func FirstUserMessageFromFile(mainPath string) (string, error) {
 	return firstUserMessageFromFile(mainPath)
 }
 
-// SessionInfoForDir returns SessionInfo for a single session directory.
-// Returns nil if the directory has no main.jsonl or it is empty.
-func SessionInfoForDir(sessionPath string) *SessionInfo {
-	mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
-	info, err := os.Stat(mainPath)
-	if err != nil || info.Size() == 0 {
-		return nil
-	}
-	lastModTime := info.ModTime()
-	firstUser, _ := firstUserMessageFromFile(mainPath)
-	firstUserIsCompactionSummary := false
-	// Only a preview the summary actually recorded may seed the original
-	// request. One read from the transcript must not: on a compacted history the
-	// scan skips the checkpoint and names the first prompt *after* it, and an
-	// original request is sticky — session lists prefer it and every later
-	// checkpoint copies it forward as its "Original request:" anchor.
-	firstUserIsRecorded := false
-	originalFirstUser := ""
-	if summary, err := analytics.LoadSessionUsageSummary(sessionPath); err == nil && summary != nil {
-		if !summary.LastUpdatedAt.IsZero() && summary.LastUpdatedAt.After(lastModTime) {
-			lastModTime = summary.LastUpdatedAt
-		}
-		if summary.FirstUserMessage != "" {
-			firstUser = summary.FirstUserMessage
-			firstUserIsCompactionSummary = summary.FirstUserMessageIsCompactionSummary
-			firstUserIsRecorded = true
-		}
-		if summary.OriginalFirstUserMessage != "" {
-			originalFirstUser = summary.OriginalFirstUserMessage
-		}
-	}
-	if originalFirstUser == "" && firstUserIsRecorded && !firstUserIsCompactionSummary {
-		originalFirstUser = firstUser
-	}
-	locked, err := sessionDirLockedByLiveOwner(sessionPath)
-	if err != nil {
-		return nil
-	}
-	forkedFrom := ""
-	worktreeName := ""
-	if meta, err := LoadSessionMeta(sessionPath); err == nil && meta != nil {
-		forkedFrom = meta.ForkedFrom
-		worktreeName = meta.WorktreeName
-	}
-	return &SessionInfo{
-		ID:                                  filepath.Base(sessionPath),
-		Path:                                sessionPath,
-		LastModTime:                         lastModTime,
-		FirstUserMessage:                    firstUser,
-		FirstUserMessageIsCompactionSummary: firstUserIsCompactionSummary,
-		OriginalFirstUserMessage:            originalFirstUser,
-		ForkedFrom:                          forkedFrom,
-		Locked:                              locked,
-		WorktreeName:                        worktreeName,
-	}
-}
-
 // sessionActivityTime reports the last observed activity for one session
 // directory, and whether the session has a non-empty transcript at all.
 //
@@ -976,24 +919,6 @@ func RecentSessionCandidates(sessionsDir string, excludeDir string) []string {
 		paths = append(paths, c.path)
 	}
 	return paths
-}
-
-// FindMostRecentSession returns the most recently active session that has a
-// non-empty main.jsonl and is not already open in another live Chord process.
-// It is used by in-app /resume, which switches into a session without going
-// through startup's lock acquisition. Returns "" if no suitable session exists.
-//
-// excludeDir is the path of a session directory to skip (typically the
-// current session). Pass "" to not exclude any directory.
-func FindMostRecentSession(sessionsDir string, excludeDir string) string {
-	for _, sessionPath := range RecentSessionCandidates(sessionsDir, excludeDir) {
-		locked, err := sessionDirLockedByLiveOwner(sessionPath)
-		if err != nil || locked {
-			continue
-		}
-		return sessionPath
-	}
-	return ""
 }
 
 // messageLogPath returns the JSONL file path for the given agent.

@@ -10,18 +10,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func TestReadOnlyTranscriptLoaderValidatesSessionID(t *testing.T) {
-	if !ValidateSessionID("20260821153000123") {
-		t.Fatal("valid session id rejected")
-	}
-	for _, bad := range []string{"", "2026", "..", "../../etc", "abc", "2026082115300012x"} {
-		if ValidateSessionID(bad) {
-			t.Fatalf("invalid session id accepted: %q", bad)
-		}
-	}
-}
-
-func TestReadOnlyTranscriptLoaderLoad(t *testing.T) {
+func TestReadOnlyTranscriptLoaderLoadDirReadsInOrder(t *testing.T) {
 	root := t.TempDir()
 	sessions := filepath.Join(root, "sessions")
 	if err := os.MkdirAll(sessions, 0o755); err != nil {
@@ -41,16 +30,16 @@ func TestReadOnlyTranscriptLoaderLoad(t *testing.T) {
 	rm.Close()
 
 	l := NewReadOnlyTranscriptLoader(sessions)
-	msgs, err := l.Load("20260821153000123")
+	msgs, err := l.LoadDir(dir)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("LoadDir: %v", err)
 	}
 	if len(msgs) != 2 || msgs[0].Content != "hello" || msgs[1].Content != "world" {
 		t.Fatalf("loaded = %+v", msgs)
 	}
-	// Unknown session.
-	if _, err := l.Load("19990101000000000"); err == nil {
-		t.Fatal("expected error for unknown session")
+	// Unknown session directory.
+	if _, err := l.LoadDir(filepath.Join(sessions, "19990101000000000")); err == nil {
+		t.Fatal("expected error for unknown session directory")
 	}
 }
 
@@ -61,8 +50,7 @@ func TestReadOnlyTranscriptLoaderRejectsPathEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := NewReadOnlyTranscriptLoader(sessions)
-	// A directory named with ../ won't pass the session-id validation; ensure
-	// an out-of-root dir passed via LoadDir is rejected too.
+	// An out-of-root directory passed via LoadDir is rejected.
 	outside := filepath.Join(root, "outside")
 	if err := os.MkdirAll(outside, 0o755); err != nil {
 		t.Fatal(err)
@@ -95,9 +83,9 @@ func TestReadOnlyTranscriptLoaderDoesNotLoadAttachments(t *testing.T) {
 	rm.Close()
 
 	l := NewReadOnlyTranscriptLoader(sessions)
-	msgs, err := l.Load("20260821153000123")
+	msgs, err := l.LoadDir(dir)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("LoadDir: %v", err)
 	}
 	if len(msgs) != 1 {
 		t.Fatalf("loaded = %d messages", len(msgs))
