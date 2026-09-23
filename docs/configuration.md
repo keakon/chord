@@ -972,7 +972,7 @@ prevent_sleep: true
 - `desktop_notification`: enables terminal notifications in local TUI mode,
   regardless of whether the terminal is focused. Each notification pairs the terminal notification escape sequence (auto-selected by terminal, OSC 9 or OSC 777) with a terminal bell (BEL), so it can be heard even where the terminal hides notification banners while focused.
 
-  Chord notifies when the agent actually ran and then stopped (a completed, cancelled, or loop-finished turn, or all SubAgents finishing) and for permission confirmations and questions, Handoff, and loop decisions waiting for input; user-initiated navigation that settles into idle (session / model-pool / MCP switches, idle slash commands) stays silent. Whether the bell is audible depends on terminal setup; see [Platforms](platforms.md).
+  Chord notifies when the agent actually ran and then stopped (a completed, cancelled, or loop-finished turn, or all SubAgents finishing) and for permission confirmations and questions, Handoff, loop decisions, and notify-protocol corrections waiting for input; user-initiated navigation that settles into idle (session / model-pool / MCP switches, idle slash commands) stays silent. Whether the bell is audible depends on terminal setup; see [Platforms](platforms.md).
 - `desktop_notification_foreground`: controls whether notifications (both the
   escape sequence and the bell) are sent while the TUI is focused. Defaults to
   `true`; set it to `false` to notify only when the terminal is unfocused.

@@ -67,7 +67,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `background_result`, `context_notice`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`.
 
 ### `status`
 
@@ -91,6 +91,11 @@ Response:
     "pending_confirm": null,
     "pending_question": null,
     "pending_handoff": null,
+    "workdir": {
+      "path": "/workspace/project",
+      "worktree_id": "",
+      "generation": 0
+    },
     "last_error": "",
     "last_outcome": "completed",
     "current_role": "builder",
@@ -100,6 +105,8 @@ Response:
 ```
 
 `session_id` tracks the active session, not just the startup snapshot. An in-band switch that replaces the session without restarting the process (handoff plan execution, `/resume <id>`, `/new`) updates the tracked id, and the change is announced with an explicit `session_switched` push; the cached value alone never counts as the gateway having seen the new session. Restores that keep the session (startup replay, durable compaction rewrite) only refresh the timestamp and emit nothing. The tracked id moves even without a `session_switched` subscription, so `status_response` always reports the session the runtime actually runs.
+
+`workdir` is the checkout currently used by the agent. `path` is the effective working directory, `worktree_id` is empty for the main or unmanaged checkout, and `generation` changes whenever the binding changes. A mid-session worktree switch updates `status_response` and emits `workdir_changed` when subscribed; integrations should use the generation to discard stale snapshots.
 
 ### `send`
 
@@ -284,7 +291,7 @@ Silent retry telemetry is never pushed. A retry the TUI only records in the erro
 
 Quiescent SubAgents may release their live runtime while their task and transcript remain durable. A later authorized targeted notification can rehydrate the task with a new `agent_id`; use stable `task_id` for routing and use `previous_agent_id` on `agent_started` to replace runtime-specific labels.
 
-`idle` is a global quiescence signal, not a per-request completion signal. Chord does not emit it while any agent is running, any internal event or actionable mailbox message is queued, a Handoff decision is pending, or a SubAgent has input waiting for its next request. A busy target processes queued messages at the next request boundary; a resumable non-running target is woken first. Progress and notice snapshots bound for the main inbox are actionable rather than informational: while the main is idle, Chord merges the pending undelivered updates into a single delivery batch, delivered in arrival order, and wakes the main for that delivery turn before global idle can fire; every arriving batch therefore costs one extra main turn and LLM request, and the idle event is held back until the batch has been delivered. `suppress_user_notification` does not change the idle state transition; it only tells user-facing integrations not to emit a generic completion reminder when the quiescence was not preceded by real agent work: for example startup, session / model-pool / MCP switches, or other user-initiated navigation. It is `true` unless the agent actually ran (a main turn, loop execution, or active SubAgent work) since the previous idle event. `notification` is the complementary explicit reminder for a runtime state that is waiting for user input; `reason="user_input_required"` currently covers permissions, questions, Handoff, and loop decisions.
+`idle` is a global quiescence signal, not a per-request completion signal. Chord does not emit it while any agent is running, any internal event or actionable mailbox message is queued, a Handoff decision is pending, or a SubAgent has input waiting for its next request. A busy target processes queued messages at the next request boundary; a resumable non-running target is woken first. Progress and notice snapshots bound for the main inbox are actionable rather than informational: while the main is idle, Chord merges the pending undelivered updates into a single delivery batch, delivered in arrival order, and wakes the main for that delivery turn before global idle can fire; every arriving batch therefore costs one extra main turn and LLM request, and the idle event is held back until the batch has been delivered. `suppress_user_notification` does not change the idle state transition; it only tells user-facing integrations not to emit a generic completion reminder when the quiescence was not preceded by real agent work: for example startup, session / model-pool / MCP switches, or other user-initiated navigation. It is `true` unless the agent actually ran (a main turn, loop execution, or active SubAgent work) since the previous idle event. `notification` is the complementary explicit reminder for a runtime state that is waiting for user input; `reason="user_input_required"` currently covers permissions, questions, Handoff, loop decisions, and notify-protocol corrections. Permissions, questions, and Handoff already deliver their own prompt as a card or as chat text, so an integration may drop the reminder while that request is still pending; loop decisions and notify corrections have no other prompt.
 
 ## Slash compatibility via `send`
 

@@ -58,7 +58,7 @@ Install `im-select` separately. The variable name is just a string: Chord passes
 
 ### `desktop_notification` (terminal notifications)
 
-When enabled, Chord emits terminal notification escape sequences when the agent actually ran and then stopped (a completed, cancelled, or loop-finished turn, or all SubAgents finishing) and for permissions, questions, Handoff, and loop decisions waiting for input. User-initiated navigation that settles into idle (session / model-pool / MCP switches, idle slash commands) stays silent. There is no Chord-side notifier daemon; the terminal is responsible for surfacing the notification.
+When enabled, Chord emits terminal notification escape sequences when the agent actually ran and then stopped (a completed, cancelled, or loop-finished turn, or all SubAgents finishing) and for permissions, questions, Handoff, loop decisions, and notify-protocol corrections waiting for input. User-initiated navigation that settles into idle (session / model-pool / MCP switches, idle slash commands) stays silent. There is no Chord-side notifier daemon; the terminal is responsible for surfacing the notification.
 
 Chord auto-selects the protocol by terminal. Unsupported terminals usually ignore the sequence.
 

@@ -67,7 +67,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`background_result`、`context_notice`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`。
 
 ### `status`
 
@@ -91,6 +91,11 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
     "pending_confirm": null,
     "pending_question": null,
     "pending_handoff": null,
+    "workdir": {
+      "path": "/workspace/project",
+      "worktree_id": "",
+      "generation": 0
+    },
     "last_error": "",
     "last_outcome": "completed",
     "current_role": "builder",
@@ -100,6 +105,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 ```
 
 `session_id` 跟的是当前实际会话，不是启动时的快照。进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`），Chord 会更新这个跟踪值，并用一条显式的 `session_switched` 推送告诉订阅方；仅凭缓存值变化不能视为网关已看到新会话。会话没换的恢复（启动回放、持久压缩重写）只刷新时间戳，不推送。即使没订阅 `session_switched`，跟踪值照样会更新，所以 `status_response` 永远报实际运行的那个会话。
+
+`workdir` 是 agent 当前实际使用的 checkout。`path` 是生效的工作目录；主仓库或非 Chord 管理目录的 `worktree_id` 为空；每次 binding 变化都会递增 `generation`。会话中切换 worktree 时，`status_response` 会更新；订阅了 `workdir_changed` 的客户端还会收到推送，应该用 generation 丢弃过期快照。
 
 ### `send`
 
@@ -284,7 +291,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 进入静止状态的 SubAgent 可能释放 live runtime，但 task 与 transcript 会持久保留。后续获授权的定向通知可用新的 `agent_id` rehydrate 该任务；集成方应使用稳定的 `task_id` 路由，并根据 `agent_started.previous_agent_id` 替换 runtime 级标签。
 
-`idle` 是全局静默信号，不是单次请求完成信号。只要任一 agent 仍在运行、内部事件或需要处理的 mailbox 消息仍在排队、Handoff 决策还没完成，或某个 SubAgent 还有等待下一请求消费的输入，Chord 就不会发出 `idle`。目标 busy 时，排队消息会在下一个请求边界处理；可恢复但未运行的目标会先被唤醒。发往主 inbox 的 progress / notice 快照是可处理的工作，不是纯信息：主代理空闲时，Chord 会把待投递的更新合并成一批、按到达顺序投递，在发出全局 idle 之前先唤醒主代理投递完这批，每来一批都会多一次主回合与 LLM 请求，idle 也要等这批投递收尾才发出。`suppress_user_notification` 不改变 idle 状态收口，只告诉面向用户的集成：当这次静默之前并没有真实的 agent 工作（例如启动、会话 / model pool / MCP 切换或其它用户主动导航）时，不要发出通用完成提醒。除非 agent 在上一次 idle 事件之后确实运行过（主回合、loop 执行或活跃的 SubAgent 工作），否则该字段为 `true`。`notification` 则用于 runtime 明确等待用户输入的提醒；当前 `reason="user_input_required"` 覆盖权限、Question、Handoff 和 loop 决策。
+`idle` 是全局静默信号，不是单次请求完成信号。只要任一 agent 仍在运行、内部事件或需要处理的 mailbox 消息仍在排队、Handoff 决策还没完成，或某个 SubAgent 还有等待下一请求消费的输入，Chord 就不会发出 `idle`。目标 busy 时，排队消息会在下一个请求边界处理；可恢复但未运行的目标会先被唤醒。发往主 inbox 的 progress / notice 快照是可处理的工作，不是纯信息：主代理空闲时，Chord 会把待投递的更新合并成一批、按到达顺序投递，在发出全局 idle 之前先唤醒主代理投递完这批，每来一批都会多一次主回合与 LLM 请求，idle 也要等这批投递收尾才发出。`suppress_user_notification` 不改变 idle 状态收口，只告诉面向用户的集成：当这次静默之前并没有真实的 agent 工作（例如启动、会话 / model pool / MCP 切换或其它用户主动导航）时，不要发出通用完成提醒。除非 agent 在上一次 idle 事件之后确实运行过（主回合、loop 执行或活跃的 SubAgent 工作），否则该字段为 `true`。`notification` 则用于 runtime 明确等待用户输入的提醒；当前 `reason="user_input_required"` 覆盖权限、Question、Handoff、loop 决策和 notify 协议纠正。权限、Question 和 Handoff 各自的请求已经以卡片或聊天文本形式发过提示，集成方可以在该请求仍待处理时丢掉重复的提醒；loop 决策和 notify 纠正没有其它提示通道。
 
 ## 通过 `send` 兼容 slash 命令
 
