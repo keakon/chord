@@ -20,9 +20,25 @@ import (
 	"sync"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 )
+
+// writeAuthConfigForTest stages an auth.yaml fixture for tests that exercise
+// the load path. Production writes go through the locked atomic persist
+// helpers; fixtures only need the same bytes on disk.
+func writeAuthConfigForTest(t *testing.T, path string, auth config.AuthConfig) {
+	t.Helper()
+	data, err := yaml.Marshal(auth)
+	if err != nil {
+		t.Fatalf("marshal auth fixture: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write auth fixture: %v", err)
+	}
+}
 
 func TestResolvePprofListenAddr(t *testing.T) {
 	t.Setenv("CHORD_PPROF_PORT", "")
@@ -706,15 +722,13 @@ func TestRunAuthRefreshRefreshesAllCodexOAuthCredentials(t *testing.T) {
 	defer srv.Close()
 
 	authPath := filepath.Join(configHome, "auth.yaml")
-	if err := config.SaveAuthConfig(filepath.Join(configHome, "auth.yaml"), config.AuthConfig{
+	writeAuthConfigForTest(t, filepath.Join(configHome, "auth.yaml"), config.AuthConfig{
 		"codex": {
 			{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-a", "user-a", "a@example.com"), Refresh: "refresh-a", AccountID: "acct-a", Email: "a@example.com", CodexPrimaryResetAt: 111}},
 			{APIKey: "api-key"},
 			{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-b", "user-b", "b@example.com"), Refresh: "refresh-b", AccountUserID: "user-b__acct-b", AccountID: "acct-b", Email: "b@example.com", CodexSecondaryResetAt: 222}},
 		},
-	}); err != nil {
-		t.Fatalf("SaveAuthConfig: %v", err)
-	}
+	})
 
 	var out bytes.Buffer
 	initialAuth, err := config.LoadAuthConfig(authPath)
@@ -814,13 +828,11 @@ func TestRunAuthRefreshContinuesAfterFailures(t *testing.T) {
 	defer srv.Close()
 
 	authPath := filepath.Join(configHome, "auth.yaml")
-	if err := config.SaveAuthConfig(authPath, config.AuthConfig{"codex": {
+	writeAuthConfigForTest(t, authPath, config.AuthConfig{"codex": {
 		{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-a", "user-a", "a@example.com"), Refresh: "refresh-a", AccountID: "acct-a", Email: "a@example.com"}},
 		{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-b", "user-b", "b@example.com"), Refresh: "refresh-b", AccountID: "acct-b", Email: "b@example.com"}},
 		{OAuth: &config.OAuthCredential{Access: testCodexAccessToken("acct-c", "user-c", "c@example.com"), Refresh: "refresh-c", AccountID: "acct-c", Email: "c@example.com"}},
-	}}); err != nil {
-		t.Fatalf("SaveAuthConfig: %v", err)
-	}
+	}})
 
 	initialAuth, err := config.LoadAuthConfig(authPath)
 	if err != nil {
@@ -861,11 +873,9 @@ func TestRunAuthRefreshRollsBackAuthCredentialWhenStatePersistFails(t *testing.T
 
 	authPath := filepath.Join(configHome, "auth.yaml")
 	oldAccess := testCodexAccessToken("acct-a", "user-a", "a@example.com")
-	if err := config.SaveAuthConfig(authPath, config.AuthConfig{"codex": {
+	writeAuthConfigForTest(t, authPath, config.AuthConfig{"codex": {
 		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-old", AccountID: "acct-a", Email: "a@example.com", CodexPrimaryResetAt: 111}},
-	}}); err != nil {
-		t.Fatalf("SaveAuthConfig: %v", err)
-	}
+	}})
 	if err := os.Mkdir(filepath.Join(configHome, "auth.state.json.tmp"), 0o700); err != nil {
 		t.Fatalf("block auth state temp path: %v", err)
 	}
@@ -904,11 +914,9 @@ func TestRunAuthRefreshRejectsMismatchedAccount(t *testing.T) {
 
 	authPath := filepath.Join(configHome, "auth.yaml")
 	oldAccess := testCodexAccessToken("acct-a", "user-a", "a@example.com")
-	if err := config.SaveAuthConfig(authPath, config.AuthConfig{"codex": {
+	writeAuthConfigForTest(t, authPath, config.AuthConfig{"codex": {
 		{OAuth: &config.OAuthCredential{Access: oldAccess, Refresh: "refresh-a", AccountID: "acct-a", Email: "a@example.com"}},
-	}}); err != nil {
-		t.Fatalf("SaveAuthConfig: %v", err)
-	}
+	}})
 
 	initialAuth, err := config.LoadAuthConfig(authPath)
 	if err != nil {
@@ -1912,9 +1920,7 @@ func TestPersistOAuthMetadataBackfillsUpdatesAuthFileAndMemory(t *testing.T) {
 			{OAuth: &config.OAuthCredential{Access: access, Refresh: "refresh-123"}},
 		},
 	}
-	if err := config.SaveAuthConfig(authPath, auth); err != nil {
-		t.Fatalf("SaveAuthConfig: %v", err)
-	}
+	writeAuthConfigForTest(t, authPath, auth)
 	_, backfills, err := oauthCredentialMap(auth["codex"])
 	if err != nil {
 		t.Fatalf("oauthCredentialMap: %v", err)

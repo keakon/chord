@@ -259,8 +259,9 @@ type StreamingFrontierScanner struct {
 //
 // Saved state is only committed at definite line boundaries: the final line
 // may still be growing (no terminator yet, or a trailing '\r' that could
-// become '\r\n'), so it is rescanned from its start on the next call. This
-// keeps incremental results identical to FindStreamingSettledFrontier.
+// become '\r\n'), so it is rescanned from its start on the next call. A fresh
+// scanner over full content therefore agrees with an incrementally fed one,
+// which is what the scanner tests pin.
 func (s *StreamingFrontierScanner) Advance(content string) int {
 	if !strings.HasPrefix(content, s.Content) {
 		// Content changed non-monotonically – reset.
@@ -352,63 +353,6 @@ func (s *StreamingFrontierScanner) Advance(content string) int {
 	if content[len(content)-1] == '\r' {
 		s.scanned--
 	}
-	return frontier
-}
-
-// FindStreamingSettledFrontier returns the byte offset in content up to
-// which the markdown structure is stable enough to render during streaming.
-// It scans line-by-line without allocating intermediate slices so long
-// append-only responses stay cheap to re-evaluate.
-func FindStreamingSettledFrontier(content string) int {
-	if content == "" {
-		return 0
-	}
-
-	frontier := 0
-	offset := 0
-	inFence := false
-	prevBlank := false
-	var currentFence Fence
-
-	for i := 0; i < len(content); {
-		lineStart := i
-		for i < len(content) && content[i] != '\n' && content[i] != '\r' {
-			i++
-		}
-		line := content[lineStart:i]
-		newlineLen := 0
-		if i < len(content) {
-			if content[i] == '\r' && i+1 < len(content) && content[i+1] == '\n' {
-				newlineLen = 2
-			} else {
-				newlineLen = 1
-			}
-		}
-
-		isBlank := strings.TrimSpace(line) == ""
-		if !inFence {
-			if fence, ok := ParseFenceLine(line); ok {
-				currentFence = fence
-				inFence = true
-				prevBlank = false
-			} else if isBlank {
-				if !prevBlank {
-					frontier = offset
-				}
-				prevBlank = true
-			} else {
-				prevBlank = false
-			}
-		} else if IsFenceClose(line, currentFence) {
-			inFence = false
-			currentFence = Fence{}
-			frontier = offset + len(line) + newlineLen
-		}
-
-		offset += len(line) + newlineLen
-		i += newlineLen
-	}
-
 	return frontier
 }
 

@@ -24,7 +24,7 @@ FULL_BENCH_PATTERN='^(BenchmarkRenderAssistantCard|BenchmarkRenderAssistantCardC
 # clock is dominated by the untimed setup, so a time-based benchtime would balloon
 # the iteration count and run for minutes. Keep them on a fixed count.
 PACED_BENCH_PATTERN='^(BenchmarkStreamTextDeltaBurstDeferredView|BenchmarkStreamTextDeltaBurstCadenceFlush|BenchmarkStreamThinkingDeltaBurstDeferredView|BenchmarkToolCallUpdateArgsStreamingCadence)$'
-FRONTIER_BENCH_PATTERN='^(BenchmarkFindStreamingSettledFrontierAppendSnapshots|BenchmarkStreamingFrontierScannerAppendSnapshots)$'
+FRONTIER_BENCH_PATTERN='^(BenchmarkStreamingFrontierScannerAppendSnapshots)$'
 SSE_BENCH_PATTERN='^(BenchmarkSSEParseWithCallbackCumulative|BenchmarkSSEParseWithCallbackIncremental|BenchmarkSSEParseWithCollector)$'
 TRUNCATE_BENCH_PATTERN='^BenchmarkTruncateStringHeadTail$'
 SESSION_BENCH_PATTERN='^BenchmarkExportedSessionToMessagesLargeSession$'

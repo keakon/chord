@@ -12,9 +12,6 @@ func TestModelRefPackageEnsureHelpers(t *testing.T) {
 	if got := modelref.EnsureRefShowsProvider("gpt-5.5@xhigh", "sample/gpt-5.5@xhigh"); got != "sample/gpt-5.5@xhigh" {
 		t.Fatalf("EnsureRefShowsProvider = %q", got)
 	}
-	if got := modelref.EnsureRefShowsVariant("sample/gpt-5.5", "xhigh"); got != "sample/gpt-5.5@xhigh" {
-		t.Fatalf("EnsureRefShowsVariant = %q", got)
-	}
 	if got := modelref.EnsureRefShowsMatchingVariant("sample/gpt-5.5", "sample/gpt-5.5@xhigh", "xhigh"); got != "sample/gpt-5.5@xhigh" {
 		t.Fatalf("EnsureRefShowsMatchingVariant same base = %q", got)
 	}

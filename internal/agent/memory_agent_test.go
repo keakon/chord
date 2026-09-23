@@ -604,11 +604,15 @@ func TestDrainMemoryQueueRecordsFailureInsteadOfRequeueing(t *testing.T) {
 	if len(pending) != 0 {
 		t.Fatalf("pending jobs after permanent failure = %+v, want empty", pending)
 	}
-	status, err := memory.LoadFailure(a.memoryMgr.Layout())
+	statusData, err := os.ReadFile(filepath.Join(a.memoryMgr.Layout().StateDir, "last-failure.json"))
 	if err != nil {
-		t.Fatalf("LoadFailure: %v", err)
+		t.Fatalf("read failure status: %v", err)
 	}
-	if status == nil || status.SessionID != filepath.Base(missing) {
+	var status memory.FailureStatus
+	if err := json.Unmarshal(statusData, &status); err != nil {
+		t.Fatalf("parse failure status: %v", err)
+	}
+	if status.SessionID != filepath.Base(missing) {
 		t.Fatalf("failure status = %+v, want a record for %s", status, filepath.Base(missing))
 	}
 	// A setup failure cannot succeed on a retry, so the drain must also stall

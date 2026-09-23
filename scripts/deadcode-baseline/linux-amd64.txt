@@ -10,22 +10,10 @@
 # clipboardread.decodeReaderOutput / readProtocolLine: platform; darwin backend is live, other platforms fall back.
 github.com/keakon/chord/internal/clipboardread.decodeReaderOutput
 github.com/keakon/chord/internal/clipboardread.readProtocolLine
-# config.SaveAuthConfig: public-api; write side of LoadAuthConfig, exercised by tests.
-github.com/keakon/chord/internal/config.SaveAuthConfig
 # logtest: test-support; testing logger used by unit tests.
 github.com/keakon/chord/internal/logtest.NewLogger
 github.com/keakon/chord/internal/logtest.WithDefault
 github.com/keakon/chord/internal/logtest.nopWriteCloser.Close
-# memory.LoadFailure: public-api; read side of SaveFailure, exercised by tests and diagnostics.
-github.com/keakon/chord/internal/memory.LoadFailure
 # tools.ExecuteJobForTest / ResetJobRegistryForTest: test-helper; cross-package job control for tests.
 github.com/keakon/chord/internal/tools.ExecuteJobForTest
 github.com/keakon/chord/internal/tools.ResetJobRegistryForTest
-# tools.ListArtifactFiles: public-api; artifact listing exercised by pipeline tests.
-github.com/keakon/chord/internal/tools.ListArtifactFiles
-# tui.NewModel: public-api; 80x24 convenience over NewModelWithSize, exercised by tests.
-github.com/keakon/chord/internal/tui.NewModel
-# tui/markdownutil.FindStreamingSettledFrontier: public-api; streaming render helper, no live caller today.
-github.com/keakon/chord/internal/tui/markdownutil.FindStreamingSettledFrontier
-# tui/modelref.EnsureRefShowsVariant: public-api; ref formatting helper, no live caller today.
-github.com/keakon/chord/internal/tui/modelref.EnsureRefShowsVariant

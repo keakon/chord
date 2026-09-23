@@ -11,12 +11,28 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func testJWT(payload string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	body := base64.RawURLEncoding.EncodeToString([]byte(payload))
 	return header + "." + body + ".sig"
+}
+
+// writeAuthConfigForTest stages an auth.yaml fixture for tests that exercise
+// the load path. Production writes go through the locked atomic persist
+// helpers; fixtures only need the same bytes on disk.
+func writeAuthConfigForTest(t *testing.T, path string, auth AuthConfig) {
+	t.Helper()
+	data, err := yaml.Marshal(auth)
+	if err != nil {
+		t.Fatalf("marshal auth fixture: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write auth fixture: %v", err)
+	}
 }
 
 func TestLoadAuthConfig_APIKey(t *testing.T) {
@@ -482,9 +498,7 @@ func TestSaveAndLoadAuthConfig_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := SaveAuthConfig(f.Name(), original); err != nil {
-		t.Fatalf("SaveAuthConfig: %v", err)
-	}
+	writeAuthConfigForTest(t, f.Name(), original)
 
 	loaded, err := LoadAuthConfig(f.Name())
 	if err != nil {

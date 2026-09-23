@@ -56,10 +56,10 @@ func TestFormatToolExecutionOutputKeepsLongLineWithinInlineBudget(t *testing.T) 
 	if got != result {
 		t.Fatalf("non-question result changed despite fitting inline budget: got len=%d want len=%d", len(got), len(result))
 	}
-	if files, err := tools.ListArtifactFiles(sessionDir); err != nil {
-		t.Fatalf("list artifacts: %v", err)
-	} else if len(files) != 0 {
-		t.Fatalf("inline result should not create an artifact, got %v", files)
+	if entries, err := os.ReadDir(sessionDir); err != nil {
+		t.Fatalf("read session dir: %v", err)
+	} else if len(entries) != 0 {
+		t.Fatalf("inline result should not create an artifact, got %v", entries)
 	}
 }
 
@@ -72,10 +72,10 @@ func TestFormatToolExecutionOutputKeepsReadResultWithoutArtifact(t *testing.T) {
 	if got != result {
 		t.Fatalf("read result was changed: got len=%d want len=%d", len(got), len(result))
 	}
-	if files, err := tools.ListArtifactFiles(sessionDir); err != nil {
-		t.Fatalf("list artifacts: %v", err)
-	} else if len(files) != 0 {
-		t.Fatalf("read result should not create artifacts, got %v", files)
+	if entries, err := os.ReadDir(sessionDir); err != nil {
+		t.Fatalf("read session dir: %v", err)
+	} else if len(entries) != 0 {
+		t.Fatalf("read result should not create artifacts, got %v", entries)
 	}
 }
 

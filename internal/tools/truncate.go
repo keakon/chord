@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -631,27 +630,4 @@ func writeArtifactFile(sessionDir, path string, output string) error {
 		return err
 	}
 	return nil
-}
-
-func ListArtifactFiles(sessionDir string) ([]string, error) {
-	root := sessionToolOutputsDir(sessionDir)
-	if root == "" {
-		return nil, nil
-	}
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	out := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		out = append(out, filepath.Join(root, entry.Name()))
-	}
-	sort.Strings(out)
-	return out, nil
 }

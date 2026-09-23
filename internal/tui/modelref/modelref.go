@@ -54,23 +54,6 @@ func stripFirstModelPathSegment(model string) (newModel string, ok bool) {
 	return after, true
 }
 
-// EnsureRefShowsVariant returns ref unchanged if it already has an inline @variant;
-// otherwise appends @activeVariant when non-empty. RunningModelRef is often provider/model
-// without @ while the client holds a separate ActiveVariant (e.g. sample/gpt-5.5 + xhigh).
-func EnsureRefShowsVariant(ref, activeVariant string) string {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return ref
-	}
-	if _, v := config.ParseModelRef(ref); v != "" {
-		return ref
-	}
-	if rv := strings.TrimSpace(activeVariant); rv != "" {
-		return ref + "@" + rv
-	}
-	return ref
-}
-
 // EnsureRefShowsMatchingVariant appends activeVariant only when runningRef and selectedRef
 // refer to the same provider/model base ref. This prevents a primary model's active variant
 // from leaking onto a fallback running model.

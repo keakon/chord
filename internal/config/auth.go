@@ -335,22 +335,6 @@ func (o *OAuthCredential) IsExpired() bool {
 	return time.Now().Unix() >= o.Expires/1000-60
 }
 
-// SaveAuthConfig serializes auth and writes it to path with permission 0600.
-func SaveAuthConfig(path string, auth AuthConfig) error {
-	data, err := yaml.Marshal(auth)
-	if err != nil {
-		return err
-	}
-	lock, err := LockConfigMutation(path)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = lock.Close()
-	}()
-	return writeConfigFileAtomicallyReplace(path, data, 0o600)
-}
-
 // tokenResponse is the JSON response from an OAuth token endpoint.
 type tokenResponse struct {
 	AccessToken  *string `json:"access_token"`

@@ -67,7 +67,7 @@ func TestIsFenceClose(t *testing.T) {
 	}
 }
 
-func TestFindStreamingSettledFrontier(t *testing.T) {
+func TestStreamingFrontierScannerFullScan(t *testing.T) {
 	tests := []struct {
 		name    string
 		content string
@@ -80,17 +80,17 @@ func TestFindStreamingSettledFrontier(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := FindStreamingSettledFrontier(tc.content); got != tc.want {
-				t.Fatalf("FindStreamingSettledFrontier() = %d, want %d", got, tc.want)
+			if got := new(StreamingFrontierScanner).Advance(tc.content); got != tc.want {
+				t.Fatalf("Advance() = %d, want %d", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestStreamingFrontierScannerMatchesFind(t *testing.T) {
-	// Verify that StreamingFrontierScanner.Advance (incremental) produces
-	// the same results as FindStreamingSettledFrontier (full-scan).
-	// Test full-content scan first, then incremental appends.
+func TestStreamingFrontierScannerMatchesFreshScan(t *testing.T) {
+	// Verify that an incrementally fed scanner produces the same results as
+	// a fresh scanner over the full content. Test full-content scan first,
+	// then incremental appends.
 	parts := []string{
 		"",
 		"para one continues\n",
@@ -105,7 +105,7 @@ func TestStreamingFrontierScannerMatchesFind(t *testing.T) {
 	var s StreamingFrontierScanner
 	for _, part := range parts {
 		full += part
-		want := FindStreamingSettledFrontier(full)
+		want := new(StreamingFrontierScanner).Advance(full)
 		got := s.Advance(full)
 		if got != want {
 			t.Fatalf("after append %q: Advance() = %d, want %d (full=%q)", part, got, want, full)
@@ -134,7 +134,7 @@ func TestStreamingFrontierScannerReplaysUnterminatedLine(t *testing.T) {
 			var full string
 			for _, part := range tc.parts {
 				full += part
-				want := FindStreamingSettledFrontier(full)
+				want := new(StreamingFrontierScanner).Advance(full)
 				if got := s.Advance(full); got != want {
 					t.Fatalf("after append %q: Advance() = %d, want %d (full=%q)", part, got, want, full)
 				}
@@ -148,7 +148,7 @@ func TestStreamingFrontierScannerResetsOnNonAppend(t *testing.T) {
 	s.Advance("hello\n\nworld")
 	// Shrink content – should reset.
 	got := s.Advance("hello\n\n")
-	want := FindStreamingSettledFrontier("hello\n\n")
+	want := new(StreamingFrontierScanner).Advance("hello\n\n")
 	if got != want {
 		t.Fatalf("after shrink: Advance() = %d, want %d", got, want)
 	}
@@ -200,23 +200,12 @@ func buildStreamingFrontierBenchmarkSnapshots() []string {
 	return snapshots
 }
 
-func BenchmarkFindStreamingSettledFrontierLongContent(b *testing.B) {
+func BenchmarkStreamingFrontierScannerLongContent(b *testing.B) {
 	content := buildStreamingFrontierBenchmarkContent()
 	b.SetBytes(int64(len(content)))
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = FindStreamingSettledFrontier(content)
-	}
-}
-
-func BenchmarkFindStreamingSettledFrontierAppendSnapshots(b *testing.B) {
-	snapshots := buildStreamingFrontierBenchmarkSnapshots()
-	b.SetBytes(int64(len(snapshots[len(snapshots)-1])))
-	b.ReportAllocs()
-	for b.Loop() {
-		for _, content := range snapshots {
-			_ = FindStreamingSettledFrontier(content)
-		}
+		_ = new(StreamingFrontierScanner).Advance(content)
 	}
 }
 
@@ -232,12 +221,12 @@ func BenchmarkStreamingFrontierScannerAppendSnapshots(b *testing.B) {
 	}
 }
 
-func TestFindStreamingSettledFrontierLongContentAllocsGuard(t *testing.T) {
+func TestStreamingFrontierScannerLongContentAllocsGuard(t *testing.T) {
 	content := buildStreamingFrontierBenchmarkContent()
 	allocs := testing.AllocsPerRun(50, func() {
-		_ = FindStreamingSettledFrontier(content)
+		_ = new(StreamingFrontierScanner).Advance(content)
 	})
 	if allocs > 0 {
-		t.Fatalf("FindStreamingSettledFrontier allocs = %.0f, want 0", allocs)
+		t.Fatalf("Advance allocs = %.0f, want 0", allocs)
 	}
 }

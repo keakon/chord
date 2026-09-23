@@ -128,22 +128,21 @@ func TestTruncateOutputCreatesPrivateArtifact(t *testing.T) {
 	}
 }
 
-func TestListArtifactFilesReturnsSessionToolOutputs(t *testing.T) {
+func TestTruncateArtifactsLandUnderSessionToolOutputs(t *testing.T) {
 	sessionDir := t.TempDir()
-	_ = TruncateOutputWithOptions(generatePaddedLines(3000, 20), sessionDir, TruncateOptions{ArtifactKey: "call-a"})
-	_ = TruncateOutputWithOptions(generatePaddedLines(3001, 20), sessionDir, TruncateOptions{ArtifactKey: "call-b"})
+	first := TruncateOutputWithOptions(generatePaddedLines(3000, 20), sessionDir, TruncateOptions{ArtifactKey: "call-a"})
+	second := TruncateOutputWithOptions(generatePaddedLines(3001, 20), sessionDir, TruncateOptions{ArtifactKey: "call-b"})
 
-	files, err := ListArtifactFiles(sessionDir)
-	if err != nil {
-		t.Fatalf("ListArtifactFiles: %v", err)
-	}
-	if len(files) != 2 {
-		t.Fatalf("len(files) = %d, want 2", len(files))
-	}
-	for _, path := range files {
-		if !strings.Contains(path, filepath.Join(sessionDir, sessionToolOutputsDirName)) {
-			t.Fatalf("artifact path %q should be under %q", path, filepath.Join(sessionDir, sessionToolOutputsDirName))
+	for i, result := range []TruncateResult{first, second} {
+		if result.SavedPath == "" {
+			t.Fatalf("result %d SavedPath is empty", i)
 		}
+		if !strings.Contains(result.SavedPath, filepath.Join(sessionDir, sessionToolOutputsDirName)) {
+			t.Fatalf("artifact path %q should be under %q", result.SavedPath, filepath.Join(sessionDir, sessionToolOutputsDirName))
+		}
+	}
+	if first.SavedPath == second.SavedPath {
+		t.Fatal("distinct artifact keys must produce distinct paths")
 	}
 }
 func TestTruncateOutputWithOptions(t *testing.T) {

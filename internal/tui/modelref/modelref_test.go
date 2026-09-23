@@ -23,23 +23,6 @@ func TestSplitRunningModelRef(t *testing.T) {
 	}
 }
 
-func TestEnsureRefShowsVariant(t *testing.T) {
-	tests := []struct {
-		name, ref, active, want string
-	}{
-		{name: "appends active variant", ref: "sample/model-alpha", active: "balanced", want: "sample/model-alpha@balanced"},
-		{name: "keeps existing variant", ref: "sample/model-alpha@high", active: "balanced", want: "sample/model-alpha@high"},
-		{name: "ignores blank active", ref: "sample/model-alpha", active: " ", want: "sample/model-alpha"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := EnsureRefShowsVariant(tc.ref, tc.active); got != tc.want {
-				t.Fatalf("EnsureRefShowsVariant() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestEnsureRefShowsMatchingVariant(t *testing.T) {
 	tests := []struct {
 		name, running, selected, active, want string
@@ -49,6 +32,7 @@ func TestEnsureRefShowsMatchingVariant(t *testing.T) {
 		{name: "different model unchanged", running: "sample/model-beta", selected: "sample/model-alpha", active: "balanced", want: "sample/model-beta"},
 		{name: "existing variant unchanged", running: "sample/model-alpha@high", selected: "sample/model-alpha", active: "balanced", want: "sample/model-alpha@high"},
 		{name: "missing provider unchanged", running: "model-alpha", selected: "sample/model-alpha", active: "balanced", want: "model-alpha"},
+		{name: "blank active unchanged", running: "sample/model-alpha", selected: "sample/model-alpha", active: " ", want: "sample/model-alpha"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

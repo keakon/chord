@@ -514,12 +514,6 @@ type toastItem struct {
 	Category string // same-category toasts in queue are merged; empty = no merge
 }
 
-// NewModel creates a fully initialised TUI model. Pass nil for agent to run
-// without a backend (useful for tests).
-func NewModel(a agent.AgentForTUI) Model {
-	return NewModelWithSize(a, 80, 24)
-}
-
 // NewModelWithSize creates a fully initialised TUI model using the provided
 // initial terminal dimensions. Callers should pass the real terminal size when
 // it is already known before p.Run() so the first render does not use the 80×24

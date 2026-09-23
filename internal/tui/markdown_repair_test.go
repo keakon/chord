@@ -305,12 +305,18 @@ func TestToolResultMarkdownRepairsUnterminatedTildeFence(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// findStreamingMarkdownSettledFrontier tests
+// streamingMarkdownSettledFrontier tests
 // ---------------------------------------------------------------------------
+
+// streamingFrontierOf scans content with a fresh scanner: the single-shot
+// result a live incremental scan must agree with.
+func streamingFrontierOf(content string) int {
+	return new(markdownutil.StreamingFrontierScanner).Advance(content)
+}
 
 func TestFindStreamingMarkdownSettledFrontier_NoNewline(t *testing.T) {
 	// Content with no newline at all — no stable boundary yet.
-	if got := markdownutil.FindStreamingSettledFrontier("hello world"); got != 0 {
+	if got := streamingFrontierOf("hello world"); got != 0 {
 		t.Fatalf("want 0, got %d", got)
 	}
 }
@@ -319,7 +325,7 @@ func TestFindStreamingMarkdownSettledFrontier_SingleNewline(t *testing.T) {
 	// Single newline — not a paragraph boundary, frontier stays 0.
 	// (We only advance on blank lines, not every newline.)
 	content := "hello\nworld"
-	if got := markdownutil.FindStreamingSettledFrontier(content); got != 0 {
+	if got := streamingFrontierOf(content); got != 0 {
 		t.Fatalf("single newline should not advance frontier, got %d", got)
 	}
 }
@@ -329,7 +335,7 @@ func TestFindStreamingMarkdownSettledFrontier_BlankLine(t *testing.T) {
 	// Frontier points at the start of the blank run so the tail preserves the
 	// visible separator during streaming.
 	content := "paragraph one\n\nstill coming"
-	frontier := markdownutil.FindStreamingSettledFrontier(content)
+	frontier := streamingFrontierOf(content)
 	want := len("paragraph one\n")
 	if frontier != want {
 		t.Fatalf("want frontier=%d, got %d (content=%q)", want, frontier, content)
@@ -339,7 +345,7 @@ func TestFindStreamingMarkdownSettledFrontier_BlankLine(t *testing.T) {
 func TestFindStreamingMarkdownSettledFrontier_MultipleBlankLines(t *testing.T) {
 	// Frontier should be at the last stable blank-run start before the tail.
 	content := "para one\n\npara two\n\nstill streaming"
-	frontier := markdownutil.FindStreamingSettledFrontier(content)
+	frontier := streamingFrontierOf(content)
 	want := len("para one\n\npara two\n")
 	if frontier != want {
 		t.Fatalf("want frontier=%d, got %d", want, frontier)
@@ -348,7 +354,7 @@ func TestFindStreamingMarkdownSettledFrontier_MultipleBlankLines(t *testing.T) {
 
 func TestFindStreamingMarkdownSettledFrontier_BlankRunStartsAtFirstBlankLine(t *testing.T) {
 	content := "para one\n\n\nstill streaming"
-	frontier := markdownutil.FindStreamingSettledFrontier(content)
+	frontier := streamingFrontierOf(content)
 	want := len("para one\n")
 	if frontier != want {
 		t.Fatalf("want frontier=%d, got %d", want, frontier)
@@ -358,7 +364,7 @@ func TestFindStreamingMarkdownSettledFrontier_BlankRunStartsAtFirstBlankLine(t *
 func TestFindStreamingMarkdownSettledFrontier_UnclosedFence(t *testing.T) {
 	// An open fence blocks frontier advancement inside it.
 	content := "intro\n\n```go\nfunc main() {\n"
-	frontier := markdownutil.FindStreamingSettledFrontier(content)
+	frontier := streamingFrontierOf(content)
 	// Frontier should point to the start of the blank run before the fence so
 	// the tail keeps the separator visible.
 	want := len("intro\n")
@@ -370,7 +376,7 @@ func TestFindStreamingMarkdownSettledFrontier_UnclosedFence(t *testing.T) {
 func TestFindStreamingMarkdownSettledFrontier_ClosedFence(t *testing.T) {
 	// A fully closed fence advances the frontier past its closing line.
 	content := "intro\n\n```go\nfunc main() {}\n```\nafter"
-	frontier := markdownutil.FindStreamingSettledFrontier(content)
+	frontier := streamingFrontierOf(content)
 	want := len("intro\n\n```go\nfunc main() {}\n```\n")
 	if frontier != want {
 		t.Fatalf("want frontier=%d, got %d", want, frontier)
@@ -380,7 +386,7 @@ func TestFindStreamingMarkdownSettledFrontier_ClosedFence(t *testing.T) {
 func TestFindStreamingMarkdownSettledFrontier_TildeFence(t *testing.T) {
 	// Tilde fences should also close the frontier.
 	content := "intro\n\n~~~sh\necho hello\n~~~\nmore"
-	frontier := markdownutil.FindStreamingSettledFrontier(content)
+	frontier := streamingFrontierOf(content)
 	want := len("intro\n\n~~~sh\necho hello\n~~~\n")
 	if frontier != want {
 		t.Fatalf("want frontier=%d, got %d", want, frontier)
@@ -388,7 +394,7 @@ func TestFindStreamingMarkdownSettledFrontier_TildeFence(t *testing.T) {
 }
 
 func TestFindStreamingMarkdownSettledFrontier_EmptyContent(t *testing.T) {
-	if got := markdownutil.FindStreamingSettledFrontier(""); got != 0 {
+	if got := streamingFrontierOf(""); got != 0 {
 		t.Fatalf("empty content: want 0, got %d", got)
 	}
 }

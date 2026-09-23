@@ -136,24 +136,6 @@ func SaveCheckpoint(l *Layout, cp *ExtractionCheckpoint) error {
 	return privatefs.SyncDir(filepath.Dir(l.CheckpointPath))
 }
 
-// LoadFailure reads the last recorded extraction failure; returns (nil, nil)
-// when absent.
-func LoadFailure(l *Layout) (*FailureStatus, error) {
-	path := filepath.Join(l.StateDir, "last-failure.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read memory failure status: %w", err)
-	}
-	var f FailureStatus
-	if err := json.Unmarshal(data, &f); err != nil {
-		return nil, fmt.Errorf("parse memory failure status: %w", err)
-	}
-	return &f, nil
-}
-
 // SaveFailure records the most recent failed extraction attempt.
 func SaveFailure(l *Layout, sessionID string, err error) {
 	f := FailureStatus{SessionID: sessionID, FailedAt: time.Now()}

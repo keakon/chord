@@ -7,8 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
 )
+
+// NewModel creates a fully initialised TUI model at the 80×24 placeholder
+// size. It is test-only: every caller lives in this package's tests, while
+// production passes the real terminal size through NewModelWithSize.
+func NewModel(a agent.AgentForTUI) Model {
+	return NewModelWithSize(a, 80, 24)
+}
 
 // statusBarCurrentAgentLabel is consumed by status-bar agent-label tests; the
 // production status bar reads viewingLabel directly off statusBarSnapshot().
