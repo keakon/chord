@@ -22,6 +22,12 @@ type skillSelectState struct {
 	prevMode Mode
 	filter   string
 
+	// searchCorpus holds one lowercase "name description" haystack per
+	// states entry, built once when the selector opens. Filtering then
+	// matches without re-lowercasing every candidate on each keystroke
+	// (see buildSessionSearchCorpus for the session picker's equivalent).
+	searchCorpus []string
+
 	filterFocused bool
 }
 
@@ -61,20 +67,47 @@ func skillReasonText(reason string) string {
 	}
 }
 
-func skillSelectMatches(st skill.InvocationState, tokens []string) bool {
+func skillSelectMatches(haystack string, tokens []string) bool {
 	if len(tokens) == 0 {
 		return true
 	}
-	if st.Meta == nil {
-		return false
-	}
-	haystack := strings.ToLower(strings.TrimSpace(st.Meta.Name) + " " + strings.TrimSpace(st.Meta.Description))
 	for _, token := range tokens {
 		if !strings.Contains(haystack, token) {
 			return false
 		}
 	}
 	return true
+}
+
+// buildSkillSelectSearchCorpus precomputes the lowercase haystack per states
+// entry so filtering never re-lowercases the catalog. Entries without metadata
+// get an empty haystack and never match a non-empty filter.
+func buildSkillSelectSearchCorpus(states []skill.InvocationState) []string {
+	corpus := make([]string, 0, len(states))
+	for _, st := range states {
+		if st.Meta == nil {
+			corpus = append(corpus, "")
+			continue
+		}
+		corpus = append(corpus, strings.ToLower(strings.TrimSpace(st.Meta.Name)+" "+strings.TrimSpace(st.Meta.Description)))
+	}
+	return corpus
+}
+
+// sortSkillSelectStates orders states into display order once: manual-only
+// skills first, each group by name. Filtering preserves relative order, so the
+// per-keystroke rebuild never re-sorts; the grouping below only partitions.
+func sortSkillSelectStates(states []skill.InvocationState) {
+	sort.SliceStable(states, func(i, j int) bool {
+		mi, mj := states[i].Meta, states[j].Meta
+		if mi == nil || mj == nil {
+			return mj != nil
+		}
+		if mi.DisableModelInvocation != mj.DisableModelInvocation {
+			return mi.DisableModelInvocation
+		}
+		return mi.Name < mj.Name
+	})
 }
 
 func skillSelectItemFor(st skill.InvocationState) OverlayListItem {
@@ -101,18 +134,23 @@ func skillSelectItemFor(st skill.InvocationState) OverlayListItem {
 	return item
 }
 
-// skillSelectItems groups the catalog into MANUAL and AVAILABLE sections, each
-// sorted by name. Group headers carry no ID, so the list's cursor walk skips
-// them and the current-selection helpers never read one as a skill.
-func skillSelectItems(states []skill.InvocationState, filter string) []OverlayListItem {
+// skillSelectItems groups the catalog into MANUAL and AVAILABLE sections.
+// States must arrive in display order (see sortSkillSelectStates): filtering
+// preserves it, so this path never sorts. Group headers carry no ID, so the
+// list's cursor walk skips them and the current-selection helpers never read
+// one as a skill.
+func skillSelectItems(states []skill.InvocationState, corpus []string, filter string) []OverlayListItem {
+	if len(corpus) != len(states) {
+		corpus = buildSkillSelectSearchCorpus(states)
+	}
 	tokens := strings.Fields(strings.ToLower(filter))
 	manual := make([]skill.InvocationState, 0, len(states))
 	model := make([]skill.InvocationState, 0, len(states))
-	for _, st := range states {
+	for i, st := range states {
 		if st.Meta == nil || strings.TrimSpace(st.Meta.Name) == "" {
 			continue
 		}
-		if !skillSelectMatches(st, tokens) {
+		if !skillSelectMatches(corpus[i], tokens) {
 			continue
 		}
 		if st.Meta.DisableModelInvocation {
@@ -126,7 +164,6 @@ func skillSelectItems(states []skill.InvocationState, filter string) []OverlayLi
 		if len(group) == 0 {
 			return
 		}
-		sort.Slice(group, func(i, j int) bool { return group[i].Meta.Name < group[j].Meta.Name })
 		items = append(items, OverlayListItem{Header: true, Label: header})
 		for _, st := range group {
 			items = append(items, skillSelectItemFor(st))
@@ -157,8 +194,9 @@ func (m *Model) openSkillSelect() {
 	}
 
 	m.clearChordState()
-	m.skillSelect = skillSelectState{prevMode: m.mode, states: states}
-	m.skillSelect.selector.list = NewOverlayList(skillSelectItems(states, ""), m.skillSelectMaxVisible())
+	sortSkillSelectStates(states)
+	m.skillSelect = skillSelectState{prevMode: m.mode, states: states, searchCorpus: buildSkillSelectSearchCorpus(states)}
+	m.skillSelect.selector.list = NewOverlayList(skillSelectItems(states, m.skillSelect.searchCorpus, ""), m.skillSelectMaxVisible())
 	m.mode = ModeSkillSelect
 	m.recalcViewportSize()
 }
@@ -175,7 +213,7 @@ func (m *Model) closeSkillSelect() tea.Cmd {
 }
 
 func (m *Model) rebuildSkillSelectItems(resetCursor bool) {
-	items := skillSelectItems(m.skillSelect.states, m.skillSelect.filter)
+	items := skillSelectItems(m.skillSelect.states, m.skillSelect.searchCorpus, m.skillSelect.filter)
 	if m.skillSelect.selector.list == nil {
 		m.skillSelect.selector.list = NewOverlayList(items, m.skillSelectMaxVisible())
 	} else {
