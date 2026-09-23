@@ -1,18 +1,10 @@
 package terminaltitle
 
 import (
-	"bytes"
+	"slices"
 	"strings"
 	"testing"
 )
-
-func extractTitleFromOSC(t *testing.T, out string) string {
-	t.Helper()
-	if !strings.HasPrefix(out, "\x1b]0;") || !strings.HasSuffix(out, "\x1b\\") {
-		t.Fatalf("output %q is not a valid OSC title", out)
-	}
-	return out[len("\x1b]0;") : len(out)-len("\x1b\\")]
-}
 
 func TestSanitizeTitle_RemovesControlCharacters(t *testing.T) {
 	tests := []struct {
@@ -70,71 +62,16 @@ func TestSanitizeTitle_TruncatesToMaxRunes(t *testing.T) {
 	}
 }
 
-func TestSetWindowTitle_WritesOSCSequence(t *testing.T) {
-	var buf bytes.Buffer
-	err := SetWindowTitle(&buf, "test title")
-	if err != nil {
-		t.Fatalf("SetWindowTitle: %v", err)
-	}
-	out := buf.String()
-	// Should start with OSC 0 and end with ST
-	if !strings.HasPrefix(out, "\x1b]0;") {
-		t.Errorf("output %q does not start with OSC 0 prefix", out)
-	}
-	if !strings.HasSuffix(out, "\x1b\\") {
-		t.Errorf("output %q does not end with ST suffix", out)
-	}
-	// Title should be in between
-	title := out[len("\x1b]0;") : len(out)-len("\x1b\\")]
-	if title != "test title" {
-		t.Errorf("title in output = %q, want %q", title, "test title")
-	}
-}
-
-func TestSetWindowTitleWithSpinner_PrefixesSpinner(t *testing.T) {
-	var buf bytes.Buffer
-	err := SetWindowTitleWithSpinner(&buf, "my task", "⠼")
-	if err != nil {
-		t.Fatalf("SetWindowTitleWithSpinner: %v", err)
-	}
-	got := extractTitleFromOSC(t, buf.String())
-	want := "⠼ my task"
-	if got != want {
-		t.Errorf("title = %q, want %q", got, want)
-	}
-}
-
-func TestSetWindowTitleWithPrefix_AllowsFixedWidthPlaceholder(t *testing.T) {
-	var buf bytes.Buffer
-	err := SetWindowTitleWithPrefix(&buf, "my task", " ")
-	if err != nil {
-		t.Fatalf("SetWindowTitleWithPrefix: %v", err)
-	}
-	got := extractTitleFromOSC(t, buf.String())
-	want := "  my task"
-	if got != want {
-		t.Errorf("title = %q, want %q", got, want)
-	}
-}
-
-func TestSetWindowTitle_EmptyAfterSanitization(t *testing.T) {
-	var buf bytes.Buffer
-	// Pure control characters should result in empty title and no write
-	err := SetWindowTitle(&buf, "\x1b\n\r\t")
-	if err != nil {
-		t.Fatalf("SetWindowTitle: %v", err)
-	}
-	if buf.Len() != 0 {
-		t.Errorf("expected no output for invisible title, got %q", buf.String())
-	}
-}
-
 func TestSpinnerFrames_Cycles(t *testing.T) {
-	ResetSpinner()
+	first := NextSpinnerFrame()
+	start := slices.Index(SpinnerFrames, first)
+	if start < 0 {
+		t.Fatalf("NextSpinnerFrame returned %q, not a known frame", first)
+	}
 	// Cycle through twice to verify ordering
-	for i := 0; i < len(SpinnerFrames)*2; i++ {
+	for i := 1; i < len(SpinnerFrames)*2; i++ {
 		frame := NextSpinnerFrame()
-		expected := SpinnerFrames[i%len(SpinnerFrames)]
+		expected := SpinnerFrames[(start+i)%len(SpinnerFrames)]
 		if frame != expected {
 			t.Errorf("frame %d = %q, want %q", i, frame, expected)
 		}

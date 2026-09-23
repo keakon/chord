@@ -1,12 +1,10 @@
-// Package terminaltitle provides helpers for setting the terminal tab/window
-// title via OSC escape sequences. It handles sanitization (stripping control
-// characters, collapsing whitespace) so that callers can pass untrusted text
-// such as user messages safely.
+// Package terminaltitle provides helpers for composing the terminal tab/window
+// title. It handles sanitization (stripping control characters, collapsing
+// whitespace) so that callers can pass untrusted text such as user messages
+// safely.
 package terminaltitle
 
 import (
-	"fmt"
-	"io"
 	"os"
 	"strings"
 	"sync"
@@ -27,9 +25,7 @@ var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 const DefaultTitle = "chord"
 
 // ComposeTitle builds a sanitized window title string that callers can assign
-// to Bubble Tea v2's View.WindowTitle field. It uses the same sanitization
-// rules as SetWindowTitle and SetWindowTitleWithPrefix, but returns the
-// composed title rather than writing OSC sequences.
+// to Bubble Tea v2's View.WindowTitle field.
 //
 // When prefix is empty after sanitization, the returned title is just the
 // sanitized title. When title is empty after sanitization, it returns "".
@@ -43,49 +39,6 @@ func ComposeTitle(title, prefix string) string {
 		return cleanTitle
 	}
 	return cleanPrefix + " " + cleanTitle
-}
-
-// ---------------------------------------------------------------------------
-// Low-level OSC write
-// ---------------------------------------------------------------------------
-
-// SetWindowTitle writes an OSC 0 (set title + icon name) sequence to w.
-// The title is sanitized before emission. If sanitization removes all visible
-// content, the function returns without writing anything.
-func SetWindowTitle(w io.Writer, title string) error {
-	clean := sanitizeTitle(title)
-	if clean == "" {
-		return nil
-	}
-	return writeWindowTitle(w, clean)
-}
-
-// SetWindowTitleWithPrefix writes an OSC 0 title with an optional sanitized
-// prefix. The prefix is sanitized without collapsing or trimming spaces so the
-// caller can keep a fixed-width placeholder (for example, toggling between
-// "❓" and " ") without causing the visible title text to shift.
-func SetWindowTitleWithPrefix(w io.Writer, title string, prefix string) error {
-	cleanTitle := sanitizeTitle(title)
-	if cleanTitle == "" {
-		return nil
-	}
-	cleanPrefix := sanitizeTitlePrefix(prefix)
-	if cleanPrefix == "" {
-		return writeWindowTitle(w, cleanTitle)
-	}
-	return writeWindowTitle(w, cleanPrefix+" "+cleanTitle)
-}
-
-// SetWindowTitleWithSpinner writes an OSC 0 title with an optional spinner
-// prefix. When spinner is empty/nil, only the title is emitted.
-func SetWindowTitleWithSpinner(w io.Writer, title string, spinner string) error {
-	return SetWindowTitleWithPrefix(w, title, spinner)
-}
-
-func writeWindowTitle(w io.Writer, clean string) error {
-	// OSC 0: set both icon name and window title; terminated by ST (ESC \).
-	_, err := fmt.Fprintf(w, "\x1b]0;%s\x1b\\", clean)
-	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -220,13 +173,6 @@ func NextSpinnerFrame() string {
 	frame := SpinnerFrames[spinnerFrameIndex%len(SpinnerFrames)]
 	spinnerFrameIndex++
 	return frame
-}
-
-// ResetSpinner resets the spinner frame index to 0.
-func ResetSpinner() {
-	spinnerMu.Lock()
-	defer spinnerMu.Unlock()
-	spinnerFrameIndex = 0
 }
 
 // ---------------------------------------------------------------------------
