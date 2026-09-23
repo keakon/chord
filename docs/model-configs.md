@@ -6,7 +6,7 @@ Use this page when you already know which provider/model family you want and jus
 
 ## How to use this page
 
-Choose a connection type, then copy its recipe. Keep the default context settings until the model connects successfully; tune them later if needed.
+Choose a connection type, then copy its recipe. Keep the default context settings until the model connects successfully; tune them later if needed. A provider that needs an API key first needs its credentials in `~/.config/chord/auth.yaml`; each section below shows only the matching entry.
 
 | Connection | Recipe |
 | --- | --- |
@@ -19,151 +19,102 @@ Choose a connection type, then copy its recipe. Keep the default context setting
 
 After copying a recipe, [verify the configuration and connection](#verify-any-recipe). For long sessions or context-cost tuning, see [Per-model compaction tuning](#per-model-compaction-tuning) at the end of this page.
 
+## Shared model templates
+
+The provider recipes below keep restating the same windows and input modalities. This section holds them once, and each recipe combines them with merge keys; `model_templates` is only a YAML anchor namespace, so its entries never take effect as model definitions. Anchors are visible only inside the same file, so put this section at the top of your `config.yaml` before pasting any recipe.
+
+```yaml
+model_templates:
+  # Windows: one anchor per published tier, shared across providers.
+  window-1050k-128k: &window-1050k-128k   # GPT-5.x / GPT-6 official API: no `input`
+    limit: {context: 1050000, output: 128000}
+  window-codex-1050k-128k: &window-codex-1050k-128k   # same tier; Codex exposes a separate input cap
+    limit: {context: 1050000, input: 922000, output: 128000}
+  window-400k-128k: &window-400k-128k     # GPT-5.5, and accounts/relays still on the older profile
+    limit: {context: 400000, input: 272000, output: 128000}
+  window-1m-128k: &window-1m-128k         # Claude 5, GLM-5.x
+    limit: {context: 1000000, output: 128000}
+  window-1m-64k: &window-1m-64k           # DeepSeek V4.1
+    limit: {context: 1000000, output: 64000}
+  window-1m-65k: &window-1m-65k           # Qwen
+    limit: {context: 1000000, output: 65536}
+  window-1049k-64k: &window-1049k-64k     # Gemini 3.x
+    limit: {context: 1048576, output: 65536}
+  window-1049k-131k: &window-1049k-131k   # Kimi K3, MiMo, Muse Spark
+    limit: {context: 1048576, output: 131072}
+  window-256k-32k: &window-256k-32k       # Kimi K2.x
+    limit: {context: 262144, output: 32768}
+  window-200k-64k: &window-200k-64k       # Claude / GLM chat behind a gateway
+    limit: {context: 200000, output: 64000}
+  # Input modalities: a model that declares no modalities takes text only.
+  vision-pdf: &vision-pdf
+    modalities: {input: [text, image, pdf]}
+  vision: &vision
+    modalities: {input: [text, image]}
+  text-only: &text-only
+    modalities: {input: [text]}
+  # GPT-5.x / GPT-6 Responses reasoning (shared by the API and Codex).
+  gpt-reasoning-full: &gpt-reasoning-full
+    reasoning: {effort: medium, summary: auto}
+    variants:
+      low: {reasoning: {effort: low}}
+      medium: {reasoning: {effort: medium}}
+      high: {reasoning: {effort: high}}
+      xhigh: {reasoning: {effort: xhigh}}
+      max: {reasoning: {effort: max}}
+  gpt-reasoning-basic: &gpt-reasoning-basic
+    reasoning: {summary: auto}
+    variants:
+      high: {reasoning: {effort: high}}
+      xhigh: {reasoning: {effort: xhigh}}
+```
+
+Each recipe then carries only its own provider `type`, `api_url`, auth, `cost`, and `compat`; windows and modalities come from the anchors above. To tune a single model, override that field as a whole block in its own entry.
+
+A few conventions apply across the recipes on this page:
+
+- A model that declares no `modalities` takes text only, and its image/PDF attachments are dropped.
+- When `limit.output` is omitted, Chord derives the input budget from its default `64000` output budget (`limit.context` minus 64000); Responses providers do not send `max_output_tokens` by default, so set `compat.responses.send_max_output_tokens: true` to enforce the cap explicitly.
+- A `compaction` block on a template is inherited by every model entry that references it; without one the model uses the global threshold. The trigger compares the last provider-reported usage, so a single large tool result can push the next request past the line: a threshold is a tuning goal, not a guarantee. Short sessions can stay on the global default; only long agentic runs need per-model tuning.
+- `reasoning_continuity` has two modes: `openai_visible` replays native `reasoning_content` unchanged under the Chat Completions convention; `anthropic_unsigned` serves Messages-compatible endpoints that return unsigned thinking rather than Claude-style signed blocks, replaying same-provider/model unsigned thinking. Both accept portable visible reasoning from other wire families as the target shape; if the target still rejects that shape, strict compatibility drops the reasoning carrier while preserving the tool round. Backends that require the full reasoning history or preserved thinking also set `preserve_history: true`, so the complete assistant history is replayed unchanged.
+
 ## OpenAI GPT (Responses)
-
-The GPT-5.4 / GPT-5.5 / GPT-5.6 / GPT-6 Sol / GPT-6 Luna / GPT-6 Astra snippets use the limits published on the OpenAI model pages: GPT-5.4 / 5.6 / 6 run a `1050000 / 922000 / 128000` allocation (1.05M total window; the 922K input budget derives as `context` minus `output`, since these models publish no separate input cap) on both the API and the current Codex catalog, while GPT-5.5 stays on `400000 / 272000 / 128000`. If your account or relay still serves an older profile, fall back to `400000 / 272000 / 128000` for the affected models.
-
-The cost blocks use OpenAI API pricing; override them when your relay charges different rates. Codex OAuth has a separate preset block below. Pair API-key providers with the matching entry in `~/.config/chord/auth.yaml`:
 
 ```yaml
 openai:
   - "$OPENAI_API_KEY"
 ```
 
-### GPT-5.4
+### GPT-5.4 / 5.5 / 5.6 / 6
+
+These four families share mostly the same window, reasoning, input modalities, and compaction strategy. GPT-5.6 (Sol / Terra / Luna) and GPT-6 (Astra / Sol / Luna) use `&window-1050k-128k`, `&gpt-reasoning-full`, and `&gpt-cost-first`, and differ only in their `cost` blocks; GPT-5.4 / 5.5 use a narrower reasoning set and the 400K window. The 1.05M tier publishes no separate input cap, so it declares only `context` and `output`, and Chord derives the 922K input budget as `context - output`.
 
 ```yaml
+model_templates:
+  gpt-cost-first: &gpt-cost-first
+    compaction:
+      threshold: 0.25      # fires at ~231K, under the 272K pricing tier
+      reminder: 0.2
+
 providers:
   openai:
     type: responses
     api_url: https://api.openai.com/v1/responses
-    supported_service_tiers: [fast, slow]
     models:
       gpt-5.4:
-        limit:
-          context: 1050000
-          input: 922000
-          output: 128000
+        <<: [*window-1050k-128k, *gpt-reasoning-basic, *vision-pdf]
         cost:
           input: 2.5
           output: 15
           cache_read: 0.25
-        reasoning:
-          summary: auto
-        variants:
-          high:
-            reasoning:
-              effort: high
-          xhigh:
-            reasoning:
-              effort: xhigh
-        modalities:
-          input: [text, image, pdf]
-
-model_pools:
-  default:
-    - openai/gpt-5.4@xhigh
-```
-
-Verify:
-
-```bash
-chord doctor models --model openai/gpt-5.4@xhigh
-```
-
-### GPT-5.5
-
-```yaml
-providers:
-  openai:
-    type: responses
-    api_url: https://api.openai.com/v1/responses
-    supported_service_tiers: [fast, slow]
-    models:
       gpt-5.5:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
+        <<: [*window-400k-128k, *gpt-reasoning-basic, *vision-pdf]
         cost:
           input: 5
           output: 30
           cache_read: 0.5
-        reasoning:
-          summary: auto
-        variants:
-          high:
-            reasoning:
-              effort: high
-          xhigh:
-            reasoning:
-              effort: xhigh
-        modalities:
-          input: [text, image, pdf]
-
-model_pools:
-  default:
-    - openai/gpt-5.5@xhigh
-```
-
-Verify:
-
-```bash
-chord doctor models --model openai/gpt-5.5@xhigh
-```
-
-### GPT-5.6 (Sol / Terra / Luna)
-
-The 5.6 family has three models: `gpt-5.6-sol`, `gpt-5.6-terra`, and
-`gpt-5.6-luna`. They share the same window, reasoning, variants, and
-modalities, so a common `&gpt-5-6-base` anchor carries those and each model
-entry only adds its own `cost` block.
-
-```yaml
-model_templates:
-  gpt-5.6-base: &gpt-5-6-base
-    # 1.05M model-page limits, shared by the API and the current Codex
-    # catalog: 1050000 total window / 922000 input budget (context minus
-    # output; these models publish no separate input cap) / 128000 output.
-    # Fall back to 400000/272000/128000 when your account or relay still
-    # serves the older profile.
-    limit:
-      context: 1050000
-      input: 922000
-      output: 128000
-    reasoning:
-      effort: medium
-      summary: auto
-    variants:
-      low:
-        reasoning:
-          effort: low
-      medium:
-        reasoning:
-          effort: medium
-      high:
-        reasoning:
-          effort: high
-      xhigh:
-        reasoning:
-          effort: xhigh
-      max:
-        reasoning:
-          effort: max
-    modalities:
-      input: [text, image, pdf]
-```
-
-### GPT-5.6 Sol
-
-```yaml
-providers:
-  openai:
-    type: responses
-    api_url: https://api.openai.com/v1/responses
-    models:
       gpt-5.6-sol:
-        <<: *gpt-5-6-base
+        <<: [*window-1050k-128k, *gpt-reasoning-full, *vision-pdf, *gpt-cost-first]
         cost:
           input: 5
           output: 30
@@ -175,22 +126,8 @@ providers:
               output: 45
               cache_read: 1
               cache_write: 12.5
-
-model_pools:
-  default:
-    - openai/gpt-5.6-sol@xhigh
-```
-
-### GPT-5.6 Terra
-
-```yaml
-providers:
-  openai:
-    type: responses
-    api_url: https://api.openai.com/v1/responses
-    models:
       gpt-5.6-terra:
-        <<: *gpt-5-6-base
+        <<: [*window-1050k-128k, *gpt-reasoning-full, *vision-pdf, *gpt-cost-first]
         cost:
           input: 2
           output: 12
@@ -202,22 +139,8 @@ providers:
               output: 18
               cache_read: 0.4
               cache_write: 5
-
-model_pools:
-  default:
-    - openai/gpt-5.6-terra@max
-```
-
-### GPT-5.6 Luna
-
-```yaml
-providers:
-  openai:
-    type: responses
-    api_url: https://api.openai.com/v1/responses
-    models:
       gpt-5.6-luna:
-        <<: *gpt-5-6-base
+        <<: [*window-1050k-128k, *gpt-reasoning-full, *vision-pdf, *gpt-cost-first]
         cost:
           input: 0.2
           output: 1.2
@@ -229,523 +152,112 @@ providers:
               output: 1.8
               cache_read: 0.04
               cache_write: 0.5
-
-model_pools:
-  default:
-    - openai/gpt-5.6-luna@max
-```
-
-Notes:
-
-- The 5.6 examples declare the model-page window directly as
-  `1050000 / 922000 / 128000`: the 922K input budget derives as `context`
-  minus `output` (these models publish no separate input cap) and needs no
-  explicit `input`. Only the 400K-allocation models (GPT-5.5 / 5.2 above)
-  keep `input: 272000`. If your account or relay still serves the older
-  Codex profile, fall back to `400000 / 272000 / 128000` for the 5.6 tiers.
-- GPT-5.6 API reasoning efforts can include `none`, `low`, `medium`, `high`, `xhigh`, and `max`.
-- Responses defaults `reasoning.summary` to `auto` while reasoning is active; set `reasoning.summary: none` when you do not want Chord to request a readable summary.
-- Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
-
-Verify:
-
-```bash
-chord doctor models --model openai/gpt-5.6-sol@xhigh
-```
-
-#### Compaction tuning for GPT-5.6
-
-Start from two questions: **which budget the model runs against**, the
-1.05M / 922K allocation used by the examples above or a
-`400000 / 272000` fallback profile when your account/relay still serves the
-older Codex catalog, and **what the threshold is for**: keeping quality up,
-staying under the 272K long-context pricing tier, or using the window for raw
-capacity. The trigger is `threshold × usable input budget`, so the same ratio
-fires at very different token counts under the two budgets; a recipe tuned
-for one does not transfer to the other.
-
-**Long-context quality** (MRCR v2 8-needle results as reported by OpenAI):
-Sol/Terra stay strong in the 256K–512K band (91.5% / 89.6%) and drop to ~73%
-(73.8% / 72.5%) in the 512K–1M band, while Luna sits at 41.3% in both, a
-cliff rather than a slope. The bands are averages, so treat them as a broad guide
-for where quality starts slipping, not as an exact cliff location.
-
-**Pricing** (official OpenAI API): a prompt that exceeds 272K input tokens
-(exactly 272000 does not) bills the **entire request** at the long-context rates (2x input / cache-read / cache-write and 1.5x output), not just the portion above 272K. Relays and Codex OAuth set their own prices, so this tier does not necessarily apply there. Chord's cost accounting selects the tier from the full prompt, but automatic compaction does not know about price tiers: it fires on a usage ratio, so keeping requests under 272K is a tuning goal, not a guarantee.
-
-The trigger compares the last provider-reported usage with the budget, a single large tool result can push the next prompt past the line, and while `model_driven` is enabled the grace period lets crossing requests run before compaction starts. Leave headroom below the line. Every compaction also costs a summarization call and loses raw context, so compressing too eagerly can cost more than the tier it avoids.
-
-Cost-first (Sol/Terra/Luna share this: it keeps usage under the 272K tier
-and below Luna's 256K+ collapse zone):
-
-```yaml
-model_templates:
-  gpt-5.6-cost-first: &gpt-5-6-cost-first
-    <<: *gpt-5-6-base
-    compaction:
-      threshold: 0.25       # 0.25 × 922K ≈ 231K, under the 272K pricing tier
-      reminder: 0.2
-```
-
-Quality-first (Sol/Terra; Luna has no strong long-context band to aim for):
-
-```yaml
-model_templates:
-  gpt-5.6-quality-first: &gpt-5-6-quality-first
-    <<: *gpt-5-6-base
-    compaction:
-      threshold: 0.55       # ≈ 507K; 0.5–0.65 are reasonable
-```
-
-The `reminder` above is optional: omit it to accept the value derived from
-`threshold` (0.50 for the quality-first template; derivation in
-[Per-model compaction tuning](#per-model-compaction-tuning)). Going above ~0.65 moves
-the trigger past ~600K–640K, already inside the band where Sol/Terra measure
-~73%; 0.7 (~645K–690K) is a capacity-first choice that deliberately accepts
-the long-context rate and some quality loss, and 0.8 (~738K–789K) even more
-so. Do not reuse the old 0.3 Luna recipe under this window: it fires at
-~277K–296K, already past the pricing line.
-
-##### Codex subscription windows are server-controlled
-
-On a Codex subscription endpoint (`preset: codex`, or a `/codex/responses`
-relay), the window a ChatGPT account actually gets comes from the
-server-delivered model catalog (`context_window` / `max_context_window`),
-not from the model page: those catalog values have changed repeatedly and
-differed between accounts (input-side caps as low as 272K have shipped while
-the model page advertised 1.05M). `/status` may show the configured value
-before the first request and the real cap only after it. So:
-
-- Before relying on the 1.05M allocation for long sessions, measure what the
-  endpoint actually accepts: configure the candidate `limit`, run a long
-  session, and watch the logs for `context_length_exceeded` / oversize
-  rejections.
-- If your account or relay still serves the older profile, fall back to
-  `400000 / 272000 / 128000` for that provider.
-- `threshold` is decoupled from the window: it is the fraction of the usable
-  budget at which to compact, chosen by your quality/cost tradeoff, but the
-  API's >272K-input whole-request 2× pricing cliff applies regardless of the
-  window, so keep the trigger inside it if that pricing applies to your
-  route. Leave headroom: the trigger compares the last provider-reported
-  usage against the budget, and a single large tool result can push the next
-  prompt past the line.
-
-As everywhere on this page, the `compaction` block lives on the model
-template so every provider referencing it inherits it, and the fields tune
-the usage-driven automatic-compaction path regardless of `model_driven`. A
-block on a shared template such as `&gpt-5-6-base` applies to every model that
-merges it; for per-tier tuning, give that tier its own template.
-
-### GPT-6 Astra
-
-GPT-6 Astra is OpenAI's current flagship (`gpt-6-astra`): a 1,050,000-token context window with 128,000 max output and 922,000 usable input (derived as `context` minus `output` when `input` is unset). Reasoning supports `low`, `medium`, `high`, `xhigh`, and `max`; there is no `none` effort. Standard pricing is $10 input / $50 output per 1M with $1 cached input and $12.50 cache writes; prompts above 272K input bill the whole request at 2× input/cache and 1.5× output.
-
-Unlike GPT-5.6 there are no Sol/Terra/Luna tiers: `gpt-6-astra` is a single model ID, so its recipe carries no tier variants. Pair the API-key provider with an entry in `~/.config/chord/auth.yaml`:
-
-```yaml
-openai:
-  - "$OPENAI_API_KEY"
-```
-
-The base template carries a cost-first `compaction` block by default: 272K is
-a pricing cliff (the whole request reprices, not just the tokens above the
-line), so keeping usage under it is the largest cost lever, and Astra stays at
-full long-context quality well below it (OpenAI reports 100% on MRCR v2
-8-needle at 256K–512K). Raise `threshold` past 0.29 only when you accept the
-2× long-context rate.
-
-```yaml
-model_templates:
-  gpt-6-astra-base: &gpt-6-astra-base
-    limit:
-      context: 1050000
-      output: 128000        # full API window: no `input`; usable input derives as 922K
-    cost:
-      input: 10
-      output: 50
-      cache_read: 1
-      cache_write: 12.5
-      input_tiers:
-        - above_input_tokens: 272000
-          input: 20
-          output: 75
-          cache_read: 2
-          cache_write: 25
-    reasoning:
-      effort: medium
-      summary: auto
-    variants:
-      low:
-        reasoning:
-          effort: low
-      medium:
-        reasoning:
-          effort: medium
-      high:
-        reasoning:
-          effort: high
-      xhigh:
-        reasoning:
-          effort: xhigh
-      max:
-        reasoning:
-          effort: max
-    modalities:
-      input: [text, image, pdf]
-    compaction:
-      threshold: 0.25       # fires at ~231K, under the 272K pricing cliff
-      reminder: 0.2
-
-providers:
-  openai:
-    type: responses
-    api_url: https://api.openai.com/v1/responses
-    models:
-      gpt-6-astra: *gpt-6-astra-base
-
-model_pools:
-  default:
-    - openai/gpt-6-astra@medium
-```
-
-Verify:
-
-```bash
-chord doctor models --model openai/gpt-6-astra@medium
-```
-
-Notes:
-
-- This snippet targets the **official OpenAI API**, so it declares the full
-  `1050000` window with no `input`: Chord derives the usable input budget as
-  `context` minus the model's own `output` cap (`1050000 − 128000 = 922000`),
-  and reserves the default `64000` output cap only for models that declare no
-  `limit.output`. Above 272K is a pricing threshold here, not an input cap, so
-  do not add `input: 272000`.
-- A Codex-backed provider is a different allocation: see
-  [Codex OAuth preset](#codex-oauth-preset) for the Codex-profile examples.
-  Do not copy this API snippet's window onto a Codex provider.
-- Supported API reasoning efforts are `low`, `medium`, `high`, `xhigh`, and
-  `max`; select a configured variant with a ref such as `openai/gpt-6-astra@medium`.
-  GPT-6 Astra has no `none` effort.
-- Responses defaults `reasoning.summary` to `auto` while reasoning is active;
-  set `reasoning.summary: none` when you do not want Chord to request a
-  readable summary.
-
-#### Compaction tuning for GPT-6 Astra
-
-The base template above already carries the cost-first `compaction`
-(0.25/0.2). The 272K pricing cliff is the hard constraint; the quality
-ceiling is not: OpenAI reports GPT-6 Astra at 100% on MRCR v2 8-needle at
-256K–512K and 96.3% at 512K–1M, a gentle slope rather than the cliff GPT-5.6
-Sol hits (73.8% at 512K–1M). So Astra's threshold choice beyond cost-first is
-a price/capacity tradeoff, not a quality-preservation one.
-
-**Cost-first** (the base template, 0.25/0.2): fires at ~231K, under the 272K
-cliff. Recommended default: the 2× repricing dwarfs any other lever, and
-the trigger sits well inside the full-quality band.
-
-**Quality-first / capacity-first** (accept the 2× long-context rate): because
-Astra has no quality cliff before ~512K, you can push the threshold well past
-where GPT-5.6 Sol would, while staying in a high-quality band. 0.6–0.7
-(~553K–645K) buys a large window while keeping MRCR above 96%; 0.7–0.8
-(~645K–738K) leans further into capacity at some quality cost. Override the
-base template's `compaction`:
-
-```yaml
-model_templates:
-  gpt-6-astra-quality: &gpt-6-astra-quality
-    <<: *gpt-6-astra-base
-    compaction:
-      threshold: 0.65      # fires at ~600K; accepts the 2× long-context rate
-```
-
-Omit `reminder` to accept the value derived from `threshold`. On a
-Codex-backed provider (its window is server-controlled and unverified for
-Astra), put the `compaction` on that provider's model entry and tune the
-threshold to the actual measured window, not the API full window.
-
-### GPT-6 Sol
-
-GPT-6 Sol (`gpt-6-sol`, September 2026) sits below GPT-6 Astra as OpenAI's
-coding and agentic workhorse, distinct from the previous generation's
-`gpt-5.6-sol`: the model page positions it for complex coding
-and agentic workflows, and it runs the same 1,050,000-token window and 128,000
-max output at $2 / $10 per 1M tokens, a fifth of Astra's rates. It shipped
-together with GPT-6 Luna, the new cheap tier, whose recipe follows below.
-
-```yaml
-model_templates:
-  gpt-6-sol-base: &gpt-6-sol-base
-    limit:
-      context: 1050000
-      output: 128000        # full API window: no `input`; usable input derives as 922K
-    cost:
-      input: 2
-      output: 10
-      cache_read: 0.2
-      cache_write: 2.5
-      input_tiers:
-        - above_input_tokens: 272000
-          input: 4
-          output: 15
-          cache_read: 0.4
-          cache_write: 5
-    reasoning:
-      effort: medium
-      summary: auto
-    variants:
-      low:
-        reasoning:
-          effort: low
-      medium:
-        reasoning:
-          effort: medium
-      high:
-        reasoning:
-          effort: high
-      xhigh:
-        reasoning:
-          effort: xhigh
-      max:
-        reasoning:
-          effort: max
-    modalities:
-      input: [text, image, pdf]
-    compaction:
-      threshold: 0.25       # fires at ~231K, under the 272K pricing cliff
-      reminder: 0.2
-
-providers:
-  openai:
-    type: responses
-    api_url: https://api.openai.com/v1/responses
-    models:
-      gpt-6-sol: *gpt-6-sol-base
+      gpt-6-astra:
+        <<: [*window-1050k-128k, *gpt-reasoning-full, *vision-pdf, *gpt-cost-first]
+        cost:
+          input: 10
+          output: 50
+          cache_read: 1
+          cache_write: 12.5
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 20
+              output: 75
+              cache_read: 2
+              cache_write: 25
+      gpt-6-sol:
+        <<: [*window-1050k-128k, *gpt-reasoning-full, *vision-pdf, *gpt-cost-first]
+        cost:
+          input: 2
+          output: 10
+          cache_read: 0.2
+          cache_write: 2.5
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 4
+              output: 15
+              cache_read: 0.4
+              cache_write: 5
+      gpt-6-luna:
+        <<: [*window-1050k-128k, *gpt-reasoning-full, *vision, *gpt-cost-first]
+        cost:
+          input: 0.1
+          output: 0.5
+          cache_read: 0.01
+          cache_write: 0.125
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 0.2
+              output: 0.75
+              cache_read: 0.02
+              cache_write: 0.25
 
 model_pools:
   default:
     - openai/gpt-6-sol@medium
+    - openai/gpt-5.6-sol@xhigh
 ```
+
+### Model differences
+
+| Model | Window | Input modalities | Input / output price (per 1M tokens) | Long-context quality (MRCR v2 8-needle) |
+| --- | --- | --- | ---: | --- |
+| GPT-5.4 | 1.05M | text, image, PDF | $2.5 / $15 | no banded results published |
+| GPT-5.5 | 400K | text, image, PDF | $5 / $30 | no banded results published |
+| GPT-5.6 Sol | 1.05M | text, image, PDF | $5 / $30 | ~73.8% at 512K–1M |
+| GPT-5.6 Terra | 1.05M | text, image, PDF | $2 / $12 | ~72.5% at 512K–1M |
+| GPT-5.6 Luna | 1.05M | text, image, PDF | $0.20 / $1.20 | 41.3% in both 256K–1M bands |
+| GPT-6 Astra | 1.05M | text, image, PDF | $10 / $50 | 96.3% at 512K–1M |
+| GPT-6 Sol | 1.05M | text, image, PDF | $2 / $10 | no banded results published |
+| GPT-6 Luna | 1.05M | text, image | $0.10 / $0.50 | no banded results published |
+
+Prices list base input / output only; the `cost` blocks in the configs also carry cache rates and long-context tiers. GPT-5.4 / GPT-5.5 support `supported_service_tiers: [fast, slow]`: declare it on the provider or the model entry when you need a service tier, and set the multiplier in `cost`.
+
+- **Window**: the 1.05M tier declares only `context` and `output`, no `input` (these models publish no separate input cap, so the 922K input budget derives from `context - output`). GPT-5.5 is on the 400K tier and keeps `input: 272000`. When an account or relay still serves the older profile, configure the affected models as `400000 / 272000 / 128000`.
+- **reasoning**: GPT-5.6 and GPT-6 take `low / medium / high / xhigh / max`, with `medium` as the default; GPT-5.6 and GPT-6 Sol / Luna also accept `none`, while GPT-6 Astra does not. GPT-5.4 / GPT-5.5 only have the `high` and `xhigh` variants. While reasoning is active, Responses requests `summary: auto` by default; set it to `none` when you do not want a summary. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
+- **Long-context pricing** (official API): once a prompt exceeds 272K input tokens (exactly 272K does not trigger it), the whole request is repriced at 2x input / cache and 1.5x output. Relays and Codex OAuth set their own prices, so this may not apply.
+
+#### Compaction
+
+The examples use `threshold: 0.25` for GPT-5.6 / GPT-6, which on the 922K budget fires at ~231K and leaves room under the 272K pricing line. Compaction itself also calls a summarization model and discards some raw context. GPT-5.4 / GPT-5.5 have no dedicated recipe: omit `compaction` and they use the global default.
+
+The band averages are only a rough guide to quality drift: GPT-5.6 Sol / Terra hold 91.5% / 89.6% at 256K–512K and drop to 73.8% / 72.5% at 512K–1M, while Luna sits at 41.3% in both. Sol / Terra can raise the threshold to `0.5–0.65` when quality needs it; Luna should not copy that.
+
+GPT-6 Astra measures 100% at 256K–512K and 96.3% at 512K–1M, so once you accept the above-272K rate the threshold can go to `0.6–0.7` (~553K–645K); `0.7–0.8` leans further into capacity at a clearer quality cost. GPT-6 Sol / Luna have no published banded results, so start cost-first and adjust only after measuring their long-context quality yourself.
 
 Verify:
 
 ```bash
 chord doctor models --model openai/gpt-6-sol@medium
+chord doctor models --model openai/gpt-5.4@xhigh
 ```
-
-Notes:
-
-- `reasoning.effort` supports `none`, `low`, `medium` (the default), `high`,
-  `xhigh`, and `max`. Keep the Responses provider when the model has to call
-  tools: on Chat Completions, GPT-6 Sol supports function calling only with
-  `reasoning_effort` set to `none`.
-- Cache writes bill at 1.25x the input rate ($2.50); Batch and Flex are half
-  price and fast mode is double, as on the model page.
-- As with Astra, do not add `input: 272000`: 272K is a pricing threshold, not
-  an input cap, and a prompt above it re-prices the entire request at 2x
-  input/cache and 1.5x output.
-
-#### Compaction tuning for GPT-6 Sol
-
-OpenAI has not published banded long-context results for GPT-6 Sol, so this
-recipe starts cost-first: `threshold` 0.25 fires at ~231K, under the 272K
-whole-request repricing cliff, with the derived `reminder`. Raise the
-threshold past the cliff only after you have measured Sol's long-context
-quality on your own material and accepted the 2x rate; do not copy Astra's
-0.6–0.7 range by analogy.
-
-### GPT-6 Luna
-
-GPT-6 Luna (`gpt-6-luna`, September 2026) is the cheap tier of the GPT-6
-generation, succeeding the previous generation's `gpt-5.6-luna`: the model
-page positions it for focused, high-volume tasks. It runs the same
-1,050,000-token window and 128,000 max output as Sol at $0.10 / $0.50 per 1M
-tokens, with cached input at $0.01.
-
-```yaml
-model_templates:
-  gpt-6-luna-base: &gpt-6-luna-base
-    limit:
-      context: 1050000
-      output: 128000        # full API window: no `input`; usable input derives as 922K
-    cost:
-      input: 0.1
-      output: 0.5
-      cache_read: 0.01
-      cache_write: 0.125
-      input_tiers:
-        - above_input_tokens: 272000
-          input: 0.2
-          output: 0.75
-          cache_read: 0.02
-          cache_write: 0.25
-    reasoning:
-      effort: medium
-      summary: auto
-    variants:
-      low:
-        reasoning:
-          effort: low
-      medium:
-        reasoning:
-          effort: medium
-      high:
-        reasoning:
-          effort: high
-      xhigh:
-        reasoning:
-          effort: xhigh
-      max:
-        reasoning:
-          effort: max
-    modalities:
-      input: [text, image]
-    compaction:
-      threshold: 0.25       # fires at ~231K, under the 272K pricing cliff
-      reminder: 0.2
-
-providers:
-  openai:
-    type: responses
-    api_url: https://api.openai.com/v1/responses
-    models:
-      gpt-6-luna: *gpt-6-luna-base
-
-model_pools:
-  default:
-    - openai/gpt-6-luna@medium
-```
-
-Verify:
-
-```bash
-chord doctor models --model openai/gpt-6-luna@medium
-```
-
-Notes:
-
-- `reasoning.effort` supports `none`, `low`, `medium` (the default), `high`,
-  `xhigh`, and `max`. Input is text and image; output is text.
-- Cache writes bill at 1.25x the input rate ($0.125); Batch and Flex are half
-  price and fast mode is double, as on the model page.
-- As on Sol, do not add `input: 272000`: 272K is a pricing threshold, not an
-  input cap, and a prompt above it re-prices the entire request at 2x
-  input/cache and 1.5x output.
-- On Chat Completions, function calling needs `reasoning_effort: none`; keep
-  the Responses provider when Luna has to call tools.
-
-#### Compaction tuning for GPT-6 Luna
-
-OpenAI has not published banded long-context results for GPT-6 Luna, so this
-recipe starts cost-first: `threshold` 0.25 fires at ~231K, under the 272K
-whole-request repricing cliff, with the derived `reminder`. Raise the
-threshold past the cliff only after you have measured Luna's long-context
-quality on your own material and accepted the 2x rate; do not copy Astra's
-0.6–0.7 range by analogy.
 
 ## Codex OAuth preset
 
-Use this when you want ChatGPT/Codex OAuth instead of API keys. Codex OAuth
-differs from the API-key examples only in the provider preset and the
-authentication method: the model windows match the API allocation.
+Use this when you want ChatGPT/Codex OAuth instead of API keys. Codex OAuth differs from the API-key examples only in the provider preset and the authentication method: the model windows match the API allocation.
 
-The model allocations used in this section are:
-
-| Model | `limit.context` | `limit.input` | `limit.output` |
-| --- | ---: | ---: | ---: |
-| GPT-6 Sol / Luna / Astra | 1,050,000 | 922,000 | 128,000 |
-| GPT-5.4 | 1,050,000 | 922,000 | 128,000 |
-| GPT-5.5 | 400,000 | 272,000 | 128,000 |
-| GPT-5.6 Sol / Terra / Luna | 1,050,000 | 922,000 | 128,000 |
-
-Keep all three fields: `context` is the total input-plus-output window exposed
-by Codex, while `input` and `output` are the separate hard allocations within
-that window. The separate maxima do not need to add up to `context`: near the
-input cap, less space remains for output.
+The model tiers used in this section:
 
 ```yaml
-model_templates:
-  # 1.05M-window entries: same limits, reasoning, variants, and modalities;
-  # GPT-6 Luna takes images but not PDFs.
-  codex-gpt6-base: &codex-gpt6-base
-    limit:
-      context: 1050000
-      input: 922000
-      output: 128000
-    reasoning:
-      effort: medium
-      summary: auto
-    variants:
-      low:
-        reasoning:
-          effort: low
-      medium:
-        reasoning:
-          effort: medium
-      high:
-        reasoning:
-          effort: high
-      xhigh:
-        reasoning:
-          effort: xhigh
-      max:
-        reasoning:
-          effort: max
-    modalities:
-      input: [text, image, pdf]
-  codex-gpt6-luna: &codex-gpt6-luna
-    <<: *codex-gpt6-base
-    modalities:
-      input: [text, image]
-
 providers:
   codex:
     preset: codex
     type: responses
     models:
-      gpt-6-astra: *codex-gpt6-base
-      gpt-5.5:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
-        reasoning:
-          summary: auto
-        variants:
-          high:
-            reasoning:
-              effort: high
-          xhigh:
-            reasoning:
-              effort: xhigh
-        modalities:
-          input: [text, image, pdf]
-      gpt-5.4:
-        limit:
-          context: 1050000
-          input: 922000
-          output: 128000
-        reasoning:
-          summary: auto
-        variants:
-          high:
-            reasoning:
-              effort: high
-          xhigh:
-            reasoning:
-              effort: xhigh
-        modalities:
-          input: [text, image, pdf]
-      gpt-5.6-sol: *codex-gpt6-base
-      gpt-6-sol: *codex-gpt6-base
-      gpt-6-luna: *codex-gpt6-luna
+      gpt-6-astra: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
+      gpt-6-sol: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
+      gpt-6-luna: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision]}
+      gpt-5.6-sol: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
+      gpt-5.4: {<<: [*window-codex-1050k-128k, *gpt-reasoning-basic, *vision-pdf]}
+      gpt-5.5: {<<: [*window-400k-128k, *gpt-reasoning-basic, *vision-pdf]}
 
 model_pools:
   default:
-    - codex/gpt-6-astra@medium
+    - codex/gpt-6-sol@medium
     - codex/gpt-5.5@xhigh
 ```
+
+A Codex window is described by three fields together: `context` is the total input-plus-output window, while `input` and `output` are the separate hard caps within it, and the two maxima do not need to add up to `context`. Near the input cap, less space remains for output. The main recipes use `&window-1050k-128k` for official APIs that publish no separate input cap, so here they switch to `&window-codex-1050k-128k`, which carries `input: 922000`.
 
 Authenticate with:
 
@@ -755,36 +267,15 @@ chord auth codex
 
 Notes:
 
-- Keep API-key and Codex OAuth providers separate when you use both because their credentials and model allocations differ.
-- Each entry carries the same `reasoning` and `modalities` as its recipe
-  above. Without `modalities` a model takes text only and Chord drops its
-  image/PDF attachments; without a `reasoning` block the request carries no
-  reasoning parameters at all, so the effort stays at the backend default and
-  no summary is requested.
-- The first-run wizard writes the full catalog (it also lists `gpt-5.2`,
-  `gpt-5.3-codex`, `gpt-5.6-terra`, and `gpt-5.6-luna`) with `limit` only and
-  no pool suffixes; add `reasoning` and `modalities` the same way when you want
-  summaries and attachments for those models.
-- GPT-6 Astra is rolling out to Codex over the first weeks after launch (it
-  requires Codex CLI 0.153.0 or newer) and its Codex subscription window is
-  not published. The recipe uses the same `1050000 / 922000 / 128000`
-  allocation as GPT-5.6 Sol as a conservative starting point; verify against
-  your account's server catalog and adjust all three fields to the measured
-  window before relying on it for long sessions.
-- GPT-5.4, GPT-5.6 Sol / Terra / Luna, and GPT-6 Sol / Luna / Astra use the model-page
-  allocation `1050000 / 922000 / 128000` (the 922K input budget derives as
-  `context` minus `output`; these models publish no separate input cap). The
-  API's >272K whole-request 2× pricing cliff still applies if your route bills
-  that way. If the server catalog for your account/relay still serves the
-  older profile, fall back to `400000 / 272000 / 128000`.
-- This preset has no `cost` block — a subscription is not billed per token —
-  and no `compaction` block: take a threshold from the compaction section of
-  the model's recipe above and set it on the template or the model entry.
+- Keep API-key and Codex OAuth providers separate when you use both because their credentials and model allocations differ, and configure each one's limits separately.
+- Each entry carries the same `reasoning` and `modalities` as its recipe above. Without a `reasoning` block the request carries no reasoning parameters at all, so the effort stays at the backend default and no summary is requested.
+- The first-run wizard writes the full catalog (it also lists `gpt-5.2`, `gpt-5.3-codex`, `gpt-5.6-terra`, and `gpt-5.6-luna`) with `limit` only and no pool suffixes; add `reasoning` and `modalities` the same way when you want summaries and attachments for those models.
+- Codex subscription windows are controlled by the server-delivered model catalog, not the model page: those catalog values have changed repeatedly and differed between accounts (input-side caps as low as 272K have shipped while the model page advertised 1.05M). `/status` may show the configured value before the first request and the real cap only after it. Before relying on a 1.05M window for long sessions, measure what the endpoint actually accepts, and fall back to `400000 / 272000 / 128000` for that provider when your account or relay still serves the older profile.
+- GPT-6 Astra is rolling out to Codex over the first weeks after launch (it requires Codex CLI 0.153.0 or newer) and its Codex subscription window is not published. The recipe uses the same `1050000 / 922000 / 128000` allocation as GPT-5.6 Sol as a conservative starting point; verify against your account's server catalog and adjust all three fields to the measured window before relying on it for long sessions.
+- This preset has no `cost` block (a subscription is not billed per token) and no `compaction` block: take a threshold from the [Compaction](#compaction) section above and set it on the template or the model entry. Compute the trigger point from the measured usable budget; the API's whole-request 2× repricing cliff above 272K applies only where the route actually charges OpenAI's long-context rates.
 - These values track the current Codex model catalog and may change with a future Codex release. Update all three fields together when the backend allocation changes.
 
 ## Anthropic Claude
-
-Pair with `~/.config/chord/auth.yaml`:
 
 ```yaml
 anthropic:
@@ -794,9 +285,7 @@ anthropic:
 ```yaml
 model_templates:
   claude-opus: &claude-opus
-    limit:
-      context: 1000000
-      output: 128000
+    <<: [*window-1m-128k, *vision-pdf]
     cost:
       input: 5
       output: 25
@@ -813,8 +302,6 @@ model_templates:
       xhigh:
         thinking:
           effort: xhigh
-    modalities:
-      input: [text, image, pdf]
 
 providers:
   anthropic:
@@ -919,37 +406,20 @@ Notes:
 
 ### Compaction tuning for Claude 5
 
-The whole Claude 5 line (Fable 5.1, Opus 5.5, Opus 5, Sonnet 5) advertises 1M tokens with 128K output and flat per-token pricing across the window. MRCR v2 8-needle shows Opus-class models holding ~76% even at 1M (the flattest curve of any current family), so the reliable window is genuinely large. Opus 4.7-era models trade retrieval accuracy for refusal honesty; Opus 5, Opus 5.5, and Fable 5.1 restore strong long-context retrieval; Opus 5.5 also has the lowest cache reads of the three ($0.20 per 1M tokens), so re-reading files after compaction costs less.
-
-For everyday work, omit the `compaction` block and stay on the global default (`threshold` 0.8, about 698K on the ~872K usable budget); for many-hour agentic sessions, set `threshold: 0.7` (about 610K) to limit time spent deep in the mild 512K+ degradation band.
+The whole Claude 5 line (Fable 5.1, Opus 5.5, Opus 5, Sonnet 5) advertises 1M tokens with 128K output and flat per-token pricing across the window. MRCR v2 8-needle shows Opus-class models holding ~76% even at 1M (the flattest curve of any current family), so the reliable window is genuinely large. Opus 4.7-era models trade retrieval accuracy for refusal honesty; Opus 5, Opus 5.5, and Fable 5.1 restore strong long-context retrieval; Opus 5.5 also has the lowest cache reads of the three ($0.20 per 1M tokens), so re-reading files after compaction costs less. For everyday work, omit the `compaction` block and stay on the global default (`threshold` 0.8, about 698K on the ~872K usable budget); for many-hour agentic sessions, set `threshold: 0.7` (about 610K) to limit time spent deep in the mild 512K+ degradation band.
 
 ```yaml
+# Add the compaction line to the existing claude-fable-5-1 template; every
+# provider that references it inherits the threshold.
 model_templates:
   claude-fable-5-1: &claude-fable-5-1
-    limit: {context: 1000000, output: 128000}
-    cost:
-      input: 10
-      output: 50
-      cache_read: 0.25
-      cache_write: 12.5
-      cache_write_1h: 20
-    thinking: {type: adaptive, display: summarized}
+    <<: [*window-1m-128k, *vision-pdf]
     compaction: {threshold: 0.7}   # tuned for long agentic sessions
-
-providers:
-  anthropic:
-    models:
-      claude-fable-5-1: *claude-fable-5-1
-      claude-opus-5: *claude-fable-5-1     # same profile; adjust cost block
 ```
 
-`reminder` is omitted on purpose: the derived 0.60 is
-a sensible pressure head start for these models; set it explicitly only when
-you want the reminder earlier or later than the derived value.
+`reminder` is omitted on purpose: the derived 0.60 is a sensible pressure head start for these models; set it explicitly only when you want the reminder earlier or later than the derived value. The same line works for other models in the same reliability tier, such as Opus 5.
 
-Note the tokenizer change since Opus 4.7: the same text produces ~30% more
-tokens on Claude 5 models than on older ones, so a context budget that felt
-right on an older model should be scaled down accordingly.
+Note the tokenizer change since Opus 4.7: the same text produces ~30% more tokens on Claude 5 models than on older ones, so a context budget that felt right on an older model should be scaled down accordingly.
 
 ## Thinking behind a Chat Completions gateway
 
@@ -973,7 +443,7 @@ dialect explicitly for those, below.
 ```yaml
 model_templates:
   gemini-flash: &gemini-flash
-    limit: {context: 1048576, output: 65536}
+    <<: *window-1049k-64k
     thinking:
       include_thoughts: true
     variants:
@@ -982,16 +452,16 @@ model_templates:
       low: {thinking: {level: low}}
 
   claude-chat: &claude-chat
-    limit: {context: 200000, output: 64000}
+    <<: *window-200k-64k
     thinking: {type: enabled, budget: 8192}
 
   deepseek-chat: &deepseek-chat
-    limit: {context: 1000000, output: 64000}
+    <<: *window-1m-64k
     reasoning: {effort: high}
     thinking: {type: enabled}
 
   glm-chat: &glm-chat
-    limit: {context: 200000, output: 64000}
+    <<: *window-200k-64k
     thinking: {type: enabled}
     compat:
       # Family extras stay in the override; Chord merges them into the
@@ -1093,8 +563,6 @@ that drops `extra_content` or `thinking_blocks` leaves Chord nothing to replay.
 
 ## Google Gemini
 
-Pair with `~/.config/chord/auth.yaml`:
-
 ```yaml
 gemini:
   - "$GEMINI_API_KEY"
@@ -1105,11 +573,7 @@ model_templates:
   # Shared shape for Gemini 3.x Flash models: 1M window, `level`-controlled
   # thinking.
   gemini-flash: &gemini-flash
-    limit:
-      context: 1048576
-      output: 65536
-    modalities:
-      input: [text, image, pdf]
+    <<: [*window-1049k-64k, *vision-pdf]
     thinking:
       level: high
 
@@ -1151,7 +615,7 @@ compaction rule:
 # Per-model Gemini compaction. Providers referencing the template inherit it.
 model_templates:
   gemini-pro: &gemini-pro
-    limit: {context: 1048576, output: 65536}
+    <<: [*window-1049k-64k, *vision-pdf]
     compaction: {threshold: 0.2, reminder: 0.15}
     thinking:
       include_thoughts: true
@@ -1159,7 +623,6 @@ model_templates:
       high: {thinking: {level: "high"}}
       medium: {thinking: {level: "medium"}}
       low: {thinking: {level: "low"}}
-    modalities: {input: [text, image, pdf]}
 ```
 
 Pricing note: only **Gemini 3.1 Pro** steps up to the higher input tier above
@@ -1170,8 +633,6 @@ workload. If you need both a long reliable window *and* Pro-class quality, that 
 the case where a GPT-5.6 Sol / Claude 5-class model is the better fit.
 
 ## GLM / BigModel Coding Plan
-
-Pair with `~/.config/chord/auth.yaml`:
 
 ```yaml
 bigmodel:
@@ -1189,9 +650,7 @@ compat settings, not a 5.2-only restriction.
 ```yaml
 model_templates:
   glm-5.2-chat: &glm-5-2-chat
-    limit:
-      context: 1000000
-      output: 128000
+    <<: *window-1m-128k
     reasoning:
       effort: max
     compat:
@@ -1207,9 +666,7 @@ model_templates:
         preserve_history: true
 
   glm-5.2-messages: &glm-5-2-messages
-    limit:
-      context: 1000000
-      output: 128000
+    <<: *window-1m-128k
     thinking:
       type: adaptive
       effort: max
@@ -1221,9 +678,7 @@ model_templates:
         mode: anthropic_unsigned
 
   glm-5.2-responses: &glm-5-2-responses
-    limit:
-      context: 1000000
-      output: 128000
+    <<: *window-1m-128k
     reasoning:
       effort: max
 
@@ -1241,9 +696,7 @@ model_templates:
           effort: max
 
   glm-5.3-flash: &glm-5-3-flash
-    <<: *glm-5-3-chat
-    modalities:
-      input: [text, image, pdf]
+    <<: [*glm-5-3-chat, *vision-pdf]
 
 providers:
   bigmodel:
@@ -1275,22 +728,18 @@ Notes:
 
 - Chat Completions requires `thinking.type: enabled`, `reasoning_effort`, and
   `max_tokens`. `request_overrides` adds GLM's thinking flags and renames the
-  dynamically calculated output-limit field; `openai_visible` replays native
-  `reasoning_content` and accepts portable visible reasoning from other wire
-  families as `reasoning_content`.
+  dynamically calculated output-limit field.
+- Messages-compatible endpoints use `thinking` plus `output_config.effort`.
+  Disable Anthropic beta headers unless that endpoint documents support;
+  signature replay support cannot be inferred from the wire format alone, so
+  configure `anthropic_unsigned` as described in the shared section only after
+  verifying that the endpoint accepts its own visible unsigned thinking in
+  tool-call loops.
 - GLM-5.3 and 5.3-Flash support only `reasoning_effort` `low` / `high` / `max`
   (GLM-5.2 additionally accepts `xhigh` / `medium` / `minimal` / `none`), so
   the `glm-5.3-chat` template adds the three-effort `variants`; use
   `glm-5.3@low|high|max` refs for 5.3 and 5.3-Flash instead of the 5.2
   effort set.
-- Messages-compatible endpoints use `thinking` plus `output_config.effort`.
-  Disable Anthropic beta headers unless that endpoint documents support. A
-  compatible Messages endpoint may return unsigned thinking rather than
-  Claude-style signed blocks; do not infer signature replay support from the
-  wire format alone. Configure `anthropic_unsigned` only after verifying that
-  the endpoint accepts its own visible unsigned thinking in tool-call loops;
-  once enabled, Chord can also map portable visible reasoning from other wire
-  families into unsigned `thinking` blocks for that target.
 - A GLM `/responses` endpoint is gateway-specific. Use a separate template with
   `reasoning.effort` only when the gateway documents OpenAI Responses mapping.
 - GLM-5.3 (GA August 2026) keeps GLM-5.2's text-only specs (1M context, 128K
@@ -1319,18 +768,15 @@ sessions on GLM, compact around a quarter of the usable budget:
 # template inherits it.
 model_templates:
   glm-5.2-chat: &glm-5-2-chat
-    limit: {context: 1000000, output: 128000}
+    <<: *window-1m-128k
     compaction: {threshold: 0.25, reminder: 0.2}
 ```
 
 GLM-5.2 is served by several providers in the recipes above (`bigmodel` chat,
 `bigmodel-messages`, `glm-responses`); each model entry that references the
-template gets the same `compaction`. If your workloads stay short, omit the
-`compaction` block and let the model use the global default.
+template gets the same `compaction`.
 
 ## DeepSeek
-
-Pair with `~/.config/chord/auth.yaml`:
 
 ```yaml
 deepseek:
@@ -1346,11 +792,7 @@ requests will follow from 2026-09-14 04:00 UTC until V4.1-Pro ships.
 ```yaml
 model_templates:
   deepseek-v4.1-chat: &deepseek-v4-1-chat
-    limit:
-      context: 1000000
-      output: 64000
-    modalities:
-      input: [text, image]
+    <<: [*window-1m-64k, *vision]
     reasoning:
       effort: high
     variants:
@@ -1377,11 +819,7 @@ model_templates:
         suppress_in_thinking: true
 
   deepseek-v4.1-messages: &deepseek-v4-1-messages
-    limit:
-      context: 1000000
-      output: 64000
-    modalities:
-      input: [text, image]
+    <<: [*window-1m-64k, *vision]
     thinking:
       type: adaptive
       effort: high
@@ -1404,11 +842,7 @@ model_templates:
         preserve_history: true
 
   deepseek-v4.1-responses: &deepseek-v4-1-responses
-    limit:
-      context: 1000000
-      output: 64000
-    modalities:
-      input: [text, image]
+    <<: [*window-1m-64k, *vision]
     reasoning:
       effort: high
     variants:
@@ -1456,7 +890,8 @@ model_pools:
 Notes:
 
 - DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
-  `max_tokens`. `request_overrides` supplies the request-shape differences; during thinking + tool-call loops, `openai_visible` returns the assistant's `reasoning_content` unchanged. When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so the templates set `preserve_history: true` to keep completed-turn reasoning client-side; without tools the field is ignored.
+  `max_tokens`. `request_overrides` supplies the request-shape differences.
+  When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so the templates set `preserve_history: true` to keep completed-turn reasoning client-side; without tools the field is ignored.
 
   DeepSeek also rejects forced tool choice while thinking is active, so the template downgrades loop-forced `tool_choice: required` to the backend default for those requests.
 - DeepSeek Responses supports `tool_choice: required`, so its template keeps
@@ -1467,9 +902,7 @@ Notes:
   the stream ends with a `response.completed` / `incomplete` / `failed` event
   instead of `data: [DONE]`.
 - DeepSeek Messages supports `output_config.effort`; Chord derives it from
-  `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint; it ignores them outside the Files API. `thinking.budget_tokens` is accepted but ignored: thinking depth comes from the effort value, not from a token budget. DeepSeek's Anthropic-compatible endpoint may return unsigned `thinking` blocks rather than Claude-style signed blocks.
-
-  `anthropic_unsigned` replays same-provider/model unsigned thinking natively and can also accept portable visible reasoning from other wire families as unsigned `thinking` blocks; if the target still rejects that shape, strict compatibility drops the reasoning carrier while preserving the tool round.
+  `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint; it ignores them outside the Files API. `thinking.budget_tokens` is accepted but ignored: thinking depth comes from the effort value, not from a token budget. Its Anthropic-compatible endpoint may return unsigned `thinking` blocks, so configure `anthropic_unsigned` as described in the shared section.
 - All three wire families accept images, billed as input tokens (the official
   cap is 1024 tokens per image). The endpoint takes inline base64, external
   URLs, or Files API `file_id`s, detects the format by content
@@ -1495,7 +928,7 @@ Notes:
 
 Additional notes:
 
-- The official pricing page lists a maximum output of 384K; `limit.output:
+- The official pricing page lists a maximum output of 384K; the `limit.output:
   64000` here is a conservative local allocation. Raise it as needed for
   longer outputs.
 - `reasoning_effort` (Chat) and `output_config.effort` (Messages) accept `low`
@@ -1522,11 +955,11 @@ inherit it; override `modalities` or build their templates text-only:
 
 ```yaml
 # Gateways still serving the V4-generation models: same templates, text only.
+# The first anchor in a merge sequence wins, so text-only leads and overrides
+# the V4.1 template's image modality.
 model_templates:
   deepseek-v4-chat: &deepseek-v4-chat
-    <<: *deepseek-v4-1-chat
-    modalities:
-      input: [text]
+    <<: [*text-only, *deepseek-v4-1-chat]
 
 providers:
   deepseek-gateway:
@@ -1547,7 +980,7 @@ The Flash family is the cheapest by a wide margin even on cache misses, so frequ
 # in the recipes above; every model entry that references them inherits it.
 model_templates:
   deepseek-v4.1-chat: &deepseek-v4-1-chat
-    limit: {context: 1000000, output: 128000}
+    <<: [*window-1m-64k, *vision]
     compaction: {threshold: 0.25, reminder: 0.2}
 ```
 
@@ -1568,9 +1001,7 @@ but should leave continuity disabled.
 ```yaml
 model_templates:
   qwen-preserved: &qwen-preserved
-    limit:
-      context: 1000000
-      output: 65536
+    <<: *window-1m-65k
     compat:
       request_overrides:
         body:
@@ -1609,9 +1040,7 @@ loops. Do not pass the K2.x `thinking` parameter or sampling fields: K3 fixes
 ```yaml
 model_templates:
   kimi-k3: &kimi-k3
-    limit:
-      context: 1048576
-      output: 131072
+    <<: *window-1049k-131k
     reasoning:
       effort: max
     compat:
@@ -1622,18 +1051,14 @@ model_templates:
         preserve_history: true
 
   kimi-k2.7-code: &kimi-k2-7-code
-    limit:
-      context: 262144
-      output: 32768
+    <<: *window-256k-32k
     compat:
       reasoning_continuity:
         mode: openai_visible
         preserve_history: true
 
   kimi-k2.6-thinking: &kimi-k2-6-thinking
-    limit:
-      context: 262144
-      output: 32768
+    <<: *window-256k-32k
     compat:
       request_overrides:
         body:
@@ -1706,8 +1131,7 @@ Grok 4.7 emits reasoning text through `response.reasoning_text.*` stream events 
 ```yaml
 model_templates:
   grok-4.7: &grok-4-7
-    limit:
-      context: 500000
+    limit: {context: 500000}
     reasoning:
       effort: high
     variants:
@@ -1723,8 +1147,7 @@ model_templates:
       xhigh:
         reasoning:
           effort: xhigh
-    modalities:
-      input: [text, image]
+    modalities: {input: [text, image]}
     cost:
       input: 2
       output: 6
@@ -1748,13 +1171,11 @@ model_pools:
 ```
 
 xAI publishes a 500K total context window for Grok 4.7, but not a lower,
-separate model output cap, so `limit.output` is unset. Chord therefore
-does not send `max_output_tokens` to xAI and lets the API fit output within the
-remaining context. Locally, Chord still reserves its default `64000` output
-budget when deriving the input budget from `limit.context`. Set `limit.output`,
-raise Chord's `max_output_tokens`, and enable
-`compat.responses.send_max_output_tokens: true` only when you intentionally
-want to enforce and send an explicit cap.
+separate model output cap, so `limit.output` is unset and Chord does not send
+`max_output_tokens` to xAI; the API fits output within the remaining context.
+To enforce an explicit cap, set `limit.output`, raise Chord's
+`max_output_tokens`, and enable `compat.responses.send_max_output_tokens` as
+described in the shared section.
 
 The `cost` block models xAI's whole-request tier: a prompt that reaches 200K
 tokens bills every token in the request at the higher rate, which
@@ -1837,14 +1258,10 @@ Grok 4.7 has a whole-request pricing tier at 200K prompt tokens: below 200K
 the rates are $2 input / $0.50 cached input / $6 output per 1M, while a prompt
 that reaches 200K bills the whole request at $4 / $1 / $12.
 
-The recipes above omit `limit.output`, so Chord reserves its default `64000`
-output budget and the usable input budget derives as roughly
-`500000 − 64000 = 436000`. A `threshold` of 0.4 fires at ~174K, under the 200K
-tier with headroom for a single large tool result pushing the next prompt past
-the line (the trigger compares the last provider-reported usage with the
-budget, so staying under the tier is a tuning goal, not a guarantee; the same
-caveat as the GPT pricing tiers). Add it to whichever Grok template you use;
-every provider referencing the template inherits it:
+The recipes above omit `limit.output`, so the usable input budget derives as
+roughly `500000 − 64000 = 436000`. A `threshold` of 0.4 fires at ~174K, under
+the 200K tier with headroom. Add it to whichever Grok template you use; every
+provider referencing the template inherits it:
 
 ```yaml
 model_templates:
@@ -1854,12 +1271,9 @@ model_templates:
 ```
 
 The derived value for this threshold is 0.36, so the explicit
-0.35 only pulls the pressure notice slightly earlier. If your sessions stay
-short, omit the `compaction` block and let the model use the global default.
+0.35 only pulls the pressure notice slightly earlier.
 
 ## MiniMax (OpenAI-compatible)
-
-Pair with `~/.config/chord/auth.yaml`:
 
 ```yaml
 minimax:
@@ -1876,16 +1290,12 @@ by default on M3 and always on for M2.x; only M3 accepts
 ```yaml
 model_templates:
   minimax-m3: &minimax-m3
-    limit:
-      context: 1000000
-    modalities:
-      input: [text, image]
+    limit: {context: 1000000}
+    modalities: {input: [text, image]}
 
   minimax-m2x: &minimax-m2x
-    limit:
-      context: 204800
-    modalities:
-      input: [text]
+    limit: {context: 204800}
+    modalities: {input: [text]}
 
 providers:
   minimax:
@@ -1936,13 +1346,10 @@ MiniMax-M3 doubles its rates above 512K input tokens: calls with ≤512K input
 bill at the standard rate, calls above 512K at the higher long-context rate;
 cache reads double too.
 
-The M3 template sets no `limit.output`, so Chord reserves its default `64000`
-output budget and the usable input budget derives as roughly
-`1000000 − 64000 = 936000` (`512000 / 936000 ≈ 0.55`). A `threshold` of 0.5
-fires at ~468K, under the 512K rate with headroom; the trigger compares the
-last provider-reported usage with the budget, so a single large tool result
-can still push the next prompt past the line. Add it to the M3 template you
-already use:
+The M3 template sets no `limit.output`, so the usable input budget derives as
+roughly `1000000 − 64000 = 936000` (`512000 / 936000 ≈ 0.55`). A `threshold` of
+0.5 fires at ~468K, under the 512K rate with headroom. Add it to the M3
+template you already use:
 
 ```yaml
 model_templates:
@@ -1953,12 +1360,9 @@ model_templates:
 
 The derived value for this threshold is 0.45; the explicit
 value only states the default. The M2.x line (204800 window) has no documented
-length surcharge, so leave it on the global default. If your M3 sessions stay
-short, omit the `compaction` block entirely.
+length surcharge, so leave it on the global default.
 
 ## Xiaomi MiMo (OpenAI-compatible)
-
-Pair with `~/.config/chord/auth.yaml`:
 
 ```yaml
 mimo:
@@ -1972,11 +1376,7 @@ Thinking mode carries a hard replay contract: in multi-turn tool calls the API e
 ```yaml
 model_templates:
   mimo-v2.6-base: &mimo-v2-6-base
-    limit:
-      context: 1048576
-      output: 131072
-    modalities:
-      input: [text, image]
+    <<: [*window-1049k-131k, *vision]
     thinking:
       type: enabled
     variants:
@@ -2034,8 +1434,6 @@ chord doctor models --model mimo/mimo-v2.6-pro
 
 ## Meta Muse Spark
 
-Pair with `~/.config/chord/auth.yaml`:
-
 ```yaml
 meta:
   - "$MODEL_API_KEY"
@@ -2053,9 +1451,7 @@ reasoning items.
 ```yaml
 model_templates:
   muse-spark-1.3: &muse-spark-1-3
-    limit:
-      context: 1048576
-      output: 131072
+    <<: [*window-1049k-131k, *vision-pdf]
     reasoning:
       effort: high
       summary: auto
@@ -2078,8 +1474,6 @@ model_templates:
       max:              # Standard tier only
         reasoning:
           effort: max
-    modalities:
-      input: [text, image, pdf]
 
 providers:
   meta:
@@ -2107,10 +1501,9 @@ Notes:
 - `muse-spark-1.3-contributor` serves the same model much cheaper in exchange
   for letting Meta train on your prompts and completions. Configure it only
   where that tradeoff is acceptable, and note that it has no `max` effort.
-- `limit.output` follows Meta's reference configuration (`131072`). Chord does
-  not send `max_output_tokens` on Responses by default; set
-  `compat.responses.send_max_output_tokens: true` when you want Chord to
-  enforce the cap explicitly.
+- `limit.output` follows Meta's reference configuration (`131072`); set
+  `compat.responses.send_max_output_tokens` as described in the shared section
+  when you want Chord to enforce the cap explicitly.
 - Meta's launch benchmarks report near-flat long-context retrieval (MRCR v2
   8-needle 98.5 at 256K–512K and 98.1 at 512K–1M), so there is no documented
   quality cliff to compact under; the global compaction threshold applies.
@@ -2143,15 +1536,12 @@ chord doctor models --model anthropic/claude-opus-5@high
 
 ## Per-model compaction tuning
 
-**Per-model compaction tuning.** Every recipe below is a `model_pools` /
-`providers` recipe for wiring up the model. To tune context
-auto-compaction per model, add a `compaction` block to the model's own
-definition or template (see [Context compaction](./context-management.md#context-compaction)):
+**Per-model compaction tuning.** Every recipe on this page wires a model into `model_pools` / `providers`. To tune context auto-compaction per model, add a `compaction` block to the model's own definition or template (see [Context compaction](./context-management.md#context-compaction)):
 
 ```yaml
 model_templates:
   luna-full-window: &luna-full-window
-    limit: {context: 1050000, output: 128000}   # full API window: no `input`
+    <<: *window-1050k-128k
     compaction: {threshold: 0.25, reminder: 0.2}   # stay under the 272K long-context pricing tier
 
 providers:
@@ -2160,6 +1550,4 @@ providers:
       gpt-6-luna: *luna-full-window
 ```
 
-A model without a `compaction` block inherits the global `context.compaction.threshold`; `reminder` is derived from `threshold` when unset ([derivation and tuning guidance](./context-management.md#context-compaction)); `reminder: -1` disables the pressure reminder for the model while keeping its automatic compaction. These fields tune the usage-driven automatic-compaction path and take effect whether or not `model_driven` is enabled.
-
-Where the benchmark evidence below gives a recommended usage band for a model, tune its `threshold` to the *top* of that band (compaction keeps the context inside it) and optionally set `reminder` just below it. When a model's long-context reliability is not documented here, omit the `compaction` block and let it use the global default.
+A model without a `compaction` block inherits the global `context.compaction.threshold`; `reminder` is derived from `threshold` when unset ([derivation and tuning guidance](./context-management.md#context-compaction)); `reminder: -1` disables the pressure reminder for that model while keeping automatic compaction on. These fields tune the usage-driven automatic-compaction path and take effect whether or not `model_driven` is enabled. Where the evidence on this page gives a model a recommended usage band, tune its `threshold` to the *top* of that band (compaction keeps the context inside it) and optionally set `reminder` just below it. When a model's long-context reliability is not documented, omit the `compaction` block and let it use the global default.
