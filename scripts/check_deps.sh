@@ -76,6 +76,7 @@ allowed_pseudo = {
     "github.com/charmbracelet/x/exp/slice": "Transitive Charm experimental helper pinned by the current TUI stack.",
     "golang.org/x/exp/shiny": "Transitive desktop dependency of the native clipboard backend; upstream currently publishes pseudo-version releases.",
     "golang.org/x/mobile": "Transitive platform dependency of the native clipboard backend; upstream currently publishes pseudo-version releases.",
+    "golang.org/x/telemetry": "Transitive dependency of the go.mod-pinned deadcode analyzer that the unreachable-code gate runs.",
 }
 allowed_forks = {
     "github.com/keakon/bubbles/v2": "Bubbles fork rebased to github.com/keakon/bubbletea/v2 so component tea.Msg/Cmd types match Chord's Bubble Tea fork.",
@@ -110,7 +111,7 @@ for req in requirements:
 graph = subprocess.run(["go", "mod", "graph"], check=True, text=True, stdout=subprocess.PIPE).stdout.splitlines()
 root_edges = sum(1 for line in graph if line.startswith(module + " "))
 graph_edges = len(graph)
-max_root_edges = int(os.environ.get("CHORD_MAX_ROOT_REQUIRE_EDGES", "70"))
+max_root_edges = int(os.environ.get("CHORD_MAX_ROOT_REQUIRE_EDGES", "72"))
 max_graph_edges = int(os.environ.get("CHORD_MAX_MOD_GRAPH_EDGES", "650"))
 if root_edges > max_root_edges:
     errors.append(f"root dependency edges {root_edges} exceed CHORD_MAX_ROOT_REQUIRE_EDGES={max_root_edges}")
