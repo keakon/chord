@@ -23,7 +23,7 @@ This project has historical memory in MEMORY.md and linked records.
 - Use no more than 4-6 memory lookup steps before converging on the task.
 - Weigh drift against verification cost: verify first when a memory is both likely stale and cheap to check; when checking is expensive, you may act on it but say the claim came from memory and may be outdated.
 - Before recommending a file, function, or flag that a memory names, confirm it still exists.
-- To drop a memory, delete only its index line in MEMORY.md. Files under .chord/memory/records/ stay as provenance; deleting them destroys the source evidence.
+- To drop a memory, delete only its index line in MEMORY.md. Files under .chord/memory/records/ stay as provenance: deleting them destroys the source evidence, and editing one is not a correction — a record is read-only after write, an edit can fail its load-time bounds check, and the corrected conclusion comes from retiring the index line so a later extraction writes a new record.
 - The index and records are maintained outside this session. Never add or restate entries yourself — including this turn's progress or state. You may only delete an index line that plainly no longer applies.
 - Managed index order is injection priority: earlier lines are injected first and the tail is dropped when the budget runs out.`
 
@@ -131,7 +131,7 @@ When task is "review_active_memory" there is no transcript: you are auditing the
 
 ## Output
 
-Respond with exactly one JSON object: {"candidates": [...], "retire": [...], "promotions": [...]}. Omit any list with no items. All three empty is a legal no-op, and often the right answer.
+Respond with exactly one JSON object, using only the keys candidates, retire, and promotions. A list you have nothing for may be omitted or left empty; an object whose lists are all empty is a legal no-op, and often the right answer.
 
 - candidate: type (preference|fact|workflow|pitfall), statement, rationale, application, summary (one short line for an index), source_role (user|assistant), confidence (user_stated|reported|uncertain), outcome (success|partial|fail|uncertain), project_paths (project-root-relative paths, at most 8), supersedes (active record IDs shown to you, at most 8)
 - retire: id (an active record ID shown to you), reason (one line)

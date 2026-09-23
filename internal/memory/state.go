@@ -39,6 +39,21 @@ func (c *ExtractionCheckpoint) Covered(sessionID, fingerprint string) bool {
 	return ok && sc.SourceFingerprint == fingerprint
 }
 
+// NewestExtractionAt returns the most recent successful extraction recorded in
+// the checkpoint; the zero time when nothing has been extracted yet.
+func (c *ExtractionCheckpoint) NewestExtractionAt() time.Time {
+	if c == nil {
+		return time.Time{}
+	}
+	var newest time.Time
+	for _, sc := range c.Sessions {
+		if sc.ExtractedAt.After(newest) {
+			newest = sc.ExtractedAt
+		}
+	}
+	return newest
+}
+
 // SetCovered records that sessionID's fingerprint was covered.
 func (c *ExtractionCheckpoint) SetCovered(sessionID, fingerprint string, projected int, generation uint64) {
 	if c == nil {

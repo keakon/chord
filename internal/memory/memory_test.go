@@ -1158,6 +1158,59 @@ func TestExtractionOutputParsing(t *testing.T) {
 	}
 }
 
+// The envelope's key vocabulary separates "this response found nothing to
+// record" from "this response is not an extraction result". Only the first is a
+// no-op: reading an unrelated object as a no-op would advance the checkpoint and
+// skip the session without a trace.
+func TestExtractionEnvelopeKeyVocabulary(t *testing.T) {
+	noOp := []struct {
+		name string
+		raw  string
+	}{
+		{"empty object", `{}`},
+		{"empty candidates", `{"candidates":[]}`},
+		{"retire only", `{"retire":[]}`},
+		{"promotions only", `{"promotions":[]}`},
+		{"null list", `{"candidates":null}`},
+	}
+	for _, tc := range noOp {
+		out, err := ParseExtractionOutput([]byte(tc.raw), MaxRetirePerSessionRun)
+		if err != nil {
+			t.Fatalf("%s (%s) must parse as a no-op: %v", tc.name, tc.raw, err)
+		}
+		cands, dropped := outParts(out)
+		if len(cands) != 0 || len(dropped) != 0 {
+			t.Fatalf("%s: cands=%+v dropped=%v, want nothing to commit", tc.name, cands, dropped)
+		}
+	}
+	// A subset envelope still commits what it does carry.
+	subset := `{"retire":[{"id":"one--1111111111111111","reason":"covered by project instructions"}]}`
+	out, err := ParseExtractionOutput([]byte(subset), MaxRetirePerSessionRun)
+	if err != nil {
+		t.Fatalf("subset envelope must parse: %v", err)
+	}
+	if len(out.Retire) != 1 || out.Retire[0].ID != "one--1111111111111111" {
+		t.Fatalf("subset envelope retire = %+v", out.Retire)
+	}
+	invalid := []struct {
+		name string
+		raw  string
+	}{
+		{"unknown key", `{"candidates":[],"notes":"nothing found"}`},
+		{"unknown key alone", `{"foo":1}`},
+		{"non-object document", `null`},
+		{"array document", `[]`},
+		{"wrong field type", `{"candidates":{}}`},
+		{"truncated JSON", `{"candidates":[]`},
+		{"trailing data", `{"candidates":[]} and that is all`},
+	}
+	for _, tc := range invalid {
+		if got, err := ParseExtractionOutput([]byte(tc.raw), MaxRetirePerSessionRun); err == nil {
+			t.Fatalf("%s (%s) must fail, got %+v", tc.name, tc.raw, got)
+		}
+	}
+}
+
 // Session-local identifiers are machine-checkable, so the deterministic layer
 // drops them per-candidate: a commit SHA or machine-absolute path in durable
 // text either goes stale or leaks a local layout into every later session.

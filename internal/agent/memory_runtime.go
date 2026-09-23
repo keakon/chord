@@ -37,13 +37,23 @@ const (
 	memoryJobRetainBackoff        = 2 * time.Second
 	memoryMaxRetryBackoff         = 30 * time.Second
 	memoryMaxExtractionAttempts   = 5
-	memoryStartupBackfillLimit    = 2
-	memoryJobQueueLimit           = 64
+	// memoryMaxOutputAttempts bounds how often one job may fail on an unusable
+	// output shape (bad JSON, an unknown field, an unknown enum) before memory
+	// is declared stalled: the first response plus one resample. A shape failure
+	// describes the sample, not the job, so it gets its own small budget instead
+	// of consuming the transient-failure attempts.
+	memoryMaxOutputAttempts    = 2
+	memoryStartupBackfillLimit = 2
+	memoryJobQueueLimit        = 64
+	// memoryHealthToastRunes bounds the reason carried by the degradation toast
+	// so a long model or protocol error cannot wrap the notification.
+	memoryHealthToastRunes = 200
 )
 
 // memoryJob is one queued extraction attempt. retryAt gates the next attempt
-// after a transient failure; attempts bounds retries so a persistently failing
-// job stops burning model tokens.
+// after a failure; attempts bounds transient retries and outputAttempts bounds
+// unusable-output-shape retries, so a persistently failing job stops burning
+// model tokens.
 //
 // A job with review set and no sessionDir audits the whole active index instead
 // of one transcript: that is the only view from which memory written by an
@@ -52,7 +62,11 @@ type memoryJob struct {
 	sessionDir string
 	review     bool
 	attempts   int
-	retryAt    time.Time
+	// outputAttempts counts responses that were unusable in shape. The retry
+	// starts from the next model in the pool, so the same sample is not drawn
+	// twice from the model that produced it.
+	outputAttempts int
+	retryAt        time.Time
 }
 
 // memoryInflight tracks one in-flight extraction so a new foreground turn can
@@ -79,6 +93,7 @@ func (a *MainAgent) initMemory(contentRoot string) {
 	if err != nil {
 		a.memoryErr = err
 		a.memoryDegraded.Store(true)
+		a.memoryDegradedAt.Store(time.Now().UnixNano())
 		log.Warnf("memory: init error=%v", err)
 		return
 	}
@@ -118,9 +133,9 @@ func (a *MainAgent) MemoryEnabled() bool {
 	return a.memoryExtractEnabled.Load()
 }
 
-// MemoryDegraded reports whether memory setup or the last commit failed
-// permanently, so the MEMORY pill can warn instead of implying a healthy
-// region.
+// MemoryDegraded reports whether memory extraction is stalled: setup failed, or
+// a commit or extraction cannot proceed without external intervention. The
+// MEMORY pill reads it so it can warn instead of implying a healthy region.
 func (a *MainAgent) MemoryDegraded() bool {
 	if a == nil {
 		return false
@@ -128,23 +143,40 @@ func (a *MainAgent) MemoryDegraded() bool {
 	return a.memoryDegraded.Load()
 }
 
-// noteMemoryOutcome tracks background commit health: a permanent failure marks
-// memory degraded (injection has stopped until external intervention), and any
-// later success clears the mark. Only a real flip is announced, so a live TUI
-// repaints the MEMORY pill without a redundant event on every commit.
-func (a *MainAgent) noteMemoryOutcome(err error) {
-	var degraded bool
-	switch {
-	case err == nil:
-	case memoryPermanentFailure(err):
-		degraded = true
-	default:
-		return
-	}
+// setMemoryDegraded records background memory health. Only a real flip is
+// announced, so a live TUI repaints the MEMORY pill without a redundant event
+// on every successful commit. A flip also stamps when the degradation started,
+// which is what lets a later drain recognize that another process has moved
+// memory on (see recoverMemoryHealthFromCheckpoint).
+//
+// A degradation also carries the reason as a toast: the pill alone says memory
+// stopped, not what to look at, and the cause is usually a single line of the
+// last failure. Recovery stays pill-only — the region is working again, and a
+// toast would only add noise.
+func (a *MainAgent) setMemoryDegraded(degraded bool, reason string) {
 	if a.memoryDegraded.Swap(degraded) == degraded {
 		return
 	}
+	if degraded {
+		a.memoryDegradedAt.Store(time.Now().UnixNano())
+	} else {
+		a.memoryDegradedAt.Store(0)
+	}
 	a.emitToTUI(MemoryHealthEvent{Degraded: degraded})
+	if !degraded {
+		return
+	}
+	msg := "Project memory extraction stopped"
+	// Collapse to a single line: the reason is a wrapped error, and the toast
+	// renders one row.
+	if reason = strings.TrimSpace(reason); reason != "" {
+		msg += ": " + strings.Join(strings.Fields(reason), " ")
+	}
+	a.emitToTUI(ToastEvent{
+		Message:  truncateString(msg, memoryHealthToastRunes),
+		Level:    "warn",
+		Category: "memory_health",
+	})
 }
 
 // refreshMemoryReminderBlock reloads the bounded MEMORY.md summary into the
@@ -347,7 +379,15 @@ func (a *MainAgent) memoryWakeIdle() {
 func (a *MainAgent) drainMemoryQueue() {
 	for {
 		a.memoryMu.Lock()
-		if len(a.memoryPending) == 0 || a.memoryInflight != nil {
+		if len(a.memoryPending) == 0 {
+			a.memoryMu.Unlock()
+			// Nothing of our own is left to run, which is the only moment the
+			// worker reads the checkpoint for health without competing with its
+			// own jobs.
+			a.recoverMemoryHealthFromCheckpoint()
+			return
+		}
+		if a.memoryInflight != nil {
 			a.memoryMu.Unlock()
 			return
 		}
@@ -376,9 +416,9 @@ func (a *MainAgent) drainMemoryQueue() {
 		a.memoryMu.Unlock()
 		var err error
 		if job.review {
-			err = a.runMemoryIndexReview(ctx)
+			err = a.runMemoryIndexReview(ctx, job.outputAttempts)
 		} else {
-			err = a.runMemoryExtraction(ctx, job.sessionDir)
+			err = a.runMemoryExtraction(ctx, job.sessionDir, job.outputAttempts)
 		}
 		// Read the cancellation state before releasing the context: cancel()
 		// sets ctx.Err() itself, so checking it afterwards would classify every
@@ -401,20 +441,29 @@ func (a *MainAgent) drainMemoryQueue() {
 			return
 		case err != nil:
 			sessionID := memoryJobSessionID(job)
-			log.Warnf("memory: extraction failed session=%v error=%v", sessionID, err)
-			a.noteMemoryOutcome(err)
+			log.Warnf("memory: extraction failed session=%v attempts=%d/%d output_attempts=%d/%d error=%v",
+				sessionID, job.attempts, memoryMaxExtractionAttempts, job.outputAttempts, memoryMaxOutputAttempts, err)
 			if m := a.memoryMgr; m != nil {
 				memory.SaveFailure(m.Layout(), sessionID, err)
 			}
-			if memoryPermanentFailure(err) || job.attempts >= memoryMaxExtractionAttempts {
-				// Permanent or repeatedly failing job: stop retrying so the
-				// worker never hot-loops or burns model tokens. The fingerprint
-				// stays uncovered, so a future startup backfill or explicit
-				// request retries after external intervention.
+			switch chargeMemoryFailure(&job, err) {
+			case memoryFailureStalled:
+				// Broken managed markers, unusable setup, or an output shape
+				// that survived the resample: stop retrying and say why once.
+				// The fingerprint stays uncovered, so a later startup backfill
+				// retries after the cause is fixed.
+				log.Warnf("memory: extraction stalled session=%v attempts=%d output_attempts=%d", sessionID, job.attempts, job.outputAttempts)
+				a.setMemoryDegraded(true, err.Error())
+				continue
+			case memoryFailureDrop:
+				// Transient retries used up: stop this job so the worker never
+				// hot-loops or burns model tokens, but leave memory health
+				// alone — another session or a later backfill can still
+				// succeed. The fingerprint stays uncovered.
+				log.Warnf("memory: dropping job after %d failures session=%v", job.attempts, sessionID)
 				continue
 			}
-			job.attempts++
-			job.retryAt = time.Now().Add(memoryRetryBackoff(job.attempts))
+			job.retryAt = time.Now().Add(memoryRetryBackoff(job.attempts + job.outputAttempts))
 			a.memoryMu.Lock()
 			a.memoryPending = append(a.memoryPending, job)
 			a.memoryMu.Unlock()
@@ -425,10 +474,42 @@ func (a *MainAgent) drainMemoryQueue() {
 			// Committed: reload the bounded summary into the cached reminder
 			// block. The per-request reminder is rebuilt by ensureSessionBuilt
 			// at the next request boundary (this goroutine must not touch it).
-			a.noteMemoryOutcome(nil)
+			a.setMemoryDegraded(false, "")
 			a.refreshMemoryReminderBlock()
 		}
 	}
+}
+
+// recoverMemoryHealthFromCheckpoint clears a stall that another process already
+// resolved. memoryDegraded only tracks this process's own commits, but
+// extraction is shared project state: a second window (or a later startup
+// backfill) can cover the session that failed here, so the pill would otherwise
+// stay red until this process commits or restarts. A checkpoint entry extracted
+// after the local stall means memory moved on and the indicator follows the
+// project rather than the process.
+//
+// Called on the worker goroutine only, and only once the local queue has
+// drained. A read failure just logs: the next idle drain retries, and a stale
+// red pill is safer than a green one that claims memory is healthy.
+func (a *MainAgent) recoverMemoryHealthFromCheckpoint() {
+	if a == nil || a.memoryMgr == nil || !a.memoryDegraded.Load() {
+		return
+	}
+	stalledAt := a.memoryDegradedAt.Load()
+	if stalledAt == 0 {
+		return
+	}
+	cp, err := memory.LoadCheckpoint(a.memoryMgr.Layout())
+	if err != nil {
+		log.Warnf("memory: health recovery checkpoint read failed: %v", err)
+		return
+	}
+	newest := cp.NewestExtractionAt()
+	if !newest.After(time.Unix(0, stalledAt)) {
+		return
+	}
+	log.Infof("memory: health recovered from checkpoint: extraction advanced at %v after the local stall", newest.UTC().Format(time.RFC3339))
+	a.setMemoryDegraded(false, "")
 }
 
 // memoryRetryBackoff grows exponentially from memoryJobRetainBackoff up to
@@ -470,16 +551,57 @@ func (a *MainAgent) memorySleepUntil(retryAt time.Time) {
 }
 
 // memoryPermanentFailure reports whether an extraction failure cannot succeed
-// without external intervention (config, file, or schema changes). Permanent
-// jobs are dropped after logging; their fingerprint stays uncovered for a
-// later startup backfill or explicit request.
+// without external intervention (config or file changes). Permanent jobs are
+// dropped and stall memory; their fingerprint stays uncovered for a later
+// startup backfill.
 func memoryPermanentFailure(err error) bool {
 	if err == nil {
 		return false
 	}
 	return errors.Is(err, memory.ErrManagedMarkers) ||
-		errors.Is(err, memory.ErrInvalidExtraction) ||
 		errors.Is(err, errMemorySetupFailed)
+}
+
+// memoryFailureOutcome is how a failed extraction job proceeds.
+type memoryFailureOutcome int
+
+const (
+	// memoryFailureRetry requeues the job after a backoff.
+	memoryFailureRetry memoryFailureOutcome = iota
+	// memoryFailureDrop stops the job without touching memory health: the
+	// transient retry budget is used up, and another session or a later
+	// backfill can still succeed.
+	memoryFailureDrop
+	// memoryFailureStalled stops the job and marks memory degraded: the failure
+	// cannot succeed without external intervention.
+	memoryFailureStalled
+)
+
+// chargeMemoryFailure books one failure against the job's budget and reports how
+// the job proceeds.
+//
+// Unusable output shape (bad JSON, an unknown field, an unknown enum) is
+// charged to outputAttempts, not to attempts: it is one model's sampling
+// accident, so the retry starts from the next pool model and the job only
+// stalls once that resample fails too. Transient failures keep the exponential
+// backoff budget; permanent failures stall immediately.
+func chargeMemoryFailure(job *memoryJob, err error) memoryFailureOutcome {
+	switch {
+	case memoryPermanentFailure(err):
+		return memoryFailureStalled
+	case errors.Is(err, memory.ErrInvalidExtraction):
+		if job.outputAttempts+1 >= memoryMaxOutputAttempts {
+			return memoryFailureStalled
+		}
+		job.outputAttempts++
+		return memoryFailureRetry
+	default:
+		if job.attempts+1 > memoryMaxExtractionAttempts {
+			return memoryFailureDrop
+		}
+		job.attempts++
+		return memoryFailureRetry
+	}
 }
 
 // errMemorySetupFailed marks the extraction failures that come from the setup
@@ -557,8 +679,9 @@ func (a *MainAgent) waitMemoryWorkerStopped(wait time.Duration) bool {
 
 // runMemoryExtraction projects, sanitizes, bounds, fingerprints, extracts via
 // the shared model pool (full round fallback semantics), and commits
-// candidates. It advances no checkpoint on any failure.
-func (a *MainAgent) runMemoryExtraction(ctx context.Context, sessionDir string) error {
+// candidates. It advances no checkpoint on any failure. rotation picks the pool
+// model the retry of an unusable output shape starts from.
+func (a *MainAgent) runMemoryExtraction(ctx context.Context, sessionDir string, rotation int) error {
 	if a.memoryMgr == nil {
 		return fmt.Errorf("memory is not initialized")
 	}
@@ -607,7 +730,7 @@ func (a *MainAgent) runMemoryExtraction(ctx context.Context, sessionDir string) 
 	}
 	agentsMD := a.boundedAgentsMDSnapshot()
 	prompt := buildMemoryExtractionPrompt(kept, agentsMD, active, a.pendingPromotionView())
-	out, err := a.callMemoryExtraction(ctx, prompt, memory.MaxRetirePerSessionRun)
+	out, err := a.callMemoryExtraction(ctx, prompt, memory.MaxRetirePerSessionRun, rotation)
 	if err != nil {
 		return err
 	}
@@ -703,7 +826,9 @@ func (a *MainAgent) maybeScheduleMemoryIndexReview(res *memory.CommitResult) {
 //
 // It commits under a synthetic session key whose fingerprint is the index state,
 // so an unchanged index is already covered and the review does not repeat.
-func (a *MainAgent) runMemoryIndexReview(ctx context.Context) error {
+// rotation picks the pool model the retry of an unusable output shape starts
+// from.
+func (a *MainAgent) runMemoryIndexReview(ctx context.Context, rotation int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -730,7 +855,7 @@ func (a *MainAgent) runMemoryIndexReview(ctx context.Context) error {
 	}
 	agentsMD := a.boundedAgentsMDSnapshot()
 	prompt := buildMemoryIndexReviewPrompt(agentsMD, active, a.pendingPromotionView())
-	out, err := a.callMemoryExtraction(ctx, prompt, memory.MaxRetirePerReviewRun)
+	out, err := a.callMemoryExtraction(ctx, prompt, memory.MaxRetirePerReviewRun, rotation)
 	if err != nil {
 		return err
 	}
@@ -801,9 +926,10 @@ func sanitizeProjected(projected []sessionview.Projected) []sessionview.Projecte
 // governor and parses the response. Malformed or unknown output is a failure
 // (does not advance the checkpoint); per-item drops are returned inside the
 // output and never block the surviving items from being committed. maxRetire
-// bounds how many active records this run may retire.
-func (a *MainAgent) callMemoryExtraction(ctx context.Context, prompt string, maxRetire int) (*memory.ExtractionOutput, error) {
-	client := a.newMemoryExtractionClient()
+// bounds how many active records this run may retire, and rotation picks the
+// pool model the request starts from.
+func (a *MainAgent) callMemoryExtraction(ctx context.Context, prompt string, maxRetire int, rotation int) (*memory.ExtractionOutput, error) {
+	client := a.newMemoryExtractionClient(rotation)
 	if client == nil {
 		return nil, fmt.Errorf("%w: no model pool available for memory extraction", errMemorySetupFailed)
 	}
@@ -828,7 +954,11 @@ func (a *MainAgent) callMemoryExtraction(ctx context.Context, prompt string, max
 // pool snapshot (sticky cursor + full round fallback), never a single model.
 // It reuses the auxiliary-client construction (timeout/retry profile) but is
 // owned by this extraction: independent cancel and stale-result checks.
-func (a *MainAgent) newMemoryExtractionClient() *llm.Client {
+//
+// rotation shifts the starting position for a retry after an unusable output
+// shape, so the resample is not drawn from the model that produced it. A
+// single-model pool has nowhere to rotate to, which is the only option.
+func (a *MainAgent) newMemoryExtractionClient(rotation int) *llm.Client {
 	a.llmMu.RLock()
 	mainClient := a.llmClient
 	a.llmMu.RUnlock()
@@ -838,6 +968,9 @@ func (a *MainAgent) newMemoryExtractionClient() *llm.Client {
 	pool, selectedIdx := mainClient.ModelPoolSnapshot()
 	if len(pool) == 0 {
 		return nil
+	}
+	if rotation > 0 {
+		selectedIdx = (selectedIdx + rotation) % len(pool)
 	}
 	client := newAuxClientFromPool(pool, selectedIdx, 0, a.ServiceTier())
 	client.SetStreamRetryRounds(1)
@@ -902,9 +1035,9 @@ func (a *MainAgent) maybeScheduleStartupBackfill() {
 	}
 	for _, s := range candidates {
 		if meta, err := recovery.LoadSessionMeta(s.Path); err == nil && meta != nil && meta.ImportedFrom != nil {
-			// Imported sessions are not auto-backfilled unless the user later
-			// asks; the fingerprint stays uncovered, so an explicit request
-			// still works.
+			// Imported sessions are not backfilled at startup. Freezing one
+			// (switching away from it) queues it like any other session, and
+			// the uncovered fingerprint keeps it eligible until then.
 			continue
 		}
 		a.scheduleMemoryExtraction(s.Path)

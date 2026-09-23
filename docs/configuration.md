@@ -1022,7 +1022,7 @@ memory:
 ### Precedence
 
 - May appear in the global config and in project `.chord/config.yaml`; project values override the user-level value like every other setting.
-- Because a project can enable extraction for itself, opening a project with `memory.enabled: true` may start uploading that project's history sessions to the model. When enabled, the status bar shows a `MEMORY` indicator so the state is visible.
+- Because a project can enable extraction for itself, opening a project with `memory.enabled: true` may start uploading that project's history sessions to the model. When enabled, the status bar shows a `MEMORY` indicator so the state is visible; a stalled extraction turns it into `MEMORY-FAIL` and adds a one-line notice with the reason.
 - The value is read at startup; changing the config file requires a restart of the running process.
 
 ## Multi-agent orchestration resource limits

@@ -799,12 +799,18 @@ type MainAgent struct {
 	memoryWorkerDone     chan struct{}
 	memoryExtractEnabled atomic.Bool // effective memory.enabled (project overrides user)
 	memoryActive         atomic.Bool
-	// memoryDegraded records that memory setup or a commit failed permanently
-	// (unreadable managed region, invalid extraction schema, unusable setup), so
-	// the status bar can surface a memory region that silently stopped
-	// injecting instead of showing only the enabled pill. A later successful
-	// commit clears it.
+	// memoryDegraded records that background memory extraction is stalled: setup
+	// failed, or a commit or extraction cannot proceed without external
+	// intervention. The status bar shows it as a failed MEMORY pill instead of
+	// an enabled one; a later successful commit clears it. Injection is not
+	// switched off by this flag — a stalled commit keeps serving the last
+	// successfully indexed memory.
 	memoryDegraded atomic.Bool
+	// memoryDegradedAt records when memoryDegraded last flipped to true (Unix
+	// nanoseconds, 0 while healthy). A checkpoint entry extracted after that
+	// instant proves project memory moved on in another process, which lets the
+	// worker clear the indicator without waiting for a local commit.
+	memoryDegradedAt atomic.Int64
 	// memoryReminderVersion is bumped whenever the cached Memory block changes
 	// (init, background extraction commit). ensureSessionBuilt rebuilds the
 	// per-request session reminder when it moves, so a background commit lands

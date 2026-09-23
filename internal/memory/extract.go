@@ -107,8 +107,8 @@ func (o *ExtractionOutput) Empty() bool {
 }
 
 // ErrInvalidExtraction marks structured extraction output that cannot be
-// parsed as a valid candidate set (bad JSON, missing field, unknown enum).
-// It is a failure, never a no-op.
+// parsed as a valid candidate set (bad JSON, a non-object response, an unknown
+// field, an unknown enum). It is a failure, never a no-op.
 var ErrInvalidExtraction = errors.New("invalid memory extraction output")
 
 var (
@@ -175,10 +175,22 @@ func HighRisk(text string) bool {
 }
 
 // extractionEnvelope is the wire shape of a structured extraction response.
+// Every list is optional: a model with nothing for a list leaves it out, so a
+// subset envelope (an empty object included) still means "nothing to record"
+// rather than a response that went off the rails.
 type extractionEnvelope struct {
 	Candidates []Candidate     `json:"candidates"`
 	Retire     []RetireRequest `json:"retire,omitempty"`
 	Promotions []Promotion     `json:"promotions,omitempty"`
+}
+
+// extractionEnvelopeKeys is the envelope's complete key vocabulary. A response
+// carrying a top-level key outside it is some other JSON object, not an
+// extraction result that happened to find nothing to record.
+var extractionEnvelopeKeys = map[string]bool{
+	"candidates": true,
+	"retire":     true,
+	"promotions": true,
 }
 
 // ParseExtractionOutput parses and validates a structured extraction response.
@@ -187,9 +199,12 @@ type extractionEnvelope struct {
 // share the same allowance, so wrapping retirements as promotions cannot
 // multiply it.
 //
-//   - candidates: [] with no retirements or promotions is a legal no-op.
-//   - malformed JSON, a missing/malformed candidates field, or an unknown enum
-//     value is a failure (ErrInvalidExtraction), never a no-op.
+//   - A list that is absent or empty means the model had nothing for it, so a
+//     subset envelope (an empty object included) is a legal no-op.
+//   - malformed JSON, a response that is not a JSON object, an unknown top-level
+//     key, or an unknown enum value is a failure (ErrInvalidExtraction), never a
+//     no-op: reading some unrelated object as "nothing to record" would advance
+//     the checkpoint and skip the session without a trace.
 //   - per-item validation (lengths, paths, cognitive state consistency, secrets)
 //     drops only the offending item; the survivors are still returned with their
 //     drop reasons so callers can commit the rest.
@@ -198,12 +213,25 @@ type extractionEnvelope struct {
 // active, and whether it is allowed to be retired at all, needs the active
 // snapshot and is enforced at commit time.
 func ParseExtractionOutput(data []byte, maxRetire int) (*ExtractionOutput, error) {
+	// The response has to be this envelope, so a document that is not a JSON
+	// object, or an object carrying a key outside the envelope, is a failure
+	// rather than a no-op. Lists are the exception: a model with nothing for a
+	// list omits it, which is why the key check must not require them.
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidExtraction, err)
+	}
+	if keys == nil {
+		return nil, fmt.Errorf("%w: response is not a JSON object", ErrInvalidExtraction)
+	}
+	for key := range keys {
+		if !extractionEnvelopeKeys[key] {
+			return nil, fmt.Errorf("%w: unknown field %q", ErrInvalidExtraction, key)
+		}
+	}
 	var env extractionEnvelope
 	if err := json.Unmarshal(data, &env); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidExtraction, err)
-	}
-	if env.Candidates == nil {
-		return nil, fmt.Errorf("%w: missing candidates field", ErrInvalidExtraction)
 	}
 	out := &ExtractionOutput{}
 	for i, c := range env.Candidates {

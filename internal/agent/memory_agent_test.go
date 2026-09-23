@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/memory"
 	"github.com/keakon/chord/internal/sessionview"
 )
@@ -378,6 +380,24 @@ func TestMemoryExtractionPromptCarriesRetentionDiscipline(t *testing.T) {
 	}
 }
 
+// The extraction prompt has to state the envelope's contract positively. An
+// earlier wording named the shape it did not want, and a sample with nothing to
+// record reasoned itself into exactly that shape before emitting it.
+func TestMemoryExtractionPromptStatesOutputContract(t *testing.T) {
+	for _, want := range []string{
+		"using only the keys candidates, retire, and promotions",
+		"may be omitted or left empty",
+		"an object whose lists are all empty is a legal no-op",
+	} {
+		if !strings.Contains(memoryExtractionSystemPrompt, want) {
+			t.Errorf("extraction system prompt missing output contract: %q", want)
+		}
+	}
+	if strings.Contains(memoryExtractionSystemPrompt, "{}") {
+		t.Error("extraction system prompt must not spell the empty-object shape it used to reject")
+	}
+}
+
 // The read-path block is injected every turn, so it carries the cheap decisions:
 // when to skip memory entirely, and how to weigh staleness against the cost of
 // checking, rather than a blanket "verify everything". It also carries the
@@ -395,6 +415,8 @@ func TestMemoryStableGuidanceCarriesLookupDiscipline(t *testing.T) {
 		"maintained outside this session",
 		"Never add or restate entries yourself",
 		"You may only delete an index line",
+		"a record is read-only after write",
+		"retiring the index line so a later extraction writes a new record",
 	} {
 		if !strings.Contains(memoryStableGuidancePrompt, want) {
 			t.Errorf("stable memory guidance missing discipline: %q", want)
@@ -454,7 +476,6 @@ func TestMemoryPermanentFailureClassification(t *testing.T) {
 		fmt.Errorf("%w: resolve sessions dir: nope", errMemorySetupFailed),
 		fmt.Errorf("%w: no model pool available for memory extraction", errMemorySetupFailed),
 		fmt.Errorf("merge managed index: %w", memory.ErrManagedMarkers),
-		fmt.Errorf("parse extraction: %w", memory.ErrInvalidExtraction),
 	}
 	for _, err := range permanent {
 		if !memoryPermanentFailure(err) {
@@ -463,6 +484,9 @@ func TestMemoryPermanentFailureClassification(t *testing.T) {
 	}
 	transient := []error{
 		context.Canceled,
+		// An unusable output shape is its own class: one model's sampling
+		// accident is retried on another model before it stalls memory.
+		fmt.Errorf("parse extraction: %w", memory.ErrInvalidExtraction),
 		fmt.Errorf("acquire memory extraction LLM capacity: rate limited"),
 		fmt.Errorf("memory lock held by another process"),
 		fmt.Errorf("stream: connection reset"),
@@ -475,6 +499,79 @@ func TestMemoryPermanentFailureClassification(t *testing.T) {
 	for _, err := range transient {
 		if memoryPermanentFailure(err) {
 			t.Fatalf("expected retryable failure for %v", err)
+		}
+	}
+}
+
+// An unusable output shape gets its own small budget and never touches the
+// transient attempt budget: the retry is a resample on another model, and only
+// that resample failing stalls memory.
+func TestChargeMemoryUnusableOutputRetriesOnItsOwnBudget(t *testing.T) {
+	err := fmt.Errorf("parse extraction: %w", memory.ErrInvalidExtraction)
+	job := memoryJob{sessionDir: "20260101010101010"}
+	if got := chargeMemoryFailure(&job, err); got != memoryFailureRetry {
+		t.Fatalf("first unusable output = %v, want retry", got)
+	}
+	if job.outputAttempts != 1 {
+		t.Fatalf("output attempts = %d, want 1", job.outputAttempts)
+	}
+	if job.attempts != 0 {
+		t.Fatalf("transient attempts = %d, want an unusable output to charge only its own budget", job.attempts)
+	}
+	if got := chargeMemoryFailure(&job, err); got != memoryFailureStalled {
+		t.Fatalf("unusable output after the resample = %v, want stalled", got)
+	}
+}
+
+func TestChargeMemoryFailureBudgets(t *testing.T) {
+	// Transient failures retry up to the attempt cap and are then dropped
+	// without stalling memory: another session or a later backfill can still
+	// succeed.
+	job := memoryJob{}
+	for i := 1; i <= memoryMaxExtractionAttempts; i++ {
+		if got := chargeMemoryFailure(&job, errors.New("stream: connection reset")); got != memoryFailureRetry {
+			t.Fatalf("transient failure %d = %v, want retry", i, got)
+		}
+	}
+	if got := chargeMemoryFailure(&job, errors.New("stream: connection reset")); got != memoryFailureDrop {
+		t.Fatalf("failure past the retry cap = %v, want drop", got)
+	}
+	if job.attempts != memoryMaxExtractionAttempts {
+		t.Fatalf("attempts = %d, want capped at %d", job.attempts, memoryMaxExtractionAttempts)
+	}
+
+	// A permanent failure stalls immediately and charges nothing.
+	stalled := memoryJob{}
+	if got := chargeMemoryFailure(&stalled, fmt.Errorf("merge managed index: %w", memory.ErrManagedMarkers)); got != memoryFailureStalled {
+		t.Fatalf("permanent failure = %v, want stalled", got)
+	}
+	if stalled.attempts != 0 || stalled.outputAttempts != 0 {
+		t.Fatalf("permanent failure charged budgets: %+v", stalled)
+	}
+}
+
+// A retry after an unusable output shape must start from the next pool model,
+// so the resample is not drawn from the model that produced it. A single-model
+// pool has nowhere to rotate to, which is the only option there.
+func TestNewMemoryExtractionClientRotatesForOutputRetry(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	refs := []string{"alpha/model-a", "beta/model-b", "gamma/model-c"}
+	pool := make([]llm.FallbackModel, 0, len(refs))
+	for _, ref := range refs {
+		provider, model, _ := splitRolePoolTestRef(ref, "")
+		pool = append(pool, newRoleSwitchClient(t, provider, model, 8192).PrimaryModelEntry())
+	}
+	main := llm.NewClient(pool[0].ProviderConfig, pool[0].ProviderImpl, pool[0].ModelID, pool[0].MaxTokens, "")
+	main.SetModelPool(pool, 0)
+	a.llmClient = main
+
+	for rotation, want := range []string{"alpha/model-a", "beta/model-b", "gamma/model-c", "alpha/model-a"} {
+		client := a.newMemoryExtractionClient(rotation)
+		if client == nil {
+			t.Fatalf("rotation %d: no client built", rotation)
+		}
+		if got := client.PrimaryModelRef(); got != want {
+			t.Fatalf("rotation %d started at %q, want %q", rotation, got, want)
 		}
 	}
 }
@@ -513,6 +610,11 @@ func TestDrainMemoryQueueRecordsFailureInsteadOfRequeueing(t *testing.T) {
 	}
 	if status == nil || status.SessionID != filepath.Base(missing) {
 		t.Fatalf("failure status = %+v, want a record for %s", status, filepath.Base(missing))
+	}
+	// A setup failure cannot succeed on a retry, so the drain must also stall
+	// memory instead of leaving the MEMORY pill green.
+	if !a.MemoryDegraded() {
+		t.Fatal("a permanent setup failure must mark memory degraded")
 	}
 }
 

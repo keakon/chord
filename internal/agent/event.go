@@ -648,9 +648,9 @@ type PersistenceHealthEvent struct {
 func (PersistenceHealthEvent) agentEvent() {}
 
 // MemoryHealthEvent reports a change of background memory health. Degraded=true
-// means a permanent memory commit failure stopped injection until external
-// intervention; the TUI repaints the MEMORY pill so a long-lived session does
-// not keep showing the health state it happened to render first.
+// means memory extraction is stalled — setup failed, or a commit or extraction
+// cannot proceed without external intervention — so the TUI repaints the MEMORY
+// pill instead of keeping the health state it happened to render first.
 type MemoryHealthEvent struct {
 	Degraded bool
 }

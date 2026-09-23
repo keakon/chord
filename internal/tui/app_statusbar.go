@@ -355,9 +355,9 @@ func (m *Model) appendStatusBarMemoryPill(pills []string, inputs statusBarInputs
 		return pills
 	}
 	if inputs.MemoryDegraded {
-		// Setup or the last commit failed permanently, so injection has stopped
-		// even though the feature is enabled: say so instead of implying a
-		// healthy region.
+		// Memory extraction is stalled: setup failed, or the last commit could
+		// not proceed. Say so instead of implying a healthy region; the
+		// already-indexed memory is still injected.
 		return append(pills, ErrorStyle.Render("MEMORY-FAIL"))
 	}
 	return append(pills, StatusHintStyle.Render("MEMORY"))
