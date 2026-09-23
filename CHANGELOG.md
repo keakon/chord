@@ -4,6 +4,12 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Headless `status_response` now includes the current working directory and
+  worktree generation, and mid-session checkout changes can be subscribed to
+  through `workdir_changed`.
+- Image token estimates use a conservative allowance for the largest normalized
+  image instead of estimating image tokens from encoded file size.
+
 ### Breaking Changes
 
 - Agent definitions no longer read `capabilities`, `preferred_tasks`, `write_mode`, or `delegation_policy`. Those keys were never enforced: they only appeared as labels on Delegate's agent-type list. Put routing intent in `description`. Whether a role may write files is still decided by `permission`, and Delegate still marks each choice with `empty_scope=allowed` or `non_empty_scope=required`. Leftover keys in existing agent files are ignored.
@@ -110,6 +116,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A rejected compaction summary is now repaired against the sections it actually missed: the repair prompt lists all required headings and names the missing ones, so a summary no longer degrades to a structured fallback or a truncated one just because the model had to guess the section list. The validation and repair log lines also name the summarizer model, the output size, and the missing sections.
 - A request whose estimated input no longer fits the model's context window is refused before it is sent, instead of spending a provider call on a context-length error: Chord starts or waits behind a compaction and retries afterwards, the same path a provider rejection takes. The estimate only refuses a request once the session has a provider-reported prompt size, so a small window with a large tool surface cannot trigger a pointless compaction loop.
 - Context-pressure warnings no longer pile up as separate cards in the transcript: the same pressure writes at most one durable notice line, later escalations of it ride the live notice instead of adding another card, and a restored session reuses the notice lines already in its transcript rather than recording the pressure a second time.
+- Context usage no longer counts an image's base64 payload as text. A 400 KB screenshot used to read as roughly 130K context tokens, which inflated the sidebar gauge and could start automatic compaction far ahead of the real threshold; image parts now add a fixed per-image allowance to every estimate, and the byte calibration that scales the last provider sample leaves image payloads out of both sides.
 
 ## 0.8.1 - 2026-09-16
 

@@ -83,7 +83,8 @@ func NormalizeImageBytes(data []byte, declaredMime string) ([]byte, string, erro
 // is only used for diagnostics in error messages.
 //
 // The processing order is fixed: content detection, size pre-check, pixel
-// budget, full decode, EXIF orientation, scaling, encoding, output budget.
+// budget, full decode, pass-through check, EXIF
+// orientation, scaling, encoding, output budget.
 // Inputs that are already a conforming PNG/JPEG are returned unchanged, which
 // makes normalization idempotent; anything else is decoded and re-encoded
 // exactly once.
@@ -108,6 +109,17 @@ func NormalizeImage(data []byte, declaredMime string) (NormalizedImage, error) {
 	if err := checkImageDimensions(cfg); err != nil {
 		return NormalizedImage{}, err
 	}
+	orientation := 1
+	if decoder.mimeType == "image/jpeg" {
+		orientation = jpegOrientation(data)
+	}
+	out := NormalizedImage{
+		OriginalWidth:  cfg.Width,
+		OriginalHeight: cfg.Height,
+		Width:          cfg.Width,
+		Height:         cfg.Height,
+	}
+	needsScale := cfg.Width > MaxImageEdge || cfg.Height > MaxImageEdge
 
 	// Only the pixel-heavy work is bounded: several independent entry points
 	// (a read-only tool batch can carry many view_image calls, MCP can return
@@ -121,27 +133,15 @@ func NormalizeImage(data []byte, declaredMime string) (NormalizedImage, error) {
 	if err != nil {
 		return NormalizedImage{}, fmt.Errorf("failed to decode %s image: %w", decoder.name, err)
 	}
-
-	orientation := 1
-	if decoder.mimeType == "image/jpeg" {
-		orientation = jpegOrientation(data)
+	if orientation == 1 && !needsScale && len(data) <= MaxImageBytes &&
+		(decoder.mimeType == "image/png" || decoder.mimeType == "image/jpeg") {
+		out.Data, out.MimeType = data, decoder.mimeType
+		return out, nil
 	}
-
-	out := NormalizedImage{
-		OriginalWidth:  cfg.Width,
-		OriginalHeight: cfg.Height,
-		Width:          cfg.Width,
-		Height:         cfg.Height,
-	}
-	needsScale := cfg.Width > MaxImageEdge || cfg.Height > MaxImageEdge
 
 	if orientation == 1 && !needsScale {
 		switch decoder.mimeType {
 		case "image/png":
-			if len(data) <= MaxImageBytes {
-				out.Data, out.MimeType = data, "image/png"
-				return out, nil
-			}
 			// A conforming PNG may still be too large to upload; re-encode it
 			// once as JPEG instead of silently shipping it.
 			encoded, err := encodeJPEG(img)
@@ -154,10 +154,6 @@ func NormalizeImage(data []byte, declaredMime string) (NormalizedImage, error) {
 			out.Data, out.MimeType = encoded, "image/jpeg"
 			return out, nil
 		case "image/jpeg":
-			if len(data) <= MaxImageBytes {
-				out.Data, out.MimeType = data, "image/jpeg"
-				return out, nil
-			}
 			// A conforming JPEG may still be too large to upload. Re-encoding
 			// it at the same size would only degrade an already-lossy source,
 			// so resolution is what gets traded away: the image still reaches

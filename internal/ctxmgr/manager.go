@@ -24,19 +24,33 @@ type Manager struct {
 	// history declare, so AnyAssistantDeclaresToolCallID answers O(1) instead
 	// of scanning the full history per tool result. nil until first needed;
 	// guarded by mu.
-	declaredToolCallIDs     map[string]struct{}
-	payloadBytes            int
-	contextBytes            int
+	declaredToolCallIDs map[string]struct{}
+	payloadBytes        int
+	contextBytes        int
+	// imagePayloadBytes and imageEstimateTokens mirror the image parts inside
+	// messages. Provider image billing is per image rather than per base64
+	// byte, so the token estimator subtracts these payload bytes from its byte
+	// denominator and charges the per-image allowance instead. payloadBytes and
+	// contextBytes keep counting image bytes: they measure the request surface
+	// for display and byte budgets, not token cost.
+	imagePayloadBytes       int
+	imageEstimateTokens     int
 	lastInputTokens         int // full prompt size for compaction thresholds and input-budget displays
 	lastTotalContextTokens  int // post-response context baseline (full prompt + output)
 	calibrationInputTokens  int
 	calibrationContextBytes int
-	// usageCalibration keeps a bounded window of (full prompt tokens, prompt
-	// bytes) samples from completed LLM calls; the median tokens/bytes ratio is
-	// the usage-calibrated estimator. The window deliberately survives session
-	// switches and context rewrites — the ratio stays valid while the stale
-	// size fields above are cleared — so a model switch keeps the last valid
-	// calibration instead of cold-starting.
+	// calibrationImageTokens is the image allowance inside the calibration
+	// sample. The sample's byte denominator excludes image payloads, so its
+	// image share is removed before scaling and the current allowance is added
+	// afterwards, keeping image cost out of the text growth factor.
+	calibrationImageTokens int
+	// usageCalibration keeps a bounded window of (text-share prompt tokens,
+	// estimator prompt bytes) samples from completed LLM calls; the median
+	// tokens/bytes ratio is the usage-calibrated estimator. Both sides exclude
+	// image parts, whose provider cost is per image rather than per byte. The
+	// window deliberately survives session switches and context rewrites — the
+	// ratio stays valid while the stale size fields above are cleared — so a
+	// model switch keeps the last valid calibration instead of cold-starting.
 	usageCalibration []calibrationSample
 	// calibratedRatioCache caches the median clamped tokens/bytes ratio of the
 	// calibration window. It is recomputed under the write lock whenever
@@ -218,6 +232,9 @@ func (m *Manager) Append(msg message.Message) {
 	m.messages = append(m.messages, msg)
 	m.payloadBytes += MessagePayloadBytes([]message.Message{msg})
 	m.contextBytes += messageContextBytes([]message.Message{msg})
+	imagePayloadBytes, imageTokens := imagePartAccounting([]message.Message{msg})
+	m.imagePayloadBytes += imagePayloadBytes
+	m.imageEstimateTokens += imageTokens
 }
 
 // trackToolCallIDsLocked records the tool call IDs an appended assistant
@@ -253,6 +270,9 @@ func (m *Manager) DropLastMessage() {
 	if n := len(m.messages); n > 0 {
 		m.payloadBytes -= MessagePayloadBytes(m.messages[n-1:])
 		m.contextBytes -= messageContextBytes(m.messages[n-1:])
+		imagePayloadBytes, imageTokens := imagePartAccounting(m.messages[n-1:])
+		m.imagePayloadBytes -= imagePayloadBytes
+		m.imageEstimateTokens -= imageTokens
 		m.messages = m.messages[:n-1]
 		m.rebuildToolCallIDIndexLocked()
 	}
@@ -274,6 +294,9 @@ func (m *Manager) DropLastMessages(n int) {
 	}
 	m.payloadBytes -= MessagePayloadBytes(m.messages[len(m.messages)-n:])
 	m.contextBytes -= messageContextBytes(m.messages[len(m.messages)-n:])
+	imagePayloadBytes, imageTokens := imagePartAccounting(m.messages[len(m.messages)-n:])
+	m.imagePayloadBytes -= imagePayloadBytes
+	m.imageEstimateTokens -= imageTokens
 	m.messages = m.messages[:len(m.messages)-n]
 	// The declared-ID index must track the removal: a dropped assistant message
 	// no longer declares its tool calls, and a stale entry would keep
@@ -312,9 +335,11 @@ func (m *Manager) RestoreMessages(msgs []message.Message) {
 	m.messages = replaced
 	m.payloadBytes = MessagePayloadBytes(replaced)
 	m.contextBytes = messageContextBytes(replaced)
+	m.imagePayloadBytes, m.imageEstimateTokens = imagePartAccounting(replaced)
 	m.rebuildToolCallIDIndexLocked()
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
+	m.calibrationImageTokens = 0
 	if len(repaired) == 0 {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
@@ -333,8 +358,10 @@ func (m *Manager) RepairOrphanToolMessagesInPlace() int {
 	m.messages = repaired
 	m.payloadBytes = MessagePayloadBytes(repaired)
 	m.contextBytes = messageContextBytes(repaired)
+	m.imagePayloadBytes, m.imageEstimateTokens = imagePartAccounting(repaired)
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
+	m.calibrationImageTokens = 0
 	// Every other path that replaces m.messages wholesale rebuilds the index.
 	// Today the repair only drops tool-role messages, so the declared-call set
 	// is unchanged — but that is a property of RepairOrphanToolResults, not of
@@ -416,15 +443,15 @@ func (m *Manager) RestoreStats(usage message.TokenUsage) {
 
 const (
 	calibrationWindowSize = 12
-	// Sanity bounds for a tokens/bytes ratio: 0.05 (base64-heavy payloads) to
-	// 1.0 (dense CJK). A single pathological sample cannot drag the estimate
-	// outside this band.
+	// Sanity bounds for a tokens/bytes ratio: 0.05 (low-density repetitive or
+	// base64-heavy text) to 1.0 (dense CJK). A single pathological sample
+	// cannot drag the estimate outside this band.
 	calibrationRatioMin = 0.05
 	calibrationRatioMax = 1.0
 )
 
-// calibrationSample pairs the full normalized prompt tokens with the prompt
-// bytes of one completed LLM call.
+// calibrationSample pairs the text-share prompt tokens with the estimator byte
+// surface (image payloads excluded) of one completed LLM call.
 type calibrationSample struct {
 	tokens int
 	bytes  int
@@ -467,15 +494,22 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.lastInputTokens = fullPrompt
 	m.lastTotalContextTokens = fullPrompt + usage.OutputTokens
 	if fullPrompt > 0 {
-		contextBytes := m.systemPromptContextBytes + m.contextBytes
+		contextBytes := m.estimatorContextBytesLocked()
 		if contextBytes > 0 {
 			m.calibrationInputTokens = fullPrompt
 			m.calibrationContextBytes = contextBytes
-			m.usageCalibration = append(m.usageCalibration, calibrationSample{tokens: fullPrompt, bytes: contextBytes})
-			if len(m.usageCalibration) > calibrationWindowSize {
-				m.usageCalibration = m.usageCalibration[len(m.usageCalibration)-calibrationWindowSize:]
+			m.calibrationImageTokens = m.imageEstimateTokens
+			// The ratio window models the text/tool/thinking share of the
+			// prompt: the provider charged this request's images at its own
+			// per-image rate, and keeping that share in the tokens-per-byte
+			// median would bias every image-heavy window.
+			if textTokens := fullPrompt - m.imageEstimateTokens; textTokens > 0 {
+				m.usageCalibration = append(m.usageCalibration, calibrationSample{tokens: textTokens, bytes: contextBytes})
+				if len(m.usageCalibration) > calibrationWindowSize {
+					m.usageCalibration = m.usageCalibration[len(m.usageCalibration)-calibrationWindowSize:]
+				}
+				m.calibratedRatioCache = m.computeCalibratedRatioLocked()
 			}
-			m.calibratedRatioCache = m.computeCalibratedRatioLocked()
 		}
 	}
 	m.mu.Unlock()
@@ -540,6 +574,7 @@ func (m *Manager) ClearLastTokenUsage() {
 	m.lastTotalContextTokens = 0
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
+	m.calibrationImageTokens = 0
 }
 
 // EstimateTotalTokens returns a rough token count for the current message list.
@@ -616,11 +651,47 @@ func messageContextBytes(messages []message.Message) int {
 }
 
 // EstimateMessagesBytes returns the total byte size of a message slice using the
-// same accounting as the calibrated token estimator's denominator (payload bytes
-// plus tool-call, thinking, responses and gemini fields). Exposed for telemetry
-// that records the raw request surface size alongside the token estimate.
+// same field accounting as the calibrated token estimator's denominator (payload
+// bytes plus tool-call, thinking, responses and gemini fields), but unlike the
+// estimator it keeps image payload bytes in the total. It measures the request
+// surface for byte budgets and telemetry; the estimator strips images out of the
+// byte ratio and charges them per image instead.
 func EstimateMessagesBytes(messages []message.Message) int {
 	return messageContextBytes(messages)
+}
+
+// imagePartEstimateTokens is the input-token allowance one image part carries in
+// every estimate. Providers bill images per image (patch- or scale-based), not
+// per base64 byte — byte accounting charged a 400 KB screenshot ~130K phantom
+// tokens. The allowance covers the largest normalized image Chord accepts
+// under the conservative Anthropic-style ceil(w*h/750) rule (2000x2000), so an
+// unknown provider does not make capacity planning optimistic. PDF parts keep
+// the byte-based accounting: their cost scales with the document and the part
+// carries no page count to estimate.
+const imagePartEstimateTokens = (2000*2000 + 749) / 750
+
+// imagePartAccounting reports the two image-side quantities the token estimator
+// keeps apart from the byte counters: the payload bytes image parts contribute
+// and the per-image token allowance replacing them.
+func imagePartAccounting(messages []message.Message) (payloadBytes, tokens int) {
+	for _, msg := range messages {
+		for _, part := range msg.Parts {
+			if part.Type != message.ContentPartImage {
+				continue
+			}
+			payloadBytes += int(part.PayloadBytes())
+			tokens += imagePartEstimateTokens
+		}
+	}
+	return payloadBytes, tokens
+}
+
+// messageEstimateBytesAndImages splits a message slice into the estimator's two
+// inputs: the byte surface the calibrated ratio applies to (image payloads
+// removed) and the per-image allowance for the image parts in it.
+func messageEstimateBytesAndImages(messages []message.Message) (bytes, imageTokens int) {
+	imagePayloadBytes, imageTokens := imagePartAccounting(messages)
+	return messageContextBytes(messages) - imagePayloadBytes, imageTokens
 }
 
 // EstimateMessagesTokens returns the approximate input-token count for a slice
@@ -636,13 +707,18 @@ func EstimateMessagesTokens(messages []message.Message) int {
 // EstimateMessageTokens returns approximate token count for a single message.
 func EstimateMessageTokens(msg message.Message) int {
 	payloadBytes := len(msg.Content)
+	imageTokens := 0
 	if len(msg.Parts) > 0 {
 		payloadBytes = 0
 		for _, part := range msg.Parts {
+			if part.Type == message.ContentPartImage {
+				imageTokens += imagePartEstimateTokens
+				continue
+			}
 			payloadBytes += len(part.Text) + int(part.PayloadBytes())
 		}
 	}
-	n := payloadBytes / 3
+	n := payloadBytes/3 + imageTokens
 	n += len(msg.ToolCallID) / 3
 	for _, tc := range msg.ToolCalls {
 		n += len(tc.Args) / 3
@@ -731,15 +807,27 @@ func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 	}
 }
 
+// estimatorContextBytesLocked returns the byte denominator the calibrated
+// ratio applies to: full context bytes with image payloads removed, because
+// provider image billing does not scale with the base64 payload a part carries.
+func (m *Manager) estimatorContextBytesLocked() int {
+	return m.systemPromptContextBytes + m.contextBytes - m.imagePayloadBytes
+}
+
 func (m *Manager) estimatedInputTokensFromPayloadBytesLocked() int {
 	if m.calibrationInputTokens <= 0 || m.calibrationContextBytes <= 0 {
 		return 0
 	}
-	contextBytes := m.systemPromptContextBytes + m.contextBytes
+	contextBytes := m.estimatorContextBytesLocked()
 	if contextBytes <= m.calibrationContextBytes {
 		return 0
 	}
-	return int((int64(m.calibrationInputTokens) * int64(contextBytes)) / int64(m.calibrationContextBytes))
+	// The sample's image share is provider-priced, not byte-proportional, so it
+	// is removed before scaling the byte-based share and the current images are
+	// charged the local allowance afterwards: image cost enters the estimate
+	// once instead of growing with the text.
+	sampleTokens := max(m.calibrationInputTokens-m.calibrationImageTokens, 0)
+	return int((int64(sampleTokens)*int64(contextBytes))/int64(m.calibrationContextBytes)) + m.imageEstimateTokens
 }
 
 // computeCalibratedRatioLocked recomputes the median clamped tokens-per-byte
@@ -788,13 +876,12 @@ func (m *Manager) EstimateMessagesTokensCalibrated(messages []message.Message) i
 	m.mu.RLock()
 	ratio := m.calibratedRatioCache
 	m.mu.RUnlock()
-	if ratio <= 0 {
-		return EstimateMessagesTokens(messages)
-	}
 	// The calibration denominator (system prompt + context bytes) includes
-	// tool-call arguments and thinking payloads, so the estimate uses the same
-	// byte accounting — a conservative overestimate, which is the safe
-	// direction for budget decisions.
+	// tool-call arguments and thinking payloads, so the ratio applies to the
+	// same byte accounting — a conservative overestimate, which is the safe
+	// direction for budget decisions. Image payloads are the exception: they
+	// are excluded from the ratio and charged the per-image allowance, because
+	// provider image billing does not scale with base64 bytes.
 	//
 	// The two sides are not the same surface: the denominator is the full
 	// durable history, while the numerator (provider-reported prompt tokens)
@@ -804,22 +891,22 @@ func (m *Manager) EstimateMessagesTokensCalibrated(messages []message.Message) i
 	// Callers must therefore keep this estimator to capacity planning; request
 	// admission gates stay on the plain bytes/3 bound, which cannot be dragged
 	// below the physical token density by a low calibration sample.
-	bytes := messageContextBytes(messages)
-	tokens := max(int(float64(bytes)*ratio), 1)
-	return tokens
+	return EstimateMessagesTokensWithRatio(messages, ratio)
 }
 
 // EstimateMessagesTokensWithRatio estimates input tokens from a caller-provided
 // calibration ratio, keeping two estimates on the same calibration baseline
 // even when the live manager ratio may change between them (a compaction
-// preflight and its post-export re-check, for example). A non-positive ratio
-// falls back to the plain bytes/3 estimate, matching
+// preflight and its post-export re-check, for example). The ratio applies to
+// the non-image bytes, and every image part adds its per-image allowance. A
+// non-positive ratio falls back to the plain bytes/3 estimate, matching
 // EstimateMessagesTokensCalibrated's no-sample behavior.
 func EstimateMessagesTokensWithRatio(messages []message.Message, ratio float64) int {
 	if ratio <= 0 {
 		return EstimateMessagesTokens(messages)
 	}
-	return max(int(float64(messageContextBytes(messages))*ratio), 1)
+	bytes, imageTokens := messageEstimateBytesAndImages(messages)
+	return max(int(float64(bytes)*ratio), 1) + imageTokens
 }
 
 // EstimateBytesForTokensCalibrated converts a token budget back into a byte
@@ -1056,8 +1143,10 @@ func (m *Manager) ReplacePrefixAtomic(
 func (m *Manager) refreshMessageByteStateLocked() {
 	m.payloadBytes = MessagePayloadBytes(m.messages)
 	m.contextBytes = messageContextBytes(m.messages)
+	m.imagePayloadBytes, m.imageEstimateTokens = imagePartAccounting(m.messages)
 	m.calibrationInputTokens = 0
 	m.calibrationContextBytes = 0
+	m.calibrationImageTokens = 0
 	// Byte-state refresh runs exactly after wholesale rewrites (compaction
 	// replace, orphan repair, restore), where the declared-ID index must be
 	// rebuilt; incremental appends never reach here.

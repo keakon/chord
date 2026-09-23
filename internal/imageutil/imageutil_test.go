@@ -211,6 +211,26 @@ func TestNormalizeImageBytesRejectsTruncatedBody(t *testing.T) {
 	}
 }
 
+func TestNormalizeImageBytesRejectsTruncatedJPEGScan(t *testing.T) {
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, gradientImage(32, 32), nil); err != nil {
+		t.Fatal(err)
+	}
+	data := encoded.Bytes()
+	scan := bytes.Index(data, []byte{0xff, 0xda})
+	if scan < 0 {
+		t.Fatal("missing scan header")
+	}
+	end := scan + 2 + int(binary.BigEndian.Uint16(data[scan+2:scan+4]))
+	truncated := data[:end]
+	if _, err := jpeg.DecodeConfig(bytes.NewReader(truncated)); err != nil {
+		t.Fatalf("fixture must retain its configuration: %v", err)
+	}
+	if _, _, err := NormalizeImageBytes(truncated, "image/jpeg"); err == nil {
+		t.Fatal("expected error for missing JPEG scan data")
+	}
+}
+
 func TestNormalizeImageBytesRejectsOversizedDimensions(t *testing.T) {
 	_, _, err := NormalizeImageBytes(craftPNGHeader(30_000, 30_000), "image/png")
 	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("megapixel")) {

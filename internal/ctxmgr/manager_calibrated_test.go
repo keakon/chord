@@ -146,6 +146,47 @@ func TestEstimateMessagesTokensCalibratedClampsOutliers(t *testing.T) {
 	}
 }
 
+// TestEstimateMessagesTokensCalibratedExcludesImageShare verifies the
+// calibration window measures the text share: the provider sample's image
+// tokens leave the numerator and the image payload leaves the denominator, so
+// an image-heavy window cannot bias the tokens-per-byte ratio.
+func TestEstimateMessagesTokensCalibratedExcludesImageShare(t *testing.T) {
+	m := NewManager(8192, 0)
+	m.Append(message.Message{Content: strings.Repeat("x", 3000)})
+	m.Append(message.Message{Parts: []message.ContentPart{{Type: message.ContentPartImage, Data: make([]byte, 5000)}}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 2000})
+	// Text share 2000 - 1600 over 3000 text bytes.
+	if got, want := m.CalibratedRatio(), 400.0/3000.0; got != want {
+		t.Fatalf("CalibratedRatio() = %v, want %v", got, want)
+	}
+}
+
+// TestEstimateMessagesTokensCalibratedChargesImagesPerImage verifies the ratio
+// applies to the non-image bytes while image parts add the per-image allowance:
+// the estimate must not depend on the image payload size at all.
+func TestEstimateMessagesTokensCalibratedChargesImagesPerImage(t *testing.T) {
+	m := NewManager(8192, 0)
+	text := strings.Repeat("x", 3000)
+	m.Append(message.Message{Content: text})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 600})
+	withImage := func(size int) []message.Message {
+		return []message.Message{{Parts: []message.ContentPart{
+			{Type: message.ContentPartText, Text: text},
+			{Type: message.ContentPartImage, Data: make([]byte, size)},
+		}}}
+	}
+
+	small := m.EstimateMessagesTokensCalibrated(withImage(1000))
+	large := m.EstimateMessagesTokensCalibrated(withImage(300_000))
+	if small != large {
+		t.Fatalf("calibrated estimate depends on image payload size: %d vs %d", small, large)
+	}
+	// 3000 text bytes at ratio 0.2 plus one per-image allowance.
+	if want := 600 + imagePartEstimateTokens; small != want {
+		t.Fatalf("calibrated estimate = %d, want %d", small, want)
+	}
+}
+
 // TestEstimateMessagesTokensCalibratedMixedWindowClamps verifies the median is
 // taken over clamped ratios: two below-bound samples plus one in-band sample
 // must not let the in-band sample become the median on its own.
@@ -159,5 +200,22 @@ func TestEstimateMessagesTokensCalibratedMixedWindowClamps(t *testing.T) {
 	// Clamped ratios sorted: 0.05, 0.05, 0.3333 -> median 0.05.
 	if got := m.EstimateMessagesTokensCalibrated([]message.Message{msg}); got != 1500 {
 		t.Fatalf("mixed window = %d, want 1500 (median of clamped ratios)", got)
+	}
+}
+
+// A part restored from the session file carries no inline Data, so the
+// calibration window must subtract its recorded size (DataBytes) from the
+// denominator exactly like an in-memory part: the ratio only measures text
+// bytes, whether or not the blob has been resolved.
+func TestEstimateMessagesTokensCalibratedExcludesLazilyRestoredImageShare(t *testing.T) {
+	m := NewManager(8192, 0)
+	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Parts: []message.ContentPart{
+		{Type: message.ContentPartText, Text: strings.Repeat("x", 3000)},
+		{Type: message.ContentPartImage, ImagePath: "shot.png", DataBytes: 5000},
+	}}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 2000})
+	// Text share 2000 - 1600 over 3000 text bytes.
+	if got, want := m.CalibratedRatio(), 400.0/3000.0; got != want {
+		t.Fatalf("CalibratedRatio() = %v, want %v", got, want)
 	}
 }

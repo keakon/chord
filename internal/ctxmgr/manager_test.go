@@ -238,13 +238,20 @@ func TestCompressForTargetCountsMultipartPayload(t *testing.T) {
 	}
 }
 
-func TestEstimateMessageTokensCountsMultipartBinaryPayload(t *testing.T) {
-	msg := message.Message{Parts: []message.ContentPart{{
-		Type: message.ContentPartImage,
-		Data: make([]byte, 3000),
-	}}}
-	if got := EstimateMessageTokens(msg); got != 1000 {
-		t.Fatalf("EstimateMessageTokens() = %d, want 1000", got)
+// Image parts are charged a per-image allowance, never their base64 length: a
+// 300 KB screenshot would otherwise add ~100K phantom tokens to the estimate.
+func TestEstimateMessageTokensChargesImagesPerImage(t *testing.T) {
+	text := strings.Repeat("a", 3000)
+	textOnly := message.Message{Role: message.RoleUser, Content: text}
+	textPart := message.ContentPart{Type: message.ContentPartText, Text: text}
+	for _, size := range []int{1000, 300_000} {
+		msg := message.Message{Role: message.RoleUser, Parts: []message.ContentPart{
+			textPart,
+			{Type: message.ContentPartImage, Data: make([]byte, size)},
+		}}
+		if got, want := EstimateMessageTokens(msg), EstimateMessageTokens(textOnly)+imagePartEstimateTokens; got != want {
+			t.Fatalf("EstimateMessageTokens(image %d bytes) = %d, want %d (text estimate plus per-image allowance)", size, got, want)
+		}
 	}
 }
 
@@ -458,6 +465,76 @@ func TestShouldAutoCompactUsesContextByteCalibrationForToolCalls(t *testing.T) {
 	}
 }
 
+// Image payloads are not token-proportional, so a large screenshot appended
+// after the provider sample must not be extrapolated into the byte-calibrated
+// estimate: byte scaling multiplied the whole context by the image's ~300 KB
+// and showed (and triggered compaction at) a phantom 100K+ tokens.
+func TestPayloadByteCalibrationIgnoresImagePayloadBytes(t *testing.T) {
+	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 100)}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
+
+	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{
+		Type: message.ContentPartImage,
+		Data: make([]byte, 300_000),
+	}}})
+
+	decision := m.AutoCompactDecision()
+	if got := decision.EstimatedInputTokens; got != 0 {
+		t.Fatalf("EstimatedInputTokens = %d, want 0: image bytes must not grow the byte-calibrated estimate", got)
+	}
+	if decision.ShouldCompact {
+		t.Fatal("image payload must not trigger automatic compaction")
+	}
+	if got := m.EffectiveContextTokens(); got != 400 {
+		t.Fatalf("EffectiveContextTokens() = %d, want the last provider sample 400", got)
+	}
+}
+
+// Text growth after the sample is scaled by the byte ratio, and the images in
+// the current context are charged the per-image allowance on top instead of
+// being folded into that growth factor.
+func TestPayloadByteCalibrationAddsPerImageAllowance(t *testing.T) {
+	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 100)}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
+
+	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{
+		Type: message.ContentPartImage,
+		Data: make([]byte, 300_000),
+	}}})
+	m.Append(message.Message{Role: message.RoleUser, Content: strings.Repeat("b", 50)})
+	m.UpdateFromUsage(message.TokenUsage{})
+
+	// Text bytes 100 -> 150 scale the 400-token sample to 600; the image adds
+	// one per-image allowance on top.
+	if got := m.AutoCompactDecision().EstimatedInputTokens; got != 600+imagePartEstimateTokens {
+		t.Fatalf("EstimatedInputTokens = %d, want %d (scaled text share plus per-image allowance)", got, 600+imagePartEstimateTokens)
+	}
+}
+
+// A sample taken while images were in context carries their provider-priced
+// share; it is removed before scaling so the text growth factor is not inflated
+// by image tokens.
+func TestPayloadByteCalibrationDiscountsSampleImageShare(t *testing.T) {
+	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 300)}})
+	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{
+		Type: message.ContentPartImage,
+		Data: make([]byte, 100),
+	}}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 2000})
+
+	m.Append(message.Message{Role: message.RoleUser, Content: strings.Repeat("b", 100)})
+	m.UpdateFromUsage(message.TokenUsage{})
+
+	// Text bytes 300 -> 400 scale the sample's text share (2000 - 1600) to 533;
+	// the image adds its allowance back.
+	if got := m.AutoCompactDecision().EstimatedInputTokens; got != 533+imagePartEstimateTokens {
+		t.Fatalf("EstimatedInputTokens = %d, want %d (sample image share discounted, current allowance added)", got, 533+imagePartEstimateTokens)
+	}
+}
+
 func TestShouldAutoCompactPayloadByteCalibrationHonorsDisabledThreshold(t *testing.T) {
 	m := NewManagerWithInputBudget(1000, 1000, 0, 0)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
@@ -625,6 +702,45 @@ func TestManagerPayloadBytesRecomputesAfterRestoreAndRepair(t *testing.T) {
 	m.DropLastMessages(2)
 	if got, want := m.PayloadBytes(), 0; got != want {
 		t.Fatalf("PayloadBytes() after DropLastMessages = %d, want %d", got, want)
+	}
+}
+
+// The image-side counters the estimator reads are maintained incrementally, so
+// append, drop, wholesale replace and restore must keep them consistent with
+// the payload/context byte counters that keep counting the same payloads for
+// display and byte budgets.
+func TestManagerImageAccountingTracksMessageChanges(t *testing.T) {
+	image := message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{
+		Type: message.ContentPartImage,
+		Data: make([]byte, 300_000),
+	}}}
+	m := NewManager(1000, 0)
+
+	m.Append(image)
+	if m.imagePayloadBytes != 300_000 || m.imageEstimateTokens != imagePartEstimateTokens {
+		t.Fatalf("after Append: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
+	}
+	if got := m.ContextPayloadBytes(); got != 300_000 {
+		t.Fatalf("ContextPayloadBytes() = %d, want the image payload still counted for byte budgets", got)
+	}
+	m.DropLastMessage()
+	if m.imagePayloadBytes != 0 || m.imageEstimateTokens != 0 {
+		t.Fatalf("after DropLastMessage: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
+	}
+
+	m.Append(image)
+	m.Append(image)
+	m.DropLastMessages(2)
+	if m.imagePayloadBytes != 0 || m.imageEstimateTokens != 0 {
+		t.Fatalf("after DropLastMessages: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
+	}
+
+	m.Append(image)
+	if err := m.ReplacePrefixAtomic(m.MessageCount(), []message.Message{{Role: message.RoleAssistant, Content: "summary"}}, nil); err != nil {
+		t.Fatalf("ReplacePrefixAtomic: %v", err)
+	}
+	if m.imagePayloadBytes != 0 || m.imageEstimateTokens != 0 {
+		t.Fatalf("after ReplacePrefixAtomic: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
 	}
 }
 
@@ -882,4 +998,59 @@ func TestReplacePrefixAtomic(t *testing.T) {
 			t.Fatalf("second message = %q, want u2", snap[1].Content)
 		}
 	})
+}
+
+// Restore and orphan repair rebuild the image counters from the message list,
+// so they must agree with the byte counters for parts that only exist on disk:
+// a part restored from the session file keeps Data empty (the blob resolves
+// lazily) and reports its payload through DataBytes.
+func TestManagerImageAccountingTracksRestoreAndRepair(t *testing.T) {
+	m := NewManager(1000, 0)
+	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Parts: []message.ContentPart{{
+		Type:      message.ContentPartImage,
+		ImagePath: "shot.png",
+		DataBytes: 300_000,
+	}}}})
+	if m.imagePayloadBytes != 300_000 || m.imageEstimateTokens != imagePartEstimateTokens {
+		t.Fatalf("after RestoreMessages: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
+	}
+	if got := m.ContextPayloadBytes(); got != 300_000 {
+		t.Fatalf("ContextPayloadBytes() = %d, want the lazily resolved image payload counted", got)
+	}
+
+	m.Append(message.Message{Role: message.RoleTool, ToolCallID: "ghost", Parts: []message.ContentPart{{
+		Type: message.ContentPartImage,
+		Data: make([]byte, 4000),
+	}}})
+	if m.imagePayloadBytes != 304_000 || m.imageEstimateTokens != 2*imagePartEstimateTokens {
+		t.Fatalf("after Append: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
+	}
+
+	if got := m.RepairOrphanToolMessagesInPlace(); got != 1 {
+		t.Fatalf("RepairOrphanToolMessagesInPlace = %d, want 1", got)
+	}
+	if m.imagePayloadBytes != 300_000 || m.imageEstimateTokens != imagePartEstimateTokens {
+		t.Fatalf("after repair: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
+	}
+	if got := m.MessageCount(); got != 1 {
+		t.Fatalf("MessageCount() = %d, want the orphan image message dropped", got)
+	}
+}
+
+// The byte calibration discounts the image allowance of the current context
+// from the provider sample, assuming the request surface carried those images.
+// A target that rejects image input reports a prompt without them, so the
+// discount still applies and the ratio under-scales as text grows. This test
+// pins that known approximation.
+func TestPayloadByteCalibrationUsesContextImageAllowance(t *testing.T) {
+	m := NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Parts: []message.ContentPart{
+		{Type: message.ContentPartText, Text: strings.Repeat("a", 30000)},
+		{Type: message.ContentPartImage, Data: make([]byte, 4000)},
+	}}})
+	m.UpdateFromUsage(message.TokenUsage{InputTokens: 10000})
+	// (10000 - 1600) text tokens over 30000 text bytes.
+	if got, want := m.CalibratedRatio(), 8400.0/30000.0; got != want {
+		t.Fatalf("CalibratedRatio() = %v, want %v", got, want)
+	}
 }
