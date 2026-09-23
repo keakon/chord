@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // ---------- parseFrontmatter tests ----------
@@ -411,25 +410,6 @@ func TestScan_MultipleSkillsSameDir(t *testing.T) {
 	}
 	if len(skills) != 3 {
 		t.Fatalf("expected 3 skills, got %d", len(skills))
-	}
-}
-
-func TestLoad_ByName(t *testing.T) {
-	dir1 := t.TempDir()
-	dir2 := t.TempDir()
-	createSkillFile(t, dir1, "go-expert", "Go expert (project)", "Project content\n")
-	createSkillFile(t, dir2, "go-expert", "Go expert (global)", "Global content\n")
-
-	loader := NewLoader([]string{dir1, dir2})
-	sk, err := loader.Load("go-expert")
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if sk.Description != "Go expert (project)" {
-		t.Fatalf("description = %q, want project version", sk.Description)
-	}
-	if sk.Content != "Project content\n" {
-		t.Fatalf("content = %q, want project content", sk.Content)
 	}
 }
 
@@ -851,69 +831,3 @@ func TestNoSidecarWhenMissing(t *testing.T) {
 }
 
 // ---------- WorkDir chain ----------
-
-// ---------- LazyWatcher ----------
-
-func TestLazyWatcher_StartStop(t *testing.T) {
-	dir := t.TempDir()
-	createSkillFile(t, dir, "watch-skill", "Watched skill", "Body\n")
-	loader := NewLoader([]string{dir})
-	refreshed := make(chan struct{}, 1)
-	w := NewLazyWatcher(loader, 100*time.Millisecond, func() {
-		select {
-		case refreshed <- struct{}{}:
-		default:
-		}
-	})
-	w.Start()
-	defer w.Stop()
-
-	// Wait for at least one refresh cycle.
-	select {
-	case <-refreshed:
-		// ok
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("expected at least one refresh cycle")
-	}
-}
-
-func TestLazyWatcher_StopIsIdempotent(t *testing.T) {
-	loader := NewLoader([]string{})
-	w := NewLazyWatcher(loader, time.Hour, nil)
-	w.Start()
-	w.Stop()
-	w.Stop() // should not panic
-}
-
-func TestLazyWatcherRecheckOnlyFiresOnChange(t *testing.T) {
-	dir := t.TempDir()
-	createSkillFile(t, dir, "watch-skill", "Watched skill", "Body\n")
-	skillPath := filepath.Join(dir, "watch-skill", "SKILL.md")
-	loader := NewLoader([]string{dir})
-	calls := 0
-	w := NewLazyWatcher(loader, 0, func() { calls++ })
-
-	w.recheck()
-	if calls != 1 {
-		t.Fatalf("first recheck calls = %d, want 1", calls)
-	}
-
-	w.recheck()
-	if calls != 1 {
-		t.Fatalf("unchanged recheck calls = %d, want 1", calls)
-	}
-
-	updated := `---
-name: watch-skill
-description: Watched skill updated
----
-Body
-`
-	if err := os.WriteFile(skillPath, []byte(updated), 0644); err != nil {
-		t.Fatalf("write updated skill: %v", err)
-	}
-	w.recheck()
-	if calls != 2 {
-		t.Fatalf("changed recheck calls = %d, want 2", calls)
-	}
-}

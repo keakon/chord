@@ -4,10 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"gopkg.in/yaml.v3"
@@ -111,35 +108,6 @@ func (l *Loader) ScanMeta() ([]*Meta, error) {
 	}
 
 	return skills, nil
-}
-
-// Load loads a single skill's full content by name.
-func (l *Loader) Load(name string) (*Skill, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil, fmt.Errorf("skill name is required")
-	}
-	for _, dir := range l.dirs {
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			continue
-		}
-		matches, err := doublestar.Glob(os.DirFS(dir), "**/SKILL.md")
-		if err != nil {
-			continue
-		}
-		for _, match := range matches {
-			fullPath := filepath.Join(dir, match)
-			meta, err := LoadMeta(fullPath)
-			if err != nil {
-				continue
-			}
-			if meta.Name != name {
-				continue
-			}
-			return LoadSkill(fullPath)
-		}
-	}
-	return nil, fmt.Errorf("skill %q not found", name)
 }
 
 // LoadMeta loads only a skill's metadata from a SKILL.md file.
@@ -273,106 +241,6 @@ func loadSidecarMeta(rootDir string, meta *Meta) {
 		}
 		break // first sidecar wins
 	}
-}
-
-// lazyWatcher periodically re-scans skill directories for changes.
-type lazyWatcher struct {
-	loader     *Loader
-	onChange   func()
-	interval   time.Duration
-	stopCh     chan struct{}
-	mu         sync.Mutex
-	lastScan   time.Time
-	lastDigest string
-}
-
-// NewLazyWatcher creates a periodic skill watcher.
-func NewLazyWatcher(loader *Loader, interval time.Duration, onChange func()) *lazyWatcher {
-	return &lazyWatcher{
-		loader:   loader,
-		onChange: onChange,
-		interval: interval,
-		stopCh:   make(chan struct{}),
-	}
-}
-
-// Start begins the periodic watch loop.
-func (w *lazyWatcher) Start() {
-	go func() {
-		ticker := time.NewTicker(w.interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-w.stopCh:
-				return
-			case <-ticker.C:
-				w.recheck()
-			}
-		}
-	}()
-}
-
-// Stop terminates the watch loop.
-func (w *lazyWatcher) Stop() {
-	select {
-	case <-w.stopCh:
-	default:
-		close(w.stopCh)
-	}
-}
-
-// recheck scans skill directories and fires onChange if any changes detected.
-func (w *lazyWatcher) recheck() {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if time.Since(w.lastScan) < w.interval/2 {
-		return
-	}
-	metas, err := w.loader.ScanMeta()
-	if err != nil {
-		return
-	}
-	digest := digestSkillMetas(metas)
-	w.lastScan = time.Now()
-	if digest == w.lastDigest {
-		return
-	}
-	w.lastDigest = digest
-	if w.onChange != nil {
-		w.onChange()
-	}
-}
-
-func digestSkillMetas(metas []*Meta) string {
-	if len(metas) == 0 {
-		return ""
-	}
-	lines := make([]string, 0, len(metas))
-	for _, meta := range metas {
-		if meta == nil {
-			continue
-		}
-		allowed := strings.Join(meta.AllowedTools, ",")
-		paths := strings.Join(meta.Paths, ",")
-		resources := strings.Join(NormalizeResourceList(meta.Resources), ",")
-		lines = append(lines, fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%t",
-			meta.Name,
-			meta.Description,
-			meta.Location,
-			meta.RootDir,
-			meta.WhenToUse,
-			meta.ArgsHint,
-			meta.Context,
-			meta.Model,
-			meta.Effort,
-			allowed,
-			paths,
-			resources,
-			meta.DisableModelInvocation,
-		))
-	}
-	sort.Strings(lines)
-	return strings.Join(lines, "\n")
 }
 
 // parseFrontmatter extracts YAML frontmatter (between --- delimiters)

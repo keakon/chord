@@ -181,29 +181,6 @@ func TestLoadMeta_ResourcesSidecarReplaces(t *testing.T) {
 	}
 }
 
-func TestDigestSkillMetas_ResourcesChangeDigest(t *testing.T) {
-	base := &Meta{Name: "s", Description: "d", Location: "/l", RootDir: "/r", Resources: []string{"references/a.md"}}
-	changed := &Meta{Name: "s", Description: "d", Location: "/l", RootDir: "/r", Resources: []string{"references/b.md"}}
-	equivalent := &Meta{Name: "s", Description: "d", Location: "/l", RootDir: "/r", Resources: []string{"./references/a.md"}}
-	if digestSkillMetas([]*Meta{base}) == digestSkillMetas([]*Meta{changed}) {
-		t.Fatal("changing resources should change the digest")
-	}
-	if digestSkillMetas([]*Meta{base}) != digestSkillMetas([]*Meta{equivalent}) {
-		t.Fatal("equivalent resource spellings should share a digest")
-	}
-}
-
-// TestDigestSkillMetas_DisableModelInvocationChangeDigest pins the watcher
-// contract: flipping the frontmatter flag must change the digest, or a running
-// session would keep the old model visibility after the file changes.
-func TestDigestSkillMetas_DisableModelInvocationChangeDigest(t *testing.T) {
-	base := &Meta{Name: "s", Description: "d", Location: "/l", RootDir: "/r"}
-	manual := &Meta{Name: "s", Description: "d", Location: "/l", RootDir: "/r", DisableModelInvocation: true}
-	if digestSkillMetas([]*Meta{base}) == digestSkillMetas([]*Meta{manual}) {
-		t.Fatal("flipping disable-model-invocation should change the digest")
-	}
-}
-
 func writeResourceFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
