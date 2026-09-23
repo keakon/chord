@@ -184,6 +184,15 @@ func TestHeadlessSessionSwitchedRespectsSubscription(t *testing.T) {
 	}
 }
 
+// The TUI's checkout notification is not forwarded when the client has not
+// subscribed to workdir_changed; status_response remains the snapshot source.
+func TestHeadlessWorkDirChangedEventHasNoEnvelope(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{"session_switched": true}}
+	if envs := filterHeadlessEvent(agent.WorkDirChangedEvent{Generation: 1}, state, &mockBackend{}); len(envs) != 0 {
+		t.Fatalf("checkout invalidation must not emit envelopes, got %v", envs)
+	}
+}
+
 func TestHeadlessInitialStatusSeqSurvivesWireEncoding(t *testing.T) {
 	var output bytes.Buffer
 	writer := newStdoutWriter(t.Context(), &output)

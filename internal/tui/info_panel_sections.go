@@ -490,6 +490,14 @@ func (m *Model) buildInfoPanelGitBlock(lineW int) string {
 	lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Branch", InfoPanelValue.Render(truncateOneLine(ref, lineW-8-infoPanelCollapsibleContentInset))))
 	if info.WorktreeName != "" {
 		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Worktree", InfoPanelValue.Render(truncateOneLine(info.WorktreeName, lineW-10-infoPanelCollapsibleContentInset))))
+		// The status bar renders the worktree's identity label instead of its
+		// path, so the panel is where that path stays visible — but the name
+		// above comes from the git snapshot, while the path is the live
+		// directory. Only show the path while the snapshot still describes that
+		// directory, so a stale name is never paired with a new checkout.
+		if info.Dir != "" && info.Dir == m.workingDir {
+			lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Worktree Path", InfoPanelValue.Render(truncateOneLine(displayWorkingDir(m.workingDir), lineW-16-infoPanelCollapsibleContentInset))))
+		}
 	}
 	if info.ChangedFiles > 0 {
 		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Changes", InfoPanelValue.Render(fmt.Sprintf("%d files", info.ChangedFiles))))

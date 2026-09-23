@@ -70,6 +70,7 @@ func (loopBusyAgentStub) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnaps
 func (loopBusyAgentStub) ProxyInUseForRef(string) bool                              { return false }
 func (loopBusyAgentStub) ContentRoot() string                                       { return "" }
 func (loopBusyAgentStub) WorkDir() string                                           { return "" }
+func (loopBusyAgentStub) WorkDirSnapshot() agent.WorkDirSnapshot                    { return agent.WorkDirSnapshot{} }
 func (loopBusyAgentStub) CurrentRole() string                                       { return "builder" }
 func (loopBusyAgentStub) LoopKeepsMainBusy() bool                                   { return true }
 func (loopBusyAgentStub) CurrentLoopState() agent.LoopState                         { return agent.LoopStateExecuting }

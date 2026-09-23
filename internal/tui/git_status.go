@@ -42,10 +42,15 @@ type gitStatusResult struct {
 }
 
 type gitStatusInfo struct {
-	Present      bool
-	Branch       string
-	Commit       string
+	Present bool
+	Branch  string
+	Commit  string
+	// WorktreeName is the linked worktree the snapshot was taken in, and Dir is
+	// the checkout it describes. The panel pairs the name with a live directory
+	// path, so both must be kept: a snapshot that outlived its checkout would
+	// otherwise label a different directory as that worktree's location.
 	WorktreeName string
+	Dir          string
 	ChangedFiles int
 	StagedFiles  int
 	Stashes      int
@@ -56,23 +61,36 @@ type gitStatusInfo struct {
 
 type gitStatusRefreshedMsg struct {
 	generation uint64
-	result     gitStatusResult
+	// dir is the checkout the result describes. A refresh in flight when the
+	// checkout switches would otherwise land as the new directory's git data.
+	dir    string
+	result gitStatusResult
 }
 
 type gitStatusTickMsg struct {
 	generation uint64
 }
 
+// currentCheckoutPath is the directory the panel's git data must describe: the
+// agent's live checkout, read in one snapshot so a path and an identity can
+// never come from different switches.
+func (m *Model) currentCheckoutPath() string {
+	if m == nil {
+		return ""
+	}
+	if m.agent != nil {
+		if snap := m.agent.WorkDirSnapshot(); strings.TrimSpace(snap.Path) != "" {
+			return strings.TrimSpace(snap.Path)
+		}
+	}
+	return strings.TrimSpace(m.workingDir)
+}
+
 func (m *Model) requestGitStatusRefresh() tea.Cmd {
 	if m == nil || m.agent == nil || m.gitStatus.Refreshing || m.gitStatus.Disabled {
 		return nil
 	}
-	workDir := strings.TrimSpace(m.workingDir)
-	if m.agent != nil {
-		if root := strings.TrimSpace(m.agent.WorkDir()); root != "" {
-			workDir = root
-		}
-	}
+	workDir := m.currentCheckoutPath()
 	if workDir == "" {
 		return nil
 	}
@@ -80,7 +98,7 @@ func (m *Model) requestGitStatusRefresh() tea.Cmd {
 	m.gitStatus.Generation++
 	generation := m.gitStatus.Generation
 	return func() tea.Msg {
-		return gitStatusRefreshedMsg{generation: generation, result: collectGitStatus(workDir)}
+		return gitStatusRefreshedMsg{generation: generation, dir: workDir, result: collectGitStatus(workDir)}
 	}
 }
 
@@ -159,6 +177,7 @@ func gitStatusInfoEqual(a, b gitStatusInfo) bool {
 		a.Branch == b.Branch &&
 		a.Commit == b.Commit &&
 		a.WorktreeName == b.WorktreeName &&
+		a.Dir == b.Dir &&
 		a.ChangedFiles == b.ChangedFiles &&
 		a.StagedFiles == b.StagedFiles &&
 		a.Stashes == b.Stashes &&
@@ -170,7 +189,6 @@ func (m *Model) handleGitStatusRefreshed(msg gitStatusRefreshedMsg) tea.Cmd {
 	if msg.generation != m.gitStatus.Generation {
 		return nil
 	}
-	previous := m.gitStatus.Info
 	m.gitStatus.Refreshing = false
 	if msg.result.Disable {
 		m.gitStatus.Disabled = true
@@ -179,7 +197,18 @@ func (m *Model) handleGitStatusRefreshed(msg gitStatusRefreshedMsg) tea.Cmd {
 		m.cachedInfoPanelOut = ""
 		return nil
 	}
+	if msg.dir != m.currentCheckoutPath() {
+		// The checkout switched while this refresh was in flight: the result
+		// describes the previous directory, so drop it and schedule a fresh one
+		// instead of presenting it as the current checkout's git data.
+		return m.scheduleGitStatusTick()
+	}
+	previous := m.gitStatus.Info
+	// Stamp the directory the snapshot describes here, where it is known to be
+	// the live checkout, so the panel can tell whether its worktree identity and
+	// the directory path it pairs with it still belong together.
 	m.gitStatus.Info = msg.result.Info
+	m.gitStatus.Info.Dir = msg.dir
 	if gitStatusInfoEqual(previous, msg.result.Info) {
 		m.advanceGitStatusRefreshDelay()
 	} else {

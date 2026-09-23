@@ -262,6 +262,16 @@ type PlanExecutor interface {
 	ExecutePlan(planPath, agentName string)
 }
 
+// WorkDirSnapshot is the display-relevant view of an agent's active checkout:
+// the effective working directory, the chord-managed worktree identity working
+// there (empty when the directory is not a managed checkout), and the
+// generation the binding was published with.
+type WorkDirSnapshot struct {
+	Path       string
+	WorktreeID string
+	Generation uint64
+}
+
 // AgentForTUI is the full interface required by the local TUI. New code that
 // consumes only a slice of this surface should target the smaller sub-interfaces
 // (MessageSender, ModelSelector, …) instead.
@@ -274,6 +284,11 @@ type AgentForTUI interface {
 	ContentRoot() string
 	// WorkDir returns the checkout the agent's tools and shell commands run in.
 	WorkDir() string
+	// WorkDirSnapshot returns that checkout together with the worktree identity
+	// working there and the generation the binding was published with. Callers
+	// that render or compare the checkout must prefer it over combining
+	// WorkDir() with anything else: separate reads can straddle a switch.
+	WorkDirSnapshot() WorkDirSnapshot
 	// InvokedSkills returns skills explicitly loaded via the Skill tool in the current session.
 	InvokedSkills() []*skill.Meta
 	// GetTodos returns the current todo list for sidebar display.

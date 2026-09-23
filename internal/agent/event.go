@@ -944,6 +944,17 @@ type SessionTitleChangedEvent struct {
 
 func (SessionTitleChangedEvent) agentEvent() {}
 
+// WorkDirChangedEvent signals that an agent's active checkout changed. It is
+// an invalidation, not a snapshot: it carries only the new generation, and the
+// consumer reads the whole state through WorkDirSnapshot, so a notification
+// that races a newer switch still converges on the latest release instead of
+// mixing the path of one release with the identity of another.
+type WorkDirChangedEvent struct {
+	Generation uint64
+}
+
+func (WorkDirChangedEvent) agentEvent() {}
+
 // ForkSessionEvent is emitted after a fork (ee chord) operation completes.
 // Parts holds the content of the forked message so the TUI can load it
 // into the composer for editing.

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/keakon/golog/log"
 
@@ -28,14 +30,33 @@ func resolveWorktreeBranchPrefix(cfg *config.Config) string {
 	return normalized
 }
 
-// newPathRootsResolver returns the checkout-roots resolver injected into the
-// agent for policy-root path evaluation. Storage paths and the worktree
-// location are pinned at startup; only the checkout set itself is re-listed,
-// once per turn.
-func newPathRootsResolver(ctx context.Context, contentRoot string, pl *config.PathLocator, worktreeRoot string) agent.PathRootsResolver {
-	return func() (roots, containers []string) {
-		return resolvePathRoots(ctx, contentRoot, pl, worktreeRoot)
+// newPathRootsResolver returns the checkout-roots resolver and its mutation
+// invalidator. Topology is reused across ordinary turns and refreshed after a
+// worktree mutation; the short interval also picks up changes made externally.
+func newPathRootsResolver(ctx context.Context, contentRoot string, pl *config.PathLocator, worktreeRoot string) (agent.PathRootsResolver, func()) {
+	var mu sync.Mutex
+	var cachedRoots, cachedContainers []string
+	var refreshedAt time.Time
+	dirty := true
+	const refreshInterval = 2 * time.Second
+
+	resolve := func() (roots, containers []string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !dirty && time.Since(refreshedAt) < refreshInterval {
+			return cachedRoots, cachedContainers
+		}
+		cachedRoots, cachedContainers = resolvePathRoots(ctx, contentRoot, pl, worktreeRoot)
+		refreshedAt = time.Now()
+		dirty = false
+		return cachedRoots, cachedContainers
 	}
+	invalidate := func() {
+		mu.Lock()
+		dirty = true
+		mu.Unlock()
+	}
+	return resolve, invalidate
 }
 
 // resolvePathRoots returns the canonical roots of every checkout of the

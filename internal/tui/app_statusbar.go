@@ -110,15 +110,21 @@ type statusBarAgentSnapshot struct {
 }
 
 type statusBarInputs struct {
-	Now                 time.Time
-	ModeText            string
-	Snapshot            statusBarAgentSnapshot
-	StatusActiveID      string
-	StatusActivity      agent.AgentActivityEvent
-	InfoPanelVisible    bool
-	SessionSwitchKind   string
-	SessionSwitchID     string
+	Now               time.Time
+	ModeText          string
+	Snapshot          statusBarAgentSnapshot
+	StatusActiveID    string
+	StatusActivity    agent.AgentActivityEvent
+	InfoPanelVisible  bool
+	SessionSwitchKind string
+	SessionSwitchID   string
+	// WorkingDirDisplay is the checkout path a click copies. The path region
+	// renders an identity label instead when a managed worktree is active
+	// (WorkDirCheckoutName non-empty): the label names the checkout, while this
+	// value keeps the real path for the clipboard.
 	WorkingDirDisplay   string
+	WorkDirRepoName     string
+	WorkDirCheckoutName string
 	PendingQuitFP       string
 	ChordDisplay        string
 	SearchFP            string
@@ -189,6 +195,8 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		SessionSwitchKind:   m.sessionSwitch.kind,
 		SessionSwitchID:     m.sessionSwitch.sessionID,
 		WorkingDirDisplay:   displayWorkingDir(m.workingDir),
+		WorkDirRepoName:     m.workDirRepoShortName(),
+		WorkDirCheckoutName: m.workingDirID,
 		PendingQuitFP:       strings.TrimSpace(m.pendingQuitFingerprint(now)),
 		ChordDisplay:        m.chord.display(),
 		SearchFP:            m.statusBarSearchFingerprint(),
@@ -526,6 +534,10 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	b.WriteByte('|')
 	b.WriteString(snap.mcpPill)
 	b.WriteByte('|')
+	b.WriteString(inputs.WorkDirRepoName)
+	b.WriteByte('|')
+	b.WriteString(inputs.WorkDirCheckoutName)
+	b.WriteByte('|')
 	b.WriteString(compactionBackgroundStatusKey(m.compactionBgStatus))
 	if compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
 		b.WriteByte('|')
@@ -618,10 +630,10 @@ func (m *Model) renderStatusBar() string {
 	// Content width: leave margins so the closing paren of elapsed "(Ns)" / "(NmNs)" is not covered by scrollbar.
 	effectiveWidth := max(m.width-statusBarLeftMargin-statusBarRightMargin, 0)
 
-	pathValue := inputs.WorkingDirDisplay
+	path := statusBarPathForms{value: inputs.WorkingDirDisplay, repo: inputs.WorkDirRepoName, checkout: inputs.WorkDirCheckoutName}
 	sessionValue := sessionID
 	activityText, activityWidth := m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
-	rightSide, rightStart, rightWidth := m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue, inputs.RunningJobs, inputs.FallbackAgents)
+	rightSide, rightStart, rightWidth := m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, path, sessionValue, inputs.RunningJobs, inputs.FallbackAgents)
 	if inputs.NextEscHint != "" && statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, inputs.NextEscHint) {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
@@ -631,7 +643,7 @@ func (m *Model) renderStatusBar() string {
 		)
 		leftWidth = lipgloss.Width(leftSide)
 		activityText, activityWidth = m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
-		rightSide, rightStart, rightWidth = m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue, inputs.RunningJobs, inputs.FallbackAgents)
+		rightSide, rightStart, rightWidth = m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, path, sessionValue, inputs.RunningJobs, inputs.FallbackAgents)
 	}
 	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
 	if activityWidth == 0 && leftWidth <= rightStart {
@@ -792,9 +804,9 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 	return activityText, activityWidth
 }
 
-func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidth, activityWidth int, pathValue, sessionValue string, runningJobs, fallbackAgents int) (string, int, int) {
+func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidth, activityWidth int, path statusBarPathForms, sessionValue string, runningJobs, fallbackAgents int) (string, int, int) {
 	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
-	rightKey := statusBarRightKey(effectiveWidth, leftWidth, activityWidth, pathValue, sessionValue, runningJobs, fallbackAgents)
+	rightKey := statusBarRightKey(effectiveWidth, leftWidth, activityWidth, path, sessionValue, runningJobs, fallbackAgents)
 	if !compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
 		rightKey += "|"
 	} else {
@@ -857,7 +869,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 		if m.width < statusBarSessionMinVisibleCols {
 			availableSession = 0
 		}
-		if pathValue != "" {
+		if path.value != "" {
 			if availableSession > statusBarSessionMinWidth+separatorWidth {
 				availableSession -= statusBarSessionMinWidth + separatorWidth
 			} else {
@@ -878,17 +890,14 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 		availablePath := availableRight
 		if m.statusSession.display != "" {
 			availablePath -= ansi.StringWidth(m.statusSession.display)
-			if pathValue != "" {
+			if path.value != "" {
 				availablePath -= separatorWidth
 			}
 		}
-		if pathValue != "" && availablePath > 0 {
-			displayPath := truncateMiddleDisplay(pathValue, availablePath)
-			if displayPath != "" {
-				pathText = StatusBarPathStyle.Render(displayPath)
-				m.statusPath.value = pathValue
-				m.statusPath.display = displayPath
-			}
+		if displayPath := path.display(availablePath); displayPath != "" {
+			pathText = StatusBarPathStyle.Render(displayPath)
+			m.statusPath.value = path.value
+			m.statusPath.display = displayPath
 		}
 	}
 
@@ -1045,16 +1054,20 @@ func statusBarActivityKey(mode string, availableCenter int, compactIdle bool, an
 	return b.String()
 }
 
-func statusBarRightKey(effectiveWidth, leftWidth, activityWidth int, pathValue, sessionValue string, runningJobs, fallbackAgents int) string {
+func statusBarRightKey(effectiveWidth, leftWidth, activityWidth int, path statusBarPathForms, sessionValue string, runningJobs, fallbackAgents int) string {
 	var b strings.Builder
-	b.Grow(len(pathValue) + len(sessionValue) + 64)
+	b.Grow(len(path.value) + len(path.repo) + len(path.checkout) + len(sessionValue) + 64)
 	b.WriteString(strconv.Itoa(effectiveWidth))
 	b.WriteByte('|')
 	b.WriteString(strconv.Itoa(leftWidth))
 	b.WriteByte('|')
 	b.WriteString(strconv.Itoa(activityWidth))
 	b.WriteByte('|')
-	b.WriteString(pathValue)
+	b.WriteString(path.value)
+	b.WriteByte('|')
+	b.WriteString(path.repo)
+	b.WriteByte('|')
+	b.WriteString(path.checkout)
 	b.WriteByte('|')
 	b.WriteString(sessionValue)
 	b.WriteByte('|')

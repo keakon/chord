@@ -137,6 +137,15 @@ func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 			effects.addFollowup(m.maybeTerminalNotifyCmd(evt.Message))
 		}
 		return m.applyUIEffects(effects)
+	case agent.WorkDirChangedEvent:
+		// Invalidation only, and consumed here rather than acted on: the
+		// batch entry reconciles the published snapshot — never this event's
+		// payload, which may describe a release the agent has already
+		// superseded and would mix two releases if rendered — and requests the
+		// git refresh when that reconcile changed the checkout. Re-applying
+		// the snapshot here would read the same state the reconcile just
+		// applied, so its change check could only be false.
+		return m.applyUIEffects(effects)
 	}
 
 	if handled, sub := m.handleStreamingAgentEvent(msg.event); handled {

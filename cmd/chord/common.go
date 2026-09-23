@@ -680,7 +680,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	llmClient.SetSessionID(filepath.Base(ac.SessionDir))
 	ac.MainAgent.SetInitialYoloMode(flagYolo)
 	worktreeBranchPrefix := resolveWorktreeBranchPrefix(cfg)
-	ac.MainAgent.SetPathRootsResolver(newPathRootsResolver(ac.Ctx, contentRoot, ac.PathLocator, cfg.Worktree.Root))
+	pathRootsResolver, invalidatePathRoots := newPathRootsResolver(ac.Ctx, contentRoot, ac.PathLocator, cfg.Worktree.Root)
+	ac.MainAgent.SetPathRootsResolver(pathRootsResolver)
+	ac.MainAgent.SetPathRootsInvalidator(invalidatePathRoots)
 	ac.MainAgent.SetWorktreeRuntime(agent.WorktreeRuntime{
 		PathLocator:  ac.PathLocator,
 		RepoRoot:     contentRoot,

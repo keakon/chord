@@ -110,6 +110,7 @@ type headlessState struct {
 	// session_switched push; the cached value alone never counts as the
 	// gateway having seen the new session.
 	sessionID string
+	workDir   agent.WorkDirSnapshot
 	// seq is a monotonic version counter for emitted state. Genesis is 1, so a
 	// status_response copied before any push still has a nonzero seq on the
 	// wire (uint64 0 would be omitted by json omitempty and look unversioned).
@@ -274,6 +275,7 @@ var headlessEventTypes = map[string]bool{
 	"question_resolved":  true,
 	"role_change":        true,
 	"notification":       true,
+	"workdir_changed":    true,
 	"handoff_request":    true,
 	"handoff_cancelled":  true,
 	"error":              true,
@@ -663,6 +665,16 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				"session_id": sessionID,
 			}})
 		}
+	case agent.WorkDirChangedEvent:
+		snapshot := headlessWorkDirSnapshot(backend)
+		if snapshot == state.workDir {
+			break
+		}
+		touch()
+		state.workDir = snapshot
+		if state.isSubscribed("workdir_changed") {
+			out = append(out, &headlessEnvelope{Type: "workdir_changed", Payload: headlessWorkDirPayload(snapshot)})
+		}
 	case agent.BackgroundResultAppendedEvent:
 		// A finished background job's result is durable now, and this event is
 		// the only delivery channel for the JOB RESULT card: background output
@@ -985,11 +997,12 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	go out.run()
 
 	sessionID := filepath.Base(ac.SessionDir)
-	state := &headlessState{sessionID: sessionID, updatedAt: time.Now()}
+	state := &headlessState{sessionID: sessionID, workDir: headlessWorkDirSnapshot(rt.Backend()), updatedAt: time.Now()}
 
 	// Emit a one-time ready marker so gateways can detect successful init.
 	readyPayload := map[string]any{
 		"session_id": sessionID,
+		"workdir":    headlessWorkDirPayload(state.workDir),
 	}
 	if len(ac.StartupSkippedLockedSessions) > 0 {
 		readyPayload["skipped_locked_sessions"] = append([]string(nil), ac.StartupSkippedLockedSessions...)
@@ -1181,6 +1194,28 @@ type headlessBackend interface {
 	// SupersedeQuestion closes a still-pending question because a newer user
 	// message was accepted. It returns whether the request was still pending.
 	SupersedeQuestion(requestID string) bool
+}
+
+type headlessWorkDirBackend interface {
+	WorkDirSnapshot() agent.WorkDirSnapshot
+}
+
+func headlessWorkDirSnapshot(backend headlessBackend) agent.WorkDirSnapshot {
+	if backend == nil {
+		return agent.WorkDirSnapshot{}
+	}
+	if provider, ok := backend.(headlessWorkDirBackend); ok {
+		return provider.WorkDirSnapshot()
+	}
+	return agent.WorkDirSnapshot{}
+}
+
+func headlessWorkDirPayload(snapshot agent.WorkDirSnapshot) map[string]any {
+	return map[string]any{
+		"path":        snapshot.Path,
+		"worktree_id": snapshot.WorktreeID,
+		"generation":  snapshot.Generation,
+	}
 }
 
 type headlessHandoffBackend interface {
@@ -1442,7 +1477,13 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		// under the same lock as seq so a concurrent RoleChangedEvent cannot
 		// bind an older role to a newer version.
 		headlessCurrentRole(backend, state)
+		workDirSnapshot := headlessWorkDirSnapshot(backend)
 		state.mu.Lock()
+		workDirChanged := workDirSnapshot != state.workDir
+		if workDirChanged {
+			state.workDir = workDirSnapshot
+			state.updatedAt = time.Now()
+		}
 		currentRole := state.role
 		sid := state.sessionID
 		busy := state.busy
@@ -1454,7 +1495,8 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		lastError := state.lastError
 		lastOutcome := state.lastOutcome
 		updatedAt := state.updatedAt
-		seq := state.stampHeadlessSeq(false)
+		workDir := state.workDir
+		seq := state.stampHeadlessSeq(workDirChanged)
 		state.mu.Unlock()
 		out.emit(headlessEnvelope{
 			Type: "status_response",
@@ -1471,6 +1513,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 				"last_outcome":     lastOutcome,
 				"current_role":     currentRole,
 				"updated_at":       updatedAt.Format(time.RFC3339),
+				"workdir":          headlessWorkDirPayload(workDir),
 			},
 		})
 

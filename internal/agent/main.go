@@ -355,10 +355,11 @@ type MainAgent struct {
 	// caches the last immutable snapshot so tool goroutines read it without
 	// blocking. A nil resolver or empty roots degrade path rules to the
 	// cwd-only behavior.
-	pathRootsResolver PathRootsResolver
-	pathRoots         atomic.Pointer[pathRootsSnapshot]
-	lastPlanPath      string
-	pendingHandoff    *HandoffResult // deferred Handoff action; processed after all sibling tools finish
+	pathRootsResolver    PathRootsResolver
+	pathRootsInvalidator func()
+	pathRoots            atomic.Pointer[pathRootsSnapshot]
+	lastPlanPath         string
+	pendingHandoff       *HandoffResult // deferred Handoff action; processed after all sibling tools finish
 	// handoffWaitActive mirrors "pendingHandoff != nil" for mailbox delivery
 	// paths that also run off the event loop (manual delivery, restore). While a
 	// handoff user wait is open, automatic mailbox delivery is held instead of

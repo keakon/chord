@@ -30,6 +30,16 @@ func (a *MainAgent) SetPathRootsResolver(fn PathRootsResolver) {
 	a.pathRootsResolver = fn
 }
 
+// SetPathRootsInvalidator installs the mutation hook for the resolver cache.
+// Worktree-changing operations call it before refreshing their next scope;
+// ordinary turns can reuse the last topology snapshot.
+func (a *MainAgent) SetPathRootsInvalidator(fn func()) {
+	if a == nil {
+		return
+	}
+	a.pathRootsInvalidator = fn
+}
+
 // refreshPathRoots re-resolves the checkout snapshot for the turn about to
 // start, so a worktree created since the previous turn is already in scope.
 func (a *MainAgent) refreshPathRoots() {
@@ -38,6 +48,16 @@ func (a *MainAgent) refreshPathRoots() {
 	}
 	roots, containers := a.pathRootsResolver()
 	a.pathRoots.Store(&pathRootsSnapshot{roots: roots, containers: containers})
+}
+
+func (a *MainAgent) invalidatePathRoots() {
+	if a == nil {
+		return
+	}
+	if a.pathRootsInvalidator != nil {
+		a.pathRootsInvalidator()
+	}
+	a.refreshPathRoots()
 }
 
 // effectivePathScope returns the path evaluation scope for the agent's next

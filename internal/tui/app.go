@@ -427,6 +427,8 @@ type Model struct {
 	runtimeCacheHandle       runtimeCacheSessionHandle
 	runtimeCacheSession      string
 	workingDir               string
+	workingDirID             string
+	workingDirGeneration     uint64
 	homeDir                  string
 	instanceID               string
 	statusPath               statusPathState
@@ -528,6 +530,18 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 	z := newZoneManager()
 	wd, _ := os.Getwd()
 	homeDir, _ := os.UserHomeDir()
+	// Seed the checkout from the agent when it already has one, so a session
+	// that starts in a worktree renders its identity on the first frame and the
+	// first event batch does not look like a change.
+	workDirSnap := agent.WorkDirSnapshot{}
+	if a != nil {
+		workDirSnap = a.WorkDirSnapshot()
+	}
+	workDirSnap.Path = strings.TrimSpace(workDirSnap.Path)
+	workDirSnap.WorktreeID = strings.TrimSpace(workDirSnap.WorktreeID)
+	if workDirSnap.Path == "" {
+		workDirSnap.Path = wd
+	}
 	caps := detectTerminalImageCapabilitiesFromProcessEnv()
 	setCurrentTerminalImageCapabilities(caps)
 	if width <= 0 {
@@ -572,7 +586,9 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		selEndBlockID:   -1,
 		statusSession:   statusBarCopyRegionState{},
 
-		workingDir:                   wd,
+		workingDir:                   workDirSnap.Path,
+		workingDirID:                 workDirSnap.WorktreeID,
+		workingDirGeneration:         workDirSnap.Generation,
 		homeDir:                      homeDir,
 		imageCaps:                    caps,
 		kittyImageCache:              make(map[int]struct{}),
@@ -592,8 +608,8 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		// renderCacheState
 		statusBarAgentSnapshotDirty: true,
 	}
-	m.viewport.SetWorkingDir(wd)
-	m.sidebar.SetWorkingDir(wd)
+	m.viewport.SetWorkingDir(workDirSnap.Path)
+	m.sidebar.SetWorkingDir(workDirSnap.Path)
 	m.viewport.SetErrorDetailsHint(errorDetailsHint(m.keyMap))
 	if a != nil {
 		pending, sessionID := a.StartupResumeStatus()
@@ -624,29 +640,67 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 	return m
 }
 
+// workDirSnapshotFromAgent reads the agent's checkout in one atomic step. The
+// model keeps its own copy of the release, so an invalidation that races a
+// newer switch still renders whichever state the agent has already published.
+func (m *Model) workDirSnapshotFromAgent() agent.WorkDirSnapshot {
+	snap := agent.WorkDirSnapshot{}
+	if m.agent != nil {
+		snap = m.agent.WorkDirSnapshot()
+	}
+	snap.Path = strings.TrimSpace(snap.Path)
+	snap.WorktreeID = strings.TrimSpace(snap.WorktreeID)
+	if snap.Path == "" {
+		snap.Path = m.workingDir
+	}
+	return snap
+}
+
+// applyWorkDirSnapshot stores the checkout state the UI renders and pushes the
+// working directory into both views. They are updated on every call, not only
+// on change: a view constructed after the last change still needs it. It
+// reports whether anything derived from the checkout changed — a switch between
+// two checkouts that share a path (a session started in a worktree that then
+// leaves it falls back to that same path with the identity cleared) counts as a
+// change because the identity did.
+func (m *Model) applyWorkDirSnapshot(snap agent.WorkDirSnapshot) bool {
+	changed := snap.Path != m.workingDir || snap.WorktreeID != m.workingDirID
+	m.workingDir = snap.Path
+	m.workingDirID = snap.WorktreeID
+	m.workingDirGeneration = snap.Generation
+	if m.viewport != nil {
+		m.viewport.SetWorkingDir(snap.Path)
+	}
+	m.sidebar.SetWorkingDir(snap.Path)
+	if !changed {
+		return false
+	}
+	m.invalidateStatusBarAgentSnapshot()
+	m.invalidateDrawCaches()
+	return true
+}
+
+// reconcileWorkDirSnapshot picks up a checkout change whose notification never
+// arrived: the invalidation is delivered best-effort, so every batch of agent
+// events compares the published state before rendering it. It reports whether
+// the checkout changed, which is also the signal that the git status of the
+// previous checkout is now stale.
+func (m *Model) reconcileWorkDirSnapshot() bool {
+	if m == nil || m.agent == nil {
+		return false
+	}
+	snap := m.workDirSnapshotFromAgent()
+	if snap.Generation == m.workingDirGeneration && snap.Path == m.workingDir && snap.WorktreeID == m.workingDirID {
+		return false
+	}
+	return m.applyWorkDirSnapshot(snap)
+}
+
 func (m *Model) syncWorkingDirFromAgent() {
 	if m == nil {
 		return
 	}
-	wd := strings.TrimSpace(m.workingDir)
-	if m.agent != nil {
-		if workDir := strings.TrimSpace(m.agent.WorkDir()); workDir != "" {
-			wd = workDir
-		}
-	}
-	// The working dir is pushed to both views on every sync, not only when it
-	// changes: a view constructed after the last change still needs it.
-	changed := wd != m.workingDir
-	m.workingDir = wd
-	if m.viewport != nil {
-		m.viewport.SetWorkingDir(wd)
-	}
-	m.sidebar.SetWorkingDir(wd)
-	if !changed {
-		return
-	}
-	m.invalidateStatusBarAgentSnapshot()
-	m.invalidateDrawCaches()
+	m.applyWorkDirSnapshot(m.workDirSnapshotFromAgent())
 }
 
 func (m *Model) SetTheme(t Theme) {
@@ -1004,6 +1058,14 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		var cmds []tea.Cmd
 		needKeyPoolTick := false
 		jobStateMaybeChanged := false
+		// Notifications are best-effort: pick up a checkout change whose event
+		// was dropped before rendering this batch. The refresh belongs here,
+		// next to the change: the per-event branch below reads the same
+		// snapshot this reconcile already applied, so its own change check is
+		// false by then and cannot be what requests the refresh.
+		if m.reconcileWorkDirSnapshot() {
+			cmds = append(cmds, m.requestGitStatusRefresh())
+		}
 		for _, item := range msg {
 			cmds = append(cmds, m.handleAgentEvent(item))
 			if m.displayState == stateBackground {

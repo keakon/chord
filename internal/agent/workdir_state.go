@@ -113,6 +113,50 @@ func (a *MainAgent) SetWorktreeRuntime(rt WorktreeRuntime) {
 	a.worktreeRT = rt
 }
 
+// publishWorkDirChange tells surfaces outside this agent that the active
+// checkout changed. The event is an invalidation carrying the new generation:
+// consumers read the whole state themselves, so a notification that races a
+// later switch still converges on the newest release. A store that did not
+// change the binding (re-entering the directory already active, a session in
+// the main checkout) sends nothing.
+func (a *MainAgent) publishWorkDirChange(prev, next WorkDirState) {
+	if a == nil || prev == next {
+		return
+	}
+	a.emitToTUI(WorkDirChangedEvent{Generation: next.Generation})
+}
+
+// WorkDirSnapshot reports the display-relevant view of this agent's active
+// checkout in one read: the effective working directory plus the worktree
+// identity and generation describing it. Callers that compare or render the
+// checkout must use this instead of combining WorkDir() with a separate
+// identity read, because two reads can straddle a switch.
+func (a *MainAgent) WorkDirSnapshot() WorkDirSnapshot {
+	if a == nil {
+		return WorkDirSnapshot{}
+	}
+	// Single atomic binding read: the path fallback (cachedWorkDir,
+	// contentRoot) is derived from the same loaded state while holding
+	// promptMetaMu, so a concurrent switch cannot splice the path of one
+	// release with the identity of another.
+	a.promptMetaMu.RLock()
+	defer a.promptMetaMu.RUnlock()
+	state := a.workDirState.load()
+	path := strings.TrimSpace(state.Path)
+	if path == "" {
+		if dir := strings.TrimSpace(a.cachedWorkDir); dir != "" {
+			path = dir
+		} else {
+			path = a.contentRoot
+		}
+	}
+	return WorkDirSnapshot{
+		Path:       path,
+		WorktreeID: state.WorktreeID,
+		Generation: state.Generation,
+	}
+}
+
 // restoredPlainWorkDir returns the canonical recorded directory when it is an
 // existing directory inside this repository's main checkout. A worker's
 // recorded directory is usually its active checkout; a plain directory (the
@@ -182,6 +226,12 @@ type workDirActor struct {
 	agentID     string
 	kind        worktree.OwnerKind
 	afterSwitch func(prev, next WorkDirState) []string
+	// publish notifies surfaces outside this agent that the binding changed. It
+	// runs immediately after the store and before the post-switch refresh: the
+	// switch is committed at that point, so a failure in an auxiliary refresh
+	// must never leave a listener waiting for it. Sub-agents leave it nil —
+	// their checkout is not a TUI surface.
+	publish func(prev, next WorkDirState)
 	// removalHolders reports live work still anchored to a worktree (another
 	// agent bound to it, a background command running there). nil means "no way
 	// to tell"; guardRemoval treats an unknown answer conservatively by
@@ -217,6 +267,7 @@ func (a *MainAgent) worktreeActor() workDirActor {
 		agentID:        a.instanceID,
 		kind:           worktree.OwnerKindMain,
 		afterSwitch:    a.afterWorkDirSwitch,
+		publish:        a.publishWorkDirChange,
 		removalHolders: a.worktreeRemovalHolders,
 	}
 }
@@ -232,7 +283,7 @@ func (s *SubAgent) worktreeActor() workDirActor {
 		act.deps = s.parent.worktreeRT
 		act.removalHolders = s.parent.worktreeRemovalHolders
 		act.afterSwitch = func(WorkDirState, WorkDirState) []string {
-			s.parent.refreshPathRoots()
+			s.parent.invalidatePathRoots()
 			// AGENTS.md is project behavior tied to the checkout, so the
 			// worker reloads it from the checkout just entered (content root
 			// falls back for gitignored instructions). Pinned control plane --
@@ -277,7 +328,7 @@ func (a *MainAgent) afterWorkDirSwitch(prev, next WorkDirState) []string {
 // verbatim in the session timeline, so an automatic adoption must not reuse a
 // reason that names a user-requested switch.
 func (a *MainAgent) afterWorkDirSwitchWithReason(prev, next WorkDirState, reason string) []string {
-	a.refreshPathRoots()
+	a.invalidatePathRoots()
 	a.ReloadAgentsMD()
 	// The injected git status and virtualenv path describe the working
 	// directory, so they follow the switch for the same reason AGENTS.md does.
@@ -377,7 +428,9 @@ func (a *MainAgent) RestoreWorkDirBinding(ctx context.Context, state WorkDirStat
 			state.BaseSHA = head
 		}
 	}
+	prev := a.workDirState.load()
 	a.workDirState.store(state)
+	a.publishWorkDirChange(prev, state)
 	// Installing the binding is a publication like any other: without this a
 	// session that starts in a worktree would inject the startup checkout's
 	// branch for its whole life.
@@ -474,6 +527,7 @@ func (a *MainAgent) adoptResumedSessionCheckout(ctx context.Context, state WorkD
 		}
 	}
 	a.workDirState.store(next)
+	a.publishWorkDirChange(prev, next)
 	if warnings := a.afterWorkDirSwitchWithReason(prev, next, recovery.WorktreeSwitchResume); len(warnings) > 0 {
 		log.Warnf("resume worktree switch warnings session=%v warnings=%v", filepath.Base(a.sessionDir), warnings)
 	}
@@ -562,6 +616,9 @@ func (act workDirActor) enter(ctx context.Context, req tools.WorktreeEnterReques
 		Generation: prev.Generation + 1,
 	}
 	act.binding.store(next)
+	if act.publish != nil {
+		act.publish(prev, next)
+	}
 	if act.afterSwitch != nil {
 		res.Warnings = append(res.Warnings, act.afterSwitch(prev, next)...)
 	}
@@ -608,6 +665,9 @@ func (act workDirActor) exit(ctx context.Context, req tools.WorktreeExitRequest)
 	if active {
 		next := WorkDirState{Generation: prev.Generation + 1}
 		act.binding.store(next)
+		if act.publish != nil {
+			act.publish(prev, next)
+		}
 		res.WorkDir = act.currentDir()
 		if act.afterSwitch != nil {
 			res.Warnings = append(res.Warnings, act.afterSwitch(prev, next)...)

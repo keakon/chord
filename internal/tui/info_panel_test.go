@@ -1322,11 +1322,12 @@ func TestInfoPanelGitBlockCollapsedKeepsCountsWithLongBranch(t *testing.T) {
 
 func TestInfoPanelGitBlockExpanded(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
-	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 2, Behind: 1, ChangedFiles: 3, StagedFiles: 1, Stashes: 2}
+	m.workingDir = "/state/worktrees/repo-abc/fix-ui"
+	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Dir: "/state/worktrees/repo-abc/fix-ui", Ahead: 2, Behind: 1, ChangedFiles: 3, StagedFiles: 1, Stashes: 2}
 	m.toggleInfoPanelSection(infoPanelSectionGit)
 	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▼ GIT")
 	joined := strings.Join(section, "\n")
-	for _, want := range []string{"Branch: main", "Worktree: fix-ui", "Changes: 3 files", "Staged: 1 files", "Stash: 2 entries", "Sync: ↑2 ↓1"} {
+	for _, want := range []string{"Branch: main", "Worktree: fix-ui", "Worktree Path: /state/worktrees", "Changes: 3 files", "Staged: 1 files", "Stash: 2 entries", "Sync: ↑2 ↓1"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expanded git section missing %q in:\n%s", want, joined)
 		}
@@ -1355,7 +1356,7 @@ func TestInfoPanelGitBlockExpandedHidesZeroNumericRows(t *testing.T) {
 			t.Fatalf("expanded git section missing %q in:\n%s", want, joined)
 		}
 	}
-	for _, hidden := range []string{"Staged:", "Stash:", "Sync:", "0 files", "0 entries", "↑0", "↓0"} {
+	for _, hidden := range []string{"Staged:", "Stash:", "Sync:", "Worktree Path:", "0 files", "0 entries", "↑0", "↓0"} {
 		if strings.Contains(joined, hidden) {
 			t.Fatalf("expanded git section should hide zero value %q in:\n%s", hidden, joined)
 		}

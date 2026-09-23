@@ -4332,6 +4332,8 @@ type sessionControlAgent struct {
 	switchRoleErr           error
 	contentRoot             string
 	workDir                 string
+	workDirID               string
+	workDirGeneration       uint64
 	focused                 string
 	providerModelRef        string
 	providerModelRefByFocus map[string]string
@@ -4579,6 +4581,9 @@ func (s *sessionControlAgent) WorkDir() string {
 		return s.workDir
 	}
 	return s.contentRoot
+}
+func (s *sessionControlAgent) WorkDirSnapshot() agent.WorkDirSnapshot {
+	return agent.WorkDirSnapshot{Path: s.WorkDir(), WorktreeID: s.workDirID, Generation: s.workDirGeneration}
 }
 func (s *sessionControlAgent) CurrentRole() string               { return s.currentRole }
 func (s *sessionControlAgent) LoopKeepsMainBusy() bool           { return false }
