@@ -48,6 +48,26 @@ lsp: deny
 	}
 }
 
+// TestBuildSystemPrompt_StatesLSPCoverageIsNotGuaranteed guards the prompt-side
+// answer to a language server that never starts: the model must be told that an
+// absent diagnostics block means "nothing was reported", not "the file is
+// verified", because startup failures deliberately stay out of tool output.
+func TestBuildSystemPrompt_StatesLSPCoverageIsNotGuaranteed(t *testing.T) {
+	reg := tools.NewRegistry()
+	reg.Register(tools.WriteTool{})
+
+	a := &MainAgent{tools: reg, globalConfig: &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}}
+	got := a.buildSystemPrompt()
+	for _, want := range []string{
+		"Coverage is not guaranteed",
+		"not that the file is verified",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("buildSystemPrompt() must state that LSP coverage is not guaranteed (%q missing): %q", want, got)
+		}
+	}
+}
+
 func TestHasEnabledLSPServers_ProjectOverrideCanDisableGlobalServer(t *testing.T) {
 	globalCfg := &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
 	projectCfg := &config.Config{LSP: config.LSPConfig{"gopls": {Disabled: true}}}

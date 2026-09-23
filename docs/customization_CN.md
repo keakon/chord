@@ -202,6 +202,25 @@ lsp:
 
 需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 会从 LSP workspace root 向上寻找最近的有效虚拟环境，不越过项目根；类 Unix 查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`，Windows 查找对应的 `Scripts\python.exe`。同一 workspace root 的发现结果会随 LSP client 缓存，避免重复探测。
 
+TypeScript 服务器还要求能跑起一个 TypeScript：`typescript-language-server` 会加载工作区 `node_modules` 里的 `lib/tsserver.js`，工作区里没有才退回全局安装。两处都取不到时，服务器在 `initialize` 阶段直接失败，Chord 把该 server 标为启动失败（信息面板红点），原因写进日志。给它一个 TypeScript 有两条路：
+
+- 装项目依赖（`pnpm install`、`npm install` 等），让服务器用工作区自己的 TypeScript，诊断和项目实际编译用的版本一致。
+- 或者用 `init_options.tsserver.fallbackPath` 指向另一个安装；它只在工作区没有可用 TypeScript 时生效（`tsserver.path` 则始终优先）：
+
+```yaml
+lsp:
+  typescript:
+    command: typescript-language-server
+    args: ["--stdio"]
+    file_types: [".ts", ".tsx", ".js", ".jsx"]
+    init_options:
+      tsserver:
+        # 指向仍提供 tsserver.js 的安装，例如 .../lib/tsserver.js
+        fallbackPath: /path/to/typescript/lib/tsserver.js
+```
+
+TypeScript 7 不再随包提供 `lib/tsserver.js`（语言服务并入了原生编译器），锁定 TypeScript 7 的工作区要把 `fallbackPath` 指向仍提供该文件的版本（6.x 及更早），代价是诊断来自旧版编译器。每个 TypeScript 服务器实际加载的版本、以及服务器对此发出的警告，Chord 都会写进日志。
+
 `file_types` 决定语言服务器处理哪些文件，`root_markers` 决定工作区根目录。省略 `root_markers` 时，TypeScript/JavaScript 使用 `tsconfig.json`、`jsconfig.json` 和 `package.json`，Pyright 使用 `pyrightconfig.json`、`pyproject.toml` 和 `requirements.txt`，两类服务器不会把另一种语言的标记当作项目边界。其他服务器回退到 Chord 项目根；显式配置 `root_markers` 会覆盖默认标记。
 
 Chord 根据配置中的服务器名或可执行文件名识别类型：`typescript` / `typescript-language-server`、`pyright` / `pyright-langserver`、`basedpyright` / `basedpyright-langserver`，也支持 Windows 可执行文件后缀。使用自定义包装脚本时，保留这些服务器名，或显式设置 `root_markers`。目录查找始终限制在项目根内。

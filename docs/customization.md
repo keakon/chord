@@ -235,6 +235,25 @@ This edit-time LSP feedback is incremental and does not replace a whole-reposito
 
 Availability depends on whether the corresponding language server is installed locally. Chord automatically discovers nested TypeScript/JavaScript projects and Python environments without per-project configuration. For Pyright, when no Python interpreter is configured, it searches from the LSP workspace root upward for the nearest valid `.venv`, `venv`, or `env`, without crossing the Chord project root, and caches the resulting LSP client. It probes `.venv/bin/python`, `venv/bin/python`, and `env/bin/python` on Unix-like systems; Windows uses the corresponding `Scripts/python.exe` paths.
 
+TypeScript servers additionally need a TypeScript installation they can run: `typescript-language-server` loads `lib/tsserver.js` from the workspace's `node_modules` and falls back to a global installation only when the workspace has none. When neither provides it, the server fails at `initialize`; Chord reports that server as failed (red dot in the info panel) and writes the reason to the log. Two ways to give it one:
+
+- Install the project's dependencies (`pnpm install`, `npm install`, ...) so the server uses the workspace's own TypeScript, keeping diagnostics aligned with the compiler the project builds with.
+- Or point the server at another installation with `init_options.tsserver.fallbackPath`, which applies only when the workspace has no usable TypeScript (`tsserver.path` always wins instead):
+
+```yaml
+lsp:
+  typescript:
+    command: typescript-language-server
+    args: ["--stdio"]
+    file_types: [".ts", ".tsx", ".js", ".jsx"]
+    init_options:
+      tsserver:
+        # .../lib/tsserver.js of an installation that ships tsserver.js
+        fallbackPath: /path/to/typescript/lib/tsserver.js
+```
+
+TypeScript 7 ships without `lib/tsserver.js` (the language service moved into the native compiler), so a workspace pinned to TypeScript 7 needs a `fallbackPath` pointing at a release that still provides it (6.x or earlier), and its diagnostics then come from that older compiler. Chord logs the TypeScript version each TypeScript server loaded, along with any warning the server reports about it.
+
 `file_types` controls whether a language server handles a file. Use `root_markers` to override how Chord selects that server's workspace root. TypeScript/JavaScript and Pyright use built-in markers when none are configured; other servers fall back to the Chord project root.
 
 For a matching file, Chord discovers the language-server workspace root as the nearest ancestor directory (at or below the project root) that contains any of the configured `root_markers`; if none matches, it falls back to the project root. The discovery is per file, so servers may be rooted at different directories and the same server name can run one instance per root. This is what lets nested frontend packages (for example a `frontend/` under a repository root that is otherwise a backend project) get a language server rooted at the package, where its `node_modules`, `tsconfig.json`, and other package-local configuration live. A single server name keeps at most 8 live instances; browsing a monorepo with more marker directories than that shuts down the least recently used one, which restarts on the next file read under its root.

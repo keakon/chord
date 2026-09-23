@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/keakon/golog/log"
 
@@ -70,6 +71,23 @@ type Client struct {
 
 	// onDiagnostics is called when diagnostics are received (manager sets it to broadcast + notify waiters).
 	onDiagnostics func(uri string, serverID string, diags []protocol.Diagnostic, version int32)
+
+	// noticeMu guards noticesSeen, the dedup set for server notices. Handlers
+	// run on the transport's reader goroutine, so the set needs its own lock.
+	noticeMu    sync.Mutex
+	noticesSeen map[string]struct{}
+}
+
+// typescriptVersionParams is the payload of the non-standard $/typescriptVersion
+// notification typescript-language-server sends after initialized. It names the
+// TypeScript the server actually loaded and where that choice came from
+// (workspace / user-setting / bundled), which is the only way to tell that
+// diagnostics come from a compiler other than the project's own. A path set
+// through init_options.tsserver.fallbackPath reports user-setting too: the
+// server resolves it through the same provider as tsserver.path.
+type typescriptVersionParams struct {
+	Version string `json:"version"`
+	Source  string `json:"source"`
 }
 
 func newClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd, projectRoot string, debug bool) (*Client, error) {
@@ -147,9 +165,101 @@ func (c *Client) registerHandlers() {
 			c.onDiagnostics(string(par.URI), c.name, par.Diagnostics, version)
 		}
 	})
+	// Server notices describe the server rather than a file: which TypeScript it
+	// loaded, why it cannot serve this workspace, or a re-handshake warning.
+	// Without handlers they were dropped silently, so "the server is serving this
+	// workspace" and "the server refuses to work here" looked the same once the
+	// server had answered initialize.
+	c.client.RegisterNotificationHandler("window/showMessage", func(_ context.Context, _ string, params json.RawMessage) {
+		var par protocol.ShowMessageParams
+		if err := json.Unmarshal(params, &par); err != nil {
+			log.Debugf("lsp: unmarshal showMessage error=%v", err)
+			return
+		}
+		c.logServerNotice("showMessage", int(par.Type), par.Message)
+	})
+	c.client.RegisterNotificationHandler("window/logMessage", func(_ context.Context, _ string, params json.RawMessage) {
+		var par protocol.LogMessageParams
+		if err := json.Unmarshal(params, &par); err != nil {
+			log.Debugf("lsp: unmarshal logMessage error=%v", err)
+			return
+		}
+		c.logServerNotice("logMessage", int(par.Type), par.Message)
+	})
+	c.client.RegisterNotificationHandler("$/typescriptVersion", func(_ context.Context, _ string, params json.RawMessage) {
+		var par typescriptVersionParams
+		if err := json.Unmarshal(params, &par); err != nil {
+			log.Debugf("lsp: unmarshal typescriptVersion error=%v", err)
+			return
+		}
+		notice := strings.TrimSpace(par.Version)
+		if source := strings.TrimSpace(par.Source); source != "" {
+			notice += " (" + source + ")"
+		}
+		c.logServerNotice("typescriptVersion", int(protocol.Info), notice)
+	})
 	c.client.RegisterHandler("workspace/applyEdit", handleApplyEdit)
 	c.client.RegisterHandler("workspace/configuration", c.handleWorkspaceConfiguration)
 	c.client.RegisterHandler("client/registerCapability", handleRegisterCapability)
+}
+
+// noticeLogMaxChars bounds one server notice so a server that dumps a document
+// or a stack trace through window/logMessage cannot flood the log. Truncation
+// backs up to a rune boundary so the log never records half a character.
+const noticeLogMaxChars = 600
+
+// noticeDedupMaxEntries bounds the per-client dedup set. A verbose server can
+// keep emitting distinct notices for the life of the process, so once the set
+// is full it is reset instead of growing without limit.
+const noticeDedupMaxEntries = 256
+
+// logServerNotice records one server notice in Chord's log. Severity keeps the
+// server's own ranking: errors and warnings reach the log at their level while
+// routine chatter stays at debug.
+//
+// Repeated identical notices are dropped per client. Servers re-send the same
+// warning on every re-handshake (typescript-language-server repeats its version
+// warning), and a verbose server can emit thousands of identical log lines; in
+// both cases the second line adds no information.
+func (c *Client) logServerNotice(kind string, severity int, message string) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+	if len(message) > noticeLogMaxChars {
+		cut := noticeLogMaxChars
+		for cut > 0 && !utf8.RuneStart(message[cut]) {
+			cut--
+		}
+		message = message[:cut] + "..."
+	}
+
+	c.noticeMu.Lock()
+	if c.noticesSeen == nil {
+		c.noticesSeen = make(map[string]struct{})
+	}
+	key := fmt.Sprintf("%s\x00%d\x00%s", kind, severity, message)
+	if _, seen := c.noticesSeen[key]; seen {
+		c.noticeMu.Unlock()
+		return
+	}
+	if len(c.noticesSeen) >= noticeDedupMaxEntries {
+		clear(c.noticesSeen)
+	}
+	c.noticesSeen[key] = struct{}{}
+	c.noticeMu.Unlock()
+
+	prefix := fmt.Sprintf("lsp: server notice name=%v root=%v kind=%v severity=%v message=%v", c.name, c.cwd, kind, severity, message)
+	switch severity {
+	case int(protocol.Error):
+		log.Error(prefix)
+	case int(protocol.Warning):
+		log.Warn(prefix)
+	case int(protocol.Info):
+		log.Info(prefix)
+	default:
+		log.Debug(prefix)
+	}
 }
 
 func (c *Client) handleWorkspaceConfiguration(_ context.Context, _ string, params json.RawMessage) (any, error) {

@@ -59,6 +59,7 @@
 - 继续会话时会切回它当时所在的 checkout：`chord resume <id>`、`chord --resume <id>` 与 `chord --continue` 都会进入会话记录的 worktree，继续时落在 worktree 里也会把它记下来。那个 worktree 已不存在时先给出提示：`chord resume` 回退到主工作区，`--resume` 与 `--continue` 则在启动 chord 时所在的 checkout 里继续。会话选择器会在该会话那一行标出它，不同 checkout 的会话一眼可辨。runtime cache 仍按 checkout 分开。
 - `Available Skills` 列表对技能描述的展示上限从 157 字节提高到 1024 字符，中文描述尤其明显：写在旧上限之后的触发条件现在能到达模型，不再被静默丢掉。列表的整体预算同步提高到 8192 字节，32 条上限不变。
 - 压缩之后或中途恢复之后，续跑提示带上的是运行期掌管的那些任务状态，而不只是摘要模型自己写的内容：最新用户请求（含被 Chord 拒绝的完成）、todo 快照、运行中的后台任务与子 agent、以及结果从未落盘的工具调用都会随请求回来，其中这类调用会明确列为「重试前先核对现状」。续跑注入的文件清单在每次请求时从磁盘重新读取、标注为本次读取，并标出与 checkpoint 不一致的条目。
+- TypeScript 语言服务器自己的消息现在会进日志：Chord 记录 `window/showMessage` 警告，以及 `$/typescriptVersion` 通知里服务器实际加载的 TypeScript 版本和来源。这两类通知以前没有 handler，被 transport 直接丢弃、连日志都不留，于是「服务器退回到另一个编译器」「服务器完全拒绝这个工作区」和「用的就是项目自己的 TypeScript」看起来一模一样。工作区没装依赖、以及锁定 TypeScript 7（不再提供 `lib/tsserver.js`）时都会遇到这种情况；定制文档现在给出两条出路——装工作区依赖，或用 `init_options.tsserver.fallbackPath` 指向仍提供该文件的版本。模型侧的 LSP 指引也写明：工具结果里没有 diagnostics 块，只代表没有诊断被上报，不代表文件已验证。
 
 ### 修复
 

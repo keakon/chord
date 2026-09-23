@@ -304,7 +304,8 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 	}
 	return strings.TrimSpace(`## LSP diagnostic follow-up
 - When LSP diagnostics are available after your ` + toolRefs + ` changes, treat new blocking diagnostics in files you directly modified as regressions and fix them before finishing unless the user explicitly asked for a partial/WIP result
-- If your current-session edits introduce non-blocking diagnostics in files you directly modified, prefer low-risk cleanup when it is small and clear; do not expand scope to unrelated historical diagnostics in untouched files unless they directly block the requested task`)
+- If your current-session edits introduce non-blocking diagnostics in files you directly modified, prefer low-risk cleanup when it is small and clear; do not expand scope to unrelated historical diagnostics in untouched files unless they directly block the requested task
+- Coverage is not guaranteed: a language server may be missing, fail to start, refuse the workspace (for example a toolchain the server cannot load), or not be registered for a file type. A tool result without a diagnostics block then means no diagnostics were reported, not that the file is verified: use the project's compiler, linter, or tests when a check matters`)
 }
 
 func (a *MainAgent) shouldInjectLSPDiagnosticPrompt() bool {
