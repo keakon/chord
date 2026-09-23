@@ -341,6 +341,7 @@ const (
 	requestReductionLongLog     requestReductionClass = "long_log"
 	requestReductionShellOK     requestReductionClass = "shell_success"
 	requestReductionListing     requestReductionClass = "record_listing"
+	requestReductionSkill       requestReductionClass = "skill_instruction"
 	requestReductionGeneric     requestReductionClass = "generic_stale"
 )
 
@@ -488,11 +489,20 @@ func classifyRequestReduction(ctx requestReductionContext) requestReductionVerdi
 	if ctx.Age < ctx.Policy.DiffProtectAgeTurns && looksLikeDiffOrPatch(ctx.Content) {
 		return protectedVerdict(retentionReasonRecentDiff)
 	}
+	// Resolved once for the gates below: a skill body is instruction state
+	// rather than data, and each gate has to keep it off its content-shape
+	// rule. For any other tool the check rejects on the tool name alone, so
+	// sharing the answer costs nothing here and saves the envelope scan the
+	// later gates would otherwise repeat on an aged skill result.
+	skillResult := isSkillInstructionResult(ctx)
 	// Diffs are durable review evidence, not build logs. Keep them on a
 	// dedicated path so source identifiers such as "error" and "failed" do
-	// not turn a patch into a misleading log summary.
+	// not turn a patch into a misleading log summary. A loaded skill body
+	// is instruction state rather than data: it waits for the skill
+	// instruction summary below so the envelope anchors survive.
 	if ctx.Age >= ctx.Policy.ShellSuccessAgeTurns &&
 		len(ctx.Content) > max(ctx.Policy.ShellSuccessBytes, ctx.Policy.ReadLikeOutputBytes) &&
+		!skillResult &&
 		looksLikeDiffOrPatch(ctx.Content) {
 		return reducedVerdict(requestReductionDiff)
 	}
@@ -531,8 +541,12 @@ func classifyRequestReduction(ctx requestReductionContext) requestReductionVerdi
 		return reducedVerdict(requestReductionShellOK)
 	}
 	// An invalidated or superseded read was already classified above; a web
-	// fetch or other read-like output waits for the age gate here.
-	if ctx.Age >= ctx.Policy.ReadLikeAgeTurns && len(ctx.Content) > ctx.Policy.ReadLikeOutputBytes {
+	// fetch or other read-like output waits for the age gate here. A loaded
+	// skill body is instruction state rather than data, so no content-shape
+	// rule may describe it as search hits, numbered source or a log: those
+	// summaries drop the envelope anchors the workflow's relative paths
+	// resolve against. It waits for the skill instruction summary below.
+	if ctx.Age >= ctx.Policy.ReadLikeAgeTurns && len(ctx.Content) > ctx.Policy.ReadLikeOutputBytes && !skillResult {
 		// Reached by a shell result only when the shell gate above is
 		// configured looser than this one (higher ShellSuccessAgeTurns or
 		// ShellSuccessBytes); at the default equal thresholds that gate already
@@ -561,6 +575,13 @@ func classifyRequestReduction(ctx requestReductionContext) requestReductionVerdi
 		}
 	}
 	if ctx.ToolResults >= ctx.Policy.MinToolResultsPrune && ctx.Age >= ctx.Policy.StaleAgeTurns && len(ctx.Content) > ctx.Policy.StaleOutputBytes {
+		// A skill body keeps the envelope anchors and a workflow outline: the
+		// full text stays recoverable at the archived address, but the model
+		// still has to resolve the workflow's relative references against the
+		// root this copy was loaded from.
+		if skillResult {
+			return reducedVerdict(requestReductionSkill)
+		}
 		// This is the widest gate (1500 bytes), so it is where a real
 		// `git log --oneline -30` actually lands — the shell branch above never
 		// sees it. The command signal has to be applied here too.
@@ -836,6 +857,15 @@ func reduceRequestToolOutput(class requestReductionClass, ctx requestReductionCo
 		reduced, rule = reduceShellSuccessOutputSummary(ctx), "shell_success"
 	case requestReductionListing:
 		reduced, rule = reduceRecordListingOutputSummary(ctx), "record_listing"
+	case requestReductionSkill:
+		summary := reduceSkillInstructionSummary(ctx)
+		if len(summary) >= len(ctx.Content) {
+			// A body this small gains nothing from a summary that must carry
+			// the anchors anyway: keep the instructions complete instead of
+			// trading them for a same-size marker.
+			return "", "", false
+		}
+		reduced, rule = summary, string(requestReductionSkill)
 	case requestReductionGeneric:
 		// One-shot, non-rebuildable outputs are archived in full so the model
 		// can read them back by stable address instead of losing the payload
