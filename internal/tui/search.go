@@ -111,15 +111,6 @@ func (sm SearchModel) View(width int) string {
 // Search functions
 // ---------------------------------------------------------------------------
 
-// FindMatches performs a case-insensitive search across all block content and
-// returns the positions of blocks whose plain-text content contains the query.
-//
-// The search examines the unstyled source fields that feed each block's
-// visible text. This avoids false matches on ANSI escape codes while covering
-// structured displays such as tool diffs, reports, and attachment labels.
-//
-// Each match includes the absolute LineOffset so the viewport can scroll
-// directly to the match position.
 func approximateSearchMatchInnerOffset(block *Block, query string, width int) int {
 	if block == nil || query == "" {
 		return 0
@@ -403,12 +394,17 @@ func visibleSearchMatchInnerOffset(block *Block, query string, width int) (int, 
 	}
 }
 
-func FindMatches(blocks []*Block, query string) []MatchPosition {
-	return findMatchesAtWidth(blocks, query, 80)
-}
-
-// FindMatchesAtWidth performs FindMatches but uses the given width for accurate
-// line offset calculation. Use this when the viewport width is known.
+// FindMatchesAtWidth performs a case-insensitive search across all block content
+// and returns the positions of blocks whose plain-text content contains the
+// query, using the given width for accurate line offset calculation. Use this
+// when the viewport width is known.
+//
+// The search examines the unstyled source fields that feed each block's visible
+// text. This avoids false matches on ANSI escape codes while covering structured
+// displays such as tool diffs, reports, and attachment labels.
+//
+// Each match includes the absolute LineOffset so the viewport can scroll
+// directly to the match position.
 func FindMatchesAtWidth(blocks []*Block, query string, width int) []MatchPosition {
 	if width <= 0 {
 		width = 80

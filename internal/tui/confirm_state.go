@@ -1,14 +1,11 @@
 package tui
 
 import (
-	"context"
-	"strings"
 	"time"
 
 	"github.com/keakon/bubbles/v2/textarea"
 	tea "github.com/keakon/bubbletea/v2"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
 )
 
@@ -129,77 +126,4 @@ func confirmTimeoutTick() tea.Cmd {
 	return tickCmd(time.Second, func(_ time.Time) tea.Msg {
 		return confirmTimeoutTickMsg{}
 	})
-}
-
-// MakeConfirmFunc creates a callback suitable for use as the agent's tool
-// permission confirmation handler. It sends a ConfirmRequest to reqCh and
-// blocks until a ConfirmResult is available on resCh or the provided context
-// is cancelled.
-//
-// Context cancellation (e.g. turn cancelled by a new user message) returns
-// ConfirmDeny immediately, unblocking the tool goroutine without waiting for
-// user input.
-//
-// If timeout > 0 the call returns ConfirmDeny automatically after that
-// duration.
-
-func MakeConfirmFunc(reqCh chan<- ConfirmRequest, resCh <-chan ConfirmResult, timeout time.Duration) func(ctx context.Context, toolName, argsJSON string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (agent.ConfirmResponse, error) {
-	return func(ctx context.Context, toolName, argsJSON string, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules []string) (agent.ConfirmResponse, error) {
-		request := ConfirmRequest{
-			ToolName:            toolName,
-			ArgsJSON:            argsJSON,
-			NeedsApproval:       append([]string(nil), needsApproval...),
-			AlreadyAllowed:      append([]string(nil), alreadyAllowed...),
-			NeedsApprovalRules:  append([]string(nil), needsApprovalRules...),
-			AlreadyAllowedRules: append([]string(nil), alreadyAllowedRules...),
-		}
-		// Send the request, but bail out if the context is already cancelled.
-		select {
-		case reqCh <- request:
-		case <-ctx.Done():
-			return agent.ConfirmResponse{Approved: false}, nil
-		}
-
-		// Wait for the user's response, with optional timeout and context
-		// cancellation.
-		if timeout <= 0 {
-			select {
-			case result := <-resCh:
-				return confirmResponseFromResult(result, argsJSON), nil
-			case <-ctx.Done():
-				return agent.ConfirmResponse{Approved: false}, nil
-			}
-		}
-		timer := time.NewTimer(timeout)
-		defer timer.Stop()
-		select {
-		case result := <-resCh:
-			return confirmResponseFromResult(result, argsJSON), nil
-		case <-timer.C:
-			return agent.ConfirmResponse{Approved: false}, nil
-		case <-ctx.Done():
-			return agent.ConfirmResponse{Approved: false}, nil
-		}
-	}
-}
-
-func confirmResponseFromResult(result ConfirmResult, fallbackArgsJSON string) agent.ConfirmResponse {
-	finalArgs := result.FinalArgsJSON
-	if strings.TrimSpace(finalArgs) == "" {
-		finalArgs = fallbackArgsJSON
-	}
-	var ruleIntent *agent.ConfirmRuleIntent
-	if result.RuleIntent != nil {
-		ruleIntent = &agent.ConfirmRuleIntent{
-			Patterns: append([]string(nil), result.RuleIntent.Patterns...),
-			Scope:    int(result.RuleIntent.Scope),
-		}
-	}
-	return agent.ConfirmResponse{
-		Approved:      result.Action == ConfirmAllow,
-		FinalArgsJSON: finalArgs,
-		EditSummary:   result.EditSummary,
-		DenyReason:    result.DenyReason,
-		RuleIntent:    ruleIntent,
-	}
 }

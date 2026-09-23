@@ -112,10 +112,6 @@ func fileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func ArtifactSHA256(path string) (string, error) {
-	return fileSHA256(path)
-}
-
 const (
 	maxImmutableResultBytes = 10 * 1024 * 1024
 	MaxInlineResultBytes    = 32 * 1024

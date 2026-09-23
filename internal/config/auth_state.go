@@ -237,28 +237,6 @@ func UpsertOAuthStateRecord(path string, key OAuthStateKey, mutate func(*OAuthSt
 	return state, &updated, changed, nil
 }
 
-func RemoveOAuthStateRecord(path string, key OAuthStateKey) (AuthStateFile, bool, error) {
-	recordKey := OAuthStateRecordKey(key)
-	if recordKey == "" {
-		return nil, false, fmt.Errorf("oauth state key is empty")
-	}
-	return UpdateAuthStateFile(path, func(state AuthStateFile) (bool, error) {
-		provider := strings.TrimSpace(key.Provider)
-		entries := state[provider]
-		if len(entries) == 0 {
-			return false, nil
-		}
-		if _, ok := entries[recordKey]; !ok {
-			return false, nil
-		}
-		delete(entries, recordKey)
-		if len(entries) == 0 {
-			delete(state, provider)
-		}
-		return true, nil
-	})
-}
-
 // RemovedOAuthStateEntry describes an invalid runtime-state entry removed from auth.state.json.
 type RemovedOAuthStateEntry struct {
 	Provider      string
@@ -414,41 +392,6 @@ func FindOAuthStateRecord(state AuthStateFile, key OAuthStateKey) (OAuthStateRec
 		}
 	}
 	return record, ok
-}
-
-func MergeOAuthStateRecord(existing OAuthStateRecord, incoming OAuthStateRecord) OAuthStateRecord {
-	if incoming.AccountUserID != "" {
-		existing.AccountUserID = incoming.AccountUserID
-	}
-	if incoming.AccountID != "" {
-		existing.AccountID = incoming.AccountID
-	}
-	if incoming.RefreshSHA256 != "" {
-		existing.RefreshSHA256 = incoming.RefreshSHA256
-	}
-	if incoming.Email != "" {
-		existing.Email = incoming.Email
-	}
-	if incoming.Status != "" || existing.Status == "" {
-		existing.Status = incoming.Status
-	}
-	if incoming.Expires != 0 {
-		existing.Expires = incoming.Expires
-	}
-	if incoming.UpdatedAt >= existing.UpdatedAt {
-		existing.UpdatedAt = incoming.UpdatedAt
-		existing.LastWarmupAt = incoming.LastWarmupAt
-		existing.CodexPrimaryUsedPct = incoming.CodexPrimaryUsedPct
-		existing.CodexPrimaryWindowMin = incoming.CodexPrimaryWindowMin
-		existing.CodexPrimaryResetAt = incoming.CodexPrimaryResetAt
-		existing.CodexSecondaryUsedPct = incoming.CodexSecondaryUsedPct
-		existing.CodexSecondaryWindowMin = incoming.CodexSecondaryWindowMin
-		existing.CodexSecondaryResetAt = incoming.CodexSecondaryResetAt
-		existing.CodexHasCredits = incoming.CodexHasCredits
-		existing.CodexUnlimited = incoming.CodexUnlimited
-		existing.CodexBalance = incoming.CodexBalance
-	}
-	return existing
 }
 
 func EqualOAuthStateRecord(a, b OAuthStateRecord) bool {

@@ -66,10 +66,6 @@ func resolveCommandWorkdir(workdir, baseDir string) (string, error) {
 	return resolved, nil
 }
 
-func ResolveToolPath(path string) (string, error) {
-	return resolveToolPath(path)
-}
-
 func ResolveToolPathInDir(path, baseDir string) (string, error) {
 	return resolveToolPathInDir(path, baseDir)
 }

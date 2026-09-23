@@ -1,7 +1,6 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -186,12 +185,4 @@ func resetInvalidDiagnosticsFields(d *DiagnosticsConfig) {
 			*field = 0
 		}
 	}
-}
-
-func ValidateDiagnosticsConfig(cfg *Config) error {
-	issues := collectDiagnosticsConfigIssues(cfg)
-	if len(issues) == 0 {
-		return nil
-	}
-	return errors.New(strings.Join(issues, "; "))
 }

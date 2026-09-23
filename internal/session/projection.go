@@ -178,13 +178,6 @@ func Project(exported *ExportedSession) ([]ProjectedTurn, error) {
 	return ProjectWithLimits(exported, DefaultProjectionLimits())
 }
 
-// ProjectJSONL projects with the default limits and returns the encoded JSONL
-// bytes. Callers that write the projection out use this instead of Project so
-// the turns are encoded once.
-func ProjectJSONL(exported *ExportedSession) ([]byte, error) {
-	return ProjectJSONLWithLimits(exported, DefaultProjectionLimits())
-}
-
 // ProjectWithLimits projects with an explicit budget. It returns the turns and
 // discards the encoding enforceProjectionBudget produced to measure them.
 func ProjectWithLimits(exported *ExportedSession, limits ProjectionLimits) ([]ProjectedTurn, error) {

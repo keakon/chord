@@ -160,8 +160,3 @@ func ParseShellType(s string) ShellType {
 		return ShellBash
 	}
 }
-
-// IsWindows returns true if running on Windows
-func IsWindows() bool {
-	return runtime.GOOS == "windows"
-}

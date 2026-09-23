@@ -86,12 +86,6 @@ func Pulse(duration time.Duration) float64 {
 	return (val + 1) / 2
 }
 
-// SineWave returns a shifted value for staggered animations.
-func SineWave(offset, period, amplitude float64) float64 {
-	ms := float64(time.Now().UnixNano() / int64(time.Millisecond))
-	return math.Sin((ms+offset)/period) * amplitude
-}
-
 // ---------------------------------------------------------------------------
 // Multi-stop gradient ramp (inspired by crush)
 // ---------------------------------------------------------------------------

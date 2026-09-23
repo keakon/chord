@@ -40,14 +40,6 @@ type localShellPayload struct {
 	Failed   bool   `json:"failed"`
 }
 
-// ToolCallLabel returns the label for a tool call block, e.g. "TOOL CALL (Edit):".
-func ToolCallLabel(toolName string) string {
-	if toolName == "" {
-		return "TOOL CALL:"
-	}
-	return "TOOL CALL (" + toolName + "):"
-}
-
 // LabelLocalShell is the block label for TUI ! terminal runs (client-side bash -c).
 // Not the same as TOOL CALL (shell): no LLM/agent round-trip.
 const LabelLocalShell = "TERMINAL (!):"
@@ -107,14 +99,6 @@ func UserShellPersistedBody(userLine, cmd, output string, failed bool) string {
 		Failed:   failed,
 	})
 	return readable + "\n\n" + localShellPayloadPrefix + string(payloadBytes)
-}
-
-// ToolResultLabel returns the label for a tool result block, e.g. "TOOL RESULT (Read):".
-func ToolResultLabel(toolName string) string {
-	if toolName == "" {
-		return "TOOL RESULT (unknown):"
-	}
-	return "TOOL RESULT (" + toolName + "):"
 }
 
 // ToolCallMarkdown formats a tool call as Markdown with optional arguments,

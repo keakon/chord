@@ -19,15 +19,6 @@ type UsageSnapshot struct {
 	ReasoningTokens    int64 `json:"reasoning_tokens,omitempty"`
 }
 
-func UsageSnapshotIsZero(usage UsageSnapshot) bool {
-	return usage.InputTokens == 0 &&
-		usage.OutputTokens == 0 &&
-		usage.CacheReadTokens == 0 &&
-		usage.CacheWriteTokens == 0 &&
-		usage.CacheWrite1hTokens == 0 &&
-		usage.ReasoningTokens == 0
-}
-
 // BillingUsage records normalized, mutually-exclusive billing buckets.
 // InputTokens excludes cache-read tokens so cost calculation does not charge
 // the same tokens as both normal input and cache reads.

@@ -68,45 +68,11 @@ func (t *OverlayTable) SetItems(items []OverlayTableItem) {
 	t.invalidateRenderCache()
 }
 
-func (t *OverlayTable) SetMaxVisible(maxVisible int) {
-	if t.list != nil && t.list.maxVisible == maxVisible {
-		return
-	}
-	t.list.SetMaxVisible(maxVisible)
-	t.invalidateRenderCache()
-}
-
-func (t *OverlayTable) CursorUp() {
-	t.list.CursorUp()
-	t.invalidateRenderCache()
-}
 func (t *OverlayTable) CursorDown() {
 	t.list.CursorDown()
 	t.invalidateRenderCache()
 }
-func (t *OverlayTable) CursorToTop() {
-	t.list.CursorToTop()
-	t.invalidateRenderCache()
-}
-func (t *OverlayTable) CursorToBottom() {
-	t.list.CursorToBottom()
-	t.invalidateRenderCache()
-}
 func (t *OverlayTable) CursorAt() int { return t.list.CursorAt() }
-func (t *OverlayTable) HandleWheel(delta int) bool {
-	if !t.list.HandleWheel(delta) {
-		return false
-	}
-	t.invalidateRenderCache()
-	return true
-}
-func (t *OverlayTable) HandleClick(row int) bool {
-	if !t.list.HandleClick(row) {
-		return false
-	}
-	t.invalidateRenderCache()
-	return true
-}
 
 func (t *OverlayTable) RenderVersion() uint64 {
 	if t == nil {
