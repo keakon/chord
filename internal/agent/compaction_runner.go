@@ -116,6 +116,9 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	// instead of reading whichever turn happens to be current at HTTP dispatch.
 	ctx = llm.WithResponsesTurnState(ctx, a.currentTurnResponsesState())
 	a.beginCompactionState(planID, target, trigger, continuation, headSplit, cancel)
+	if a.ctxMgr != nil {
+		a.notePressureStage(pressureStageCompacting, a.currentOverlayWindowKey())
+	}
 	if a.walltime != nil {
 		a.walltime.startCompactionAt(planID, a.currentAgentName(), target.turnID)
 	}
@@ -350,6 +353,12 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// snapshot above: whatever the summarizer wrote is replaced.
 	skillNames, skillsOmitted := collectCheckpointSkillNames(headSnapshot)
 	summaryText = ensureCheckpointSkillsSection(summaryText, skillNames, skillsOmitted)
+	// The runtime owns the continuation state a weak or fallback summary must
+	// not drop: the authoritative latest request (a Done rejected reason
+	// included) and the tool calls whose results never reached the transcript.
+	// Every mode below — model summary, structured fallback, truncate-only —
+	// composes the same runtime-owned state here.
+	summaryText = applyCompactionRecoveryState(summaryText, buildCompactionRecoveryState(snapshot, headSnapshot))
 	// A prior checkpoint inside the archived head is carried forward verbatim
 	// as a final section, so the checkpoint that replaces it always references
 	// the structured content of the one before (recursive compaction must not
@@ -543,6 +552,11 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		newMessages := make([]message.Message, 0, len(d.NewMessages)+len(tail))
 		newMessages = append(newMessages, d.NewMessages...)
 		newMessages = append(newMessages, tail...)
+		// A successful compaction ends the pressure cycle the notice rows were
+		// written for: a row surviving in the retained tail would keep
+		// replaying pre-apply pressure text as if it described the fresh
+		// window, which is the stale reminder the new window must not inherit.
+		newMessages = dropContextNoticeMessages(newMessages)
 		compactedMessages = newMessages
 
 		// The target transcript fingerprint is recorded BEFORE the session
@@ -639,6 +653,12 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// beginMainLLMAfterPreparation re-queues against the new window claims.
 	a.pendingContextPressureReminder = ""
 	a.pendingCompactionWarning = ""
+	// The apply ends the pressure cycle it was serving: the terminal reason is
+	// "applied", not a window reset, and the cycle's durable row went away with
+	// the rewrite above.
+	a.endPressureCycle(pressureEndApplied)
+	a.contextNoticesPersisted.Store(containsContextNotice(compactedMessages))
+	a.disarmContextNoticeCleanup()
 	// The apply itself — not the worker's history export — advances the
 	// overlay window key, so requests dispatched while an async compaction is
 	// still running (or was discarded) stay on the pre-apply window claim.
@@ -815,13 +835,15 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 	}
 	repairPrompt := buildCompactionRepairPrompt(prompt, err)
 	if repairPrompt != "" {
-		log.Debugf("compaction summary validation failed; requesting corrected summary backend=%v error=%v", backendName, err)
+		log.Debugf("compaction summary validation failed; requesting corrected summary backend=%v model=%v summary_chars=%v missing_headings=%v error=%v",
+			backendName, modelRef, len([]rune(summary)), strings.Join(compactionMissingHeadings(err), ", "), err)
 		progress.startAttempt()
 		repairedSummary, repairedModelRef, repairErr := backend.ProduceSummary(ctx, client, modelRef, repairPrompt, progress)
 		if repairErr == nil {
 			return repairedSummary, backendName, repairedModelRef, nil
 		}
-		log.Debugf("compaction summary repair failed backend=%v error=%v", backendName, repairErr)
+		log.Debugf("compaction summary repair failed backend=%v model=%v summary_chars=%v missing_headings=%v error=%v",
+			backendName, repairedModelRef, len([]rune(repairedSummary)), strings.Join(compactionMissingHeadings(repairErr), ", "), repairErr)
 	}
 	return "", backendName, modelRef, err
 }
@@ -1084,24 +1106,49 @@ func compactionSummaryFromResponseContent(content string) string {
 	}
 }
 
+// compactionMissingHeadings extracts the required headings a rejected summary
+// omitted so repair prompts and diagnostics can name them.
+func compactionMissingHeadings(err error) []string {
+	if validationErr, ok := errors.AsType[*compactionSummaryValidationError](err); ok {
+		return validationErr.Missing
+	}
+	return nil
+}
+
+// renderCompactionRequiredHeadings lists the required summary headings so a
+// repair prompt restates the exact section contract instead of asking the
+// model to recall it.
+func renderCompactionRequiredHeadings() string {
+	lines := make([]string, 0, len(compactionRequiredHeadings))
+	for _, heading := range compactionRequiredHeadings {
+		lines = append(lines, "- "+heading)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func buildCompactionRepairPrompt(originalPrompt string, validationErr error) string {
 	originalPrompt = strings.TrimSpace(originalPrompt)
 	if originalPrompt == "" || validationErr == nil {
 		return ""
+	}
+	missingLine := ""
+	if missing := compactionMissingHeadings(validationErr); len(missing) > 0 {
+		missingLine = "\n- The missing sections are: " + strings.Join(missing, ", ") + "."
 	}
 	return fmt.Sprintf(`Write a valid compaction summary from the original compaction input below.
 
 Requirements:
 - Write only the summary.
 - Keep the same facts; do not invent details.
-- Use exactly the required Markdown headings, in order.
+- Use exactly these Markdown headings, in this order, each on its own line:
+%s%s
 - Make "Current User Request" identify the latest user request explicitly.
 - Make "Active Objective" and "Next Step" directly serve that latest user request.
 - Do not restart work listed as completed, background, stale, or superseded.
 - Make "Next Step" a concrete action that can be performed immediately.
 
 Original compaction input:
-%s`, originalPrompt)
+%s`, renderCompactionRequiredHeadings(), missingLine, originalPrompt)
 }
 
 func (a *MainAgent) configuredCompactionModelRefs() ([]string, bool, error) {

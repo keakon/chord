@@ -28,6 +28,7 @@ func TestStableSurfaceSurvivesKeyFileInjection(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,

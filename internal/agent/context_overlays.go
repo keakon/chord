@@ -3,6 +3,9 @@ package agent
 import (
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/ctxmgr"
@@ -97,6 +100,12 @@ type overlayClaimState struct {
 	// shares the reminder's (window, budget) key but is tracked separately so
 	// the two never suppress each other.
 	imminent reminderOverlayClaim
+	// pressure is the single authority for the current pressure cycle: the
+	// stage reached, the one durable notice row it may write, and how it
+	// ended. It lives under this mutex because the durable-row reservation
+	// happens on the main LLM goroutine while the stage transitions happen on
+	// the event loop.
+	pressure pressureCycle
 }
 
 // overlayWindowKey is the (session epoch, compaction window, model, budget
@@ -191,10 +200,13 @@ func (a *MainAgent) reminderClaimModelRef() string {
 func (a *MainAgent) markReminderCompactContextCalled() {
 	key := a.currentOverlayWindowKey()
 	a.overlayClaims.mu.Lock()
-	defer a.overlayClaims.mu.Unlock()
 	c := &a.overlayClaims.reminder
 	c.bindTo(key)
 	c.ccCalled = true
+	a.overlayClaims.mu.Unlock()
+	// The pressure cycle records the answer separately: the claim is the
+	// per-window delivery gate, the cycle's preparation audit is the fact.
+	a.notePressurePreparation(pressurePreparationCompactContext, time.Now())
 }
 
 // tryClaimCompactionWarning returns true when the usage-driven externalization
@@ -363,6 +375,18 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 		}
 		level := notice.level
 		text := notice.text
+		cycleID, skipReason, reserved := a.reservePressureCycleRecord()
+		if !reserved {
+			// One durable row per cycle: the first notice that reaches the
+			// transcript records the cycle, and later escalations are
+			// suppressed, so the transcript cannot accumulate cards that all
+			// describe the same pressure. Their delivery is already recorded
+			// through the analytics diagnostics emitted alongside the overlay
+			// claims; no live-only ContextNoticeEvent is sent because TUI
+			// notice cards must stay backed by a durable transcript row.
+			log.Debugf("durable context notice row skipped level=%v reason=%v", level, skipReason)
+			continue
+		}
 		msg := message.Message{
 			Role: message.RoleUser,
 			Kind: message.KindContextNotice,
@@ -370,8 +394,9 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 			// other harness injection uses, so the model can tell it apart from
 			// a user-written message when a later request replays the notice.
 			// The live card is built from the bare event text below.
-			Content:     "<system-reminder>\n" + text + "\n</system-reminder>",
-			NoticeLevel: level,
+			Content:         "<system-reminder>\n" + text + "\n</system-reminder>",
+			NoticeLevel:     level,
+			PressureCycleID: cycleID,
 		}
 		messageIndex := a.ctxMgr.MessageCount()
 		a.ctxMgr.Append(msg)
@@ -423,9 +448,11 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 	messages := a.ctxMgr.Snapshot()
 	kept := make([]message.Message, 0, len(messages))
 	removed := false
+	var removedCycles []uint64
 	for _, msg := range messages {
 		if msg.Kind == message.KindContextNotice && contextNoticeStale(msg, pressureOnly) {
 			removed = true
+			removedCycles = append(removedCycles, msg.PressureCycleID)
 			continue
 		}
 		kept = append(kept, msg)
@@ -446,6 +473,17 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 		}
 	}
 	a.resetOverlayDeliveryAfterNoticeClear(pressureOnly)
+	// The withdrawn rows gave up their cycle's one-row reservation: a later
+	// re-crossing of the same cycle may record again, while a withdrawn row
+	// from an older cycle cannot reopen the current one's reservation.
+	for _, cycleID := range removedCycles {
+		a.releasePressureCycleRecord(cycleID)
+	}
+	// The rewrite is the new truth about which rows document pressure, so the
+	// adoption follows it. A row withdrawn before the next cycle opens would
+	// otherwise leave the runtime reviving an identity the transcript no longer
+	// carries — and that cycle would skip the card the row used to justify.
+	a.derivePressureCycleAdoption(kept)
 	a.emitToTUI(ContextNoticeClearedEvent{})
 }
 
@@ -595,6 +633,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	if threshold <= 0 || usable <= 0 {
 		// Automatic compaction is off: a durable pressure notice can no longer
 		// be justified by the live decision.
+		a.endPressureCycle(pressureEndDisabled)
 		a.armContextNoticeCleanup()
 		return
 	}
@@ -605,6 +644,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	// mode, so no request-side overlay is injected — and a durable row written
 	// by a configuration that did inject one is stale.
 	if !a.compactContextVisible() {
+		a.endPressureCycle(pressureEndDisabled)
 		a.armContextNoticeCleanup()
 		return
 	}
@@ -632,6 +672,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 		// request is no longer justified, so the next gate must not start
 		// compaction from it, and any queued or durable notice measured
 		// against the higher line is stale.
+		a.endPressureCycle(pressureEndWithdrawn)
 		a.clearUsageDrivenAutoCompactRequest()
 		a.clearCompactionGrace()
 		a.pendingCompactionWarning = ""
@@ -649,6 +690,10 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	if reminderPct >= threshold {
 		return
 	}
+	// The stage is noted before the claim sync: after a restore it opens the
+	// cycle against the adopted row, and the claim it seeds (delivered) is then
+	// what makes the restored window re-attach the short form.
+	a.notePressureStage(pressureStageReminded, a.currentOverlayWindowKey())
 	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.currentOverlayWindowKey())
 	// A same-window re-cross before idle cleanup means the leftover durable
 	// notice is accurate again; drop the stale mark so the card is not removed.
@@ -723,6 +768,7 @@ func (a *MainAgent) installContextNoticePresence(messages []message.Message) {
 	a.contextNoticesStalePressureOnly.Store(false)
 	a.contextNoticesStale.Store(false)
 	a.contextNoticesPersisted.Store(containsContextNotice(messages))
+	a.adoptPressureCyclesFromTranscript(messages)
 }
 
 // armContextNoticeCleanup arms idle cleanup of durable context-pressure notices
@@ -777,6 +823,30 @@ func (a *MainAgent) omitStaleContextNoticesFromRequest(messages []message.Messag
 	return omitContextNoticeMessages(messages, a.contextNoticesStalePressureOnly.Load())
 }
 
+// dropContextNoticeMessages removes every durable context-pressure notice row
+// from a rewritten message list. A successful compaction ends the cycle that
+// wrote them, so the compacted context must not keep replaying a pre-apply
+// pressure notice as if it still described current usage.
+func dropContextNoticeMessages(messages []message.Message) []message.Message {
+	n := 0
+	for i := range messages {
+		if messages[i].Kind == message.KindContextNotice {
+			n++
+		}
+	}
+	if n == 0 {
+		return messages
+	}
+	out := make([]message.Message, 0, len(messages)-n)
+	for i := range messages {
+		if messages[i].Kind == message.KindContextNotice {
+			continue
+		}
+		out = append(out, messages[i])
+	}
+	return out
+}
+
 func omitContextNoticeMessages(messages []message.Message, pressureOnly bool) []message.Message {
 	n := 0
 	for i := range messages {
@@ -818,6 +888,7 @@ func (a *MainAgent) queueCompactionWarning() {
 	if !a.tryClaimCompactionWarning(requestID, batch) {
 		return
 	}
+	a.notePressureStage(pressureStageArmed, a.currentOverlayWindowKey())
 	a.stageContextNotice(contextNoticeWarning, compactionWarningText)
 }
 

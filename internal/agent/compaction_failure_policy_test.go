@@ -43,6 +43,28 @@ func TestUsageDrivenAutoCompactFailureBreakerSuppressesAfterThreshold(t *testing
 	}
 }
 
+func TestArmUsageDrivenAutoCompactRequestReportsNewInstance(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+
+	if !a.armUsageDrivenAutoCompactRequest() {
+		t.Fatal("first arm must report a new request instance")
+	}
+	if a.armUsageDrivenAutoCompactRequest() {
+		t.Fatal("arming an already armed request must not report a new instance")
+	}
+	if got := a.autoCompactRequestGeneration.Load(); got != 1 {
+		t.Fatalf("autoCompactRequestGeneration = %d, want 1", got)
+	}
+
+	a.clearUsageDrivenAutoCompactRequest()
+	if !a.armUsageDrivenAutoCompactRequest() {
+		t.Fatal("arm after a clear must report a new request instance")
+	}
+	if got := a.autoCompactRequestGeneration.Load(); got != 2 {
+		t.Fatalf("autoCompactRequestGeneration = %d, want 2", got)
+	}
+}
+
 func TestUsageDrivenBreakerSuppressesIdleAutoCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)

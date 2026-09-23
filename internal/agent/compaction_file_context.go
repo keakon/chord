@@ -22,10 +22,41 @@ const (
 	compactionInjectedFilesMaxBytes = 48 * 1024
 	compactionInjectedFilesMinBytes = 8 * 1024
 
+	// Post-compaction re-injection budget policy.
+	//
+	// The must-restore layer travels inside the checkpoint message itself
+	// (latest request anchor, runtime snapshots, constraints, recovery
+	// references), so it is already part of the request surface when the quota
+	// below is computed. This overlay is the on-demand layer: it re-reads the
+	// declared files instead of replaying the checkpoint's snapshot of them, so
+	// a stale copy can never masquerade as the current file.
+	//
+	// The on-demand quota is derived from what the checkpoint left free, never
+	// from an absolute token count — the 50K/20K figures other implementations
+	// use belong to their own windows. It may take at most a quarter of the
+	// free budget, and only while at least half of the usable input budget
+	// stays free for the next task increment. A checkpoint that already
+	// consumed the margin suppresses the overlay instead of pushing the next
+	// request toward the reminder line.
+	compactionReinjectionShareDivisor = 4
+	compactionWorkingMarginDivisor    = 2
+
+	// compactionFileSource* records how the checkpoint named a re-injected
+	// path: a state file the model externalized, or a key file extracted from
+	// the summary's file list.
+	compactionFileSourceStateFile = "state_file"
+	compactionFileSourceKeyFile   = "key_file"
+
 	// compactionFileCtxPrefix opens the synthesized user message that re-loads
 	// key files identified by the latest compaction summary. Detection on the
 	// next request and generation here share this marker so they cannot drift.
 	compactionFileCtxPrefix = "[system] Automatically loaded key files from the latest compaction checkpoint"
+
+	// compactionFileCtxReloadNote follows the marker and states that the content
+	// below is a fresh read rather than the checkpoint's snapshot: the model
+	// must not read the re-injected body as the state the checkpoint recorded,
+	// and changed_since_checkpoint carries the invalidation flag.
+	compactionFileCtxReloadNote = "They were re-read from disk for this request; revision is the content hash at read time, and changed_since_checkpoint reports whether the file differs from the checkpoint snapshot.\n"
 )
 
 func (a *MainAgent) latestCompactionSummarySignature(msgs []message.Message) (int, string, map[string]string) {
@@ -235,15 +266,15 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]m
 		return messages, -1
 	}
 
-	maxFileBytes, maxTotalBytes := a.compactionInjectedFileBudgets(messages)
-	if maxTotalBytes <= 0 {
-		log.Debugf("compaction key-file context omitted due to exhausted request budget key_files=%v", len(keyFiles))
+	plan := a.compactionInjectedFileBudgets(messages)
+	if plan.maxTotalBytes <= 0 {
+		log.Debugf("compaction key-file context omitted; post-compaction budget leaves no re-injection quota key_files=%v usable_input_budget=%v remaining_tokens=%v quota_tokens=%v", len(keyFiles), plan.usableTokens, plan.remainingTokens, plan.quotaTokens)
 		return messages, -1
 	}
 
 	result := filectx.BuildFilePartsWithOptions(keyFiles, a.resolveCheckpointFileReadPath, filectx.BuildFilePartsOptions{
-		MaxFileBytes:  maxFileBytes,
-		MaxTotalBytes: maxTotalBytes,
+		MaxFileBytes:  plan.maxFileBytes,
+		MaxTotalBytes: plan.maxTotalBytes,
 		ReadFile:      a.readCheckpointFile,
 	})
 	if len(result.Parts) == 0 {
@@ -251,14 +282,15 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]m
 	}
 	a.annotateCompactionFileParts(signature, revisions, result.Parts)
 	if result.TruncatedFiles > 0 || result.OmittedFiles > 0 {
-		log.Debugf("compaction key-file context bounded loaded_files=%v truncated_files=%v omitted_files=%v total_bytes=%v max_file_bytes=%v max_total_bytes=%v", result.LoadedFiles, result.TruncatedFiles, result.OmittedFiles, result.TotalBytes, maxFileBytes, maxTotalBytes)
+		log.Debugf("compaction key-file context bounded loaded_files=%v truncated_files=%v omitted_files=%v total_bytes=%v max_file_bytes=%v max_total_bytes=%v usable_input_budget=%v remaining_tokens=%v quota_tokens=%v", result.LoadedFiles, result.TruncatedFiles, result.OmittedFiles, result.TotalBytes, plan.maxFileBytes, plan.maxTotalBytes, plan.usableTokens, plan.remainingTokens, plan.quotaTokens)
 	}
 
 	injected := message.Message{
 		Role: message.RoleUser,
+		Kind: message.KindTurnOverlay,
 		Parts: append([]message.ContentPart{{
 			Type: message.ContentPartText,
-			Text: compactionFileCtxPrefix + " for continuation.\n",
+			Text: compactionFileCtxPrefix + " for continuation.\n" + compactionFileCtxReloadNote,
 		}}, result.Parts...),
 	}
 	a.trackObservedFileParts(injected.Parts)
@@ -275,6 +307,7 @@ func (a *MainAgent) annotateCompactionFileParts(checkpoint string, revisions map
 	if a == nil || checkpoint == "" || len(parts) == 0 {
 		return
 	}
+	declared := extractCompactionStateFiles(checkpoint, a.effectiveToolBaseDir())
 	for i := range parts {
 		part := &parts[i]
 		if part.Type != message.ContentPartText || !message.IsFileRefContent(part.Text) {
@@ -294,49 +327,84 @@ func (a *MainAgent) annotateCompactionFileParts(checkpoint string, revisions map
 		// assertion after a restart. A manifest that omits a path is also
 		// conservative: the summary did not establish a baseline for it.
 		changed := len(revisions) == 0 || !seen || previous != hash
-		part.Text = annotateFileRefRevision(part.Text, hash, changed)
+		part.Text = annotateFileRefRevision(part.Text, hash, changed, compactionFileSource(declared, displayPath))
 	}
 }
 
-func annotateFileRefRevision(text, revision string, changed bool) string {
+// compactionFileSource labels a re-injected path by how the checkpoint named
+// it: a state file the model externalized, or a key file extracted from the
+// summary's file list. Only paths the overlay actually carries reach this
+// label, so it can never attribute a file the gate rejected.
+func compactionFileSource(declared []string, path string) string {
+	if slices.Contains(declared, path) {
+		return compactionFileSourceStateFile
+	}
+	return compactionFileSourceKeyFile
+}
+
+func annotateFileRefRevision(text, revision string, changed bool, source string) string {
 	close := strings.IndexByte(text, '>')
 	if close < 0 || !strings.HasPrefix(strings.TrimSpace(text), message.FileRefOpenTag) {
 		return text
 	}
-	attrs := fmt.Sprintf(" revision=%q changed_since_checkpoint=%q", "sha256:"+revision, strconv.FormatBool(changed))
+	attrs := fmt.Sprintf(" revision=%q changed_since_checkpoint=%q source=%q", "sha256:"+revision, strconv.FormatBool(changed), source)
 	return text[:close] + attrs + text[close:]
 }
 
-func (a *MainAgent) compactionInjectedFileBudgets(messages []message.Message) (maxFileBytes, maxTotalBytes int) {
-	maxFileBytes = compactionInjectedFileMaxBytes
-	maxTotalBytes = compactionInjectedFilesMaxBytes
-	if a == nil || a.ctxMgr == nil {
-		return maxFileBytes, maxTotalBytes
+// compactionReinjectionPlan is the per-request byte budget for the key-file
+// overlay together with the token accounting that produced it, so the caller
+// records why the overlay was bounded or skipped.
+type compactionReinjectionPlan struct {
+	maxFileBytes    int
+	maxTotalBytes   int
+	usableTokens    int
+	remainingTokens int
+	quotaTokens     int
+}
+
+func (a *MainAgent) compactionInjectedFileBudgets(messages []message.Message) compactionReinjectionPlan {
+	plan := compactionReinjectionPlan{
+		maxFileBytes:  compactionInjectedFileMaxBytes,
+		maxTotalBytes: compactionInjectedFilesMaxBytes,
 	}
-	if a.ctxMgr.GetMaxTokens() <= 8192 {
-		return maxFileBytes, maxTotalBytes
+	if a == nil || a.ctxMgr == nil {
+		return plan
 	}
 	decision := a.ctxMgr.AutoCompactDecision()
-	budget := decision.UsableInputBudget
-	if budget <= 0 {
-		budget = decision.InputBudget
+	usable := decision.UsableInputBudget
+	if usable <= 0 {
+		plan.maxTotalBytes = 0
+		return plan
 	}
-	if budget <= 0 {
-		return maxFileBytes, maxTotalBytes
+	plan.usableTokens = usable
+	plan.remainingTokens = usable - estimateMessagesTokens(a.ctxMgr, messages)
+	plan.quotaTokens = compactionReinjectionQuotaTokens(plan.remainingTokens, usable)
+	if plan.quotaTokens <= 0 {
+		plan.maxTotalBytes = 0
+		return plan
 	}
-	used := estimateMessagesTokens(a.ctxMgr, messages)
-	remainingTokens := budget - used
-	if remainingTokens <= 0 {
-		return maxFileBytes, 0
-	}
-	remainingBytes := estimateBytesForTokens(a.ctxMgr, remainingTokens)
-	allowed := min(remainingBytes/4, maxTotalBytes)
+	allowed := min(estimateBytesForTokens(a.ctxMgr, plan.quotaTokens), plan.maxTotalBytes)
 	if allowed < compactionInjectedFilesMinBytes {
-		return maxFileBytes, 0
+		plan.maxTotalBytes = 0
+		return plan
 	}
-	maxTotalBytes = allowed
-	if maxFileBytes > maxTotalBytes {
-		maxFileBytes = maxTotalBytes
+	plan.maxTotalBytes = allowed
+	plan.maxFileBytes = min(plan.maxFileBytes, allowed)
+	return plan
+}
+
+// compactionReinjectionQuotaTokens returns the token budget the on-demand
+// re-injection layer may use out of the tokens a checkpoint left free. It is
+// the smaller of a share of the free budget and whatever stays above the
+// working margin, so a checkpoint that already consumed the margin suppresses
+// the overlay entirely instead of filling the window the compaction just freed.
+func compactionReinjectionQuotaTokens(remainingTokens, usableTokens int) int {
+	if remainingTokens <= 0 || usableTokens <= 0 {
+		return 0
 	}
-	return maxFileBytes, maxTotalBytes
+	margin := usableTokens / compactionWorkingMarginDivisor
+	if remainingTokens <= margin {
+		return 0
+	}
+	return min(remainingTokens/compactionReinjectionShareDivisor, remainingTokens-margin)
 }

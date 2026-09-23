@@ -836,11 +836,20 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		a.ctxMgr.UpdateFromUsage(*resp.Usage)
 	}
 	decision := a.ctxMgr.AutoCompactDecision()
+	decisionFields := fmt.Sprintf("last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
+	// The requested line marks a new request instance: arming only transitions
+	// once per threshold crossing, so a response that still reads as crossing
+	// while the same request is armed — a compaction run in flight, or a draft
+	// waiting for its continuation barrier — logs at Debug. Counting those as
+	// further requests reads as a retriggering loop that is not happening.
 	if decision.ShouldCompact {
-		log.Infof("automatic context compaction requested last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
-		a.armUsageDrivenAutoCompactRequest()
+		if a.armUsageDrivenAutoCompactRequest() {
+			log.Infof("automatic context compaction requested %v", decisionFields)
+		} else {
+			log.Debugf("automatic context compaction already requested %v", decisionFields)
+		}
 	} else {
-		log.Debugf("automatic context compaction not requested last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
+		log.Debugf("automatic context compaction not requested %v", decisionFields)
 	}
 
 	// Record token usage plus cache-attribution diagnostics: how many tokens

@@ -328,9 +328,14 @@ type Message struct {
 	// NoticeLevel carries the context-pressure level of a KindContextNotice
 	// message (pressure|imminent|warning). It is TUI metadata for the card
 	// badge; the model only ever sees Content.
-	NoticeLevel  string           `json:"notice_level,omitempty"`
-	Mailbox      *MailboxMetadata `json:"mailbox,omitempty"` // durable metadata for a mailbox message actually sent to an agent
-	MailboxAckID string           `json:"-"`                 // transient runtime-only mailbox ack marker; never persisted
+	NoticeLevel string `json:"notice_level,omitempty"`
+	// PressureCycleID identifies the runtime pressure cycle that produced a
+	// KindContextNotice row. One cycle writes at most one row, and a restore
+	// continues the cycle counter past the IDs already on disk instead of
+	// opening a duplicate cycle for pressure the transcript already records.
+	PressureCycleID uint64           `json:"pressure_cycle_id,omitempty"`
+	Mailbox         *MailboxMetadata `json:"mailbox,omitempty"` // durable metadata for a mailbox message actually sent to an agent
+	MailboxAckID    string           `json:"-"`                 // transient runtime-only mailbox ack marker; never persisted
 	// MCPTools carries a request-only provider mount. It never enters ctxmgr or
 	// session JSONL; MainAgent reconstructs it at a fixed conversation anchor.
 	MCPTools []ToolDefinition `json:"-"`

@@ -91,15 +91,20 @@ func (a *MainAgent) clearUsageDrivenAutoCompactRequest() {
 }
 
 // armUsageDrivenAutoCompactRequest raises the usage-driven auto-compact request
-// and, on the false->true transition, assigns it a fresh monotonic generation.
-// The generation is never reset by apply/skip/clear: it identifies the request
-// instance for the usage-driven externalization warning claim
-// (auto_compact_request_id), so a later arm — after a durable apply or a
-// session switch — always starts a new claim.
-func (a *MainAgent) armUsageDrivenAutoCompactRequest() {
+// and reports whether this call created the request instance. Only the
+// false->true transition assigns a fresh monotonic generation, so later
+// responses that keep crossing the threshold while the same request is armed
+// (in flight, or awaiting its continuation barrier) are no-ops. The generation
+// is never reset by apply/skip/clear: it identifies the request instance for
+// the usage-driven externalization warning claim (auto_compact_request_id), so
+// a later arm — after a durable apply or a session switch — always starts a new
+// claim.
+func (a *MainAgent) armUsageDrivenAutoCompactRequest() bool {
 	if a.autoCompactRequested.CompareAndSwap(false, true) {
 		a.autoCompactRequestGeneration.Add(1)
+		return true
 	}
+	return false
 }
 
 // SetModelDrivenCompactionEnabled records whether the compact_context tool is

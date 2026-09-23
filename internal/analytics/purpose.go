@@ -30,6 +30,13 @@ const (
 	// are sticky: the notice attaches on every deferred
 	// request while the grace is active.
 	UsagePurposeCompactionGrace = "compaction_grace"
+	// UsagePurposeContextPressureCycle records one pressure cycle's terminal
+	// state (cycle identity, stage reached, whether the model answered the
+	// nudge, and the end reason: applied / withdrawn / window_closed /
+	// disabled). It is the audit side of the pressure-cycle state machine:
+	// stage escalations inside a cycle stay live-only for the transcript and
+	// land here instead.
+	UsagePurposeContextPressureCycle = "context_pressure_cycle"
 )
 
 var diagnosticUsagePurposes = []string{
@@ -41,6 +48,7 @@ var diagnosticUsagePurposes = []string{
 	UsagePurposeContextPressureReminder,
 	UsagePurposeCompactionWarning,
 	UsagePurposeCompactionGrace,
+	UsagePurposeContextPressureCycle,
 	// Wall-clock time bookkeeping events (TIME sidebar section) are zero-usage
 	// segments; they must stay out of token/cost aggregates and the Calls count.
 	WalltimePurposeModel,

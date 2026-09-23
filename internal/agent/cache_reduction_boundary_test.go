@@ -384,3 +384,56 @@ func TestPrepareMessagesKeepsFrozenReadMarkerWhenSuperseded(t *testing.T) {
 		t.Fatalf("frozen read marker rewritten after its validity widened:\nfirst:  %q\nsecond: %q", first[2].Content, second[2].Content)
 	}
 }
+
+// TestContextNoticeRowKeepsStableSurfaceReusable pins the cache side of the
+// context-pressure notice policy: the row that records a pressure cycle is
+// appended at the tail of the durable history, so its arrival must leave the
+// recorded stable surface prefix-compatible. A row inserted before the frozen
+// prefix (or a durable rewrite) would fail compatibility and make every later
+// request in the same window pay a full reduction scan.
+func TestContextNoticeRowKeepsStableSurfaceReusable(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  80,
+			MinIncrementalTokens: 1 << 20,
+		}},
+	}
+	a.runningModelRef = "p/m"
+	a.recordLLMModelRun("p/m")
+
+	readContent := strings.Repeat("line content for fetched page\n", 120)
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "tc1", Content: readContent},
+		{Role: message.RoleAssistant, Content: "done"},
+	}
+	setTestRequestBatch(a, nil, 2)
+	turnCtx, turnCancel := context.WithCancel(context.Background())
+	defer turnCancel()
+	a.turn = &Turn{ID: 1, Ctx: turnCtx, Cancel: turnCancel}
+
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content == readContent {
+		t.Fatal("aged webfetch result should be reduced on request 1")
+	}
+	a.updatePreparedLLMRequestSurface(a.currentTurnID(), prepared)
+
+	notice := message.Message{
+		Role:            message.RoleUser,
+		Kind:            message.KindContextNotice,
+		NoticeLevel:     contextNoticePressure,
+		PressureCycleID: 1,
+		Content:         "<system-reminder>\nThe context is approaching the configured automatic-compaction threshold.\n</system-reminder>",
+	}
+	setTestRequestBatch(a, nil, 3)
+	prepared2 := a.prepareMessagesForLLM(append(append([]message.Message(nil), msgs...), notice))
+	if stats := a.GetContextReductionStats(); !stats.ReusedStable {
+		t.Fatalf("stable surface should be reused after the durable notice row, stats=%+v", stats)
+	}
+	if prepared2[2].Content != prepared[2].Content {
+		t.Fatal("frozen reduced read marker should stay byte-stable across requests")
+	}
+}

@@ -69,6 +69,10 @@ func latestPriorCheckpointStrippedBody(messages []message.Message) string {
 		// instant: carrying the previous block forward would leave two blocks
 		// (or one stale one) claiming to be the live job list.
 		body = stripActiveBackgroundJobSnapshotBlock(body)
+		// The runtime recovery section is re-ensured from the current capture
+		// and omitted when nothing is unsettled, so carrying the previous block
+		// forward would leave two blocks, one of them stale.
+		body = stripRuntimeRecoveryStateSection(body)
 		// The strip above can remove the only typed block of a usage-driven
 		// checkpoint, whose machine state lives inside the carried appendix it
 		// replaced. The typed state is machine-carryable and must keep

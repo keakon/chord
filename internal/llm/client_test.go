@@ -3454,6 +3454,34 @@ func TestClientContextLengthExceededDoesNotRetryKeysAndFallsBackWithinRound(t *t
 	}
 }
 
+func TestClientSkipsRequestWhenInputFillsContextWindow(t *testing.T) {
+	cfg := NewProviderConfig("provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"small-model": {Limit: config.ModelLimit{Context: 1000, Output: 256}},
+		},
+	}, []string{"test-key"})
+	impl := &recordingProvider{}
+	c := NewClient(cfg, impl, "small-model", 256, "sys")
+	// A provider-confirmed prompt size from an earlier response makes the local
+	// admission gate active for this session.
+	c.setLastInputTokens(900)
+
+	// ~3000 bytes ≈ 1000 tokens: the input side alone fills the 1000-token
+	// context window once the provider buffer is added.
+	messages := []message.Message{{Role: "user", Content: strings.Repeat("x", 3000)}}
+	_, err := c.CompleteStream(context.Background(), messages, nil, nil)
+	if err == nil {
+		t.Fatal("CompleteStream err = nil, want oversize error")
+	}
+	if !IsAllAttemptedCandidatesContextLengthExceeded(err) {
+		t.Fatalf("err = %v, want all-attempted-candidates context length exceeded", err)
+	}
+	if got := impl.CallCount(); got != 0 {
+		t.Fatalf("provider calls = %d, want 0: a request the runtime knows cannot fit must not reach the provider", got)
+	}
+}
+
 func TestClientContextLengthExceededStopsAfterPoolExhaustedWithoutNextRound(t *testing.T) {
 	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
 	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
@@ -3574,7 +3602,7 @@ func TestClientContextLengthExceededStillTriesSameNamedFallbackOnDifferentProvid
 func TestClampEffectiveMaxTokensUsesTotalContextForOutputClampWhenInputBudgetConfigured(t *testing.T) {
 	model := config.ModelConfig{Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 128000}}
 	messages := []message.Message{{Role: "user", Content: strings.Repeat("x", 720000)}} // ~240k tokens
-	got := clampEffectiveMaxTokens(model, 128000, 128000, RequestTuning{}, "", messages, nil, 0)
+	got, _, _ := clampEffectiveMaxTokens(model, 128000, 128000, RequestTuning{}, "", messages, nil, 0)
 	if got != 128000 {
 		t.Fatalf("clampEffectiveMaxTokens() = %d, want 128000", got)
 	}
@@ -3582,7 +3610,7 @@ func TestClampEffectiveMaxTokensUsesTotalContextForOutputClampWhenInputBudgetCon
 
 func TestClampEffectiveMaxTokensReasoningStillRespectsGlobalOutputCap(t *testing.T) {
 	model := config.ModelConfig{Limit: config.ModelLimit{Context: 400000, Input: 272000, Output: 128000}}
-	got := clampEffectiveMaxTokens(model, 128000, 32000, RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "high"}}, "", []message.Message{{Role: "user", Content: "hi"}}, nil, 0)
+	got, _, _ := clampEffectiveMaxTokens(model, 128000, 32000, RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "high"}}, "", []message.Message{{Role: "user", Content: "hi"}}, nil, 0)
 	if got != 32000 {
 		t.Fatalf("clampEffectiveMaxTokens() = %d, want 32000", got)
 	}
@@ -3601,7 +3629,7 @@ func TestClampEffectiveMaxTokensUsesSmallerDefaultOrModelOutputLimit(t *testing.
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			model := config.ModelConfig{Limit: config.ModelLimit{Context: 400000, Output: tc.modelOutput}}
-			got := clampEffectiveMaxTokens(model, tc.modelOutput, 0, RequestTuning{}, "", []message.Message{{Role: "user", Content: "hi"}}, nil, 0)
+			got, _, _ := clampEffectiveMaxTokens(model, tc.modelOutput, 0, RequestTuning{}, "", []message.Message{{Role: "user", Content: "hi"}}, nil, 0)
 			if got != tc.want {
 				t.Fatalf("clampEffectiveMaxTokens() = %d, want %d", got, tc.want)
 			}
@@ -4030,7 +4058,7 @@ func TestClampEffectiveMaxTokensUsesCurrentRequestEstimate(t *testing.T) {
 		Content: strings.Repeat("x", 540000), // ~180k tokens
 	}}
 
-	got := clampEffectiveMaxTokens(
+	got, _, _ := clampEffectiveMaxTokens(
 		model,
 		64000,
 		64000,
@@ -4057,7 +4085,7 @@ func TestClampEffectiveMaxTokensStartsShrinkingAtDefaultOutputBoundary(t *testin
 		Content: strings.Repeat("x", 504000), // ~168k tokens
 	}}
 
-	got := clampEffectiveMaxTokens(
+	got, _, _ := clampEffectiveMaxTokens(
 		model,
 		32000,
 		32000,
@@ -4069,6 +4097,34 @@ func TestClampEffectiveMaxTokensStartsShrinkingAtDefaultOutputBoundary(t *testin
 	)
 	if got != 30000 {
 		t.Fatalf("clampEffectiveMaxTokens() = %d, want 30000", got)
+	}
+}
+
+func TestClampEffectiveMaxTokensReportsInputThatFillsContextWindow(t *testing.T) {
+	// ~3000 bytes ≈ 1000 tokens plus the 256-token provider buffer: the input
+	// side alone fills the window, so no output budget is left.
+	model := config.ModelConfig{Limit: config.ModelLimit{Context: 1000, Output: 256}}
+	messages := []message.Message{{Role: "user", Content: strings.Repeat("x", 3000)}}
+
+	got, _, inputFits := clampEffectiveMaxTokens(model, 256, 256, RequestTuning{}, "", messages, nil, 900)
+	if inputFits {
+		t.Fatal("inputFits = true, want false for input that fills the context window")
+	}
+	if got != 1 {
+		t.Fatalf("clampEffectiveMaxTokens() = %d, want 1 (the output floor)", got)
+	}
+
+	// Without a provider-confirmed prompt size the conservative byte estimate
+	// must not refuse the request: a fitting request would be compacted for
+	// nothing. The provider call is the only way to find out.
+	if _, _, fits := clampEffectiveMaxTokens(model, 256, 256, RequestTuning{}, "", messages, nil, 0); !fits {
+		t.Fatal("inputFits = false without a provider-confirmed baseline")
+	}
+
+	// A request that leaves room for the normal output budget still fits.
+	roomy := config.ModelConfig{Limit: config.ModelLimit{Context: 128000, Output: 4096}}
+	if _, _, fits := clampEffectiveMaxTokens(roomy, 4096, 4096, RequestTuning{}, "", []message.Message{{Role: "user", Content: "hi"}}, nil, 0); !fits {
+		t.Fatal("inputFits = false, want true when the input leaves room for the output budget")
 	}
 }
 

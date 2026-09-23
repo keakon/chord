@@ -523,6 +523,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				a.MarkSkillInvokedByName(skillName)
 			}
 		}
+		a.notePressurePreparationFromToolResult(payload)
 	}
 
 	rawResult := payload.Result

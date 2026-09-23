@@ -659,6 +659,9 @@ func waitForContextNoticeCleared(t *testing.T, a *MainAgent) {
 
 func TestContextNoticeFirstDeliveryPersistsDurableMessage(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	// A durable row belongs to an open pressure cycle: the cycle identity is
+	// stamped on the row so a restore can adopt it instead of duplicating it.
+	a.notePressureStage(pressureStageReminded, a.currentOverlayWindowKey())
 	before := a.ctxMgr.MessageCount()
 	text := "Context is nearing the automatic-compaction threshold."
 	a.stashContextNotice(contextNoticePressure, text)
@@ -674,6 +677,9 @@ func TestContextNoticeFirstDeliveryPersistsDurableMessage(t *testing.T) {
 	if last.Role != message.RoleUser || last.Kind != message.KindContextNotice || last.NoticeLevel != contextNoticePressure || last.Content != wrapped {
 		t.Fatalf("persisted notice = %+v, want a user-role KindContextNotice at level %s carrying the wrapped text", last, contextNoticePressure)
 	}
+	if last.PressureCycleID == 0 {
+		t.Fatal("a durable notice row must carry the pressure cycle that wrote it")
+	}
 	if message.IsUserAuthored(last) {
 		t.Fatal("a context notice must not count as user-authored")
 	}
@@ -686,6 +692,7 @@ func TestContextNoticeFirstDeliveryPersistsDurableMessage(t *testing.T) {
 
 func TestContextNoticeRepeatDeliveryDoesNotPersistAgain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	a.notePressureStage(pressureStageReminded, a.currentOverlayWindowKey())
 	a.stashContextNotice(contextNoticePressure, "first full reminder")
 	a.noteContextPressureReminderAttached()
 	a.markOverlayClaimsDelivered()
@@ -1043,12 +1050,11 @@ func TestContextNoticeCleanupDisarmsOnFirstDeliveryOnly(t *testing.T) {
 }
 
 func TestQueueContextPressureReminderMarksNonReminderNoticesStale(t *testing.T) {
-	// Every overlay class persists its own KindContextNotice row, and a window
-	// can deliver the grace imminent notice or the externalization warning
-	// without ever delivering the sticky reminder (an explicit reminder line at
-	// or above the threshold never injects on its own, and a compact_context
-	// call silences the reminder for the window). A below-line drop must still
-	// withdraw those durable rows.
+	// The one durable row a cycle may write can be the grace imminent notice or
+	// the externalization warning rather than the sticky reminder (an explicit
+	// reminder line at or above the threshold never injects on its own, and a
+	// compact_context call silences the reminder for the window). A below-line
+	// drop must still withdraw that row.
 	cases := []struct {
 		name string
 		mark func(a *MainAgent)
@@ -1061,6 +1067,7 @@ func TestQueueContextPressureReminderMarksNonReminderNoticesStale(t *testing.T) 
 			a.noteCompactionImminentAttached()
 		}},
 		{name: "warning", mark: func(a *MainAgent) {
+			a.notePressureStage(pressureStageArmed, a.currentOverlayWindowKey())
 			a.stashContextNotice(contextNoticeWarning, compactionWarningText)
 			a.noteCompactionWarningAttached()
 		}},

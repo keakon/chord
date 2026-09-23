@@ -228,6 +228,9 @@ func IsRoutingInvalidated(err error) bool {
 
 // InvalidateRouting marks the current retry/fallback plan stale for all future
 // retry boundaries and resets provider-specific incremental transport chains.
+// It also drops the provider-confirmed input baseline: that size belonged to
+// the previous model window, and reusing it after a switch would let a stale
+// large baseline refuse a small request on a smaller window.
 func (c *Client) InvalidateRouting(reason string) {
 	if c == nil {
 		return
@@ -242,6 +245,7 @@ func (c *Client) InvalidateRouting(reason string) {
 	}
 	c.routingGeneration.Add(1)
 	c.routingChangedCh = make(chan struct{})
+	c.lastInputTokens = 0
 	c.mu.Unlock()
 	if prevCh != nil {
 		close(prevCh)

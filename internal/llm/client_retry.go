@@ -713,9 +713,12 @@ func (c *Client) completeStreamTarget(
 		log.Infof("disabling reasoning for replay-incompatible request provider=%v model=%v replay_level=%v", t.provider.Name(), t.modelID, replayLevel)
 	}
 	effectiveMaxTokens := t.maxTokens
-	if m, ok := t.provider.GetModel(t.modelID); ok {
-		effectiveMaxTokens = clampEffectiveMaxTokens(
-			m,
+	inputFits := true
+	inputEstimate := lastInputTokens
+	modelCfg, hasModelCfg := t.provider.GetModel(t.modelID)
+	if hasModelCfg {
+		effectiveMaxTokens, inputEstimate, inputFits = clampEffectiveMaxTokens(
+			modelCfg,
 			effectiveMaxTokens,
 			outputCapSetting,
 			requestTuning,
@@ -724,6 +727,27 @@ func (c *Client) completeStreamTarget(
 			tools,
 			lastInputTokens,
 		)
+	}
+	if !inputFits {
+		// The estimated request input already fills the context window, so no
+		// positive output budget is left: the provider would reject the request
+		// or answer with a one-token reply. Refuse it locally and report the
+		// target as oversize so the pool-exhaustion path starts oversize-driven
+		// compaction (or surfaces the compaction-unavailable error) instead of
+		// spending a doomed round trip on the wire.
+		oversizeErr := &ContextLengthExceededError{
+			ProviderMessage: fmt.Sprintf("estimated request input %d tokens exceeds the %d-token context window", inputEstimate, modelCfg.Limit.Context),
+		}
+		if status != nil && !t.isFallback && status.FallbackReason == "" {
+			status.FallbackReason = classifyFallbackReason(oversizeErr)
+		}
+		result.setLastErr(t.provider, oversizeErr)
+		// Counted as an attempted target: this candidate could have served the
+		// request and refused it for size. No wire request was sent for it.
+		result.hadRequestAttempt = true
+		oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
+		log.Infof("skipping request: estimated input exceeds the model context window provider=%v model=%v variant=%v input_tokens_est=%v context_limit=%v", t.provider.Name(), t.modelID, t.variant, inputEstimate, modelCfg.Limit.Context)
+		return result, lastInputTokens, nil
 	}
 	var apiKey string
 	var resp *message.Response
@@ -1659,6 +1683,11 @@ func EstimateRequestInputTokens(systemPrompt string, messages []message.Message,
 	return estimateRequestInputTokens(systemPrompt, messages, tools)
 }
 
+// clampEffectiveMaxTokens returns the output budget the model can accept for
+// this request, the estimated request input, and whether the estimated input
+// leaves room for at least one output token inside the model's context window.
+// A false third result means the input side alone fills the window: no output
+// budget is left for the provider to honour, so the request must not be sent.
 func clampEffectiveMaxTokens(
 	model config.ModelConfig,
 	effectiveMaxTokens int,
@@ -1668,7 +1697,7 @@ func clampEffectiveMaxTokens(
 	messages []message.Message,
 	tools []message.ToolDefinition,
 	lastInputTokens int,
-) int {
+) (int, int, bool) {
 	if model.Limit.Output > 0 && model.Limit.Output < effectiveMaxTokens {
 		effectiveMaxTokens = model.Limit.Output
 	}
@@ -1691,12 +1720,20 @@ func clampEffectiveMaxTokens(
 	}
 
 	inputEstimate := max(estimateRequestInputTokens(systemPrompt, messages, tools), lastInputTokens)
+	inputFits := true
 	if model.Limit.Context > 0 {
 		buffer := max(model.Limit.Context/100, 256)
 		contextCap := max(model.Limit.Context-inputEstimate-buffer, 1)
 		if contextCap < effectiveMaxTokens {
 			effectiveMaxTokens = contextCap
 		}
+		// The byte-based estimate is deliberately conservative, so it must not
+		// refuse a request on its own: without a provider-confirmed prompt size
+		// the runtime could refuse — and then needlessly compact — a request the
+		// provider would accept. A session that already saw a provider response
+		// carries an exact baseline (lastInputTokens), so only that case may be
+		// refused locally.
+		inputFits = lastInputTokens <= 0 || inputEstimate+buffer < model.Limit.Context
 	}
-	return effectiveMaxTokens
+	return effectiveMaxTokens, inputEstimate, inputFits
 }

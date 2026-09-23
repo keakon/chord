@@ -1139,6 +1139,9 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 	ctx, cancel := context.WithTimeout(a.parentCtx, compactionDraftTimeout)
 	ctx = llm.WithResponsesTurnState(ctx, bundle.responsesState)
 	a.beginCompactionState(planID, target, compactionTriggerModelDriven, continuation, headSplit, cancel)
+	if a.ctxMgr != nil {
+		a.notePressureStage(pressureStageCompacting, a.currentOverlayWindowKey())
+	}
 	if a.walltime != nil {
 		a.walltime.startCompactionAt(planID, a.currentAgentName(), target.turnID)
 	}
@@ -1894,6 +1897,11 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// draft instead of shipping a snapshot that was already wrong when it
 	// landed.
 	summary = ensureActiveBackgroundJobSnapshot(summary, bundle.backgroundObjects, time.Now())
+	// The same runtime-owned composition the summarization runner applies: the
+	// authoritative latest request and the unsettled tool calls never depend on
+	// model wording on either path. The anchor above is reused so the same
+	// compaction does not scan the transcript for it twice.
+	summary = applyCompactionRecoveryState(summary, buildCompactionRecoveryStateWithAnchor(anchor, headSnapshot))
 	// The previous checkpoint's machine-carryable state was merged into the
 	// typed state block above; its natural-language body is deliberately NOT
 	// carried forward. The model re-states its current objective on every
@@ -2060,7 +2068,10 @@ const inheritedCheckpointLabel = "Inherited from the previous context checkpoint
 
 // modelDrivenCurrentUserRequestSection renders the `## Current User Request`
 // section of a deterministic checkpoint from the latest-request anchor, capping
-// the anchor text like the structured-fallback summary does.
+// the anchor text like the structured-fallback summary does. It is the
+// canonical renderer for both compaction paths: the summarization runner
+// replaces the summarizer's own body with it (ensureCompactionLatestRequestAnchor),
+// so a weak or fallback summary cannot lose or stale the authoritative request.
 func modelDrivenCurrentUserRequestSection(anchor fallbackAnchor) string {
 	if anchor.Kind != "" {
 		if anchor.Kind == "inherited_checkpoint" {

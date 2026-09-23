@@ -423,14 +423,14 @@ func validateCompactionSummary(summary string) error {
 		return fmt.Errorf("compaction summary too short (%d chars)", len([]rune(summary)))
 	}
 	positions := compactionHeadingPositions(summary)
-	matched := len(positions)
-	if matched < len(compactionRequiredHeadings) {
-		return fmt.Errorf("compaction summary missing required sections (%d/%d)", matched, len(compactionRequiredHeadings))
+	if missing := missingCompactionHeadings(summary); len(missing) > 0 {
+		return &compactionSummaryValidationError{Missing: missing, Total: len(compactionRequiredHeadings)}
 	}
-	for i := 1; i < len(positions); i++ {
-		if positions[i] <= positions[i-1] {
-			return fmt.Errorf("compaction summary sections out of order")
-		}
+	// compactionHeadingPositions scans headings sequentially, so a short result
+	// means an earlier heading appeared after a later one rather than a missing
+	// section.
+	if len(positions) != len(compactionRequiredHeadings) {
+		return fmt.Errorf("compaction summary sections out of order")
 	}
 	if strings.TrimSpace(summary[:positions[0]]) != "" {
 		return fmt.Errorf("compaction summary has content before first required section")
@@ -442,6 +442,19 @@ func validateCompactionSummary(summary string) error {
 		return err
 	}
 	return nil
+}
+
+// compactionSummaryValidationError names the required headings a summary
+// omitted so repair prompts and diagnostics can act on the exact sections
+// instead of only a match ratio.
+type compactionSummaryValidationError struct {
+	Missing []string
+	Total   int
+}
+
+func (e *compactionSummaryValidationError) Error() string {
+	return fmt.Sprintf("compaction summary missing required sections (%d/%d): %s",
+		e.Total-len(e.Missing), e.Total, strings.Join(e.Missing, ", "))
 }
 
 var (
@@ -598,6 +611,16 @@ func normalizeTodoStateLine(line string) string {
 func containsThinkingTag(summary string) bool {
 	lower := strings.ToLower(summary)
 	return strings.Contains(lower, "<think>") || strings.Contains(lower, "</think>")
+}
+
+func missingCompactionHeadings(summary string) []string {
+	missing := make([]string, 0, len(compactionRequiredHeadings))
+	for _, heading := range compactionRequiredHeadings {
+		if findMarkdownHeadingLine(summary, heading) < 0 {
+			missing = append(missing, heading)
+		}
+	}
+	return missing
 }
 
 func compactionHeadingPositions(summary string) []int {

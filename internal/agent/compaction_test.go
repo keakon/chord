@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -3429,6 +3430,59 @@ func TestBuildCompactionRepairPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildCompactionRepairPromptListsRequiredHeadings(t *testing.T) {
+	original := "Archived history file: history-1.md\n\nTranscript:\n- user: fix compaction"
+	prompt := buildCompactionRepairPrompt(original, fmt.Errorf("compaction summary next step is too vague"))
+	for _, heading := range compactionRequiredHeadings {
+		if !strings.Contains(prompt, "- "+heading) {
+			t.Fatalf("repair prompt missing required heading %q:\n%s", heading, prompt)
+		}
+	}
+	if strings.Contains(prompt, "The missing sections are") {
+		t.Fatalf("repair prompt should not name missing sections when validation failed for another reason:\n%s", prompt)
+	}
+}
+
+func TestBuildCompactionRepairPromptNamesMissingSections(t *testing.T) {
+	original := "Archived history file: history-1.md\n\nTranscript:\n- user: fix compaction"
+	broken := strings.Replace(validCompactionSummaryForTest("history-1.md"), "## Progress\n- progress recorded\n\n", "", 1)
+	if strings.Contains(broken, "## Progress") {
+		t.Fatalf("test fixture still contains the removed section:\n%s", broken)
+	}
+	validationErr := validateCompactionSummary(broken)
+	if validationErr == nil {
+		t.Fatal("expected a summary without the Progress section to be rejected")
+	}
+	wrapped := fmt.Errorf("%w: %w", errInvalidCompactionSummary, validationErr)
+	if !errors.Is(wrapped, errInvalidCompactionSummary) {
+		t.Fatal("missing-section rejection should stay wrapped as an invalid compaction summary")
+	}
+	missing := compactionMissingHeadings(wrapped)
+	if len(missing) != 1 || missing[0] != "## Progress" {
+		t.Fatalf("missing headings = %v, want [## Progress]", missing)
+	}
+	prompt := buildCompactionRepairPrompt(original, wrapped)
+	if !strings.Contains(prompt, "The missing sections are: ## Progress.") {
+		t.Fatalf("repair prompt did not name the missing section:\n%s", prompt)
+	}
+}
+
+func TestValidateCompactionSummaryRejectsOutOfOrderSections(t *testing.T) {
+	summary := strings.Replace(validCompactionSummaryForTest("history-1.md"),
+		"## Open Problems\n- none\n\n## Next Step\n- Inspect src/current_task.go and continue the current task.",
+		"## Next Step\n- Inspect src/current_task.go and continue the current task.\n\n## Open Problems\n- none", 1)
+	err := validateCompactionSummary(summary)
+	if err == nil {
+		t.Fatal("expected a summary with swapped sections to be rejected")
+	}
+	if err.Error() != "compaction summary sections out of order" {
+		t.Fatalf("validateCompactionSummary() = %v, want out-of-order rejection", err)
+	}
+	if missing := compactionMissingHeadings(err); len(missing) != 0 {
+		t.Fatalf("out-of-order rejection reported missing headings: %v", missing)
+	}
+}
+
 func TestValidateCompactionSummaryRejectsLegacySections(t *testing.T) {
 	summary := `## Goal
 - Continue work with enough detail to pass the minimum summary length requirement for validation.
@@ -4858,6 +4912,7 @@ func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history: history-1.md\n- internal/agent/compaction.go\n\n## Todo State\n- none\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -4914,6 +4969,7 @@ func TestInjectCompactionFileContextDetectsChangeBeforeFirstInjection(t *testing
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -4943,6 +4999,7 @@ func TestInjectCompactionFileContextTreatsLegacyCheckpointAsChanged(t *testing.T
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -4986,6 +5043,7 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 	)
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
 	msgs := []message.Message{
 		{Role: "user", IsCompactionSummary: true, Content: summary},
 		{Role: "user", Content: "continue"},

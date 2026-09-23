@@ -110,6 +110,12 @@ func (a *MainAgent) endCompactionGrace(reason string, current uint64) {
 	a.compactionGraceStartBatch = 0
 	a.compactionGraceExhausted = true
 	a.pendingCompactionImminent = ""
+	// The cycle keeps its threshold-class pressure (the usage-driven request
+	// is still armed and the next crossing starts compaction immediately);
+	// only the countdown stage is over.
+	if a.ctxMgr != nil {
+		a.notePressureStage(pressureStageArmed, a.currentOverlayWindowKey())
+	}
 	if active || reason == "hard_ceiling" || reason == "model_driven_settled" {
 		a.recordCompactionGraceEvent(reason, current)
 	}
@@ -146,6 +152,11 @@ func (a *MainAgent) clearCompactionGrace() {
 	a.compactionGraceActive = false
 	a.compactionGraceExhausted = false
 	a.pendingCompactionImminent = ""
+	// The window the cycle belonged to is gone (session switch, restore,
+	// model/budget change, or a durable apply that ended it first): close it so
+	// the next pressure observation opens a fresh identity instead of
+	// inheriting the reached stage.
+	a.endPressureCycle(pressureEndWindowClosed)
 }
 
 func (a *MainAgent) recordCompactionGraceEvent(stage string, batch uint64) {
@@ -167,5 +178,6 @@ func (a *MainAgent) recordCompactionGraceEvent(stage string, batch uint64) {
 // model, budget) key but only records first/repeat delivery stages for telemetry.
 func (a *MainAgent) queueCompactionImminentNotice(remaining int) {
 	a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.currentOverlayWindowKey())
+	a.notePressureStage(pressureStageGrace, a.currentOverlayWindowKey())
 	a.stageContextNotice(contextNoticeImminent, compactionImminentText(remaining))
 }
