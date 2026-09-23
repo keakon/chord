@@ -40,14 +40,16 @@ Gemini 用 `extra_body.google.thinking_config`，Claude 用
    但没有 reasoning 回放契约时（文档里的例子是走 Chat Completions 的 Grok），
    才设置 `compat.chat_completions.keep_reasoning_effort: true`。
 3. **后端会校验回传的思考**：设置 `compat.reasoning_continuity.mode:
-   openai_visible` 加 `preserve_history: true`，让每条 assistant 消息原样
+   openai_visible` 加 `reasoning_replay: all`，让每条 assistant 消息原样
    回传。带 tools 的 DeepSeek、Kimi K3、Qwen `preserve_thinking`、
-   GLM `clear_thinking: false` 都属于这一类。
+   GLM `clear_thinking: false` 都属于这一类。第三方中转不保证遵守官方
+   契约（有的会拒绝回放的 `reasoning_content`），把 `all` 当成必需前
+   先确认实际端点的行为。
 4. **Responses、Messages、Gemini**：原生 continuity 自动生效：Chord 会保存
    明文或带签名 / 加密的状态，并在目标线路允许时回放，无需配置。
 
-`preserve_history: true` 会让已完成轮次的思考在每次请求中重复回放，后端按
-输入计费。第 3 条不适用时不要开。
+`reasoning_replay: all` 会让已完成轮次的思考在每次请求中重复回放，后端按
+输入计费。默认的 `current_turn` 会剥离已完成轮次，第 3 条不适用时用默认即可。
 
 ## 跨 provider 回退时保留什么
 
@@ -60,8 +62,10 @@ Gemini 用 `extra_body.google.thinking_config`，Claude 用
 ## 计费与行为提示
 
 - 思考 token 算输出；回放的 reasoning 算输入。
-- 已完成轮次的 thinking 默认会被剥离，因为多数后端在服务端同样丢弃它，却
-  照常收输入费。
+- 已完成轮次的 thinking 默认会被剥离，用来控制请求体积。Anthropic 会在服务端
+  过滤历史轮的 thinking 块，只为模型实际看到的块计费，省掉它们不花冤枉钱；
+  原样回放历史的端点会为保留的每个 token 计费，所以上面那些契约要显式选
+  `all`。
 - 有些后端会固定采样参数，或在思考设置变化时让缓存失效：Kimi K3 固定
   `temperature` / `top_p` / penalties，会话中途改 `reasoning_effort` 会让
   prefix cache 失效。

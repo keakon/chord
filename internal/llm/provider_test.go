@@ -1824,29 +1824,27 @@ func TestProviderConfig_ReasoningContinuityCompat_ModelOverride(t *testing.T) {
 	}
 }
 
-func TestProviderConfig_ReasoningContinuityCompat_PreserveHistoryMerge(t *testing.T) {
-	preserve := true
-	suppress := false
+func TestProviderConfig_ReasoningContinuityCompat_ReasoningReplayMerge(t *testing.T) {
 	cfg := config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
 		Compat: &config.ProviderCompatConfig{
-			ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible", PreserveHistory: &preserve},
+			ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "openai_visible", ReasoningReplay: "all"},
 		},
 		Models: map[string]config.ModelConfig{
 			"inherits": {},
 			"overrides": {
 				Compat: &config.ModelCompatConfig{
-					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{PreserveHistory: &suppress},
+					ReasoningContinuity: &config.ReasoningContinuityCompatConfig{ReasoningReplay: "current_turn"},
 				},
 			},
 		},
 	}
 	p := NewProviderConfig("test", cfg, []string{"k"})
-	if got := p.ReasoningContinuityCompat("inherits"); !got.PreserveHistoryValue() {
-		t.Fatalf("expected provider-level preserve_history to be inherited, got %#v", got)
+	if got := p.ReasoningContinuityCompat("inherits"); got.ReasoningReplayValue() != "all" {
+		t.Fatalf("expected provider-level reasoning_replay=all to be inherited, got %#v", got)
 	}
-	if got := p.ReasoningContinuityCompat("overrides"); got.PreserveHistoryValue() {
-		t.Fatalf("expected model-level preserve_history=false to override, got %#v", got)
+	if got := p.ReasoningContinuityCompat("overrides"); got.ReasoningReplayValue() != "current_turn" {
+		t.Fatalf("expected model-level reasoning_replay=current_turn to override, got %#v", got)
 	}
 }
 

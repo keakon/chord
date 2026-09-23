@@ -1469,16 +1469,16 @@ func normalizeMessagesForPoolTargetWithOptions(msgs []message.Message, target Fa
 		modelRef = modelRef + "@" + variant
 	}
 	tm := modelcompat.TargetModel{
-		ProviderID:                  target.ProviderConfig.Name(),
-		ModelID:                     target.ModelID,
-		Variant:                     variant,
-		ModelRef:                    modelRef,
-		WireFamily:                  providerWireFamily(target.ProviderConfig),
-		NativeFamily:                target.ProviderConfig.NativeFamily(target.ModelID),
-		ReasoningContinuityMode:     reasoningContinuityMode(target.ProviderConfig, target.ModelID, tuning),
-		PreserveHistoricalReasoning: preserveHistoricalReasoning(target.ProviderConfig, target.ModelID),
-		ToolResultEncoding:          toolResultEncoding(target.ProviderConfig),
-		SupportsStructuredTools:     supportsStructuredTools(target.ProviderConfig),
+		ProviderID:              target.ProviderConfig.Name(),
+		ModelID:                 target.ModelID,
+		Variant:                 variant,
+		ModelRef:                modelRef,
+		WireFamily:              providerWireFamily(target.ProviderConfig),
+		NativeFamily:            target.ProviderConfig.NativeFamily(target.ModelID),
+		ReasoningContinuityMode: reasoningContinuityMode(target.ProviderConfig, target.ModelID, tuning),
+		ReasoningReplay:         reasoningReplayPolicy(target.ProviderConfig, target.ModelID),
+		ToolResultEncoding:      toolResultEncoding(target.ProviderConfig),
+		SupportsStructuredTools: supportsStructuredTools(target.ProviderConfig),
 	}
 	return modelcompat.NormalizeForTarget(msgs, tm, modelcompat.NormalizeOptions{StructuredTools: true, ReplayCompat: replayCompat})
 }
@@ -1610,15 +1610,17 @@ func reasoningContinuityMode(provider *ProviderConfig, modelID string, tuning Re
 	return modelcompat.ReasoningContinuityNone
 }
 
-// preserveHistoricalReasoning reports whether the target opts out of the
-// completed-turn plaintext reasoning strip. Deliberately independent of
-// request tuning: even when a degraded request disables reasoning generation,
-// a preserved-thinking backend still expects the existing history unchanged.
-func preserveHistoricalReasoning(provider *ProviderConfig, modelID string) bool {
+// reasoningReplayPolicy resolves the target's reasoning replay window from
+// compat.reasoning_continuity.reasoning_replay. Empty or unknown values fall
+// back to current_turn (see modelcompat.NormalizeReasoningReplay). Deliberately
+// independent of request tuning: even when a degraded request disables
+// reasoning generation, a preserved-thinking backend still expects the
+// existing history unchanged.
+func reasoningReplayPolicy(provider *ProviderConfig, modelID string) string {
 	if provider == nil {
-		return false
+		return modelcompat.ReasoningReplayAll
 	}
-	return provider.ReasoningContinuityCompat(modelID).PreserveHistoryValue()
+	return modelcompat.NormalizeReasoningReplay(provider.ReasoningContinuityCompat(modelID).ReasoningReplayValue())
 }
 
 func reasoningContinuityCompatMode(provider *ProviderConfig, modelID string) string {

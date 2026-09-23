@@ -46,15 +46,18 @@ The answer depends on whether the backend requires its own reasoning content bac
    Chat Completions is the documented case).
 3. **The backend validates the replayed reasoning**: set
    `compat.reasoning_continuity.mode: openai_visible` plus
-   `preserve_history: true` so every assistant message goes back unchanged.
+   `reasoning_replay: all` so every assistant message goes back unchanged.
    This is the contract for DeepSeek when a request carries tools, Kimi K3,
-   Qwen `preserve_thinking`, and GLM `clear_thinking: false`.
+   Qwen `preserve_thinking`, and GLM `clear_thinking: false`. Third-party
+   relays do not reliably follow the official API here (some reject replayed
+   `reasoning_content`), so verify the actual endpoint before relying on `all`.
 4. **Responses, Messages, and Gemini**: native continuity is automatic. Chord
    captures the plaintext or signed/encrypted state and replays it where the
    wire allows; nothing to configure.
 
-`preserve_history: true` replays completed-turn thinking on every request, which
-the backend bills as input. Leave it off unless the contract in step 3 applies.
+`reasoning_replay: all` replays completed-turn thinking on every request, which
+the backend bills as input. The default (`current_turn`) strips completed turns
+and is enough unless the contract in step 3 applies.
 
 ## What crosses a fallback pool
 
@@ -68,8 +71,11 @@ structured, and that is the part which must survive a provider switch. See
 ## Cost and behavior notes
 
 - Thinking tokens are output tokens; replayed reasoning is input tokens.
-- Completed-turn reasoning is stripped by default because most backends drop it
-  server-side while still billing it.
+- Completed-turn reasoning is stripped by default to keep requests small.
+  Anthropic filters prior-turn thinking blocks server-side and bills only the
+  blocks the model actually sees, so omitting them costs nothing there;
+  backends that replay history verbatim bill every retained token, which is
+  why the contracts above opt into `all` explicitly.
 - Some backends pin sampling or invalidate caches when thinking settings change:
   Kimi K3 fixes `temperature` / `top_p` / penalties and drops the prefix cache
   when `reasoning_effort` changes mid-session.

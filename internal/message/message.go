@@ -366,12 +366,23 @@ type MailboxMetadata struct {
 
 // IsUserAuthored reports whether msg represents input authored by the user
 // rather than a synthetic user-role control or mailbox message.
+//
+// This is the single source of truth for that distinction: every surface that
+// asks "did the user say this" — the latest-request anchor of a context
+// checkpoint, terminal titles, input statistics, and the model-compat
+// current-turn boundary — must agree, so a synthetic user-role message never
+// counts as a new turn just because it carries the user role.
 func IsUserAuthored(msg Message) bool {
 	if msg.Role != RoleUser || msg.IsCompactionSummary {
 		return false
 	}
 	switch msg.Kind {
 	case KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice:
+		return false
+	case KindTurnOverlay:
+		// Request-scoped runtime hints ride the request tail as user-role
+		// messages. They never reach durable history, but a consumer that
+		// inspects a request face still must not treat one as a user turn.
 		return false
 	default:
 		return true

@@ -110,9 +110,9 @@ the task into smaller requests.
 
 For GLM Preserved Thinking, that body override must include
 `thinking.type: enabled` and `thinking.clear_thinking: false`, plus
-`reasoning_continuity.preserve_history: true` so Chord keeps completed-turn
+`reasoning_continuity.reasoning_replay: all` so Chord keeps completed-turn
 reasoning in the replayed history. DeepSeek needs `thinking.type: enabled` and
-`reasoning_continuity.preserve_history: true`: when a request carries tools,
+`reasoning_continuity.reasoning_replay: all`: when a request carries tools,
 DeepSeek requires the full `reasoning_content` from every earlier turn back and
 returns a `400` otherwise. In both cases, replayed `reasoning_content` must
 remain complete, unchanged, and in order.

@@ -19,6 +19,15 @@ const (
 	ReasoningContinuityAnthropicUnsigned = "anthropic_unsigned"
 	ReasoningContinuityOpenAIVisible     = "openai_visible"
 
+	// Reasoning replay window policies for historical thinking. The policy
+	// selects how much reasoning outside the current turn is replayed; the
+	// latest turn (everything after the last user message, including its
+	// tool loop) is always replayed unchanged under all and current_turn.
+	// current_turn is the default (see NormalizeReasoningReplay).
+	ReasoningReplayAll         = "all"
+	ReasoningReplayCurrentTurn = "current_turn"
+	ReasoningReplayNone        = "none"
+
 	ToolResultEncodingNone               = "none"
 	ToolResultEncodingOpenAIToolRole     = "openai_tool_role"
 	ToolResultEncodingAnthropicUserBlock = "anthropic_user_blocks"
@@ -44,19 +53,23 @@ func HasNativeReplayPayload(msgs []message.Message) bool {
 	return false
 }
 
-// LastUserMessageIndex returns the index of the last real user message, or -1.
-// Request-scoped turn overlays (KindTurnOverlay, e.g. <system-reminder> hints)
-// are appended after the conversation tail and are not real user turns, so they
-// are skipped: counting one as the last user message would extend the
-// reasoning-strip / validation window past the current turn and strip the
-// reasoning the backend actually consumes in this turn's tool chain.
-// Thinking-mode chat backends validate reasoning presence only for assistant
-// tool-call messages after this boundary; normalize and the llm retry layer
-// must agree on the same window definition.
+// LastUserMessageIndex returns the index of the last user-authored message, or
+// -1. Synthetic user-role messages are not user turns: request-scoped turn
+// overlays (KindTurnOverlay, e.g. <system-reminder> hints) are appended after
+// the conversation tail, and hook feedback, background results, stream
+// continuations, loop notices, SubAgent mailbox deliveries and context notices
+// are appended mid-turn. Counting any of them as the last user message would
+// extend the reasoning-strip / validation window past the current turn and
+// strip the reasoning the backend actually consumes in this turn's tool chain,
+// so the boundary is defined by message.IsUserAuthored — the same predicate the
+// durable "did the user say this" surfaces use. Thinking-mode chat backends
+// validate reasoning presence only for assistant tool-call messages after this
+// boundary; normalize and the llm retry layer must agree on the same window
+// definition.
 func LastUserMessageIndex(msgs []message.Message) int {
 	last := -1
 	for i := range msgs {
-		if msgs[i].Role == message.RoleUser && msgs[i].Kind != message.KindTurnOverlay {
+		if message.IsUserAuthored(msgs[i]) {
 			last = i
 		}
 	}
@@ -76,13 +89,18 @@ type TargetModel struct {
 	// family stays the fallback when no model family resolves.
 	NativeFamily            string
 	ReasoningContinuityMode string
-	// PreserveHistoricalReasoning exempts the target from the completed-turn
-	// plaintext reasoning strip: preserved-thinking backends keep earlier-turn
-	// reasoning in their chat template and expect it replayed unchanged. Set
-	// from compat.reasoning_continuity.preserve_history.
-	PreserveHistoricalReasoning bool
-	ToolResultEncoding          string
-	SupportsStructuredTools     bool
+	// ReasoningReplay selects how much historical reasoning/thinking is
+	// replayed for the target. "all" replays completed-turn reasoning
+	// unchanged: plaintext history plus family-matched native thinking.
+	// "current_turn" keeps only reasoning after the last user message (the
+	// current tool loop); everything earlier is stripped. "none" strips
+	// reasoning everywhere, including the current turn. Empty or unknown
+	// values resolve to "current_turn", the strip default it inherited from
+	// the plaintext-only policy it replaces. Set from
+	// compat.reasoning_continuity.reasoning_replay.
+	ReasoningReplay         string
+	ToolResultEncoding      string
+	SupportsStructuredTools bool
 }
 
 // Replay compatibility degradation ladder for provider-bound native payloads.
@@ -140,13 +158,12 @@ type NormalizeReport struct {
 	// provenance matching. It is diagnostic output; retry decisions compare the
 	// actual normalized request shapes because a stricter level may be identical.
 	ForeignNativeReplays int
-	// StrippedHistoricalReasoning counts plaintext reasoning payloads removed
-	// from completed turns (before the last user message). Deliberately not
-	// part of Changed(): for a given target the strip is applied identically
-	// at every replay level (preserved-thinking targets opt out entirely via
-	// PreserveHistoricalReasoning), so a replay rejection can never be
-	// attributed to it and it must not push bare-400 heuristics into the
-	// degradation ladder.
+	// StrippedHistoricalReasoning counts reasoning payloads removed by the
+	// replay-window policy (reasoning_replay) outside the current turn.
+	// Deliberately not part of Changed(): for a given target the window strip
+	// is applied identically at every replay level, so a replay rejection can
+	// never be attributed to it and it must not push bare-400 heuristics into
+	// the degradation ladder.
 	StrippedHistoricalReasoning int
 	Warnings                    []string
 }
@@ -155,6 +172,94 @@ func (r NormalizeReport) Changed() bool {
 	return r.DroppedThinkingBlocks != 0 || r.DowngradedToolCalls != 0 || r.DowngradedReasoning != 0 ||
 		r.ConvertedReasoning != 0 || r.DroppedToolCalls != 0 || r.DroppedToolResults != 0 ||
 		r.ForeignNativeReplays != 0 || len(r.Warnings) != 0
+}
+
+// NormalizeReasoningReplay maps a configured reasoning_replay value onto the
+// effective window policy. Empty or unknown values resolve to
+// ReasoningReplayCurrentTurn: most thinking backends validate or use reasoning
+// only after the last user message and drop earlier turns server-side, so
+// replaying them inflates every request. Endpoints whose contract requires the
+// complete assistant history (DeepSeek when a request carries tools, Kimi K3 /
+// keep:all, Qwen preserve_thinking, GLM clear_thinking:false) opt in with
+// "all".
+func NormalizeReasoningReplay(policy string) string {
+	switch strings.TrimSpace(policy) {
+	case ReasoningReplayAll:
+		return ReasoningReplayAll
+	case ReasoningReplayNone:
+		return ReasoningReplayNone
+	default:
+		return ReasoningReplayCurrentTurn
+	}
+}
+
+// reasoningWindowStrips reports whether the message at msgIndex falls outside
+// the policy's replay window. current_turn keeps everything after the last
+// user message (the current tool loop); none strips every message. A
+// conversation without any user message (lastUserIdx == -1) keeps everything
+// under current_turn, matching the completed-turn strip it replaces.
+func reasoningWindowStrips(policy string, msgIndex, lastUserIdx int) bool {
+	switch policy {
+	case ReasoningReplayNone:
+		return true
+	case ReasoningReplayCurrentTurn:
+		return msgIndex < lastUserIdx
+	default:
+		return false
+	}
+}
+
+// stripReasoningForReplayWindow removes every reasoning payload from msg while
+// keeping the tool trajectory (tool calls, results, and their pairing)
+// intact: plaintext reasoning_content, all thinking blocks, Responses
+// reasoning items, Gemini thought parts, and per-call thought signatures.
+// Non-reasoning Responses items and Gemini function-call parts stay so the
+// action history survives; only their thinking state is dropped. It returns
+// how many payloads were removed for the StrippedHistoricalReasoning report
+// counter, which deliberately stays out of Changed().
+func stripReasoningForReplayWindow(msg *message.Message) int {
+	stripped := 0
+	if strings.TrimSpace(msg.ReasoningContent) != "" {
+		msg.ReasoningContent = ""
+		stripped++
+	}
+	if len(msg.ThinkingBlocks) > 0 {
+		stripped += len(msg.ThinkingBlocks)
+		msg.ThinkingBlocks = nil
+	}
+	if len(msg.ResponsesOutput) > 0 {
+		kept := make([]message.ResponsesOutputItem, 0, len(msg.ResponsesOutput))
+		for _, item := range msg.ResponsesOutput {
+			if item.Type == "reasoning" {
+				stripped++
+				continue
+			}
+			kept = append(kept, item)
+		}
+		msg.ResponsesOutput = kept
+	}
+	if len(msg.GeminiParts) > 0 {
+		kept := make([]message.GeminiReplayPart, 0, len(msg.GeminiParts))
+		for _, part := range msg.GeminiParts {
+			if part.Type == "thought" {
+				stripped++
+				continue
+			}
+			if strings.TrimSpace(part.ThoughtSignature) != "" {
+				part.ThoughtSignature = ""
+				stripped++
+			}
+			kept = append(kept, part)
+		}
+		msg.GeminiParts = kept
+	}
+	for j := range msg.ToolCalls {
+		if strings.TrimSpace(msg.ToolCalls[j].ThoughtSignature) != "" {
+			msg.ToolCalls[j].ThoughtSignature = ""
+			stripped++
+		}
+	}
+	return stripped
 }
 
 // NormalizeForTarget returns a wire-only deep-copied message slice suitable for
@@ -191,39 +296,28 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	// Thinking-mode chat backends validate reasoning presence only for
 	// assistant tool-call messages after the last user message.
 	lastUserIdx := LastUserMessageIndex(out)
+	replayPolicy := NormalizeReasoningReplay(target.ReasoningReplay)
 
 	for i := range out {
 		msg := &out[i]
-		// Reasoning continuity is usually a current-turn contract: most
+		// The replay window is a per-target policy (reasoning_replay): most
 		// thinking-mode chat backends validate reasoning presence only after
 		// the last user message, and their chat templates drop earlier-turn
 		// reasoning server-side, so replaying it inflates every request for
 		// nothing — measured at 56-68% of large DeepSeek prompts (plaintext
 		// reasoning_content on the chat wire, unsigned thinking blocks on the
-		// Anthropic-compatible wire). Strip both from completed turns before
-		// any replay or sensitivity decision. Preserved-thinking backends
-		// (Kimi keep:all, Qwen preserve_thinking, GLM clear_thinking:false)
-		// keep earlier-turn reasoning in their template and expect it replayed
-		// unchanged — they opt out per target via
-		// compat.reasoning_continuity.preserve_history. Cryptographically
-		// bound payloads (signed or redacted Anthropic blocks, Responses
-		// items, Gemini parts) keep their provider-specific handling below.
-		if i < lastUserIdx && !target.PreserveHistoricalReasoning {
-			if strings.TrimSpace(msg.ReasoningContent) != "" {
-				msg.ReasoningContent = ""
-				report.StrippedHistoricalReasoning++
-			}
-			if len(msg.ThinkingBlocks) > 0 {
-				kept := msg.ThinkingBlocks[:0]
-				for _, block := range msg.ThinkingBlocks {
-					if block.Replayable() {
-						kept = append(kept, block)
-						continue
-					}
-					report.StrippedHistoricalReasoning++
-				}
-				msg.ThinkingBlocks = kept
-			}
+		// Anthropic-compatible wire). current_turn strips every reasoning
+		// payload outside the current tool loop, including provider-bound
+		// native thinking whose family would otherwise replay it; all keeps
+		// completed-turn reasoning for preserved-thinking backends (Kimi K3 /
+		// keep:all, Qwen preserve_thinking, GLM clear_thinking:false, DeepSeek
+		// tool mode) that keep earlier-turn reasoning in their template and
+		// expect it replayed unchanged; none strips reasoning everywhere.
+		// current_turn is the default policy (NormalizeReasoningReplay).
+		// The tool trajectory itself (tool calls, results, and their pairing)
+		// always survives the window strip — only thinking state is dropped.
+		if reasoningWindowStrips(replayPolicy, i, lastUserIdx) {
+			report.StrippedHistoricalReasoning += stripReasoningForReplayWindow(msg)
 		}
 		if msg.Kind == message.KindThinkingReplayPrefix && opts.ReplayCompat >= ReplayCompatSynthesized {
 			// The prefix is a request-only best-effort extension for compatible

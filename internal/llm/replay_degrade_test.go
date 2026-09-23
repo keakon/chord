@@ -92,13 +92,31 @@ func crossProviderReplayMessages() []message.Message {
 }
 
 func replayTestClient(rejectCount int) (*Client, *ProviderConfig, *replayRejectingProvider) {
+	return replayTestClientWithModel(rejectCount, config.ModelConfig{})
+}
+
+// replayTestClientWithModel pins the target model's config. Pass
+// replayAllModel() when the test asserts a specific replay ladder rung.
+func replayTestClientWithModel(rejectCount int, model config.ModelConfig) (*Client, *ProviderConfig, *replayRejectingProvider) {
 	cfg := NewProviderConfig("responses", config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
-		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+		Models: map[string]config.ModelConfig{"gpt-5.6-sol": model},
 	}, []string{"key"})
 	disableRetryDelayForTest(cfg)
 	impl := &replayRejectingProvider{rejectCount: rejectCount}
 	return NewClient(cfg, impl, "gpt-5.6-sol", 1024, ""), cfg, impl
+}
+
+// replayAllModel keeps completed-turn native payloads whole so the replay
+// ladder still has something to degrade. Tests that assert ladder rungs must
+// use it: the default window policy strips completed turns before the first
+// attempt, so the ladder would escalate straight past the rung under test.
+func replayAllModel() config.ModelConfig {
+	return config.ModelConfig{
+		Compat: &config.ModelCompatConfig{
+			ReasoningContinuity: &config.ReasoningContinuityCompatConfig{ReasoningReplay: modelcompat.ReasoningReplayAll},
+		},
+	}
 }
 
 func callReplayTestStream(t *testing.T, client *Client, cfg *ProviderConfig, impl *replayRejectingProvider) (*message.Response, error) {
@@ -927,7 +945,7 @@ func TestCompleteStreamAmbiguousFailureRetriesUnchangedWithoutPersistingReplayLe
 func TestCompleteStreamAmbiguousFailureProbeIsRequestScoped(t *testing.T) {
 	cfg := NewProviderConfig("responses", config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
-		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+		Models: map[string]config.ModelConfig{"gpt-5.6-sol": replayAllModel()},
 	}, []string{"key"})
 	streamErr := func() error {
 		return &APIError{Origin: APIErrorOriginSSEEvent, Type: "upstream_error", Code: "future_stream_failure", Message: "stream failed"}
@@ -965,7 +983,7 @@ func TestCompleteStreamAmbiguousFailureProbeIsRequestScoped(t *testing.T) {
 func TestCompleteStreamProbesRelayWrappedParam400WithReplaySensitiveInput(t *testing.T) {
 	cfg := NewProviderConfig("responses", config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
-		Models: map[string]config.ModelConfig{"gpt-5.6-sol": {}},
+		Models: map[string]config.ModelConfig{"gpt-5.6-sol": replayAllModel()},
 	}, []string{"key"})
 	wrapped400 := func() error {
 		return &APIError{StatusCode: 400, Type: "invalid_request_error", Code: "invalid_value", Param: "input", Message: "bad response status code 400 (request id: req-0001)"}
@@ -1334,11 +1352,13 @@ func TestCompleteStreamExplicitRejectionOverridesSameTargetProvenance(t *testing
 		{Role: message.RoleUser, Content: "go on"},
 	}
 
-	client, cfg, impl := replayTestClient(0)
+	client, cfg, impl := replayTestClientWithModel(0, replayAllModel())
 	// Always reject so the call never succeeds; we only care about attempt
 	// content. A hard cap of 2 rounds bounds the outer retry loop; the
 	// per-round replay ladder may still escalate native -> reasoning-stripped
-	// -> strict within one round.
+	// -> strict within one round. The completed turn replays whole
+	// (reasoning_replay=all): the default window policy would strip the native
+	// reasoning item before the ladder could react to the explicit rejection.
 	impl.rejectCount = 100
 
 	_, err := callCompleteStreamWithRetryForTest(

@@ -76,7 +76,7 @@ A few conventions apply across the recipes on this page:
 - A model that declares no `modalities` takes text only, and its image/PDF attachments are dropped.
 - When `limit.output` is omitted, Chord derives the input budget from its default `64000` output budget (`limit.context` minus 64000); Responses providers do not send `max_output_tokens` by default, so set `compat.responses.send_max_output_tokens: true` to enforce the cap explicitly.
 - A `compaction` block on a template is inherited by every model entry that references it; without one the model uses the global threshold. The trigger compares the last provider-reported usage, so a single large tool result can push the next request past the line: a threshold is a tuning goal, not a guarantee. Short sessions can stay on the global default; only long agentic runs need per-model tuning.
-- `reasoning_continuity` has two modes: `openai_visible` replays native `reasoning_content` unchanged under the Chat Completions convention; `anthropic_unsigned` serves Messages-compatible endpoints that return unsigned thinking rather than Claude-style signed blocks, replaying same-provider/model unsigned thinking. Both accept portable visible reasoning from other wire families as the target shape; if the target still rejects that shape, strict compatibility drops the reasoning carrier while preserving the tool round. Backends that require the full reasoning history or preserved thinking also set `preserve_history: true`, so the complete assistant history is replayed unchanged.
+- `reasoning_continuity` has two modes: `openai_visible` replays native `reasoning_content` unchanged under the Chat Completions convention; `anthropic_unsigned` serves Messages-compatible endpoints that return unsigned thinking rather than Claude-style signed blocks, replaying same-provider/model unsigned thinking. Both accept portable visible reasoning from other wire families as the target shape; if the target still rejects that shape, strict compatibility drops the reasoning carrier while preserving the tool round. Its `reasoning_replay` window defaults to `current_turn` (only the current turn's reasoning is sent); backends that require the full reasoning history or preserved thinking set `reasoning_replay: all`, so the complete assistant history is replayed unchanged.
 
 ## OpenAI GPT (Responses)
 
@@ -663,7 +663,7 @@ model_templates:
             clear_thinking: false
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
   glm-5.2-messages: &glm-5-2-messages
     <<: *window-1m-128k
@@ -814,7 +814,7 @@ model_templates:
             type: enabled
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
       forced_tool_choice:
         suppress_in_thinking: true
 
@@ -839,7 +839,7 @@ model_templates:
           anthropic-beta: null
       reasoning_continuity:
         mode: anthropic_unsigned
-        preserve_history: true
+        reasoning_replay: all
 
   deepseek-v4.1-responses: &deepseek-v4-1-responses
     <<: [*window-1m-64k, *vision]
@@ -861,7 +861,7 @@ model_templates:
         send_max_output_tokens: true
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
 providers:
   deepseek:
@@ -891,7 +891,7 @@ Notes:
 
 - DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
   `max_tokens`. `request_overrides` supplies the request-shape differences.
-  When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so the templates set `preserve_history: true` to keep completed-turn reasoning client-side; without tools the field is ignored.
+  When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so the templates set `reasoning_replay: all` to keep completed-turn reasoning client-side; without tools the field is ignored.
 
   DeepSeek also rejects forced tool choice while thinking is active, so the template downgrades loop-forced `tool_choice: required` to the backend default for those requests.
 - DeepSeek Responses supports `tool_choice: required`, so its template keeps
@@ -1009,7 +1009,7 @@ model_templates:
           preserve_thinking: true
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
 providers:
   qwen:
@@ -1025,7 +1025,7 @@ model_pools:
 
 Use the limits and regional endpoint published for your account. Historical
 reasoning counts as input tokens and billing when `preserve_thinking` is true;
-`preserve_history: true` keeps Chord from stripping that history client-side.
+`reasoning_replay: all` keeps Chord from stripping that history client-side.
 
 ## Kimi
 
@@ -1048,14 +1048,14 @@ model_templates:
         mcp_system_tools_message: true
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
   kimi-k2.7-code: &kimi-k2-7-code
     <<: *window-256k-32k
     compat:
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
   kimi-k2.6-thinking: &kimi-k2-6-thinking
     <<: *window-256k-32k
@@ -1067,7 +1067,7 @@ model_templates:
             keep: all
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
 providers:
   kimi:
@@ -1096,7 +1096,7 @@ sets both fields explicitly. K2.5 does not support preserved thinking.
 
 For all `openai_visible` recipes (DeepSeek, GLM, supported Qwen, and Kimi), Chord first replays native reasoning optimistically to any Chat Completions target, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback can keep continuity.
 
-Recipes for backends whose tool-mode contract requires the full reasoning history (DeepSeek) and preserved-thinking recipes (GLM `clear_thinking: false`, Qwen `preserve_thinking`, Kimi K3 / `keep: all`) set `preserve_history: true` so the complete assistant history is replayed unchanged. If a target rejects native reasoning, Chord removes or converts only the incompatible reasoning payload.
+Recipes for backends whose tool-mode contract requires the full reasoning history (DeepSeek) and preserved-thinking recipes (GLM `clear_thinking: false`, Qwen `preserve_thinking`, Kimi K3 / `keep: all`) set `reasoning_replay: all` so the complete assistant history is replayed unchanged. If a target rejects native reasoning, Chord removes or converts only the incompatible reasoning payload.
 
 Completed tool calls and their paired results remain available to the next model; they are not treated as disposable chain-of-thought data. A strict compatibility fallback may textify the completed action history when the target cannot accept the structured shape.
 
@@ -1337,7 +1337,7 @@ model_templates:
           reasoning_split: true
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 ```
 
 ### Compaction tuning for MiniMax M3
@@ -1371,7 +1371,7 @@ mimo:
 
 MiMo-V2.6-Pro and MiMo-V2.6-Flash are Xiaomi's fully multimodal agentic models on the MiMo Open Platform: a 1,048,576-token context window, a 131,072-token maximum output (the endpoint's default and cap for `max_completion_tokens`), image input, function calling, structured output, and deep thinking that is on by default. The platform is OpenAI- and Anthropic-compatible; this recipe uses `https://api.xiaomimimo.com/v1/chat/completions` because that is where MiMo documents the `reasoning_content` replay contract Chord needs for tool loops.
 
-Thinking mode carries a hard replay contract: in multi-turn tool calls the API expects every earlier `reasoning_content` back and reports `400 - Invalid Format` when it is missing, so the template enables `openai_visible` with `preserve_history: true`. The thinking switch is a `thinking: {type: ...}` object, which Chord only emits when the model pins the Chat Completions dialect (`native_thinking: thinking`); `mimo-*` is not one of the model names Chord infers a dialect from.
+Thinking mode carries a hard replay contract: in multi-turn tool calls the API expects every earlier `reasoning_content` back and reports `400 - Invalid Format` when it is missing, so the template enables `openai_visible` with `reasoning_replay: all`. The thinking switch is a `thinking: {type: ...}` object, which Chord only emits when the model pins the Chat Completions dialect (`native_thinking: thinking`); `mimo-*` is not one of the model names Chord infers a dialect from.
 
 ```yaml
 model_templates:
@@ -1388,7 +1388,7 @@ model_templates:
         native_thinking: thinking
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
 providers:
   mimo:
@@ -1417,7 +1417,7 @@ Notes:
 
 - `mimo-v2.6-pro` takes complex, long-horizon work; `mimo-v2.6-flash` is the cheaper everyday option with the same window, modalities, and limits. `mimo-v2.6-pro-ultraspeed` is the same model on a faster serving tier, sold as a customized service.
 - Thinking is on by default. `mimo/mimo-v2.6-pro@off` sends `thinking: {type: disabled}` for turns that do not need it. The platform also forces `temperature` to 1.0 and `top_p` to 0.95 in thinking mode, which Chord does not send anyway.
-- `preserve_history: true` keeps completed-turn reasoning in the replayed conversation because the API requires it; that history is billed as input tokens on every request, which MiMo's prompt cache absorbs at the cache-read rate ($0.0036 per 1M on Pro).
+- `reasoning_replay: all` keeps completed-turn reasoning in the replayed conversation because the API requires it; that history is billed as input tokens on every request, which MiMo's prompt cache absorbs at the cache-read rate ($0.0036 per 1M on Pro).
 - Cache writes are currently free, and `cache_write` has no way to express that: leaving it unset bills estimated writes at the input rate, so cost estimates for cache-heavy sessions run slightly high.
 - Prices are $0.435 input / $0.87 output / $0.0036 cached input per 1M on Pro and $0.14 / $0.28 / $0.0028 on Flash, with no long-context surcharge.
 - The backend silently drops any `tool_choice` other than `auto`; add `compat.forced_tool_choice: {auto_only: true}` if you want Chord to stop sending a forced choice to this provider.

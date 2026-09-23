@@ -107,9 +107,9 @@ Completion。若模型在输出可见正文前耗尽预算，且已启用
 
 GLM Preserved Thinking 的 body override 需要包含 `thinking.type: enabled` 和
 `thinking.clear_thinking: false`，并设置
-`reasoning_continuity.preserve_history: true`，让 Chord 在回放历史中保留
+`reasoning_continuity.reasoning_replay: all`，让 Chord 在回放历史中保留
 已完成轮次的 reasoning。DeepSeek 需要 `thinking.type: enabled` 和
-`reasoning_continuity.preserve_history: true`：请求带 tools 时，DeepSeek
+`reasoning_continuity.reasoning_replay: all`：请求带 tools 时，DeepSeek
 要求后续每一轮都完整回传历史 `reasoning_content`，否则返回 `400`。两种
 情况下，回放的 `reasoning_content` 都必须保持完整、未修改且顺序不变。
 

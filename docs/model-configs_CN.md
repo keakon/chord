@@ -92,8 +92,9 @@ model_templates:
   thinking（而非 Claude 风格签名块）的 Messages 兼容接口，回放同 provider/model
   的无签名 thinking。两者都能把其他 wire family 的可移植可见 reasoning 转成
   目标形状；target 仍拒绝该形状时，严格兼容降级会丢弃 reasoning carrier，但
-  保留工具轮次。要求完整 reasoning 历史或 preserved thinking 的后端另外设置
-  `preserve_history: true`，完整 assistant 历史会原样回放。
+  保留工具轮次。回放窗口 `reasoning_replay` 默认 `current_turn`，只发当前轮的
+  reasoning；要求完整 reasoning 历史或 preserved thinking 的后端设置
+  `reasoning_replay: all`，完整 assistant 历史会原样回放。
 
 ## OpenAI GPT（Responses 兼容接口）
 
@@ -689,7 +690,7 @@ model_templates:
             clear_thinking: false
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
   glm-5.2-messages: &glm-5-2-messages
     <<: *window-1m-128k
@@ -841,7 +842,7 @@ model_templates:
             type: enabled
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
       forced_tool_choice:
         suppress_in_thinking: true
 
@@ -866,7 +867,7 @@ model_templates:
           anthropic-beta: null
       reasoning_continuity:
         mode: anthropic_unsigned
-        preserve_history: true
+        reasoning_replay: all
 
   deepseek-v4.1-responses: &deepseek-v4-1-responses
     <<: [*window-1m-64k, *vision]
@@ -888,7 +889,7 @@ model_templates:
         send_max_output_tokens: true
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
 providers:
   deepseek:
@@ -919,7 +920,7 @@ model_pools:
 - DeepSeek Chat thinking 使用 `thinking.type`、顶层 `reasoning_effort` 和
   `max_tokens`。`request_overrides` 提供请求形状差异。
   请求带 tools 时，DeepSeek 要求后续每一轮都完整回传历史
-  `reasoning_content`，否则返回 `400`，所以模板设置 `preserve_history: true`
+  `reasoning_content`，否则返回 `400`，所以模板设置 `reasoning_replay: all`
   让 Chord 在本地保留已完成轮次的思考；不带 tools 时该字段会被忽略。
   DeepSeek 在启用 thinking 时会拒绝 forced tool
   choice，所以模板会把 loop 强制的 `tool_choice: required` 降级为后端默认
@@ -1035,7 +1036,7 @@ model_templates:
           preserve_thinking: true
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
 providers:
   qwen:
@@ -1050,7 +1051,7 @@ model_pools:
 ```
 
 请按账号和区域文档替换上下文限制及 endpoint。`preserve_thinking: true`
-时，历史思考会计入输入 token 和费用；`preserve_history: true` 让 Chord
+时，历史思考会计入输入 token 和费用；`reasoning_replay: all` 让 Chord
 不在客户端剥离这段历史。
 
 ## Kimi
@@ -1073,14 +1074,14 @@ model_templates:
         mcp_system_tools_message: true
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
   kimi-k2.7-code: &kimi-k2-7-code
     <<: *window-256k-32k
     compat:
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
   kimi-k2.6-thinking: &kimi-k2-6-thinking
     <<: *window-256k-32k
@@ -1092,7 +1093,7 @@ model_templates:
             keep: all
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
 providers:
   kimi:
@@ -1124,7 +1125,7 @@ Kimi），Chord 首次会把原生 reasoning 乐观回放给任何 Chat Completi
 provider fallback 都能保留连续性。工具模式契约要求完整 reasoning 历史的
 后端（DeepSeek）和 preserved-thinking 模板（GLM `clear_thinking: false`、
 Qwen `preserve_thinking`、Kimi K3 / `keep: all`）都设置
-`preserve_history: true`。若目标拒绝原生 reasoning，Chord 只会
+`reasoning_replay: all`。若目标拒绝原生 reasoning，Chord 只会
 删除或转换不兼容的 reasoning 负载；已完成且成对的工具调用和结果仍会保留。
 目标连结构化形状也不接受时，严格降级会把已完成的动作历史文本化，而
 不会把外部工具事实静默删除。
@@ -1358,7 +1359,7 @@ model_templates:
           reasoning_split: true
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 ```
 
 ### MiniMax M3 的压缩调优
@@ -1396,7 +1397,7 @@ Chord 需要的 `reasoning_content` 回放契约。
 
 思考模式有一条硬性回放契约：多轮工具调用时，接口要求把之前所有
 `reasoning_content` 传回去，缺了会报 `400 - Invalid Format`，所以模板开了
-`openai_visible` 加 `preserve_history: true`。思考开关是
+`openai_visible` 加 `reasoning_replay: all`。思考开关是
 `thinking: {type: ...}` 对象，只有模型显式钉住 chat 方言
 （`native_thinking: thinking`）时 Chord 才会发这个字段——`mimo-*` 不在 Chord
 按模型名推断的名单里。
@@ -1416,7 +1417,7 @@ model_templates:
         native_thinking: thinking
       reasoning_continuity:
         mode: openai_visible
-        preserve_history: true
+        reasoning_replay: all
 
 providers:
   mimo:
@@ -1447,7 +1448,7 @@ model_pools:
 - 思考默认开启；不需要思考的回合用 `mimo/mimo-v2.6-pro@off`，它会发
   `thinking: {type: disabled}`。平台在思考模式下会把 `temperature` 固定为
   1.0、`top_p` 固定为 0.95，Chord 本来也不发这两个参数。
-- `preserve_history: true` 会把已完成回合的思考留在对话里，因为接口要求如此；
+- `reasoning_replay: all` 会把已完成回合的思考留在对话里，因为接口要求如此；
   这部分历史每次请求都按输入 token 计费，MiMo 的提示缓存按缓存读价
   （Pro 每 1M $0.0036）吸收。
 - 缓存写入目前免费，而 `cache_write` 没法表达“免费”：不写就按输入价估算写入

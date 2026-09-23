@@ -831,13 +831,20 @@ type RequestOverridesConfig struct {
 // ordinary assistant content.
 type ReasoningContinuityCompatConfig struct {
 	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
-	// PreserveHistory keeps plaintext reasoning from completed turns in the
-	// replayed conversation instead of stripping it before the last user
-	// message. Enable it only for preserved-thinking models whose chat
-	// template documents using earlier-turn reasoning (Kimi K3 / keep:all,
-	// Qwen preserve_thinking, GLM clear_thinking:false); historical reasoning
-	// is then billed as input on every request.
-	PreserveHistory *bool `json:"preserve_history,omitempty" yaml:"preserve_history,omitempty"`
+	// ReasoningReplay selects how much historical reasoning/thinking is
+	// replayed for the target: "current_turn" (the default) keeps only
+	// reasoning after the last user message, "all" replays completed-turn
+	// reasoning unchanged (plaintext history plus family-matched native
+	// thinking), and "none" strips reasoning everywhere, including the
+	// current turn. Completed turns are stripped by default because most
+	// thinking backends drop or ignore earlier-turn reasoning server-side
+	// while billing it as input; set "all" for endpoints whose contract
+	// requires the complete assistant history (DeepSeek when a request
+	// carries tools, Kimi K3 / keep:all, Qwen preserve_thinking, GLM
+	// clear_thinking:false), and "none" only where a probe showed the
+	// endpoint accepts a request without current-turn reasoning. Historical
+	// reasoning replayed under "all" is billed as input on every request.
+	ReasoningReplay string `json:"reasoning_replay,omitempty" yaml:"reasoning_replay,omitempty"`
 }
 
 // EffectiveMode returns the configured continuity mode.
@@ -848,13 +855,14 @@ func (c *ReasoningContinuityCompatConfig) EffectiveMode() string {
 	return strings.TrimSpace(c.Mode)
 }
 
-// PreserveHistoryValue reports whether completed-turn plaintext reasoning must
-// be kept in the replayed conversation. The default is false: strip it.
-func (c *ReasoningContinuityCompatConfig) PreserveHistoryValue() bool {
-	if c == nil || c.PreserveHistory == nil {
-		return false
+// ReasoningReplayValue returns the configured reasoning replay window
+// ("all", "current_turn", or "none"). An empty value means unset; the
+// resolver applies the current_turn default.
+func (c *ReasoningContinuityCompatConfig) ReasoningReplayValue() string {
+	if c == nil {
+		return ""
 	}
-	return *c.PreserveHistory
+	return strings.TrimSpace(c.ReasoningReplay)
 }
 
 // ThinkingToolcallCompatConfig controls compatibility handling for providers
@@ -1845,8 +1853,8 @@ func collectConfigIssues(data []byte, cfg *Config) []string {
 	return issues
 }
 
-// collectProviderIssues returns the retry, compression, key-selection, and
-// native-thinking problems for one provider config.
+// collectProviderIssues returns the retry, compression, key-selection,
+// native-thinking, and reasoning-continuity problems for one provider config.
 func collectProviderIssues(providerName string, cfg *ProviderConfig) []string {
 	var issues []string
 	if err := ValidateProviderRetry(providerName, *cfg); err != nil {
@@ -1859,6 +1867,9 @@ func collectProviderIssues(providerName string, cfg *ProviderConfig) []string {
 		issues = append(issues, err.Error())
 	}
 	if err := ValidateProviderNativeThinking(providerName, *cfg); err != nil {
+		issues = append(issues, err.Error())
+	}
+	if err := ValidateProviderReasoningContinuity(providerName, *cfg); err != nil {
 		issues = append(issues, err.Error())
 	}
 	return issues
@@ -1886,7 +1897,7 @@ func resetInvalidProviderFields(cfg ProviderConfig) ProviderConfig {
 	if !validRequestCompression(cfg.Compress) {
 		cfg.Compress = ""
 	}
-	return resetInvalidNativeThinking(cfg)
+	return resetInvalidReasoningContinuity(resetInvalidNativeThinking(cfg))
 }
 
 // stripTypeInvalidOverride removes override leaves whose values cannot be

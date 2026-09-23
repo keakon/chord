@@ -34,11 +34,11 @@ type visibleStreamTracker struct {
 	keyCount         int
 }
 
-func logNormalizeReport(provider, model string, level, messagesBefore, messagesAfter int, report modelcompat.NormalizeReport) {
-	if !report.Changed() {
+func logNormalizeReport(provider, model, reasoningReplay string, level, messagesBefore, messagesAfter int, report modelcompat.NormalizeReport) {
+	if !report.Changed() && report.StrippedHistoricalReasoning == 0 {
 		return
 	}
-	log.Debugf("normalized LLM request provider=%v model=%v replay_level=%v messages_before=%v messages_after=%v dropped_thinking=%v downgraded_reasoning=%v converted_reasoning=%v downgraded_tool_calls=%v dropped_tool_calls=%v dropped_tool_results=%v replay_sensitive_items=%v foreign_native_replays=%v stripped_historical_reasoning=%v warnings=%q", provider, model, level, messagesBefore, messagesAfter, report.DroppedThinkingBlocks, report.DowngradedReasoning, report.ConvertedReasoning, report.DowngradedToolCalls, report.DroppedToolCalls, report.DroppedToolResults, report.ReplaySensitiveItems, report.ForeignNativeReplays, report.StrippedHistoricalReasoning, report.Warnings)
+	log.Debugf("normalized LLM request provider=%v model=%v reasoning_replay=%v replay_level=%v messages_before=%v messages_after=%v dropped_thinking=%v downgraded_reasoning=%v converted_reasoning=%v downgraded_tool_calls=%v dropped_tool_calls=%v dropped_tool_results=%v replay_sensitive_items=%v foreign_native_replays=%v stripped_historical_reasoning=%v warnings=%q", provider, model, reasoningReplay, level, messagesBefore, messagesAfter, report.DroppedThinkingBlocks, report.DowngradedReasoning, report.ConvertedReasoning, report.DowngradedToolCalls, report.DroppedToolCalls, report.DroppedToolResults, report.ReplaySensitiveItems, report.ForeignNativeReplays, report.StrippedHistoricalReasoning, report.Warnings)
 }
 
 func (t *visibleStreamTracker) Callback(delta message.StreamDelta) {
@@ -703,7 +703,7 @@ func (c *Client) completeStreamTarget(
 	}
 	var normalizeReport modelcompat.NormalizeReport
 	targetMessages, normalizeReport = normalizeMessagesForPoolTargetWithOptions(targetMessages, poolTarget, t.tuning, replayLevel)
-	logNormalizeReport(t.provider.Name(), t.modelID, replayLevel, len(messages), len(targetMessages), normalizeReport)
+	logNormalizeReport(t.provider.Name(), t.modelID, reasoningReplayPolicy(t.provider, t.modelID), replayLevel, len(messages), len(targetMessages), normalizeReport)
 	requestTuning := replayCompatibleRequestTuning(t.tuning, targetMessages, poolTarget)
 	if requestTuning.DisableReasoning && !t.tuning.DisableReasoning {
 		log.Infof("disabling reasoning for replay-incompatible request provider=%v model=%v replay_level=%v", t.provider.Name(), t.modelID, replayLevel)
@@ -973,7 +973,7 @@ func (c *Client) completeStreamTarget(
 				targetMessages = nextMessages
 				normalizeReport = nextReport
 				requestTuning = replayCompatibleRequestTuning(t.tuning, targetMessages, poolTarget)
-				logNormalizeReport(t.provider.Name(), t.modelID, replayLevel, len(messages), len(targetMessages), nextReport)
+				logNormalizeReport(t.provider.Name(), t.modelID, reasoningReplayPolicy(t.provider, t.modelID), replayLevel, len(messages), len(targetMessages), nextReport)
 				keyAttempt--
 				continue
 			}
@@ -1680,10 +1680,12 @@ func EstimateRequestInputTokens(systemPrompt string, messages []message.Message,
 }
 
 // clampEffectiveMaxTokens returns the output budget the model can accept for
-// this request, the estimated request input, and whether the estimated input
+// this request, the estimated request input, and whether the observed input
 // leaves room for at least one output token inside the model's context window.
-// A false third result means the input side alone fills the window: no output
-// budget is left for the provider to honour, so the request must not be sent.
+// A false third result means the observed input side alone fills the window: no
+// output budget is left for the provider to honour, so the request must not be
+// sent. Output-budget clamping (model output cap, outputCapSetting/thinking
+// floor, contextCap) is preserved; only the refusal gate is usage-only.
 func clampEffectiveMaxTokens(
 	model config.ModelConfig,
 	effectiveMaxTokens int,
@@ -1723,13 +1725,12 @@ func clampEffectiveMaxTokens(
 		if contextCap < effectiveMaxTokens {
 			effectiveMaxTokens = contextCap
 		}
-		// The byte-based estimate is deliberately conservative, so it must not
-		// refuse a request on its own: without a provider-confirmed prompt size
-		// the runtime could refuse — and then needlessly compact — a request the
-		// provider would accept. A session that already saw a provider response
-		// carries an exact baseline (lastInputTokens), so only that case may be
-		// refused locally.
-		inputFits = lastInputTokens <= 0 || inputEstimate+buffer < model.Limit.Context
+		// Usage-only admission: the byte-based estimate must not refuse a
+		// request on its own, and it must not force a refusal through the
+		// max() above either. Only a provider-observed prompt size
+		// (lastInputTokens) may refuse locally; without an observation the
+		// request is always sent and the provider is the authority.
+		inputFits = lastInputTokens <= 0 || lastInputTokens+buffer < model.Limit.Context
 	}
 	return effectiveMaxTokens, inputEstimate, inputFits
 }

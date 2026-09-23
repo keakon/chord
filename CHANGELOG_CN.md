@@ -9,6 +9,8 @@
 
 ### 不兼容变更
 
+- `compat.reasoning_continuity.preserve_history` 被 `compat.reasoning_continuity.reasoning_replay` 取代：`current_turn`（新的默认值）只保留当前轮的 reasoning，`all` 原样回放已完成轮次（等价原来的 `preserve_history: true`），`none` 连当前轮一起剥离。回放窗口现在覆盖所有 reasoning 载荷，不再局限于明文，因此已完成轮次的 Claude 签名 thinking 块、Responses reasoning items、Gemini thought 签名默认也会被剥离；当前轮（含工具循环）始终原样回传。契约要求完整 assistant 历史的后端用 `reasoning_replay: all` 保留（DeepSeek 在请求带 tools 时、Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`），模型配置指南的模板已同步设置。保留历史轮 thinking 的 Claude 模型（Opus 4.5+、Sonnet 4.6+）在默认值下还会失去跨轮思考连续性，需要保留就让这些模型用 `all`。旧键不再读取：残留的 `preserve_history` 会由配置加载器报出（`chord doctor config` 也会列出），随后按新默认值生效，迁移需要手动完成。
+
 - Agent 定义不再读取 `capabilities`、`preferred_tasks`、`write_mode`、`delegation_policy`。这些键从未被强制执行，只是 Delegate 选人列表上的标签。选人意图写进 `description`。角色能不能写文件仍由 `permission` 决定，Delegate 仍会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。现有 agent 文件里残留的这些键会被忽略。
 - headless 的 `compaction_status` 事件不再携带 `model_downshift` 触发类型：切换到更小窗口引发的压缩现在以 `usage_driven` 上报，按旧值过滤的集成方请改匹配 `usage_driven`。
 - headless 的提问协议换了形状。`question_request` 不再带 `default_answer` 和 `timeout_ms`，改为带 `deadline`——Chord 关闭该问题的绝对 RFC 3339 时刻（未设置 `question_timeout` 时省略）。Chord 也不再拿第一个选项当兜底默认答案。`question` 命令用 `reason`（`answered` 或 `declined`）取代 `cancelled`，问题关闭改由新增的 `question_resolved` 事件通知，不再靠之后的快照推断。

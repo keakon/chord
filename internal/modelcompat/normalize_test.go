@@ -39,6 +39,23 @@ func requireHistoricalToolEvidence(t *testing.T, msgs []message.Message, toolNam
 	}
 }
 
+// toolPairingIntact reports whether the assistant tool call and its tool result
+// for callID both survived normalization as structured messages.
+func toolPairingIntact(msgs []message.Message, callID string) bool {
+	callSeen, resultSeen := false, false
+	for _, msg := range msgs {
+		for _, tc := range msg.ToolCalls {
+			if strings.TrimSpace(tc.ID) == callID {
+				callSeen = true
+			}
+		}
+		if msg.Role == message.RoleTool && strings.TrimSpace(msg.ToolCallID) == callID {
+			resultSeen = true
+		}
+	}
+	return callSeen && resultSeen
+}
+
 func TestNormalizeForTarget_PreservesAnthropicThinkingWhenEnabled(t *testing.T) {
 	msgs := []message.Message{{
 		Role:           message.RoleAssistant,
@@ -137,7 +154,11 @@ func TestNormalizeForTarget_TurnOverlayDoesNotShiftCurrentTurnBoundary(t *testin
 	}
 }
 
-func TestNormalizeForTarget_StripsHistoricalUnsignedThinkingKeepsSigned(t *testing.T) {
+// The default window policy strips every reasoning payload outside the current
+// turn, including provider-bound signed blocks: payload-family gating decides
+// what may be replayed *inside* the window, not whether completed turns keep
+// their thinking state.
+func TestNormalizeForTarget_ReasoningReplayCurrentTurnStripsHistoricalUnsignedAndSignedThinking(t *testing.T) {
 	prov := &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyAnthropic}
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "q1"},
@@ -147,22 +168,24 @@ func TestNormalizeForTarget_StripsHistoricalUnsignedThinkingKeepsSigned(t *testi
 	}
 	target := TargetModel{ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicUnsigned}
 	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{})
-	var histThinking []string
-	for _, b := range out[1].ThinkingBlocks {
-		histThinking = append(histThinking, b.Thinking)
-	}
-	if len(histThinking) != 1 || histThinking[0] != "signed" {
-		t.Fatalf("historical blocks = %v, want only the signed block kept", histThinking)
+	if len(out[1].ThinkingBlocks) != 0 {
+		t.Fatalf("historical blocks = %+v, want none under the default window policy", out[1].ThinkingBlocks)
 	}
 	if len(out[3].ThinkingBlocks) != 1 || out[3].ThinkingBlocks[0].Thinking != "current plan" {
 		t.Fatalf("current-turn unsigned thinking should be preserved: %+v", out[3].ThinkingBlocks)
 	}
-	if rep.StrippedHistoricalReasoning != 1 {
-		t.Fatalf("StrippedHistoricalReasoning=%d, want 1", rep.StrippedHistoricalReasoning)
+	if rep.StrippedHistoricalReasoning != 2 {
+		t.Fatalf("StrippedHistoricalReasoning=%d, want 2", rep.StrippedHistoricalReasoning)
+	}
+	if rep.Changed() {
+		t.Fatalf("window strip must not mark the report changed: %+v", rep)
 	}
 }
 
-func TestNormalizeForTarget_PreserveHistoryKeepsCompletedTurnReasoning(t *testing.T) {
+// Reasoning replay is a per-target window policy: an endpoint whose contract
+// requires the complete assistant history opts in with reasoning_replay=all,
+// which is what the preserved-thinking recipes set.
+func TestNormalizeForTarget_ReasoningReplayAllKeepsCompletedTurnReasoning(t *testing.T) {
 	chatProv := &message.MessageProvenance{Source: "chord", ProviderID: "kimi", ModelID: "k3", WireFamily: WireFamilyOpenAIChat}
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "q1"},
@@ -170,10 +193,10 @@ func TestNormalizeForTarget_PreserveHistoryKeepsCompletedTurnReasoning(t *testin
 		{Role: message.RoleUser, Content: "q2"},
 		{Role: message.RoleAssistant, Content: "new", ReasoningContent: "current plan", Provenance: chatProv},
 	}
-	target := TargetModel{ProviderID: "kimi", ModelID: "k3", WireFamily: WireFamilyOpenAIChat, ReasoningContinuityMode: ReasoningContinuityOpenAIVisible, PreserveHistoricalReasoning: true}
+	target := TargetModel{ProviderID: "kimi", ModelID: "k3", WireFamily: WireFamilyOpenAIChat, ReasoningContinuityMode: ReasoningContinuityOpenAIVisible, ReasoningReplay: ReasoningReplayAll}
 	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{})
 	if got := out[1].ReasoningContent; got != "old plan" {
-		t.Fatalf("historical reasoning_content = %q, want preserved for a preserved-thinking target", got)
+		t.Fatalf("historical reasoning_content = %q, want preserved under reasoning_replay=all", got)
 	}
 	if got := out[3].ReasoningContent; got != "current plan" {
 		t.Fatalf("current-turn reasoning_content = %q, want preserved", got)
@@ -183,7 +206,7 @@ func TestNormalizeForTarget_PreserveHistoryKeepsCompletedTurnReasoning(t *testin
 	}
 }
 
-func TestNormalizeForTarget_PreserveHistoryKeepsUnsignedThinking(t *testing.T) {
+func TestNormalizeForTarget_ReasoningReplayAllKeepsUnsignedThinking(t *testing.T) {
 	prov := &message.MessageProvenance{Source: "chord", ProviderID: "glm", ModelID: "m", WireFamily: WireFamilyAnthropic}
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "q1"},
@@ -191,13 +214,106 @@ func TestNormalizeForTarget_PreserveHistoryKeepsUnsignedThinking(t *testing.T) {
 		{Role: message.RoleUser, Content: "q2"},
 		{Role: message.RoleAssistant, Content: "new", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "current plan"}}, Provenance: prov},
 	}
-	target := TargetModel{ProviderID: "glm", ModelID: "m", WireFamily: WireFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicUnsigned, PreserveHistoricalReasoning: true}
+	target := TargetModel{ProviderID: "glm", ModelID: "m", WireFamily: WireFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicUnsigned, ReasoningReplay: ReasoningReplayAll}
 	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{})
 	if len(out[1].ThinkingBlocks) != 1 || out[1].ThinkingBlocks[0].Thinking != "old plan" {
-		t.Fatalf("historical unsigned thinking should be preserved: %+v", out[1].ThinkingBlocks)
+		t.Fatalf("historical unsigned thinking should be preserved under reasoning_replay=all: %+v", out[1].ThinkingBlocks)
 	}
 	if rep.StrippedHistoricalReasoning != 0 {
 		t.Fatalf("StrippedHistoricalReasoning=%d, want 0", rep.StrippedHistoricalReasoning)
+	}
+}
+
+func TestNormalizeReasoningReplayResolvesDefault(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"", ReasoningReplayCurrentTurn},
+		{"  ", ReasoningReplayCurrentTurn},
+		{"inherit", ReasoningReplayCurrentTurn},
+		{" all ", ReasoningReplayAll},
+		{"current_turn", ReasoningReplayCurrentTurn},
+		{"none", ReasoningReplayNone},
+	} {
+		if got := NormalizeReasoningReplay(tc.in); got != tc.want {
+			t.Fatalf("NormalizeReasoningReplay(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeForTarget_ReasoningReplayNoneStripsCurrentTurn(t *testing.T) {
+	prov := &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyOpenAIChat}
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{Role: message.RoleAssistant, Content: "old", ReasoningContent: "old plan", Provenance: prov},
+		{Role: message.RoleUser, Content: "q2"},
+		{Role: message.RoleAssistant, Content: "t1", ReasoningContent: "turn reasoning", ToolCalls: []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{}`)}}, Provenance: prov},
+		{Role: message.RoleTool, ToolCallID: "c1", Content: "ok"},
+		{Role: message.RoleAssistant, Content: "new", ReasoningContent: "current plan", Provenance: prov},
+	}
+	target := TargetModel{ProviderID: "deepseek", ModelID: "m", WireFamily: WireFamilyOpenAIChat, ReasoningContinuityMode: ReasoningContinuityOpenAIVisible, ReasoningReplay: ReasoningReplayNone, SupportsStructuredTools: true, ToolResultEncoding: ToolResultEncodingOpenAIToolRole}
+	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true})
+	for i, msg := range out {
+		if strings.TrimSpace(msg.ReasoningContent) != "" {
+			t.Fatalf("message %d kept reasoning under reasoning_replay=none: %q", i, msg.ReasoningContent)
+		}
+	}
+	if rep.StrippedHistoricalReasoning != 3 {
+		t.Fatalf("StrippedHistoricalReasoning=%d, want 3", rep.StrippedHistoricalReasoning)
+	}
+	if !toolPairingIntact(out, "c1") {
+		t.Fatalf("tool pairing broken after reasoning strip: %+v", out)
+	}
+}
+
+func TestNormalizeForTarget_ReasoningReplayCurrentTurnStripsNativeThinkingOutsideWindow(t *testing.T) {
+	prov := &message.MessageProvenance{Source: "chord", ProviderID: "sample", ModelID: "test-model", WireFamily: WireFamilyAnthropic}
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{Role: message.RoleAssistant, Content: "t1", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "old plan", Signature: "sig-old"}}, ToolCalls: []message.ToolCall{{ID: "c1", Name: "Read", Args: json.RawMessage(`{}`)}}, Provenance: prov},
+		{Role: message.RoleTool, ToolCallID: "c1", Content: "ok"},
+		{Role: message.RoleUser, Content: "q2"},
+		{Role: message.RoleAssistant, Content: "t2", ThinkingBlocks: []message.ThinkingBlock{{Thinking: "current plan", Signature: "sig-current"}}, ToolCalls: []message.ToolCall{{ID: "c2", Name: "Read", Args: json.RawMessage(`{}`)}}, Provenance: prov},
+		{Role: message.RoleTool, ToolCallID: "c2", Content: "ok"},
+	}
+	target := TargetModel{ProviderID: "sample", ModelID: "test-model", WireFamily: WireFamilyAnthropic, NativeFamily: NativeFamilyAnthropic, ReasoningContinuityMode: ReasoningContinuityAnthropicBlocks, ReasoningReplay: ReasoningReplayCurrentTurn, SupportsStructuredTools: true, ToolResultEncoding: ToolResultEncodingAnthropicUserBlock}
+	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true})
+	if len(out[1].ThinkingBlocks) != 0 {
+		t.Fatalf("historical signed thinking survived the window strip: %+v", out[1].ThinkingBlocks)
+	}
+	if len(out[4].ThinkingBlocks) != 1 || out[4].ThinkingBlocks[0].Thinking != "current plan" {
+		t.Fatalf("current-turn signed thinking = %+v, want preserved", out[4].ThinkingBlocks)
+	}
+	if rep.StrippedHistoricalReasoning != 1 {
+		t.Fatalf("StrippedHistoricalReasoning=%d, want 1", rep.StrippedHistoricalReasoning)
+	}
+	if rep.DroppedThinkingBlocks != 0 {
+		t.Fatalf("DroppedThinkingBlocks=%d, want 0 (window strips are not replay drops)", rep.DroppedThinkingBlocks)
+	}
+	if !toolPairingIntact(out, "c1") || !toolPairingIntact(out, "c2") {
+		t.Fatalf("tool pairing broken after reasoning strip: %+v", out)
+	}
+}
+
+func TestNormalizeForTarget_ReasoningReplayCurrentTurnStripsResponsesReasoningItems(t *testing.T) {
+	prov := &message.MessageProvenance{Source: "chord", ProviderID: "sample", ModelID: "test-model", WireFamily: WireFamilyOpenAIResponses}
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "q1"},
+		{Role: message.RoleAssistant, Content: "old", ResponsesOutput: []message.ResponsesOutputItem{
+			{Type: "reasoning", EncryptedContent: "blob"},
+			{Type: "message", Content: []message.ResponsesOutputContent{{Type: "output_text", Text: "old"}}},
+		}, Provenance: prov},
+		{Role: message.RoleUser, Content: "q2"},
+		{Role: message.RoleAssistant, Content: "new", ResponsesOutput: []message.ResponsesOutputItem{{Type: "reasoning", EncryptedContent: "blob2"}}, Provenance: prov},
+	}
+	target := TargetModel{ProviderID: "sample", ModelID: "test-model", WireFamily: WireFamilyOpenAIResponses, NativeFamily: NativeFamilyOpenAI, ReasoningReplay: ReasoningReplayCurrentTurn}
+	out, rep := NormalizeForTarget(msgs, target, NormalizeOptions{})
+	if len(out[1].ResponsesOutput) != 1 || out[1].ResponsesOutput[0].Type != "message" {
+		t.Fatalf("historical responses items = %+v, want only the non-reasoning item kept", out[1].ResponsesOutput)
+	}
+	if len(out[3].ResponsesOutput) != 1 || out[3].ResponsesOutput[0].Type != "reasoning" {
+		t.Fatalf("current-turn reasoning item = %+v, want preserved", out[3].ResponsesOutput)
+	}
+	if rep.StrippedHistoricalReasoning != 1 {
+		t.Fatalf("StrippedHistoricalReasoning=%d, want 1", rep.StrippedHistoricalReasoning)
 	}
 }
 
@@ -640,6 +756,9 @@ func TestNormalizeForTargetStrictDropsAnthropicThinkingForReplayCompat(t *testin
 		ModelID:                 "claude-x",
 		WireFamily:              WireFamilyAnthropic,
 		ReasoningContinuityMode: ReasoningContinuityAnthropicBlocks,
+		// The ladder never re-applies the window policy (the strip is identical
+		// at every level), so the test pins the completed turn replaying whole.
+		ReasoningReplay:         ReasoningReplayAll,
 		ToolResultEncoding:      ToolResultEncodingAnthropicUserBlock,
 		SupportsStructuredTools: true,
 	}
