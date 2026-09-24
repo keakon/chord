@@ -70,8 +70,7 @@ func persistCompactionMailboxRestoreSession(t *testing.T, sessionDir string, row
 		}
 	}
 	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
-		LastInputTokens:        1,
-		LastTotalContextTokens: 2,
+		ContextReading: 2,
 	}); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}

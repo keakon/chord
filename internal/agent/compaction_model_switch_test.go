@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
@@ -11,12 +12,13 @@ import (
 )
 
 // TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction pins the
-// usage-only switch contract: a running-model change invalidates the size
-// observation (window and tokenization may differ), keeping only the calibration
-// ratio. The round must still go out immediately — a switch never holds the
-// round back — but nothing arms or starts a compaction until fresh usage on the
-// new window crosses its own line; only a hard context-length rejection
-// suspends a round.
+// usage-only switch contract: a running-model change retires the size
+// observation for the trigger frame (window and tokenization may differ) — the
+// gauge keeps the retired reading as stale until fresh usage arrives, and only
+// the calibration ratio feeds the next frozen estimate. The round must still go
+// out immediately — a switch never holds the round back — but nothing arms or
+// starts a compaction until fresh usage on the new window crosses its own line;
+// only a hard context-length rejection suspends a round.
 func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
@@ -157,5 +159,81 @@ func TestModelSwitchDoesNotAttachStalePressureNoticeToRequest(t *testing.T) {
 		if strings.Contains(msg.Content, contextCheckpointPressureAction) || strings.Contains(msg.Content, compactionWarningText) {
 			t.Fatalf("a model switch must not warn from the previous window's observation, got %q", msg.Content)
 		}
+	}
+}
+
+// waitForFailedRoundSettled drains the TUI output channel until the request
+// goroutine posts its segment end: tests drive the request path without the
+// event loop, and the segment end is the last thing that goroutine emits, so an
+// assertion after this observes a finished failed round instead of racing it.
+func waitForFailedRoundSettled(t *testing.T, a *MainAgent) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		select {
+		case evt := <-a.outputCh:
+			if _, ok := evt.(StreamSegmentEndedEvent); ok {
+				return
+			}
+		case <-time.After(time.Millisecond):
+		}
+	}
+	t.Fatal("timed out waiting for the failed round to post its segment end")
+}
+
+// TestModelSwitchFailedRoundKeepsRetiredGaugeReading pins the display half of
+// the switch contract: a round that fails after the switch carries no usage, so
+// the gauge must stay on the reading the switch retired (marked stale) instead
+// of blanking to 0 until the new window reports usage of its own.
+func TestModelSwitchFailedRoundKeepsRetiredGaugeReading(t *testing.T) {
+	a := newReadyTestMainAgent(t)
+	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000}) // 0.9: measured against the previous window
+	// The running model just changed: the applied threshold still belongs to the
+	// previous model, so this gate retires the previous window's reading.
+	a.appliedCompactionModelRef = "provider/previous-model"
+	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{
+		err: &llm.APIError{StatusCode: 503, Message: "upstream unavailable"},
+	}}}
+	providerCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{
+			"current-model": {Limit: config.ModelLimit{Context: 100000, Input: 100000, Output: 4096}},
+		},
+	}, []string{"test-key"})
+	client := llm.NewClient(providerCfg, provider, "current-model", 4096, "sys")
+	client.SetStreamRetryRounds(1)
+	a.llmClient = client
+	a.llmMu.Lock()
+	a.providerModelRef = "provider/current-model"
+	a.runningModelRef = "provider/current-model"
+	a.llmMu.Unlock()
+	a.newTurn()
+	a.started.Store(true)
+	t.Cleanup(func() {
+		if a.IsCompactionRunning() {
+			a.handleCompactionCancel()
+		}
+		a.compactionWg.Wait()
+	})
+
+	a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, "")
+	waitForBlockingStreamProviderCalls(t, provider, 1)
+	waitForFailedRoundSettled(t, a)
+
+	current, limit := a.GetContextStats()
+	if current != 90000 || limit != 100000 {
+		t.Fatalf("GetContextStats() after the failed round = (%d, %d), want the retired reading (90000, 100000)", current, limit)
+	}
+	if got := a.GetContextUsageState(); got != ctxmgr.ContextUsageStale {
+		t.Fatalf("GetContextUsageState() = %v, want stale", got)
+	}
+	if a.ctxMgr.AutoCompactDecision().ShouldCompact {
+		t.Fatal("the failed round must not arm automatic compaction from the retired reading")
+	}
+	if a.autoCompactRequested.Load() {
+		t.Fatal("the failed round must not arm the usage-driven compaction request")
 	}
 }

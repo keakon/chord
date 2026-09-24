@@ -215,12 +215,16 @@ type UsageReporter interface {
 	GetSidebarWalltimeStats() analytics.WalltimeStats
 	// GetContextStats returns current input-context usage and usable input budget for the focused agent.
 	// current is the usage-only reading (observed baseline, frozen estimate, or 0
-	// when unknown); limit is the usable input budget (0 if unknown).
+	// when unknown); a model/window change keeps the previous window's reading
+	// until a new response replaces it; limit is the usable input budget
+	// (0 if unknown).
 	GetContextStats() (current, limit int)
 	// GetContextUsageState reports the observation state behind GetContextStats:
-	// observed, estimated (frozen), or unknown. Unknown renders as 0 and never
-	// triggers compaction; the frozen estimate must be marked as approximate,
-	// because it is computed instead of provider-observed.
+	// observed, estimated (frozen), stale (kept from a previous model window or restored session
+	// until a new response replaces it), or unknown. Unknown renders as 0 and
+	// never triggers compaction; the frozen estimate and the stale reading must
+	// be marked as approximate, because they are not current provider-observed
+	// readings.
 	GetContextUsageState() ctxmgr.ContextUsageState
 	// ContextPressureLinesForModelRef returns the context-pressure reminder and
 	// auto-compaction lines that a model at modelRef would manage its context

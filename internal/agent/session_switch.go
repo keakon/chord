@@ -300,8 +300,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.fileTrack = filelock.NewFileTracker()
 	a.clearEvidenceCandidates()
 	a.ctxMgr.RestoreStats(message.TokenUsage{})
-	a.ctxMgr.SetLastInputTokens(0)
-	a.ctxMgr.SetLastTotalContextTokens(0)
+	a.ctxMgr.ClearLastTokenUsage()
 	// The cleared observation described the previous session's model/context.
 	a.setUsageObservationModelRef("")
 	a.resetContextReductionStats()

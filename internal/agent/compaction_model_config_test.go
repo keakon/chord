@@ -337,9 +337,10 @@ func TestApplyModelCompactionConfigKeepsNewModelOwnedObservation(t *testing.T) {
 	}
 }
 
-// The counterpart: an observation the previous model produced is stale for the
-// new window, so the switch must invalidate it instead of judging it against
-// the new line.
+// The counterpart: an observation the previous model produced is retired for
+// the new window's trigger (the switch must not judge it against the new line)
+// while the gauge keeps showing it as a stale reading until the new window
+// reports usage — the conversation content it measured did not change.
 func TestApplyModelCompactionConfigInvalidatesOtherModelObservation(t *testing.T) {
 	perModel := 0.8
 	a := modelCompTestAgent(
@@ -352,11 +353,18 @@ func TestApplyModelCompactionConfigInvalidatesOtherModelObservation(t *testing.T
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 900})
 	a.setUsageObservationModelRef("openai/gpt-5.6-sol")
 	a.applyModelCompactionConfig()
-	if got := a.ctxMgr.ContextUsageState(); got != ctxmgr.ContextUsageUnknown {
-		t.Fatalf("usage state = %v, want unknown after invalidating another model's sample", got)
+	if got := a.ctxMgr.ContextUsageState(); got != ctxmgr.ContextUsageStale {
+		t.Fatalf("display state = %v, want stale after retiring another model's sample", got)
 	}
-	if got := a.ctxMgr.EffectiveContextTokens(); got != 0 {
-		t.Fatalf("effective tokens = %d, want 0 after invalidation", got)
+	if got := a.ctxMgr.EffectiveContextTokens(); got != 900 {
+		t.Fatalf("display tokens = %d, want the retired sample 900 kept for the gauge", got)
+	}
+	decision := a.ctxMgr.AutoCompactDecision()
+	if got := decision.UsageState; got != ctxmgr.ContextUsageUnknown {
+		t.Fatalf("trigger usage state = %v, want unknown after invalidating another model's sample", got)
+	}
+	if got := decision.EffectiveInputTokens; got != 0 {
+		t.Fatalf("trigger effective tokens = %d, want 0 after invalidation", got)
 	}
 	if a.autoCompactRequested.Load() {
 		t.Fatal("the previous model's crossing must not arm the new window")

@@ -158,9 +158,12 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 	// unknown. Unknown is what a session that has not called the model yet
 	// looks like, so it renders as a plain 0 with no extra mark and never
 	// triggers; the frozen estimate is computed rather than observed and is
-	// marked with ≈. Post-response growth never moves the value, so the gauge
-	// shows exactly the pressure that triggers compaction. percent = current /
-	// usable input budget.
+	// marked with ≈. A model/window change keeps the previous window's reading
+	// on the gauge until a new response replaces it, marked with the same ≈
+	// because it no longer describes the current model's window. Post-response growth
+	// never moves the value, so the gauge reads the same pressure the trigger
+	// does, except that a stale reading is display-only and never triggers.
+	// percent = current / usable input budget.
 	// Color the Context value and its gauge from the focused agent's pressure
 	// lines: orange once usage reaches the reminder line, red once it reaches
 	// the auto-compaction threshold. Agents without usage-driven lines (focused
@@ -187,7 +190,7 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 	if current > 0 || limit > 0 {
 		gauge := m.renderContextGauge(width-6, percent, reminder, threshold)
 		contextValueStr := fmt.Sprintf("%s (%s)", formatTokens(current), formatPercent(percent))
-		if usageState == ctxmgr.ContextUsageEstimated {
+		if usageState == ctxmgr.ContextUsageEstimated || usageState == ctxmgr.ContextUsageStale {
 			contextValueStr = "≈" + contextValueStr
 		}
 		usageLines = append(usageLines,

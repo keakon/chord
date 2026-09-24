@@ -1157,8 +1157,7 @@ func TestRestoreSkipsMailboxMessageWithDurableTranscriptRow(t *testing.T) {
 		}
 	}
 	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
-		LastInputTokens:        1,
-		LastTotalContextTokens: 2,
+		ContextReading: 2,
 		ActiveAgents: []recovery.AgentSnapshot{{
 			InstanceID:   "agent-1",
 			AgentDefName: "restorer",
@@ -1367,8 +1366,8 @@ func persistRestorableSession(t *testing.T, sessionDir string) {
 		t.Fatalf("AppendEvent(usage): %v", err)
 	}
 	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
-		Todos:                  []recovery.TodoState{},
-		LastTotalContextTokens: 0,
+		Todos:          []recovery.TodoState{},
+		ContextReading: 0,
 	}); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
 	}
@@ -1495,8 +1494,7 @@ func persistMailboxRestoreSessionWithID(t *testing.T, sessionDir, mailboxID stri
 		t.Fatalf("PersistMessage(main): %v", err)
 	}
 	if err := rm.SaveSnapshot(&recovery.SessionSnapshot{
-		LastInputTokens:        1,
-		LastTotalContextTokens: 2,
+		ContextReading: 2,
 		ActiveAgents: []recovery.AgentSnapshot{{
 			InstanceID:   "agent-1",
 			AgentDefName: "restorer",

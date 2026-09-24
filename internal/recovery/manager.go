@@ -73,8 +73,7 @@ type SessionSnapshot struct {
 	ModelPoolCurrentModelPool string                   `json:"model_pool_current_model_pool,omitempty"`
 	ModelPoolAgentOverrides   map[string]string        `json:"model_pool_agent_overrides,omitempty"`
 	CreatedAt                 time.Time                `json:"created_at"`
-	LastInputTokens           int                      `json:"last_input_tokens"`                   // prompt size when snapshot was saved (for compaction/input-budget displays)
-	LastTotalContextTokens    int                      `json:"last_total_context_tokens,omitempty"` // post-response context baseline when saved (full prompt + output); restored for diagnostics/full-burden displays
+	ContextReading            int                      `json:"context_reading,omitempty"` // display-only; restored as stale until a new response
 	CompactionGeneration      uint64                   `json:"compaction_generation,omitempty"`
 	LastHistoryIndex          int                      `json:"last_history_index,omitempty"`
 	SessionEpoch              uint64                   `json:"session_epoch,omitempty"`

@@ -44,9 +44,15 @@ type Manager struct {
 	// later appends. When neither holds the state is unknown: 0, which is also
 	// what a session that has not called the model yet shows, and no
 	// usage-driven trigger.
-	frozenEstimateTokens    int
-	observedValid           bool
-	frozenValid             bool
+	frozenEstimateTokens int
+	observedValid        bool
+	frozenValid          bool
+	// observationStale marks that the current reading was measured against a
+	// different model window (a model/window change retired its trigger frame).
+	// The gauge keeps showing the reading — the conversation content it measured
+	// is unchanged — but trigger decisions read unknown until a response reports
+	// usage against the new window.
+	observationStale        bool
 	calibrationInputTokens  int
 	calibrationContextBytes int
 	// calibrationImageTokens tracks image allowance at the observed baseline,
@@ -502,15 +508,18 @@ func FullPromptTokens(usage message.TokenUsage) int {
 	return fullPromptTokens(usage)
 }
 
-// ContextUsageState is the observation state behind the context gauge and the
-// auto-compaction trigger. observed = latest main response carried usage;
-// estimated = latest missed usage but a frozen calibration estimate exists;
-// unknown = no usable sample: 0, never triggers on usage.
+// ContextUsageState is the observation state behind the context gauge. observed
+// = latest main response carried usage; estimated = latest missed usage but a
+// frozen calibration estimate exists; stale = a previous window or restored
+// session reading kept for display only; unknown = no usable
+// sample: 0. The auto-compaction trigger reads stale as unknown and never
+// triggers on it (see AutoCompactDecision).
 type ContextUsageState string
 
 const (
 	ContextUsageObserved  ContextUsageState = "observed"
 	ContextUsageEstimated ContextUsageState = "estimated"
+	ContextUsageStale     ContextUsageState = "stale"
 	ContextUsageUnknown   ContextUsageState = "unknown"
 )
 
@@ -562,8 +571,10 @@ func (m *Manager) computeFrozenEstimateLocked() int {
 // With provider usage it records the observed baseline (full normalized prompt
 // plus generated output) and refreshes calibration; without usage it freezes a
 // single estimate for the just-finished request when samples exist, otherwise
-// it records unknown. The frozen value never grows with later appends: only the
-// next response or an explicit invalidation changes it.
+// it records unknown. Either branch supersedes a stale reading kept from a
+// previous model window: the frame now describes the model that answered.
+// The frozen value never grows with later appends: only the next response or
+// an explicit invalidation changes it.
 func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.mu.Lock()
 	m.stats.InputTokens += usage.InputTokens
@@ -576,6 +587,9 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
 		m.observedValid = false
+		// The frozen frame describes the model that just answered, so it
+		// supersedes any stale reading kept from a previous window.
+		m.observationStale = false
 		if frozen > 0 {
 			m.frozenEstimateTokens = frozen
 			m.frozenValid = true
@@ -590,6 +604,7 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.lastInputTokens = fullPrompt
 	m.lastTotalContextTokens = fullPrompt + usage.OutputTokens
 	m.observedValid = true
+	m.observationStale = false
 	m.frozenEstimateTokens = 0
 	m.frozenValid = false
 	if fullPrompt > 0 {
@@ -638,10 +653,9 @@ func (m *Manager) LastInputTokens() int {
 // LastTotalContextTokens returns the observed post-response context baseline
 // from the most recent API call: the full normalized prompt plus generated
 // output (0 when the latest response missed usage or no observation exists).
-// Persistence, recovery, and diagnostics read this raw baseline; sidebar and
-// trigger consumers that must stay aligned with auto-compaction should read
-// EffectiveContextTokens instead, which falls back to the frozen estimate when
-// the latest response missed usage.
+// Diagnostics read this raw baseline; snapshot and sidebar consumers use
+// EffectiveContextTokens, including frozen and stale readings. Trigger
+// consumers use AutoCompactDecision, which excludes stale readings.
 func (m *Manager) LastTotalContextTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -651,18 +665,23 @@ func (m *Manager) LastTotalContextTokens() int {
 	return m.lastTotalContextTokens
 }
 
-// ContextUsageState reports the observation state behind the gauge and trigger:
-// observed, estimated (frozen), or unknown.
+// ContextUsageState reports the display state behind the gauge: observed,
+// estimated (frozen), stale (a retired or restored reading kept until a new
+// response replaces it), or unknown. AutoCompactDecision's UsageState is the
+// trigger-side view, where stale reads as unknown.
 func (m *Manager) ContextUsageState() ContextUsageState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.observedValid {
+	switch {
+	case !m.observedValid && !m.frozenValid:
+		return ContextUsageUnknown
+	case m.observationStale:
+		return ContextUsageStale
+	case m.observedValid:
 		return ContextUsageObserved
-	}
-	if m.frozenValid {
+	default:
 		return ContextUsageEstimated
 	}
-	return ContextUsageUnknown
 }
 
 // FrozenEstimateTokens returns the frozen estimate for the just-finished
@@ -684,37 +703,17 @@ func (m *Manager) MessageCount() int {
 	return len(m.messages)
 }
 
-// SetLastTotalContextTokens sets the last total context token count (e.g. when restoring from snapshot).
-func (m *Manager) SetLastTotalContextTokens(n int) {
+// RestoreContextReading restores a display-only reading from a session snapshot.
+// A snapshot has no current request/model observation, so it must never restore
+// trigger authority. The next response replaces this stale reading with usage
+// or a frozen estimate. Restoring zero also clears a previous session's sample.
+func (m *Manager) RestoreContextReading(tokens int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.lastTotalContextTokens = n
-	if n > 0 {
-		m.observedValid = true
-		m.frozenEstimateTokens = 0
-		m.frozenValid = false
-	} else if m.lastInputTokens <= 0 {
-		m.observedValid = false
-		m.frozenEstimateTokens = 0
-		m.frozenValid = false
-	}
-}
-
-// SetLastInputTokens sets the last input token count (e.g. when restoring a
-// session from snapshot so input-budget-based context indicators show the correct value).
-func (m *Manager) SetLastInputTokens(n int) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.lastInputTokens = n
-	if n > 0 {
-		m.observedValid = true
-		m.frozenEstimateTokens = 0
-		m.frozenValid = false
-	} else if m.lastTotalContextTokens <= 0 {
-		m.observedValid = false
-		m.frozenEstimateTokens = 0
-		m.frozenValid = false
-	}
+	m.clearLastTokenUsageLocked()
+	m.lastTotalContextTokens = max(tokens, 0)
+	m.observedValid = tokens > 0
+	m.observationStale = tokens > 0
 }
 
 // ClearLastTokenUsage clears the latest request-size usage sample without
@@ -725,9 +724,14 @@ func (m *Manager) SetLastInputTokens(n int) {
 func (m *Manager) ClearLastTokenUsage() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.clearLastTokenUsageLocked()
+}
+
+func (m *Manager) clearLastTokenUsageLocked() {
 	m.lastInputTokens = 0
 	m.lastTotalContextTokens = 0
 	m.observedValid = false
+	m.observationStale = false
 	m.frozenEstimateTokens = 0
 	m.frozenValid = false
 	m.calibrationInputTokens = 0
@@ -735,11 +739,22 @@ func (m *Manager) ClearLastTokenUsage() {
 	m.calibrationImageTokens = 0
 }
 
-// InvalidateSizeObservation drops the size observation for a model/window change
-// (window and tokenization may differ) while keeping the cross-model calibration
-// ratio window. The next trigger decision stays unknown until fresh usage arrives.
+// InvalidateSizeObservation retires the size observation for a model/window
+// change (window and tokenization may differ) while keeping the cross-model
+// calibration ratio window. The reading is kept for the gauge — the
+// conversation content it measured did not change — but marked stale: trigger
+// decisions read unknown until a new response replaces it,
+// so the previous window's crossing can neither arm nor force-compact the new
+// one.
 func (m *Manager) InvalidateSizeObservation() {
-	m.ClearLastTokenUsage()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.observationStale = true
+	// The single-sample fields describe the retired window; only the ratio
+	// window survives for the next frozen estimate.
+	m.calibrationInputTokens = 0
+	m.calibrationContextBytes = 0
+	m.calibrationImageTokens = 0
 }
 
 // EstimateTotalTokens returns a rough token count for the current message list.
@@ -920,12 +935,12 @@ type AutoCompactDecision struct {
 	ShouldCompact        bool
 }
 
-// observedEffectiveLocked returns the usage-only reading: the observed baseline
-// when the latest response carried usage, else the frozen estimate, else 0
-// (unknown). It never includes the live growth estimate: post-response appends
-// must not move the gauge or the trigger until fresh provider usage arrives.
-// Must hold at least an RLock.
-func (m *Manager) observedEffectiveLocked() int {
+// lastReadingLocked returns the last known reading in either frame: the
+// observed baseline when the latest response carried usage, else the frozen
+// estimate, else 0 (unknown). It never includes the live growth estimate:
+// post-response appends must not move the gauge or the trigger until fresh
+// provider usage arrives. Must hold at least an RLock.
+func (m *Manager) lastReadingLocked() int {
 	if m.observedValid {
 		return max(m.lastTotalContextTokens, m.lastInputTokens)
 	}
@@ -935,32 +950,53 @@ func (m *Manager) observedEffectiveLocked() int {
 	return 0
 }
 
-func (m *Manager) usageStateLocked() ContextUsageState {
-	if m.observedValid {
-		return ContextUsageObserved
+// observedEffectiveLocked returns the trigger-frame reading: the last known
+// reading, except that a stale one (kept for the gauge after a model/window
+// change) reads 0 (unknown) so the previous window's crossing cannot drive the
+// new window's trigger. Must hold at least an RLock.
+func (m *Manager) observedEffectiveLocked() int {
+	if m.observationStale {
+		return 0
 	}
-	if m.frozenValid {
-		return ContextUsageEstimated
-	}
-	return ContextUsageUnknown
+	return m.lastReadingLocked()
 }
 
-// EffectiveContextTokens returns the context-usage level in the same frame as
-// AutoCompactDecision: the observed post-response baseline, or the single frozen
-// estimate when the latest response missed usage, or 0 when unknown. Sidebar
-// gauges and the auto-compaction trigger observe one value. Post-response
-// growth never moves it; planning budgets use the calibrated estimators instead.
+// usageStateLocked returns the trigger-frame state behind ShouldCompact; stale
+// reads as unknown. Must hold at least an RLock.
+func (m *Manager) usageStateLocked() ContextUsageState {
+	if m.observationStale {
+		return ContextUsageUnknown
+	}
+	switch {
+	case m.observedValid:
+		return ContextUsageObserved
+	case m.frozenValid:
+		return ContextUsageEstimated
+	default:
+		return ContextUsageUnknown
+	}
+}
+
+// EffectiveContextTokens returns the context-usage level for the gauge: the
+// observed post-response baseline, or the single frozen estimate when the
+// latest response missed usage, or 0 when unknown. A model/window change keeps
+// the last reading here (marked stale by ContextUsageState) until a new response
+// arrives, so a switch or a failing request does not blank the gauge; the
+// auto-compaction trigger reads the same reading except that stale counts as
+// unknown (AutoCompactDecision). Post-response growth never moves it; planning
+// budgets use the calibrated estimators instead.
 func (m *Manager) EffectiveContextTokens() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.observedEffectiveLocked()
+	return m.lastReadingLocked()
 }
 
 // AutoCompactDecision returns the current automatic compaction threshold inputs.
-// The trigger and the gauge use only provider observations (or the single frozen
-// estimate when the latest response missed usage). EstimatedInputTokens stays as
-// the live planning estimate for capacity consumers, but ShouldCompact never
-// reads it: unknown (0) never compacts.
+// The trigger uses only provider observations (or the single frozen estimate
+// when the latest response missed usage); a stale reading kept for the gauge
+// counts as unknown here. EstimatedInputTokens stays as the live planning
+// estimate for capacity consumers, but ShouldCompact never reads it: unknown
+// (0) never compacts.
 func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

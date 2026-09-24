@@ -84,7 +84,7 @@ func TestPressureCycleIdentityAndStageTransitions(t *testing.T) {
 func TestPressureCycleRecordsOneDurableRowPerCycle(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(5000) // above the reminder line, below the threshold
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line, below the threshold
 	enableTestCompactContext(a)
 
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
@@ -139,7 +139,7 @@ func TestPressureCycleRecordsOneDurableRowPerCycle(t *testing.T) {
 func TestPressureCycleAdoptsRestoredRow(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 
 	restored := message.Message{
@@ -183,7 +183,7 @@ func TestPressureCycleAdoptsRestoredRow(t *testing.T) {
 	}
 	// Usage climbs back above the line: the same cycle records again now that
 	// its withdrawn row gave the reservation back.
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder == "" {
 		t.Fatalf("re-cross must stage a reminder cycle=%+v claim=%+v", a.overlayClaims.pressure, a.overlayClaims.reminder)
@@ -226,7 +226,7 @@ func TestPressureCycleStaleRestoredRowReleasesAdoption(t *testing.T) {
 
 	// Usage sits below the reminder line, so the first decision after the
 	// restore withdraws the row before anything opens a cycle.
-	a.ctxMgr.SetLastTotalContextTokens(1000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 1000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	a.maybeClearStaleContextNotices()
 	waitForContextNoticeCleared(t, a)
@@ -239,7 +239,7 @@ func TestPressureCycleStaleRestoredRowReleasesAdoption(t *testing.T) {
 
 	// Usage climbs back above the line: the new cycle records its own card
 	// instead of inheriting an identity with no row behind it.
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder == "" {
 		t.Fatalf("re-cross must stage a reminder: cycle=%+v", a.overlayClaims.pressure)

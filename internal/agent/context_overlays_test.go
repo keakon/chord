@@ -106,7 +106,7 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	// Auto-compact off (threshold 0): never a reminder, even with model-driven
 	// enabled — there is no usage-driven safety net to justify the nudge.
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0)
-	a.ctxMgr.SetLastTotalContextTokens(7000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 7000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != "" {
 		t.Fatalf("threshold=0 must not queue a reminder, got %q", a.pendingContextPressureReminder)
@@ -114,7 +114,7 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 
 	// Below the reminder line (0.6 for threshold 0.9): no reminder.
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(4000) // 4000/8192 ≈ 0.49 < 0.60
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4000}) // 4000/8192 ≈ 0.49 < 0.60
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != "" {
 		t.Fatalf("below the reminder line must not queue a reminder, got %q", a.pendingContextPressureReminder)
@@ -127,7 +127,7 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	// instead of preparing — automatic compaction is runtime-owned in this
 	// mode, like Codex's local and remote paths that never notify the working
 	// model.
-	a.ctxMgr.SetLastTotalContextTokens(5000) // 5000/8192 ≈ 0.61 >= 0.60
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // 5000/8192 ≈ 0.61 >= 0.60
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != "" {
 		t.Fatalf("model-driven off must not queue a reminder, got %q", a.pendingContextPressureReminder)
@@ -173,7 +173,7 @@ func TestQueueContextPressureReminderKeepsArmWhenReminderDisabled(t *testing.T) 
 	// compaction still starts at the threshold.
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(100)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 100})
 	enableTestCompactContext(a)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
 	a.armUsageDrivenAutoCompactRequest()
@@ -202,7 +202,7 @@ func TestQueueContextPressureReminderKeepsArmWhenReminderDisabled(t *testing.T) 
 func TestQueueContextPressureReminderDisabledKeepsThresholdNotices(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(7600)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 7600})
 	enableTestCompactContext(a)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "pressure", NoticeLevel: contextNoticePressure})
@@ -229,7 +229,7 @@ func TestQueueContextPressureReminderDisabledKeepsThresholdNotices(t *testing.T)
 func TestContextPressureBelowReminderLineDisabledLineIsNotBelow(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(100)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 100})
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
 	if a.contextPressureBelowReminderLine(a.ctxMgr.AutoCompactDecision(), -1) {
 		t.Fatal("a disabled reminder line must not report below-line pressure")
@@ -244,7 +244,7 @@ func TestQueueContextPressureReminderStickyAcrossRequests(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(5000) // ≈0.61: above the 0.60 reminder line, below threshold 0.9
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // ≈0.61: above the 0.60 reminder line, below threshold 0.9
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	queue := func() string {
@@ -271,13 +271,13 @@ func TestQueueContextPressureReminderStickyAcrossRequests(t *testing.T) {
 	}
 
 	// Usage drops back below the line: the reminder stops re-attaching.
-	a.ctxMgr.SetLastTotalContextTokens(4000) // ≈0.49 < 0.60
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4000}) // ≈0.49 < 0.60
 	if got := queue(); got != "" {
 		t.Fatalf("usage below the line must stop the reminder, got %q", got)
 	}
 	// A later rise in the same window resumes with the short text (the full
 	// text already dispatched in this window).
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	if got := queue(); got != contextPressureReminderShortText {
 		t.Fatalf("re-crossing the reminder line in the same window must keep the short text, got %q", got)
 	}
@@ -303,7 +303,7 @@ func TestCompactContextCallArmsAndStopsStickyReminder(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
 	a.ctxMgr.SetThreshold(0.9)
-	a.ctxMgr.SetLastTotalContextTokens(5000) // above the 0.60 reminder line, below threshold
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the 0.60 reminder line, below threshold
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 
@@ -330,7 +330,7 @@ func TestQueueContextPressureReminderSkipsWhenReminderAtThreshold(t *testing.T) 
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.5)
-	a.ctxMgr.SetLastTotalContextTokens(4500) // ≈0.55: above the reminder line
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4500}) // ≈0.55: above the reminder line
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	// An explicit reminder line at the threshold: the reminder only ever
@@ -846,7 +846,7 @@ func enableTestCompactContext(a *MainAgent) {
 func TestQueueContextPressureReminderMarksNoticesStaleWhenUsageDrops(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 	a.armUsageDrivenAutoCompactRequest()
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
@@ -854,7 +854,7 @@ func TestQueueContextPressureReminderMarksNoticesStaleWhenUsageDrops(t *testing.
 	a.noteContextPressureReminderAttached()
 	a.markOverlayClaimsDelivered()
 
-	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != "" {
 		t.Fatalf("usage below the line must stop the reminder, got %q", a.pendingContextPressureReminder)
@@ -870,21 +870,21 @@ func TestQueueContextPressureReminderMarksNoticesStaleWhenUsageDrops(t *testing.
 func TestQueueContextPressureReminderReCrossBeforeCleanupKeepsShortText(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	a.stashContextNotice(contextNoticePressure, a.pendingContextPressureReminder)
 	a.noteContextPressureReminderAttached()
 	a.markOverlayClaimsDelivered()
 
-	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if !a.contextNoticesStale.Load() {
 		t.Fatal("usage drop must mark the delivered notice stale")
 	}
 
 	a.pendingContextPressureReminder = ""
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != contextPressureReminderShortText {
 		t.Fatalf("re-crossing before idle cleanup must keep the short text, got %q", a.pendingContextPressureReminder)
@@ -898,7 +898,7 @@ func TestMaybeClearStaleContextNoticesResetsReminderDeliveryForRecross(t *testin
 	a := newTestMainAgent(t, t.TempDir())
 	a.installSessionTarget(t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
@@ -909,7 +909,7 @@ func TestMaybeClearStaleContextNoticesResetsReminderDeliveryForRecross(t *testin
 		t.Fatal("first delivery must persist a context notice")
 	}
 
-	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	a.maybeClearStaleContextNotices()
 	if hasContextNotice(a.ctxMgr.Snapshot()) {
@@ -928,7 +928,7 @@ func TestMaybeClearStaleContextNoticesResetsReminderDeliveryForRecross(t *testin
 		t.Fatal("cleanup must not invent a compact_context call")
 	}
 
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if got := a.pendingContextPressureReminder; got == "" || got == contextPressureReminderShortText {
 		t.Fatalf("re-crossing after cleanup must queue the full reminder, got %q", got)
@@ -938,7 +938,7 @@ func TestMaybeClearStaleContextNoticesResetsReminderDeliveryForRecross(t *testin
 func TestMaybeClearStaleContextNoticesKeepsCcCalledQuiet(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	a.stashContextNotice(contextNoticePressure, "pressure")
@@ -946,11 +946,11 @@ func TestMaybeClearStaleContextNoticesKeepsCcCalledQuiet(t *testing.T) {
 	a.markOverlayClaimsDelivered()
 	a.markReminderCompactContextCalled()
 
-	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	a.maybeClearStaleContextNotices()
 
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	a.pendingContextPressureReminder = ""
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != "" {
@@ -1077,7 +1077,7 @@ func TestQueueContextPressureReminderMarksNonReminderNoticesStale(t *testing.T) 
 			a := newTestMainAgent(t, t.TempDir())
 			a.installSessionTarget(t.TempDir())
 			a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-			a.ctxMgr.SetLastTotalContextTokens(5000)
+			a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 			enableTestCompactContext(a)
 			tc.mark(a)
 			a.markOverlayClaimsDelivered()
@@ -1085,7 +1085,7 @@ func TestQueueContextPressureReminderMarksNonReminderNoticesStale(t *testing.T) 
 				t.Fatal("the delivered overlay must persist a durable notice row")
 			}
 
-			a.ctxMgr.SetLastTotalContextTokens(4000)
+			a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4000})
 			a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 			if !a.contextNoticesStale.Load() {
 				t.Fatal("a durable notice of any class must be marked stale once usage drops below the reminder line")
@@ -1106,7 +1106,7 @@ func TestMaybeClearStaleContextNoticesResetsImminentDeliveryForRecross(t *testin
 	a := newTestMainAgent(t, t.TempDir())
 	a.installSessionTarget(t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
-	a.ctxMgr.SetLastTotalContextTokens(5000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 
 	// Deliver only the grace imminent notice: its durable row exists while the
@@ -1121,7 +1121,7 @@ func TestMaybeClearStaleContextNoticesResetsImminentDeliveryForRecross(t *testin
 		t.Fatal("imminent delivery must persist a context notice")
 	}
 
-	a.ctxMgr.SetLastTotalContextTokens(4000)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	a.maybeClearStaleContextNotices()
 	if hasContextNotice(a.ctxMgr.Snapshot()) {

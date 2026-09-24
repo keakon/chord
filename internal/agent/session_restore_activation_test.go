@@ -10,8 +10,10 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/thinkingtranslate"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -32,14 +34,13 @@ func TestGetContextStatsIncludesCacheWriteTokens(t *testing.T) {
 func TestActivateLoadedSessionUsesLoadedStateWithoutRecomputingMerge(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	loaded := &loadedSessionState{
-		SessionPath:            "/tmp/session-123",
-		Messages:               []message.Message{{Role: "user", Content: "hi"}},
-		TodoItems:              []tools.TodoItem{{ID: "todo-1", Status: "pending", Content: "from loaded"}},
-		UsageStats:             analytics.SessionStats{InputTokens: 7, OutputTokens: 3, LLMCalls: 2},
-		ContextUsage:           message.TokenUsage{InputTokens: 7, OutputTokens: 3},
-		LastInputTokens:        11,
-		LastTotalContextTokens: 29,
-		ActiveRole:             "reviewer",
+		SessionPath:    "/tmp/session-123",
+		Messages:       []message.Message{{Role: "user", Content: "hi"}},
+		TodoItems:      []tools.TodoItem{{ID: "todo-1", Status: "pending", Content: "from loaded"}},
+		UsageStats:     analytics.SessionStats{InputTokens: 7, OutputTokens: 3, LLMCalls: 2},
+		ContextUsage:   message.TokenUsage{InputTokens: 7, OutputTokens: 3},
+		ContextReading: 29,
+		ActiveRole:     "reviewer",
 	}
 
 	result := a.activateLoadedSession(loaded)
@@ -187,10 +188,9 @@ func TestNewAuxModelPoolClientReportsAllErrorsWhenAllRefsFail(t *testing.T) {
 func TestActivateLoadedSessionKeepsRepairedEmptyHistoryCleared(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	loaded := &loadedSessionState{
-		SessionPath:            "/tmp/session-456",
-		Messages:               []message.Message{{Role: "tool", ToolCallID: "ghost", Content: "orphan"}},
-		LastInputTokens:        11,
-		LastTotalContextTokens: 29,
+		SessionPath:    "/tmp/session-456",
+		Messages:       []message.Message{{Role: "tool", ToolCallID: "ghost", Content: "orphan"}},
+		ContextReading: 29,
 	}
 
 	result := a.activateLoadedSession(loaded)
@@ -265,4 +265,55 @@ type agentTestChunkTranslator struct {
 
 func (s agentTestChunkTranslator) TranslateChunk(ctx context.Context, targetLang, chunk string) (string, error) {
 	return s.translate(ctx, targetLang, chunk)
+}
+
+// Persist and reload the display reading through the real snapshot path. The
+// restored manager must never promote any saved reading to trigger authority.
+func TestSessionSnapshotRestoresContextReadingWithoutPressure(t *testing.T) {
+	for _, kind := range []ctxmgr.ContextUsageState{ctxmgr.ContextUsageObserved, ctxmgr.ContextUsageEstimated, ctxmgr.ContextUsageStale, ctxmgr.ContextUsageUnknown} {
+		t.Run(string(kind), func(t *testing.T) {
+			a := newTestMainAgent(t, t.TempDir())
+			a.ctxMgr.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: "sample"}})
+			a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 900000})
+			switch kind {
+			case ctxmgr.ContextUsageEstimated:
+				a.ctxMgr.NoteMissingUsage()
+			case ctxmgr.ContextUsageStale:
+				a.ctxMgr.InvalidateSizeObservation()
+			case ctxmgr.ContextUsageUnknown:
+				a.ctxMgr.ClearLastTokenUsage()
+			}
+			want := a.ctxMgr.EffectiveContextTokens()
+			if kind != ctxmgr.ContextUsageUnknown && want == 0 {
+				t.Fatal("expected nonzero source reading")
+			}
+			dir := t.TempDir()
+			rm := recovery.NewRecoveryManager(dir)
+			defer rm.Close()
+			if err := rm.SaveSnapshot(a.buildRecoverySnapshot()); err != nil {
+				t.Fatal(err)
+			}
+			loaded := &loadedSessionState{SessionPath: dir, Messages: a.ctxMgr.Snapshot()}
+			a.applySessionSnapshot(loaded, dir, rm, nil)
+			a.activateLoadedSession(loaded)
+			a.applyModelCompactionConfig()
+			if got, _ := a.GetContextStats(); got != want {
+				t.Fatalf("reading=%d want=%d", got, want)
+			}
+			state := ctxmgr.ContextUsageStale
+			if want == 0 {
+				state = ctxmgr.ContextUsageUnknown
+			}
+			if got := a.GetContextUsageState(); got != state {
+				t.Fatalf("state=%v want=%v", got, state)
+			}
+			if d := a.ctxMgr.AutoCompactDecision(); d.ShouldCompact || d.EffectiveInputTokens != 0 {
+				t.Fatalf("restored trigger=%+v", d)
+			}
+			a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 100})
+			if a.GetContextUsageState() != ctxmgr.ContextUsageObserved {
+				t.Fatal("new response did not replace stale state")
+			}
+		})
+	}
 }

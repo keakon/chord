@@ -724,6 +724,18 @@ func TestRenderInfoPanelFrozenEstimateIsMarkedApproximate(t *testing.T) {
 	}
 }
 
+func TestRenderInfoPanelStaleReadingIsMarkedApproximate(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 12_300
+	backend.contextUsageState = ctxmgr.ContextUsageStale
+	m := NewModel(backend)
+
+	lines := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(40, 24)), "USAGE")
+	if len(lines) == 0 || lines[0] != "Context: ≈12.3k (6%)" {
+		t.Fatalf("a reading kept from a previous model window should be marked approximate, got %#v", lines)
+	}
+}
+
 func TestInfoPanelCacheIncludesUsageState(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.contextCurrent = 12_300

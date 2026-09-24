@@ -682,8 +682,7 @@ func TestHandleForkSessionCommandSeedsPrefixAndRestoresDerivedState(t *testing.T
 	a.todoMu.Lock()
 	a.todoItems = []tools.TodoItem{{ID: "stale", Content: "stale todo", Status: "completed"}}
 	a.todoMu.Unlock()
-	a.ctxMgr.SetLastInputTokens(999)
-	a.ctxMgr.SetLastTotalContextTokens(999)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 999})
 	a.usageTracker.RestoreStats(analytics.SessionStats{InputTokens: 42, LLMCalls: 1})
 	oldSessionDir := a.sessionDir
 	if err := recovery.SaveSessionMeta(oldSessionDir, recovery.SessionMeta{Title: "Old custom title", MCPEnabledServers: []string{" manual-search ", "manual-files", "manual-search"}}); err != nil {

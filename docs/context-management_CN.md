@@ -166,7 +166,9 @@ TUI 状态栏会把模型请求的 checkpoint 与 usage-driven 压缩区分开�
 
 以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context` 减去模型声明的 `limit.output` 推导（模型声明了自己的输出上限时，例如 Codex 400K 窗口配 128K 输出推出 272K 输入预算）；只有未声明 `limit.output` 的模型才回退到预留有效默认输出上限（`max_output_tokens`，默认 `64000`）。若设置了 `reserved`，再从预算中扣除。因此实际触发点为 `(输入预算 - reserved) × threshold`；`reserved` 会和 `threshold` 未使用的比例余量叠加，而不是替代它。TUI 信息面板和底部栏的 `Context` 百分比使用扣除 `reserved` 后的同一输入预算基准，与自动压缩阈值保持对齐。对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
 
-provider usage 是自动触发的权威依据。Chord 不会用请求级剪裁后的本地 token 估算去清除已经触发的自动压缩请求，因为多模态输入、工具 schema、provider/proxy framing 等都可能让本地估算与 provider 统计不一致。唯一的兜底是 usage 缺失场景：Chord 收到可信的非零 `input_tokens` 后，会记录当时会进入上下文的消息 bytes，包括正文、需要回放的 tool-call 参数、thinking blocks 和 reasoning text；之后某次响应缺少 usage 或返回 0 时，就按 bytes 比例缩放这个样本，把结果冻结成该次请求的估算值，估算值达到 `threshold` 时也会触发自动压缩。冻结后的估算值不会随后续追加的消息继续增长，只有下一次响应回报 usage、模型切换或压缩应用才会改变它。表盘上这个值标为 `≈`，与真实观测区分开；还没有任何可信样本的会话显示 `0`，也不会据此触发压缩。这个 byte-calibrated estimate 只用于提前压缩，不用于计费，也不表示精确的上下文窗口用量。
+provider usage 是自动触发的权威依据。Chord 不会用请求级剪裁后的本地 token 估算去清除已经触发的自动压缩请求，因为多模态输入、工具 schema、provider/proxy framing 等都可能让本地估算与 provider 统计不一致。唯一的兜底是 usage 缺失场景：Chord 收到可信的非零 `input_tokens` 后，会记录当时会进入上下文的消息 bytes，包括正文、需要回放的 tool-call 参数、thinking blocks 和 reasoning text；之后某次响应缺少 usage 或返回 0 时，就按 bytes 比例缩放这个样本，把结果冻结成该次请求的估算值，估算值达到 `threshold` 时也会触发自动压缩。冻结后的估算值不会随后续追加的消息继续增长，只有下一次响应或压缩应用才会替换它。表盘上这个值标为 `≈`，与真实观测区分开；还没有任何可信样本的会话显示 `0`，也不会据此触发压缩。这个 byte-calibrated estimate 只用于提前压缩，不用于计费，也不表示精确的上下文窗口用量。
+
+切换模型后，旧读数对触发失效：旧窗口读数不会触发新窗口的压缩；新响应报告的用量或在缺少用量时冻结的校准估算，才参与新的阈值判断；侧栏继续显示这份读数并标为 `≈`，直到某次响应替换它。带 usage 的响应给出观测值，缺 usage 的响应给出一份新的估算值（同样标 `≈`），没有可用校准样本时回到 `0`。切换本身、以及切换后失败的请求，都不会把表盘重置成 `0`。恢复会话时，快照中的读数也只用于显示并标为 `≈`，不会触发压力提醒或自动压缩；下一次响应会替换它。
 
 **额外固定 headroom 示例（仅在需要时）**：
 

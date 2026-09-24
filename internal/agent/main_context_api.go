@@ -113,7 +113,10 @@ func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord, liveInstanceID str
 // generated output), or the single frozen estimate when the latest response
 // missed usage, or 0 when unknown (no usable sample: a session that has not
 // called the model yet shows a plain 0 and never triggers). Post-response
-// growth never moves it.
+// growth never moves it. A model/window change retires the reading for the
+// trigger frame but keeps it for the gauge, marked stale by
+// GetContextUsageState, until a new response replaces it —
+// a switch, or a failing request after it, does not blank the display.
 // Focused SubAgents report the same frame from their own context manager;
 // parked and settled targets have no live context manager and report zero.
 func (a *MainAgent) GetContextStats() (current, limit int) {
@@ -128,8 +131,10 @@ func (a *MainAgent) GetContextStats() (current, limit int) {
 }
 
 // GetContextUsageState reports the observation state behind GetContextStats for
-// the focused agent: observed, estimated (frozen), or unknown. The TUI marks
-// the frozen estimate as approximate; unknown renders as a plain zero.
+// the focused agent: observed, estimated (frozen), stale (kept from a previous
+// model window or restored session until a new response replaces it), or unknown. The TUI marks
+// the frozen estimate and the stale reading as approximate; unknown renders as
+// a plain zero.
 func (a *MainAgent) GetContextUsageState() ctxmgr.ContextUsageState {
 	target := a.focusedAgentSnapshot()
 	if target.sub != nil {

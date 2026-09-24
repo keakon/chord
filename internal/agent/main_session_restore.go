@@ -51,8 +51,7 @@ type loadedSessionState struct {
 	WalltimeStats                        map[string]*analytics.WalltimeStats
 	AgentModelRefs                       map[string]analytics.AgentModelRefs
 	ContextUsage                         message.TokenUsage
-	LastInputTokens                      int
-	LastTotalContextTokens               int
+	ContextReading                       int
 	PendingCompactionResume              *recovery.PendingCompactionResume
 	LastModelDrivenApplyBatch            uint64
 	LastModelDrivenCheckpointFingerprint string
@@ -425,8 +424,7 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	loaded.ActiveRole = strings.TrimSpace(snap.ActiveRole)
 	loaded.ModelPoolCurrentModelPool = strings.TrimSpace(snap.ModelPoolCurrentModelPool)
 	loaded.ModelPoolAgentOverrides = cloneStringMap(snap.ModelPoolAgentOverrides)
-	loaded.LastInputTokens = snap.LastInputTokens
-	loaded.LastTotalContextTokens = snap.LastTotalContextTokens
+	loaded.ContextReading = snap.ContextReading
 	loaded.PendingCompactionResume = clonePendingCompactionResume(snap.PendingCompactionResume)
 	loaded.LastModelDrivenApplyBatch = snap.LastModelDrivenApplyBatch
 	loaded.LastModelDrivenCheckpointFingerprint = snap.LastModelDrivenCheckpointFingerprint
@@ -752,10 +750,8 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.restoreMainTrackedFileState(restoredMessages)
 	a.ctxMgr.RestoreStats(loaded.ContextUsage)
 	if len(restoredMessages) > 0 {
-		a.ctxMgr.SetLastInputTokens(loaded.LastInputTokens)
-		a.ctxMgr.SetLastTotalContextTokens(loaded.LastTotalContextTokens)
-		// A restored baseline carries no model identity: the first model change
-		// after the restore must invalidate it rather than trust the ownership.
+		a.ctxMgr.RestoreContextReading(loaded.ContextReading)
+		// Restored readings are display-only until this run receives a response.
 		a.setUsageObservationModelRef("")
 	}
 	a.setPendingCompactionResume(loaded.PendingCompactionResume)

@@ -110,14 +110,15 @@ func (a *MainAgent) effectiveReminderPctForModelRef(modelRef string, threshold f
 // pending model-pool switches are applied; a model change changes the reminder
 // claim's model identity, which resets the reminder-class overlay claims for
 // the new window (full reminder text becomes available again; the warning claim
-// resets with the request generation). A model change also drops the size
-// observation when it was measured against the previous window, so that window
-// starts from unknown: any request armed before the switch is cleared, and
-// nothing arms until a response reports usage against the new window's own
-// line. An observation the new model itself produced (a fallback response
-// reporting usage for the model that answered) is kept and judged against the
-// new line instead. The round itself is never deferred behind a compaction:
-// only a hard context-length rejection suspends a round.
+// resets with the request generation). A model change also retires the size
+// observation when it was measured against the previous window: the trigger
+// frame starts from unknown — any request armed before the switch is cleared,
+// and nothing arms until a new response supplies usage or a frozen estimate
+// against the new window's line. The gauge keeps the retired reading as stale
+// until that response arrives. An observation the new model itself produced
+// (a fallback response reporting usage for the model that answered) is kept and judged
+// against the new line instead. The round itself is never deferred behind a
+// compaction: only a hard context-length rejection suspends a round.
 func (a *MainAgent) applyModelCompactionConfig() {
 	if a == nil || a.ctxMgr == nil {
 		return
@@ -145,9 +146,9 @@ func (a *MainAgent) applyModelCompactionConfig() {
 	a.llmMu.Unlock()
 	if modelChanged {
 		// The new model re-evaluates usage against its own threshold, so the
-		// previous window's grace state does not carry over. Only the
-		// cross-model calibration ratio survives the invalidation for the
-		// frozen estimate.
+		// previous window's grace state does not carry over. The retired
+		// reading stays on the gauge as stale; only the cross-model calibration
+		// ratio feeds the next frozen estimate.
 		a.clearCompactionGrace()
 		if !observationMatchesNewModel {
 			a.ctxMgr.InvalidateSizeObservation()
@@ -174,7 +175,7 @@ func (a *MainAgent) applyModelCompactionConfig() {
 	// invalidation above leaves the decision unknown, so a request armed under
 	// the previous window is cleared here: the new window must not be
 	// force-compacted by an old crossing, and it arms again only once a
-	// response reports usage against its own line.
+	// response supplies usage or a frozen estimate against its own line.
 	if modelChanged {
 		if a.ctxMgr.AutoCompactDecision().ShouldCompact {
 			a.armUsageDrivenAutoCompactRequest()
