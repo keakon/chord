@@ -61,16 +61,10 @@ func sameSegment(a, b streamSegment) bool {
 }
 
 // eventMapper translates main-agent Chord events into ACP session updates.
-//
-// It carries no per-turn buffer: Chord already streams deltas, and ACP updates
-// are session-scoped, so events that arrive between turns are forwarded the same
-// way. The only state it keeps is whether streaming text was forwarded for the
-// current request, so a finalized assistant message is only sent when no delta
-// covered it. Stream start/end are reported as effects instead of state here,
-// because the turn waiter is what needs them to know when a prompt is done.
-type eventMapper struct {
-	sawText bool
-}
+// ACP text chunks are append-only, so only finalized AssistantMessageEvent
+// text is published. Provisional deltas still drive stream-drain bookkeeping;
+// thinking and tool progress remain incremental. No text buffer is needed.
+type eventMapper struct{}
 
 // Map converts one Chord event. Sub-agent events are dropped: the ACP client
 // watches one conversation, and delegated work already shows up through the
@@ -81,12 +75,15 @@ func (m *eventMapper) Map(ev agent.AgentEvent) ([]acp.SessionUpdate, eventEffect
 		if e.AgentID != "" {
 			return nil, eventEffects{}
 		}
-		m.sawText = true
-		segment := segmentOf(e.TurnID, e.RequestSeq)
-		if e.Text == "" {
-			return nil, eventEffects{busy: true, streamStarted: true, segment: segment}
+		return nil, eventEffects{busy: true, streamStarted: true, segment: segmentOf(e.TurnID, e.RequestSeq)}
+
+	case agent.StreamTextCommitEvent:
+		if e.AgentID != "" {
+			return nil, eventEffects{}
 		}
-		return []acp.SessionUpdate{acp.UpdateAgentMessageText(e.Text)}, eventEffects{busy: true, streamStarted: true, segment: segment}
+		// This confirms the provider reply before history accepts it. The
+		// accepted message below owns publication, including terminal-only text.
+		return nil, eventEffects{busy: true}
 
 	case agent.StreamThinkingDeltaEvent:
 		if e.AgentID != "" {
@@ -131,8 +128,7 @@ func (m *eventMapper) Map(ev agent.AgentEvent) ([]acp.SessionUpdate, eventEffect
 		if e.AgentID != "" {
 			return nil, eventEffects{}
 		}
-		// ACP has no way to retract already delivered chunks; the finalized
-		// assistant message below is the recovery path.
+		// Provisional text was never sent, so retries need no wire retraction.
 		return nil, eventEffects{busy: true}
 
 	case agent.ToolCallStartEvent:
@@ -184,13 +180,7 @@ func (m *eventMapper) Map(ev agent.AgentEvent) ([]acp.SessionUpdate, eventEffect
 		if e.AgentID != "" {
 			return nil, eventEffects{}
 		}
-		streamed := m.sawText
-		m.sawText = false
 		if strings.TrimSpace(e.Text) == "" {
-			return nil, eventEffects{busy: true, recovered: true}
-		}
-		if streamed {
-			// Deltas already delivered this text.
 			return nil, eventEffects{busy: true, recovered: true}
 		}
 		return []acp.SessionUpdate{acp.UpdateAgentMessageText(e.Text)}, eventEffects{busy: true, recovered: true}
@@ -206,7 +196,6 @@ func (m *eventMapper) Map(ev agent.AgentEvent) ([]acp.SessionUpdate, eventEffect
 		return nil, effects
 
 	case agent.GlobalIdleEvent:
-		m.sawText = false
 		return nil, eventEffects{settle: true}
 
 	case agent.IdleEvent:

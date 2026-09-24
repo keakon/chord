@@ -456,7 +456,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 ) (*message.Response, []responsesInputItem, error) {
 	var (
 		resp            message.Response
-		content         strings.Builder
+		textItems       responsesItemTexts
 		toolCalls       = make(map[int]*responsesToolAccumulator)
 		customItemToIdx = make(map[string]int) // custom tool item_id → index
 		finalizedCalls  = make(map[string]bool)
@@ -486,11 +486,14 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 	}
 
 	flushContent := func() {
-		if content.Len() == 0 {
-			resp.Content = ""
+		joined, hasText := textItems.join()
+		if !hasText {
+			// Same no-wipe rule as the SSE parser: keep content backfilled
+			// from terminal payloads that never passed through the delta
+			// accumulator.
 			return
 		}
-		resp.Content = content.String()
+		resp.Content = joined
 	}
 	for {
 		select {
@@ -583,7 +586,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		}
 		state := responsesEventState{
 			resp:              &resp,
-			content:           &content,
+			textItems:         &textItems,
 			toolCalls:         toolCalls,
 			customItemToIndex: customItemToIdx,
 			finalizedCalls:    finalizedCalls,

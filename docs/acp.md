@@ -1,6 +1,6 @@
 # ACP Agent Mode
 
-`chord acp` serves the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) over stdio, so any ACP client can drive Chord as its agent — editors like Zed, JetBrains IDEs, and Neovim, or the `acpx` CLI. The client sends `initialize`, `session/new`, `session/prompt`, `session/cancel`, and `session/close`; Chord streams the answer, its thinking blocks, and every tool call back as `session/update` notifications.
+`chord acp` serves the [Agent Client Protocol](https://agentclientprotocol.com/) (ACP) over stdio, so any ACP client can drive Chord as its agent — editors like Zed, JetBrains IDEs, and Neovim, or the `acpx` CLI. The client sends `initialize`, `session/new`, `session/prompt`, `session/cancel`, and `session/close`; Chord sends the answer, its thinking blocks, and every tool call back as `session/update` notifications.
 
 stdout carries JSON-RPC only. Chord writes its own logs to the [logs directory](./paths.md): the `chord acp` frontend writes `chord-acp-mux-<pid>.log`, and each session's process writes `chord-acp-<session-id>.log`. A stray print from any library is redirected there too, so the protocol stream stays clean.
 
@@ -42,7 +42,7 @@ JetBrains IDEs read the same `agent_servers` entry from `~/.jetbrains/acp.json`.
 
 ## What the client sees
 
-- Answer text arrives as it is generated, so the client renders it progressively instead of waiting for the turn to end. If the model retries mid-stream, text already shown stays on screen: ACP v1 cannot retract a chunk, and the retried answer is appended after it.
+- Answer text is sent once each model response is finalized, including responses before tool calls. ACP v1 cannot replace or retract text chunks, so provisional answer text is not sent. The client receives the confirmed text even when it differs from the streamed draft; cancelled or failed requests without a finalized answer publish no partial answer text. Thinking and tool progress continue to stream.
 - Thinking blocks stream while the model reasons; a block that was never streamed is delivered once, in full.
 - Tool calls arrive with a category (`read`, `edit`, `search`, `execute`, and so on), a title naming the file or command, the target file location, and the model's raw arguments. Each call then closes as completed or failed, with the tool's output and, for file edits, the diff.
 - `@`-style file references work: when a client sends a `file://` resource link for a readable local file, Chord loads it as a `<file path="...">` context block, the same shape the TUI's file references produce.

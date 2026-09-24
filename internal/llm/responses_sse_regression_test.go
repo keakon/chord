@@ -199,3 +199,157 @@ func TestParseResponsesSSEEmitsReasoningItemDeltaPerFinalizedItem(t *testing.T) 
 		}
 	}
 }
+
+// The terminal reconciliation tests below lock in the fix for relays that
+// damage multi-byte text upstream (deltas arrive with U+FFFD already encoded
+// in them) while the completed/incomplete payload still carries clean text.
+
+func TestParseResponsesSSECompletedAdoptsCleanTerminalText(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"da"}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"ma"}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"ged \ufffd text"}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"damaged text"}]}]}}`,
+		`{"type":"[DONE]"}`,
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "damaged text" {
+		t.Fatalf("Content = %q, want clean terminal text", resp.Content)
+	}
+}
+
+func TestParseResponsesSSEIncompleteAdoptsCleanTerminalText(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"partial \ufffd"}`,
+		`{"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"partial clean"}]}]}}`,
+		`{"type":"[DONE]"}`,
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "partial clean" {
+		t.Fatalf("Content = %q, want clean terminal text", resp.Content)
+	}
+	if resp.StopReason != "length" {
+		t.Fatalf("StopReason = %q, want length", resp.StopReason)
+	}
+}
+
+// A terminal message without a content field does not provide text: content
+// accumulated from deltas must survive it.
+func TestParseResponsesSSECompletedWithoutContentKeepsDeltaText(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"streamed reply"}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant"}]}}`,
+		`{"type":"[DONE]"}`,
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "streamed reply" {
+		t.Fatalf("Content = %q, want delta accumulation preserved", resp.Content)
+	}
+}
+
+// An explicit empty output_text part is an authoritative empty, not a missing
+// field: the terminal adopts the empty over any damaged delta accumulation.
+func TestParseResponsesSSECompletedEmptyOutputTextAdoptsEmpty(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"\ufffd"}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}]}}`,
+		`{"type":"[DONE]"}`,
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "" {
+		t.Fatalf("Content = %q, want explicit terminal empty", resp.Content)
+	}
+}
+
+// Multiple message items reconcile in structural order regardless of the
+// interleaving of their deltas.
+func TestParseResponsesSSECompletedMultiItemStructuralOrder(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"msg_2","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_2","output_index":1,"content_index":0,"delta":"second \ufffd"}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"first \ufffd"}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"first"}]},{"type":"message","id":"msg_2","role":"assistant","content":[{"type":"output_text","text":"second"}]}]}}`,
+		`{"type":"[DONE]"}`,
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "firstsecond" {
+		t.Fatalf("Content = %q, want structural order join", resp.Content)
+	}
+}
+
+// A stream that dies after output_item.done keeps the done item's captured
+// text and the unfinished item's delta accumulation.
+func TestParseResponsesSSENoTerminalKeepsDoneCaptureAndDeltas(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"msg_2","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"damaged \ufffd"}`,
+		`{"type":"response.output_text.delta","item_id":"msg_2","output_index":1,"content_index":0,"delta":"plain tail"}`,
+		`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"clean head"}]}}`,
+		`{"type":"[DONE]"}`,
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "clean headplain tail" {
+		t.Fatalf("Content = %q, want done capture for finished item and delta tail for the open one", resp.Content)
+	}
+}
+
+// response.completed is terminal for the stream: events after it must not
+// reopen or mutate content.
+func TestParseResponsesSSEEventsAfterCompletedDoNotMutateContent(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"clean"}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"clean"}]}]}}`,
+		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":" \ufffd after"}`,
+		`{"type":"[DONE]"}`,
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "clean" {
+		t.Fatalf("Content = %q, want terminal text unchanged by post-completed events", resp.Content)
+	}
+}
+
+// The refusal backfill inside applyResponsesCompletionPayload must survive the
+// final content flush: a refusal-only response streams no text deltas, so the
+// flush would previously wipe the backfilled refusal with an empty builder.
+func TestParseResponsesSSERefusalBackfillSurvivesFlush(t *testing.T) {
+	stream := buildSSEStream([]string{
+		`{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant"}}`,
+		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"refusal","refusal":"cannot help with that"}]}]}}`,
+		`{"type":"[DONE]"}`,
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "cannot help with that" {
+		t.Fatalf("Content = %q, want refusal backfill preserved", resp.Content)
+	}
+}

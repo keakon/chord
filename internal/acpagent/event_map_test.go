@@ -30,16 +30,14 @@ func TestEventMapperMap(t *testing.T) {
 		want        eventEffects
 	}{
 		{
-			name:        "stream text maps to agent message chunk",
-			ev:          agent.StreamTextEvent{Text: "hello"},
-			wantUpdates: []acp.SessionUpdate{acp.UpdateAgentMessageText("hello")},
-			want:        eventEffects{busy: true, streamStarted: true},
+			name: "provisional text only marks the stream",
+			ev:   agent.StreamTextEvent{Text: "hello"},
+			want: eventEffects{busy: true, streamStarted: true},
 		},
 		{
-			name:        "stream text reports the segment identity it belongs to",
-			ev:          agent.StreamTextEvent{Text: "hello", TurnID: 4, RequestSeq: 2},
-			wantUpdates: []acp.SessionUpdate{acp.UpdateAgentMessageText("hello")},
-			want:        eventEffects{busy: true, streamStarted: true, segment: segmentOf(4, 2)},
+			name: "stream text reports the segment identity it belongs to",
+			ev:   agent.StreamTextEvent{Text: "hello", TurnID: 4, RequestSeq: 2},
+			want: eventEffects{busy: true, streamStarted: true, segment: segmentOf(4, 2)},
 		},
 		{
 			name: "sub-agent stream text is dropped",
@@ -285,24 +283,29 @@ func TestEventMapperMap(t *testing.T) {
 	}
 }
 
-func TestEventMapperAssistantMessageFallback(t *testing.T) {
-	mapper := &eventMapper{}
-
-	mapper.Map(agent.StreamTextEvent{Text: "streamed"})
-	if !mapper.sawText {
-		t.Fatal("streaming text should mark the request as covered")
-	}
-	updates, _ := mapper.Map(agent.AssistantMessageEvent{Text: "streamed"})
-	if len(updates) != 0 {
-		t.Fatalf("finalized text was already streamed, got updates %#v", updates)
-	}
-	if mapper.sawText {
-		t.Fatal("a finalized assistant message must start a fresh request window")
-	}
-
-	updates, _ = mapper.Map(agent.AssistantMessageEvent{Text: "never streamed"})
-	want := []acp.SessionUpdate{acp.UpdateAgentMessageText("never streamed")}
-	if !reflect.DeepEqual(updates, want) {
-		t.Fatalf("updates = %#v, want %#v", updates, want)
+func TestEventMapperPublishesOnlyFinalizedText(t *testing.T) {
+	for _, text := range []string{"clean reply", ""} {
+		t.Run(text, func(t *testing.T) {
+			mapper := &eventMapper{}
+			for _, ev := range []agent.AgentEvent{
+				agent.StreamTextEvent{Text: "damaged \ufffd"},
+				agent.StreamRollbackEvent{Reason: "retry"},
+				agent.StreamTextEvent{Text: "retried \ufffd"},
+				agent.StreamTextCommitEvent{Text: text},
+				agent.StreamSegmentEndedEvent{TurnID: 1, RequestSeq: 1},
+			} {
+				if updates, _ := mapper.Map(ev); len(updates) != 0 {
+					t.Fatalf("provisional update: %#v", updates)
+				}
+			}
+			updates, effects := mapper.Map(agent.AssistantMessageEvent{Text: text})
+			var want []acp.SessionUpdate
+			if text != "" {
+				want = []acp.SessionUpdate{acp.UpdateAgentMessageText(text)}
+			}
+			if !reflect.DeepEqual(updates, want) || !effects.recovered {
+				t.Fatalf("updates=%#v effects=%#v", updates, effects)
+			}
+		})
 	}
 }

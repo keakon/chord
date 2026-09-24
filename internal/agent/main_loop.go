@@ -600,7 +600,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"status", e.Status,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, WorkDirChangedEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, ContextNoticeEvent, ContextNoticeClearedEvent, HandoffEvent, HandoffCancelledEvent, StreamSegmentEndedEvent:
+	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, WorkDirChangedEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, ContextNoticeEvent, ContextNoticeClearedEvent, HandoffEvent, HandoffCancelledEvent, StreamSegmentEndedEvent, StreamTextCommitEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true
@@ -689,6 +689,10 @@ func (a *MainAgent) emitToTUI(evt AgentEvent) {
 			return
 		}
 	case StreamThinkingEvent:
+		if strings.TrimSpace(e.AgentID) != "" && !a.shouldEmitSubAgentStreaming(e.AgentID) {
+			return
+		}
+	case StreamTextCommitEvent:
 		if strings.TrimSpace(e.AgentID) != "" && !a.shouldEmitSubAgentStreaming(e.AgentID) {
 			return
 		}

@@ -92,6 +92,10 @@ type responsesStreamItem struct {
 	Arguments        json.RawMessage `json:"arguments,omitempty"`
 	Input            string          `json:"input,omitempty"` // custom_tool_call freeform text
 	EncryptedContent string          `json:"encrypted_content,omitempty"`
+	// Content carries a message item's content parts. It is empty on
+	// output_item.added and only filled on output_item.done, where the
+	// message's output_text parts are the item's authoritative text.
+	Content []responsesContentBlock `json:"content,omitempty"`
 }
 
 // responsesCompletedPayload captures the subset of response.completed / response.incomplete
@@ -341,7 +345,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 
 	var (
 		resp            message.Response
-		content         strings.Builder
+		textItems       responsesItemTexts
 		toolCalls       = make(map[int]*responsesToolAccumulator) // index → accumulator
 		customItemToIdx = make(map[string]int)                    // custom tool item_id → index
 		finalizedCalls  = make(map[string]bool)                   // call_id → true; dedup against proxy replays
@@ -360,11 +364,14 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 	partial.openOutputItems = make(map[int]struct{})
 	dataChunkIndex = -1
 	flushContent := func() {
-		if content.Len() == 0 {
-			resp.Content = ""
+		joined, hasText := textItems.join()
+		if !hasText {
+			// Keep content backfilled from terminal payloads (refusal text,
+			// compaction summaries) that never passed through the delta
+			// accumulator; the streamed accumulation itself is empty either way.
 			return
 		}
-		resp.Content = content.String()
+		resp.Content = joined
 	}
 
 	flushEvent := func(readErr error) (*message.Response, []responsesInputItem, bool, error) {
@@ -416,7 +423,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 
 		state := responsesEventState{
 			resp:              &resp,
-			content:           &content,
+			textItems:         &textItems,
 			toolCalls:         toolCalls,
 			customItemToIndex: customItemToIdx,
 			finalizedCalls:    finalizedCalls,
@@ -602,7 +609,7 @@ func finishPartialResponsesResponseWouldSucceed(resp *message.Response, partial 
 
 type responsesEventState struct {
 	resp              *message.Response
-	content           *strings.Builder
+	textItems         *responsesItemTexts
 	toolCalls         map[int]*responsesToolAccumulator
 	customItemToIndex map[string]int // custom tool item_id → output index
 	finalizedCalls    map[string]bool
@@ -718,10 +725,30 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		if delta.Delta != "" && state.cb != nil {
 			state.cb(message.StreamDelta{Type: message.StreamDeltaText, Text: delta.Delta})
 		}
-		state.content.WriteString(delta.Delta)
+		deltaIdx := delta.OutputIndex
+		if deltaIdx == 0 && delta.Index != 0 {
+			deltaIdx = delta.Index
+		}
+		state.textItems.appendDelta(deltaIdx, delta.ContentIndex, delta.Delta)
 		return nil, nil, false, nil
 
 	case "response.output_text.done":
+		var done struct {
+			Index        int     `json:"index"`
+			OutputIndex  int     `json:"output_index"`
+			ContentIndex int     `json:"content_index"`
+			Text         *string `json:"text"`
+		}
+		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
+			return nil, nil, false, fmt.Errorf("parse output_text.done: %w", err)
+		}
+		index := done.OutputIndex
+		if index == 0 && done.Index != 0 {
+			index = done.Index
+		}
+		if done.Text != nil {
+			state.textItems.markPartDone(index, done.ContentIndex, *done.Text)
+		}
 		if state.partial != nil {
 			state.partial.textDone = true
 		}
@@ -970,6 +997,10 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			if state.partial != nil {
 				state.partial.textDone = true
 			}
+			// The done payload carries the item's authoritative text; capture
+			// it so a stream that ends without response.completed still
+			// reconciles the final content against terminal text.
+			state.textItems.markDone(doneIdx, done.Item)
 		case "reasoning":
 			// A finalized reasoning item carries its encrypted_content and id.
 			// Streaming does not fold reasoning into resp.ResponsesOutput (that
@@ -1061,6 +1092,15 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			recoverResponsesToolCallsFromOutput(state.resp, respObj.Output, state.cb)
 		}
 		flushContent()
+		// The terminal payload carries the response's authoritative text.
+		// Adopt it over the delta accumulation, which may hold upstream damage
+		// (e.g. a relay that re-encodes cut multi-byte characters as U+FFFD)
+		// the deltas alone cannot recover from. A payload without output_text
+		// parts (pure refusal, tool calls, compaction) provides no text and
+		// leaves the assembled content alone.
+		if text, ok := responsesTerminalOutputText(respObj.Output); ok {
+			state.resp.Content = text
+		}
 		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp, state.freeform)
 		return state.resp, *state.outputItems, true, nil
 
@@ -1078,6 +1118,12 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated, state.finalizedCalls)
 		flushContent()
+		// Same terminal reconciliation as response.completed: the incomplete
+		// payload's output_text parts are the authoritative snapshot of the
+		// truncated response.
+		if text, ok := responsesTerminalOutputText(respObj.Output); ok {
+			state.resp.Content = text
+		}
 		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp, state.freeform)
 		return state.resp, *state.outputItems, true, nil
 	}

@@ -66,6 +66,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Responses replies now use final text to correct damaged TUI streaming text, including partial streams with confirmed text. Replies provided only at completion are displayed, and explicitly empty final text clears the streamed reply. ACP publishes confirmed answer text after each model response, keeping damaged or retracted drafts out of clients that cannot retract text; thinking and tool progress still stream.
+- Responses streams containing only a refusal now preserve and display the refusal text.
 - MCP tool cards no longer start expanded. A collapsed `mcp_*` card still rendered its arguments and result on first paint, and Space could not fold it back; MCP calls now follow the same folded default as the other tool cards.
 - The files re-loaded after a context reset or a compaction are now bounded by the model's context window. On a window of 8192 tokens or less the reload takes at most a quarter of the window and is skipped when that leaves less than the smallest useful fragment; it used to receive the fixed 48 KiB default, which could push the next request past the window and fail it. The checkpoint still lists the file references, so the model can read them with its own tools.
 - LSP `options` in the customization docs now nest gopls settings under a `gopls` key. Those keys are `workspace/configuration` section names, and the flat top-level form documented before was never delivered to gopls, so `staticcheck` and `analyses` configured that way had no effect; move them under `gopls`.

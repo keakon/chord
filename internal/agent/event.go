@@ -251,6 +251,24 @@ type StreamTextEvent struct {
 
 func (StreamTextEvent) agentEvent() {}
 
+// StreamTextCommitEvent carries the authoritative final text of a request's
+// streamed assistant reply. It is emitted once after the response is finalized
+// and sanitized — the same string that will be persisted — and replaces the
+// streaming card's accumulated text, which may hold upstream damage the deltas
+// alone cannot recover from (e.g. a relay that cuts multi-byte characters and
+// re-encodes them as U+FFFD inside delta payloads). The identity fields carry
+// the same streaming segment identity as StreamTextEvent, and the event
+// arrives before that segment's StreamSegmentEndedEvent. Empty Text explicitly
+// retracts streamed content; a missing event is not an empty confirmation.
+type StreamTextCommitEvent struct {
+	Text       string
+	AgentID    string // originating agent ("" = main agent)
+	TurnID     uint64
+	RequestSeq uint64
+}
+
+func (StreamTextCommitEvent) agentEvent() {}
+
 // StreamSegmentEndedEvent reports that the request goroutine which produced an
 // agent's streamed text has finished its final flush and will emit no more
 // content for the segment identified by (AgentID, TurnID, RequestSeq). It is

@@ -77,6 +77,20 @@ var responsesWSCallbackFixedFixture = []byte(strings.Join([]string{
 	"",
 }, "\n\n"))
 
+// Build the representative 117-delta stream outside benchmark timing.
+var responsesFragmentsCallbackFixedFixture = func() []byte {
+	events := []string{`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_frag","role":"assistant"}}`}
+	fragments := []string{"Da", "ta ", `\ufffd`}
+	for i := range 117 {
+		events = append(events, `data: {"type":"response.output_text.delta","item_id":"msg_frag","output_index":0,"content_index":0,"delta":"`+fragments[i%len(fragments)]+`"}`)
+	}
+	events = append(events,
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_frag","role":"assistant","content":[{"type":"output_text","text":"Data reconciliation text from fragments"}]}}`,
+		`data: {"type":"response.completed","response":{"id":"resp-frag-1","status":"completed","output":[{"type":"message","id":"msg_frag","role":"assistant","content":[{"type":"output_text","text":"Data reconciliation text from fragments"}]}],"usage":{"input_tokens":40,"output_tokens":9}}}`,
+		`data: [DONE]`, "")
+	return []byte(strings.Join(events, "\n\n"))
+}()
+
 type fixedSSEBenchFixture struct {
 	provider string
 	name     string
@@ -115,6 +129,59 @@ func TestOpenAIFixedSSEParseAllocsGuard(t *testing.T) {
 	const maxAllocs = 90
 	if allocs > maxAllocs {
 		t.Fatalf("fixed OpenAI SSE parse allocs = %.0f, want ≤%d", allocs, maxAllocs)
+	}
+}
+
+// TestResponsesFragmentsFixedSSEParse verifies the fragmented-delta fixture
+// used by the benchmarks: deltas damaged with U+FFFD escapes are superseded by
+// the clean terminal text, so the fixture keeps exercising the reconciliation
+// path rather than silently degrading into a plain-text parse.
+func TestResponsesFragmentsFixedSSEParse(t *testing.T) {
+	if count := bytes.Count(responsesFragmentsCallbackFixedFixture, []byte(`"type":"response.output_text.delta"`)); count != 117 {
+		t.Fatalf("delta count = %d, want 117", count)
+	}
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader(responsesFragmentsCallbackFixedFixture), nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parse fragmented fixed Responses SSE: %v", err)
+	}
+	if resp.Content != "Data reconciliation text from fragments" {
+		t.Fatalf("fragmented fixed Responses SSE content = %q, want clean terminal text", resp.Content)
+	}
+	if resp.StopReason != "stop" {
+		t.Fatalf("fragmented fixed Responses SSE stop reason = %q, want stop", resp.StopReason)
+	}
+}
+
+// BenchmarkResponsesFragmentedText covers the long sequence of damaged deltas
+// followed by a complete terminal reply, with and without dump collection.
+func BenchmarkResponsesFragmentedText(b *testing.B) {
+	for _, collect := range []bool{false, true} {
+		name := "callback"
+		if collect {
+			name = "collector"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(responsesFragmentsCallbackFixedFixture)))
+			for b.Loop() {
+				var collector *SSECollector
+				if collect {
+					collector = NewSSECollector()
+				}
+				emitted := 0
+				resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader(responsesFragmentsCallbackFixedFixture), func(delta message.StreamDelta) {
+					if delta.Type == message.StreamDeltaText {
+						emitted += len(delta.Text)
+					}
+				}, collector, nil, "", false)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if resp.Content != "Data reconciliation text from fragments" || emitted == 0 {
+					b.Fatal("missing text")
+				}
+			}
+		})
 	}
 }
 

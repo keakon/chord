@@ -640,6 +640,12 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 		if orphans := countOrphanVariationSelectors(resp); len(orphans) > 0 {
 			log.Warnf("orphan variation selectors in LLM response (kept verbatim, report-only): model=%v turn=%v fields=%v", modelRef, turnID, formatInvisibleCounts(orphans))
 		}
+		// Commit even empty content: a successful terminal response can retract
+		// text that streamed earlier. Tool-only rounds simply have no card.
+		resp.Content = message.NormalizeInvisibleText(resp.Content)
+		if turnCtx.Err() == nil {
+			a.emitToTUI(StreamTextCommitEvent{Text: resp.Content, TurnID: turnID, RequestSeq: requestSeq})
+		}
 		payload := &LLMResponsePayload{
 			Content:                   resp.Content,
 			ThinkingBlocks:            resp.ThinkingBlocks,

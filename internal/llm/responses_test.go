@@ -1253,7 +1253,7 @@ func TestResponsesOutputItemDone_ReasoningArmsTerminalDrain(t *testing.T) {
 	phaser := &recordingPhaser{}
 	state := responsesEventState{
 		resp:           &message.Response{},
-		content:        &strings.Builder{},
+		textItems:      &responsesItemTexts{},
 		toolCalls:      make(map[int]*responsesToolAccumulator),
 		finalizedCalls: make(map[string]bool),
 		truncated:      new(bool),

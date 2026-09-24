@@ -1,6 +1,6 @@
 # ACP Agent 模式
 
-`chord acp` 通过 stdio 提供 [Agent Client Protocol](https://agentclientprotocol.com/)（ACP），任何 ACP 客户端都能把 Chord 当成自己的 agent 使用：编辑器如 Zed、JetBrains IDE、Neovim，以及 `acpx` 这类命令行客户端。客户端发 `initialize`、`session/new`、`session/prompt`、`session/cancel`、`session/close`，Chord 把回答、思考块和每个工具调用作为 `session/update` 通知流式回传。
+`chord acp` 通过 stdio 提供 [Agent Client Protocol](https://agentclientprotocol.com/)（ACP），任何 ACP 客户端都能把 Chord 当成自己的 agent 使用：编辑器如 Zed、JetBrains IDE、Neovim，以及 `acpx` 这类命令行客户端。客户端发 `initialize`、`session/new`、`session/prompt`、`session/cancel`、`session/close`，Chord 把回答、思考块和每个工具调用作为 `session/update` 通知回传。
 
 stdout 只跑 JSON-RPC。Chord 自己的日志写进[日志目录](./paths_CN.md)：前端写 `chord-acp-mux-<pid>.log`，每个会话的子进程写 `chord-acp-<会话 id>.log`；第三方库误写到 stdout 的内容也会被重定向过去，协议流不会被污染。
 
@@ -42,7 +42,7 @@ JetBrains IDE 从 `~/.jetbrains/acp.json` 读同一个 `agent_servers` 条目。
 
 ## 客户端能看到什么
 
-- 回答边生成边到达，客户端可以逐字渲染，不用等整轮结束。模型中途重试时，已经显示的文字会留在屏幕上：ACP v1 撤不回已发出的片段，重试后的回答接在后面。
+- 正文在每次模型响应完成后发送，包括工具调用前的回复，不必等整个任务结束。ACP v1 不能替换或撤回文字片段，因此 Chord 不发送尚未确认的正文；终稿与流式草稿不同时，客户端收到的是终稿。请求取消或失败且没有确认回复时，不发送部分正文。思考和工具进度仍会流式推送。
 - 模型思考时思考块会流式推送；没流式过完整块的会一次性补齐。
 - 工具调用带分类（`read`、`edit`、`search`、`execute` 等）、标题（文件名或命令）、目标文件与模型原始参数；随后以完成或失败收口，附上工具输出，文件编辑还带 diff。
 - `@` 形式的文件引用可用：客户端发来的 `file://` 资源链接指向可读的本地文件时，Chord 按 `<file path="...">` 上下文块加载，与 TUI 文件引用是同一种形态。

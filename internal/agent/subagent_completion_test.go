@@ -20,16 +20,25 @@ import (
 func TestSubAgentPersistsThinkingBlocksWithAssistantToolCall(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	blocks := []message.ThinkingBlock{{Thinking: "plan", Signature: "sig"}, {Data: "encrypted"}}
-	sub.handleLLMResponse(&llmResult{
-		turnID: 1,
-		resp: &message.Response{
-			Content:        "\u200b\u200b",
-			ThinkingBlocks: blocks,
-			ToolCalls: convertCalls([]messageToolCall{
-				mustJSONToolCall(t, "complete-1", "complete", map[string]any{"summary": "done"}),
-			}),
-		},
-	})
+	response := &message.Response{
+		Content:        "\u200b\u200b",
+		ThinkingBlocks: blocks,
+		ToolCalls: convertCalls([]messageToolCall{
+			mustJSONToolCall(t, "complete-1", "complete", map[string]any{"summary": "done"}),
+		}),
+	}
+	providerCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
+	}, []string{"test-key"})
+	sub.llmClient = llm.NewClient(providerCfg, &blockingStreamProvider{calls: []scriptedStreamCall{{resp: response}}}, "model", 1024, "sys")
+	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	result := waitForSubAgentLLMResult(t, sub, time.Second)
+	sub.llmWG.Wait()
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	sub.handleLLMResponse(result)
 	msgs := sub.ctxMgr.Snapshot()
 	if len(msgs) == 0 {
 		t.Fatal("expected assistant message in subagent context")

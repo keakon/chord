@@ -1046,6 +1046,18 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			wallReq.finish()
 		}
 		streamReducer.Finish() // final flush: emit any remaining accumulated text
+		// Publish the sanitized final text as this segment's authoritative
+		// content so the UI can replace damaged delta accumulation with what
+		// will actually be persisted. This is the normalization boundary for
+		// successful responses. Empty final content retracts
+		// any text streamed earlier; a tool-only round has no card to clear.
+		if err == nil && resp != nil && turn.Ctx.Err() == nil {
+			resp.Content = message.NormalizeInvisibleText(resp.Content)
+			if counts := sanitizeResponseZeroWidth(resp); len(counts) > 0 {
+				log.Warnf("SubAgent: sanitized zero-width format characters from response agent=%v turn_id=%v fields=%v", s.instanceID, turn.ID, formatInvisibleCounts(counts))
+			}
+			s.parent.emitToTUI(StreamTextCommitEvent{Text: resp.Content, AgentID: s.instanceID, TurnID: streamTurnID(turn), RequestSeq: requestSeq})
+		}
 		s.parent.emitToTUI(RequestProgressEvent{AgentID: s.instanceID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 		if turn.Ctx.Err() != nil {
 			return // turn cancelled

@@ -419,6 +419,8 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		m.markStreamRenderDirty()
 		effects.addFollowup(m.scheduleStreamFlush(0))
 		return true, effects
+	case agent.StreamTextCommitEvent:
+		return true, m.commitStreamText(evt)
 	case agent.StreamSegmentEndedEvent:
 		// The producer of (agent, turn, request) flushed its last delta and will
 		// emit no more text for it, so its streaming card may settle now —
