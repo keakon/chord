@@ -328,7 +328,10 @@ func requiredToolChoiceTuning(tuning llm.RequestTuning) llm.RequestTuning {
 }
 
 func (a *MainAgent) shouldRequireToolCallInLoop() bool {
-	return a != nil && a.llmClient != nil && a.loopState.Enabled && providerSupportsRequiredToolChoice(a.llmClient.ProviderConfig())
+	// Request tuning is assembled on the LLM request goroutine, concurrent with
+	// the event loop handling /loop, so loop mode has to be read through the
+	// loopReductionMu-guarded accessor rather than the raw field.
+	return a != nil && a.llmClient != nil && a.loopExitAuthorized() && providerSupportsRequiredToolChoice(a.llmClient.ProviderConfig())
 }
 
 func (a *MainAgent) applyLoopToolChoiceRequirement(tuning llm.RequestTuning) llm.RequestTuning {

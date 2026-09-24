@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2453,4 +2454,37 @@ func TestCurrentLoopContinuationReasonsUsesHasActiveSubAgents(t *testing.T) {
 			t.Fatalf("should not report subagents_active for completed subagent, reasons: %v", reasons)
 		}
 	}
+}
+
+// Request tuning reads loop mode on the LLM request goroutine while the event
+// loop may be handling /loop, so the read has to be serialized by
+// loopReductionMu. Without -race this only drives both entry points; with
+// -race an unsynchronized field read fails the test.
+func TestShouldRequireToolCallInLoopReadIsRaceSafe(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	const iterations = 200
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		for range iterations {
+			_ = a.shouldRequireToolCallInLoop()
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		for range iterations {
+			a.EnableLoopMode("finish current task")
+			a.DisableLoopMode()
+			// Loop state events use blocking delivery; no TUI consumes them here.
+			for len(a.outputCh) > 0 {
+				<-a.outputCh
+			}
+		}
+	}()
+	close(start)
+	wg.Wait()
 }
