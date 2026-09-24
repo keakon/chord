@@ -517,10 +517,10 @@ func messagesContainKind(messages []message.Message, kind string) bool {
 }
 
 func TestAmbiguous400AfterExplicitEscalationRetriesWithoutPersistentStrict(t *testing.T) {
-	cfg := NewProviderConfig("deepseek", config.ProviderConfig{
+	cfg := NewProviderConfig("sample-model", config.ProviderConfig{
 		Type: config.ProviderTypeMessages,
 		Models: map[string]config.ModelConfig{
-			"deepseek-v4-pro": {
+			"sample-reasoner": {
 				Thinking: &config.ThinkingConfig{Type: "adaptive"},
 				Compat:   &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Mode: "anthropic_unsigned"}},
 			},
@@ -532,30 +532,27 @@ func TestAmbiguous400AfterExplicitEscalationRetriesWithoutPersistentStrict(t *te
 		// Attempt 2 (Synthesized): diagnostic-free gateway 400.
 		&APIError{StatusCode: 400, Message: "bad request"},
 	}}
-	client := NewClient(cfg, impl, "deepseek-v4-pro", 1024, "")
-	// The trailing newline makes the Synthesized rewrite (drop + re-add
-	// trimmed unsigned thinking) differ from the Native request while the
-	// Native normalize report stays empty. The assistant stays in the current
-	// turn (no trailing user message): historical unsigned thinking is now
-	// stripped unconditionally and would never reach the wire.
+	client := NewClient(cfg, impl, "sample-reasoner", 1024, "")
+	// Coalescing portable blocks produces a distinct intermediate request
+	// while the visible thinking text must remain unchanged.
 	messages := []message.Message{
 		{Role: message.RoleUser, Content: "continue"},
 		{
 			Role:           message.RoleAssistant,
-			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "plan\n"}},
+			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "plan\n"}, {Thinking: "next"}},
 			ToolCalls:      []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
-			Provenance:     &message.MessageProvenance{ProviderID: "deepseek", ModelID: "deepseek-v4-pro", WireFamily: modelcompat.WireFamilyAnthropic},
+			Provenance:     &message.MessageProvenance{ProviderID: "sample-model", ModelID: "sample-reasoner", WireFamily: modelcompat.WireFamilyAnthropic},
 		},
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
 	}
-	target := FallbackModel{ProviderConfig: cfg, ModelID: "deepseek-v4-pro"}
+	target := FallbackModel{ProviderConfig: cfg, ModelID: "sample-reasoner"}
 
 	resp, err := callCompleteStreamWithRetryForTest(
 		client,
 		context.Background(),
 		cfg,
 		impl,
-		"deepseek-v4-pro",
+		"sample-reasoner",
 		1024,
 		tuningForPoolTarget(target),
 		"",
@@ -578,16 +575,16 @@ func TestAmbiguous400AfterExplicitEscalationRetriesWithoutPersistentStrict(t *te
 	if len(impl.attempts) != 3 {
 		t.Fatalf("attempts = %d, want native, synthesized, unchanged synthesized retry", len(impl.attempts))
 	}
-	if len(impl.attempts[0][1].ThinkingBlocks) != 1 || impl.attempts[0][1].ThinkingBlocks[0].Thinking != "plan\n" {
+	if len(impl.attempts[0][1].ThinkingBlocks) != 2 || impl.attempts[0][1].ThinkingBlocks[0].Thinking != "plan\n" {
 		t.Fatalf("first attempt should keep same-provider unsigned thinking verbatim: %+v", impl.attempts[0])
 	}
-	if len(impl.attempts[1][1].ThinkingBlocks) != 1 || impl.attempts[1][1].ThinkingBlocks[0].Thinking != "plan" {
+	if len(impl.attempts[1][1].ThinkingBlocks) != 1 || impl.attempts[1][1].ThinkingBlocks[0].Thinking != "plan\n\nnext" {
 		t.Fatalf("second attempt should rewrite unsigned thinking through the portable path: %+v", impl.attempts[1])
 	}
 	if !reflect.DeepEqual(impl.attempts[1], impl.attempts[2]) {
 		t.Fatalf("ambiguous 400 changed the retry shape before an unchanged retry: second=%+v third=%+v", impl.attempts[1], impl.attempts[2])
 	}
-	if got := client.replayCompatLevelFor(cfg.Name(), "deepseek-v4-pro", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatSynthesized {
+	if got := client.replayCompatLevelFor(cfg.Name(), "sample-reasoner", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatSynthesized {
 		t.Fatalf("remembered replay level = %v, want only the explicitly confirmed synthesized level", got)
 	}
 }
@@ -648,14 +645,14 @@ func TestFallbackSynthesizedReplayPreservesForeignAnthropicToolTrajectory(t *tes
 func TestReplayCompatibleRequestTuningDisablesMissingToolReasoning(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
-		Models: map[string]config.ModelConfig{"deepseek": {
+		Models: map[string]config.ModelConfig{"sample-model": {
 			Reasoning: &config.ReasoningConfig{Effort: "high"},
 			Compat: &config.ModelCompatConfig{RequestOverrides: &config.RequestOverridesConfig{Body: map[string]any{
 				"thinking": map[string]any{"type": "enabled"},
 			}}},
 		}},
 	}, []string{"key"})
-	target := FallbackModel{ProviderConfig: cfg, ModelID: "deepseek"}
+	target := FallbackModel{ProviderConfig: cfg, ModelID: "sample-model"}
 	tuning := tuningForPoolTarget(target)
 	missing := []message.Message{{
 		Role:       message.RoleAssistant,
@@ -721,17 +718,17 @@ func TestReplayCompatibleRequestTuningKeepReasoningEffortCompat(t *testing.T) {
 func TestCompleteStreamTargetPassesReplayCompatibleTuning(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
-		Models: map[string]config.ModelConfig{"deepseek": {
+		Models: map[string]config.ModelConfig{"sample-model": {
 			Reasoning: &config.ReasoningConfig{Effort: "high"},
 		}},
 	}, []string{"key"})
 	impl := &replayRejectingProvider{}
-	client := NewClient(cfg, impl, "deepseek", 1024, "")
+	client := NewClient(cfg, impl, "sample-model", 1024, "")
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{
-			provider: cfg, impl: impl, modelID: "deepseek", maxTokens: 1024,
+			provider: cfg, impl: impl, modelID: "sample-model", maxTokens: 1024,
 			contextLimit: 128000, inputLimit: 128000, isFallback: true,
-			tuning: tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "deepseek"}),
+			tuning: tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "sample-model"}),
 		},
 		0, []message.Message{
 			{
@@ -794,18 +791,18 @@ func TestCompleteStreamTargetKeepsReasoningEffortWithCompat(t *testing.T) {
 func TestCompleteStreamStrictlyTextifiesRejectedForeignToolTrajectory(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type:   config.ProviderTypeChatCompletions,
-		Models: map[string]config.ModelConfig{"deepseek": {Reasoning: &config.ReasoningConfig{Effort: "high"}}},
+		Models: map[string]config.ModelConfig{"sample-model": {Reasoning: &config.ReasoningConfig{Effort: "high"}}},
 	}, []string{"key"})
 	impl := &replayRejectingProvider{
 		rejectCount:      1,
 		rejectionMessage: "The `reasoning_content` in the thinking mode must be passed back to the API.",
 	}
-	client := NewClient(cfg, impl, "deepseek", 1024, "")
+	client := NewClient(cfg, impl, "sample-model", 1024, "")
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{
-			provider: cfg, impl: impl, modelID: "deepseek", maxTokens: 1024,
+			provider: cfg, impl: impl, modelID: "sample-model", maxTokens: 1024,
 			contextLimit: 128000, inputLimit: 128000, isFallback: true,
-			tuning: tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "deepseek"}),
+			tuning: tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "sample-model"}),
 		},
 		0, []message.Message{
 			{
@@ -1051,18 +1048,18 @@ func TestCompleteStreamOfficialParam400DoesNotProbe(t *testing.T) {
 func TestCompleteStreamSkipsEquivalentReplayLevelBeforeStrict(t *testing.T) {
 	cfg := NewProviderConfig("messages", config.ProviderConfig{Type: config.ProviderTypeMessages}, []string{"key"})
 	impl := &replayRejectingProvider{rejectCount: 1, rejectionMessage: "The `content[].thinking` in the thinking mode must be passed back to the API."}
-	client := NewClient(cfg, impl, "deepseek-v4-pro", 4096, "sys")
+	client := NewClient(cfg, impl, "sample-reasoner", 4096, "sys")
 	messages := []message.Message{
 		{
 			Role:           message.RoleAssistant,
 			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "unsigned reasoning"}},
 			ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: []byte(`{}`)}},
-			Provenance:     &message.MessageProvenance{ProviderID: "source", ModelID: "deepseek-v4-pro", WireFamily: modelcompat.WireFamilyAnthropic},
+			Provenance:     &message.MessageProvenance{ProviderID: "source", ModelID: "sample-reasoner", WireFamily: modelcompat.WireFamilyAnthropic},
 		},
 		{Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"},
 	}
 	result, _, err := client.completeStreamTarget(
-		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "deepseek-v4-pro", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
+		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "sample-reasoner", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
 		0, messages, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -1075,7 +1072,7 @@ func TestCompleteStreamSkipsEquivalentReplayLevelBeforeStrict(t *testing.T) {
 		t.Fatalf("attempts = %d, want native then strict without identical synthesized retry", len(attempts))
 	}
 	requireStrictReplayEvidence(t, attempts[1], "read", "call-1")
-	if got := client.replayCompatLevelFor(cfg.Name(), "deepseek-v4-pro", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatStrict {
+	if got := client.replayCompatLevelFor(cfg.Name(), "sample-reasoner", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatStrict {
 		t.Fatalf("replay level = %d, want strict", got)
 	}
 }
@@ -1483,11 +1480,11 @@ func TestBuildStreamRetryTargetsPropagatesReplayFloorToFallbacks(t *testing.T) {
 func TestReplayCompatibleRequestTuningIgnoresPriorTurnMissingReasoning(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
-		Models: map[string]config.ModelConfig{"deepseek": {
+		Models: map[string]config.ModelConfig{"sample-model": {
 			Reasoning: &config.ReasoningConfig{Effort: "high"},
 		}},
 	}, []string{"key"})
-	target := FallbackModel{ProviderConfig: cfg, ModelID: "deepseek"}
+	target := FallbackModel{ProviderConfig: cfg, ModelID: "sample-model"}
 	tuning := tuningForPoolTarget(target)
 	reasoninglessCall := message.Message{
 		Role:       message.RoleAssistant,

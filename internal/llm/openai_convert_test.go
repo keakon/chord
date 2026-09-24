@@ -549,7 +549,7 @@ func TestFillCurrentTurnEmptyReasoning(t *testing.T) {
 		{Role: "assistant", Content: "done"},
 	}
 	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs, openAIConvertOptions{})
-	fillCurrentTurnEmptyReasoning(out)
+	fillMissingReasoning(out, false)
 
 	byToolID := func(id string) *openAIMessage {
 		for i := range out {
@@ -620,7 +620,7 @@ func TestFillCurrentTurnEmptyReasoning_SkipsTurnOverlayBoundary(t *testing.T) {
 		{Role: message.RoleUser, Content: "<system-reminder>\n## Bug Triage Workflow\n</system-reminder>", Kind: message.KindTurnOverlay},
 	}
 	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityOpenAIVisible, msgs, openAIConvertOptions{})
-	fillCurrentTurnEmptyReasoning(out)
+	fillMissingReasoning(out, false)
 
 	byToolID := func(id string) *openAIMessage {
 		for i := range out {

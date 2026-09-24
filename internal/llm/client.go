@@ -1462,6 +1462,9 @@ func normalizeMessagesForPoolTargetWithOptions(msgs []message.Message, target Fa
 	if target.ProviderConfig == nil {
 		return msgs, modelcompat.NormalizeReport{}
 	}
+	if deepSeekTarget(target.ProviderConfig, target.ModelID) {
+		replayCompat = min(replayCompat, modelcompat.ReplayCompatSynthesized)
+	}
 	msgs = filterUnsupportedBinaryPartsForTarget(msgs, target)
 	modelRef := providerModelRef(target.ProviderConfig, target.ModelID)
 	variant := validVariantForModel(target.ProviderConfig, target.ModelID, target.Variant)
@@ -1617,6 +1620,9 @@ func reasoningContinuityMode(provider *ProviderConfig, modelID string, tuning Re
 // reasoning generation, a preserved-thinking backend still expects the
 // existing history unchanged.
 func reasoningReplayPolicy(provider *ProviderConfig, modelID string) string {
+	if deepSeekTarget(provider, modelID) {
+		return modelcompat.ReasoningReplayAll
+	}
 	if provider == nil {
 		return modelcompat.ReasoningReplayAll
 	}
@@ -1626,6 +1632,12 @@ func reasoningReplayPolicy(provider *ProviderConfig, modelID string) string {
 func reasoningContinuityCompatMode(provider *ProviderConfig, modelID string) string {
 	if provider == nil {
 		return modelcompat.ReasoningContinuityNone
+	}
+	if deepSeekTarget(provider, modelID) {
+		if providerWireFamily(provider) == modelcompat.WireFamilyAnthropic {
+			return modelcompat.ReasoningContinuityAnthropicUnsigned
+		}
+		return modelcompat.ReasoningContinuityOpenAIVisible
 	}
 	compat := provider.ReasoningContinuityCompat(modelID)
 	if compat == nil {

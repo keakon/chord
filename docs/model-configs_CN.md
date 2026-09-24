@@ -834,22 +834,13 @@ model_templates:
         reasoning:
           effort: max
     compat:
-      request_overrides:
-        rename_body_fields:
-          max_completion_tokens: max_tokens
-        body:
-          thinking:
-            type: enabled
-      reasoning_continuity:
-        mode: openai_visible
-        reasoning_replay: all
       forced_tool_choice:
         suppress_in_thinking: true
 
   deepseek-v4.1-messages: &deepseek-v4-1-messages
     <<: [*window-1m-64k, *vision]
     thinking:
-      type: adaptive
+      type: enabled
       effort: high
     variants:
       low:
@@ -865,9 +856,6 @@ model_templates:
       request_overrides:
         headers:
           anthropic-beta: null
-      reasoning_continuity:
-        mode: anthropic_unsigned
-        reasoning_replay: all
 
   deepseek-v4.1-responses: &deepseek-v4-1-responses
     <<: [*window-1m-64k, *vision]
@@ -918,10 +906,10 @@ model_pools:
 要点：
 
 - DeepSeek Chat thinking 使用 `thinking.type`、顶层 `reasoning_effort` 和
-  `max_tokens`。`request_overrides` 提供请求形状差异。
+  `max_tokens`。Chord 会为 DeepSeek 模型直接选择这些字段。
   请求带 tools 时，DeepSeek 要求后续每一轮都完整回传历史
-  `reasoning_content`，否则返回 `400`，所以模板设置 `reasoning_replay: all`
-  让 Chord 在本地保留已完成轮次的思考；不带 tools 时该字段会被忽略。
+  `reasoning_content`，否则返回 `400`。Chord 的 Chat 与 Messages 路径会完整
+  回传保留历史中的思考；不带 tools 时该字段会被忽略。
   DeepSeek 在启用 thinking 时会拒绝 forced tool
   choice，所以模板会把 loop 强制的 `tool_choice: required` 降级为后端默认
   选择。
@@ -934,8 +922,7 @@ model_pools:
 - DeepSeek Messages 支持 `output_config.effort`；Chord 从 `thinking.effort`
   生成该字段。兼容接口应关闭 Anthropic beta header：它只对 Files API 生效。
   `thinking.budget_tokens` 会被接受但忽略：思考深度由 effort 值决定，不是
-  token 预算。其 Anthropic 兼容接口也可能返回无签名 thinking，按共用节配置
-  `anthropic_unsigned`。
+  token 预算。兼容接口返回的无签名 thinking 由 Chord 自动回放。
 - 三个 wire family 都能收图，图片按输入 token 计费（官方上限为单图 1024
   token）。接口支持 inline base64、外部 URL 与 Files API `file_id`，按文件
   内容识别格式（JPEG / PNG / GIF / WebP），且图片只能出现在 user 消息中：

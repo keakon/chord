@@ -248,17 +248,17 @@ func TestNormalizeMessagesForPoolTarget_ConvertsGeminiThoughtToAnthropicUnsigned
 }
 
 func TestNormalizeMessagesForPoolTarget_DropsAnthropicThinkingWithoutConfiguredThinking(t *testing.T) {
-	provider := NewProviderConfig("deepseek", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
+	provider := NewProviderConfig("sample-provider", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
 	msgs := []message.Message{
 		{
 			Role:           message.RoleAssistant,
 			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 			ToolCalls:      []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: json.RawMessage(`{"command":"pwd"}`)}},
-			Provenance:     &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", WireFamily: modelcompat.WireFamilyAnthropic},
+			Provenance:     &message.MessageProvenance{Source: "chord", ProviderID: "sample-provider", WireFamily: modelcompat.WireFamilyAnthropic},
 		},
 		{Role: message.RoleTool, ToolCallID: "toolu_1", Content: "/tmp\n"},
 	}
-	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{}, modelcompat.ReplayCompatNative)
+	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "sample-model"}, RequestTuning{}, modelcompat.ReplayCompatNative)
 	if len(out) != 2 || len(out[0].ThinkingBlocks) != 0 || len(out[0].ToolCalls) != 1 {
 		t.Fatalf("thinking should be removed without configured thinking: %+v", out)
 	}
@@ -268,14 +268,14 @@ func TestNormalizeMessagesForPoolTarget_DropsAnthropicThinkingWithoutConfiguredT
 }
 
 func TestNormalizeMessagesForPoolTarget_PreservesAnthropicThinkingWhenConfigured(t *testing.T) {
-	provider := NewProviderConfig("deepseek", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
+	provider := NewProviderConfig("sample-provider", config.ProviderConfig{Type: config.ProviderTypeMessages}, nil)
 	msgs := []message.Message{{
 		Role:           message.RoleAssistant,
 		ThinkingBlocks: []message.ThinkingBlock{{Thinking: "t", Signature: "sig"}},
 		ToolCalls:      []message.ToolCall{{ID: "toolu_1", Name: "Shell", Args: json.RawMessage(`{"command":"pwd"}`)}},
-		Provenance:     &message.MessageProvenance{Source: "chord", ProviderID: "deepseek", WireFamily: modelcompat.WireFamilyAnthropic},
+		Provenance:     &message.MessageProvenance{Source: "chord", ProviderID: "sample-provider", WireFamily: modelcompat.WireFamilyAnthropic},
 	}}
-	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}, modelcompat.ReplayCompatNative)
+	out, rep := normalizeMessagesForPoolTargetWithOptions(msgs, FallbackModel{ProviderConfig: provider, ModelID: "sample-model"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}, modelcompat.ReplayCompatNative)
 	if len(out) != 1 || len(out[0].ThinkingBlocks) != 1 {
 		t.Fatalf("thinking unexpectedly removed with configured thinking: %+v", out)
 	}
@@ -613,12 +613,12 @@ func TestNormalizeMessagesForPoolTarget_ChatToMessagesDropsOnlyReasoning(t *test
 			Role:             message.RoleAssistant,
 			ReasoningContent: "visible chat reasoning",
 			ToolCalls:        []message.ToolCall{{ID: "call_1", Name: "read", Args: json.RawMessage(`{"path":"README.md"}`)}},
-			Provenance:       &message.MessageProvenance{ProviderID: "deepseek", ModelID: "deepseek-v4-pro", WireFamily: modelcompat.WireFamilyOpenAIChat},
+			Provenance:       &message.MessageProvenance{ProviderID: "sample-provider", ModelID: "sample-model", WireFamily: modelcompat.WireFamilyOpenAIChat},
 		},
 		{Role: message.RoleTool, ToolCallID: "call_1", Content: "README contents"},
 	}
 
-	normalized, report := normalizeMessagesForPoolTargetWithOptions(source, FallbackModel{ProviderConfig: provider, ModelID: "deepseek-v4-pro"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}, modelcompat.ReplayCompatNative)
+	normalized, report := normalizeMessagesForPoolTargetWithOptions(source, FallbackModel{ProviderConfig: provider, ModelID: "sample-model"}, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}, modelcompat.ReplayCompatNative)
 	if len(normalized) != 3 || normalized[1].ReasoningContent != "" || len(normalized[1].ToolCalls) != 1 || report.DowngradedReasoning != 1 {
 		t.Fatalf("Chat reasoning should be dropped while tool facts survive: %+v (report %+v)", normalized, report)
 	}

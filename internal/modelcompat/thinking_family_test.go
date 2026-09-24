@@ -20,7 +20,8 @@ func TestModelNativeFamily(t *testing.T) {
 		{modelID: "anthropic/claude-opus-4.6", want: NativeFamilyAnthropic},
 		{modelID: "gpt-5.2", want: NativeFamilyOpenAI},
 		{modelID: "openai/o3-codex", want: NativeFamilyOpenAI},
-		{modelID: "deepseek-v4.1-flash", want: NativeFamilyUnknown},
+		{modelID: "deepseek-v4.1-flash", want: NativeFamilyDeepSeek},
+		{modelID: "DeepSeek-V4.1-Flash", want: NativeFamilyDeepSeek},
 		{modelID: "gateway-alias", want: NativeFamilyUnknown},
 	}
 	for _, tc := range cases {

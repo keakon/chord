@@ -111,11 +111,12 @@ the task into smaller requests.
 For GLM Preserved Thinking, that body override must include
 `thinking.type: enabled` and `thinking.clear_thinking: false`, plus
 `reasoning_continuity.reasoning_replay: all` so Chord keeps completed-turn
-reasoning in the replayed history. DeepSeek needs `thinking.type: enabled` and
-`reasoning_continuity.reasoning_replay: all`: when a request carries tools,
-DeepSeek requires the full `reasoning_content` from every earlier turn back and
-returns a `400` otherwise. In both cases, replayed `reasoning_content` must
-remain complete, unchanged, and in order.
+reasoning in the replayed history. DeepSeek Chat and Messages routes replay the
+complete `reasoning_content` history automatically, because DeepSeek returns a
+`400` when a request carries tools without it; a third-party `deepseek-*` route
+that serves another backend opts out with
+`reasoning_continuity.contract: none`. In both cases, replayed
+`reasoning_content` must remain complete, unchanged, and in order.
 
 Anthropic also binds each thinking block to the conversation prefix that
 produced it, so a history rewrite (context compaction, session restore) can

@@ -1237,6 +1237,11 @@ func nextDistinctReplayRequest(
 	tuning RequestTuning,
 	currentLevel int,
 ) (int, []message.Message, modelcompat.NormalizeReport, bool) {
+	// DeepSeek requires the original reasoning with the structured history.
+	// Removing either cannot repair a rejection of that contract.
+	if deepSeekTarget(target.ProviderConfig, target.ModelID) {
+		return currentLevel, nil, modelcompat.NormalizeReport{}, false
+	}
 	for nextLevel := currentLevel + 1; nextLevel <= modelcompat.ReplayCompatStrict; nextLevel++ {
 		nextMessages, nextReport := normalizeMessagesForPoolTargetWithOptions(messages, target, tuning, nextLevel)
 		if reflect.DeepEqual(nextMessages, current) {
@@ -1263,6 +1268,9 @@ func lastUserMessageIndex(messages []message.Message) int {
 }
 
 func replayCompatibleRequestTuning(tuning RequestTuning, messages []message.Message, target FallbackModel) RequestTuning {
+	if deepSeekTarget(target.ProviderConfig, target.ModelID) {
+		return deepSeekRequestTuning(tuning)
+	}
 	if providerWireFamily(target.ProviderConfig) != modelcompat.WireFamilyOpenAIChat ||
 		!openAIChatReasoningEnabled(tuning, target) {
 		return tuning

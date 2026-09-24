@@ -222,11 +222,11 @@ func TestApplyNativeThinkingShapes(t *testing.T) {
 func TestReplayCompatibleRequestTuningDisablesModelLevelThinking(t *testing.T) {
 	cfg := NewProviderConfig("sample", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
-		Models: map[string]config.ModelConfig{"deepseek-v4.1-flash": {
+		Models: map[string]config.ModelConfig{"glm-5.2": {
 			Thinking: &config.ThinkingConfig{Type: "enabled"},
 		}},
 	}, []string{"key"})
-	target := FallbackModel{ProviderConfig: cfg, ModelID: "deepseek-v4.1-flash"}
+	target := FallbackModel{ProviderConfig: cfg, ModelID: "glm-5.2"}
 	tuning := tuningForPoolTarget(target)
 	missing := []message.Message{{
 		Role:       message.RoleAssistant,
@@ -316,10 +316,11 @@ func TestOpenAIProvider_NativeThinkingBody(t *testing.T) {
 			wantKey: "",
 		},
 		{
-			name:    "no thinking knobs emit nothing",
-			model:   "deepseek-v4.1-flash",
-			tuning:  RequestTuning{},
-			wantKey: "",
+			name:         "DeepSeek thinking is enabled by default",
+			model:        "deepseek-v4.1-flash",
+			tuning:       RequestTuning{},
+			wantKey:      "thinking",
+			wantThinking: map[string]any{"type": "enabled"},
 		},
 	}
 	for _, tc := range cases {

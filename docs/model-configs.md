@@ -806,22 +806,13 @@ model_templates:
         reasoning:
           effort: max
     compat:
-      request_overrides:
-        rename_body_fields:
-          max_completion_tokens: max_tokens
-        body:
-          thinking:
-            type: enabled
-      reasoning_continuity:
-        mode: openai_visible
-        reasoning_replay: all
       forced_tool_choice:
         suppress_in_thinking: true
 
   deepseek-v4.1-messages: &deepseek-v4-1-messages
     <<: [*window-1m-64k, *vision]
     thinking:
-      type: adaptive
+      type: enabled
       effort: high
     variants:
       low:
@@ -837,9 +828,6 @@ model_templates:
       request_overrides:
         headers:
           anthropic-beta: null
-      reasoning_continuity:
-        mode: anthropic_unsigned
-        reasoning_replay: all
 
   deepseek-v4.1-responses: &deepseek-v4-1-responses
     <<: [*window-1m-64k, *vision]
@@ -890,8 +878,8 @@ model_pools:
 Notes:
 
 - DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
-  `max_tokens`. `request_overrides` supplies the request-shape differences.
-  When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so the templates set `reasoning_replay: all` to keep completed-turn reasoning client-side; without tools the field is ignored.
+  `max_tokens`. Chord selects these fields directly for DeepSeek models.
+  When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so Chord preserves the entire retained reasoning history on Chat and Messages; without tools the field is ignored.
 
   DeepSeek also rejects forced tool choice while thinking is active, so the template downgrades loop-forced `tool_choice: required` to the backend default for those requests.
 - DeepSeek Responses supports `tool_choice: required`, so its template keeps
@@ -902,7 +890,7 @@ Notes:
   the stream ends with a `response.completed` / `incomplete` / `failed` event
   instead of `data: [DONE]`.
 - DeepSeek Messages supports `output_config.effort`; Chord derives it from
-  `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint; it ignores them outside the Files API. `thinking.budget_tokens` is accepted but ignored: thinking depth comes from the effort value, not from a token budget. Its Anthropic-compatible endpoint may return unsigned `thinking` blocks, so configure `anthropic_unsigned` as described in the shared section.
+  `thinking.effort`. Disable Anthropic beta headers for the compatible endpoint; it ignores them outside the Files API. `thinking.budget_tokens` is accepted but ignored: thinking depth comes from the effort value, not from a token budget. Its Anthropic-compatible endpoint may return unsigned `thinking` blocks, which Chord handles automatically for DeepSeek models.
 - All three wire families accept images, billed as input tokens (the official
   cap is 1024 tokens per image). The endpoint takes inline base64, external
   URLs, or Files API `file_id`s, detects the format by content

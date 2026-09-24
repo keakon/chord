@@ -29,9 +29,29 @@ DeepSeek / GLM / Kimi K2.x / Doubao as `thinking: {type}`, and Qwen as
 with `compat.chat_completions.native_thinking`; see
 [Thinking behind a Chat Completions gateway](./model-configs.md#thinking-behind-a-chat-completions-gateway).
 
+## DeepSeek thinking and history replay
+
+Chord recognizes `deepseek` / `deepseek-*` in the final component of a model ID,
+including provider-prefixed IDs. Chat Completions and Messages preserve the
+selected effort across tool calls, even when an assistant returns no reasoning.
+`max` is an effort level; `max_tokens` limits output. DeepSeek ignores
+`budget_tokens` as a thinking-effort control.
+
+For Messages, use `thinking.type: enabled` with `thinking.effort`; Chord sends
+`thinking: {type: enabled}` and `output_config.effort`. For Chat, use
+`reasoning.effort`; Chord sends `reasoning_effort` and
+`thinking: {type: enabled}`. `thinking.type: disabled` explicitly turns thinking off.
+
+Both DeepSeek paths replay reasoning from the entire retained history, including
+previous user turns; generic `reasoning_replay: current_turn` / `none` settings
+do not shorten this window. Same-target Messages blocks retain their original
+text and usable signatures. A replay rejection does not trigger lower effort,
+removal of required reasoning, or textification of tool history; the error follows
+the model-pool handling rules. Third-party gateways must support this contract.
+
 ## Decide the replay contract
 
-The answer depends on whether the backend requires its own reasoning content back:
+For targets other than the DeepSeek Chat/Messages paths above, the answer depends on whether the backend requires its own reasoning content back:
 
 1. **No thinking**: the model does not reason, or you never turn thinking on.
    Nothing to configure.

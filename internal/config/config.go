@@ -966,12 +966,13 @@ func (l ModelLimit) EffectiveOutputBudget(outputCapSetting, defaultOutputCap int
 
 // ThinkingConfig controls extended thinking for Anthropic models.
 // Type selects one of three mutually-exclusive modes:
-//   - "enabled": manual mode; parses Budget and optional Display
+//   - "enabled": manual mode; parses Budget, optional Effort and Display
 //   - "adaptive": adaptive mode; parses Effort and optional Display
 //   - "disabled": thinking disabled; no extra thinking fields are parsed
 //
 // Budget belongs to manual mode only.
-// Effort belongs to adaptive mode only.
+// Effort applies to adaptive mode and DeepSeek enabled thinking.
+// Claude enabled thinking uses Budget and ignores Effort.
 // Display is valid only for enabled/adaptive modes.
 type ThinkingConfig struct {
 	Type            string `json:"type,omitempty" yaml:"type,omitempty"`

@@ -25,6 +25,7 @@ const (
 	NativeFamilyAnthropic = "anthropic"
 	NativeFamilyGemini    = "gemini"
 	NativeFamilyOpenAI    = "openai"
+	NativeFamilyDeepSeek  = "deepseek"
 )
 
 // ModelNativeFamily infers the upstream family from a model ID. Vendor prefixes
@@ -38,6 +39,8 @@ func ModelNativeFamily(modelID string) string {
 	switch {
 	case m == "":
 		return NativeFamilyUnknown
+	case m == "deepseek", strings.HasPrefix(m, "deepseek-"):
+		return NativeFamilyDeepSeek
 	case strings.Contains(m, "gemini"), strings.Contains(m, "vertex"):
 		return NativeFamilyGemini
 	case strings.Contains(m, "claude"), strings.Contains(m, "anthropic"):

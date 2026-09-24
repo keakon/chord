@@ -364,6 +364,15 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 			var portableThinking []string
 			kept := make([]message.ThinkingBlock, 0, len(msg.ThinkingBlocks))
 			for _, block := range msg.ThinkingBlocks {
+				// DeepSeek returns visible thinking with optional opaque metadata.
+				// Preserve same-target blocks verbatim; Claude signature validation
+				// does not apply to this backend.
+				if allowUnsignedThinking && targetNativeFamily(target) == NativeFamilyDeepSeek &&
+					block.Data == "" && messageProvenanceMatchesTarget(*msg, target) &&
+					provenanceWireFamily(*msg) == WireFamilyAnthropic {
+					kept = append(kept, block)
+					continue
+				}
 				if !allowThinking {
 					report.DroppedThinkingBlocks++
 					portableThinking = appendPortableText(portableThinking, block.Thinking)
@@ -423,7 +432,11 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				report.ForeignNativeReplays++
 			}
 			if !replayable {
-				portableReasoning := strings.TrimSpace(msg.ReasoningContent)
+				// The guard above already established that this text is more than
+				// whitespace, and portable reasoning is replayed as the source
+				// produced it: trimming it here would rewrite the text the source
+				// model emitted on its way to the target.
+				portableReasoning := msg.ReasoningContent
 				msg.ReasoningContent = ""
 				converted := false
 				if portableReasoning != "" && canConvertPortableReasoningToUnsignedAnthropic(target, opts.ReplayCompat) {
@@ -894,8 +907,14 @@ func downgradeAssistantToolCallsToText(msg message.Message) message.Message {
 	}
 }
 
+// appendPortableText adds one reasoning part to the text a target receives in
+// place of its native reasoning. A part is replayed as the source produced it,
+// padding included, so the text the source model emitted is not rewritten on
+// its way to the target. A whitespace-only part carries no reasoning and is
+// dropped: converted into unsigned thinking or reasoning_content it would only
+// add an empty block some backends reject.
 func appendPortableText(items []string, text string) []string {
-	if text = strings.TrimSpace(text); text != "" {
+	if strings.TrimSpace(text) != "" {
 		return append(items, text)
 	}
 	return items

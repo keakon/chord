@@ -193,7 +193,8 @@ func (a *AnthropicProvider) CompleteStream(
 		traceCB = traceCollector.Callback
 	}
 	at := tuning.Anthropic
-	at, err := validateAnthropicTuning(at)
+	deepSeek := deepSeekTarget(a.provider, model)
+	at, err := validateMessagesThinking(tuning, deepSeek)
 	if err != nil {
 		return nil, fmt.Errorf("validate anthropic tuning: %w", err)
 	}
@@ -248,6 +249,9 @@ func (a *AnthropicProvider) CompleteStream(
 		// Configure thinking.
 		if thinking := buildAnthropicThinking(at); thinking != nil {
 			reqBody.Thinking = thinking
+		}
+		if deepSeek && at.ThinkingType != "disabled" {
+			reqBody.Thinking = &anthropicThinking{Type: "enabled"}
 		}
 		if oc := buildAnthropicOutputConfig(at); oc != nil {
 			reqBody.OutputConfig = oc

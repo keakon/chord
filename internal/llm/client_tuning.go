@@ -103,6 +103,9 @@ func mergeAnthropicThinkingTuning(base AnthropicTuning, thinking *config.Thinkin
 	}
 	switch base.ThinkingType {
 	case "enabled":
+		if thinking.Effort != "" {
+			base.ThinkingEffort = thinking.Effort
+		}
 		if thinking.Budget > 0 {
 			base.ThinkingBudget = thinking.Budget
 		}

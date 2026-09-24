@@ -126,7 +126,7 @@ type openAIMessage struct {
 	Role    string `json:"role"`
 	Content any    `json:"content,omitempty"` // string or []openAIContentBlock; omitted when nil
 	// Transient marks a request-scoped overlay (KindTurnOverlay source) that is
-	// not a real user turn. It is omitted from the wire; fillCurrentTurnEmptyReasoning
+	// not a real user turn. It is omitted from the wire; fillMissingReasoning
 	// skips it when computing the current-turn boundary so an overlay at the tail
 	// cannot move the reasoning-presence window past the current tool chain.
 	Transient bool `json:"-"`
@@ -321,6 +321,9 @@ func (o *OpenAIProvider) CompleteStream(
 		traceCB = traceCollector.Callback
 	}
 
+	if deepSeekTarget(o.provider, model) {
+		tuning = deepSeekRequestTuning(tuning)
+	}
 	ot := tuning.OpenAI
 	if tuning.DisableReasoning {
 		ot.ReasoningEffort = ""
@@ -377,7 +380,7 @@ func (o *OpenAIProvider) CompleteStream(
 		// session dump shows 12 "reasoning_content must be passed back" 400s on
 		// requests whose thinking key was already stripped.
 		if wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
-			fillCurrentTurnEmptyReasoning(apiMessages)
+			fillMissingReasoning(apiMessages, deepSeekTarget(o.provider, model))
 		}
 		if chatGeminiRequiresSignaturePlaceholder(model, dialect) {
 			// Gemini 3 rejects function-call history whose thought signature is
@@ -450,7 +453,7 @@ func (o *OpenAIProvider) CompleteStream(
 
 		if effort := ot.EffectiveReasoningEffort(); effort != "" {
 			reqBody.ReasoningEffort = effort
-			if maxTokens > 0 {
+			if maxTokens > 0 && !deepSeekTarget(o.provider, model) {
 				// OpenAI reasoning models require max_completion_tokens. Compatible
 				// providers can rename this dynamically computed field through
 				// request_overrides.rename_body_fields.
@@ -458,6 +461,9 @@ func (o *OpenAIProvider) CompleteStream(
 				reqBody.MaxTokens = 0
 			}
 		} else if maxTokens > 0 {
+			reqBody.MaxTokens = maxTokens
+		}
+		if deepSeekTarget(o.provider, model) && maxTokens > 0 {
 			reqBody.MaxTokens = maxTokens
 		}
 
@@ -632,25 +638,23 @@ func responseHeaderBytes(resp *http.Response) int64 {
 	return int64(n)
 }
 
-// fillCurrentTurnEmptyReasoning gives every assistant tool-call message after
-// the last real user message an empty-but-present reasoning_content field when
-// the upstream produced none (e.g. a gateway routed the turn to a non-thinking
-// backend). Thinking-mode chat backends (DeepSeek family) validate the field's
-// presence on current-turn tool-call messages and reject the whole request
-// when it is absent; messages before the last user message are outside the
-// validation window and stay untouched. Request-scoped overlays (Transient,
-// e.g. <system-reminder> hints) are not real user turns and are skipped so an
-// overlay at the tail cannot push the current-turn window past the tool chain.
-func fillCurrentTurnEmptyReasoning(apiMessages []openAIMessage) {
+// fillMissingReasoning preserves empty-but-present reasoning on assistant
+// messages. DeepSeek validates all historical turns; other visible-reasoning
+// endpoints only receive empty fields on current-turn tool calls. Transient
+// reminders do not advance the real user-turn boundary.
+func fillMissingReasoning(apiMessages []openAIMessage, entireHistory bool) {
 	lastUserIdx := -1
 	for i := range apiMessages {
 		if apiMessages[i].Role == "user" && !apiMessages[i].Transient {
 			lastUserIdx = i
 		}
 	}
+	if entireHistory {
+		lastUserIdx = -1
+	}
 	for i := lastUserIdx + 1; i < len(apiMessages); i++ {
 		m := &apiMessages[i]
-		if m.Role == "assistant" && len(m.ToolCalls) > 0 && m.ReasoningContent == nil {
+		if m.Role == "assistant" && (entireHistory || len(m.ToolCalls) > 0) && m.ReasoningContent == nil {
 			empty := ""
 			m.ReasoningContent = &empty
 		}

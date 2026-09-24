@@ -108,10 +108,11 @@ Completion。若模型在输出可见正文前耗尽预算，且已启用
 GLM Preserved Thinking 的 body override 需要包含 `thinking.type: enabled` 和
 `thinking.clear_thinking: false`，并设置
 `reasoning_continuity.reasoning_replay: all`，让 Chord 在回放历史中保留
-已完成轮次的 reasoning。DeepSeek 需要 `thinking.type: enabled` 和
-`reasoning_continuity.reasoning_replay: all`：请求带 tools 时，DeepSeek
-要求后续每一轮都完整回传历史 `reasoning_content`，否则返回 `400`。两种
-情况下，回放的 `reasoning_content` 都必须保持完整、未修改且顺序不变。
+已完成轮次的 reasoning。DeepSeek 的 Chat 与 Messages 路由会自动完整回传
+历史 `reasoning_content`：请求带 tools 却缺少它时，DeepSeek 会返回 `400`。
+第三方托管、实际不是 DeepSeek 后端的 `deepseek-*` 路由，可以用
+`reasoning_continuity.contract: none` 退出这套规则。两种情况下，回放的
+`reasoning_content` 都必须保持完整、未修改且顺序不变。
 
 Anthropic 还会把每个 thinking 块绑定到生成它的对话前缀，所以压缩或恢复
 会话等历史改写可能让原本完好的块被拒，报

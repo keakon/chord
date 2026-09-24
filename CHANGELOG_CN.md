@@ -9,7 +9,7 @@
 
 ### 不兼容变更
 
-- `compat.reasoning_continuity.preserve_history` 被 `compat.reasoning_continuity.reasoning_replay` 取代：`current_turn`（新的默认值）只保留当前轮的 reasoning，`all` 原样回放已完成轮次（等价原来的 `preserve_history: true`），`none` 连当前轮一起剥离。回放窗口现在覆盖所有 reasoning 载荷，不再局限于明文，因此已完成轮次的 Claude 签名 thinking 块、Responses reasoning items、Gemini thought 签名默认也会被剥离；当前轮（含工具循环）始终原样回传。契约要求完整 assistant 历史的后端用 `reasoning_replay: all` 保留（DeepSeek 在请求带 tools 时、Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`），模型配置指南的模板已同步设置。保留历史轮 thinking 的 Claude 模型（Opus 4.5+、Sonnet 4.6+）在默认值下还会失去跨轮思考连续性，需要保留就让这些模型用 `all`。旧键不再读取：残留的 `preserve_history` 会由配置加载器报出（`chord doctor config` 也会列出），随后按新默认值生效，迁移需要手动完成。
+- `compat.reasoning_continuity.preserve_history` 被 `compat.reasoning_continuity.reasoning_replay` 取代：`current_turn`（新的默认值）只保留当前轮的 reasoning，`all` 原样回放已完成轮次（等价原来的 `preserve_history: true`），`none` 连当前轮一起剥离。回放窗口现在覆盖所有 reasoning 载荷，不再局限于明文，因此已完成轮次的 Claude 签名 thinking 块、Responses reasoning items、Gemini thought 签名默认也会被剥离；当前轮（含工具循环）始终原样回传。DeepSeek 的 Chat/Messages 会自动保留完整的 reasoning 历史。其他契约要求完整 assistant 历史的后端用 `reasoning_replay: all` 保留（Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`），模型配置指南的模板已同步设置。保留历史轮 thinking 的 Claude 模型（Opus 4.5+、Sonnet 4.6+）在默认值下还会失去跨轮思考连续性，需要保留就让这些模型用 `all`。旧键不再读取：残留的 `preserve_history` 会由配置加载器报出（`chord doctor config` 也会列出），随后按新默认值生效，迁移需要手动完成。
 
 - Agent 定义不再读取 `capabilities`、`preferred_tasks`、`write_mode`、`delegation_policy`。这些键从未被强制执行，只是 Delegate 选人列表上的标签。选人意图写进 `description`。角色能不能写文件仍由 `permission` 决定，Delegate 仍会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。现有 agent 文件里残留的这些键会被忽略。
 - headless 的 `compaction_status` 事件不再携带 `model_downshift` 触发类型：切换到更小窗口引发的压缩现在以 `usage_driven` 上报，按旧值过滤的集成方请改匹配 `usage_driven`。
@@ -121,6 +121,7 @@
 - 上下文用量不再把图片的 base64 载荷按正文计费。过去一张 400 KB 的截图会读成约 13 万上下文 token，侧栏读数虚高，还可能在真实用量远未越线时就开始自动压缩；现在每张图按固定额度计入估算，按上次上游样本重标定的字节校准也不再统计图片载荷。
 - 侧边栏的上下文表盘与自动压缩现在只认 provider 对实际发出的请求回报的 usage：新追加的大段工具输出或粘贴的文件不再让显示的用量在两次响应之间继续增长，也不会独自触发压缩。响应没有回报 usage 时，只为该次请求冻结一个估算值，表盘上标为 `≈`；完全没有可用样本的会话仍显示 `0`，也不会据此触发压缩。切换模型时表盘保持上一次读数并标为 `≈`，旧读数不参与新窗口的阈值判断；新响应的用量或缺少用量时的冻结估算才会参与。切换以及切换后失败的请求都不会让表盘归零。恢复会话后的读数同样只供显示，直到新响应更新它。
 - 压缩进行中双击状态栏里的工作目录或会话 ID，现在复制的是你点中的那一项。压缩进度 pill 是右侧分组的最左成员，可点击列却按没有它来排布，于是 pill 在场时双击会话 ID 毫无反应，双击可见的路径反而复制了会话 ID；行里没显示出来的成员也不再保留可点击区域。
+- DeepSeek 的 Chat 与 Messages 请求保持指定思考强度，并完整回传历史思考；Messages 按 DeepSeek 规则发送思考参数，不再要求 Claude 的思考预算。
 
 ## 0.8.1 - 2026-09-16
 

@@ -28,9 +28,27 @@ Gemini 用 `extra_body.google.thinking_config`，Claude 用
 `compat.chat_completions.native_thinking` 指定；见
 [走 Chat Completions 网关的 thinking](./model-configs_CN.md#走-chat-completions-网关的-thinking)。
 
+## DeepSeek 的思考与历史回放
+
+Chord 按模型 ID 的最后一段识别 `deepseek` / `deepseek-*`，包括带 provider
+前缀的名称。Chat Completions 和 Messages 都保持用户指定的思考强度；历史
+工具调用没有思考文本，也不会撤掉 `max`。`max` 是强度，`max_tokens` 是输出
+上限，DeepSeek 不使用 `budget_tokens` 控制思考强度。
+
+Messages 使用 `thinking.type: enabled` 配合 `thinking.effort`，发送为
+`thinking: {type: enabled}` 与 `output_config.effort`。Chat 使用
+`reasoning.effort`，发送 `reasoning_effort` 与 `thinking: {type: enabled}`。
+`thinking.type: disabled` 明确关闭思考。
+
+这两条 DeepSeek 路径始终完整回放保留历史中的思考，包括更早用户轮次的
+消息；通用的 `reasoning_replay: current_turn` / `none` 不会缩短这个窗口。
+同源 Messages 思考块保留原始文本和可用签名。回放被拒绝时，Chord 不会通过
+降低强度、删除必需思考或把工具轨迹转成文本来重试；错误继续按模型池规则
+处理。第三方网关需要支持这套 DeepSeek 契约。
+
 ## 决定回放契约
 
-答案取决于后端是否要求把自己的思考内容再传回去：
+除上述 DeepSeek Chat/Messages 路径外，其他目标按后端是否要求回传思考选择：
 
 1. **不思考**：模型本身不推理，或者你从不开启思考。无需配置。
 2. **会返回思考，但不要求回传**：默认配置就够。Chord 首次尝试会乐观回放

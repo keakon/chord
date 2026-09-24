@@ -426,6 +426,57 @@ func TestNormalizeForTarget_ConvertsOpenAIReasoningToUnsignedAnthropicThinking(t
 	}
 }
 
+// Portable reasoning is replayed as the source produced it, so the text keeps
+// its padding instead of being trimmed on the way to the target's thinking
+// block.
+func TestNormalizeForTarget_KeepsPortableReasoningTextVerbatim(t *testing.T) {
+	const reasoning = "\n  padded reasoning  \n"
+	msgs := []message.Message{
+		{
+			Role:             message.RoleAssistant,
+			Content:          "calling tool",
+			ReasoningContent: reasoning,
+			ToolCalls:        []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}},
+			Provenance:       &message.MessageProvenance{ProviderID: "source-chat", ModelID: "glm-5.2", WireFamily: WireFamilyOpenAIChat},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+	}
+	target := TargetModel{
+		ProviderID:              "target-messages",
+		ModelID:                 "glm-5.2",
+		WireFamily:              WireFamilyAnthropic,
+		ReasoningContinuityMode: ReasoningContinuityAnthropicUnsigned,
+		ToolResultEncoding:      ToolResultEncodingAnthropicUserBlock,
+		SupportsStructuredTools: true,
+	}
+
+	out, report := NormalizeForTarget(msgs, target, NormalizeOptions{StructuredTools: true})
+	if len(out) != 2 || len(out[0].ThinkingBlocks) != 1 {
+		t.Fatalf("converted messages = %+v", out)
+	}
+	if got := out[0].ThinkingBlocks[0].Thinking; got != reasoning {
+		t.Fatalf("portable reasoning was rewritten: %q", got)
+	}
+	if report.ConvertedReasoning != 1 {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+// The helper carries parts through verbatim and skips parts without any
+// reasoning text, whitespace-only ones included.
+func TestAppendPortableTextKeepsPartsVerbatim(t *testing.T) {
+	items := appendPortableText(nil, "  padded  ")
+	if len(items) != 1 || items[0] != "  padded  " {
+		t.Fatalf("padded part = %#v", items)
+	}
+	if items = appendPortableText(items, " \n\t "); len(items) != 1 {
+		t.Fatalf("whitespace-only part appended: %#v", items)
+	}
+	if items = appendPortableText(items, ""); len(items) != 1 {
+		t.Fatalf("empty part appended: %#v", items)
+	}
+}
+
 func TestNormalizeForTarget_ConvertsAnthropicThinkingToOpenAIReasoningContent(t *testing.T) {
 	msgs := []message.Message{
 		{
