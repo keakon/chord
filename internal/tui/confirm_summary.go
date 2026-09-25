@@ -306,6 +306,20 @@ func buildReplaceEditConfirmSummary(summary *confirmSummary, parsed map[string]a
 	}
 	appendConfirmField(&summary.Fields, newConfirmField("File", filePath, true))
 
+	if edits, ok := parsed["edits"].([]any); ok {
+		handled["edits"] = true
+		for i, value := range edits {
+			if edit, ok := value.(map[string]any); ok {
+				oldText, _ := confirmString(edit, "old_string")
+				newText, _ := confirmString(edit, "new_string")
+				appendConfirmField(&summary.Fields, newConfirmPreviewField(fmt.Sprintf("Edit %d old text", i+1), oldText, true, 3, 8))
+				appendConfirmField(&summary.Fields, newConfirmPreviewField(fmt.Sprintf("Edit %d new text", i+1), newText, true, 3, 8))
+				if all, ok := confirmBool(edit, "replace_all"); ok {
+					appendConfirmField(&summary.Fields, newConfirmField(fmt.Sprintf("Edit %d replace all", i+1), confirmYesNo(all), true))
+				}
+			}
+		}
+	}
 	oldText, oldOK := confirmString(parsed, "old_string")
 	handled["old_string"] = true
 	if oldOK {

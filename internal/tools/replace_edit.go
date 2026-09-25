@@ -33,10 +33,11 @@ type EditTool struct {
 }
 
 type replaceEditArgs struct {
-	Path       string `json:"path"`
-	OldString  string `json:"old_string"`
-	NewString  string `json:"new_string"`
-	ReplaceAll *bool  `json:"replace_all,omitempty"`
+	Path       string            `json:"path"`
+	Edits      []textReplacement `json:"edits,omitempty"`
+	OldString  string            `json:"old_string"`
+	NewString  string            `json:"new_string"`
+	ReplaceAll *bool             `json:"replace_all,omitempty"`
 }
 
 // UnmarshalJSON accepts the tolerated "filePath" alias for "path" (current
@@ -45,15 +46,17 @@ type replaceEditArgs struct {
 // via argumentAliases instead.
 func (a *replaceEditArgs) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Path       string `json:"path"`
-		FilePath   string `json:"filePath"`
-		OldString  string `json:"old_string"`
-		NewString  string `json:"new_string"`
-		ReplaceAll *bool  `json:"replace_all,omitempty"`
+		Path       string            `json:"path"`
+		Edits      []textReplacement `json:"edits,omitempty"`
+		FilePath   string            `json:"filePath"`
+		OldString  string            `json:"old_string"`
+		NewString  string            `json:"new_string"`
+		ReplaceAll *bool             `json:"replace_all,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
+	a.Edits = raw.Edits
 	a.Path = raw.Path
 	if a.Path == "" {
 		a.Path = raw.FilePath
@@ -82,6 +85,7 @@ func (t EditTool) Description() string {
 	// lspDiagnosticPromptBlock.
 	return "Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with Write. " +
 		"old_string must match the file's raw text exactly, including indentation, tabs, spaces, newlines (including CRLF vs LF), and quote characters; if the text came from Read output, do not include the displayed line-number gutter or separator tab. " +
+		"For several disjoint changes in one file, use edits instead of separate calls. Every batch entry matches the original file exactly; overlaps are rejected and all entries are validated before writing. Do not mix edits with top-level replacement fields. " +
 		"Prefer the smallest unique 2-4 line block instead of a large stale context block; re-read before retrying after any mismatch. Replaces one occurrence by default; set replace_all to replace every occurrence."
 }
 
@@ -92,6 +96,15 @@ func (EditTool) Parameters() map[string]any {
 			"path": map[string]any{
 				"type":        "string",
 				"description": "Relative (preferred) or absolute path to the file to edit. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
+			},
+			"edits": map[string]any{
+				"type": "array", "minItems": 1,
+				"description": "Disjoint exact replacements against the original file, validated together before one write.",
+				"items": map[string]any{"type": "object", "properties": map[string]any{
+					"old_string":  map[string]any{"type": "string", "minLength": 1},
+					"new_string":  map[string]any{"type": "string"},
+					"replace_all": map[string]any{"type": "boolean"},
+				}, "required": []string{"old_string", "new_string"}, "additionalProperties": false},
 			},
 			"old_string": map[string]any{
 				"type":        "string",
@@ -106,7 +119,8 @@ func (EditTool) Parameters() map[string]any {
 				"description": "If true, replace all occurrences of old_string. Default is false.",
 			},
 		},
-		"required":             []string{"path", "old_string", "new_string"},
+		"required":             []string{"path"},
+		"anyOf":                []map[string]any{{"required": []string{"old_string", "new_string"}}, {"required": []string{"edits"}}},
 		"additionalProperties": false,
 	}
 }
@@ -128,61 +142,25 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	if isBlockedDevicePath(resolvedPath) {
 		return "", fmt.Errorf("cannot edit blocked device path: %s", a.Path)
 	}
+	if a.Edits != nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return "", fmt.Errorf("invalid arguments: %w", err)
+		}
+		for _, name := range []string{"old_string", "new_string", "replace_all"} {
+			if _, exists := fields[name]; exists {
+				return "", fmt.Errorf("edits cannot be combined with %s", name)
+			}
+		}
+		return t.executeBatch(ctx, resolvedPath, a.Path, a.Edits)
+	}
 	if a.OldString == "" {
 		return "", fmt.Errorf("old_string is required")
 	}
 
-	decodedOld, err := decodeToolStringArg(a.OldString)
+	decodedOld, decodedNew, abs, err := prepareReplacementText(a.OldString, a.NewString)
 	if err != nil {
-		return "", fmt.Errorf("old_string encoding unsupported: %w", err)
-	}
-	decodedNew, err := decodeToolStringArg(a.NewString)
-	if err != nil {
-		return "", fmt.Errorf("new_string encoding unsupported: %w", err)
-	}
-
-	// Strip orphaned variation selectors that models sometimes emit inside
-	// numeric literals and plain text (e.g. "️0" instead of "0").  The file
-	// content never contains them, so they cause every matching layer to fail.
-	// We count stripped selectors so the success message can report them.
-	// The per-rune counts come from what the strip actually removed (original
-	// minus result), so the report names exactly which invisible characters the
-	// model leaked and never counts preserved ones (emoji-joining ZWJ, leading
-	// BOM, base-character variation selectors).
-	oldLen := len([]rune(decodedOld))
-	// The search text keeps only the zero-width/variation-selector cleaning it
-	// already had: orphaned combining marks are left for the tolerance matcher
-	// to fold, which is what fires the "punctuation/whitespace-tolerant" note.
-	strippedOldText := StripZeroWidthFormat(StripOrphanVariationSelectors(decodedOld))
-	oldInvisible := CountStrippedInvisible(decodedOld, strippedOldText)
-	decodedOld = strippedOldText
-	strippedOld := oldLen - len([]rune(decodedOld))
-	newLen := len([]rune(decodedNew))
-	strippedNewText := stripEditInvisible(decodedNew)
-	newInvisible := CountStrippedInvisible(decodedNew, strippedNewText)
-	decodedNew = strippedNewText
-	strippedNew := newLen - len([]rune(decodedNew))
-	strippedSelectors := strippedOld + strippedNew
-	// An old_string made only of orphaned selectors strips to the empty
-	// string, which matches everywhere: strings.Count(content, "") reports
-	// rune count + 1 hits and replace_all would splice new_string between
-	// every rune. Reject it with an actionable message instead.
-	if decodedOld == "" {
-		return "", fmt.Errorf("old_string contains only invisible characters (%d invisible character(s) were stripped) and cannot be matched; re-read the target range and rebuild old_string from the visible file text you want to replace", strippedOld)
-	}
-	// A new_string that strips to empty had its visible content lost before
-	// the model ever sent it; applying it would turn the replacement into a
-	// deletion on unknowable intent. A new_string that arrives empty is a
-	// legitimate deletion and stays allowed.
-	if decodedNew == "" && newLen > 0 {
-		return "", fmt.Errorf("new_string contains only invisible characters (%d invisible character(s) were stripped); rebuild new_string with the visible text the file should contain (send an empty new_string if you intend to delete the old_string text)", strippedNew)
-	}
-	// new_string is written to the file verbatim, so control characters would
-	// land in it — reject and route binary content to a shell command or
-	// script. old_string needs no such guard: control characters there simply
-	// fail to match.
-	if err := validateWritableText(decodedNew); err != nil {
-		return "", fmt.Errorf("new_string %w", err)
+		return "", err
 	}
 
 	// Read the file.
@@ -210,15 +188,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 			newlineTolerant = true
 		}
 	}
-	// Both success paths report every invisible character the model leaked
-	// (variation selectors and zero-width format runes stripped above).
-	abs := ""
-	if strippedSelectors > 0 {
-		// Per-rune counts reflect what the strip removed (oldInvisible /
-		// newInvisible), so the report names exactly which invisible
-		// characters the model leaked.
-		abs = fmt.Sprintf(", cleaned %d invisible character(s) from your arguments: %s", strippedSelectors, describeInvisibleCounts(mergeInvisibleCounts(oldInvisible, newInvisible)))
-	}
+
 	if count == 0 {
 		// Try punctuation tolerance: some models cannot reproduce the file's
 		// punctuation verbatim — they emit straight quotes for curly ones,
@@ -348,6 +318,72 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", err
 	}
 	return out, nil
+}
+
+func prepareReplacementText(oldString, newString string) (string, string, string, error) {
+	decodedOld, err := decodeToolStringArg(oldString)
+	if err != nil {
+		return "", "", "", fmt.Errorf("old_string encoding unsupported: %w", err)
+	}
+	decodedNew, err := decodeToolStringArg(newString)
+	if err != nil {
+		return "", "", "", fmt.Errorf("new_string encoding unsupported: %w", err)
+	}
+
+	// Strip orphaned variation selectors that models sometimes emit inside
+	// numeric literals and plain text (e.g. "️0" instead of "0").  The file
+	// content never contains them, so they cause every matching layer to fail.
+	// We count stripped selectors so the success message can report them.
+	// The per-rune counts come from what the strip actually removed (original
+	// minus result), so the report names exactly which invisible characters the
+	// model leaked and never counts preserved ones (emoji-joining ZWJ, leading
+	// BOM, base-character variation selectors).
+	oldLen := len([]rune(decodedOld))
+	// The search text keeps only the zero-width/variation-selector cleaning it
+	// already had: orphaned combining marks are left for the tolerance matcher
+	// to fold, which is what fires the "punctuation/whitespace-tolerant" note.
+	strippedOldText := StripZeroWidthFormat(StripOrphanVariationSelectors(decodedOld))
+	oldInvisible := CountStrippedInvisible(decodedOld, strippedOldText)
+	decodedOld = strippedOldText
+	strippedOld := oldLen - len([]rune(decodedOld))
+	newLen := len([]rune(decodedNew))
+	strippedNewText := stripEditInvisible(decodedNew)
+	newInvisible := CountStrippedInvisible(decodedNew, strippedNewText)
+	decodedNew = strippedNewText
+	strippedNew := newLen - len([]rune(decodedNew))
+	strippedSelectors := strippedOld + strippedNew
+	// An old_string made only of orphaned selectors strips to the empty
+	// string, which matches everywhere: strings.Count(content, "") reports
+	// rune count + 1 hits and replace_all would splice new_string between
+	// every rune. Reject it with an actionable message instead.
+	if decodedOld == "" {
+		return "", "", "", fmt.Errorf("old_string contains only invisible characters (%d invisible character(s) were stripped) and cannot be matched; re-read the target range and rebuild old_string from the visible file text you want to replace", strippedOld)
+	}
+	// A new_string that strips to empty had its visible content lost before
+	// the model ever sent it; applying it would turn the replacement into a
+	// deletion on unknowable intent. A new_string that arrives empty is a
+	// legitimate deletion and stays allowed.
+	if decodedNew == "" && newLen > 0 {
+		return "", "", "", fmt.Errorf("new_string contains only invisible characters (%d invisible character(s) were stripped); rebuild new_string with the visible text the file should contain (send an empty new_string if you intend to delete the old_string text)", strippedNew)
+	}
+	// new_string is written to the file verbatim, so control characters would
+	// land in it — reject and route binary content to a shell command or
+	// script. old_string needs no such guard: control characters there simply
+	// fail to match.
+	if err := validateWritableText(decodedNew); err != nil {
+		return "", "", "", fmt.Errorf("new_string %w", err)
+	}
+
+	// Both success paths report every invisible character the model leaked
+	// (variation selectors and zero-width format runes stripped above).
+	abs := ""
+	if strippedSelectors > 0 {
+		// Per-rune counts reflect what the strip removed (oldInvisible /
+		// newInvisible), so the report names exactly which invisible
+		// characters the model leaked.
+		abs = fmt.Sprintf(", cleaned %d invisible character(s) from your arguments: %s", strippedSelectors, describeInvisibleCounts(mergeInvisibleCounts(oldInvisible, newInvisible)))
+	}
+	return decodedOld, decodedNew, abs, nil
 }
 
 func trailingNewlineTolerantEdit(content, oldText, newText string) (altOld, altNew string, altCount int, ok bool) {

@@ -151,8 +151,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	var headerOpts []string
 	if b.ToolName == tools.NameEdit {
 		replaceArgs, hasReplaceArgs = parseReplaceEditArgs(b.editPatchArgsJSON())
-		if hasReplaceArgs && replaceArgs.ReplaceAll != nil && *replaceArgs.ReplaceAll {
-			headerOpts = append(headerOpts, "replace_all=true")
+		if hasReplaceArgs {
+			if opt := replaceEditReplaceAllOption(replaceArgs); opt != "" {
+				headerOpts = append(headerOpts, opt)
+			}
 		}
 	}
 	headerOpts = append(headerOpts, b.diagnosticHeaderOptions()...)
@@ -913,7 +915,47 @@ func (b *Block) applyPatchTargets() []tools.ApplyPatchDisplayTarget {
 	return targets
 }
 
+// replaceEditReplaceAllOption renders the header option naming which
+// replacements apply to every match: the top-level flag, or the numbered batch
+// entries that set it (numbered like the batch preview sections).
+func replaceEditReplaceAllOption(args replaceEditArgs) string {
+	if len(args.Edits) == 0 {
+		if args.ReplaceAll != nil && *args.ReplaceAll {
+			return "replace_all=true"
+		}
+		return ""
+	}
+	var entries []string
+	for i, edit := range args.Edits {
+		if edit.ReplaceAll != nil && *edit.ReplaceAll {
+			entries = append(entries, strconv.Itoa(i+1))
+		}
+	}
+	switch len(entries) {
+	case 0:
+		return ""
+	case 1:
+		return "replace_all=edit " + entries[0]
+	default:
+		return "replace_all=edits " + strings.Join(entries, ",")
+	}
+}
+
 func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath string, width int) []string {
+	if len(args.Edits) > 0 {
+		// Number every batch entry so adjacent replacements stay distinct,
+		// matching the numbered fields of the confirm summary.
+		for i, edit := range args.Edits {
+			label := fmt.Sprintf("Edit %d", i+1)
+			if edit.ReplaceAll != nil && *edit.ReplaceAll {
+				label += " (replace_all=true)"
+			}
+			result = append(result, toolFieldSection(ToolResultExpandedStyle, label))
+			edit.Edits = nil
+			result = appendReplaceEditPreview(result, edit, filePath, width)
+		}
+		return result
+	}
 	// Strip orphaned variation selectors before rendering so that width
 	// measurement matches terminal zero-width rendering and the card
 	// background fills completely.
@@ -1118,9 +1160,10 @@ func decodeJSONUnicodeEscape(seg string, i int) (rune, bool) {
 // replaceEditArgs holds the old_string/new_string replacement args of an Edit
 // tool call.
 type replaceEditArgs struct {
-	OldString  string `json:"old_string"`
-	NewString  string `json:"new_string"`
-	ReplaceAll *bool  `json:"replace_all,omitempty"`
+	Edits      []replaceEditArgs `json:"edits,omitempty"`
+	OldString  string            `json:"old_string"`
+	NewString  string            `json:"new_string"`
+	ReplaceAll *bool             `json:"replace_all,omitempty"`
 }
 
 // parseReplaceEditArgs extracts the text-replacement args of an Edit tool call.
@@ -1128,7 +1171,7 @@ type replaceEditArgs struct {
 // callers fall back to the unified-diff representation.
 func parseReplaceEditArgs(argsJSON string) (replaceEditArgs, bool) {
 	var parsed replaceEditArgs
-	if json.Unmarshal([]byte(argsJSON), &parsed) != nil || parsed.OldString == "" {
+	if json.Unmarshal([]byte(argsJSON), &parsed) != nil || (parsed.OldString == "" && len(parsed.Edits) == 0) {
 		return replaceEditArgs{}, false
 	}
 	return parsed, true

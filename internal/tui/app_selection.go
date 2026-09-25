@@ -656,10 +656,19 @@ func fileDiffToolCallMarkdownContent(b *Block) string {
 	showReplace := false
 	if toolName == tools.NameEdit {
 		if args, ok := parseReplaceEditArgs(argsJSON); ok {
-			parts = append(parts, markdownFencedSection("old_string", args.OldString))
-			parts = append(parts, markdownFencedSection("new_string", args.NewString))
-			if args.ReplaceAll != nil && *args.ReplaceAll {
-				parts = append(parts, "## replace_all\n\ntrue")
+			edits := args.Edits
+			if len(edits) == 0 {
+				edits = []replaceEditArgs{args}
+			}
+			for i, edit := range edits {
+				if len(edits) > 1 {
+					parts = append(parts, fmt.Sprintf("## Edit %d", i+1))
+				}
+				parts = append(parts, markdownFencedSection("old_string", edit.OldString))
+				parts = append(parts, markdownFencedSection("new_string", edit.NewString))
+				if edit.ReplaceAll != nil && *edit.ReplaceAll {
+					parts = append(parts, "## replace_all\n\ntrue")
+				}
 			}
 			showReplace = true
 		}

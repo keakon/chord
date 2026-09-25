@@ -176,9 +176,19 @@ When the patch fails without an applied diff, the tool card keeps the requested-
 
 ### Parameters
 
-- **`old_string`** (required): Exact text to find. Must match indentation, whitespace, and newlines exactly. As a last-resort fallback, punctuation variants are tolerated (see [Punctuation Tolerance](#punctuation-tolerance) below).
-- **`new_string`** (required): Replacement text.
+- **`old_string`** (required for a single replacement): Exact text to find. Must match indentation, whitespace, and newlines exactly. As a last-resort fallback, punctuation variants are tolerated (see [Punctuation Tolerance](#punctuation-tolerance) below).
+- **`new_string`** (required for a single replacement): Replacement text.
 - **`replace_all`** (optional): `true` to replace all occurrences, `false` (default) to replace only the first.
+
+### Several replacements in one file
+
+Use `edits` for disjoint changes in one call:
+
+```json
+{"path":"server.go","edits":[{"old_string":"const port = 8080","new_string":"const port = 3000"},{"old_string":"const retries = 2","new_string":"const retries = 3"}]}
+```
+
+Each entry has `old_string`, `new_string`, and optional `replace_all`. Do not combine `edits` with top-level replacement fields. All entries match the original file, so one entry cannot target text introduced by another. Batch matching is exact after argument character cleaning; it does not use newline or punctuation tolerance. Overlapping matches, missing text, ambiguous matches without `replace_all`, or encoding failures reject the entire batch before writing. A successful batch writes once and reports diagnostics once.
 
 ### Example: Single Replacement
 
