@@ -29,21 +29,24 @@ const (
 	ArtifactReadGuidance = "Only if the preview is insufficient, use grep first or read with offset/limit for needed ranges; use a script/parser for huge single-line structured output. Do not read the entire output by default."
 
 	maxArtifactReferencePathBytes = 4096
+
+	truncationMarkerOpen   = "... ["
+	linesOmittedNotice     = " lines omitted"
+	showingLinesNotice     = "; showing lines "
+	firstLineTruncatedHead = "line 1 truncated to "
+	bytesNotice            = " bytes"
 )
 
-// TruncateOptions controls how output truncation is performed.
+// TruncateOptions controls how output truncation is performed. An over-budget
+// preview keeps the first 40% and the last 60% of the line and byte budgets.
 type TruncateOptions struct {
 	// MaxLines is the maximum number of lines to keep in an over-budget preview.
 	// It defaults to MaxOutputLines (2000).
 	MaxLines int
-	// MaxBytes is the maximum inline byte length before truncation is triggered.
+	// MaxBytes is the maximum inline byte length before truncation is triggered,
+	// not counting a single trailing newline.
 	// It defaults to MaxOutputBytes (50KB).
 	MaxBytes int
-	// Direction controls which part of the output is preserved:
-	//   "head"      – keep only the first MaxLines lines
-	//   "tail"      – keep only the last MaxLines lines
-	//   "head+tail" – keep the first 40% and last 60% of MaxLines (default)
-	Direction string
 	// ArtifactKey enables idempotent artifact storage. When non-empty, repeated
 	// truncation of the same finalized tool result reuses the same file path.
 	ArtifactKey string
@@ -62,8 +65,6 @@ type TruncateResult struct {
 	// Hint is a truncation notice (without agent-specific suggestions) that
 	// callers can use or augment depending on the agent's capabilities.
 	Hint string
-	// Preview is the model-facing preview kept inline after truncation.
-	Preview string
 	// ArtifactReference is the stable reference text for the saved full output.
 	ArtifactReference string
 }
@@ -76,30 +77,29 @@ func (o TruncateOptions) defaults() TruncateOptions {
 	if o.MaxBytes <= 0 {
 		o.MaxBytes = MaxOutputBytes
 	}
-	if o.Direction == "" {
-		o.Direction = "head+tail"
-	}
 	return o
 }
 
-// buildLineOffsets returns the byte offset of the first byte of each line in s
-// (same boundaries as strings.Split(s, "\n")).
+// buildLineOffsets returns the byte offset of the first byte of each line in
+// s, counting lines the way wc -l does: a trailing newline terminates the last
+// line instead of starting an empty one. The byte range of that last line
+// therefore includes its newline, and empty output has no lines.
 func buildLineOffsets(s string) []int {
 	if s == "" {
-		return []int{0}
+		return nil
 	}
-	nl := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			nl++
-		}
-	}
-	offs := make([]int, 0, nl+1)
+	offs := make([]int, 0, strings.Count(s, "\n")+1)
 	offs = append(offs, 0)
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\n' {
 			offs = append(offs, i+1)
 		}
+	}
+	// A trailing newline terminated the last line; it does not begin an
+	// empty one, so the offset entry after that newline is dropped and the
+	// last line's byte range keeps the newline itself.
+	if strings.HasSuffix(s, "\n") {
+		offs = offs[:len(offs)-1]
 	}
 	return offs
 }
@@ -115,29 +115,33 @@ func lineByteLen(s string, offs []int, lineIdx int) int {
 	return end - start
 }
 
-func cumulativeSizeOffsets(s string, offs []int, n int) int {
+// buildLineSizePrefix returns prefix sums of line byte lengths:
+// prefix[0] is 0 and prefix[i+1] is prefix[i] plus lineByteLen(i).
+func buildLineSizePrefix(s string, offs []int) []int {
+	prefix := make([]int, len(offs)+1)
+	for i := range offs {
+		prefix[i+1] = prefix[i] + lineByteLen(s, offs, i)
+	}
+	return prefix
+}
+
+func cumulativeSizeOffsets(prefix []int, n int) int {
 	if n <= 0 {
 		return 0
 	}
-	total := 0
-	for i := range n {
-		total += lineByteLen(s, offs, i)
-	}
+	total := prefix[n]
 	if n > 1 {
 		total += n - 1
 	}
 	return total
 }
 
-func cumulativeSizeLineRange(s string, offs []int, from, to int) int {
+func cumulativeSizeLineRange(prefix []int, from, to int) int {
 	n := to - from
 	if n <= 0 {
 		return 0
 	}
-	total := 0
-	for i := from; i < to; i++ {
-		total += lineByteLen(s, offs, i)
-	}
+	total := prefix[to] - prefix[from]
 	if n > 1 {
 		total += n - 1
 	}
@@ -168,130 +172,71 @@ func materializeLineRange(s string, offs []int, from, to int) []string {
 	return out
 }
 
+// firstLineString returns the first line without its line terminator, even
+// when it is the output's only line (whose byte range keeps the newline).
 func firstLineString(s string, offs []int) string {
 	if len(offs) == 0 {
 		return ""
 	}
-	start := offs[0]
-	var end int
 	if len(offs) > 1 {
-		end = offs[1] - 1
-	} else {
-		end = len(s)
+		return s[offs[0] : offs[1]-1]
 	}
-	return s[start:end]
+	return strings.TrimSuffix(s[offs[0]:], "\n")
 }
 
-func trimLinesToByteLimitOffsets(s string, offs []int, maxBytes int, direction string) []string {
-	if direction == "head+tail" {
-		return trimLinesToByteLimitHeadTailOffsets(s, offs, maxBytes)
-	}
+// previewWindow selects the lines shown inline: head lines from the front of
+// the output and tail lines from the back. fallback reports that not even one
+// complete line fits the byte budget, so the caller must keep a byte-truncated
+// first line instead.
+func previewWindow(s string, offs []int, opts TruncateOptions) (head, tail int, fallback bool) {
 	total := len(offs)
-	if direction == "tail" {
-		lo, hi := 0, total
-		for lo < hi {
-			mid := lo + (hi-lo+1)/2
-			if cumulativeSizeLineRange(s, offs, total-mid, total) <= maxBytes {
-				lo = mid
-			} else {
-				hi = mid - 1
-			}
-		}
-		return materializeLineRange(s, offs, total-lo, total)
+	headBudget := opts.MaxBytes * 2 / 5
+	tailBudget := opts.MaxBytes - headBudget
+	headLimit := opts.MaxLines * 2 / 5
+	tailLimit := opts.MaxLines - headLimit
+
+	prefix := buildLineSizePrefix(s, offs)
+	head = min(fitHeadLines(prefix, headBudget), headLimit)
+	// Joining nonempty head and tail windows inserts one additional newline.
+	// Reserve it before selecting the tail so retaining every line cannot
+	// exceed MaxBytes while claiming that the unchanged output was truncated.
+	if head > 0 {
+		tailBudget = max(tailBudget-1, 0)
 	}
-	lo, hi := 0, total
+	tail = min(fitTailLines(prefix, tailBudget, total-head), tailLimit)
+	return head, tail, head+tail == 0
+}
+
+// fitHeadLines returns how many lines from the front of the output fit within
+// maxBytes.
+func fitHeadLines(prefix []int, maxBytes int) int {
+	lo, hi := 0, len(prefix)-1
 	for lo < hi {
 		mid := lo + (hi-lo+1)/2
-		if cumulativeSizeOffsets(s, offs, mid) <= maxBytes {
+		if cumulativeSizeOffsets(prefix, mid) <= maxBytes {
 			lo = mid
 		} else {
 			hi = mid - 1
 		}
 	}
-	return materializeLineRange(s, offs, 0, lo)
+	return lo
 }
 
-func trimLinesToByteLimitHeadTailOffsets(s string, offs []int, maxBytes int) []string {
-	headBudget := maxBytes * 2 / 5
-	tailBudget := maxBytes - headBudget
-	total := len(offs)
-
-	headLines := 0
-	{
-		lo, hi := 0, total
-		for lo < hi {
-			mid := lo + (hi-lo+1)/2
-			if cumulativeSizeOffsets(s, offs, mid) <= headBudget {
-				lo = mid
-			} else {
-				hi = mid - 1
-			}
+// fitTailLines returns how many lines from the back of the output fit within
+// maxBytes, counting at most remaining lines.
+func fitTailLines(prefix []int, maxBytes, remaining int) int {
+	total := len(prefix) - 1
+	remaining = min(remaining, total)
+	lo, hi := 0, remaining
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		if cumulativeSizeLineRange(prefix, total-mid, total) <= maxBytes {
+			lo = mid
+		} else {
+			hi = mid - 1
 		}
-		headLines = lo
 	}
-
-	remaining := total - headLines
-	tailLines := 0
-	{
-		lo, hi := 0, remaining
-		for lo < hi {
-			mid := lo + (hi-lo+1)/2
-			if cumulativeSizeLineRange(s, offs, total-mid, total) <= tailBudget {
-				lo = mid
-			} else {
-				hi = mid - 1
-			}
-		}
-		tailLines = lo
-	}
-
-	if headLines == 0 && tailLines == 0 {
-		return nil
-	}
-	if tailLines == 0 {
-		return materializeLineRange(s, offs, 0, headLines)
-	}
-	if headLines == 0 {
-		return materializeLineRange(s, offs, total-tailLines, total)
-	}
-	out := make([]string, 0, headLines+tailLines)
-	out = append(out, materializeLineRange(s, offs, 0, headLines)...)
-	out = append(out, materializeLineRange(s, offs, total-tailLines, total)...)
-	return out
-}
-
-func applyDirectionTruncationOffsets(s string, offs []int, totalLines int, opts TruncateOptions, savedPath string) []string {
-	omitted := totalLines - opts.MaxLines
-
-	switch opts.Direction {
-	case "tail":
-		from := max(totalLines-opts.MaxLines, 0)
-		kept := materializeLineRange(s, offs, from, totalLines)
-		kept = truncateLines(kept)
-		marker := truncationMarker(omitted, savedPath)
-		return append([]string{marker}, kept...)
-
-	case "head":
-		headEnd := min(opts.MaxLines, totalLines)
-		kept := materializeLineRange(s, offs, 0, headEnd)
-		kept = truncateLines(kept)
-		marker := truncationMarker(omitted, savedPath)
-		return append(kept, marker)
-
-	default: // "head+tail"
-		headCount := min(opts.MaxLines*2/5, totalLines)
-		tailCount := min(opts.MaxLines-headCount, totalLines-headCount)
-
-		head := truncateLines(materializeLineRange(s, offs, 0, headCount))
-		tail := truncateLines(materializeLineRange(s, offs, totalLines-tailCount, totalLines))
-		marker := truncationMarker(omitted, savedPath)
-
-		result := make([]string, 0, len(head)+1+len(tail))
-		result = append(result, head...)
-		result = append(result, marker)
-		result = append(result, tail...)
-		return result
-	}
+	return lo
 }
 
 // truncateStringToValidUTF8Prefix returns up to n bytes of s, shortened if needed
@@ -332,47 +277,52 @@ func TruncateOutputWithOptions(output string, sessionDir string, opts TruncateOp
 	// per-line limits shape only the preview of an output that already exceeds
 	// the byte budget; applying them independently forces needless artifact
 	// rereads for otherwise small results such as search responses with one long
-	// embedded snippet.
-	needsTruncation := len(output) > opts.MaxBytes
+	// embedded snippet. A single trailing newline is not counted: it is the
+	// only byte a preview of such an output could drop, so an output that fits
+	// without it stays verbatim instead of claiming a truncation that omits
+	// nothing.
+	needsTruncation := len(strings.TrimSuffix(output, "\n")) > opts.MaxBytes
 
 	if !needsTruncation {
-		return TruncateResult{
-			Content: output,
-			Preview: output,
-		}
+		return TruncateResult{Content: output}
 	}
 
 	savedPath := saveFullOutput(output, sessionDir, opts.ArtifactKey)
 	offs := buildLineOffsets(output)
-	lineCount := len(offs)
+	totalLines := len(offs)
 
-	var lines []string // nil until byte-trim or final materialize
-	if len(output) > opts.MaxBytes {
+	head, tail, fallback := previewWindow(output, offs, opts)
+	var content string
+	if fallback {
+		// No complete line fits the byte budget; keep a readable slice of the
+		// first line, cut once to the smaller of the byte budget and the
+		// per-line limit. The ellipsis is part of the cut, not a decoration: a
+		// first line that fits whole must not wear a truncation marker on
+		// itself. The marker reports the byte cut and the omitted lines and
+		// carries the artifact reference, so a caller that only reads Content
+		// keeps both.
 		firstLine := firstLineString(output, offs)
-		lines = trimLinesToByteLimitOffsets(output, offs, opts.MaxBytes, opts.Direction)
-		if len(lines) == 0 {
-			if len(firstLine) > opts.MaxBytes {
-				firstLine = truncateStringToValidUTF8Prefix(firstLine, opts.MaxBytes) + "..."
+		var notice string
+		if limit := min(opts.MaxBytes, MaxLineLength); len(firstLine) > limit {
+			kept := truncateStringToValidUTF8Prefix(firstLine, limit)
+			notice = firstLineTruncatedNotice(len(kept), len(firstLine))
+			if totalLines > 1 {
+				notice += "; " + linesOmittedCount(totalLines-1, totalLines)
 			}
-			lines = []string{firstLine}
-		}
-		lineCount = len(lines)
-	}
-
-	if lineCount > opts.MaxLines {
-		if lines != nil {
-			lines = applyDirectionTruncation(lines, lineCount, opts, savedPath)
+			firstLine = kept + "..."
 		} else {
-			lines = applyDirectionTruncationOffsets(output, offs, lineCount, opts, savedPath)
+			notice = linesOmittedCount(totalLines-1, totalLines) + showingLinesNotice + keptLineRanges(totalLines, 1, 0)
 		}
+		content = firstLine + "\n" + truncationMarkerNotice(notice, savedPath)
 	} else {
-		if lines == nil {
-			lines = materializeLineRange(output, offs, 0, lineCount)
+		kept := truncateLines(materializeLineRange(output, offs, 0, head))
+		if omitted := totalLines - head - tail; omitted > 0 {
+			kept = append(kept, truncationMarker(omitted, totalLines, keptLineRanges(totalLines, head, tail), savedPath))
 		}
-		lines = truncateLines(lines)
+		kept = append(kept, truncateLines(materializeLineRange(output, offs, totalLines-tail, totalLines))...)
+		content = strings.Join(kept, "\n")
 	}
 
-	content := strings.Join(lines, "\n")
 	reference := artifactReference(savedPath)
 	hint := "Output truncated."
 	if reference != "" {
@@ -384,78 +334,80 @@ func TruncateOutputWithOptions(output string, sessionDir string, opts TruncateOp
 		Truncated:         true,
 		SavedPath:         savedPath,
 		Hint:              hint,
-		Preview:           content,
 		ArtifactReference: reference,
 	}
 }
 
-// applyDirectionTruncation selects lines according to the Direction strategy and
-// returns the resulting slice (with per-line truncation applied and any
-// truncation marker inserted).
-func applyDirectionTruncation(lines []string, totalLines int, opts TruncateOptions, savedPath string) []string {
-	omitted := totalLines - opts.MaxLines
+// truncationMarker returns the omission notice inserted between the kept
+// sections. omitted and totalLines describe the full output; ranges names the
+// kept line sections (empty when they cannot be described).
+func truncationMarker(omitted, totalLines int, ranges, savedPath string) string {
+	notice := linesOmittedCount(omitted, totalLines)
+	if ranges != "" {
+		notice += showingLinesNotice + ranges
+	}
+	return truncationMarkerNotice(notice, savedPath)
+}
 
-	switch opts.Direction {
-	case "tail":
-		from := max(totalLines-opts.MaxLines, 0)
-		kept := lines[from:]
-		kept = truncateLines(kept)
-		marker := truncationMarker(omitted, savedPath)
-		return append([]string{marker}, kept...)
+// truncationMarkerNotice wraps notice as an omission marker followed by the
+// artifact reference when the full output was saved.
+func truncationMarkerNotice(notice, savedPath string) string {
+	if ref := artifactReference(savedPath); ref != "" {
+		return fmt.Sprintf("%s%s. %s] ...", truncationMarkerOpen, notice, ref)
+	}
+	return fmt.Sprintf("%s%s] ...", truncationMarkerOpen, notice)
+}
 
-	case "head":
-		headEnd := min(opts.MaxLines, totalLines)
-		kept := lines[:headEnd]
-		kept = truncateLines(kept)
-		marker := truncationMarker(omitted, savedPath)
-		return append(kept, marker)
+func linesOmittedCount(omitted, totalLines int) string {
+	return fmt.Sprintf("%d of %d%s", omitted, totalLines, linesOmittedNotice)
+}
 
-	default: // "head+tail"
-		headCount := min(opts.MaxLines*2/5, totalLines)
-		tailCount := min(opts.MaxLines-headCount, totalLines-headCount)
+// firstLineTruncatedNotice reports that the only line shown inline was cut to
+// kept of total bytes.
+func firstLineTruncatedNotice(kept, total int) string {
+	return fmt.Sprintf("%s%d of %d%s", firstLineTruncatedHead, kept, total, bytesNotice)
+}
 
-		head := truncateLines(lines[:headCount])
-		tail := truncateLines(lines[totalLines-tailCount:])
-		marker := truncationMarker(omitted, savedPath)
-
-		result := make([]string, 0, headCount+1+tailCount)
-		result = append(result, head...)
-		result = append(result, marker)
-		result = append(result, tail...)
-		return result
+// keptLineRanges renders the kept head/tail sections as 1-based inclusive line
+// numbers, e.g. "1-48 and 517-588".
+func keptLineRanges(total, head, tail int) string {
+	switch {
+	case head > 0 && tail > 0:
+		return lineRangeLabel(1, head) + " and " + lineRangeLabel(total-tail+1, total)
+	case head > 0:
+		return lineRangeLabel(1, head)
+	case tail > 0:
+		return lineRangeLabel(total-tail+1, total)
+	default:
+		return ""
 	}
 }
 
-// truncationMarker returns the omission notice inserted between kept sections.
-func truncationMarker(omitted int, savedPath string) string {
-	if ref := artifactReference(savedPath); ref != "" {
-		return fmt.Sprintf(
-			"\n\n... [%d lines truncated. %s] ...\n",
-			omitted, ref,
-		)
+func lineRangeLabel(from, to int) string {
+	if from == to {
+		return fmt.Sprintf("%d", from)
 	}
-	return fmt.Sprintf("\n\n... [%d lines truncated] ...\n", omitted)
+	return fmt.Sprintf("%d-%d", from, to)
 }
 
 // truncateLines shortens every line that exceeds MaxLineLength UTF-8 bytes,
-// aligned to a code-unit boundary.
+// aligned to a code-unit boundary. The output's last line keeps its trailing
+// newline (see buildLineOffsets); the newline is not line content, so it
+// neither counts toward the limit nor gets cut.
 func truncateLines(lines []string) []string {
-	out, _ := truncateLinesWithStatus(lines)
-	return out
-}
-
-func truncateLinesWithStatus(lines []string) ([]string, bool) {
 	out := make([]string, len(lines))
-	truncated := false
 	for i, l := range lines {
-		if len(l) > MaxLineLength {
-			out[i] = truncateStringToValidUTF8Prefix(l, MaxLineLength) + "..."
-			truncated = true
+		body, newline := strings.CutSuffix(l, "\n")
+		if len(body) > MaxLineLength {
+			out[i] = truncateStringToValidUTF8Prefix(body, MaxLineLength) + "..."
+			if newline {
+				out[i] += "\n"
+			}
 		} else {
 			out[i] = l
 		}
 	}
-	return out, truncated
+	return out
 }
 
 func artifactReference(savedPath string) string {
@@ -531,16 +483,52 @@ func validArtifactReferencePath(path string) bool {
 	return path != "" && len(path) <= maxArtifactReferencePathBytes && !strings.ContainsAny(path, "\r\n")
 }
 
+// isTruncationMarkerReferencePrefix reports whether the text preceding an
+// artifact reference is one of Chord's own omission notices.
 func isTruncationMarkerReferencePrefix(prefix string) bool {
 	prefix = strings.TrimSpace(prefix)
-	if !strings.HasPrefix(prefix, "... [") || !strings.HasSuffix(prefix, " lines truncated.") {
+	if !strings.HasPrefix(prefix, truncationMarkerOpen) || !strings.HasSuffix(prefix, ".") {
 		return false
 	}
-	count := strings.TrimSuffix(strings.TrimPrefix(prefix, "... ["), " lines truncated.")
-	if count == "" {
+	body := strings.TrimSuffix(strings.TrimPrefix(prefix, truncationMarkerOpen), ".")
+	if rest, ok := strings.CutPrefix(body, firstLineTruncatedHead); ok {
+		rest, ok = cutCountPair(rest, bytesNotice)
+		if !ok {
+			return false
+		}
+		if rest == "" {
+			return true
+		}
+		body, ok = strings.CutPrefix(rest, "; ")
+		if !ok {
+			return false
+		}
+	}
+	rest, ok := cutCountPair(body, linesOmittedNotice)
+	// Everything after the counts is descriptive; the digits already make this
+	// shape specific enough to reject ordinary prose.
+	return ok && (rest == "" || strings.HasPrefix(rest, showingLinesNotice))
+}
+
+// cutCountPair parses a leading "<digits> of <digits><unit>" and returns the
+// text after unit.
+func cutCountPair(s, unit string) (string, bool) {
+	first, rest, ok := strings.Cut(s, " of ")
+	if !ok || !isDecimalDigits(first) {
+		return "", false
+	}
+	second, rest, ok := strings.Cut(rest, unit)
+	if !ok || !isDecimalDigits(second) {
+		return "", false
+	}
+	return rest, true
+}
+
+func isDecimalDigits(s string) bool {
+	if s == "" {
 		return false
 	}
-	for _, r := range count {
+	for _, r := range s {
 		if r < '0' || r > '9' {
 			return false
 		}

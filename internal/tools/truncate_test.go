@@ -75,7 +75,7 @@ func TestExtractArtifactReferencesAcceptsGeneratedFormatsOnly(t *testing.T) {
 	path := "/session/tool-outputs/call-123.log"
 	guided := artifactReference(path)
 	short := shortArtifactReference(path)
-	marker := strings.TrimSpace(truncationMarker(12, path))
+	marker := truncationMarker(12, 30, "1-18 and 21-30", path)
 
 	got := ExtractArtifactReferences(strings.Join([]string{guided, marker, short, guided}, "\n"))
 	want := []string{guided, short}
@@ -222,7 +222,7 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 				if got := strings.Count(r.Content, "line-"); got > MaxOutputLines {
 					t.Errorf("preview has too many data lines: %d", got)
 				}
-				if !strings.Contains(r.Content, "lines truncated") {
+				if !strings.Contains(r.Content, "lines omitted") {
 					t.Error("Content should contain a line truncation marker")
 				}
 				// Verify saved file contains the original output.
@@ -238,58 +238,6 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 				}
 				if r.Hint == "" || !strings.Contains(r.Hint, "truncated") {
 					t.Errorf("Hint should mention truncation, got %q", r.Hint)
-				}
-			},
-		},
-		{
-			name:  "over-budget output applies head direction",
-			input: func() string { return generatePaddedLines(3000, 10) },
-			opts:  TruncateOptions{Direction: "head", MaxBytes: 25 * 1024},
-			check: func(t *testing.T, input string, r TruncateResult) {
-				if !r.Truncated {
-					t.Fatal("Truncated should be true")
-				}
-				// Head keeps the first MaxOutputLines of the over-budget preview.
-				if !strings.Contains(r.Content, "line-0000") {
-					t.Error("should contain first line")
-				}
-				if !strings.Contains(r.Content, "line-1999") {
-					t.Error("should contain line-1999")
-				}
-				if strings.Contains(r.Content, "line-2000") {
-					t.Error("should NOT contain line-2000")
-				}
-				if !strings.Contains(r.Content, "lines truncated") {
-					t.Error("should contain truncation marker")
-				}
-				if r.SavedPath == "" {
-					t.Error("SavedPath should be set")
-				}
-			},
-		},
-		{
-			name:  "over-budget output applies tail direction",
-			input: func() string { return generatePaddedLines(3000, 10) },
-			opts:  TruncateOptions{Direction: "tail", MaxBytes: 25 * 1024},
-			check: func(t *testing.T, input string, r TruncateResult) {
-				if !r.Truncated {
-					t.Fatal("Truncated should be true")
-				}
-				// Tail keeps the last MaxOutputLines of the over-budget preview.
-				if !strings.Contains(r.Content, "line-1000") {
-					t.Error("should contain line-1000")
-				}
-				if !strings.Contains(r.Content, "line-2999") {
-					t.Error("should contain last line")
-				}
-				if strings.Contains(r.Content, "line-0999") {
-					t.Error("should NOT contain line-0999")
-				}
-				if !strings.Contains(r.Content, "lines truncated") {
-					t.Error("should contain truncation marker")
-				}
-				if r.SavedPath == "" {
-					t.Error("SavedPath should be set")
 				}
 			},
 		},
@@ -367,21 +315,31 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 				if len(r.Content) == 0 {
 					t.Fatal("Content should not be empty")
 				}
-				// Byte trim: single line exceeds all budgets → fallback to
-				// firstLine[:MaxOutputBytes] + "..."
-				// Then per-line truncation: still > MaxLineLength → [:MaxLineLength] + "..."
-				maxExpected := MaxLineLength + len("...")
-				if len(r.Content) > maxExpected {
-					t.Errorf("Content length %d should be ≤ %d", len(r.Content), maxExpected)
+				// A single line exceeds every budget: it is cut once to
+				// MaxLineLength and the marker reports the byte cut instead of
+				// claiming the line is shown.
+				parts := strings.SplitN(r.Content, "\n", 2)
+				if len(parts) != 2 {
+					t.Fatalf("fallback content should hold the first line plus a marker, got %q", r.Content)
 				}
-				if !strings.HasSuffix(r.Content, "...") {
-					t.Error("Content should end with ...")
+				if want := strings.Repeat("z", MaxLineLength) + "..."; parts[0] != want {
+					t.Errorf("first line length %d, want %d bytes plus an ellipsis", len(parts[0]), MaxLineLength)
 				}
-				if !strings.HasPrefix(r.Content, "zzz") {
-					t.Error("Content should start with original characters")
+				wantNotice := fmt.Sprintf("... [line 1 truncated to %d of %d bytes. ", MaxLineLength, len(input))
+				if !strings.HasPrefix(parts[1], wantNotice) {
+					t.Errorf("marker should report the byte cut %q, got %q", wantNotice, parts[1])
+				}
+				if strings.Contains(parts[1], "lines omitted") {
+					t.Errorf("single-line marker must not claim omitted lines, got %q", parts[1])
 				}
 				if r.SavedPath == "" {
 					t.Error("SavedPath should be set")
+				}
+				if !strings.Contains(parts[1], r.SavedPath) {
+					t.Errorf("marker should reference the saved output %q, got %q", r.SavedPath, parts[1])
+				}
+				if len(ExtractArtifactReferences(r.Content)) == 0 {
+					t.Error("fallback content should carry an artifact reference")
 				}
 				if r.Hint == "" {
 					t.Error("Hint should be non-empty")
@@ -421,21 +379,31 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 					t.Fatal("Content should not be empty")
 				}
 				// Each 60000-byte line exceeds both head and tail byte budgets,
-				// so trimLinesToByteLimitHeadTail returns nil.
-				// Fallback: firstLine[:MaxOutputBytes]+"...", then per-line
-				// truncation → [:MaxLineLength]+"..."
+				// so previewWindow reports no fitting line. The first line is
+				// cut to MaxLineLength and the marker reports that cut plus the
+				// omitted lines and the reference.
+				parts := strings.SplitN(r.Content, "\n", 2)
+				if len(parts) != 2 {
+					t.Fatalf("fallback content should hold the first line plus a marker, got %q", r.Content[:min(200, len(r.Content))])
+				}
 				if !strings.HasPrefix(r.Content, "line-0000:") {
 					t.Error("Content should start with first line prefix")
 				}
 				maxExpected := MaxLineLength + len("...")
-				if len(r.Content) > maxExpected {
-					t.Errorf("Content length %d should be ≤ %d", len(r.Content), maxExpected)
+				if len(parts[0]) > maxExpected {
+					t.Errorf("first line length %d should be ≤ %d", len(parts[0]), maxExpected)
 				}
-				if !strings.HasSuffix(r.Content, "...") {
-					t.Error("Content should end with ...")
+				if want := fmt.Sprintf("... [line 1 truncated to %d of 60000 bytes; 9 of 10 lines omitted. ", MaxLineLength); !strings.HasPrefix(parts[1], want) {
+					t.Errorf("marker should count omitted lines, got %q", parts[1])
 				}
 				if r.SavedPath == "" {
 					t.Error("SavedPath should be set")
+				}
+				if !strings.Contains(parts[1], r.SavedPath) {
+					t.Errorf("marker should reference the saved output %q, got %q", r.SavedPath, parts[1])
+				}
+				if len(ExtractArtifactReferences(r.Content)) == 0 {
+					t.Error("fallback content should carry an artifact reference")
 				}
 				if !strings.Contains(r.Hint, "truncated") {
 					t.Errorf("Hint should mention truncated, got %q", r.Hint)
@@ -451,5 +419,224 @@ func TestTruncateOutputWithOptions(t *testing.T) {
 			r := TruncateOutputWithOptions(input, sessionDir, tt.opts)
 			tt.check(t, input, r)
 		})
+	}
+}
+
+// A byte-trimmed preview must report the lines it actually dropped: the count
+// covers the byte budget as well as the line cap, and the marker names the
+// sections that survived.
+func TestTruncateMarkerCountsEveryDroppedLine(t *testing.T) {
+	const total = 588
+	input := generatePaddedLines(total, 40)
+
+	r := TruncateOutputWithOptions(input, t.TempDir(), TruncateOptions{MaxBytes: 16 * 1024, ArtifactKey: "diff"})
+	if !r.Truncated {
+		t.Fatal("expected truncation")
+	}
+
+	var kept []int
+	for i := range total {
+		if strings.Contains(r.Content, fmt.Sprintf("line-%04d:", i)) {
+			kept = append(kept, i)
+		}
+	}
+	head, tail := 0, 0
+	for head < len(kept) && kept[head] == head {
+		head++
+	}
+	for tail < len(kept)-head && kept[len(kept)-1-tail] == total-1-tail {
+		tail++
+	}
+	if head+tail != len(kept) {
+		t.Fatalf("preview kept lines %v, want a head and tail section", kept)
+	}
+	if head == 0 || tail == 0 || head+tail >= total {
+		t.Fatalf("preview kept head=%d tail=%d of %d lines, want both sections", head, tail, total)
+	}
+
+	want := fmt.Sprintf("%d of %d lines omitted; showing lines 1-%d and %d-%d", total-head-tail, total, head, total-tail+1, total)
+	if !strings.Contains(r.Content, want) {
+		t.Fatalf("Content should contain %q, got:\n%s", want, r.Content)
+	}
+	if !strings.Contains(r.Content, r.SavedPath) {
+		t.Fatalf("marker should reference the saved output %q", r.SavedPath)
+	}
+}
+
+// A trailing newline terminates the output's last line; it must not be counted
+// as one more (empty) line in the omission marker or the shown ranges.
+func TestTruncateMarkerCountsTrailingNewlineAsTerminator(t *testing.T) {
+	const total = 10
+	var b strings.Builder
+	for i := range total {
+		fmt.Fprintf(&b, "line-%04d: %s\n", i, strings.Repeat("x", 44)) // 50 bytes per line
+	}
+	input := b.String()
+
+	t.Run("head and tail", func(t *testing.T) {
+		r := TruncateOutputWithOptions(input, t.TempDir(), TruncateOptions{MaxBytes: 300, ArtifactKey: "diff"})
+		if !r.Truncated {
+			t.Fatal("expected truncation")
+		}
+		var kept []int
+		for i := range total {
+			if strings.Contains(r.Content, fmt.Sprintf("line-%04d:", i)) {
+				kept = append(kept, i)
+			}
+		}
+		head := 0
+		for head < len(kept) && kept[head] == head {
+			head++
+		}
+		tail := 0
+		for tail < len(kept)-head && kept[len(kept)-1-tail] == total-1-tail {
+			tail++
+		}
+		if head == 0 || tail == 0 || head+tail != len(kept) {
+			t.Fatalf("preview kept lines %v, want a head and tail section", kept)
+		}
+		want := fmt.Sprintf("%d of %d lines omitted; showing lines 1-%d and %d-%d", total-head-tail, total, head, total-tail+1, total)
+		if !strings.Contains(r.Content, want) {
+			t.Fatalf("Content should contain %q, got:\n%s", want, r.Content)
+		}
+	})
+
+	t.Run("tail keeps the final newline", func(t *testing.T) {
+		r := TruncateOutputWithOptions(input, t.TempDir(), TruncateOptions{MaxBytes: 100, ArtifactKey: "diff"})
+		if !r.Truncated {
+			t.Fatal("expected truncation")
+		}
+		want := fmt.Sprintf("%d of %d lines omitted; showing lines %d", total-1, total, total)
+		if !strings.Contains(r.Content, want) {
+			t.Fatalf("Content should contain %q, got:\n%s", want, r.Content)
+		}
+		if !strings.HasSuffix(r.Content, "\n") {
+			t.Fatalf("preview should keep the input's trailing newline, got:\n%q", r.Content)
+		}
+	})
+}
+
+// An output that fits the byte budget once its trailing newline is set aside
+// has nothing a preview could omit, so it stays verbatim instead of saving an
+// artifact under a marker that reports zero omitted lines.
+func TestTruncateIgnoresTrailingNewlineForBudget(t *testing.T) {
+	for _, input := range []string{
+		strings.Repeat("x", 100) + "\n",
+		strings.Repeat("x", 49) + "\n" + strings.Repeat("y", 50) + "\n",
+	} {
+		r := TruncateOutputWithOptions(input, t.TempDir(), TruncateOptions{MaxBytes: 100})
+		if r.Truncated || r.Content != input || r.SavedPath != "" {
+			t.Fatalf("result = %+v, want %q kept verbatim", r, input)
+		}
+	}
+	r := TruncateOutputWithOptions(strings.Repeat("x", 101)+"\n", t.TempDir(), TruncateOptions{MaxBytes: 100})
+	if !r.Truncated {
+		t.Fatal("an output over budget without its newline must still truncate")
+	}
+}
+
+func TestTruncateReservesHeadTailSeparator(t *testing.T) {
+	for _, trailing := range []string{"", "\n"} {
+		input := "aaaa\nbbbbbb" + trailing
+		r := TruncateOutputWithOptions(input, t.TempDir(), TruncateOptions{MaxBytes: 10})
+		if !r.Truncated || r.Content == input {
+			t.Fatalf("over-budget output must lose content: %+v", r)
+		}
+		if !strings.Contains(r.Content, "1 of 2 lines omitted") || r.SavedPath == "" {
+			t.Fatalf("missing omission notice or saved output: %+v", r)
+		}
+		data, err := os.ReadFile(r.SavedPath)
+		if err != nil || string(data) != input {
+			t.Fatalf("saved output = %q, error = %v", data, err)
+		}
+	}
+}
+
+// A fallback preview that shows the first line whole must not decorate it with
+// a truncation ellipsis: the marker belongs to the cut, not to the fallback.
+func TestTruncateFallbackOmitsEllipsisWhenFirstLineFits(t *testing.T) {
+	first := strings.Repeat("x", 50) // fits MaxBytes, exceeds the head budget (40)
+	last := strings.Repeat("y", 70)  // exceeds the tail budget (60)
+	input := first + "\n" + last
+	r := TruncateOutputWithOptions(input, t.TempDir(), TruncateOptions{MaxBytes: 100, MaxLines: 2000})
+	if !r.Truncated {
+		t.Fatal("Truncated should be true")
+	}
+	parts := strings.SplitN(r.Content, "\n", 2)
+	if len(parts) != 2 || parts[0] != first {
+		t.Fatalf("first line = %q, want the whole first line without an ellipsis", r.Content)
+	}
+	if strings.HasSuffix(parts[0], "...") {
+		t.Fatalf("fully shown first line wears a truncation marker: %q", parts[0])
+	}
+	if !strings.Contains(parts[1], "1 of 2 lines omitted") {
+		t.Fatalf("marker should count omitted lines, got %q", parts[1])
+	}
+	if r.SavedPath == "" || !strings.Contains(parts[1], r.SavedPath) {
+		t.Fatalf("marker should reference the saved output %q, got %q", r.SavedPath, parts[1])
+	}
+	if len(ExtractArtifactReferences(r.Content)) == 0 {
+		t.Error("fallback content should carry an artifact reference")
+	}
+}
+
+// A fallback cut must land on a UTF-8 boundary and report the bytes it kept.
+func TestTruncateFallbackCutsFirstLineOnUTF8Boundary(t *testing.T) {
+	// "é" is two bytes, so a 101-byte limit splits the 51st rune.
+	input := strings.Repeat("é", 200)
+	r := TruncateOutputWithOptions(input, t.TempDir(), TruncateOptions{MaxBytes: 101, ArtifactKey: "utf8"})
+	if !r.Truncated {
+		t.Fatal("Truncated should be true")
+	}
+	parts := strings.SplitN(r.Content, "\n", 2)
+	if len(parts) != 2 {
+		t.Fatalf("fallback content should hold the first line plus a marker, got %q", r.Content)
+	}
+	if want := strings.Repeat("é", 50) + "..."; parts[0] != want {
+		t.Fatalf("first line = %q, want %q", parts[0], want)
+	}
+	if want := fmt.Sprintf("... [line 1 truncated to 100 of %d bytes. ", len(input)); !strings.HasPrefix(parts[1], want) {
+		t.Fatalf("marker = %q, want prefix %q", parts[1], want)
+	}
+	refs := ExtractArtifactReferences(r.Content)
+	if len(refs) != 1 || refs[0] != artifactReference(r.SavedPath) {
+		t.Fatalf("ExtractArtifactReferences() = %#v, want the saved output reference", refs)
+	}
+}
+
+func TestIsTruncationMarkerReferencePrefix(t *testing.T) {
+	for prefix, want := range map[string]bool{
+		"... [12 of 30 lines omitted; showing lines 1-18 and 21-30.":           true,
+		"... [3 of 4 lines omitted.":                                           true,
+		"... [line 1 truncated to 2000 of 102400 bytes.":                       true,
+		"... [line 1 truncated to 2000 of 60000 bytes; 9 of 10 lines omitted.": true,
+		"... [line 1 truncated to many of 60000 bytes.":                        false,
+		"... [line 1 truncated to 2000 of 60000 bytes; see below.":             false,
+		"... [line 1 truncated to 2000 of 60000 bytes and more.":               false,
+		"... [some lines omitted.":                                             false,
+		"tool echoed":                                                          false,
+	} {
+		if got := isTruncationMarkerReferencePrefix(prefix); got != want {
+			t.Errorf("isTruncationMarkerReferencePrefix(%q) = %v, want %v", prefix, got, want)
+		}
+	}
+}
+
+// The last line's byte range keeps the output's trailing newline; a line of
+// exactly MaxLineLength bytes must neither gain an ellipsis nor lose it.
+func TestTruncateKeepsFullLengthLastLineWithNewline(t *testing.T) {
+	last := strings.Repeat("z", MaxLineLength)
+	input := strings.Repeat("line\n", 3000) + last + "\n"
+	r := TruncateOutputWithOptions(input, t.TempDir(), TruncateOptions{MaxBytes: 10000})
+	if !r.Truncated {
+		t.Fatal("expected truncation")
+	}
+	if !strings.HasSuffix(r.Content, "\n"+last+"\n") {
+		t.Fatalf("preview tail = %q, want the full last line and its newline", r.Content[max(0, len(r.Content)-40):])
+	}
+	longer := strings.Repeat("z", MaxLineLength+5)
+	r = TruncateOutputWithOptions(strings.Repeat("line\n", 3000)+longer+"\n", t.TempDir(), TruncateOptions{MaxBytes: 10000})
+	if !strings.HasSuffix(r.Content, strings.Repeat("z", MaxLineLength)+"...\n") {
+		t.Fatalf("preview tail = %q, want the cut line to keep its newline", r.Content[max(0, len(r.Content)-40):])
 	}
 }
