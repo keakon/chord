@@ -68,6 +68,9 @@ func wrapEditedArgsPermissionDenied(toolName string) error {
 	return fmt.Errorf("edited arguments for tool %q are denied by permission policy: %w", toolName, errEditedArgsPermissionDeny)
 }
 
+// extractToolArgument returns the string used for permission pattern matching:
+// the branch in extractToolArgumentInDir names the identifying argument for
+// each tool, and tools without one fall back to "*" (whole-tool match).
 func extractToolArgument(toolName string, args []byte) string {
 	return extractToolArgumentInDir(toolName, args, "")
 }

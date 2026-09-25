@@ -16,15 +16,6 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// extractToolArgument returns the string used for permission pattern matching.
-//
-// For Shell the full command string is used (e.g. "git push origin main").
-// For file tools (Read/Write/Edit) the path argument is extracted so that
-// path-based rules like `Write: { "/etc/*": deny }` work correctly.
-// For search tools (Grep/Glob) the pattern argument is extracted.
-// All other tools fall back to "*" (whole-tool match).
-// ---------------------------------------------------------------------------
-
 // ReloadAgentsMD reloads project AGENTS.md from disk and marks the startup
 // gate (agentsMDReady) so ensureSessionBuilt can proceed. The content is
 // consumed the next time ensureSessionBuilt rebuilds the session-context
