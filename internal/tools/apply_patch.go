@@ -241,7 +241,7 @@ func (ApplyPatchTool) Description() string {
 	// session working directory, or absolute) live in the patch parameter
 	// description instead, which JSON function models always see.
 	return "The `apply_patch` tool can be used to edit files. " +
-		"Your patch is a unified diff wrapped in a `*** Begin Patch` / `*** End Patch` envelope. " +
+		"Use the Codex patch format wrapped in a `*** Begin Patch` / `*** End Patch` envelope. " +
 		"Each operation starts with one of `*** Add File: <path>`, `*** Delete File: <path>`, `*** Update File: <path>` (optionally followed by `*** Move to: <new path>`). " +
 		"Hunks are introduced by `@@` and each line's first character is its marker: `+` (added), `-` (removed), or a space (context); new file contents are `+` lines. " +
 		"One `@@` line starts exactly one hunk: put any section context on that same line (`@@ func greet():`) rather than on a line after it, since a later `@@` starts the next hunk, and never prefix it with a unified-diff range like `@@ -19,10 +19,8 @@` — Chord anchors on the header text, not on line numbers, so a range is dead weight and any useful anchor is the section name itself. " +
@@ -255,7 +255,7 @@ func (ApplyPatchTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"patch": map[string]any{
 				"type":        "string",
-				"description": "Complete Codex apply_patch text: a `*** Begin Patch` / `*** End Patch` envelope wrapping Add/Delete/Update operations with `@@` hunks; new file contents are `+` lines. Prefer paths relative to the session working directory when the file is inside it; use an absolute path only for files outside it. One `@@` line starts exactly one hunk, so any section context belongs on that line (`@@ func greet():`) and a second `@@` starts the next hunk. The first character of each hunk line must be its marker (`+` added, `-` removed, space context); do not add a space before `+` or `-`, and preserve source indentation after it (`-old` is a deletion, while ` -old` is context text). Every hunk must contain at least one `+` or `-` line. Context lines must be literal complete source lines; blank or whitespace-only lines are real source lines, not omission placeholders, and `...` never omits context. Prefer small hunks with distinctive context, and rebuild a hunk from a fresh read after a mismatch.",
+				"description": "Complete patch in the format described above. Prefer paths relative to the session working directory; use absolute paths for files outside it.",
 			},
 		},
 		"required":             []string{"patch"},

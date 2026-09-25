@@ -1626,9 +1626,9 @@ func TestStartPlanExecutionPromptIncludesOrchestrationRulesWithDelegate(t *testi
 
 	// Verify orchestration rules for parallel dispatch and non-takeover
 	for _, want := range []string{
-		"first dispatch all currently independent tasks whose write scopes are clearly disjoint",
+		"dispatch tasks with disjoint write scopes before starting your own independent work",
 		"Dispatch tasks in parallel only when their write scopes are clearly independent",
-		"no new independent task to send, stop doing implementation work in MainAgent",
+		"Continue independent work that cannot conflict with it",
 		"do not take over implementation just because a SubAgent is briefly quiet",
 		"has not written files yet, or has not produced immediate visible output",
 	} {
@@ -1675,9 +1675,9 @@ func TestStartPlanExecutionPromptIncludesOrchestrationRulesWithoutTodoWrite(t *t
 
 	// Without TodoWrite, the prompt should still include orchestration rules
 	for _, want := range []string{
-		"first dispatch all currently independent tasks whose write scopes are clearly disjoint",
+		"dispatch tasks with disjoint write scopes before starting your own independent work",
 		"Dispatch tasks in parallel only when their write scopes are clearly independent",
-		"no new independent task to send, stop doing implementation work in MainAgent",
+		"Continue independent work that cannot conflict with it",
 		"do not take over implementation just because a SubAgent is briefly quiet",
 	} {
 		if !strings.Contains(got, want) {

@@ -84,7 +84,7 @@ func (t EditTool) Description() string {
 	// (## LSP diagnostic follow-up), not per-tool descriptions; see
 	// lspDiagnosticPromptBlock.
 	return "Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with Write. " +
-		"old_string must match the file's raw text exactly, including indentation, tabs, spaces, newlines (including CRLF vs LF), and quote characters; if the text came from Read output, do not include the displayed line-number gutter or separator tab. " +
+		"Copy source text after the READ_RESULT metadata line, preserving indentation, spaces, and quotes. For files with uniform CRLF or CR line endings, LF replacement text is adapted to the existing line ending; mixed line endings require exact matching. " +
 		"For several disjoint changes in one file, use edits instead of separate calls. Every batch entry matches the original file exactly; overlaps are rejected and all entries are validated before writing. Do not mix edits with top-level replacement fields. " +
 		"Prefer the smallest unique 2-4 line block instead of a large stale context block; re-read before retrying after any mismatch. Replaces one occurrence by default; set replace_all to replace every occurrence."
 }
@@ -108,7 +108,7 @@ func (EditTool) Parameters() map[string]any {
 			},
 			"old_string": map[string]any{
 				"type":        "string",
-				"description": "The exact raw text to find in the file. Match indentation, tabs, spaces, and newlines exactly; if the text came from Read output, do not include the displayed line-number gutter or separator tab.",
+				"description": "Source text to replace, excluding the READ_RESULT metadata line. Preserve whitespace and quotes; uniform file line endings are handled as described above.",
 			},
 			"new_string": map[string]any{
 				"type":        "string",
@@ -169,6 +169,8 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", err
 	}
 	content := editRead.Decoded.Text
+	fileEOL := fileLineEnding(content)
+	decodedOld, decodedNew = replacementLineEndings(fileEOL, decodedOld, decodedNew)
 
 	// Check for identical old/new.
 	if decodedOld == decodedNew {
@@ -182,7 +184,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	newlineTolerant := false
 	if count == 0 {
 		// Try trailing-newline tolerance.
-		if altOld, altNew, altCount, ok := trailingNewlineTolerantEdit(content, decodedOld, decodedNew); ok {
+		if altOld, altNew, altCount, ok := trailingNewlineTolerantEdit(content, decodedOld, decodedNew, fileEOL); ok {
 			count = altCount
 			decodedOld, decodedNew = altOld, altNew
 			newlineTolerant = true
@@ -386,9 +388,15 @@ func prepareReplacementText(oldString, newString string) (string, string, string
 	return decodedOld, decodedNew, abs, nil
 }
 
-func trailingNewlineTolerantEdit(content, oldText, newText string) (altOld, altNew string, altCount int, ok bool) {
-	// Only consider a single final "\n" variance.
-	if before, ok0 := strings.CutSuffix(oldText, "\n"); ok0 {
+func trailingNewlineTolerantEdit(content, oldText, newText, fileEOL string) (altOld, altNew string, altCount int, ok bool) {
+	// Only consider a single final line-ending variance, in the file's own
+	// convention: after replacementLineEndings the arguments carry the file's
+	// EOL, so a CRLF file must not be compared against a hardcoded "\n".
+	eol := fileEOL
+	if eol == "" {
+		eol = "\n"
+	}
+	if before, ok0 := strings.CutSuffix(oldText, eol); ok0 {
 		altOld = before
 		if altOld == "" {
 			return "", "", 0, false
@@ -397,18 +405,18 @@ func trailingNewlineTolerantEdit(content, oldText, newText string) (altOld, altN
 		if altCount != 1 {
 			return "", "", 0, false
 		}
-		altNew = strings.TrimSuffix(newText, "\n")
+		altNew = strings.TrimSuffix(newText, eol)
 		return altOld, altNew, altCount, true
 	}
 
-	altOld = oldText + "\n"
+	altOld = oldText + eol
 	altCount = strings.Count(content, altOld)
 	if altCount != 1 {
 		return "", "", 0, false
 	}
 	altNew = newText
-	if !strings.HasSuffix(altNew, "\n") {
-		altNew += "\n"
+	if !strings.HasSuffix(altNew, eol) {
+		altNew += eol
 	}
 	return altOld, altNew, altCount, true
 }

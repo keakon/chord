@@ -341,6 +341,39 @@ func TestEditToolTrailingNewlineTolerantMatchReportsTolerance(t *testing.T) {
 	}
 }
 
+// The trailing-newline tolerance must trim and re-add the file's own line
+// ending: on CRLF/CR files a hardcoded "\n" neither matches the final EOL nor
+// preserves the convention, so the same edit that succeeds on LF files would
+// fall through to the closest-match error.
+func TestEditToolTrailingNewlineToleranceUsesFileEOL(t *testing.T) {
+	dir := t.TempDir()
+	cases := []struct {
+		name string
+		eol  string
+	}{
+		{name: "CRLF", eol: "\r\n"},
+		{name: "CR", eol: "\r"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeEditFixture(t, dir, "demo-"+tc.name+".txt", "x"+tc.eol+"y")
+			out, err := runEdit(t, dir, map[string]any{
+				"path": path, "old_string": "y\n", "new_string": "z",
+			})
+			if err != nil {
+				t.Fatalf("Execute err = %v, want trailing-newline tolerance success", err)
+			}
+			if !strings.Contains(out, "via trailing-newline-tolerant match") {
+				t.Fatalf("output = %q, want the trailing-newline-tolerant match marker", out)
+			}
+			got, _ := os.ReadFile(path)
+			if want := "x" + tc.eol + "z"; string(got) != want {
+				t.Fatalf("file = %q, want %q", string(got), want)
+			}
+		})
+	}
+}
+
 // A1: full-width CJK punctuation (e.g. "," vs ",") is tolerated the same way
 // as curly quotes. The shared prefix/suffix keep the file's original full-
 // width bytes; only the model's delta is written verbatim.

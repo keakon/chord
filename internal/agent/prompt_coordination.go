@@ -67,14 +67,14 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 		// invisible tool must never be pushed onto the model as an option).
 		sb.WriteString("- For sub-tasks that can be described and executed independently with results the main thread can consume, prefer ")
 		sb.WriteString(delegate)
-		sb.WriteString(" (SubAgent): the SubAgent runs in a fresh window and only the final result reaches the main thread, so its intermediate tool output never pollutes the main context. Use ")
+		sb.WriteString(" (SubAgent): the SubAgent runs in a fresh window and its tool output stays in that window; explicit progress, questions, and results return through coordination messages. Use ")
 		sb.WriteString(toolPromptName(tools.NameCompactContext))
 		sb.WriteString(" when the main thread itself must keep reasoning and carrying its history costs more than restoring externalized state; the current task need not be complete.\n")
 	}
-	sb.WriteString("- For implementation tasks, first dispatch all currently independent tasks whose write scopes are clearly disjoint.\n")
-	sb.WriteString("- After dispatching the current independent implementation tasks, if there is no new independent task to send, stop doing implementation work in MainAgent and wait for runtime coordination to deliver the next decision point.\n")
+	sb.WriteString("- After choosing substantial independent work to delegate, dispatch tasks with disjoint write scopes before starting your own independent work.\n")
+	sb.WriteString("- Do not duplicate work assigned to an active worker. Continue independent work that cannot conflict with it; otherwise wait for runtime coordination.\n")
 	sb.WriteString("- Until you receive an escalation, a completion, or a clear error/blocked signal from a worker, do not take over implementation just because a SubAgent is briefly quiet, has not written files yet, or has not produced immediate visible output.\n")
-	sb.WriteString("- You may dispatch multiple SubAgents in parallel or continue working on other non-implementation tasks while they run.\n")
+	sb.WriteString("- You may dispatch multiple SubAgents in parallel or continue working on other independent tasks while they run.\n")
 	return sb.String()
 }
 
@@ -122,7 +122,7 @@ func (a *MainAgent) hasDelegateWorkflowAccess() bool {
 
 func (a *MainAgent) executionStartInstruction() string {
 	if a.hasTodoWriteAccess() {
-		return "then execute the plan using the visible tools and coordination mechanisms available in this role. Initialise todos with TodoWrite, begin with tasks that have no unmet dependencies, and keep the todo list aligned with real progress."
+		return "then execute the plan using the visible tools and coordination mechanisms available in this role. Initialise todos with " + toolPromptName(tools.NameTodoWrite) + ", begin with tasks that have no unmet dependencies, and keep the todo list aligned with real progress."
 	}
 	return "then execute the plan using the visible tools and coordination mechanisms available in this role, beginning with tasks that have no unmet dependencies."
 }

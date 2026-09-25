@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/filectx"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // startPlanExecution begins executing a plan document in response to an
@@ -289,20 +290,20 @@ Path: %s
 
 ### Execution Rules
 1. **Analyse** the plan's tasks and their dependency graph.
-2. **Initialise** a todo list with TodoWrite (all "pending"; order matches plan intent).
+2. **Initialise** a todo list with %s (all "pending"; order matches plan intent).
 3. **Choose the execution strategy that fits this role**: use the visible tools
    and coordination mechanisms that are actually available here. Do not assume a
    hidden orchestration mode or unavailable workers.
 4. **Respect dependencies**: do NOT begin a task until its dependencies are
    satisfied. For independent tasks, use a pragmatic order and keep moving.
-5. **Track progress**: update TodoWrite as work progresses (statuses:
+5. **Track progress**: update %s as work progresses (statuses:
    pending, in_progress, completed, cancelled). Before your final summary, leave
    no pending/in_progress items unless you explain why.
 6. **Report real blockers**: if the current role lacks a needed capability or
    permission, explain the blocker instead of assuming hidden capabilities or
    nonexistent workers.
 7. **Finish**: when everything is done, give a concise final summary.
-`, planPath)
+`, planPath, tools.NameTodoWrite, tools.NameTodoWrite)
 	} else {
 		fmt.Fprintf(&sb, `
 

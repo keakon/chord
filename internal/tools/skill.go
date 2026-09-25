@@ -97,7 +97,7 @@ func BuildSkillListing(entries []SkillListingEntry, header string) string {
 	}
 	remaining := len(entries) - shown
 	if remaining > 0 {
-		fmt.Fprintf(&sb, "+%d more skills available\n", remaining)
+		fmt.Fprintf(&sb, "+%d more skills available; see the skill tool name enum for all visible names\n", remaining)
 	}
 	return sb.String()
 }
@@ -120,14 +120,19 @@ func (t SkillTool) DescriptionForTools(_ map[string]struct{}) string {
 	return strings.Join(base, " ")
 }
 
-func (SkillTool) Parameters() map[string]any {
+func (t SkillTool) Parameters() map[string]any {
+	name := map[string]any{
+		"type":        "string",
+		"description": "Name of the skill to load.",
+	}
+	if names := t.visibleSkillNames(); len(names) > 0 {
+		name["enum"] = names
+		name["description"] = "Name of the skill to load. The enum lists all visible names, including entries omitted from the prompt summary."
+	}
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"name": map[string]any{
-				"type":        "string",
-				"description": "Name of the skill to load.",
-			},
+			"name": name,
 			"args": map[string]any{
 				"type":        "string",
 				"description": "Optional free-form arguments that the skill instructions may reference.",
@@ -136,6 +141,22 @@ func (SkillTool) Parameters() map[string]any {
 		"required":             []string{"name"},
 		"additionalProperties": false,
 	}
+}
+
+// visibleSkillNames keeps omitted catalog entries discoverable without repeating
+// their descriptions. The provider already applies the agent's visibility rules.
+func (t SkillTool) visibleSkillNames() []string {
+	if t.provider == nil {
+		return nil
+	}
+	var names []string
+	for _, sk := range t.provider.ListSkills() {
+		if isListableSkill(sk) {
+			names = append(names, sk.Name)
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names)
 }
 
 func (SkillTool) IsReadOnly() bool { return true }

@@ -221,3 +221,23 @@ func TestSkillToolDescriptionNoSkillsAvailable(t *testing.T) {
 		t.Fatal("should report no skills available")
 	}
 }
+
+func TestSkillSchemaIncludesNamesBeyondPromptBudget(t *testing.T) {
+	var list []*skill.Meta
+	var entries []SkillListingEntry
+	for i := range SkillListingMaxEntries + 5 {
+		name := fmt.Sprintf("sample-%03d", i)
+		list = append(list, &skill.Meta{Name: name, Discovered: true})
+		entries = append(entries, SkillListingEntry{Name: name})
+	}
+	list = append(list, &skill.Meta{Name: "hidden", Discovered: false})
+	tool := NewSkillTool(skillProviderStub{list: list})
+	names := tool.Parameters()["properties"].(map[string]any)["name"].(map[string]any)["enum"].([]string)
+	last := entries[len(entries)-1].Name
+	if strings.Contains(BuildSkillListing(entries, ""), last) {
+		t.Fatal("fixture did not truncate")
+	}
+	if len(names) != len(entries) || names[len(names)-1] != last {
+		t.Fatalf("visible enum = %v", names)
+	}
+}

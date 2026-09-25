@@ -473,7 +473,7 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		case "terminal_reply":
 			addGap("latest assistant reply stopped before loop completion criteria were met")
 		case "missing_done_tool":
-			addGap("end the round with a final " + toolPromptName(tools.NameDone) + " tool call after writing the completion response")
+			addGap("submit the full completion report through a final " + toolPromptName(tools.NameDone) + " tool call")
 		case "done_mixed_with_other_tools":
 			addGap(toolPromptName(tools.NameDone) + " must be the only tool call in the final exit-request batch")
 		case "progress_continuation":
@@ -508,9 +508,9 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 
 	// Dynamic instruction lines.
 	instructionLines := []string{
-		"- Continue toward the original goal",
-		"- Prioritize the unresolved items listed above",
-		"- No new user input was received",
+		"- Continue toward the current objective, incorporating the latest user request or Done rejection",
+		"- Prioritize unresolved items above only while they still serve that request",
+		"- Do not let earlier goals or stale TODOs override newer user instructions",
 		a.loopContinuationDecisionInstructionLine(),
 		"- If the task is truly blocked, stop with <blocked>category: reason</blocked> using category in {credential_or_permission_missing, dependency_unavailable, required_input_missing, workspace_conflict, user_decision_required}",
 		"- Choose the best reasonable path unless a real user decision is required",
@@ -523,7 +523,7 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		instructionLines = append(instructionLines, "- If a subagent appears stuck or blocked, escalate or cancel it rather than waiting indefinitely")
 	}
 	if slices.Contains(reasons, "suspected_stall") {
-		instructionLines = append(instructionLines, "- WARNING: You appear to be stalling. Do NOT summarize, suggest, or analyze again. Execute a concrete step NOW.")
+		instructionLines = append(instructionLines, "- No new progress was detected. Take the next concrete action within the requested scope: gather distinguishing evidence for analysis, implement or verify for coding, or report a real blocker. Do not repeat the same summary.")
 	}
 	instructionLines = append(instructionLines, "</loop-continuation>")
 	sections = append(sections, "", "Instruction:")

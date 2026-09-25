@@ -67,7 +67,7 @@ func TestToolParameterDescriptionsMentionDefaults(t *testing.T) {
 		{name: "save artifact result type", tool: SaveArtifactTool{}, path: []string{"result_type"}, want: "given together with result"},
 		{name: "save artifact result", tool: SaveArtifactTool{}, path: []string{"result"}, want: "given together with result_type"},
 		{name: "question multiple", tool: NewQuestionTool(nil), path: []string{"questions", "items", "multiple"}, want: "Defaults to false."},
-		{name: "apply patch", tool: ApplyPatchTool{}, path: []string{"patch"}, want: "Context lines must be literal complete source lines"},
+		{name: "apply patch", tool: ApplyPatchTool{}, path: []string{"patch"}, want: "Prefer paths relative to the session working directory"},
 	}
 
 	for _, tc := range tests {

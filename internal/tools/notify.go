@@ -84,7 +84,7 @@ const notifyResponseCorrelationHint = "message_type=response answers only a real
 	"If you do need to answer but cannot find the genuine correlation_id, stop this response and ask for coordination instead of substituting any other id."
 
 func (t *NotifyTool) Description() string {
-	const usageRule = "For a plain note, call notify with only target_task_id, message, and optionally kind — do not send message_type or correlation_id. " +
+	const usageRule = "For a plain targeted note, provide target_task_id, message, and optionally kind — do not send message_type or correlation_id. " +
 		"Use message_type=response only to answer a pending request that is genuinely waiting on you, passing exactly the correlation_id that request carries; never invent one. "
 	switch {
 	case t.allowOwner && t.allowTarget:
@@ -109,7 +109,7 @@ func (t *NotifyTool) Parameters() map[string]any {
 		},
 		"message_type": map[string]any{
 			"type":        "string",
-			"description": "Owner notifications support progress/notice. A targeted response requires message_type=response and correlation_id, and accepts only message and kind. Omit message_type for a plain targeted message.",
+			"description": "Owner notifications support progress/notice. A targeted response requires message_type=response and correlation_id, with message and optional kind as its payload. Omit message_type for a plain targeted message.",
 		},
 		"correlation_id": map[string]any{"type": "string", "description": "Required for message_type=response: use the exact correlation_id of the pending request being answered, never an invented, guessed, or reused one. Omit for plain targeted messages. Optional for owner-visible notices."},
 	}

@@ -24,6 +24,7 @@ func planExactReplacements(content string, edits []textReplacement) (string, int
 	if len(edits) == 0 {
 		return "", 0, "", fmt.Errorf("edits must contain at least one replacement")
 	}
+	newline := fileLineEnding(content)
 	var spans []replacementSpan
 	var notes []string
 	for i, edit := range edits {
@@ -37,6 +38,7 @@ func planExactReplacements(content string, edits []textReplacement) (string, int
 		if err != nil {
 			return "", 0, "", fmt.Errorf("edits[%d]: %w", i, err)
 		}
+		oldText, newText = replacementLineEndings(newline, oldText, newText)
 		if oldText == newText {
 			return "", 0, "", fmt.Errorf("edits[%d]: old_string and new_string are identical", i)
 		}

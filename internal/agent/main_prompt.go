@@ -203,7 +203,7 @@ func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 	if strings.TrimSpace(agentsMD) == "" {
 		return ""
 	}
-	return "## Workspace Instructions\nEach applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message. Follow it as mandatory scoped workspace instructions; do not reread AGENTS.md files with file, search, or shell tools."
+	return "## Workspace Instructions\nEach applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message. Follow it as mandatory scoped workspace instructions; do not reread already-loaded AGENTS.md files. Read additional instructions only when entering a directory whose instructions were not loaded."
 }
 
 func (a *MainAgent) pendingLoopContinuationPromptBlock() string {
@@ -271,7 +271,7 @@ func (a *MainAgent) userConfirmationPromptBlock() string {
 		question := toolPromptName(tools.NameQuestion)
 		return `## Structured User Confirmation
 - Default to making ordinary implementation decisions yourself; the Guidelines section defines when asking the user is justified and what information a question must carry
-- When a necessary confirmation would change scope, permissions, risk, or implementation choice, prefer ` + question + ` so the user gets a structured decision UI instead of an unstructured text question
+- When a necessary confirmation would change scope, risk, implementation choice, or the permission policy itself (not approval for an individual tool call), prefer ` + question + ` so the user gets a structured decision UI instead of an unstructured text question
 - Use plain assistant text only for lightweight clarifications that do not materially change the execution path`
 	}
 	return `## Plain-Text User Confirmation

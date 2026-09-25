@@ -1213,7 +1213,7 @@ func TestStallDetectorContinuationNoteIncludesSuspectedStall(t *testing.T) {
 	if !strings.Contains(note.Text, "no hard progress detected") {
 		t.Fatalf("continuation note = %q, want suspected_stall guidance", note.Text)
 	}
-	if !strings.Contains(note.Text, "WARNING: You appear to be stalling") {
+	if !strings.Contains(note.Text, "gather distinguishing evidence for analysis") {
 		t.Fatalf("continuation note = %q, want stalling warning instruction", note.Text)
 	}
 }

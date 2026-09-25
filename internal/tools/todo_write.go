@@ -66,7 +66,7 @@ func (TodoWriteTool) Description() string {
 ## When to Use
 1. Complex multi-step tasks (3+ steps)
 2. Multi-step bug triage or investigation where explicit checkpoints help
-3. After new instructions — capture as todos (order reflects execution order)
+3. When already tracking this task with todos, incorporate new instructions (order reflects execution order)
 4. When starting direct work — mark one item in_progress
 5. When tracking multiple active workstreams — multiple in_progress items are allowed when each maps to a distinct live workstream and has a unique active_form; update each item when its workstream completes, blocks, or is cancelled
 6. After meaningful progress — update statuses / active_form so the list stays aligned with real progress

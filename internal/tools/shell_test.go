@@ -350,7 +350,6 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 		"shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
 		"If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.",
 		"For explicit file deletions, prefer `delete`; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup.",
-		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"This tool also runs background jobs. Set run_in_background:true for services or work you do not need to wait for",
 		"Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default 90s), or when the command exits while its process group still runs",
 		"Dependent commands must run in order",

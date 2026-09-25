@@ -188,7 +188,7 @@ Use `edits` for disjoint changes in one call:
 {"path":"server.go","edits":[{"old_string":"const port = 8080","new_string":"const port = 3000"},{"old_string":"const retries = 2","new_string":"const retries = 3"}]}
 ```
 
-Each entry has `old_string`, `new_string`, and optional `replace_all`. Do not combine `edits` with top-level replacement fields. All entries match the original file, so one entry cannot target text introduced by another. Batch matching is exact after argument character cleaning; it does not use newline or punctuation tolerance. Overlapping matches, missing text, ambiguous matches without `replace_all`, or encoding failures reject the entire batch before writing. A successful batch writes once and reports diagnostics once.
+Each entry has `old_string`, `new_string`, and optional `replace_all`. Do not combine `edits` with top-level replacement fields. All entries match the original file, so one entry cannot target text introduced by another. Batch matching is exact after argument character cleaning; it does not use trailing-newline or punctuation tolerance. Overlapping matches, missing text, ambiguous matches without `replace_all`, or encoding failures reject the entire batch before writing. A successful batch writes once and reports diagnostics once.
 
 ### Example: Single Replacement
 
@@ -228,6 +228,8 @@ The write paths of `edit`, `apply_patch`, and `write` strip zero-width formattin
 When any are removed, the tool result reports exactly which code points were cleaned (for example `U+200B×2, U+0304×1`), so the model learns to stop emitting them. A combining mark over any visible base is kept (letter, digit, symbol, or punctuation) so legitimate diacritics (Vietnamese/Arabic/Devanagari text, stacked marks) and sequences such as a U+0305 overline over a digit in math notation survive untouched.
 
 In `apply_patch` the clean is limited to the lines the patch adds: existing content elsewhere in the file is never scanned or rewritten by this clean.
+
+For files with uniform CRLF or CR line endings, both single and batch replacements accept the LF text returned by `read` and preserve the file's line-ending convention. Mixed line endings require exact matching. Exclude the `READ_RESULT` metadata line from replacement text.
 
 ### Trailing Newline Tolerance
 

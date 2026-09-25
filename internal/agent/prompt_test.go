@@ -419,12 +419,14 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Match final claims to the requested scope and the evidence actually gathered",
 		"For analysis, review, or planning tasks",
 		"begin with repository evidence: relevant code, existing tests, CI configuration, documentation, and history",
-		"Do not install dependencies or run builds, tests, benchmarks, services, or network checks unless the user requests dynamic verification or a material conclusion cannot otherwise be supported",
-		"state remaining runtime uncertainty instead of silently expanding the task into project acceptance testing",
-		"When you modify code or claim behavior was fixed or implemented",
+		"Install dependencies or run dynamic checks only when requested or necessary to support a material conclusion",
+		"state remaining runtime uncertainty",
+		"For implementation and bug-fix tasks, verify the requested behavior",
 		"Do not equate self-authored happy-path tests passing with full verification of the requested behavior",
-		"changing its inputs so the failing path is no longer exercised is not a fix",
-		"When a candidate fix is cheap to try, run it rather than deliberating about whether it would work",
+		"When a check you wrote for the requested behavior fails, fix the code or show from the requirements that the check is wrong",
+		"changing its inputs so the failing path no longer runs is not a fix",
+		"When a candidate fix is cheap to try, run it instead of deliberating about whether it would work",
+		"Find the smallest distinguishing check or narrow the claim",
 		"state verification status explicitly (passed, failed, not run, or only inspected statically)",
 		"following project-local test/build conventions when known",
 		"Do not narrate every routine action or restate obvious next steps",
@@ -445,9 +447,14 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Do not add a final audit loop, re-review, or re-test pass only to demonstrate compliance with these rules",
 		"state a brief plan with verifiable success criteria per step",
 		"For analysis-only tasks, define success in terms of evidence gathered and conclusions supported, not implementation or acceptance-test completion",
-		"For implementation and bug-fix tasks, or when dynamic evidence is justified above, prefer incremental verification",
-		"first the cheapest compile/typecheck-only command",
-		"For implementation work, run broad verification after focused checks pass.",
+		"Order checks by cost: compile/typecheck first, then focused checks",
+		"do not run a full suite while the code is not known to compile",
+		"A guarantee stated without conditions (for example that an operation closes, releases, or restores something) holds on every exit, including errors and early returns",
+		"existing code that lacks it and a preference for minimal change do not narrow it",
+		"Assert it with a check that fails partway through",
+		"report its other failures of the same kind through that error, keeping the underlying error as the cause",
+		"following project-local test/build conventions when known",
+		"then broaden when the change's impact or project requirements warrant it",
 		"When a broad test fails, narrow the reproduction before retrying",
 	} {
 		if !strings.Contains(got, want) {
@@ -761,17 +768,20 @@ func TestSharedCodingGuidelinesPrompt_RequiresEvidenceDiscriminationAndAmbiguity
 	got := sharedCodingGuidelinesPrompt
 	for _, want := range []string{
 		// Evidence discrimination.
-		"also fits a plausible alternative that would change it",
-		"find the smallest check that tells them apart",
-		"state, side effects, ordering, and resource limits on success, failure, and interruption",
-		"investigation separates what was observed from what is inferred before naming a cause",
-		"code review confirms a reachable path and the surrounding guards before calling something a defect",
-		"analysis states the goal and constraints before recommending",
-		"treats reading code, tests, and history as evidence gathering rather than requiring a build, test run, or execution",
+		"a plausible alternative explanation or a violated requirement could pass your checks",
+		"Find the smallest distinguishing check",
+		"failure, interruption, ordering, and resource constraints",
+		"Confirm a reachable path and the surrounding guards before calling something a defect",
+		"state the goal and constraints before recommending",
+		"separate what was observed from what was inferred before naming a cause",
+		"Separate explicit requirements, observed facts, and assumptions",
+		"Match final claims to the requested scope",
+		"For analysis, review, or planning tasks",
+		"run dynamic checks only when requested or necessary",
 		// Ambiguity convergence.
-		"separate explicit requirements, observed facts, and your own assumptions",
+		"Separate explicit requirements, observed facts, and assumptions",
 		"stop re-guessing unstated intent",
-		"do not independently confirm the assumption itself",
+		"does not independently confirm it",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sharedCodingGuidelinesPrompt missing %q in %q", want, got)
@@ -795,7 +805,6 @@ func TestSharedAgentValuesPrompt_AllowsNecessaryLowRiskAdjacentWork(t *testing.T
 	got := sharedAgentValuesPrompt
 	for _, want := range []string{
 		"Verify > Assume — verify claims proportionally to the task and risk",
-		"always confirm that your own code changes work",
 		"Complete the requested outcome with the smallest safe change set",
 		"targeted regression tests",
 		"required doc updates",
@@ -1136,8 +1145,8 @@ delegate: allow
 		"## SubAgent Workflow",
 		"prefer `notify` on the existing task instead of creating a new delegate",
 		"Dispatch tasks in parallel only when their write scopes are clearly independent",
-		"For implementation tasks, first dispatch all currently independent tasks whose write scopes are clearly disjoint",
-		"if there is no new independent task to send, stop doing implementation work in MainAgent",
+		"After choosing substantial independent work to delegate",
+		"Continue independent work that cannot conflict with it",
 		"Until you receive an escalation, a completion, or a clear error/blocked signal from a worker, do not take over implementation just because a SubAgent is briefly quiet",
 	} {
 		if !strings.Contains(got, want) {
@@ -1284,7 +1293,7 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if bashDesc == "" {
 		t.Fatal("missing Shell tool definition")
 	}
-	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.", "Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable."} {
+	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.", "shell is not a substitute for them"} {
 		if !strings.Contains(bashDesc, want) {
 			t.Fatalf("missing %q in Shell description %q", want, bashDesc)
 		}
@@ -1751,7 +1760,7 @@ shell: allow
 		"If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up.",
 		"Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains",
 		"continue instead of presenting routine next steps as optional follow-up for the owner agent",
-		"The `complete` call is the only thing the owner agent receives: put the key result, the changed files and the verification status in its arguments",
+		"Deliver the final task report through `complete`; progress and blockers use the coordination channels above: put the key result, the changed files and the verification status in its arguments",
 		"do not compose the report a second time there",
 	} {
 		if !strings.Contains(got, want) {
@@ -1888,7 +1897,7 @@ func TestExecutionStartInstructionStaysGenericAcrossRoleCapabilities(t *testing.
 todo_write: allow
 `)}
 	a.rebuildRuleset()
-	if got := a.executionStartInstruction(); !strings.Contains(got, "TodoWrite") || strings.Contains(got, "Delegate") || strings.Contains(got, "directly") {
+	if got := a.executionStartInstruction(); !strings.Contains(got, "todo_write") || strings.Contains(got, "Delegate") || strings.Contains(got, "directly") {
 		t.Fatalf("executionStartInstruction() = %q, want generic execution + TodoWrite without Delegate/direct wording", got)
 	}
 
@@ -1904,7 +1913,7 @@ todo_write: allow
 delegate: allow
 `)}
 	a.rebuildRuleset()
-	if got := a.executionStartInstruction(); !strings.Contains(got, "TodoWrite") || strings.Contains(got, "Delegate") || strings.Contains(got, "directly") {
+	if got := a.executionStartInstruction(); !strings.Contains(got, "todo_write") || strings.Contains(got, "Delegate") || strings.Contains(got, "directly") {
 		t.Fatalf("executionStartInstruction() = %q, should remain generic even when delegate workflow is available", got)
 	}
 }
@@ -2220,7 +2229,7 @@ func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t 
 	for _, want := range []string{
 		"Each applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message",
 		"Follow it as mandatory scoped workspace instructions",
-		"do not reread AGENTS.md files with file, search, or shell tools",
+		"do not reread already-loaded AGENTS.md files",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)
@@ -2248,7 +2257,7 @@ func TestSubAgentBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPr
 		"## Workspace Instructions",
 		"Each applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message",
 		"Follow it as mandatory scoped workspace instructions",
-		"do not reread AGENTS.md files with file, search, or shell tools",
+		"do not reread already-loaded AGENTS.md files",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("SubAgent buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)

@@ -335,7 +335,6 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 		parts = append(parts, line)
 	}
 	parts = append(parts,
-		"Do not use shell redirection, heredocs, inline scripts, or `rm` as the default way to edit, write, or delete files when dedicated file tools are unavailable.",
 		"This tool also runs background jobs. Set run_in_background:true for services or work you do not need to wait for; the call returns a job id immediately and job_output/job_list/job_kill manage it.",
 		fmt.Sprintf("Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default %s), or when the command exits while its process group still runs, and keep running; you will be notified when they finish. Do not sleep-wait or busy-poll — do independent work, or end your turn and wait for the notification.", durationLabel(ShellDefaultYieldMs)),
 		"Dependent commands must run in order: chain them in one call with `&&` or `;`, or wait for the previous result. A background job runs concurrently with other tool calls, so never start a command that depends on a job's output before that job finishes.",

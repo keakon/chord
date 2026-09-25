@@ -111,7 +111,7 @@ active_memory is the current index. You are responsible for its quality, not onl
 - A conclusion corrects or materially refines an active entry -> one candidate carrying that record ID in supersedes. Do not supersede merely to reword.
 - Several active entries on one subsystem that a single sharper statement would cover -> one candidate that supersedes them together, rather than another entry beside them.
 - An active entry that should never have been recorded, is no longer true, or is already covered by repository instructions -> list it in retire with a one-line reason. Retire is removal with no replacement; use supersedes when you do have a replacement.
-- Never retire an entry whose confidence is "user_stated". If such an entry looks stale or belongs in project instructions, emit a promotion instead — except when the visible repository_instructions already state it in full: then the memory entry is a duplicate for a human to drop, and another promotion would only restate guidance already in force. The entry stays in memory until a human accepts the suggestion.
+- Never retire an entry whose confidence is "user_stated", or count superseding it as freeing an index slot: the runtime preserves its original entry. If such an entry looks stale or belongs in project instructions, emit a promotion instead — except when the visible repository_instructions already state it in full: then the memory entry is a duplicate for a human to drop, and another promotion would only restate guidance already in force. The entry stays in memory until a human accepts the suggestion.
 - Removals are rationed per run: retire requests and promotions carrying source_id share the same small allowance, so remove only what you would defend removing.
 - When active_memory has reached active_memory_limit, a new candidate must earn its slot: supersede or retire at least as many entries as you add, so the index does not outgrow its budget.
 
@@ -162,12 +162,13 @@ type memoryExtractionInput struct {
 }
 
 type memoryExtractionActiveRecord struct {
-	ID          string      `json:"id"`
-	Summary     string      `json:"summary"`
-	Type        memory.Type `json:"type,omitempty"`
-	Statement   string      `json:"statement,omitempty"`
-	Rationale   string      `json:"rationale,omitempty"`
-	Application string      `json:"application,omitempty"`
+	ID          string            `json:"id"`
+	Summary     string            `json:"summary"`
+	Type        memory.Type       `json:"type,omitempty"`
+	Confidence  memory.Confidence `json:"confidence,omitempty"`
+	Statement   string            `json:"statement,omitempty"`
+	Rationale   string            `json:"rationale,omitempty"`
+	Application string            `json:"application,omitempty"`
 }
 
 type memoryExtractionTranscript struct {
@@ -225,6 +226,7 @@ func activeMemoryForExtraction(active *memory.ActiveSnapshot) ([]memoryExtractio
 		item := memoryExtractionActiveRecord{ID: entry.ID, Summary: entry.Summary}
 		if record := records[entry.ID]; record != nil {
 			item.Type = record.Type
+			item.Confidence = record.Confidence
 			item.Statement = record.Statement
 			item.Rationale = record.Rationale
 			item.Application = record.Application

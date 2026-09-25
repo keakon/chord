@@ -99,7 +99,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 				lines = append(lines, "- Only `*** Delete File:` paths you have verified exist; do not guess paths for deletions.")
 			}
 		case tools.NameEdit:
-			lines = append(lines, "- For "+toolPromptName(editToolName)+", use exact old_string/new_string replacements; batch disjoint changes in one file with edits, matching the original contents. Match the file's raw text exactly, including whitespace and newlines; prefer the smallest unique block and set replace_all only when every occurrence should change.")
+			lines = append(lines, "- For "+toolPromptName(editToolName)+", use exact old_string/new_string replacements; batch disjoint changes in one file with edits, matching the original contents. Follow the edit tool's source-text and line-ending contract; prefer the smallest unique block and set replace_all only when every occurrence should change.")
 			lines = append(lines, "- If editing a file modified earlier in the turn and the target area is not freshly visible, re-read the small target range before editing.")
 		}
 	}

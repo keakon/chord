@@ -29,7 +29,7 @@ SSE_BENCH_PATTERN='^(BenchmarkSSEParseWithCallbackCumulative|BenchmarkSSEParseWi
 TRUNCATE_BENCH_PATTERN='^BenchmarkTruncateStringHeadTail$'
 SESSION_BENCH_PATTERN='^BenchmarkExportedSessionToMessagesLargeSession$'
 RECOVERY_BENCH_PATTERN='^(BenchmarkLoadMessagesLargeSession.*|BenchmarkLoadMessagesBySize)$'
-TOOLS_BENCH_PATTERN='^BenchmarkBuildApplyPatchPlan(LargeFile|MultiFile)$'
+TOOLS_BENCH_PATTERN='^(BenchmarkBuildApplyPatchPlan(LargeFile|MultiFile)|BenchmarkPlanExactReplacementsCRLF)$'
 
 # Paced flow benchmarks always use a fixed iteration count (never CHORD_BENCH_TIME):
 # 1x keeps the smoke scan cheap, 100x gives full mode an average worth comparing.
@@ -98,7 +98,7 @@ if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
 fi
 go test ./internal/recovery "${recovery_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
 
-printf '\n==> Running apply_patch planning benchmarks\n'
+printf '\n==> Running apply_patch planning and Edit batch benchmarks\n'
 tools_bench_args=(-run '^$' -bench "$TOOLS_BENCH_PATTERN" -benchmem)
 if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
   tools_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")

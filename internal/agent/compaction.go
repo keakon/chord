@@ -177,18 +177,7 @@ const compactionSystemPrompt = `You summarize earlier coding-agent conversation 
 
 Write only the summary. Do not answer the user. Do not invent facts.
 
-First, privately think through the transcript and anchors to identify:
-- the latest user request that should be answered next, including the latest Done rejected reason when it asks for more work, asks a question, changes scope, or corrects the agent
-- the single active coding objective that serves that latest user request
-- historical or completed goals that are background only
-- user constraints and corrections that still matter
-- whether existing TODO items still serve the latest user request, are completed/background, or are stale/superseded
-- concrete progress already made
-- important decisions and why they were made
-- key files, commands, errors, and evidence needed for continuation
-- unresolved blockers and the most likely next step
-
-Then write the final summary using the exact Markdown section headings below, in order:
+Write the summary using the exact Markdown section headings below, in order:
 ## Current User Request
 ## Active Objective
 ## Background Goals

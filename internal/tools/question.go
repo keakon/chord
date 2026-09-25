@@ -95,25 +95,25 @@ func (QuestionTool) Parameters() map[string]any {
 					"properties": map[string]any{
 						"question": map[string]any{
 							"type":        "string",
-							"description": "The complete question to present to the user, written in the user's current language",
+							"description": "The complete question to present to the user",
 						},
 						"header": map[string]any{
 							"type":        "string",
-							"description": "Very short label for the question; aim for 30 characters or fewer, written in the user's current language",
+							"description": "Very short label for the question; aim for 30 characters or fewer",
 						},
 						"options": map[string]any{
 							"type":        "array",
-							"description": "Available choices. Omit for pure free-text input. Write labels and descriptions in the user's current language.",
+							"description": "Available choices. Omit for pure free-text input.",
 							"items": map[string]any{
 								"type": "object",
 								"properties": map[string]any{
 									"label": map[string]any{
 										"type":        "string",
-										"description": "Concise display text, written in the user's current language",
+										"description": "Concise display text",
 									},
 									"description": map[string]any{
 										"type":        "string",
-										"description": "Explanation of this choice and its tradeoffs, written in the user's current language. Optional: omit it when the label alone is self-explanatory.",
+										"description": "Explanation of this choice and its tradeoffs. Optional: omit it when the label alone is self-explanatory.",
 									},
 								},
 								"required": []string{"label"},
