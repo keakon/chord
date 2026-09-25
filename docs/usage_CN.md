@@ -242,6 +242,8 @@ worktree 工具和命令都要求 `PATH` 里有 `git`。找不到 git 时，agen
 
 **权限跟着会话，不跟着 checkout。** 权限规则对同一仓库的每个 checkout 都生效：主工作区里写 `write src/**: allow`，在 `<worktree>/src/` 里同样允许写；也没法写出「只允许某一个 checkout」的规则。Chord 把仓库内的路径按仓库相对拼写去匹配，所以绝对路径规则永远匹配不到它们。worktree 是用来并行干活的，不是用来收窄权限的。hook、agent 配置、权限规则和 worktree 创建配置都在会话启动时从主工作区读取，会话中途进出 worktree 不会改变它们——想用分支上改过的配置，就在该 checkout 新开一个会话。
 
+**会话内的 worktree 工具同样按权限规则判定。** `worktree_enter`、`worktree_exit`、`worktree_list` 与其他工具一样受权限规则约束，而且 `worktree_exit` 的规则可以点名 action：`worktree_exit: {remove: deny}` 会拦住删除 checkout，退出（`keep`）照常允许；传了 `discard_changes: true` 的删除也由同一条规则拦住。详见[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
+
 ## 常用本地控制命令
 
 以下命令由本地运行时处理，不会原样发送给模型。在 TUI 中输入 `/` 会打开补全列表。`Tab` 只补全高亮命令，不执行。`Enter` 在输入还不是该命令时先补全，同一次按键接着执行或发送。继续输入缩小列表时，高亮仍停在当前那一行，回车执行的就是它，而不是缩完后的第一项：

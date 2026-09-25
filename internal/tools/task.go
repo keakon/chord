@@ -247,7 +247,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 			},
 			"workdir": map[string]any{
 				"type":        "string",
-				"description": "Optional existing chord worktree (its name or path) to start this worker in. The worktree must already exist: this tool never creates one, so create it first (WorktreeEnter) or point at one you already have. Omit it and the worker inherits your working directory. Sharing a worktree is supported on purpose: delegating several workers into the same worktree is how you get a review of what another worker just wrote, and concurrent writes to the same file in the same worktree are still caught by the shared path tracker. The worker's own permission rules decide what it may do there, not this parameter.",
+				"description": "Optional existing chord worktree (its name or path) to start this worker in. The worktree must already exist: this tool never creates one, so create it first (`" + NameWorktreeEnter + "`) or point at one you already have. Omit it and the worker inherits your working directory. Sharing a worktree is supported on purpose: delegating several workers into the same worktree is how you get a review of what another worker just wrote, and concurrent writes to the same file in the same worktree are still caught by the shared path tracker. The worker's own permission rules decide what it may do there, not this parameter.",
 			},
 			"agent_type": map[string]any{
 				"type":        "string",

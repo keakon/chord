@@ -175,6 +175,47 @@ func TestWorktreeExitToolKeepsBranchWording(t *testing.T) {
 	}
 }
 
+// The description is the only place the model learns which values `action`
+// accepts, and no other test reads it, so a quoting mistake in the string
+// concatenation reaches the model unnoticed.
+func TestWorktreeExitDescriptionNamesActionValues(t *testing.T) {
+	desc := NewWorktreeExitTool(&stubWorktreeHost{}).Description()
+	for _, action := range []string{WorktreeActionKeep, WorktreeActionRemove} {
+		want := "`action: \"" + action + "\"`"
+		if !strings.Contains(desc, want) {
+			t.Fatalf("Description() = %q, want it to contain %s", desc, want)
+		}
+	}
+	// The constant names are Go identifiers: seeing them means the
+	// concatenation landed inside a quoted string and the model is reading
+	// source text instead of the action values.
+	for _, ident := range []string{"WorktreeActionKeep", "WorktreeActionRemove"} {
+		if strings.Contains(desc, ident) {
+			t.Fatalf("Description() = %q, leaked the Go identifier %s", desc, ident)
+		}
+	}
+}
+
+func TestWorktreeExitAction(t *testing.T) {
+	for _, tc := range []struct {
+		args, want string
+		wantErr    bool
+	}{
+		{args: ``, want: WorktreeActionKeep},
+		{args: `null`, want: WorktreeActionKeep},
+		{args: `{}`, want: WorktreeActionKeep},
+		{args: `{"action":"keep"}`, want: WorktreeActionKeep},
+		{args: `{"action":" Remove "}`, want: WorktreeActionRemove},
+		{args: `{"action":"delete"}`, wantErr: true},
+		{args: `{"action":`, wantErr: true},
+	} {
+		got, err := WorktreeExitAction(json.RawMessage(tc.args))
+		if (err != nil) != tc.wantErr || got != tc.want {
+			t.Errorf("WorktreeExitAction(%q) = %q, %v; want %q, error %v", tc.args, got, err, tc.want, tc.wantErr)
+		}
+	}
+}
+
 func TestWorktreeListToolEmptyRepository(t *testing.T) {
 	host := &stubWorktreeHost{}
 	out, err := NewWorktreeListTool(host).Execute(context.Background(), json.RawMessage(`{}`))
@@ -258,6 +299,30 @@ func TestWorktreeToolsHiddenWithoutGit(t *testing.T) {
 		if tool.(AvailableTool).IsAvailable() {
 			t.Errorf("%s must be hidden when git is not installed", tool.Name())
 		}
+	}
+}
+
+func TestWorktreeEnterDescriptionGatesExitReference(t *testing.T) {
+	tool := NewWorktreeEnterTool(&stubWorktreeHost{})
+
+	// A nil visible set means the caller does not know the tool surface, so
+	// the description keeps its original wording.
+	unknown := tool.Description()
+	if !strings.Contains(unknown, "until `"+NameWorktreeExit+"`") {
+		t.Fatalf("Description() = %q, want the worktree_exit reference", unknown)
+	}
+
+	withoutExit := tool.DescriptionForTools(map[string]struct{}{NameWorktreeEnter: {}})
+	if strings.Contains(withoutExit, NameWorktreeExit) {
+		t.Fatalf("DescriptionForTools without exit = %q, must not reference %s", withoutExit, NameWorktreeExit)
+	}
+	if !strings.Contains(withoutExit, "from then on") {
+		t.Fatalf("DescriptionForTools without exit = %q, want the duration-only wording", withoutExit)
+	}
+
+	withExit := tool.DescriptionForTools(map[string]struct{}{NameWorktreeEnter: {}, NameWorktreeExit: {}})
+	if !strings.Contains(withExit, "until `"+NameWorktreeExit+"`") {
+		t.Fatalf("DescriptionForTools with exit = %q, want the worktree_exit reference", withExit)
 	}
 }
 

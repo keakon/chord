@@ -88,10 +88,24 @@ func NewWorktreeEnterTool(host WorktreeHost) WorktreeEnterTool {
 
 func (WorktreeEnterTool) Name() string { return NameWorktreeEnter }
 
-func (WorktreeEnterTool) Description() string {
+func (t WorktreeEnterTool) Description() string {
+	return t.DescriptionForTools(nil)
+}
+
+// DescriptionForTools drops the worktree_exit reference when that tool is not
+// on the model's surface: a session whose ruleset hides it must not be pointed
+// at a tool it cannot call. A nil visible map means the caller does not know
+// the surface and keeps the original wording.
+func (WorktreeEnterTool) DescriptionForTools(visible map[string]struct{}) string {
+	stay := " until `" + NameWorktreeExit + "`"
+	if visible != nil {
+		if _, ok := visible[NameWorktreeExit]; !ok {
+			stay = " from then on"
+		}
+	}
 	return "Creates or opens a git worktree of the current repository and switches this agent's working directory into it for the rest of the session.\n" +
-		"Use it only when the user explicitly asks to work in a separate worktree, branch checkout, or isolated copy; do not enter one on your own initiative. " +
-		"After a successful switch the shell, file tools, grep/glob and LSP all operate inside the worktree until `" + NameWorktreeExit + "`.\n" +
+		"Use it only when the user explicitly asks for a worktree or an isolated copy separate from the current checkout; do not enter one on your own initiative. A request to create, switch to, or commit on a branch is not such a request: do that with git in the current checkout, because work done in a worktree does not appear in the main checkout. " +
+		"After a successful switch the shell, file tools, grep/glob and LSP all operate inside the worktree" + stay + ".\n" +
 		"Worktrees share the repository's session history and permissions: entering one does not change permission rules, hooks or agent configuration, and it never modifies the main checkout. " +
 		"Entering a worktree that already exists reuses that checkout, so another session or sub-agent can be working in the same directory: uncommitted changes and files are shared, and concurrent writers can overwrite each other. Open a separate worktree for each task that proceeds in parallel.\n" +
 		"Tracked files come from the branch; ignore-rule content (local config, AGENTS.md, .chord) is provided by the main checkout rather than copied.\n" +
@@ -169,6 +183,34 @@ func (t WorktreeEnterTool) Execute(ctx context.Context, raw json.RawMessage) (st
 	return formatWorktreeEnterResult(result), nil
 }
 
+// Worktree exit actions. An omitted action resolves to keep; permission rules
+// and the schema enum name the same values.
+const (
+	WorktreeActionKeep   = "keep"
+	WorktreeActionRemove = "remove"
+)
+
+// WorktreeExitAction decodes the action of worktree_exit arguments the way
+// Execute does: a missing body or action is keep, and the action is trimmed
+// and lowercased. It fails on undecodable arguments or an unknown action, so
+// callers that classify a call without executing it can stay conservative.
+func WorktreeExitAction(raw json.RawMessage) (string, error) {
+	var args struct {
+		Action string `json:"action"`
+	}
+	if err := decodeWorktreeArgs(raw, &args); err != nil {
+		return "", err
+	}
+	switch action := strings.ToLower(strings.TrimSpace(args.Action)); action {
+	case "", WorktreeActionKeep:
+		return WorktreeActionKeep, nil
+	case WorktreeActionRemove:
+		return action, nil
+	default:
+		return "", fmt.Errorf("invalid action %q: expected %s or %s", args.Action, WorktreeActionKeep, WorktreeActionRemove)
+	}
+}
+
 // WorktreeExitTool leaves the active worktree, optionally removing its
 // checkout.
 type WorktreeExitTool struct {
@@ -183,8 +225,8 @@ func (WorktreeExitTool) Name() string { return NameWorktreeExit }
 
 func (WorktreeExitTool) Description() string {
 	return "Leaves the active worktree and returns this agent to the checkout the session started in, or removes a worktree checkout.\n" +
-		"`action: \"keep\"` (default) only unbinds the working directory and always keeps the branch and its commits. " +
-		"`action: \"remove\"` deletes the checkout after the work is done; the branch is always kept. " +
+		"`action: \"" + WorktreeActionKeep + "\"` (default) only unbinds the working directory and always keeps the branch and its commits. " +
+		"`action: \"" + WorktreeActionRemove + "\"` deletes the checkout after the work is done; the branch is always kept. " +
 		"Removal is refused when this session does not own the worktree, when the worktree is the currently active working directory (leave first), when it has uncommitted changes or commits that exist only on its branch, or when another agent of this session or a running background command is still working in it. " +
 		"Pass `discard_changes: true` only when the user explicitly accepts losing those changes."
 }
@@ -199,8 +241,8 @@ func (WorktreeExitTool) Parameters() map[string]any {
 			},
 			"action": map[string]any{
 				"type":        "string",
-				"enum":        []string{"keep", "remove"},
-				"description": "keep (default) unbinds the directory; remove also deletes the checkout but keeps the branch.",
+				"enum":        []string{WorktreeActionKeep, WorktreeActionRemove},
+				"description": WorktreeActionKeep + " (default) unbinds the directory; " + WorktreeActionRemove + " also deletes the checkout but keeps the branch.",
 			},
 			"discard_changes": map[string]any{
 				"type":        "boolean",
@@ -221,22 +263,19 @@ func (t WorktreeExitTool) Execute(ctx context.Context, raw json.RawMessage) (str
 	}
 	var args struct {
 		Name           string `json:"name"`
-		Action         string `json:"action"`
 		DiscardChanges bool   `json:"discard_changes"`
 	}
 	if err := decodeWorktreeArgs(raw, &args); err != nil {
 		return "", err
 	}
+	action, err := WorktreeExitAction(raw)
+	if err != nil {
+		return "", err
+	}
 	req := WorktreeExitRequest{
 		Name:           strings.TrimSpace(args.Name),
+		Remove:         action == WorktreeActionRemove,
 		DiscardChanges: args.DiscardChanges,
-	}
-	switch strings.ToLower(strings.TrimSpace(args.Action)) {
-	case "", "keep":
-	case "remove":
-		req.Remove = true
-	default:
-		return "", fmt.Errorf("invalid action %q: expected keep or remove", args.Action)
 	}
 	result, err := t.Host.WorktreeExit(ctx, req)
 	if err != nil {

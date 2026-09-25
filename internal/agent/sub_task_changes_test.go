@@ -74,6 +74,8 @@ func TestRecordTaskToolChangesWorktreeSwitchesAreAttributionNeutral(t *testing.T
 		{tools.NameWorktreeExit, `{}`, false},
 		{tools.NameWorktreeExit, `{"action":"remove"}`, true},
 		{tools.NameWorktreeExit, `{"action":"remove","discard_changes":true}`, true},
+		{tools.NameWorktreeExit, `{"action":"delete"}`, true},
+		{tools.NameWorktreeExit, `{"action":`, true},
 	}
 	for _, tc := range cases {
 		sub.fileAttributionIncomplete = false

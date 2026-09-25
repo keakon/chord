@@ -146,17 +146,12 @@ func isFileAttributionNeutralTool(name string, args json.RawMessage) bool {
 	}
 }
 
-// worktreeExitRemovesCheckout mirrors the WorktreeExit action switch: only an
-// explicit "remove" deletes the checkout, and unparseable args are treated as
-// a removal so the conservative flag survives.
+// worktreeExitRemovesCheckout reports whether a worktree_exit call may delete
+// its checkout; unparseable args or an unknown action count as a removal so
+// the conservative flag survives.
 func worktreeExitRemovesCheckout(args json.RawMessage) bool {
-	var req struct {
-		Action string `json:"action"`
-	}
-	if err := json.Unmarshal(args, &req); err != nil {
-		return true
-	}
-	return strings.ToLower(strings.TrimSpace(req.Action)) == "remove"
+	action, err := tools.WorktreeExitAction(args)
+	return err != nil || action == tools.WorktreeActionRemove
 }
 
 func (s *SubAgent) taskChangeSnapshot() (files []string, incomplete bool) {

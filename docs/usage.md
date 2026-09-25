@@ -244,6 +244,8 @@ Worktree tools and commands need `git` on `PATH`. When Chord cannot find it, the
 
 **Permissions follow the session, not the checkout.** Permission rules apply to every checkout of a repository: a rule such as `write src/**: allow` in the main checkout also allows writes to `<worktree>/src/`, and you cannot write a rule that allows a single checkout only. Chord evaluates repository paths through their repository-relative spelling, so an absolute path rule never matches them; worktrees are for parallel work, not for narrowing permissions. Hooks, agent configuration, permission rules, and worktree creation settings are read when a session starts, from the main checkout, and entering or leaving a worktree inside a session does not change them — to pick up config edited on a worktree branch, start a new session in that checkout.
 
+**The in-session worktree tools follow your rules.** `worktree_enter`, `worktree_exit`, and `worktree_list` are gated by the same permission rules as any other tool, and a `worktree_exit` rule can name the action: `worktree_exit: {remove: deny}` blocks deleting a checkout while leaving it (`keep`) stays allowed, and a removal that passes `discard_changes: true` is covered by the same rule. See [Permissions & Safety](./permissions-and-safety.md#special-permission-semantics).
+
 ## Local slash commands
 
 These commands are handled by the local runtime and are not sent to the model as-is. In the TUI, type `/` to open completion. `Tab` completes the highlighted command without running it. `Enter` completes it when the input is not already that command, then runs or sends it in the same keypress. Narrowing the list by typing keeps the highlighted row: `Enter` runs that command, not the first match:

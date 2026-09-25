@@ -36,11 +36,15 @@ func TestDelegateToolSchemaDescribesOptionalWorkdir(t *testing.T) {
 		"workdir",
 		"existing chord worktree",
 		"never creates one",
+		NameWorktreeEnter,
 		"inherits your working directory",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Parameters() missing %q in %s", want, text)
 		}
+	}
+	if strings.Contains(text, "(WorktreeEnter)") {
+		t.Fatalf("Parameters() names a display name the model cannot call: %s", text)
 	}
 	required, ok := params["required"].([]string)
 	if !ok {

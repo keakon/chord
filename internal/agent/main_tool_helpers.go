@@ -134,6 +134,15 @@ func extractToolArgumentInDir(toolName string, args []byte, workDir string) stri
 				return patterns[0]
 			}
 		}
+	case tools.NameWorktreeExit:
+		// An omitted action matches a rule written for keep, and remove also
+		// covers discard_changes. The action is normalized to lowercase while
+		// rule keys stay case-sensitive, so rules use lowercase actions.
+		// Undecodable arguments or an unknown action fall through to "*", so
+		// a rule naming one action never decides them.
+		if action, err := tools.WorktreeExitAction(args); err == nil {
+			return action
+		}
 	}
 	return "*"
 }
