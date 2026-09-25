@@ -45,6 +45,7 @@
 - 新增 `/skill <name> [args]` 显式加载：Chord 把这行当普通用户消息提交，并在同一回合里把 skill 正文作为 `skill` 工具结果追加进去，模型不用自己决定调用工具就能拿到正文；名字之后的内容替换正文里的 `${CHORD_SKILL_ARGS}`。这行跟着当前聚焦的 Agent，所以子 Agent 也能用同样方式载入技能。TUI 里只敲 `/skill` 则打开选择器，列出当前 Agent 可加载的全部技能（只留给显式加载的排在前面），选中后回填 `/skill <name> ` 供你接着输参数；被 ruleset 拒绝的技能显示为不可用并给出原因，名字不存在则弹 toast 拒绝。这样合成的加载在各处都算一次真实加载：继续会话时恢复，持久压缩把这对消息归档后与重启一样清掉。
 - `view_image`、图片附件、剪贴板粘贴以及 MCP 工具返回的图片现在除了 PNG/JPEG 外还接受 WebP、GIF、BMP 和 TIFF。所有图片在送达上游前都会归一化为 PNG 或 JPEG，长边超过 2000px 时缩小（动画 WebP、GIF 和 TIFF 只取首帧）。HEIC、HEIF、AVIF、SVG 会被拒绝并提示先转换。JPEG 带 EXIF `Orientation` 时会把方向烧进像素，不再留给模型自行解读；`view_image` 只要做过缩放，就会在结果里报告原始尺寸与最终尺寸。
 - 编辑工具支持一次校验并替换同文件的多处内容。
+- headless 的 `idle` 与 `status_response` 带 `running_jobs`，指当前会话里「结束时会唤醒主 agent」的后台 job 数。`running_jobs` 大于 0 的 `idle` 后面必然还有事件；被停止但不产生完成通知的 job（模型调用 `job_kill`、SubAgent 停止、切换会话）在发出停止请求时就从计数中移除。
 
 ### 改进
 

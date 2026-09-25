@@ -859,6 +859,11 @@ func (a *MainAgent) handleJobFinished(evt Event) {
 		return
 	}
 	backgroundID := payload.EffectiveID()
+	// The notification is consumed here, or deliberately dropped below; either
+	// way it stops being a pending wake once this handler has made its
+	// decision, which is what lets headless running_jobs report the final
+	// count after the JOB RESULT is durable.
+	defer tools.AckJobFinishedNotification(backgroundID)
 
 	// A job that finished after a session switch must not be written into the
 	// new session's transcript. The completion event carries the session the

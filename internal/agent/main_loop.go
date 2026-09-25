@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/tools"
 )
 
 const (
@@ -432,7 +433,10 @@ func (a *MainAgent) emitGlobalIdleIfReady() bool {
 	workEpoch := a.realWorkEpoch.Load()
 	suppress := workEpoch == a.lastIdleWorkEpoch
 	a.lastIdleWorkEpoch = workEpoch
-	a.emitInteractiveToTUI(a.parentCtx, GlobalIdleEvent{SuppressUserNotification: suppress})
+	a.emitInteractiveToTUI(a.parentCtx, GlobalIdleEvent{
+		SuppressUserNotification: suppress,
+		RunningJobs:              tools.PendingWakeJobs(a.SessionDir()),
+	})
 	a.fireHookBackground(a.parentCtx, hook.OnIdle, a.lastIdleTurnID.Load(), map[string]any{})
 	return true
 }

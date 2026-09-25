@@ -441,6 +441,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			out = append(out, &headlessEnvelope{Type: "idle", Payload: map[string]any{
 				"last_outcome":               outcome,
 				"suppress_user_notification": e.SuppressUserNotification,
+				"running_jobs":               e.RunningJobs,
 			}})
 		}
 	case agent.RoleChangedEvent:
@@ -1514,6 +1515,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 				"current_role":     currentRole,
 				"updated_at":       updatedAt.Format(time.RFC3339),
 				"workdir":          headlessWorkDirPayload(workDir),
+				"running_jobs":     headlessRunningJobs(backend),
 			},
 		})
 
@@ -1818,4 +1820,27 @@ func parseHeadlessRuleIntent(pattern, scope string) (*agent.ConfirmRuleIntent, e
 		Patterns: []string{pattern},
 		Scope:    ruleScope,
 	}, nil
+}
+
+// headlessRunningJobs snapshots the active session's jobs that still owe the
+// agent a completion notification: live jobs whose end will notify, plus
+// finished jobs whose notification the agent has not consumed yet. The second
+// group keeps the count above zero after a job finishes but before the queued
+// JOB RESULT has been handled, so an integration cannot read a final idle and
+// stop consuming events early. Idle is not held back for the live jobs
+// themselves: services and watchers may keep running indefinitely. Silent
+// cancellation removes a job from the next snapshot; tool-driven stops are
+// reported by the active work's next idle, while session switches have their
+// own explicit notification.
+//
+// status_response reads it live; idle carries the count the agent captured
+// when it went idle (GlobalIdleEvent.RunningJobs), because a snapshot taken
+// later on the output goroutine could miss a job whose notification the agent
+// consumed in between.
+func headlessRunningJobs(backend headlessBackend) int {
+	sessionDir := ""
+	if sb, ok := backend.(headlessSessionBackend); ok {
+		sessionDir = sb.SessionDir()
+	}
+	return tools.PendingWakeJobs(sessionDir)
 }

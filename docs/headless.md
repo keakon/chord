@@ -99,7 +99,8 @@ Response:
     "last_error": "",
     "last_outcome": "completed",
     "current_role": "builder",
-    "updated_at": "2026-05-08T12:00:00Z"
+    "updated_at": "2026-05-08T12:00:00Z",
+    "running_jobs": 0
   }
 }
 ```
@@ -107,6 +108,8 @@ Response:
 `session_id` tracks the active session, not just the startup snapshot. An in-band switch that replaces the session without restarting the process (handoff plan execution, `/resume <id>`, `/new`) updates the tracked id, and the change is announced with an explicit `session_switched` push; the cached value alone never counts as the gateway having seen the new session. Restores that keep the session (startup replay, durable compaction rewrite) only refresh the timestamp and emit nothing. The tracked id moves even without a `session_switched` subscription, so `status_response` always reports the session the runtime actually runs.
 
 `workdir` is the checkout currently used by the agent. `path` is the effective working directory, `worktree_id` is empty for the main or unmanaged checkout, and `generation` changes whenever the binding changes. A mid-session worktree switch updates `status_response` and emits `workdir_changed` when subscribed; integrations should use the generation to discard stale snapshots.
+
+`running_jobs` counts background shell jobs of the current session that still owe an agent a completion notification: running jobs whose completion will notify an agent (including jobs the operator is stopping), and finished jobs whose notification the agent has not consumed yet. A completion notification wakes the agent; when that work finishes, a new `idle` carries the updated count. Services and watchers may keep running indefinitely, so a nonzero count does not promise an event within any time limit. Jobs stopped without a completion notification (the model's `job_kill`, a SubAgent stop, a session switch) leave the count when the stop is requested; tool-driven stops are reflected when the active work next reaches `idle`, and a session switch is announced through `session_switched`. Jobs attributed to another session are excluded. `idle` carries the same count as `status_response`.
 
 ### `send`
 
@@ -260,7 +263,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | ----------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `activity`              | Agent enters a new phase                                                                          | `agent_id`, `type` (`connecting`, `streaming`, `compacting`, …), `detail`                                    |
 | `assistant_message`     | A complete assistant message is ready for consumption                                             | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `text`, `tool_calls`; delegation fields are empty for main |
-| `idle`                  | The main agent and all SubAgents are globally quiescent and ready for input                         | `last_outcome` (`completed` / `cancelled` / `error`), `suppress_user_notification` (`true` unless the agent ran since the previous idle event) |
+| `idle`                  | The main agent and all SubAgents are globally quiescent and ready for input                         | `last_outcome` (`completed` / `cancelled` / `error`), `suppress_user_notification` (`true` unless the agent ran since the previous idle event), `running_jobs` (same count as `status_response`; while it is above zero, each counted job wakes the agent again when it ends and a new `idle` follows, so an integration waiting for the work to end should keep reading events) |
 | `done_completion`      | Done tool completed with a final report. Emitted only while a loop is running, since that is the only time `done` is mounted; the `mode` field is currently always `normal` | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `agent_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `needs_approval_rules`, `already_allowed_rules`, `timeout_ms` |
 | `question_request`      | The model asked the user a question                                                               | `request_id`, `agent_id`, `tool_name`, `header`, `question`, `options`, `option_details`, `multiple`, `deadline` (absolute RFC 3339 close time; omitted when no `question_timeout` is set) |

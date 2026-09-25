@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -813,5 +815,204 @@ func TestHeadlessCommandPathRoleChangeWithoutSubscriptionBumpsSeq(t *testing.T) 
 	}
 	if payload := headlessPayloadMap(t, fresh.Payload); payload["current_role"] != "planner" {
 		t.Errorf("current_role = %v, want planner", payload["current_role"])
+	}
+}
+
+// discardEventSender stands in for the agent a job reports its completion to:
+// running_jobs only counts jobs whose end delivers a notification, and a job
+// started without a sender can deliver none.
+type discardEventSender struct{}
+
+func (discardEventSender) SendAgentEvent(string, string, any) {}
+
+// gatedEventSender blocks a job's completion delivery until the test releases
+// it, so the "finished but not consumed" window is directly observable.
+type gatedEventSender struct {
+	entered     chan struct{}
+	release     chan struct{}
+	enterOnce   sync.Once
+	releaseOnce sync.Once
+}
+
+func (s *gatedEventSender) SendAgentEvent(string, string, any) {
+	s.enterOnce.Do(func() { close(s.entered) })
+	<-s.release
+}
+
+func (s *gatedEventSender) releaseDelivery() {
+	s.releaseOnce.Do(func() { close(s.release) })
+}
+
+// headlessJobContext is the start context a main-agent shell call gives a
+// background job of the session in dir.
+func headlessJobContext(ctx context.Context, dir string) context.Context {
+	ctx = tools.WithSessionDir(ctx, dir)
+	ctx = tools.WithAgentID(ctx, "main")
+	return tools.WithEventSender(ctx, discardEventSender{})
+}
+
+// idle forwards the running-job count the agent captured on its loop when it
+// went idle, instead of taking a later snapshot: by the time the output
+// goroutine handles the event, a job may have finished and had its
+// notification consumed, and a recount would report a final-looking zero.
+func TestHeadlessIdleForwardsCapturedRunningJobs(t *testing.T) {
+	state := &headlessState{subscriptions: map[string]bool{"idle": true}}
+	backend := sessionDirBackend{mockBackend: &mockBackend{}, dir: t.TempDir()}
+	env := findHeadlessEnvelope(filterHeadlessEvent(agent.GlobalIdleEvent{RunningJobs: 2}, state, backend), "idle")
+	if env == nil {
+		t.Fatal("idle envelope not emitted")
+	}
+	if got := headlessPayloadMap(t, env.Payload)["running_jobs"]; got != float64(2) {
+		t.Fatalf("running_jobs = %v, want the captured 2", got)
+	}
+}
+
+// A background job that is still running when the agents go quiet will wake
+// the main agent once it finishes, so it counts as a running job: an
+// integration waiting for the work to end must be able to tell this idle from
+// a final one.
+func TestHeadlessRunningJobsCountsLiveJobs(t *testing.T) {
+	t.Cleanup(tools.ResetJobRegistryForTest())
+	active := t.TempDir()
+	other := t.TempDir()
+	runningJobs := func() int {
+		return headlessRunningJobs(sessionDirBackend{mockBackend: &mockBackend{}, dir: active})
+	}
+	if got := runningJobs(); got != 0 {
+		t.Fatalf("running_jobs without jobs = %v, want 0", got)
+	}
+	id, err := tools.ExecuteJobForTest(headlessJobContext(context.Background(), active), "sleep 30", "sleeper", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tools.StopJobByUser(id, "test cleanup") })
+	if got := runningJobs(); got != 1 {
+		t.Fatalf("running_jobs with a live job = %v, want 1", got)
+	}
+	// A job another session started cannot wake this session's agent, so it
+	// must not keep this idle from reading as final.
+	otherID, err := tools.ExecuteJobForTest(headlessJobContext(context.Background(), other), "sleep 30", "other-sleeper", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tools.StopJobByUser(otherID, "test cleanup") })
+	if got := runningJobs(); got != 1 {
+		t.Fatalf("another session's job must not be counted = %v, want 1", got)
+	}
+}
+
+// A job that has finished but whose completion notification has not been
+// consumed by the agent still counts as pending work: an idle published in
+// that window must not read as final, or an integration would stop consuming
+// events before the JOB RESULT arrives.
+func TestHeadlessRunningJobsCountsUnconsumedJobNotifications(t *testing.T) {
+	t.Cleanup(tools.ResetJobRegistryForTest())
+	active := t.TempDir()
+	sender := &gatedEventSender{entered: make(chan struct{}), release: make(chan struct{})}
+	ctx := tools.WithSessionDir(context.Background(), active)
+	ctx = tools.WithAgentID(ctx, "main")
+	ctx = tools.WithEventSender(ctx, sender)
+	runningJobs := func() int {
+		return headlessRunningJobs(sessionDirBackend{mockBackend: &mockBackend{}, dir: active})
+	}
+	if got := runningJobs(); got != 0 {
+		t.Fatalf("running_jobs without jobs = %v, want 0", got)
+	}
+	id, err := tools.ExecuteJobForTest(ctx, "exit 0", "quick-finisher", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		sender.releaseDelivery()
+		tools.AckJobFinishedNotification(id)
+	})
+	<-sender.entered
+	if got := runningJobs(); got != 1 {
+		t.Fatalf("running_jobs with an unconsumed completion = %v, want 1", got)
+	}
+	sender.releaseDelivery()
+	// Delivery returning is not consumption: the agent has not handled the
+	// queued event yet, so the job still counts.
+	if got := runningJobs(); got != 1 {
+		t.Fatalf("running_jobs after delivery but before consumption = %v, want 1", got)
+	}
+	tools.AckJobFinishedNotification(id)
+	if got := runningJobs(); got != 0 {
+		t.Fatalf("running_jobs after the agent consumed the notification = %v, want 0", got)
+	}
+}
+
+// A job the model stops with job_kill ends without a completion notification,
+// so nothing would ever wake the agent to report a lower count: it has to leave
+// running_jobs the moment the stop is requested, not when the process exits,
+// or the idle ending the job_kill turn would read as "more work pending"
+// forever.
+func TestHeadlessRunningJobsExcludesJobsStoppedWithoutNotification(t *testing.T) {
+	t.Cleanup(tools.ResetJobRegistryForTest())
+	active := t.TempDir()
+	ctx := headlessJobContext(t.Context(), active)
+	runningJobs := func() int {
+		return headlessRunningJobs(sessionDirBackend{mockBackend: &mockBackend{}, dir: active})
+	}
+
+	killedID, err := tools.ExecuteJobForTest(ctx, "sleep 30", "killed-sleeper", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tools.StopJobByUser(killedID, "test cleanup") })
+	if got := runningJobs(); got != 1 {
+		t.Fatalf("running_jobs with a live background job = %v, want 1", got)
+	}
+	args, err := json.Marshal(map[string]string{"job_id": killedID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (tools.JobKillTool{}).Execute(ctx, args); err != nil {
+		t.Fatalf("job_kill: %v", err)
+	}
+	if got := runningJobs(); got != 0 {
+		t.Fatalf("running_jobs after job_kill = %v, want 0", got)
+	}
+}
+
+// status_response is the snapshot an integration polls, so it has to report the
+// same running-job count as idle, scoped to the session the backend runs: a job
+// another session of this process started cannot wake this session's agent and
+// must not keep the count above zero.
+func TestHeadlessStatusReportsRunningJobsForTheActiveSession(t *testing.T) {
+	t.Cleanup(tools.ResetJobRegistryForTest())
+	active := t.TempDir()
+	other := t.TempDir()
+
+	statusJobs := func() any {
+		t.Helper()
+		to := newTestOut()
+		backend := sessionDirBackend{mockBackend: &mockBackend{}, dir: active}
+		handleHeadlessCommand(headlessCommand{Type: "status"}, backend, &headlessState{sessionID: filepath.Base(active)}, to.writer())
+		env := findHeadlessEnvelopeValue(to.drain(), "status_response")
+		if env == nil {
+			t.Fatal("status_response not emitted")
+		}
+		return headlessPayloadMap(t, env.Payload)["running_jobs"]
+	}
+
+	if got := statusJobs(); got != float64(0) {
+		t.Fatalf("running_jobs without jobs = %v, want 0", got)
+	}
+	activeID, err := tools.ExecuteJobForTest(headlessJobContext(t.Context(), active), "sleep 30", "active-session-sleeper", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tools.StopJobByUser(activeID, "test cleanup") })
+	if got := statusJobs(); got != float64(1) {
+		t.Fatalf("running_jobs with this session's job = %v, want 1", got)
+	}
+	otherID, err := tools.ExecuteJobForTest(headlessJobContext(t.Context(), other), "sleep 30", "other-session-sleeper", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tools.StopJobByUser(otherID, "test cleanup") })
+	if got := statusJobs(); got != float64(1) {
+		t.Fatalf("another session's job must not be counted = %v, want 1", got)
 	}
 }

@@ -140,6 +140,27 @@ func TestClaimReportedSurvivesEviction(t *testing.T) {
 	}
 }
 
+// A finished job whose completion notification has not been acknowledged
+// still counts toward headless running_jobs, so eviction must keep it even
+// when it is the oldest finished job.
+func TestEvictionKeepsJobsWithPendingNotification(t *testing.T) {
+	r := &JobRegistry{jobs: make(map[string]*job)}
+	r.jobs["job-pending"] = &job{ID: "job-pending", finished: true, notifyPending: true}
+	for i := range maxRetainedFinishedJobs + 1 {
+		id := fmt.Sprintf("old-%d", i)
+		r.jobs[id] = &job{ID: id, finished: true, finishedAt: time.Unix(int64(i), 0)}
+	}
+	r.mu.Lock()
+	r.evictFinishedLocked()
+	r.mu.Unlock()
+	if _, ok := r.jobs["job-pending"]; !ok {
+		t.Fatal("eviction dropped a job whose completion notification is still pending")
+	}
+	if _, ok := r.jobs["old-0"]; ok {
+		t.Fatal("old-0 survived eviction; the test did not exercise the path")
+	}
+}
+
 func TestCompletionMessageOmitsFollowUpForSuccessfulJob(t *testing.T) {
 	j := &job{
 		ID:          "job-7",
@@ -493,6 +514,110 @@ func TestRequestCancelClearsPromotedDetach(t *testing.T) {
 		// set: the job is still stopping, not killed.
 		t.Fatal("a pending cancel must not report a terminal kill")
 	}
+}
+
+// NotifiesOnFinish is the live half of PendingWake, which headless running_jobs
+// counts, so it must say exactly whether finish will deliver a completion
+// notification: a detached job and an operator stop of one do, a foreground job
+// and a notification-suppressing cancel (job_kill) do not, and a finished job
+// has nothing left to deliver.
+func TestJobStateNotifiesOnFinishTracksCompletionDelivery(t *testing.T) {
+	sender := &recordingEventSender{ch: make(chan any, 1)}
+	newJob := func(detached bool) *job {
+		return &job{status: jobStatusRunning, detached: detached, eventSender: sender, cancelCh: make(chan string, 1), done: make(chan struct{})}
+	}
+
+	if newJob(false).state().NotifiesOnFinish {
+		t.Fatal("a foreground job reports through its shell call, not a notification")
+	}
+	if !newJob(true).state().NotifiesOnFinish {
+		t.Fatal("a detached job must report that its end delivers a notification")
+	}
+	noSender := newJob(true)
+	noSender.eventSender = nil
+	if noSender.state().NotifiesOnFinish {
+		t.Fatal("a detached job without an event sender cannot deliver a notification")
+	}
+
+	userStopped := newJob(true)
+	if !userStopped.stopByUser("stopped by user") {
+		t.Fatal("stopByUser on a running job must report true")
+	}
+	if state := userStopped.state(); state.Status != string(jobStatusStopping) || !state.NotifiesOnFinish {
+		t.Fatalf("operator stop of a detached job = %+v, want stopping and still notifying", state)
+	}
+
+	killed := newJob(true)
+	if !killed.requestCancel("cancelled by job_kill", false) {
+		t.Fatal("requestCancel on a running job must report true")
+	}
+	if state := killed.state(); state.Status != string(jobStatusStopping) || state.NotifiesOnFinish {
+		t.Fatalf("job_kill of a detached job = %+v, want stopping without a notification", state)
+	}
+
+	registry := &JobRegistry{jobs: make(map[string]*job)}
+	finished := newJob(true)
+	finished.ID = "job-tracks-delivery"
+	registry.jobs[finished.ID] = finished
+	registry.finish(finished, jobStatusCompleted, "exit code 0", nil)
+	<-sender.ch
+	if state := finished.state(); state.NotifiesOnFinish || !state.NotificationPending || !state.PendingWake() {
+		t.Fatalf("finished job = %+v, want a delivered-but-unconsumed notification counted as pending", state)
+	}
+	registry.ackNotification(finished.ID)
+	if state := finished.state(); state.NotificationPending || state.PendingWake() {
+		t.Fatalf("finished job after ack = %+v, want no pending wake", state)
+	}
+}
+
+// headless running_jobs must stay above zero while a finished job's completion
+// notification sits unprocessed in the agent queue: an idle published in that
+// window would otherwise look final and let an integration stop consuming
+// events before the JOB RESULT arrives.
+func TestJobStatePendingWakeSurvivesUntilAgentAcks(t *testing.T) {
+	registry := &JobRegistry{jobs: make(map[string]*job)}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	j := &job{
+		ID:          "job-pending-wake",
+		status:      jobStatusRunning,
+		detached:    true,
+		eventSender: &blockingEventSender{entered: entered, release: release},
+		cancelCh:    make(chan string, 1),
+		done:        make(chan struct{}),
+	}
+	registry.jobs[j.ID] = j
+	if !j.state().PendingWake() {
+		t.Fatal("a live detached job must count as a pending wake")
+	}
+	finished := make(chan struct{})
+	go func() {
+		registry.finish(j, jobStatusCompleted, "exit code 0", nil)
+		close(finished)
+	}()
+	<-entered
+	if state := j.state(); state.Active() || !state.NotificationPending || !state.PendingWake() {
+		t.Fatalf("job mid-delivery = %+v, want finished with a pending notification", state)
+	}
+	close(release)
+	<-finished
+	if state := j.state(); !state.NotificationPending || !state.PendingWake() {
+		t.Fatalf("job after delivery = %+v, want pending until the agent acks", state)
+	}
+	registry.ackNotification(j.ID)
+	if state := j.state(); state.NotificationPending || state.PendingWake() {
+		t.Fatalf("job after ack = %+v, want no pending wake", state)
+	}
+}
+
+type blockingEventSender struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingEventSender) SendAgentEvent(string, string, any) {
+	close(s.entered)
+	<-s.release
 }
 
 // A job is readable by more than its owner, so one reader must not consume

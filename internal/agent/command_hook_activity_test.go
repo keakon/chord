@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/chord/internal/command"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 type recordingActivityObserver struct {
@@ -750,5 +751,38 @@ func TestAutomationFeedbackFormattingAndPolicies(t *testing.T) {
 		if got := hookToastLevel(hook.AutomationResult{Severity: tc.severity}); got != tc.want {
 			t.Fatalf("hookToastLevel(%q) = %q, want %q", tc.severity, got, tc.want)
 		}
+	}
+}
+
+// GlobalIdleEvent carries the session's running-job count captured on the
+// main loop, so the headless idle cannot miss a job whose completion the loop
+// consumes after emitting idle.
+func TestGlobalIdleCarriesSessionRunningJobs(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	t.Cleanup(tools.ResetJobRegistryForTest())
+	t.Cleanup(func() { tools.StopAllJobsForShutdown() })
+	ctx := tools.WithSessionDir(t.Context(), a.SessionDir())
+	ctx = tools.WithAgentID(ctx, "main")
+	ctx = tools.WithEventSender(ctx, a)
+	if _, err := tools.ExecuteJobForTest(ctx, "sleep 60", "watcher", nil); err != nil {
+		t.Fatalf("ExecuteJobForTest: %v", err)
+	}
+	otherCtx := tools.WithSessionDir(t.Context(), t.TempDir())
+	otherCtx = tools.WithEventSender(tools.WithAgentID(otherCtx, "main"), a)
+	if _, err := tools.ExecuteJobForTest(otherCtx, "sleep 60", "other session", nil); err != nil {
+		t.Fatalf("ExecuteJobForTest: %v", err)
+	}
+
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("expected global idle")
+	}
+	var idle *GlobalIdleEvent
+	for _, evt := range drainAgentEvents(a.Events()) {
+		if candidate, ok := evt.(GlobalIdleEvent); ok {
+			idle = &candidate
+		}
+	}
+	if idle == nil || idle.RunningJobs != 1 {
+		t.Fatalf("idle = %#v, want RunningJobs 1 for this session's job only", idle)
 	}
 }

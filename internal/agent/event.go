@@ -549,6 +549,10 @@ func (IdleEvent) agentEvent() {}
 // should honor this flag.
 type GlobalIdleEvent struct {
 	SuppressUserNotification bool
+	// RunningJobs counts the session's background jobs that still owe an agent
+	// a completion notification, captured on the main loop when idle is
+	// emitted so it is ordered with the loop's notification consumption.
+	RunningJobs int
 }
 
 func (GlobalIdleEvent) agentEvent() {}

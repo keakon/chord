@@ -119,7 +119,12 @@ type job struct {
 	finished   bool
 	finishedAt time.Time
 	detached   bool
-	reported   bool
+	// notifyPending marks a finished job whose completion notification has
+	// been delivered to the agent event stream but not consumed by the agent
+	// yet. Until the agent acks it, consumers that gate on "no work left"
+	// (headless running_jobs) must keep counting the job.
+	notifyPending bool
+	reported      bool
 	// stopOrigin records who cancelled the job; empty when it was not stopped.
 	// It travels with the completion event so a user stop is distinguishable
 	// from a deadline, a job_kill, or a session-switch teardown.
@@ -755,6 +760,8 @@ func (j *job) closeOutputPipes() {
 // finish records the terminal state, wakes any waiter, and delivers the
 // completion notification when the job completed while detached. Detaching and
 // finishing share j.mu, so a job cannot both complete as foreground and notify.
+// A detached job's notification stays pending (see JobState.PendingWake) until
+// the consuming agent acks it with AckJobFinishedNotification.
 func (r *JobRegistry) finish(j *job, status jobStatus, detail string, exitErr error) {
 	j.mu.Lock()
 	if j.finished {
@@ -767,6 +774,7 @@ func (r *JobRegistry) finish(j *job, status jobStatus, detail string, exitErr er
 	j.detail = detail
 	j.exitErr = exitErr
 	notify := j.detached
+	j.notifyPending = notify && j.eventSender != nil
 	// A recorded user stop only counts when the kill actually took effect: a
 	// process that exited on its own between the stop request and the cancel
 	// being consumed finishes as completed, and must neither be reported to the
@@ -874,10 +882,14 @@ func (j *job) stopByUser(reason string) bool {
 // finishedTime reports when a terminal job finished. The finished flag and the
 // timestamp come from one critical section, so eviction ordering never mixes a
 // finished flag from one instant with a zero timestamp from another.
-func (j *job) finishedTime() (time.Time, bool) {
+// evictableFinishedTime reports when a job finished, for jobs eviction may
+// drop. A finished job whose completion notification is still pending is not
+// evictable: it keeps headless running_jobs above zero until the agent
+// acknowledges the notification.
+func (j *job) evictableFinishedTime() (time.Time, bool) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	if !j.finished {
+	if !j.finished || j.notifyPending {
 		return time.Time{}, false
 	}
 	return j.finishedAt, true
@@ -949,6 +961,13 @@ func (j *job) stateLocked() JobState {
 		Status:        string(j.status),
 		FinishedAt:    j.finishedAt,
 		LastOutputAt:  lastOutputAt,
+		SessionDir:    j.SessionDir,
+		// finish delivers a completion notification exactly when the job is
+		// detached at that moment, and it can only reach an agent through the
+		// sender captured at start. NotificationPending covers the window after
+		// that delivery, until the agent consumes the event.
+		NotifiesOnFinish:    !j.finished && j.detached && j.eventSender != nil,
+		NotificationPending: j.notifyPending,
 	}
 }
 
@@ -1294,6 +1313,27 @@ func ClaimJobReported(id string) bool {
 	return globalJobRegistry.claimReported(id)
 }
 
+// AckJobFinishedNotification records that the agent consumed (or deliberately
+// discarded) a finished job's completion notification. The pending flag keeps
+// headless running_jobs above zero from finish until this point, so an idle
+// published while the completion event is still queued cannot read as final.
+func AckJobFinishedNotification(id string) {
+	globalJobRegistry.ackNotification(strings.TrimSpace(id))
+}
+
+func (r *JobRegistry) ackNotification(id string) {
+	if id == "" {
+		return
+	}
+	j, ok := r.get(id)
+	if !ok {
+		return
+	}
+	j.mu.Lock()
+	j.notifyPending = false
+	j.mu.Unlock()
+}
+
 // StopJobByUser stops a running job on the operator's behalf and reports
 // whether a live job was found. It is the interface-facing stop entry point:
 // a detached job still delivers an asynchronous completion notification marked
@@ -1316,6 +1356,21 @@ type JobState struct {
 	Status        string
 	FinishedAt    time.Time
 	LastOutputAt  time.Time
+	// SessionDir is the session directory the job was started from, or "" when
+	// the start context carried none. It is immutable for the job's life, so
+	// callers can attribute a job to a session without holding the job lock.
+	SessionDir string
+	// NotifiesOnFinish reports whether the unfinished job will deliver a
+	// completion notification that wakes its owning agent when it ends: a job
+	// started in or promoted to the background, including one the operator is
+	// stopping. It is false for a finished job, for a foreground job whose
+	// waiting shell call reports the outcome, and for a job cancelled without a
+	// notification (job_kill, session switch, agent stop), which ends silently.
+	NotifiesOnFinish bool
+	// NotificationPending reports that a detached job has finished and its
+	// completion notification has not been consumed by the agent yet: the
+	// event is queued or being handled, so the result is not delivered.
+	NotificationPending bool
 }
 
 // Active reports whether the job is still running or being stopped, i.e. part
@@ -1327,6 +1382,13 @@ func (s JobState) Active() bool {
 	default:
 		return false
 	}
+}
+
+// PendingWake reports whether the job still owes the owning agent a completion
+// notification: a live job whose end will notify, or a finished job whose
+// notification the agent has not consumed yet.
+func (s JobState) PendingWake() bool {
+	return s.NotificationPending || (s.Active() && s.NotifiesOnFinish)
 }
 
 // DeadlineAt returns the wall-clock deadline of a job that carries one, or the
@@ -1452,6 +1514,25 @@ func (r *JobRegistry) snapshotStates() []JobState {
 // SnapshotJobs returns the current lifecycle state of every tracked job.
 func SnapshotJobs() []JobState {
 	return globalJobRegistry.snapshotStates()
+}
+
+// PendingWakeJobs counts the jobs of the session in sessionDir that still owe
+// their agent a completion notification (see JobState.PendingWake). Jobs
+// attributed to another session are excluded; jobs without a session
+// directory are counted because completion delivery also accepts them. An
+// empty sessionDir counts every pending job.
+func PendingWakeJobs(sessionDir string) int {
+	n := 0
+	for _, state := range globalJobRegistry.snapshotStates() {
+		if !state.PendingWake() {
+			continue
+		}
+		if sessionDir != "" && state.SessionDir != "" && state.SessionDir != sessionDir {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 // RunningJobsInDir reports the live jobs whose working directory is dir or a
@@ -1603,7 +1684,7 @@ func (r *JobRegistry) evictFinishedLocked() {
 	}
 	finished := make([]finishedJob, 0)
 	for _, j := range r.jobs {
-		if at, ok := j.finishedTime(); ok {
+		if at, ok := j.evictableFinishedTime(); ok {
 			finished = append(finished, finishedJob{j: j, finishedAt: at})
 		}
 	}

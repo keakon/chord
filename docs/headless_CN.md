@@ -99,7 +99,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
     "last_error": "",
     "last_outcome": "completed",
     "current_role": "builder",
-    "updated_at": "2026-05-08T12:00:00Z"
+    "updated_at": "2026-05-08T12:00:00Z",
+    "running_jobs": 0
   }
 }
 ```
@@ -107,6 +108,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 `session_id` 跟的是当前实际会话，不是启动时的快照。进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`），Chord 会更新这个跟踪值，并用一条显式的 `session_switched` 推送告诉订阅方；仅凭缓存值变化不能视为网关已看到新会话。会话没换的恢复（启动回放、持久压缩重写）只刷新时间戳，不推送。即使没订阅 `session_switched`，跟踪值照样会更新，所以 `status_response` 永远报实际运行的那个会话。
 
 `workdir` 是 agent 当前实际使用的 checkout。`path` 是生效的工作目录；主仓库或非 Chord 管理目录的 `worktree_id` 为空；每次 binding 变化都会递增 `generation`。会话中切换 worktree 时，`status_response` 会更新；订阅了 `workdir_changed` 的客户端还会收到推送，应该用 generation 丢弃过期快照。
+
+`running_jobs` 统计当前会话中仍欠 agent 一条完成通知的后台 shell 任务：仍在运行、结束时会通知 agent 的任务（包括操作员正在停止的任务），以及已经结束、但 agent 还没处理其完成通知的任务。完成通知会唤醒 agent；这轮工作结束后，新的 `idle` 会携带最新计数。服务或监听任务可能长期运行，非零计数不保证多久以后收到事件。停止时不发完成通知的任务（模型调用 `job_kill`、SubAgent 被停止、切换会话）从发起停止起就不再计入；工具触发的停止会在当前工作再次进入 `idle` 时体现，会话切换则通过 `session_switched` 通知。归属于其他会话的任务不计入。`idle` 和 `status_response` 使用同一计数口径。
 
 ### `send`
 
@@ -260,7 +263,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | -------------------- | -------------------------------------------- | ----------------- |
 | `activity`           | Agent 进入新阶段                             | `agent_id`、`type`（如 `connecting`、`streaming`、`compacting`） 、`detail` |
 | `assistant_message`  | 一条完整 assistant 消息可供消费              | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`text`、`tool_calls`；main agent 的委托字段为空 |
-| `idle`               | 主 agent 与所有 SubAgent 均已全局静默，可再次接收输入 | `last_outcome`（`completed` / `cancelled` / `error`）、`suppress_user_notification`（除非 agent 在上一次 idle 事件后运行过，否则为 `true`） |
+| `idle`               | 主 agent 与所有 SubAgent 均已全局静默，可再次接收输入 | `last_outcome`（`completed` / `cancelled` / `error`）、`suppress_user_notification`（除非 agent 在上一次 idle 事件后运行过，否则为 `true`）、`running_jobs`（与 `status_response` 同口径；大于 0 时，每个计入的 job 结束后 agent 都会再跑一轮，随后再发一条 `idle`，等待工作结束的集成方应继续读取事件） |
 | `done_completion`   | Done 工具完成并给出最终报告。只在 loop 运行期间产生——`done` 仅在此时挂载；`mode` 字段目前恒为 `normal` | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
 | `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`agent_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`timeout_ms` |
 | `question_request`   | 模型向用户提问                               | `request_id`、`agent_id`、`tool_name`、`header`、`question`、`options`、`option_details`、`multiple`、`deadline`（绝对的 RFC 3339 关闭时间；未配置 `question_timeout` 时省略） |
