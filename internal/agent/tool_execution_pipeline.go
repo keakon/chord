@@ -1450,11 +1450,25 @@ func trackedEditPathFromArgs(raw json.RawMessage, baseDir string) string {
 	return tools.ExtractEditPathFromArgsInDir(llm.UnwrapToolArgs(raw), baseDir)
 }
 
+// shellResultPreviewBytes bounds the inline preview of Shell and JobOutput
+// results. It is a preview budget, not a data cap: the full text stays in the
+// saved artifact, and the smaller preview keeps repetitive command output from
+// crowding the context. A truncated JobOutput result is saved as its own
+// artifact even though the job also writes a log file: the job log rotates in
+// place once it reaches its size cap and is pruned after a week, so it cannot
+// be the restore address a truncation marker promises for the session's
+// lifetime, while the artifact never changes.
+const shellResultPreviewBytes = 16 * 1024
+
 func formatToolExecutionOutput(result, sessionDir, artifactKey, toolName string, execErr error, guidance string) string {
 	if toolName == tools.NameQuestion || toolName == tools.NameRead {
 		return tools.NormalizeEmptySuccessOutput(toolName, result, execErr)
 	}
-	truncated := tools.TruncateOutputWithOptions(result, sessionDir, tools.TruncateOptions{ArtifactKey: artifactKey})
+	opts := tools.TruncateOptions{ArtifactKey: artifactKey}
+	if toolName == tools.NameShell || toolName == tools.NameJobOutput {
+		opts.MaxBytes = shellResultPreviewBytes
+	}
+	truncated := tools.TruncateOutputWithOptions(result, sessionDir, opts)
 	content := tools.NormalizeEmptySuccessOutput(toolName, truncated.Content, execErr)
 	return tools.AppendArtifactGuidance(content, truncated, guidance)
 }

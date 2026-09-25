@@ -322,6 +322,11 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	parts = append(parts,
 		"This tool is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution.",
 		"Use shell mainly for tests, builds, git, and other system commands.",
+	)
+	if shellSupportsTextFilters(shellType) {
+		parts = append(parts, "Run checks without piping away their output through tail or grep: long results are saved with a bounded preview. Read or search that saved output for another view instead of rerunning the command. A pipeline reports the shell pipeline status, not necessarily the check's exit code.")
+	}
+	parts = append(parts,
 		"Prefer the smallest safe number of tool calls. When one visible built-in tool can do the job directly, use it instead of simulating it in shell.",
 		"For native filesystem operations with no dedicated built-in tool, shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
 		"If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.",
@@ -555,6 +560,7 @@ func (t ShellTool) foregroundResult(j *job, started time.Time) (string, error) {
 		elapsed := time.Since(started)
 		output = appendShellDurationNote(output, elapsed)
 		output = appendShellCostNote(output, j.Command, elapsed)
+		output = appendShellOutputFilterNote(output, j.Command, t.shellType, elapsed)
 	}
 	// j.exitErr is published by finish() under j.mu after close(j.done); the
 	// foreground path observes it through that happens-before, but reading it

@@ -820,3 +820,15 @@ func TestStopJobUsesPublishedNaturalExit(t *testing.T) {
 		t.Fatalf("err = %v, want exit code 7", err)
 	}
 }
+
+func TestBackgroundJobHandleNamesSavedLog(t *testing.T) {
+	j := &job{
+		ID:      "job-9",
+		Command: "producer",
+		LogFile: "/tmp/session/jobs/job-9.log",
+	}
+	handle := backgroundJobHandle(j, groupPendingReason)
+	if !strings.Contains(handle, "log_file: /tmp/session/jobs/job-9.log") {
+		t.Fatalf("handle does not name the job log: %q", handle)
+	}
+}

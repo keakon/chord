@@ -62,6 +62,10 @@ A job owns the whole process group its command starts, not only the direct child
 
 `job_list` shows the jobs that are running or stopping, with the label, elapsed time, quiet duration, and how much of the deadline is left; pass `include_finished: true` to also see retained finished ones.
 
+Shell and background output above 16 KiB comes back as a bounded preview with a saved-output reference. Read or search the saved output for details instead of rerunning the command. Avoid piping checks through `tail` or `grep`: discarded upstream text never reaches the log, and a pipeline can hide the check's exit status.
+
+For foreground commands that take several seconds and contain such a pipeline, Chord adds an output-preservation reminder to the result.
+
 ### Reading background output
 
 Read a background job's output since the previous read, then its `[status: ...]` line. `wait` selects whether the call blocks: `none` (default) returns what is available now, `output` waits for the next output, and `exit` waits for the job to finish, each capped at 30s by the runtime. A wait that expires is not an error: the job keeps running and the reply reports it as running, plus a `[notice]` line that says whether the `exit` wait timed out or was cancelled and how long the job has been quiet. Repeated non-blocking reads that find no new output are reported as polling and then rejected, so keep reading only while there is a reason to. Terminal escape sequences are stripped from what the model sees.
