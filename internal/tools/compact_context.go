@@ -532,24 +532,26 @@ func (t CompactContextTool) Description() string {
 	// it has already authored the whole state.
 	budget := ""
 	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
-		budget = fmt.Sprintf("All text fields together (active_objective, next_step, completed, decisions, open_issues, retired_items, state_files, planned_state_files, evidence_refs, stage_id, stage_status, checkpoint_kind, claim_evidence, claim_kinds) must fit a combined budget of about %d estimated tokens; there are no per-field or per-item caps, so a long item is fine as long as the whole state stays within the budget.\n", limit)
+		budget = fmt.Sprintf("All text fields together must fit about %d estimated tokens; there are no per-field or per-item caps.\n", limit)
 	}
 	// The todo-sync line is rendered only when todo_write is visible in the
 	// same surface, so the description never pushes a tool the model cannot
 	// call. Like the budget, it is baked at registration time.
 	todoSync := ""
 	if t.validator.TodoWriteVisible {
-		todoSync = "- your todo list reflects actual progress (the checkpoint snapshots runtime todos verbatim; sync drifted entries with todo_write before requesting);\n"
+		todoSync = "Before requesting, sync drifted entries with todo_write: the checkpoint snapshots runtime todos verbatim.\n"
 	}
-	return "Request a durable context checkpoint to reduce the cost of remaining work. This is a costed state transition, not a routine progress save: runtime rewrites session history and continues the same turn. A checkpoint never completes the task or replaces the final response.\n" +
-		"Do not call it when the task is complete and only the final response remains. If work requires user input or confirmation, use the normal question or waiting mechanism. A terminal TODO state alone is not a reason to checkpoint.\n" +
-		"Call it alone (no sibling tool calls in the same response), at a safe stop after the current atomic operation has ended. Unfinished background work may continue; do not describe it as completed.\n" +
-		"When context is comfortable, checkpoint only if expected savings justify the reset and recovery cost. Under context pressure, stop optional exploration, preserve the minimum recovery state, and request a provisional checkpoint even if the stage remains active or candidate.\n" +
-		"Capture every fact needed to resume in structured arguments or state_files; do not repeat full file contents in both. Refresh files you rely on before referencing them. Leave state_files empty when the structured arguments fully carry the recovery state, and never create a file merely to fill the field: externalize a fact only when it genuinely has to survive the reset, and write that file before submitting the checkpoint, because state_files references existing files and this call cannot create them. Record unfinished updates as open_issues, not saved state.\n" +
-		"Use planned_state_files only for future paths; they do not externalize state. File paths and evidence requirements are defined by the corresponding parameter descriptions.\n" +
-		"Only active_objective and next_step are required. Report new progress and changed decisions; bounded prior completed work, decisions and open issues carry forward automatically. Use retired_items to remove resolved or superseded entries by their exact checkpoint text. Omission alone never deletes an entry. Evidence and stage metadata are optional; do not invent evidence IDs.\n" +
+	// Timing and preparation under pressure are repeated by the context
+	// reminder when it fires, and each evidence rule is restated by the
+	// rejection that enforces it, so this always-sent text keeps only the call
+	// contract.
+	return "Request a durable context checkpoint: the runtime rewrites session history from these arguments plus runtime facts and continues the same turn. It is a costed state transition, not a routine progress save. A checkpoint never completes the task or replaces the final response.\n" +
+		"Do not call it when the task is complete and only the final response remains, or to wait for input (use the normal question or waiting mechanism). A terminal TODO state alone is not a reason to checkpoint. " +
+		"Call it alone (no sibling tool calls) at a safe stop after the current atomic operation. Under context pressure, a provisional checkpoint is expected even if the stage remains active or candidate.\n" +
+		"Only active_objective and next_step are required. Report new progress and changed decisions; earlier entries carry forward until named in retired_items. Evidence and stage fields are optional. " +
+		"Leave state_files empty when the structured arguments fully carry the recovery state, and never create a file merely to fill the field; a file you do reference must exist, so write that file before submitting the checkpoint. planned_state_files name future paths and do not externalize state.\n" +
 		todoSync +
-		"A success result only means the request was accepted; a later model-driven [Context Summary] checkpoint confirms the reset was applied. A skip is a normal policy result, not an error: continue actual work or deliver the final response, rather than repeatedly retrying unchanged input.\n" +
+		"Acceptance is not application: a later model-driven [Context Summary] checkpoint confirms the reset was applied. A skip is a normal policy result, not an error: continue the work or deliver the final response.\n" +
 		budget +
 		"If the arguments are rejected, fix the reported problem and retry; re-submitting the same values cannot succeed. Never work around the limits by splitting the checkpoint."
 }
@@ -567,51 +569,51 @@ func (CompactContextTool) Parameters() map[string]any {
 				"type":        "array",
 				"maxItems":    12,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Verified outcomes with how each was verified (tests, commands, files). Do not restate the todo list: runtime todos are snapshotted automatically and reconcile against this section after the reset.",
+				"description": "Verified outcomes and how each was verified. Do not restate the todo list; it is snapshotted automatically.",
 			},
 			"decisions": map[string]any{
 				"type":        "array",
 				"maxItems":    8,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Each item must be one non-empty string containing an important decision and, when useful, its one-line reason; do not use objects such as {\"value\":\"...\",\"reason\":\"...\"}.",
+				"description": "Important decisions, each one plain string with an optional one-line reason (not an object).",
 			},
 			"open_issues": map[string]any{
 				"type":        "array",
 				"maxItems":    8,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Unresolved blockers, risks, or facts awaiting confirmation.",
+				"description": "Unresolved blockers, risks, unfinished updates, or facts awaiting confirmation.",
 			},
 			"next_step": map[string]any{
 				"type":        "string",
 				"minLength":   1,
-				"description": "One concrete action executable immediately after the checkpoint applies, subordinate to the latest user request. Do not use a checkpoint just to wait for user input or deliver the final response.",
+				"description": "One concrete action executable immediately after the checkpoint applies, subordinate to the latest user request.",
 			},
 			"retired_items": map[string]any{
 				"type": "array", "maxItems": 40,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Exact text of prior completed, decision, open issue or claim entries to retire. Use for resolved issues or superseded conclusions; supply replacements in the normal fields. Unknown entries are harmless. Never removes runtime facts or user instructions.",
+				"description": "Exact text of earlier completed, decision, open issue or claim entries that are resolved or superseded. Retiring only clears the entries it names: it never removes runtime facts or user instructions, and an entry that matches nothing is harmless. Omission alone never deletes an entry.",
 			},
 			"state_files": map[string]any{
 				"type":        "array",
 				"maxItems":    16,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Existing files carrying recovery state: paths must resolve inside the project root and are stored workspace-relative. References only: the tool never reads them and never verifies that they exist. After a reset eligible files may have a bounded head injected only when the current read permission allows it; do not assume the full file was loaded. Keep its head self-contained. Leave empty when structured arguments carry the state. Capture out-of-project state in structured arguments.",
+				"description": "Existing files inside the project carrying recovery state. The tool never reads them and never verifies that they exist; after the reset a bounded head may be injected when the current read permission allows it, so keep the head self-contained. Refresh the files you rely on before referencing their contents. Leave empty when structured arguments carry the state.",
 			},
 			"planned_state_files": map[string]any{
 				"type": "array", "maxItems": 16,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Workspace-relative paths planned for future state. They are not evidence that a file exists or that work is complete.",
+				"description": "Project paths planned for future state; not evidence that a file exists or that work is complete.",
 			},
 			"evidence_refs": map[string]any{
 				"type": "array", "maxItems": 24,
 				"items":       map[string]any{"type": "string", "minLength": 1},
-				"description": "Stable evidence IDs supporting completed work or decisions, copied verbatim from the Evidence ID lines of a [Context Evidence] pack visible in this conversation (each ID is ev- plus 12 hex characters). Leave this empty when no Evidence ID line is visible, and write nothing else in its place: invented or non-ID values are rejected, and only observed claims and committed checkpoints require evidence — not every completed stage. Evidence IDs in claim_evidence are automatically included in evidence_refs; do not repeat them here.",
+				"description": "Evidence IDs (ev- plus 12 hex characters) copied verbatim from Evidence ID lines visible in this conversation; leave empty when none is visible. IDs in claim_evidence are automatically included in evidence_refs.",
 			},
 			"stage_id":        map[string]any{"type": "string", "description": "Stable identifier for the current work stage."},
-			"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "State of this work stage, not the whole user request. A completed stage does not end the turn or replace the final response."},
-			"checkpoint_kind": map[string]any{"type": "string", "enum": compactContextCheckpointKinds, "description": "Provisional reduces context but is not authoritative; committed requires runtime validation, and additionally requires stage_status=completed with at least one valid evidence_refs entry."},
-			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps each claim to the evidence IDs supporting it. Claim keys are natural language: usually a condensed conclusion from completed/decisions, where paraphrasing is fine and verbatim matching is never required; standalone claims are also allowed. Every value must be an evidence ID visible in this conversation, copied verbatim from an Evidence ID line of a [Context Evidence] pack or from an ID a rejected compact_context result listed (each ID is ev- plus 12 hex characters). File paths, tool names, URLs, descriptions and claim kinds (observed/derived/assumed/proposed) are not evidence IDs and are rejected. An observed claim needs at least one supporting ID here; if no ID is visible, do not fill this in — classify the claim derived or assumed instead. These IDs are automatically included in evidence_refs; no duplicate entry is required."},
-			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies each claim (usually from completed/decisions); observed requires an evidence ID visible in this conversation and listed in claim_evidence/evidence_refs, derived is inferred from evidence, assumed is unverified, and proposed is future work. When no evidence ID is visible, the claim cannot be observed: classify it derived, assumed or proposed instead of substituting anything for the missing ID."},
+			"stage_status":    map[string]any{"type": "string", "enum": compactContextStageStatuses, "description": "State of this work stage, not of the whole request."},
+			"checkpoint_kind": map[string]any{"type": "string", "enum": compactContextCheckpointKinds, "description": "provisional reduces context; committed also requires stage_status=completed and an evidence_refs entry."},
+			"claim_evidence":  map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "array", "maxItems": 8, "items": map[string]any{"type": "string", "minLength": 1}}, "description": "Maps a natural-language claim to the evidence IDs visible in this conversation that support it. File paths, tool names, descriptions and claim kinds are not evidence IDs; with no visible ID, omit the claim here and classify it derived or assumed. These IDs are automatically included in evidence_refs."},
+			"claim_kinds":     map[string]any{"type": "object", "maxProperties": maxCompactContextClaims, "additionalProperties": map[string]any{"type": "string", "enum": compactContextClaimKinds}, "description": "Classifies a claim; observed needs an evidence ID visible in this conversation in claim_evidence, otherwise use derived, assumed or proposed."},
 		},
 		"required":             []string{"active_objective", "next_step"},
 		"additionalProperties": false,
