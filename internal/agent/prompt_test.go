@@ -423,12 +423,14 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"state remaining runtime uncertainty instead of silently expanding the task into project acceptance testing",
 		"When you modify code or claim behavior was fixed or implemented",
 		"Do not equate self-authored happy-path tests passing with full verification of the requested behavior",
+		"changing its inputs so the failing path is no longer exercised is not a fix",
+		"When a candidate fix is cheap to try, run it rather than deliberating about whether it would work",
 		"state verification status explicitly (passed, failed, not run, or only inspected statically)",
 		"following project-local test/build conventions when known",
 		"Do not narrate every routine action or restate obvious next steps",
 		"Do not over-explain routine actions",
 		"If multiple interpretations exist but one is clearly the best fit",
-		"Before implementing new logic, search for existing helpers, patterns, or utilities to reuse or extend",
+		"Before implementing new logic, look for existing helpers and patterns.",
 		"Do not introduce parallel helpers or duplicate logic when an existing local abstraction can be reused or slightly extended",
 		"Do not add error handling, fallbacks, validation, or defensive checks for scenarios that cannot happen",
 		"only validate at real trust boundaries",
@@ -445,7 +447,7 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"For analysis-only tasks, define success in terms of evidence gathered and conclusions supported, not implementation or acceptance-test completion",
 		"For implementation and bug-fix tasks, or when dynamic evidence is justified above, prefer incremental verification",
 		"first the cheapest compile/typecheck-only command",
-		"For implementation work, a full test suite is expensive: run it at most once as a final check",
+		"For implementation work, run broad verification after focused checks pass.",
 		"When a broad test fails, narrow the reproduction before retrying",
 	} {
 		if !strings.Contains(got, want) {
@@ -761,7 +763,7 @@ func TestSharedCodingGuidelinesPrompt_RequiresEvidenceDiscriminationAndAmbiguity
 		// Evidence discrimination.
 		"also fits a plausible alternative that would change it",
 		"find the smallest check that tells them apart",
-		"not only the final output",
+		"state, side effects, ordering, and resource limits on success, failure, and interruption",
 		"investigation separates what was observed from what is inferred before naming a cause",
 		"code review confirms a reachable path and the surrounding guards before calling something a defect",
 		"analysis states the goal and constraints before recommending",
