@@ -718,11 +718,15 @@ func (p *ProviderConfig) ReasoningContinuityCompat(modelID string) *config.Reaso
 
 	if providerCfg != nil {
 		merged.Mode = providerCfg.Mode
+		merged.Contract = providerCfg.Contract
 		merged.ReasoningReplay = providerCfg.ReasoningReplay
 	}
 
 	if modelCfg != nil && strings.TrimSpace(modelCfg.Mode) != "" {
 		merged.Mode = modelCfg.Mode
+	}
+	if modelCfg != nil && strings.TrimSpace(modelCfg.Contract) != "" {
+		merged.Contract = modelCfg.Contract
 	}
 	if modelCfg != nil && strings.TrimSpace(modelCfg.ReasoningReplay) != "" {
 		merged.ReasoningReplay = modelCfg.ReasoningReplay

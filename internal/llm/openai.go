@@ -321,9 +321,12 @@ func (o *OpenAIProvider) CompleteStream(
 		traceCB = traceCollector.Callback
 	}
 
-	if deepSeekTarget(o.provider, model) {
-		tuning = deepSeekRequestTuning(tuning)
-	}
+	// Resolve the DeepSeek contract once for the whole request: it is read
+	// inside the cached body build, and the resolver takes the provider lock
+	// and re-merges layers on every call. The DeepSeek request tuning itself
+	// is applied by the retry layer (replayCompatibleRequestTuning), which
+	// also sizes the output budget from it.
+	deepseek := deepSeekTarget(o.provider, model)
 	ot := tuning.OpenAI
 	if tuning.DisableReasoning {
 		ot.ReasoningEffort = ""
@@ -354,7 +357,7 @@ func (o *OpenAIProvider) CompleteStream(
 		// Resolve the chat dialect once for the whole request: it selects both
 		// the thinking controls and the thinking-state carrier this endpoint
 		// reads, and the converter and the body writer must agree.
-		dialect, dialectErr := chatCompletionsNativeThinking(model, chatCompat)
+		dialect, dialectErr := chatCompletionsNativeThinking(chatCompat, deepseek)
 		if dialectErr != nil {
 			return nil, dialectErr
 		}
@@ -380,9 +383,9 @@ func (o *OpenAIProvider) CompleteStream(
 		// session dump shows 12 "reasoning_content must be passed back" 400s on
 		// requests whose thinking key was already stripped.
 		if wireFamily == modelcompat.WireFamilyOpenAIChat && continuityMode == modelcompat.ReasoningContinuityOpenAIVisible {
-			fillMissingReasoning(apiMessages, deepSeekTarget(o.provider, model))
+			fillMissingReasoning(apiMessages, deepseek)
 		}
-		if chatGeminiRequiresSignaturePlaceholder(model, dialect) {
+		if chatGeminiRequiresSignaturePlaceholder(dialect) {
 			// Gemini 3 rejects function-call history whose thought signature is
 			// missing; a step without one (never captured, or stripped by the
 			// replay ladder) gets the documented placeholder instead of a
@@ -453,17 +456,19 @@ func (o *OpenAIProvider) CompleteStream(
 
 		if effort := ot.EffectiveReasoningEffort(); effort != "" {
 			reqBody.ReasoningEffort = effort
-			if maxTokens > 0 && !deepSeekTarget(o.provider, model) {
-				// OpenAI reasoning models require max_completion_tokens. Compatible
-				// providers can rename this dynamically computed field through
-				// request_overrides.rename_body_fields.
-				reqBody.MaxCompletionTokens = maxTokens
-				reqBody.MaxTokens = 0
+			// OpenAI reasoning models require max_completion_tokens, while
+			// DeepSeek keeps reading max_tokens next to reasoning_effort.
+			// Compatible providers can rename the dynamically computed field
+			// through request_overrides.rename_body_fields.
+			if maxTokens > 0 {
+				if deepseek {
+					reqBody.MaxTokens = maxTokens
+				} else {
+					reqBody.MaxCompletionTokens = maxTokens
+					reqBody.MaxTokens = 0
+				}
 			}
 		} else if maxTokens > 0 {
-			reqBody.MaxTokens = maxTokens
-		}
-		if deepSeekTarget(o.provider, model) && maxTokens > 0 {
 			reqBody.MaxTokens = maxTokens
 		}
 
@@ -473,10 +478,12 @@ func (o *OpenAIProvider) CompleteStream(
 		// A gateway that translates chat/completions into the target model's
 		// native API can only read the thinking controls in its own dialect.
 		// The model's thinking config is wire-independent, so convert it into
-		// the shape the resolved dialect expects; nothing is emitted when the
-		// model configures no thinking knobs. A replay-compatible degradation
-		// (DisableReasoning) must not ship a thinking request the rest of the
-		// body no longer matches.
+		// the shape the resolved dialect expects. Nothing is emitted when the
+		// model configures no thinking knobs, except on a DeepSeek target:
+		// its request tuning turns thinking on (see deepSeekRequestTuning), so
+		// a DeepSeek-named model sends the thinking object on its own. A
+		// replay-compatible degradation (DisableReasoning) must not ship a
+		// thinking request the rest of the body no longer matches.
 		if !tuning.DisableReasoning {
 			applyNativeThinking(&reqBody, dialect, tuning)
 		}

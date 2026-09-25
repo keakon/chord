@@ -103,6 +103,11 @@ func TestBuildInitialSetupConfigYAML_Gemini(t *testing.T) {
 	if prov.Models["gemini-3.8-flash"].Limit.Context != 1048576 || prov.Models["gemini-3.8-flash"].Limit.Output != 65536 {
 		t.Fatalf("model limits = %#v", prov.Models["gemini-3.8-flash"].Limit)
 	}
+	// The native endpoint infers the Gemini 3 contract from the model ID, so the
+	// generated entry needs no compat block.
+	if got := prov.Models["gemini-3.8-flash"].Compat; got != nil {
+		t.Fatalf("model compat = %#v, want none", got)
+	}
 	if normalized, err := normalizeProviderConfig("gemini", prov, nil); err != nil {
 		t.Fatalf("normalizeProviderConfig: %v", err)
 	} else if normalized.Type != config.ProviderTypeGenerateContent {
@@ -198,35 +203,5 @@ func TestDefaultAPIURLForProviderType(t *testing.T) {
 	}
 	if got := defaultAPIURLForProviderType("responses"); got != "https://api.openai.com/v1/responses" {
 		t.Fatalf("defaultAPIURLForProviderType(responses) = %q", got)
-	}
-}
-
-func TestInferProviderTypeFromAPIURL_GeminiModels(t *testing.T) {
-	if got := inferProviderTypeFromAPIURL("https://generativelanguage.googleapis.com/v1beta/models"); got != "generate-content" {
-		t.Fatalf("inferProviderTypeFromAPIURL(gemini) = %q", got)
-	}
-	if got := inferProviderTypeFromAPIURL("https://generativelanguage.googleapis.com/v1beta/models/"); got != "generate-content" {
-		t.Fatalf("inferProviderTypeFromAPIURL(gemini trailing slash) = %q", got)
-	}
-}
-
-func TestInferProviderTypeFromAPIURLIgnoresQuery(t *testing.T) {
-	cases := []struct {
-		name   string
-		apiURL string
-		want   string
-	}{
-		{"responses", "https://example.invalid/openai/v1/responses?api-version=v1", "responses"},
-		{"messages", "https://example.invalid/v1/messages?version=preview", "messages"},
-		{"chat completions", "https://example.invalid/v1/chat/completions?source=test", "chat-completions"},
-		{"models", "https://example.invalid/v1beta/models?region=test", "generate-content"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := inferProviderTypeFromAPIURL(tc.apiURL); got != tc.want {
-				t.Fatalf("inferProviderTypeFromAPIURL(%q) = %q, want %q", tc.apiURL, got, tc.want)
-			}
-		})
 	}
 }

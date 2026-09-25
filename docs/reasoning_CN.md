@@ -15,7 +15,7 @@
 | Responses（`type: responses`） | `reasoning.effort`、`reasoning.summary` | 明文 `reasoning_text`，加上加密的 reasoning item |
 | Chat Completions（`type: chat-completions`） | `reasoning.effort`，以及各家族特有字段，通过 `compat.request_overrides.body` 发送（`thinking`、`enable_thinking`、`reasoning_split`、`clear_thinking` 等） | 一般是 `reasoning_content`；有些后端把带标签的思考直接写进 `content` |
 | Messages（`type: messages`） | `thinking.type`、`thinking.budget_tokens`、`thinking.effort`、`thinking.display` | 带签名的 `thinking` block |
-| Gemini（`type: generate-content`） | `thinking.level`、`thinking.budget`、`thinking.include_thoughts` | 思考摘要，加上 thought signature |
+| Gemini（`type: generate-content`） | `thinking.level`、`thinking.budget`、`thinking.include_thoughts` | 思考摘要，加上思考签名 |
 
 `reasoning.effort` 没有本地白名单：Chord 原样透传，由后端决定接受、收敛还是
 拒绝。只有 Responses 线路会先归一化空格和大小写，所以那里 `high` 和 `High`
@@ -24,8 +24,10 @@
 走 Chat Completions 时，把请求转成模型原生 API 的网关会按自己的形状收到思考配置：
 Gemini 用 `extra_body.google.thinking_config`，Claude 用
 `thinking: {type, budget_tokens}`，DeepSeek / GLM / Kimi K2.x / Doubao 用
-`thinking: {type}`，Qwen 用 `enable_thinking`。形状按模型名推断，也可以用
-`compat.chat_completions.native_thinking` 指定；见
+`thinking: {type}`，Qwen 用 `enable_thinking`。形状由
+`compat.chat_completions.native_thinking` 指定，只有 DeepSeek 路由（DeepSeek
+模型 ID 或 `compat.reasoning_continuity.contract: deepseek`）才会自动选到。网关后面的模型是不是 Gemini 或 Claude 也靠这个选择器识别：没配时 Gemini 的
+思考签名不会写回请求，Gemini 3 会拒绝每次工具调用之后的请求（HTTP 400）。见
 [走 Chat Completions 网关的 thinking](./model-configs_CN.md#走-chat-completions-网关的-thinking)。
 
 ## DeepSeek 的思考与历史回放
@@ -42,9 +44,13 @@ Messages 使用 `thinking.type: enabled` 配合 `thinking.effort`，发送为
 
 这两条 DeepSeek 路径始终完整回放保留历史中的思考，包括更早用户轮次的
 消息；通用的 `reasoning_replay: current_turn` / `none` 不会缩短这个窗口。
+显式配置这两个值时，启动日志和 `chord doctor config` 会提示它们被 DeepSeek
+契约覆盖；移除该配置或设为 `all` 即可消除提示。
 同源 Messages 思考块保留原始文本和可用签名。回放被拒绝时，Chord 不会通过
 降低强度、删除必需思考或把工具轨迹转成文本来重试；错误继续按模型池规则
-处理。第三方网关需要支持这套 DeepSeek 契约。
+处理。第三方网关需要支持这套 DeepSeek 契约；第三方路由的模型名以 `deepseek-`
+开头、后端却不是 DeepSeek 时，用 `compat.reasoning_continuity.contract: none`
+退出，Chat 和 Messages 都适用。
 
 ## 决定回放契约
 
@@ -59,12 +65,15 @@ Messages 使用 `thinking.type: enabled` 配合 `thinking.effort`，发送为
    才设置 `compat.chat_completions.keep_reasoning_effort: true`。
 3. **后端会校验回传的思考**：设置 `compat.reasoning_continuity.mode:
    openai_visible` 加 `reasoning_replay: all`，让每条 assistant 消息原样
-   回传。带 tools 的 DeepSeek、Kimi K3、Qwen `preserve_thinking`、
-   GLM `clear_thinking: false` 都属于这一类。第三方中转不保证遵守官方
+   回传。Kimi K3、Qwen `preserve_thinking`、GLM `clear_thinking: false`
+   都属于这一类。第三方中转不保证遵守官方
    契约（有的会拒绝回放的 `reasoning_content`），把 `all` 当成必需前
    先确认实际端点的行为。
 4. **Responses、Messages、Gemini**：原生 continuity 自动生效：Chord 会保存
-   明文或带签名 / 加密的状态，并在目标线路允许时回放，无需配置。
+   明文或带签名 / 加密的状态，并在目标线路允许时回放，无需配置。Gemini 原生
+   端点上，模型 ID 以 `gemini-3` 开头时还会自动开启缺失思考签名的
+   修复。走 Chat Completions 网关时，要等 `compat.chat_completions.native_thinking`
+   指明家族（Gemini 3 用 `gemini-3`），Chord 才会回放 Gemini 和 Claude 的状态。
 
 `reasoning_replay: all` 会让已完成轮次的思考在每次请求中重复回放，后端按
 输入计费。默认的 `current_turn` 会剥离已完成轮次，第 3 条不适用时用默认即可。

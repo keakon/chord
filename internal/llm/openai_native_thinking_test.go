@@ -21,40 +21,32 @@ func extraBodyWith(cfg openAIGoogleThinkingConfig) *openAIExtraBody {
 func TestResolveNativeThinkingDialect(t *testing.T) {
 	cases := []struct {
 		name     string
-		modelID  string
 		selector string
+		deepSeek bool
 		want     nativeThinkingDialect
 		wantErr  bool
 	}{
-		{name: "gemini model", modelID: "gemini-3.8-flash", want: nativeThinkingGemini},
-		{name: "vertex gemini alias", modelID: "google/gemini-2.5-pro", want: nativeThinkingGemini},
-		{name: "claude model", modelID: "claude-fable-5.1", want: nativeThinkingAnthropic},
-		{name: "anthropic model", modelID: "anthropic/claude-opus-4.6", want: nativeThinkingAnthropic},
-		{name: "deepseek model", modelID: "deepseek-v4.1-flash", want: nativeThinkingObject},
-		{name: "glm model", modelID: "glm-5.2", want: nativeThinkingObject},
-		{name: "kimi model", modelID: "kimi-k2.6", want: nativeThinkingObject},
-		{name: "doubao model", modelID: "doubao-seed-1.8", want: nativeThinkingObject},
-		{name: "qwen model", modelID: "qwen3.7-plus", want: nativeThinkingQwen},
-		{name: "unknown model stays off", modelID: "my-gateway-model", want: nativeThinkingOff},
-		{name: "selector off for a gemini model", modelID: "gemini-3.8-flash", selector: "off", want: nativeThinkingOff},
-		{name: "selector forces a dialect for an alias", modelID: "my-gateway-model", selector: "gemini", want: nativeThinkingGemini},
-		{name: "selector pins gemini 3 for an alias", modelID: "my-gateway-model", selector: "gemini-3", want: nativeThinkingGemini3},
-		{name: "selector accepts a family name", modelID: "my-gateway-model", selector: "kimi", want: nativeThinkingObject},
-		{name: "selector accepts auto", modelID: "deepseek-v4.1-flash", selector: "auto", want: nativeThinkingObject},
-		{name: "selector wins over inference", modelID: "gemini-3.8-flash", selector: "qwen", want: nativeThinkingQwen},
-		{name: "unknown selector fails", modelID: "gemini-3.8-flash", selector: "deepsek", wantErr: true},
+		{name: "deepseek target", deepSeek: true, want: nativeThinkingObject},
+		{name: "other target stays off", want: nativeThinkingOff},
+		{name: "selector off disables the deepseek default", selector: "off", deepSeek: true, want: nativeThinkingOff},
+		{name: "selector forces a dialect for an alias", selector: "gemini", want: nativeThinkingGemini},
+		{name: "selector pins gemini 3 for an alias", selector: "gemini-3", want: nativeThinkingGemini3},
+		{name: "selector accepts a family name", selector: "kimi", want: nativeThinkingObject},
+		{name: "selector wins over the deepseek default", selector: "qwen", deepSeek: true, want: nativeThinkingQwen},
+		{name: "removed auto selector fails", selector: "auto", deepSeek: true, wantErr: true},
+		{name: "unknown selector fails", selector: "deepsek", wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := resolveNativeThinkingDialect(tc.modelID, tc.selector)
+			got, err := resolveNativeThinkingDialect(tc.selector, tc.deepSeek)
 			if tc.wantErr {
 				if err == nil {
-					t.Fatalf("resolveNativeThinkingDialect(%q, %q) = %q, want error", tc.modelID, tc.selector, got)
+					t.Fatalf("resolveNativeThinkingDialect(%q, %v) = %q, want error", tc.selector, tc.deepSeek, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("resolveNativeThinkingDialect(%q, %q): %v", tc.modelID, tc.selector, err)
+				t.Fatalf("resolveNativeThinkingDialect(%q, %v): %v", tc.selector, tc.deepSeek, err)
 			}
 			if got != tc.want {
 				t.Fatalf("dialect = %q, want %q", got, tc.want)
@@ -243,9 +235,9 @@ func TestReplayCompatibleRequestTuningDisablesModelLevelThinking(t *testing.T) {
 }
 
 // TestOpenAIProvider_NativeThinkingBody confirms the Chat Completions body
-// carries the dialect-specific thinking field inferred from the model name, that
-// compat.chat_completions.native_thinking overrides or disables it, and that a
-// replay degradation never ships the field.
+// carries the dialect field selected by compat.chat_completions.native_thinking,
+// that a DeepSeek model name is the only one that selects a field on its own,
+// and that a replay degradation never ships the field.
 func TestOpenAIProvider_NativeThinkingBody(t *testing.T) {
 	deepseekTuning := RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 4096}}
 	cases := []struct {
@@ -257,15 +249,21 @@ func TestOpenAIProvider_NativeThinkingBody(t *testing.T) {
 		wantThinking map[string]any
 	}{
 		{
-			name:         "deepseek model emits the native object",
-			model:        "deepseek-v4.1-flash",
+			name:  "deepseek model emits the native object",
+			model: "deepseek-v4.1-flash",
+			compat: &config.ProviderCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{
+				Contract: config.ReasoningContractDeepSeek,
+			}},
 			tuning:       deepseekTuning,
 			wantKey:      "thinking",
 			wantThinking: map[string]any{"type": "enabled"},
 		},
 		{
-			name:    "claude model emits type and budget",
-			model:   "claude-fable-5.1",
+			name:  "pinned anthropic dialect emits type and budget",
+			model: "claude-fable-5.1",
+			compat: &config.ProviderCompatConfig{
+				ChatCompletions: &config.ChatCompletionsCompatConfig{NativeThinking: "anthropic"},
+			},
 			tuning:  RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 4096}},
 			wantKey: "thinking",
 			wantThinking: map[string]any{
@@ -274,16 +272,34 @@ func TestOpenAIProvider_NativeThinkingBody(t *testing.T) {
 			},
 		},
 		{
-			name:    "gemini model emits the google block",
-			model:   "gemini-3.8-flash",
+			name:  "pinned gemini dialect emits the google block",
+			model: "gemini-3.8-flash",
+			compat: &config.ProviderCompatConfig{
+				ChatCompletions: &config.ChatCompletionsCompatConfig{NativeThinking: "gemini"},
+			},
 			tuning:  RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}},
 			wantKey: "extra_body",
 		},
 		{
-			name:    "qwen model emits the boolean flag",
-			model:   "qwen3.7-plus",
+			name:  "pinned qwen dialect emits the boolean flag",
+			model: "qwen3.7-plus",
+			compat: &config.ProviderCompatConfig{
+				ChatCompletions: &config.ChatCompletionsCompatConfig{NativeThinking: "qwen"},
+			},
 			tuning:  RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled"}},
 			wantKey: "enable_thinking",
+		},
+		{
+			name:    "gemini model name alone emits nothing",
+			model:   "gemini-3.8-flash",
+			tuning:  RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}},
+			wantKey: "",
+		},
+		{
+			name:    "claude model name alone emits nothing",
+			model:   "claude-fable-5.1",
+			tuning:  RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 4096}},
+			wantKey: "",
 		},
 		{
 			name:    "unknown model family emits nothing",
@@ -316,9 +332,14 @@ func TestOpenAIProvider_NativeThinkingBody(t *testing.T) {
 			wantKey: "",
 		},
 		{
-			name:         "DeepSeek thinking is enabled by default",
-			model:        "deepseek-v4.1-flash",
-			tuning:       RequestTuning{},
+			name:  "DeepSeek thinking is enabled by default",
+			model: "deepseek-v4.1-flash",
+			compat: &config.ProviderCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{
+				Contract: config.ReasoningContractDeepSeek,
+			}},
+			// The retry layer applies the DeepSeek request tuning before the
+			// provider builds the body.
+			tuning:       deepSeekRequestTuning(RequestTuning{}),
 			wantKey:      "thinking",
 			wantThinking: map[string]any{"type": "enabled"},
 		},

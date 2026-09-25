@@ -32,6 +32,22 @@ func TestRunDoctorConfigOK(t *testing.T) {
 	}
 }
 
+// An advisory is listed as a warning and keeps the config OK.
+func TestRunDoctorConfigWarningsDoNotFail(t *testing.T) {
+	setupDoctorConfigHome(t, "providers:\n  sample:\n    type: chat-completions\n    models:\n      gemini-3-flash:\n")
+	t.Chdir(t.TempDir())
+
+	var out bytes.Buffer
+	if err := runDoctorConfig(doctorConfigOptions{Out: &out}); err != nil {
+		t.Fatalf("runDoctorConfig: %v", err)
+	}
+	for _, want := range []string{"warning:", "native_thinking: gemini-3", "config OK"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("output = %q, want mention of %q", out.String(), want)
+		}
+	}
+}
+
 func TestRunDoctorConfigReportsAllIssues(t *testing.T) {
 	setupDoctorConfigHome(t, "bogus_top_level: true\nproviders:\n  sample:\n    type: responses\n    retry_backoff: linear\nmax_output_tokens: abc\n")
 	t.Chdir(t.TempDir())

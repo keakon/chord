@@ -219,6 +219,8 @@ Chord's config loader logs these problems and starts anyway, treating the offend
 
 The global config is always checked; the project config (`.chord/config.yaml`) under the current working directory is checked when present. Any problem makes the command exit with status 2, which is convenient for scripts and CI.
 
+The report also lists warnings for settings that load as written but are unlikely to do what you expect, such as a Chat Completions gateway model with thinking enabled but no `compat.chat_completions.native_thinking` selector. Warnings are printed as `warning:` lines (the `warnings` field in `--json`) and do not change the exit status.
+
 ### Examples
 
 ```bash

@@ -643,6 +643,95 @@ func TestGeminiCompleteStreamOmitsThinkingBudgetWhenLevelSet(t *testing.T) {
 	}
 }
 
+// TestGeminiActiveLoopSignatureContract covers the native Gemini wire: the
+// documented placeholder is filled only for a route that declares the gemini-3
+// contract, so a model name alone never opts a request into version-specific
+// repair.
+func TestGeminiActiveLoopSignatureContract(t *testing.T) {
+	capture := func(t *testing.T, model, contract string) geminiRequest {
+		t.Helper()
+		var captured geminiRequest
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer r.Body.Close()
+			if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+				t.Errorf("decode request body: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":{"code":400,"message":"forced","status":"INVALID_ARGUMENT"}}`))
+		}))
+		t.Cleanup(srv.Close)
+
+		modelCfg := config.ModelConfig{}
+		if contract != "" {
+			modelCfg.Compat = &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Contract: contract}}
+		}
+		provider := NewProviderConfig("gemini", config.ProviderConfig{
+			Type:   config.ProviderTypeGenerateContent,
+			APIURL: srv.URL + "/models",
+			Models: map[string]config.ModelConfig{model: modelCfg},
+		}, []string{"test-key"})
+		geminiProvider, err := NewGeminiProvider(provider, "")
+		if err != nil {
+			t.Fatalf("NewGeminiProvider: %v", err)
+		}
+		_, err = geminiProvider.CompleteStream(
+			context.Background(),
+			"test-key",
+			model,
+			"",
+			[]message.Message{
+				{Role: message.RoleUser, Content: "hello"},
+				{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: "read", Args: json.RawMessage(`{}`)}}},
+				{Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"},
+			},
+			nil,
+			128,
+			RequestTuning{},
+			func(message.StreamDelta) {},
+		)
+		if err == nil {
+			t.Fatal("expected forced server error")
+		}
+		return captured
+	}
+
+	firstSignature := func(t *testing.T, req geminiRequest) string {
+		t.Helper()
+		for _, content := range req.Contents {
+			for _, part := range content.Parts {
+				if part.FunctionCall != nil {
+					return part.ThoughtSignature
+				}
+			}
+		}
+		t.Fatal("request carries no function call")
+		return ""
+	}
+
+	cases := []struct {
+		name     string
+		model    string
+		contract string
+		want     string
+	}{
+		{name: "gemini-3 model ID selects the contract", model: "gemini-3.8-flash", want: geminiSkipThoughtSignatureValidator},
+		{name: "resource-form gemini-3 model ID selects the contract", model: "models/Gemini-3-pro-preview", want: geminiSkipThoughtSignatureValidator},
+		{name: "explicit none opts a gemini-3 model out", model: "gemini-3.8-flash", contract: config.ReasoningContractNone},
+		{name: "explicit gemini-3 opts in an alias", model: "deployment-a", contract: config.ReasoningContractGemini3, want: geminiSkipThoughtSignatureValidator},
+		{name: "a contract for another endpoint keeps the model-ID inference", model: "gemini-3.8-flash", contract: config.ReasoningContractDeepSeek, want: geminiSkipThoughtSignatureValidator},
+		{name: "earlier generation stays without the contract", model: "gemini-2.5-pro"},
+		{name: "alias without a contract stays without it", model: "deployment-a"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := firstSignature(t, capture(t, tc.model, tc.contract)); got != tc.want {
+				t.Fatalf("signature = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestGeminiRequestDropsUnrepresentableSchemaKeywords covers the whole path a
 // tool schema takes onto the wire. Gemini parses the request as proto-JSON,
 // where a field its Schema message does not have fails the entire request, so

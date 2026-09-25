@@ -192,7 +192,6 @@ func (a *AnthropicProvider) CompleteStream(
 		traceCollector = newLLMTraceCollector("anthropic", model, cb)
 		traceCB = traceCollector.Callback
 	}
-	at := tuning.Anthropic
 	deepSeek := deepSeekTarget(a.provider, model)
 	at, err := validateMessagesThinking(tuning, deepSeek)
 	if err != nil {

@@ -146,21 +146,6 @@ func initialSetupCodexModels() []initialSetupModelDefaults {
 	}
 }
 
-func inferProviderTypeFromAPIURL(apiURL string) string {
-	switch {
-	case config.APIURLPathHasSuffix(apiURL, "/responses"):
-		return "responses"
-	case config.APIURLPathHasSuffix(apiURL, "/chat/completions"):
-		return "chat-completions"
-	case config.APIURLPathHasSuffix(apiURL, "/messages"):
-		return "messages"
-	case config.APIURLPathHasSuffix(apiURL, "/models"):
-		return "generate-content"
-	default:
-		return ""
-	}
-}
-
 func defaultAPIKeyEnvVar(providerName string) string {
 	providerName = strings.TrimSpace(providerName)
 	if providerName == "" {
@@ -234,5 +219,5 @@ func initialSetupDefaultsForProviderType(providerType string) initialSetupEndpoi
 }
 
 func initialSetupDefaultsForAPIURL(apiURL string) initialSetupEndpointDefaults {
-	return initialSetupDefaultsForProviderType(inferProviderTypeFromAPIURL(apiURL))
+	return initialSetupDefaultsForProviderType(config.InferProviderTypeFromAPIURL(apiURL))
 }

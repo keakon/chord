@@ -778,17 +778,19 @@ type ChatCompletionsCompatConfig struct {
 	KeepReasoningEffort *bool `json:"keep_reasoning_effort,omitempty" yaml:"keep_reasoning_effort,omitempty"`
 	// NativeThinking selects the request shape Chord uses to hand a model's
 	// thinking settings to a Chat Completions endpoint that translates the call
-	// into the model's native API. Empty (default) infers the shape from the
-	// model name; "off" disables the conversion for endpoints that reject the
-	// field instead of translating it. Accepted shapes are "gemini"
+	// into the model's native API. Empty (default) uses the protocol-generic
+	// Chat Completions request and does not add a native dialect field, except
+	// for a model ID whose final component is "deepseek" or starts with
+	// "deepseek-": that family keeps the
+	// "thinking" object without a selector, and off/none disables it. Accepted
+	// shapes are "gemini"
 	// (extra_body.google.thinking_config), "gemini-3"
 	// (the same shape plus Gemini 3 signature replay), "anthropic"
 	// (thinking:{type,budget_tokens}), "thinking" (the native thinking:{type}
 	// object used by DeepSeek, GLM, Kimi K2.x, and Doubao), and "qwen"
 	// (enable_thinking). Family aliases (claude, deepseek, glm, kimi, ...) name
-	// the same shapes, for models whose id does not reveal the upstream.
-	// Nothing is emitted when the model configures no thinking knobs, so an
-	// unconfigured model is unaffected by the inference.
+	// the same shapes. Nothing is emitted when the model configures no thinking
+	// knobs.
 	NativeThinking string `json:"native_thinking,omitempty" yaml:"native_thinking,omitempty"`
 }
 
@@ -831,6 +833,19 @@ type RequestOverridesConfig struct {
 // ordinary assistant content.
 type ReasoningContinuityCompatConfig struct {
 	Mode string `json:"mode,omitempty" yaml:"mode,omitempty"`
+	// Contract selects an endpoint-specific reasoning contract; an explicit
+	// value always wins over what the model ID implies. "deepseek" enables the
+	// DeepSeek tool-history passback rules on the Chat Completions and Messages
+	// wires for an alias whose model name does not identify it; a model ID
+	// whose final component is "deepseek" or starts with "deepseek-" selects
+	// the same contract automatically. "gemini-3" enables missing
+	// thought-signature repair on the native generate-content endpoint, where
+	// a model ID whose final component starts with "gemini-3" (see
+	// IsGemini3ModelID) selects it automatically; a Chat Completions gateway
+	// opts in through native_thinking: gemini-3 instead. "none" opts a route out
+	// of both inferences, e.g. a deepseek-named third-party route that serves
+	// another backend, on the Messages wire as well as Chat Completions.
+	Contract string `json:"contract,omitempty" yaml:"contract,omitempty"`
 	// ReasoningReplay selects how much historical reasoning/thinking is
 	// replayed for the target: "current_turn" (the default) keeps only
 	// reasoning after the last user message, "all" replays completed-turn
@@ -839,11 +854,12 @@ type ReasoningContinuityCompatConfig struct {
 	// current turn. Completed turns are stripped by default because most
 	// thinking backends drop or ignore earlier-turn reasoning server-side
 	// while billing it as input; set "all" for endpoints whose contract
-	// requires the complete assistant history (DeepSeek when a request
-	// carries tools, Kimi K3 / keep:all, Qwen preserve_thinking, GLM
-	// clear_thinking:false), and "none" only where a probe showed the
-	// endpoint accepts a request without current-turn reasoning. Historical
-	// reasoning replayed under "all" is billed as input on every request.
+	// requires the complete assistant history (Kimi K3 / keep:all, Qwen
+	// preserve_thinking, GLM clear_thinking:false; the DeepSeek contract keeps
+	// the full history regardless of this field), and "none" only where a
+	// probe showed the endpoint accepts a request without current-turn
+	// reasoning. Historical reasoning replayed under "all" is billed as input
+	// on every request.
 	ReasoningReplay string `json:"reasoning_replay,omitempty" yaml:"reasoning_replay,omitempty"`
 }
 
@@ -863,6 +879,14 @@ func (c *ReasoningContinuityCompatConfig) ReasoningReplayValue() string {
 		return ""
 	}
 	return strings.TrimSpace(c.ReasoningReplay)
+}
+
+// ReasoningContractValue returns the configured endpoint contract.
+func (c *ReasoningContinuityCompatConfig) ReasoningContractValue() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.Contract)
 }
 
 // ThinkingToolcallCompatConfig controls compatibility handling for providers
@@ -982,6 +1006,17 @@ type ThinkingConfig struct {
 	IncludeThoughts *bool  `json:"include_thoughts,omitempty" yaml:"include_thoughts,omitempty"`
 	Level           string `json:"level,omitempty" yaml:"level,omitempty"`
 }
+
+// ThinkingConfig.Type values. Enabled and adaptive turn thinking on.
+const (
+	ThinkingTypeEnabled  = "enabled"
+	ThinkingTypeAdaptive = "adaptive"
+	ThinkingTypeDisabled = "disabled"
+)
+
+// ThinkingEffortNone is the effort value that turns thinking off where the
+// backend accepts it (DeepSeek, OpenAI reasoning_effort).
+const ThinkingEffortNone = "none"
 
 // EffectiveType returns the configured thinking type.
 func (t *ThinkingConfig) EffectiveType() string {

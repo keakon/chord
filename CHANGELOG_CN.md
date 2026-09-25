@@ -17,6 +17,7 @@
 - worktree 会话现在按仓库共享：同一仓库的所有 checkout 共用一个 store，在 worktree 里开的会话能在主工作区列出、继续，反过来也一样。旧版本按 checkout 分片写入的会话不会迁移：它们仍留在自己那个 key 下，但 Chord 不再列出、不再恢复，也不会随 worktree 一起清理。
 - 点名仓库内路径的权限规则现在对同一仓库的每个 checkout 生效。主工作区里写的 `write src/**: allow`，在 `<worktree>/src/` 下同样允许；也没法写出「只允许某一个 checkout」的规则——Chord 按仓库相对拼写匹配仓库内的路径，绝对路径规则永远匹配不到它们。
 - 已经是 PNG 或 JPEG 的图片现在按原字节发给上游，不再先统一转成 JPEG。截图、图表和文字截图因此保留原画质，代价是过去会被重新压缩的图片上传体积变大。原样直传只适用于不需要任何变换的图片：长边超过 2000px、带 EXIF 旋转信息、或超出体积预算的 PNG / JPEG 仍会重新编码。需要转换或缩放的图片仍优先输出 PNG，只有在结果超过体积预算时才退回 JPEG。
+- Chat Completions 网关不再按模型名推断原生 thinking 形状：只有 DeepSeek 路由（模型 ID 最后一段是 `deepseek` 或以 `deepseek-` 开头，或配了 `compat.reasoning_continuity.contract: deepseek`）无需选择器就保留 `thinking: {type}`；网关后面的 Gemini、Claude、GLM、Kimi、Doubao、Qwen 模型必须在 `compat.chat_completions.native_thinking` 里指定形状（`gemini`、`gemini-3`、`anthropic`、`thinking` 或 `qwen`，也接受 `claude`、`kimi` 等家族名）。`auto` 不再是合法取值：配置里有残留时加载器会重置为未设置，对这些模型来说等于不发送该字段，`chord doctor config` 也会报出。没配选择器时，模型的 thinking 配置不会进入 chat 请求体，Gemini 3 模型的 thought signature 也不会回传，网关会以 HTTP 400 拒绝之后的工具调用请求；`native_thinking: gemini-3` 还会启用官方的 `skip_thought_signature_validator` 修复，只声明家族的 `gemini` 不会。开了 thinking 却没配选择器的网关模型，以及没配选择器的 Gemini 3 模型，`chord doctor config` 都会给出警告。要保留原来的转换行为，请在模型或 provider 上补上选择器。Gemini 原生端点上，`gemini-3*` 模型仍会自动启用 thought signature 修复。`compat.reasoning_continuity.contract` 用来显式声明端点契约：`deepseek` 给模型 ID 无法标识后端的别名启用 DeepSeek 回传规则和 `thinking: {type}` 对象；`none` 让路由退出模型 ID 隐含的契约，比如后端不是 DeepSeek 的 `deepseek-*` 路由（Chat Completions 与 Messages 都适用），或不需要修复的原生 `gemini-3*` 路由。
 - 旧版本写下的工具输出省略提示不再被识别为输出文件引用，请求级上下文剪裁可能连同其中的路径一起缩短。已保存的文件本身仍留在磁盘上。
 - 旧版本写入的压缩检查点没有「已推翻约束」标签：其中 `~ ` 开头的行会按普通约束读取，检查点标记为已推翻的约束在恢复会话后会重新生效。继续这类会话前先核对恢复出的约束，或者开新会话。
 
@@ -108,7 +109,6 @@
 - 子代理启动的后台任务在 owner 被 park 后继续运行：此前 park 会顺手停掉它启动的 job，与句柄中「命令继续运行、输出不会丢」的承诺矛盾。任务完成后结果会记进主转录，仍然看得到。
 - 打开 YOLO 模式时，模型驱动的上下文重置重新载入 state file 恢复可用：注入门禁与执行侧一样直接放行，不再评估 YOLO 过滤后的规则集，因为后者已把普通 read 规则移除，会让所有路径都拿不到。
 - 确定性的 HTTP 失败现在会终止模型池，而不是继续在整个池子上重试：404、405、410、414、415 在任何 provider 上都是终态（网关对已下线的模型开始回 404 时，此前只会静默重试而不会让回合失败），422 按 400 的纪律处理。无法归入更具体分类的 fallback 原因会带上状态码（`http_404`）。
-- 别名模型的 native thinking 目标现在解析正确：使用 `gemini-3` pin 才会补上 Gemini 3 的 thought signature 占位值，不会把只声明家族的 `gemini` 当成版本信号；未设置 `native_thinking` 仍按 `auto` 处理，上游家族继续按模型名推断，而不是退回 unknown。
 - 后台结果卡片在实时与重建路径上都以持久的 mailbox 行标识为键：重启后新任务复用了旧的 `job-N` id 时，会得到自己的卡片，不再覆写上一次运行中同 id 任务的恢复卡片；同一行的再次投递仍会更新它创建的那张卡。
 - 转录重建时仍在运行的 `!` 命令会保留自己的卡片，结束后输出照常落在这张卡上；若期间会话切换替换了该转录，过期结果会被丢弃，而不是写进新会话。
 - 对话框浮层现在也在终端最右列前停一格，与状态栏、输入分隔线一致：铺满整行、写到最后一列的对话框会让 Ghostty 等宿主给这一帧多输出一行，cell 级 diff 随后把陈旧的行留到下一次全量重绘才消失。

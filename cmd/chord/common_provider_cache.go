@@ -46,16 +46,8 @@ func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []con
 
 	// Auto-detect type from api_url when preset normalization did not set it.
 	if normalized.Type == "" {
-		switch {
-		case config.APIURLPathHasSuffix(normalized.APIURL, "/responses"):
-			normalized.Type = config.ProviderTypeResponses
-		case config.APIURLPathHasSuffix(normalized.APIURL, "/chat/completions"):
-			normalized.Type = config.ProviderTypeChatCompletions
-		case config.APIURLPathHasSuffix(normalized.APIURL, "/messages"):
-			normalized.Type = config.ProviderTypeMessages
-		case config.APIURLPathHasSuffix(normalized.APIURL, "/models"):
-			normalized.Type = config.ProviderTypeGenerateContent
-		default:
+		normalized.Type = config.EffectiveProviderType(normalized)
+		if normalized.Type == "" {
 			return cfg, fmt.Errorf("could not auto-detect type for provider %q, please explicitly set 'type' field (allowed: %s, %s, %s, %s)",
 				provName, config.ProviderTypeChatCompletions, config.ProviderTypeMessages, config.ProviderTypeResponses, config.ProviderTypeGenerateContent)
 		}

@@ -11,6 +11,7 @@ func TestValidateProviderReasoningContinuityAcceptsKnownSelectors(t *testing.T) 
 	cfg := ProviderConfig{
 		Compat: &ProviderCompatConfig{ReasoningContinuity: &ReasoningContinuityCompatConfig{
 			Mode:            ReasoningContinuityModeOpenAIVisible,
+			Contract:        ReasoningContractGemini3,
 			ReasoningReplay: ReasoningReplayAll,
 		}},
 		Models: map[string]ModelConfig{
@@ -22,10 +23,23 @@ func TestValidateProviderReasoningContinuityAcceptsKnownSelectors(t *testing.T) 
 				Mode:            ReasoningContinuityModeAnthropicUnsigned,
 				ReasoningReplay: ReasoningReplayNone,
 			}}},
+			"model-contract-none": {Compat: &ModelCompatConfig{ReasoningContinuity: &ReasoningContinuityCompatConfig{
+				Contract: ReasoningContractNone,
+			}}},
 		},
 	}
 	if err := ValidateProviderReasoningContinuity("sample", cfg); err != nil {
 		t.Fatalf("ValidateProviderReasoningContinuity: %v", err)
+	}
+}
+
+func TestValidateProviderReasoningContinuityRejectsUnknownContract(t *testing.T) {
+	cfg := ProviderConfig{Compat: &ProviderCompatConfig{ReasoningContinuity: &ReasoningContinuityCompatConfig{
+		Contract: "deep-seek",
+	}}}
+	err := ValidateProviderReasoningContinuity("sample", cfg)
+	if err == nil || !strings.Contains(err.Error(), `invalid reasoning_continuity contract "deep-seek"`) {
+		t.Fatalf("contract error = %v, want the invalid value reported", err)
 	}
 }
 

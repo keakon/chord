@@ -25,8 +25,12 @@ On Chat Completions, a gateway that translates the call into the model's native
 API receives the thinking settings as that API's own field: Gemini as
 `extra_body.google.thinking_config`, Claude as `thinking: {type, budget_tokens}`,
 DeepSeek / GLM / Kimi K2.x / Doubao as `thinking: {type}`, and Qwen as
-`enable_thinking`. The shape is inferred from the model name and can be forced
-with `compat.chat_completions.native_thinking`; see
+`enable_thinking`. The shape comes from
+`compat.chat_completions.native_thinking`, and only a DeepSeek route (a DeepSeek
+model ID or `compat.reasoning_continuity.contract: deepseek`) selects it on its
+own. The selector is also what identifies a gateway model as Gemini or
+Claude: without it Gemini thought signatures are not written back, and Gemini 3
+rejects the request that follows each tool call (HTTP 400). See
 [Thinking behind a Chat Completions gateway](./model-configs.md#thinking-behind-a-chat-completions-gateway).
 
 ## DeepSeek thinking and history replay
@@ -44,10 +48,14 @@ For Messages, use `thinking.type: enabled` with `thinking.effort`; Chord sends
 
 Both DeepSeek paths replay reasoning from the entire retained history, including
 previous user turns; generic `reasoning_replay: current_turn` / `none` settings
-do not shorten this window. Same-target Messages blocks retain their original
+do not shorten this window. Explicitly setting either value produces a warning
+at startup and in `chord doctor config`; remove the setting or use `all` to
+clear it. Same-target Messages blocks retain their original
 text and usable signatures. A replay rejection does not trigger lower effort,
 removal of required reasoning, or textification of tool history; the error follows
-the model-pool handling rules. Third-party gateways must support this contract.
+the model-pool handling rules. Third-party gateways must support this contract;
+a third-party route whose `deepseek-` model serves another backend opts out with
+`compat.reasoning_continuity.contract: none`, on Chat and Messages alike.
 
 ## Decide the replay contract
 
@@ -67,13 +75,17 @@ For targets other than the DeepSeek Chat/Messages paths above, the answer depend
 3. **The backend validates the replayed reasoning**: set
    `compat.reasoning_continuity.mode: openai_visible` plus
    `reasoning_replay: all` so every assistant message goes back unchanged.
-   This is the contract for DeepSeek when a request carries tools, Kimi K3,
-   Qwen `preserve_thinking`, and GLM `clear_thinking: false`. Third-party
+   This is the contract for Kimi K3, Qwen `preserve_thinking`, and GLM
+   `clear_thinking: false`. Third-party
    relays do not reliably follow the official API here (some reject replayed
    `reasoning_content`), so verify the actual endpoint before relying on `all`.
 4. **Responses, Messages, and Gemini**: native continuity is automatic. Chord
    captures the plaintext or signed/encrypted state and replays it where the
-   wire allows; nothing to configure.
+   wire allows; nothing to configure. On the native Gemini endpoint, a model ID
+   starting with `gemini-3` also turns on the missing thought-signature repair.
+   Behind a Chat Completions gateway, Gemini and Claude state is only replayed
+   once `compat.chat_completions.native_thinking` names the family (`gemini-3`
+   for Gemini 3).
 
 `reasoning_replay: all` replays completed-turn thinking on every request, which
 the backend bills as input. The default (`current_turn`) strips completed turns

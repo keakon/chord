@@ -219,6 +219,8 @@ Chord 的配置加载器遇到这些问题只会写日志并照常启动，把�
 
 全局配置始终会检查；当前工作目录下的项目配置（`.chord/config.yaml`）存在时也会检查。只要有问题，命令就以状态码 2 退出，方便脚本和 CI 使用。
 
+报告还会列出警告：配置能按原样加载，但效果多半不符合预期，比如 Chat Completions 网关上的模型开了 thinking，却没配 `compat.chat_completions.native_thinking` 选择器。警告以 `warning:` 行输出（`--json` 里是 `warnings` 字段），不影响退出码。
+
 ### 示例
 
 ```bash

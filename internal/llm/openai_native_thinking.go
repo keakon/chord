@@ -4,16 +4,15 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/modelcompat"
 )
 
 // A Chat Completions endpoint is frequently a gateway that translates the call
 // into the target model's native API. Chord's thinking keys are
 // wire-independent, but the gateway only reads the controls in the shape its own
 // translation understands, so the chat body carries a dialect-specific field
-// instead of the native generationConfig / thinking blocks. The dialect is
-// inferred from the model name and can be forced with
-// `compat.chat_completions.native_thinking`.
+// instead of the native generationConfig / thinking blocks. The dialect comes
+// from `compat.chat_completions.native_thinking`; when the selector is unset,
+// only a DeepSeek target (see deepSeekTarget) still gets a dialect.
 
 type nativeThinkingDialect string
 
@@ -40,58 +39,40 @@ const (
 )
 
 // pinnedNativeThinkingDialect reports whether the compat block pins the chat
-// dialect explicitly, i.e. with a value other than unset or `auto`. The model
-// name cannot identify an aliased endpoint, so a pin is the only signal that an
+// dialect explicitly, i.e. with a non-empty value. The model name cannot
+// identify an aliased endpoint, so a pin is the only signal that an
 // unrecognized ID really speaks a known native dialect.
 func pinnedNativeThinkingDialect(compat *config.ChatCompletionsCompatConfig) bool {
 	if compat == nil {
 		return false
 	}
-	selector := strings.TrimSpace(compat.NativeThinkingValue())
-	return selector != "" && !strings.EqualFold(selector, config.NativeThinkingAuto)
+	return strings.TrimSpace(compat.NativeThinkingValue()) != ""
 }
 
 // resolveNativeThinkingDialect picks the dialect for a Chat Completions target.
-// The configured selector wins over inference, and both are limited to the
-// dialects Chord knows how to build: a wrong selector fails the request with a
-// clear message instead of silently dropping the model's thinking settings. The
-// selector vocabulary lives in config so the loader can reject an unknown value
-// before it reaches a request.
-func resolveNativeThinkingDialect(modelID, selector string) (nativeThinkingDialect, error) {
+// The configured selector names the shape, limited to the dialects Chord knows
+// how to build: a wrong selector fails the request with a clear message instead
+// of silently dropping the model's thinking settings. The selector vocabulary
+// lives in config so the loader can reject an unknown value before it reaches a
+// request.
+func resolveNativeThinkingDialect(selector string, deepSeek bool) (nativeThinkingDialect, error) {
 	shape, err := config.NormalizeNativeThinking(selector)
 	if err != nil {
 		return nativeThinkingOff, err
 	}
-	switch shape {
-	case config.NativeThinkingAuto:
-		return inferNativeThinkingDialect(modelID), nil
-	case config.NativeThinkingOff:
-		return nativeThinkingOff, nil
+	if shape != config.NativeThinkingOff {
+		return nativeThinkingDialect(shape), nil
 	}
-	return nativeThinkingDialect(shape), nil
-}
-
-// inferNativeThinkingDialect maps a model name onto the shape its upstream API
-// expects. Models outside the known families keep the thinking controls out of
-// the chat body: sending a guessed field to an endpoint that rejects it would
-// fail the request, and the previous behavior (an inert thinking block) is the
-// safer default. Those setups name the dialect explicitly instead.
-func inferNativeThinkingDialect(modelID string) nativeThinkingDialect {
-	switch modelcompat.ModelNativeFamily(modelID) {
-	case modelcompat.NativeFamilyGemini:
-		return nativeThinkingGemini
-	case modelcompat.NativeFamilyAnthropic:
-		return nativeThinkingAnthropic
+	// An unset selector adds no dialect field except on a DeepSeek target: its
+	// routes share the thinking:{type} object and the contract's request tuning
+	// depends on the field, while every other backend must name the shape
+	// explicitly. The target decision is deepSeekTarget's, so an explicit
+	// reasoning contract moves the dialect together with the rest of the
+	// DeepSeek contract instead of the model name deciding it separately.
+	if deepSeek && strings.TrimSpace(selector) == "" {
+		return nativeThinkingObject, nil
 	}
-	m := strings.ToLower(modelID)
-	switch {
-	case strings.Contains(m, "qwen"), strings.Contains(m, "qwq"):
-		return nativeThinkingQwen
-	case strings.Contains(m, "deepseek"), strings.Contains(m, "glm"), strings.Contains(m, "zhipu"),
-		strings.Contains(m, "kimi"), strings.Contains(m, "moonshot"), strings.Contains(m, "doubao"):
-		return nativeThinkingObject
-	}
-	return nativeThinkingOff
+	return nativeThinkingOff, nil
 }
 
 // nativeThinkingConfigured reports whether the model configures the
@@ -205,7 +186,7 @@ func qwenEnableThinking(t AnthropicTuning) *bool {
 }
 
 // chatCompletionsNativeThinking resolves the dialect for one Chat Completions
-// request.
-func chatCompletionsNativeThinking(modelID string, compat *config.ChatCompletionsCompatConfig) (nativeThinkingDialect, error) {
-	return resolveNativeThinkingDialect(modelID, compat.NativeThinkingValue())
+// request; deepSeek is deepSeekTarget's answer for the same target.
+func chatCompletionsNativeThinking(compat *config.ChatCompletionsCompatConfig, deepSeek bool) (nativeThinkingDialect, error) {
+	return resolveNativeThinkingDialect(compat.NativeThinkingValue(), deepSeek)
 }

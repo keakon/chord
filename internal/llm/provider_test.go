@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/ratelimit"
 )
 
@@ -1848,6 +1849,56 @@ func TestProviderConfig_ReasoningContinuityCompat_ReasoningReplayMerge(t *testin
 	}
 }
 
+func TestProviderConfig_ReasoningContinuityCompat_ContractMerge(t *testing.T) {
+	p := NewProviderConfig("sample", config.ProviderConfig{
+		Compat: &config.ProviderCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{
+			Contract: config.ReasoningContractDeepSeek,
+		}},
+		Models: map[string]config.ModelConfig{
+			"model-1": {Compat: &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{
+				Mode: "openai_visible",
+			}}},
+		},
+	}, nil)
+	got := p.ReasoningContinuityCompat("model-1")
+	if got == nil || got.ReasoningContractValue() != config.ReasoningContractDeepSeek || got.EffectiveMode() != "openai_visible" {
+		t.Fatalf("compat = %+v, want provider contract and model mode", got)
+	}
+}
+
+func TestProviderConfigNativeFamilyChatGateway(t *testing.T) {
+	cases := []struct {
+		name       string
+		model      string
+		compat     *config.ChatCompletionsCompatConfig
+		wantFamily string
+	}{
+		{name: "gateway alias stays unknown", model: "deployment-a", wantFamily: modelcompat.NativeFamilyUnknown},
+		{name: "gemini name alone is not inferred", model: "gemini-2.5-pro", wantFamily: modelcompat.NativeFamilyUnknown},
+		{name: "claude name alone is not inferred", model: "claude-sonnet-4-5", wantFamily: modelcompat.NativeFamilyUnknown},
+		{name: "deepseek name is the one name default", model: "vendor/deepseek-v4.1", wantFamily: modelcompat.NativeFamilyDeepSeek},
+		{name: "embedded deepseek text is not the family", model: "my-deepseek-proxy", wantFamily: modelcompat.NativeFamilyUnknown},
+		{name: "gemini selector", model: "deployment-a", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "gemini-3"}, wantFamily: modelcompat.NativeFamilyGemini},
+		{name: "anthropic selector", model: "deployment-a", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "anthropic"}, wantFamily: modelcompat.NativeFamilyAnthropic},
+		{name: "off selector suppresses the name default", model: "deepseek-v4.1-flash", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "off"}, wantFamily: modelcompat.NativeFamilyUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			providerCfg := config.ProviderConfig{
+				Type:   config.ProviderTypeChatCompletions,
+				Models: map[string]config.ModelConfig{tc.model: {}},
+			}
+			if tc.compat != nil {
+				providerCfg.Compat = &config.ProviderCompatConfig{ChatCompletions: tc.compat}
+			}
+			p := NewProviderConfig("sample", providerCfg, nil)
+			if got := p.NativeFamily(tc.model); got != tc.wantFamily {
+				t.Fatalf("NativeFamily(%q) = %q, want %q", tc.model, got, tc.wantFamily)
+			}
+		})
+	}
+}
+
 func TestProviderConfig_ForcedToolChoiceCompat_Merge(t *testing.T) {
 	cfg := config.ProviderConfig{
 		Type: config.ProviderTypeResponses,
@@ -2296,6 +2347,38 @@ func TestIsContextLengthExceeded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := IsContextLengthExceeded(tc.err); got != tc.want {
 				t.Fatalf("IsContextLengthExceeded(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProviderConfigNativeFamilyFollowsDeepSeekContract(t *testing.T) {
+	cases := []struct {
+		name       string
+		typ        string
+		model      string
+		contract   string
+		wantFamily string
+	}{
+		{name: "messages deepseek name", typ: config.ProviderTypeMessages, model: "deepseek-v4.1", wantFamily: modelcompat.NativeFamilyDeepSeek},
+		{name: "messages none opts a deepseek name out", typ: config.ProviderTypeMessages, model: "deepseek-v4.1", contract: config.ReasoningContractNone, wantFamily: modelcompat.NativeFamilyAnthropic},
+		{name: "messages deepseek contract on an alias", typ: config.ProviderTypeMessages, model: "deployment-a", contract: config.ReasoningContractDeepSeek, wantFamily: modelcompat.NativeFamilyDeepSeek},
+		{name: "chat none opts a deepseek name out", typ: config.ProviderTypeChatCompletions, model: "deepseek-v4.1", contract: config.ReasoningContractNone, wantFamily: modelcompat.NativeFamilyUnknown},
+		{name: "chat deepseek contract on an alias", typ: config.ProviderTypeChatCompletions, model: "deployment-a", contract: config.ReasoningContractDeepSeek, wantFamily: modelcompat.NativeFamilyDeepSeek},
+		{name: "responses deepseek name has no deepseek contract", typ: config.ProviderTypeResponses, model: "deepseek-v4.1", wantFamily: modelcompat.NativeFamilyOpenAI},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			modelCfg := config.ModelConfig{}
+			if tc.contract != "" {
+				modelCfg.Compat = &config.ModelCompatConfig{ReasoningContinuity: &config.ReasoningContinuityCompatConfig{Contract: tc.contract}}
+			}
+			p := NewProviderConfig("sample", config.ProviderConfig{
+				Type:   tc.typ,
+				Models: map[string]config.ModelConfig{tc.model: modelCfg},
+			}, nil)
+			if got := p.NativeFamily(tc.model); got != tc.wantFamily {
+				t.Fatalf("NativeFamily(%q) = %q, want %q", tc.model, got, tc.wantFamily)
 			}
 		})
 	}

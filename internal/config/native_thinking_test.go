@@ -12,9 +12,7 @@ func TestNormalizeNativeThinking(t *testing.T) {
 		selector string
 		want     string
 	}{
-		{selector: "", want: NativeThinkingAuto},
-		{selector: "auto", want: NativeThinkingAuto},
-		{selector: "  AUTO ", want: NativeThinkingAuto},
+		{selector: "", want: NativeThinkingOff},
 		{selector: "off", want: NativeThinkingOff},
 		{selector: "none", want: NativeThinkingOff},
 		{selector: "gemini", want: NativeThinkingGemini},
@@ -41,9 +39,11 @@ func TestNormalizeNativeThinking(t *testing.T) {
 		}
 	}
 
-	_, err := NormalizeNativeThinking("gemeni")
-	if err == nil || !strings.Contains(err.Error(), `invalid native_thinking "gemeni"`) {
-		t.Fatalf("NormalizeNativeThinking(\"gemeni\") error = %v, want it to name the invalid selector", err)
+	for _, selector := range []string{"gemeni", "auto", "  AUTO "} {
+		_, err := NormalizeNativeThinking(selector)
+		if err == nil || !strings.Contains(err.Error(), `invalid native_thinking "`+selector+`"`) {
+			t.Fatalf("NormalizeNativeThinking(%q) error = %v, want it to name the invalid selector", selector, err)
+		}
 	}
 }
 
@@ -108,12 +108,50 @@ func TestLoadConfigFromPathResetsInvalidNativeThinking(t *testing.T) {
 	}
 	providerCfg := cfg.Providers["sample"]
 	if got := providerChatCompletionsCompat(providerCfg).NativeThinking; got != "" {
-		t.Fatalf("provider native_thinking = %q, want it reset to the inferring default", got)
+		t.Fatalf("provider native_thinking = %q, want it reset to unset", got)
 	}
 	if got := modelChatCompletionsCompat(providerCfg.Models["model-1"]).NativeThinking; got != "" {
-		t.Fatalf("model-1 native_thinking = %q, want it reset to the inferring default", got)
+		t.Fatalf("model-1 native_thinking = %q, want it reset to unset", got)
 	}
 	if got := modelChatCompletionsCompat(providerCfg.Models["model-2"]).NativeThinking; got != "gemini" {
 		t.Fatalf("model-2 native_thinking = %q, want the valid selection preserved", got)
+	}
+}
+
+func TestIsGemini3ModelID(t *testing.T) {
+	for id, want := range map[string]bool{
+		"gemini-3-pro-preview":        true,
+		"models/gemini-3.1-flash":     true,
+		"google/Gemini-3-Flash":       true,
+		"gemini-2.5-pro":              false,
+		"vendor/model-gemini-3-proxy": false,
+		"":                            false,
+	} {
+		if got := IsGemini3ModelID(id); got != want {
+			t.Errorf("IsGemini3ModelID(%q) = %v, want %v", id, got, want)
+		}
+	}
+}
+
+func TestGeminiFamilySelectorAdvisory(t *testing.T) {
+	for _, tc := range []struct {
+		model, selector, override string
+		want                      bool
+	}{
+		{"gemini-3-pro", NativeThinkingGemini, "", true},
+		{"gemini-3-pro", "vertex", "", true},
+		{"gemini-3-pro", " Gemini ", "", true},
+		{"gemini-2.5-pro", NativeThinkingGemini, "", false},
+		{"gemini-3-pro", NativeThinkingGemini, NativeThinkingGemini3, false},
+		{"gemini-3-pro", NativeThinkingGemini3, NativeThinkingGemini, true},
+	} {
+		cfg := ProviderConfig{Type: ProviderTypeChatCompletions, Compat: &ProviderCompatConfig{ChatCompletions: &ChatCompletionsCompatConfig{NativeThinking: tc.selector}}, Models: map[string]ModelConfig{tc.model: {Compat: &ModelCompatConfig{ChatCompletions: &ChatCompletionsCompatConfig{NativeThinking: tc.override}}}}}
+		got := nativeThinkingSelectorAdvisories("sample", cfg)
+		if (len(got) > 0) != tc.want {
+			t.Fatalf("%+v: %v", tc, got)
+		}
+		if tc.want && (!strings.Contains(got[0], "real thought signatures are preserved") || !strings.Contains(got[0], "native_thinking: gemini-3")) {
+			t.Fatalf("misleading advisory: %v", got)
+		}
 	}
 }

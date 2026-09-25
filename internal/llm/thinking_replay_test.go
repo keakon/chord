@@ -209,7 +209,7 @@ func TestEnsureGeminiActiveLoopSignatures(t *testing.T) {
 		{Role: "model", Parts: []geminiPart{{FunctionCall: &geminiFunctionCall{Name: "read"}}, {FunctionCall: &geminiFunctionCall{Name: "write"}}}},
 		{Role: "user", Parts: []geminiPart{{FunctionResponse: &geminiFunctionResponse{Name: "read"}}}},
 	}
-	ensureGeminiActiveLoopSignatures(contents, "gemini-3.5-pro")
+	ensureGeminiActiveLoopSignatures(contents)
 	want := geminiSkipThoughtSignatureValidator
 	if contents[1].Parts[0].ThoughtSignature != want || contents[1].Parts[1].ThoughtSignature != "" {
 		t.Fatalf("synthetic signature must be added only to the first function call: %+v", contents[1].Parts)

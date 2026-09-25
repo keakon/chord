@@ -77,6 +77,7 @@ A few conventions apply across the recipes on this page:
 - When `limit.output` is omitted, Chord derives the input budget from its default `64000` output budget (`limit.context` minus 64000); Responses providers do not send `max_output_tokens` by default, so set `compat.responses.send_max_output_tokens: true` to enforce the cap explicitly.
 - A `compaction` block on a template is inherited by every model entry that references it; without one the model uses the global threshold. The trigger compares the last provider-reported usage, so a single large tool result can push the next request past the line: a threshold is a tuning goal, not a guarantee. Short sessions can stay on the global default; only long agentic runs need per-model tuning.
 - `reasoning_continuity` has two modes: `openai_visible` replays native `reasoning_content` unchanged under the Chat Completions convention; `anthropic_unsigned` serves Messages-compatible endpoints that return unsigned thinking rather than Claude-style signed blocks, replaying same-provider/model unsigned thinking. Both accept portable visible reasoning from other wire families as the target shape; if the target still rejects that shape, strict compatibility drops the reasoning carrier while preserving the tool round. Its `reasoning_replay` window defaults to `current_turn` (only the current turn's reasoning is sent); backends that require the full reasoning history or preserved thinking set `reasoning_replay: all`, so the complete assistant history is replayed unchanged.
+- `reasoning_continuity.contract` declares an endpoint-specific request contract. The `deepseek` contract selects the DeepSeek tool-history passback rules and request tuning on the Chat Completions and Messages wires; a model ID whose final component is `deepseek` or starts with `deepseek-` selects it automatically, and the field covers aliases or private deployments whose name does not identify the backend. On Chat Completions the contract also selects the `thinking:{type}` shape while `native_thinking` is unset. On the native Gemini endpoint, a model ID whose final component starts with `gemini-3` selects the `gemini-3` contract (missing thought-signature repair) the same way. `none` opts a route out of either shortcut, including that shape, for example a `deepseek-` named route that serves another backend. Other endpoints keep the generic continuity behavior unless their compat block declares a contract.
 
 ## OpenAI GPT (Responses)
 
@@ -426,19 +427,38 @@ Note the tokenizer change since Opus 4.7: the same text produces ~30% more token
 A gateway can expose models on `/v1/chat/completions` and translate each call
 into the upstream's native API. Chord's `thinking.*` keys are wire-independent,
 but the gateway only reads the thinking controls in the shape its own
-translation understands, so Chord writes them into the chat body as the dialect
-the model name implies:
+translation understands, so `compat.chat_completions.native_thinking` selects
+the shape Chord writes into the chat body:
 
-| Model | Field Chord adds | Built from |
+| Selector | Field Chord adds | Built from |
 | --- | --- | --- |
-| Gemini | `extra_body.google.thinking_config` | `thinking.level`, `thinking.budget`, `thinking.include_thoughts` — snake_case keys, with the same budget/level rule and the same `include_thoughts` default as the native wire |
-| Claude | `thinking: {type, budget_tokens}` | `thinking.type`, `thinking.budget`, `thinking.display` |
-| DeepSeek, GLM, Kimi K2.x, Doubao | `thinking: {type}` | `thinking.type`, with `adaptive` mapped to `enabled` |
-| Qwen | `enable_thinking` | `thinking.type`, `thinking.budget` |
+| `gemini`, `gemini-3` | `extra_body.google.thinking_config` | `thinking.level`, `thinking.budget`, `thinking.include_thoughts` — snake_case keys, with the same budget/level rule and the same `include_thoughts` default as the native wire |
+| `anthropic` | `thinking: {type, budget_tokens}` | `thinking.type`, `thinking.budget`, `thinking.display` |
+| `thinking` | `thinking: {type}` | `thinking.type`, with `adaptive` mapped to `enabled` |
+| `qwen` | `enable_thinking` | `thinking.type`, `thinking.budget` |
 
-A model that configures no thinking block sends nothing, and a model outside
-these families keeps its thinking settings out of the chat body; name the
-dialect explicitly for those, below.
+Family names (`claude`, `deepseek`, `glm`, `kimi`, `doubao`) select the same
+shapes. Only a DeepSeek route picks the `thinking` object without a selector:
+a model ID whose final component is `deepseek` or starts with `deepseek-`, or a
+model under `compat.reasoning_continuity.contract: deepseek`; `contract: none`
+drops the name shortcut. Gemini, Claude, GLM, Kimi, Doubao, and Qwen models
+behind a gateway must name the shape. Either way, a model that configures no
+thinking block sends nothing, except on a DeepSeek route: its reasoning contract
+turns thinking on by default and sends `thinking: {type: enabled}`. Set
+`thinking.type: disabled` or `reasoning.effort: none` to disable thinking on
+DeepSeek Chat/Messages; Chord sends `thinking: {type: disabled}` and omits effort.
+An explicit
+selector governs the request shape only and always wins over that default; the
+DeepSeek reasoning contract itself is set with
+`compat.reasoning_continuity.contract`.
+
+The selector is also the only thing that tells Chord a gateway model is Gemini
+or Claude, whatever its model ID says. Without it Chord does not write Gemini
+thought signatures back, and Gemini 3 rejects the request that follows each tool
+call (HTTP 400). Pin `native_thinking: gemini-3` on every Gemini 3 model behind a
+gateway, even one without a thinking block. `chord doctor config` warns about a
+Gemini 3 model without the selector and about a gateway model whose thinking
+block would be dropped.
 
 ```yaml
 model_templates:
@@ -446,6 +466,8 @@ model_templates:
     <<: *window-1049k-64k
     thinking:
       include_thoughts: true
+    compat:
+      chat_completions: {native_thinking: gemini-3}
     variants:
       high: {thinking: {level: high}}
       medium: {thinking: {level: medium}}
@@ -454,16 +476,20 @@ model_templates:
   claude-chat: &claude-chat
     <<: *window-200k-64k
     thinking: {type: enabled, budget: 8192}
+    compat:
+      chat_completions: {native_thinking: anthropic}
 
   deepseek-chat: &deepseek-chat
     <<: *window-1m-64k
     reasoning: {effort: high}
     thinking: {type: enabled}
+    # No selector: a DeepSeek model ID keeps the thinking object.
 
   glm-chat: &glm-chat
     <<: *window-200k-64k
     thinking: {type: enabled}
     compat:
+      chat_completions: {native_thinking: thinking}
       # Family extras stay in the override; Chord merges them into the
       # thinking object it writes from the model-level block above.
       request_overrides:
@@ -488,18 +514,17 @@ model_pools:
     - gateway/glm-5.2
 ```
 
-- Nothing to configure: the field is built from the thinking knobs you already
-  set, so one template works unchanged behind the gateway and on the model's
-  native endpoint.
+- Only DeepSeek needs no selector: a model ID whose final component is `deepseek`
+  or starts with `deepseek-` keeps the `thinking` object on its own. Every other family must name the shape; the
+  field still comes from the thinking knobs you already set, so one template
+  works unchanged behind the gateway and on the model's native endpoint.
 - A gateway that rejects unknown body fields instead of ignoring or translating
   them needs `compat.chat_completions.native_thinking: off`, set on the model or
   on the provider.
 - A model name that hides the upstream (a gateway alias, a private deployment)
   names the shape directly: `native_thinking: gemini`, `gemini-3`, `anthropic`,
-  `thinking`, or `qwen`. Use `gemini` when only the Gemini family is known;
-  use `gemini-3` when the alias is known to target Gemini 3 and missing
-  thought-signature repair is required. Family names such as `claude`,
-  `deepseek`, `glm`, `kimi`, and `doubao` select the same shapes.
+  `thinking`, or `qwen`. Use `gemini-3` for any Gemini 3 target and `gemini`
+  only for earlier Gemini models or when the version is unknown.
 - Kimi K3 rejects the K2.x `thinking` parameter, so do not give it a model-level
   thinking block; K2.x models use the block as described above.
 - `reasoning.effort` still goes out as the portable `reasoning_effort` field.
@@ -530,9 +555,9 @@ reverse holds too. A request that reaches a different family strips the blobs;
 their readable text still goes out as portable thinking where the target accepts
 it.
 
-For a Chat Completions model alias, set `native_thinking` to `anthropic` or
-`gemini` to identify its backend; use `gemini-3` when the alias is known to be
-Gemini 3 and needs signature repair. Chord records that family with the response,
+Behind a Chat Completions gateway, `native_thinking` (`anthropic`, `gemini`, or
+`gemini-3`) is what identifies the backend family; without it the blobs are not
+sent back at all. Chord records that family with the response,
 so saved sessions retain the replay identity even when the model name does not
 identify it. Family checks apply before converting between wire formats. A
 Gemini signature carried in a Messages thinking block is sent on the first
@@ -545,9 +570,12 @@ Missing or rejected state is repaired instead of sent as a guaranteed failure:
   assistant step after the last user message lost its signature (a model switch,
   a gateway that dropped it), Chord sends the documented placeholder
   `skip_thought_signature_validator`, which the backend accepts in place of a
-  real signature. The repair needs to know the endpoint is Gemini 3: for a
-  gateway alias that hides the upstream name, pin `native_thinking: gemini-3`.
-  A family-only `gemini` pin does not assume a model version.
+  real signature. On the native Gemini endpoint the repair turns on by itself
+  for a model ID whose final component starts with `gemini-3`;
+  `reasoning_continuity.contract: gemini-3` turns it on for a Gemini 3 model
+  whose ID hides the version, and `contract: none` turns it off. Behind a Chat
+  Completions gateway, pin `native_thinking: gemini-3`; a family-only `gemini`
+  pin does not assume a model version.
 - A Claude-backed endpoint whose current turn no longer has replayable
   `thinking_blocks` is called without the `thinking` controls, matching the
   history the request carries; asking for reasoning the replayed history cannot
@@ -570,7 +598,7 @@ gemini:
 
 ```yaml
 model_templates:
-  # Shared shape for Gemini 3.x Flash models: 1M window, `level`-controlled
+  # Shared shape for Gemini 3.x Flash models: 1M window and `level`-controlled
   # thinking.
   gemini-flash: &gemini-flash
     <<: [*window-1049k-64k, *vision-pdf]
@@ -592,6 +620,7 @@ Notes:
 
 - Keep `api_url` at the `/models` base path. Chord appends `/{model}:streamGenerateContent?alt=sse` automatically.
 - `type` can be omitted; Chord auto-detects Gemini from the `/models` path.
+- Gemini 3 rejects a tool-call step without its thought signature. For a model ID starting with `gemini-3`, Chord turns on the missing-signature repair automatically, so the template needs no `compat` block. Set `compat.reasoning_continuity.contract: gemini-3` for a Gemini 3 model whose ID hides the version, or `none` to turn the repair off.
 - Gemini 3.8 Flash (GA September 2, 2026) is the current workhorse: 1M-token context, 64K max output, and thinking levels `low` / `medium` (the provider default) / `high`. `minimal` is not supported and `thinking_budget` is deprecated, so the template above uses `level` only; it pins `high` for agentic work; dropping to `medium` or `low` cuts latency and token burn for everyday tasks.
 - Gemini 3.5 / 3.6 Flash share this shape and also accept `minimal`; the Flash-Lite series defaults to `minimal`. Gemini 3.1 Pro takes `low` / `medium` / `high` and rejects `minimal` too, so do not reuse one `minimal` variant across the family.
 
@@ -808,6 +837,8 @@ model_templates:
     compat:
       forced_tool_choice:
         suppress_in_thinking: true
+      reasoning_continuity:
+        contract: deepseek
 
   deepseek-v4.1-messages: &deepseek-v4-1-messages
     <<: [*window-1m-64k, *vision]
@@ -828,6 +859,8 @@ model_templates:
       request_overrides:
         headers:
           anthropic-beta: null
+      reasoning_continuity:
+        contract: deepseek
 
   deepseek-v4.1-responses: &deepseek-v4-1-responses
     <<: [*window-1m-64k, *vision]
@@ -878,8 +911,13 @@ model_pools:
 Notes:
 
 - DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
-  `max_tokens`. Chord selects these fields directly for DeepSeek models.
-  When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so Chord preserves the entire retained reasoning history on Chat and Messages; without tools the field is ignored.
+  `max_tokens`. A model ID whose final component is `deepseek` or starts with
+  `deepseek-` selects this endpoint contract automatically; the recipe also pins
+  it with `reasoning_continuity.contract: deepseek`, the explicit form to use for
+  aliases or private deployments. A third-party route whose model ID starts with
+  `deepseek-` but serves another backend opts out with
+  `reasoning_continuity.contract: none`, on Chat and Messages alike.
+  When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so the contract always preserves the entire retained reasoning history on Chat and Messages and fixes the replay mode; `reasoning_continuity.mode` and `reasoning_replay` have no effect there, which is why the Chat and Messages templates leave them out.
 
   DeepSeek also rejects forced tool choice while thinking is active, so the template downgrades loop-forced `tool_choice: required` to the backend default for those requests.
 - DeepSeek Responses supports `tool_choice: required`, so its template keeps
@@ -1084,9 +1122,9 @@ mode and `keep: all` behavior are fixed, so the template does not send a
 `thinking` object. K2.6 is the 256K general-purpose hybrid option and therefore
 sets both fields explicitly. K2.5 does not support preserved thinking.
 
-For all `openai_visible` recipes (DeepSeek, GLM, supported Qwen, and Kimi), Chord first replays native reasoning optimistically to any Chat Completions target, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback can keep continuity.
+For all `openai_visible` recipes (GLM, supported Qwen, and Kimi) and the DeepSeek Chat contract, Chord first replays native reasoning optimistically to any Chat Completions target, so documented in-provider upgrades such as Kimi K2.6/K2.7 to K3 and same-model provider fallback can keep continuity.
 
-Recipes for backends whose tool-mode contract requires the full reasoning history (DeepSeek) and preserved-thinking recipes (GLM `clear_thinking: false`, Qwen `preserve_thinking`, Kimi K3 / `keep: all`) set `reasoning_replay: all` so the complete assistant history is replayed unchanged. If a target rejects native reasoning, Chord removes or converts only the incompatible reasoning payload.
+Preserved-thinking recipes (GLM `clear_thinking: false`, Qwen `preserve_thinking`, Kimi K3 / `keep: all`) and the DeepSeek Responses recipe set `reasoning_replay: all` so the complete assistant history is replayed unchanged; DeepSeek Chat and Messages keep the full reasoning history on their own. If a target rejects native reasoning, Chord removes or converts only the incompatible reasoning payload.
 
 Completed tool calls and their paired results remain available to the next model; they are not treated as disposable chain-of-thought data. A strict compatibility fallback may textify the completed action history when the target cannot accept the structured shape.
 
@@ -1361,7 +1399,7 @@ mimo:
 
 MiMo-V2.6-Pro and MiMo-V2.6-Flash are Xiaomi's fully multimodal agentic models on the MiMo Open Platform: a 1,048,576-token context window, a 131,072-token maximum output (the endpoint's default and cap for `max_completion_tokens`), image input, function calling, structured output, and deep thinking that is on by default. The platform is OpenAI- and Anthropic-compatible; this recipe uses `https://api.xiaomimimo.com/v1/chat/completions` because that is where MiMo documents the `reasoning_content` replay contract Chord needs for tool loops.
 
-Thinking mode carries a hard replay contract: in multi-turn tool calls the API expects every earlier `reasoning_content` back and reports `400 - Invalid Format` when it is missing, so the template enables `openai_visible` with `reasoning_replay: all`. The thinking switch is a `thinking: {type: ...}` object, which Chord only emits when the model pins the Chat Completions dialect (`native_thinking: thinking`); `mimo-*` is not one of the model names Chord infers a dialect from.
+Thinking mode carries a hard replay contract: in multi-turn tool calls the API expects every earlier `reasoning_content` back and reports `400 - Invalid Format` when it is missing, so the template enables `openai_visible` with `reasoning_replay: all`. The thinking switch is a `thinking: {type: ...}` object, which Chord only emits when the model pins the Chat Completions dialect (`native_thinking: thinking`); only a DeepSeek route (a `deepseek` model name or `contract: deepseek`) selects a dialect on its own, so the template pins it.
 
 ```yaml
 model_templates:

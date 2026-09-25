@@ -95,6 +95,14 @@ model_templates:
   保留工具轮次。回放窗口 `reasoning_replay` 默认 `current_turn`，只发当前轮的
   reasoning；要求完整 reasoning 历史或 preserved thinking 的后端设置
   `reasoning_replay: all`，完整 assistant 历史会原样回放。
+- `reasoning_continuity.contract` 用来声明端点的专用请求契约。`deepseek` 在
+  Chat Completions 与 Messages 线路上启用 DeepSeek 的工具历史回传规则和请求
+  调优；模型 ID 最后一段是 `deepseek` 或以 `deepseek-` 开头时会自动选到它，
+  别名或私有部署用它显式声明；在 Chat Completions 上，没配 `native_thinking`
+  时它还会选用 `thinking:{type}` 形状。Gemini 原生端点上，模型 ID 最后一段以
+  `gemini-3` 开头时同样会自动选到 `gemini-3` 契约（补齐缺失的 thought
+  signature）。`none` 让路由退出这两种自动识别（包括这个形状），比如名字带 `deepseek-` 但后端
+  不是 DeepSeek 的路由。其他端点未声明契约时继续使用通用连续性逻辑。
 
 ## OpenAI GPT（Responses 兼容接口）
 
@@ -489,17 +497,31 @@ model_templates:
 
 网关可以把多个模型暴露在 `/v1/chat/completions` 上，再把请求转成上游原生 API。
 Chord 的 `thinking.*` 与线路无关，但网关只认它自己转换逻辑里的字段形状，所以
-Chord 会按模型名推断出的方言，把这些配置写进 chat 请求体：
+`compat.chat_completions.native_thinking` 决定把这些配置按哪种形状写进 chat 请求体：
 
-| 模型 | Chord 追加的字段 | 取值来源 |
+| 选择器 | Chord 追加的字段 | 取值来源 |
 | --- | --- | --- |
-| Gemini | `extra_body.google.thinking_config` | `thinking.level`、`thinking.budget`、`thinking.include_thoughts`；键名用 snake_case，预算与级别的冲突规则、`include_thoughts` 默认值都和原生线路一致 |
-| Claude | `thinking: {type, budget_tokens}` | `thinking.type`、`thinking.budget`、`thinking.display` |
-| DeepSeek、GLM、Kimi K2.x、Doubao | `thinking: {type}` | `thinking.type`，`adaptive` 映射成 `enabled` |
-| Qwen | `enable_thinking` | `thinking.type`、`thinking.budget` |
+| `gemini`、`gemini-3` | `extra_body.google.thinking_config` | `thinking.level`、`thinking.budget`、`thinking.include_thoughts`；键名用 snake_case，预算与级别的冲突规则、`include_thoughts` 默认值都和原生线路一致 |
+| `anthropic` | `thinking: {type, budget_tokens}` | `thinking.type`、`thinking.budget`、`thinking.display` |
+| `thinking` | `thinking: {type}` | `thinking.type`，`adaptive` 映射成 `enabled` |
+| `qwen` | `enable_thinking` | `thinking.type`、`thinking.budget` |
 
-没有配置 thinking 块的模型不会追加任何字段；不属于上表的模型也不会把 thinking 配置
-写进 chat 请求体，这类情况按下文显式指定方言。
+`claude`、`deepseek`、`glm`、`kimi`、`doubao` 等家族名等价。不配选择器时只有
+DeepSeek 路由能选到 `thinking` 对象：模型 ID 最后一段是 `deepseek` 或以
+`deepseek-` 开头，或者配了 `compat.reasoning_continuity.contract: deepseek`；
+`contract: none` 会取消按名字的自动识别。网关后面的 Gemini、Claude、GLM、Kimi、
+Doubao、Qwen 模型都要显式指定形状。无论哪种情况，没配 thinking 块就不会追加
+字段，DeepSeek 路由例外：它默认打开 thinking 并发送
+`thinking: {type: enabled}`。DeepSeek Chat/Messages 配置 `thinking.type: disabled`
+或 `reasoning.effort: none` 时，Chord 会发送 `thinking: {type: disabled}`，不再发送 effort。
+显式配置的选择器只管请求形状，并且总是优先于这个
+默认形状；DeepSeek 推理契约本身用 `compat.reasoning_continuity.contract` 设置。
+
+不管模型 ID 写的是什么，Chord 也只靠选择器判断网关后面是 Gemini 还是 Claude。
+没配选择器时，Chord 不会把 Gemini 的 thought signature 写回请求，Gemini 3 会拒绝
+每次工具调用之后的那个请求（HTTP 400）。网关后面的每个 Gemini 3 模型都要配
+`native_thinking: gemini-3`，没配 thinking 块也一样。`chord doctor config` 会对
+没配选择器的 Gemini 3 模型、以及 thinking 块会被丢掉的网关模型给出警告。
 
 ```yaml
 model_templates:
@@ -507,6 +529,8 @@ model_templates:
     <<: *window-1049k-64k
     thinking:
       include_thoughts: true
+    compat:
+      chat_completions: {native_thinking: gemini-3}
     variants:
       high: {thinking: {level: high}}
       medium: {thinking: {level: medium}}
@@ -515,16 +539,20 @@ model_templates:
   claude-chat: &claude-chat
     <<: *window-200k-64k
     thinking: {type: enabled, budget: 8192}
+    compat:
+      chat_completions: {native_thinking: anthropic}
 
   deepseek-chat: &deepseek-chat
     <<: *window-1m-64k
     reasoning: {effort: high}
     thinking: {type: enabled}
+    # 不配选择器：DeepSeek 模型 ID 就会选到 thinking 对象。
 
   glm-chat: &glm-chat
     <<: *window-200k-64k
     thinking: {type: enabled}
     compat:
+      chat_completions: {native_thinking: thinking}
       # 家族特有的附加项留在 override 里；Chord 会把它合并进由上面模型级
       # thinking 块生成的 thinking 对象。
       request_overrides:
@@ -549,14 +577,14 @@ model_pools:
     - gateway/glm-5.2
 ```
 
-- 不需要额外配置：字段完全由你已配置的 thinking 项生成，同一份模板既能在网关后面
-  生效，也能直接连模型的原生端点。
+- 只有 DeepSeek 不用选择器：模型 ID 最后一段是 `deepseek` 或以 `deepseek-`
+  开头时自动选到 `thinking` 对象，其余家族都要显式指定形状。字段本身仍由你配好的 thinking 项生成，同一份模板既能在
+  网关后面生效，也能直接连模型的原生端点。
 - 端点拒绝未知请求体字段、既不忽略也不转换时，用
   `compat.chat_completions.native_thinking: off`（模型级或 provider 级）关掉。
 - 模型名看不出上游（网关别名、私有部署）时直接指定形状：`gemini`、`gemini-3`、
-  `anthropic`、`thinking`、`qwen`。只知道是 Gemini 家族时用 `gemini`；已确认别名
-  指向 Gemini 3、需要缺失签名修复时用 `gemini-3`。`claude`、`deepseek`、`glm`、
-  `kimi`、`doubao` 等家族名仍可使用。
+  `anthropic`、`thinking`、`qwen`。Gemini 3 一律用 `gemini-3`；`gemini` 只用于
+  更早的 Gemini 模型或不确定版本的情况。
 - Kimi K3 不接受 K2.x 的 `thinking` 参数，所以不要给它配模型级 thinking 块；K2.x
   模型按上面的说明使用该块。
 - `reasoning.effort` 仍按可移植的 `reasoning_effort` 字段发送。网关自己映射 effort
@@ -580,8 +608,8 @@ model_pools:
 或直连原生 API 都能继续用，反过来也一样。请求落到别的家族时会剥掉这些 blob；其中
 可读的思考文本仍会按目标接受的形式作为普通 thinking 发出。
 
-Chat Completions 模型使用别名时，用 `native_thinking: anthropic` 或 `gemini`
-明确后端家族；已确认是 Gemini 3 且需要签名修复时用 `gemini-3`。Chord 会把家族
+在 Chat Completions 网关后面，后端家族靠 `native_thinking`（`anthropic`、`gemini`
+或 `gemini-3`）确定；没配时这些 blob 根本不会回传。Chord 会把家族
 信息随响应保存，恢复会话后也不必靠别名猜测来源。
 只有家族匹配，才会转换回放载体：例如 Messages 思考块中的 Gemini 签名，切到
 Chat Completions 后会放在第一条工具调用上。Gemini 工具续轮即使没有可见思考文本，
@@ -591,9 +619,11 @@ Chat Completions 后会放在第一条工具调用上。Gemini 工具续轮即�
 
 - Gemini 3 不接受缺 thought signature 的 function call 步骤。最后一条用户消息之后
   的 assistant 步骤签名已丢时（换了模型、网关把它丢了），Chord 会补上官方文档给出的
-  占位值 `skip_thought_signature_validator`，后端接受它代替真实签名。这个修复需要知道
-  端点确实是 Gemini 3：网关别名把上游名字藏了的话，显式 pin
-  `native_thinking: gemini-3` 即可。只声明家族的 `gemini` 不会默认推断模型版本。
+  占位值 `skip_thought_signature_validator`，后端接受它代替真实签名。Gemini 原生
+  端点上，模型 ID 最后一段以 `gemini-3` 开头时自动开启这项修复；ID 看不出版本的
+  Gemini 3 模型用 `reasoning_continuity.contract: gemini-3` 开启，`contract: none`
+  关闭。Chat Completions 网关要配 `native_thinking: gemini-3`；只声明家族的
+  `gemini` 不会默认推断模型版本。
 - Claude 线路当前回合已经没有可回放的 `thinking_blocks` 时，该请求不会再带 `thinking`
   控制字段：发出的历史里没有对应的思考块，声明了思考反而会被拒。
 - 后端确实拒绝某个签名时，仍会按回放兼容等级逐级降级：Chord 剥掉 blob 重试，而不是
@@ -613,7 +643,7 @@ gemini:
 
 ```yaml
 model_templates:
-  # Gemini 3.x Flash 共用形状：1M 窗口、`level` 控制的 thinking。
+  # Gemini 3.x Flash 共用形状：1M 窗口和 `level` 控制的 thinking。
   gemini-flash: &gemini-flash
     <<: [*window-1049k-64k, *vision-pdf]
     thinking:
@@ -634,6 +664,7 @@ model_pools:
 
 - `api_url` 保持在 `/models` 基础路径即可；Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。
 - `type` 可以省略；Chord 会根据 `/models` 路径自动识别 Gemini。
+- Gemini 3 不接受缺 thought signature 的工具调用步骤。模型 ID 以 `gemini-3` 开头时，Chord 自动开启缺失签名修复，所以模板不需要 `compat` 块。ID 看不出版本的 Gemini 3 模型配 `compat.reasoning_continuity.contract: gemini-3`；想关掉修复就配 `none`。
 - Gemini 3.8 Flash（2026 年 9 月 2 日 GA）是目前的主力模型：1M token 上下文、最大 64K 输出，thinking 级别为 `low` / `medium`（官方默认）/ `high`。它不支持 `minimal`，且 `thinking_budget` 已废弃，所以上面模板只用 `level`；模板固定用 `high` 服务 agentic 场景；日常任务降到 `medium` / `low` 可以省延迟和 token。
 - Gemini 3.5 / 3.6 Flash 也是同一套结构，并且仍然接受 `minimal`；Flash-Lite 系列则以 `minimal` 为默认值。Gemini 3.1 Pro 只接受 `low` / `medium` / `high`，同样不支持 `minimal`，所以不要把一个 `minimal` variant 套用到整个家族。
 
@@ -836,6 +867,8 @@ model_templates:
     compat:
       forced_tool_choice:
         suppress_in_thinking: true
+      reasoning_continuity:
+        contract: deepseek
 
   deepseek-v4.1-messages: &deepseek-v4-1-messages
     <<: [*window-1m-64k, *vision]
@@ -856,6 +889,8 @@ model_templates:
       request_overrides:
         headers:
           anthropic-beta: null
+      reasoning_continuity:
+        contract: deepseek
 
   deepseek-v4.1-responses: &deepseek-v4-1-responses
     <<: [*window-1m-64k, *vision]
@@ -906,10 +941,15 @@ model_pools:
 要点：
 
 - DeepSeek Chat thinking 使用 `thinking.type`、顶层 `reasoning_effort` 和
-  `max_tokens`。Chord 会为 DeepSeek 模型直接选择这些字段。
+  `max_tokens`。模型 ID 最后一段是 `deepseek` 或以 `deepseek-` 开头时 Chord 会
+  自动选择这套端点契约；别名或私有模型可通过
+  `reasoning_continuity.contract: deepseek` 显式选择。第三方托管的路由模型 ID
+  以 `deepseek-` 开头、后端却不是 DeepSeek 时，用
+  `reasoning_continuity.contract: none` 退出，Chat 和 Messages 都适用。
   请求带 tools 时，DeepSeek 要求后续每一轮都完整回传历史
-  `reasoning_content`，否则返回 `400`。Chord 的 Chat 与 Messages 路径会完整
-  回传保留历史中的思考；不带 tools 时该字段会被忽略。
+  `reasoning_content`，否则返回 `400`。所以这套契约在 Chat 与 Messages 上总会
+  完整回传保留历史中的思考，回放模式也由它固定；`reasoning_continuity.mode` 和
+  `reasoning_replay` 在这两条线路上不起作用，模板因此没有写。
   DeepSeek 在启用 thinking 时会拒绝 forced tool
   choice，所以模板会把 loop 强制的 `tool_choice: required` 降级为后端默认
   选择。
@@ -1107,13 +1147,13 @@ K2.7 Code 是 256K 上下文、面向编码的纯思考型号；它的 thinking 
 上下文的通用混合思考型号，所以显式设置这两个字段。
 K2.5 不支持保留历史思考。
 
-对于所有使用 `openai_visible` 的模板（DeepSeek、GLM、受支持的 Qwen 和
-Kimi），Chord 首次会把原生 reasoning 乐观回放给任何 Chat Completions
+对于所有使用 `openai_visible` 的模板（GLM、受支持的 Qwen 和 Kimi）以及
+DeepSeek Chat 契约，Chord 首次会把原生 reasoning 乐观回放给任何 Chat Completions
 目标，因此 Kimi K2.6/K2.7→K3 这类官方允许的同 provider 升级和同模型跨
-provider fallback 都能保留连续性。工具模式契约要求完整 reasoning 历史的
-后端（DeepSeek）和 preserved-thinking 模板（GLM `clear_thinking: false`、
-Qwen `preserve_thinking`、Kimi K3 / `keep: all`）都设置
-`reasoning_replay: all`。若目标拒绝原生 reasoning，Chord 只会
+provider fallback 都能保留连续性。preserved-thinking 模板（GLM
+`clear_thinking: false`、Qwen `preserve_thinking`、Kimi K3 / `keep: all`）和
+DeepSeek Responses 模板都设置 `reasoning_replay: all`；DeepSeek Chat 与
+Messages 会自己保留完整 reasoning 历史。若目标拒绝原生 reasoning，Chord 只会
 删除或转换不兼容的 reasoning 负载；已完成且成对的工具调用和结果仍会保留。
 目标连结构化形状也不接受时，严格降级会把已完成的动作历史文本化，而
 不会把外部工具事实静默删除。
@@ -1386,9 +1426,9 @@ Chord 需要的 `reasoning_content` 回放契约。
 思考模式有一条硬性回放契约：多轮工具调用时，接口要求把之前所有
 `reasoning_content` 传回去，缺了会报 `400 - Invalid Format`，所以模板开了
 `openai_visible` 加 `reasoning_replay: all`。思考开关是
-`thinking: {type: ...}` 对象，只有模型显式钉住 chat 方言
-（`native_thinking: thinking`）时 Chord 才会发这个字段——`mimo-*` 不在 Chord
-按模型名推断的名单里。
+`thinking: {type: ...}` 对象，只有显式指定 chat 方言
+（`native_thinking: thinking`）时 Chord 才会发这个字段；能自己选到方言的只有
+DeepSeek 路由（DeepSeek 模型 ID 或 `contract: deepseek`），模板因此显式写上了它。
 
 ```yaml
 model_templates:

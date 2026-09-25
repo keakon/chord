@@ -177,6 +177,9 @@ func planInitAppStartup(contentRoot, workDir string) (*initAppStartupPlan, error
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
+	for _, advisory := range config.Advisories(cfg) {
+		log.Warnf("config: %s", advisory)
+	}
 	pathLocator, err := config.ResolvePathLocator(globalCfg, config.PathOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("resolve storage paths: %w", err)

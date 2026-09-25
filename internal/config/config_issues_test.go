@@ -185,6 +185,26 @@ func TestCollectProjectConfigIssuesReportsUnsupportedFields(t *testing.T) {
 	}
 }
 
+func TestCollectProjectConfigIssuesReportsInvalidNativeThinking(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", `providers:
+  sample:
+    type: chat-completions
+    models:
+      model-1:
+        compat:
+          chat_completions:
+            native_thinking: auto
+`)
+	issues, err := CollectProjectConfigIssues(path)
+	if err != nil {
+		t.Fatalf("CollectProjectConfigIssues: %v", err)
+	}
+	joined := strings.Join(issues, "\n")
+	if !strings.Contains(joined, `invalid native_thinking "auto"`) || !strings.Contains(joined, `for model "model-1" in provider "sample"`) {
+		t.Fatalf("issues = %q, want the invalid native_thinking selector reported against the model", joined)
+	}
+}
+
 func TestCollectProjectConfigIssuesMissingFile(t *testing.T) {
 	issues, err := CollectProjectConfigIssues(filepath.Join(t.TempDir(), "nope.yaml"))
 	if err != nil {

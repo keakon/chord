@@ -122,34 +122,31 @@ func TestEnsureChatGeminiActiveLoopSignatures(t *testing.T) {
 	}
 }
 
-// The gate cannot rely on the model name alone: an aliased Gemini 3 is only
-// identified by an explicitly pinned gemini dialect.
+// The gate does not rely on the model name: only the explicit gemini-3 selector
+// opts into version-specific signature repair.
 func TestChatGeminiRequiresSignaturePlaceholder(t *testing.T) {
 	cases := []struct {
 		name    string
-		model   string
 		dialect nativeThinkingDialect
 		want    bool
 	}{
-		{name: "gemini 3 by name", model: "gemini-3-pro", dialect: nativeThinkingGemini, want: true},
-		{name: "gemini 2 keeps no placeholder", model: "gemini-2.5-pro", dialect: nativeThinkingGemini},
-		{name: "family pin does not imply gemini 3", model: "deployment-a", dialect: nativeThinkingGemini},
-		{name: "aliased gemini 3 with a versioned dialect", model: "deployment-a", dialect: nativeThinkingGemini3, want: true},
-		{name: "alias without a version stays unnamed", model: "deployment-a", dialect: nativeThinkingGemini},
-		{name: "non-gemini dialect", model: "deployment-a", dialect: nativeThinkingAnthropic},
+		{name: "family pin does not imply gemini 3", dialect: nativeThinkingGemini},
+		{name: "versioned dialect enables repair", dialect: nativeThinkingGemini3, want: true},
+		{name: "non-gemini dialect", dialect: nativeThinkingAnthropic},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := chatGeminiRequiresSignaturePlaceholder(tc.model, tc.dialect); got != tc.want {
-				t.Fatalf("chatGeminiRequiresSignaturePlaceholder(%q, %q) = %v, want %v", tc.model, tc.dialect, got, tc.want)
+			if got := chatGeminiRequiresSignaturePlaceholder(tc.dialect); got != tc.want {
+				t.Fatalf("chatGeminiRequiresSignaturePlaceholder(%q) = %v, want %v", tc.dialect, got, tc.want)
 			}
 		})
 	}
 }
 
-// An unset selector means auto, so it must not count as a pinned dialect: the
-// family resolution would otherwise read a gpt-* gateway as an unknown backend.
-func TestPinnedNativeThinkingDialectTreatsUnsetAsAuto(t *testing.T) {
+// An unset selector adds no dialect field, so it must not count as pinned: the
+// family resolution then still reads the model name, and falls back to the wire
+// family when the name says nothing.
+func TestPinnedNativeThinkingDialect(t *testing.T) {
 	cases := []struct {
 		name   string
 		compat *config.ChatCompletionsCompatConfig
@@ -157,7 +154,7 @@ func TestPinnedNativeThinkingDialectTreatsUnsetAsAuto(t *testing.T) {
 	}{
 		{name: "no compat block", compat: nil},
 		{name: "unset selector", compat: &config.ChatCompletionsCompatConfig{}},
-		{name: "auto selector", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "auto"}},
+		{name: "whitespace selector", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "  "}},
 		{name: "pinned gemini", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "gemini"}, want: true},
 		{name: "pinned off", compat: &config.ChatCompletionsCompatConfig{NativeThinking: "off"}, want: true},
 	}
@@ -203,6 +200,9 @@ func TestParseOpenAISSEStreamChatThinkingState(t *testing.T) {
 func TestReplayCompatibleRequestTuningKeepsReplayableBlocks(t *testing.T) {
 	cfg := NewProviderConfig("sample", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
+		Compat: &config.ProviderCompatConfig{
+			ChatCompletions: &config.ChatCompletionsCompatConfig{NativeThinking: "anthropic"},
+		},
 		Models: map[string]config.ModelConfig{"claude-fable-5.1": {
 			Thinking: &config.ThinkingConfig{Type: "enabled"},
 		}},
@@ -230,6 +230,12 @@ func extraContentWith(signature string) *openAIToolCallExtraContent {
 		return nil
 	}
 	return &openAIToolCallExtraContent{Google: &openAIGoogleThoughtSignature{ThoughtSignature: signature}}
+}
+
+func nativeThinkingCompat(value string) *config.ProviderCompatConfig {
+	return &config.ProviderCompatConfig{
+		ChatCompletions: &config.ChatCompletionsCompatConfig{NativeThinking: value},
+	}
 }
 
 func captureOpenAIChatBody(t *testing.T, model string, compat *config.ProviderCompatConfig, tuning RequestTuning, messages []message.Message) map[string]any {
@@ -292,30 +298,37 @@ func TestOpenAIProvider_ChatThinkingStateBody(t *testing.T) {
 	t.Run("gemini keeps the captured signature", func(t *testing.T) {
 		messages := toolStep()
 		messages[1].ToolCalls[0].ThoughtSignature = "sig-real"
-		body := captureOpenAIChatBody(t, "gemini-3.8-flash", nil, RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}}, messages)
+		body := captureOpenAIChatBody(t, "gemini-3.8-flash", nativeThinkingCompat("gemini"), RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}}, messages)
 		if got := firstToolCallSignature(t, body); got != "sig-real" {
 			t.Fatalf("signature = %q, want the captured value replayed", got)
 		}
 	})
 
 	t.Run("gemini 3 fills a missing signature", func(t *testing.T) {
-		body := captureOpenAIChatBody(t, "gemini-3.8-flash", nil, RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}}, toolStep())
+		body := captureOpenAIChatBody(t, "gemini-3.8-flash", nativeThinkingCompat("gemini-3"), RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}}, toolStep())
 		if got := firstToolCallSignature(t, body); got != geminiSkipThoughtSignatureValidator {
 			t.Fatalf("signature = %q, want the documented placeholder", got)
 		}
 	})
 
 	t.Run("gemini 2 sends no placeholder", func(t *testing.T) {
-		body := captureOpenAIChatBody(t, "gemini-2.5-flash", nil, RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}}, toolStep())
+		body := captureOpenAIChatBody(t, "gemini-2.5-flash", nativeThinkingCompat("gemini"), RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}}, toolStep())
 		if got := firstToolCallSignature(t, body); got != "" {
 			t.Fatalf("signature = %q, want no placeholder before Gemini 3", got)
+		}
+	})
+
+	t.Run("gemini 3 name with a family pin sends no placeholder", func(t *testing.T) {
+		body := captureOpenAIChatBody(t, "gemini-3.8-flash", nativeThinkingCompat("gemini"), RequestTuning{Gemini: GeminiTuning{ThinkingLevel: "high"}}, toolStep())
+		if got := firstToolCallSignature(t, body); got != "" {
+			t.Fatalf("signature = %q, want no placeholder without the versioned selector", got)
 		}
 	})
 
 	t.Run("claude ships the thinking blocks", func(t *testing.T) {
 		messages := toolStep()
 		messages[1].ThinkingBlocks = []message.ThinkingBlock{{Thinking: "plan", Signature: "sig-block"}}
-		body := captureOpenAIChatBody(t, "claude-fable-5.1", nil, RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 4096}}, messages)
+		body := captureOpenAIChatBody(t, "claude-fable-5.1", nativeThinkingCompat("anthropic"), RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 4096}}, messages)
 		msgs, _ := body["messages"].([]any)
 		assistant, _ := msgs[1].(map[string]any)
 		blocks, ok := assistant["thinking_blocks"].([]any)
@@ -332,7 +345,7 @@ func TestOpenAIProvider_ChatThinkingStateBody(t *testing.T) {
 		messages := toolStep()
 		messages[1].ThinkingBlocks = []message.ThinkingBlock{{Thinking: "plan", Signature: "sig-block"}}
 		tuning := RequestTuning{DisableReasoning: true, Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingBudget: 4096}}
-		body := captureOpenAIChatBody(t, "claude-fable-5.1", nil, tuning, messages)
+		body := captureOpenAIChatBody(t, "claude-fable-5.1", nativeThinkingCompat("anthropic"), tuning, messages)
 		if _, ok := body["thinking"]; ok {
 			t.Fatalf("thinking field present in a degraded request: %#v", body["thinking"])
 		}

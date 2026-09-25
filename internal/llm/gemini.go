@@ -247,7 +247,9 @@ func (g *GeminiProvider) CompleteStream(
 	// re-converting and re-marshaling the full history on every attempt.
 	bodyBytes, err := g.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), func() ([]byte, error) {
 		contents := convertMessagesToGemini(messages)
-		ensureGeminiActiveLoopSignatures(contents, model)
+		if gemini3Target(g.provider, model) {
+			ensureGeminiActiveLoopSignatures(contents)
+		}
 		// Tool config is only valid while tools are declared (Gemini rejects
 		// toolConfig without function declarations).
 		apiTools := convertToolsToGemini(tools)
@@ -497,10 +499,7 @@ func geminiFunctionCallPart(tc message.ToolCall, signature string) geminiPart {
 
 const geminiSkipThoughtSignatureValidator = "skip_thought_signature_validator"
 
-func ensureGeminiActiveLoopSignatures(contents []geminiContent, model string) {
-	if !isGemini3Model(model) {
-		return
-	}
+func ensureGeminiActiveLoopSignatures(contents []geminiContent) {
 	activeStart := 0
 	for i, content := range contents {
 		if content.Role != "user" {
@@ -530,12 +529,30 @@ func ensureGeminiActiveLoopSignatures(contents []geminiContent, model string) {
 	}
 }
 
-func isGemini3Model(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	if slash := strings.LastIndex(model, "/"); slash >= 0 {
-		model = model[slash+1:]
+// gemini3Target reports whether a native Gemini request follows the Gemini 3
+// thought-signature contract. Only the native generateContent provider asks:
+// on that wire the model ID is the backend's own ID, so a "gemini-3" model
+// selects the contract automatically, the same way a DeepSeek model ID selects
+// DeepSeek's. An explicit compat.reasoning_continuity.contract always wins:
+// "none" opts such a model out, and "gemini-3" opts in a model whose ID does
+// not carry the version. A Chat Completions gateway never reaches this check;
+// it opts in through its native_thinking selector.
+func gemini3Target(provider *ProviderConfig, model string) bool {
+	if provider == nil {
+		return false
 	}
-	return strings.HasPrefix(model, "gemini-3")
+	if compat := provider.ReasoningContinuityCompat(model); compat != nil {
+		// Only gemini-3 selects the repair and only none opts out; any other
+		// contract (a provider-wide deepseek, say) does not apply to this
+		// endpoint and leaves the model-ID inference in charge.
+		switch compat.ReasoningContractValue() {
+		case config.ReasoningContractGemini3:
+			return true
+		case config.ReasoningContractNone:
+			return false
+		}
+	}
+	return config.IsGemini3ModelID(model)
 }
 
 func appendGeminiUserContent(result []geminiContent, parts []geminiPart) []geminiContent {

@@ -1492,26 +1492,41 @@ func providerWireFamily(provider *ProviderConfig) string {
 }
 
 // NativeFamily resolves the upstream model family a request reaches. The
-// wire only implies a family for the native endpoints; a Chat Completions
-// endpoint is usually a gateway, so the model name — or an explicit
-// compat.chat_completions.native_thinking selector — is what identifies the
-// backend whose provider-bound thinking state it can validate.
+// wire only implies a family for native endpoints. A Chat Completions endpoint
+// is usually a gateway, so only an explicit native_thinking selector identifies
+// a non-DeepSeek backend whose provider-bound thinking state it can validate.
+//
+// The DeepSeek family follows deepSeekTarget, never the model name by itself:
+// an explicit contract, including "none", decides it the same way it decides
+// the DeepSeek request contract. On the Chat Completions wire an explicit
+// selector still names the family first, because it declares which backend
+// validates the replayed thinking state; the DeepSeek request contract keeps
+// applying to such a target all the same.
 func (p *ProviderConfig) NativeFamily(modelID string) string {
 	wire := providerWireFamily(p)
+	// Messages aliases need the endpoint contract to preserve same-target
+	// opaque thinking signatures. Chat selectors still control their dialect.
+	if wire == modelcompat.WireFamilyAnthropic && deepSeekTarget(p, modelID) {
+		return modelcompat.NativeFamilyDeepSeek
+	}
 	if wire == modelcompat.WireFamilyOpenAIChat && p != nil {
 		if compat := p.ChatCompletionsCompat(modelID); pinnedNativeThinkingDialect(compat) {
 			// An explicit selector declares what the backend reads, including
-			// `off` for endpoints that reject the native fields. An unset
-			// selector means auto, exactly like an explicit `auto`, and keeps
-			// inferring the family from the model name below.
-			dialect, err := chatCompletionsNativeThinking(modelID, compat)
+			// `off` for endpoints that reject the native fields; the DeepSeek
+			// fallback only applies to an unset selector.
+			dialect, err := chatCompletionsNativeThinking(compat, false)
 			if err != nil {
 				return modelcompat.NativeFamilyUnknown
 			}
 			return nativeFamilyForDialect(dialect)
 		}
+		if deepSeekTarget(p, modelID) {
+			return modelcompat.NativeFamilyDeepSeek
+		}
+		return modelcompat.NativeFamilyUnknown
 	}
-	if family := modelcompat.ModelNativeFamily(modelID); family != modelcompat.NativeFamilyUnknown {
+	if family := modelcompat.ModelNativeFamily(modelID); family != modelcompat.NativeFamilyUnknown &&
+		family != modelcompat.NativeFamilyDeepSeek {
 		return family
 	}
 	return modelcompat.WireNativeFamily(wire)
@@ -1600,6 +1615,10 @@ func reasoningContinuityCompatMode(provider *ProviderConfig, modelID string) str
 		return modelcompat.ReasoningContinuityNone
 	}
 	if deepSeekTarget(provider, modelID) {
+		// DeepSeek's tool-history contract requires its wire-specific carrier;
+		// an explicit compat.mode is therefore advisory-only and must not turn
+		// off the carrier. deepSeekContractAdvisories reports that ineffective
+		// setting during config inspection.
 		if providerWireFamily(provider) == modelcompat.WireFamilyAnthropic {
 			return modelcompat.ReasoningContinuityAnthropicUnsigned
 		}
