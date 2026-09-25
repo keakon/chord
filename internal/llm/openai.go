@@ -199,9 +199,9 @@ type openAITool struct {
 
 // openAIFunctionDef is the function definition.
 type openAIFunctionDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	Parameters  toolSchema `json:"parameters"`
 	// Strict explicitly opts the function out of server-side strict schema
 	// normalization: some Chat Completions hosts rewrite a function whose
 	// schema omits strict into strict mode (every property required), which

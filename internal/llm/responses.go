@@ -187,10 +187,10 @@ type responsesContentBlock struct {
 // responsesTool is a tool definition for the Responses API.
 // The Responses API expects "parameters" (not "params") for tool schemas.
 type responsesTool struct {
-	Type        string         `json:"type"`
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	Parameters  map[string]any `json:"parameters,omitempty"`
+	Type        string     `json:"type"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Parameters  toolSchema `json:"parameters,omitempty"`
 	// Format carries the constraint-decoding block for custom (freeform)
 	// tools. Custom tools must not send "parameters".
 	Format *responsesToolFormat `json:"format,omitempty"`

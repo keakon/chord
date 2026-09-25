@@ -3,6 +3,7 @@ package llm
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
@@ -254,5 +255,28 @@ func TestApplyRequestHeaderOverrides(t *testing.T) {
 	}
 	if got := header.Get("x-keep"); got != "yes" {
 		t.Fatalf("x-keep = %q, want preserved", got)
+	}
+}
+
+func TestRequestOverridesPreserveUntouchedSchemaOrder(t *testing.T) {
+	const properties = `{"z":{"type":"string"},"a":{"type":"string"}}`
+	for _, tc := range []struct {
+		body      string
+		overrides config.RequestOverridesConfig
+	}{
+		{`{"tools":[{"function":{"parameters":{"properties":` + properties + `}}}],"n":9007199254740993}`, config.RequestOverridesConfig{Body: map[string]any{"temperature": 0.5}}},
+		{`{"tools":[{"input_schema":{"properties":` + properties + `}}]}`, config.RequestOverridesConfig{RenameBodyFields: map[string]*string{"tools": new("functions")}}},
+		{`{"schema":{"properties":` + properties + `,"description":"before"}}`, config.RequestOverridesConfig{Body: map[string]any{"schema": map[string]any{"description": "after"}}}},
+	} {
+		body, err := applyRequestBodyOverrides([]byte(tc.body), tc.overrides)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), properties) {
+			t.Fatalf("property order changed: %s", body)
+		}
+		if strings.Contains(tc.body, "9007199254740993") && !strings.Contains(string(body), "9007199254740993") {
+			t.Fatalf("number changed: %s", body)
+		}
 	}
 }

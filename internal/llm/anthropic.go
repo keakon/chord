@@ -157,7 +157,7 @@ type anthropicCacheCtrl struct {
 type anthropicTool struct {
 	Name         string              `json:"name"`
 	Description  string              `json:"description"`
-	InputSchema  map[string]any      `json:"input_schema"`
+	InputSchema  toolSchema          `json:"input_schema"`
 	CacheControl *anthropicCacheCtrl `json:"cache_control,omitempty"`
 }
 

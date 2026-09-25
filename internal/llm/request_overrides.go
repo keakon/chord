@@ -17,13 +17,17 @@ func applyRequestBodyOverrides(body []byte, overrides config.RequestOverridesCon
 		return body, nil
 	}
 
-	var patched map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.UseNumber()
-	if err := decoder.Decode(&patched); err != nil {
+	var patched map[string]json.RawMessage
+	if err := json.Unmarshal(body, &patched); err != nil {
 		return nil, fmt.Errorf("decode request body for overrides: %w", err)
 	}
-	if err := mergeRequestBodyOverrides(patched, overrides); err != nil {
+	if patched == nil {
+		return nil, fmt.Errorf("request body for overrides must be an object")
+	}
+	if err := renameRequestBodyFields(patched, overrides.RenameBodyFields); err != nil {
+		return nil, err
+	}
+	if err := mergeRawRequestBody(patched, overrides.Body); err != nil {
 		return nil, err
 	}
 	patchedBody, err := json.Marshal(patched)
@@ -33,9 +37,49 @@ func applyRequestBodyOverrides(body []byte, overrides config.RequestOverridesCon
 	return patchedBody, nil
 }
 
+// Preserve untouched subtrees, including tool schema property order. Only
+// objects along a patched path need decoding and re-encoding.
+func mergeRawRequestBody(target map[string]json.RawMessage, patch map[string]any) error {
+	for key, value := range patch {
+		if value == nil {
+			delete(target, key)
+			continue
+		}
+		if nested, ok := value.(map[string]any); ok {
+			var object map[string]json.RawMessage
+			if raw := bytes.TrimSpace(target[key]); len(raw) > 0 && raw[0] == '{' {
+				if err := json.Unmarshal(raw, &object); err != nil {
+					return fmt.Errorf("decode request override field %q: %w", key, err)
+				}
+			}
+			if object == nil {
+				object = make(map[string]json.RawMessage)
+			}
+			if err := mergeRawRequestBody(object, nested); err != nil {
+				return err
+			}
+			value = object
+		}
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Errorf("encode request override field %q: %w", key, err)
+		}
+		target[key] = encoded
+	}
+	return nil
+}
+
 func mergeRequestBodyOverrides(patched map[string]any, overrides config.RequestOverridesConfig) error {
-	renamed := make(map[string]any, len(overrides.RenameBodyFields))
-	for source, target := range overrides.RenameBodyFields {
+	if err := renameRequestBodyFields(patched, overrides.RenameBodyFields); err != nil {
+		return err
+	}
+	mergeRequestBody(patched, overrides.Body)
+	return nil
+}
+
+func renameRequestBodyFields[T any](patched map[string]T, fields map[string]*string) error {
+	renamed := make(map[string]T, len(fields))
+	for source, target := range fields {
 		value, ok := patched[source]
 		if !ok {
 			continue
@@ -49,7 +93,6 @@ func mergeRequestBodyOverrides(patched map[string]any, overrides config.RequestO
 		}
 	}
 	maps.Copy(patched, renamed)
-	mergeRequestBody(patched, overrides.Body)
 	return nil
 }
 
