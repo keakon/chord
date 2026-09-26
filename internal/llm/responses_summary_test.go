@@ -17,6 +17,16 @@ func TestNormalizeReasoningSummaryHeadings(t *testing.T) {
 			want: "**Reviewing the config**\n\n**Checking the loader**",
 		},
 		{
+			name: "following heading carries an underscore and parentheses",
+			in:   "**Checking the loader****Reviewing native_thinking flag (off) handling**",
+			want: "**Checking the loader**\n\n**Reviewing native_thinking flag (off) handling**",
+		},
+		{
+			name: "following heading carries a slash and a code span",
+			in:   "**Auditing (v2) naming****Checking path/legacy `cfg.X` names**",
+			want: "**Auditing (v2) naming**\n\n**Checking path/legacy `cfg.X` names**",
+		},
+		{
 			name: "heading glued to the previous token",
 			in:   "Nothing left to do.**Planning the next step**",
 			want: "Nothing left to do.\n\n**Planning the next step**",
@@ -32,6 +42,26 @@ func TestNormalizeReasoningSummaryHeadings(t *testing.T) {
 			want: "**First**\n\n**Second**\n\n**Third**",
 		},
 		{
+			name: "glued CJK headings split",
+			in:   "**检查配置****检查加载器**",
+			want: "**检查配置**\n\n**检查加载器**",
+		},
+		{
+			name: "two-rune Latin heading is long enough as the prefix side",
+			in:   "**AI****Ops**",
+			want: "**AI**\n\n**Ops**",
+		},
+		{
+			name: "very short following heading stays one run",
+			in:   "**AI****OK**",
+			want: "**AI****OK**",
+		},
+		{
+			name: "following heading mixed CJK and Latin stays one run",
+			in:   "**检查配置****关于 API 设计**",
+			want: "**检查配置****关于 API 设计**",
+		},
+		{
 			name: "headings already separated",
 			in:   "**First**\n\n**Second**",
 			want: "**First**\n\n**Second**",
@@ -45,6 +75,11 @@ func TestNormalizeReasoningSummaryHeadings(t *testing.T) {
 			name: "lowercase inline span is not a heading",
 			in:   "word**bold**",
 			want: "word**bold**",
+		},
+		{
+			name: "inline span with an underscore stays inline",
+			in:   "set the **draft_mode** flag first",
+			want: "set the **draft_mode** flag first",
 		},
 		{
 			name: "cjk inline bold stays inline",
@@ -69,10 +104,20 @@ func TestNormalizeReasoningSummaryHeadings(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeReasoningSummaryHeadings(tt.in); got != tt.want {
-				t.Fatalf("normalizeReasoningSummaryHeadings(%q) = %q, want %q", tt.in, got, tt.want)
+			if got := NormalizeReasoningSummaryHeadings(tt.in); got != tt.want {
+				t.Fatalf("NormalizeReasoningSummaryHeadings(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestNormalizeReasoningSummaryHeadings_ShortChainTerminatesUnchanged pins the
+// fixpoint bound: a chain too short to match any heading rule returns as-is
+// instead of looping.
+func TestNormalizeReasoningSummaryHeadings_ShortChainTerminatesUnchanged(t *testing.T) {
+	in := "**A****B****C**"
+	if got := NormalizeReasoningSummaryHeadings(in); got != in {
+		t.Fatalf("NormalizeReasoningSummaryHeadings(%q) = %q, want unchanged", in, got)
 	}
 }
 
@@ -98,5 +143,84 @@ func TestParseResponsesSSE_SeparatesFlattenedSummaryHeadings(t *testing.T) {
 	want := "**Reviewing the config**\n\n**Checking the loader**"
 	if got := resp.ThinkingBlocks[0].Thinking; got != want {
 		t.Fatalf("thinking = %q, want %q", got, want)
+	}
+}
+
+// TestParseResponsesSSE_KeepsRawReasoningTextVerbatim pins the storage side of
+// the raw reasoning_text channel: glued generated headings stay as the backend
+// sent them, so replay forwards the original and renderers add the breaks.
+func TestParseResponsesSSE_KeepsRawReasoningTextVerbatim(t *testing.T) {
+	raw := strings.Join([]string{
+		`data: {"type":"response.reasoning_text.delta","delta":"**Reviewing the config**"}`,
+		`data: {"type":"response.reasoning_text.delta","delta":"**Checking native_thinking handling**"}`,
+		`data: {"type":"response.output_text.delta","delta":"answer"}`,
+		`data: {"type":"response.completed","response":{"id":"resp_raw_reasoning","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}}`,
+	}, "\n\n") + "\n\n"
+
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(strings.NewReader(raw), nil, nil, nil, "", false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if len(resp.ThinkingBlocks) != 0 {
+		t.Fatalf("ThinkingBlocks = %+v, want none from the raw reasoning channel", resp.ThinkingBlocks)
+	}
+	want := "**Reviewing the config****Checking native_thinking handling**"
+	if got := resp.ReasoningContent; got != want {
+		t.Fatalf("reasoning = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeStreamingReasoningSummaryHeadings(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "trailing cjk bold waits for its terminator", in: "检查**配置**", want: "检查**配置**"},
+		{name: "cjk bold followed by text stays inline", in: "检查**配置**文件", want: "检查**配置**文件"},
+		{name: "cjk heading closed by a newline splits", in: "检查**配置**\n", want: "检查\n\n**配置**\n"},
+		{name: "trailing glued heading waits", in: "**First****Second**", want: "**First****Second**"},
+		{name: "glued heading closed by a newline splits", in: "**First****Second**\n", want: "**First**\n\n**Second**\n"},
+		{name: "last heading of a chain waits", in: "Done.**Planning the next step**", want: "Done.**Planning the next step**"},
+		{name: "heading closed by the next heading splits", in: "Done.**Planning the next step****Checking**", want: "Done.\n\n**Planning the next step****Checking**"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeStreamingReasoningSummaryHeadings(tt.in); got != tt.want {
+				t.Fatalf("NormalizeStreamingReasoningSummaryHeadings(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeStreamingReasoningSummaryHeadings_BreaksNeverRetract pins the
+// streaming property the TUI relies on: feeding the text rune by rune, every
+// paragraph boundary produced for a prefix stays in place once more text
+// arrives, so the settled part of a streaming thinking card never regresses.
+func TestNormalizeStreamingReasoningSummaryHeadings_BreaksNeverRetract(t *testing.T) {
+	samples := []string{
+		"检查**配置**文件，然后继续。**检查加载器**\n正文**第二节**\n\n结尾",
+		"**Reviewing the config****Checking the loader****Planning next**\nBody text.\n**Wrapping up**",
+		"Nothing left to do.\n**Planning the next step**\n\nKeep the **important** part.**API**Returns",
+		"这是**重要**内容。这是**重要**\n**AI****Ops**\n",
+	}
+	for _, sample := range samples {
+		prevSettled := ""
+		for i := range sample {
+			if i == 0 {
+				continue
+			}
+			got := NormalizeStreamingReasoningSummaryHeadings(sample[:i])
+			if !strings.HasPrefix(got, prevSettled) {
+				t.Fatalf("prefix %q: normalized %q dropped settled prefix %q", sample[:i], got, prevSettled)
+			}
+			if cut := strings.LastIndex(got, "\n\n"); cut >= 0 {
+				prevSettled = got[:cut+2]
+			}
+		}
+		final := NormalizeReasoningSummaryHeadings(sample)
+		if !strings.HasPrefix(final, prevSettled) {
+			t.Fatalf("final %q dropped settled prefix %q", final, prevSettled)
+		}
 	}
 }

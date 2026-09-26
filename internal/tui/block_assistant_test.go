@@ -52,6 +52,22 @@ func TestPreprocessThinkingMarkdown_GluedBoldSection(t *testing.T) {
 	}
 }
 
+func TestPreprocessThinkingMarkdown_GluedHeadingAfterHeading(t *testing.T) {
+	in := "**First section****Second section**"
+	want := "**First section**\n\n**Second section**"
+	if got := preprocessThinkingMarkdown(in); got != want {
+		t.Fatalf("expected a paragraph break between glued headings, got %q", got)
+	}
+}
+
+func TestPreprocessThinkingMarkdown_ThreeGluedHeadings(t *testing.T) {
+	in := "**First****Second****Third**"
+	want := "**First**\n\n**Second**\n\n**Third**"
+	if got := preprocessThinkingMarkdown(in); got != want {
+		t.Fatalf("expected every glued heading on its own paragraph, got %q", got)
+	}
+}
+
 func TestPreprocessThinkingMarkdown_PunctuationBeforeBold(t *testing.T) {
 	in := "which is great!**Considering placements**"
 	got := preprocessThinkingMarkdown(in)
@@ -120,6 +136,18 @@ func TestPreprocessThinkingMarkdown_DoesNotTouchBlankLineSeparated(t *testing.T)
 	got := preprocessThinkingMarkdown(in)
 	if got != in {
 		t.Fatalf("already blank-line separated section should be unchanged, got %q", got)
+	}
+}
+
+func TestPreprocessThinkingMarkdown_RepeatedCallReturnsSameResult(t *testing.T) {
+	in := "**First section****Second section**"
+	first := preprocessThinkingMarkdown(in)
+	second := preprocessThinkingMarkdown(in)
+	if first != second {
+		t.Fatalf("repeated calls diverged: %q vs %q", first, second)
+	}
+	if want := "**First section**\n\n**Second section**"; first != want {
+		t.Fatalf("preprocessThinkingMarkdown(%q) = %q, want %q", in, first, want)
 	}
 }
 
@@ -729,6 +757,32 @@ func TestRenderThinkingStreamingContentReusesSettledCache(t *testing.T) {
 	}
 	if !reflect.DeepEqual(block.thinkingStreamSettled[0].lines, oldLines) {
 		t.Fatalf("standalone thinking cache lines changed across identical rerender")
+	}
+}
+
+// TestRenderThinkingStreamingHeadingSettledPrefixNeverRegresses pins the
+// streaming heading normalization: a bold run that ends the streamed text so
+// far must not be split off as a heading and merged back when the next delta
+// continues the sentence, so the settled prefix only ever grows.
+func TestRenderThinkingStreamingHeadingSettledPrefixNeverRegresses(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	deltas := []string{"检查", "**配置**", "文件", "，继续。", "**下一节**", "\n正文", "\n\n结尾"}
+	block := &Block{Type: BlockThinking, Streaming: true}
+	settled := ""
+	for _, delta := range deltas {
+		block.Content += delta
+		_ = block.renderThinking(70)
+		raw := ""
+		if len(block.thinkingStreamSettled) > 0 {
+			raw = block.thinkingStreamSettled[0].raw
+		}
+		if !strings.HasPrefix(raw, settled) {
+			t.Fatalf("content %q: settled prefix regressed from %q to %q", block.Content, settled, raw)
+		}
+		settled = raw
+	}
+	if !strings.Contains(settled, "检查**配置**文件，继续。") {
+		t.Fatalf("settled prefix = %q, want the inline bold kept in its sentence", settled)
 	}
 }
 

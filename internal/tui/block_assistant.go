@@ -9,21 +9,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/thinkingtranslate"
 	"github.com/keakon/chord/internal/tui/markdownutil"
-)
-
-// thinkingBoldSectionBreakRE normalizes the break in front of a bold section
-// header ("**Title**") so glamour renders it as its own paragraph. GPT
-// reasoning summaries are inconsistent: the header is glued to the previous
-// token ("too.**Planning**"), behind a single newline that CommonMark treats as
-// an inline soft break ("job.\n**Clarifying**"), or already correct behind a
-// blank line. Only the first two forms match; the rune after "**" must look
-// like a header start (uppercase, digit, or CJK) so inline bold such as
-// "word**bold**" is not split. Both forms are handled in one scan because this
-// runs on every streaming flush.
-var thinkingBoldSectionBreakRE = regexp.MustCompile(
-	`(?:([a-zA-Z0-9.!?)}\]'"。．！？）』」\x{4e00}-\x{9fff}])(\*\*)|([^\n])\n(\*\*))(\p{Lu}|[0-9]|[\x{4e00}-\x{9fff}])`,
 )
 
 // thinkingHeadingOnlyRE matches a thinking part whose entire content is a
@@ -67,11 +55,27 @@ func thinkingContentIsPlaceholder(content string) bool {
 
 // preprocessThinkingMarkdown makes each "**" section header a standalone
 // paragraph by collapsing whatever separator precedes it into a blank line.
+// The break rules live in llm.NormalizeReasoningSummaryHeadings so the live
+// render of the streamed text and the finalized stored text cannot drift
+// apart.
 func preprocessThinkingMarkdown(s string) string {
 	if s == "" || !strings.Contains(s, "**") {
 		return s
 	}
-	return thinkingBoldSectionBreakRE.ReplaceAllString(s, "${1}${3}\n\n${2}${4}${5}")
+	return llm.NormalizeReasoningSummaryHeadings(s)
+}
+
+// preprocessStreamingThinkingMarkdown is preprocessThinkingMarkdown for a
+// thinking part that is still growing. It only breaks in front of a heading
+// whose terminator has already arrived, so appending a delta never takes back a
+// paragraph boundary in front of the streaming frontier: "检查**配置**" is not
+// split off as a heading only to merge back when "文件" follows, which would
+// flicker the card and rebuild the settled render cache.
+func preprocessStreamingThinkingMarkdown(s string) string {
+	if s == "" || !strings.Contains(s, "**") {
+		return s
+	}
+	return llm.NormalizeStreamingReasoningSummaryHeadings(s)
 }
 
 // styleRenderedThinkingLines applies title styling to the first line of each
@@ -195,14 +199,16 @@ type assistantMarkdownSegment struct {
 }
 
 type thinkingStreamSettledCache struct {
-	raw             string
-	frontier        int
-	width           int
-	frontierScanner markdownutil.StreamingFrontierScanner
-	lines           []string
-	tailRaw         string
-	tailWidth       int
-	tailLines       []string
+	preprocessInput  string
+	preprocessResult string
+	raw              string
+	frontier         int
+	width            int
+	frontierScanner  markdownutil.StreamingFrontierScanner
+	lines            []string
+	tailRaw          string
+	tailWidth        int
+	tailLines        []string
 	// styledLines caches the styled form of the settled lines so streaming
 	// flushes do not re-run per-line style rendering over the whole prefix.
 	styledLines        []string
@@ -1078,15 +1084,19 @@ func (b *Block) renderAssistant(width int) []string {
 // When ThinkingCollapsed is true, only the last maxCollapsedThinkingLines are shown.
 func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth int) ([]string, int) {
 	part = removeTrailingCursorGlyph(part)
-	part = preprocessThinkingMarkdown(part)
 	if !b.Streaming {
-		return renderMarkdownContent(part, contentWidth), 0
+		return renderMarkdownContent(preprocessThinkingMarkdown(part), contentWidth), 0
 	}
 
 	for len(b.thinkingStreamSettled) <= partIndex {
 		b.thinkingStreamSettled = append(b.thinkingStreamSettled, thinkingStreamSettledCache{})
 	}
 	cache := &b.thinkingStreamSettled[partIndex]
+	if cache.preprocessInput != part {
+		cache.preprocessInput = part
+		cache.preprocessResult = preprocessStreamingThinkingMarkdown(part)
+	}
+	part = cache.preprocessResult
 	frontier := cache.frontierScanner.Advance(part)
 
 	var out []string
@@ -1124,7 +1134,11 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 		// content so a tail-only stream does not fall back to a full scan on
 		// every flush.
 		scanner := cache.frontierScanner
-		b.thinkingStreamSettled[partIndex] = thinkingStreamSettledCache{frontierScanner: scanner}
+		b.thinkingStreamSettled[partIndex] = thinkingStreamSettledCache{
+			frontierScanner:  scanner,
+			preprocessInput:  cache.preprocessInput,
+			preprocessResult: cache.preprocessResult,
+		}
 		cache = &b.thinkingStreamSettled[partIndex]
 	}
 

@@ -892,8 +892,10 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		if done.Text != "" {
 			// A backend may flatten the whole summary into this one part and glue
 			// the section headings together; restore a paragraph break per heading
-			// before the text becomes a thinking block.
-			state.resp.ThinkingBlocks = append(state.resp.ThinkingBlocks, message.ThinkingBlock{Thinking: normalizeReasoningSummaryHeadings(done.Text)})
+			// before the text becomes a thinking block. Unlike ReasoningContent,
+			// thinking blocks are also written verbatim by the markdown session
+			// export, which applies no display normalization of its own.
+			state.resp.ThinkingBlocks = append(state.resp.ThinkingBlocks, message.ThinkingBlock{Thinking: NormalizeReasoningSummaryHeadings(done.Text)})
 		}
 		return nil, nil, false, nil
 
