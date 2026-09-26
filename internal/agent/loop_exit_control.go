@@ -314,7 +314,7 @@ func providerSupportsRequiredToolChoice(provider *llm.ProviderConfig) bool {
 		return true
 	case config.ProviderTypeGenerateContent:
 		return true
-	case config.ProviderTypeChatCompletions, config.ProviderTypeChatCompletionsLegacy, config.ProviderTypeResponses:
+	case config.ProviderTypeChatCompletions, config.ProviderTypeResponses:
 		return true
 	default:
 		return false

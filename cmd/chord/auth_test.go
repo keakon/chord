@@ -782,7 +782,7 @@ func TestRunAuthRefreshRejectsNonCodexProvider(t *testing.T) {
 	t.Setenv("CHORD_CONFIG_HOME", configHome)
 	if err := os.WriteFile(filepath.Join(configHome, "config.yaml"), []byte(`providers:
   openai:
-    type: chat_completions
+    type: chat-completions
     api_url: https://example.com/v1/chat/completions
     models:
       gpt-4o:

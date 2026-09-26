@@ -18,11 +18,10 @@ import (
 
 // Provider type constants
 const (
-	ProviderTypeChatCompletions       = "chat-completions"
-	ProviderTypeChatCompletionsLegacy = "chat_completions"
-	ProviderTypeMessages              = "messages"
-	ProviderTypeResponses             = "responses"
-	ProviderTypeGenerateContent       = "generate-content"
+	ProviderTypeChatCompletions = "chat-completions"
+	ProviderTypeMessages        = "messages"
+	ProviderTypeResponses       = "responses"
+	ProviderTypeGenerateContent = "generate-content"
 )
 
 const (

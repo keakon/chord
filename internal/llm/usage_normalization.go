@@ -65,7 +65,7 @@ func defaultInputUsageSemantics(providerType string) (includesRead, includesWrit
 	switch strings.TrimSpace(strings.ToLower(providerType)) {
 	case config.ProviderTypeMessages:
 		return false, false
-	case config.ProviderTypeChatCompletions, config.ProviderTypeChatCompletionsLegacy, config.ProviderTypeResponses:
+	case config.ProviderTypeChatCompletions, config.ProviderTypeResponses:
 		return true, true
 	case config.ProviderTypeGenerateContent:
 		return true, false
