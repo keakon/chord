@@ -571,7 +571,6 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 }
 
 func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnID uint64, messages []message.Message, agentErrSourceID string) {
-	a.pendingLoopContinuation = nil
 	a.mainLLMRequestInFlight.Store(true)
 	a.mainRequestSeq++
 	requestSeq := a.mainRequestSeq

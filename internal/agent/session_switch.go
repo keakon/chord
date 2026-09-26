@@ -278,7 +278,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 	a.resetSubAgentMailboxRuntime()
 	loopWasEnabled := a.loopState.Enabled
 	a.loopState.disable()
-	a.pendingLoopContinuation = nil
+	a.setPendingLoopContinuation(nil)
 	a.pendingLSPDiagnosticOverlay = ""
 	a.pendingRecoveryPrompt = ""
 	a.clearPendingThinkingReplay()

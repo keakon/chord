@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	routingMemoryMarker      = "## Memory\nThis project has historical memory"
+	routingMemoryMarker      = "## Memory\nThe \"# Project Memory\" block"
 	routingWriteContract     = "Never add or restate entries yourself"
 	routingDeleteOnly        = "You may only delete an index line"
 	routingExtractionNote    = "may be captured into memory automatically"

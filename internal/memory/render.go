@@ -24,6 +24,12 @@ const (
 	maxSummaryBytes = 8192
 )
 
+// SummaryTruncatedMarker ends a bounded summary that dropped part of MEMORY.md
+// (User Notes past their reservation, index entries past the budget, or bytes
+// past the wire cap). The Memory guidance allows reading MEMORY.md only when
+// this marker is present.
+const SummaryTruncatedMarker = "[Summary truncated: MEMORY.md holds more than this injected summary.]"
+
 // ActiveIndexSoftLimit is roughly how many entries fit in the reminder budget.
 // It is the number extraction is told to consolidate against, so the index stays
 // within what actually gets injected instead of growing a tail nobody reads.
@@ -62,12 +68,15 @@ func BoundedSummary(idx *MemoryIndex) (string, bool) {
 	}
 	notes := strings.TrimSpace(idx.UserNotes())
 	notesLimited := notes
+	truncated := false
 	if sessionview.EstimatedTokens(notes) > notesTokens {
 		notesLimited = boundedPrefixUTF8(notes, notesTokens*4)
+		truncated = true
 	}
 	notesLimited = strings.TrimSpace(notesLimited)
 	managedBudget := max(maxSummaryTokens-sessionview.EstimatedTokens(notesLimited), managedSectionMinTokens)
-	managed := renderManagedLines(idx.Managed, managedBudget)
+	managed, omitted := renderManagedLines(idx.Managed, managedBudget)
+	truncated = truncated || omitted > 0
 
 	var parts []string
 	if notesLimited != "" {
@@ -84,11 +93,21 @@ func BoundedSummary(idx *MemoryIndex) (string, bool) {
 	// summary JSON-escaped (see renderMemoryReminder): `"`, `\`, and the
 	// HTML-sensitive `<`, `>`, `&` each expand to a six-byte \uXXXX escape, so a
 	// summary dense in them would otherwise inject several times the cap.
-	if escapedWireLen(out) > maxSummaryBytes {
-		out = boundedEscapedPrefix(out, maxSummaryBytes)
+	limit := maxSummaryBytes
+	if truncated || escapedWireLen(out) > limit {
+		// Reserve room for the marker so the model can tell a cut summary from
+		// the whole file and knows the rest is only a read away.
+		truncated = true
+		limit -= escapedWireLen("\n\n" + SummaryTruncatedMarker)
+	}
+	if escapedWireLen(out) > limit {
+		out = boundedEscapedPrefix(out, limit)
 	}
 	if strings.TrimSpace(out) == "" {
 		return "", false
+	}
+	if truncated {
+		out += "\n\n" + SummaryTruncatedMarker
 	}
 	return out, true
 }
@@ -119,8 +138,8 @@ func boundedEscapedPrefix(s string, byteLimit int) string {
 }
 
 // renderManagedLines renders managed index entries as "- [id](link)\n  — summary",
-// adding whole entries until the token budget is reached. It never truncates
-// mid-entry. The first entry is always kept so a sparse or single large entry
+// adding whole entries until the token budget is reached, and reports how many
+// entries did not fit. It never truncates mid-entry. The first entry is always kept so a sparse or single large entry
 // still injects something.
 //
 // Entries render in MEMORY.md's own order, not sorted: BuildManagedIndexReplacing
@@ -128,17 +147,17 @@ func boundedEscapedPrefix(s string, byteLimit int) string {
 // learned records inject first and manually reordering MEMORY.md takes effect
 // directly. Sorting by ID would rank by slug spelling — with multi-byte IDs
 // sorting last, they could never be injected at all.
-func renderManagedLines(entries []ManagedEntry, budget int) string {
+func renderManagedLines(entries []ManagedEntry, budget int) (string, int) {
 	var sb strings.Builder
 	used := 0
-	for _, e := range entries {
+	for i, e := range entries {
 		line := "- [" + e.ID + "](" + e.Link + ")\n  — " + e.Summary + "\n"
 		add := sessionview.EstimatedTokens(line)
 		if used > 0 && used+add > budget {
-			break
+			return strings.TrimSpace(sb.String()), len(entries) - i
 		}
 		sb.WriteString(line)
 		used += add
 	}
-	return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(sb.String()), 0
 }

@@ -301,7 +301,7 @@ func (JobListTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
 }
 
 func (JobListTool) Description() string {
-	return "List the background jobs you can read or stop (id, status, elapsed, quiet duration, label), including jobs started by the main agent and by your direct owner. Use it to see what is still running before deciding to wait, to do other work, or to end your turn. Only active jobs are listed by default; set include_finished:true to also list the retained terminal ones. A job row with a deadline shows how much of it is left."
+	return "List the background jobs you can read or stop (id, status, elapsed, quiet duration, label): the main agent sees every job; a delegated worker sees its own jobs plus those of the main agent and of its direct owner. Use it to see what is still running before deciding to wait, to do other work, or to end your turn. Only active jobs are listed by default; set include_finished:true to also list the retained terminal ones. A job row with a deadline shows how much of it is left."
 }
 
 type jobListArgs struct {

@@ -56,15 +56,14 @@ func (ReadTool) Description() string {
 		"- offset is a 1-based line number (1 = the first line); omit it to start from the beginning.\n" +
 		"- Paging is line-based, not character-based: offset/limit cannot split a single line that exceeds the output budget.\n" +
 		"Output format:\n" +
-		"- Normal output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (an empty file, or offset=N+1 — the one-past-the-last-line value that is the normal end of paging; an offset larger than N+1 is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit hunks.\n" +
+		"- Normal output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (an empty file, or offset=N+1 — the one-past-the-last-line value that is the normal end of paging; an offset larger than N+1 is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit arguments.\n" +
 		"- The header omits encoding for UTF-8 files and reports it only for other encodings.\n" +
 		"- read output normalizes line endings to LF.\n" +
 		"Truncation semantics (a read that simply did not reach the end of the file is not truncation):\n" +
 		"- `truncated=budget`: the tool itself dropped requested lines to fit the approximate 20k-token read budget; the header adds `requested_lines=a-d` (the range you originally requested) — compare it with the returned lines=a-b and page further with offset/limit.\n" +
 		"- `truncated=stale`: a context-reduction pass trimmed this old read output because the file was modified after the read; do not trust its content and re-read before editing.\n" +
 		"- `truncated=superseded`: a newer read of the same range appears later in this conversation; use that newer output.\n" +
-		"- Context reduction trims an old read only when its content is no longer the current view, keeping the leading lines (lines=a-b then covers just the kept head). A read that is still current is never trimmed, so do not re-read files just to refresh them.\n" +
-		"For edit, include a few unchanged source lines around the intended change; if you need more surrounding context, read the intended nearby block before patching."
+		"- Context reduction trims an old read only when its content is no longer the current view, keeping the leading lines (lines=a-b then covers just the kept head). A read that is still current is never trimmed, so do not re-read files just to refresh them."
 }
 
 func (ReadTool) Parameters() map[string]any {

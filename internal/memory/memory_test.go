@@ -215,6 +215,9 @@ func TestBoundedSummaryUserNotesOnly(t *testing.T) {
 	if !strings.Contains(summary, "focused verification") {
 		t.Fatalf("summary missing notes: %q", summary)
 	}
+	if strings.Contains(summary, SummaryTruncatedMarker) {
+		t.Fatalf("a summary carrying the whole file must not claim truncation: %q", summary)
+	}
 }
 
 func TestBoundedSummaryInactiveWithoutFile(t *testing.T) {
@@ -1596,6 +1599,9 @@ func TestBoundedSummaryLongNotesStillLeaveIndexFloor(t *testing.T) {
 	}
 	if got := strings.Count(summary, "- [record-number-"); got == 0 {
 		t.Fatalf("long notes squeezed the index out entirely: %q", summary)
+	}
+	if !strings.HasSuffix(summary, SummaryTruncatedMarker) {
+		t.Fatalf("a cut summary must end with the truncation marker: %q", summary)
 	}
 }
 

@@ -174,7 +174,11 @@ func fileInspectionConstraintsPromptBlock(visible map[string]struct{}, ruleset p
 	hasGrep := hasVisibleTool(visible, tools.NameGrep)
 	hasGlob := hasVisibleTool(visible, tools.NameGlob)
 	hasLsp := hasVisibleTool(visible, tools.NameLsp)
-	if hasRead && hasGrep && hasGlob && hasLsp && !hasScopedInspectionPermissions(ruleset) {
+	// lsp is only registered when language servers are configured, so its
+	// absence alone is a missing integration, not a permission boundary; only
+	// a rule that denies it limits the role.
+	lspDenied := !hasLsp && ruleset.IsDisabled(tools.NameLsp)
+	if hasRead && hasGrep && hasGlob && !lspDenied && !hasScopedInspectionPermissions(ruleset) {
 		return ""
 	}
 

@@ -4039,7 +4039,6 @@ func TestFitCompactionInputToContextLimitReturnsErrorForGrosslyOversizedPrompt(t
 		EvidenceItems:    []evidenceItem{{Kind: evidenceUserCorrection, Excerpt: "do not hardcode"}},
 		RecentTailAnchor: "- user: continue",
 		GoalAnchor:       "- improve extraction",
-		ConstraintAnchor: "- do not hardcode",
 		DecisionAnchor:   "- classify issues before changing implementation",
 		ProgressAnchor:   "- latest error: patch not found",
 	}
@@ -4079,19 +4078,15 @@ func TestBuildCompactionInputUsesProvidedEvidenceAndTail(t *testing.T) {
 	if len(input.RecentTail) != 1 || input.RecentTail[0].Content != tail[0].Content {
 		t.Fatalf("recent tail mismatch: %+v", input.RecentTail)
 	}
-	if !strings.Contains(input.ConstraintAnchor, "do not hardcode") {
-		t.Fatalf("constraint anchor missing provided evidence: %q", input.ConstraintAnchor)
-	}
 }
 
 func TestBuildCompactionPromptIncludesDurableAnchors(t *testing.T) {
 	prompt := buildCompactionPromptWithKeyFiles(
 		&compactionInput{
-			Transcript:       "transcript",
-			GoalAnchor:       "- improve extraction quality",
-			ConstraintAnchor: "- do not hardcode",
-			DecisionAnchor:   "- classify failures before choosing the next layer",
-			ProgressAnchor:   "- latest error: patch not found",
+			Transcript:     "transcript",
+			GoalAnchor:     "- improve extraction quality",
+			DecisionAnchor: "- classify failures before choosing the next layer",
+			ProgressAnchor: "- latest error: patch not found",
 		},
 		"history-1.md",
 		nil,
@@ -4099,7 +4094,7 @@ func TestBuildCompactionPromptIncludesDurableAnchors(t *testing.T) {
 		nil,
 		nil,
 	)
-	for _, want := range []string{"Durable anchors extracted before summarization:", "Latest user request anchor:", "Constraint anchor:", "Decision anchor:", "Recent progress anchor:"} {
+	for _, want := range []string{"Extraction hints (summary input only; not carried into the checkpoint):", "Latest user request anchor:", "Decision anchor:", "Recent progress anchor:"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
@@ -6014,12 +6009,11 @@ func TestCollectCompactionEvidenceClassifiesTypedMailbox(t *testing.T) {
 
 func TestCompactionPromptAnchorsLatestRequestAgainstStaleTodo(t *testing.T) {
 	input := &compactionInput{
-		Transcript:       "transcript",
-		GoalAnchor:       buildGoalAnchor([]message.Message{{Role: "user", Content: "继续调查 rate limit"}, {Role: "user", Content: "生成压缩目标保持方案 plan"}}),
-		EvidenceItems:    []evidenceItem{{Kind: evidenceDoneRejected, Title: "Latest Done rejection", WhyNeeded: "The rejection reason is recent user feedback/request and may supersede older todos.", Excerpt: "把这个方案生成一个plan文档"}},
-		ConstraintAnchor: "- (none extracted)",
-		DecisionAnchor:   "- (none explicitly extracted; infer from progress and evidence)",
-		ProgressAnchor:   "- (none extracted)",
+		Transcript:     "transcript",
+		GoalAnchor:     buildGoalAnchor([]message.Message{{Role: "user", Content: "继续调查 rate limit"}, {Role: "user", Content: "生成压缩目标保持方案 plan"}}),
+		EvidenceItems:  []evidenceItem{{Kind: evidenceDoneRejected, Title: "Latest Done rejection", WhyNeeded: "The rejection reason is recent user feedback/request and may supersede older todos.", Excerpt: "把这个方案生成一个plan文档"}},
+		DecisionAnchor: "- (none explicitly extracted; infer from progress and evidence)",
+		ProgressAnchor: "- (none extracted)",
 	}
 	prompt := buildCompactionPromptWithKeyFiles(
 		input,

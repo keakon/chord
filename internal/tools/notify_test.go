@@ -101,6 +101,22 @@ func TestNotifyParametersMatchRoleCapabilities(t *testing.T) {
 			if got := properties["message_type"].(map[string]any)["enum"].([]string); !slices.Equal(got, tc.messageType) {
 				t.Fatalf("message types = %v, want %v", got, tc.messageType)
 			}
+			// Descriptions must only name the shapes this variant can send.
+			schema, err := json.Marshal(params)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(schema), "owner notification"); got != tc.owner {
+				t.Fatalf("owner notification mentioned = %t, want %t: %s", got, tc.owner, schema)
+			}
+			if got := strings.Contains(string(schema), "pending request"); got != tc.target {
+				t.Fatalf("response contract mentioned = %t, want %t: %s", got, tc.target, schema)
+			}
+			if target, ok := properties["target_task_id"].(map[string]any); ok && !tc.owner {
+				if desc := target["description"].(string); strings.Contains(desc, "Optional") || strings.Contains(desc, "Omit") {
+					t.Fatalf("required target_task_id described as optional: %q", desc)
+				}
+			}
 		})
 	}
 }

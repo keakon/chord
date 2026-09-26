@@ -164,7 +164,13 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	}
 	if a.stageCompletionCandidatePending && !a.stageCompletionCandidatePromptDelivered {
 		a.stageCompletionCandidatePromptDelivered = true
-		overlays = append(overlays, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "<system-reminder>\nThe TODO list reached a terminal state; this does not establish that the current user request is complete. Check remaining work and verification. If only the final response remains, deliver it without compact_context. Otherwise continue the work; a stage boundary alone is not a reason to checkpoint.\n</system-reminder>"})
+		reminder := "The TODO list reached a terminal state; this does not establish that the current user request is complete. Check remaining work and verification. "
+		if a.compactContextVisible() {
+			reminder += "If only the final response remains, deliver it without compact_context. Otherwise continue the work; a stage boundary alone is not a reason to checkpoint."
+		} else {
+			reminder += "If only the final response remains, deliver it; otherwise continue the work."
+		}
+		overlays = append(overlays, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "<system-reminder>\n" + reminder + "\n</system-reminder>"})
 	}
 
 	// Context-pressure reminder (sticky per compaction window — full text once,
@@ -210,7 +216,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		})
 	}
 
-	if block := strings.TrimSpace(a.pendingLoopContinuationPromptBlock()); block != "" {
+	if block := strings.TrimSpace(a.takePendingLoopContinuationPromptBlock()); block != "" {
 		overlays = append(overlays, message.Message{
 			Role:    "user",
 			Kind:    message.KindTurnOverlay,

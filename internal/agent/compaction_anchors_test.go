@@ -181,8 +181,10 @@ func TestCompactionPromptCarriesSessionAnchors(t *testing.T) {
 	}
 
 	empty := buildCompactionPromptWithKeyFiles(&compactionInput{Transcript: "t"}, "history-1.md", nil, nil, nil, nil)
-	if !strings.Contains(empty, "(none yet; this is the first compaction of the session)") {
-		t.Fatalf("prompt missing the empty-anchor placeholder:\n%s", empty)
+	// Empty anchors do not prove this is the first compaction, so the
+	// placeholder states only the fact.
+	if !strings.Contains(empty, "Durable session anchors (carried forward verbatim in the checkpoint):\n- (none)") || strings.Contains(empty, "this is the first compaction") {
+		t.Fatalf("prompt missing the factual empty-anchor placeholder:\n%s", empty)
 	}
 }
 

@@ -29,10 +29,10 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 		a.loopState.State = LoopStateExecuting
 		a.emitLoopStateChanged()
 		if a.shouldEmitLoopContinuationForAssessment(payload) {
-			a.pendingLoopContinuation = a.buildLoopContinuationNote(payload)
-			if a.pendingLoopContinuation != nil {
-				a.emitLoopContinuationNote(a.pendingLoopContinuation, true)
-			}
+			// A terminal stop has no tool result to attach the note to, so it is
+			// persisted as a loop notice; the history already carries it and it
+			// must not also ride the next request as an overlay.
+			a.emitLoopContinuationNote(a.buildLoopContinuationNote(payload))
 		}
 		a.emitActivity("main", ActivityExecuting, "loop")
 		a.handleContinueFromContext()
@@ -169,6 +169,10 @@ func inferLoopBlockerCategory(reason string) string {
 	}
 }
 
+// loopBlockerCategories are the categories a <blocked>category: reason</blocked>
+// marker may name; anything else is inferred from the reason text.
+var loopBlockerCategories = []string{"credential_or_permission_missing", "dependency_unavailable", "required_input_missing", "workspace_conflict", "user_decision_required"}
+
 func parseLoopBlockedReason(raw string) (category, detail string) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -178,8 +182,7 @@ func parseLoopBlockedReason(raw string) (category, detail string) {
 	detail = raw
 	if idx := strings.Index(raw, ":"); idx > 0 {
 		maybeCategory := strings.TrimSpace(raw[:idx])
-		switch maybeCategory {
-		case "credential_or_permission_missing", "dependency_unavailable", "required_input_missing", "workspace_conflict", "user_decision_required":
+		if slices.Contains(loopBlockerCategories, maybeCategory) {
 			category = maybeCategory
 			detail = strings.TrimSpace(raw[idx+1:])
 		}
@@ -512,7 +515,6 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 		"- Prioritize unresolved items above only while they still serve that request",
 		"- Do not let earlier goals or stale TODOs override newer user instructions",
 		a.loopContinuationDecisionInstructionLine(),
-		"- If the task is truly blocked, stop with <blocked>category: reason</blocked> using category in {credential_or_permission_missing, dependency_unavailable, required_input_missing, workspace_conflict, user_decision_required}",
 		"- Choose the best reasonable path unless a real user decision is required",
 		"- Only ask the user when a material ambiguity, permission boundary, or major tradeoff requires it",
 	}

@@ -110,7 +110,6 @@ type compactionInput struct {
 	RecentTailAnchor string
 	SessionAnchors   compactionAnchors
 	GoalAnchor       string
-	ConstraintAnchor string
 	DecisionAnchor   string
 	ProgressAnchor   string
 	// PriorCheckpoint is the durable body of the most recent checkpoint inside
@@ -212,10 +211,9 @@ func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, cont
 		// progress anchors read only assistant/tool messages, which carry no
 		// @-injected file parts, so both surfaces are identical for them. If
 		// either is ever extended to user messages, it must switch to pruned.
-		GoalAnchor:       buildGoalAnchor(pruned),
-		ConstraintAnchor: buildConstraintAnchor(evidenceItems),
-		DecisionAnchor:   buildDecisionAnchor(normalized),
-		ProgressAnchor:   buildProgressAnchor(normalized, evidenceItems),
+		GoalAnchor:     buildGoalAnchor(pruned),
+		DecisionAnchor: buildDecisionAnchor(normalized),
+		ProgressAnchor: buildProgressAnchor(normalized, evidenceItems),
 	}, nil
 }
 
@@ -332,20 +330,6 @@ func buildGoalAnchor(messages []message.Message) string {
 	return "- (not confidently recoverable from retained head)"
 }
 
-func buildConstraintAnchor(items []evidenceItem) string {
-	var lines []string
-	for _, item := range items {
-		if item.Kind != evidenceUserCorrection {
-			continue
-		}
-		lines = append(lines, "- "+strings.ReplaceAll(compactTextSnippet(item.Excerpt, 220), "\n", " "))
-	}
-	if len(lines) == 0 {
-		return "- (none extracted)"
-	}
-	return strings.Join(lines, "\n")
-}
-
 func buildDecisionAnchor(messages []message.Message) string {
 	var lines []string
 	for _, msg := range messages {
@@ -401,11 +385,10 @@ func buildProgressAnchor(messages []message.Message, items []evidenceItem) strin
 
 func formatCompactionAnchorsForPrompt(input *compactionInput) string {
 	if input == nil {
-		return "Latest user request anchor:\n- (none)\n\nConstraint anchor:\n- (none)\n\nDecision anchor:\n- (none)\n\nRecent progress anchor:\n- (none)"
+		return "Latest user request anchor:\n- (none)\n\nDecision anchor:\n- (none)\n\nRecent progress anchor:\n- (none)"
 	}
 	return strings.Join([]string{
 		"Latest user request anchor:\n" + input.GoalAnchor,
-		"Constraint anchor:\n" + input.ConstraintAnchor,
 		"Decision anchor:\n" + input.DecisionAnchor,
 		"Recent progress anchor:\n" + input.ProgressAnchor,
 	}, "\n\n")
@@ -1445,7 +1428,7 @@ func buildCompactionPromptWithKeyFiles(input *compactionInput, historyPath strin
 	} else {
 		sb.WriteString(formatCompactionAnchorsForSummarizePrompt(compactionAnchors{}))
 	}
-	sb.WriteString("\n\nDurable anchors extracted before summarization:\n")
+	sb.WriteString("\n\nExtraction hints (summary input only; not carried into the checkpoint):\n")
 	sb.WriteString(formatCompactionAnchorsForPrompt(input))
 	sb.WriteString("\n\nKey file candidates:\n")
 	sb.WriteString(formatKeyFileCandidatesForPrompt(keyFiles))

@@ -43,8 +43,8 @@ func TestBuildCompactionAnchorsSupersedesContradictoryConstraint(t *testing.T) {
 		t.Fatalf("superseded constraints = %+v", second.SupersededConstraints)
 	}
 	rendered := renderCompactionAnchors(second)
-	if !strings.Contains(rendered, "- ~ 不要修改 internal/parser.go") {
-		t.Fatalf("superseded constraint not rendered with the ~ marker: %q", rendered)
+	if !strings.Contains(rendered, compactAnchorsSupersededLabel+"\n- 不要修改 internal/parser.go") {
+		t.Fatalf("superseded constraint not rendered under its labeled list: %q", rendered)
 	}
 	// The superseded state round-trips through the checkpoint.
 	parsed := latestCompactionAnchors([]message.Message{checkpointWithAnchors(t, second)})
@@ -184,8 +184,8 @@ func TestStatedConstraintBecomesAnchor(t *testing.T) {
 	}
 }
 
-// Superseded-only anchors must round-trip: the constraints header gates parsing
-// of the "~ " lines, so omitting it would silently drop the superseded history.
+// Superseded-only anchors must round-trip: the superseded label alone must
+// carry them, without an active constraints list.
 func TestSupersededOnlyAnchorsRoundTrip(t *testing.T) {
 	anchors := compactionAnchors{OriginalRequest: "do the thing", SupersededConstraints: []string{"不要修改 a.go"}}
 	parsed := parseCompactionAnchors(renderCompactionAnchors(anchors))

@@ -206,11 +206,31 @@ func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 	return "## Workspace Instructions\nEach applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message. Follow it as mandatory scoped workspace instructions; do not reread already-loaded AGENTS.md files. Read additional instructions only when entering a directory whose instructions were not loaded."
 }
 
-func (a *MainAgent) pendingLoopContinuationPromptBlock() string {
-	if a.pendingLoopContinuation == nil {
+// takePendingLoopContinuationPromptBlock renders and consumes the
+// request-scoped continuation note. It runs while the request goroutine
+// assembles overlays, and a busy /loop off can clear the note from the event
+// loop at the same time, so both sides go through loopReductionMu.
+//
+// Consumption is one-shot and unacknowledged: a request that never reaches the
+// provider (a hook block, a governor rejection, or a transport failure before
+// the send) does not re-attach the note to the following request. The Done
+// rejection that produced the note stays visible in the tool result, so the
+// next request still carries the substance of the feedback.
+func (a *MainAgent) takePendingLoopContinuationPromptBlock() string {
+	a.loopReductionMu.Lock()
+	note := a.pendingLoopContinuation
+	a.pendingLoopContinuation = nil
+	a.loopReductionMu.Unlock()
+	if note == nil {
 		return ""
 	}
-	return "## " + a.pendingLoopContinuation.Title + "\n\n" + a.pendingLoopContinuation.Text
+	return "## " + note.Title + "\n\n" + note.Text
+}
+
+func (a *MainAgent) setPendingLoopContinuation(note *LoopContinuationNote) {
+	a.loopReductionMu.Lock()
+	a.pendingLoopContinuation = note
+	a.loopReductionMu.Unlock()
 }
 
 func (a *MainAgent) questionToolAvailable() bool {
@@ -378,7 +398,8 @@ func (a *MainAgent) plannerModePromptBlock() string {
 		hasFileWrite = hasWrite || hasPatch
 		_, hasHandoff = visible[tools.NameHandoff]
 	}
-	fileWriteStep := "5. Save the plan document under .chord/plans/ as YYYYMMDD-<slug>.md, using today's date and a short descriptive slug derived from the task title (for example .chord/plans/20260903-session-key-isolation.md). If a file with the same date and slug already exists (a later revision of the same topic), append -2, -3, and so on. When a new plan document replaces an earlier one, declare it with a supersedes: <old file> line near the top; move finished or superseded documents to .chord/plans/archive/ (archive files keep their original names). Write the plan before handing it off or finishing the planning turn."
+	handoff := toolPromptName(tools.NameHandoff)
+	fileWriteStep := "3. Save the plan document under .chord/plans/ as YYYYMMDD-<slug>.md, using today's date and a short descriptive slug derived from the task title (for example .chord/plans/20260903-session-key-isolation.md). If a file with the same date and slug already exists (a later revision of the same topic), append -2, -3, and so on. When a new plan document replaces an earlier one, declare it with a supersedes: <old file> line near the top; move finished or superseded documents to .chord/plans/archive/ (archive files keep their original names). Write the plan before handing it off or finishing the planning turn."
 	if hasFileWrite {
 		fileWriteStep += " Write the plan document with the visible file tools available in this role."
 	} else {
@@ -387,9 +408,9 @@ func (a *MainAgent) plannerModePromptBlock() string {
 	if a.compactContextVisible() {
 		fileWriteStep += " Once saved, this plan document can be listed in the compact_context tool's state_files parameter when a checkpoint is worthwhile, following the tool's file-reference and permission rules. Use planned_state_files only for paths that are not yet written; those paths are not completion evidence."
 	}
-	handoffStep := "6. "
+	handoffStep := "4. "
 	if hasHandoff {
-		handoffStep += "If this role supports handoff to execution, do it only after the plan file exists. Hand off only when the request actually needs execution: never hand off a direct answer or a plan the user only asked to review."
+		handoffStep += "Call " + handoff + " only after the plan file exists, and only when the request actually needs execution: never hand off a direct answer or a plan the user only asked to review."
 	} else {
 		handoffStep += "Handoff is unavailable in this role. Return the saved plan path or the plan content needed for the next step, and explain the limitation clearly."
 	}
@@ -397,42 +418,36 @@ func (a *MainAgent) plannerModePromptBlock() string {
 
 ## Planning Mode
 
-You are now in planning mode. Your goal is to analyse the user's request, explore
-the codebase as needed, and produce a concrete execution plan — or to answer
-directly when the request does not call for one.
+You are in planning mode: analyse the user's request, explore the codebase as
+needed, and either answer directly or produce a concrete execution plan.
 
 ### Decide what to deliver first
-Answer directly and stop (no plan file, no Handoff) when the user asks for any
-of the following:
+Answer directly and stop — no plan document and no ` + handoff + ` — when the user
+asks for any of the following:
 - An explanation, recommendation, comparison, or diagnosis
 - A read-only review or analysis — including verification of a report or existing
   plan — whose deliverable is the conclusion itself
-- A change small enough to describe without a task breakdown
+- A change small enough to describe without a task breakdown (a plan with a
+  single task is not a plan)
 
 Create a plan document only when the request needs concrete implementation work
 for an execution role, or when the user explicitly asks for a plan. If the user
 asked only for the plan, save the document and return a summary without calling
-Handoff.
+` + handoff + `.
 
 ### Workflow
-1. If the user has not yet described what they want to accomplish (their message
-   is "I'd like to create a plan. Please ask me what I want to accomplish."),
-   greet them and ask what they'd like to plan. Wait for their response before
-   proceeding.
-2. Explore the codebase using the tools and permissions available in this role.
-3. Analyse the requirements and decompose them into concrete, independently-
+1. Explore the codebase using the tools and permissions available in this role.
+2. Analyse the requirements and decompose them into concrete, independently-
    executable tasks.
-4. For direct-answer requests, stop after the answer — do not create a plan file
-   and do not call Handoff.
 ` + fileWriteStep + `
 ` + handoffStep + `
 
-### When the user rejects Handoff
+### When the user rejects handoff
 The rejection is appended to the conversation as a user message ("Handoff
 rejected: <reason>") and becomes the latest request driving this turn:
 - Revise the existing plan file referenced by that message; do not create a new
   plan document or rename the existing one for the same plan.
-- Call Handoff again only after addressing the rejection reason.
+- Call ` + handoff + ` again only after addressing the rejection reason.
 
 ### Plan Document Format
 Write a Markdown document with this structure:
@@ -446,25 +461,23 @@ Write a Markdown document with this structure:
     ## Tasks
 
     ### 1. <Task title>
-    <Task description>
+    <What to change, naming the specific files>
+    Verify: <how to tell this task succeeded>
 
     ### 2. <Task title> (depends: 1)
-    <Task description with dependency>
+    <What to change, naming the specific files>
+    Verify: <how to tell this task succeeded>
 
 Rules:
 - Each task is a ### heading with a numeric ID followed by a dot
 - Dependencies are declared in parentheses: (depends: 1, 2)
 - Task IDs are immutable — never renumber existing tasks
 - New tasks always take max(existing IDs) + 1
-- Make tasks granular enough for independent execution
-- Do NOT include status markers — they are added during execution
-
-### Plan quality requirements
-- A request you can answer directly does not need a plan document — answer it and stop
-- A plan with only 1 step is not a plan: describe the single change directly instead of writing a document, unless the user explicitly asked for a plan
-- Each step must name the specific file(s) to modify
-- Avoid vague verbs: "handle", "improve", "update" — use "add", "remove", "rename", "extract"
-- Include a verification step: how will you know each step succeeded?
+- Make tasks granular enough for independent execution; each names the specific
+  file(s) to modify and carries a Verify line
+- Use concrete verbs such as "add", "remove", "rename", "extract" instead of vague
+  ones such as "handle", "improve", "update"
+- Do NOT include status markers; execution tracks progress in its own todo list
 `)
 }
 

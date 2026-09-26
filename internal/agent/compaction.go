@@ -192,11 +192,12 @@ Write the summary using the exact Markdown section headings below, in order:
 
 Requirements:
 - Every section must be present.
+- The runtime overwrites "Current User Request" and "SubAgent State" with authoritative snapshots when it has them; keep those two sections brief and spend detail on the others.
 - The latest user request is authoritative: identify it explicitly, prioritize it over older or conflicting goals, and mention superseded older context only when needed. Do not let old implementation/debugging goals override a later meta-analysis, clarification request, or explicit correction.
 - Treat the most recent Done rejected reason as important user feedback/request when it asks for more work, asks a question, changes scope, or corrects the agent.
 - Separate active todos that directly serve the latest user request from historical, completed, or superseded ones; if the user changed topics after todos were created, do not treat stale todos as active work.
 - "Active Objective" and "Next Step" must directly serve the latest user request. Do not restart tasks listed under "Completed/background" or "Stale/superseded".
-- Under "Todo State", use these subgroups exactly: "Active/relevant to latest request", "Completed/background", and "Stale/superseded". If a subgroup has no items, write "(none)".
+- Under "Todo State", write exactly these subgroup label lines, each followed by its items: "- Active/relevant to latest request:", "- Completed/background:", and "- Stale/superseded:". If a subgroup has no items, write "(none)".
 - Use concise bullet-style prose under each heading.
 - Include concrete files, commands, errors, and decisions when known.
 - If a fact is not supported by the transcript or anchors, write "unknown" or omit it; do not infer unstated implementation details.
@@ -208,7 +209,7 @@ Requirements:
 - Keep each file path on its own bullet line. Do not add inline explanation text on the same line as a file path.
 - Focus on durable continuation context, not narrative recap.
 - Do not duplicate long verbatim excerpts already present in the evidence pack or recent tail anchor.
-- Durable session anchors are preserved verbatim outside your summary: do not restate them, and never write anything that contradicts them. They outrank the transcript when the two disagree.
+- Durable session anchors are preserved verbatim outside your summary: do not restate them. Their standing constraints outrank the transcript when the two disagree; the latest user request, not their original request, decides the current objective. Under "User Constraints", list only constraints that are not already in the session anchors, or write "(none)".
 - If details are missing because earliest messages were omitted, say so explicitly instead of inventing facts.`
 
 type evidenceKind string

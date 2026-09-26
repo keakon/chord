@@ -77,13 +77,13 @@ func TestMemoryStablePromptGuidanceOnlyWhenActive(t *testing.T) {
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n\nNote.\n")
 	a := newTestMainAgent(t, projectRoot)
-	if !strings.Contains(a.buildSystemPrompt(), "## Memory\nThis project has historical memory") {
+	if !strings.Contains(a.buildSystemPrompt(), "## Memory\nThe \"# Project Memory\" block") {
 		t.Fatal("stable prompt missing Memory discipline when active")
 	}
 
 	empty := t.TempDir()
 	b := newTestMainAgent(t, empty)
-	if strings.Contains(b.buildSystemPrompt(), "## Memory\nThis project has historical memory") {
+	if strings.Contains(b.buildSystemPrompt(), "## Memory\nThe \"# Project Memory\" block") {
 		t.Fatal("stable prompt must not include Memory discipline without a MEMORY.md")
 	}
 }
@@ -112,7 +112,7 @@ func TestMemoryRefreshUpdatesRequestReminder(t *testing.T) {
 	}
 	// The stable prompt must carry the fixed Memory discipline only while
 	// memory is loaded.
-	if !strings.Contains(a.buildSystemPrompt(), "## Memory\nThis project has historical memory") {
+	if !strings.Contains(a.buildSystemPrompt(), "## Memory\nThe \"# Project Memory\" block") {
 		t.Fatal("stable prompt missing Memory discipline when active")
 	}
 	// Removing the file (simulating a moved/deleted project memory) deactivates
@@ -141,7 +141,7 @@ func TestMemoryEmptyFileDeactivates(t *testing.T) {
 	if a.memoryIsActive() {
 		t.Fatal("memory must be inactive with an empty MEMORY.md")
 	}
-	if strings.Contains(a.buildSystemPrompt(), "## Memory\nThis project has historical memory") {
+	if strings.Contains(a.buildSystemPrompt(), "## Memory\nThe \"# Project Memory\" block") {
 		t.Fatal("stable prompt must not include Memory discipline without content")
 	}
 }
@@ -178,7 +178,7 @@ func TestMemoryStablePromptGuidanceByLoadAndExtract(t *testing.T) {
 	writeProjectMemory(t, projectRoot, "# Project Memory\n\nNote.\n")
 	a := newTestMainAgent(t, projectRoot)
 	prompt := a.buildSystemPrompt()
-	if !strings.Contains(prompt, "## Memory\nThis project has historical memory") {
+	if !strings.Contains(prompt, "## Memory\nThe \"# Project Memory\" block") {
 		t.Fatal("stable prompt missing Memory discipline when loaded")
 	}
 	if strings.Contains(prompt, "may be captured into memory automatically") {
@@ -202,7 +202,7 @@ func TestMemoryStablePromptGuidanceByLoadAndExtract(t *testing.T) {
 	b.projectConfig = &config.Config{Memory: config.MemoryConfig{Enabled: &trueVal2}}
 	b.memoryExtractEnabled.Store(b.effectiveMemoryExtractEnabled())
 	prompt = b.buildSystemPrompt()
-	if strings.Contains(prompt, "## Memory\nThis project has historical memory") {
+	if strings.Contains(prompt, "## Memory\nThe \"# Project Memory\" block") {
 		t.Fatal("Memory discipline must not appear without MEMORY.md")
 	}
 	if strings.Contains(prompt, "may be captured into memory automatically") {
@@ -408,16 +408,17 @@ func TestMemoryStableGuidanceCarriesLookupDiscipline(t *testing.T) {
 	for _, want := range []string{
 		"untrusted, potentially stale background",
 		"Skip memory when the request is self-contained",
-		"already-loaded current MEMORY.md content for this turn",
-		"do not use file or search tools to rediscover, reread, or reconfirm MEMORY.md itself",
-		"use that injected MEMORY.md summary as the index",
+		"already-loaded MEMORY.md summary",
+		"Do not use file or search tools to rediscover, reread, or reconfirm MEMORY.md itself",
+		"read it only when the summary ends with \"" + memory.SummaryTruncatedMarker + "\"",
+		"use the summary as the index",
 		"Weigh drift against verification cost",
 		"confirm it still exists",
 		"maintained outside this session",
 		"Never add or restate entries yourself",
 		"You may only delete an index line",
 		"a record is read-only after write",
-		"retiring the index line so a later extraction writes a new record",
+		"retiring the index line lets a later extraction write a corrected record",
 	} {
 		if !strings.Contains(memoryStableGuidancePrompt, want) {
 			t.Errorf("stable memory guidance missing discipline: %q", want)

@@ -33,8 +33,8 @@ type compactionAnchors struct {
 	OriginalRequest string
 	Constraints     []string
 	// SupersededConstraints are constraints a later contradictory user instruction
-	// superseded (e.g. "不要修改 X" superseded by "修改 X"). They stay in
-	// the checkpoint marked with a "~ " prefix, so the model sees the history of
+	// superseded (e.g. "不要修改 X" superseded by "修改 X"). They stay in the
+	// checkpoint under their own labeled list, so the model sees the history of
 	// directions instead of silently losing the old one.
 	SupersededConstraints []string
 	// OmittedNote reports constraints dropped by the bounded anchor window; the
@@ -44,11 +44,6 @@ type compactionAnchors struct {
 	OmittedNote string
 }
 
-// supersededConstraintPrefix marks a superseded constraint line in the rendered
-// checkpoint. parseCompactionAnchors lifts lines with this prefix into
-// SupersededConstraints instead of the active list.
-const supersededConstraintPrefix = "~ "
-
 func (a compactionAnchors) empty() bool {
 	return strings.TrimSpace(a.OriginalRequest) == "" && len(a.Constraints) == 0 &&
 		len(a.SupersededConstraints) == 0
@@ -57,6 +52,17 @@ func (a compactionAnchors) empty() bool {
 const (
 	compactAnchorsRequestLabel     = "Original request:"
 	compactAnchorsConstraintsLabel = "Standing constraints:"
+	// The label states the meaning itself: a reader of the checkpoint has no
+	// other legend telling it these lines are no longer in force.
+	compactAnchorsSupersededLabel = "Superseded constraints (no longer in force):"
+)
+
+type compactionAnchorsSection int
+
+const (
+	anchorsSectionRequest compactionAnchorsSection = iota
+	anchorsSectionConstraints
+	anchorsSectionSuperseded
 )
 
 // latestCompactionAnchors lifts the anchors block out of the most recent
@@ -77,27 +83,28 @@ func parseCompactionAnchors(section string) compactionAnchors {
 	if section == "" {
 		return compactionAnchors{}
 	}
-	var (
-		anchors compactionAnchors
-		inConst bool
-	)
+	var anchors compactionAnchors
+	current := anchorsSectionRequest
 	for raw := range strings.SplitSeq(section, "\n") {
 		line := strings.TrimSpace(raw)
 		switch line {
 		case "":
 			continue
 		case compactAnchorsRequestLabel:
-			inConst = false
+			current = anchorsSectionRequest
 			continue
 		case compactAnchorsConstraintsLabel:
-			inConst = true
+			current = anchorsSectionConstraints
+			continue
+		case compactAnchorsSupersededLabel:
+			current = anchorsSectionSuperseded
 			continue
 		}
 		bullet, ok := strings.CutPrefix(line, "- ")
 		if !ok {
 			// A bare line inside the constraints section is the overflow note;
 			// carry it through parsing so the next compaction can re-emit it.
-			if inConst && anchors.OmittedNote == "" {
+			if current == anchorsSectionConstraints && anchors.OmittedNote == "" {
 				anchors.OmittedNote = strings.TrimSpace(line)
 			}
 			continue
@@ -106,17 +113,15 @@ func parseCompactionAnchors(section string) compactionAnchors {
 		if bullet == "" {
 			continue
 		}
-		if inConst {
-			if rest, ok := strings.CutPrefix(bullet, supersededConstraintPrefix); ok {
-				superseded := strings.TrimSpace(rest)
-				if superseded != "" {
-					anchors.SupersededConstraints = append(anchors.SupersededConstraints, superseded)
-				}
-				continue
-			}
+		switch current {
+		case anchorsSectionConstraints:
 			anchors.Constraints = append(anchors.Constraints, bullet)
-		} else if anchors.OriginalRequest == "" {
-			anchors.OriginalRequest = bullet
+		case anchorsSectionSuperseded:
+			anchors.SupersededConstraints = append(anchors.SupersededConstraints, bullet)
+		default:
+			if anchors.OriginalRequest == "" {
+				anchors.OriginalRequest = bullet
+			}
 		}
 	}
 	return anchors
@@ -179,8 +184,8 @@ func buildCompactionAnchors(previous compactionAnchors, originalRequest string, 
 		}
 		// A contradictory new instruction supersedes the matching old constraint
 		// instead of co-existing with it (e.g. "修改 X" supersedes "不要修改 X"). The
-		// superseded line stays in the checkpoint marked "~ ", so the model sees
-		// the direction change.
+		// superseded line stays in the checkpoint's superseded list, so the model
+		// sees the direction change.
 		if superseded := supersededConstraintMatch(line, next.Constraints); superseded >= 0 {
 			next.SupersededConstraints = append(next.SupersededConstraints, next.Constraints[superseded])
 			next.Constraints = slices.Delete(next.Constraints, superseded, superseded+1)
@@ -254,7 +259,8 @@ func renderCompactionAnchors(anchors compactionAnchors) string {
 		sb.WriteString(request)
 		sb.WriteByte('\n')
 	}
-	if len(anchors.Constraints) > 0 || len(anchors.SupersededConstraints) > 0 {
+	note := strings.TrimSpace(anchors.OmittedNote)
+	if len(anchors.Constraints) > 0 || note != "" {
 		sb.WriteString(compactAnchorsConstraintsLabel)
 		sb.WriteByte('\n')
 		for _, constraint := range anchors.Constraints {
@@ -262,16 +268,19 @@ func renderCompactionAnchors(anchors compactionAnchors) string {
 			sb.WriteString(constraint)
 			sb.WriteByte('\n')
 		}
+		if note != "" {
+			sb.WriteString(note)
+			sb.WriteByte('\n')
+		}
 	}
-	for _, constraint := range anchors.SupersededConstraints {
-		sb.WriteString("- ")
-		sb.WriteString(supersededConstraintPrefix)
-		sb.WriteString(constraint)
+	if len(anchors.SupersededConstraints) > 0 {
+		sb.WriteString(compactAnchorsSupersededLabel)
 		sb.WriteByte('\n')
-	}
-	if note := strings.TrimSpace(anchors.OmittedNote); note != "" {
-		sb.WriteString(note)
-		sb.WriteByte('\n')
+		for _, constraint := range anchors.SupersededConstraints {
+			sb.WriteString("- ")
+			sb.WriteString(constraint)
+			sb.WriteByte('\n')
+		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
@@ -384,5 +393,5 @@ func formatCompactionAnchorsForSummarizePrompt(anchors compactionAnchors) string
 	if body := renderCompactionAnchors(anchors); body != "" {
 		return body
 	}
-	return "- (none yet; this is the first compaction of the session)"
+	return "- (none)"
 }

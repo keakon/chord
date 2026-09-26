@@ -894,7 +894,7 @@ func TestMainAgentRolePromptBlock_UsesPlannerPromptOnlyForPlannerRole(t *testing
 	// selects the block; the bare role name no longer does.
 	a.activeConfig = &config.AgentConfig{Name: "planner", PromptPreset: config.PromptPresetPlanning}
 	got := a.mainAgentRolePromptBlock()
-	for _, want := range []string{"Save the plan document under .chord/plans/ as YYYYMMDD-<slug>.md, using today's date and a short descriptive slug derived from the task title", "Explore the codebase using the tools and permissions available in this role.", "Answer directly and stop (no plan file, no Handoff) when the user asks for any", "When the user rejects Handoff"} {
+	for _, want := range []string{"Save the plan document under .chord/plans/ as YYYYMMDD-<slug>.md, using today's date and a short descriptive slug derived from the task title", "Explore the codebase using the tools and permissions available in this role.", "Answer directly and stop — no plan document and no `handoff` — when the user\nasks for any", "When the user rejects handoff"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("planner prompt missing %q in %q", want, got)
 		}
@@ -942,12 +942,12 @@ handoff: allow
 	if strings.Contains(got, "Handoff is unavailable in this role.") {
 		t.Fatalf("planner prompt with Handoff should not claim it is unavailable, got %q", got)
 	}
-	if !strings.Contains(got, "If this role supports handoff to execution, do it only after the plan file exists.") {
+	if !strings.Contains(got, "Call `handoff` only after the plan file exists") {
 		t.Fatalf("planner prompt with Handoff should include handoff path, got %q", got)
 	}
 	for _, want := range []string{
 		"never hand off a direct answer or a plan the user only asked to review",
-		"A request you can answer directly does not need a plan document",
+		"a plan with a\n  single task is not a plan",
 		"Revise the existing plan file referenced by that message",
 	} {
 		if !strings.Contains(got, want) {
@@ -1525,6 +1525,33 @@ delete: allow
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
 		}
+	}
+}
+
+// Without configured language servers lsp is never registered; that missing
+// integration must not read as a permission boundary for an otherwise
+// unrestricted role, while a rule that denies lsp still does.
+func TestMainAgentCapabilityPromptBlock_UnconfiguredLSPIsNotAnInspectionLimit(t *testing.T) {
+	a := &MainAgent{tools: tools.NewRegistry()}
+	a.tools.Register(tools.ReadTool{})
+	a.tools.Register(tools.GrepTool{})
+	a.tools.Register(tools.GlobTool{})
+	a.tools.Register(tools.NewShellTool("bash"))
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": allow
+`)}
+	a.rebuildRuleset()
+	if got := a.mainAgentCapabilityPromptBlock(); strings.Contains(got, "## File Inspection Constraints") {
+		t.Fatalf("unconfigured lsp must not add inspection constraints: %q", got)
+	}
+
+	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
+"*": allow
+lsp: deny
+`)}
+	a.rebuildRuleset()
+	if got := a.mainAgentCapabilityPromptBlock(); !strings.Contains(got, "## File Inspection Constraints") {
+		t.Fatalf("denied lsp must add inspection constraints: %q", got)
 	}
 }
 

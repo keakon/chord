@@ -66,14 +66,19 @@ func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 		"offset/limit cannot split a single line that exceeds the output budget",
 		"omits encoding for UTF-8 files",
 		"everything after that first line is exact file text without line-number gutters or extra indentation",
-		"copy only the text after READ_RESULT into edit hunks",
+		"copy only the text after READ_RESULT into edit arguments",
 		"approximate 20k-token read budget",
-		"if you need more surrounding context, read the intended nearby block before patching",
-		"For edit, include a few unchanged source lines around the intended change",
 		"read output normalizes line endings to LF",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
+		}
+	}
+	// read is shared by the replace-edit and patch surfaces; edit sizing lives in
+	// each edit tool's own description.
+	for _, unwanted := range []string{"hunk", "patching"} {
+		if strings.Contains(desc, unwanted) {
+			t.Fatalf("Description() uses edit-format-specific wording %q: %q", unwanted, desc)
 		}
 	}
 }

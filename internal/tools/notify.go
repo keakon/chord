@@ -98,6 +98,21 @@ func (t *NotifyTool) Description() string {
 }
 
 func (t *NotifyTool) Parameters() map[string]any {
+	// Each variant describes only the message shapes it can send, so a
+	// target-only surface never mentions owner notifications and vice versa.
+	const responseCorrelation = "Required for message_type=response: the exact correlation_id of the pending request being answered, never an invented, guessed, or reused one. Omit it for a plain targeted message."
+	var messageTypeDesc, correlationDesc string
+	switch {
+	case t.allowOwner && t.allowTarget:
+		messageTypeDesc = "progress or notice for an owner notification; response only to answer a pending request from a delegated worker, together with its correlation_id. Omit it for a plain targeted message."
+		correlationDesc = responseCorrelation + " Optional for an owner notification."
+	case t.allowTarget:
+		messageTypeDesc = "Set response only to answer a pending request from the delegated worker, together with its correlation_id. Omit it for a plain targeted message."
+		correlationDesc = responseCorrelation
+	default:
+		messageTypeDesc = "progress or notice for this owner notification."
+		correlationDesc = "Optional correlation id for this owner notification."
+	}
 	properties := map[string]any{
 		"message": map[string]any{
 			"type":        "string",
@@ -107,11 +122,8 @@ func (t *NotifyTool) Parameters() map[string]any {
 			"type":        "string",
 			"description": "Optional message kind hint such as progress, clarification, correction, or constraint_update.",
 		},
-		"message_type": map[string]any{
-			"type":        "string",
-			"description": "Owner notifications support progress/notice. A targeted response requires message_type=response and correlation_id, with message and optional kind as its payload. Omit message_type for a plain targeted message.",
-		},
-		"correlation_id": map[string]any{"type": "string", "description": "Required for message_type=response: use the exact correlation_id of the pending request being answered, never an invented, guessed, or reused one. Omit for plain targeted messages. Optional for owner-visible notices."},
+		"message_type":   map[string]any{"type": "string", "description": messageTypeDesc},
+		"correlation_id": map[string]any{"type": "string", "description": correlationDesc},
 	}
 	messageTypes := []string{"response"}
 	if t.allowOwner {
@@ -125,13 +137,13 @@ func (t *NotifyTool) Parameters() map[string]any {
 	properties["message_type"].(map[string]any)["enum"] = messageTypes
 	required := []string{"message"}
 	if t.allowTarget {
-		properties["target_task_id"] = map[string]any{
-			"type":        "string",
-			"description": "Optional durable task handle for the specific delegated worker to notify. Required when used from MainAgent or when notifying a specific delegate.",
-		}
-		if !t.allowOwner {
+		targetDesc := "Durable task handle of the delegated worker to notify."
+		if t.allowOwner {
+			targetDesc += " Omit it to notify your owner instead."
+		} else {
 			required = append(required, "target_task_id")
 		}
+		properties["target_task_id"] = map[string]any{"type": "string", "description": targetDesc}
 	}
 	params := map[string]any{
 		"type":                 "object",

@@ -273,11 +273,8 @@ func (a *MainAgent) appendLoopNoticeMessage(title, text string) {
 	a.persistAsync(identity.MainAgentID, msg)
 }
 
-func (a *MainAgent) emitLoopContinuationNote(note *LoopContinuationNote, persistUserMessage bool) {
+func (a *MainAgent) emitLoopContinuationNote(note *LoopContinuationNote) {
 	if note == nil {
-		return
-	}
-	if !persistUserMessage {
 		return
 	}
 	a.appendLoopNoticeMessage(note.Title, note.Text)
@@ -289,7 +286,7 @@ func (a *MainAgent) loopCompletionRequirementLines() []string {
 		"- All requested work is finished",
 		"- Required verification is completed, or explicitly reported as not run",
 		"- If verification cannot be run, state why in the final report.",
-		"- If the task is blocked, use <blocked>category: reason</blocked> instead of stopping the loop",
+		"- If the task is truly blocked, end your reply with <blocked>category: reason</blocked> (category is one of " + strings.Join(loopBlockerCategories, ", ") + "); the loop then stops as blocked",
 		a.loopCompletionDecisionRequirementLine(),
 	}
 	if a.hasActiveSubAgents() {

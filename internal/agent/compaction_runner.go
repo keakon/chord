@@ -1140,8 +1140,8 @@ func buildCompactionRepairPrompt(originalPrompt string, validationErr error) str
 	return fmt.Sprintf(`Write a valid compaction summary from the original compaction input below.
 
 Requirements:
-- Write only the summary.
-- Keep the same facts; do not invent details.
+- Write only the summary, starting directly with the first heading and without private thinking tags.
+- Use only facts from the original compaction input; do not invent details.
 - Use exactly these Markdown headings, in this order, each on its own line:
 %s%s
 - Make "Current User Request" identify the latest user request explicitly.

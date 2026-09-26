@@ -84,7 +84,7 @@ func (TodoWriteTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"todos": map[string]any{
 				"type":        "array",
-				"description": "Complete todo list (replaces existing list). Provide ALL items, not just changes. Array order is the intended execution order. Multiple in_progress items are accepted when this role supports multiple workstreams; each in_progress item must represent a distinct live workstream and use a unique active_form.",
+				"description": "Complete todo list (replaces existing list). Provide ALL items, not just changes. Array order is the intended execution order. Multiple in_progress items are accepted when each represents a distinct live workstream and uses a unique active_form.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{

@@ -275,8 +275,9 @@ func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result s
 	note := a.buildLoopContinuationNote(assessment)
 	if note != nil {
 		a.loopState.DeferContinuationPromptUntilDone = false
-		a.pendingLoopContinuation = note
-		a.emitLoopContinuationNote(note, false)
+		// The rejection itself stays attached to the done call as its tool
+		// result; the note rides the next request as a one-shot overlay.
+		a.setPendingLoopContinuation(note)
 	}
 	a.emitToTUI(ToolCallUpdateEvent{ID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, ArgsStreamingDone: true, AgentID: "main"})
 	a.emitToTUI(ToolResultEvent{CallID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, Result: result, Status: ToolResultStatusSuccess})

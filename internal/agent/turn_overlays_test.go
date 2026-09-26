@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // turnOverlayBenchAgent builds an agent with a long conversation and no
@@ -82,16 +83,35 @@ func TestStageCompletionCandidateOverlayIsOneShot(t *testing.T) {
 	a := turnOverlayBenchAgent(1)
 	a.stageCompletionCandidatePending = true
 	overlays := a.buildTurnOverlayMessages()
-	if len(overlays) != 1 || !strings.Contains(overlays[0].Content, "a stage boundary alone is not a reason to checkpoint") {
+	if len(overlays) != 1 || !strings.Contains(overlays[0].Content, "this does not establish that the current user request is complete") {
 		t.Fatalf("stage completion overlays = %#v", overlays)
 	}
-	if !strings.Contains(overlays[0].Content, "deliver it without compact_context") {
-		t.Fatal("stage completion must not request a checkpoint instead of the final response")
+	if strings.Contains(overlays[0].Content, "compact_context") {
+		t.Fatal("stage completion must not name compact_context while it is not visible")
 	}
 	if !a.stageCompletionCandidatePromptDelivered || !a.stageCompletionCandidatePending {
 		t.Fatal("stage completion candidate prompt was not delivered while candidate was retained")
 	}
 	if len(a.ctxMgr.Snapshot()) != 1 {
 		t.Fatal("stage completion overlay must not be durable")
+	}
+}
+
+// With compact_context visible, the reminder also keeps the checkpoint tool
+// from replacing the final response.
+func TestStageCompletionCandidateOverlayNamesVisibleCompactContext(t *testing.T) {
+	a := turnOverlayBenchAgent(1)
+	a.modelDrivenCompactionEnabled.Store(true)
+	a.tools = tools.NewRegistry()
+	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
+	a.stageCompletionCandidatePending = true
+	overlays := a.buildTurnOverlayMessages()
+	if len(overlays) != 1 {
+		t.Fatalf("stage completion overlays = %#v", overlays)
+	}
+	for _, want := range []string{"deliver it without compact_context", "a stage boundary alone is not a reason to checkpoint"} {
+		if !strings.Contains(overlays[0].Content, want) {
+			t.Fatalf("stage completion overlay missing %q: %s", want, overlays[0].Content)
+		}
 	}
 }
