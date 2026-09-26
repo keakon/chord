@@ -635,6 +635,7 @@ func (c *Client) completeStreamTarget(
 	round int,
 	messages []message.Message,
 	tools []message.ToolDefinition,
+	mcpDeclarations []message.ToolDefinition,
 	cb StreamCallback,
 	fallbackEnabled bool,
 	fallbackModels []FallbackModel,
@@ -704,6 +705,15 @@ func (c *Client) completeStreamTarget(
 	var normalizeReport modelcompat.NormalizeReport
 	targetMessages, normalizeReport = normalizeMessagesForPoolTargetWithOptions(targetMessages, poolTarget, t.tuning, replayLevel)
 	logNormalizeReport(t.provider.Name(), t.modelID, reasoningReplayPolicy(t.provider, t.modelID), replayLevel, len(messages), len(targetMessages), normalizeReport)
+	// A target that does not accept the dynamic MCP declaration shape still
+	// has to receive a legal standard request: fold the declarations into the
+	// top-level tools array for this target only. The selected target decides
+	// the mount shape; every other pool member sees the same tool set in the
+	// shape it accepts, so mixed pools do not force a top-level rebuild.
+	inlineMCPDeclarations := !targetAcceptsMCPDeclarations(poolTarget)
+	if inlineMCPDeclarations {
+		targetMessages, tools = inlineMCPToolDeclarations(targetMessages, tools, mcpDeclarations)
+	}
 	requestTuning := replayCompatibleRequestTuning(t.tuning, targetMessages, poolTarget)
 	if requestTuning.DisableReasoning && !t.tuning.DisableReasoning {
 		log.Infof("disabling reasoning for replay-incompatible request provider=%v model=%v replay_level=%v", t.provider.Name(), t.modelID, replayLevel)
@@ -961,7 +971,7 @@ func (c *Client) completeStreamTarget(
 			continue
 		}
 		if replayLevel < modelcompat.ReplayCompatStrict && (explicitReplayRejection || ambiguousReplayRecovery) {
-			nextLevel, nextMessages, nextReport, ok := nextDistinctReplayRequest(messages, targetMessages, poolTarget, t.tuning, replayLevel)
+			nextLevel, nextMessages, nextReport, ok := nextDistinctReplayRequest(messages, targetMessages, poolTarget, t.tuning, replayLevel, inlineMCPDeclarations, mcpDeclarations)
 			if ok {
 				replayLevel = nextLevel
 				if explicitReplayRejection {
@@ -971,6 +981,12 @@ func (c *Client) completeStreamTarget(
 					log.Warnf("probing request-local replay compatibility after repeated ambiguous failure provider=%v model=%v key_id=%v level=%v origin=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), replayLevel, apiErrorOrigin(err), err)
 				}
 				targetMessages = nextMessages
+				if inlineMCPDeclarations {
+					// The rebuilt messages carry the declaration messages again,
+					// so the probe must re-fold them or it would ship both the
+					// declaration messages and the already-merged top-level tools.
+					targetMessages, tools = inlineMCPToolDeclarations(targetMessages, tools, mcpDeclarations)
+				}
 				normalizeReport = nextReport
 				requestTuning = replayCompatibleRequestTuning(t.tuning, targetMessages, poolTarget)
 				logNormalizeReport(t.provider.Name(), t.modelID, reasoningReplayPolicy(t.provider, t.modelID), replayLevel, len(messages), len(targetMessages), nextReport)
@@ -1231,11 +1247,20 @@ func minimumReplayLevelForTarget(messages []message.Message, target FallbackMode
 	return modelcompat.ReplayCompatNative
 }
 
+// nextDistinctReplayRequest returns the first stricter replay level whose
+// request differs from current, the messages actually sent at the current
+// level. When inlineMCPDeclarations is set, current already has the dynamic
+// MCP declarations folded into the top-level tools, so each candidate is
+// folded the same way before the comparison; comparing a raw candidate with
+// the folded current would never match and would resend an equivalent request.
+// The returned messages are the raw candidate; the caller folds them.
 func nextDistinctReplayRequest(
 	messages, current []message.Message,
 	target FallbackModel,
 	tuning RequestTuning,
 	currentLevel int,
+	inlineMCPDeclarations bool,
+	mcpDeclarations []message.ToolDefinition,
 ) (int, []message.Message, modelcompat.NormalizeReport, bool) {
 	// DeepSeek requires the original reasoning with the structured history.
 	// Removing either cannot repair a rejection of that contract.
@@ -1244,7 +1269,12 @@ func nextDistinctReplayRequest(
 	}
 	for nextLevel := currentLevel + 1; nextLevel <= modelcompat.ReplayCompatStrict; nextLevel++ {
 		nextMessages, nextReport := normalizeMessagesForPoolTargetWithOptions(messages, target, tuning, nextLevel)
-		if reflect.DeepEqual(nextMessages, current) {
+		candidate := nextMessages
+		if inlineMCPDeclarations {
+			// The folded messages do not depend on the top-level tools argument.
+			candidate, _ = inlineMCPToolDeclarations(nextMessages, nil, mcpDeclarations)
+		}
+		if reflect.DeepEqual(candidate, current) {
 			continue
 		}
 		return nextLevel, nextMessages, nextReport, true
@@ -1344,6 +1374,7 @@ func (c *Client) completeStreamWithRetry(
 	startVariant string,
 	messages []message.Message,
 	tools []message.ToolDefinition,
+	mcpDeclarations []message.ToolDefinition,
 	cb StreamCallback,
 	fallbackEnabled bool,
 	fallbackModels []FallbackModel,
@@ -1534,6 +1565,7 @@ func (c *Client) completeStreamWithRetry(
 				round,
 				messages,
 				tools,
+				mcpDeclarations,
 				cb,
 				fallbackEnabled,
 				fallbackModels,

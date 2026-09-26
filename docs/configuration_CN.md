@@ -1019,7 +1019,7 @@ mcp:
   - `/mcp disable <server>`
   - `/mcp status`
 - Agent 运行中也可以执行 `/mcp enable|disable`。当前正在进行的请求继续使用启动时的工具表面；下一次 LLM 请求（包括自动重试 / 恢复请求）才会应用新的执行状态。
-- 默认情况下，下一次请求会重建顶层 MCP 工具表面，因此已有提示词缓存可能无法命中。模型显式开启 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 后，Chord 会把工具声明挂在固定的对话位置，并在后续请求里原位回放。禁用 server 只会拦截执行，不删除已经发出的声明，因此前缀保持稳定。模型切换、会话恢复/切换或上下文压缩后，Chord 会退回顶层工具并提示缓存复用可能下降：这些边界会破坏提示词缓存复用，固定挂载位置也不再可信。
+- 默认情况下，下一次请求会重建顶层 MCP 工具表面，因此已有提示词缓存可能无法命中。模型显式开启 `compat.chat_completions.mcp_system_tools_message` 或 `compat.responses.mcp_additional_tools` 后，Chord 会把工具声明挂在固定的对话位置，并在后续请求里原位回放。禁用 server 只会拦截执行，不删除已经发出的声明，因此前缀保持稳定。挂载形态跟随当前选中的模型：切换模型会为新模型重建顶层工具表面，新模型接受动态声明时继续沿用。会话恢复/切换或上下文压缩后则会退回顶层工具，并在本次会话运行内一直保持，因为这些边界会破坏提示词缓存复用、固定挂载位置也不再可信；之后再切换模型也不会解除，只有开启新的会话运行（比如 `/new`）才会重新启用动态声明。某个工具在历史里已有调用、但当前运行里还没声明过时，请求同样会退回顶层工具，免得它的声明落到自己的调用之后。回退本身不发提示；退回后的 `/mcp enable|disable` 要等新工具表面被某个请求装载过一次，才会再次提示缓存可能未命中。
 - manual server 的启用 / 禁用意图会随会话保存：`/mcp enable` 写入该意图，`/mcp disable` 清除它；之后 resume 该会话（包括重启后 resume）时会重新连接上次处于启用状态的 manual server。连接失败不会清除意图，server 会保持「enabled (unavailable)」状态，方便之后重试，而不是悄悄退回禁用。
 
 ### 启动一致性
@@ -1261,14 +1261,14 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `websocket_handshake_timeout` | int | Responses WebSocket 握手超时，单位秒。`0` / 省略表示使用内置默认值。 |
 | `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
 | `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`、`mcp_additional_tools`。 |
-| `compat.responses.mcp_additional_tools` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `input[type="additional_tools"]` item，不改写顶层 `tools`。只为已确认接受该 item 的 Responses endpoint / 模型开启。Fallback 池里每个模型都必须开启；混合池退回顶层工具。 |
+| `compat.responses.mcp_additional_tools` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `input[type="additional_tools"]` item，不改写顶层 `tools`。只为已确认接受该 item 的 Responses endpoint / 模型开启。挂载形态跟随当前选中的目标；请求最终落到不接受该 item 的池成员时，Chord 会把声明并入该请求的顶层 `tools` 数组。 |
 | `compat.apply_patch.enabled` | bool | 三态 — 省略时按模型名推断。`true` 保留 `apply_patch`（同时隐藏 `edit`、`write`、`delete`）；`false` 退回 `edit`，`write`/`delete` 重新可见。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6-astra` 等更高的主版本）和 `codex-auto-review` 默认 `true`；`gpt-oss-*`、gpt-3.5、gpt-4/4o、o 系列及非 OpenAI 模型默认 `false`。 |
 | `compat.apply_patch.freeform` | bool | 三态 — 省略时按模型名和 wire 类型推断。`true` 把 `apply_patch` 作为 freeform custom tool 发送（`type: "custom"`，随请求带上 grammar）；`false` 按 JSON function tool 发送。gpt-5 及之后家族名称和 `codex-auto-review` 在 Responses 端点上默认 `true`；非 Responses wire 一律默认 `false`（没有 custom tool 类型）。接受 Responses 但拒绝 custom tool 的主机没有内置例外：请在那里设置 `false`；只有确实支持 custom tool 的网关才设 `true`。 |
 | `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
 | `compat.chat_completions.infer_finish_reason` | bool | `false` — 对结束流时不发 `finish_reason` 的兼容网关，自动推断为正常的 `stop` / `tool_calls` 完成；不开启时这类流会被当成中断处理。 |
 | `compat.chat_completions.requires_tool_result_name` | bool | `false` — 对要求 tool result 消息同时携带 `name` 和 `tool_call_id` 的网关，回填配对的工具名。 |
 | `compat.chat_completions.requires_assistant_after_tool_result` | bool | `false` — 对不接受 tool result 后直接跟 user 消息的网关，在中间插入一条合成 assistant 消息。 |
-| `compat.chat_completions.mcp_system_tools_message` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `role: system` 消息，消息只带 `tools`、不带 `content`，不改写顶层 `tools`。只为已确认接受 Kimi 兼容动态工具形态的模型开启。Fallback 池里每个模型都必须开启；混合池退回顶层工具。 |
+| `compat.chat_completions.mcp_system_tools_message` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `role: system` 消息，消息只带 `tools`、不带 `content`，不改写顶层 `tools`。只为已确认接受 Kimi 兼容动态工具形态的模型开启。挂载形态跟随当前选中的目标；请求最终落到不接受该形态的池成员时，Chord 会把声明并入该请求的顶层 `tools` 数组。 |
 | `compat.chat_completions.keep_reasoning_effort` | bool | `false` — 本轮回放的 assistant tool-call 消息没有 `reasoning_content` 时，仍保留 `reasoning_effort` 与 reasoning 请求覆盖项。默认行为下 Chord 会把缺少 reasoning content 判定为该后端无法回放 reasoning，在本回合后续请求中剥离这些控制项；对接受 reasoning 控制、但没有 reasoning 回放契约的后端（例如走 Chat Completions 线路的 Grok）开启。它只保留请求侧控制项，不会为校验回放历史的后端（带 tools 的 DeepSeek、Kimi K3、Qwen `preserve_thinking`）补上 reasoning content。 |
 | `compat.chat_completions.native_thinking` | string | 端点是把 chat/completions 转成模型原生 API 的网关时，用哪个请求形状把该模型的 thinking 配置交上去。留空（默认）按模型名推断：`gemini*` → `extra_body.google.thinking_config`，`claude*` → `thinking:{type,budget_tokens}`，`deepseek*` / `glm*` / `kimi*` / `doubao*` → `thinking:{type}`，`qwen*` → `enable_thinking`。`off` 用于拒绝未知请求体字段的端点，关闭转换；`gemini`、`gemini-3`、`anthropic`、`thinking`、`qwen` 用于模型名看不出上游时直接指定形状。`gemini` 只声明 Gemini 家族，不启用版本专属签名修复；已知别名指向 Gemini 3 时使用 `gemini-3`。`claude`、`deepseek`、`glm`、`kimi`、`doubao` 等家族名仍可作为等价别名。没有配置 thinking 块的模型不会发送该字段。见[走 Chat Completions 网关的 thinking](./model-configs_CN.md#走-chat-completions-网关的-thinking)。 |
 | `compat.usage.input_includes_cache_read` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache read。默认：Messages 为 `false`；Chat Completions / Responses / Generate Content 为 `true`。 |

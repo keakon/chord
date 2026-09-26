@@ -709,6 +709,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		wallReq.wireStreamReducer(streamReducer)
 	}
 	requestOptions := llm.CompleteStreamOptions{
+		MCPDeclarations: a.effectiveRuntimeMCPDeclarations(),
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {
 			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback)
 			if err == nil && updatedMessages != nil {

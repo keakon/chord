@@ -27,6 +27,7 @@ type replayRejectingProvider struct {
 	// rejectCount-based rejection.
 	scriptedErrs []error
 	attempts     [][]message.Message
+	toolAttempts [][]message.ToolDefinition
 	tunings      []RequestTuning
 }
 
@@ -36,7 +37,7 @@ func (p *replayRejectingProvider) CompleteStream(
 	_ string,
 	_ string,
 	msgs []message.Message,
-	_ []message.ToolDefinition,
+	tools []message.ToolDefinition,
 	_ int,
 	tuning RequestTuning,
 	_ StreamCallback,
@@ -46,6 +47,7 @@ func (p *replayRejectingProvider) CompleteStream(
 	copied := make([]message.Message, len(msgs))
 	copy(copied, msgs)
 	p.attempts = append(p.attempts, copied)
+	p.toolAttempts = append(p.toolAttempts, append([]message.ToolDefinition(nil), tools...))
 	p.tunings = append(p.tunings, cloneRequestTuning(tuning))
 	if len(p.scriptedErrs) > 0 {
 		if len(p.attempts) <= len(p.scriptedErrs) {
@@ -257,7 +259,7 @@ func TestCompleteStreamRetriesReplayEvidenceEchoWithReinforcedContinuation(t *te
 	result, _, err := client.completeStreamTarget(
 		context.Background(),
 		streamRetryTarget{provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 1024, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{ReplayCompat: &strict}},
-		0, strictCurrentTurnReplayMessages(), nil, func(delta message.StreamDelta) { deltas = append(deltas, delta) }, false, nil, roundCoolingWait{}, false,
+		0, strictCurrentTurnReplayMessages(), nil, nil, func(delta message.StreamDelta) { deltas = append(deltas, delta) }, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil {
@@ -737,7 +739,7 @@ func TestCompleteStreamTargetPassesReplayCompatibleTuning(t *testing.T) {
 				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		}, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
+		}, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
 		func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -775,7 +777,7 @@ func TestCompleteStreamTargetKeepsReasoningEffortWithCompat(t *testing.T) {
 				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		}, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
+		}, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
 		func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -812,7 +814,7 @@ func TestCompleteStreamStrictlyTextifiesRejectedForeignToolTrajectory(t *testing
 				Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
 			},
 			{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
-		}, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
+		}, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0,
 		func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -830,6 +832,74 @@ func TestCompleteStreamStrictlyTextifiesRejectedForeignToolTrajectory(t *testing
 		if len(msg.ToolCalls) > 0 || msg.Role == message.RoleTool {
 			t.Fatalf("strict retry retained structured tool trajectory: %+v", impl.attempts[1])
 		}
+	}
+}
+
+// TestReplayLadderKeepsMCPDeclarationsInlinedForPlainTarget pins the mixed-pool
+// degrade path: a target that does not accept the dynamic MCP declaration shape
+// receives the declarations folded into its top-level tools, and a replay-ladder
+// probe on that target — whose messages are rebuilt from the raw conversation —
+// must re-fold them instead of shipping both the declaration messages and the
+// already-merged tools.
+func TestReplayLadderKeepsMCPDeclarationsInlinedForPlainTarget(t *testing.T) {
+	cfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"sample-model": {}},
+	}, []string{"key"})
+	impl := &replayRejectingProvider{
+		rejectCount:      1,
+		rejectionMessage: "The `reasoning_content` in the thinking mode must be passed back to the API.",
+	}
+	client := NewClient(cfg, impl, "sample-model", 4096, "sys")
+	declarations := []message.ToolDefinition{{
+		Name:        "mcp_sample_lookup",
+		Description: "lookup",
+		InputSchema: map[string]any{"type": "object"},
+	}}
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "continue"},
+		{
+			Role:       message.RoleAssistant,
+			Content:    "checking file",
+			ToolCalls:  []message.ToolCall{{ID: "call_1", Name: "read", Args: []byte(`{}`)}},
+			Provenance: &message.MessageProvenance{WireFamily: modelcompat.WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "READ_RESULT ok"},
+		message.NewSystemToolsMessage(declarations),
+	}
+	tools := []message.ToolDefinition{{Name: "read", Description: "read files"}}
+
+	result, _, err := client.completeStreamTarget(
+		context.Background(), streamRetryTarget{
+			provider: cfg, impl: impl, modelID: "sample-model", maxTokens: 4096,
+			contextLimit: 128000, inputLimit: 128000,
+		},
+		0, messages, tools, declarations, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0,
+		func() error { return nil }, nil, "",
+	)
+	if err != nil || result.resp == nil {
+		t.Fatalf("completeStreamTarget = (%+v, %v), want success after replay degradation", result, err)
+	}
+	impl.mu.Lock()
+	defer impl.mu.Unlock()
+	if len(impl.attempts) != 2 || len(impl.toolAttempts) != 2 {
+		t.Fatalf("attempts = %d, tool captures = %d, want rejected request plus strict probe", len(impl.attempts), len(impl.toolAttempts))
+	}
+	for i, attempt := range impl.attempts {
+		for _, msg := range attempt {
+			if len(msg.MCPTools) > 0 {
+				t.Fatalf("attempt %d shipped dynamic MCP declarations to a plain target: %+v", i+1, msg)
+			}
+		}
+	}
+	merged := 0
+	for _, def := range impl.toolAttempts[1] {
+		if def.Name == "mcp_sample_lookup" {
+			merged++
+		}
+	}
+	if merged != 1 {
+		t.Fatalf("probe request carried the declared tool %d times, want exactly once: %#v", merged, impl.toolAttempts[1])
 	}
 }
 
@@ -877,7 +947,7 @@ func TestCompleteStreamCompactionReplayFloorUsesPortableShape(t *testing.T) {
 			contextLimit: 128000, inputLimit: 128000,
 			tuning: RequestTuning{ReplayCompat: &level},
 		},
-		0, crossProviderReplayMessages(), nil, nil, false, nil, roundCoolingWait{}, false,
+		0, crossProviderReplayMessages(), nil, nil, nil, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -918,7 +988,7 @@ func TestCompleteStreamAmbiguousFailureRetriesUnchangedWithoutPersistingReplayLe
 					provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 					contextLimit: 128000, inputLimit: 128000,
 				},
-				0, messages, nil, nil, false, nil, roundCoolingWait{}, false,
+				0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false,
 				&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 			)
 			if err != nil || result.resp == nil {
@@ -957,7 +1027,7 @@ func TestCompleteStreamAmbiguousFailureProbeIsRequestScoped(t *testing.T) {
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, nil, nil, false, nil, roundCoolingWait{}, false,
+		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -995,7 +1065,7 @@ func TestCompleteStreamProbesRelayWrappedParam400WithReplaySensitiveInput(t *tes
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, nil, nil, false, nil, roundCoolingWait{}, false,
+		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
@@ -1032,7 +1102,7 @@ func TestCompleteStreamOfficialParam400DoesNotProbe(t *testing.T) {
 			provider: cfg, impl: impl, modelID: "gpt-5.6-sol", maxTokens: 4096,
 			contextLimit: 128000, inputLimit: 128000,
 		},
-		0, messages, nil, nil, false, nil, roundCoolingWait{}, false,
+		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false,
 		&CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err == nil {
@@ -1060,7 +1130,46 @@ func TestCompleteStreamSkipsEquivalentReplayLevelBeforeStrict(t *testing.T) {
 	}
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "sample-reasoner", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+	)
+	if err != nil || result.resp == nil {
+		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
+	}
+	impl.mu.Lock()
+	attempts := append([][]message.Message(nil), impl.attempts...)
+	impl.mu.Unlock()
+	if len(attempts) != 2 {
+		t.Fatalf("attempts = %d, want native then strict without identical synthesized retry", len(attempts))
+	}
+	requireStrictReplayEvidence(t, attempts[1], "read", "call-1")
+	if got := client.replayCompatLevelFor(cfg.Name(), "sample-reasoner", "", lastUserMessageIndex(messages)); got != modelcompat.ReplayCompatStrict {
+		t.Fatalf("replay level = %d, want strict", got)
+	}
+}
+
+// TestCompleteStreamSkipsEquivalentReplayLevelWithInlinedMCPDeclarations pins
+// the same-shape comparison: a target that needs the dynamic MCP declarations
+// folded into its top-level tools must still recognize an equivalent stricter
+// level instead of resending an identical request.
+func TestCompleteStreamSkipsEquivalentReplayLevelWithInlinedMCPDeclarations(t *testing.T) {
+	cfg := NewProviderConfig("messages", config.ProviderConfig{Type: config.ProviderTypeMessages}, []string{"key"})
+	impl := &replayRejectingProvider{rejectCount: 1, rejectionMessage: "The `content[].thinking` in the thinking mode must be passed back to the API."}
+	client := NewClient(cfg, impl, "sample-reasoner", 4096, "sys")
+	declarations := []message.ToolDefinition{{Name: "mcp_sample_lookup", Description: "lookup", InputSchema: map[string]any{"type": "object"}}}
+	messages := []message.Message{
+		{
+			Role:           message.RoleAssistant,
+			ThinkingBlocks: []message.ThinkingBlock{{Thinking: "unsigned reasoning"}},
+			ToolCalls:      []message.ToolCall{{ID: "call-1", Name: "read", Args: []byte(`{}`)}},
+			Provenance:     &message.MessageProvenance{ProviderID: "source", ModelID: "sample-reasoner", WireFamily: modelcompat.WireFamilyAnthropic},
+		},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "ok"},
+		message.NewSystemToolsMessage(declarations),
+	}
+	tools := []message.ToolDefinition{{Name: "read", Description: "read files"}}
+	result, _, err := client.completeStreamTarget(
+		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "sample-reasoner", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
+		0, messages, tools, declarations, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
@@ -1099,7 +1208,7 @@ func TestCompleteStreamRecoversAnthropicPrefixBindingRejection(t *testing.T) {
 	}
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "claude-x", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
@@ -1149,7 +1258,7 @@ func TestCompleteStreamDegradesConvertedUnsignedThinkingWithoutTextLeak(t *testi
 	}
 	result, _, err := client.completeStreamTarget(
 		context.Background(), streamRetryTarget{provider: cfg, impl: impl, modelID: "glm-5.2", maxTokens: 4096, contextLimit: 128000, inputLimit: 128000, tuning: RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "adaptive"}}},
-		0, messages, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
+		0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0, func() error { return nil }, nil, "",
 	)
 	if err != nil || result.resp == nil {
 		t.Fatalf("completeStreamTarget = (%+v, %v)", result, err)
@@ -1281,7 +1390,7 @@ func TestCompleteStreamDegradesProviderNativeReplayOnKnownRejections(t *testing.
 					provider: cfg, impl: impl, modelID: tc.modelID, maxTokens: 4096,
 					contextLimit: 128000, inputLimit: 128000, tuning: tc.tuning,
 				},
-				0, messages, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0,
+				0, messages, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "sys", 0, 0,
 				func() error { return nil }, nil, "",
 			)
 			if err != nil || result.resp == nil {

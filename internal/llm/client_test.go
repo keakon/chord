@@ -336,6 +336,7 @@ func callCompleteStreamWithRetryForTest(
 		startVariant,
 		messages,
 		tools,
+		nil,
 		cb,
 		fallbackEnabled,
 		fallbackModels,

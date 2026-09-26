@@ -67,16 +67,6 @@ func TestSupportsKimiDynamicToolsOptInIsAuthoritative(t *testing.T) {
 	}
 }
 
-func TestAllPoolTargetsSupportKimiDynamicToolsRejectsMixedPool(t *testing.T) {
-	primary := kimiChatProviderConfig("model-1", true)
-	fallback := kimiChatProviderConfig("model-2", false)
-	client := NewClient(primary, &recordingProvider{}, "model-1", 512, "")
-	client.SetFallbackModels([]FallbackModel{{ProviderConfig: fallback, ModelID: "model-2", MaxTokens: 512}})
-	if client.AllPoolTargetsSupportKimiDynamicTools() {
-		t.Fatal("mixed capability pool must use top-level tools")
-	}
-}
-
 func TestConvertMessagesToOpenAIRendersSystemToolsMessage(t *testing.T) {
 	messages := []message.Message{
 		{Role: message.RoleUser, Content: "hello"},

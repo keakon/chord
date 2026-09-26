@@ -1099,7 +1099,8 @@ model_pools:
 `mcp_system_tools_message` 是显式的模型能力开关，不靠模型名猜测。开启后，
 运行时 manual MCP 声明会固定在原对话位置，不再改写顶层工具列表。不接受
 「只带 `tools`、不带 `content` 的 `role: system` 消息」的网关应保持关闭；
-fallback 池能力不一致时，Chord 会自动采用各模型都能接受的顶层工具形态。
+挂载形态跟随当前选中的目标，池内其他成员不具备该能力时，Chord 会把声明
+并入那些请求的顶层 `tools` 数组。
 
 K2.7 Code 是 256K 上下文、面向编码的纯思考型号；它的 thinking 和
 `keep: all` 行为固定，因此模板不发送 `thinking` 对象。K2.6 是 256K

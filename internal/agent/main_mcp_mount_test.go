@@ -309,6 +309,37 @@ func TestRuntimeMCPMountResumeWithHistoricalCallUsesTopLevelTools(t *testing.T) 
 	}
 }
 
+// A reset run (model switch, restore, compaction) keeps the history that
+// called tools declared by the previous run. Once the new run has declared
+// something of its own, a re-enabled tool with historical calls must still fall
+// back rather than get its first declaration behind those calls.
+func TestRuntimeMCPMountFallsBackForUndeclaredToolWithHistoricalCallAfterOtherDeclarations(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools = tools.NewRegistry()
+	sealEmptyMCPMountBaseline(a)
+	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_fetch", description: "fetch"})
+	messages := []message.Message{
+		{Role: message.RoleUser, Content: "first"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: "mcp_sample_lookup"}}},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "result"},
+		{Role: message.RoleUser, Content: "second"},
+	}
+	first, _, fellBack := a.mountRuntimeMCPTools(messages, mcpMountKimiDynamic)
+	if fellBack {
+		t.Fatal("a tool without historical calls must mount dynamically")
+	}
+	assertMCPMountAt(t, first, len(first)-1, "mcp_sample_fetch")
+
+	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
+	got, fallback, fellBack := a.mountRuntimeMCPTools(messages, mcpMountKimiDynamic)
+	if !fellBack || len(fallback) != 2 {
+		t.Fatalf("undeclared tool with historical calls: fallback = %v, defs = %#v", fellBack, fallback)
+	}
+	if countMCPMounts(got) != 0 {
+		t.Fatalf("fallback request should not contain request-only mounts: %#v", got)
+	}
+}
+
 func newResponsesAdditionalToolsClient(model string) *llm.Client {
 	provider := llm.NewProviderConfig("sample", config.ProviderConfig{
 		Type:   config.ProviderTypeResponses,
@@ -351,7 +382,7 @@ func TestForceFullMCPToolInjectionDisablesDynamicMount(t *testing.T) {
 	}
 }
 
-func TestModelSwitchForcesFullMCPToolInjection(t *testing.T) {
+func TestModelSwitchRebaselinesManualToolsAndKeepsDynamicMount(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
@@ -359,8 +390,95 @@ func TestModelSwitchForcesFullMCPToolInjection(t *testing.T) {
 
 	a.swapLLMClientWithRef(newResponsesAdditionalToolsClient("model-b"), "model-b", 4096, "sample/model-b")
 
+	if got := a.mcpToolMountMode(); got != mcpMountResponsesAdditionalTools {
+		t.Fatalf("mount mode after model switch = %v, want responses additional_tools", got)
+	}
+	// The switched run rebuilds its baseline: a manual tool enabled before the
+	// switch rides in the top-level array again instead of staying a dynamic
+	// declaration relative to the previous run's baseline.
+	topLevel := false
+	for _, tool := range a.stableVisibleLLMTools() {
+		if tool.Name() == "mcp_sample_lookup" {
+			topLevel = true
+		}
+	}
+	if !topLevel {
+		t.Fatal("model switch must re-baseline enabled manual MCP tools at top level")
+	}
+}
+
+// The top-level pin set by resume (or durable compaction) exists because the
+// restored history calls tools whose dynamic declarations were lost; a model
+// switch keeps that history, so it must keep the pin until the next session
+// head instead of resuming dynamic mounts.
+func TestModelSwitchAfterResumeKeepsTopLevelInjection(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools = tools.NewRegistry()
+	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
+	a.llmClient = newResponsesAdditionalToolsClient("model-a")
+	a.SetProviderModelRef("sample/model-a")
+	a.forceFullMCPToolInjection()
+
+	a.swapLLMClientWithRef(newResponsesAdditionalToolsClient("model-b"), "model-b", 4096, "sample/model-b")
+
 	if got := a.mcpToolMountMode(); got != mcpMountFullInjection {
-		t.Fatalf("mount mode after model switch = %v, want full injection", got)
+		t.Fatalf("mount mode after a post-resume model switch = %v, want full injection", got)
+	}
+	a.resetSessionBuildState()
+	if got := a.mcpToolMountMode(); got != mcpMountResponsesAdditionalTools {
+		t.Fatalf("mount mode after the next session head = %v, want responses additional_tools", got)
+	}
+}
+
+func TestModelSwitchToTargetWithoutDynamicMountUsesTopLevelTools(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.tools = tools.NewRegistry()
+	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
+	a.SetProviderModelRef("sample/model-a")
+
+	provider := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: "https://example.invalid/v1",
+		Models: map[string]config.ModelConfig{"model-c": {Limit: config.ModelLimit{Context: 128000, Output: 4096}}},
+	}, []string{"test-key"})
+	a.swapLLMClientWithRef(llm.NewClient(provider, stubProvider{}, "model-c", 4096, ""), "model-c", 4096, "sample/model-c")
+
+	if got := a.mcpToolMountMode(); got != mcpMountFullInjection {
+		t.Fatalf("mount mode after switch to a plain chat target = %v, want full injection", got)
+	}
+}
+
+func TestMCPToolMountModeFollowsSelectedTargetInMixedPool(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+
+	responsesProvider := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: "https://example.invalid/v1/responses",
+		Models: map[string]config.ModelConfig{"model-a": {
+			Limit:  config.ModelLimit{Context: 128000, Output: 4096},
+			Compat: &config.ModelCompatConfig{Responses: &config.ResponsesCompatConfig{MCPAdditionalTools: new(true)}},
+		}},
+	}, []string{"test-key"})
+	chatProvider := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeChatCompletions,
+		APIURL: "https://example.invalid/v1/chat/completions",
+		Models: map[string]config.ModelConfig{"model-b": {Limit: config.ModelLimit{Context: 128000, Output: 4096}}},
+	}, []string{"test-key"})
+
+	client := llm.NewClient(responsesProvider, stubProvider{}, "model-a", 4096, "")
+	client.SetModelPool([]llm.FallbackModel{
+		{ProviderConfig: responsesProvider, ProviderImpl: stubProvider{}, ModelID: "model-a", MaxTokens: 4096},
+		{ProviderConfig: chatProvider, ProviderImpl: stubProvider{}, ModelID: "model-b", MaxTokens: 4096},
+	}, 0)
+	a.llmClient = client
+
+	a.SetProviderModelRef("sample/model-a")
+	if got := a.mcpToolMountMode(); got != mcpMountResponsesAdditionalTools {
+		t.Fatalf("mount mode for the responses target = %v, want responses additional_tools", got)
+	}
+	a.SetProviderModelRef("sample/model-b")
+	if got := a.mcpToolMountMode(); got != mcpMountFullInjection {
+		t.Fatalf("mount mode for the plain chat target = %v, want full injection", got)
 	}
 }
 

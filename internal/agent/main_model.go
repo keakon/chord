@@ -440,9 +440,15 @@ func (a *MainAgent) swapLLMClientWithRefLocked(newClient *llm.Client, modelName 
 		oldClient.Close()
 	}
 	if oldRunningRef != "" && oldRunningRef != newRunningRef {
-		// A real model switch invalidates prompt-cache reuse, so cache-friendly
-		// dynamic MCP mounts cannot carry over to the new model's request surface.
-		a.forceFullMCPToolInjection()
+		// A real model switch starts a new run for the new target: rebuild the
+		// request surface. Prompt-cache reuse is already invalidated by the
+		// switch itself, so the new run re-baselines every currently enabled
+		// manual MCP tool and then resumes cache-friendly mounts wherever the
+		// new target accepts them. A top-level pin from resume, fork, or durable
+		// compaction survives the switch: the history it distrusts is still the
+		// history the new target receives, and only a session-head event clears
+		// it.
+		a.resetMCPMountSurface(a.mcpMountFullInjectionOnly.Load())
 	} else {
 		a.resetMCPToolMountState()
 		a.clearFrozenToolSurface()

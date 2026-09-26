@@ -23,18 +23,23 @@ func (m mcpToolMountMode) cacheFriendly() bool {
 	return m == mcpMountKimiDynamic || m == mcpMountResponsesAdditionalTools
 }
 
+// mcpToolMountMode selects the dynamic mount shape accepted by the currently
+// selected target. The mount shape is a property of that target: other pool
+// members that do not accept it receive the declarations inlined into the
+// top-level tools array by the LLM layer, so pool composition never forces the
+// selected target to rebuild its surface.
 func (a *MainAgent) mcpToolMountMode() mcpToolMountMode {
 	if a.mcpMountFullInjectionOnly.Load() {
 		return mcpMountFullInjection
 	}
-	client, _, _, _ := a.llmSnapshot()
+	client, _, selectedRef, _ := a.llmSnapshot()
 	if client == nil {
 		return mcpMountFullInjection
 	}
-	if client.AllPoolTargetsSupportKimiDynamicTools() {
+	if client.SupportsKimiDynamicTools(selectedRef) {
 		return mcpMountKimiDynamic
 	}
-	if client.AllPoolTargetsSupportResponsesAdditionalTools() {
+	if client.SupportsResponsesAdditionalTools(selectedRef) {
 		return mcpMountResponsesAdditionalTools
 	}
 	return mcpMountFullInjection
@@ -188,6 +193,16 @@ func (a *MainAgent) declaredRuntimeMCPToolDefsLocked() []message.ToolDefinition 
 	return llmToolDefinitionsFromVisibleTools(manual)
 }
 
+// effectiveRuntimeMCPDeclarations returns the request's current incremental
+// MCP tool set for targets that fold dynamic declarations into their top-level
+// tools. It is a point-in-time snapshot: tools disabled after this call stay
+// disabled in later requests because the set is re-read per request.
+func (a *MainAgent) effectiveRuntimeMCPDeclarations() []message.ToolDefinition {
+	a.mcpMountState.mu.Lock()
+	defer a.mcpMountState.mu.Unlock()
+	return a.declaredRuntimeMCPToolDefsLocked()
+}
+
 type mcpMountAnchor struct {
 	window     []stableReductionMessageShape
 	occurrence int
@@ -228,17 +243,20 @@ func (a *MainAgent) resetMCPToolMountState() {
 // injection and disables cache-friendly dynamic mounts (Responses
 // additional_tools and Kimi mcp_system_tools_message) until the next
 // session-head event resets the surface. It is used at boundaries where
-// prompt-cache reuse no longer applies — model switch, session resume, forked
-// history, and durable compaction — because there the dynamic mounts would
-// only risk being mis-anchored or misread by the model as the complete tool
-// surface.
+// prompt-cache reuse no longer applies and the restored history would
+// mis-anchor the dynamic declarations — session resume, forked history, and
+// durable compaction. A model switch neither sets nor clears it: the switched
+// run re-baselines every currently enabled manual tool for the new target and
+// resumes cache-friendly mounts where that target accepts them unless this pin
+// is already in place (see swapLLMClientWithRefLocked).
 func (a *MainAgent) forceFullMCPToolInjection() {
 	a.resetMCPMountSurface(true)
 }
 
 // resetMCPMountSurface clears the dynamic-mount bookkeeping and rebuilds the
 // runtime tool/prompt surface. fullInjectionOnly pins the run to top-level
-// injection; false re-enables cache-friendly mounts for a fresh session run.
+// injection; false lets cache-friendly mounts run where the target accepts
+// them.
 func (a *MainAgent) resetMCPMountSurface(fullInjectionOnly bool) {
 	a.mcpMountFullInjectionOnly.Store(fullInjectionOnly)
 	a.resetMCPToolMountState()
@@ -292,11 +310,19 @@ func (a *MainAgent) mountRuntimeMCPTools(messages []message.Message, mode mcpToo
 		return messages, nil, false
 	}
 
-	activeNames := make(map[string]struct{}, len(active))
+	// A tool this run has never declared gets its first declaration at the
+	// conversation tail. If the history already calls it — declared by an
+	// earlier run whose anchors were reset (a model switch, or a restored or
+	// compacted history) — that declaration would land behind its own calls,
+	// so fall back to top-level injection instead.
+	undeclared := make(map[string]struct{}, len(active))
 	for _, def := range active {
-		activeNames[toolpkg.NormalizeName(def.Name)] = struct{}{}
+		name := toolpkg.NormalizeName(def.Name)
+		if _, ok := state.known[name]; !ok {
+			undeclared[name] = struct{}{}
+		}
 	}
-	if len(state.snapshots) == 0 && len(activeNames) > 0 && hasHistoricalMCPToolCall(messages, activeNames) {
+	if len(undeclared) > 0 && hasHistoricalMCPToolCall(messages, undeclared) {
 		state.fallback = true
 		return messages, active, true
 	}

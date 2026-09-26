@@ -1075,7 +1075,9 @@ model_pools:
 guess. It lets runtime manual-MCP declarations stay at fixed conversation
 anchors instead of rewriting the top-level tool list. Keep it off for gateways
 that do not accept a `role: system` message containing `tools` without
-`content`; mixed fallback pools automatically use the common top-level shape.
+`content`; the mount follows the selected target, and a pool member without
+the capability receives the declarations inlined into the request's top-level
+`tools` array instead.
 
 K2.7 Code is the 256K coding-specialized, thinking-only option; its thinking
 mode and `keep: all` behavior are fixed, so the template does not send a

@@ -50,6 +50,12 @@ type mcpControlDonePayload struct {
 	// replaces the barrier; the stale result must then not be staged onto the
 	// new session's surface nor release the new barrier.
 	readyGen MCPReadyGeneration
+	// surfaceBuiltAtDispatch reports whether a request had already installed
+	// the context surface that this control replaces, sampled when the control
+	// was dispatched. Dispatching clears sessionBuilt to force the next request
+	// to rebuild, so the answer has to be captured there; reading it when the
+	// result is applied would always see the cleared value.
+	surfaceBuiltAtDispatch bool
 }
 
 // SetMCPControlFunc installs the runtime callback used to connect/disconnect MCP servers.
@@ -117,6 +123,12 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 		return
 	}
 
+	// Sample before the transition begins: markRuntimeSurfaceDirty below clears
+	// sessionBuilt, so the cache warning can no longer tell "a request already
+	// installed the surface this toggle replaces" from "the surface was already
+	// cold" once we are past this point.
+	surfaceBuiltAtDispatch := a.sessionBuilt.Load()
+
 	// Begin transition: block new LLM requests at ensureSessionBuilt until the
 	// runtime control result is ready to be applied to the next request surface.
 	a.mcpTransitionActive.Store(true)
@@ -127,7 +139,7 @@ func (a *MainAgent) handleMCPControlEvent(evt Event) {
 	req.SessionDir = a.SessionDir()
 	go func() {
 		res, err := a.mcpControlFn(a.parentCtx, req)
-		a.sendEvent(Event{Type: EventMCPControlDone, Payload: mcpControlDonePayload{req: req, result: res, err: err, readyGen: gen}})
+		a.sendEvent(Event{Type: EventMCPControlDone, Payload: mcpControlDonePayload{req: req, result: res, err: err, readyGen: gen, surfaceBuiltAtDispatch: surfaceBuiltAtDispatch}})
 	}()
 }
 
@@ -203,6 +215,11 @@ func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 	}
 
 	changed := len(payload.result.Enabled) > 0 || len(payload.result.Disabled) > 0
+	// surfaceBuiltAtDispatch was sampled when the control was dispatched, before
+	// the transition cleared the surface. It is the flag the cache warning uses
+	// to tell "this toggle is the first change since a request" from "a boundary
+	// already rewrote the surface and the cache is cold anyway".
+	surfaceBuiltBeforeToggle := payload.surfaceBuiltAtDispatch
 	applied := a.applyMCPControlSurfaceForGeneration(payload.readyGen, func() {
 		if payload.err != nil && !changed {
 			return
@@ -248,7 +265,7 @@ func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 		a.emitToTUI(ToastEvent{Message: "MCP changed" + scope + " (enabled: " + strings.Join(payload.result.Enabled, ", ") + "; disabled: " + strings.Join(payload.result.Disabled, ", ") + ")", Level: "info"})
 	}
 	if applied && changed {
-		a.emitMCPSurfaceChangeToast(payload.result)
+		a.emitMCPSurfaceChangeToast(payload.result, surfaceBuiltBeforeToggle)
 	}
 	if msg := summarizeMCPControlError(payload.err); msg != "" {
 		a.emitToTUI(ToastEvent{Message: msg, Level: "error"})
@@ -262,9 +279,20 @@ func (a *MainAgent) handleMCPControlDoneEvent(evt Event) {
 }
 
 // emitMCPSurfaceChangeToast surfaces the cache cost of changing the complete
-// top-level MCP tool surface.
-func (a *MainAgent) emitMCPSurfaceChangeToast(result MCPControlResult) {
+// top-level MCP tool surface. surfaceBuilt reports whether a request had
+// already installed the surface this toggle replaces; it is sampled when the
+// toggle is dispatched, not when its result is applied.
+func (a *MainAgent) emitMCPSurfaceChangeToast(result MCPControlResult, surfaceBuilt bool) {
 	if !a.mcpControlChangesTopLevelSurface(result) {
+		return
+	}
+	// The boundary that forced top-level injection (session resume/fork,
+	// durable compaction, or a switch to a target without a dynamic mount)
+	// may already have invalidated the prompt cache. Before the rebuilt run
+	// has sent its first request there is no cache left to miss, so the
+	// warning is redundant. The same holds for a second toggle that lands
+	// before any request: the first one already rewrote the surface.
+	if a.effectiveMCPMountIsFullInjection() && !surfaceBuilt {
 		return
 	}
 	a.emitToTUI(ToastEvent{

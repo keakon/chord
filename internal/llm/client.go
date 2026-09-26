@@ -175,6 +175,12 @@ type CallStatus struct {
 // snapshot for that fallback attempt.
 type CompleteStreamOptions struct {
 	BeforeFallback func(context.Context, []message.Message, FallbackModel) ([]message.Message, error)
+	// MCPDeclarations is the request's currently effective incremental MCP
+	// tool set. A target that cannot accept the dynamic declaration shape
+	// inlines exactly this set into its top-level tools instead of replaying
+	// every declaration in the message history, so tools disabled mid-session
+	// are never re-advertised.
+	MCPDeclarations []message.ToolDefinition
 }
 
 // NewClient creates a new Client for making LLM completions.
@@ -486,26 +492,6 @@ func (c *Client) SupportsKimiDynamicTools(modelRef string) bool {
 	return ok && kimiDynamicTargetSupported(target)
 }
 
-// AllPoolTargetsSupportKimiDynamicTools requires one legal request shape for
-// every target that may receive the same retry input.
-func (c *Client) AllPoolTargetsSupportKimiDynamicTools() bool {
-	if c == nil {
-		return false
-	}
-	c.mu.RLock()
-	pool := c.modelPoolLocked()
-	c.mu.RUnlock()
-	if len(pool) == 0 {
-		return false
-	}
-	for _, target := range pool {
-		if !kimiDynamicTargetSupported(target) {
-			return false
-		}
-	}
-	return true
-}
-
 func kimiDynamicTargetSupported(target FallbackModel) bool {
 	if target.ProviderConfig == nil || providerWireFamily(target.ProviderConfig) != modelcompat.WireFamilyOpenAIChat {
 		return false
@@ -519,10 +505,10 @@ func kimiDynamicTargetSupported(target FallbackModel) bool {
 // message is the interrupted assistant turn, letting the caller skip the
 // extra user turn a continuation prompt would otherwise need.
 //
-// Like AllPoolTargetsSupportKimiDynamicTools this is deliberately an all-target
-// check: a preserved interruption restarts the request through the full
-// key/fallback rotation, so the request shape must be legal for every target
-// that may end up serving it, not just the one that was interrupted. A pool
+// This is deliberately an all-target check: a preserved interruption restarts
+// the request through the full key/fallback rotation, so the request shape must
+// be legal for every target that may end up serving it, not just the one that
+// was interrupted. A pool
 // containing a single target that needs a user turn therefore makes the whole
 // pool take the user-turn path.
 func (c *Client) AllPoolTargetsSupportAssistantPrefillContinuation() bool {
@@ -607,26 +593,6 @@ func (c *Client) SupportsResponsesAdditionalTools(modelRef string) bool {
 	defer c.mu.RUnlock()
 	target, ok := c.modelPoolTargetForRefLocked(modelRef)
 	return ok && responsesAdditionalToolsTargetSupported(target)
-}
-
-// AllPoolTargetsSupportResponsesAdditionalTools requires every retry target to
-// accept the same additional_tools request item.
-func (c *Client) AllPoolTargetsSupportResponsesAdditionalTools() bool {
-	if c == nil {
-		return false
-	}
-	c.mu.RLock()
-	pool := c.modelPoolLocked()
-	c.mu.RUnlock()
-	if len(pool) == 0 {
-		return false
-	}
-	for _, target := range pool {
-		if !responsesAdditionalToolsTargetSupported(target) {
-			return false
-		}
-	}
-	return true
 }
 
 func responsesAdditionalToolsTargetSupported(target FallbackModel) bool {
@@ -1204,7 +1170,7 @@ func (c *Client) CompleteStreamWithOptions(
 	resp, err := c.completeStreamWithRetry(
 		ctx, start.ProviderConfig, start.ProviderImpl, start.ModelID,
 		start.MaxTokens, requestTuning, start.Variant,
-		wireMessages, tools, cb, true, orderedFallbacks, maxAttempts, &status,
+		wireMessages, tools, options.MCPDeclarations, cb, true, orderedFallbacks, maxAttempts, &status,
 		routingGeneration, routingChangedCh, options.BeforeFallback,
 	)
 

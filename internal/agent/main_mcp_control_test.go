@@ -489,3 +489,132 @@ func TestMCPControlDoneCurrentGenerationAppliesAndReleasesBarrier(t *testing.T) 
 		t.Fatalf("current-generation control not staged: replace=%v prompt=%q", pendingReplace, runtimePrompt)
 	}
 }
+
+// mcpControlToasts drains the events emitted so far and returns the toasts.
+func mcpControlToasts(a *MainAgent) []ToastEvent {
+	var toasts []ToastEvent
+	for {
+		select {
+		case evt := <-a.Events():
+			if toast, ok := evt.(ToastEvent); ok {
+				toasts = append(toasts, toast)
+			}
+		default:
+			return toasts
+		}
+	}
+}
+
+// mcpControlCacheWarns returns the cache-cost warnings among the emitted toasts.
+func mcpControlCacheWarns(a *MainAgent) []ToastEvent {
+	var warns []ToastEvent
+	for _, toast := range mcpControlToasts(a) {
+		if toast.Level == "warn" && strings.Contains(toast.Message, "prompt cache") {
+			warns = append(warns, toast)
+		}
+	}
+	return warns
+}
+
+// mcpControlAgentWithBuiltSurface prepares a full-injection agent whose request
+// surface has already been installed, which is the state a mid-session toggle
+// runs in.
+func mcpControlAgentWithBuiltSurface(t *testing.T) *MainAgent {
+	t.Helper()
+	a := newTestMainAgent(t, t.TempDir())
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.tools.Register(tools.GlobTool{})
+	a.sessionBuilt.Store(true)
+	a.freezeToolSurface()
+	a.newTurn()
+	if !a.effectiveMCPMountIsFullInjection() {
+		t.Fatal("test setup needs a full-injection mount")
+	}
+	return a
+}
+
+// mcpControlToggle drives one runtime enable of the manual server through the
+// real dispatch sequence. The surface state the cache warning depends on is
+// sampled while dispatching, so a helper that called the done handler directly
+// would exercise a sequence production never takes and would not notice that
+// the sample was taken after the dispatch had already cleared it.
+func mcpControlToggle(t *testing.T, a *MainAgent) {
+	t.Helper()
+	a.SetMCPControlFunc(func(context.Context, MCPControlRequest) (MCPControlResult, error) {
+		return MCPControlResult{
+			Tools:       []tools.Tool{tools.ReadTool{}},
+			PromptBlock: "MCP updated prompt",
+			Enabled:     []string{"manual"},
+		}, nil
+	})
+	a.handleMCPControlEvent(Event{Payload: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}}})
+	a.handleMCPControlDoneEvent(mcpControlWaitDone(t, a))
+}
+
+// mcpControlWaitDone receives loop events the way the event loop does, blocking
+// until the control result arrives.
+func mcpControlWaitDone(t *testing.T, a *MainAgent) Event {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for {
+		evt, err := a.nextEvent(ctx)
+		if err != nil {
+			t.Fatalf("waiting for the MCP control done event: %v", err)
+		}
+		if evt.Type == EventMCPControlDone {
+			return evt
+		}
+	}
+}
+
+// A toggle that rewrites the top-level surface of an already-installed request
+// surface costs the provider cache, and the user has to hear about it.
+func TestMCPControlMidSessionToggleWarnsAboutCache(t *testing.T) {
+	a := mcpControlAgentWithBuiltSurface(t)
+	mcpControlToggle(t, a)
+	if warns := mcpControlCacheWarns(a); len(warns) != 1 {
+		t.Fatalf("a mid-session toggle must warn about the prompt cache once, got %#v", warns)
+	}
+}
+
+// Nothing has been sent in an unbuilt session, so there is no cache to miss.
+func TestMCPControlToggleInUnbuiltSessionSkipsCacheWarning(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	a.tools.Register(tools.GlobTool{})
+	mcpControlToggle(t, a)
+	if warns := mcpControlCacheWarns(a); len(warns) != 0 {
+		t.Fatalf("a session that never sent a request has no cache to miss, got %#v", warns)
+	}
+}
+
+// A boundary (resume/fork, durable compaction, or a switch to a target without
+// a dynamic mount) already rewrote the surface, so the next request misses the
+// cache whether or not MCP changes.
+func TestMCPControlToggleAfterBoundaryRebuildSkipsCacheWarning(t *testing.T) {
+	a := mcpControlAgentWithBuiltSurface(t)
+	a.markRuntimeSurfaceDirty()
+	mcpControlToggle(t, a)
+	if warns := mcpControlCacheWarns(a); len(warns) != 0 {
+		t.Fatalf("a toggle after a boundary rebuild has no warm cache to lose, got %#v", warns)
+	}
+}
+
+// The first toggle already rewrote the surface; a second one before any request
+// would repeat a warning about a cache that is already cold.
+func TestMCPControlRepeatedTogglesBeforeRequestWarnOnce(t *testing.T) {
+	a := mcpControlAgentWithBuiltSurface(t)
+	mcpControlToggle(t, a)
+	if warns := mcpControlCacheWarns(a); len(warns) != 1 {
+		t.Fatalf("first toggle must warn, got %#v", warns)
+	}
+	mcpControlToggle(t, a)
+	if warns := mcpControlCacheWarns(a); len(warns) != 0 {
+		t.Fatalf("second toggle before any request must not repeat the warning, got %#v", warns)
+	}
+}

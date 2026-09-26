@@ -29,7 +29,7 @@ func mcpDynamicProviderConfig(providerType, model string, chatOptIn, responsesOp
 
 func TestMCPDynamicCapabilitiesUseExplicitCompatFlags(t *testing.T) {
 	chat := NewClient(mcpDynamicProviderConfig(config.ProviderTypeChatCompletions, "custom-model", true, false), &recordingProvider{}, "custom-model", 512, "")
-	if !chat.SupportsKimiDynamicTools("sample/custom-model") || !chat.AllPoolTargetsSupportKimiDynamicTools() {
+	if !chat.SupportsKimiDynamicTools("sample/custom-model") {
 		t.Fatal("chat capability should follow mcp_system_tools_message without model-name gating")
 	}
 	if chat.SupportsResponsesAdditionalTools("sample/custom-model") {
@@ -37,7 +37,7 @@ func TestMCPDynamicCapabilitiesUseExplicitCompatFlags(t *testing.T) {
 	}
 
 	responses := NewClient(mcpDynamicProviderConfig(config.ProviderTypeResponses, "custom-model", false, true), &recordingProvider{}, "custom-model", 512, "")
-	if !responses.SupportsResponsesAdditionalTools("sample/custom-model") || !responses.AllPoolTargetsSupportResponsesAdditionalTools() {
+	if !responses.SupportsResponsesAdditionalTools("sample/custom-model") {
 		t.Fatal("Responses capability should follow mcp_additional_tools")
 	}
 	if responses.SupportsKimiDynamicTools("sample/custom-model") {
@@ -45,16 +45,19 @@ func TestMCPDynamicCapabilitiesUseExplicitCompatFlags(t *testing.T) {
 	}
 }
 
-func TestMCPDynamicCapabilitiesRequireHomogeneousPool(t *testing.T) {
-	primary := mcpDynamicProviderConfig(config.ProviderTypeChatCompletions, "model-1", true, false)
-	fallback := mcpDynamicProviderConfig(config.ProviderTypeChatCompletions, "model-2", false, false)
-	client := NewClient(primary, &recordingProvider{}, "model-1", 512, "")
+func TestMCPDynamicCapabilitiesFollowSelectedTargetInMixedPool(t *testing.T) {
+	optIn := mcpDynamicProviderConfig(config.ProviderTypeChatCompletions, "model-1", true, false)
+	plain := mcpDynamicProviderConfig(config.ProviderTypeChatCompletions, "model-2", false, false)
+	client := NewClient(optIn, &recordingProvider{}, "model-1", 512, "")
 	client.SetModelPool([]FallbackModel{
-		{ProviderConfig: primary, ProviderImpl: &recordingProvider{}, ModelID: "model-1", MaxTokens: 512},
-		{ProviderConfig: fallback, ProviderImpl: &recordingProvider{}, ModelID: "model-2", MaxTokens: 512},
+		{ProviderConfig: optIn, ProviderImpl: &recordingProvider{}, ModelID: "model-1", MaxTokens: 512},
+		{ProviderConfig: plain, ProviderImpl: &recordingProvider{}, ModelID: "model-2", MaxTokens: 512},
 	}, 0)
-	if client.AllPoolTargetsSupportKimiDynamicTools() {
-		t.Fatal("mixed capability pool must use the common top-level tool shape")
+	if !client.SupportsKimiDynamicTools("sample/model-1") {
+		t.Fatal("the opted-in selected target keeps its dynamic mount in a mixed pool")
+	}
+	if client.SupportsKimiDynamicTools("sample/model-2") {
+		t.Fatal("a plain pool member must not advertise dynamic tools")
 	}
 }
 

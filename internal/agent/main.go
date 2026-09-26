@@ -701,11 +701,11 @@ type MainAgent struct {
 	// set, cache-friendly dynamic MCP mounts (Responses additional_tools and
 	// Kimi mcp_system_tools_message) are disabled and every MCP tool is
 	// injected in the top-level tools array. It is set on boundaries where
-	// prompt-cache reuse no longer applies — model switch, session resume,
-	// forked history, and durable compaction — so dynamic mounts cannot be
-	// mis-anchored or misread as the complete tool surface. The next
-	// session-head event (resetSessionBuildState) clears it: a fresh, empty
-	// session run may mount dynamically again.
+	// prompt-cache reuse no longer applies and the restored history could
+	// mis-anchor the dynamic declarations — session resume, forked history,
+	// and durable compaction. The next session-head event
+	// (resetSessionBuildState) clears it: a fresh, empty session run may mount
+	// dynamically again.
 	mcpMountFullInjectionOnly atomic.Bool
 	sessionBuilt              atomic.Bool
 	bugTriagePromptActive     atomic.Bool

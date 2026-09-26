@@ -147,7 +147,7 @@ func TestDeepSeekReplayRejectionDoesNotWeakenRequest(t *testing.T) {
 	tuning := RequestTuning{Anthropic: AnthropicTuning{ThinkingType: "enabled", ThinkingEffort: "max"}}
 	result, _, err := client.completeStreamTarget(context.Background(), streamRetryTarget{
 		provider: cfg, impl: impl, modelID: "deepseek-flash", maxTokens: 2048, tuning: tuning,
-	}, 0, history, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0, func() error { return nil }, nil, "")
+	}, 0, history, nil, nil, nil, false, nil, roundCoolingWait{}, false, &CallStatus{}, "", 0, 0, func() error { return nil }, nil, "")
 	if err == nil && result.lastErr == nil {
 		t.Fatal("expected original replay rejection")
 	}
