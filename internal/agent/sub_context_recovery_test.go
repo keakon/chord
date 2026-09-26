@@ -29,6 +29,12 @@ func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
 	client := llm.NewClient(providerCfg, provider, "model", 1024, "")
 
 	parent, sub := newMixedBatchTestSubAgent(t)
+	// The test drives the LLM loop by hand, so give the turn its own cancellable
+	// context: the join at the end must be able to abort the request the
+	// SubAgent issues after a plain-text reply.
+	ctx, cancel := context.WithCancel(sub.parentCtx)
+	defer cancel()
+	sub.turn.Ctx = ctx
 	sub.llmMu.Lock()
 	sub.llmClient = client
 	sub.llmMu.Unlock()
@@ -101,6 +107,13 @@ func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
 		}
 	default:
 	}
+	// "recovered" carries no coordination tool, so the SubAgent keeps going: it
+	// issues one more request, the stub answers with a transport error, and the
+	// client retries it with backoff. That call runs on a tracked goroutine, so
+	// cancel the turn and join it before returning — otherwise it logs after
+	// this test ends and races the next test's global logger swap.
+	cancel()
+	sub.llmWG.Wait()
 }
 
 func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) {
