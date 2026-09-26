@@ -1218,3 +1218,26 @@ func TestEditToolFailureReportsLineCountDifference(t *testing.T) {
 		t.Fatalf("error = %q, must not contain the <absent> placeholder", err.Error())
 	}
 }
+
+// The READ_RESULT copy rule has one home: the old_string parameter it governs.
+// The read description states only its own output format, and the edit
+// description keeps the line-ending behavior without repeating the rule.
+func TestEditReadResultCopyRuleHasSingleSource(t *testing.T) {
+	props := (EditTool{}).Parameters()["properties"].(map[string]any)
+	oldDesc := props["old_string"].(map[string]any)["description"].(string)
+	for _, want := range []string{"without the READ_RESULT metadata line", "preserve indentation, whitespace, and quotes"} {
+		if !strings.Contains(oldDesc, want) {
+			t.Fatalf("old_string description missing %q: %q", want, oldDesc)
+		}
+	}
+	editDesc := (EditTool{}).Description()
+	if strings.Contains(editDesc, "READ_RESULT") {
+		t.Fatalf("edit description repeats the old_string copy rule: %q", editDesc)
+	}
+	if !strings.Contains(editDesc, "LF replacement text is adapted to the existing line ending") {
+		t.Fatalf("edit description lost the line-ending behavior: %q", editDesc)
+	}
+	if strings.Contains((ReadTool{}).Description(), "into edit arguments") {
+		t.Fatal("read description repeats the edit copy rule")
+	}
+}

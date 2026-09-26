@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/lsp"
+	"github.com/keakon/chord/internal/toolname"
 )
 
 // ApplyPatchTool applies the Codex apply_patch protocol. Every operation is
@@ -247,7 +248,7 @@ func (ApplyPatchTool) Description() string {
 		"One `@@` line starts exactly one hunk: put any section context on that same line (`@@ func greet():`) rather than on a line after it, since a later `@@` starts the next hunk, and never prefix it with a unified-diff range like `@@ -19,10 +19,8 @@` — Chord anchors on the header text, not on line numbers, so a range is dead weight and any useful anchor is the section name itself. " +
 		"`+` or `-` must be the first character of the line; preserve source indentation after the marker (`-old` is a deletion, while ` -old` is context text). Every hunk must contain at least one `+` or `-` line. " +
 		"Context lines are literal complete source lines, not placeholders: a blank or whitespace-only line is a real source line, and `...` never omits context. " +
-		"Prefer the smallest hunk with distinctive context; after a mismatch, re-read the current target range and rebuild the hunk instead of retrying it unchanged."
+		toolname.ApplyPatchHunkGuidance
 }
 func (ApplyPatchTool) Parameters() map[string]any {
 	return map[string]any{

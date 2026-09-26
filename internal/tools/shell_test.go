@@ -346,16 +346,14 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 	for _, want := range []string{
 		"This tool is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution.",
 		"Use shell mainly for tests, builds, git, and other system commands.",
-		"Prefer the smallest safe number of tool calls.",
+		"When one visible built-in tool can do the job directly, use it instead of simulating it in shell.",
 		"shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
 		"If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.",
 		"For explicit file deletions, prefer `delete`; use shell removal only when shell semantics are actually required, such as directory trees or batch cleanup.",
 		"This tool also runs background jobs. Set run_in_background:true for services or work you do not need to wait for",
 		"Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default 90s), or when the command exits while its process group still runs",
 		"Dependent commands must run in order",
-		"Only set timeout_ms when you need a hard deadline other than the foreground default of 600000ms",
-		"a job started with run_in_background:true has none until you set one, and accepts up to 21600000 for hour-scale work",
-		"only set yield_time_ms when you need a foreground budget other than the default 90000ms.",
+		"Set timeout_ms or yield_time_ms only when you need a deadline or foreground budget other than the defaults their parameters describe.",
 	} {
 		if !strings.Contains(withoutHelpers, want) {
 			t.Fatalf("missing guidance %q in %q", want, withoutHelpers)
@@ -369,10 +367,10 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 		NameRead: {},
 	})
 	for _, want := range []string{
-		"use LSP first for symbol-aware navigation",
-		"use Grep for repo text search before reaching for rg",
-		"use Glob for file or path discovery before reaching for rg --files or find",
-		"use Read once you have narrowed the target files",
+		"use `lsp` first for symbol-aware navigation",
+		"use `grep` for repo text search before reaching for rg",
+		"use `glob` for file or path discovery before reaching for rg --files or find",
+		"use `read` once you have narrowed the target files",
 	} {
 		if !strings.Contains(withHelpers, want) {
 			t.Fatalf("missing helper hint %q in %q", want, withHelpers)

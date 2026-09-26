@@ -108,10 +108,7 @@ func (WorktreeEnterTool) DescriptionForTools(visible map[string]struct{}) string
 		"After a successful switch the shell, file tools, grep/glob and LSP all operate inside the worktree" + stay + ".\n" +
 		"Worktrees share the repository's session history and permissions: entering one does not change permission rules, hooks or agent configuration, and it never modifies the main checkout. " +
 		"Entering a worktree that already exists reuses that checkout, so another session or sub-agent can be working in the same directory: uncommitted changes and files are shared, and concurrent writers can overwrite each other. Open a separate worktree for each task that proceeds in parallel.\n" +
-		"Tracked files come from the branch; ignore-rule content (local config, AGENTS.md, .chord) is provided by the main checkout rather than copied.\n" +
-		"Parameters: `name` (optional; a name is generated when omitted and when `branch` is omitted), `path` (optional; defaults to the configured worktree root), " +
-		"`base` (optional commit to branch from; defaults to the current working directory's HEAD), `branch` (optional existing chord-managed branch to check out instead of creating one). " +
-		"If a branch with the requested name already exists without being checked out anywhere, the call fails unless `reset_branch` is true; resetting discards that branch's current tip."
+		"Tracked files come from the branch; ignore-rule content (local config, AGENTS.md, .chord) is provided by the main checkout rather than copied."
 }
 
 func (WorktreeEnterTool) Parameters() map[string]any {
@@ -120,7 +117,7 @@ func (WorktreeEnterTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"name": map[string]any{
 				"type":        "string",
-				"description": "Worktree name; also the directory and branch slug. Optional: a unique name is generated when omitted.",
+				"description": "Worktree name; also the directory and branch slug. Optional: a unique name is generated when both it and `branch` are omitted.",
 			},
 			"path": map[string]any{
 				"type":        "string",
@@ -136,7 +133,7 @@ func (WorktreeEnterTool) Parameters() map[string]any {
 			},
 			"reset_branch": map[string]any{
 				"type":        "boolean",
-				"description": "Reset an existing leftover branch to the base commit. Only use it when the user explicitly accepts losing that branch's current tip.",
+				"description": "Reset an existing leftover branch to the base commit. Without it, a requested name whose branch already exists without being checked out anywhere makes the call fail. Only use it when the user explicitly accepts losing that branch's current tip.",
 			},
 		},
 		"additionalProperties": false,

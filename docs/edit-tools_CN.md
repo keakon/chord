@@ -178,7 +178,7 @@ providers:
 {"path":"server.go","edits":[{"old_string":"const port = 8080","new_string":"const port = 3000"},{"old_string":"const retries = 2","new_string":"const retries = 3"}]}
 ```
 
-每项包含 `old_string`、`new_string` 和可选的 `replace_all`。`edits` 不能与顶层替换字段混用。所有项都匹配原始文件，不能依赖另一项刚插入的文本。批量替换清理参数中的不可见字符后精确匹配，不使用尾随换行或标点容错。匹配重叠、文本不存在、未设置 `replace_all` 却匹配多处，或编码失败时，整批拒绝，不写入任何替换。成功时只写入一次，并统一返回诊断。
+每项包含 `old_string`、`new_string` 和可选的 `replace_all`。`edits` 不能与顶层替换字段混用。所有项都匹配原始文件，不能依赖另一项刚插入的文本。批量替换在清理参数中的不可见字符、适配文件换行方式后精确匹配，不使用单次替换的尾随换行、标点或空白容错。匹配重叠、文本不存在、未设置 `replace_all` 却匹配多处，或编码失败时，整批拒绝，不写入任何替换。成功时只写入一次，并统一返回诊断。
 
 ### 示例：单次替换
 

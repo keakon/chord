@@ -115,7 +115,7 @@ func (t SkillTool) DescriptionForTools(_ map[string]struct{}) string {
 	if t.provider == nil || len(t.provider.ListSkills()) == 0 {
 		base = append(base, "No skills are currently available.")
 	} else {
-		base = append(base, "The available skills and their descriptions are listed in the system prompt's \"Available Skills\" section; when a task clearly matches one of them, call `skill` before proceeding.")
+		base = append(base, "The available skills and their descriptions are listed in the system prompt's \"Available Skills\" section.")
 	}
 	return strings.Join(base, " ")
 }
@@ -125,6 +125,11 @@ func (t SkillTool) Parameters() map[string]any {
 		"type":        "string",
 		"description": "Name of the skill to load.",
 	}
+	// The enum is intentionally complete rather than capped like the prompt
+	// summary: it is what keeps a skill past SkillListingMaxEntries loadable, so
+	// a cap here would turn a long install into silently unreachable skills. The
+	// cost is bounded by the install set, and a name is a few dozen bytes where
+	// the summary would have carried a description.
 	if names := t.visibleSkillNames(); len(names) > 0 {
 		name["enum"] = names
 		name["description"] = "Name of the skill to load. The enum lists all visible names, including entries omitted from the prompt summary."

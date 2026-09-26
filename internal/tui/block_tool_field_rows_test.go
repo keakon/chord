@@ -20,7 +20,7 @@ func TestNotifyCardUsesFieldRowGrammar(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      tools.NameNotify,
 		Content:       `{"message":"cross-check the checkpoint tree","kind":"progress"}`,
-		ResultContent: "Owner coordination chain has been notified. Continue working.",
+		ResultContent: "Your owner agent has been notified. Continue working.",
 		ResultDone:    true,
 	}
 	plain := stripANSI(strings.Join(b.Render(100, ""), "\n"))

@@ -1421,24 +1421,11 @@ func subAgentCoordinationPromptText(visible map[string]struct{}) string {
 	return strings.Join(lines, "\n")
 }
 
-// taskCompletionInstruction closes the "## Your Task" section. The escalation
-// path is resolved from the same visibility snapshot the coordination block
-// used, so the task instruction never tells a worker to call a control tool
-// this role does not expose. complete is exempt: it is always registered and
-// never ruleset-filtered (isSubAgentInternalTool).
-func taskCompletionInstruction(visible map[string]struct{}) string {
-	// When to call complete is not restated here: the SubAgent Coordination
-	// section and the Complete tool description are its single source.
-	base := "Focus only on this task."
-	switch {
-	case hasVisibleTool(visible, tools.NameEscalate):
-		return base + " Call " + toolPromptName(tools.NameEscalate) + " if you are blocked."
-	case hasVisibleTool(visible, tools.NameNotify):
-		return base + " Use " + toolPromptName(tools.NameNotify) + " if you are blocked or need owner-agent input because " + toolPromptName(tools.NameEscalate) + " is unavailable in this role."
-	default:
-		return base + " If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up."
-	}
-}
+// taskCompletionInstruction closes the "## Your Task" section. Blocker routing
+// is not restated here: the SubAgent Coordination section (rendered from the
+// live visibility snapshot) owns it, and SubAgent Task Closure already points
+// there, so a third copy would only drift.
+const taskCompletionInstruction = "Focus only on this task."
 
 // System prompt
 // ---------------------------------------------------------------------------
@@ -1473,7 +1460,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 	// prefix-cacheable.
 
 	// Task description (core difference from MainAgent).
-	taskSection := fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, taskCompletionInstruction(visible))
+	taskSection := fmt.Sprintf("## Your Task\n\n%s\n\n%s", s.taskDesc, taskCompletionInstruction)
 	if block := s.resultContractPromptBlock(); block != "" {
 		taskSection += "\n\n" + block
 	}

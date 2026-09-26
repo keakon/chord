@@ -179,9 +179,8 @@ func (t GrepTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 
 func (GrepTool) Description() string {
 	return "Search file contents using a regular expression. If pattern is not valid regex, it is safely searched as literal text and the result reports that fallback." +
-		" Use paths for one or more files/directories (JSON array, e.g. paths: [\"internal\", \"cmd\"]), and includes for optional path globs such as **/*.go (JSON array, e.g. includes: [\"**/*.go\"]). Relative paths resolve from the session working directory." +
+		" Use paths for one or more files/directories and includes for optional path globs; single bare strings are tolerated for either, but arrays are preferred." +
 		" If the exact file path is known, pass the full file path in paths instead of searching its parent directory with the filename in includes; includes filters files during traversal and does not avoid walking the search path." +
-		" Single bare strings are tolerated for paths/includes but arrays are preferred." +
 		" Returns matching lines with file paths and line numbers." +
 		" Best for discovering candidate files, symbols, or text matches when the exact location is not known yet."
 }
@@ -192,7 +191,7 @@ func (GrepTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"pattern": map[string]any{
 				"type":        "string",
-				"description": "Regular expression for file contents. If invalid as regex, it is searched as literal text and the result reports that fallback.",
+				"description": "Regular expression for file contents.",
 			},
 			"paths": map[string]any{
 				"type": "array",

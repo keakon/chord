@@ -116,8 +116,8 @@ func TestConvertToolsToResponsesForTarget(t *testing.T) {
 		if ap.Name != toolname.ApplyPatch {
 			t.Errorf("apply_patch name = %q", ap.Name)
 		}
-		if ap.Description != "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON." {
-			t.Errorf("custom tool description = %q, want the exact Codex freeform description", ap.Description)
+		if ap.Description != "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON. "+toolname.ApplyPatchHunkGuidance {
+			t.Errorf("custom tool description = %q, want the Codex freeform description plus the hunk rule", ap.Description)
 		}
 		if ap.Parameters != nil {
 			t.Errorf("custom tool must not send parameters, got %#v", ap.Parameters)
@@ -900,7 +900,7 @@ func TestResponsesToolCustomShapeMarshal(t *testing.T) {
 	wantTool := responsesTool{
 		Type:        "custom",
 		Name:        "apply_patch",
-		Description: "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+		Description: "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON. " + toolname.ApplyPatchHunkGuidance,
 		Format: &responsesToolFormat{
 			Type:       "grammar",
 			Syntax:     "lark",

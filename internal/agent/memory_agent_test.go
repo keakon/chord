@@ -399,6 +399,26 @@ func TestMemoryExtractionPromptStatesOutputContract(t *testing.T) {
 	}
 }
 
+// The removal ration is stated as a number the model can check, and it is the
+// same number the parser enforces for that kind of run.
+func TestMemoryExtractionInputCarriesEnforcedRemovalAllowance(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		prompt string
+		want   int
+	}{
+		{"session", buildMemoryExtractionPrompt(nil, "", nil, nil), memory.MaxRetirePerSessionRun},
+		{"review", buildMemoryIndexReviewPrompt("", nil, nil), memory.MaxRetirePerReviewRun},
+	} {
+		if want := fmt.Sprintf(`"removal_allowance":%d`, tc.want); !strings.Contains(tc.prompt, want) {
+			t.Errorf("%s prompt missing %s: %s", tc.name, want, tc.prompt)
+		}
+	}
+	if !strings.Contains(memoryExtractionSystemPrompt, "may not exceed removal_allowance") {
+		t.Error("extraction system prompt must name the removal_allowance budget")
+	}
+}
+
 // The read-path block is injected every turn, so it carries the cheap decisions:
 // when to skip memory entirely, and how to weigh staleness against the cost of
 // checking, rather than a blanket "verify everything". It also carries the

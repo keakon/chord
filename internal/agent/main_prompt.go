@@ -197,13 +197,13 @@ func (a *MainAgent) visibleMCPServersPromptBlock() string {
 	return mcp.RenderServersPromptBlock(filtered)
 }
 
-const agentsMDInstructionRequirement = "Treat these loaded sections as mandatory scoped workspace instructions and follow every applicable instruction at all times. Do not use file, search, or shell tools to rediscover or reread them. Read an additional AGENTS.md only when entering a directory whose instructions were not loaded. Beyond that, inspect only the task-relevant project files needed to understand, modify, or verify the requested work."
+const agentsMDInstructionRequirement = "Treat these loaded sections as mandatory scoped workspace instructions and follow every applicable instruction within the instruction priority order. Do not use file, search, or shell tools to rediscover or reread them. Read an additional AGENTS.md only when entering a directory whose instructions were not loaded. Beyond that, inspect only the task-relevant project files needed to understand, modify, or verify the requested work."
 
 func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 	if strings.TrimSpace(agentsMD) == "" {
 		return ""
 	}
-	return "## Workspace Instructions\nEach applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message. Follow it as mandatory scoped workspace instructions; do not reread already-loaded AGENTS.md files. Read additional instructions only when entering a directory whose instructions were not loaded."
+	return "## Workspace Instructions\nEach applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message; follow the requirement stated at the top of that block."
 }
 
 // takePendingLoopContinuationPromptBlock renders and consumes the
@@ -291,11 +291,13 @@ func (a *MainAgent) userConfirmationPromptBlock() string {
 		question := toolPromptName(tools.NameQuestion)
 		return `## Structured User Confirmation
 - Default to making ordinary implementation decisions yourself; the Guidelines section defines when asking the user is justified and what information a question must carry
+` + executionAuthorizationLine + `
 - When a necessary confirmation would change scope, risk, implementation choice, or the permission policy itself (not approval for an individual tool call), prefer ` + question + ` so the user gets a structured decision UI instead of an unstructured text question
 - Use plain assistant text only for lightweight clarifications that do not materially change the execution path`
 	}
 	return `## Plain-Text User Confirmation
 - Default to making ordinary implementation decisions yourself; the Guidelines section defines when asking the user is justified and what information a question must carry
+` + executionAuthorizationLine + `
 - Because structured confirmation is unavailable in this tool/permission state, ask necessary user-decision questions in normal assistant text while meeting that same information standard
 - When a clarification does not materially change the execution path, keep it brief and focused`
 }
@@ -359,7 +361,7 @@ func hasEnabledLSPServers(globalCfg, projectCfg *config.Config) bool {
 }
 
 func (a *MainAgent) loopContinuationDecisionInstructionLine() string {
-	return "- Continue autonomously from the existing context. Request user input only when a real external decision is strictly required to proceed, and do not ask merely because the automatic " + toolPromptName(tools.NameDone) + " interception budget is low."
+	return "- Continue autonomously from the existing context; ask the user only when the Guidelines' asking threshold is met, never merely because the automatic " + toolPromptName(tools.NameDone) + " interception budget is low."
 }
 
 // loopCompletionDecisionRequirementLine renders the loop's exit contract.

@@ -246,24 +246,33 @@ todo_write: allow
 	}
 }
 
+// Tool Selection routes between tools; how to size a replacement or a hunk is
+// each edit tool's own contract, stated once in its description.
 func TestToolSelectionPromptBlock_UsesEditSpecificGuidance(t *testing.T) {
 	editPrompt := toolSelectionPromptBlock(map[string]struct{}{tools.NameEdit: {}})
-	if !strings.Contains(editPrompt, "exact old_string/new_string replacements") {
-		t.Fatalf("edit prompt missing exact replacement guidance: %q", editPrompt)
+	if !strings.Contains(editPrompt, "re-read the small target range before editing") {
+		t.Fatalf("edit prompt missing stale target re-read guidance: %q", editPrompt)
 	}
-	if strings.Contains(editPrompt, "keep hunks small") {
-		t.Fatalf("edit prompt should not use patch hunk guidance: %q", editPrompt)
+	for _, unwanted := range []string{"hunk", "old_string/new_string", "replace_all"} {
+		if strings.Contains(editPrompt, unwanted) {
+			t.Fatalf("edit prompt restates edit-tool contract %q: %q", unwanted, editPrompt)
+		}
+	}
+	if desc := (tools.EditTool{}).Description(); !strings.Contains(desc, "Prefer the smallest unique 2-4 line block") {
+		t.Fatalf("edit description lost its sizing contract: %q", desc)
 	}
 
 	patchPrompt := toolSelectionPromptBlock(map[string]struct{}{tools.NameApplyPatch: {}})
-	if !strings.Contains(patchPrompt, "keep hunks small") {
-		t.Fatalf("patch prompt missing hunk guidance: %q", patchPrompt)
-	}
 	if !strings.Contains(patchPrompt, "re-read the small target range before patching") {
 		t.Fatalf("patch prompt missing stale target re-read guidance: %q", patchPrompt)
 	}
-	if strings.Contains(patchPrompt, "old_string/new_string") {
-		t.Fatalf("patch prompt should not use replace-edit guidance: %q", patchPrompt)
+	for _, unwanted := range []string{"keep hunks small", "old_string/new_string"} {
+		if strings.Contains(patchPrompt, unwanted) {
+			t.Fatalf("patch prompt restates edit-tool contract %q: %q", unwanted, patchPrompt)
+		}
+	}
+	if desc := (tools.ApplyPatchTool{}).Description(); !strings.Contains(desc, "put the enclosing function, test, or case name on the `@@` line") {
+		t.Fatalf("apply_patch description lost the repeated-block anchor hint: %q", desc)
 	}
 }
 
@@ -675,26 +684,6 @@ done: allow
 	}
 }
 
-func TestLoopFinalCompletionResponseLines_AlwaysRequireDoneToolInLoop(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.tools.Register(tools.NewDoneTool())
-	a.activeConfig = &config.AgentConfig{
-		Permission: parsePermissionNode(t, `
-"*": deny
-done: allow
-`),
-	}
-	a.rebuildRuleset()
-	joined := strings.Join(a.loopFinalCompletionResponseLines(), "\n")
-	for _, want := range []string{
-		"Call the `done` tool to request loop exit once those conditions are satisfied",
-	} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("loop final completion response requirements should include %q, got %q", want, joined)
-		}
-	}
-}
-
 func TestEvaluateToolPermission_TreatsQuestionAskAsAllow(t *testing.T) {
 	ruleset := permission.Ruleset{{Permission: tools.NameQuestion, Pattern: "*", Action: permission.ActionAsk}}
 	decision := evaluateToolPermissionInDir(ruleset, tools.NameQuestion, []byte(`{"questions":[{"header":"Next","question":"What next?","options":[]}]}`), permission.PathScope{})
@@ -847,17 +836,24 @@ question: allow
 	}
 }
 
+// How a response ends lives in Response Closure alone; User Communication keeps
+// the in-flight orientation guidance.
 func TestMainAgentCommunicationPrompt_PrefersAutonomyForLowRiskAdjacentWork(t *testing.T) {
-	got := mainAgentCommunicationPrompt
+	closure := mainAgentResponseClosurePromptText(false)
 	for _, want := range []string{
 		"Do not end responses with open-ended optional offers for routine in-scope next steps",
 		"This applies to equivalent wording in any language",
 		"if the next step is clearly necessary, low-risk, and within scope, do it yourself instead of offering it or asking the user to decide",
-		"keep the user oriented about the current direction",
 	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("mainAgentCommunicationPrompt missing %q in %q", want, got)
+		if !strings.Contains(closure, want) {
+			t.Fatalf("response closure missing %q in %q", want, closure)
 		}
+		if strings.Contains(mainAgentCommunicationPrompt, want) {
+			t.Fatalf("mainAgentCommunicationPrompt restates closure rule %q", want)
+		}
+	}
+	if !strings.Contains(mainAgentCommunicationPrompt, "keep the user oriented about the current direction") {
+		t.Fatalf("mainAgentCommunicationPrompt lost orientation guidance: %q", mainAgentCommunicationPrompt)
 	}
 }
 
@@ -1269,12 +1265,12 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if len(defs) != 1 {
 		t.Fatalf("mainLLMToolDefinitions() count = %d, want 1", len(defs))
 	}
-	for _, want := range []string{"Use shell mainly for tests, builds, git, and other system commands.", "Prefer the smallest safe number of tool calls.", "shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive."} {
+	for _, want := range []string{"Use shell mainly for tests, builds, git, and other system commands.", "When one visible built-in tool can do the job directly, use it instead of simulating it in shell.", "shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive."} {
 		if !strings.Contains(defs[0].Description, want) {
 			t.Fatalf("missing %q in Shell description %q", want, defs[0].Description)
 		}
 	}
-	if strings.Contains(defs[0].Description, "use LSP first") {
+	if strings.Contains(defs[0].Description, "use `lsp` first") {
 		t.Fatalf("unexpected LSP hint without Lsp tool: %q", defs[0].Description)
 	}
 
@@ -1293,7 +1289,7 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if bashDesc == "" {
 		t.Fatal("missing Shell tool definition")
 	}
-	for _, want := range []string{"use LSP first", "use Grep for repo text search before reaching for rg", "use Glob for file or path discovery before reaching for rg --files or find", "use Read once you have narrowed the target files", "If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.", "shell is not a substitute for them"} {
+	for _, want := range []string{"use `lsp` first", "use `grep` for repo text search before reaching for rg", "use `glob` for file or path discovery before reaching for rg --files or find", "use `read` once you have narrowed the target files", "If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts."} {
 		if !strings.Contains(bashDesc, want) {
 			t.Fatalf("missing %q in Shell description %q", want, bashDesc)
 		}
@@ -1374,18 +1370,19 @@ shell: allow
 		"## File Modification Constraints",
 		"This role is currently read-only for files",
 		"Do not use `shell`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
-		"## Authorization & Decisions",
-		"Execution authorization is handled by the permission system",
-		"See Plain-Text User Confirmation for how to raise a necessary user decision.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
 		}
 	}
-	for _, unwanted := range []string{"Use `edit`", "Use `write`", "`lsp`"} {
+	for _, unwanted := range []string{"Use `edit`", "Use `write`", "`lsp`", "## Authorization & Decisions"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly contains %q in %q", unwanted, got)
 		}
+	}
+	// The main agent's authorization line lives with its confirmation channel.
+	if confirm := a.userConfirmationPromptBlock(); !strings.Contains(confirm, "Execution authorization is handled by the permission system") {
+		t.Fatalf("userConfirmationPromptBlock() missing authorization line: %q", confirm)
 	}
 }
 
@@ -1519,8 +1516,8 @@ delete: allow
 
 	got := a.mainAgentCapabilityPromptBlock()
 	for _, want := range []string{
-		"Choose file tools by final state: use `write` directly when a path should still exist afterward with new full contents, and use `delete` only when the path should no longer exist.",
-		"Do not `delete` a path just to recreate it with `write`; that adds unnecessary risk and tool churn.",
+		"Choose file tools by final state: use `write` directly when a path should still exist afterward with new full contents, and use `delete` only when the path should no longer exist",
+		"never `delete` a path just to recreate it with `write`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
@@ -1592,9 +1589,16 @@ question: allow
 `)}
 	a.rebuildRuleset()
 
-	got := a.mainAgentCapabilityPromptBlock()
-	if !strings.Contains(got, "See Structured User Confirmation for when to use `question` versus plain assistant text.") {
-		t.Fatalf("mainAgentCapabilityPromptBlock() should reference Structured User Confirmation when Question is visible, got %q", got)
+	// The confirmation section owns the question-versus-text choice and the
+	// authorization line; the capability block no longer points at it.
+	got := a.userConfirmationPromptBlock()
+	for _, want := range []string{"## Structured User Confirmation", "prefer `question`", "Execution authorization is handled by the permission system"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("userConfirmationPromptBlock() missing %q when Question is visible, got %q", want, got)
+		}
+	}
+	if block := a.mainAgentCapabilityPromptBlock(); strings.Contains(block, "Structured User Confirmation") {
+		t.Fatalf("mainAgentCapabilityPromptBlock() should not point at the confirmation section, got %q", block)
 	}
 }
 
@@ -1616,9 +1620,15 @@ question: deny
 		t.Fatalf("mainAgentCapabilityPromptBlock() should not mention hidden Question tool, got %q", got)
 	}
 	// The threshold and information standard for a question live in Guidelines
-	// and the confirmation block; this block only routes to them.
-	if !strings.Contains(got, "See Plain-Text User Confirmation for how to raise a necessary user decision.") {
-		t.Fatalf("mainAgentCapabilityPromptBlock() missing plain-text confirmation routing, got %q", got)
+	// and the confirmation block, which also carries the authorization line.
+	confirm := a.userConfirmationPromptBlock()
+	for _, want := range []string{"## Plain-Text User Confirmation", "Execution authorization is handled by the permission system"} {
+		if !strings.Contains(confirm, want) {
+			t.Fatalf("userConfirmationPromptBlock() missing %q without Question, got %q", want, confirm)
+		}
+	}
+	if strings.Contains(confirm, "`question`") {
+		t.Fatalf("userConfirmationPromptBlock() should not mention hidden Question tool, got %q", confirm)
 	}
 }
 
@@ -1784,10 +1794,10 @@ shell: allow
 		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
 		"`escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up",
 		"Call `complete` when the task is done",
-		"If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up.",
 		"Focus on finishing the assigned task or reaching a real blocker; do not stop at a partial summary when in-scope work still remains",
 		"continue instead of presenting routine next steps as optional follow-up for the owner agent",
-		"Deliver the final task report through `complete`; progress and blockers use the coordination channels above: put the key result, the changed files and the verification status in its arguments",
+		"Deliver the final task report through `complete`: the key result and verification status in `summary`, the changed files in `files_changed`",
+		"progress and blockers go through the coordination channels above",
 		"do not compose the report a second time there",
 	} {
 		if !strings.Contains(got, want) {
@@ -1827,11 +1837,15 @@ shell: allow
 	for _, want := range []string{
 		"`notify` is unavailable in this role; do not assume you can send non-blocking progress updates to the owner agent",
 		"`escalate` is unavailable in this role; if you cannot proceed independently, explain the blocker clearly in assistant text and wait for owner follow-up",
-		"If you are blocked and no control tool is available, explain the blocker clearly in assistant text and wait for owner follow-up.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("subagent prompt missing %q in %q", want, got)
 		}
+	}
+	// The Coordination section is the single blocker route; the task section
+	// does not repeat it.
+	if !strings.Contains(got, "## Your Task\n\nInspect the parser and report findings.\n\nFocus only on this task.") || strings.Contains(got, "if you are blocked") {
+		t.Fatalf("task section should defer blocker routing to Coordination: %q", got)
 	}
 
 	reg.Register(tools.NewEscalateTool(nil))
@@ -1850,7 +1864,6 @@ notify: allow
 	for _, want := range []string{
 		"Use `notify` to surface progress, clarifications, or intermediate results",
 		"Call `escalate` when owner-agent intervention, a cross-task dependency, or a decision is required",
-		"Call `escalate` if you are blocked.",
 		"continue instead of presenting routine next steps as optional follow-up for the owner agent",
 	} {
 		if !strings.Contains(got, want) {
@@ -1886,10 +1899,10 @@ edit:
 	if !strings.Contains(mainBlock, "ask to adjust permissions, scope, or approach") {
 		t.Fatalf("main capability block missing user-facing escalation wording: %q", mainBlock)
 	}
-	if !strings.Contains(mainBlock, "See Structured User Confirmation for when to use `question` versus plain assistant text") {
-		t.Fatalf("main capability block missing Structured User Confirmation reference: %q", mainBlock)
+	if strings.Contains(mainBlock, "## Authorization & Decisions") {
+		t.Fatalf("main capability block should leave authorization to the confirmation section: %q", mainBlock)
 	}
-	if !strings.Contains(subBlock, "question` when the user must choose between materially different options") && !strings.Contains(subBlock, "Use `question` when the user must choose between materially different options") {
+	if !strings.Contains(subBlock, "Use `question` only when the user must choose between materially different options; route other owner-agent decisions through your SubAgent Coordination section") {
 		t.Fatalf("sub capability block missing Question guidance: %q", subBlock)
 	}
 	if !strings.Contains(subBlock, "explain the limitation clearly in assistant text because `escalate` and `notify` are unavailable in this role") {
@@ -1906,9 +1919,37 @@ notify: allow
 	ruleset = permission.ParsePermission(&permNode)
 	s = &SubAgent{tools: reg}
 	s.setRuleset(ruleset)
-	subBlock = s.capabilityPromptBlock(s.visibleToolNames())
-	if !strings.Contains(subBlock, "Use `notify` to surface materially different decisions or owner-agent intervention because `escalate` is unavailable") {
-		t.Fatalf("sub capability block should fall back to Notify when Escalate is unavailable, got %q", subBlock)
+	visible := s.visibleToolNames()
+	subBlock = s.capabilityPromptBlock(visible)
+	_, authBlock, _ := strings.Cut(subBlock, "## Authorization & Decisions")
+	if strings.TrimSpace(authBlock) != executionAuthorizationLine {
+		t.Fatalf("without question the authorization block must leave decision routing to the coordination section, got %q", authBlock)
+	}
+	if coordination := subAgentCoordinationPromptText(visible); !strings.Contains(coordination, "use `notify` to surface blockers or owner-agent decisions") {
+		t.Fatalf("coordination section should route decisions to Notify when Escalate is unavailable, got %q", coordination)
+	}
+
+	// With escalate visible the Coordination section owns the escalate
+	// routing; the authorization block must point there, not restate it.
+	reg.Register(tools.NewEscalateTool(nil))
+	permNode = parsePermissionNode(t, `
+"*": deny
+read: allow
+shell: allow
+question: allow
+escalate: allow
+`)
+	ruleset = permission.ParsePermission(&permNode)
+	s = &SubAgent{tools: reg}
+	s.setRuleset(ruleset)
+	visible = s.visibleToolNames()
+	_, authBlock, _ = strings.Cut(s.capabilityPromptBlock(visible), "## Authorization & Decisions")
+	authBlock, _, _ = strings.Cut(authBlock, "\n## ")
+	if strings.Contains(authBlock, "`escalate`") || !strings.Contains(authBlock, "route other owner-agent decisions through your SubAgent Coordination section") {
+		t.Fatalf("authorization block must defer escalate routing to the coordination section, got %q", authBlock)
+	}
+	if coordination := subAgentCoordinationPromptText(visible); !strings.Contains(coordination, "`escalate`") {
+		t.Fatalf("coordination section must own the escalate routing, got %q", coordination)
 	}
 }
 
@@ -1978,9 +2019,10 @@ func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 	if !strings.Contains(joined, "In this loop workflow, the `done` tool is the explicitly required completion signal") {
 		t.Fatalf("loop completion requirements should designate Done as the required completion signal, got %q", joined)
 	}
-	finalJoined := strings.Join(a.loopFinalCompletionResponseLines(), "\n")
-	if !strings.Contains(finalJoined, "Call the `done` tool to request loop exit once those conditions are satisfied") {
-		t.Fatalf("loop final completion requirements should mention Done exit contract, got %q", finalJoined)
+	// The general completion-report wording lives in Response Closure; the loop
+	// contract does not restate it as a separate final-response section.
+	if strings.Contains(joined, "Clearly state that the requested task is complete") {
+		t.Fatalf("loop completion requirements should not restate Response Closure, got %q", joined)
 	}
 }
 
@@ -2206,15 +2248,16 @@ func TestBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t 
 	}
 	for _, want := range []string{
 		"Each applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message",
-		"Follow it as mandatory scoped workspace instructions",
-		"do not reread already-loaded AGENTS.md files",
+		"follow the requirement stated at the top of that block",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "Read an additional AGENTS.md only when entering a directory") {
-		t.Fatalf("buildSystemPrompt() should not duplicate the full AGENTS.md requirement kept in the session reminder, got:\n%s", got)
+	for _, unwanted := range []string{"mandatory scoped workspace instructions", "whose instructions were not loaded", "reread"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("buildSystemPrompt() should not duplicate the full AGENTS.md requirement kept in the session reminder (%q), got:\n%s", unwanted, got)
+		}
 	}
 }
 
@@ -2234,8 +2277,7 @@ func TestSubAgentBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPr
 	for _, want := range []string{
 		"## Workspace Instructions",
 		"Each applicable AGENTS.md is already loaded in the labeled \"# AGENTS.md instructions\" block before the first visible user message",
-		"Follow it as mandatory scoped workspace instructions",
-		"do not reread already-loaded AGENTS.md files",
+		"follow the requirement stated at the top of that block",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("SubAgent buildSystemPrompt() missing AGENTS.md framing %q, got:\n%s", want, got)

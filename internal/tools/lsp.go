@@ -59,7 +59,7 @@ func (t LspTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"operation": map[string]any{
 				"type":        "string",
-				"description": "One of: definition, references, implementation. Prefer these for semantic navigation and analysis once the file path and position are known. Use definition to jump to the symbol definition, references to find usages, and implementation to find concrete implementations. For references/implementation, place the cursor on the identifier, not on empty space or the file beginning.",
+				"description": "definition jumps to the symbol definition, references finds usages, and implementation finds concrete implementations.",
 				"enum":        []string{"definition", "references", "implementation"},
 			},
 			"path": map[string]any{
@@ -69,7 +69,7 @@ func (t LspTool) Parameters() map[string]any {
 			"line": map[string]any{
 				"type":        "integer",
 				"minimum":     1,
-				"description": "1-based line number from the current verified file content. Reread the file after edits; do not reuse stale coordinates.",
+				"description": "1-based line number from the current verified file content.",
 			},
 			"character": map[string]any{
 				"type":        "integer",

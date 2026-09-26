@@ -188,7 +188,7 @@ Use `edits` for disjoint changes in one call:
 {"path":"server.go","edits":[{"old_string":"const port = 8080","new_string":"const port = 3000"},{"old_string":"const retries = 2","new_string":"const retries = 3"}]}
 ```
 
-Each entry has `old_string`, `new_string`, and optional `replace_all`. Do not combine `edits` with top-level replacement fields. All entries match the original file, so one entry cannot target text introduced by another. Batch matching is exact after argument character cleaning; it does not use trailing-newline or punctuation tolerance. Overlapping matches, missing text, ambiguous matches without `replace_all`, or encoding failures reject the entire batch before writing. A successful batch writes once and reports diagnostics once.
+Each entry has `old_string`, `new_string`, and optional `replace_all`. Do not combine `edits` with top-level replacement fields. All entries match the original file, so one entry cannot target text introduced by another. Batch matching is exact after argument character cleaning and line-ending adaptation; it does not use trailing-newline or punctuation/whitespace tolerance. Overlapping matches, missing text, ambiguous matches without `replace_all`, or encoding failures reject the entire batch before writing. A successful batch writes once and reports diagnostics once.
 
 ### Example: Single Replacement
 

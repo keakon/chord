@@ -18,8 +18,9 @@ type DoneTool struct{}
 func NewDoneTool() DoneTool { return DoneTool{} }
 
 // CompletionReportStructure is the required section shape of the final Markdown
-// completion report. Shared by the done tool description and the agent's
-// loop-mode completion instructions so the two never drift apart.
+// completion report. It is interpolated into the done tool description, which
+// is the only place the contract is stated to the model: the loop-mode
+// instructions point at the tool instead of restating the sections.
 const CompletionReportStructure = "- **Completion status**: one line summary (e.g., 'All requested work is finished')\n" +
 	"- **What changed**: files modified, created, deleted or key actions taken\n" +
 	"- **Verification**: tests run and their results\n" +

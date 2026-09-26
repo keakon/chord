@@ -175,7 +175,7 @@ func (DelegateTool) Description() string {
 	return "Delegate a task to a SubAgent for parallel execution. " +
 		"The SubAgent runs independently with its own context and tool access, and reports back when done. " +
 		"Your system prompt's delegation workflow governs task selection, follow-up, and safe parallelism. " +
-		"IMPORTANT: The result is delivered asynchronously and flows back to you automatically — do NOT poll or retrieve SubAgent results. " +
+		"The result is delivered asynchronously and flows back to you automatically; do not poll for or retrieve SubAgent results. " +
 		"The returned task_id is the stable durable handle for that delegate and identifies the same task across follow-up attempts. " +
 		"Roles that can write files must declare a non-empty expected_write_scope; a read-only delegation pairs a read-only role with an empty scope object {}."
 }
@@ -241,13 +241,13 @@ func (t *DelegateTool) Parameters() map[string]any {
 			},
 			"expected_write_scope": map[string]any{
 				"type":                 "object",
-				"description":          "Required declaration of the paths this task expects to modify. It is a coordination declaration, not an enforced boundary: the runtime does not block the worker's file tools outside it, and which tools the worker may actually use is decided by the role's permission rules. The declaration feeds sibling-overlap hints (a started handle may carry scope_conflict with suggested_task_id) and your own planning, so declare the narrowest files/path_prefix/modules that honestly cover the work. A task that will not modify files should pick an agent_type whose role registers no file-writing tools (its permission rules deny write, edit, delete, and apply_patch) and pass an empty object {}: the empty scope is accepted only for such roles, because a role that can write files must still declare what it plans to touch.",
+				"description":          "Required declaration of the narrowest files, path_prefix, or modules that honestly cover the paths this task expects to modify. It is a coordination declaration, not an enforced boundary: the worker's role permissions decide which tools it may use, and the declaration only feeds sibling-overlap hints (a started handle may carry scope_conflict with suggested_task_id) and your own planning. An empty object {} is accepted only for an agent_type whose role cannot write files.",
 				"properties":           scopeProperties,
 				"additionalProperties": false,
 			},
 			"workdir": map[string]any{
 				"type":        "string",
-				"description": "Optional existing chord worktree (its name or path) to start this worker in. The worktree must already exist: this tool never creates one, so create it first (`" + NameWorktreeEnter + "`) or point at one you already have. Omit it and the worker inherits your working directory. Sharing a worktree is supported on purpose: delegating several workers into the same worktree is how you get a review of what another worker just wrote, and concurrent writes to the same file in the same worktree are still caught by the shared path tracker. The worker's own permission rules decide what it may do there, not this parameter.",
+				"description": "Optional existing chord worktree (its name or path) to start this worker in. The worktree must already exist: this tool never creates one, so create it first (`" + NameWorktreeEnter + "`) or point at one you already have. Omit it and the worker inherits your working directory. Several workers may share a worktree (for example, one reviewing what another just wrote); concurrent writes to the same file are still caught by the shared path tracker. The worker's own permission rules decide what it may do there.",
 			},
 			"agent_type": map[string]any{
 				"type":        "string",

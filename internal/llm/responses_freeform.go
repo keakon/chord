@@ -58,15 +58,16 @@ func convertToolsToResponsesForTarget(provider *ProviderConfig, modelID string, 
 	freeform := shouldEmitFreeformApplyPatch(provider, modelID)
 	for _, t := range tools {
 		if freeform && t.Name == toolname.ApplyPatch {
-			// The custom tool wire description matches Codex exactly (the
-			// FREEFORM sentence is only valid for this shape, so it cannot
-			// live on the shared ToolDefinition description used by the JSON
-			// function shape). gpt-5-and-later models are already trained on
-			// the patch format and need no format teaching here.
+			// The custom tool wire description starts with the Codex text
+			// (the FREEFORM sentence is only valid for this shape, so it
+			// cannot live on the shared ToolDefinition description used by
+			// the JSON function shape). gpt-5-and-later models are already
+			// trained on the patch format and need no format teaching here,
+			// but the hunk-sizing rule is Chord's own and is kept.
 			result = append(result, responsesTool{
 				Type:        "custom",
 				Name:        t.Name,
-				Description: "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON.",
+				Description: "The `apply_patch` tool can be used to edit files. This is a FREEFORM tool, so do not wrap the patch in JSON. " + toolname.ApplyPatchHunkGuidance,
 				Format: &responsesToolFormat{
 					Type:       "grammar",
 					Syntax:     "lark",

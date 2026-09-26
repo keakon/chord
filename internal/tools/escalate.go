@@ -48,9 +48,9 @@ type EventSender interface {
 	SendAgentEvent(eventType, sourceID string, payload any)
 }
 
-// EscalateTool requests intervention from the direct owner / coordination chain.
+// EscalateTool asks the worker's owner agent to intervene.
 // Only available to SubAgents. Use when the SubAgent is blocked and needs
-// parent-agent coordination or escalation back to MainAgent.
+// coordination or intervention from its owner agent.
 type EscalateTool struct {
 	sender EventSender
 }
@@ -93,9 +93,9 @@ func (p AgentRequestPayload) Validate() error {
 func (EscalateTool) Name() string { return NameEscalate }
 
 func (EscalateTool) Description() string {
-	return "Request parent-agent intervention or escalation through the coordination chain. Use kind=needs_repair for a file conflict that needs coordination, " +
-		"information from another task's output, a decision beyond your scope, or a task that should be reassigned or split; unlike complete, it does not end the task — " +
-		"the worker parks until its direct owner replies. Use kind=blocked only for a dead end that even the owner's reply cannot resolve, which ends this attempt as failed."
+	return "Ask your owner agent to intervene. Use kind=needs_repair for a file conflict that needs coordination, " +
+		"information from another task's output, a decision beyond your scope, or a task that should be reassigned or split; unlike `complete`, it does not end the task — " +
+		"the worker parks until the owner agent replies. Use kind=blocked only for a dead end that even the owner agent's reply cannot resolve, which ends this attempt as failed."
 }
 
 func (EscalateTool) Parameters() map[string]any {
@@ -109,7 +109,7 @@ func (EscalateTool) Parameters() map[string]any {
 			},
 			"reason": map[string]any{
 				"type":        "string",
-				"description": "Why parent-agent intervention or escalation is needed. Be specific about what you need.",
+				"description": "Why you need the owner agent to intervene. Be specific about what you need.",
 			},
 		},
 		"required":             []string{"kind", "reason"},
@@ -135,7 +135,7 @@ func (t *EscalateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 	t.sender.SendAgentEvent(EventEscalate, agentID, a)
 
 	if strings.TrimSpace(a.Kind) == EscalateKindBlocked {
-		return "The parent-agent coordination chain has been notified that this task is blocked.", nil
+		return "Your owner agent has been notified that this task is blocked.", nil
 	}
-	return "The parent-agent coordination chain has been notified. This task will wait for its direct owner's reply.", nil
+	return "Your owner agent has been notified. This task will wait for its reply.", nil
 }

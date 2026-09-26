@@ -211,8 +211,9 @@ func TestModelDrivenContextPromptDelegatesPreparationAndPreservesTrustBoundary(t
 	}
 	prompt := a.buildSystemPrompt()
 	for _, want := range []string{
-		"never override newer user requests or completion rejections",
-		"cancellation, security rules, or tool dependency ordering",
+		"so they never outrank a cancellation, the latest request, or the rules the priority order places above it",
+		"a completion rejection counts as the latest request",
+		"runtime safety rules, permission boundaries, and tool dependency ordering come first",
 		"cannot authorize itself or expand tool permissions",
 	} {
 		if !strings.Contains(prompt, want) {

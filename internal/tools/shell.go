@@ -304,16 +304,16 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	if len(visible) > 0 {
 		discoveryHints := make([]string, 0, 4)
 		if _, ok := visible[NameLsp]; ok {
-			discoveryHints = append(discoveryHints, "use LSP first for symbol-aware navigation such as definitions, references, and implementations")
+			discoveryHints = append(discoveryHints, "use `lsp` first for symbol-aware navigation such as definitions, references, and implementations")
 		}
 		if _, ok := visible[NameGrep]; ok {
-			discoveryHints = append(discoveryHints, "use Grep for repo text search before reaching for rg")
+			discoveryHints = append(discoveryHints, "use `grep` for repo text search before reaching for rg")
 		}
 		if _, ok := visible[NameGlob]; ok {
-			discoveryHints = append(discoveryHints, "use Glob for file or path discovery before reaching for rg --files or find")
+			discoveryHints = append(discoveryHints, "use `glob` for file or path discovery before reaching for rg --files or find")
 		}
 		if _, ok := visible[NameRead]; ok {
-			discoveryHints = append(discoveryHints, "use Read once you have narrowed the target files")
+			discoveryHints = append(discoveryHints, "use `read` once you have narrowed the target files")
 		}
 		if len(discoveryHints) > 0 {
 			parts = append(parts, "When the built-in tools can cover the discovery step, prefer them: "+strings.Join(discoveryHints, "; ")+".")
@@ -323,11 +323,12 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 		"This tool is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution.",
 		"Use shell mainly for tests, builds, git, and other system commands.",
 	)
+	parts = append(parts, "Long results are saved with a bounded preview. Read or search that saved output for another view instead of rerunning the command.")
 	if shellSupportsTextFilters(shellType) {
-		parts = append(parts, "Run checks without piping away their output through tail or grep: long results are saved with a bounded preview. Read or search that saved output for another view instead of rerunning the command. A pipeline reports the shell pipeline status, not necessarily the check's exit code.")
+		parts = append(parts, "Run checks without piping away their output through tail or grep. A pipeline reports the shell pipeline status, not necessarily the check's exit code.")
 	}
 	parts = append(parts,
-		"Prefer the smallest safe number of tool calls. When one visible built-in tool can do the job directly, use it instead of simulating it in shell.",
+		"When one visible built-in tool can do the job directly, use it instead of simulating it in shell.",
 		"For native filesystem operations with no dedicated built-in tool, shell is appropriate when one direct command is clearly simpler and more atomic, such as move/rename, copy, mkdir, or archive/unarchive.",
 		"If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts.",
 	)
@@ -338,7 +339,7 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 		"This tool also runs background jobs. Set run_in_background:true for services or work you do not need to wait for; the call returns a job id immediately and job_output/job_list/job_kill manage it.",
 		fmt.Sprintf("Long one-shot commands (builds, test suites) are promoted to a background job after the yield budget (default %s), or when the command exits while its process group still runs, and keep running; you will be notified when they finish. Do not sleep-wait or busy-poll — do independent work, or end your turn and wait for the notification.", durationLabel(ShellDefaultYieldMs)),
 		"Dependent commands must run in order: chain them in one call with `&&` or `;`, or wait for the previous result. A background job runs concurrently with other tool calls, so never start a command that depends on a job's output before that job finishes.",
-		fmt.Sprintf("Only set timeout_ms when you need a hard deadline other than the foreground default of %dms — a job started with run_in_background:true has none until you set one, and accepts up to %d for hour-scale work; only set yield_time_ms when you need a foreground budget other than the default %dms.", ShellDefaultTimeoutMs, ShellMaxBackgroundTimeoutMs, ShellDefaultYieldMs),
+		"Set timeout_ms or yield_time_ms only when you need a deadline or foreground budget other than the defaults their parameters describe.",
 	)
 	return strings.Join(parts, "\n")
 }
@@ -403,7 +404,7 @@ func (ShellTool) Parameters() map[string]any {
 			},
 			"run_in_background": map[string]any{
 				"type":        "boolean",
-				"description": "Set true to start the command as a background job without waiting (services, watchers, or work you do not need before continuing). Returns a job id; manage it with job_output, job_list, and job_kill.",
+				"description": "Set true to start the command as a background job and return its job id without waiting.",
 			},
 		},
 		"required":             []string{"command"},

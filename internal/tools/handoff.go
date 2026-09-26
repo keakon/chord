@@ -24,8 +24,7 @@ func (HandoffTool) Name() string { return NameHandoff }
 
 func (HandoffTool) Description() string {
 	return "Signal that planning is complete and hand off to another agent for execution. " +
-		"Always write the plan to .chord/plans/ as YYYYMMDD-<slug>.md before calling this tool — " +
-		"it validates that the referenced file already exists. Call it after writing the plan document to .chord/plans/. " +
+		"Write the plan document under .chord/plans/ (named YYYYMMDD-<slug>.md) first: the call validates that the referenced file already exists. " +
 		"Call it only when the request actually needs execution in another role; do not use it to " +
 		"hand off a request you answered directly or a plan the user only asked to review."
 }

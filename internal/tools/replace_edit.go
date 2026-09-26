@@ -83,9 +83,9 @@ func (t EditTool) Description() string {
 	// LSP diagnostic follow-up guidance lives in the system prompt
 	// (## LSP diagnostic follow-up), not per-tool descriptions; see
 	// lspDiagnosticPromptBlock.
-	return "Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with Write. " +
-		"Copy source text after the READ_RESULT metadata line, preserving indentation, spaces, and quotes. For files with uniform CRLF or CR line endings, LF replacement text is adapted to the existing line ending; mixed line endings require exact matching. " +
-		"For several disjoint changes in one file, use edits instead of separate calls. Every batch entry matches the original file exactly; overlaps are rejected and all entries are validated before writing. Do not mix edits with top-level replacement fields. " +
+	return "Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with `write`. " +
+		"For files with uniform CRLF or CR line endings, LF replacement text is adapted to the existing line ending; mixed line endings require exact matching. " +
+		"For several disjoint changes in one file, use edits instead of separate calls. Every batch entry matches the original file exactly after line-ending adaptation; overlaps are rejected and all entries are validated before writing. Do not mix edits with top-level replacement fields. " +
 		"Prefer the smallest unique 2-4 line block instead of a large stale context block; re-read before retrying after any mismatch. Replaces one occurrence by default; set replace_all to replace every occurrence."
 }
 
@@ -99,7 +99,7 @@ func (EditTool) Parameters() map[string]any {
 			},
 			"edits": map[string]any{
 				"type": "array", "minItems": 1,
-				"description": "Disjoint exact replacements against the original file, validated together before one write.",
+				"description": "Disjoint replacements matched exactly against the original file after line-ending adaptation, without trailing-newline or punctuation/whitespace tolerance; validated together before one write.",
 				"items": map[string]any{"type": "object", "properties": map[string]any{
 					"old_string":  map[string]any{"type": "string", "minLength": 1},
 					"new_string":  map[string]any{"type": "string"},
@@ -108,7 +108,7 @@ func (EditTool) Parameters() map[string]any {
 			},
 			"old_string": map[string]any{
 				"type":        "string",
-				"description": "Source text to replace, excluding the READ_RESULT metadata line. Preserve whitespace and quotes; uniform file line endings are handled as described above.",
+				"description": "Exact source text to replace, copied from read output without the READ_RESULT metadata line; preserve indentation, whitespace, and quotes.",
 			},
 			"new_string": map[string]any{
 				"type":        "string",

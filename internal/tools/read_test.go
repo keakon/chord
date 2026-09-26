@@ -66,7 +66,6 @@ func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
 		"offset/limit cannot split a single line that exceeds the output budget",
 		"omits encoding for UTF-8 files",
 		"everything after that first line is exact file text without line-number gutters or extra indentation",
-		"copy only the text after READ_RESULT into edit arguments",
 		"approximate 20k-token read budget",
 		"read output normalizes line endings to LF",
 	} {

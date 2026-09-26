@@ -281,49 +281,62 @@ func (a *MainAgent) emitLoopContinuationNote(note *LoopContinuationNote) {
 	a.emitToTUI(LoopNoticeEvent{Title: note.Title, Text: note.Text, DedupKey: note.DedupKey})
 }
 
+// loopCompletionRequirementLines is the loop's exit contract. The open TODO
+// items and active subagents it refers to are listed once, above it, by the
+// note that embeds it; the report format lives in the done tool description
+// and the general closure rules in the system prompt's Response Closure.
 func (a *MainAgent) loopCompletionRequirementLines() []string {
 	lines := []string{
 		"- All requested work is finished",
-		"- Required verification is completed, or explicitly reported as not run",
-		"- If verification cannot be run, state why in the final report.",
+		"- Required verification is completed, or explicitly reported as not run. If verification cannot be run, state why in the final report.",
+		"- Producing a summary or reaching a natural stopping point does not by itself mean the work is complete",
 		"- If the task is truly blocked, end your reply with <blocked>category: reason</blocked> (category is one of " + strings.Join(loopBlockerCategories, ", ") + "); the loop then stops as blocked",
 		a.loopCompletionDecisionRequirementLine(),
 	}
 	if a.hasActiveSubAgents() {
-		lines = append(lines, "- Active subagents must finish before completion:")
-		for _, line := range a.activeSubAgentContinuationLines() {
-			lines = append(lines, "  "+line)
-		}
-		lines = append(lines, "- No active subagents remain after all subagent work is done")
+		lines = append(lines, "- No active subagents remain: every active subagent has finished")
 	}
 	if a.hasOpenTodos() {
 		todoWrite := toolPromptName(tools.NameTodoWrite)
 		if a.hasTodoWriteAccess() {
-			lines = append(lines, "- Mark every remaining open TODO item completed or cancelled with "+todoWrite+" before finishing:")
-			for _, line := range a.openTodoContinuationLines() {
-				lines = append(lines, "  "+line)
-			}
-			lines = append(lines, "- No open TODO items remain after that final "+todoWrite+" sync")
+			lines = append(lines, "- No open TODO items remain: mark every open item completed or cancelled with "+todoWrite+" before finishing")
 		} else {
-			lines = append(lines, "- The following open TODO items exist but "+todoWrite+" is not available in this role; finish the remaining work they describe:")
-			for _, line := range a.openTodoContinuationLines() {
-				lines = append(lines, "  "+line)
-			}
-			lines = append(lines, "- All work described in the above TODO items is done")
+			lines = append(lines, "- Open TODO items remain, but "+todoWrite+" is not available in this role; finish the remaining work they describe")
 		}
 	}
 	return lines
 }
 
-func (a *MainAgent) loopFinalCompletionResponseLines() []string {
-	return []string{
-		"- Clearly state that the requested task is complete",
-		"- Summarize the completed work",
-		"- Report verification status explicitly",
-		"- If verification was not run, state why",
-		"- Call the " + toolPromptName(tools.NameDone) + " tool to request loop exit once those conditions are satisfied",
-		"- List any remaining limitations or unverified areas",
+// loopBudgetMeaning states what one interception counts. Both notices that
+// show the budget share the sentence so the wording cannot drift apart.
+const loopBudgetMeaning = "each automatic rejection of `done` or of a repeated tool call uses one; once none remain, the next one waits for the user's decision."
+
+// loopBudgetLines states the automatic Done interception budget and what it
+// means, so the counter is not an unexplained number. used is the count
+// already spent. The near-exhaustion warning lives in the continuation note's
+// instruction section (buildLoopContinuationNote), which is the only place that
+// can word it as advice next to the rest of the loop instructions; stating it
+// here too printed two near-identical warnings in one note.
+func (a *MainAgent) loopBudgetLines(used int) []string {
+	maxIter := a.loopState.MaxIterations
+	if maxIter <= 0 {
+		return []string{fmt.Sprintf("Automatic Done interceptions %d (unlimited).", used)}
 	}
+	remaining := max(maxIter-used, 0)
+	return []string{fmt.Sprintf("Automatic Done interceptions %d of %d (%d remaining): %s", used, maxIter, remaining, loopBudgetMeaning)}
+}
+
+// loopStateListSections lists the open TODO items and active subagents once,
+// for the completion requirements below them to refer to.
+func (a *MainAgent) loopStateListSections() []string {
+	var sections []string
+	if todoLines := a.openTodoContinuationLines(); len(todoLines) > 0 {
+		sections = append(sections, "", "Open TODO items:", strings.Join(todoLines, "\n"))
+	}
+	if subLines := a.activeSubAgentContinuationLines(); len(subLines) > 0 {
+		sections = append(sections, "", "Active subagents:", strings.Join(subLines, "\n"))
+	}
+	return sections
 }
 
 func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
@@ -335,26 +348,16 @@ func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
 		"Target:",
 		"- " + target,
 	}
-	// Automatic Done interception budget.
-	maxIter := a.loopState.MaxIterations
-	if maxIter > 0 {
-		sections = append(sections, fmt.Sprintf("Automatic Done interceptions: %d", maxIter))
+	if a.loopState.MaxIterations > 0 {
+		sections = append(sections, fmt.Sprintf("Automatic Done interceptions: %d — %s", a.loopState.MaxIterations, loopBudgetMeaning))
 	} else {
 		sections = append(sections, "Automatic Done interceptions: unlimited")
 	}
-	if todoLines := a.openTodoContinuationLines(); len(todoLines) > 0 {
-		sections = append(sections, "", "Open TODO items:", strings.Join(todoLines, "\n"))
-	}
-	if subLines := a.activeSubAgentContinuationLines(); len(subLines) > 0 {
-		sections = append(sections, "", "Active subagents:", strings.Join(subLines, "\n"))
-	}
+	sections = append(sections, a.loopStateListSections()...)
 	sections = append(sections,
 		"",
 		"Completion requirements:",
 		strings.Join(a.loopCompletionRequirementLines(), "\n"),
-		"",
-		"Final completion response requirements:",
-		strings.Join(a.loopFinalCompletionResponseLines(), "\n"),
 	)
 	noticeText := strings.Join(sections, "\n")
 	a.appendLoopNoticeMessage("LOOP", noticeText)

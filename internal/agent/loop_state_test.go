@@ -1766,8 +1766,8 @@ func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
 	if found == nil {
 		t.Fatal("expected persisted loop notice message")
 	}
-	if !strings.Contains(found.Content, "Completion requirements:") || !strings.Contains(found.Content, "Final completion response requirements:") {
-		t.Fatalf("loop notice content = %q, want completion contract", found.Content)
+	if !strings.Contains(found.Content, "Completion requirements:") || strings.Contains(found.Content, "Final completion response requirements:") {
+		t.Fatalf("loop notice content = %q, want one completion contract", found.Content)
 	}
 	if !strings.Contains(found.Content, "Pass the complete final Markdown completion report in the `done` tool's required `report` argument, following the report structure in its tool description") {
 		t.Fatalf("loop notice content = %q, want Done report-argument requirement", found.Content)
@@ -2313,8 +2313,27 @@ func TestLoopContinuationIncludesIterationBudget(t *testing.T) {
 	if note == nil {
 		t.Fatal("expected continuation note")
 	}
-	if !strings.Contains(note.Text, "Automatic Done interceptions 6 of 100 (94 remaining)") {
+	if !strings.Contains(note.Text, "Automatic Done interceptions 7 of 100 (93 remaining)") {
 		t.Fatalf("LOOP CONTINUE should contain iteration budget with remaining count, got: %q", note.Text)
+	}
+}
+
+// TestLoopContinuationBudgetCountsTheRejectionThatProducedIt pins the off-by-one
+// the budget line used to carry: the auto-reject path records the intercept
+// before it builds the notice, so a counter of 7 must report 7 spent.
+func TestLoopContinuationBudgetCountsTheRejectionThatProducedIt(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.loopState.enableWithTarget("finish current task")
+	a.loopState.MaxIterations = 10
+	before := a.loopState.Iteration
+	a.loopState.recordAutoExitIntercept()
+	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"target_active"}})
+	if note == nil {
+		t.Fatal("expected continuation note")
+	}
+	want := fmt.Sprintf("Automatic Done interceptions %d of 10 (%d remaining)", before+1, 10-(before+1))
+	if !strings.Contains(note.Text, want) {
+		t.Fatalf("LOOP CONTINUE budget = %q, want %q", note.Text, want)
 	}
 }
 
@@ -2327,11 +2346,13 @@ func TestLoopContinuationConvergenceWarningNearBudgetLimit(t *testing.T) {
 	if note == nil {
 		t.Fatal("expected continuation note")
 	}
-	if !strings.Contains(note.Text, "Automatic Done interception budget is nearly exhausted") {
-		t.Fatalf("LOOP CONTINUE should warn when budget nearly exhausted, got: %q", note.Text)
+	if got := strings.Count(note.Text, "near the automatic Done interception limit"); got != 1 {
+		t.Fatalf("LOOP CONTINUE must warn about the limit exactly once, got %d in: %q", got, note.Text)
 	}
-	if !strings.Contains(note.Text, "near the automatic Done interception limit") {
-		t.Fatalf("LOOP CONTINUE instruction should mention iteration limit, got: %q", note.Text)
+	// The budget line reports the counter only; a second near-exhaustion
+	// sentence next to the instruction line is the duplication this guards.
+	if strings.Contains(note.Text, "budget is nearly exhausted") {
+		t.Fatalf("the near-exhaustion warning must have a single home, got: %q", note.Text)
 	}
 }
 

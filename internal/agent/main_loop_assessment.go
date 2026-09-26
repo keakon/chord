@@ -134,44 +134,63 @@ func (a *MainAgent) hasActiveSubAgentWork() bool {
 	return false
 }
 
+// Loop blocker categories. A `<blocked>category: reason</blocked>` marker names
+// one of these, and the reason text is otherwise matched against them. The
+// marker parser, the prompt, and the inference all read the same constants, so
+// renaming a category cannot leave the inference naming a category the parser
+// no longer accepts.
+const (
+	loopBlockerCredentialOrPermission = "credential_or_permission_missing"
+	loopBlockerDependencyUnavailable  = "dependency_unavailable"
+	loopBlockerRequiredInputMissing   = "required_input_missing"
+	loopBlockerWorkspaceConflict      = "workspace_conflict"
+	loopBlockerUserDecisionRequired   = "user_decision_required"
+)
+
 func inferLoopBlockerCategory(reason string) string {
 	normalized := strings.ToLower(strings.TrimSpace(reason))
 	switch {
 	case normalized == "":
-		return "dependency_unavailable"
+		return loopBlockerDependencyUnavailable
 	case strings.Contains(normalized, "credential"),
 		strings.Contains(normalized, "permission"),
 		strings.Contains(normalized, "forbidden"),
 		strings.Contains(normalized, "unauthorized"),
 		strings.Contains(normalized, "token"),
 		strings.Contains(normalized, "denied"):
-		return "credential_or_permission_missing"
+		return loopBlockerCredentialOrPermission
 	case strings.Contains(normalized, "input"),
 		strings.Contains(normalized, "sample"),
 		strings.Contains(normalized, "capture"),
 		strings.Contains(normalized, "replay"),
 		strings.Contains(normalized, "fixture"),
 		strings.Contains(normalized, "missing data"):
-		return "required_input_missing"
+		return loopBlockerRequiredInputMissing
 	case strings.Contains(normalized, "conflict"),
 		strings.Contains(normalized, "locked"),
 		strings.Contains(normalized, "lock"),
 		strings.Contains(normalized, "dirty worktree"),
 		strings.Contains(normalized, "workspace"):
-		return "workspace_conflict"
+		return loopBlockerWorkspaceConflict
 	case strings.Contains(normalized, "decision"),
 		strings.Contains(normalized, "choose"),
 		strings.Contains(normalized, "approval"),
 		strings.Contains(normalized, "confirm"):
-		return "user_decision_required"
+		return loopBlockerUserDecisionRequired
 	default:
-		return "dependency_unavailable"
+		return loopBlockerDependencyUnavailable
 	}
 }
 
 // loopBlockerCategories are the categories a <blocked>category: reason</blocked>
 // marker may name; anything else is inferred from the reason text.
-var loopBlockerCategories = []string{"credential_or_permission_missing", "dependency_unavailable", "required_input_missing", "workspace_conflict", "user_decision_required"}
+var loopBlockerCategories = []string{
+	loopBlockerCredentialOrPermission,
+	loopBlockerDependencyUnavailable,
+	loopBlockerRequiredInputMissing,
+	loopBlockerWorkspaceConflict,
+	loopBlockerUserDecisionRequired,
+}
 
 func parseLoopBlockedReason(raw string) (category, detail string) {
 	raw = strings.TrimSpace(raw)
@@ -430,29 +449,14 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 	sections := make([]string, 0, 10)
 	sections = append(sections, "<loop-continuation>", "Continue required.")
 
-	// Automatic Done interception budget. Continue notices are emitted after an
-	// automatic rejection, so show the current counter as the number already used.
+	// Automatic Done interception budget. The counter already counts the
+	// rejection that produced this notice: autoRejectLoopExitAndContinue
+	// records the intercept before building it, so the number shown is what
+	// the model has actually spent, not what is left before the next one.
 	maxIter := a.loopState.MaxIterations
 	iter := a.loopState.Iteration
-	if assessment.Action == LoopAssessmentActionContinue && iter > 0 {
-		iter--
-	}
-	if maxIter > 0 {
-		remaining := max(maxIter-iter, 0)
-		sections = append(sections, fmt.Sprintf("Automatic Done interceptions %d of %d (%d remaining).", iter, maxIter, remaining))
-		if remaining <= 2 {
-			sections = append(sections, "Automatic Done interception budget is nearly exhausted — the next failed Done attempts may require explicit user approval or denial.")
-		}
-	} else {
-		sections = append(sections, fmt.Sprintf("Automatic Done interceptions %d (unlimited).", iter))
-	}
-
-	if todoLines := a.openTodoContinuationLines(); len(todoLines) > 0 {
-		sections = append(sections, "", "Open TODO items:", strings.Join(todoLines, "\n"))
-	}
-	if subLines := a.activeSubAgentContinuationLines(); len(subLines) > 0 {
-		sections = append(sections, "", "Active subagents:", strings.Join(subLines, "\n"))
-	}
+	sections = append(sections, a.loopBudgetLines(iter)...)
+	sections = append(sections, a.loopStateListSections()...)
 	if reason, ok := extractDoneRejectedReason(assessment.Message); ok {
 		sections = append(sections, "", "Latest Done rejection reason:", reason)
 	}
@@ -506,20 +510,15 @@ func (a *MainAgent) buildLoopContinuationNote(assessment *LoopAssessment) *LoopC
 	}
 
 	sections = append(sections, "", "Completion requirements:", strings.Join(a.loopCompletionRequirementLines(), "\n"))
-	finalLines := append(a.loopFinalCompletionResponseLines(), "- Do not mark completion merely because you produced a summary or reached a natural stopping point")
-	sections = append(sections, "", "Final completion response requirements:", strings.Join(finalLines, "\n"))
 
-	// Dynamic instruction lines.
+	// Dynamic instruction lines. When to ask the user is owned by the system
+	// prompt's Guidelines; only the loop-specific budget rule is stated here.
 	instructionLines := []string{
-		"- Continue toward the current objective, incorporating the latest user request or Done rejection",
-		"- Prioritize unresolved items above only while they still serve that request",
-		"- Do not let earlier goals or stale TODOs override newer user instructions",
+		"- Continue toward the current objective, led by the latest user request or Done rejection; work on the unresolved items above only while they still serve it, and do not let earlier goals or stale TODOs override newer user instructions",
 		a.loopContinuationDecisionInstructionLine(),
-		"- Choose the best reasonable path unless a real user decision is required",
-		"- Only ask the user when a material ambiguity, permission boundary, or major tradeoff requires it",
 	}
 	if maxIter > 0 && maxIter-iter <= 2 {
-		instructionLines = append(instructionLines, "- You are near the automatic Done interception limit: avoid marginal work and prepare for a user decision if Done is rejected again")
+		instructionLines = append(instructionLines, "- You are near the automatic Done interception limit: avoid marginal work before the next `done`, and prepare for a user decision if it is rejected again")
 	}
 	if a.hasActiveSubAgents() {
 		instructionLines = append(instructionLines, "- If a subagent appears stuck or blocked, escalate or cancel it rather than waiting indefinitely")

@@ -112,6 +112,14 @@ func TestNotifyParametersMatchRoleCapabilities(t *testing.T) {
 			if got := strings.Contains(string(schema), "pending request"); got != tc.target {
 				t.Fatalf("response contract mentioned = %t, want %t: %s", got, tc.target, schema)
 			}
+			// The correlation rule lives in the parameters; the description only points at them.
+			desc := NewNotifyTool(nil, notifyMessengerStub{}, tc.owner, tc.target).Description()
+			if strings.Contains(desc, "invent") {
+				t.Fatalf("description restates the correlation_id rule owned by the parameters: %q", desc)
+			}
+			if got := strings.Contains(desc, "as their parameter descriptions state"); got != tc.target {
+				t.Fatalf("description points at response parameters = %t, want %t: %q", got, tc.target, desc)
+			}
 			if target, ok := properties["target_task_id"].(map[string]any); ok && !tc.owner {
 				if desc := target["description"].(string); strings.Contains(desc, "Optional") || strings.Contains(desc, "Omit") {
 					t.Fatalf("required target_task_id described as optional: %q", desc)

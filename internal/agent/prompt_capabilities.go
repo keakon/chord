@@ -40,8 +40,8 @@ func buildDynamicCapabilityPromptBlock(visible map[string]struct{}, ruleset perm
 // shellExecutionBoundaryPromptBlock renders the command-execution boundary a
 // delegated task actually has. A role ruleset that denies Shell never gets the
 // tool registered, so the worker's visible surface has no command tool at all;
-// without the block, the shared Guidelines' incremental-verification advice
-// ("first compile, then run the changed package's tests") would push the
+// without the block, the shared Guidelines' cost-ordered verification advice
+// (compile/typecheck first, then focused checks) would push the
 // worker toward builds and tests it can never run, after which it could only
 // fabricate results or get stuck. The block tells the worker that command
 // execution and execution-based verification belong to the owner agent, and to
@@ -90,31 +90,31 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		} else {
 			lines = append(lines, "- Use "+toolPromptName(editToolName)+" to modify the contents of one existing file with a verified path.")
 		}
+		// How to size a hunk or a replacement is each edit tool's own
+		// contract (its description); only the cross-tool read-before-edit
+		// rule and the patch-only file-lifecycle rules live here.
 		switch editToolName {
 		case tools.NameApplyPatch:
-			lines = append(lines, "- For "+toolPromptName(editToolName)+", keep hunks small and include unique unchanged context; in repeated blocks such as tests or fixtures, include the enclosing function, test, or case name.")
 			lines = append(lines, "- If patching a file modified earlier in the turn and the target area is not freshly visible, re-read the small target range before patching.")
 			if patchOnlySurface {
 				lines = append(lines, "- To fully rewrite an existing file, use `*** Update File:` hunks that replace its content; do not `*** Delete File:` a path just to re-add it, and never combine delete and add operations for the same path in one patch.")
 				lines = append(lines, "- Only `*** Delete File:` paths you have verified exist; do not guess paths for deletions.")
 			}
 		case tools.NameEdit:
-			lines = append(lines, "- For "+toolPromptName(editToolName)+", use exact old_string/new_string replacements; batch disjoint changes in one file with edits, matching the original contents. Follow the edit tool's source-text and line-ending contract; prefer the smallest unique block and set replace_all only when every occurrence should change.")
 			lines = append(lines, "- If editing a file modified earlier in the turn and the target area is not freshly visible, re-read the small target range before editing.")
 		}
 	}
 	if hasVisibleTool(visible, tools.NameWrite) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameWrite)+" for whole-file writes. Overwriting an existing file replaces its contents; if the file was not read or changed on disk after your last read, the previous contents are backed up to the session directory when they can be read, and the result names that backup.")
+		lines = append(lines, "- Use "+toolPromptName(tools.NameWrite)+" for whole-file writes: a new file, or all of an existing file's contents.")
 	}
 	if editToolName != "" && hasVisibleTool(visible, tools.NameWrite) {
 		lines = append(lines, "- Do not use "+toolPromptName(tools.NameWrite)+" for local edits to existing files; use "+toolPromptName(editToolName)+" instead.")
 	}
 	if hasVisibleTool(visible, tools.NameDelete) {
-		lines = append(lines, "- Use "+toolPromptName(tools.NameDelete)+" to remove files whose paths you have verified exist; never guess paths for deletions.")
+		lines = append(lines, "- Use "+toolPromptName(tools.NameDelete)+" to remove files whose paths you have verified exist.")
 	}
 	if hasVisibleTool(visible, tools.NameWrite) && hasVisibleTool(visible, tools.NameDelete) {
-		lines = append(lines, "- Choose file tools by final state: use "+toolPromptName(tools.NameWrite)+" directly when a path should still exist afterward with new full contents, and use "+toolPromptName(tools.NameDelete)+" only when the path should no longer exist.")
-		lines = append(lines, "- Do not "+toolPromptName(tools.NameDelete)+" a path just to recreate it with "+toolPromptName(tools.NameWrite)+"; that adds unnecessary risk and tool churn.")
+		lines = append(lines, "- Choose file tools by final state: use "+toolPromptName(tools.NameWrite)+" directly when a path should still exist afterward with new full contents, and use "+toolPromptName(tools.NameDelete)+" only when the path should no longer exist; never "+toolPromptName(tools.NameDelete)+" a path just to recreate it with "+toolPromptName(tools.NameWrite)+".")
 	}
 
 	if len(discoveryTools) > 0 {
@@ -234,39 +234,27 @@ func fileModificationConstraintsPromptBlock(visible map[string]struct{}, ruleset
 	return "## File Modification Constraints\n" + strings.Join(lines, "\n")
 }
 
-// authorizationAndDecisionsPromptBlock explains how execution authorization
-// and materially different decisions are routed. Conservative handling of
-// destructive actions and verification reporting live in the shared
-// Guidelines section, not here.
+// executionAuthorizationLine tells the model that tool approval is the
+// runtime's job. The main agent carries it in its user-confirmation section
+// (userConfirmationPromptBlock); a SubAgent carries it here.
+const executionAuthorizationLine = "- Execution authorization is handled by the permission system: when a tool call needs approval, the runtime asks automatically, so attempt the call instead of asking for permission in text."
+
+// authorizationAndDecisionsPromptBlock explains how a SubAgent handles
+// execution authorization and when to ask the user directly. The main agent's
+// equivalent lives in its user-confirmation section, which already owns the
+// question-versus-text choice, so no separate block is rendered for it.
+// Routing blockers and owner-agent decisions through escalate, notify, or
+// assistant text is owned by the SubAgent Coordination section; this block
+// only adds the question-versus-owner choice when question is visible.
+// Conservative handling of destructive actions and verification reporting
+// live in the shared Guidelines section, not here.
 func authorizationAndDecisionsPromptBlock(visible map[string]struct{}, audience capabilityPromptAudience) string {
-	const authorizationLine = "- Execution authorization is handled by the permission system: when a tool call needs approval, the runtime asks automatically, so attempt the call instead of asking for permission in text."
-	lines := []string{authorizationLine}
-	if audience == capabilityPromptAudienceSub {
-		hasQuestion := hasVisibleTool(visible, tools.NameQuestion)
-		hasEscalate := hasVisibleTool(visible, tools.NameEscalate)
-		hasNotify := hasVisibleTool(visible, tools.NameNotify)
-		switch {
-		case hasQuestion && hasEscalate:
-			lines = append(lines, "- Use "+toolPromptName(tools.NameQuestion)+" only when the user must choose between materially different options; otherwise use "+toolPromptName(tools.NameEscalate)+" when owner-agent intervention or a decision is required.")
-		case hasQuestion && hasNotify:
-			lines = append(lines, "- Use "+toolPromptName(tools.NameQuestion)+" only when the user must choose between materially different options; otherwise use "+toolPromptName(tools.NameNotify)+" to surface owner-agent intervention or decision points because "+toolPromptName(tools.NameEscalate)+" is unavailable in this role.")
-		case hasQuestion:
-			lines = append(lines, "- Use "+toolPromptName(tools.NameQuestion)+" when the user must choose between materially different options, and clearly explain any remaining owner-agent dependency in assistant text because "+toolPromptName(tools.NameEscalate)+" is unavailable in this role.")
-		case hasEscalate:
-			lines = append(lines, "- Use "+toolPromptName(tools.NameEscalate)+" when owner-agent intervention or a materially different decision is required.")
-		case hasNotify:
-			lines = append(lines, "- Use "+toolPromptName(tools.NameNotify)+" to surface materially different decisions or owner-agent intervention because "+toolPromptName(tools.NameEscalate)+" is unavailable in this role.")
-		default:
-			lines = append(lines, "- If a materially different decision or owner-agent intervention is required, explain the blocker clearly in assistant text because neither "+toolPromptName(tools.NameQuestion)+", "+toolPromptName(tools.NameNotify)+", nor "+toolPromptName(tools.NameEscalate)+" is available in this role.")
-		}
-	} else if hasVisibleTool(visible, tools.NameQuestion) {
-		lines = append(lines, "- See Structured User Confirmation for when to use "+toolPromptName(tools.NameQuestion)+" versus plain assistant text.")
-	} else {
-		// Without question, userConfirmationPromptBlock renders the
-		// Plain-Text User Confirmation section, which already states the
-		// threshold and the information standard; restating it here would give
-		// the same rule a second source that can drift.
-		lines = append(lines, "- See Plain-Text User Confirmation for how to raise a necessary user decision.")
+	if audience != capabilityPromptAudienceSub {
+		return ""
+	}
+	lines := []string{executionAuthorizationLine}
+	if hasVisibleTool(visible, tools.NameQuestion) {
+		lines = append(lines, "- Use "+toolPromptName(tools.NameQuestion)+" only when the user must choose between materially different options; route other owner-agent decisions through your SubAgent Coordination section.")
 	}
 	return "## Authorization & Decisions\n" + strings.Join(lines, "\n")
 }

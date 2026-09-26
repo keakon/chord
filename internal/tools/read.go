@@ -56,7 +56,7 @@ func (ReadTool) Description() string {
 		"- offset is a 1-based line number (1 = the first line); omit it to start from the beginning.\n" +
 		"- Paging is line-based, not character-based: offset/limit cannot split a single line that exceeds the output budget.\n" +
 		"Output format:\n" +
-		"- Normal output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (an empty file, or offset=N+1 — the one-past-the-last-line value that is the normal end of paging; an offset larger than N+1 is an error); everything after that first line is exact file text without line-number gutters or extra indentation, so copy only the text after READ_RESULT into edit arguments.\n" +
+		"- Normal output starts with one READ_RESULT metadata line of the form `READ_RESULT lines=a-b total=N` (1-based inclusive returned range and total file line count), or `READ_RESULT lines=none total=N` when no line was returned (an empty file, or offset=N+1 — the one-past-the-last-line value that is the normal end of paging; an offset larger than N+1 is an error); everything after that first line is exact file text without line-number gutters or extra indentation.\n" +
 		"- The header omits encoding for UTF-8 files and reports it only for other encodings.\n" +
 		"- read output normalizes line endings to LF.\n" +
 		"Truncation semantics (a read that simply did not reach the end of the file is not truncation):\n" +

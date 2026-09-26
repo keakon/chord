@@ -42,6 +42,12 @@ func TestShellOutputFilterGuidance(t *testing.T) {
 // PowerShell pipelines are not POSIX text filters, so the description must not
 // advertise tail/grep there. The advice lives only in the tool description.
 func TestShellOutputFilterGuidanceExcludesPowerShell(t *testing.T) {
+	for _, shellType := range []string{"bash", "powershell"} {
+		got := shellToolDescription(nil, shellType)
+		if !strings.Contains(got, "Long results are saved with a bounded preview") || !strings.Contains(got, "instead of rerunning the command") {
+			t.Fatalf("%s description lacks saved output guidance: %q", shellType, got)
+		}
+	}
 	if got := shellToolDescription(nil, "powershell"); strings.Contains(got, "tail or grep") {
 		t.Fatalf("PowerShell description advertises tail/grep guidance: %q", got)
 	}

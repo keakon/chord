@@ -4112,7 +4112,6 @@ func TestBuildCompactionPromptIncludesActiveObjectivePreservationRules(t *testin
 	)
 	for _, want := range []string{
 		"Full archived history file for this compaction: history-2.md",
-		"checkpoint wrapper also lists all archived history files",
 		"These todos are not automatically authoritative after compaction",
 		"classify it as active/relevant, completed/background, or stale/superseded",
 		"continue investigating rate limit",
@@ -4120,6 +4119,11 @@ func TestBuildCompactionPromptIncludesActiveObjectivePreservationRules(t *testin
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q:\n%s", want, prompt)
 		}
+	}
+	// The archive-chain rule is stated once, in the compaction system prompt.
+	const archiveChain = "checkpoint wrapper may also list all archived history files"
+	if !strings.Contains(compactionSystemPrompt, archiveChain) || strings.Contains(prompt, "checkpoint wrapper") {
+		t.Fatalf("archive-chain rule must live only in the system prompt:\n%s", prompt)
 	}
 }
 

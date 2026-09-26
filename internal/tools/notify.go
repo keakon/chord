@@ -84,16 +84,17 @@ const notifyResponseCorrelationHint = "message_type=response answers only a real
 	"If you do need to answer but cannot find the genuine correlation_id, stop this response and ask for coordination instead of substituting any other id."
 
 func (t *NotifyTool) Description() string {
-	const usageRule = "For a plain targeted note, provide target_task_id, message, and optionally kind — do not send message_type or correlation_id. " +
-		"Use message_type=response only to answer a pending request that is genuinely waiting on you, passing exactly the correlation_id that request carries; never invent one. "
+	// How to answer a pending request is owned by the message_type and
+	// correlation_id parameter descriptions.
+	const usageRule = "For a plain targeted note, provide target_task_id, message, and optionally kind; message_type and correlation_id are only for answering a pending request, as their parameter descriptions state. "
 	switch {
 	case t.allowOwner && t.allowTarget:
-		return "Send a non-blocking update. Without target_task_id, notify your direct owner / coordination chain and continue working. " +
+		return "Send a non-blocking update. Without target_task_id, notify your owner agent and continue working. " +
 			"With target_task_id, deliver a clarification, correction, or follow-up to a specific delegated worker without escalating. " + usageRule + targetedNotifyResumeNote
 	case t.allowTarget:
 		return "Send a non-blocking clarification, decision, or correction to a delegated worker identified by target_task_id. " + usageRule + targetedNotifyResumeNote
 	default:
-		return "Send a non-blocking progress update or intermediate result to your direct owner / coordination chain and continue working."
+		return "Send a non-blocking progress update or intermediate result to your owner agent and continue working."
 	}
 }
 
@@ -271,5 +272,5 @@ func (t *NotifyTool) Execute(ctx context.Context, raw json.RawMessage) (string, 
 		Message: a.Message, Kind: a.Kind, MessageType: a.MessageType, Subtype: a.Subtype,
 		CorrelationID: a.CorrelationID, Payload: a.Payload,
 	})
-	return "Owner coordination chain has been notified. Continue working.", nil
+	return "Your owner agent has been notified. Continue working.", nil
 }

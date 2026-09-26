@@ -106,7 +106,7 @@ func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
 	if !strings.Contains(got, "Treat these loaded sections as mandatory scoped workspace instructions") {
 		t.Errorf("missing mandatory AGENTS.md workspace-instruction guidance: %q", got)
 	}
-	if !strings.Contains(got, "follow every applicable instruction at all times") {
+	if !strings.Contains(got, "follow every applicable instruction within the instruction priority order") {
 		t.Errorf("missing must-follow AGENTS.md guidance: %q", got)
 	}
 	if !strings.Contains(got, "Do not use file, search, or shell tools to rediscover or reread them") {

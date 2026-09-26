@@ -54,12 +54,9 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 	// is rendered once by the Delegate tool's agent_type parameter
 	// description, which ships with the tool schema on every request where
 	// delegation is visible; it is not duplicated as a prompt list here.
+	// That results arrive asynchronously without polling is stated once in the
+	// Delegate tool description, which nested delegators also see.
 	sb.WriteString("## SubAgent Workflow\n")
-	sb.WriteString("- The ")
-	sb.WriteString(delegate)
-	sb.WriteString(" tool call returns immediately; MainAgent receives SubAgent progress and completion updates automatically through the runtime coordination flow (see the ")
-	sb.WriteString(delegate)
-	sb.WriteString(" tool description for its call semantics).\n")
 	sb.WriteString(delegationStrategyPromptLines(a.mainLLMVisibleToolNames()))
 	if a.compactContextVisible() {
 		// The compact_context tool exists only when it is visible and
@@ -74,7 +71,6 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 	sb.WriteString("- After choosing substantial independent work to delegate, dispatch tasks with disjoint write scopes before starting your own independent work.\n")
 	sb.WriteString("- Do not duplicate work assigned to an active worker. Continue independent work that cannot conflict with it; otherwise wait for runtime coordination.\n")
 	sb.WriteString("- Until you receive an escalation, a completion, or a clear error/blocked signal from a worker, do not take over implementation just because a SubAgent is briefly quiet, has not written files yet, or has not produced immediate visible output.\n")
-	sb.WriteString("- You may dispatch multiple SubAgents in parallel or continue working on other independent tasks while they run.\n")
 	return sb.String()
 }
 

@@ -1414,13 +1414,10 @@ func backgroundObjectPromptDescription(description, fallbackCommand string) stri
 
 func buildCompactionPromptWithKeyFiles(input *compactionInput, historyPath string, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState) string {
 	var sb strings.Builder
-	sb.WriteString("Summarize the earlier conversation transcript below so the main coding agent can continue work.\n")
-	sb.WriteString("Treat this as a durable checkpoint for the next coding turn, not as a narrative recap. Focus on current objective, constraints, decisions, progress, blockers, and concrete next steps.\n")
-	sb.WriteString("A small raw evidence pack and recent raw tail may be kept after this summary, so focus on durable context from the archived head rather than duplicating those verbatim excerpts.\n\n")
+	sb.WriteString("Summarize the earlier conversation transcript below so the main coding agent can continue work.\n\n")
 	fmt.Fprintf(&sb, "Full archived history file for this compaction: %s\n", historyPath)
-	sb.WriteString("If this is not the first compaction, the checkpoint wrapper also lists all archived history files for the full session history chain.\n")
 	if input != nil && input.OmittedMessages > 0 {
-		fmt.Fprintf(&sb, "Compression note: the earliest %d archived message(s) were omitted from the summary input to fit the utility model budget. The archived history file is authoritative for those details.\n", input.OmittedMessages)
+		fmt.Fprintf(&sb, "Compression note: the earliest %d archived message(s) were omitted from the summary input to fit the summarizer's input budget. The archived history file is authoritative for those details.\n", input.OmittedMessages)
 	}
 	sb.WriteString("\nDurable session anchors (carried forward verbatim in the checkpoint):\n")
 	if input != nil {
@@ -1452,7 +1449,7 @@ func buildCompactionPromptWithKeyFiles(input *compactionInput, historyPath strin
 	sb.WriteString(formatBackgroundObjectsForPrompt(backgroundObjects))
 	if input != nil && strings.TrimSpace(input.PriorCheckpoint) != "" {
 		sb.WriteString("\n\nPrior durable checkpoint from an earlier compaction of this session — always present, independent of transcript trimming:\n")
-		sb.WriteString("Fold its still-accurate content into your summary. Do not silently drop or contradict the sections it established. The session anchors are carried forward verbatim separately; do not restate them.\n\n")
+		sb.WriteString("Fold its still-accurate content into your summary. Do not silently drop or contradict the sections it established.\n\n")
 		sb.WriteString(formatPriorCheckpointCarryForPrompt(input.PriorCheckpoint))
 		sb.WriteByte('\n')
 	}

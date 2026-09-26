@@ -26,7 +26,7 @@ func TestToolDefinitionsKeepLocalContractsOnRestrictedSurfaces(t *testing.T) {
 	}{
 		{tools.NameRead, "offset/limit cannot split a single line", []string{tools.NameGrep, tools.NameLsp, tools.NameShell}},
 		{tools.NameGrep, "Returns matching lines with file paths and line numbers", []string{tools.NameLsp}},
-		{tools.NameGlob, "patterns are path globs", []string{tools.NameRead, tools.NameGrep, tools.NameLsp}},
+		{tools.NameGlob, "glob syntax, not regex and not a file-contents search", []string{tools.NameRead, tools.NameGrep, tools.NameLsp}},
 		{tools.NameWrite, "Empty content truncates the file to zero bytes", []string{tools.NameEdit, tools.NameDelete}},
 		{tools.NameDelete, "Does not delete directories or wildcard patterns", []string{tools.NameWrite}},
 		{tools.NameDelegate, "delivered asynchronously", []string{tools.NameRead, tools.NameGrep, tools.NameShell, tools.NameNotify, tools.NameCancel}},
@@ -44,12 +44,17 @@ func TestToolDefinitionsKeepLocalContractsOnRestrictedSurfaces(t *testing.T) {
 			if len(defs) != 1 || defs[0].Name != tc.name {
 				t.Fatalf("visible definitions = %+v, want only %s", defs, tc.name)
 			}
-			if !strings.Contains(defs[0].Description, tc.want) {
-				t.Fatalf("%s lost its local contract %q", tc.name, tc.want)
-			}
 			schema, err := json.Marshal(defs[0].InputSchema)
 			if err != nil {
 				t.Fatal(err)
+			}
+			contract := defs[0].Description
+			// glob's not-regex contract is owned by its patterns parameter.
+			if tc.name == tools.NameGlob {
+				contract = string(schema)
+			}
+			if !strings.Contains(contract, tc.want) {
+				t.Fatalf("%s lost its local contract %q", tc.name, tc.want)
 			}
 			text := strings.ToLower(defs[0].Description + "\n" + string(schema))
 			for _, absent := range tc.absent {

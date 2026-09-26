@@ -341,12 +341,16 @@ func TestGrepToolParameterDescriptionsClarifyPathsAndIncludes(t *testing.T) {
 func TestGlobToolDescriptionExplainsDiscoveryRole(t *testing.T) {
 	desc := (GlobTool{}).Description()
 	for _, want := range []string{
-		"patterns are path globs, not regular expressions and not file-contents searches.",
+		"Find files by path using glob syntax.",
 		"Best for discovering candidate files by path or extension.",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("Description() missing %q: %q", want, desc)
 		}
+	}
+	// The patterns parameter owns the not-regex / not-contents boundary.
+	if strings.Contains(desc, "regular expressions") {
+		t.Fatalf("Description() should leave the regex boundary to the patterns parameter: %q", desc)
 	}
 }
 
@@ -371,6 +375,7 @@ func TestGlobToolParameterDescriptionsClarifyBasePathAndPatternScope(t *testing.
 		"Returned matches are also relative to path",
 		"src/**/*.ts",
 		"Supports **",
+		"This is glob syntax, not regex and not a file-contents search.",
 	} {
 		if !strings.Contains(patternDesc, want) {
 			t.Fatalf("pattern description missing %q: %q", want, patternDesc)

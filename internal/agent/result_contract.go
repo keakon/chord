@@ -262,12 +262,12 @@ func (s *SubAgent) resultContractPromptBlock() string {
 	return strings.Join([]string{
 		"### Result contract",
 		"",
-		"call complete with a machine-readable result that satisfies this JSON Schema:",
+		"Call `complete` with a machine-readable result that satisfies this JSON Schema:",
 		"",
 		"```json",
 		string(s.resultSchemaJSON),
 		"```",
 		"",
-		"Supply it as result_type together with result or result_ref; the engine checks the delivered result against this contract before accepting complete.",
+		"Supply it as result_type (a short label for this result shape; with result_ref it must match the reference's result_type) together with result or result_ref; the engine checks the delivered result against this contract before accepting `complete`.",
 	}, "\n")
 }

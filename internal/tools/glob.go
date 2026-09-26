@@ -68,10 +68,8 @@ func (t GlobTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 }
 
 func (GlobTool) Description() string {
-	return "Find files by path using glob syntax. Supports ** for recursive directory matching relative to path." +
-		" Returned matches are relative to path, or to the session working directory when path is omitted." +
-		" patterns are path globs, not regular expressions and not file-contents searches." +
-		" Pass patterns as a JSON array (e.g. patterns: [\"**/*.go\"] or patterns: [\"src/**/*.ts\", \"test/**/*.ts\"]); a single bare string is tolerated but a single-element array is preferred." +
+	return "Find files by path using glob syntax." +
+		" A single bare string is tolerated for patterns, but a single-element array is preferred." +
 		" If the exact relative file path is known, pass it as the pattern (e.g. patterns: [\"src/main.go\"]) instead of using ** from a very broad path like /, /tmp, or the home directory." +
 		" Best for discovering candidate files by path or extension."
 }
