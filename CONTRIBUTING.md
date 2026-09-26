@@ -35,6 +35,14 @@ This configures `core.hooksPath` to use `.githooks/` and ensures:
 - `pre-commit` automatically runs `goimports` and `gofmt` on staged `.go` files
 - `pre-push` runs `fmt-check`, `vet`, `staticcheck`, `modernize-check`, and tests before pushing
 
+`pre-commit` refuses to format and re-stage a Go file that also has unstaged changes, because that would sweep hunks belonging to other work into the commit. When you deliberately want to commit only the staged hunks of such a file, pass the override on the command line for that one command:
+
+```bash
+CHORD_PARTIAL_STAGE_OK=1 git commit
+```
+
+The staged content is still checked: it must already match `goimports` + `gofmt` output. Do not export the variable into your shell — a permanently set override silently skips the re-stage protection for every later commit.
+
 Verify the setup:
 
 ```bash

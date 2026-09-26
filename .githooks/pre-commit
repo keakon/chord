@@ -20,23 +20,56 @@ if [[ -z "${files}" ]]; then
   exit 0
 fi
 
-while IFS= read -r f; do
-  [[ -z "${f}" ]] && continue
-  if ! git diff --quiet -- "${f}"; then
-    echo "pre-commit: ${f} has unstaged changes"
-    echo "pre-commit: refusing to format and re-stage partially staged Go files"
-    echo "pre-commit: stage the whole file, stash unstaged changes, or split the commit"
-    exit 1
-  fi
-done <<< "${files}"
+allow_partial="${CHORD_PARTIAL_STAGE_OK:-}"
+if [[ "${allow_partial}" != "1" ]]; then
+  while IFS= read -r f; do
+    [[ -z "${f}" ]] && continue
+    if ! git diff --quiet -- "${f}"; then
+      echo "pre-commit: ${f} has unstaged changes"
+      echo "pre-commit: refusing to format and re-stage partially staged Go files"
+      echo "pre-commit: stage the whole file, or set CHORD_PARTIAL_STAGE_OK=1 to commit the staged hunks without re-staging (their staged content must already be formatted)"
+      exit 1
+    fi
+  done <<< "${files}"
+fi
+
+# staged_is_formatted reports whether the index copy of a file already matches
+# goimports + gofmt output. -srcdir resolves imports as if the content lived at
+# the file's own path. Content goimports cannot parse produces no output and so
+# never matches.
+staged_is_formatted() {
+  local f="$1"
+  cmp -s <(git show ":${f}") \
+    <(git show ":${f}" | goimports -local github.com/keakon/chord -srcdir "${repo_root}/${f}" 2>/dev/null | gofmt 2>/dev/null)
+}
 
 count=0
+checked=0
+unformatted=()
 while IFS= read -r f; do
   [[ -z "${f}" ]] && continue
+  # A partially staged file is committed from the index; formatting the working
+  # tree and re-adding it would sweep in hunks that belong to other work, so the
+  # staged content is only checked.
+  if [[ "${allow_partial}" == "1" ]] && ! git diff --quiet -- "${f}"; then
+    if ! staged_is_formatted "${f}"; then
+      unformatted+=("${f}")
+    fi
+    checked=$((checked + 1))
+    continue
+  fi
   goimports -w -local github.com/keakon/chord "${f}"
   gofmt -w "${f}"
   git add "${f}"
   count=$((count + 1))
 done <<< "${files}"
 
-echo "pre-commit: goimports + gofmt applied to ${count} staged Go file(s)"
+if ((${#unformatted[@]} > 0)); then
+  for f in "${unformatted[@]}"; do
+    echo "pre-commit: staged content of partially staged ${f} is not goimports/gofmt formatted"
+  done
+  echo "pre-commit: fix syntax and formatting in the affected hunks, use git add -p to stage only those changes, then inspect git diff --cached and commit again"
+  exit 1
+fi
+
+echo "pre-commit: goimports + gofmt applied to ${count} staged Go file(s); ${checked} partially staged file(s) checked from the index"
