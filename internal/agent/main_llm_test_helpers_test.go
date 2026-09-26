@@ -182,7 +182,7 @@ func TestAutoContinuePromptIsInjectedAsOneShotOverlay(t *testing.T) {
 	}
 	found := false
 	for _, o := range overlays {
-		if strings.Contains(o.Content, "context compaction completed successfully") {
+		if strings.Contains(o.Content, "Context compaction completed successfully") {
 			found = true
 			break
 		}
@@ -195,7 +195,7 @@ func TestAutoContinuePromptIsInjectedAsOneShotOverlay(t *testing.T) {
 	}
 	overlays2 := a.buildTurnOverlayMessages()
 	for _, o := range overlays2 {
-		if strings.Contains(o.Content, "context compaction completed successfully") {
+		if strings.Contains(o.Content, "Context compaction completed successfully") {
 			t.Fatal("auto-continue overlay should not persist after first use")
 		}
 	}

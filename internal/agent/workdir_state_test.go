@@ -163,7 +163,7 @@ func TestWorktreeSwitchRefreshesInjectedGitStatus(t *testing.T) {
 	a.waitGitStatus(ctx)
 
 	_, startupStatus, _, startupVenv := a.promptMetaSnapshot()
-	if !strings.Contains(startupStatus, "Git branch: main") {
+	if !strings.Contains(startupStatus, "(branch main,") {
 		t.Fatalf("startup git status = %q, want the startup branch", startupStatus)
 	}
 	if want := filepath.Join(repo, ".venv"); startupVenv != want {
@@ -175,10 +175,10 @@ func TestWorktreeSwitchRefreshesInjectedGitStatus(t *testing.T) {
 		t.Fatalf("WorktreeEnter: %v", err)
 	}
 	_, inWorktree, _, worktreeVenv := a.promptMetaSnapshot()
-	if !strings.Contains(inWorktree, "Git branch: "+res.Branch) {
+	if !strings.Contains(inWorktree, "(branch "+res.Branch+",") {
 		t.Errorf("git status inside the worktree = %q, want branch %q", inWorktree, res.Branch)
 	}
-	if strings.Contains(inWorktree, "Git branch: main") {
+	if strings.Contains(inWorktree, "(branch main,") {
 		t.Errorf("git status inside the worktree still names the startup branch: %q", inWorktree)
 	}
 	// The worktree has no environment of its own, so the content root's venv
@@ -193,7 +193,7 @@ func TestWorktreeSwitchRefreshesInjectedGitStatus(t *testing.T) {
 		t.Fatalf("WorktreeExit: %v", err)
 	}
 	_, back, _, backVenv := a.promptMetaSnapshot()
-	if !strings.Contains(back, "Git branch: main") {
+	if !strings.Contains(back, "(branch main,") {
 		t.Errorf("git status after leaving the worktree = %q, want the startup branch", back)
 	}
 	if backVenv != startupVenv {
@@ -203,7 +203,7 @@ func TestWorktreeSwitchRefreshesInjectedGitStatus(t *testing.T) {
 		t.Fatalf("WorktreeEnter (again): %v", err)
 	}
 	_, reentered, _, reenteredVenv := a.promptMetaSnapshot()
-	if !strings.Contains(reentered, "Git branch: "+res.Branch) {
+	if !strings.Contains(reentered, "(branch "+res.Branch+",") {
 		t.Errorf("git status after re-entering = %q, want branch %q", reentered, res.Branch)
 	}
 	if reenteredVenv != ownVenv {

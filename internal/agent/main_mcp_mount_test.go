@@ -276,71 +276,15 @@ func TestRuntimeMCPMountUsesDuplicateAnchorOccurrence(t *testing.T) {
 	assertMCPMountAt(t, next, 2, "mcp_sample_lookup")
 }
 
-func TestRuntimeMCPMountIgnoresInjectedGitStatusInTextMessage(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.tools = tools.NewRegistry()
-	sealEmptyMCPMountBaseline(a)
-	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
-	a.waitGitStatus(context.Background())
-	a.setCachedGitStatus("Git branch: main\n")
-
-	firstInput := []message.Message{{Role: message.RoleUser, Content: "first"}}
-	a.injectGitStatusIntoFirstUserMessage(firstInput)
-	first, _, fellBack := a.mountRuntimeMCPTools(firstInput, mcpMountKimiDynamic)
-	if fellBack {
-		t.Fatal("initial text mount unexpectedly fell back")
-	}
-	assertMCPMountAt(t, first, 1, "mcp_sample_lookup")
-
-	next, _, fellBack := a.mountRuntimeMCPTools(
-		[]message.Message{{Role: message.RoleUser, Content: "first"}},
-		mcpMountKimiDynamic,
-	)
-	if fellBack {
-		t.Fatal("git status changed the text-message anchor")
-	}
-	assertMCPMountAt(t, next, 1, "mcp_sample_lookup")
-}
-
-func TestRuntimeMCPMountIgnoresInjectedGitStatusPart(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.tools = tools.NewRegistry()
-	sealEmptyMCPMountBaseline(a)
-	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
-	a.waitGitStatus(context.Background())
-	a.setCachedGitStatus("Git branch: main")
-	original := []message.ContentPart{
-		{Type: message.ContentPartText, Text: "first"},
-		{Type: message.ContentPartImage, MimeType: "image/png", ImagePath: "sample.png"},
-	}
-
-	firstInput := []message.Message{{Role: message.RoleUser, Parts: append([]message.ContentPart(nil), original...)}}
-	a.injectGitStatusIntoFirstUserMessage(firstInput)
-	first, _, fellBack := a.mountRuntimeMCPTools(firstInput, mcpMountResponsesAdditionalTools)
-	if fellBack {
-		t.Fatal("initial multipart mount unexpectedly fell back")
-	}
-	assertMCPMountAt(t, first, 1, "mcp_sample_lookup")
-
-	next, _, fellBack := a.mountRuntimeMCPTools(
-		[]message.Message{{Role: message.RoleUser, Parts: original}},
-		mcpMountResponsesAdditionalTools,
-	)
-	if fellBack {
-		t.Fatal("git status changed the multipart-message anchor")
-	}
-	assertMCPMountAt(t, next, 1, "mcp_sample_lookup")
-}
-
 func TestMCPMountIncrementalMessageShapesDetectNestedChange(t *testing.T) {
 	state := &mcpToolMountState{}
 	messages := []message.Message{{
 		Role:      message.RoleAssistant,
 		ToolCalls: []message.ToolCall{{ID: "call-1", Name: "mcp_sample_lookup", Args: json.RawMessage(`{"value":"first"}`)}},
 	}}
-	first := append([]stableReductionMessageShape(nil), state.incrementalMessageShapes(messages, "")...)
+	first := append([]stableReductionMessageShape(nil), state.incrementalMessageShapes(messages)...)
 	messages[0].ToolCalls = []message.ToolCall{{ID: "call-1", Name: "mcp_sample_lookup", Args: json.RawMessage(`{"value":"second"}`)}}
-	second := state.incrementalMessageShapes(messages, "")
+	second := state.incrementalMessageShapes(messages)
 	if first[0] == second[0] {
 		t.Fatal("nested tool-call change reused the previous message shape")
 	}

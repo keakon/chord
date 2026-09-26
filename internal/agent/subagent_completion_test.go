@@ -313,7 +313,7 @@ func TestSubAgentPureTextGetsSingleTerminalRecoveryRequest(t *testing.T) {
 		t.Fatalf("provider request count = %d, want 1", len(seen))
 	}
 	last := seen[0][len(seen[0])-1]
-	if last.Role != "user" || !strings.Contains(last.Content, "call Complete") {
+	if last.Role != "user" || !strings.HasPrefix(last.Content, "System note: ") || !strings.Contains(last.Content, "call `complete`") {
 		t.Fatalf("terminal recovery message = %#v", last)
 	}
 	if sub.turn.SubAgentTerminalRecoveryCount != 1 {
@@ -348,7 +348,7 @@ func TestSubAgentUnparseableThinkingToolcallGetsTerminalRecoveryRequest(t *testi
 		t.Fatalf("provider request count = %d, want 1", len(seen))
 	}
 	last := seen[0][len(seen[0])-1]
-	if last.Role != "user" || !strings.Contains(last.Content, "call Complete") {
+	if last.Role != "user" || !strings.HasPrefix(last.Content, "System note: ") || !strings.Contains(last.Content, "call `complete`") {
 		t.Fatalf("terminal recovery message = %#v", last)
 	}
 	if sub.turn.SubAgentTerminalRecoveryCount != 1 {

@@ -279,11 +279,17 @@ func (s *SubAgent) issueLLMSilenceRecovery() {
 	s.asyncCallLLMWithFlightMarked(turn, s.prepareContextForLLM(s.ctxMgr.Snapshot()))
 }
 
+// subAgentRecoveryNotePrefix marks runtime recovery instructions sent to a
+// SubAgent. They are persisted as ordinary user messages and shown verbatim in
+// the TUI, so they cannot use <system-reminder> tags; without the prefix they
+// would read like an owner-agent or user message.
+const subAgentRecoveryNotePrefix = "System note: "
+
 // subAgentLLMSilenceRecoveryInstruction tells the model the previous request
 // was abandoned after a silent timeout so it resumes the work instead of
 // duplicating it.
 func subAgentLLMSilenceRecoveryInstruction() string {
-	return "System note: the previous model request produced no output for an extended period and was abandoned. Re-check the current task state and continue the delegated work now, then finish coordination (Complete / Escalate / Notify) instead of stopping after plain text."
+	return subAgentRecoveryNotePrefix + "the previous model request produced no output for an extended period and was abandoned. Re-check the current task state and continue the delegated work now, then finish coordination — `complete` when done, otherwise the route in your SubAgent Coordination section — instead of stopping after plain text."
 }
 
 // failTurnForLLMSilence abandons the silent request with a terminal

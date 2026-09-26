@@ -183,8 +183,8 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	// is confirmed at dispatch, so attaching here only marks deliveryPending —
 	// a request cancelled before dispatch leaves the claim reusable. They
 	// carry bare text and are wrapped in the same <system-reminder> runtime
-	// message block as every other harness injection so the model can tell
-	// them apart from user-written messages.
+	// message block as the other turn overlays so the model can tell them
+	// apart from user-written messages.
 	if reminder := strings.TrimSpace(a.pendingContextPressureReminder); reminder != "" {
 		a.pendingContextPressureReminder = ""
 		a.noteContextPressureReminderAttached()

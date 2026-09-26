@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/keakon/chord/internal/message"
@@ -301,7 +300,7 @@ func (a *MainAgent) mountRuntimeMCPTools(messages []message.Message, mode mcpToo
 		state.fallback = true
 		return messages, active, true
 	}
-	shapes := state.incrementalMessageShapes(messages, a.promptGitStatus())
+	shapes := state.incrementalMessageShapes(messages)
 
 	positions := make([]int, 0, len(state.snapshots)+1)
 	lastPosition := 0
@@ -395,13 +394,7 @@ func mcpMountWindowMatches(shapes []stableReductionMessageShape, start int, wind
 	return true
 }
 
-func (a *MainAgent) promptGitStatus() string {
-	_, gitStatus, _, _ := a.promptMetaSnapshot()
-	return gitStatus
-}
-
-func (s *mcpToolMountState) incrementalMessageShapes(messages []message.Message, gitStatus string) []stableReductionMessageShape {
-	messages = normalizeMCPMountMessages(messages, gitStatus)
+func (s *mcpToolMountState) incrementalMessageShapes(messages []message.Message) []stableReductionMessageShape {
 	reusable := 0
 	if len(s.messageSources) == len(s.messageShapes) {
 		reusable = reusableMessagePrefixLen(s.messageSources, messages)
@@ -415,35 +408,6 @@ func (s *mcpToolMountState) incrementalMessageShapes(messages []message.Message,
 		s.messageShapes[i] = stableReductionMessageShapeOf(&messages[i])
 	}
 	return s.messageShapes
-}
-
-func normalizeMCPMountMessages(messages []message.Message, gitStatus string) []message.Message {
-	if strings.TrimSpace(gitStatus) == "" {
-		return messages
-	}
-	prefix := gitStatus + "\n\n"
-	normalized := messages
-	for i := range messages {
-		if messages[i].Role != message.RoleUser {
-			continue
-		}
-		contentPrefixed := strings.HasPrefix(messages[i].Content, prefix)
-		injectedPart := len(messages[i].Parts) > 0 &&
-			messages[i].Parts[0].Type == message.ContentPartText &&
-			messages[i].Parts[0].Text == prefix
-		if !contentPrefixed && !injectedPart {
-			break
-		}
-		normalized = append([]message.Message(nil), messages...)
-		if contentPrefixed {
-			normalized[i].Content = strings.TrimPrefix(normalized[i].Content, prefix)
-		}
-		if injectedPart {
-			normalized[i].Parts = append([]message.ContentPart(nil), normalized[i].Parts[1:]...)
-		}
-		break
-	}
-	return normalized
 }
 
 func toolDefinitionSignature(def message.ToolDefinition) [sha256.Size]byte {

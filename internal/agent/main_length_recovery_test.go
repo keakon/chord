@@ -481,7 +481,7 @@ func TestResumePendingMainLLMAfterCompactionOversizeResumeInjectsReplayOverlay(t
 		if msg.Role != "user" {
 			continue
 		}
-		if strings.Contains(msg.Content, "context compaction completed successfully") {
+		if strings.Contains(msg.Content, "Context compaction completed successfully") {
 			foundContinue = true
 		}
 		if strings.Contains(msg.Content, "finish the refactor safely") {

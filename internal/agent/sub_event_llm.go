@@ -429,7 +429,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		if s.continueLLMIfPendingUserMessages() {
 			return
 		}
-		if s.recoverTerminalResponse("Do not stop after plain text. Finish coordination now: call Complete if the delegated task is done; otherwise call Escalate or Notify with the blocker, question, or progress that the parent must receive.", nil) {
+		if s.recoverTerminalResponse(subAgentRecoveryNotePrefix+"do not stop after plain text. Finish coordination now: call `complete` if the delegated task is done; otherwise take the blocker route in your SubAgent Coordination section with the blocker, question, or progress the owner agent must receive.", nil) {
 			return
 		}
 		if s.turn.SubAgentTerminalRecoveryCount > 0 {
@@ -569,9 +569,9 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 // flight to resume, so the bounded wrap-up instruction stays correct.
 func (s *SubAgent) interruptedRequestRecoveryInstruction() string {
 	if s != nil && s.turn != nil && strings.TrimSpace(s.turn.peekPartialText()) != "" {
-		return "System note: the previous model request was interrupted by a transient transport error, and the reply it had already produced is preserved above as an interrupted assistant message. Continue that reply directly from where it stopped without apology or recap, then finish the delegated task. Do not restart the analysis and do not repeat text that is already preserved."
+		return subAgentRecoveryNotePrefix + "the previous model request was interrupted by a transient transport error, and the reply it had already produced is preserved above as an interrupted assistant message. Continue that reply directly from where it stopped without apology or recap, then finish the delegated task. Do not restart the analysis and do not repeat text that is already preserved."
 	}
-	return "The previous model request was interrupted by a transient transport error. Re-check the task state and finish coordination now. If the task is complete, call Complete with a concise summary. If blocked or parent input is required, call Escalate or Notify instead of stopping after plain text."
+	return subAgentRecoveryNotePrefix + "the previous model request was interrupted by a transient transport error. Re-check the task state and finish coordination now: if the task is complete, call `complete` with a concise summary; if you are blocked or need owner-agent input, take the blocker route in your SubAgent Coordination section instead of stopping after plain text."
 }
 
 // maxSubAgentStreamResumes bounds how many times one sub-agent turn restarts

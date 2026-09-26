@@ -23,14 +23,17 @@ type SessionEnvSnapshot struct {
 	// relative paths belong to.
 	WorktreeName   string
 	WorktreeBranch string
-	Platform       string
-	VenvRel        string
-	Date           string
+	// Git is the preformatted repository line from getGitStatus, empty until
+	// the async lookup finished (and for SubAgents, which do not carry it).
+	Git      string
+	Platform string
+	VenvRel  string
+	Date     string
 }
 
 // hasEnv reports whether the snapshot carries any environment field.
 func (e SessionEnvSnapshot) hasEnv() bool {
-	return e.WorkDir != "" || e.Platform != "" || e.VenvRel != "" || e.Date != "" || e.WorktreeName != ""
+	return e.WorkDir != "" || e.Platform != "" || e.VenvRel != "" || e.Date != "" || e.WorktreeName != "" || e.Git != ""
 }
 
 // renderEnvBlock renders the <env> block using the same format the system
@@ -52,15 +55,19 @@ func (e SessionEnvSnapshot) renderEnvBlock() string {
 		}
 		worktreeLine += "\n  This is a separate checkout: relative paths resolve inside it, and the main checkout is a different directory."
 	}
+	gitLine := ""
+	if e.Git != "" {
+		gitLine = "\n  " + e.Git
+	}
 	venvLine := ""
 	if e.VenvRel != "" {
 		venvLine = fmt.Sprintf("\n  Python virtual environment: %s\n  When running Python commands, prefer the interpreter from this virtual environment.", e.VenvRel)
 	}
 	return fmt.Sprintf(`<env>
-  Working directory: %s%s
+  Working directory: %s%s%s
   Platform: %s
   Today's date: %s%s
-</env>`, workDir, worktreeLine, e.Platform, e.Date, venvLine)
+</env>`, workDir, worktreeLine, gitLine, e.Platform, e.Date, venvLine)
 }
 
 // buildSessionContextReminder constructs a meta user message that carries
@@ -105,7 +112,7 @@ func buildSessionContextReminder(env SessionEnvSnapshot, agentsMD string) string
 // session-context reminder. The date uses the same "Mon Jan 2 2006" format the
 // system prompt previously embedded.
 func (a *MainAgent) sessionEnvSnapshot() SessionEnvSnapshot {
-	workDir, _, _, venvPath := a.promptMetaSnapshot()
+	workDir, gitStatus, _, venvPath := a.promptMetaSnapshot()
 	venvRel := ""
 	if venvPath != "" && workDir != "" {
 		venvRel = displayPathFromWorkDir(workDir, venvPath)
@@ -115,6 +122,7 @@ func (a *MainAgent) sessionEnvSnapshot() SessionEnvSnapshot {
 		WorkDir:        workDir,
 		WorktreeName:   state.WorktreeID,
 		WorktreeBranch: state.Branch,
+		Git:            strings.TrimSpace(gitStatus),
 		Platform:       runtime.GOOS + "/" + runtime.GOARCH,
 		VenvRel:        venvRel,
 		Date:           time.Now().Format("Mon Jan 2 2006"),

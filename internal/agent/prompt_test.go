@@ -2020,72 +2020,23 @@ question: allow
 	}
 }
 
-func TestInjectGitStatusIntoFirstUserMessage_TextMessage(t *testing.T) {
-	a := &MainAgent{}
-	a.setCachedGitStatus("Git branch: main")
+// The repository line belongs to the session-context <env> block, not to the
+// first user message, so the user's own text reaches the model untouched.
+func TestSessionEnvBlockCarriesGitStatus(t *testing.T) {
+	env := SessionEnvSnapshot{WorkDir: "/work", Platform: "linux/amd64", Date: "Mon Jan 2 2006", Git: getGitStatus(t.TempDir())}
+	if got := env.renderEnvBlock(); !strings.Contains(got, "  Working directory: /work\n  Git repository: no\n  Platform: linux/amd64") {
+		t.Fatalf("env block missing git line: %q", got)
+	}
 
-	msgs := []message.Message{{Role: "user", Content: "hello"}}
-	if injected := a.injectGitStatusIntoFirstUserMessage(msgs); !injected {
-		t.Fatal("expected git status injection to succeed")
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	if !strings.HasPrefix(msgs[0].Content, "Git branch: main\n\nhello") {
-		t.Fatalf("expected git status prefix, got %q", msgs[0].Content)
+	if err := os.WriteFile(filepath.Join(repo, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func TestInjectGitStatusIntoFirstUserMessage_MultipartMessage(t *testing.T) {
-	a := &MainAgent{}
-	a.setCachedGitStatus("Git branch: main")
-
-	msgs := []message.Message{{
-		Role: "user",
-		Parts: []message.ContentPart{
-			{Type: "text", Text: "hello"},
-			{Type: "image", MimeType: "image/png", Data: []byte{1, 2, 3}},
-		},
-	}}
-	if injected := a.injectGitStatusIntoFirstUserMessage(msgs); !injected {
-		t.Fatal("expected git status injection to succeed for multipart message")
-	}
-	if len(msgs[0].Parts) != 3 {
-		t.Fatalf("expected injected multipart message to have 3 parts, got %d", len(msgs[0].Parts))
-	}
-	if got := msgs[0].Parts[0]; got.Type != "text" || got.Text != "Git branch: main\n\n" {
-		t.Fatalf("unexpected injected first part: %#v", got)
-	}
-	if got := msgs[0].Parts[1]; got.Type != "text" || got.Text != "hello" {
-		t.Fatalf("unexpected original text part after injection: %#v", got)
-	}
-	if got := msgs[0].Parts[2]; got.Type != "image" || got.MimeType != "image/png" || len(got.Data) != 3 {
-		t.Fatalf("unexpected original image part after injection: %#v", got)
-	}
-}
-
-func TestInjectGitStatusIntoFirstUserMessage_EveryRequest(t *testing.T) {
-	a := &MainAgent{}
-	a.setCachedGitStatus("Git branch: main")
-
-	msg1 := []message.Message{{Role: "user", Content: "hello"}}
-	msg2 := []message.Message{{Role: "user", Content: "world"}}
-
-	if injected := a.injectGitStatusIntoFirstUserMessage(msg1); !injected {
-		t.Fatal("expected first injection to succeed")
-	}
-	// A later request carries the status again: the prompt prefix must keep one
-	// stable shape instead of losing the status after the first call.
-	if injected := a.injectGitStatusIntoFirstUserMessage(msg2); !injected {
-		t.Fatal("expected second request injection to succeed")
-	}
-	if !strings.HasPrefix(msg2[0].Content, "Git branch: main\n\nworld") {
-		t.Fatalf("second request should carry the git status prefix, got %q", msg2[0].Content)
-	}
-	// Re-injecting into an already-prefixed message is a no-op so a request
-	// that reuses the previous prefix is not double-prefixed.
-	if injected := a.injectGitStatusIntoFirstUserMessage(msg2); injected {
-		t.Fatal("expected re-injection into an already-prefixed message to be a no-op")
-	}
-	if got := strings.Count(msg2[0].Content, "Git branch"); got != 1 {
-		t.Fatalf("expected exactly one git status prefix, got %d: %q", got, msg2[0].Content)
+	if got := getGitStatus(repo); got != "Git repository: yes (branch main, captured when the working directory was set up)" {
+		t.Fatalf("getGitStatus = %q", got)
 	}
 }
 

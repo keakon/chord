@@ -71,6 +71,27 @@ func TestInterruptedRequestRecoveryInstructionKeepsPartialWork(t *testing.T) {
 	}
 }
 
+// SubAgent recovery instructions are persisted as plain user messages and
+// shown verbatim, so only the prefix separates them from owner or user input.
+func TestSubAgentRecoveryInstructionsCarrySystemNotePrefix(t *testing.T) {
+	sub := &SubAgent{turn: &Turn{}}
+	wrapUp := sub.interruptedRequestRecoveryInstruction()
+	sub.turn.appendPartialText("partial reply")
+	resume := sub.interruptedRequestRecoveryInstruction()
+	for name, instruction := range map[string]string{
+		"silence":            subAgentLLMSilenceRecoveryInstruction(),
+		"interrupted wrapup": wrapUp,
+		"interrupted resume": resume,
+	} {
+		if !strings.HasPrefix(instruction, "System note: ") {
+			t.Fatalf("%s recovery instruction = %q, want System note prefix", name, instruction)
+		}
+		if strings.Contains(instruction, "<system-reminder>") {
+			t.Fatalf("%s recovery instruction must not use reminder tags: %q", name, instruction)
+		}
+	}
+}
+
 type errStreamConnReset struct{}
 
 func (errStreamConnReset) Error() string { return "connection reset by peer" }

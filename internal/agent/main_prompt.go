@@ -762,20 +762,20 @@ func (a *MainAgent) availableSkillsPromptBlock() string {
 
 // getGitStatus checks whether the working directory is inside a git repository
 // by walking up from workDir to find .git (directory or file for submodules/worktrees),
-// matching git's "is-inside-work-tree" semantics. No git binary is invoked.
+// matching git's "is-inside-work-tree" semantics. No git binary is invoked. It
+// returns the <env> line describing the result; the branch is only read when
+// the working directory is set up — at startup and on a working-directory
+// switch — so the line says when it was captured, and a branch switched in a
+// shell afterwards is not reflected.
 func getGitStatus(workDir string) string {
 	gitRoot, headPath := findGitHead(workDir)
 	if gitRoot == "" {
-		return "Is directory a git repo: no"
+		return "Git repository: no"
 	}
-	_ = gitRoot // used only to establish we're in a repo; HEAD path is what we need
-	branch := readGitHeadBranch(headPath)
-	var sb strings.Builder
-	sb.WriteString("Is directory a git repo: yes")
-	if branch != "" {
-		fmt.Fprintf(&sb, "\n  Git branch: %s", branch)
+	if branch := readGitHeadBranch(headPath); branch != "" {
+		return "Git repository: yes (branch " + branch + ", captured when the working directory was set up)"
 	}
-	return sb.String()
+	return "Git repository: yes"
 }
 
 // findGitHead walks up from dir looking for .git (directory or file). Returns the
