@@ -27,10 +27,24 @@ func TestProcessPendingUserMessagesBeforeLLMInTurnEmitsConsumedEvent(t *testing.
 		t.Fatalf("messages after pending consume = %+v, want second user message 'queued'", msgs)
 	}
 
-	ev := nextNonRequestCycleEvent(t, a.Events())
-	consumed, ok := ev.(PendingDraftConsumedEvent)
-	if !ok {
-		t.Fatalf("event type = %T, want PendingDraftConsumedEvent", ev)
+	// The turn's first request waits on the session readiness gates and reports
+	// preparing activities from its goroutine; their arrival order against the
+	// consumed event is not a contract, so skip them.
+	var consumed PendingDraftConsumedEvent
+	for i := 0; ; i++ {
+		if i == 20 {
+			t.Fatal("PendingDraftConsumedEvent not observed within 20 events")
+		}
+		ev := nextNonRequestCycleEvent(t, a.Events())
+		if _, ok := ev.(AgentActivityEvent); ok {
+			continue
+		}
+		c, ok := ev.(PendingDraftConsumedEvent)
+		if !ok {
+			t.Fatalf("event type = %T, want PendingDraftConsumedEvent", ev)
+		}
+		consumed = c
+		break
 	}
 	if consumed.DraftID != "draft-1" {
 		t.Fatalf("DraftID = %q, want draft-1", consumed.DraftID)

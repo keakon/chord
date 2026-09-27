@@ -172,14 +172,31 @@ func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) er
 	mcpReady := a.mcpReady
 	a.mcpReadyMu.Unlock()
 
-	for _, ch := range []chan struct{}{a.agentsMDReady, a.skillsReady, mcpReady} {
-		if ch == nil {
+	// Readiness gates can wait on network-bound work (remote MCP server
+	// discovery), during which the turn is active but no request phase has
+	// started. Emit a preparing activity per pending gate so the status bar
+	// shows what the wait is on instead of appearing idle.
+	gates := []struct {
+		name  string
+		ready chan struct{}
+	}{
+		{name: "AGENTS.md", ready: a.agentsMDReady},
+		{name: "skills", ready: a.skillsReady},
+		{name: "MCP servers", ready: mcpReady},
+	}
+	for _, gate := range gates {
+		if gate.ready == nil {
 			continue
 		}
 		select {
-		case <-ch:
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-gate.ready:
+		default:
+			a.emitActivity(identity.MainAgentID, ActivityPreparing, "waiting for "+gate.name)
+			select {
+			case <-gate.ready:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
 	}
 

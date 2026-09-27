@@ -1097,10 +1097,11 @@ type ActivityType string
 
 // Activity types that mirror an LLM request phase derive from the
 // message.StatusDelta wire names, so a reducer can convert a status delta into
-// an activity without a translation table. Idle and executing have no
-// status-delta counterpart: they describe the agent loop itself.
+// an activity without a translation table. Idle, preparing, and executing have
+// no status-delta counterpart: they describe the agent loop itself.
 const (
 	ActivityIdle           ActivityType = "idle"
+	ActivityPreparing      ActivityType = "preparing"
 	ActivityConnecting     ActivityType = message.StatusDeltaConnecting
 	ActivityWaitingHeaders ActivityType = message.StatusDeltaWaitingHeaders
 	ActivityWaitingToken   ActivityType = message.StatusDeltaWaitingToken

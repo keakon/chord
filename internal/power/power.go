@@ -18,6 +18,7 @@ type ActivityType string
 
 const (
 	ActivityIdle          ActivityType = "idle"
+	ActivityPreparing     ActivityType = "preparing"
 	ActivityConnecting    ActivityType = message.StatusDeltaConnecting
 	ActivityWaitingHeader ActivityType = message.StatusDeltaWaitingHeaders
 	ActivityWaitingToken  ActivityType = message.StatusDeltaWaitingToken
@@ -33,7 +34,7 @@ const (
 // Compact activity is intentionally excluded to match TUI "non-busy" perception.
 func IsSleepPreventing(t ActivityType) bool {
 	switch t {
-	case ActivityConnecting, ActivityWaitingHeader, ActivityWaitingToken,
+	case ActivityPreparing, ActivityConnecting, ActivityWaitingHeader, ActivityWaitingToken,
 		ActivityStreaming, ActivityExecuting,
 		ActivityRetrying, ActivityRetryingKey, ActivityCooling:
 		return true

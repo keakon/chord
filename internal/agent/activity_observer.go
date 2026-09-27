@@ -51,7 +51,11 @@ func (a *MainAgent) emitStatusActivity(agentID string, status *message.StatusDel
 func (a *MainAgent) emitActivityEvent(evt AgentActivityEvent) {
 	agentID := evt.AgentID
 	activity := evt.Type
-	if activity != ActivityIdle && activity != ActivityCompacting {
+	// Preparing only reports a session gate the request waits behind; the
+	// work it precedes marks itself when its turn starts.
+	switch activity {
+	case ActivityIdle, ActivityCompacting, ActivityPreparing:
+	default:
 		a.markRealWorkStarted()
 	}
 	a.emitToTUI(evt)

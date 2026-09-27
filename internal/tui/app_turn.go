@@ -425,7 +425,7 @@ func runtimeActivityBusy(a agent.AgentActivityEvent) bool {
 	switch a.Type {
 	case agent.ActivityIdle:
 		return false
-	case agent.ActivityCooling, agent.ActivityCompacting,
+	case agent.ActivityPreparing, agent.ActivityCooling, agent.ActivityCompacting,
 		agent.ActivityConnecting, agent.ActivityWaitingHeaders, agent.ActivityWaitingToken,
 		agent.ActivityStreaming, agent.ActivityExecuting, agent.ActivityRetrying, agent.ActivityRetryingKey:
 		return true

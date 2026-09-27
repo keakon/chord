@@ -50,3 +50,22 @@ func TestControlActionBaselineGuardedBySubAgentWork(t *testing.T) {
 		t.Fatalf("control action did not advance the baseline after subagent completion: epoch=%d want %d", a.lastIdleWorkEpoch, a.realWorkEpoch.Load())
 	}
 }
+
+// A preparing status only reports that a request waits behind a session gate.
+// It must not count as real work: after a control action such as /new, the
+// gate wait alone would otherwise turn the next idle into a completion
+// notification.
+func TestPreparingActivityIsNotRealWork(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.markControlAction()
+	baseline := a.realWorkEpoch.Load()
+
+	a.emitActivity("main", ActivityPreparing, "waiting for MCP servers")
+	if got := a.realWorkEpoch.Load(); got != baseline {
+		t.Fatalf("realWorkEpoch after preparing = %d, want %d", got, baseline)
+	}
+	a.emitActivity("main", ActivityStreaming, "")
+	if got := a.realWorkEpoch.Load(); got == baseline {
+		t.Fatal("streaming activity must still count as real work")
+	}
+}

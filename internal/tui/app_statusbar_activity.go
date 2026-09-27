@@ -308,6 +308,18 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 	}
 
 	switch a.Type {
+	case agent.ActivityPreparing:
+		// The turn is active but no request phase has started yet: the session
+		// surface is waiting for an async readiness gate (AGENTS.md, skills,
+		// MCP servers), which can stall on network-bound discovery.
+		display.Icon = "✶"
+		if detail := strings.TrimSpace(a.Detail); detail != "" {
+			display.Text = detail + " · " + elapsedText
+			display.CompactText = detail
+			display.NarrowText = elapsedText
+		} else {
+			display.Text = elapsedText
+		}
 	case agent.ActivityConnecting:
 		display.Icon = "⇋"
 		display.Text = elapsedText
