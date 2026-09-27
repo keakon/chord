@@ -65,6 +65,12 @@ func latestPriorCheckpointStrippedBody(messages []message.Message) string {
 		body := stripCompactionAnchorsBlock(raw)
 		body = stripCheckpointSkillsSection(body)
 		body = stripPriorCheckpointCarrySection(body)
+		// The runtime rewrites Current User Request on every checkpoint from
+		// the latest-request anchor, and an inherited anchor is read from the
+		// checkpoint message itself, never from this carry. A long request
+		// would otherwise fill the bounded carry and crowd out the progress
+		// and decisions it exists to preserve.
+		body = stripCheckpointCurrentUserRequestSection(body)
 		// The job snapshot is runtime-owned and re-ensured for the new capture
 		// instant: carrying the previous block forward would leave two blocks
 		// (or one stale one) claiming to be the live job list.
@@ -239,6 +245,25 @@ func stripPriorCheckpointCarrySection(body string) string {
 		return strings.TrimSpace(body)
 	}
 	return strings.TrimSpace(body[:idx])
+}
+
+// stripCheckpointCurrentUserRequestSection removes the `## Current User
+// Request` section from a checkpoint body.
+func stripCheckpointCurrentUserRequestSection(body string) string {
+	start, end, ok := markdownSectionBounds(body, checkpointCurrentUserRequestHeading)
+	if !ok {
+		return strings.TrimSpace(body)
+	}
+	prefix := strings.TrimSpace(body[:start-len(checkpointCurrentUserRequestHeading)])
+	suffix := strings.TrimSpace(body[end:])
+	switch {
+	case prefix == "":
+		return suffix
+	case suffix == "":
+		return prefix
+	default:
+		return prefix + "\n\n" + suffix
+	}
 }
 
 // appendPriorCheckpointCarry appends the carried body as the checkpoint's

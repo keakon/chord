@@ -80,6 +80,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Context compaction preserves complete latest requests up to 8,192 characters, including completion rejection feedback. Longer requests explicitly direct the agent to recover omitted requirements from archived history.
+
 - Responses replies now use final text to correct damaged TUI streaming text, including partial streams with confirmed text. Replies provided only at completion are displayed, and explicitly empty final text clears the streamed reply. ACP publishes confirmed answer text after each model response, keeping damaged or retracted drafts out of clients that cannot retract text; thinking and tool progress still stream.
 - Responses streams containing only a refusal now preserve and display the refusal text.
 - MCP tool cards no longer start expanded. A collapsed `mcp_*` card still rendered its arguments and result on first paint, and Space could not fold it back; MCP calls now follow the same folded default as the other tool cards.

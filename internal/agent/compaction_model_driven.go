@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/keakon/golog/log"
 
@@ -69,11 +70,10 @@ const (
 	// ignored: a reset is only allowed when the net gain survives the
 	// re-injection cost.
 	modelDrivenPostResetOverlayTokens = 1500
-	// modelDrivenAnchorMaxRunes caps the latest-request anchor in the
-	// deterministic checkpoint. It matches the structured-fallback summary's
-	// anchor cap so both compaction paths preserve the same amount of the
-	// latest user request.
-	modelDrivenAnchorMaxRunes = 260
+	// Keep ordinary task specifications intact. The bound prevents a pasted
+	// document from dominating every subsequent checkpoint; oversized requests
+	// retain an explicit recovery instruction instead of looking complete.
+	modelDrivenAnchorMaxRunes = 8192
 	// minModelDrivenApplyIntervalBatches is the conservative first-version
 	// spacing between durable model-driven applies: a reset is only allowed
 	// after at least this many main-model request batches since the last
@@ -1862,7 +1862,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Open Problems", openIssues},
 		{"## Progress", completed},
 		{"## Key Decisions", decisions},
-		{"## Files and Evidence", "- Precise archived history is listed in the checkpoint wrapper's archived history map."},
+		{"## Files and Evidence", "- Precise archived history is listed under the checkpoint wrapper's archived history files."},
 		{"## Externalized State", stateFiles},
 		{"## Planned Externalized State", plannedStateFiles},
 		{"## Evidence References", evidenceRefs},
@@ -2067,8 +2067,7 @@ func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
 const inheritedCheckpointLabel = "Inherited from the previous context checkpoint"
 
 // modelDrivenCurrentUserRequestSection renders the `## Current User Request`
-// section of a deterministic checkpoint from the latest-request anchor, capping
-// the anchor text like the structured-fallback summary does. It is the
+// section of a deterministic checkpoint from the latest-request anchor. It is the
 // canonical renderer for both compaction paths: the summarization runner
 // replaces the summarizer's own body with it (ensureCompactionLatestRequestAnchor),
 // so a weak or fallback summary cannot lose or stale the authoritative request.
@@ -2086,11 +2085,19 @@ func modelDrivenCurrentUserRequestSection(anchor fallbackAnchor) string {
 			body = strings.TrimSpace(strings.TrimPrefix(body, inheritedCheckpointLabel+": "))
 			return "- " + inheritedCheckpointLabel + ": " + body
 		}
-		// Cap the anchor text like the structured-fallback summary does
-		// (260 chars with an explicit cut marker): an overlong user message
-		// or Done-rejected reason must not crowd out the rest of the
-		// deterministic checkpoint.
-		return "- " + anchor.Label + ": " + compactTextSnippet(strings.ReplaceAll(anchor.Text, "\n", " "), modelDrivenAnchorMaxRunes)
+		text := strings.TrimSpace(strings.ReplaceAll(anchor.Text, "\r\n", "\n"))
+		// Keep the request's own line structure (lists, code blocks) as an
+		// indented continuation of the bullet. The indent also keeps every
+		// request line, including the tail after compactTextSnippet's
+		// omission separator, off column zero: a line starting with "## "
+		// there would forge a section boundary, and the next inheritance
+		// pass would cut the request tail plus the truncation notice below.
+		snippet := strings.ReplaceAll(compactTextSnippet(text, modelDrivenAnchorMaxRunes), "\n", "\n  ")
+		section := stripColumnZeroHeadings("- " + anchor.Label + ": " + snippet)
+		if utf8.RuneCountInString(text) > modelDrivenAnchorMaxRunes {
+			section += "\n- Request text was truncated. Recover the full request from the archived history files before making decisions that depend on omitted requirements; this excerpt is not the complete specification."
+		}
+		return section
 	}
 	return "- Unknown: no reliable latest user request was preserved; do not infer the active task from stale context."
 }
@@ -2106,6 +2113,15 @@ func renderModelState(text string) string {
 	if text == "" {
 		return "- (none)"
 	}
+	return stripColumnZeroHeadings(text)
+}
+
+// stripColumnZeroHeadings removes column-zero ATX heading markers from every
+// line of a rendered section. Checkpoint readers locate sections by "^## "
+// lines, so no text rendered inside a section may start a line with a heading
+// marker, no matter which path (model-authored field, request excerpt) put it
+// there.
+func stripColumnZeroHeadings(text string) string {
 	lines := strings.Split(text, "\n")
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {

@@ -380,13 +380,24 @@ func (a *MainAgent) flushParkedPendingUserMessages() {
 	a.processPendingUserMessagesBeforeLLMInTurn()
 }
 
+// latestRecoverableUserIntent returns the newest user-authored request or, when
+// a Done rejection is newer, that rejection: a Done rejected reason is the
+// user's latest feedback and outranks the request it rejected.
 func (a *MainAgent) latestRecoverableUserIntent() string {
 	if a == nil || a.ctxMgr == nil {
 		return ""
 	}
 	msgs := a.ctxMgr.Snapshot()
-	for _, msg := range slices.Backward(msgs) {
-
+	for i, msg := range slices.Backward(msgs) {
+		if msg.Role == message.RoleTool {
+			if _, ok := extractUserDoneRejectedReason(msg.Content); !ok {
+				continue
+			}
+			if reason, ok := doneRejectedToolResult(msgs, i); ok {
+				return userDoneRejectedPrefix + " " + reason
+			}
+			continue
+		}
 		if !message.IsUserAuthored(msg) {
 			continue
 		}

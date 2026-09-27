@@ -480,9 +480,13 @@ func extractDoneRejectedReason(text string) (string, bool) {
 // automatically:", emitted by loop exit control) is runtime text, not user
 // intent: it stays evidence (extractDoneRejectedReason) but must never become
 // the Current User Request anchor of a checkpoint.
+// userDoneRejectedPrefix starts a Done tool result that carries the user's
+// rejection reason.
+const userDoneRejectedPrefix = "Done rejected:"
+
 func extractUserDoneRejectedReason(text string) (string, bool) {
 	trimmed := strings.TrimSpace(text)
-	after, ok := strings.CutPrefix(trimmed, "Done rejected:")
+	after, ok := strings.CutPrefix(trimmed, userDoneRejectedPrefix)
 	if !ok {
 		return "", false
 	}

@@ -283,3 +283,103 @@ func TestFallbackContinuationAnchorFallsBackWithoutEvidence(t *testing.T) {
 		t.Fatalf("anchor kind = %q, want empty", anchor.Kind)
 	}
 }
+
+func TestCompactionPreservesDetailedRequestAcrossCheckpoints(t *testing.T) {
+	request := strings.Repeat("Implement the requested operation with the documented behavior. ", 20) +
+		"\n## Requirements\nKeep the original ordering, and reject duplicate identifiers.\n" +
+		strings.Repeat("Cover the supported input forms. ", 30)
+	for _, kind := range []string{"user_request", "done_rejected"} {
+		t.Run(kind, func(t *testing.T) {
+			messages := []message.Message{{Role: message.RoleUser, Content: request}}
+			if kind == "done_rejected" {
+				messages = []message.Message{
+					{Role: message.RoleUser, Content: "previous request"},
+					{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "done-1", Name: tools.NameDone}}},
+					{Role: message.RoleTool, ToolCallID: "done-1", Content: "Done rejected: " + request},
+				}
+			}
+			for generation := range 4 {
+				anchor := resolveLatestUserRequestAnchor(messages)
+				body := ensureCompactionLatestRequestAnchor("## Next Step\n- implement the operation", anchor)
+				section, ok := compactionCurrentUserRequestSection(body)
+				// The request keeps its line structure as an indented
+				// continuation of the anchor bullet.
+				if !ok || !strings.Contains(section, strings.ReplaceAll(strings.TrimSpace(request), "\n", "\n  ")) {
+					t.Fatalf("generation %d lost part of the request: %s", generation, section)
+				}
+				if strings.Contains(body, "\n## Requirements") || !strings.Contains(body, "\n## Next Step\n") {
+					t.Fatal("request text escaped its section or damaged the next section")
+				}
+				messages = []message.Message{{Role: message.RoleUser, IsCompactionSummary: true, Content: body}}
+			}
+		})
+	}
+}
+
+func TestModelDrivenCheckpointPreservesDetailedRequest(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	request := strings.Repeat("Preserve the documented behavior. ", 40) +
+		"Reject duplicate identifiers without changing the stored data. " +
+		strings.Repeat("Keep operations deterministic. ", 40)
+	bundle := modelDrivenBarrierSnapshot{
+		snapshot: []message.Message{{Role: message.RoleUser, Content: request}},
+	}
+	summary := a.buildModelDrivenCheckpointSummary(bundle, bundle.snapshot, len(bundle.snapshot), &modelDrivenCheckpointRequest{
+		Args: tools.CompactContextArgs{ActiveObjective: "implement the operation", NextStep: "run the focused check"},
+	})
+	section, ok := compactionCurrentUserRequestSection(summary)
+	if !ok || !strings.Contains(section, strings.TrimSpace(request)) {
+		t.Fatal("deterministic checkpoint lost requirements from the middle of the request")
+	}
+}
+
+func TestCompactionRequestBoundAndOmissionSurviveInheritance(t *testing.T) {
+	for _, length := range []int{modelDrivenAnchorMaxRunes, modelDrivenAnchorMaxRunes + 1} {
+		request := strings.Repeat("x", length)
+		anchor := fallbackAnchor{Kind: "user_request", Label: "Latest user request", Text: request}
+		body := ensureCompactionLatestRequestAnchor("", anchor)
+		for generation := range 3 {
+			truncated := strings.Contains(body, "Request text was truncated.")
+			if truncated != (length > modelDrivenAnchorMaxRunes) {
+				t.Fatalf("length %d generation %d: incorrect omission notice", length, generation)
+			}
+			if length <= modelDrivenAnchorMaxRunes && !strings.Contains(body, request) {
+				t.Fatal("request within the bound was shortened")
+			}
+			if len(body) > modelDrivenAnchorMaxRunes+512 {
+				t.Fatal("checkpoint exceeded the bounded request plus metadata allowance")
+			}
+			anchor = resolveLatestUserRequestAnchor([]message.Message{{Role: message.RoleUser, IsCompactionSummary: true, Content: body}})
+			body = ensureCompactionLatestRequestAnchor("", anchor)
+		}
+	}
+}
+
+func TestCompactionRequestTailHeadingCannotForgeSectionBoundary(t *testing.T) {
+	// modelDrivenAnchorMaxRunes 8192 keeps the head 5461 runes and the tail
+	// 2726, so this request's tail excerpt starts exactly on a "## " heading.
+	// compactTextSnippet renders that excerpt at column zero after its
+	// "\n...\n" separator; left unescaped it forges a top-level heading, and
+	// the next inheritance pass cuts the section at "\n## ", silently
+	// dropping the request tail plus the truncation notice.
+	request := strings.Repeat("x", 8192) + "## " + strings.Repeat("y", 2723)
+	anchor := fallbackAnchor{Kind: "user_request", Label: "Latest user request", Text: request}
+	body := ensureCompactionLatestRequestAnchor("## Next Step\n- implement the operation", anchor)
+	for generation := range 3 {
+		section, ok := compactionCurrentUserRequestSection(body)
+		if !ok {
+			t.Fatalf("generation %d: request section missing:\n%s", generation, body)
+		}
+		if strings.Contains("\n"+section, "\n## ") {
+			t.Fatalf("generation %d: request text forged a section boundary:\n%s", generation, section)
+		}
+		if !strings.Contains(section, "Request text was truncated.") {
+			t.Fatalf("generation %d: truncation notice lost:\n%s", generation, section)
+		}
+		if !strings.Contains(section, strings.Repeat("y", 2723)) {
+			t.Fatalf("generation %d: request tail lost:\n%s", generation, section)
+		}
+		anchor = resolveLatestUserRequestAnchor([]message.Message{{Role: message.RoleUser, IsCompactionSummary: true, Content: body}})
+		body = ensureCompactionLatestRequestAnchor("## Next Step\n- implement the operation", anchor)
+	}
+}

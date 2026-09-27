@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/keakon/golog/log"
 
@@ -43,12 +44,22 @@ func autoContinuePrompt() string {
 	return "Context compaction completed successfully. Continue the active task directly without apology or recap. Prefer the smallest next concrete step, and preserve the constraints and decisions captured in the compacted context summary. " + checkpointVerificationGuidance
 }
 
+// autoContinueReplayMaxRunes bounds the request quoted by the replay prompt.
+// The checkpoint's Current User Request section already carries the request in
+// full (up to its own bound), so a long request is quoted as an excerpt rather
+// than paid for twice in every continuation request.
+const autoContinueReplayMaxRunes = 1000
+
 func autoContinueReplayPrompt(userIntent string) string {
 	userIntent = strings.TrimSpace(userIntent)
 	if userIntent == "" {
 		return ""
 	}
-	return fmt.Sprintf("After compaction, keep the current task anchored to the latest user intent. The latest user request was: %q. Continue that request directly without apology or recap, unless newer queued user input in this turn supersedes it.", userIntent)
+	quoted := fmt.Sprintf("%q", userIntent)
+	if utf8.RuneCountInString(userIntent) > autoContinueReplayMaxRunes {
+		quoted = fmt.Sprintf("%q (excerpt; the complete text is under Current User Request in the context checkpoint)", compactTextSnippet(userIntent, autoContinueReplayMaxRunes))
+	}
+	return "After compaction, keep the current task anchored to the latest user intent. The latest user request was: " + quoted + ". Continue that request directly without apology or recap, unless newer queued user input in this turn supersedes it."
 }
 
 // beginLengthRecoveryRetry retries the turn with recoveryPrompt injected as a

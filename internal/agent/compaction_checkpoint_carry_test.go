@@ -21,12 +21,13 @@ func TestLatestPriorCheckpointBodyStripsWrapperAnchorsAndFooter(t *testing.T) {
 		OriginalRequest: "build the loader",
 		Constraints:     []string{"do not touch the public API"},
 	}
-	summary := "## Current User Request\n- finish the migration\n\n## Active Objective\n- land it\n\n## Key Decisions\n- keep archival profile\n\n## Next Step\n- run the full suite"
+	carried := "## Active Objective\n- land it\n\n## Key Decisions\n- keep archival profile\n\n## Next Step\n- run the full suite"
+	summary := "## Current User Request\n- finish the migration\n\n" + carried
 	msg := checkpointMessageForCarryTest(withCompactionAnchors(summary, anchors), []string{"history-1.md"})
 
 	got := latestPriorCheckpointBody([]message.Message{msg})
-	if got != summary {
-		t.Fatalf("carried body = %q, want %q", got, summary)
+	if got != carried {
+		t.Fatalf("carried body = %q, want %q", got, carried)
 	}
 	for _, forbidden := range []string{"[Context Summary]", "[Context compressed]", "Archived history files", "[Session Anchors]", "do not touch the public API", "[Context display hint]"} {
 		if strings.Contains(got, forbidden) {
@@ -50,6 +51,25 @@ func TestLatestPriorCheckpointBodyDoesNotCompound(t *testing.T) {
 	}
 	if !strings.Contains(got, "## Key Decisions") {
 		t.Fatalf("carried body must keep the checkpoint's own sections:\n%s", got)
+	}
+}
+
+// The runtime rewrites Current User Request on every checkpoint, so the carry
+// drops it: a long request would otherwise fill the bounded carry and crowd out
+// the progress and decisions the carry exists to preserve.
+func TestLatestPriorCheckpointBodyDropsLongCurrentUserRequest(t *testing.T) {
+	request := strings.Repeat("specify the loader behavior in detail. ", 200)
+	summary := "## Current User Request\n- Latest user request: " + request + "\n\n## Progress\n- parser ported\n\n## Key Decisions\n- keep archival profile"
+	msg := checkpointMessageForCarryTest(summary, nil)
+
+	got := latestPriorCheckpointBody([]message.Message{msg})
+	if strings.Contains(got, "## Current User Request") || strings.Contains(got, "specify the loader") {
+		t.Fatalf("carry must drop the runtime-owned request section:\n%s", got)
+	}
+	for _, want := range []string{"## Progress\n- parser ported", "## Key Decisions\n- keep archival profile"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("carry lost %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -261,7 +281,7 @@ func TestPriorCheckpointCarryDoesNotConsumeProseQuotingTheTypedHeading(t *testin
 	// claim key, or a free line — is ordinary body text: parsing must not read
 	// it as the machine block, and the carry must keep it verbatim instead of
 	// deleting it.
-	body := "## Current User Request\n- finish the migration\n\n## Key Decisions\n- keep the literal `## Typed Checkpoint State` marker inside this decision\n\n## Active Objective\n- land it\n\n## Next Step\n- run the focused tests"
+	body := "## Key Decisions\n- keep the literal `## Typed Checkpoint State` marker inside this decision\n\n## Active Objective\n- land it\n\n## Next Step\n- run the focused tests"
 	msg := checkpointMessageForCarryTest(body, nil)
 	if got := latestPriorCheckpointBody([]message.Message{msg}); got != body {
 		t.Fatalf("carry must preserve prose quoting the typed heading verbatim, got:\n%s", got)
@@ -400,5 +420,72 @@ func TestCompactionDraftCarriesPriorCheckpointBody(t *testing.T) {
 	carried = strings.TrimSpace(strings.Split(carried, "[Context compressed]")[0])
 	if carried != expectedCarry {
 		t.Fatalf("carried body = %q, want %q", carried, expectedCarry)
+	}
+}
+
+// A long latest request fills the first checkpoint's Current User Request
+// section. The next usage-driven compaction must still carry the rest of that
+// checkpoint instead of spending the bounded carry on the request the runtime
+// rewrites anyway.
+func TestCompactionDraftCarryKeepsProgressAfterLongRequest(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+
+	request := strings.TrimSpace(strings.Repeat("port the config loader to the new schema and keep every field documented. ", 60))
+	snapshot := []message.Message{
+		{Role: message.RoleUser, Content: "keep the public API stable"},
+		{Role: message.RoleAssistant, Content: "a1"},
+		{Role: message.RoleUser, Content: request},
+		{Role: message.RoleAssistant, Content: "a2"},
+	}
+	a.resetRuntimeEvidenceFromMessages(snapshot)
+	first, err := a.produceCompactionDraftAsync(t.Context(), snapshot, false, 1,
+		compactionTarget{sessionEpoch: a.sessionEpoch}, len(snapshot), compactionProfileArchival,
+		request, a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()), a.captureCompactionArchiveMeta())
+	if err != nil {
+		t.Fatalf("first produceCompactionDraftAsync: %v", err)
+	}
+	if first.Skip || len(first.NewMessages) == 0 {
+		t.Fatalf("unexpected first draft: %+v", first)
+	}
+	if !strings.Contains(first.NewMessages[0].Content, "keep every field documented") {
+		t.Fatalf("first checkpoint must anchor the long request:\n%s", first.NewMessages[0].Content)
+	}
+	firstBody := latestPriorCheckpointStrippedBody(first.NewMessages)
+	if !strings.Contains(firstBody, "## Progress") {
+		t.Fatalf("first checkpoint has no carryable progress:\n%s", first.NewMessages[0].Content)
+	}
+
+	next := append([]message.Message{first.NewMessages[0]}, []message.Message{
+		{Role: message.RoleAssistant, Content: "continuing"},
+		{Role: message.RoleUser, Content: "now add the migration command"},
+		{Role: message.RoleAssistant, Content: "done"},
+	}...)
+	a.resetRuntimeEvidenceFromMessages(next)
+	second, err := a.produceCompactionDraftAsync(t.Context(), next, false, 2,
+		compactionTarget{sessionEpoch: a.sessionEpoch}, len(next), compactionProfileArchival,
+		first.NewMessages[0].Content, a.evidenceItemsForCompaction(a.ctxMgr.GetMaxTokens()), a.captureCompactionArchiveMeta())
+	if err != nil {
+		t.Fatalf("second produceCompactionDraftAsync: %v", err)
+	}
+	if second.Skip || len(second.NewMessages) == 0 {
+		t.Fatalf("unexpected second draft: %+v", second)
+	}
+	_, after, ok := strings.Cut(second.NewMessages[0].Content, "\n"+priorCheckpointSectionHeading+"\n")
+	if !ok {
+		t.Fatalf("second checkpoint carries no previous-checkpoint section:\n%s", second.NewMessages[0].Content)
+	}
+	carried := strings.TrimSpace(strings.Split(after, "[Context compressed]")[0])
+	if strings.Contains(carried, checkpointCurrentUserRequestHeading) {
+		t.Fatalf("carry spent its budget on the rewritten request section:\n%s", carried)
+	}
+	if !strings.Contains(carried, "## Progress") {
+		t.Fatalf("carry lost the prior progress:\n%s", carried)
+	}
+	if strings.Contains(carried, "Earlier checkpoint content omitted") {
+		t.Fatalf("carry was truncated although the prior body fits once the request is dropped:\n%s", carried)
+	}
+	if carried != strings.TrimSpace(firstBody) {
+		t.Fatalf("carried body = %q, want the first checkpoint's body %q", carried, firstBody)
 	}
 }

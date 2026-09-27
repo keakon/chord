@@ -699,15 +699,13 @@ func TestStripLeadingHeadingMarkers(t *testing.T) {
 }
 
 func TestModelDrivenCurrentUserRequestSectionTruncatesOverlongAnchor(t *testing.T) {
-	// P2-1: the deterministic checkpoint must cap the latest-request anchor
-	// like the structured-fallback summary does; an overlong user message or
-	// Done-rejected reason must not crowd out the rest of the checkpoint.
+	// Oversized requests remain bounded and disclose how to recover omissions.
 	longText := strings.Repeat("a", modelDrivenAnchorMaxRunes*3)
 	got := modelDrivenCurrentUserRequestSection(fallbackAnchor{Kind: "user_request", Label: "Latest user request", Text: longText})
 	if strings.Contains(got, strings.Repeat("a", modelDrivenAnchorMaxRunes*2)) {
 		t.Fatalf("anchor was not truncated: %d runes retained", len(got))
 	}
-	if !strings.Contains(got, "...") {
+	if !strings.Contains(got, "Request text was truncated.") {
 		t.Fatalf("truncated anchor must carry an explicit cut marker: %q", got)
 	}
 	// Short anchors are untouched.

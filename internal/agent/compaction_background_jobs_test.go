@@ -98,7 +98,7 @@ func TestCarryStripsTheJobSnapshotBlock(t *testing.T) {
 	if strings.Contains(got, activeJobsSnapshotOpenPrefix) || strings.Contains(got, "job-1") {
 		t.Fatalf("the runtime-owned block must not be carried into the next checkpoint:\n%s", got)
 	}
-	if !strings.Contains(got, "## Current User Request") || !strings.Contains(got, "## Next Step") {
+	if !strings.Contains(got, "## Next Step\n- continue") {
 		t.Fatalf("stripping removed unrelated sections:\n%s", got)
 	}
 }
