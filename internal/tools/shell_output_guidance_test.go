@@ -66,3 +66,18 @@ func TestShellOutputFilterGuidanceExcludesPowerShell(t *testing.T) {
 		}
 	}
 }
+
+// The note must steer a rerun to the unfiltered command, whose long output
+// Chord saves, instead of a hand-made redirect that would plant a log file in
+// the working tree and still filter the check's output.
+func TestShellOutputFilterNoteRerunsUnfiltered(t *testing.T) {
+	note := appendShellOutputFilterNote("", "producer | tail -1", "bash", 10*time.Second)
+	if !strings.Contains(note, "run it without the filter") || !strings.Contains(note, "read or search the saved output") {
+		t.Fatalf("note lacks the unfiltered rerun guidance: %q", note)
+	}
+	for _, forbidden := range []string{">", "tail -n", ".log"} {
+		if strings.Contains(note, forbidden) {
+			t.Fatalf("note suggests a hand-made redirect or filter (%q): %q", forbidden, note)
+		}
+	}
+}

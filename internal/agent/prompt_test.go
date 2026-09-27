@@ -431,11 +431,11 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Install dependencies or run dynamic checks only when requested or necessary to support a material conclusion",
 		"state remaining runtime uncertainty",
 		"For implementation and bug-fix tasks, verify the requested behavior",
-		"Do not equate self-authored happy-path tests passing with full verification of the requested behavior",
+		"Passing tests do not dismiss an unchecked counterexample",
 		"When a check you wrote for the requested behavior fails, fix the code or show from the requirements that the check is wrong",
 		"changing its inputs so the failing path no longer runs is not a fix",
 		"When a candidate fix is cheap to try, run it instead of deliberating about whether it would work",
-		"Find the smallest distinguishing check or narrow the claim",
+		"check it with the smallest reproduction before adding coverage or running broader tests",
 		"state verification status explicitly (passed, failed, not run, or only inspected statically)",
 		"following project-local test/build conventions when known",
 		"Do not narrate every routine action or restate obvious next steps",
@@ -456,14 +456,14 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Do not add a final audit loop, re-review, or re-test pass only to demonstrate compliance with these rules",
 		"state a brief plan with verifiable success criteria per step",
 		"For analysis-only tasks, define success in terms of evidence gathered and conclusions supported, not implementation or acceptance-test completion",
-		"Order checks by cost: compile/typecheck first, then focused checks",
-		"do not run a full suite while the code is not known to compile",
-		"A guarantee stated without conditions (for example that an operation closes, releases, or restores something) holds on every exit, including errors and early returns",
-		"existing code that lacks it and a preference for minimal change do not narrow it",
-		"Assert it with a check that fails partway through",
+		"Start with the cheapest check that can resolve a concrete correctness concern",
+		"establish that the code builds before running broad tests",
+		"A guarantee stated without conditions holds on success, errors, and early returns",
+		"Existing code is a reference, not permission to weaken a requirement",
+		"Verify the promised state on relevant exit paths",
 		"report its other failures of the same kind through that error, keeping the underlying error as the cause",
 		"following project-local test/build conventions when known",
-		"then broaden when the change's impact or project requirements warrant it",
+		"Broaden when the change's impact or project requirements warrant it",
 		"When a broad test fails, narrow the reproduction before retrying",
 	} {
 		if !strings.Contains(got, want) {
@@ -757,27 +757,27 @@ func TestSharedCodingGuidelinesPrompt_RequiresEvidenceDiscriminationAndAmbiguity
 	got := sharedCodingGuidelinesPrompt
 	for _, want := range []string{
 		// Evidence discrimination.
-		"a plausible alternative explanation or a violated requirement could pass your checks",
-		"Find the smallest distinguishing check",
+		"When you identify a concrete path that may violate a requirement",
+		"check it with the smallest reproduction",
 		"failure, interruption, ordering, and resource constraints",
 		"Confirm a reachable path and the surrounding guards before calling something a defect",
 		"state the goal and constraints before recommending",
 		"separate what was observed from what was inferred before naming a cause",
-		"Separate explicit requirements, observed facts, and assumptions",
+		"distinguish requirements from assumptions",
 		"Match final claims to the requested scope",
 		"For analysis, review, or planning tasks",
 		"run dynamic checks only when requested or necessary",
 		// Ambiguity convergence.
-		"Separate explicit requirements, observed facts, and assumptions",
-		"stop re-guessing unstated intent",
-		"does not independently confirm it",
+		"distinguish requirements from assumptions",
+		"clarify when blocked",
+		"limit claims to what you verified",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("sharedCodingGuidelinesPrompt missing %q in %q", want, got)
 		}
 	}
 	// The rules are shared with SubAgents, not main-only guidance.
-	if !strings.Contains(subAgentCodingGuidelinesPrompt, "stop re-guessing unstated intent") {
+	if !strings.Contains(subAgentCodingGuidelinesPrompt, "clarify when blocked") {
 		t.Fatalf("subAgentCodingGuidelinesPrompt missing shared ambiguity-convergence rule: %q", subAgentCodingGuidelinesPrompt)
 	}
 	for _, unwanted := range []string{

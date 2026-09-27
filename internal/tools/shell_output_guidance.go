@@ -20,7 +20,7 @@ func appendShellOutputFilterNote(output, command, shellType string, elapsed time
 	if elapsed < shellOutputFilterNoteMin || !shellContainsOutputFilter(command, shellType) {
 		return output
 	}
-	return output + "\n(output note: this command contains a tail/head/grep pipeline. Upstream text discarded by a filter cannot be recovered from this result or from a saved log, which only holds the pipeline's final output. If a new execution is necessary, keep its unfiltered output. Changing display filters alone is not a reason to repeat the producer.)"
+	return output + "\n(output note: filters may hide failures and the producer's exit code. Read any existing unfiltered log before rerunning. If another execution is necessary, run it without the filter: long output is saved with a bounded preview, so read or search the saved output for other views.)"
 }
 
 // PowerShell pipelines are not POSIX text filters.
