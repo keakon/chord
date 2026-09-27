@@ -46,32 +46,15 @@ func planExactReplacements(content string, edits []textReplacement) (string, int
 			notes = append(notes, fmt.Sprintf("edits[%d]%s", i, note))
 		}
 
-		// Collect match spans once. Besides avoiding a second full scan for
-		// every batch entry, this keeps the ambiguity check and replacement
-		// plan based on the exact same matches.
-		entrySpans := make([]replacementSpan, 0, 1)
-		for offset := 0; offset < len(content); {
-			at := strings.Index(content[offset:], oldText)
-			if at < 0 {
-				break
-			}
-			start := offset + at
-			end := start + len(oldText)
-			entrySpans = append(entrySpans, replacementSpan{start: start, end: end, entry: i, text: newText})
-			offset = end
-		}
-		count := len(entrySpans)
+		entrySpans, count := entryReplacementSpans(content, newline, oldText, newText, i, edit.ReplaceAll)
 		if count == 0 {
-			// Batch entries match exactly, but a single edit also tolerates a
-			// trailing-newline and punctuation/whitespace difference (see
-			// tolerantMatchNote). A near miss here is therefore not proof the
-			// text is absent, and the model cannot tell that from this message:
-			// point at the fallback so it retries the one entry instead of
-			// rebuilding the whole batch.
+			if diagnostic := editClosestMatchDiagnostic(content, oldText); diagnostic != "" {
+				return "", 0, "", fmt.Errorf("edits[%d]: old_string not found in the original file; no changes written. Batch entries match exactly; for a trailing newline or %s difference, retry this entry as a single edit. %s", i, tolerantMatchNote, diagnostic)
+			}
 			return "", 0, "", fmt.Errorf("edits[%d]: old_string not found in the original file; no changes written. Batch entries match exactly: if this entry differs only by a trailing newline or a %s difference, retry it on its own as a single edit; otherwise read the target range and rebuild this entry", i, tolerantMatchNote)
 		}
 		if count > 1 && !edit.ReplaceAll {
-			return "", 0, "", fmt.Errorf("edits[%d]: old_string found %d times; provide unique context or set replace_all", i, count)
+			return "", 0, "", fmt.Errorf("edits[%d]: old_string found %d times at lines %s in the original file; no changes written. Provide unique context or set replace_all", i, count, formatMatchLines(lineNumbersAt(content, spanStarts(entrySpans)), count))
 		}
 		spans = append(spans, entrySpans...)
 	}
@@ -86,7 +69,54 @@ func planExactReplacements(content string, edits []textReplacement) (string, int
 			return "", 0, "", fmt.Errorf("edits[%d] overlaps edits[%d] in the original file; merge overlapping replacements; no changes written", spans[i-1].entry, spans[i].entry)
 		}
 	}
+	return spliceReplacements(content, spans), len(spans), strings.Join(notes, "; "), nil
+}
+
+// entryReplacementSpans collects the spans one entry replaces and its total
+// match count. Without replace_all only a unique match is applied, so the scan
+// stops at maxMatchLinesShown — enough to name the ambiguous lines — and only
+// a scan that hits that cap pays for strings.Count to report the total. In a
+// mixed line-ending file a multi-line entry matches all equivalent line endings
+// before exact matching, so exact matches cannot hide equivalent ones.
+func entryReplacementSpans(content, fileEOL, oldText, newText string, entry int, replaceAll bool) ([]replacementSpan, int) {
+	limit := -1
+	if !replaceAll {
+		limit = maxMatchLinesShown
+	}
+	if spans := lineBreakTolerantSpans(content, fileEOL, oldText, newText, entry); len(spans) > 0 {
+		return spans, len(spans)
+	}
+	starts := exactMatchOffsets(content, oldText, limit)
+	total := len(starts)
+	if total == limit {
+		total = strings.Count(content, oldText)
+	}
+	spans := make([]replacementSpan, len(starts))
+	for i, start := range starts {
+		spans[i] = replacementSpan{start: start, end: start + len(oldText), entry: entry, text: newText}
+	}
+	return spans, total
+}
+
+// spanStarts returns the byte offsets of at most maxMatchLinesShown spans, the
+// locations an ambiguity error names.
+func spanStarts(spans []replacementSpan) []int {
+	starts := make([]int, min(len(spans), maxMatchLinesShown))
+	for i := range starts {
+		starts[i] = spans[i].start
+	}
+	return starts
+}
+
+// spliceReplacements swaps every span for its text in one pre-sized write;
+// spans must be sorted by start and disjoint.
+func spliceReplacements(content string, spans []replacementSpan) string {
+	size := len(content)
+	for _, span := range spans {
+		size += len(span.text) - (span.end - span.start)
+	}
 	var out strings.Builder
+	out.Grow(size)
 	offset := 0
 	for _, span := range spans {
 		out.WriteString(content[offset:span.start])
@@ -94,7 +124,7 @@ func planExactReplacements(content string, edits []textReplacement) (string, int
 		offset = span.end
 	}
 	out.WriteString(content[offset:])
-	return out.String(), len(spans), strings.Join(notes, "; "), nil
+	return out.String()
 }
 
 func (t EditTool) executeBatch(ctx context.Context, path, displayPath string, edits []textReplacement) (string, error) {

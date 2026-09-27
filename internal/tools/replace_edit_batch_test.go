@@ -2,7 +2,9 @@ package tools
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -156,5 +158,99 @@ func TestEditBatchSchema(t *testing.T) {
 	}
 	if err := ValidateToolArgs(EditTool{}, json.RawMessage(`{"path":"sample.txt","edits":[{"old_string":"alpha"}]}`)); err == nil {
 		t.Fatal("missing new_string accepted")
+	}
+}
+
+func TestEditBatchAmbiguityReportsOriginalLines(t *testing.T) {
+	for _, newline := range []string{"\n", "\r\n"} {
+		t.Run(fmt.Sprintf("newline-%q", newline), func(t *testing.T) {
+			dir := t.TempDir()
+			original := strings.Join([]string{"first", "target", "middle", "target", ""}, newline)
+			path := writeEditFixture(t, dir, "sample.txt", original)
+			_, err := runEdit(t, dir, map[string]any{"path": path, "edits": []map[string]any{
+				{"old_string": "first", "new_string": "first\nextra"},
+				{"old_string": "target", "new_string": "changed"},
+			}})
+			if err == nil || !strings.Contains(err.Error(), "edits[1]: old_string found 2 times at lines 2, 4 in the original file; no changes written") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != original {
+				t.Fatalf("batch wrote changes: %q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestMatchLineNumbersPreservesNonOverlappingLocations(t *testing.T) {
+	for _, tc := range []struct{ content, needle string }{
+		{"", ""}, {"abc", ""}, {"aaaaa", "aa"},
+		{"a\nb\na\nb\n", "a\nb\n"}, {"\n\nx\n\nx", "\n\nx"},
+		{"x\r\nx\r\n", "x"}, {"abc", "missing"},
+	} {
+		var want []int
+		if tc.needle != "" {
+			for offset := 0; offset < len(tc.content); {
+				at := strings.Index(tc.content[offset:], tc.needle)
+				if at < 0 {
+					break
+				}
+				start := offset + at
+				want = append(want, 1+strings.Count(tc.content[:start], "\n"))
+				offset = start + len(tc.needle)
+			}
+		}
+		if got := matchLineNumbers(tc.content, tc.needle, maxMatchLinesShown); !slices.Equal(got, want) {
+			t.Fatalf("content=%q needle=%q: got %v, want %v", tc.content, tc.needle, got, want)
+		}
+	}
+}
+
+func TestMatchLineNumbersBoundsCollectionAndReportsTotal(t *testing.T) {
+	const matched = maxMatchLinesShown + 8
+	content := strings.Repeat("x\n", matched)
+	lines := matchLineNumbers(content, "x", maxMatchLinesShown)
+	if len(lines) != maxMatchLinesShown {
+		t.Fatalf("matchLineNumbers collected %d lines, want %d", len(lines), maxMatchLinesShown)
+	}
+	rendered := formatMatchLines(lines, matched)
+	if !strings.Contains(rendered, fmt.Sprintf("(+%d more)", matched-len(lines))) {
+		t.Fatalf("formatMatchLines(%v, %d) = %q, want the omitted count", lines, matched, rendered)
+	}
+}
+
+// A batch entry without replace_all stops collecting matches at the listing
+// cap but still reports the true total.
+func TestPlanExactReplacementsReportsTotalBeyondLineCap(t *testing.T) {
+	const matched = maxMatchLinesShown + 8
+	_, _, _, err := planExactReplacements(strings.Repeat("x\n", matched), []textReplacement{{OldString: "x", NewString: new("y")}})
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("found %d times at lines 1, 2,", matched)) || !strings.Contains(err.Error(), "(+8 more)") {
+		t.Fatalf("err = %v, want the full count and the first lines", err)
+	}
+}
+
+func BenchmarkEditBatchAmbiguousOriginal(b *testing.B) {
+	content := strings.Repeat("section\ntarget\n", 10000)
+	edits := []textReplacement{{OldString: "target", NewString: new("changed")}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		if _, _, _, err := planExactReplacements(content, edits); err == nil {
+			b.Fatal("expected ambiguity")
+		}
+	}
+}
+
+func TestEditBatchNotFoundShowsClosestMatchWithoutWriting(t *testing.T) {
+	dir := t.TempDir()
+	original := "header\nresult = transform(value, enabled=True)\nfooter\n"
+	path := writeEditFixture(t, dir, "sample.txt", original)
+	_, err := runEdit(t, dir, map[string]any{"path": path, "edits": []map[string]any{{"old_string": "header", "new_string": "changed"}, {"old_string": "result = transform(values, enabled=True)", "new_string": "result = transform(value)"}}})
+	if err == nil || !strings.Contains(err.Error(), "edits[1]") || !strings.Contains(err.Error(), "Closest match is at line 2") {
+		t.Fatalf("missing diagnostic: %v", err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil || string(got) != original {
+		t.Fatalf("failed batch changed file: %q %v", got, readErr)
 	}
 }

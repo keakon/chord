@@ -229,7 +229,7 @@ When any are removed, the tool result reports exactly which code points were cle
 
 In `apply_patch` the clean is limited to the lines the patch adds: existing content elsewhere in the file is never scanned or rewritten by this clean.
 
-For files with uniform CRLF or CR line endings, both single and batch replacements accept the LF text returned by `read` and preserve the file's line-ending convention. Mixed line endings require exact matching. Exclude the `READ_RESULT` metadata line from replacement text.
+Single and batch replacements accept the LF text returned by `read`. For files with uniform CRLF or CR line endings, the replacement keeps the file's line-ending convention. For files that mix line endings, each line break in `old_string` matches any line ending, and the replacement uses the line ending of the block it replaces. Exclude the `READ_RESULT` metadata line from replacement text.
 
 ### Trailing Newline Tolerance
 

@@ -753,7 +753,9 @@ const minEditSuggestionSimilarity = 0.6
 // is a character-level difference (dropped/inserted rune, extra line, real
 // stale content). A window whose similarity clears the threshold gives the
 // model the exact file lines to copy, avoiding a re-read; otherwise ok is
-// false and the caller falls back to the generic re-read error.
+// false and the caller falls back to the generic re-read error. Both texts
+// must use LF line breaks; editClosestMatchDiagnostic normalizes them.
+//
 // maxDiffLinesShown caps how many differing lines the closest-match error
 // lists. A couple of lines is enough to guide the rebuild; a pathological
 // multi-line drift degrades to the generic hint rather than a wall of text.
@@ -784,13 +786,6 @@ func editClosestMatch(content, oldText string) (editClosestMatchResult, bool) {
 	// windows align with visible lines.
 	for len(srcLines) > 0 && srcLines[len(srcLines)-1] == "" {
 		srcLines = srcLines[:len(srcLines)-1]
-	}
-	// CRLF files: a trailing carriage return would leak into the quoted
-	// suggestion and silently penalize the similarity of every line (the
-	// punctuation normalizer maps it to a space). Matching already tolerates
-	// it — the whitespace layer strips it — so drop it here too.
-	for i, l := range srcLines {
-		srcLines[i] = strings.TrimSuffix(l, "\r")
 	}
 	if len(srcLines) > maxEditSuggestionLines || len(srcLines) < len(normOld) {
 		return editClosestMatchResult{}, false

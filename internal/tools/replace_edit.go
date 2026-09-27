@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 
@@ -84,7 +83,7 @@ func (t EditTool) Description() string {
 	// (## LSP diagnostic follow-up), not per-tool descriptions; see
 	// lspDiagnosticPromptBlock.
 	return "Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with `write`. " +
-		"For files with uniform CRLF or CR line endings, LF replacement text is adapted to the existing line ending; mixed line endings require exact matching. " +
+		"Line breaks adapt to the file: with uniform CRLF or CR line endings, LF text takes that ending; with mixed line endings, each line break in old_string matches any line ending and the replacement takes the matched block's. " +
 		"For several disjoint changes in one file, use edits instead of separate calls. Every batch entry matches the original file exactly after line-ending adaptation; overlaps are rejected and all entries are validated before writing. Do not mix edits with top-level replacement fields. " +
 		"Prefer the smallest unique 2-4 line block instead of a large stale context block; re-read before retrying after any mismatch. Replaces one occurrence by default; set replace_all to replace every occurrence."
 }
@@ -179,9 +178,24 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 
 	replaceAll := a.ReplaceAll != nil && *a.ReplaceAll
 
-	// Count occurrences with exact matching.
-	count := strings.Count(content, decodedOld)
+	var count int
 	newlineTolerant := false
+	// In a mixed line-ending file, let each line break of a multi-line
+	// old_string match any line ending; read showed them all as LF.
+	var lineBreakSpans []replacementSpan
+	if spans := lineBreakTolerantSpans(content, fileEOL, decodedOld, decodedNew, 0); len(spans) > 0 {
+		if len(spans) > 1 && !replaceAll {
+			return "", fmt.Errorf("old_string found %d times under %s matching at lines %s; provide more context or set replace_all to true", len(spans), lineBreakTolerantNote, formatMatchLines(lineNumbersAt(content, spanStarts(spans)), len(spans)))
+		}
+		if !replaceAll {
+			spans = spans[:1]
+		}
+		lineBreakSpans = spans
+		count = len(spans)
+	} else {
+		count = strings.Count(content, decodedOld)
+	}
+
 	if count == 0 {
 		// Try trailing-newline tolerance.
 		if altOld, altNew, altCount, ok := trailingNewlineTolerantEdit(content, decodedOld, decodedNew, fileEOL); ok {
@@ -203,7 +217,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		// to the model's punctuation style.
 		if altNew, altCount, matchLines, ok := punctuationTolerantEdit(content, decodedOld, decodedNew, replaceAll); ok {
 			if altCount > 1 && !replaceAll {
-				return "", fmt.Errorf("old_string found %d times under %s matching at lines %s; provide more context or set replace_all to true", altCount, tolerantMatchNote, formatMatchLines(matchLines))
+				return "", fmt.Errorf("old_string found %d times under %s matching at lines %s; provide more context or set replace_all to true", altCount, tolerantMatchNote, formatMatchLines(matchLines, altCount))
 			}
 			qc := altNew
 			encodedBytes, err := encodeString(qc, editRead.Decoded.Encoding)
@@ -234,63 +248,20 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		// difference, which usually lets it retry without a re-read. When
 		// no window is close enough, the generic re-read hint below
 		// applies.
-		if closest, ok := editClosestMatch(content, decodedOld); ok {
-			sim := int(math.Round(closest.Similarity * 100))
-			var b strings.Builder
-			fmt.Fprintf(&b, "old_string not found in file, even after punctuation/whitespace tolerance. Closest match is at line %d (%d%% similar, %d character difference):\n", closest.StartLine, sim, closest.DiffRunes)
-			fmt.Fprintf(&b, "  file line %d: %s\n", closest.FileDiffLine, closest.Actual)
-			fmt.Fprintf(&b, "  your line %d: %s\n", closest.ExpectedDiffLine, closest.Expected)
-			if hint := firstMismatchHint(closest.ExpectedRaw, closest.ActualRaw); hint != "" {
-				fmt.Fprintf(&b, "  %s\n", hint)
-			}
-			if closest.LineDiffOldExtra > 0 || closest.LineDiffSrcExtra > 0 {
-				blankNote := ""
-				if closest.LineDiffBlankOnly {
-					blankNote = " — the extra lines are blank, so the blank-line count differs"
-				}
-				fmt.Fprintf(&b, "  line-count difference: your old_string has %d extra line(s), the file has %d extra line(s)%s\n", closest.LineDiffOldExtra, closest.LineDiffSrcExtra, blankNote)
-			}
-			// Diffs[0] is already rendered above as the first mismatch; the
-			// rest are listed here. The slice can be empty when the diagnostic
-			// normalizer is more tolerant than the matcher that rejected the
-			// block — the window is "closest" yet has no differing line under
-			// the looser comparison — so the skip must not assume an element.
-			for _, d := range restAfterFirst(closest.Diffs) {
-				fmt.Fprintf(&b, "  differing line %d (file %d): expected %s\n    actual %s\n", d.ExpectedLine, d.FileLine, d.Expected, d.Actual)
-			}
-			// When whole lines drifted, the few differing lines shown above
-			// cannot reconstruct the target block: the model would have to
-			// retype the lines between them from memory, which is exactly
-			// how drift compounds. Send it to a fresh bounded read of the
-			// target range instead.
-			drifted := closest.LineDiffOldExtra + closest.LineDiffSrcExtra
-			oldLineCount := strings.Count(strings.TrimSuffix(decodedOld, "\n"), "\n") + 1
-			if drifted > maxDiffLinesShown || closest.DiffLines > maxDiffLinesShown {
-				var reason string
-				if drifted > 0 {
-					reason = fmt.Sprintf("Whole lines drifted (%d vs %d extra line(s) between you and the file)", closest.LineDiffOldExtra, closest.LineDiffSrcExtra)
-					if closest.DiffLines > maxDiffLinesShown {
-						reason += fmt.Sprintf(" and %d+ lines differ in place", maxDiffLinesShown)
-					}
-				} else {
-					reason = fmt.Sprintf("More than %d lines differ in place", maxDiffLinesShown)
-				}
-				fmt.Fprintf(&b, "%s, so the lines above are not enough to rebuild old_string: read the file with offset=%d limit=%d (the closest match range), rebuild old_string from that fresh output, or use a smaller 2-4 line anchor; do not retype the block from memory",
-					reason, closest.StartLine, oldLineCount)
-			} else {
-				b.WriteString("Rebuild old_string from the file lines above (copy them exactly), then retry; the difference is beyond punctuation/whitespace tolerance")
-			}
-			return "", fmt.Errorf("%s", b.String())
+		if diagnostic := editClosestMatchDiagnostic(content, decodedOld); diagnostic != "" {
+			return "", fmt.Errorf("old_string not found in file, even after punctuation/whitespace tolerance. %s", diagnostic)
 		}
 		return "", fmt.Errorf("old_string not found in file, even after punctuation/whitespace tolerance. The target text may be stale or already changed, or differs beyond punctuation and spacing. Re-read the small target range from current file contents, then rebuild old_string using exact text from that fresh read. Do not retry the same edit unchanged")
 	}
 	if count > 1 && !replaceAll {
-		return "", fmt.Errorf("old_string found %d times at lines %s; provide more context or set replace_all to true", count, formatMatchLines(matchLineNumbers(content, decodedOld)))
+		return "", fmt.Errorf("old_string found %d times at lines %s; provide more context or set replace_all to true", count, formatMatchLines(matchLineNumbers(content, decodedOld, maxMatchLinesShown), count))
 	}
 
 	// Perform replacement.
 	var newContent string
-	if replaceAll {
+	if lineBreakSpans != nil {
+		newContent = spliceReplacements(content, lineBreakSpans)
+	} else if replaceAll {
 		newContent = strings.ReplaceAll(content, decodedOld, decodedNew)
 	} else {
 		newContent = strings.Replace(content, decodedOld, decodedNew, 1)
@@ -308,7 +279,13 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		encSuffix = fmt.Sprintf(", encoding=%s", editRead.Decoded.Encoding.Name)
 	}
 	var out string
-	if replaceAll && count > 1 {
+	if lineBreakSpans != nil {
+		occurrences := "1 occurrence"
+		if count > 1 {
+			occurrences = fmt.Sprintf("%d occurrences", count)
+		}
+		out = fmt.Sprintf("Replaced %s via %s match (%d bytes -> %d bytes)%s%s", occurrences, lineBreakTolerantNote, oldBytes, newBytes, abs, encSuffix)
+	} else if replaceAll && count > 1 {
 		out = fmt.Sprintf("Replaced %d occurrences (%d bytes -> %d bytes)%s%s", count, oldBytes, newBytes, abs, encSuffix)
 	} else if newlineTolerant {
 		out = fmt.Sprintf("Replaced 1 occurrence via trailing-newline-tolerant match (%d bytes -> %d bytes)%s%s", oldBytes, newBytes, abs, encSuffix)
@@ -421,46 +398,6 @@ func trailingNewlineTolerantEdit(content, oldText, newText, fileEOL string) (alt
 	return altOld, altNew, altCount, true
 }
 
-// matchLineNumbers returns the one-based source line for each non-overlapping
-// exact match. The edit error uses these locations to let the model choose a
-// unique context block without another exploratory read.
-func matchLineNumbers(content, needle string) []int {
-	if needle == "" {
-		return nil
-	}
-	lines := make([]int, 0, 4)
-	for offset := 0; offset < len(content); {
-		at := strings.Index(content[offset:], needle)
-		if at < 0 {
-			break
-		}
-		start := offset + at
-		lines = append(lines, 1+strings.Count(content[:start], "\n"))
-		offset = start + len(needle)
-	}
-	return lines
-}
-
-func formatMatchLines(lines []int) string {
-	if len(lines) == 0 {
-		return "unknown"
-	}
-	const maxShown = 12
-	shown := lines
-	if len(shown) > maxShown {
-		shown = shown[:maxShown]
-	}
-	parts := make([]string, len(shown))
-	for i, line := range shown {
-		parts[i] = fmt.Sprintf("%d", line)
-	}
-	result := strings.Join(parts, ", ")
-	if len(lines) > maxShown {
-		result += fmt.Sprintf(", … (+%d more)", len(lines)-maxShown)
-	}
-	return result
-}
-
 // punctuationTolerantEdit finds oldText in content after normalizing prose
 // punctuation (curly/straight quotes, dashes, and full-width CJK punctuation
 // are treated as their ASCII equivalents, and one typesetting space adjacent
@@ -510,20 +447,25 @@ func punctuationTolerantEdit(content, oldText, newText string, replaceAll bool) 
 			}
 		}
 		if match {
-			starts = append(starts, i)
-			if !replaceAll && len(starts) >= 2 {
-				// Report ambiguity to the caller; it surfaces the same
-				// "provide more context" error as the exact path, with the
-				// same landing lines the exact path reports.
-				return "", len(starts), tolerantMatchLines(content, contentSpans, starts), true
+			count++
+			// Without replace_all only a unique match is applied, so keep
+			// just enough starts to name the ambiguous lines while counting
+			// the rest.
+			if replaceAll || len(starts) < maxMatchLinesShown {
+				starts = append(starts, i)
 			}
 			i += len(normOld)
 			continue
 		}
 		i++
 	}
-	if len(starts) == 0 {
+	if count == 0 {
 		return "", 0, nil, false
+	}
+	if count > 1 && !replaceAll {
+		// Report ambiguity to the caller; it surfaces the same "provide more
+		// context" error as the exact path, with the same landing lines.
+		return "", count, tolerantMatchLines(content, contentSpans, starts), true
 	}
 
 	normNew, newSpans := normalizePunctWithSpaceFolding(newRunes)
@@ -575,7 +517,7 @@ func punctuationTolerantEdit(content, oldText, newText string, replaceAll bool) 
 	}
 	b.WriteString(string(contentRunes[prev:]))
 	lines = tolerantMatchLines(content, contentSpans, starts)
-	return b.String(), len(starts), lines, true
+	return b.String(), count, lines, true
 }
 
 // restAfterFirst returns everything after the first element, or nothing when

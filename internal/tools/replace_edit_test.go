@@ -1120,6 +1120,35 @@ func TestEditToolTolerantAmbiguityReportsLines(t *testing.T) {
 	}
 }
 
+// Tolerant matches carry rune offsets; the reported lines must still be right
+// when multi-byte text precedes the match.
+func TestEditToolTolerantAmbiguityLinesAfterMultibyteText(t *testing.T) {
+	dir := t.TempDir()
+	file := strings.Repeat("这是一行中文说明文字\n", 20) + "line one： quoted here\n" + strings.Repeat("中文\n", 5) + "line two： quoted there\n"
+	path := writeEditFixture(t, dir, "demo.md", file)
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": ": quoted", "new_string": "@ quoted",
+	})
+	if err == nil || !strings.Contains(err.Error(), "at lines 21, 27") {
+		t.Fatalf("err = %v, want ambiguity error naming lines 21, 27", err)
+	}
+}
+
+// The tolerant ambiguity error reports every match, like the exact path, not
+// just the first two it needed to prove the ambiguity.
+func TestEditToolTolerantAmbiguityCountsEveryMatch(t *testing.T) {
+	dir := t.TempDir()
+	const matches = maxMatchLinesShown + 3
+	path := writeEditFixture(t, dir, "demo.md", strings.Repeat("key： value\n", matches))
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": "key: value", "new_string": "key: other",
+	})
+	want := fmt.Sprintf("found %d times under %s matching", matches, tolerantMatchNote)
+	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "(+3 more)") {
+		t.Fatalf("err = %v, want %q with the omitted count", err, want)
+	}
+}
+
 // TestEditToolClosestMatchBeyondOldLineCap guards that raising the file-line
 // cap restores the closest-match hint for files longer than the old 2000-line cap.
 func TestEditToolClosestMatchBeyondOldLineCap(t *testing.T) {
@@ -1249,7 +1278,7 @@ func TestEditReadResultCopyRuleHasSingleSource(t *testing.T) {
 	if strings.Contains(editDesc, "READ_RESULT") {
 		t.Fatalf("edit description repeats the old_string copy rule: %q", editDesc)
 	}
-	if !strings.Contains(editDesc, "LF replacement text is adapted to the existing line ending") {
+	if !strings.Contains(editDesc, "each line break in old_string matches any line ending") {
 		t.Fatalf("edit description lost the line-ending behavior: %q", editDesc)
 	}
 	if strings.Contains((ReadTool{}).Description(), "into edit arguments") {
