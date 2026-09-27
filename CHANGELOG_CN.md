@@ -4,6 +4,7 @@
 
 ## 未发布
 
+- 工具确认框支持只读查看完整参数，包括较长的批量编辑；查看后仍需明确批准调用。
 - headless 的 `status_response` 现在带当前工作目录和 worktree generation；会话中切换 checkout 时，订阅 `workdir_changed` 的客户端也会收到推送。
 - 图片 token 按张数和保守额度估算，不再按图片文件字节数折算。
 

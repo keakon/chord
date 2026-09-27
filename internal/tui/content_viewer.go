@@ -10,6 +10,7 @@ import (
 
 type contentViewerState struct {
 	title        string
+	literal      bool
 	content      string
 	prevMode     Mode
 	scrollOffset int
@@ -112,6 +113,8 @@ func (m *Model) cachedContentViewerLines(width int) []string {
 	content := strings.TrimSpace(m.contentViewer.content)
 	if content == "" {
 		lines = append(lines, DimStyle.Render("(empty)"))
+	} else if m.contentViewer.literal {
+		lines = append(lines, wrapConfirmLiteralText(content, contentWidth)...)
 	} else {
 		lines = append(lines, renderRichMarkdownContent(content, contentWidth, nil)...)
 	}

@@ -4,6 +4,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- Tool confirmation dialogs offer a read-only viewer for complete arguments, including long batch edits; opening it keeps the approval pending.
 - Headless `status_response` now includes the current working directory and
   worktree generation, and mid-session checkout changes can be subscribed to
   through `workdir_changed`.

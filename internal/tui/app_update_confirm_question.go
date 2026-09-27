@@ -72,8 +72,17 @@ func (m *Model) presentConfirmRequest(msg confirmRequestMsg, prevMode Mode, arri
 }
 
 func (m *Model) handleConfirmTimeoutTick() tea.Cmd {
-	if m.mode == ModeConfirm && !m.confirm.deadline.IsZero() {
+	// The chain follows the request, not the mode: viewing the arguments
+	// switches to ModeContentViewer, and mode-gated renewal would stop the
+	// countdown there with no path to restart it, leaving a dialog the broker
+	// has already auto-denied on screen.
+	if m.confirm.request != nil && !m.confirm.deadline.IsZero() {
 		if time.Now().After(m.confirm.deadline) {
+			if m.mode == ModeContentViewer && m.contentViewer.prevMode == ModeConfirm {
+				// Drop the viewer state without restoring its mode so
+				// finishDialog can restore the mode the confirm was opened over.
+				m.contentViewer = contentViewerState{}
+			}
 			return m.resolveConfirm(ConfirmResult{Action: ConfirmDeny})
 		}
 		m.recalcViewportSize()

@@ -78,8 +78,10 @@ func (m *Model) renderConfirmDialog() string {
 
 	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed, req.DoneReport)
 	lines := m.renderConfirmSummary(title, summary, innerWidth)
-	lines = append(lines, "", m.renderConfirmOptions())
-	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
+	options := strings.Split(m.renderConfirmOptions(), "\n")
+	lines = append(lines, "")
+	lines = append(lines, options...)
+	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), len(options)+1)
 	out := renderDialogBox(maxWidth, lines)
 	if m.confirm.deadline.IsZero() {
 		m.confirm.renderCacheWidth = m.width
@@ -172,10 +174,24 @@ func (m Model) renderConfirmOptions() string {
 		ConfirmAllowStyle.Render("[Enter/A] Allow"),
 		ConfirmDenyStyle.Render("[Esc/D] Deny"),
 		ConfirmDenyStyle.Render("[R] Deny+Reason"),
+		ConfirmEditStyle.Render("[V] View args"),
 		ConfirmEditStyle.Render("[E] Modify args"),
 	}
 	parts = append(parts, ConfirmEditStyle.Render("[M] Add rule…"))
-	return strings.Join(parts, "  ")
+	var lines []string
+	line := ""
+	for _, part := range parts {
+		if line != "" && ansi.StringWidth(line)+2+ansi.StringWidth(part) > confirmDialogInnerWidth(m.width)-1 {
+			lines = append(lines, line)
+			line = ""
+		}
+		if line != "" {
+			line += "  "
+		}
+		line += part
+	}
+	lines = append(lines, line)
+	return strings.Join(lines, "\n")
 }
 
 // renderRulePicker renders the rule picker sub-dialog.

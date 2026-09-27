@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -1162,5 +1164,122 @@ func TestConfirmRulePickerPreselectsAllMatchedAskRules(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected confirm result")
+	}
+}
+
+func TestHandleConfirmViewPreservesFullArguments(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeConfirm
+	args := `{"path":"sample.txt","edits":[{"old_string":"**literal**","new_string":"` + strings.Repeat("value", 200) + `"}]}`
+	m.confirm.request = &ConfirmRequest{ToolName: "edit", ArgsJSON: args}
+	if cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'})); cmd != nil {
+		cmd()
+	}
+	if m.mode != ModeContentViewer || m.contentViewer.prevMode != ModeConfirm {
+		t.Fatal("viewer must return to pending confirmation")
+	}
+	var original, viewed any
+	if err := json.Unmarshal([]byte(args), &original); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(m.contentViewer.content), &viewed); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(original, viewed) || m.confirm.request.ArgsJSON != args {
+		t.Fatal("view changed or omitted arguments")
+	}
+	if lines := strings.Join(m.cachedContentViewerLines(80), "\n"); !strings.Contains(lines, "**literal**") {
+		t.Fatalf("viewer interpreted argument text as Markdown: %s", lines)
+	}
+	m.closeContentViewer()
+	if m.mode != ModeConfirm || m.confirm.request.ArgsJSON != args {
+		t.Fatal("view must leave approval pending")
+	}
+}
+
+// The confirm timeout chain follows the request, not the mode: viewing the
+// arguments switches to ModeContentViewer, and a mode-gated tick would stop
+// renewing with no path to restart the countdown.
+func TestConfirmTimeoutTickRenewsWhileViewingArguments(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeConfirm
+	m.confirm = confirmState{
+		request:  &ConfirmRequest{ToolName: "edit", ArgsJSON: `{"path":"sample.txt"}`},
+		prevMode: ModeNormal,
+		deadline: time.Now().Add(time.Minute),
+	}
+	if cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'})); cmd != nil {
+		cmd()
+	}
+	if m.mode != ModeContentViewer {
+		t.Fatalf("setup: mode = %v, want ModeContentViewer", m.mode)
+	}
+	if cmd := m.handleConfirmTimeoutTick(); cmd == nil {
+		t.Fatal("tick chain stopped while the arguments viewer was open")
+	}
+	if m.mode != ModeContentViewer || m.confirm.request == nil || m.contentViewer.content == "" {
+		t.Fatalf("renewal must leave the confirm and viewer in place: mode=%v viewer=%q", m.mode, m.contentViewer.content)
+	}
+}
+
+// A deadline that elapses while the arguments are being viewed must close both
+// the viewer and the dialog: the broker has already auto-denied the request,
+// and keeping a stale confirm on screen would queue later dialogs behind it.
+func TestConfirmTimeoutExpiryClosesViewerAndDialog(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.confirmResultCh = make(chan ConfirmResult, 1)
+	m.mode = ModeConfirm
+	m.confirm = confirmState{
+		request:  &ConfirmRequest{ToolName: "edit", ArgsJSON: `{"path":"sample.txt"}`},
+		prevMode: ModeNormal,
+		deadline: time.Now().Add(-time.Second),
+	}
+	if cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'})); cmd != nil {
+		cmd()
+	}
+	_ = m.handleConfirmTimeoutTick()
+	if m.mode != ModeNormal {
+		t.Fatalf("mode after expiry = %v, want ModeNormal", m.mode)
+	}
+	if m.confirm.request != nil {
+		t.Fatal("expired confirm must be resolved")
+	}
+	if m.contentViewer.title != "" || m.contentViewer.content != "" {
+		t.Fatalf("viewer after expiry = %q, want it cleared with the dialog", m.contentViewer.content)
+	}
+	select {
+	case result := <-m.confirmResultCh:
+		if result.Action != ConfirmDeny {
+			t.Fatalf("expiry result = %v, want ConfirmDeny", result.Action)
+		}
+	default:
+		t.Fatal("expiry must deny the pending request")
+	}
+}
+
+// A session switch drops the pending confirmation; an arguments viewer opened
+// over it must go with it instead of lingering as stale viewer state.
+func TestSessionSwitchClosesArgumentsViewerWithDialog(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	m.mode = ModeConfirm
+	m.confirm = confirmState{
+		request:  &ConfirmRequest{ToolName: "edit", ArgsJSON: `{"path":"sample.txt"}`},
+		prevMode: ModeNormal,
+	}
+	if cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'})); cmd != nil {
+		cmd()
+	}
+	if m.mode != ModeContentViewer {
+		t.Fatalf("setup: mode = %v, want ModeContentViewer", m.mode)
+	}
+	_ = m.resetDialogsOnSessionSwitch()
+	if m.mode != ModeNormal {
+		t.Fatalf("mode after switch = %v, want ModeNormal", m.mode)
+	}
+	if m.confirm.request != nil {
+		t.Fatal("session switch must drop the pending confirmation")
+	}
+	if m.contentViewer.title != "" || m.contentViewer.content != "" {
+		t.Fatalf("viewer after switch = %q, want it cleared with the dialog", m.contentViewer.content)
 	}
 }

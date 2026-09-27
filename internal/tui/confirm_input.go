@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -191,6 +192,21 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 		m.recalcViewportSize()
 		return textareaBlinkCmd()
+
+	case msg.String() == "v" || msg.String() == "V":
+		if m.confirm.request != nil {
+			content := m.confirm.request.ArgsJSON
+			var out bytes.Buffer
+			if err := json.Indent(&out, []byte(content), "", "  "); err == nil {
+				content = out.String()
+			}
+			cmd := m.openContentViewer("Tool arguments", content)
+			// Arguments are literal data, not Markdown: formatting must not
+			// hide characters the user is being asked to approve.
+			m.contentViewer.literal = true
+			return cmd
+		}
+		return nil
 
 	case msg.String() == "e" || msg.String() == "E":
 		if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone {

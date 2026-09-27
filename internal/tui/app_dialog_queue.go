@@ -94,6 +94,12 @@ func (m *Model) resetDialogsOnSessionSwitch() tea.Cmd {
 	if !hadDialog {
 		return nil
 	}
+	if m.mode == ModeContentViewer {
+		// A viewer opened over the dropped dialog (such as View args) has
+		// nothing to return to; the dialog's own previous mode is restored
+		// below instead.
+		m.contentViewer = contentViewerState{}
+	}
 	m.terminalTitleRequestSeen = false
 	m.recalcViewportSize()
 	cmds := []tea.Cmd{m.syncTerminalTitleState(), m.restoreModeWithIME(prevMode)}
