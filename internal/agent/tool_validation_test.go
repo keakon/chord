@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -92,6 +93,14 @@ func TestClassifyToolArgsAbnormality(t *testing.T) {
 			registry: nil,
 			toolName: "RequiredTool",
 			args:     json.RawMessage(`{}`),
+		},
+		{
+			name:                "wire name containing provider thinking text",
+			registry:            registry,
+			toolName:            "shell\n<｜｜DSML｜｜ invoke name=",
+			args:                json.RawMessage(`{"command":"pwd"}`),
+			wantMalformed:       true,
+			wantAbnormalToolArg: true,
 		},
 	}
 
@@ -349,5 +358,24 @@ func TestPromotedToolAuditKeepsExecutionTruth(t *testing.T) {
 
 	if got := promotedToolAudit(nil, executed, `{"path":"a.go"}`); got != executed {
 		t.Fatal("without a hook audit the promoted execution's audit must pass through untouched")
+	}
+}
+
+func TestRegisteredLongToolNamesAreNotMalformed(t *testing.T) {
+	for _, token := range []string{strings.Repeat("a", 140), strings.Repeat("字", 50)} {
+		name := mcp.RegisteredMCPToolName("sample", token)
+		registry := tools.NewRegistry()
+		registry.Register(agentValidationTool{name: name, schema: map[string]any{"type": "object", "required": []string{"path"}}})
+		call := message.ToolCall{Name: name, Args: json.RawMessage(`{"path":"file.txt"}`)}
+		if isMalformedToolCall(call, registry) {
+			t.Fatalf("registered name rejected: %q", name)
+		}
+		if !isMalformedToolCall(call, nil) {
+			t.Fatal("unknown oversized name accepted")
+		}
+		call.Args = json.RawMessage(`{}`)
+		if !isMalformedToolCall(call, registry) {
+			t.Fatal("registered name bypassed argument validation")
+		}
 	}
 }

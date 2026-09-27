@@ -203,7 +203,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		// to the model's punctuation style.
 		if altNew, altCount, matchLines, ok := punctuationTolerantEdit(content, decodedOld, decodedNew, replaceAll); ok {
 			if altCount > 1 && !replaceAll {
-				return "", fmt.Errorf("old_string found %d times under %s matching, provide more context or set replace_all to true", altCount, tolerantMatchNote)
+				return "", fmt.Errorf("old_string found %d times under %s matching at lines %s; provide more context or set replace_all to true", altCount, tolerantMatchNote, formatMatchLines(matchLines))
 			}
 			qc := altNew
 			encodedBytes, err := encodeString(qc, editRead.Decoded.Encoding)
@@ -285,7 +285,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("old_string not found in file, even after punctuation/whitespace tolerance. The target text may be stale or already changed, or differs beyond punctuation and spacing. Re-read the small target range from current file contents, then rebuild old_string using exact text from that fresh read. Do not retry the same edit unchanged")
 	}
 	if count > 1 && !replaceAll {
-		return "", fmt.Errorf("old_string found %d times, provide more context or set replace_all to true", count)
+		return "", fmt.Errorf("old_string found %d times at lines %s; provide more context or set replace_all to true", count, formatMatchLines(matchLineNumbers(content, decodedOld)))
 	}
 
 	// Perform replacement.
@@ -421,6 +421,46 @@ func trailingNewlineTolerantEdit(content, oldText, newText, fileEOL string) (alt
 	return altOld, altNew, altCount, true
 }
 
+// matchLineNumbers returns the one-based source line for each non-overlapping
+// exact match. The edit error uses these locations to let the model choose a
+// unique context block without another exploratory read.
+func matchLineNumbers(content, needle string) []int {
+	if needle == "" {
+		return nil
+	}
+	lines := make([]int, 0, 4)
+	for offset := 0; offset < len(content); {
+		at := strings.Index(content[offset:], needle)
+		if at < 0 {
+			break
+		}
+		start := offset + at
+		lines = append(lines, 1+strings.Count(content[:start], "\n"))
+		offset = start + len(needle)
+	}
+	return lines
+}
+
+func formatMatchLines(lines []int) string {
+	if len(lines) == 0 {
+		return "unknown"
+	}
+	const maxShown = 12
+	shown := lines
+	if len(shown) > maxShown {
+		shown = shown[:maxShown]
+	}
+	parts := make([]string, len(shown))
+	for i, line := range shown {
+		parts[i] = fmt.Sprintf("%d", line)
+	}
+	result := strings.Join(parts, ", ")
+	if len(lines) > maxShown {
+		result += fmt.Sprintf(", … (+%d more)", len(lines)-maxShown)
+	}
+	return result
+}
+
 // punctuationTolerantEdit finds oldText in content after normalizing prose
 // punctuation (curly/straight quotes, dashes, and full-width CJK punctuation
 // are treated as their ASCII equivalents, and one typesetting space adjacent
@@ -473,8 +513,9 @@ func punctuationTolerantEdit(content, oldText, newText string, replaceAll bool) 
 			starts = append(starts, i)
 			if !replaceAll && len(starts) >= 2 {
 				// Report ambiguity to the caller; it surfaces the same
-				// "provide more context" error as the exact path.
-				return "", len(starts), nil, true
+				// "provide more context" error as the exact path, with the
+				// same landing lines the exact path reports.
+				return "", len(starts), tolerantMatchLines(content, contentSpans, starts), true
 			}
 			i += len(normOld)
 			continue

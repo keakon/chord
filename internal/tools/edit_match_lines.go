@@ -11,12 +11,18 @@ import (
 // replacement landed. A match starts at the normalized span's original
 // rune offset; counting newlines in content[:offset] yields the line number
 // directly. Matches never overlap, so the returned lines are strictly
-// increasing.
+// increasing. The line counter advances over the disjoint segments between
+// match starts instead of recounting the whole prefix for every match.
 
 func tolerantMatchLines(content string, contentSpans []punctSpan, starts []int) []int {
 	lines := make([]int, 0, len(starts))
+	line := 1
+	prev := 0
 	for _, m := range starts {
-		lines = append(lines, 1+strings.Count(content[:contentSpans[m].start], "\n"))
+		offset := contentSpans[m].start
+		line += strings.Count(content[prev:offset], "\n")
+		lines = append(lines, line)
+		prev = offset
 	}
 	return lines
 }

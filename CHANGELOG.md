@@ -141,6 +141,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Without configured language servers, the default role no longer tells the model that its file inspection is limited in this role.
 - Exact-text edits accept LF text returned by `read` for files using uniform CRLF or CR line endings, preserving the original line-ending convention.
 - Truncated tool output now reports the true number of omitted lines and the line ranges the preview kept. The notice counted only what the line cap dropped, so a byte-trimmed preview could claim a small omission while discarding most of the output: a 588-line diff was labeled "27 lines truncated" while 468 lines were missing. When not even one whole line fits the preview, the notice reports how much of the first line was kept (for example `line 1 truncated to 2000 of 102400 bytes`).
+- Ambiguous `edit` `old_string` matches now report the lines they were found at in the exact-match, batch, and punctuation-tolerant errors (up to 12, plus a remaining count), so more context can be added around the intended occurrence instead of guessing. The line lookups scan the content once instead of recounting the prefix for every match, keeping large-file ambiguity errors and tolerant `replace_all` landing reports fast.
 
 ## 0.8.1 - 2026-09-16
 

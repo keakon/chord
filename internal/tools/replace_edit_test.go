@@ -1105,6 +1105,21 @@ func TestEditToolTolerantMatchReportsLandingLinesMany(t *testing.T) {
 	}
 }
 
+// TestEditToolTolerantAmbiguityReportsLines guards the ambiguous tolerant
+// path: the provide-more-context error names the same landing lines the
+// exact path reports instead of an unknown placeholder.
+func TestEditToolTolerantAmbiguityReportsLines(t *testing.T) {
+	dir := t.TempDir()
+	file := "line one： quoted here\nline two： quoted there\n"
+	path := writeEditFixture(t, dir, "demo.md", file)
+	_, err := runEdit(t, dir, map[string]any{
+		"path": path, "old_string": ": quoted", "new_string": "@ quoted",
+	})
+	if err == nil || !strings.Contains(err.Error(), "found 2 times under punctuation/whitespace-tolerant matching at lines 1, 2") {
+		t.Fatalf("err = %v, want ambiguity error naming lines 1, 2", err)
+	}
+}
+
 // TestEditToolClosestMatchBeyondOldLineCap guards that raising the file-line
 // cap restores the closest-match hint for files longer than the old 2000-line cap.
 func TestEditToolClosestMatchBeyondOldLineCap(t *testing.T) {

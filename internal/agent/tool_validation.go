@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -19,6 +20,15 @@ type toolArgsAbnormality struct {
 }
 
 func classifyToolArgsAbnormality(registry *tools.Registry, toolName string, args json.RawMessage) toolArgsAbnormality {
+	// Registered names are authoritative, including long MCP names. The bounded
+	// syntax guard only classifies names the runtime did not advertise.
+	known := false
+	if registry != nil {
+		_, known = registry.Get(toolName)
+	}
+	if !known && !toolname.IsValid(toolName) {
+		return toolArgsAbnormality{Malformed: true}
+	}
 	if llm.IsMalformedArgs(args) {
 		return toolArgsAbnormality{Malformed: true}
 	}

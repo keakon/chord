@@ -1,6 +1,11 @@
 package toolname
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+)
+
+const maxToolNameLength = 128
 
 const (
 	Read           = "read"
@@ -53,4 +58,25 @@ func Normalize(name string) string {
 		return ApplyPatch
 	}
 	return name
+}
+
+// IsValid reports whether name can be a wire-level tool identifier. Tool
+// names are provider-controlled input, so keep them bounded and deliberately
+// narrower than free text before they reach history, routing, or permissions.
+// Registered tools are validated by identity at dispatch. This bounded syntax
+// check rejects malformed unknown names without treating ordinary unknown tools
+// as a wire parsing failure. Unicode letters support MCP naming.
+func IsValid(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" || len(name) > maxToolNameLength {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) ||
+			r == '_' || r == '.' || r == ':' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
