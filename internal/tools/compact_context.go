@@ -532,7 +532,7 @@ func (t CompactContextTool) Description() string {
 	// it has already authored the whole state.
 	budget := ""
 	if limit := t.validator.ContinuationStateMaxTokens; limit > 0 {
-		budget = fmt.Sprintf("All text fields together must fit about %d estimated tokens; there are no per-field or per-item caps.\n", limit)
+		budget = fmt.Sprintf("All text fields together must fit about %d estimated tokens; individual strings have no character caps, but schema array item limits still apply.\n", limit)
 	}
 	// The todo-sync line is rendered only when todo_write is visible in the
 	// same surface, so the description never pushes a tool the model cannot
@@ -549,12 +549,12 @@ func (t CompactContextTool) Description() string {
 		"Do not call it when the task is complete and only the final response remains, or to wait for input (use the normal question or waiting mechanism). A terminal TODO state alone is not a reason to checkpoint. " +
 		"Call it alone (no sibling tool calls) at a safe stop after the current atomic operation. Under context pressure, a provisional checkpoint is expected even if the stage remains active or candidate.\n" +
 		"Only active_objective and next_step are required. Report new progress and changed decisions; earlier entries carry forward until named in retired_items. Evidence and stage fields are optional. " +
-		"Use the exact JSON types from the schema: completed, decisions, open_issues, retired_items and evidence_refs are arrays of strings; claim_evidence and claim_kinds are objects keyed by the exact claim text. Never encode an object or array as a JSON string. Keep decisions to at most 8 items.\n" +
+		"Use the schema's exact types: list fields are string arrays, claim_evidence and claim_kinds are objects, and decisions has at most 8 items; never encode an object or array as a JSON string.\n" +
 		"Leave state_files empty when the structured arguments fully carry the recovery state, and never create a file merely to fill the field; a file you do reference must exist, so write that file before submitting the checkpoint. planned_state_files name future paths and do not externalize state.\n" +
 		todoSync +
 		"Acceptance is not application: a later model-driven [Context Summary] checkpoint confirms the reset was applied. A skip is a normal policy result, not an error: continue the work or deliver the final response.\n" +
 		budget +
-		"For evidence, copy only complete ev- IDs shown in the current conversation. If no such ID is visible, omit evidence_refs and claim_evidence, and classify claims as derived, assumed or proposed instead of observed. If the arguments are rejected, fix the reported problem and retry, especially the named field; re-submitting the same values cannot succeed. Never work around the limits by splitting the checkpoint."
+		"For evidence, copy only complete visible ev- IDs; without one, omit evidence fields and classify claims as derived, assumed or proposed. If the arguments are rejected, fix the reported problem and retry; re-submitting the same values cannot succeed, and splitting the checkpoint cannot work."
 }
 
 func (CompactContextTool) Parameters() map[string]any {
