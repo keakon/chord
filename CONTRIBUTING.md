@@ -72,7 +72,7 @@ The Makefile targets mirror CI and should be preferred over copying individual c
 ```bash
 make fmt-check
 make deps-check
-make test-cover    # CI requires total coverage >= 70.0%.
+make test-cover    # CI requires total coverage >= 80.0%.
 make race
 make vet
 make staticcheck

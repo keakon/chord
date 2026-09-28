@@ -9,7 +9,7 @@ set -euo pipefail
 # Optional package args limit the run, e.g. scripts/check_ci_local.sh ./cmd/chord;
 # a focused run skips the whole-program deadcode gate that full runs add.
 
-min_coverage="${MIN_COVERAGE:-70.0}"
+min_coverage="${MIN_COVERAGE:-80.0}"
 coverage_file="${COVERAGE_FILE:-coverage.out}"
 test_count="${CHORD_TEST_COUNT:-}"
 if [[ -z "${test_count}" && ("${GITHUB_ACTIONS:-}" == "true" || "${CHORD_CI_STRICT:-}" == "1") ]]; then

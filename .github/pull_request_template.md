@@ -6,7 +6,7 @@
 ## Checklist
 
 - [ ] I ran `make ci`, or the relevant CI-equivalent targets for this change
-- [ ] I reviewed coverage with `make test-cover` or `scripts/check_ci_local.sh`, and total coverage is at least 70.0%
+- [ ] I reviewed coverage with `make test-cover` or `scripts/check_ci_local.sh`, and total coverage is at least 80.0%
 - [ ] I ran `go vet ./...`
 - [ ] I ran `staticcheck -checks 'all,-ST1000' ./...`
 - [ ] I ran dependency/docs checks when changing `go.mod`, CI scripts, or docs examples

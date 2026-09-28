@@ -88,10 +88,8 @@ coverage_docs=(CONTRIBUTING.md .github/pull_request_template.md)
 for doc in "${coverage_docs[@]}"; do
  [[ -f "$doc" ]] || fail "missing coverage doc $doc"
  grep -n "${ci_coverage}%" "$doc" >/dev/null || fail "$doc coverage threshold must match CI MIN_COVERAGE (${ci_coverage}%)"
- if grep -nE '65\.0%' "$doc" >/dev/null; then
-  fail "$doc contains stale coverage threshold 65.0%"
- fi
 done
+grep -n "MIN_COVERAGE:-${ci_coverage}}" scripts/check_ci_local.sh >/dev/null || fail "scripts/check_ci_local.sh default coverage threshold must match CI MIN_COVERAGE (${ci_coverage})"
 
 grep -n "staticcheck -checks 'all,-ST1000' ./..." .github/pull_request_template.md >/dev/null || fail ".github/pull_request_template.md staticcheck command must match CI"
 if grep -n "staticcheck -checks 'all,-ST\\*' ./..." .github/pull_request_template.md >/dev/null; then

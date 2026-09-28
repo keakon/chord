@@ -49,7 +49,7 @@ jobs:
 
       - name: Test
         env:
-          MIN_COVERAGE: "70.0"
+          MIN_COVERAGE: "80.0"
           CHORD_TEST_COUNT: "1"
         run: scripts/check_ci_local.sh
 
