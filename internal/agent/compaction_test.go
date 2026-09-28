@@ -63,6 +63,41 @@ func TestCompactionProgressReporterUsesTransportProgressAndAccumulatesAttempts(t
 	}
 }
 
+func TestCompactionProgressReporterForwardsRetryAndKeyDeltas(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	reporter := newCompactionProgressReporter(a)
+
+	retryErr := &llm.APIError{StatusCode: 429, Message: "rate limited"}
+	if reporter.update(message.StreamDelta{Type: message.StreamDeltaRetryError, Err: retryErr, Provider: "sample", Model: "test-model", MaskedKey: "k1"}) {
+		t.Fatal("a retry error is not transport progress")
+	}
+	if reporter.update(message.StreamDelta{Type: message.StreamDeltaKeyExpired, Email: "user@example.com", AccountID: "acc-1"}) {
+		t.Fatal("a key-state delta is not transport progress")
+	}
+
+	sawError := false
+	sawToast := false
+	for _, event := range drainAgentEvents(a.outputCh) {
+		switch e := event.(type) {
+		case ErrorEvent:
+			if e.Err != retryErr || e.Provider != "sample" || e.Model != "test-model" || e.Key != "k1" || !e.Silent {
+				t.Fatalf("forwarded error event = %+v, want the retry error metadata", e)
+			}
+			sawError = true
+		case ToastEvent:
+			if e.Category == "oauth_account_expired" {
+				sawToast = true
+			}
+		}
+	}
+	if !sawError {
+		t.Fatal("compaction callback dropped the retry error instead of forwarding it")
+	}
+	if !sawToast {
+		t.Fatal("compaction callback dropped the permanent invalidation overlay")
+	}
+}
+
 func TestCompactionEndpointWaitsForLLMGovernor(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.governor = newResourceGovernor(config.OrchestrationConfig{MaxActiveLLMRequests: 1})

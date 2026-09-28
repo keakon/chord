@@ -74,6 +74,8 @@ func (c *Client) Compact(
 	systemPrompt := c.systemPrompt
 	c.mu.Unlock()
 
+	drainPendingKeyReportsForPool(orderedPool, cb)
+
 	resp, runningOffset, err := c.compactWithFallback(ctx, orderedPool, systemPrompt, messages, tools, cb)
 	if err != nil {
 		return nil, err
@@ -153,7 +155,7 @@ func (c *Client) compactWithFallback(
 			}
 			lastErr = err
 			log.Debugf("compact endpoint failed provider=%v model=%v key_id=%v error=%v", target.ProviderConfig.Name(), target.ModelID, keyLogID(key), err)
-			cooldownResult := markKeyCooldown(ctx, target.ProviderConfig, key, err)
+			cooldownResult := markKeyCooldown(ctx, target.ProviderConfig, key, target.ModelID, err)
 			if ctx.Err() != nil {
 				return nil, 0, fmt.Errorf("LLM request aborted: %w", ctx.Err())
 			}

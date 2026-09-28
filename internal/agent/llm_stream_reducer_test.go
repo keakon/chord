@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -234,6 +235,36 @@ func TestSubLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 		}
 	default:
 		t.Fatal("missing retry ErrorEvent")
+	}
+}
+
+func TestSubLLMStreamReducerForwardsKeyInvalidation(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	sub := &SubAgent{
+		instanceID: "agent-1",
+		parent:     a,
+	}
+	reducer := sub.newSubLLMStreamReducer(&Turn{ID: 1}, func(string) {}, false, nil, 0)
+
+	reducer.Handle(message.StreamDelta{
+		Type:      message.StreamDeltaKeyInvalidated,
+		AccountID: "acc-1",
+		Email:     "user@example.com",
+	})
+
+	var sawToast, sawPoolChange bool
+	for len(a.outputCh) > 0 {
+		switch evt := (<-a.outputCh).(type) {
+		case ToastEvent:
+			if evt.Category == "oauth_account_invalidated" && strings.Contains(evt.Message, "user@example.com") {
+				sawToast = true
+			}
+		case KeyPoolChangedEvent:
+			sawPoolChange = true
+		}
+	}
+	if !sawToast || !sawPoolChange {
+		t.Fatalf("toast=%v pool change=%v, want the MainAgent invalidation announcement", sawToast, sawPoolChange)
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/ratelimit"
 )
@@ -1001,6 +1002,285 @@ func TestSelectKey_AllKeysCooldown(t *testing.T) {
 	// RetryAfter should be close to 10s (the earliest cooldown end).
 	if cooling.RetryAfter < 5*time.Second || cooling.RetryAfter > 15*time.Second {
 		t.Fatalf("expected RetryAfter ~10s, got %v", cooling.RetryAfter)
+	}
+}
+
+func selectCoolingError(t *testing.T, p *ProviderConfig) *AllKeysCoolingError {
+	t.Helper()
+	_, _, err := p.SelectKeyWithContext(context.Background())
+	cooling, ok := errors.AsType[*AllKeysCoolingError](err)
+	if !ok {
+		t.Fatalf("SelectKeyWithContext err = %v, want *AllKeysCoolingError", err)
+	}
+	return cooling
+}
+
+func TestSelectKey_AllKeysCoolingCarriesCooldownCause(t *testing.T) {
+	p := newTestProviderConfig([]string{"key-a", "key-b"})
+	err401 := error(&APIError{StatusCode: 401, Message: "unauthorized"})
+	err429 := error(&APIError{StatusCode: 429, Message: "rate limited", RetryAfter: 10 * time.Second})
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	if res := markKeyCooldown(context.Background(), p, "key-b", "model-2", err429); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(429) cooldownApplied = false, want the key to enter cooldown")
+	}
+
+	// key-b recovers first (10s vs 1min), so its failure explains the wait.
+	cause := selectCoolingError(t, p).cause
+	if cause == nil {
+		t.Fatal("cooling error carries no cause for cooldowns recorded from API failures")
+	}
+	if cause.Err != err429 || cause.Model != "model-2" || cause.Key != "key-b" {
+		t.Fatalf("cooling cause = (%v, %q, %q), want the 429 of key-b/model-2", cause.Err, cause.Model, cause.Key)
+	}
+}
+
+func TestClaimKeyCooldownCauseReportsEachFailureOnce(t *testing.T) {
+	p := newTestProviderConfig([]string{"key-a"})
+	err401 := error(&APIError{StatusCode: 401, Message: "unauthorized"})
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	cause := selectCoolingError(t, p).cause
+	if cause == nil {
+		t.Fatal("cooling error carries no cause for a recorded 401")
+	}
+	if !p.claimKeyCooldownCause(cause) {
+		t.Fatal("first claim of a recorded cause must succeed")
+	}
+	if p.claimKeyCooldownCause(cause) {
+		t.Fatal("the same cause must be handed to only one reporting request")
+	}
+
+	// A newer failure replaces the cause; the stale one must not be reportable.
+	err429 := error(&APIError{StatusCode: 429, Message: "rate limited", RetryAfter: 10 * time.Second})
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", err429); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(429) cooldownApplied = false, want the key to enter cooldown")
+	}
+	if p.claimKeyCooldownCause(cause) {
+		t.Fatal("a cause replaced by a newer failure must not be reported")
+	}
+	replaced := selectCoolingError(t, p).cause
+	if replaced == nil || replaced.Err != err429 {
+		t.Fatalf("cooling cause after the new failure = %v, want the 429", replaced)
+	}
+	if !p.claimKeyCooldownCause(replaced) {
+		t.Fatal("the replacement cause must be claimable")
+	}
+}
+
+func TestClaimKeyCooldownCauseConcurrentWaitersReportOnce(t *testing.T) {
+	p := newTestProviderConfig([]string{"key-a"})
+	err401 := error(&APIError{StatusCode: 401, Message: "unauthorized"})
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	cause := selectCoolingError(t, p).cause
+	const waiters = 8
+	results := make(chan bool, waiters)
+	var wg sync.WaitGroup
+	wg.Add(waiters)
+	for range waiters {
+		go func() {
+			defer wg.Done()
+			results <- p.claimKeyCooldownCause(cause)
+		}()
+	}
+	wg.Wait()
+	close(results)
+	claimed := 0
+	for ok := range results {
+		if ok {
+			claimed++
+		}
+	}
+	if claimed != 1 {
+		t.Fatalf("successful claims = %d, want exactly 1", claimed)
+	}
+}
+
+func TestMarkKeyCooldownCauseReportedBlocksClaim(t *testing.T) {
+	p := newTestProviderConfig([]string{"key-a"})
+	err401 := error(&APIError{StatusCode: 401, Message: "unauthorized"})
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	cause := selectCoolingError(t, p).cause
+	p.markKeyCooldownCauseReported(err401)
+	if p.claimKeyCooldownCause(cause) {
+		t.Fatal("a cause already shown to the user as a retry error must not be reported again")
+	}
+}
+
+func TestCooldownCauseClearedOnSuccessAndReset(t *testing.T) {
+	p := newTestProviderConfig([]string{"key-a"})
+	causeFor := func() *keyCooldownCause {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		ks := p.keyStateByKeyLocked("key-a")
+		if ks == nil {
+			return nil
+		}
+		return ks.cooldownCause
+	}
+	err401 := error(&APIError{StatusCode: 401, Message: "unauthorized"})
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	if causeFor() == nil {
+		t.Fatal("expected the 401 to be recorded as the cooldown cause")
+	}
+	p.MarkKeySuccess("key-a")
+	if got := causeFor(); got != nil {
+		t.Fatalf("cooldown cause after MarkKeySuccess = %v, want nil", got)
+	}
+
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	p.MarkCooldown("key-a", 0)
+	if got := causeFor(); got != nil {
+		t.Fatalf("cooldown cause after a zero-duration MarkCooldown reset = %v, want nil", got)
+	}
+}
+
+func TestDrainPendingKeyReportsReplaysCoolingOnce(t *testing.T) {
+	p := newTestProviderConfig([]string{"key-a"})
+	err429 := error(&APIError{StatusCode: 429, Message: "rate limited", RetryAfter: 10 * time.Second})
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", err429); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(429) cooldownApplied = false, want the key to enter cooldown")
+	}
+
+	// A caller without a callback must not consume the report.
+	p.drainPendingKeyReports(nil)
+
+	var drained []message.StreamDelta
+	p.drainPendingKeyReports(func(delta message.StreamDelta) { drained = append(drained, delta) })
+	if len(drained) != 1 {
+		t.Fatalf("drained deltas = %d, want exactly 1 retry error", len(drained))
+	}
+	if drained[0].Type != message.StreamDeltaRetryError || drained[0].Err != err429 {
+		t.Fatalf("drained delta = (%q, %v), want the recorded 429 as a retry error", drained[0].Type, drained[0].Err)
+	}
+	if drained[0].Provider != "test" || drained[0].Model != "model-1" || drained[0].MaskedKey == "" {
+		t.Fatalf("retry error route = (%q, %q, key=%q), want the provider, model and masked key", drained[0].Provider, drained[0].Model, drained[0].MaskedKey)
+	}
+
+	drained = nil
+	p.drainPendingKeyReports(func(delta message.StreamDelta) { drained = append(drained, delta) })
+	if len(drained) != 0 {
+		t.Fatalf("second drain emitted %d deltas, want none: each cause is reported once", len(drained))
+	}
+}
+
+func TestDrainPendingKeyReportsEmitsInvalidationOverlayOnce(t *testing.T) {
+	p := newTestProviderConfig([]string{"oauth-key"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{AccountID: "acc-1", Email: "user@example.com", Expires: time.Now().Add(time.Hour).UnixMilli()}
+	p.mu.Unlock()
+	err401 := error(&APIError{StatusCode: 401, Message: "Your account has been disabled."})
+	if res := markKeyCooldown(context.Background(), p, "oauth-key", "model-1", err401); !res.cooldownApplied || !res.deactivated {
+		t.Fatalf("markKeyCooldown(401) = %+v, want a permanent deactivation", res)
+	}
+
+	var drained []message.StreamDelta
+	p.drainPendingKeyReports(func(delta message.StreamDelta) { drained = append(drained, delta) })
+	if len(drained) != 1 {
+		t.Fatalf("drained deltas = %d, want exactly 1 key overlay", len(drained))
+	}
+	if drained[0].Type != message.StreamDeltaKeyDeactivated {
+		t.Fatalf("drained delta type = %q, want %q", drained[0].Type, message.StreamDeltaKeyDeactivated)
+	}
+	if drained[0].AccountID != "acc-1" || drained[0].Email != "user@example.com" {
+		t.Fatalf("overlay identity = (%q, %q), want the deactivated account", drained[0].AccountID, drained[0].Email)
+	}
+
+	drained = nil
+	p.drainPendingKeyReports(func(delta message.StreamDelta) { drained = append(drained, delta) })
+	if len(drained) != 0 {
+		t.Fatalf("second drain emitted %d deltas, want none", len(drained))
+	}
+}
+
+func TestDrainPendingKeyReportsSkipsFailureAlreadyReported(t *testing.T) {
+	p := newTestProviderConfig([]string{"key-a"})
+	err401 := error(&APIError{StatusCode: 401, Message: "unauthorized"})
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	p.markKeyCooldownCauseReported(err401)
+
+	var drained []message.StreamDelta
+	p.drainPendingKeyReports(func(delta message.StreamDelta) { drained = append(drained, delta) })
+	if len(drained) != 0 {
+		t.Fatalf("drained deltas = %d, want none for a failure already shown as a retry error", len(drained))
+	}
+}
+
+func TestDrainPendingKeyReportsSkipsOverlayAlreadyEmitted(t *testing.T) {
+	p := newTestProviderConfig([]string{"oauth-key"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{AccountID: "acc-1", Email: "user@example.com", Expires: time.Now().Add(time.Hour).UnixMilli()}
+	p.mu.Unlock()
+	err401 := error(&APIError{StatusCode: 401, Message: "Your account has been disabled."})
+	if res := markKeyCooldown(context.Background(), p, "oauth-key", "model-1", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	// The failing request had its own callback and already showed the overlay.
+	p.markKeyCooldownCauseDeltasEmitted(err401)
+
+	var drained []message.StreamDelta
+	p.drainPendingKeyReports(func(delta message.StreamDelta) { drained = append(drained, delta) })
+	if len(drained) != 0 {
+		t.Fatalf("drained deltas = %d, want none for an overlay already shown", len(drained))
+	}
+}
+
+func TestMarkKeyCooldownCauseReportedMatchesTheRecordedFailure(t *testing.T) {
+	p := newTestProviderConfig([]string{"key-a"})
+	errFirst := error(&APIError{StatusCode: 401, Message: "first failure"})
+	errNewer := error(&APIError{StatusCode: 429, Message: "newer failure", RetryAfter: 10 * time.Second})
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", errFirst); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	// A newer failure replaces the cause on the key while the first request is
+	// still unwinding.
+	if res := markKeyCooldown(context.Background(), p, "key-a", "model-1", errNewer); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(429) cooldownApplied = false, want the key to enter cooldown")
+	}
+	// The first request reports its own failure late; only that failure may be
+	// marked, so the newer cause still reaches the user.
+	p.markKeyCooldownCauseReported(errFirst)
+
+	var drained []message.StreamDelta
+	p.drainPendingKeyReports(func(delta message.StreamDelta) { drained = append(drained, delta) })
+	if len(drained) != 1 || drained[0].Type != message.StreamDeltaRetryError || drained[0].Err != errNewer {
+		t.Fatalf("drained deltas = %v, want only the newer failure as a retry error", drained)
+	}
+}
+
+func TestMarkKeyCooldownCauseDeltasEmittedMatchesTheRecordedFailure(t *testing.T) {
+	p := newTestProviderConfig([]string{"oauth-key"})
+	p.mu.Lock()
+	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{AccountID: "acc-1", Email: "user@example.com", Expires: time.Now().Add(time.Hour).UnixMilli()}
+	p.mu.Unlock()
+	errOverlay := error(&APIError{StatusCode: 401, Message: "Your account has been disabled."})
+	if res := markKeyCooldown(context.Background(), p, "oauth-key", "model-1", errOverlay); !res.cooldownApplied || !res.deactivated {
+		t.Fatalf("markKeyCooldown(401) = %+v, want a permanent deactivation", res)
+	}
+	// The overlay of the first failure reached the user through the request's
+	// own callback; a newer failure meanwhile replaced the cause on the key.
+	errNewer := error(&APIError{StatusCode: 429, Message: "rate limited", RetryAfter: 10 * time.Second})
+	if res := markKeyCooldown(context.Background(), p, "oauth-key", "model-2", errNewer); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(429) cooldownApplied = false, want the key to enter cooldown")
+	}
+	p.markKeyCooldownCauseDeltasEmitted(errOverlay)
+
+	var drained []message.StreamDelta
+	p.drainPendingKeyReports(func(delta message.StreamDelta) { drained = append(drained, delta) })
+	if len(drained) != 1 || drained[0].Type != message.StreamDeltaRetryError || drained[0].Err != errNewer {
+		t.Fatalf("drained deltas = %v, want only the newer failure as a retry error", drained)
 	}
 }
 

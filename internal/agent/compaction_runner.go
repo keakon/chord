@@ -991,6 +991,23 @@ func (p *compactionProgressReporter) Callback() llm.StreamCallback {
 }
 
 func (p *compactionProgressReporter) update(delta message.StreamDelta) bool {
+	// Compaction is a background request, but its callback is the only channel
+	// it has: forwarding key-state and retry deltas keeps a failure it consumed
+	// (a cooling cause or a permanently invalidated credential) visible instead
+	// of dropping it.
+	switch delta.Type {
+	case message.StreamDeltaRetryError:
+		if p.agent != nil {
+			p.agent.recordRetryError(delta.Err, delta.Provider, delta.Model, delta.MaskedKey, delta.AccountID, delta.Email)
+		}
+		return false
+	case message.StreamDeltaKeyDeactivated, message.StreamDeltaKeyInvalidated, message.StreamDeltaKeyExpired:
+		if p.agent != nil {
+			p.agent.emitKeyStateChange(delta.Type, delta.Email, delta.AccountID)
+		}
+		return false
+	}
+
 	if delta.Status != nil && strings.HasPrefix(delta.Status.Type, message.StatusDeltaRetrying) {
 		p.startAttempt()
 		return false

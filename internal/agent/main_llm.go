@@ -487,16 +487,13 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		a.emitToTUI(KeyPoolChangedEvent{})
 	}
 	streamReducer.onKeyDeactivated = func(email, accountID string) {
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Account deactivated: %s", streamKeyIdentity(email, accountID)), Level: "error", Category: "oauth_account_deactivated"})
-		a.emitToTUI(KeyPoolChangedEvent{})
+		a.emitKeyStateChange(message.StreamDeltaKeyDeactivated, email, accountID)
 	}
 	streamReducer.onKeyInvalidated = func(email, accountID string) {
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Account invalidated: %s. Please sign in again.", streamKeyIdentity(email, accountID)), Level: "error", Category: "oauth_account_invalidated"})
-		a.emitToTUI(KeyPoolChangedEvent{})
+		a.emitKeyStateChange(message.StreamDeltaKeyInvalidated, email, accountID)
 	}
 	streamReducer.onKeyExpired = func(email, accountID string) {
-		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("OAuth refresh token invalid: %s. Please sign in again.", streamKeyIdentity(email, accountID)), Level: "error", Category: "oauth_account_expired"})
-		a.emitToTUI(KeyPoolChangedEvent{})
+		a.emitKeyStateChange(message.StreamDeltaKeyExpired, email, accountID)
 	}
 	streamReducer.onKeyConfirmed = func(status *message.StatusDelta) {
 		// First visible token received on the current key: update key availability now.
@@ -516,21 +513,45 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		emitConfirmedSwitchToast(confirmedRef)
 	}
 	streamReducer.onRetryError = func(err error, provider, model, maskedKey, accountID, email string) {
-		a.emitToTUI(ErrorEvent{
-			Err:       err,
-			AgentID:   a.instanceID,
-			Silent:    true,
-			Provider:  provider,
-			Model:     model,
-			Key:       maskedKey,
-			AccountID: accountID,
-			Email:     email,
-		})
+		a.recordRetryError(err, provider, model, maskedKey, accountID, email)
 	}
 	streamReducer.onError = func(text string) {
 		log.Warnf("LLM stream error delta text=%v instance=%v", text, a.instanceID)
 	}
 	return streamReducer
+}
+
+// recordRetryError surfaces an intermediate API failure in the error panel.
+// Compaction reuses it so a retry error its callback consumes is not silently
+// dropped.
+func (a *MainAgent) recordRetryError(err error, provider, model, maskedKey, accountID, email string) {
+	a.emitToTUI(ErrorEvent{
+		Err:       err,
+		AgentID:   a.instanceID,
+		Silent:    true,
+		Provider:  provider,
+		Model:     model,
+		Key:       maskedKey,
+		AccountID: accountID,
+		Email:     email,
+	})
+}
+
+// emitKeyStateChange announces a credential the provider permanently
+// invalidated. kind is one of the message.StreamDeltaKey* invalidation deltas;
+// compaction reuses it so an invalidation it noticed still reaches the user.
+func (a *MainAgent) emitKeyStateChange(kind, email, accountID string) {
+	switch kind {
+	case message.StreamDeltaKeyDeactivated:
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Account deactivated: %s", streamKeyIdentity(email, accountID)), Level: "error", Category: "oauth_account_deactivated"})
+	case message.StreamDeltaKeyInvalidated:
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Account invalidated: %s. Please sign in again.", streamKeyIdentity(email, accountID)), Level: "error", Category: "oauth_account_invalidated"})
+	case message.StreamDeltaKeyExpired:
+		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("OAuth refresh token invalid: %s. Please sign in again.", streamKeyIdentity(email, accountID)), Level: "error", Category: "oauth_account_expired"})
+	default:
+		return
+	}
+	a.emitToTUI(KeyPoolChangedEvent{})
 }
 
 // callLLMForRequest runs one main-agent LLM request. requestSeq is the streaming

@@ -230,6 +230,10 @@ func (e *NoUsableKeysError) Error() string {
 // AllKeysCoolingError indicates all API keys for a provider are in cooldown.
 type AllKeysCoolingError struct {
 	RetryAfter time.Duration
+	// cause is the API failure behind the earliest key recovery in the pool,
+	// so a cooling wait can surface its real cause in the error panel. It is
+	// nil when that key's wait has no recorded failure behind it.
+	cause *keyCooldownCause
 }
 
 func (e *AllKeysCoolingError) Error() string {

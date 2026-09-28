@@ -246,12 +246,25 @@ func applyRateLimitCooldown(provider *ProviderConfig, key string, apiErr *APIErr
 
 // markKeyCooldown checks the error and puts the key into cooldown if the
 // error indicates a per-key problem (rate limit, auth failure, permission
-// denied). Returns cooldownApplied when MarkCooldown ran with d>0, and
-// oauthRefreshed when a 401/403 was handled by a successful token refresh.
+// denied). It also records the failure on the key state as the current
+// cooldown cause, so a later cooling wait or reporting request can surface a
+// failure that this caller only logged (no stream callback). Returns
+// cooldownApplied when MarkCooldown ran with d>0, and oauthRefreshed when a
+// 401/403 was handled by a successful token refresh.
 // For OAuth keys that receive a 401/403, it first attempts to refresh the
 // token; if refresh succeeds no cooldown is applied and refreshedKey contains
 // the new access token now stored in the credential slot.
-func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, err error) markKeyCooldownResult {
+func markKeyCooldown(ctx context.Context, provider *ProviderConfig, key, model string, err error) markKeyCooldownResult {
+	result := applyKeyCooldown(ctx, provider, key, err)
+	if result.cooldownApplied {
+		provider.noteKeyCooldownCause(key, model, err, result)
+	}
+	return result
+}
+
+// applyKeyCooldown classifies the API error and applies the matching key-state
+// mutation. Cooldowns it applies are reported by markKeyCooldown.
+func applyKeyCooldown(ctx context.Context, provider *ProviderConfig, key string, err error) markKeyCooldownResult {
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok {
 		return markKeyCooldownResult{}

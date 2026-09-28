@@ -1224,6 +1224,18 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		}
 	}
 	streamReducer.onKeyConfirmed = noteConfirmedRunningModelRef
+	// The request's callback also drains credential invalidations queued by
+	// background calls, so forward them to the MainAgent's announcement path
+	// instead of dropping them.
+	streamReducer.onKeyDeactivated = func(email, accountID string) {
+		s.parent.emitKeyStateChange(message.StreamDeltaKeyDeactivated, email, accountID)
+	}
+	streamReducer.onKeyInvalidated = func(email, accountID string) {
+		s.parent.emitKeyStateChange(message.StreamDeltaKeyInvalidated, email, accountID)
+	}
+	streamReducer.onKeyExpired = func(email, accountID string) {
+		s.parent.emitKeyStateChange(message.StreamDeltaKeyExpired, email, accountID)
+	}
 	streamReducer.onRetryError = func(err error, provider, model, maskedKey, accountID, email string) {
 		s.parent.emitToTUI(ErrorEvent{
 			Err:       err,

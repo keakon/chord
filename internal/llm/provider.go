@@ -127,6 +127,29 @@ type Provider interface {
 	) (*message.Response, error)
 }
 
+// keyCooldownCause records the API failure that put a key into cooldown. It
+// lets a cooling wait explain itself in the error panel even when the failure
+// came from a caller without a TUI stream callback (background extraction or
+// thinking translation): the cause lives on the shared key state and is claimed
+// exactly once by whichever request has a callback to report it. The provider
+// also queues it (pendingCauses), so the next request with a callback reports
+// it even when no request ever waits the cooldown out.
+type keyCooldownCause struct {
+	Err   error
+	Model string
+	Key   string // raw credential; mask before display
+	// result is the key-state mutation this failure caused; a permanently
+	// invalidated credential is replayed as a key overlay, not a retry error.
+	result markKeyCooldownResult
+	// reported, deltasEmitted and provider are guarded by provider.mu.
+	// claimKeyCooldownCause flips reported to hand the cause to exactly one
+	// reporting request; deltasEmitted records that the key overlay of a
+	// permanent invalidation already reached the user.
+	reported      bool
+	deltasEmitted bool
+	provider      *ProviderConfig
+}
+
 // KeyState tracks the state of a single API key for cooldown and load balancing.
 type KeyState struct {
 	Key           string
@@ -148,6 +171,7 @@ type KeyState struct {
 	Invalid               bool                            // permanently unusable (OAuth account deactivated or refresh token expired)
 	EverSelected          bool                            // true once this slot has been selected in the current process
 	SoftCooldownUntil     time.Time                       // persisted Codex soft hint: latest known future reset across windows
+	cooldownCause         *keyCooldownCause               // API failure behind the current cooldown; nil when the wait did not come from a recorded failure
 }
 
 // OAuthKeySetup mirrors auth.yaml OAuth credential state needed to initialize a key slot.
@@ -213,8 +237,11 @@ type ProviderConfig struct {
 	// endpoints). Those providers have no KeyState to carry the wait, so a
 	// key-scoped cooldown would silently be a no-op and leave the caller free
 	// to restart back-to-back.
-	keylessCooldownEnd         time.Time
-	keylessCooldownCount       int
+	keylessCooldownEnd   time.Time
+	keylessCooldownCount int
+	// pendingCauses queues recorded cooldown causes until a request with a
+	// stream callback drains them (see drainPendingKeyReports).
+	pendingCauses              []*keyCooldownCause
 	limiter                    *rate.Limiter // optional rate limiter (nil = no rate limiting)
 	models                     map[string]config.ModelConfig
 	compat                     *config.ProviderCompatConfig // provider-level compat defaults

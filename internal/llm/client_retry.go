@@ -201,7 +201,7 @@ const upstreamStreamFailureRetryRounds = 2
 // preservedInterruptionCooldownMax saturates that growth well below
 // maxProviderRetryDelay on purpose. The cooldown exists to pace one caller's
 // restarts, but it sits on a ProviderConfig shared with compaction, sub-agents
-// and title generation; letting it reach a minute would starve exactly the
+// and thinking translation; letting it reach a minute would starve exactly the
 // compaction that a long continuation loop needs.
 // These are vars so tests can shrink the seeded cooldown instead of waiting it
 // out; production keeps the values described above.
@@ -507,18 +507,55 @@ func emitRetryError(cb StreamCallback, err error, provider, model, maskedKey, ac
 	})
 }
 
-func emitRetryErrorForKey(cb StreamCallback, err error, provider *ProviderConfig, model, key string) {
-	providerName := ""
-	accountID := ""
-	email := ""
-	if provider != nil {
-		providerName = provider.Name()
-		if info := provider.oauthInfoForKey(key); info != nil {
-			accountID = info.AccountID
-			email = info.Email
-		}
+// retryErrorFields resolves the display identity a retry error about key
+// carries: the provider name plus the OAuth account metadata when available.
+func retryErrorFields(provider *ProviderConfig, key string) (providerName, accountID, email string) {
+	if provider == nil {
+		return "", "", ""
 	}
+	providerName = provider.Name()
+	if info := provider.oauthInfoForKey(key); info != nil {
+		accountID = info.AccountID
+		email = info.Email
+	}
+	return providerName, accountID, email
+}
+
+func emitRetryErrorForKey(cb StreamCallback, err error, provider *ProviderConfig, model, key string) {
+	providerName, accountID, email := retryErrorFields(provider, key)
 	emitRetryError(cb, err, providerName, model, maskedKey(key), accountID, email)
+	if cb != nil && provider != nil && err != nil {
+		// The failure reached the user as a retry error, so a later cooling
+		// wait must not report this same cause a second time.
+		provider.markKeyCooldownCauseReported(err)
+	}
+}
+
+// markTerminalCooldownCauseReported covers a request that gives up right after
+// recording a cooldown cause: the failure reaches the user as the request's
+// own error, so a later request must not replay it from the pending queue.
+// Without a callback the caller is a background request whose error nobody
+// sees, and the queued cause stays for the next request that can show it.
+func markTerminalCooldownCauseReported(cb StreamCallback, provider *ProviderConfig, err error) {
+	if cb != nil && provider != nil {
+		provider.markKeyCooldownCauseReported(err)
+	}
+}
+
+// reportCoolingCause surfaces the API failure behind a cooling wait the caller
+// is about to show. The failure may have come from a caller without a stream
+// callback (background extraction, compaction or thinking translation), so the
+// cause is kept on the shared key state and claimed here;
+// claimKeyCooldownCause makes sure concurrent waiters report each recorded
+// failure only once.
+func reportCoolingCause(cb StreamCallback, cause *keyCooldownCause) {
+	if cb == nil || cause == nil || cause.provider == nil {
+		return
+	}
+	if !cause.provider.claimKeyCooldownCause(cause) {
+		return
+	}
+	emitRetryErrorForKey(cb, cause.Err, cause.provider, cause.Model, cause.Key)
 }
 
 func emitKeyCooldownDeltas(cb StreamCallback, result markKeyCooldownResult) {
@@ -807,6 +844,7 @@ func (c *Client) completeStreamTarget(
 							Deadline: time.Now().Add(wait.recovery),
 						})
 					}
+					reportCoolingCause(cb, cooling.cause)
 				}
 			} else {
 				result.setLastErr(t.provider, err)
@@ -996,13 +1034,19 @@ func (c *Client) completeStreamTarget(
 		}
 		if !visibleStarted {
 			fallbackEligible := shouldFallback(err)
-			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, result.lastErr)
+			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, t.modelID, result.lastErr)
 			if err := abortIfCancelled(); err != nil {
 				return result, lastInputTokens, err
 			}
 			emitKeyCooldownDeltas(cb, cooldownResult)
+			if cb != nil {
+				// The overlay reached the user through this callback; a later
+				// request must not replay it from the pending queue.
+				t.provider.markKeyCooldownCauseDeltasEmitted(result.lastErr)
+			}
 			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
 				log.Errorf("terminal API error, giving up provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
+				markTerminalCooldownCauseReported(cb, t.provider, err)
 				return result, lastInputTokens, err
 			}
 			cooldownApplied := cooldownResult.cooldownApplied
@@ -1030,6 +1074,7 @@ func (c *Client) completeStreamTarget(
 							modelDone = true
 							break
 						}
+						markTerminalCooldownCauseReported(cb, t.provider, err)
 						return result, lastInputTokens, err
 					}
 					// For compatible gateways, other 400s are retriable (may be overload).
@@ -1076,13 +1121,19 @@ func (c *Client) completeStreamTarget(
 		}
 
 		if isAuthAPIStatusError(err) || isRateLimitAPIStatusError(err) {
-			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, result.lastErr)
+			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, t.modelID, result.lastErr)
 			if err := abortIfCancelled(); err != nil {
 				return result, lastInputTokens, err
 			}
 			emitKeyCooldownDeltas(cb, cooldownResult)
+			if cb != nil {
+				// The overlay reached the user through this callback; a later
+				// request must not replay it from the pending queue.
+				t.provider.markKeyCooldownCauseDeltasEmitted(result.lastErr)
+			}
 			if c.isTerminalAPIStatusError(err) && !cooldownResult.oauthRefreshed {
 				log.Errorf("terminal API error after visible output, giving up provider=%v model=%v key_id=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), err)
+				markTerminalCooldownCauseReported(cb, t.provider, err)
 				return result, lastInputTokens, err
 			}
 			keyForRotationCooldown := apiKey
@@ -1473,6 +1524,9 @@ func (c *Client) completeStreamWithRetry(
 					// The countdown must promise when a request can really go
 					// out, not when this round wakes up to re-probe the pool.
 					emitStreamStatusDelta(cb, message.StatusDelta{Type: message.StatusDeltaCooling, Detail: recovery.Round(time.Second).String(), ModelRef: startDisplayRef, Deadline: time.Now().Add(recovery)})
+					if cooling, ok := errors.AsType[*AllKeysCoolingError](lastErr); ok {
+						reportCoolingCause(cb, cooling.cause)
+					}
 				}
 			} else {
 				log.Infof("retrying LLM request round attempt=%v retry_count=%v delay=%v error=%v", round+1, retryCount, delay, lastErr)

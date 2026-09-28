@@ -1324,7 +1324,7 @@ func TestClient_RepeatedInterruptionsGrowTheTransportCooldown(t *testing.T) {
 	t.Run("interrupted_response", func(t *testing.T) {
 		grown := run(t, scriptedCall{resp: &message.Response{Content: "partial ", StopReason: "interrupted"}})
 		// The throttle saturates far below maxProviderRetryDelay: the same
-		// ProviderConfig serves compaction, sub-agents and title generation,
+		// ProviderConfig serves compaction, sub-agents and thinking translation,
 		// which must not be starved while one reply keeps truncating.
 		if grown > preservedInterruptionCooldownMax+time.Second {
 			t.Fatalf("cooldown = %v, want it capped near %v", grown, preservedInterruptionCooldownMax)
@@ -1649,7 +1649,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 
 	t.Run("403_global_quota_uses_retry_after", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeResponses}, []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{
+		res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{
 			StatusCode: 403, Code: "global_fixed_window_quota_exhausted",
 			Message: "provider quota exhausted", RetryAfter: 2 * time.Minute,
 		})
@@ -1668,7 +1668,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 	t.Run("unconfigured_429_without_retry_after_uses_default_exponential", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"k1"})
 		for attempt, want := range []time.Duration{time.Second, 2 * time.Second} {
-			res := markKeyCooldown(ctx, p, "k1", err429)
+			res := markKeyCooldown(ctx, p, "k1", "test-model", err429)
 			if !res.cooldownApplied {
 				t.Fatal("expected cooldownApplied=true for 429")
 			}
@@ -1692,7 +1692,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			RetryAfterMaxS: new(config.OfficialRetryAfterMaxS),
 		}, []string{"k1"})
 		for attempt := range 2 {
-			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+			res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
 			if !res.cooldownApplied {
 				t.Fatal("expected cooldownApplied=true for Retry-After 429")
 			}
@@ -1713,7 +1713,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 	t.Run("third_party_429_caps_retry_after_at_one_minute", func(t *testing.T) {
 		p := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1"})
 		for attempt := range 2 {
-			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
+			res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 2 * time.Minute})
 			if !res.cooldownApplied {
 				t.Fatal("expected cooldownApplied=true for third-party 429")
 			}
@@ -1736,7 +1736,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			Type:         config.ProviderTypeChatCompletions,
 			RetryDelayMS: new(2500),
 		}, []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", err429)
+		res := markKeyCooldown(ctx, p, "k1", "test-model", err429)
 		if !res.cooldownApplied {
 			t.Fatal("expected explicit retry_delay_ms cooldown for 429")
 		}
@@ -1754,7 +1754,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			Type:         config.ProviderTypeChatCompletions,
 			RetryDelayMS: new(0),
 		}, []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", err429)
+		res := markKeyCooldown(ctx, p, "k1", "test-model", err429)
 		if !res.cooldownApplied {
 			t.Fatal("expected explicit zero retry_delay_ms cooldown for 429")
 		}
@@ -1774,7 +1774,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			RetryDelayMS: new(2000),
 		}, []string{"k1"})
 		for attempt, want := range []time.Duration{2 * time.Second, 4 * time.Second} {
-			res := markKeyCooldown(ctx, p, "k1", err429)
+			res := markKeyCooldown(ctx, p, "k1", "test-model", err429)
 			if !res.cooldownApplied {
 				t.Fatal("expected configured exponential cooldown for 429")
 			}
@@ -1795,7 +1795,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			RetryDelayMS: new(3000),
 		}, []string{"k1"})
 		for attempt := range 2 {
-			res := markKeyCooldown(ctx, p, "k1", err429)
+			res := markKeyCooldown(ctx, p, "k1", "test-model", err429)
 			if !res.cooldownApplied {
 				t.Fatal("expected configured fixed cooldown for 429")
 			}
@@ -1818,7 +1818,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			Type:         config.ProviderTypeChatCompletions,
 			RetryBackoff: config.RetryBackoffNone,
 		}, []string{"k1", "k2"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 30 * time.Second})
+		res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 30 * time.Second})
 		if !res.cooldownApplied {
 			t.Fatal("server-directed Retry-After must apply even under retry_backoff=none")
 		}
@@ -1842,7 +1842,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			Type:         config.ProviderTypeChatCompletions,
 			RetryBackoff: config.RetryBackoffNone,
 		}, []string{"k1", "k2"})
-		res := markKeyCooldown(ctx, p, "k1", err429)
+		res := markKeyCooldown(ctx, p, "k1", "test-model", err429)
 		if res.cooldownApplied {
 			t.Fatal("expected retry_backoff=none to skip timed 429 cooldown")
 		}
@@ -1872,7 +1872,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		beforeCount := p.keyStates[0].CooldownCount
 		p.mu.Unlock()
 
-		res := markKeyCooldown(ctx, p, "k1", err429)
+		res := markKeyCooldown(ctx, p, "k1", "test-model", err429)
 		if res.cooldownApplied {
 			t.Fatal("expected retry_backoff=none not to add a timed 429 cooldown")
 		}
@@ -1896,7 +1896,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		before := p.keyStates[0].CooldownEnd
 		p.mu.Unlock()
 
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: time.Millisecond})
+		res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: time.Millisecond})
 		if !res.cooldownApplied {
 			t.Fatal("expected fixed 429 pacing to be applied")
 		}
@@ -1910,7 +1910,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 
 	t.Run("402_uses_same_cooldown_path", func(t *testing.T) {
 		p := NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 402, Message: "quota exhausted; retry later"})
+		res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 402, Message: "quota exhausted; retry later"})
 		if !res.cooldownApplied {
 			t.Fatal("expected cooldownApplied=true for 402 quota exhaustion")
 		}
@@ -1925,7 +1925,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 
 	t.Run("compatible_400_without_retry_after_uses_short_probe_cooldown", func(t *testing.T) {
 		p := testCompatibleResponsesProviderConfigWithKeys("gateway", "gpt-test", []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 400, Message: "Concurrency limit exceeded for user, please retry later"})
+		res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 400, Message: "Concurrency limit exceeded for user, please retry later"})
 		if !res.cooldownApplied {
 			t.Fatal("expected cooldownApplied=true for retriable compatible 400")
 		}
@@ -1944,7 +1944,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1", Email: "user@example.com"}
 		p.mu.Unlock()
 
-		res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 402, Code: "deactivated_workspace", Message: `{"detail":{"code":"deactivated_workspace"}}`})
+		res := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 402, Code: "deactivated_workspace", Message: `{"detail":{"code":"deactivated_workspace"}}`})
 		if !res.cooldownApplied {
 			t.Fatal("expected cooldownApplied=true")
 		}
@@ -1963,7 +1963,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 		p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli(), AccountID: "acc-1"}
 		p.mu.Unlock()
 
-		res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 402, Message: `{"detail":{"code":"deactivated_workspace"}}`})
+		res := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 402, Message: `{"detail":{"code":"deactivated_workspace"}}`})
 		if !res.cooldownApplied {
 			t.Fatal("expected cooldownApplied=true")
 		}
@@ -1982,7 +1982,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			RetryBackoff: config.RetryBackoffFixed,
 			RetryDelayMS: new(5000),
 		}, []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 30 * time.Second})
+		res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 30 * time.Second})
 		if !res.cooldownApplied {
 			t.Fatal("expected Retry-After cooldown despite explicit pacing")
 		}
@@ -2000,7 +2000,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			RetryAfterMaxS: new(config.OfficialRetryAfterMaxS),
 		}, []string{"k1"})
 		for attempt := range 2 {
-			res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 402, Message: "quota", RetryAfter: 2 * time.Hour})
+			res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 402, Message: "quota", RetryAfter: 2 * time.Hour})
 			if !res.cooldownApplied {
 				t.Fatal("expected cooldownApplied=true for 402 with Retry-After")
 			}
@@ -2019,7 +2019,7 @@ func TestMarkKeyCooldownAPIStatusPolicies(t *testing.T) {
 			Type:           config.ProviderTypeChatCompletions,
 			RetryAfterMaxS: new(120),
 		}, []string{"k1"})
-		res := markKeyCooldown(ctx, p, "k1", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 5 * time.Minute})
+		res := markKeyCooldown(ctx, p, "k1", "test-model", &APIError{StatusCode: 429, Message: "rl", RetryAfter: 5 * time.Minute})
 		if !res.cooldownApplied {
 			t.Fatal("expected cooldownApplied=true for capped 429")
 		}
@@ -2049,7 +2049,7 @@ func TestMarkKeyCooldown429CodexOAuthQuotaExhaustedUsesResetWindow(t *testing.T)
 		Primary:   &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetPrimary},
 		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetSecondary},
 	})
-	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 429, Message: "quota exhausted"})
+	res := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 429, Message: "quota exhausted"})
 	if !res.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true for quota exhaustion")
 	}
@@ -2077,7 +2077,7 @@ func TestMarkKeyCooldown429CodexOAuthRetryHintOutranksExplicitPacingWithoutExhau
 	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
 	p.mu.Unlock()
 
-	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{
+	res := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{
 		StatusCode: 429,
 		Code:       "usage_limit_reached",
 		Message:    "usage limit reached",
@@ -2195,7 +2195,7 @@ func TestMarkKeyCooldown401OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, config.ExtractAPIKeys(creds))
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
 
-	result := markKeyCooldown(ctx, p, oldAccess, &APIError{StatusCode: 401, Message: "unauthorized"})
+	result := markKeyCooldown(ctx, p, oldAccess, "test-model", &APIError{StatusCode: 401, Message: "unauthorized"})
 	if !result.oauthRefreshed {
 		t.Fatal("expected oauthRefreshed=true")
 	}
@@ -2237,7 +2237,7 @@ func TestMarkKeyCooldown403OAuthRefreshReturnsRefreshedKey(t *testing.T) {
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex}, config.ExtractAPIKeys(creds))
 	p.SetOAuthRefresher(refreshServer.URL, "client-id", "", "", &auth, &authMu, map[string]OAuthKeySetup{creds[0].OAuth.Access: {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: creds[0].OAuth.Expires}}, "")
 
-	result := markKeyCooldown(ctx, p, oldAccess, &APIError{StatusCode: 403, Message: "forbidden"})
+	result := markKeyCooldown(ctx, p, oldAccess, "test-model", &APIError{StatusCode: 403, Message: "forbidden"})
 	if !result.oauthRefreshed {
 		t.Fatal("expected oauthRefreshed=true")
 	}
@@ -2263,7 +2263,7 @@ func TestMarkKeyCooldown401OAuthNoRefresherPersistsDeactivatedKey(t *testing.T) 
 		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: auth["openai"][0].OAuth.Expires},
 	}, "")
 
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Code: "account_deactivated", Message: "account deactivated"})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 401, Code: "account_deactivated", Message: "account deactivated"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2287,7 +2287,7 @@ func TestMarkKeyCooldown401OAuthNoRefresherDeactivatesKey(t *testing.T) {
 	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
 	p.mu.Unlock()
 	// no OAuthRefresher set → TryRefreshOAuthKey returns false → MarkDeactivated
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Code: "account_deactivated", Message: "account deactivated"})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 401, Code: "account_deactivated", Message: "account deactivated"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2310,7 +2310,7 @@ func TestMarkKeyCooldownOAuthMessageOnlyDeactivatesKey(t *testing.T) {
 			}
 			p.mu.Unlock()
 
-			result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: status, Message: "Your account has been disabled."})
+			result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: status, Message: "Your account has been disabled."})
 			if !result.cooldownApplied {
 				t.Fatal("expected cooldownApplied=true")
 			}
@@ -2348,7 +2348,7 @@ func TestMarkKeyCooldown401OAuthInvalidatedSkipsRefreshAndDeactivatesKey(t *test
 		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Code: "account_invalidated", Message: "account invalidated"})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 401, Code: "account_invalidated", Message: "account invalidated"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2391,7 +2391,7 @@ func TestMarkKeyCooldownOAuthMessageOnlyInvalidatedSkipsRefresh(t *testing.T) {
 				"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Email: "user@example.com", Expires: expires},
 			}, "")
 
-			result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: status, Message: "Your authentication token has been revoked."})
+			result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: status, Message: "Your authentication token has been revoked."})
 			if !result.cooldownApplied {
 				t.Fatal("expected cooldownApplied=true")
 			}
@@ -2434,7 +2434,7 @@ func TestMarkKeyCooldown401OAuthEmptyRefreshTokenMarksExpiredWithoutHTTP(t *test
 		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Message: "unauthorized"})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 401, Message: "unauthorized"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2473,7 +2473,7 @@ func TestMarkKeyCooldown401OAuthTokenInvalidatedCodeSkipsRefreshAndInvalidatesKe
 		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Code: "token_invalidated", Message: "Your authentication token has been invalidated. Please try signing in again."})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 401, Code: "token_invalidated", Message: "Your authentication token has been invalidated. Please try signing in again."})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2509,7 +2509,7 @@ func TestMarkKeyCooldown401OAuthMalformedAuthTokenDetailInvalidatesKey(t *testin
 	}, "")
 
 	apiErr := parseOpenAIHTTPErrorFromBytes(http.StatusUnauthorized, nil, []byte(`{"detail":"Could not parse your authentication token. Please try signing in again."}`))
-	result := markKeyCooldown(ctx, p, "oauth-key", apiErr)
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", apiErr)
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2542,7 +2542,7 @@ func TestMarkKeyCooldown401OAuthRefreshUnknownUnauthorizedMarksExpired(t *testin
 		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 401, Message: "unauthorized"})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 401, Message: "unauthorized"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2615,7 +2615,7 @@ func TestMarkKeyCooldown403OAuthInvalidatedSkipsRefreshAndInvalidatesKey(t *test
 		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: expires},
 	}, "")
 
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 403, Code: "account_invalidated", Message: "account invalidated"})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 403, Code: "account_invalidated", Message: "account invalidated"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2645,7 +2645,7 @@ func TestMarkKeyCooldown403OAuthNoRefresherPersistsDeactivatedKey(t *testing.T) 
 		"oauth-key": {CredentialIndex: 0, AccountUserID: "user-1__acc-1", AccountID: "acc-1", Expires: auth["openai"][0].OAuth.Expires},
 	}, "")
 
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 403, Code: "account_deactivated", Message: "account deactivated"})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 403, Code: "account_deactivated", Message: "account deactivated"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2668,7 +2668,7 @@ func TestMarkKeyCooldown403OAuthNoRefresherDeactivatesKey(t *testing.T) {
 	p.mu.Lock()
 	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
 	p.mu.Unlock()
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 403, Code: "account_deactivated", Message: "account deactivated"})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 403, Code: "account_deactivated", Message: "account deactivated"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2736,7 +2736,7 @@ func TestMarkKeyCooldown403OAuthNonDeactivationMessageUsesCooldown(t *testing.T)
 	p.keyStates[0].OAuthInfo = &OAuthKeyInfo{Expires: time.Now().Add(time.Hour).UnixMilli()}
 	p.mu.Unlock()
 	// generic 403 (e.g. from proxy) — message does not match deactivation keywords
-	result := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: 403, Message: "forbidden"})
+	result := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: 403, Message: "forbidden"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true")
 	}
@@ -2752,7 +2752,7 @@ func TestMarkKeyCooldown403OAuthNonDeactivationMessageUsesCooldown(t *testing.T)
 func TestMarkKeyCooldown401NonOAuthUsesCooldown(t *testing.T) {
 	ctx := context.Background()
 	p := newTestProviderConfig([]string{"plain-key"})
-	result := markKeyCooldown(ctx, p, "plain-key", &APIError{StatusCode: 401, Message: "unauthorized"})
+	result := markKeyCooldown(ctx, p, "plain-key", "test-model", &APIError{StatusCode: 401, Message: "unauthorized"})
 	if !result.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true for plain key 401")
 	}
@@ -4250,6 +4250,173 @@ func TestCompleteStreamSingleTargetCoolingWaitsForRealRecovery(t *testing.T) {
 	}
 	if got := coolingDetails[0]; got != cooldown.String() {
 		t.Fatalf("cooling detail = %q, want %v", got, cooldown)
+	}
+}
+
+func TestCompleteStreamCoolingWaitReportsCauseFromBackgroundCaller(t *testing.T) {
+	cfg := testProviderConfigWithKeys("only-prov", "only-model", []string{"k1"})
+	err401 := error(&APIError{StatusCode: 401, Message: "unauthorized"})
+	// A background caller (memory extraction, compaction or thinking translation)
+	// has no stream callback; the failure must still be recorded on the shared
+	// key state so the next request can explain the cooling wait it runs into.
+	if res := markKeyCooldown(context.Background(), cfg, "k1", "only-model", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	impl := &recordingProvider{}
+	c := NewClient(cfg, impl, "only-model", 4096, "sys")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var retryDeltas []message.StreamDelta
+	var coolingStatuses int
+	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		switch {
+		case delta.Type == message.StreamDeltaRetryError:
+			retryDeltas = append(retryDeltas, delta)
+		case delta.Type == message.StreamDeltaStatus && delta.Status != nil && delta.Status.Type == message.StatusDeltaCooling:
+			// Cancel from the first cooling status: the cause is reported right
+			// after it, before the round actually sleeps.
+			coolingStatuses++
+			cancel()
+		}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CompleteStream err = %v, want context.Canceled after observing the cooling status", err)
+	}
+	if got := impl.CallCount(); got != 0 {
+		t.Fatalf("provider calls = %d, want 0 while the only key is cooling", got)
+	}
+	if coolingStatuses != 1 {
+		t.Fatalf("cooling statuses = %d, want 1", coolingStatuses)
+	}
+	if len(retryDeltas) != 1 {
+		t.Fatalf("retry errors = %d, want exactly 1 for the recorded cause", len(retryDeltas))
+	}
+	if retryDeltas[0].Err != err401 {
+		t.Fatalf("retry error = %v, want the recorded 401", retryDeltas[0].Err)
+	}
+	if retryDeltas[0].Provider != "only-prov" || retryDeltas[0].Model != "only-model" {
+		t.Fatalf("retry error route = (%q, %q), want (only-prov, only-model)", retryDeltas[0].Provider, retryDeltas[0].Model)
+	}
+}
+
+func TestCompleteStreamCoolingWaitDoesNotRepeatCauseReportedByAttempt(t *testing.T) {
+	cfg := testProviderConfigWithKeys("only-prov", "only-model", []string{"k1"})
+	cfg.retryDelayBase = -1 // test hook: a round with no backoff re-probes immediately
+	impl := &constantErrProvider{err: &APIError{StatusCode: 401, Message: "unauthorized"}}
+	c := NewClient(cfg, impl, "only-model", 4096, "sys")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var retryErrs []error
+	coolingSeen := false
+	_, err := c.CompleteStream(ctx, []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		switch {
+		case delta.Type == message.StreamDeltaRetryError:
+			retryErrs = append(retryErrs, delta.Err)
+		case delta.Type == message.StreamDeltaStatus && delta.Status != nil && delta.Status.Type == message.StatusDeltaCooling:
+			coolingSeen = true
+			cancel()
+		}
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CompleteStream err = %v, want context.Canceled after observing the cooling status", err)
+	}
+	if got := impl.calls; got != 1 {
+		t.Fatalf("provider calls = %d, want 1: the 401 attempt must not be retried while its key cools", got)
+	}
+	if !coolingSeen {
+		t.Fatal("expected a cooling status once the only key was put into cooldown")
+	}
+	// The attempt's 401 already reached the panel as a retry error; the cooling
+	// wait must not record the same cause a second time.
+	if len(retryErrs) != 1 {
+		t.Fatalf("retry errors = %d (%v), want exactly 1", len(retryErrs), retryErrs)
+	}
+}
+
+func TestCompleteStreamDrainsBackgroundKeyFailureOnce(t *testing.T) {
+	cfg := testProviderConfigWithKeys("drain-prov", "drain-model", []string{"k1", "k2"})
+	err401 := error(&APIError{StatusCode: 401, Message: "unauthorized"})
+	// A background caller has no stream callback, so its 401 cools k1 without
+	// ever reaching the UI. k2 keeps the next request from waiting, which makes
+	// the drained report the only trace of that failure.
+	if res := markKeyCooldown(context.Background(), cfg, "k1", "drain-model", err401); !res.cooldownApplied {
+		t.Fatal("markKeyCooldown(401) cooldownApplied = false, want the key to enter cooldown")
+	}
+	impl := &recordingProvider{}
+	impl.calls = []scriptedCall{{resp: &message.Response{Content: "ok"}}}
+	c := NewClient(cfg, impl, "drain-model", 4096, "sys")
+
+	var retryDeltas []message.StreamDelta
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaRetryError {
+			retryDeltas = append(retryDeltas, delta)
+		}
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+	if len(retryDeltas) != 1 {
+		t.Fatalf("retry errors = %d (%v), want exactly 1 drained background failure", len(retryDeltas), retryDeltas)
+	}
+	if retryDeltas[0].Err != err401 {
+		t.Fatalf("retry error = %v, want the recorded 401", retryDeltas[0].Err)
+	}
+	if retryDeltas[0].Provider != "drain-prov" || retryDeltas[0].Model != "drain-model" {
+		t.Fatalf("retry error route = (%q, %q), want (drain-prov, drain-model)", retryDeltas[0].Provider, retryDeltas[0].Model)
+	}
+	if got := impl.CallCount(); got != 1 {
+		t.Fatalf("provider calls = %d, want 1: k2 must serve the request while k1 cools", got)
+	}
+
+	// The next request must not replay the same failure.
+	impl.calls = append(impl.calls, scriptedCall{resp: &message.Response{Content: "ok again"}})
+	var repeated []message.StreamDelta
+	if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi again"}}, nil, func(delta message.StreamDelta) {
+		if delta.Type == message.StreamDeltaRetryError {
+			repeated = append(repeated, delta)
+		}
+	}); err != nil {
+		t.Fatalf("second CompleteStream: %v", err)
+	}
+	if len(repeated) != 0 {
+		t.Fatalf("second request retry errors = %d (%v), want none", len(repeated), repeated)
+	}
+}
+
+func TestCompleteStreamTerminalFailureIsNotReplayedFromPendingQueue(t *testing.T) {
+	structural400 := &APIError{StatusCode: 400, Message: "invalid assistant message"}
+	drainRetryErrors := func(cfg *ProviderConfig) int {
+		n := 0
+		cfg.drainPendingKeyReports(func(delta message.StreamDelta) {
+			if delta.Type == message.StreamDeltaRetryError {
+				n++
+			}
+		})
+		return n
+	}
+	run := func(cb StreamCallback) *ProviderConfig {
+		cfg := testProviderConfigWithKeys("gateway", "model-1", []string{"k1"})
+		c := NewClient(cfg, &constantErrProvider{err: structural400}, "model-1", 4096, "sys")
+		if _, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, cb); err == nil {
+			t.Fatal("CompleteStream err = nil, want the terminal 400")
+		}
+		return cfg
+	}
+
+	// A background request has no callback, so its failure stays queued for
+	// the next request that can show it.
+	if got := drainRetryErrors(run(nil)); got != 1 {
+		t.Fatalf("background request: drained retry errors = %d, want 1", got)
+	}
+	// A request with a callback returns the failure as its own error; replaying
+	// it later would record the same failure twice.
+	if got := drainRetryErrors(run(func(message.StreamDelta) {})); got != 0 {
+		t.Fatalf("foreground request: drained retry errors = %d, want 0", got)
 	}
 }
 

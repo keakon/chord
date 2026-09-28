@@ -83,6 +83,7 @@ func (p *ProviderConfig) markCooldownWithCapLocked(ks *KeyState, d time.Duration
 	if d <= 0 {
 		ks.CooldownCount = 0
 		ks.CooldownEnd = time.Time{}
+		ks.cooldownCause = nil
 		return
 	}
 	ks.CooldownCount++
@@ -103,7 +104,7 @@ func (p *ProviderConfig) markCooldownWithCapLocked(ks *KeyState, d time.Duration
 // consecutive failures like an ordinary cooldown but saturates at its own cap,
 // which is deliberately far below maxProviderRetryDelay: this cooldown throttles
 // one caller's restart cadence, and the same ProviderConfig is shared with
-// compaction, sub-agents and title generation, which must not be starved for a
+// compaction, sub-agents and thinking translation, which must not be starved for a
 // minute because one reply kept truncating.
 //
 // Providers configured without keys carry the wait on the provider itself, so
@@ -445,12 +446,16 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 	}
 
 	if selectedKS == nil || selectedIdx < 0 {
-		retryAfter := p.earliestKeyRecoveryLocked(now)
+		retryAfter, coolingOwner := p.earliestKeyRecoveryLocked(now)
 		if retryAfter <= 0 {
 			retryAfter = 10 * time.Second
 		}
+		var cause *keyCooldownCause
+		if coolingOwner != nil {
+			cause = coolingOwner.cooldownCause
+		}
 		p.mu.Unlock()
-		return "", false, &AllKeysCoolingError{RetryAfter: retryAfter}
+		return "", false, &AllKeysCoolingError{RetryAfter: retryAfter, cause: cause}
 	}
 
 	// With an existing access token, let the provider prove whether it still works;
@@ -577,6 +582,165 @@ func (p *ProviderConfig) markRateLimitCooldown(key string, retryAfter time.Durat
 	return applied
 }
 
+// maxPendingKeyCooldownCauses bounds the per-provider queue of failures waiting
+// for a request that can report them: a burst of background failures must not
+// grow it without bound.
+const maxPendingKeyCooldownCauses = 32
+
+// noteKeyCooldownCause stores the API failure behind a cooldown that was just
+// applied, replacing any previous cause on the key, and queues it for the next
+// request with a stream callback. It is called for every cooldownApplied
+// result, including ones produced by callers without a stream callback, so the
+// failure is not lost when no request ever waits the cooldown out.
+func (p *ProviderConfig) noteKeyCooldownCause(key, model string, err error, result markKeyCooldownResult) {
+	if p == nil || err == nil {
+		return
+	}
+	cause := &keyCooldownCause{
+		Err:      err,
+		Model:    model,
+		Key:      key,
+		result:   result,
+		provider: p,
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	matched := false
+	p.forEachKeyStateByKeyLocked(key, func(ks *KeyState) {
+		matched = true
+		ks.cooldownCause = cause
+	})
+	if !matched {
+		// A keyless provider (or a key no longer in the pool) has no state to
+		// carry the failure and no credential to name, so there is nothing key
+		// specific to report later.
+		return
+	}
+	if len(p.pendingCauses) >= maxPendingKeyCooldownCauses {
+		p.pendingCauses = p.pendingCauses[1:]
+	}
+	p.pendingCauses = append(p.pendingCauses, cause)
+}
+
+// drainPendingKeyReports replays recorded cooldown causes to a request that can
+// surface them in the UI. Callers run it at request entry, so failures recorded
+// by callers without a stream callback (background extraction or thinking
+// translation) or by requests that never reached a cooling wait are shown
+// instead of staying invisible. Each cause is consumed at most once: a
+// permanent invalidation replays the key overlay, everything else becomes a
+// retry error. Causes are drained even when the cooldown already expired,
+// because the error panel is a diagnostic log of what happened, not a snapshot
+// of what is still cooling.
+func (p *ProviderConfig) drainPendingKeyReports(cb StreamCallback) {
+	if p == nil || cb == nil {
+		return
+	}
+	type pendingKeyReport struct {
+		cause   *keyCooldownCause
+		overlay bool
+	}
+	var reports []pendingKeyReport
+	p.mu.Lock()
+	for _, cause := range p.pendingCauses {
+		if cause == nil {
+			continue
+		}
+		if cause.result.invalidated || cause.result.deactivated || cause.result.expired {
+			if cause.deltasEmitted {
+				continue
+			}
+			cause.deltasEmitted = true
+			cause.reported = true
+			reports = append(reports, pendingKeyReport{cause: cause, overlay: true})
+			continue
+		}
+		if cause.reported {
+			continue
+		}
+		cause.reported = true
+		reports = append(reports, pendingKeyReport{cause: cause})
+	}
+	p.pendingCauses = nil
+	p.mu.Unlock()
+
+	for _, report := range reports {
+		if report.overlay {
+			emitKeyCooldownDeltas(cb, report.cause.result)
+			continue
+		}
+		providerName, accountID, email := retryErrorFields(p, report.cause.Key)
+		emitRetryError(cb, report.cause.Err, providerName, report.cause.Model, maskedKey(report.cause.Key), accountID, email)
+	}
+}
+
+// markKeyCooldownCauseDeltasEmitted records that the key overlay for a
+// permanently invalidated credential already reached the user through a
+// callback, so a later drain does not replay it.
+func (p *ProviderConfig) markKeyCooldownCauseDeltasEmitted(err error) {
+	p.markKeyCooldownCauseByErr(err, func(cause *keyCooldownCause) {
+		cause.deltasEmitted = true
+	})
+}
+
+// claimKeyCooldownCause hands a recorded cause to exactly one reporting
+// request. It returns false when the cause was already reported or is no
+// longer the cause of any key, so concurrent cooling waits cannot duplicate it.
+func (p *ProviderConfig) claimKeyCooldownCause(cause *keyCooldownCause) bool {
+	if p == nil || cause == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if cause.reported {
+		return false
+	}
+	stillCurrent := false
+	for _, ks := range p.keyStates {
+		if ks.cooldownCause == cause {
+			stillCurrent = true
+			break
+		}
+	}
+	if !stillCurrent {
+		return false
+	}
+	cause.reported = true
+	return true
+}
+
+// markKeyCooldownCauseReported suppresses a later cooling-wait report for the
+// failure that was just handed to the user through a retry error delta. The
+// cause is matched by error identity rather than by key, because a newer
+// failure may have replaced it on the key in the meantime.
+func (p *ProviderConfig) markKeyCooldownCauseReported(err error) {
+	p.markKeyCooldownCauseByErr(err, func(cause *keyCooldownCause) {
+		cause.reported = true
+	})
+}
+
+// markKeyCooldownCauseByErr applies mark to every recorded cause carrying err
+// by identity: the cause attached to a key and the queued copy a drain would
+// replay. A newer failure can replace the cause on its key while the request
+// that produced this failure is still unwinding, and matching by key would
+// then stamp the newer cause and leave this failure to be reported twice.
+func (p *ProviderConfig) markKeyCooldownCauseByErr(err error, mark func(*keyCooldownCause)) {
+	if p == nil || err == nil || mark == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, ks := range p.keyStates {
+		if ks != nil && ks.cooldownCause != nil && ks.cooldownCause.Err == err {
+			mark(ks.cooldownCause)
+		}
+	}
+	for _, cause := range p.pendingCauses {
+		if cause != nil && cause.Err == err {
+			mark(cause)
+		}
+	}
+}
+
 // MarkQuotaExhaustedUntil marks a key unavailable until the real provider reset time.
 // Unlike MarkCooldown, this does not use exponential backoff or the 1-minute cap.
 
@@ -608,6 +772,7 @@ func (p *ProviderConfig) MarkKeySuccess(key string) {
 			ks.ExhaustedUntil = time.Time{}
 		}
 		clearSoftHints = clearSoftHints || (ks.OAuthInfo != nil && (ks.OAuthInfo.CodexPrimaryResetAt != 0 || ks.OAuthInfo.CodexSecondaryResetAt != 0))
+		ks.cooldownCause = nil
 		p.markHealthyLocked(ks)
 	})
 	p.mu.Unlock()
@@ -766,7 +931,7 @@ func (p *ProviderConfig) KeyPoolNextTransition() time.Duration {
 }
 
 func (p *ProviderConfig) keyPoolNextTransitionLocked(now time.Time) time.Duration {
-	d := p.earliestKeyRecoveryLocked(now)
+	d, _ := p.earliestKeyRecoveryLocked(now)
 	if d <= 0 {
 		return 0
 	}
@@ -774,23 +939,26 @@ func (p *ProviderConfig) keyPoolNextTransitionLocked(now time.Time) time.Duratio
 }
 
 // earliestKeyRecoveryLocked returns the minimum time until any key becomes
-// selectable again (cooldown ends). Must hold p.mu.
+// selectable again (cooldown ends) along with the key that owns this recovery
+// instant. Must hold p.mu.
 
-func (p *ProviderConfig) earliestKeyRecoveryLocked(now time.Time) time.Duration {
+func (p *ProviderConfig) earliestKeyRecoveryLocked(now time.Time) (time.Duration, *KeyState) {
 	var minD time.Duration
-	for _, ks := range p.keyStates {
-		if now.Before(ks.CooldownEnd) {
-			d := time.Until(ks.CooldownEnd)
-			if d > 0 && (minD == 0 || d < minD) {
-				minD = d
-			}
+	var owner *KeyState
+	consider := func(ks *KeyState, end time.Time) {
+		if !now.Before(end) {
+			return
 		}
-		if now.Before(ks.ExhaustedUntil) {
-			d := time.Until(ks.ExhaustedUntil)
-			if d > 0 && (minD == 0 || d < minD) {
-				minD = d
-			}
+		d := time.Until(end)
+		if d <= 0 || (minD > 0 && d >= minD) {
+			return
 		}
+		minD = d
+		owner = ks
 	}
-	return minD
+	for _, ks := range p.keyStates {
+		consider(ks, ks.CooldownEnd)
+		consider(ks, ks.ExhaustedUntil)
+	}
+	return minD, owner
 }

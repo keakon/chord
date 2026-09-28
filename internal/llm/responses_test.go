@@ -3277,7 +3277,7 @@ func TestMarkKeyCooldownCodexWSUsageLimitWithoutHTTPStatusUsesResetWindow(t *tes
 		Primary:   &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetPrimary},
 		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetSecondary},
 	})
-	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: http.StatusInternalServerError, Code: "usage_limit_reached", Message: "The usage limit has been reached"})
+	res := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: http.StatusInternalServerError, Code: "usage_limit_reached", Message: "The usage limit has been reached"})
 	if !res.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true for Codex WebSocket usage limit")
 	}
@@ -3305,7 +3305,7 @@ func TestMarkKeyCooldownCodexWSMessageOnlyUsageLimitUsesResetWindow(t *testing.T
 		Primary:   &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetPrimary},
 		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetSecondary},
 	})
-	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: http.StatusInternalServerError, Message: "You've hit your usage limit"})
+	res := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: http.StatusInternalServerError, Message: "You've hit your usage limit"})
 	if !res.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true for message-only Codex usage limit")
 	}
@@ -3333,7 +3333,7 @@ func TestMarkKeyCooldownCodexWSMessageOnlyQuotaUsesResetWindow(t *testing.T) {
 		Primary:   &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetPrimary},
 		Secondary: &ratelimit.RateLimitWindow{UsedPct: 100, ResetsAt: resetSecondary},
 	})
-	res := markKeyCooldown(ctx, p, "oauth-key", &APIError{StatusCode: http.StatusInternalServerError, Message: "You have exceeded your current quota"})
+	res := markKeyCooldown(ctx, p, "oauth-key", "test-model", &APIError{StatusCode: http.StatusInternalServerError, Message: "You have exceeded your current quota"})
 	if !res.cooldownApplied {
 		t.Fatal("expected cooldownApplied=true for message-only Codex quota exhaustion")
 	}

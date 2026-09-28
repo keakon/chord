@@ -1152,6 +1152,12 @@ func (c *Client) CompleteStreamWithOptions(
 	serviceTier := c.serviceTier
 	c.mu.Unlock()
 
+	// A request with a callback also replays key failures recorded while no
+	// request could show them (background extraction or thinking translation);
+	// without this, a failure that cooled a key but was never waited out stays
+	// invisible in the error panel.
+	drainPendingKeyReportsForPool(pool, cb)
+
 	status := CallStatus{
 		SelectedModelRef:    startRef,
 		RunningModelRef:     startRef,
@@ -1204,6 +1210,22 @@ func (c *Client) CompleteStreamWithOptions(
 	c.lastCallStatus = status
 	c.mu.Unlock()
 	return resp, err
+}
+
+// drainPendingKeyReportsForPool lets every provider in the pool replay key
+// failures that were recorded without a request able to show them. Draining
+// through a callback that drops deltas would consume the causes without
+// showing them, so callers pass their own stream callback and nothing is
+// drained when it is nil.
+func drainPendingKeyReportsForPool(pool []FallbackModel, cb StreamCallback) {
+	if cb == nil {
+		return
+	}
+	for _, target := range pool {
+		if target.ProviderConfig != nil {
+			target.ProviderConfig.drainPendingKeyReports(cb)
+		}
+	}
 }
 
 func (c *Client) setLastInputTokens(n int) {

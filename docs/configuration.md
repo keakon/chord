@@ -874,6 +874,15 @@ decides: a model that is ready again is never held back by a longer cooldown on
 another one, and a pool that is re-checked every minute picks a recovered key up
 as soon as it is ready.
 
+When a key goes into cooldown, the API failure behind it is recorded in the
+error panel (`Ctrl+E`) by the wait that shows the cooling or by the next
+foreground request (an agent turn or a context compaction), whichever comes
+first. This includes failures from background work such as memory extraction
+or thinking translation. A credential the provider permanently invalidated (an
+expired refresh token, an invalidated or deactivated account) is announced by
+the next foreground request. Each failure is recorded once: a failure already
+reported as a retry error by the attempt that caused it is not repeated.
+
 Codex OAuth follows the same rules: every Codex 429 is an ordinary 429. A
 retry hint (`Retry-After` or WebSocket `resets_in_seconds`) is honored ahead
 of explicit settings, and a usage-limit 429 carrying neither a hint nor an
