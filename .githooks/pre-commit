@@ -15,7 +15,9 @@ if ! command -v goimports >/dev/null 2>&1; then
   exit 1
 fi
 
-files="$(git diff --cached --name-only --diff-filter=ACMR -- '*.go')"
+# core.quotePath=false keeps non-ASCII paths literal instead of octal-escaped
+# and quoted, so every later git and formatter call sees the real file name.
+files="$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR -- '*.go')"
 if [[ -z "${files}" ]]; then
   exit 0
 fi
