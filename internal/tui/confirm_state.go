@@ -44,6 +44,10 @@ type ConfirmRequest struct {
 	// carried through from ConfirmRequestEvent so the TUI can switch focus to
 	// the agent whose tool call needs a decision.
 	AgentID string
+	// PathScope is the path evaluation scope of the confirmed call, carried
+	// through from ConfirmRequestEvent. Rule suggestions derive their
+	// patterns from it so an offered rule matches the same call.
+	PathScope permission.PathScope
 }
 
 // ConfirmResult is the user's response to a ConfirmRequest.

@@ -90,6 +90,14 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 		summaryVal = summary[0]
 	}
 
+	// Rule suggestions in the confirmation UI are derived from this scope, so
+	// it must be the scope the call was evaluated against, not whatever scope
+	// the receiving agent would resolve now.
+	scope, ok := rulePathScopeFromContext(ctx)
+	if !ok {
+		scope = a.effectivePathScope()
+	}
+
 	if err := a.emitInteractiveToTUI(ctx, ConfirmRequestEvent{
 		ToolName:            toolName,
 		ArgsJSON:            argsJSON,
@@ -102,6 +110,7 @@ func (a *MainAgent) awaitConfirm(ctx context.Context, toolName, argsJSON string,
 		DoneReport:          summaryVal,
 		ForceDenyReason:     forceDenyReason,
 		AgentID:             ownerID,
+		PathScope:           scope,
 	}); err != nil {
 		return ConfirmResponse{}, err
 	}

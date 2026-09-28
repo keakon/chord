@@ -103,6 +103,7 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 			AlreadyAllowedRules: append([]string(nil), evt.AlreadyAllowedRules...),
 			ForceDenyReason:     evt.ForceDenyReason,
 			AgentID:             evt.AgentID,
+			PathScope:           evt.PathScope,
 		}
 		effects.addFollowup(func() tea.Msg { return confirmRequestMsg{request: req} })
 		return true, effects

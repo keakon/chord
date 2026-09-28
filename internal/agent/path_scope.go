@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+
 	"github.com/keakon/chord/internal/permission"
 )
 
@@ -58,6 +60,26 @@ func (a *MainAgent) invalidatePathRoots() {
 		a.pathRootsInvalidator()
 	}
 	a.refreshPathRoots()
+}
+
+// rulePathScopeCtxKey carries the path scope of the call being confirmed to
+// the AwaitConfirm receiver. The confirm callback is shared between the main
+// agent and its sub-agents, so the executing agent's scope must travel with
+// the call context instead of being re-derived from the receiving agent.
+type rulePathScopeCtxKey struct{}
+
+// withRulePathScope attaches the executing agent's path scope to a confirm
+// call context.
+func withRulePathScope(ctx context.Context, scope permission.PathScope) context.Context {
+	return context.WithValue(ctx, rulePathScopeCtxKey{}, scope)
+}
+
+// rulePathScopeFromContext returns the scope attached by the tool-execution
+// pipeline. ok is false for confirm flows that do not originate from a tool
+// call.
+func rulePathScopeFromContext(ctx context.Context) (permission.PathScope, bool) {
+	scope, ok := ctx.Value(rulePathScopeCtxKey{}).(permission.PathScope)
+	return scope, ok
 }
 
 // effectivePathScope returns the path evaluation scope for the agent's next

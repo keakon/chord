@@ -3,11 +3,18 @@ package tui
 import (
 	"testing"
 
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
+// cwdScope is the cwd-only scope equivalent of the pre-PathScope cwd argument:
+// no checkout roots, so path evaluation stays cwd-relative.
+func cwdScope(cwd string) permission.PathScope {
+	return permission.PathScope{Cwd: cwd}
+}
+
 func TestSuggestRulePatterns_BashSimple(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("shell", `{"command":"git log --oneline"}`, nil, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("shell", `{"command":"git log --oneline"}`, nil, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for simple shell command")
 	}
@@ -31,7 +38,7 @@ func TestSuggestRulePatterns_BashSimple(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashNeedsApproval(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("shell", `{"command":"git log --oneline && git status"}`, []string{"git status"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("shell", `{"command":"git log --oneline && git status"}`, []string{"git status"}, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates")
 	}
@@ -42,7 +49,7 @@ func TestSuggestRulePatterns_BashNeedsApproval(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashHighRisk(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("shell", `{"command":"rm -rf /tmp/foo"}`, nil, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("shell", `{"command":"rm -rf /tmp/foo"}`, nil, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for high-risk command")
 	}
@@ -59,7 +66,7 @@ func TestSuggestRulePatterns_BashHighRisk(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashComplex(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("shell", `{"command":"git log | grep foo"}`, nil, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("shell", `{"command":"git log | grep foo"}`, nil, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for complex command")
 	}
@@ -73,7 +80,7 @@ func TestSuggestRulePatterns_BashComplex(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WriteFile(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("write", `{"path":"internal/tui/app.go","content":"..."}`, nil, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("write", `{"path":"internal/tui/app.go","content":"..."}`, nil, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for Write tool")
 	}
@@ -97,7 +104,7 @@ func TestSuggestRulePatterns_WriteFile(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_EditFile(t *testing.T) {
-	candidates := suggestRulePatternsWithContext(tools.NameEdit, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext(tools.NameEdit, `{"path":"docs/README.md","patch":"@@\n-old\n+new\n"}`, nil, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for Edit tool")
 	}
@@ -116,7 +123,7 @@ func TestSuggestRulePatterns_EditFile(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WebFetch(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("web_fetch", `{"url":"https://example.com/api/v1/data"}`, nil, nil, "")
+	candidates := suggestRulePatternsWithContext("web_fetch", `{"url":"https://example.com/api/v1/data"}`, nil, nil, cwdScope(""))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for WebFetch")
 	}
@@ -146,7 +153,7 @@ func TestSuggestRulePatterns_WebFetch(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WebFetchWithPortAndQuery(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("web_fetch", `{"url":"https://example.com:8443/api/v1/data?q=ok"}`, nil, nil, "")
+	candidates := suggestRulePatternsWithContext("web_fetch", `{"url":"https://example.com:8443/api/v1/data?q=ok"}`, nil, nil, cwdScope(""))
 	foundPath := false
 	foundHost := false
 	for _, c := range candidates {
@@ -163,7 +170,7 @@ func TestSuggestRulePatterns_WebFetchWithPortAndQuery(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_Delete(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["tmp/foo.log"]}`, []string{"tmp/foo.log"}, nil, "")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["tmp/foo.log"]}`, []string{"tmp/foo.log"}, nil, cwdScope(""))
 	if len(candidates) == 0 {
 		t.Fatal("expected directory candidates for Delete tool")
 	}
@@ -190,7 +197,7 @@ func TestSuggestRulePatterns_Delete(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_DeleteWithinCWDOffersCurDirCandidateNotDefault(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["nested/deep/tmp.go"]}`, []string{"nested/deep/tmp.go"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["nested/deep/tmp.go"]}`, []string{"nested/deep/tmp.go"}, nil, cwdScope("/home/user/project"))
 	foundCwd := false
 	for _, c := range candidates {
 		if c.Pattern == "**" {
@@ -207,7 +214,7 @@ func TestSuggestRulePatterns_DeleteWithinCWDOffersCurDirCandidateNotDefault(t *t
 }
 
 func TestSuggestRulePatterns_DeleteOutsideCWDNoCurDirCandidate(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["../shared/tmp.go"]}`, []string{"../shared/tmp.go"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["../shared/tmp.go"]}`, []string{"../shared/tmp.go"}, nil, cwdScope("/home/user/project"))
 	for _, c := range candidates {
 		if c.Pattern == "**" {
 			t.Fatalf("unexpected cwd-scoped candidate for outside-cwd delete: %+v", candidates)
@@ -216,7 +223,7 @@ func TestSuggestRulePatterns_DeleteOutsideCWDNoCurDirCandidate(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_DeleteAbsoluteInCWDCollapsesToRelative(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["/home/user/project/tmp/foo.log"]}`, []string{"/home/user/project/tmp/foo.log"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["/home/user/project/tmp/foo.log"]}`, []string{"/home/user/project/tmp/foo.log"}, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates")
 	}
@@ -226,14 +233,14 @@ func TestSuggestRulePatterns_DeleteAbsoluteInCWDCollapsesToRelative(t *testing.T
 }
 
 func TestSuggestRulePatterns_DeleteOutsideCWDStaysAbsolute(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["/Users/me/shared/tmp.go"]}`, []string{"/Users/me/shared/tmp.go"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["/Users/me/shared/tmp.go"]}`, []string{"/Users/me/shared/tmp.go"}, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 || candidates[0].Pattern != "/Users/me/shared/*" {
 		t.Fatalf("first candidate = %+v, want absolute parent directory", candidates)
 	}
 }
 
 func TestSuggestRulePatterns_DeleteRanksDirectoriesByPathCount(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["artifacts/report-1.json","artifacts/report-2.json","artifacts/report-3.json","/tmp/old-report.json"]}`, []string{"/tmp/old-report.json", "artifacts/report-1.json", "artifacts/report-2.json", "artifacts/report-3.json"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["artifacts/report-1.json","artifacts/report-2.json","artifacts/report-3.json","/tmp/old-report.json"]}`, []string{"/tmp/old-report.json", "artifacts/report-1.json", "artifacts/report-2.json", "artifacts/report-3.json"}, nil, cwdScope("/home/user/project"))
 	want := []string{"artifacts/*", "/tmp/*", "*"}
 	if len(candidates) != len(want) {
 		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), len(want), candidates)
@@ -257,7 +264,7 @@ func TestSuggestRulePatterns_DeleteReservesCWDAndGlobalCandidates(t *testing.T) 
 		"echo/five.txt",
 		"foxtrot/six.txt",
 	}
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["fallback.txt"]}`, paths, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["fallback.txt"]}`, paths, nil, cwdScope("/home/user/project"))
 	if len(candidates) != maxPatternCandidates {
 		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), maxPatternCandidates, candidates)
 	}
@@ -275,7 +282,7 @@ func TestSuggestRulePatterns_DeleteReservesCWDAndGlobalCandidates(t *testing.T) 
 }
 
 func TestSuggestRulePatterns_DeleteMixedCWDTargetsOmitsCWDWildcard(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["artifacts/report.json","/tmp/old-report.json"]}`, []string{"artifacts/report.json", "/tmp/old-report.json"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["artifacts/report.json","/tmp/old-report.json"]}`, []string{"artifacts/report.json", "/tmp/old-report.json"}, nil, cwdScope("/home/user/project"))
 	for _, candidate := range candidates {
 		if candidate.Pattern == "**" {
 			t.Fatalf("mixed in-cwd and out-of-cwd targets should omit '**': %+v", candidates)
@@ -284,7 +291,7 @@ func TestSuggestRulePatterns_DeleteMixedCWDTargetsOmitsCWDWildcard(t *testing.T)
 }
 
 func TestSuggestRulePatterns_DeleteAllowedOutsideTargetStillOmitsCWDWildcard(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["artifacts/report.json","/tmp/already-allowed.json"]}`, []string{"artifacts/report.json"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["artifacts/report.json","/tmp/already-allowed.json"]}`, []string{"artifacts/report.json"}, nil, cwdScope("/home/user/project"))
 	for _, candidate := range candidates {
 		if candidate.Pattern == "**" {
 			t.Fatalf("an out-of-cwd requested target should omit '**' even when already allowed: %+v", candidates)
@@ -293,7 +300,7 @@ func TestSuggestRulePatterns_DeleteAllowedOutsideTargetStillOmitsCWDWildcard(t *
 }
 
 func TestSuggestRulePatterns_DeleteCWDRootFileDoesNotPreselectBroadRule(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["obsolete.txt"]}`, []string{"obsolete.txt"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["obsolete.txt"]}`, []string{"obsolete.txt"}, nil, cwdScope("/home/user/project"))
 	want := []string{"**", "*"}
 	if len(candidates) != len(want) {
 		t.Fatalf("candidate count = %d, want %d: %+v", len(candidates), len(want), candidates)
@@ -309,7 +316,7 @@ func TestSuggestRulePatterns_DeleteCWDRootFileDoesNotPreselectBroadRule(t *testi
 }
 
 func TestSuggestRulePatterns_Read(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("read", `{"path":"foo.go"}`, nil, nil, "")
+	candidates := suggestRulePatternsWithContext("read", `{"path":"foo.go"}`, nil, nil, cwdScope(""))
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 candidate for Read, got %d", len(candidates))
 	}
@@ -319,7 +326,7 @@ func TestSuggestRulePatterns_Read(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_Grep(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("grep", `{"pattern":"TODO"}`, nil, nil, "")
+	candidates := suggestRulePatternsWithContext("grep", `{"pattern":"TODO"}`, nil, nil, cwdScope(""))
 	if len(candidates) != 1 {
 		t.Fatalf("expected 1 candidate for Grep, got %d", len(candidates))
 	}
@@ -329,7 +336,7 @@ func TestSuggestRulePatterns_Grep(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashSudo(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("shell", `{"command":"sudo apt install foo"}`, nil, nil, "")
+	candidates := suggestRulePatternsWithContext("shell", `{"command":"sudo apt install foo"}`, nil, nil, cwdScope(""))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for sudo command")
 	}
@@ -339,7 +346,7 @@ func TestSuggestRulePatterns_BashSudo(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashComplexCommandFallsBackToLiteral(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("shell", `{"command":"cat <<'EOF'\nhello\nEOF"}`, nil, nil, "")
+	candidates := suggestRulePatternsWithContext("shell", `{"command":"cat <<'EOF'\nhello\nEOF"}`, nil, nil, cwdScope(""))
 	if len(candidates) < 1 {
 		t.Fatal("expected candidates for heredoc command")
 	}
@@ -357,7 +364,7 @@ func TestSuggestRulePatterns_BashComplexCommandPrefersMatchedAskRules(t *testing
 		`{"command":"git reset HEAD^ && git add CHANGELOG.md && git commit -m fix"}`,
 		[]string{"git reset HEAD^", "git add CHANGELOG.md", "git commit -m fix"},
 		[]string{"git reset *", "git add *", "git commit *"},
-		"",
+		cwdScope(""),
 	)
 	if len(candidates) < 4 {
 		t.Fatalf("candidates = %#v, want matched ask rules", candidates)
@@ -390,7 +397,7 @@ func TestSuggestRulePatterns_BashComplexCommandPrefersMatchedAskRules(t *testing
 }
 
 func TestSuggestRulePatterns_BashMultilineFallsBackToLiteral(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("shell", `{"command":"echo one\necho two"}`, nil, nil, "")
+	candidates := suggestRulePatternsWithContext("shell", `{"command":"echo one\necho two"}`, nil, nil, cwdScope(""))
 	if len(candidates) < 1 {
 		t.Fatal("expected candidates for multiline command")
 	}
@@ -403,7 +410,7 @@ func TestSuggestRulePatterns_BashMultilineFallsBackToLiteral(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_BashSingleWord(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("shell", `{"command":"ls"}`, nil, nil, "")
+	candidates := suggestRulePatternsWithContext("shell", `{"command":"ls"}`, nil, nil, cwdScope(""))
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for single-word command")
 	}
@@ -424,7 +431,7 @@ func TestSuggestRulePatterns_BashSingleWord(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WriteRelativePathDefaultsToDirScope(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("write", `{"path":"docs/guide.md","content":"..."}`, nil, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("write", `{"path":"docs/guide.md","content":"..."}`, nil, nil, cwdScope("/home/user/project"))
 	foundDefaultDir := false
 	for _, c := range candidates {
 		if c.Pattern == "docs/*" && c.Default {
@@ -438,7 +445,7 @@ func TestSuggestRulePatterns_WriteRelativePathDefaultsToDirScope(t *testing.T) {
 }
 
 func TestSuggestRulePatterns_WriteParentPathDoesNotDefaultToDirScope(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("write", `{"path":"../secret/plan.md","content":"..."}`, nil, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("write", `{"path":"../secret/plan.md","content":"..."}`, nil, nil, cwdScope("/home/user/project"))
 	for _, c := range candidates {
 		if c.Pattern == "../secret/*" && c.Default {
 			t.Fatalf("unexpected default dir candidate for parent path: %+v", c)
@@ -450,7 +457,7 @@ func TestSuggestRulePatterns_OutsideCWDHasNoRelativeExtCandidate(t *testing.T) {
 	// A relative "**/*.md" rule is scoped to the working directory and could
 	// never match this out-of-cwd absolute path; offering it would save a rule
 	// that has no effect on future calls.
-	candidates := suggestRulePatternsWithContext("write", `{"path":"/home/shared/plan.md","content":"..."}`, nil, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("write", `{"path":"/home/shared/plan.md","content":"..."}`, nil, nil, cwdScope("/home/user/project"))
 	for _, c := range candidates {
 		if c.Pattern == "**/*.md" {
 			t.Fatalf("unexpected cwd-scoped ext candidate for outside-cwd path: %+v", c)
@@ -473,7 +480,7 @@ func TestSuggestRulePatterns_OutsideCWDHasNoRelativeExtCandidate(t *testing.T) {
 // rule engine's semantics (a "dir/*" rule matches any depth), so a common
 // ancestor is not crowded out by its own subdirectory.
 func TestSuggestRulePatterns_DeleteRanksByRecursiveCoverage(t *testing.T) {
-	candidates := suggestRulePatternsWithContext("delete", `{"paths":["artifacts/2024/q1.log","artifacts/2024/q2.log","artifacts/root.log"]}`, []string{"artifacts/2024/q1.log", "artifacts/2024/q2.log", "artifacts/root.log"}, nil, "/home/user/project")
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["artifacts/2024/q1.log","artifacts/2024/q2.log","artifacts/root.log"]}`, []string{"artifacts/2024/q1.log", "artifacts/2024/q2.log", "artifacts/root.log"}, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 || candidates[0].Pattern != "artifacts/*" {
 		t.Fatalf("first candidate = %+v, want the common ancestor covering all three paths", candidates)
 	}
@@ -484,4 +491,96 @@ func TestSuggestRulePatterns_DeleteRanksByRecursiveCoverage(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestSuggestRulePatterns_SubdirectorySessionUsesCheckoutRelativeSpelling
+// guards that a session running in a subdirectory suggests the
+// repository-relative rule the permission engine matches, not a cwd-relative
+// spelling that would never apply to the same call.
+func TestSuggestRulePatterns_SubdirectorySessionUsesCheckoutRelativeSpelling(t *testing.T) {
+	scope := permission.PathScope{
+		Cwd:   "/repo/internal",
+		Roots: []string{"/repo"},
+	}
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["tools/delete.go"]}`, []string{"tools/delete.go"}, nil, scope)
+	if len(candidates) == 0 || candidates[0].Pattern != "internal/tools/*" {
+		t.Fatalf("first candidate = %+v, want checkout-relative internal/tools/*", candidates)
+	}
+	if !candidates[0].Default {
+		t.Fatalf("in-scope directory candidate should be the default: %+v", candidates)
+	}
+	rs := permission.Ruleset{{Permission: tools.NameDelete, Pattern: candidates[0].Pattern, Action: permission.ActionAllow}}
+	if got := rs.EvaluatePath(tools.NameDelete, "tools/delete.go", scope); got != permission.ActionAllow {
+		t.Fatalf("suggested rule %q does not match the confirmed call (got %q)", candidates[0].Pattern, got)
+	}
+}
+
+// TestSuggestRulePatterns_WorktreeSessionUsesMainCheckoutSpelling guards that
+// a linked-worktree session suggests the same repository-relative spelling as
+// the main checkout, so one rule governs the file everywhere.
+func TestSuggestRulePatterns_WorktreeSessionUsesMainCheckoutSpelling(t *testing.T) {
+	scope := permission.PathScope{
+		Cwd:   "/worktrees/feature",
+		Roots: []string{"/repo", "/worktrees/feature"},
+	}
+	candidates := suggestRulePatternsWithContext("write", `{"path":"/repo/src/main.go","content":"..."}`, nil, nil, scope)
+	if len(candidates) == 0 || candidates[0].Pattern != "src/main.go" {
+		t.Fatalf("first candidate = %+v, want src/main.go", candidates)
+	}
+	rs := permission.Ruleset{{Permission: tools.NameWrite, Pattern: candidates[0].Pattern, Action: permission.ActionAllow}}
+	for _, spelled := range []string{"/repo/src/main.go", "src/main.go"} {
+		if got := rs.EvaluatePath(tools.NameWrite, spelled, scope); got != permission.ActionAllow {
+			t.Fatalf("suggested rule %q does not match %q (got %q)", candidates[0].Pattern, spelled, got)
+		}
+	}
+}
+
+// TestSuggestRulePatterns_WildcardCandidateNamesRepositoryScope guards the
+// "**" candidate in a subdirectory session: it covers the whole repository, so
+// it must be offered and described as such, and it must match a file outside
+// the working directory.
+func TestSuggestRulePatterns_WildcardCandidateNamesRepositoryScope(t *testing.T) {
+	scope := permission.PathScope{
+		Cwd:   "/repo/internal",
+		Roots: []string{"/repo"},
+	}
+	candidates := suggestRulePatternsWithContext("write", `{"path":"docs/guide.md","content":"..."}`, nil, nil, scope)
+	found := false
+	for _, c := range candidates {
+		if c.Pattern != "**" {
+			continue
+		}
+		found = true
+		if want := "any path in this repository"; c.Summary != want {
+			t.Errorf("** summary = %q, want %q", c.Summary, want)
+		}
+	}
+	if !found {
+		t.Fatalf("expected a '**' candidate for an in-repository path: %+v", candidates)
+	}
+	rs := permission.Ruleset{{Permission: tools.NameWrite, Pattern: "**", Action: permission.ActionAllow}}
+	if got := rs.EvaluatePath(tools.NameWrite, "/repo/src/other.go", scope); got != permission.ActionAllow {
+		t.Fatalf("'**' must match a repository file outside the working directory (got %q)", got)
+	}
+}
+
+// TestSuggestRulePatterns_DeleteRepoWideTargetsOfferWildcard guards that the
+// delete "**" candidate is gated on the repository scope, not the working
+// directory: targets spread across the repository still qualify.
+func TestSuggestRulePatterns_DeleteRepoWideTargetsOfferWildcard(t *testing.T) {
+	scope := permission.PathScope{
+		Cwd:   "/repo/internal",
+		Roots: []string{"/repo"},
+	}
+	paths := []string{"tools/a.go", "../src/b.go"}
+	candidates := suggestRulePatternsWithContext("delete", `{"paths":["tools/a.go","../src/b.go"]}`, paths, nil, scope)
+	for _, c := range candidates {
+		if c.Pattern == "**" {
+			if c.Summary != "any path in this repository" {
+				t.Fatalf("** summary = %q, want repository wording: %+v", c.Summary, candidates)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected a repository-wide '**' candidate: %+v", candidates)
 }

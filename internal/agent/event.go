@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -1041,6 +1042,11 @@ type ConfirmRequestEvent struct {
 	// switches focus to this agent so the user sees the context the request
 	// originated from before answering.
 	AgentID string
+	// PathScope is the path evaluation scope of the confirmed call: the
+	// executing agent's base dir plus the repository checkout roots. Clients
+	// that offer a rule suggestion derive patterns from it so the offered rule
+	// matches the same spelling the permission engine uses.
+	PathScope permission.PathScope
 }
 
 func (ConfirmRequestEvent) agentEvent() {}

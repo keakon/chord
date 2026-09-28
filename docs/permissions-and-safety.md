@@ -32,7 +32,7 @@ A rule that names a nonexistent tool matches nothing, so a typo silently leaves 
 
 In the TUI confirmation dialog, `V` opens the full tool arguments in a read-only viewer, including entries hidden by the summary preview. Close the viewer to return to the pending confirmation; viewing does not approve or change the call. `E` edits the arguments.
 
-In the TUI confirmation dialog, `M` opens the add-rule picker for the current tool call; press `Enter` in that picker to save the selected rule and allow the current call. For `delete`, the picker suggests reusable parent-directory rules instead of one-off exact-file rules. Directories covering more paths that still need approval appear first, `*` (any delete path) is always available, and `**` (anything under the current working directory) is also available when every requested path is inside that directory. The broad `**` and `*` choices are never selected by default.
+In the TUI confirmation dialog, `M` opens the add-rule picker for the current tool call; press `Enter` in that picker to save the selected rule and allow the current call. For `delete`, the picker suggests reusable parent-directory rules instead of one-off exact-file rules, written in the same spelling permission matching uses, so the saved rule also applies to the same file from another checkout. Directories covering more paths that still need approval appear first, `*` (any delete path) is always available, and `**` (any path in the repository) is also available when every requested path lies inside the repository. The broad `**` and `*` choices are never selected by default.
 
 Permissions can be defined in Agent config. Start with this recommended personal-development template, then tighten or relax it for your project's risk profile:
 
@@ -66,14 +66,37 @@ This means: allow most tools by default; disable `handoff` and `delegate`; requi
 
 This page starts from `"*": allow` as a trusted-workspace baseline; for a least-privilege baseline instead, the `builder` agent in [Configuration: Agent config](./configuration.md#agent-config) starts from `"*": deny` and opts in only to the tools a role needs.
 
-Permission matching examines the tool call and the session working directory (the directory the tool executes in). For `shell`, only the command string is matched: a `workdir` argument does not participate. For file tools (`read`, `write`, `edit`, `apply_patch`, `delete`, `view_image`), the target path is normalized against the working directory before rules are matched: a path inside the working directory is matched in cwd-relative form (so `foo.go`, `./foo.go`, and an absolute spelling of the same file all hit the same rule), while a path outside the working directory stays absolute.
+Permission matching examines the tool call and the repository the session works in. For `shell`, only the command string is matched: a `workdir` argument does not participate. For file tools (`read`, `write`, `edit`, `apply_patch`, `delete`, `view_image`), the target path is normalized before rules are matched: a path inside any checkout of the current repository becomes repository-relative (`src/main.go`), so `foo.go`, `./foo.go`, `internal/../foo.go`, and an absolute spelling of the same file all hit the same rule no matter which checkout or subdirectory the session runs in. Paths outside every checkout stay absolute. When no repository resolves (a plain directory, or no `git` binary), the session working directory takes the repository's place.
 
 File-tool rule patterns are scoped by their form:
 
-- `*` matches every path spelling: the same "any path" it always meant.
-- A relative pattern (`**`, `src/**`, `tmp/*`) is anchored to the working directory and only matches in-cwd paths. `**` therefore means "everything under the current directory"; `./**` is accepted as the same thing.
-- An absolute pattern (`/Users/me/other/**`, `~/other/**`, `/**`) only matches out-of-cwd absolute paths. `/**` means "every absolute path"; combining it with `**` covers the same ground as `*`. On Windows, home-relative patterns accept either separator (`~\other\**` and `~/other/**`).
-- An absolute rule no longer matches a file inside the working directory; write the in-cwd rule in relative form instead.
+- `*` matches every path spelling, meaning "any path".
+- A relative pattern (`**`, `src/**`, `tmp/*`) only matches normalized relative paths, i.e. paths inside the scope described above. `**` means "any path in the repository", covering every checkout; when no repository resolves it means "any path under the working directory". `./**` is accepted as the same thing.
+- An absolute pattern (`/Users/me/other/**`, `~/other/**`, `/**`) only matches paths outside every checkout. `/**` means "every absolute path"; combining it with `**` covers the same ground as `*`. On Windows, home-relative patterns accept either separator (`~\other\**` and `~/other/**`).
+- An absolute rule does not match a file inside the repository; write the in-repository rule in relative form instead.
+
+This configuration lets the agent delete anything inside the repository and the system temp directory, while `.git`, `.chord`, and any `AGENTS.md` still need confirmation:
+
+```yaml
+permission:
+  delete:
+    "*": ask
+    "**": allow
+    "/tmp/*": allow
+    "/private/tmp/*": allow
+    ".git": ask
+    ".git/*": ask
+    "**/.git": ask
+    "**/.git/*": ask
+    ".chord": ask
+    ".chord/*": ask
+    "**/.chord": ask
+    "**/.chord/*": ask
+    "AGENTS.md": ask
+    "**/AGENTS.md": ask
+```
+
+Rules use last-match-wins ordering, so the broad `**` allow comes first and the narrower rules after it bring the protected paths back to confirmation. Outside the repository a path keeps the spelling the caller used, so `/tmp/*` and `/private/tmp/*` are both listed: on macOS `/tmp` is a symlink to `/private/tmp`, and only the matching spelling hits the rule.
 
 Shell rules only constrain the submitted command string: they do not sandbox the command's filesystem effects, and an allowed command can still `cd` elsewhere, invoke another program, or act on an absolute path. Use narrow shell patterns for approval policy and an OS-level sandbox when actual filesystem confinement is required.
 
@@ -108,6 +131,7 @@ rule. Treat these rules as intent-level gating, not a network sandbox.
 Most tools use the literal `allow` / `ask` / `deny` meaning above, but a few orchestration tools intentionally have extra coupling so permission settings match the workflow Chord can safely run:
 
 - `edit` and `apply_patch` are one file-editing tool family with two model-facing formats (`patch` is accepted as a legacy alias for `apply_patch`). A rule for one editor applies to the other editor when the other editor has no explicit same-tool rule. This includes `deny`: `*: allow` followed by `edit: deny` disables both `edit` and `apply_patch`, because `apply_patch` inherits the edit-family denial. Configure both names when you want different behavior per format. For example, `edit: allow` plus `apply_patch: deny` disables `apply_patch` but keeps `edit` available, so GPT/o-series models fall back to `edit`; conversely, `apply_patch: allow` plus `edit: deny` keeps `apply_patch` available for non-GPT models that would otherwise prefer `edit`.
+- `apply_patch` also subsumes `write` and `delete` for the paths inside one patch: an added or updated file is additionally checked against any rule that names `write`, a deleted file and a move's source against any rule that names `delete`. Those rules can only make the decision stricter (`deny` > `ask` > `allow`); a wildcard default such as `"*": allow` does not leak in. A `delete: deny` therefore cannot be circumvented by removing files through a patch.
 - `handoff` and `done` are treated as control gates. Setting either one to `deny` hides or disables that workflow. Setting it to `allow` or `ask` makes the workflow available; Chord may still show local confirmation at the actual handoff/finish point (for example the loop `done` confirmation). This means `ask` is not a second, stronger workflow mode for these tools: it mainly keeps the tool visible/available while preserving Chord's built-in confirmation gate. The trade-off avoids confusing the model with an available control tool that is later impossible to complete, while still preventing silent role switches or premature loop exits.
 - `done` is the loop workflow's exit signal: Chord mounts it **only while a loop is running**, and `/loop on` is refused with a toast when a rule denies `done`, so `done: deny` reserves loop termination for you. See [Usage: `/loop` continuous execution mode](./usage.md#loop-continuous-execution-mode).
 - `delegate` matches its `agent_type` argument, so a role can restrict delegation to selected SubAgent definitions. For example, the ordered rules below deny every target except `reviewer` and require confirmation before delegating to `tester`:

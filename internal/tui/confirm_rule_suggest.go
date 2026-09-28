@@ -3,13 +3,11 @@ package tui
 import (
 	"encoding/json"
 	"net/url"
-	"os"
 	pathpkg "path"
-	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/keakon/chord/internal/pathutil"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -29,17 +27,18 @@ const maxPatternCandidates = 6
 // argsJSON: the tool arguments as JSON
 // needsApproval: explicit paths that need approval (for Delete)
 // needsApprovalRules: ask rules that already matched, offered as candidates
-// cwd: current working directory (for relative path generation)
-func suggestRulePatternsWithContext(toolName, argsJSON string, needsApproval []string, needsApprovalRules []string, cwd string) []PatternCandidate {
+// scope: path evaluation scope of the call being confirmed, used to spell
+// candidate paths the way the permission engine matches them
+func suggestRulePatternsWithContext(toolName, argsJSON string, needsApproval []string, needsApprovalRules []string, scope permission.PathScope) []PatternCandidate {
 	switch toolNameKey(toolName) {
 	case tools.NameShell:
 		return suggestShellPatterns(argsJSON, needsApproval, needsApprovalRules)
 	case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite:
-		return suggestFilePatterns(toolName, argsJSON, cwd)
+		return suggestFilePatterns(toolName, argsJSON, scope)
 	case tools.NameWebFetch:
 		return suggestWebFetchPatterns(argsJSON)
 	case tools.NameDelete:
-		return suggestDeletePatterns(argsJSON, needsApproval, cwd)
+		return suggestDeletePatterns(argsJSON, needsApproval, scope)
 	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameSkill:
 		return normalizePatternCandidates([]PatternCandidate{
 			{Pattern: "*", Summary: "any " + toolName + " call", Broad: true, Default: true},
@@ -203,7 +202,10 @@ func isHighRiskBashCommand(command string) bool {
 }
 
 // suggestFilePatterns generates pattern candidates for Edit/Write tools.
-func suggestFilePatterns(toolName, argsJSON, cwd string) []PatternCandidate {
+// Paths are normalized through the permission scope, so a candidate is
+// spelled the way the permission engine matches the call no matter which
+// checkout or subdirectory the session runs in.
+func suggestFilePatterns(toolName, argsJSON string, scope permission.PathScope) []PatternCandidate {
 	filePath := extractFilePath(argsJSON)
 	if filePath == "" {
 		return normalizePatternCandidates([]PatternCandidate{
@@ -211,44 +213,38 @@ func suggestFilePatterns(toolName, argsJSON, cwd string) []PatternCandidate {
 		})
 	}
 
+	normalized := permission.NormalizeRulePath(filePath, scope)
+	inScope := permission.RulePathInScope(filePath, scope)
+
 	var candidates []PatternCandidate
 
 	// Literal
 	candidates = append(candidates, PatternCandidate{
-		Pattern: rulePatternForPath(filePath, cwd),
+		Pattern: normalized,
 		Summary: "this exact file",
 	})
 
-	// <dir>/*
-	dir := filepath.Dir(filePath)
+	dir := pathpkg.Dir(normalized)
 	if dir != "." && dir != "" {
-		dirPattern := rulePatternForPath(dir, cwd)
-		if dirPattern != "" && dirPattern != "." {
-			candidates = append(candidates, PatternCandidate{
-				Pattern: filepath.Join(dirPattern, "*"),
-				Summary: "any file in " + dir + "/",
-				Default: isPathWithinCWD(filePath, cwd),
-			})
-		}
-	}
+		// <dir>/*
+		candidates = append(candidates, PatternCandidate{
+			Pattern: pathpkg.Join(dir, "*"),
+			Summary: "any file in " + dir + "/",
+			Default: inScope,
+		})
 
-	// <dir>/** - recursive
-	if dir != "." && dir != "" {
-		dirPattern := rulePatternForPath(dir, cwd)
-		if dirPattern != "" && dirPattern != "." {
-			candidates = append(candidates, PatternCandidate{
-				Pattern: filepath.Join(dirPattern, "**"),
-				Summary: "any file under " + dir + "/ (recursive)",
-			})
-		}
+		// <dir>/** - recursive
+		candidates = append(candidates, PatternCandidate{
+			Pattern: pathpkg.Join(dir, "**"),
+			Summary: "any file under " + dir + "/ (recursive)",
+		})
 	}
 
 	// **/*.<ext>
-	// In cwd-scoped matching a relative "**" pattern only matches in-cwd paths,
-	// so the candidate is only useful when the file lies inside the working
-	// directory; with no cwd the pattern still matches lexically, so it stays.
-	ext := filepath.Ext(filePath)
-	if ext != "" && (strings.TrimSpace(cwd) == "" || isPathWithinCWD(filePath, cwd)) {
+	// A relative "**" pattern only matches in-scope paths, so the candidate is
+	// only useful when the file lies on the relative side of the boundary.
+	ext := pathpkg.Ext(normalized)
+	if ext != "" && inScope {
 		candidates = append(candidates, PatternCandidate{
 			Pattern: "**/*" + ext,
 			Summary: "any " + ext + " file",
@@ -256,11 +252,12 @@ func suggestFilePatterns(toolName, argsJSON, cwd string) []PatternCandidate {
 		})
 	}
 
-	// ** - any file under the current directory (cwd-scoped)
-	if cwd != "" && isPathWithinCWD(filePath, cwd) {
+	// ** - every path the scope spells relative (the whole repository when the
+	// checkout roots are known).
+	if inScope {
 		candidates = append(candidates, PatternCandidate{
 			Pattern: "**",
-			Summary: "any file under current directory",
+			Summary: ruleScopeSummary(scope),
 			Broad:   true,
 		})
 	}
@@ -275,53 +272,22 @@ func suggestFilePatterns(toolName, argsJSON, cwd string) []PatternCandidate {
 	return normalizePatternCandidates(candidates)
 }
 
-// rulePatternForPath converts a tool-supplied path into the spelling a
-// permission rule must use to match it: paths inside the working directory
-// become cwd-relative, paths outside stay absolute. This mirrors how the
-// permission engine normalizes inputs, so the offered rules actually match
-// subsequent calls regardless of whether the model spells the path relative
-// or absolute.
-func rulePatternForPath(path, cwd string) string {
-	p := strings.TrimSpace(path)
-	if p == "" || strings.TrimSpace(cwd) == "" {
-		return p
+// ruleScopeSummary describes what a relative "**" rule covers: every checkout
+// of the repository when the scope carries checkout roots, otherwise the
+// working directory the scope falls back to.
+func ruleScopeSummary(scope permission.PathScope) string {
+	if len(scope.Roots) > 0 || len(scope.Containers) > 0 {
+		return "any path in this repository"
 	}
-	normalized, err := pathutil.NormalizeWithinBase(p, cwd)
-	if err != nil {
-		return filepath.ToSlash(filepath.Clean(p))
-	}
-	return normalized
-}
-
-func isPathWithinCWD(filePath, cwd string) bool {
-	path := strings.TrimSpace(filePath)
-	if path == "" {
-		return false
-	}
-	cwd = strings.TrimSpace(cwd)
-	if cwd == "" {
-		// No session working directory: non-escaping relative paths are
-		// treated as within, absolute paths are not.
-		p := filepath.Clean(path)
-		if filepath.IsAbs(p) {
-			return false
-		}
-		return p != ".." && !strings.HasPrefix(p, ".."+string(os.PathSeparator))
-	}
-	resolved, err := pathutil.ResolveInDir(path, cwd)
-	if err != nil {
-		return false
-	}
-	_, ok := pathutil.RelToBase(resolved, cwd)
-	return ok
+	return "any path under the working directory"
 }
 
 // suggestDeletePatterns generates reusable directory-scoped candidates for
 // Delete. Exact-file rules are omitted because a successfully deleted path is
 // unlikely to be useful again. Directory candidates are ranked by how many
-// requested paths they cover, while cwd-wide "**" and global "*" candidates
+// requested paths they cover, while scope-wide "**" and global "*" candidates
 // have reserved slots so a large batch cannot crowd them out.
-func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) []PatternCandidate {
+func suggestDeletePatterns(argsJSON string, needsApproval []string, scope permission.PathScope) []PatternCandidate {
 	paths := append([]string(nil), needsApproval...)
 	var req struct {
 		Paths []string `json:"paths"`
@@ -335,15 +301,22 @@ func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) 
 	if len(requestedPaths) == 0 {
 		requestedPaths = paths
 	}
-	// Candidate directories are the parents of the requested paths.
-	dirs := make([]string, 0, len(paths))
-	seenDirs := make(map[string]struct{}, len(paths))
+	// Rank and deduplicate on rule spellings, not raw arguments: two spellings
+	// of one file (for example a checkout-absolute and a cwd-relative path)
+	// must collapse to one candidate and count once.
+	normalizedPaths := make([]string, 0, len(paths))
 	for _, raw := range paths {
 		p := strings.TrimSpace(raw)
 		if p == "" {
 			continue
 		}
-		dir := filepath.Dir(p)
+		normalizedPaths = append(normalizedPaths, permission.NormalizeRulePath(p, scope))
+	}
+	// Candidate directories are the normalized parents of the requested paths.
+	dirs := make([]string, 0, len(normalizedPaths))
+	seenDirs := make(map[string]struct{}, len(normalizedPaths))
+	for _, p := range normalizedPaths {
+		dir := pathpkg.Dir(p)
 		if dir == "." || dir == "" {
 			continue
 		}
@@ -364,14 +337,10 @@ func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) 
 	}
 	directories := make([]*directoryCandidate, 0, len(dirs))
 	for _, dir := range dirs {
-		dirPattern := rulePatternForPath(dir, cwd)
-		if dirPattern == "" || dirPattern == "." {
-			continue
-		}
-		prefix := filepath.ToSlash(dir) + "/"
+		prefix := dir + "/"
 		count := 0
-		for _, raw := range paths {
-			if p := filepath.ToSlash(strings.TrimSpace(raw)); strings.HasPrefix(p, prefix) {
+		for _, p := range normalizedPaths {
+			if strings.HasPrefix(p, prefix) {
 				count++
 			}
 		}
@@ -379,8 +348,8 @@ func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) 
 			continue
 		}
 		directories = append(directories, &directoryCandidate{
-			pattern: filepath.ToSlash(filepath.Join(dirPattern, "*")),
-			summary: "any path under " + strings.TrimSuffix(filepath.ToSlash(dirPattern), "/") + "/",
+			pattern: pathpkg.Join(dir, "*"),
+			summary: "any path under " + dir + "/",
 			count:   count,
 		})
 	}
@@ -392,9 +361,9 @@ func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) 
 		return directories[i].pattern < directories[j].pattern
 	})
 
-	includeCWD := allTargetsWithinCWD(requestedPaths, cwd)
+	includeWildcard := allTargetsInRuleScope(requestedPaths, scope)
 	reserved := 1 // The global "*" catch-all is always present.
-	if includeCWD {
+	if includeWildcard {
 		reserved++
 	}
 	directoryLimit := maxPatternCandidates - reserved
@@ -406,10 +375,10 @@ func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) 
 			Default: i == 0,
 		})
 	}
-	if includeCWD {
+	if includeWildcard {
 		candidates = append(candidates, PatternCandidate{
 			Pattern: "**",
-			Summary: "any path under current directory",
+			Summary: ruleScopeSummary(scope),
 			Broad:   true,
 		})
 	}
@@ -417,10 +386,10 @@ func suggestDeletePatterns(argsJSON string, needsApproval []string, cwd string) 
 	return candidates
 }
 
-func allTargetsWithinCWD(paths []string, cwd string) bool {
-	if strings.TrimSpace(cwd) == "" {
-		return false
-	}
+// allTargetsInRuleScope reports whether every requested path lies on the
+// relative side of the scope boundary, so a scope-wide "**" rule would match
+// all of them. An empty or entirely out-of-scope request reports false.
+func allTargetsInRuleScope(paths []string, scope permission.PathScope) bool {
 	found := false
 	for _, raw := range paths {
 		p := strings.TrimSpace(raw)
@@ -428,7 +397,7 @@ func allTargetsWithinCWD(paths []string, cwd string) bool {
 			continue
 		}
 		found = true
-		if !isPathWithinCWD(p, cwd) {
+		if !permission.RulePathInScope(p, scope) {
 			return false
 		}
 	}

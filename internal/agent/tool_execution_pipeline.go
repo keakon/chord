@@ -1017,6 +1017,10 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 		if p.currentTurnID != nil {
 			confirmCtx = tools.WithTurnID(confirmCtx, p.currentTurnID())
 		}
+		// The receiving agent derives rule-suggestion paths from this scope, so
+		// carry the scope this call was evaluated against through the shared
+		// confirm callback.
+		confirmCtx = withRulePathScope(confirmCtx, p.effectivePathScope())
 		resp, err := p.confirm(confirmCtx, tc.Name, string(tc.Args), decision.NeedsApprovalPaths, decision.AlreadyAllowedPaths, decision.NeedsApprovalRules, decision.AlreadyAllowedRules)
 		if err != nil {
 			return wrapToolConfirmationFailed(tc.Name, err)

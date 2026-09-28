@@ -138,21 +138,6 @@ func ResolveInDir(path, baseDir string) (string, error) {
 	return filepath.Clean(filepath.Join(base, resolved)), nil
 }
 
-// NormalizeWithinBase returns path spelled consistently for permission rule
-// matching and rule suggestions: when the resolved path lies inside baseDir it
-// is returned relative to baseDir, otherwise in absolute form. The result
-// always uses "/" separators so rules are portable across platforms.
-func NormalizeWithinBase(path, baseDir string) (string, error) {
-	resolved, err := ResolveInDir(path, baseDir)
-	if err != nil {
-		return "", err
-	}
-	if rel, ok := RelToBase(resolved, baseDir); ok {
-		return filepath.ToSlash(rel), nil
-	}
-	return filepath.ToSlash(resolved), nil
-}
-
 // ResolveSymlinksBestEffort re-spells path through the EvalSymlinks result of
 // its nearest existing ancestor, so a path that differs from a known root only
 // by a symlinked prefix still matches that root. It returns false when no

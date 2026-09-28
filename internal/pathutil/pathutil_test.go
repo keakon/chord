@@ -203,33 +203,6 @@ func TestResolveInDir(t *testing.T) {
 	}
 }
 
-func TestNormalizeWithinBase(t *testing.T) {
-	tests := []struct {
-		name    string
-		path    string
-		baseDir string
-		want    string
-	}{
-		{name: "inside becomes relative", path: "/repo/src/x.go", baseDir: "/repo", want: "src/x.go"},
-		{name: "relative inside", path: "src/x.go", baseDir: "/repo", want: "src/x.go"},
-		{name: "base itself", path: "/repo", baseDir: "/repo", want: "."},
-		{name: "escape stays absolute", path: "/tmp/out", baseDir: "/repo", want: "/tmp/out"},
-		{name: "escape via dotdot becomes absolute", path: "../out", baseDir: "/repo", want: "/out"},
-		{name: "clean traversal", path: "/repo/a/../b", baseDir: "/repo", want: "b"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := NormalizeWithinBase(tt.path, tt.baseDir)
-			if err != nil {
-				t.Fatalf("NormalizeWithinBase(%q, %q) error: %v", tt.path, tt.baseDir, err)
-			}
-			if got != tt.want {
-				t.Fatalf("NormalizeWithinBase(%q, %q) = %q, want %q", tt.path, tt.baseDir, got, tt.want)
-			}
-		})
-	}
-}
-
 func mustMkdirAll(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

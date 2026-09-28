@@ -238,7 +238,7 @@ func (m *Model) enterRulePicker() {
 		return
 	}
 	req := m.confirm.request
-	candidates := suggestRulePatternsWithContext(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.NeedsApprovalRules, m.workingDir)
+	candidates := suggestRulePatternsWithContext(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.NeedsApprovalRules, req.PathScope)
 	if len(candidates) == 0 {
 		return
 	}
