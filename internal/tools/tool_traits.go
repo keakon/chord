@@ -17,7 +17,6 @@ const (
 	NameJobOutput      = toolname.JobOutput
 	NameJobList        = toolname.JobList
 	NameJobKill        = toolname.JobKill
-	NameLsp            = toolname.Lsp
 	NameTodoWrite      = toolname.TodoWrite
 	NameQuestion       = toolname.Question
 	NameDone           = toolname.Done

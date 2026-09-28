@@ -361,13 +361,11 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 	}
 
 	withHelpers := tool.DescriptionForTools(map[string]struct{}{
-		NameLsp:  {},
 		NameGrep: {},
 		NameGlob: {},
 		NameRead: {},
 	})
 	for _, want := range []string{
-		"use `lsp` first for symbol-aware navigation",
 		"use `grep` for repo text search before reaching for rg",
 		"use `glob` for file or path discovery before reaching for rg --files or find",
 		"use `read` once you have narrowed the target files",

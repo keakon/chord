@@ -57,11 +57,6 @@ func TestToolResultSummaryLineShowsTerminalStates(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "lsp failed",
-			blk:  &Block{ToolName: "lsp", ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
-			want: "",
-		},
-		{
 			name: "cancel failed",
 			blk:  &Block{ToolName: "cancel", ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
 			want: "",

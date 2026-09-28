@@ -20,7 +20,6 @@ const (
 	JobOutput      = "job_output"
 	JobList        = "job_list"
 	JobKill        = "job_kill"
-	Lsp            = "lsp"
 	TodoWrite      = "todo_write"
 	Question       = "question"
 	Done           = "done"

@@ -458,7 +458,8 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 		}
 		return
 	}
-	// Wait for the server to be ready before exposing it (sidebar green + ClientForPath).
+	// Wait for the server to be ready before exposing it to the sidebar and the
+	// post-write sync.
 	// Avoids "gopls: not started" when the first call happens before init completes (see crush).
 	const serverReadyTimeout = 15 * time.Second
 	if err := client.WaitForServerReady(ctx, serverReadyTimeout); err != nil {
@@ -978,10 +979,10 @@ func (m *Manager) waitForClientForPath(ctx context.Context, path string, timeout
 		// when an ancestor client already handles the file: an instance rooted
 		// at the repository root also accepts files inside a nested package,
 		// so returning it while the nearer instance for this path is still
-		// starting would route the first navigation or the post-write sync to
-		// the old environment. Once the launch settles (its client registers,
-		// or the launch ends without one) the owner below is final and can be
-		// served; a failed nearer launch falls back to the ancestor.
+		// starting would route the post-write sync to the old environment.
+		// Once the launch settles (its client registers, or the launch ends
+		// without one) the owner below is final and can be served; a failed
+		// nearer launch falls back to the ancestor.
 		if m.hasPendingStartForPathLocked(path) {
 			return nil, false, true
 		}
@@ -1019,14 +1020,6 @@ func (m *Manager) waitForClientForPath(ctx context.Context, path string, timeout
 		case <-ticker.C:
 		}
 	}
-}
-
-// ClientForPath returns a client that handles the given path, starting the server if needed.
-// If the server is still starting (async), waits up to clientWaitTimeout for it to appear.
-// Returns (nil, false) if no LSP is configured for this path or the server did not become ready in time.
-func (m *Manager) ClientForPath(ctx context.Context, path string) (*Client, bool) {
-	const clientWaitTimeout = 20 * time.Second
-	return m.waitForClientForPath(ctx, path, clientWaitTimeout)
 }
 
 // DidOpen sends didOpen to the clients that own path; maintains version per client.
@@ -1332,46 +1325,4 @@ func (m *Manager) Stop(ctx context.Context) {
 			return
 		}
 	}
-}
-
-// ConfiguredServerInfo describes a configured LSP server and its handled file types.
-type ConfiguredServerInfo struct {
-	Name      string
-	FileTypes []string
-}
-
-// ConfiguredServers returns the list of enabled LSP servers sorted by name.
-// FileTypes are normalized to "*.ext" format and returned as a copy.
-func (m *Manager) ConfiguredServers() []ConfiguredServerInfo {
-	if m == nil || m.cfg == nil {
-		return nil
-	}
-	var names []string
-	for name, srv := range m.cfg.LSP {
-		if !srv.Disabled {
-			names = append(names, name)
-		}
-	}
-	if len(names) == 0 {
-		return nil
-	}
-	sort.Strings(names)
-	out := make([]ConfiguredServerInfo, 0, len(names))
-	for _, name := range names {
-		srv := m.cfg.LSP[name]
-		var fts []string
-		for _, ft := range srv.FileTypes {
-			ext := strings.ToLower(ft)
-			if ext == "" {
-				continue
-			}
-			if ext[0] != '.' {
-				ext = "." + ext
-			}
-			fts = append(fts, "*"+ext)
-		}
-		sort.Strings(fts)
-		out = append(out, ConfiguredServerInfo{Name: name, FileTypes: fts})
-	}
-	return out
 }

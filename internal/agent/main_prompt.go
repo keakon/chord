@@ -322,9 +322,6 @@ func (a *MainAgent) lspDiagnosticPromptBlock() string {
 }
 
 func (a *MainAgent) shouldInjectLSPDiagnosticPrompt() bool {
-	if ruleset := a.effectiveRuleset(); len(ruleset) > 0 && ruleset.IsDisabled(tools.NameLsp) {
-		return false
-	}
 	visible := a.mainVisibleLLMToolNames()
 	if len(visible) == 0 {
 		return false

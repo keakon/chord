@@ -892,7 +892,7 @@ func TestEditToolCardKeepsFinalInlineDiffBackgrounds(t *testing.T) {
 }
 
 func TestRenderInlineDiffLineKeepsTabIndentedDeletionAligned(t *testing.T) {
-	oldLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameJobOutput, tools.NameLsp:"
+	oldLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameJobOutput, tools.NameViewImage:"
 	newLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameJobOutput:"
 	hl := newCodeHighlighter("example.go", "package tui\n\nfunc example() {\n"+oldLine+"\n}\n")
 
@@ -904,9 +904,9 @@ func TestRenderInlineDiffLineKeepsTabIndentedDeletionAligned(t *testing.T) {
 	if got := stripANSI(lines[0]); got != wantLine {
 		t.Fatalf("rendered line = %q, want %q", got, wantLine)
 	}
-	want := DiffDelInlineStyle.Render(", tools.NameLsp")
+	want := DiffDelInlineStyle.Render(", tools.NameViewImage")
 	if !strings.Contains(lines[0], want) {
-		t.Fatalf("expected deletion style to cover only %q, got %q", ", tools.NameLsp", lines[0])
+		t.Fatalf("expected deletion style to cover only %q, got %q", ", tools.NameViewImage", lines[0])
 	}
 }
 

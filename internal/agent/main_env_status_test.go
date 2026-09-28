@@ -24,8 +24,8 @@ func TestIntegrationStatusRespectsActiveRolePermissions(t *testing.T) {
 	})
 
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionDeny}}
-	if got := a.LSPServerList(); len(got) != 0 {
-		t.Fatalf("LSPServerList() = %#v, want no rows when lsp is denied", got)
+	if got := a.LSPServerList(); len(got) != 1 || got[0].Name != "gopls" {
+		t.Fatalf("LSPServerList() = %#v, want server status independent of tool permissions", got)
 	}
 	if got := a.MCPServerList(); len(got) != 0 {
 		t.Fatalf("MCPServerList() = %#v, want no rows when all Exa tools are denied", got)
@@ -42,20 +42,13 @@ func TestIntegrationStatusRespectsActiveRolePermissions(t *testing.T) {
 	if got := a.MCPServerList(); len(got) != 1 || got[0].Name != "exa" {
 		t.Fatalf("MCPServerList() = %#v, want visible Exa row", got)
 	}
-	if got := a.LSPServerList(); len(got) != 0 {
-		t.Fatalf("LSPServerList() = %#v, want lsp to remain hidden", got)
+	if got := a.LSPServerList(); len(got) != 1 || got[0].Name != "gopls" {
+		t.Fatalf("LSPServerList() = %#v, want server status independent of tool permissions", got)
 	}
 	if got := a.visibleMCPServersPromptBlock(); !strings.Contains(got, "mcp_exa_web_search_exa") {
 		t.Fatalf("visibleMCPServersPromptBlock() = %q, want visible Exa tool", got)
 	}
 
-	a.ruleset = permission.Ruleset{
-		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
-		{Permission: "lsp", Pattern: "*", Action: permission.ActionAllow},
-	}
-	if got := a.LSPServerList(); len(got) != 1 || got[0].Name != "gopls" {
-		t.Fatalf("LSPServerList() = %#v, want visible gopls row", got)
-	}
 }
 
 func TestMCPCommandHidesDeniedServers(t *testing.T) {

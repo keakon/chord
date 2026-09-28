@@ -1156,14 +1156,6 @@ func looksLikeSearchResult(ctx requestReductionContext) bool {
 	switch ctx.ToolName {
 	case tools.NameGrep, tools.NameGlob:
 		return true
-	case tools.NameLsp:
-		var parsed struct {
-			Operation string `json:"operation"`
-		}
-		if err := json.Unmarshal([]byte(ctx.Meta.Args), &parsed); err != nil {
-			return false
-		}
-		return strings.TrimSpace(parsed.Operation) == "references"
 	default:
 		return looksLikeSearchResultContent(ctx.Content)
 	}
@@ -1521,14 +1513,6 @@ func reduceSearchScope(ctx requestReductionContext) string {
 		}
 		_ = json.Unmarshal([]byte(ctx.Meta.Args), &parsed)
 		return fmt.Sprintf("patterns=%q path=%q", reduceSearchList(parsed.Patterns, ""), blankToDefault(strings.TrimSpace(parsed.Path), "."))
-	case tools.NameLsp:
-		var parsed struct {
-			Operation string `json:"operation"`
-			Path      string `json:"path"`
-			Line      int    `json:"line"`
-		}
-		_ = json.Unmarshal([]byte(ctx.Meta.Args), &parsed)
-		return fmt.Sprintf("operation=%q path=%q line=%d", strings.TrimSpace(parsed.Operation), strings.TrimSpace(parsed.Path), parsed.Line)
 	default:
 		return "query preserved"
 	}

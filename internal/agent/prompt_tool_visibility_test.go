@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -24,9 +23,9 @@ func TestToolDefinitionsKeepLocalContractsOnRestrictedSurfaces(t *testing.T) {
 		want   string
 		absent []string
 	}{
-		{tools.NameRead, "offset/limit cannot split a single line", []string{tools.NameGrep, tools.NameLsp, tools.NameShell}},
-		{tools.NameGrep, "Returns matching lines with file paths and line numbers", []string{tools.NameLsp}},
-		{tools.NameGlob, "glob syntax, not regex and not a file-contents search", []string{tools.NameRead, tools.NameGrep, tools.NameLsp}},
+		{tools.NameRead, "offset/limit cannot split a single line", []string{tools.NameGrep, tools.NameShell}},
+		{tools.NameGrep, "Returns matching lines with file paths and line numbers", nil},
+		{tools.NameGlob, "glob syntax, not regex and not a file-contents search", []string{tools.NameRead, tools.NameGrep}},
 		{tools.NameWrite, "Empty content truncates the file to zero bytes", []string{tools.NameEdit, tools.NameDelete}},
 		{tools.NameDelete, "Does not delete directories or wildcard patterns", []string{tools.NameWrite}},
 		{tools.NameDelegate, "delivered asynchronously", []string{tools.NameRead, tools.NameGrep, tools.NameShell, tools.NameNotify, tools.NameCancel}},
@@ -197,21 +196,18 @@ func TestToolSelectionOwnsVisibilityAwareNavigation(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ReadTool{})
 	reg.Register(tools.GrepTool{})
-	reg.Register(tools.LspTool{LSP: lsp.NewManager(&config.Config{}, t.TempDir(), nil)})
 	for _, navigation := range []bool{false, true} {
 		rules := permission.Ruleset{
 			{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
 			{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionAllow},
 		}
 		if navigation {
-			for _, name := range []string{tools.NameGrep, tools.NameLsp} {
-				rules = append(rules, permission.Rule{Permission: name, Pattern: "*", Action: permission.ActionAllow})
-			}
+			rules = append(rules, permission.Rule{Permission: tools.NameGrep, Pattern: "*", Action: permission.ActionAllow})
 		}
 		a := &MainAgent{tools: reg, ruleset: rules}
 		prompt := a.mainAgentCapabilityPromptBlock()
 		for _, want := range []string{
-			"prefer `lsp` when the file type has LSP coverage",
+			"Use `grep` for discovery and navigation.",
 			"use `grep` for targeted text matches",
 		} {
 			if got := strings.Contains(prompt, want); got != navigation {

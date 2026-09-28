@@ -777,9 +777,6 @@ func compactToolHiddenResultLines(b *Block, contentWidth int) int {
 		return 0
 	}
 	displayResult := b.stripResultNotes(toolExpandedResultContent(b.ToolName, b.ResultContent))
-	if b.ToolName == tools.NameLsp && !b.toolResultIsError() && !b.toolResultIsCancelled() {
-		displayResult = toolDisplayResultContent(b)
-	}
 	if b.ToolName == tools.NameDelete {
 		displayResult = sanitizeToolDisplayText(displayResult)
 		nonEmpty := 0
@@ -864,7 +861,7 @@ func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 		return false
 	}
 	switch b.ToolName {
-	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameLsp:
+	case tools.NameGrep, tools.NameGlob, tools.NameShell:
 		// Search cards have their own count-based summaries; the generic
 		// "only one hidden line" heuristic must not force them expanded, or
 		// Space could never collapse them again (the toggle guard below).
@@ -918,7 +915,7 @@ func compactToolHeaderResultSummary(b *Block) (summary string, ok bool) {
 		return "", false
 	}
 	switch toolNameKey(b.ToolName) {
-	case tools.NameLsp, tools.NameJobKill:
+	case tools.NameJobKill:
 		if b.toolExecutionIsQueued() {
 			return "", true
 		}

@@ -184,7 +184,7 @@ func TestOverlayRuleChangesRefreshRuntimeSurfaces(t *testing.T) {
 	a.sessionBuilt.Store(true)
 	a.surfaceDirty.Store(false)
 
-	if err := a.AddOverlayRule(permission.Rule{Permission: tools.NameLsp, Pattern: "*", Action: permission.ActionDeny}, permission.ScopeSession); err != nil {
+	if err := a.AddOverlayRule(permission.Rule{Permission: tools.NameGrep, Pattern: "*", Action: permission.ActionDeny}, permission.ScopeSession); err != nil {
 		t.Fatalf("AddOverlayRule: %v", err)
 	}
 	if a.sessionBuilt.Load() || !a.surfaceDirty.Load() {

@@ -95,7 +95,6 @@ func TestReadOnlyBatchableToolPoliciesStayNonExclusive(t *testing.T) {
 		{NameGrep, GrepTool{BaseDir: "/tmp"}, `{"pattern":"TODO","paths":["."]}`},
 		{NameGlob, GlobTool{BaseDir: "/tmp"}, `{"path":"."}`},
 		{NameWebFetch, WebFetchTool{}, `{"url":"https://example.invalid/page"}`},
-		{NameLsp, LspTool{BaseDir: "/tmp"}, `{"path":"main.go"}`},
 		{NameWorktreeList, WorktreeListTool{}, `{}`},
 	}
 	declared, _ := scanReadOnlyClassDeclarations(t)

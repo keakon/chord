@@ -458,8 +458,8 @@ func TestIsDisabledMCPWildcardRule(t *testing.T) {
 	if rs.IsDisabled("mcp_exa_web_search_exa") {
 		t.Fatal("mcp_* allow should expose mcp_exa_web_search_exa")
 	}
-	if !rs.IsDisabled("lsp") {
-		t.Fatal("mcp_* allow should not expose lsp")
+	if !rs.IsDisabled("grep") {
+		t.Fatal("mcp_* allow should not expose grep")
 	}
 }
 

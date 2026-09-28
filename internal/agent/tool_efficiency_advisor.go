@@ -58,7 +58,7 @@ type toolEfficiencyState struct {
 // in parallel within one response, making one-per-response streaks wasteful.
 func isBatchableLookupTool(name string) bool {
 	switch tools.NormalizeName(name) {
-	case tools.NameRead, tools.NameGrep, tools.NameGlob, tools.NameLsp:
+	case tools.NameRead, tools.NameGrep, tools.NameGlob:
 		return true
 	default:
 		return false
@@ -115,7 +115,7 @@ func (t *Turn) efficiencyNoteForToolResult(callID, toolName, argsJSON, rawResult
 		return fmt.Sprintf(
 			"Efficiency note: each of the last %d responses issued exactly one read-only lookup (%s). When your next lookups are independent of each other (different files, symbols, or ranges), issue them together in one response — they run in parallel and each avoided response saves a full model round trip. Keep one lookup per response only when it depends on the previous result.",
 			s.armedStreakLen,
-			strings.Join([]string{tools.NameRead, tools.NameGrep, tools.NameGlob, tools.NameLsp}, ", "),
+			strings.Join([]string{tools.NameRead, tools.NameGrep, tools.NameGlob}, ", "),
 		)
 	}
 	if readNoteEligible {

@@ -40,7 +40,7 @@ func suggestRulePatternsWithContext(toolName, argsJSON string, needsApproval []s
 		return suggestWebFetchPatterns(argsJSON)
 	case tools.NameDelete:
 		return suggestDeletePatterns(argsJSON, needsApproval, cwd)
-	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameSkill:
+	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameSkill:
 		return normalizePatternCandidates([]PatternCandidate{
 			{Pattern: "*", Summary: "any " + toolName + " call", Broad: true, Default: true},
 		})

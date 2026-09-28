@@ -34,9 +34,6 @@ func (a *MainAgent) LSPServerList() []LSPServerDisplay {
 	if a.lspServerListFn == nil {
 		return nil
 	}
-	if ruleset := a.effectiveRuleset(); len(ruleset) > 0 && ruleset.IsDisabled(tools.NameLsp) {
-		return nil
-	}
 	return a.lspServerListFn()
 }
 

@@ -8,7 +8,7 @@ Start with the behavior you want to change. You do not need to configure every e
 | Assign models and permissions by role | [Agents](#agents) |
 | Load specialized knowledge or procedures on demand | [Skills](#skills) |
 | Automate notifications, checks, or tool-result processing | [Hooks](#hooks) |
-| Get code diagnostics, definitions, and references | [LSP](#lsp) |
+| Get code diagnostics while editing | [LSP](#lsp) |
 | Connect external tools | [MCP](#mcp) |
 | Save reusable prompts | [Custom commands](#custom-slash-commands) |
 
@@ -183,7 +183,7 @@ For the full list of trigger points (14 in total), the JSON envelope contract, s
 
 ## LSP
 
-LSP can return semantic diagnostics after file writes and provide `definition` / `references` / `implementation` capabilities.
+LSP returns semantic diagnostics after file writes.
 
 Typical config:
 

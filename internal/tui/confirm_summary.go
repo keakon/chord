@@ -188,8 +188,6 @@ func confirmActionText(toolName string) string {
 		return "Search file contents"
 	case tools.NameGlob:
 		return "Find matching files"
-	case tools.NameLsp:
-		return "Query language server"
 	default:
 		if toolName == "" {
 			return "Execute tool"
@@ -204,7 +202,7 @@ func confirmRiskForTool(toolName string) confirmRiskLevel {
 		return confirmRiskHigh
 	case tools.NameEdit, tools.NameApplyPatch, tools.NameWrite, tools.NameDelete:
 		return confirmRiskMedium
-	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameLsp, tools.NameWebFetch, tools.NameJobOutput, tools.NameJobList:
+	case tools.NameRead, tools.NameViewImage, tools.NameGrep, tools.NameGlob, tools.NameWebFetch, tools.NameJobOutput, tools.NameJobList:
 		return confirmRiskLow
 	default:
 		return confirmRiskMedium

@@ -165,7 +165,6 @@ func ensureRuntimeLSP(ac *AppContext) {
 	ac.Registry.Register(tools.ApplyPatchTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
 	ac.Registry.Register(tools.EditTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
 	ac.Registry.Register(tools.DeleteTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
-	ac.Registry.Register(tools.LspTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
 }
 
 // rebindLSPForWorkDir re-roots the session's language servers after a worktree

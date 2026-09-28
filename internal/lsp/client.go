@@ -34,10 +34,6 @@ type lspProcessClient interface {
 	NotifyDidCloseTextDocument(ctx context.Context, uri string) error
 	NotifyDidChangeWatchedFiles(ctx context.Context, changes []protocol.FileEvent) error
 	NotifyWorkspaceDidChangeConfiguration(ctx context.Context, settings any) error
-	RequestHover(ctx context.Context, uri string, position protocol.Position) (*protocol.Hover, error)
-	RequestDefinitionRaw(ctx context.Context, uri string, position protocol.Position) (*protocol.Or_Result_textDocument_definition, error)
-	RequestImplementation(ctx context.Context, uri string, position protocol.Position) (*protocol.Or_Result_textDocument_implementation, error)
-	FindReferences(ctx context.Context, filepath string, line, character int, includeDeclaration bool) ([]protocol.Location, error)
 }
 
 // Client wraps a powernap LSP client with per-file version tracking and diagnostic cache.
@@ -648,22 +644,6 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	}
 }
 
-// OpenFileOnDemand opens the file with the LSP server if not already open (reads from disk).
-func (c *Client) OpenFileOnDemand(ctx context.Context, path string) error {
-	c.openFilesMu.Lock()
-	_, ok := c.openFiles[path]
-	c.openFilesMu.Unlock()
-	if ok {
-		return nil
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	_, err = c.DidOpen(ctx, path, string(content))
-	return err
-}
-
 // NotifyChange reads the file and sends didChange (file must already be open).
 func (c *Client) NotifyChange(ctx context.Context, path string) error {
 	content, err := os.ReadFile(path)
@@ -685,148 +665,6 @@ func handleApplyEdit(_ context.Context, _ string, params json.RawMessage) (any, 
 
 func handleRegisterCapability(_ context.Context, _ string, _ json.RawMessage) (any, error) {
 	return nil, nil
-}
-
-// HoverResult is a simplified hover result for tools (no dependency on LSP protocol).
-type HoverResult struct {
-	Contents string
-}
-
-// RefLocation is a single reference location for tools.
-type RefLocation struct {
-	Path string
-	Line int
-	Col  int
-}
-
-func definitionResultToRefLocations(res *protocol.Or_Result_textDocument_definition) ([]RefLocation, error) {
-	if res == nil || res.Value == nil {
-		return nil, nil
-	}
-	switch v := res.Value.(type) {
-	case protocol.Definition:
-		switch dv := v.Value.(type) {
-		case nil:
-			return nil, nil
-		case protocol.Location:
-			return []RefLocation{locationToRefLocation(dv)}, nil
-		case []protocol.Location:
-			return locationsToRefLocations(dv), nil
-		default:
-			return nil, fmt.Errorf("unsupported definition nested result type %T", v.Value)
-		}
-	case []protocol.DefinitionLink:
-		return definitionLinksToRefLocations(v), nil
-	default:
-		return nil, fmt.Errorf("unsupported definition result type %T", res.Value)
-	}
-}
-
-func implementationResultToRefLocations(res *protocol.Or_Result_textDocument_implementation) ([]RefLocation, error) {
-	if res == nil || res.Value == nil {
-		return nil, nil
-	}
-	switch v := res.Value.(type) {
-	case protocol.Definition:
-		switch dv := v.Value.(type) {
-		case nil:
-			return nil, nil
-		case protocol.Location:
-			return []RefLocation{locationToRefLocation(dv)}, nil
-		case []protocol.Location:
-			return locationsToRefLocations(dv), nil
-		default:
-			return nil, fmt.Errorf("unsupported implementation definition result type %T", v.Value)
-		}
-	case []protocol.DefinitionLink:
-		return definitionLinksToRefLocations(v), nil
-	default:
-		return nil, fmt.Errorf("unsupported implementation result type %T", res.Value)
-	}
-}
-
-func locationsToRefLocations(locs []protocol.Location) []RefLocation {
-	out := make([]RefLocation, 0, len(locs))
-	for _, loc := range locs {
-		out = append(out, locationToRefLocation(loc))
-	}
-	return out
-}
-
-func locationToRefLocation(loc protocol.Location) RefLocation {
-	p, _ := loc.URI.Path()
-	return RefLocation{
-		Path: p,
-		Line: int(loc.Range.Start.Line),
-		Col:  int(loc.Range.Start.Character),
-	}
-}
-
-func definitionLinksToRefLocations(links []protocol.DefinitionLink) []RefLocation {
-	out := make([]RefLocation, 0, len(links))
-	for _, link := range links {
-		p, _ := link.TargetURI.Path()
-		out = append(out, RefLocation{
-			Path: p,
-			Line: int(link.TargetSelectionRange.Start.Line),
-			Col:  int(link.TargetSelectionRange.Start.Character),
-		})
-	}
-	return out
-}
-
-// Hover returns hover information at the given position (line and character are 0-based).
-func (c *Client) Hover(ctx context.Context, path string, line, character int) (*HoverResult, error) {
-	uri := c.pathToURI(path)
-	pos := protocol.Position{Line: uint32(line), Character: uint32(character)}
-	h, err := c.client.RequestHover(ctx, uri, pos)
-	if err != nil {
-		return nil, err
-	}
-	if h == nil {
-		return &HoverResult{}, nil
-	}
-	return &HoverResult{Contents: h.Contents.Value}, nil
-}
-
-// GoToDefinition returns definition locations for the symbol at the given position (line and character 0-based).
-func (c *Client) GoToDefinition(ctx context.Context, path string, line, character int) ([]RefLocation, error) {
-	uri := c.pathToURI(path)
-	pos := protocol.Position{Line: uint32(line), Character: uint32(character)}
-	res, err := c.client.RequestDefinitionRaw(ctx, uri, pos)
-	if err != nil {
-		return nil, err
-	}
-	return definitionResultToRefLocations(res)
-}
-
-// FindReferences returns all references to the symbol at the given position (line and character 0-based).
-func (c *Client) FindReferences(ctx context.Context, path string, line, character int, includeDeclaration bool) ([]RefLocation, error) {
-	locs, err := c.client.FindReferences(ctx, path, line, character, includeDeclaration)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]RefLocation, 0, len(locs))
-	for _, loc := range locs {
-		p, _ := loc.URI.Path()
-		out = append(out, RefLocation{
-			Path: p,
-			Line: int(loc.Range.Start.Line),
-			Col:  int(loc.Range.Start.Character),
-		})
-	}
-	return out, nil
-}
-
-// FindImplementations returns implementation locations for the symbol at the given position (line and character 0-based).
-func (c *Client) FindImplementations(ctx context.Context, path string, line, character int) ([]RefLocation, error) {
-	uri := c.pathToURI(path)
-	pos := protocol.Position{Line: uint32(line), Character: uint32(character)}
-	res, err := c.client.RequestImplementation(ctx, uri, pos)
-	if err != nil {
-		return nil, err
-	}
-	return implementationResultToRefLocations(res)
 }
 
 // WaitForServerReady polls IsRunning until true or timeout.

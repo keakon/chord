@@ -8,7 +8,7 @@
 | 给不同任务分配模型和权限 | [自定义 Agents](#自定义-agents) |
 | 按需加载专业知识或操作步骤 | [Skills](#skills) |
 | 自动通知、检查或处理工具结果 | [Hooks](#hooks) |
-| 获取代码诊断、定义和引用 | [LSP](#lsp) |
+| 获取代码诊断 | [LSP](#lsp) |
 | 接入外部工具 | [MCP](#mcp) |
 | 保存常用提示词 | [自定义命令](#自定义-slash-commands) |
 
@@ -150,7 +150,7 @@ hooks:
 
 ## LSP
 
-LSP 可在写文件后返回语义级诊断，并提供 `definition` / `references` / `implementation` 等能力。
+LSP 可在写文件后返回语义级诊断。
 
 典型配置：
 

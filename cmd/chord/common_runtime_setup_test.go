@@ -178,8 +178,8 @@ func TestEnsureRuntimeLSPNoopsWithoutConfig(t *testing.T) {
 	if ac.LSPManager != nil {
 		t.Fatal("LSP manager should stay nil without LSP config")
 	}
-	if _, ok := ac.Registry.Get(tools.NameLsp); ok {
-		t.Fatal("LSP tool should not be registered without LSP config")
+	if registered := ac.Registry.ToolsSnapshot(); len(registered) != 0 {
+		t.Fatalf("LSP-aware tools should not be registered without LSP config: %d registered", len(registered))
 	}
 }
 
@@ -198,7 +198,7 @@ func TestEnsureRuntimeLSPRegistersLSPAwareTools(t *testing.T) {
 	if ac.LSPManager == nil {
 		t.Fatal("LSP manager was not initialized")
 	}
-	for _, name := range []string{tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameDelete, tools.NameLsp} {
+	for _, name := range []string{tools.NameRead, tools.NameWrite, tools.NameEdit, tools.NameDelete} {
 		if _, ok := ac.Registry.Get(name); !ok {
 			t.Fatalf("tool %s was not registered", name)
 		}

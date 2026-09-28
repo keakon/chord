@@ -52,7 +52,6 @@ func TestToolParameterDescriptionsMentionDefaults(t *testing.T) {
 		{name: "read limit", tool: ReadTool{}, path: []string{"limit"}, want: "Defaults to 2000."},
 		{name: "glob path", tool: GlobTool{}, path: []string{"path"}, want: "Defaults to the session working directory."},
 		{name: "grep paths", tool: GrepTool{}, path: []string{"paths"}, want: "Defaults to the session working directory when omitted."},
-		{name: "lsp include declaration", tool: LspTool{}, path: []string{"include_declaration"}, want: "Default true."},
 		{name: "edit replace all", tool: EditTool{}, path: []string{"replace_all"}, want: "Default is false."},
 		{name: "shell workdir", tool: NewShellTool(""), path: []string{"workdir"}, want: "run in the current Working directory"},
 		{name: "shell timeout", tool: NewShellTool(""), path: []string{"timeout_ms"}, want: "A foreground command defaults to 600000"},

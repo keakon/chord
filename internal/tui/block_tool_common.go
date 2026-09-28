@@ -905,7 +905,7 @@ func bashFirstNonEmptyLine(content string) string {
 func toolSummarySuppressesErrors(name string) bool {
 	switch name {
 	case tools.NameJobList, tools.NameJobKill, tools.NameDelegate, tools.NameGrep,
-		tools.NameGlob, tools.NameLsp, tools.NameCancel, tools.NameNotify:
+		tools.NameGlob, tools.NameCancel, tools.NameNotify:
 		return true
 	}
 	return false
@@ -1092,8 +1092,6 @@ func formatToolResultSummaryLine(b *Block) string {
 			return ""
 		}
 		return fmt.Sprintf("%d files", count)
-	case tools.NameLsp:
-		return lspResultSummary(b.Content, trimmed)
 	case tools.NameCancel:
 		handle, _, ok := parseTaskToolHandle(trimmed)
 		if ok && handle.Status == "cancelled" {

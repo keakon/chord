@@ -99,7 +99,7 @@ func (b *Block) toolHeaderMeta() (paramSummary, mainPart, grayPart, collapsedMai
 	if !b.toolHeaderCacheParamLinesOK {
 		paramVals := vals
 		switch b.ToolName {
-		case tools.NameRead, tools.NameViewImage, tools.NameDelete, tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameLsp:
+		case tools.NameRead, tools.NameViewImage, tools.NameDelete, tools.NameGrep, tools.NameGlob, tools.NameShell:
 			paramVals = cloneToolValsWithDisplayDirs(b, vals)
 		}
 		b.toolHeaderCacheParamLines = append(b.toolHeaderCacheParamLines[:0], extractToolParamsLinesWithParsed(b.ToolName, keys, paramVals)...)
@@ -383,7 +383,7 @@ func cloneToolValsWithDisplayDirs(b *Block, vals map[string]string) map[string]s
 	}
 	if path, ok := cloned["path"]; ok {
 		switch b.ToolName {
-		case tools.NameGrep, tools.NameGlob, tools.NameLsp:
+		case tools.NameGrep, tools.NameGlob:
 			cloned["path"] = b.displayToolDir(path)
 		case tools.NameRead, tools.NameViewImage, tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete:
 			cloned["path"] = b.displayToolPath(path)
@@ -498,8 +498,6 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 		return formatToolHeaderPartsWithParsed("", keys, vals)
 	}
 	switch b.ToolName {
-	case tools.NameLsp:
-		return b.lspToolHeaderParts()
 	case tools.NameDelete:
 		mainPart, grayPart := b.deleteDiagnosticHeaderParts(vals)
 		if mainPart != "" {
@@ -563,7 +561,7 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 // apply_patch, write, read) derive their main part from the header renderers,
 // so they fall back to the path here. The result is always sanitized: header
 // rendering strips control characters at draw time, but summaries are terminal
-// output too and the formatter values (glob patterns, lsp operations) can
+// output too and the formatter values (glob patterns, edit hunks) can
 // still carry raw escapes.
 func (b *Block) toolCallSummaryMainPart() string {
 	keys, vals := b.toolArgsParsed()
@@ -626,7 +624,7 @@ func (b *Block) formatToolHeaderParamsWithParsed(keys []string, vals map[string]
 			return summary + " " + gray
 		}
 		return summary
-	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameLsp:
+	case tools.NameGrep, tools.NameGlob, tools.NameShell:
 		return b.toolHeaderParamsWithDisplayDirs(vals)
 	default:
 		return formatToolHeaderParamsWithParsed(b.ToolName, b.headerParamSummaryKeys(keys, vals), vals)

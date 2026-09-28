@@ -77,9 +77,6 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		lines = append(lines, "- Use "+toolPromptName(tools.NameRead)+" for file contents when the target path is already known or has been verified.")
 		lines = append(lines, "- When the user provides complete file contents in a "+"`<file path=...>`"+" reference, treat that content as the working context; do not re-read the same file merely to obtain duplicate contents. Re-read only when the supplied content is incomplete, the file may have changed on disk, or the edit workflow requires fresh file state, and then read only the needed range.")
 	}
-	if hasVisibleTool(visible, tools.NameLsp) {
-		lines = append(lines, "- For semantic navigation at a known position (definition, references, implementations), prefer "+toolPromptName(tools.NameLsp)+" when the file type has LSP coverage.")
-	}
 	// Check for either edit tool (patch or edit/replace)
 	editToolName := visibleEditToolName(visible)
 	patchOnlySurface := editToolName == tools.NameApplyPatch &&
@@ -137,15 +134,12 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 }
 
 func visiblePathDiscoveryTools(visible map[string]struct{}) []string {
-	discoveryTools := make([]string, 0, 3)
+	discoveryTools := make([]string, 0, 2)
 	if hasVisibleTool(visible, tools.NameGlob) {
 		discoveryTools = append(discoveryTools, toolPromptName(tools.NameGlob))
 	}
 	if hasVisibleTool(visible, tools.NameGrep) {
 		discoveryTools = append(discoveryTools, toolPromptName(tools.NameGrep))
-	}
-	if hasVisibleTool(visible, tools.NameLsp) {
-		discoveryTools = append(discoveryTools, toolPromptName(tools.NameLsp))
 	}
 	return discoveryTools
 }
@@ -173,17 +167,12 @@ func fileInspectionConstraintsPromptBlock(visible map[string]struct{}, ruleset p
 	hasRead := hasVisibleTool(visible, tools.NameRead)
 	hasGrep := hasVisibleTool(visible, tools.NameGrep)
 	hasGlob := hasVisibleTool(visible, tools.NameGlob)
-	hasLsp := hasVisibleTool(visible, tools.NameLsp)
-	// lsp is only registered when language servers are configured, so its
-	// absence alone is a missing integration, not a permission boundary; only
-	// a rule that denies it limits the role.
-	lspDenied := !hasLsp && ruleset.IsDisabled(tools.NameLsp)
-	if hasRead && hasGrep && hasGlob && !lspDenied && !hasScopedInspectionPermissions(ruleset) {
+	if hasRead && hasGrep && hasGlob && !hasScopedInspectionPermissions(ruleset) {
 		return ""
 	}
 
 	var lines []string
-	if !hasRead && !hasGrep && !hasGlob && !hasLsp {
+	if !hasRead && !hasGrep && !hasGlob {
 		lines = []string{
 			"- This role has no direct file inspection or code-navigation tools available in the prompt.",
 			"- Do not use " + toolPromptName(tools.NameShell) + ", shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
@@ -264,7 +253,7 @@ func hasScopedInspectionPermissions(ruleset permission.Ruleset) bool {
 		return false
 	}
 
-	for _, permName := range []string{tools.NameRead, tools.NameGrep, tools.NameGlob, tools.NameLsp} {
+	for _, permName := range []string{tools.NameRead, tools.NameGrep, tools.NameGlob} {
 		if toolHasScopedRestriction(ruleset, permName) {
 			return true
 		}

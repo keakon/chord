@@ -33,11 +33,6 @@
 | --- | --- |
 | `grep` | 按正则/字面文本搜索内容，输出有上限；支持多根 `paths` 和 `includes` glob 过滤。 |
 | `glob` | 按 glob 模式匹配路径，输出有上限。 |
-| `lsp` | 在指定文件位置做语义化的 definition / references / implementation 查询，需要对应 LSP server 覆盖该文件类型。 |
-
-在 TUI 中，`lsp` 卡片会在头部概括查询动作和位置（例如 `find references internal/agent/main.go:54:17`），查询完成后显示位置数量，展开详情可看到每个返回的 `path:line:character` 位置。
-
-位置没落在标识符上时（比如行号差一行、点到声明上方的注释里），失败结果会附上该行和上下相邻行的原文与行号，不用再读一次文件就能看出位置到底点到了哪。
 
 ## 执行
 

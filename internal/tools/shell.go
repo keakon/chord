@@ -302,10 +302,7 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 	}
 	parts := []string{shellDesc}
 	if len(visible) > 0 {
-		discoveryHints := make([]string, 0, 4)
-		if _, ok := visible[NameLsp]; ok {
-			discoveryHints = append(discoveryHints, "use `lsp` first for symbol-aware navigation such as definitions, references, and implementations")
-		}
+		discoveryHints := make([]string, 0, 3)
 		if _, ok := visible[NameGrep]; ok {
 			discoveryHints = append(discoveryHints, "use `grep` for repo text search before reaching for rg")
 		}

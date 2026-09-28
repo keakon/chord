@@ -607,40 +607,6 @@ func TestRebuildTouchedPathsNormalizesAndSorts(t *testing.T) {
 	}
 }
 
-func TestConfiguredServersSortsNamesAndFileTypesAndReturnsCopies(t *testing.T) {
-	mgr := NewManager(&config.Config{
-		LSP: config.LSPConfig{
-			"zed": {
-				Command:   "zed-lsp",
-				FileTypes: []string{"tsx", ".ts", "Go", ""},
-			},
-			"alpha": {
-				Command:   "alpha-lsp",
-				FileTypes: []string{".py", "pyi"},
-			},
-			"disabled": {
-				Command:   "off",
-				Disabled:  true,
-				FileTypes: []string{".txt"},
-			},
-		},
-	}, t.TempDir(), nil)
-
-	got := mgr.ConfiguredServers()
-	want := []ConfiguredServerInfo{
-		{Name: "alpha", FileTypes: []string{"*.py", "*.pyi"}},
-		{Name: "zed", FileTypes: []string{"*.go", "*.ts", "*.tsx"}},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ConfiguredServers() = %#v, want %#v", got, want)
-	}
-
-	got[0].FileTypes[0] = "*.mutated"
-	if again := mgr.ConfiguredServers(); !reflect.DeepEqual(again, want) {
-		t.Fatalf("ConfiguredServers() should return copies, got %#v after mutation, want %#v", again, want)
-	}
-}
-
 // TestConcurrentDiagnosticsAndCloseDoNotDeadlock exercises the two lock
 // directions at once: review snapshotting and diagnostics publishing take
 // diagMu and then clientsMu (reviewCountsForPathLocked / reviewServerIDsForPathLocked),

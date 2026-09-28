@@ -78,7 +78,7 @@ func TestValidateToolArgsRejectsWrongTypeInArray(t *testing.T) {
 
 func TestValidateToolArgsRejectsEnumMismatch(t *testing.T) {
 	tool := validationStubTool{
-		name: "Lsp",
+		name: "Lookup",
 		schema: map[string]any{
 			"type":     "object",
 			"required": []string{"operation"},

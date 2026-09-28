@@ -19,23 +19,19 @@ import (
 )
 
 type fakePowernapClient struct {
-	shutdownErr          error
-	exitErr              error
-	definitionResult     *protocol.Or_Result_textDocument_definition
-	definitionErr        error
-	implementationResult *protocol.Or_Result_textDocument_implementation
-	implementationErr    error
-	shutdowns            int
-	exits                int
-	kills                int
-	didCloseURIs         []string
-	didChangeURIs        []string
-	didOpenURIs          []string
-	watchedFileEvents    []protocol.FileEvent
-	registeredHandlers   map[string]powertransport.Handler
-	registeredNotifies   map[string]powertransport.NotificationHandler
-	configNotifications  []any
-	initializeHook       func(*fakePowernapClient) error
+	shutdownErr         error
+	exitErr             error
+	shutdowns           int
+	exits               int
+	kills               int
+	didCloseURIs        []string
+	didChangeURIs       []string
+	didOpenURIs         []string
+	watchedFileEvents   []protocol.FileEvent
+	registeredHandlers  map[string]powertransport.Handler
+	registeredNotifies  map[string]powertransport.NotificationHandler
+	configNotifications []any
+	initializeHook      func(*fakePowernapClient) error
 }
 
 func (f *fakePowernapClient) Initialize(context.Context, bool) error {
@@ -85,18 +81,6 @@ func (f *fakePowernapClient) NotifyDidChangeWatchedFiles(_ context.Context, chan
 func (f *fakePowernapClient) NotifyWorkspaceDidChangeConfiguration(_ context.Context, settings any) error {
 	f.configNotifications = append(f.configNotifications, settings)
 	return nil
-}
-func (f *fakePowernapClient) RequestHover(context.Context, string, protocol.Position) (*protocol.Hover, error) {
-	return nil, nil
-}
-func (f *fakePowernapClient) RequestDefinitionRaw(context.Context, string, protocol.Position) (*protocol.Or_Result_textDocument_definition, error) {
-	return f.definitionResult, f.definitionErr
-}
-func (f *fakePowernapClient) RequestImplementation(context.Context, string, protocol.Position) (*protocol.Or_Result_textDocument_implementation, error) {
-	return f.implementationResult, f.implementationErr
-}
-func (f *fakePowernapClient) FindReferences(context.Context, string, int, int, bool) ([]protocol.Location, error) {
-	return nil, nil
 }
 
 func TestClientInitializeRegistersHandlersBeforeInitializeAndSyncsWorkspaceConfig(t *testing.T) {
@@ -440,184 +424,6 @@ func TestClientCloseKillsOnExitTimeout(t *testing.T) {
 	}
 	if fake.kills != 1 {
 		t.Fatalf("kills = %d, want 1", fake.kills)
-	}
-}
-
-func TestGoToDefinitionUsesDefinitionLocationResult(t *testing.T) {
-	fake := &fakePowernapClient{
-		definitionResult: &protocol.Or_Result_textDocument_definition{Value: protocol.Definition{Value: protocol.Location{
-			URI:   protocol.DocumentURI("file:///tmp/main.go"),
-			Range: protocol.Range{Start: protocol.Position{Line: 4, Character: 7}},
-		}}},
-	}
-	c := &Client{client: fake}
-	got, err := c.GoToDefinition(context.Background(), "/tmp/input.go", 1, 2)
-	if err != nil {
-		t.Fatalf("GoToDefinition() error = %v", err)
-	}
-	want := []RefLocation{{Path: "/tmp/main.go", Line: 4, Col: 7}}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("GoToDefinition() = %#v, want %#v", got, want)
-	}
-}
-
-func TestGoToDefinitionUsesDefinitionLocationSliceResult(t *testing.T) {
-	fake := &fakePowernapClient{
-		definitionResult: &protocol.Or_Result_textDocument_definition{Value: protocol.Definition{Value: []protocol.Location{{
-			URI:   protocol.DocumentURI("file:///tmp/main.go"),
-			Range: protocol.Range{Start: protocol.Position{Line: 4, Character: 7}},
-		}}}},
-	}
-	c := &Client{client: fake}
-	got, err := c.GoToDefinition(context.Background(), "/tmp/input.go", 1, 2)
-	if err != nil {
-		t.Fatalf("GoToDefinition() error = %v", err)
-	}
-	want := []RefLocation{{Path: "/tmp/main.go", Line: 4, Col: 7}}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("GoToDefinition() = %#v, want %#v", got, want)
-	}
-}
-
-func TestGoToDefinitionUsesDefinitionLinks(t *testing.T) {
-	fake := &fakePowernapClient{
-		definitionResult: &protocol.Or_Result_textDocument_definition{Value: []protocol.DefinitionLink{{
-			TargetURI:            protocol.DocumentURI("file:///tmp/impl.go"),
-			TargetSelectionRange: protocol.Range{Start: protocol.Position{Line: 8, Character: 3}},
-		}}},
-	}
-	c := &Client{client: fake}
-	got, err := c.GoToDefinition(context.Background(), "/tmp/input.go", 1, 2)
-	if err != nil {
-		t.Fatalf("GoToDefinition() error = %v", err)
-	}
-	want := []RefLocation{{Path: "/tmp/impl.go", Line: 8, Col: 3}}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("GoToDefinition() = %#v, want %#v", got, want)
-	}
-}
-
-func TestGoToDefinitionNullResultReturnsEmpty(t *testing.T) {
-	fake := &fakePowernapClient{definitionResult: &protocol.Or_Result_textDocument_definition{}}
-	c := &Client{client: fake}
-	got, err := c.GoToDefinition(context.Background(), "/tmp/input.go", 1, 2)
-	if err != nil {
-		t.Fatalf("GoToDefinition() error = %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("GoToDefinition() = %#v, want empty", got)
-	}
-}
-
-func TestGoToDefinitionUnknownNestedShapeReturnsError(t *testing.T) {
-	fake := &fakePowernapClient{definitionResult: &protocol.Or_Result_textDocument_definition{Value: protocol.Definition{Value: 123}}}
-	c := &Client{client: fake}
-	if _, err := c.GoToDefinition(context.Background(), "/tmp/input.go", 1, 2); err == nil {
-		t.Fatal("GoToDefinition() error = nil, want error")
-	}
-}
-
-func TestGoToDefinitionUnknownShapeReturnsError(t *testing.T) {
-	fake := &fakePowernapClient{definitionResult: &protocol.Or_Result_textDocument_definition{Value: 123}}
-	c := &Client{client: fake}
-	if _, err := c.GoToDefinition(context.Background(), "/tmp/input.go", 1, 2); err == nil {
-		t.Fatal("GoToDefinition() error = nil, want error")
-	}
-}
-
-func TestGoToDefinitionResultMatchesJSONUnmarshalShape(t *testing.T) {
-	data := []byte(`{"uri":"file:///tmp/main.go","range":{"start":{"line":4,"character":7},"end":{"line":4,"character":8}}}`)
-	var res protocol.Or_Result_textDocument_definition
-	if err := json.Unmarshal(data, &res); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	got, err := definitionResultToRefLocations(&res)
-	if err != nil {
-		t.Fatalf("definitionResultToRefLocations() error = %v", err)
-	}
-	want := []RefLocation{{Path: "/tmp/main.go", Line: 4, Col: 7}}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("definitionResultToRefLocations() = %#v, want %#v", got, want)
-	}
-}
-
-func TestFindImplementationsUsesLocationSliceResult(t *testing.T) {
-	fake := &fakePowernapClient{
-		implementationResult: &protocol.Or_Result_textDocument_implementation{Value: protocol.Definition{Value: []protocol.Location{{
-			URI:   protocol.DocumentURI("file:///tmp/impl.go"),
-			Range: protocol.Range{Start: protocol.Position{Line: 2, Character: 9}},
-		}}}},
-	}
-	c := &Client{client: fake}
-	got, err := c.FindImplementations(context.Background(), "/tmp/input.go", 1, 2)
-	if err != nil {
-		t.Fatalf("FindImplementations() error = %v", err)
-	}
-	want := []RefLocation{{Path: "/tmp/impl.go", Line: 2, Col: 9}}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("FindImplementations() = %#v, want %#v", got, want)
-	}
-}
-
-func TestFindImplementationsUsesDefinitionLinks(t *testing.T) {
-	fake := &fakePowernapClient{
-		implementationResult: &protocol.Or_Result_textDocument_implementation{Value: []protocol.DefinitionLink{{
-			TargetURI:            protocol.DocumentURI("file:///tmp/impl.go"),
-			TargetSelectionRange: protocol.Range{Start: protocol.Position{Line: 6, Character: 4}},
-		}}},
-	}
-	c := &Client{client: fake}
-	got, err := c.FindImplementations(context.Background(), "/tmp/input.go", 1, 2)
-	if err != nil {
-		t.Fatalf("FindImplementations() error = %v", err)
-	}
-	want := []RefLocation{{Path: "/tmp/impl.go", Line: 6, Col: 4}}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("FindImplementations() = %#v, want %#v", got, want)
-	}
-}
-
-func TestFindImplementationsResultMatchesJSONUnmarshalShape(t *testing.T) {
-	data := []byte(`{"uri":"file:///tmp/impl.go","range":{"start":{"line":2,"character":9},"end":{"line":2,"character":10}}}`)
-	var res protocol.Or_Result_textDocument_implementation
-	if err := json.Unmarshal(data, &res); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-	got, err := implementationResultToRefLocations(&res)
-	if err != nil {
-		t.Fatalf("implementationResultToRefLocations() error = %v", err)
-	}
-	want := []RefLocation{{Path: "/tmp/impl.go", Line: 2, Col: 9}}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("implementationResultToRefLocations() = %#v, want %#v", got, want)
-	}
-}
-
-func TestFindImplementationsUnknownNestedShapeReturnsError(t *testing.T) {
-	fake := &fakePowernapClient{implementationResult: &protocol.Or_Result_textDocument_implementation{Value: protocol.Definition{Value: 123}}}
-	c := &Client{client: fake}
-	if _, err := c.FindImplementations(context.Background(), "/tmp/input.go", 1, 2); err == nil {
-		t.Fatal("FindImplementations() error = nil, want error")
-	}
-}
-
-func TestFindImplementationsUnknownShapeReturnsError(t *testing.T) {
-	fake := &fakePowernapClient{implementationResult: &protocol.Or_Result_textDocument_implementation{Value: 123}}
-	c := &Client{client: fake}
-	if _, err := c.FindImplementations(context.Background(), "/tmp/input.go", 1, 2); err == nil {
-		t.Fatal("FindImplementations() error = nil, want error")
-	}
-}
-
-func TestFindImplementationsNullResultReturnsEmpty(t *testing.T) {
-	fake := &fakePowernapClient{implementationResult: &protocol.Or_Result_textDocument_implementation{}}
-	c := &Client{client: fake}
-	got, err := c.FindImplementations(context.Background(), "/tmp/input.go", 1, 2)
-	if err != nil {
-		t.Fatalf("FindImplementations() error = %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("FindImplementations() = %#v, want empty", got)
 	}
 }
 

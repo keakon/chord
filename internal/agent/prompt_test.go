@@ -11,7 +11,6 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
-	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/skill"
@@ -1270,11 +1269,7 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 			t.Fatalf("missing %q in Shell description %q", want, defs[0].Description)
 		}
 	}
-	if strings.Contains(defs[0].Description, "use `lsp` first") {
-		t.Fatalf("unexpected LSP hint without Lsp tool: %q", defs[0].Description)
-	}
 
-	a.tools.Register(tools.LspTool{LSP: lsp.NewManager(&config.Config{}, t.TempDir(), nil)})
 	a.tools.Register(tools.GrepTool{})
 	a.tools.Register(tools.GlobTool{})
 	a.tools.Register(tools.ReadTool{})
@@ -1289,7 +1284,7 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if bashDesc == "" {
 		t.Fatal("missing Shell tool definition")
 	}
-	for _, want := range []string{"use `lsp` first", "use `grep` for repo text search before reaching for rg", "use `glob` for file or path discovery before reaching for rg --files or find", "use `read` once you have narrowed the target files", "If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts."} {
+	for _, want := range []string{"use `grep` for repo text search before reaching for rg", "use `glob` for file or path discovery before reaching for rg --files or find", "use `read` once you have narrowed the target files", "If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts."} {
 		if !strings.Contains(bashDesc, want) {
 			t.Fatalf("missing %q in Shell description %q", want, bashDesc)
 		}
@@ -1364,9 +1359,6 @@ shell: allow
 		"Minimize LLM round trips: a response that stops after a single lookup spends one full model round trip per lookup.",
 		"issue them together in the same response — they execute in parallel.",
 		"Use serial calls only when a later call depends on an earlier result, the call mutates state, or a command is intentionally high-cost.",
-		"## File Inspection Constraints",
-		"File inspection and code-navigation capabilities may be limited in this role.",
-		"Do not use `shell`, shell commands, or inline scripts to simulate hidden or denied file reading, search, or code navigation capabilities.",
 		"## File Modification Constraints",
 		"This role is currently read-only for files",
 		"Do not use `shell`, shell redirection, or inline scripts to simulate file edits, writes, or deletes.",
@@ -1375,7 +1367,7 @@ shell: allow
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
 		}
 	}
-	for _, unwanted := range []string{"Use `edit`", "Use `write`", "`lsp`", "## Authorization & Decisions"} {
+	for _, unwanted := range []string{"Use `edit`", "Use `write`", "## File Inspection Constraints", "## Authorization & Decisions"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly contains %q in %q", unwanted, got)
 		}
@@ -1393,14 +1385,12 @@ func TestMainAgentCapabilityPromptBlock_PathVerificationMentionsOnlyVisibleDisco
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.GrepTool{})
 	a.tools.Register(tools.GlobTool{})
-	a.tools.Register(tools.LspTool{})
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 read: allow
 edit: allow
 delete: allow
 grep: allow
-lsp: allow
 `)}
 	a.rebuildRuleset()
 
@@ -1413,7 +1403,7 @@ lsp: allow
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
 		}
 	}
-	for _, unwanted := range []string{"`glob`", "`lsp`"} {
+	for _, unwanted := range []string{"`glob`"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly mentions unavailable %q in %q", unwanted, got)
 		}
@@ -1425,20 +1415,19 @@ lsp: allow
 	a.tools.Register(tools.DeleteTool{})
 	a.tools.Register(tools.GrepTool{})
 	a.tools.Register(tools.GlobTool{})
-	a.tools.Register(tools.LspTool{LSP: lsp.NewManager(&config.Config{}, t.TempDir(), nil)})
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 read: allow
 edit: allow
 delete: allow
 grep: allow
-lsp: allow
+glob: allow
 `)}
 	a.rebuildRuleset()
 
 	got = a.mainAgentCapabilityPromptBlock()
-	if !strings.Contains(got, "Use `grep` / `lsp` for discovery and navigation.") {
-		t.Fatalf("mainAgentCapabilityPromptBlock() should include configured LSP discovery guidance, got %q", got)
+	if !strings.Contains(got, "Use `glob` / `grep` for discovery and navigation.") {
+		t.Fatalf("mainAgentCapabilityPromptBlock() should include both discovery tools, got %q", got)
 	}
 }
 
@@ -1470,7 +1459,7 @@ delete: allow
 	if strings.Contains(got, "Use `delete`") {
 		t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly references the hidden delete tool in %q", got)
 	}
-	for _, unwanted := range []string{"for discovery and navigation", "to find or verify it before calling the path tool", "`glob`", "`grep`", "`lsp`"} {
+	for _, unwanted := range []string{"for discovery and navigation", "to find or verify it before calling the path tool", "`glob`", "`grep`"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly contains %q in %q", unwanted, got)
 		}
@@ -1525,39 +1514,11 @@ delete: allow
 	}
 }
 
-// Without configured language servers lsp is never registered; that missing
-// integration must not read as a permission boundary for an otherwise
-// unrestricted role, while a rule that denies lsp still does.
-func TestMainAgentCapabilityPromptBlock_UnconfiguredLSPIsNotAnInspectionLimit(t *testing.T) {
-	a := &MainAgent{tools: tools.NewRegistry()}
-	a.tools.Register(tools.ReadTool{})
-	a.tools.Register(tools.GrepTool{})
-	a.tools.Register(tools.GlobTool{})
-	a.tools.Register(tools.NewShellTool("bash"))
-	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
-"*": allow
-`)}
-	a.rebuildRuleset()
-	if got := a.mainAgentCapabilityPromptBlock(); strings.Contains(got, "## File Inspection Constraints") {
-		t.Fatalf("unconfigured lsp must not add inspection constraints: %q", got)
-	}
-
-	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
-"*": allow
-lsp: deny
-`)}
-	a.rebuildRuleset()
-	if got := a.mainAgentCapabilityPromptBlock(); !strings.Contains(got, "## File Inspection Constraints") {
-		t.Fatalf("denied lsp must add inspection constraints: %q", got)
-	}
-}
-
 func TestMainAgentCapabilityPromptBlock_ShowsInspectionConstraintsWhenInspectionToolsHiddenButBashVisible(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
 	a.tools.Register(tools.GrepTool{})
 	a.tools.Register(tools.GlobTool{})
-	a.tools.Register(tools.LspTool{LSP: lsp.NewManager(&config.Config{}, t.TempDir(), nil)})
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny

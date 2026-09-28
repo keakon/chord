@@ -2565,52 +2565,6 @@ func TestPrepareMessagesForLLM_ShellSearchOutputParsesWindowsAbsolutePaths(t *te
 	}
 }
 
-func TestPrepareMessagesForLLM_LSPReferencesSearchReducerParsesFormattedArgs(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.projectConfig = &config.Config{
-		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
-			MinToolResultsPrune:  1,
-			ReadLikeAgeTurns:     1,
-			ReadLikeOutputBytes:  80,
-			StaleAgeTurns:        1,
-			StaleOutputBytes:     40,
-			ShellSuccessAgeTurns: 9,
-			ShellSuccessBytes:    1 << 20,
-			MinIncrementalTokens: 1,
-		}},
-	}
-	content := strings.Join([]string{
-		"internal/agent/compaction_policy.go:12:func prepareMessagesForLLM(...)",
-		"internal/agent/compaction_test.go:50:func TestPrepareMessagesForLLM(...)",
-	}, "\n") + "\n" + strings.Repeat("internal/agent/compaction_policy.go:999:func extraMatch()\n", 40)
-	args := json.RawMessage(`{
-		"path": "internal/agent/compaction_policy.go",
-		"line": 12,
-		"operation"
-		:
-		"references"
-	}`)
-	msgs := []message.Message{
-		{Role: "user", Content: "u1"},
-		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameLsp, Args: args}}},
-		{Role: "tool", ToolCallID: "tc1", Content: content},
-		{Role: "user", Content: "u2"},
-		{Role: "assistant", Content: "ack"},
-		{Role: "user", Content: "u3"},
-	}
-
-	prepared := a.prepareMessagesForLLM(msgs)
-	if !strings.Contains(prepared[2].Content, "Older "+tools.NameLsp+" results summarized") {
-		t.Fatalf("expected LSP references search summary, got %q", prepared[2].Content)
-	}
-	if strings.Contains(prepared[2].Content, "refer to exported history") || strings.Contains(strings.ToLower(prepared[2].Content), "re-run") {
-		t.Fatalf("expected LSP summary without history/re-run hint, got %q", prepared[2].Content)
-	}
-	if !strings.Contains(prepared[2].Content, `operation="references"`) {
-		t.Fatalf("expected LSP operation in summary, got %q", prepared[2].Content)
-	}
-}
-
 func TestPrepareMessagesForLLM_JSONReducerBeatsGenericStaleFallback(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{

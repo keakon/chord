@@ -115,7 +115,7 @@ func rawInput(argsJSON string) any {
 // names the file they touch.
 func toolLocations(name, argsJSON string) []acp.ToolCallLocation {
 	switch toolname.Normalize(name) {
-	case toolname.Read, toolname.ReadArtifact, toolname.ViewImage, toolname.Write, toolname.Edit, toolname.Delete, toolname.Lsp:
+	case toolname.Read, toolname.ReadArtifact, toolname.ViewImage, toolname.Write, toolname.Edit, toolname.Delete:
 	default:
 		return nil
 	}

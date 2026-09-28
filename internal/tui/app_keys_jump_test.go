@@ -345,7 +345,7 @@ func TestToolCallSummaryIncludesPrimaryArg(t *testing.T) {
 		{"read path", &Block{Type: BlockToolCall, ToolName: tools.NameRead, Content: `{"path":"docs/usage.md"}`}, "Tool: read", "docs/usage.md"},
 		{"no args", &Block{Type: BlockToolCall, ToolName: tools.NameGrep, Content: `{}`}, "Tool: grep", ""},
 		{"glob array control chars", &Block{Type: BlockToolCall, ToolName: tools.NameGlob, Content: `{"patterns":["**/*.go\u001b[31m"]}`}, "Tool: glob", `**/*.go\x1b[31m`},
-		{"lsp operation control chars", &Block{Type: BlockToolCall, ToolName: tools.NameLsp, Content: `{"operation":"go to definition\u001b[31m","path":"app.go"}`}, "Tool: lsp", `go to definition\x1b[31m`},
+		{"grep pattern control chars", &Block{Type: BlockToolCall, ToolName: tools.NameGrep, Content: `{"pattern":"go to definition\u001b[31m"}`}, "Tool: grep", `go to definition\x1b[31m`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

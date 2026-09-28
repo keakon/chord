@@ -260,7 +260,7 @@ A combining mark with no visible base (at the start of a line or preceded only b
 
 Neither edit tool requires a prior `read`: both tools read current on-disk content at execution time. For reliable edits, still follow these recommendations:
 
-1. **Inspect the target area first** when you have not already verified the exact text, path, or hunk anchor. `read`, `grep`, or `lsp` are good ways to do that.
+1. **Inspect the target area first** when you have not already verified the exact text, path, or hunk anchor. `read` or `grep` are good ways to do that.
 2. **Use the smallest unique block** (2-4 lines). Large context blocks are more likely to become stale.
 3. **Re-read after failures**. If a hunk or string match fails, the file may have changed; read it again before retrying.
 
@@ -276,13 +276,13 @@ Both tools work well. Choose based on model training:
 ### For Renaming/Refactoring
 
 - **Edit with `replace_all: true`**: Rename a variable across one file.
-- **LSP tool**: For symbol-aware renames across multiple files.
+- **Shell** with the language's refactoring command (such as `gopls rename`): For symbol-aware renames across multiple files.
 
 ### For Large-Scale Changes
 
 - Creating, deleting, or moving files → `apply_patch` does this natively (`*** Add File:` / `*** Delete File:` / `*** Move to:`); models on `edit` use **Write** and **Delete**
 - Batch text replacements across many files → Use **Shell** with `sd` or `sed`
-- Symbol renames across files → Use **LSP**
+- Symbol renames across files → Use **Shell** with the language's refactoring command
 
 ## Permissions
 
@@ -359,4 +359,4 @@ A: Only one tool is visible at a time, based on the active model. You won't see 
 
 - [Tool Reference](./tools.md) – All available tools
 - [Permission System](./permissions-and-safety.md) – How file access control works
-- [LSP Integration](./tools.md) – Symbol-aware operations
+- [LSP](./customization.md#lsp) – Diagnostics after edits
