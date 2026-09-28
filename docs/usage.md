@@ -41,14 +41,14 @@ Common keys:
 - `Ctrl+T`: open the message directory
 - `Ctrl+P`: switch the main role model pool
 - `Ctrl+O`: open the MCP server selector
-- `Ctrl+E`: open the error panel (view all errors from the current session)
+- `Ctrl+E`: open the error panel (view the errors recorded so far)
 - `Ctrl+G`: export a diagnostics bundle
 - `q`: press twice to quit
 - `Ctrl+C`: press twice to quit
 
 ### Error panel
 
-Press `Ctrl+E` in normal mode to open the error panel, which shows all errors encountered during the current session. This includes:
+Press `Ctrl+E` in normal mode to open the error panel, which lists the errors encountered so far. This includes:
 
 - **Intermediate retry errors**: API errors that triggered a key rotation, model fallback, or stream retry (e.g., 429 rate limits, 503 service unavailable, context length exceeded, timeouts). These are recorded silently and only appear in the error panel, keeping the conversation flow clean. Switching to a different fallback model is the exception: the notification appears as soon as the fallback starts, naming the reason and the target model, and the status bar keeps showing that target, reason, and elapsed time while the new model is being reached.
 - **Final errors**: errors that exhausted all retries and appear as red error blocks in the conversation.
@@ -76,7 +76,7 @@ Navigation:
 - `g` / `G`: jump to top / bottom
 - `Esc`: close the panel
 
-The error panel keeps the most recent 80 errors in a ring buffer (newest first). Use it to diagnose why a model fallback occurred or which keys are hitting rate limits.
+The error panel keeps the most recent 80 errors in a ring buffer (newest first), and the buffer lives in process memory: it starts empty when Chord launches and clears when you start or resume a session; a forked session keeps the records it inherits. Use it to diagnose why a model fallback occurred or which keys are hitting rate limits.
 
 ## Info panel
 

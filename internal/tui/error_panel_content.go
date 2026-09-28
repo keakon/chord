@@ -21,7 +21,7 @@ func (m *Model) errorPanelLines(innerWidth int) []string {
 	records := m.snapshotAgentErrors()
 	var lines []string
 	if len(records) == 0 {
-		lines = []string{DimStyle.Render("No errors recorded in this session.")}
+		lines = []string{DimStyle.Render("No errors recorded yet.")}
 	} else {
 		// Newest first so the most recent failure is visible without scrolling.
 		for i, record := range slices.Backward(records) {
