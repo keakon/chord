@@ -4,7 +4,6 @@
 
 ## 未发布
 
-- 工具确认框支持只读查看完整参数，包括较长的批量编辑；查看后仍需明确批准调用。
 - headless 的 `status_response` 现在带当前工作目录和 worktree generation；会话中切换 checkout 时，订阅 `workdir_changed` 的客户端也会收到推送。
 - 图片 token 按张数和保守额度估算，不再按图片文件字节数折算。
 
@@ -18,13 +17,14 @@
 - worktree 会话现在按仓库共享：同一仓库的所有 checkout 共用一个 store，在 worktree 里开的会话能在主工作区列出、继续，反过来也一样。旧版本按 checkout 分片写入的会话不会迁移：它们仍留在自己那个 key 下，但 Chord 不再列出、不再恢复，也不会随 worktree 一起清理。
 - 点名仓库内路径的权限规则现在对同一仓库的每个 checkout 生效。主工作区里写的 `write src/**: allow`，在 `<worktree>/src/` 下同样允许；也没法写出「只允许某一个 checkout」的规则——Chord 按仓库相对拼写匹配仓库内的路径，绝对路径规则永远匹配不到它们。
 - 已经是 PNG 或 JPEG 的图片现在按原字节发给上游，不再先统一转成 JPEG。截图、图表和文字截图因此保留原画质，代价是过去会被重新压缩的图片上传体积变大。原样直传只适用于不需要任何变换的图片：长边超过 2000px、带 EXIF 旋转信息、或超出体积预算的 PNG / JPEG 仍会重新编码。需要转换或缩放的图片仍优先输出 PNG，只有在结果超过体积预算时才退回 JPEG。
-- Chat Completions 网关不再按模型名推断原生 thinking 形状：只有 DeepSeek 路由（模型 ID 最后一段是 `deepseek` 或以 `deepseek-` 开头，或配了 `compat.reasoning_continuity.contract: deepseek`）无需选择器就保留 `thinking: {type}`；网关后面的 Gemini、Claude、GLM、Kimi、Doubao、Qwen 模型必须在 `compat.chat_completions.native_thinking` 里指定形状（`gemini`、`gemini-3`、`anthropic`、`thinking` 或 `qwen`，也接受 `claude`、`kimi` 等家族名）。`auto` 不再是合法取值：配置里有残留时加载器会重置为未设置，对这些模型来说等于不发送该字段，`chord doctor config` 也会报出。没配选择器时，模型的 thinking 配置不会进入 chat 请求体，Gemini 3 模型的 thought signature 也不会回传，网关会以 HTTP 400 拒绝之后的工具调用请求；`native_thinking: gemini-3` 还会启用官方的 `skip_thought_signature_validator` 修复，只声明家族的 `gemini` 不会。开了 thinking 却没配选择器的网关模型，以及没配选择器的 Gemini 3 模型，`chord doctor config` 都会给出警告。要保留原来的转换行为，请在模型或 provider 上补上选择器。Gemini 原生端点上，`gemini-3*` 模型仍会自动启用 thought signature 修复。`compat.reasoning_continuity.contract` 用来显式声明端点契约：`deepseek` 给模型 ID 无法标识后端的别名启用 DeepSeek 回传规则和 `thinking: {type}` 对象；`none` 让路由退出模型 ID 隐含的契约，比如后端不是 DeepSeek 的 `deepseek-*` 路由（Chat Completions 与 Messages 都适用），或不需要修复的原生 `gemini-3*` 路由。
+- Chat Completions 网关不再按模型名推断原生 thinking 形状：只有 DeepSeek 路由（模型 ID 最后一段是 DeepSeek API 模型名，即 `deepseek`、`deepseek-v4` 及更新版本，或 `deepseek-flash` / `deepseek-pro` / `deepseek-chat` / `deepseek-reasoner`；或者配了 `compat.reasoning_continuity.contract: deepseek`）无需选择器就保留 `thinking: {type}`；网关后面的 Gemini、Claude、GLM、Kimi、Doubao、Qwen 模型必须在 `compat.chat_completions.native_thinking` 里指定形状（`gemini`、`gemini-3`、`anthropic`、`thinking` 或 `qwen`，也接受 `claude`、`kimi` 等家族名）。`auto` 不再是合法取值：配置里有残留时加载器会重置为未设置，对这些模型来说等于不发送该字段，`chord doctor config` 也会报出。没配选择器时，模型的 thinking 配置不会进入 chat 请求体，Gemini 3 模型的 thought signature 也不会回传，网关会以 HTTP 400 拒绝之后的工具调用请求；`native_thinking: gemini-3` 还会启用官方的 `skip_thought_signature_validator` 修复，只声明家族的 `gemini` 不会。开了 thinking 却没配选择器的网关模型，以及没配选择器的 Gemini 3 模型，`chord doctor config` 都会给出警告。要保留原来的转换行为，请在模型或 provider 上补上选择器。Gemini 原生端点上，`gemini-3*` 模型仍会自动启用 thought signature 修复。`compat.reasoning_continuity.contract` 用来显式声明端点契约：`deepseek` 给模型 ID 无法标识后端的别名启用 DeepSeek 回传规则和 `thinking: {type}` 对象，其他平台托管的 DeepSeek 开源权重模型（如 `deepseek-r1-distill-*`、`deepseek-coder-*`、`deepseek-v3`）不会按名字识别（名字含 `distill` 的一律排除），需要时也用它显式开启；`none` 让路由退出模型 ID 隐含的契约，比如模型 ID 是 DeepSeek API 模型名、后端却不是 DeepSeek 的路由（Chat Completions 与 Messages 都适用），或不需要修复的原生 `gemini-3*` 路由。
 - 旧版本写下的工具输出省略提示不再被识别为输出文件引用，请求级上下文剪裁可能连同其中的路径一起缩短。已保存的文件本身仍留在磁盘上。
 - 旧版本写入的压缩检查点没有「已推翻约束」标签：其中 `~ ` 开头的行会按普通约束读取，检查点标记为已推翻的约束在恢复会话后会重新生效。继续这类会话前先核对恢复出的约束，或者开新会话。
 - 模型面的 `lsp` 工具已移除：definition、references、implementation 查询不再提供给模型，提示词里也不再提及。导航请用 `read`、`grep` 和 `glob`。写后诊断不受影响——`write`、`edit`、`apply_patch` 的结果仍会附带 language server 诊断，配置好的 server 仍显示在信息面板里——残留的 `lsp` 权限规则不再匹配任何调用。
 
 ### 新功能
 
+- 工具确认框支持只读查看完整参数，包括较长的批量编辑；查看后仍需明确批准调用。
 - 新增 `chord acp`：通过 stdio 提供 Agent Client Protocol，让 Zed 这类 ACP 客户端把 Chord 当作自己的 agent。工作目录由客户端在 `session/new` 里给出；回答、思考块和工具调用（分类、标题、目标文件、原始参数、输出与文件 diff）以 `session/update` 流式回传；取消本轮返回 `cancelled`；`file://` 资源链接会变成与 TUI 一致的 `<file path="...">` 上下文块。stdout 只跑 JSON-RPC，每个进程把自己的日志写进日志目录。一个 `chord acp` 进程服务客户端开出的所有会话，上限由 `--max-sessions`（默认 8）控制，每个会话一个子进程，各自持有自己的工作目录、runtime 与 MCP server；`session/close` 会释放对应会话和它的进程。确认弹窗尚未接通，在此之前需要授权的工具会等 Chord 自己的确认超时。详见 [ACP Agent 模式](./docs/acp_CN.md)。
 - 新增 `chord sessions project <session-id>` 命令：把已落盘会话投影成每 turn 一行的 JSONL 事实（turn 边界、带 digest 的工具结果、工具归因的文件变更、压缩边界），用于复盘与完成报告取证。只读，源会话被别的进程占用时也能跑；turn 成因只报 `user_message` / `inferred` / `unknown`，不硬猜用户 continue 还是后台唤醒。`--out` 会拒绝写进会话目录内（或硬链接到其中文件）的路径，投影不可能覆盖源会话；`--max-bytes` 可调高 256 KiB 的 JSONL 上限，长会话不再受限。
 - 新增 `question_timeout`（秒，默认 `0`）单独控制 Question 工具等多久，不再跟 `confirm_timeout` 共用；`0` 表示无限等。这段倒计时覆盖整段等待，包括请求排在别的对话框后面的时间，且绝不会采用答案：到期后问题按 `no_response` 关闭。
@@ -49,7 +49,7 @@
 - 新增 `/skill <name> [args]` 显式加载：Chord 把这行当普通用户消息提交，并在同一回合里把 skill 正文作为 `skill` 工具结果追加进去，模型不用自己决定调用工具就能拿到正文；名字之后的内容替换正文里的 `${CHORD_SKILL_ARGS}`。这行跟着当前聚焦的 Agent，所以子 Agent 也能用同样方式载入技能。TUI 里只敲 `/skill` 则打开选择器，列出当前 Agent 可加载的全部技能（只留给显式加载的排在前面），选中后回填 `/skill <name> ` 供你接着输参数；被 ruleset 拒绝的技能显示为不可用并给出原因，名字不存在则弹 toast 拒绝。这样合成的加载在各处都算一次真实加载：继续会话时恢复，持久压缩把这对消息归档后与重启一样清掉。
 - `view_image`、图片附件、剪贴板粘贴以及 MCP 工具返回的图片现在除了 PNG/JPEG 外还接受 WebP、GIF、BMP 和 TIFF。所有图片在送达上游前都会归一化为 PNG 或 JPEG，长边超过 2000px 时缩小（动画 WebP、GIF 和 TIFF 只取首帧）。HEIC、HEIF、AVIF、SVG 会被拒绝并提示先转换。JPEG 带 EXIF `Orientation` 时会把方向烧进像素，不再留给模型自行解读；`view_image` 只要做过缩放，就会在结果里报告原始尺寸与最终尺寸。
 - 编辑工具支持一次校验并替换同文件的多处内容。
-- headless 的 `idle` 与 `status_response` 带 `running_jobs`，指当前会话里「结束时会唤醒主 agent」的后台 job 数。`running_jobs` 大于 0 的 `idle` 后面必然还有事件；被停止但不产生完成通知的 job（模型调用 `job_kill`、SubAgent 停止、切换会话）在发出停止请求时就从计数中移除。
+- headless 的 `idle` 与 `status_response` 带 `running_jobs`，指当前会话里仍欠 agent 一条完成通知的后台 job 数。`running_jobs` 大于 0 的 `idle` 后面必然还有事件；被停止但不产生完成通知的 job（模型调用 `job_kill`、SubAgent 停止、切换会话）在发出停止请求时就从计数中移除。
 
 ### 改进
 
@@ -58,18 +58,18 @@
 - 后台 job 现在管的是命令启动的整个进程组，不只看直接子进程：命令自身退出、但它起的子进程还在跑时，job 保持活跃到子进程也退出，且这些子进程同样受该 job 的 `timeout_ms` 截止、`job_kill` 和会话清理约束。`nohup … &` 不再能靠熬死启动它的那层包装逃出 job；用 `setsid` / `setpgid` 主动脱离进程组的进程仍不在 job 之内。命令这样退出时，前台调用会带着 job 句柄返回，不再阻塞当前回合等这些后代结束，即使 `yield_time_ms: 0` 也一样。只有当命令退出那一刻记录到的某个成员仍在这个组里时，停止才会向它发信号；证明不了时会按「未能确认」报告清理结果，而不是朝可能已被回收的组号发信号。在没有进程组的平台（Windows）上，job 仍以直接进程为界，停止操作会把清理结果标为无法确认，因为命令可能留下的后代进程观察不到。
 - `job_list` 默认只列正在运行和正在停止的 job，传 `include_finished: true` 才会带上保留的终态 job；活跃行还会给出截止时间还剩多少。长会话里的活跃 job 不会再被一堆终态条目埋掉。
 - 状态栏改为倒计时剩余等待时间，不再只显示已经等了多久。所有 API key 进入冷却时说明原因并显示剩余时间（`↺ cooling down · 33s left`），带停顿的重试轮则倒数到下一次尝试（`↺ round 12 · retry in 45s`）。冷却倒计时指向「真正能发出请求」的时刻，而不是下一次内部检查；像 provider 配额重置这样的长等待会按小时显示（`↺ cooling down · 2h15m left`）。没有停顿、立刻重新探测的重试轮没有可倒数的等待，继续显示已耗时。终端较窄时先省略原因（`↺ 33s left`），再省略 `left`（`↺ 33s`），而不是直接截断。
-- 错误面板现在会记录 key 冷却背后的 API 失败，即使那次失败来自没有 UI 回调的后台调用：记忆抽取或思考翻译造成的失败会由下一个请求补记，被 Provider 永久判废的凭据（刷新令牌过期、账号失效或停用）也会在下一个带 UI 回调的请求上提示。每条失败只记一次。
-- 会话的首个请求可能要等异步的会话准备完成——`AGENTS.md`、项目 skills 或 MCP server 发现——而此时 turn 已经在跑。状态栏现在会显示 preparing 状态并注明在等什么（`✶ waiting for MCP servers · 12s`），不再看起来像空闲：MCP server 慢或连不上时，能从界面看出「没动静」的原因。
+- 错误面板现在会记录 key 冷却背后的 API 失败，即使那次失败来自后台调用：记忆抽取或思考翻译造成的失败会由下一个前台请求（agent 的一轮对话或一次上下文压缩）补记，被 Provider 永久判废的凭据（刷新令牌过期、账号失效或停用）也会在下一个前台请求上提示。每条失败只记一次。
+- 会话的首个请求可能要等异步的会话准备完成——`AGENTS.md`、项目 skills 或 MCP server 发现——而此时 turn 已经在跑。状态栏现在会显示 preparing 状态并注明在等什么（`✶ waiting for MCP servers · 12s`），不再看起来像空闲：MCP server 慢或连不上时，能从界面看出「没动静」的原因。headless 客户端会收到 `type` 为 `preparing` 的 `activity` 事件。
 - 只配了一个模型时，等待 key 冷却会一直等到它真正恢复，不再每分钟重启一轮：等待在最早的 key 可用时刻结束。较长的窗口（已确认的配额重置时刻，由 Provider 自己决定，`retry_after_max_s` 并不限制它，该设置只限制 `Retry-After` 提示）一次等完，key 可用后立即发出重试。这段等待期间不会重新探测模型池，因此等待中途新增的凭据要等这次等待结束才会被用上。配了 fallback 模型时仍然至少每分钟重新检查一次模型池——兄弟模型、新加的凭据或刷新后的限流快照都可能让请求更早发出。正在等这类冷却的 worker 也不会再被当成卡住的 agent 上报给它的 owner。
 - 同一条消息里的只读工具调用现在合进同一个并行批次，不再把消息切成两段：`job_output`、`job_list`、`skill`、`view_image`、`read_artifact` 会与 `read`、`grep`、`glob` 一起执行，Chord 已经识别为只读的 `shell` 命令（比如 `git status`）也跟它们同批，不再充当批次边界。还在等待的 `job_output(wait: exit)` 不再压住同一批里的读文件和检索；读不同的 job 互不等待，读同一个 job 的两次调用同样相互独立，各自取走属于自己的那段新输出。
 - 能并行的只读 shell 命令变多了：`grep`、`find`、`sort`、`jq`、`diff`、`sed -n '1,20p'` 这类检索查看命令，以及 `rg --no-config`（`rg` 只有带 `--no-config` 才并入，因为 `RIPGREP_CONFIG_PATH` 可以注入 `--pre` 去跑外部命令），还有 `git` / `gh` 的查询形态（`git blame`、`git stash list`、`gh pr view` 等）都会跟读文件同批，不再一个个串行。两边都只读的管道和 `&&` / `||`（比如 `git log | head -20`）合进同一批，`command` / `nice` 只剥一层。判定依然偏保守，不会动权限：不认识的 flag 照样串行。
 - 在 worktree 里运行的会话同样带上项目上下文：指令（`AGENTS.md`）与项目技能以会话所在的 checkout 为准——分支可以自带一份——checkout 里没有的 gitignore 副本再回落到主工作区。子代理定义与记忆从主工作区读取，因此 worktree 会话的配置与主工作区一致。Chord 自己的状态——记忆、计划、笔记与 worktree 记录——也写在那里，所以从 worktree 会话写出的计划不会随它所在的 checkout 一起消失。`chord --worktree <name> --continue` 以该 worktree 为工作目录继续仓库里最近的会话。
 - 继续会话时会切回它当时所在的 checkout：`chord resume <id>`、`chord --resume <id>` 与 `chord --continue` 都会进入会话记录的 worktree，继续时落在 worktree 里也会把它记下来。那个 worktree 已不存在时先给出提示：`chord resume` 回退到主工作区，`--resume` 与 `--continue` 则在启动 chord 时所在的 checkout 里继续。会话选择器会在该会话那一行标出它，不同 checkout 的会话一眼可辨。runtime cache 仍按 checkout 分开。
-- `Available Skills` 列表对技能描述的展示上限从 157 字节提高到 1024 字符，中文描述尤其明显：写在旧上限之后的触发条件现在能到达模型，不再被静默丢掉。列表的整体预算同步提高到 8192 字节，32 条上限不变。
+- `Available Skills` 列表对技能描述的展示上限从 157 字节提高到 1024 字符，中文描述尤其明显：写在旧上限之后的触发条件现在能到达模型，不再被静默丢掉。列表的整体预算同步提高到 8192 字节。列表仍最多显示 32 个技能，但 `skill` 工具的名称列表现在包含全部可见技能，超出上限的技能也能按名称加载。
 - 压缩之后或中途恢复之后，续跑提示带上的是运行期掌管的那些任务状态，而不只是摘要模型自己写的内容：最新用户请求（含被 Chord 拒绝的完成）、todo 快照、运行中的后台任务与子 agent、以及结果从未落盘的工具调用都会随请求回来，其中这类调用会明确列为「重试前先核对现状」。续跑注入的文件清单在每次请求时从磁盘重新读取、标注为本次读取，并标出与 checkpoint 不一致的条目。
 - TypeScript 语言服务器自己的消息现在会进日志：Chord 记录 `window/showMessage` 警告，以及 `$/typescriptVersion` 通知里服务器实际加载的 TypeScript 版本和来源。这两类通知以前没有 handler，被 transport 直接丢弃、连日志都不留，于是「服务器退回到另一个编译器」「服务器完全拒绝这个工作区」和「用的就是项目自己的 TypeScript」看起来一模一样。工作区没装依赖、以及锁定 TypeScript 7（不再提供 `lib/tsserver.js`）时都会遇到这种情况；定制文档现在给出两条出路——装工作区依赖，或用 `init_options.tsserver.fallbackPath` 指向仍提供该文件的版本。模型侧的 LSP 指引也写明：工具结果里没有 diagnostics 块，只代表没有诊断被上报，不代表文件已验证。
 - Shell 和后台任务输出的内联预览从所有工具结果共用的 50 KB 默认值缩短到 16 KiB，完整文本指向可复用的保存日志，减少重复输出和命令执行。
-- 每次请求携带的 `compact_context` 工具定义缩短了约三分之一；压力下的准备步骤仍由上下文提醒给出，证据字段的具体规则由对应的拒绝信息说明。
+- 每次请求携带的 `compact_context` 工具定义缩短了约三分之一；压力下的准备步骤仍由上下文提醒给出。
 - 工具 schema 按必填字段的声明顺序列出属性，编辑工具的 `old_string` 在 `new_string` 之前，Write 的 `path` 在 `content` 之前，为模型提供先写源信息、再写替换内容的提示；这不保证模型实际生成参数的顺序。
 - 注入的 MEMORY.md 摘要因预算被截断时，末尾会加截断标记，模型可以去读 MEMORY.md 补齐被省略的部分。
 - 压缩检查点把被推翻的约束列在明确的「Superseded constraints (no longer in force)」标签下，不再用没有说明的 `~ ` 前缀。
@@ -79,8 +79,8 @@
 
 ### 修复
 
-- 上下文压缩完整保留不超过 8,192 个字符的最新用户请求，包括拒绝完成时的反馈；更长的请求会明确提示 agent 从历史归档恢复省略的要求。
-
+- 上下文压缩完整保留不超过 8,192 个字符的最新用户请求（含行结构），包括拒绝完成时的反馈；更长的请求会明确提示 agent 从历史归档恢复省略的要求。
+- 压缩或超长回复之后的自动续跑，在拒绝完成的反馈比最后一条用户消息更新时，以该反馈为准，不再回到更早的请求。
 - Responses 回复会用最终文本修正 TUI 流式输出中的乱码；流中断时也会采用已确认的文本。仅在完成时返回的回复能正常显示，最终文本明确为空时会清除此前的流式内容。ACP 在每次模型响应完成后发送确认正文，避免向无法撤回文字的客户端发送损坏或被撤回的草稿；思考和工具进度仍会流式发送。
 - 仅包含拒绝回复的 Responses 流现在能正确保留并显示拒绝文本。
 - MCP 工具卡不再默认展开。此前折叠状态下的 `mcp_*` 卡仍会渲染参数与结果，按空格也收不回去；现在 MCP 调用和其他工具卡一样默认折叠。
@@ -138,15 +138,16 @@
 - 上下文用量不再把图片的 base64 载荷按正文计费。过去一张 400 KB 的截图会读成约 13 万上下文 token，侧栏读数虚高，还可能在真实用量远未越线时就开始自动压缩；现在每张图按固定额度计入估算，按上次上游样本重标定的字节校准也不再统计图片载荷。
 - 侧边栏的上下文表盘与自动压缩现在只认 provider 对实际发出的请求回报的 usage：新追加的大段工具输出或粘贴的文件不再让显示的用量在两次响应之间继续增长，也不会独自触发压缩。响应没有回报 usage 时，只为该次请求冻结一个估算值，表盘上标为 `≈`；完全没有可用样本的会话仍显示 `0`，也不会据此触发压缩。切换模型时表盘保持上一次读数并标为 `≈`，旧读数不参与新窗口的阈值判断；新响应的用量或缺少用量时的冻结估算才会参与。切换以及切换后失败的请求都不会让表盘归零。恢复会话后的读数同样只供显示，直到新响应更新它。
 - 压缩进行中双击状态栏里的工作目录或会话 ID，现在复制的是你点中的那一项。压缩进度 pill 是右侧分组的最左成员，可点击列却按没有它来排布，于是 pill 在场时双击会话 ID 毫无反应，双击可见的路径反而复制了会话 ID；行里没显示出来的成员也不再保留可点击区域。
-- DeepSeek 的 Chat 与 Messages 请求保持指定思考强度，并完整回传历史思考；Messages 按 DeepSeek 规则发送思考参数，不再要求 Claude 的思考预算。
+- DeepSeek 的 Chat 与 Messages 请求保持指定思考强度，并完整回传历史思考；这两类路由默认开启思考（`thinking: {type: enabled}`），effort 为 `none` 或关闭思考时除外；Messages 按 DeepSeek 规则发送思考参数，不再要求 Claude 的思考预算。
 - loop 模式自动拒绝 Done 后，下一次请求会带上续跑清单（未完成的 TODO、仍在运行的子代理、继续的原因）；之前模型只能看到拒绝理由。`<blocked>` 标记的说明也统一为「会让 loop 停止」。
-- 没有配置语言服务器时，默认角色不会再告诉模型「本角色的文件查看能力受限」。
-- 精确文本编辑支持将 `read` 返回的 LF 文本用于统一采用 CRLF 或 CR 换行的文件，并保留原有换行方式。
+- 精确文本编辑接受 `read` 返回的 LF 文本：统一采用 CRLF 或 CR 换行的文件保留原有换行方式；混用换行的文件里，`old_string` 中的每个换行都能匹配任意一种换行符，替换内容沿用被替换片段的换行。
 - 工具输出的截断提示现在会给出真实的省略行数和预览保留的行区间。此前提示只统计行数上限掉的行，按字节裁剪的预览可能只报很小的省略数，实际却丢掉了大部分内容：588 行的 diff 提示「27 lines truncated」，实际少了 468 行。预览连一整行都放不下时，提示会说明第一行保留了多少字节（例如 `line 1 truncated to 2000 of 102400 bytes`）。
-- `edit` 的 `old_string` 出现多处歧义匹配时，单次编辑、批量编辑和标点容错三条报错路径都会列出命中的行号（最多 12 个，超出显示剩余数量），可以直接在目标位置补充上下文，不必逐个猜测。行号查找只扫描一遍内容，不再对每个匹配重算前缀，大文件的歧义报错和容错 `replace_all` 的落点报告都能保持快速。
-- 单独出现的肤色修饰符（U+1F3FB–U+1F3FF，前面是空格或非 emoji 字符）不再把它所在行的后续内容整体右移两列。Chord 此前给这类序列只算一列，终端却推进两列，导致卡片与面板底色错位、对话框边框和内容偏移；现在宽度计算与终端推进一致。跟在 emoji 基字符后的修饰符（例如 👋🏿）宽度不变。
-- 写后 LSP 诊断不再基于过期副本运行：文件被 shell 命令、外部编辑器、另一个 Chord 会话或代码生成器改写后，只要下一次被读取，当前字节就会重新推送给已经打开该文档的语言服务器，server 据此重算诊断（含跨文件诊断）；读取不会打开原本未打开的文档，也不会启动 watcher。语言服务器声明 save 能力后也会收到 `textDocument/didSave`，`workspace/diagnostic/refresh` 请求会被正常应答，而不是以 `method not found` 失败。
-- 语言服务器启动失败、或诊断未在等待窗口内到达时，不再留下看起来像「干净」的空工具结果：每个 server 的首次此类失败会在 `write`、`edit`、`apply_patch` 结果里追加一行（`LSP diagnostics unavailable for this edit (gopls: no diagnostics within 3s); do not treat this edit as verified.`），重复失败仍只记日志。
+- `edit` 的 `old_string` 出现多处歧义匹配时，单次编辑、批量编辑和标点容错三条报错路径都会列出命中的行号（最多 12 个，超出显示剩余数量），可以直接在目标位置补充上下文，不必逐个猜测。大文件上定位行号依然很快。
+- 匹配位置之前有中文等多字节文本时，标点容错 `edit` 报告的行号不再错位。
+- 单独出现的肤色修饰符（U+1F3FB–U+1F3FF，前面是空格或非 emoji 字符）不再把它所在行的后续内容整体右移两列。Chord 此前给这类序列只算一列，终端却推进三列（修饰符本身占两列），导致卡片与面板底色错位、对话框边框和内容偏移；现在宽度计算与终端推进一致。跟在 emoji 基字符后的修饰符（例如 👋🏿）宽度不变。
+- 写后 LSP 诊断不再基于过期副本运行：文件被 shell 命令、外部编辑器、另一个 Chord 会话或代码生成器改写后，只要下一次被读取，当前字节就会重新推送给已经打开该文档的语言服务器，server 据此重算诊断（含跨文件诊断）；读取不会打开原本未打开的文档，也不会启动 watcher。
+- 语言服务器要求保存通知时（启动时声明或之后动态注册），Chord 写入文件后会发送 `textDocument/didSave`，在保存时重算诊断的 server 也能看到 Chord 的修改。
+- 语言服务器启动失败或中途退出、或诊断未在等待窗口内到达时，不再留下看起来像「干净」的空工具结果：每个 server 每种失败的首次发生会在 `write`、`edit`、`apply_patch` 结果里追加一行（`LSP diagnostics unavailable for this edit (gopls: not started); do not treat this edit as verified.`）。诊断等待超时每个会话只提示一次，退出的 server 会自动重启，仍在启动中的 server 每次写入都会注明，不占用这一行提示。重复失败仍只记日志。
 
 ## 0.8.1 - 2026-09-16
 
