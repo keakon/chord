@@ -23,14 +23,15 @@ import (
 // machine-carryable typed state.
 func e2eCheckpointRequest(active string, decisions, openIssues, evidenceRefs []string, stageID, stageStatus, kind string) *modelDrivenCheckpointRequest {
 	return &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
-		ActiveObjective: active,
-		NextStep:        "continue",
-		Decisions:       decisions,
-		OpenIssues:      openIssues,
-		EvidenceRefs:    evidenceRefs,
-		StageID:         stageID,
-		StageStatus:     stageStatus,
-		CheckpointKind:  kind,
+		ActiveObjective:    active,
+		NextStep:           "continue",
+		Decisions:          decisions,
+		OpenIssues:         openIssues,
+		OpenIssuesComplete: true,
+		EvidenceRefs:       evidenceRefs,
+		StageID:            stageID,
+		StageStatus:        stageStatus,
+		CheckpointKind:     kind,
 	}}
 }
 
@@ -68,6 +69,19 @@ func e2eTypedStateOf(t *testing.T, checkpoint message.Message) checkpointTypedSt
 	return state
 }
 
+// carriedIssueTexts returns the texts of the historical (carried-only)
+// open-issue bucket in order.
+func carriedIssueTexts(state checkpointTypedState) []string {
+	if len(state.CarriedOpenIssues) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(state.CarriedOpenIssues))
+	for _, item := range state.CarriedOpenIssues {
+		out = append(out, item.Text)
+	}
+	return out
+}
+
 // e2eCheckpointAt returns the checkpoint message at the head of the live
 // transcript, or fails if the applied checkpoint is not the first message.
 func e2eCheckpointAt(t *testing.T, a *MainAgent) message.Message {
@@ -84,6 +98,13 @@ func e2eCheckpointAt(t *testing.T, a *MainAgent) message.Message {
 // landing between generations, and pins that the machine-carryable state
 // (decisions, open issues, evidence references) accumulates newest-first
 // across real durable applies without a natural-language carry.
+//
+// Open issues are the one list that does not accumulate flat: the fresh
+// submission's issues are the current generation's blockers, and an issue the
+// submission did not restate is demoted to the historical bucket with the
+// generation that last confirmed it. The distinction is the point — a
+// carried-only issue must stay recoverable without reading as a current
+// blocker, which is what this test's round-2 and round-3 assertions pin.
 func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -127,8 +148,19 @@ func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 	if slices.Equal(second.Decisions, []string{"d2: fresh submission must win the merge", "d1: unify context reduction and compaction state"}) == false {
 		t.Fatalf("round-2 decisions = %v", second.Decisions)
 	}
-	if slices.Equal(second.OpenIssues, []string{"o2: cap disclosure text", "o1: verify the carry format"}) == false {
+	// Only the round-2 submission's own issue is a current blocker: the
+	// round-1 issue it did not restate is demoted to the historical bucket,
+	// tagged with the generation that last confirmed it (generation 0), so it
+	// can never read as freshly confirmed while staying recoverable.
+	if slices.Equal(second.OpenIssues, []string{"o2: cap disclosure text"}) == false {
 		t.Fatalf("round-2 open issues = %v", second.OpenIssues)
+	}
+	if got := carriedIssueTexts(second); slices.Equal(got, []string{"o1: verify the carry format"}) == false {
+		t.Fatalf("round-2 carried issues = %v", got)
+	}
+	if second.Generation != 1 || len(second.CarriedOpenIssues) != 1 ||
+		second.CarriedOpenIssues[0].Source != 0 || second.CarriedOpenIssues[0].Status != typedIssueStatusUnconfirmed {
+		t.Fatalf("round-2 carried provenance = %+v (generation %d)", second.CarriedOpenIssues, second.Generation)
 	}
 	if slices.Equal(second.EvidenceRefs, []string{"ev-2", "ev-1"}) == false {
 		t.Fatalf("round-2 evidence refs = %v", second.EvidenceRefs)
@@ -148,8 +180,19 @@ func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 	if slices.Equal(finalState.Decisions, []string{"d3: session-level tests pin the chain", "d2: fresh submission must win the merge", "d1: unify context reduction and compaction state"}) == false {
 		t.Fatalf("round-3 decisions = %v", finalState.Decisions)
 	}
-	if slices.Equal(finalState.OpenIssues, []string{"o3: benchmark guard still missing", "o2: cap disclosure text", "o1: verify the carry format"}) == false {
+	if slices.Equal(finalState.OpenIssues, []string{"o3: benchmark guard still missing"}) == false {
 		t.Fatalf("round-3 open issues = %v", finalState.OpenIssues)
+	}
+	// Both earlier issues are historical now, newest-first, each keeping the
+	// generation that last confirmed it: the round-2 issue at generation 1 and
+	// the round-1 issue still at generation 0. The chain must not auto-upgrade
+	// them just because they survived the carry.
+	if got := carriedIssueTexts(finalState); slices.Equal(got, []string{"o2: cap disclosure text", "o1: verify the carry format"}) == false {
+		t.Fatalf("round-3 carried issues = %v", got)
+	}
+	if finalState.Generation != 2 || len(finalState.CarriedOpenIssues) != 2 ||
+		finalState.CarriedOpenIssues[0].Source != 1 || finalState.CarriedOpenIssues[1].Source != 0 {
+		t.Fatalf("round-3 carried provenance = %+v (generation %d)", finalState.CarriedOpenIssues, finalState.Generation)
 	}
 	if slices.Equal(finalState.EvidenceRefs, []string{"ev-3", "ev-2", "ev-1"}) == false {
 		t.Fatalf("round-3 evidence refs = %v", finalState.EvidenceRefs)
@@ -160,6 +203,31 @@ func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 	body := compactionSummaryBody(final.Content)
 	if strings.Contains(body, priorCheckpointSectionHeading) {
 		t.Fatal("no checkpoint generation may carry the prior checkpoint as natural-language Markdown")
+	}
+	// The rendered section has to show the split, not just the typed block:
+	// the current issue stands alone and both earlier issues sit behind the
+	// historical label, so a reader cannot mistake a carried entry for a
+	// freshly confirmed blocker.
+	openProblems, ok := markdownSection(body, "## Open Problems")
+	if !ok {
+		t.Fatalf("final checkpoint must render ## Open Problems:\n%s", body)
+	}
+	labelAt := strings.Index(openProblems, typedStateCarriedIssuesLabel)
+	if labelAt < 0 {
+		t.Fatalf("carried issues must be introduced by the historical label:\n%s", openProblems)
+	}
+	const currentIssue = "o3: benchmark guard still missing"
+	if at := strings.Index(openProblems, currentIssue); at < 0 || at > labelAt {
+		t.Fatalf("the current issue must render before the historical label:\n%s", openProblems)
+	}
+	for _, text := range []string{"o2: cap disclosure text", "o1: verify the carry format"} {
+		at := strings.Index(openProblems, text)
+		if at < 0 {
+			t.Fatalf("open problems must keep the carried issue %q:\n%s", text, openProblems)
+		}
+		if at < labelAt {
+			t.Fatalf("carried issue %q rendered before the historical label:\n%s", text, openProblems)
+		}
 	}
 
 	// The tail preserved by the last apply is still live after the checkpoint.

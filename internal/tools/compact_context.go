@@ -63,20 +63,21 @@ var (
 // model-authored; runtime facts (current user request, todos, subagents,
 // anchors, history map) are captured separately at checkpoint build time.
 type CompactContextArgs struct {
-	ActiveObjective   string              `json:"active_objective"`
-	Completed         []string            `json:"completed"`
-	Decisions         []string            `json:"decisions"`
-	OpenIssues        []string            `json:"open_issues"`
-	RetiredItems      []string            `json:"retired_items"`
-	NextStep          string              `json:"next_step"`
-	StateFiles        []string            `json:"state_files"`
-	PlannedStateFiles []string            `json:"planned_state_files"`
-	EvidenceRefs      []string            `json:"evidence_refs"`
-	ClaimEvidence     map[string][]string `json:"claim_evidence"`
-	ClaimKinds        map[string]string   `json:"claim_kinds"`
-	StageID           string              `json:"stage_id"`
-	StageStatus       string              `json:"stage_status"`
-	CheckpointKind    string              `json:"checkpoint_kind"`
+	ActiveObjective    string              `json:"active_objective"`
+	Completed          []string            `json:"completed"`
+	Decisions          []string            `json:"decisions"`
+	OpenIssues         []string            `json:"open_issues"`
+	OpenIssuesComplete bool                `json:"open_issues_complete"`
+	RetiredItems       []string            `json:"retired_items"`
+	NextStep           string              `json:"next_step"`
+	StateFiles         []string            `json:"state_files"`
+	PlannedStateFiles  []string            `json:"planned_state_files"`
+	EvidenceRefs       []string            `json:"evidence_refs"`
+	ClaimEvidence      map[string][]string `json:"claim_evidence"`
+	ClaimKinds         map[string]string   `json:"claim_kinds"`
+	StageID            string              `json:"stage_id"`
+	StageStatus        string              `json:"stage_status"`
+	CheckpointKind     string              `json:"checkpoint_kind"`
 }
 
 // TokenEstimator estimates the input-token cost of a string. Defaults to a
@@ -548,7 +549,7 @@ func (t CompactContextTool) Description() string {
 	return "Request a durable context checkpoint: the runtime rewrites session history from these arguments plus runtime facts and continues the same turn. It is a costed state transition, not a routine progress save. A checkpoint never completes the task or replaces the final response.\n" +
 		"Do not call it when the task is complete and only the final response remains, or to wait for input (use the normal question or waiting mechanism). A terminal TODO state alone is not a reason to checkpoint. " +
 		"Call it alone (no sibling tool calls) at a safe stop after the current atomic operation. Under context pressure, a provisional checkpoint is expected even if the stage remains active or candidate.\n" +
-		"Only active_objective and next_step are required. Report new progress and changed decisions; earlier entries carry forward until named in retired_items. Evidence and stage fields are optional. " +
+		"Only active_objective and next_step are required. Report new progress and changed decisions; earlier entries carry forward until named in retired_items. Set open_issues_complete=true only when open_issues is a complete current issue list; otherwise omitted earlier issues remain current. Evidence and stage fields are optional. " +
 		"Use the schema's exact types: list fields are string arrays, claim_evidence and claim_kinds are objects, and decisions has at most 8 items; never encode an object or array as a JSON string.\n" +
 		"Leave state_files empty when the structured arguments fully carry the recovery state, and never create a file merely to fill the field; a file you do reference must exist, so write that file before submitting the checkpoint. planned_state_files name future paths and do not externalize state.\n" +
 		todoSync +
@@ -583,6 +584,10 @@ func (CompactContextTool) Parameters() map[string]any {
 				"maxItems":    8,
 				"items":       map[string]any{"type": "string", "minLength": 1},
 				"description": "Unresolved blockers, risks, unfinished updates, or facts awaiting confirmation.",
+			},
+			"open_issues_complete": map[string]any{
+				"type":        "boolean",
+				"description": "When true, open_issues is the complete current issue set and omitted carried issues may move to historical status. When absent or false, earlier open issues carry forward until explicitly retired.",
 			},
 			"next_step": map[string]any{
 				"type":        "string",

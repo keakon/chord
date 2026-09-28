@@ -43,6 +43,16 @@ type modelDrivenCheckpointRequest struct {
 	// nil for a fresh request that carried no prior typed state, in which case
 	// the Args-derived claims are used.
 	Claims map[string]checkpointClaim
+	// CarriedOpenIssues is the authoritative historical open-issue set when it
+	// is set: the open issues an earlier generation confirmed that this
+	// submission did not restate. Rendering reads it instead of rebuilding
+	// from Args, which carries only the current generation's confirmed issues.
+	// It is nil for a request that carried no prior typed state.
+	CarriedOpenIssues []checkpointOpenIssue
+	// Generation is the carry ordinal of the merged typed state (see
+	// checkpointTypedState.Generation). It is 0 for a request that carried no
+	// prior typed state.
+	Generation int
 }
 
 // requestAcceptedToolResult is the canonical compact_context success text. It
@@ -1798,6 +1808,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// line before the parse.
 	var stateCarryOmitted int
 	var claimsCarryOmitted int
+	var openIssuesCarryOmitted int
 	var typedCarryUnreadable bool
 	// The prior typed state comes from the nearest checkpoint that actually
 	// carries a parseable typed block: a usage-driven or truncate-only
@@ -1809,7 +1820,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	if typedCarryBroken {
 		typedCarryUnreadable = true
 	} else if priorTypedBody != "" {
-		req, stateCarryOmitted, claimsCarryOmitted, _ = mergePriorTypedCheckpointState(req, priorTypedBody)
+		req, stateCarryOmitted, claimsCarryOmitted, openIssuesCarryOmitted, _ = mergePriorTypedCheckpointState(req, priorTypedBody)
 	}
 	markTypedClaimsInvalidated(req, bundle.evidenceItems)
 	headSnapshot := snapshot[:headSplit]
@@ -1820,7 +1831,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// done. Do not repeat an identical item in decisions or open issues; keep
 	// near-matches because they may intentionally describe a different state.
 	decisions := renderModelStateList(removeCheckpointItems(req.Args.Decisions, req.Args.Completed), "(none reported by the model)")
-	openIssues := renderModelStateList(removeCheckpointItems(req.Args.OpenIssues, req.Args.Completed), "(none reported by the model)")
+	openIssues := renderOpenProblemsSection(req, openIssuesCarryOmitted)
 	// The Externalized State footer describes the archive the continuation
 	// actually receives, which is the archival-filtered pack
 	// (newModelDrivenCheckpointBuilder filters the same way), not the raw
@@ -1843,10 +1854,13 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		// section, so the disclosure never breaks the machine block.
 		typedState += "\n" + typedStateClaimsOmittedNote
 	}
-	if stateCarryOmitted > 0 {
+	if stateCarryOmitted-openIssuesCarryOmitted > 0 {
 		// The dropped entries exist only in the archived history files. The
 		// note must say so: a bounded carry that silently looked complete
-		// would read as the full decision record.
+		// would read as the full decision record. The open-issue share of the
+		// omissions is disclosed inside ## Open Problems instead (see
+		// renderOpenProblemsSection), so this note covers the lists rendered
+		// here.
 		decisions += "\n" + typedStateOmittedNote
 	}
 	if typedCarryUnreadable {
@@ -1996,33 +2010,43 @@ func markTypedClaimsInvalidated(req *modelDrivenCheckpointRequest, evidenceItems
 // on an empty restate — see mergeCheckpointTypedStates); carried items fill
 // the remaining capacity. omitted reports how many carried list items were
 // dropped to bound the lists, claimsOmitted how many carried-only claims the
-// claim-set cap evicted, so the renderer can disclose both. malformed reports
-// that the prior body carried a typed block that could not be parsed, which
-// the renderer must disclose as an unreadable carry rather than silently
-// treating it as absent. A nil request, an empty prior body, or a prior body
-// without a typed state block leaves the submission untouched.
+// claim-set cap evicted, and openIssuesOmitted how many carried open issues
+// the shared open-issue budget dropped, so the renderer can disclose each.
+// malformed reports that the prior body carried a typed block that could not
+// be parsed, which the renderer must disclose as an unreadable carry rather
+// than silently treating it as absent. A nil request, an empty prior body, or
+// a prior body without a typed state block leaves the submission untouched.
+//
+// The open issues the submission did not restate do not land in Args: they
+// travel on CarriedOpenIssues and render apart from the current blockers (see
+// renderOpenProblemsSection).
 //
 // prior must be the body of a checkpoint that actually carries a parseable
 // typed block (see latestPriorTypedCheckpointBody): the caller scans the head
 // for the nearest such checkpoint instead of passing a body truncated to the
 // display carry cap, which would drop the typed JSON line before the parse.
-func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior string) (mergedReq *modelDrivenCheckpointRequest, omitted int, claimsOmitted int, malformed bool) {
+func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior string) (mergedReq *modelDrivenCheckpointRequest, omitted int, claimsOmitted int, openIssuesOmitted int, malformed bool) {
 	if req == nil {
-		return req, 0, 0, false
+		return req, 0, 0, 0, false
 	}
 	priorState, found, broken := typedStateFromBody(prior)
 	if !found {
-		return req, 0, 0, false
+		return req, 0, 0, 0, false
 	}
 	if broken {
-		return req, 0, 0, true
+		return req, 0, 0, 0, true
 	}
 	priorState = retireCheckpointItems(priorState, req.Args.RetiredItems)
-	merged, omitted, claimsOmitted := mergeCheckpointTypedStates(priorState, typedStateFromArgs(req.Args))
+	merged, omitted, claimsOmitted, openIssuesOmitted := mergeCheckpointTypedStates(priorState, typedStateFromArgs(req.Args))
 	copyReq := *req
 	copyReq.Args.Completed = merged.Completed
 	copyReq.Args.Decisions = merged.Decisions
+	// Args.OpenIssues holds only the current generation's confirmed issues;
+	// the ones this submission did not restate travel on the historical set
+	// below so they can never render as current blockers.
 	copyReq.Args.OpenIssues = merged.OpenIssues
+	copyReq.CarriedOpenIssues = merged.CarriedOpenIssues
+	copyReq.Generation = merged.Generation
 	copyReq.Args.EvidenceRefs = merged.EvidenceRefs
 	copyReq.Args.StageID = merged.StageID
 	copyReq.Args.StageStatus = merged.StageStatus
@@ -2038,7 +2062,7 @@ func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior str
 	// and a claim invalidated by evidence that has since left the window would
 	// come back active.
 	copyReq.Claims = merged.Claims
-	return &copyReq, omitted, claimsOmitted, false
+	return &copyReq, omitted, claimsOmitted, openIssuesOmitted, false
 }
 
 func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
@@ -2057,6 +2081,13 @@ func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
 		item.Status = status
 		state.Claims[claim] = item
 	}
+	// Args only ever holds the current generation's confirmed open issues, so
+	// the historical set and the carry ordinal travel on the request: the
+	// typed block is the only channel that hands the historical bucket to the
+	// next checkpoint, and the ordinal is what keeps a carried entry's
+	// provenance stable across generations.
+	state.CarriedOpenIssues = req.CarriedOpenIssues
+	state.Generation = req.Generation
 	return renderTypedStateJSON(state)
 }
 
@@ -2128,6 +2159,54 @@ func stripColumnZeroHeadings(text string) string {
 		out = append(out, stripLeadingHeadingMarkers(line))
 	}
 	return strings.Join(out, "\n")
+}
+
+// renderOpenProblemsSection renders the ## Open Problems section: the current
+// generation's confirmed open issues first, then the historical issues an
+// earlier checkpoint confirmed and this submission did not restate.
+//
+// The two sets are rendered apart on purpose. A carried-only issue is not a
+// blocker of this checkpoint — the model restated its current blockers and
+// this one was not among them — so listing it beside them made a stale entry
+// read as freshly confirmed and invited the continuation to re-investigate
+// finished work. The historical block stays visible, and its label says both
+// what it is and what to do with it, because an unrestated risk must never be
+// silently read as resolved while it must also not cost a re-check per item.
+//
+// The overlap with completed work keeps the existing exact-text display
+// de-duplication: it is deliberately not a semantic match, so an issue that
+// merely resembles a completed entry ("tests not written" against "tests
+// passed") survives instead of being auto-resolved.
+func renderOpenProblemsSection(req *modelDrivenCheckpointRequest, carriedOmitted int) string {
+	if req == nil {
+		return "- (none reported by the model)"
+	}
+	confirmed := removeCheckpointItems(req.Args.OpenIssues, req.Args.Completed)
+	section := renderModelStateList(confirmed, "(none reported by the model)")
+	if len(req.CarriedOpenIssues) > 0 {
+		completedKeys := make(map[string]struct{}, len(req.Args.Completed))
+		for _, item := range req.Args.Completed {
+			completedKeys[checkpointItemKey(item)] = struct{}{}
+		}
+		var carried []string
+		for _, item := range req.CarriedOpenIssues {
+			text := strings.TrimSpace(item.Text)
+			if text == "" {
+				continue
+			}
+			if _, done := completedKeys[checkpointItemKey(text)]; done {
+				continue
+			}
+			carried = append(carried, text)
+		}
+		if len(carried) > 0 {
+			section += "\n- " + typedStateCarriedIssuesLabel + "\n" + renderModelStateList(carried, "")
+		}
+	}
+	if carriedOmitted > 0 {
+		section += "\n" + typedStateOpenIssuesOmittedNote
+	}
+	return section
 }
 
 // renderModelStateList renders model-authored list items as bullets

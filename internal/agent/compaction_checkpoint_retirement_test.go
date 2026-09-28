@@ -22,7 +22,7 @@ func TestCheckpointProgressRetirementAcrossGenerations(t *testing.T) {
 		Decisions:    []string{"use option B"},
 		RetiredItems: []string{"use option A", "verify parser", "absent entry"},
 	}}
-	merged, _, _, malformed := mergePriorTypedCheckpointState(request, typedStateSectionHeading+"\n"+renderTypedStateJSON(prior))
+	merged, _, _, _, malformed := mergePriorTypedCheckpointState(request, typedStateSectionHeading+"\n"+renderTypedStateJSON(prior))
 	if malformed || !slices.Equal(merged.Args.Completed, []string{"renderer tested", "parser tested"}) {
 		t.Fatalf("completed progress lost: %+v", merged)
 	}
@@ -32,7 +32,7 @@ func TestCheckpointProgressRetirementAcrossGenerations(t *testing.T) {
 	if _, exists := merged.Claims["use option A"]; exists {
 		t.Fatal("retired claim survived")
 	}
-	next, _, _, malformed := mergePriorTypedCheckpointState(&modelDrivenCheckpointRequest{}, typedStateSectionHeading+"\n"+renderTypedCheckpointState(merged))
+	next, _, _, _, malformed := mergePriorTypedCheckpointState(&modelDrivenCheckpointRequest{}, typedStateSectionHeading+"\n"+renderTypedCheckpointState(merged))
 	if malformed || !slices.Equal(next.Args.Completed, merged.Args.Completed) || len(next.Args.OpenIssues) != 0 {
 		t.Fatalf("state regressed on next generation: %+v", next)
 	}
@@ -92,7 +92,7 @@ func TestCheckpointCompletedCarryIsBounded(t *testing.T) {
 	for index := range current.Completed {
 		current.Completed[index] = string(rune('a' + index))
 	}
-	merged, omitted, _ := mergeCheckpointTypedStates(prior, current)
+	merged, omitted, _, _ := mergeCheckpointTypedStates(prior, current)
 	if len(merged.Completed) != 12 || omitted != 1 {
 		t.Fatalf("unbounded progress: %+v, omitted=%d", merged, omitted)
 	}

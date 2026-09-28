@@ -74,7 +74,7 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	// Decisions cap is 8, so nothing is dropped here; the fresh submission's
 	// items come first and the carried ones follow, and the fresh stage
 	// metadata wins.
-	merged, omitted, _ := mergeCheckpointTypedStates(prior, current)
+	merged, omitted, _, _ := mergeCheckpointTypedStates(prior, current)
 	if omitted != 0 {
 		t.Fatalf("omitted = %d, want 0", omitted)
 	}
@@ -92,7 +92,7 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	for i := range typedStateCarryMaxDecisions + 2 {
 		over.Decisions = append(over.Decisions, "old-"+string(rune('a'+i)))
 	}
-	merged, omitted, _ = mergeCheckpointTypedStates(over, current)
+	merged, omitted, _, _ = mergeCheckpointTypedStates(over, current)
 	if len(merged.Decisions) != typedStateCarryMaxDecisions {
 		t.Fatalf("merged decisions = %d, want cap %d", len(merged.Decisions), typedStateCarryMaxDecisions)
 	}
@@ -112,7 +112,7 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	for i := range typedStateCarryMaxEvidenceRefs + 2 {
 		tooMany.EvidenceRefs = append(tooMany.EvidenceRefs, "ev-"+string(rune('a'+i)))
 	}
-	merged, omitted, _ = mergeCheckpointTypedStates(checkpointTypedState{}, tooMany)
+	merged, omitted, _, _ = mergeCheckpointTypedStates(checkpointTypedState{}, tooMany)
 	if len(merged.OpenIssues) != typedStateCarryMaxOpenIssues || len(merged.EvidenceRefs) != typedStateCarryMaxEvidenceRefs {
 		t.Fatalf("current typed lists exceeded bounds: open=%d evidence=%d", len(merged.OpenIssues), len(merged.EvidenceRefs))
 	}
@@ -124,7 +124,7 @@ func TestMergeTypedStateKeepsNewestAndDisclosesOmission(t *testing.T) {
 	// the merge, so the readable sections and the typed block can never
 	// diverge on the same decision.
 	oversizedPrior := checkpointTypedState{Decisions: []string{strings.Repeat("x", typedStateCarryMaxItemRunes+50)}}
-	merged, omitted, _ = mergeCheckpointTypedStates(oversizedPrior, current)
+	merged, omitted, _, _ = mergeCheckpointTypedStates(oversizedPrior, current)
 	if omitted != 0 {
 		t.Fatalf("omitted = %d, want 0", omitted)
 	}
@@ -221,7 +221,7 @@ func TestTypedClaimsCarryIdentityAndStatus(t *testing.T) {
 		"tests pass": {Kind: "derived", EvidenceRefs: []string{"ev-new"}, Status: "superseded"},
 		"next step":  {Kind: "proposed", Status: "active"},
 	}}
-	merged, _, _ := mergeCheckpointTypedStates(prior, current)
+	merged, _, _, _ := mergeCheckpointTypedStates(prior, current)
 	if got := merged.Claims["tests pass"]; got.Status != "superseded" || got.Kind != "derived" || len(got.EvidenceRefs) != 1 || got.EvidenceRefs[0] != "ev-new" {
 		t.Fatalf("fresh claim did not replace prior identity: %#v", got)
 	}
@@ -358,7 +358,7 @@ func TestMergePriorTypedCheckpointStateReadsFullBodyBeyondDisplayTruncation(t *t
 	}
 	// The merge works against the stripped full body (the head scanner passes
 	// the raw body to the merge).
-	merged, _, _, malformed := mergePriorTypedCheckpointState(req, full)
+	merged, _, _, _, malformed := mergePriorTypedCheckpointState(req, full)
 	if malformed {
 		t.Fatal("full body with a valid typed block must not report malformed")
 	}
@@ -396,7 +396,7 @@ func TestMergePriorTypedCheckpointStateDisclosesUnreadableCarry(t *testing.T) {
 		Decisions:       []string{"fresh-decision"},
 	}}
 	prior := "## Current User Request\n- continue\n\n## Typed Checkpoint State\n- {this is not valid json"
-	merged, _, _, malformed := mergePriorTypedCheckpointState(req, prior)
+	merged, _, _, _, malformed := mergePriorTypedCheckpointState(req, prior)
 	if !malformed {
 		t.Fatal("unparseable typed block must report malformed")
 	}
@@ -592,7 +592,7 @@ func TestMergeTypedStatesDoesNotInheritTerminalCarriedStage(t *testing.T) {
 		Decisions:   []string{"task one done"},
 	}
 	current := checkpointTypedState{}
-	merged, _, _ := mergeCheckpointTypedStates(prior, current)
+	merged, _, _, _ := mergeCheckpointTypedStates(prior, current)
 	if merged.StageID != "" || merged.StageStatus != "" || merged.Kind != "" {
 		t.Fatalf("terminal carried stage must not become the current stage on an empty restate: %+v", merged)
 	}
@@ -613,7 +613,7 @@ func TestMergeTypedStatesKeepsInFlightCarriedStageOnEmptyRestate(t *testing.T) {
 		Kind:        "provisional",
 	}
 	current := checkpointTypedState{}
-	merged, _, _ := mergeCheckpointTypedStates(prior, current)
+	merged, _, _, _ := mergeCheckpointTypedStates(prior, current)
 	if merged.StageID != "impl" || merged.StageStatus != "candidate" || merged.Kind != "provisional" {
 		t.Fatalf("in-flight carried stage must stay current on an empty restate: %+v", merged)
 	}
@@ -696,7 +696,7 @@ func TestMergeTypedClaimsBoundsCarriedSetAndDisclosesOmission(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	priorBody := "## Key Decisions\n- d-old\n\n## Typed Checkpoint State\n" + renderTypedStateJSON(checkpointTypedState{Claims: prior})
 	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "continue", NextStep: "go", Decisions: []string{"fresh decision"}}}
-	req, _, claimsOmitted, _ := mergePriorTypedCheckpointState(req, priorBody)
+	req, _, claimsOmitted, _, _ := mergePriorTypedCheckpointState(req, priorBody)
 	if claimsOmitted != len(prior)-typedStateCarryMaxClaims {
 		t.Fatalf("claimsOmitted = %d, want %d", claimsOmitted, len(prior)-typedStateCarryMaxClaims)
 	}
