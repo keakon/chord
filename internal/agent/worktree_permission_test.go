@@ -57,6 +57,8 @@ func TestWorktreeExitActionDenyKeepsToolVisible(t *testing.T) {
 		t.Skip("git is not installed")
 	}
 	parent := newTestMainAgent(t, t.TempDir())
+	parent.workDirState.store(WorkDirState{WorktreeID: "test-worktree"})
+	parent.worktreeTools.Store(true)
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewWorktreeEnterTool(parent))
 	reg.Register(tools.NewWorktreeExitTool(parent))

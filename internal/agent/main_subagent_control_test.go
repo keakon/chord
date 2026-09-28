@@ -22,6 +22,14 @@ import (
 
 func newControllableTestSubAgent(t *testing.T, parent *MainAgent, taskID string) *SubAgent {
 	t.Helper()
+	return newControllableTestSubAgentWithWorkDir(t, parent, taskID, WorkDirState{})
+}
+
+// newControllableTestSubAgentWithWorkDir is newControllableTestSubAgent for a
+// worker that starts with a checkout binding, for example one placed in a
+// managed worktree.
+func newControllableTestSubAgentWithWorkDir(t *testing.T, parent *MainAgent, taskID string, state WorkDirState) *SubAgent {
+	t.Helper()
 	ctx, cancel := context.WithCancel(parent.parentCtx)
 	sub := NewSubAgent(SubAgentConfig{
 		InstanceID:   "worker-1",
@@ -35,6 +43,7 @@ func newControllableTestSubAgent(t *testing.T, parent *MainAgent, taskID string)
 		Cancel:       cancel,
 		BaseTools:    parent.tools,
 		WorkDir:      parent.contentRoot,
+		WorkDirState: state,
 		SessionDir:   parent.sessionDir,
 		ModelName:    "test-model",
 	})

@@ -36,15 +36,16 @@ func TestDelegateToolSchemaDescribesOptionalWorkdir(t *testing.T) {
 		"workdir",
 		"existing chord worktree",
 		"never creates one",
-		NameWorktreeEnter,
 		"inherits your working directory",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("Parameters() missing %q in %s", want, text)
 		}
 	}
-	if strings.Contains(text, "(WorktreeEnter)") {
-		t.Fatalf("Parameters() names a display name the model cannot call: %s", text)
+	// The schema is shared by every surface, so it must not name a tool the
+	// session may hide; the description carries that reference instead.
+	if strings.Contains(text, NameWorktreeEnter) {
+		t.Fatalf("Parameters() names %s, which sessions outside a worktree hide: %s", NameWorktreeEnter, text)
 	}
 	required, ok := params["required"].([]string)
 	if !ok {
@@ -54,5 +55,19 @@ func TestDelegateToolSchemaDescribesOptionalWorkdir(t *testing.T) {
 		if field == "workdir" {
 			t.Fatal("workdir must stay optional: the worker inherits the delegating agent's directory when omitted")
 		}
+	}
+}
+
+// The description points at worktree_enter for creating a worker's worktree
+// only when the model can call it.
+func TestDelegateToolDescriptionReferencesWorktreeEnterOnlyWhenVisible(t *testing.T) {
+	tool := NewDelegateTool(taskTestCreator{})
+	withEnter := tool.DescriptionForTools(map[string]struct{}{NameDelegate: {}, NameWorktreeEnter: {}})
+	if !strings.Contains(withEnter, "`"+NameWorktreeEnter+"`") {
+		t.Fatalf("description with %s visible lacks the reference: %s", NameWorktreeEnter, withEnter)
+	}
+	without := tool.DescriptionForTools(map[string]struct{}{NameDelegate: {}})
+	if strings.Contains(without, NameWorktreeEnter) {
+		t.Fatalf("description with %s hidden still names it: %s", NameWorktreeEnter, without)
 	}
 }

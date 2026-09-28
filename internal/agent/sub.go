@@ -272,6 +272,11 @@ type SubAgent struct {
 	// workDirState is this SubAgent's active checkout; a worktree switch
 	// publishes a new generation here and never touches the parent's binding.
 	workDirState workDirBinding
+	// worktreeTools mirrors MainAgent.worktreeTools: a sticky capability, set
+	// when the worker starts in a managed worktree. Like the MainAgent's it
+	// lives in process memory, so a rehydrated worker re-derives it from the
+	// checkout it is restored in.
+	worktreeTools atomic.Bool
 
 	// cachedSessionReminderContent is the meta user message content carrying
 	// environment + AGENTS.md (under "# AGENTS.md instructions" /
@@ -713,6 +718,15 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	if !s.setState(SubAgentStateRunning, "") {
 		panic(fmt.Sprintf("new SubAgent %s rejected initial running state", s.instanceID))
 	}
+	// Install the initial binding before registering capability-gated tools.
+	// A worker placed in a managed worktree gets the runtime controls; a
+	// normal worker stays on the lightweight default tool surface.
+	if cfg.WorkDirState.Path != "" || cfg.WorkDirState.WorktreeID != "" {
+		s.workDirState.store(cfg.WorkDirState)
+	}
+	if strings.TrimSpace(cfg.WorkDirState.WorktreeID) != "" {
+		s.worktreeTools.Store(true)
+	}
 	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {
 		s.tools.Register(tools.NewSkillTool(s))
 	}
@@ -729,13 +743,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	}
 	if !cfg.Ruleset.IsDisabled(tools.NameWorktreeList) {
 		s.tools.Register(tools.NewWorktreeListTool(s))
-	}
-
-	// Install the initial binding before anything derives a path from it: the
-	// environment reminder must name the worktree the worker is placed in, and
-	// the completion report reads the same binding.
-	if cfg.WorkDirState.Path != "" || cfg.WorkDirState.WorktreeID != "" {
-		s.workDirState.store(cfg.WorkDirState)
 	}
 
 	// Build and install the system prompt.

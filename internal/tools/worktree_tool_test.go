@@ -21,6 +21,11 @@ type stubWorktreeHost struct {
 
 	listRes []WorktreeListEntry
 	listErr error
+
+	// worktreeToolsDisabled models a session without the worktree capability;
+	// the zero value keeps the tools enabled so the forwarding tests exercise
+	// the tool bodies.
+	worktreeToolsDisabled bool
 }
 
 func (h *stubWorktreeHost) WorktreeEnter(_ context.Context, req WorktreeEnterRequest) (WorktreeEnterResult, error) {
@@ -36,6 +41,8 @@ func (h *stubWorktreeHost) WorktreeExit(_ context.Context, req WorktreeExitReque
 func (h *stubWorktreeHost) WorktreeList(context.Context) ([]WorktreeListEntry, error) {
 	return h.listRes, h.listErr
 }
+
+func (h *stubWorktreeHost) WorktreeToolsEnabled() bool { return !h.worktreeToolsDisabled }
 
 func TestWorktreeToolNames(t *testing.T) {
 	host := &stubWorktreeHost{}
@@ -298,6 +305,22 @@ func TestWorktreeToolsHiddenWithoutGit(t *testing.T) {
 	for _, tool := range []Tool{NewWorktreeEnterTool(host), NewWorktreeExitTool(host), NewWorktreeListTool(host)} {
 		if tool.(AvailableTool).IsAvailable() {
 			t.Errorf("%s must be hidden when git is not installed", tool.Name())
+		}
+	}
+}
+
+func TestWorktreeToolsHiddenWithoutSessionCapability(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	host := &stubWorktreeHost{worktreeToolsDisabled: true}
+	for _, tool := range []Tool{NewWorktreeEnterTool(host), NewWorktreeExitTool(host), NewWorktreeListTool(host)} {
+		available, ok := tool.(AvailableTool)
+		if !ok {
+			t.Fatalf("%s must implement AvailableTool", tool.Name())
+		}
+		if available.IsAvailable() {
+			t.Errorf("%s must be hidden without the session capability", tool.Name())
 		}
 	}
 }

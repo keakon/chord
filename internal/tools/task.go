@@ -171,13 +171,28 @@ type delegateArgs struct {
 
 func (DelegateTool) Name() string { return NameDelegate }
 
-func (DelegateTool) Description() string {
+func (t DelegateTool) Description() string {
+	return t.DescriptionForTools(nil)
+}
+
+// DescriptionForTools points at worktree_enter for creating a worker's
+// worktree only when that tool is on the model's surface: sessions that do
+// not run in a worktree hide it. A nil visible map means the caller does not
+// know the surface and keeps the reference.
+func (DelegateTool) DescriptionForTools(visible map[string]struct{}) string {
+	createWorktree := " A workdir must name an existing worktree; create a new one first with `" + NameWorktreeEnter + "`."
+	if visible != nil {
+		if _, ok := visible[NameWorktreeEnter]; !ok {
+			createWorktree = ""
+		}
+	}
 	return "Delegate a task to a SubAgent for parallel execution. " +
 		"The SubAgent runs independently with its own context and tool access, and reports back when done. " +
 		"Your system prompt's delegation workflow governs task selection, follow-up, and safe parallelism. " +
 		"The result is delivered asynchronously and flows back to you automatically; do not poll for or retrieve SubAgent results. " +
 		"The returned task_id is the stable durable handle for that delegate and identifies the same task across follow-up attempts. " +
-		"Roles that can write files must declare a non-empty expected_write_scope; a read-only delegation pairs a read-only role with an empty scope object {}."
+		"Roles that can write files must declare a non-empty expected_write_scope; a read-only delegation pairs a read-only role with an empty scope object {}." +
+		createWorktree
 }
 
 // IsAvailable reports whether the DelegateTool should be registered.
@@ -247,7 +262,7 @@ func (t *DelegateTool) Parameters() map[string]any {
 			},
 			"workdir": map[string]any{
 				"type":        "string",
-				"description": "Optional existing chord worktree (its name or path) to start this worker in. The worktree must already exist: this tool never creates one, so create it first (`" + NameWorktreeEnter + "`) or point at one you already have. Omit it and the worker inherits your working directory. Several workers may share a worktree (for example, one reviewing what another just wrote); concurrent writes to the same file are still caught by the shared path tracker. The worker's own permission rules decide what it may do there.",
+				"description": "Optional existing chord worktree (its name or path) to start this worker in. The worktree must already exist: this tool never creates one. Omit it and the worker inherits your working directory. Several workers may share a worktree (for example, one reviewing what another just wrote); concurrent writes to the same file are still caught by the shared path tracker. The worker's own permission rules decide what it may do there.",
 			},
 			"agent_type": map[string]any{
 				"type":        "string",

@@ -74,6 +74,11 @@ type WorktreeHost interface {
 	WorktreeEnter(ctx context.Context, req WorktreeEnterRequest) (WorktreeEnterResult, error)
 	WorktreeExit(ctx context.Context, req WorktreeExitRequest) (WorktreeExitResult, error)
 	WorktreeList(ctx context.Context) ([]WorktreeListEntry, error)
+	// WorktreeToolsEnabled reports whether the session behind this host
+	// exposes the worktree runtime tools at all. It is a sticky session
+	// capability, never the live binding, so leaving a worktree does not hide
+	// tools the session may still call.
+	WorktreeToolsEnabled() bool
 }
 
 // WorktreeEnterTool creates or reopens a repository worktree and switches the
@@ -147,7 +152,13 @@ func (WorktreeEnterTool) IsReadOnly() bool { return false }
 // every operation shells out to git. A machine without git hides all three
 // rather than listing a capability that can only fail.
 func worktreeToolsAvailable(host WorktreeHost) bool {
-	return host != nil && worktree.GitAvailable()
+	if host == nil || !worktree.GitAvailable() {
+		return false
+	}
+	// Worktree operations are a session capability rather than a general
+	// model capability: hosts expose the tools only when the session was
+	// started in a chord worktree.
+	return host.WorktreeToolsEnabled()
 }
 
 func (t WorktreeEnterTool) IsAvailable() bool { return worktreeToolsAvailable(t.Host) }

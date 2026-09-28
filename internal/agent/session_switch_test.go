@@ -1532,3 +1532,34 @@ func TestHandleRenameCommandPreservesMetadataAndUpdatesSessionSummary(t *testing
 		t.Fatalf("clear event = %#v, want empty SessionTitleChangedEvent", event)
 	}
 }
+
+// /new starts a transcript that has seen no tool definitions, so the worktree
+// capability follows the checkout the new session runs in instead of what the
+// replaced session once had.
+func TestHandleNewSessionCommandRederivesWorktreeTools(t *testing.T) {
+	projectRoot := t.TempDir()
+	sessionDir := testProjectSessionDir(t, projectRoot, "worktree-capable")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("mkdir session: %v", err)
+	}
+	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+
+	// The previous session worked in a worktree and returned to the main
+	// checkout: its conversation keeps the tools.
+	a.worktreeTools.Store(true)
+	a.workDirState.store(WorkDirState{})
+	a.handleNewSessionCommand()
+	if a.WorktreeToolsEnabled() {
+		t.Fatal("a new session in the main checkout must not expose the worktree tools")
+	}
+
+	// A new session started while the process works in a worktree gets them.
+	a.workDirState.store(WorkDirState{Path: t.TempDir(), WorktreeID: "feat-x", Branch: "chord/feat-x"})
+	a.handleNewSessionCommand()
+	if !a.WorktreeToolsEnabled() {
+		t.Fatal("a new session inside a worktree must expose the worktree tools")
+	}
+}

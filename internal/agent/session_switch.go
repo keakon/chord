@@ -134,6 +134,7 @@ func (a *MainAgent) handleNewSessionCommand() {
 	a.sessionLock = newLock
 	a.resetSessionRuntimeState()
 	a.installSessionTarget(newSessionDir)
+	a.rederiveWorktreeTools()
 	a.recordSessionCheckoutOrWarn()
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
 	// Freeze is complete (persist flushed, recovery closed): queue extraction

@@ -658,6 +658,30 @@ func TestSubAgentWorktreeBindingIsIndependent(t *testing.T) {
 	}
 }
 
+// TestSubAgentWorktreeCapabilityIsSticky pins the worker side of the session
+// capability behind the worktree tools: it is fixed when the worker starts in
+// a managed worktree and must not follow the binding, so leaving the worktree
+// does not drop tools whose frozen definitions the model may still call.
+func TestSubAgentWorktreeCapabilityIsSticky(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	if a.WorktreeToolsEnabled() {
+		t.Fatal("a session born in the main checkout must not expose the worktree tools")
+	}
+
+	placed := newControllableTestSubAgentWithWorkDir(t, a, "task-placed", WorkDirState{
+		Path:       t.TempDir(),
+		WorktreeID: "feat-x",
+		Branch:     "chord/feat-x",
+	})
+	if !placed.WorktreeToolsEnabled() {
+		t.Fatal("a worker placed in a worktree must expose the worktree tools")
+	}
+	placed.workDirState.store(WorkDirState{})
+	if !placed.WorktreeToolsEnabled() {
+		t.Fatal("leaving the worktree must not disable the worker's capability")
+	}
+}
+
 // TestSubAgentWorktreeSwitchReloadsAgentsMD pins the worker's AGENTS.md to the
 // checkout it works in. A gitignored AGENTS.md that exists only in the main
 // checkout must still reach a worker inside a worktree, while a checkout that
@@ -1322,6 +1346,32 @@ func TestResumeAdoptsRecordedWorktreeCheckout(t *testing.T) {
 	}
 	if meta == nil || meta.WorktreePath != res.Path {
 		t.Fatalf("resumed session meta = %+v, want the adopted checkout", meta)
+	}
+	if !a.WorktreeToolsEnabled() {
+		t.Fatal("a session resumed into its recorded worktree must expose the worktree tools")
+	}
+}
+
+// An in-process /resume grants the worktree tools on the same terms as a
+// restart resume: a session that continues in the main checkout does not
+// inherit the capability the replaced session had.
+func TestResumeInMainCheckoutRederivesWorktreeTools(t *testing.T) {
+	a, _ := newWorktreeTestAgent(t, "session-resume-main")
+	a.worktreeTools.Store(true)
+	sessionsDir, err := a.projectSessionsDir()
+	if err != nil {
+		t.Fatalf("projectSessionsDir: %v", err)
+	}
+	targetDir := filepath.Join(sessionsDir, "target-main")
+	persistRestorableSession(t, targetDir)
+
+	a.handleResumeCommand("target-main")
+
+	if a.sessionDir != targetDir {
+		t.Fatalf("sessionDir = %q, want %q", a.sessionDir, targetDir)
+	}
+	if a.WorktreeToolsEnabled() {
+		t.Fatal("a session resumed in the main checkout must not expose the worktree tools")
 	}
 }
 

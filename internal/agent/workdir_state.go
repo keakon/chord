@@ -34,6 +34,27 @@ type WorkDirState struct {
 	Generation uint64
 }
 
+// WorktreeToolsEnabled reports whether this session exposes the worktree
+// runtime tools. It is a sticky capability of the running conversation, set
+// when the session starts in (or adopts) a chord-managed worktree, not the
+// live binding: leaving a worktree must not hide tools whose definitions the
+// model has already seen and may still call. It is held in process memory
+// only: a restart or resume re-derives it from the checkout the session
+// resumes in, and /new re-derives it from the current checkout, because a
+// fresh transcript has seen no tool definitions. Ordinary sessions use
+// `chord worktree` as their explicit entry point and do not pay for worktree
+// tool definitions in every model request.
+func (a *MainAgent) WorktreeToolsEnabled() bool {
+	return a != nil && a.worktreeTools.Load()
+}
+
+// rederiveWorktreeTools resets the worktree capability to what the current
+// binding grants on its own, for a session switch that does not continue the
+// previous conversation. Resume adoption may set it again afterwards.
+func (a *MainAgent) rederiveWorktreeTools() {
+	a.worktreeTools.Store(strings.TrimSpace(a.workDirState.load().WorktreeID) != "")
+}
+
 // workDirBinding holds the active checkout for one agent. Switches publish a
 // whole new state with a higher generation through a single atomic store, so a
 // running tool goroutine never observes a half-updated binding.
@@ -430,6 +451,9 @@ func (a *MainAgent) RestoreWorkDirBinding(ctx context.Context, state WorkDirStat
 	}
 	prev := a.workDirState.load()
 	a.workDirState.store(state)
+	if strings.TrimSpace(state.WorktreeID) != "" {
+		a.worktreeTools.Store(true)
+	}
 	a.publishWorkDirChange(prev, state)
 	// Installing the binding is a publication like any other: without this a
 	// session that starts in a worktree would inject the startup checkout's
@@ -527,6 +551,10 @@ func (a *MainAgent) adoptResumedSessionCheckout(ctx context.Context, state WorkD
 		}
 	}
 	a.workDirState.store(next)
+	// Adopting a resumed session's recorded worktree checkout makes this
+	// session worktree-capable, even after the binding later returns to the
+	// main checkout.
+	a.worktreeTools.Store(true)
 	a.publishWorkDirChange(prev, next)
 	if warnings := a.afterWorkDirSwitchWithReason(prev, next, recovery.WorktreeSwitchResume); len(warnings) > 0 {
 		log.Warnf("resume worktree switch warnings session=%v warnings=%v", filepath.Base(a.sessionDir), warnings)
@@ -835,4 +863,11 @@ func (s *SubAgent) WorktreeExit(ctx context.Context, req tools.WorktreeExitReque
 // WorktreeList implements tools.WorktreeHost for a SubAgent.
 func (s *SubAgent) WorktreeList(ctx context.Context) ([]tools.WorktreeListEntry, error) {
 	return s.worktreeActor().list(ctx)
+}
+
+// WorktreeToolsEnabled reports whether this worker exposes the worktree
+// runtime tools: the same sticky session capability as the MainAgent, set
+// when the worker was placed in a managed worktree.
+func (s *SubAgent) WorktreeToolsEnabled() bool {
+	return s != nil && s.worktreeTools.Load()
 }

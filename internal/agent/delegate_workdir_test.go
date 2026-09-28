@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/worktree"
@@ -275,6 +276,33 @@ func TestRestoreWorkDirBindingInstallsLiveWorktree(t *testing.T) {
 	last := meta.WorktreeTimeline[len(meta.WorktreeTimeline)-1]
 	if last.Reason != recovery.WorktreeSwitchResume {
 		t.Fatalf("last timeline entry = %+v, want a resume boundary", last)
+	}
+
+	// Restoring a worktree session enables the worktree runtime tools. Leaving
+	// the worktree afterwards must not take them away, or a model switch or
+	// compaction rebuild would drop tools whose frozen definitions the model
+	// may still call.
+	if !a.WorktreeToolsEnabled() {
+		t.Fatal("restoring a worktree binding must enable the worktree tools")
+	}
+	if _, err := a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-restore"}); err != nil {
+		t.Fatalf("WorktreeExit keep: %v", err)
+	}
+	if state := a.workDirState.load(); strings.TrimSpace(state.WorktreeID) != "" {
+		t.Fatalf("binding = %#v, want none after leaving the worktree", state)
+	}
+	if !a.WorktreeToolsEnabled() {
+		t.Fatal("leaving the worktree must not disable the session capability")
+	}
+	reg := tools.NewRegistry()
+	reg.Register(tools.NewWorktreeEnterTool(a))
+	reg.Register(tools.NewWorktreeExitTool(a))
+	reg.Register(tools.NewWorktreeListTool(a))
+	visible := visibleLLMTools(reg, permission.Ruleset{}, func(string) bool { return false }, toolPermissionContext{})
+	for _, name := range []string{tools.NameWorktreeEnter, tools.NameWorktreeExit, tools.NameWorktreeList} {
+		if !containsToolNamed(visible, name) {
+			t.Fatalf("%s must stay visible after leaving the worktree", name)
+		}
 	}
 }
 

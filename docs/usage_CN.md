@@ -226,9 +226,11 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 - `chord worktree remove <name>`：删除 worktree 及其 runtime cache，**保留分支与仓库的会话历史**。`--delete-branch` 仅在已合并时删分支，`--force` 强制删除脏 worktree 和分支。
 - `chord worktree finish <name>`：先用目标分支更新工作树，再把结果压缩成一个提交合回目标分支，最后删除工作树和分支。可用 `--onto <branch>` 指定目标分支，或用 `--check` 在不改动现有工作树的情况下预检冲突。发生冲突时，目标分支保持不变；解决工作树中的合并冲突后重新运行 `finish` 即可。
 
-创建或进入 worktree 会改变 Chord 运行所在的目录。你可以用 `chord --worktree <name>`，也可以用 `chord worktree <name>`；`worktree` 子命令同时承担 `list`、`remove`、`finish` 等管理操作。会话进行中也可以直接让 agent 切换 worktree。
+创建或进入 worktree 会改变 Chord 运行所在的目录。你可以用 `chord --worktree <name>`，也可以用 `chord worktree <name>`；`worktree` 子命令同时承担 `list`、`remove`、`finish` 等管理操作。这些命令是启动 worktree 会话的常规入口。
 
-worktree 工具和命令都要求 `PATH` 里有 `git`。找不到 git 时，agent 的 worktree 工具不会出现在工具列表里，创建或进入 worktree、`list`、`remove`、`finish` 都会拒绝执行，并直接说明缺的是 git 二进制，而不是报成仓库错误。记录过 checkout 的会话照样能恢复：Chord 会说明无法验证该 checkout，在解析出的仓库检出里继续，并保留记录，之后装回 git 再恢复仍会切回那个 checkout。
+会话内的 `worktree_enter`、`worktree_exit`、`worktree_list` 工具只对已经运行在 Chord 管理 worktree 中的会话，以及明确被放入 worktree 的子代理开放。普通会话不会加载这些工具，避免无关的工具定义占用提示词。任务需要在会话内控制 worktree 时，先用 `chord worktree <name>` 启动会话。会话一旦拥有这些工具，离开 worktree 后在本次对话里仍然可用；`/new`、`/resume` 和重启会按会话所在的 checkout 重新判断。
+
+worktree 工具和命令都要求 `PATH` 里有 `git`。找不到 git 时，worktree 工具不会出现在工具列表里，创建或进入 worktree、`list`、`remove`、`finish` 都会拒绝执行，并直接说明缺的是 git 二进制，而不是报成仓库错误。记录过 checkout 的会话照样能恢复：Chord 会说明无法验证该 checkout，在解析出的仓库检出里继续，并保留记录，之后装回 git 再恢复仍会切回那个 checkout。
 
 **落在哪里。** 默认在 `<state-dir>/worktrees/<repo-id>/<slug>`，也就是仓库之外。想换位置就设 `worktree.root`：相对路径以主仓库根为基准，`root: .chord/worktrees` 会落在 `<repo>/.chord/worktrees/<slug>`。这个目录在仓库内时，Chord 会在其中放一个内容为 `*` 的 `.gitignore`，这些 checkout 就不会出现在未跟踪文件里；该文件只负责 `git status` 整洁，而 chord 自己的 `grep` / `glob` 会跳过这个根目录。但别的工具并不知道它：仓库内的 checkout 就是磁盘上的第二份代码树，凡是依赖索引或全仓扫描的工具（LSP 建索引、`docker` build context、会遍历整个仓库的测试运行器）都可能把它一并算进去。留在默认位置就不会有这个问题。
 

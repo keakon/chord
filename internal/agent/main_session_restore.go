@@ -1635,6 +1635,10 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 	}
 	a.sessionLock = newLock
 	result := a.activateLoadedSession(loaded)
+	// A resumed session gets the worktree tools on the same terms as a restart
+	// resume: from the checkout it continues in, not from what the replaced
+	// session once adopted.
+	a.rederiveWorktreeTools()
 	// Adopt the checkout the resumed session was working in before the next
 	// request is built; otherwise the resumed transcript's relative paths would
 	// be interpreted against the checkout the previous session left.
