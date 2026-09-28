@@ -142,14 +142,15 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("cannot edit blocked device path: %s", a.Path)
 	}
 	if a.Edits != nil {
-		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &fields); err != nil {
-			return "", fmt.Errorf("invalid arguments: %w", err)
-		}
-		for _, name := range []string{"old_string", "new_string", "replace_all"} {
-			if _, exists := fields[name]; exists {
-				return "", fmt.Errorf("edits cannot be combined with %s", name)
-			}
+		// Models often echo the single-replacement fields at their zero values
+		// next to edits; only a field that would change the request conflicts.
+		switch {
+		case a.OldString != "":
+			return "", fmt.Errorf("edits cannot be combined with old_string")
+		case a.NewString != "":
+			return "", fmt.Errorf("edits cannot be combined with new_string")
+		case a.ReplaceAll != nil && *a.ReplaceAll:
+			return "", fmt.Errorf("edits cannot be combined with replace_all")
 		}
 		return t.executeBatch(ctx, resolvedPath, a.Path, a.Edits)
 	}

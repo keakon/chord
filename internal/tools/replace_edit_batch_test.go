@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -70,11 +71,39 @@ func TestEditBatchRejectsWithoutWriting(t *testing.T) {
 }
 
 func TestEditBatchRejectsMixedFields(t *testing.T) {
+	for _, field := range []map[string]any{
+		{"old_string": "alpha"},
+		{"new_string": "beta"},
+		{"replace_all": true},
+	} {
+		dir := t.TempDir()
+		path := writeEditFixture(t, dir, "sample.txt", "alpha")
+		args := map[string]any{"path": path, "edits": []map[string]any{{"old_string": "alpha", "new_string": "beta"}}}
+		maps.Copy(args, field)
+		_, err := runEdit(t, dir, args)
+		if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+			t.Fatalf("%v: error = %v", field, err)
+		}
+	}
+}
+
+// Zero-valued single-replacement fields carry no request of their own, so a
+// batch that echoes them still applies.
+func TestEditBatchIgnoresZeroValuedTopLevelFields(t *testing.T) {
 	dir := t.TempDir()
 	path := writeEditFixture(t, dir, "sample.txt", "alpha")
-	_, err := runEdit(t, dir, map[string]any{"path": path, "old_string": "", "edits": []map[string]any{{"old_string": "alpha", "new_string": "beta"}}})
-	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
-		t.Fatalf("error = %v", err)
+	_, err := runEdit(t, dir, map[string]any{
+		"path":        path,
+		"old_string":  "",
+		"new_string":  "",
+		"replace_all": false,
+		"edits":       []map[string]any{{"old_string": "alpha", "new_string": "beta"}},
+	})
+	if err != nil {
+		t.Fatalf("batch with zero-valued top-level fields: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "beta" {
+		t.Fatalf("file = %q, want %q", got, "beta")
 	}
 }
 
