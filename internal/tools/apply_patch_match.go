@@ -19,6 +19,15 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 	if logical != "" {
 		fileLines = strings.Split(strings.TrimSuffix(logical, "\n"), "\n")
 	}
+	// Pre-grow once so the per-hunk replacement below stays allocation-free.
+	// Each hunk changes the line count by #'+' - #'-' (context ' ' lines
+	// cancel out: they appear in both old and new sequences); the capacity
+	// must cover the highest running total, not the final one, because a
+	// patch that grows and then shrinks peaks above its net size — the peak
+	// is where slices.Replace would otherwise allocate inside the loop.
+	if growth := applyPatchHunksPeakGrowth(hunks); growth > 0 {
+		fileLines = slices.Grow(fileLines, growth)
+	}
 	searchStart := 0
 	punctuationHunks := 0
 	fuzzyHunks := 0
@@ -105,11 +114,8 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 				line:    match + fuzzyRemovedIndex + 1,
 			})
 		}
-		replaced := make([]string, 0, len(fileLines)-len(oldSeq)+len(newSeq))
-		replaced = append(replaced, fileLines[:match]...)
-		replaced = append(replaced, newSeq...)
-		replaced = append(replaced, fileLines[match+len(oldSeq):]...)
-		fileLines = replaced
+		// In place: the pre-grow above left room for the running peak.
+		fileLines = slices.Replace(fileLines, match, match+len(oldSeq), newSeq...)
 		if len(oldSeq) > 0 {
 			searchStart = match + len(newSeq)
 		}
@@ -122,6 +128,31 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 		out = strings.ReplaceAll(out, "\n", "\r\n")
 	}
 	return out, punctuationHunks, fuzzyHunks, fuzzyReplacements, nil
+}
+
+// applyPatchHunksPeakGrowth returns the highest line count the hunks reach
+// while they are applied: the running sum of per-hunk (#'+' - #'-') deltas,
+// never below zero. Context lines cancel out and EndOfFile/append hunks
+// contribute through the same counts. The pre-grow must cover this peak, not
+// the final net delta: a patch that grows and then shrinks ends below its
+// peak, and sizing by the net delta would push the peak's allocation into
+// the replacement loop.
+func applyPatchHunksPeakGrowth(hunks []applyPatchHunk) int {
+	peak, running := 0, 0
+	for _, hunk := range hunks {
+		for _, line := range hunk.Lines {
+			switch line.Kind {
+			case '+':
+				running++
+			case '-':
+				running--
+			}
+		}
+		if running > peak {
+			peak = running
+		}
+	}
+	return peak
 }
 
 // The fuzzy layer's acceptance gates. It is the only layer that writes the
