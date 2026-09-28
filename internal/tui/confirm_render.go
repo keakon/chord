@@ -307,10 +307,6 @@ func fitConfirmDialogLines(lines []string, maxLines int, preserveTail int) []str
 		return lines[:maxLines]
 	}
 
-	footerNote := ""
-	if preserveTail == 0 || ansi.StringWidth(footerNote) > 48 {
-		footerNote = ""
-	}
 	marker := DimStyle.Render(fmt.Sprintf("... %d more lines hidden.", hidden))
 
 	out := make([]string, 0, maxLines)
