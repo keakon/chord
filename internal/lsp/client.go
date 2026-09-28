@@ -31,9 +31,11 @@ type lspProcessClient interface {
 	RegisterHandler(method string, handler powertransport.Handler)
 	NotifyDidOpenTextDocument(ctx context.Context, uri string, languageID string, version int, text string) error
 	NotifyDidChangeTextDocument(ctx context.Context, uri string, version int, changes []protocol.TextDocumentContentChangeEvent) error
+	NotifyDidSaveTextDocument(ctx context.Context, uri string, text *string) error
 	NotifyDidCloseTextDocument(ctx context.Context, uri string) error
 	NotifyDidChangeWatchedFiles(ctx context.Context, changes []protocol.FileEvent) error
 	NotifyWorkspaceDidChangeConfiguration(ctx context.Context, settings any) error
+	SaveOptions() (protocol.SaveOptions, bool)
 }
 
 // Client wraps a powernap LSP client with per-file version tracking and diagnostic cache.
@@ -66,6 +68,15 @@ type Client struct {
 
 	// onDiagnostics is called when diagnostics are received (manager sets it to broadcast + notify waiters).
 	onDiagnostics func(uri string, serverID string, diags []protocol.Diagnostic, version int32)
+
+	// saveMu guards the save capability: the static one declared during
+	// initialize (resolved once, on first use) and the textDocument/didSave
+	// registrations the server added dynamically, keyed by registration id.
+	saveMu          sync.Mutex
+	staticSaveKnown bool
+	staticSave      protocol.SaveOptions
+	staticSaveOK    bool
+	dynamicSaves    map[string]saveRegistration
 
 	// noticeMu guards noticesSeen, the dedup set for server notices. Handlers
 	// run on the transport's reader goroutine, so the set needs its own lock.
@@ -195,7 +206,9 @@ func (c *Client) registerHandlers() {
 	})
 	c.client.RegisterHandler("workspace/applyEdit", handleApplyEdit)
 	c.client.RegisterHandler("workspace/configuration", c.handleWorkspaceConfiguration)
-	c.client.RegisterHandler("client/registerCapability", handleRegisterCapability)
+	c.client.RegisterHandler("client/registerCapability", c.handleRegisterCapability)
+	c.client.RegisterHandler("client/unregisterCapability", c.handleUnregisterCapability)
+	c.client.RegisterHandler("workspace/diagnostic/refresh", handleDiagnosticRefresh)
 }
 
 // noticeLogMaxChars bounds one server notice so a server that dumps a document
@@ -644,27 +657,17 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	}
 }
 
-// NotifyChange reads the file and sends didChange (file must already be open).
-func (c *Client) NotifyChange(ctx context.Context, path string) error {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	_, err = c.DidChange(ctx, path, string(content))
-	return err
-}
-
 func handleApplyEdit(_ context.Context, _ string, params json.RawMessage) (any, error) {
 	// A language server request is not an authorized Chord tool operation.
 	// Never inspect the edit or touch the filesystem on this path.
 	if !json.Valid(params) {
-		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: "workspace/applyEdit rejected: malformed parameters"}, nil
+		reason := "workspace/applyEdit rejected: malformed parameters"
+		log.Debugf("lsp: %v", reason)
+		return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: reason}, nil
 	}
-	return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: "workspace/applyEdit rejected: no authorized tool operation"}, nil
-}
-
-func handleRegisterCapability(_ context.Context, _ string, _ json.RawMessage) (any, error) {
-	return nil, nil
+	reason := "workspace/applyEdit rejected: no authorized tool operation"
+	log.Debugf("lsp: %v", reason)
+	return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: reason}, nil
 }
 
 // WaitForServerReady polls IsRunning until true or timeout.

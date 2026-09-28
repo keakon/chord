@@ -27,11 +27,15 @@ type fakePowernapClient struct {
 	didCloseURIs        []string
 	didChangeURIs       []string
 	didOpenURIs         []string
+	didSaveURIs         []string
+	didSaveTexts        []*string
 	watchedFileEvents   []protocol.FileEvent
 	registeredHandlers  map[string]powertransport.Handler
 	registeredNotifies  map[string]powertransport.NotificationHandler
 	configNotifications []any
+	saveOptions         *protocol.SaveOptions
 	initializeHook      func(*fakePowernapClient) error
+	notifyOrder         []string
 }
 
 func (f *fakePowernapClient) Initialize(context.Context, bool) error {
@@ -58,6 +62,7 @@ func (f *fakePowernapClient) RegisterHandler(method string, handler powertranspo
 }
 func (f *fakePowernapClient) NotifyDidOpenTextDocument(_ context.Context, uri string, _ string, _ int, _ string) error {
 	f.didOpenURIs = append(f.didOpenURIs, uri)
+	f.notifyOrder = append(f.notifyOrder, "didOpen")
 	return nil
 }
 
@@ -68,7 +73,20 @@ func (f *fakePowernapClient) syncedURIs() []string {
 }
 func (f *fakePowernapClient) NotifyDidChangeTextDocument(_ context.Context, uri string, _ int, _ []protocol.TextDocumentContentChangeEvent) error {
 	f.didChangeURIs = append(f.didChangeURIs, uri)
+	f.notifyOrder = append(f.notifyOrder, "didChange")
 	return nil
+}
+func (f *fakePowernapClient) NotifyDidSaveTextDocument(_ context.Context, uri string, text *string) error {
+	f.didSaveURIs = append(f.didSaveURIs, uri)
+	f.didSaveTexts = append(f.didSaveTexts, text)
+	f.notifyOrder = append(f.notifyOrder, "didSave")
+	return nil
+}
+func (f *fakePowernapClient) SaveOptions() (protocol.SaveOptions, bool) {
+	if f.saveOptions == nil {
+		return protocol.SaveOptions{}, false
+	}
+	return *f.saveOptions, true
 }
 func (f *fakePowernapClient) NotifyDidCloseTextDocument(_ context.Context, uri string) error {
 	f.didCloseURIs = append(f.didCloseURIs, uri)
@@ -76,6 +94,7 @@ func (f *fakePowernapClient) NotifyDidCloseTextDocument(_ context.Context, uri s
 }
 func (f *fakePowernapClient) NotifyDidChangeWatchedFiles(_ context.Context, changes []protocol.FileEvent) error {
 	f.watchedFileEvents = append(f.watchedFileEvents, changes...)
+	f.notifyOrder = append(f.notifyOrder, "watched")
 	return nil
 }
 func (f *fakePowernapClient) NotifyWorkspaceDidChangeConfiguration(_ context.Context, settings any) error {

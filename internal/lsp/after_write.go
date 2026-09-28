@@ -35,6 +35,9 @@ var (
 	afterWriteDidChange = func(m *Manager, ctx context.Context, path string, content string) (map[string]int32, error) {
 		return m.DidChangeVersions(ctx, path, content)
 	}
+	afterWriteDidSave = func(m *Manager, ctx context.Context, path string, content string) error {
+		return m.NotifyDidSave(ctx, path, content)
+	}
 	afterWriteNotifyWatchedFileChanged = func(m *Manager, ctx context.Context, path string, changeType pnprotocol.FileChangeType) error {
 		return m.NotifyWatchedFileChanged(ctx, path, changeType)
 	}
@@ -93,6 +96,9 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 	serverVersions, err := afterWriteDidChange(m, ctx, absPath, content)
 	if err != nil {
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
+	}
+	if err := afterWriteDidSave(m, ctx, absPath, content); err != nil {
+		m.logLSPServiceNote(absPath, "Failed to notify language server about the saved file: "+err.Error())
 	}
 
 	waitTimeout := diagnosticsWaitTimeout

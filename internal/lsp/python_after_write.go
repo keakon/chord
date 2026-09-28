@@ -69,6 +69,9 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 	if err != nil {
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
 	}
+	if err := afterWriteDidSave(m, ctx, absPath, content); err != nil {
+		m.logLSPServiceNote(absPath, "Failed to notify language server about the saved file: "+err.Error())
+	}
 
 	waitTimeout := diagnosticsWaitTimeout
 	if coldStart {

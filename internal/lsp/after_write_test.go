@@ -341,3 +341,56 @@ func newAfterWriteTestManager(t *testing.T) (*Manager, string, *Client) {
 	mgr.clients[testKey(mgr, "gopls")] = client
 	return mgr, path, client
 }
+
+func TestAfterFileWriteToolResultDidSaveFollowsServerCapability(t *testing.T) {
+	tests := []struct {
+		name        string
+		saveOptions *protocol.SaveOptions
+		wantSaves   int
+		wantTextSet bool
+	}{
+		{name: "save without includeText", saveOptions: &protocol.SaveOptions{}, wantSaves: 1},
+		{name: "save with includeText", saveOptions: &protocol.SaveOptions{IncludeText: true}, wantSaves: 1, wantTextSet: true},
+		{name: "server did not request save", saveOptions: nil, wantSaves: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr, path, client := newAfterWriteTestManager(t)
+			fake := &fakePowernapClient{saveOptions: tt.saveOptions}
+			client.client = fake
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			out := mgr.AfterFileWriteToolResult(ctx, path, "package main", "Successfully wrote 12 bytes", false, WatchedFileChanged, "")
+			if out != "Successfully wrote 12 bytes" {
+				t.Fatalf("AfterFileWriteToolResult output = %q", out)
+			}
+			if synced := fake.syncedURIs(); len(synced) != 1 || synced[0] != client.pathToURI(path) {
+				t.Fatalf("synced URIs = %v, want [%s]", synced, client.pathToURI(path))
+			}
+			if len(fake.didSaveURIs) != tt.wantSaves {
+				t.Fatalf("didSave URIs = %v, want %d", fake.didSaveURIs, tt.wantSaves)
+			}
+			if tt.wantSaves == 0 {
+				return
+			}
+			if fake.didSaveURIs[0] != client.pathToURI(path) {
+				t.Fatalf("didSave URI = %q, want %q", fake.didSaveURIs[0], client.pathToURI(path))
+			}
+			text := fake.didSaveTexts[0]
+			if tt.wantTextSet {
+				if text == nil || *text != "package main" {
+					t.Fatalf("didSave text = %v, want package main", text)
+				}
+			} else if text != nil {
+				t.Fatalf("didSave text = %q, want no text", *text)
+			}
+			// The file is not open yet, so the sync is didOpen + didSave; the save
+			// notification must follow the content sync exactly once.
+			if got := strings.Join(fake.notifyOrder, ","); got != "watched,didOpen,didSave" {
+				t.Fatalf("notification order = %q, want watched,didOpen,didSave", got)
+			}
+		})
+	}
+}

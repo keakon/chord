@@ -1089,6 +1089,24 @@ func (m *Manager) DidChangeVersions(ctx context.Context, path string, content st
 	return versions, first
 }
 
+// NotifyDidSave sends didSave to the clients that own path, skipping servers that
+// did not declare save support during initialize. Returns the first notification
+// error; a failure is never fatal to the tool result.
+func (m *Manager) NotifyDidSave(ctx context.Context, path string, content string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
+	var first error
+	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
+		if err := c.NotifyDidSave(ctx, path, content); err != nil && first == nil {
+			first = err
+		}
+	})
+	return first
+}
+
 // DidClose sends didClose to all clients that handle path, clears cached diagnostics for that path,
 // and refreshes sidebar/server counts.
 func (m *Manager) DidClose(ctx context.Context, path string) {
