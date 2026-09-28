@@ -153,6 +153,12 @@ type Manager struct {
 	// from every server's published set, so a real regression is reported again.
 	reportedByPath map[string]map[diagnosticIdentity]struct{}
 
+	// degradeMu guards degradeNotes, the per-session dedup set for model-facing
+	// LSP degradation notes: losing a language server's diagnostics is worth one
+	// line in a tool result, not one per failed edit.
+	degradeMu    sync.Mutex
+	degradeNotes map[string]struct{}
+
 	// touchedPaths tracks files modified by successful Write/Edit calls in the current
 	// session. Successful Delete removes a file from this set.
 	touchedMu    sync.RWMutex
@@ -1087,6 +1093,30 @@ func (m *Manager) DidChangeVersions(ctx context.Context, path string, content st
 		}
 	})
 	return versions, first
+}
+
+// ResyncFile forwards content (the decoded file text, as write paths send it)
+// to every running client that owns path and already has the document open, sending didChange only when the content
+// differs from what that server last received. Servers that never opened the
+// file are skipped: opening documents belongs to Chord's write paths, and a
+// server without the document has no stale copy to correct. Failures are
+// logged, not returned, so a read never fails because language-server state
+// could not be refreshed.
+func (m *Manager) ResyncFile(ctx context.Context, path, content string) {
+	if m == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	path = normalizeWaiterPath(path)
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
+	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
+		if _, err := c.ResyncFileIfChanged(ctx, path, content); err != nil {
+			log.Debugf("lsp: resync changed file failed path=%v name=%v error=%v", path, c.name, err)
+		}
+	})
 }
 
 // NotifyDidSave sends didSave to the clients that own path, skipping servers that

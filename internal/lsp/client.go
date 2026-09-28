@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -62,6 +63,11 @@ type Client struct {
 	openFiles   map[string]int32
 	openFilesMu sync.Mutex
 
+	// syncedDigest: path (normalized) -> sha256 of the content Chord last sent
+	// for it. External-change resync compares the file's current bytes against
+	// it so an unchanged document is never re-sent. Guarded by openFilesMu.
+	syncedDigest map[string][sha256.Size]byte
+
 	// diagnostics cache: URI -> diagnostics (updated by publishDiagnostics handler)
 	diagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
 	diagnosticsMu sync.RWMutex
@@ -99,12 +105,13 @@ type typescriptVersionParams struct {
 func newClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd, projectRoot string, debug bool) (*Client, error) {
 	cfg.Options = prepareWorkspaceSettingsBounded(name, cfg, cwd, projectRoot)
 	c := &Client{
-		name:        name,
-		cwd:         cwd,
-		cfg:         cfg,
-		debug:       debug,
-		openFiles:   make(map[string]int32),
-		diagnostics: make(map[protocol.DocumentURI][]protocol.Diagnostic),
+		name:         name,
+		cwd:          cwd,
+		cfg:          cfg,
+		debug:        debug,
+		openFiles:    make(map[string]int32),
+		syncedDigest: make(map[string][sha256.Size]byte),
+		diagnostics:  make(map[protocol.DocumentURI][]protocol.Diagnostic),
 	}
 	if err := c.createPowernapClient(); err != nil {
 		return nil, err
@@ -543,7 +550,11 @@ func (c *Client) DidOpen(ctx context.Context, path string, content string) (int3
 		c.openFiles[path] = v
 		c.openFilesMu.Unlock()
 		changes := []protocol.TextDocumentContentChangeEvent{{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}}}
-		return v, c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
+		err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
+		if err == nil {
+			c.recordSyncedContent(path, content)
+		}
+		return v, err
 	}
 	c.openFiles[path] = 1
 	c.openFilesMu.Unlock()
@@ -555,6 +566,7 @@ func (c *Client) DidOpen(ctx context.Context, path string, content string) (int3
 	if err := c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content); err != nil {
 		return 1, err
 	}
+	c.recordSyncedContent(path, content)
 	return 1, nil
 }
 
@@ -579,6 +591,7 @@ func (c *Client) DidChange(ctx context.Context, path string, content string) (in
 		if err := c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content); err != nil {
 			return 1, err
 		}
+		c.recordSyncedContent(path, content)
 		return 1, nil
 	}
 	v++
@@ -588,7 +601,11 @@ func (c *Client) DidChange(ctx context.Context, path string, content string) (in
 	changes := []protocol.TextDocumentContentChangeEvent{
 		{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}},
 	}
-	return v, c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
+	err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
+	if err == nil {
+		c.recordSyncedContent(path, content)
+	}
+	return v, err
 }
 
 func (c *Client) NotifyWatchedFileChange(ctx context.Context, path string, changeType protocol.FileChangeType) error {
@@ -613,6 +630,7 @@ func (c *Client) DidClose(ctx context.Context, path string) error {
 	_, ok := c.openFiles[path]
 	if ok {
 		delete(c.openFiles, path)
+		delete(c.syncedDigest, path)
 	}
 	c.openFilesMu.Unlock()
 	if !ok {
@@ -651,6 +669,7 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 		paths = append(paths, p)
 	}
 	c.openFiles = make(map[string]int32)
+	c.syncedDigest = make(map[string][sha256.Size]byte)
 	c.openFilesMu.Unlock()
 	for _, p := range paths {
 		_ = c.client.NotifyDidCloseTextDocument(ctx, c.pathToURI(p))

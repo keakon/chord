@@ -208,7 +208,7 @@ func collectDiagnostics(t *testing.T, ctx context.Context, mgr *Manager, path st
 	}
 	mgr.Start(ctx, path)
 	if _, ok := mgr.waitForClientForPath(ctx, path, time.Minute); !ok {
-		t.Fatalf("no language server became available for %s: %v", path, mgr.startFailuresForPath(path))
+		t.Fatalf("no language server became available for %s: %v", path, formattedStartFailures(mgr, path))
 	}
 	ch := mgr.PrepareWaiter(path)
 	after := time.Now()

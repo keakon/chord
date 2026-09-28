@@ -26,6 +26,8 @@ type fakePowernapClient struct {
 	kills               int
 	didCloseURIs        []string
 	didChangeURIs       []string
+	didChangeVersions   []int
+	didChangeTexts      []string
 	didOpenURIs         []string
 	didSaveURIs         []string
 	didSaveTexts        []*string
@@ -71,8 +73,10 @@ func (f *fakePowernapClient) NotifyDidOpenTextDocument(_ context.Context, uri st
 func (f *fakePowernapClient) syncedURIs() []string {
 	return append(append([]string(nil), f.didOpenURIs...), f.didChangeURIs...)
 }
-func (f *fakePowernapClient) NotifyDidChangeTextDocument(_ context.Context, uri string, _ int, _ []protocol.TextDocumentContentChangeEvent) error {
+func (f *fakePowernapClient) NotifyDidChangeTextDocument(_ context.Context, uri string, version int, changes []protocol.TextDocumentContentChangeEvent) error {
 	f.didChangeURIs = append(f.didChangeURIs, uri)
+	f.didChangeVersions = append(f.didChangeVersions, version)
+	f.didChangeTexts = append(f.didChangeTexts, wholeDocumentChangeText(changes))
 	f.notifyOrder = append(f.notifyOrder, "didChange")
 	return nil
 }

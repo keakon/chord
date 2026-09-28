@@ -8,11 +8,17 @@ import (
 	"testing"
 	"time"
 
-	powernap "github.com/keakon/x/powernap/pkg/lsp"
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 
 	"github.com/keakon/chord/internal/config"
 )
+
+// formattedStartFailures renders the start-failure records a path would report;
+// the production path uses startFailureInfosForPath directly so it can also add
+// one degradation note per server.
+func formattedStartFailures(m *Manager, path string) []string {
+	return formatStartFailures(m.startFailureInfosForPath(path))
+}
 
 // TestStartFailuresForPathSkipsServersForOtherFileTypes guards the multi-server
 // contract: a start-failure note for a path must only name servers that handle
@@ -30,10 +36,10 @@ func TestStartFailuresForPathSkipsServersForOtherFileTypes(t *testing.T) {
 	mgr.startFail[testKey(mgr, "gopls")] = "init timeout"
 	mgr.startFailMu.Unlock()
 
-	got := mgr.startFailuresForPath(filepath.Join(root, "main.go"))
+	got := formattedStartFailures(mgr, filepath.Join(root, "main.go"))
 	want := []string{"gopls: init timeout"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("startFailuresForPath(.go) = %#v, want %#v", got, want)
+		t.Fatalf("formattedStartFailures(.go) = %#v, want %#v", got, want)
 	}
 }
 
@@ -59,20 +65,20 @@ func TestStartFailuresForPathUsesMatchingRootRecord(t *testing.T) {
 	mgr.startFail[clientKey{name: "gopls", root: otherRoot}] = "other root failure"
 	mgr.startFailMu.Unlock()
 
-	got := mgr.startFailuresForPath(filepath.Join(root, "main.go"))
+	got := formattedStartFailures(mgr, filepath.Join(root, "main.go"))
 	want := []string{"gopls: not started"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("startFailuresForPath = %#v, want %#v", got, want)
+		t.Fatalf("formattedStartFailures = %#v, want %#v", got, want)
 	}
 
 	// Same path's root failed to start this time: the matching record wins.
 	mgr.startFailMu.Lock()
 	mgr.startFail[clientKey{name: "gopls", root: root}] = "init timeout"
 	mgr.startFailMu.Unlock()
-	got = mgr.startFailuresForPath(filepath.Join(root, "main.go"))
+	got = formattedStartFailures(mgr, filepath.Join(root, "main.go"))
 	want = []string{"gopls: init timeout"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("startFailuresForPath = %#v, want %#v", got, want)
+		t.Fatalf("formattedStartFailures = %#v, want %#v", got, want)
 	}
 }
 
@@ -221,7 +227,7 @@ func TestAfterFileWriteToolResultNotifiesWatchedFileBeforeDidChange(t *testing.T
 		return nil, nil
 	}
 	afterWriteAwaitWaiter = func(_ *Manager, _ context.Context, _ string, _ chan diagnosticsEvent, _ diagnosticsWaitRequest, _ time.Duration) ([]Diagnostic, bool) {
-		return nil, false
+		return nil, true
 	}
 
 	out := mgr.AfterFileWriteToolResult(context.Background(), path, "package main", "Successfully wrote 12 bytes", false, WatchedFileCreated, "")
@@ -312,8 +318,11 @@ func TestAfterFileWriteToolResultStartsMatchingServerBeforeWaiting(t *testing.T)
 	if startedPath != path {
 		t.Fatalf("after-write should start matching server for %q, got %q", path, startedPath)
 	}
-	if out != "Successfully wrote 12 bytes" {
-		t.Fatalf("non-actionable startup failures should not modify base output: %q", out)
+	if !strings.HasPrefix(out, "Successfully wrote 12 bytes") {
+		t.Fatalf("startup failure dropped the base result: %q", out)
+	}
+	if !strings.Contains(out, "LSP diagnostics unavailable for this edit (language server)") {
+		t.Fatalf("startup failure should add one honest line: %q", out)
 	}
 }
 
@@ -332,7 +341,7 @@ func newAfterWriteTestManager(t *testing.T) (*Manager, string, *Client) {
 
 	path := filepath.Join(root, "main.go")
 	client := &Client{
-		client:      &powernap.Client{},
+		client:      &fakePowernapClient{},
 		cwd:         root,
 		cfg:         config.LSPServerConfig{FileTypes: []string{".go"}},
 		openFiles:   make(map[string]int32),

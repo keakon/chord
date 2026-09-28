@@ -40,12 +40,24 @@ type recordingLSPStarter struct {
 	ctx   context.Context
 	path  string
 	calls int
+
+	resyncCalls   int
+	resyncCtx     context.Context
+	resyncPath    string
+	resyncContent string
 }
 
 func (r *recordingLSPStarter) Start(ctx context.Context, path string) {
 	r.ctx = ctx
 	r.path = path
 	r.calls++
+}
+
+func (r *recordingLSPStarter) ResyncFile(ctx context.Context, path, content string) {
+	r.resyncCalls++
+	r.resyncCtx = ctx
+	r.resyncPath = path
+	r.resyncContent = content
 }
 
 func TestReadToolDescriptionExplainsRawOutputForEdits(t *testing.T) {
@@ -372,6 +384,48 @@ func TestReadToolWarmupUsesProvidedContextAndAbsolutePath(t *testing.T) {
 	}
 	if starter.path != wantPath {
 		t.Fatalf("Start path = %q, want %q", starter.path, wantPath)
+	}
+	if starter.resyncCalls != 1 {
+		t.Fatalf("ResyncFile calls = %d, want 1", starter.resyncCalls)
+	}
+	if starter.resyncCtx != ctx {
+		t.Fatalf("ResyncFile context = %v, want ctx", starter.resyncCtx)
+	}
+	if starter.resyncPath != wantPath {
+		t.Fatalf("ResyncFile path = %q, want %q", starter.resyncPath, wantPath)
+	}
+	if starter.resyncContent != "hello\nworld\n" {
+		t.Fatalf("ResyncFile content = %q, want the file text", starter.resyncContent)
+	}
+}
+
+// The resync must carry the same decoded text the write paths send, or a BOM
+// or non-UTF-8 file would never match its last sync and be resent (garbled)
+// on every read.
+func TestReadToolResyncsDecodedText(t *testing.T) {
+	dir := t.TempDir()
+	cases := []struct {
+		name string
+		raw  []byte
+	}{
+		{"utf8_bom", append([]byte{0xEF, 0xBB, 0xBF}, "hello\n"...)},
+		{"utf16le_bom", []byte{0xFF, 0xFE, 'h', 0, 'e', 0, 'l', 0, 'l', 0, 'o', 0, '\n', 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, tc.name+".txt")
+			if err := os.WriteFile(path, tc.raw, 0o644); err != nil {
+				t.Fatalf("WriteFile: %v", err)
+			}
+			starter := &recordingLSPStarter{}
+			args, _ := json.Marshal(map[string]string{"path": path})
+			if _, err := (ReadTool{LSP: starter}).Execute(context.Background(), args); err != nil {
+				t.Fatalf("ReadTool.Execute: %v", err)
+			}
+			if starter.resyncContent != "hello\n" {
+				t.Fatalf("ResyncFile content = %q, want the decoded text %q", starter.resyncContent, "hello\n")
+			}
+		})
 	}
 }
 

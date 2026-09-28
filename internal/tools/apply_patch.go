@@ -754,6 +754,7 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 		paths = append(paths, path)
 	}
 	slices.Sort(paths)
+	var notes []string
 	for _, path := range paths {
 		write := finalWrites[path]
 		t.LSP.MarkTouched(write.path)
@@ -762,10 +763,21 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 		if parsed := lsp.ParseToolOutputDiagnostics(result); len(parsed) > 0 {
 			extras[path] = parsed
 		}
+		// Degradation lines are reported once per session, so the one this
+		// write produced must reach the patch result or it is lost for good.
+		for _, note := range lsp.DegradationNotes(result) {
+			if !slices.Contains(notes, note) {
+				notes = append(notes, note)
+			}
+		}
 		reviewedPaths = append(reviewedPaths, write.path)
 	}
 	slices.Sort(reviewedPaths)
-	return t.LSP.AppendLSPDiagnosticsToToolOutputForPaths(out, reviewedPaths, true, baselines, outputs, extras, t.BaseDir)
+	out = t.LSP.AppendLSPDiagnosticsToToolOutputForPaths(out, reviewedPaths, true, baselines, outputs, extras, t.BaseDir)
+	if len(notes) > 0 {
+		out += "\n\n" + strings.Join(notes, "\n")
+	}
+	return out
 }
 
 func normalizedLSPPath(path string) string {

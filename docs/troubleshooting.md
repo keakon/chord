@@ -192,6 +192,7 @@ If you configured LSP but do not see diagnostics after writing files:
 - check whether the `lsp` config format is correct
 - confirm the target file type matches `file_types`
 - check whether `diagnostics.enabled: false` turned off post-tool diagnostics
+- if the tool result carries `LSP diagnostics unavailable for this edit (<server>[: <detail>]); do not treat this edit as verified.`, Chord could not obtain diagnostics: the server named in the parentheses did not start, is still starting, or exited and is being restarted, or no server published anything within the wait window (cold starts wait longer; this case reads `language server: no diagnostics within …`). The parenthesized detail or the log has the cause. A start failure or exit appears at most once per server per session, a wait timeout at most once per session, and a server that is still starting is named on every edit until it is up.
 
 For Python specifically:
 

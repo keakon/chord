@@ -13,13 +13,17 @@ import (
 
 // ReadTool reads file contents with optional offset/limit paging.
 type ReadTool struct {
-	LSP     lspStarter // nil when LSP not configured
-	BaseDir string     // session working directory for relative paths; empty keeps process cwd behavior
+	LSP     readLSP // nil when LSP not configured
+	BaseDir string  // session working directory for relative paths; empty keeps process cwd behavior
 }
 
-// lspStarter is the minimal interface ReadTool needs from lsp.Manager.
-type lspStarter interface {
+// readLSP is the minimal interface ReadTool needs from lsp.Manager: start the
+// server that will handle later writes, and push a file's current text to the
+// servers that already have it open so an external change does not leave them
+// diagnosing a stale copy.
+type readLSP interface {
 	Start(ctx context.Context, path string)
+	ResyncFile(ctx context.Context, path, content string)
 }
 
 type readArgs struct {
@@ -369,6 +373,12 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 
 	if t.LSP != nil {
 		if absPath, absErr := resolveToolPathAbsInDir(a.Path, t.BaseDir); absErr == nil {
+			// A shell command or another process may have changed the file after
+			// the server last heard about it; push the text just read before
+			// starting servers or later writes rely on them. The decoded text is
+			// what write paths send too, so BOM and non-UTF-8 files compare
+			// equal to their last sync instead of resending on every read.
+			t.LSP.ResyncFile(ctx, absPath, decoded.Text)
 			t.LSP.Start(ctx, absPath)
 		}
 	}

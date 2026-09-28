@@ -168,6 +168,7 @@ Chord 会在会话空闲时主动卸载空闲的 LSP / MCP 运行时资源，以
 - 检查 `lsp` 配置格式是否正确
 - 确认目标文件类型与 `file_types` 是否匹配
 - 检查是否通过 `diagnostics.enabled: false` 关闭了工具后诊断
+- 如果工具结果里出现 `LSP diagnostics unavailable for this edit (<server>[: <detail>]); do not treat this edit as verified.`，说明 Chord 没能拿到诊断：括号里的 server 未启动、仍在启动、或已退出正在重启，或者等待窗口内没有任何 server 发布诊断（冷启动等待更长，此时括号里是 `language server: no diagnostics within …`）。原因见括号里的细节或日志。启动失败和退出每个 server 每会话最多提示一行，等待超时每会话最多提示一行；仍在启动的 server 在就绪前每次编辑都会提示。
 
 Python 还需要注意：
 

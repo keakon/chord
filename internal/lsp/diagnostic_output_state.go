@@ -164,16 +164,28 @@ func (m *Manager) ResetReportedDiagnostics() {
 	m.diagMu.Lock()
 	m.reportedByPath = make(map[string]map[diagnosticIdentity]struct{})
 	m.diagMu.Unlock()
+
+	// Degradation notes are session-scoped like the suppression window: a fresh
+	// session should hear about a dead server again.
+	m.degradeMu.Lock()
+	m.degradeNotes = nil
+	m.degradeMu.Unlock()
 }
 
 // RestoreReportedDiagnostics replaces the suppression window with diagnostics
 // that a restored transcript already showed. Resume must not re-announce them:
 // the model has seen those lines in its own history, so only a later update to
-// the file makes them worth reporting again.
+// the file makes them worth reporting again. Degradation notes start over like
+// on a fresh session: the restored session has not heard about this process's
+// server failures.
 func (m *Manager) RestoreReportedDiagnostics(reported map[string][]Diagnostic) {
 	if m == nil {
 		return
 	}
+	m.degradeMu.Lock()
+	m.degradeNotes = nil
+	m.degradeMu.Unlock()
+
 	m.diagMu.Lock()
 	defer m.diagMu.Unlock()
 	m.reportedByPath = make(map[string]map[diagnosticIdentity]struct{}, len(reported))

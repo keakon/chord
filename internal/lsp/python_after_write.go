@@ -40,19 +40,15 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 		return base
 	}
 
+	base, exited := m.appendExitedServerNotes(ctx, absPath, base)
 	coldStart := !afterWriteHasReadyClient(m, absPath)
 	afterWriteStart(m, ctx, absPath)
 
 	// Start is asynchronous, so wait briefly for the matching client to appear
 	// before treating the first post-write sync as a startup failure.
-	if _, ok := afterWriteWaitForClient(m, ctx, absPath, 3*time.Second); !ok {
-		msgs := m.startFailuresForPath(absPath)
-		if len(msgs) > 0 {
-			m.logLSPServiceNote(absPath, "Language server could not start: "+strings.Join(msgs, "; "))
-		} else {
-			m.logLSPServiceNote(absPath, "No language server connection is available for this file.")
-		}
-		return base
+	_, ok := afterWriteWaitForClient(m, ctx, absPath, 3*time.Second)
+	if !ok {
+		return m.appendStartFailureNotes(ctx, absPath, base, exited)
 	}
 
 	baseline := m.currentFileDiagnostics(absPath)
@@ -83,8 +79,10 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 		m.confirmDiagnosticsSync(syncToken)
 	}
 	if !notified && ctx.Err() == nil {
-		// Keep diagnostics wait timeouts out of the tool output so the model only sees
-		// actionable diagnostics; log the timeout for troubleshooting instead.
+		// A timeout is logged every time; the model hears about the first one
+		// per session so an empty result is never mistaken for a clean one. The
+		// quick-backend fallback below replaces the semantic result, so only the
+		// no-fallback case carries the note.
 		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", absPath, waitTimeout)
 		if isPythonPath(absPath) {
 			pyCfg := m.cfg.Diagnostics.Python
@@ -94,6 +92,7 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 				return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, fallbackBase, ranges, changeType, false, displayBaseDir)
 			}
 		}
+		base = m.appendTimeoutNote(base, waitTimeout)
 	}
 
 	m.recordReviewSnapshot(absPath)

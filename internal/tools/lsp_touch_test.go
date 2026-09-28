@@ -201,3 +201,31 @@ func repoRootForTest(t *testing.T) string {
 	}
 	return root
 }
+
+// A degradation line is reported once per session, so apply_patch must carry
+// the one its writes produced instead of keeping only the diagnostic lines.
+func TestApplyPatchToolKeepsLSPDegradationNote(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"a.go", "b.go"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("package sample\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := &config.Config{LSP: config.LSPConfig{
+		"sample-lsp": {Command: filepath.Join(dir, "missing-language-server"), FileTypes: []string{".go"}},
+	}}
+	mgr := lsp.NewManager(cfg, dir, nil)
+	t.Cleanup(func() { mgr.Stop(context.Background()) })
+	patch := "*** Begin Patch\n" +
+		"*** Update File: a.go\n@@\n-package sample\n+package sample // a\n" +
+		"*** Update File: b.go\n@@\n-package sample\n+package sample // b\n" +
+		"*** End Patch"
+	out, err := (ApplyPatchTool{LSP: mgr, BaseDir: dir}).Execute(context.Background(), applyPatchArgs(t, patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := lsp.DegradationNotes(out)
+	if len(notes) != 1 || !strings.Contains(notes[0], "sample-lsp") {
+		t.Fatalf("apply_patch result = %q, want exactly one degradation note naming sample-lsp", out)
+	}
+}
