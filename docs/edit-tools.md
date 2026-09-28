@@ -131,6 +131,10 @@ You can add text after `@@` to help locate ambiguous blocks:
 
 **Important**: Only use headers you've verified exist in the file. Headers are soft anchors: when the header text is not found, matching falls back to the hunk body alone.
 
+### Line Endings
+
+Hunk lines are matched without their line endings, so the LF text returned by `read` applies to files with any line-ending convention. Untouched lines keep their original line endings. In a file that uses CRLF or CR throughout, added lines use that ending too; in a file that mixes line endings, an added line takes the ending of the line it replaces or sits next to. The updated file always ends with a line ending.
+
 ### Transactional Behavior
 
 All operations in one envelope are planned from a single filesystem snapshot **before any file is modified**. Envelope-wide preflight failures (such as malformed syntax, unsafe overlapping paths, or an unreadable snapshot) leave every file unchanged. An operation-level failure, such as a missing update source or an existing `Add` target, rejects that file group while independent file groups can still commit.

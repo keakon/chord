@@ -148,6 +148,7 @@
 - 写后 LSP 诊断不再基于过期副本运行：文件被 shell 命令、外部编辑器、另一个 Chord 会话或代码生成器改写后，只要下一次被读取，当前字节就会重新推送给已经打开该文档的语言服务器，server 据此重算诊断（含跨文件诊断）；读取不会打开原本未打开的文档，也不会启动 watcher。
 - 语言服务器要求保存通知时（启动时声明或之后动态注册），Chord 写入文件后会发送 `textDocument/didSave`，在保存时重算诊断的 server 也能看到 Chord 的修改。
 - 语言服务器启动失败或中途退出、或诊断未在等待窗口内到达时，不再留下看起来像「干净」的空工具结果：每个 server 每种失败的首次发生会在 `write`、`edit`、`apply_patch` 结果里追加一行（`LSP diagnostics unavailable for this edit (gopls: not started); do not treat this edit as verified.`）。诊断等待超时每个会话只提示一次，退出的 server 会自动重启，仍在启动中的 server 每次写入都会注明，不占用这一行提示。重复失败仍只记日志。
+- `apply_patch` 保留文件的换行方式：未改动的行保留原有换行符，只用 CR 换行的文件也能正常打补丁；混用换行的文件中，新增行沿用所替换或紧邻那一行的换行符，不再因为文件里出现过一处 CRLF 就把整个文件改成 CRLF。
 
 ## 0.8.1 - 2026-09-16
 

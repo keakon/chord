@@ -10,15 +10,7 @@ import (
 )
 
 func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatchHunk) (string, int, int, []applyPatchFuzzyReplacement, error) {
-	newline := "\n"
-	if strings.Contains(content, "\r\n") {
-		newline = "\r\n"
-	}
-	logical := strings.ReplaceAll(content, "\r\n", "\n")
-	var fileLines []string
-	if logical != "" {
-		fileLines = strings.Split(strings.TrimSuffix(logical, "\n"), "\n")
-	}
+	fileLines, endings := splitApplyPatchLines(content)
 	// Pre-grow once so the per-hunk replacement below stays allocation-free.
 	// Each hunk changes the line count by #'+' - #'-' (context ' ' lines
 	// cancel out: they appear in both old and new sequences); the capacity
@@ -27,6 +19,9 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 	// is where slices.Replace would otherwise allocate inside the loop.
 	if growth := applyPatchHunksPeakGrowth(hunks); growth > 0 {
 		fileLines = slices.Grow(fileLines, growth)
+		if endings.perLine != nil {
+			endings.perLine = slices.Grow(endings.perLine, growth)
+		}
 	}
 	searchStart := 0
 	punctuationHunks := 0
@@ -115,19 +110,16 @@ func applyApplyPatchHunks(ctx context.Context, content string, hunks []applyPatc
 			})
 		}
 		// In place: the pre-grow above left room for the running peak.
+		if endings.perLine != nil {
+			newEOLs := applyPatchNewLineEndings(hunk, endings.perLine, match, len(oldSeq))
+			endings.perLine = slices.Replace(endings.perLine, match, match+len(oldSeq), newEOLs...)
+		}
 		fileLines = slices.Replace(fileLines, match, match+len(oldSeq), newSeq...)
 		if len(oldSeq) > 0 {
 			searchStart = match + len(newSeq)
 		}
 	}
-	out := strings.Join(fileLines, "\n")
-	if len(fileLines) > 0 {
-		out += "\n"
-	}
-	if newline == "\r\n" {
-		out = strings.ReplaceAll(out, "\n", "\r\n")
-	}
-	return out, punctuationHunks, fuzzyHunks, fuzzyReplacements, nil
+	return joinApplyPatchLines(fileLines, endings), punctuationHunks, fuzzyHunks, fuzzyReplacements, nil
 }
 
 // applyPatchHunksPeakGrowth returns the highest line count the hunks reach
