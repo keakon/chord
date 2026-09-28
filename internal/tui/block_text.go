@@ -12,7 +12,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
-	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
@@ -313,24 +312,25 @@ func sanitizeDisplayText(s string) string {
 	if s == "" {
 		return ""
 	}
-	// One pass detects both control characters and the 0xEF lead byte of
-	// U+FE0E/U+FE0F, so clean text — the overwhelming majority — pays a
-	// single scan instead of a separate selector probe. A control character
-	// ends the scan early, so a selector hiding after it is only covered by
-	// also stripping on needsSanitization; the strip's own ContainsRune
-	// probe keeps that rare path honest. The strip still runs before the
-	// control rebuild so every downstream path (markdown, streaming tail,
-	// wrapText fallbacks) measures width consistently.
+	// One pass detects control characters, the 0xEF lead byte of
+	// U+FE0E/U+FE0F and the 0xF0 lead byte of emoji modifiers, so clean
+	// text — the overwhelming majority — pays a single scan instead of
+	// separate glyph probes. A control character ends the scan early, so a
+	// glyph hiding after it is only covered by also normalizing on
+	// needsSanitization; the normalizers' own probes keep that rare path
+	// honest. Glyph normalization still runs before the control rebuild so
+	// every downstream path (markdown, streaming tail, wrapText fallbacks)
+	// measures width consistently.
 	needsSanitization := false
-	maybeSelector := false
+	maybeGlyph := false
 	for i := 0; i < len(s); {
 		c := s[i]
 		if c == '\r' || ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7f) {
 			needsSanitization = true
 			break
 		}
-		if c == 0xEF {
-			maybeSelector = true
+		if c == 0xEF || c == 0xF0 {
+			maybeGlyph = true
 		}
 		if c < utf8.RuneSelf {
 			i++
@@ -346,8 +346,8 @@ func sanitizeDisplayText(s string) string {
 		}
 		i += size
 	}
-	if maybeSelector || needsSanitization {
-		s = tools.StripOrphanVariationSelectors(s)
+	if maybeGlyph || needsSanitization {
+		s = normalizeDisplayGlyphs(s)
 	}
 	if !needsSanitization {
 		return s

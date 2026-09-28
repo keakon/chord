@@ -148,7 +148,7 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 			}
 		}
 	}
-	raw := normalizeLineNumberPrefix(sb.String())
+	raw := normalizeLineNumberPrefix(joinStandaloneEmojiModifiers(sb.String()))
 	text := dedentLines(raw)
 	text = dedentLinesSkipUnindented(text)
 	return strings.TrimSpace(text)

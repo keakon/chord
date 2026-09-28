@@ -361,7 +361,7 @@ func (m *Model) selectedContentViewerText() string {
 		}
 		sb.WriteString(segment)
 	}
-	return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(joinStandaloneEmojiModifiers(sb.String()))
 }
 
 func (m *Model) copyContentViewerSelection() tea.Cmd {

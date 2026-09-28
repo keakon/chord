@@ -61,11 +61,11 @@ type diffOneSidedSpan struct {
 
 func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) {
 	// Diff bodies come from file contents, which can legitimately carry
-	// orphaned variation selectors (left by editors or earlier tool runs).
-	// Strip them before inline-diff spans and width math so the spans stay
-	// aligned with what the terminal paints.
-	oldLine = tools.StripOrphanVariationSelectors(oldLine)
-	newLine = tools.StripOrphanVariationSelectors(newLine)
+	// orphaned variation selectors or standalone emoji modifiers. Normalize
+	// them before inline-diff spans and width math so the spans stay aligned
+	// with what the terminal paints.
+	oldLine = normalizeDisplayGlyphs(oldLine)
+	newLine = normalizeDisplayGlyphs(newLine)
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
 	if lines := renderInlineDiffLine(oldLine, newLine, diffWidth, hl); lines != nil {
 		if strings.HasPrefix(lines[0], "+") {
@@ -85,7 +85,7 @@ func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine stri
 }
 
 func appendApplyPatchToolUnifiedDiffLine(result *[]string, body string, lineNum, diffWidth int, hl *codeHighlighter, added bool) {
-	body = tools.StripOrphanVariationSelectors(body)
+	body = normalizeDisplayGlyphs(body)
 	bg := diffDelBg
 	marker := DiffDelStyle.Render("-")
 	if added {
@@ -353,7 +353,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				if len(content) > 0 && content[0] == ' ' {
 					content = content[1:]
 				}
-				content = tools.StripOrphanVariationSelectors(content)
+				content = normalizeDisplayGlyphs(content)
 				code := renderHighlightedSnippetLine(content, nil, diffWidth-1, hl, "")
 				displayLineNum := max(newLineNum, oldLineNum)
 				rendered = DimStyle.Render(fmt.Sprintf("%4d ", displayLineNum)) + " " + code
@@ -623,7 +623,7 @@ func appendEditArgsPreview(result []string, b *Block, replaceArgs replaceEditArg
 }
 
 func appendEditPatchPreview(result []string, argsJSON string, width int) []string {
-	patch := tools.StripOrphanVariationSelectors(editPatchFromArgs(argsJSON))
+	patch := normalizeDisplayGlyphs(editPatchFromArgs(argsJSON))
 	if patch == "" {
 		return result
 	}
@@ -956,11 +956,10 @@ func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath st
 		}
 		return result
 	}
-	// Strip orphaned variation selectors before rendering so that width
-	// measurement matches terminal zero-width rendering and the card
-	// background fills completely.
-	oldStr := tools.StripOrphanVariationSelectors(args.OldString)
-	newStr := tools.StripOrphanVariationSelectors(args.NewString)
+	// Normalize glyphs before rendering so that width measurement matches
+	// the terminal's advance and the card background fills completely.
+	oldStr := normalizeDisplayGlyphs(args.OldString)
+	newStr := normalizeDisplayGlyphs(args.NewString)
 	hl := newCodeHighlighterWithLanguage(filePath, oldStr+"\n"+newStr, "")
 	for _, line := range replaceEditPreviewLines(oldStr) {
 		result = append(result, "    "+DiffDelStyle.Render("- ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, diffDelBg))
