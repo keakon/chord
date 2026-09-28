@@ -22,7 +22,7 @@ require (
 	github.com/keakon/bubbles/v2 v2.2.1-fork
 	github.com/keakon/bubbletea/v2 v2.0.9-fork
 	github.com/keakon/golog v0.4.1
-	github.com/keakon/ultraviolet v0.0.1-fork.6
+	github.com/keakon/ultraviolet v0.0.1-fork.7
 	github.com/keakon/x/powernap v0.1.8-fork
 	github.com/klauspost/compress v1.20.0
 	github.com/mackee/go-readability v0.3.1
