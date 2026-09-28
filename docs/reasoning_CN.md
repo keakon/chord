@@ -65,10 +65,11 @@ Messages 使用 `thinking.type: enabled` 配合 `thinking.effort`，发送为
    才设置 `compat.chat_completions.keep_reasoning_effort: true`。
 3. **后端会校验回传的思考**：设置 `compat.reasoning_continuity.mode:
    openai_visible` 加 `reasoning_replay: all`，让每条 assistant 消息原样
-   回传。Kimi K3、Qwen `preserve_thinking`、GLM `clear_thinking: false`
-   都属于这一类。第三方中转不保证遵守官方
-   契约（有的会拒绝回放的 `reasoning_content`），把 `all` 当成必需前
-   先确认实际端点的行为。
+   回传。Kimi K3、Qwen `preserve_thinking`、GLM `clear_thinking: false`、
+   小米 MiMo 都属于这一类。第三方中转不保证遵守官方
+   契约（有的直接拒绝，有的只是效果变差），把 `all` 当成必需前
+   先确认实际端点的行为。本轮工具链必须带，之前轮次是可选项：留着连续性
+   和缓存更好，去掉每次请求更省。
 4. **Responses、Messages、Gemini**：原生 continuity 自动生效：Chord 会保存
    明文或带签名 / 加密的状态，并在目标线路允许时回放，无需配置。Gemini 原生
    端点上，模型 ID 以 `gemini-3` 开头时还会自动开启缺失思考签名的
@@ -77,6 +78,7 @@ Messages 使用 `thinking.type: enabled` 配合 `thinking.effort`，发送为
 
 `reasoning_replay: all` 会让已完成轮次的思考在每次请求中重复回放，后端按
 输入计费。默认的 `current_turn` 会剥离已完成轮次，第 3 条不适用时用默认即可。
+过期的思考还可能把模型带偏，只在后端明确要求时才保留全量。
 
 ## 跨 provider 回退时保留什么
 

@@ -75,10 +75,13 @@ For targets other than the DeepSeek Chat/Messages paths above, the answer depend
 3. **The backend validates the replayed reasoning**: set
    `compat.reasoning_continuity.mode: openai_visible` plus
    `reasoning_replay: all` so every assistant message goes back unchanged.
-   This is the contract for Kimi K3, Qwen `preserve_thinking`, and GLM
-   `clear_thinking: false`. Third-party
+   This is the contract for Kimi K3, Qwen `preserve_thinking`, GLM
+   `clear_thinking: false`, and Xiaomi MiMo. Third-party
    relays do not reliably follow the official API here (some reject replayed
-   `reasoning_content`), so verify the actual endpoint before relying on `all`.
+   `reasoning_content`, some only lose quality), so verify the actual endpoint
+   before relying on `all`. The current turn's tool loop is always required;
+   completed turns are the optional part: keeping them improves continuity and
+   cache reuse, dropping them saves input on every request.
 4. **Responses, Messages, and Gemini**: native continuity is automatic. Chord
    captures the plaintext or signed/encrypted state and replays it where the
    wire allows; nothing to configure. On the native Gemini endpoint, a model ID
@@ -89,7 +92,9 @@ For targets other than the DeepSeek Chat/Messages paths above, the answer depend
 
 `reasoning_replay: all` replays completed-turn thinking on every request, which
 the backend bills as input. The default (`current_turn`) strips completed turns
-and is enough unless the contract in step 3 applies.
+and is enough unless the contract in step 3 applies. Stale reasoning can also
+anchor the model to an outdated approach, so keep `all` only where the backend
+asks for it.
 
 ## What crosses a fallback pool
 

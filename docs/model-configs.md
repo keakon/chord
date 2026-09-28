@@ -1278,7 +1278,9 @@ model_pools:
 `reasoning_content` contract. Cache hits depend on sticky routing: xAI accepts
 a `prompt_cache_key` on both `/v1/responses` and Chat Completions and routes it
 through `x-grok-conv-id`, so a gateway that forwards neither re-sends every
-request as a cache miss.
+request as a cache miss. xAI names omitted prior reasoning as the top cause of
+such misses, so keep the encrypted reasoning items Chord replays rather than
+stripping history to save tokens.
 
 ### Compaction tuning for Grok 4.7
 
@@ -1399,7 +1401,7 @@ mimo:
 
 MiMo-V2.6-Pro and MiMo-V2.6-Flash are Xiaomi's fully multimodal agentic models on the MiMo Open Platform: a 1,048,576-token context window, a 131,072-token maximum output (the endpoint's default and cap for `max_completion_tokens`), image input, function calling, structured output, and deep thinking that is on by default. The platform is OpenAI- and Anthropic-compatible; this recipe uses `https://api.xiaomimimo.com/v1/chat/completions` because that is where MiMo documents the `reasoning_content` replay contract Chord needs for tool loops.
 
-Thinking mode carries a hard replay contract: in multi-turn tool calls the API expects every earlier `reasoning_content` back and reports `400 - Invalid Format` when it is missing, so the template enables `openai_visible` with `reasoning_replay: all`. The thinking switch is a `thinking: {type: ...}` object, which Chord only emits when the model pins the Chat Completions dialect (`native_thinking: thinking`); only a DeepSeek route (a `deepseek` model name or `contract: deepseek`) selects a dialect on its own, so the template pins it.
+Thinking mode carries a hard replay contract: in multi-turn tool calls the API expects every earlier `reasoning_content` back and reports `400 - Invalid Format` when it is missing, so the template enables `openai_visible` with `reasoning_replay: all`. Third-party relays of the same models may only lose quality instead of rejecting, but keep the template as is unless the relay documents otherwise. Pure conversation turns without tool calls only need `content`. The thinking switch is a `thinking: {type: ...}` object, which Chord only emits when the model pins the Chat Completions dialect (`native_thinking: thinking`); only a DeepSeek route (a `deepseek` model name or `contract: deepseek`) selects a dialect on its own, so the template pins it.
 
 ```yaml
 model_templates:

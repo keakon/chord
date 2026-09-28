@@ -1305,7 +1305,8 @@ model_pools:
 `openai_visible` 依然不用配：Grok 不要求回放 `reasoning_content`。缓存命中
 取决于粘性路由：xAI 在 `/v1/responses` 和 Chat Completions 上都接受
 `prompt_cache_key`，并映射为 `x-grok-conv-id`；网关两者都不透传时，每个请求
-都会以缓存未命中重发。
+都会以缓存未命中重发。xAI 明确说漏掉历史思考是缓存未命中的头号原因，所以
+Chord 回放的加密思考不要为了省 token 去掉。
 
 ### Grok 4.7 的压缩调优
 
@@ -1425,7 +1426,9 @@ Chord 需要的 `reasoning_content` 回放契约。
 
 思考模式有一条硬性回放契约：多轮工具调用时，接口要求把之前所有
 `reasoning_content` 传回去，缺了会报 `400 - Invalid Format`，所以模板开了
-`openai_visible` 加 `reasoning_replay: all`。思考开关是
+`openai_visible` 加 `reasoning_replay: all`。同模型的第三方中转可能只降效果
+不报错，没看到官方口径前先保持模板不动。纯对话、历史里没有工具调用时，
+只回 `content` 就够。思考开关是
 `thinking: {type: ...}` 对象，只有显式指定 chat 方言
 （`native_thinking: thinking`）时 Chord 才会发这个字段；能自己选到方言的只有
 DeepSeek 路由（DeepSeek 模型 ID 或 `contract: deepseek`），模板因此显式写上了它。
