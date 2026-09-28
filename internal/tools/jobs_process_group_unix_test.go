@@ -47,7 +47,6 @@ func TestJobKeepsDescendantOutputPastTheDirectCommandExit(t *testing.T) {
 func TestStopEscalatesToSIGKILLAfterTheDirectCommandExited(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
 	t.Cleanup(func() { StopAllJobsForShutdown() })
-	shortenJobGroupTimings(t)
 
 	sender := &recordingEventSender{ch: make(chan any, 1)}
 	ctx := WithEventSender(jobTestCtx(), sender)
@@ -88,7 +87,6 @@ func TestStopEscalatesToSIGKILLAfterTheDirectCommandExited(t *testing.T) {
 func TestStopEscalatesToSIGKILLWhileTheDirectCommandStillWaits(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
 	t.Cleanup(func() { StopAllJobsForShutdown() })
-	shortenJobGroupTimings(t)
 
 	sender := &recordingEventSender{ch: make(chan any, 1)}
 	ctx := WithEventSender(jobTestCtx(), sender)
@@ -121,7 +119,6 @@ func TestStopEscalatesToSIGKILLWhileTheDirectCommandStillWaits(t *testing.T) {
 func TestDeadlineDuringGroupDrainKeepsTheCommandExitFact(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
 	t.Cleanup(func() { StopAllJobsForShutdown() })
-	shortenJobGroupTimings(t)
 
 	sender := &recordingEventSender{ch: make(chan any, 2)}
 	ctx := WithEventSender(jobTestCtx(), sender)
@@ -275,7 +272,6 @@ func TestStopWithoutALiveWitnessDoesNotSignalTheGroup(t *testing.T) {
 func TestGroupDrainWaitsForAGroupItCannotWitness(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
 	t.Cleanup(func() { StopAllJobsForShutdown() })
-	shortenJobGroupTimings(t)
 
 	restoreMembers := jobGroupMembers
 	jobGroupMembers = func(int) []int { return nil }
@@ -314,7 +310,6 @@ func TestGroupDrainWaitsForAGroupItCannotWitness(t *testing.T) {
 func TestGroupDrainKeepsRunningForDescendantsForkedAfterTheWitness(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
 	t.Cleanup(func() { StopAllJobsForShutdown() })
-	shortenJobGroupTimings(t)
 	// The terminal state is published only after the output copy is released, so
 	// the backstop must not outlast the window this test asserts on: an early
 	// drain would otherwise still look like a running job here.
@@ -424,16 +419,6 @@ func waitForJobToFinish(t *testing.T, j *job) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-}
-
-func shortenJobGroupTimings(t *testing.T) {
-	t.Helper()
-	restoreGrace := killGracePeriod
-	killGracePeriod = 100 * time.Millisecond
-	t.Cleanup(func() { killGracePeriod = restoreGrace })
-	restorePoll := jobGroupPollInterval
-	jobGroupPollInterval = 20 * time.Millisecond
-	t.Cleanup(func() { jobGroupPollInterval = restorePoll })
 }
 
 func readJobPidFile(t *testing.T, path string) int {

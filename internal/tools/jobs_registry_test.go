@@ -343,6 +343,9 @@ func TestJobListShowsQuietDurationNextToElapsed(t *testing.T) {
 			t.Fatalf("job_list missing %q:\n%s", want, out)
 		}
 	}
+	// The registry's shutdown wait follows done; this fake job has no runner to
+	// close it, and cleanup would otherwise sit out the stop grace window.
+	close(j.done)
 }
 
 func TestJobOutputWaitExitTimesOutWithNoticeWhileJobKeepsRunning(t *testing.T) {

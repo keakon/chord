@@ -65,10 +65,6 @@ func TestBashTTYAccessFailsFastWithoutControllingTTY(t *testing.T) {
 }
 
 func TestBashTimeoutForceKillsProcessGroupThatIgnoresSIGTERM(t *testing.T) {
-	origGrace := killGracePeriod
-	killGracePeriod = 100 * time.Millisecond
-	t.Cleanup(func() { killGracePeriod = origGrace })
-
 	pidFile := t.TempDir() + "/sleep.pid"
 	start := time.Now()
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
