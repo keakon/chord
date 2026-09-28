@@ -75,11 +75,11 @@ func ParseSingleFileRefContent(text string) (FileRef, string, bool) {
 	if !ok {
 		return FileRef{}, "", false
 	}
-	closeIdx := strings.LastIndex(rest, fileRefCloseTag)
-	if closeIdx < 0 || strings.TrimSpace(rest[closeIdx+len(fileRefCloseTag):]) != "" {
+	before, after, ok := strings.CutLast(rest, fileRefCloseTag)
+	if !ok || strings.TrimSpace(after) != "" {
 		return FileRef{}, "", false
 	}
-	body := rest[:closeIdx]
+	body := before
 	switch {
 	case strings.HasPrefix(body, "\r\n"):
 		body = body[2:]

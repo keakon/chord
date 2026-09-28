@@ -83,7 +83,7 @@ make docs-check
 make docs-examples-check
 ```
 
-`make modernize-check` runs the pinned gopls `modernize` command across production and test code. Update `MODERNIZE_VERSION` in the Makefile deliberately when adopting a newer analyzer release; do not replace the pinned version with `@latest`, because new releases may add checks and fail the existing baseline.
+`make modernize-check` runs the pinned `golang.org/x/tools/go/analysis/passes/modernize` command across production and test code. Update `MODERNIZE_VERSION` in the Makefile deliberately when adopting a newer analyzer release; do not replace the pinned version with `@latest`, because new releases may add checks and fail the existing baseline.
 
 `make deadcode-check` compares the symbols that are unreachable from the production entry points against the baselines in `scripts/deadcode-baseline/`, one file per analyzed `GOOS/GOARCH`. CI checks every baseline — linux/amd64, windows/amd64, and darwin/arm64 — by pointing `GOOS`/`GOARCH` at each target from one runner; a local run analyzes the host platform unless the environment selects another. A new unreachable symbol fails the gate: remove it, or add it to the matching baseline in a dedicated commit with the platform and a reason. Removing symbols shrinks the baseline, so cleanup commits carry their own baseline updates.
 

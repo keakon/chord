@@ -21,11 +21,11 @@ func NextInstanceID(agentType string) string {
 // and advances the global agentSeq so that future calls to NextInstanceID never
 // collide with restored IDs.
 func AdvancePastID(id string) {
-	idx := strings.LastIndex(id, "-")
-	if idx < 0 {
+	_, after, ok := strings.CutLast(id, "-")
+	if !ok {
 		return
 	}
-	n, err := strconv.ParseUint(id[idx+1:], 10, 64)
+	n, err := strconv.ParseUint(after, 10, 64)
 	if err != nil {
 		return
 	}

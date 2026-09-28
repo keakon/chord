@@ -349,7 +349,7 @@ func TestStepImageViewerDeleteCmdIsImmediateForKittyPhysicalPlacement(t *testing
 	if seqVal.Len() < 2 {
 		t.Fatalf("stepImageViewer() sequence len = %d, want >= 2", seqVal.Len())
 	}
-	firstCmd, ok := seqVal.Index(0).Interface().(tea.Cmd)
+	firstCmd, ok := reflect.TypeAssert[tea.Cmd](seqVal.Index(0))
 	if !ok {
 		t.Fatalf("first sequence entry = %T, want tea.Cmd", seqVal.Index(0).Interface())
 	}

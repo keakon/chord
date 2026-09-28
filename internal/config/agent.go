@@ -196,8 +196,8 @@ func (c *AgentConfig) PoolModels(poolName string) []string {
 // Format: "provider/model-id[@variant]" or "model-id[@variant]".
 // If no @ is present, variant is empty.
 func ParseModelRef(s string) (ref, variant string) {
-	if i := strings.LastIndex(s, "@"); i >= 0 {
-		return s[:i], s[i+1:]
+	if before, after, ok := strings.CutLast(s, "@"); ok {
+		return before, after
 	}
 	return s, ""
 }

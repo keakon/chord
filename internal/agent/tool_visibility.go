@@ -246,8 +246,8 @@ func shouldUsePatchForModel(modelName string) bool {
 	// Extract the model ID from provider/model format
 	// e.g. "codex/gpt-5.5" → "gpt-5.5", "anthropic-main/claude-opus-4.7" → "claude-opus-4.7"
 	modelID := modelName
-	if idx := strings.LastIndex(modelName, "/"); idx >= 0 {
-		modelID = modelName[idx+1:]
+	if _, after, ok := strings.CutLast(modelName, "/"); ok {
+		modelID = after
 	}
 	// Strip priority suffix if present (e.g. "@xhigh" → "")
 	if idx := strings.Index(modelID, "@"); idx >= 0 {

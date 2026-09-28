@@ -240,11 +240,11 @@ func stripCompactionAnchorsBlock(body string) string {
 // previously appended to a checkpoint body, so the carry stays bounded at one
 // checkpoint body instead of compounding the whole history of carried blocks.
 func stripPriorCheckpointCarrySection(body string) string {
-	idx := strings.LastIndex(body, "\n"+priorCheckpointSectionHeading+"\n")
-	if idx < 0 {
+	before, _, ok := strings.CutLast(body, "\n"+priorCheckpointSectionHeading+"\n")
+	if !ok {
 		return strings.TrimSpace(body)
 	}
-	return strings.TrimSpace(body[:idx])
+	return strings.TrimSpace(before)
 }
 
 // stripCheckpointCurrentUserRequestSection removes the `## Current User

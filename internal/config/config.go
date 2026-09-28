@@ -2097,7 +2097,7 @@ func removeFailingNodes(node *yaml.Node, prefix []string, failures yamlFailures)
 		var removed []string
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			keyNode, valNode := node.Content[i], node.Content[i+1]
-			path := append(prefix[:len(prefix):len(prefix)], keyNode.Value)
+			path := append(slices.Clip(prefix), keyNode.Value)
 			if failures.matchesKey(keyNode) || failures.matchesValue(valNode) {
 				removed = append(removed, strings.Join(path, "."))
 				continue
@@ -2305,21 +2305,21 @@ func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
 		base := []string{"providers", name}
 		v := strings.TrimSpace(p.RetryBackoff)
 		if v != "" && !validRetryBackoff(v) {
-			paths = append(paths, append(base[:len(base):len(base)], "retry_backoff"))
+			paths = append(paths, append(slices.Clip(base), "retry_backoff"))
 		}
 		if p.RetryDelayMS != nil && !validRetryDelayMS(*p.RetryDelayMS) {
-			paths = append(paths, append(base[:len(base):len(base)], "retry_delay_ms"))
+			paths = append(paths, append(slices.Clip(base), "retry_delay_ms"))
 		}
 		if p.RetryAfterMaxS != nil && !validRetryAfterMaxS(*p.RetryAfterMaxS) {
-			paths = append(paths, append(base[:len(base):len(base)], "retry_after_max_s"))
+			paths = append(paths, append(slices.Clip(base), "retry_after_max_s"))
 		}
 		v = strings.TrimSpace(p.KeyRotation)
 		if v != "" && !validKeyRotation(v) {
-			paths = append(paths, append(base[:len(base):len(base)], "key_rotation"))
+			paths = append(paths, append(slices.Clip(base), "key_rotation"))
 		}
 		v = strings.TrimSpace(p.KeyOrder)
 		if v != "" && v != KeyOrderSequential && v != KeyOrderRandom && v != KeyOrderSmart {
-			paths = append(paths, append(base[:len(base):len(base)], "key_order"))
+			paths = append(paths, append(slices.Clip(base), "key_order"))
 		}
 	}
 	for _, issue := range collectDiagnosticIssues(cfg) {
@@ -2345,10 +2345,10 @@ func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
 			}
 			base := []string{"providers", name, "models", modelName, "compaction"}
 			if mc.Compaction.Threshold != nil && !validCompactionFraction(*mc.Compaction.Threshold) {
-				paths = append(paths, append(base[:len(base):len(base)], "threshold"))
+				paths = append(paths, append(slices.Clip(base), "threshold"))
 			}
 			if mc.Compaction.Reminder != nil && !validCompactionReminder(*mc.Compaction.Reminder) {
-				paths = append(paths, append(base[:len(base):len(base)], "reminder"))
+				paths = append(paths, append(slices.Clip(base), "reminder"))
 			}
 		}
 	}

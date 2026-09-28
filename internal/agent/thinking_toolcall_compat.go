@@ -59,10 +59,10 @@ func parseThinkingToolcalls(reasoning string) []message.ToolCall {
 	sectionBegin := "<|tool_calls_section_begin|>"
 	sectionEnd := "<|tool_calls_section_end|>"
 
-	lastBegin := strings.LastIndex(reasoning, sectionBegin)
+	_, after, ok := strings.CutLast(reasoning, sectionBegin)
 	var section string
-	if lastBegin >= 0 {
-		section = reasoning[lastBegin+len(sectionBegin):]
+	if ok {
+		section = after
 		if idx := strings.Index(section, sectionEnd); idx >= 0 {
 			section = section[:idx]
 		}

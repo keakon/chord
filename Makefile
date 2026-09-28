@@ -12,8 +12,8 @@ LOCAL ?= github.com/keakon/chord
 GOIMPORTS ?= goimports
 STATICCHECK ?= staticcheck
 GOPLS ?= gopls
-MODERNIZE_VERSION ?= v0.23.0
-MODERNIZE ?= $(GO) run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@$(MODERNIZE_VERSION)
+MODERNIZE_VERSION ?= v0.50.0
+MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
 .PHONY: ci fmt fmt-check deps-check test test-cover race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check bench-tui clean
 
