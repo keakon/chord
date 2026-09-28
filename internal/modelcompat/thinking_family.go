@@ -1,6 +1,7 @@
 package modelcompat
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -39,7 +40,7 @@ func ModelNativeFamily(modelID string) string {
 	switch {
 	case m == "":
 		return NativeFamilyUnknown
-	case m == "deepseek", strings.HasPrefix(m, "deepseek-"):
+	case isDeepSeekAPIModel(m):
 		return NativeFamilyDeepSeek
 	case strings.Contains(m, "gemini"), strings.Contains(m, "vertex"):
 		return NativeFamilyGemini
@@ -49,6 +50,38 @@ func ModelNativeFamily(modelID string) string {
 		return NativeFamilyOpenAI
 	}
 	return NativeFamilyUnknown
+}
+
+// isDeepSeekAPIModel reports whether a lowercased model name (vendor prefix
+// removed) names a model DeepSeek serves under its own API contract:
+// deepseek-v4 and later, the deepseek-flash / deepseek-pro tiers, and the
+// deepseek-chat / deepseek-reasoner API aliases. Open-weight releases that
+// third parties host under their own contracts — deepseek-r1-distill-*,
+// deepseek-coder-*, deepseek-v3 — are excluded; a route serving them under
+// DeepSeek's contract opts in with an explicit contract instead.
+func isDeepSeekAPIModel(m string) bool {
+	if m == "deepseek" {
+		return true
+	}
+	rest, ok := strings.CutPrefix(m, "deepseek-")
+	if !ok || strings.Contains(rest, "distill") {
+		return false
+	}
+	for _, tier := range []string{"flash", "pro", "chat", "reasoner"} {
+		if rest == tier || strings.HasPrefix(rest, tier+"-") {
+			return true
+		}
+	}
+	version, ok := strings.CutPrefix(rest, "v")
+	if !ok {
+		return false
+	}
+	end := strings.IndexFunc(version, func(r rune) bool { return r < '0' || r > '9' })
+	if end < 0 {
+		end = len(version)
+	}
+	major, err := strconv.Atoi(version[:end])
+	return err == nil && major >= 4
 }
 
 // WireNativeFamily maps a wire family onto the upstream family it implies when

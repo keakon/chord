@@ -110,8 +110,11 @@ GLM Preserved Thinking 的 body override 需要包含 `thinking.type: enabled` �
 `reasoning_continuity.reasoning_replay: all`，让 Chord 在回放历史中保留
 已完成轮次的 reasoning。DeepSeek 的 Chat 与 Messages 路由会自动完整回传
 历史 `reasoning_content`：请求带 tools 却缺少它时，DeepSeek 会返回 `400`。
-第三方托管、实际不是 DeepSeek 后端的 `deepseek-*` 路由，可以用
-`reasoning_continuity.contract: none` 退出这套规则。两种情况下，回放的
+哪些模型 ID 会被当作 DeepSeek 见
+[DeepSeek 的思考与历史回放](./reasoning_CN.md#deepseek-的思考与历史回放)。第三方路由的
+模型 ID 符合规则、后端却不是 DeepSeek 时，用 `reasoning_continuity.contract: none`
+退出；名字不在规则内的 DeepSeek 路由，用 `reasoning_continuity.contract: deepseek`
+显式开启。两种情况下，回放的
 `reasoning_content` 都必须保持完整、未修改且顺序不变。
 
 Anthropic 还会把每个 thinking 块绑定到生成它的对话前缀，所以压缩或恢复

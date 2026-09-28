@@ -12,14 +12,14 @@ func TestDeepSeekReplayAdvisories(t *testing.T) {
 		want                                                                            bool
 	}{
 		{name: "explicit contract", wire: ProviderTypeChatCompletions, model: "test-model", providerContract: ReasoningContractDeepSeek, providerReplay: ReasoningReplayNone, want: true},
-		{name: "inferred contract", wire: ProviderTypeMessages, model: "deepseek-test", modelReplay: ReasoningReplayCurrentTurn, want: true},
+		{name: "inferred contract", wire: ProviderTypeMessages, model: "deepseek-v4-flash", modelReplay: ReasoningReplayCurrentTurn, want: true},
 		{name: "model contract overrides opt out", wire: ProviderTypeMessages, model: "test-model", providerContract: ReasoningContractNone, modelContract: ReasoningContractDeepSeek, providerReplay: ReasoningReplayNone, want: true},
-		{name: "model opts out", wire: ProviderTypeChatCompletions, model: "deepseek-test", providerContract: ReasoningContractDeepSeek, modelContract: ReasoningContractNone, providerReplay: ReasoningReplayNone},
-		{name: "unset replay", wire: ProviderTypeMessages, model: "deepseek-test"},
-		{name: "explicit all", wire: ProviderTypeMessages, model: "deepseek-test", providerReplay: ReasoningReplayAll},
-		{name: "model overrides replay", wire: ProviderTypeMessages, model: "deepseek-test", providerReplay: ReasoningReplayNone, modelReplay: ReasoningReplayAll},
-		{name: "model conflict overrides all", wire: ProviderTypeMessages, model: "deepseek-test", providerReplay: ReasoningReplayAll, modelReplay: ReasoningReplayNone, want: true},
-		{name: "unsupported wire", wire: ProviderTypeResponses, model: "deepseek-test", providerReplay: ReasoningReplayNone},
+		{name: "model opts out", wire: ProviderTypeChatCompletions, model: "deepseek-v4-flash", providerContract: ReasoningContractDeepSeek, modelContract: ReasoningContractNone, providerReplay: ReasoningReplayNone},
+		{name: "unset replay", wire: ProviderTypeMessages, model: "deepseek-v4-flash"},
+		{name: "explicit all", wire: ProviderTypeMessages, model: "deepseek-v4-flash", providerReplay: ReasoningReplayAll},
+		{name: "model overrides replay", wire: ProviderTypeMessages, model: "deepseek-v4-flash", providerReplay: ReasoningReplayNone, modelReplay: ReasoningReplayAll},
+		{name: "model conflict overrides all", wire: ProviderTypeMessages, model: "deepseek-v4-flash", providerReplay: ReasoningReplayAll, modelReplay: ReasoningReplayNone, want: true},
+		{name: "unsupported wire", wire: ProviderTypeResponses, model: "deepseek-v4-flash", providerReplay: ReasoningReplayNone},
 		{name: "unrelated model", wire: ProviderTypeChatCompletions, model: "test-model", providerReplay: ReasoningReplayNone},
 	}
 	for _, tt := range tests {

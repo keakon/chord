@@ -779,9 +779,8 @@ type ChatCompletionsCompatConfig struct {
 	// thinking settings to a Chat Completions endpoint that translates the call
 	// into the model's native API. Empty (default) uses the protocol-generic
 	// Chat Completions request and does not add a native dialect field, except
-	// for a model ID whose final component is "deepseek" or starts with
-	// "deepseek-": that family keeps the
-	// "thinking" object without a selector, and off/none disables it. Accepted
+	// for DeepSeek API model names recognized by modelcompat.ModelNativeFamily,
+	// which keep the "thinking" object without a selector, and off/none disables it. Accepted
 	// shapes are "gemini"
 	// (extra_body.google.thinking_config), "gemini-3"
 	// (the same shape plus Gemini 3 signature replay), "anthropic"
@@ -836,9 +835,8 @@ type ReasoningContinuityCompatConfig struct {
 	// value always wins over what the model ID implies. "deepseek" enables the
 	// DeepSeek tool-history passback rules on the Chat Completions and Messages
 	// wires for an alias whose model name does not identify it; a model ID
-	// whose final component is "deepseek" or starts with "deepseek-" selects
-	// the same contract automatically. "gemini-3" enables missing
-	// thought-signature repair on the native generate-content endpoint, where
+	// recognized as DeepSeek by modelcompat.ModelNativeFamily selects the same
+	// contract automatically. "gemini-3" enables missing thought-signature repair on the native generate-content endpoint, where
 	// a model ID whose final component starts with "gemini-3" (see
 	// IsGemini3ModelID) selects it automatically; a Chat Completions gateway
 	// opts in through native_thinking: gemini-3 instead. "none" opts a route out

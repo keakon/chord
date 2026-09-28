@@ -113,9 +113,11 @@ For GLM Preserved Thinking, that body override must include
 `reasoning_continuity.reasoning_replay: all` so Chord keeps completed-turn
 reasoning in the replayed history. DeepSeek Chat and Messages routes replay the
 complete `reasoning_content` history automatically, because DeepSeek returns a
-`400` when a request carries tools without it; a third-party `deepseek-*` route
-that serves another backend opts out with
-`reasoning_continuity.contract: none`. In both cases, replayed
+`400` when a request carries tools without it. Which model IDs Chord treats as
+DeepSeek is listed in [DeepSeek thinking and history replay](./reasoning.md#deepseek-thinking-and-history-replay);
+a third-party route whose model ID matches but serves another backend opts out
+with `reasoning_continuity.contract: none`, and a route whose name Chord does
+not recognize opts in with `reasoning_continuity.contract: deepseek`. In both cases, replayed
 `reasoning_content` must remain complete, unchanged, and in order.
 
 Anthropic also binds each thinking block to the conversation prefix that

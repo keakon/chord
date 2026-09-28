@@ -35,8 +35,23 @@ rejects the request that follows each tool call (HTTP 400). See
 
 ## DeepSeek thinking and history replay
 
-Chord recognizes `deepseek` / `deepseek-*` in the final component of a model ID,
-including provider-prefixed IDs. Chat Completions and Messages preserve the
+Chord applies the DeepSeek contract automatically when the final component of a
+model ID (any provider prefix removed, case-insensitive) names a DeepSeek API
+model:
+
+- `deepseek`;
+- `deepseek-v<N>` with N of 4 or later, such as `deepseek-v4-pro`,
+  `deepseek-v4.1-flash`, or `deepseek-v5`;
+- `deepseek-flash`, `deepseek-pro`, `deepseek-chat`, or `deepseek-reasoner`,
+  alone or followed by `-…`.
+
+A name containing `distill` never matches. Open-weight releases hosted by third
+parties under their own contracts — `deepseek-r1-distill-*`, `deepseek-coder-*`,
+`deepseek-v3`, `deepseek-r1` — are not recognized either; a route that serves
+one of them under DeepSeek's contract opts in with
+`compat.reasoning_continuity.contract: deepseek`.
+
+Chat Completions and Messages preserve the
 selected effort across tool calls, even when an assistant returns no reasoning.
 `max` is an effort level; `max_tokens` limits output. DeepSeek ignores
 `budget_tokens` as a thinking-effort control.
@@ -54,8 +69,9 @@ clear it. Same-target Messages blocks retain their original
 text and usable signatures. A replay rejection does not trigger lower effort,
 removal of required reasoning, or textification of tool history; the error follows
 the model-pool handling rules. Third-party gateways must support this contract;
-a third-party route whose `deepseek-` model serves another backend opts out with
-`compat.reasoning_continuity.contract: none`, on Chat and Messages alike.
+a third-party route whose model ID names a DeepSeek API model but serves another
+backend opts out with `compat.reasoning_continuity.contract: none`, on Chat and
+Messages alike.
 
 ## Decide the replay contract
 

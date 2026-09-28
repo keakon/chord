@@ -77,7 +77,7 @@ A few conventions apply across the recipes on this page:
 - When `limit.output` is omitted, Chord derives the input budget from its default `64000` output budget (`limit.context` minus 64000); Responses providers do not send `max_output_tokens` by default, so set `compat.responses.send_max_output_tokens: true` to enforce the cap explicitly.
 - A `compaction` block on a template is inherited by every model entry that references it; without one the model uses the global threshold. The trigger compares the last provider-reported usage, so a single large tool result can push the next request past the line: a threshold is a tuning goal, not a guarantee. Short sessions can stay on the global default; only long agentic runs need per-model tuning.
 - `reasoning_continuity` has two modes: `openai_visible` replays native `reasoning_content` unchanged under the Chat Completions convention; `anthropic_unsigned` serves Messages-compatible endpoints that return unsigned thinking rather than Claude-style signed blocks, replaying same-provider/model unsigned thinking. Both accept portable visible reasoning from other wire families as the target shape; if the target still rejects that shape, strict compatibility drops the reasoning carrier while preserving the tool round. Its `reasoning_replay` window defaults to `current_turn` (only the current turn's reasoning is sent); backends that require the full reasoning history or preserved thinking set `reasoning_replay: all`, so the complete assistant history is replayed unchanged.
-- `reasoning_continuity.contract` declares an endpoint-specific request contract. The `deepseek` contract selects the DeepSeek tool-history passback rules and request tuning on the Chat Completions and Messages wires; a model ID whose final component is `deepseek` or starts with `deepseek-` selects it automatically, and the field covers aliases or private deployments whose name does not identify the backend. On Chat Completions the contract also selects the `thinking:{type}` shape while `native_thinking` is unset. On the native Gemini endpoint, a model ID whose final component starts with `gemini-3` selects the `gemini-3` contract (missing thought-signature repair) the same way. `none` opts a route out of either shortcut, including that shape, for example a `deepseek-` named route that serves another backend. Other endpoints keep the generic continuity behavior unless their compat block declares a contract.
+- `reasoning_continuity.contract` declares an endpoint-specific request contract. The `deepseek` contract selects the DeepSeek tool-history passback rules and request tuning on the Chat Completions and Messages wires; a model ID that [names a DeepSeek API model](./reasoning.md#deepseek-thinking-and-history-replay) selects it automatically, and the field covers aliases or private deployments whose name does not identify the backend. On Chat Completions the contract also selects the `thinking:{type}` shape while `native_thinking` is unset. On the native Gemini endpoint, a model ID whose final component starts with `gemini-3` selects the `gemini-3` contract (missing thought-signature repair) the same way. `none` opts a route out of either shortcut, including that shape, for example a route whose model ID names a DeepSeek API model but serves another backend. Other endpoints keep the generic continuity behavior unless their compat block declares a contract.
 
 ## OpenAI GPT (Responses)
 
@@ -439,7 +439,7 @@ the shape Chord writes into the chat body:
 
 Family names (`claude`, `deepseek`, `glm`, `kimi`, `doubao`) select the same
 shapes. Only a DeepSeek route picks the `thinking` object without a selector:
-a model ID whose final component is `deepseek` or starts with `deepseek-`, or a
+a model ID that [names a DeepSeek API model](./reasoning.md#deepseek-thinking-and-history-replay), or a
 model under `compat.reasoning_continuity.contract: deepseek`; `contract: none`
 drops the name shortcut. Gemini, Claude, GLM, Kimi, Doubao, and Qwen models
 behind a gateway must name the shape. Either way, a model that configures no
@@ -514,8 +514,8 @@ model_pools:
     - gateway/glm-5.2
 ```
 
-- Only DeepSeek needs no selector: a model ID whose final component is `deepseek`
-  or starts with `deepseek-` keeps the `thinking` object on its own. Every other family must name the shape; the
+- Only DeepSeek needs no selector: a model ID that
+  [names a DeepSeek API model](./reasoning.md#deepseek-thinking-and-history-replay) keeps the `thinking` object on its own. Every other family must name the shape; the
   field still comes from the thinking knobs you already set, so one template
   works unchanged behind the gateway and on the model's native endpoint.
 - A gateway that rejects unknown body fields instead of ignoring or translating
@@ -911,11 +911,11 @@ model_pools:
 Notes:
 
 - DeepSeek Chat thinking uses `thinking.type`, top-level `reasoning_effort`, and
-  `max_tokens`. A model ID whose final component is `deepseek` or starts with
-  `deepseek-` selects this endpoint contract automatically; the recipe also pins
+  `max_tokens`. A model ID that
+  [names a DeepSeek API model](./reasoning.md#deepseek-thinking-and-history-replay) selects this endpoint contract automatically; the recipe also pins
   it with `reasoning_continuity.contract: deepseek`, the explicit form to use for
-  aliases or private deployments. A third-party route whose model ID starts with
-  `deepseek-` but serves another backend opts out with
+  aliases or private deployments. A third-party route whose model ID names a DeepSeek API
+  model but serves another backend opts out with
   `reasoning_continuity.contract: none`, on Chat and Messages alike.
   When a request carries tools, DeepSeek requires the full `reasoning_content` back in every later turn and returns a `400` otherwise, so the contract always preserves the entire retained reasoning history on Chat and Messages and fixes the replay mode; `reasoning_continuity.mode` and `reasoning_replay` have no effect there, which is why the Chat and Messages templates leave them out.
 

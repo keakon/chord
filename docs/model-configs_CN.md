@@ -97,12 +97,12 @@ model_templates:
   `reasoning_replay: all`，完整 assistant 历史会原样回放。
 - `reasoning_continuity.contract` 用来声明端点的专用请求契约。`deepseek` 在
   Chat Completions 与 Messages 线路上启用 DeepSeek 的工具历史回传规则和请求
-  调优；模型 ID 最后一段是 `deepseek` 或以 `deepseek-` 开头时会自动选到它，
+  调优；模型 ID 是[DeepSeek API 模型名](./reasoning_CN.md#deepseek-的思考与历史回放)时会自动选到它，
   别名或私有部署用它显式声明；在 Chat Completions 上，没配 `native_thinking`
   时它还会选用 `thinking:{type}` 形状。Gemini 原生端点上，模型 ID 最后一段以
   `gemini-3` 开头时同样会自动选到 `gemini-3` 契约（补齐缺失的 thought
-  signature）。`none` 让路由退出这两种自动识别（包括这个形状），比如名字带 `deepseek-` 但后端
-  不是 DeepSeek 的路由。其他端点未声明契约时继续使用通用连续性逻辑。
+  signature）。`none` 让路由退出这两种自动识别（包括这个形状），比如模型 ID 是
+  DeepSeek API 模型名、后端却不是 DeepSeek 的路由。其他端点未声明契约时继续使用通用连续性逻辑。
 
 ## OpenAI GPT（Responses 兼容接口）
 
@@ -507,8 +507,8 @@ Chord 的 `thinking.*` 与线路无关，但网关只认它自己转换逻辑里
 | `qwen` | `enable_thinking` | `thinking.type`、`thinking.budget` |
 
 `claude`、`deepseek`、`glm`、`kimi`、`doubao` 等家族名等价。不配选择器时只有
-DeepSeek 路由能选到 `thinking` 对象：模型 ID 最后一段是 `deepseek` 或以
-`deepseek-` 开头，或者配了 `compat.reasoning_continuity.contract: deepseek`；
+DeepSeek 路由能选到 `thinking` 对象：模型 ID 是[DeepSeek API 模型名](./reasoning_CN.md#deepseek-的思考与历史回放)，
+或者配了 `compat.reasoning_continuity.contract: deepseek`；
 `contract: none` 会取消按名字的自动识别。网关后面的 Gemini、Claude、GLM、Kimi、
 Doubao、Qwen 模型都要显式指定形状。无论哪种情况，没配 thinking 块就不会追加
 字段，DeepSeek 路由例外：它默认打开 thinking 并发送
@@ -577,8 +577,8 @@ model_pools:
     - gateway/glm-5.2
 ```
 
-- 只有 DeepSeek 不用选择器：模型 ID 最后一段是 `deepseek` 或以 `deepseek-`
-  开头时自动选到 `thinking` 对象，其余家族都要显式指定形状。字段本身仍由你配好的 thinking 项生成，同一份模板既能在
+- 只有 DeepSeek 不用选择器：模型 ID 是[DeepSeek API 模型名](./reasoning_CN.md#deepseek-的思考与历史回放)时
+  自动选到 `thinking` 对象，其余家族都要显式指定形状。字段本身仍由你配好的 thinking 项生成，同一份模板既能在
   网关后面生效，也能直接连模型的原生端点。
 - 端点拒绝未知请求体字段、既不忽略也不转换时，用
   `compat.chat_completions.native_thinking: off`（模型级或 provider 级）关掉。
@@ -941,10 +941,10 @@ model_pools:
 要点：
 
 - DeepSeek Chat thinking 使用 `thinking.type`、顶层 `reasoning_effort` 和
-  `max_tokens`。模型 ID 最后一段是 `deepseek` 或以 `deepseek-` 开头时 Chord 会
+  `max_tokens`。模型 ID 是[DeepSeek API 模型名](./reasoning_CN.md#deepseek-的思考与历史回放)时 Chord 会
   自动选择这套端点契约；别名或私有模型可通过
   `reasoning_continuity.contract: deepseek` 显式选择。第三方托管的路由模型 ID
-  以 `deepseek-` 开头、后端却不是 DeepSeek 时，用
+  是 DeepSeek API 模型名、后端却不是 DeepSeek 时，用
   `reasoning_continuity.contract: none` 退出，Chat 和 Messages 都适用。
   请求带 tools 时，DeepSeek 要求后续每一轮都完整回传历史
   `reasoning_content`，否则返回 `400`。所以这套契约在 Chat 与 Messages 上总会

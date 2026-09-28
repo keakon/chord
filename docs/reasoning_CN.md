@@ -32,8 +32,21 @@ Gemini 用 `extra_body.google.thinking_config`，Claude 用
 
 ## DeepSeek 的思考与历史回放
 
-Chord 按模型 ID 的最后一段识别 `deepseek` / `deepseek-*`，包括带 provider
-前缀的名称。Chat Completions 和 Messages 都保持用户指定的思考强度；历史
+模型 ID 的最后一段（去掉 provider 前缀，不区分大小写）是 DeepSeek API 模型名时，
+Chord 自动启用 DeepSeek 契约。DeepSeek API 模型名包括：
+
+- `deepseek`；
+- `deepseek-v<N>`，N 不小于 4，例如 `deepseek-v4-pro`、`deepseek-v4.1-flash`、
+  `deepseek-v5`；
+- `deepseek-flash`、`deepseek-pro`、`deepseek-chat`、`deepseek-reasoner`，
+  可以单独出现，也可以后接 `-…`。
+
+名字里带 `distill` 的一律不算。第三方按自家契约托管的开源权重模型，例如
+`deepseek-r1-distill-*`、`deepseek-coder-*`、`deepseek-v3`、`deepseek-r1`，
+同样不会自动识别；如果某条路由确实按 DeepSeek 契约提供这类模型，用
+`compat.reasoning_continuity.contract: deepseek` 显式开启。
+
+Chat Completions 和 Messages 都保持用户指定的思考强度；历史
 工具调用没有思考文本，也不会撤掉 `max`。`max` 是强度，`max_tokens` 是输出
 上限，DeepSeek 不使用 `budget_tokens` 控制思考强度。
 
@@ -48,8 +61,8 @@ Messages 使用 `thinking.type: enabled` 配合 `thinking.effort`，发送为
 契约覆盖；移除该配置或设为 `all` 即可消除提示。
 同源 Messages 思考块保留原始文本和可用签名。回放被拒绝时，Chord 不会通过
 降低强度、删除必需思考或把工具轨迹转成文本来重试；错误继续按模型池规则
-处理。第三方网关需要支持这套 DeepSeek 契约；第三方路由的模型名以 `deepseek-`
-开头、后端却不是 DeepSeek 时，用 `compat.reasoning_continuity.contract: none`
+处理。第三方网关需要支持这套 DeepSeek 契约；第三方路由的模型 ID 是 DeepSeek
+API 模型名、后端却不是 DeepSeek 时，用 `compat.reasoning_continuity.contract: none`
 退出，Chat 和 Messages 都适用。
 
 ## 决定回放契约
