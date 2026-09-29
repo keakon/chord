@@ -112,7 +112,7 @@ providers:
 
 设置 `context.compaction.model_driven: true` 后，主 agent 获得 `compact_context` 工具。注册该工具是启用功能的一部分：仅含通配符的权限规则（例如 allowlist 式的 `"*": deny` 加少量显式放行的工具）不会隐藏或拦截它：只有匹配 `compact_context` 的非全局工具规则仍然生效（`deny` 会移除工具并给出一次性诊断，`ask` 保留工具但每次调用需确认，`allow` 与默认一致）。像 `compact_*` 这样的窄匹配也算匹配规则。即使角色的 allowlist 没有放行任何文件工具，模型仍可把状态完整写进结构化参数来完成 checkpoint。
 
-模型应在「用 checkpoint 替换当前历史」比继续携带历史更划算，且后续需要的事实已经充分外化时单独调用它（同一响应里不能有其他工具调用）：这些事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中（`completed` 只记录已验证的结果及验证方式，todo 列表由运行时自动快照、无需复述）。引用已有状态文件前，应先更新其中依赖的内容。结构化参数能完整承载恢复状态时，`state_files` 可以留空，不必为了请求 checkpoint 额外创建或修改文件。checkpoint 是有成本的状态转移，不是例行保存进度。runtime 校验请求，等工具批次收口后：
+模型应在「用 checkpoint 替换当前历史」比继续携带历史更划算，且后续需要的事实已经充分外化时单独调用它（同一响应里不能有其他工具调用）：这些事实要么写在 `state_files` 指出的文件里，要么完整表达在 `active_objective` / `completed` / `decisions` / `open_issues` / `next_step` 结构化参数中（`completed` 只记录已验证的结果及验证方式，todo 列表由运行时自动快照、无需复述）。长任务应将可复用的代码位置、已验证结论及适用条件、有效命令与结果路径、失败路线和未解决问题维护在任务笔记中。压缩前更新笔记并通过 `state_files` 登记；结构化参数只保留进度、阻碍、下一步和相关笔记小节，作为简短交接。恢复后先按需读取笔记，再补充探索。恢复信息很少或角色没有文件写入权限时，可以全部使用结构化参数，`state_files` 留空。checkpoint 是有成本的状态转移，不是例行保存进度。runtime 校验请求，等工具批次收口后：
 
 1. 快照对话并归档 head（不调用摘要模型，checkpoint 由确定性构造）；
 2. 当预计收益低于保守门槛（2048 tokens 且占 prepared surface 的 10%）时拒绝 reset；距上次成功 apply 不足 3 个主模型请求批次时同样会跳过；

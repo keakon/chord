@@ -2270,9 +2270,9 @@ func renderStateFilesSection(paths []string, archivedEvidence []evidenceItem, ev
 	if len(paths) == 0 {
 		// An empty list is legitimate (pure analysis, final delivery, a role
 		// without write tools), so it is never a rejection. The continuation
-		// still gets an actionable line: the checkpoint sections and the
-		// archived history are the whole recovery state, and the next
-		// checkpoint is where a notes/plan file gets registered.
+		// still gets an actionable line: use the checkpoint and archive now,
+		// and register notes when reusable details accumulate and writing is
+		// permitted.
 		//
 		// The archived-evidence counts are stated as facts rather than left as
 		// a generic reminder, because this message repeats on every later
@@ -2291,17 +2291,16 @@ func renderStateFilesSection(paths []string, archivedEvidence []evidenceItem, ev
 			"- Model-declared references only; existence is not verified.\n"
 		if len(archivedEvidence) == 0 {
 			// With nothing archived there is no ID to cite, so offering the ID
-			// route would ask for an action the continuation cannot take. The
-			// only step left is registering a durable file at the next
-			// checkpoint.
+			// route would ask for an action the continuation cannot take. Future
+			// reusable details can be saved in notes when writing is permitted.
 			return prefix +
-				"- No durable state file was registered and no archived evidence exists to cite: register a notes or plan file at the next checkpoint so re-derivable work stops depending on the archive."
+				"- No durable state file was registered and no archived evidence exists to cite: when reusable working details accumulate and file writing is permitted, save them in task notes and register the file at the next checkpoint."
 		}
 		return prefix +
-			fmt.Sprintf("- No durable state file was registered: %d archived evidence item(s) exist, and this state references %d of them. Cite an archived ID to make its detail survive later checkpoints, and register a notes or plan file at the next checkpoint so re-derivable work stops depending on the archive.", len(archivedEvidence), referenced)
+			fmt.Sprintf("- No durable state file was registered: %d archived evidence item(s) exist, and this state references %d of them. Cite an archived ID to make its detail survive later checkpoints. When reusable working details accumulate and file writing is permitted, save them in task notes and register the file at the next checkpoint.", len(archivedEvidence), referenced)
 	}
 	var sb strings.Builder
-	sb.WriteString("- Model-declared references only; existence is not verified. Use the read tool to load any path before relying on it:\n")
+	sb.WriteString("- Model-declared references only; existence is not verified. Use these task notes for working details; read only the sections needed for the next action unless already injected:\n")
 	for _, p := range paths {
 		for line := range strings.SplitSeq(p, "\n") {
 			sb.WriteString("- ")

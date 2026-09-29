@@ -52,13 +52,13 @@ func TestStateFilesSectionEmptyFallback(t *testing.T) {
 	if !strings.Contains(section, "no archived evidence exists to cite") {
 		t.Fatalf("empty state_files must state that no archived evidence exists:\n%s", section)
 	}
-	if !strings.Contains(section, "register a notes or plan file at the next checkpoint") {
+	if !strings.Contains(section, "save them in task notes and register the file at the next checkpoint") {
 		t.Fatalf("empty state_files must tell the continuation how to close the gap:\n%s", section)
 	}
 	// The nudge belongs to the empty case only; a registered reference must
 	// not carry it.
 	registered := renderStateFilesSection([]string{"notes/current.md"}, nil, nil)
-	if strings.Contains(registered, "register a notes or plan file at the next checkpoint") {
+	if strings.Contains(registered, "save them in task notes and register the file at the next checkpoint") {
 		t.Fatalf("a non-empty state_files section must not carry the empty-case nudge:\n%s", registered)
 	}
 }

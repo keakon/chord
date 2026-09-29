@@ -163,7 +163,7 @@ func TestContextPressureReminderShortTextSelfContained(t *testing.T) {
 	if strings.Contains(contextPressureReminderShortText, "earlier notice") {
 		t.Fatalf("short reminder must not reference the transient earlier notice: %q", contextPressureReminderShortText)
 	}
-	for _, want := range []string{"compact_context", "structured arguments or permitted state files", "final response", "user input"} {
+	for _, want := range []string{"compact_context", "If the recovery state is small or file writing is unavailable, preserve it in structured arguments.", "final response", "user input"} {
 		if !strings.Contains(contextPressureReminderShortText, want) {
 			t.Fatalf("short reminder must restate the action (mention %q), got %q", want, contextPressureReminderShortText)
 		}

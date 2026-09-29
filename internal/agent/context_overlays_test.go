@@ -143,7 +143,7 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	if reminder == "" {
 		t.Fatal("tool-visible session must queue a reminder above the line")
 	}
-	if !strings.Contains(reminder, "compact_context") || !strings.Contains(reminder, "automatic-compaction threshold") || !strings.Contains(reminder, "structured arguments or permitted state files") {
+	if !strings.Contains(reminder, "compact_context") || !strings.Contains(reminder, "automatic-compaction threshold") || !strings.Contains(reminder, "If the recovery state is small or file writing is unavailable, preserve it in structured arguments.") {
 		t.Fatalf("reminder text = %q, want actionable text naming compact_context and both recovery-state options", reminder)
 	}
 	if strings.Contains(reminder, "<context-pressure>") || strings.Contains(reminder, "<system-reminder>") {
@@ -579,7 +579,7 @@ func TestAutoContinuePromptVerificationGuidance(t *testing.T) {
 	if !strings.Contains(prompt, "Before continuing, confirm that the preserved Current User Request and Next Step still match the actual state.") {
 		t.Fatalf("auto-continue prompt must carry the post-apply verification guidance: %q", prompt)
 	}
-	if !strings.Contains(prompt, "Re-read any referenced state_files when needed before acting.") {
+	if !strings.Contains(prompt, "Use registered notes as the detail source: read the sections needed for the next action unless already injected, before repeating exploration.") {
 		t.Fatalf("auto-continue prompt must reference state_files re-read: %q", prompt)
 	}
 }
@@ -587,7 +587,7 @@ func TestAutoContinuePromptVerificationGuidance(t *testing.T) {
 func TestAppendContextPressureVerificationGuidance(t *testing.T) {
 	base := "A model-driven context checkpoint was applied; continue."
 	got := appendContextPressureVerificationGuidance(base)
-	if !strings.Contains(got, base) || !strings.Contains(got, "state_files") {
+	if !strings.Contains(got, base) || !strings.Contains(got, "Use registered notes as the detail source") {
 		t.Fatalf("guidance append = %q, want base + verification guidance", got)
 	}
 }

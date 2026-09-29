@@ -527,8 +527,8 @@ func (a *MainAgent) modelDrivenContextPromptBlock() string {
 		return ""
 	}
 	return "## Long-session context management\n" +
-		"- Preserve important findings, decisions, and recovery state as part of the work. The compact_context tool description governs checkpoint timing and preparation.\n" +
-		"- After a reset, start from the checkpoint and any injected file content. Read registered state_files only for missing or changed information needed for the next action; read archived history only for exact details unavailable there."
+		"- For long tasks, maintain a concise task-notes file as reusable findings accumulate, within your file permissions. Keep key code locations, verified conclusions and their conditions, working commands and saved result paths, failed approaches and retry conditions, and open questions; update stale entries rather than appending a transcript. The compact_context tool description governs checkpoint timing and preparation.\n" +
+		"- After a reset, start from the checkpoint and any injected file content. Use the registered task notes as the detail source: read the relevant sections only for missing or changed information needed for the next action, before repeating searches or experiments. Reuse results while their code and conditions remain unchanged; read archived history only for exact details unavailable there."
 }
 
 // shouldUsePlannerPrompt reports whether the active role gets the built-in

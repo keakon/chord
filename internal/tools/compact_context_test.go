@@ -551,18 +551,14 @@ func TestCompactContextDescriptionKeepsRejectionGuidanceGeneric(t *testing.T) {
 	}
 }
 
-// An empty state_files list stays valid (pure analysis, final delivery, or a
-// role without write tools), so the contract must state when it is the right
-// answer instead of leaving the model to infer it from a rejection it cannot
-// afford on the checkpoint's critical path. The ban on inventing files is
-// scoped to filling the field: the externalization route the budget rejection
-// recommends has to stay reachable, or the two texts contradict each other.
+// Small recovery states and roles without write tools may omit state files;
+// long-task details should be saved before the checkpoint references them.
 func TestCompactContextStatesWhenStateFilesMayBeEmpty(t *testing.T) {
 	tool := NewCompactContextTool(testCompactValidator())
 	description := tool.Description()
 	for _, want := range []string{
-		"Leave state_files empty when the structured arguments fully carry the recovery state",
-		"never create a file merely to fill the field",
+		"When recovery state is genuinely small or file writing is unavailable",
+		"update a permitted task-notes file and register it in state_files",
 		"write that file before submitting the checkpoint",
 	} {
 		if !strings.Contains(description, want) {

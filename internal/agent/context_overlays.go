@@ -918,7 +918,7 @@ const contextPressureReminderShortText = "Context pressure is still active and t
 // as an instruction to try.
 const contextStateFileTargetHint = "a task-notes file under .chord/notes/ or a plan document under .chord/plans/, named with a YYYYMMDD date prefix such as 20260915-auth-token-refresh.md"
 
-const contextCheckpointPressureAction = "If only the final response remains, deliver it without a checkpoint; if user input is required, use the normal question or waiting mechanism. Otherwise finish the current atomic operation, stop optional exploration, and preserve the minimum recovery state in structured arguments or permitted state files (" + contextStateFileTargetHint + "). Request a provisional checkpoint with compact_context alone when its preparation requirements are met; do not claim unfinished work is complete."
+const contextCheckpointPressureAction = "If only the final response remains, deliver it without a checkpoint; if user input is required, use the normal question or waiting mechanism. Otherwise finish the current atomic operation, stop optional exploration, and update the reusable working details in " + contextStateFileTargetHint + " when permitted; register the saved file in state_files and keep structured arguments a concise handoff with the next action and relevant notes section. If the recovery state is small or file writing is unavailable, preserve it in structured arguments. Request a provisional checkpoint with compact_context alone when its preparation requirements are met; do not claim unfinished work is complete."
 
 // buildContextPressureReminderText renders the full reminder text. It does not
 // quote the current usage ratio or the remaining budget: the model cannot act
@@ -953,5 +953,5 @@ func appendContextPressureVerificationGuidance(text string) string {
 // conversation's tool results, then archived payloads, and only then the
 // checkpoint's own prose.
 const checkpointVerificationGuidance = "Before continuing, confirm that the preserved Current User Request and Next Step still match the actual state. " +
-	"Re-read any referenced state_files when needed before acting. " +
+	"Use registered notes as the detail source: read the sections needed for the next action unless already injected, before repeating exploration. Reuse verified results while their code and conditions remain unchanged. " +
 	"If the checkpoint conflicts with a newer source, the newer source wins, in this order: the latest user message or Done rejection, then current runtime state (todos, subagents, background tasks), then the files on disk, then tool results still in this conversation, then archived artifacts, and only then the checkpoint's own text."

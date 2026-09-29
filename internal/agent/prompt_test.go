@@ -424,7 +424,7 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		}
 	}
 	for _, want := range []string{
-		"Match final claims to the requested scope and the evidence actually gathered",
+		"Before claiming completion, compare the requested behavior with the implementation and verification already gathered",
 		"For analysis, review, or planning tasks",
 		"begin with repository evidence: relevant code, existing tests, CI configuration, documentation, and history",
 		"Install dependencies or run dynamic checks only when requested or necessary to support a material conclusion",
@@ -496,7 +496,7 @@ func TestSharedReasoningDisciplinePrompt_ContentAndBoundary(t *testing.T) {
 		owner string
 	}{
 		{"verify claims proportionally to the task and risk", sharedAgentValuesPrompt},
-		{"Match final claims to the requested scope and the evidence actually gathered", sharedCodingGuidelinesPrompt},
+		{"Before claiming completion, compare the requested behavior with the implementation and verification already gathered", sharedCodingGuidelinesPrompt},
 		{"state verification status explicitly", sharedCodingGuidelinesPrompt},
 		{"Do not narrate every routine action", sharedCodingGuidelinesPrompt},
 		{"Do not add a final audit loop", sharedCodingGuidelinesPrompt},
@@ -763,7 +763,7 @@ func TestSharedCodingGuidelinesPrompt_RequiresEvidenceDiscriminationAndAmbiguity
 		"state the goal and constraints before recommending",
 		"separate what was observed from what was inferred before naming a cause",
 		"distinguish requirements from assumptions",
-		"Match final claims to the requested scope",
+		"Before claiming completion, compare the requested behavior",
 		"For analysis, review, or planning tasks",
 		"run dynamic checks only when requested or necessary",
 		// Ambiguity convergence.
@@ -2404,7 +2404,7 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 	for _, want := range []string{
 		"## Long-session context management",
 		"compact_context",
-		"state_files",
+		"registered task notes",
 		"archived history",
 		"checkpoint and any injected file content",
 		"only for missing or changed information",
