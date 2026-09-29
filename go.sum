@@ -88,10 +88,10 @@ github.com/keakon/bubbletea/v2 v2.0.9-fork h1:NHOp5ySqhLfET9HvRT7G4B3Bw19MMdbOKZ
 github.com/keakon/bubbletea/v2 v2.0.9-fork/go.mod h1:hpkf06dOzuUOrAq/5gqTiTZmP2nHDaV0kjiqPhrTDBk=
 github.com/keakon/golog v0.4.1 h1:ypNKDc+jIs1uiGP5uMSGaxa9SQKuG1G8QrnAofUOP10=
 github.com/keakon/golog v0.4.1/go.mod h1:VaRf1sNrjyL0MBAGAJUXajaJ3Zg0Z8+5A6faep08BHA=
-github.com/keakon/ultraviolet v0.0.1-fork.7 h1:kgGDQ7Pz4oMN6w91vRggT/jmCYh64oLlhQnCHPpmZEs=
-github.com/keakon/ultraviolet v0.0.1-fork.7/go.mod h1:X3Jy1+j9FjeMscbXuzxeEJBbPQymVn9qTWn3V1469ow=
-github.com/keakon/x/powernap v0.1.9-fork h1:NeScY4Dzj5PNBV2JlFpHqXCg8pMEyef/AjyjPAoQclc=
-github.com/keakon/x/powernap v0.1.9-fork/go.mod h1:w8nObTAIcIPJI/msiOXCFs6utx3yuLVl7lm0oa2/DAY=
+github.com/keakon/ultraviolet v0.0.1-fork.9 h1:8zwMp+/GFN9Q2hhlIqGQuGTK/hj+vv7gYVgIfrhTIiA=
+github.com/keakon/ultraviolet v0.0.1-fork.9/go.mod h1:X3Jy1+j9FjeMscbXuzxeEJBbPQymVn9qTWn3V1469ow=
+github.com/keakon/x/powernap v0.1.10-fork h1:MXKY08zVvvfdGPGKJykcPkmrnCTRdsx5Nbcqz0k8Z0s=
+github.com/keakon/x/powernap v0.1.10-fork/go.mod h1:w8nObTAIcIPJI/msiOXCFs6utx3yuLVl7lm0oa2/DAY=
 github.com/klauspost/compress v1.20.0 h1:a3C1ke2ohxFymNlb2HWAHjDeKCI90scRskErZkR0ezA=
 github.com/klauspost/compress v1.20.0/go.mod h1:LUdAzn7YLVvxLpc7y3V1m40wESHTgc1422pwwBSKYuI=
 github.com/klauspost/cpuid/v2 v2.4.0 h1:S6Hrbc7+ywsr0r+RLapfGBHfyefhCTwEh3A0tV913Dw=
