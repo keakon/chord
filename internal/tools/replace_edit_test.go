@@ -1285,3 +1285,15 @@ func TestEditReadResultCopyRuleHasSingleSource(t *testing.T) {
 		t.Fatal("read description repeats the edit copy rule")
 	}
 }
+
+// Tool selection between edit and write is owned by the shared Tool Selection
+// prompt block, which only names write when it is actually visible in the role.
+func TestEditDescriptionLeavesEditWriteRoutingToPrompt(t *testing.T) {
+	desc := (EditTool{}).Description()
+	if strings.Contains(desc, "rewriting the whole file") {
+		t.Fatalf("edit description repeats the shared edit-vs-write routing: %q", desc)
+	}
+	if !strings.Contains(desc, "Perform exact string replacement in an existing file.") {
+		t.Fatalf("edit description lost its core contract: %q", desc)
+	}
+}

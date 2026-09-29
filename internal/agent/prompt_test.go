@@ -1327,9 +1327,16 @@ func TestMainLLMToolDefinitionsUseContextualBashDescription(t *testing.T) {
 	if bashDesc == "" {
 		t.Fatal("missing Shell tool definition")
 	}
-	for _, want := range []string{"use `grep` for repo text search before reaching for rg", "use `glob` for file or path discovery before reaching for rg --files or find", "use `read` once you have narrowed the target files", "If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts."} {
+	for _, want := range []string{"If file reading, search, code-navigation, or file-editing tools are hidden or denied in this role, shell is not a substitute for them; do not simulate those capabilities with shell commands or inline scripts."} {
 		if !strings.Contains(bashDesc, want) {
 			t.Fatalf("missing %q in Shell description %q", want, bashDesc)
+		}
+	}
+	// Discovery routing is owned by the shared Tool Selection block; the
+	// shell description must not restate it.
+	for _, unwanted := range []string{"reaching for rg", "once you have narrowed the target files"} {
+		if strings.Contains(bashDesc, unwanted) {
+			t.Fatalf("Shell description repeats shared discovery routing %q: %q", unwanted, bashDesc)
 		}
 	}
 	// With neither delete nor apply_patch on the surface there is no dedicated

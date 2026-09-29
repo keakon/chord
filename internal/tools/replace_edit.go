@@ -82,7 +82,10 @@ func (t EditTool) Description() string {
 	// LSP diagnostic follow-up guidance lives in the system prompt
 	// (## LSP diagnostic follow-up), not per-tool descriptions; see
 	// lspDiagnosticPromptBlock.
-	return "Perform exact string replacement in an existing file. Prefer this tool for localized changes instead of rewriting the whole file with `write`. " +
+	// The edit-vs-write choice is stated once in the shared Tool Selection
+	// block, which only names `write` when it is visible in the role, so this
+	// description keeps only the tool's own contract.
+	return "Perform exact string replacement in an existing file. " +
 		"Line breaks adapt to the file: with uniform CRLF or CR line endings, LF text takes that ending; with mixed line endings, each line break in old_string matches any line ending and the replacement takes the matched block's. " +
 		"For several disjoint changes in one file, use edits instead of separate calls. Every batch entry matches the original file exactly after line-ending adaptation; overlaps are rejected and all entries are validated before writing. Do not mix edits with top-level replacement fields. " +
 		"Prefer the smallest unique 2-4 line block instead of a large stale context block; re-read before retrying after any mismatch. Replaces one occurrence by default; set replace_all to replace every occurrence."

@@ -288,6 +288,11 @@ func (t ShellTool) DescriptionForTools(visible map[string]struct{}) string {
 	return shellToolDescription(visible, t.shellType)
 }
 
+// shellToolDescription renders the shell description for a tool surface.
+// Discovery routing (glob/grep/read order) lives in the shared Tool Selection
+// prompt block that main and sub agents both receive; this text keeps only the
+// generic rule against simulating a visible built-in tool in shell, plus the
+// deletion routing that depends on which deletion-capable tools are visible.
 func shellToolDescription(visible map[string]struct{}, shellType string) string {
 	var shellDesc string
 	switch shellType {
@@ -301,21 +306,6 @@ func shellToolDescription(visible map[string]struct{}, shellType string) string 
 		shellDesc = "Execute a shell command via bash."
 	}
 	parts := []string{shellDesc}
-	if len(visible) > 0 {
-		discoveryHints := make([]string, 0, 3)
-		if _, ok := visible[NameGrep]; ok {
-			discoveryHints = append(discoveryHints, "use `grep` for repo text search before reaching for rg")
-		}
-		if _, ok := visible[NameGlob]; ok {
-			discoveryHints = append(discoveryHints, "use `glob` for file or path discovery before reaching for rg --files or find")
-		}
-		if _, ok := visible[NameRead]; ok {
-			discoveryHints = append(discoveryHints, "use `read` once you have narrowed the target files")
-		}
-		if len(discoveryHints) > 0 {
-			parts = append(parts, "When the built-in tools can cover the discovery step, prefer them: "+strings.Join(discoveryHints, "; ")+".")
-		}
-	}
 	parts = append(parts,
 		"This tool is non-interactive: stdin is not provided, Unix commands run without a controlling TTY. Do not run interactive commands (login wizards, editors, TUIs, password prompts); obvious interactive commands are rejected before execution.",
 		"Use shell mainly for tests, builds, git, and other system commands.",

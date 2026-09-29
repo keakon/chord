@@ -365,13 +365,11 @@ func TestBashDescriptionIncludesToolSpecificHintsOnlyWhenVisible(t *testing.T) {
 		NameGlob: {},
 		NameRead: {},
 	})
-	for _, want := range []string{
-		"use `grep` for repo text search before reaching for rg",
-		"use `glob` for file or path discovery before reaching for rg --files or find",
-		"use `read` once you have narrowed the target files",
-	} {
-		if !strings.Contains(withHelpers, want) {
-			t.Fatalf("missing helper hint %q in %q", want, withHelpers)
+	// Discovery routing is owned by the shared Tool Selection prompt block;
+	// the description must not grow a second copy that can drift.
+	for _, unwanted := range []string{"reaching for rg", "once you have narrowed the target files", "prefer them"} {
+		if strings.Contains(withHelpers, unwanted) {
+			t.Fatalf("description repeats shared discovery routing (%q): %q", unwanted, withHelpers)
 		}
 	}
 }
