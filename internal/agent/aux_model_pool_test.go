@@ -198,7 +198,7 @@ func TestNewAuxModelPoolClientSkipsInvalidRefAndUsesRemainingPool(t *testing.T) 
 		return valid, ref, 0, nil
 	}
 
-	client, err := a.newAuxModelPoolClient([]string{"invalid/model", "valid/model"}, 0, 0)
+	client, err := a.newAuxModelPoolClient([]string{"invalid/model", "valid/model"}, 0, 0, 0)
 	if err != nil {
 		t.Fatalf("newAuxModelPoolClient() error = %v", err)
 	}
@@ -215,7 +215,7 @@ func TestNewAuxModelPoolClientReportsAllConstructionErrors(t *testing.T) {
 	a.modelSwitchFactory = func(ref string, _ []string, _ string) (*llm.Client, string, int, error) {
 		return nil, "", 0, fmt.Errorf("failed %s", ref)
 	}
-	_, err := a.newAuxModelPoolClient([]string{"first/ref", "second/ref"}, 0, 0)
+	_, err := a.newAuxModelPoolClient([]string{"first/ref", "second/ref"}, 0, 0, 0)
 	if err == nil || !strings.Contains(err.Error(), "first/ref: failed first/ref") || !strings.Contains(err.Error(), "second/ref: failed second/ref") {
 		t.Fatalf("error = %v, want both refs and reasons", err)
 	}
@@ -249,7 +249,7 @@ func TestNewAuxModelPoolClientAppliesServiceTierToPoolClient(t *testing.T) {
 		return directClient, providerModel, 0, nil
 	}
 
-	client, err := a.newAuxModelPoolClient([]string{"aux/model"}, 0, 2048)
+	client, err := a.newAuxModelPoolClient([]string{"aux/model"}, 0, 2048, 0)
 	if err != nil {
 		t.Fatalf("newAuxModelPoolClient() error = %v", err)
 	}

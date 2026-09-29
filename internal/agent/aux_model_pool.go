@@ -34,6 +34,25 @@ func (a *MainAgent) resolveConfiguredModelPool(poolName string) ([]string, error
 	return nil, fmt.Errorf("model pool %q is not defined or empty", poolName)
 }
 
+// configuredAuxModelPoolRefs resolves a named aux model pool, preferring the
+// project-level config over the user-level one. The second return reports
+// whether a pool was configured at all.
+func (a *MainAgent) configuredAuxModelPoolRefs(poolName func(*config.Config) string) ([]string, bool, error) {
+	for _, cfg := range []*config.Config{a.projectConfig, a.globalConfig} {
+		if cfg == nil {
+			continue
+		}
+		if pool := strings.TrimSpace(poolName(cfg)); pool != "" {
+			refs, err := a.resolveConfiguredModelPool(pool)
+			if err != nil {
+				return nil, true, err
+			}
+			return refs, true, nil
+		}
+	}
+	return nil, false, nil
+}
+
 func trimModelPoolRefs(refs []string) []string {
 	out := make([]string, 0, len(refs))
 	for _, ref := range refs {
@@ -46,7 +65,7 @@ func trimModelPoolRefs(refs []string) []string {
 	return out
 }
 
-func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, outputMax int) (*llm.Client, error) {
+func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, outputMax int, selectedIdx int) (*llm.Client, error) {
 	if len(refs) == 0 {
 		return nil, fmt.Errorf("empty model pool")
 	}
@@ -90,16 +109,15 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 		}
 		return nil, fmt.Errorf("model pool has no usable refs")
 	}
-	return newAuxClientFromPool(pool, 0, outputMax, a.ServiceTier()), nil
+	return newAuxClientFromPool(pool, selectedIdx, outputMax, a.ServiceTier()), nil
 }
 
 func newAuxClientFromPool(pool []llm.FallbackModel, selectedIdx int, outputMax int, serviceTier config.ServiceTier) *llm.Client {
 	if len(pool) == 0 {
 		return nil
 	}
-	if selectedIdx < 0 || selectedIdx >= len(pool) {
-		selectedIdx = 0
-	}
+	// Wrap out-of-range positions (rotation shifts) instead of clamping to 0.
+	selectedIdx = ((selectedIdx % len(pool)) + len(pool)) % len(pool)
 	selected := pool[selectedIdx]
 	client := llm.NewClient(selected.ProviderConfig, selected.ProviderImpl, selected.ModelID, selected.MaxTokens, "")
 	client.SetModelPool(pool, selectedIdx)

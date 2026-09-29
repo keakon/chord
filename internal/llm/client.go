@@ -53,7 +53,8 @@ type Client struct {
 	tuning                 RequestTuning
 	nextTuning             *RequestTuning
 	activeVariant          string // name of the currently applied variant (empty = none)
-	systemPrompt           string
+
+	systemPrompt string
 	// sessionKey is the per-Client session identity for provider-side
 	// prompt-cache routing; see SetSessionID.
 	sessionKey         string

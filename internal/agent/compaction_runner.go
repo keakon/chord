@@ -1171,25 +1171,9 @@ Original compaction input:
 }
 
 func (a *MainAgent) configuredCompactionModelRefs() ([]string, bool, error) {
-	if a.projectConfig != nil {
-		if pool := strings.TrimSpace(a.projectConfig.Context.Compaction.ModelPool); pool != "" {
-			refs, err := a.resolveConfiguredModelPool(pool)
-			if err != nil {
-				return nil, true, err
-			}
-			return refs, true, nil
-		}
-	}
-	if a.globalConfig != nil {
-		if pool := strings.TrimSpace(a.globalConfig.Context.Compaction.ModelPool); pool != "" {
-			refs, err := a.resolveConfiguredModelPool(pool)
-			if err != nil {
-				return nil, true, err
-			}
-			return refs, true, nil
-		}
-	}
-	return nil, false, nil
+	return a.configuredAuxModelPoolRefs(func(cfg *config.Config) string {
+		return cfg.Context.Compaction.ModelPool
+	})
 }
 
 func (a *MainAgent) compactionModelRef() string {
@@ -1216,7 +1200,7 @@ func (a *MainAgent) newCompactionClient(_ string) (*llm.Client, int, error) {
 	}
 	var client *llm.Client
 	if configured {
-		client, err = a.newAuxModelPoolClient(refs, 5*time.Minute, 0)
+		client, err = a.newAuxModelPoolClient(refs, 5*time.Minute, 0, 0)
 		if err != nil {
 			return nil, 0, err
 		}

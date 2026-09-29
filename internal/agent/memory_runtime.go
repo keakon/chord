@@ -12,6 +12,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/memory"
 	"github.com/keakon/chord/internal/message"
@@ -929,9 +930,9 @@ func sanitizeProjected(projected []sessionview.Projected) []sessionview.Projecte
 // bounds how many active records this run may retire, and rotation picks the
 // pool model the request starts from.
 func (a *MainAgent) callMemoryExtraction(ctx context.Context, prompt string, maxRetire int, rotation int) (*memory.ExtractionOutput, error) {
-	client := a.newMemoryExtractionClient(rotation)
-	if client == nil {
-		return nil, fmt.Errorf("%w: no model pool available for memory extraction", errMemorySetupFailed)
+	client, err := a.newMemoryExtractionClient(rotation)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", errMemorySetupFailed, err)
 	}
 	client.SetSystemPrompt(memoryExtractionSystemPrompt)
 	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -950,31 +951,47 @@ func (a *MainAgent) callMemoryExtraction(ctx context.Context, prompt string, max
 	return memory.ParseExtractionOutput(extractionJSONBytes(resp.Content), maxRetire)
 }
 
-// newMemoryExtractionClient builds the extraction client from the main model
-// pool snapshot (sticky cursor + full round fallback), never a single model.
-// It reuses the auxiliary-client construction (timeout/retry profile) but is
-// owned by this extraction: independent cancel and stale-result checks.
+// configuredMemoryExtractionModelRefs resolves memory.model_pool, preferring
+// the project-level setting over the user-level one.
+func (a *MainAgent) configuredMemoryExtractionModelRefs() ([]string, bool, error) {
+	return a.configuredAuxModelPoolRefs(func(cfg *config.Config) string {
+		return cfg.Memory.ModelPool
+	})
+}
+
+// newMemoryExtractionClient uses the configured memory pool, or a snapshot
+// of the main pool and its current cursor. Each target retains its configured
+// reasoning settings; omitted settings retain the provider defaults.
 //
 // rotation shifts the starting position for a retry after an unusable output
 // shape, so the resample is not drawn from the model that produced it. A
 // single-model pool has nowhere to rotate to, which is the only option.
-func (a *MainAgent) newMemoryExtractionClient(rotation int) *llm.Client {
+func (a *MainAgent) newMemoryExtractionClient(rotation int) (*llm.Client, error) {
+	refs, configured, err := a.configuredMemoryExtractionModelRefs()
+	if err != nil {
+		return nil, err
+	}
+	if configured {
+		client, err := a.newAuxModelPoolClient(refs, 5*time.Minute, 0, rotation)
+		if err != nil {
+			return nil, err
+		}
+		client.SetStreamRetryRounds(1)
+		return client, nil
+	}
 	a.llmMu.RLock()
 	mainClient := a.llmClient
 	a.llmMu.RUnlock()
 	if mainClient == nil {
-		return nil
+		return nil, fmt.Errorf("no main model pool available for memory extraction")
 	}
 	pool, selectedIdx := mainClient.ModelPoolSnapshot()
 	if len(pool) == 0 {
-		return nil
+		return nil, fmt.Errorf("main model pool has no usable entries")
 	}
-	if rotation > 0 {
-		selectedIdx = (selectedIdx + rotation) % len(pool)
-	}
-	client := newAuxClientFromPool(pool, selectedIdx, 0, a.ServiceTier())
+	client := newAuxClientFromPool(pool, selectedIdx+rotation, 0, a.ServiceTier())
 	client.SetStreamRetryRounds(1)
-	return client
+	return client, nil
 }
 
 // extractionJSONBytes extracts the largest balanced JSON object from a response

@@ -82,7 +82,7 @@ func (a *MainAgent) newThinkingTranslator(poolName string) (*thinkingtranslate.L
 	if err != nil {
 		return nil, err
 	}
-	client, err := a.newAuxModelPoolClient(poolRefs, 1*time.Minute, 2048)
+	client, err := a.newAuxModelPoolClient(poolRefs, 1*time.Minute, 2048, 0)
 	if err != nil {
 		return nil, err
 	}

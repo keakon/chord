@@ -155,7 +155,7 @@ func TestNewAuxModelPoolClientFallsBackAcrossRefs(t *testing.T) {
 		}
 	}
 
-	client, err := a.newAuxModelPoolClient([]string{"bad/ref", "good/ref"}, 0, 2048)
+	client, err := a.newAuxModelPoolClient([]string{"bad/ref", "good/ref"}, 0, 2048, 0)
 	if err != nil {
 		t.Fatalf("newAuxModelPoolClient() error = %v, want nil", err)
 	}
@@ -176,7 +176,7 @@ func TestNewAuxModelPoolClientReportsAllErrorsWhenAllRefsFail(t *testing.T) {
 		return nil, "", 0, fmt.Errorf("failed %s", providerModel)
 	}
 
-	_, err := a.newAuxModelPoolClient([]string{"first/ref", "second/ref"}, 0, 0)
+	_, err := a.newAuxModelPoolClient([]string{"first/ref", "second/ref"}, 0, 0, 0)
 	if err == nil {
 		t.Fatal("newAuxModelPoolClient() error = nil, want aggregated construction errors")
 	}

@@ -230,6 +230,13 @@ type MemoryConfig struct {
 	// Enabled enables automatic extraction for this machine + project.
 	// Nil means unset (defaults to false).
 	Enabled *bool `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	// ModelPool is the name of the model pool to use for extraction requests.
+	// When set, extraction uses this dedicated pool instead of the main model
+	// pool, which avoids inheriting aggressive reasoning settings (e.g. effort:max)
+	// that can cause output truncation. The pool must be defined in model_pools.
+	// When unset, extraction uses the main model pool, preserving each model's
+	// configured reasoning settings.
+	ModelPool string `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
 }
 
 type MaintenanceConfig struct {

@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -588,13 +592,78 @@ func TestNewMemoryExtractionClientRotatesForOutputRetry(t *testing.T) {
 	a.llmClient = main
 
 	for rotation, want := range []string{"alpha/model-a", "beta/model-b", "gamma/model-c", "alpha/model-a"} {
-		client := a.newMemoryExtractionClient(rotation)
-		if client == nil {
-			t.Fatalf("rotation %d: no client built", rotation)
+		client, err := a.newMemoryExtractionClient(rotation)
+		if err != nil {
+			t.Fatalf("rotation %d: %v", rotation, err)
 		}
 		if got := client.PrimaryModelRef(); got != want {
 			t.Fatalf("rotation %d started at %q, want %q", rotation, got, want)
 		}
+	}
+}
+
+// An unusable-output retry in a configured model pool must also rotate the
+// start position; the configured pool path shares the same resample semantics
+// as the main-pool fallback.
+func TestNewMemoryExtractionClientRotatesConfiguredPool(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Memory:     config.MemoryConfig{ModelPool: "memory-extract"},
+		ModelPools: map[string][]string{"memory-extract": {"alpha/model-a", "beta/model-b"}},
+	}
+	factoryCalls := make([]string, 0, 4)
+	a.modelSwitchFactory = func(ref string, _ []string, _ string) (*llm.Client, string, int, error) {
+		factoryCalls = append(factoryCalls, ref)
+		provider, model, _ := splitRolePoolTestRef(ref, "")
+		return newRoleSwitchClient(t, provider, model, 8192), provider + "/" + model, 0, nil
+	}
+
+	for rotation, want := range []string{"alpha/model-a", "beta/model-b", "alpha/model-a"} {
+		client, err := a.newMemoryExtractionClient(rotation)
+		if err != nil {
+			t.Fatalf("rotation %d: %v", rotation, err)
+		}
+		if got := client.PrimaryModelRef(); got != want {
+			t.Fatalf("rotation %d started at %q, want %q", rotation, got, want)
+		}
+	}
+}
+
+// A configured memory extraction pool whose refs cannot be resolved must fail
+// the client build instead of silently falling back to the main model pool.
+func TestNewMemoryExtractionClientConfiguredPoolFailure(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Memory:     config.MemoryConfig{ModelPool: "memory-extract"},
+		ModelPools: map[string][]string{"memory-extract": {"bad/ref"}},
+	}
+	a.modelSwitchFactory = func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
+		return nil, "", 0, fmt.Errorf("provider unavailable")
+	}
+
+	if _, err := a.newMemoryExtractionClient(0); err == nil {
+		t.Fatal("newMemoryExtractionClient() error = nil, want configured pool failure")
+	}
+}
+
+// A missing pool must reach the caller as the setup-failure sentinel and keep
+// the pool name, so the stall report names the cause instead of a generic
+// "no model pool available".
+func TestCallMemoryExtractionMissingPoolIsSetupError(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Memory: config.MemoryConfig{ModelPool: "missing-pool"},
+	}
+
+	_, err := a.callMemoryExtraction(context.Background(), "prompt", 1, 0)
+	if err == nil {
+		t.Fatal("callMemoryExtraction() error = nil, want setup failure")
+	}
+	if !errors.Is(err, errMemorySetupFailed) {
+		t.Fatalf("error does not wrap errMemorySetupFailed: %v", err)
+	}
+	if !strings.Contains(err.Error(), "missing-pool") {
+		t.Fatalf("error does not name the configured pool: %v", err)
 	}
 }
 
@@ -861,5 +930,109 @@ func TestBoundedAgentsSnapshotKeepsHeadAndTail(t *testing.T) {
 	got = boundedAgentsSnapshot(cjk, 400, 100)
 	if !utf8.ValidString(got) || !strings.Contains(got, agentsMDTruncationMarker) {
 		t.Fatalf("CJK snapshot = %q", got)
+	}
+}
+
+// The dedicated memory pool wraps each entry via rebuildClientWithTotalTimeout,
+// which reconstructs the provider from ProviderConfig and discards any
+// injected recording seam, so the dedicated=true subtests serve the Anthropic
+// messages wire format from a local server and assert on the received request
+// body instead. The main-pool subtests keep the recording provider and assert
+// on the request tuning directly; both paths must preserve the configured
+// adaptive-thinking effort.
+func TestMemoryExtractionPreservesReasoningConfiguration(t *testing.T) {
+	for _, dedicated := range []bool{false, true} {
+		for _, effort := range []string{"", "low", "high", "max"} {
+			t.Run(fmt.Sprintf("dedicated=%v/effort=%s", dedicated, effort), func(t *testing.T) {
+				a := newTestMainAgent(t, t.TempDir())
+				provider := &recordingLoopTuningProvider{}
+				model := config.ModelConfig{Thinking: &config.ThinkingConfig{Type: config.ThinkingTypeAdaptive, Effort: effort}}
+				if !dedicated {
+					cfg := llm.NewProviderConfig("provider", config.ProviderConfig{Type: config.ProviderTypeMessages, Models: map[string]config.ModelConfig{"sample-model": model}}, []string{"test-key"})
+					a.llmClient = llm.NewClient(cfg, provider, "sample-model", 4096, "")
+					client, err := a.newMemoryExtractionClient(0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, err := client.CompleteStream(context.Background(), nil, nil, nil); err != nil {
+						t.Fatal(err)
+					}
+					provider.mu.Lock()
+					defer provider.mu.Unlock()
+					if len(provider.tunes) != 1 {
+						t.Fatalf("requests=%d", len(provider.tunes))
+					}
+					if got := provider.tunes[0].Anthropic.ThinkingEffort; got != effort {
+						t.Fatalf("effort=%q, want configured %q", got, effort)
+					}
+					return
+				}
+				var mu sync.Mutex
+				var bodies [][]byte
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					body, err := io.ReadAll(r.Body)
+					if err != nil {
+						http.Error(w, err.Error(), http.StatusBadRequest)
+						return
+					}
+					mu.Lock()
+					bodies = append(bodies, body)
+					mu.Unlock()
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprint(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg-1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
+					fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n")
+					fmt.Fprint(w, "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"{\\\"items\\\":[]}\"}}\n\n")
+					fmt.Fprint(w, "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n")
+					fmt.Fprint(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+				}))
+				t.Cleanup(srv.Close)
+				a.projectConfig = &config.Config{Memory: config.MemoryConfig{ModelPool: "memory"}, ModelPools: map[string][]string{"memory": {"provider/sample-model"}}}
+				wireCfg := llm.NewProviderConfig("provider", config.ProviderConfig{
+					Type:   config.ProviderTypeMessages,
+					APIURL: srv.URL,
+					Models: map[string]config.ModelConfig{"sample-model": model},
+				}, []string{"test-key"})
+				a.modelSwitchFactory = func(string, []string, string) (*llm.Client, string, int, error) {
+					return llm.NewClient(wireCfg, provider, "sample-model", 4096, ""), "provider/sample-model", 0, nil
+				}
+				client, err := a.newMemoryExtractionClient(0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := client.CompleteStream(context.Background(), nil, nil, nil); err != nil {
+					t.Fatal(err)
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				if len(bodies) != 1 {
+					t.Fatalf("requests=%d, want exactly one extraction request", len(bodies))
+				}
+				// The wire carries the adaptive-thinking effort as the top-level
+				// output_config.effort field; an empty effort omits the object.
+				var wire struct {
+					Thinking *struct {
+						Type string `json:"type"`
+					} `json:"thinking"`
+					OutputConfig *struct {
+						Effort string `json:"effort"`
+					} `json:"output_config"`
+				}
+				if err := json.Unmarshal(bodies[0], &wire); err != nil {
+					t.Fatalf("parse request body %s: %v", bodies[0], err)
+				}
+				if wire.Thinking == nil || wire.Thinking.Type != string(config.ThinkingTypeAdaptive) {
+					t.Fatalf("thinking config = %+v, want adaptive type", wire.Thinking)
+				}
+				if effort == "" {
+					if wire.OutputConfig != nil {
+						t.Fatalf("output_config = %+v, want omitted for empty effort", wire.OutputConfig)
+					}
+					return
+				}
+				if wire.OutputConfig == nil || wire.OutputConfig.Effort != effort {
+					t.Fatalf("output_config = %+v, want effort %q", wire.OutputConfig, effort)
+				}
+			})
+		}
 	}
 }

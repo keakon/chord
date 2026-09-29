@@ -1586,6 +1586,38 @@ func TestBuildStreamRetryTargetsPropagatesReplayFloorToFallbacks(t *testing.T) {
 	}
 }
 
+func TestBuildStreamRetryTargetsPreservesConfiguredReasoningEfforts(t *testing.T) {
+	cfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"sample-model": {
+			Reasoning: &config.ReasoningConfig{Effort: "high"},
+		}},
+	}, []string{"key"})
+	fbCfg := NewProviderConfig("openai", config.ProviderConfig{
+		Type: config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"sample-model-2": {
+			Reasoning: &config.ReasoningConfig{Effort: "max"},
+		}},
+	}, []string{"key"})
+	impl := &replayRejectingProvider{}
+	client := NewClient(cfg, impl, "sample-model", 4096, "sys")
+
+	targets := client.buildStreamRetryTargets(
+		cfg, impl, "sample-model", 4096,
+		tuningForPoolTarget(FallbackModel{ProviderConfig: cfg, ModelID: "sample-model"}), "", 0, true,
+		[]FallbackModel{{ProviderConfig: fbCfg, ProviderImpl: impl, ModelID: "sample-model-2", MaxTokens: 4096}},
+	)
+	if len(targets) != 2 {
+		t.Fatalf("targets = %d, want start + fallback", len(targets))
+	}
+	if got := targets[0].tuning.OpenAI.ReasoningEffort; got != "high" {
+		t.Fatalf("start reasoning effort = %q, want configured high", got)
+	}
+	if got := targets[1].tuning.OpenAI.ReasoningEffort; got != "max" {
+		t.Fatalf("fallback reasoning effort = %q, want configured max", got)
+	}
+}
+
 func TestReplayCompatibleRequestTuningIgnoresPriorTurnMissingReasoning(t *testing.T) {
 	cfg := NewProviderConfig("openai", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
