@@ -357,6 +357,11 @@ func (a *MainAgent) afterWorkDirSwitchWithReason(prev, next WorkDirState, reason
 	if a.worktreeRT.RefreshSkills != nil {
 		a.worktreeRT.RefreshSkills(a.workDir())
 	}
+	// The reminder is rebuilt for the new checkout anyway, so a pending Memory
+	// commit rides along.
+	if _, flipped := a.applyLoadedMemory(); flipped {
+		a.markRuntimeSurfaceDirty()
+	}
 	a.refreshSessionContextReminder()
 	var warnings []string
 	if err := a.recordWorkDirBoundary(next, reason); err != nil {

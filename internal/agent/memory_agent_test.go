@@ -269,6 +269,40 @@ func TestScheduleMemoryExtractionQueuesFrozenSession(t *testing.T) {
 	a.cancelInFlightMemoryExtraction()
 }
 
+// Extraction on the main model pool yields to the foreground: it waits for an
+// idle agent and a new turn cancels it. A dedicated memory.model_pool shares
+// neither the main pool's models nor its prompt cache, so it runs during a
+// turn and a new turn leaves it alone.
+func TestMemoryExtractionYieldsToTurnOnlyOnMainPool(t *testing.T) {
+	projectRoot := t.TempDir()
+	writeProjectMemory(t, projectRoot, "# Project Memory\n")
+	a := newTestMainAgent(t, projectRoot)
+	a.memoryExtractEnabled.Store(true)
+	a.turn = &Turn{ID: 1}
+	t.Cleanup(func() { a.turn = nil })
+
+	cancelled := false
+	a.memoryInflight = &memoryInflight{cancel: func() { cancelled = true }}
+	if a.memoryAdmission() {
+		t.Fatal("main-pool extraction admitted during a turn")
+	}
+	a.preemptMemoryExtractionForTurn()
+	if !cancelled {
+		t.Fatal("a new turn did not cancel main-pool extraction")
+	}
+
+	a.projectConfig = &config.Config{Memory: config.MemoryConfig{ModelPool: "memory-extract"}}
+	cancelled = false
+	if !a.memoryAdmission() {
+		t.Fatal("dedicated-pool extraction not admitted during a turn")
+	}
+	a.preemptMemoryExtractionForTurn()
+	if cancelled {
+		t.Fatal("a new turn cancelled dedicated-pool extraction")
+	}
+	a.memoryInflight = nil
+}
+
 func TestExtractionJSONBytesUnfences(t *testing.T) {
 	content := "```json\n{\"candidates\":[]}\n```"
 	if got := string(extractionJSONBytes(content)); got != `{"candidates":[]}` {
@@ -739,12 +773,12 @@ func TestDrainMemoryQueueRefreshesReminderAfterCommit(t *testing.T) {
 	a.memoryMu.Lock()
 	a.memoryPending = []memoryJob{{sessionDir: frozen}}
 	a.memoryMu.Unlock()
-	before := a.memoryReminderVersion.Load()
+	before := a.memoryLoaded.Load()
 
 	a.drainMemoryQueue()
 
-	if got := a.memoryReminderVersion.Load(); got == before {
-		t.Fatalf("reminder version = %d, want a bump after a committed extraction", got)
+	if a.memoryLoaded.Load() == before {
+		t.Fatal("committed extraction did not reload the memory summary")
 	}
 	cp, err := memory.LoadCheckpoint(a.memoryMgr.Layout())
 	if err != nil || cp == nil {
@@ -777,37 +811,76 @@ func TestShutdownWaitsForMemoryWorkerToStop(t *testing.T) {
 	}
 }
 
-// A background extraction commit bumps the memory reminder version; the next
-// request boundary (ensureSessionBuilt early-return path) rebuilds the
-// per-request reminder so the current session sees the update without a
-// session-head reset.
-func TestMemoryBackgroundCommitRefreshesNextRequestReminder(t *testing.T) {
+// A background extraction commit only loads the new summary: the reminder
+// sits before the first user message, so applying it on the next request would
+// re-bill the whole conversation as uncached input. The session keeps sending
+// the applied summary until a point where its prefix is rebuilt anyway.
+func TestMemoryBackgroundCommitWaitsForCacheBreak(t *testing.T) {
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n\nOriginal notes.\n")
 	a := newTestMainAgent(t, projectRoot)
-	a.refreshSessionContextReminder()
-	before := a.memoryReminderVersion.Load()
-	if before == 0 {
-		t.Fatal("expected reminder version bumped at init")
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt: %v", err)
 	}
 	got := a.cachedSessionReminderContent.Load()
 	if got == nil || !strings.Contains(*got, "Original notes") {
 		t.Fatalf("reminder missing initial notes: %v", got)
 	}
 
-	// Background commit writes a new record and refreshes the cached block.
 	writeProjectMemory(t, projectRoot, "# Project Memory\n\nUpdated notes.\n")
-	a.refreshMemoryReminderBlock()
-	if a.memoryReminderVersion.Load() == before {
-		t.Fatal("background refresh did not bump the reminder version")
+	a.loadMemorySummary()
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt: %v", err)
 	}
-	a.refreshSessionReminderIfMemoryChanged()
+	if got := a.cachedSessionReminderContent.Load(); got == nil || !strings.Contains(*got, "Original notes") || strings.Contains(*got, "Updated notes") {
+		t.Fatalf("a request boundary applied the pending summary: %v", got)
+	}
+
+	// A session switch or restore starts a new history, so the pending summary
+	// lands there.
+	a.resetSessionBuildState()
 	got = a.cachedSessionReminderContent.Load()
-	if got == nil || !strings.Contains(*got, "Updated notes") {
-		t.Fatalf("reminder not rebuilt after memory change: %v", got)
+	if got == nil || !strings.Contains(*got, "Updated notes") || strings.Contains(*got, "Original notes") {
+		t.Fatalf("reminder not rebuilt at the cache break: %v", got)
 	}
-	if strings.Contains(*got, "Original notes") {
-		t.Fatalf("reminder still carries stale notes: %v", *got)
+}
+
+// The first MEMORY.md of a project flips the load activation, which also
+// changes the stable prompt and compact_context visibility: applying it at a
+// cache break marks the surface dirty so the next request reinstalls both.
+func TestMemoryActivationFlipAtCacheBreakRebuildsSurface(t *testing.T) {
+	projectRoot := t.TempDir()
+	a := newTestMainAgent(t, projectRoot)
+	a.markAgentsMDReady()
+	a.MarkSkillsReady()
+	a.markMCPReady()
+	if a.memoryMgr == nil {
+		t.Skip("memory not initialized")
+	}
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt: %v", err)
+	}
+	writeProjectMemory(t, projectRoot, "# Project Memory\n\nFirst note.\n")
+	a.loadMemorySummary()
+	if a.memoryIsActive() {
+		t.Fatal("loading a summary activated memory before a cache break")
+	}
+
+	a.applyLoadedMemoryAtCacheBreak()
+	if !a.memoryIsActive() || a.sessionBuilt.Load() {
+		t.Fatalf("active=%v sessionBuilt=%v, want an active summary and a dirty surface", a.memoryIsActive(), a.sessionBuilt.Load())
+	}
+	if err := a.ensureSessionBuilt(context.Background()); err != nil {
+		t.Fatalf("ensureSessionBuilt: %v", err)
+	}
+	a.llmMu.RLock()
+	installed := a.installedSysPrompt
+	a.llmMu.RUnlock()
+	if !strings.Contains(installed, "## Memory\nThe \"# Project Memory\" block") {
+		t.Fatal("rebuilt system prompt lacks the Memory discipline")
 	}
 }
 

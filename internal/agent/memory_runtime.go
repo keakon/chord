@@ -180,13 +180,20 @@ func (a *MainAgent) setMemoryDegraded(degraded bool, reason string) {
 	})
 }
 
-// refreshMemoryReminderBlock reloads the bounded MEMORY.md summary into the
-// cached reminder block and updates the activation state. It is safe to call
-// from any goroutine: every touched field is atomic, and the per-request
-// reminder is rebuilt from the cached block by ensureSessionBuilt at the next
-// request boundary, so a background extraction commit lands on the next
-// request. Called at init and after every successful background commit.
-func (a *MainAgent) refreshMemoryReminderBlock() {
+// memorySnapshot is one bounded MEMORY.md summary as read from disk: the
+// rendered untrusted block (nil while inactive) and the load activation state.
+type memorySnapshot struct {
+	block  *string
+	active bool
+}
+
+// loadMemorySummary reads the bounded MEMORY.md summary into memoryLoaded. It
+// is safe to call from any goroutine and changes nothing the current session
+// sends: the snapshot waits in memoryLoaded until applyLoadedMemory takes it
+// at a point where the prompt cache is rebuilt anyway. A failed read keeps the
+// previous snapshot. Called at init and after every successful background
+// commit.
+func (a *MainAgent) loadMemorySummary() {
 	if a.memoryMgr == nil {
 		return
 	}
@@ -195,37 +202,59 @@ func (a *MainAgent) refreshMemoryReminderBlock() {
 		log.Warnf("memory: refresh summary error=%v", err)
 		return
 	}
-	prevActive := a.memoryActive.Load()
-	a.memoryActive.Store(active)
-	if !active {
-		a.cachedMemoryReminder.Store(nil)
-	} else {
-		block := renderMemoryReminder(summary)
-		if block == "" {
-			a.memoryActive.Store(false)
-			a.cachedMemoryReminder.Store(nil)
-		} else {
-			a.cachedMemoryReminder.Store(&block)
+	snap := &memorySnapshot{}
+	if active {
+		if block := renderMemoryReminder(summary); block != "" {
+			snap.block = &block
+			snap.active = true
 		}
 	}
-	if a.memoryActive.Load() != prevActive {
-		// Load activation flip changes the stable-prompt Memory discipline
-		// block; mark the surface dirty so the next request reinstalls it.
-		a.markRuntimeSurfaceDirty()
-	}
-	// Invalidate the per-request reminder regardless of activation: a content
-	// change without a flip (e.g. a new record indexed) must still land on the
-	// next request. ensureSessionBuilt rebuilds the reminder when the version
-	// moves.
-	a.memoryReminderVersion.Add(1)
+	a.memoryLoaded.Store(snap)
 }
 
-// refreshMemoryReminder refreshes the cached memory block and immediately
-// rebuilds the per-request session reminder so the current session sees the
-// update. Event-loop callers only (init, tests): the background worker calls
-// refreshMemoryReminderBlock and lets the next request boundary rebuild.
+// applyLoadedMemory makes the latest loaded summary the one the session
+// surface uses, reporting whether it changed and whether the load activation
+// flipped (which changes the stable prompt's Memory discipline and the
+// compact_context visibility). Event-loop callers only.
+//
+// The Memory block sits in the session-head reminder, before the first user
+// message, so swapping it re-bills the whole conversation as uncached input.
+// Callers therefore apply only where that prefix is being rebuilt anyway: the
+// first surface build, a surface change, a session switch or restore, a
+// durable compaction, or a working-directory switch. Records extracted from
+// earlier sessions are background knowledge; they can wait for that point.
+func (a *MainAgent) applyLoadedMemory() (changed, flipped bool) {
+	loaded := a.memoryLoaded.Load()
+	if loaded == nil || loaded == a.memoryApplied.Load() {
+		return false, false
+	}
+	a.memoryApplied.Store(loaded)
+	a.cachedMemoryReminder.Store(loaded.block)
+	flipped = a.memoryActive.Swap(loaded.active) != loaded.active
+	return true, flipped
+}
+
+// applyLoadedMemoryAtCacheBreak applies a pending summary at a point where the
+// session head is rebuilt: the reminder is refreshed, and an activation flip
+// marks the surface dirty so the next request reinstalls the system prompt
+// and tools. Event-loop callers only.
+func (a *MainAgent) applyLoadedMemoryAtCacheBreak() {
+	changed, flipped := a.applyLoadedMemory()
+	if !changed {
+		return
+	}
+	if flipped {
+		a.markRuntimeSurfaceDirty()
+	}
+	a.refreshSessionContextReminder()
+}
+
+// refreshMemoryReminder loads and applies the summary and rebuilds the
+// session reminder at once. Init only: it runs before the first system prompt
+// is built, so nothing is cached yet.
 func (a *MainAgent) refreshMemoryReminder() {
-	a.refreshMemoryReminderBlock()
+	a.loadMemorySummary()
+	a.applyLoadedMemory()
 	a.refreshSessionContextReminder()
 }
 
@@ -302,8 +331,8 @@ func (a *MainAgent) signalMemoryWake() {
 	}
 }
 
-// memoryWorkerLoop dispatches pending extraction jobs when the foreground is
-// idle and auto-extraction is enabled. Errors that do not advance the commit
+// memoryWorkerLoop dispatches pending extraction jobs whenever memoryAdmission
+// allows it and auto-extraction is enabled. Errors that do not advance the commit
 // retain the job for a later trigger; a foreground cancel requeues the job
 // (the fingerprint stays uncovered) and waits for the next wake so it is
 // retried later. Shutdown never waits here.
@@ -472,11 +501,11 @@ func (a *MainAgent) drainMemoryQueue() {
 			// on shutdown.
 			a.memorySleepUntil(job.retryAt)
 		default:
-			// Committed: reload the bounded summary into the cached reminder
-			// block. The per-request reminder is rebuilt by ensureSessionBuilt
-			// at the next request boundary (this goroutine must not touch it).
+			// Committed: load the new summary. The session applies it at its
+			// next prompt-cache break (see applyLoadedMemory); this goroutine
+			// must not touch the surface.
 			a.setMemoryDegraded(false, "")
-			a.refreshMemoryReminderBlock()
+			a.loadMemorySummary()
 		}
 	}
 }
@@ -614,9 +643,10 @@ func chargeMemoryFailure(job *memoryJob, err error) memoryFailureOutcome {
 var errMemorySetupFailed = errors.New("memory extraction setup failed")
 
 // memoryAdmission reports whether a background extraction may dispatch: enabled,
-// no shutdown, foreground idle, and no compaction running. Rate/quota are
-// handled by the governor at request time; a new turn cancels the in-flight
-// request and requeues its job.
+// no shutdown, no compaction running, and — when extraction shares the main
+// model pool — foreground idle. Rate/quota are handled by the governor at
+// request time. On the main pool a new turn also cancels the in-flight request
+// and requeues its job (see preemptMemoryExtractionForTurn).
 func (a *MainAgent) memoryAdmission() bool {
 	if a.memoryMgr == nil || !a.memoryExtractEnabled.Load() {
 		return false
@@ -624,7 +654,7 @@ func (a *MainAgent) memoryAdmission() bool {
 	if a.shuttingDown.Load() {
 		return false
 	}
-	if a.currentTurn() != nil {
+	if a.currentTurn() != nil && !a.memoryUsesDedicatedPool() {
 		return false
 	}
 	if a.IsCompactionRunning() {
@@ -633,9 +663,9 @@ func (a *MainAgent) memoryAdmission() bool {
 	return true
 }
 
-// cancelInFlightMemoryExtraction cancels the current extraction request so a
-// new foreground turn is never starved. The job is left for a later trigger.
-// Called from newTurn.
+// cancelInFlightMemoryExtraction cancels the current extraction request; the
+// job is left for a later trigger. Used for foreground preemption and
+// shutdown.
 func (a *MainAgent) cancelInFlightMemoryExtraction() {
 	a.memoryMu.Lock()
 	inflight := a.memoryInflight
@@ -643,6 +673,30 @@ func (a *MainAgent) cancelInFlightMemoryExtraction() {
 	if inflight != nil && inflight.cancel != nil {
 		inflight.cancel()
 	}
+}
+
+// memoryPoolName selects the memory extraction pool from one config level.
+func memoryPoolName(cfg *config.Config) string {
+	return cfg.Memory.ModelPool
+}
+
+// memoryUsesDedicatedPool reports whether memory.model_pool routes extraction
+// away from the main model pool. Such a request neither competes with the
+// foreground for the main pool's models nor shares its prompt cache, and it
+// reads a frozen transcript, so it may run during a turn and is not preempted
+// by one.
+func (a *MainAgent) memoryUsesDedicatedPool() bool {
+	return a.configuredAuxPoolName(memoryPoolName) != ""
+}
+
+// preemptMemoryExtractionForTurn gives a new foreground turn priority over an
+// extraction on the main model pool: the in-flight request is cancelled and
+// its job stays pending for a later idle pass. A dedicated pool keeps running.
+func (a *MainAgent) preemptMemoryExtractionForTurn() {
+	if a.memoryUsesDedicatedPool() {
+		return
+	}
+	a.cancelInFlightMemoryExtraction()
 }
 
 // shutdownMemoryWorker cancels the in-flight extraction. It does not wait for
@@ -954,9 +1008,7 @@ func (a *MainAgent) callMemoryExtraction(ctx context.Context, prompt string, max
 // configuredMemoryExtractionModelRefs resolves memory.model_pool, preferring
 // the project-level setting over the user-level one.
 func (a *MainAgent) configuredMemoryExtractionModelRefs() ([]string, bool, error) {
-	return a.configuredAuxModelPoolRefs(func(cfg *config.Config) string {
-		return cfg.Memory.ModelPool
-	})
+	return a.configuredAuxModelPoolRefs(memoryPoolName)
 }
 
 // newMemoryExtractionClient uses the configured memory pool, or a snapshot

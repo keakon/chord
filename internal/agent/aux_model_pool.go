@@ -34,23 +34,37 @@ func (a *MainAgent) resolveConfiguredModelPool(poolName string) ([]string, error
 	return nil, fmt.Errorf("model pool %q is not defined or empty", poolName)
 }
 
-// configuredAuxModelPoolRefs resolves a named aux model pool, preferring the
-// project-level config over the user-level one. The second return reports
-// whether a pool was configured at all.
-func (a *MainAgent) configuredAuxModelPoolRefs(poolName func(*config.Config) string) ([]string, bool, error) {
+// configuredAuxPoolName returns the named aux pool a config accessor selects,
+// preferring the project-level config over the user-level one. An empty result
+// means no pool was configured at all; it is the single source of the
+// project-then-global precedence every aux pool consumer shares.
+func (a *MainAgent) configuredAuxPoolName(poolName func(*config.Config) string) string {
 	for _, cfg := range []*config.Config{a.projectConfig, a.globalConfig} {
 		if cfg == nil {
 			continue
 		}
 		if pool := strings.TrimSpace(poolName(cfg)); pool != "" {
-			refs, err := a.resolveConfiguredModelPool(pool)
-			if err != nil {
-				return nil, true, err
-			}
-			return refs, true, nil
+			return pool
 		}
 	}
-	return nil, false, nil
+	return ""
+}
+
+// configuredAuxModelPoolRefs resolves a named aux model pool, preferring the
+// project-level config over the user-level one. The second return reports
+// whether a pool was configured at all: a set-but-unresolvable name still
+// counts as configured, so the caller fails naming the pool instead of
+// silently falling back to the main pool.
+func (a *MainAgent) configuredAuxModelPoolRefs(poolName func(*config.Config) string) ([]string, bool, error) {
+	pool := a.configuredAuxPoolName(poolName)
+	if pool == "" {
+		return nil, false, nil
+	}
+	refs, err := a.resolveConfiguredModelPool(pool)
+	if err != nil {
+		return nil, true, err
+	}
+	return refs, true, nil
 }
 
 func trimModelPoolRefs(refs []string) []string {

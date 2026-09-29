@@ -612,6 +612,9 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// instead of re-anchoring additional_tools / mcp_system_tools_message
 	// declarations against the compacted history.
 	a.forceFullMCPToolInjection()
+	// Everything after the session head is new now, so a pending Memory
+	// commit costs only the reminder itself here.
+	a.applyLoadedMemoryAtCacheBreak()
 
 	// Rebuild the runtime evidence candidates from the complete compacted message
 	// list (checkpoint + preserved tail), not just the checkpoint. The summary

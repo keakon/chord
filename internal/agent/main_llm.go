@@ -150,11 +150,9 @@ func (a *MainAgent) prepareBusyResources(ctx context.Context) error {
 // turn a recoverable preparation error into a half-installed new session.
 func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) error {
 	if a.sessionBuilt.Load() {
-		// Common per-request path: the surface is already built. A background
-		// Memory commit may still have changed the cached Memory block since
-		// the reminder was built; rebuild it (cheap, cached snapshots) so the
-		// update lands on this request.
-		a.refreshSessionReminderIfMemoryChanged()
+		// Common per-request path: the surface is already built. A pending
+		// Memory commit is deliberately not applied here: it would rewrite the
+		// session head and re-bill the whole conversation as uncached input.
 		return nil
 	}
 
@@ -162,7 +160,6 @@ func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) er
 	defer a.sessionInitMu.Unlock()
 
 	if a.sessionBuilt.Load() {
-		a.refreshSessionReminderIfMemoryChanged()
 		return nil
 	}
 
@@ -215,6 +212,9 @@ func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) er
 	}
 
 	if !a.surfaceDirty.Load() {
+		// First build of this surface: nothing is cached yet, so take any
+		// pending Memory commit before the prompt reads its activation.
+		a.applyLoadedMemory()
 		a.refreshSystemPrompt()
 		a.refreshSessionContextReminder()
 		a.freezeToolSurface()
@@ -225,10 +225,17 @@ func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) er
 	candidatePrompt := a.currentSystemPromptCandidate()
 	candidateTools := llmToolDefinitionsFromVisibleTools(a.stableVisibleLLMTools())
 	if a.currentLLMContextSurfaceMatches(candidatePrompt, candidateTools) {
-		a.refreshSessionReminderIfMemoryChanged()
 		a.sessionBuilt.Store(true)
 		a.surfaceDirty.Store(false)
 		return nil
+	}
+	// The surface changes, so the cached prefix is lost anyway: this is the
+	// moment to take a pending Memory commit. An activation flip changes the
+	// Memory discipline and compact_context visibility, so rebuild the
+	// candidate from the applied state.
+	if _, flipped := a.applyLoadedMemory(); flipped {
+		candidatePrompt = a.currentSystemPromptCandidate()
+		candidateTools = llmToolDefinitionsFromVisibleTools(a.stableVisibleLLMTools())
 	}
 	a.installSystemPrompt(candidatePrompt)
 	a.refreshSessionContextReminder()
@@ -245,9 +252,11 @@ func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) er
 // with forceFullMCPToolInjection.
 func (a *MainAgent) resetSessionBuildState() {
 	a.resetMCPMountSurface(false)
-	// The session reminder content is intentionally kept: it is injected into
-	// every request, and ensureSessionBuilt refreshes it in place, so there is
-	// no window where the prompt loses its AGENTS.md/env block.
+	// A new or restored session history has no cached prefix to protect.
+	a.applyLoadedMemoryAtCacheBreak()
+	// Otherwise the session reminder content is intentionally kept: it is
+	// injected into every request, so there is no window where the prompt
+	// loses its AGENTS.md/env block.
 }
 
 func (a *MainAgent) markRuntimeSurfaceDirty() {

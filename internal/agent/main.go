@@ -816,14 +816,12 @@ type MainAgent struct {
 	// instant proves project memory moved on in another process, which lets the
 	// worker clear the indicator without waiting for a local commit.
 	memoryDegradedAt atomic.Int64
-	// memoryReminderVersion is bumped whenever the cached Memory block changes
-	// (init, background extraction commit). ensureSessionBuilt rebuilds the
-	// per-request session reminder when it moves, so a background commit lands
-	// on the next request even when the load activation state did not flip.
-	memoryReminderVersion atomic.Int64
-	// memoryReminderBuilt records the version captured when
-	// cachedSessionReminderContent was last rebuilt from the memory block.
-	memoryReminderBuilt  atomic.Int64
+	// memoryLoaded is the latest summary read from disk (init, background
+	// commit); memoryApplied is the one memoryActive and cachedMemoryReminder
+	// currently reflect. They differ while a commit waits for the next
+	// prompt-cache break (see applyLoadedMemory).
+	memoryLoaded         atomic.Pointer[memorySnapshot]
+	memoryApplied        atomic.Pointer[memorySnapshot]
 	cachedMemoryReminder atomic.Pointer[string]
 
 	// frozenToolDefs is the LLM tool surface snapshot captured at

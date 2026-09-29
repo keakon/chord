@@ -507,10 +507,9 @@ func (a *MainAgent) newTurn() {
 	a.clearPendingThinkingReplay()
 	a.markRealWorkStarted()
 	a.clearContextReductionWrapUpGrace()
-	// Foreground priority: a new user turn cancels any in-flight background
-	// memory extraction so it never competes for LLM capacity. The job stays
-	// pending for a later idle pass.
-	a.cancelInFlightMemoryExtraction()
+	// Foreground priority: a new user turn cancels an in-flight background
+	// memory extraction that shares the main model pool.
+	a.preemptMemoryExtractionForTurn()
 	a.turnMu.Lock()
 	if a.turn != nil {
 		a.interruptCurrentTurnForReplacement()

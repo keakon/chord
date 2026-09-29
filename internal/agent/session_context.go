@@ -140,8 +140,8 @@ func (a *MainAgent) refreshSessionContextReminder() {
 	content := buildSessionContextReminder(env, agentsMD)
 	// Memory is appended under its own untrusted wrapper (not inside the
 	// AGENTS.md <INSTRUCTIONS> block). It reuses the same head-refresh /
-	// per-request-inject lifecycle; changes land on the next session head or
-	// auto-extraction commits.
+	// per-request-inject lifecycle; a background commit lands only once
+	// applyLoadedMemory takes it at a prompt-cache break.
 	if mem := a.memoryReminderBlock(); mem != nil {
 		if content != "" {
 			content += "\n\n" + *mem
@@ -151,22 +151,9 @@ func (a *MainAgent) refreshSessionContextReminder() {
 	}
 	if content == "" {
 		a.cachedSessionReminderContent.Store(nil)
-		a.memoryReminderBuilt.Store(a.memoryReminderVersion.Load())
 		return
 	}
 	a.cachedSessionReminderContent.Store(&content)
-	a.memoryReminderBuilt.Store(a.memoryReminderVersion.Load())
-}
-
-// refreshSessionReminderIfMemoryChanged rebuilds the cached per-request
-// reminder when the Memory block changed since the last build (a background
-// extraction commit bumps memoryReminderVersion). Event-loop callers only;
-// the reminder is rebuilt from atomic cached snapshots so this stays cheap and
-// happens at most once per request boundary.
-func (a *MainAgent) refreshSessionReminderIfMemoryChanged() {
-	if a.memoryReminderBuilt.Load() != a.memoryReminderVersion.Load() {
-		a.refreshSessionContextReminder()
-	}
 }
 
 // firstUserMessageIndex returns the index of the first user-role message in
