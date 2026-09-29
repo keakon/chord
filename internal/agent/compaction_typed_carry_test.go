@@ -350,7 +350,7 @@ func TestMergePriorTypedCheckpointStateReadsFullBodyBeyondDisplayTruncation(t *t
 		t.Fatalf("display carry must keep a parseable typed block found=%v malformed=%v:\n%s", found, malformed, display)
 	}
 	prelude := display
-	if before, _, ok := strings.Cut(display, typedStateSectionHeading); ok {
+	if before, _, ok := strings.Cut(display, message.CompactionTypedStateHeading); ok {
 		prelude = before
 	}
 	if runeCount(prelude) > compactCheckpointCarryMaxChars {
@@ -1051,7 +1051,7 @@ func TestTypedCarrySurvivesOverLimitAppendixThroughUsageSummary(t *testing.T) {
 	// verbatim (now with the typed section retained past the truncation) and
 	// the usage summary is wrapped around it.
 	carry := latestPriorCheckpointBody([]message.Message{mdMsg})
-	if carry == "" || !strings.Contains(carry, typedStateSectionHeading) {
+	if carry == "" || !strings.Contains(carry, message.CompactionTypedStateHeading) {
 		t.Fatalf("usage-driven carry must retain the typed section:\n%s", carry)
 	}
 	usageSummary := "## Current User Request\n- continue\n\n## Progress\n- summarized\n\n" + priorCheckpointSectionHeading + "\n" + carry

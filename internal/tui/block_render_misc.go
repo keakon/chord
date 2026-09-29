@@ -238,7 +238,14 @@ func (b *Block) renderCompactionSummary(width int) []string {
 		if section.label != "" {
 			bodyLines = append(bodyLines, CompactionSectionLabelStyle.Render(section.label))
 		}
-		bodyLines = append(bodyLines, renderRichMarkdownContent(section.body, contentWidth, &b.compactionSectionHL[i])...)
+		body := section.body
+		if section.label == "" {
+			// The machine-carryable state is a single JSON bullet; render it as a
+			// code block instead of letting the prose renderer rewrap it (see
+			// wrapCompactionTypedStateForDisplay).
+			body = wrapCompactionTypedStateForDisplay(body)
+		}
+		bodyLines = append(bodyLines, renderRichMarkdownContent(body, contentWidth, &b.compactionSectionHL[i])...)
 	}
 	if len(bodyLines) == 0 {
 		bodyLines = []string{""}

@@ -174,3 +174,46 @@ func TestCompactionSectionHighlighterCacheSurvivesReRender(t *testing.T) {
 		t.Fatal("re-render reset the anchors highlighter cache; sections must hold disjointslots")
 	}
 }
+
+// A preserved excerpt keeps its own line structure in the card: the checkpoint
+// renders it as a fenced code block, so the prose renderer cannot join the
+// lines after a blank line into one reflowed paragraph. The bare two-space
+// indented form used to lose the diff or log line boundaries in exactly that
+// way once the excerpt contained a blank line.
+func TestCompactionCardKeepsExcerptLinesSeparate(t *testing.T) {
+	content := message.CompactionSummaryHeader +
+		"## Current User Request\n- continue\n\n" +
+		message.CompactionEvidenceTag +
+		"Verbatim excerpts preserved for the immediate continuation.\n\n" +
+		"1. Recent code diff\n" +
+		"Evidence ID: ev-8ce7b70efe45\n" +
+		"Evidence Kind: tool_diff\n" +
+		"Excerpt:\n" +
+		"```text\n" +
+		"  --- a/file.go\n" +
+		"  +++ b/file.go\n" +
+		"\n" +
+		"  alpha marker line\n" +
+		"  beta marker line\n" +
+		"```\n" +
+		message.CompactionCompressedTag + "\nEarlier conversation was compacted.\n"
+	block := &Block{ID: 0, Type: BlockCompactionSummary, Content: content, CompactionSummaryMode: message.CompactionSummaryModeModelDriven}
+	rendered := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	lines := strings.Split(rendered, "\n")
+
+	alpha, beta := false, false
+	for _, line := range lines {
+		if strings.Contains(line, "alpha marker line") {
+			alpha = true
+		}
+		if strings.Contains(line, "beta marker line") {
+			beta = true
+		}
+		if strings.Contains(line, "alpha marker line beta marker line") {
+			t.Fatalf("excerpt lines were reflowed into one paragraph:\n%s", rendered)
+		}
+	}
+	if !alpha || !beta {
+		t.Fatalf("excerpt lines missing from the card (alpha=%t beta=%t):\n%s", alpha, beta, rendered)
+	}
+}

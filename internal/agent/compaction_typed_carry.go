@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -29,9 +30,6 @@ import (
 // looks complete.
 
 const (
-	// typedStateSectionHeading introduces the machine-carryable state block
-	// inside a checkpoint body.
-	typedStateSectionHeading = "## Typed Checkpoint State"
 	// typedStateCarryMaxDecisions / MaxOpenIssues / MaxEvidenceRefs bound a
 	// merged list, matching the per-field limits the compact_context argument
 	// validator enforces on a fresh submission (internal/tools/
@@ -66,11 +64,7 @@ const (
 	// first line of the section, so the disclosure never breaks the machine
 	// block.
 	typedStateClaimsOmittedNote = "- [older checkpoint claim(s) omitted to bound the carried claim state; read the archive for the complete record.]"
-	// typedIssueStatusUnconfirmed is the confirmation status of a carried open
-	// issue the current generation did not restate. It is the only status the
-	// historical bucket holds: an issue the current submission restates is
-	// confirmed by definition and lives in OpenIssues, never here.
-	typedIssueStatusUnconfirmed = "unconfirmed"
+
 	// typedStateOpenIssuesOmittedNote discloses carried open issues dropped by
 	// the shared open-issue budget. It is appended inside the ## Open Problems
 	// section — where the reader looks for issues — rather than reusing the
@@ -125,25 +119,9 @@ type checkpointTypedState struct {
 	// entry is no longer a blocker of this checkpoint, and rendering it beside
 	// the fresh submission's issues made a stale item read exactly like a
 	// freshly confirmed one. See mergeTypedStateOpenIssues.
-	CarriedOpenIssues []checkpointOpenIssue
-	// Generation is the carry ordinal: 0 for a state that was never merged
-	// into a successor, and one more than the prior state on every merge. It
-	// is the provenance the historical bucket records per entry, so a carried
-	// issue keeps the generation that last confirmed it.
-	Generation int
-	Claims     map[string]checkpointClaim
-}
+	CarriedOpenIssues []string
 
-// checkpointOpenIssue is one open issue carried from an earlier generation
-// that the current submission did not restate, with its provenance: the text
-// (whose identity is checkpointItemKey, like every other carried item), the
-// generation that last confirmed it, and its confirmation status. The
-// historical bucket exists so an unrestated issue stays recoverable without
-// reading as a current blocker.
-type checkpointOpenIssue struct {
-	Text   string `json:"text"`
-	Source int    `json:"source,omitempty"`
-	Status string `json:"status,omitempty"`
+	Claims map[string]checkpointClaim
 }
 
 type checkpointClaim struct {
@@ -207,12 +185,12 @@ func typedStateSectionRanges(body string) []typedSectionRange {
 	var out []typedSectionRange
 	search := 0
 	for {
-		rel := findMarkdownHeadingLine(body[search:], typedStateSectionHeading)
+		rel := findMarkdownHeadingLine(body[search:], message.CompactionTypedStateHeading)
 		if rel < 0 {
 			return out
 		}
 		headingStart := search + rel
-		contentStart := headingStart + len(typedStateSectionHeading)
+		contentStart := headingStart + len(message.CompactionTypedStateHeading)
 		contentEnd := len(body)
 		if loc := compactionMarkdownHeadingLineRe.FindStringIndex(body[contentStart:]); loc != nil {
 			contentEnd = contentStart + loc[0]
@@ -266,12 +244,11 @@ func typedStateFromBody(body string) (state checkpointTypedState, found bool, ma
 			Completed         []string                   `json:"completed"`
 			Decisions         []string                   `json:"decisions"`
 			OpenIssues        []string                   `json:"open_issues"`
-			CarriedOpenIssues []checkpointOpenIssue      `json:"carried_open_issues"`
+			CarriedOpenIssues []string                   `json:"carried_open_issues"`
 			EvidenceRefs      []string                   `json:"evidence_refs"`
 			StageID           string                     `json:"stage_id"`
 			StageStatus       string                     `json:"stage_status"`
 			Kind              string                     `json:"checkpoint_kind"`
-			Generation        int                        `json:"generation"`
 			Claims            map[string]checkpointClaim `json:"claims"`
 		}
 		if json.Unmarshal([]byte(line), &decoded) != nil {
@@ -279,22 +256,14 @@ func typedStateFromBody(body string) (state checkpointTypedState, found bool, ma
 			continue
 		}
 		return checkpointTypedState{
-			Completed:    decoded.Completed,
-			Decisions:    decoded.Decisions,
-			OpenIssues:   decoded.OpenIssues,
-			EvidenceRefs: decoded.EvidenceRefs,
-			StageID:      strings.TrimSpace(decoded.StageID),
-			StageStatus:  strings.TrimSpace(decoded.StageStatus),
-			Kind:         strings.TrimSpace(decoded.Kind),
-			// A block written before the current/historical split declares no
-			// carried set and no generation: it decodes as generation 0 with
-			// an empty historical bucket, so its open issues read as the
-			// current generation's and only the next merge demotes the ones
-			// the fresh submission does not restate. An old block is therefore
-			// never silently emptied, and never mistaken for a chain that had
-			// already demoted its carried entries.
-			CarriedOpenIssues: normalizeCarriedOpenIssues(decoded.CarriedOpenIssues),
-			Generation:        max(decoded.Generation, 0),
+			Completed:         decoded.Completed,
+			Decisions:         decoded.Decisions,
+			OpenIssues:        decoded.OpenIssues,
+			EvidenceRefs:      decoded.EvidenceRefs,
+			StageID:           strings.TrimSpace(decoded.StageID),
+			StageStatus:       strings.TrimSpace(decoded.StageStatus),
+			Kind:              strings.TrimSpace(decoded.Kind),
+			CarriedOpenIssues: boundTypedStateItems(decoded.CarriedOpenIssues),
 			Claims:            decoded.Claims,
 		}, true, false
 	}
@@ -315,23 +284,21 @@ func renderTypedStateJSON(state checkpointTypedState) string {
 		Completed         []string                   `json:"completed,omitempty"`
 		Decisions         []string                   `json:"decisions,omitempty"`
 		OpenIssues        []string                   `json:"open_issues,omitempty"`
-		CarriedOpenIssues []checkpointOpenIssue      `json:"carried_open_issues,omitempty"`
+		CarriedOpenIssues []string                   `json:"carried_open_issues,omitempty"`
 		EvidenceRefs      []string                   `json:"evidence_refs,omitempty"`
 		StageID           string                     `json:"stage_id,omitempty"`
 		StageStatus       string                     `json:"stage_status,omitempty"`
 		Kind              string                     `json:"checkpoint_kind,omitempty"`
-		Generation        int                        `json:"generation,omitempty"`
 		Claims            map[string]checkpointClaim `json:"claims,omitempty"`
 	}{
 		Completed:         boundTypedStateItems(state.Completed),
 		Decisions:         boundTypedStateItems(state.Decisions),
 		OpenIssues:        boundTypedStateItems(state.OpenIssues),
-		CarriedOpenIssues: normalizeCarriedOpenIssues(state.CarriedOpenIssues),
+		CarriedOpenIssues: boundTypedStateItems(state.CarriedOpenIssues),
 		EvidenceRefs:      boundTypedStateItems(state.EvidenceRefs),
 		StageID:           state.StageID,
 		StageStatus:       state.StageStatus,
 		Kind:              state.Kind,
-		Generation:        state.Generation,
 		Claims:            state.Claims,
 	}
 	data, err := json.Marshal(payload)
@@ -348,13 +315,19 @@ func boundTypedStateItems(items []string) []string {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]string, len(items))
-	for i, item := range items {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
 		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
 		if runeLen(item) > typedStateCarryMaxItemRunes {
 			item = truncateRunes(item, typedStateCarryMaxItemRunes) + typedStateItemTruncatedSuffix
 		}
-		out[i] = item
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -388,37 +361,6 @@ func truncateRunes(s string, n int) string {
 		count++
 	}
 	return b.String()
-}
-
-// normalizeCarriedOpenIssues prepares a historical open-issue set for storage
-// or rendering: each entry's text is trimmed and an over-long text is
-// truncated at a rune boundary with the shared marker, a missing status
-// defaults to unconfirmed (the only posture the bucket holds), and empty
-// entries are dropped. The result is nil when nothing survives, so the JSON
-// field is omitted entirely rather than rendered as an empty list.
-func normalizeCarriedOpenIssues(items []checkpointOpenIssue) []checkpointOpenIssue {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make([]checkpointOpenIssue, 0, len(items))
-	for _, item := range items {
-		text := strings.TrimSpace(item.Text)
-		if text == "" {
-			continue
-		}
-		if runeLen(text) > typedStateCarryMaxItemRunes {
-			text = truncateRunes(text, typedStateCarryMaxItemRunes) + typedStateItemTruncatedSuffix
-		}
-		item.Text = text
-		if item.Status == "" {
-			item.Status = typedIssueStatusUnconfirmed
-		}
-		out = append(out, item)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 // mergeCheckpointTypedStates merges the carried state of the previous
@@ -459,10 +401,6 @@ func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged che
 	merged.Decisions = boundTypedStateItems(merged.Decisions)
 	merged.EvidenceRefs = boundTypedStateItems(merged.EvidenceRefs)
 	merged.Claims, claimsOmitted = mergeTypedClaims(prior.Claims, current.Claims)
-	// The carry ordinal advances once per merge, so every entry the historical
-	// bucket records keeps the generation that last confirmed it and a
-	// demotion is observable as a growing distance from the current one.
-	merged.Generation = prior.Generation + 1
 	// Stage metadata is re-declared by the model on every submission and a
 	// fresh declaration always wins. When the fresh submission declares
 	// nothing, an in-flight carried stage (anything but a completed one) is
@@ -509,7 +447,7 @@ func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged che
 // restatement that matches the carried text after trimming surrounding
 // whitespace — including a truncated entry copied verbatim with its marker —
 // moves the entry into the confirmed set instead of duplicating it.
-func mergeTypedStateOpenIssues(prior, current checkpointTypedState, cap int) (confirmed []string, carried []checkpointOpenIssue, omitted int) {
+func mergeTypedStateOpenIssues(prior, current checkpointTypedState, cap int) (confirmed []string, carried []string, omitted int) {
 	if cap <= 0 {
 		return nil, nil, len(current.OpenIssues) + len(prior.OpenIssues) + len(prior.CarriedOpenIssues)
 	}
@@ -547,17 +485,17 @@ func mergeTypedStateOpenIssues(prior, current checkpointTypedState, cap int) (co
 		// does not mean resolution. A prior current issue stays current unless
 		// the model explicitly supplied a complete snapshot.
 		if current.OpenIssuesComplete {
-			carried = append(carried, checkpointOpenIssue{Text: item, Source: prior.Generation, Status: typedIssueStatusUnconfirmed})
+			carried = append(carried, item)
 		} else {
 			confirmed = append(confirmed, item)
 		}
 	}
 	for _, item := range prior.CarriedOpenIssues {
-		if add(item.Text) {
-			carried = append(carried, checkpointOpenIssue{Text: item.Text, Source: item.Source, Status: typedIssueStatusUnconfirmed})
+		if add(item) {
+			carried = append(carried, item)
 		}
 	}
-	return boundTypedStateItems(confirmed), normalizeCarriedOpenIssues(carried), omitted
+	return boundTypedStateItems(confirmed), boundTypedStateItems(carried), omitted
 }
 
 func checkpointItemKey(item string) string {

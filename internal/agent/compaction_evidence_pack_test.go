@@ -60,6 +60,67 @@ func TestParseCheckpointEvidencePackMetadataResumesAfterExcerpt(t *testing.T) {
 	}
 }
 
+// A rendered excerpt is a fenced code block: the fence keeps the quoted text's
+// own line structure (a blank line inside the excerpt must not split it into
+// prose the card then reflows), and the fence stays intact when the excerpt
+// quotes a fence of its own.
+func TestRenderedEvidenceExcerptFencesQuotedLines(t *testing.T) {
+	rendered := renderEvidenceArtifactContent([]evidenceItem{{
+		Kind:  evidenceToolDiff,
+		Title: "Recent code diff",
+		Key:   "tool-diff",
+		Excerpt: strings.Join([]string{
+			"--- a.md",
+			"+++ a.md",
+			"",
+			"```go",
+			"fmt.Println(\"x\")",
+			"```",
+			"+// added line",
+		}, "\n"),
+	}})
+
+	// The excerpt quotes a three-backtick fence, so the opener must be longer or
+	// the quoted fence would close the block early.
+	if !strings.Contains(rendered, "````text\n") {
+		t.Fatalf("excerpt fence is not longer than the quoted fence:\n%s", rendered)
+	}
+	if !strings.HasSuffix(rendered, "\n````") {
+		t.Fatalf("excerpt fence is not closed with the matching delimiter:\n%s", rendered)
+	}
+	// A blank excerpt line stays a blank line inside the block: the reader must
+	// see the diff's own line structure instead of one reflowed paragraph.
+	if !strings.Contains(rendered, "+++ a.md\n\n  ```go\n") {
+		t.Fatalf("blank excerpt line was not preserved inside the fence:\n%s", rendered)
+	}
+	// Quoted text stays indented inside the fence, so the pack parser still
+	// cannot index a quoted row.
+	meta := parseCheckpointEvidencePackMetadata(rendered)
+	if len(meta) != 1 {
+		t.Fatalf("indexed %d evidence rows, want 1: %#v", len(meta), meta)
+	}
+	for id, ref := range meta {
+		if ref.kind != evidenceToolDiff {
+			t.Fatalf("row %s kind = %q, want tool_diff", id, ref.kind)
+		}
+	}
+}
+
+// An excerpt without backticks still renders as a fenced block, with the
+// minimal fence and every line indented.
+func TestRenderedEvidenceExcerptUsesMinimalFence(t *testing.T) {
+	rendered := renderEvidenceArtifactContent([]evidenceItem{{
+		Kind:    evidenceToolError,
+		Title:   "Latest failing tool result",
+		Key:     "tool-error",
+		Excerpt: "undefined: foo\n\nsee the full build log",
+	}})
+
+	if !strings.Contains(rendered, "Excerpt:\n```text\n  undefined: foo\n\n  see the full build log\n```") {
+		t.Fatalf("excerpt is not rendered as one fenced block:\n%s", rendered)
+	}
+}
+
 // The renderer indents quoted excerpt text and the parser only accepts column-0
 // rows, so a well-formed Evidence ID plus a completion-supporting Evidence Kind
 // quoted inside an excerpt cannot enter the index as a forged row.

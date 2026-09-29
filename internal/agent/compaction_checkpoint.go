@@ -245,6 +245,26 @@ func renderCheckpointRetainedRecentMessages(messages []message.Message, maxUserM
 	return strings.TrimRight(sb.String(), "\n")
 }
 
+// evidenceExcerptFence returns a fence the excerpt cannot close early: a
+// closing fence needs at least as many delimiter characters as the opener on a
+// line of its own, and an excerpt commonly quotes Markdown (a diff of a
+// document, tool output that embedded a fence), so the opener is one backtick
+// longer than the longest backtick run it contains.
+func evidenceExcerptFence(excerpt string) string {
+	longest, run := 0, 0
+	for _, r := range excerpt {
+		if r != '`' {
+			run = 0
+			continue
+		}
+		run++
+		if run > longest {
+			longest = run
+		}
+	}
+	return strings.Repeat("`", max(longest+1, 3))
+}
+
 func renderEvidenceArtifactContent(items []evidenceItem) string {
 	if len(items) == 0 {
 		return ""
@@ -285,10 +305,20 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 		}
 		if item.Excerpt != "" {
 			sb.WriteString("Excerpt:\n")
-			// Indent every excerpt line: the excerpt is raw quoted text that can
-			// contain a line shaped exactly like a pack row, so the parser only
-			// accepts column-0 structural lines and quoted text can never forge
-			// one.
+			// Render the excerpt as a fenced code block: it is raw quoted text
+			// (diff, log, tool output) whose own line structure carries the
+			// information, and bare indented prose loses it — a blank line
+			// inside the excerpt ends the surrounding list item, and the
+			// Markdown renderer then reflows the remaining lines into one
+			// paragraph and wraps them at arbitrary character boundaries.
+			//
+			// Every excerpt line stays indented by two spaces: the excerpt is
+			// raw quoted text that can contain a line shaped exactly like a pack
+			// row, so the parser only accepts column-0 structural lines and
+			// quoted text can never forge one.
+			fence := evidenceExcerptFence(item.Excerpt)
+			sb.WriteString(fence)
+			sb.WriteString("text\n")
 			for line := range strings.SplitSeq(item.Excerpt, "\n") {
 				if line == "" {
 					sb.WriteByte('\n')
@@ -298,6 +328,8 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 				sb.WriteString(line)
 				sb.WriteByte('\n')
 			}
+			sb.WriteString(fence)
+			sb.WriteByte('\n')
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")

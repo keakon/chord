@@ -17,8 +17,8 @@ import (
 // after the tests were written — rendered exactly like a freshly confirmed
 // blocker. The continuation then re-investigated finished work. The fix keeps
 // the fresh submission's issues as the current generation's blockers and
-// demotes the ones it does not restate into a historical bucket with the
-// generation that last confirmed them.
+// demotes the ones it does not restate into a historical bucket so they
+// cannot read as newly confirmed.
 
 func TestCarriedOnlyOpenIssueIsDemotedAndNeverReadsAsCurrent(t *testing.T) {
 	prior := checkpointTypedState{OpenIssues: []string{"tests not written yet"}}
@@ -31,23 +31,17 @@ func TestCarriedOnlyOpenIssueIsDemotedAndNeverReadsAsCurrent(t *testing.T) {
 	if omitted != 0 || openIssuesOmitted != 0 {
 		t.Fatalf("demotion is not an omission: omitted=%d openIssuesOmitted=%d", omitted, openIssuesOmitted)
 	}
-	want := []checkpointOpenIssue{{Text: "tests not written yet", Source: 0, Status: typedIssueStatusUnconfirmed}}
+	want := []string{"tests not written yet"}
 	if !slices.Equal(merged.CarriedOpenIssues, want) {
 		t.Fatalf("carried issues = %+v, want %+v", merged.CarriedOpenIssues, want)
 	}
-	if merged.Generation != 1 {
-		t.Fatalf("generation = %d, want 1", merged.Generation)
-	}
 
 	// Generation 3: the historical entry survives the next carry unchanged —
-	// still not current, still tagged with the generation that confirmed it —
+	// still not current, still in the historical bucket —
 	// so the chain never auto-upgrades it just because it survived.
 	third, _, _, _ := mergeCheckpointTypedStates(merged, checkpointTypedState{})
 	if len(third.OpenIssues) != 0 || !slices.Equal(third.CarriedOpenIssues, want) {
 		t.Fatalf("third generation = %+v, want the same historical entry", third)
-	}
-	if third.Generation != 2 {
-		t.Fatalf("third generation ordinal = %d, want 2", third.Generation)
 	}
 }
 
@@ -63,7 +57,7 @@ func TestTruncatedOpenIssueRestatesAndRetiresByRenderedText(t *testing.T) {
 	long := strings.Repeat("current risk ", typedStateCarryMaxItemRunes)
 	// The carried block is the only copy a later generation sees, so the long
 	// issue reaches it already truncated with the shared marker.
-	prior, ok := typedStateForTest(typedStateSectionHeading + "\n" + renderTypedStateJSON(checkpointTypedState{OpenIssues: []string{long}}))
+	prior, ok := typedStateForTest(message.CompactionTypedStateHeading + "\n" + renderTypedStateJSON(checkpointTypedState{OpenIssues: []string{long}}))
 	if !ok || len(prior.OpenIssues) != 1 || !strings.HasSuffix(prior.OpenIssues[0], typedStateItemTruncatedSuffix) {
 		t.Fatalf("long issue was not carried truncated: %+v", prior)
 	}
@@ -81,7 +75,7 @@ func TestTruncatedOpenIssueRestatesAndRetiresByRenderedText(t *testing.T) {
 	// the carry has run.
 	demoted, _, _, _ := mergeCheckpointTypedStates(prior, checkpointTypedState{OpenIssuesComplete: true})
 	carried, _, _, _ := mergeCheckpointTypedStates(demoted, checkpointTypedState{})
-	if !slices.Equal(carriedIssueTexts(carried), []string{rendered}) {
+	if !slices.Equal(carried.CarriedOpenIssues, []string{rendered}) {
 		t.Fatalf("demoted issue = %+v, want the rendered text", carried.CarriedOpenIssues)
 	}
 	if retired := retireCheckpointItems(carried, []string{rendered}); len(retired.CarriedOpenIssues) != 0 {
@@ -95,10 +89,9 @@ func TestTruncatedOpenIssueRestatesAndRetiresByRenderedText(t *testing.T) {
 func TestRestatedOpenIssueMovesToCurrentWithoutDuplicate(t *testing.T) {
 	prior := checkpointTypedState{
 		OpenIssues: []string{"verify parser"},
-		CarriedOpenIssues: []checkpointOpenIssue{
-			{Text: "old risk", Source: 0, Status: typedIssueStatusUnconfirmed},
+		CarriedOpenIssues: []string{
+			"old risk",
 		},
-		Generation: 1,
 	}
 	// Surrounding whitespace is insignificant; exact restatement refreshes the issue.
 	current := checkpointTypedState{OpenIssues: []string{"  verify parser  ", "new issue"}, OpenIssuesComplete: true}
@@ -109,7 +102,7 @@ func TestRestatedOpenIssueMovesToCurrentWithoutDuplicate(t *testing.T) {
 	if !slices.Equal(merged.OpenIssues, []string{"verify parser", "new issue"}) {
 		t.Fatalf("current issues = %v, want the fresh spelling first", merged.OpenIssues)
 	}
-	want := []checkpointOpenIssue{{Text: "old risk", Source: 0, Status: typedIssueStatusUnconfirmed}}
+	want := []string{"old risk"}
 	if !slices.Equal(merged.CarriedOpenIssues, want) {
 		t.Fatalf("carried issues = %+v, want %+v", merged.CarriedOpenIssues, want)
 	}
@@ -129,8 +122,8 @@ func TestRestatedOpenIssueMovesToCurrentWithoutDuplicate(t *testing.T) {
 func TestRetiredOpenIssueLeavesBothBuckets(t *testing.T) {
 	prior := checkpointTypedState{
 		OpenIssues: []string{"verify parser"},
-		CarriedOpenIssues: []checkpointOpenIssue{
-			{Text: "Old Risk", Source: 0, Status: typedIssueStatusUnconfirmed},
+		CarriedOpenIssues: []string{
+			"Old Risk",
 		},
 	}
 	// Retirement preserves meaningful spelling and ignores surrounding whitespace.
@@ -173,63 +166,54 @@ func TestOpenIssueBudgetIsSharedAndDisclosed(t *testing.T) {
 	if !slices.Equal(merged.OpenIssues, []string{"new-1", "new-2", "new-3", "new-4"}) {
 		t.Fatalf("current issues = %v", merged.OpenIssues)
 	}
-	if got := carriedIssueTexts(merged); !slices.Equal(got, []string{"old-a", "old-b", "old-c", "old-d"}) {
+	if got := merged.CarriedOpenIssues; !slices.Equal(got, []string{"old-a", "old-b", "old-c", "old-d"}) {
 		t.Fatalf("carried issues = %v, want the newest four historical entries", got)
 	}
 }
 
-func TestLegacyTypedBlockOpenIssuesEnterHistoricalOnNextCarry(t *testing.T) {
-	// A block written before the current/historical split: no carried set and
-	// no generation ordinal. It must decode as generation 0 with its open
-	// issues still current, so nothing is silently emptied.
-	legacy := `{"open_issues":["tests not written"],"decisions":["d1"],"stage_status":"candidate"}`
-	parsed, found, malformed := typedStateFromBody(typedStateSectionHeading + "\n- " + legacy)
+func TestCurrentOnlyTypedBlockOpenIssuesEnterHistoricalOnNextCarry(t *testing.T) {
+	// A checkpoint without carried issues keeps its current blockers.
+	currentOnly := `{"open_issues":["tests not written"],"decisions":["d1"],"stage_status":"candidate"}`
+	parsed, found, malformed := typedStateFromBody(message.CompactionTypedStateHeading + "\n- " + currentOnly)
 	if !found || malformed {
-		t.Fatalf("legacy typed block must parse found=%v malformed=%v", found, malformed)
+		t.Fatalf("currentOnly typed block must parse found=%v malformed=%v", found, malformed)
 	}
-	if parsed.Generation != 0 || len(parsed.CarriedOpenIssues) != 0 || !slices.Equal(parsed.OpenIssues, []string{"tests not written"}) {
-		t.Fatalf("legacy decode = %+v", parsed)
+	if len(parsed.CarriedOpenIssues) != 0 || !slices.Equal(parsed.OpenIssues, []string{"tests not written"}) {
+		t.Fatalf("currentOnly decode = %+v", parsed)
 	}
 
-	// The next generation does not restate it: the legacy entry is demoted
+	// The next generation does not restate it: the currentOnly entry is demoted
 	// like any other carried issue instead of being dropped with the format
 	// change.
 	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "continue", NextStep: "go"}}
 	req.Args.OpenIssuesComplete = true
-	merged, omitted, _, openIssuesOmitted, broken := mergePriorTypedCheckpointState(req, typedStateSectionHeading+"\n- "+legacy)
+	merged, omitted, _, openIssuesOmitted, broken := mergePriorTypedCheckpointState(req, message.CompactionTypedStateHeading+"\n- "+currentOnly)
 	if broken {
-		t.Fatal("legacy block must not read as malformed")
+		t.Fatal("currentOnly block must not read as malformed")
 	}
 	if omitted != 0 || openIssuesOmitted != 0 {
 		t.Fatalf("omitted=%d openIssuesOmitted=%d, want 0", omitted, openIssuesOmitted)
 	}
 	if len(merged.Args.OpenIssues) != 0 {
-		t.Fatalf("legacy issue must leave the current set: %v", merged.Args.OpenIssues)
+		t.Fatalf("currentOnly issue must leave the current set: %v", merged.Args.OpenIssues)
 	}
-	want := []checkpointOpenIssue{{Text: "tests not written", Source: 0, Status: typedIssueStatusUnconfirmed}}
+	want := []string{"tests not written"}
 	if !slices.Equal(merged.CarriedOpenIssues, want) {
 		t.Fatalf("carried issues = %+v, want %+v", merged.CarriedOpenIssues, want)
-	}
-	if merged.Generation != 1 {
-		t.Fatalf("generation = %d, want 1", merged.Generation)
 	}
 }
 
 func TestTypedStateCarriedOpenIssuesRoundTrip(t *testing.T) {
 	state := checkpointTypedState{
 		OpenIssues: []string{"current blocker"},
-		CarriedOpenIssues: []checkpointOpenIssue{
-			{Text: "older risk", Source: 3, Status: typedIssueStatusUnconfirmed},
-			{Text: strings.Repeat("x", typedStateCarryMaxItemRunes+50), Source: 1},
+		CarriedOpenIssues: []string{
+			"older risk",
+			strings.Repeat("x", typedStateCarryMaxItemRunes+50),
 		},
-		Generation: 4,
 	}
-	parsed, ok := typedStateForTest(typedStateSectionHeading + "\n" + renderTypedStateJSON(state))
+	parsed, ok := typedStateForTest(message.CompactionTypedStateHeading + "\n" + renderTypedStateJSON(state))
 	if !ok {
 		t.Fatal("typed state with a historical bucket must round-trip")
-	}
-	if parsed.Generation != 4 {
-		t.Fatalf("generation = %d, want 4", parsed.Generation)
 	}
 	if !slices.Equal(parsed.OpenIssues, []string{"current blocker"}) {
 		t.Fatalf("current issues = %v", parsed.OpenIssues)
@@ -237,16 +221,9 @@ func TestTypedStateCarriedOpenIssuesRoundTrip(t *testing.T) {
 	if len(parsed.CarriedOpenIssues) != 2 {
 		t.Fatalf("carried issues = %+v", parsed.CarriedOpenIssues)
 	}
-	if parsed.CarriedOpenIssues[0].Source != 3 || parsed.CarriedOpenIssues[0].Status != typedIssueStatusUnconfirmed {
-		t.Fatalf("carried provenance lost: %+v", parsed.CarriedOpenIssues[0])
-	}
-	// An entry with no status decodes as unconfirmed, and an over-long text is
-	// bounded on the way out so a half item never reads as a complete one.
-	if parsed.CarriedOpenIssues[1].Status != typedIssueStatusUnconfirmed {
-		t.Fatalf("missing status must default to unconfirmed: %+v", parsed.CarriedOpenIssues[1])
-	}
-	if !strings.HasSuffix(parsed.CarriedOpenIssues[1].Text, typedStateItemTruncatedSuffix) {
-		t.Fatalf("over-long carried text must be truncated: %d runes", runeLen(parsed.CarriedOpenIssues[1].Text))
+	// Over-long text is bounded with an explicit truncation marker.
+	if !strings.HasSuffix(parsed.CarriedOpenIssues[1], typedStateItemTruncatedSuffix) {
+		t.Fatalf("over-long carried text must be truncated: %d runes", runeLen(parsed.CarriedOpenIssues[1]))
 	}
 
 	// An empty historical bucket must not render the field at all, so a
@@ -264,9 +241,9 @@ func TestRenderOpenProblemsSplitsCurrentFromHistorical(t *testing.T) {
 			OpenIssues: []string{"fixed thing", "current blocker"},
 			Completed:  []string{"fixed thing"},
 		},
-		CarriedOpenIssues: []checkpointOpenIssue{
-			{Text: "fixed thing", Source: 0, Status: typedIssueStatusUnconfirmed},
-			{Text: "stale risk", Source: 1, Status: typedIssueStatusUnconfirmed},
+		CarriedOpenIssues: []string{
+			"fixed thing",
+			"stale risk",
 		},
 	}
 	section := renderOpenProblemsSection(req, 0)
@@ -316,7 +293,7 @@ func TestOpenIssueHelpersHandleEmptyInputs(t *testing.T) {
 	// mergeTypedStateList's contract for a disabled list.
 	prior := checkpointTypedState{
 		OpenIssues:        []string{"prior-current"},
-		CarriedOpenIssues: []checkpointOpenIssue{{Text: "prior-historical"}},
+		CarriedOpenIssues: []string{"prior-historical"},
 	}
 	confirmed, carried, omitted := mergeTypedStateOpenIssues(prior, checkpointTypedState{OpenIssues: []string{"fresh"}}, 0)
 	if len(confirmed) != 0 || len(carried) != 0 || omitted != 3 {
@@ -333,7 +310,7 @@ func TestOpenIssueHelpersHandleEmptyInputs(t *testing.T) {
 	if key := checkpointItemKey("verify\t\tparser"); key != "verify\t\tparser" {
 		t.Fatalf("internal whitespace run = %q, want it preserved", key)
 	}
-	if got := normalizeCarriedOpenIssues([]checkpointOpenIssue{{Text: "  "}}); got != nil {
+	if got := boundTypedStateItems([]string{"  "}); got != nil {
 		t.Fatalf("blank carried entries must be dropped: %+v", got)
 	}
 	blank, blankOmitted, _, _ := mergeCheckpointTypedStates(
@@ -343,14 +320,14 @@ func TestOpenIssueHelpersHandleEmptyInputs(t *testing.T) {
 	if len(blank.OpenIssues) != 0 || len(blank.CarriedOpenIssues) != 0 || blankOmitted != 0 {
 		t.Fatalf("blank issues must be dropped, not carried: %+v omitted=%d", blank, blankOmitted)
 	}
-	state := checkpointTypedState{CarriedOpenIssues: []checkpointOpenIssue{{Text: "keep", Status: typedIssueStatusUnconfirmed}}}
-	if got := retireCheckpointItems(state, []string{"   "}); !slices.Equal(carriedIssueTexts(got), []string{"keep"}) {
+	state := checkpointTypedState{CarriedOpenIssues: []string{"keep"}}
+	if got := retireCheckpointItems(state, []string{"   "}); !slices.Equal(got.CarriedOpenIssues, []string{"keep"}) {
 		t.Fatalf("blank retirement must not remove entries: %+v", got.CarriedOpenIssues)
 	}
 	// The renderer must not emit an empty bullet for a blank historical entry.
 	section := renderOpenProblemsSection(&modelDrivenCheckpointRequest{
 		Args:              tools.CompactContextArgs{OpenIssues: []string{"current"}},
-		CarriedOpenIssues: []checkpointOpenIssue{{Text: "  "}},
+		CarriedOpenIssues: []string{"  "},
 	}, 0)
 	if section != "- current" {
 		t.Fatalf("blank carried entry must not render: %q", section)
@@ -368,10 +345,9 @@ func TestCarriedOpenIssueSurvivesUsageSummaryAppendixWithoutUpgrade(t *testing.T
 	a := newTestMainAgent(t, t.TempDir())
 	priorState := checkpointTypedState{
 		Decisions: []string{"d1: archived decision"},
-		CarriedOpenIssues: []checkpointOpenIssue{
-			{Text: "tests not written yet", Source: 0, Status: typedIssueStatusUnconfirmed},
+		CarriedOpenIssues: []string{
+			"tests not written yet",
 		},
-		Generation: 3,
 	}
 	// The filler keeps the body past the display carry cap, so the carry has
 	// to truncate the natural-language part and re-append the typed line — the
@@ -386,7 +362,7 @@ func TestCarriedOpenIssueSurvivesUsageSummaryAppendixWithoutUpgrade(t *testing.T
 		CompactionSummaryMode: compactionSummaryModeModelDriven,
 	}
 	carry := latestPriorCheckpointBody([]message.Message{mdMsg})
-	if carry == "" || !strings.Contains(carry, typedStateSectionHeading) {
+	if carry == "" || !strings.Contains(carry, message.CompactionTypedStateHeading) {
 		t.Fatalf("the usage-driven carry must retain the typed section:\n%s", carry)
 	}
 	usageSummary := "## Current User Request\n- continue\n\n## Progress\n- summarized\n\n" + priorCheckpointSectionHeading + "\n" + carry
@@ -410,11 +386,8 @@ func TestCarriedOpenIssueSurvivesUsageSummaryAppendixWithoutUpgrade(t *testing.T
 	if len(state.OpenIssues) != 0 {
 		t.Fatalf("the appendix must not upgrade a historical entry to current: %v", state.OpenIssues)
 	}
-	if got := carriedIssueTexts(state); !slices.Equal(got, []string{"tests not written yet"}) {
+	if got := state.CarriedOpenIssues; !slices.Equal(got, []string{"tests not written yet"}) {
 		t.Fatalf("historical entry lost across the appendix: %v", got)
-	}
-	if state.Generation != 4 {
-		t.Fatalf("generation = %d, want the carry ordinal to keep advancing", state.Generation)
 	}
 }
 
@@ -450,7 +423,7 @@ func TestOpenIssueDemotionSurvivesDurableApplyChain(t *testing.T) {
 	if len(second.OpenIssues) != 0 {
 		t.Fatalf("round 2 must not keep the un-restated issue current: %v", second.OpenIssues)
 	}
-	if got := carriedIssueTexts(second); !slices.Equal(got, []string{"tests not written yet"}) {
+	if got := second.CarriedOpenIssues; !slices.Equal(got, []string{"tests not written yet"}) {
 		t.Fatalf("round-2 carried issues = %v", got)
 	}
 	// The rendered section has to say what the carried entry is: a reader must

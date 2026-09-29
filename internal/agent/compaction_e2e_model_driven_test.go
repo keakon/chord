@@ -69,19 +69,6 @@ func e2eTypedStateOf(t *testing.T, checkpoint message.Message) checkpointTypedSt
 	return state
 }
 
-// carriedIssueTexts returns the texts of the historical (carried-only)
-// open-issue bucket in order.
-func carriedIssueTexts(state checkpointTypedState) []string {
-	if len(state.CarriedOpenIssues) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(state.CarriedOpenIssues))
-	for _, item := range state.CarriedOpenIssues {
-		out = append(out, item.Text)
-	}
-	return out
-}
-
 // e2eCheckpointAt returns the checkpoint message at the head of the live
 // transcript, or fails if the applied checkpoint is not the first message.
 func e2eCheckpointAt(t *testing.T, a *MainAgent) message.Message {
@@ -102,8 +89,7 @@ func e2eCheckpointAt(t *testing.T, a *MainAgent) message.Message {
 // Open issues are the one list that does not accumulate flat once a
 // submission declares its list complete, as every submission of this chain
 // does: its issues are the current generation's blockers, and an issue it did
-// not restate is demoted to the historical bucket with the generation that
-// last confirmed it. The distinction is the point — a
+// not restate is retained in the separate historical bucket. The distinction is the point — a
 // carried-only issue must stay recoverable without reading as a current
 // blocker, which is what this test's round-2 and round-3 assertions pin.
 func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
@@ -151,17 +137,12 @@ func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 	}
 	// Only the round-2 submission's own issue is a current blocker: the
 	// round-1 issue it did not restate is demoted to the historical bucket,
-	// tagged with the generation that last confirmed it (generation 0), so it
-	// can never read as freshly confirmed while staying recoverable.
+	// so it remains recoverable without reading as freshly confirmed.
 	if slices.Equal(second.OpenIssues, []string{"o2: cap disclosure text"}) == false {
 		t.Fatalf("round-2 open issues = %v", second.OpenIssues)
 	}
-	if got := carriedIssueTexts(second); slices.Equal(got, []string{"o1: verify the carry format"}) == false {
+	if got := second.CarriedOpenIssues; slices.Equal(got, []string{"o1: verify the carry format"}) == false {
 		t.Fatalf("round-2 carried issues = %v", got)
-	}
-	if second.Generation != 1 || len(second.CarriedOpenIssues) != 1 ||
-		second.CarriedOpenIssues[0].Source != 0 || second.CarriedOpenIssues[0].Status != typedIssueStatusUnconfirmed {
-		t.Fatalf("round-2 carried provenance = %+v (generation %d)", second.CarriedOpenIssues, second.Generation)
 	}
 	if slices.Equal(second.EvidenceRefs, []string{"ev-2", "ev-1"}) == false {
 		t.Fatalf("round-2 evidence refs = %v", second.EvidenceRefs)
@@ -185,15 +166,10 @@ func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 		t.Fatalf("round-3 open issues = %v", finalState.OpenIssues)
 	}
 	// Both earlier issues are historical now, newest-first, each keeping the
-	// generation that last confirmed it: the round-2 issue at generation 1 and
-	// the round-1 issue still at generation 0. The chain must not auto-upgrade
+	// text of its last confirmation. The chain must not auto-upgrade
 	// them just because they survived the carry.
-	if got := carriedIssueTexts(finalState); slices.Equal(got, []string{"o2: cap disclosure text", "o1: verify the carry format"}) == false {
+	if got := finalState.CarriedOpenIssues; slices.Equal(got, []string{"o2: cap disclosure text", "o1: verify the carry format"}) == false {
 		t.Fatalf("round-3 carried issues = %v", got)
-	}
-	if finalState.Generation != 2 || len(finalState.CarriedOpenIssues) != 2 ||
-		finalState.CarriedOpenIssues[0].Source != 1 || finalState.CarriedOpenIssues[1].Source != 0 {
-		t.Fatalf("round-3 carried provenance = %+v (generation %d)", finalState.CarriedOpenIssues, finalState.Generation)
 	}
 	if slices.Equal(finalState.EvidenceRefs, []string{"ev-3", "ev-2", "ev-1"}) == false {
 		t.Fatalf("round-3 evidence refs = %v", finalState.EvidenceRefs)

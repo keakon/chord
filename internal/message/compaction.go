@@ -6,6 +6,10 @@ const (
 	CompactionSummaryHeader = "[Context Summary]\n"
 	CompactionCompressedTag = "\n\n[Context compressed]"
 	CompactionEvidenceTag   = "[Context Evidence]\n"
+	// CompactionTypedStateHeading introduces the machine-carryable state
+	// block inside a checkpoint body: one JSON bullet the carry parser reads
+	// back and the TUI card renders as a code block.
+	CompactionTypedStateHeading = "## Typed Checkpoint State"
 	// CompactionDisplayHint is a legacy marker: checkpoints written before the
 	// display-hint tail was removed end with it. Nothing new appends it; parsers
 	// of persisted sessions still recognize it as a region/tail boundary.

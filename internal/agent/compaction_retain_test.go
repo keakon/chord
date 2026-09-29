@@ -202,7 +202,7 @@ func TestRetainedRecentSectionPlacedBetweenHistoryMapAndEvidence(t *testing.T) {
 	if strings.Contains(content, "[Context display hint]") {
 		t.Fatalf("checkpoint still carries the display-hint tail:\n%s", content)
 	}
-	if !strings.HasSuffix(strings.TrimSpace(content), "exact error text") {
+	if !strings.HasSuffix(strings.TrimSpace(content), "Excerpt:\n```text\n  exact error text\n```") {
 		t.Fatalf("evidence artifact must be the trailing section:\n%s", content)
 	}
 	if !strings.Contains(content, "> Keep the public API stable.") {

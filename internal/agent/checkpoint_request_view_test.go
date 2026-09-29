@@ -16,7 +16,7 @@ import (
 func requestViewFixture() message.Message {
 	request := "Fix the parser.\n\n## Requirements\nKeep empty input valid."
 	body := "## Current User Request\n" + modelDrivenCurrentUserRequestSection(fallbackAnchor{Kind: "user_request", Label: "Latest user request", Text: request}) +
-		"\n\n## Progress\n- parser checked\n\n## Key Decisions\n- preserve empty input\n\n## Open Problems\n- add test\n\n" + typedStateSectionHeading + "\n" + renderTypedStateJSON(checkpointTypedState{Completed: []string{"parser checked"}, Decisions: []string{"preserve empty input"}, OpenIssues: []string{"add test"}}) + "\n" + typedStateOmittedNote +
+		"\n\n## Progress\n- parser checked\n\n## Key Decisions\n- preserve empty input\n\n## Open Problems\n- add test\n\n" + message.CompactionTypedStateHeading + "\n" + renderTypedStateJSON(checkpointTypedState{Completed: []string{"parser checked"}, Decisions: []string{"preserve empty input"}, OpenIssues: []string{"add test"}}) + "\n" + typedStateOmittedNote +
 		"\n\n" + retainedRecentMessagesHeading + "\nUser:\n> " + strings.ReplaceAll(request, "\n", "\n> ") + "\n\nUser:\n> Also keep whitespace.\n\n[Context Evidence]\nPreserve evidence."
 	return message.Message{Role: message.RoleUser, Content: body, IsCompactionSummary: true, CompactionSummaryMode: compactionSummaryModeModelDriven}
 }
@@ -36,7 +36,7 @@ func TestCheckpointRequestProjectionPreservesDurableCarryAndCorrections(t *testi
 			t.Fatalf("lost %q", want)
 		}
 	}
-	if strings.Contains(body, typedStateSectionHeading) || strings.Count(body, "Keep empty input valid.") != 1 {
+	if strings.Contains(body, message.CompactionTypedStateHeading) || strings.Count(body, "Keep empty input valid.") != 1 {
 		t.Fatal("duplicate request or typed payload retained")
 	}
 	if !reflect.DeepEqual(projected[1], msgs[1]) {
@@ -79,7 +79,7 @@ func TestCheckpointRequestProjectionConservativeCases(t *testing.T) {
 			if kind == "ordinary" && got != msg.Content {
 				t.Fatal("ordinary user content changed")
 			}
-			if (kind == "malformed" || kind == "generic") && !strings.Contains(got, typedStateSectionHeading) {
+			if (kind == "malformed" || kind == "generic") && !strings.Contains(got, message.CompactionTypedStateHeading) {
 				t.Fatal("unsafe machine state removed")
 			}
 			if (kind == "truncated" || kind == "different") && strings.Contains(got, "User: Same request") {
@@ -103,10 +103,10 @@ func TestCheckpointProjectionBeforeReductionAndFallbackPreparation(t *testing.T)
 		first := a.prepareMessagesForLLM(msgs)
 		again := a.prepareMessagesForLLM(msgs)
 		fallback := a.prepareMessagesForLLMWithOptions(msgs, false)
-		if strings.Contains(first[0].Content, typedStateSectionHeading) || first[0].Content != again[0].Content || first[0].Content != fallback[0].Content {
+		if strings.Contains(first[0].Content, message.CompactionTypedStateHeading) || first[0].Content != again[0].Content || first[0].Content != fallback[0].Content {
 			t.Fatal("unstable request projection")
 		}
-		if !strings.Contains(msgs[0].Content, typedStateSectionHeading) {
+		if !strings.Contains(msgs[0].Content, message.CompactionTypedStateHeading) {
 			t.Fatal("durable checkpoint changed")
 		}
 	}

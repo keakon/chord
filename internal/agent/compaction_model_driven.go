@@ -48,11 +48,7 @@ type modelDrivenCheckpointRequest struct {
 	// submission did not restate. Rendering reads it instead of rebuilding
 	// from Args, which carries only the current generation's confirmed issues.
 	// It is nil for a request that carried no prior typed state.
-	CarriedOpenIssues []checkpointOpenIssue
-	// Generation is the carry ordinal of the merged typed state (see
-	// checkpointTypedState.Generation). It is 0 for a request that carried no
-	// prior typed state.
-	Generation int
+	CarriedOpenIssues []string
 }
 
 // requestAcceptedToolResult is the canonical compact_context success text. It
@@ -1891,7 +1887,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Evidence References", evidenceRefs},
 		{"## Claims", claims},
 		{"## Checkpoint Stage", stage},
-		{typedStateSectionHeading, typedState},
+		{message.CompactionTypedStateHeading, typedState},
 		{"## Todo State", formatTodosAsRelevanceBullets(bundle.todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(bundle.subAgents)},
 	}
@@ -2055,7 +2051,6 @@ func mergePriorTypedCheckpointState(req *modelDrivenCheckpointRequest, prior str
 	// below so they can never render as current blockers.
 	copyReq.Args.OpenIssues = merged.OpenIssues
 	copyReq.CarriedOpenIssues = merged.CarriedOpenIssues
-	copyReq.Generation = merged.Generation
 	copyReq.Args.EvidenceRefs = merged.EvidenceRefs
 	copyReq.Args.StageID = merged.StageID
 	copyReq.Args.StageStatus = merged.StageStatus
@@ -2096,7 +2091,6 @@ func renderTypedCheckpointState(req *modelDrivenCheckpointRequest) string {
 	// next checkpoint, and the ordinal is what keeps a carried entry's
 	// provenance stable across generations.
 	state.CarriedOpenIssues = req.CarriedOpenIssues
-	state.Generation = req.Generation
 	return renderTypedStateJSON(state)
 }
 
@@ -2199,7 +2193,7 @@ func renderOpenProblemsSection(req *modelDrivenCheckpointRequest, carriedOmitted
 		}
 		var carried []string
 		for _, item := range req.CarriedOpenIssues {
-			text := strings.TrimSpace(item.Text)
+			text := strings.TrimSpace(item)
 			if text == "" {
 				continue
 			}

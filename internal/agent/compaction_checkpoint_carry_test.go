@@ -144,7 +144,7 @@ func TestLatestPriorCheckpointBodyRetainsTypedStateBeyondRuneCap(t *testing.T) {
 	// respects the rune budget; only the machine block is exempt. In this
 	// fixture the prelude is short enough to survive the truncation verbatim,
 	// so no disclosure note is expected.
-	before, _, ok := strings.Cut(got, typedStateSectionHeading)
+	before, _, ok := strings.Cut(got, message.CompactionTypedStateHeading)
 	if !ok {
 		t.Fatalf("typed section missing from the retained carry:\n%s", got)
 	}
@@ -166,7 +166,7 @@ func TestTruncateCarryKeepingTypedStateNoOpCases(t *testing.T) {
 	// No typed block: plain line truncation with the disclosure note.
 	plain := "## Next Step\n- run tests\n" + strings.Repeat("x", 300)
 	got := truncateCarryKeepingTypedState(plain, 100)
-	if strings.Contains(got, typedStateSectionHeading) {
+	if strings.Contains(got, message.CompactionTypedStateHeading) {
 		t.Fatalf("body without a typed block must not gain one: %q", got)
 	}
 	if !strings.Contains(got, "Earlier checkpoint content omitted") {
@@ -176,7 +176,7 @@ func TestTruncateCarryKeepingTypedStateNoOpCases(t *testing.T) {
 	// truncation (no dangling typed heading).
 	dangling := "## Next Step\n- run tests\n" + strings.Repeat("z", 300) + "\n## Typed Checkpoint State"
 	got = truncateCarryKeepingTypedState(dangling, 100)
-	if strings.Contains(got, typedStateSectionHeading) {
+	if strings.Contains(got, message.CompactionTypedStateHeading) {
 		t.Fatalf("a typed heading without its JSON line must not be carried: %q", got)
 	}
 }

@@ -85,6 +85,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- The context summary card keeps preserved excerpts readable: a quoted diff, log, or tool output renders as a code block, so its line structure and blank lines survive instead of being reflowed into one wrapped paragraph. The checkpoint's machine-readable state also renders inside a JSON code block instead of wrapping as an ordinary bullet.
 - Automatic project-memory extraction on the main model pool caps a higher OpenAI `reasoning.effort` or Anthropic `thinking.effort` at `low`, so a model configured with `effort: max` no longer spends its whole output budget thinking and returns no extraction result. Models without reasoning, or with it turned off, are sent as configured; a configured `memory.model_pool` keeps its own settings.
 - Reading a file no longer starts a language server: a server starts on the first write to a matching file, so read-only exploration of a large workspace does not launch one. The first write after a cold start can wait for the server and may report diagnostics unavailable while it is still starting.
 - Context compaction preserves complete latest requests up to 8,192 characters, including completion rejection feedback, with their line structure. Longer requests explicitly direct the agent to recover omitted requirements from archived history.

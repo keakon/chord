@@ -109,9 +109,9 @@ func restoreStrippedTypedState(body, raw string) string {
 		}
 		body = strings.TrimSpace(body)
 		if body == "" {
-			return typedStateSectionHeading + "\n" + line
+			return message.CompactionTypedStateHeading + "\n" + line
 		}
-		return body + "\n\n" + typedStateSectionHeading + "\n" + line
+		return body + "\n\n" + message.CompactionTypedStateHeading + "\n" + line
 	}
 	return body
 }
@@ -170,9 +170,9 @@ func truncateCarryKeepingTypedState(body string, maxChars int) string {
 	}
 	kept := truncateCheckpointCarryLines(body[:keepStart], maxChars)
 	if kept == "" {
-		return typedStateSectionHeading + "\n" + keptJSON
+		return message.CompactionTypedStateHeading + "\n" + keptJSON
 	}
-	return strings.TrimSpace(kept) + "\n" + typedStateSectionHeading + "\n" + keptJSON
+	return strings.TrimSpace(kept) + "\n" + message.CompactionTypedStateHeading + "\n" + keptJSON
 }
 
 func truncateCheckpointCarryLines(body string, maxChars int) string {
