@@ -437,10 +437,11 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"check it with the smallest reproduction before adding coverage or running broader tests",
 		"state verification status explicitly (passed, failed, not run, or only inspected statically)",
 		"following project-local test/build conventions when known",
-		"Do not narrate every routine action or restate obvious next steps",
-		"Do not over-explain routine actions",
+		"Do not narrate every routine action, restate obvious next steps, or over-explain — lead with the action or answer",
 		"If multiple interpretations exist but one is clearly the best fit",
 		"Before implementing new logic, look for existing helpers and patterns.",
+		"Reuse them when they satisfy the requested behavior, including libraries the repo already depends on",
+		"\"no new dependencies\" forbids adding packages, not using existing ones",
 		"Do not introduce parallel helpers or duplicate logic when an existing local abstraction can be reused or slightly extended",
 		"Do not add error handling, fallbacks, validation, or defensive checks for scenarios that cannot happen",
 		"only validate at real trust boundaries",
@@ -451,17 +452,20 @@ func TestSharedCodingGuidelinesPrompt_ExcludesMainAgentOnlyCommunicationGuidance
 		"Do not remove pre-existing dead code unless asked",
 		"Keep necessary callers, fixtures, tests, accessibility, security, compatibility, and migration work when reachable evidence requires it",
 		"fewer files or lines is not the goal — the smallest correct result is",
-		"Do not introduce new abstractions, helper layers, configuration knobs, feature flags, checksums, dependencies, migrations, compatibility layers, or parameters reserved for hypothetical future needs",
+		"Do not introduce new abstractions, helper layers, configuration knobs, feature flags, checksums, new third-party dependencies, migrations, compatibility layers, or parameters reserved for hypothetical future needs",
 		"Do not add a final audit loop, re-review, or re-test pass only to demonstrate compliance with these rules",
 		"state a brief plan with verifiable success criteria per step",
 		"For analysis-only tasks, define success in terms of evidence gathered and conclusions supported, not implementation or acceptance-test completion",
-		"Start with the cheapest check that can resolve a concrete correctness concern",
+		"Run the narrowest check that can falsify the change first",
+		"usually run the full suite once at the end, again only when a later change invalidates its result",
+		"Repeat a command, search, or failed approach only when something relevant changed since the last attempt (code, inputs, environment, or the hypothesis being tested)",
+		"status polling and flaky-failure triage are exceptions",
+		"When a search or approach is exhausted, use the available evidence to implement, run a focused experiment, or report a specific blocker",
 		"establish that the code builds before running broad tests",
 		"A guarantee stated without conditions holds on success, errors, and early returns",
 		"Existing code is a reference, not permission to weaken a requirement",
 		"Verify the promised state on relevant exit paths",
 		"report its other failures of the same kind through that error, keeping the underlying error as the cause",
-		"following project-local test/build conventions when known",
 		"Broaden when the change's impact or project requirements warrant it",
 		"When a broad test fails, narrow the reproduction before retrying",
 	} {
@@ -482,6 +486,9 @@ func TestSharedReasoningDisciplinePrompt_ContentAndBoundary(t *testing.T) {
 		"keep only the next one or two decisions active",
 		"use existing task state or notes when they materially help",
 		"do not create external artifacts solely for ephemeral thoughts",
+		"Reasoning is for decisions, invariants and the checks you will run",
+		"not for transcribing the code you are about to write",
+		"write the real change in the edit/write call",
 		"Evidence before conclusion",
 		"state concise evidence or rationale supporting a conclusion",
 		"Evidence sufficiency",
@@ -726,6 +733,38 @@ func TestSharedCodingGuidelinesPrompt_PrefersReasonableAutonomyBeforeAsking(t *t
 	}
 }
 
+// Each Guidelines rule has one source: the repeat rule owns when a command,
+// search or approach may run again, and the merged ambiguity bullet owns the
+// sibling-implementation preference. The dropped restatements must not return.
+func TestSharedCodingGuidelinesPrompt_RulesStaySingleSourced(t *testing.T) {
+	got := sharedCodingGuidelinesPrompt
+	for _, unwanted := range []string{
+		"Revisit an exhausted search or failed approach only when",
+		"the result cannot change",
+		"Only count a run as valid",
+		"is not a reason to re-run",
+		"full suite at most once",
+		"When the spec is ambiguous",
+		"acceptance criteria you are only guessing at",
+		"note the assumption in the file",
+		"Avoid engineering from first principles",
+		"import restrictions",
+		"task notes",
+	} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("sharedCodingGuidelinesPrompt repeats or reintroduces %q in %q", unwanted, got)
+		}
+	}
+	if got := strings.Count(got, "only when something relevant changed since the last attempt"); got != 1 {
+		t.Fatalf("repeat rule rendered %d times, want 1", got)
+	}
+	// The exhausted-search guidance lives only in the merged repeat-rule bullet,
+	// not also at the end of the exploration bullet.
+	if got := strings.Count(got, "When a search or approach is exhausted"); got != 1 {
+		t.Fatalf("exhausted-search guidance rendered %d times, want 1", got)
+	}
+}
+
 func TestSharedCodingGuidelinesPrompt_SeparatesProductLevelAndImplementationLevelAmbiguity(t *testing.T) {
 	got := sharedCodingGuidelinesPrompt
 	for _, want := range []string{
@@ -735,6 +774,8 @@ func TestSharedCodingGuidelinesPrompt_SeparatesProductLevelAndImplementationLeve
 		"treat that as the resolved product decision and proceed without re-asking",
 		"When the request admits several implementation paths with no externally visible behavior difference",
 		"pick the one with the smallest blast radius on existing code",
+		"proceed with it and state the assumption briefly; to find it, prefer the closest existing sibling implementation and the documented contract",
+		"do not add special cases for requirements you are only guessing at",
 		"If a blocker of this kind appears mid-execution, raise it then rather than continuing on a guess or pretending the task is complete",
 	} {
 		if !strings.Contains(got, want) {
@@ -766,6 +807,8 @@ func TestSharedCodingGuidelinesPrompt_RequiresEvidenceDiscriminationAndAmbiguity
 		"Before claiming completion, compare the requested behavior",
 		"For analysis, review, or planning tasks",
 		"run dynamic checks only when requested or necessary",
+		"When a self-contained fact (library semantics, dtype/null behavior, version differences, API availability) can be settled by a one-off script in seconds, run it instead of deriving it",
+		"this does not cover multi-file interactions, concurrency behavior, or state that requires a running service",
 		// Ambiguity convergence.
 		"distinguish requirements from assumptions",
 		"clarify when blocked",
@@ -2410,13 +2453,42 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 		"only for missing or changed information",
 		"tool description governs checkpoint timing",
 		"required environment variables and arguments",
+		"Append verified reusable findings to the existing notes file together with the next action's tool calls rather than in a separate step",
+		"replace the short handoff status instead of appending to it",
+		"Distinguish passed, failed, skipped and environment-blocked checks",
+		"Put an index and a short current handoff",
+		"refresh existing task notes only when material state changed and writing is permitted",
+		"reconcile stale pending items with results already received",
 		"Notes are recovery aids, not proof",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("block must mention %q, got:\n%s", want, block)
 		}
 	}
-	for _, unwanted := range []string{"<system-reminder>", "estimated tokens", "checkpoint_kind=", "Leave state_files empty", "Call it alone", "refresh files"} {
+	// Task-notes rules have one source: this main-only block. The shared
+	// Guidelines (also rendered for SubAgents) and the always-sent tool
+	// description must not repeat them.
+	prompt := a.buildSystemPrompt()
+	description := tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}).Description()
+	for _, sentence := range []string{
+		"required environment variables and arguments",
+		"Distinguish passed, failed, skipped and environment-blocked checks",
+		"refresh existing task notes",
+		"reconcile stale pending items",
+	} {
+		if got := strings.Count(prompt, sentence); got != 1 {
+			t.Fatalf("main prompt renders %q %d times, want 1", sentence, got)
+		}
+		if strings.Contains(description, sentence) {
+			t.Fatalf("compact_context description repeats task-notes guidance %q", sentence)
+		}
+	}
+	for _, guidelines := range []string{sharedCodingGuidelinesPrompt, subAgentCodingGuidelinesPrompt} {
+		if strings.Contains(guidelines, "task notes") {
+			t.Fatalf("shared Guidelines must not carry main-only task-notes rules: %q", guidelines)
+		}
+	}
+	for _, unwanted := range []string{"<system-reminder>", "estimated tokens", "checkpoint_kind=", "Leave state_files empty", "Call it alone", "refresh files", "append 1–3 lines", "separate turn"} {
 		if strings.Contains(block, unwanted) {
 			t.Fatalf("context block duplicates tool or trust guidance %q: %s", unwanted, block)
 		}

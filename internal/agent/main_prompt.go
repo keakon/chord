@@ -521,13 +521,17 @@ func (a *MainAgent) mainAgentCapabilityPromptBlock() string {
 // otherwise the tool does not exist on the model's surface and the guidance
 // would have no referent — no system prompt may push a tool that is invisible
 // or denied. The tool description owns checkpoint timing and preparation;
-// this block owns the long-session principle and recovery reading order.
+// this block owns how the main agent keeps task notes and the recovery
+// reading order. The shared Guidelines stay free of task-notes rules because
+// SubAgents render them too.
 func (a *MainAgent) modelDrivenContextPromptBlock() string {
 	if !a.compactContextVisible() {
 		return ""
 	}
 	return "## Long-session context management\n" +
-		"- For long tasks, maintain a concise task-notes file as reusable findings accumulate, within your file permissions. Keep a short current handoff (completed work, remaining work, blockers, next action) separate from reusable details. Record key code locations, verified conclusions and their conditions, successful commands with working directory, required environment variables and arguments, reusable script/log paths, and failed approaches with retry conditions. Replace stale status; link to large results instead of copying them. The compact_context tool description governs checkpoint timing and preparation.\n" +
+		"- For long tasks, maintain a concise task-notes file as reusable findings accumulate, within your file permissions. Put an index and a short current handoff (completed work, remaining work, blockers, next action) first, separate from reusable details. Record key code locations, verified conclusions with their evidence and conditions, successful commands with working directory, required environment variables and arguments, reusable script/log paths, failed approaches with retry conditions, and unresolved questions. Distinguish passed, failed, skipped and environment-blocked checks, and facts from assumptions. Link to large results instead of copying them. The compact_context tool description governs checkpoint timing and preparation.\n" +
+		"- Append verified reusable findings to the existing notes file together with the next action's tool calls rather than in a separate step; replace the short handoff status instead of appending to it.\n" +
+		"- Before handing off, pausing, or finishing, refresh existing task notes only when material state changed and writing is permitted; do not create notes just for closure. A note that depends on a tool result must wait for that result; if written while a check is running, mark it pending. Before handing off, reconcile stale pending items with results already received.\n" +
 		"- After a reset, start from the checkpoint and any injected file content. Use the registered task notes as the detail source: read the relevant sections only for missing or changed information needed for the next action, before repeating searches or experiments. Reuse results while their code and conditions remain unchanged and the referenced artifacts remain available. Notes are recovery aids, not proof: current code and verification results take precedence over notes. Read archived history only for exact details unavailable there."
 }
 

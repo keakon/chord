@@ -3239,23 +3239,24 @@ func TestSplitMessagesForCompaction_BuildsSyntheticEvidenceArtifact(t *testing.T
 }
 
 func TestSplitMessagesForCompaction_PreservesRecentRawTailOutsideArchive(t *testing.T) {
-	msgs := []message.Message{
-		{Role: "user", Content: "u1"},
-		{Role: "assistant", Content: "a1"},
-		{Role: "user", Content: "u2"},
-		{Role: "assistant", Content: "a2"},
-		{Role: "user", Content: "u3"},
-		{Role: "assistant", Content: "a3"},
-		{Role: "user", Content: "u4"},
-		{Role: "assistant", Content: "a4"},
+	const userTurns = 8
+	var msgs []message.Message
+	for i := 1; i <= userTurns; i++ {
+		msgs = append(msgs,
+			message.Message{Role: "user", Content: fmt.Sprintf("u%d", i)},
+			message.Message{Role: "assistant", Content: fmt.Sprintf("a%d", i)},
+		)
 	}
 
 	head, _ := splitMessagesForCompactionForTest(msgs, 8192)
 	if len(head) == 0 {
 		t.Fatal("expected archived head")
 	}
-	if got := head[len(head)-1].Content; got != "a2" {
-		t.Fatalf("latest archived message = %q, want a2", got)
+	// Every message fits the tail budget, so the split keeps the newest
+	// compactRecentTailTurns authored turns raw and archives the rest.
+	want := fmt.Sprintf("a%d", userTurns-compactRecentTailTurns)
+	if got := head[len(head)-1].Content; got != want {
+		t.Fatalf("latest archived message = %q, want %q", got, want)
 	}
 }
 

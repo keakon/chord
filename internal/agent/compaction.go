@@ -36,7 +36,10 @@ const (
 	compactEvidencePercentDenom       = 100
 	compactRecentTailMinTokens        = 768
 	compactRecentTailMaxTokens        = 16384
-	compactRecentTailTurns            = 2
+	// compactRecentTailTurns sizes the verbatim tail by authored user turns.
+	// Six turns keeps the recent work, including its tool loops, readable after
+	// a reset; compactRecentTailMaxTokens still caps its token cost.
+	compactRecentTailTurns = 6
 	// compactRecentTailBudgetRatio divides the context window to size the raw
 	// tail kept after a continuation checkpoint. The compaction threshold
 	// already leaves ~20% of the window unused, so a tail worth ~5% of it is
