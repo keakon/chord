@@ -31,7 +31,7 @@ Only one of `edit` / `apply_patch` is exposed to the model at a time, chosen by 
 
 | Tool | What it does |
 | --- | --- |
-| `grep` | Regex/literal content search with output caps; supports multi-root `paths` and `includes` glob filters. |
+| `grep` | Regex/literal content search with output caps; supports multi-root `paths`, `includes` glob filters, and optional `context_lines` (0-20, default 0; larger values are clamped with a note) to also return the lines surrounding each match. Surrounding lines are printed as `\| path-line-text` while matches keep `path:line:text`; paths with whitespace or ambiguous separators are quoted and escaped; nearby matches share one merged window, and surrounding lines longer than 256 bytes are shortened with `...`. Context lines count against the output budget but not against the match cap; once the budget has no room for more of them, earlier windows stay whole, the window in flight when the budget runs out may end early, later matches are listed without context, and a footer notes the omission. |
 | `glob` | Path matching by glob pattern(s), with output caps. |
 
 ## Execution

@@ -643,6 +643,32 @@ func TestSearchResultParsingRejectsTimestampedLogLines(t *testing.T) {
 	}
 }
 
+// A grep result with context_lines carries path-line-text surrounding lines,
+// notes and footers besides its path:line:text hits; only the hits are
+// matches, while a path-only listing still counts one result per line.
+func TestSearchSummaryCountsOnlyMatchLines(t *testing.T) {
+	content := strings.Join([]string{
+		"Note: context_lines 50 exceeds the maximum of 20; using 20.",
+		"| internal/a.go-3-	x := 1",
+		"internal/a.go:4:func run() error {",
+		"| internal/a.go-5-	return nil",
+		"internal/b.go:9:func run() {",
+		"",
+		"(showing first 2 matches within 12 KiB; narrow paths/includes/pattern for more precise results)",
+	}, "\n")
+	summary := reduceSearchLikeOutputSummary(requestReductionContext{
+		ToolName: tools.NameGrep,
+		Content:  content,
+		Meta:     toolCallMeta{Name: tools.NameGrep, Args: `{"pattern":"func run","context_lines":1}`},
+	})
+	if !strings.Contains(summary, "matches=2]") {
+		t.Fatalf("summary should count only the two hits, got %q", summary)
+	}
+	if got := countSearchResultMatches("a.go\nb.go\nc.go\n"); got != 3 {
+		t.Fatalf("path-only listing counted %d results, want 3", got)
+	}
+}
+
 // The long-log summary keeps only marker lines, so it must say how many lines
 // it dropped. Without a count the model cannot tell "one matching line" from
 // "the output only had one line" and may read the summary as the whole result.
@@ -731,5 +757,17 @@ func TestLossySummaryLeavesRecoveryAddress(t *testing.T) {
 	small, _, ok := reduceRequestToolOutput(requestReductionShellOK, smallCtx)
 	if ok && len(tools.ExtractArtifactReferences(small)) > 0 {
 		t.Fatalf("small payload should not be archived, got %q", small)
+	}
+}
+
+func TestSearchResultParsingSharesUnambiguousGrepFormat(t *testing.T) {
+	for _, line := range []string{"| a.go-5-x[1:2:3]", "| docs/my-2026-09-note.md-3-x[1:2:3]"} {
+		if _, _, _, ok := parseSearchResultLine(line); ok {
+			t.Fatalf("context became evidence: %q", line)
+		}
+	}
+	path, num, text, ok := parseSearchResultLine(`"docs/my file-2026-09-note.md":3:hit`)
+	if !ok || path != "docs/my file-2026-09-note.md" || num != "3" || text != "hit" {
+		t.Fatalf("quoted match = %q %q %q %v", path, num, text, ok)
 	}
 }

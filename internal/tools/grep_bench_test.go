@@ -23,13 +23,26 @@ func BenchmarkGrepWalkRootParallel(b *testing.B) {
 		}
 	}
 
-	for _, pattern := range []string{"common", "not-present"} {
-		b.Run(pattern, func(b *testing.B) {
-			re := regexp.MustCompile(pattern)
+	cases := []struct {
+		name         string
+		pattern      string
+		contextLines int
+	}{
+		{name: "common", pattern: "common"},
+		{name: "not-present", pattern: "not-present"},
+		// Every file has one hit, so the context window fills the output
+		// budget early and the remaining files stream through bare matches.
+		{name: "common-context-3", pattern: "common", contextLines: 3},
+		// No hit: measures what buffering leading context costs per line.
+		{name: "not-present-context-3", pattern: "not-present", contextLines: 3},
+	}
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			re := regexp.MustCompile(tc.pattern)
 			b.ReportAllocs()
 			b.ResetTimer()
 			for b.Loop() {
-				if _, _, _, _, err := grepWalkRoot(context.Background(), dir, re, []string{"**/*.go"}, dir, maxGrepMatches, maxGrepOutputBytes, ""); err != nil {
+				if _, err := grepWalkRoot(context.Background(), dir, re, []string{"**/*.go"}, dir, maxGrepMatches, maxGrepOutputBytes, tc.contextLines, ""); err != nil {
 					b.Fatal(err)
 				}
 			}

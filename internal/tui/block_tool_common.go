@@ -1064,14 +1064,7 @@ func formatToolResultSummaryLine(b *Block) string {
 		if trimmed == "No matches found." {
 			return ""
 		}
-		count := 0
-		for line := range strings.SplitSeq(strings.TrimRight(trimmed, "\n"), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "(showing first ") {
-				continue
-			}
-			count++
-		}
+		count := parseGrepResultMeta(trimmed).Matches
 		if count <= 1 {
 			return ""
 		}
@@ -1347,7 +1340,7 @@ func parseGrepResultMeta(result string) grepResultMeta {
 		case strings.HasPrefix(line, "grep: skipped path:"):
 			meta.HasDetails = true
 			meta.Skipped++
-		case strings.HasPrefix(line, "(showing first "):
+		case strings.HasPrefix(line, "(showing first "), strings.HasPrefix(line, tools.GrepContextOmittedFooterPrefix):
 			meta.HasDetails = true
 			meta.Truncated = true
 		case line == "No matches found." || strings.HasPrefix(line, "No matches found."):
@@ -1360,13 +1353,16 @@ func parseGrepResultMeta(result string) grepResultMeta {
 			}
 		default:
 			meta.HasDetails = true
+			// Only path:line:text entries are matches; context_lines output
+			// also carries path-line-text surrounding lines.
+			path, isContext, ok := tools.ParseGrepOutputLine(line)
+			if !ok || isContext {
+				continue
+			}
 			meta.Matches++
-			if idx := strings.Index(line, ":"); idx > 0 {
-				path := line[:idx]
-				if _, ok := seenFiles[path]; !ok {
-					seenFiles[path] = struct{}{}
-					meta.Files++
-				}
+			if _, seen := seenFiles[path]; !seen {
+				seenFiles[path] = struct{}{}
+				meta.Files++
 			}
 		}
 	}

@@ -1186,29 +1186,11 @@ func looksLikeSearchResultContent(content string) bool {
 
 func parseSearchResultLine(line string) (path, lineNo, snippet string, ok bool) {
 	trimmed := strings.TrimSpace(line)
-	if trimmed == "" || strings.ContainsAny(trimmed[:1], ":\t\n\r ") {
+	path, lineNo, snippet, ok = tools.ParseGrepMatchLine(trimmed)
+	if !ok || !strings.HasPrefix(trimmed, "\"") && !looksLikeSearchResultPath(path) {
 		return "", "", "", false
 	}
-	for i := 1; i < len(trimmed)-2; i++ {
-		if trimmed[i] != ':' || !isASCIIDigit(trimmed[i+1]) {
-			continue
-		}
-		j := i + 2
-		for j < len(trimmed) && isASCIIDigit(trimmed[j]) {
-			j++
-		}
-		if j >= len(trimmed) || trimmed[j] != ':' {
-			continue
-		}
-		path = strings.TrimSpace(trimmed[:i])
-		lineNo = strings.TrimSpace(trimmed[i+1 : j])
-		snippet = strings.TrimSpace(trimmed[j+1:])
-		if !looksLikeSearchResultPath(path) {
-			continue
-		}
-		return path, lineNo, snippet, path != "" && lineNo != "" && snippet != ""
-	}
-	return "", "", "", false
+	return path, lineNo, strings.TrimSpace(snippet), true
 }
 
 // looksLikeSearchResultPath rejects the `path` half of a `path:line:text`
@@ -1345,7 +1327,26 @@ func reduceSearchLikeOutputSummary(ctx requestReductionContext) string {
 		snippetLines = []string{"- (no preserved matches)"}
 	}
 	scope := reduceSearchScope(ctx)
-	return fmt.Sprintf("[Older %s results summarized for this request to save context; %s; matches=%d]\n%s", toolName, scope, countMeaningfulLines(ctx.Content), strings.Join(snippetLines, "\n"))
+	return fmt.Sprintf("[Older %s results summarized for this request to save context; %s; matches=%d]\n%s", toolName, scope, countSearchResultMatches(ctx.Content), strings.Join(snippetLines, "\n"))
+}
+
+// countSearchResultMatches counts the path:line:text entries of a search
+// output, so notes, footers and the path-line-text surrounding lines of a
+// context_lines search are not reported as matches. Outputs without such
+// entries (glob, rg -l) list one result per line and fall back to counting
+// non-empty lines.
+func countSearchResultMatches(content string) int {
+	matches := 0
+	forEachLine(content, func(line string) bool {
+		if _, _, _, ok := parseSearchResultLine(line); ok {
+			matches++
+		}
+		return true
+	})
+	if matches == 0 {
+		return countMeaningfulLines(content)
+	}
+	return matches
 }
 
 const (

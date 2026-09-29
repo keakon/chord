@@ -50,6 +50,52 @@ func TestGrepCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 	}
 }
 
+// context_lines output interleaves path-line-text surrounding lines with the
+// path:line:text hits; only hits count as matches, and files come from hit
+// paths even when a surrounding line's text contains a colon.
+func TestGrepCollapsedSummaryCountsOnlyHitsWithContextLines(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               tools.NameGrep,
+		Content:                `{"pattern":"TODO","context_lines":1}`,
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+		ResultContent: strings.Join([]string{
+			"Note: context_lines 50 exceeds the maximum of 20; using 20.",
+			"| a.go-1-package main // see: notes",
+			"a.go:2:TODO one",
+			"| a.go-3-x := m[a:1:2]",
+			"docs/2026-09-29-plan.md:7:TODO two",
+			"| docs/2026-09-29-plan.md-8-next step",
+			"b.go:5:TODO three",
+			"",
+			"(showing first 3 matches within 12 KiB; narrow paths/includes/pattern for more precise results)",
+			tools.GrepContextOmittedFooterPrefix + " for later matches to stay within 12 KiB; lower context_lines or narrow paths/includes/pattern to see them)",
+		}, "\n"),
+	}
+
+	meta := parseGrepResultMeta(block.ResultContent)
+	if meta.Matches != 3 || meta.Files != 3 || meta.Notes != 1 || !meta.Truncated {
+		t.Fatalf("meta = %+v, want 3 matches in 3 files, 1 note, truncated", meta)
+	}
+	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(collapsed, "grep TODO · 3 matches · 3 files") {
+		t.Fatalf("expected collapsed grep summary to count only hits, got:\n%s", collapsed)
+	}
+	if got := formatToolResultSummaryLine(block); got != "3 matches" {
+		t.Fatalf("formatToolResultSummaryLine() = %q, want %q", got, "3 matches")
+	}
+
+	// A footer about omitted surrounding lines alone still marks the result
+	// as truncated so the card stays expandable.
+	meta = parseGrepResultMeta("a.go:2:TODO one\n\n" + tools.GrepContextOmittedFooterPrefix + " for later matches to stay within 12 KiB)")
+	if meta.Matches != 1 || !meta.Truncated {
+		t.Fatalf("context-only footer meta = %+v, want 1 match, truncated", meta)
+	}
+}
+
 func TestGlobCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := &Block{
