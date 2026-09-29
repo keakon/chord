@@ -473,10 +473,10 @@ func (m *Manager) startServer(ctx context.Context, key clientKey, srvCfg config.
 		// Still add the client so later calls can succeed; first request may still fail briefly.
 	}
 	// Mark the newcomer as most-recently-used before it can be considered for
-	// eviction: it was started to serve a file the caller is reading right now,
+	// eviction: it was started to serve a file the caller is writing right now,
 	// and an untouched client sorts as the least-recently-used one, so without
 	// this the instance for the ninth root would be closed the instant it came
-	// up and restarted on the next read.
+	// up and restarted on the next write.
 	client.touch(time.Now().UnixNano())
 	m.clientsMu.Lock()
 	closeMe, survivors, admitted := m.admitStartedClientLocked(key, entry, client)
@@ -960,7 +960,7 @@ func (m *Manager) hasPendingStartForPathLocked(path string) bool {
 			continue
 		}
 		// Only a server whose configured file types and root markers cover the
-		// path can be "starting for" it; otherwise a Go read would count a
+		// path can be "starting for" it; otherwise a Go file would count a
 		// TypeScript startup as pending for that path.
 		if root, ok := m.serverRootForPath(key.name, srvCfg, path); ok && root == key.root {
 			if _, ok := m.clients[key]; !ok {
@@ -1042,66 +1042,66 @@ func (m *Manager) DidOpen(ctx context.Context, path string, content string) {
 
 // DidChange sends didChange to all clients that handle path.
 func (m *Manager) DidChange(ctx context.Context, path string, content string) {
-	_ = m.DidChangeErr(ctx, path, content)
-}
-
-// DidChangeErr is like DidChange but returns the first notify error from any client.
-func (m *Manager) DidChangeErr(ctx context.Context, path string, content string) error {
-	_, err := m.DidChangeVersions(ctx, path, content)
-	return err
+	_, _ = m.DidChangeVersions(ctx, path, content)
 }
 
 // NotifyWatchedFileChanged sends workspace/didChangeWatchedFiles to the clients
 // that own path. This keeps language-server project graphs in sync
 // for file create/change/delete events, including newly created modules that are
-// imported by other files.
-func (m *Manager) NotifyWatchedFileChanged(ctx context.Context, path string, changeType pnprotocol.FileChangeType) error {
+// imported by other files. It returns the notification error of every failed
+// server, keyed by server name.
+func (m *Manager) NotifyWatchedFileChanged(ctx context.Context, path string, changeType pnprotocol.FileChangeType) map[string]error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	path = normalizeWaiterPath(path)
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
-	var first error
-	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
-		if err := c.NotifyWatchedFileChange(ctx, path, changeType); err != nil && first == nil {
-			first = err
+	errs := make(map[string]error)
+	m.forEachClientForPathLocked(path, func(key clientKey, c *Client) {
+		if err := c.NotifyWatchedFileChange(ctx, path, changeType); err != nil {
+			errs[key.name] = err
 		}
 	})
-	return first
+	return errs
 }
 
 // DidChangeVersions sends didChange to the clients that own path and returns the
-// document versions used by each server notification. The versions are used to
+// document versions used by each server notification plus the notification error
+// of every failed server, keyed by server name. The versions are used to
 // ignore stale publishDiagnostics snapshots when servers include diagnostic
 // versions. Keying by server name is safe because forEachClientForPathLocked
 // yields at most one instance per server for a given path.
-func (m *Manager) DidChangeVersions(ctx context.Context, path string, content string) (map[string]int32, error) {
+func (m *Manager) DidChangeVersions(ctx context.Context, path string, content string) (map[string]int32, map[string]error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 	versions := make(map[string]int32)
-	var first error
+	errs := make(map[string]error)
 	m.forEachClientForPathLocked(path, func(key clientKey, c *Client) {
 		version, err := c.DidChange(ctx, path, content)
-		if err == nil {
-			versions[key.name] = version
-		} else if first == nil {
-			first = err
+		if err != nil {
+			errs[key.name] = err
+			return
 		}
+		versions[key.name] = version
 	})
-	return versions, first
+	return versions, errs
 }
 
 // ResyncFile forwards content (the decoded file text, as write paths send it)
-// to every running client that owns path and already has the document open, sending didChange only when the content
-// differs from what that server last received. Servers that never opened the
-// file are skipped: opening documents belongs to Chord's write paths, and a
-// server without the document has no stale copy to correct. Failures are
-// logged, not returned, so a read never fails because language-server state
-// could not be refreshed.
+// to every running client that owns path and already has the document open,
+// sending didChange only when the content differs from what that server last
+// received. It never starts a server, so a read cannot trigger a launch and
+// the workspace file watching that comes with it. Servers that never opened
+// the file are skipped, because opening documents belongs to Chord's write
+// paths and a server without the document has no stale copy to correct.
+// Failures are logged, not returned, so a read never fails because
+// language-server state could not be refreshed; a confirmed disconnect
+// reclaims the instance and its orphaned diagnostics, and the next file write
+// starts it again.
 func (m *Manager) ResyncFile(ctx context.Context, path, content string) {
 	if m == nil {
 		return
@@ -1110,31 +1110,39 @@ func (m *Manager) ResyncFile(ctx context.Context, path, content string) {
 		ctx = context.Background()
 	}
 	path = normalizeWaiterPath(path)
+	disconnected := false
 	m.clientsMu.RLock()
-	defer m.clientsMu.RUnlock()
 	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
 		if _, err := c.ResyncFileIfChanged(ctx, path, content); err != nil {
 			log.Debugf("lsp: resync changed file failed path=%v name=%v error=%v", path, c.name, err)
+			if !c.IsRunning() {
+				disconnected = true
+			}
 		}
 	})
+	m.clientsMu.RUnlock()
+	if disconnected {
+		m.pruneExitedClientsForPath(ctx, path)
+	}
 }
 
 // NotifyDidSave sends didSave to the clients that own path, skipping servers that
-// did not declare save support during initialize. Returns the first notification
-// error; a failure is never fatal to the tool result.
-func (m *Manager) NotifyDidSave(ctx context.Context, path string, content string) error {
+// did not declare save support during initialize. Returns the notification error
+// of every failed server, keyed by server name; a failure is never fatal to the
+// tool result.
+func (m *Manager) NotifyDidSave(ctx context.Context, path string, content string) map[string]error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
-	var first error
-	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
-		if err := c.NotifyDidSave(ctx, path, content); err != nil && first == nil {
-			first = err
+	errs := make(map[string]error)
+	m.forEachClientForPathLocked(path, func(key clientKey, c *Client) {
+		if err := c.NotifyDidSave(ctx, path, content); err != nil {
+			errs[key.name] = err
 		}
 	})
-	return first
+	return errs
 }
 
 // DidClose sends didClose to all clients that handle path, clears cached diagnostics for that path,
@@ -1229,6 +1237,8 @@ func (m *Manager) AwaitWaiter(ctx context.Context, path string, ch chan diagnost
 }
 
 type diagnosticsWaitRequest struct {
+	// A nil map accepts any server. A non-nil map limits the wait to the
+	// listed servers, including when an event has no document version.
 	serverVersions map[string]int32
 	after          time.Time
 	settle         time.Duration
@@ -1278,8 +1288,9 @@ func (m *Manager) AwaitFreshWaiter(ctx context.Context, path string, ch chan dia
 }
 
 func diagnosticsEventFresh(ev diagnosticsEvent, req diagnosticsWaitRequest) bool {
-	if len(req.serverVersions) > 0 {
-		if want, ok := req.serverVersions[ev.serverID]; ok && ev.version != 0 && ev.version != want {
+	if req.serverVersions != nil {
+		want, ok := req.serverVersions[ev.serverID]
+		if !ok || ev.version != 0 && ev.version != want {
 			return false
 		}
 	}

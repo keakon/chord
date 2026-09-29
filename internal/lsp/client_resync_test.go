@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
+	"github.com/sourcegraph/jsonrpc2"
 
 	"github.com/keakon/chord/internal/config"
 )
@@ -174,5 +175,46 @@ func TestManagerResyncFileRoutesOnlyToOwningOpenClients(t *testing.T) {
 	mgr.ResyncFile(context.Background(), otherGoPath, "package other")
 	if len(goFake.didChangeURIs) != 1 {
 		t.Fatalf("unopened file sent didChange: %v", goFake.didChangeURIs)
+	}
+}
+
+// Reading must never launch a server: ResyncFile only talks to clients that are
+// already running, so a configured server with no instance stays unstarted.
+func TestManagerResyncFileNeverStartsServers(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
+		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
+	}}, root, nil)
+	defer stopManager(mgr)
+
+	mgr.ResyncFile(context.Background(), path, "package main")
+	mgr.clientsMu.RLock()
+	defer mgr.clientsMu.RUnlock()
+	if len(mgr.clients) != 0 || len(mgr.starting) != 0 {
+		t.Fatalf("resync started servers: clients=%d starting=%d", len(mgr.clients), len(mgr.starting))
+	}
+}
+
+// A resync that finds the connection gone reclaims the instance and drops the
+// diagnostics it published, so they are not shown as current; it does not
+// restart the server.
+func TestManagerResyncFileDisconnectReclaimsClient(t *testing.T) {
+	mgr, path, c := newAfterWriteTestManager(t)
+	fake := c.client.(*fakePowernapClient)
+	c.name = "gopls"
+	c.openFiles[path] = 1
+	c.diagnostics[protocol.DocumentURI(c.pathToURI(path))] = []protocol.Diagnostic{{Message: "stale diagnostic", Severity: 1}}
+	c.client = &failingNotificationClient{fakePowernapClient: fake, notify: func(context.Context) error { return jsonrpc2.ErrClosed }}
+
+	mgr.ResyncFile(context.Background(), path, "package main // changed")
+	mgr.clientsMu.RLock()
+	clients, starting := len(mgr.clients), len(mgr.starting)
+	mgr.clientsMu.RUnlock()
+	if clients != 0 || starting != 0 || fake.kills != 1 {
+		t.Fatalf("clients=%d starting=%d kills=%d", clients, starting, fake.kills)
+	}
+	if diags := mgr.currentFileDiagnostics(path); len(diags) != 0 {
+		t.Fatalf("stale diagnostics survived the disconnect: %v", diags)
 	}
 }

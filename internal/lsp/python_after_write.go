@@ -54,19 +54,10 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 	baseline := m.currentFileDiagnostics(absPath)
 	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
 	waiterCh := m.PrepareWaiter(absPath)
-	if notifyWatched {
-		if err := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); err != nil {
-			m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+err.Error())
-		}
-	}
-	after := time.Now()
-	syncToken := m.beginDiagnosticsSync(absPath)
-	serverVersions, err := afterWriteDidChange(m, ctx, absPath, content)
-	if err != nil {
-		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
-	}
-	if err := afterWriteDidSave(m, ctx, absPath, content); err != nil {
-		m.logLSPServiceNote(absPath, "Failed to notify language server about the saved file: "+err.Error())
+	sync := m.syncAfterWrite(ctx, absPath, content, changeType, notifyWatched)
+	base, wait := m.settleAfterWriteSyncFailure(ctx, absPath, waiterCh, sync, base)
+	if !wait {
+		return base
 	}
 
 	waitTimeout := diagnosticsWaitTimeout
@@ -74,9 +65,9 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 		waitTimeout = coldStartDiagnosticsWaitTimeout
 	}
 
-	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: serverVersions, after: after}, waitTimeout)
-	if err == nil && notified {
-		m.confirmDiagnosticsSync(syncToken)
+	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: sync.serverVersions, after: sync.after}, waitTimeout)
+	if notified {
+		m.confirmDiagnosticsSync(sync.token)
 	}
 	if !notified && ctx.Err() == nil {
 		// A timeout is logged every time; the model hears about the first one
@@ -104,8 +95,8 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 func (m *Manager) afterWritePythonQuickResult(ctx context.Context, absPath, content string, pyCfg config.PythonDiagnosticsConfig, selection pythonDiagnosticSelection, base string, ranges []EditRange, changeType pnprotocol.FileChangeType, notifyWatched bool, displayBaseDir string) string {
 	watchedNotified := false
 	if notifyWatched && afterWriteHasReadyClient(m, absPath) {
-		if err := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); err != nil {
-			m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+err.Error())
+		if errs := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); len(errs) > 0 {
+			m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+formatServerErrors(errs))
 		} else {
 			watchedNotified = true
 		}

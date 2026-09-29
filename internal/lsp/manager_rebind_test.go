@@ -212,9 +212,9 @@ func collectDiagnostics(t *testing.T, ctx context.Context, mgr *Manager, path st
 	}
 	ch := mgr.PrepareWaiter(path)
 	after := time.Now()
-	versions, err := mgr.DidChangeVersions(ctx, path, string(content))
-	if err != nil {
-		t.Fatalf("sync %s: %v", path, err)
+	versions, errs := mgr.DidChangeVersions(ctx, path, string(content))
+	if len(errs) != 0 {
+		t.Fatalf("sync %s: %v", path, errs)
 	}
 	diags, notified := mgr.AwaitFreshWaiter(ctx, path, ch, diagnosticsWaitRequest{serverVersions: versions, after: after}, 30*time.Second)
 	if !notified && len(diags) == 0 {

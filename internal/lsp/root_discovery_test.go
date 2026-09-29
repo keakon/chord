@@ -242,9 +242,9 @@ func TestNotificationsGoOnlyToNearestRootClient(t *testing.T) {
 	m.clientsMu.Unlock()
 
 	nestedPath := filepath.Join(frontend, "src", "a.ts")
-	versions, err := m.DidChangeVersions(context.Background(), nestedPath, "export {}")
-	if err != nil {
-		t.Fatalf("DidChangeVersions() error = %v", err)
+	versions, errs := m.DidChangeVersions(context.Background(), nestedPath, "export {}")
+	if len(errs) != 0 {
+		t.Fatalf("DidChangeVersions() errors = %v", errs)
 	}
 	if len(versions) != 1 {
 		t.Fatalf("versions = %v, want exactly one entry for the owning instance", versions)
@@ -258,8 +258,8 @@ func TestNotificationsGoOnlyToNearestRootClient(t *testing.T) {
 
 	// A file the nested instance cannot serve still reaches the root instance.
 	rootPath := filepath.Join(root, "b.ts")
-	if _, err := m.DidChangeVersions(context.Background(), rootPath, "export {}"); err != nil {
-		t.Fatalf("DidChangeVersions(root file) error = %v", err)
+	if _, errs := m.DidChangeVersions(context.Background(), rootPath, "export {}"); len(errs) != 0 {
+		t.Fatalf("DidChangeVersions(root file) errors = %v", errs)
 	}
 	if got := rootFake.syncedURIs(); len(got) != 1 {
 		t.Fatalf("repository-root instance sync count = %d, want 1", len(got))

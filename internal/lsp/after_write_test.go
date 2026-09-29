@@ -150,7 +150,7 @@ func TestAfterFileWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *test
 	var didChangeErr error
 	var notifyErr error
 	var awaitErr error
-	afterWriteNotifyWatchedFileChanged = func(_ *Manager, gotCtx context.Context, gotPath string, changeType protocol.FileChangeType) error {
+	afterWriteNotifyWatchedFileChanged = func(_ *Manager, gotCtx context.Context, gotPath string, changeType protocol.FileChangeType) map[string]error {
 		if gotPath != path {
 			t.Fatalf("watched-file path = %q, want %q", gotPath, path)
 		}
@@ -160,7 +160,7 @@ func TestAfterFileWriteToolResultPassesCallerContextToDidChangeAndWaiter(t *test
 		notifyErr = gotCtx.Err()
 		return nil
 	}
-	afterWriteDidChange = func(_ *Manager, gotCtx context.Context, gotPath string, content string) (map[string]int32, error) {
+	afterWriteDidChange = func(_ *Manager, gotCtx context.Context, gotPath string, content string) (map[string]int32, map[string]error) {
 		if gotPath != path {
 			t.Fatalf("didChange path = %q, want %q", gotPath, path)
 		}
@@ -206,7 +206,7 @@ func TestAfterFileWriteToolResultNotifiesWatchedFileBeforeDidChange(t *testing.T
 	})
 
 	var order []string
-	afterWriteNotifyWatchedFileChanged = func(_ *Manager, _ context.Context, gotPath string, changeType protocol.FileChangeType) error {
+	afterWriteNotifyWatchedFileChanged = func(_ *Manager, _ context.Context, gotPath string, changeType protocol.FileChangeType) map[string]error {
 		if gotPath != path {
 			t.Fatalf("watched-file path = %q, want %q", gotPath, path)
 		}
@@ -216,7 +216,7 @@ func TestAfterFileWriteToolResultNotifiesWatchedFileBeforeDidChange(t *testing.T
 		order = append(order, "watched")
 		return nil
 	}
-	afterWriteDidChange = func(_ *Manager, _ context.Context, gotPath string, content string) (map[string]int32, error) {
+	afterWriteDidChange = func(_ *Manager, _ context.Context, gotPath string, content string) (map[string]int32, map[string]error) {
 		if gotPath != path {
 			t.Fatalf("didChange path = %q, want %q", gotPath, path)
 		}
@@ -271,11 +271,11 @@ func TestAfterFileWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
 		t.Fatal("disabled gopls should not be waited on after write")
 		return nil, false
 	}
-	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, error) {
+	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, map[string]error) {
 		t.Fatal("disabled gopls should not receive didChange after write")
 		return nil, nil
 	}
-	afterWriteNotifyWatchedFileChanged = func(_ *Manager, _ context.Context, _ string, _ protocol.FileChangeType) error {
+	afterWriteNotifyWatchedFileChanged = func(_ *Manager, _ context.Context, _ string, _ protocol.FileChangeType) map[string]error {
 		t.Fatal("disabled gopls should not receive watched-file notifications after write")
 		return nil
 	}

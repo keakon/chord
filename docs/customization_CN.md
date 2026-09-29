@@ -184,6 +184,8 @@ lsp:
 
 `options` 是 Chord 应答服务器 `workspace/configuration` 请求时返回的 workspace settings，键名就是 section 名：gopls 的 `staticcheck`、`analyses` 等设置要放在 `gopls` 键下，Pyright 的设置用 `python`、`python.analysis`。平铺在顶层不会送到服务器——section 找不到对应键时，Chord 返回空对象。`init_options` 只作为 LSP 初始化元数据发送，并不是 gopls settings 的正确位置。可用的 analyzer 名称及其默认值取决于本机安装的 gopls 版本。较新的 gopls 已默认启用大多数 `modernize` analyzer；显式设为 `true` 可以记录并保留项目依赖的检查，设为 `false` 则可关闭单项检查。修改 Go 文件后，Chord 会透传 gopls 的 information 和 hint 诊断，但在默认最多 10 条的输出额度内，error 和 warning 会优先展示。
 
+gopls 的设置是一层平铺的 map。gopls 文档里的 `build`、`ui` 只是分组名，不是键：`directoryFilters` 要直接写在 `gopls` 下（也可以写成带点的 `build.directoryFilters`），嵌套的 `build:` 会被 gopls 当作未知设置拒绝。`directoryFilters` 限定 gopls 从哪些目录加载包，适合排除体积大且不含 Go 代码的子目录，例如前端的 `web/`。配置的清单会替换默认的 `["-**/node_modules"]`，需要保留这一项；以 `.` 或 `_` 开头的目录本来就会跳过。这些过滤规则不作用于 gopls 自己的文件监听（`fileWatcher`）。`fileWatcher` 保持默认的 `off` 即可：`fsnotify` 会监听工作区里的每个目录，在 macOS 上可能耗尽文件描述符。
+
 ```yaml
 lsp:
   gopls:
@@ -225,7 +227,7 @@ TypeScript 7 不再随包提供 `lib/tsserver.js`（语言服务并入了原生�
 
 Chord 根据配置中的服务器名或可执行文件名识别类型：`typescript` / `typescript-language-server`、`pyright` / `pyright-langserver`、`basedpyright` / `basedpyright-langserver`，也支持 Windows 可执行文件后缀。使用自定义包装脚本时，保留这些服务器名，或显式设置 `root_markers`。目录查找始终限制在项目根内。
 
-对匹配的文件，Chord 会按以下规则确定该语言服务器的 workspace root：从文件所在目录向上，取最近一个包含任一 `root_markers` 的目录（不越过项目根）；没有匹配则回退到项目根。发现是按文件进行的，所以不同文件可能落在不同的根上，同一个服务器名也能按根各起一个实例。这样嵌套前端工程（例如仓库根本身是后端项目、前端在 `frontend/` 子目录）就能得到 root 定位到该子包的语言服务器，直接在包内找它的 `node_modules`、`tsconfig.json` 等包级配置。单个服务器名最多保留 8 个存活实例；monorepo 中标记目录超出这个数量时，最久未使用的实例会被关闭，下次读取其根下的文件时再重启。
+对匹配的文件，Chord 会按以下规则确定该语言服务器的 workspace root：从文件所在目录向上，取最近一个包含任一 `root_markers` 的目录（不越过项目根）；没有匹配则回退到项目根。发现是按文件进行的，所以不同文件可能落在不同的根上，同一个服务器名也能按根各起一个实例。这样嵌套前端工程（例如仓库根本身是后端项目、前端在 `frontend/` 子目录）就能得到 root 定位到该子包的语言服务器，直接在包内找它的 `node_modules`、`tsconfig.json` 等包级配置。单个服务器名最多保留 8 个存活实例；monorepo 中标记目录超出这个数量时，最久未使用的实例会被关闭，下次写入其根下的文件时再重启。
 
 Python、TypeScript 和 JavaScript 都会按文件发现最近的 workspace root；同一服务器名可以为不同根目录缓存独立实例。
 

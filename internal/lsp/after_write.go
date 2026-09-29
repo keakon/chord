@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -35,13 +34,13 @@ var (
 	afterWriteWaitForClient = func(m *Manager, ctx context.Context, path string, timeout time.Duration) (*Client, bool) {
 		return m.waitForClientForPath(ctx, path, timeout)
 	}
-	afterWriteDidChange = func(m *Manager, ctx context.Context, path string, content string) (map[string]int32, error) {
+	afterWriteDidChange = func(m *Manager, ctx context.Context, path string, content string) (map[string]int32, map[string]error) {
 		return m.DidChangeVersions(ctx, path, content)
 	}
-	afterWriteDidSave = func(m *Manager, ctx context.Context, path string, content string) error {
+	afterWriteDidSave = func(m *Manager, ctx context.Context, path string, content string) map[string]error {
 		return m.NotifyDidSave(ctx, path, content)
 	}
-	afterWriteNotifyWatchedFileChanged = func(m *Manager, ctx context.Context, path string, changeType pnprotocol.FileChangeType) error {
+	afterWriteNotifyWatchedFileChanged = func(m *Manager, ctx context.Context, path string, changeType pnprotocol.FileChangeType) map[string]error {
 		return m.NotifyWatchedFileChanged(ctx, path, changeType)
 	}
 	afterWriteAwaitWaiter = func(m *Manager, ctx context.Context, path string, ch chan diagnosticsEvent, req diagnosticsWaitRequest, timeout time.Duration) ([]Diagnostic, bool) {
@@ -87,37 +86,9 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 
 	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
 	waiterCh := m.PrepareWaiter(absPath)
-	var syncErr error
-	if err := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); err != nil {
-		syncErr = errors.Join(syncErr, err)
-		m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+err.Error())
-	}
-	after := time.Now()
-	syncToken := m.beginDiagnosticsSync(absPath)
-	serverVersions, err := afterWriteDidChange(m, ctx, absPath, content)
-	if err != nil {
-		syncErr = errors.Join(syncErr, err)
-		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
-	}
-	if err := afterWriteDidSave(m, ctx, absPath, content); err != nil {
-		syncErr = errors.Join(syncErr, err)
-		m.logLSPServiceNote(absPath, "Failed to notify language server about the saved file: "+err.Error())
-	}
-	if syncErr != nil {
-		// Failed notifications cannot produce reliable diagnostics for this
-		// write. Do not wait out a timeout or present cached results as fresh.
-		m.waitersMu.Lock()
-		m.removeWaiter(absPath, waiterCh)
-		m.waitersMu.Unlock()
-		dead := m.pruneExitedClientsForPath(ctx, absPath)
-		if ctx.Err() == nil {
-			if len(dead) == 0 {
-				base = appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationSync, "", "file synchronization failed"))
-			}
-			for _, name := range dead {
-				base = appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationExited, name, "connection lost; retrying on the next file operation"))
-			}
-		}
+	sync := m.syncAfterWrite(ctx, absPath, content, changeType, true)
+	base, wait := m.settleAfterWriteSyncFailure(ctx, absPath, waiterCh, sync, base)
+	if !wait {
 		return base
 	}
 
@@ -126,9 +97,9 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 		waitTimeout = coldStartDiagnosticsWaitTimeout
 	}
 
-	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: serverVersions, after: after}, waitTimeout)
-	if err == nil && notified {
-		m.confirmDiagnosticsSync(syncToken)
+	_, notified := afterWriteAwaitWaiter(m, ctx, absPath, waiterCh, diagnosticsWaitRequest{serverVersions: sync.serverVersions, after: sync.after}, waitTimeout)
+	if notified {
+		m.confirmDiagnosticsSync(sync.token)
 	}
 	if !notified && ctx.Err() == nil {
 		// A timeout is logged every time; the model hears about the first one

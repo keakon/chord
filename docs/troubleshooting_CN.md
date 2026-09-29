@@ -173,9 +173,9 @@ Chord 会在会话空闲时主动卸载空闲的 LSP / MCP 运行时资源，以
 - 检查是否通过 `diagnostics.enabled: false` 关闭了工具后诊断
 - 如果工具结果里出现 `LSP diagnostics unavailable for this edit (<server>[: <detail>]); do not treat this edit as verified.`，说明 Chord 没能拿到诊断：括号里的 server 未启动、仍在启动、或已退出正在重启，或者等待窗口内没有任何 server 发布诊断（冷启动等待更长，此时括号里是 `language server: no diagnostics within …`）。原因见括号里的细节或日志。启动失败和退出每个 server 每会话最多提示一行，等待超时每会话最多提示一行；仍在启动的 server 在就绪前每次编辑都会提示。
 
-文件同步通知失败时，Chord 会说明诊断不可用并跳过等待，不把旧诊断当成本次验证结果。确认连接断开后，会移除对应服务器实例及无其他实例提供的旧诊断，下一次文件操作可重新启动服务器。取消请求或普通协议错误本身不会被判定为断连。
+文件同步通知失败时，Chord 会说明诊断不可用并跳过等待，不把旧诊断当成本次验证结果。确认连接断开后，会移除对应服务器实例及无其他实例提供的旧诊断，下一次写文件时会重新启动服务器。取消请求或普通协议错误本身不会被判定为断连。
 
-Go 的 `No packages found for open file` 可能是包加载失败的后果，应先检查 LSP 日志，而不是修改模块路径。如果日志出现 `too many open files`，且 `lsp.gopls.options.gopls.fileWatcher` 配置为 `fsnotify`，可改为 `poll` 后重启受影响的会话。macOS 上对大型工作区使用 `fsnotify` 可能耗尽文件描述符。文件编辑成功不代表 LSP 已完成诊断。
+Go 的 `No packages found for open file` 可能是包加载失败的后果，应先检查 LSP 日志，而不是修改模块路径。如果日志出现 `too many open files`，且配置了 `lsp.gopls.options.gopls.fileWatcher`，删掉这项让 gopls 回到默认的 `off`，再重启受影响的会话。macOS 上对大型工作区使用 `fsnotify` 可能耗尽文件描述符，`poll` 同样会遍历工作区里的每个目录。文件编辑成功不代表 LSP 已完成诊断。
 
 Python 还需要注意：
 

@@ -77,11 +77,11 @@ func TestNotifyWatchedFileChangedRoutesByFileTypeAcrossLanguages(t *testing.T) {
 
 	goPath := filepath.Join(root, "main.go")
 	jsPath := filepath.Join(root, "src", "main.js")
-	if err := mgr.NotifyWatchedFileChanged(context.Background(), goPath, WatchedFileCreated); err != nil {
-		t.Fatalf("NotifyWatchedFileChanged(go) error = %v", err)
+	if errs := mgr.NotifyWatchedFileChanged(context.Background(), goPath, WatchedFileCreated); len(errs) != 0 {
+		t.Fatalf("NotifyWatchedFileChanged(go) errors = %v", errs)
 	}
-	if err := mgr.NotifyWatchedFileChanged(context.Background(), jsPath, WatchedFileChanged); err != nil {
-		t.Fatalf("NotifyWatchedFileChanged(js) error = %v", err)
+	if errs := mgr.NotifyWatchedFileChanged(context.Background(), jsPath, WatchedFileChanged); len(errs) != 0 {
+		t.Fatalf("NotifyWatchedFileChanged(js) errors = %v", errs)
 	}
 
 	if len(goFake.watchedFileEvents) != 1 {
@@ -105,8 +105,8 @@ func TestNotifyWatchedFileChangedSendsDeletedEvent(t *testing.T) {
 	mgr.clients[testKey(mgr, "rust-analyzer")] = &Client{client: fake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".rs"}}}
 
 	path := filepath.Join(root, "src", "lib.rs")
-	if err := mgr.NotifyWatchedFileChanged(context.Background(), path, WatchedFileDeleted); err != nil {
-		t.Fatalf("NotifyWatchedFileChanged(delete) error = %v", err)
+	if errs := mgr.NotifyWatchedFileChanged(context.Background(), path, WatchedFileDeleted); len(errs) != 0 {
+		t.Fatalf("NotifyWatchedFileChanged(delete) errors = %v", errs)
 	}
 	if len(fake.watchedFileEvents) != 1 {
 		t.Fatalf("watched events = %+v, want 1", fake.watchedFileEvents)

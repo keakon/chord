@@ -36,24 +36,14 @@ func TestReadToolReportsHashFromReturnedBytes(t *testing.T) {
 	}
 }
 
-type recordingLSPStarter struct {
-	ctx   context.Context
-	path  string
-	calls int
-
+type recordingReadLSP struct {
 	resyncCalls   int
 	resyncCtx     context.Context
 	resyncPath    string
 	resyncContent string
 }
 
-func (r *recordingLSPStarter) Start(ctx context.Context, path string) {
-	r.ctx = ctx
-	r.path = path
-	r.calls++
-}
-
-func (r *recordingLSPStarter) ResyncFile(ctx context.Context, path, content string) {
+func (r *recordingReadLSP) ResyncFile(ctx context.Context, path, content string) {
 	r.resyncCalls++
 	r.resyncCtx = ctx
 	r.resyncPath = path
@@ -338,7 +328,7 @@ func TestReadToolExecuteNormalizesCRLFOutput(t *testing.T) {
 	}
 }
 
-func TestReadToolWarmupUsesProvidedContextAndAbsolutePath(t *testing.T) {
+func TestReadToolResyncUsesProvidedContextAndAbsolutePath(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -358,8 +348,8 @@ func TestReadToolWarmupUsesProvidedContextAndAbsolutePath(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	starter := &recordingLSPStarter{}
-	tool := ReadTool{LSP: starter}
+	recorder := &recordingReadLSP{}
+	tool := ReadTool{LSP: recorder}
 	raw := json.RawMessage(`{"path":"sample.txt"}`)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -372,30 +362,21 @@ func TestReadToolWarmupUsesProvidedContextAndAbsolutePath(t *testing.T) {
 	if got == "" {
 		t.Fatal("ReadTool.Execute returned empty content")
 	}
-	if starter.calls != 1 {
-		t.Fatalf("Start calls = %d, want 1", starter.calls)
-	}
-	if starter.ctx != ctx {
-		t.Fatalf("Start context = %v, want ctx", starter.ctx)
-	}
 	wantPath, err := filepath.Abs("sample.txt")
 	if err != nil {
 		t.Fatalf("Abs sample.txt: %v", err)
 	}
-	if starter.path != wantPath {
-		t.Fatalf("Start path = %q, want %q", starter.path, wantPath)
+	if recorder.resyncCalls != 1 {
+		t.Fatalf("ResyncFile calls = %d, want 1", recorder.resyncCalls)
 	}
-	if starter.resyncCalls != 1 {
-		t.Fatalf("ResyncFile calls = %d, want 1", starter.resyncCalls)
+	if recorder.resyncCtx != ctx {
+		t.Fatalf("ResyncFile context = %v, want ctx", recorder.resyncCtx)
 	}
-	if starter.resyncCtx != ctx {
-		t.Fatalf("ResyncFile context = %v, want ctx", starter.resyncCtx)
+	if recorder.resyncPath != wantPath {
+		t.Fatalf("ResyncFile path = %q, want %q", recorder.resyncPath, wantPath)
 	}
-	if starter.resyncPath != wantPath {
-		t.Fatalf("ResyncFile path = %q, want %q", starter.resyncPath, wantPath)
-	}
-	if starter.resyncContent != "hello\nworld\n" {
-		t.Fatalf("ResyncFile content = %q, want the file text", starter.resyncContent)
+	if recorder.resyncContent != "hello\nworld\n" {
+		t.Fatalf("ResyncFile content = %q, want the file text", recorder.resyncContent)
 	}
 }
 
@@ -417,13 +398,13 @@ func TestReadToolResyncsDecodedText(t *testing.T) {
 			if err := os.WriteFile(path, tc.raw, 0o644); err != nil {
 				t.Fatalf("WriteFile: %v", err)
 			}
-			starter := &recordingLSPStarter{}
+			recorder := &recordingReadLSP{}
 			args, _ := json.Marshal(map[string]string{"path": path})
-			if _, err := (ReadTool{LSP: starter}).Execute(context.Background(), args); err != nil {
+			if _, err := (ReadTool{LSP: recorder}).Execute(context.Background(), args); err != nil {
 				t.Fatalf("ReadTool.Execute: %v", err)
 			}
-			if starter.resyncContent != "hello\n" {
-				t.Fatalf("ResyncFile content = %q, want the decoded text %q", starter.resyncContent, "hello\n")
+			if recorder.resyncContent != "hello\n" {
+				t.Fatalf("ResyncFile content = %q, want the decoded text %q", recorder.resyncContent, "hello\n")
 			}
 		})
 	}

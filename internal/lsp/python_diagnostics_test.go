@@ -249,7 +249,7 @@ func TestPythonQuickDiagnosticsNotifyReadyLSPClientWithoutSemanticSync(t *testin
 		t.Fatal("quick diagnostics should not wait for semantic LSP clients")
 		return nil, false
 	}
-	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, error) {
+	afterWriteDidChange = func(_ *Manager, _ context.Context, _ string, _ string) (map[string]int32, map[string]error) {
 		t.Fatal("quick diagnostics should not send didChange semantic sync")
 		return nil, nil
 	}
