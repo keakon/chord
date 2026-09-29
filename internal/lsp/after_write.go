@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -86,17 +87,38 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 
 	// Register the waiter BEFORE sending didChange so we cannot miss a fast response.
 	waiterCh := m.PrepareWaiter(absPath)
+	var syncErr error
 	if err := afterWriteNotifyWatchedFileChanged(m, ctx, absPath, changeType); err != nil {
+		syncErr = errors.Join(syncErr, err)
 		m.logLSPServiceNote(absPath, "Failed to notify language server about workspace file change: "+err.Error())
 	}
 	after := time.Now()
 	syncToken := m.beginDiagnosticsSync(absPath)
 	serverVersions, err := afterWriteDidChange(m, ctx, absPath, content)
 	if err != nil {
+		syncErr = errors.Join(syncErr, err)
 		m.logLSPServiceNote(absPath, "Failed to sync buffer to language server: "+err.Error())
 	}
 	if err := afterWriteDidSave(m, ctx, absPath, content); err != nil {
+		syncErr = errors.Join(syncErr, err)
 		m.logLSPServiceNote(absPath, "Failed to notify language server about the saved file: "+err.Error())
+	}
+	if syncErr != nil {
+		// Failed notifications cannot produce reliable diagnostics for this
+		// write. Do not wait out a timeout or present cached results as fresh.
+		m.waitersMu.Lock()
+		m.removeWaiter(absPath, waiterCh)
+		m.waitersMu.Unlock()
+		dead := m.pruneExitedClientsForPath(ctx, absPath)
+		if ctx.Err() == nil {
+			if len(dead) == 0 {
+				base = appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationSync, "", "file synchronization failed"))
+			}
+			for _, name := range dead {
+				base = appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationExited, name, "connection lost; retrying on the next file operation"))
+			}
+		}
+		return base
 	}
 
 	waitTimeout := diagnosticsWaitTimeout
@@ -131,6 +153,7 @@ const (
 	lspDegradationStart   = "start"
 	lspDegradationExited  = "exited"
 	lspDegradationTimeout = "timeout"
+	lspDegradationSync    = "sync"
 )
 
 // lspDegradationNotePrefix opens every model-facing degradation line, so

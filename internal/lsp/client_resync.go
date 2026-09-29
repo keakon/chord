@@ -56,7 +56,7 @@ func (c *Client) ResyncFileIfChanged(ctx context.Context, path, content string) 
 	changes := []protocol.TextDocumentContentChangeEvent{
 		{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}},
 	}
-	if err := c.client.NotifyDidChangeTextDocument(ctx, c.pathToURI(path), int(version), changes); err != nil {
+	if err := c.observeTransportError(c.client.NotifyDidChangeTextDocument(ctx, c.pathToURI(path), int(version), changes)); err != nil {
 		return false, err
 	}
 	c.recordSyncedContent(path, content)

@@ -55,7 +55,7 @@ func (c *Client) NotifyDidSave(ctx context.Context, path string, content string)
 	if options.IncludeText {
 		text = &content
 	}
-	return c.client.NotifyDidSaveTextDocument(ctx, c.pathToURI(path), text)
+	return c.observeTransportError(c.client.NotifyDidSaveTextDocument(ctx, c.pathToURI(path), text))
 }
 
 // handleRegisterCapability records textDocument/didSave registrations and

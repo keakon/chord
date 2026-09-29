@@ -51,8 +51,9 @@ type Client struct {
 	// manager may drop its map lock before using a collected *Client to avoid a
 	// cross-manager deadlock, so the client itself must reject or serialize
 	// concurrent DidOpen/DidChange/DidClose/Close calls against the same process.
-	lifecycleMu sync.Mutex
-	closed      bool
+	lifecycleMu     sync.Mutex
+	closed          bool
+	transportFailed atomic.Bool
 
 	// lastUsed is the unix-nano timestamp of the most recent access, used to
 	// evict the least-recently-used instance when a server exceeds its
@@ -156,7 +157,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		return fmt.Errorf("initialize lsp client: %w", err)
 	}
 	settings := c.workspaceSettings()
-	if err := c.client.NotifyWorkspaceDidChangeConfiguration(ctx, settings); err != nil {
+	if err := c.observeTransportError(c.client.NotifyWorkspaceDidChangeConfiguration(ctx, settings)); err != nil {
 		return fmt.Errorf("notify workspace configuration: %w", err)
 	}
 	return nil
@@ -481,6 +482,11 @@ func (c *Client) Close(ctx context.Context) error {
 	if c.closed {
 		return nil
 	}
+	if c.transportFailed.Load() {
+		c.client.Kill()
+		c.closed = true
+		return nil
+	}
 	if err := c.client.Shutdown(ctx); err != nil {
 		log.Warnf("lsp: shutdown client error=%v", err)
 		if ctx != nil && ctx.Err() != nil {
@@ -504,7 +510,7 @@ func (c *Client) Close(ctx context.Context) error {
 
 // IsRunning returns whether the connection is still active.
 func (c *Client) IsRunning() bool {
-	return c.client != nil && c.client.IsRunning()
+	return c.client != nil && !c.transportFailed.Load() && c.client.IsRunning()
 }
 
 // touch records that this client was used at time now (unix nano), feeding the
@@ -550,7 +556,7 @@ func (c *Client) DidOpen(ctx context.Context, path string, content string) (int3
 		c.openFiles[path] = v
 		c.openFilesMu.Unlock()
 		changes := []protocol.TextDocumentContentChangeEvent{{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}}}
-		err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
+		err := c.observeTransportError(c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes))
 		if err == nil {
 			c.recordSyncedContent(path, content)
 		}
@@ -563,7 +569,7 @@ func (c *Client) DidOpen(ctx context.Context, path string, content string) (int3
 	if lang == "" {
 		lang = "plaintext"
 	}
-	if err := c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content); err != nil {
+	if err := c.observeTransportError(c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content)); err != nil {
 		return 1, err
 	}
 	c.recordSyncedContent(path, content)
@@ -588,7 +594,7 @@ func (c *Client) DidChange(ctx context.Context, path string, content string) (in
 		if lang == "" {
 			lang = "plaintext"
 		}
-		if err := c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content); err != nil {
+		if err := c.observeTransportError(c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content)); err != nil {
 			return 1, err
 		}
 		c.recordSyncedContent(path, content)
@@ -601,7 +607,7 @@ func (c *Client) DidChange(ctx context.Context, path string, content string) (in
 	changes := []protocol.TextDocumentContentChangeEvent{
 		{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}},
 	}
-	err := c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes)
+	err := c.observeTransportError(c.client.NotifyDidChangeTextDocument(ctx, uri, int(v), changes))
 	if err == nil {
 		c.recordSyncedContent(path, content)
 	}
@@ -614,9 +620,9 @@ func (c *Client) NotifyWatchedFileChange(ctx context.Context, path string, chang
 	if c.closed {
 		return nil
 	}
-	return c.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
+	return c.observeTransportError(c.client.NotifyDidChangeWatchedFiles(ctx, []protocol.FileEvent{
 		{URI: protocol.DocumentURI(c.pathToURI(path)), Type: changeType},
-	})
+	}))
 }
 
 // DidClose sends didClose for the file if it is open, then forgets the local open-file version.
@@ -636,7 +642,7 @@ func (c *Client) DidClose(ctx context.Context, path string) error {
 	if !ok {
 		return nil
 	}
-	return c.client.NotifyDidCloseTextDocument(ctx, c.pathToURI(path))
+	return c.observeTransportError(c.client.NotifyDidCloseTextDocument(ctx, c.pathToURI(path)))
 }
 
 // GetDiagnostics returns a copy of diagnostics for the given path (or all if path is empty).
@@ -672,7 +678,7 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	c.syncedDigest = make(map[string][sha256.Size]byte)
 	c.openFilesMu.Unlock()
 	for _, p := range paths {
-		_ = c.client.NotifyDidCloseTextDocument(ctx, c.pathToURI(p))
+		_ = c.observeTransportError(c.client.NotifyDidCloseTextDocument(ctx, c.pathToURI(p)))
 	}
 }
 
@@ -689,12 +695,19 @@ func handleApplyEdit(_ context.Context, _ string, params json.RawMessage) (any, 
 	return protocol.ApplyWorkspaceEditResult{Applied: false, FailureReason: reason}, nil
 }
 
-// WaitForServerReady polls IsRunning until true or timeout.
+// WaitForServerReady polls IsRunning until true or timeout. A transport
+// failure is terminal for the connection, so once it is observed IsRunning can
+// never turn true again; polling would only burn the whole timeout before the
+// caller's continue-anyway fallback, so the same timeout outcome is returned
+// immediately.
 func (c *Client) WaitForServerReady(ctx context.Context, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if c.IsRunning() {
 			return nil
+		}
+		if c.transportFailed.Load() {
+			return fmt.Errorf("timeout waiting for LSP server %s", c.name)
 		}
 		select {
 		case <-ctx.Done():

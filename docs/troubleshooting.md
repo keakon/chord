@@ -196,6 +196,10 @@ If you configured LSP but do not see diagnostics after writing files:
 - check whether `diagnostics.enabled: false` turned off post-tool diagnostics
 - if the tool result carries `LSP diagnostics unavailable for this edit (<server>[: <detail>]); do not treat this edit as verified.`, Chord could not obtain diagnostics: the server named in the parentheses did not start, is still starting, or exited and is being restarted, or no server published anything within the wait window (cold starts wait longer; this case reads `language server: no diagnostics within …`). The parenthesized detail or the log has the cause. A start failure or exit appears at most once per server per session, a wait timeout at most once per session, and a server that is still starting is named on every edit until it is up.
 
+When a file notification fails, Chord reports diagnostics unavailable and skips the wait instead of presenting old diagnostics as verification. A confirmed transport disconnect removes the affected server instance and its orphaned diagnostics; the next file operation can restart it. Cancellation or a rejected protocol request alone does not mark the server disconnected.
+
+For Go, `No packages found for open file` may be a consequence of package loading failure. Check the LSP log before changing module paths. If it reports `too many open files` and `lsp.gopls.options.gopls.fileWatcher` is `fsnotify`, try `poll` and restart the affected session. On macOS, watching a large workspace with `fsnotify` can exhaust file descriptors. File editing can still succeed while LSP diagnostics are unavailable.
+
 For Python specifically:
 
 - Small files use `diagnostics.python.semantic_backend` (usually `lsp.pyright`). Make sure `diagnostics.python.semantic_backend.server` matches the server key under `lsp`.
