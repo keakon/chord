@@ -885,11 +885,13 @@ web_fetch:
 ```yaml
 memory:
   enabled: true
+  model_pool: memory-extract
 ```
 
 | 字段 | 默认值 | 说明 |
 |------|--------|------|
 | `enabled` | `false` | 为本机 + 当前项目开启自动记忆抽取。开启后，冻结的会话可能被发送给模型，并自动写入 `MEMORY.md` / `.chord/memory/records/`，这些都是普通项目文件。关闭或未设置时，Chord 不会把历史发送给模型、不写记忆文件，但仍会加载已有的 `MEMORY.md`。 |
+| `model_pool` | *（未设置）* | 用于抽取请求的 `model_pools` 条目名，替代主模型池。可独立选择记忆抽取的模型和推理设置。未设置时，抽取使用主模型池。两种方式都遵循对应模型的推理配置；未配置 effort 时不额外覆盖，沿用服务商默认行为。配置的池必须已在 `model_pools` 中定义，否则抽取会以指明缺失池名的 setup 失败停止。 |
 
 ### 优先级
 
