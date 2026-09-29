@@ -71,7 +71,7 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	lines := make([]string, 0, 12)
 	lines = append(lines, "- Prefer the smallest safe number of tool calls. If one tool call can complete the task clearly and safely, do not split it into multiple steps.")
 	if len(discoveryTools) > 0 || hasVisibleTool(visible, tools.NameRead) {
-		lines = append(lines, "- Minimize LLM round trips: a response that stops after a single lookup spends one full model round trip per lookup. When two or more read-only tool calls are independent (searches for different symbols, reads of different files or ranges, separate path lookups), issue them together in the same response — they execute in parallel. Use serial calls only when a later call depends on an earlier result, the call mutates state, or a command is intentionally high-cost.")
+		lines = append(lines, "- Before issuing a lookup, identify the independent read-only calls needed for the current step whose arguments are already known. Issue those calls together in the same response so they can execute in parallel: for example, read several known files or ranges, or search for independent symbols, without waiting for one result at a time. If a search must first reveal a path or line range, wait for that result before constructing the dependent read. Preserve ordering around state-changing calls and keep expensive commands deliberate. Do not add unrelated lookups or enlarge read ranges merely to fill a batch.")
 	}
 	if hasVisibleTool(visible, tools.NameRead) {
 		lines = append(lines, "- Use "+toolPromptName(tools.NameRead)+" for file contents when the target path is already known or has been verified.")
