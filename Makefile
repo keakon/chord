@@ -19,11 +19,13 @@ MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/moder
 
 ci: fmt-check deps-check test-cover race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check
 
+# fmt / fmt-check cover every Go file Git tracks or would add. Ignored private
+# trees (for example .chord/) must never block the gate or get rewritten by it.
 fmt:
-	$(GOIMPORTS) -w -local $(LOCAL) .
+	./scripts/goimports_files.sh $(GOIMPORTS) -w -local $(LOCAL)
 
 fmt-check:
-	@out="$$( $(GOIMPORTS) -l -local $(LOCAL) . )"; \
+	@out="$$( ./scripts/goimports_files.sh $(GOIMPORTS) -l -local $(LOCAL) )" || exit $$?; \
 	if [[ -n "$$out" ]]; then \
 		echo "goimports formatting needed:"; \
 		echo "$$out"; \
