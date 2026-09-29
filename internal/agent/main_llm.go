@@ -575,7 +575,6 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 			a.requestBatches.rollback(a.sessionEpoch, requestBatch)
 		}
 	}()
-	messages = a.omitStaleContextNoticesFromRequest(messages)
 	messages = a.prepareMessagesForLLM(messages)
 	if repaired, dropped := message.RepairOrphanToolResults(messages); dropped > 0 {
 		log.Warnf("dropping orphan tool result messages before LLM request dropped=%v", dropped)
@@ -595,6 +594,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		messages = filtered
 	}
 
+	noticeRequestMessages := messages
 	a.updatePreparedLLMRequestSurface(a.currentTurnID(), messages)
 
 	mountMode := a.mcpToolMountMode()
@@ -624,6 +624,15 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	beforeReminder := len(messages)
 	messages = a.injectSessionContextReminder(messages)
 	metaPrefixCount := len(messages) - beforeReminder
+
+	beforeNotices := len(messages)
+	modelRef := llmClient.NextRequestModelRef()
+	messages = a.reconcilePressureNoticesForModel(messages, noticeRequestMessages, modelRef, llmClient.InputLimitForModelRef(modelRef))
+	if len(messages) != beforeNotices {
+		// Removed notices shift source indices; the old explicit boundary no
+		// longer names the prepared prefix. The latest boundary remains valid.
+		a.setPreparedStablePrefixLen(0)
+	}
 
 	// Assemble per-turn model input. Durable SubAgent mailbox messages are
 	// appended in the same conversation position persisted to ctxMgr; transient
@@ -733,9 +742,10 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	// buildTurnOverlayMessages counts as delivered. Requests that never reach
 	// this point (hook-blocked, governor-rejected, cancelled before dispatch)
 	// leave the claims undelivered so the next request may re-attach (the
-	// sticky reminder and imminent notice re-queue every request; the
+	// undelivered reminder and upper-threshold notice may be re-queued; the
 	// per-generation warning needs the claim to stay spendable for the retry).
 	a.markOverlayClaimsDelivered()
+	a.rememberPressureNoticeRequest(noticeRequestMessages, modelRef)
 	// Model/cooldown wall-clock segmentation for the TIME section: the segment
 	// spans acquireLLM success through CompleteStream return (success or
 	// error), so hook-blocked / governor-rejected / zero-delta requests still
@@ -751,6 +761,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback)
 			if err == nil && updatedMessages != nil {
 				messages = updatedMessages
+				tailOverlayCount -= trailingTurnOverlayCount(requestMessages) - trailingTurnOverlayCount(updatedMessages)
 			}
 			return updatedMessages, err
 		},

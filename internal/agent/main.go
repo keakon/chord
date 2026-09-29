@@ -456,6 +456,9 @@ type MainAgent struct {
 	// one request; the claim's delivered flag is confirmed at dispatch, not at
 	// attach. pendingCompactionWarning is the one-shot usage-driven
 	// externalization warning (once per auto-compact request generation).
+	// All three fields are written by the event-loop queue paths and cleared
+	// or restaged by the request assembly on the main LLM goroutine, so they
+	// are guarded by overlayClaims.mu (see context_overlays.go).
 	pendingContextPressureReminder string
 	pendingCompactionWarning       string
 	// pendingCompactionImminent is the grace-period "compaction imminent"
@@ -514,23 +517,12 @@ type MainAgent struct {
 	// the threshold; not persisted, so after a restore the threshold is
 	// re-applied at the first request boundary.
 	appliedCompactionModelRef string
-	// contextNoticesStale marks durable context-pressure notices as no longer
-	// matching the live AutoCompactDecision: a model switch moved the
-	// compaction/reminder line, or usage in the same window dropped back below
-	// the reminder line. The event loop drops them at the next idle boundary
-	// (see maybeClearStaleContextNotices); a leftover notice would otherwise
-	// keep claiming pressure the current decision is not under. A fresh first
-	// delivery for the live window cancels the mark: that row belongs to the
-	// current line, so the audit must not sweep it away in the same turn.
+	// contextNoticesStale marks notices withdrawn after prefix reduction,
+	// model changes, or disabling the notification contract. Request filtering
+	// is immediate; durable removal waits for an idle boundary.
 	contextNoticesStale atomic.Bool
-	// contextNoticesStalePressureOnly narrows an armed cleanup to the
-	// reminder-class rows. A reminder line that is disabled for the current
-	// model withdraws only the rows measured against that line: the grace and
-	// externalization rows are measured against the compaction threshold,
-	// which is still live, so they must survive the sweep. Written before
-	// contextNoticesStale so a reader that observes the mark also observes its
-	// scope.
-	contextNoticesStalePressureOnly atomic.Bool
+	// contextNoticeWithdrawalScope selects which threshold rows are withdrawn.
+	contextNoticeWithdrawalScope atomic.Uint32
 	// contextNoticesPersisted records that the transcript may still hold
 	// durable context-pressure notice rows. Overlay delivery claims are
 	// runtime memory that a restore or session switch never carries over, so

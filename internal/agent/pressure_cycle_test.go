@@ -81,7 +81,7 @@ func TestPressureCycleIdentityAndStageTransitions(t *testing.T) {
 	}
 }
 
-func TestPressureCycleRecordsOneDurableRowPerCycle(t *testing.T) {
+func TestPressureCycleRecordsOneDurableRowPerLevel(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line, below the threshold
@@ -99,18 +99,47 @@ func TestPressureCycleRecordsOneDurableRowPerCycle(t *testing.T) {
 	waitForContextNoticeEvent(t, a)
 	afterReminder := a.ctxMgr.MessageCount()
 
-	// Escalating inside the same cycle is suppressed: the transcript keeps
-	// the one row that already records the cycle.
-	a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
+	// The threshold crossing dispatches a new message — the grace countdown —
+	// so that level records its own row instead of being suppressed by the
+	// reminder's.
+	a.queueCompactionImminentNotice()
 	if a.pendingCompactionImminent == "" {
 		t.Fatal("the grace countdown must still be staged for the request")
 	}
 	a.pendingCompactionImminent = ""
 	a.noteCompactionImminentAttached()
-	a.stashContextNotice(contextNoticeImminent, compactionImminentText(minCompactionGracePeriodBatches))
+	a.stashContextNotice(contextNoticeImminent, compactionThresholdNoticeText)
 	a.markOverlayClaimsDelivered()
-	if got := a.ctxMgr.MessageCount(); got != afterReminder {
-		t.Fatalf("an escalation appended %d durable rows, want none", got-afterReminder)
+	waitForContextNoticeEvent(t, a)
+	if got := a.ctxMgr.MessageCount(); got != afterReminder+1 {
+		t.Fatalf("the threshold crossing appended %d rows, want 1", got-afterReminder)
+	}
+	last := a.ctxMgr.Snapshot()[a.ctxMgr.MessageCount()-1]
+	if last.NoticeLevel != contextNoticeImminent {
+		t.Fatalf("crossing row level = %q, want %q", last.NoticeLevel, contextNoticeImminent)
+	}
+
+	// Repeating an already recorded level (the countdown update) writes
+	// nothing: the model still receives the text, the transcript keeps one
+	// card for the level.
+	a.queueCompactionImminentNotice()
+	a.pendingCompactionImminent = ""
+	a.noteCompactionImminentAttached()
+	a.stashContextNotice(contextNoticeImminent, compactionThresholdNoticeText)
+	a.markOverlayClaimsDelivered()
+	if got := a.ctxMgr.MessageCount(); got != afterReminder+1 {
+		t.Fatalf("a repeat delivery appended %d durable rows, want none", got-afterReminder-1)
+	}
+
+	// The request that starts the compaction carries the externalization
+	// warning, which shares the already-recorded upper threshold.
+	a.stageContextNotice(contextNoticeWarning, compactionThresholdNoticeText)
+	a.pendingCompactionWarning = ""
+	a.noteCompactionWarningAttached()
+	a.stashContextNotice(contextNoticeWarning, compactionThresholdNoticeText)
+	a.markOverlayClaimsDelivered()
+	if got := a.ctxMgr.MessageCount(); got != afterReminder+1 {
+		t.Fatalf("the compaction start appended %d rows, want 0", got-afterReminder-1)
 	}
 
 	notices := 0
@@ -119,11 +148,11 @@ func TestPressureCycleRecordsOneDurableRowPerCycle(t *testing.T) {
 			notices++
 		}
 	}
-	if notices != 1 {
-		t.Fatalf("durable notices = %d, want exactly one row per pressure cycle", notices)
+	if notices != 2 {
+		t.Fatalf("durable notices = %d, want one row per recorded level", notices)
 	}
 
-	// A new window starts a new cycle and may record again.
+	// A new window cannot duplicate either retained threshold.
 	a.clearCompactionGrace()
 	a.compactionWindowGeneration++
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
@@ -132,7 +161,87 @@ func TestPressureCycleRecordsOneDurableRowPerCycle(t *testing.T) {
 	a.stashContextNotice(contextNoticePressure, buildContextPressureReminderText())
 	a.markOverlayClaimsDelivered()
 	if got := a.ctxMgr.MessageCount(); got != afterReminder+1 {
-		t.Fatalf("a fresh cycle appended %d rows, want 1", got-afterReminder)
+		t.Fatalf("a fresh cycle appended %d rows, want 0", got-afterReminder-1)
+	}
+}
+
+// TestAdoptedPressureRowRecoversLevels pins the per-level adoption: the
+// transcript's rows mark exactly the levels they document, so a restored
+// pressure row cannot suppress a card for a level the model has not received,
+// while a row without a level (written before levels were stamped) covers every
+// level because the transcript cannot say which one it was.
+func TestAdoptedPressureRowRecoversLevels(t *testing.T) {
+	row := func(id uint64, level string) message.Message {
+		return message.Message{Kind: message.KindContextNotice, PressureCycleID: id, NoticeLevel: level}
+	}
+	maxID, record := adoptedPressureRow([]message.Message{
+		row(3, contextNoticePressure),
+		row(5, contextNoticeWarning),
+		row(5, contextNoticePressure),
+	})
+	if maxID != 5 {
+		t.Fatalf("max cycle id = %d, want 5", maxID)
+	}
+	if !record[pressureNoticeSlot(contextNoticePressure)] || !record[pressureNoticeSlot(contextNoticeWarning)] {
+		t.Fatalf("record = %v, want the documented levels recorded", record)
+	}
+	if !record[pressureNoticeSlot(contextNoticeImminent)] {
+		t.Fatalf("record = %v, want grace and warning to share the upper slot", record)
+	}
+	if _, unknown := adoptedPressureRow([]message.Message{row(2, "")}); unknown.any() {
+		t.Fatalf("unknown record = %v, want no known threshold", unknown)
+	}
+	if _, none := adoptedPressureRow([]message.Message{{Role: message.RoleUser, Content: "hello"}}); none.any() {
+		t.Fatalf("record = %v, want no level without a notice row", none)
+	}
+}
+
+// TestPressureCycleAdoptionKeepsOtherLevelsRecordable pins that adoption is
+// per level: a restored pressure row answers the reminder level, but the
+// threshold crossing is still a message the model has not received, so the
+// revived cycle writes its card.
+func TestPressureCycleAdoptionKeepsOtherLevelsRecordable(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
+	enableTestCompactContext(a)
+
+	restored := message.Message{
+		Role:            message.RoleUser,
+		Kind:            message.KindContextNotice,
+		Content:         "<system-reminder>\nold pressure\n</system-reminder>",
+		NoticeLevel:     contextNoticePressure,
+		PressureCycleID: 7,
+	}
+	a.installContextNoticePresence([]message.Message{restored})
+
+	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	a.pendingContextPressureReminder = ""
+	a.noteContextPressureReminderAttached()
+	a.stashContextNotice(contextNoticePressure, buildContextPressureReminderText())
+	a.markOverlayClaimsDelivered()
+	if got := a.ctxMgr.MessageCount(); got != 0 {
+		t.Fatalf("the adopted pressure level appended %d rows, want none", got)
+	}
+
+	a.queueCompactionImminentNotice()
+	if a.pendingCompactionImminent == "" {
+		t.Fatal("the grace countdown must be staged")
+	}
+	a.pendingCompactionImminent = ""
+	a.noteCompactionImminentAttached()
+	a.stashContextNotice(contextNoticeImminent, compactionThresholdNoticeText)
+	a.markOverlayClaimsDelivered()
+	waitForContextNoticeEvent(t, a)
+	messages := a.ctxMgr.Snapshot()
+	if len(messages) != 1 {
+		t.Fatalf("message count = %d, want the imminent row", len(messages))
+	}
+	if messages[0].NoticeLevel != contextNoticeImminent {
+		t.Fatalf("row level = %q, want %q", messages[0].NoticeLevel, contextNoticeImminent)
+	}
+	if messages[0].PressureCycleID != restored.PressureCycleID {
+		t.Fatalf("row cycle = %d, want the adopted cycle %d", messages[0].PressureCycleID, restored.PressureCycleID)
 	}
 }
 
@@ -157,12 +266,12 @@ func TestPressureCycleAdoptsRestoredRow(t *testing.T) {
 	// The restored row is the cycle's record: the revived cycle continues past
 	// its identity and must not append a duplicate.
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
-	if a.pendingContextPressureReminder != contextPressureReminderShortText {
-		t.Fatalf("restored window reminder = %q, want the short re-attachment", a.pendingContextPressureReminder)
+	if a.pendingContextPressureReminder != "" {
+		t.Fatalf("restored window reminder = %q, want no repeated overlay", a.pendingContextPressureReminder)
 	}
 	a.pendingContextPressureReminder = ""
 	a.noteContextPressureReminderAttached()
-	a.stashContextNotice(contextNoticePressure, contextPressureReminderShortText)
+	a.stashContextNotice(contextNoticePressure, buildContextPressureReminderText())
 	a.markOverlayClaimsDelivered()
 	if got := a.ctxMgr.MessageCount(); got != 0 {
 		t.Fatalf("restore adoption appended %d duplicate rows, want none", got)
@@ -228,6 +337,7 @@ func TestPressureCycleStaleRestoredRowReleasesAdoption(t *testing.T) {
 	// restore withdraws the row before anything opens a cycle.
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 1000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
+	a.armContextNoticeCleanup() // The restored request has invalidated the notice.
 	a.maybeClearStaleContextNotices()
 	waitForContextNoticeCleared(t, a)
 	if hasContextNotice(a.ctxMgr.Snapshot()) {

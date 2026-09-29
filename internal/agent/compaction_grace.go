@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"fmt"
 	"strconv"
 
 	"github.com/keakon/chord/internal/analytics"
@@ -25,32 +24,6 @@ const (
 	// reaches it and simply consumes its batches like any other deferred request.
 	compactionGraceHardCeilingRatio = 0.95
 )
-
-// compactionImminentText renders the grace-period "compaction imminent"
-// notice for a request inside the deferral window. requests is the number of
-// main-model request batches left before automatic compaction takes over: the
-// crossing request reports the full minCompactionGracePeriodBatches window and
-// every later deferred request reports its true remaining count, so the model
-// always sees how much room is actually left. It is bare
-// content; the turn-overlay injector wraps it in a <system-reminder> block.
-//
-// The closing line states what a compaction actually preserves. The checkpoint
-// wrapper explains this in detail (archived history map, read-back guidance,
-// verbatim recent tail), but the model only sees that wrapper *after* the
-// switch; before it, this notice is the only place the retention semantics can
-// come from, and a model that reads "compaction" as "reset" has no reason to
-// spend a turn checkpointing. The trailing clause keeps that reassurance from
-// undercutting the externalization instruction above it: recovery exists, but
-// it costs a tool call, so writing state out is still the cheaper path.
-func compactionImminentText(requests int) string {
-	countdown := fmt.Sprintf("the next %d requests", requests)
-	if requests == 1 {
-		countdown = "the next request"
-	}
-	return fmt.Sprintf("The context has crossed the automatic-compaction threshold. Automatic compaction will start after %s unless a context checkpoint is applied first.\n", countdown) +
-		contextCheckpointPressureAction + "\n" +
-		"Compaction is recoverable rather than a reset: earlier messages are exported to archived history files whose paths are listed in the new context and can be read back with the read tool, and the newest messages are kept verbatim. Reading an archive back still costs a tool call, so externalizing the state that matters remains the cheaper path."
-}
 
 // usageDrivenCompactionGraceDefers decides, on the pre-request gate after the
 // usage-driven trigger fired, whether the compaction start is deferred by the
@@ -80,17 +53,14 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 	if !a.compactionGraceActive {
 		a.compactionGraceActive = true
 		a.compactionGraceStartBatch = current
-		a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
+		a.queueCompactionImminentNotice()
 		a.recordCompactionGraceEvent("started", current)
 		return true
 	}
-	// Grace in progress: every deferred request re-attaches the imminent
-	// notice with the true remaining countdown, so a model
-	// that missed the crossing request — or whose copy was attached to a
-	// cancelled dispatch — still sees how much room is left.
+	// Grace remains active. Retry the notice only if no request delivered it;
+	// later requests read the retained history without a changing countdown.
 	if current >= a.compactionGraceStartBatch && current-a.compactionGraceStartBatch < minCompactionGracePeriodBatches {
-		remaining := minCompactionGracePeriodBatches - int(current-a.compactionGraceStartBatch)
-		a.queueCompactionImminentNotice(remaining)
+		a.queueCompactionImminentNotice()
 		return true
 	}
 	a.endCompactionGrace("expired", current)
@@ -111,10 +81,10 @@ func (a *MainAgent) endCompactionGrace(reason string, current uint64) {
 	a.compactionGraceActive = false
 	a.compactionGraceStartBatch = 0
 	a.compactionGraceExhausted = true
-	a.pendingCompactionImminent = ""
+	a.setPendingContextNoticeText(contextNoticeImminent, "")
 	// The cycle keeps its threshold-class pressure (the usage-driven request
 	// is still armed and the next crossing starts compaction immediately);
-	// only the countdown stage is over.
+	// only the grace stage is over.
 	if a.ctxMgr != nil {
 		a.notePressureStage(pressureStageArmed, a.currentOverlayWindowKey())
 	}
@@ -153,7 +123,7 @@ func (a *MainAgent) clearCompactionGrace() {
 	a.compactionGraceStartBatch = 0
 	a.compactionGraceActive = false
 	a.compactionGraceExhausted = false
-	a.pendingCompactionImminent = ""
+	a.setPendingContextNoticeText(contextNoticeImminent, "")
 	// The window the cycle belonged to is gone (session switch, restore,
 	// model/budget change, or a durable apply that ended it first): close it so
 	// the next pressure observation opens a fresh identity instead of
@@ -168,18 +138,13 @@ func (a *MainAgent) recordCompactionGraceEvent(stage string, batch uint64) {
 	})
 }
 
-// queueCompactionImminentNotice arms the "compaction imminent" overlay for a
-// request inside the threshold grace period. The notice is
-// sticky for the whole grace: the queue never suppresses an attach, because
-// the gate only defers while the grace is active and the notice is the only
-// signal that automatic compaction is about to take over — if a request could
-// attach it, it is by definition still inside the window. remaining is the
-// number of main-model request batches left before compaction starts; the
-// crossing request reports the full window and every later deferred request
-// reports its true countdown. The claim shares the reminder's (session, window,
-// model, budget) key but only records first/repeat delivery stages for telemetry.
-func (a *MainAgent) queueCompactionImminentNotice(remaining int) {
-	a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.currentOverlayWindowKey())
+// queueCompactionImminentNotice stages the upper-threshold notice once.
+// The durable message remains visible throughout grace and compaction startup.
+func (a *MainAgent) queueCompactionImminentNotice() {
 	a.notePressureStage(pressureStageGrace, a.currentOverlayWindowKey())
-	a.stageContextNotice(contextNoticeImminent, compactionImminentText(remaining))
+	claim := a.syncOverlayWindowClaim(&a.overlayClaims.imminent, a.currentOverlayWindowKey())
+	if claim.delivered || a.hasDurablePressureNotice(contextNoticeImminent) {
+		return
+	}
+	a.stageContextNotice(contextNoticeImminent, compactionThresholdNoticeText)
 }

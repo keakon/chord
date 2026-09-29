@@ -63,14 +63,8 @@ func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testin
 	}
 }
 
-// TestReminderDoesNotStageOverPendingHigherPressureNotice pins the guard that
-// keeps the reminder from stacking on a higher-pressure notice left pending by
-// a dispatch that never confirmed (a threshold crossing that both re-attaches
-// the reminder and arms the compaction in the same cycle). The guard lives in the
-// reminder queue because it is the lowest-severity notice and cannot tell from
-// its own inputs whether the gate is about to attach the countdown or the
-// warning for this same request.
-func TestReminderDoesNotStageOverPendingHigherPressureNotice(t *testing.T) {
+// Both thresholds remain independently observable when queued together.
+func TestReminderCoexistsWithPendingUpperThresholdNotice(t *testing.T) {
 	newAgent := func(t *testing.T) *MainAgent {
 		a := newTestMainAgent(t, t.TempDir())
 		a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
@@ -81,13 +75,13 @@ func TestReminderDoesNotStageOverPendingHigherPressureNotice(t *testing.T) {
 
 	t.Run("grace countdown", func(t *testing.T) {
 		a := newAgent(t)
-		a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
+		a.queueCompactionImminentNotice()
 		if a.pendingCompactionImminent == "" {
 			t.Fatal("grace must stage the countdown")
 		}
 		a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
-		if a.pendingContextPressureReminder != "" {
-			t.Fatalf("a pending countdown must keep the lower-pressure reminder from staging, got %q", a.pendingContextPressureReminder)
+		if a.pendingContextPressureReminder == "" {
+			t.Fatalf("a pending countdown must retain the lower-threshold reminder, got %q", a.pendingContextPressureReminder)
 		}
 		if a.pendingCompactionImminent == "" {
 			t.Fatal("the countdown must survive the reminder queue")
@@ -103,8 +97,8 @@ func TestReminderDoesNotStageOverPendingHigherPressureNotice(t *testing.T) {
 			t.Fatal("the armed request must stage the warning")
 		}
 		a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
-		if a.pendingContextPressureReminder != "" {
-			t.Fatalf("a pending warning must keep the lower-pressure reminder from staging, got %q", a.pendingContextPressureReminder)
+		if a.pendingContextPressureReminder == "" {
+			t.Fatalf("a pending warning must retain the lower-threshold reminder, got %q", a.pendingContextPressureReminder)
 		}
 		if a.pendingCompactionWarning == "" {
 			t.Fatal("the warning must survive the reminder queue")
@@ -112,15 +106,9 @@ func TestReminderDoesNotStageOverPendingHigherPressureNotice(t *testing.T) {
 	})
 }
 
-// TestModelSwitchDoesNotAttachStalePressureNoticeToRequest is the end-to-end
-// guard for the reported bug: a model switch that crossed the new window's
-// threshold in the same cycle used to queue the sticky reminder together with a
-// higher-pressure notice, so the model received two prompts describing one
-// pressure. Under usage-only triggering the switch invalidates the previous
-// window's size observation, so the request that goes out carries no pressure
-// prompt at all: the crossing is judged again from fresh usage against the new
-// window's own line.
-func TestModelSwitchDoesNotAttachStalePressureNoticeToRequest(t *testing.T) {
+// A model switch can estimate notices from the previous usage without arming
+// automatic compaction from that retired observation.
+func TestModelSwitchEstimatesPressureNoticesFromPreviousUsage(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
@@ -153,13 +141,19 @@ func TestModelSwitchDoesNotAttachStalePressureNoticeToRequest(t *testing.T) {
 
 	waitForBlockingStreamProviderCalls(t, provider, 1)
 	requests, _ := provider.snapshot()
+	notices := 0
 	for _, msg := range requests[0] {
-		// The reminder and the countdown share the checkpoint-pressure action
-		// text; the externalization warning has its own wording.
-		if strings.Contains(msg.Content, contextCheckpointPressureAction) || strings.Contains(msg.Content, compactionWarningText) {
-			t.Fatalf("a model switch must not warn from the previous window's observation, got %q", msg.Content)
+		if strings.Contains(msg.Content, contextCheckpointPressureAction) {
+			notices++
 		}
 	}
+	if notices != 2 {
+		t.Fatalf("notice count = %d, want both thresholds", notices)
+	}
+	if a.autoCompactRequested.Load() || a.IsCompactionRunning() {
+		t.Fatal("notice estimates must not trigger compaction")
+	}
+
 }
 
 // waitForFailedRoundSettled drains the TUI output channel until the request

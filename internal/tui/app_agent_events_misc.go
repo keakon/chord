@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"time"
 
@@ -36,19 +37,22 @@ func contextNoticeTitle(level string) string {
 	}
 }
 
-// removeContextNoticeBlocks drops every live context-pressure card after the
-// agent removed their backing KindContextNotice messages (a model switch
-// changed the compaction threshold). Cards are matched by NoticeLevel, the
-// marker only this path sets. Removing the messages shifted every later
-// transcript index, so main user block fork anchors are re-synced.
-func (m *Model) removeContextNoticeBlocks() {
-	if m == nil || m.viewport == nil {
+// removeContextNoticeBlocks removes only withdrawn messages' cards. Survivors
+// retain their viewport positions and receive their post-rewrite message index.
+func (m *Model) removeContextNoticeBlocks(messageIndices []int) {
+	if m == nil || m.viewport == nil || len(messageIndices) == 0 {
 		return
 	}
 	var ids []int
 	for _, block := range m.viewport.blocks {
-		if block != nil && block.NoticeLevel != "" {
+		if block == nil || block.AgentID != "" {
+			continue
+		}
+		before, removed := slices.BinarySearch(messageIndices, block.MsgIndex)
+		if removed && block.NoticeLevel != "" {
 			ids = append(ids, block.ID)
+		} else {
+			block.MsgIndex -= before
 		}
 	}
 	if len(ids) == 0 {
@@ -226,7 +230,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		m.markBlockSettled(block)
 		return true, effects
 	case agent.ContextNoticeClearedEvent:
-		m.removeContextNoticeBlocks()
+		m.removeContextNoticeBlocks(evt.MessageIndices)
 		return true, effects
 	case agent.BackgroundResultAppendedEvent:
 		// The result is durable now: drop its pending-area entry and build the

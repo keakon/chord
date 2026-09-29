@@ -70,7 +70,7 @@ context:
 | `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从输入预算中扣除，再应用 `threshold`。 |
 | `preset` | 字符串 | 自动检测 | 强制指定压缩实现方式，一般无需设置。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
-| `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；等于或高于 threshold 的 reminder 不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本来会带宽限「compaction imminent」提示或外化提示。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
+| `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；等于或高于 threshold 的 reminder 不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本就携带上阈值通知。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
 | `model_driven` | 布尔 | `false` | 实验性开关：给主 agent 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求，随后在同一 turn 的压缩上下文上继续。工具仅 MainAgent 可见、必须单独调用、`state_files` 与 `planned_state_files` 只作路径引用，工具自身不读取也不校验存在性；reset 后 runtime 会重新载入登记文件与 checkpoint 关键文件的一小段头部，且仅当当前 read 权限规则允许该路径。低收益请求会被自动跳过。默认关闭。 |
 | `retain_recent_tokens` | 整数 | `4096`（内置） | 每个压缩 checkpoint 内嵌的最近真实用户消息的估计 token 预算（见上文的「保留最近消息」）；`0` 或缺省使用内置默认值，只算消息正文。需要跨压缩保住更多最近轮次就调大，想让压缩多回收上下文就调小；保留段不替代摘要，只把最新指令边界原样钉住（与当前请求完全相同的重复消息会改写为一条去重说明）。 |
 
@@ -134,7 +134,7 @@ checkpoint 的停点按上下文压力调整，不要求每次都等完整阶段
 
 #### 与自动压缩的关系
 
-自动压缩不会把模型的 checkpoint 锁死。当 usage-driven 压缩已在运行（threshold 越线启动了后台 worker，或 draft 已 ready、正在等 continuation barrier）时，与它并行的那次请求仍可提交 `compact_context`。模型是自己挑的边界，所以它的 checkpoint 优先：runtime 丢弃自动 draft，改应用模型 checkpoint。自动压缩是兜底而不是锁：threshold 越线不会夺走正在收尾的模型的 reset 机会。一次性外化提示不会提及这种覆盖（模型不需要知道有自动压缩在跑，只需要知道当前上下文即将结束）；模型之前主动提交的 checkpoint 照常工作。
+自动压缩不会把模型的 checkpoint 锁死。当 usage-driven 压缩已在运行（threshold 越线启动了后台 worker，或 draft 已 ready、正在等 continuation barrier）时，与它并行的那次请求仍可提交 `compact_context`。模型是自己挑的边界，所以它的 checkpoint 优先：runtime 丢弃自动 draft，改应用模型 checkpoint。自动压缩是兜底而不是锁：threshold 越线不会夺走正在收尾的模型的 reset 机会。上阈值通知不会提及这种覆盖（模型不需要知道有自动压缩在跑，只需要知道当前上下文即将结束）；模型之前主动提交的 checkpoint 照常工作。
 
 #### 跳过与上下文提醒
 

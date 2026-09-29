@@ -154,23 +154,10 @@ func (a *MainAgent) applyModelCompactionConfig() {
 			a.ctxMgr.InvalidateSizeObservation()
 		}
 	}
-	previousThreshold := a.ctxMgr.Threshold()
 	newThreshold := a.effectiveCompactionThreshold(modelRef)
 	a.ctxMgr.SetThreshold(newThreshold)
-	// A model switch that moves the compaction line or the effective reminder
-	// line invalidates every context-pressure notice measured against the
-	// previous lines. Arms a cleanup for the next idle boundary instead of
-	// rewriting history mid-request. The reminder line is resolved per model
-	// (per-model reminder, then global, then the derived default) with the same
-	// 0/-1 semantics the queue path uses, so its change is compared as the
-	// resolved value rather than the raw config.
-	if modelChanged {
-		previousReminder := a.effectiveReminderPctForModelRef(previousModelRef, previousThreshold)
-		newReminder := a.effectiveReminderPctForModelRef(modelRef, newThreshold)
-		if newThreshold != previousThreshold || newReminder != previousReminder {
-			a.armContextNoticeCleanup()
-		}
-	}
+	// Notice validity is evaluated against the prepared request and target
+	// model budget, separately from the usage-only compaction trigger.
 	// Re-evaluate the armed request against the freshly applied threshold. The
 	// invalidation above leaves the decision unknown, so a request armed under
 	// the previous window is cleared here: the new window must not be

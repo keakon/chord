@@ -37,14 +37,14 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 		t.Fatalf("grace start batch = %d, want 1", a.compactionGraceStartBatch)
 	}
 	notice := a.pendingCompactionImminent
-	if notice == "" || !strings.Contains(notice, "compact_context") || !strings.Contains(notice, "after the next 2 requests") || strings.Contains(notice, "<") {
+	if notice == "" || !strings.Contains(notice, "compact_context") || notice != compactionThresholdNoticeText || strings.Contains(notice, "<") {
 		t.Fatalf("imminent notice = %q, want bare text naming compact_context and the 2-request window", notice)
 	}
 	// The retention semantics must stay in this notice: the checkpoint wrapper
 	// states them too, but the model only reads that after the switch, so
 	// dropping them here leaves it deciding whether to checkpoint while it
 	// still reads compaction as a reset.
-	if !strings.Contains(notice, "archived history files") || !strings.Contains(notice, "provisional checkpoint") {
+	if !strings.Contains(notice, "archived history files") {
 		t.Fatalf("imminent notice = %q, want the post-compaction retention semantics", notice)
 	}
 	a.pendingCompactionImminent = ""
@@ -56,8 +56,8 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 	if !a.usageDrivenCompactionGraceDefers(snapshot) {
 		t.Fatal("same-batch re-gate must still defer")
 	}
-	if !strings.Contains(a.pendingCompactionImminent, "after the next 2 requests") {
-		t.Fatalf("same-batch re-queue must carry the full countdown, got %q", a.pendingCompactionImminent)
+	if a.pendingCompactionImminent != compactionThresholdNoticeText {
+		t.Fatalf("same-batch re-queue must carry the same threshold text, got %q", a.pendingCompactionImminent)
 	}
 
 	// One batch later: still inside the grace, and the countdown now reports
@@ -66,8 +66,8 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 	if !a.usageDrivenCompactionGraceDefers(snapshot) {
 		t.Fatal("one batch into the grace must still defer")
 	}
-	if !strings.Contains(a.pendingCompactionImminent, "after the next request") || strings.Contains(a.pendingCompactionImminent, "next 1 requests") {
-		t.Fatalf("second-round notice must count down to the last request, got %q", a.pendingCompactionImminent)
+	if a.pendingCompactionImminent != compactionThresholdNoticeText {
+		t.Fatalf("second-round notice must keep stable text until first delivery, got %q", a.pendingCompactionImminent)
 	}
 
 	// Two batches later: expired — compaction starts and the window is spent.
@@ -91,7 +91,7 @@ func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
 }
 
 func TestCheckpointPressureNoticesSharePreparationContract(t *testing.T) {
-	for _, notice := range []string{buildContextPressureReminderText(), contextPressureReminderShortText, compactionImminentText(1), compactionImminentText(2)} {
+	for _, notice := range []string{buildContextPressureReminderText(), compactionThresholdNoticeText} {
 		if strings.Count(notice, contextCheckpointPressureAction) != 1 {
 			t.Fatal("pressure notices must share one self-contained action contract")
 		}
@@ -262,9 +262,9 @@ func TestCompactionImminentClaimAndOverlay(t *testing.T) {
 	// The grace queue arms the notice for every deferred request (optimization
 	// 2.9); attaching consumes the pending text and marks deliveryPending
 	// without consuming the claim (a cancelled dispatch stays reusable).
-	a.queueCompactionImminentNotice(minCompactionGracePeriodBatches)
-	if a.pendingCompactionImminent == "" || !strings.Contains(a.pendingCompactionImminent, "after the next 2 requests") {
-		t.Fatalf("queued imminent notice = %q, want the 2-request countdown", a.pendingCompactionImminent)
+	a.queueCompactionImminentNotice()
+	if a.pendingCompactionImminent != compactionThresholdNoticeText {
+		t.Fatalf("queued imminent notice = %q, want the upper-threshold notice", a.pendingCompactionImminent)
 	}
 	overlays := a.buildTurnOverlayMessages()
 	if len(overlays) != 1 || overlays[0].Kind != message.KindTurnOverlay || !strings.Contains(overlays[0].Content, "<system-reminder>\n") || !strings.Contains(overlays[0].Content, "\n</system-reminder>") {
@@ -276,8 +276,8 @@ func TestCompactionImminentClaimAndOverlay(t *testing.T) {
 	// A retried grace request re-queues the notice with the true remaining
 	// countdown, and the dispatch confirmation then marks the claim delivered
 	// (delivered_first).
-	a.queueCompactionImminentNotice(minCompactionGracePeriodBatches - 1)
-	if a.pendingCompactionImminent == "" || !strings.Contains(a.pendingCompactionImminent, "after the next request") {
+	a.queueCompactionImminentNotice()
+	if a.pendingCompactionImminent != compactionThresholdNoticeText {
 		t.Fatalf("retried request must re-queue the countdown notice, got %q", a.pendingCompactionImminent)
 	}
 	if overlays := a.buildTurnOverlayMessages(); len(overlays) != 1 || a.pendingCompactionImminent != "" {

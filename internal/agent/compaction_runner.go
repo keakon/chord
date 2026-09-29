@@ -651,8 +651,8 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// queued for the pre-apply window (the reminder reported the old usage
 	// baseline and the warning is moot once auto-compact applied). The next
 	// beginMainLLMAfterPreparation re-queues against the new window claims.
-	a.pendingContextPressureReminder = ""
-	a.pendingCompactionWarning = ""
+	a.setPendingContextNoticeText(contextNoticePressure, "")
+	a.setPendingContextNoticeText(contextNoticeWarning, "")
 	// The apply ends the pressure cycle it was serving: the terminal reason is
 	// "applied", not a window reset, and the cycle's durable row went away with
 	// the rewrite above.

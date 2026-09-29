@@ -173,46 +173,37 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		overlays = append(overlays, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "<system-reminder>\n" + reminder + "\n</system-reminder>"})
 	}
 
-	// Context-pressure reminder (sticky per compaction window — full text once,
-	// then the short text — until the model calls compact_context or the
-	// window resets), the grace-period imminent notice (sticky per deferred
-	// request during the grace window) and the usage-driven externalization
-	// warning (one-shot per auto-compact request generation). They are
-	// turn-tail overlays queued by beginMainLLMAfterPreparation /
-	// usageDrivenCompactionGraceDefers and consumed here; the delivered claim
-	// is confirmed at dispatch, so attaching here only marks deliveryPending —
-	// a request cancelled before dispatch leaves the claim reusable. They
-	// carry bare text and are wrapped in the same <system-reminder> runtime
-	// message block as the other turn overlays so the model can tell them
-	// apart from user-written messages.
-	if reminder := strings.TrimSpace(a.pendingContextPressureReminder); reminder != "" {
-		a.pendingContextPressureReminder = ""
+	// Attach each undelivered threshold once. Grace and compaction startup
+	// share the upper slot. Dispatch confirms the claims and persists matching
+	// notice messages; cancellation before dispatch leaves them available.
+	if reminder := strings.TrimSpace(a.takePendingContextNoticeText(contextNoticePressure)); reminder != "" {
 		a.noteContextPressureReminderAttached()
 		a.stashContextNotice(contextNoticePressure, reminder)
 		overlays = append(overlays, message.Message{
-			Role:    "user",
-			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + reminder + "\n</system-reminder>",
+			Role:        "user",
+			Kind:        message.KindTurnOverlay,
+			Content:     "<system-reminder>\n" + reminder + "\n</system-reminder>",
+			NoticeLevel: contextNoticePressure,
 		})
 	}
-	if imminent := strings.TrimSpace(a.pendingCompactionImminent); imminent != "" {
-		a.pendingCompactionImminent = ""
+	if imminent := strings.TrimSpace(a.takePendingContextNoticeText(contextNoticeImminent)); imminent != "" {
 		a.noteCompactionImminentAttached()
 		a.stashContextNotice(contextNoticeImminent, imminent)
 		overlays = append(overlays, message.Message{
-			Role:    "user",
-			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + imminent + "\n</system-reminder>",
+			Role:        "user",
+			Kind:        message.KindTurnOverlay,
+			Content:     "<system-reminder>\n" + imminent + "\n</system-reminder>",
+			NoticeLevel: contextNoticeImminent,
 		})
 	}
-	if warning := strings.TrimSpace(a.pendingCompactionWarning); warning != "" {
-		a.pendingCompactionWarning = ""
+	if warning := strings.TrimSpace(a.takePendingContextNoticeText(contextNoticeWarning)); warning != "" {
 		a.noteCompactionWarningAttached()
 		a.stashContextNotice(contextNoticeWarning, warning)
 		overlays = append(overlays, message.Message{
-			Role:    "user",
-			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + warning + "\n</system-reminder>",
+			Role:        "user",
+			Kind:        message.KindTurnOverlay,
+			Content:     "<system-reminder>\n" + warning + "\n</system-reminder>",
+			NoticeLevel: contextNoticeWarning,
 		})
 	}
 

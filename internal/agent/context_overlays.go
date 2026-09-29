@@ -25,42 +25,15 @@ const (
 	// contextPressureReminderThresholdRatio is the reminder head start before
 	// the configured auto-compaction threshold.
 	contextPressureReminderThresholdRatio = 0.90
-	// compactionWarningText is the usage-driven externalization opportunity.
-	// It is only injected while model-driven compaction is enabled (the
-	// compact_context tool is visible): with the tool off the model has no
-	// externalization contract, so automatic compaction is fully owned by the
-	// runtime — like Codex's local and remote compaction paths, which never
-	// notify the working model — and an unactionable warning would only be
-	// read as conversation noise. The text is bare content: the turn-overlay
-	// injector wraps it in a <system-reminder> block, the same runtime-message
-	// convention used by every other harness injection, so the model can tell
-	// it apart from user-written messages. It never asks the model to call
-	// compact_context or guarantee a write; it only preserves an
-	// externalization opportunity on the request that runs alongside the
-	// automatic-compaction start, and says plainly that the compaction does
-	// not wait for it.
-	compactionWarningText = "The context has reached the automatic-compaction threshold and will be compacted at the next safe boundary.\n" +
-		"If important findings, decisions, or working state are not yet written to files, write them now to a project file your role may write (" + contextStateFileTargetHint + ") — this may be the last request on the current context.\n" +
-		"The compaction does not wait for this message."
+	// A threshold notice remains true throughout grace and compaction startup.
+	compactionThresholdNoticeText = "The context has reached the automatic-compaction threshold. The runtime may compact it after the current safe continuation window.\n" +
+		contextCheckpointPressureAction + "\n" +
+		"Earlier messages remain recoverable from the checkpoint's archived history files; preserve the working details needed to continue before compaction."
 )
 
-// reminderOverlayClaim is the per-window claim shared by the context-pressure
-// reminder and the grace-period "compaction imminent" notice. It binds to
-// (session_epoch, compaction_window_id, model_ref, budget_epoch): a durable
-// apply (model-driven or usage-driven), a session reset/restore, or a
-// model/provider/budget switch changes one component and starts a fresh claim,
-// so a reset that is followed by a new full reminder is intended — each
-// compaction window delivers the full reminder text at most once.
-//
-// The claim never suppresses an attach by itself: the reminder overlay is
-// sticky while usage stays above the reminder line (the full text before the
-// first dispatch, the short text afterwards) and the imminent notice is
-// sticky for the whole grace period. delivered only records whether the full
-// text / first notice already dispatched, and ccCalled records that the model
-// called compact_context in this window — its attempt (whatever it settles
-// to) answered the nudge, so the reminder goes quiet until a fresh window
-// clears the mark. Cancellation never consumes a delivery: delivered is
-// confirmed only when a request carrying the overlay actually dispatches.
+// reminderOverlayClaim tracks first dispatch within a compaction window.
+// Cancelled requests leave the claim available; durable rows suppress repeats
+// across model/window changes until the relevant row is withdrawn.
 type reminderOverlayClaim struct {
 	windowEpoch     uint64
 	windowIndex     int    // compaction window generation; 0 = initial window
@@ -77,7 +50,7 @@ type reminderOverlayClaim struct {
 // back, so the retried request carries the same batch and may re-claim; once a
 // request with that batch dispatches, the batch advances and the same
 // generation can never claim again. The warning stays one-shot per generation
-// (it is explicitly the "last request" notice), unlike the sticky reminder.
+// while sharing the durable upper-threshold slot with the grace notice.
 type warningOverlayClaim struct {
 	requestID       uint64
 	batch           uint64
@@ -85,7 +58,7 @@ type warningOverlayClaim struct {
 	delivered       bool
 }
 
-// overlayClaimState owns the overlay claims: the sticky context-pressure
+// overlayClaimState owns the overlay claims: the context-pressure
 // reminder and grace-period imminent notice (reminder-class, same window key)
 // plus the one-shot usage-driven warning. The queue decision runs on the event
 // loop (beginMainLLMAfterPreparation), the attach note and the delivered
@@ -101,11 +74,15 @@ type overlayClaimState struct {
 	// the two never suppress each other.
 	imminent reminderOverlayClaim
 	// pressure is the single authority for the current pressure cycle: the
-	// stage reached, the one durable notice row it may write, and how it
-	// ended. It lives under this mutex because the durable-row reservation
-	// happens on the main LLM goroutine while the stage transitions happen on
-	// the event loop.
+	// stage reached, the durable notice rows it may write (one per level), and
+	// how it ended. It lives under this mutex because the durable-row
+	// reservation happens on the main LLM goroutine while the stage transitions
+	// happen on the event loop.
 	pressure pressureCycle
+	// noticeModel is the model whose prepared request last selected the notices.
+	noticeModel         string
+	noticePrefixSource  []message.Message
+	noticePrefixesKnown bool
 }
 
 // overlayWindowKey is the (session epoch, compaction window, model, budget
@@ -152,7 +129,7 @@ func (c *reminderOverlayClaim) bindTo(key overlayWindowKey) {
 
 // confirmDelivery consumes a pending attachment at dispatch and reports the
 // delivery stage ("" when nothing was attached). The first delivery in a
-// window is distinguished from the sticky repeats.
+// window is distinguished from redundant delivery attempts.
 func (c *reminderOverlayClaim) confirmDelivery() string {
 	if !c.deliveryPending {
 		return ""
@@ -192,7 +169,7 @@ func (a *MainAgent) reminderClaimModelRef() string {
 
 // markReminderCompactContextCalled records that the model called
 // compact_context in the current window: whatever that attempt settles to, the
-// reminder nudge has been answered and the sticky reminder must go quiet until
+// reminder nudge has been answered and the reminder must go quiet until
 // a fresh window resets the claim. It binds the mark to the current (window,
 // budget) key first, because the reminder claim is only synced lazily by the
 // queue — a call that arrived after a background apply advanced the window
@@ -255,59 +232,80 @@ type contextNotice struct {
 	text  string
 }
 
-// contextNoticeRank orders the three pressure notices by severity: the sticky
-// reminder, the grace-period countdown, and the externalization warning that
-// rides on the request starting the compaction. They describe the same fact at
-// increasing pressure, so a request must never carry two of them.
-func contextNoticeRank(level string) int {
-	switch level {
-	case contextNoticePressure:
-		return 0
-	case contextNoticeImminent:
-		return 1
-	case contextNoticeWarning:
-		return 2
-	}
-	return -1
-}
+// Pending-notice text hand-off: the three pending fields are written by the
+// event-loop queue paths and cleared or restaged by the request assembly on
+// the main LLM goroutine (reconcilePressureNoticesForModel,
+// buildTurnOverlayMessages). A turn replaced or cancelled mid-assembly runs
+// both sides concurrently, so the fields share overlayClaims.mu — the same
+// guard as the claims the queue decisions feed.
 
-// stageContextNotice stages the highest-pressure notice for the request being
-// assembled and drops any lower-pressure notice still pending. The pending
-// fields survive an aborted request, so variant orderings (a reminder queued
-// on an earlier request whose dispatch never confirmed, a model switch that
-// arms the compaction in the same cycle) could otherwise attach two notices
-// that say the same thing at different pressure. A newly staged notice never
-// downgrades a higher-pressure one already pending: it is dropped instead.
-func (a *MainAgent) stageContextNotice(level, text string) {
-	if a == nil || strings.TrimSpace(text) == "" {
-		return
-	}
-	rank := contextNoticeRank(level)
-	if rank < 0 {
-		return
-	}
-	current := -1
-	if a.pendingContextPressureReminder != "" {
-		current = contextNoticeRank(contextNoticePressure)
-	}
-	if a.pendingCompactionImminent != "" && contextNoticeRank(contextNoticeImminent) > current {
-		current = contextNoticeRank(contextNoticeImminent)
-	}
-	if a.pendingCompactionWarning != "" && contextNoticeRank(contextNoticeWarning) > current {
-		current = contextNoticeRank(contextNoticeWarning)
-	}
-	if rank < current {
-		return
-	}
-	a.pendingContextPressureReminder = ""
-	a.pendingCompactionImminent = ""
-	a.pendingCompactionWarning = ""
+// setPendingContextNoticeText stages one notice level's overlay text for the
+// next request assembly; an empty text clears the level.
+func (a *MainAgent) setPendingContextNoticeText(level, text string) {
+	a.overlayClaims.mu.Lock()
+	defer a.overlayClaims.mu.Unlock()
 	switch level {
 	case contextNoticePressure:
 		a.pendingContextPressureReminder = text
 	case contextNoticeImminent:
 		a.pendingCompactionImminent = text
 	case contextNoticeWarning:
+		a.pendingCompactionWarning = text
+	}
+}
+
+// clearPendingContextNotices drops every queued overlay text.
+func (a *MainAgent) clearPendingContextNotices() {
+	a.overlayClaims.mu.Lock()
+	a.pendingContextPressureReminder = ""
+	a.pendingCompactionImminent = ""
+	a.pendingCompactionWarning = ""
+	a.overlayClaims.mu.Unlock()
+}
+
+// takePendingContextNoticeText consumes one level's queued overlay text.
+func (a *MainAgent) takePendingContextNoticeText(level string) string {
+	a.overlayClaims.mu.Lock()
+	defer a.overlayClaims.mu.Unlock()
+	var text string
+	switch level {
+	case contextNoticePressure:
+		text, a.pendingContextPressureReminder = a.pendingContextPressureReminder, ""
+	case contextNoticeImminent:
+		text, a.pendingCompactionImminent = a.pendingCompactionImminent, ""
+	case contextNoticeWarning:
+		text, a.pendingCompactionWarning = a.pendingCompactionWarning, ""
+	}
+	return text
+}
+
+// stageContextNotice retains one pending message for each threshold. Grace
+// and compaction startup share the upper slot; startup supersedes grace.
+func (a *MainAgent) stageContextNotice(level, text string) {
+	if a == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	rank := pressureNoticeSlot(level)
+	if rank < 0 {
+		return
+	}
+	if a.hasDurablePressureNotice(level) {
+		return
+	}
+	a.overlayClaims.mu.Lock()
+	defer a.overlayClaims.mu.Unlock()
+	switch level {
+	case contextNoticePressure:
+		a.pendingContextPressureReminder = text
+	case contextNoticeImminent:
+		// The warning owns the shared upper slot once staged; the empty-text
+		// guard above means the staged text is never blank.
+		if a.pendingCompactionWarning != "" {
+			return
+		}
+		a.pendingCompactionImminent = text
+	case contextNoticeWarning:
+		a.pendingCompactionImminent = ""
 		a.pendingCompactionWarning = text
 	}
 }
@@ -350,10 +348,9 @@ func (a *MainAgent) takeContextNotices() []contextNotice {
 // the only source of the card: it is appended to ctxmgr and persisted before
 // the event goes out, and ContextNoticeEvent carries its transcript index so a
 // restored session rebuilds the same card from message.KindContextNotice
-// instead of losing a live-only notice. Repeat deliveries are suppressed: the
-// reminder and the grace notice re-attach on every request in the window, and
-// re-showing the card each time would bury the transcript in duplicates of the
-// same warning.
+// instead of losing a live-only notice. Each notice level records its first
+// delivery once, so the user sees a card for every message the model actually
+// received. Later requests replay the durable rows without new overlays.
 func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string, warningDelivered bool) {
 	if a == nil || a.ctxMgr == nil {
 		return
@@ -375,15 +372,10 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 		}
 		level := notice.level
 		text := notice.text
-		cycleID, skipReason, reserved := a.reservePressureCycleRecord()
+		cycleID, skipReason, reserved := a.reservePressureCycleRecord(level)
 		if !reserved {
-			// One durable row per cycle: the first notice that reaches the
-			// transcript records the cycle, and later escalations are
-			// suppressed, so the transcript cannot accumulate cards that all
-			// describe the same pressure. Their delivery is already recorded
-			// through the analytics diagnostics emitted alongside the overlay
-			// claims; no live-only ContextNoticeEvent is sent because TUI
-			// notice cards must stay backed by a durable transcript row.
+			// The existing durable threshold row owns its card. No live-only
+			// event is emitted for a suppressed duplicate.
 			log.Debugf("durable context notice row skipped level=%v reason=%v", level, skipReason)
 			continue
 		}
@@ -411,23 +403,17 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 	}
 }
 
-// maybeClearStaleContextNotices drops durable context-pressure notices after
-// the live AutoCompactDecision no longer matches them: a model switch moved
-// the compaction/reminder line, or usage in the same window dropped back below
-// the reminder line after a notice had already been delivered. A leftover
-// notice would otherwise keep claiming pressure the current decision is not
-// under, and since the card is backed by the message both must go together.
-// Runs on the event loop after dispatch, and only at an idle
-// boundary (no active turn, no in-flight request, no running compaction) so the
-// rewrite can never race request assembly, a compaction draft whose headSplit
-// was measured against the current transcript, or a provider call that still
-// holds the old transcript. Clearing delivered notices also resets the
-// delivered flags of the withdrawn classes (the sticky reminder, the grace
-// imminent notice, and the externalization warning) so a later re-crossing can
-// persist a fresh first-delivery card instead of a silent repeat, and so a
-// withdrawn notice cannot keep re-arming cleanup on later below-line requests.
-// A reminder-class-only withdrawal leaves the threshold-class claims untouched:
-// their rows are still present and must not re-deliver.
+// removedContextNotice names one durable notice row withdrawn from the
+// transcript: its cycle and level are what the reservation release needs to
+// give the level back to the live cycle.
+type removedContextNotice struct {
+	cycleID uint64
+	level   string
+}
+
+// maybeClearStaleContextNotices removes withdrawn rows and their cards at an
+// idle boundary. Active requests and compaction retain their original indices.
+// Surviving rows keep their delivery claims and cards in their original positions.
 func (a *MainAgent) maybeClearStaleContextNotices() {
 	if a == nil || a.ctxMgr == nil || !a.contextNoticesStale.Load() {
 		return
@@ -435,24 +421,24 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 	if a.turn != nil || a.mainLLMRequestInFlight.Load() || a.IsCompactionRunning() {
 		return
 	}
-	pressureOnly := a.contextNoticesStalePressureOnly.Load()
+	scope := a.contextNoticeWithdrawalScope.Load()
 	a.contextNoticesStale.Store(false)
-	a.contextNoticesStalePressureOnly.Store(false)
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	// Any overlay queued for the next request was measured against the stale
 	// decision; drop it so the next request re-queues against live usage.
-	a.pendingContextPressureReminder = ""
-	a.pendingCompactionWarning = ""
-	a.pendingCompactionImminent = ""
+	a.clearPendingContextNotices()
 	a.resetContextNotices()
 	a.flushPersist()
 	messages := a.ctxMgr.Snapshot()
 	kept := make([]message.Message, 0, len(messages))
 	removed := false
-	var removedCycles []uint64
-	for _, msg := range messages {
-		if msg.Kind == message.KindContextNotice && contextNoticeStale(msg, pressureOnly) {
+	var removedRows []removedContextNotice
+	var removedIndices []int
+	for index, msg := range messages {
+		if msg.Kind == message.KindContextNotice && contextNoticeStale(msg, scope) {
 			removed = true
-			removedCycles = append(removedCycles, msg.PressureCycleID)
+			removedIndices = append(removedIndices, index)
+			removedRows = append(removedRows, removedContextNotice{cycleID: msg.PressureCycleID, level: msg.NoticeLevel})
 			continue
 		}
 		kept = append(kept, msg)
@@ -463,28 +449,32 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 	if !removed {
 		// Consume a leftover delivered flag so a later below-line queue does
 		// not keep re-arming idle cleanup when there is nothing to rewrite.
-		a.resetOverlayDeliveryAfterNoticeClear(pressureOnly)
+		a.resetOverlayDeliveryAfterNoticeClear(scope)
 		return
 	}
-	a.ctxMgr.RestoreMessages(kept)
 	if manager := a.recoveryManager(); manager != nil {
 		if err := manager.RewriteLog(identity.MainAgentID, kept); err != nil {
 			a.notePersistenceFailure(err)
+			a.contextNoticesPersisted.Store(containsContextNotice(messages))
+			a.contextNoticeWithdrawalScope.Store(scope)
+			a.contextNoticesStale.Store(true)
+			return
 		}
 	}
-	a.resetOverlayDeliveryAfterNoticeClear(pressureOnly)
-	// The withdrawn rows gave up their cycle's one-row reservation: a later
-	// re-crossing of the same cycle may record again, while a withdrawn row
-	// from an older cycle cannot reopen the current one's reservation.
-	for _, cycleID := range removedCycles {
-		a.releasePressureCycleRecord(cycleID)
+	a.ctxMgr.RestoreMessages(kept)
+	a.resetOverlayDeliveryAfterNoticeClear(scope)
+	// The withdrawn rows gave up their cycle's reservations: a later re-crossing
+	// of the same cycle may record a level again, while a withdrawn row from an
+	// older cycle cannot reopen the current one's reservation.
+	for _, row := range removedRows {
+		a.releasePressureCycleRecord(row.cycleID, row.level)
 	}
 	// The rewrite is the new truth about which rows document pressure, so the
 	// adoption follows it. A row withdrawn before the next cycle opens would
 	// otherwise leave the runtime reviving an identity the transcript no longer
 	// carries — and that cycle would skip the card the row used to justify.
 	a.derivePressureCycleAdoption(kept)
-	a.emitToTUI(ContextNoticeClearedEvent{})
+	a.emitToTUI(ContextNoticeClearedEvent{MessageIndices: removedIndices})
 }
 
 // contextNoticeStale reports whether an armed cleanup withdraws this row. A
@@ -492,37 +482,48 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 // a row that does not name the reminder class is never proven to be one, so it
 // survives: keeping a stale row costs a visible card, while withdrawing a live
 // threshold notice loses the externalization instruction the runtime just gave.
-func contextNoticeStale(msg message.Message, pressureOnly bool) bool {
-	if !pressureOnly {
-		return true
-	}
-	return msg.NoticeLevel == contextNoticePressure
+const (
+	contextNoticeWithdrawAll uint32 = iota
+	contextNoticeWithdrawPressure
+	contextNoticeWithdrawCompaction
+)
+
+func contextNoticeStale(msg message.Message, scope uint32) bool {
+	return pressureSlotWithdrawn(pressureNoticeSlot(msg.NoticeLevel), scope)
 }
 
-// resetOverlayDeliveryAfterNoticeClear returns the withdrawn overlays' delivery
-// claims to an undelivered first-delivery state after their durable rows were
-// removed: the sticky reminder, the grace imminent notice, and the
-// externalization warning each persist their own KindContextNotice row, and the
-// delivered flag is what suppresses the card on a repeat. Resetting them is
-// also what stops a withdrawn notice from re-arming idle cleanup on every later
-// below-line request. A pressure-only withdrawal touches only the reminder
-// claim; resetting the threshold-class claims there would re-deliver their
-// still-present rows and churn. The reminder keeps ccCalled: a compact_context
-// attempt in this window already answered the nudge, so a later re-crossing
-// must not resurrect the reminder overlay until a fresh window resets the
-// claim. The warning keeps its (generation, batch) identity, so the batch guard
-// keeps it one-shot for the generation that already delivered it; a re-crossing
-// arms a new generation with a fresh claim anyway.
-func (a *MainAgent) resetOverlayDeliveryAfterNoticeClear(pressureOnly bool) {
+// pressureSlotWithdrawn reports whether an armed cleanup withdraws every row
+// of a threshold slot. A pressure-only withdrawal leaves the
+// threshold-measured classes in place, and a slot that does not name the
+// reminder class is never proven to be one, so it survives: keeping a stale
+// row costs a visible card, while withdrawing a live threshold notice loses
+// the externalization instruction the runtime just gave.
+func pressureSlotWithdrawn(slot int, scope uint32) bool {
+	switch scope {
+	case contextNoticeWithdrawPressure:
+		return slot == 0
+	case contextNoticeWithdrawCompaction:
+		return slot == 1
+	default:
+		return true
+	}
+}
+
+// resetOverlayDeliveryAfterNoticeClear releases only the withdrawn threshold's
+// delivery claims. A compact_context call still keeps its answered reminder
+// quiet until the next window.
+func (a *MainAgent) resetOverlayDeliveryAfterNoticeClear(scope uint32) {
 	a.overlayClaims.mu.Lock()
-	if !pressureOnly {
+	if scope != contextNoticeWithdrawPressure {
 		a.overlayClaims.imminent.deliveryPending = false
 		a.overlayClaims.imminent.delivered = false
 		a.overlayClaims.warning.deliveryPending = false
 		a.overlayClaims.warning.delivered = false
 	}
-	a.overlayClaims.reminder.deliveryPending = false
-	a.overlayClaims.reminder.delivered = false
+	if scope != contextNoticeWithdrawCompaction {
+		a.overlayClaims.reminder.deliveryPending = false
+		a.overlayClaims.reminder.delivered = false
+	}
 	a.overlayClaims.mu.Unlock()
 }
 
@@ -565,12 +566,6 @@ func (a *MainAgent) markOverlayClaimsDelivered() {
 	if imminentStage != "" {
 		a.recordContextDiagnosticEvent(analytics.UsagePurposeCompactionGrace, map[string]string{"stage": imminentStage})
 	}
-	if reminderStage == "delivered_first" || imminentStage == "delivered_first" || warningDelivered {
-		// The request that delivers the current window's first row supersedes a
-		// pending withdrawal: the fresh row measures against the live line, so
-		// the audit must not sweep it away in the same turn.
-		a.disarmContextNoticeCleanup()
-	}
 	a.emitStagedContextNotices(reminderStage, imminentStage, warningDelivered)
 }
 
@@ -593,20 +588,10 @@ func (a *MainAgent) compactContextVisible() bool {
 	return compactContextPermissionAction(a.effectiveRuleset()) != permission.ActionDeny
 }
 
-// queueContextPressureReminderForNextRequest queues the context-pressure
-// reminder overlay for the next main request. Called from
-// beginMainLLMAfterPreparation before the compaction gate decision, using the
-// post-response usage baseline of AutoCompactDecision — not the current
-// request's prepared/reduced surface. The reminder is sticky (optimization
-// 2.9): while usage stays above the reminder line it is re-queued for every
-// request — the full text once per window, then a one-line short text — until
-// the model calls compact_context in this window, the usage drops back below
-// the line, or a durable apply / session switch / model change starts a fresh
-// window. The usage-driven externalization warning is queued separately by
-// the gate only on the request that actually starts the compaction: during
-// the grace period the compaction has not started yet, so a warning that
-// claims "the runtime has scheduled automatic compaction" would be misleading
-// there.
+// queueContextPressureReminderForNextRequest evaluates the lower threshold
+// from observed usage. A delivered notification stays in the durable history;
+// only the request reconciler may withdraw it after a relevant prefix change.
+// The gate separately stages the shared upper-threshold notice.
 func (a *MainAgent) queueContextPressureReminderForNextRequest() {
 	if a == nil || a.ctxMgr == nil {
 		return
@@ -615,16 +600,7 @@ func (a *MainAgent) queueContextPressureReminderForNextRequest() {
 }
 
 func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDecision) {
-	a.pendingContextPressureReminder = ""
-	// A higher-pressure notice is already staged for the request being
-	// assembled — the grace countdown on a threshold deferral, or the
-	// externalization warning on the request that starts the compaction. The
-	// reminder is the lowest of the three and adds nothing they do not say, so
-	// it must not stack on top of one of them (a dispatch that never confirmed
-	// can leave the higher notice pending into the next request).
-	if a.pendingCompactionImminent != "" || a.pendingCompactionWarning != "" {
-		return
-	}
+	a.setPendingContextNoticeText(contextNoticePressure, "")
 	threshold := decision.Threshold
 	usable := decision.UsableInputBudget
 	// threshold<=0 means auto-compact is off: no reminder, even when
@@ -675,8 +651,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 		a.endPressureCycle(pressureEndWithdrawn)
 		a.clearUsageDrivenAutoCompactRequest()
 		a.clearCompactionGrace()
-		a.pendingCompactionWarning = ""
-		a.armContextNoticeCleanup()
+		a.setPendingContextNoticeText(contextNoticeWarning, "")
 		return
 	}
 	// When the resolved reminder line sits at or beyond the
@@ -692,32 +667,21 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 	}
 	// The stage is noted before the claim sync: after a restore it opens the
 	// cycle against the adopted row, and the claim it seeds (delivered) is then
-	// what makes the restored window re-attach the short form.
+	// what suppresses another delivery of an existing threshold.
 	a.notePressureStage(pressureStageReminded, a.currentOverlayWindowKey())
 	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.currentOverlayWindowKey())
-	// A same-window re-cross before idle cleanup means the leftover durable
-	// notice is accurate again; drop the stale mark so the card is not removed.
-	// A window reset (model switch, restore) leaves delivered false, so a
-	// re-cross there keeps the mark and its first delivery cancels it instead.
-	if claim.delivered {
-		a.disarmContextNoticeCleanup()
-	}
 	// The model already called compact_context in this window: whatever
 	// that attempt settles to — an apply that advances the window and resets
 	// the claim, or a skip/failure surfaced by the continuation notice — the
-	// nudge has been answered, so the sticky reminder goes quiet until a fresh
+	// nudge has been answered, so the reminder goes quiet until a fresh
 	// window.
 	if claim.ccCalled {
 		return
 	}
-	// Sticky re-attach: only the full text is one-shot per window (delivered
-	// is confirmed at dispatch, so a cancelled request never consumes it);
-	// later above-line requests in the same window carry the short text.
-	text := buildContextPressureReminderText()
-	if claim.delivered {
-		text = contextPressureReminderShortText
+	if claim.delivered || a.hasDurablePressureNotice(contextNoticePressure) {
+		return
 	}
-	a.stageContextNotice(contextNoticePressure, text)
+	a.stageContextNotice(contextNoticePressure, buildContextPressureReminderText())
 }
 
 // contextPressureBelowReminderLine reports whether the decision's effective
@@ -765,26 +729,26 @@ func (a *MainAgent) installContextNoticePresence(messages []message.Message) {
 	if a == nil {
 		return
 	}
-	a.contextNoticesStalePressureOnly.Store(false)
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(false)
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.noticeModel = ""
+	a.overlayClaims.noticePrefixSource = nil
+	a.overlayClaims.noticePrefixesKnown = false
+	a.overlayClaims.mu.Unlock()
 	a.contextNoticesPersisted.Store(containsContextNotice(messages))
 	a.adoptPressureCyclesFromTranscript(messages)
 }
 
-// armContextNoticeCleanup arms idle cleanup of durable context-pressure notices
-// whose line the live decision has withdrawn from. The reminder overlay itself
-// is already request-scoped and simply stops re-attaching; the leftover
-// KindContextNotice row would otherwise keep claiming pressure on every later
-// request until a model switch or compaction apply. Presence — not a delivered
-// claim — is the gate, because claims do not survive a restore. Call on the
-// event loop.
+// armContextNoticeCleanup withdraws all notices when their contract is disabled.
+// Model and request-prefix changes use the scoped validity selection instead.
 func (a *MainAgent) armContextNoticeCleanup() {
 	if a == nil || !a.contextNoticesPersisted.Load() {
 		return
 	}
 	// Scope before the mark: a reader that observes the mark must also observe
 	// which classes it withdraws.
-	a.contextNoticesStalePressureOnly.Store(false)
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 }
 
@@ -795,21 +759,18 @@ func (a *MainAgent) armContextPressureNoticeCleanup() {
 	if a == nil || !a.contextNoticesPersisted.Load() {
 		return
 	}
-	a.contextNoticesStalePressureOnly.Store(true)
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawPressure)
 	a.contextNoticesStale.Store(true)
 }
 
-// disarmContextNoticeCleanup cancels an armed cleanup once the live decision
-// justifies a notice again: a same-window re-cross, or a fresh first delivery
-// for the current window. A model switch restarts the window, so the request
-// that re-delivers the full notice cancels the audit armed against the previous
-// window's rows and the fresh row survives.
+// disarmContextNoticeCleanup retains both notices after re-evaluation confirms
+// that both thresholds still apply.
 func (a *MainAgent) disarmContextNoticeCleanup() {
 	if a == nil {
 		return
 	}
 	a.contextNoticesStale.Store(false)
-	a.contextNoticesStalePressureOnly.Store(false)
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 }
 
 // omitStaleContextNoticesFromRequest drops the withdrawn durable context
@@ -820,7 +781,7 @@ func (a *MainAgent) omitStaleContextNoticesFromRequest(messages []message.Messag
 	if a == nil || !a.contextNoticesStale.Load() {
 		return messages
 	}
-	return omitContextNoticeMessages(messages, a.contextNoticesStalePressureOnly.Load())
+	return omitContextNoticeMessages(messages, a.contextNoticeWithdrawalScope.Load())
 }
 
 // dropContextNoticeMessages removes every durable context-pressure notice row
@@ -847,10 +808,10 @@ func dropContextNoticeMessages(messages []message.Message) []message.Message {
 	return out
 }
 
-func omitContextNoticeMessages(messages []message.Message, pressureOnly bool) []message.Message {
+func omitContextNoticeMessages(messages []message.Message, scope uint32) []message.Message {
 	n := 0
 	for i := range messages {
-		if messages[i].Kind == message.KindContextNotice && contextNoticeStale(messages[i], pressureOnly) {
+		if messages[i].Kind == message.KindContextNotice && contextNoticeStale(messages[i], scope) {
 			n++
 		}
 	}
@@ -859,7 +820,7 @@ func omitContextNoticeMessages(messages []message.Message, pressureOnly bool) []
 	}
 	out := make([]message.Message, 0, len(messages)-n)
 	for i := range messages {
-		if messages[i].Kind == message.KindContextNotice && contextNoticeStale(messages[i], pressureOnly) {
+		if messages[i].Kind == message.KindContextNotice && contextNoticeStale(messages[i], scope) {
 			continue
 		}
 		out = append(out, messages[i])
@@ -889,33 +850,11 @@ func (a *MainAgent) queueCompactionWarning() {
 		return
 	}
 	a.notePressureStage(pressureStageArmed, a.currentOverlayWindowKey())
-	a.stageContextNotice(contextNoticeWarning, compactionWarningText)
+	a.stageContextNotice(contextNoticeWarning, compactionThresholdNoticeText)
 }
 
-// contextPressureReminderShortText is the short re-attachment used on requests
-// after the full reminder already dispatched in the same window. It must stay
-// self-contained: reminders are request-scoped overlays rebuilt from scratch
-// on every request, so a later request — or a fallback or replay of one — is
-// never guaranteed to still carry the full notice this text would otherwise
-// point back at. The short form therefore restates the action instead of
-// referencing the earlier notice.
-const contextPressureReminderShortText = "Context pressure is still active and the context may be compacted soon.\n" +
-	contextCheckpointPressureAction
-
-// contextStateFileTargetHint names where externalized state goes and how the
-// file is named. Both context-pressure overlays share it because they compete
-// for the same moment: the reminder is sticky above the reminder line and
-// therefore arrives first and repeats, while the warning fires once on the
-// request that starts the compaction. Stating the target in only one of them
-// left the sticky text asking for a file write without saying where or under
-// what name, so the naming drifted whenever that was the only text in view.
-// The convention itself is the published one (docs/paths.md) and matches the
-// plan-document naming the planning prompt block and the handoff tool already
-// mandate; it lives here once so the two overlays cannot drift apart.
-// It carries the location and the name only; each overlay keeps its own
-// permission qualifier ("a project file your role may write", "permitted state
-// files") because a role that cannot write those paths must not read the hint
-// as an instruction to try.
+// contextStateFileTargetHint gives both thresholds the same file target and
+// naming guidance whenever checkpoint preparation calls for a file write.
 const contextStateFileTargetHint = "a task-notes file under .chord/notes/ or a plan document under .chord/plans/, named with a YYYYMMDD date prefix such as 20260915-auth-token-refresh.md"
 
 const contextCheckpointPressureAction = "If only the final response remains, deliver it without a checkpoint; if user input is required, use the normal question or waiting mechanism. Otherwise finish the current atomic operation, stop optional exploration, and update the reusable working details in " + contextStateFileTargetHint + " when permitted; register the saved file in state_files and keep structured arguments a concise handoff with the next action and relevant notes section. If the recovery state is small or file writing is unavailable, preserve it in structured arguments. Request a provisional checkpoint with compact_context alone when its preparation requirements are met; do not claim unfinished work is complete."

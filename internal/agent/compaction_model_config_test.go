@@ -226,8 +226,8 @@ func TestApplyModelCompactionConfigModelChangeMarksNoticesStale(t *testing.T) {
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	a.contextNoticesPersisted.Store(true)
 	a.applyModelCompactionConfig()
-	if !a.contextNoticesStale.Load() {
-		t.Fatal("a model change that moves the threshold must mark the context notices stale")
+	if a.contextNoticesStale.Load() {
+		t.Fatal("request preparation, not merely moving the threshold must decide notice validity")
 	}
 }
 
@@ -264,8 +264,8 @@ func TestApplyModelCompactionConfigModelChangeReminderOnlyMarksNoticesStale(t *t
 	if got := a.ctxMgr.Threshold(); got != 0.65 {
 		t.Fatalf("threshold = %v, want 0.65 (unchanged)", got)
 	}
-	if !a.contextNoticesStale.Load() {
-		t.Fatal("a model change that moves only the reminder line must mark the context notices stale")
+	if a.contextNoticesStale.Load() {
+		t.Fatal("request preparation, not merely moving only the reminder line must decide notice validity")
 	}
 }
 

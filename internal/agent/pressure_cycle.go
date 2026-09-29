@@ -13,21 +13,16 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// pressureStage is the stage of the current pressure cycle. A cycle spans one
-// compaction window — the same (session epoch, compaction window, model ref,
-// budget epoch) identity the reminder-class overlay claims bind to — and it is
-// the single authority behind what used to be two independent escalation
-// ladders: the notice ladder (reminder → imminent countdown → externalization
-// warning) and the usage-driven start ladder (armed → threshold grace →
-// compacting). Both read from and write to this one stage, so a notice can no
-// longer describe a pressure the trigger side has already left behind.
+// pressureStage tracks usage-driven compaction and its preparation window.
+// Notice delivery uses two durable threshold slots regardless of how many
+// runtime stages the cycle traverses.
 type pressureStage uint8
 
 const (
 	// pressureStageClear is the absence of an open cycle: usage sits below the
 	// reminder line, or the externalization contract is off entirely.
 	pressureStageClear pressureStage = iota
-	// pressureStageReminded is the sticky floor: above the reminder line, the
+	// pressureStageReminded is the reminder crossing: above the reminder line, the
 	// model has been told to prepare.
 	pressureStageReminded
 	// pressureStageArmed is the threshold crossing: the usage-driven
@@ -35,8 +30,7 @@ const (
 	// starts the compaction.
 	pressureStageArmed
 	// pressureStageGrace is a threshold crossing deferred by the threshold
-	// grace period; the imminent countdown is attached to every deferred
-	// request.
+	// grace period; one upper-threshold notice remains in the history.
 	pressureStageGrace
 	// pressureStageCompacting advances an already-open cycle while a
 	// compaction runs; it never opens one, so a manual or oversize-driven
@@ -95,18 +89,56 @@ type pressureCycleAudit struct {
 	awaitingUserAt   time.Time
 }
 
+// pressureNoticeRecord owns two threshold slots. Grace and compaction startup
+// share the upper slot; they are execution phases, not additional thresholds.
+const pressureNoticeSlotCount = 2
+
+type pressureNoticeRecord [pressureNoticeSlotCount]bool
+
+func pressureNoticeSlot(level string) int {
+	switch level {
+	case contextNoticePressure:
+		return 0
+	case contextNoticeImminent, contextNoticeWarning:
+		return 1
+	default:
+		return -1
+	}
+}
+
+// any reports whether any level already wrote its durable row.
+func (r pressureNoticeRecord) any() bool {
+	for _, marked := range r {
+		if marked {
+			return true
+		}
+	}
+	return false
+}
+
+// String renders the recorded levels for logs and the cycle journal: the level
+// names in severity order, or "none" when the cycle wrote no row.
+func (r pressureNoticeRecord) String() string {
+	if !r.any() {
+		return "none"
+	}
+	names := make([]string, 0, len(r))
+	for rank, marked := range r {
+		if marked {
+			names = append(names, [pressureNoticeSlotCount]string{contextNoticePressure, contextNoticeWarning}[rank])
+		}
+	}
+	return strings.Join(names, ",")
+}
+
 // pressureCycle is the single runtime authority for the current pressure
 // cycle. It carries the identity the runtime allocates when a cycle opens, the
 // window it belongs to, the stage reached, whether the model answered the nudge
 // (audit only — it never proves the context is safe), and how the cycle ended.
 //
-// A cycle owns at most one durable notice row (message.PressureCycleID stamps
-// it): the first notice that reaches the transcript records the cycle, and
-// later escalations are suppressed, so the transcript cannot accumulate
-// several cards that all describe the same pressure. Escalation delivery is
-// recorded through the analytics diagnostics emitted with the overlay claims.
-// A restored transcript adopts the rows and cycle IDs already on disk instead
-// of opening a duplicate cycle for the same pressure.
+// Durable rows carry the originating cycle ID for audit. Retained rows own
+// their threshold slots across later cycles, so changing models cannot append
+// another card for an already represented threshold.
 //
 // The state is guarded by overlayClaims.mu because the durable-row reservation
 // runs on the main LLM goroutine at the dispatch confirmation point while the
@@ -116,16 +148,18 @@ type pressureCycle struct {
 	nextID    uint64 // monotonic counter; seeded from restored rows
 	window    overlayWindowKey
 	stage     pressureStage
-	recorded  bool // this cycle already wrote its one durable notice row
-	responded bool // the model called compact_context in this cycle (audit)
+	recorded  pressureNoticeRecord // levels that already wrote their durable rows
+	responded bool                 // the model called compact_context in this cycle (audit)
 	audit     pressureCycleAudit
 	// adopted marks that the transcript this cycle opens against already
-	// carries a durable notice row for it (restore), and adoptedID is that
-	// row's cycle. The revived cycle keeps that identity instead of allocating
-	// a new one, so a restore neither duplicates the record nor renumbers the
-	// cycle the transcript already documents.
-	adopted   bool
-	adoptedID uint64
+	// carries durable notice rows for it (restore): adoptedID is the highest
+	// cycle those rows carry and adoptedRecord the levels they document. The
+	// revived cycle keeps that identity instead of allocating a new one, so a
+	// restore neither duplicates a record nor renumbers the cycle the
+	// transcript already documents.
+	adopted       bool
+	adoptedID     uint64
+	adoptedRecord pressureNoticeRecord
 }
 
 // pressureCycleEnd carries the facts of a closed cycle out of the locked
@@ -134,7 +168,7 @@ type pressureCycleEnd struct {
 	id        uint64
 	stage     pressureStage
 	responded bool
-	recorded  bool
+	recorded  pressureNoticeRecord
 	reason    pressureEndReason
 	audit     pressureCycleAudit
 }
@@ -164,7 +198,7 @@ func (a *MainAgent) notePressureStage(stage pressureStage, key overlayWindowKey)
 	var end pressureCycleEnd
 	var openedID uint64
 	var openedWindow overlayWindowKey
-	var openedRecorded bool
+	var openedRecorded pressureNoticeRecord
 	var stageLogged bool
 	var loggedID uint64
 	var loggedPrevious, loggedStage pressureStage
@@ -213,25 +247,19 @@ func (a *MainAgent) notePressureStage(stage pressureStage, key overlayWindowKey)
 func (a *MainAgent) openPressureCycleLocked(key overlayWindowKey) {
 	c := &a.overlayClaims.pressure
 	if c.adopted {
-		// A restored transcript already documents this pressure with a durable
-		// row: revive that cycle identity — or allocate one when the row
-		// predates cycle stamps — and adopt the row as its record.
+		// Resume the identity of the latest durable notice.
 		c.id = c.adoptedID
-		if c.id == 0 {
-			c.nextID++
-			c.id = c.nextID
-		}
 		if c.nextID < c.id {
 			c.nextID = c.id
 		}
 		c.adopted = false
 		c.adoptedID = 0
-		c.recorded = true
-		// The restored transcript still carries the full notice text, so the
-		// reminder claim starts answered: later requests re-attach the short
-		// form and never write a second row for this cycle.
+		c.recorded = c.adoptedRecord
+		c.adoptedRecord = pressureNoticeRecord{}
+		// The restored transcript already documents this pressure, so the
+		// reminder claim is answered only if that threshold has a row.
 		a.overlayClaims.reminder.bindTo(key)
-		a.overlayClaims.reminder.delivered = true
+		a.overlayClaims.reminder.delivered = c.recorded[pressureNoticeSlot(contextNoticePressure)]
 	} else {
 		c.nextID++
 		c.id = c.nextID
@@ -260,11 +288,12 @@ func (a *MainAgent) closePressureCycleLocked(reason pressureEndReason) pressureC
 	}
 	c.id = 0
 	c.stage = pressureStageClear
-	c.recorded = false
+	c.recorded = pressureNoticeRecord{}
 	c.responded = false
 	c.audit = pressureCycleAudit{}
 	c.adopted = false
 	c.adoptedID = 0
+	c.adoptedRecord = pressureNoticeRecord{}
 	return end
 }
 
@@ -285,7 +314,7 @@ func (a *MainAgent) recordPressureCycleEnd(end pressureCycleEnd) {
 		"stage":     end.stage.String(),
 		"reason":    string(end.reason),
 		"responded": strconv.FormatBool(end.responded),
-		"recorded":  strconv.FormatBool(end.recorded),
+		"recorded":  end.recorded.String(),
 	}
 	// Preparation audit: date the actions instead of only reporting that the
 	// nudge went unanswered, so a review can tell a model that prepared too
@@ -431,14 +460,18 @@ func isPressureStateFilePath(path string) bool {
 }
 
 // reservePressureCycleRecord returns the cycle identity to stamp on a durable
-// notice row, or the reason no row may be written: "no_cycle" when no cycle is
-// open (escalations only ever ride an open cycle — the queue paths note the
-// stage before staging the notice text), "already_recorded" when this cycle
-// already wrote its one row. Runs on the main LLM goroutine at the dispatch
-// confirmation point; the state is mutex-guarded.
-func (a *MainAgent) reservePressureCycleRecord() (uint64, string, bool) {
+// notice row of level, or the reason no row may be written: "no_cycle" when no
+// cycle is open (escalations only ever ride an open cycle — the queue paths
+// note the stage before staging the notice text), "already_recorded" when this
+// cycle already wrote this level's row. Runs on the main LLM goroutine at the
+// dispatch confirmation point; the state is mutex-guarded.
+func (a *MainAgent) reservePressureCycleRecord(level string) (uint64, string, bool) {
 	if a == nil {
 		return 0, "no_agent", false
+	}
+	rank := pressureNoticeSlot(level)
+	if rank < 0 {
+		return 0, "unknown_level", false
 	}
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
@@ -446,36 +479,34 @@ func (a *MainAgent) reservePressureCycleRecord() (uint64, string, bool) {
 	if c.id == 0 {
 		return 0, "no_cycle", false
 	}
-	if c.recorded {
+	if c.recorded[rank] || a.hasDurablePressureNotice(level) {
 		return 0, "already_recorded", false
 	}
-	c.recorded = true
+	c.recorded[rank] = true
 	return c.id, "", true
 }
 
-// releasePressureCycleRecord returns the one-row reservation when the row that
-// carried it was withdrawn from the transcript: the cycle may record again if
-// its pressure line is crossed once more, while a withdrawn row from an older
+// releasePressureCycleRecord returns the reservation of the level whose row
+// was withdrawn from the transcript: the level may record again if its
+// pressure line is crossed once more, while a withdrawn row from an older
 // cycle cannot reopen the current one's reservation.
-func (a *MainAgent) releasePressureCycleRecord(cycleID uint64) {
+func (a *MainAgent) releasePressureCycleRecord(cycleID uint64, level string) {
 	if a == nil || cycleID == 0 {
+		return
+	}
+	rank := pressureNoticeSlot(level)
+	if rank < 0 {
 		return
 	}
 	a.overlayClaims.mu.Lock()
 	if c := &a.overlayClaims.pressure; c.id == cycleID {
-		c.recorded = false
+		c.recorded[rank] = false
 	}
 	a.overlayClaims.mu.Unlock()
 }
 
-// adoptPressureCyclesFromTranscript re-establishes the cycle identity from a
-// freshly loaded transcript: the ID counter continues past the IDs already on
-// disk, and a transcript that still carries a durable notice row marks the next
-// cycle as already recorded, so a restore cannot duplicate the record or open a
-// cycle the transcript already documents. Rows without an ID (written before
-// cycles carried one) are still recorded as adopted: the row is replayed to the
-// model either way, and treating it as the cycle's record is what prevents a
-// duplicate.
+// adoptPressureCyclesFromTranscript restores cycle identity and the two
+// threshold reservations from the durable messages.
 func (a *MainAgent) adoptPressureCyclesFromTranscript(messages []message.Message) {
 	if a == nil {
 		return
@@ -484,45 +515,41 @@ func (a *MainAgent) adoptPressureCyclesFromTranscript(messages []message.Message
 	a.derivePressureCycleAdoption(messages)
 }
 
-// derivePressureCycleAdoption points the adoption at the durable notice rows a
-// transcript still carries: the highest cycle ID on a row continues the ID
-// counter, and any row marks the next cycle as already recorded. Rows without
-// an ID (written before cycles carried one) still count — the row is replayed to
-// the model either way, and treating it as the cycle's record is what prevents a
-// duplicate.
-//
-// The transcript is the authority here, so every rewrite of the durable table
-// re-derives: a row withdrawn before the next cycle opens would otherwise leave
-// the runtime adopting a row that is gone, and that cycle would never write its
-// one card. Call on the event loop, after the rewrite.
+// derivePressureCycleAdoption rebuilds reservations after a transcript rewrite.
+// The highest recorded cycle ID advances the counter; all retained threshold
+// rows suppress duplicates regardless of which cycle first delivered them.
 func (a *MainAgent) derivePressureCycleAdoption(messages []message.Message) {
 	if a == nil {
 		return
 	}
-	maxID, hasRow := adoptedPressureRow(messages)
+	maxID, record := adoptedPressureRow(messages)
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
 	c := &a.overlayClaims.pressure
 	if maxID > c.nextID {
 		c.nextID = maxID
 	}
-	c.adopted = hasRow
+	c.adopted = maxID != 0 && record.any()
 	c.adoptedID = maxID
+	c.adoptedRecord = record
 }
 
-// adoptedPressureRow returns the highest cycle identity stamped on a durable
-// notice row and whether the transcript carries one at all.
-func adoptedPressureRow(messages []message.Message) (uint64, bool) {
+// adoptedPressureRow returns the highest cycle identity and known threshold
+// slots still represented in the transcript.
+func adoptedPressureRow(messages []message.Message) (uint64, pressureNoticeRecord) {
 	maxID := uint64(0)
-	hasRow := false
+	var record pressureNoticeRecord
 	for i := range messages {
 		if messages[i].Kind != message.KindContextNotice {
 			continue
 		}
-		hasRow = true
 		if messages[i].PressureCycleID > maxID {
 			maxID = messages[i].PressureCycleID
 		}
+		if rank := pressureNoticeSlot(messages[i].NoticeLevel); rank >= 0 {
+			record[rank] = true
+			continue
+		}
 	}
-	return maxID, hasRow
+	return maxID, record
 }

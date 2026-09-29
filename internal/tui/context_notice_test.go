@@ -44,7 +44,7 @@ func TestContextNoticeClearedEventRemovesOnlyNoticeCards(t *testing.T) {
 		MessageIndex: 1,
 	}})
 
-	_ = m.handleAgentEvent(agentEventMsg{event: agent.ContextNoticeClearedEvent{}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ContextNoticeClearedEvent{MessageIndices: []int{1}}})
 
 	userBlocks := 0
 	for _, block := range m.viewport.blocks {
@@ -122,5 +122,29 @@ func TestMessagesToBlocksStripsContextNoticeReminderWrapper(t *testing.T) {
 	}
 	if live.Content != card.Content {
 		t.Fatalf("live card content = %q, restored card content = %q, want them equal", live.Content, card.Content)
+	}
+}
+
+func TestContextNoticePartialWithdrawalKeepsSurvivorPosition(t *testing.T) {
+	m := NewModelWithSize(nil, 120, 30)
+	lower := &Block{ID: 1, Type: BlockStatus, NoticeLevel: "pressure", MsgIndex: 1}
+	upper := &Block{ID: 3, Type: BlockStatus, NoticeLevel: "warning", MsgIndex: 3}
+	tail := &Block{ID: 4, Type: BlockUser, Content: "continue", MsgIndex: 4}
+	m.viewport.AppendBlock(lower)
+	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: "working", MsgIndex: 2})
+	m.viewport.AppendBlock(upper)
+	m.viewport.AppendBlock(tail)
+	m.removeContextNoticeBlocks([]int{1})
+	if len(m.viewport.blocks) != 3 || m.viewport.blocks[1] != upper || m.viewport.blocks[2] != tail {
+		t.Fatal("surviving notice moved out of its transcript position")
+	}
+	if upper.MsgIndex != 2 {
+		t.Fatalf("survivor message index=%d, want 2", upper.MsgIndex)
+	}
+	m.removeContextNoticeBlocks([]int{2})
+	for _, block := range m.viewport.blocks {
+		if block.NoticeLevel != "" {
+			t.Fatal("second withdrawal must use the shifted index")
+		}
 	}
 }

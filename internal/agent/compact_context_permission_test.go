@@ -155,17 +155,14 @@ compact_*: `+tc.rule)
 	}
 }
 
-func TestContextPressureReminderShortTextSelfContained(t *testing.T) {
-	// The short re-attachment must restate the action instead of pointing
-	// back at the full notice: reminders are request-scoped overlays rebuilt
-	// from scratch on every request, so the earlier full text is not
-	// guaranteed to still be in the context.
-	if strings.Contains(contextPressureReminderShortText, "earlier notice") {
-		t.Fatalf("short reminder must not reference the transient earlier notice: %q", contextPressureReminderShortText)
+func TestContextPressureReminderSelfContained(t *testing.T) {
+	// Each retained notice states its action without referring to another notice.
+	if strings.Contains(buildContextPressureReminderText(), "earlier notice") {
+		t.Fatalf("reminder must not reference the transient earlier notice: %q", buildContextPressureReminderText())
 	}
 	for _, want := range []string{"compact_context", "If the recovery state is small or file writing is unavailable, preserve it in structured arguments.", "final response", "user input"} {
-		if !strings.Contains(contextPressureReminderShortText, want) {
-			t.Fatalf("short reminder must restate the action (mention %q), got %q", want, contextPressureReminderShortText)
+		if !strings.Contains(buildContextPressureReminderText(), want) {
+			t.Fatalf("reminder must restate the action (mention %q), got %q", want, buildContextPressureReminderText())
 		}
 	}
 }
@@ -177,10 +174,8 @@ func TestContextPressureReminderShortTextSelfContained(t *testing.T) {
 // requests that mattered most. All four therefore render the one shared hint.
 func TestContextPressureOverlaysShareStateFileNaming(t *testing.T) {
 	texts := map[string]string{
-		"full reminder":  buildContextPressureReminderText(),
-		"short reminder": contextPressureReminderShortText,
-		"warning":        compactionWarningText,
-		"imminent":       compactionImminentText(1),
+		"full reminder": buildContextPressureReminderText(),
+		"warning":       compactionThresholdNoticeText,
 	}
 	for name, text := range texts {
 		if !strings.Contains(text, contextStateFileTargetHint) {

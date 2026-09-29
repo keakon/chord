@@ -804,17 +804,16 @@ type ContextNoticeEvent struct {
 
 func (ContextNoticeEvent) agentEvent() {}
 
-// ContextNoticeClearedEvent tells the TUI to drop every context-pressure card
-// whose backing messages were removed from the transcript. A model switch can
-// change the effective compaction threshold, and a notice computed against the
-// previous threshold would otherwise keep claiming pressure the new model is
-// not under.
-type ContextNoticeClearedEvent struct{}
+// ContextNoticeClearedEvent withdraws only cards whose durable messages were
+// removed. MessageIndices contains sorted indices in the pre-rewrite transcript.
+type ContextNoticeClearedEvent struct {
+	MessageIndices []int
+}
 
 func (ContextNoticeClearedEvent) agentEvent() {}
 
-// Context notice levels, mirroring the three overlays queued by the
-// compaction gate. They are also the card badges the TUI renders.
+// Context notice badges. Grace (imminent) and startup (warning) share one
+// upper-threshold record; pressure is the lower-threshold record.
 const (
 	contextNoticePressure = "pressure"
 	contextNoticeImminent = "imminent"

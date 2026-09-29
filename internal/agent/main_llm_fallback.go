@@ -122,7 +122,7 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 	if !a.started.Load() {
 		// The pending queue is event-loop owned. A direct call without a running
 		// event loop cannot safely consume it, so leave it for the normal drain.
-		return messages, nil
+		return a.reconcileFallbackPressureNotices(messages, fallbackModelDisplayRef(fallback), fallbackInputBudget(fallback), true), nil
 	}
 
 	payload := &llmFallbackBoundaryPayload{
@@ -158,7 +158,7 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 			estimateMessagesTokens(a.ctxMgr, messages), payload.fallbackInputLimit)
 		a.noteFallbackSurfaceDecision(rebuilt)
 		log.Debugf("LLM fallback %s", describeSurfaceDecision(primarySurface, targetSurface, rebuilt))
-		return messages, nil
+		return a.reconcileFallbackPressureNotices(messages, payload.fallbackModelRef, fallbackInputBudget(fallback), !rebuilt), nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("fallback request update cancelled: %w", ctx.Err())
 	case <-a.parentCtx.Done():
@@ -230,4 +230,19 @@ func fallbackNarrowsRequestBudget(fallbackContextLimit, fallbackInputLimit, prim
 		fallbackInput = fallbackContextLimit
 	}
 	return primaryInputLimit > 0 && fallbackInput < primaryInputLimit
+}
+
+func fallbackInputBudget(fallback llm.FallbackModel) int {
+	if fallback.InputLimit > 0 {
+		return fallback.InputLimit
+	}
+	return fallback.ContextLimit
+}
+
+func trailingTurnOverlayCount(messages []message.Message) int {
+	n := 0
+	for i := len(messages) - 1; i >= 0 && messages[i].Kind == message.KindTurnOverlay; i-- {
+		n++
+	}
+	return n
 }
