@@ -4944,7 +4944,7 @@ func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 		t.Fatalf("WriteFile changed revision: %v", err)
 	}
 	changed, _ := a.injectCompactionFileContext(msgs)
-	if len(changed) < 2 || len(changed[1].Parts) < 2 || !strings.Contains(changed[1].Parts[1].Text, `changed_since_checkpoint="true"`) {
+	if len(changed) != 4 || len(changed[3].Parts) < 2 || !strings.Contains(changed[3].Parts[1].Text, `changed_since_checkpoint="true"`) {
 		t.Fatalf("changed file metadata = %#v", changed)
 	}
 }

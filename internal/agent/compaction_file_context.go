@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"maps"
 	"os"
@@ -53,10 +54,9 @@ const (
 	compactionFileCtxPrefix = "[system] Automatically loaded key files from the latest compaction checkpoint"
 
 	// compactionFileCtxReloadNote follows the marker and states that the content
-	// below is a fresh read rather than the checkpoint's snapshot: the model
-	// must not read the re-injected body as the state the checkpoint recorded,
-	// and changed_since_checkpoint carries the invalidation flag.
-	compactionFileCtxReloadNote = "They were re-read from disk for this request; revision is the content hash at read time, and changed_since_checkpoint reports whether the file differs from the checkpoint snapshot.\n"
+	// below was observed at its conversation boundary, rather than claiming
+	// every retained version is the latest file. Later versions supersede it.
+	compactionFileCtxReloadNote = "These are file snapshots observed at this point in the conversation. Later automatic snapshots supersede earlier versions of the same path; revision is the content hash at read time, and changed_since_checkpoint compares against the checkpoint.\n"
 )
 
 func (a *MainAgent) latestCompactionSummarySignature(msgs []message.Message) (int, string, map[string]string) {
@@ -243,19 +243,22 @@ func (a *MainAgent) stateFileInjectableForRead(absPath string) bool {
 	return normalizeToolPermissionAction(tools.NameRead, action) == permission.ActionAllow
 }
 
-// injectCompactionFileContext inserts the request-local key-file overlay right
-// after the latest compaction checkpoint. It returns the (possibly) extended
-// message list plus the index the overlay was inserted at, or -1 when nothing
+// injectCompactionFileContext inserts the first file snapshot after the latest
+// checkpoint and appends changed snapshots at stable history boundaries. It
+// returns the extended list and first insertion index, or -1 when nothing
 // was injected. Callers must invoke it only after the prepared surface has
 // been remembered: the overlay never enters the durable history, so recording
 // it in the stable-prefix shapes would break prefix compatibility on the next
 // request and disable incremental reduction reuse after the first compaction.
 func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]message.Message, int) {
+	a.compactionFiles.mu.Lock()
+	defer a.compactionFiles.mu.Unlock()
 	if len(messages) == 0 || a.effectiveToolBaseDir() == "" {
 		return messages, -1
 	}
 	checkpointIdx, signature, revisions := a.latestCompactionSummarySignature(messages)
 	if checkpointIdx < 0 || signature == "" {
+		a.compactionFiles.clear()
 		return messages, -1
 	}
 	if compactionFileContextAlreadyInjected(messages, checkpointIdx) {
@@ -263,24 +266,34 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]m
 	}
 	keyFiles := a.compactionContinuationFiles(signature)
 	if len(keyFiles) == 0 {
+		a.compactionFiles.clear()
 		return messages, -1
 	}
 
 	plan := a.compactionInjectedFileBudgets(messages)
 	if plan.maxTotalBytes <= 0 {
+		a.compactionFiles.clear()
 		log.Debugf("compaction key-file context omitted; post-compaction budget leaves no re-injection quota key_files=%v usable_input_budget=%v remaining_tokens=%v quota_tokens=%v", len(keyFiles), plan.usableTokens, plan.remainingTokens, plan.quotaTokens)
 		return messages, -1
 	}
 
+	readRevisions := make(map[string]string, len(keyFiles))
 	result := filectx.BuildFilePartsWithOptions(keyFiles, a.resolveCheckpointFileReadPath, filectx.BuildFilePartsOptions{
 		MaxFileBytes:  plan.maxFileBytes,
 		MaxTotalBytes: plan.maxTotalBytes,
-		ReadFile:      a.readCheckpointFile,
+		ReadFile: func(path string) ([]byte, error) {
+			data, err := a.readCheckpointFile(path)
+			if err == nil {
+				readRevisions[path] = fmt.Sprintf("%x", sha256.Sum256(data))
+			}
+			return data, err
+		},
 	})
 	if len(result.Parts) == 0 {
+		a.compactionFiles.clear()
 		return messages, -1
 	}
-	a.annotateCompactionFileParts(signature, revisions, result.Parts)
+	a.annotateCompactionFileParts(signature, revisions, readRevisions, result.Parts)
 	if result.TruncatedFiles > 0 || result.OmittedFiles > 0 {
 		log.Debugf("compaction key-file context bounded loaded_files=%v truncated_files=%v omitted_files=%v total_bytes=%v max_file_bytes=%v max_total_bytes=%v usable_input_budget=%v remaining_tokens=%v quota_tokens=%v", result.LoadedFiles, result.TruncatedFiles, result.OmittedFiles, result.TotalBytes, plan.maxFileBytes, plan.maxTotalBytes, plan.usableTokens, plan.remainingTokens, plan.quotaTokens)
 	}
@@ -295,15 +308,10 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]m
 	}
 	a.trackObservedFileParts(injected.Parts)
 
-	out := make([]message.Message, 0, len(messages)+1)
-	out = append(out, messages[:checkpointIdx+1]...)
-	out = append(out, injected)
-	out = append(out, messages[checkpointIdx+1:]...)
-
-	return out, checkpointIdx + 1
+	return a.compactionFiles.replay(messages, checkpointIdx, signature, a.effectiveToolBaseDir(), injected, result.TotalBytes, plan.maxTotalBytes)
 }
 
-func (a *MainAgent) annotateCompactionFileParts(checkpoint string, revisions map[string]string, parts []message.ContentPart) {
+func (a *MainAgent) annotateCompactionFileParts(checkpoint string, revisions, readRevisions map[string]string, parts []message.ContentPart) {
 	if a == nil || checkpoint == "" || len(parts) == 0 {
 		return
 	}
@@ -317,7 +325,7 @@ func (a *MainAgent) annotateCompactionFileParts(checkpoint string, revisions map
 		if !ok || displayPath == "" {
 			continue
 		}
-		hash := computeFileHash(a.resolveCheckpointFilePath(displayPath))
+		hash := readRevisions[a.resolveCheckpointFileReadPath(displayPath)]
 		if hash == "" {
 			continue
 		}

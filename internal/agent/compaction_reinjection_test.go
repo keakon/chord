@@ -147,8 +147,8 @@ func TestInjectCompactionFileContextRecordsFileSource(t *testing.T) {
 		t.Fatalf("insertedAt=%d len=%d, want 1 and 2", gotIdx, len(got))
 	}
 	overlay := got[1].Parts
-	if !strings.Contains(overlay[0].Text, compactionFileCtxPrefix) || !strings.Contains(overlay[0].Text, "re-read from disk") {
-		t.Fatalf("overlay intro must mark the body as a fresh read: %q", overlay[0].Text)
+	if !strings.Contains(overlay[0].Text, compactionFileCtxPrefix) || !strings.Contains(overlay[0].Text, "file snapshots observed at this point") {
+		t.Fatalf("overlay intro must identify the snapshot observation boundary: %q", overlay[0].Text)
 	}
 	sources := map[string]string{}
 	for _, part := range overlay[1:] {

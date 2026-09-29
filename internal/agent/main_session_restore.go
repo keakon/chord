@@ -731,6 +731,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	// one (the frozen session already persisted its own).
 	a.modelDrivenProposal = modelDrivenProposalState{}
 	a.pendingModelDrivenNotice = ""
+	// Checkpoint file snapshots are a request-only cache of the replaced
+	// session; the loaded one starts from fresh permission-checked reads.
+	a.compactionFiles.reset()
 	a.resetCacheRoutingState()
 	a.restoreCacheHitStats(loaded.UsageStats)
 	a.clearReductionCache(true)

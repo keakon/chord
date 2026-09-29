@@ -38,6 +38,8 @@ import (
 // (eventCh) for sequencing work and an output channel (outputCh) that the TUI
 // consumes.
 type MainAgent struct {
+	compactionFiles compactionFileReplay
+
 	parentCtx              context.Context
 	cancel                 context.CancelFunc
 	llmClient              *llm.Client

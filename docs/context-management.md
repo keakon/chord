@@ -241,6 +241,8 @@ While model-driven compaction is enabled, the main agent's system prompt also ca
 
 The model-driven section asks the model to preserve key findings, decisions and recovery state as part of the work. After a reset it starts from the checkpoint and injected file content, reads registered `state_files` only for missing or changed information needed for the next action, and reads archived history only for exact details unavailable there. It defers timing, preparation, state-file and budget rules to the `compact_context` tool description. SubAgents never receive this section or the tool.
 
+Automatically loaded file snapshots retain their conversation positions while unchanged. When a file changes, Chord appends a newer snapshot that supersedes its earlier version, preserving the earlier prompt prefix for cache reuse. Retained versions share a bounded budget; a new checkpoint, session restore, unavailable file, or permission change can rebuild this view. Session restore reads current files rather than relying on this request cache.
+
 The guidance is advisory, not a mandatory workflow: under context pressure it outranks open-ended exploration and optional work, but it never overrides a newer user request or Done rejection, a cancellation, permission or security rules, or tool dependency ordering.
 
 #### What carries across checkpoints

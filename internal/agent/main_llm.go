@@ -608,13 +608,14 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		})
 	}
 
-	// Reload compaction checkpoint key files as a request-local overlay, only
+	// Replay checkpoint file snapshots and append changed versions, only
 	// after the prepared surface was remembered above: the overlay never enters
 	// the durable history, so recording it in the stable-prefix shapes would
 	// make the next request's raw snapshot fail prefix compatibility and
 	// permanently disable incremental reduction reuse after the first
 	// compaction.
-	messages, keyFileCtxIdx := a.injectCompactionFileContext(messages)
+	messages, _ = a.injectCompactionFileContext(messages)
+	fileContextMessages := messages
 
 	// Inject the meta user message carrying environment + AGENTS.md before the
 	// first user message. AGENTS.md is delivered under a "# AGENTS.md
@@ -647,13 +648,11 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	// Propagate prompt-cache placement as one-shot Anthropic hints. The stable
 	// boundary index is computed against the prepared surface before the
 	// key-file overlay and session-context reminder were inserted, so every
-	// overlay message inserted at or before the boundary is added back to map it
+	// overlay message inserted before the boundary is added back to map it
 	// onto the source message list supplied to the provider. Anthropic resolves
 	// both source indices after message merging.
 	stableLen := a.consumePreparedStablePrefixLen()
-	if stableLen > 0 && keyFileCtxIdx >= 0 && keyFileCtxIdx < stableLen {
-		metaPrefixCount++
-	}
+	metaPrefixCount += compactionFileContextPrefixCount(fileContextMessages, stableLen)
 	a.applyAnthropicCacheHints(stableLen, metaPrefixCount, len(messages)-tailOverlayCount)
 
 	// Emit early activity event so the TUI shows "connecting" immediately,
