@@ -38,6 +38,20 @@ const (
 	retainedCheckpointRequestLabel    = "Assistant (context checkpoint request, own reasoning)"
 )
 
+// Checkpoint summary sections and labels shared by the renderers and by the
+// request-local checkpoint view, which recognizes their rendered form.
+const (
+	checkpointProgressHeading     = "## Progress"
+	checkpointKeyDecisionsHeading = "## Key Decisions"
+	checkpointOpenProblemsHeading = "## Open Problems"
+	// latestUserRequestLabel labels the Current User Request bullet taken
+	// from a real user message.
+	latestUserRequestLabel = "Latest user request"
+	// truncatedRequestNotice follows a Current User Request excerpt that was
+	// cut to the anchor budget.
+	truncatedRequestNotice = "- Request text was truncated."
+)
+
 // retainedCheckpointBlock is one message kept verbatim inside a checkpoint.
 // Blocks are collected newest first and rendered in reverse (chronological).
 type retainedCheckpointBlock struct {
@@ -212,7 +226,7 @@ func renderCheckpointRetainedRecentMessages(messages []message.Message, maxUserM
 	}
 	var sb strings.Builder
 	sb.WriteString(retainedRecentMessagesHeading)
-	sb.WriteString("\nReal messages kept verbatim from just before the checkpoint so the conversation continues on the actual work boundary; everything older lives in the summarized sections above and the archived history files.\n")
+	sb.WriteString("\nReal messages kept verbatim from just before the checkpoint so the conversation continues on the actual work boundary; an exact repeat of the current request is summarized as a duplicate above; everything older lives in the summarized sections above and the archived history files.\n")
 	for _, block := range slices.Backward(blocks) {
 		sb.WriteByte('\n')
 		sb.WriteString(block.label)

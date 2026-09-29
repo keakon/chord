@@ -806,33 +806,42 @@ func (e checkpointClaimNeedsEvidenceError) Error() string {
 }
 
 func validateModelDrivenCheckpointKind(args tools.CompactContextArgs) error {
+	var problems []error
+	add := func(err error) { problems = append(problems, err) }
 	if args.CheckpointKind == checkpointKindCommitted && args.StageStatus != stageStatusCompleted {
-		return fmt.Errorf("committed compact_context requires stage_status=completed; retry with checkpoint_kind=provisional when the stage is not authoritative yet")
+		add(fmt.Errorf("committed compact_context requires stage_status=completed; retry with checkpoint_kind=provisional when the stage is not authoritative yet"))
 	}
 	if args.CheckpointKind == checkpointKindCommitted && len(args.EvidenceRefs) == 0 {
-		return fmt.Errorf("committed compact_context requires at least one evidence_refs entry from the checkpoint evidence pack; retry with checkpoint_kind=provisional when no evidence pack is in view")
+		add(fmt.Errorf("committed compact_context requires at least one evidence_refs entry from the checkpoint evidence pack; retry with checkpoint_kind=provisional when no evidence pack is in view"))
 	}
-	// A provisional completed stage does not require evidence on its own:
-	// only observed claims (checked below) and committed checkpoints must
-	// anchor to evidence IDs, and those IDs are not even visible to the model
-	// before the first checkpoint of a session renders its evidence pack.
-	for claim, kind := range args.ClaimKinds {
-		if kind == claimKindObserved && len(args.ClaimEvidence[claim]) == 0 {
-			return checkpointClaimNeedsEvidenceError{claim: claim}
+	claims := make([]string, 0, len(args.ClaimKinds))
+	for claim := range args.ClaimKinds {
+		claims = append(claims, claim)
+	}
+	slices.Sort(claims)
+	for _, claim := range claims {
+		if args.ClaimKinds[claim] != claimKindObserved {
+			continue
 		}
-		if kind == claimKindObserved {
-			refs := make(map[string]struct{}, len(args.EvidenceRefs))
-			for _, ref := range args.EvidenceRefs {
-				refs[ref] = struct{}{}
-			}
-			for _, ref := range args.ClaimEvidence[claim] {
-				if _, ok := refs[ref]; !ok {
-					return fmt.Errorf("observed claim %q references evidence %q that is not listed in evidence_refs", claim, ref)
-				}
+		if len(args.ClaimEvidence[claim]) == 0 {
+			add(checkpointClaimNeedsEvidenceError{claim: claim})
+			continue
+		}
+		refs := slices.Clone(args.ClaimEvidence[claim])
+		slices.Sort(refs)
+		for _, ref := range slices.Compact(refs) {
+			if !slices.Contains(args.EvidenceRefs, ref) {
+				add(fmt.Errorf("observed claim %q references evidence %q that is not listed in evidence_refs", claim, ref))
 			}
 		}
 	}
-	return nil
+	// Bound rejection output while reporting independent repairs together.
+	const maxReportedProblems = 8
+	if len(problems) > maxReportedProblems {
+		omitted := len(problems) - maxReportedProblems
+		problems = append(problems[:maxReportedProblems:maxReportedProblems], fmt.Errorf("%d additional checkpoint validation errors omitted; correct the reported fields and retry", omitted))
+	}
+	return errors.Join(problems...)
 }
 
 // ------------------------------------------------------------------ barrier ---
@@ -1873,9 +1882,9 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 		{"## Active Objective", renderModelState(req.Args.ActiveObjective)},
 		{"## Background Goals", "- Earlier goals and the model-declared Active Objective are subordinate to the Current User Request and User Constraints."},
 		{"## Next Step", renderModelState(req.Args.NextStep)},
-		{"## Open Problems", openIssues},
-		{"## Progress", completed},
-		{"## Key Decisions", decisions},
+		{checkpointOpenProblemsHeading, openIssues},
+		{checkpointProgressHeading, completed},
+		{checkpointKeyDecisionsHeading, decisions},
 		{"## Files and Evidence", "- Precise archived history is listed under the checkpoint wrapper's archived history files."},
 		{"## Externalized State", stateFiles},
 		{"## Planned Externalized State", plannedStateFiles},
@@ -2126,7 +2135,7 @@ func modelDrivenCurrentUserRequestSection(anchor fallbackAnchor) string {
 		snippet := strings.ReplaceAll(compactTextSnippet(text, modelDrivenAnchorMaxRunes), "\n", "\n  ")
 		section := stripColumnZeroHeadings("- " + anchor.Label + ": " + snippet)
 		if utf8.RuneCountInString(text) > modelDrivenAnchorMaxRunes {
-			section += "\n- Request text was truncated. Recover the full request from the archived history files before making decisions that depend on omitted requirements; this excerpt is not the complete specification."
+			section += "\n" + truncatedRequestNotice + " Recover the full request from the archived history files before making decisions that depend on omitted requirements; this excerpt is not the complete specification."
 		}
 		return section
 	}

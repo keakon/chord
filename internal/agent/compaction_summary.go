@@ -812,12 +812,12 @@ func buildStructuredFallbackSummary(historyPath string, input *compactionInput, 
 		{"## Active Objective", fallbackActiveObjectiveSection(anchor)},
 		{"## Background Goals", "- Earlier goals are background until confirmed relevant to the latest preserved user request."},
 		{"## User Constraints", renderEvidenceKindForFallback(input, evidenceUserCorrection, "- No preserved user constraints.")},
-		{"## Progress", fallbackProgressSection(input)},
-		{"## Key Decisions", "- Earlier durable decisions should be read from the archived history file if needed.\n- Preserve the recent continuation direction and evidence below."},
+		{checkpointProgressHeading, fallbackProgressSection(input)},
+		{checkpointKeyDecisionsHeading, "- Earlier durable decisions should be read from the archived history file if needed.\n- Preserve the recent continuation direction and evidence below."},
 		{"## Files and Evidence", fallbackFilesAndEvidenceSection(historyPath, input, keyFiles)},
 		{"## Todo State", formatTodosAsRelevanceBullets(todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
-		{"## Open Problems", fallbackOpenProblemsSection(input, summarizeErr)},
+		{checkpointOpenProblemsHeading, fallbackOpenProblemsSection(input, summarizeErr)},
 		{"## Next Step", fallbackNextStepSection(input)},
 	})
 }
@@ -916,7 +916,7 @@ func latestRequestOrDoneRejectedAnchor(input *compactionInput) (fallbackAnchor, 
 	case doneText != "" && doneSeq >= userSeq:
 		return fallbackAnchor{Kind: "done_rejected", Label: "Latest Done rejected reason", Text: doneText}, true
 	case userText != "":
-		return fallbackAnchor{Kind: "user_request", Label: "Latest user request", Text: userText}, true
+		return fallbackAnchor{Kind: "user_request", Label: latestUserRequestLabel, Text: userText}, true
 	}
 	return fallbackAnchor{}, false
 }
@@ -963,7 +963,7 @@ func resolveLatestUserRequestAnchor(messages []message.Message) fallbackAnchor {
 		if doneIdx > userIdx {
 			return fallbackAnchor{Kind: "done_rejected", Label: "Latest Done rejected reason", Text: doneText}
 		}
-		return fallbackAnchor{Kind: "user_request", Label: "Latest user request", Text: userText}
+		return fallbackAnchor{Kind: "user_request", Label: latestUserRequestLabel, Text: userText}
 	}
 	if lastCheckpointIdx >= 0 {
 		if section, ok := compactionCurrentUserRequestSection(messages[lastCheckpointIdx].Content); ok {
@@ -1490,12 +1490,12 @@ func buildTruncateOnlySummary(historyPath string, summarizeErr error, keyFiles [
 		{"## Active Objective", "- Continue from the latest preserved user request; do not assume older todos remain active without checking relevance."},
 		{"## Background Goals", "- Earlier goals are background until confirmed relevant to the latest preserved user request."},
 		{"## User Constraints", "- Constraints may be incomplete because truncate-only fallback skipped model-generated summarization."},
-		{"## Progress", "- Earlier history was compacted in truncate-only mode.\n- Use the archived history and key files below as the durable checkpoint."},
-		{"## Key Decisions", "- Model-based context summarization was unavailable.\n- Continue from the archived history, key files, and preserved recent context instead of inventing missing decisions."},
+		{checkpointProgressHeading, "- Earlier history was compacted in truncate-only mode.\n- Use the archived history and key files below as the durable checkpoint."},
+		{checkpointKeyDecisionsHeading, "- Model-based context summarization was unavailable.\n- Continue from the archived history, key files, and preserved recent context instead of inventing missing decisions."},
 		{"## Files and Evidence", fallbackFilesAndEvidenceSection(historyPath, nil, keyFiles)},
 		{"## Todo State", formatTodosAsRelevanceBullets(todos, fallbackAnchor{})},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
-		{"## Open Problems", fallbackOpenProblemsSection(nil, summarizeErr)},
+		{checkpointOpenProblemsHeading, fallbackOpenProblemsSection(nil, summarizeErr)},
 		{"## Next Step", "- Continue from the latest preserved user request, archived history, and listed key files."},
 	})
 }

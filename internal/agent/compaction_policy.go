@@ -145,6 +145,7 @@ func (a *MainAgent) handleRefreshReductionStats() {
 }
 
 func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message, rememberPrepared bool) []message.Message {
+	messages = projectCheckpointRequests(messages)
 	if a != nil && rememberPrepared {
 		a.setPreparedStablePrefixLen(0)
 	}
