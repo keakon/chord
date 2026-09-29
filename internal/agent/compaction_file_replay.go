@@ -12,6 +12,43 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+// Earlier snapshot versions are retained only for a provider/model that has
+// already observed cache hits: those hits establish that prefix reuse is
+// available. Model pricing is not consulted; byte and version limits bound the
+// extra history, without predicting future request counts.
+func (a *MainAgent) checkpointFileReplayAllowed(modelRef string) bool {
+	if a == nil || a.cacheHitTracker == nil {
+		return false
+	}
+	rate, observed := a.cacheHitTracker.HitRate(modelRef)
+	return observed && rate > 0
+}
+
+func isCompactionFileSnapshot(m message.Message) bool {
+	return m.Kind == message.KindTurnOverlay && len(m.Parts) > 0 && strings.HasPrefix(m.Parts[0].Text, compactionFileCtxPrefix)
+}
+
+// Keep the latest complete bundle in its original position; never move an
+// overlay into an assistant tool-call/result pair during provider fallback.
+func latestCompactionFileSnapshotOnly(messages []message.Message) []message.Message {
+	latest, count := -1, 0
+	for i, m := range messages {
+		if isCompactionFileSnapshot(m) {
+			latest, count = i, count+1
+		}
+	}
+	if count <= 1 {
+		return messages
+	}
+	out := make([]message.Message, 0, len(messages)-count+1)
+	for i, m := range messages {
+		if i == latest || !isCompactionFileSnapshot(m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // compactionFileReplay keeps request-only snapshots at their original history
 // boundaries. It is a cache, never a recovery source: a new session or checkpoint
 // starts from fresh permission-checked disk reads. The caller holds mu while
@@ -77,7 +114,7 @@ func compactionFileAnchor(m message.Message) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (r *compactionFileReplay) replay(messages []message.Message, checkpoint int, signature, root string, current message.Message, bytes, budget int) ([]message.Message, int) {
+func (r *compactionFileReplay) replay(messages []message.Message, checkpoint int, signature, root string, current message.Message, bytes, budget int) []message.Message {
 	var paths []string
 	for _, p := range current.Parts {
 		paths = append(paths, message.FileRefPaths(p.Text)...)
@@ -122,7 +159,7 @@ func (r *compactionFileReplay) replay(messages []message.Message, checkpoint int
 		start = v.before
 	}
 	out = append(out, messages[start:]...)
-	return out, r.versions[0].before
+	return out
 }
 
 // Translate the prepared-history cache boundary to the request with all file
@@ -133,7 +170,7 @@ func compactionFileContextPrefixCount(messages []message.Message, stableLen int)
 		if raw >= stableLen {
 			break
 		}
-		if m.Kind == message.KindTurnOverlay && len(m.Parts) > 0 && strings.HasPrefix(m.Parts[0].Text, compactionFileCtxPrefix) {
+		if isCompactionFileSnapshot(m) {
 			count++
 		} else {
 			raw++

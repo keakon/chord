@@ -1,12 +1,9 @@
 package agent
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/keakon/chord/internal/tools"
 )
@@ -118,7 +115,6 @@ type checkpointTypedState struct {
 	Decisions          []string
 	OpenIssues         []string
 	OpenIssuesComplete bool
-	OpenIssueIDs       map[string]string
 	EvidenceRefs       []string
 	StageID            string
 	StageStatus        string
@@ -140,12 +136,11 @@ type checkpointTypedState struct {
 
 // checkpointOpenIssue is one open issue carried from an earlier generation
 // that the current submission did not restate, with its provenance: the text
-// (whose stable identity is the lexical openIssueKey, not a new ID space), the
+// (whose identity is checkpointItemKey, like every other carried item), the
 // generation that last confirmed it, and its confirmation status. The
 // historical bucket exists so an unrestated issue stays recoverable without
 // reading as a current blocker.
 type checkpointOpenIssue struct {
-	ID     string `json:"id,omitempty"`
 	Text   string `json:"text"`
 	Source int    `json:"source,omitempty"`
 	Status string `json:"status,omitempty"`
@@ -268,33 +263,29 @@ func typedStateFromBody(body string) (state checkpointTypedState, found bool, ma
 			continue
 		}
 		var decoded struct {
-			Completed          []string                   `json:"completed"`
-			Decisions          []string                   `json:"decisions"`
-			OpenIssues         []string                   `json:"open_issues"`
-			OpenIssuesComplete bool                       `json:"open_issues_complete"`
-			OpenIssueIDs       map[string]string          `json:"open_issue_ids"`
-			CarriedOpenIssues  []checkpointOpenIssue      `json:"carried_open_issues"`
-			EvidenceRefs       []string                   `json:"evidence_refs"`
-			StageID            string                     `json:"stage_id"`
-			StageStatus        string                     `json:"stage_status"`
-			Kind               string                     `json:"checkpoint_kind"`
-			Generation         int                        `json:"generation"`
-			Claims             map[string]checkpointClaim `json:"claims"`
+			Completed         []string                   `json:"completed"`
+			Decisions         []string                   `json:"decisions"`
+			OpenIssues        []string                   `json:"open_issues"`
+			CarriedOpenIssues []checkpointOpenIssue      `json:"carried_open_issues"`
+			EvidenceRefs      []string                   `json:"evidence_refs"`
+			StageID           string                     `json:"stage_id"`
+			StageStatus       string                     `json:"stage_status"`
+			Kind              string                     `json:"checkpoint_kind"`
+			Generation        int                        `json:"generation"`
+			Claims            map[string]checkpointClaim `json:"claims"`
 		}
 		if json.Unmarshal([]byte(line), &decoded) != nil {
 			broken = true
 			continue
 		}
 		return checkpointTypedState{
-			Completed:          decoded.Completed,
-			Decisions:          decoded.Decisions,
-			OpenIssues:         decoded.OpenIssues,
-			OpenIssuesComplete: decoded.OpenIssuesComplete,
-			OpenIssueIDs:       decoded.OpenIssueIDs,
-			EvidenceRefs:       decoded.EvidenceRefs,
-			StageID:            strings.TrimSpace(decoded.StageID),
-			StageStatus:        strings.TrimSpace(decoded.StageStatus),
-			Kind:               strings.TrimSpace(decoded.Kind),
+			Completed:    decoded.Completed,
+			Decisions:    decoded.Decisions,
+			OpenIssues:   decoded.OpenIssues,
+			EvidenceRefs: decoded.EvidenceRefs,
+			StageID:      strings.TrimSpace(decoded.StageID),
+			StageStatus:  strings.TrimSpace(decoded.StageStatus),
+			Kind:         strings.TrimSpace(decoded.Kind),
 			// A block written before the current/historical split declares no
 			// carried set and no generation: it decodes as generation 0 with
 			// an empty historical bucket, so its open issues read as the
@@ -317,32 +308,31 @@ func typedStateFromBody(body string) (state checkpointTypedState, found bool, ma
 // Carried items over the per-item cap are truncated with an explicit marker;
 // the JSON stays parseable by typedStateFromBody.
 func renderTypedStateJSON(state checkpointTypedState) string {
+	// OpenIssuesComplete is a declaration of the fresh submission only: the
+	// merge reads it from the current generation, never from a carried block,
+	// so it is not persisted.
 	payload := struct {
-		Completed          []string                   `json:"completed,omitempty"`
-		Decisions          []string                   `json:"decisions,omitempty"`
-		OpenIssues         []string                   `json:"open_issues,omitempty"`
-		OpenIssuesComplete bool                       `json:"open_issues_complete,omitempty"`
-		OpenIssueIDs       map[string]string          `json:"open_issue_ids,omitempty"`
-		CarriedOpenIssues  []checkpointOpenIssue      `json:"carried_open_issues,omitempty"`
-		EvidenceRefs       []string                   `json:"evidence_refs,omitempty"`
-		StageID            string                     `json:"stage_id,omitempty"`
-		StageStatus        string                     `json:"stage_status,omitempty"`
-		Kind               string                     `json:"checkpoint_kind,omitempty"`
-		Generation         int                        `json:"generation,omitempty"`
-		Claims             map[string]checkpointClaim `json:"claims,omitempty"`
+		Completed         []string                   `json:"completed,omitempty"`
+		Decisions         []string                   `json:"decisions,omitempty"`
+		OpenIssues        []string                   `json:"open_issues,omitempty"`
+		CarriedOpenIssues []checkpointOpenIssue      `json:"carried_open_issues,omitempty"`
+		EvidenceRefs      []string                   `json:"evidence_refs,omitempty"`
+		StageID           string                     `json:"stage_id,omitempty"`
+		StageStatus       string                     `json:"stage_status,omitempty"`
+		Kind              string                     `json:"checkpoint_kind,omitempty"`
+		Generation        int                        `json:"generation,omitempty"`
+		Claims            map[string]checkpointClaim `json:"claims,omitempty"`
 	}{
-		Completed:          boundTypedStateItems(state.Completed),
-		Decisions:          boundTypedStateItems(state.Decisions),
-		OpenIssues:         boundTypedStateItems(state.OpenIssues),
-		OpenIssuesComplete: state.OpenIssuesComplete,
-		OpenIssueIDs:       openIssueIDsForRendered(state.OpenIssues, state.OpenIssueIDs),
-		CarriedOpenIssues:  normalizeCarriedOpenIssues(state.CarriedOpenIssues),
-		EvidenceRefs:       boundTypedStateItems(state.EvidenceRefs),
-		StageID:            state.StageID,
-		StageStatus:        state.StageStatus,
-		Kind:               state.Kind,
-		Generation:         state.Generation,
-		Claims:             state.Claims,
+		Completed:         boundTypedStateItems(state.Completed),
+		Decisions:         boundTypedStateItems(state.Decisions),
+		OpenIssues:        boundTypedStateItems(state.OpenIssues),
+		CarriedOpenIssues: normalizeCarriedOpenIssues(state.CarriedOpenIssues),
+		EvidenceRefs:      boundTypedStateItems(state.EvidenceRefs),
+		StageID:           state.StageID,
+		StageStatus:       state.StageStatus,
+		Kind:              state.Kind,
+		Generation:        state.Generation,
+		Claims:            state.Claims,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -400,70 +390,6 @@ func truncateRunes(s string, n int) string {
 	return b.String()
 }
 
-// openIssueKey is the stable lexical identity of an open issue inside the
-// open-issue bucket: surrounding whitespace removed, internal whitespace runs
-// collapsed to one space, and case folded. The model re-spaces and re-cases an
-// issue when it restates or retires it, and the restatement has to be
-// recognized as the same issue — otherwise the earlier wording survives as a
-// second, historical entry that reads like a distinct unresolved risk, and a
-// retirement spelled differently would leave the entry the model believes it
-// removed.
-//
-// This is lexical normalization, not a semantic matcher: two issues that
-// differ in wording stay distinct, exactly as checkpointItemKey keeps
-// completed work and decisions distinct. The other carried lists keep that
-// exact-after-trim identity (a claim is a map key, and the decisions/completed
-// retirement contract is unchanged).
-//
-// The normalization is a single scan that returns the input unchanged when it
-// is already in normalized form — the common case — because this runs once per
-// open issue on every checkpoint render: strings.Fields/ToLower/Join would
-// allocate a slice and a string per call on that path.
-func openIssueKey(item string) string {
-	item = strings.TrimSpace(item)
-	if item == "" || openIssueKeyNormalized(item) {
-		return item
-	}
-	var b strings.Builder
-	b.Grow(len(item))
-	space := false
-	for _, r := range item {
-		if unicode.IsSpace(r) {
-			if space {
-				continue
-			}
-			space = true
-			b.WriteByte(' ')
-			continue
-		}
-		space = false
-		b.WriteRune(unicode.ToLower(r))
-	}
-	return strings.TrimSpace(b.String())
-}
-
-// openIssueKeyNormalized reports whether s already has the openIssueKey form:
-// no whitespace run longer than a single space, and no rune that case folding
-// would change. s is expected to be trimmed already, so a leading or trailing
-// space cannot occur.
-func openIssueKeyNormalized(s string) bool {
-	space := false
-	for _, r := range s {
-		if unicode.IsSpace(r) {
-			if space || r != ' ' {
-				return false
-			}
-			space = true
-			continue
-		}
-		space = false
-		if unicode.ToLower(r) != r {
-			return false
-		}
-	}
-	return true
-}
-
 // normalizeCarriedOpenIssues prepares a historical open-issue set for storage
 // or rendering: each entry's text is trimmed and an over-long text is
 // truncated at a rune boundary with the shared marker, a missing status
@@ -480,12 +406,6 @@ func normalizeCarriedOpenIssues(items []checkpointOpenIssue) []checkpointOpenIss
 		if text == "" {
 			continue
 		}
-		// Derive the stable identity before truncating the display text. The
-		// full lexical identity is needed for a later retired_items entry to
-		// retire the original long issue.
-		if item.ID == "" {
-			item.ID = openIssueID(text)
-		}
 		if runeLen(text) > typedStateCarryMaxItemRunes {
 			text = truncateRunes(text, typedStateCarryMaxItemRunes) + typedStateItemTruncatedSuffix
 		}
@@ -499,73 +419,6 @@ func normalizeCarriedOpenIssues(items []checkpointOpenIssue) []checkpointOpenIss
 		return nil
 	}
 	return out
-}
-
-// openIssueID is a compact stable identity for an issue's normalized text.
-// It keeps the full identity available after display truncation without
-// copying an arbitrarily long issue into every typed checkpoint.
-func openIssueID(item string) string {
-	key := openIssueKey(item)
-	if key == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(sum[:16])
-}
-
-// openIssueIDsForRendered preserves identities for current issues whose
-// display text is truncated by the normal typed-state item bound. Keys are
-// the rendered text so the parser can recover the identity on the next carry.
-func openIssueIDsForRendered(items []string, ids map[string]string) map[string]string {
-	if len(items) == 0 {
-		return nil
-	}
-	if ids == nil {
-		needsIdentity := false
-		for _, item := range items {
-			if runeLen(strings.TrimSpace(item)) > typedStateCarryMaxItemRunes {
-				needsIdentity = true
-				break
-			}
-		}
-		if !needsIdentity {
-			return nil
-		}
-	}
-	rendered := boundTypedStateItems(items)
-	var out map[string]string
-	for i, item := range items {
-		key := openIssueKey(item)
-		if key == "" {
-			continue
-		}
-		id := ""
-		if ids != nil {
-			id = ids[key]
-		}
-		if id == "" {
-			id = openIssueID(item)
-		}
-		if id != "" && (rendered[i] != item || id != openIssueID(item)) {
-			if out == nil {
-				out = make(map[string]string, len(items))
-			}
-			out[rendered[i]] = id
-		}
-	}
-	return out
-}
-
-func checkpointOpenIssueID(state checkpointTypedState, item string) string {
-	if state.OpenIssueIDs != nil {
-		if id := state.OpenIssueIDs[item]; id != "" {
-			return id
-		}
-		if id := state.OpenIssueIDs[openIssueKey(item)]; id != "" {
-			return id
-		}
-	}
-	return openIssueID(item)
 }
 
 // mergeCheckpointTypedStates merges the carried state of the previous
@@ -652,25 +505,24 @@ func mergeCheckpointTypedStates(prior, current checkpointTypedState) (merged che
 // the prior generation confirmed but this one did not restate, then the older
 // carried set. Entries past the shared cap are dropped and counted, so the
 // renderer discloses the omission instead of presenting a bounded list as
-// complete. Identity is openIssueKey, so a restatement the model re-spaced or
-// re-cased moves the entry into the confirmed set instead of duplicating it.
+// complete. Identity is checkpointItemKey across both buckets, so a
+// restatement that matches the carried text after trimming surrounding
+// whitespace — including a truncated entry copied verbatim with its marker —
+// moves the entry into the confirmed set instead of duplicating it.
 func mergeTypedStateOpenIssues(prior, current checkpointTypedState, cap int) (confirmed []string, carried []checkpointOpenIssue, omitted int) {
 	if cap <= 0 {
 		return nil, nil, len(current.OpenIssues) + len(prior.OpenIssues) + len(prior.CarriedOpenIssues)
 	}
 	confirmed = make([]string, 0, min(cap, len(current.OpenIssues)))
 	seen := make(map[string]struct{}, min(cap, len(current.OpenIssues)+len(prior.OpenIssues)+len(prior.CarriedOpenIssues)))
-	// add records one candidate under its normalized identity and reports
-	// whether the caller should keep it. A duplicate is dropped silently (it
-	// is the same issue, not a lost one); an entry past the shared cap is
-	// counted as omitted.
-	addWithID := func(item, identity string) bool {
-		key := openIssueKey(item)
+	// add records one candidate under its identity and reports whether the
+	// caller should keep it. A duplicate is dropped silently (it is the same
+	// issue, not a lost one); an entry past the shared cap is counted as
+	// omitted.
+	add := func(item string) bool {
+		key := checkpointItemKey(item)
 		if key == "" {
 			return false
-		}
-		if identity != "" {
-			key = identity
 		}
 		if _, dup := seen[key]; dup {
 			return false
@@ -682,42 +534,27 @@ func mergeTypedStateOpenIssues(prior, current checkpointTypedState, cap int) (co
 		seen[key] = struct{}{}
 		return true
 	}
-	add := func(item string) bool { return addWithID(item, openIssueID(item)) }
 	for _, item := range current.OpenIssues {
 		if add(item) {
 			confirmed = append(confirmed, item)
 		}
 	}
-	if current.OpenIssuesComplete {
-		for _, item := range prior.OpenIssues {
-			if addWithID(item, checkpointOpenIssueID(prior, item)) {
-				carried = append(carried, checkpointOpenIssue{
-					ID:     checkpointOpenIssueID(prior, item),
-					Text:   item,
-					Source: prior.Generation,
-					Status: typedIssueStatusUnconfirmed,
-				})
-			}
+	for _, item := range prior.OpenIssues {
+		if !add(item) {
+			continue
 		}
-	} else {
 		// The compact_context contract is incremental by default: omission
-		// does not mean resolution. Preserve prior current issues as current
-		// unless the model explicitly supplied a complete snapshot.
-		priorCurrent := append([]string(nil), prior.OpenIssues...)
-		for _, item := range priorCurrent {
-			if addWithID(item, checkpointOpenIssueID(prior, item)) {
-				confirmed = append(confirmed, item)
-			}
+		// does not mean resolution. A prior current issue stays current unless
+		// the model explicitly supplied a complete snapshot.
+		if current.OpenIssuesComplete {
+			carried = append(carried, checkpointOpenIssue{Text: item, Source: prior.Generation, Status: typedIssueStatusUnconfirmed})
+		} else {
+			confirmed = append(confirmed, item)
 		}
 	}
 	for _, item := range prior.CarriedOpenIssues {
-		if addWithID(item.Text, item.ID) {
-			carried = append(carried, checkpointOpenIssue{
-				ID:     item.ID,
-				Text:   item.Text,
-				Source: item.Source,
-				Status: typedIssueStatusUnconfirmed,
-			})
+		if add(item.Text) {
+			carried = append(carried, checkpointOpenIssue{Text: item.Text, Source: item.Source, Status: typedIssueStatusUnconfirmed})
 		}
 	}
 	return boundTypedStateItems(confirmed), normalizeCarriedOpenIssues(carried), omitted

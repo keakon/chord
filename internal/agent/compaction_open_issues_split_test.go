@@ -31,7 +31,7 @@ func TestCarriedOnlyOpenIssueIsDemotedAndNeverReadsAsCurrent(t *testing.T) {
 	if omitted != 0 || openIssuesOmitted != 0 {
 		t.Fatalf("demotion is not an omission: omitted=%d openIssuesOmitted=%d", omitted, openIssuesOmitted)
 	}
-	want := []checkpointOpenIssue{{ID: openIssueID("tests not written yet"), Text: "tests not written yet", Source: 0, Status: typedIssueStatusUnconfirmed}}
+	want := []checkpointOpenIssue{{Text: "tests not written yet", Source: 0, Status: typedIssueStatusUnconfirmed}}
 	if !slices.Equal(merged.CarriedOpenIssues, want) {
 		t.Fatalf("carried issues = %+v, want %+v", merged.CarriedOpenIssues, want)
 	}
@@ -59,34 +59,36 @@ func TestOpenIssueOmissionCarriesForwardUnlessSnapshotIsComplete(t *testing.T) {
 	}
 }
 
-func TestLongCarriedOpenIssueRetiresByStableIdentity(t *testing.T) {
-	long := strings.Repeat("risk ", typedStateCarryMaxItemRunes+20)
-	state := checkpointTypedState{CarriedOpenIssues: []checkpointOpenIssue{{Text: long, Source: 1}}}
-	state.CarriedOpenIssues = normalizeCarriedOpenIssues(state.CarriedOpenIssues)
-	if len(state.CarriedOpenIssues) != 1 || state.CarriedOpenIssues[0].ID == "" {
-		t.Fatalf("long issue must retain a stable id: %+v", state.CarriedOpenIssues)
+func TestTruncatedOpenIssueRestatesAndRetiresByRenderedText(t *testing.T) {
+	long := strings.Repeat("current risk ", typedStateCarryMaxItemRunes)
+	// The carried block is the only copy a later generation sees, so the long
+	// issue reaches it already truncated with the shared marker.
+	prior, ok := typedStateForTest(typedStateSectionHeading + "\n" + renderTypedStateJSON(checkpointTypedState{OpenIssues: []string{long}}))
+	if !ok || len(prior.OpenIssues) != 1 || !strings.HasSuffix(prior.OpenIssues[0], typedStateItemTruncatedSuffix) {
+		t.Fatalf("long issue was not carried truncated: %+v", prior)
 	}
-	retired := retireCheckpointItems(state, []string{long})
-	if len(retired.CarriedOpenIssues) != 0 {
-		t.Fatalf("long issue was not retired by its original text: %+v", retired.CarriedOpenIssues)
-	}
-}
+	rendered := prior.OpenIssues[0]
 
-func TestLongCurrentOpenIssueKeepsIdentityAcrossTypedRoundTrip(t *testing.T) {
-	long := strings.Repeat("current risk ", typedStateCarryMaxItemRunes+20)
-	state := checkpointTypedState{OpenIssues: []string{long}, OpenIssuesComplete: true}
-	parsed, ok := typedStateForTest(typedStateSectionHeading + "\n" + renderTypedStateJSON(state))
-	if !ok || len(parsed.OpenIssues) != 1 || len(parsed.OpenIssueIDs) != 1 {
-		t.Fatalf("current issue identity was not persisted: %+v", parsed)
+	// Restating the truncated text verbatim is the same issue: it stays
+	// current once and is not also demoted into the historical bucket.
+	restated, _, _, _ := mergeCheckpointTypedStates(prior, checkpointTypedState{OpenIssues: []string{rendered}, OpenIssuesComplete: true})
+	if !slices.Equal(restated.OpenIssues, []string{rendered}) || len(restated.CarriedOpenIssues) != 0 {
+		t.Fatalf("verbatim restatement duplicated the issue: %+v", restated)
 	}
-	prior := parsed
-	merged, _, _, _ := mergeCheckpointTypedStates(prior, checkpointTypedState{OpenIssuesComplete: true})
-	if len(merged.CarriedOpenIssues) != 1 {
-		t.Fatalf("long current issue was not carried with identity: %+v", merged)
+
+	// Without the restatement the issue is demoted, and the rendered text the
+	// model can see retires it from either bucket, however many generations
+	// the carry has run.
+	demoted, _, _, _ := mergeCheckpointTypedStates(prior, checkpointTypedState{OpenIssuesComplete: true})
+	carried, _, _, _ := mergeCheckpointTypedStates(demoted, checkpointTypedState{})
+	if !slices.Equal(carriedIssueTexts(carried), []string{rendered}) {
+		t.Fatalf("demoted issue = %+v, want the rendered text", carried.CarriedOpenIssues)
 	}
-	retired := retireCheckpointItems(merged, []string{long})
-	if len(retired.CarriedOpenIssues) != 0 {
-		t.Fatalf("long current issue could not be retired after carry: %+v", retired.CarriedOpenIssues)
+	if retired := retireCheckpointItems(carried, []string{rendered}); len(retired.CarriedOpenIssues) != 0 {
+		t.Fatalf("historical issue was not retired by its rendered text: %+v", retired.CarriedOpenIssues)
+	}
+	if retired := retireCheckpointItems(prior, []string{rendered}); len(retired.OpenIssues) != 0 {
+		t.Fatalf("current issue was not retired by its rendered text: %+v", retired.OpenIssues)
 	}
 }
 
@@ -98,26 +100,22 @@ func TestRestatedOpenIssueMovesToCurrentWithoutDuplicate(t *testing.T) {
 		},
 		Generation: 1,
 	}
-	// The model restates the first issue with different spacing and casing and
-	// adds a new one. The restatement is the same issue (openIssueKey), so it
-	// must move into the current set instead of leaving the earlier wording
-	// behind as a second, historical entry; the untouched historical entry
-	// keeps its own provenance.
-	current := checkpointTypedState{OpenIssues: []string{"Verify  Parser", "new issue"}, OpenIssuesComplete: true}
+	// Surrounding whitespace is insignificant; exact restatement refreshes the issue.
+	current := checkpointTypedState{OpenIssues: []string{"  verify parser  ", "new issue"}, OpenIssuesComplete: true}
 	merged, omitted, _, openIssuesOmitted := mergeCheckpointTypedStates(prior, current)
 	if omitted != 0 || openIssuesOmitted != 0 {
 		t.Fatalf("omitted=%d openIssuesOmitted=%d, want 0", omitted, openIssuesOmitted)
 	}
-	if !slices.Equal(merged.OpenIssues, []string{"Verify  Parser", "new issue"}) {
+	if !slices.Equal(merged.OpenIssues, []string{"verify parser", "new issue"}) {
 		t.Fatalf("current issues = %v, want the fresh spelling first", merged.OpenIssues)
 	}
-	want := []checkpointOpenIssue{{ID: openIssueID("old risk"), Text: "old risk", Source: 0, Status: typedIssueStatusUnconfirmed}}
+	want := []checkpointOpenIssue{{Text: "old risk", Source: 0, Status: typedIssueStatusUnconfirmed}}
 	if !slices.Equal(merged.CarriedOpenIssues, want) {
 		t.Fatalf("carried issues = %+v, want %+v", merged.CarriedOpenIssues, want)
 	}
 
 	// Distinct wording is never merged: "verify parser" and "verify the
-	// parser" stay two issues, because this is lexical normalization and not a
+	// parser" stay two issues, because identity is the trimmed text and not a
 	// semantic matcher.
 	distinct, _, _, _ := mergeCheckpointTypedStates(
 		checkpointTypedState{OpenIssues: []string{"verify parser"}},
@@ -135,10 +133,8 @@ func TestRetiredOpenIssueLeavesBothBuckets(t *testing.T) {
 			{Text: "Old Risk", Source: 0, Status: typedIssueStatusUnconfirmed},
 		},
 	}
-	// The retirement spells both entries with different spacing and casing: a
-	// retirement that missed them would leave entries the model believes it
-	// removed, so the open-issue identity is normalized on both sides.
-	state := retireCheckpointItems(prior, []string{"VERIFY   parser", "old risk"})
+	// Retirement preserves meaningful spelling and ignores surrounding whitespace.
+	state := retireCheckpointItems(prior, []string{"  verify parser  ", "Old Risk"})
 	if len(state.OpenIssues) != 0 || len(state.CarriedOpenIssues) != 0 {
 		t.Fatalf("retirement must empty both buckets: %+v", state)
 	}
@@ -154,8 +150,7 @@ func TestRetiredOpenIssueLeavesBothBuckets(t *testing.T) {
 		t.Fatalf("retired state resurrected: %+v", merged)
 	}
 
-	// Only the open-issue buckets use the normalized identity: a claim is a
-	// map key and keeps its exact-after-trim retirement contract.
+	// Claims also keep their exact-after-trim retirement contract.
 	withClaim := checkpointTypedState{Claims: map[string]checkpointClaim{"Use option A": {Status: typedClaimStatusActive}}}
 	kept := retireCheckpointItems(withClaim, []string{"use option a"})
 	if _, exists := kept.Claims["Use option A"]; !exists {
@@ -211,7 +206,7 @@ func TestLegacyTypedBlockOpenIssuesEnterHistoricalOnNextCarry(t *testing.T) {
 	if len(merged.Args.OpenIssues) != 0 {
 		t.Fatalf("legacy issue must leave the current set: %v", merged.Args.OpenIssues)
 	}
-	want := []checkpointOpenIssue{{ID: openIssueID("tests not written"), Text: "tests not written", Source: 0, Status: typedIssueStatusUnconfirmed}}
+	want := []checkpointOpenIssue{{Text: "tests not written", Source: 0, Status: typedIssueStatusUnconfirmed}}
 	if !slices.Equal(merged.CarriedOpenIssues, want) {
 		t.Fatalf("carried issues = %+v, want %+v", merged.CarriedOpenIssues, want)
 	}
@@ -329,14 +324,14 @@ func TestOpenIssueHelpersHandleEmptyInputs(t *testing.T) {
 	}
 
 	// A blank entry is not an issue, and a blank retirement entry cannot match
-	// one: the normalized identity of "   " is empty, so it is skipped on both
-	// sides instead of removing every blank entry at once. An internal
-	// whitespace run (here a tab) is collapsed like any other.
-	if key := openIssueKey("   \t "); key != "" {
+	// one: the identity of "   " is empty, so it is skipped on both sides
+	// instead of removing every blank entry at once. An internal whitespace
+	// run (here a tab) remains significant.
+	if key := checkpointItemKey("   \t "); key != "" {
 		t.Fatalf("blank issue key = %q, want empty", key)
 	}
-	if key := openIssueKey("verify\t\tparser"); key != "verify parser" {
-		t.Fatalf("internal whitespace run = %q, want it collapsed", key)
+	if key := checkpointItemKey("verify\t\tparser"); key != "verify\t\tparser" {
+		t.Fatalf("internal whitespace run = %q, want it preserved", key)
 	}
 	if got := normalizeCarriedOpenIssues([]checkpointOpenIssue{{Text: "  "}}); got != nil {
 		t.Fatalf("blank carried entries must be dropped: %+v", got)

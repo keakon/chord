@@ -614,7 +614,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	// make the next request's raw snapshot fail prefix compatibility and
 	// permanently disable incremental reduction reuse after the first
 	// compaction.
-	messages, _ = a.injectCompactionFileContext(messages)
+	messages = a.injectCompactionFileContext(messages, llmClient.NextRequestModelRef())
 	fileContextMessages := messages
 
 	// Inject the meta user message carrying environment + AGENTS.md before the

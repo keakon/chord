@@ -2409,6 +2409,8 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 		"checkpoint and any injected file content",
 		"only for missing or changed information",
 		"tool description governs checkpoint timing",
+		"required environment variables and arguments",
+		"Notes are recovery aids, not proof",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("block must mention %q, got:\n%s", want, block)

@@ -134,7 +134,7 @@ func TestCompactionContinuationFilesLoadsInRootAbsoluteSymlink(t *testing.T) {
 	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
 	summary := "## Externalized State\n- state.md\n"
 
-	out, insertedAt := a.injectCompactionFileContext([]message.Message{
+	out, insertedAt := injectCompactionFileContextForTest(a, []message.Message{
 		{Role: "user", IsCompactionSummary: true, Content: summary},
 	})
 	if insertedAt != 1 || len(out) != 2 {
@@ -212,7 +212,7 @@ func TestCompactionContinuationFilesGateStateFilesByReadPermission(t *testing.T)
 
 	// Wiring: the declared file reaches the request-local overlay, with the
 	// notes body carried by the file reference parts.
-	out, insertedAt := a.injectCompactionFileContext([]message.Message{
+	out, insertedAt := injectCompactionFileContextForTest(a, []message.Message{
 		{Role: "user", IsCompactionSummary: true, Content: summary},
 	})
 	if insertedAt != 1 || len(out) != 2 {

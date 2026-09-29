@@ -349,10 +349,7 @@ func TestModelDrivenCheckpointTypedRenderGuard(t *testing.T) {
 	if len(content) > 60_000 {
 		t.Fatalf("typed checkpoint content = %d bytes, want ≤60000 (bounded carry)", len(content))
 	}
-	// Stable identities for truncated open issues add a small fixed amount of
-	// JSON/render bookkeeping; keep the guard tight while allowing that
-	// correctness-preserving metadata.
-	maxAllocs := 270.0
+	maxAllocs := 250.0
 	mode := "normal"
 	if testBinaryBuiltWithRace() {
 		// Race instrumentation adds allocations to this path. Keep a separate

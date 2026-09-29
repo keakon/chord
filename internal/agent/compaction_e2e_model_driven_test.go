@@ -99,10 +99,11 @@ func e2eCheckpointAt(t *testing.T, a *MainAgent) message.Message {
 // (decisions, open issues, evidence references) accumulates newest-first
 // across real durable applies without a natural-language carry.
 //
-// Open issues are the one list that does not accumulate flat: the fresh
-// submission's issues are the current generation's blockers, and an issue the
-// submission did not restate is demoted to the historical bucket with the
-// generation that last confirmed it. The distinction is the point — a
+// Open issues are the one list that does not accumulate flat once a
+// submission declares its list complete, as every submission of this chain
+// does: its issues are the current generation's blockers, and an issue it did
+// not restate is demoted to the historical bucket with the generation that
+// last confirmed it. The distinction is the point — a
 // carried-only issue must stay recoverable without reading as a current
 // blocker, which is what this test's round-2 and round-3 assertions pin.
 func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {

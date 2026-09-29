@@ -64,7 +64,7 @@ func TestCompactionKeyFilesDoNotCreateUserBoundary(t *testing.T) {
 		{Role: message.RoleUser, Content: "Continue the task"},
 		{Role: message.RoleUser, IsCompactionSummary: true, Content: "## Files and Evidence\n- key.go\n\n## Next Step\n- continue"},
 	}
-	injected, index := a.injectCompactionFileContext(messages)
+	injected, index := injectCompactionFileContextForTest(a, messages)
 	if index != 2 {
 		t.Fatalf("injection index = %d, want 2", index)
 	}
@@ -110,14 +110,14 @@ func TestInjectCompactionFileContextSkipsWhenPostCompactionMarginIsGone(t *testi
 	if plan.quotaTokens != 0 || plan.maxTotalBytes != 0 {
 		t.Fatalf("a checkpoint inside the working margin must suppress the overlay: quota_tokens=%d max_total_bytes=%d", plan.quotaTokens, plan.maxTotalBytes)
 	}
-	if got, gotIdx := a.injectCompactionFileContext(msgs); len(got) != len(msgs) || gotIdx != -1 {
+	if got, gotIdx := injectCompactionFileContextForTest(a, msgs); len(got) != len(msgs) || gotIdx != -1 {
 		t.Fatalf("len(got) = %d idx = %d, want unchanged %d and -1", len(got), gotIdx, len(msgs))
 	}
 
 	// The same request surface re-injects against a wider window, where the
 	// remaining budget sits above the margin.
 	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
-	wider, widerIdx := a.injectCompactionFileContext(msgs)
+	wider, widerIdx := injectCompactionFileContextForTest(a, msgs)
 	if widerIdx != 1 || len(wider) != len(msgs)+1 {
 		t.Fatalf("wider window must re-inject, insertedAt=%d len=%d", widerIdx, len(wider))
 	}
@@ -142,7 +142,7 @@ func TestInjectCompactionFileContextRecordsFileSource(t *testing.T) {
 	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
 	summary := "## Files and Evidence\n- key.go\n\n## Externalized State\n- .chord/notes/task.md\n\n## Next Step\n- continue"
 
-	got, gotIdx := a.injectCompactionFileContext([]message.Message{{Role: message.RoleUser, IsCompactionSummary: true, Content: summary}})
+	got, gotIdx := injectCompactionFileContextForTest(a, []message.Message{{Role: message.RoleUser, IsCompactionSummary: true, Content: summary}})
 	if gotIdx != 1 || len(got) != 2 {
 		t.Fatalf("insertedAt=%d len=%d, want 1 and 2", gotIdx, len(got))
 	}
@@ -203,14 +203,14 @@ func TestInjectCompactionFileContextBoundsOverlayOnSmallWindow(t *testing.T) {
 	if plan.maxTotalBytes != 0 {
 		t.Fatalf("quarter of a 3K window must not qualify as an overlay budget: max_total_bytes=%d", plan.maxTotalBytes)
 	}
-	if got, gotIdx := a.injectCompactionFileContext(msgs); len(got) != len(msgs) || gotIdx != -1 {
+	if got, gotIdx := injectCompactionFileContextForTest(a, msgs); len(got) != len(msgs) || gotIdx != -1 {
 		t.Fatalf("small window injected an overlay it cannot hold: len=%d idx=%d", len(got), gotIdx)
 	}
 
 	// The same request surface re-injects against a wider window, which takes
 	// the remaining-budget path.
 	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
-	if _, idx := a.injectCompactionFileContext(msgs); idx != 1 {
+	if _, idx := injectCompactionFileContextForTest(a, msgs); idx != 1 {
 		t.Fatalf("wider window must inject, got insertedAt=%d", idx)
 	}
 }

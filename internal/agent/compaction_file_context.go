@@ -244,37 +244,39 @@ func (a *MainAgent) stateFileInjectableForRead(absPath string) bool {
 }
 
 // injectCompactionFileContext inserts the first file snapshot after the latest
-// checkpoint and appends changed snapshots at stable history boundaries. It
-// returns the extended list and first insertion index, or -1 when nothing
-// was injected. Callers must invoke it only after the prepared surface has
-// been remembered: the overlay never enters the durable history, so recording
-// it in the stable-prefix shapes would break prefix compatibility on the next
-// request and disable incremental reduction reuse after the first compaction.
-func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]message.Message, int) {
+// checkpoint and appends changed snapshots at stable history boundaries, and
+// returns the extended list (unchanged when nothing was injected). modelRef is
+// the model the request starts on; earlier snapshot versions are replayed only
+// when it has observed cache hits. Callers must invoke it only after the
+// prepared surface has been remembered: the overlay never enters the durable
+// history, so recording it in the stable-prefix shapes would break prefix
+// compatibility on the next request and disable incremental reduction reuse
+// after the first compaction.
+func (a *MainAgent) injectCompactionFileContext(messages []message.Message, modelRef string) []message.Message {
 	a.compactionFiles.mu.Lock()
 	defer a.compactionFiles.mu.Unlock()
 	if len(messages) == 0 || a.effectiveToolBaseDir() == "" {
-		return messages, -1
+		return messages
 	}
 	checkpointIdx, signature, revisions := a.latestCompactionSummarySignature(messages)
 	if checkpointIdx < 0 || signature == "" {
 		a.compactionFiles.clear()
-		return messages, -1
+		return messages
 	}
 	if compactionFileContextAlreadyInjected(messages, checkpointIdx) {
-		return messages, -1
+		return messages
 	}
 	keyFiles := a.compactionContinuationFiles(signature)
 	if len(keyFiles) == 0 {
 		a.compactionFiles.clear()
-		return messages, -1
+		return messages
 	}
 
 	plan := a.compactionInjectedFileBudgets(messages)
 	if plan.maxTotalBytes <= 0 {
 		a.compactionFiles.clear()
 		log.Debugf("compaction key-file context omitted; post-compaction budget leaves no re-injection quota key_files=%v usable_input_budget=%v remaining_tokens=%v quota_tokens=%v", len(keyFiles), plan.usableTokens, plan.remainingTokens, plan.quotaTokens)
-		return messages, -1
+		return messages
 	}
 
 	readRevisions := make(map[string]string, len(keyFiles))
@@ -291,7 +293,7 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]m
 	})
 	if len(result.Parts) == 0 {
 		a.compactionFiles.clear()
-		return messages, -1
+		return messages
 	}
 	a.annotateCompactionFileParts(signature, revisions, readRevisions, result.Parts)
 	if result.TruncatedFiles > 0 || result.OmittedFiles > 0 {
@@ -308,6 +310,9 @@ func (a *MainAgent) injectCompactionFileContext(messages []message.Message) ([]m
 	}
 	a.trackObservedFileParts(injected.Parts)
 
+	if !a.checkpointFileReplayAllowed(modelRef) {
+		a.compactionFiles.clear()
+	}
 	return a.compactionFiles.replay(messages, checkpointIdx, signature, a.effectiveToolBaseDir(), injected, result.TotalBytes, plan.maxTotalBytes)
 }
 

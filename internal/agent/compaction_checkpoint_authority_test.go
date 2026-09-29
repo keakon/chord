@@ -155,10 +155,13 @@ func TestCheckpointContinuationStatesPrecedence(t *testing.T) {
 			if userIdx > checkpointIdx {
 				t.Fatalf("the checkpoint must never outrank the newest user message: %q", text)
 			}
-			for _, source := range []string{"runtime state", "files on disk", "tool results", "archived artifacts"} {
+			for _, source := range []string{"runtime state", "current source and configuration files", "tool results", "archived artifacts", "task notes"} {
 				if !strings.Contains(text, source) {
 					t.Fatalf("precedence clause omits %q: %q", source, text)
 				}
+			}
+			if strings.Index(text, "tool results") > strings.Index(text, "task notes") {
+				t.Fatalf("task notes must not outrank verification results: %q", text)
 			}
 		})
 	}

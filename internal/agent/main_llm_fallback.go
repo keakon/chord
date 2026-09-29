@@ -113,6 +113,12 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 	if a == nil {
 		return messages, nil
 	}
+	// Fallback targets build their tuning from model config, so cache hints
+	// recorded here would never reach this request; they would instead leak
+	// into the next request's one-shot override.
+	if !a.checkpointFileReplayAllowed(fallbackModelDisplayRef(fallback)) {
+		messages = latestCompactionFileSnapshotOnly(messages)
+	}
 	if !a.started.Load() {
 		// The pending queue is event-loop owned. A direct call without a running
 		// event loop cannot safely consume it, so leave it for the normal drain.

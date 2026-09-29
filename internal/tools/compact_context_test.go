@@ -495,6 +495,8 @@ func TestCompactContextDescriptionExplainsPressureAwareSafeStops(t *testing.T) {
 		"A checkpoint never completes the task or replaces the final response",
 		"use the normal question or waiting mechanism",
 		"A terminal TODO state alone is not a reason to checkpoint",
+		"Without context pressure, finish a remaining commit, handoff, or final response directly",
+		"under pressure, preserve a safe continuation even near completion",
 	} {
 		if !strings.Contains(description, want) {
 			t.Fatalf("description must mention %q, got:\n%s", want, description)
@@ -552,17 +554,31 @@ func TestCompactContextDescriptionKeepsRejectionGuidanceGeneric(t *testing.T) {
 }
 
 // Small recovery states and roles without write tools may omit state files;
-// long-task details should be saved before the checkpoint references them.
+// long-task details should be saved in the task notes before the checkpoint
+// references them.
 func TestCompactContextStatesWhenStateFilesMayBeEmpty(t *testing.T) {
 	tool := NewCompactContextTool(testCompactValidator())
 	description := tool.Description()
 	for _, want := range []string{
 		"When recovery state is genuinely small or file writing is unavailable",
-		"update a permitted task-notes file and register it in state_files",
+		"bring the task-notes file described under Long-session context management up to date and register it in state_files",
+		"keep those details in the notes instead of duplicating them in the handoff",
 		"write that file before submitting the checkpoint",
 	} {
 		if !strings.Contains(description, want) {
 			t.Fatalf("description must mention %q, got:\n%s", want, description)
+		}
+	}
+	// What task notes record is main-agent system prompt guidance; the tool
+	// description only references it, so the always-sent text does not repeat it.
+	for _, gone := range []string{
+		"required environment variables and arguments",
+		"Distinguish passed, failed, skipped and environment-blocked checks",
+		"failed approaches with retry conditions",
+		"Put an index",
+	} {
+		if strings.Contains(description, gone) {
+			t.Fatalf("description must not repeat task-notes content %q, got:\n%s", gone, description)
 		}
 	}
 	properties, ok := tool.Parameters()["properties"].(map[string]any)

@@ -66,7 +66,7 @@ func TestStableSurfaceSurvivesKeyFileInjection(t *testing.T) {
 		t.Fatal("aged read should be reduced on request 1")
 	}
 	a.updatePreparedLLMRequestSurface(a.currentTurnID(), prepared)
-	injected, insertedAt := a.injectCompactionFileContext(prepared)
+	injected, insertedAt := injectCompactionFileContextForTest(a, prepared)
 	if insertedAt != 1 || len(injected) != len(prepared)+1 {
 		t.Fatalf("expected key-file injection after the checkpoint, insertedAt=%d len=%d", insertedAt, len(injected))
 	}

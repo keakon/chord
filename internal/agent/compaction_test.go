@@ -4916,7 +4916,8 @@ func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 		},
 		{Role: "user", Content: "continue"},
 	}
-	first, firstIdx := a.injectCompactionFileContext(msgs)
+	enableTestCheckpointFileReplay(a)
+	first, firstIdx := injectCompactionFileContextForTest(a, msgs)
 	if len(first) != 3 {
 		t.Fatalf("len(first) = %d, want 3", len(first))
 	}
@@ -4932,18 +4933,18 @@ func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 	if paths := message.FileRefPaths(first[1].Parts[1].Text); !reflect.DeepEqual(paths, []string{"internal/agent/compaction.go"}) {
 		t.Fatalf("annotated file-ref paths = %#v", paths)
 	}
-	second, _ := a.injectCompactionFileContext(msgs)
+	second, _ := injectCompactionFileContextForTest(a, msgs)
 	if len(second) != 3 {
 		t.Fatalf("len(second) = %d, want 3 for stable per-request injection", len(second))
 	}
-	alreadyInjected, alreadyIdx := a.injectCompactionFileContext(first)
+	alreadyInjected, alreadyIdx := injectCompactionFileContextForTest(a, first)
 	if len(alreadyInjected) != 3 || alreadyIdx != -1 {
 		t.Fatalf("len(alreadyInjected) = %d idx = %d, want 3 and -1 without duplicate injection", len(alreadyInjected), alreadyIdx)
 	}
 	if err := os.WriteFile(path, []byte("package agent\n\nconst changed = true\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile changed revision: %v", err)
 	}
-	changed, _ := a.injectCompactionFileContext(msgs)
+	changed, _ := injectCompactionFileContextForTest(a, msgs)
 	if len(changed) != 4 || len(changed[3].Parts) < 2 || !strings.Contains(changed[3].Parts[1].Text, `changed_since_checkpoint="true"`) {
 		t.Fatalf("changed file metadata = %#v", changed)
 	}
@@ -4974,7 +4975,7 @@ func TestInjectCompactionFileContextDetectsChangeBeforeFirstInjection(t *testing
 		t.Fatalf("WriteFile changed: %v", err)
 	}
 
-	got, _ := a.injectCompactionFileContext([]message.Message{checkpoint})
+	got, _ := injectCompactionFileContextForTest(a, []message.Message{checkpoint})
 	if len(got) != 2 || len(got[1].Parts) < 2 || !strings.Contains(got[1].Parts[1].Text, `changed_since_checkpoint="true"`) {
 		t.Fatalf("injected changed metadata = %#v", got)
 	}
@@ -4995,7 +4996,7 @@ func TestInjectCompactionFileContextTreatsLegacyCheckpointAsChanged(t *testing.T
 		nil,
 	)
 
-	got, _ := a.injectCompactionFileContext([]message.Message{{Role: message.RoleUser, Content: summary, IsCompactionSummary: true}})
+	got, _ := injectCompactionFileContextForTest(a, []message.Message{{Role: message.RoleUser, Content: summary, IsCompactionSummary: true}})
 	if len(got) != 2 || len(got[1].Parts) < 2 || !strings.Contains(got[1].Parts[1].Text, `changed_since_checkpoint="true"`) {
 		t.Fatalf("legacy checkpoint metadata = %#v", got)
 	}
@@ -5036,7 +5037,7 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 		{Role: "user", IsCompactionSummary: true, Content: summary},
 		{Role: "user", Content: "continue"},
 	}
-	got, _ := a.injectCompactionFileContext(msgs)
+	got, _ := injectCompactionFileContextForTest(a, msgs)
 	if len(got) != 3 {
 		t.Fatalf("len(got) = %d, want 3", len(got))
 	}
@@ -5079,7 +5080,7 @@ func TestInjectCompactionFileContextSkipsWhenRequestBudgetIsExhausted(t *testing
 		{Role: "user", Content: strings.Repeat("already large ", 80)},
 	}
 
-	got, gotIdx := a.injectCompactionFileContext(msgs)
+	got, gotIdx := injectCompactionFileContextForTest(a, msgs)
 	if len(got) != len(msgs) || gotIdx != -1 {
 		t.Fatalf("len(got) = %d idx = %d, want unchanged %d and -1", len(got), gotIdx, len(msgs))
 	}
