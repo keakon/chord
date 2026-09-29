@@ -320,7 +320,7 @@ model_pools:
 
 Claude Opus 5 / 4.8 / 4.7 share the same context window (1M), max output (128K), pricing, adaptive thinking, and input modalities, so all three reuse the single `&claude-opus` template; only the model ID differs. Remove the entries you don't use, and point `model_pools` at your preferred model (e.g. `anthropic/claude-opus-5@high`).
 
-For a lower-cost Claude family config, use the same shape with `claude-sonnet-5`, `cost: {input: 2, output: 10}`, and `output: 64000` for a conservative local allocation. Sonnet 5's $2 / $10 per-1M pricing became permanent in August 2026.
+For a lower-cost Claude family config, use the same shape with `claude-sonnet-5-5` (see [Claude Sonnet 5.5](#claude-sonnet-55)) or the earlier `claude-sonnet-5`; Sonnet 5's $2 / $10 per-1M pricing became permanent in August 2026.
 
 For `claude-fable-5-1` (released September 2026), reuse the same shape: it shares the 1M context, 128K max output, adaptive thinking, and PDF support, and only the cost block differs. It keeps Fable 5's $10 / $50 per-1M input/output rates but cuts cache reads to $0.25 per 1M tokens (0.025x of base input instead of the standard 0.1x multiplier), so set `cache_read: 0.25`, not 1.0. `claude-fable-5` remains available with the same rates except cache reads at $1.0.
 
@@ -405,9 +405,86 @@ Notes:
   dropped, so the session continues and only the pre-rewrite reasoning text is
   lost.
 
+### Claude Sonnet 5.5
+
+`claude-sonnet-5-5` (September 2026) is the faster, lower-cost complement to
+Opus 5.5, aimed at well-scoped work: bug fixes, fast iteration on an existing
+feature, and polished documents. It has a 1M context window, 128K max output,
+adaptive thinking, and PDF support, at $2 / $10 per 1M tokens with cache reads
+at $0.20 and cache writes at $2.50 (5m) / $4 (1h).
+
+```yaml
+# Requires the `&claude-opus` template above in the same file.
+model_templates:
+  claude-sonnet-5.5: &claude-sonnet-5-5
+    <<: *claude-opus
+    cost:
+      input: 2
+      output: 10
+      cache_read: 0.2
+      cache_write: 2.5
+      cache_write_1h: 4
+    variants:
+      low:
+        thinking:
+          effort: low
+      medium:
+        thinking:
+          effort: medium
+      high:
+        thinking:
+          effort: high
+      xhigh:
+        thinking:
+          effort: xhigh
+      max:
+        thinking:
+          effort: max
+
+providers:
+  anthropic:
+    type: messages
+    api_url: https://api.anthropic.com/v1/messages
+    models:
+      claude-sonnet-5-5: *claude-sonnet-5-5
+
+model_pools:
+  default:
+    - anthropic/claude-sonnet-5-5@medium
+```
+
+Notes:
+
+- Thinking takes no manual budget and cannot be disabled:
+  `thinking.type: disabled` and `thinking.type: enabled` with a budget return
+  an error. Keep `thinking.type: adaptive` and pick the cost/quality point with
+  `@low` through `@max`; the platform default is `high`. For well-specified
+  agentic tasks Anthropic's guidance is to start at `medium` and move to `high`
+  for harder or longer ones.
+- The API's lowest setting, `thinking.type: between_tools`, disables extended
+  thinking while allowing brief progress updates between tool calls, returned
+  as thinking blocks (at `high` effort or below).
+  Chord does not support it yet and rejects the type, so `@low` is the least
+  thinking Chord can configure.
+- Forced tool use returns an error; with adaptive thinking Chord already
+  suppresses the loop's forced tool choice, so no `compat.forced_tool_choice`
+  block is needed.
+- Thinking blocks follow the Opus 5.5 rules above: they are bound to the model
+  and the conversation prefix, and Chord retries without them after a history
+  rewrite.
+
 ### Compaction tuning for Claude 5
 
-The whole Claude 5 line (Fable 5.1, Opus 5.5, Opus 5, Sonnet 5) advertises 1M tokens with 128K output and flat per-token pricing across the window. MRCR v2 8-needle shows Opus-class models holding ~76% even at 1M (the flattest curve of any current family), so the reliable window is genuinely large. Opus 4.7-era models trade retrieval accuracy for refusal honesty; Opus 5, Opus 5.5, and Fable 5.1 restore strong long-context retrieval; Opus 5.5 also has the lowest cache reads of the three ($0.20 per 1M tokens), so re-reading files after compaction costs less. For everyday work, omit the `compaction` block and stay on the global default (`threshold` 0.8, about 698K on the ~872K usable budget); for many-hour agentic sessions, set `threshold: 0.7` (about 610K) to limit time spent deep in the mild 512K+ degradation band.
+The whole Claude 5 line (Fable 5.1, Opus 5.5, Opus 5, Sonnet 5.5, Sonnet 5) advertises 1M tokens with 128K output and flat per-token pricing across the window. MRCR v2 8-needle shows Opus-class models holding ~76% even at 1M (the flattest curve of any current family), so the reliable window is genuinely large. Opus 4.7-era models trade retrieval accuracy for refusal honesty; Opus 5, Opus 5.5, and Fable 5.1 restore strong long-context retrieval; Opus 5.5 also has the lowest cache reads of the three ($0.20 per 1M tokens, matched by Sonnet 5.5), so re-reading files after compaction costs less. For everyday work, omit the `compaction` block and stay on the global default (`threshold` 0.8, about 698K on the ~872K usable budget); for many-hour agentic sessions, set `threshold: 0.7` (about 610K) to limit time spent deep in the mild 512K+ degradation band.
+
+Sonnet 5.5 has no banded retrieval curve. Its system card's long-context
+section reports ProgramBench instead: rebuilding a program from its binary and
+documentation, with contexts spanning up to the full 1M window, where Sonnet
+5.5 scores 79.7% against Sonnet 5's 77.3% and Opus 5.5's 91.2%. That puts its
+long-context accuracy a tier below the Opus-class models. Well-scoped everyday
+work can stay on the global default; for long agentic sessions set
+`threshold: 0.7` as the ceiling and tighten further only if results drift late
+in a run.
 
 ```yaml
 # Add the compaction line to the existing claude-fable-5-1 template; every

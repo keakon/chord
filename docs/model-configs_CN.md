@@ -391,7 +391,7 @@ thinking 与输入模态完全一致，因此共用同一个 `&claude-opus` 模�
 模型 ID 不同。用不到的型号可以删掉，`model_pools` 指向你想用的模型即可
 （例如 `anthropic/claude-opus-5@high`）。
 
-如果想要更低成本的 Claude 配置，可沿用同样结构，改为 `claude-sonnet-5`、`cost: {input: 2, output: 10}`，并按需把 `output` 调低（例如 64000）做保守的本地分配。Sonnet 5 的 $2 / $10（每百万 token）定价已于 2026 年 8 月转为永久。
+如果想要更低成本的 Claude 配置，可沿用同样结构，改为 `claude-sonnet-5-5`（见下文 [Claude Sonnet 5.5](#claude-sonnet-55)）或更早的 `claude-sonnet-5`；Sonnet 5 的 $2 / $10（每百万 token）定价已于 2026 年 8 月转为永久。
 
 `claude-fable-5-1`（2026 年 9 月发布）沿用同样的结构：1M 上下文、128K 最大输出、adaptive thinking 和 PDF 支持都一样，只有 cost 块不同。它沿用了 Fable 5 的 $10 / $50（每百万 token 输入 / 输出）费率，但缓存读取降到每百万 token $0.25（是基础输入价的 0.025x，而不是常见的 0.1x 乘数），所以 `cache_read` 要填 0.25，不要按比例填成 1.0。`claude-fable-5` 仍可用，费率相同，只有缓存读取是 $1.0。
 
@@ -473,11 +473,69 @@ model_pools:
   会识别这类错误、丢掉 thinking 块后重试，会话照常继续，只是压缩前的推理原文
   没了。
 
+### Claude Sonnet 5.5
+
+`claude-sonnet-5-5`（2026 年 9 月发布）是 Opus 5.5 更快、更便宜的补充，面向范围明确的活：修 bug、在既有功能上快速迭代、产出更精致的文档。它有 1M 上下文、128K 最大输出、adaptive thinking，支持 PDF，定价 $2 / $10（每百万 token），缓存读取 $0.20、缓存写入 $2.50（5m）/ $4（1h）。
+
+```yaml
+# 需要同一文件上方的 `&claude-opus` 模板。
+model_templates:
+  claude-sonnet-5.5: &claude-sonnet-5-5
+    <<: *claude-opus
+    cost:
+      input: 2
+      output: 10
+      cache_read: 0.2
+      cache_write: 2.5
+      cache_write_1h: 4
+    variants:
+      low:
+        thinking:
+          effort: low
+      medium:
+        thinking:
+          effort: medium
+      high:
+        thinking:
+          effort: high
+      xhigh:
+        thinking:
+          effort: xhigh
+      max:
+        thinking:
+          effort: max
+
+providers:
+  anthropic:
+    type: messages
+    api_url: https://api.anthropic.com/v1/messages
+    models:
+      claude-sonnet-5-5: *claude-sonnet-5-5
+
+model_pools:
+  default:
+    - anthropic/claude-sonnet-5-5@medium
+```
+
+要点：
+
+- thinking 不能关闭，也不能手动指定预算：`thinking.type: disabled` 和 `thinking.type: enabled` + budget 都会报错。保持 `thinking.type: adaptive`，用 `@low` 到 `@max` 选成本与质量的平衡点；平台默认是 `high`。范围明确的 agentic 活官方建议从 `medium` 起步，更难、更长的活再用 `high`。
+- API 最低的一档是 `thinking.type: between_tools`：不进行扩展思考，但可在工具调用之间生成简短进度说明，以 thinking blocks 返回（effort 需为 `high` 或更低）。Chord 暂不支持这个类型，配置会被拒绝，因此 `@low` 是 Chord 能配到的最低思考量。
+- 强制工具调用会报错；adaptive thinking 下 Chord 本来就会抑制循环里的强制工具选择，不需要再配 `compat.forced_tool_choice`。
+- thinking 块的行为与上文 Opus 5.5 相同：绑定产生它的模型和对话前缀，本地改写历史后 Chord 会丢掉这些块重试。
+
 ### Claude 5 的压缩调优
 
-Claude 5 全系（Fable 5.1、Opus 5.5、Opus 5、Sonnet 5）都是 1M 上下文、128K 最大输出、全窗口统一按 token 计费。MRCR v2 8-needle 显示 Opus 级模型即使到 1M 仍能保持 ~76%（当前所有模型族里最平坦的曲线），可靠窗口确实很大。Opus 4.7 时代的模型为换取「拒绝而非编造」牺牲了检索准确率；Opus 5、Opus 5.5 和 Fable 5.1 恢复了强长上下文检索；Opus 5.5 的缓存读取（每百万 token $0.20）低于 Opus 5 和 Fable 5.1，压缩后重读文件的成本更低。日常用直接不写 `compaction` 块，跟全局默认走
+Claude 5 全系（Fable 5.1、Opus 5.5、Opus 5、Sonnet 5.5、Sonnet 5）都是 1M 上下文、128K 最大输出、全窗口统一按 token 计费。MRCR v2 8-needle 显示 Opus 级模型即使到 1M 仍能保持 ~76%（当前所有模型族里最平坦的曲线），可靠窗口确实很大。Opus 4.7 时代的模型为换取「拒绝而非编造」牺牲了检索准确率；Opus 5、Opus 5.5 和 Fable 5.1 恢复了强长上下文检索；Opus 5.5 的缓存读取（每百万 token $0.20，Sonnet 5.5 同价）低于 Opus 5 和 Fable 5.1，压缩后重读文件的成本更低。日常用直接不写 `compaction` 块，跟全局默认走
 （`threshold` 0.8，可用预算约 872K 里约 698K 触发）；跑数小时的 agentic 长会话
 再设 `threshold: 0.7`（约 610K），少在 512K 以上的轻度退化带深处待。
+
+Sonnet 5.5 没有公布分档检索曲线。它的系统卡长上下文一节给出的是
+ProgramBench：只给二进制和项目文档，让 agent 重建出程序，上下文覆盖到
+整个 1M 窗口。Sonnet 5.5 得分 79.7%，Sonnet 5 是 77.3%，Opus 5.5 是
+91.2%，长上下文准确率比 Opus 级低一档。范围明确的日常会话照常走全局
+默认；跑数小时的 agentic 长会话时，把 `threshold: 0.7` 当作上限，观察到
+后期结果漂移再往下压。
 
 ```yaml
 # 直接在既有 claude-fable-5-1 模板上加 compaction，引用它的 provider 全部继承

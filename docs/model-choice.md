@@ -68,6 +68,8 @@ Yes, and it should by default. Coder is for changes that are already decided: re
 
 It is not for work that still needs judgment: an open "why" or "which approach", a change to protocol, data models, concurrency or lifetimes, permissions, or recovery, or a task that has already failed twice. System-level work in an unfamiliar environment (new language, new build system, inside a container) needs its path and acceptance criteria pinned down first, and of the three, DeepSeek V4.1 Flash is the weakest there.
 
+When the cheap tier keeps coming back with execution mistakes (multi-file edits against a fixed spec, bug fixes spread across files, fast iteration on an existing feature), Claude Sonnet 5.5 is the middle option. It is the faster complement to Opus 5.5, priced far below the Opus-class flagships, with agentic coding near their level at higher effort and a much lower cost per task at lower effort. Open-ended judgment still belongs to expert.
+
 ### No GPT or Claude subscription — what should expert use?
 
 Neither vendor requires a subscription: both sell API keys, so Opus 5.5 and Sol stay on the table without a ChatGPT or Claude plan. If you want to stay off both vendors entirely, start at item 3.
