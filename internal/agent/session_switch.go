@@ -169,6 +169,7 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	a.resumePendingUserDrain()
 	a.abandonPendingHandoff()
 	a.clearUsageDrivenAutoCompactRequest()
+	a.clearManualCompactionIntent()
 	a.resetAutoCompactionFailureState()
 
 	stoppedBackground := tools.StopAllJobsForSessionSwitch()

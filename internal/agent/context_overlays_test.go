@@ -426,11 +426,14 @@ func TestQueueCompactionWarningLifecycle(t *testing.T) {
 	}
 }
 
-// Both thresholds may be queued together, while grace and startup compete
-// for the same upper-threshold slot.
+// The injection ladder governs the pending texts: a higher-priority notice
+// suppresses the not-yet-delivered lower one, and staging a higher level makes
+// the lower pending text yield. Grace and startup still compete for the same
+// upper-threshold slot.
 func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
-	// Reminder first (queued on the request that observes the switch), then the
-	// warning for the compaction the same cycle starts.
+	// Reminder first (queued on a request below the threshold), then the
+	// warning for the compaction a later crossing starts: the undelivered
+	// reminder yields, so the crossing request carries only the warning.
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line (0.54), below the threshold
@@ -442,8 +445,8 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 	a.armUsageDrivenAutoCompactRequest()
 	a.queueCompactionWarning()
-	if a.pendingContextPressureReminder == "" {
-		t.Fatalf("the externalization warning must retain the lower-threshold reminder, got reminder %q", a.pendingContextPressureReminder)
+	if a.pendingContextPressureReminder != "" {
+		t.Fatalf("the higher-priority warning must make the undelivered reminder yield, got reminder %q", a.pendingContextPressureReminder)
 	}
 	if a.pendingCompactionWarning == "" {
 		t.Fatal("armed auto-compact request with a visible tool must stage the warning")
@@ -459,8 +462,8 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 	b.armUsageDrivenAutoCompactRequest()
 	b.queueCompactionWarning()
 	b.queueContextPressureReminder(b.ctxMgr.AutoCompactDecision())
-	if b.pendingContextPressureReminder == "" {
-		t.Fatalf("a request that already carries the warning must also retain the reminder, got %q", b.pendingContextPressureReminder)
+	if b.pendingContextPressureReminder != "" {
+		t.Fatalf("a request that already carries the warning must not stack the reminder, got %q", b.pendingContextPressureReminder)
 	}
 	if b.pendingCompactionWarning == "" {
 		t.Fatal("the warning must survive the lower-severity reminder staging")
@@ -509,7 +512,7 @@ func TestRecrossBeforeIdleSweepRestagesWithdrawnWarning(t *testing.T) {
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000}) // 0.9: above the reminder line and the threshold
 	// The validity re-evaluation withdrew the row: it is omitted from requests
 	// while the durable removal waits for an idle boundary.
-	a.setPressureNoticeValidity(false, false)
+	a.setPressureNoticeValidity(false, false, false)
 	if got := a.omitStaleContextNoticesFromRequest(a.ctxMgr.Snapshot()); len(got) != 1 {
 		t.Fatal("the withdrawn row must be omitted from requests before the idle sweep")
 	}
@@ -521,7 +524,7 @@ func TestRecrossBeforeIdleSweepRestagesWithdrawnWarning(t *testing.T) {
 		t.Fatal("a re-crossing before the idle sweep must stage a fresh warning; the withdrawn row must not suppress it")
 	}
 	// A live durable row still suppresses a fresh delivery.
-	a.setPressureNoticeValidity(true, true)
+	a.setPressureNoticeValidity(true, true, false)
 	a.pendingCompactionWarning = ""
 	a.stageContextNotice(contextNoticeWarning, compactionThresholdNoticeText)
 	if a.pendingCompactionWarning != "" {
@@ -816,6 +819,7 @@ func TestMaybeClearStaleContextNoticesRemovesHistoryAndRewritesLog(t *testing.T)
 	a.pendingContextPressureReminder = "stale reminder"
 	a.pendingCompactionWarning = "stale warning"
 	a.pendingCompactionImminent = "stale imminent"
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 	a.maybeClearStaleContextNotices()
 
@@ -843,6 +847,7 @@ func TestMaybeClearStaleContextNoticesRemovesHistoryAndRewritesLog(t *testing.T)
 func TestMaybeClearStaleContextNoticesWaitsForIdle(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "stale pressure", NoticeLevel: contextNoticeWarning})
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 
 	a.newTurn()
@@ -864,6 +869,7 @@ func TestMaybeClearStaleContextNoticesWaitsForIdle(t *testing.T) {
 func TestMaybeClearStaleContextNoticesWaitsForCompaction(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "stale pressure", NoticeLevel: contextNoticeWarning})
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 
 	// A compaction draft's headSplit is measured against the current
@@ -888,6 +894,7 @@ func TestMaybeClearStaleContextNoticesWaitsForCompaction(t *testing.T) {
 func TestMaybeClearStaleContextNoticesNoNoticeKeepsHistory(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "hello"})
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 	a.maybeClearStaleContextNotices()
 	if hasContextNotice(a.ctxMgr.Snapshot()) {
@@ -1053,6 +1060,7 @@ func TestOmitStaleContextNoticesFromRequestDropsCopyOnly(t *testing.T) {
 		t.Fatal("fresh notices must stay on the request until they are marked stale")
 	}
 
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 	filtered = a.omitStaleContextNoticesFromRequest(snapshot)
 	if hasContextNotice(filtered) {
@@ -1068,6 +1076,7 @@ func TestMaybeClearStaleContextNoticesNoNoticeResetsDelivered(t *testing.T) {
 	a.overlayClaims.mu.Lock()
 	a.overlayClaims.reminder.delivered = true
 	a.overlayClaims.mu.Unlock()
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 	a.maybeClearStaleContextNotices()
 	a.overlayClaims.mu.Lock()
@@ -1080,6 +1089,7 @@ func TestMaybeClearStaleContextNoticesNoNoticeResetsDelivered(t *testing.T) {
 
 func TestInstallContextNoticePresenceRebuildsFromTranscript(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 	notice := message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "pressure", NoticeLevel: contextNoticePressure}
 	a.installContextNoticePresence([]message.Message{notice})
@@ -1123,6 +1133,7 @@ func TestContextNoticeDeliveryDoesNotCancelPendingWithdrawal(t *testing.T) {
 	// The one-shot externalization warning persists its own row, so its
 	// delivery supersedes the withdrawal the same way.
 	a.disarmContextNoticeCleanup()
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 	a.noteCompactionWarningAttached()
 	a.markOverlayClaimsDelivered()
@@ -1219,8 +1230,9 @@ func TestMaybeClearStaleContextNoticesResetsImminentDeliveryForRecross(t *testin
 }
 
 // TestStageContextNoticeNeverDowngrades pins the staging rank: a lower-pressure
-// notice staged after a higher-pressure one is dropped, so an aborted request's
-// residual warning cannot be replaced by a stale countdown or reminder.
+// notice staged after a higher-pressure one is dropped (the injection ladder),
+// so an aborted request's residual warning cannot be replaced by a stale
+// countdown or reminder.
 func TestStageContextNoticeNeverDowngrades(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.stageContextNotice(contextNoticeWarning, "warning text")
@@ -1232,7 +1244,7 @@ func TestStageContextNoticeNeverDowngrades(t *testing.T) {
 		t.Fatalf("a lower-pressure imminent must be dropped while warning is pending, got %q", a.pendingCompactionImminent)
 	}
 	a.stageContextNotice(contextNoticePressure, "reminder text")
-	if a.pendingCompactionWarning != "warning text" || a.pendingContextPressureReminder != "reminder text" {
-		t.Fatalf("staging pressure must not downgrade the pending warning, got warning %q reminder %q", a.pendingCompactionWarning, a.pendingContextPressureReminder)
+	if a.pendingCompactionWarning != "warning text" || a.pendingContextPressureReminder != "" {
+		t.Fatalf("the pending warning must suppress the lower-priority reminder without being downgraded, got warning %q reminder %q", a.pendingCompactionWarning, a.pendingContextPressureReminder)
 	}
 }

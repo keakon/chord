@@ -89,9 +89,10 @@ type pressureCycleAudit struct {
 	awaitingUserAt   time.Time
 }
 
-// pressureNoticeRecord owns two threshold slots. Grace and compaction startup
+// pressureNoticeRecord owns the threshold slots. Grace and compaction startup
 // share the upper slot; they are execution phases, not additional thresholds.
-const pressureNoticeSlotCount = 2
+// Manual is the user-requested /compact imperative notice.
+const pressureNoticeSlotCount = 3
 
 type pressureNoticeRecord [pressureNoticeSlotCount]bool
 
@@ -101,6 +102,8 @@ func pressureNoticeSlot(level string) int {
 		return 0
 	case contextNoticeImminent, contextNoticeWarning:
 		return 1
+	case contextNoticeManual:
+		return 2
 	default:
 		return -1
 	}
@@ -125,7 +128,7 @@ func (r pressureNoticeRecord) String() string {
 	names := make([]string, 0, len(r))
 	for rank, marked := range r {
 		if marked {
-			names = append(names, [pressureNoticeSlotCount]string{contextNoticePressure, contextNoticeWarning}[rank])
+			names = append(names, [pressureNoticeSlotCount]string{contextNoticePressure, contextNoticeWarning, contextNoticeManual}[rank])
 		}
 	}
 	return strings.Join(names, ",")

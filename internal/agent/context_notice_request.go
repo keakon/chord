@@ -64,6 +64,9 @@ func (a *MainAgent) reconcilePressureNoticesForModel(messages, prepared []messag
 	// Reduction makes the previous usage obsolete. A model switch alone can
 	// reuse that observation as an estimate against the target model's budget.
 	pressure, compaction := a.pressureNoticeValidity(messages, modelRef, inputBudget, !changedPrefix)
+	// The manual dimension is armed-driven, not usage-driven: the notice stays
+	// justified while the intent is armed and is withdrawn once it is not.
+	manual := a.manualNoticeActive()
 	if previous == modelRef {
 		// A reduction between the two notices may retire the upper one, but must
 		// not rewrite the lower notice whose prefix is still cacheable.
@@ -83,15 +86,25 @@ func (a *MainAgent) reconcilePressureNoticesForModel(messages, prepared []messag
 			}
 		}
 	}
+	// Preserve a pending manual text across the pending clear below: the gate
+	// staged it for this very request, and the re-evaluation only re-derives
+	// the usage-driven levels.
+	pendingManual := a.takePendingContextNoticeText(contextNoticeManual)
 	a.clearPendingContextNotices()
 	a.resetContextNotices()
-	a.setPressureNoticeValidity(pressure, compaction)
+	if pendingManual != "" {
+		a.setPendingContextNoticeText(contextNoticeManual, pendingManual)
+	}
+	a.setPressureNoticeValidity(pressure, compaction, manual)
 	messages = a.omitStaleContextNoticesFromRequest(messages)
 	if pressure || compaction {
 		key := a.currentOverlayWindowKey()
 		key.modelRef = modelRef
 		a.notePressureStage(pressureStageReminded, key)
 	}
+	// The ladder lives inside stageContextNotice: a live higher-priority
+	// notice (the armed manual intent, a retained row, a pending text)
+	// suppresses the re-queued text while the retained rows keep replaying.
 	if pressure {
 		a.stageContextNotice(contextNoticePressure, buildContextPressureReminderText())
 	}
@@ -132,7 +145,8 @@ func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message,
 		return messages
 	}
 	pressure, compaction := a.pressureNoticeValidity(messages, modelRef, inputBudget, preferUsage)
-	a.setPressureNoticeValidity(pressure, compaction)
+	manual := a.manualNoticeActive()
+	a.setPressureNoticeValidity(pressure, compaction, manual)
 	var out []message.Message
 	var present pressureNoticeRecord
 	for i, msg := range messages {
@@ -140,7 +154,7 @@ func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message,
 		if msg.Kind == message.KindContextNotice || msg.Kind == message.KindTurnOverlay {
 			slot = pressureNoticeSlot(msg.NoticeLevel)
 		}
-		if slot == 0 && !pressure || slot == 1 && !compaction {
+		if slot == 0 && !pressure || slot == 1 && !compaction || slot == 2 && !manual {
 			if out == nil {
 				out = make([]message.Message, 0, len(messages))
 				out = append(out, messages[:i]...)
@@ -157,10 +171,24 @@ func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message,
 	if out != nil {
 		messages = out
 	}
-	valid := pressureNoticeRecord{pressure, compaction}
+	valid := pressureNoticeRecord{pressure, compaction, manual}
 	var appended bool
 	for slot, keep := range valid {
 		if !keep || present[slot] {
+			continue
+		}
+		// Manual rows are only ever written by the compaction gate; a fallback
+		// must not invent one.
+		if slot == pressureNoticeSlot(contextNoticeManual) {
+			continue
+		}
+		// The injection ladder: a live higher-priority notice suppresses
+		// appending a lower level — one appended in this same pass, a retained
+		// durable row, or the armed manual intent.
+		if slot == 0 && (valid[pressureNoticeSlot(contextNoticeWarning)] || a.higherPriorityNoticeActive(contextNoticePressure)) {
+			continue
+		}
+		if slot == 1 && a.higherPriorityNoticeActive(contextNoticeWarning) {
 			continue
 		}
 		var notice message.Message
@@ -248,16 +276,22 @@ func (a *MainAgent) rememberPressureNoticeRequest(messages []message.Message, mo
 
 // Immediate filtering and deferred durable cleanup share the same selection.
 // No transcript indices move while an active compaction still references them.
-func (a *MainAgent) setPressureNoticeValidity(pressure, compaction bool) {
-	if pressure && compaction {
+// The manual dimension is armed-driven: its rows stay justified while the
+// intent is armed and are withdrawn once it is not.
+func (a *MainAgent) setPressureNoticeValidity(pressure, compaction, manual bool) {
+	if pressure && compaction && manual {
 		a.disarmContextNoticeCleanup()
 		return
 	}
 	scope := contextNoticeWithdrawAll
 	if pressure {
-		scope = contextNoticeWithdrawCompaction
-	} else if compaction {
-		scope = contextNoticeWithdrawPressure
+		scope &^= contextNoticeWithdrawPressure
+	}
+	if compaction {
+		scope &^= contextNoticeWithdrawCompaction
+	}
+	if manual {
+		scope &^= contextNoticeWithdrawManual
 	}
 	a.contextNoticeWithdrawalScope.Store(scope)
 	a.contextNoticesStale.Store(a.contextNoticesPersisted.Load())

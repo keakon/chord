@@ -63,8 +63,10 @@ func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testin
 	}
 }
 
-// Both thresholds remain independently observable when queued together.
-func TestReminderCoexistsWithPendingUpperThresholdNotice(t *testing.T) {
+// A pending upper-threshold notice keeps the lower-priority reminder quiet on
+// the same request: the injection ladder stages one pressure notice per
+// request, and the upper level's text subsumes the reminder's action contract.
+func TestPendingUpperThresholdNoticeSuppressesReminder(t *testing.T) {
 	newAgent := func(t *testing.T) *MainAgent {
 		a := newTestMainAgent(t, t.TempDir())
 		a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
@@ -80,8 +82,8 @@ func TestReminderCoexistsWithPendingUpperThresholdNotice(t *testing.T) {
 			t.Fatal("grace must stage the countdown")
 		}
 		a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
-		if a.pendingContextPressureReminder == "" {
-			t.Fatalf("a pending countdown must retain the lower-threshold reminder, got %q", a.pendingContextPressureReminder)
+		if a.pendingContextPressureReminder != "" {
+			t.Fatalf("a pending countdown must suppress the lower-threshold reminder, got %q", a.pendingContextPressureReminder)
 		}
 		if a.pendingCompactionImminent == "" {
 			t.Fatal("the countdown must survive the reminder queue")
@@ -97,8 +99,8 @@ func TestReminderCoexistsWithPendingUpperThresholdNotice(t *testing.T) {
 			t.Fatal("the armed request must stage the warning")
 		}
 		a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
-		if a.pendingContextPressureReminder == "" {
-			t.Fatalf("a pending warning must retain the lower-threshold reminder, got %q", a.pendingContextPressureReminder)
+		if a.pendingContextPressureReminder != "" {
+			t.Fatalf("a pending warning must suppress the lower-threshold reminder, got %q", a.pendingContextPressureReminder)
 		}
 		if a.pendingCompactionWarning == "" {
 			t.Fatal("the warning must survive the reminder queue")
@@ -147,8 +149,10 @@ func TestModelSwitchEstimatesPressureNoticesFromPreviousUsage(t *testing.T) {
 			notices++
 		}
 	}
-	if notices != 2 {
-		t.Fatalf("notice count = %d, want both thresholds", notices)
+	// Both lines are crossed, but the ladder stages only the higher one: the
+	// warning subsumes the reminder's action contract on the same request.
+	if notices != 1 {
+		t.Fatalf("notice count = %d, want only the upper threshold", notices)
 	}
 	if a.autoCompactRequested.Load() || a.IsCompactionRunning() {
 		t.Fatal("notice estimates must not trigger compaction")

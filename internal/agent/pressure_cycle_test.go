@@ -284,6 +284,7 @@ func TestPressureCycleAdoptsRestoredRow(t *testing.T) {
 	// same cycle records again.
 	a.ctxMgr.Append(restored)
 	a.contextNoticesPersisted.Store(true)
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 	a.maybeClearStaleContextNotices()
 	waitForContextNoticeCleared(t, a)

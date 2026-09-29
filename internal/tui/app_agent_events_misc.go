@@ -23,15 +23,17 @@ const streamContinueCardTitle = "REPLY RESUMED"
 const infoCardTitle = "NOTICE"
 
 // contextNoticeTitle maps a ContextNoticeEvent level to the badge the card
-// carries. The three levels mirror the request-scoped overlays the compaction
-// gate attaches to outgoing requests; surfacing them as cards lets the user
-// see the same context-pressure signal the model receives.
+// carries. The levels mirror the request-scoped overlays the compaction gate
+// attaches to outgoing requests; surfacing them as cards lets the user see the
+// same context-pressure signal the model receives.
 func contextNoticeTitle(level string) string {
 	switch level {
 	case "imminent":
 		return "COMPACT IMMINENT"
 	case "warning":
 		return "COMPACT WARNING"
+	case "manual":
+		return "COMPACT REQUESTED"
 	default:
 		return "CONTEXT PRESSURE"
 	}

@@ -2378,6 +2378,11 @@ func (a *MainAgent) settleModelDrivenOutcome(status string, reason string, prefl
 	// The model already took its shot at a checkpoint: the threshold grace
 	// (if any) ends here so the usage-driven safety net is not deferred again.
 	a.exhaustCompactionGraceAfterModelDriven()
+	// The settle answered the armed manual /compact intent without applying:
+	// the imperative notice is withdrawn (it was answered), while the intent
+	// stays armed so the manual worker restarts at the next gate — or at this
+	// settle point, when the turn that hosted the checkpoint is already gone.
+	a.withdrawManualCompactionNotice()
 	diagnostic := map[string]string{
 		"trigger": compactionTriggerModelDriven.analyticsName(),
 		"reason":  a.modelDrivenSkipNotice,

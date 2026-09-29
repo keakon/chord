@@ -199,11 +199,17 @@ func (a *MainAgent) cancelCompactionOnLoop() bool {
 		return false
 	}
 	a.markCompactionDiscard()
+	// The user is stopping the compaction they requested: the manual intent
+	// dies with it. Read the trigger before the reset below.
+	manualTrigger := a.compactionState.trigger == compactionTriggerManual
 	// Clear the ready draft (waiting for barrier)
 	readyDraft := a.compactionState.readyDraft
 	a.compactionState.readyDraft = nil
 	if readyDraft != nil {
 		cleanupOrphanCompactionFiles(readyDraft.AbsHistoryPath)
+		if manualTrigger {
+			a.clearManualCompactionIntentAndWithdrawNotice()
+		}
 		// Build the terminal event before reset: compactionStatusEvent reads
 		// the trigger from the still-live compaction state.
 		cancelled := a.compactionStatusEvent(CompactionStatusCancelled, "cancelled by the user")
@@ -211,6 +217,9 @@ func (a *MainAgent) cancelCompactionOnLoop() bool {
 		a.emitToTUI(cancelled)
 		a.emitActivity("main", ActivityIdle, "")
 		return true
+	}
+	if manualTrigger {
+		a.clearManualCompactionIntentAndWithdrawNotice()
 	}
 	if a.compactionState.cancel != nil {
 		a.compactionState.cancel()
@@ -480,6 +489,13 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 		}
 	}
 
+	// Manual /compact intent (compaction_manual_intent.go): inject the
+	// imperative notice while the armed intent's own worker is still running,
+	// or restart the worker a settled model checkpoint displaced. Runs after
+	// the apply above (which clears a satisfied intent) and before the
+	// usage-driven trigger evaluation below.
+	a.handleManualCompactionIntentAtGate()
+
 	snapshot := a.ctxMgr.Snapshot()
 	trigger := a.compactionTriggerForMainLLM()
 	// The context-pressure reminder is sticky (re-queued on every request above
@@ -735,10 +751,16 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		pending, _ = a.finishCompactionState()
 		a.emitActivity("main", ActivityIdle, "")
 		if pending == nil {
+			a.restartManualCompactionIfArmedIdle()
 			a.drainPendingUserMessages()
 			return
 		}
-		_ = a.resumePendingMainLLMAfterCompaction(pending, false)
+		if a.resumePendingMainLLMAfterCompaction(pending, false) {
+			return
+		}
+		// The turn is gone and no continuation consumed the settle: the armed
+		// manual intent restarts its worker here as an idle compaction.
+		a.restartManualCompactionIfArmedIdle()
 		return
 	}
 	canApplyNow := !turnActive ||
@@ -841,10 +863,16 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 		if a.resumeModelDrivenTurnAfterDiscard(settledPlan) {
 			return
 		}
+		a.restartManualCompactionIfArmedIdle()
 		a.drainPendingUserMessages()
 		return
 	}
-	_ = a.resumePendingMainLLMAfterCompaction(pending, applySucceeded)
+	if a.resumePendingMainLLMAfterCompaction(pending, applySucceeded) {
+		return
+	}
+	// No continuation consumed the settle (e.g. a dead turn): the armed manual
+	// intent restarts its worker here as an idle compaction.
+	a.restartManualCompactionIfArmedIdle()
 }
 
 // applyReadyDraft applies the compaction draft that was waiting for the continuation barrier.
@@ -1340,6 +1368,12 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 				Level:   "warn",
 			})
 			a.emitToTUI(a.compactionStatusEvent(CompactionStatusFailed, shortCompactionFailureReason(payload.err)))
+			if a.compactionState.trigger == compactionTriggerManual {
+				// A manual worker failure is a legitimate terminal state: the
+				// intent and its notice die here (the breaker never counts
+				// manual failures, so no usage semantics are touched).
+				a.clearManualCompactionIntentAndWithdrawNotice()
+			}
 		}
 	} else if isCancellation {
 		log.Info("context compaction cancelled by user")
@@ -1366,10 +1400,16 @@ func (a *MainAgent) handleCompactionFailed(evt Event) {
 		if a.resumeModelDrivenTurnAfterDiscard(settledPlan) {
 			return
 		}
+		a.restartManualCompactionIfArmedIdle()
 		// Auto compaction (not during an LLM call): drain any pending user messages
 		// to continue the conversation automatically.
 		a.drainPendingUserMessages()
 		return
 	}
-	_ = a.resumePendingMainLLMAfterCompaction(pending, false)
+	if a.resumePendingMainLLMAfterCompaction(pending, false) {
+		return
+	}
+	// No continuation consumed the settle (e.g. a dead turn): the armed manual
+	// intent restarts its worker here as an idle compaction.
+	a.restartManualCompactionIfArmedIdle()
 }

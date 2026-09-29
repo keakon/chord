@@ -144,9 +144,9 @@ and applies at the next continuation barrier, so the request that crosses the
 line keeps running in parallel with it. Provider rejections (oversize) still
 force compaction immediately.
 
-While model-driven compaction is enabled (`compact_context` visible), the first crossing in a compaction window instead defers the start across two main-model requests: the first request after the crossing and one more run before the summary-based compaction takes over, giving the model room to wrap up the phase and request a model-driven checkpoint or externalize state.
+While model-driven compaction is enabled (`compact_context` visible), the first crossing in a compaction window instead defers the start across two main-model requests: the first request after the crossing and one more run before the summary-based compaction takes over, giving the model room to wrap up the phase and request a model-driven checkpoint or externalize state. The deferral assumes the model had an early warning: when usage jumps past the threshold without the pressure reminder ever being delivered in the window (including when the reminder is disabled or its line sits at or above the threshold), the crossing counts as abrupt and compaction starts immediately with a single warning.
 
-Pressure notifications have two thresholds: the reminder line and the automatic-compaction line. Each threshold adds one persistent notice, retained in the conversation and displayed as a card. Grace and compaction startup share the upper-threshold notice; later requests reuse the history without adding reminders or countdowns.
+Pressure notifications have two thresholds: the reminder line and the automatic-compaction line. Each threshold adds one persistent notice, retained in the conversation and displayed as a card. Grace and compaction startup share the upper-threshold notice; later requests reuse the history without adding reminders or countdowns. One request never stacks two pressure notices: the highest applicable level is injected (manual `/compact` instruction, then the threshold warning, then the grace countdown, then the reminder), while notices already delivered keep replaying from the conversation until their own invalidation.
 
 Request reduction only permits reconsidering a notice when it changes the prefix before that notice. Chord then estimates the reduced request from its byte size; changes after a notice leave it in place. On a model switch, Chord uses the previous model's usage as an estimate against the new model's budget and thresholds, falling back to a byte estimate when usage is unavailable. Applicable notices stay in place, invalid ones are withdrawn, and newly reached thresholds can be notified. These estimates select notifications only; they do not trigger automatic compaction.
 
@@ -324,6 +324,23 @@ working, shows progress in the background compaction status slot, and applies
 at the next safe continuation/idle barrier rather than interrupting the active
 turn immediately. You can also use `/compact --no` to temporarily disable
 subsequent automatic compaction for the current session.
+
+While `context.compaction.model_driven` is enabled and the agent is busy, a
+`/compact` also asks the model to checkpoint on its own: a persistent
+instruction (shown as a "COMPACT REQUESTED" card) rides every request until a
+checkpoint applies, telling the model to call `compact_context` alone and
+immediately. Whichever side finishes first wins: if the model submits a
+checkpoint before the background summary is ready, its checkpoint replaces the
+runtime result; if the background summary applies first, the model's later
+`compact_context` call is judged against the new window as usual. If the
+model's attempt settles without applying (skipped by the low-gain or interval
+gates, failed, or cancelled), the runtime restarts the background compaction
+without asking the model again. The manual instruction outranks the
+usage-driven notices: while it is active, threshold warnings, grace
+countdowns, and pressure reminders are not injected anew (already-delivered
+ones keep replaying). The pending request is runtime memory: after a crash or
+restore, an unfinished `/compact` is not resumed, and a leftover notice is
+withdrawn at the next idle boundary.
 
 If every attempted candidate model rejects a request with a context-length error
 and automatic compaction is enabled, Chord starts an oversize-recovery compaction

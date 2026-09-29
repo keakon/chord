@@ -29,6 +29,13 @@ const (
 	compactionThresholdNoticeText = "The context has reached the automatic-compaction threshold. The runtime may compact it after the current safe continuation window.\n" +
 		contextCheckpointPressureAction + "\n" +
 		"Earlier messages remain recoverable from the checkpoint's archived history files; preserve the working details needed to continue before compaction."
+	// manualCompactionNoticeText is the persistent imperative notice injected
+	// while a busy /compact's summarize worker is still running and
+	// compact_context is visible. It replays on every request until a
+	// checkpoint applies, so it must stay self-contained and imperative.
+	manualCompactionNoticeText = "The user has explicitly requested an immediate context compaction via /compact. The runtime is already compacting in the background; this instruction stays in effect on every request until that compaction is applied.\n" +
+		"Call compact_context now, as the only tool call in this response, to commit a checkpoint instead — it replaces the runtime result. If you do not call it, the runtime result applies before the next request.\n" +
+		"Do not claim unfinished work is complete; record the next action in the checkpoint's continuation state. Reference existing notes files in state_files instead of creating new ones for this; updating notes first is not required."
 )
 
 // reminderOverlayClaim tracks first dispatch within a compaction window.
@@ -73,6 +80,11 @@ type overlayClaimState struct {
 	// shares the reminder's (window, budget) key but is tracked separately so
 	// the two never suppress each other.
 	imminent reminderOverlayClaim
+	// manual is the per-intent claim of the manual /compact imperative notice.
+	// It binds to the armed intent's plan id, so one /compact intent writes at
+	// most one durable row; a request cancelled before dispatch leaves the
+	// claim spendable and the next gate re-stages.
+	manual manualOverlayClaim
 	// pressure is the single authority for the current pressure cycle: the
 	// stage reached, the durable notice rows it may write (one per level), and
 	// how it ended. It lives under this mutex because the durable-row
@@ -225,6 +237,14 @@ func (a *MainAgent) noteCompactionWarningAttached() {
 	a.overlayClaims.mu.Unlock()
 }
 
+// noteCompactionManualAttached records that the manual /compact imperative was
+// attached to the in-flight request. Called from buildTurnOverlayMessages.
+func (a *MainAgent) noteCompactionManualAttached() {
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.manual.deliveryPending = true
+	a.overlayClaims.mu.Unlock()
+}
+
 // contextNotice is the text of one context overlay, staged so the dispatch
 // confirmation point can surface it to the user as a card.
 type contextNotice struct {
@@ -251,6 +271,8 @@ func (a *MainAgent) setPendingContextNoticeText(level, text string) {
 		a.pendingCompactionImminent = text
 	case contextNoticeWarning:
 		a.pendingCompactionWarning = text
+	case contextNoticeManual:
+		a.pendingCompactionManual = text
 	}
 }
 
@@ -260,6 +282,7 @@ func (a *MainAgent) clearPendingContextNotices() {
 	a.pendingContextPressureReminder = ""
 	a.pendingCompactionImminent = ""
 	a.pendingCompactionWarning = ""
+	a.pendingCompactionManual = ""
 	a.overlayClaims.mu.Unlock()
 }
 
@@ -275,12 +298,21 @@ func (a *MainAgent) takePendingContextNoticeText(level string) string {
 		text, a.pendingCompactionImminent = a.pendingCompactionImminent, ""
 	case contextNoticeWarning:
 		text, a.pendingCompactionWarning = a.pendingCompactionWarning, ""
+	case contextNoticeManual:
+		text, a.pendingCompactionManual = a.pendingCompactionManual, ""
 	}
 	return text
 }
 
 // stageContextNotice retains one pending message for each threshold. Grace
 // and compaction startup share the upper slot; startup supersedes grace.
+//
+// The injection ladder applies here: a live higher-priority notice (the armed
+// manual intent, a retained durable row, or an already-staged pending text)
+// suppresses new injections of the levels below it, and staging a level clears
+// the not-yet-delivered pending texts of the levels below it so a single
+// request never stacks two pressure notices. Retained durable rows of lower
+// levels are left alone — they keep replaying until their own invalidation.
 func (a *MainAgent) stageContextNotice(level, text string) {
 	if a == nil || strings.TrimSpace(text) == "" {
 		return
@@ -296,18 +328,49 @@ func (a *MainAgent) stageContextNotice(level, text string) {
 	defer a.overlayClaims.mu.Unlock()
 	switch level {
 	case contextNoticePressure:
+		if a.manualNoticeActive() ||
+			a.pendingCompactionWarning != "" || a.pendingCompactionImminent != "" ||
+			a.hasDurablePressureNotice(contextNoticeWarning) {
+			return
+		}
 		a.pendingContextPressureReminder = text
 	case contextNoticeImminent:
 		// The warning owns the shared upper slot once staged; the empty-text
 		// guard above means the staged text is never blank.
-		if a.pendingCompactionWarning != "" {
+		if a.manualNoticeActive() || a.pendingCompactionWarning != "" {
 			return
 		}
+		a.pendingContextPressureReminder = ""
 		a.pendingCompactionImminent = text
 	case contextNoticeWarning:
+		if a.manualNoticeActive() {
+			return
+		}
+		a.pendingContextPressureReminder = ""
 		a.pendingCompactionImminent = ""
 		a.pendingCompactionWarning = text
+	case contextNoticeManual:
+		a.pendingContextPressureReminder = ""
+		a.pendingCompactionImminent = ""
+		a.pendingCompactionWarning = ""
+		a.pendingCompactionManual = text
 	}
+}
+
+// higherPriorityNoticeActive reports whether a notice above level is live for
+// the injection ladder: the manual /compact intent is live while armed, and a
+// threshold class is live while its durable row is retained (the warning and
+// imminent levels share one slot, so one check covers both). A live higher
+// notice suppresses NEW injections of level; retained lower rows are untouched.
+// Must not be called with overlayClaims.mu held.
+func (a *MainAgent) higherPriorityNoticeActive(level string) bool {
+	switch level {
+	case contextNoticePressure:
+		return a.manualNoticeActive() || a.hasDurablePressureNotice(contextNoticeWarning)
+	case contextNoticeImminent, contextNoticeWarning:
+		return a.manualNoticeActive()
+	}
+	return false
 }
 
 // stashContextNotice stages the text of a context overlay that was just
@@ -351,7 +414,7 @@ func (a *MainAgent) takeContextNotices() []contextNotice {
 // instead of losing a live-only notice. Each notice level records its first
 // delivery once, so the user sees a card for every message the model actually
 // received. Later requests replay the durable rows without new overlays.
-func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string, warningDelivered bool) {
+func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string, warningDelivered, manualDelivered bool) {
 	if a == nil || a.ctxMgr == nil {
 		return
 	}
@@ -367,6 +430,10 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 			}
 		case contextNoticeWarning:
 			if !warningDelivered {
+				continue
+			}
+		case contextNoticeManual:
+			if !manualDelivered {
 				continue
 			}
 		}
@@ -393,6 +460,9 @@ func (a *MainAgent) emitStagedContextNotices(reminderStage, imminentStage string
 		messageIndex := a.ctxMgr.MessageCount()
 		a.ctxMgr.Append(msg)
 		a.contextNoticesPersisted.Store(true)
+		if level == contextNoticeManual {
+			a.recordCompactionPolicyAnalyticsEvent("manual_notice_written")
+		}
 		a.persistAsyncAfter(identity.MainAgentID, msg, func(err error) {
 			if err != nil {
 				a.notePersistenceFailure(err)
@@ -482,10 +552,16 @@ func (a *MainAgent) maybeClearStaleContextNotices() {
 // a row that does not name the reminder class is never proven to be one, so it
 // survives: keeping a stale row costs a visible card, while withdrawing a live
 // threshold notice loses the externalization instruction the runtime just gave.
+// Withdrawal scopes are bitmasks over the pressure-notice slots: each bit
+// names one slot whose durable rows an armed cleanup withdraws, so a manual
+// withdrawal can be merged with (or exclude) the threshold classes. The bit
+// positions mirror pressureNoticeSlot (pressure=0, threshold=1, manual=2).
 const (
-	contextNoticeWithdrawAll uint32 = iota
-	contextNoticeWithdrawPressure
-	contextNoticeWithdrawCompaction
+	contextNoticeWithdrawNone       uint32 = 0
+	contextNoticeWithdrawPressure   uint32 = 1 << 0 // pressureNoticeSlot(contextNoticePressure)
+	contextNoticeWithdrawCompaction uint32 = 1 << 1 // pressureNoticeSlot(contextNoticeWarning / contextNoticeImminent)
+	contextNoticeWithdrawManual     uint32 = 1 << 2 // pressureNoticeSlot(contextNoticeManual)
+	contextNoticeWithdrawAll        uint32 = contextNoticeWithdrawPressure | contextNoticeWithdrawCompaction | contextNoticeWithdrawManual
 )
 
 func contextNoticeStale(msg message.Message, scope uint32) bool {
@@ -497,16 +573,13 @@ func contextNoticeStale(msg message.Message, scope uint32) bool {
 // threshold-measured classes in place, and a slot that does not name the
 // reminder class is never proven to be one, so it survives: keeping a stale
 // row costs a visible card, while withdrawing a live threshold notice loses
-// the externalization instruction the runtime just gave.
+// the externalization instruction the runtime just gave. Unknown levels are
+// only proven disposable by a full withdrawal.
 func pressureSlotWithdrawn(slot int, scope uint32) bool {
-	switch scope {
-	case contextNoticeWithdrawPressure:
-		return slot == 0
-	case contextNoticeWithdrawCompaction:
-		return slot == 1
-	default:
-		return true
+	if slot < 0 {
+		return scope == contextNoticeWithdrawAll
 	}
+	return scope&(uint32(1)<<slot) != 0
 }
 
 // resetOverlayDeliveryAfterNoticeClear releases only the withdrawn threshold's
@@ -514,15 +587,19 @@ func pressureSlotWithdrawn(slot int, scope uint32) bool {
 // quiet until the next window.
 func (a *MainAgent) resetOverlayDeliveryAfterNoticeClear(scope uint32) {
 	a.overlayClaims.mu.Lock()
-	if scope != contextNoticeWithdrawPressure {
+	if scope&contextNoticeWithdrawCompaction != 0 {
 		a.overlayClaims.imminent.deliveryPending = false
 		a.overlayClaims.imminent.delivered = false
 		a.overlayClaims.warning.deliveryPending = false
 		a.overlayClaims.warning.delivered = false
 	}
-	if scope != contextNoticeWithdrawCompaction {
+	if scope&contextNoticeWithdrawPressure != 0 {
 		a.overlayClaims.reminder.deliveryPending = false
 		a.overlayClaims.reminder.delivered = false
+	}
+	if scope&contextNoticeWithdrawManual != 0 {
+		a.overlayClaims.manual.deliveryPending = false
+		a.overlayClaims.manual.delivered = false
 	}
 	a.overlayClaims.mu.Unlock()
 }
@@ -541,6 +618,7 @@ func (a *MainAgent) resetOverlayDeliveryAfterNoticeClear(scope uint32) {
 // and keeps a plain delivered stage.
 func (a *MainAgent) markOverlayClaimsDelivered() {
 	warningDelivered := false
+	manualDelivered := false
 	a.overlayClaims.mu.Lock()
 	imminentStage := a.overlayClaims.imminent.confirmDelivery()
 	reminderStage := a.overlayClaims.reminder.confirmDelivery()
@@ -548,6 +626,11 @@ func (a *MainAgent) markOverlayClaimsDelivered() {
 		a.overlayClaims.warning.deliveryPending = false
 		a.overlayClaims.warning.delivered = true
 		warningDelivered = true
+	}
+	if a.overlayClaims.manual.deliveryPending {
+		a.overlayClaims.manual.deliveryPending = false
+		a.overlayClaims.manual.delivered = true
+		manualDelivered = true
 	}
 	a.overlayClaims.mu.Unlock()
 	if reminderStage != "" {
@@ -566,7 +649,7 @@ func (a *MainAgent) markOverlayClaimsDelivered() {
 	if imminentStage != "" {
 		a.recordContextDiagnosticEvent(analytics.UsagePurposeCompactionGrace, map[string]string{"stage": imminentStage})
 	}
-	a.emitStagedContextNotices(reminderStage, imminentStage, warningDelivered)
+	a.emitStagedContextNotices(reminderStage, imminentStage, warningDelivered, manualDelivered)
 }
 
 // compactContextVisible reports whether the compact_context tool is present in
@@ -592,8 +675,18 @@ func (a *MainAgent) compactContextVisible() bool {
 // from observed usage. A delivered notification stays in the durable history;
 // only the request reconciler may withdraw it after a relevant prefix change.
 // The gate separately stages the shared upper-threshold notice.
+//
+// While the manual /compact intent is armed the queue is skipped entirely: the
+// ladder already suppresses the reminder's own staging, and the queue's
+// below-line and disabled paths would end the pressure cycle the manual
+// notice row reserves into (or arm a cleanup that withdraws it). The usage
+// corrections those paths perform happen at the next apply or idle recheck
+// instead.
 func (a *MainAgent) queueContextPressureReminderForNextRequest() {
 	if a == nil || a.ctxMgr == nil {
+		return
+	}
+	if a.manualNoticeActive() {
 		return
 	}
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
@@ -724,12 +817,14 @@ func containsContextNotice(messages []message.Message) bool {
 // replaced. Overlay delivery claims are runtime memory that never survives a
 // restore or a session switch, so the load path is the only place presence can
 // be reestablished; the live decision at the next request boundary then decides
-// whether the loaded rows are still justified.
+// whether the loaded rows are still justified. A restored manual notice has no
+// armed intent behind it (the flag is runtime memory), so it is withdrawn at
+// the next idle boundary.
 func (a *MainAgent) installContextNoticePresence(messages []message.Message) {
 	if a == nil {
 		return
 	}
-	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawNone)
 	a.contextNoticesStale.Store(false)
 	a.overlayClaims.mu.Lock()
 	a.overlayClaims.noticeModel = ""
@@ -737,7 +832,21 @@ func (a *MainAgent) installContextNoticePresence(messages []message.Message) {
 	a.overlayClaims.noticePrefixesKnown = false
 	a.overlayClaims.mu.Unlock()
 	a.contextNoticesPersisted.Store(containsContextNotice(messages))
+	if containsContextNoticeLevel(messages, contextNoticeManual) {
+		a.withdrawManualCompactionNotice()
+	}
 	a.adoptPressureCyclesFromTranscript(messages)
+}
+
+// containsContextNoticeLevel reports whether a message list carries a durable
+// context-notice row of the given level.
+func containsContextNoticeLevel(messages []message.Message, level string) bool {
+	for i := range messages {
+		if messages[i].Kind == message.KindContextNotice && messages[i].NoticeLevel == level {
+			return true
+		}
+	}
+	return false
 }
 
 // armContextNoticeCleanup withdraws all notices when their contract is disabled.
@@ -749,6 +858,16 @@ func (a *MainAgent) armContextNoticeCleanup() {
 	// Scope before the mark: a reader that observes the mark must also observe
 	// which classes it withdraws.
 	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
+	a.contextNoticesStale.Store(true)
+}
+
+// armContextNoticeCleanupExceptManual withdraws the threshold and pressure rows
+// while a live manual /compact intent keeps its own notice row justified.
+func (a *MainAgent) armContextNoticeCleanupExceptManual() {
+	if a == nil || !a.contextNoticesPersisted.Load() {
+		return
+	}
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll &^ contextNoticeWithdrawManual)
 	a.contextNoticesStale.Store(true)
 }
 
@@ -770,7 +889,7 @@ func (a *MainAgent) disarmContextNoticeCleanup() {
 		return
 	}
 	a.contextNoticesStale.Store(false)
-	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
+	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawNone)
 }
 
 // omitStaleContextNoticesFromRequest drops the withdrawn durable context
@@ -835,6 +954,12 @@ func (a *MainAgent) queueCompactionWarning() {
 	// long-session guidance gives the model an externalization contract);
 	// otherwise compaction is runtime-owned and the model is never notified.
 	if !a.compactContextVisible() {
+		return
+	}
+	// The manual /compact intent outranks the threshold warning on the ladder:
+	// while it is armed, the warning claim stays unconsumed so the intent's
+	// own notice is the only externalization prompt this window gets.
+	if a.manualNoticeActive() {
 		return
 	}
 	if !a.autoCompactRequested.Load() || a.isUsageDrivenAutoCompactSuppressed() {

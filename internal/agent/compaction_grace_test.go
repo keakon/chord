@@ -11,7 +11,10 @@ import (
 )
 
 // graceTestAgent returns an agent with compact_context visible whose usage
-// sits at the given fraction of a 0.8-threshold budget.
+// sits at the given fraction of a 0.8-threshold budget. The pressure reminder
+// is marked delivered for the current window, modeling the gradual climb that
+// justifies a grace countdown: a crossing whose window never delivered the
+// reminder reads as abrupt and bypasses the grace outright.
 func graceTestAgent(t *testing.T, usage float64) *MainAgent {
 	t.Helper()
 	a := newTestMainAgent(t, t.TempDir())
@@ -21,6 +24,11 @@ func graceTestAgent(t *testing.T, usage float64) *MainAgent {
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
 	a.requestBatches.reserve(a.sessionEpoch, 0) // batch 1 = last completed request
+	a.notePressureStage(pressureStageReminded, a.currentOverlayWindowKey())
+	a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.currentOverlayWindowKey())
+	a.overlayClaims.mu.Lock()
+	a.overlayClaims.reminder.delivered = true
+	a.overlayClaims.mu.Unlock()
 	return a
 }
 

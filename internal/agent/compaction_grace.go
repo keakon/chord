@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -46,6 +47,20 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 		return false
 	}
 	current := a.currentRequestBatch(snapshot)
+	// Abrupt crossing: the observation reached the threshold without the
+	// pressure reminder ever being delivered in this window — usage jumped
+	// instead of climbing past the reminder line, so the model has had no
+	// early warning to act on. The grace countdown has no one to serve: skip
+	// it, start compaction immediately, and let the crossing request carry a
+	// single externalization warning (the reminder never injects on a request
+	// that already stages the warning — the ladder in stageContextNotice).
+	// A disabled reminder line (reminder: -1/0, or a line at/above the
+	// threshold) keeps this condition permanently true: a configuration that
+	// opted out of early notices gets no countdown either.
+	if a.contextPressureAbruptCrossing(decision) {
+		a.endCompactionGrace("abrupt_crossing", current)
+		return false
+	}
 	if float64(decision.EffectiveInputTokens) >= float64(decision.UsableInputBudget)*compactionGraceHardCeilingRatio {
 		a.endCompactionGrace("hard_ceiling", current)
 		return false
@@ -67,12 +82,30 @@ func (a *MainAgent) usageDrivenCompactionGraceDefers(snapshot []message.Message)
 	return false
 }
 
+// contextPressureAbruptCrossing reports whether the current observation
+// reached the compaction threshold while the pressure reminder has never been
+// delivered in this compaction window: neither the window claim carries a
+// delivery nor does the transcript carry a durable reminder row. Rebinding the
+// claim to the live window key first keeps a delivery from a previous window
+// from masking an abrupt crossing of the fresh one.
+func (a *MainAgent) contextPressureAbruptCrossing(decision ctxmgr.AutoCompactDecision) bool {
+	if a == nil || a.ctxMgr == nil || !decision.ShouldCompact {
+		return false
+	}
+	claim := a.syncOverlayWindowClaim(&a.overlayClaims.reminder, a.currentOverlayWindowKey())
+	if claim.delivered {
+		return false
+	}
+	return !a.hasDurablePressureNotice(contextNoticePressure)
+}
+
 // endCompactionGrace marks the current window's grace exhausted: the next
 // threshold crossing in this window starts compaction immediately. The grace
-// stage event is recorded for an ended active window and for the two decisions
-// that exhaust a window whose grace never started — the hard-ceiling bypass
-// and a model-driven settle after an armed crossing — so a window whose grace
-// was cut off before it began still leaves a diagnostic trail.
+// stage event is recorded for an ended active window and for the decisions
+// that exhaust a window whose grace never started — the hard-ceiling bypass,
+// an abrupt crossing, and a model-driven settle after an armed crossing — so a
+// window whose grace was cut off before it began still leaves a diagnostic
+// trail.
 func (a *MainAgent) endCompactionGrace(reason string, current uint64) {
 	if a == nil {
 		return
@@ -88,7 +121,7 @@ func (a *MainAgent) endCompactionGrace(reason string, current uint64) {
 	if a.ctxMgr != nil {
 		a.notePressureStage(pressureStageArmed, a.currentOverlayWindowKey())
 	}
-	if active || reason == "hard_ceiling" || reason == "model_driven_settled" {
+	if active || reason != "expired" {
 		a.recordCompactionGraceEvent(reason, current)
 	}
 }

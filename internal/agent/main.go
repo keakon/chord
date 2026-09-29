@@ -465,6 +465,25 @@ type MainAgent struct {
 	// notice. It is re-queued on every request inside the threshold grace
 	// window with the true remaining countdown (compaction_grace.go).
 	pendingCompactionImminent string
+	// pendingCompactionManual is the manual /compact imperative notice staged
+	// by the compaction gate while the armed intent's worker is still running
+	// (compaction_manual_intent.go).
+	pendingCompactionManual string
+	// manualCompactArmed records that a busy /compact armed a manual compaction
+	// intent while compact_context was visible: the model may submit its
+	// checkpoint before the summarize worker applies. The flag lives from the
+	// command until an apply, a manual worker terminal settle, a turn
+	// cancellation, or a session switch/restore; usage-driven resets (usage
+	// falling back, the failure breaker, a model switch) never clear it. It
+	// only ever means "the user's compaction request has no result yet".
+	// Written on the event loop, read from the main LLM goroutine
+	// (reconcile/stage paths), hence the atomics.
+	manualCompactArmed atomic.Bool
+	// manualCompactArmedPlanID is the plan id of the worker the armed /compact
+	// started. Only a running compaction with exactly this plan id may write
+	// the manual notice row; restarted workers keep the intent alive but
+	// permanently lose injection rights.
+	manualCompactArmedPlanID atomic.Uint64
 	// overlayClaims holds the per-window context-pressure reminder claim and
 	// the per-generation externalization warning claim. Cross-goroutine: the
 	// event loop queues, the main LLM goroutine confirms delivery at dispatch.
@@ -1626,6 +1645,11 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	// A model-driven checkpoint armed by this turn must not outlive it: the
 	// user just aborted exactly the work the checkpoint was meant to continue.
 	a.cancelCompactionForTurnCancellation(evt.TurnID)
+	// The armed manual /compact intent dies with the turn as well: the user
+	// aborted the work, so neither its notice nor its restart survives. The
+	// manual worker itself is NOT discarded — it outlives the turn and applies
+	// at ready, mirroring usage-driven workers.
+	a.clearManualCompactionIntentAndWithdrawNotice()
 
 	// Extract completed speculative tool results before marking as failed
 	var completedResults map[string]*ToolResultPayload

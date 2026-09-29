@@ -176,6 +176,19 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	// Attach each undelivered threshold once. Grace and compaction startup
 	// share the upper slot. Dispatch confirms the claims and persists matching
 	// notice messages; cancellation before dispatch leaves them available.
+	// The manual /compact imperative is the ladder's top level, so it attaches
+	// first; stageContextNotice already cleared the lower pending texts when
+	// it staged the manual level.
+	if manual := strings.TrimSpace(a.takePendingContextNoticeText(contextNoticeManual)); manual != "" {
+		a.noteCompactionManualAttached()
+		a.stashContextNotice(contextNoticeManual, manual)
+		overlays = append(overlays, message.Message{
+			Role:        "user",
+			Kind:        message.KindTurnOverlay,
+			Content:     "<system-reminder>\n" + manual + "\n</system-reminder>",
+			NoticeLevel: contextNoticeManual,
+		})
+	}
 	if reminder := strings.TrimSpace(a.takePendingContextNoticeText(contextNoticePressure)); reminder != "" {
 		a.noteContextPressureReminderAttached()
 		a.stashContextNotice(contextNoticePressure, reminder)

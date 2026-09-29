@@ -134,14 +134,17 @@ func TestFallbackAddsOnlyMissingThresholdAndReusesDurableRows(t *testing.T) {
 	a := noticeRequestAgent(t)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 99000})
 	messages := []message.Message{{Role: message.RoleUser, Content: "continue"}}
+	// Both lines are crossed at once: the ladder appends only the higher
+	// notice, whose row the dispatch persists.
 	got := a.reconcileFallbackPressureNotices(messages, "provider/target", 100000, true)
-	if len(got) != 3 || a.ctxMgr.MessageCount() != 2 {
-		t.Fatalf("request=%d durable=%d, want two notices", len(got), a.ctxMgr.MessageCount())
+	if len(got) != 2 || a.ctxMgr.MessageCount() != 1 {
+		t.Fatalf("request=%d durable=%d, want only the upper threshold", len(got), a.ctxMgr.MessageCount())
 	}
-	// An intervening large-budget model removed both notices from its request;
-	// the next smaller model reuses the durable rows without appending cards.
+	// An intervening large-budget model removed the notice from its request;
+	// the next smaller model reuses the durable row without appending cards,
+	// and the retained warning row keeps the lower reminder suppressed.
 	got = a.reconcileFallbackPressureNotices(messages, "provider/other", 100000, true)
-	if len(got) != 3 || a.ctxMgr.MessageCount() != 2 {
+	if len(got) != 2 || a.ctxMgr.MessageCount() != 1 {
 		t.Fatalf("reused request=%d durable=%d", len(got), a.ctxMgr.MessageCount())
 	}
 }

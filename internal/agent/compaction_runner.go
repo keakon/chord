@@ -24,12 +24,19 @@ import (
 )
 
 func (a *MainAgent) scheduleCompaction(manual bool) bool {
+	ok, _ := a.scheduleCompactionPlan(manual)
+	return ok
+}
+
+// scheduleCompactionPlan starts a compaction and reports the plan id of the
+// worker it started (0 when a compaction was already running).
+func (a *MainAgent) scheduleCompactionPlan(manual bool) (bool, uint64) {
 	if a.IsCompactionRunning() {
 		log.Debugf("context compaction already in progress; skipping duplicate schedule manual=%v", manual)
 		if manual {
 			a.emitToTUI(InfoEvent{Message: "Context compaction is already in progress"})
 		}
-		return false
+		return false, 0
 	}
 	snapshot := a.ctxMgr.Snapshot()
 	a.fireBeforeCompressHook(snapshot, manual)
@@ -39,7 +46,7 @@ func (a *MainAgent) scheduleCompaction(manual bool) bool {
 		trigger = compactionTriggerManual
 	}
 	a.scheduleCompactionAsync(snapshot, planID, target, trigger)
-	return true
+	return true, planID
 }
 
 // scheduleCompactionAsync starts a non-blocking compaction. The main event loop
@@ -179,7 +186,13 @@ func (a *MainAgent) maybeRunAutoCompaction() {
 		a.clearUsageDrivenAutoCompactRequest()
 		a.resetAutoCompactionFailureState()
 		if a.contextPressureBelowReminderLine(decision, -1) {
-			a.armContextNoticeCleanup()
+			// A live manual /compact intent keeps its own notice row justified
+			// even when usage falls back below the reminder line.
+			if a.manualNoticeActive() {
+				a.armContextNoticeCleanupExceptManual()
+			} else {
+				a.armContextNoticeCleanup()
+			}
 		}
 		return
 	}
@@ -201,8 +214,19 @@ func (a *MainAgent) maybeRunAutoCompaction() {
 // maybeRunBarrierCompaction runs compaction at the ContinuationBarrier (all
 // foreground tools done, about to call LLM again). Unlike maybeRunAutoCompaction
 // it does not require the agent to be idle, and does not emit IdleEvent.
+// handleCompactCommand dispatches /compact. Idle and model-invisible runs keep
+// the plain runtime path; a busy run with a visible compact_context also arms
+// the manual intent so the next request carries the imperative notice and the
+// model can submit its checkpoint before the worker applies (see
+// compaction_manual_intent.go).
 func (a *MainAgent) handleCompactCommand() {
-	a.scheduleCompaction(true)
+	if a.turn == nil || !a.compactContextVisible() {
+		a.scheduleCompaction(true)
+		return
+	}
+	if ok, planID := a.scheduleCompactionPlan(true); ok {
+		a.armManualCompactionIntent(planID)
+	}
 }
 
 // produceCompactionDraftAsync archives the head, summarizes it, and builds the
@@ -440,13 +464,25 @@ func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 		a.clearUsageObservation()
 		a.clearUsageDrivenAutoCompactRequest()
 		a.resetAutoCompactionFailureState()
-		if d != nil && d.InfoMessage != "" && d.Manual {
-			a.emitToTUI(InfoEvent{Message: d.InfoMessage})
+		if d != nil && d.Manual {
+			// A manual skip is a legitimate terminal state: the user's request
+			// has its answer (nothing to compact), so the intent and its
+			// notice die here. No retry, no restart.
+			a.clearManualCompactionIntentAndWithdrawNotice()
+			if d.InfoMessage != "" {
+				a.emitToTUI(InfoEvent{Message: d.InfoMessage})
+			}
 		}
 		return nil
 	}
 
-	return a.applyCompactionDraftAsync(d)
+	err := a.applyCompactionDraftAsync(d)
+	if err != nil && d.Manual {
+		// A failed manual apply is terminal, just like a failed summary worker.
+		// Keep displaced model-driven checkpoints eligible for the manual fallback.
+		a.clearManualCompactionIntentAndWithdrawNotice()
+	}
+	return err
 }
 
 // applyCompactionDraftAsync applies a compaction draft using ReplacePrefixAtomic,
@@ -706,6 +742,10 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	}
 	a.clearUsageDrivenAutoCompactRequest()
 	a.resetAutoCompactionFailureState()
+	// Any successful apply — manual, usage-driven, or a model checkpoint —
+	// answers the manual /compact intent: the notice rows are gone with the
+	// rewritten history above, so only the flag remains to clear.
+	a.clearManualCompactionIntent()
 	// The committed transaction record has served its purpose once the apply
 	// settlement is durable: the crash-window reconciliation (restore
 	// reconcileCompactionTransactions plus the model-driven proposal fix)

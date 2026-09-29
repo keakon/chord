@@ -14,9 +14,10 @@ import (
 // externalization warning across the requests of one armed generation. The
 // request that starts the compaction delivers the warning and its durable
 // row; a later request behind the same generation — the compaction already
-// running in parallel — must not attach a fresh warning overlay, while the
-// notice content stays visible through the durable rows the transcript
-// replays.
+// running in parallel — must not attach a fresh warning overlay, and the
+// injection ladder keeps the lower-priority reminder quiet while the warning
+// row is retained: the notice content reaches the model only through the
+// durable row the transcript replays.
 func TestGateKeepsStickyReminderWhenTheWarningClaimIsSpent(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
@@ -59,8 +60,8 @@ func TestGateKeepsStickyReminderWhenTheWarningClaimIsSpent(t *testing.T) {
 	waitForBlockingStreamProviderCalls(t, provider, 1)
 
 	// Second request behind the same armed generation: the spent claim must
-	// not re-attach the warning, and the sticky reminder content must still
-	// reach the model through the durable rows.
+	// not re-attach the warning, the retained warning row keeps replaying,
+	// and the ladder keeps the undelivered reminder quiet.
 	a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, "")
 	waitForBlockingStreamProviderCalls(t, provider, 2)
 
@@ -80,8 +81,8 @@ func TestGateKeepsStickyReminderWhenTheWarningClaimIsSpent(t *testing.T) {
 	if !strings.Contains(first.String(), "has reached the automatic-compaction threshold") {
 		t.Fatalf("the request that starts the compaction must deliver the warning; dispatched=%q", first.String())
 	}
-	if !strings.Contains(second.String(), "approaching the configured automatic-compaction threshold") {
-		t.Fatalf("a request behind the armed generation must still carry the sticky reminder; dispatched=%q", second.String())
+	if strings.Contains(second.String(), "approaching the configured automatic-compaction threshold") {
+		t.Fatalf("the retained warning row must keep the lower-priority reminder quiet; dispatched=%q", second.String())
 	}
 	if n := strings.Count(second.String(), "has reached the automatic-compaction threshold"); n != 1 {
 		t.Fatalf("the spent warning claim must not re-attach the warning; occurrences=%d dispatched=%q", n, second.String())

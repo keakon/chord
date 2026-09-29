@@ -813,11 +813,15 @@ type ContextNoticeClearedEvent struct {
 func (ContextNoticeClearedEvent) agentEvent() {}
 
 // Context notice badges. Grace (imminent) and startup (warning) share one
-// upper-threshold record; pressure is the lower-threshold record.
+// upper-threshold record; pressure is the lower-threshold record; manual is
+// the user-requested /compact imperative notice. The order is also the
+// injection priority ladder: a live higher level suppresses new injections of
+// the levels below it.
 const (
 	contextNoticePressure = "pressure"
 	contextNoticeImminent = "imminent"
 	contextNoticeWarning  = "warning"
+	contextNoticeManual   = "manual"
 )
 
 // AgentDoneEvent signals that a SubAgent has completed its task.
