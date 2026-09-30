@@ -72,10 +72,12 @@ func (a *MainAgent) effectiveCompactionThreshold(modelRef string) float64 {
 // 0 when the threshold disables automatic compaction (threshold<=0) or the
 // reminder is explicitly disabled, meaning no reminder is ever injected.
 func (a *MainAgent) effectiveReminderPct(threshold float64) float64 {
+	a.llmMu.RLock()
 	modelRef := a.runningModelRef
 	if modelRef == "" {
 		modelRef = a.providerModelRef
 	}
+	a.llmMu.RUnlock()
 	return a.effectiveReminderPctForModelRef(modelRef, threshold)
 }
 
