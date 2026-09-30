@@ -16,7 +16,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -1367,7 +1366,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		TransactionID:              transactionID,
 		TransactionSessionDir:      bundle.archiveMeta.sessionDir,
 		SummaryMode:                compactionSummaryModeModelDriven,
-		Backend:                    config.CompactionPresetGeneric,
+		Backend:                    CompactionBackendGeneric,
 		Profile:                    string(compactionProfileArchival),
 		ModelRef:                   "model_declared",
 		Manual:                     false,

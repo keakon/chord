@@ -82,7 +82,8 @@ func (t *responsesItemTexts) markDone(index int, item responsesStreamItem) {
 }
 
 // join also reports presence, so an explicit empty confirmation clears earlier
-// text without erasing unrelated refusal or compaction backfill when absent.
+// text without erasing an unrelated refusal backfilled from the terminal
+// payload when absent.
 func (t *responsesItemTexts) join() (string, bool) {
 	var b strings.Builder
 	for _, index := range slices.Sorted(maps.Keys(t.byIndex)) {

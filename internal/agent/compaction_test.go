@@ -98,7 +98,7 @@ func TestCompactionProgressReporterForwardsRetryAndKeyDeltas(t *testing.T) {
 	}
 }
 
-func TestCompactionEndpointWaitsForLLMGovernor(t *testing.T) {
+func TestCompactionSummaryWaitsForLLMGovernor(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.governor = newResourceGovernor(config.OrchestrationConfig{MaxActiveLLMRequests: 1})
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
@@ -107,7 +107,9 @@ func TestCompactionEndpointWaitsForLLMGovernor(t *testing.T) {
 			"test-model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}},
 		},
 	}, []string{"test-key"})
-	client := llm.NewClient(providerCfg, stubProvider{}, "test-model", 1024, "")
+	// A non-empty response keeps the client's empty-response retry loop out of
+	// the way: this test pins governor waiting, not retry behavior.
+	client := llm.NewClient(providerCfg, stubProvider{response: &message.Response{Content: "summary", StopReason: "stop"}}, "test-model", 1024, "")
 
 	release, err := a.governor.acquireLLM(context.Background(), client.PrimaryModelRef())
 	if err != nil {
@@ -115,14 +117,14 @@ func TestCompactionEndpointWaitsForLLMGovernor(t *testing.T) {
 	}
 	result := make(chan error, 1)
 	go func() {
-		_, _, err := a.callCompactionEndpoint(context.Background(), client, "sample/test-model", "prompt", nil)
+		_, _, err := a.callCompactionSummary(context.Background(), client, "sample/test-model", "prompt", nil)
 		result <- err
 	}()
 
 	select {
 	case err := <-result:
 		release()
-		t.Fatalf("compaction endpoint bypassed the LLM governor: %v", err)
+		t.Fatalf("compaction summary bypassed the LLM governor: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
 	release()
@@ -130,7 +132,7 @@ func TestCompactionEndpointWaitsForLLMGovernor(t *testing.T) {
 	select {
 	case <-result:
 	case <-time.After(time.Second):
-		t.Fatal("compaction endpoint did not proceed after the LLM slot was released")
+		t.Fatal("compaction summary did not proceed after the LLM slot was released")
 	}
 }
 
@@ -314,8 +316,9 @@ func TestCompactionProgressReporterInfersAttemptFromTransportReset(t *testing.T)
 }
 
 type countingCompactionProvider struct {
+	keys          []string
+	models        []string
 	calls         int
-	compactCalls  int
 	invalidations []string
 	tunings       []llm.RequestTuning
 	progress      []message.StreamProgressDelta
@@ -324,16 +327,10 @@ type countingCompactionProvider struct {
 	err           error
 }
 
-type countingSummaryOnlyProvider struct {
-	calls    int
-	response *message.Response
-	err      error
-}
-
 func (p *countingCompactionProvider) CompleteStream(
 	_ context.Context,
-	_ string,
-	_ string,
+	key string,
+	model string,
 	_ string,
 	_ []message.Message,
 	_ []message.ToolDefinition,
@@ -342,6 +339,8 @@ func (p *countingCompactionProvider) CompleteStream(
 	cb llm.StreamCallback,
 ) (*message.Response, error) {
 	p.calls++
+	p.keys = append(p.keys, key)
+	p.models = append(p.models, model)
 	p.tunings = append(p.tunings, tuning)
 	for _, progress := range p.progress {
 		if cb != nil {
@@ -362,8 +361,8 @@ func (p *countingCompactionProvider) CompleteStream(
 
 func (p *countingCompactionProvider) Complete(
 	_ context.Context,
-	_ string,
-	_ string,
+	key string,
+	model string,
 	_ string,
 	_ []message.Message,
 	_ []message.ToolDefinition,
@@ -371,40 +370,13 @@ func (p *countingCompactionProvider) Complete(
 	_ llm.RequestTuning,
 ) (*message.Response, error) {
 	p.calls++
+	p.keys = append(p.keys, key)
+	p.models = append(p.models, model)
 	if p.err != nil {
 		return nil, p.err
 	}
 	if len(p.responses) >= p.calls {
 		return p.responses[p.calls-1], nil
-	}
-	if p.response != nil {
-		return p.response, nil
-	}
-	return &message.Response{}, nil
-}
-
-func (p *countingCompactionProvider) Compact(
-	_ context.Context,
-	_ string,
-	_ string,
-	_ string,
-	_ []message.Message,
-	_ []message.ToolDefinition,
-	_ int,
-	_ llm.RequestTuning,
-	cb llm.StreamCallback,
-) (*message.Response, error) {
-	p.compactCalls++
-	for _, progress := range p.progress {
-		if cb != nil {
-			cb(message.StreamDelta{Progress: &progress})
-		}
-	}
-	if p.err != nil {
-		return nil, p.err
-	}
-	if len(p.responses) >= p.compactCalls {
-		return p.responses[p.compactCalls-1], nil
 	}
 	if p.response != nil {
 		return p.response, nil
@@ -509,47 +481,6 @@ func TestSummarizeHeadTailLinesPreservesArtifactReference(t *testing.T) {
 	}
 }
 
-func (p *countingSummaryOnlyProvider) CompleteStream(
-	_ context.Context,
-	_ string,
-	_ string,
-	_ string,
-	_ []message.Message,
-	_ []message.ToolDefinition,
-	_ int,
-	_ llm.RequestTuning,
-	_ llm.StreamCallback,
-) (*message.Response, error) {
-	p.calls++
-	if p.err != nil {
-		return nil, p.err
-	}
-	if p.response != nil {
-		return p.response, nil
-	}
-	return &message.Response{}, nil
-}
-
-func (p *countingSummaryOnlyProvider) Complete(
-	_ context.Context,
-	_ string,
-	_ string,
-	_ string,
-	_ []message.Message,
-	_ []message.ToolDefinition,
-	_ int,
-	_ llm.RequestTuning,
-) (*message.Response, error) {
-	p.calls++
-	if p.err != nil {
-		return nil, p.err
-	}
-	if p.response != nil {
-		return p.response, nil
-	}
-	return &message.Response{}, nil
-}
-
 func validCompactionSummaryForTest(history string) string {
 	return fmt.Sprintf(
 		"## Current User Request\n- continue current task\n\n## Active Objective\n- continue current task\n\n## Background Goals\n- none\n\n## User Constraints\n- none\n\n## Progress\n- progress recorded\n\n## Key Decisions\n- decisions captured\n\n## Files and Evidence\n- Archived history: %s\n- src/current_task.go\n\n## Todo State\n- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)\n\n## SubAgent State\n- none active\n\n## Open Problems\n- none\n\n## Next Step\n- Inspect src/current_task.go and continue the current task.",
@@ -560,7 +491,7 @@ func validCompactionSummaryForTest(history string) string {
 // summarizeCompactionHeadForTest invokes summarizeCompactionHead with the
 // continuation profile defaults previously baked into the deleted 2-arg wrapper.
 func summarizeCompactionHeadForTest(a *MainAgent, head []message.Message, historyPath string) (summary string, modelRef string, err error) {
-	summary, _, modelRef, err = a.summarizeCompactionHead(context.Background(), head, historyPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), jobStatesForSnapshot(), compactionAnchors{})
+	summary, modelRef, err = a.summarizeCompactionHead(context.Background(), head, historyPath, nil, nil, a.GetTodos(), a.taskInfosForCompaction(), jobStatesForSnapshot(), compactionAnchors{})
 	return summary, modelRef, err
 }
 
@@ -4216,82 +4147,6 @@ func TestSummarizeCompactionHeadDoesNotRepairTransportError(t *testing.T) {
 	}
 }
 
-func TestSummarizeCompactionHeadUsesCompactEndpointForCodexPreset(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.globalConfig.Context.Compaction.Preset = config.CompactionPresetCodex
-	a.SetProviderModelRef("sample/compact-model")
-
-	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
-		Type:   config.ProviderTypeResponses,
-		Preset: config.ProviderPresetCodex,
-		Models: map[string]config.ModelConfig{
-			"compact-model": {
-				Limit: config.ModelLimit{Context: 16384, Output: 2048},
-			},
-		},
-	}, []string{"test-key"})
-	provider := &countingCompactionProvider{
-		response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")},
-	}
-	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
-	a.llmClient = client
-
-	head := []message.Message{
-		{Role: "user", Content: "Please continue working on the current task."},
-		{Role: "assistant", Content: "I will inspect the current implementation and summarize next steps."},
-	}
-	got, _, err := summarizeCompactionHeadForTest(a, head, "history-1.md")
-	if err != nil {
-		t.Fatalf("summarizeCompactionHead error: %v", err)
-	}
-	if provider.compactCalls != 1 {
-		t.Fatalf("provider Compact calls = %d, want 1", provider.compactCalls)
-	}
-	if provider.calls != 0 {
-		t.Fatalf("provider Complete calls = %d, want 0", provider.calls)
-	}
-	if !strings.Contains(got, "history-1.md") {
-		t.Fatalf("summary should contain archive reference, got:\n%s", got)
-	}
-}
-
-func TestSummarizeCompactionHeadUsesGenericBackendWhenCompactionPresetIsGeneric(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.globalConfig.Context.Compaction.Preset = config.CompactionPresetGeneric
-	a.SetProviderModelRef("sample/compact-model")
-
-	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
-		Type:   "stub",
-		Preset: config.ProviderPresetCodex,
-		Models: map[string]config.ModelConfig{
-			"compact-model": {
-				Limit: config.ModelLimit{Context: 16384, Output: 2048},
-			},
-		},
-	}, []string{"test-key"})
-	provider := &countingCompactionProvider{
-		response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")},
-	}
-	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
-	a.llmClient = client
-
-	_, _, err := summarizeCompactionHeadForTest(a, []message.Message{
-		{Role: "user", Content: "Please continue working on the current task."},
-		{Role: "assistant", Content: "I will inspect the current implementation and summarize next steps."},
-	}, "history-1.md")
-	if err != nil {
-		t.Fatalf("summarizeCompactionHead error: %v", err)
-	}
-	if provider.calls != 1 {
-		t.Fatalf("provider Complete calls = %d, want 1", provider.calls)
-	}
-	if provider.compactCalls != 0 {
-		t.Fatalf("provider Compact calls = %d, want 0", provider.compactCalls)
-	}
-}
-
 func TestGenericCompactionEmitsTransportProgress(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
@@ -4326,36 +4181,66 @@ func TestGenericCompactionEmitsTransportProgress(t *testing.T) {
 	}
 }
 
-func TestSummarizeCompactionHeadCodexPresetFallsBackToGenericWhenEndpointUnavailable(t *testing.T) {
+// TestSummarizeCompactionHeadWalksPoolAndKeysAfterFailure documents that the
+// compaction summarize request keeps the main client's model-pool semantics:
+// a retriable failure walks every key of the current target before falling
+// back to the next pool target, and the successful fallback model is the one
+// recorded on the checkpoint.
+func TestSummarizeCompactionHeadWalksPoolAndKeysAfterFailure(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.globalConfig.Context.Compaction.Preset = config.CompactionPresetCodex
 	a.SetProviderModelRef("sample/compact-model")
 
-	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
-		Type:   "stub",
-		Preset: config.ProviderPresetCodex,
+	primaryCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
+		Type: "stub",
 		Models: map[string]config.ModelConfig{
-			"compact-model": {
-				Limit: config.ModelLimit{Context: 16384, Output: 2048},
-			},
+			"compact-model": {Limit: config.ModelLimit{Context: 16384, Output: 2048}},
 		},
-	}, []string{"test-key"})
-	provider := &countingSummaryOnlyProvider{
-		response: &message.Response{Content: validCompactionSummaryForTest("history-1.md")},
+	}, []string{"key-1", "key-2"})
+	fallbackCfg := llm.NewProviderConfig("fallback", config.ProviderConfig{
+		Type: "stub",
+		Models: map[string]config.ModelConfig{
+			"fallback-model": {Limit: config.ModelLimit{Context: 16384, Output: 2048}},
+		},
+	}, []string{"fallback-key"})
+	primary := &countingCompactionProvider{err: &llm.APIError{StatusCode: 500, Message: "temporary failure"}}
+	fallback := &countingCompactionProvider{
+		response: &message.Response{Content: validCompactionSummaryForTest("history-1.md"), StopReason: "stop"},
 	}
-	client := llm.NewClient(providerCfg, provider, "compact-model", 2048, "")
+	client := llm.NewClient(primaryCfg, primary, "compact-model", 2048, "")
+	client.SetFallbackModels([]llm.FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallback,
+		ModelID:        "fallback-model",
+		MaxTokens:      2048,
+	}})
 	a.llmClient = client
 
-	_, _, err := summarizeCompactionHeadForTest(a, []message.Message{
+	head := []message.Message{
 		{Role: "user", Content: "Please continue working on the current task."},
 		{Role: "assistant", Content: "I will inspect the current implementation and summarize next steps."},
-	}, "history-1.md")
+	}
+	summary, modelRef, err := summarizeCompactionHeadForTest(a, head, "history-1.md")
 	if err != nil {
 		t.Fatalf("summarizeCompactionHead error: %v", err)
 	}
-	if provider.calls != 1 {
-		t.Fatalf("provider Complete calls = %d, want 1", provider.calls)
+	if primary.calls != 2 {
+		t.Fatalf("primary Complete calls = %d, want 2 (one per key)", primary.calls)
+	}
+	if fallback.calls != 1 {
+		t.Fatalf("fallback Complete calls = %d, want 1", fallback.calls)
+	}
+	if !slices.Equal(primary.keys, []string{"key-1", "key-2"}) || !slices.Equal(fallback.keys, []string{"fallback-key"}) {
+		t.Fatalf("key order = %v / %v, want [key-1 key-2] / [fallback-key]", primary.keys, fallback.keys)
+	}
+	if !slices.Equal(primary.models, []string{"compact-model", "compact-model"}) || !slices.Equal(fallback.models, []string{"fallback-model"}) {
+		t.Fatalf("model order = %v / %v", primary.models, fallback.models)
+	}
+	if !strings.Contains(summary, "history-1.md") {
+		t.Fatalf("summary should contain archive reference, got:\n%s", summary)
+	}
+	if modelRef != "fallback/fallback-model" {
+		t.Fatalf("model ref = %q, want fallback/fallback-model", modelRef)
 	}
 }
 
@@ -7767,20 +7652,6 @@ func (p *compactionPromptCaptureProvider) Complete(
 	return nil, fmt.Errorf("unexpected Complete call")
 }
 
-func (p *compactionPromptCaptureProvider) Compact(
-	_ context.Context,
-	_ string,
-	_ string,
-	_ string,
-	_ []message.Message,
-	_ []message.ToolDefinition,
-	_ int,
-	_ llm.RequestTuning,
-	_ llm.StreamCallback,
-) (*message.Response, error) {
-	return nil, fmt.Errorf("unexpected Compact call")
-}
-
 func (p *compactionPromptCaptureProvider) InvalidateRouting(string) {}
 
 // TestSummarizeCompactionHeadSendsExactlyTheBudgetedInputs drives the real
@@ -7841,7 +7712,7 @@ func TestSummarizeCompactionHeadSendsExactlyTheBudgetedInputs(t *testing.T) {
 	todos := []tools.TodoItem{{ID: "t1", Status: "pending", Content: strings.Repeat("outstanding todo detail ", 60)}}
 
 	historyPath := filepath.Join(a.sessionDir, "history-1.md")
-	summary, _, _, err := a.summarizeCompactionHead(context.Background(), head, historyPath, nil, nil, todos, subAgents, backgroundObjects, compactionAnchors{})
+	summary, _, err := a.summarizeCompactionHead(context.Background(), head, historyPath, nil, nil, todos, subAgents, backgroundObjects, compactionAnchors{})
 	if err != nil {
 		t.Fatalf("summarizeCompactionHead error: %v", err)
 	}

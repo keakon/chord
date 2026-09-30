@@ -46,10 +46,9 @@ type responsesToolFormat struct {
 // format for a specific provider/model target. apply_patch is emitted as a
 // freeform custom tool (type:"custom" + grammar, no parameters) when the
 // target supports it; every other tool stays a JSON function tool. All request
-// paths that declare tools — the ordinary HTTP request, the Codex WebSocket
-// request (which reuses the same responsesRequest tools), and remote
-// compaction — share this entry so the freeform decision is identical
-// everywhere.
+// paths that declare tools — the ordinary HTTP request and the Codex WebSocket
+// request (which reuses the same responsesRequest tools) — share this entry so
+// the freeform decision is identical everywhere.
 func convertToolsToResponsesForTarget(provider *ProviderConfig, modelID string, tools []message.ToolDefinition) []responsesTool {
 	result := make([]responsesTool, 0, len(tools))
 	if len(tools) == 0 {

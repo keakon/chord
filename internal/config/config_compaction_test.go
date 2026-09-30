@@ -16,9 +16,6 @@ func TestDefaultConfigCompactionProfileDefaultsToAuto(t *testing.T) {
 	if cfg.Context.Compaction.Profile != CompactionProfileAuto {
 		t.Fatalf("DefaultConfig().Context.Compaction.Profile = %q, want %q", cfg.Context.Compaction.Profile, CompactionProfileAuto)
 	}
-	if cfg.Context.Compaction.Preset != "" {
-		t.Fatalf("DefaultConfig().Context.Compaction.Preset = %q, want empty auto-detect", cfg.Context.Compaction.Preset)
-	}
 }
 
 func TestDefaultConfigCompactionModelDrivenDisabled(t *testing.T) {
@@ -191,7 +188,6 @@ func TestLoadConfigFromPathParsesNestedCompactionConfig(t *testing.T) {
 		"context:\n" +
 		"  compaction:\n" +
 		"    threshold: 0.75\n" +
-		"    preset: codex\n" +
 		"    profile: archival\n" +
 		"    reserved: 16000\n")
 	if err := os.WriteFile(path, content, 0o644); err != nil {
@@ -201,9 +197,6 @@ func TestLoadConfigFromPathParsesNestedCompactionConfig(t *testing.T) {
 	cfg, err := LoadConfigFromPath(path)
 	if err != nil {
 		t.Fatalf("LoadConfigFromPath: %v", err)
-	}
-	if cfg.Context.Compaction.Preset != CompactionPresetCodex {
-		t.Fatalf("preset = %q, want %q", cfg.Context.Compaction.Preset, CompactionPresetCodex)
 	}
 	if cfg.Context.Compaction.Profile != CompactionProfileArchival {
 		t.Fatalf("profile = %q, want %q", cfg.Context.Compaction.Profile, CompactionProfileArchival)

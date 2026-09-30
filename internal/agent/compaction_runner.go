@@ -318,14 +318,11 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	}
 
 	summaryMode := message.CompactionSummaryModeModelSummary
-	backendName := config.CompactionPresetGeneric
+	backendName := CompactionBackendGeneric
 	modelRef := ""
 	keepAlive := newCompactionKeepAlive(a)
 	defer keepAlive.Stop()
-	summaryText, backendUsed, usedModel, summarizeErr := a.summarizeCompactionHead(ctx, head, pathutil.AbbreviateHome(absHistoryPath), evidenceItems, recentTail, todos, subAgents, backgroundObjects, sessionAnchors)
-	if strings.TrimSpace(backendUsed) != "" {
-		backendName = backendUsed
-	}
+	summaryText, usedModel, summarizeErr := a.summarizeCompactionHead(ctx, head, pathutil.AbbreviateHome(absHistoryPath), evidenceItems, recentTail, todos, subAgents, backgroundObjects, sessionAnchors)
 	if summarizeErr != nil {
 		summaryMode = message.CompactionSummaryModeStructuredFallback
 		modelRef = "fallback"
@@ -835,22 +832,22 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	return nil
 }
 
-func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.Message, historyPath string, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, sessionAnchors compactionAnchors) (summary string, backendName string, modelRef string, err error) {
+func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.Message, historyPath string, evidenceItems []evidenceItem, recentTail []message.Message, todos []tools.TodoItem, subAgents []SubAgentInfo, backgroundObjects []recovery.BackgroundObjectState, sessionAnchors compactionAnchors) (summary string, modelRef string, err error) {
 	modelRef = a.compactionModelRef()
 	client, utilityContextLimit, err := a.newCompactionClient(modelRef)
 	if err != nil {
-		return "", "", "", err
+		return "", "", err
 	}
 	client.SetOutputTokenMax(compactReservedOutput)
 	keyFiles := extractCompactionKeyFileCandidates(head, a.effectiveToolBaseDir(), 8)
 
 	input, err := a.buildCompactionInputWithOptions(head, utilityContextLimit, evidenceItems, recentTail, sessionAnchors)
 	if err != nil {
-		return "", "", modelRef, err
+		return "", modelRef, err
 	}
 	input, promptInputs, err := a.fitCompactionInputToContextLimit(head, input, utilityContextLimit, historyPath, keyFiles, todos, subAgents, backgroundObjects, compactReservedOutput)
 	if err != nil {
-		return "", "", modelRef, err
+		return "", modelRef, err
 	}
 
 	// The prompt is assembled from the exact inputs the budget fit admitted.
@@ -868,61 +865,27 @@ func (a *MainAgent) summarizeCompactionHead(ctx context.Context, head []message.
 		promptInputs.BackgroundObjects,
 	)
 
-	backend := a.selectCompactionBackend(client)
-	backendName = backend.Name()
 	progress := newCompactionProgressReporter(a)
-	summary, modelRef, err = backend.ProduceSummary(ctx, client, modelRef, prompt, progress)
+	summary, modelRef, err = a.callCompactionSummary(ctx, client, modelRef, prompt, progress)
 	if err == nil {
-		return summary, backendName, modelRef, nil
+		return summary, modelRef, nil
 	}
 	if !errors.Is(err, errInvalidCompactionSummary) {
-		return "", backendName, modelRef, err
+		return "", modelRef, err
 	}
 	repairPrompt := buildCompactionRepairPrompt(prompt, err)
 	if repairPrompt != "" {
-		log.Debugf("compaction summary validation failed; requesting corrected summary backend=%v model=%v summary_chars=%v missing_headings=%v error=%v",
-			backendName, modelRef, len([]rune(summary)), strings.Join(compactionMissingHeadings(err), ", "), err)
+		log.Debugf("compaction summary validation failed; requesting corrected summary model=%v summary_chars=%v missing_headings=%v error=%v",
+			modelRef, len([]rune(summary)), strings.Join(compactionMissingHeadings(err), ", "), err)
 		progress.startAttempt()
-		repairedSummary, repairedModelRef, repairErr := backend.ProduceSummary(ctx, client, modelRef, repairPrompt, progress)
+		repairedSummary, repairedModelRef, repairErr := a.callCompactionSummary(ctx, client, modelRef, repairPrompt, progress)
 		if repairErr == nil {
-			return repairedSummary, backendName, repairedModelRef, nil
+			return repairedSummary, repairedModelRef, nil
 		}
-		log.Debugf("compaction summary repair failed backend=%v model=%v summary_chars=%v missing_headings=%v error=%v",
-			backendName, repairedModelRef, len([]rune(repairedSummary)), strings.Join(compactionMissingHeadings(repairErr), ", "), repairErr)
+		log.Debugf("compaction summary repair failed model=%v summary_chars=%v missing_headings=%v error=%v",
+			repairedModelRef, len([]rune(repairedSummary)), strings.Join(compactionMissingHeadings(repairErr), ", "), repairErr)
 	}
-	return "", backendName, modelRef, err
-}
-
-func (a *MainAgent) callCompactionEndpoint(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string, progress *compactionProgressReporter) (string, string, error) {
-	if client == nil {
-		return "", fallbackModelRef, fmt.Errorf("compaction client is nil")
-	}
-	client.SetSystemPrompt(compactionSystemPrompt)
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-
-	releaseLLM, err := a.governor.acquireLLM(ctx, client.PrimaryModelRef())
-	if err != nil {
-		return "", fallbackModelRef, fmt.Errorf("acquire compaction LLM request capacity: %w", err)
-	}
-	defer releaseLLM()
-
-	resp, err := client.Compact(
-		ctx,
-		[]message.Message{{Role: "user", Content: prompt}},
-		nil,
-		progress.Callback(),
-	)
-	if err != nil {
-		return "", fallbackModelRef, err
-	}
-	progress.EmitCurrent()
-	summary, modelRef, err := a.finishCompactionCall(client, fallbackModelRef, resp)
-	if err != nil {
-		return summary, modelRef, err
-	}
-	log.Debugf("compaction endpoint produced summary prompt_bytes=%v response_bytes_total=%v summary_len=%v", len(prompt), progress.Bytes(), len(summary))
-	return summary, modelRef, nil
+	return "", modelRef, err
 }
 
 func (a *MainAgent) callCompactionSummary(ctx context.Context, client *llm.Client, fallbackModelRef, prompt string, progress *compactionProgressReporter) (string, string, error) {
@@ -972,7 +935,7 @@ type compactionProgressReporter struct {
 // so this timer-driven signal is the only heartbeat external control planes
 // (headless gateways tracking last-activity for idle reaping) receive during
 // a request that streams no transport progress at all. It must live for the
-// whole summarize phase, not per backend attempt, because key/model retries
+// whole summarize phase, not per request attempt, because key/model retries
 // and summary-repair attempts replace each other back-to-back.
 type compactionKeepAlive struct {
 	agent *MainAgent
@@ -1027,6 +990,9 @@ func newCompactionProgressReporter(a *MainAgent) *compactionProgressReporter {
 
 func (p *compactionProgressReporter) Callback() llm.StreamCallback {
 	return func(delta message.StreamDelta) {
+		if p == nil {
+			return
+		}
 		if p.update(delta) {
 			p.emitIfDue(time.Now())
 		}
@@ -1116,11 +1082,10 @@ func (p *compactionProgressReporter) Bytes() int64 {
 	return p.bytes
 }
 
-// finishCompactionCall settles a completed summarize response identically for
-// the streaming and the provider-endpoint path: record the call's usage under
-// the compaction purpose (otherwise these full-context requests are invisible
-// in analytics or attributed to chat), resolve which model actually ran, and
-// validate the summary.
+// finishCompactionCall settles a completed summarize response: record the
+// call's usage under the compaction purpose (otherwise these full-context
+// requests are invisible in analytics or attributed to chat), resolve which
+// model actually ran, and validate the summary.
 func (a *MainAgent) finishCompactionCall(client *llm.Client, fallbackModelRef string, resp *message.Response) (string, string, error) {
 	selectedRef := client.PrimaryModelRef()
 	runningRef := client.RunningModelRef()

@@ -128,6 +128,10 @@ var compactionRequiredHeadings = []string{
 	"## Next Step",
 }
 
+// CompactionBackendGeneric is the durable record label for the built-in
+// compaction backend: Chord calls the model to produce a text summary.
+const CompactionBackendGeneric = "generic"
+
 // compactionDraft is produced off the event loop and applied when
 // EventCompactionReady is dispatched.
 type compactionDraft struct {

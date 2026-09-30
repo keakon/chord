@@ -152,7 +152,7 @@ func (r responsesRequest) MarshalJSON() ([]byte, error) {
 // responsesInputItem represents an item in the Responses API input array.
 // The API expects "arguments" to be a string (JSON-serialized object), not an object.
 type responsesInputItem struct {
-	Type      string `json:"type"` // "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "reasoning", "additional_tools", "compaction_trigger"
+	Type      string `json:"type"` // "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "reasoning", "additional_tools"
 	ID        string `json:"id,omitempty"`
 	Role      string `json:"role,omitempty"`
 	Content   any    `json:"content,omitempty"`
@@ -338,8 +338,8 @@ func responsesClientMetadata(sessionID string, startedAt time.Time) map[string]s
 	return metadata
 }
 
-// resolveResponsesReasoningFields keeps the main and compact Responses request
-// shapes aligned when normalizing effort and applying the summary default.
+// resolveResponsesReasoningFields normalizes the effort value and applies the
+// summary default so every Responses request carries a consistent shape.
 func resolveResponsesReasoningFields(effort, summary string) (string, string) {
 	effort = resolveResponsesReasoningEffort(effort)
 	if summary == "" && openAIReasoningEffortActive(effort) {
@@ -760,7 +760,7 @@ func (r *ResponsesProvider) sendAndParse(
 
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	if useOpenAIOAuth {
-		applyOpenAIOAuthHeaders(req, r.provider, apiKey, true)
+		applyOpenAIOAuthHeaders(req, r.provider, apiKey)
 	} else {
 		var scheme string
 		if r.provider != nil {

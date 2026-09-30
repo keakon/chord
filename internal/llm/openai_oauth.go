@@ -69,7 +69,7 @@ func applyResponsesIdentityHeaders(h http.Header, provider *ProviderConfig) {
 }
 
 // applyResponsesStreamingHeaders sets headers used by streaming Responses
-// requests. The compact endpoint is unary JSON and does not use the SSE Accept.
+// requests, including the SSE Accept.
 func applyResponsesStreamingHeaders(h http.Header, provider *ProviderConfig) {
 	applyResponsesIdentityHeaders(h, provider)
 	h.Set("Accept", "text/event-stream")
@@ -87,15 +87,10 @@ func applyProviderAuthHeader(h http.Header, scheme, apiKey string) {
 }
 
 // applyOpenAIOAuthHeaders sets the full set of headers for Codex requests using
-// an OAuth session key. Callers choose whether the request is streaming so the
-// unary compact endpoint does not inherit the SSE Accept header.
-func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, apiKey string, streaming bool) {
+// an OAuth session key.
+func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, apiKey string) {
 	applyProviderAuthHeader(req.Header, config.AuthSchemeBearer, apiKey)
-	if streaming {
-		applyResponsesStreamingHeaders(req.Header, provider)
-	} else {
-		applyResponsesIdentityHeaders(req.Header, provider)
-	}
+	applyResponsesStreamingHeaders(req.Header, provider)
 	req.Header.Set(headerSessionID, newOpenAIOAuthSessionID())
 
 	if provider == nil {

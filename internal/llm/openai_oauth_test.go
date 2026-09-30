@@ -491,11 +491,16 @@ func TestResponsesProvider_ToolOnlyFieldsGatedOnTools(t *testing.T) {
 	}
 }
 
-func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
+// TestResponsesProvider_CodexPresetCompactionUsesOrdinaryResponsesRequest pins
+// the wire shape of a compaction summarize request against a provider-level
+// Codex preset: the summary is produced by an ordinary streaming Responses
+// request, with no trailing compaction_trigger input item and no
+// remote-compaction beta feature advertised. Summary validation is covered
+// through the agent summarize entrypoint; this test checks transport only.
+func TestResponsesProvider_CodexPresetCompactionUsesOrdinaryResponsesRequest(t *testing.T) {
 	var gotPath string
 	var gotBody map[string]any
 	var gotHeaders http.Header
-	var progress []message.StreamProgressDelta
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
@@ -508,12 +513,9 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 			t.Fatalf("unmarshal request body: %v", err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		// A tiny leading event keeps the first SSE progress snapshot smaller
-		// than the response headers, asserting the compact path rebases body
-		// progress onto the header baseline instead of regressing.
 		_, _ = io.WriteString(w, `data: {"type":"response.created","response":{"id":"resp-1"}}`+"\n\n")
-		_, _ = io.WriteString(w, `data: {"type":"response.output_item.done","output_index":0,"item":{"type":"compaction","encrypted_content":"## Goal\n- continue\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history: history-1.md\n\n## Todo State\n- none\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue"}}`+"\n\n")
-		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":5,"input_tokens_details":{"cached_tokens":0,"cache_write_tokens":2},"output_tokens_details":{"reasoning_tokens":0}}}}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"response.output_text.delta","delta":"## Goal\n- continue\n\n## Next Step\n- continue"}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}`+"\n\n")
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
@@ -521,145 +523,46 @@ func TestResponsesProvider_OpenAIOAuthCompactUsesCompactEndpoint(t *testing.T) {
 	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL+"/v1/responses")
 	r := &ResponsesProvider{provider: provider, client: server.Client()}
 
-	resp, err := r.Compact(
+	resp, err := r.CompleteStream(
 		context.Background(),
 		accessToken,
 		"gpt-5.5",
 		"system prompt",
-		[]message.Message{{Role: "user", Content: "hello"}},
-		nil,
-		128,
-		RequestTuning{SessionKey: "session-123", OpenAI: OpenAITuning{ReasoningEffort: " HIGH ", TextVerbosity: "low"}},
-		func(delta message.StreamDelta) {
-			if delta.Progress != nil {
-				progress = append(progress, *delta.Progress)
-			}
-		},
-	)
-	if err != nil {
-		t.Fatalf("Compact returned error: %v", err)
-	}
-	if resp == nil || !strings.Contains(resp.Content, "## Goal") {
-		t.Fatalf("compact response = %#v, want extracted summary text", resp)
-	}
-	if resp.Usage == nil || resp.Usage.InputTokens != 10 {
-		t.Fatalf("compact response usage = %#v, want input tokens 10", resp.Usage)
-	}
-	if len(progress) < 2 {
-		t.Fatalf("compact progress updates = %d, want at least 2", len(progress))
-	}
-	if progress[0].Bytes <= 0 || progress[0].Events != 0 {
-		t.Fatalf("initial compact progress = %+v, want non-zero header bytes and zero events", progress[0])
-	}
-	for i := 1; i < len(progress); i++ {
-		if progress[i].Bytes < progress[i-1].Bytes || progress[i].Events < progress[i-1].Events {
-			t.Fatalf("compact progress regressed at update %d: previous=%+v current=%+v", i, progress[i-1], progress[i])
-		}
-	}
-	if progress[1].Bytes <= progress[0].Bytes || progress[1].Events <= progress[0].Events {
-		t.Fatalf("first compact stream progress = %+v, want bytes and events beyond header baseline", progress[1])
-	}
-	if gotPath != "/v1/responses" {
-		t.Fatalf("compact request path = %q, want /v1/responses (native remote compaction v2)", gotPath)
-	}
-	if got := gotHeaders.Get("Accept"); got != "text/event-stream" {
-		t.Fatalf("compact request Accept = %q, want text/event-stream", got)
-	}
-	if got := gotHeaders.Get(headerCodexBetaFeatures); got != headerValueRemoteCompactV2 {
-		t.Fatalf("compact request %s = %q, want %s", headerCodexBetaFeatures, got, headerValueRemoteCompactV2)
-	}
-	if got := gotHeaders.Get("originator"); got != openAICodexOriginator {
-		t.Fatalf("compact request originator = %q, want %q", got, openAICodexOriginator)
-	}
-	if got := gotHeaders.Get(headerOpenAIBeta); got != openAICodexBetaHeader {
-		t.Fatalf("compact request %s = %q, want %q", headerOpenAIBeta, got, openAICodexBetaHeader)
-	}
-	if gotHeaders.Get(headerSessionID) == "" {
-		t.Fatal("expected compact request session_id header to be set")
-	}
-	if gotBody["prompt_cache_key"] == nil || gotBody["prompt_cache_key"] == "" {
-		t.Fatalf("compact request prompt_cache_key = %#v, want set", gotBody["prompt_cache_key"])
-	}
-	// Fingerprint convergence for cache locality: compact traffic must carry
-	// the same client_metadata identity as the main Responses path (body + the
-	// echoed headers), so it does not surface as a different session upstream.
-	cm, ok := gotBody["client_metadata"].(map[string]any)
-	if !ok {
-		t.Fatalf("compact request client_metadata = %#v, want object", gotBody["client_metadata"])
-	}
-	for _, key := range []string{responsesClientMetadataInstallationID, responsesClientMetadataSessionID, responsesClientMetadataThreadID, responsesClientMetadataWindowID} {
-		if cm[key] == nil || cm[key] == "" {
-			t.Fatalf("compact request client_metadata[%s] = %#v, want set", key, cm[key])
-		}
-	}
-	if cm[responsesClientMetadataSessionID] != "session-123" || cm[responsesClientMetadataThreadID] != "session-123" {
-		t.Fatalf("compact request client_metadata session/thread = %#v/%#v, want session-123", cm[responsesClientMetadataSessionID], cm[responsesClientMetadataThreadID])
-	}
-	if cm[responsesClientMetadataInstallationID] != gotHeaders.Get(responsesClientMetadataInstallationID) {
-		t.Fatalf("compact request installation_id mismatch body=%v header=%q", cm[responsesClientMetadataInstallationID], gotHeaders.Get(responsesClientMetadataInstallationID))
-	}
-	if gotHeaders.Get("thread-id") != "session-123" || gotHeaders.Get("x-client-request-id") != "session-123" {
-		t.Fatalf("compact request thread-id/x-client-request-id = %q/%q, want session-123", gotHeaders.Get("thread-id"), gotHeaders.Get("x-client-request-id"))
-	}
-	if gotBody["instructions"] != "system prompt" {
-		t.Fatalf("expected instructions=system prompt, got %#v", gotBody["instructions"])
-	}
-	if input, ok := gotBody["input"].([]any); !ok || len(input) == 0 {
-		t.Fatalf("expected compact request input array, got %#v", gotBody["input"])
-	} else if last, ok := input[len(input)-1].(map[string]any); !ok || last["type"] != "compaction_trigger" {
-		t.Fatalf("compact request input last item = %#v, want compaction_trigger", input[len(input)-1])
-	}
-	if _, ok := gotBody["parallel_tool_calls"]; ok {
-		t.Fatalf("compact request parallel_tool_calls should be omitted without tools, got %#v", gotBody["parallel_tool_calls"])
-	}
-	if gotBody["stream"] != true {
-		t.Fatalf("expected compact request stream=true, got %#v", gotBody["stream"])
-	}
-	for _, key := range []string{"store", "include"} {
-		if _, ok := gotBody[key]; ok {
-			t.Fatalf("compact request unexpectedly included %s: %#v", key, gotBody[key])
-		}
-	}
-	reasoning, ok := gotBody["reasoning"].(map[string]any)
-	if !ok {
-		t.Fatalf("compact request reasoning = %#v, want object", gotBody["reasoning"])
-	}
-	if got := reasoning["effort"]; got != "high" {
-		t.Fatalf("compact request reasoning.effort = %#v, want high", got)
-	}
-	if got := reasoning["summary"]; got != "auto" {
-		t.Fatalf("compact request reasoning.summary = %#v, want auto", got)
-	}
-	for _, key := range []string{"tool_choice", "max_output_tokens"} {
-		if _, ok := gotBody[key]; ok {
-			t.Fatalf("compact request unexpectedly included %s: %#v", key, gotBody[key])
-		}
-	}
-}
-
-func TestResponsesProvider_OpenAIOAuthCompactRejectsOrdinaryResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, `data: {"type":"response.output_text.delta","delta":"ordinary response"}`+"\n\n")
-		_, _ = io.WriteString(w, `data: {"type":"response.completed","response":{"id":"resp-ordinary","status":"completed","output":[]}}`+"\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	}))
-	defer server.Close()
-
-	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL+"/v1/responses")
-	r := &ResponsesProvider{provider: provider, client: server.Client()}
-	if _, err := r.Compact(
-		context.Background(),
-		accessToken,
-		"test-model",
-		"system prompt",
-		[]message.Message{{Role: "user", Content: "hello"}},
+		[]message.Message{{Role: "user", Content: "summarize the archived history"}},
 		nil,
 		128,
 		RequestTuning{},
-		nil,
-	); err == nil {
-		t.Fatal("Compact accepted an ordinary Responses message without a compaction output item")
+		func(message.StreamDelta) {},
+	)
+	if err != nil {
+		t.Fatalf("CompleteStream returned error: %v", err)
+	}
+	if resp == nil || !strings.Contains(resp.Content, "## Goal") {
+		t.Fatalf("compaction summary response = %#v, want streamed summary text", resp)
+	}
+	if gotPath != "/v1/responses" {
+		t.Fatalf("compaction request path = %q, want /v1/responses", gotPath)
+	}
+	input, ok := gotBody["input"].([]any)
+	if !ok || len(input) == 0 {
+		t.Fatalf("expected request input array, got %#v", gotBody["input"])
+	}
+	for _, item := range input {
+		if obj, ok := item.(map[string]any); ok && obj["type"] == "compaction_trigger" {
+			t.Fatalf("compaction request input contains compaction_trigger item: %#v", input)
+		}
+	}
+	if last, ok := input[len(input)-1].(map[string]any); !ok || last["type"] != "message" {
+		t.Fatalf("request input last item = %#v, want the summary user message", input[len(input)-1])
+	}
+	if got := gotHeaders.Get(headerCodexBetaFeatures); strings.Contains(got, "remote_compaction_v2") {
+		t.Fatalf("compaction request %s = %q, want no remote-compaction beta feature", headerCodexBetaFeatures, got)
+	}
+	if got := gotHeaders.Get("originator"); got != openAICodexOriginator {
+		t.Fatalf("compaction request originator = %q, want %q", got, openAICodexOriginator)
+	}
+	if gotBody["instructions"] != "system prompt" {
+		t.Fatalf("expected instructions=system prompt, got %#v", gotBody["instructions"])
 	}
 }
 

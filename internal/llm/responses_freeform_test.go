@@ -823,37 +823,6 @@ func TestResponsesParallelToolCallsWithCustomTool(t *testing.T) {
 	})
 }
 
-func TestCompactParallelToolCalls(t *testing.T) {
-	custom := []responsesTool{{Type: "custom", Name: "apply_patch", Format: &responsesToolFormat{}}}
-	plain := []responsesTool{{Type: "function", Name: "apply_patch", Parameters: map[string]any{}}}
-
-	t.Run("custom_keeps_omit", func(t *testing.T) {
-		// A custom (freeform) tool is not a reason to force serial emission:
-		// concurrency is decided by the local tool pipeline, not the wire.
-		if got := compactParallelToolCalls(custom, nil); got != nil {
-			t.Fatalf("compactParallelToolCalls(custom, nil) = %v, want nil (omit)", got)
-		}
-	})
-	t.Run("explicit_wins", func(t *testing.T) {
-		if got := compactParallelToolCalls(custom, new(true)); got == nil || !*got {
-			t.Fatalf("compactParallelToolCalls(custom, true) = %v, want true", got)
-		}
-		if got := compactParallelToolCalls(plain, new(false)); got == nil || *got {
-			t.Fatalf("compactParallelToolCalls(function, false) = %v, want false", got)
-		}
-	})
-	t.Run("plain_function_keeps_omit", func(t *testing.T) {
-		if got := compactParallelToolCalls(plain, nil); got != nil {
-			t.Fatalf("compactParallelToolCalls(function, nil) = %v, want nil (omit)", got)
-		}
-	})
-	t.Run("no_tools_omits", func(t *testing.T) {
-		if got := compactParallelToolCalls(nil, nil); got != nil {
-			t.Fatalf("compactParallelToolCalls(nil, nil) = %v, want nil", got)
-		}
-	})
-}
-
 // TestApplyPatchCompatMerge exercises the three-state merge used by both the
 // freeform decision and the agent tool-surface policy.
 func TestApplyPatchCompatMerge(t *testing.T) {

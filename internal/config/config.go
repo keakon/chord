@@ -396,8 +396,6 @@ const (
 
 	OAuthProfileOpenAICodex       = "openai_codex"
 	ProviderPresetCodex           = "codex"
-	CompactionPresetGeneric       = "generic"
-	CompactionPresetCodex         = "codex"
 	CompactionProfileAuto         = "auto"
 	CompactionProfileContinuation = "continuation"
 	CompactionProfileArchival     = "archival"
@@ -1446,7 +1444,6 @@ func unknownFieldErrorAt(keyNode *yaml.Node, target string) string {
 // input-budget reservation used by auto-compaction / oversize recovery.
 type CompactionConfig struct {
 	Threshold float64 `json:"threshold,omitempty" yaml:"threshold,omitempty"`
-	Preset    string  `json:"preset,omitempty" yaml:"preset,omitempty"`
 	Profile   string  `json:"profile,omitempty" yaml:"profile,omitempty"`
 	Reserved  int     `json:"reserved,omitempty" yaml:"reserved,omitempty"`
 	ModelPool string  `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
