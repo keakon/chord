@@ -2065,7 +2065,8 @@ func gitSubcommand(literal []string) (string, bool) {
 			arg == "--no-replace-objects" || arg == "--literal-pathspecs" ||
 			arg == "--no-optional-locks" || strings.HasPrefix(arg, "--git-dir=") ||
 			strings.HasPrefix(arg, "--work-tree=") || strings.HasPrefix(arg, "--namespace=") ||
-			strings.HasPrefix(arg, "--exec-path="):
+			strings.HasPrefix(arg, "--exec-path=") ||
+			(len(arg) > 2 && (strings.HasPrefix(arg, "-C") || strings.HasPrefix(arg, "-c"))):
 			i++
 		default:
 			return "", false

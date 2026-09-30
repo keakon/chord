@@ -352,6 +352,11 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// capture also keeps the snapshot_at label and the deadline remaining
 	// consistent with the moment the states were read.
 	summaryText = ensureActiveBackgroundJobSnapshot(summaryText, backgroundObjects, jobSnapshotAt)
+	// These bounded machine sections describe the archived work and the
+	// repository at build time. Later observations take precedence.
+	summaryText = applyCheckpointMachineState(summaryText, headSnapshot, buildCheckpointRepositoryState(ctx, a.workDir()), func(text string) int {
+		return estimateMessageTokens(a.ctxMgr, message.Message{Role: message.RoleUser, Content: text})
+	})
 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

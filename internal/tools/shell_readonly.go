@@ -98,7 +98,7 @@ type shellWordValue struct {
 const shellUnexpandedLitChars = "\\*?[{}"
 
 // evalShellWordValue recovers a word's exact value without using Word.Lit,
-// which returns "" for quoted literals and truncates LiteralArgs.
+// which returns "" for quoted literals.
 func evalShellWordValue(word *syntax.Word) shellWordValue {
 	if word == nil || len(word.Parts) == 0 {
 		return shellWordValue{Static: false}

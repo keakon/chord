@@ -427,7 +427,7 @@ func TestE2EModelDrivenCheckpointRerendersDeclaredEvidenceRefs(t *testing.T) {
 	snapshot := a.ctxMgr.Snapshot()
 	req := e2eCheckpointRequest("implement the carry fix", []string{"d1: keep refs resolvable"}, nil, []string{packedID, liveID}, "impl", "candidate", "provisional")
 	bundle := modelDrivenBarrierSnapshot{snapshot: snapshot, sessionDir: sessionDir, evidenceItems: []evidenceItem{packed, live}}
-	content, _ := a.newModelDrivenCheckpointBuilder(bundle, snapshot, 1, req).render("")
+	content, _ := a.newModelDrivenCheckpointBuilder(t.Context(), bundle, snapshot, 1, req).render("")
 
 	meta := parseCheckpointEvidencePackMetadata(content)
 	if got := meta[packedID].kind; got != evidenceToolError {
@@ -481,7 +481,7 @@ func TestE2EModelDrivenCheckpointRerendersUnclassifiedCarriedRef(t *testing.T) {
 		CheckpointKind:  "provisional",
 	}}
 	bundle := modelDrivenBarrierSnapshot{snapshot: snapshot, sessionDir: sessionDir}
-	content, _ := a.newModelDrivenCheckpointBuilder(bundle, snapshot, len(snapshot), req).render("")
+	content, _ := a.newModelDrivenCheckpointBuilder(t.Context(), bundle, snapshot, len(snapshot), req).render("")
 
 	meta, ok := parseCheckpointEvidencePackMetadata(content)[carriedRef]
 	if !ok {

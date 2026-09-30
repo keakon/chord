@@ -5,6 +5,28 @@ import (
 	"testing"
 )
 
+func TestAnalyzeShellCommandPreservesStaticQuotedArgs(t *testing.T) {
+	for _, tc := range []struct {
+		command string
+		args    []string
+	}{
+		{`git -C "sample repo" commit -m 'sample subject'`, []string{"git", "-C", "sample repo", "commit", "-m", "sample subject"}},
+		{`git -C "" commit`, []string{"git", "-C", "", "commit"}},
+		{`git -C "$repo" commit`, []string{"git", "-C"}},
+		{`git -C repo* commit`, []string{"git", "-C"}},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			analysis, err := AnalyzeShellCommand(tc.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(analysis.Subcommands) != 1 || !reflect.DeepEqual(analysis.Subcommands[0].LiteralArgs, tc.args) {
+				t.Fatalf("subcommands = %#v, want args=%#v", analysis.Subcommands, tc.args)
+			}
+		})
+	}
+}
+
 func TestAnalyzeShellCommandExtractsCompoundSubcommands(t *testing.T) {
 	analysis, err := AnalyzeShellCommand("echo foo && rm bar")
 	if err != nil {

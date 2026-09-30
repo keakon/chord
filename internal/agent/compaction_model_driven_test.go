@@ -387,7 +387,7 @@ func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
 		maxTokens:             a.ctxMgr.GetMaxTokens(),
 		prepareReducedRequest: a.compactionReductionScratch().prepareMessagesForLLM,
 	}
-	reason, skip, _ := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(bundle, snapshot, len(snapshot), req))
+	reason, skip, _ := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(t.Context(), bundle, snapshot, len(snapshot), req))
 	if !skip {
 		t.Fatal("tiny context must be skipped by the low-gain gate")
 	}
@@ -1012,7 +1012,7 @@ func TestModelDrivenPreflightReusesLastPreparedSurface(t *testing.T) {
 		Args:       tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"},
 	}
 	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
-	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(bundle, snapshot, len(snapshot), req))
+	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(t.Context(), bundle, snapshot, len(snapshot), req))
 	if skip {
 		t.Fatalf("gate must pass on the reused baseline, got skip reason %q", reason)
 	}
@@ -1043,7 +1043,7 @@ func TestModelDrivenPreflightFallsBackToScratchWhenHeadChanged(t *testing.T) {
 		Args:       tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"},
 	}
 	bundle := a.captureModelDrivenBarrierSnapshot(snapshot)
-	_, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(bundle, snapshot, len(snapshot), req))
+	_, skip, preflight := a.modelDrivenLowGainPreflight(bundle, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(t.Context(), bundle, snapshot, len(snapshot), req))
 	if skip {
 		t.Fatal("fixture must pass the gate")
 	}
@@ -1060,7 +1060,7 @@ func TestModelDrivenPreflightFallsBackToScratchWhenHeadChanged(t *testing.T) {
 		postResetFixedRequestTokens: 4000,
 		archiveMeta:                 a.captureCompactionArchiveMeta(),
 	}
-	_, skip2, preflight2 := a.modelDrivenLowGainPreflight(bundleNoPrep, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(bundleNoPrep, snapshot, len(snapshot), req))
+	_, skip2, preflight2 := a.modelDrivenLowGainPreflight(bundleNoPrep, len(snapshot), snapshot, a.newModelDrivenCheckpointBuilder(t.Context(), bundleNoPrep, snapshot, len(snapshot), req))
 	if skip2 {
 		t.Fatal("fixture must pass the gate without a prepared surface")
 	}
@@ -1113,7 +1113,7 @@ func TestModelDrivenPreflightRecordsCacheRebuildCostWithoutSubtracting(t *testin
 		ToolCallID: "cc-1",
 		Args:       tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"},
 	}
-	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, 4, snapshot, a.newModelDrivenCheckpointBuilder(bundle, snapshot, 4, req))
+	reason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, 4, snapshot, a.newModelDrivenCheckpointBuilder(t.Context(), bundle, snapshot, 4, req))
 	if skip {
 		t.Fatalf("gate must pass on raw savings, got skip reason %q", reason)
 	}
@@ -1513,7 +1513,7 @@ func TestModelDrivenCheckpointRenderReusesBuilderAndAddsExportedArchive(t *testi
 	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "keep going", NextStep: "continue"}}
 	evidence := []evidenceItem{{Kind: evidenceToolError, Title: "Go build failure in internal/agent", Excerpt: "undefined: foo", Priority: 95, Sequence: 1}}
 	bundle := modelDrivenBarrierSnapshot{snapshot: snapshot, sessionDir: sessionDir, evidenceItems: evidence}
-	builder := a.newModelDrivenCheckpointBuilder(bundle, snapshot, 2, req)
+	builder := a.newModelDrivenCheckpointBuilder(t.Context(), bundle, snapshot, 2, req)
 
 	preflightContent, preflightStats := builder.render("")
 	exported, _, _, err := a.exportCompactionHistory(snapshot[:2], 1, evidenceItemTopics(filterCompactionEvidenceForArchival(evidence)), a.captureCompactionArchiveMeta())

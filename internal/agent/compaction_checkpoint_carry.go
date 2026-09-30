@@ -79,6 +79,10 @@ func latestPriorCheckpointStrippedBody(messages []message.Message) string {
 		// and omitted when nothing is unsettled, so carrying the previous block
 		// forward would leave two blocks, one of them stale.
 		body = stripRuntimeRecoveryStateSection(body)
+		// The current checkpoint re-extracts these machine snapshots. Carrying
+		// them again would duplicate outdated repository state and worklog rows.
+		body = ensureCheckpointWorklogSection(body, "")
+		body = ensureCheckpointRepositoryStateSection(body, "")
 		// The strip above can remove the only typed block of a usage-driven
 		// checkpoint, whose machine state lives inside the carried appendix it
 		// replaced. The typed state is machine-carryable and must keep

@@ -76,11 +76,18 @@ func AnalyzeShellCommand(command string) (ShellAnalysis, error) {
 			}
 			literalArgs := make([]string, 0, len(n.Args))
 			for _, word := range n.Args {
+				// Keep the common unquoted path allocation-free. Quoted words
+				// use the shared static evaluator; expansions stop the prefix.
 				literal := word.Lit()
-				if literal == "" {
+				if literal != "" && !strings.ContainsAny(literal, shellUnexpandedLitChars) {
+					literalArgs = append(literalArgs, literal)
+					continue
+				}
+				value := evalShellWordValue(word)
+				if !value.Static {
 					break
 				}
-				literalArgs = append(literalArgs, literal)
+				literalArgs = append(literalArgs, value.Value)
 			}
 			subcommands = append(subcommands, ShellSubcommand{
 				Source:        source,

@@ -2467,6 +2467,8 @@ func TestModelDrivenContextPromptBlockInjectedWhenEnabled(t *testing.T) {
 		"refresh existing task notes only when material state changed and writing is permitted",
 		"reconcile stale pending items with results already received",
 		"Notes are recovery aids, not proof",
+		"Checkpoint worklogs and repository sections are historical snapshots",
+		"do not rewrite notes solely to mirror todo status, the current HEAD, a commit, or a final completion banner",
 	} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("block must mention %q, got:\n%s", want, block)

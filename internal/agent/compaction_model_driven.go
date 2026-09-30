@@ -175,6 +175,10 @@ type modelDrivenBarrierSnapshot struct {
 	// captured on the event loop at the barrier (exportCompactionHistory runs
 	// in the worker and reads only this bundle).
 	archiveMeta compactionArchiveMeta
+	// workDir is the checkout the checkpoint records repository state for,
+	// captured on the event loop at the barrier so the worker's build-time git
+	// probe never reads live workdir state.
+	workDir string
 	// lastPreparedTurnID / lastPreparedSource / lastPreparedPrefix are the
 	// most recent request surface this turn actually sent to the provider
 	// (rememberPreparedLLMRequest): the reduced prefix and the original source
@@ -976,6 +980,7 @@ func (a *MainAgent) captureModelDrivenBarrierSnapshot(snapshot []message.Message
 		calibratedRatio:                      a.ctxMgr.CalibratedRatio(),
 		retainRecentTokens:                   a.effectiveCompactionRetainRecentTokens(),
 		archiveMeta:                          a.captureCompactionArchiveMeta(),
+		workDir:                              a.workDir(),
 		lastPreparedTurnID:                   lastPreparedTurnID,
 		lastPreparedSource:                   lastPreparedSource,
 		lastPreparedPrefix:                   lastPreparedPrefix,
@@ -1266,7 +1271,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	// Low-gain preflight BEFORE history export. A skip here must not produce
 	// orphan history-*.md / metadata / backup files. The preflight stats ride
 	// on the returned draft so the event-loop settlement records them once.
-	checkpointBuilder := a.newModelDrivenCheckpointBuilder(bundle, snapshot, headSplit, req)
+	checkpointBuilder := a.newModelDrivenCheckpointBuilder(ctx, bundle, snapshot, headSplit, req)
 	skipReason, skip, preflight := a.modelDrivenLowGainPreflight(bundle, headSplit, snapshot, checkpointBuilder)
 	if skip {
 		return modelDrivenSkipDraft(planID, target, skipReason, modelDrivenSkipReasonLowGain, bundle.currentRequestBatch, &preflight), nil
@@ -1630,17 +1635,23 @@ type modelDrivenCheckpointBuilder struct {
 }
 
 // newModelDrivenCheckpointBuilder performs the one-time work for a draft's
-// checkpoint renders. All inputs come from the immutable barrier snapshot.
-func (a *MainAgent) newModelDrivenCheckpointBuilder(bundle modelDrivenBarrierSnapshot, snapshot []message.Message, headSplit int, req *modelDrivenCheckpointRequest) *modelDrivenCheckpointBuilder {
+// checkpoint renders. All inputs come from the immutable barrier snapshot;
+// ctx bounds the build-time repository probe. The runtime-owned machine
+// sections (worklog and repository state) are applied here so both renders of
+// one draft share them.
+func (a *MainAgent) newModelDrivenCheckpointBuilder(ctx context.Context, bundle modelDrivenBarrierSnapshot, snapshot []message.Message, headSplit int, req *modelDrivenCheckpointRequest) *modelDrivenCheckpointBuilder {
 	historyChain, historyMetas, err := listCheckpointHistoryReferences(bundle.sessionDir, "")
 	if err != nil {
 		log.Warnf("model-driven checkpoint: list history references error=%v", err)
 	}
 	headSnapshot := snapshot[:headSplit]
+	summaryText := applyCheckpointMachineState(a.buildModelDrivenCheckpointSummary(bundle, snapshot, headSplit, req), headSnapshot, buildCheckpointRepositoryState(ctx, bundle.workDir), func(text string) int {
+		return bundle.estimateTokens([]message.Message{{Role: message.RoleUser, Content: text}})
+	})
 	return &modelDrivenCheckpointBuilder{
 		bundle:        bundle,
 		req:           req,
-		summaryText:   a.buildModelDrivenCheckpointSummary(bundle, snapshot, headSplit, req),
+		summaryText:   summaryText,
 		evidenceItems: filterCompactionEvidenceForArchival(bundle.evidenceItems),
 		refMetadata:   checkpointEvidenceRefMetadata(bundle, headSnapshot),
 		// The newest real user messages of the archived head (and any dangling
