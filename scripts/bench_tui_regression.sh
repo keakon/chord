@@ -29,7 +29,7 @@ SSE_BENCH_PATTERN='^(BenchmarkSSEParseWithCallbackCumulative|BenchmarkSSEParseWi
 TRUNCATE_BENCH_PATTERN='^BenchmarkTruncateStringHeadTail$'
 SESSION_BENCH_PATTERN='^BenchmarkExportedSessionToMessagesLargeSession$'
 RECOVERY_BENCH_PATTERN='^(BenchmarkLoadMessagesLargeSession.*|BenchmarkLoadMessagesBySize)$'
-TOOLS_BENCH_PATTERN='^(BenchmarkBuildApplyPatchPlan(LargeFile|MultiFile)|BenchmarkPlanExactReplacementsCRLF)$'
+TOOLS_BENCH_PATTERN='^(BenchmarkBuildApplyPatchPlan(LargeFile|MultiFile)|BenchmarkPlanExactReplacementsCRLF|BenchmarkPlanExactReplacementsRecovery)$'
 
 # Paced flow benchmarks always use a fixed iteration count (never CHORD_BENCH_TIME):
 # 1x keeps the smoke scan cheap, 100x gives full mode an average worth comparing.

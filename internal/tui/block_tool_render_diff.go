@@ -373,7 +373,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	// replacement still sits in the args, so the card falls back to the same
 	// preview a failed edit renders instead of losing what changed.
 	if b.ResultDone && b.ToolName == tools.NameEdit && !b.toolResultIsError() && !b.toolResultIsCancelled() && strings.TrimSpace(displayDiff) == "" {
-		result = appendEditArgsPreview(result, b, replaceArgs, hasReplaceArgs, syntaxPath, cardWidth-4)
+		result = appendEditArgsPreview(result, b, replaceArgs, hasReplaceArgs, syntaxPath, cardWidth-4, nil)
 	}
 	if b.toolResultIsError() && b.ResultContent != "" {
 		switch b.ToolName {
@@ -392,8 +392,16 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				result = append(result, renderLSPDiagnosticsLines(applyPatchSections.diagnostics, "    ", textWrap)...)
 			}
 		case tools.NameEdit:
+			// A failed batch names its failing entries as "edits[i]:" lines;
+			// mark those preview sections ✗ and state that the whole batch was
+			// left unwritten. Matched-only entries stay unmarked — they were
+			// not applied either.
+			failed := replaceEditFailedIndexes(b.ResultContent)
+			if len(failed) > 0 {
+				result = append(result, toolFieldInline(ToolStatusErrorStyle, "Not applied", "no changes were written"))
+			}
 			if strings.TrimSpace(displayDiff) == "" {
-				result = appendEditArgsPreview(result, b, replaceArgs, hasReplaceArgs, syntaxPath, cardWidth-4)
+				result = appendEditArgsPreview(result, b, replaceArgs, hasReplaceArgs, syntaxPath, cardWidth-4, failed)
 			}
 			result = append(result, toolFieldSection(ErrorStyle, "Error"))
 			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.stripResultNotes(b.ResultContent)), "    ", textWrap)...)
@@ -615,9 +623,9 @@ func (b *Block) applyPatchDiffSectionDisplay(targets []tools.ApplyPatchDisplayTa
 
 // appendEditArgsPreview renders the requested edit when no diff is available,
 // preferring the replace args preview and falling back to the patch preview.
-func appendEditArgsPreview(result []string, b *Block, replaceArgs replaceEditArgs, hasReplaceArgs bool, syntaxPath string, width int) []string {
+func appendEditArgsPreview(result []string, b *Block, replaceArgs replaceEditArgs, hasReplaceArgs bool, syntaxPath string, width int, failed map[int]bool) []string {
 	if hasReplaceArgs {
-		return appendReplaceEditPreview(result, replaceArgs, syntaxPath, width)
+		return appendReplaceEditPreview(result, replaceArgs, syntaxPath, width, failed)
 	}
 	return appendEditPatchPreview(result, b.editPatchArgsJSON(), width)
 }
@@ -941,18 +949,24 @@ func replaceEditReplaceAllOption(args replaceEditArgs) string {
 	}
 }
 
-func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath string, width int) []string {
+func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath string, width int, failed map[int]bool) []string {
 	if len(args.Edits) > 0 {
 		// Number every batch entry so adjacent replacements stay distinct,
-		// matching the numbered fields of the confirm summary.
+		// matching the numbered fields of the confirm summary. An entry the
+		// failure report blames keeps its ✗; matched-only entries stay
+		// unmarked, since none of the batch was applied.
 		for i, edit := range args.Edits {
 			label := fmt.Sprintf("Edit %d", i+1)
 			if edit.ReplaceAll != nil && *edit.ReplaceAll {
 				label += " (replace_all=true)"
 			}
-			result = append(result, toolFieldSection(ToolResultExpandedStyle, label))
+			if failed[i] {
+				result = append(result, toolFieldSectionMarked(ToolResultExpandedStyle, ToolStatusErrorStyle, "✗", label))
+			} else {
+				result = append(result, toolFieldSection(ToolResultExpandedStyle, label))
+			}
 			edit.Edits = nil
-			result = appendReplaceEditPreview(result, edit, filePath, width)
+			result = appendReplaceEditPreview(result, edit, filePath, width, nil)
 		}
 		return result
 	}
@@ -974,6 +988,40 @@ func replaceEditPreviewLines(text string) []string {
 	// Output is intentional full content: the preview mirrors exactly what the
 	// tool applied. Do not truncate long new_string/old_string payloads.
 	return strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+}
+
+// replaceEditFailedIndexes extracts the 0-based entries a batch failure report
+// blames. The report names them on lines that open with "edits[" (the overlap
+// line names both entries); the "Remaining entries (…)" summary line does not
+// open with the token and is skipped. Returns nil when the result is not a
+// batch report.
+func replaceEditFailedIndexes(content string) map[int]bool {
+	var failed map[int]bool
+	for line := range strings.SplitSeq(content, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "edits[") {
+			continue
+		}
+		for {
+			open := strings.Index(line, "edits[")
+			if open < 0 {
+				break
+			}
+			line = line[open+len("edits["):]
+			end := strings.IndexByte(line, ']')
+			if end <= 0 {
+				break
+			}
+			if index, err := strconv.Atoi(line[:end]); err == nil {
+				if failed == nil {
+					failed = make(map[int]bool)
+				}
+				failed[index] = true
+			}
+			line = line[end+1:]
+		}
+	}
+	return failed
 }
 
 func (b *Block) editPatchArgsJSON() string {

@@ -51,9 +51,9 @@ func fmtNewlineCase(newline string, batch bool) string {
 
 func TestBatchEditDoesNotNormalizeMixedFile(t *testing.T) {
 	content := "first\r\nsecond\n"
-	got, _, _, err := planExactReplacements(content, []textReplacement{{OldString: "first\r\n", NewString: new("changed\r\n")}})
-	if err != nil || got != "changed\r\nsecond\n" {
-		t.Fatalf("got %q, err %v", got, err)
+	plan, err := planExactReplacements(content, []textReplacement{{OldString: "first\r\n", NewString: new("changed\r\n")}})
+	if err != nil || plan.content != "changed\r\nsecond\n" {
+		t.Fatalf("got %q, err %v", plan.content, err)
 	}
 }
 

@@ -20,7 +20,7 @@ func BenchmarkPlanExactReplacementsCRLF(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		if _, _, _, err := planExactReplacements(source, edits); err != nil {
+		if _, err := planExactReplacements(source, edits); err != nil {
 			b.Fatal(err)
 		}
 	}

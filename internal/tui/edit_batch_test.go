@@ -14,7 +14,7 @@ func TestEditBatchPreviewAndCopyIncludeEveryReplacement(t *testing.T) {
 	if !ok {
 		t.Fatal("batch arguments not recognized")
 	}
-	preview := stripANSI(strings.Join(appendReplaceEditPreview(nil, args, "sample.go", 100), "\n"))
+	preview := stripANSI(strings.Join(appendReplaceEditPreview(nil, args, "sample.go", 100, nil), "\n"))
 	copyText := fileDiffToolCallMarkdownContent(&Block{ToolName: tools.NameEdit, Content: raw})
 	for _, text := range []string{"firstOld", "firstNew", "secondOld", "secondNew"} {
 		if !strings.Contains(preview, text) || !strings.Contains(copyText, text) {
@@ -75,5 +75,64 @@ func TestEditBatchHeaderNamesReplaceAllEntries(t *testing.T) {
 	}).Render(100, ""), "\n"))
 	if strings.Contains(plain, "replace_all") {
 		t.Fatalf("batch without replace_all shows the option; got:\n%s", plain)
+	}
+}
+
+// A failed batch card states that nothing was written and marks only the
+// entries the report blames: 0-based "edits[i]" indexes map to the 1-based
+// "Edit N" sections, matched-only entries stay unmarked, and no entry reads as
+// applied.
+func TestEditBatchFailureMarksOnlyFailedEntries(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	const raw = `{"path":"sample.go","edits":[{"old_string":"firstOld","new_string":"firstNew"},{"old_string":"failedOld","new_string":"failedNew"},{"old_string":"thirdOld","new_string":"thirdNew"}]}`
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"sample.go"}`,
+		RawArgs:       raw,
+		ResultContent: "No changes were written (batch edits are atomic).\nedits[1]: old_string not found in the original file\nRemaining entries (edits[0,2]) passed per-entry matching but were not applied.\nFix the failing entries above and resubmit the complete batch.",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+	}
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if !strings.Contains(plain, "Not applied: no changes were written") {
+		t.Fatalf("card lacks the not-applied status:\n%s", plain)
+	}
+	if !strings.Contains(plain, "✗ Edit 2") {
+		t.Fatalf("failing entry lacks the ✗ mark:\n%s", plain)
+	}
+	for _, unmarked := range []string{"✗ Edit 1", "✗ Edit 3"} {
+		if strings.Contains(plain, unmarked) {
+			t.Fatalf("matched-only entry marked %q:\n%s", unmarked, plain)
+		}
+	}
+	if strings.Contains(plain, "✓") {
+		t.Fatalf("batch failure card shows an applied mark:\n%s", plain)
+	}
+}
+
+// An error result that is not a batch failure report carries no ✗/not-applied
+// decoration: cards restored from other error shapes keep the plain preview.
+func TestEditBatchUnstructuredErrorKeepsPlainPreview(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameEdit,
+		Content:       `{"path":"sample.go"}`,
+		RawArgs:       `{"path":"sample.go","edits":[{"old_string":"a","new_string":"b"},{"old_string":"c","new_string":"d"}]}`,
+		ResultContent: "old_string not found in file, even after punctuation/whitespace tolerance.",
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultDone:    true,
+	}
+	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.Contains(plain, "Not applied") || strings.Contains(plain, "✗ Edit") {
+		t.Fatalf("unstructured error gained failure decoration:\n%s", plain)
+	}
+	for _, want := range []string{"Edit 1", "Edit 2"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("preview lacks %q:\n%s", want, plain)
+		}
 	}
 }

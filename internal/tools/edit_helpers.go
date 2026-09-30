@@ -1233,6 +1233,8 @@ func bandedEditDistance(a, b string, maxDist int) (int, bool) {
 	return prev[len(rb)], true
 }
 
+const maxToolLineRunes = 120
+
 // truncateToolLine caps a single file/expected line quoted into a mismatch
 // diagnostic, so a pathological line cannot inflate the error message. edit and
 // apply_patch share it: the same failure quotes the same way whichever tool the
@@ -1240,12 +1242,11 @@ func bandedEditDistance(a, b string, maxDist int) (int, bool) {
 // text is always quoted because trailing whitespace and empty lines are exactly
 // the differences that make a retry fail when shown bare.
 func truncateToolLine(s string) string {
-	const max = 120
 	r := []rune(s)
-	if len(r) <= max {
+	if len(r) <= maxToolLineRunes {
 		return quoteToolLine(s)
 	}
-	return quoteToolLine(string(r[:max])) + "..."
+	return quoteToolLine(string(r[:maxToolLineRunes])) + "..."
 }
 
 // quoteToolLine quotes s for the closest-match hint. strconv.Quote already

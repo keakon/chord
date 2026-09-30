@@ -192,7 +192,7 @@ Use `edits` for disjoint changes in one call:
 {"path":"server.go","edits":[{"old_string":"const port = 8080","new_string":"const port = 3000"},{"old_string":"const retries = 2","new_string":"const retries = 3"}]}
 ```
 
-Each entry has `old_string`, `new_string`, and optional `replace_all`. Do not combine `edits` with top-level replacement fields. All entries match the original file, so one entry cannot target text introduced by another. Batch matching is exact after argument character cleaning and line-ending adaptation; it does not use trailing-newline or punctuation/whitespace tolerance. Overlapping matches, missing text, ambiguous matches without `replace_all`, or encoding failures reject the entire batch before writing. A successful batch writes once and reports diagnostics once.
+Each entry has `old_string`, `new_string`, and optional `replace_all`. Do not combine `edits` with top-level replacement fields. Entries that request changes match the original file, so one entry cannot target text introduced by another. Batch matching is exact after argument character cleaning and line-ending adaptation; it does not use trailing-newline or punctuation/whitespace tolerance. Any failing entry rejects the whole batch before writing, and the result names every failing entry with its reason in one report, so fix all of them and resend the complete batch. Entries whose `old_string` and `new_string` are identical request no change: they are skipped without checking whether that text exists in the file and never counted as replacements, and a batch with nothing to change writes nothing and reports no changes. A successful batch writes once and reports diagnostics once.
 
 ### Example: Single Replacement
 
@@ -221,7 +221,7 @@ Each entry has `old_string`, `new_string`, and optional `replace_all`. Do not co
 - **"old_string found N times"**: Multiple matches found. Either:
   - Add more context to make it unique
   - Set `replace_all: true` if you want to replace all occurrences
-- **"old_string and new_string are identical"**: No change needed.
+- **"old_string and new_string are identical"**: A single edit reports this as an error. A batch skips the entry and lists it as skipped; a batch with no text change reports no changes and writes nothing.
 
 When the same target file repeatedly fails approximate matching on `edit`/`apply_patch`, the agent appends a note to the model-visible result (from the second failure on) telling it to read the target range fresh, or switch to `write` for a whole-block replacement, instead of retyping the same old text from memory. The note does not appear in the UI, and any successful result or a new turn resets the count.
 

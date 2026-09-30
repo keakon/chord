@@ -87,7 +87,7 @@ func (t EditTool) Description() string {
 	// description keeps only the tool's own contract.
 	return "Perform exact string replacement in an existing file. " +
 		"Line breaks adapt to the file: with uniform CRLF or CR line endings, LF text takes that ending; with mixed line endings, each line break in old_string matches any line ending and the replacement takes the matched block's. " +
-		"For several disjoint changes in one file, use edits instead of separate calls. Every batch entry matches the original file exactly after line-ending adaptation; overlaps are rejected and all entries are validated before writing. Do not mix edits with top-level replacement fields. " +
+		"For several disjoint changes in one file, use edits instead of separate calls: entries that request changes match the original file exactly after line-ending adaptation; overlaps are rejected, and all such entries must pass validation before writing. One failed batch reports all failing entries at once; fix them and resubmit the complete batch. Batch entries whose old_string and new_string are identical are skipped without verifying their text exists and never counted as replacements; a batch that requests no text change reports no changes and writes nothing. A single edit with identical strings returns an error. Do not mix edits with top-level replacement fields. " +
 		"Prefer the smallest unique 2-4 line block instead of a large stale context block; re-read before retrying after any mismatch. Replaces one occurrence by default; set replace_all to replace every occurrence."
 }
 

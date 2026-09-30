@@ -332,6 +332,14 @@ func toolFieldSection(style lipgloss.Style, label string) string {
 	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(style, label)
 }
 
+// toolFieldSectionMarked renders a labelled section row with a leading status
+// mark: "  ↳ ✗ Edit 2:". The mark keeps the status colour and the label the
+// section style, instead of nesting one style's ANSI inside the other.
+func toolFieldSectionMarked(style, markStyle lipgloss.Style, mark, label string) string {
+	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) +
+		markStyle.Render(mark) + " " + style.Bold(true).Render(label+":")
+}
+
 // toolFieldInline renders a labelled row whose value shares the line:
 // "  ↳ Kind: progress". An empty value degrades to a section row instead of
 // printing a dangling colon. Callers sanitize value themselves.
