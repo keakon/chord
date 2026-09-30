@@ -692,4 +692,8 @@ type Response struct {
 	// transport for connection-scoped previous_response_id incremental requests.
 	ProviderResponseID string
 	RequestBatch       uint64
+	// Hosted captures provider-side (hosted) tool activity when the request
+	// declared a hosted tool. In-memory only: it is never persisted or
+	// replayed (see HostedObservation).
+	Hosted *HostedObservation
 }

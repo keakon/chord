@@ -319,6 +319,10 @@ func responseHasUsableOutput(resp *message.Response) bool {
 	if resp == nil {
 		return false
 	}
+	if resp.Hosted != nil && (len(resp.Hosted.Calls) > 0 || len(resp.Hosted.Items) > 0 || resp.Hosted.RequiresApproval) {
+		// Hosted output must reach the backend for validation and continuation.
+		return true
+	}
 	if hasVisibleContent(resp.Content) || len(resp.ToolCalls) > 0 {
 		return true
 	}
@@ -884,6 +888,20 @@ func (c *Client) completeStreamTarget(
 			pendingRollback = ""
 		}
 		normalizeResponseUsage(t.provider, resp)
+		if requestTuning.HostedTool != nil && resp != nil && resp.Hosted != nil && resp.Hosted.RequiresApproval {
+			// Approval is an execution boundary even if its stream ends early.
+			// Let the hosted backend surface it; never retry or switch credentials.
+			updateSuccessfulCallStatus(status, t)
+			result.resp = resp
+			return result, lastInputTokens, nil
+		}
+		if ht := requestTuning.HostedTool; ht != nil && !ht.RetrySafe && ctx.Err() == nil && ((err != nil && !hostedRequestRejected(err)) || (resp != nil && resp.StopReason == "interrupted")) {
+			if err == nil {
+				err = fmt.Errorf("hosted stream interrupted")
+			}
+			updateSuccessfulCallStatus(status, t)
+			return result, lastInputTokens, &HostedOutcomeUnknownError{Cause: err, Response: resp}
+		}
 		if err == nil {
 			if resp != nil && modelcompat.IsReplayEvidenceEcho(resp.Content, targetMessages) {
 				echoErr := &ReplayEvidenceEchoError{}
@@ -1642,6 +1660,9 @@ func (c *Client) completeStreamWithRetry(
 				if IsPreservableStreamInterruption(err) {
 					pendingRollback = ""
 				}
+				if unknown, ok := errors.AsType[*HostedOutcomeUnknownError](err); ok {
+					return unknown.Response, err
+				}
 				return nil, err
 			} else {
 				if _, repeatedEcho := errors.AsType[*ReplayEvidenceEchoError](targetResult.lastErr); repeatedEcho {
@@ -1687,6 +1708,9 @@ func (c *Client) completeStreamWithRetry(
 				return nil, lastErr
 			}
 			log.Warnf("model pool exhausted with no usable keys; retrying full pool provider=%v model=%v had_request_attempt=%v error=%v", startProvider.Name(), startModelID, roundHadRequestAttempt, lastErr)
+		}
+		if startTuning.HostedTool != nil && !hostedFailureAllowsRetryRound(lastErr) {
+			return nil, lastErr
 		}
 		if isTerminalModelPoolFailureForProvider(lastErrProvider, lastErr) {
 			return nil, lastErr

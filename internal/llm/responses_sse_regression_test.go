@@ -58,7 +58,7 @@ func TestParseResponsesSSEOutOfOrderItemDoneKeepsTerminalOrder(t *testing.T) {
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}`,
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"Read","arguments":"{}"}]}}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestParseResponsesSSECustomToolCallEmitsInputDeltas(t *testing.T) {
 		if delta.Type == message.StreamDeltaToolUseDelta && delta.ToolCall != nil {
 			got = append(got, delta.ToolCall.InputText)
 		}
-	}, nil, nil, "", false)
+	}, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestParseResponsesSSEEmitsReasoningItemDeltaOnDone(t *testing.T) {
 		if delta.Type == message.StreamDeltaReasoningItem && delta.ReasoningItem != nil {
 			got = append(got, *delta.ReasoningItem)
 		}
-	}, nil, nil, "", false); err != nil {
+	}, nil, nil, "", false, false); err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
 	if len(got) != 1 {
@@ -162,7 +162,7 @@ func TestParseResponsesSSESkipsReasoningItemWithoutEncryptedContent(t *testing.T
 		if delta.Type == message.StreamDeltaReasoningItem && delta.ReasoningItem != nil {
 			got = append(got, *delta.ReasoningItem)
 		}
-	}, nil, nil, "", false); err != nil {
+	}, nil, nil, "", false, false); err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
 	if len(got) != 0 {
@@ -186,7 +186,7 @@ func TestParseResponsesSSEEmitsReasoningItemDeltaPerFinalizedItem(t *testing.T) 
 		if delta.Type == message.StreamDeltaReasoningItem && delta.ReasoningItem != nil {
 			got = append(got, delta.ReasoningItem.ID)
 		}
-	}, nil, nil, "", false); err != nil {
+	}, nil, nil, "", false, false); err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
 	want := []string{"rs_1", "rs_2"}
@@ -213,7 +213,7 @@ func TestParseResponsesSSECompletedAdoptsCleanTerminalText(t *testing.T) {
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"damaged text"}]}]}}`,
 		`{"type":"[DONE]"}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestParseResponsesSSEIncompleteAdoptsCleanTerminalText(t *testing.T) {
 		`{"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"partial clean"}]}]}}`,
 		`{"type":"[DONE]"}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestParseResponsesSSECompletedWithoutContentKeepsDeltaText(t *testing.T) {
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant"}]}}`,
 		`{"type":"[DONE]"}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestParseResponsesSSECompletedEmptyOutputTextAdoptsEmpty(t *testing.T) {
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":""}]}]}}`,
 		`{"type":"[DONE]"}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestParseResponsesSSECompletedMultiItemStructuralOrder(t *testing.T) {
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"first"}]},{"type":"message","id":"msg_2","role":"assistant","content":[{"type":"output_text","text":"second"}]}]}}`,
 		`{"type":"[DONE]"}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -308,7 +308,7 @@ func TestParseResponsesSSENoTerminalKeepsDoneCaptureAndDeltas(t *testing.T) {
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"clean head"}]}}`,
 		`{"type":"[DONE]"}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestParseResponsesSSEEventsAfterCompletedDoNotMutateContent(t *testing.T) {
 		`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":" \ufffd after"}`,
 		`{"type":"[DONE]"}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestParseResponsesSSERefusalBackfillSurvivesFlush(t *testing.T) {
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"refusal","refusal":"cannot help with that"}]}]}}`,
 		`{"type":"[DONE]"}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}

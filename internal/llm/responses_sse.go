@@ -339,16 +339,17 @@ func (s responsesPartialCompletionState) outputItemsComplete() bool {
 	return len(s.openOutputItems) == 0
 }
 
-func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCallback, collector *SSECollector, turnState *ResponsesTurnState, turnStateID string, freeform bool) (*message.Response, []responsesInputItem, error) {
+func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCallback, collector *SSECollector, turnState *ResponsesTurnState, turnStateID string, freeform bool, captureHosted bool) (response *message.Response, nativeItems []responsesInputItem, parseErr error) {
 	phaser, _ := reader.(chunkPhaser)
 	br := bufio.NewReaderSize(reader, sseInitialBufferSize)
 
 	var (
 		resp            message.Response
 		textItems       responsesItemTexts
-		toolCalls       = make(map[int]*responsesToolAccumulator) // index → accumulator
-		customItemToIdx = make(map[string]int)                    // custom tool item_id → index
-		finalizedCalls  = make(map[string]bool)                   // call_id → true; dedup against proxy replays
+		toolCalls       = make(map[int]*responsesToolAccumulator)    // index → accumulator
+		customItemToIdx = make(map[string]int)                       // custom tool item_id → index
+		finalizedCalls  = make(map[string]bool)                      // call_id → true; dedup against proxy replays
+		hostedCalls     = make(map[string]*responsesHostedCallState) // hosted item id → dedup state
 		truncated       bool
 		gotData         bool
 		sawDataLine     bool
@@ -361,6 +362,14 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		progressEvents  int64
 		providerErr     error
 	)
+	if captureHosted {
+		defer func() {
+			if parseErr != nil {
+				finalizeHostedObservation(&resp)
+				response = &resp
+			}
+		}()
+	}
 	partial.openOutputItems = make(map[int]struct{})
 	dataChunkIndex = -1
 	flushContent := func() {
@@ -395,6 +404,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 				return partialResp, partialItems, true, nil
 			}
 			outputItems = responsesFinalizeIncrementalOutputItems(outputItems, &resp, freeform)
+			finalizeHostedObservation(&resp)
 			return &resp, outputItems, true, nil
 		}
 		if len(data) == 0 {
@@ -421,6 +431,8 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 			toolCalls:         toolCalls,
 			customItemToIndex: customItemToIdx,
 			finalizedCalls:    finalizedCalls,
+			hostedCalls:       hostedCalls,
+			captureHosted:     captureHosted,
 			truncated:         &truncated,
 			outputItems:       &outputItems,
 			partial:           &partial,
@@ -560,6 +572,7 @@ func finishPartialResponsesResponse(resp *message.Response, outputItems *[]respo
 		if partialResp := markInterruptedTextResponse(resp); partialResp != nil {
 			items := responsesFinalizeIncrementalOutputItems(*outputItems, partialResp, freeform)
 			*outputItems = items
+			finalizeHostedObservation(partialResp)
 			return partialResp, items, true
 		}
 	}
@@ -578,6 +591,7 @@ func finishPartialResponsesResponse(resp *message.Response, outputItems *[]respo
 	}
 	items := responsesFinalizeIncrementalOutputItems(*outputItems, resp, freeform)
 	*outputItems = items
+	finalizeHostedObservation(resp)
 	return resp, items, true
 }
 
@@ -607,13 +621,18 @@ type responsesEventState struct {
 	toolCalls         map[int]*responsesToolAccumulator
 	customItemToIndex map[string]int // custom tool item_id → output index
 	finalizedCalls    map[string]bool
-	truncated         *bool
-	outputItems       *[]responsesInputItem
-	partial           *responsesPartialCompletionState
-	cb                StreamCallback
-	phaser            chunkPhaser
-	turnState         *ResponsesTurnState
-	turnStateID       string
+	hostedCalls       map[string]*responsesHostedCallState // hosted item id → dedup state
+	// captureHosted enables hosted-call capture: the raw item payloads are
+	// re-read from the event data only on sub-requests that declared a hosted
+	// tool, so the main conversation pays no extra decode.
+	captureHosted bool
+	truncated     *bool
+	outputItems   *[]responsesInputItem
+	partial       *responsesPartialCompletionState
+	cb            StreamCallback
+	phaser        chunkPhaser
+	turnState     *ResponsesTurnState
+	turnStateID   string
 	// freeform replays apply_patch output items in the custom_tool_call shape
 	// (raw patch text) so incremental baselines match the main history replay.
 	freeform bool
@@ -693,9 +712,22 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 				state.customItemToIndex[added.Item.ID] = addedIdx
 			}
 			maybeEmitResponsesToolStart(acc, state.cb)
+		case "web_search_call":
+			// Hosted call: captured for flattening, never turned into a client
+			// tool call. The item completes on done/the terminal payload.
 		case "reasoning":
 			if state.phaser != nil {
 				state.phaser.SetChunkTimeout(SlowPhaseChunkTimeout)
+			}
+		}
+		if state.captureHosted {
+			// A hosted call runs server-side, so the stream may be idle for a
+			// while after the item is announced.
+			if state.phaser != nil && isResponsesHostedCallType(added.Item.Type) {
+				state.phaser.SetChunkTimeout(SlowPhaseChunkTimeout)
+			}
+			if raw, ok := responsesHostedRawItem(eventData); ok {
+				recordResponsesHostedItem(state.resp, state.hostedCalls, raw, false)
 			}
 		}
 		return nil, nil, false, nil
@@ -959,6 +991,9 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			// accumulator wraps it into the canonical {patch} object at
 			// finalize (see canonicalApplyPatchArgs).
 			finalizeOneResponsesToolCall(state.toolCalls, doneIdx, state.resp, state.cb, *state.truncated, json.RawMessage(done.Item.Input), state.finalizedCalls)
+		case "web_search_call":
+			// Hosted call: captured for flattening, never turned into a client
+			// tool call.
 		case "message":
 			if state.partial != nil {
 				state.partial.textDone = true
@@ -1008,6 +1043,14 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		if state.partial != nil {
 			state.partial.markOutputItemDone(doneIdx)
 		}
+		if state.captureHosted {
+			if state.phaser != nil && isResponsesHostedCallType(done.Item.Type) {
+				state.phaser.SetChunkTimeout(DefaultChunkTimeout)
+			}
+			if raw, ok := responsesHostedRawItem(eventData); ok {
+				recordResponsesHostedItem(state.resp, state.hostedCalls, raw, true)
+			}
+		}
 		if state.phaser != nil && state.partial != nil && finishPartialResponsesResponseWouldSucceed(state.resp, *state.partial, true) {
 			state.phaser.SetTerminalDrainTimeout(TerminalDrainChunkTimeout)
 		}
@@ -1028,6 +1071,9 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		respObj := completed.Response
 		applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
 		collectResponsesOutput(state.resp, respObj.Output)
+		if state.captureHosted {
+			recordResponsesHostedOutputItems(state.resp, state.hostedCalls, eventData)
+		}
 		// applyResponsesCompletionPayload already stores the trailer's usage on
 		// state.resp.Usage when the completed payload carries it.
 		*state.outputItems = responsesOutputToInputItems(respObj.Output, state.freeform)
@@ -1046,6 +1092,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			state.resp.Content = text
 		}
 		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp, state.freeform)
+		finalizeHostedObservation(state.resp)
 		return state.resp, *state.outputItems, true, nil
 
 	case "response.incomplete":
@@ -1055,6 +1102,9 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		respObj := incomplete.Response
 		applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
+		if state.captureHosted {
+			recordResponsesHostedOutputItems(state.resp, state.hostedCalls, eventData)
+		}
 		*state.outputItems = responsesOutputToInputItems(respObj.Output, state.freeform)
 		if respObj.IncompleteDetails != nil {
 			state.resp.StopReason = "length"
@@ -1069,6 +1119,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			state.resp.Content = text
 		}
 		*state.outputItems = responsesFinalizeIncrementalOutputItems(*state.outputItems, state.resp, state.freeform)
+		finalizeHostedObservation(state.resp)
 		return state.resp, *state.outputItems, true, nil
 	}
 	return nil, nil, false, nil

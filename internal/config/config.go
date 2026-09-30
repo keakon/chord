@@ -53,24 +53,25 @@ type Config struct {
 	DesktopNotificationForeground *bool `json:"desktop_notification_foreground,omitempty" yaml:"desktop_notification_foreground,omitempty"`
 	// PreventSleep, when true, prevents macOS idle sleep while any agent is active (non-idle). YAML: prevent_sleep: true
 	// Only effective in the local TUI.
-	PreventSleep        *bool                      `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
-	KeyMap              map[string][]string        `json:"keymap,omitempty" yaml:"keymap,omitempty"`                             // custom key bindings (snake_case action → key list)
-	Commands            map[string]string          `json:"commands,omitempty" yaml:"commands,omitempty"`                         // custom slash commands: "/cmd" → text to send as message
-	IMESwitchTarget     string                     `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"`       // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
-	LogLevel            string                     `json:"log_level" yaml:"log_level"`                                           // log verbosity: "debug", "info" (default), "warn", "error"
-	Paths               PathsConfig                `json:"paths" yaml:"paths,omitempty"`                                         // user-level state/cache/logs path overrides
-	Maintenance         MaintenanceConfig          `json:"maintenance" yaml:"maintenance,omitempty"`                             // optional cleanup/status checks
-	LSP                 LSPConfig                  `json:"lsp" yaml:"lsp"`                                                       // LSP server config
-	Diagnostics         DiagnosticsConfig          `json:"diagnostics" yaml:"diagnostics,omitempty"`                             // post-tool diagnostics config
-	MCP                 MCPConfig                  `json:"mcp,omitempty" yaml:"mcp,omitempty"`                                   // MCP server configs
-	Hooks               HookConfig                 `json:"hooks" yaml:"hooks,omitempty"`                                         // lifecycle hook configs
-	MaxOutputTokens     int                        `json:"max_output_tokens" yaml:"max_output_tokens"`                           // global output token cap (0 = use DefaultOutputTokenMax)
-	StreamRetryRounds   int                        `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                       // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
-	Proxy               string                     `json:"proxy,omitempty" yaml:"proxy,omitempty"`                               // global proxy URL (http/https/socks5), empty = no proxy
-	Memory              MemoryConfig               `json:"memory" yaml:"memory,omitempty"`                                       // project memory auto-extraction
-	WebFetch            WebFetchConfig             `json:"web_fetch" yaml:"web_fetch,omitempty"`                                 // WebFetch-specific options
-	Worktree            WorktreeConfig             `json:"worktree" yaml:"worktree,omitempty"`                                   // git worktree integration options
-	ThinkingTranslation *ThinkingTranslationConfig `json:"thinking_translation,omitempty" yaml:"thinking_translation,omitempty"` // optional thinking translation enhancement
+	PreventSleep        *bool                       `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
+	KeyMap              map[string][]string         `json:"keymap,omitempty" yaml:"keymap,omitempty"`                             // custom key bindings (snake_case action → key list)
+	Commands            map[string]string           `json:"commands,omitempty" yaml:"commands,omitempty"`                         // custom slash commands: "/cmd" → text to send as message
+	IMESwitchTarget     string                      `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"`       // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
+	LogLevel            string                      `json:"log_level" yaml:"log_level"`                                           // log verbosity: "debug", "info" (default), "warn", "error"
+	Paths               PathsConfig                 `json:"paths" yaml:"paths,omitempty"`                                         // user-level state/cache/logs path overrides
+	Maintenance         MaintenanceConfig           `json:"maintenance" yaml:"maintenance,omitempty"`                             // optional cleanup/status checks
+	LSP                 LSPConfig                   `json:"lsp" yaml:"lsp"`                                                       // LSP server config
+	Diagnostics         DiagnosticsConfig           `json:"diagnostics" yaml:"diagnostics,omitempty"`                             // post-tool diagnostics config
+	MCP                 MCPConfig                   `json:"mcp,omitempty" yaml:"mcp,omitempty"`                                   // MCP server configs
+	Hooks               HookConfig                  `json:"hooks" yaml:"hooks,omitempty"`                                         // lifecycle hook configs
+	MaxOutputTokens     int                         `json:"max_output_tokens" yaml:"max_output_tokens"`                           // global output token cap (0 = use DefaultOutputTokenMax)
+	StreamRetryRounds   int                         `json:"stream_retry_rounds" yaml:"stream_retry_rounds"`                       // hard cap on public LLM retry rounds (0 = keep retrying until success/cancel)
+	Proxy               string                      `json:"proxy,omitempty" yaml:"proxy,omitempty"`                               // global proxy URL (http/https/socks5), empty = no proxy
+	Memory              MemoryConfig                `json:"memory" yaml:"memory,omitempty"`                                       // project memory auto-extraction
+	WebFetch            WebFetchConfig              `json:"web_fetch" yaml:"web_fetch,omitempty"`                                 // WebFetch-specific options
+	HostedTools         map[string]HostedToolConfig `json:"hosted_tools,omitempty" yaml:"hosted_tools,omitempty"`                 // provider-side (hosted) tool catalog: local tool surface + per-family wire declarations
+	Worktree            WorktreeConfig              `json:"worktree" yaml:"worktree,omitempty"`                                   // git worktree integration options
+	ThinkingTranslation *ThinkingTranslationConfig  `json:"thinking_translation,omitempty" yaml:"thinking_translation,omitempty"` // optional thinking translation enhancement
 }
 
 const (
@@ -660,6 +661,7 @@ type ModelCompatConfig struct {
 	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
 	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
 	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitempty" yaml:"apply_patch,omitempty"`
+	HostedTools         *[]string                        `json:"hosted_tools,omitempty" yaml:"hosted_tools,omitempty"` // hosted_tools catalog entries enabled for this target
 }
 
 // ProviderCompatConfig contains provider-level compatibility toggles. Model
@@ -674,6 +676,7 @@ type ProviderCompatConfig struct {
 	Responses           *ResponsesCompatConfig           `json:"responses,omitempty" yaml:"responses,omitempty"`
 	ChatCompletions     *ChatCompletionsCompatConfig     `json:"chat_completions,omitempty" yaml:"chat_completions,omitempty"`
 	ApplyPatch          *ApplyPatchCompatConfig          `json:"apply_patch,omitempty" yaml:"apply_patch,omitempty"`
+	HostedTools         *[]string                        `json:"hosted_tools,omitempty" yaml:"hosted_tools,omitempty"` // hosted_tools catalog entries enabled for this target
 }
 
 // ApplyPatchCompatConfig controls the apply_patch tool surface and wire shape.
@@ -743,6 +746,53 @@ type ResponsesCompatConfig struct {
 	// input[type="additional_tools"] at their conversation anchor instead of
 	// the top-level tools array. Default false: compatible gateways must opt in.
 	MCPAdditionalTools *bool `json:"mcp_additional_tools,omitempty" yaml:"mcp_additional_tools,omitempty"`
+}
+
+// HostedToolConfig is one entry in the top-level hosted_tools catalog: the
+// local tool surface the main model sees plus the raw wire declarations used
+// on the independent sub-requests that ask the provider to run the tool
+// server-side. Chord only places declarations and captures raw result
+// payloads, so a new provider-side tool (or a new tool version) stays a
+// configuration change instead of Go code. Entries are inert until a
+// provider/model enables them through compat.hosted_tools.
+type HostedToolConfig struct {
+	// Description and Parameters form the local tool surface. Parameters is a
+	// JSON Schema object; nil exposes a tool without arguments.
+	Description string         `json:"description,omitempty" yaml:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty" yaml:"parameters,omitempty"`
+	// Prompt is the sub-request instruction template; {arg} placeholders are
+	// replaced with the matching local tool argument value. Empty serializes
+	// the arguments as JSON instead.
+	Prompt string `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	// ReadOnly and ConcurrencySafe override the local tool traits. Nil keeps
+	// the conservative default (false), so a catalog-only tool never silently
+	// gains read-only or parallel-execution semantics.
+	ReadOnly        *bool `json:"read_only,omitempty" yaml:"read_only,omitempty"`
+	ConcurrencySafe *bool `json:"concurrency_safe,omitempty" yaml:"concurrency_safe,omitempty"`
+	// RetrySafe permits replay after an attempt whose execution outcome is unknown.
+	RetrySafe *bool `json:"retry_safe,omitempty" yaml:"retry_safe,omitempty"`
+	// ImagePaths selects base64 images from completed raw result objects.
+	ImagePaths []string `json:"image_paths,omitempty" yaml:"image_paths,omitempty"`
+	// TimeoutSeconds caps one local execution; 0 uses the shared default.
+	TimeoutSeconds int `json:"timeout_s,omitempty" yaml:"timeout_s,omitempty"`
+	// Declarations maps a supported provider wire type (messages, responses)
+	// to that family's declaration. A family without an entry cannot carry
+	// the tool.
+	Declarations map[string]HostedToolDeclarationConfig `json:"declarations,omitempty" yaml:"declarations,omitempty"`
+}
+
+// HostedToolDeclarationConfig is the per-family wire declaration of a hosted
+// tool. Tool and Force are raw wire JSON: Tool is placed in the family's
+// declaration slot as-is, and Force becomes tool_choice when the sub-request
+// forces the tool (a string such as "required" or a family-specific object).
+// Object values may carry {"$arg": "<name>"} placeholders, which are replaced
+// with the matching local tool argument at request-build time; a missing or
+// empty argument drops the enclosing key.
+type HostedToolDeclarationConfig struct {
+	Tool    map[string]any    `json:"tool,omitempty" yaml:"tool,omitempty"`
+	Force   any               `json:"force,omitempty" yaml:"force,omitempty"`
+	Include []string          `json:"include,omitempty" yaml:"include,omitempty"`
+	Headers map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
 }
 
 // ChatCompletionsCompatConfig controls which optional Chat Completions request
@@ -2202,6 +2252,7 @@ var projectScopedTopLevelKeys = map[string]bool{
 	"stream_retry_rounds":             true,
 	"proxy":                           true,
 	"web_fetch":                       true,
+	"hosted_tools":                    true,
 	"worktree":                        true,
 	"memory":                          true,
 }

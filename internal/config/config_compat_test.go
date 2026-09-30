@@ -1,6 +1,7 @@
 package config
 
 import (
+	"slices"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -490,5 +491,136 @@ providers:
 	}
 	if model.Compat.ChatCompletions == nil || model.Compat.ChatCompletions.MCPSystemToolsMessage == nil || *model.Compat.ChatCompletions.MCPSystemToolsMessage {
 		t.Fatalf("model chat compat = %#v, want explicit false", model.Compat)
+	}
+}
+
+func TestConfigYAML_HostedTools(t *testing.T) {
+	const raw = `
+hosted_tools:
+  code_execution:
+    description: "Run code in a sandbox."
+    parameters:
+      type: object
+      properties:
+        code:
+          type: string
+    prompt: "Run this code: {code}"
+    read_only: false
+    concurrency_safe: true
+    timeout_s: 300
+    declarations:
+      messages:
+        tool:
+          type: code_execution_20250825
+          name: code_execution
+        force:
+          type: tool
+          name: code_execution
+        headers:
+          anthropic-beta: "code-execution-2025-08-25"
+      responses:
+        tool:
+          type: code_interpreter
+          container:
+            type: auto
+        force: "required"
+        include:
+          - file_search_call.results
+providers:
+  gateway:
+    type: "messages"
+    compat:
+      hosted_tools: [code_execution, web_search]
+    models:
+      provider/model-1:
+        compat:
+          hosted_tools: [code_execution]
+`
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(raw), &cfg); err != nil {
+		t.Fatalf("yaml unmarshal failed: %v", err)
+	}
+	tool, ok := cfg.HostedTools["code_execution"]
+	if !ok {
+		t.Fatal("hosted_tools.code_execution not found")
+	}
+	if tool.Description != "Run code in a sandbox." || tool.Prompt == "" || tool.TimeoutSeconds != 300 {
+		t.Fatalf("hosted tool surface = %#v", tool)
+	}
+	if tool.ReadOnly == nil || *tool.ReadOnly || tool.ConcurrencySafe == nil || !*tool.ConcurrencySafe {
+		t.Fatalf("hosted tool traits = %#v, want explicit read_only false and concurrency_safe true", tool)
+	}
+	if props, ok := tool.Parameters["properties"].(map[string]any); !ok || props["code"] == nil {
+		t.Fatalf("parameters = %#v, want the code property", tool.Parameters)
+	}
+	messages := tool.Declarations[ProviderTypeMessages]
+	if messages.Tool["type"] != "code_execution_20250825" || messages.Tool["name"] != "code_execution" {
+		t.Fatalf("messages declaration tool = %#v", messages.Tool)
+	}
+	force, ok := messages.Force.(map[string]any)
+	if !ok || force["name"] != "code_execution" {
+		t.Fatalf("messages force = %#v", messages.Force)
+	}
+	if messages.Headers["anthropic-beta"] != "code-execution-2025-08-25" {
+		t.Fatalf("messages headers = %#v", messages.Headers)
+	}
+	responses := tool.Declarations[ProviderTypeResponses]
+	if responses.Force != "required" {
+		t.Fatalf("responses force = %#v, want required", responses.Force)
+	}
+	if len(responses.Include) != 1 || responses.Include[0] != "file_search_call.results" {
+		t.Fatalf("responses include = %#v", responses.Include)
+	}
+
+	prov, ok := cfg.Providers["gateway"]
+	if !ok {
+		t.Fatal("provider gateway not found")
+	}
+	if prov.Compat == nil || !slices.Equal(*prov.Compat.HostedTools, []string{"code_execution", "web_search"}) {
+		t.Fatalf("provider hosted_tools = %#v", prov.Compat)
+	}
+	model := prov.Models["provider/model-1"]
+	if model.Compat == nil || !slices.Equal(*model.Compat.HostedTools, []string{"code_execution"}) {
+		t.Fatalf("model hosted_tools = %#v", model.Compat)
+	}
+}
+
+func TestConfigYAMLHostedToolsExplicitEmpty(t *testing.T) {
+	var cfg Config
+	raw := []byte("providers:\n  sample:\n    compat:\n      hosted_tools: [web_search]\n    models:\n      disabled:\n        compat:\n          hosted_tools: []\n")
+	if err := yaml.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	prov := cfg.Providers["sample"]
+	gate := prov.Models["disabled"].Compat.HostedTools
+	if gate == nil || len(*gate) != 0 {
+		t.Fatalf("gate = %#v", gate)
+	}
+	encoded, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored Config
+	if err := yaml.Unmarshal(encoded, &restored); err != nil {
+		t.Fatal(err)
+	}
+	gate = restored.Providers["sample"].Models["disabled"].Compat.HostedTools
+	if gate == nil || len(*gate) != 0 {
+		t.Fatal("round trip lost explicit disable")
+	}
+}
+
+func TestMergeProjectConfigHostedToolsExplicitEmpty(t *testing.T) {
+	base := &Config{Providers: map[string]ProviderConfig{"sample": {Compat: &ProviderCompatConfig{HostedTools: new([]string{"web_search"})}}}}
+	merged, err := mergeConfigOverrideData(base, []byte("providers:\n  sample:\n    compat:\n      hosted_tools: []\n"), "config.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := merged.Providers["sample"].Compat.HostedTools
+	if gate == nil || len(*gate) != 0 {
+		t.Fatalf("merged gate = %#v", gate)
+	}
+	if len(*base.Providers["sample"].Compat.HostedTools) != 1 {
+		t.Fatal("merge mutated base")
 	}
 }

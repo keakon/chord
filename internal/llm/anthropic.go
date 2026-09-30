@@ -104,6 +104,9 @@ type anthropicMetadata struct {
 
 type anthropicToolChoice struct {
 	Type string `json:"type"`
+	// Name selects a specific tool for the "tool" choice type; used by hosted
+	// (server-side) tool declarations, which have no client tool to pick.
+	Name string `json:"name,omitempty"`
 }
 
 func anthropicToolChoiceFromTuning(choice string) *anthropicToolChoice {
@@ -203,7 +206,19 @@ func (a *AnthropicProvider) CompleteStream(
 	// tuning) plus static provider config — not on the API key. Caching it per
 	// target lets key rotation resend the identical bytes instead of
 	// re-converting and re-marshaling the full history on every attempt.
-	bodyBytes, err := a.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), func() ([]byte, error) {
+	buildBody := func() ([]byte, error) {
+		if ht := tuning.HostedTool; ht != nil {
+			hostedReq, err := newAnthropicHostedRequest(model, systemPrompt, hostedSubRequestText(messages), ht, maxTokens)
+			if err != nil {
+				return nil, err
+			}
+			hostedBody, err := json.Marshal(hostedReq)
+			if err != nil {
+				return nil, fmt.Errorf("marshal request body: %w", err)
+			}
+			return applyRequestBodyOverrides(hostedBody, overrides)
+		}
+
 		// Build system content blocks.
 		systemBlocks := buildSystemBlocks(systemPrompt)
 
@@ -271,7 +286,16 @@ func (a *AnthropicProvider) CompleteStream(
 			return nil, err
 		}
 		return bodyBytes, nil
-	})
+	}
+	var bodyBytes []byte
+	if tuning.HostedTool != nil {
+		// Hosted sub-requests bypass the body-reuse cache: the cache identity
+		// deliberately ignores request tuning, and a hosted body differs from a
+		// plain body built from the same (system, messages, tools, maxTokens).
+		bodyBytes, err = buildBody()
+	} else {
+		bodyBytes, err = a.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), buildBody)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -303,6 +327,9 @@ func (a *AnthropicProvider) CompleteStream(
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, a.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)
+	if err := applyHostedToolHeaders(req.Header, tuning.HostedTool); err != nil {
+		return nil, err
+	}
 
 	// Send the request.
 	start := time.Now()
@@ -366,7 +393,7 @@ func (a *AnthropicProvider) CompleteStream(
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, a.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, parseErr := parseSSEStream(cr, traceCB, collector)
+	resp, parseErr := parseSSEStream(cr, traceCB, collector, tuning.HostedTool != nil)
 
 	// Write dump asynchronously.
 	if dumpWriter != nil {

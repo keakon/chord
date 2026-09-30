@@ -402,7 +402,7 @@ func (r *ResponsesProvider) CompleteStream(
 	sessionKey := strings.TrimSpace(tuning.SessionKey)
 	// The WebSocket transport takes the live request struct and mutates it for
 	// incremental sends, so cached bodies only serve the plain HTTP path.
-	wsEligible := useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && requestOverridesEmpty(overrides)
+	wsEligible := useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && requestOverridesEmpty(overrides) && tuning.HostedTool == nil
 
 	// buildResponsesRequest converts the history and marshals the body. It is
 	// cached per target across key-rotation attempts (requestBodyReuse): the
@@ -411,6 +411,27 @@ func (r *ResponsesProvider) CompleteStream(
 	// stamp and turn ID, so retries of one logical request share one turn
 	// identity instead of minting a fresh one per attempt.
 	buildResponsesRequest := func() ([]byte, any, error) {
+		if ht := tuning.HostedTool; ht != nil {
+			rc := (*config.ResponsesCompatConfig)(nil)
+			if r.provider != nil {
+				rc = r.provider.ResponsesCompat(model)
+			}
+			reqBody, err := newResponsesHostedRequest(model, systemPrompt, hostedSubRequestText(messages), ht, maxTokens, store, rc)
+			if err != nil {
+				return nil, nil, err
+			}
+			reqBody.ServiceTier = ot.ServiceTier
+			bodyBytes, err := json.Marshal(reqBody)
+			if err != nil {
+				return nil, nil, fmt.Errorf("marshal request body: %w", err)
+			}
+			bodyBytes, err = applyRequestBodyOverrides(bodyBytes, overrides)
+			if err != nil {
+				return nil, nil, err
+			}
+			return bodyBytes, responsesBuiltBody{}, nil
+		}
+
 		// Convert messages to Responses API format. System/developer instructions are
 		// sent through the top-level instructions field (matching Codex) instead of as
 		// a system-role input message; some Responses-compatible backends reject typed
@@ -576,7 +597,10 @@ func (r *ResponsesProvider) CompleteStream(
 	var bodyBytes []byte
 	var builtAny any
 	var err error
-	if wsEligible {
+	if wsEligible || tuning.HostedTool != nil {
+		// Hosted sub-requests bypass the body-reuse cache: the cache identity
+		// deliberately ignores request tuning, and a hosted body differs from a
+		// plain body built from the same (system, messages, tools, maxTokens).
 		bodyBytes, builtAny, err = buildResponsesRequest()
 	} else {
 		bodyBytes, builtAny, err = r.bodyReuse.bodyWithExtra(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), buildResponsesRequest)
@@ -672,7 +696,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	r.lastTransportUsed.Store("http")
-	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, sessionKey, reqBody.ClientMetadata, overrides, traceCB)
+	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, sessionKey, reqBody.ClientMetadata, overrides, tuning.HostedTool, traceCB)
 
 	// HTTP full-input path: no previous_response_id retry/rollback handling required.
 
@@ -742,6 +766,7 @@ func (r *ResponsesProvider) sendAndParse(
 	sessionKey string,
 	clientMetadata map[string]string,
 	overrides config.RequestOverridesConfig,
+	hosted *HostedToolRequest,
 	cb StreamCallback,
 ) (*message.Response, int, error) {
 	if err := ctx.Err(); err != nil {
@@ -780,6 +805,9 @@ func (r *ResponsesProvider) sendAndParse(
 	// Apply request body compression if configured
 	req, _ = compressRequestBody(req, bodyBytes, r.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)
+	if err := applyHostedToolHeaders(req.Header, hosted); err != nil {
+		return nil, 0, err
+	}
 
 	// Send request.
 	start := time.Now()
@@ -877,7 +905,7 @@ func (r *ResponsesProvider) sendAndParse(
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity, freeform)
+	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity, freeform, hosted != nil)
 	if parseErr != nil {
 		if _, ok := errors.AsType[*ChunkTimeoutError](parseErr); ok {
 			snap := cr.chunkTimeoutSnapshot()

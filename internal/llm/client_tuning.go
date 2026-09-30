@@ -2,6 +2,7 @@ package llm
 
 import (
 	"maps"
+	"slices"
 
 	"github.com/keakon/chord/internal/config"
 )
@@ -214,6 +215,11 @@ func cloneRequestTuning(tuning RequestTuning) RequestTuning {
 		copy.Gemini.IncludeThoughts = new(*tuning.Gemini.IncludeThoughts)
 	}
 	copy.SupportedServiceTiers = cloneServiceTiers(tuning.SupportedServiceTiers)
+	if tuning.HostedTool != nil {
+		hosted := *tuning.HostedTool
+		hosted.Messages = slices.Clone(hosted.Messages)
+		copy.HostedTool = &hosted
+	}
 	return copy
 }
 
@@ -293,6 +299,11 @@ func mergeRequestTuning(base, tuning RequestTuning) RequestTuning {
 	}
 	if len(tuning.SupportedServiceTiers) > 0 {
 		base.SupportedServiceTiers = cloneServiceTiers(tuning.SupportedServiceTiers)
+	}
+	if tuning.HostedTool != nil {
+		hosted := *tuning.HostedTool
+		hosted.Messages = slices.Clone(hosted.Messages)
+		base.HostedTool = &hosted
 	}
 	return base
 }

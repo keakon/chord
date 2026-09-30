@@ -5,9 +5,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -784,6 +786,16 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.Registry.Register(tools.NewWorktreeEnterTool(ac.MainAgent))
 	ac.Registry.Register(tools.NewWorktreeExitTool(ac.MainAgent))
 	ac.Registry.Register(tools.NewWorktreeListTool(ac.MainAgent))
+	// Hosted (provider-side) tools are catalog-driven: every configured entry
+	// becomes one local tool sharing a single backend over the model pool.
+	if err := tools.ValidateHostedToolCatalog(cfg.HostedTools, ac.Registry); err != nil {
+		return nil, fmt.Errorf("hosted tool catalog: %w", err)
+	}
+	hostedCatalog := tools.ResolveHostedToolCatalog(cfg.HostedTools)
+	hostedBackend := agent.NewHostedBackend(ac.MainAgent, hostedCatalog)
+	for _, name := range slices.Sorted(maps.Keys(hostedCatalog)) {
+		ac.Registry.Register(tools.NewHostedTool(hostedCatalog[name], hostedBackend))
+	}
 
 	// LLM factory for SubAgents.
 	ac.MainAgent.SetLLMFactory(buildSubAgentLLMFactory(ac, providerCfg, llmProvider, modelID, modelCfg, cfg, auth))

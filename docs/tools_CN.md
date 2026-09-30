@@ -68,6 +68,9 @@ Shell 和后台输出超过 16 KiB 时，结果会显示简短预览及日志文
 | 工具 | 用途 |
 | --- | --- |
 | `web_fetch` | 抓取 URL 并转成可读文本；权限规则可按 URL 模式匹配。 |
+| `web_search` | 通过 provider 的 hosted 搜索工具检索网络，返回摘要与编号来源。默认关闭，需用 `compat.hosted_tools: [web_search]` 开启（见[配置与认证：WebSearch](./configuration_CN.md#websearch)）。 |
+
+`web_search` 只在模型池里存在已启用、能承载声明的目标时出现：Anthropic Messages 或 OpenAI Responses 模型，且 `compat.hosted_tools` 里列了它。每次调用在 provider 侧执行一次搜索，返回摘要和编号来源；可用 `allowed_domains` / `blocked_domains` 缩小范围。顶层 `hosted_tools` 目录还能定义其他 hosted 工具（见[Hosted tools](./configuration_CN.md#hosted-tools)）。
 
 ## 工作流
 

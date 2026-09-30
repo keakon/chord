@@ -13,6 +13,7 @@ const (
 	NameGrep           = toolname.Grep
 	NameGlob           = toolname.Glob
 	NameWebFetch       = toolname.WebFetch
+	NameWebSearch      = toolname.WebSearch
 	NameShell          = toolname.Shell
 	NameJobOutput      = toolname.JobOutput
 	NameJobList        = toolname.JobList
@@ -42,7 +43,7 @@ var NormalizeName = toolname.Normalize
 // that can be compacted into a re-runnable summary.
 func IsReadLike(name string) bool {
 	switch NormalizeName(name) {
-	case NameRead, NameGrep, NameGlob, NameWebFetch:
+	case NameRead, NameGrep, NameGlob, NameWebFetch, NameWebSearch:
 		return true
 	default:
 		return false

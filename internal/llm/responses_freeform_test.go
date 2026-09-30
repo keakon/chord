@@ -634,7 +634,7 @@ func TestParseResponsesSSE_CustomToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":1,"item":{"type":"custom_tool_call","id":"ct_1","name":"apply_patch","status":"completed","input":"*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -665,7 +665,7 @@ func TestParseResponsesSSE_CustomToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":2,"item":{"type":"custom_tool_call","id":"ct_x","name":"apply_patch","status":"completed"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -689,7 +689,7 @@ func TestParseResponsesSSE_CustomToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":3,"item":{"type":"custom_tool_call","id":"ct_y","name":"apply_patch","status":"completed","input":"*** Begin Patch\n*** End Patch"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -719,7 +719,7 @@ func TestParseResponsesSSE_CustomToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":1,"item":{"type":"custom_tool_call","id":"ct_1","name":"apply_patch","status":"completed","input":"*** Begin Patch\n*** End Patch"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}

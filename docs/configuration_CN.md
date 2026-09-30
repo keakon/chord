@@ -878,6 +878,82 @@ web_fetch:
 
 `web_fetch` 保持轻量级静态 HTTP 读取，不运行本地浏览器。对 JS-heavy 页面，若返回的 HTML 只有应用空壳而非可读正文，结果会标记为 `Content-Quality: suspect-shell`。
 
+## WebSearch
+
+`web_search` 通过 provider 的 hosted 搜索工具检索，返回摘要和编号来源。它默认关闭，需要对端支持 hosted 搜索的 Anthropic Messages 或 OpenAI Responses provider（也可以只开单个模型）显式启用：
+
+```yaml
+providers:
+  anthropic:
+    type: messages
+    compat:
+      hosted_tools: [web_search]
+```
+
+`compat.hosted_tools` 列出该 provider 的模型可以提供的 hosted 工具；模型未配置该字段时继承 provider 列表；显式 `hosted_tools: []` 关闭该模型的全部 hosted 工具，非空列表替换 provider 列表。`web_search` 是内置条目，在 Anthropic Messages 上声明为 `web_search_20250305`，在 OpenAI Responses 上声明为 `web_search`。
+
+只有当前模型池里存在已启用、能承载该声明的目标时，工具才会出现在模型的工具列表里。每次调用另发一条只带 query 的请求，在那里声明 hosted 搜索工具；Chord 把返回的原生结果作为普通工具结果返回，主对话请求从不声明该工具，历史里也不会出现 provider 专属块。`allowed_domains` 和 `blocked_domains` 按请求参数下发，不会拼进 query 文本。
+
+子请求按服务它的模型计入 token；provider 可能另收按次检索费，Chord 的费用统计只算 token。
+
+## Hosted tools
+
+顶层 `hosted_tools` 定义 provider 侧执行的 hosted 工具。每个条目会变成一个本地工具，调用时另发一条请求声明该 hosted 工具，服务端执行的能力（网络检索、代码执行、文件检索等）只需配置，不必写代码。某个 provider 或模型通过 `compat.hosted_tools` 启用，且目标的 provider 类型（`messages` / `responses`）在条目里有声明时，这个本地工具才会出现。
+
+```yaml
+hosted_tools:
+  code_execution:
+    description: 在 provider 沙箱里运行 Python 代码并返回输出。
+    parameters:
+      type: object
+      properties:
+        code:
+          type: string
+          description: 要运行的 Python 源码。
+      required: [code]
+    prompt: "运行这段代码并报告结果：\n{code}"
+    read_only: true
+    timeout_s: 300
+    declarations:
+      messages:
+        tool: {type: code_execution_20250825, name: code_execution}
+        force: {type: tool, name: code_execution}
+```
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `description` | 空 | 展示给模型的本地工具描述。 |
+| `parameters` | 无参数的对象 schema | 本地工具参数的 JSON Schema。 |
+| `prompt` | 参数的 JSON | 子请求指令模板，`{arg}` 会替成对应参数值；不写则把参数序列化成 JSON。 |
+| `read_only` | `false` | 把本地工具标记为只读，供调度判断使用；权限仍由角色的 permission 规则决定。 |
+| `concurrency_safe` | `false` | 允许与其他并发安全的只读工具放进同一批并行执行。 |
+| `retry_safe` | `false` | 允许结果未知时重试；只在重复执行安全时开启。内置 `web_search` 默认开启。 |
+| `image_paths` | （空） | 每个调用结果中 base64 图片字段的点分路径，如 `[output.image]`；图片会成为工具结果附件。只遍历对象字段，不遍历数组。 |
+| `timeout_s` | `120` | 单次调用的总预算（秒），覆盖里面每一次子请求。 |
+| `declarations.<type>` | | 按 provider 类型的 wire 声明：`messages` 或 `responses`。 |
+| `declarations.<type>.tool` | （必填） | 包含非空 `type` 的 wire JSON，放入该 family 的 `tools` 数组；其他字段遵循 provider 的 schema。 |
+| `declarations.<type>.force` | （省略） | 强制调用的原始 `tool_choice` 值。省略时仍会声明该工具并在 prompt 里要求调用，但模型不调用就算失败。 |
+| `declarations.<type>.include` | （省略） | `include` 选择器，例如 Responses 的 `[web_search_call.action.sources]`。 |
+| `declarations.<type>.headers` | （省略） | 工具声明需要的额外 HTTP 头，在 provider 默认头和请求覆盖配置之后应用。可以替换 beta 头；认证、传输和会话头受保护。 |
+
+声明里的 `{"$arg": "<name>"}` 会替成同名本地参数；参数缺失或为空时删掉该键，对象的键全被删光时连对象一起删。内置 `web_search` 条目就用它把 `allowed_domains`、`blocked_domains` 作为声明参数下发。
+
+只写在自己配置里的条目从保守 trait 起步：非只读、非并发安全、禁止自动重放结果未知的操作。内置条目（目前是 `web_search`）按字段合并，改写声明就能换工具版本，不必重述本地工具面。
+
+工具名不能与现有工具重名，也不能使用内置工具保留名或 `mcp_` 前缀。启动时校验合并后的配置：每个条目需要 object 参数 schema、非负超时，以及至少一个带非空工具 `type` 的 `messages` 或 `responses` 声明。header 名和值必须合法，不能覆盖认证、传输或会话头；provider 专用字段仍由端点校验。已有 `web_search` 条目可以按字段覆盖。
+
+首次子请求按当前模型池游标遍历支持该工具的目标。每个 hosted 工具独立记住成功目标，后续调用优先从那里开始，需要时仍遍历所有可用目标，不改变主对话游标。更换主 client 后重新选择；模型池中已移除或不再支持该工具的目标不会复用。Messages 返回 `pause_turn` 时，Chord 保留本次完整、有序的原生内容和沙箱容器标识，在同一个目标上最多续跑 4 次；总耗时仍受 `timeout_s` 限制。所有尝试和续跑的 token 用量归属发起调用的 Agent 与轮次。对明确拒绝 `tool_choice` 的请求，会在同一目标上重试一次不强制调用的声明。
+
+默认 `retry_safe: false`。请求可能已执行而结果未知（如连接中断、流错误或续跑上限耗尽）时，Chord 停止自动换 key 或模型重放；明确的请求前拒绝仍可尝试其他目标。只有确认重复执行安全时才设置 `retry_safe: true`。
+
+hosted 子请求与其他 Agent 请求共用 `orchestration.max_active_llm_requests`、`provider_max_active_requests` 和 `model_max_active_requests` 限制。如果 provider 只允许一个请求同时执行，将 `provider_max_active_requests` 中对应的条目设为 `1`。这些限制只在当前 Chord 进程内生效；多个 provider 配置或多个进程共用同一账户时，不会自动共用额度限制。
+
+对 `retry_safe: true` 的工具（包括内置 `web_search`），瞬态限流、上游不可用和传输失败在每个目标上最多尝试 3 轮，沿用已有的 key 轮转、provider 退避与 `Retry-After` 等待规则。每轮可能尝试多个 key；排队和重试等待都计入 `timeout_s` 总预算，等待期间释放请求槽。账户额度耗尽、声明被拒绝、未观察到 hosted 调用时，不会在同一目标上开启下一轮重试，仍可尝试其他可用目标。失败提示会区分这些情况并给出对应的处理建议。
+
+Responses 的远程 MCP 错误会作为失败返回；需要 provider 侧审批的请求会停止并提示使用本地 MCP 集成完成交互审批。此桥不会自动批准远程操作。原生消息中的引用信息、文件引用与未知输出字段会保留，完整原生输出及被截断的调用结果会保存为会话产物，工具结果提供读取引用。provider 生成的文件目前保留 `container_id` / `file_id` / 文件名，Chord 不会自动下载这些文件；配置 `image_paths` 可将实际返回的 base64 图片附到工具结果。
+
+当前支持 `messages` 和 `responses` 的子请求桥。主会话沿用普通工具结果历史；Gemini、Chat Completions 的 hosted 声明和主会话原生块回放需要各自的协议适配。
+
 ## 项目记忆（自动抽取）
 
 顶层 `memory` 配置控制自动跨会话记忆抽取。读取项目中已有的 `MEMORY.md` 始终自动进行，不需要任何配置；这个键只决定 Chord 是否把冻结的历史会话发送给模型以生成记忆记录，并写入项目文件。记录了什么、摘要如何加载、如何审阅和删除条目见[项目记忆](./project-memory_CN.md)。
@@ -1267,6 +1343,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
 | `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`、`mcp_additional_tools`。 |
 | `compat.responses.mcp_additional_tools` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `input[type="additional_tools"]` item，不改写顶层 `tools`。只为已确认接受该 item 的 Responses endpoint / 模型开启。挂载形态跟随当前选中的目标；请求最终落到不接受该 item 的池成员时，Chord 会把声明并入该请求的顶层 `tools` 数组。 |
+| `compat.hosted_tools` | list | （空）— 允许该 provider 的模型提供的 hosted 工具名列表。每次调用另发一条请求，在那里声明该工具按 provider 类型的 wire 声明，Chord 把 provider 返回的结果作为普通工具结果返回；主对话请求不声明该工具。只为确认支持该声明的端点启用：端点拒绝声明时调用会带着端点返回的原因失败，端点静默忽略时错误会提示检查这个列表。条目形状见 [Hosted tools](#hosted-tools)。 |
 | `compat.apply_patch.enabled` | bool | 三态 — 省略时按模型名推断。`true` 保留 `apply_patch`（同时隐藏 `edit`、`write`、`delete`）；`false` 退回 `edit`，`write`/`delete` 重新可见。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6-astra` 等更高的主版本）和 `codex-auto-review` 默认 `true`；`gpt-oss-*`、gpt-3.5、gpt-4/4o、o 系列及非 OpenAI 模型默认 `false`。 |
 | `compat.apply_patch.freeform` | bool | 三态 — 省略时按模型名和 wire 类型推断。`true` 把 `apply_patch` 作为 freeform custom tool 发送（`type: "custom"`，随请求带上 grammar）；`false` 按 JSON function tool 发送。gpt-5 及之后家族名称和 `codex-auto-review` 在 Responses 端点上默认 `true`；非 Responses wire 一律默认 `false`（没有 custom tool 类型）。接受 Responses 但拒绝 custom tool 的主机没有内置例外：请在那里设置 `false`；只有确实支持 custom tool 的网关才设 `true`。 |
 | `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |
@@ -1303,6 +1380,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.chat_completions.keep_reasoning_effort` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.chat_completions.native_thinking` | string | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.responses.mcp_additional_tools` | bool | 模型级覆盖项；provider 默认值见上表。 |
+| `compat.hosted_tools` | list | 模型级列表，替换上表描述的 provider 默认值。 |
 | `compat.apply_patch.enabled` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `compat.apply_patch.freeform` | bool | 模型级覆盖项；provider 默认值见上表。 |
 | `variants`        | map    | 命名参数预设。引用方式：`provider/model@variant`。                                                                |

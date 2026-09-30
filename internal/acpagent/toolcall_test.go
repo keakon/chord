@@ -30,6 +30,7 @@ func TestToolKindMapping(t *testing.T) {
 		{"job_list", acp.ToolKindExecute},
 		{"job_kill", acp.ToolKindExecute},
 		{"web_fetch", acp.ToolKindFetch},
+		{"web_search", acp.ToolKindSearch},
 		{"todo_write", acp.ToolKindThink},
 		{"delegate", acp.ToolKindOther},
 		{"", acp.ToolKindOther},

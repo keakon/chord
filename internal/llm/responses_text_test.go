@@ -37,7 +37,7 @@ func TestResponsesTextTerminalAuthority(t *testing.T) {
 		{"literal replacement rune", []string{done(0, 0, "text \ufffd")}, "text \ufffd"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(tc.events), nil, nil, nil, "", false)
+			resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(tc.events), nil, nil, nil, "", false, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -60,7 +60,7 @@ func TestResponsesTextExplicitEmptyAndAbsent(t *testing.T) {
 			// [DONE] returns an explicit empty response; EOF alone may instead reject
 			// an empty incomplete response under the parser's recovery policy.
 			events := append(tc.events, `[DONE]`)
-			resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false)
+			resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false, false)
 			if err != nil {
 				t.Fatal(err)
 			}

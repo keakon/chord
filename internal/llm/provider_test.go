@@ -2663,3 +2663,29 @@ func TestProviderConfigNativeFamilyFollowsDeepSeekContract(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderConfigHostedToolsCompatMerge(t *testing.T) {
+	provider := NewProviderConfig("sample", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		APIURL: "https://example.invalid/v1",
+		Compat: &config.ProviderCompatConfig{HostedTools: new([]string{"web_search"})},
+		Models: map[string]config.ModelConfig{
+			"provider/model-1": {Compat: &config.ModelCompatConfig{HostedTools: new([]string{"code_execution"})}},
+			"provider/model-2": {},
+		},
+	}, nil)
+	if got := provider.HostedToolsCompat("provider/model-1"); !slices.Equal(got, []string{"code_execution"}) {
+		t.Errorf("model-level override = %v, want [code_execution]", got)
+	}
+	if got := provider.HostedToolsCompat("provider/model-2"); !slices.Equal(got, []string{"web_search"}) {
+		t.Errorf("provider default = %v, want [web_search]", got)
+	}
+	if got := provider.HostedToolsCompat("provider/unlisted"); !slices.Equal(got, []string{"web_search"}) {
+		t.Errorf("provider default for an unlisted model = %v, want [web_search]", got)
+	}
+
+	plain := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeResponses, APIURL: "https://example.invalid/v1"}, nil)
+	if got := plain.HostedToolsCompat("provider/model-1"); len(got) != 0 {
+		t.Errorf("unconfigured HostedToolsCompat = %v, want empty", got)
+	}
+}

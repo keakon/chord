@@ -36,7 +36,7 @@ func TestAnthropicStreamCapturesRedactedThinking(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseSSEStream(strings.NewReader(sse), nil, nil)
+	resp, err := parseSSEStream(strings.NewReader(sse), nil, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

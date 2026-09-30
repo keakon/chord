@@ -68,14 +68,16 @@ type sseContentBlockStart struct {
 	Type         string `json:"type"`
 	Index        int    `json:"index"`
 	ContentBlock struct {
-		Type      string          `json:"type"`                // "text", "tool_use", "thinking", or "redacted_thinking"
-		Text      string          `json:"text,omitempty"`      // for text blocks
-		Thinking  string          `json:"thinking,omitempty"`  // for thinking blocks
-		Signature string          `json:"signature,omitempty"` // for thinking blocks
-		ID        string          `json:"id,omitempty"`        // for tool_use blocks
-		Name      string          `json:"name,omitempty"`      // for tool_use blocks
-		Input     json.RawMessage `json:"input,omitempty"`     // for tool_use blocks (usually {})
-		Data      string          `json:"data,omitempty"`      // for redacted_thinking blocks (encrypted payload)
+		Type      string          `json:"type"`                  // "text", "tool_use", "thinking", or "redacted_thinking"
+		Text      string          `json:"text,omitempty"`        // for text blocks
+		Thinking  string          `json:"thinking,omitempty"`    // for thinking blocks
+		Signature string          `json:"signature,omitempty"`   // for thinking blocks
+		ID        string          `json:"id,omitempty"`          // for tool_use and server_tool_use blocks
+		Name      string          `json:"name,omitempty"`        // for tool_use and server_tool_use blocks
+		Input     json.RawMessage `json:"input,omitempty"`       // for tool_use blocks (usually {})
+		Data      string          `json:"data,omitempty"`        // for redacted_thinking blocks (encrypted payload)
+		ToolUseID string          `json:"tool_use_id,omitempty"` // for web_search_tool_result blocks
+		Content   json.RawMessage `json:"content,omitempty"`     // for web_search_tool_result blocks (result array or error object)
 	} `json:"content_block"`
 }
 
@@ -128,6 +130,9 @@ type contentBlock struct {
 	thinking  strings.Builder // accumulated thinking text (thinking blocks only)
 	signature string          // thinking block signature (returned by signature_delta)
 	redacted  string          // redacted_thinking encrypted payload (replayed verbatim)
+	// hostedCall is the index of the block's hosted call in the response
+	// observation, or -1 for non-hosted blocks.
+	hostedCall int
 }
 
 func applyAnthropicSSEUsage(dst *message.TokenUsage, usage sseUsage, adoptOnlyNonZero bool) {
@@ -172,7 +177,7 @@ func anthropicSSECacheWriteUsage(usage sseUsage) (cacheWrite, cacheWrite1h int) 
 // each incremental delta. If collector is non-nil, raw SSE data lines are
 // recorded for debug dumps. It returns the fully assembled Response when the
 // stream completes, or an error if the stream fails.
-func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector) (*message.Response, error) {
+func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector, captureHosted bool) (response *message.Response, parseErr error) {
 	scanner := bufio.NewScanner(reader)
 	// Allow lines up to 1MB for large JSON payloads.
 	scanner.Buffer(make([]byte, 0, sseInitialBufferSize), sseMaxTokenSize)
@@ -181,10 +186,21 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 		eventType      string
 		resp           message.Response
 		blocks         = make(map[int]*contentBlock)
+		nativeCapture  anthropicHostedCapture
+		hostedByToolID = make(map[string]int) // hosted tool_use id → call index
 		gotData        bool
 		progressBytes  int64
 		progressEvents int64
 	)
+
+	if captureHosted {
+		defer func() {
+			if parseErr != nil {
+				finalizeHostedObservation(&resp)
+				response = &resp
+			}
+		}()
+	}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -218,6 +234,11 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 				collector.Add(fmt.Sprintf("%s: %s", eventType, data))
 			}
 
+			if captureHosted {
+				if err := nativeCapture.capture(&resp, eventType, data); err != nil {
+					return &resp, err
+				}
+			}
 			switch eventType {
 			case "message_start":
 				var ev sseMessageStart
@@ -235,7 +256,8 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					return nil, fmt.Errorf("parse content_block_start: %w", err)
 				}
 				block := &contentBlock{
-					blockType: ev.ContentBlock.Type,
+					blockType:  ev.ContentBlock.Type,
+					hostedCall: -1,
 				}
 				switch ev.ContentBlock.Type {
 				case "text":
@@ -265,6 +287,20 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					if p, ok := reader.(chunkPhaser); ok {
 						p.SetChunkTimeout(SlowPhaseChunkTimeout)
 					}
+				case anthropicServerToolUseBlock:
+					if p, ok := reader.(chunkPhaser); ok {
+						p.SetChunkTimeout(SlowPhaseChunkTimeout)
+					}
+					// Hosted (server-side) tool call. Main-conversation requests never
+					// declare hosted tools, so this appears only on hosted
+					// sub-requests, where it is captured for flattening instead of
+					// being replayed as a client tool call.
+					block.toolID = ev.ContentBlock.ID
+					block.toolName = ev.ContentBlock.Name
+					block.hostedCall = appendAnthropicHostedCall(&resp, ev.ContentBlock.ID, ev.ContentBlock.Name, anthropicServerToolUseBlock, ev.ContentBlock.Input)
+					if block.toolID != "" && block.hostedCall >= 0 {
+						hostedByToolID[block.toolID] = block.hostedCall
+					}
 				case message.StreamDeltaThinking:
 					block.thinking.WriteString(ev.ContentBlock.Thinking)
 					if ev.ContentBlock.Signature != "" {
@@ -283,6 +319,13 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					// Encrypted reasoning arrives whole in the start event; it must be
 					// preserved and replayed verbatim for the conversation to remain valid.
 					block.redacted = cloneLongLivedLLMString(ev.ContentBlock.Data)
+				default:
+					if strings.HasSuffix(ev.ContentBlock.Type, anthropicHostedResultSuffix) {
+						// Hosted results arrive whole in the start event. They are
+						// paired into the sub-request observation; the main conversation
+						// history never carries them.
+						recordAnthropicHostedResult(&resp, hostedByToolID, ev.ContentBlock.Type, ev.ContentBlock.ToolUseID, ev.ContentBlock.Content)
+					}
 				}
 				blocks[ev.Index] = block
 
@@ -311,7 +354,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					// Input carries this delta's fragment only: consumers
 					// accumulate, so re-sending the accumulated args on every
 					// delta would be quadratic in the arguments' size.
-					if cb != nil && block.toolID != "" && block.toolName != "" && ev.Delta.PartialJSON != "" {
+					if cb != nil && block.blockType == "tool_use" && block.toolID != "" && block.toolName != "" && ev.Delta.PartialJSON != "" {
 						cb(message.StreamDelta{
 							Type: message.StreamDeltaToolUseDelta,
 							ToolCall: &message.ToolCallDelta{
@@ -398,6 +441,8 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					if block.redacted != "" {
 						resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{Data: block.redacted})
 					}
+				case anthropicServerToolUseBlock:
+					applyAnthropicHostedInput(&resp, block.hostedCall, block.toolInput.String())
 				}
 				delete(blocks, ev.Index)
 
@@ -420,6 +465,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 
 			case "message_stop":
 				// Stream complete. Return the assembled response.
+				finalizeHostedObservation(&resp)
 				return &resp, nil
 
 			case message.StreamDeltaError:
@@ -474,6 +520,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 	if readErr != nil {
 		if canRecoverPartialResponsesAfterError(readErr) {
 			if partial := markInterruptedTextResponse(&resp); partial != nil {
+				finalizeHostedObservation(partial)
 				return partial, nil
 			}
 		}
@@ -481,6 +528,7 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 	}
 	if !truncated {
 		if partial := markInterruptedTextResponse(&resp); partial != nil {
+			finalizeHostedObservation(partial)
 			return partial, nil
 		}
 	}
@@ -528,11 +576,14 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 			if cb != nil {
 				cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
 			}
+		case anthropicServerToolUseBlock:
+			applyAnthropicHostedInput(&resp, block.hostedCall, block.toolInput.String())
 		}
 		delete(blocks, idx)
 	}
 
 	if truncated && (resp.Content != "" || len(resp.ToolCalls) > 0) {
+		finalizeHostedObservation(&resp)
 		return &resp, nil
 	}
 	return nil, fmt.Errorf("SSE stream ended without message_stop event")

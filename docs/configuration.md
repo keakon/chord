@@ -1017,6 +1017,82 @@ web_fetch:
 
 `web_fetch` intentionally remains a lightweight static HTTP reader. It does not run a local browser; JS-heavy pages may be marked as `Content-Quality: suspect-shell` when the returned HTML looks like an application shell rather than readable content.
 
+## WebSearch
+
+`web_search` searches through the provider's hosted search tool and returns a summary with numbered sources. It is off by default: enable it for an Anthropic Messages or OpenAI Responses provider (or one model) whose endpoint supports hosted search.
+
+```yaml
+providers:
+  anthropic:
+    type: messages
+    compat:
+      hosted_tools: [web_search]
+```
+
+`compat.hosted_tools` lists the hosted tools a provider's models may serve; an omitted model field inherits the provider list, an explicit `hosted_tools: []` disables all hosted tools for that model, and a non-empty list replaces the provider list. `web_search` is a built-in entry, declared as `web_search_20250305` on Anthropic Messages and `web_search` on OpenAI Responses.
+
+The tool joins the model's tool list while the active model pool contains an enabled target that can carry the declaration; otherwise Chord withholds it. Each call sends a separate request carrying only the query and declares the hosted search tool there, so the main conversation request never declares it and its history stays free of provider-specific blocks. Chord returns the native results as an ordinary tool result; `allowed_domains` and `blocked_domains` travel as request parameters rather than query text.
+
+The sub-request bills as tokens on the model that serves it. Providers may charge a per-search fee on top; Chord's cost accounting counts tokens only.
+
+## Hosted tools
+
+The top-level `hosted_tools` section defines provider-side (hosted) tools. Each entry becomes a local tool whose calls run one sub-request declaring the hosted tool, so a tool the provider executes server-side — web search, code execution, file search — needs configuration instead of code. A local tool appears while some provider or model enables it through `compat.hosted_tools` and the target's wire type has a declaration in the entry; otherwise Chord withholds it.
+
+```yaml
+hosted_tools:
+  code_execution:
+    description: Run Python code in the provider's sandbox and report its output.
+    parameters:
+      type: object
+      properties:
+        code:
+          type: string
+          description: Python source to run.
+      required: [code]
+    prompt: "Run this code and report the result:\n{code}"
+    read_only: true
+    timeout_s: 300
+    declarations:
+      messages:
+        tool: {type: code_execution_20250825, name: code_execution}
+        force: {type: tool, name: code_execution}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `description` | *(empty)* | Local tool description shown to the model. |
+| `parameters` | object schema without arguments | JSON Schema of the local tool's arguments. |
+| `prompt` | arguments as JSON | Sub-request instruction; `{arg}` is replaced with the matching argument value. |
+| `read_only` | `false` | Marks the tool read-only for scheduling; the role permission rules still decide access. |
+| `concurrency_safe` | `false` | Allows the call to run alongside other concurrent-safe read-only tools in one batch. |
+| `retry_safe` | `false` | Allow retries when execution outcome is unknown; enable only when repeated execution is safe. Built-in `web_search` defaults to `true`. |
+| `image_paths` | *(empty)* | Dot-separated object paths to base64 images in each call result, such as `[output.image]`. Images become tool result attachments; array traversal is unsupported. |
+| `timeout_s` | `120` | Whole-call budget in seconds, covering every sub-request attempt. |
+| `declarations.<type>` | | Wire declaration for one provider type: `messages` or `responses`. |
+| `declarations.<type>.tool` | *(required)* | Wire JSON with a non-empty `type`, inserted into that family's `tools` array. Other fields follow the provider's schema. |
+| `declarations.<type>.force` | *(omitted)* | Raw `tool_choice` value that forces the call. Omitted, the tool is still declared and the prompt asks for it, but a model that answers without calling it fails the call. |
+| `declarations.<type>.include` | *(omitted)* | `include` selectors, for example `[web_search_call.action.sources]` on Responses. |
+| `declarations.<type>.headers` | *(omitted)* | Declaration-specific HTTP headers, applied after provider headers and request overrides. Beta headers can be replaced; authentication, transport, and session headers are protected. |
+
+Inside a declaration, `{"$arg": "<name>"}` is replaced with the local argument of that name; a missing or empty argument drops the key, and an object that loses all its keys is dropped too. The built-in `web_search` entry uses this to pass `allowed_domains` and `blocked_domains` as declaration parameters.
+
+An entry that only exists in your configuration starts with conservative traits: not read-only, not concurrency-safe, and no automatic replay of operations with unknown outcomes. Built-in entries (currently `web_search`) are merged field by field, so a declaration can be retargeted to another tool version without restating the local tool surface.
+
+Names must not collide with registered tools, reserved built-in names, or the `mcp_` prefix. Startup validates the merged catalog: each entry needs an object parameter schema, a non-negative timeout, and at least one `messages` or `responses` declaration with a non-empty tool `type`. Headers must have valid names and values, and cannot replace authentication, transport, or session headers. Provider-specific declaration fields remain subject to the endpoint's validation. The built-in `web_search` entry supports field-level overrides.
+
+The first sub-request walks capable targets from the active model-pool cursor. Each hosted tool remembers its successful target independently of the main conversation: later calls start there and still try every capable target when needed. Replacing the main client resets this preference; targets removed from the pool or no longer capable are not reused. For Messages `pause_turn`, Chord retains the complete ordered native content and sandbox container and continues on the same target, with at most four continuations under the original `timeout_s` budget. Token usage for all attempts belongs to the calling Agent and turn. An explicit `tool_choice` rejection gets one retry on the same target without forcing the call.
+
+With the default `retry_safe: false`, a possibly executed operation whose outcome is unknown (connection interruption, stream error, or exhausted continuation limit) stops automatic key/model replay. A clear rejection before execution may still try another target. Set `retry_safe: true` only when repeating the operation is safe.
+
+Hosted requests share `orchestration.max_active_llm_requests`, `provider_max_active_requests`, and `model_max_active_requests` with other Agent requests. For a provider that allows only one concurrent request, set its entry under `provider_max_active_requests` to `1`. Limits are local to this Chord process; separate provider entries or processes sharing one account do not share a quota gate.
+
+For `retry_safe: true` tools, including the built-in `web_search`, transient rate limits, upstream unavailability, and transport failures get at most three rounds per target, with configured key rotation, provider backoff, and `Retry-After` pacing. Each round can try multiple keys; the total `timeout_s` budget also includes queueing and retry waits. Capacity is released while waiting between attempts. Exhausted account quota, rejected declarations, and responses without an observed hosted call do not trigger another retry round; another capable target may still be tried. Failure messages distinguish these cases and suggest an appropriate next action.
+
+Responses remote MCP errors fail the call. Requests requiring provider-side approval stop and direct you to the local MCP integration for interactive approval; the bridge never automatically approves them. Native message citations, file references, and unknown output fields are retained. Full native output and truncated call payloads are saved as session artifacts with readable references in the tool result. Provider files currently retain `container_id`, `file_id`, and filename references; Chord does not automatically download these files. Configure `image_paths` to attach base64 image data actually returned by the provider.
+
+The bridge currently supports `messages` and `responses` sub-requests. Main conversation history uses ordinary tool results. Hosted declarations for Gemini and Chat Completions, and native main-conversation replay, require separate protocol adapters.
+
 ## Project memory (automatic extraction)
 
 The top-level `memory` section controls automatic cross-session memory extraction. Reading an existing project `MEMORY.md` is always automatic and needs no config; this key only decides whether Chord sends frozen history sessions to the model to grow memory records and writes project files. What gets stored, how the summary loads, and how to review or remove entries: [Project Memory](./project-memory.md).
@@ -1439,6 +1515,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `parallel_tool_calls` | bool | `true` — Provider-level default for Responses / Chat Completions tool parallelism; model and variant values override it. |
 | `compat.responses.*` | object | protocol defaults — Provider-level optional Responses fields: `send_store`, `send_reasoning_include`, `send_tool_choice`, `send_prompt_cache_key`, `send_max_output_tokens`, and `mcp_additional_tools`. |
 | `compat.responses.mcp_additional_tools` | bool | `false` — Mount runtime manual-MCP schemas as fixed-anchor `input[type="additional_tools"]` items instead of changing top-level `tools`. Enable only for Responses endpoints/models known to accept this item. The mount follows the currently selected target; when a fallback pool member without this capability serves the request, Chord inlines the declarations into that request's top-level `tools` array. |
+| `compat.hosted_tools` | list | *(empty)* — Hosted tool names this provider's models may serve. Each call runs as a separate request that declares the tool's per-type wire declaration and returns the provider's result as an ordinary tool result; the main conversation request never declares it. Enable only on endpoints known to support the declaration: one that rejects it fails the call with the endpoint's error, and one that silently ignores it fails with a message pointing back at this list. The catalog shape is documented under [Hosted tools](#hosted-tools). |
 | `compat.apply_patch.enabled` | bool | Three-state — when omitted, Chord infers from the model name. `true` keeps `apply_patch` (hiding `edit`, `write`, and `delete`); `false` falls back to `edit` with `write`/`delete` visible. gpt-5-and-later family names (`gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5-codex`, any `gpt-5.*` name, later majors like `gpt-6-astra`) and `codex-auto-review` default to `true`; `gpt-oss-*`, gpt-3.5, gpt-4/4o, the o-series, and non-OpenAI models default to `false`. |
 | `compat.apply_patch.freeform` | bool | Three-state — when omitted, Chord infers from the model name and the wire type. `true` emits `apply_patch` as a freeform custom tool (`type: "custom"` with a grammar); `false` emits a JSON function tool. gpt-5-and-later family names and `codex-auto-review` on Responses endpoints default to `true`; all non-Responses wires default to `false` (they have no custom tool type). Hosts that accept Responses but reject custom tools have no built-in exception: set `false` there, or `true` only for gateways that actually accept custom tools. |
 | `compat.chat_completions.send_stream_options` | bool | `true` — Omit `stream_options.include_usage` for gateways that reject it; streaming token usage then remains unavailable. |
@@ -1475,6 +1552,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `compat.chat_completions.keep_reasoning_effort` | bool | Model-level override for the provider default described above. |
 | `compat.chat_completions.native_thinking` | string | Model-level override for the provider default described above. |
 | `compat.responses.mcp_additional_tools` | bool | Model-level override for the provider default described above. |
+| `compat.hosted_tools` | list | Model-level list that replaces the provider default described above. |
 | `compat.apply_patch.enabled` | bool | Model-level override for the provider default described above. |
 | `compat.apply_patch.freeform` | bool | Model-level override for the provider default described above. |
 | `variants`        | map    | Named parameter presets. Reference with `provider/model@variant`.                                                      |

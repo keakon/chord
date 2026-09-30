@@ -2,9 +2,11 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -88,6 +90,35 @@ type GeminiTuning struct {
 	ToolChoice      string // ""|"auto"|"required"|"none" (required maps to Gemini ANY)
 }
 
+// HostedToolRequest is a one-request directive to declare a provider-side
+// (hosted) tool on the request. It is set only on the independent
+// sub-requests issued by the local hosted tools; main-conversation requests
+// never carry it. The family adapters place the raw declaration and
+// tool_choice without interpreting them, so a new tool or a new declaration
+// version needs no Go change.
+type HostedToolRequest struct {
+	// Name is the local hosted tool name, used in diagnostics and errors.
+	Name string
+	// Declaration is the raw JSON declaration placed into the target family's
+	// tools array.
+	Declaration json.RawMessage
+	// Force is the raw tool_choice value that forces the declaration. nil
+	// omits tool_choice: the declaration stays declared but nothing forces
+	// the call (the degraded hint-only retry).
+	Force json.RawMessage
+	// Include lists provider-side include selectors (the Responses include
+	// array); families without an include surface ignore it.
+	Include []string
+	// Headers are extra HTTP headers for the sub-request, applied after the
+	// standard provider headers so a declaration can override them.
+	Headers map[string]string
+	// RetrySafe allows replay after an uncertain transport outcome.
+	RetrySafe bool
+	// Messages and Container carry request-local Anthropic continuation state.
+	Messages  []json.RawMessage
+	Container string
+}
+
 // RequestTuning bundles all provider-specific tuning parameters for a single
 // LLM request. Each provider reads only its own sub-struct.
 type RequestTuning struct {
@@ -95,6 +126,10 @@ type RequestTuning struct {
 	OpenAI                OpenAITuning
 	Gemini                GeminiTuning
 	SupportedServiceTiers map[config.ServiceTier]bool
+	// HostedTool asks the target to declare a provider-side (hosted) tool and
+	// run it server-side. Transient: it is set per sub-request through the
+	// next-request tuning override and is not part of any persisted state.
+	HostedTool *HostedToolRequest
 	// DisableReasoning suppresses reasoning/thinking request controls for this
 	// request. It is used when replayed history cannot satisfy the target
 	// provider's reasoning continuity contract.
@@ -475,6 +510,22 @@ func (p *ProviderConfig) ResponsesCompat(modelID string) *config.ResponsesCompat
 		merged.MCPAdditionalTools = modelCfg.MCPAdditionalTools
 	}
 	return merged
+}
+
+// HostedToolsCompat resolves the hosted_tools catalog entries enabled for a
+// target. A non-empty model-level list replaces the provider default; an
+// absent list inherits it; an explicit empty list disables all hosted tools. An unconfigured pair
+// returns nil, which callers treat as "no hosted tools enabled".
+func (p *ProviderConfig) HostedToolsCompat(modelID string) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if model, ok := p.models[modelID]; ok && model.Compat != nil && model.Compat.HostedTools != nil {
+		return slices.Clone(*model.Compat.HostedTools)
+	}
+	if p.compat != nil && p.compat.HostedTools != nil {
+		return slices.Clone(*p.compat.HostedTools)
+	}
+	return nil
 }
 
 // ApplyPatchCompat resolves provider defaults with model-level overrides for

@@ -1310,7 +1310,7 @@ func TestParseSSEStreamAggregatesAnthropicCacheUsage(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -1352,7 +1352,7 @@ func TestParseSSEStreamErrorEventAfterTextReturnsAPIError(t *testing.T) {
 		`data: {"type":"error","error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
 		"",
 	}, "\n")
-	_, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	_, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr.Code != "upstream_connection_error" {
 		t.Fatalf("err = %T %v, want provider API error (partial stays on screen, no rollback)", err, err)
@@ -1366,7 +1366,7 @@ func TestParseSSEStreamPreservesStatuslessMessagesError(t *testing.T) {
 		"",
 	}, "\n")
 
-	_, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	_, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok {
 		t.Fatalf("err = %T %v, want *APIError", err, err)
@@ -1407,7 +1407,7 @@ func TestParseSSEStreamSkipsToolUseWithEmptyName(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -1457,7 +1457,7 @@ func TestParseSSEStreamDoesNotEmitStartOrDeltaForEmptyNameToolUse(t *testing.T) 
 		case message.StreamDeltaToolUseEnd:
 			ends = append(ends, *delta.ToolCall)
 		}
-	}, nil)
+	}, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -1490,7 +1490,7 @@ func TestParseSSEStreamDoesNotEmitToolEndForMalformedEOFToolUse(t *testing.T) {
 		if delta.Type == message.StreamDeltaToolUseEnd {
 			toolEnds++
 		}
-	}, nil)
+	}, nil, false)
 	if toolEnds != 0 {
 		t.Fatalf("tool_use_end callbacks = %d, want 0", toolEnds)
 	}
@@ -1521,7 +1521,7 @@ func TestParseSSEStreamAdoptsMessageDeltaInputUsage(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -1552,7 +1552,7 @@ func TestParseSSEStreamMessageDeltaZeroUsageDoesNotClobberStartUsage(t *testing.
 		"",
 	}, "\n")
 
-	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -1604,7 +1604,7 @@ func TestParseSSEStreamPreservesInitialBlockContent(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -1629,7 +1629,7 @@ func TestParseSSEStreamKeepsInterruptedTextWithoutMessageStop(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	if err == nil {
 		if resp == nil || resp.Content != "hello" || resp.StopReason != "interrupted" {
 			t.Fatalf("resp = %#v, want interrupted partial text", resp)
@@ -1669,7 +1669,7 @@ func TestParseSSEStreamInterruptedTextDropsPartialToolAndThinking(t *testing.T) 
 		case message.StreamDeltaThinkingEnd:
 			sawThinkingEnd = true
 		}
-	}, nil)
+	}, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream returned error: %v", err)
 	}
@@ -1700,7 +1700,7 @@ func TestParseSSEStreamAllowsMaxTokensTruncatedContentWithoutMessageStop(t *test
 		"",
 	}, "\n")
 
-	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -1724,7 +1724,7 @@ func TestParseSSEStreamEmitsProgressDeltas(t *testing.T) {
 		if delta.Progress != nil {
 			progress = append(progress, *delta.Progress)
 		}
-	}, nil)
+	}, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}
@@ -1847,7 +1847,7 @@ func TestParseSSEStreamParsesThinkingTokens(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil)
+	resp, err := parseSSEStream(strings.NewReader(stream), nil, nil, false)
 	if err != nil {
 		t.Fatalf("parseSSEStream: %v", err)
 	}

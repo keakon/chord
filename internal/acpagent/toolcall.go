@@ -37,7 +37,7 @@ func toolKind(name string) acp.ToolKind {
 		return acp.ToolKindEdit
 	case toolname.Delete:
 		return acp.ToolKindDelete
-	case toolname.Grep, toolname.Glob:
+	case toolname.Grep, toolname.Glob, toolname.WebSearch:
 		return acp.ToolKindSearch
 	case toolname.Shell, toolname.JobOutput, toolname.JobList, toolname.JobKill:
 		return acp.ToolKindExecute

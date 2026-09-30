@@ -133,7 +133,7 @@ func TestParseResponsesSSE_SeparatesFlattenedSummaryHeadings(t *testing.T) {
 		`data: {"type":"response.completed","response":{"id":"resp_summary","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}}`,
 	}, "\n\n") + "\n\n"
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(strings.NewReader(raw), nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(strings.NewReader(raw), nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestParseResponsesSSE_KeepsRawReasoningTextVerbatim(t *testing.T) {
 		`data: {"type":"response.completed","response":{"id":"resp_raw_reasoning","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}}`,
 	}, "\n\n") + "\n\n"
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(strings.NewReader(raw), nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(strings.NewReader(raw), nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}

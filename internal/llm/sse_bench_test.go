@@ -140,7 +140,7 @@ func TestResponsesFragmentsFixedSSEParse(t *testing.T) {
 	if count := bytes.Count(responsesFragmentsCallbackFixedFixture, []byte(`"type":"response.output_text.delta"`)); count != 117 {
 		t.Fatalf("delta count = %d, want 117", count)
 	}
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader(responsesFragmentsCallbackFixedFixture), nil, nil, nil, "", false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader(responsesFragmentsCallbackFixedFixture), nil, nil, nil, "", false, false)
 	if err != nil {
 		t.Fatalf("parse fragmented fixed Responses SSE: %v", err)
 	}
@@ -173,7 +173,7 @@ func BenchmarkResponsesFragmentedText(b *testing.B) {
 					if delta.Type == message.StreamDeltaText {
 						emitted += len(delta.Text)
 					}
-				}, collector, nil, "", false)
+				}, collector, nil, "", false, false)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -229,7 +229,7 @@ func BenchmarkSSEParseWithCallback(b *testing.B) {
 				case "openai":
 					resp, err = parseOpenAISSEStreamOptions(reader, cb, nil, false)
 				case "responses", "responses_ws":
-					resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, nil, nil, "", false)
+					resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, cb, nil, nil, "", false, false)
 				default:
 					b.Fatalf("unsupported provider %q", provider)
 				}
@@ -290,7 +290,7 @@ func BenchmarkSSEParseWithCollector(b *testing.B) {
 				case "openai":
 					resp, err = parseOpenAISSEStreamOptions(reader, nil, collector, false)
 				case "responses", "responses_ws":
-					resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, collector, nil, "", false)
+					resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, collector, nil, "", false, false)
 				default:
 					b.Fatalf("unsupported provider %q", provider)
 				}
@@ -405,11 +405,11 @@ func parseSSEBenchFixture(fixture sseBenchFixture) (*message.Response, error) {
 	reader := bytes.NewReader(fixture.BodyBytes)
 	switch fixture.Provider {
 	case "anthropic":
-		return parseSSEStream(reader, nil, nil)
+		return parseSSEStream(reader, nil, nil, false)
 	case "openai":
 		return parseOpenAISSEStreamOptions(reader, nil, nil, false)
 	case "responses", "responses_ws":
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false)
 		return resp, err
 	default:
 		return nil, fmt.Errorf("unsupported provider %q", fixture.Provider)
