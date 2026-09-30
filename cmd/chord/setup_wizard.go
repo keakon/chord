@@ -281,7 +281,10 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 		case "4":
 			// Skip for now.
 		}
-		nextStep = "chord doctor models"
+		// Quote the configured ref so the suggested command is safe to paste,
+		// including when a custom provider or model contains shell characters.
+		modelRef := cfgInput.ProviderName + "/" + cfgInput.ModelName
+		nextStep = "chord doctor models --model '" + strings.ReplaceAll(modelRef, "'", "'\"'\"'") + "'"
 	}
 
 	fmt.Fprintln(out)
@@ -401,6 +404,7 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 	if limitReminder != "" {
 		fmt.Fprintln(out, limitReminder)
 	}
+	fmt.Fprintln(out, "Model access depends on your account and endpoint. Verify the configured model before starting; edit config.yaml if your account needs a different model.")
 	if nextStep != "" {
 		fmt.Fprintf(out, "\nNext step:\n  %s\n", nextStep)
 	}

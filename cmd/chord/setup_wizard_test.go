@@ -69,7 +69,7 @@ func TestRunInitialSetupWizardWritesFilesAndHidesAPIKey(t *testing.T) {
 	if cfg.Providers["openai"].Type != config.ProviderTypeResponses {
 		t.Fatalf("provider type = %q", cfg.Providers["openai"].Type)
 	}
-	if got := cfg.ModelPools["default"]; len(got) != 1 || got[0] != "openai/gpt-6-astra" {
+	if got := cfg.ModelPools["default"]; len(got) != 1 || got[0] != "openai/gpt-6.1-sol" {
 		t.Fatalf("model_pools.default = %#v", got)
 	}
 	if runtime.GOOS == "darwin" {
@@ -103,8 +103,11 @@ func TestRunInitialSetupWizardWritesFilesAndHidesAPIKey(t *testing.T) {
 	if !strings.Contains(output, configPath) || !strings.Contains(output, authPath) {
 		t.Fatalf("wizard output did not include real paths: %s", output)
 	}
-	if !strings.Contains(output, "chord doctor models") {
+	if !strings.Contains(output, "chord doctor models --model 'openai/gpt-6.1-sol'") {
 		t.Fatalf("wizard output missing next step: %s", output)
+	}
+	if !strings.Contains(output, "Model access depends on your account and endpoint") {
+		t.Fatalf("wizard output missing model access guidance: %s", output)
 	}
 	if !strings.Contains(output, "Edit config.yaml") || !strings.Contains(output, "Edit auth.yaml") {
 		t.Fatalf("wizard output missing edit guidance: %s", output)
@@ -408,7 +411,7 @@ func TestRunInitialSetupWizardCodexSkeletonSupportsAuthCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(output): %v", err)
 	}
-	if strings.Contains(string(outData), "Model [gpt-6-astra]:") {
+	if strings.Contains(string(outData), "Model [gpt-6.1-sol]:") {
 		t.Fatalf("unexpected Codex model prompt in output: %s", string(outData))
 	}
 	if !loginCalled {
@@ -424,7 +427,7 @@ func TestRunInitialSetupWizardCodexSkeletonSupportsAuthCommand(t *testing.T) {
 	if !strings.EqualFold(strings.TrimSpace(providerCfg.Preset), config.ProviderPresetCodex) {
 		t.Fatalf("provider preset = %q, want %q", providerCfg.Preset, config.ProviderPresetCodex)
 	}
-	wantModels := []string{"gpt-5.2", "gpt-5.3-codex", "gpt-5.4", "gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
+	wantModels := []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"}
 	for _, model := range wantModels {
 		if _, ok := providerCfg.Models[model]; !ok {
 			t.Fatalf("missing configured codex model %q", model)

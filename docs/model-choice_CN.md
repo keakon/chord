@@ -33,7 +33,7 @@ Chord 只接受 API key，或 Codex OAuth（`chord auth codex`）。订阅如果
 
 ### 4. 不太在意账单
 
-把当时能拿到的最强 API 模型（按这份口径是 GPT-6 Sol 和 Claude Opus 5.5）留给 expert 和 reviewer；架构设计这类判断型工作，以及特别难或已经失败过的活，再退回 GPT-6 Astra、Claude Fable 5.1。orchestrator、explorer、coder 用便宜、快的模型就够了，用不到旗舰。
+把当时能拿到的最强 API 模型（按这份口径是 GPT-6.1 Sol 和 Claude Opus 5.5）留给 expert 和 reviewer；架构设计这类判断型工作，以及特别难或已经失败过的活，再退回 GPT-6 Astra、Claude Fable 5.1。orchestrator、explorer、coder 用便宜、快的模型就够了，用不到旗舰。
 
 ## 哪个角色用什么模型？
 
@@ -46,12 +46,12 @@ Chord 只接受 API key，或 Codex OAuth（`chord auth codex`）。订阅如果
 | orchestrator | Gemini 3.8 Flash、DeepSeek V4.1 Flash、GPT-6 Luna | 分类、派工、合成，每个回合都跑。 |
 | explorer | DeepSeek V4.1 Flash、Gemini 3.8 Flash、GPT-6 Luna | 只读探路，报告文件在哪，不做判断；DeepSeek 缓存读最省，Gemini 读资料更强。 |
 | coder | DeepSeek V4.1 Flash、Gemini 3.8 Flash、GPT-6 Luna | 改哪、改成什么都已写清，这类机械改动它们都够用。 |
-| expert | Claude Opus 5.5、GPT-6 Sol | 根因、架构取舍、并发与热路径，判断错了会变成隐性债。 |
-| reviewer | Claude Opus 5.5、GPT-6 Sol | 只抓回归与不变量，不重做设计。 |
+| expert | Claude Opus 5.5、GPT-6.1 Sol | 根因、架构取舍、并发与热路径，判断错了会变成隐性债。 |
+| reviewer | Claude Opus 5.5、GPT-6.1 Sol | 只抓回归与不变量，不重做设计。 |
 
 架构设计和根因判断是 expert 里最吃判断力的一头。Fable 5.1（Anthropic 渠道）和 GPT-6 Astra（OpenAI 渠道）在这类活上的记录仍最扎实，设计级决策优先用它们。其余 expert 活交给上面表里那两个默认模型，啃不动再升到 Fable 5.1 或 Astra。
 
-只订了套餐、没单独买 API key 时，就从套餐目录里挑：orchestrator、explorer、coder 用最便宜的模型，expert、reviewer 用额度允许范围内最强的模型。Codex 对应 GPT-6 Luna 和 GPT-6 Astra（账号里没有 Astra 就用 GPT-6 Sol）。
+只订了套餐、没单独买 API key 时，就从套餐目录里挑：orchestrator、explorer、coder 用最便宜的模型，expert、reviewer 用额度允许范围内最强的模型。Codex 对应 GPT-6 Luna 和 GPT-6 Astra（账号里没有 Astra 就用 GPT-6.1 Sol）。
 
 落地就按用途拆池：`deep` 放 expert 和 reviewer 的模型，`fast` 放 explorer 和 coder 的模型。团队示例把 orchestrator 也放在 `deep`；实际使用中它用不到旗舰，放进 `fast` 或单独的便宜池都行。
 
@@ -75,7 +75,7 @@ Chord 只接受 API key，或 Codex OAuth（`chord auth codex`）。订阅如果
 这两家都不用订阅，单买 API key 就能用，所以没有 ChatGPT、Claude 套餐也能选 Opus 5.5 和 Sol；完全不想碰这两家的话，从第 3 条往下看。
 
 1. **Claude Opus 5.5**：用 Anthropic API key 按量付费。多数工作上能接近 Fable 5.1，价格低得多，缓存读取也适合反复读同一批文件；架构设计、根因判断这类不想让便宜模型拿主意的活，再升到 Fable 5.1。
-2. **GPT-6 Sol**：单独买 OpenAI API key 就行。它是 GPT-6 一代的编程与 agentic 模型，价格只是 Astra 的一小部分，窗口同为 1.05M；编程、调试和 agentic 实现这类活用它，架构设计和根因判断再升到 GPT-6 Astra；中转还没上架 Sol 时继续用 Astra。
+2. **GPT-6.1 Sol**：单独买 OpenAI API key 就行。它是 GPT-6 一代的编程与 agentic 模型，价格只是 Astra 的一小部分，窗口同为 1.05M，缓存读取也便宜；编程、调试和 agentic 实现这类活用它，架构设计和根因判断再升到 GPT-6 Astra；中转还没上架 Sol 时继续用 Astra。
 3. **Muse Spark 1.3**（Meta Model API）：GPT、Claude 渠道之外最强的一个。长程实现、大仓库是它的强项；根因和架构上的判断弱一档，派给它时把 expert 的活拆小、多验证。
 4. **GLM-5.3 或 Kimi K3**：开源模型里最强的两个，OpenCode Go、Command Code GOAT 这类开源模型套餐就有。能顶 expert 的活，但架构、并发的终审别交给它们。
 5. **上面都没有**：把 expert 的问题压小：让便宜模型复现、缩小范围；等判断错了会变成隐性债时，再回头看前面几条。日常讨论可以让 Gemini 3.8 Flash 先顶一轮，别让它当终审。

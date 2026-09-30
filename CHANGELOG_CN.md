@@ -24,6 +24,7 @@
 
 ### 新功能
 
+- 初始安装向导的 Codex OAuth 目录现在包含 GPT-6.1 Sol（`gpt-6.1-sol`），分配同为 `1050000 / 922000 / 128000`，且新装的默认模型池以它开头（GPT-6 Astra 退为回退项）；API key 路径为 OpenAI Responses 端点预填的默认模型同样改为 GPT-6.1 Sol。[模型配置速查](./docs/model-configs_CN.md#codex-oauth-preset)里列出了新条目。已有的 `config.yaml` 不受影响，保持你原本的配置。
 - 工具确认框支持只读查看完整参数，包括较长的批量编辑；查看后仍需明确批准调用。
 - 新增 `chord acp`：通过 stdio 提供 Agent Client Protocol，让 Zed 这类 ACP 客户端把 Chord 当作自己的 agent。工作目录由客户端在 `session/new` 里给出；回答、思考块和工具调用（分类、标题、目标文件、原始参数、输出与文件 diff）以 `session/update` 流式回传；取消本轮返回 `cancelled`；`file://` 资源链接会变成与 TUI 一致的 `<file path="...">` 上下文块。stdout 只跑 JSON-RPC，每个进程把自己的日志写进日志目录。一个 `chord acp` 进程服务客户端开出的所有会话，上限由 `--max-sessions`（默认 8）控制，每个会话一个子进程，各自持有自己的工作目录、runtime 与 MCP server；`session/close` 会释放对应会话和它的进程。确认弹窗尚未接通，在此之前需要授权的工具会等 Chord 自己的确认超时。详见 [ACP Agent 模式](./docs/acp_CN.md)。
 - 新增 `chord sessions project <session-id>` 命令：把已落盘会话投影成每 turn 一行的 JSONL 事实（turn 边界、带 digest 的工具结果、工具归因的文件变更、压缩边界），用于复盘与完成报告取证。只读，源会话被别的进程占用时也能跑；turn 成因只报 `user_message` / `inferred` / `unknown`，不硬猜用户 continue 还是后台唤醒。`--out` 会拒绝写进会话目录内（或硬链接到其中文件）的路径，投影不可能覆盖源会话；`--max-bytes` 可调高 256 KiB 的 JSONL 上限，长会话不再受限。

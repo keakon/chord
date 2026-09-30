@@ -111,13 +111,14 @@ openai:
   - "$OPENAI_API_KEY"
 ```
 
-### GPT-5.4 / 5.5 / 5.6 / 6
+### GPT-5.4 / 5.5 / 5.6 / 6 / 6.1
 
-这四个系列的窗口、reasoning、输入模态和压缩策略大多相同。GPT-5.6（Sol /
-Terra / Luna）与 GPT-6（Astra / Sol / Luna）共用 `&window-1050k-128k`、
-`&gpt-reasoning-full` 和 `&gpt-cost-first`，只是各自的 `cost` 不同；GPT-5.4 /
-5.5 用较窄的 reasoning 档位和 400K 窗口。1.05M 档不公布独立输入上限，只声明
-`context` 和 `output`，Chord 按 `context - output` 推出 922K 输入预算。
+这五个系列的窗口、reasoning、输入模态和压缩策略大多相同。GPT-5.6（Sol /
+Terra / Luna）、GPT-6（Astra / Sol / Luna）与 GPT-6.1 Sol 共用
+`&window-1050k-128k`、`&gpt-reasoning-full` 和 `&gpt-cost-first`，只是各自的
+`cost` 不同；GPT-5.4 / 5.5 用较窄的 reasoning 档位和 400K 窗口。1.05M 档不
+公布独立输入上限，只声明 `context` 和 `output`，Chord 按 `context - output`
+推出 922K 输入预算。
 
 ```yaml
 model_templates:
@@ -221,10 +222,23 @@ providers:
               output: 0.75
               cache_read: 0.02
               cache_write: 0.25
+      gpt-6.1-sol:
+        <<: [*window-1050k-128k, *gpt-reasoning-full, *vision-pdf, *gpt-cost-first]
+        cost:
+          input: 2
+          output: 10
+          cache_read: 0.1
+          cache_write: 2.5
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 4
+              output: 15
+              cache_read: 0.2
+              cache_write: 5
 
 model_pools:
   default:
-    - openai/gpt-6-sol@medium
+    - openai/gpt-6.1-sol@medium
     - openai/gpt-5.6-sol@xhigh
 ```
 
@@ -240,6 +254,7 @@ model_pools:
 | GPT-6 Astra | 1.05M | 文本、图片、PDF | $10 / $50 | 512K–1M 为 96.3% |
 | GPT-6 Sol | 1.05M | 文本、图片、PDF | $2 / $10 | 未公布分段结果 |
 | GPT-6 Luna | 1.05M | 文本、图片 | $0.10 / $0.50 | 未公布分段结果 |
+| GPT-6.1 Sol | 1.05M | 文本、图片、PDF | $2 / $10 | 未公布分段结果 |
 
 价格只列基础输入 / 输出；配置里的 `cost` 已含缓存价格和长上下文费率。
 GPT-5.4 / GPT-5.5 支持 `supported_service_tiers: [fast, slow]`，需要
@@ -251,7 +266,7 @@ service tier 时在 provider 或模型条目上声明，并在 `cost` 里配倍�
   `400000 / 272000 / 128000` 配置。
 - **reasoning**：GPT-5.6 与 GPT-6 的 effort 档位为
   `low / medium / high / xhigh / max`，默认 `medium`；GPT-5.6 与 GPT-6 Sol、
-  Luna 还接受 `none`，GPT-6 Astra 不接受。GPT-5.4 / GPT-5.5 只有
+  Luna 还接受 `none`，GPT-6 Astra 与 GPT-6.1 Sol 不接受。GPT-5.4 / GPT-5.5 只有
   `high`、`xhigh` 两个 variant。Responses 启用 reasoning 时默认请求
   `summary: auto`，不需要摘要时可设为 `none`。GPT-5.6 的
   `reasoning.mode: pro` 当前未暴露。
@@ -271,13 +286,13 @@ Terra 可按质量需要把阈值提高到 `0.5–0.65`；Luna 不建议照搬�
 
 GPT-6 Astra 在 256K–512K 为 100%、512K–1M 为 96.3%，接受 272K 以上费率后
 可以把阈值提高到 `0.6–0.7`（约 553K–645K）；`0.7–0.8` 更偏容量，质量代价
-也更明显。GPT-6 Sol / Luna 尚无公开分段结果，先沿用成本优先阈值，等自己
+也更明显。GPT-6.1 Sol / GPT-6 Sol / Luna 尚无公开分段结果，先沿用成本优先阈值，等自己
 量过长上下文质量再调整。
 
-验证：
+模型是否可用取决于账号和端点。初始安装向导默认使用 [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol)；启动前先验证访问权限，需要时在 `config.yaml` 中选择账号可用的其他模型：
 
 ```bash
-chord doctor models --model openai/gpt-6-sol@medium
+chord doctor models --model openai/gpt-6.1-sol@medium
 chord doctor models --model openai/gpt-5.4@xhigh
 ```
 
@@ -298,14 +313,14 @@ providers:
       gpt-6-astra: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
       gpt-6-sol: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
       gpt-6-luna: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision]}
+      gpt-6.1-sol: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
       gpt-5.6-sol: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
       gpt-5.4: {<<: [*window-codex-1050k-128k, *gpt-reasoning-basic, *vision-pdf]}
       gpt-5.5: {<<: [*window-400k-128k, *gpt-reasoning-basic, *vision-pdf]}
 
 model_pools:
   default:
-    - codex/gpt-6-sol@medium
-    - codex/gpt-5.5@xhigh
+    - codex/gpt-6.1-sol@medium
 ```
 
 Codex 的窗口由 `context`、`input`、`output` 三个字段共同描述：`context`
@@ -326,10 +341,11 @@ chord auth codex
 - 每个条目都带上了与上文配方相同的 `reasoning` 和 `modalities`。没有
   `reasoning` 块时请求里完全不发 reasoning 参数，effort 交给后端默认值，
   也不会请求摘要。
-- 初始安装向导按同样的档位写完整 Codex 目录（另外还有 `gpt-5.2`、
-  `gpt-5.3-codex`、`gpt-5.6-terra`、`gpt-5.6-luna`），但只写 `limit`、
-  模型池也不带后缀；想让这些模型也有思考摘要和附件输入，按上面的方式补
-  `reasoning` 与 `modalities`。
+- 初始安装向导把七个模型按顺序加入默认模型池：`gpt-6.1-sol`、
+  `gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna`、`gpt-5.6-sol`、
+  `gpt-5.6-terra`、`gpt-5.6-luna`。首选 Sol，其余模型作为备用。
+  模型目录中的每项只写 `limit`，模型池引用也不带后缀；需要思考摘要和附件输入时，
+  按上面的方式补充 `reasoning` 与 `modalities`。
 - Codex 订阅窗口由服务端模型目录控制，而不是模型页：目录值历史上多次变动、
   账号间也不一致（输入侧出现过低至 272K 的档位）。`/status` 在首个请求前可能
   显示配置值、请求后才回落真实值。依赖 1.05M 窗口前先实测该端点实际接受的
@@ -338,6 +354,9 @@ chord auth codex
   或更新版本），Codex 订阅窗口官方尚未公布。配方沿用 GPT-5.6 Sol 的
   `1050000 / 922000 / 128000` 作为保守起点；上线后请按账号的服务端目录
   核对，并把三个字段都调成实测窗口再用于长会话。
+- 模型是否可用取决于 Codex 账号的服务端目录。用
+  `chord doctor models --model codex/gpt-6.1-sol` 验证访问权限；provider 名不是
+  `codex` 时，换成配置中的名称。
 - 这份 preset 不含 `cost`（订阅不按 token 计费），也不含 `compaction`：
   按上文 GPT 的[上下文压缩](#上下文压缩)一节挑一个阈值，写在模板或模型条目上。
   触发点按实测可用预算计算；API 的 >272K 整单 2× 计价悬崖只在路由实际

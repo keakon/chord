@@ -86,9 +86,9 @@ openai:
   - "$OPENAI_API_KEY"
 ```
 
-### GPT-5.4 / 5.5 / 5.6 / 6
+### GPT-5.4 / 5.5 / 5.6 / 6 / 6.1
 
-These four families share mostly the same window, reasoning, input modalities, and compaction strategy. GPT-5.6 (Sol / Terra / Luna) and GPT-6 (Astra / Sol / Luna) use `&window-1050k-128k`, `&gpt-reasoning-full`, and `&gpt-cost-first`, and differ only in their `cost` blocks; GPT-5.4 / 5.5 use a narrower reasoning set and the 400K window. The 1.05M tier publishes no separate input cap, so it declares only `context` and `output`, and Chord derives the 922K input budget as `context - output`.
+These five families share mostly the same window, reasoning, input modalities, and compaction strategy. GPT-5.6 (Sol / Terra / Luna), GPT-6 (Astra / Sol / Luna), and GPT-6.1 Sol use `&window-1050k-128k`, `&gpt-reasoning-full`, and `&gpt-cost-first`, and differ only in their `cost` blocks; GPT-5.4 / 5.5 use a narrower reasoning set and the 400K window. The 1.05M tier publishes no separate input cap, so it declares only `context` and `output`, and Chord derives the 922K input budget as `context - output`.
 
 ```yaml
 model_templates:
@@ -192,10 +192,23 @@ providers:
               output: 0.75
               cache_read: 0.02
               cache_write: 0.25
+      gpt-6.1-sol:
+        <<: [*window-1050k-128k, *gpt-reasoning-full, *vision-pdf, *gpt-cost-first]
+        cost:
+          input: 2
+          output: 10
+          cache_read: 0.1
+          cache_write: 2.5
+          input_tiers:
+            - above_input_tokens: 272000
+              input: 4
+              output: 15
+              cache_read: 0.2
+              cache_write: 5
 
 model_pools:
   default:
-    - openai/gpt-6-sol@medium
+    - openai/gpt-6.1-sol@medium
     - openai/gpt-5.6-sol@xhigh
 ```
 
@@ -211,11 +224,12 @@ model_pools:
 | GPT-6 Astra | 1.05M | text, image, PDF | $10 / $50 | 96.3% at 512K–1M |
 | GPT-6 Sol | 1.05M | text, image, PDF | $2 / $10 | no banded results published |
 | GPT-6 Luna | 1.05M | text, image | $0.10 / $0.50 | no banded results published |
+| GPT-6.1 Sol | 1.05M | text, image, PDF | $2 / $10 | no banded results published |
 
 Prices list base input / output only; the `cost` blocks in the configs also carry cache rates and long-context tiers. GPT-5.4 / GPT-5.5 support `supported_service_tiers: [fast, slow]`: declare it on the provider or the model entry when you need a service tier, and set the multiplier in `cost`.
 
 - **Window**: the 1.05M tier declares only `context` and `output`, no `input` (these models publish no separate input cap, so the 922K input budget derives from `context - output`). GPT-5.5 is on the 400K tier and keeps `input: 272000`. When an account or relay still serves the older profile, configure the affected models as `400000 / 272000 / 128000`.
-- **reasoning**: GPT-5.6 and GPT-6 take `low / medium / high / xhigh / max`, with `medium` as the default; GPT-5.6 and GPT-6 Sol / Luna also accept `none`, while GPT-6 Astra does not. GPT-5.4 / GPT-5.5 only have the `high` and `xhigh` variants. While reasoning is active, Responses requests `summary: auto` by default; set it to `none` when you do not want a summary. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
+- **reasoning**: GPT-5.6 and GPT-6 take `low / medium / high / xhigh / max`, with `medium` as the default; GPT-5.6 and GPT-6 Sol / Luna also accept `none`, while GPT-6 Astra and GPT-6.1 Sol do not. GPT-5.4 / GPT-5.5 only have the `high` and `xhigh` variants. While reasoning is active, Responses requests `summary: auto` by default; set it to `none` when you do not want a summary. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
 - **Long-context pricing** (official API): once a prompt exceeds 272K input tokens (exactly 272K does not trigger it), the whole request is repriced at 2x input / cache and 1.5x output. Relays and Codex OAuth set their own prices, so this may not apply.
 
 #### Compaction
@@ -224,12 +238,12 @@ The examples use `threshold: 0.25` for GPT-5.6 / GPT-6, which on the 922K budget
 
 The band averages are only a rough guide to quality drift: GPT-5.6 Sol / Terra hold 91.5% / 89.6% at 256K–512K and drop to 73.8% / 72.5% at 512K–1M, while Luna sits at 41.3% in both. Sol / Terra can raise the threshold to `0.5–0.65` when quality needs it; Luna should not copy that.
 
-GPT-6 Astra measures 100% at 256K–512K and 96.3% at 512K–1M, so once you accept the above-272K rate the threshold can go to `0.6–0.7` (~553K–645K); `0.7–0.8` leans further into capacity at a clearer quality cost. GPT-6 Sol / Luna have no published banded results, so start cost-first and adjust only after measuring their long-context quality yourself.
+GPT-6 Astra measures 100% at 256K–512K and 96.3% at 512K–1M, so once you accept the above-272K rate the threshold can go to `0.6–0.7` (~553K–645K); `0.7–0.8` leans further into capacity at a clearer quality cost. GPT-6.1 Sol / GPT-6 Sol / Luna have no published banded results, so start cost-first and adjust only after measuring their long-context quality yourself.
 
-Verify:
+Model access depends on your account and endpoint. The first-run wizard defaults to [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol); verify access before starting and choose another available model in `config.yaml` if needed:
 
 ```bash
-chord doctor models --model openai/gpt-6-sol@medium
+chord doctor models --model openai/gpt-6.1-sol@medium
 chord doctor models --model openai/gpt-5.4@xhigh
 ```
 
@@ -248,14 +262,14 @@ providers:
       gpt-6-astra: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
       gpt-6-sol: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
       gpt-6-luna: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision]}
+      gpt-6.1-sol: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
       gpt-5.6-sol: {<<: [*window-codex-1050k-128k, *gpt-reasoning-full, *vision-pdf]}
       gpt-5.4: {<<: [*window-codex-1050k-128k, *gpt-reasoning-basic, *vision-pdf]}
       gpt-5.5: {<<: [*window-400k-128k, *gpt-reasoning-basic, *vision-pdf]}
 
 model_pools:
   default:
-    - codex/gpt-6-sol@medium
-    - codex/gpt-5.5@xhigh
+    - codex/gpt-6.1-sol@medium
 ```
 
 A Codex window is described by three fields together: `context` is the total input-plus-output window, while `input` and `output` are the separate hard caps within it, and the two maxima do not need to add up to `context`. Near the input cap, less space remains for output. The main recipes use `&window-1050k-128k` for official APIs that publish no separate input cap, so here they switch to `&window-codex-1050k-128k`, which carries `input: 922000`.
@@ -270,9 +284,10 @@ Notes:
 
 - Keep API-key and Codex OAuth providers separate when you use both because their credentials and model allocations differ, and configure each one's limits separately.
 - Each entry carries the same `reasoning` and `modalities` as its recipe above. Without a `reasoning` block the request carries no reasoning parameters at all, so the effort stays at the backend default and no summary is requested.
-- The first-run wizard writes the full catalog (it also lists `gpt-5.2`, `gpt-5.3-codex`, `gpt-5.6-terra`, and `gpt-5.6-luna`) with `limit` only and no pool suffixes; add `reasoning` and `modalities` the same way when you want summaries and attachments for those models.
+- The first-run wizard adds seven models to the default pool in this order: `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. Sol is the first choice; the remaining models are fallback targets. Each catalog entry contains only `limit`, and the pool references have no suffixes. Add `reasoning` and `modalities` as shown above when you want reasoning summaries and attachments.
 - Codex subscription windows are controlled by the server-delivered model catalog, not the model page: those catalog values have changed repeatedly and differed between accounts (input-side caps as low as 272K have shipped while the model page advertised 1.05M). `/status` may show the configured value before the first request and the real cap only after it. Before relying on a 1.05M window for long sessions, measure what the endpoint actually accepts, and fall back to `400000 / 272000 / 128000` for that provider when your account or relay still serves the older profile.
 - GPT-6 Astra is rolling out to Codex over the first weeks after launch (it requires Codex CLI 0.153.0 or newer) and its Codex subscription window is not published. The recipe uses the same `1050000 / 922000 / 128000` allocation as GPT-5.6 Sol as a conservative starting point; verify against your account's server catalog and adjust all three fields to the measured window before relying on it for long sessions.
+- Model availability depends on your Codex account's server-delivered catalog. Run `chord doctor models --model codex/gpt-6.1-sol` to verify access, using your configured provider name when it differs from `codex`.
 - This preset has no `cost` block (a subscription is not billed per token) and no `compaction` block: take a threshold from the [Compaction](#compaction) section above and set it on the template or the model entry. Compute the trigger point from the measured usable budget; the API's whole-request 2× repricing cliff above 272K applies only where the route actually charges OpenAI's long-context rates.
 - These values track the current Codex model catalog and may change with a future Codex release. Update all three fields together when the backend allocation changes.
 

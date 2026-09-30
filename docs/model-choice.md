@@ -33,7 +33,7 @@ A flat subscription beats per-token billing when you use it every day. Subscribe
 
 ### 4. Bill size is not the issue
 
-Give the strongest API models you can get (GPT-6 Sol and Claude Opus 5.5 as of this snapshot) to expert and reviewer, and keep GPT-6 Astra and Claude Fable 5.1 for architecture design and for work that is unusually hard or has already failed. Keep a cheap fast model on orchestrator, explorer, and coder; they do not need a flagship.
+Give the strongest API models you can get (GPT-6.1 Sol and Claude Opus 5.5 as of this snapshot) to expert and reviewer, and keep GPT-6 Astra and Claude Fable 5.1 for architecture design and for work that is unusually hard or has already failed. Keep a cheap fast model on orchestrator, explorer, and coder; they do not need a flagship.
 
 ## Which model goes to which role?
 
@@ -46,12 +46,12 @@ The names below are not built-in. Chord ships `builder` and `planner`. The five-
 | orchestrator | Gemini 3.8 Flash, DeepSeek V4.1 Flash, GPT-6 Luna | It classifies, dispatches, and synthesizes every turn. |
 | explorer | DeepSeek V4.1 Flash, Gemini 3.8 Flash, GPT-6 Luna | Read-only scouting; it reports where files are and makes no judgment calls. DeepSeek has the cheapest cache reads, Gemini reads material better. |
 | coder | DeepSeek V4.1 Flash, Gemini 3.8 Flash, GPT-6 Luna | What to change and how is already written down; mechanical edits are within reach of any of them. |
-| expert | Claude Opus 5.5, GPT-6 Sol | Root cause, architecture, concurrency, and hot paths; a wrong call becomes hidden debt. |
-| reviewer | Claude Opus 5.5, GPT-6 Sol | Catches regressions and invariant breaks; it does not redesign. |
+| expert | Claude Opus 5.5, GPT-6.1 Sol | Root cause, architecture, concurrency, and hot paths; a wrong call becomes hidden debt. |
+| reviewer | Claude Opus 5.5, GPT-6.1 Sol | Catches regressions and invariant breaks; it does not redesign. |
 
 Architecture design and root-cause work are the judgment-heavy end of expert. Fable 5.1 (Anthropic) and GPT-6 Astra (OpenAI) still have the strongest record there, so treat them as the first choice for design-level calls. The two defaults above carry the rest of expert work; escalate to Fable 5.1 or Astra when they stall.
 
-If you only have a subscription and no separate API keys, pick the same two levels from that plan's catalog: the cheapest model for orchestrator, explorer, and coder, and the strongest the plan can sustain for expert and reviewer. On Codex that is GPT-6 Luna and GPT-6 Astra (use GPT-6 Sol when the account does not include Astra).
+If you only have a subscription and no separate API keys, pick the same two levels from that plan's catalog: the cheapest model for orchestrator, explorer, and coder, and the strongest the plan can sustain for expert and reviewer. On Codex that is GPT-6 Luna and GPT-6 Astra (use GPT-6.1 Sol when the account does not include Astra).
 
 In practice, split pools by job: `deep` holds the expert and reviewer models and `fast` holds the explorer and coder models. The team example keeps orchestrator on `deep`; in real use it needs no flagship, so `fast` or its own cheap pool works too.
 
@@ -75,7 +75,7 @@ When the cheap tier keeps coming back with execution mistakes (multi-file edits 
 Neither vendor requires a subscription: both sell API keys, so Opus 5.5 and Sol stay on the table without a ChatGPT or Claude plan. If you want to stay off both vendors entirely, start at item 3.
 
 1. **Claude Opus 5.5**: pay as you go with an Anthropic API key. It lands near Fable 5.1 on most work for much less, and its cache reads suit re-reading the same files; for architecture design and other calls you would not want a cheaper model to get wrong, step up to Fable 5.1.
-2. **GPT-6 Sol**: buy an OpenAI API key on its own. It is the GPT-6 generation's coding and agentic model at a fraction of Astra's price, with the same 1.05M window; use it for coding, debugging, and agentic implementation work, and step up to GPT-6 Astra for architecture design and root-cause judgment; stay on Astra where a relay does not list Sol yet.
+2. **GPT-6.1 Sol**: buy an OpenAI API key on its own. It is the GPT-6 generation's coding and agentic model at a fraction of Astra's price, with the same 1.05M window and cheap cache reads; use it for coding, debugging, and agentic implementation work, and step up to GPT-6 Astra for architecture design and root-cause judgment; stay on Astra where a relay does not list Sol yet.
 3. **Muse Spark 1.3** (Meta Model API): the strongest model outside the GPT and Claude channels. Long-horizon implementation and large-repo work are its strengths; its root-cause and architecture judgment is a notch lower, so split expert work smaller and verify more.
 4. **GLM-5.3 or Kimi K3**: the strongest open models, carried by open-model plans such as OpenCode Go and Command Code GOAT. They can hold expert work, but not the final word on architecture or concurrency.
 5. **None of these**: keep the expert question small (have a cheap model reproduce it and narrow the range) and revisit the paid options above when a wrong call would become hidden debt. Gemini 3.8 Flash can hold a first discussion; do not let it be the final reviewer.
