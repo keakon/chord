@@ -639,11 +639,12 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	}
 
 	// Decide whether boundary proposals are applied this request. Rewriting the
-	// cached prefix at position p re-bills everything after p at input price
-	// (~10x the cache-read price), while the reduction saves its tokens on
+	// cached prefix at position p re-bills everything after p at cache-write
+	// price instead of cache-read price, while the reduction saves its tokens on
 	// every subsequent request. Flush when the cache is invalid anyway (first
-	// request on this model ref) or when the pending
-	// savings amortize the rewrite within a short horizon of future requests.
+	// request on this model ref) or when the pending savings amortize the
+	// rewrite within the bounded policy horizon. A queued checkpoint ends the
+	// current prefix's reuse period, so it suppresses speculative rewrites.
 	applyBoundary := true
 	if incrementalEnabled && frozenBoundary > 0 {
 		pendingSaved := 0
@@ -663,8 +664,13 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 		}
 		if earliestBoundary >= 0 {
 			cacheInvalidAnyway := modelSnapshot.ProjectedModelRunLength <= 1
-			tailTokens := estimateMessagesTokens(a.ctxMgr, prepared[earliestBoundary:])
-			amortized := pendingSaved*reductionFlushHorizonRequests >= cacheMissPenaltyRatio*tailTokens
+			// New messages were not cached: do not charge their ordinary input
+			// cost as a penalty for rewriting the previously sent prefix.
+			tailTokens := estimateMessagesTokens(a.ctxMgr, prepared[earliestBoundary:frozenBoundary])
+			horizon := a.reductionFlushHorizon()
+			billableInputTokens := estimateMessagesTokens(a.ctxMgr, prepared) + a.estimateFixedRequestTokens()
+			penaltyRatio := a.boundaryFlushPenaltyRatio(modelSnapshot, billableInputTokens)
+			amortized := horizon > 0 && float64(pendingSaved)*float64(horizon) >= penaltyRatio*float64(tailTokens)
 			applyBoundary = cacheInvalidAnyway || amortized
 		}
 	}

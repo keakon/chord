@@ -3,15 +3,180 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
+
+// newBoundaryReductionTestAgent builds the boundary-reduction harness with a
+// model cost entry registered for the running ref "p/m", so the flush decision
+// resolves pricing instead of falling back to the fixed ratio.
+func newBoundaryReductionTestAgent(t *testing.T, cost *config.ModelCost) *MainAgent {
+	t.Helper()
+	a := newTestMainAgent(t, t.TempDir())
+	a.projectConfig = &config.Config{
+		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
+			ReadLikeAgeTurns:     1,
+			ReadLikeOutputBytes:  80,
+			MinIncrementalTokens: 1 << 20,
+		}},
+		Providers: map[string]config.ProviderConfig{
+			"p": {Models: map[string]config.ModelConfig{"m": {Cost: cost}}},
+		},
+	}
+	a.runningModelRef = "p/m"
+	a.recordLLMModelRun("p/m")
+	a.recordLLMModelRun("p/m")
+	turnCtx, turnCancel := context.WithCancel(context.Background())
+	t.Cleanup(turnCancel)
+	a.turn = &Turn{ID: 1, Ctx: turnCtx, Cancel: turnCancel}
+	return a
+}
+
+func TestBoundaryCacheMissPenaltyRatio(t *testing.T) {
+	tests := []struct {
+		name   string
+		cost   *config.ModelCost
+		tokens int64
+		tier   config.ServiceTier
+		ttl    string
+		want   float64
+		ok     bool
+	}{
+		{name: "no cost entry", ok: false},
+		{name: "zero input price", cost: &config.ModelCost{CacheRead: 0.1}, ok: false},
+		{name: "ten to one caching", cost: &config.ModelCost{Input: 1, CacheRead: 0.1, CacheWrite: 1}, want: 9, ok: true},
+		{name: "fifty to one caching", cost: &config.ModelCost{Input: 1, CacheRead: 0.02}, want: 49, ok: true},
+		{name: "two to one caching", cost: &config.ModelCost{Input: 1, CacheRead: 0.5}, want: 1, ok: true},
+		{name: "unconfigured cache write falls back to input price", cost: &config.ModelCost{Input: 2, CacheRead: 0.2}, want: 9, ok: true},
+		{name: "explicit 1h cache write price", cost: &config.ModelCost{Input: 1, CacheRead: 0.1, CacheWrite: 1.25, CacheWrite1h: 2}, ttl: "1h", want: 19, ok: true},
+		{name: "default cache TTL uses ordinary write price", cost: &config.ModelCost{Input: 1, CacheRead: 0.1, CacheWrite: 1.25, CacheWrite1h: 2}, want: 11.5, ok: true},
+		{name: "explicit 5m cache TTL uses ordinary write price", cost: &config.ModelCost{Input: 1, CacheRead: 0.1, CacheWrite: 1.25, CacheWrite1h: 2}, ttl: "5m", want: 11.5, ok: true},
+		{name: "free cache reads hit the ceiling", cost: &config.ModelCost{Input: 1, CacheWrite: 1}, want: cacheMissPenaltyRatioCeiling, ok: true},
+		{name: "cache writes not cheaper than reads", cost: &config.ModelCost{Input: 1, CacheRead: 1, CacheWrite: 1}, want: 0, ok: true},
+		{
+			name: "service tier multiplier cancels out",
+			cost: &config.ModelCost{Input: 1, CacheRead: 0.1, ServiceTierMultipliers: &config.ServiceTierMultipliers{Fast: 3}},
+			tier: config.ServiceTierFast,
+			want: 9, ok: true,
+		},
+		{
+			name: "input tier above threshold is resolved",
+			cost: &config.ModelCost{
+				Input: 1, CacheRead: 0.1,
+				InputTiers: []config.ModelCostInputTier{{AboveInputTokens: 1000, Input: 2, CacheRead: 0.1, CacheWrite: 2}},
+			},
+			tokens: 1001,
+			want:   19, ok: true,
+		},
+		{
+			name: "input tier at threshold keeps flat prices",
+			cost: &config.ModelCost{
+				Input: 1, CacheRead: 0.5,
+				InputTiers: []config.ModelCostInputTier{{AboveInputTokens: 1000, Input: 2, CacheRead: 0.1, CacheWrite: 2}},
+			},
+			tokens: 1000,
+			want:   1, ok: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := boundaryCacheMissPenaltyRatio(tt.cost, tt.tokens, tt.tier, tt.ttl)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if ok && math.Abs(got-tt.want) > 1e-9 {
+				t.Fatalf("ratio = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReductionFlushHorizonStopsAtPendingCompaction(t *testing.T) {
+	a := newBoundaryReductionTestAgent(t, &config.ModelCost{Input: 1, CacheRead: 0.02})
+	for range 200 {
+		a.recordLLMModelRun("p/m")
+	}
+	if got := a.reductionFlushHorizon(); got != reductionFlushHorizonRequests {
+		t.Fatalf("horizon = %d; past requests must not inflate the future horizon", got)
+	}
+	a.autoCompactRequested.Store(true)
+	if got := a.reductionFlushHorizon(); got != 0 {
+		t.Fatalf("queued compaction horizon = %d, want 0", got)
+	}
+	a.autoCompactRequested.Store(false)
+	a.compactionSlotActive.Store(true)
+	if got := a.reductionFlushHorizon(); got != 0 {
+		t.Fatalf("running compaction horizon = %d, want 0", got)
+	}
+}
+
+func TestBoundaryFlushPenaltyRatioFallsBackWithoutPricing(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.runningModelRef = "p/m"
+	if got := a.boundaryFlushPenaltyRatio(a.llmModelContinuitySnapshot(), 1000); got != cacheMissPenaltyRatioFallback {
+		t.Fatalf("penalty ratio without pricing = %v, want fallback %v", got, cacheMissPenaltyRatioFallback)
+	}
+}
+
+func TestBoundaryFlushPricingUsesExactProviderAndRequestTTL(t *testing.T) {
+	cost := &config.ModelCost{Input: 1, CacheRead: 0.1, CacheWrite: 1.25, CacheWrite1h: 2}
+	a := newBoundaryReductionTestAgent(t, cost)
+	for _, tc := range []struct {
+		mode, ttl string
+		want      float64
+	}{
+		{mode: "explicit", want: 11.5}, {mode: "explicit", ttl: "5m", want: 11.5},
+		{mode: "explicit", ttl: "1h", want: 19}, {mode: "auto", ttl: "1h", want: 19},
+		{mode: "off", ttl: "1h", want: 0},
+	} {
+		model := config.ModelConfig{Cost: cost, PromptCache: &config.PromptCacheConfig{Mode: tc.mode, TTL: tc.ttl}}
+		provider := llm.NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: "https://example.invalid/v1/messages", Models: map[string]config.ModelConfig{"m": model}}, nil)
+		a.llmClient = llm.NewClient(provider, nil, "m", 4096, "")
+		got := a.boundaryFlushPenaltyRatio(a.llmModelContinuitySnapshot(), 1000)
+		if math.Abs(got-tc.want) > 1e-9 {
+			t.Fatalf("mode=%q ttl=%q: ratio=%v, want %v", tc.mode, tc.ttl, got, tc.want)
+		}
+	}
+	a.llmClient = newTestLLMClient()
+	a.projectConfig.Providers["p"] = config.ProviderConfig{Models: map[string]config.ModelConfig{"m": {}}}
+	a.projectConfig.Providers["q"] = config.ProviderConfig{Models: map[string]config.ModelConfig{"m": {Cost: &config.ModelCost{Input: 1, CacheRead: 0.02}}}}
+	if got := a.boundaryFlushPenaltyRatio(a.llmModelContinuitySnapshot(), 1000); got != cacheMissPenaltyRatioFallback {
+		t.Fatalf("model p/m without cost borrowed q/m pricing: %v", got)
+	}
+}
+
+func TestBoundaryFlushRespectsCheckpointAndCachedTail(t *testing.T) {
+	for _, pending := range []bool{false, true} {
+		a := newBoundaryReductionTestAgent(t, &config.ModelCost{Input: 1, CacheRead: 0.5})
+		readContent := strings.Repeat("sample result line\n", 300)
+		msgs := []message.Message{
+			{Role: message.RoleUser, Content: "request"},
+			{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.invalid/page"}`)}}},
+			{Role: message.RoleTool, ToolCallID: "read", ToolStatus: message.ToolStatusSuccess, Content: readContent},
+		}
+		setTestRequestBatch(a, msgs, 1)
+		if prepared := a.prepareMessagesForLLM(msgs); prepared[2].Content != readContent {
+			t.Fatal("fresh result reduced before establishing the cache")
+		}
+		setTestRequestBatch(a, nil, 2)
+		// This append is not part of the already cached tail. Charging it as a
+		// rewrite penalty would defer an otherwise inexpensive reduction.
+		msgs = append(msgs, message.Message{Role: message.RoleAssistant, Content: "next"}, message.Message{Role: message.RoleUser, Content: strings.Repeat("additional context ", 20000)})
+		a.autoCompactRequested.Store(pending)
+		prepared := a.prepareMessagesForLLM(msgs)
+		if reduced := prepared[2].Content != readContent; reduced == pending {
+			t.Fatalf("pending checkpoint=%v: cached result reduced=%v", pending, reduced)
+		}
+	}
+}
 
 func setTestRequestBatch(a *MainAgent, messages []message.Message, batch uint64) {
 	a.requestBatches.mu.Lock()
@@ -435,5 +600,91 @@ func TestContextNoticeRowKeepsStableSurfaceReusable(t *testing.T) {
 	}
 	if prepared2[2].Content != prepared[2].Content {
 		t.Fatal("frozen reduced read marker should stay byte-stable across requests")
+	}
+}
+
+// TestBoundaryReductionDefersDeepRewriteAtRelayPricing pins the pricing-derived
+// penalty: at a 50:1 cache-read price the rewrite of a long tail no longer
+// amortizes within the conservative horizon, so a proposal the historical 10:1
+// constant would have flushed stays deferred, including on a long model run.
+func TestBoundaryReductionDefersDeepRewriteAtRelayPricing(t *testing.T) {
+	a := newBoundaryReductionTestAgent(t, &config.ModelCost{Input: 1, CacheRead: 0.02})
+
+	readContent := strings.Repeat("line content for fetched page\n", 3000)
+	// The irreducible tail makes the rewrite expensive at this cache price.
+	tailContent := strings.Repeat("user context that cannot be reduced ", 1500)
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "tc1", Content: readContent},
+		{Role: message.RoleAssistant, Content: tailContent},
+	}
+	setTestRequestBatch(a, msgs, 1)
+	if prepared := a.prepareMessagesForLLM(msgs); prepared[2].Content != readContent {
+		t.Fatal("fresh webfetch result was unexpectedly reduced")
+	}
+
+	setTestRequestBatch(a, nil, 2)
+	msgs = append(msgs,
+		message.Message{Role: message.RoleAssistant, Content: "done"},
+		message.Message{Role: message.RoleUser, Content: "u2"},
+	)
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != readContent {
+		t.Fatal("50:1 pricing should defer the deep rewrite at the conservative horizon")
+	}
+	if got := a.GetContextReductionStats().SkippedByReason[contextReductionSkipDeferredCache]; got == 0 {
+		t.Fatal("expected deferred_for_cache skip under 50:1 pricing")
+	}
+
+	// Past requests do not extend the remaining reuse period.
+	for range 110 {
+		a.recordLLMModelRun("p/m")
+	}
+	prepared = a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content != readContent {
+		t.Fatal("a long model run must not speculate on a longer future reuse period")
+	}
+
+	// A model switch invalidates the cache anyway: the rewrite is free and the
+	// flush must not wait for any amortization.
+	a.resetLLMModelRun()
+	a.recordLLMModelRun("q/m")
+	prepared = a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content == readContent {
+		t.Fatal("cold cache should flush the boundary rewrite regardless of pricing")
+	}
+}
+
+// TestBoundaryReductionFlushesSoonerUnderTwoToOneCaching pins the other side of
+// the pricing range: at a 2:1 cache-read price the rewrite penalty is small, so
+// a proposal the 10:1 constant deferred flushes immediately.
+func TestBoundaryReductionFlushesSoonerUnderTwoToOneCaching(t *testing.T) {
+	a := newBoundaryReductionTestAgent(t, &config.ModelCost{Input: 1, CacheRead: 0.5})
+
+	readContent := strings.Repeat("line content for fetched page\n", 3000)
+	tailContent := strings.Repeat("user context that cannot be reduced ", 20000)
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "u1"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a"}`)}}},
+		{Role: message.RoleTool, ToolCallID: "tc1", Content: readContent},
+		{Role: message.RoleAssistant, Content: tailContent},
+	}
+	setTestRequestBatch(a, msgs, 1)
+	if prepared := a.prepareMessagesForLLM(msgs); prepared[2].Content != readContent {
+		t.Fatal("fresh webfetch result was unexpectedly reduced")
+	}
+
+	setTestRequestBatch(a, nil, 2)
+	msgs = append(msgs,
+		message.Message{Role: message.RoleAssistant, Content: "done"},
+		message.Message{Role: message.RoleUser, Content: "u2"},
+	)
+	prepared := a.prepareMessagesForLLM(msgs)
+	if prepared[2].Content == readContent {
+		t.Fatal("2:1 pricing should flush a rewrite the 10:1 constant deferred")
+	}
+	if got := a.GetContextReductionStats().SkippedByReason[contextReductionSkipDeferredCache]; got != 0 {
+		t.Fatalf("2:1 flush still recorded deferred_for_cache = %d", got)
 	}
 }

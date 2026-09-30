@@ -683,11 +683,16 @@ func (c *Client) modelPoolTargetForRefLocked(ref string) (FallbackModel, bool) {
 		return pool[cursor], true
 	}
 	base, _ := config.ParseModelRef(normalized)
+	// An exact variant target can follow another variant of the same model in
+	// the pool. Prefer that match before considering an unqualified model ref.
 	for _, target := range pool {
 		targetRef := modelRefWithVariant(target)
 		if targetRef == normalized {
 			return target, true
 		}
+	}
+	for _, target := range pool {
+		targetRef := modelRefWithVariant(target)
 		targetBase, _ := config.ParseModelRef(targetRef)
 		if base != "" && targetBase == base {
 			return target, true

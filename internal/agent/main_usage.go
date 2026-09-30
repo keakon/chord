@@ -24,6 +24,9 @@ func tokenUsageFromSessionStats(stats analytics.SessionStats) message.TokenUsage
 
 func (a *MainAgent) lookupModelCost(modelRef string) *config.ModelCost {
 	providerName, modelID := analytics.SplitModelRef(modelRef)
+	if providerName == "" || modelID == "" {
+		return nil
+	}
 	for _, cfg := range []*config.Config{a.projectConfig, a.globalConfig} {
 		if cfg == nil {
 			continue
@@ -37,23 +40,6 @@ func (a *MainAgent) lookupModelCost(modelRef string) *config.ModelCost {
 		}
 	}
 
-	if modelID == "" {
-		modelID = strings.TrimSpace(modelRef)
-	}
-	if modelID == "" {
-		return nil
-	}
-
-	for _, cfg := range []*config.Config{a.projectConfig, a.globalConfig} {
-		if cfg == nil {
-			continue
-		}
-		for _, prov := range cfg.Providers {
-			if mc, ok := prov.Models[modelID]; ok && mc.Cost != nil {
-				return mc.Cost
-			}
-		}
-	}
 	return nil
 }
 

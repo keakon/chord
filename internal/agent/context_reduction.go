@@ -107,18 +107,6 @@ const (
 	contextReductionOverCompressionResearch              = "research_after_reduction"
 )
 
-// Cache-aware flush model for boundary reductions. Rewriting an already-sent
-// message at position p re-bills every token after p at input price instead of
-// cache-read price (~10x cheaper), a one-time penalty of roughly
-// cacheMissPenaltyRatio × tail tokens. The reduction saves its tokens on every
-// later request, so deferred boundary rewrites are flushed once the pending
-// savings would amortize that penalty within reductionFlushHorizonRequests
-// future requests (a conservative fraction of observed session lengths).
-const (
-	reductionFlushHorizonRequests = 30
-	cacheMissPenaltyRatio         = 9
-)
-
 type contextReductionPolicy struct {
 	Disabled                bool
 	ConfirmAgeTurns         int

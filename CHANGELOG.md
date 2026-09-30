@@ -165,6 +165,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A language server that fails to start or exits, or diagnostics that do not arrive within the wait window, no longer leaves an empty tool result that reads as clean. The first such failure per server and failure kind appends one line to the `write`, `edit`, or `apply_patch` result (`LSP diagnostics unavailable for this edit (gopls: not started); do not treat this edit as verified.`). A diagnostics timeout is reported once per session, and a server that exited is restarted — including one whose connection dropped while its process kept running: a failed file sync reports diagnostics unavailable instead of waiting or showing cached results, drops that server's diagnostics, and the next write starts it again. A server that is still starting is named on every write without using up that line. Repeat failures stay in the log.
 - `apply_patch` preserves line endings: untouched lines keep their original endings, files that use CR alone can be patched, and in files that mix line endings an added line takes the ending of the line it replaces or sits next to, instead of the whole file being rewritten to CRLF whenever it contained one.
 
+- Boundary context reduction derives the cached-prefix rewrite penalty from the current provider/model's prices and the request's cache TTL. Models without pricing keep the fallback assumption instead of borrowing another provider's price. The policy uses a bounded 30-request horizon rather than extrapolating from past requests, excludes newly appended content from the rewrite penalty, and defers speculative rewrites while a checkpoint is queued or running.
+
 ## 0.8.1 - 2026-09-16
 
 ### Highlights
