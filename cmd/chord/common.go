@@ -786,16 +786,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.Registry.Register(tools.NewWorktreeEnterTool(ac.MainAgent))
 	ac.Registry.Register(tools.NewWorktreeExitTool(ac.MainAgent))
 	ac.Registry.Register(tools.NewWorktreeListTool(ac.MainAgent))
-	// Hosted (provider-side) tools are catalog-driven: every configured entry
-	// becomes one local tool sharing a single backend over the model pool.
-	if err := tools.ValidateHostedToolCatalog(cfg.HostedTools, ac.Registry); err != nil {
-		return nil, fmt.Errorf("hosted tool catalog: %w", err)
-	}
-	hostedCatalog := tools.ResolveHostedToolCatalog(cfg.HostedTools)
-	hostedBackend := agent.NewHostedBackend(ac.MainAgent, hostedCatalog)
-	for _, name := range slices.Sorted(maps.Keys(hostedCatalog)) {
-		ac.Registry.Register(tools.NewHostedTool(hostedCatalog[name], hostedBackend))
-	}
 
 	// LLM factory for SubAgents.
 	ac.MainAgent.SetLLMFactory(buildSubAgentLLMFactory(ac, providerCfg, llmProvider, modelID, modelCfg, cfg, auth))
@@ -833,6 +823,24 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 
 	// Model switch factory.
 	ac.MainAgent.SetModelSwitchFactory(buildMainClientFactory(ac, cfg, auth))
+
+	// Hosted (provider-side) tools are catalog-driven: every configured entry
+	// becomes one local tool sharing a single backend. Registered after the
+	// model switch factory so named model_pool snapshots resolve their model
+	// refs at startup; an unknown or empty pool fails startup here.
+	if err := tools.ValidateHostedToolCatalog(cfg.HostedTools, ac.Registry); err != nil {
+		ac.cleanup()
+		return nil, fmt.Errorf("hosted tool catalog: %w", err)
+	}
+	hostedCatalog := tools.ResolveHostedToolCatalog(cfg.HostedTools)
+	hostedBackend, hostedErr := agent.NewHostedBackend(ac.MainAgent, hostedCatalog, cfg.ModelPools)
+	if hostedErr != nil {
+		ac.cleanup()
+		return nil, fmt.Errorf("hosted tools: %w", hostedErr)
+	}
+	for _, name := range slices.Sorted(maps.Keys(hostedCatalog)) {
+		ac.Registry.Register(tools.NewHostedTool(hostedCatalog[name], hostedBackend))
+	}
 
 	if sessionPlan.RestoreOnStartup {
 		if err := ac.MainAgent.RestoreSessionAtStartup(); err != nil {

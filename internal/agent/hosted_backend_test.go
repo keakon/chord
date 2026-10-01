@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 	"sync"
 	"testing"
@@ -106,7 +107,10 @@ func setHostedTestPool(a *MainAgent, targets ...llm.FallbackModel) *llm.Client {
 	first := targets[0]
 	client := llm.NewClient(first.ProviderConfig, first.ProviderImpl, first.ModelID, first.MaxTokens, "")
 	client.SetModelPool(targets, 0)
+	a.llmMu.Lock()
 	a.llmClient = client
+	a.forgetHostedCaller("")
+	a.llmMu.Unlock()
 	return client
 }
 
@@ -164,7 +168,7 @@ func decodeHostedJSON(t *testing.T, name string, raw json.RawMessage) map[string
 
 func TestHostedBackendCapabilityGate(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	backend := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil))
+	backend := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil))
 	ctx := context.Background()
 
 	// A model-level list replaces the provider default; this override no
@@ -234,7 +238,7 @@ func TestHostedBackendFallsThroughAndLowersHostedRequest(t *testing.T) {
 	mainClient := setHostedTestPool(a, firstTarget, secondTarget)
 	cursorBefore := mainClient.PrimaryModelRef()
 
-	backend := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil))
+	backend := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil))
 	obs, err := backend.Run(context.Background(), tools.NameWebSearch, map[string]any{
 		"query":           "golang release notes",
 		"allowed_domains": []string{"go.dev"},
@@ -318,7 +322,7 @@ func TestHostedBackendFallsThroughAndLowersHostedRequest(t *testing.T) {
 func TestHostedBackendConfigOnlyCatalogEntry(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	catalog := sampleHostedCatalog()
-	backend := NewHostedBackend(a, catalog)
+	backend := newTestHostedBackend(t, a, catalog)
 	impl := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) {
 		return &message.Response{
 			Content:    "Ran the sample code.",
@@ -392,7 +396,7 @@ func TestHostedBackendInputLevelErrorStopsWalk(t *testing.T) {
 		}, second),
 	)
 
-	_, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(
+	_, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(
 		context.Background(), tools.NameWebSearch, map[string]any{"query": "test query"})
 	if err == nil {
 		t.Fatal("Run() succeeded, want the input-level rejection")
@@ -427,7 +431,7 @@ func TestHostedBackendDegradesToHintOnlyAfterRejection(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	obs, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(
+	obs, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(
 		ctx, tools.NameWebSearch, map[string]any{"query": "test query"})
 	if err != nil {
 		t.Fatalf("Run() = %v", err)
@@ -474,7 +478,7 @@ func TestHostedBackendUnrelatedRejectionMovesToNextTarget(t *testing.T) {
 		}, second),
 	)
 
-	obs, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(
+	obs, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(
 		context.Background(), tools.NameWebSearch, map[string]any{"query": "test query"})
 	if err != nil {
 		t.Fatalf("Run() = %v", err)
@@ -502,7 +506,7 @@ func TestHostedBackendCancellationPropagates(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(
+		_, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(
 			ctx, tools.NameWebSearch, map[string]any{"query": "test query"})
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("Run() error = %v, want context.Canceled", err)
@@ -535,7 +539,7 @@ func TestHostedBackendCancellationPropagates(t *testing.T) {
 			}, second),
 		)
 
-		_, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(
+		_, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(
 			ctx, tools.NameWebSearch, map[string]any{"query": "test query"})
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("Run() error = %v, want context.Canceled", err)
@@ -631,4 +635,22 @@ func TestHostedObservationFromResponse(t *testing.T) {
 			}
 		})
 	}
+}
+
+// newTestHostedBackend builds the hosted backend for tests, failing the test
+// when a named model_pool snapshot cannot be constructed.
+func newTestHostedBackend(t testing.TB, a *MainAgent, catalog map[string]tools.HostedToolSpec) tools.HostedToolBackend {
+	t.Helper()
+	modelPools := make(map[string][]string)
+	if a.globalConfig != nil {
+		maps.Copy(modelPools, a.globalConfig.ModelPools)
+	}
+	if a.projectConfig != nil {
+		maps.Copy(modelPools, a.projectConfig.ModelPools)
+	}
+	backend, err := NewHostedBackend(a, catalog, modelPools)
+	if err != nil {
+		t.Fatalf("NewHostedBackend: %v", err)
+	}
+	return backend
 }

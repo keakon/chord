@@ -902,7 +902,7 @@ providers:
 
 `compat.hosted_tools` 列出该 provider 的模型可以提供的 hosted 工具；模型未配置该字段时继承 provider 列表；显式 `hosted_tools: []` 关闭该模型的全部 hosted 工具，非空列表替换 provider 列表。`web_search` 是内置条目，在 Anthropic Messages 上声明为 `web_search_20250305`，在 OpenAI Responses 上声明为 `web_search`。
 
-只有当前模型池里存在已启用、能承载该声明的目标时，工具才会出现在模型的工具列表里。每次调用另发一条只带 query 的请求，在那里声明 hosted 搜索工具；Chord 把返回的原生结果作为普通工具结果返回，主对话请求从不声明该工具，历史里也不会出现 provider 专属块。`allowed_domains` 和 `blocked_domains` 按请求参数下发，不会拼进 query 文本。
+只有工具的路由源里存在已启用、能承载该声明的目标时，工具才会出现在模型的工具列表里。未设置 `model_pool` 时，路由源是调用 agent 当前的模型池；设置具名 `model_pool` 后，路由源是该 hosted 请求指定的模型池。否则 Chord 会隐藏工具。每次调用另发一条只带 query 的请求，在那里声明 hosted 搜索工具；Chord 把返回的原生结果作为普通工具结果返回，主对话请求从不声明该工具，历史里也不会出现 provider 专属块。`allowed_domains` 和 `blocked_domains` 按请求参数下发，不会拼进 query 文本。
 
 OpenAI 的搜索限制取决于型号和子请求的推理设置：`gpt-5` 在 `reasoning.effort: minimal` 下不支持网络搜索，`gpt-5.4` 在 `reasoning.effort: none` 下可能降低结果质量。各型号支持范围以 [OpenAI 的 web search 指南](https://developers.openai.com/api/docs/guides/tools-web-search)为准。
 
@@ -932,6 +932,7 @@ hosted_tools:
     prompt: "运行这段代码并报告结果：\n{code}"
     read_only: true
     timeout_s: 300
+    model_pool: tools
     declarations:
       messages:
         tool: {type: code_execution_20250825, name: code_execution}
@@ -953,6 +954,7 @@ hosted_tools:
 | `declarations.<type>.force` | （省略） | 强制调用的原始 `tool_choice` 值。省略时仍会声明该工具并在 prompt 里要求调用，但模型不调用就算失败。 |
 | `declarations.<type>.include` | （省略） | `include` 选择器，例如 Responses 的 `[web_search_call.action.sources]`。 |
 | `declarations.<type>.headers` | （省略） | 工具声明需要的额外 HTTP 头，在 provider 默认头和请求覆盖配置之后应用。可以替换 beta 头；认证、传输和会话头受保护。 |
+| `model_pool` | （空） | 指向顶层 `model_pools` 条目的名称，该工具的子请求改由这个池执行，不再跟随调用方。留空时跟随调用方：主 agent 用主池，子 agent 用自己的池。池必须在启动时已定义，调用 agent 自己的 `model_pools` 也必须包含它；池内哪些条目能执行该工具仍由 `compat.hosted_tools` 决定。想钉死单个模型，建一个只含它的池即可——池条目支持 `provider/model@variant`。 |
 
 声明里的 `{"$arg": "<name>"}` 会替成同名本地参数；参数缺失或为空时删掉该键，对象的键全被删光时连对象一起删。内置 `web_search` 条目就用它把 `allowed_domains`、`blocked_domains` 作为声明参数下发。
 
@@ -960,7 +962,9 @@ hosted_tools:
 
 工具名不能与现有工具重名，也不能使用内置工具保留名或 `mcp_` 前缀。启动时校验合并后的配置：每个条目需要 object 参数 schema、非负超时，以及至少一个带非空工具 `type` 的 `messages` 或 `responses` 声明。header 名和值必须合法，不能覆盖认证、传输或会话头；provider 专用字段仍由端点校验。已有 `web_search` 条目可以按字段覆盖。
 
-首次子请求按当前模型池游标遍历支持该工具的目标。每个 hosted 工具独立记住成功目标，后续调用优先从那里开始，需要时仍遍历所有可用目标，不改变主对话游标。更换主 client 后重新选择；模型池中已移除或不再支持该工具的目标不会复用。Messages 返回 `pause_turn` 时，Chord 保留本次完整、有序的原生内容和沙箱容器标识，在同一个目标上最多续跑 4 次；总耗时仍受 `timeout_s` 限制。所有尝试和续跑的 token 用量归属发起调用的 Agent 与轮次。对明确拒绝 `tool_choice` 的请求，会在同一目标上重试一次不强制调用的声明。
+首次子请求遍历该工具路由源中支持该工具的目标。未设置 `model_pool` 时跟随调用方：主 agent 按其当前模型池游标遍历，子 agent 遍历自己的池。每个 hosted 工具按路由源记住成功目标——具名 `model_pool` 在各 agent 之间共享，未设置时按调用方隔离——后续调用优先从那里开始，池内容不变时一直有效；池重建或调用方切换模型池后会重新选择，模型池中已移除或不再支持该工具的目标不会复用。路由源中没有任何目标能执行该工具时，调用显式失败，不会回退到主对话的模型。Messages 返回 `pause_turn` 时，Chord 保留本次完整、有序的原生内容和沙箱容器标识，在同一个目标上最多续跑 4 次；总耗时仍受 `timeout_s` 限制。所有尝试和续跑的 token 用量归属发起调用的 Agent 与轮次。对明确拒绝 `tool_choice` 的请求，会在同一目标上重试一次不强制调用的声明。
+
+具名 `model_pool` 不存在或为空时，Chord 会报错并停止启动。模型条目加载失败时，Chord 会跳过该条目并将原因写入日志。路由源中没有能承载且已启用该工具的模型，或调用 agent 无权使用具名池时，Chord 会隐藏工具，并按路由源记录一次原因。工具没有出现在可用列表中时，检查池定义、agent 的 `model_pools` 和目标的 `compat.hosted_tools`。
 
 默认 `retry_safe: false`。请求可能已执行而结果未知（如连接中断、流错误或续跑上限耗尽）时，Chord 停止自动换 key 或模型重放；明确的请求前拒绝仍可尝试其他目标。只有确认重复执行安全时才设置 `retry_safe: true`。
 

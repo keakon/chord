@@ -421,6 +421,7 @@ func (a *MainAgent) swapLLMClientWithRefLocked(newClient *llm.Client, modelName 
 	oldClient := a.llmClient
 	oldRunningRef := a.runningModelRef
 	a.llmClient = newClient
+	a.forgetHostedCaller("")
 	a.modelName = modelName
 	if providerModelRef != "" {
 		a.providerModelRef = providerModelRef

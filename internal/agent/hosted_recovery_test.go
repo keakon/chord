@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -40,15 +41,15 @@ func TestHostedBackendCursorAndCallerUsage(t *testing.T) {
 	}
 	var events []analytics.UsageEvent
 	a.SetUsageEventSink(func(e analytics.UsageEvent) { events = append(events, e) })
-	ctx := tools.WithTurnID(tools.WithAgentID(context.Background(), "worker-1"), 42)
-	_, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(ctx, tools.NameWebSearch, map[string]any{"query": "sample"})
+	ctx := tools.WithTurnID(context.Background(), 42)
+	_, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(ctx, tools.NameWebSearch, map[string]any{"query": "sample"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.callCount() != beforeFirst || second.callCount() != beforeSecond+1 {
 		t.Fatalf("calls = %d/%d", first.callCount(), second.callCount())
 	}
-	if len(events) != 1 || events[0].AgentID != "worker-1" || events[0].AgentKind != "sub" || events[0].TurnID != 42 || events[0].RunningModelRef != "second/model-2" {
+	if len(events) != 1 || events[0].AgentID != identity.MainAgentID || events[0].AgentKind != identity.MainAgentID || events[0].TurnID != 42 || events[0].RunningModelRef != "second/model-2" {
 		t.Fatalf("usage = %+v", events)
 	}
 	_, cursor := client.ModelPoolSnapshot()
@@ -73,7 +74,7 @@ func TestHostedBackendPauseContinuation(t *testing.T) {
 	setHostedTestPool(a, newHostedTestTarget("provider", hostedTestTargetOpts{typ: config.ProviderTypeMessages, modelID: "model-1", providerHosted: []string{sampleHostedTool}}, impl))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	obs, err := NewHostedBackend(a, sampleHostedCatalog()).Run(ctx, sampleHostedTool, map[string]any{"code": "print(1)"})
+	obs, err := newTestHostedBackend(t, a, sampleHostedCatalog()).Run(ctx, sampleHostedTool, map[string]any{"code": "print(1)"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func TestHostedBackendUnsafeExecutionNeverReplays(t *testing.T) {
 			one := newHostedTestTarget("first", hostedTestTargetOpts{typ: config.ProviderTypeMessages, modelID: "model-1", providerHosted: []string{sampleHostedTool}}, first)
 			one.ProviderConfig = llm.NewProviderConfig("first", config.ProviderConfig{Type: config.ProviderTypeMessages, Compat: &config.ProviderCompatConfig{HostedTools: new([]string{sampleHostedTool})}}, []string{"key-1", "key-2"})
 			setHostedTestPool(a, one, newHostedTestTarget("second", hostedTestTargetOpts{typ: config.ProviderTypeMessages, modelID: "model-2", providerHosted: []string{sampleHostedTool}}, second))
-			_, err := NewHostedBackend(a, sampleHostedCatalog()).Run(context.Background(), sampleHostedTool, map[string]any{"code": "print(1)"})
+			_, err := newTestHostedBackend(t, a, sampleHostedCatalog()).Run(context.Background(), sampleHostedTool, map[string]any{"code": "print(1)"})
 			if err == nil {
 				t.Fatal("wanted failure")
 			}
@@ -142,7 +143,7 @@ func TestHostedBackendPermissionRevocationStopsContinuation(t *testing.T) {
 		return &message.Response{StopReason: hostedPauseTurn, Hosted: &message.HostedObservation{Items: []json.RawMessage{json.RawMessage(`{"type":"text","text":"paused"}`)}}}, nil
 	}}
 	setHostedTestPool(a, newHostedTestTarget("provider", hostedTestTargetOpts{typ: config.ProviderTypeMessages, modelID: "model-1", providerHosted: []string{sampleHostedTool}}, impl))
-	_, err := NewHostedBackend(a, sampleHostedCatalog()).Run(context.Background(), sampleHostedTool, map[string]any{"code": "print(1)"})
+	_, err := newTestHostedBackend(t, a, sampleHostedCatalog()).Run(context.Background(), sampleHostedTool, map[string]any{"code": "print(1)"})
 	if err == nil || !strings.Contains(err.Error(), "permission revoked") || impl.callCount() != 1 {
 		t.Fatalf("err=%v calls=%d", err, impl.callCount())
 	}
@@ -159,7 +160,7 @@ func TestHostedBackendApprovalStopsRetriesOnFailedStream(t *testing.T) {
 	spec := catalog[sampleHostedTool]
 	spec.RetrySafe = true
 	catalog[sampleHostedTool] = spec
-	_, err := NewHostedBackend(a, catalog).Run(context.Background(), sampleHostedTool, map[string]any{"code": "print(1)"})
+	_, err := newTestHostedBackend(t, a, catalog).Run(context.Background(), sampleHostedTool, map[string]any{"code": "print(1)"})
 	if err == nil || !strings.Contains(err.Error(), "approval") || first.callCount() != 1 || second.callCount() != 0 {
 		t.Fatalf("err=%v calls=%d/%d", err, first.callCount(), second.callCount())
 	}

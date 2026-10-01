@@ -637,6 +637,17 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 			if cfg.Ruleset.IsDisabled(t.Name()) {
 				continue
 			}
+			if ht, ok := t.(tools.HostedTool); ok {
+				// Hosted tools only enter the base registry after the shared
+				// backend exists, so the per-caller view is always available
+				// here. The view's default caller is this subagent: unset
+				// model_pool routing follows its own pool instead of the
+				// shared main-agent view.
+				if cfg.Parent != nil {
+					subTools.Register(ht.WithBackend(cfg.Parent.HostedBackendForCaller(cfg.InstanceID)))
+					continue
+				}
+			}
 			subTools.Register(subAgentToolWithBaseDir(t, cfg.WorkDir))
 		}
 	}
@@ -809,6 +820,9 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 	s.llmMu.Lock()
 	oldClient := s.llmClient
 	s.llmClient = client
+	if s.parent != nil {
+		s.parent.forgetHostedCaller(s.instanceID)
+	}
 	s.modelName = modelName
 	s.frozenToolDefs = append([]message.ToolDefinition(nil), toolDefs...)
 	s.llmMu.Unlock()
@@ -849,11 +863,14 @@ func (s *SubAgent) closeLLMClient() {
 	if s == nil {
 		return
 	}
-	s.llmMu.RLock()
+	s.llmMu.Lock()
+	defer s.llmMu.Unlock()
 	client := s.llmClient
-	s.llmMu.RUnlock()
 	if client != nil {
 		client.Close()
+	}
+	if s.parent != nil {
+		s.parent.forgetHostedCaller(s.instanceID)
 	}
 }
 

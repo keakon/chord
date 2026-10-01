@@ -270,6 +270,7 @@ func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) 
 }
 
 func (a *MainAgent) resetSessionRuntimeState() {
+	a.resetHostedCallers()
 	a.compactionFiles.reset()
 	a.resetCacheRoutingState()
 	a.resetLLMModelRun()

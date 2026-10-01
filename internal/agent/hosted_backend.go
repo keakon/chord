@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -28,46 +30,152 @@ const (
 	hostedToolRetryRounds = 3
 )
 
-// hostedBackend runs every configured hosted tool over the main agent's model
-// pool. It implements tools.HostedToolBackend for the whole catalog: each call
+const (
+	hostedRouteSourceCaller = "caller"
+	hostedRouteSourcePool   = "pool"
+)
+
+// hostedRouteSource identifies one routing universe: whose pool answers this
+// tool's sub-requests. kind "pool" pins a named model_pool snapshot; kind
+// "caller" follows one agent instance's current client. The generation is
+// derived from the pool contents. Caller sources also carry a binding epoch,
+// so switching away and back cannot resurrect an old request's affinity.
+type hostedRouteSource struct {
+	kind       string
+	id         string // agent instance id ("" for the main agent) or pool name
+	generation uint64
+	epoch      uint64
+}
+
+func (s hostedRouteSource) key() string {
+	return s.kind + ":" + s.id + "@" + strconv.FormatUint(s.generation, 16) + ":" + strconv.FormatUint(s.epoch, 16)
+}
+
+// hostedBackend runs every configured hosted tool. Routing follows a route
+// source: unset model_pool follows the calling agent's current pool (the main
+// agent's pool for the main view, a subagent's own pool for its view), and a
+// named model_pool pins an immutable pool snapshot built at startup. Each call
 // tries every capable target in turn, and each target is one independent
 // sub-request through a single-target client (a shared-pool CompleteStream
 // would rebuild tuning per fallback target and drop the hosted marker). The
 // main pool cursor is never advanced: ModelPoolSnapshot is an explicit copy.
 type hostedBackend struct {
-	agent   *MainAgent
-	catalog map[string]tools.HostedToolSpec
-	mu      sync.Mutex
-	routes  map[string]hostedRoute
+	agent           *MainAgent
+	catalog         map[string]tools.HostedToolSpec
+	pools           map[string]*hostedPoolSnapshot // named model_pool snapshots, built at startup
+	mu              sync.Mutex
+	routes          map[hostedRouteCacheKey]hostedRoute
+	seenDiag        map[hostedDiagnosticKey]struct{}
+	callerBindings  map[string]hostedCallerBinding
+	nextCallerEpoch uint64
 }
 
+// hostedRoute is the remembered sticky target for one route source and tool.
+// The route source generation in the key carries pool identity, so no client
+// pointer is stored: an entry whose source generation changed simply stops
+// matching and is replaced on the next success.
 type hostedRoute struct {
-	client   *llm.Client
 	provider *llm.ProviderConfig
 	model    string
 	variant  string
 }
 
-// NewHostedBackend wires the hosted tool backend for the resolved catalog.
-// Registration happens after NewMainAgent; subagents clone their tool registry
-// at spawn time, so they see the tools too.
-func NewHostedBackend(a *MainAgent, catalog map[string]tools.HostedToolSpec) tools.HostedToolBackend {
-	return &hostedBackend{agent: a, catalog: catalog}
+// hostedBackendView binds the shared backend to one default caller. Each
+// SubAgent spawn builds its own view so unset model_pool routing follows that
+// subagent's current pool, and availability is evaluated against the subagent
+// instead of the main agent.
+type hostedBackendView struct {
+	backend  *hostedBackend
+	callerID string // "" or the main identity = main agent; otherwise a SubAgent instance id
 }
 
-// Available reports whether at least one pool target can carry the tool's
-// declaration and has it enabled through compat.hosted_tools. When false the
-// tool is withheld from the LLM tool list.
+func (v *hostedBackendView) Available(tool string) bool {
+	return v.backend.availableFor(v.callerID, tool)
+}
+
+func (v *hostedBackendView) Run(ctx context.Context, tool string, args map[string]any) (*message.HostedObservation, error) {
+	return v.backend.runForCaller(v.callerID, ctx, tool, args)
+}
+
+func (v *hostedBackendView) ForCaller(agentID string) tools.HostedToolBackend {
+	return v.backend.ForCaller(agentID)
+}
+
+// NewHostedBackend wires the hosted tool backend for the resolved catalog and
+// the final merged top-level model_pools map. Keeping the effective pool map
+// explicit prevents routing from accidentally reapplying project/global
+// precedence with a helper that treats empty project pools as unset.
+// Named model_pool snapshots are built here, after the model switch factory is
+// installed, so an unknown or empty pool fails startup instead of hiding the
+// tool at runtime. Registration happens after NewMainAgent; subagents clone
+// their tool registry at spawn time through per-caller backend views.
+func NewHostedBackend(a *MainAgent, catalog map[string]tools.HostedToolSpec, modelPools map[string][]string) (tools.HostedToolBackend, error) {
+	b := &hostedBackend{
+		agent:          a,
+		catalog:        catalog,
+		pools:          make(map[string]*hostedPoolSnapshot),
+		routes:         make(map[hostedRouteCacheKey]hostedRoute),
+		seenDiag:       make(map[hostedDiagnosticKey]struct{}),
+		callerBindings: make(map[string]hostedCallerBinding),
+	}
+	for _, name := range slices.Sorted(maps.Keys(catalog)) {
+		poolName := strings.TrimSpace(catalog[name].ModelPool)
+		if poolName == "" {
+			continue
+		}
+		if _, ok := b.pools[poolName]; ok {
+			continue
+		}
+		snap, err := a.buildHostedPoolSnapshot(poolName, modelPools)
+		if err != nil {
+			return nil, fmt.Errorf("hosted tool %q model_pool %q: %w", name, poolName, err)
+		}
+		b.pools[poolName] = snap
+	}
+	a.setHostedBackend(b)
+	return b, nil
+}
+
+// ForCaller returns a backend view whose default caller is the given agent
+// instance. Unset model_pool routing follows that caller's own pool, and
+// availability is evaluated against it.
+func (b *hostedBackend) ForCaller(agentID string) tools.HostedToolBackend {
+	return &hostedBackendView{backend: b, callerID: strings.TrimSpace(agentID)}
+}
+
+// Available reports whether at least one target in the view's routing source
+// can carry the tool's declaration and has it enabled through
+// compat.hosted_tools. When false the tool is withheld from the LLM tool list.
 func (b *hostedBackend) Available(tool string) bool {
-	targets, _ := b.capableTargets(tool)
-	return len(targets) > 0
+	return b.availableFor("", tool)
 }
 
-// Run walks the capable targets until one completes the hosted call and
-// satisfies the success contract. Errors that no other target can fix (input
-// level rejections) stop the walk; every other failure is attributed to the
-// target and the next one is tried.
+func (b *hostedBackend) availableFor(callerID, tool string) bool {
+	spec, ok := b.catalogTool(tool)
+	if !ok {
+		return false
+	}
+	caller, err := b.resolveCaller(callerID, nil)
+	if err != nil {
+		return false
+	}
+	plan := b.planRoute(caller, spec)
+	if len(plan.targets) == 0 {
+		b.diagnoseOnce(plan.source, tool, plan.reason)
+		return false
+	}
+	return true
+}
+
+// Run walks the compatible targets of the caller's routing source until one
+// completes the hosted call and satisfies the success contract. Errors that no
+// other target can fix (input level rejections) stop the walk; every other
+// ordinary failure is attributed to the target and the next one is tried.
 func (b *hostedBackend) Run(ctx context.Context, tool string, args map[string]any) (*message.HostedObservation, error) {
+	return b.runForCaller("", ctx, tool, args)
+}
+
+func (b *hostedBackend) runForCaller(callerID string, ctx context.Context, tool string, args map[string]any) (*message.HostedObservation, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -75,19 +183,24 @@ func (b *hostedBackend) Run(ctx context.Context, tool string, args map[string]an
 	if !ok {
 		return nil, fmt.Errorf("hosted tool %q is not configured", tool)
 	}
-	targets, mainClient := b.capableTargets(tool)
-	if len(targets) == 0 {
-		return nil, newHostedUnavailableError(tool)
+	caller, err := b.resolveCaller(callerID, ctx)
+	if err != nil {
+		return nil, err
 	}
-	targets = b.preferredTargets(tool, mainClient, targets)
+	plan := b.planRoute(caller, spec)
+	if len(plan.targets) == 0 {
+		b.diagnoseOnce(plan.source, tool, plan.reason)
+		return nil, newHostedUnavailableError(tool, plan.unavailable)
+	}
+	targets := b.preferredTargets(plan, tool)
 	failures := make([]hostedTargetFailure, 0, len(targets))
 	for _, target := range targets {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("%s cancelled: %w", tool, err)
 		}
-		obs, err := b.runTarget(ctx, target, spec, args)
+		obs, err := b.runTarget(ctx, caller, target, spec, args)
 		if err == nil {
-			b.rememberTarget(tool, mainClient, target)
+			b.rememberTarget(caller, spec, plan, tool, target)
 			return obs, nil
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -107,39 +220,206 @@ func (b *hostedBackend) Run(ctx context.Context, tool string, args map[string]an
 	return nil, newHostedAllTargetsFailedError(tool, failures)
 }
 
-// preferredTargets keeps a per-tool cursor independent of the main request
-// cursor. A remembered route must still belong to this client's capable pool;
-// removed targets and replaced clients never re-enter through this cache.
-func (b *hostedBackend) preferredTargets(tool string, client *llm.Client, targets []llm.FallbackModel) []llm.FallbackModel {
-	b.mu.Lock()
-	route, ok := b.routes[tool]
-	b.mu.Unlock()
-	if !ok || route.client != client {
-		return targets
-	}
-	for i, target := range targets {
-		if target.ProviderConfig == route.provider && target.ModelID == route.model && target.Variant == route.variant {
-			if i == 0 {
-				return targets
-			}
-			return slices.Concat(targets[i:], targets[:i])
-		}
-	}
-	return targets
+// hostedCaller is the resolved default caller for one hosted call: the agent
+// instance, its current client for unset routing, and its effective agent
+// config for named-pool authorization (nil = unrestricted).
+type hostedCaller struct {
+	id       string // "" for the main agent
+	client   *llm.Client
+	agentCfg *config.AgentConfig
+	turnID   uint64 // captured when the request context does not carry one
+	sub      *SubAgent
+	pool     []llm.FallbackModel
+	cursor   int
+	source   hostedRouteSource
 }
 
-func (b *hostedBackend) rememberTarget(tool string, client *llm.Client, target llm.FallbackModel) {
-	b.agent.llmMu.RLock()
-	defer b.agent.llmMu.RUnlock()
-	if b.agent.llmClient != client {
-		return
+// resolveCaller validates the view default against the request context and
+// resolves the caller's current client. It fails closed: a context agent id
+// that does not match the view, an unknown id, or a subagent that has finished
+// since spawn returns an error and never falls back to the main agent's pool.
+func (b *hostedBackend) resolveCaller(callerID string, ctx context.Context) (*hostedCaller, error) {
+	if ctx != nil {
+		if ctxID := strings.TrimSpace(tools.AgentIDFromContext(ctx)); ctxID != "" && !b.sameCaller(callerID, ctxID) {
+			return nil, fmt.Errorf("hosted tool caller mismatch: view=%q request=%q", viewCallerLabel(callerID), ctxID)
+		}
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.routes == nil {
-		b.routes = make(map[string]hostedRoute)
+	if isMainCaller(callerID, b.agent.instanceID) {
+		caller := &hostedCaller{agentCfg: b.agent.currentActiveConfig(), turnID: b.agent.currentTurnID()}
+		b.agent.llmMu.RLock()
+		defer b.agent.llmMu.RUnlock()
+		caller.client = b.agent.llmClient
+		return b.bindCaller(caller)
 	}
-	b.routes[tool] = hostedRoute{client: client, provider: target.ProviderConfig, model: target.ModelID, variant: target.Variant}
+	sub := b.agent.subAgentByID(callerID)
+	if sub == nil {
+		return nil, fmt.Errorf("hosted tool caller %q is no longer active", callerID)
+	}
+	caller := &hostedCaller{id: callerID, sub: sub, agentCfg: b.agent.agentConfigFor(sub.agentDefName), turnID: sub.currentTurnID()}
+	sub.llmMu.RLock()
+	defer sub.llmMu.RUnlock()
+	caller.client = sub.llmClient
+	return b.bindCaller(caller)
+}
+
+// sameCaller reports whether a context agent id names the view's caller. The
+// main view accepts the main identity and the main agent's instance id; a
+// subagent view matches only its own instance id.
+func (b *hostedBackend) sameCaller(viewCallerID, ctxID string) bool {
+	if isMainCaller(viewCallerID, b.agent.instanceID) {
+		return ctxID == "" || ctxID == identity.MainAgentID || ctxID == b.agent.instanceID
+	}
+	return viewCallerID == ctxID
+}
+
+func isMainCaller(callerID, mainInstanceID string) bool {
+	return callerID == "" || callerID == identity.MainAgentID || callerID == mainInstanceID
+}
+
+func viewCallerLabel(callerID string) string {
+	if callerID == "" {
+		return identity.MainAgentID
+	}
+	return callerID
+}
+
+// hostedRoutePlan is the resolved candidate list for one hosted call, plus the
+// reason the list is empty when it is.
+type hostedRoutePlan struct {
+	source      hostedRouteSource
+	targets     []llm.FallbackModel
+	unavailable string // productized reason, "" when targets exist
+	reason      string // stable category for one-time diagnostics, "" when targets exist
+}
+
+// planRoute resolves the routing source for one call and filters its targets
+// by wire family and compat.hosted_tools enablement. Named pools use the
+// immutable startup snapshot; unset routing snapshots the caller's current
+// client pool, rotated from its cursor.
+func (b *hostedBackend) planRoute(caller *hostedCaller, spec tools.HostedToolSpec) hostedRoutePlan {
+	if poolName := strings.TrimSpace(spec.ModelPool); poolName != "" {
+		snap := b.pools[poolName]
+		source := hostedRouteSource{kind: hostedRouteSourcePool, id: poolName, generation: snap.generation}
+		// agentCfg nil means the caller has no restricting role config: every
+		// declared pool is authorized for it.
+		if caller.agentCfg != nil && len(caller.agentCfg.Models) > 0 && !caller.agentCfg.HasPool(poolName) {
+			return hostedRoutePlan{
+				source:      source,
+				unavailable: fmt.Sprintf("model pool %q is not in the calling agent's model_pools", poolName),
+				reason:      "pool not authorized for caller",
+			}
+		}
+		targets, reason := capableHostedTargets(snap.targets, spec)
+		if len(targets) == 0 {
+			if len(snap.constructionFailures) > 0 && len(snap.targets) == 0 {
+				return hostedRoutePlan{
+					source:      source,
+					unavailable: fmt.Sprintf("all model refs failed to construct in model pool %q", poolName),
+					reason:      "model ref construction failed",
+				}
+			}
+			return hostedRoutePlan{source: source, unavailable: poolTargetReason(poolName, reason), reason: reason}
+		}
+		return hostedRoutePlan{source: source, targets: targets}
+	}
+	pool, cursor := caller.pool, caller.cursor
+	if len(pool) == 0 {
+		source := caller.source
+		return hostedRoutePlan{source: source, unavailable: "the calling agent has no model pool", reason: "caller pool empty"}
+	}
+	ordered := make([]llm.FallbackModel, 0, len(pool))
+	for i := range pool {
+		ordered = append(ordered, pool[(cursor+i)%len(pool)])
+	}
+	targets, reason := capableHostedTargets(ordered, spec)
+	source := caller.source
+	if len(targets) == 0 {
+		return hostedRoutePlan{source: source, unavailable: poolTargetReason("", reason), reason: reason}
+	}
+	return hostedRoutePlan{source: source, targets: targets}
+}
+
+func poolTargetReason(poolName, filterReason string) string {
+	if filterReason == "no compatible protocol family" {
+		return fmt.Sprintf("no Anthropic Messages or OpenAI Responses target in the routing pool%s", poolScopeSuffix(poolName))
+	}
+	return fmt.Sprintf("no target has the tool enabled in compat.hosted_tools%s", poolScopeSuffix(poolName))
+}
+
+func poolScopeSuffix(poolName string) string {
+	if poolName == "" {
+		return ""
+	}
+	return " in model pool " + strconv.Quote(poolName)
+}
+
+// capableHostedTargets filters targets that can lower the tool's declaration
+// for their wire family and are opted in through compat.hosted_tools. The
+// second return distinguishes the two ways a pool can come up empty so the
+// failure message names the actual gate.
+func capableHostedTargets(targets []llm.FallbackModel, spec tools.HostedToolSpec) ([]llm.FallbackModel, string) {
+	out := make([]llm.FallbackModel, 0, len(targets))
+	familyMatches := 0
+	for _, target := range targets {
+		if !hostedTargetFamilyCapable(target, spec) {
+			continue
+		}
+		familyMatches++
+		if !hostedTargetCompatCapable(target, spec) {
+			continue
+		}
+		out = append(out, target)
+	}
+	if len(out) > 0 {
+		return out, ""
+	}
+	if familyMatches == 0 {
+		return nil, "no compatible protocol family"
+	}
+	return nil, "compat entry missing"
+}
+
+// hostedTargetFamilyCapable reports whether the target speaks a wire family
+// that has a declaration for the tool.
+func hostedTargetFamilyCapable(target llm.FallbackModel, spec tools.HostedToolSpec) bool {
+	if target.ProviderConfig == nil || target.ProviderImpl == nil || strings.TrimSpace(target.ModelID) == "" {
+		return false
+	}
+	family := target.ProviderConfig.Type()
+	if family != config.ProviderTypeMessages && family != config.ProviderTypeResponses {
+		return false
+	}
+	decl, ok := spec.Declarations[family]
+	return ok && len(decl.Tool) > 0
+}
+
+// hostedTargetCompatCapable reports whether the target enabled the tool
+// through compat.hosted_tools. Disabled by default: identifying official
+// endpoints is unreliable and a wrong enable fails as a rejected request or a
+// silently ignored declaration.
+func hostedTargetCompatCapable(target llm.FallbackModel, spec tools.HostedToolSpec) bool {
+	return slices.Contains(target.ProviderConfig.HostedToolsCompat(target.ModelID), spec.Name)
+}
+
+// hostedTargetCapable reports whether one pool target can lower the tool's
+// declaration and is opted in for it.
+func hostedTargetCapable(target llm.FallbackModel, spec tools.HostedToolSpec) bool {
+	return hostedTargetFamilyCapable(target, spec) && hostedTargetCompatCapable(target, spec)
+}
+
+// hostedTargetsGeneration derives a route generation from the pool's target
+// identities and order: a rebuild with different contents or order produces a
+// different generation and invalidates sticky routes for the old contents.
+func hostedTargetsGeneration(targets []llm.FallbackModel) uint64 {
+	hash := fnv.New64a()
+	for _, entry := range targets {
+		name := ""
+		if entry.ProviderConfig != nil {
+			name = entry.ProviderConfig.Name()
+		}
+		_, _ = fmt.Fprintf(hash, "%s\x00%s\x00%s\x00", name, entry.ModelID, entry.Variant)
+	}
+	return hash.Sum64()
 }
 
 // catalogTool looks up one catalog entry, defaulting a missing name to the
@@ -158,54 +438,6 @@ func (b *hostedBackend) catalogTool(tool string) (tools.HostedToolSpec, bool) {
 	return spec, true
 }
 
-// capableTargets snapshots the pool entries that can carry the tool's
-// declaration for their wire family and are opted in via compat. The returned
-// client is the main client the snapshot came from (nil when no session model
-// is installed).
-func (b *hostedBackend) capableTargets(tool string) ([]llm.FallbackModel, *llm.Client) {
-	spec, ok := b.catalogTool(tool)
-	if !ok || b.agent == nil {
-		return nil, nil
-	}
-	b.agent.llmMu.RLock()
-	mainClient := b.agent.llmClient
-	b.agent.llmMu.RUnlock()
-	if mainClient == nil {
-		return nil, nil
-	}
-	pool, cursor := mainClient.ModelPoolSnapshot()
-	targets := make([]llm.FallbackModel, 0, len(pool))
-	for i := range pool {
-		target := pool[(cursor+i)%len(pool)]
-		if hostedTargetCapable(target, spec) {
-			targets = append(targets, target)
-		}
-	}
-	return targets, mainClient
-}
-
-// hostedTargetCapable reports whether one pool target can lower the tool's
-// declaration (Anthropic Messages or OpenAI Responses) and has the capability
-// enabled. Disabled by default: identifying official endpoints is unreliable
-// and a wrong enable fails as a rejected request or a silently ignored
-// declaration.
-func hostedTargetCapable(target llm.FallbackModel, spec tools.HostedToolSpec) bool {
-	if target.ProviderConfig == nil || target.ProviderImpl == nil || strings.TrimSpace(target.ModelID) == "" {
-		return false
-	}
-	family := target.ProviderConfig.Type()
-	switch family {
-	case config.ProviderTypeMessages, config.ProviderTypeResponses:
-	default:
-		return false
-	}
-	decl, ok := spec.Declarations[family]
-	if !ok || len(decl.Tool) == 0 {
-		return false
-	}
-	return slices.Contains(target.ProviderConfig.HostedToolsCompat(target.ModelID), spec.Name)
-}
-
 func hostedTargetRef(target llm.FallbackModel) string {
 	name := ""
 	if target.ProviderConfig != nil {
@@ -220,8 +452,8 @@ func hostedTargetRef(target llm.FallbackModel) string {
 // runTarget issues the sub-request for one target: first with the forced
 // declaration, then, when the endpoint refuses the forced tool_choice, once
 // more as a hint-only sub-request.
-func (b *hostedBackend) runTarget(ctx context.Context, target llm.FallbackModel, spec tools.HostedToolSpec, args map[string]any) (*message.HostedObservation, error) {
-	obs, err := b.runAttempt(ctx, target, spec, args, false)
+func (b *hostedBackend) runTarget(ctx context.Context, caller *hostedCaller, target llm.FallbackModel, spec tools.HostedToolSpec, args map[string]any) (*message.HostedObservation, error) {
+	obs, err := b.runAttempt(ctx, caller, target, spec, args, false)
 	if err == nil || hostedInputLevelError(err) || !hostedToolChoiceRejection(err) {
 		return obs, err
 	}
@@ -229,7 +461,7 @@ func (b *hostedBackend) runTarget(ctx context.Context, target llm.FallbackModel,
 	// as a hint-only sub-request: the hosted tool stays declared and the
 	// prompt asks for it, but nothing forces the call. The success contract is
 	// unchanged, so a model that answers from memory still fails the target.
-	hintObs, hintErr := b.runAttempt(ctx, target, spec, args, true)
+	hintObs, hintErr := b.runAttempt(ctx, caller, target, spec, args, true)
 	if hintErr == nil {
 		return hintObs, nil
 	}
@@ -240,7 +472,7 @@ func (b *hostedBackend) runTarget(ctx context.Context, target llm.FallbackModel,
 // least one complete hosted call with a result payload. Zero hits count as
 // success; per-call errors are annotations on a successful result. The
 // sub-request model's own text never counts as a result by itself.
-func (b *hostedBackend) runAttempt(ctx context.Context, target llm.FallbackModel, spec tools.HostedToolSpec, args map[string]any, hintOnly bool) (*message.HostedObservation, error) {
+func (b *hostedBackend) runAttempt(ctx context.Context, caller *hostedCaller, target llm.FallbackModel, spec tools.HostedToolSpec, args map[string]any, hintOnly bool) (*message.HostedObservation, error) {
 	decl, err := tools.ResolveHostedDeclaration(spec, target.ProviderConfig.Type(), args)
 	if err != nil {
 		return nil, err
@@ -252,6 +484,7 @@ func (b *hostedBackend) runAttempt(ctx context.Context, target llm.FallbackModel
 	if client == nil {
 		return nil, fmt.Errorf("could not build a client for the target")
 	}
+	defer client.Close()
 	systemPrompt := hostedToolSystemPrompt
 	if hintOnly {
 		systemPrompt = hostedToolHintSystemPrompt(spec.Name)
@@ -284,7 +517,7 @@ func (b *hostedBackend) runAttempt(ctx context.Context, target llm.FallbackModel
 		if unknown, ok := errors.AsType[*llm.HostedOutcomeUnknownError](err); ok && resp == nil {
 			resp = unknown.Response
 		}
-		b.recordAttemptUsage(ctx, client, spec.Name, resp)
+		b.recordAttemptUsage(ctx, caller, client, spec.Name, resp)
 		if err != nil {
 			if continuation > 0 && ctx.Err() == nil {
 				return nil, &llm.HostedOutcomeUnknownError{Cause: err, Response: resp}
@@ -333,16 +566,13 @@ func (b *hostedBackend) runAttempt(ctx context.Context, target llm.FallbackModel
 	}
 }
 
-// hostedToolHintSystemPrompt backs the degraded retry: the endpoint refused
-// to force the hosted tool, so the prompt has to ask for the call while the
-// success contract still requires an observed hosted call.
 func hostedToolHintSystemPrompt(tool string) string {
 	return fmt.Sprintf("%s Always call the %s tool for the request before answering.", hostedToolSystemPrompt, tool)
 }
 
 // recordAttemptUsage books every attempt that produced a response, including
 // attempts whose result later fails validation: those tokens were spent.
-func (b *hostedBackend) recordAttemptUsage(ctx context.Context, client *llm.Client, tool string, resp *message.Response) {
+func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCaller, client *llm.Client, tool string, resp *message.Response) {
 	if b == nil || b.agent == nil || resp == nil {
 		return
 	}
@@ -358,12 +588,15 @@ func (b *hostedBackend) recordAttemptUsage(ctx context.Context, client *llm.Clie
 	}
 	agentID, agentKind, agentName := identity.MainAgentID, identity.MainAgentID, b.agent.currentAgentName()
 	turnID := tools.TurnIDFromContext(ctx)
+	if turnID == 0 && caller != nil && caller.turnID != 0 {
+		turnID = caller.turnID
+	}
 	if turnID == 0 {
 		turnID = b.agent.currentTurnID()
 	}
-	if id := tools.AgentIDFromContext(ctx); id != "" && id != b.agent.instanceID && id != identity.MainAgentID {
-		agentID, agentKind, agentName = id, "sub", id
-		if sub := b.agent.subAgentByID(id); sub != nil {
+	if caller != nil && caller.id != "" {
+		agentID, agentKind, agentName = caller.id, "sub", caller.id
+		if sub := b.agent.subAgentByID(caller.id); sub != nil {
 			agentName = sub.agentDefName
 		}
 	}
@@ -447,6 +680,35 @@ func hostedToolChoiceRejection(err error) bool {
 	return strings.Contains(detail, "tool_choice") || strings.Contains(detail, "tool choice") || strings.Contains(detail, "forced tool") || strings.Contains(detail, "force tool")
 }
 
-func newHostedUnavailableError(tool string) error {
-	return fmt.Errorf("%s is not available: no configured model target can carry its hosted declaration; add the %s entry to compat.hosted_tools for an Anthropic Messages or OpenAI Responses model", tool, tool)
+func newHostedUnavailableError(tool, reason string) error {
+	if reason == "" {
+		reason = fmt.Sprintf("no configured model target can carry its hosted declaration; add the %s entry to compat.hosted_tools for an Anthropic Messages or OpenAI Responses model", tool)
+	}
+	return fmt.Errorf("%s is not available: %s", tool, reason)
+}
+
+// setHostedBackend installs the shared hosted backend once at startup, after
+// the hosted catalog is registered and named pool snapshots are built.
+func (a *MainAgent) setHostedBackend(b tools.HostedToolBackend) {
+	a.hostedBackend = b
+}
+
+// HostedBackendForCaller returns the hosted backend view whose default caller
+// is the given agent instance, or nil when no hosted backend is registered.
+// SubAgent spawn rebinds its cloned hosted tools through this so unset
+// model_pool routing follows the subagent's own pool.
+func (a *MainAgent) HostedBackendForCaller(agentID string) tools.HostedToolBackend {
+	b := a.hostedBackend
+	if b == nil {
+		return nil
+	}
+	return b.ForCaller(agentID)
+}
+
+// agentConfigFor returns the named agent definition, or nil when unknown. The
+// returned config's Models map is the agent's authorized pool set.
+func (a *MainAgent) agentConfigFor(name string) *config.AgentConfig {
+	a.stateMu.RLock()
+	defer a.stateMu.RUnlock()
+	return a.agentConfigs[name]
 }

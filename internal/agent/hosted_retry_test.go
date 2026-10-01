@@ -48,7 +48,7 @@ func TestHostedBackendTransientRetry(t *testing.T) {
 				setHostedTestPool(a, hostedRetryTarget("sample", []string{"key-1"}, impl))
 				ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 				defer cancel()
-				_, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(ctx, tools.NameWebSearch, map[string]any{"query": "sample query"})
+				_, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(ctx, tools.NameWebSearch, map[string]any{"query": "sample query"})
 				wantCalls := hostedToolRetryRounds
 				if recover {
 					wantCalls = 2
@@ -70,7 +70,7 @@ func TestHostedBackendQuotaDoesNotRetryRounds(t *testing.T) {
 	first := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) { return nil, quota }}
 	second := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) { return hostedWebSearchResponse(), nil }}
 	setHostedTestPool(a, hostedRetryTarget("first", []string{"key-1", "key-2"}, first), hostedRetryTarget("second", []string{"key-3"}, second))
-	_, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(t.Context(), tools.NameWebSearch, map[string]any{"query": "sample query"})
+	_, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(t.Context(), tools.NameWebSearch, map[string]any{"query": "sample query"})
 	if err != nil || first.callCount() != 2 || second.callCount() != 1 {
 		t.Fatalf("calls=%d/%d error=%v", first.callCount(), second.callCount(), err)
 	}
@@ -89,7 +89,7 @@ func TestHostedBackendBackoffReleasesCapacityAndCancels(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(ctx, tools.NameWebSearch, map[string]any{"query": "sample query"})
+		_, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(ctx, tools.NameWebSearch, map[string]any{"query": "sample query"})
 		done <- err
 	}()
 	select {

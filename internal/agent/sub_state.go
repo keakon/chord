@@ -203,6 +203,9 @@ func (s *SubAgent) setState(state SubAgentState, summary string) bool {
 	if state == SubAgentStateRunning {
 		s.signalWake()
 	}
+	if isTerminalSubAgentState(state) && s.parent != nil {
+		s.parent.forgetHostedCaller(s.instanceID)
+	}
 	return true
 }
 
@@ -223,6 +226,9 @@ func (s *SubAgent) setStateFrom(from, to SubAgentState, summary string) bool {
 	}
 	if to == SubAgentStateRunning {
 		s.signalWake()
+	}
+	if isTerminalSubAgentState(to) && s.parent != nil {
+		s.parent.forgetHostedCaller(s.instanceID)
 	}
 	return true
 }

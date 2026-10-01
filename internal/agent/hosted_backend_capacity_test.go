@@ -34,7 +34,7 @@ func TestHostedBackendReleasesLLMCapacity(t *testing.T) {
 			setHostedTestPool(a, newHostedTestTarget("sample", hostedTestTargetOpts{
 				typ: config.ProviderTypeMessages, modelID: "model-1", providerHosted: []string{tools.NameWebSearch},
 			}, impl))
-			_, err := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil)).Run(
+			_, err := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).Run(
 				context.Background(), tools.NameWebSearch, map[string]any{"query": "sample query"})
 			if (err != nil) != fail {
 				t.Fatalf("Run error = %v, want failure %v", err, fail)
@@ -73,7 +73,7 @@ func TestHostedBackendWaitsForLLMCapacity(t *testing.T) {
 			setHostedTestPool(a, newHostedTestTarget("sample", hostedTestTargetOpts{
 				typ: config.ProviderTypeMessages, modelID: "model-1", providerHosted: []string{tools.NameWebSearch},
 			}, impl))
-			backend := NewHostedBackend(a, tools.ResolveHostedToolCatalog(nil))
+			backend := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil))
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 			if _, err := backend.Run(ctx, tools.NameWebSearch, map[string]any{"query": "sample query"}); !errors.Is(err, context.DeadlineExceeded) {

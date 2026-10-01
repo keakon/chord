@@ -750,6 +750,12 @@ type MainAgent struct {
 	// and deferred main-model policy rebuilds. Set via SetModelSwitchFactory
 	// after construction.
 	modelSwitchFactory func(providerModel string, poolRefs []string, poolVariant string) (*llm.Client, string, int, error)
+
+	// hostedBackend routes hosted tool sub-requests. Set once during startup
+	// when the hosted catalog is registered; nil when no hosted tools exist.
+	// Reads happen after startup (tool dispatch and SubAgent spawn), so the
+	// plain write is ordered before any reader.
+	hostedBackend tools.HostedToolBackend
 	// mainModelPolicyDirty marks the current main-agent client as needing a
 	// rebuild from modelSwitchFactory before the next LLM call. This is mainly a
 	// startup/deferred-policy flag; role switches try to refresh the active

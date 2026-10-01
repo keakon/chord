@@ -72,7 +72,7 @@ Read a background job's output since the previous read, then its `[status: ...]`
 | `web_fetch` | Fetch a URL as readable text; permission rules can match URL patterns. |
 | `web_search` | Search the web through the provider's hosted search tool; returns a summary with numbered sources. Off by default; enable it with `compat.hosted_tools: [web_search]` ([Configuration & Auth: WebSearch](./configuration.md#websearch)). |
 
-`web_search` appears only while the model pool has an enabled target that can carry the declaration: an Anthropic Messages or OpenAI Responses model with `compat.hosted_tools` listing it. Each call runs a provider-side search and returns a summary plus numbered sources; optional `allowed_domains` / `blocked_domains` filters narrow the results. The same catalog can define further hosted tools through the top-level `hosted_tools` section ([Hosted tools](./configuration.md#hosted-tools)).
+`web_search` appears only while its routing source has an enabled target that can carry the declaration: without `model_pool` this is the calling agent's model pool, and with a named `model_pool` it is that configured pool. Targets must be Anthropic Messages or OpenAI Responses models with `compat.hosted_tools` listing it. Each call runs a provider-side search and returns a summary plus numbered sources; optional `allowed_domains` / `blocked_domains` filters narrow the results. The same catalog can define further hosted tools through the top-level `hosted_tools` section ([Hosted tools](./configuration.md#hosted-tools)).
 
 ## Workflow
 

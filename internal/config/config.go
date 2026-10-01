@@ -779,6 +779,13 @@ type HostedToolConfig struct {
 	// to that family's declaration. A family without an entry cannot carry
 	// the tool.
 	Declarations map[string]HostedToolDeclarationConfig `json:"declarations,omitempty" yaml:"declarations,omitempty"`
+	// ModelPool routes this tool's sub-requests to a named top-level
+	// model_pools entry instead of the caller's own pool. Empty follows the
+	// caller: the main agent runs the tool on the main pool and a subagent on
+	// its own pool. The pool must exist at startup, the calling agent must
+	// include it in its own model_pools, and compat.hosted_tools still gates
+	// which entries inside the pool can serve the tool.
+	ModelPool string `json:"model_pool,omitempty" yaml:"model_pool,omitempty"`
 }
 
 // HostedToolDeclarationConfig is the per-family wire declaration of a hosted

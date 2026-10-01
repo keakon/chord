@@ -4780,6 +4780,9 @@ func TestClientCloseCancelsWarmupAndRejectsNewRequests(t *testing.T) {
 	}
 	c.Close()
 	c.Close()
+	if !c.IsClosed() {
+		t.Fatal("Close must permanently invalidate the client")
+	}
 	select {
 	case <-canceled:
 	case <-time.After(2 * time.Second):

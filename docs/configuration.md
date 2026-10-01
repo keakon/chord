@@ -1041,7 +1041,7 @@ providers:
 
 `compat.hosted_tools` lists the hosted tools a provider's models may serve; an omitted model field inherits the provider list, an explicit `hosted_tools: []` disables all hosted tools for that model, and a non-empty list replaces the provider list. `web_search` is a built-in entry, declared as `web_search_20250305` on Anthropic Messages and `web_search` on OpenAI Responses.
 
-The tool joins the model's tool list while the active model pool contains an enabled target that can carry the declaration; otherwise Chord withholds it. Each call sends a separate request carrying only the query and declares the hosted search tool there, so the main conversation request never declares it and its history stays free of provider-specific blocks. Chord returns the native results as an ordinary tool result; `allowed_domains` and `blocked_domains` travel as request parameters rather than query text.
+The tool joins the model's tool list while its routing source contains an enabled target that can carry the declaration. Without `model_pool`, that source is the calling agent's active model pool; with a named `model_pool`, it is the configured pool for the hosted request. Otherwise Chord withholds the tool. Each call sends a separate request carrying only the query and declares the hosted search tool there, so the main conversation request never declares it and its history stays free of provider-specific blocks. Chord returns the native results as an ordinary tool result; `allowed_domains` and `blocked_domains` travel as request parameters rather than query text.
 
 OpenAI's search restrictions depend on the model and the sub-request's reasoning settings: `gpt-5` with `reasoning.effort: minimal` does not support web search, while `gpt-5.4` with `reasoning.effort: none` may produce lower-quality results. See [OpenAI's web search guide](https://developers.openai.com/api/docs/guides/tools-web-search) for per-model support.
 
@@ -1071,6 +1071,7 @@ hosted_tools:
     prompt: "Run this code and report the result:\n{code}"
     read_only: true
     timeout_s: 300
+    model_pool: tools
     declarations:
       messages:
         tool: {type: code_execution_20250825, name: code_execution}
@@ -1092,6 +1093,7 @@ hosted_tools:
 | `declarations.<type>.force` | *(omitted)* | Raw `tool_choice` value that forces the call. Omitted, the tool is still declared and the prompt asks for it, but a model that answers without calling it fails the call. |
 | `declarations.<type>.include` | *(omitted)* | `include` selectors, for example `[web_search_call.action.sources]` on Responses. |
 | `declarations.<type>.headers` | *(omitted)* | Declaration-specific HTTP headers, applied after provider headers and request overrides. Beta headers can be replaced; authentication, transport, and session headers are protected. |
+| `model_pool` | *(empty)* | Named `model_pools` entry that serves this tool's sub-requests instead of the caller's own pool. Empty follows the caller: the main agent uses the main pool and a subagent uses its own. The pool must exist at startup and the calling agent must include it in its own `model_pools`; `compat.hosted_tools` still decides which entries in the pool can serve the tool. To pin a single model, create a pool containing just it — pool entries accept `provider/model@variant`. |
 
 Inside a declaration, `{"$arg": "<name>"}` is replaced with the local argument of that name; a missing or empty argument drops the key, and an object that loses all its keys is dropped too. The built-in `web_search` entry uses this to pass `allowed_domains` and `blocked_domains` as declaration parameters.
 
@@ -1099,7 +1101,9 @@ An entry that only exists in your configuration starts with conservative traits:
 
 Names must not collide with registered tools, reserved built-in names, or the `mcp_` prefix. Startup validates the merged catalog: each entry needs an object parameter schema, a non-negative timeout, and at least one `messages` or `responses` declaration with a non-empty tool `type`. Headers must have valid names and values, and cannot replace authentication, transport, or session headers. Provider-specific declaration fields remain subject to the endpoint's validation. The built-in `web_search` entry supports field-level overrides.
 
-The first sub-request walks capable targets from the active model-pool cursor. Each hosted tool remembers its successful target independently of the main conversation: later calls start there and still try every capable target when needed. Replacing the main client resets this preference; targets removed from the pool or no longer capable are not reused. For Messages `pause_turn`, Chord retains the complete ordered native content and sandbox container and continues on the same target, with at most four continuations under the original `timeout_s` budget. Token usage for all attempts belongs to the calling Agent and turn. An explicit `tool_choice` rejection gets one retry on the same target without forcing the call.
+The first sub-request walks capable targets of the tool's routing source. Unset `model_pool` follows the calling agent: the main agent walks its active model-pool cursor and a subagent walks its own pool. Each hosted tool remembers its successful target per routing source — shared across agents for a named `model_pool`, isolated per caller otherwise — and later calls start there while the pool contents stay the same; a pool rebuild or a caller pool switch starts fresh, and targets removed from the pool or no longer capable are not reused. If no target in the routing source can carry the tool, the call fails explicitly and never falls back to the main conversation's model. For Messages `pause_turn`, Chord retains the complete ordered native content and sandbox container and continues on the same target, with at most four continuations under the original `timeout_s` budget. Token usage for all attempts belongs to the calling Agent and turn. An explicit `tool_choice` rejection gets one retry on the same target without forcing the call.
+
+A named `model_pool` that is missing or empty prevents startup. Chord skips model entries that cannot be loaded and writes the reason to the logs. If none of the routing pool's usable models supports the tool's protocol and enables it through `compat.hosted_tools`, or the calling agent is not authorized to use the named pool, Chord hides the tool and logs the reason once for that routing source. Check the pool definition, the agent's `model_pools`, and the targets' `compat.hosted_tools` when a tool is missing.
 
 With the default `retry_safe: false`, a possibly executed operation whose outcome is unknown (connection interruption, stream error, or exhausted continuation limit) stops automatic key/model replay. A clear rejection before execution may still try another target. Set `retry_safe: true` only when repeating the operation is safe.
 

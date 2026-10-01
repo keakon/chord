@@ -31,6 +31,8 @@ type hostedRun struct {
 
 func (s *stubHostedBackend) Available(string) bool { return s.available }
 
+func (s *stubHostedBackend) ForCaller(string) HostedToolBackend { return s }
+
 func (s *stubHostedBackend) Run(ctx context.Context, tool string, args map[string]any) (*message.HostedObservation, error) {
 	s.runs = append(s.runs, hostedRun{tool: tool, args: args})
 	if deadline, ok := ctx.Deadline(); ok {
@@ -438,5 +440,18 @@ func TestHostedToolConcurrencyPolicy(t *testing.T) {
 	unsafeSpec := HostedToolSpec{Name: "sample_exec", ConcurrencySafe: true}
 	if NewHostedTool(unsafeSpec, readOnly).ConcurrencySafeReadOnly(nil) {
 		t.Fatal("concurrency_safe without read_only must not be batched")
+	}
+}
+
+func TestHostedToolCatalogModelPoolOverlay(t *testing.T) {
+	catalog := ResolveHostedToolCatalog(map[string]config.HostedToolConfig{
+		NameWebSearch:       {ModelPool: "  tools  "},
+		sampleExecutionTool: {ModelPool: "   "},
+	})
+	if got := catalog[NameWebSearch].ModelPool; got != "tools" {
+		t.Fatalf("model_pool = %q, want trimmed %q", got, "tools")
+	}
+	if got := catalog[sampleExecutionTool].ModelPool; got != "" {
+		t.Fatalf("blank model_pool = %q, want unset", got)
 	}
 }

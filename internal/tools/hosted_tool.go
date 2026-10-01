@@ -37,6 +37,11 @@ type HostedToolBackend interface {
 	// declaration. When false the tool is withheld from the LLM tool list.
 	Available(tool string) bool
 	Run(ctx context.Context, tool string, args map[string]any) (*message.HostedObservation, error)
+	// ForCaller returns a backend view whose default caller is the given
+	// agent instance. Unset model_pool routing follows that caller's own
+	// pool, and availability is evaluated against it. SubAgent spawn uses
+	// this to rebind hosted tools cloned from the shared registry.
+	ForCaller(agentID string) HostedToolBackend
 }
 
 // HostedToolSpec is the resolved local-tool view of one hosted tool: the
@@ -54,6 +59,10 @@ type HostedToolSpec struct {
 	ImagePaths      []string
 	TimeoutS        int
 	Declarations    map[string]config.HostedToolDeclarationConfig
+	// ModelPool routes the tool's sub-requests to a named model pool instead
+	// of the caller's own pool. Empty follows the caller. Resolved and
+	// validated by the agent layer at startup.
+	ModelPool string
 	// Validate checks the decoded arguments before any sub-request is sent. It
 	// may normalize values in place so the wire declaration and the prompt see
 	// the same canonical arguments. nil skips validation.
@@ -108,6 +117,9 @@ func applyHostedToolConfig(spec *HostedToolSpec, cfg config.HostedToolConfig) {
 	}
 	if cfg.TimeoutSeconds > 0 {
 		spec.TimeoutS = cfg.TimeoutSeconds
+	}
+	if trimmedPool := strings.TrimSpace(cfg.ModelPool); trimmedPool != "" {
+		spec.ModelPool = trimmedPool
 	}
 	if len(cfg.Declarations) > 0 {
 		if spec.Declarations == nil {
@@ -170,6 +182,13 @@ type HostedTool struct {
 // NewHostedTool wires one catalog entry to the shared hosted backend.
 func NewHostedTool(spec HostedToolSpec, backend HostedToolBackend) HostedTool {
 	return HostedTool{spec: spec, backend: backend}
+}
+
+// WithBackend returns a copy of the tool bound to a backend view. SubAgent
+// spawn uses it so cloned hosted tools follow the subagent as the default
+// caller instead of the shared main-agent view.
+func (t HostedTool) WithBackend(backend HostedToolBackend) HostedTool {
+	return HostedTool{spec: t.spec, backend: backend}
 }
 
 func (t HostedTool) Name() string { return t.spec.Name }

@@ -146,7 +146,7 @@ func testHostedToolConfigOnlyEndToEnd(t *testing.T, paused bool) {
 			},
 		},
 	})
-	tool := tools.NewHostedTool(catalog[codeExecutionTool], NewHostedBackend(a, catalog))
+	tool := tools.NewHostedTool(catalog[codeExecutionTool], newTestHostedBackend(t, a, catalog))
 	if tool.Name() != codeExecutionTool || tool.Description() != "Run Python code in a sandbox and report its output." {
 		t.Fatalf("tool surface = %q/%q, want the configured name and description", tool.Name(), tool.Description())
 	}

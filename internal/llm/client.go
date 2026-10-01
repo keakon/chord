@@ -267,6 +267,11 @@ func (c *Client) InvalidateRouting(reason string) {
 	}
 }
 
+// IsClosed reports whether the client has been permanently invalidated.
+func (c *Client) IsClosed() bool {
+	return c == nil || c.closed.Load()
+}
+
 // Close releases client-owned background work and permanently invalidates any
 // in-flight routing plan. Provider implementations and ProviderConfig objects
 // may be shared by other clients, so their lifecycle remains externally owned.
