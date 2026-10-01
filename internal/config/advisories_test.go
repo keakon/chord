@@ -15,9 +15,9 @@ func collectTestAdvisories(t *testing.T, content string) string {
 		t.Fatalf("LoadConfigFromPath: %v", err)
 	}
 	advisories := Advisories(cfg)
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	if len(issues) != 0 {
 		t.Fatalf("issues = %q, want advisories kept out of the issue channel", issues)

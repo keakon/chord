@@ -1259,3 +1259,11 @@ func TestRunDoctorModelsResponsesReportsHTTPTransport(t *testing.T) {
 		t.Fatalf("results = %+v", report.Results)
 	}
 }
+
+func TestDoctorModelsRejectsUnknownCatalogBeforeNetwork(t *testing.T) {
+	cfg := &config.Config{Providers: map[string]config.ProviderConfig{"sample": {Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"alias": {Catalog: &config.ModelCatalogRef{ID: "unknown/model"}}}}}}
+	result := executeDoctorModelTarget(context.Background(), &doctorModelsRuntimeConfig{Cfg: cfg}, doctorModelTarget{ProviderName: "sample", ModelName: "alias"}, doctorModelsOptions{})
+	if result.Status != doctorModelResultConfigError || !strings.Contains(result.Error, "catalog model") {
+		t.Fatalf("result = %+v", result)
+	}
+}

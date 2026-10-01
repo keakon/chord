@@ -871,18 +871,12 @@ func TestLoadConfigRejectsOrchestrationWaitingMaxBelowMin(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesReportsOrchestrationWaitingInversion(t *testing.T) {
-	// The same contradiction surfaces through the issue collector (doctor /
-	// startup config issues), so it is visible even where the loader itself
-	// does not run.
+func TestResolvedConfigRejectsOrchestrationWaitingInversion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeTestFile(t, path, "orchestration:\n  waiting_main_min_wait_sec: 600\n  waiting_main_max_wait_sec: 300\n")
-	issues, err := CollectConfigFileIssues(path, true)
-	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
-	}
-	if joined := strings.Join(issues, "\n"); !strings.Contains(joined, "waiting_main_max_wait_sec 300 is below waiting_main_min_wait_sec 600") {
-		t.Fatalf("issues = %q, want the waiting_main clock inversion report", joined)
+	_, err := LoadResolvedConfig(path, "")
+	if err == nil || !strings.Contains(err.Error(), "waiting_main_max_wait_sec 300 is below waiting_main_min_wait_sec 600") {
+		t.Fatalf("error = %v, want the waiting_main clock inversion report", err)
 	}
 }
 
@@ -960,9 +954,9 @@ func TestLoadConfigOrchestrationCompactUsageOutOfRangeFallsBackToDefault(t *test
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeTestFile(t, path, "orchestration:\n  subagent_compact_usage: 1.5\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	if joined := strings.Join(issues, "\n"); !strings.Contains(joined, "orchestration.subagent_compact_usage") {
 		t.Fatalf("issues = %q, want an orchestration.subagent_compact_usage report", joined)

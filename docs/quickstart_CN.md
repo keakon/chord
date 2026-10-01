@@ -44,6 +44,22 @@ chord
 
 想手写配置？从[示例配置库](./examples/index_CN.md)选一个起点。API URL 格式、凭据和模型池设置见[配置与认证](./configuration_CN.md)。无交互终端的初始化问题见[常见问题排查](./troubleshooting_CN.md)。
 
+### 用内置目录配置官方端点
+
+官方 OpenAI 端点可在 `~/.config/chord/config.yaml` 中写入：
+
+```yaml
+providers:
+  openai:
+    preset: openai
+model_pools:
+  default: [openai/gpt-6.1-sol]
+```
+
+在启动 Chord 的终端中设置 `OPENAI_API_KEY`。`auth.yaml` 未给这个 provider 声明凭据时，Chord 会读取该环境变量，并从内置目录补充所引用模型的限额和档位。
+
+用 `chord config show --catalog` 查看可选模型，`chord config show` 查看有效配置，`chord doctor config` 检查配置问题。自定义网关及更多接入方式见[模型配置速查](./model-configs_CN.md)。
+
 ## 3. 检查连接
 
 完成配置后就可以发送消息。若 API key 配置无法请求模型，退出 Chord 后运行：

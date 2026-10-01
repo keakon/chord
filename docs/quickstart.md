@@ -44,6 +44,22 @@ Setup needs a controlling terminal: redirected stdin alone does not disable the 
 
 Prefer to write configuration yourself? Start with an [example](./examples/index.md). See [Configuration & Auth](./configuration.md) for endpoint formats, credentials, and model pools. For setup without an interactive terminal, see [Troubleshooting](./troubleshooting.md).
 
+### Configure an official endpoint with the built-in catalog
+
+For the official OpenAI endpoint, write this to `~/.config/chord/config.yaml`:
+
+```yaml
+providers:
+  openai:
+    preset: openai
+model_pools:
+  default: [openai/gpt-6.1-sol]
+```
+
+Set `OPENAI_API_KEY` in the terminal that starts Chord. When `auth.yaml` declares no credentials for this provider, Chord reads that variable and fills the referenced model's limits and variants from the built-in catalog.
+
+Use `chord config show --catalog` to discover models, `chord config show` to inspect effective settings, and `chord doctor config` to check configuration. For custom gateways and other connections, see [Model configuration recipes](./model-configs.md).
+
 ## 3. Check the connection
 
 After setup, you can send your first message. If an API-key configuration cannot reach the model, exit Chord and run:

@@ -279,6 +279,8 @@ type ProviderConfig struct {
 	pendingCauses              []*keyCooldownCause
 	limiter                    *rate.Limiter // optional rate limiter (nil = no rate limiting)
 	models                     map[string]config.ModelConfig
+	responsesCompat            map[string]*config.ResponsesCompatConfig
+	defaultResponsesCompat     *config.ResponsesCompatConfig
 	compat                     *config.ProviderCompatConfig // provider-level compat defaults
 	store                      *bool                        // provider-level Responses storage preference; nil defaults to false
 	parallelToolCalls          *bool                        // provider-level parallel_tool_calls default; nil = true
@@ -342,6 +344,13 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		models = make(map[string]config.ModelConfig)
 	}
 
+	responsesCompat := make(map[string]*config.ResponsesCompatConfig, len(models))
+	for name, model := range models {
+		responsesCompat[name], _ = config.ResolveResponsesCompat(cfg.Preset, name, model, cfg.Compat)
+	}
+
+	defaultResponsesCompat, _ := config.ResolveResponsesCompat("", "", config.ModelConfig{}, cfg.Compat)
+
 	// Initialize key states from the provided key list.
 	keyStates := make([]*KeyState, len(keys))
 	for i, k := range keys {
@@ -398,6 +407,8 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		oauthProfile:               oauthProfile,
 		keyStates:                  keyStates,
 		models:                     models,
+		responsesCompat:            responsesCompat,
+		defaultResponsesCompat:     defaultResponsesCompat,
 		compat:                     cfg.Compat,
 		store:                      cfg.Store,
 		parallelToolCalls:          cfg.ParallelToolCalls,
@@ -468,48 +479,14 @@ func (p *ProviderConfig) ParallelToolCallsConfig() *bool {
 	return p.parallelToolCalls
 }
 
-// ResponsesCompat resolves provider defaults with model-level overrides.
+// ResponsesCompat returns the request settings resolved when the provider was built.
 func (p *ProviderConfig) ResponsesCompat(modelID string) *config.ResponsesCompatConfig {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var providerCfg *config.ResponsesCompatConfig
-	if p.compat != nil {
-		providerCfg = p.compat.Responses
+	if compat, ok := p.responsesCompat[modelID]; ok {
+		return compat
 	}
-	var modelCfg *config.ResponsesCompatConfig
-	if model, ok := p.models[modelID]; ok && model.Compat != nil {
-		modelCfg = model.Compat.Responses
-	}
-	if providerCfg == nil && modelCfg == nil {
-		return nil
-	}
-	if modelCfg == nil {
-		return providerCfg
-	}
-	if providerCfg == nil {
-		return modelCfg
-	}
-	merged := &config.ResponsesCompatConfig{}
-	*merged = *providerCfg
-	if modelCfg.SendStore != nil {
-		merged.SendStore = modelCfg.SendStore
-	}
-	if modelCfg.SendReasoningInclude != nil {
-		merged.SendReasoningInclude = modelCfg.SendReasoningInclude
-	}
-	if modelCfg.SendToolChoice != nil {
-		merged.SendToolChoice = modelCfg.SendToolChoice
-	}
-	if modelCfg.SendPromptCacheKey != nil {
-		merged.SendPromptCacheKey = modelCfg.SendPromptCacheKey
-	}
-	if modelCfg.SendMaxOutputTokens != nil {
-		merged.SendMaxOutputTokens = modelCfg.SendMaxOutputTokens
-	}
-	if modelCfg.MCPAdditionalTools != nil {
-		merged.MCPAdditionalTools = modelCfg.MCPAdditionalTools
-	}
-	return merged
+	return p.defaultResponsesCompat
 }
 
 // HostedToolsCompat resolves the hosted_tools catalog entries enabled for a

@@ -169,7 +169,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVar(&flagWorktreeResetBranch, "reset-branch", false,
 		"Reset an existing branch that no worktree has checked out to HEAD instead of refusing to recreate it (only with --worktree)")
 
-	rootCmd.AddCommand(newAuthCmd(), newHeadlessCmd(), newACPCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd(), newSessionsCmd())
+	rootCmd.AddCommand(newAuthCmd(), newConfigCmd(), newHeadlessCmd(), newACPCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd(), newSessionsCmd())
 	return rootCmd
 }
 
@@ -562,6 +562,7 @@ func resolveModelRef(
 	ref string,
 	allProviders map[string]config.ProviderConfig,
 	auth config.AuthConfig,
+	credDecls config.CredentialDeclarations,
 	globalProxy string,
 	getProvider getProviderFunc,
 	getProviderImpl getProviderImplFunc,
@@ -581,6 +582,9 @@ func resolveModelRef(
 		providerCfg config.ProviderConfig
 		mc          config.ModelConfig
 	)
+	if err = config.ValidateConfiguredModelRefs(allProviders, []string{ref}, ""); err != nil {
+		return
+	}
 	provName, resolvedModelID, _, providerCfg, mc, err = config.ResolveConfiguredModelRef(allProviders, ref)
 	if err != nil {
 		return nil, nil, "", 0, 0, err
@@ -588,7 +592,7 @@ func resolveModelRef(
 	providerCfg = applyRuntimeAPIBaseOverride(providerCfg)
 
 	creds := auth[provName]
-	apiKeys := config.ExtractAPIKeys(creds)
+	apiKeys := resolveProviderAPIKeys(provName, providerCfg, auth, credDecls)
 	// Note: empty creds is allowed for local/self-hosted providers that don't require authentication.
 	// The provider implementation will handle authentication as needed.
 	normalizedProviderCfg, err := normalizeProviderConfig(provName, providerCfg, creds)

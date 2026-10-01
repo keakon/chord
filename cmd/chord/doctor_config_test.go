@@ -117,3 +117,46 @@ func TestRunDoctorConfigMissingGlobal(t *testing.T) {
 		t.Fatalf("err = %v, want initial setup required", err)
 	}
 }
+
+// A model pool reference that does not resolve is a problem of the effective
+// config: the files parse cleanly, but doctor still exits 2.
+func TestRunDoctorConfigBrokenPoolRef(t *testing.T) {
+	setupDoctorConfigHome(t, "providers:\n  sample:\n    type: responses\n    models:\n      test-model:\n        limit:\n          context: 100000\n          output: 64000\nmodel_pools:\n  default:\n    - sample/gone\n")
+	t.Chdir(t.TempDir())
+
+	var out bytes.Buffer
+	err := runDoctorConfig(doctorConfigOptions{Out: &out})
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
+		t.Fatalf("err = %v, want exit 2", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "problem: model ref \"sample/gone\"") {
+		t.Fatalf("output = %q, want the broken pool reference as a problem", text)
+	}
+	if strings.Contains(text, "config OK") {
+		t.Fatalf("output = %q, want no config OK line", text)
+	}
+}
+
+func TestRunDoctorConfigBrokenPoolRefJSON(t *testing.T) {
+	setupDoctorConfigHome(t, "providers:\n  sample:\n    type: responses\n    models:\n      test-model:\n        limit:\n          context: 100000\n          output: 64000\nmodel_pools:\n  default:\n    - sample/gone\n")
+	t.Chdir(t.TempDir())
+
+	var out bytes.Buffer
+	err := runDoctorConfig(doctorConfigOptions{Out: &out, JSON: true})
+	if exitErr, ok := errors.AsType[cliExitError](err); !ok || exitErr.code != 2 {
+		t.Fatalf("err = %v, want exit 2", err)
+	}
+	var report doctorConfigReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("decode JSON report: %v\n%s", err, out.String())
+	}
+	if len(report.Errors) != 1 || !strings.Contains(report.Errors[0], "sample/gone") {
+		t.Fatalf("report.Errors = %+v, want the broken reference", report)
+	}
+	for _, f := range report.Files {
+		if !f.OK {
+			t.Fatalf("file report = %+v, want clean parse issues", f)
+		}
+	}
+}

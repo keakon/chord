@@ -2180,11 +2180,12 @@ func TestResponsesProvider_CompatTogglesOmitOptionalFields(t *testing.T) {
 		APIURL: server.URL + "/v1/responses",
 		Compat: &config.ProviderCompatConfig{
 			Responses: &config.ResponsesCompatConfig{
-				SendStore:            new(false),
-				SendToolChoice:       new(false),
-				SendPromptCacheKey:   new(false),
-				SendReasoningInclude: new(false),
-				SendMaxOutputTokens:  new(true),
+				SendStore:             new(false),
+				SendToolChoice:        new(false),
+				SendParallelToolCalls: new(false),
+				SendPromptCacheKey:    new(false),
+				SendReasoningInclude:  new(false),
+				SendMaxOutputTokens:   new(true),
 			},
 		},
 	}, []string{"test-key"})
@@ -2193,7 +2194,7 @@ func TestResponsesProvider_CompatTogglesOmitOptionalFields(t *testing.T) {
 	_, err := r.CompleteStream(
 		context.Background(), "test-key", "gpt-5.5", "",
 		[]message.Message{{Role: "user", Content: "hello"}},
-		nil, 128, RequestTuning{SessionKey: "session-123"},
+		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}}, 128, RequestTuning{SessionKey: "session-123"},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
@@ -2204,6 +2205,9 @@ func TestResponsesProvider_CompatTogglesOmitOptionalFields(t *testing.T) {
 	}
 	if _, has := gotBody["tool_choice"]; has {
 		t.Fatalf("tool_choice should be omitted, got %#v", gotBody["tool_choice"])
+	}
+	if _, has := gotBody["parallel_tool_calls"]; has {
+		t.Fatalf("parallel_tool_calls should be omitted, got %#v", gotBody["parallel_tool_calls"])
 	}
 	if _, has := gotBody["prompt_cache_key"]; has {
 		t.Fatalf("prompt_cache_key should be omitted, got %#v", gotBody["prompt_cache_key"])

@@ -291,9 +291,9 @@ func TestRemovedContextReductionKeysReportTheirMigration(t *testing.T) {
 		if err := os.WriteFile(path, content, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		issues, err := CollectConfigFileIssues(path, true)
+		issues, err := resolvedFileIssues(path, "")
 		if err != nil {
-			t.Fatalf("CollectConfigFileIssues: %v", err)
+			t.Fatalf("ResolvedConfigIssues: %v", err)
 		}
 		if len(issues) != 1 {
 			t.Fatalf("issues = %v, want exactly one", issues)

@@ -61,6 +61,7 @@ type doctorModelsRuntimeConfig struct {
 	Auth      config.AuthConfig
 	AuthMu    sync.Mutex
 	AuthPath  string
+	CredDecls config.CredentialDeclarations
 	PoolOrder []string
 }
 
@@ -195,7 +196,15 @@ func runDoctorModels(parentCtx context.Context, opts doctorModelsOptions) error 
 		return cliExitError{code: 2, err: err}
 	}
 
-	runtimeCfg, err := loadDoctorModelsRuntimeConfig()
+	var extraRefs []string
+	if modelRef := strings.TrimSpace(opts.ModelRef); modelRef != "" {
+		base, _ := config.ParseModelRef(modelRef)
+		if provider := strings.TrimSpace(opts.Provider); provider != "" && !strings.Contains(base, "/") {
+			base = provider + "/" + base
+		}
+		extraRefs = append(extraRefs, base)
+	}
+	runtimeCfg, err := loadDoctorModelsRuntimeConfig(extraRefs...)
 	if err != nil {
 		return cliExitError{code: 2, err: err}
 	}
@@ -297,11 +306,24 @@ type orderedModelPool struct {
 	Refs []string
 }
 
-func loadDoctorModelsRuntimeConfig() (*doctorModelsRuntimeConfig, error) {
-	cfg, err := config.LoadConfig()
+func loadDoctorModelsRuntimeConfig(extraRefs ...string) (*doctorModelsRuntimeConfig, error) {
+	globalPath, err := config.ConfigPath()
 	if err != nil {
-		return nil, wrapConfigLoadError("load config", err)
+		return nil, wrapConfigLoadError("resolve config path", err)
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("get working directory: %w", err)
+	}
+	projectConfigPath := config.ProjectConfigPath(cwd)
+	resolved, err := config.LoadResolvedConfig(globalPath, projectConfigPath, extraRefs...)
+	if err != nil {
+		return nil, fmt.Errorf("load config: %w", err)
+	}
+	if resolved.Global == nil {
+		return nil, initialSetupRequiredError()
+	}
+	cfg := resolved.Config
 	poolOrder := []string(nil)
 	if cfgPath, pathErr := config.ConfigPath(); pathErr == nil {
 		if pools, orderErr := orderedModelPoolsFromPath(cfgPath); orderErr == nil {
@@ -311,19 +333,11 @@ func loadDoctorModelsRuntimeConfig() (*doctorModelsRuntimeConfig, error) {
 		}
 	}
 
-	if cwd, err := os.Getwd(); err == nil {
-		projectConfigPath := config.ProjectConfigPath(cwd)
-		projectCfg, mergedCfg, mergeErr := config.MergeProjectConfig(cfg, projectConfigPath)
-		if mergeErr != nil {
-			return nil, fmt.Errorf("load project config: %w", mergeErr)
-		}
-		if projectCfg != nil {
-			cfg = mergedCfg
-			if pools, orderErr := orderedModelPoolsFromPath(projectConfigPath); orderErr == nil {
-				poolOrder = appendPoolOrder(poolOrder, pools)
-			} else {
-				return nil, fmt.Errorf("read model_pools order: %w", orderErr)
-			}
+	if resolved.Project != nil {
+		if pools, orderErr := orderedModelPoolsFromPath(projectConfigPath); orderErr == nil {
+			poolOrder = appendPoolOrder(poolOrder, pools)
+		} else {
+			return nil, fmt.Errorf("read model_pools order: %w", orderErr)
 		}
 	}
 	poolOrder = completeModelPoolOrder(poolOrder, cfg.ModelPools)
@@ -336,7 +350,11 @@ func loadDoctorModelsRuntimeConfig() (*doctorModelsRuntimeConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load auth: %w", err)
 	}
-	return &doctorModelsRuntimeConfig{Cfg: cfg, Auth: auth, AuthPath: authPath, PoolOrder: poolOrder}, nil
+	credDecls, err := config.LoadCredentialDeclarations(authPath)
+	if err != nil {
+		return nil, fmt.Errorf("load credential declarations: %w", err)
+	}
+	return &doctorModelsRuntimeConfig{Cfg: cfg, Auth: auth, AuthPath: authPath, CredDecls: credDecls, PoolOrder: poolOrder}, nil
 }
 
 func (r *doctorModelsRuntimeConfig) providerCredentials(provider string) []config.ProviderCredential {
@@ -776,6 +794,11 @@ func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModel
 		return result
 	}
 	cfg := runtimeCfg.Cfg
+	ref := config.CanonicalModelRef(target.ProviderName, target.ModelName, target.VariantName)
+	if err := config.ValidateConfiguredModelRefs(cfg.Providers, []string{ref}, ""); err != nil {
+		result.Status, result.Error = doctorModelResultConfigError, err.Error()
+		return result
+	}
 	providerCfg, modelCfg, err := config.LookupConfiguredModelVariant(cfg.Providers, target.ProviderName, target.ModelName, target.VariantName)
 	if err != nil {
 		result.Status = doctorModelResultConfigError
@@ -793,7 +816,7 @@ func executeDoctorModelTarget(parentCtx context.Context, runtimeCfg *doctorModel
 	}
 	result.ProviderType = normalizedCfg.Type
 	modelCfg = normalizedCfg.Models[target.ModelName]
-	apiKeys := config.ExtractAPIKeys(creds)
+	apiKeys := resolveProviderAPIKeys(target.ProviderName, providerCfg, runtimeCfg.Auth, runtimeCfg.CredDecls)
 	if len(apiKeys) > 1 {
 		apiKeys = apiKeys[:1]
 	}

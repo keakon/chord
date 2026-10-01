@@ -612,7 +612,7 @@ func TestConfigYAMLHostedToolsExplicitEmpty(t *testing.T) {
 
 func TestMergeProjectConfigHostedToolsExplicitEmpty(t *testing.T) {
 	base := &Config{Providers: map[string]ProviderConfig{"sample": {Compat: &ProviderCompatConfig{HostedTools: new([]string{"web_search"})}}}}
-	merged, err := mergeConfigOverrideData(base, []byte("providers:\n  sample:\n    compat:\n      hosted_tools: []\n"), "config.yaml")
+	merged, err := mergeConfigOverrideData(base, []byte("providers:\n  sample:\n    compat:\n      hosted_tools: []\n"), "config.yaml", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

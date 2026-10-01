@@ -278,7 +278,7 @@ func TestResolveModelRefStripsInlineVariant(t *testing.T) {
 
 	provCfg, _, modelID, maxTokens, ctxLimit, err := resolveModelRef(
 		context.Background(),
-		"test/test-model@high", providers, nil, "", nil, nil,
+		"test/test-model@high", providers, nil, nil, "", nil, nil,
 	)
 	if err != nil {
 		t.Fatalf("resolveModelRef: %v", err)
@@ -318,7 +318,7 @@ func TestResolveModelRefAppliesAPIBaseOverride(t *testing.T) {
 
 	provCfg, _, _, _, _, err := resolveModelRef(
 		context.Background(),
-		"test/test-model", providers, auth, "", cache.getOrCreate, cache.getOrCreateImpl,
+		"test/test-model", providers, auth, nil, "", cache.getOrCreate, cache.getOrCreateImpl,
 	)
 	if err != nil {
 		t.Fatalf("resolveModelRef: %v", err)
@@ -346,14 +346,14 @@ func TestResolveModelRefReusesCachedProviderImpl(t *testing.T) {
 	}
 	provCfg1, impl1, _, _, _, err := resolveModelRef(
 		context.Background(),
-		"test/test-model", providers, cache.auth, "", cache.getOrCreate, cache.getOrCreateImpl,
+		"test/test-model", providers, cache.auth, nil, "", cache.getOrCreate, cache.getOrCreateImpl,
 	)
 	if err != nil {
 		t.Fatalf("resolveModelRef first: %v", err)
 	}
 	provCfg2, impl2, _, _, _, err := resolveModelRef(
 		context.Background(),
-		"test/test-model", providers, cache.auth, "", cache.getOrCreate, cache.getOrCreateImpl,
+		"test/test-model", providers, cache.auth, nil, "", cache.getOrCreate, cache.getOrCreateImpl,
 	)
 	if err != nil {
 		t.Fatalf("resolveModelRef second: %v", err)
@@ -499,7 +499,7 @@ func TestCollectStartupConfigIssuesReportsIgnoredProblems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
-	issues := collectStartupConfigIssues(plan)
+	issues := startupConfigIssues(plan)
 	joined := strings.Join(issues, "\n")
 	if !strings.Contains(joined, "bogus_top_level") || !strings.Contains(joined, "cannot unmarshal") {
 		t.Fatalf("issues = %q, want unknown-key and wrong-type reports", joined)
@@ -518,7 +518,7 @@ func TestCollectStartupConfigIssuesSkipsMissingProjectFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("planInitAppStartup: %v", err)
 	}
-	if issues := collectStartupConfigIssues(plan); len(issues) != 0 {
+	if issues := startupConfigIssues(plan); len(issues) != 0 {
 		t.Fatalf("issues = %v, want none for a valid config and no project file", issues)
 	}
 }
@@ -769,5 +769,34 @@ func TestSupersededSkillScanDoesNotRepublish(t *testing.T) {
 	}
 	if len(ids) != 1 || ids[0] != "current-skill" {
 		t.Fatalf("skills after a superseded scan = %v, want [current-skill]", ids)
+	}
+}
+
+func TestStartupDiagnosticsUseLoadedSnapshot(t *testing.T) {
+	withTestStateDir(t)
+	path := filepath.Join(flagConfigHome, "config.yaml")
+	data := `providers:
+  sample:
+    type: responses
+    models:
+      model-1: {}
+model_pools:
+  default: [sample/model-1]
+  secondary: [sample/missing]
+`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	plan, err := planInitAppStartup(root, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	issues := startupConfigIssues(plan)
+	if len(issues) != 1 || !strings.Contains(issues[0], "sample/missing") {
+		t.Fatalf("issues = %v, want secondary pool diagnostic from snapshot", issues)
 	}
 }

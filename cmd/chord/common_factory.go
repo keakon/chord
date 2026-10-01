@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -37,17 +38,22 @@ func buildModelPool(
 	selectedRef string,
 	allProviders map[string]config.ProviderConfig,
 	auth config.AuthConfig,
+	credDecls config.CredentialDeclarations,
 	globalProxy string,
 	outputTokenMax int,
 	getProvider getProviderFunc,
 	getProviderImpl getProviderImplFunc,
 	logLabel string,
-) ([]llm.FallbackModel, int) {
+) ([]llm.FallbackModel, int, error) {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
 	if len(modelRefs) == 0 {
-		return nil, -1
+		return nil, -1, nil
+	}
+
+	if err := config.ValidateConfiguredModelRefs(allProviders, modelRefs, defaultVariant); err != nil {
+		return nil, -1, fmt.Errorf("%s model pool: %w", logLabel, err)
 	}
 
 	selectedCanonicalRef := ""
@@ -67,11 +73,10 @@ func buildModelPool(
 		}
 		fbProvCfg, fbImpl, fbModelID, fbMaxTokens, fbCtxLimit, fbErr := resolveModelRef(
 			parentCtx,
-			fbRef, allProviders, auth, globalProxy, getProvider, getProviderImpl,
+			fbRef, allProviders, auth, credDecls, globalProxy, getProvider, getProviderImpl,
 		)
 		if fbErr != nil {
-			log.Warnf("failed to resolve %s model, skipping model_ref=%v error=%v", logLabel, ref, fbErr)
-			continue
+			return nil, -1, fmt.Errorf("resolve %s model %q: %w", logLabel, ref, fbErr)
 		}
 		if selectedCanonicalRef != "" && config.CanonicalModelRef(fbProvCfg.Name(), fbModelID, fbVariant) == selectedCanonicalRef && selectedIdx < 0 {
 			selectedIdx = len(pool)
@@ -89,12 +94,12 @@ func buildModelPool(
 		})
 	}
 	if len(pool) == 0 {
-		return nil, -1
+		return nil, -1, nil
 	}
 	if selectedIdx < 0 {
 		selectedIdx = 0
 	}
-	return pool, selectedIdx
+	return pool, selectedIdx, nil
 }
 
 // buildSubAgentLLMFactory returns the LLM factory used by MainAgent when
@@ -129,72 +134,18 @@ func buildSubAgentLLMFactory(
 			parentCtx = context.Background()
 		}
 
-		// Parse per-model variant from the first model-pool ref (e.g. "provider/model@high").
-		// Inline @variant takes precedence over the global AgentConfig.Variant.
-		firstRef, firstVariant := config.ParseModelRef(agentModels[0])
-		if firstVariant == "" {
-			firstVariant = variant
+		pool, _, err := buildModelPool(parentCtx, agentModels, variant, agentModels[0], cfg.Providers,
+			auth, ac.CredDecls, cfg.Proxy, cfg.MaxOutputTokens, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl, "sub-agent")
+		if err != nil {
+			log.Warnf("cannot create agent model pool: %v", err)
+			return nil
 		}
-
-		pRef := strings.TrimSpace(firstRef)
-		if firstVariant != "" {
-			pRef += "@" + firstVariant
-		}
-		pProvCfg, pImpl, pModelID, pMaxTokens, _, pErr := resolveModelRef(
-			parentCtx,
-			pRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
-		)
-		if pErr != nil {
-			log.Warnf("failed to resolve agent first model-pool entry, falling back to default model_ref=%v error=%v", agentModels[0], pErr)
-			c := llm.NewClient(providerCfg, llmProvider, modelID,
-				modelCfg.Limit.Output, systemPrompt)
-			c.SetOutputTokenMax(cfg.MaxOutputTokens)
-			c.SetStreamRetryRounds(cfg.StreamRetryRounds)
-			c.SetVariant(firstVariant)
-			return c
-		}
-
-		client := llm.NewClient(pProvCfg, pImpl, pModelID, pMaxTokens, systemPrompt)
+		first := pool[0]
+		client := llm.NewClient(first.ProviderConfig, first.ProviderImpl, first.ModelID, first.MaxTokens, systemPrompt)
 		client.SetOutputTokenMax(cfg.MaxOutputTokens)
 		client.SetStreamRetryRounds(cfg.StreamRetryRounds)
-		client.SetVariant(firstVariant)
-
-		if len(agentModels) > 1 {
-			var fallbacks []llm.FallbackModel
-			for _, ref := range agentModels[1:] {
-				// Parse per-model variant for each fallback ref.
-				fbBaseRef, fbVariant := config.ParseModelRef(ref)
-				if fbVariant == "" {
-					fbVariant = variant
-				}
-				fbRef := strings.TrimSpace(fbBaseRef)
-				if fbVariant != "" {
-					fbRef += "@" + fbVariant
-				}
-				fbProvCfg, fbImpl, fbModelID, fbMaxTokens, fbCtxLimit, fbErr := resolveModelRef(
-					parentCtx,
-					fbRef, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
-				)
-				if fbErr != nil {
-					log.Warnf("failed to resolve agent fallback model, skipping model_ref=%v error=%v", ref, fbErr)
-					continue
-				}
-				inputLimit, deriveInputLimit := fallbackInputLimitConfig(fbProvCfg, fbModelID, fbCtxLimit, cfg.MaxOutputTokens)
-				fallbacks = append(fallbacks, llm.FallbackModel{
-					ProviderConfig:   fbProvCfg,
-					ProviderImpl:     fbImpl,
-					ModelID:          fbModelID,
-					MaxTokens:        fbMaxTokens,
-					ContextLimit:     fbCtxLimit,
-					InputLimit:       inputLimit,
-					DeriveInputLimit: deriveInputLimit,
-					Variant:          fbVariant,
-				})
-			}
-			if len(fallbacks) > 0 {
-				client.SetFallbackModels(fallbacks)
-			}
-		}
+		client.SetVariant(first.Variant)
+		client.SetModelPool(pool, 0)
 
 		return client
 	}
@@ -216,10 +167,16 @@ func buildMainClientFactory(
 		if parentCtx == nil {
 			parentCtx = context.Background()
 		}
+		if err := config.ValidateConfiguredModelRefs(cfg.Providers, poolRefs, poolVariant); err != nil {
+			return nil, "", 0, err
+		}
+		if err := config.ValidateConfiguredModelRefs(cfg.Providers, []string{providerModel}, ""); err != nil {
+			return nil, "", 0, err
+		}
 		_, selectedVariant := config.ParseModelRef(providerModel)
 		pProvCfg, pImpl, pModelID, pMaxTokens, pCtxLimit, pErr := resolveModelRef(
 			parentCtx,
-			providerModel, cfg.Providers, auth, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
+			providerModel, cfg.Providers, auth, ac.CredDecls, cfg.Proxy, ac.GetOrCreateProvider, ac.GetOrCreateProviderImpl,
 		)
 		if pErr != nil {
 			return nil, "", 0, pErr
@@ -230,19 +187,23 @@ func buildMainClientFactory(
 		client.SetStreamRetryRounds(cfg.StreamRetryRounds)
 		client.SetVariant(selectedVariant)
 
-		pool, selectedIdx := buildModelPool(
+		pool, selectedIdx, poolErr := buildModelPool(
 			parentCtx,
 			poolRefs,
 			poolVariant,
 			providerModel,
 			cfg.Providers,
 			auth,
+			ac.CredDecls,
 			cfg.Proxy,
 			cfg.MaxOutputTokens,
 			ac.GetOrCreateProvider,
 			ac.GetOrCreateProviderImpl,
 			"main-agent",
 		)
+		if poolErr != nil {
+			return nil, "", 0, poolErr
+		}
 		if len(pool) > 0 && selectedIdx >= 0 && selectedIdx < len(pool) && config.CanonicalModelRef(pool[selectedIdx].ProviderConfig.Name(), pool[selectedIdx].ModelID, pool[selectedIdx].Variant) == config.CanonicalModelRef(pProvCfg.Name(), pModelID, selectedVariant) {
 			client.SetModelPool(pool, selectedIdx)
 		}

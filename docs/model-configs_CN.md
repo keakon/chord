@@ -6,7 +6,7 @@
 
 ## 本页怎么读
 
-先选接入方式，再复制对应片段。第一次配置可以先保留默认的上下文设置，等模型连接正常后再调优。需要 API key 的 provider，先把凭据写进 `~/.config/chord/auth.yaml`；下面各节只列对应的条目片段。
+先选接入方式，再复制对应片段。第一次配置可以先保留默认的上下文设置，等模型连接正常后再调优。下面的手工片段列出 `~/.config/chord/auth.yaml` 中对应的凭据；托管 preset 也可使用默认的凭据环境变量。
 
 | 想接入什么 | 配方 |
 | --- | --- |
@@ -18,6 +18,24 @@
 | Chat Completions 网关的思考设置 | [网关配置](#走-chat-completions-网关的-thinking) |
 
 复制后按[验证步骤](#如何验证任意一份配置)检查配置和连接。需要长期运行或控制上下文成本时，再看文末的[按模型调压缩](#按模型调压缩)。
+
+## 官方端点的最简配置
+
+内置目录支持 `openai`、`anthropic`、`gemini` 和 `codex` preset。先用 `chord config show --catalog` 查看可用端点、模型 ID、档位与资料来源；目录可在尚无配置文件时离线浏览。
+
+官方 OpenAI 端点只需：
+
+```yaml
+providers:
+  openai:
+    preset: openai
+model_pools:
+  default: [openai/gpt-6.1-sol]
+```
+
+设置 `OPENAI_API_KEY` 后即可使用；`auth.yaml` 已声明凭据时以该声明为准。Anthropic 与 Gemini 可按目录更换 preset 和池引用，分别使用 `ANTHROPIC_API_KEY` 与 `GEMINI_API_KEY`；Codex 使用下方的 OAuth 登录流程。需要调节模型参数时，只在对应模型块中写下要覆盖的字段，省略的已知限额和档位由目录补齐。
+
+自定义网关应显式填写端点，不带官方 preset。可用模型下的 `catalog: openai/gpt-6.1-sol` 借用已知模型事实，线路专用的发送规则和档位仍需按网关能力配置。以下手工片段适用于目录未覆盖的模型、端点及高级设置，使用共用模板的片段需要先复制模板定义。
 
 ## 共用模型模板
 

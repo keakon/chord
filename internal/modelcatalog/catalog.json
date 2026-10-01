@@ -1,0 +1,395 @@
+{
+  "version": "2026-10-01.1",
+  "endpoints": [
+    {
+      "preset_id": "anthropic",
+      "protocol": "messages",
+      "request_url": "https://api.anthropic.com/v1/messages",
+      "auth_method": "anthropic-api-key",
+      "env_var": "ANTHROPIC_API_KEY",
+      "docs": [
+        {
+          "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://models.dev/anthropic",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "preset_id": "codex",
+      "protocol": "responses",
+      "request_url": "https://chatgpt.com/backend-api/codex/responses",
+      "auth_method": "oauth",
+      "env_var": "",
+      "docs": [
+        {
+          "url": "https://developers.openai.com/codex/",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "preset_id": "gemini",
+      "protocol": "generate-content",
+      "request_url": "https://generativelanguage.googleapis.com/v1beta/models",
+      "auth_method": "x-goog-api-key",
+      "env_var": "GEMINI_API_KEY",
+      "docs": [
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/models",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://models.dev/google",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "preset_id": "openai",
+      "protocol": "responses",
+      "request_url": "https://api.openai.com/v1/responses",
+      "auth_method": "bearer",
+      "env_var": "OPENAI_API_KEY",
+      "docs": [
+        {
+          "url": "https://platform.openai.com/docs/models",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://models.dev/openai",
+          "checked": "2026-10-01"
+        }
+      ]
+    }
+  ],
+  "models": [
+    {
+      "id": "anthropic/claude-opus-5-5",
+      "context": 1000000,
+      "output": 128000,
+      "reasoning_options": [],
+      "sources": [
+        {
+          "url": "https://models.dev/anthropic/claude-opus-5-5",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "id": "anthropic/claude-sonnet-5-5",
+      "context": 1000000,
+      "output": 128000,
+      "reasoning_options": [],
+      "sources": [
+        {
+          "url": "https://models.dev/anthropic/claude-sonnet-5-5",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://docs.anthropic.com/en/docs/about-claude/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "id": "google/gemini-3.8-flash",
+      "context": 1048576,
+      "output": 65536,
+      "reasoning_options": [],
+      "sources": [
+        {
+          "url": "https://models.dev/google/gemini-3.8-flash",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://ai.google.dev/gemini-api/docs/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-6-astra",
+      "context": 1050000,
+      "input": 922000,
+      "output": 128000,
+      "reasoning_options": ["low", "medium", "high", "xhigh"],
+      "sources": [
+        {
+          "url": "https://models.dev/openai/gpt-6-astra",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://platform.openai.com/docs/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-6-luna",
+      "context": 1050000,
+      "input": 922000,
+      "output": 128000,
+      "reasoning_options": ["low", "medium", "high", "xhigh"],
+      "sources": [
+        {
+          "url": "https://models.dev/openai/gpt-6-luna",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://platform.openai.com/docs/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-6-sol",
+      "context": 1050000,
+      "input": 922000,
+      "output": 128000,
+      "reasoning_options": ["low", "medium", "high", "xhigh"],
+      "sources": [
+        {
+          "url": "https://models.dev/openai/gpt-6-sol",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://platform.openai.com/docs/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-6.1-sol",
+      "context": 1050000,
+      "input": 922000,
+      "output": 128000,
+      "reasoning_options": ["low", "medium", "high", "xhigh"],
+      "sources": [
+        {
+          "url": "https://models.dev/openai/gpt-6.1-sol",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://platform.openai.com/docs/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-luna",
+      "context": 1050000,
+      "input": 922000,
+      "output": 128000,
+      "reasoning_options": ["low", "medium", "high", "xhigh"],
+      "sources": [
+        {
+          "url": "https://models.dev/openai/gpt-5.6-luna",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://platform.openai.com/docs/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-sol",
+      "context": 1050000,
+      "input": 922000,
+      "output": 128000,
+      "reasoning_options": ["low", "medium", "high", "xhigh"],
+      "sources": [
+        {
+          "url": "https://models.dev/openai/gpt-5.6-sol",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://platform.openai.com/docs/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-terra",
+      "context": 1050000,
+      "input": 922000,
+      "output": 128000,
+      "reasoning_options": ["low", "medium", "high", "xhigh"],
+      "sources": [
+        {
+          "url": "https://models.dev/openai/gpt-5.6-terra",
+          "checked": "2026-10-01"
+        },
+        {
+          "url": "https://platform.openai.com/docs/models",
+          "checked": "2026-10-01"
+        }
+      ]
+    }
+  ],
+  "bindings": [
+    {
+      "endpoint": "codex",
+      "wire_model_id": "gpt-6.1-sol",
+      "model_id": "openai/gpt-6.1-sol",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "codex",
+      "wire_model_id": "gpt-6-astra",
+      "model_id": "openai/gpt-6-astra",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "codex",
+      "wire_model_id": "gpt-6-luna",
+      "model_id": "openai/gpt-6-luna",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "codex",
+      "wire_model_id": "gpt-6-sol",
+      "model_id": "openai/gpt-6-sol",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "codex",
+      "wire_model_id": "gpt-5.6-luna",
+      "model_id": "openai/gpt-5.6-luna",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "codex",
+      "wire_model_id": "gpt-5.6-sol",
+      "model_id": "openai/gpt-5.6-sol",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "codex",
+      "wire_model_id": "gpt-5.6-terra",
+      "model_id": "openai/gpt-5.6-terra",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "openai",
+      "wire_model_id": "gpt-6.1-sol",
+      "model_id": "openai/gpt-6.1-sol",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "openai",
+      "wire_model_id": "gpt-6-sol",
+      "model_id": "openai/gpt-6-sol",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "openai",
+      "wire_model_id": "gpt-6-luna",
+      "model_id": "openai/gpt-6-luna",
+      "responses": {
+        "send_store": true,
+        "send_parallel_tool_calls": true
+      },
+      "variants": {
+        "high": { "reasoning_effort": "high" },
+        "low": { "reasoning_effort": "low" },
+        "xhigh": { "reasoning_effort": "xhigh" }
+      }
+    },
+    {
+      "endpoint": "anthropic",
+      "wire_model_id": "claude-sonnet-5-5",
+      "model_id": "anthropic/claude-sonnet-5-5"
+    },
+    {
+      "endpoint": "anthropic",
+      "wire_model_id": "claude-opus-5-5",
+      "model_id": "anthropic/claude-opus-5-5"
+    },
+    {
+      "endpoint": "gemini",
+      "wire_model_id": "gemini-3.8-flash",
+      "model_id": "google/gemini-3.8-flash"
+    }
+  ]
+}

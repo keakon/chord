@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -444,10 +445,79 @@ type ModelModalities struct {
 	Input []string `json:"input,omitempty" yaml:"input,omitempty"` // "text", "image", "pdf"
 }
 
+// ModelCatalogRef selects the verified model facts used to materialize a
+// model. A string binds a custom wire model ID to a stable catalog model; the
+// disabled form keeps the endpoint preset contract while opting the model out
+// of all catalog filling.
+type ModelCatalogRef struct {
+	ID       string `json:"-"`
+	Disabled bool   `json:"-"`
+}
+
+func (r *ModelCatalogRef) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil {
+		return fmt.Errorf("catalog must be a non-empty string or false")
+	}
+	switch value.Tag {
+	case "!!str":
+		r.ID = strings.TrimSpace(value.Value)
+		if r.ID == "" {
+			return fmt.Errorf("catalog must be a non-empty string or false")
+		}
+		r.Disabled = false
+	case "!!bool":
+		if strings.EqualFold(strings.TrimSpace(value.Value), "false") {
+			r.ID = ""
+			r.Disabled = true
+			return nil
+		}
+		return fmt.Errorf("catalog must be a non-empty string or false")
+	default:
+		return fmt.Errorf("catalog must be a non-empty string or false")
+	}
+	return nil
+}
+
+func (r ModelCatalogRef) MarshalYAML() (any, error) {
+	if r.Disabled {
+		return false, nil
+	}
+	return r.ID, nil
+}
+
+func (r ModelCatalogRef) MarshalJSON() ([]byte, error) {
+	if r.Disabled {
+		return []byte("false"), nil
+	}
+	if strings.TrimSpace(r.ID) == "" {
+		return nil, fmt.Errorf("catalog must be a non-empty string or false")
+	}
+	return json.Marshal(r.ID)
+}
+
+func (r *ModelCatalogRef) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if bytes.Equal(data, []byte("false")) {
+		r.ID, r.Disabled = "", true
+		return nil
+	}
+	var id string
+	if len(data) == 0 || data[0] != '"' || json.Unmarshal(data, &id) != nil {
+		return fmt.Errorf("catalog must be a non-empty string or false")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("catalog must be a non-empty string or false")
+	}
+	r.ID, r.Disabled = id, false
+	return nil
+}
+
 // ModelConfig specifies a model and its parameters.
 type ModelConfig struct {
 	Name                  string                  `json:"name" yaml:"name"`
 	Limit                 ModelLimit              `json:"limit" yaml:"limit"`
+	Catalog               *ModelCatalogRef        `json:"catalog,omitempty" yaml:"catalog,omitempty"`
 	Modalities            *ModelModalities        `json:"modalities,omitempty" yaml:"modalities,omitempty"`
 	SupportedServiceTiers []ServiceTier           `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"` // explicit non-standard tiers supported by this model
 	Compaction            *ModelCompactionConfig  `json:"compaction,omitempty" yaml:"compaction,omitempty"`                           // per-model compaction threshold/reminder overrides; nil inherits the global context.compaction values
@@ -735,6 +805,9 @@ type ResponsesCompatConfig struct {
 	// SendToolChoice emits the default tool_choice: "auto" (default true).
 	// An explicit tool choice from model/variant tuning is always sent.
 	SendToolChoice *bool `json:"send_tool_choice,omitempty" yaml:"send_tool_choice,omitempty"`
+	// SendParallelToolCalls emits parallel_tool_calls when tools are present
+	// (default true). Set false for a binding that does not accept this field.
+	SendParallelToolCalls *bool `json:"send_parallel_tool_calls,omitempty" yaml:"send_parallel_tool_calls,omitempty"`
 	// SendPromptCacheKey emits prompt_cache_key and client_metadata session
 	// routing metadata (default true).
 	SendPromptCacheKey *bool `json:"send_prompt_cache_key,omitempty" yaml:"send_prompt_cache_key,omitempty"`
@@ -1591,7 +1664,7 @@ func LoadConfigFromPath(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
-	return loadConfigData(path, data, true)
+	return loadConfigData(path, data, true, nil)
 }
 
 // MergeProjectConfig overlays a project-level .chord/config.yaml onto an
@@ -1619,11 +1692,11 @@ func MergeProjectConfig(base *Config, path string) (projectCfg *Config, merged *
 	for _, drop := range drops {
 		log.Warnf("config %s: ignoring invalid value: %s", path, drop)
 	}
-	projectCfg, err = loadConfigData(path, cleanedData, false)
+	projectCfg, err = loadConfigData(path, cleanedData, false, nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	merged, err = mergeConfigOverrideData(base, cleanedData, path)
+	merged, err = mergeConfigOverrideData(base, cleanedData, path, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1906,7 +1979,7 @@ func compThresholdForModel(global CompactionConfig, mc ModelConfig) float64 {
 // waiting_main_max_wait_sec below waiting_main_min_wait_sec) are a fatal
 // error too: the effective-value layer would otherwise have to silently
 // rewrite one of the two explicit values.
-func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error) {
+func loadConfigData(path string, data []byte, withDefaults bool, diagnostics *[]Diagnostic) (*Config, error) {
 	cfg := &Config{}
 	if withDefaults {
 		cfg = DefaultConfig()
@@ -1917,34 +1990,17 @@ func loadConfigData(path string, data []byte, withDefaults bool) (*Config, error
 	}
 	for _, issue := range terrors {
 		log.Warnf("config %s: ignoring invalid value: %s", path, issue)
+		appendLoadDiagnostic(diagnostics, path, "", issue, "inherited/default value")
 	}
 	if err := orchestrationConfigLoadError(cfg); err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
 	}
 	for _, issue := range collectSemanticIssues(cfg) {
 		log.Warnf("config %s: ignoring invalid value(s): %s", path, issue)
+		appendLoadDiagnostic(diagnostics, path, "", issue, "inherited/default value")
 	}
 	normalizeModelLimits(cfg)
 	return cfg, nil
-}
-
-// collectConfigIssues decodes data into cfg with the loader's strict rules and
-// returns a human-readable list of every problem found: malformed YAML,
-// unknown keys, wrongly typed values, and semantic validation failures.
-// Decoding still populates cfg with everything valid, matching what
-// loadConfigData would accept, so callers can use the partial config for
-// reporting surfaces such as `chord doctor config`.
-func collectConfigIssues(data []byte, cfg *Config) []string {
-	terrors, err := decodeStrict(data, cfg)
-	if err != nil {
-		return []string{err.Error()}
-	}
-	issues := append([]string(nil), terrors...)
-	issues = append(issues, collectSemanticIssues(cfg)...)
-	if lerr := orchestrationConfigLoadError(cfg); lerr != nil {
-		issues = append(issues, lerr.Error())
-	}
-	return issues
 }
 
 // collectProviderIssues returns the retry, compression, key-selection,
@@ -2199,42 +2255,6 @@ func removeFailingNodes(node *yaml.Node, prefix []string, failures yamlFailures)
 	}
 }
 
-func CollectConfigFileIssues(path string, withDefaults bool) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config %s: %w", path, err)
-	}
-	cfg := &Config{}
-	if withDefaults {
-		cfg = DefaultConfig()
-	}
-	return collectConfigIssues(data, cfg), nil
-}
-
-// CollectProjectConfigIssues returns every problem in a project-level config:
-// strict parse issues plus top-level fields that are not recognized at the
-// project layer (which the loader logs and drops). A missing file is not an
-// error and yields nil issues.
-func CollectProjectConfigIssues(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read config %s: %w", path, err)
-	}
-	var issues []string
-	issues = append(issues, collectConfigIssues(data, &Config{})...)
-	var overrideMap map[string]any
-	if err := yaml.Unmarshal(data, &overrideMap); err != nil {
-		return issues, nil // malformed YAML is already reported above
-	}
-	for _, key := range unsupportedProjectTopLevelKeys(overrideMap) {
-		issues = append(issues, fmt.Sprintf("field %q is not supported in project config", key))
-	}
-	return issues, nil
-}
-
 var projectScopedTopLevelKeys = map[string]bool{
 	"providers":                       true,
 	"model_pools":                     true,
@@ -2288,7 +2308,7 @@ func unsupportedProjectTopLevelKeys(overrideMap map[string]any) []string {
 	return keys
 }
 
-func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath string) (*Config, error) {
+func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath string, diagnostics *[]Diagnostic) (*Config, error) {
 	baseMap, err := configToYAMLMap(base)
 	if err != nil {
 		return nil, err
@@ -2302,17 +2322,18 @@ func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath str
 	// drop them so the rest of the override still applies.
 	for _, key := range unsupportedProjectTopLevelKeys(overrideMap) {
 		log.Warnf("config %s: ignoring unsupported project field %q", overridePath, key)
+		appendLoadDiagnostic(diagnostics, overridePath, key, fmt.Sprintf("field %q is not supported in project config", key), "field ignored")
 		delete(overrideMap, key)
 	}
 	normalizeContextReductionOverride(baseMap, overrideMap)
 	// Semantically invalid leaves must not clobber the global value they
 	// overlay. Evaluate the merged candidate, strip exactly those leaves from
 	// the override, and re-merge until nothing invalid remains.
-	mergedData, err := marshalSanitizedMerge(baseMap, overrideMap, overridePath)
+	mergedData, err := marshalSanitizedMerge(baseMap, overrideMap, overridePath, diagnostics)
 	if err != nil {
 		return nil, err
 	}
-	return loadConfigData(overridePath, mergedData, false)
+	return loadConfigData(overridePath, mergedData, false, diagnostics)
 }
 
 // maxOverrideSanitizeRounds bounds how often invalid leaves can be stripped
@@ -2320,7 +2341,7 @@ func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath str
 // converge in one or two.
 const maxOverrideSanitizeRounds = 4
 
-func marshalSanitizedMerge(baseMap, overrideMap map[string]any, path string) ([]byte, error) {
+func marshalSanitizedMerge(baseMap, overrideMap map[string]any, path string, diagnostics *[]Diagnostic) ([]byte, error) {
 	for range maxOverrideSanitizeRounds {
 		trial := cloneYAMLValue(baseMap).(map[string]any)
 		mergeProjectConfigMap(trial, overrideMap, nil)
@@ -2344,6 +2365,7 @@ func marshalSanitizedMerge(baseMap, overrideMap map[string]any, path string) ([]
 		for _, p := range removable {
 			removeMapPath(overrideMap, p)
 			log.Warnf("config %s: ignoring semantically invalid override value: %s", path, strings.Join(p, "."))
+			appendLoadDiagnostic(diagnostics, path, strings.Join(p, "."), "ignoring semantically invalid override value", "inherited global/default value")
 		}
 	}
 	return nil, fmt.Errorf("config %s: too many invalid project values to sanitize", path)
@@ -2496,6 +2518,13 @@ func configToYAMLMap(cfg *Config) (map[string]any, error) {
 	// explicit values would freeze a stale sum when a project override changes
 	// input or output. Strip them so the merged re-parse re-derives.
 	stripped := *cfg
+	// Model templates are a pure anchor namespace: every decoded value has
+	// already been materialized, project configs cannot reference anchors
+	// across documents (anchors are document-scoped), and nothing reads the
+	// namespace directly. Re-emitting it orders the template mapping by key,
+	// which can place an alias before the anchor it references and fail the
+	// merged re-parse with an unknown-anchor error; drop it instead.
+	stripped.ModelTemplates = nil
 	if len(cfg.Providers) > 0 {
 		stripped.Providers = make(map[string]ProviderConfig, len(cfg.Providers))
 		for providerName, provider := range cfg.Providers {

@@ -6,7 +6,7 @@ Use this page when you already know which provider/model family you want and jus
 
 ## How to use this page
 
-Choose a connection type, then copy its recipe. Keep the default context settings until the model connects successfully; tune them later if needed. A provider that needs an API key first needs its credentials in `~/.config/chord/auth.yaml`; each section below shows only the matching entry.
+Choose a connection type, then copy its recipe. Keep the default context settings until the model connects successfully; tune them later if needed. The manual recipes below show the matching credentials for `~/.config/chord/auth.yaml`; managed presets can also use their default credential environment variable.
 
 | Connection | Recipe |
 | --- | --- |
@@ -18,6 +18,24 @@ Choose a connection type, then copy its recipe. Keep the default context setting
 | Thinking through a Chat Completions gateway | [Gateway settings](#thinking-behind-a-chat-completions-gateway) |
 
 After copying a recipe, [verify the configuration and connection](#verify-any-recipe). For long sessions or context-cost tuning, see [Per-model compaction tuning](#per-model-compaction-tuning) at the end of this page.
+
+## Minimal configuration for official endpoints
+
+The built-in catalog supports the `openai`, `anthropic`, `gemini`, and `codex` presets. Start with `chord config show --catalog` to inspect endpoints, model IDs, variants, and verification sources; browsing works offline without a config file.
+
+For the official OpenAI endpoint:
+
+```yaml
+providers:
+  openai:
+    preset: openai
+model_pools:
+  default: [openai/gpt-6.1-sol]
+```
+
+Set `OPENAI_API_KEY`; credentials declared in `auth.yaml` take priority. For Anthropic or Gemini, choose the preset and model reference shown in the catalog and use `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`. Codex uses the OAuth sign-in flow below. To tune a model, define only the fields you want to override; omitted verified limits and variants come from the catalog.
+
+Custom gateways need explicit endpoint settings without an official preset. A model's `catalog: openai/gpt-6.1-sol` borrows known model facts; route-specific field emission and variants must follow the gateway's capabilities. The manual recipes below cover models, endpoints, and advanced settings outside the catalog. Recipes using shared templates need those template definitions copied first.
 
 ## Shared model templates
 

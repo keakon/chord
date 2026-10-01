@@ -698,6 +698,9 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	}
 
 	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
+	if subLLMClient == nil {
+		return nil, "", false, fmt.Errorf("cannot initialize model pool for agent %q; check chord doctor config", agentDef.Name)
+	}
 	a.applyServiceTierToClient(subLLMClient)
 	var extraMCPTools []tools.Tool
 	if len(agentDef.MCP) > 0 {

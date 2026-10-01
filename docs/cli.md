@@ -18,9 +18,10 @@ Without a command, `chord` runs the local TUI in the current directory.
 | -------------------------------- | ---------------------------------------------------------------- |
 | `chord`                          | Run the local TUI                                                |
 | `chord auth [provider]`          | Sign in with a `preset: codex` OAuth provider                    |
+| `chord config show`              | Show the effective config with origins, or the built-in model catalog |
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
 | `chord acp`                      | Serve the Agent Client Protocol over stdio for ACP clients       |
-| `chord doctor config`            | Validate global/project config files                            |
+| `chord doctor config`            | Validate global/project config files and model pool references   |
 | `chord doctor models`            | Diagnose configured provider/model calls                         |
 | `chord doctor skills`            | Diagnose skill discovery, loading, and visibility                |
 | `chord cleanup status`           | Inspect state/cache/log sizes managed by the path locator        |
@@ -205,9 +206,49 @@ chord acp
 
 See [ACP Agent Mode](./acp.md) for client setup, what the client sees, and current limits.
 
+## `chord config show`
+
+Show the effective configuration (project merged over global) with the origin of every tracked field — which config file and line declared it, across the `catalog`, `global`, and `project` layers — plus per-model budget facts and structured diagnostics. The command is fully offline: it reads the config files and environment variables only, and never initializes LLM clients, refreshes OAuth state, probes the network, or writes any file. Diagnostics are listed without changing the exit status; `chord doctor config` is the pass/fail entry.
+
+Values that may carry credentials (API keys, tokens, authorization headers, credential query parameters) are redacted in both text and JSON output.
+
+### Flags
+
+| Flag           | Description                                                                       |
+| -------------- | --------------------------------------------------------------------------------- |
+| `--path <p>`   | Restrict the output to a dotted config path (for example `providers.sample`)      |
+| `--catalog`    | Show the built-in model catalog instead of the effective config                   |
+| `--json`       | Write a machine-readable JSON report                                              |
+
+JSON `ok` is false when an error diagnostic exists; inspection still exits successfully, while `chord doctor config` provides the pass/fail check. Responses models also have `request_settings`, showing `store` and `parallel_tool_calls` values separately from field emission, with their sources. This is read-only explanation, not a YAML configuration field. These are defaults before `request_overrides` patches. Tool fields require tools in the request; variants or request tuning can override capability values.
+
+`--path` filters the effective config, so it cannot be combined with `--catalog`.
+
+### Catalog view
+
+With `--catalog`, the command lists the built-in model catalog (see [Built-in model catalog](./configuration.md#built-in-model-catalog)): each managed preset's endpoint contract, and every verified model with its limits and reasoning variants, marked as `configured` when your effective config defines or references it and `not configured` otherwise. The view is read-only reference: it never writes files, probes the network, or previews into your pools, and it works with no config file at all.
+
+### Examples
+
+```bash
+# Effective config with origins, budgets, and diagnostics
+chord config show
+
+# Only one provider's subtree
+chord config show --path providers.sample
+
+# Browse the built-in model catalog
+chord config show --catalog
+
+# Machine-readable report for scripts
+chord config show --json
+```
+
 ## `chord doctor config`
 
 Check the global and project `config.yaml` files for unrecognized keys, wrongly typed values, malformed YAML, and invalid setting values (such as an unknown `retry_backoff` or a negative diagnostics threshold). The command reports every problem it finds in one pass instead of stopping at the first one.
+
+It also loads the effective config the runtime would start with (project merged over global) and reports model pool references that do not resolve — a reference naming an unknown provider or model, or a `@variant` the model does not define. Parse problems stay attributed to their file; such effective-config problems are reported as `problem:` lines (the `errors` field in `--json`).
 
 Chord's config loader logs these problems and starts anyway, treating the offending value as not configured. This command surfaces them explicitly so you can validate a config file without reading the log.
 

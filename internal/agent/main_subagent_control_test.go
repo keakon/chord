@@ -4991,3 +4991,16 @@ func TestTurnCloseoutAcksEveryBatchStagedInTurn(t *testing.T) {
 		t.Fatalf("staged batch survived closeout: pending=%v active=%v", a.pendingSubAgentMailboxes, a.activeSubAgentMailboxes)
 	}
 }
+
+func TestCreateSubAgentRejectsUnusableModelPoolAndReleasesAdmission(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	configureNestedDelegationTestRuntime(a, 1)
+	a.SetLLMFactory(func(string, []string, string) *llm.Client { return nil })
+	_, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{Description: "sample task", AgentType: "worker"})
+	if err == nil || !strings.Contains(err.Error(), "model pool") {
+		t.Fatalf("error = %v", err)
+	}
+	if got := len(a.sem); got != 0 {
+		t.Fatalf("semaphore slots = %d, want 0", got)
+	}
+}

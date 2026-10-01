@@ -466,10 +466,11 @@ func (r *ResponsesProvider) CompleteStream(
 		if r.provider != nil {
 			rc = r.provider.ResponsesCompat(model)
 		}
-		var sendStore, sendToolChoice, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens *bool
+		var sendStore, sendToolChoice, sendParallelToolCalls, sendPromptCacheKey, sendReasoningInclude, sendMaxOutputTokens *bool
 		if rc != nil {
 			sendStore = rc.SendStore
 			sendToolChoice = rc.SendToolChoice
+			sendParallelToolCalls = rc.SendParallelToolCalls
 			sendPromptCacheKey = rc.SendPromptCacheKey
 			sendReasoningInclude = rc.SendReasoningInclude
 			sendMaxOutputTokens = rc.SendMaxOutputTokens
@@ -527,10 +528,12 @@ func (r *ResponsesProvider) CompleteStream(
 		// reject the combination are handled by configuring parallel_tool_calls:
 		// false explicitly.
 		if len(apiTools) > 0 {
-			if ot.ParallelToolCalls != nil {
-				reqBody.ParallelToolCalls = ot.ParallelToolCalls
-			} else {
-				reqBody.ParallelToolCalls = new(true)
+			if compatBool(sendParallelToolCalls, true) {
+				if ot.ParallelToolCalls != nil {
+					reqBody.ParallelToolCalls = ot.ParallelToolCalls
+				} else {
+					reqBody.ParallelToolCalls = new(true)
+				}
 			}
 			if compatBool(sendToolChoice, true) {
 				reqBody.ToolChoice = "auto"

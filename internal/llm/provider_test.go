@@ -788,6 +788,33 @@ func TestNewProviderConfig_CodexDefaultsToSmartKeyOrder(t *testing.T) {
 	}
 }
 
+func TestProviderResponsesCompatIncludesCatalogBindingDefaults(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Preset: "openai",
+		Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}},
+	}, []string{"key"})
+	compat := p.ResponsesCompat("gpt-6.1-sol")
+	if compat == nil || compat.SendStore == nil || !*compat.SendStore || compat.SendParallelToolCalls == nil || !*compat.SendParallelToolCalls {
+		t.Fatalf("ResponsesCompat = %+v, want catalog binding defaults", compat)
+	}
+}
+
+func TestProviderResponsesCompatPrecedenceKeepsUserOverrides(t *testing.T) {
+	p := NewProviderConfig("openai", config.ProviderConfig{
+		Type:   config.ProviderTypeResponses,
+		Preset: "openai",
+		Compat: &config.ProviderCompatConfig{Responses: &config.ResponsesCompatConfig{SendParallelToolCalls: new(false)}},
+		Models: map[string]config.ModelConfig{
+			"gpt-6.1-sol": {Compat: &config.ModelCompatConfig{Responses: &config.ResponsesCompatConfig{SendParallelToolCalls: new(true)}}},
+		},
+	}, []string{"key"})
+	compat := p.ResponsesCompat("gpt-6.1-sol")
+	if compat == nil || compat.SendParallelToolCalls == nil || !*compat.SendParallelToolCalls {
+		t.Fatalf("ResponsesCompat = %+v, want model override true", compat)
+	}
+}
+
 func TestNewProviderConfig_NormalizesUnknownKeySelectionDefensively(t *testing.T) {
 	p := NewProviderConfig("openai", config.ProviderConfig{Type: config.ProviderTypeResponses, KeyRotation: "per-call", KeyOrder: "round_robin"}, []string{"k1", "k2"})
 	if p.keyRotation != config.KeyRotationOnFailure {
@@ -2687,5 +2714,33 @@ func TestProviderConfigHostedToolsCompatMerge(t *testing.T) {
 	plain := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeResponses, APIURL: "https://example.invalid/v1"}, nil)
 	if got := plain.HostedToolsCompat("provider/model-1"); len(got) != 0 {
 		t.Errorf("unconfigured HostedToolsCompat = %v, want empty", got)
+	}
+}
+
+func TestProviderResponsesCompatProviderOverridesCatalog(t *testing.T) {
+	p := NewProviderConfig("sample", config.ProviderConfig{
+		Preset: "openai", Type: config.ProviderTypeResponses,
+		Compat: &config.ProviderCompatConfig{Responses: &config.ResponsesCompatConfig{SendParallelToolCalls: new(false)}},
+		Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}},
+	}, nil)
+	defer p.Close()
+	compat := p.ResponsesCompat("gpt-6.1-sol")
+	if compat == nil || compat.SendParallelToolCalls == nil || *compat.SendParallelToolCalls {
+		t.Fatalf("compat = %+v, want provider false over catalog true", compat)
+	}
+}
+
+func TestProviderResponsesCompatRetainsResolvedSnapshot(t *testing.T) {
+	send := new(false)
+	cfg := config.ProviderConfig{
+		Preset: "openai", Type: config.ProviderTypeResponses,
+		Compat: &config.ProviderCompatConfig{Responses: &config.ResponsesCompatConfig{SendParallelToolCalls: send}},
+		Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}},
+	}
+	p := NewProviderConfig("sample", cfg, nil)
+	defer p.Close()
+	*send = true
+	if compat := p.ResponsesCompat("gpt-6.1-sol"); compat == nil || compat.SendParallelToolCalls == nil || *compat.SendParallelToolCalls {
+		t.Fatalf("compat = %+v, want immutable resolved false", compat)
 	}
 }

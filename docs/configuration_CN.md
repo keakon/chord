@@ -334,6 +334,33 @@ providers:
 
 不匹配以上规则时，需显式设置 `type`。
 
+## 内置模型目录
+
+Chord 内置一份小型的版本化目录，收录托管 preset（`openai`、`anthropic`、`gemini`、`codex`）的已核验端点契约与模型事实。目录随二进制分发，只读且完全离线：不会访问网络，也永远不会覆盖你写下的内容。
+
+托管 preset 代表一份已核验的端点契约。provider 使用托管 preset 时，Chord 只在字段留空处填充 `type`、`api_url` 和 `auth_scheme`——你显式写的值始终优先；与契约冲突的取值（例如 preset 不使用的 `auth_scheme`，或非 OAuth preset 上的 `token_url`）会被判为配置错误。如果要把 provider 指向其他端点，删除 `preset` 并显式配置端点即可。
+
+对使用托管 preset 的 provider，目录还会补充你未声明的模型事实：
+
+- `limit.context`、`limit.input`、`limit.output` 和 reasoning `variants` 只在所有配置层都未声明时填充。用显式 null 清空的块保持清空，不会被目录重新填上。
+- 被 `model_pools` 引用但从未定义的模型会按目录整体创建，引用目录里的模型无需手工抄写限额。
+- 每个由目录填充的值都带 `catalog` 来源层，可用 `chord config show` 查询。
+- 默认只按 preset 下的精确 wire model ID 匹配；自定义 wire 名称可在模型下用 `catalog: openai/gpt-6.1-sol` 显式绑定稳定目录 ID，`catalog: false` 则关闭该模型的全部目录填充。
+
+目录只填充实际核验过的事实；未知事实（例如价格）保持缺席，不做猜测。事实条目附带核验来源与核验日期。
+
+无 preset 的自定义端点也可显式写 `catalog: openai/gpt-6.1-sol`，借用目录中的窗口、输入模态等模型事实；它不会继承官方线路的发送规则或档位。不存在的目录 ID 会报错。当前模型使用的结构错误会阻止启动或切换；未选中的次要池问题会进入启动提示，可用 `chord doctor config` 查询。
+
+在托管 preset 上，显式的 `compat.responses.send_*` 覆盖仍按来源矩阵生效；但若绑定已核验该端点从不接受该字段，`chord config show` 和 `chord doctor config` 会将其报为错误——覆盖仍会发送、该模型的请求会失败——而不是静默丢弃你的取值。
+
+### 凭据
+
+在 `auth.yaml` 中完全没有声明凭据来源的 provider，会回退到其 preset 的默认环境变量（`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`）。已有声明但当前不可用的来源——未设置的 `$VAR`、显式空列表、空字符串——仍视为已声明，不会触发回退；已显式配置的账号保持既有选择语义。
+
+### 查看目录
+
+`chord config show --catalog`（见 [CLI 参考](./cli_CN.md#chord-config-show)）列出目录中的端点、模型与 reasoning 档位，并按当前有效配置标注每项「已配置 / 未配置」。该视图只是只读参考：不写文件、不探测网络、不改动你的模型池。
+
 ## Thinking 附加翻译
 
 如果你的模型会输出英文 thinking / reasoning，而你希望在界面中附加中文译文，可启用 `thinking_translation`：
@@ -1383,6 +1410,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 
 | 字段              | 类型   | 说明                                                                                                              |
 | ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
+| `catalog` | string / false | 显式绑定目录模型 ID；省略时只在所属 preset 下按模型名精确匹配，`false` 关闭该模型的目录填充。 |
 | `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，Chord 按总窗口减去模型声明的 `limit.output` 推导输入预算（模型未声明输出上限时回退到 `max_output_tokens` 默认值）。                                       |
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |

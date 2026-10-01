@@ -18,9 +18,10 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | --------------------------------- | ----------------------------------------------------------------- |
 | `chord`                           | 启动本地 TUI                                                      |
 | `chord auth [provider]`           | 用 `preset: codex` provider 登录 OAuth                            |
+| `chord config show`               | 查看带来源的有效配置，或浏览内置模型目录                          |
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
 | `chord acp`                       | 为 ACP 客户端提供 stdio 版 Agent Client Protocol 服务             |
-| `chord doctor config`             | 校验全局 / 项目配置文件                                            |
+| `chord doctor config`             | 校验全局 / 项目配置文件与模型池引用                               |
 | `chord doctor models`             | 诊断已配置的 provider/model 调用链                                |
 | `chord doctor skills`             | 诊断 skill 的发现、加载与可见性                                    |
 | `chord cleanup status`            | 查看路径定位器管理的 state/cache/logs 体积                        |
@@ -205,9 +206,49 @@ chord acp
 
 客户端配置、客户端能看到什么、以及当前限制见 [ACP Agent 模式](./acp_CN.md)。
 
+## `chord config show`
+
+查看有效配置（项目层叠加在全局层之上），以及每个被跟踪字段的来源——它在哪一层、哪个文件、哪一行声明，覆盖 `catalog`、`global`、`project` 三层——外加每个模型的预算事实和结构化诊断。命令完全离线：只读取配置文件和环境变量，不初始化 LLM client、不刷新 OAuth 状态、不探测网络、不写任何文件。诊断只列出、不影响退出码；以通过/失败为准的入口是 `chord doctor config`。
+
+可能携带凭据的值（API key、token、authorization header、URL 中的凭据参数）在文本和 JSON 输出中都会脱敏。
+
+### Flag
+
+| Flag           | 说明                                                            |
+| -------------- | --------------------------------------------------------------- |
+| `--path <p>`   | 只输出某个点分配置路径的子树（例如 `providers.sample`）         |
+| `--catalog`    | 显示内置模型目录，而不是有效配置                                |
+| `--json`       | 输出机器可读的 JSON 报告                                        |
+
+JSON 的 `ok` 表示是否存在 error 级诊断；有错误时为 `false`，查询命令仍保持成功退出，配置是否通过检查以 `chord doctor config` 为准。Responses 模型另有 `request_settings`，分别显示 `store`、`parallel_tool_calls` 的取值、字段是否发送及其来源。它是只读说明，不是可写入 YAML 的配置字段；这里显示 `request_overrides` 补丁之前的默认值；工具字段需要请求含工具，档位或单次请求调优还可覆盖能力取值。
+
+`--path` 过滤的是有效配置，与 `--catalog` 互斥。
+
+### 目录视图
+
+加 `--catalog` 时，命令列出内置模型目录（见[内置模型目录](./configuration_CN.md#内置模型目录)）：每个托管 preset 的端点契约，以及每个已核验模型的限额与 reasoning 档位；被当前有效配置定义或引用的条目标为 `configured`，其余标为 `not configured`。该视图是只读参考：不写文件、不探测网络、不改动你的模型池，即使没有任何配置文件也能打开。
+
+### 示例
+
+```bash
+# 有效配置 + 来源 + 预算 + 诊断
+chord config show
+
+# 只看某个 provider 的子树
+chord config show --path providers.sample
+
+# 浏览内置模型目录
+chord config show --catalog
+
+# 脚本用的机器可读报告
+chord config show --json
+```
+
 ## `chord doctor config`
 
 检查全局与项目 `config.yaml` 里的未知字段、类型不对的值、YAML 语法错误，以及不合理的配置值（比如非法的 `retry_backoff`、负数 diagnostics 阈值）。命令会一次性列出所有问题，而不是遇到第一个就停。
+
+命令还会加载运行时将要使用的有效配置（项目层叠加在全局层之上），报告无法解析的模型池引用——引用了不存在的 provider 或 model，或使用了模型未定义的 `@variant`。解析类问题归属到各自的文件；这类有效配置问题以 `problem:` 行输出（`--json` 里是 `errors` 字段）。
 
 Chord 的配置加载器遇到这些问题只会写日志并照常启动，把出错的值当作未配置处理。这个命令把它们显式列出来，方便你在不翻日志的情况下校验配置文件。
 

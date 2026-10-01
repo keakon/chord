@@ -342,6 +342,33 @@ If `type` is omitted, Chord auto-detects it from provider config:
 
 If none of these rules match, set `type` explicitly.
 
+## Built-in model catalog
+
+Chord ships a small, versioned catalog of verified endpoint contracts and model facts for the managed presets: `openai`, `anthropic`, `gemini`, and `codex`. It is read-only and fully offline: nothing in it probes the network, and it never overrides what you write.
+
+A managed preset stands for a verified endpoint contract. When a provider uses one, Chord fills `type`, `api_url`, and `auth_scheme` only where you left them empty — an explicit value of yours always wins, and a value that contradicts the contract (for example an `auth_scheme` the preset does not use, or a `token_url` on a preset that is not OAuth) is a config error. To point a provider at a different endpoint, remove the `preset` and configure the endpoint explicitly.
+
+For providers with a managed preset, the catalog also supplies model facts you did not declare:
+
+- `limit.context`, `limit.input`, `limit.output`, and reasoning `variants` are filled only when no config layer declared them. A block you cleared with an explicit null stays cleared.
+- A model referenced from a `model_pools` entry but never defined is created from the catalog, so pool references to catalog models work without hand-copied limits.
+- Every filled value carries a `catalog` origin in `chord config show`.
+- Matching is exact within the provider preset. A custom wire name can explicitly bind a stable catalog model with `catalog: openai/gpt-6.1-sol`; `catalog: false` disables all catalog filling for that model.
+
+Only facts the catalog actually verified are filled; unknown facts (such as pricing) stay absent instead of being guessed. Facts carry their verification sources and check dates.
+
+A custom endpoint without a preset can explicitly set `catalog: openai/gpt-6.1-sol` to borrow known model facts such as limits and input modalities. It does not inherit official route-specific field emission or variants. Unknown catalog IDs are errors. Structural errors in the selected model or pool block startup or switching; problems in unselected secondary pools appear in the startup notice and `chord doctor config`.
+
+On a managed preset, an explicit `compat.responses.send_*` override still wins over the catalog's field-emission rules. When the binding verified the endpoint never accepts that field, `chord config show` and `chord doctor config` report it as an error — the override is still sent and requests on that model will fail — instead of silently dropping your value.
+
+### Credentials
+
+A provider that declared no credential source in `auth.yaml` falls back to its preset's default environment variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`). A declaration that exists but resolves to nothing usable — an unset `$VAR`, an explicit empty list, an empty key — still counts as declared and never engages the fallback, so explicitly configured accounts keep their existing selection semantics.
+
+### Inspecting the catalog
+
+`chord config show --catalog` (see [CLI reference](./cli.md#chord-config-show)) lists the catalog's endpoints, models, and reasoning variants, marking each candidate as configured or not configured in your effective config. The view is read-only reference: it never writes files, probes the network, or changes your pools.
+
 ## Appended thinking translation
 
 If your model outputs English thinking / reasoning and you want an appended translation (for example, Chinese) in the TUI, you can enable `thinking_translation`:
@@ -1555,6 +1582,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 
 | Field             | Type   | Description                                                                                                            |
 | ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `catalog` | string / false | Bind a catalog model ID explicitly; omission matches the exact model name within its preset, and `false` disables catalog filling for the model. |
 | `limit.context`   | int    | Total request window in tokens when known. If `limit.input` is omitted, Chord derives the input budget from this minus the model's `limit.output` (falling back to the `max_output_tokens` default when no output cap is declared). |
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |

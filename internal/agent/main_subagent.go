@@ -1167,6 +1167,9 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 		admission.complete(result, resultErr)
 	}()
 	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
+	if subLLMClient == nil {
+		return tools.TaskHandle{}, fmt.Errorf("cannot initialize model pool for agent %q; check chord doctor config", agentDef.Name)
+	}
 	clientCommitted := false
 	defer func() {
 		if !clientCommitted && subLLMClient != nil {

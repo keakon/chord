@@ -248,9 +248,9 @@ func TestBuildMainClientFactoryWithModelPool(t *testing.T) {
 			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
-					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}, Variants: map[string]config.ModelVariant{"balanced": {}}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}, Variants: map[string]config.ModelVariant{"balanced": {}}},
+					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}, Variants: map[string]config.ModelVariant{"balanced": {}}},
 				},
 			},
 		},
@@ -318,9 +318,9 @@ func TestBuildMainClientFactorySelectsCorrectPoolEntry(t *testing.T) {
 			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
-					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}, Variants: map[string]config.ModelVariant{"balanced": {}}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}, Variants: map[string]config.ModelVariant{"balanced": {}}},
+					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}, Variants: map[string]config.ModelVariant{"balanced": {}}},
 				},
 			},
 		},
@@ -362,7 +362,7 @@ func TestBuildMainClientFactorySelectsCorrectPoolEntry(t *testing.T) {
 	t.Logf("Pool correctly starts from selected model: %s", primary)
 }
 
-func TestBuildModelPoolSelectedIndexTracksFilteredPool(t *testing.T) {
+func TestBuildModelPoolRejectsBrokenMember(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
@@ -376,12 +376,13 @@ func TestBuildModelPoolSelectedIndexTracksFilteredPool(t *testing.T) {
 			},
 		},
 	}
-	pool, selectedIdx := buildModelPool(
+	pool, selectedIdx, err := buildModelPool(
 		context.Background(),
 		[]string{"sample/missing", "sample/model-alpha", "sample/model-beta"},
 		"",
 		"sample/model-beta",
 		cfg.Providers,
+		nil,
 		nil,
 		"",
 		0,
@@ -389,17 +390,11 @@ func TestBuildModelPoolSelectedIndexTracksFilteredPool(t *testing.T) {
 		nil,
 		"test",
 	)
-	if len(pool) != 2 {
-		t.Fatalf("pool len = %d, want 2", len(pool))
+	if err == nil || !strings.Contains(err.Error(), "sample/missing") {
+		t.Fatalf("error = %v, want missing model", err)
 	}
-	if selectedIdx != 1 {
-		t.Fatalf("selectedIdx = %d, want 1", selectedIdx)
-	}
-	if got := pool[selectedIdx].ProviderConfig.Name() + "/" + pool[selectedIdx].ModelID; got != "sample/model-beta" {
-		t.Fatalf("selected pool entry = %q, want sample/model-beta", got)
-	}
-	if got := pool[0].ProviderConfig.Name() + "/" + pool[0].ModelID; got != "sample/model-alpha" {
-		t.Fatalf("first pool entry = %q, want sample/model-alpha", got)
+	if pool != nil || selectedIdx != -1 {
+		t.Fatalf("pool = %+v, selected = %d, want no partial pool", pool, selectedIdx)
 	}
 }
 
@@ -417,12 +412,13 @@ func TestBuildModelPoolFallsBackToFirstResolvedEntryWhenSelectionMissing(t *test
 			},
 		},
 	}
-	pool, selectedIdx := buildModelPool(
+	pool, selectedIdx, err := buildModelPool(
 		context.Background(),
 		[]string{"sample/model-alpha", "sample/model-beta"},
 		"",
 		"sample/missing",
 		cfg.Providers,
+		nil,
 		nil,
 		"",
 		0,
@@ -430,6 +426,9 @@ func TestBuildModelPoolFallsBackToFirstResolvedEntryWhenSelectionMissing(t *test
 		nil,
 		"test",
 	)
+	if err != nil {
+		t.Fatalf("buildModelPool: %v", err)
+	}
 	if len(pool) != 2 {
 		t.Fatalf("pool len = %d, want 2", len(pool))
 	}
@@ -458,12 +457,13 @@ func TestBuildModelPoolSelectsMatchingVariantForDuplicateBaseModel(t *testing.T)
 		},
 	}
 
-	pool, selectedIdx := buildModelPool(
+	pool, selectedIdx, err := buildModelPool(
 		context.Background(),
 		[]string{"sample/model-gamma@balanced", "sample/model-gamma@high"},
 		"",
 		"sample/model-gamma@high",
 		cfg.Providers,
+		nil,
 		nil,
 		"",
 		0,
@@ -471,6 +471,9 @@ func TestBuildModelPoolSelectsMatchingVariantForDuplicateBaseModel(t *testing.T)
 		nil,
 		"test",
 	)
+	if err != nil {
+		t.Fatalf("buildModelPool: %v", err)
+	}
 	if len(pool) != 2 {
 		t.Fatalf("pool len = %d, want 2", len(pool))
 	}
@@ -507,12 +510,13 @@ func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 		},
 	}
 
-	pool, selectedIdx := buildModelPool(
+	pool, selectedIdx, err := buildModelPool(
 		context.Background(),
 		[]string{"sample/model-alpha@balanced", "sample/model-beta", "sample/model-gamma@high"},
 		"high",
 		"sample/model-beta",
 		cfg.Providers,
+		nil,
 		nil,
 		"",
 		0,
@@ -520,6 +524,9 @@ func TestBuildModelPoolPreservesConfiguredOrderAndVariants(t *testing.T) {
 		nil,
 		"test",
 	)
+	if err != nil {
+		t.Fatalf("buildModelPool: %v", err)
+	}
 	if len(pool) != 3 {
 		t.Fatalf("pool len = %d, want 3", len(pool))
 	}
@@ -559,12 +566,13 @@ func TestBuildModelPoolMarksDerivedInputBudgetsDynamic(t *testing.T) {
 		},
 	}
 
-	pool, selectedIdx := buildModelPool(
+	pool, selectedIdx, err := buildModelPool(
 		context.Background(),
 		[]string{"sample/gpt-5.5", "sample/gpt-5"},
 		"",
 		"sample/gpt-5.5",
 		cfg.Providers,
+		nil,
 		nil,
 		"",
 		0,
@@ -574,6 +582,9 @@ func TestBuildModelPoolMarksDerivedInputBudgetsDynamic(t *testing.T) {
 	)
 	if selectedIdx != 0 {
 		t.Fatalf("selectedIdx = %d, want 0", selectedIdx)
+	}
+	if err != nil {
+		t.Fatalf("buildModelPool: %v", err)
 	}
 	if len(pool) != 2 {
 		t.Fatalf("pool len = %d, want 2", len(pool))
@@ -617,13 +628,14 @@ func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 	fallbackOneImpl := &stubScriptedProvider{calls: []stubScriptedCall{{err: &llm.APIError{StatusCode: 500, Message: "fallback one failed"}}}}
 	fallbackTwoImpl := &stubScriptedProvider{calls: []stubScriptedCall{{resp: &message.Response{Content: "fallback success"}}, {resp: &message.Response{Content: "next call starts here"}}}}
 
-	pool, selectedIdx := buildModelPool(
+	pool, selectedIdx, err := buildModelPool(
 		context.Background(),
 		[]string{"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
 		"",
 		"sample/model-beta",
 		cfg.Providers,
 		auth,
+		nil,
 		"",
 		cfg.MaxOutputTokens,
 		func(provName string, _ config.ProviderConfig, _ []string) (*llm.ProviderConfig, error) {
@@ -648,6 +660,9 @@ func TestSetModelPoolRotatesFallbackOrderFromSelectedEntry(t *testing.T) {
 		},
 		"test",
 	)
+	if err != nil {
+		t.Fatalf("buildModelPool: %v", err)
+	}
 	if len(pool) != 3 {
 		t.Fatalf("pool len = %d, want 3", len(pool))
 	}
@@ -711,7 +726,7 @@ func TestBuildMainClientFactorySingleModelPool(t *testing.T) {
 			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}, Variants: map[string]config.ModelVariant{"balanced": {}}},
 				},
 			},
 		},
@@ -759,9 +774,9 @@ func TestBuildMainClientFactoryWrapAround(t *testing.T) {
 			"sample": {
 				Type: config.ProviderTypeChatCompletions,
 				Models: map[string]config.ModelConfig{
-					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}},
-					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}},
-					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}},
+					"model-alpha": {Limit: config.ModelLimit{Context: 128000, Output: 4096}, Variants: map[string]config.ModelVariant{"balanced": {}}},
+					"model-beta":  {Limit: config.ModelLimit{Context: 200000, Output: 4096}, Variants: map[string]config.ModelVariant{"balanced": {}}},
+					"model-gamma": {Limit: config.ModelLimit{Context: 200000, Output: 100000}, Variants: map[string]config.ModelVariant{"balanced": {}}},
 				},
 			},
 		},
@@ -882,13 +897,14 @@ func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
 	primaryImpl := &stubScriptedProvider{calls: []stubScriptedCall{{err: &llm.APIError{StatusCode: 500, Message: "upstream unavailable"}}}}
 	fallbackImpl := &stubScriptedProvider{calls: []stubScriptedCall{{resp: &message.Response{Content: "fallback success"}}}}
 
-	pool, selectedIdx := buildModelPool(
+	pool, selectedIdx, err := buildModelPool(
 		context.Background(),
 		[]string{"sample/model-alpha", "sample/model-beta"},
 		"",
 		"sample/model-alpha",
 		cfg.Providers,
 		auth,
+		nil,
 		"",
 		cfg.MaxOutputTokens,
 		func(provName string, _ config.ProviderConfig, _ []string) (*llm.ProviderConfig, error) {
@@ -911,6 +927,9 @@ func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
 		},
 		"builder startup",
 	)
+	if err != nil {
+		t.Fatalf("buildModelPool: %v", err)
+	}
 	if len(pool) != 2 {
 		t.Fatalf("pool len = %d, want 2", len(pool))
 	}
@@ -1009,4 +1028,37 @@ func newTestAppContextWithBuilder(
 	}
 
 	return ac
+}
+
+func TestMainFactoryRejectsInvalidPoolBeforeProviderCreation(t *testing.T) {
+	cfg := &config.Config{Providers: map[string]config.ProviderConfig{"sample": {Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"model-1": {}}}}}
+	ac := &AppContext{Ctx: context.Background()}
+	factory := buildMainClientFactory(ac, cfg, nil)
+	// A nil cache would panic if construction ran before complete validation.
+	client, _, _, err := factory("sample/model-1", []string{"sample/model-1", "sample/missing"}, "")
+	if err == nil || !strings.Contains(err.Error(), "sample/missing") || client != nil {
+		t.Fatalf("client = %v, error = %v", client, err)
+	}
+}
+
+func TestStartupRejectsBrokenPoolBeforeProviderSetup(t *testing.T) {
+	cfg := &config.Config{Providers: map[string]config.ProviderConfig{"sample": {Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"model-1": {}}}}}
+	ac := &AppContext{Ctx: context.Background()}
+	agents := map[string]*config.AgentConfig{"builder": {Models: map[string][]string{"default": {"sample/model-1", "sample/missing"}}}}
+	_, err := setupInitialLLMClient(ac, cfg, nil, "", agents, nil, "sample/model-1", "")
+	if err == nil || !strings.Contains(err.Error(), "sample/missing") {
+		t.Fatalf("error = %v", err)
+	}
+	if ac.ProviderCache != nil {
+		t.Fatal("invalid pool initialized provider resources")
+	}
+}
+
+func TestSubAgentFactoryRejectsBrokenPool(t *testing.T) {
+	cfg := &config.Config{Providers: map[string]config.ProviderConfig{"sample": {Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"model-1": {}}}}}
+	ac := &AppContext{Ctx: context.Background()}
+	factory := buildSubAgentLLMFactory(ac, nil, nil, "model-1", config.ModelConfig{}, cfg, nil)
+	if client := factory("", []string{"sample/model-1", "sample/missing"}, ""); client != nil {
+		t.Fatal("invalid pool silently used a partial/default client")
+	}
 }

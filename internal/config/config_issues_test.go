@@ -17,22 +17,22 @@ func writeIssueTestConfig(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-func TestCollectConfigFileIssuesValid(t *testing.T) {
+func TestResolvedConfigIssuesValid(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    models:\n      test-model:\n        limit:\n          context: 100000\n          output: 64000\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	if len(issues) != 0 {
 		t.Fatalf("issues = %#v, want none", issues)
 	}
 }
 
-func TestCollectConfigFileIssuesReportsAllUnknownKeys(t *testing.T) {
+func TestResolvedConfigIssuesReportsAllUnknownKeys(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "bogus_top_level: true\nproviders:\n  sample:\n    type: responses\n    api_key: $X\n    models:\n      test-model:\n        include_thoughts: true\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	joined := strings.Join(issues, "\n")
 	for _, want := range []string{"bogus_top_level", "api_key", "include_thoughts"} {
@@ -42,22 +42,22 @@ func TestCollectConfigFileIssuesReportsAllUnknownKeys(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesReportsWrongType(t *testing.T) {
+func TestResolvedConfigIssuesReportsWrongType(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "max_output_tokens: abc\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	if len(issues) == 0 || !strings.Contains(strings.Join(issues, "\n"), "cannot unmarshal") {
 		t.Fatalf("issues = %#v, want wrong-type report for max_output_tokens", issues)
 	}
 }
 
-func TestCollectConfigFileIssuesReportsSemanticProblems(t *testing.T) {
+func TestResolvedConfigIssuesReportsSemanticProblems(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    retry_backoff: linear\ndiagnostics:\n  python:\n    large_file:\n      line_threshold: -1\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	joined := strings.Join(issues, "\n")
 	for _, want := range []string{"invalid retry_backoff", "line_threshold"} {
@@ -67,26 +67,22 @@ func TestCollectConfigFileIssuesReportsSemanticProblems(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesReportsMalformedYAML(t *testing.T) {
+func TestResolvedConfigIssuesReportsMalformedYAML(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers: [\n")
-	issues, err := CollectConfigFileIssues(path, true)
-	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
-	}
-	if len(issues) != 1 {
-		t.Fatalf("issues = %#v, want a single parse error", issues)
+	if _, err := LoadResolvedConfig(path, ""); err == nil {
+		t.Fatal("malformed YAML must prevent loading")
 	}
 }
 
-func TestCollectConfigFileIssuesAllowsReminderAtOrAboveThreshold(t *testing.T) {
+func TestResolvedConfigIssuesAllowsReminderAtOrAboveThreshold(t *testing.T) {
 	// A reminder >= threshold is legal and must not report an issue: the
 	// reminder fires on the threshold crossing itself (usage reaching
 	// min(reminder, threshold)) while the grace period defers the actual
 	// compaction; the reminder never raises the compaction line.
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.65\n    reminder: 0.7\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	for _, issue := range issues {
 		if strings.Contains(issue, "compaction") {
@@ -95,11 +91,11 @@ func TestCollectConfigFileIssuesAllowsReminderAtOrAboveThreshold(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesReportsNegativeQuestionTimeout(t *testing.T) {
+func TestResolvedConfigIssuesReportsNegativeQuestionTimeout(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "question_timeout: -5\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	if joined := strings.Join(issues, "\n"); !strings.Contains(joined, "question_timeout") {
 		t.Fatalf("issues = %q, want one mentioning question_timeout", joined)
@@ -117,11 +113,11 @@ func TestLoadConfigFromPathResetsNegativeQuestionTimeout(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesReportsDeadReminderOnDisabledCompaction(t *testing.T) {
+func TestResolvedConfigIssuesReportsDeadReminderOnDisabledCompaction(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0\n    reminder: 0.7\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	found := false
 	for _, issue := range issues {
@@ -135,15 +131,15 @@ func TestCollectConfigFileIssuesReportsDeadReminderOnDisabledCompaction(t *testi
 	}
 }
 
-func TestCollectConfigFileIssuesAllowsValidPerModelReminder(t *testing.T) {
+func TestResolvedConfigIssuesAllowsValidPerModelReminder(t *testing.T) {
 	// The per-model compaction block lives on the model definition
 	// (ModelConfig.compaction); the old context.compaction.models table is
 	// gone and must not be referenced. Valid global + per-model lines report
 	// no issue.
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.65\n    reminder: 0.5\nproviders:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 0.3\n          reminder: 0.2\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	for _, issue := range issues {
 		if strings.Contains(issue, "compaction") {
@@ -152,14 +148,14 @@ func TestCollectConfigFileIssuesAllowsValidPerModelReminder(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesReportsDeadModelReminder(t *testing.T) {
+func TestResolvedConfigIssuesReportsDeadModelReminder(t *testing.T) {
 	// A reminder configured against a model-level threshold of 0 never fires
 	// (threshold 0 disables auto-compaction and reminders for that model); the
 	// issue names the model definition so the user fixes it on the model side.
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 0\n          reminder: 0.2\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	found := false
 	for _, issue := range issues {
@@ -173,11 +169,11 @@ func TestCollectConfigFileIssuesReportsDeadModelReminder(t *testing.T) {
 	}
 }
 
-func TestCollectProjectConfigIssuesReportsUnsupportedFields(t *testing.T) {
+func TestResolvedProjectConfigIssuesReportsUnsupportedFields(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "provder:\n  x: 1\nproviders:\n  sample:\n    type: responses\n")
-	issues, err := CollectProjectConfigIssues(path)
+	issues, err := resolvedFileIssues("", path)
 	if err != nil {
-		t.Fatalf("CollectProjectConfigIssues: %v", err)
+		t.Fatalf("ResolvedProjectConfigIssues: %v", err)
 	}
 	joined := strings.Join(issues, "\n")
 	if !strings.Contains(joined, `"provder"`) || !strings.Contains(joined, "not supported in project config") {
@@ -185,7 +181,7 @@ func TestCollectProjectConfigIssuesReportsUnsupportedFields(t *testing.T) {
 	}
 }
 
-func TestCollectProjectConfigIssuesReportsInvalidNativeThinking(t *testing.T) {
+func TestResolvedProjectConfigIssuesReportsInvalidNativeThinking(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", `providers:
   sample:
     type: chat-completions
@@ -195,9 +191,9 @@ func TestCollectProjectConfigIssuesReportsInvalidNativeThinking(t *testing.T) {
           chat_completions:
             native_thinking: auto
 `)
-	issues, err := CollectProjectConfigIssues(path)
+	issues, err := resolvedFileIssues("", path)
 	if err != nil {
-		t.Fatalf("CollectProjectConfigIssues: %v", err)
+		t.Fatalf("ResolvedProjectConfigIssues: %v", err)
 	}
 	joined := strings.Join(issues, "\n")
 	if !strings.Contains(joined, `invalid native_thinking "auto"`) || !strings.Contains(joined, `for model "model-1" in provider "sample"`) {
@@ -205,25 +201,25 @@ func TestCollectProjectConfigIssuesReportsInvalidNativeThinking(t *testing.T) {
 	}
 }
 
-func TestCollectProjectConfigIssuesMissingFile(t *testing.T) {
-	issues, err := CollectProjectConfigIssues(filepath.Join(t.TempDir(), "nope.yaml"))
+func TestResolvedProjectConfigIssuesMissingFile(t *testing.T) {
+	issues, err := resolvedFileIssues("", filepath.Join(t.TempDir(), "nope.yaml"))
 	if err != nil {
-		t.Fatalf("CollectProjectConfigIssues: %v", err)
+		t.Fatalf("ResolvedProjectConfigIssues: %v", err)
 	}
 	if issues != nil {
 		t.Fatalf("issues = %#v, want nil for missing file", issues)
 	}
 }
 
-func TestCollectConfigFileIssuesReportsLegacyBooleanCompress(t *testing.T) {
+func TestResolvedConfigIssuesReportsLegacyBooleanCompress(t *testing.T) {
 	// The pre-1.0 boolean compress form (`compress: true` / `compress:
 	// false`) silently enabled gzip; it is now rejected so users migrate to
 	// the explicit encoding, with a hint naming the replacement.
 	for _, value := range []string{"true", "false"} {
 		path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    compress: "+value+"\n")
-		issues, err := CollectConfigFileIssues(path, true)
+		issues, err := resolvedFileIssues(path, "")
 		if err != nil {
-			t.Fatalf("CollectConfigFileIssues(%v): %v", value, err)
+			t.Fatalf("ResolvedConfigIssues(%v): %v", value, err)
 		}
 		joined := strings.Join(issues, "\n")
 		if !strings.Contains(joined, "removed boolean form") || !strings.Contains(joined, "gzip") {
@@ -245,11 +241,11 @@ func TestLoadConfigFromPathIgnoresLegacyBooleanCompress(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesReportsUnknownCompressEncoding(t *testing.T) {
+func TestResolvedConfigIssuesReportsUnknownCompressEncoding(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    compress: brotli\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	joined := strings.Join(issues, "\n")
 	if !strings.Contains(joined, "invalid compress value") || !strings.Contains(joined, "gzip") || !strings.Contains(joined, "zstd") {
@@ -257,12 +253,12 @@ func TestCollectConfigFileIssuesReportsUnknownCompressEncoding(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesAllowsRequestCompressionEncodings(t *testing.T) {
+func TestResolvedConfigIssuesAllowsRequestCompressionEncodings(t *testing.T) {
 	for _, value := range []string{"gzip", "zstd"} {
 		path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  sample:\n    type: responses\n    compress: "+value+"\n")
-		issues, err := CollectConfigFileIssues(path, true)
+		issues, err := resolvedFileIssues(path, "")
 		if err != nil {
-			t.Fatalf("CollectConfigFileIssues(%v): %v", value, err)
+			t.Fatalf("ResolvedConfigIssues(%v): %v", value, err)
 		}
 		if len(issues) != 0 {
 			t.Fatalf("issues for compress: %v = %#v, want none", value, issues)
@@ -282,9 +278,9 @@ func TestCompactionReminderMinusOneDisablesWithoutIssue(t *testing.T) {
 	// keeps automatic compaction on and must neither be reported nor reset,
 	// globally or per model.
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.8\n    reminder: -1\nproviders:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          reminder: -1\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	for _, issue := range issues {
 		if strings.Contains(issue, "reminder") {
@@ -304,11 +300,11 @@ func TestCompactionReminderMinusOneDisablesWithoutIssue(t *testing.T) {
 	}
 }
 
-func TestCollectConfigFileIssuesReportsOutOfRangeCompactionValues(t *testing.T) {
+func TestResolvedConfigIssuesReportsOutOfRangeCompactionValues(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 1.5\n    reminder: -0.2\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	joined := strings.Join(issues, "\n")
 	for _, want := range []string{"context.compaction.threshold", "context.compaction.reminder"} {
@@ -318,11 +314,11 @@ func TestCollectConfigFileIssuesReportsOutOfRangeCompactionValues(t *testing.T) 
 	}
 }
 
-func TestCollectConfigFileIssuesReportsOutOfRangeModelCompactionValues(t *testing.T) {
+func TestResolvedConfigIssuesReportsOutOfRangeModelCompactionValues(t *testing.T) {
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "providers:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 2\n          reminder: 2\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	joined := strings.Join(issues, "\n")
 	for _, want := range []string{"openai/gpt-5.6-luna", "compaction.threshold", "compaction.reminder"} {
@@ -332,15 +328,15 @@ func TestCollectConfigFileIssuesReportsOutOfRangeModelCompactionValues(t *testin
 	}
 }
 
-func TestCollectConfigFileIssuesReportsInheritedReminderAtOrAboveModelThreshold(t *testing.T) {
+func TestResolvedConfigIssuesReportsInheritedReminderAtOrAboveModelThreshold(t *testing.T) {
 	// A model that overrides only its threshold inherits the global
 	// reminder; when the inherited line sits at or above the model's own
 	// threshold the reminder never injects for that model, which is silent
 	// without this report.
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.8\n    reminder: 0.9\nproviders:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 0.85\n      gpt-5.6-sol:\n        compaction:\n          threshold: 0.95\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	joined := strings.Join(issues, "\n")
 	if !strings.Contains(joined, "openai/gpt-5.6-luna: inherits context.compaction.reminder 0.9, which is at or above this model's compaction.threshold 0.85") {
@@ -351,13 +347,13 @@ func TestCollectConfigFileIssuesReportsInheritedReminderAtOrAboveModelThreshold(
 	}
 }
 
-func TestCollectConfigFileIssuesDoesNotReportDerivedReminderAgainstModelThreshold(t *testing.T) {
+func TestResolvedConfigIssuesDoesNotReportDerivedReminderAgainstModelThreshold(t *testing.T) {
 	// A derived global reminder (reminder unset/0) is always below the
 	// threshold, so a threshold-only model override must not be flagged.
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "context:\n  compaction:\n    threshold: 0.8\nproviders:\n  openai:\n    type: responses\n    models:\n      gpt-5.6-luna:\n        compaction:\n          threshold: 0.5\n")
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
-		t.Fatalf("CollectConfigFileIssues: %v", err)
+		t.Fatalf("ResolvedConfigIssues: %v", err)
 	}
 	joined := strings.Join(issues, "\n")
 	if strings.Contains(joined, "inherits context.compaction.reminder") {
@@ -415,4 +411,21 @@ func TestLoadConfigFromPathFallsBackForOutOfRangeModelCompactionValues(t *testin
 	if mc.Reminder != nil {
 		t.Fatalf("out-of-range model reminder = %v, want nil (inherit the global value)", *mc.Reminder)
 	}
+}
+
+func resolvedFileIssues(globalPath, projectPath string) ([]string, error) {
+	if globalPath == "" {
+		globalPath = filepath.Join(filepath.Dir(projectPath), "missing-global.yaml")
+	}
+	rc, err := LoadResolvedConfig(globalPath, projectPath)
+	if err != nil {
+		return nil, err
+	}
+	var issues []string
+	for _, diagnostic := range rc.Diagnostics {
+		if diagnostic.Fallback != "" && diagnostic.Fallback != "built-in defaults" {
+			issues = append(issues, diagnostic.String())
+		}
+	}
+	return issues, nil
 }

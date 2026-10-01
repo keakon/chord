@@ -55,15 +55,19 @@ type AppContext struct {
 	ContentRoot string
 	// WorkDir is the checkout this session works in. Tool base directories,
 	// shell cwd, and the LSP root resolve against it.
-	WorkDir          string
-	ConfigHome       string
-	PathLocator      *config.PathLocator
-	ProjectLocator   *config.ProjectLocator
-	SessionDir       string
-	Cfg              *config.Config
-	GlobalCfg        *config.Config
-	ProjectCfg       *config.Config
-	Auth             config.AuthConfig
+	WorkDir        string
+	ConfigHome     string
+	PathLocator    *config.PathLocator
+	ProjectLocator *config.ProjectLocator
+	SessionDir     string
+	Cfg            *config.Config
+	GlobalCfg      *config.Config
+	ProjectCfg     *config.Config
+	Auth           config.AuthConfig
+	// CredDecls preserves the raw auth.yaml credential declarations before
+	// environment expansion: only a provider with no declared source may fall
+	// back to its preset's default environment variable.
+	CredDecls        config.CredentialDeclarations
 	LLMClient        *llm.Client
 	ProviderName     string
 	ModelID          string
@@ -115,25 +119,14 @@ func (ac *AppContext) GetOrCreateProvider(provName string, cfg config.ProviderCo
 	return ac.ProviderCache.getOrCreate(provName, cfg, apiKeys)
 }
 
-// collectStartupConfigIssues re-runs the loader's strict checks over the
-// global and project config files so startup can surface (as a one-time toast)
-// the problems the tolerant loader logged and treated as not configured.
-// Errors resolving or reading a file are ignored: they are already logged by
-// the load path, and the toast should only report values that were dropped.
-func collectStartupConfigIssues(plan *initAppStartupPlan) []string {
+// startupConfigIssues formats the diagnostics already collected during loading.
+func startupConfigIssues(plan *initAppStartupPlan) []string {
 	if plan == nil {
 		return nil
 	}
-	var issues []string
-	if globalPath, err := config.ConfigPath(); err == nil {
-		if list, err := config.CollectConfigFileIssues(globalPath, true); err == nil {
-			issues = append(issues, list...)
-		}
-	}
-	if plan.ProjectConfigPath != "" {
-		if list, err := config.CollectProjectConfigIssues(plan.ProjectConfigPath); err == nil {
-			issues = append(issues, list...)
-		}
+	issues := make([]string, 0, len(plan.Diagnostics))
+	for _, diagnostic := range plan.Diagnostics {
+		issues = append(issues, diagnostic.String())
 	}
 	return issues
 }
@@ -154,6 +147,7 @@ type initAppStartupPlan struct {
 	ProjectConfig     *config.Config
 	Config            *config.Config
 	ProjectConfigPath string
+	Diagnostics       []config.Diagnostic
 }
 
 // planInitAppStartup resolves everything startup needs before initApp wires the
@@ -170,15 +164,19 @@ func planInitAppStartup(contentRoot, workDir string) (*initAppStartupPlan, error
 	if err := os.MkdirAll(filepath.Join(contentRoot, ".chord"), 0o700); err != nil {
 		return nil, fmt.Errorf("create .chord directory: %w", err)
 	}
-	globalCfg, err := config.LoadConfig()
+	globalPath, err := config.ConfigPath()
 	if err != nil {
-		return nil, wrapConfigLoadError("load config", err)
+		return nil, wrapConfigLoadError("resolve config path", err)
 	}
 	projectConfigPath := config.ProjectConfigPath(contentRoot)
-	projectCfg, cfg, err := config.MergeProjectConfig(globalCfg, projectConfigPath)
+	resolved, err := config.LoadResolvedConfig(globalPath, projectConfigPath)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
+	if resolved.Global == nil {
+		return nil, initialSetupRequiredError()
+	}
+	globalCfg, projectCfg, cfg := resolved.Global, resolved.Project, resolved.Config
 	for _, advisory := range config.Advisories(cfg) {
 		log.Warnf("config: %s", advisory)
 	}
@@ -200,6 +198,7 @@ func planInitAppStartup(contentRoot, workDir string) (*initAppStartupPlan, error
 		ProjectConfig:     projectCfg,
 		Config:            cfg,
 		ProjectConfigPath: projectConfigPath,
+		Diagnostics:       resolved.Diagnostics,
 	}, nil
 }
 
@@ -250,6 +249,22 @@ func resolveInitialModelSelection(agentConfigs map[string]*config.AgentConfig, p
 	return "", ""
 }
 
+func initialModelPoolRefs(agentConfigs map[string]*config.AgentConfig, policy *agent.RuntimeModelPoolPolicy) ([]string, string) {
+	builder := agentConfigs["builder"]
+	if builder == nil {
+		return nil, ""
+	}
+	if policy != nil {
+		if refs := policy.EffectiveModels("builder", builder); len(refs) > 0 {
+			return refs, builder.Variant
+		}
+	}
+	if pools := builder.PoolNames(); len(pools) > 0 {
+		return builder.PoolModels(pools[0]), builder.Variant
+	}
+	return nil, builder.Variant
+}
+
 func configureInitialClientModelPool(
 	ac *AppContext,
 	client *llm.Client,
@@ -258,40 +273,33 @@ func configureInitialClientModelPool(
 	agentConfigs map[string]*config.AgentConfig,
 	poolPolicy *agent.RuntimeModelPoolPolicy,
 	defaultProviderModel string,
-) {
+) error {
 	if ac == nil || client == nil || cfg == nil || agentConfigs == nil {
-		return
+		return nil
 	}
-	builderCfg, ok := agentConfigs["builder"]
-	if !ok || len(builderCfg.Models) == 0 {
-		return
-	}
-	var poolModels []string
-	if poolPolicy != nil {
-		poolModels = poolPolicy.EffectiveModels("builder", builderCfg)
-	}
-	if len(poolModels) == 0 {
-		if poolNames := builderCfg.PoolNames(); len(poolNames) > 0 {
-			poolModels = builderCfg.PoolModels(poolNames[0])
-		}
-	}
-	pool, selectedIdx := buildModelPool(
+	poolModels, variant := initialModelPoolRefs(agentConfigs, poolPolicy)
+	pool, selectedIdx, err := buildModelPool(
 		ac.Ctx,
 		poolModels,
-		builderCfg.Variant,
+		variant,
 		defaultProviderModel,
 		cfg.Providers,
 		auth,
+		ac.CredDecls,
 		cfg.Proxy,
 		cfg.MaxOutputTokens,
 		ac.GetOrCreateProvider,
 		ac.GetOrCreateProviderImpl,
 		"builder startup",
 	)
+	if err != nil {
+		return err
+	}
 	if len(pool) > 1 {
 		client.SetModelPool(pool, selectedIdx)
 		log.Debugf("initial LLM client configured with builder model pool size=%v selected_idx=%v", len(pool), selectedIdx)
 	}
+	return nil
 }
 
 func setupInitialLLMClient(
@@ -333,6 +341,15 @@ func setupInitialLLMClient(
 		return nil, err
 	}
 
+	if err := config.ValidateConfiguredModelRefs(cfg.Providers, []string{config.CanonicalModelRef(providerName, modelID, defaultVariant)}, ""); err != nil {
+		return nil, err
+	}
+
+	poolRefs, poolVariant := initialModelPoolRefs(agentConfigs, poolPolicy)
+	if err := config.ValidateConfiguredModelRefs(cfg.Providers, poolRefs, poolVariant); err != nil {
+		return nil, fmt.Errorf("builder startup model pool: %w", err)
+	}
+
 	ac.ProviderCache = &providerCache{
 		m:        make(map[string]*llm.ProviderConfig),
 		impls:    make(map[string]llm.Provider),
@@ -342,8 +359,7 @@ func setupInitialLLMClient(
 		cfg:      cfg,
 	}
 	cfgProvider = applyRuntimeAPIBaseOverride(cfgProvider)
-	creds := auth[providerName]
-	apiKeys := config.ExtractAPIKeys(creds)
+	apiKeys := resolveProviderAPIKeys(providerName, cfgProvider, auth, ac.CredDecls)
 	providerCfg, err := ac.GetOrCreateProvider(providerName, cfgProvider, apiKeys)
 	if err != nil {
 		return nil, err
@@ -374,7 +390,9 @@ func setupInitialLLMClient(
 	if initialVariant != "" {
 		llmClient.SetVariant(initialVariant)
 	}
-	configureInitialClientModelPool(ac, llmClient, cfg, auth, agentConfigs, poolPolicy, defaultProviderModel)
+	if err := configureInitialClientModelPool(ac, llmClient, cfg, auth, agentConfigs, poolPolicy, defaultProviderModel); err != nil {
+		return nil, err
+	}
 	return &initialLLMSetup{
 		ProviderName:   providerName,
 		ModelID:        modelID,
@@ -534,6 +552,12 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		return nil, fmt.Errorf("load auth config: %w", err)
 	}
 	ac.Auth = auth
+	credDecls, err := config.LoadCredentialDeclarations(authPath)
+	if err != nil {
+		ac.cleanup()
+		return nil, fmt.Errorf("load credential declarations: %w", err)
+	}
+	ac.CredDecls = credDecls
 
 	initialLLM, err := setupInitialLLMClient(ac, cfg, auth, authPath, agentConfigs, poolPolicy, defaultProviderModel, defaultVariant)
 	if err != nil {
@@ -724,7 +748,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 	ac.MainAgent.SetSessionLock(ac.SessionLock)
 	ac.MainAgent.SetStartupSkippedLockedSessions(ac.StartupSkippedLockedSessions)
-	ac.MainAgent.SetStartupConfigIssues(collectStartupConfigIssues(startupPlan))
+	ac.MainAgent.SetStartupConfigIssues(startupConfigIssues(startupPlan))
 	ac.MainAgent.SetSessionArtifactsDirFunc(func() string {
 		if ac == nil || strings.TrimSpace(ac.SessionDir) == "" {
 			return ""

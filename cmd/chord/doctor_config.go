@@ -24,8 +24,10 @@ type doctorConfigFileReport struct {
 
 type doctorConfigReport struct {
 	Files []doctorConfigFileReport `json:"files"`
-	// Warnings are computed on the effective config, with the project layer
-	// merged over the global one, so they are not attributed to a single file.
+	// Errors are problems of the effective config the runtime would start
+	// with, such as model pool references that do not resolve. They fail the
+	// command exactly like file issues.
+	Errors   []string `json:"errors,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 	OK       bool     `json:"ok"`
 }
@@ -36,10 +38,12 @@ func newDoctorConfigCmd() *cobra.Command {
 		Use:   "config",
 		Short: "Validate configuration files",
 		Long: `Check the global and project config.yaml files for unrecognized keys,
-wrongly typed values, malformed YAML, and invalid setting values.
+wrongly typed values, malformed YAML, and invalid setting values, plus
+model pool references that do not resolve against the configured
+providers.
 
-The running application logs such problems and starts anyway, treating the
-offending value as not configured; this command surfaces them explicitly.
+The running application ignores invalid optional values and reports them at
+startup. Structural errors block the action using the affected model or pool.
 Any problem makes the command exit with status 2.
 
 Warnings flag settings that load as written but are unlikely to behave as
@@ -69,24 +73,33 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 	if _, statErr := os.Stat(globalPath); os.IsNotExist(statErr) {
 		return cliExitError{code: 2, err: initialSetupRequiredError()}
 	}
-	globalReport, err := checkDoctorConfigFile(globalPath, true)
-	if err != nil {
-		return cliExitError{code: 2, err: err}
-	}
-	report.Files = append(report.Files, globalReport)
-
 	projectPath := ""
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 		projectPath = config.ProjectConfigPath(cwd)
-		if _, statErr := os.Stat(projectPath); statErr == nil {
-			projectReport, err := checkDoctorConfigFile(projectPath, false)
-			if err != nil {
-				return cliExitError{code: 2, err: err}
+	}
+	rc, err := config.LoadResolvedConfig(globalPath, projectPath)
+	if err != nil {
+		return cliExitError{code: 2, err: err}
+	}
+	report.Files = append(report.Files, doctorConfigFileReport{Path: globalPath, OK: true})
+	if rc.Project != nil {
+		report.Files = append(report.Files, doctorConfigFileReport{Path: projectPath, OK: true})
+	}
+	for _, diagnostic := range rc.Diagnostics {
+		if diagnostic.Fallback != "" && diagnostic.File != "" {
+			for i := range report.Files {
+				if report.Files[i].Path == diagnostic.File {
+					report.Files[i].Issues = append(report.Files[i].Issues, diagnostic.String())
+					report.Files[i].OK = false
+				}
 			}
-			report.Files = append(report.Files, projectReport)
+		} else if diagnostic.Severity == config.DiagnosticSeverityError {
+			report.Errors = append(report.Errors, diagnostic.String())
+		} else {
+			report.Warnings = append(report.Warnings, diagnostic.String())
 		}
 	}
-	report.Warnings = doctorConfigAdvisories(globalPath, projectPath)
+	report.Warnings = append(report.Warnings, config.Advisories(rc.Config)...)
 
 	report.OK = true
 	totalIssues := 0
@@ -95,6 +108,10 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 			report.OK = false
 			totalIssues += len(f.Issues)
 		}
+	}
+	if len(report.Errors) > 0 {
+		report.OK = false
+		totalIssues += len(report.Errors)
 	}
 
 	if opts.JSON {
@@ -114,6 +131,9 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 				}
 			}
 		}
+		for _, problem := range report.Errors {
+			fmt.Fprintf(out, "problem: %s\n", problem)
+		}
 		for _, warning := range report.Warnings {
 			fmt.Fprintf(out, "warning: %s\n", warning)
 		}
@@ -130,34 +150,4 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 		return cliExitError{code: 2, err: fmt.Errorf("config has %d %s", totalIssues, plural)}
 	}
 	return nil
-}
-
-// checkDoctorConfigFile collects the problems for one config file. The global config is checked with defaults; a project config is
-// checked on its own, including the top-level keys the project layer rejects.
-func checkDoctorConfigFile(path string, global bool) (doctorConfigFileReport, error) {
-	var issues []string
-	var err error
-	if global {
-		issues, err = config.CollectConfigFileIssues(path, true)
-	} else {
-		issues, err = config.CollectProjectConfigIssues(path)
-	}
-	if err != nil {
-		return doctorConfigFileReport{}, err
-	}
-	return doctorConfigFileReport{Path: path, Issues: issues, OK: len(issues) == 0}, nil
-}
-
-// doctorConfigAdvisories returns the advisories for the effective config the
-// runtime would start with. A config that does not load has its problems
-// reported as issues already, so it yields no advisories.
-func doctorConfigAdvisories(globalPath, projectPath string) []string {
-	cfg, err := config.LoadConfigFromPath(globalPath)
-	if err != nil {
-		return nil
-	}
-	if _, merged, err := config.MergeProjectConfig(cfg, projectPath); err == nil {
-		cfg = merged
-	}
-	return config.Advisories(cfg)
 }

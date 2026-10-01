@@ -15,7 +15,7 @@ func TestRemovedCompactionPresetReportsIssueAndKeepsOtherSettings(t *testing.T) 
 		t.Fatalf("other compaction settings were lost: %+v", comp)
 	}
 	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", content)
-	issues, err := CollectConfigFileIssues(path, true)
+	issues, err := resolvedFileIssues(path, "")
 	if err != nil {
 		t.Fatalf("collect config issues: %v", err)
 	}
