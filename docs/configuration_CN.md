@@ -890,15 +890,33 @@ providers:
       hosted_tools: [web_search]
 ```
 
+OpenAI Responses provider 同样在 `responses` 类型上开启：
+
+```yaml
+providers:
+  openai:
+    type: responses
+    compat:
+      hosted_tools: [web_search]
+```
+
 `compat.hosted_tools` 列出该 provider 的模型可以提供的 hosted 工具；模型未配置该字段时继承 provider 列表；显式 `hosted_tools: []` 关闭该模型的全部 hosted 工具，非空列表替换 provider 列表。`web_search` 是内置条目，在 Anthropic Messages 上声明为 `web_search_20250305`，在 OpenAI Responses 上声明为 `web_search`。
 
 只有当前模型池里存在已启用、能承载该声明的目标时，工具才会出现在模型的工具列表里。每次调用另发一条只带 query 的请求，在那里声明 hosted 搜索工具；Chord 把返回的原生结果作为普通工具结果返回，主对话请求从不声明该工具，历史里也不会出现 provider 专属块。`allowed_domains` 和 `blocked_domains` 按请求参数下发，不会拼进 query 文本。
 
+OpenAI 的搜索限制取决于型号和子请求的推理设置：`gpt-5` 在 `reasoning.effort: minimal` 下不支持网络搜索，`gpt-5.4` 在 `reasoning.effort: none` 下可能降低结果质量。各型号支持范围以 [OpenAI 的 web search 指南](https://developers.openai.com/api/docs/guides/tools-web-search)为准。
+
+Chord 的 Responses 搜索子请求不发送模型配置中的 `reasoning.effort`，默认使用服务端的推理设置。`request_overrides` 可以向该子请求注入 `reasoning` 参数；上述限制应按实际发送的参数判断。
+
 子请求按服务它的模型计入 token；provider 可能另收按次检索费，Chord 的费用统计只算 token。
+
+GPT、Claude 等模型的完整 provider 配方见[模型配置配方](./model-configs_CN.md)。
 
 ## Hosted tools
 
 顶层 `hosted_tools` 定义 provider 侧执行的 hosted 工具。每个条目会变成一个本地工具，调用时另发一条请求声明该 hosted 工具，服务端执行的能力（网络检索、代码执行、文件检索等）只需配置，不必写代码。某个 provider 或模型通过 `compat.hosted_tools` 启用，且目标的 provider 类型（`messages` / `responses`）在条目里有声明时，这个本地工具才会出现。
+
+hosted 工具在真正服务子请求的端点上执行，可用性跟着渠道走而不只是模型：同一个中转可以服务相同的模型却不承载其 hosted 工具，部分 hosted 工具可能只有 provider 官方渠道才有。被端点拒绝或静默忽略的声明，会按 `compat.hosted_tools` 的说明以对应失败收口。
 
 ```yaml
 hosted_tools:

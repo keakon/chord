@@ -1029,15 +1029,33 @@ providers:
       hosted_tools: [web_search]
 ```
 
+On an OpenAI Responses provider, enable it the same way on the `responses` wire type:
+
+```yaml
+providers:
+  openai:
+    type: responses
+    compat:
+      hosted_tools: [web_search]
+```
+
 `compat.hosted_tools` lists the hosted tools a provider's models may serve; an omitted model field inherits the provider list, an explicit `hosted_tools: []` disables all hosted tools for that model, and a non-empty list replaces the provider list. `web_search` is a built-in entry, declared as `web_search_20250305` on Anthropic Messages and `web_search` on OpenAI Responses.
 
 The tool joins the model's tool list while the active model pool contains an enabled target that can carry the declaration; otherwise Chord withholds it. Each call sends a separate request carrying only the query and declares the hosted search tool there, so the main conversation request never declares it and its history stays free of provider-specific blocks. Chord returns the native results as an ordinary tool result; `allowed_domains` and `blocked_domains` travel as request parameters rather than query text.
 
+OpenAI's search restrictions depend on the model and the sub-request's reasoning settings: `gpt-5` with `reasoning.effort: minimal` does not support web search, while `gpt-5.4` with `reasoning.effort: none` may produce lower-quality results. See [OpenAI's web search guide](https://developers.openai.com/api/docs/guides/tools-web-search) for per-model support.
+
+Chord's Responses search sub-request omits the model's configured `reasoning.effort`, so it uses the server's default reasoning settings. `request_overrides` can inject a `reasoning` parameter into that sub-request; the restrictions above apply to the settings actually sent.
+
 The sub-request bills as tokens on the model that serves it. Providers may charge a per-search fee on top; Chord's cost accounting counts tokens only.
+
+For complete GPT and Claude provider recipes, see [Model configuration recipes](./model-configs.md).
 
 ## Hosted tools
 
 The top-level `hosted_tools` section defines provider-side (hosted) tools. Each entry becomes a local tool whose calls run one sub-request declaring the hosted tool, so a tool the provider executes server-side — web search, code execution, file search — needs configuration instead of code. A local tool appears while some provider or model enables it through `compat.hosted_tools` and the target's wire type has a declaration in the entry; otherwise Chord withholds it.
+
+Execution happens on the endpoint that serves each sub-request, so availability follows the channel rather than the model alone: a relay can serve the same models without carrying their hosted tools, and some hosted tools may be available only through the provider's official channels. A declaration the endpoint rejects or silently drops fails the call as described for `compat.hosted_tools`.
 
 ```yaml
 hosted_tools:
