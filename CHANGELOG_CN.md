@@ -4,7 +4,9 @@
 
 ## 未发布
 
-- `chord config add <provider>/<model>` 从内置离线模型目录向 `config.yaml` 添加模型引用：绑定 preset 的模型只需一条池引用；自定义网关可用 `--catalog` 借用目录模型的事实；未命中的 wire 名会列出最接近的已验证模型供显式选择；写入前会对候选配置执行完整解析。
+- 模型目录现在可以从上游数据仓库 [chord-models](https://github.com/keakon/chord-models) 刷新，不必等 chord 发版：`chord config refresh-catalog` 把最新版本 tag 拉进本地缓存，`chord config add --refresh-catalog` 在添加模型前顺带执行。刷新快照按版本号整体取代内置目录——绝不按条目合并——在下一次 chord 命令启动时生效；任何一步失败（网络、快照损坏、schema 不兼容）都回退到当前生效的快照。`chord config show --catalog` 会标明当前生效的快照及其来源。
+- 目录刷新同时带来 candidate 条目——社区发现、尚未完整验证的 wire 名——它们会进入 `chord config add` 的建议列表，标注被观察到的 provider 作用域与来源。候选永不填充默认值：采纳意味着把观测值写成你自己的显式配置；同一 wire 名在多个作用域被观察到时并列展示，Chord 不替你挑选。
+- `chord config add <provider>/<model>` 从模型目录向 `config.yaml` 添加模型引用：绑定 preset 的模型只需一条池引用；自定义网关可用 `--catalog` 借用目录模型的事实；未命中的 wire 名会列出最接近的已验证模型供显式选择；写入前会对候选配置执行完整解析。
 - 很可能已被更新的已验证模型取代的目录引用现在会以 advisory 形式上报：`chord doctor config` 列出它们及重新绑定 / 保留现状的命令，启动时提示未处理数量，`chord config add <provider>/<model> --keep-current` 可在当前目录版本下确认不再提示。
 - headless 的 `status_response` 现在带当前工作目录和 worktree generation；会话中切换 checkout 时，订阅 `workdir_changed` 的客户端也会收到推送。
 - 图片 token 按张数和保守额度估算，不再按图片文件字节数折算。
@@ -31,7 +33,7 @@
 - 使用托管 preset（`openai`、`anthropic`、`gemini`、`codex`）的 provider 现在把 preset 解析为已核验的端点契约：`type`、`api_url`、`auth_scheme` 只在留空处填充，与契约冲突的取值会被判为配置错误。内置目录还会补充你未声明的模型事实——context/input/output 限额与 reasoning 档位——覆盖显式定义的模型，以及被模型池引用但从未定义的模型；显式 null 清空的块保持清空，每个由目录填充的值都在 `chord config show` 里带 `catalog` 来源层。 无 preset 的自定义端点可显式绑定目录模型，只借用模型事实；`chord config show` 另列 Responses 字段的取值、发送行为与来源。
 - 在 `auth.yaml` 中完全没有声明凭据来源的 provider，现在会回退到其 preset 的默认环境变量（`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`）。已有声明但当前不可用的来源仍视为已声明，不会触发回退。
 - `chord doctor config` 现在还会加载有效配置，把无法解析的模型池引用（provider 或 model 不存在、`@variant` 未定义）作为问题上报并以状态码 2 退出；解析类问题仍归属到各自的文件。 启动提示复用同一份诊断，结构错误会阻止使用相关模型池，未选中的次要池不影响启动。
-- 初始安装向导的 Codex OAuth 目录现在包含 GPT-6.1 Sol（`gpt-6.1-sol`），分配同为 `1050000 / 922000 / 128000`，且新装的默认模型池以它开头（GPT-6 Astra 退为回退项）；API key 路径为 OpenAI Responses 端点预填的默认模型同样改为 GPT-6.1 Sol。[模型配置速查](./docs/model-configs_CN.md#codex-oauth-preset)里列出了新条目。已有的 `config.yaml` 不受影响，保持你原本的配置。
+- 初始安装向导的 Codex OAuth 目录现在包含 GPT-6.1 Sol（`gpt-6.1-sol`），分配同为 `1050000 / 922000 / 128000`，且新装的默认模型池以它开头（GPT-6 Astra 退为回退项）；API key 路径为 OpenAI Responses 端点预填的默认模型同样改为 GPT-6.1 Sol。`chord config show --catalog` 会列出这个新条目。已有的 `config.yaml` 不受影响，保持你原本的配置。
 - 工具确认框支持只读查看完整参数，包括较长的批量编辑；查看后仍需明确批准调用。
 - 新增 `chord acp`：通过 stdio 提供 Agent Client Protocol，让 Zed 这类 ACP 客户端把 Chord 当作自己的 agent。工作目录由客户端在 `session/new` 里给出；回答、思考块和工具调用（分类、标题、目标文件、原始参数、输出与文件 diff）以 `session/update` 流式回传；取消本轮返回 `cancelled`；`file://` 资源链接会变成与 TUI 一致的 `<file path="...">` 上下文块。stdout 只跑 JSON-RPC，每个进程把自己的日志写进日志目录。一个 `chord acp` 进程服务客户端开出的所有会话，上限由 `--max-sessions`（默认 8）控制，每个会话一个子进程，各自持有自己的工作目录、runtime 与 MCP server；`session/close` 会释放对应会话和它的进程。确认弹窗尚未接通，在此之前需要授权的工具会等 Chord 自己的确认超时。详见 [ACP Agent 模式](./docs/acp_CN.md)。
 - 新增 `chord sessions project <session-id>` 命令：把已落盘会话投影成每 turn 一行的 JSONL 事实（turn 边界、带 digest 的工具结果、工具归因的文件变更、压缩边界），用于复盘与完成报告取证。只读，源会话被别的进程占用时也能跑；turn 成因只报 `user_message` / `inferred` / `unknown`，不硬猜用户 continue 还是后台唤醒。`--out` 会拒绝写进会话目录内（或硬链接到其中文件）的路径，投影不可能覆盖源会话；`--max-bytes` 可调高 256 KiB 的 JSONL 上限，长会话不再受限。

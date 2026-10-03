@@ -4,7 +4,7 @@
 
 > 口径：2026 年 9 月。套餐会变，买之前、改配置之前以各家官网为准。
 
-还没选定渠道时看这一页。可复制的接线在[模型配置速查](./model-configs_CN.md)和[配置示例](./examples/index_CN.md)。那些片段用当前旗舰，是为了把字段写全；选定之后把模型 ID 换掉即可。
+还没选定渠道时看这一页。接线通常一条 [`chord config add`](./cli_CN.md#chord-config-add) 就够——限额、模态和 reasoning 档位由目录补齐；需要整段 provider 布局时看[配置示例](./examples/index_CN.md)。
 
 ## 你已经在付的，Chord 用得上吗？
 
@@ -94,6 +94,6 @@ reviewer 跟 expert 用同一个模型。只有一份旗舰预算时先给 exper
 
 ## 决定之后
 
-1. 到[模型配置速查](./model-configs_CN.md)复制对应片段。
+1. 用 [`chord config add`](./cli_CN.md#chord-config-add) 添加模型，或从[配置示例](./examples/index_CN.md)复制 provider 布局。
 2. 需要完整文件布局时，从[配置示例](./examples/index_CN.md)起步，把旗舰 ID 换成你真正选的。
 3. 用 `chord doctor models` 确认能通。

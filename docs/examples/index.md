@@ -14,7 +14,7 @@ These examples use a **real file layout**: pick a scenario and create the files 
 These examples are starting points, not rigid templates. They fill in a current flagship so every field is present; pick the model you will actually run in [Choosing models](../model-choice.md).
 
 For field semantics and the full config surface, see the [Configuration cheatsheet](../configuration.md#configuration-cheatsheet).
-If you already know the provider/model you want and only need a minimal copy-paste snippet, start with [Model configuration recipes](../model-configs.md).
+If you already know the provider/model you want, [`chord config add`](../cli.md#chord-config-add) wires it in from the catalog; these examples cover layouts beyond that.
 
 ## Agent file formats
 

@@ -19,7 +19,8 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord`                          | Run the local TUI                                                |
 | `chord auth [provider]`          | Sign in with a `preset: codex` OAuth provider                    |
 | `chord config show`              | Show the effective config with origins, or the built-in model catalog |
-| `chord config add <provider>/<model>` | Add a model reference from the built-in catalog and append it to a pool |
+| `chord config add <provider>/<model>` | Add a model reference from the model catalog and append it to a pool |
+| `chord config refresh-catalog`       | Pull the latest tagged catalog snapshot from the upstream data repository |
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
 | `chord acp`                      | Serve the Agent Client Protocol over stdio for ACP clients       |
 | `chord doctor config`            | Validate global/project config files and model pool references   |
@@ -247,13 +248,13 @@ chord config show --json
 
 ## `chord config add`
 
-Add a model reference to `config.yaml` and append it to a model pool, using the built-in model catalog as the source of verified facts. The command is fully offline, and the candidate config is resolved in full before anything is written — the file is only replaced when that resolution reports no errors.
+Add a model reference to `config.yaml` and append it to a model pool, using the model catalog as the source of verified facts. The command is offline by default, and the candidate config is resolved in full before anything is written — the file is only replaced when that resolution reports no errors.
 
 How the model resolves:
 
 - **Wire name bound to the provider's preset** (for example `gpt-6.1-sol` under `preset: openai`): only a pool reference is written; context, modalities, reasoning variants and field send rules fill in at load.
 - **Custom endpoint**: pass `--catalog <id>` to borrow the protocol-independent facts of a catalog model under your own wire name (a `catalog:` field on the model entry). Endpoint contracts, credential defaults and field send rules are never borrowed.
-- **No match**: the closest verified models are listed with their catalog IDs. Adoption is always an explicit `--catalog` choice; the command fails instead of guessing.
+- **No match**: the closest verified models are listed with their catalog IDs, together with any refreshed candidates annotated with their provider scope and sources. Adoption is always an explicit `--catalog` choice; the command fails instead of guessing.
 
 Existing pool entries keep their order — new references are appended. Files that use YAML anchors or aliases are refused rather than rewritten.
 
@@ -266,6 +267,7 @@ Existing pool entries keep their order — new references are appended. Files th
 | `--pool <name>`     | Model pool to append the reference to (default `default`)                                |
 | `--api-key-env <v>` | Write `$VAR` as the provider credential in `auth.yaml` when it has none                  |
 | `--keep-current`    | Acknowledge freshness advisories for this model without changing anything                |
+| `--refresh-catalog` | First pull the latest tagged catalog snapshot from the upstream repository (network); a failure continues with the catalog already in effect |
 
 ### Examples
 
@@ -284,6 +286,10 @@ chord config add mygw2/m1 --url https://gateway.example.com/v1/chat/completions 
 # Silence a freshness advisory after deciding to keep the current borrow
 chord config add mygw2/gpt-6-sol-gw --keep-current
 ```
+
+## `chord config refresh-catalog`
+
+Pull the newest version tag of the upstream model catalog repository ([chord-models](https://github.com/keakon/chord-models)) into a local cache. A refreshed snapshot supersedes the built-in catalog as a whole — by catalog version, never merged entry by entry — and takes effect on the next start of every chord command. Refresh is an explicit network operation: it never runs in the background, and any failure leaves the previous cache and the built-in catalog untouched. Pass `--repo <url>` to pull from a different mirror. Use `chord config show --catalog` to see which snapshot is in effect.
 
 ## `chord doctor config`
 

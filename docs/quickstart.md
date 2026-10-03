@@ -58,7 +58,7 @@ model_pools:
 
 Set `OPENAI_API_KEY` in the terminal that starts Chord. When `auth.yaml` declares no credentials for this provider, Chord reads that variable and fills the referenced model's limits and variants from the built-in catalog.
 
-Use `chord config show --catalog` to discover models, `chord config show` to inspect effective settings, and `chord doctor config` to check configuration. For custom gateways and other connections, see [Model configuration recipes](./model-configs.md).
+Use `chord config show --catalog` to discover models, `chord config show` to inspect effective settings, and `chord doctor config` to check configuration. For custom gateways and other connections, see [Model configuration](./model-configs.md).
 
 ## 3. Check the connection
 

@@ -4,7 +4,7 @@
 
 > Snapshot: September 2026. Plans change; confirm on the vendor's site before you buy or reconfigure.
 
-Start here if you still need to choose a channel. Copy-paste wiring is in [Model configuration recipes](./model-configs.md) and [Examples](./examples/index.md). Those snippets use a current flagship so every field is filled in; swap the model IDs after you decide.
+Start here if you still need to choose a channel. Wiring is one command with [`chord config add`](./cli.md#chord-config-add) — the catalog fills in limits, modalities, and reasoning variants; copy-paste provider layouts live in [Examples](./examples/index.md).
 
 ## Will what you already pay for reach Chord?
 
@@ -94,6 +94,6 @@ Default to Gemini 3.8 Flash, DeepSeek V4.1 Flash, or GPT-6 Luna; DeepSeek has th
 
 ## After you decide
 
-1. Copy the matching snippet from [Model configuration recipes](./model-configs.md).
+1. Add the model with [`chord config add`](./cli.md#chord-config-add), or copy a provider layout from [Examples](./examples/index.md).
 2. For a full file layout, start from [Examples](./examples/index.md) and replace the flagship IDs with what you actually picked.
 3. Confirm with `chord doctor models`.

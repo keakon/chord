@@ -13,7 +13,7 @@
 
 无需从头到尾阅读本页：
 
-- **首次配置：**先看[快速开始](./quickstart_CN.md)，还没选定渠道时先看[按工作选模型](./model-choice_CN.md)，再从[模型配置速查](./model-configs_CN.md)复制合适的服务商配置。
+- **首次配置：**先看[快速开始](./quickstart_CN.md)，还没选定渠道时先看[按工作选模型](./model-choice_CN.md)，再用 [`chord config add`](./cli_CN.md#chord-config-add) 添加模型。
 - **凭据与 OAuth：**直接查看 [`auth.yaml`](#authyaml) 或 [OAuth 登录](#oauth-登录)。
 - **路由与稳定性：**查看[模型池](#模型池)、[服务商超时](#provider-超时)和[流式重试上限](#流式重试上限)。
 - **长会话：**查看[上下文管理](./context-management_CN.md)。
@@ -99,7 +99,7 @@ providers:
 
 ### OpenAI Responses
 
-各 provider / 模型的可复制片段（GPT-5.4/5.5/5.6、Claude、Gemini、GLM、DeepSeek/OpenAI-compatible）见[模型配置速查](./model-configs_CN.md)。
+托管 preset 的模型限额、模态与 reasoning 档位由内置目录供给，见[模型配置](./model-configs_CN.md)。
 
 ```yaml
 providers:
@@ -213,10 +213,9 @@ providers:
           output: 128000
 ```
 
-GPT-5.4 / GPT-5.6 Sol / Terra / Luna / GPT-6 Sol / Luna / Astra / GPT-6.1 Sol 使用 `1050000 / 922000 / 128000`
-（1.05M 总窗口；922K 输入预算由 `context` − `output` 推导，这些模型不公布
-独立输入上限）；GPT-5.5 与 GPT-5.2 使用 `400000 / 272000 / 128000`。
-完整示例见 [模型配置速查](./model-configs_CN.md#codex-oauth-preset)。
+各 Codex 模型的额度由已验证目录供给（这些模型为 `1050000 / 922000 / 128000`，
+922K 输入预算由 `context` − `output` 推导，它们不公布独立输入上限）；
+向导给出的数值不够用时，用 `chord config show --catalog` 查询，不要手工照抄数字。
 
 `preset: codex` 可使用 `auth.yaml` 中的 OpenAI / ChatGPT OAuth 凭据。OAuth 条目通常是 mapping：
 
@@ -585,7 +584,7 @@ merge key（`<<:`）把被引用映射**按键级别**复制进当前条目，�
   关闭这两个行为。
 
 本页只介绍协议和字段语义。当前模型限制、价格以及 GPT / Claude / Gemini /
-GLM / DeepSeek 的完整可复制配置见[模型配置速查](./model-configs_CN.md)。
+模型怎么接入、配置怎么保持不过期，见[模型配置](./model-configs_CN.md)。
 
 ```yaml
 model_templates:
@@ -602,7 +601,7 @@ model_templates:
         rename_body_fields:
           max_completion_tokens: max_tokens
         body:
-          # 「走 Chat Completions 网关的 thinking」（model-configs_CN.md）里列出的
+          # 「Chat Completions 网关背后的 thinking」（model-configs_CN.md）里列出的
           # 模型家族会自动写入这个对象；这里的 override 覆盖其他后端，也用于补充
           # 同一对象里的家族特有字段（如 GLM 的 clear_thinking）。
           thinking:
@@ -937,7 +936,7 @@ Chord 的 Responses 搜索子请求不发送模型配置中的 `reasoning.effort
 
 子请求按服务它的模型计入 token；provider 可能另收按次检索费，Chord 的费用统计只算 token。
 
-GPT、Claude 等模型的完整 provider 配方见[模型配置配方](./model-configs_CN.md)。
+模型的接入与保鲜方式见[模型配置](./model-configs_CN.md)。
 
 ## Hosted tools
 
@@ -1401,7 +1400,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `compat.chat_completions.requires_assistant_after_tool_result` | bool | `false` — 对不接受 tool result 后直接跟 user 消息的网关，在中间插入一条合成 assistant 消息。 |
 | `compat.chat_completions.mcp_system_tools_message` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `role: system` 消息，消息只带 `tools`、不带 `content`，不改写顶层 `tools`。只为已确认接受 Kimi 兼容动态工具形态的模型开启。挂载形态跟随当前选中的目标；请求最终落到不接受该形态的池成员时，Chord 会把声明并入该请求的顶层 `tools` 数组。 |
 | `compat.chat_completions.keep_reasoning_effort` | bool | `false` — 本轮回放的 assistant tool-call 消息没有 `reasoning_content` 时，仍保留 `reasoning_effort` 与 reasoning 请求覆盖项。默认行为下 Chord 会把缺少 reasoning content 判定为该后端无法回放 reasoning，在本回合后续请求中剥离这些控制项；对接受 reasoning 控制、但没有 reasoning 回放契约的后端（例如走 Chat Completions 线路的 Grok）开启。它只保留请求侧控制项，不会为校验回放历史的后端（带 tools 的 DeepSeek、Kimi K3、Qwen `preserve_thinking`）补上 reasoning content。 |
-| `compat.chat_completions.native_thinking` | string | 端点是把 chat/completions 转成模型原生 API 的网关时，用哪个请求形状把该模型的 thinking 配置交上去。不配时只有 DeepSeek 路由会自动选到 `thinking:{type}` 形状：模型 ID 是 [DeepSeek API 模型名](./reasoning_CN.md#deepseek-的思考与历史回放)，或者配了 `compat.reasoning_continuity.contract: deepseek` 的模型（`contract: none` 会取消按名字的自动识别）。其他模型必须显式配置选择器。可选值：`gemini`（`extra_body.google.thinking_config`）、`gemini-3`（同一形状并启用 Gemini 3 缺失签名修复）、`anthropic`（`thinking:{type,budget_tokens}`）、`thinking`（DeepSeek、GLM、Kimi K2.x、Doubao 使用的原生 `thinking:{type}` 对象）、`qwen`（`enable_thinking`）；`claude`、`deepseek`、`glm`、`kimi`、`doubao` 等家族名作为等价别名。`off`（别名 `none`）用于拒绝未知请求体字段的端点，关闭转换。没有配置 thinking 块的模型不会发送该字段，DeepSeek 路由例外：它默认开启 thinking；显式配置 `thinking.type: disabled` 或 `reasoning.effort: none` 会关闭思考，不再发送 effort（见 `compat.reasoning_continuity.contract`）。网关后面的模型是不是 Gemini 或 Claude，Chord 也只看这个选择器：没配时不会把 Gemini 的 thought signature 写回请求，Gemini 3 会拒绝每次工具调用之后的请求（HTTP 400），所以网关后面的每个 Gemini 3 模型都要配 `gemini-3`。`chord doctor config` 会对这类模型给出警告。显式配置的选择器只管请求形状，并且总是优先于 DeepSeek 的默认形状；推理契约照常生效，`off` 也不会关掉它。见[走 Chat Completions 网关的 thinking](./model-configs_CN.md#走-chat-completions-网关的-thinking)。 |
+| `compat.chat_completions.native_thinking` | string | 端点是把 chat/completions 转成模型原生 API 的网关时，用哪个请求形状把该模型的 thinking 配置交上去。不配时只有 DeepSeek 路由会自动选到 `thinking:{type}` 形状：模型 ID 是 [DeepSeek API 模型名](./reasoning_CN.md#deepseek-的思考与历史回放)，或者配了 `compat.reasoning_continuity.contract: deepseek` 的模型（`contract: none` 会取消按名字的自动识别）。其他模型必须显式配置选择器。可选值：`gemini`（`extra_body.google.thinking_config`）、`gemini-3`（同一形状并启用 Gemini 3 缺失签名修复）、`anthropic`（`thinking:{type,budget_tokens}`）、`thinking`（DeepSeek、GLM、Kimi K2.x、Doubao 使用的原生 `thinking:{type}` 对象）、`qwen`（`enable_thinking`）；`claude`、`deepseek`、`glm`、`kimi`、`doubao` 等家族名作为等价别名。`off`（别名 `none`）用于拒绝未知请求体字段的端点，关闭转换。没有配置 thinking 块的模型不会发送该字段，DeepSeek 路由例外：它默认开启 thinking；显式配置 `thinking.type: disabled` 或 `reasoning.effort: none` 会关闭思考，不再发送 effort（见 `compat.reasoning_continuity.contract`）。网关后面的模型是不是 Gemini 或 Claude，Chord 也只看这个选择器：没配时不会把 Gemini 的 thought signature 写回请求，Gemini 3 会拒绝每次工具调用之后的请求（HTTP 400），所以网关后面的每个 Gemini 3 模型都要配 `gemini-3`。`chord doctor config` 会对这类模型给出警告。显式配置的选择器只管请求形状，并且总是优先于 DeepSeek 的默认形状；推理契约照常生效，`off` 也不会关掉它。见[Chat Completions 网关背后的 thinking](./model-configs_CN.md#chat-completions-网关背后的-thinking)。 |
 | `compat.usage.input_includes_cache_read` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache read。默认：Messages 为 `false`；Chat Completions / Responses / Generate Content 为 `true`。 |
 | `compat.usage.input_includes_cache_write` | bool | 协议默认值 — 覆盖 provider 顶层 input 是否已包含 cache write/cache creation。默认：Chat Completions / Responses 为 `true`；Messages / Generate Content 为 `false`。 |
 | `models`      | map    | model id → [模型配置](#模型字段参考)。                                                                                                              |

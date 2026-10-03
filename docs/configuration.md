@@ -13,7 +13,7 @@ Connect your models once, then reuse pools, fallback, and project overrides. Cho
 
 You do not need to read this page from top to bottom:
 
-- **First setup:** start with [Quickstart](./quickstart.md), pick a channel in [Choosing models](./model-choice.md) if you have not already, then copy a provider from [Model configuration recipes](./model-configs.md).
+- **First setup:** start with [Quickstart](./quickstart.md), pick a channel in [Choosing models](./model-choice.md) if you have not already, then add a model with [`chord config add`](./cli.md#chord-config-add).
 - **Credentials and OAuth:** jump to [`auth.yaml`](#authyaml) or [OAuth](#oauth).
 - **Routing and reliability:** use [Model pools](#model-pools-selecting-providermodel), [Provider timeouts](#provider-timeouts), and [Stream retry cap](#stream-retry-cap).
 - **Long sessions:** use [Context management](./context-management.md).
@@ -103,8 +103,8 @@ workload needs.
 
 ### OpenAI Responses
 
-For provider/model-specific copy-paste snippets (GPT-5.4/5.5/5.6, Claude,
-Gemini, GLM, DeepSeek/OpenAI-compatible), see [Model configuration recipes](./model-configs.md).
+Model limits, modalities, and reasoning variants for managed presets come
+from the built-in catalog — see [Model configuration](./model-configs.md).
 
 ```yaml
 providers:
@@ -220,11 +220,11 @@ providers:
           output: 128000
 ```
 
-GPT-5.4 / 5.6 Sol / Terra / Luna / GPT-6 Sol / Luna / Astra / GPT-6.1 Sol use `1050000 / 922000 / 128000`
-(1.05M total window; the 922K input budget derives as `context` − `output`,
-since these models publish no separate input cap); GPT-5.5 and
-GPT-5.2 use `400000 / 272000 / 128000`. See [Model configuration recipes](./model-configs.md#codex-oauth-preset)
-for complete examples.
+The verified catalog supplies each Codex model's allocation (for these
+models `1050000 / 922000 / 128000`, where the 922K input budget derives as
+`context` − `output` since they publish no separate input cap); when the
+wizard's values are not enough, look them up with `chord config show
+--catalog` instead of copying numbers by hand.
 
 `preset: codex` can use OpenAI / ChatGPT OAuth credentials from `auth.yaml`. OAuth entries are mappings:
 
@@ -619,9 +619,9 @@ key level**, and the current entry wins on conflict:
   and `compaction.reminder: -1` are the documented exceptions that disable
   those two behaviors explicitly.
 
-This page covers protocol and field semantics. For current model limits,
-pricing, and complete GPT / Claude / Gemini / GLM / DeepSeek snippets, see
-[Model configuration recipes](./model-configs.md).
+This page covers protocol and field semantics. For how model facts reach
+your config and how to connect a model, see
+[Model configuration](./model-configs.md).
 
 ```yaml
 model_templates:
@@ -1076,7 +1076,7 @@ Chord's Responses search sub-request omits the model's configured `reasoning.eff
 
 The sub-request bills as tokens on the model that serves it. Providers may charge a per-search fee on top; Chord's cost accounting counts tokens only.
 
-For complete GPT and Claude provider recipes, see [Model configuration recipes](./model-configs.md).
+See [Model configuration](./model-configs.md) for how a model gets connected and kept current.
 
 ## Hosted tools
 

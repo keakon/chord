@@ -1,6 +1,6 @@
 # 推理与思考
 
-先从[模型配置速查](./model-configs_CN.md)复制所用模型的配方，不必先理解所有协议字段。
+先从[模型配置](./model-configs_CN.md)把模型接上，不必先理解所有协议字段。
 
 - **只想调整思考强度**：找到下表中对应的接入方式，修改它支持的字段。
 - **模型调用工具后报思考内容缺失**：查看[回放契约](#决定回放契约)，确认是否需要保留历史思考。
@@ -28,7 +28,7 @@ Gemini 用 `extra_body.google.thinking_config`，Claude 用
 `compat.chat_completions.native_thinking` 指定，只有 DeepSeek 路由（DeepSeek
 模型 ID 或 `compat.reasoning_continuity.contract: deepseek`）才会自动选到。网关后面的模型是不是 Gemini 或 Claude 也靠这个选择器识别：没配时 Gemini 的
 思考签名不会写回请求，Gemini 3 会拒绝每次工具调用之后的请求（HTTP 400）。见
-[走 Chat Completions 网关的 thinking](./model-configs_CN.md#走-chat-completions-网关的-thinking)。
+[走 Chat Completions 网关的 thinking](./model-configs_CN.md#chat-completions-网关背后的-thinking)。
 
 ## DeepSeek 的思考与历史回放
 
@@ -98,8 +98,8 @@ API 模型名、后端却不是 DeepSeek 时，用 `compat.reasoning_continuity.
 可移植的可见 reasoning 只在目标有结构化承载字段时才转换（Chat Completions
 的 `openai_visible`、经验证的 Messages 兼容端点的 `anthropic_unsigned`）；
 没有承载字段就直接丢弃，不会把思考塞进正文。已完成的工具调用及其结果始终
-保持结构化，这是切换 provider 时必须保住的上下文。详见
-[跨协议 fallback 的连续性](./model-configs_CN.md#跨协议-fallback-的连续性)。
+保持结构化，这是切换 provider 时必须保住的上下文。详见本页[跨 provider 回退时保留什么](#跨-provider-回退时保留什么)与
+[跨协议的 reasoning 连续性](./model-configs_CN.md#跨协议的-reasoning-连续性)。
 
 ## 计费与行为提示
 
@@ -114,20 +114,11 @@ API 模型名、后端却不是 DeepSeek 时，用 `compat.reasoning_continuity.
 - TUI 的思考翻译（`thinking_translation`）只影响显示，不会写回模型上下文；
   见 [Thinking 附加翻译](./configuration_CN.md#thinking-附加翻译)。
 
-## 按家族查配方
+## 把模型接上
 
-- [Anthropic Claude](./model-configs_CN.md#anthropic-claude)
-- [OpenAI Codex OAuth preset](./model-configs_CN.md#codex-oauth-preset)
-- [OpenAI GPT（Responses 兼容接口）](./model-configs_CN.md#openai-gptresponses-兼容接口)
-- [Google Gemini](./model-configs_CN.md#google-gemini)
-- [GLM / BigModel Coding Plan](./model-configs_CN.md#glm--bigmodel-coding-plan)
-- [DeepSeek](./model-configs_CN.md#deepseek)
-- [Qwen 保留历史思考](./model-configs_CN.md#qwen-保留历史思考)
-- [Kimi](./model-configs_CN.md#kimi)
-- [Grok](./model-configs_CN.md#grokxai)
-- [MiniMax](./model-configs_CN.md#minimaxopenai-兼容接口)
-- [小米 MiMo](./model-configs_CN.md#小米-mimoopenai-兼容接口)
-- [Meta Muse Spark](./model-configs_CN.md#meta-muse-spark)
+各家族的接线方式与网关行为经验（含上文归纳的 thinking 选择器）见
+[模型配置](./model-configs_CN.md)；目录视图（`chord config show --catalog`）
+列出每个已验证模型及其 reasoning 档位。
 
 请求报 thinking 模式错误时，从
 [常见问题排查](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)

@@ -19,7 +19,8 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord`                           | 启动本地 TUI                                                      |
 | `chord auth [provider]`           | 用 `preset: codex` provider 登录 OAuth                            |
 | `chord config show`               | 查看带来源的有效配置，或浏览内置模型目录                          |
-| `chord config add <provider>/<model>` | 从内置目录添加模型引用并追加到模型池                              |
+| `chord config add <provider>/<model>` | 从模型目录添加模型引用并追加到模型池                              |
+| `chord config refresh-catalog`       | 从上游数据仓库拉取最新 tag 的目录快照                             |
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
 | `chord acp`                       | 为 ACP 客户端提供 stdio 版 Agent Client Protocol 服务             |
 | `chord doctor config`             | 校验全局 / 项目配置文件与模型池引用                               |
@@ -247,13 +248,13 @@ chord config show --json
 
 ## `chord config add`
 
-向 `config.yaml` 添加模型引用并追加到模型池，以内置模型目录为已验证事实来源。命令完全离线；写入之前会对候选配置执行完整解析，只有解析无错误时才会替换文件。
+向 `config.yaml` 添加模型引用并追加到模型池，以模型目录为已验证事实来源。命令默认离线；写入之前会对候选配置执行完整解析，只有解析无错误时才会替换文件。
 
 模型的解析方式：
 
 - **wire 名已绑定 provider 的 preset**（例如 `preset: openai` 下的 `gpt-6.1-sol`）：只写入一条池引用；上下文、模态、推理档位与字段发送规则在加载时自动填充。
 - **自定义端点**：传 `--catalog <id>`，用自己的 wire 名借用某个目录模型的协议无关事实（模型条目上的 `catalog:` 字段）。端点契约、凭据默认值与字段发送规则不会被借用。
-- **未命中**：列出最接近的已验证模型及其目录 ID。采纳永远是显式的 `--catalog` 选择；命令直接失败，不做猜测。
+- **未命中**：列出最接近的已验证模型及其目录 ID，并一并列出刷新得到的候选条目（标注 provider 作用域与来源）。采纳永远是显式的 `--catalog` 选择；命令直接失败，不做猜测。
 
 既有池条目保持原顺序，新引用只追加。使用 YAML 锚点或别名的文件会被拒绝，而不是被重写。
 
@@ -266,6 +267,7 @@ chord config show --json
 | `--pool <name>`     | 追加引用的模型池（默认 `default`）                                   |
 | `--api-key-env <v>` | provider 尚无凭据时，向 `auth.yaml` 写入 `$VAR` 凭据                 |
 | `--keep-current`    | 确认本模型的新鲜度提示，不做任何更改                                 |
+| `--refresh-catalog` | 先从上游仓库拉取最新 tag 的目录快照（联网）；失败时以当前生效的目录继续 |
 
 ### 示例
 
@@ -284,6 +286,10 @@ chord config add mygw2/m1 --url https://gateway.example.com/v1/chat/completions 
 # 决定保留当前借用后，静默对应的新鲜度提示
 chord config add mygw2/gpt-6-sol-gw --keep-current
 ```
+
+## `chord config refresh-catalog`
+
+从上游模型目录仓库（[chord-models](https://github.com/keakon/chord-models)）拉取最新版本 tag 到本地缓存。刷新快照按目录版本整体取代内置目录——绝不按条目合并——并在下一次 chord 命令启动时生效。刷新是显式联网操作：绝不在后台运行，任何失败都会保留原缓存和内置目录。`--repo <url>` 可换镜像源。用 `chord config show --catalog` 查看当前生效的快照。
 
 ## `chord doctor config`
 

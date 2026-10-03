@@ -1,6 +1,6 @@
 # Reasoning and thinking
 
-Start with a [recipe for your model](./model-configs.md); you do not need to understand every protocol field first.
+Start with [Model configuration](./model-configs.md) to connect a model; you do not need to understand every protocol field first.
 
 - **To change thinking effort**: find your connection type in the table below and adjust its supported fields.
 - **If a request fails after a tool call because thinking is missing**: use the replay-contract guidance below to determine whether historical thinking must be preserved.
@@ -119,7 +119,7 @@ when one exists (`openai_visible` on Chat Completions, `anthropic_unsigned` on
 verified Messages-compatible endpoints); otherwise it is dropped rather than
 pasted into assistant content. Completed tool calls and their results stay
 structured, and that is the part which must survive a provider switch. See
-[Cross-protocol fallback continuity](./model-configs.md#cross-protocol-fallback-continuity).
+[What crosses a fallback pool](#what-crosses-a-fallback-pool) and [Reasoning continuity across protocols](./model-configs.md#reasoning-continuity-across-protocols).
 
 ## Cost and behavior notes
 
@@ -136,20 +136,12 @@ structured, and that is the part which must survive a provider switch. See
   is never written back into model context; see
   [Appended thinking translation](./configuration.md#appended-thinking-translation).
 
-## Recipes by family
+## Wiring a model
 
-- [Anthropic Claude](./model-configs.md#anthropic-claude)
-- [OpenAI Codex OAuth preset](./model-configs.md#codex-oauth-preset)
-- [OpenAI GPT (Responses)](./model-configs.md#openai-gpt-responses)
-- [Google Gemini](./model-configs.md#google-gemini)
-- [GLM / BigModel Coding Plan](./model-configs.md#glm--bigmodel-coding-plan)
-- [DeepSeek](./model-configs.md#deepseek)
-- [Qwen preserved thinking](./model-configs.md#qwen-preserved-thinking)
-- [Kimi](./model-configs.md#kimi)
-- [Grok](./model-configs.md#grok-xai)
-- [MiniMax](./model-configs.md#minimax-openai-compatible)
-- [Xiaomi MiMo](./model-configs.md#xiaomi-mimo-openai-compatible)
-- [Meta Muse Spark](./model-configs.md#meta-muse-spark)
+Per-family wire-in and gateway experience, including the thinking selectors
+summarized above, lives in [Model configuration](./model-configs.md); the
+catalog view (`chord config show --catalog`) lists every verified model with
+its reasoning options.
 
 When a request fails with a thinking-mode error, start from
 [Troubleshooting](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).

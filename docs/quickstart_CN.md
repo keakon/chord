@@ -58,7 +58,7 @@ model_pools:
 
 在启动 Chord 的终端中设置 `OPENAI_API_KEY`。`auth.yaml` 未给这个 provider 声明凭据时，Chord 会读取该环境变量，并从内置目录补充所引用模型的限额和档位。
 
-用 `chord config show --catalog` 查看可选模型，`chord config show` 查看有效配置，`chord doctor config` 检查配置问题。自定义网关及更多接入方式见[模型配置速查](./model-configs_CN.md)。
+用 `chord config show --catalog` 查看可选模型，`chord config show` 查看有效配置，`chord doctor config` 检查配置问题。自定义网关及更多接入方式见[模型配置](./model-configs_CN.md)。
 
 ## 3. 检查连接
 
