@@ -26,5 +26,8 @@ func Advisories(cfg *Config) []string {
 		advisories = append(advisories, nativeThinkingSelectorAdvisories(providerName, providerCfg)...)
 		advisories = append(advisories, deepSeekContractAdvisories(providerName, providerCfg)...)
 	}
-	return advisories
+	// Catalog freshness hints ride the same advisory channel: they load as
+	// written, never fail doctor, and the startup toast reports their count
+	// separately from config problems.
+	return append(advisories, CatalogFreshnessAdvisories(cfg)...)
 }

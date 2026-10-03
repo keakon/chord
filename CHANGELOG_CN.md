@@ -4,6 +4,8 @@
 
 ## 未发布
 
+- `chord config add <provider>/<model>` 从内置离线模型目录向 `config.yaml` 添加模型引用：绑定 preset 的模型只需一条池引用；自定义网关可用 `--catalog` 借用目录模型的事实；未命中的 wire 名会列出最接近的已验证模型供显式选择；写入前会对候选配置执行完整解析。
+- 很可能已被更新的已验证模型取代的目录引用现在会以 advisory 形式上报：`chord doctor config` 列出它们及重新绑定 / 保留现状的命令，启动时提示未处理数量，`chord config add <provider>/<model> --keep-current` 可在当前目录版本下确认不再提示。
 - headless 的 `status_response` 现在带当前工作目录和 worktree generation；会话中切换 checkout 时，订阅 `workdir_changed` 的客户端也会收到推送。
 - 图片 token 按张数和保守额度估算，不再按图片文件字节数折算。
 

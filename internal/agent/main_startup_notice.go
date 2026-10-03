@@ -36,6 +36,36 @@ func startupConfigIssuesNotice(count int) string {
 	return fmt.Sprintf(`config.yaml had %d problems that were ignored at startup; run "chord doctor config" for details.`, count)
 }
 
+// SetStartupCatalogAdvisories records the catalog freshness hints collected at
+// startup. The agent reports their count once as an info toast when the event
+// loop starts. Mirrors SetStartupConfigIssues.
+func (a *MainAgent) SetStartupCatalogAdvisories(advisories []string) {
+	if a == nil {
+		return
+	}
+	a.stateMu.Lock()
+	a.startupCatalogAdvisories = append([]string(nil), advisories...)
+	a.stateMu.Unlock()
+}
+
+func (a *MainAgent) consumeStartupCatalogAdvisories() []string {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	advisories := a.startupCatalogAdvisories
+	a.startupCatalogAdvisories = nil
+	return advisories
+}
+
+// catalogAdvisoriesNotice renders the one-time toast reporting catalog
+// freshness hints. The full list stays in doctor; acknowledged references
+// never reach this point.
+func catalogAdvisoriesNotice(count int) string {
+	if count == 1 {
+		return `1 config item may need attention after a catalog update; run "chord doctor config" for details.`
+	}
+	return fmt.Sprintf(`%d config items may need attention after a catalog update; run "chord doctor config" for details.`, count)
+}
+
 // SetStartupWorkDirNotice records a resume problem the session could not fix
 // before the event loop started, so it can be surfaced once as a toast once the
 // TUI is attached. Mirrors SetStartupConfigIssues.

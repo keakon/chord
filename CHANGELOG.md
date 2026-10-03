@@ -4,6 +4,17 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+- `chord config add <provider>/<model>` adds a model reference from the built-in
+  offline model catalog to `config.yaml`: preset-bound models need only a pool
+  reference, custom gateways can borrow a catalog model's facts with
+  `--catalog`, unmatched wire names list the closest verified models for an
+  explicit choice, and the candidate config is fully resolved before anything
+  is written.
+- Catalog references that a newer verified model likely supersedes are now
+  reported as advisories: `chord doctor config` lists them with the rebind and
+  keep-current commands, startup shows the outstanding count, and
+  `chord config add <provider>/<model> --keep-current` acknowledges them for
+  the current catalog version.
 - Headless `status_response` now includes the current working directory and
   worktree generation, and mid-session checkout changes can be subscribed to
   through `workdir_changed`.

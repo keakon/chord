@@ -55,6 +55,29 @@ func LockConfigMutationContext(ctx context.Context, targetPath string) (*configM
 	return &configMutationLock{file: f, path: lockPath}, nil
 }
 
+// UpdateConfigFileLocked rewrites an existing config file under the mutation
+// lock: it reads the current bytes, passes them to produce, and atomically
+// replaces the file with the produced content. It fails when the file does
+// not exist; creating new files stays WriteConfigFileAtomically's job.
+// Callers validate the produced content before writing; this helper only
+// guarantees that the bytes produced under the lock are the bytes installed.
+func UpdateConfigFileLocked(path string, produce func(current []byte) ([]byte, error)) error {
+	lock, err := LockConfigMutation(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	out, err := produce(current)
+	if err != nil {
+		return err
+	}
+	return writeConfigFileAtomicallyReplace(path, out, 0o600)
+}
+
 func WriteConfigFileAtomically(path string, data []byte, mode os.FileMode) error {
 	if path == "" {
 		return fmt.Errorf("config path is empty")

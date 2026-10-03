@@ -749,6 +749,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.MainAgent.SetSessionLock(ac.SessionLock)
 	ac.MainAgent.SetStartupSkippedLockedSessions(ac.StartupSkippedLockedSessions)
 	ac.MainAgent.SetStartupConfigIssues(startupConfigIssues(startupPlan))
+	ac.MainAgent.SetStartupCatalogAdvisories(config.CatalogFreshnessAdvisories(startupPlan.Config))
 	ac.MainAgent.SetSessionArtifactsDirFunc(func() string {
 		if ac == nil || strings.TrimSpace(ac.SessionDir) == "" {
 			return ""

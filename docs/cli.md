@@ -19,6 +19,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord`                          | Run the local TUI                                                |
 | `chord auth [provider]`          | Sign in with a `preset: codex` OAuth provider                    |
 | `chord config show`              | Show the effective config with origins, or the built-in model catalog |
+| `chord config add <provider>/<model>` | Add a model reference from the built-in catalog and append it to a pool |
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
 | `chord acp`                      | Serve the Agent Client Protocol over stdio for ACP clients       |
 | `chord doctor config`            | Validate global/project config files and model pool references   |
@@ -244,11 +245,51 @@ chord config show --catalog
 chord config show --json
 ```
 
+## `chord config add`
+
+Add a model reference to `config.yaml` and append it to a model pool, using the built-in model catalog as the source of verified facts. The command is fully offline, and the candidate config is resolved in full before anything is written — the file is only replaced when that resolution reports no errors.
+
+How the model resolves:
+
+- **Wire name bound to the provider's preset** (for example `gpt-6.1-sol` under `preset: openai`): only a pool reference is written; context, modalities, reasoning variants and field send rules fill in at load.
+- **Custom endpoint**: pass `--catalog <id>` to borrow the protocol-independent facts of a catalog model under your own wire name (a `catalog:` field on the model entry). Endpoint contracts, credential defaults and field send rules are never borrowed.
+- **No match**: the closest verified models are listed with their catalog IDs. Adoption is always an explicit `--catalog` choice; the command fails instead of guessing.
+
+Existing pool entries keep their order — new references are appended. Files that use YAML anchors or aliases are refused rather than rewritten.
+
+### Flags
+
+| Flag                | Description                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------------- |
+| `--url <u>`         | API URL when the provider does not exist yet (path must end in a known protocol suffix)  |
+| `--catalog <id>`    | Catalog model ID to borrow facts from (custom endpoints)                                 |
+| `--pool <name>`     | Model pool to append the reference to (default `default`)                                |
+| `--api-key-env <v>` | Write `$VAR` as the provider credential in `auth.yaml` when it has none                  |
+| `--keep-current`    | Acknowledge freshness advisories for this model without changing anything                |
+
+### Examples
+
+```bash
+# A verified model on an official endpoint: one pool reference, nothing else
+chord config add openai/gpt-6-sol
+
+# Serve a catalog model through your own gateway under its wire name
+chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
+  --catalog anthropic/claude-opus-5-5
+
+# Add credentials for a new provider in the same step
+chord config add mygw2/m1 --url https://gateway.example.com/v1/chat/completions \
+  --catalog openai/gpt-6-sol --api-key-env MYGW_API_KEY
+
+# Silence a freshness advisory after deciding to keep the current borrow
+chord config add mygw2/gpt-6-sol-gw --keep-current
+```
+
 ## `chord doctor config`
 
 Check the global and project `config.yaml` files for unrecognized keys, wrongly typed values, malformed YAML, and invalid setting values (such as an unknown `retry_backoff` or a negative diagnostics threshold). The command reports every problem it finds in one pass instead of stopping at the first one.
 
-It also loads the effective config the runtime would start with (project merged over global) and reports model pool references that do not resolve — a reference naming an unknown provider or model, or a `@variant` the model does not define. Parse problems stay attributed to their file; such effective-config problems are reported as `problem:` lines (the `errors` field in `--json`).
+It also loads the effective config the runtime would start with (project merged over global) and reports model pool references that do not resolve — a reference naming an unknown provider or model, or a `@variant` the model does not define. Parse problems stay attributed to their file; such effective-config problems are reported as `problem:` lines (the `errors` field in `--json`). The report also lists advisories: settings that load exactly as written but may not behave as intended, including catalog references that a newer verified model likely supersedes, each with the command to rebind or to keep the current choice. Advisories never change the exit status.
 
 Chord's config loader logs these problems and starts anyway, treating the offending value as not configured. This command surfaces them explicitly so you can validate a config file without reading the log.
 

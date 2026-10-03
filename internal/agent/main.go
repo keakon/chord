@@ -71,6 +71,12 @@ type MainAgent struct {
 	// once as a toast when the event loop starts so silently dropped values
 	// stay visible, pointing at `chord doctor config` for the full report.
 	startupConfigIssues []string
+	// startupCatalogAdvisories names the catalog freshness hints collected at
+	// startup: catalog references a newer verified entry likely supersedes.
+	// They load as written and never fail anything; the agent reports their
+	// count once as an info toast so an upgrade-induced staleness is not
+	// silently missed. Pointing at `chord doctor config` for the full report.
+	startupCatalogAdvisories []string
 	// startupWorkDirNotice names a resume problem the session could not fix
 	// before the event loop started (the recorded worktree was gone). It is
 	// reported once as a toast, like the config issues above.

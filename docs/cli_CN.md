@@ -19,6 +19,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord`                           | 启动本地 TUI                                                      |
 | `chord auth [provider]`           | 用 `preset: codex` provider 登录 OAuth                            |
 | `chord config show`               | 查看带来源的有效配置，或浏览内置模型目录                          |
+| `chord config add <provider>/<model>` | 从内置目录添加模型引用并追加到模型池                              |
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
 | `chord acp`                       | 为 ACP 客户端提供 stdio 版 Agent Client Protocol 服务             |
 | `chord doctor config`             | 校验全局 / 项目配置文件与模型池引用                               |
@@ -244,11 +245,51 @@ chord config show --catalog
 chord config show --json
 ```
 
+## `chord config add`
+
+向 `config.yaml` 添加模型引用并追加到模型池，以内置模型目录为已验证事实来源。命令完全离线；写入之前会对候选配置执行完整解析，只有解析无错误时才会替换文件。
+
+模型的解析方式：
+
+- **wire 名已绑定 provider 的 preset**（例如 `preset: openai` 下的 `gpt-6.1-sol`）：只写入一条池引用；上下文、模态、推理档位与字段发送规则在加载时自动填充。
+- **自定义端点**：传 `--catalog <id>`，用自己的 wire 名借用某个目录模型的协议无关事实（模型条目上的 `catalog:` 字段）。端点契约、凭据默认值与字段发送规则不会被借用。
+- **未命中**：列出最接近的已验证模型及其目录 ID。采纳永远是显式的 `--catalog` 选择；命令直接失败，不做猜测。
+
+既有池条目保持原顺序，新引用只追加。使用 YAML 锚点或别名的文件会被拒绝，而不是被重写。
+
+### Flags
+
+| Flag                | 描述                                                                 |
+| ------------------- | -------------------------------------------------------------------- |
+| `--url <u>`         | provider 尚不存在时的 API URL（路径必须以已知协议后缀结尾）           |
+| `--catalog <id>`    | 要借用事实的目录模型 ID（自定义端点）                                |
+| `--pool <name>`     | 追加引用的模型池（默认 `default`）                                   |
+| `--api-key-env <v>` | provider 尚无凭据时，向 `auth.yaml` 写入 `$VAR` 凭据                 |
+| `--keep-current`    | 确认本模型的新鲜度提示，不做任何更改                                 |
+
+### 示例
+
+```bash
+# 官方端点上的已验证模型：一条池引用，其余免填
+chord config add openai/gpt-6-sol
+
+# 在自己的网关上以自定义 wire 名使用目录模型
+chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
+  --catalog anthropic/claude-opus-5-5
+
+# 同一步骤为新 provider 写入凭据
+chord config add mygw2/m1 --url https://gateway.example.com/v1/chat/completions \
+  --catalog openai/gpt-6-sol --api-key-env MYGW_API_KEY
+
+# 决定保留当前借用后，静默对应的新鲜度提示
+chord config add mygw2/gpt-6-sol-gw --keep-current
+```
+
 ## `chord doctor config`
 
 检查全局与项目 `config.yaml` 里的未知字段、类型不对的值、YAML 语法错误，以及不合理的配置值（比如非法的 `retry_backoff`、负数 diagnostics 阈值）。命令会一次性列出所有问题，而不是遇到第一个就停。
 
-命令还会加载运行时将要使用的有效配置（项目层叠加在全局层之上），报告无法解析的模型池引用——引用了不存在的 provider 或 model，或使用了模型未定义的 `@variant`。解析类问题归属到各自的文件；这类有效配置问题以 `problem:` 行输出（`--json` 里是 `errors` 字段）。
+命令还会加载运行时将要使用的有效配置（项目层叠加在全局层之上），报告无法解析的模型池引用——引用了不存在的 provider 或 model，或使用了模型未定义的 `@variant`。解析类问题归属到各自的文件；这类有效配置问题以 `problem:` 行输出（`--json` 里是 `errors` 字段）。 报告中还会列出 advisory：加载完全按原文生效、但实际行为可能不符合预期的设置，其中包括很可能已被更新的已验证模型取代的目录引用，每条都附有重新绑定或保留现状的命令。advisory 不会改变退出状态。
 
 Chord 的配置加载器遇到这些问题只会写日志并照常启动，把出错的值当作未配置处理。这个命令把它们显式列出来，方便你在不翻日志的情况下校验配置文件。
 
