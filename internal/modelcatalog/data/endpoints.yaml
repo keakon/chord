@@ -1,0 +1,45 @@
+# Verified endpoint contracts. One entry per managed preset: the protocol,
+# the full request URL, the authentication method, and the default credential
+# environment variable. docs records where the contract was verified.
+endpoints:
+  - preset_id: anthropic
+    protocol: messages
+    request_url: https://api.anthropic.com/v1/messages
+    auth_method: anthropic-api-key
+    env_var: ANTHROPIC_API_KEY
+    docs:
+      - url: https://docs.anthropic.com/en/docs/about-claude/models
+        checked: "2026-10-01"
+      - url: https://models.dev/anthropic
+        checked: "2026-10-01"
+
+  - preset_id: codex
+    protocol: responses
+    request_url: https://chatgpt.com/backend-api/codex/responses
+    auth_method: oauth
+    env_var: ""
+    docs:
+      - url: https://developers.openai.com/codex/
+        checked: "2026-10-01"
+
+  - preset_id: gemini
+    protocol: generate-content
+    request_url: https://generativelanguage.googleapis.com/v1beta/models
+    auth_method: x-goog-api-key
+    env_var: GEMINI_API_KEY
+    docs:
+      - url: https://ai.google.dev/gemini-api/docs/models
+        checked: "2026-10-01"
+      - url: https://models.dev/google
+        checked: "2026-10-01"
+
+  - preset_id: openai
+    protocol: responses
+    request_url: https://api.openai.com/v1/responses
+    auth_method: bearer
+    env_var: OPENAI_API_KEY
+    docs:
+      - url: https://platform.openai.com/docs/models
+        checked: "2026-10-01"
+      - url: https://models.dev/openai
+        checked: "2026-10-01"

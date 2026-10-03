@@ -1,0 +1,307 @@
+// Package gen builds the committed catalog artifact from the YAML source
+// files under internal/modelcatalog/data. It runs at maintenance time only:
+// the runtime reads the committed catalog.json through go:embed and never
+// depends on this package.
+//
+// The generated artifact is byte-stable: entries are sorted by identity, map
+// keys are sorted by the encoder, and the sources must pass the same
+// structural validation the runtime enforces at load, plus stricter
+// generation-time checks (https sources, verifiable check dates, positive
+// pricing). Regenerate with `go run ./cmd/modelcatalog-gen` from the
+// repository root; the golden test in internal/modelcatalog fails when the
+// committed artifact drifts from the sources.
+package gen
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/keakon/chord/internal/modelcatalog"
+)
+
+const (
+	fileNameCatalog   = "catalog.yaml"
+	fileNameEndpoints = "endpoints.yaml"
+	fileNameModels    = "models.yaml"
+	fileNameBindings  = "bindings.yaml"
+)
+
+// sourceRef is one verification citation in the source files. The checked
+// date must be a real calendar day so staleness reviews stay meaningful.
+type sourceRef struct {
+	URL     string `yaml:"url"`
+	Checked string `yaml:"checked"`
+}
+
+func (s sourceRef) validate(where string) error {
+	if !strings.HasPrefix(s.URL, "https://") {
+		return fmt.Errorf("%s: source URL must be https, got %q", where, s.URL)
+	}
+	if err := checkDate(s.Checked, where); err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkDate(value, where string) error {
+	if _, err := time.Parse(time.DateOnly, value); err != nil {
+		return fmt.Errorf("%s: checked date %q must be a calendar day in YYYY-MM-DD form", where, value)
+	}
+	return nil
+}
+
+type catalogSource struct {
+	Version string `yaml:"version"`
+}
+
+type endpointsFile struct {
+	Endpoints []endpointSource `yaml:"endpoints"`
+}
+
+type modelsFile struct {
+	Models []modelSource `yaml:"models"`
+}
+
+type bindingsFile struct {
+	Bindings []bindingSource `yaml:"bindings"`
+}
+
+type endpointSource struct {
+	PresetID   string      `yaml:"preset_id"`
+	Protocol   string      `yaml:"protocol"`
+	RequestURL string      `yaml:"request_url"`
+	AuthMethod string      `yaml:"auth_method"`
+	EnvVar     string      `yaml:"env_var"`
+	Docs       []sourceRef `yaml:"docs"`
+}
+
+type costSource struct {
+	InputPerMillion  float64   `yaml:"input_per_million"`
+	OutputPerMillion float64   `yaml:"output_per_million"`
+	Currency         string    `yaml:"currency"`
+	Checked          string    `yaml:"checked"`
+	Source           sourceRef `yaml:"source"`
+}
+
+type modelSource struct {
+	ID               string      `yaml:"id"`
+	Context          int         `yaml:"context"`
+	Input            int         `yaml:"input"`
+	Output           int         `yaml:"output"`
+	InputModalities  []string    `yaml:"input_modalities"`
+	ReasoningOptions []string    `yaml:"reasoning_options"`
+	Cost             *costSource `yaml:"cost"`
+	Sources          []sourceRef `yaml:"sources"`
+}
+
+type variantSource struct {
+	ReasoningEffort string `yaml:"reasoning_effort"`
+	ThinkingType    string `yaml:"thinking_type"`
+	ThinkingEffort  string `yaml:"thinking_effort"`
+}
+
+type responsesSource struct {
+	SendStore             *bool `yaml:"send_store"`
+	SendReasoningInclude  *bool `yaml:"send_reasoning_include"`
+	SendToolChoice        *bool `yaml:"send_tool_choice"`
+	SendPromptCacheKey    *bool `yaml:"send_prompt_cache_key"`
+	SendMaxOutputTokens   *bool `yaml:"send_max_output_tokens"`
+	SendParallelToolCalls *bool `yaml:"send_parallel_tool_calls"`
+}
+
+type bindingSource struct {
+	Endpoint    string                   `yaml:"endpoint"`
+	WireModelID string                   `yaml:"wire_model_id"`
+	ModelID     string                   `yaml:"model_id"`
+	Variants    map[string]variantSource `yaml:"variants"`
+	Responses   *responsesSource         `yaml:"responses"`
+}
+
+// Load reads and validates the source files in dir and returns the sorted,
+// runtime-validated catalog.
+func Load(dir string) (*modelcatalog.Catalog, error) {
+	var meta catalogSource
+	if err := decodeYAMLFile(filepath.Join(dir, fileNameCatalog), &meta); err != nil {
+		return nil, err
+	}
+	var endpointsFile endpointsFile
+	if err := decodeYAMLFile(filepath.Join(dir, fileNameEndpoints), &endpointsFile); err != nil {
+		return nil, err
+	}
+	var modelsFile modelsFile
+	if err := decodeYAMLFile(filepath.Join(dir, fileNameModels), &modelsFile); err != nil {
+		return nil, err
+	}
+	var bindingsFile bindingsFile
+	if err := decodeYAMLFile(filepath.Join(dir, fileNameBindings), &bindingsFile); err != nil {
+		return nil, err
+	}
+	c, err := buildCatalog(meta.Version, endpointsFile.Endpoints, modelsFile.Models, bindingsFile.Bindings)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Validate(); err != nil {
+		return nil, fmt.Errorf("catalog sources fail structural validation: %w", err)
+	}
+	return c, nil
+}
+
+// Generate produces the committed artifact bytes for the sources in dir.
+func Generate(dir string) ([]byte, error) {
+	c, err := Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal catalog: %w", err)
+	}
+	return append(data, '\n'), nil
+}
+
+func buildCatalog(version string, endpointsSrc []endpointSource, modelsSrc []modelSource, bindingsSrc []bindingSource) (*modelcatalog.Catalog, error) {
+	endpoints := make([]modelcatalog.Endpoint, 0, len(endpointsSrc))
+	for _, e := range endpointsSrc {
+		docs := make([]modelcatalog.Source, 0, len(e.Docs))
+		for _, d := range e.Docs {
+			if err := d.validate(fmt.Sprintf("endpoint %q doc", e.PresetID)); err != nil {
+				return nil, err
+			}
+			docs = append(docs, modelcatalog.Source{URL: d.URL, Checked: d.Checked})
+		}
+		endpoints = append(endpoints, modelcatalog.Endpoint{
+			PresetID:   e.PresetID,
+			Protocol:   e.Protocol,
+			RequestURL: e.RequestURL,
+			AuthMethod: e.AuthMethod,
+			EnvVar:     e.EnvVar,
+			Docs:       docs,
+		})
+	}
+
+	models := make([]modelcatalog.ModelFacts, 0, len(modelsSrc))
+	for _, m := range modelsSrc {
+		sources := make([]modelcatalog.Source, 0, len(m.Sources))
+		for _, s := range m.Sources {
+			if err := s.validate(fmt.Sprintf("model %q source", m.ID)); err != nil {
+				return nil, err
+			}
+			sources = append(sources, modelcatalog.Source{URL: s.URL, Checked: s.Checked})
+		}
+		var cost *modelcatalog.Cost
+		if m.Cost != nil {
+			converted, err := convertCost(*m.Cost, fmt.Sprintf("model %q cost", m.ID))
+			if err != nil {
+				return nil, err
+			}
+			cost = converted
+		}
+		models = append(models, modelcatalog.ModelFacts{
+			ID:               m.ID,
+			Context:          m.Context,
+			Input:            m.Input,
+			Output:           m.Output,
+			InputModalities:  slices.Clone(m.InputModalities),
+			ReasoningOptions: slices.Clone(m.ReasoningOptions),
+			Cost:             cost,
+			Sources:          sources,
+		})
+	}
+
+	bindings := make([]modelcatalog.Binding, 0, len(bindingsSrc))
+	for _, b := range bindingsSrc {
+		converted := modelcatalog.Binding{
+			Endpoint:    b.Endpoint,
+			WireModelID: b.WireModelID,
+			ModelID:     b.ModelID,
+		}
+		if len(b.Variants) > 0 {
+			converted.Variants = make(map[string]modelcatalog.Variant, len(b.Variants))
+			for name, v := range b.Variants {
+				converted.Variants[name] = modelcatalog.Variant{
+					ReasoningEffort: v.ReasoningEffort,
+					ThinkingType:    v.ThinkingType,
+					ThinkingEffort:  v.ThinkingEffort,
+				}
+			}
+		}
+		if b.Responses != nil {
+			converted.Responses = &modelcatalog.ResponsesContract{
+				SendStore:             b.Responses.SendStore,
+				SendReasoningInclude:  b.Responses.SendReasoningInclude,
+				SendToolChoice:        b.Responses.SendToolChoice,
+				SendPromptCacheKey:    b.Responses.SendPromptCacheKey,
+				SendMaxOutputTokens:   b.Responses.SendMaxOutputTokens,
+				SendParallelToolCalls: b.Responses.SendParallelToolCalls,
+			}
+		}
+		bindings = append(bindings, converted)
+	}
+
+	// Canonical order makes the artifact byte-stable regardless of how the
+	// source files arrange their entries.
+	slices.SortFunc(endpoints, func(a, b modelcatalog.Endpoint) int {
+		return strings.Compare(a.PresetID, b.PresetID)
+	})
+	slices.SortFunc(models, func(a, b modelcatalog.ModelFacts) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	slices.SortFunc(bindings, func(a, b modelcatalog.Binding) int {
+		if n := strings.Compare(a.Endpoint, b.Endpoint); n != 0 {
+			return n
+		}
+		return strings.Compare(a.WireModelID, b.WireModelID)
+	})
+
+	return &modelcatalog.Catalog{
+		Version:   version,
+		Endpoints: endpoints,
+		Models:    models,
+		Bindings:  bindings,
+	}, nil
+}
+
+func convertCost(c costSource, where string) (*modelcatalog.Cost, error) {
+	// Missing pricing stays absent so it is never shown as free; a present
+	// cost must be a real, dated price.
+	if c.InputPerMillion <= 0 || c.OutputPerMillion <= 0 {
+		return nil, fmt.Errorf("%s: prices must be positive; omit the cost block for unknown pricing instead of recording zero", where)
+	}
+	if strings.TrimSpace(c.Currency) == "" {
+		return nil, fmt.Errorf("%s: currency is required", where)
+	}
+	if err := checkDate(c.Checked, where); err != nil {
+		return nil, err
+	}
+	if err := c.Source.validate(where); err != nil {
+		return nil, err
+	}
+	return &modelcatalog.Cost{
+		InputPerMillion:  c.InputPerMillion,
+		OutputPerMillion: c.OutputPerMillion,
+		Currency:         c.Currency,
+		Checked:          c.Checked,
+		Source:           modelcatalog.Source{URL: c.Source.URL, Checked: c.Source.Checked},
+	}, nil
+}
+
+func decodeYAMLFile[T any](path string, out *T) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(out); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	return nil
+}

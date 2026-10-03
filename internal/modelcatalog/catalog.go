@@ -149,6 +149,12 @@ var validModalities = map[string]bool{
 	"video": true,
 }
 
+// Validate re-runs the structural checks enforced at load time. The code
+// generator calls it so a source file that fails these checks never ships.
+func (c *Catalog) Validate() error {
+	return c.validate()
+}
+
 func (c *Catalog) validate() error {
 	if strings.TrimSpace(c.Version) == "" {
 		return fmt.Errorf("catalog version is required")
