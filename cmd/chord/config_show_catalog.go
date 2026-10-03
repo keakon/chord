@@ -40,19 +40,32 @@ type configShowCatalogModel struct {
 
 // configShowCatalogReport is the JSON form of chord config show --catalog.
 type configShowCatalogReport struct {
-	Version   string                      `json:"version"`
-	Endpoints []configShowCatalogEndpoint `json:"endpoints"`
-	Models    []configShowCatalogModel    `json:"models"`
+	Version string `json:"version"`
+	// Source records the upstream revision the shown snapshot was generated
+	// from, when the catalog knows one.
+	Source *modelcatalog.CatalogSource `json:"source,omitempty"`
+	// FromRefreshCache reports whether the shown catalog came from the
+	// refresh cache rather than the embedded snapshot.
+	FromRefreshCache bool                        `json:"from_refresh_cache"`
+	CacheDetail      string                      `json:"cache_detail,omitempty"`
+	Endpoints        []configShowCatalogEndpoint `json:"endpoints"`
+	Models           []configShowCatalogModel    `json:"models"`
 }
 
-// renderConfigShowCatalog writes the read-only catalog view: what the built-in
-// catalog knows, and which of its candidates the effective config already
-// uses. It never mutates anything and works without any config file.
+// renderConfigShowCatalog writes the read-only catalog view: what the
+// effective catalog knows, which of its candidates the effective config
+// already uses, and which snapshot the view was resolved against. It never
+// mutates anything and works without any config file.
 func renderConfigShowCatalog(out io.Writer, opts configShowOptions, rc *config.ResolvedConfig) error {
+	origin := modelcatalog.OriginInfo()
+	status := modelcatalog.CurrentCacheStatus()
 	report := configShowCatalogReport{
-		Version:   modelcatalog.Version(),
-		Endpoints: catalogShowEndpoints(),
-		Models:    catalogShowModels(rc.Config),
+		Version:          origin.Version,
+		Source:           origin.Source,
+		FromRefreshCache: origin.Cached,
+		CacheDetail:      status.Detail,
+		Endpoints:        catalogShowEndpoints(),
+		Models:           catalogShowModels(rc.Config),
 	}
 	if opts.JSON {
 		enc := json.NewEncoder(out)
@@ -156,7 +169,10 @@ func catalogConfiguredModels(cfg *config.Config) map[string]map[string]bool {
 }
 
 func renderConfigShowCatalogText(out io.Writer, report configShowCatalogReport) error {
-	fmt.Fprintf(out, "Built-in model catalog, version %s (read-only reference, not your config):\n\n", report.Version)
+	fmt.Fprintf(out, "Model catalog version %s (%s):\n\n", report.Version, catalogOriginLabel(report))
+	if report.CacheDetail != "" {
+		fmt.Fprintf(out, "Refresh cache not in effect: %s\n\n", report.CacheDetail)
+	}
 
 	fmt.Fprintln(out, "Endpoints:")
 	for _, e := range report.Endpoints {
@@ -210,6 +226,22 @@ func renderConfigShowCatalogText(out io.Writer, report configShowCatalogReport) 
 		}
 	}
 	return nil
+}
+
+// catalogOriginLabel describes where the shown catalog snapshot came from:
+// the refresh cache, or the embedded snapshot with its recorded upstream
+// revision when one was synced in.
+func catalogOriginLabel(report configShowCatalogReport) string {
+	switch {
+	case report.FromRefreshCache && report.Source != nil:
+		return fmt.Sprintf("refresh cache of %s @ %s; read-only reference, not your config", report.Source.Repository, report.Source.Revision)
+	case report.FromRefreshCache:
+		return "refresh cache; read-only reference, not your config"
+	case report.Source != nil:
+		return fmt.Sprintf("embedded snapshot of %s @ %s; read-only reference, not your config", report.Source.Repository, report.Source.Revision)
+	default:
+		return "embedded snapshot; read-only reference, not your config"
+	}
 }
 
 // catalogVariantLabel renders one variant as its name plus the knobs it sets,

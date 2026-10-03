@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 
@@ -16,41 +18,45 @@ import (
 )
 
 // configAddCommand is the first write slice for daily model onboarding. It is
-// fully offline, keeps the built-in catalog as the source of verified facts,
-// and writes only selections and explicit user values: a pool reference for
-// preset-bound models, a `catalog:` borrow for custom endpoints, never
+// offline by default, keeps the built-in catalog as the source of verified
+// facts, and writes only selections and explicit user values: a pool reference
+// for preset-bound models, a `catalog:` borrow for custom endpoints, never
 // materialized defaults. Non-interactive by design (the first slice per the
 // catalog plan); the interactive selector arrives with the editor work.
 type configAddOptions struct {
-	url         string
-	catalogID   string
-	pool        string
-	envVar      string
-	keepCurrent bool
+	url            string
+	catalogID      string
+	pool           string
+	envVar         string
+	keepCurrent    bool
+	refreshCatalog bool
 }
 
 func newConfigAddCmd() *cobra.Command {
 	opts := &configAddOptions{}
 	cmd := &cobra.Command{
 		Use:   "add <provider>/<model>",
-		Short: "Add a model reference to config.yaml from the built-in catalog",
+		Short: "Add a model reference to config.yaml from the model catalog",
 		Long: `Add a model reference to config.yaml and append it to a model pool.
 
-The model resolves against the built-in verified catalog. A wire name bound to
+The model resolves against the verified model catalog. A wire name bound to
 the provider's preset needs nothing else: context, modalities, reasoning
 variants and field send rules fill in at load. For custom endpoints, pass
 --catalog <id> to borrow the protocol-independent facts of a catalog model
 under your own wire name.
 
-When the wire name matches nothing, the closest verified models are listed;
-adopting one is always an explicit --catalog choice, never automatic.
+When the wire name matches nothing, the closest verified models are listed
+together with any candidates that came with a catalog refresh; adopting one
+is always an explicit --catalog choice, never automatic.
 
-The command is fully offline. The candidate config is resolved in full before
-anything is written, and the file is only replaced when that resolution
-reports no errors.`,
+The command is offline by default. Pass --refresh-catalog to first pull the
+latest tagged snapshot of the upstream model catalog repository; if that
+network step fails, the command continues with the catalog already in
+effect. The candidate config is resolved in full before anything is written,
+and the file is only replaced when that resolution reports no errors.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runConfigAdd(cmd.OutOrStdout(), args[0], *opts)
+			return runConfigAdd(cmd.Context(), cmd.OutOrStdout(), args[0], *opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.url, "url", "",
@@ -62,10 +68,12 @@ reports no errors.`,
 		"write $VAR as the provider credential in auth.yaml when it has none")
 	cmd.Flags().BoolVar(&opts.keepCurrent, "keep-current", false,
 		"acknowledge freshness advisories for this model without changing anything")
+	cmd.Flags().BoolVar(&opts.refreshCatalog, "refresh-catalog", false,
+		"first pull the latest tagged catalog snapshot from the upstream repository (network)")
 	return cmd
 }
 
-func runConfigAdd(out io.Writer, ref string, opts configAddOptions) error {
+func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAddOptions) error {
 	providerName, wireModel := config.SplitProviderModelRef(strings.TrimSpace(ref))
 	providerName, wireModel = strings.TrimSpace(providerName), strings.TrimSpace(wireModel)
 	if providerName == "" || wireModel == "" {
@@ -92,6 +100,14 @@ func runConfigAdd(out io.Writer, ref string, opts configAddOptions) error {
 		return fmt.Errorf("no config.yaml at %s; run `chord` once in an interactive terminal to complete initial setup", globalPath)
 	}
 
+	if opts.refreshCatalog {
+		// An explicit user opt-in to network access. A failure keeps the
+		// catalog already in effect — the add itself stays fully usable.
+		if err := refreshCatalogForCommand(ctx, out); err != nil {
+			fmt.Fprintf(out, "Catalog refresh failed; continuing with the catalog already in effect: %v\n", err)
+		}
+	}
+
 	rc, err := config.LoadResolvedConfig(globalPath, "")
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -109,8 +125,12 @@ func runConfigAdd(out io.Writer, ref string, opts configAddOptions) error {
 	mode, borrowID, err := resolveConfigAddMode(preset, wireModel, opts.catalogID)
 	if err != nil {
 		if errors.Is(err, errNoCatalogMatch) {
-			if !printCatalogSuggestions(out, wireModel) {
-				fmt.Fprintln(out, "No close catalog match for this wire name; configure the model manually or refresh the catalog in a future release.")
+			apiURL := strings.TrimSpace(opts.url)
+			if providerExists {
+				apiURL = strings.TrimSpace(providerCfg.APIURL)
+			}
+			if !printCatalogSuggestions(out, wireModel, preset, apiURL) {
+				fmt.Fprintln(out, "No close catalog match for this wire name; configure the model manually or refresh the catalog with `chord config refresh-catalog`.")
 			}
 		}
 		return err
@@ -204,20 +224,130 @@ func resolveConfigAddMode(preset, wireModel, catalogID string) (configAddMode, s
 	return configAddBorrow, borrowID, nil
 }
 
-// printCatalogSuggestions renders the ranked suggestion list and reports
-// whether anything was shown.
-func printCatalogSuggestions(out io.Writer, wireModel string) bool {
+// printCatalogSuggestions renders the ranked verified suggestions followed by
+// refreshed candidate entries, and reports whether anything was shown.
+func printCatalogSuggestions(out io.Writer, wireModel, preset, apiURL string) bool {
 	suggestions := modelcatalog.SuggestModels(wireModel, 5)
-	if len(suggestions) == 0 {
+	candidates := catalogCandidateOrder(modelcatalog.SuggestCandidates(wireModel, 5), preset, apiURL)
+	if len(suggestions) == 0 && len(candidates) == 0 {
 		return false
 	}
-	fmt.Fprintf(out, "%q is not in the verified catalog for this endpoint. Closest verified models:\n", wireModel)
-	for i, s := range suggestions {
-		fmt.Fprintf(out, "  %d) %s (context %d / output %d)\n", i+1, s.ModelID, s.Facts.Context, s.Facts.Output)
+	if len(suggestions) > 0 {
+		fmt.Fprintf(out, "%q is not in the verified catalog for this endpoint. Closest verified models:\n", wireModel)
+		for i, s := range suggestions {
+			fmt.Fprintf(out, "  %d) %s (context %d / output %d)\n", i+1, s.ModelID, s.Facts.Context, s.Facts.Output)
+		}
 	}
-	fmt.Fprintln(out, "Borrow one explicitly, e.g.:")
-	fmt.Fprintf(out, "  chord config add --catalog %s\n", suggestions[0].ModelID)
+	if len(candidates) > 0 {
+		if len(suggestions) > 0 {
+			fmt.Fprintln(out)
+		}
+		fmt.Fprintln(out, "Refreshed catalog candidates (discovery entries with their sources; never defaults):")
+		for i, c := range candidates {
+			scope := fmt.Sprintf("scope %q", c.Candidate.Scope)
+			if catalogScopeMatches(c.Candidate.Scope, preset, apiURL) {
+				scope += " — matches this endpoint"
+			} else {
+				scope += " — different provider; reference values, your endpoint may differ"
+			}
+			fmt.Fprintf(out, "  %d) %s on %s\n", i+1, c.Candidate.WireModelID, scope)
+			if c.Candidate.ModelID != "" {
+				fmt.Fprintf(out, "     refers to verified model %s\n", c.Candidate.ModelID)
+			}
+			if observed := candidateObservedFacts(c.Candidate); observed != "" {
+				fmt.Fprintf(out, "     observed: %s\n", observed)
+			}
+			for _, s := range c.Candidate.Sources {
+				fmt.Fprintf(out, "     source: %s (checked %s)\n", s.URL, s.Checked)
+			}
+		}
+	}
+	if example := suggestionExampleID(suggestions, candidates); example != "" {
+		fmt.Fprintln(out, "Adopt explicitly, e.g.:")
+		fmt.Fprintf(out, "  chord config add <provider>/<model> --catalog %s\n", example)
+	} else {
+		fmt.Fprintln(out, "Candidates are reference values; configure the model manually in config.yaml if one fits.")
+	}
 	return true
+}
+
+// suggestionExampleID picks the model ID the adoption example shows: the
+// verified model behind the top candidate when there is one — the closest
+// sighting of the typed name — otherwise the top verified suggestion.
+func suggestionExampleID(suggestions []modelcatalog.Suggestion, candidates []modelcatalog.CandidateSuggestion) string {
+	for _, c := range candidates {
+		if c.Candidate.ModelID != "" {
+			return c.Candidate.ModelID
+		}
+	}
+	if len(suggestions) > 0 {
+		return suggestions[0].ModelID
+	}
+	return ""
+}
+
+// candidateObservedFacts renders the observed reference values a candidate
+// carries; unobserved values stay absent rather than reading as defaults.
+func candidateObservedFacts(c modelcatalog.Candidate) string {
+	var parts []string
+	if c.Context > 0 {
+		parts = append(parts, fmt.Sprintf("context %d", c.Context))
+	}
+	if c.Input > 0 {
+		parts = append(parts, fmt.Sprintf("input %d", c.Input))
+	}
+	if c.Output > 0 {
+		parts = append(parts, fmt.Sprintf("output %d", c.Output))
+	}
+	if len(c.InputModalities) > 0 {
+		parts = append(parts, "modalities "+strings.Join(c.InputModalities, ","))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// catalogCandidateOrder lists scope-matched candidates first, keeping the
+// ranked order within each group: the endpoint match is a presentation
+// preference, the ranking itself stays the engine's.
+func catalogCandidateOrder(candidates []modelcatalog.CandidateSuggestion, preset, apiURL string) []modelcatalog.CandidateSuggestion {
+	if len(candidates) == 0 {
+		return nil
+	}
+	matched := make([]modelcatalog.CandidateSuggestion, 0, len(candidates))
+	for _, c := range candidates {
+		if catalogScopeMatches(c.Candidate.Scope, preset, apiURL) {
+			matched = append(matched, c)
+		}
+	}
+	if len(matched) == 0 || len(matched) == len(candidates) {
+		return candidates
+	}
+	rest := make([]modelcatalog.CandidateSuggestion, 0, len(candidates)-len(matched))
+	for _, c := range candidates {
+		if !catalogScopeMatches(c.Candidate.Scope, preset, apiURL) {
+			rest = append(rest, c)
+		}
+	}
+	return append(matched, rest...)
+}
+
+// catalogScopeMatches reports whether a candidate's provider scope plausibly
+// describes the endpoint being configured: the provider's preset, or a
+// distinctive name inside the API URL host. It only chooses display order and
+// wording; it never decides what gets configured.
+func catalogScopeMatches(scope, preset, apiURL string) bool {
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	if scope == "" {
+		return false
+	}
+	if preset != "" && scope == strings.ToLower(strings.TrimSpace(preset)) {
+		return true
+	}
+	u, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Host)
+	return host != "" && strings.Contains(host, scope)
 }
 
 func addProviderEnvCredential(providerName, envVar string, out io.Writer) error {

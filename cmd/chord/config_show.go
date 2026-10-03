@@ -64,7 +64,7 @@ func newConfigCmd() *cobra.Command {
 		Use:   "config",
 		Short: "Inspect configuration",
 	}
-	cmd.AddCommand(newConfigAddCmd(), newConfigShowCmd())
+	cmd.AddCommand(newConfigAddCmd(), newConfigShowCmd(), newConfigRefreshCatalogCmd())
 	return cmd
 }
 

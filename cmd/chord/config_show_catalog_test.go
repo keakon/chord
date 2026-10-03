@@ -52,7 +52,7 @@ model_pools:
 	}
 	text := buf.String()
 	for _, want := range []string{
-		"Built-in model catalog, version " + modelcatalog.Version(),
+		"Model catalog version " + modelcatalog.Version() + " (embedded snapshot of https://github.com/keakon/chord-models @ v2026-10-01.1; read-only reference, not your config):",
 		"Endpoints:",
 		"openai",
 		"Models (configured = defined or referenced by a pool in the effective config):",
@@ -76,6 +76,19 @@ func TestRenderConfigShowCatalogWithoutConfig(t *testing.T) {
 	text := buf.String()
 	if !strings.Contains(text, "openai / gpt-6.1-sol  [not configured]") {
 		t.Fatalf("catalog view without config should list everything unconfigured:\n%s", text)
+	}
+}
+
+func TestCatalogOriginLabel(t *testing.T) {
+	source := &modelcatalog.CatalogSource{Repository: "https://example.invalid/chord-models", Revision: "v2026-10-02.1"}
+	if got := catalogOriginLabel(configShowCatalogReport{Version: "2026-10-02.1", Source: source, FromRefreshCache: true}); !strings.Contains(got, "refresh cache of https://example.invalid/chord-models @ v2026-10-02.1") {
+		t.Errorf("cached origin = %q", got)
+	}
+	if got := catalogOriginLabel(configShowCatalogReport{Version: "2026-10-01.1", Source: source}); !strings.Contains(got, "embedded snapshot of https://example.invalid/chord-models @ v2026-10-02.1") {
+		t.Errorf("embedded origin with source = %q", got)
+	}
+	if got := catalogOriginLabel(configShowCatalogReport{Version: "2026-10-01.1"}); !strings.Contains(got, "embedded snapshot; read-only reference") {
+		t.Errorf("bare embedded origin = %q", got)
 	}
 }
 

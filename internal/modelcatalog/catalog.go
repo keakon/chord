@@ -91,9 +91,18 @@ type Binding struct {
 	Responses   *ResponsesContract `json:"responses,omitempty"`
 }
 
+// CatalogSource records which upstream revision a catalog snapshot was
+// generated from. The embedded snapshot records the chord-models tag it was
+// synced from; the refresh cache records the tag it was fetched from.
+type CatalogSource struct {
+	Repository string `json:"repository"`
+	Revision   string `json:"revision"` // upstream tag the snapshot was pinned to
+}
+
 // Catalog is the validated in-memory form of the embedded data.
 type Catalog struct {
 	Version   string            `json:"version"`
+	Source    *CatalogSource    `json:"source,omitempty"`
 	Endpoints []Endpoint        `json:"endpoints"`
 	Models    []ModelFacts      `json:"models"`
 	Bindings  []Binding         `json:"bindings"`
@@ -101,8 +110,6 @@ type Catalog struct {
 	byModelID map[string]int    `json:"-"`
 	byBinding map[[2]string]int `json:"-"`
 }
-
-var catalog = mustLoadCatalog()
 
 func mustLoadCatalog() *Catalog {
 	c, err := loadCatalog(catalogData)
@@ -158,6 +165,14 @@ func (c *Catalog) Validate() error {
 func (c *Catalog) validate() error {
 	if strings.TrimSpace(c.Version) == "" {
 		return fmt.Errorf("catalog version is required")
+	}
+	if c.Source != nil {
+		if !strings.HasPrefix(c.Source.Repository, "https://") {
+			return fmt.Errorf("catalog source repository %q must be an https URL", c.Source.Repository)
+		}
+		if strings.TrimSpace(c.Source.Revision) == "" {
+			return fmt.Errorf("catalog source revision is required when a source is recorded")
+		}
 	}
 	c.byPreset = make(map[string]int, len(c.Endpoints))
 	for i, e := range c.Endpoints {
@@ -248,48 +263,48 @@ func (c *Catalog) buildIndexes() {
 	}
 }
 
-// Version returns the catalog data version.
-func Version() string { return catalog.Version }
+// Version returns the version of the catalog the process resolves against.
+func Version() string { return effective().Version }
 
 // EndpointContract returns the contract recorded for a preset ID.
 func EndpointContract(presetID string) (Endpoint, bool) {
-	i, ok := catalog.byPreset[presetID]
+	i, ok := effective().byPreset[presetID]
 	if !ok {
 		return Endpoint{}, false
 	}
-	return catalog.Endpoints[i], true
+	return effective().Endpoints[i], true
 }
 
 // EndpointContracts lists all verified endpoint contracts, ordered by preset ID.
 func EndpointContracts() []Endpoint {
-	out := slices.Clone(catalog.Endpoints)
+	out := slices.Clone(effective().Endpoints)
 	slices.SortFunc(out, func(a, b Endpoint) int { return strings.Compare(a.PresetID, b.PresetID) })
 	return out
 }
 
 // Model returns the facts recorded for a stable catalog model ID.
 func Model(id string) (ModelFacts, bool) {
-	i, ok := catalog.byModelID[id]
+	i, ok := effective().byModelID[id]
 	if !ok {
 		return ModelFacts{}, false
 	}
-	return catalog.Models[i], true
+	return effective().Models[i], true
 }
 
 // LookupBinding resolves the binding for one wire model ID served by a preset.
 func LookupBinding(presetID, wireModelID string) (Binding, bool) {
-	i, ok := catalog.byBinding[[2]string{presetID, wireModelID}]
+	i, ok := effective().byBinding[[2]string{presetID, wireModelID}]
 	if !ok {
 		return Binding{}, false
 	}
-	return catalog.Bindings[i], true
+	return effective().Bindings[i], true
 }
 
 // LookupBindingByModelID resolves a stable catalog model through a preset's
 // verified binding. It is used for explicit catalog aliases whose wire model
 // name differs from the catalog identity.
 func LookupBindingByModelID(presetID, modelID string) (Binding, bool) {
-	for _, b := range catalog.Bindings {
+	for _, b := range effective().Bindings {
 		if b.Endpoint == presetID && b.ModelID == modelID {
 			return b, true
 		}
@@ -300,7 +315,7 @@ func LookupBindingByModelID(presetID, modelID string) (Binding, bool) {
 // BindingsForEndpoint lists a preset's bindings ordered by wire model ID.
 func BindingsForEndpoint(presetID string) []Binding {
 	var out []Binding
-	for _, b := range catalog.Bindings {
+	for _, b := range effective().Bindings {
 		if b.Endpoint == presetID {
 			out = append(out, b)
 		}
@@ -313,6 +328,6 @@ func BindingsForEndpoint(presetID string) []Binding {
 // contract. The codex preset keeps its own stricter handling in the config
 // package but is also catalog-managed for model facts.
 func IsManagedPreset(presetID string) bool {
-	_, ok := catalog.byPreset[presetID]
+	_, ok := effective().byPreset[presetID]
 	return ok
 }

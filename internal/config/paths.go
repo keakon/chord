@@ -110,6 +110,19 @@ func ConfigPath() (string, error) {
 	return filepath.Join(h, "config.yaml"), nil
 }
 
+// ModelCatalogCachePath is the refresh cache of the model catalog: the full
+// snapshot `chord config refresh-catalog` writes into the cache dir, which
+// every command installs at startup when it is newer than the embedded one.
+// The file is disposable derived data; a missing or unreadable cache only
+// means the embedded snapshot stays in effect.
+func ModelCatalogCachePath() (string, error) {
+	l, err := DefaultPathLocator()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(l.CacheDir, "modelcatalog-cache.json"), nil
+}
+
 func (l *PathLocator) LocateProject(projectRoot string) (*ProjectLocator, error) {
 	if l == nil {
 		return nil, fmt.Errorf("path locator is nil")

@@ -25,7 +25,7 @@ const SuggestionMinScore = 0.35
 // name. The result is deterministic: equal scores order by model ID, then by
 // endpoint. At most one suggestion per model is returned.
 func SuggestModels(query string, limit int) []Suggestion {
-	return suggestModels(query, limit, catalog)
+	return suggestModels(query, limit, effective())
 }
 
 func suggestModels(query string, limit int, c *Catalog) []Suggestion {
@@ -77,7 +77,7 @@ func suggestModels(query string, limit int, c *Catalog) []Suggestion {
 // supersedes. The heuristic is advisory-only input; callers must never rebind
 // automatically.
 func SuggestNewerVersion(wireQuery, currentModelID string) (Suggestion, bool) {
-	return suggestNewerVersion(wireQuery, currentModelID, catalog)
+	return suggestNewerVersion(wireQuery, currentModelID, effective())
 }
 
 func suggestNewerVersion(wireQuery, currentModelID string, c *Catalog) (Suggestion, bool) {
@@ -95,6 +95,47 @@ func suggestNewerVersion(wireQuery, currentModelID string, c *Catalog) (Suggesti
 		}
 	}
 	return Suggestion{}, false
+}
+
+// CandidateSuggestion is one ranked candidate entry for a user-typed wire
+// name. The candidate's scope decides whether it plausibly describes the
+// endpoint being configured; the caller annotates that, the score here only
+// orders the list.
+type CandidateSuggestion struct {
+	Candidate Candidate
+	Score     float64 // 0..1, same floor as SuggestionMinScore
+}
+
+// SuggestCandidates ranks refreshed candidate entries against a user-typed
+// wire model name. Candidates arrive only through the refresh cache; without
+// one there is nothing to suggest. The result is deterministic: equal scores
+// order by wire model ID, then by scope.
+func SuggestCandidates(query string, limit int) []CandidateSuggestion {
+	candidates := EffectiveCandidates()
+	if limit <= 0 || len(candidates) == 0 {
+		return nil
+	}
+	var out []CandidateSuggestion
+	for _, c := range candidates {
+		score := similarity(query, c.WireModelID)
+		if score < SuggestionMinScore {
+			continue
+		}
+		out = append(out, CandidateSuggestion{Candidate: c, Score: score})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score != out[j].Score {
+			return out[i].Score > out[j].Score
+		}
+		if out[i].Candidate.WireModelID != out[j].Candidate.WireModelID {
+			return out[i].Candidate.WireModelID < out[j].Candidate.WireModelID
+		}
+		return out[i].Candidate.Scope < out[j].Candidate.Scope
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 func bestBindingForModel(c *Catalog, modelID string) (Binding, bool) {

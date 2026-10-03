@@ -29,6 +29,7 @@ import (
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/modelcatalog"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/worktree"
@@ -133,6 +134,14 @@ func newRootCmd() *cobra.Command {
 			}
 			if strings.TrimSpace(flagAPIBase) == "" {
 				flagAPIBase = strings.TrimSpace(os.Getenv("CHORD_API_BASE"))
+			}
+			// Install a newer refreshed catalog snapshot when one is cached.
+			// A missing, stale, or unreadable cache keeps the embedded
+			// snapshot: refresh is an explicit operation and the cache is
+			// never required. `chord config show --catalog` reports what is
+			// in effect and why a cache was not installed.
+			if cachePath, cacheErr := config.ModelCatalogCachePath(); cacheErr == nil {
+				_ = modelcatalog.InstallCachedCatalog(cachePath)
 			}
 			return nil
 		},

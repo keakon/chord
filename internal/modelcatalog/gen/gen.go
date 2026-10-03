@@ -15,6 +15,7 @@ package gen
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -32,6 +33,12 @@ const (
 	fileNameEndpoints = "endpoints.yaml"
 	fileNameModels    = "models.yaml"
 	fileNameBindings  = "bindings.yaml"
+	// fileNameSnapshot optionally records which upstream revision the source
+	// directory was synced from. The chord repository writes it when pinning
+	// a chord-models tag; the upstream repository itself has none, so
+	// validating upstream sources directly produces an artifact without a
+	// source record.
+	fileNameSnapshot = "snapshot.yaml"
 )
 
 // sourceRef is one verification citation in the source files. The checked
@@ -60,6 +67,13 @@ func checkDate(value, where string) error {
 
 type catalogSource struct {
 	Version string `yaml:"version"`
+}
+
+// snapshotMeta records the upstream revision a source directory was synced
+// from; the generator copies it into the artifact's source record.
+type snapshotMeta struct {
+	Repository string `yaml:"repository"`
+	Revision   string `yaml:"revision"`
 }
 
 type endpointsFile struct {
@@ -144,7 +158,11 @@ func Load(dir string) (*modelcatalog.Catalog, error) {
 	if err := decodeYAMLFile(filepath.Join(dir, fileNameBindings), &bindingsFile); err != nil {
 		return nil, err
 	}
-	c, err := buildCatalog(meta.Version, endpointsFile.Endpoints, modelsFile.Models, bindingsFile.Bindings)
+	source, err := loadSnapshotMeta(dir)
+	if err != nil {
+		return nil, err
+	}
+	c, err := buildCatalog(meta.Version, source, endpointsFile.Endpoints, modelsFile.Models, bindingsFile.Bindings)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +170,29 @@ func Load(dir string) (*modelcatalog.Catalog, error) {
 		return nil, fmt.Errorf("catalog sources fail structural validation: %w", err)
 	}
 	return c, nil
+}
+
+// loadSnapshotMeta reads the optional snapshot.yaml. A missing file is the
+// normal case when validating the upstream repository directly.
+func loadSnapshotMeta(dir string) (*modelcatalog.CatalogSource, error) {
+	data, err := os.ReadFile(filepath.Join(dir, fileNameSnapshot))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", filepath.Join(dir, fileNameSnapshot), err)
+	}
+	var meta snapshotMeta
+	if err := yaml.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", filepath.Join(dir, fileNameSnapshot), err)
+	}
+	if !strings.HasPrefix(meta.Repository, "https://") {
+		return nil, fmt.Errorf("%s: repository %q must be an https URL", fileNameSnapshot, meta.Repository)
+	}
+	if strings.TrimSpace(meta.Revision) == "" {
+		return nil, fmt.Errorf("%s: revision is required", fileNameSnapshot)
+	}
+	return &modelcatalog.CatalogSource{Repository: meta.Repository, Revision: meta.Revision}, nil
 }
 
 // Generate produces the committed artifact bytes for the sources in dir.
@@ -167,7 +208,7 @@ func Generate(dir string) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-func buildCatalog(version string, endpointsSrc []endpointSource, modelsSrc []modelSource, bindingsSrc []bindingSource) (*modelcatalog.Catalog, error) {
+func buildCatalog(version string, source *modelcatalog.CatalogSource, endpointsSrc []endpointSource, modelsSrc []modelSource, bindingsSrc []bindingSource) (*modelcatalog.Catalog, error) {
 	endpoints := make([]modelcatalog.Endpoint, 0, len(endpointsSrc))
 	for _, e := range endpointsSrc {
 		docs := make([]modelcatalog.Source, 0, len(e.Docs))
@@ -263,6 +304,7 @@ func buildCatalog(version string, endpointsSrc []endpointSource, modelsSrc []mod
 
 	return &modelcatalog.Catalog{
 		Version:   version,
+		Source:    source,
 		Endpoints: endpoints,
 		Models:    models,
 		Bindings:  bindings,

@@ -1,5 +1,9 @@
 {
   "version": "2026-10-01.1",
+  "source": {
+    "repository": "https://github.com/keakon/chord-models",
+    "revision": "v2026-10-01.1"
+  },
   "endpoints": [
     {
       "preset_id": "anthropic",
