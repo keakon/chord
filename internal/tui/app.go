@@ -303,7 +303,8 @@ type Model struct {
 	contentViewer contentViewerState
 
 	// Pending image attachments (shown above input box, sent with next message)
-	attachments []Attachment
+	attachments  []Attachment
+	composerUndo composerUndoState
 	// Session restore rebuilds are deferred; when a ForkSessionEvent in the same
 	// event batch has already repopulated the composer, the deferred rebuild must
 	// not wipe those restored attachments.

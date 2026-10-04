@@ -46,6 +46,7 @@ func KeyMapFromConfig(m map[string][]string) KeyMap {
 	apply(&km.InsertAttachClipboard, "insert_attach_clipboard")
 	apply(&km.InsertAttachFile, "insert_attach_file")
 	apply(&km.InsertClearInput, "insert_clear_input")
+	apply(&km.InsertUndo, "insert_undo")
 	apply(&km.InsertPageUp, "insert_page_up")
 	apply(&km.InsertPageDown, "insert_page_down")
 	apply(&km.EnterInsert, "enter_insert")

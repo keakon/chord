@@ -26,9 +26,12 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Ctrl+V` / `Alt+V` | Attach an image or PDF from the system clipboard asynchronously; `Alt+V` works when the terminal reserves `Ctrl+V` |
 | `Cmd+V` / paste    | Paste text only; terminal paste events never probe clipboard attachments                       |
 | `Ctrl+U`           | Clear the input box and pending attachments                                                    |
+| `Ctrl+Z` | Undo the last composer edit, including text, inline pastes, and attachments |
 | `PgUp` / `PgDown`  | Page the transcript up / down without leaving Insert mode                                      |
 | `Shift+Tab`        | Cycle the main agent role shown in the status bar. A switch is announced with a toast (`role: planner → builder`) because it rebuilds permissions, invalidates the cached prompt prefix, and may select the role's own model. On a SubAgent view, where a role switch does not apply, it cycles the focused view instead |
 | `Tab`              | Complete the visible slash-command or `@`-mention suggestion; otherwise does nothing            |
+
+Undo keeps at most 64 edits within an 8 MiB budget, including attachment bytes. Consecutive typing within 750 ms is merged; cursor movement, paste, completion, and deletion split transactions. An oversized snapshot clears undo history. Sending, switching session or agent, and history navigation end the undo history. Restoring clears the selection. Remap the shortcut with `insert_undo`.
 
 ### Normal mode: leaving and meta
 
@@ -182,6 +185,7 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `insert_attach_clipboard`  | `["ctrl+v", "alt+v"]` (attach a clipboard image or PDF) |
 | `insert_attach_file`       | `[]`                              |
 | `insert_clear_input`       | `["ctrl+u"]`                     |
+| `insert_undo` | `["ctrl+z"]` |
 | `insert_page_up`           | `["pgup"]` (page the transcript) |
 | `insert_page_down`         | `["pgdown"]` (page the transcript) |
 | `enter_insert`             | `["i"]`                          |

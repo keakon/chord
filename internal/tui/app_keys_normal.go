@@ -550,6 +550,7 @@ func (m *Model) repeatNormalBoundary(dir, count int) tea.Cmd {
 }
 
 func (m *Model) clearInputAndAttachments() tea.Cmd {
+	defer m.beginComposerEdit(false)()
 	m.cancelClipboardAttachmentPaste()
 	m.input.SetDisplayValueAndPastes("", nil, 0)
 	m.input.syncHeight()

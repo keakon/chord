@@ -84,6 +84,8 @@ func sessionSwitchLabel(kind, sessionID string) string {
 }
 
 func (m *Model) beginSessionSwitch(kind, sessionID string) {
+	m.input.editBoundary++
+	m.syncComposerUndoBoundary()
 	kind = strings.TrimSpace(kind)
 	m.sessionSwitch = sessionSwitchState{
 		kind:      kind,

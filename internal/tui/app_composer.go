@@ -124,6 +124,7 @@ func (m *Model) dropQueuedDraftFromAgent(draftID string) {
 }
 
 func (m *Model) loadQueuedDraftIntoComposer(draft queuedDraft) tea.Cmd {
+	m.input.editBoundary++
 	m.clearActiveSearch()
 	m.editingQueuedDraftID = draft.ID
 	text, inlinePastes := displayTextAndInlinePastes(draft.contentParts(), draft.Content)

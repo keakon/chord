@@ -42,6 +42,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- The composer supports `Ctrl+Z` undo for text, inline pastes, attachments, and cursor position with bounded edit history; remap it through `insert_undo`.
 - Headless `send` accepts a `request_id` for a consumption reply (`handled`, `queued`, `started`, or `rejected`), distinguishing local commands, queued input, and started turns. Replies bypass optional event subscriptions.
 
 - New `chord config show` command shows the effective configuration (project merged over global) with the origin of every tracked field, per-model request budgets, and structured diagnostics, with `--path` for one config subtree and `--json` for scripts. Credential-bearing values are redacted. With `--catalog` it instead lists the built-in model catalog — managed preset endpoint contracts and verified models with their limits and reasoning variants, each marked configured or not configured in your config — as a read-only, fully offline reference.

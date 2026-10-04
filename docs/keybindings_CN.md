@@ -26,9 +26,12 @@ TUI 有两种模式：
 | `Ctrl+V` / `Alt+V` | 异步读取系统剪贴板中的图片或 PDF，并作为附件添加；终端占用 `Ctrl+V` 时使用 `Alt+V`     |
 | `Cmd+V` / 普通粘贴 | 只粘贴文本；终端 paste 事件不会探测剪贴板附件                                          |
 | `Ctrl+U`           | 清空输入框和待发送附件                                                                              |
+| `Ctrl+Z` | 撤销最近一次输入框编辑，包含文本、内联粘贴与附件 |
 | `PgUp` / `PgDown`  | 不离开 Insert 模式直接向上 / 向下翻页会话记录                                                       |
 | `Shift+Tab`        | 循环切换状态栏显示的主 agent role。切换会通过 toast 提示（`role: planner → builder`），因为它会重建权限、使缓存的 prompt 前缀失效，并可能切到该 role 自己的模型。在 SubAgent 视图下 role 切换不适用，此时改为切换查看的 agent 视图 |
 | `Tab`              | 补全当前显示的 slash 命令或 `@` mention 候选；没有候选时无动作                                       |
+
+撤销历史最多保留 64 次编辑，总预算 8 MiB（包括附件字节）。连续输入在 750 ms 内合并；移动光标、粘贴、补全或删除会分开事务。单份快照超过预算时清除撤销历史。发送消息、切换会话或 Agent、浏览输入历史后不能撤销之前的编辑。选择区在恢复时清除。通过 `insert_undo` 可修改快捷键。
 
 ### Normal 模式：退出与元操作
 
@@ -176,6 +179,7 @@ action 名就是 `config.yaml` 里可设置的 lower snake_case 标识符，下�
 | `insert_attach_clipboard`  | `["ctrl+v", "alt+v"]`（附加剪贴板图片或 PDF） |
 | `insert_attach_file`       | `[]`                               |
 | `insert_clear_input`       | `["ctrl+u"]`                      |
+| `insert_undo` | `["ctrl+z"]` |
 | `insert_page_up`           | `["pgup"]`（翻页会话记录）        |
 | `insert_page_down`         | `["pgdown"]`（翻页会话记录）      |
 | `enter_insert`             | `["i"]`                           |

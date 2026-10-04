@@ -102,6 +102,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding(km.InsertHistoryDown, "next history"),
 		helpBinding(km.InsertAttachClipboard, "attach clipboard image or PDF"),
 		helpBinding(km.InsertClearInput, "clear input"),
+		helpBinding(km.InsertUndo, "undo composer edit"),
 		helpBinding(km.InsertPageUp, "page transcript up"),
 		helpBinding(km.InsertPageDown, "page transcript down"),
 		helpBinding(km.SwitchRole, "switch main agent role (cycle; switches focused agent instead on a SubAgent view)"),

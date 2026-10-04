@@ -20,6 +20,7 @@ type attachmentReadyMsg struct {
 }
 
 func (m *Model) handleAttachmentReadyMsg(msg attachmentReadyMsg) tea.Cmd {
+	defer m.beginComposerEdit(false)()
 	if msg.err != nil {
 		return tea.Batch(m.rollbackPendingInlineImagePlaceholder(msg.inlineImagePlaceholderRaw), m.enqueueToast(msg.err.Error(), "error"))
 	}

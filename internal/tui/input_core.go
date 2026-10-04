@@ -33,6 +33,7 @@ type Input struct {
 	selection    inputSelection
 	inlinePastes []inlineLargePaste
 	nextPasteSeq int
+	editBoundary uint64
 
 	// displayLineCache caches the result of clampedDisplayLineCount to avoid
 	// re-running the expensive wrappedContentLines() on every View()/recalcViewportSize().
@@ -142,6 +143,7 @@ func (i *Input) draftSnapshot() inputDraftSnapshot {
 }
 
 func (i *Input) applyHistoryEntry(entry inputHistoryEntry) {
+	i.editBoundary++
 	if i.shellLine == nil {
 		i.shellLine = new(bool)
 	}
@@ -158,11 +160,7 @@ func (i *Input) applyHistoryEntry(entry inputHistoryEntry) {
 
 func (i *Input) applyDraftSnapshot(snapshot inputDraftSnapshot) {
 	i.applyHistoryEntry(snapshot.Entry)
-	i.textarea.MoveToBegin()
-	for j := 0; j < snapshot.Row; j++ {
-		i.textarea.CursorDown()
-	}
-	i.textarea.SetCursorColumn(snapshot.Col)
+	i.rebuildDisplay(snapshot.Entry.Display, runeOffsetFromRowCol(snapshot.Entry.Display, snapshot.Row, snapshot.Col))
 	i.ensureCursorOutsideInlinePastes()
 }
 

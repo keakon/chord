@@ -101,6 +101,10 @@ func (m *Model) sendSlashShortcut(key string, binding []string, command string) 
 
 func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+	if keyMatches(key, m.keyMap.InsertUndo) {
+		return m.undoComposerEdit()
+	}
+	defer m.beginComposerEdit(msg.Key().Text != "" && key != "!")()
 	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
 		return cmd
 	}

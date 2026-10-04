@@ -581,6 +581,7 @@ func (m *Model) loadLastUserMessageToComposer() tea.Cmd {
 		text, _ = queuedDraftTextAndImageCount(draft)
 	}
 	m.input.SetDisplayValueAndPastes(text, inlinePastes, nextPasteSeq)
+	m.input.editBoundary++
 	m.input.syncHeight()
 	m.attachments = attachmentsFromParts(parts)
 	m.recalcViewportSize()

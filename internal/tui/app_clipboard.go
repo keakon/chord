@@ -127,6 +127,7 @@ func (m *Model) cancelClipboardAttachmentPaste() {
 }
 
 func (m *Model) handleClipboardAttachmentReady(msg clipboardAttachmentReadyMsg) tea.Cmd {
+	defer m.beginComposerEdit(false)()
 	if !m.clipboardAttachmentPending || msg.requestID != m.clipboardAttachmentSeq {
 		return nil
 	}

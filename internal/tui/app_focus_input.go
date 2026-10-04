@@ -38,6 +38,7 @@ func (m *Model) restoreComposerStateForAgent(agentID string) {
 		state = agentComposerState{}
 	}
 	m.input.applyDraftSnapshot(state.draft)
+	m.composerUndo = composerUndoState{boundary: m.input.editBoundary}
 	if state.historyBrowsing {
 		histIdx := min(max(state.historyIndex, 0), len(m.input.history))
 		m.input.histIdx = histIdx

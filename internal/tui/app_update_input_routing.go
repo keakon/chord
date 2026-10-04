@@ -293,6 +293,7 @@ func (m *Model) syncAttachmentsToInlineImagePlaceholders() {
 }
 
 func (m *Model) insertComposerText(text string) tea.Cmd {
+	defer m.beginComposerEdit(false)()
 	m.input.ClearSelection()
 	if !m.input.InsertLargePaste(text) {
 		m.input.InsertStringPreserveInlinePastes(text)
