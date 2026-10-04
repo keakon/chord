@@ -335,6 +335,14 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	}
 
 	switch e := ev.(type) {
+	case agent.InputResultEvent:
+		// Correlated command replies are always delivered, independent of
+		// optional push subscriptions, and never clear an active turn.
+		out = append(out, &headlessEnvelope{Type: "input_result", Payload: e})
+		if e.Status == agent.InputStarted {
+			state.busy = true
+			touch()
+		}
 	case agent.AgentActivityEvent:
 		if e.Type == agent.ActivityIdle {
 			return nil // filtered; idle is expressed via GlobalIdleEvent
@@ -1188,7 +1196,7 @@ func startHeadlessParentWatcher(ac *AppContext, ppid0 int, interval time.Duratio
 
 // headlessBackend is the subset of MainAgent functionality required by headless mode.
 type headlessBackend interface {
-	SendUserMessage(content string)
+	SendUserMessageWithReceipt(content, requestID string) bool
 	CancelCurrentTurn() bool
 	ResolveConfirm(action, finalArgsJSON, editSummary, denyReason, requestID string)
 	ResolveQuestion(answers []string, reason string, requestID string) (string, bool)
@@ -1540,6 +1548,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			content = "/role status"
 		}
 		if isUnsupportedHeadlessCommand(content) {
+			emitHeadlessInputRejected(cmd.RequestID, "command is only available in local TUI mode", state, out)
 			fields := strings.Fields(content)
 			out.emit(headlessEnvelope{
 				Type: "error",
@@ -1547,6 +1556,10 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 					"message": fields[0] + " is only available in local TUI mode",
 				},
 			})
+			return
+		}
+		if strings.TrimSpace(content) == "" {
+			emitHeadlessInputRejected(cmd.RequestID, "empty input", state, out)
 			return
 		}
 		// In headless mode, if a confirm_request, question_request, or handoff_request
@@ -1560,6 +1573,12 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		pendingQuestion := state.pendingQuestion
 		pendingHandoff := state.pendingHandoff
 		state.mu.Unlock()
+		// Admit input before resolving any blocked interaction. Admission never
+		// waits for consumption, which may itself depend on that resolution.
+		if !backend.SendUserMessageWithReceipt(content, cmd.RequestID) {
+			emitHeadlessInputRejected(cmd.RequestID, "agent is shutting down", state, out)
+			return
+		}
 		if pendingConfirm != nil {
 			log.Infof("headless: auto-denying pending confirm for new user message request_id=%v tool_name=%v", pendingConfirm.RequestID, pendingConfirm.ToolName)
 			backend.ResolveConfirm("deny", "", "", "", pendingConfirm.RequestID)
@@ -1612,17 +1631,14 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		}
 		if pendingQuestion != nil {
 			// Accept the new message first, then wake the blocked Question as
-			// superseded. SendUserMessage returns only once the message is
+			// superseded. Admission returns only once the message is
 			// queued, so the resumed tool cannot reorder a model request ahead
 			// of it. The pending cache is cleared by the core resolved event,
 			// never locally. A handoff pending at the same time was cancelled
 			// above, so neither interaction is left showing as pending.
 			log.Infof("headless: superseding pending question for new user message request_id=%v tool_name=%v", pendingQuestion.RequestID, pendingQuestion.ToolName)
-			backend.SendUserMessage(content)
 			backend.SupersedeQuestion(pendingQuestion.RequestID)
-			return
 		}
-		backend.SendUserMessage(content)
 
 	case "models":
 		modelsBackend, ok := backend.(headlessModelsBackend)

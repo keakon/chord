@@ -116,10 +116,25 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 向 agent 发送用户消息。slash 命令的行为与 TUI 一致；裸 `/models` 会被当作 `/models status`，因为 headless 没有 TUI overlay。
 
 ```json
-{"type": "send", "content": "请总结一下项目结构。"}
+{"type": "send", "request_id": "input-1", "content": "请总结一下项目结构。"}
 ```
 
 如果当前有待处理的 `confirm_request`、`question_request` 或 `handoff_request`，而用户发送了普通消息（不是下面的 `confirm`、`question` 或 `handoff`），Chord 会先自动关闭该待处理交互，再消费这条新消息。待决的 `confirm_request` 按空理由自动拒绝，且没有专门的关闭事件，看下一次 `status_response` 里 `pending_confirm` 已清空就知道不用再等。待决的 `question_request` 会以 `superseded` 关闭，Chord 向订阅了 `question_resolved` 的客户端推送 `reason: "superseded"` 的事件。如果被关闭的是 `handoff_request`，Chord 还会推送 `handoff_cancelled` 事件，和 [`handoff`](#handoff) 一节里 runtime 主动取消的路径一致。被关闭的交互不会在下一次 `status_response` 中继续显示为待决。
+
+可选的 `request_id` 关联一条 `input_result` 消费回执。回执始终发送，不受 `subscribe` 过滤；不带 ID 的输入没有关联回执。
+
+```json
+{"type":"input_result","seq":12,"payload":{"request_id":"input-1","status":"started","turn_id":3}}
+```
+
+| status | 含义 |
+| --- | --- |
+| `handled` | 已在本地处理命令；具体结果由命令本身的响应或通知说明 |
+| `queued` | 输入已进入待处理队列，将在后续请求边界消费 |
+| `started` | 输入已创建回合并提交用户消息，即将准备模型请求 |
+| `rejected` | 空输入、仅支持 TUI 的命令、进程关闭或取消导致此次输入未开始工作；`message` 说明原因 |
+
+每条输入只有一次消费回执，不代表模型成功、任务完成或跨断线持久投递。`queued` 不会再收到第二条 `started` 回执；请订阅 `activity` 并结合全局 `idle` 跟踪实际工作。`handled`、`queued` 和 `rejected` 不会清掉已有回合的忙碌状态。断线后的未确认输入属于结果未知，先检查会话再决定是否重发，避免重复副作用。处理新输入时，Chord 先入队，再关闭阻塞中的交互，不等待消费完成。
 
 ### `models`
 
@@ -251,6 +266,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | 类型                 | 何时出现                                     | 主要 payload 字段 |
 | -------------------- | -------------------------------------------- | ----------------- |
 | `ready`              | 服务启动完成，可以接受命令                   | `session_id`，以及可选 worktree 信息：`name`、`branch`、`path`、`repo_root` |
+| `input_result` | 带 `request_id` 的 `send` 的消费回执 | `request_id`、`status`、可选 `turn_id` / `message` |
 | `subscribe_response` | 响应 `subscribe`                             | `events` |
 | `status_response`    | 响应 `status`                                | 见 [`status`](#status) |
 | `models_response`    | 响应 `models`                                | `ok`、`message`、`status` |

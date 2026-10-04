@@ -1403,11 +1403,13 @@ func (a *MainAgent) GetTokenUsage() message.TokenUsage {
 // becomes idle (with any other queued messages in one batch). When idle,
 // slash commands are handled immediately; otherwise a new turn is started.
 func (a *MainAgent) handleUserMessage(evt Event) {
+	requestID := ""
 	var content string
 	var parts []message.ContentPart
 	acceptedOrder := int64(0)
 	switch p := evt.Payload.(type) {
 	case acceptedUserMessage:
+		requestID = p.RequestID
 		content = p.Content
 		parts = p.Parts
 		acceptedOrder = p.AcceptedOrder
@@ -1433,6 +1435,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	// Pass busy = (a.turn != nil) so handlers skip setIdleAndDrainPending and
 	// don't clobber the active turn while it's mid-retry.
 	if a.handleLocalOnlySlashCommands(content, parts, a.turn != nil) {
+		a.emitInputResult(requestID, InputHandled, "", 0)
 		return
 	}
 	a.mailboxDeliveryPaused.Store(false)
@@ -1448,10 +1451,12 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	if a.turn != nil || a.mcpTransitionActive.Load() {
 		if a.turn != nil {
 			if a.tryHandleBusySlashCommand(content) {
+				a.emitInputResult(requestID, InputHandled, "", 0)
 				return
 			}
 		}
 		if a.mcpTransitionActive.Load() && isMCPCommand {
+			a.emitInputResult(requestID, InputRejected, "MCP change already in progress", 0)
 			a.emitToTUI(ToastEvent{Message: "MCP change already in progress", Level: "warn"})
 			return
 		}
@@ -1461,11 +1466,13 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 			Parts:         parts,
 			FromUser:      true,
 		})
+		a.emitInputResult(requestID, InputQueued, "", 0)
 		return
 	}
 
 	// Idle: session and compaction commands before starting a turn.
 	if a.tryHandleSlashCommand(content) {
+		a.emitInputResult(requestID, InputHandled, "", 0)
 		return
 	}
 
@@ -1481,6 +1488,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 		})
 		a.resumePendingUserDrain()
 		a.drainPendingUserMessages()
+		a.emitInputResult(requestID, InputQueued, "", 0)
 		return
 	}
 
@@ -1506,11 +1514,13 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	// message but not the work: the turn exists, so the transcript and recovery
 	// keep the usual shape of a cancelled turn, and the model is never called.
 	if a.cancelCoversAcceptedOrder(acceptedOrder) {
+		a.emitInputResult(requestID, InputRejected, "cancelled before model work started", turnID)
 		log.Infof("accepted user message cancelled before its first request order=%v turn_id=%v", acceptedOrder, turnID)
 		a.handleTurnCancelled(a.abortTurn(a.turn))
 		return
 	}
 
+	a.emitInputResult(requestID, InputStarted, "", turnID)
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }
 

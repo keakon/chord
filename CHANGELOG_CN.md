@@ -30,6 +30,8 @@
 
 ### 新功能
 
+- Headless `send` 可带 `request_id` 获取消费回执（`handled`、`queued`、`started` 或 `rejected`），用于区分本地命令、排队和实际开始的任务；回执不受事件订阅过滤。
+
 - 新增 `chord config show` 命令：查看有效配置（项目层叠加在全局层之上）、每个被跟踪字段的来源、各模型请求预算与结构化诊断；`--path` 可查看某个配置子树，`--json` 供脚本使用。可能携带凭据的值一律脱敏。加 `--catalog` 时改为列出内置模型目录——托管 preset 的端点契约与已核验模型的限额、reasoning 档位，并按你的配置标注「已配置 / 未配置」——这是完全离线的只读参考。
 - 使用托管 preset（`openai`、`anthropic`、`gemini`、`codex`）的 provider 现在把 preset 解析为已核验的端点契约：`type`、`api_url`、`auth_scheme` 只在留空处填充，与契约冲突的取值会被判为配置错误。内置目录还会补充你未声明的模型事实——context/input/output 限额与 reasoning 档位——覆盖显式定义的模型，以及被模型池引用但从未定义的模型；显式 null 清空的块保持清空，每个由目录填充的值都在 `chord config show` 里带 `catalog` 来源层。 无 preset 的自定义端点可显式绑定目录模型，只借用模型事实；`chord config show` 另列 Responses 字段的取值、发送行为与来源。
 - 在 `auth.yaml` 中完全没有声明凭据来源的 provider，现在会回退到其 preset 的默认环境变量（`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`）。已有声明但当前不可用的来源仍视为已声明，不会触发回退。

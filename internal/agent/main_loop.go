@@ -218,11 +218,11 @@ func (a *MainAgent) dispatch(evt Event) {
 // channel and bounded overflow are full, producers wait for capacity or
 // shutdown. Main-loop handlers must use queueLoopEvent so they never wait on
 // capacity that only the loop itself can release.
-func (a *MainAgent) sendEvent(evt Event) {
+func (a *MainAgent) sendEvent(evt Event) bool {
 	for {
 		select {
 		case <-a.stoppingCh:
-			return
+			return false
 		default:
 		}
 		a.eventMu.Lock()
@@ -231,13 +231,13 @@ func (a *MainAgent) sendEvent(evt Event) {
 				evt = a.sequenceEvent(evt)
 				a.eventCh <- evt
 				a.eventMu.Unlock()
-				return
+				return true
 			}
 		}
 		if a.coalesceQueuedEventLocked(a.deferredEvents, evt) {
 			a.eventCoalesced.Add(1)
 			a.eventMu.Unlock()
-			return
+			return true
 		}
 		if len(a.deferredEvents) < a.eventOverflowLimit {
 			evt = a.sequenceEvent(evt)
@@ -245,14 +245,14 @@ func (a *MainAgent) sendEvent(evt Event) {
 			a.updateEventOverflowPeakLocked()
 			a.eventMu.Unlock()
 			a.wakeDeferredEvents()
-			return
+			return true
 		}
 		a.eventBackpressure.Add(1)
 		a.eventMu.Unlock()
 		select {
 		case <-a.eventSpaceCh:
 		case <-a.stoppingCh:
-			return
+			return false
 		}
 	}
 }
@@ -583,6 +583,8 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 
 func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 	switch e := evt.(type) {
+	case InputResultEvent:
+		return "TUI output channel full, waiting to deliver input result", []any{"request_id", e.RequestID}, true
 	case AgentActivityEvent:
 		if e.Type == ActivityIdle {
 			return "", nil, false

@@ -142,6 +142,7 @@ type TurnCancelledPayload struct {
 // an earlier cancel request is compared against: a message accepted at or below
 // the cancel's watermark keeps its place in the transcript but not the work.
 type acceptedUserMessage struct {
+	RequestID     string
 	Content       string
 	Parts         []message.ContentPart
 	AcceptedOrder int64

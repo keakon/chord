@@ -116,10 +116,25 @@ Response:
 Send a user message to the agent. Slash commands work the same as in the TUI; bare `/models` is treated as `/models status` because there is no TUI overlay.
 
 ```json
-{"type": "send", "content": "Please summarize the project structure."}
+{"type": "send", "request_id": "input-1", "content": "Please summarize the project structure."}
 ```
 
 If a `confirm_request`, `question_request`, or `handoff_request` is pending and the user sends a regular message (not via `confirm`, `question`, or `handoff` below), Chord auto-dismisses the pending interaction so the new message is consumed. A pending `confirm_request` is auto-denied with an empty reason and emits no dedicated event; follow the next `status_response` (`pending_confirm` cleared) to stop waiting. A pending `question_request` is closed as `superseded`, and Chord pushes a `question_resolved` event with `reason: "superseded"` to subscribed clients. When the dismissed interaction is a `handoff_request`, Chord also pushes a `handoff_cancelled` event to subscribed clients, just like the runtime-initiated cancellation in the [`handoff`](#handoff) section. The dismissed interaction stops appearing as pending in the next `status_response`.
+
+An optional `request_id` correlates one `input_result` consumption reply. Replies are always emitted regardless of `subscribe`; inputs without an ID have no correlated reply.
+
+```json
+{"type":"input_result","seq":12,"payload":{"request_id":"input-1","status":"started","turn_id":3}}
+```
+
+| status | Meaning |
+| --- | --- |
+| `handled` | A command was consumed locally; its own response or notification describes the result |
+| `queued` | Input entered the pending queue for a later request boundary |
+| `started` | Input created a turn and committed the user message before model preparation |
+| `rejected` | Empty input, a TUI-only command, shutdown, or cancellation prevented this input from starting work; `message` explains why |
+
+Each input has one consumption reply. It does not promise model success, task completion, or durable delivery across disconnects. A `queued` reply is not followed by another `started` reply: subscribe to `activity` and follow global `idle` to track actual work. `handled`, `queued`, and `rejected` never clear existing busy work. Disconnected unconfirmed inputs have unknown outcomes; inspect the session before resending requests with side effects. Chord admits new input before resolving any blocked interaction and never waits for consumption to resolve it.
 
 ### `models`
 
@@ -251,6 +266,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | Type                  | When                                                                                       | Notable payload fields                                            |
 | --------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
 | `ready`               | Server has finished startup and is ready to accept commands                                | `session_id`, worktree info (when applicable: `name`, `branch`, `path`, `repo_root`) |
+| `input_result` | Consumption reply for a `send` carrying `request_id` | `request_id`, `status`, optional `turn_id` / `message` |
 | `subscribe_response`  | Reply to a `subscribe` command                                                             | `events`                                                          |
 | `status_response`     | Reply to a `status` command                                                                | see [`status`](#status)                                           |
 | `models_response`     | Reply to a `models` command                                                                | `ok`, `message`, `status`                                         |
