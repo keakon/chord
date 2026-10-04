@@ -3,7 +3,6 @@ package llm
 import (
 	"encoding/json"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/keakon/golog/log"
@@ -139,7 +138,11 @@ func responsesOutputRefusalText(output []responsesOutputEntry) string {
 // apply_patch args are back-filled from the accumulated tool call.
 func collectResponsesOutput(resp *message.Response, output []responsesOutputEntry) {
 	resp.ResponsesOutput = nil
+	seenCalls := make(map[string]struct{})
 	for _, out := range output {
+		if (out.Type == "function_call" || out.Type == "custom_tool_call") && !responsesToolItemCompleted(out.Status) {
+			continue
+		}
 		var item message.ResponsesOutputItem
 		if out.Type == "custom_tool_call" {
 			// normalizeResponsesOutputEntry already maps the entry to
@@ -161,10 +164,22 @@ func collectResponsesOutput(resp *message.Response, output []responsesOutputEntr
 				continue
 			}
 		case "function_call":
+			if item.Arguments == "" {
+				for _, call := range resp.ToolCalls {
+					if call.ID == item.CallID {
+						item.Arguments = string(call.Args)
+						break
+					}
+				}
+			}
 			item.Arguments = string(toolArgumentsFallback(item.Name, json.RawMessage(item.Arguments)))
 			if strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
 				continue
 			}
+			if _, seen := seenCalls[item.CallID]; seen {
+				continue
+			}
+			seenCalls[item.CallID] = struct{}{}
 		default:
 			continue
 		}
@@ -197,12 +212,19 @@ func recoverResponsesToolCallsFromOutput(resp *message.Response, output []respon
 		if out.Type != "function_call" {
 			continue
 		}
+		if !responsesToolItemCompleted(out.Status) {
+			resp.StopReason = "length"
+			continue
+		}
 		callID := out.CallID
 		if callID == "" {
 			callID = out.ID
 		}
 		if callID == "" || out.Name == "" {
 			log.Warnf("responses: skip malformed recovered tool call tool=%v call_id=%v id=%v", out.Name, callID, out.ID)
+			continue
+		}
+		if slices.ContainsFunc(resp.ToolCalls, func(call message.ToolCall) bool { return call.ID == callID }) {
 			continue
 		}
 		args := json.RawMessage(out.Arguments)
@@ -304,79 +326,21 @@ func finalizeOneResponsesToolCall(
 	delete(toolCalls, idx)
 }
 
-// finalizeResponsesToolCalls converts all accumulated tool calls into the response.
-func finalizeResponsesToolCalls(
+// discardUnfinishedResponsesToolCalls discards calls that never reached output_item.done
+// or a corresponding terminal output entry. Valid JSON alone is not completion
+// evidence; custom input can also be truncated at any character boundary.
+func discardUnfinishedResponsesToolCalls(
 	toolCalls map[int]*responsesToolAccumulator,
 	resp *message.Response,
-	cb StreamCallback,
 	truncated bool,
-	finalizedCalls map[string]bool,
 ) {
 	if len(toolCalls) == 0 {
 		return
 	}
 
-	if truncated {
-		for idx, acc := range toolCalls {
-			log.Warnf("discarding truncated tool call in responses API tool=%v id=%v partial_args=%v", acc.name, acc.id, acc.args.String())
-			delete(toolCalls, idx)
-		}
-		return
-	}
-
-	// Process in index order.
-	indices := make([]int, 0, len(toolCalls))
-	for idx := range toolCalls {
-		indices = append(indices, idx)
-	}
-	sort.Ints(indices)
-
-	for _, idx := range indices {
-		acc := toolCalls[idx]
-		if acc.id == "" || acc.name == "" {
-			log.Warnf("discarding malformed tool call in responses API tool=%v id=%v item_id=%v args=%v", acc.name, acc.id, acc.itemID, acc.args.String())
-			delete(toolCalls, idx)
-			continue
-		}
-		args := json.RawMessage(acc.args.String())
-		if len(args) == 0 {
-			// See finalizeOneResponsesToolCall: a custom accumulator with no
-			// input must not become the literal patch "{}".
-			if acc.custom {
-				args = json.RawMessage(`{"patch":""}`)
-			} else {
-				args = json.RawMessage("{}")
-			}
-		}
-		args = unwrapJSONString(args)
-		if acc.custom {
-			args = canonicalApplyPatchArgs(args)
-		}
-		// If stream ended without response.incomplete but args are invalid JSON (e.g. truncated
-		// mid-tool-call), treat as truncation: do not append malformed, set StopReason so agent
-		// does not count as malformed and can suggest new conversation / max_output_tokens.
-		if !json.Valid(args) {
-			log.Warnf("discarding incomplete tool call (invalid JSON, likely output truncation) tool=%v id=%v partial_args=%v", acc.name, acc.id, acc.args.String())
-			resp.StopReason = "length"
-			delete(toolCalls, idx)
-			continue
-		}
-		log.Debugf("finalized tool call (responses API) tool=%v id=%v args=%v", acc.name, acc.id, string(args))
-		resp.ToolCalls = append(resp.ToolCalls, message.ToolCall{
-			ID:   cloneLongLivedLLMString(acc.id),
-			Name: cloneLongLivedLLMString(acc.name),
-			Args: args,
-		})
-		markResponsesToolCallFinalized(finalizedCalls, acc)
-		if cb != nil && acc.streamStartEmitted && !acc.endEmitted {
-			cb(message.StreamDelta{
-				Type: message.StreamDeltaToolUseEnd,
-				ToolCall: &message.ToolCallDelta{
-					ID:   responsesToolStreamID(acc),
-					Name: acc.name,
-				},
-			})
-		}
+	resp.StopReason = "length"
+	for idx, acc := range toolCalls {
+		log.Warnf("discarding unfinished tool call in responses API tool=%v id=%v truncated=%v", acc.name, acc.id, truncated)
 		delete(toolCalls, idx)
 	}
 }

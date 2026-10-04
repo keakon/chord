@@ -133,6 +133,10 @@ diagnostics bundle and include the session ID in your report.
 
 Chord normally recovers from this WebSocket conversation-state mismatch automatically by retrying with the full local conversation. If the error repeats, export a diagnostics bundle and include the session ID in your report.
 
+### A Responses stream ends before a tool request finishes
+
+Chord skips unfinished write requests even when their partial arguments look valid. Completed calls can still run, so check their results before retrying. If this happens repeatedly, check the endpoint's output limit and streaming reliability, and include a diagnostics bundle in your report. A `conflicting Responses tool call identity` error means the endpoint assigned different calls to the same stream slot; use an endpoint that sends distinct call identities and output indexes.
+
 ### `Cache R` percentage is much lower than expected
 
 **Symptom**: the info panel shows a cache-read percentage around 50% (or any

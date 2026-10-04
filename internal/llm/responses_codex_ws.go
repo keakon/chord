@@ -442,6 +442,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		toolCalls       = make(map[int]*responsesToolAccumulator)
 		customItemToIdx = make(map[string]int) // custom tool item_id → index
 		finalizedCalls  = make(map[string]bool)
+		incompleteCalls = make(map[string]bool)
 		truncated       bool
 		outputItems     []responsesInputItem
 		gotData         bool
@@ -572,6 +573,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			toolCalls:         toolCalls,
 			customItemToIndex: customItemToIdx,
 			finalizedCalls:    finalizedCalls,
+			incompleteCalls:   incompleteCalls,
 			truncated:         &truncated,
 			outputItems:       &outputItems,
 			cb:                cb,

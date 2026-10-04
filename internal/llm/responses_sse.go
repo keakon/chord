@@ -86,6 +86,7 @@ type responseOutputItemDone struct {
 // item events avoid repeated json.Unmarshal into multiple temporary structs.
 type responsesStreamItem struct {
 	Type             string          `json:"type"`
+	Status           string          `json:"status,omitempty"`
 	ID               string          `json:"id,omitempty"`
 	CallID           string          `json:"call_id,omitempty"`
 	Name             string          `json:"name,omitempty"`
@@ -112,6 +113,7 @@ type responsesCompletedPayload struct {
 
 type responsesOutputEntry struct {
 	Type      string `json:"type"`
+	Status    string `json:"status"`
 	ID        string `json:"id"`
 	CallID    string `json:"call_id"`
 	Role      string `json:"role"`
@@ -204,9 +206,15 @@ type responsesToolAccumulator struct {
 	endEmitted         bool // tool_use_end already sent (arguments.done early signal)
 }
 
-func (a *responsesToolAccumulator) mergeMetadata(item responsesStreamItem) {
+func (a *responsesToolAccumulator) mergeMetadata(item responsesStreamItem) error {
 	if a == nil {
-		return
+		return nil
+	}
+	// An index may never join two different calls. Reject ambiguous streams
+	// before a later done event can turn the wrong call's deltas into arguments.
+	if (item.ID != "" && a.itemID != "" && item.ID != a.itemID) ||
+		(item.CallID != "" && a.id != "" && a.id != a.itemID && item.CallID != a.id) {
+		return fmt.Errorf("conflicting Responses tool call identity: item=%q call=%q", item.ID, item.CallID)
 	}
 	if item.ID != "" && a.itemID == "" {
 		a.itemID = item.ID
@@ -226,6 +234,7 @@ func (a *responsesToolAccumulator) mergeMetadata(item responsesStreamItem) {
 	if item.Name != "" {
 		a.name = item.Name
 	}
+	return nil
 }
 
 func responsesToolCallID(item responsesStreamItem) string {
@@ -236,13 +245,29 @@ func responsesToolCallID(item responsesStreamItem) string {
 }
 
 func responsesToolCallAlreadyFinalized(finalizedCalls map[string]bool, item responsesStreamItem) bool {
-	if finalizedCalls == nil {
+	return responsesToolCallMarked(finalizedCalls, item)
+}
+
+func responsesToolCallMarked(marked map[string]bool, item responsesStreamItem) bool {
+	if marked == nil {
 		return false
 	}
-	if id := responsesToolCallID(item); id != "" && finalizedCalls[id] {
+	if id := responsesToolCallID(item); id != "" && marked[id] {
 		return true
 	}
-	return item.ID != "" && finalizedCalls[item.ID]
+	return item.ID != "" && marked[item.ID]
+}
+
+func markResponsesToolCall(marked map[string]bool, item responsesStreamItem) {
+	if marked == nil {
+		return
+	}
+	if item.CallID != "" {
+		marked[item.CallID] = true
+	}
+	if item.ID != "" {
+		marked[item.ID] = true
+	}
 }
 
 func markResponsesToolCallFinalized(finalizedCalls map[string]bool, acc *responsesToolAccumulator) {
@@ -351,6 +376,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		toolCalls       = make(map[int]*responsesToolAccumulator)    // index → accumulator
 		customItemToIdx = make(map[string]int)                       // custom tool item_id → index
 		finalizedCalls  = make(map[string]bool)                      // call_id → true; dedup against proxy replays
+		incompleteCalls = make(map[string]bool)                      // explicit incomplete status blocks terminal recovery
 		hostedCalls     = make(map[string]*responsesHostedCallState) // hosted item id → dedup state
 		truncated       bool
 		gotData         bool
@@ -397,7 +423,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 
 		// [DONE] signals end of stream even if the trailing blank line is missing.
 		if bytes.Equal(data, []byte("[DONE]")) {
-			finalizeResponsesToolCalls(toolCalls, &resp, cb, truncated, finalizedCalls)
+			discardUnfinishedResponsesToolCalls(toolCalls, &resp, truncated)
 			flushContent()
 			if resp.Content != "" {
 				partial.textDone = true
@@ -433,6 +459,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 			toolCalls:         toolCalls,
 			customItemToIndex: customItemToIdx,
 			finalizedCalls:    finalizedCalls,
+			incompleteCalls:   incompleteCalls,
 			hostedCalls:       hostedCalls,
 			captureHosted:     captureHosted,
 			truncated:         &truncated,
@@ -623,6 +650,7 @@ type responsesEventState struct {
 	toolCalls         map[int]*responsesToolAccumulator
 	customItemToIndex map[string]int // custom tool item_id → output index
 	finalizedCalls    map[string]bool
+	incompleteCalls   map[string]bool // explicit incomplete status blocks terminal recovery
 	hostedCalls       map[string]*responsesHostedCallState // hosted item id → dedup state
 	// captureHosted enables hosted-call capture: the raw item payloads are
 	// re-read from the event data only on sub-requests that declared a hosted
@@ -678,7 +706,9 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 				acc = &responsesToolAccumulator{}
 				state.toolCalls[addedIdx] = acc
 			}
-			acc.mergeMetadata(added.Item)
+			if err := acc.mergeMetadata(added.Item); err != nil {
+				return nil, nil, false, err
+			}
 			maybeEmitResponsesToolStart(acc, state.cb)
 		case "custom_tool_call":
 			if state.phaser != nil {
@@ -708,7 +738,9 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 				}
 				state.toolCalls[addedIdx] = acc
 			}
-			acc.mergeMetadata(added.Item)
+			if err := acc.mergeMetadata(added.Item); err != nil {
+				return nil, nil, false, err
+			}
 			acc.custom = true
 			if added.Item.ID != "" && state.customItemToIndex != nil {
 				state.customItemToIndex[added.Item.ID] = addedIdx
@@ -957,13 +989,37 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		if doneIdx == 0 {
 			doneIdx = done.Index
 		}
+		if done.Item.Type == "function_call" || done.Item.Type == "custom_tool_call" {
+			if responsesToolCallMarked(state.incompleteCalls, done.Item) {
+				if state.partial != nil {
+					state.partial.markOutputItemDone(doneIdx)
+				}
+				return nil, nil, false, nil
+			}
+			if !responsesToolItemCompleted(done.Item.Status) {
+				markResponsesToolCall(state.incompleteCalls, done.Item)
+				if state.partial != nil {
+					state.partial.markOutputItemDone(doneIdx)
+				}
+				state.resp.StopReason = "length"
+				return nil, nil, false, nil
+			}
+		}
+		if (done.Item.Type == "function_call" || done.Item.Type == "custom_tool_call") && responsesToolCallAlreadyFinalized(state.finalizedCalls, done.Item) {
+			if state.partial != nil {
+				state.partial.markOutputItemDone(doneIdx)
+			}
+			return nil, nil, false, nil
+		}
 		switch done.Item.Type {
 		case "function_call":
 			if state.phaser != nil {
 				state.phaser.SetChunkTimeout(DefaultChunkTimeout)
 			}
 			if acc, exists := state.toolCalls[doneIdx]; exists {
-				acc.mergeMetadata(done.Item)
+				if err := acc.mergeMetadata(done.Item); err != nil {
+					return nil, nil, false, err
+				}
 				maybeEmitResponsesToolStart(acc, state.cb)
 			}
 			finalizeOneResponsesToolCall(state.toolCalls, doneIdx, state.resp, state.cb, *state.truncated, done.Item.Arguments, state.finalizedCalls)
@@ -986,7 +1042,9 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 				acc = &responsesToolAccumulator{}
 				state.toolCalls[doneIdx] = acc
 			}
-			acc.mergeMetadata(done.Item)
+			if err := acc.mergeMetadata(done.Item); err != nil {
+				return nil, nil, false, err
+			}
 			acc.custom = true
 			maybeEmitResponsesToolStart(acc, state.cb)
 			// done.Item.Input carries the complete freeform text; the
@@ -1071,18 +1129,24 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, fmt.Errorf("parse completed: %w", err)
 		}
 		respObj := completed.Response
+		respObj.Output = omitIncompleteResponsesToolOutput(respObj.Output, state.incompleteCalls)
 		applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
-		collectResponsesOutput(state.resp, respObj.Output)
+		if len(state.incompleteCalls) > 0 {
+			state.resp.StopReason = "length"
+		}
 		if state.captureHosted {
 			recordResponsesHostedOutputItems(state.resp, state.hostedCalls, eventData)
 		}
 		// applyResponsesCompletionPayload already stores the trailer's usage on
 		// state.resp.Usage when the completed payload carries it.
-		*state.outputItems = responsesOutputToInputItems(respObj.Output, state.freeform)
-		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated, state.finalizedCalls)
-		if state.resp.StopReason == "tool_calls" && len(state.resp.ToolCalls) == 0 {
-			recoverResponsesToolCallsFromOutput(state.resp, respObj.Output, state.cb)
+		if !*state.truncated {
+			if err := completeResponsesToolCallsFromOutput(state, respObj.Output); err != nil {
+				return nil, nil, false, err
+			}
 		}
+		discardUnfinishedResponsesToolCalls(state.toolCalls, state.resp, *state.truncated)
+		collectResponsesOutput(state.resp, respObj.Output)
+		*state.outputItems = responsesResponseToInputItems(state.resp, state.freeform)
 		flushContent()
 		// The terminal payload carries the response's authoritative text.
 		// Adopt it over the delta accumulation, which may hold upstream damage
@@ -1103,7 +1167,11 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, fmt.Errorf("parse incomplete: %w", err)
 		}
 		respObj := incomplete.Response
+		respObj.Output = omitIncompleteResponsesToolOutput(respObj.Output, state.incompleteCalls)
 		applyResponsesCompletionPayload(state.resp, respObj, state.truncated)
+		if len(state.incompleteCalls) > 0 {
+			state.resp.StopReason = "length"
+		}
 		if state.captureHosted {
 			recordResponsesHostedOutputItems(state.resp, state.hostedCalls, eventData)
 		}
@@ -1112,7 +1180,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			state.resp.StopReason = "length"
 			*state.truncated = true
 		}
-		finalizeResponsesToolCalls(state.toolCalls, state.resp, state.cb, *state.truncated, state.finalizedCalls)
+		discardUnfinishedResponsesToolCalls(state.toolCalls, state.resp, *state.truncated)
 		flushContent()
 		// Same terminal reconciliation as response.completed: the incomplete
 		// payload's output_text parts are the authoritative snapshot of the

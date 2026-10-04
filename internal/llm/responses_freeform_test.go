@@ -992,15 +992,15 @@ func TestResponsesLegacyToolCallsReplayAsFreeformCustomCalls(t *testing.T) {
 	}
 }
 
-// TestFinalizeResponsesToolCallsEmptyCustomInput guards that a freeform custom
+// TestFinalizeOneResponsesToolCallEmptyCustomInput guards that a completed freeform custom
 // accumulator that saw no input finalizes to the canonical empty patch object
 // instead of replaying the "{}" placeholder as literal patch text.
-func TestFinalizeResponsesToolCallsEmptyCustomInput(t *testing.T) {
+func TestFinalizeOneResponsesToolCallEmptyCustomInput(t *testing.T) {
 	resp := &message.Response{}
 	calls := map[int]*responsesToolAccumulator{
 		0: {id: "ct_1", name: toolname.ApplyPatch, custom: true},
 	}
-	finalizeResponsesToolCalls(calls, resp, nil, false, map[string]bool{})
+	finalizeOneResponsesToolCall(calls, 0, resp, nil, false, nil, map[string]bool{})
 	if len(resp.ToolCalls) != 1 {
 		t.Fatalf("got %d tool calls, want 1", len(resp.ToolCalls))
 	}
