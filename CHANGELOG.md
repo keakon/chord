@@ -118,6 +118,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Responses streams no longer execute unfinished write requests just because their arguments parse as JSON. Calls present only in the final response are recovered individually, including alongside streamed calls, and duplicate calls are removed from execution and replay. Conflicting call identities are rejected before their arguments can be mixed.
 
+- MCP discovery now includes tools on later pages and keeps the last complete directory when a page fails. Tool results preserve structured JSON and embedded text/image resources; links remain references, and unsupported content is reported instead of silently disappearing.
+
 - Context-pressure reminders now read the active model settings consistently when model requests run concurrently.
 
 - The context summary card keeps preserved excerpts readable: a quoted diff, log, or tool output renders as a code block, so its line structure and blank lines survive instead of being reflowed into one wrapped paragraph. The checkpoint's machine-readable state also renders inside a JSON code block instead of wrapping as an ordinary bullet.

@@ -1,8 +1,8 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +18,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -31,25 +30,6 @@ type MCPToolDef struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
-}
-
-// toolsListResult is the result of a tools/list request.
-type toolsListResult struct {
-	Tools []MCPToolDef `json:"tools"`
-}
-
-// toolCallResult is the result of a tools/call request.
-type toolCallResult struct {
-	Content []toolCallContent `json:"content"`
-	IsError bool              `json:"isError,omitempty"`
-}
-
-// toolCallContent is one content block in a tools/call response.
-type toolCallContent struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	Data     string `json:"data,omitempty"`     // base64-encoded bytes for image/audio blocks
-	MimeType string `json:"mimeType,omitempty"` // e.g. "image/png" for image blocks
 }
 
 // initializeParams are sent in the initialize handshake.
@@ -162,32 +142,6 @@ func (c *Client) Initialize(ctx context.Context) error {
 	return nil
 }
 
-// ListTools discovers available tools from the MCP server via tools/list.
-func (c *Client) ListTools(ctx context.Context) ([]MCPToolDef, error) {
-	req := JSONRPCRequest{
-		JSONRPC: "2.0",
-		ID:      c.allocID(),
-		Method:  "tools/list",
-		Params:  map[string]any{},
-	}
-
-	resp, err := c.transport.Send(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("mcp tools/list %s: %w", c.name, err)
-	}
-	if resp.Error != nil {
-		return nil, fmt.Errorf("mcp tools/list %s: %w", c.name, resp.Error)
-	}
-
-	var result toolsListResult
-	if err := mcpLongLivedJSON.Unmarshal(resp.Result, &result); err != nil {
-		return nil, fmt.Errorf("mcp tools/list %s: decode: %w", c.name, err)
-	}
-
-	log.Debugf("mcp tools discovered server=%v count=%v", c.name, len(result.Tools))
-	return result.Tools, nil
-}
-
 // CallTool invokes a tool on the MCP server via tools/call.
 // It returns the concatenated text content plus any image content blocks
 // (decoded from base64) so the runtime can re-inject images into model context.
@@ -218,62 +172,16 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 		return "", nil, fmt.Errorf("mcp tools/call %s/%s: %w", c.name, toolName, resp.Error)
 	}
 
+	if raw := bytes.TrimSpace(resp.Result); len(raw) == 0 || raw[0] != '{' {
+		return "", nil, fmt.Errorf("mcp tools/call %s/%s: result must be an object", c.name, toolName)
+	}
+
 	var result toolCallResult
 	if err := mcpLongLivedJSON.Unmarshal(resp.Result, &result); err != nil {
 		return "", nil, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err)
 	}
 
-	if result.IsError {
-		// Collect error text.
-		var errText strings.Builder
-		for _, c := range result.Content {
-			if c.Type == "text" {
-				errText.WriteString(c.Text)
-			}
-		}
-		return "", nil, fmt.Errorf("mcp tool error: %s", errText.String())
-	}
-
-	// Concatenate text blocks; decode image blocks into content parts so the
-	// runtime can attach them to the model context after the tool batch.
-	var text string
-	var images []message.ContentPart
-	var imageFailures []error
-	for _, block := range result.Content {
-		switch block.Type {
-		case "text":
-			if text != "" {
-				text += "\n"
-			}
-			text += block.Text
-		case "image":
-			if block.Data == "" {
-				continue
-			}
-			raw, decErr := base64.StdEncoding.DecodeString(block.Data)
-			if decErr != nil {
-				log.Warnf("mcp tools/call %s/%s: skipping image block with undecodable base64 error=%v", c.name, toolName, decErr)
-				continue
-			}
-			normalized, normalizedMime, normErr := imageutil.NormalizeImageBytes(raw, block.MimeType)
-			if normErr != nil {
-				log.Warnf("mcp tools/call %s/%s: omitting image block error=%v", c.name, toolName, normErr)
-				imageFailures = append(imageFailures, normErr)
-				continue
-			}
-			images = append(images, message.ContentPart{Type: "image", MimeType: normalizedMime, Data: normalized})
-		}
-	}
-	if len(imageFailures) > 0 {
-		// Keep the failure model-visible: the text result stays intact, but the
-		// model must know that an image in this result was not attached.
-		if text != "" {
-			text += "\n"
-		}
-		text += fmt.Sprintf("%d image attachment(s) in this result could not be read and were omitted: %v",
-			len(imageFailures), imageFailures[0])
-	}
-	return text, images, nil
+	return c.normalizeToolCallResult(toolName, result)
 }
 
 // Close shuts down the transport (and the child process for stdio).

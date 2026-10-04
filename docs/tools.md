@@ -151,7 +151,11 @@ The runtime, not the model, is the source of truth for delegation state. A worke
 
 ## MCP tools
 
-Tools exposed by configured MCP servers are registered as `mcp_<server>_<tool>` (for example `mcp_search_web_search_exa`) and can be referenced in permission rules by that full name. Use `allowed_tools` in the MCP server config to limit which remote tools are registered at all; see [Configuration: MCP](./configuration.md#mcp).
+Tools exposed by configured MCP servers are registered as `mcp_<server>_<tool>` (for example `mcp_search_web_search_exa`) and can be referenced in permission rules by that full name. Use `allowed_tools` in the MCP server config to limit which remote tools are registered at all; see [Configuration: MCP](./configuration.md#mcp). Calls a model issues in one response can run concurrently when their resources do not conflict, including multiple calls to one server. Each result is returned separately so the model can inspect a failure and decide whether a retry is safe.
+
+Tool discovery follows all pages before updating the directory. A discovery is limited to 1,000 pages, 10,000 tools, and 32 MiB of combined result JSON. A repeated cursor, duplicate remote tool name, invalid page, or exceeded limit fails discovery; an earlier complete directory is kept when available. Check the server's list response and Chord's log if tools are missing.
+
+Tool results include text and embedded text resources. Images, including embedded image resources, use the same image normalization described above. When there are no content blocks, a structured JSON result becomes text; when content blocks exist, the structured result is not appended again. Resource links show their name and URI without fetching them. Audio, other binary resources, and unsupported content types produce an omission notice. An unreadable image also produces a notice while preserving the text. Results marked as errors remain failed tool calls.
 
 ## Related
 
