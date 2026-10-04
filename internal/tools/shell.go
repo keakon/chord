@@ -374,7 +374,7 @@ func (ShellTool) Parameters() map[string]any {
 			},
 			"description": map[string]any{
 				"type":        "string",
-				"description": "Brief description of what this command does (5-10 words).",
+				"description": "Brief description of what this command does (5-10 words). When provided, generate description before command.",
 			},
 			"workdir": map[string]any{
 				"type":        "string",

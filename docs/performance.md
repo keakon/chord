@@ -69,6 +69,7 @@ Notes:
 ## How it works
 
 - **Stream batching**: streaming text arrives in small chunks; Chord coalesces provider deltas and handles several of them per UI update instead of waking the TUI for every chunk.
+- **Incremental tool arguments**: while Write, Edit, and Shell arguments arrive, cards read completed display fields and count newly received characters without repeatedly decoding file content or replacement text. Final cards use the complete arguments.
 - **Render cadence**: streamed content is flushed to the screen on a cadence rather than per token. Structural changes (a new block, a layout boundary, a rollback) still refresh promptly.
 - **Cheap streaming path**: while an assistant or thinking block is still streaming, only stable, settled content goes through full Markdown rendering; the actively changing tail stays on a cheaper plain-text path until it settles. Long single paragraphs therefore look plainer while they stream; that is expected behavior.
 - **View caching**: expensive regions such as the main viewport, info panel, and status bar are cached per frame and re-rendered only when their inputs change.

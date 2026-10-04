@@ -69,6 +69,7 @@ Chord 面向长时间交互会话做了性能优化：大 transcript、模型流
 ## 工作方式
 
 - **流式批处理**：流式文本以很小的 delta 到达；Chord 会合并 provider delta，让一次 UI 更新处理多个 delta，而不是每个小片段都唤醒 TUI。
+- **增量读取工具参数**：Write、Edit 和 Shell 接收参数时，卡片读取已完整到达的展示字段，并增量统计字符数，避免反复解码文件内容或替换文本。参数接收完成后，卡片按完整参数展示。
 - **渲染 cadence**：流式内容按节奏刷新到屏幕，而不是每个 token 都重绘。真正的结构变化（新 block、布局边界、回滚）仍会及时刷新。
 - **streaming cheap path**：assistant 和 thinking block 流式输出期间，只有稳定下来的内容走完整 Markdown 渲染；正在变化的尾部走更便宜的纯文本路径。所以长段落在流式期间看起来更朴素，这是预期行为。
 - **View 缓存**：主 viewport、info panel、status bar 等高成本区域按帧缓存，只有输入变化时才重新渲染。

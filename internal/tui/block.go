@@ -55,6 +55,7 @@ type Block struct {
 	DisplaySequence  int // one-based card number within the originating agent transcript
 	Type             BlockType
 	Content          string // raw content (args JSON for tool calls, result text for tool results)
+	streamArgs       *streamingToolArguments
 	RawArgs          string // full args JSON for tool calls when Content is display-trimmed
 	Collapsed        bool   // card detail folded; default true for tool and JOB RESULT cards
 	ToolName         string // for tool blocks

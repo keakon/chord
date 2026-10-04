@@ -404,7 +404,7 @@ func TestToolCallUpdateDoesNotMutateContentBeforeArgRenderCadence(t *testing.T) 
 
 func TestToolCharCountProgressUsesExactDigits(t *testing.T) {
 	largeJSON := `{"command":"` + strings.Repeat("x", 2190) + `"}`
-	progress := inferToolArgProgress("shell", largeJSON)
+	progress := (&Block{ToolName: tools.NameShell}).streamingArgProgress(largeJSON)
 	if progress == nil {
 		t.Fatal("expected inferred arg progress")
 	}
@@ -415,12 +415,12 @@ func TestToolCharCountProgressUsesExactDigits(t *testing.T) {
 
 func TestApplyPatchToolHasNoInferredArgCharCount(t *testing.T) {
 	for _, name := range []string{tools.NameApplyPatch, "patch"} {
-		if progress := inferToolArgProgress(name, `{"patch":"*** Begin Patch"}`); progress != nil {
-			t.Fatalf("inferToolArgProgress(%q) = %+v, want nil (patch text preview replaces char count)", name, progress)
+		if progress := (&Block{ToolName: name}).streamingArgProgress(`{"patch":"*** Begin Patch"}`); progress != nil {
+			t.Fatalf("streamingArgProgress(%q) = %+v, want nil (patch text preview replaces char count)", name, progress)
 		}
 	}
 	// Other tools keep the generic char count.
-	if progress := inferToolArgProgress("shell", `{"command":"echo hi"}`); progress == nil {
+	if progress := (&Block{ToolName: tools.NameShell}).streamingArgProgress(`{"command":"echo hi"}`); progress == nil {
 		t.Fatal("expected generic char count for shell")
 	}
 }

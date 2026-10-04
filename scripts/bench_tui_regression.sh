@@ -23,7 +23,7 @@ FULL_BENCH_PATTERN='^(BenchmarkRenderAssistantCard|BenchmarkRenderAssistantCardC
 # Flow benchmarks that rebuild their model inside b.StopTimer(): each round's wall
 # clock is dominated by the untimed setup, so a time-based benchtime would balloon
 # the iteration count and run for minutes. Keep them on a fixed count.
-PACED_BENCH_PATTERN='^(BenchmarkStreamTextDeltaBurstDeferredView|BenchmarkStreamTextDeltaBurstCadenceFlush|BenchmarkStreamThinkingDeltaBurstDeferredView|BenchmarkToolCallUpdateArgsStreamingCadence)$'
+PACED_BENCH_PATTERN='^(BenchmarkStreamTextDeltaBurstDeferredView|BenchmarkStreamTextDeltaBurstCadenceFlush|BenchmarkStreamThinkingDeltaBurstDeferredView|BenchmarkToolCallUpdateArgsStreamingCadence|BenchmarkToolArgumentStream)$'
 FRONTIER_BENCH_PATTERN='^(BenchmarkStreamingFrontierScannerAppendSnapshots)$'
 SSE_BENCH_PATTERN='^(BenchmarkSSEParseWithCallbackCumulative|BenchmarkSSEParseWithCallbackIncremental|BenchmarkSSEParseWithCollector)$'
 TRUNCATE_BENCH_PATTERN='^BenchmarkTruncateStringHeadTail$'

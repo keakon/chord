@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
@@ -54,15 +53,13 @@ func buildToolHeaderLine(headerLine string, progress *agent.ToolProgressSnapshot
 	return headerLine
 }
 
-func inferToolArgProgress(toolName, argsJSON string) *agent.ToolProgressSnapshot {
-	if toolNameKey(toolName) == tools.NameApplyPatch {
-		// apply_patch streams a live patch-text preview (see
-		// applyPatchStreamingPreview) instead of a generic char count.
+func (b *Block) streamingArgProgress(argsJSON string) *agent.ToolProgressSnapshot {
+	if toolNameKey(b.ToolName) == tools.NameApplyPatch {
 		return nil
 	}
-	count := utf8.RuneCountInString(strings.TrimSpace(argsJSON))
-	if count > 0 {
-		return &agent.ToolProgressSnapshot{Text: fmt.Sprintf("%d chars received", count)}
+	count := b.streamingArguments(argsJSON).count()
+	if count == 0 {
+		return nil
 	}
-	return nil
+	return &agent.ToolProgressSnapshot{Text: fmt.Sprintf("%d chars received", count)}
 }

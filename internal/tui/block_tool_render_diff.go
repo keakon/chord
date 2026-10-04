@@ -149,7 +149,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	var result []string
 	replaceArgs, hasReplaceArgs := replaceEditArgs{}, false
 	var headerOpts []string
-	if b.ToolName == tools.NameEdit {
+	if b.ToolName == tools.NameEdit && !b.editArgsIncomplete() {
 		replaceArgs, hasReplaceArgs = parseReplaceEditArgs(b.editPatchArgsJSON())
 		if hasReplaceArgs {
 			if opt := replaceEditReplaceAllOption(replaceArgs); opt != "" {
@@ -624,6 +624,9 @@ func (b *Block) applyPatchDiffSectionDisplay(targets []tools.ApplyPatchDisplayTa
 // appendEditArgsPreview renders the requested edit when no diff is available,
 // preferring the replace args preview and falling back to the patch preview.
 func appendEditArgsPreview(result []string, b *Block, replaceArgs replaceEditArgs, hasReplaceArgs bool, syntaxPath string, width int, failed map[int]bool) []string {
+	if b.editArgsIncomplete() {
+		return result
+	}
 	if hasReplaceArgs {
 		return appendReplaceEditPreview(result, replaceArgs, syntaxPath, width, failed)
 	}

@@ -14,6 +14,8 @@ Find the section for the job you are doing:
 - **Plan, ask, and delegate:** [Workflow](#workflow), [Orchestration and control](#orchestration-and-control).
 - **External tool servers:** [MCP tools](#mcp-tools).
 
+While `write` and `edit` arguments arrive, their TUI cards show the path once that field is complete. A `shell` card can show a completed description before the command finishes arriving. The received-character indicator remains until arguments finish or execution begins; final cards use the complete arguments.
+
 ## Files
 
 | Tool | What it does |

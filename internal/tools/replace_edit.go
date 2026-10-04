@@ -97,7 +97,7 @@ func (EditTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Relative (preferred) or absolute path to the file to edit. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory.",
+				"description": "Relative (preferred) or absolute path to the file to edit. Relative paths resolve from the session working directory. Supports ~ for the current user's home directory. Generate path before replacement text or edits.",
 			},
 			"edits": map[string]any{
 				"type": "array", "minItems": 1,

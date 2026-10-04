@@ -685,6 +685,7 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 	if block == nil {
 		return
 	}
+	block.streamArgs = nil
 	block.ResultContent = result.result
 	// A restored transcript carries the payload and notes separately when they
 	// were recorded; older sessions only have the combined text, and the card

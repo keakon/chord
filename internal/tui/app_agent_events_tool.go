@@ -40,14 +40,8 @@ func streamingToolDisplayArgs(toolName, argsJSON, result string) string {
 			return fileToolPathDisplayArgs(path)
 		}
 		return ""
-	case tools.NameEdit:
-		path := tools.ExtractEditPathFromArgs([]byte(argsJSON))
-		if path == "" {
-			path = streamedFileToolPath(argsJSON)
-		}
-		return fileToolPathDisplayArgs(path)
-	case tools.NameWrite:
-		return fileToolPathDisplayArgs(streamedFileToolPath(argsJSON))
+	case tools.NameEdit, tools.NameWrite, tools.NameShell:
+		return (&Block{ToolName: toolName}).streamedDisplayArgs(argsJSON, result)
 	default:
 		return eventToolDisplayArgs(toolName, argsJSON, result)
 	}
@@ -96,9 +90,9 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	if block, ok := m.findToolBlockByToolID(id); ok {
 		return block, false
 	}
-	displayArgs := stableToolDisplayArgs(name, argsJSON, "")
-	if includeArgProgress {
-		displayArgs = streamingToolDisplayArgs(name, argsJSON, "")
+	displayArgs := ""
+	if !includeArgProgress {
+		displayArgs = stableToolDisplayArgs(name, argsJSON, "")
 	}
 	block := &Block{
 		ID:                 m.nextBlockID,
@@ -113,7 +107,8 @@ func (m *Model) ensureToolCallBlock(id, name, argsJSON, agentID string, state ag
 	}
 	initToolCardFoldState(block, name)
 	if includeArgProgress {
-		if progress := inferToolArgProgress(name, argsJSON); progress != nil {
+		block.Content = block.streamedDisplayArgs(argsJSON, "")
+		if progress := block.streamingArgProgress(argsJSON); progress != nil {
 			cp := *progress
 			block.ToolProgress = &cp
 		}
@@ -137,6 +132,7 @@ func markToolArgsComplete(block *Block) bool {
 	if block == nil {
 		return false
 	}
+	block.streamArgs = nil
 	changed := false
 	if !block.ResultDone && block.StartedAt.IsZero() &&
 		(block.ToolExecutionState == "" ||
@@ -290,6 +286,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 	evt.Name = toolNameKey(evt.Name)
 	if block := m.ensureToolResultBlock(evt); block != nil {
 		delete(m.toolArgRenderState, evt.CallID)
+		block.streamArgs = nil
 		if block.ResultDone && block.ResultStatus == evt.Status && block.ResultContent == evt.Result && strings.TrimSpace(block.ToolID) == strings.TrimSpace(evt.CallID) {
 			return effects
 		}
@@ -461,6 +458,11 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			}
 			return true, effects
 		}
+		// Name-only updates and args-end signals may omit the payload. Keep the
+		// most recent model arguments as the display source in that case.
+		if evt.ArgsJSON == "" {
+			evt.ArgsJSON = block.RawArgs
+		}
 		// Live apply_patch preview: a growing patch is the card's primary content
 		// while the model streams it. The arg-render cadence exists to throttle
 		// transient char-count updates for other tools, and dropping deltas that
@@ -484,9 +486,11 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			return true, effects
 		}
 		updated := false
-		argsStreamingDone := evt.ArgsStreamingDone || (block != nil && !block.StartedAt.IsZero())
+		argsStreamingDone := evt.ArgsStreamingDone || (block != nil && (!block.StartedAt.IsZero() || block.ResultDone || block.ToolExecutionState == agent.ToolCallExecutionStateQueued))
 		var displayArgs string
-		if !argsStreamingDone && evt.InputText != "" {
+		if argsStreamingDone {
+			displayArgs = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+		} else if evt.InputText != "" {
 			// Freeform custom-tool input (Responses apply_patch): the raw text
 			// arrives through the InputText channel; render it verbatim instead
 			// of re-deriving it from the canonical ArgsJSON envelope.
@@ -497,10 +501,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			// and its coalesce window doubles as the preview's refresh gate.
 			displayArgs = block.cachedApplyPatchStreamingArgs(evt.ArgsJSON)
 		} else {
-			displayArgs = streamingToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
-		}
-		if argsStreamingDone {
-			displayArgs = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
+			displayArgs = block.streamedDisplayArgs(evt.ArgsJSON, block.ResultContent)
 		}
 		if rawArgsChanged {
 			// A live patch preview must not count the raw args as a visible
@@ -517,7 +518,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				updated = true
 			}
 		}
-		if displayArgs != "" && displayArgs != block.Content {
+		if displayArgs != block.Content && (displayArgs != "" || evt.Name == tools.NameWrite || evt.Name == tools.NameEdit || evt.Name == tools.NameShell) {
 			m.recordTUIDiagnostic("tool-call-update", "tool=%s id=%s block=%d len=%d->%d", evt.Name, evt.ID, block.ID, len(block.Content), len(displayArgs))
 			block.Content = displayArgs
 			updated = true
@@ -536,12 +537,15 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				updated = true
 			}
 		} else {
-			if progress := inferToolArgProgress(evt.Name, evt.ArgsJSON); progress != nil {
+			if progress := block.streamingArgProgress(evt.ArgsJSON); progress != nil {
 				if block.ToolProgress == nil || *block.ToolProgress != *progress {
 					cp := *progress
 					block.ToolProgress = &cp
 					updated = true
 				}
+			} else if block.ToolProgress != nil && evt.Name != tools.NameApplyPatch {
+				block.ToolProgress = nil
+				updated = true
 			}
 		}
 		if updated {
@@ -569,6 +573,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		evt.Name = toolNameKey(evt.Name)
 		delete(m.toolArgRenderState, evt.ID)
 		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, evt.State, false)
+		argsCompleted := markToolArgsComplete(block)
 		if block != nil {
 			switch evt.State {
 			case agent.ToolCallExecutionStateQueued:
@@ -584,7 +589,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if created {
 			return true, effects
 		}
-		updated := false
+		updated := argsCompleted
 		// Execution-state events may carry effective arguments after a hook or
 		// confirmation. The card already contains the model's original call;
 		// update arguments only for a recovery event that created an empty card.
