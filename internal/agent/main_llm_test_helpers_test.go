@@ -28,6 +28,7 @@ type blockingStreamProvider struct {
 	seenMessages   [][]message.Message
 	seenTuning     []llm.RequestTuning
 	seenTurnStates []*llm.ResponsesTurnState
+	callChanged    chan struct{}
 }
 
 func cloneMessages(messages []message.Message) []message.Message {
@@ -60,6 +61,10 @@ func (p *blockingStreamProvider) CompleteStream(
 	p.seenMessages = append(p.seenMessages, cloneMessages(messages))
 	p.seenTuning = append(p.seenTuning, tuning)
 	p.seenTurnStates = append(p.seenTurnStates, llm.ResponsesTurnStateFromContext(ctx))
+	if p.callChanged != nil {
+		close(p.callChanged)
+		p.callChanged = nil
+	}
 	p.mu.Unlock()
 
 	if cb != nil {
@@ -132,22 +137,30 @@ func waitForSubAgentLLMResult(t *testing.T, sub *SubAgent, timeout time.Duration
 	}
 }
 
-// waitForBlockingStreamProviderCalls polls the provider's locked snapshot until
-// it has recorded want CompleteStream calls. It replaces fixed time.Sleep
-// waits for the async LLM goroutine to start: under load the goroutine may not
-// be scheduled within a fixed window, while polling observes the actual entry.
+// waitForBlockingStreamProviderCalls waits for recorded requests using a gate
+// captured under the same lock as request recording, avoiding missed wakeups.
 func waitForBlockingStreamProviderCalls(t *testing.T, p *blockingStreamProvider, want int) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		msgs, _ := p.snapshot()
-		if len(msgs) >= want {
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		p.mu.Lock()
+		count := len(p.seenMessages)
+		if count >= want {
+			p.mu.Unlock()
 			return
 		}
-		time.Sleep(time.Millisecond)
+		if p.callChanged == nil {
+			p.callChanged = make(chan struct{})
+		}
+		changed := p.callChanged
+		p.mu.Unlock()
+		select {
+		case <-changed:
+		case <-deadline.C:
+			t.Fatalf("blocking provider calls = %d, want at least %d", count, want)
+		}
 	}
-	msgs, _ := p.snapshot()
-	t.Fatalf("blocking provider calls = %d, want at least %d", len(msgs), want)
 }
 
 func newReadyTestMainAgent(t *testing.T) *MainAgent {
