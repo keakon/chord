@@ -117,10 +117,11 @@ func TestParseLsRemoteTags(t *testing.T) {
 
 func TestRunRefreshesInstallsAndRecordsOrigin(t *testing.T) {
 	upstream := initUpstreamRepo(t, "v2099-01-01.1", true)
+	repository := localRepositoryURL(t, upstream)
 	cachePath := filepath.Join(t.TempDir(), "cache", "modelcatalog-cache.json")
 
 	before := modelcatalog.OriginInfo()
-	result, err := Run(context.Background(), upstream, cachePath)
+	result, err := Run(context.Background(), repository, cachePath)
 	if err != nil {
 		t.Fatalf("refresh run: %v", err)
 	}
@@ -135,7 +136,7 @@ func TestRunRefreshesInstallsAndRecordsOrigin(t *testing.T) {
 	}
 	// The refreshed snapshot is in effect in this process right away.
 	origin := modelcatalog.OriginInfo()
-	if !origin.Cached || origin.Version != "2099-01-01.1" || origin.Source == nil || origin.Source.Revision != "v2099-01-01.1" {
+	if !origin.Cached || origin.Version != "2099-01-01.1" || origin.Source == nil || origin.Source.Revision != "v2099-01-01.1" || origin.Source.Repository != repository {
 		t.Fatalf("origin after refresh = %+v, want the fetched snapshot", origin)
 	}
 	if len(modelcatalog.EffectiveCandidates()) != 1 {
@@ -157,10 +158,11 @@ func TestRunSkipsWriteWhenNothingNewer(t *testing.T) {
 	// A version strictly newer than any earlier test installs, so this test
 	// passes in any order within the package binary.
 	upstream := initUpstreamRepo(t, "v2099-01-02.1", false)
+	repository := localRepositoryURL(t, upstream)
 	cachePath := filepath.Join(t.TempDir(), "modelcatalog-cache.json")
 
 	// First run installs the fixture snapshot (newer than the embedded one).
-	if _, err := Run(context.Background(), upstream, cachePath); err != nil {
+	if _, err := Run(context.Background(), repository, cachePath); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
 	stamp, err := os.Stat(cachePath)
@@ -169,7 +171,7 @@ func TestRunSkipsWriteWhenNothingNewer(t *testing.T) {
 	}
 
 	// A second run of the same tag must not rewrite the cache.
-	result, err := Run(context.Background(), upstream, cachePath)
+	result, err := Run(context.Background(), repository, cachePath)
 	if err != nil {
 		t.Fatalf("second run: %v", err)
 	}
@@ -183,6 +185,23 @@ func TestRunSkipsWriteWhenNothingNewer(t *testing.T) {
 	if !again.ModTime().Equal(stamp.ModTime()) {
 		t.Error("the cache file must stay untouched when the snapshot is not newer")
 	}
+}
+
+// Keep the production HTTPS source contract while Git only opens the local
+// fixture. The environment and config file belong to this test alone.
+func localRepositoryURL(t *testing.T, dir string) string {
+	t.Helper()
+	const repository = "https://example.invalid/catalog"
+	configPath := filepath.Join(t.TempDir(), "gitconfig")
+	cmd := exec.Command("git", "config", "--file", configPath, "url.file://"+filepath.ToSlash(dir)+".insteadOf", repository)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("configure local repository mapping: %v: %s", err, out)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", configPath)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "0")
+	t.Setenv("GIT_ALLOW_PROTOCOL", "file")
+	return repository
 }
 
 func TestRunFailsOnUntaggedUpstream(t *testing.T) {
