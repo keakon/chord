@@ -85,6 +85,24 @@ func UpsertAPIKeyCredentialInFile(path, provider, value string) (bool, error) {
 	return changed, nil
 }
 
+// AddAPIKeyCredentialIfUndeclared preserves explicit unavailable credential
+// sources and checks declaration intent while holding the auth mutation lock.
+func AddAPIKeyCredentialIfUndeclared(path, provider, value string) (bool, error) {
+	if strings.TrimSpace(provider) == "" || strings.TrimSpace(value) == "" {
+		return false, fmt.Errorf("provider and api key value are required")
+	}
+	changed := false
+	_, err := mutateAuthYAMLFile(path, func(doc *authYAMLDocument) error {
+		if credentialDeclarations(&doc.root).Declared(provider) {
+			return nil
+		}
+		var err error
+		changed, err = doc.upsertAPIKeyCredential(provider, value)
+		return err
+	})
+	return changed, err
+}
+
 func UpsertOAuthCredentialInFile(path, provider string, cred *OAuthCredential) (AuthConfig, error) {
 	if cred == nil {
 		return nil, fmt.Errorf("oauth credential is nil")

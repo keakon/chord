@@ -83,7 +83,7 @@ func ValidateConfiguredModelRefs(providers map[string]ProviderConfig, refs []str
 			_, _, err = NormalizeProviderPreset(provider)
 		}
 		if err == nil {
-			_, _, _, err = catalogModelDefaults(provider.Preset, modelName, model)
+			_, _, _, _, err = catalogModelDefaults(provider, modelName, model)
 		}
 		if err != nil {
 			return fmt.Errorf("model ref %q: %w", ref, err)

@@ -56,8 +56,8 @@ func TestModelFactsAndBindings(t *testing.T) {
 	if m.Context != 1050000 || m.Input != 922000 || m.Output != 128000 {
 		t.Fatalf("gpt-6.1-sol facts = %+v", m)
 	}
-	if m.Cost != nil {
-		t.Fatal("unverified pricing must stay absent, not zero")
+	if m.Cost != nil && (m.Cost.InputPerMillion <= 0 || m.Cost.OutputPerMillion <= 0) {
+		t.Fatal("recorded pricing must be positive, never zero")
 	}
 	for _, s := range m.Sources {
 		if !strings.HasPrefix(s.URL, "https://") || s.Checked == "" {

@@ -52,19 +52,19 @@ func TestInstallCachedCatalogInstallsNewerSnapshotWhole(t *testing.T) {
 	path := writeCache(t, &CacheFile{
 		SchemaVersion: CacheSchemaVersion,
 		Repository:    "https://example.invalid/chord-models",
-		Revision:      "v2026-10-02.1",
+		Revision:      "v2099-01-01.1",
 		FetchedAt:     "2026-10-03T00:00:00Z",
-		Catalog:       fixtureCatalog(t, "2026-10-02.1", nil),
+		Catalog:       fixtureCatalog(t, "2099-01-01.1", nil),
 		Candidates:    []Candidate{candidate},
 	})
-	if err := InstallCachedCatalog(path); err != nil {
+	if err := InstallCachedCatalog(path, nil); err != nil {
 		t.Fatalf("install cached catalog: %v", err)
 	}
-	if got := Version(); got != "2026-10-02.1" {
+	if got := Version(); got != "2099-01-01.1" {
 		t.Fatalf("effective version = %q, want the cached snapshot version", got)
 	}
 	origin := OriginInfo()
-	if !origin.Cached || origin.Source == nil || origin.Source.Revision != "v2026-10-02.1" {
+	if !origin.Cached || origin.Source == nil || origin.Source.Revision != "v2099-01-01.1" {
 		t.Fatalf("origin = %+v, want the cached snapshot source", origin)
 	}
 	if status := CurrentCacheStatus(); !status.Present || !status.Installed {
@@ -92,7 +92,7 @@ func TestInstallCachedCatalogKeepsEmbeddedForOlderOrMissingCache(t *testing.T) {
 		FetchedAt:     "2026-10-03T00:00:00Z",
 		Catalog:       fixtureCatalog(t, "2020-01-01.1", nil),
 	})
-	if err := InstallCachedCatalog(path); err != nil {
+	if err := InstallCachedCatalog(path, nil); err != nil {
 		t.Fatalf("install older cache: %v", err)
 	}
 	if Version() != embeddedVersion {
@@ -103,7 +103,7 @@ func TestInstallCachedCatalogKeepsEmbeddedForOlderOrMissingCache(t *testing.T) {
 		t.Fatalf("status = %+v, want present-but-not-installed with a reason", status)
 	}
 
-	if err := InstallCachedCatalog(filepath.Join(t.TempDir(), "absent.json")); err != nil {
+	if err := InstallCachedCatalog(filepath.Join(t.TempDir(), "absent.json"), nil); err != nil {
 		t.Fatalf("missing cache must be the normal no-cache state, got %v", err)
 	}
 	if Version() != embeddedVersion {
@@ -118,9 +118,9 @@ func TestInstallCachedCatalogRejectsIncompatibleCacheAndFallsBack(t *testing.T) 
 	path := writeCache(t, &CacheFile{
 		SchemaVersion: CacheSchemaVersion,
 		Repository:    "https://example.invalid/chord-models",
-		Revision:      "v2026-10-02.1",
+		Revision:      "v2099-01-01.1",
 		FetchedAt:     "2026-10-03T00:00:00Z",
-		Catalog:       fixtureCatalog(t, "2026-10-02.1", nil),
+		Catalog:       fixtureCatalog(t, "2099-01-01.1", nil),
 	})
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -141,7 +141,7 @@ func TestInstallCachedCatalogRejectsIncompatibleCacheAndFallsBack(t *testing.T) 
 	if err := os.WriteFile(poisonedPath, poisoned, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := InstallCachedCatalog(poisonedPath); err == nil {
+	if err := InstallCachedCatalog(poisonedPath, nil); err == nil {
 		t.Fatal("an incompatible cache must be rejected")
 	}
 	if Version() != embeddedVersion {
@@ -156,7 +156,7 @@ func TestInstallCachedCatalogRejectsIncompatibleCacheAndFallsBack(t *testing.T) 
 	if err := os.WriteFile(corruptPath, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := InstallCachedCatalog(corruptPath); err == nil {
+	if err := InstallCachedCatalog(corruptPath, nil); err == nil {
 		t.Fatal("a corrupt cache must be rejected")
 	}
 	if Version() != embeddedVersion {
@@ -166,7 +166,7 @@ func TestInstallCachedCatalogRejectsIncompatibleCacheAndFallsBack(t *testing.T) 
 
 func TestCacheFileValidateRejectsBadEntries(t *testing.T) {
 	valid := func(f *CacheFile) *CacheFile {
-		f.Catalog = fixtureCatalog(t, "2026-10-02.1", nil)
+		f.Catalog = fixtureCatalog(t, "2099-01-01.1", nil)
 		return f
 	}
 	cases := []struct {
@@ -195,7 +195,7 @@ func TestCacheFileValidateRejectsBadEntries(t *testing.T) {
 			f := valid(&CacheFile{
 				SchemaVersion: CacheSchemaVersion,
 				Repository:    "https://example.invalid/chord-models",
-				Revision:      "v2026-10-02.1",
+				Revision:      "v2099-01-01.1",
 				FetchedAt:     "2026-10-03T00:00:00Z",
 			})
 			tc.mutate(f)
@@ -208,7 +208,7 @@ func TestCacheFileValidateRejectsBadEntries(t *testing.T) {
 }
 
 func TestCandidateValidateAgainst(t *testing.T) {
-	catalog := fixtureCatalog(t, "2026-10-02.1", nil)
+	catalog := fixtureCatalog(t, "2099-01-01.1", nil)
 	base := Candidate{
 		WireModelID: "gpt-6.1-sol-messages",
 		Scope:       "gateway-a",
@@ -233,6 +233,7 @@ func TestCandidateValidateAgainst(t *testing.T) {
 		{"unknown modality", func(c *Candidate) { c.InputModalities = []string{"smell"} }, "modality"},
 		{"no sources", func(c *Candidate) { c.Sources = nil }, "source is required"},
 		{"non-https source", func(c *Candidate) { c.Sources = []Source{{URL: "http://example.invalid", Checked: "2026-10-02"}} }, "https"},
+		{"source without host", func(c *Candidate) { c.Sources = []Source{{URL: "https:///catalog", Checked: "2026-10-02"}} }, "host"},
 		{"bad date", func(c *Candidate) { c.Sources = []Source{{URL: "https://example.invalid", Checked: "2026-13-02"}} }, "calendar day"},
 	}
 	for _, tc := range cases {
@@ -254,7 +255,7 @@ func TestCompareVersions(t *testing.T) {
 	}{
 		{"2026-10-01.1", "2026-10-01.1", 0},
 		{"2026-10-01.1", "2026-10-01.2", -1},
-		{"2026-10-02.1", "2026-10-01.9", 1},
+		{"2099-01-01.1", "2026-10-01.9", 1},
 		{"2026-10-01", "2026-10-01.1", -1},
 		{"2026-11-01.1", "2026-10-30.9", 1},
 		{"2027-01-01.1", "2026-12-31.9", 1},
@@ -282,9 +283,9 @@ func TestSuggestCandidatesRanksAndFloors(t *testing.T) {
 	path := writeCache(t, &CacheFile{
 		SchemaVersion: CacheSchemaVersion,
 		Repository:    "https://example.invalid/chord-models",
-		Revision:      "v2026-10-02.1",
+		Revision:      "v2099-01-01.1",
 		FetchedAt:     "2026-10-03T00:00:00Z",
-		Catalog:       fixtureCatalog(t, "2026-10-02.1", nil),
+		Catalog:       fixtureCatalog(t, "2099-01-01.1", nil),
 		Candidates: []Candidate{
 			{
 				WireModelID: "gpt-6.1-sol-messages", Scope: "gateway-b",
@@ -303,7 +304,7 @@ func TestSuggestCandidatesRanksAndFloors(t *testing.T) {
 			},
 		},
 	})
-	if err := InstallCachedCatalog(path); err != nil {
+	if err := InstallCachedCatalog(path, nil); err != nil {
 		t.Fatalf("install cached catalog: %v", err)
 	}
 	out := SuggestCandidates("gpt-6.1-sol-messages", 5)
@@ -313,10 +314,31 @@ func TestSuggestCandidatesRanksAndFloors(t *testing.T) {
 	if out[0].Candidate.Scope != "gateway-a" || out[1].Candidate.Scope != "gateway-b" {
 		t.Fatalf("equal scores must order by scope, got %q then %q", out[0].Candidate.Scope, out[1].Candidate.Scope)
 	}
-	if SuggestCandidates("kimi-k3", 5) != nil {
+	if SuggestCandidates("no-such-model-here", 5) != nil {
 		t.Error("below-threshold queries must suggest nothing")
 	}
 	if SuggestCandidates("gpt-6.1-sol-messages", 0) != nil {
 		t.Error("a non-positive limit must suggest nothing")
+	}
+}
+
+func TestEqualSnapshotDeliversCandidatesAndRejectsConflictingCatalog(t *testing.T) {
+	resetEffective(t)
+	c := fixtureCatalog(t, Version(), nil)
+	candidate := Candidate{WireModelID: "sample-alias", Scope: "sample", ModelID: c.Models[0].ID, Sources: []Source{{URL: "https://example.invalid/catalog", Checked: "2026-10-05"}}}
+	path := writeCache(t, &CacheFile{SchemaVersion: CacheSchemaVersion, Repository: c.Source.Repository, Revision: c.Source.Revision, FetchedAt: "2026-10-05T00:00:00Z", Catalog: c, Candidates: []Candidate{candidate}})
+	if err := InstallCachedCatalog(path, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(EffectiveCandidates()) != 1 {
+		t.Fatal("identical release did not deliver candidates")
+	}
+	c.Models[0].Context++
+	path = writeCache(t, &CacheFile{SchemaVersion: CacheSchemaVersion, Repository: c.Source.Repository, Revision: c.Source.Revision, FetchedAt: "2026-10-05T00:00:00Z", Catalog: c})
+	if err := InstallCachedCatalog(path, nil); err == nil {
+		t.Fatal("conflicting equal-version snapshot accepted")
+	}
+	if len(EffectiveCandidates()) != 1 {
+		t.Fatal("rejected cache changed candidates")
 	}
 }

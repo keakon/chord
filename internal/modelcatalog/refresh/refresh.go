@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"time"
 
@@ -19,8 +20,8 @@ import (
 )
 
 // DefaultRepository is the upstream model catalog data repository. Refresh
-// pins tags and never follows a branch head; a run only takes effect when the
-// fetched catalog version is newer than the one in effect.
+// pins tags and never follows a branch head. A run installs a newer catalog
+// or an identical release with candidates.
 const DefaultRepository = "https://github.com/keakon/chord-models"
 
 // refreshTimeout bounds one whole refresh run (tag listing plus shallow
@@ -30,12 +31,11 @@ const refreshTimeout = 2 * time.Minute
 
 // Result reports what one refresh run did.
 type Result struct {
-	// Updated reports whether a newer snapshot was written to the cache and
-	// installed. A false value means the fetched snapshot is not newer than
-	// the catalog in effect; the cache was left untouched.
+	// Updated reports whether a snapshot was newly installed, including
+	// candidate delivery for the identical embedded release.
 	Updated bool
 	// FromVersion / ToVersion are the catalog versions in effect before the
-	// run and in the fetched snapshot.
+	// run and after installation.
 	FromVersion string
 	ToVersion   string
 	// Revision is the upstream tag the snapshot was pulled from.
@@ -49,8 +49,9 @@ type Result struct {
 
 // Run refreshes the cache at cachePath from repository (empty: the default
 // upstream) and installs the fetched snapshot into the running process when
-// it is newer. Nothing here runs in the background or touches an active
-// session: catalog changes reach a session only when its next context loads.
+// it is newer or identical to the embedded release. Nothing here runs in
+// the background or touches an active session: catalog changes reach a session
+// only when its next context loads.
 func Run(ctx context.Context, repository, cachePath string) (Result, error) {
 	if strings.TrimSpace(repository) == "" {
 		repository = DefaultRepository
@@ -77,6 +78,9 @@ func Run(ctx context.Context, repository, cachePath string) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("upstream snapshot %s is not a valid catalog: %w", tag, err)
 	}
+	if tag != "v"+catalog.Version {
+		return Result{}, fmt.Errorf("upstream tag %s does not match catalog version %s", tag, catalog.Version)
+	}
 	candidates, err := gen.LoadCandidates(dir, catalog)
 	if err != nil {
 		return Result{}, fmt.Errorf("upstream snapshot %s has invalid candidates: %w", tag, err)
@@ -88,13 +92,18 @@ func Run(ctx context.Context, repository, cachePath string) (Result, error) {
 		Revision:       tag,
 		CandidateCount: len(candidates),
 	}
-	if modelcatalog.CompareVersions(catalog.Version, from.Version) <= 0 {
+	if modelcatalog.CompareVersions(catalog.Version, from.Version) < 0 {
+		result.ToVersion = from.Version
 		return result, nil
 	}
 
 	commit, err := gitOutput(ctx, dir, "rev-parse", "HEAD")
 	if err != nil {
 		return Result{}, err
+	}
+	catalog.Source = &modelcatalog.CatalogSource{Repository: repository, Revision: tag}
+	if modelcatalog.CompareVersions(catalog.Version, from.Version) == 0 && !modelcatalog.MatchesEffectiveSnapshot(catalog) {
+		return Result{}, fmt.Errorf("upstream version %s conflicts with the snapshot in effect", catalog.Version)
 	}
 	cache := &modelcatalog.CacheFile{
 		SchemaVersion: modelcatalog.CacheSchemaVersion,
@@ -105,34 +114,52 @@ func Run(ctx context.Context, repository, cachePath string) (Result, error) {
 		Catalog:       catalog,
 		Candidates:    candidates,
 	}
-	if err := writeCacheUnderLock(ctx, cachePath, cache); err != nil {
+	written, err := writeCacheUnderLock(ctx, cachePath, cache)
+	if err != nil {
 		return Result{}, err
 	}
-	if err := modelcatalog.InstallCachedCatalog(cachePath); err != nil {
+	if err := modelcatalog.InstallCachedCatalog(cachePath, config.ValidateCatalogProfiles); err != nil {
 		return Result{}, fmt.Errorf("install refreshed catalog: %w", err)
 	}
-	result.Updated = true
+	origin := modelcatalog.OriginInfo()
+	result.Updated = origin.Cached && (written || !from.Cached || origin.Version != from.Version || origin.Commit != from.Commit)
+	result.ToVersion = origin.Version
+	if origin.Source != nil {
+		result.Revision = origin.Source.Revision
+	}
+	result.Commit = origin.Commit
+	result.CandidateCount = len(modelcatalog.EffectiveCandidates())
 	return result, nil
 }
 
 // writeCacheUnderLock serializes concurrent refresh runs on the same cache
 // file and re-checks the on-disk version under the lock: another process may
 // have written a newer snapshot while this one was fetching, and that write
-// must win. A corrupt cache file is replaced unconditionally. Callers have
-// already established that the fetched version beats the version this
-// process started from.
-func writeCacheUnderLock(ctx context.Context, cachePath string, cache *modelcatalog.CacheFile) error {
+// must win. A corrupt cache file is replaced only after the fetched snapshot
+// passes validation and the effective-version check. Equal versions require
+// identical source and catalog contents.
+func writeCacheUnderLock(ctx context.Context, cachePath string, cache *modelcatalog.CacheFile) (bool, error) {
+	if err := config.ValidateCatalogProfiles(cache.Catalog); err != nil {
+		return false, fmt.Errorf("validate catalog profiles: %w", err)
+	}
 	lock, err := config.LockConfigMutationContext(ctx, cachePath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer func() { _ = lock.Close() }()
-	if existing, err := modelcatalog.ReadCacheFile(cachePath); err == nil && existing.Catalog != nil {
-		if modelcatalog.CompareVersions(existing.Catalog.Version, cache.Catalog.Version) >= 0 {
-			return nil
+	if existing, err := modelcatalog.ReadCacheFile(cachePath); err == nil && config.ValidateCatalogProfiles(existing.Catalog) == nil {
+		comparison := modelcatalog.CompareVersions(existing.Catalog.Version, cache.Catalog.Version)
+		if comparison == 0 && !modelcatalog.SameSnapshot(existing.Catalog, cache.Catalog) {
+			return false, fmt.Errorf("upstream version %s conflicts with the cached snapshot", cache.Catalog.Version)
+		}
+		if comparison > 0 || comparison == 0 && reflect.DeepEqual(existing.Candidates, cache.Candidates) {
+			return false, nil
 		}
 	}
-	return modelcatalog.WriteCacheFile(cachePath, cache)
+	if err := modelcatalog.WriteCacheFile(cachePath, cache); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // latestTag resolves the newest version tag on the upstream repository.
@@ -179,7 +206,7 @@ func isVersionTag(tag string) bool {
 	if !ok {
 		return false
 	}
-	return rest != "" && rest[0] >= '0' && rest[0] <= '9'
+	return modelcatalog.ValidateVersion(rest) == nil
 }
 
 // newestTag picks the tag with the highest catalog version.

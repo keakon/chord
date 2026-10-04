@@ -75,7 +75,7 @@ func TestWriteConfigFileAtomicallyRejectsExistingFile(t *testing.T) {
 	}
 }
 
-func TestLockConfigMutationCloseRemovesLockFileAndAllowsReacquire(t *testing.T) {
+func TestLockConfigMutationClosePreservesLockFileAndAllowsReacquire(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	lockPath := path + ".lock"
 
@@ -89,8 +89,8 @@ func TestLockConfigMutationCloseRemovesLockFileAndAllowsReacquire(t *testing.T) 
 	if err := lock.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
-		t.Fatalf("expected lock file to be removed after close, got %v", err)
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf("expected stable lock file after close, got %v", err)
 	}
 
 	lock, err = LockConfigMutation(path)

@@ -2,7 +2,7 @@
 
 <!-- description: Decide what to connect to Chord, then split models by role. Recipes and examples show how to wire a flagship after you have chosen one. -->
 
-> Snapshot: September 2026. Plans change; confirm on the vendor's site before you buy or reconfigure.
+> Snapshot: October 2026. Plans change; confirm on the vendor's site before you buy or reconfigure.
 
 Start here if you still need to choose a channel. Wiring is one command with [`chord config add`](./cli.md#chord-config-add) — the catalog fills in limits, modalities, and reasoning variants; copy-paste provider layouts live in [Examples](./examples/index.md).
 

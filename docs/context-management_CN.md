@@ -183,7 +183,7 @@ TUI 状态栏会把模型请求的 checkpoint 与 usage-driven 压缩区分开�
 
 ### 触发阈值如何计算
 
-以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context` 减去模型声明的 `limit.output` 推导（模型声明了自己的输出上限时，例如 Codex 400K 窗口配 128K 输出推出 272K 输入预算）；只有未声明 `limit.output` 的模型才回退到预留有效默认输出上限（`max_output_tokens`，默认 `64000`）。若设置了 `reserved`，再从预算中扣除。因此实际触发点为 `(输入预算 - reserved) × threshold`；`reserved` 会和 `threshold` 未使用的比例余量叠加，而不是替代它。TUI 信息面板和底部栏的 `Context` 百分比使用扣除 `reserved` 后的同一输入预算基准，与自动压缩阈值保持对齐。对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
+以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context` 减去客户端计划输出预算（`max_output_tokens`，默认 `64000`，受正数 `limit.output` 约束）推导。这是本地规划的预留量：Responses 默认不发送 `max_output_tokens`，所以该预留量不代表服务端强制的输出上限。provider 公布了独立输入额度时应配置 `limit.input`。若设置了 `reserved`，再从预算中扣除。因此实际触发点为 `(输入预算 - reserved) × threshold`；`reserved` 会和 `threshold` 未使用的比例余量叠加，而不是替代它。TUI 信息面板和底部栏的 `Context` 百分比使用扣除 `reserved` 后的同一输入预算基准，与自动压缩阈值保持对齐。对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
 
 provider usage 是自动触发的权威依据。Chord 不会用请求级剪裁后的本地 token 估算去清除已经触发的自动压缩请求，因为多模态输入、工具 schema、provider/proxy framing 等都可能让本地估算与 provider 统计不一致。唯一的兜底是 usage 缺失场景：Chord 收到可信的非零 `input_tokens` 后，会记录当时会进入上下文的消息 bytes，包括正文、需要回放的 tool-call 参数、thinking blocks 和 reasoning text；之后某次响应缺少 usage 或返回 0 时，就按 bytes 比例缩放这个样本，把结果冻结成该次请求的估算值，估算值达到 `threshold` 时也会触发自动压缩。冻结后的估算值不会随后续追加的消息继续增长，只有下一次响应或压缩应用才会替换它。表盘上这个值标为 `≈`，与真实观测区分开；还没有任何可信样本的会话显示 `0`，也不会据此触发压缩。这个 byte-calibrated estimate 只用于提前压缩，不用于计费，也不表示精确的上下文窗口用量。
 

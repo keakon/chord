@@ -18,6 +18,7 @@ type configShowCatalogEndpoint struct {
 	RequestURL string `json:"request_url"`
 	AuthMethod string `json:"auth_method"`
 	EnvVar     string `json:"env_var,omitempty"`
+	Compress   string `json:"compress,omitempty"`
 }
 
 // configShowCatalogModel is one catalog binding in JSON output, annotated with
@@ -26,6 +27,10 @@ type configShowCatalogModel struct {
 	Endpoint         string                          `json:"endpoint"`
 	WireModel        string                          `json:"wire_model_id"`
 	CatalogModel     string                          `json:"catalog_model_id"`
+	Released         string                          `json:"released,omitempty"`
+	CodingSources    []modelcatalog.Source           `json:"coding_sources,omitempty"`
+	Connection       *modelcatalog.Connection        `json:"connection,omitempty"`
+	AddCommand       string                          `json:"add_command"`
 	Context          int                             `json:"context"`
 	Input            int                             `json:"input_limit,omitempty"`
 	Output           int                             `json:"output_limit"`
@@ -34,6 +39,7 @@ type configShowCatalogModel struct {
 	Cost             *modelcatalog.Cost              `json:"cost,omitempty"`
 	Sources          []modelcatalog.Source           `json:"sources,omitempty"`
 	ReasoningOptions []string                        `json:"reasoning_options,omitempty"`
+	ConfigProfile    *modelcatalog.ConfigProfile     `json:"config_profile,omitempty"`
 	Responses        *modelcatalog.ResponsesContract `json:"responses,omitempty"`
 	Configured       bool                            `json:"configured"`
 }
@@ -47,6 +53,7 @@ type configShowCatalogReport struct {
 	// FromRefreshCache reports whether the shown catalog came from the
 	// refresh cache rather than the embedded snapshot.
 	FromRefreshCache bool                        `json:"from_refresh_cache"`
+	Candidates       []modelcatalog.Candidate    `json:"candidates,omitempty"`
 	CacheDetail      string                      `json:"cache_detail,omitempty"`
 	Endpoints        []configShowCatalogEndpoint `json:"endpoints"`
 	Models           []configShowCatalogModel    `json:"models"`
@@ -66,6 +73,7 @@ func renderConfigShowCatalog(out io.Writer, opts configShowOptions, rc *config.R
 		CacheDetail:      status.Detail,
 		Endpoints:        catalogShowEndpoints(),
 		Models:           catalogShowModels(rc.Config),
+		Candidates:       modelcatalog.EffectiveCandidates(),
 	}
 	if opts.JSON {
 		enc := json.NewEncoder(out)
@@ -85,6 +93,7 @@ func catalogShowEndpoints() []configShowCatalogEndpoint {
 			RequestURL: e.RequestURL,
 			AuthMethod: e.AuthMethod,
 			EnvVar:     e.EnvVar,
+			Compress:   e.Compress,
 		})
 	}
 	return out
@@ -94,16 +103,18 @@ func catalogShowEndpoints() []configShowCatalogEndpoint {
 // model ID, marking the ones the effective config defines or references.
 func catalogShowModels(cfg *config.Config) []configShowCatalogModel {
 	configured := catalogConfiguredModels(cfg)
+	bound := make(map[string]bool)
 	var out []configShowCatalogModel
 	for _, endpoint := range modelcatalog.EndpointContracts() {
 		for _, b := range modelcatalog.BindingsForEndpoint(endpoint.PresetID) {
+			bound[b.ModelID] = true
 			entry := configShowCatalogModel{
 				Endpoint:     b.Endpoint,
 				WireModel:    b.WireModelID,
 				CatalogModel: b.ModelID,
 				Configured:   configured[endpoint.PresetID][b.WireModelID],
 			}
-			if facts, ok := modelcatalog.Model(b.ModelID); ok {
+			if facts, ok := modelcatalog.BindingFacts(b); ok {
 				entry.Context = facts.Context
 				entry.Input = facts.Input
 				entry.Output = facts.Output
@@ -111,13 +122,45 @@ func catalogShowModels(cfg *config.Config) []configShowCatalogModel {
 				entry.Cost = facts.Cost
 				entry.Sources = facts.Sources
 				entry.ReasoningOptions = facts.ReasoningOptions
+				entry.Released = facts.Released
+				entry.CodingSources = facts.CodingSources
+				entry.Connection = facts.Connection
+				entry.ConfigProfile = modelcatalog.MergeConfigProfiles(facts.Profile, b.Profile)
+			}
+			entry.AddCommand = "chord config add " + quoteCatalogArg(b.Endpoint+"/"+b.WireModelID)
+			if endpoint.AuthMethod == "oauth" {
+				entry.AddCommand += " && chord auth " + quoteCatalogArg(b.Endpoint)
 			}
 			entry.Variants = b.Variants
 			entry.Responses = b.Responses
 			out = append(out, entry)
 		}
 	}
+	for _, facts := range modelcatalog.Models() {
+		if bound[facts.ID] {
+			continue
+		}
+		entry := configShowCatalogModel{CatalogModel: facts.ID, Context: facts.Context, Input: facts.Input, Output: facts.Output, Modalities: facts.InputModalities, Cost: facts.Cost, Sources: facts.Sources, ReasoningOptions: facts.ReasoningOptions, Released: facts.Released, CodingSources: facts.CodingSources, Connection: facts.Connection, ConfigProfile: facts.Profile}
+		entry.AddCommand = "chord config add " + quoteCatalogArg(facts.ID)
+		if facts.Connection == nil {
+			entry.AddCommand += " --url <your-api-url>"
+		}
+		if cfg != nil {
+			for _, provider := range cfg.Providers {
+				for _, model := range provider.Models {
+					if model.Catalog != nil && model.Catalog.ID == facts.ID && !model.Catalog.Disabled {
+						entry.Configured = true
+					}
+				}
+			}
+		}
+		out = append(out, entry)
+	}
 	return out
+}
+
+func quoteCatalogArg(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 // catalogConfiguredModels maps preset ID -> wire model IDs that the effective
@@ -180,6 +223,9 @@ func renderConfigShowCatalogText(out io.Writer, report configShowCatalogReport) 
 		if e.EnvVar != "" {
 			auth += " (" + e.EnvVar + ")"
 		}
+		if e.Compress != "" {
+			auth += ", supported-request-compress=" + e.Compress
+		}
 		fmt.Fprintf(out, "  %-10s %-17s %s  auth=%s\n", e.Preset, e.Protocol, e.RequestURL, auth)
 	}
 
@@ -193,7 +239,15 @@ func renderConfigShowCatalogText(out io.Writer, report configShowCatalogReport) 
 		if m.Configured {
 			status = "configured"
 		}
-		fmt.Fprintf(out, "  %s / %s  [%s]\n", m.Endpoint, m.WireModel, status)
+		if m.Endpoint == "" {
+			fmt.Fprintf(out, "  %s  [%s; model facts, no managed binding]\n", m.CatalogModel, status)
+		} else {
+			fmt.Fprintf(out, "  %s / %s  [%s]\n", m.Endpoint, m.WireModel, status)
+		}
+		if m.Released != "" {
+			fmt.Fprintf(out, "    released: %s\n", m.Released)
+		}
+		fmt.Fprintf(out, "    add: %s\n", m.AddCommand)
 		facts := fmt.Sprintf("    context=%d, output=%d", m.Context, m.Output)
 		if m.Input > 0 {
 			facts += fmt.Sprintf(", input=%d", m.Input)
@@ -205,26 +259,33 @@ func renderConfigShowCatalogText(out io.Writer, report configShowCatalogReport) 
 				names = append(names, name)
 			}
 			slices.Sort(names)
-			labels := make([]string, 0, len(names))
-			for _, name := range names {
-				labels = append(labels, catalogVariantLabel(name, m.Variants[name]))
-			}
-			fmt.Fprintf(out, "    variants: %s\n", strings.Join(labels, ", "))
-		}
-		if len(m.ReasoningOptions) > 0 {
-			fmt.Fprintf(out, "    reasoning options: %s\n", strings.Join(m.ReasoningOptions, ", "))
-		}
-		if m.Responses != nil {
-			fmt.Fprintf(out, "    Responses fields: send_store=%v, send_parallel_tool_calls=%v\n", responseFieldEnabled(m.Responses.SendStore, true), responseFieldEnabled(m.Responses.SendParallelToolCalls, true))
-		}
-		for _, source := range m.Sources {
-			fmt.Fprintf(out, "    source: %s (verified %s)\n", source.URL, source.Checked)
+			fmt.Fprintf(out, "    variants: %s\n", strings.Join(names, ", "))
 		}
 		if m.Cost != nil {
-			fmt.Fprintf(out, "    cost: %g/%g %s per million tokens (verified %s)\n",
-				m.Cost.InputPerMillion, m.Cost.OutputPerMillion, m.Cost.Currency, m.Cost.Checked)
+			fmt.Fprintf(out, "    price: %g/%g %s per million input/output tokens\n", m.Cost.InputPerMillion, m.Cost.OutputPerMillion, m.Cost.Currency)
+			if m.Cost.Notes != "" {
+				fmt.Fprintf(out, "    %s\n", m.Cost.Notes)
+			}
 		}
+		if m.ConfigProfile != nil && m.ConfigProfile.Compaction != nil {
+			c := m.ConfigProfile.Compaction
+			if c.Threshold != nil {
+				fmt.Fprintf(out, "    compaction recommendation: threshold=%.2f", *c.Threshold)
+			}
+			if c.Reminder != nil {
+				fmt.Fprintf(out, ", reminder=%.2f", *c.Reminder)
+			}
+			if c.Notes != "" {
+				fmt.Fprintf(out, " (%s)", c.Notes)
+			}
+			fmt.Fprintln(out)
+		}
+
 	}
+	if len(report.Candidates) > 0 {
+		fmt.Fprintf(out, "\n%d discovery candidates await verification; use --catalog --json for their facts, sources and missing checks.\n", len(report.Candidates))
+	}
+	fmt.Fprintln(out, "\nFull sources, reasoning options and endpoint contracts: chord config show --catalog --json")
 	return nil
 }
 
@@ -242,23 +303,4 @@ func catalogOriginLabel(report configShowCatalogReport) string {
 	default:
 		return "embedded snapshot; read-only reference, not your config"
 	}
-}
-
-// catalogVariantLabel renders one variant as its name plus the knobs it sets,
-// so thinking-style tiers stay distinguishable from reasoning efforts.
-func catalogVariantLabel(name string, v modelcatalog.Variant) string {
-	var knobs []string
-	if v.ReasoningEffort != "" {
-		knobs = append(knobs, "reasoning_effort="+v.ReasoningEffort)
-	}
-	if v.ThinkingType != "" {
-		knobs = append(knobs, "thinking_type="+v.ThinkingType)
-	}
-	if v.ThinkingEffort != "" {
-		knobs = append(knobs, "thinking_effort="+v.ThinkingEffort)
-	}
-	if len(knobs) == 0 {
-		return name
-	}
-	return name + " (" + strings.Join(knobs, ", ") + ")"
 }

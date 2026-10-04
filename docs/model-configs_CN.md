@@ -30,7 +30,7 @@ chord config add mygw/gpt-6.2-sol --url ... --refresh-catalog
 chord config refresh-catalog   # 或者只刷新、不添加
 ```
 
-刷新快照按版本号整体替换目录；任何一步失败（网络、快照损坏、schema 不兼容）都回退到当前生效的快照——内置目录的离线可用性不受影响。
+刷新快照按版本号整体替换目录。同一来源、内容一致的同版本快照也可带来候选条目。任何一步失败（网络、快照损坏、schema 不兼容）都回退到当前生效的快照——内置目录的离线可用性不受影响。
 
 目录更新后，已被同家族更新条目取代的目录引用会以 advisory 形式在启动时和 `chord doctor config` 中上报。重跑 `chord config add` 即可换绑，也可以在当前目录版本下确认保留：
 
@@ -46,7 +46,7 @@ chord doctor models --model mygw/claude-gw
 
 ## 自定义端点：借用目录事实
 
-`chord config add ... --catalog <id>` 会在模型下写入 `catalog:` 引用。自定义端点（无 preset）只借用**协议无关的事实**：限额、模态、reasoning 选项；reasoning 变体和 Responses 字段发送规则是已验证 preset 绑定的属性，不会随之借用。按模型关闭借用用 `catalog: {disabled: true}`：
+`chord config add ... --catalog <id>` 会在模型下写入 `catalog:` 引用。自定义端点（无 preset）继承限额、模态和上下文压缩建议；与官方使用相同协议时，还会继承模型行为、`compat`、reasoning 变体和 Responses 字段发送规则。provider 的地址、凭据和传输设置由用户自己的配置决定。按模型关闭借用用 `catalog: false`：
 
 ```yaml
 providers:
@@ -79,3 +79,13 @@ Chord 的 `thinking.*` 键与 wire 无关，但把 `/v1/chat/completions` 翻译
 ### 压缩阈值调优
 
 自动压缩的预算从模型 context 窗口推导，目录填好的窗口配合全局默认值（`threshold` 0.8）就是正确的起点。只有当模型的长上下文可靠性或计价给出理由时才调 `compaction` 块——机制见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。目前记录到的家族起点：Claude 5 长时间 agentic 会话 0.7；GPT 长上下文计价档位附近约 0.25、reminder 略低于它；Gemini 0.2/0.15；GLM 与 DeepSeek 0.25/0.2；Grok 0.4/0.35；MiniMax 0.5/0.45。模型长上下文行为无资料可查时，保持默认即可。
+
+## 目录配方包含什么
+
+目录配方包含 token 限额和输入模态、reasoning 或 thinking 变体、模型级 `compat` 和有依据的上下文压缩提示。preset 绑定和同协议的自定义端点均在加载配置时继承配方。`chord config add` 为新 provider 填入官方 URL，或保留你的自定义地址并写入 `catalog` 引用。例如为 `sample/model` 指定 `--catalog moonshotai/kimi-k3`，即可继承完整 reasoning 历史回放，无需手工复制 compat。用 `chord config show --catalog --json` 可以查看全部字段及其来源。
+
+网关提供不同协议时，仍继承限额、模态和上下文压缩建议；协议专用参数需按网关的接口配方设置。
+
+compat 按字段继承，显式模型值及 provider 值优先于目录默认值。其他已有模型配置块按用户配置保留，目录只填充缺失的块；将块设为 `null` 会阻止目录重新填充。模型压缩建议只补齐未设置的字段。显式设置全局或模型 `threshold` 时，目录不再填充缺省的 `reminder`，提醒线按有效阈值派生；显式全局 reminder 也优先于目录建议。模型显式值仍优先于全局设置。
+
+请求体压缩和上下文 compaction 是两件事。自动添加的 provider 默认不启用请求体压缩，包括官方连接。目录中记录的 Codex `zstd`、Anthropic `gzip` 支持信息仅供参考。确认端点支持后，用户可手动设置 provider 的 `compress: gzip` 或 `compress: zstd`；添加模型会保留已有的显式压缩设置。

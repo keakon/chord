@@ -1,4 +1,2 @@
-# Catalog identity. Bump the version whenever a source file changes; the
-# generated catalog.json carries it into the binary and every diagnostic that
-# reports which catalog a config was resolved against.
-version: "2026-10-01.1"
+# Immutable release identity; bump on data or coverage changes.
+version: "2026-10-05.4"

@@ -19,6 +19,8 @@ const candidatesDirName = "candidates"
 // record.
 type candidateSource struct {
 	WireModelID     string      `yaml:"wire_model_id"`
+	Released        string      `yaml:"released"`
+	CodingSources   []sourceRef `yaml:"coding_sources"`
 	Scope           string      `yaml:"scope"`
 	ModelID         string      `yaml:"model_id"`
 	Context         int         `yaml:"context"`
@@ -79,6 +81,7 @@ func convertCandidate(src candidateSource, path string, catalog *modelcatalog.Ca
 	}
 	c := modelcatalog.Candidate{
 		WireModelID:     strings.TrimSpace(src.WireModelID),
+		Released:        src.Released,
 		Scope:           strings.TrimSpace(src.Scope),
 		ModelID:         strings.TrimSpace(src.ModelID),
 		Context:         src.Context,
@@ -86,6 +89,9 @@ func convertCandidate(src candidateSource, path string, catalog *modelcatalog.Ca
 		Output:          src.Output,
 		InputModalities: slices.Clone(src.InputModalities),
 		Notes:           strings.TrimSpace(src.Notes),
+	}
+	for _, s := range src.CodingSources {
+		c.CodingSources = append(c.CodingSources, modelcatalog.Source{URL: s.URL, Checked: s.Checked})
 	}
 	for _, s := range src.Sources {
 		c.Sources = append(c.Sources, modelcatalog.Source{URL: s.URL, Checked: s.Checked})

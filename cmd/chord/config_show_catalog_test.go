@@ -51,8 +51,12 @@ model_pools:
 		t.Fatalf("renderConfigShowCatalog: %v", err)
 	}
 	text := buf.String()
+	origin := modelcatalog.OriginInfo()
+	if origin.Source == nil {
+		t.Fatal("embedded snapshot must record its upstream source")
+	}
 	for _, want := range []string{
-		"Model catalog version " + modelcatalog.Version() + " (embedded snapshot of https://github.com/keakon/chord-models @ v2026-10-01.1; read-only reference, not your config):",
+		"Model catalog version " + modelcatalog.Version() + " (embedded snapshot of " + origin.Source.Repository + " @ " + origin.Source.Revision + "; read-only reference, not your config):",
 		"Endpoints:",
 		"openai",
 		"Models (configured = defined or referenced by a pool in the effective config):",
@@ -178,9 +182,27 @@ func TestCatalogShowRecognizesExplicitAlias(t *testing.T) {
 	if err := renderConfigShowCatalog(&buf, configShowOptions{}, rc); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"openai / gpt-6.1-sol  [configured]", "reasoning options:", "source:", "Responses fields:"} {
+	for _, want := range []string{"openai / gpt-6.1-sol  [configured]", "add: chord config add", "context=", "--catalog --json"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Fatalf("missing %q in %s", want, buf.String())
 		}
+	}
+}
+
+func TestCatalogShowIncludesUnboundModelsAndCopyableCommands(t *testing.T) {
+	cfg := &config.Config{Providers: map[string]config.ProviderConfig{"sample": {Models: map[string]config.ModelConfig{"alias": {Catalog: &config.ModelCatalogRef{ID: "moonshotai/kimi-k3"}}}}}}
+	models := catalogShowModels(cfg)
+	found := map[string]configShowCatalogModel{}
+	for _, m := range models {
+		found[m.CatalogModel] = m
+	}
+	for _, m := range modelcatalog.Models() {
+		if _, ok := found[m.ID]; !ok {
+			t.Fatalf("catalog hid %s without a managed binding", m.ID)
+		}
+	}
+	m := found["moonshotai/kimi-k3"]
+	if !m.Configured || m.AddCommand != "chord config add 'moonshotai/kimi-k3'" || m.Connection == nil {
+		t.Fatalf("unbound model is not easy to configure: %+v", m)
 	}
 }

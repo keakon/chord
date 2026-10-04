@@ -273,7 +273,7 @@ model requests resets and how many are accepted.
 
 ### How the threshold is calculated
 
-Chord uses the **usable input budget** as the baseline. If the model config sets `limit.input`, that value is used as-is; otherwise Chord derives it as `limit.context` minus the model's own `limit.output`, the provider-published input allocation (e.g. the Codex 400K-window/128K-output pair yields a 272K budget). Only a model declaring no `limit.output` falls back to reserving the effective default output cap (`max_output_tokens`, default `64000`). If `reserved` is set, it is subtracted first.
+Chord uses the **usable input budget** as the baseline. An explicit `limit.input` is used as-is. Otherwise the budget is `limit.context` minus the client's planned output budget (`max_output_tokens`, default `64000`, capped by a positive `limit.output`). This is a local planning reserve: Responses normally omits `max_output_tokens`, so the reserve does not assert a server-enforced output limit. Set `limit.input` when the provider publishes an independent input allowance. If `reserved` is set, it is subtracted first.
 
 The effective trigger is therefore `(input budget - reserved) × threshold`: `reserved` adds to, rather than replaces, the unused proportional headroom left by `threshold`. The TUI `Context` indicator in the info panel and footer uses the same input-budget baseline after subtracting `reserved`, so its percentage matches automatic compaction thresholds.
 

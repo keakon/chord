@@ -58,6 +58,10 @@ failure (network, corrupt snapshot, incompatible schema) falls back to the
 snapshot already in effect — the built-in catalog keeps working offline either
 way.
 
+An identical release from the same source can also deliver candidates when
+refreshing the embedded version; conflicting data under the same version is
+rejected.
+
 After a catalog update, references whose verified model a newer same-family
 entry likely supersedes are reported as advisories at startup and by
 `chord doctor config`. Re-run `chord config add` to rebind, or acknowledge for
@@ -76,10 +80,11 @@ chord doctor models --model mygw/claude-gw
 ## Custom endpoints: borrowing catalog facts
 
 `chord config add ... --catalog <id>` writes a `catalog:` reference under the
-model. A custom endpoint (no preset) borrows the **protocol-independent
-facts only**: limits, modalities, reasoning options. Reasoning variants and
-Responses field-send rules are properties of verified preset bindings and are
-not borrowed. Turn a borrow off per model with `catalog: {disabled: true}`:
+model. A custom endpoint (no preset) inherits limits, modalities and compaction
+hints. When its protocol matches the official connection, it also inherits
+the model behavior, `compat`, reasoning variants and Responses field-send rules.
+The provider keeps its URL, credentials and transport settings.
+Turn a borrow off per model with `catalog: false`:
 
 ```yaml
 providers:
@@ -157,3 +162,33 @@ sessions 0.7; GPT long-context pricing tiers around 0.25 with the reminder
 just below; Gemini 0.2/0.15; GLM and DeepSeek 0.25/0.2; Grok 0.4/0.35;
 MiniMax 0.5/0.45. When a model's long-context behavior is undocumented, stay
 on the default.
+
+## What a catalog recipe contains
+
+The catalog contains token limits and modalities, reasoning or thinking
+variants, model `compat` fields and documented compaction hints. Preset bindings
+and custom endpoints using the same protocol inherit the model recipe at load.
+`chord config add` writes the official URL for a new provider, or preserves your
+custom URL and records a `catalog` reference. This also works for an alias such
+as `sample/model` with `--catalog moonshotai/kimi-k3`: full reasoning replay is
+inherited without having to copy its compat settings.
+Inspect every field and its sources with `chord config show --catalog --json`.
+
+When a gateway exposes a different protocol, limits, modalities and compaction
+hints still transfer; protocol-specific fields require that gateway's recipe.
+
+Explicit compat fields take priority over inherited compat fields; explicit
+provider compat also overrides catalog defaults. Other model blocks are kept
+as configured, with catalog defaults filling only absent blocks. Setting a block to `null` prevents the catalog from filling it.
+Model compaction hints fill unset fields only. An explicit global or model
+`threshold` prevents the catalog from filling an unset `reminder`, which is
+derived from the effective threshold. An explicit global reminder also takes
+priority over a catalog hint. Explicit model values take priority over the
+global settings.
+
+Request-body compression is separate from context compaction. It is disabled
+by default for all automatically added providers, including official ones.
+The catalog records known endpoint support (`zstd` for Codex, `gzip` for
+Anthropic) as reference information. To enable it, set provider `compress: gzip`
+or `compress: zstd` after confirming endpoint support. Adding a model preserves
+an existing explicit compression setting.

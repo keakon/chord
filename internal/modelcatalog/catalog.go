@@ -35,20 +35,25 @@ type Cost struct {
 	Currency         string  `json:"currency"`
 	Checked          string  `json:"checked"`
 	Source           Source  `json:"source"`
+	Notes            string  `json:"notes,omitempty"`
 }
 
 // ModelFacts are protocol-independent facts about one model. Input is the
 // independent input-side contract when the provider publishes one; zero means
 // the input budget derives from context/output.
 type ModelFacts struct {
-	ID               string   `json:"id"` // stable catalog ID, e.g. "openai/gpt-6.1-sol"
-	Context          int      `json:"context"`
-	Input            int      `json:"input,omitempty"`
-	Output           int      `json:"output"`
-	InputModalities  []string `json:"input_modalities,omitempty"` // default: text only
-	ReasoningOptions []string `json:"reasoning_options,omitempty"`
-	Cost             *Cost    `json:"cost,omitempty"`
-	Sources          []Source `json:"sources"`
+	ID               string         `json:"id"` // stable catalog ID, e.g. "openai/gpt-6.1-sol"
+	Released         string         `json:"released,omitempty"`
+	CodingSources    []Source       `json:"coding_sources,omitempty"`
+	Connection       *Connection    `json:"connection,omitempty"`
+	Context          int            `json:"context"`
+	Input            int            `json:"input,omitempty"`
+	Output           int            `json:"output"`
+	InputModalities  []string       `json:"input_modalities,omitempty"` // default: text only
+	ReasoningOptions []string       `json:"reasoning_options,omitempty"`
+	Cost             *Cost          `json:"cost,omitempty"`
+	Sources          []Source       `json:"sources"`
+	Profile          *ConfigProfile `json:"config_profile,omitempty"`
 }
 
 // Endpoint is one verified endpoint contract: what a preset stands for.
@@ -56,8 +61,9 @@ type Endpoint struct {
 	PresetID   string   `json:"preset_id"`
 	Protocol   string   `json:"protocol"` // chat-completions | messages | responses | generate-content
 	RequestURL string   `json:"request_url"`
-	AuthMethod string   `json:"auth_method"` // bearer | anthropic-api-key | api-key | x-goog-api-key | oauth
-	EnvVar     string   `json:"env_var"`     // default credential environment variable
+	AuthMethod string   `json:"auth_method"`        // bearer | anthropic-api-key | api-key | x-goog-api-key | oauth
+	EnvVar     string   `json:"env_var"`            // default credential environment variable
+	Compress   string   `json:"compress,omitempty"` // verified upstream request-body compression, if any
 	Docs       []Source `json:"docs"`
 }
 
@@ -84,11 +90,14 @@ type ResponsesContract struct {
 // Binding ties one endpoint to one wire model ID served under that endpoint,
 // with the endpoint-specific defaults (variants) verified for the route.
 type Binding struct {
-	Endpoint    string             `json:"endpoint"` // preset ID
-	WireModelID string             `json:"wire_model_id"`
-	ModelID     string             `json:"model_id"`
-	Variants    map[string]Variant `json:"variants,omitempty"`
-	Responses   *ResponsesContract `json:"responses,omitempty"`
+	Endpoint        string             `json:"endpoint"` // preset ID
+	WireModelID     string             `json:"wire_model_id"`
+	ModelID         string             `json:"model_id"`
+	Variants        map[string]Variant `json:"variants,omitempty"`
+	Responses       *ResponsesContract `json:"responses,omitempty"`
+	Limit           *LimitOverride     `json:"limit,omitempty"`
+	InputModalities []string           `json:"input_modalities,omitempty"`
+	Profile         *ConfigProfile     `json:"config_profile,omitempty"`
 }
 
 // CatalogSource records which upstream revision a catalog snapshot was
@@ -167,8 +176,8 @@ func (c *Catalog) validate() error {
 		return fmt.Errorf("catalog version is required")
 	}
 	if c.Source != nil {
-		if !strings.HasPrefix(c.Source.Repository, "https://") {
-			return fmt.Errorf("catalog source repository %q must be an https URL", c.Source.Repository)
+		if err := validateProvenanceURL(c.Source.Repository); err != nil {
+			return fmt.Errorf("catalog source repository: %w", err)
 		}
 		if strings.TrimSpace(c.Source.Revision) == "" {
 			return fmt.Errorf("catalog source revision is required when a source is recorded")
@@ -195,10 +204,21 @@ func (c *Catalog) validate() error {
 		if strings.TrimSpace(e.EnvVar) == "" && e.AuthMethod != "oauth" {
 			return fmt.Errorf("endpoint %q: env_var is required for non-OAuth endpoints", e.PresetID)
 		}
+		if e.Compress != "" && e.Compress != "gzip" && e.Compress != "zstd" {
+			return fmt.Errorf("endpoint %q: unknown request compression %q", e.PresetID, e.Compress)
+		}
+		for _, s := range e.Docs {
+			if err := validateMetadataSource(s); err != nil {
+				return fmt.Errorf("endpoint %q documentation: %w", e.PresetID, err)
+			}
+		}
 		c.byPreset[e.PresetID] = i
 	}
 	c.byModelID = make(map[string]int, len(c.Models))
 	for i, m := range c.Models {
+		if err := validateModelMetadata(m); err != nil {
+			return err
+		}
 		if strings.TrimSpace(m.ID) == "" {
 			return fmt.Errorf("model %d: id is required", i)
 		}
@@ -219,9 +239,12 @@ func (c *Catalog) validate() error {
 		if len(m.Sources) == 0 {
 			return fmt.Errorf("model %q: at least one verification source is required", m.ID)
 		}
+		if err := m.Profile.validate(m.ID); err != nil {
+			return err
+		}
 		for _, s := range m.Sources {
-			if !strings.HasPrefix(s.URL, "https://") {
-				return fmt.Errorf("model %q: source URL must be https", m.ID)
+			if err := validateMetadataSource(s); err != nil {
+				return fmt.Errorf("model %q source: %w", m.ID, err)
 			}
 		}
 		c.byModelID[m.ID] = i
@@ -242,6 +265,12 @@ func (c *Catalog) validate() error {
 			return fmt.Errorf("binding %s/%s: duplicate wire model ID", b.Endpoint, b.WireModelID)
 		}
 		c.byBinding[key] = i
+		if err := validateBindingOverrides(b, c.Models[c.byModelID[b.ModelID]]); err != nil {
+			return err
+		}
+		if err := b.Profile.validate(b.ModelID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -268,36 +297,60 @@ func Version() string { return effective().Version }
 
 // EndpointContract returns the contract recorded for a preset ID.
 func EndpointContract(presetID string) (Endpoint, bool) {
-	i, ok := effective().byPreset[presetID]
+	catalog := effective()
+	i, ok := catalog.byPreset[presetID]
 	if !ok {
 		return Endpoint{}, false
 	}
-	return effective().Endpoints[i], true
+	return cloneEndpoint(catalog.Endpoints[i]), true
 }
 
 // EndpointContracts lists all verified endpoint contracts, ordered by preset ID.
 func EndpointContracts() []Endpoint {
-	out := slices.Clone(effective().Endpoints)
+	catalog := effective()
+	out := make([]Endpoint, len(catalog.Endpoints))
+	for i, endpoint := range catalog.Endpoints {
+		out[i] = cloneEndpoint(endpoint)
+	}
 	slices.SortFunc(out, func(a, b Endpoint) int { return strings.Compare(a.PresetID, b.PresetID) })
 	return out
 }
 
 // Model returns the facts recorded for a stable catalog model ID.
 func Model(id string) (ModelFacts, bool) {
-	i, ok := effective().byModelID[id]
+	catalog := effective()
+	i, ok := catalog.byModelID[id]
 	if !ok {
 		return ModelFacts{}, false
 	}
-	return effective().Models[i], true
+	return cloneModelFacts(catalog.Models[i]), true
+}
+
+// Models lists all verified facts, including models with no managed binding.
+func Models() []ModelFacts {
+	catalog := effective()
+	out := make([]ModelFacts, len(catalog.Models))
+	for i, model := range catalog.Models {
+		out[i] = cloneModelFacts(model)
+	}
+	slices.SortFunc(out, func(a, b ModelFacts) int { return strings.Compare(a.ID, b.ID) })
+	return out
+}
+
+// BindingFacts resolves endpoint overrides without changing the model identity.
+func BindingFacts(b Binding) (ModelFacts, bool) {
+	facts, ok := Model(b.ModelID)
+	return b.ApplyTo(facts), ok
 }
 
 // LookupBinding resolves the binding for one wire model ID served by a preset.
 func LookupBinding(presetID, wireModelID string) (Binding, bool) {
-	i, ok := effective().byBinding[[2]string{presetID, wireModelID}]
+	catalog := effective()
+	i, ok := catalog.byBinding[[2]string{presetID, wireModelID}]
 	if !ok {
 		return Binding{}, false
 	}
-	return effective().Bindings[i], true
+	return cloneBinding(catalog.Bindings[i]), true
 }
 
 // LookupBindingByModelID resolves a stable catalog model through a preset's
@@ -306,7 +359,7 @@ func LookupBinding(presetID, wireModelID string) (Binding, bool) {
 func LookupBindingByModelID(presetID, modelID string) (Binding, bool) {
 	for _, b := range effective().Bindings {
 		if b.Endpoint == presetID && b.ModelID == modelID {
-			return b, true
+			return cloneBinding(b), true
 		}
 	}
 	return Binding{}, false
@@ -317,7 +370,7 @@ func BindingsForEndpoint(presetID string) []Binding {
 	var out []Binding
 	for _, b := range effective().Bindings {
 		if b.Endpoint == presetID {
-			out = append(out, b)
+			out = append(out, cloneBinding(b))
 		}
 	}
 	slices.SortFunc(out, func(a, b Binding) int { return strings.Compare(a.WireModelID, b.WireModelID) })

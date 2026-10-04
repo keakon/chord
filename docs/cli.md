@@ -253,7 +253,7 @@ Add a model reference to `config.yaml` and append it to a model pool, using the 
 How the model resolves:
 
 - **Wire name bound to the provider's preset** (for example `gpt-6.1-sol` under `preset: openai`): only a pool reference is written; context, modalities, reasoning variants and field send rules fill in at load.
-- **Custom endpoint**: pass `--catalog <id>` to borrow the protocol-independent facts of a catalog model under your own wire name (a `catalog:` field on the model entry). Endpoint contracts, credential defaults and field send rules are never borrowed.
+- **Custom endpoint**: pass `--catalog <id>` to inherit a catalog model under your own wire name. Limits, modalities and compaction hints transfer; the same protocol also inherits model behavior, compat, reasoning variants and field send rules. Your URL, credentials and compression settings stay explicit. Request-body compression is disabled by default and can be enabled with provider `compress: gzip` or `compress: zstd`.
 - **No match**: the closest verified models are listed with their catalog IDs, together with any refreshed candidates annotated with their provider scope and sources. Adoption is always an explicit `--catalog` choice; the command fails instead of guessing.
 
 Existing pool entries keep their order — new references are appended. Files that use YAML anchors or aliases are refused rather than rewritten.

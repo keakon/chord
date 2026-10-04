@@ -30,7 +30,7 @@ func TestSuggestModelsRanksFamilyTokens(t *testing.T) {
 }
 
 func TestSuggestModelsFiltersDissimilarNames(t *testing.T) {
-	for _, query := range []string{"kimi-k3", "totally-unrelated-thing", ""} {
+	for _, query := range []string{"no-such-model-here", "totally-unrelated-thing", ""} {
 		if got := SuggestModels(query, 5); len(got) != 0 {
 			t.Errorf("SuggestModels(%q) = %d suggestions, want none", query, len(got))
 		}

@@ -3641,26 +3641,18 @@ func TestClampEffectiveMaxTokensUsesSmallerDefaultOrModelOutputLimit(t *testing.
 	}
 }
 
-func TestInputLimitForModelRefReservesModelOutputCap(t *testing.T) {
+func TestInputLimitForModelRefReservesRequestedOutput(t *testing.T) {
 	cfg := NewProviderConfig("prov", config.ProviderConfig{
-		Type: config.ProviderTypeChatCompletions,
-		Models: map[string]config.ModelConfig{
-			"model": {Limit: config.ModelLimit{Context: 400000, Output: 128000}},
-		},
+		Type:   config.ProviderTypeChatCompletions,
+		Models: map[string]config.ModelConfig{"model": {Limit: config.ModelLimit{Context: 400000, Output: 128000}}},
 	}, []string{"k"})
 	c := NewClient(cfg, &scriptedProvider{}, "model", 128000, "")
-
-	// The derivation reserves the model's own output cap (128000), so the
-	// budget is the provider-published 400000 - 128000 = 272000 input
-	// allocation, not 400000 - DefaultOutputTokenMax.
-	if got := c.InputLimitForModelRef("prov/model"); got != 272000 {
-		t.Fatalf("default InputLimitForModelRef() = %d, want 272000", got)
+	if got := c.InputLimitForModelRef("prov/model"); got != 336000 {
+		t.Fatalf("default input = %d, want 336000", got)
 	}
-	// A configured output cap below the model's does not shrink the
-	// reservation: limit.output is authoritative for the derivation.
 	c.SetOutputTokenMax(8192)
-	if got := c.InputLimitForModelRef("prov/model"); got != 272000 {
-		t.Fatalf("configured InputLimitForModelRef() = %d, want 272000", got)
+	if got := c.InputLimitForModelRef("prov/model"); got != 391808 {
+		t.Fatalf("configured input = %d, want 391808", got)
 	}
 }
 

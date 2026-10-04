@@ -150,9 +150,9 @@ openai:
 - `gpt-5.6-terra` and `gpt-5.6-luna` are wired the same way; keep the `models` key and the `model_pools` ref on the same model ID.
 - This snippet targets the **official OpenAI API**, so it declares the full
   `1050000` window with no `input`: Chord then derives the usable input budget
-  as `context` minus the model's own `output` cap (`1050000 − 128000 = 922000`),
-  and reserves the default `64000` output cap only for models that declare no
-  `limit.output`. Above 272K is a pricing threshold here, not an input cap, so
+  as `context` minus the planned output budget
+  (`1050000 − min(64000, 128000) = 986000`). A declared independent
+  `input` limit still takes priority. Above 272K is a pricing threshold here, not an input cap, so
   do not add `input: 272000`.
 - Codex OAuth uses the same model windows as the API: GPT-5.4 / 5.6 / 6 run
   the `1050000 / 922000 / 128000` allocation there too (see
@@ -168,8 +168,8 @@ follow the gateway's published model catalog.
 Read model limits in this order:
 
 1. `limit.context` is the total window. For most models, input + requested output just needs to fit inside this number.
-2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget as `limit.context` minus the model's own `limit.output` (only a model declaring no output cap falls back to the global `max_output_tokens` default). A declared `limit.input` is always used as-is.
-3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so real requests use `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap. If a model's real output capacity is below `64000` and `limit.output` is omitted, backends that validate the requested `max_tokens` server-side will reject those requests. Declare `limit.output` for such models, or lower the global `max_output_tokens`.
+2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget as `limit.context` minus the effective planned output budget (`min(max_output_tokens, limit.output)` when both are positive). A declared `limit.input` is always used as-is.
+3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so Chord plans `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap. If a model's real output capacity is below `64000` and `limit.output` is omitted, backends that validate the requested `max_tokens` server-side will reject those requests. Declare `limit.output` for such models, or lower the global `max_output_tokens`.
 
 `parallel_tool_calls` defaults to `true` for Responses and Chat Completions providers. Set it to `false` on a provider, model, or variant only when the backend or workflow requires serial tool calls. Provider-level `user_agent` is also available for gateways that require a specific client identifier.
 
@@ -221,8 +221,8 @@ providers:
 ```
 
 The verified catalog supplies each Codex model's allocation (for these
-models `1050000 / 922000 / 128000`, where the 922K input budget derives as
-`context` − `output` since they publish no separate input cap); when the
+models the catalog records `1050000 / 922000 / 128000`; its explicit
+922K input allocation remains authoritative); when the
 wizard's values are not enough, look them up with `chord config show
 --catalog` instead of copying numbers by hand.
 
@@ -344,7 +344,30 @@ If none of these rules match, set `type` explicitly.
 
 ## Built-in model catalog
 
-Chord ships a small, versioned catalog of verified endpoint contracts and model facts for the managed presets: `openai`, `anthropic`, `gemini`, and `codex`. It is read-only and fully offline: nothing in it probes the network, and it never overrides what you write.
+Chord ships a versioned catalog of coding model facts, documented API connections, and managed endpoint contracts (`openai`, `anthropic`, `gemini`, and `codex`). It is read-only and fully offline: nothing in it probes the network, and it never overrides what you write.
+
+Start with two commands:
+
+```bash
+chord config show --catalog
+chord config add openai/gpt-6.1-sol
+```
+
+The catalog view lists every verified model, including those without a managed
+preset, with a copyable add command. `add` can create your first config and
+uses the documented API URL, wire model ID and API key environment variable.
+It prints which variable to export; API secrets are never copied from the
+catalog. Existing providers keep their endpoint and credentials. OAuth models
+also require the printed `chord auth <provider>` login command.
+
+Documented connections are setup recipes. They do not imply a successful live
+request or contribute endpoint-specific reasoning variants or send rules.
+Models requiring a workspace-specific or self-hosted URL need an explicit
+`--url`. For a custom wire name, use `--catalog <vendor/model>` to borrow facts.
+Use `chord config show --catalog --json` for complete evidence, release dates,
+pricing scope and refreshed discovery candidates. Candidates never supply
+runtime defaults. `chord config refresh-catalog` explicitly fetches a tagged
+update; ordinary viewing and adding stay offline.
 
 A managed preset stands for a verified endpoint contract. When a provider uses one, Chord fills `type`, `api_url`, and `auth_scheme` only where you left them empty — an explicit value of yours always wins, and a value that contradicts the contract (for example an `auth_scheme` the preset does not use, or a `token_url` on a preset that is not OAuth) is a config error. To point a provider at a different endpoint, remove the `preset` and configure the endpoint explicitly.
 
@@ -699,12 +722,17 @@ Model field semantics:
 - `limit.input`: independent input cap when published. A declared value is
   authoritative and used as-is, even when it is not additive with
   `limit.output` inside the window. If omitted, Chord derives the prompt
-  budget as `limit.context` minus the model's `limit.output` (so the 1.05M
-  GPT family gets 1050000 − 128000 = 922000); only a model declaring no
-  output cap falls back to reserving the effective default output cap
-  (`max_output_tokens`, default `64000`).
-- `limit.output`: model output capacity. Runtime requests are also capped by the
-  global `max_output_tokens` setting and remaining total-context space.
+  budget as `limit.context` minus the effective planned output budget
+  (`max_output_tokens`, default `64000`, capped by a positive `limit.output`).
+  This also works when a model's output capacity equals its total context.
+  For example, a 1M window with a requested 64K output budget leaves 936K
+  for input. This calculation never changes an explicit `limit.input`.
+  The reserve is a local planning budget, not a guarantee of server enforcement:
+  Responses omits `max_output_tokens` unless
+  `compat.responses.send_max_output_tokens: true` enables the field.
+- `limit.output`: model output capacity. Chord computes a request output budget
+  from `max_output_tokens` and remaining total-context space. The server only
+  receives that cap on transports that emit the output-limit field.
 - `reasoning.effort`: reasoning depth. Chord keeps no local whitelist: whatever
   level the provider supports reaches the upstream unchanged, and the Responses
   wire additionally normalizes whitespace and casing before sending.
@@ -943,7 +971,7 @@ These settings are provider-scoped, so project-level `.chord/config.yaml` can ov
 
 ## Output token cap
 
-Use `max_output_tokens` to set a global cap on requested output tokens. It defaults to `64000`. The effective request limit is still clamped by each model's `limit.output` and available total context (`limit.context` when known), so runtime uses the smallest applicable value across all providers.
+Use `max_output_tokens` to set a global cap on requested output tokens. It defaults to `64000`. The effective request limit is still clamped by each model's `limit.output` and available total context (`limit.context` when known), so Chord computes the smallest applicable output budget. The server receives that cap only when the transport emits the output-limit field.
 
 Responses providers keep the stable Responses wire shape and do not send a
 `max_output_tokens` field on the HTTP or WebSocket request by default. For a
@@ -953,7 +981,7 @@ toggles are available under the same provider-level object. The global value
 still affects Chord-side budgeting and compatibility checks when it is omitted
 from the wire request.
 
-`limit.input` is separate: use it only for models whose providers publish an extra input cap beyond the total context window. Lowering `max_output_tokens` can reduce cost and long-response failure risk, but it does **not** increase a provider's input allowance or replace `limit.input`.
+`limit.input` is separate: use it only for models whose providers publish an extra input cap beyond the total context window. On transports that send the output cap, lowering `max_output_tokens` can reduce cost and long-response failure risk. It also increases the derived input budget when no independent `limit.input` is declared. It never increases a provider's explicit input allowance or replaces `limit.input`.
 
 ```yaml
 max_output_tokens: 64000
@@ -1583,7 +1611,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | Field             | Type   | Description                                                                                                            |
 | ----------------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
 | `catalog` | string / false | Bind a catalog model ID explicitly; omission matches the exact model name within its preset, and `false` disables catalog filling for the model. |
-| `limit.context`   | int    | Total request window in tokens when known. If `limit.input` is omitted, Chord derives the input budget from this minus the model's `limit.output` (falling back to the `max_output_tokens` default when no output cap is declared). |
+| `limit.context`   | int    | Total request window in tokens when known. If `limit.input` is omitted, Chord subtracts the effective planned output budget (`max_output_tokens`, capped by `limit.output` when positive) to derive the input budget. |
 | `limit.input`     | int    | Separate input cap when a provider publishes one. Chord uses it to compact or retry before the prompt is too large.               |
 | `limit.output`    | int    | Maximum output tokens; runtime is also clamped by `max_output_tokens`.                                                             |
 | `compaction`      | object | Per-model compaction overrides: `compaction.threshold` (auto-compaction usage ratio; `0` disables for this model) and `compaction.reminder` (pressure-reminder line; derived from `threshold` when absent, `-1` disables the reminder only). Unset fields inherit the global `context.compaction.*`. Out-of-range values are rejected with a warning and inherit the global value. Derivation and tuning guidance: [Context compaction](./context-management.md#context-compaction). |

@@ -6,26 +6,23 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/keakon/chord/internal/atomicfile"
 )
 
 type configMutationLock struct {
 	file *os.File
-	path string
 }
 
 func (l *configMutationLock) Close() error {
 	if l == nil || l.file == nil {
 		return nil
 	}
+	// Keep the lock inode: waiters may already have opened it. Unlinking
+	// would let another process acquire a different inode concurrently.
 	_ = unlockConfigMutationFile(l.file)
 	err := l.file.Close()
-	if err == nil && l.path != "" {
-		if removeErr := os.Remove(l.path); removeErr != nil && !os.IsNotExist(removeErr) {
-			err = removeErr
-		}
-	}
 	l.file = nil
-	l.path = ""
 	return err
 }
 
@@ -52,22 +49,21 @@ func LockConfigMutationContext(ctx context.Context, targetPath string) (*configM
 		_ = f.Close()
 		return nil, fmt.Errorf("lock config file: %w", err)
 	}
-	return &configMutationLock{file: f, path: lockPath}, nil
+	return &configMutationLock{file: f}, nil
 }
 
-// UpdateConfigFileLocked rewrites an existing config file under the mutation
-// lock: it reads the current bytes, passes them to produce, and atomically
-// replaces the file with the produced content. It fails when the file does
-// not exist; creating new files stays WriteConfigFileAtomically's job.
-// Callers validate the produced content before writing; this helper only
-// guarantees that the bytes produced under the lock are the bytes installed.
-func UpdateConfigFileLocked(path string, produce func(current []byte) ([]byte, error)) error {
+// CreateOrUpdateConfigFileLocked supports command-driven first setup. Missing
+// files are presented as empty YAML under the same lock as existing edits.
+func CreateOrUpdateConfigFileLocked(path string, produce func(current []byte) ([]byte, error)) error {
 	lock, err := LockConfigMutation(path)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = lock.Close() }()
 	current, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		err = nil
+	}
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
@@ -124,38 +120,5 @@ func WriteConfigFileAtomically(path string, data []byte, mode os.FileMode) error
 }
 
 func writeConfigFileAtomicallyReplace(path string, data []byte, mode os.FileMode) error {
-	if path == "" {
-		return fmt.Errorf("config path is empty")
-	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("create config temp file: %w", err)
-	}
-	tmpPath := f.Name()
-	defer func() {
-		_ = f.Close()
-		_ = os.Remove(tmpPath)
-	}()
-	if err := f.Chmod(mode); err != nil {
-		return fmt.Errorf("set config temp permissions: %w", err)
-	}
-	if n, err := f.Write(data); err != nil {
-		return fmt.Errorf("write config temp file: %w", err)
-	} else if n != len(data) {
-		return fmt.Errorf("write config temp file: %w", io.ErrShortWrite)
-	}
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("sync config temp file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("close config temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("replace config file: %w", err)
-	}
-	return nil
+	return atomicfile.Replace(path, data, mode)
 }

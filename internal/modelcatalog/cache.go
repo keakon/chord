@@ -6,9 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/atomicfile"
 )
 
 // CacheSchemaVersion guards the refresh cache file. A binary that does not
@@ -24,7 +25,9 @@ const CacheSchemaVersion = 1
 // with its scope and sources, and adopting it is always an explicit user
 // choice that writes the values into the user's config as its own.
 type Candidate struct {
-	WireModelID string `json:"wire_model_id"`
+	WireModelID   string   `json:"wire_model_id"`
+	Released      string   `json:"released,omitempty"`
+	CodingSources []Source `json:"coding_sources,omitempty"`
 	// Scope names the provider side the wire name was observed on: a managed
 	// preset ID or a gateway identifier. Suggestions prefer the scope that
 	// matches the endpoint being configured and never pick one silently.
@@ -47,6 +50,9 @@ type Candidate struct {
 // side), so a candidate that references an unknown model or carries an
 // unverifiable fact never reaches a suggestion list.
 func (c Candidate) ValidateAgainst(catalog *Catalog) error {
+	if err := validateModelMetadata(ModelFacts{ID: c.WireModelID, Released: c.Released, CodingSources: c.CodingSources}); err != nil {
+		return err
+	}
 	if strings.TrimSpace(c.WireModelID) == "" {
 		return errors.New("wire_model_id is required")
 	}
@@ -79,11 +85,8 @@ func (c Candidate) ValidateAgainst(catalog *Catalog) error {
 		return errors.New("at least one source is required")
 	}
 	for _, s := range c.Sources {
-		if !strings.HasPrefix(s.URL, "https://") {
-			return fmt.Errorf("source URL must be https, got %q", s.URL)
-		}
-		if _, err := time.Parse(time.DateOnly, s.Checked); err != nil {
-			return fmt.Errorf("checked date %q must be a calendar day in YYYY-MM-DD form", s.Checked)
+		if err := validateMetadataSource(s); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -106,7 +109,8 @@ type CacheFile struct {
 }
 
 // ReadCacheFile loads and validates a refresh cache. The decode is strict on
-// every level, so unknown fields anywhere in the file reject the cache.
+// typed fields. Profile maps are additionally checked against the config schema
+// by the validator passed to InstallCachedCatalog.
 func ReadCacheFile(path string) (*CacheFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -130,6 +134,9 @@ func (f *CacheFile) validate() error {
 	}
 	if strings.TrimSpace(f.Repository) == "" {
 		return errors.New("cache repository is required")
+	}
+	if err := validateProvenanceURL(f.Repository); err != nil {
+		return fmt.Errorf("cache repository: %w", err)
 	}
 	if strings.TrimSpace(f.Revision) == "" {
 		return errors.New("cache revision is required")
@@ -162,46 +169,20 @@ func (f *CacheFile) validate() error {
 	return nil
 }
 
-// WriteCacheFile serializes the cache and replaces path atomically: write to
+// WriteCacheFile validates the cache and replaces path atomically: write to
 // a temp file in the same directory, fsync, rename. A reader sees either the
 // previous complete cache or the new one, never a torn file. Concurrent
 // writers must serialize the call themselves and re-check versions under
 // their lock; the write itself never merges with the previous content — a
 // cache is always one complete catalog snapshot.
 func WriteCacheFile(path string, f *CacheFile) error {
+	if err := f.validate(); err != nil {
+		return fmt.Errorf("validate catalog cache: %w", err)
+	}
 	data, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal catalog cache: %w", err)
 	}
 	data = append(data, '\n')
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create cache dir: %w", err)
-	}
-	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
-	if err != nil {
-		return fmt.Errorf("create cache temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath)
-	}()
-	if n, err := tmp.Write(data); err != nil {
-		return fmt.Errorf("write cache temp file: %w", err)
-	} else if n != len(data) {
-		return fmt.Errorf("write cache temp file: %w", errShortWrite)
-	}
-	if err := tmp.Sync(); err != nil {
-		return fmt.Errorf("sync cache temp file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close cache temp file: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("replace cache file: %w", err)
-	}
-	return nil
+	return atomicfile.Replace(path, data, 0o600)
 }
-
-var errShortWrite = errors.New("short write")

@@ -376,21 +376,24 @@ func TestModelLimitEffectiveInputBudget(t *testing.T) {
 			want:             272000,
 		},
 		{
-			// No limit.input: the derived budget reserves the model's own
-			// output cap (the provider-published input allocation), not the
-			// smaller global request-output default.
-			name:             "model output reserved from context",
+			// No published input limit: reserve the effective requested output.
+			name:             "default requested output reserved from context",
 			limit:            ModelLimit{Context: 400000, Output: 128000},
 			outputCapSetting: 0,
-			want:             272000,
+			want:             368000,
 		},
 		{
-			// A declared limit.output is authoritative for the derivation even
-			// when a global output cap is configured below it.
-			name:             "model output reserved regardless of configured cap",
+			// A lower request output cap leaves more room for the input.
+			name:             "configured request output bounds reservation",
 			limit:            ModelLimit{Context: 400000, Output: 128000},
 			outputCapSetting: 8192,
-			want:             272000,
+			want:             391808,
+		},
+		{
+			name:             "output capacity equals context",
+			limit:            ModelLimit{Context: 1048576, Output: 1048576},
+			outputCapSetting: 64000,
+			want:             984576,
 		},
 		{
 			name:             "model output cap bounds reservation",

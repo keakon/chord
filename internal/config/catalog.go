@@ -1,7 +1,9 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -180,35 +182,149 @@ func catalogCandidateModels(cfg *Config, providerName string, extraRefs ...strin
 	return out
 }
 
-// catalogModelDefaults resolves explicit IDs even for custom endpoints. Only a
-// verified preset binding contributes endpoint-specific variants.
-func catalogModelDefaults(preset, wireModel string, model ModelConfig) (modelcatalog.ModelFacts, map[string]modelcatalog.Variant, bool, error) {
+// catalogModelDefaults resolves preset bindings and explicitly selected
+// catalog IDs. Custom endpoints inherit recipes when the wire protocol matches.
+func catalogModelDefaults(provider ProviderConfig, wireModel string, model ModelConfig) (modelcatalog.ModelFacts, map[string]modelcatalog.Variant, *modelcatalog.ConfigProfile, bool, error) {
 	if model.Catalog != nil && model.Catalog.Disabled {
-		return modelcatalog.ModelFacts{}, nil, false, nil
+		return modelcatalog.ModelFacts{}, nil, nil, false, nil
 	}
-	preset = strings.ToLower(strings.TrimSpace(preset))
+	preset := strings.ToLower(strings.TrimSpace(provider.Preset))
 	var binding modelcatalog.Binding
 	var bound bool
 	if model.Catalog != nil && model.Catalog.ID != "" {
 		facts, exists := modelcatalog.Model(model.Catalog.ID)
 		if !exists {
-			return modelcatalog.ModelFacts{}, nil, false, fmt.Errorf("catalog model %q not found", model.Catalog.ID)
+			return modelcatalog.ModelFacts{}, nil, nil, false, fmt.Errorf("catalog model %q not found", model.Catalog.ID)
 		}
 		if preset == "" {
-			return facts, nil, true, nil
+			variants, profile, err := customCatalogProfile(provider, facts)
+			return facts, variants, profile, true, err
 		}
 		binding, bound = modelcatalog.LookupBindingByModelID(preset, model.Catalog.ID)
 		if !bound {
-			return modelcatalog.ModelFacts{}, nil, false, fmt.Errorf("catalog model %q is not bound to preset %q", model.Catalog.ID, preset)
+			return modelcatalog.ModelFacts{}, nil, nil, false, fmt.Errorf("catalog model %q is not bound to preset %q", model.Catalog.ID, preset)
 		}
 	} else {
 		binding, bound = modelcatalog.LookupBinding(preset, wireModel)
 	}
 	if !bound {
-		return modelcatalog.ModelFacts{}, nil, false, nil
+		return modelcatalog.ModelFacts{}, nil, nil, false, nil
 	}
-	facts, exists := modelcatalog.Model(binding.ModelID)
-	return facts, binding.Variants, exists, nil
+	facts, exists := modelcatalog.BindingFacts(binding)
+	profile := modelcatalog.MergeConfigProfiles(facts.Profile, binding.Profile)
+	return facts, binding.Variants, profile, exists, nil
+}
+
+// customCatalogProfile borrows the official recipe for the same wire protocol.
+// A different wire still inherits protocol-independent compaction guidance.
+// Endpoint addresses, OAuth settings and request compression never transfer.
+func customCatalogProfile(provider ProviderConfig, facts modelcatalog.ModelFacts) (map[string]modelcatalog.Variant, *modelcatalog.ConfigProfile, error) {
+	protocol := strings.ToLower(strings.TrimSpace(provider.Type))
+	if protocol == "" {
+		protocol = InferProviderTypeFromAPIURL(provider.APIURL)
+	}
+	vendor, _, _ := strings.Cut(facts.ID, "/")
+	var selected *modelcatalog.Binding
+	for _, endpoint := range modelcatalog.EndpointContracts() {
+		if endpoint.Protocol != protocol {
+			continue
+		}
+		if binding, ok := modelcatalog.LookupBindingByModelID(endpoint.PresetID, facts.ID); ok {
+			if selected == nil || endpoint.PresetID == vendor {
+				selected = &binding
+			}
+			if endpoint.PresetID == vendor {
+				break
+			}
+		}
+	}
+	if selected != nil {
+		profile := modelcatalog.MergeConfigProfiles(facts.Profile, selected.Profile)
+		if selected.Responses != nil {
+			data, err := json.Marshal(selected.Responses)
+			if err != nil {
+				return nil, nil, err
+			}
+			var fields map[string]any
+			if err := json.Unmarshal(data, &fields); err != nil {
+				return nil, nil, err
+			}
+			profile = modelcatalog.MergeConfigProfiles(&modelcatalog.ConfigProfile{Compat: map[string]any{"responses": fields}}, profile)
+		}
+		return selected.Variants, profile, nil
+	}
+	if facts.Connection != nil && InferProviderTypeFromAPIURL(facts.Connection.RequestURL) == protocol {
+		return nil, modelcatalog.MergeConfigProfiles(facts.Profile, nil), nil
+	}
+	if facts.Profile != nil && facts.Profile.Compaction != nil {
+		return nil, &modelcatalog.ConfigProfile{Compaction: facts.Profile.Compaction, Sources: facts.Profile.Sources}, nil
+	}
+	return nil, nil, nil
+}
+
+// Catalog compat is below explicit provider settings, even though it is
+// materialized into the model. Leave overlapping leaves to the provider layer.
+func prepareCatalogCompatDefaults(defaults *ModelConfig, provider *ProviderCompatConfig, model *ModelCompatConfig) error {
+	if defaults.Compat == nil {
+		return nil
+	}
+	encode := func(value any) (map[string]any, error) {
+		data, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		var fields map[string]any
+		err = json.Unmarshal(data, &fields)
+		return fields, err
+	}
+	base, err := encode(defaults.Compat)
+	if err != nil {
+		return err
+	}
+	var override map[string]any
+	if provider != nil {
+		override, err = encode(provider)
+		if err != nil {
+			return err
+		}
+	}
+	var omit func(map[string]any, map[string]any)
+	omit = func(dst, src map[string]any) {
+		for key, value := range src {
+			if child, ok := value.(map[string]any); ok {
+				if existing, ok := dst[key].(map[string]any); ok {
+					omit(existing, child)
+					if len(existing) == 0 {
+						delete(dst, key)
+					}
+				}
+			} else {
+				delete(dst, key)
+			}
+		}
+	}
+	omit(base, override)
+	if model != nil {
+		fields, err := encode(model)
+		if err != nil {
+			return err
+		}
+		base = modelcatalog.MergeConfigProfiles(&modelcatalog.ConfigProfile{Compat: base}, &modelcatalog.ConfigProfile{Compat: fields}).Compat
+	}
+	if len(base) == 0 {
+		defaults.Compat = nil
+		return nil
+	}
+	data, err := json.Marshal(base)
+	if err != nil {
+		return err
+	}
+	var compat ModelCompatConfig
+	if err := json.Unmarshal(data, &compat); err != nil {
+		return err
+	}
+	defaults.Compat = &compat
+	return nil
 }
 
 // materializeCatalogModels fills unset facts for explicitly bound custom models
@@ -222,7 +338,7 @@ func materializeCatalogModels(rc *ResolvedConfig, extraRefs ...string) []Diagnos
 		changed := false
 		for _, modelName := range catalogCandidateModels(rc.Config, providerName, extraRefs...) {
 			mc, userDefined := provider.Models[modelName]
-			facts, variants, found, err := catalogModelDefaults(provider.Preset, modelName, mc)
+			facts, variants, profile, found, err := catalogModelDefaults(provider, modelName, mc)
 			if err != nil {
 				diagnostics = append(diagnostics, Diagnostic{
 					Severity: DiagnosticSeverityError,
@@ -230,6 +346,23 @@ func materializeCatalogModels(rc *ResolvedConfig, extraRefs ...string) []Diagnos
 					Message:  err.Error(), Continues: true, Scope: "model " + providerName + "/" + modelName,
 				})
 				continue
+			}
+			var defaults ModelConfig
+			if profile != nil {
+				defaults, err = DecodeCatalogProfile(profile)
+				if err == nil {
+					err = prepareCatalogCompatDefaults(&defaults, provider.Compat, mc.Compat)
+				}
+				if provider.Store != nil {
+					defaults.Store = nil
+				}
+				if provider.ParallelToolCalls != nil {
+					defaults.ParallelToolCalls = nil
+				}
+				if err != nil {
+					diagnostics = append(diagnostics, Diagnostic{Severity: DiagnosticSeverityError, Path: "providers." + providerName + ".models." + modelName + ".catalog", Message: err.Error(), Continues: true})
+					continue
+				}
 			}
 			if !found {
 				continue
@@ -240,7 +373,7 @@ func materializeCatalogModels(rc *ResolvedConfig, extraRefs ...string) []Diagnos
 			if rc.Index != nil {
 				rc.Index.ensureModelOrigin(providerName, modelName)
 			}
-			if mc.fillFromCatalog(facts, variants, rc.Index, providerName, modelName, userDefined) {
+			if mc.fillFromCatalog(facts, variants, profile, defaults, rc.Index, providerName, modelName, userDefined) {
 				if provider.Models == nil {
 					provider.Models = make(map[string]ModelConfig)
 				}
@@ -259,7 +392,7 @@ func materializeCatalogModels(rc *ResolvedConfig, extraRefs ...string) []Diagnos
 // and reports whether anything changed. Nullable blocks cleared by a user
 // layer are skipped; the catalog origin of every filled path is recorded as
 // the lowest-priority layer in the index.
-func (m *ModelConfig) fillFromCatalog(facts modelcatalog.ModelFacts, variants map[string]modelcatalog.Variant, idx *SourceIndex, provider, model string, userDefined bool) bool {
+func (m *ModelConfig) fillFromCatalog(facts modelcatalog.ModelFacts, variants map[string]modelcatalog.Variant, profile *modelcatalog.ConfigProfile, defaults ModelConfig, idx *SourceIndex, provider, model string, userDefined bool) bool {
 	changed := false
 	leafDeclared := func(leaf string) bool {
 		if !userDefined || idx == nil {
@@ -349,6 +482,50 @@ func (m *ModelConfig) fillFromCatalog(facts modelcatalog.ModelFacts, variants ma
 				idx.prependCatalogBlockOrigin(provider, model, "variants")
 			}
 			changed = true
+		}
+	}
+	if profile != nil {
+		fill := func(block string, unset bool, assign func()) {
+			if !unset || blockCleared(block) {
+				return
+			}
+			assign()
+			if idx != nil {
+				idx.prependCatalogBlockOrigin(provider, model, block)
+			}
+			changed = true
+		}
+		fill("thinking", m.Thinking == nil && defaults.Thinking != nil, func() { m.Thinking = defaults.Thinking })
+		fill("reasoning", m.Reasoning == nil && defaults.Reasoning != nil, func() { m.Reasoning = defaults.Reasoning })
+		fill("text", m.Text == nil && defaults.Text != nil, func() { m.Text = defaults.Text })
+		fill("prompt_cache", m.PromptCache == nil && defaults.PromptCache != nil, func() { m.PromptCache = defaults.PromptCache })
+		fill("parallel_tool_calls", m.ParallelToolCalls == nil && defaults.ParallelToolCalls != nil, func() { m.ParallelToolCalls = defaults.ParallelToolCalls })
+		fill("store", m.Store == nil && defaults.Store != nil, func() { m.Store = defaults.Store })
+		fill("compat", defaults.Compat != nil && !reflect.DeepEqual(m.Compat, defaults.Compat), func() { m.Compat = defaults.Compat })
+		if c := profile.Compaction; c != nil && !blockCleared("compaction") {
+			mc := m.Compaction
+			if mc == nil {
+				mc = &ModelCompactionConfig{}
+			}
+			added := false
+			modelThresholdExplicit := mc.Threshold != nil
+			// Explicit global settings win over recommendations. Explicit model
+			// settings continue to override the global settings at runtime.
+			if mc.Threshold == nil && c.Threshold != nil && (idx == nil || len(idx.Compaction["threshold"]) == 0) {
+				mc.Threshold = new(*c.Threshold)
+				added = true
+			}
+			if !modelThresholdExplicit && mc.Reminder == nil && c.Reminder != nil && (idx == nil || len(idx.Compaction["reminder"]) == 0 && len(idx.Compaction["threshold"]) == 0) {
+				mc.Reminder = new(*c.Reminder)
+				added = true
+			}
+			if added {
+				m.Compaction = mc
+				if idx != nil {
+					idx.prependCatalogBlockOrigin(provider, model, "compaction")
+				}
+				changed = true
+			}
 		}
 	}
 	return changed

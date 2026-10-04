@@ -15,7 +15,7 @@ import (
 // fixture repository: one endpoint, one model, one binding. The catalog
 // version is filled in from the tag.
 var sourceFiles = map[string]string{
-	"catalog.yaml": `version: "2026-10-02.1"
+	"catalog.yaml": `version: "2099-01-01.1"
 `,
 	"endpoints.yaml": `endpoints:
   - preset_id: openai
@@ -116,7 +116,7 @@ func TestParseLsRemoteTags(t *testing.T) {
 }
 
 func TestRunRefreshesInstallsAndRecordsOrigin(t *testing.T) {
-	upstream := initUpstreamRepo(t, "v2026-10-02.1", true)
+	upstream := initUpstreamRepo(t, "v2099-01-01.1", true)
 	cachePath := filepath.Join(t.TempDir(), "cache", "modelcatalog-cache.json")
 
 	before := modelcatalog.OriginInfo()
@@ -127,7 +127,7 @@ func TestRunRefreshesInstallsAndRecordsOrigin(t *testing.T) {
 	if !result.Updated {
 		t.Fatal("a newer upstream snapshot must update the cache")
 	}
-	if result.ToVersion != "2026-10-02.1" || result.Revision != "v2026-10-02.1" || result.CandidateCount != 1 {
+	if result.ToVersion != "2099-01-01.1" || result.Revision != "v2099-01-01.1" || result.CandidateCount != 1 {
 		t.Fatalf("result = %+v, want the fixture snapshot identity", result)
 	}
 	if result.FromVersion != before.Version {
@@ -135,7 +135,7 @@ func TestRunRefreshesInstallsAndRecordsOrigin(t *testing.T) {
 	}
 	// The refreshed snapshot is in effect in this process right away.
 	origin := modelcatalog.OriginInfo()
-	if !origin.Cached || origin.Version != "2026-10-02.1" || origin.Source == nil || origin.Source.Revision != "v2026-10-02.1" {
+	if !origin.Cached || origin.Version != "2099-01-01.1" || origin.Source == nil || origin.Source.Revision != "v2099-01-01.1" {
 		t.Fatalf("origin after refresh = %+v, want the fetched snapshot", origin)
 	}
 	if len(modelcatalog.EffectiveCandidates()) != 1 {
@@ -146,7 +146,7 @@ func TestRunRefreshesInstallsAndRecordsOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read cache: %v", err)
 	}
-	for _, want := range []string{`"revision": "v2026-10-02.1"`, `"version": "2026-10-02.1"`, "gpt-6.1-sol-messages"} {
+	for _, want := range []string{`"revision": "v2099-01-01.1"`, `"version": "2099-01-01.1"`, "gpt-6.1-sol-messages"} {
 		if !strings.Contains(string(data), want) {
 			t.Errorf("cache file missing %q:\n%s", want, data)
 		}
@@ -156,7 +156,7 @@ func TestRunRefreshesInstallsAndRecordsOrigin(t *testing.T) {
 func TestRunSkipsWriteWhenNothingNewer(t *testing.T) {
 	// A version strictly newer than any earlier test installs, so this test
 	// passes in any order within the package binary.
-	upstream := initUpstreamRepo(t, "v2026-10-03.1", false)
+	upstream := initUpstreamRepo(t, "v2099-01-02.1", false)
 	cachePath := filepath.Join(t.TempDir(), "modelcatalog-cache.json")
 
 	// First run installs the fixture snapshot (newer than the embedded one).
@@ -186,9 +186,9 @@ func TestRunSkipsWriteWhenNothingNewer(t *testing.T) {
 }
 
 func TestRunFailsOnUntaggedUpstream(t *testing.T) {
-	upstream := initUpstreamRepo(t, "v2026-10-02.1", false)
+	upstream := initUpstreamRepo(t, "v2099-01-01.1", false)
 	// Remove the tag so the repository has no version tags to pin.
-	cmd := exec.Command("git", "tag", "-d", "v2026-10-02.1")
+	cmd := exec.Command("git", "tag", "-d", "v2099-01-01.1")
 	cmd.Dir = upstream
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("delete tag: %v: %s", err, out)
@@ -205,7 +205,7 @@ func TestRunFailsOnUntaggedUpstream(t *testing.T) {
 func TestIsVersionTag(t *testing.T) {
 	for tag, want := range map[string]bool{
 		"v2026-10-01.1": true,
-		"v1.2":          true,
+		"v1.2":          false,
 		"latest":        false,
 		"v":             false,
 		"2026-10-01.1":  false,
@@ -213,5 +213,26 @@ func TestIsVersionTag(t *testing.T) {
 		if got := isVersionTag(tag); got != want {
 			t.Errorf("isVersionTag(%q) = %v, want %v", tag, got, want)
 		}
+	}
+}
+
+func TestRunRejectsTagVersionMismatchWithoutChangingCache(t *testing.T) {
+	upstream := initUpstreamRepo(t, "v2099-01-03.1", false)
+	cmd := exec.Command("git", "tag", "v2099-01-04.1")
+	cmd.Dir = upstream
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("tag: %v: %s", err, out)
+	}
+	cachePath := filepath.Join(t.TempDir(), "cache.json")
+	before := []byte("existing cache")
+	if err := os.WriteFile(cachePath, before, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Run(context.Background(), upstream, cachePath); err == nil || !strings.Contains(err.Error(), "version") {
+		t.Fatalf("mismatch error = %v", err)
+	}
+	got, err := os.ReadFile(cachePath)
+	if err != nil || string(got) != string(before) {
+		t.Fatalf("failed refresh changed cache: %s, %v", got, err)
 	}
 }

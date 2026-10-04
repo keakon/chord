@@ -129,7 +129,7 @@ func TestPrintCatalogSuggestionsListsAndGuides(t *testing.T) {
 		t.Errorf("suggestion output must list models and the adopt command:\n%s", text)
 	}
 	out.Reset()
-	if printCatalogSuggestions(&out, "kimi-k3", "", "") {
+	if printCatalogSuggestions(&out, "no-such-model-here", "", "") {
 		t.Error("below-threshold queries must report no suggestions")
 	}
 }
@@ -192,5 +192,19 @@ func TestCandidateObservedFactsOmitsUnobserved(t *testing.T) {
 	}
 	if got := candidateObservedFacts(modelcatalog.Candidate{}); got != "" {
 		t.Fatalf("unobserved facts must render as nothing, got %q", got)
+	}
+}
+
+func TestEditConfigYAMLForAddHandlesNullAndTypeConflicts(t *testing.T) {
+	edit := configAddEdit{providerName: "sample", wireModel: "model-1", borrowID: "openai/gpt-6.1-sol", poolName: "default", poolRef: "sample/model-1"}
+	for _, content := range []string{"providers: null\nmodel_pools: null\n", "providers:\n  sample:\n    models: null\nmodel_pools:\n  default: null\n", "null\n"} {
+		if _, err := editConfigYAMLForAdd([]byte(content), edit); err != nil {
+			t.Fatalf("null containers: %v", err)
+		}
+	}
+	for _, content := range []string{"[]\n", "providers: []\n", "providers:\n  sample:\n    models: []\n", "model_pools:\n  default: {}\n"} {
+		if _, err := editConfigYAMLForAdd([]byte(content), edit); err == nil {
+			t.Fatalf("invalid container accepted: %s", content)
+		}
 	}
 }

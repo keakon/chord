@@ -75,7 +75,7 @@ func printCatalogRefreshResult(out io.Writer, result refresh.Result) {
 			result.FromVersion, result.Revision)
 		return
 	}
-	fmt.Fprintf(out, "Catalog updated: %s -> %s (tag %s).\n", result.FromVersion, result.ToVersion, result.Revision)
+	fmt.Fprintf(out, "Catalog installed: %s -> %s (tag %s).\n", result.FromVersion, result.ToVersion, result.Revision)
 	if result.CandidateCount > 0 {
 		fmt.Fprintf(out, "  %d candidate entries came with the snapshot; they appear in discovery lists with their scope and sources, never as defaults.\n", result.CandidateCount)
 	}

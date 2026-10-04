@@ -4,7 +4,7 @@ set -euo pipefail
 # Sync the embedded model catalog snapshot from the chord-models repository.
 #
 # Usage:
-#   scripts/sync_model_catalog.sh <tag-or-revision> [path-to-chord-models]
+#   scripts/sync_model_catalog.sh <tag> [path-to-chord-models]
 #
 # The script pins the given revision, copies the four YAML source files into
 # internal/modelcatalog/data, records the pin in data/snapshot.yaml, and
@@ -17,7 +17,7 @@ cd "$repo_root"
 
 revision="${1:-}"
 if [[ -z "$revision" ]]; then
-  echo "usage: scripts/sync_model_catalog.sh <tag-or-revision> [path-to-chord-models]" >&2
+  echo "usage: scripts/sync_model_catalog.sh <tag> [path-to-chord-models]" >&2
   exit 1
 fi
 
@@ -29,17 +29,20 @@ fi
 
 default_repository="https://github.com/keakon/chord-models"
 
-if ! git -C "$repo" rev-parse --verify --quiet "${revision}^{commit}" >/dev/null; then
+if ! git -C "$repo" rev-parse --verify --quiet "refs/tags/${revision}^{commit}" >/dev/null; then
   echo "sync_model_catalog: revision $revision does not exist in $repo" >&2
   exit 1
 fi
 
+# Validate the entire tagged source set before changing the embedded snapshot.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+git -C "$repo" archive "refs/tags/$revision" | tar -x -C "$tmp"
+go run ./cmd/modelcatalog-gen -dir "$tmp" -validate -revision "$revision"
+
 data_dir="internal/modelcatalog/data"
 for file in catalog.yaml endpoints.yaml models.yaml bindings.yaml; do
-  if ! git -C "$repo" show "${revision}:${file}" >"${data_dir}/${file}"; then
-    echo "sync_model_catalog: $file is missing from $revision" >&2
-    exit 1
-  fi
+  cp "$tmp/$file" "$data_dir/$file"
 done
 
 if repository="$(git -C "$repo" remote get-url origin 2>/dev/null)" && [[ -n "$repository" ]]; then
@@ -60,7 +63,7 @@ repository: ${repository}
 revision: ${revision}
 EOF
 
-go run ./cmd/modelcatalog-gen
+go run ./cmd/modelcatalog-gen -revision "$revision"
 
 changed="$(git status --porcelain -- "${data_dir}" internal/modelcatalog/catalog.json)"
 if [[ -z "$changed" ]]; then

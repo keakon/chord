@@ -1,7 +1,7 @@
 // Package gen builds the committed catalog artifact from the YAML source
-// files under internal/modelcatalog/data. It runs at maintenance time only:
-// the runtime reads the committed catalog.json through go:embed and never
-// depends on this package.
+// files under internal/modelcatalog/data or a fetched source snapshot. Startup
+// reads catalog.json through go:embed; explicit refresh uses this package to
+// validate upstream sources before installing them.
 //
 // The generated artifact is byte-stable: entries are sorted by identity, map
 // keys are sorted by the encoder, and the sources must pass the same
@@ -25,6 +25,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/modelcatalog"
 )
 
@@ -94,6 +95,7 @@ type endpointSource struct {
 	RequestURL string      `yaml:"request_url"`
 	AuthMethod string      `yaml:"auth_method"`
 	EnvVar     string      `yaml:"env_var"`
+	Compress   string      `yaml:"compress"`
 	Docs       []sourceRef `yaml:"docs"`
 }
 
@@ -103,17 +105,29 @@ type costSource struct {
 	Currency         string    `yaml:"currency"`
 	Checked          string    `yaml:"checked"`
 	Source           sourceRef `yaml:"source"`
+	Notes            string    `yaml:"notes"`
 }
 
 type modelSource struct {
-	ID               string      `yaml:"id"`
-	Context          int         `yaml:"context"`
-	Input            int         `yaml:"input"`
-	Output           int         `yaml:"output"`
-	InputModalities  []string    `yaml:"input_modalities"`
-	ReasoningOptions []string    `yaml:"reasoning_options"`
-	Cost             *costSource `yaml:"cost"`
-	Sources          []sourceRef `yaml:"sources"`
+	ID               string               `yaml:"id"`
+	Released         string               `yaml:"released"`
+	CodingSources    []sourceRef          `yaml:"coding_sources"`
+	Connection       *connectionSource    `yaml:"connection"`
+	Context          int                  `yaml:"context"`
+	Input            int                  `yaml:"input"`
+	Output           int                  `yaml:"output"`
+	InputModalities  []string             `yaml:"input_modalities"`
+	ReasoningOptions []string             `yaml:"reasoning_options"`
+	Cost             *costSource          `yaml:"cost"`
+	Sources          []sourceRef          `yaml:"sources"`
+	ConfigProfile    *configProfileSource `yaml:"config_profile"`
+}
+
+type connectionSource struct {
+	RequestURL  string      `yaml:"request_url"`
+	WireModelID string      `yaml:"wire_model_id"`
+	EnvVar      string      `yaml:"env_var"`
+	Sources     []sourceRef `yaml:"sources"`
 }
 
 type variantSource struct {
@@ -132,11 +146,27 @@ type responsesSource struct {
 }
 
 type bindingSource struct {
-	Endpoint    string                   `yaml:"endpoint"`
-	WireModelID string                   `yaml:"wire_model_id"`
-	ModelID     string                   `yaml:"model_id"`
-	Variants    map[string]variantSource `yaml:"variants"`
-	Responses   *responsesSource         `yaml:"responses"`
+	Endpoint        string                      `yaml:"endpoint"`
+	WireModelID     string                      `yaml:"wire_model_id"`
+	ModelID         string                      `yaml:"model_id"`
+	Variants        map[string]variantSource    `yaml:"variants"`
+	Responses       *responsesSource            `yaml:"responses"`
+	Limit           *modelcatalog.LimitOverride `yaml:"limit"`
+	InputModalities []string                    `yaml:"input_modalities"`
+	ConfigProfile   *configProfileSource        `yaml:"config_profile"`
+}
+
+type configProfileSource struct {
+	Model      map[string]any           `yaml:"model"`
+	Compat     map[string]any           `yaml:"compat"`
+	Compaction *compactionProfileSource `yaml:"compaction"`
+	Sources    []sourceRef              `yaml:"sources"`
+}
+
+type compactionProfileSource struct {
+	Threshold *float64 `yaml:"threshold"`
+	Reminder  *float64 `yaml:"reminder"`
+	Notes     string   `yaml:"notes"`
 }
 
 // Load reads and validates the source files in dir and returns the sorted,
@@ -144,6 +174,9 @@ type bindingSource struct {
 func Load(dir string) (*modelcatalog.Catalog, error) {
 	var meta catalogSource
 	if err := decodeYAMLFile(filepath.Join(dir, fileNameCatalog), &meta); err != nil {
+		return nil, err
+	}
+	if err := modelcatalog.ValidateVersion(meta.Version); err != nil {
 		return nil, err
 	}
 	var endpointsFile endpointsFile
@@ -168,6 +201,9 @@ func Load(dir string) (*modelcatalog.Catalog, error) {
 	}
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("catalog sources fail structural validation: %w", err)
+	}
+	if err := config.ValidateCatalogProfiles(c); err != nil {
+		return nil, err
 	}
 	return c, nil
 }
@@ -201,6 +237,9 @@ func Generate(dir string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if _, err := LoadCandidates(dir, c); err != nil {
+		return nil, err
+	}
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal catalog: %w", err)
@@ -224,12 +263,35 @@ func buildCatalog(version string, source *modelcatalog.CatalogSource, endpointsS
 			RequestURL: e.RequestURL,
 			AuthMethod: e.AuthMethod,
 			EnvVar:     e.EnvVar,
+			Compress:   e.Compress,
 			Docs:       docs,
 		})
 	}
 
 	models := make([]modelcatalog.ModelFacts, 0, len(modelsSrc))
 	for _, m := range modelsSrc {
+		var connection *modelcatalog.Connection
+		if m.Connection != nil {
+			connection = &modelcatalog.Connection{RequestURL: m.Connection.RequestURL, WireModelID: m.Connection.WireModelID, EnvVar: m.Connection.EnvVar}
+			for _, s := range m.Connection.Sources {
+				if err := s.validate(fmt.Sprintf("model %q connection", m.ID)); err != nil {
+					return nil, err
+				}
+				connection.Sources = append(connection.Sources, modelcatalog.Source{URL: s.URL, Checked: s.Checked})
+			}
+		}
+		if m.Released != "" {
+			if err := checkDate(m.Released, fmt.Sprintf("model %q release", m.ID)); err != nil {
+				return nil, err
+			}
+		}
+		codingSources := make([]modelcatalog.Source, 0, len(m.CodingSources))
+		for _, s := range m.CodingSources {
+			if err := s.validate(fmt.Sprintf("model %q coding evidence", m.ID)); err != nil {
+				return nil, err
+			}
+			codingSources = append(codingSources, modelcatalog.Source{URL: s.URL, Checked: s.Checked})
+		}
 		sources := make([]modelcatalog.Source, 0, len(m.Sources))
 		for _, s := range m.Sources {
 			if err := s.validate(fmt.Sprintf("model %q source", m.ID)); err != nil {
@@ -247,6 +309,9 @@ func buildCatalog(version string, source *modelcatalog.CatalogSource, endpointsS
 		}
 		models = append(models, modelcatalog.ModelFacts{
 			ID:               m.ID,
+			Released:         m.Released,
+			CodingSources:    codingSources,
+			Connection:       connection,
 			Context:          m.Context,
 			Input:            m.Input,
 			Output:           m.Output,
@@ -254,15 +319,19 @@ func buildCatalog(version string, source *modelcatalog.CatalogSource, endpointsS
 			ReasoningOptions: slices.Clone(m.ReasoningOptions),
 			Cost:             cost,
 			Sources:          sources,
+			Profile:          convertConfigProfile(m.ConfigProfile),
 		})
 	}
 
 	bindings := make([]modelcatalog.Binding, 0, len(bindingsSrc))
 	for _, b := range bindingsSrc {
 		converted := modelcatalog.Binding{
-			Endpoint:    b.Endpoint,
-			WireModelID: b.WireModelID,
-			ModelID:     b.ModelID,
+			Endpoint:        b.Endpoint,
+			WireModelID:     b.WireModelID,
+			ModelID:         b.ModelID,
+			Limit:           b.Limit,
+			InputModalities: slices.Clone(b.InputModalities),
+			Profile:         convertConfigProfile(b.ConfigProfile),
 		}
 		if len(b.Variants) > 0 {
 			converted.Variants = make(map[string]modelcatalog.Variant, len(b.Variants))
@@ -332,7 +401,23 @@ func convertCost(c costSource, where string) (*modelcatalog.Cost, error) {
 		Currency:         c.Currency,
 		Checked:          c.Checked,
 		Source:           modelcatalog.Source{URL: c.Source.URL, Checked: c.Source.Checked},
+		Notes:            c.Notes,
 	}, nil
+}
+
+func convertConfigProfile(src *configProfileSource) *modelcatalog.ConfigProfile {
+	if src == nil {
+		return nil
+	}
+	p := &modelcatalog.ConfigProfile{Model: src.Model, Compat: src.Compat, Compaction: nil}
+	for _, s := range src.Sources {
+		p.Sources = append(p.Sources, modelcatalog.Source{URL: s.URL, Checked: s.Checked})
+	}
+	if src.Compaction != nil {
+		c := src.Compaction
+		p.Compaction = &modelcatalog.CompactionProfile{Threshold: c.Threshold, Reminder: c.Reminder, Notes: c.Notes}
+	}
+	return p
 }
 
 func decodeYAMLFile[T any](path string, out *T) error {

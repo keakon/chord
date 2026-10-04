@@ -85,6 +85,7 @@ type PoolRefOrigin struct {
 type SourceIndex struct {
 	Providers  map[string]ProviderOrigin
 	ModelPools map[string][]PoolRefOrigin
+	Compaction map[string][]Origin
 }
 
 // nullableModelBlocks lists the model blocks whose explicit null clears the
@@ -99,6 +100,9 @@ var nullableModelBlocks = []string{
 	"modalities",
 	"compat",
 	"variants",
+	"compaction",
+	"parallel_tool_calls",
+	"store",
 }
 
 func isNullableModelBlock(key string) bool {
@@ -127,6 +131,7 @@ func BuildSourceIndex(layers ...ConfigLayer) (*SourceIndex, error) {
 	idx := &SourceIndex{
 		Providers:  make(map[string]ProviderOrigin),
 		ModelPools: make(map[string][]PoolRefOrigin),
+		Compaction: make(map[string][]Origin),
 	}
 	for _, layer := range layers {
 		if len(layer.Data) == 0 {
@@ -263,6 +268,25 @@ func (b *sourceIndexBuilder) walkDocument(root *yaml.Node) {
 	top := root.Content[0]
 	for _, e := range mappingEntries(top) {
 		switch e.Key {
+		case "context":
+			for _, block := range mappingEntries(e.Val) {
+				if block.Key != "compaction" {
+					continue
+				}
+				for _, leaf := range mappingEntries(block.Val) {
+					// Invalid fractions are discarded by config loading. They must
+					// also be absent here so they cannot suppress catalog defaults.
+					var value float64
+					if err := leaf.Val.Decode(&value); err != nil {
+						continue
+					}
+					if leaf.Key == "threshold" && !validCompactionFraction(value) ||
+						leaf.Key == "reminder" && !validCompactionReminder(value) {
+						continue
+					}
+					b.idx.Compaction[leaf.Key] = append(b.idx.Compaction[leaf.Key], b.origin(leaf.KeyNode))
+				}
+			}
 		case "providers":
 			b.walkProviders(e.Val)
 		case "model_pools":
@@ -624,6 +648,9 @@ func (rc *ResolvedConfig) addIndexLayer(layer ConfigLayer) {
 // mergeSourceIndex folds one layer's entries into an existing index. Later
 // calls append higher-priority layers; declarations keep their build order.
 func mergeSourceIndex(dst, src *SourceIndex) {
+	for key, origins := range src.Compaction {
+		dst.Compaction[key] = append(dst.Compaction[key], origins...)
+	}
 	for name, po := range src.Providers {
 		existing, ok := dst.Providers[name]
 		if !ok {

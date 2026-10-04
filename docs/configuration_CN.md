@@ -144,9 +144,9 @@ openai:
 
 - `gpt-5.6-terra` 和 `gpt-5.6-luna` 的配法相同；`models` 的 key 与 `model_pools` 的 ref 要用同一个模型 ID。
 - 这份片段面向**官方 OpenAI API**，因此直接声明 `1050000` 全窗口且不写
-  `input`：Chord 按 `context` 减去模型声明的 `limit.output` 推导可用输入预算
-  （此处为 `1050000 - 128000 = 922000`）；只有未声明 `limit.output` 的模型才回退到
-  默认输出上限（`64000`）。这里超过 272K 是计价阈值，不是输入上限，因此**不要**
+  `input`：Chord 按 `context` 减去实际请求输出预算推导可用输入预算
+  （此处为 `1050000 - min(64000, 128000) = 986000`）。独立声明的 `input`
+  上限仍然优先。这里超过 272K 是计价阈值，不是输入上限，因此**不要**
   再补 `input: 272000`。
 - Codex OAuth 与 API 使用相同的模型窗口：GPT-5.4 / 5.6 / 6 在 Codex 上同样是
   `1050000 / 922000 / 128000` 档位（见下方 [OpenAI Codex preset](#openai-codex-preset)）。
@@ -161,7 +161,7 @@ openai:
 按这个顺序理解模型限制：
 
 1. `limit.context` 是总窗口。对大多数模型，只要「输入 + 请求输出」放得进这个数字即可。
-2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 按 `limit.context` 减去模型自身的 `limit.output` 推导可用输入预算，只有模型未声明 `limit.output` 时才回退到全局默认输出上限（`max_output_tokens`，默认 `64000`）。显式声明的 `limit.input` 始终按原值使用。
+2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 按 `limit.context` 减去客户端计划输出预算推导输入预算（正数 `limit.output` 会约束 `max_output_tokens`，后者默认 `64000`）。显式声明的 `limit.input` 始终按原值使用。
 3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此在按可用上下文继续收缩前，实际请求上限为 `min(64000, limit.output)`。如需不同的全局上限，请显式设置 `max_output_tokens`。若某模型实际输出能力低于 `64000` 且未配置 `limit.output`，在服务端校验 `max_tokens` 的后端会直接拒绝这类请求，请为该模型声明 `limit.output`，或调低全局 `max_output_tokens`。
 
 Responses 和 Chat Completions 服务商的 `parallel_tool_calls` 默认都是 `true`。只有后端或工作流要求串行工具调用时，才在服务商、模型或变体上设为 `false`。部分网关要求特定客户端标识时，还可以配置服务商级 `user_agent`。
@@ -214,7 +214,7 @@ providers:
 ```
 
 各 Codex 模型的额度由已验证目录供给（这些模型为 `1050000 / 922000 / 128000`，
-922K 输入预算由 `context` − `output` 推导，它们不公布独立输入上限）；
+目录记录的显式 922K 输入额度仍然优先）；
 向导给出的数值不够用时，用 `chord config show --catalog` 查询，不要手工照抄数字。
 
 `preset: codex` 可使用 `auth.yaml` 中的 OpenAI / ChatGPT OAuth 凭据。OAuth 条目通常是 mapping：
@@ -335,7 +335,26 @@ providers:
 
 ## 内置模型目录
 
-Chord 内置一份小型的版本化目录，收录托管 preset（`openai`、`anthropic`、`gemini`、`codex`）的已核验端点契约与模型事实。目录随二进制分发，只读且完全离线：不会访问网络，也永远不会覆盖你写下的内容。
+Chord 内置一份版本化目录，收录编程模型事实、官方 API 接入信息，以及托管 preset（`openai`、`anthropic`、`gemini`、`codex`）的端点契约。目录随二进制分发，只读且完全离线：不会访问网络，也永远不会覆盖你写下的内容。
+
+先查看模型，再复制添加命令：
+
+```bash
+chord config show --catalog
+chord config add openai/gpt-6.1-sol
+```
+
+目录会列出全部已核验模型，包括没有托管 preset 的模型。`add` 可以直接
+创建首次配置，按官方文档填写 API 地址、请求模型名和密钥环境变量，并
+提示你设置哪个变量。目录不会保存或复制 API 密钥。已有 provider 会继续
+使用原地址和凭据。OAuth 模型还需执行提示中的 `chord auth <provider>` 登录。
+
+官方接入信息只用于生成配置，不表示已完成真实请求验证，也不提供端点
+专用的推理档位或字段发送规则。需要业务空间地址、自部署地址的模型仍需
+显式传入 `--url`；自定义请求模型名可用 `--catalog <vendor/model>` 借用事实。
+用 `chord config show --catalog --json` 查看完整来源、发布日期、价格适用
+范围和刷新得到的候选。候选不会填充运行默认值。获取目录更新请执行
+`chord config refresh-catalog`；普通查看和添加操作都可离线完成。
 
 托管 preset 代表一份已核验的端点契约。provider 使用托管 preset 时，Chord 只在字段留空处填充 `type`、`api_url` 和 `auth_scheme`——你显式写的值始终优先；与契约冲突的取值（例如 preset 不使用的 `auth_scheme`，或非 OAuth preset 上的 `token_url`）会被判为配置错误。如果要把 provider 指向其他端点，删除 `preset` 并显式配置端点即可。
 
@@ -659,12 +678,15 @@ providers:
   显式配置的 `context` 始终优先。
 - `limit.input`：provider 单独公布的输入上限。显式声明的值始终按原值使用，
   即使与 `limit.output` 在窗口内不满足加和关系（`input + output` 超过
-  `context`）也不收敛。省略时，Chord 按 `limit.context` 减去模型声明的
-  `limit.output` 推导 prompt 预算（1.05M GPT 家族即 1050000 − 128000 =
-  922000）；只有模型未声明 `limit.output` 时，才回退到有效默认输出上限
-  （`max_output_tokens`，默认 `64000`）。
-- `limit.output`：模型输出能力上限。实际请求还受全局
-  `max_output_tokens` 和总窗口剩余空间限制。
+  `context`）也不收敛。省略时，Chord 按 `limit.context` 减去客户端计划
+  输出预算（`max_output_tokens`，默认 `64000`，受正数 `limit.output`
+  约束）推导输入预算。即使模型的最大输出等于整个上下文窗口，也不会
+  占满输入预算。例如 1M 总窗口预留 64K 请求输出后，输入预算为 936K。
+  此计算不会改变显式 `limit.input`。该预留量是本地规划预算，不代表服务端
+  强制执行的输出上限：Responses 默认不发送 `max_output_tokens`，只有
+  `compat.responses.send_max_output_tokens: true` 才会发送该字段。
+- `limit.output`：模型输出能力上限。Chord 根据全局 `max_output_tokens`
+  和总窗口剩余空间计算输出预算；只有发送输出限制字段的协议才会将该上限传给服务端。
 - `reasoning.effort`：推理深度。Chord 不做本地白名单校验，provider 支持的
   取值原样到达上游；Responses 线路发送前还会额外规范化空格和大小写。
   - Chat Completions 发送顶层 `reasoning_effort`。
@@ -833,11 +855,11 @@ providers:
 
 ## 输出 token 上限
 
-`max_output_tokens` 设置全局输出 token 请求上限，默认值为 `64000`。实际请求上限仍受各模型 `limit.output` 和可用总上下文（已知时为 `limit.context`）限制，因此所有 provider 都会取适用限制中的最小值。
+`max_output_tokens` 设置全局输出 token 请求上限，默认值为 `64000`。实际请求上限仍受各模型 `limit.output` 和可用总上下文（已知时为 `limit.context`）限制，Chord 按适用限制中的最小值规划输出预算；只有发送输出限制字段的协议才会将该上限传给服务端。
 
 Responses provider 默认保持稳定的 Responses 请求形态，HTTP 和 WebSocket 请求都不会发送 `max_output_tokens` 字段。对于需要显式服务端输出上限的兼容网关，可以在 provider 下设置 `compat.responses.send_max_output_tokens: true`；其余 Responses 字段开关也位于同一对象下。全局值在不发送到 wire 时仍会影响 Chord 侧预算和兼容性检查。
 
-`limit.input` 是另一回事：只有当模型除了总上下文窗口外，还额外存在输入上限时才需要配置。降低 `max_output_tokens` 有助于控制成本、降低超长输出失败风险，但**不会**提升 provider 的输入上限，也不能替代 `limit.input`。
+`limit.input` 是另一回事：只有当模型除了总上下文窗口外，还额外存在输入上限时才需要配置。对于发送输出限制字段的协议，降低 `max_output_tokens` 有助于控制成本、降低超长输出失败风险。未声明独立 `limit.input` 时，降低该值也会增加推导的输入预算，但不会提升 provider 明确公布的输入上限，也不能替代 `limit.input`。
 
 ```yaml
 max_output_tokens: 64000
@@ -1410,7 +1432,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | 字段              | 类型   | 说明                                                                                                              |
 | ----------------- | ------ | ----------------------------------------------------------------------------------------------------------------- |
 | `catalog` | string / false | 显式绑定目录模型 ID；省略时只在所属 preset 下按模型名精确匹配，`false` 关闭该模型的目录填充。 |
-| `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，Chord 按总窗口减去模型声明的 `limit.output` 推导输入预算（模型未声明输出上限时回退到 `max_output_tokens` 默认值）。                                       |
+| `limit.context`   | int    | 已知时表示总请求窗口上限；未配置 `limit.input` 时，Chord 按总窗口减去客户端计划输出预算推导输入预算（`max_output_tokens` 受正数 `limit.output` 约束）。                                       |
 | `limit.input`     | int    | provider 单独公布输入上限时填写。Chord 用它判断何时在 prompt 过大前压缩或恢复重试。                |
 | `limit.output`    | int    | 输出 token 上限；运行时还会受 `max_output_tokens` 限制。                                                          |
 | `compaction`      | object | 该模型的自定义压缩参数：`compaction.threshold`（自动压缩使用率阈值；`0` 对该模型禁用）与 `compaction.reminder`（压力提醒线；缺省时按 `threshold` 派生，`-1` 只关闭提醒）。未设字段继承全局 `context.compaction.*`。越界值会被拒绝并回退继承全局值。推导方式与调参建议见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。 |

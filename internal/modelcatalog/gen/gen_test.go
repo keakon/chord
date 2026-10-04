@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/modelcatalog"
 )
 
 const (
@@ -78,6 +80,23 @@ func TestGenerateValidSources(t *testing.T) {
 	endpoints, ok := decoded["endpoints"].([]any)
 	if !ok || len(endpoints) != 1 {
 		t.Fatalf("endpoints = %#v, want one entry", decoded["endpoints"])
+	}
+}
+
+func TestGenerateRejectsGlobalCompactionFields(t *testing.T) {
+	for key, value := range map[string]string{
+		"profile":              "auto",
+		"reserved":             "1000",
+		"retain_recent_tokens": "1000",
+		"model_driven":         "true",
+	} {
+		t.Run(key, func(t *testing.T) {
+			models := validModels + "    config_profile:\n      compaction:\n        " + key + ": " + value + "\n"
+			_, err := Generate(writeSources(t, validCatalog, validEndpoints, models, validBindings))
+			if err == nil || !strings.Contains(err.Error(), "field "+key+" not found") {
+				t.Fatalf("expected unsupported compaction field error, got %v", err)
+			}
+		})
 	}
 }
 
@@ -289,5 +308,74 @@ func TestGenerateRejectsInvalidSources(t *testing.T) {
 				t.Fatalf("error = %v, want it to contain %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestGenerateMetadataAndBindingOverrides(t *testing.T) {
+	models := strings.Replace(validModels, "    context: 128000", `    released: "2026-04-28"
+    coding_sources:
+      - url: https://example.invalid/coding
+        checked: "2026-10-04"
+    connection:
+      request_url: https://example.invalid/v1/chat/completions
+      wire_model_id: test-model
+      env_var: SAMPLE_API_KEY
+      sources:
+        - url: https://example.invalid/connect
+          checked: "2026-10-04"
+    context: 128000`, 1)
+	bindings := validBindings + "    limit:\n      context: 64000\n      input: 0\n      output: 16000\n    input_modalities: [text]\n"
+	dir := writeSources(t, validCatalog, validEndpoints, models, bindings)
+	data, err := Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var catalog modelcatalog.Catalog
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	m := catalog.Models[0]
+	got := catalog.Bindings[0].ApplyTo(m)
+	if m.Connection == nil || m.Connection.EnvVar != "SAMPLE_API_KEY" || m.Released != "2026-04-28" || len(m.CodingSources) != 1 || got.Context != 64000 || got.Output != 16000 || got.Input != 0 {
+		t.Fatalf("round trip lost metadata or limits: %+v, %+v", m, got)
+	}
+	for _, bad := range []string{"released: 2026-02-30", "released: yesterday"} {
+		invalid := strings.Replace(models, `released: "2026-04-28"`, bad, 1)
+		if _, err := Generate(writeSources(t, validCatalog, validEndpoints, invalid, bindings)); err == nil {
+			t.Fatalf("accepted %s", bad)
+		}
+	}
+}
+
+func TestGenerateConfigProfileRoundTrip(t *testing.T) {
+	models := strings.Replace(validModels, "    context: 128000", `    config_profile:
+      model:
+        prompt_cache:
+          mode: auto
+      compat:
+        reasoning_continuity:
+          reasoning_replay: all
+      compaction:
+        threshold: 0.4
+        reminder: 0.3
+        notes: keep the recent task boundary
+      sources:
+        - url: https://example.invalid/profile
+          checked: "2026-10-04"
+    context: 128000`, 1)
+	data, err := Generate(writeSources(t, validCatalog, validEndpoints, models, validBindings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c modelcatalog.Catalog
+	if err := json.Unmarshal(data, &c); err != nil {
+		t.Fatal(err)
+	}
+	profile := c.Models[0].Profile
+	if profile == nil || profile.Model["prompt_cache"] == nil || profile.Compaction == nil || profile.Compaction.Threshold == nil || *profile.Compaction.Threshold != 0.4 {
+		t.Fatalf("profile lost: %#v", profile)
 	}
 }

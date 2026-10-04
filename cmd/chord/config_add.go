@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,12 +18,10 @@ import (
 	"github.com/keakon/chord/internal/modelcatalog"
 )
 
-// configAddCommand is the first write slice for daily model onboarding. It is
-// offline by default, keeps the built-in catalog as the source of verified
-// facts, and writes only selections and explicit user values: a pool reference
-// for preset-bound models, a `catalog:` borrow for custom endpoints, never
-// materialized defaults. Non-interactive by design (the first slice per the
-// catalog plan); the interactive selector arrives with the editor work.
+// configAddOptions controls offline model onboarding. Preset-bound models
+// write pool references; other connections inherit same-protocol recipes
+// through catalog references. Request compression remains an explicit choice.
+// The command is non-interactive.
 type configAddOptions struct {
 	url            string
 	catalogID      string
@@ -39,10 +38,18 @@ func newConfigAddCmd() *cobra.Command {
 		Short: "Add a model reference to config.yaml from the model catalog",
 		Long: `Add a model reference to config.yaml and append it to a model pool.
 
+Select a catalog ID from chord config show --catalog, then run:
+  chord config add openai/gpt-6.1-sol
+
+For a new provider, Chord fills the documented API URL and records its API
+key environment variable. This also creates your first config.yaml. Export
+the API key before starting Chord. Existing providers keep their URL and
+credentials. Models without a documented connection still require --url.
+
 The model resolves against the verified model catalog. A wire name bound to
 the provider's preset needs nothing else: context, modalities, reasoning
 variants and field send rules fill in at load. For custom endpoints, pass
---catalog <id> to borrow the protocol-independent facts of a catalog model
+--catalog <id> to inherit the same-protocol recipe of a catalog model
 under your own wire name.
 
 When the wire name matches nothing, the closest verified models are listed
@@ -96,10 +103,6 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 	if err != nil {
 		return fmt.Errorf("resolve config path: %w", err)
 	}
-	if _, statErr := os.Stat(globalPath); errors.Is(statErr, os.ErrNotExist) {
-		return fmt.Errorf("no config.yaml at %s; run `chord` once in an interactive terminal to complete initial setup", globalPath)
-	}
-
 	if opts.refreshCatalog {
 		// An explicit user opt-in to network access. A failure keeps the
 		// catalog already in effect — the add itself stays fully usable.
@@ -113,6 +116,10 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 		return fmt.Errorf("load config: %w", err)
 	}
 	providerCfg, providerExists := rc.Config.Providers[providerName]
+	providerCfg, wireModel, opts, err = prepareCatalogAdd(ref, providerCfg, providerExists, wireModel, opts)
+	if err != nil {
+		return err
+	}
 	if providerExists && strings.TrimSpace(opts.url) != "" &&
 		!strings.EqualFold(strings.TrimSpace(opts.url), strings.TrimSpace(providerCfg.APIURL)) {
 		return fmt.Errorf("provider %q already points at %s; --url %s would change its endpoint", providerName, providerCfg.APIURL, opts.url)
@@ -153,33 +160,29 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 		edit.providerNew = true
 		edit.providerType = strings.TrimSpace(config.InferProviderTypeFromAPIURL(strings.TrimSpace(opts.url)))
 		edit.apiURL = strings.TrimSpace(opts.url)
+		edit.preset = providerCfg.Preset
 		if edit.providerType == "" {
 			return fmt.Errorf("cannot infer a provider type from %q; use a URL ending in /responses, /messages, /chat/completions or /models", opts.url)
 		}
 	}
 
 	produce := func(current []byte) ([]byte, error) {
-		return editConfigYAMLForAdd(current, edit)
+		edited, err := editConfigYAMLForAdd(current, edit)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateCandidateConfig(out, edited, edit); err != nil {
+			return nil, err
+		}
+		return edited, nil
 	}
-
-	// Validate the candidate exactly as it will exist on disk: run the real
-	// resolver over the edited bytes before touching the live file.
-	currentBytes, err := os.ReadFile(globalPath)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", globalPath, err)
-	}
-	edited, err := produce(currentBytes)
-	if err != nil {
-		return err
-	}
-	if err := validateCandidateConfig(out, edited, providerName, wireModel); err != nil {
-		return err
-	}
-
-	if err := config.UpdateConfigFileLocked(globalPath, produce); err != nil {
+	if err := config.CreateOrUpdateConfigFileLocked(globalPath, produce); err != nil {
 		return fmt.Errorf("update %s: %w", globalPath, err)
 	}
 	printConfigAddSummary(out, edit, mode, poolName, poolRef)
+	if providerCfg.Preset == "codex" {
+		fmt.Fprintf(out, "Sign in with: chord auth %s\n", providerName)
+	}
 
 	if opts.envVar != "" {
 		if err := addProviderEnvCredential(providerName, strings.TrimSpace(opts.envVar), out); err != nil {
@@ -351,29 +354,27 @@ func catalogScopeMatches(scope, preset, apiURL string) bool {
 }
 
 func addProviderEnvCredential(providerName, envVar string, out io.Writer) error {
-	state, err := existingCredentialStateForProvider(providerName)
-	if err != nil {
-		return err
-	}
-	if state.HasCredentials {
-		fmt.Fprintf(out, "Provider %q already has credentials in auth.yaml; --api-key-env ignored.\n", providerName)
-		return nil
-	}
 	authPath, err := config.AuthPath()
 	if err != nil {
 		return fmt.Errorf("resolve auth path: %w", err)
 	}
-	if _, err := config.UpsertAPIKeyCredentialInFile(authPath, providerName, "$"+envVar); err != nil {
+	changed, err := config.AddAPIKeyCredentialIfUndeclared(authPath, providerName, "$"+envVar)
+	if err != nil {
 		return fmt.Errorf("write auth.yaml: %w", err)
 	}
+	if !changed {
+		fmt.Fprintf(out, "Provider %q already declares credentials in auth.yaml; --api-key-env ignored.\n", providerName)
+		return nil
+	}
 	fmt.Fprintf(out, "Wrote $%s for provider %q in %s.\n", envVar, providerName, authPath)
+	fmt.Fprintf(out, "Set the key before starting Chord: export %s=\"your-api-key\"\n", envVar)
 	return nil
 }
 
 // validateCandidateConfig resolves the edited bytes through the real loader
 // and fails on any error-level diagnostic, so an unusable candidate never
 // reaches disk.
-func validateCandidateConfig(out io.Writer, edited []byte, providerName, wireModel string) error {
+func validateCandidateConfig(out io.Writer, edited []byte, edit configAddEdit) error {
 	tmp, err := os.CreateTemp("", "chord-config-add-*.yaml")
 	if err != nil {
 		return fmt.Errorf("create candidate temp file: %w", err)
@@ -400,7 +401,26 @@ func validateCandidateConfig(out io.Writer, edited []byte, providerName, wireMod
 		}
 		return fmt.Errorf("candidate config resolution failed")
 	}
-	printConfigAddPreview(out, candidate, providerName, wireModel)
+	provider, exists := candidate.Config.Providers[edit.providerName]
+	if !exists {
+		return fmt.Errorf("candidate config discarded provider %q", edit.providerName)
+	}
+	if edit.providerNew && (provider.APIURL != edit.apiURL || provider.Type != edit.providerType || provider.Preset != edit.preset) {
+		return fmt.Errorf("candidate config discarded the selected endpoint for %q", edit.providerName)
+	}
+	model, exists := provider.Models[edit.wireModel]
+	if !exists || (edit.borrowID != "" && (model.Catalog == nil || model.Catalog.ID != edit.borrowID)) {
+		return fmt.Errorf("candidate config discarded model %q", edit.poolRef)
+	}
+	if !slices.Contains(candidate.Config.ModelPools[edit.poolName], edit.poolRef) {
+		return fmt.Errorf("candidate config discarded pool reference %q", edit.poolRef)
+	}
+	for _, diagnostic := range candidate.Diagnostics {
+		if diagnostic.Severity == config.DiagnosticSeverityWarning {
+			fmt.Fprintf(out, "Warning: %s\n", redactShowDiagnostic(diagnostic).String())
+		}
+	}
+	printConfigAddPreview(out, candidate, edit.providerName, edit.wireModel)
 	return nil
 }
 
@@ -433,7 +453,7 @@ func printConfigAddSummary(out io.Writer, edit configAddEdit, mode configAddMode
 	case configAddExact:
 		fmt.Fprintf(out, "  %s: verified preset binding; facts fill in at load, no model entry written\n", poolRef)
 	case configAddBorrow:
-		fmt.Fprintf(out, "  providers.%s.models.%s.catalog: %s (borrows protocol-independent facts only)\n", edit.providerName, edit.wireModel, edit.borrowID)
+		fmt.Fprintf(out, "  providers.%s.models.%s.catalog: %s (inherits model recipe for the same protocol)\n", edit.providerName, edit.wireModel, edit.borrowID)
 	}
 	fmt.Fprintf(out, "  model_pools.%s: append %s\n", poolName, poolRef)
 }
@@ -444,6 +464,7 @@ type configAddEdit struct {
 	providerNew  bool
 	providerType string
 	apiURL       string
+	preset       string
 	borrowID     string
 	poolName     string
 	poolRef      string
@@ -461,22 +482,51 @@ func editConfigYAMLForAdd(current []byte, e configAddEdit) ([]byte, error) {
 	if err := rejectAnchoredConfig(&doc); err != nil {
 		return nil, err
 	}
-	root := documentRootMapping(&doc)
-
-	providersNode := ensureMappingChild(root, "providers")
-	providerNode := ensureMappingChild(providersNode, e.providerName)
+	root, err := documentRootMapping(&doc)
+	if err != nil {
+		return nil, err
+	}
+	providersNode, err := ensureMappingChild(root, "providers")
+	if err != nil {
+		return nil, err
+	}
+	if e.providerNew && mappingValue(providersNode, e.providerName) != nil {
+		return nil, fmt.Errorf("provider %q was created during this edit; run the command again to use its current endpoint", e.providerName)
+	}
+	providerNode, err := ensureMappingChild(providersNode, e.providerName)
+	if err != nil {
+		return nil, err
+	}
 	if e.providerNew {
-		setMappingScalar(providerNode, "type", e.providerType)
-		setMappingScalar(providerNode, "api_url", e.apiURL)
+		for _, field := range []struct{ key, value string }{{"preset", e.preset}, {"type", e.providerType}, {"api_url", e.apiURL}} {
+			if field.value != "" {
+				if err := setMappingScalar(providerNode, field.key, field.value); err != nil {
+					return nil, err
+				}
+			}
+		}
 	}
 	if e.borrowID != "" {
-		modelsNode := ensureMappingChild(providerNode, "models")
-		modelNode := ensureMappingChild(modelsNode, e.wireModel)
-		setMappingScalar(modelNode, "catalog", e.borrowID)
+		modelsNode, err := ensureMappingChild(providerNode, "models")
+		if err != nil {
+			return nil, err
+		}
+		modelNode, err := ensureMappingChild(modelsNode, e.wireModel)
+		if err != nil {
+			return nil, err
+		}
+		if err := setMappingScalar(modelNode, "catalog", e.borrowID); err != nil {
+			return nil, err
+		}
 	}
-
-	poolsNode := ensureMappingChild(root, "model_pools")
-	poolNode := ensureSequenceChild(poolsNode, e.poolName)
+	poolsNode, err := ensureMappingChild(root, "model_pools")
+	if err != nil {
+		return nil, err
+	}
+	poolNode, err := ensureSequenceChild(poolsNode, e.poolName)
+	if err != nil {
+		return nil, err
+	}
 	appendSequenceValue(poolNode, e.poolRef)
 
 	var edited bytes.Buffer
@@ -511,26 +561,22 @@ func rejectAnchoredConfig(n *yaml.Node) error {
 
 // documentRootMapping returns the document's root mapping, building an empty
 // one for a blank file.
-func documentRootMapping(doc *yaml.Node) *yaml.Node {
-	if doc.Kind == 0 {
+func documentRootMapping(doc *yaml.Node) (*yaml.Node, error) {
+	if doc.Kind == 0 || (doc.Kind == yaml.DocumentNode && len(doc.Content) == 0) {
 		doc.Kind = yaml.DocumentNode
 		doc.Content = []*yaml.Node{{Kind: yaml.MappingNode, Tag: "!!map"}}
-		return doc.Content[0]
 	}
-	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
-		return doc
+	if doc.Kind != yaml.DocumentNode {
+		return nil, fmt.Errorf("config root must be a YAML document")
 	}
 	root := doc.Content[0]
-	if root.Kind == yaml.ScalarNode && strings.TrimSpace(root.Value) == "" {
-		root.Kind = yaml.MappingNode
-		root.Tag = "!!map"
-		root.Value = ""
-		return root
+	if root.Tag == "!!null" {
+		*root = yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", HeadComment: root.HeadComment, LineComment: root.LineComment}
 	}
 	if root.Kind != yaml.MappingNode {
-		panic("config add: config root is not a mapping")
+		return nil, fmt.Errorf("config root must be a mapping")
 	}
-	return root
+	return root, nil
 }
 
 // mappingValue returns the value node for key in a mapping, or nil.
@@ -545,44 +591,39 @@ func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
 
 // ensureMappingChild returns the mapping stored under key, creating an empty
 // one when the key is missing. A non-mapping existing value is a conflict.
-func ensureMappingChild(mapping *yaml.Node, key string) *yaml.Node {
-	if existing := mappingValue(mapping, key); existing != nil {
-		if existing.Kind != yaml.MappingNode {
-			panic(fmt.Sprintf("config add: %q already exists and is not a mapping", key))
-		}
-		return existing
-	}
-	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
-	valueNode := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-	mapping.Content = append(mapping.Content, keyNode, valueNode)
-	return valueNode
+func ensureMappingChild(mapping *yaml.Node, key string) (*yaml.Node, error) {
+	return ensureConfigChild(mapping, key, yaml.MappingNode, "!!map")
 }
 
-func setMappingScalar(mapping *yaml.Node, key, value string) {
+func ensureSequenceChild(mapping *yaml.Node, key string) (*yaml.Node, error) {
+	return ensureConfigChild(mapping, key, yaml.SequenceNode, "!!seq")
+}
+
+func ensureConfigChild(mapping *yaml.Node, key string, kind yaml.Kind, tag string) (*yaml.Node, error) {
+	if existing := mappingValue(mapping, key); existing != nil {
+		if existing.Tag == "!!null" {
+			*existing = yaml.Node{Kind: kind, Tag: tag, HeadComment: existing.HeadComment, LineComment: existing.LineComment}
+		}
+		if existing.Kind != kind {
+			return nil, fmt.Errorf("config key %q at line %d must be %s", key, existing.Line, strings.TrimPrefix(tag, "!!"))
+		}
+		return existing, nil
+	}
+	value := &yaml.Node{Kind: kind, Tag: tag}
+	mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, value)
+	return value, nil
+}
+
+func setMappingScalar(mapping *yaml.Node, key, value string) error {
 	if existing := mappingValue(mapping, key); existing != nil {
 		if existing.Kind != yaml.ScalarNode {
-			panic(fmt.Sprintf("config add: %q already exists and is not a scalar", key))
+			return fmt.Errorf("config key %q at line %d must be a scalar", key, existing.Line)
 		}
-		existing.Value = value
-		existing.Tag = "!!str"
-		return
+		existing.Value, existing.Tag = value, "!!str"
+		return nil
 	}
-	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
-	valueNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value}
-	mapping.Content = append(mapping.Content, keyNode, valueNode)
-}
-
-func ensureSequenceChild(mapping *yaml.Node, key string) *yaml.Node {
-	if existing := mappingValue(mapping, key); existing != nil {
-		if existing.Kind != yaml.SequenceNode {
-			panic(fmt.Sprintf("config add: model pool %q already exists and is not a list", key))
-		}
-		return existing
-	}
-	keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
-	valueNode := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
-	mapping.Content = append(mapping.Content, keyNode, valueNode)
-	return valueNode
+	mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
+	return nil
 }
 
 func appendSequenceValue(seq *yaml.Node, value string) bool {

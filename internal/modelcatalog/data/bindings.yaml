@@ -47,8 +47,10 @@ bindings:
       send_parallel_tool_calls: true
     variants:
       low: { reasoning_effort: low }
+      medium: { reasoning_effort: medium }
       high: { reasoning_effort: high }
       xhigh: { reasoning_effort: xhigh }
+      max: { reasoning_effort: max }
 
   - endpoint: codex
     wire_model_id: gpt-6-luna
@@ -58,8 +60,10 @@ bindings:
       send_parallel_tool_calls: true
     variants:
       low: { reasoning_effort: low }
+      medium: { reasoning_effort: medium }
       high: { reasoning_effort: high }
       xhigh: { reasoning_effort: xhigh }
+      max: { reasoning_effort: max }
 
   - endpoint: codex
     wire_model_id: gpt-6-sol
@@ -69,8 +73,10 @@ bindings:
       send_parallel_tool_calls: true
     variants:
       low: { reasoning_effort: low }
+      medium: { reasoning_effort: medium }
       high: { reasoning_effort: high }
       xhigh: { reasoning_effort: xhigh }
+      max: { reasoning_effort: max }
 
   - endpoint: codex
     wire_model_id: gpt-6.1-sol
@@ -80,10 +86,13 @@ bindings:
       send_parallel_tool_calls: true
     variants:
       low: { reasoning_effort: low }
+      medium: { reasoning_effort: medium }
       high: { reasoning_effort: high }
       xhigh: { reasoning_effort: xhigh }
+      max: { reasoning_effort: max }
 
-  # Official Anthropic Messages API: no optional send defaults verified.
+  # Official Anthropic Messages API: no optional send defaults verified, and
+  # no route variants recorded yet; effort levels live on the model facts.
   - endpoint: anthropic
     wire_model_id: claude-opus-5-5
     model_id: anthropic/claude-opus-5-5
@@ -92,12 +101,49 @@ bindings:
     wire_model_id: claude-sonnet-5-5
     model_id: anthropic/claude-sonnet-5-5
 
+  - endpoint: anthropic
+    wire_model_id: claude-fable-5-1
+    model_id: anthropic/claude-fable-5-1
+
+  - endpoint: anthropic
+    wire_model_id: claude-opus-5
+    model_id: anthropic/claude-opus-5
+
+  - endpoint: anthropic
+    wire_model_id: claude-sonnet-5
+    model_id: anthropic/claude-sonnet-5
+
   # Official Gemini Generate Content API.
   - endpoint: gemini
     wire_model_id: gemini-3.8-flash
     model_id: google/gemini-3.8-flash
 
+  - endpoint: gemini
+    wire_model_id: gemini-3.7-flash
+    model_id: google/gemini-3.7-flash
+
+  - endpoint: gemini
+    wire_model_id: gemini-3.6-flash
+    model_id: google/gemini-3.6-flash
+
+  - endpoint: gemini
+    wire_model_id: gemini-3.1-pro-preview
+    model_id: google/gemini-3.1-pro-preview
+
   # Official OpenAI Responses API.
+  - endpoint: openai
+    wire_model_id: gpt-6-astra
+    model_id: openai/gpt-6-astra
+    responses:
+      send_store: true
+      send_parallel_tool_calls: true
+    variants:
+      low: { reasoning_effort: low }
+      medium: { reasoning_effort: medium }
+      high: { reasoning_effort: high }
+      xhigh: { reasoning_effort: xhigh }
+      max: { reasoning_effort: max }
+
   - endpoint: openai
     wire_model_id: gpt-6-luna
     model_id: openai/gpt-6-luna
@@ -106,8 +152,10 @@ bindings:
       send_parallel_tool_calls: true
     variants:
       low: { reasoning_effort: low }
+      medium: { reasoning_effort: medium }
       high: { reasoning_effort: high }
       xhigh: { reasoning_effort: xhigh }
+      max: { reasoning_effort: max }
 
   - endpoint: openai
     wire_model_id: gpt-6-sol
@@ -117,8 +165,10 @@ bindings:
       send_parallel_tool_calls: true
     variants:
       low: { reasoning_effort: low }
+      medium: { reasoning_effort: medium }
       high: { reasoning_effort: high }
       xhigh: { reasoning_effort: xhigh }
+      max: { reasoning_effort: max }
 
   - endpoint: openai
     wire_model_id: gpt-6.1-sol
@@ -128,5 +178,7 @@ bindings:
       send_parallel_tool_calls: true
     variants:
       low: { reasoning_effort: low }
+      medium: { reasoning_effort: medium }
       high: { reasoning_effort: high }
       xhigh: { reasoning_effort: xhigh }
+      max: { reasoning_effort: max }

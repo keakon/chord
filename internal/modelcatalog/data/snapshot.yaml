@@ -2,4 +2,4 @@
 # by scripts/sync_model_catalog.sh. The generator copies it into catalog.json
 # and the golden test keeps both honest. Not part of the upstream repository.
 repository: https://github.com/keakon/chord-models
-revision: v2026-10-01.1
+revision: v2026-10-05.4

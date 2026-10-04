@@ -1,7 +1,10 @@
 package modelcatalog
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sync/atomic"
 )
@@ -38,20 +41,33 @@ type Origin struct {
 	// Cached reports whether the effective catalog came from the refresh
 	// cache rather than the embedded snapshot.
 	Cached bool
+	Commit string
 }
 
 // OriginInfo reports the effective catalog's identity for diagnostics
 // surfaces such as `chord config show --catalog`.
 func OriginInfo() Origin {
 	s := current()
-	return Origin{Version: s.catalog.Version, Source: s.catalog.Source, Cached: s.cache != nil}
+	origin := Origin{Version: s.catalog.Version, Source: cloneCatalogSource(s.catalog.Source), Cached: s.cache != nil}
+	if s.cache != nil {
+		origin.Commit = s.cache.Commit
+	}
+	return origin
 }
 
 // EffectiveCandidates lists the candidate entries currently in effect. They
 // arrive only through the refresh cache; without one the list is empty and
 // the embedded snapshot never carries candidates.
 func EffectiveCandidates() []Candidate {
-	return current().candidates
+	candidates := current().candidates
+	if candidates == nil {
+		return nil
+	}
+	out := make([]Candidate, len(candidates))
+	for i, candidate := range candidates {
+		out[i] = cloneCandidate(candidate)
+	}
+	return out
 }
 
 // CacheStatus describes how the refresh cache participated in the effective
@@ -76,12 +92,13 @@ func CurrentCacheStatus() CacheStatus {
 
 // InstallCachedCatalog reads the refresh cache at path and installs it as the
 // effective catalog when it parses cleanly and carries a catalog version
-// newer than the one in effect. A missing file is the normal no-cache state.
+// newer than the one in effect, or identical to it with refreshed candidates.
+// A missing file is the normal no-cache state.
 // Anything else that keeps the cache out of effect — stale, corrupt, written
 // by an incompatible schema — is recorded for CacheStatus and returned as an
 // error; the effective catalog never regresses and the embedded snapshot
 // always stays usable.
-func InstallCachedCatalog(path string) error {
+func InstallCachedCatalog(path string, validate func(*Catalog) error) error {
 	cache, err := ReadCacheFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -90,9 +107,21 @@ func InstallCachedCatalog(path string) error {
 		reject(err.Error())
 		return err
 	}
+	if validate != nil {
+		if err := validate(cache.Catalog); err != nil {
+			reject(err.Error())
+			return err
+		}
+	}
 	cur := current()
-	if CompareVersions(cache.Catalog.Version, cur.catalog.Version) <= 0 {
-		reject("cache version " + cache.Catalog.Version + " is not newer than the catalog in effect (" + cur.catalog.Version + ")")
+	comparison := CompareVersions(cache.Catalog.Version, cur.catalog.Version)
+	if comparison == 0 && !SameSnapshot(cache.Catalog, cur.catalog) {
+		err := fmt.Errorf("cache version %s conflicts with the snapshot in effect", cache.Catalog.Version)
+		reject(err.Error())
+		return err
+	}
+	if comparison < 0 {
+		reject("cache version " + cache.Catalog.Version + " is older than the catalog in effect (" + cur.catalog.Version + ")")
 		return nil
 	}
 	effectiveStatePtr.Store(&effectiveState{catalog: cache.Catalog, candidates: cache.Candidates, cache: cache})
@@ -187,3 +216,17 @@ func lowerByte(r byte) byte {
 	}
 	return r
 }
+
+// SameSnapshot permits equal-version candidate delivery only from the same
+// source and identical catalog contents. Different releases never merge.
+func SameSnapshot(a, b *Catalog) bool {
+	if a == nil || b == nil || a.Source == nil || b.Source == nil || *a.Source != *b.Source {
+		return false
+	}
+	ad, ae := json.Marshal(a)
+	bd, be := json.Marshal(b)
+	return ae == nil && be == nil && bytes.Equal(ad, bd)
+}
+
+// MatchesEffectiveSnapshot compares a fetched snapshot with the active one.
+func MatchesEffectiveSnapshot(catalog *Catalog) bool { return SameSnapshot(catalog, effective()) }

@@ -141,7 +141,7 @@ func newRootCmd() *cobra.Command {
 			// never required. `chord config show --catalog` reports what is
 			// in effect and why a cache was not installed.
 			if cachePath, cacheErr := config.ModelCatalogCachePath(); cacheErr == nil {
-				_ = modelcatalog.InstallCachedCatalog(cachePath)
+				_ = modelcatalog.InstallCachedCatalog(cachePath, config.ValidateCatalogProfiles)
 			}
 			return nil
 		},
