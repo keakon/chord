@@ -106,12 +106,7 @@ var nullableModelBlocks = []string{
 }
 
 func isNullableModelBlock(key string) bool {
-	for _, block := range nullableModelBlocks {
-		if key == block {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(nullableModelBlocks, key)
 }
 
 // ConfigLayer is one sanitized config layer for BuildSourceIndex.

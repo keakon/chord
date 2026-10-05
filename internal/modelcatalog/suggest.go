@@ -219,8 +219,8 @@ func tokenizeModelName(name string) []string {
 }
 
 func modelNamePart(modelID string) string {
-	if slash := strings.LastIndex(modelID, "/"); slash >= 0 {
-		return modelID[slash+1:]
+	if _, name, ok := strings.CutLast(modelID, "/"); ok {
+		return name
 	}
 	return modelID
 }

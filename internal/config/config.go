@@ -1067,10 +1067,7 @@ func (l ModelLimit) EffectiveInputBudget(outputCapSetting, defaultOutputCap int)
 	if l.Context <= 0 {
 		return 0
 	}
-	reserve := l.EffectiveOutputBudget(outputCapSetting, defaultOutputCap)
-	if reserve < 0 {
-		reserve = 0
-	}
+	reserve := max(l.EffectiveOutputBudget(outputCapSetting, defaultOutputCap), 0)
 	budget := l.Context - reserve
 	if budget < 1 {
 		return 1

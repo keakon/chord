@@ -181,7 +181,7 @@ func latestTag(ctx context.Context, repository string) (string, error) {
 func parseLsRemoteTags(out []byte) []string {
 	seen := make(map[string]bool)
 	var tags []string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue

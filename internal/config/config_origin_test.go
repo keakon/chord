@@ -196,10 +196,12 @@ model_pools:
 }
 
 func TestBlockClearing(t *testing.T) {
-	globalMap := BlockOrigin{Origin: Origin{Layer: OriginLayerGlobal, File: "g.yaml", Line: 3}}
-	globalNull := BlockOrigin{Origin: Origin{Layer: OriginLayerGlobal, File: "g.yaml", Line: 3}, Null: true}
-	projectMap := BlockOrigin{Origin: Origin{Layer: OriginLayerProject, File: "p.yaml", Line: 5}}
-	projectNull := BlockOrigin{Origin: Origin{Layer: OriginLayerProject, File: "p.yaml", Line: 5}, Null: true}
+	globalOrigin := Origin{Layer: OriginLayerGlobal, File: "g.yaml", Line: 3}
+	projectOrigin := Origin{Layer: OriginLayerProject, File: "p.yaml", Line: 5}
+	globalMap := BlockOrigin{Origin: globalOrigin}
+	globalNull := BlockOrigin{Origin: globalOrigin, Null: true}
+	projectMap := BlockOrigin{Origin: projectOrigin}
+	projectNull := BlockOrigin{Origin: projectOrigin, Null: true}
 
 	tests := []struct {
 		name         string

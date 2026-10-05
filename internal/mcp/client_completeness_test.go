@@ -116,7 +116,7 @@ func TestDiscoveryPaginationCacheAndAllowlist(t *testing.T) {
 	}
 	mgr := NewPendingManagerWithClientInfo([]ServerConfig{{Name: "sample", AllowedTools: []string{"kept", "replacement"}}}, testClientInfo)
 	mgr.clients["sample"] = NewClientWithInfo("sample", tr, testClientInfo)
-	for phase = 0; phase < 2; phase++ {
+	for phase = range 2 {
 		calls = 0
 		discovered, err := DiscoverAllTools(t.Context(), mgr)
 		cache := mgr.CachedToolDefs("sample")

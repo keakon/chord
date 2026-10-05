@@ -84,10 +84,8 @@ func RecordCatalogAdvisoryAcknowledgment(provider, model string) error {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 	entry := catalogAdvisoryAck{Provider: provider, Model: model, CatalogVersion: modelcatalog.Version()}
-	for _, ack := range state.Acks {
-		if ack == entry {
-			return nil
-		}
+	if slices.Contains(state.Acks, entry) {
+		return nil
 	}
 	state.Acks = append(state.Acks, entry)
 	data, err := json.MarshalIndent(&state, "", "  ")

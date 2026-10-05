@@ -181,7 +181,8 @@ func TestCompleteStreamRetryAdviceRotatesToHealthyKey(t *testing.T) {
 				if visible {
 					first.streams = []message.StreamDelta{{Type: message.StreamDeltaText, Text: "partial"}}
 				}
-				impl := &recordingProvider{scriptedProvider: scriptedProvider{calls: []scriptedCall{first, {resp: &message.Response{Content: "complete", StopReason: "stop"}}}}}
+				impl := new(recordingProvider)
+				impl.calls = []scriptedCall{first, {resp: &message.Response{Content: "complete", StopReason: "stop"}}}
 				client := NewClient(cfg, impl, "test-model", 4096, "sys")
 				client.SetStreamRetryRounds(1)
 				messages := []message.Message{{Role: message.RoleUser, Content: "inspect the sample"}}

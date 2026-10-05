@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/keakon/chord/internal/modelcatalog"
@@ -17,9 +18,7 @@ func DecodeCatalogProfile(profile *modelcatalog.ConfigProfile) (ModelConfig, err
 		return model, nil
 	}
 	values := make(map[string]any, len(profile.Model)+1)
-	for key, value := range profile.Model {
-		values[key] = value
-	}
+	maps.Copy(values, profile.Model)
 	if len(profile.Compat) > 0 {
 		values["compat"] = profile.Compat
 	}
