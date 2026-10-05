@@ -1000,13 +1000,7 @@ func appendGeminiResponseTextPart(resp *message.Response, part geminiPart) {
 
 func parseGeminiHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *APIError {
 	apiErr := &APIError{StatusCode: statusCode, Origin: APIErrorOriginHTTPResponse}
-	if ra := header.Get("Retry-After"); ra != "" {
-		if seconds, err := strconv.Atoi(ra); err == nil {
-			apiErr.RetryAfter = durationFromPositiveSecondsClamped(int64(seconds), 0)
-		} else if t, err := http.ParseTime(ra); err == nil {
-			apiErr.RetryAfter = max(time.Until(t), 0)
-		}
-	}
+	apiErr.RetryAfter, _ = parseRetryAfter(header.Get("Retry-After"))
 	var errResp geminiErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
 		apiErr.Message = errResp.Error.Message

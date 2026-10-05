@@ -1018,8 +1018,9 @@ func (c *Client) completeStreamTarget(
 		// the unchanged request once, then allow a request-local probe with a
 		// distinct portable shape. A successful probe recovers this request but
 		// does not claim that replay incompatibility caused the original failure.
+		// Server retry advice must enter key rotation before any such probe.
 		explicitReplayRejection := isReasoningReplayRejection(err)
-		ambiguousReplayRecovery := !visibleStarted && isAmbiguousReplayRecoveryCandidate(err, t.provider, normalizeReport)
+		ambiguousReplayRecovery := !visibleStarted && serverDirectedRetryCooldown(t.provider, err) == 0 && isAmbiguousReplayRecoveryCandidate(err, t.provider, normalizeReport)
 		if ambiguousReplayRecovery && !ambiguousReplayRetried {
 			ambiguousReplayRetried = true
 			log.Warnf("ambiguous provider failure with replay-sensitive input; retrying unchanged request before compatibility probe provider=%v model=%v key_id=%v replay_level=%v origin=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), replayLevel, apiErrorOrigin(err), err)
@@ -1138,7 +1139,7 @@ func (c *Client) completeStreamTarget(
 			continue
 		}
 
-		if isAuthAPIStatusError(err) || isRateLimitAPIStatusError(err) {
+		if isAuthAPIStatusError(err) || isRateLimitAPIStatusError(err) || serverDirectedRetryCooldown(t.provider, err) > 0 {
 			cooldownResult := markKeyCooldown(ctx, t.provider, apiKey, t.modelID, result.lastErr)
 			if err := abortIfCancelled(); err != nil {
 				return result, lastInputTokens, err

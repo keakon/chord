@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/user"
 	"slices"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -430,14 +429,7 @@ func parseHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *A
 		Origin:     APIErrorOriginHTTPResponse,
 	}
 
-	// Parse Retry-After header if present.
-	if ra := header.Get("Retry-After"); ra != "" {
-		if seconds, err := strconv.Atoi(ra); err == nil {
-			apiErr.RetryAfter = durationFromPositiveSecondsClamped(int64(seconds), 0)
-		} else if t, err := http.ParseTime(ra); err == nil {
-			apiErr.RetryAfter = max(time.Until(t), 0)
-		}
-	}
+	apiErr.RetryAfter, _ = parseRetryAfter(header.Get("Retry-After"))
 
 	// Try to parse JSON error body.
 	if len(body) == 0 {

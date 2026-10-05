@@ -809,6 +809,8 @@ providers:
 
 Provider 级重试配置控制完整重试轮之间由 Chord 生成的等待。一轮从当前 sticky 模型池游标开始，继续尝试模型池剩余候选及其可用 key；切换 fallback target 时不会单独等待。下一轮开始前使用游标所指 provider 的策略；某个 fallback 成功并成为新游标后，后续请求自然改用它的配置。同一策略也控制**未携带** `Retry-After` 提示的普通 HTTP 429 的 key 冷却；合法的 `Retry-After`（受 `retry_after_max_s` 限制）始终优先于它。
 
+Responses 流式错误和 WebSocket 错误帧中的重试提示，与 HTTP 响应头使用相同的等待上限。可重试的流式错误或 HTTP 5xx 带有合法提示时，Chord 会冷却失败的 key，其他健康 key 和备用模型仍可继续使用。提示不会把终止性错误变成可重试错误。WebSocket 错误中，合法的 `Retry-After` 优先于 `resets_in_seconds`。
+
 ```yaml
 providers:
   gateway:
@@ -1403,7 +1405,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `retry_after_max_s`| int    | 采纳 `Retry-After` 头的最长等待秒数（1-86400）。该头始终作为 key 冷却时长生效，优先于 `retry_backoff`/`retry_delay_ms`；本参数只限制单次提示最长能占用 key 多久。`preset: codex` 默认 `86400`；第三方网关可能回显任意值，默认 `60`。 |
 | `key_rotation`| string | `on_failure`（默认）/ `per_request`。控制何时重新选择 credential / API key。                                                                    |
 | `key_order`   | string | `sequential`（非 Codex 默认）/ `random` / `smart`（仅 Codex）。控制在候选 key 中如何选择。                                               |
-| `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制普通 HTTP 429 的 key 冷却，并替换这类响应的 `Retry-After`。已确认的配额重置与凭据硬状态仍然优先。 |
+| `retry_backoff`| string | `exponential`（默认）/ `fixed` / `none`。控制完整重试轮之间由 Chord 生成的等待；显式设置后也控制未携带合法 `Retry-After` 提示的普通 HTTP 429 的 key 冷却。合法服务端提示、已确认的配额重置与凭据硬状态仍然优先。 |
 | `retry_delay_ms`| int   | 轮间退避和普通 429 冷却的基准值或固定值，单位毫秒，可取 `0` 到 `60000`；`0` / 省略默认 1000ms。即使省略 `retry_backoff`，只要写出该字段（包括显式 `0`）就算覆盖。`none` 模式下忽略。超出范围的值会记录日志并回退默认值，不会中断启动。 |
 | `compress`    | string | 上游请求体的压缩编码：`gzip` 或 `zstd`；不设即关闭。只在压缩能缩小体积时生效。旧的布尔写法 `compress: true` 已删除——会被忽略并由 `chord doctor config` 报告（改成 `compress: gzip` 即可）。 |
 | `response_header_timeout` | int | 从开始该 provider 的流式 HTTP 请求到收到响应头的超时，单位秒，包括连接建立与请求体上传。`0` / 省略表示使用内置默认值；健康流由 `stream_idle_timeout` 约束，而不是总请求计时器。 |

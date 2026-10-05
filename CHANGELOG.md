@@ -112,6 +112,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Retryable Responses stream errors, WebSocket error frames, and HTTP 5xx responses now honor valid `Retry-After` advice for the failed key. Healthy keys and fallback models remain available, and WebSocket advice takes precedence over `resets_in_seconds`.
+
 - Context-pressure reminders now read the active model settings consistently when model requests run concurrently.
 
 - The context summary card keeps preserved excerpts readable: a quoted diff, log, or tool output renders as a code block, so its line structure and blank lines survive instead of being reflowed into one wrapped paragraph. The checkpoint's machine-readable state also renders inside a JSON code block instead of wrapping as an ordinary bullet.

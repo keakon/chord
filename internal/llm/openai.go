@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -902,14 +901,7 @@ func parseOpenAIHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 		Origin:     APIErrorOriginHTTPResponse,
 	}
 
-	// Parse Retry-After header: try integer seconds first, then HTTP-date.
-	if ra := header.Get("Retry-After"); ra != "" {
-		if seconds, err := strconv.Atoi(ra); err == nil {
-			apiErr.RetryAfter = durationFromPositiveSecondsClamped(int64(seconds), 0)
-		} else if t, err := http.ParseTime(ra); err == nil {
-			apiErr.RetryAfter = max(time.Until(t), 0)
-		}
-	}
+	apiErr.RetryAfter, _ = parseRetryAfter(header.Get("Retry-After"))
 
 	var errResp openAIErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {

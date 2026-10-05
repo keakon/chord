@@ -169,6 +169,7 @@ type responsesProviderErrorPayload struct {
 	Message  string                 `json:"message"`
 	Param    string                 `json:"param"`
 	Error    responsesProviderError `json:"error"`
+	Headers  json.RawMessage        `json:"headers"`
 	Response struct {
 		Status string                 `json:"status"`
 		Error  responsesProviderError `json:"error"`
@@ -176,10 +177,11 @@ type responsesProviderErrorPayload struct {
 }
 
 type responsesProviderError struct {
-	Type    string `json:"type"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Param   string `json:"param"`
+	Type    string          `json:"type"`
+	Code    string          `json:"code"`
+	Message string          `json:"message"`
+	Param   string          `json:"param"`
+	Headers json.RawMessage `json:"headers"`
 }
 
 type responseCompleted struct {
@@ -1159,7 +1161,13 @@ func parseResponsesProviderErrorEvent(eventType string, eventData []byte) (*APIE
 	if msg == "" {
 		msg = strings.TrimSpace(string(eventData))
 	}
-	return &APIError{Origin: APIErrorOriginSSEEvent, Code: code, Type: typ, Param: param, Message: msg}, nil
+	apiErr := &APIError{Origin: APIErrorOriginSSEEvent, Code: code, Type: typ, Param: param, Message: msg}
+	if delay, ok := parseRetryAfter(responseErrorHeaders(errObj.Headers).Get("Retry-After")); ok {
+		apiErr.RetryAfter = delay
+	} else if eventType == "error" {
+		apiErr.RetryAfter, _ = parseRetryAfter(responseErrorHeaders(payload.Headers).Get("Retry-After"))
+	}
+	return apiErr, nil
 }
 
 func readSSELine(r *bufio.Reader) ([]byte, error) {

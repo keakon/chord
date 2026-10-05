@@ -886,6 +886,12 @@ apply to subsequent requests. The same settings also control ordinary HTTP 429
 key cooldown when the response carries no `Retry-After` hint; a valid hint
 (bounded by `retry_after_max_s`) always outranks them.
 
+Retry advice in Responses stream errors and WebSocket error frames follows
+the same cap as HTTP headers. Retryable stream errors and HTTP 5xx responses
+with valid advice cool the failed key; healthy keys and fallback models remain
+eligible. Advice does not make a terminal error retryable. In WebSocket errors,
+a valid `Retry-After` takes precedence over `resets_in_seconds`.
+
 ```yaml
 providers:
   gateway:
@@ -1581,7 +1587,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `retry_after_max_s` | int    | Longest `Retry-After` wait honored, in seconds (1-86400). The header always applies as the key cooldown, ahead of `retry_backoff`/`retry_delay_ms`; this only bounds how long a single hint may block a key. `preset: codex` defaults to `86400`; third-party gateways, which can echo arbitrary values, default to `60`. |
 | `key_rotation` | string | `on_failure` (default) / `per_request`. Controls when a credential / API key is reselected.                                                            |
 | `key_order`    | string | `sequential` (non-Codex default) / `random` / `smart` (Codex only). Controls how Chord chooses among selectable keys.                                   |
-| `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown. Explicit settings replace `Retry-After` for ordinary 429s; confirmed quota resets and hard credential states still win. |
+| `retry_backoff`| string | `exponential` (default) / `fixed` / `none`. Controls generated delay between complete rounds and, when explicitly set, ordinary HTTP 429 key cooldown without valid `Retry-After` advice. Valid server advice, confirmed quota resets, and hard credential states still win. |
 | `retry_delay_ms`| int   | Base/fixed round and ordinary-429 delay in milliseconds, from `0` through `60000`; `0` / omitted defaults to 1000ms. Setting the field—including explicit `0`—is an override even when `retry_backoff` is omitted. Ignored for `none`. Out-of-range values are logged and fall back to the default instead of failing startup. |
 | `compress`     | string | Upstream request body compression encoding: `gzip` or `zstd`; unset = off. Applies only when compression shrinks the payload. The boolean `compress: true` form is gone — it is ignored and reported by `chord doctor config` (migrate to `compress: gzip`). |
 | `response_header_timeout` | int | Timeout in seconds from starting a streaming HTTP request until response headers arrive, including connection setup and request-body upload. `0` / omitted uses the built-in default; healthy streams are bounded by `stream_idle_timeout`, not a total request timer. |

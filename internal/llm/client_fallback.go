@@ -204,6 +204,17 @@ func retryAfterForProvider(provider *ProviderConfig, apiErr *APIError) time.Dura
 	return min(apiErr.RetryAfter, providerRetryAfterMax(provider))
 }
 
+func serverDirectedRetryCooldown(provider *ProviderConfig, err error) time.Duration {
+	apiErr, ok := errors.AsType[*APIError](err)
+	if !ok || apiErr == nil || !isRetriable(err) {
+		return 0
+	}
+	if apiErr.StatusCode == 0 && apiErr.isStreamEvent() || apiErr.StatusCode >= 500 && apiErr.StatusCode < 600 {
+		return retryAfterForProvider(provider, apiErr)
+	}
+	return 0
+}
+
 // applyCodexQuotaOrCooldown marks the key unavailable until the confirmed
 // Codex reset window when available, otherwise applies a generic cooldown: a
 // Retry-After hint (bounded by retry_after_max_s) is honored verbatim, and
@@ -272,6 +283,13 @@ func applyKeyCooldown(ctx context.Context, provider *ProviderConfig, key string,
 	if apiErr.StatusCode != 429 && provider != nil && provider.usesPresetCodexRateLimitCooldown() && confirmedCodexUsageLimitError(apiErr) {
 		return applyCodexQuotaOrCooldown(provider, key, apiErr, time.Minute,
 			"Codex usage limit reached", "Codex usage limit reached")
+	}
+	// Stream events may not have an HTTP status. Retry advice paces a key only
+	// after normal classification has confirmed that the failure is retryable.
+	if cooldown := serverDirectedRetryCooldown(provider, err); cooldown > 0 {
+		log.Warnf("API key temporarily unavailable, honoring Retry-After key_id=%v cooldown=%v", keyLogID(key), cooldown)
+		provider.MarkServerDirectedCooldown(key, cooldown)
+		return markKeyCooldownResult{cooldownApplied: true}
 	}
 	switch apiErr.StatusCode {
 	case 400:

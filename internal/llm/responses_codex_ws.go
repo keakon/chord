@@ -41,7 +41,7 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 			Message         string `json:"message"`
 			ResetsInSeconds *int64 `json:"resets_in_seconds"`
 		} `json:"error"`
-		Headers map[string]json.RawMessage `json:"headers"`
+		Headers json.RawMessage `json:"headers"`
 	}
 	if err := json.Unmarshal(msg, &frame); err != nil {
 		return nil, nil
@@ -59,27 +59,9 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 	if frame.Status == http.StatusTooManyRequests && frame.Error.ResetsInSeconds != nil && *frame.Error.ResetsInSeconds > 0 {
 		apiErr.RetryAfter = durationFromPositiveSecondsClamped(*frame.Error.ResetsInSeconds, 0)
 	}
-	if len(frame.Headers) == 0 {
-		return apiErr, nil
-	}
-	h := make(http.Header)
-	for name, raw := range frame.Headers {
-		canonical := http.CanonicalHeaderKey(name)
-		var s string
-		if json.Unmarshal(raw, &s) == nil {
-			h.Set(canonical, s)
-			continue
-		}
-		var n json.Number
-		if json.Unmarshal(raw, &n) == nil {
-			h.Set(canonical, n.String())
-			continue
-		}
-		trim := strings.TrimSpace(string(raw))
-		trim = strings.Trim(trim, `"`)
-		if trim != "" {
-			h.Set(canonical, trim)
-		}
+	h := responseErrorHeaders(frame.Headers)
+	if delay, ok := parseRetryAfter(h.Get("Retry-After")); ok {
+		apiErr.RetryAfter = delay
 	}
 	if len(h) == 0 {
 		return apiErr, nil
