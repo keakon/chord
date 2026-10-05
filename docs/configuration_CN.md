@@ -1400,7 +1400,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`        | string | `messages` / `chat-completions` / `responses` / `generate-content`。省略时按 `api_url` 或 `preset` 自动推断。                                       |
 | `api_url`     | string | 接口地址。Chord 根据 URL path 自动识别 provider type，忽略 query string 和 fragment。Gemini 用 `/models` 基础路径，Chord 自动附加 `/{model}:streamGenerateContent?alt=sse`。Azure Responses 的 `?api-version=...` 是可选项，可用于固定特定 API 版本。 |
-| `preset`      | string | 可选 `codex`（OpenAI Codex / ChatGPT OAuth）。Azure OpenAI Responses 使用普通 `type: responses` provider，配合 `auth_scheme: api-key`、`store: true`，并在 `compat.request_overrides.headers` 中将 Codex 身份 header 置为 `null`。 |
+| `preset`      | string | 可选 `openai`、`anthropic`、`gemini` 或 `codex`（OpenAI Codex / ChatGPT OAuth），分别选择对应的官方端点契约。Azure OpenAI Responses 使用普通 `type: responses` provider，配合 `auth_scheme: api-key`、`store: true`，并在 `compat.request_overrides.headers` 中将 Codex 身份 header 置为 `null`。 |
 | `trust_http_400`| bool   | 是否把 HTTP 400 视为终止性请求错误。`preset: codex` 默认 `true`；聚合/代理网关默认 `false`，因为常把上游过载包装成 400。 |
 | `retry_after_max_s`| int    | 采纳 `Retry-After` 头的最长等待秒数（1-86400）。该头始终作为 key 冷却时长生效，优先于 `retry_backoff`/`retry_delay_ms`；本参数只限制单次提示最长能占用 key 多久。`preset: codex` 默认 `86400`；第三方网关可能回显任意值，默认 `60`。 |
 | `key_rotation`| string | `on_failure`（默认）/ `per_request`。控制何时重新选择 credential / API key。                                                                    |

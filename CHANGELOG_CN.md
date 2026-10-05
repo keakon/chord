@@ -4,13 +4,11 @@
 
 ## 未发布
 
-- 内嵌模型目录包含 31 个已验证模型、20 个 preset 绑定，固定到 chord-models `v2026-10-05.4`，记录公布的限额、模态、价格和模型行为配方。`chord config add` 可接入已记录的官方端点并写入必需的协议设置；自定义 URL 可用 `--catalog` 显式借用模型事实。
-- 模型目录现在可以从上游数据仓库 [chord-models](https://github.com/keakon/chord-models) 刷新，不必等 chord 发版：`chord config refresh-catalog` 把最新版本 tag 拉进本地缓存，`chord config add --refresh-catalog` 在添加模型前顺带执行。刷新快照按版本号整体取代内置目录——绝不按条目合并——在下一次 chord 命令启动时生效；任何一步失败（网络、快照损坏、schema 不兼容）都回退到当前生效的快照。`chord config show --catalog` 会标明当前生效的快照及其来源。
-- 目录刷新同时带来 candidate 条目——社区发现、尚未完整验证的 wire 名——它们会进入 `chord config add` 的建议列表，标注被观察到的 provider 作用域与来源。候选永不填充默认值：采纳意味着把观测值写成你自己的显式配置；同一 wire 名在多个作用域被观察到时并列展示，Chord 不替你挑选。
-- `chord config add <provider>/<model>` 从模型目录向 `config.yaml` 添加模型引用：绑定 preset 的模型只需一条池引用；自定义网关可用 `--catalog` 借用目录模型的事实；未命中的 wire 名会列出最接近的已验证模型供显式选择；写入前会对候选配置执行完整解析。
-- 很可能已被更新的已验证模型取代的目录引用现在会以 advisory 形式上报：`chord doctor config` 列出它们及重新绑定 / 保留现状的命令，启动时提示未处理数量，`chord config add <provider>/<model> --keep-current` 可在当前目录版本下确认不再提示。
-- headless 的 `status_response` 现在带当前工作目录和 worktree generation；会话中切换 checkout 时，订阅 `workdir_changed` 的客户端也会收到推送。
-- 图片 token 按张数和保守额度估算，不再按图片文件字节数折算。
+### 亮点
+
+- 模型接入使用已验证的离线目录，支持显式绑定网关模型和按需刷新目录。
+- 输入框支持撤销文本、内联粘贴与附件编辑。
+- headless 客户端可通过关联回执确认输入已处理。
 
 ### 不兼容变更
 
@@ -30,12 +28,17 @@
 
 ### 新功能
 
+- 内嵌模型目录包含 31 个已验证模型、20 个 preset 绑定，固定到 chord-models `v2026-10-05.4`，记录公布的限额、模态、价格和模型行为配方。`chord config add` 可接入已记录的官方端点并写入必需的协议设置；自定义 URL 可用 `--catalog` 显式借用模型事实。
+- 模型目录现在可以从上游数据仓库 [chord-models](https://github.com/keakon/chord-models) 刷新，不必等 chord 发版：`chord config refresh-catalog` 把最新版本 tag 拉进本地缓存，`chord config add --refresh-catalog` 在添加模型前顺带执行。刷新快照按版本号整体取代内置目录——绝不按条目合并——在下一次 chord 命令启动时生效；任何一步失败（网络、快照损坏、schema 不兼容）都回退到当前生效的快照。`chord config show --catalog` 会标明当前生效的快照及其来源。
+- 目录刷新同时带来 candidate 条目——社区发现、尚未完整验证的 wire 名——它们会进入 `chord config add` 的建议列表，标注被观察到的 provider 作用域与来源。候选永不填充默认值：采纳意味着把观测值写成你自己的显式配置；同一 wire 名在多个作用域被观察到时并列展示，Chord 不替你挑选。
+- 很可能已被更新的已验证模型取代的目录引用现在会以 advisory 形式上报：`chord doctor config` 列出它们及重新绑定 / 保留现状的命令，启动时提示未处理数量，`chord config add <provider>/<model> --keep-current` 可在当前目录版本下确认不再提示。
+- headless 的 `status_response` 现在带当前工作目录和 worktree generation；会话中切换 checkout 时，订阅 `workdir_changed` 的客户端也会收到推送。
 - 新增 `chord config add` 引导式模型接入：按数字键选择接近的目录模型，无需回车；补齐网关地址和密钥环境变量，选择已有模型池或创建新池，按需配置推理档位与请求体压缩，预览并确认后保存；支持 YAML 锚点与合并，修改共享值不会影响其他引用。取消不改写文件，脚本可用 `--no-interactive`。
 - 输入框新增 `Ctrl+Z` 撤销，文本、内联粘贴、附件及光标一同恢复，保留有界的编辑历史；可通过 `insert_undo` 自定义快捷键。
 - Headless `send` 可带 `request_id` 获取消费回执（`handled`、`queued`、`started` 或 `rejected`），用于区分本地命令、排队和实际开始的任务；回执不受事件订阅过滤。
 
 - 新增 `chord config show` 命令：查看有效配置（项目层叠加在全局层之上）、每个被跟踪字段的来源、各模型请求预算与结构化诊断；`--path` 可查看某个配置子树，`--json` 供脚本使用。可能携带凭据的值一律脱敏。加 `--catalog` 时改为列出内置模型目录——托管 preset 的端点契约与已核验模型的限额、reasoning 档位，并按你的配置标注「已配置 / 未配置」——这是完全离线的只读参考。
-- 使用托管 preset（`openai`、`anthropic`、`gemini`、`codex`）的 provider 现在把 preset 解析为已核验的端点契约：`type`、`api_url`、`auth_scheme` 只在留空处填充，与契约冲突的取值会被判为配置错误。内置目录还会补充你未声明的模型事实——context/input/output 限额与 reasoning 档位——覆盖显式定义的模型，以及被模型池引用但从未定义的模型；显式 null 清空的块保持清空，每个由目录填充的值都在 `chord config show` 里带 `catalog` 来源层。 无 preset 的自定义端点可显式绑定目录模型，只借用模型事实；`chord config show` 另列 Responses 字段的取值、发送行为与来源。
+- 使用托管 preset（`openai`、`anthropic`、`gemini`、`codex`）的 provider 现在把 preset 解析为已核验的端点契约：`type`、`api_url`、`auth_scheme` 只在留空处填充，与契约冲突的取值会被判为配置错误。内置目录还会补充你未声明的模型事实——context/input/output 限额与 reasoning 档位——覆盖显式定义的模型，以及被模型池引用但从未定义的模型；显式 null 清空的块保持清空，每个由目录填充的值都在 `chord config show` 里带 `catalog` 来源层。 无 preset 的自定义端点可显式绑定目录模型，继承限额、模态和压缩建议；协议相同时还继承行为配方、推理档位及 Responses 字段发送规则；`chord config show` 另列 Responses 字段的取值、发送行为与来源。
 - 在 `auth.yaml` 中完全没有声明凭据来源的 provider，现在会回退到其 preset 的默认环境变量（`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`）。已有声明但当前不可用的来源仍视为已声明，不会触发回退。
 - `chord doctor config` 现在还会加载有效配置，把无法解析的模型池引用（provider 或 model 不存在、`@variant` 未定义）作为问题上报并以状态码 2 退出；解析类问题仍归属到各自的文件。 启动提示复用同一份诊断，结构错误会阻止使用相关模型池，未选中的次要池不影响启动。
 - 初始安装向导的 Codex OAuth 目录现在包含 GPT-6.1 Sol（`gpt-6.1-sol`），分配同为 `1050000 / 922000 / 128000`，且新装的默认模型池以它开头（GPT-6 Astra 退为回退项）；API key 路径为 OpenAI Responses 端点预填的默认模型同样改为 GPT-6.1 Sol。`chord config show --catalog` 会列出这个新条目。已有的 `config.yaml` 不受影响，保持你原本的配置。
@@ -59,7 +62,7 @@
 - 新增 `.worktreeinclude` 文件（gitignore 语法，默认 `.env*`），用来列出要复制进每个新 worktree 的被忽略文件——本地 env、机器相关配置等。已被跟踪的文件绝不覆盖。
 - 新增 flag `--reset-branch`：复用没有任何 worktree 检出的遗留 worktree 分支，不再直接失败。
 - 删除 checkout 现在会在仍有 Chord 会话正在用它时拒绝。`chord worktree remove` 与 `chord worktree finish` 删除前会检查是否有另一个 Chord 会话仍在该 checkout 里开着，`WorktreeExit` 也改成在真正删除前再查一次，而不是只信更早那次检查的结果。崩溃退出的会话不会挡住删除：会话记录会活得比进程久，因此只有进程仍持有锁的会话才算占用者。占用情况无法确定时按「占用」处理，拒绝删除。
-- 初始安装向导现在会为新装的 Codex OAuth 写入 GPT-6 Sol（`gpt-6-sol`）和 GPT-6 Luna（`gpt-6-luna`），分配与 GPT-6 Astra 相同（`1050000 / 922000 / 128000`），落进 `providers.models` 和默认模型池；[模型配置速查](./docs/model-configs_CN.md#codex-oauth-preset) 里同样列出了这两个模型。已有的 `config.yaml` 不受影响，保持你原本的配置。
+- 初始安装向导现在会为新装的 Codex OAuth 写入 GPT-6 Sol（`gpt-6-sol`）和 GPT-6 Luna（`gpt-6-luna`），分配与 GPT-6 Astra 相同（`1050000 / 922000 / 128000`），落进 `providers.models` 和默认模型池；[模型配置指南](./docs/model-configs_CN.md)说明如何查看和选择目录模型。已有的 `config.yaml` 不受影响，保持你原本的配置。
 - 新增 skill frontmatter 字段 `disable-model-invocation: true`：声明后该 skill 不进模型目录，`Available Skills` 列表和 `skill` 工具列表里都没有它，模型即使点名也加载不了；你仍可以用 `/skill <name>` 自己加载。某个角色配的技能全是这种时，它连 `skill` 工具都不会注册。TUI 的 SKILLS 面板改为用字形表示模型可见性（`○`/`●` 是模型可加载，`◌` 是只留给显式加载），颜色仍表示加载状态；`chord doctor skills` 的可见性依旧只看 ruleset，因此这类 skill 在那里照样报 `visible`，尽管它从不到达模型。
 - 新增 `/skill <name> [args]` 显式加载：Chord 把这行当普通用户消息提交，并在同一回合里把 skill 正文作为 `skill` 工具结果追加进去，模型不用自己决定调用工具就能拿到正文；名字之后的内容替换正文里的 `${CHORD_SKILL_ARGS}`。这行跟着当前聚焦的 Agent，所以子 Agent 也能用同样方式载入技能。TUI 里只敲 `/skill` 则打开选择器，列出当前 Agent 可加载的全部技能（只留给显式加载的排在前面），选中后回填 `/skill <name> ` 供你接着输参数；被 ruleset 拒绝的技能显示为不可用并给出原因，名字不存在则弹 toast 拒绝。这样合成的加载在各处都算一次真实加载：继续会话时恢复，持久压缩把这对消息归档后与重启一样清掉。
 - `view_image`、图片附件、剪贴板粘贴以及 MCP 工具返回的图片现在除了 PNG/JPEG 外还接受 WebP、GIF、BMP 和 TIFF。所有图片在送达上游前都会归一化为 PNG 或 JPEG，长边超过 2000px 时缩小（动画 WebP、GIF 和 TIFF 只取首帧）。HEIC、HEIF、AVIF、SVG 会被拒绝并提示先转换。JPEG 带 EXIF `Orientation` 时会把方向烧进像素，不再留给模型自行解读；`view_image` 只要做过缩放，就会在结果里报告原始尺寸与最终尺寸。
@@ -71,6 +74,7 @@
 
 ### 改进
 
+- 图片 token 按张数和保守额度估算，不再按图片文件字节数折算。
 - 上下文压缩截取大工具输出的摘要时，只扫描需要保留的文本，减少摘要构建耗时，摘录内容保持一致。
 - 大型 Write、Edit 和 Shell 参数流减少了 TUI 的处理与内存分配开销；路径和命令说明在字段完整到达后即可显示。
 
@@ -109,7 +113,7 @@
 
 - 可重试的 Responses 流式错误、WebSocket 错误帧和 HTTP 5xx 响应现在会按合法的 `Retry-After` 提示冷却失败的 key，其他健康 key 和备用模型仍可使用；WebSocket 提示优先于 `resets_in_seconds`。
 
-- Responses 流不再仅凭参数能解析为 JSON 就执行尚未完成的写操作请求。只在最终响应中出现的调用会逐项恢复，与流中已完成的调用同时保留；重复调用在执行和历史回放中均只保留一次。调用标识冲突时拒绝解析，避免混用参数。
+- Responses 流不再仅凭参数能解析为 JSON 就执行尚未完成的写操作请求，明确标为未完成的工具项也不会执行。只在最终响应中出现的调用会逐项恢复，与流中已完成的调用同时保留；重复调用在执行和历史回放中均只保留一次。调用标识冲突时拒绝解析，避免混用参数。
 
 - MCP 工具发现会读取后续分页，页面失败时保留上次完整目录。工具结果保留结构化 JSON 和嵌入文本、图片资源；链接只作为引用展示，不支持的内容会给出提示，不再静默消失。
 
@@ -505,7 +509,7 @@
 - 发往 Gemini 的请求不再同时携带 `thinking_budget` 与 `thinking_level`。该 API 对这一组合直接返回 HTTP 400，而 0.7.3 随附的推荐配方要的恰好就是这个组合，于是开启思考的 Gemini 模型可能每次请求都失败，直到手工删掉 budget。现在以 level 为准，budget 不再发上线；只配置了 budget 的模型行为不变。
 - 流式接收 `apply_patch` 时，大补丁不再卡死 TUI。此前每个参数增量都会把整个预览块重新渲染并重新高亮一遍，仅仅为了数出行数，成本随补丁大小平方增长，主循环连滚动和 `Esc` 都不再响应。预览行数现在无需整块重渲染即可测得，并且流式过程中高亮文件发生变化时会丢弃已缓存的行，不再留下一份两种配色的预览。
 - 折叠的工具卡片不再把多行错误截成第一行。真正有用的部分在第一行之下的失败（例如路径不存在后面跟着的 `Did you mean:` 建议，或 `apply_patch` 按文件列出的失败清单）恰好被藏掉了。折叠卡片现在会显示错误正文，并限制在若干行内、其余部分提示展开查看，因此任意长的工具错误也不会淹没整个对话记录。
-- 首次运行的配置向导现在写入当前的 Codex 模型额度。GPT-6 Astra、GPT-5.4 与 GPT-5.6 Sol / Terra / Luna 改为 `1050000 / 922000 / 128000`，不再是较老的 `400000 / 272000` 档（以及 GPT-5.4 那个已过时的 `950000` 输入上限），与[模型配置示例](./docs/model-configs_CN.md#codex-oauth-preset)一致。GPT-5.5、GPT-5.2 与 GPT-5.3-codex 保持 `400000 / 272000 / 128000`。
+- 首次运行的配置向导现在写入当前的 Codex 模型额度。GPT-6 Astra、GPT-5.4 与 GPT-5.6 Sol / Terra / Luna 改为 `1050000 / 922000 / 128000`，不再是较老的 `400000 / 272000` 档（以及 GPT-5.4 那个已过时的 `950000` 输入上限），与[模型配置示例](./docs/model-configs_CN.md)一致。GPT-5.5、GPT-5.2 与 GPT-5.3-codex 保持 `400000 / 272000 / 128000`。
 
 - `chord import codex --id <id>` 现在能解析 `codex resume` 退出时打印的那个 id。Codex 会话如果派生过 fork 或 sub-agent thread，会留下另一个 rollout 文件，里面的记录仍写着父 session 的 id，导入这个 id 时就会匹配到两个文件并报「multiple files matched」。现在按 Codex 自己解析 `codex resume <id>` 所用的 thread id 来识别 rollout，派生过子线程的会话可以直接用 id 导入，不必再手动指定文件路径。
 - 两个事件同时操作同一个 SubAgent mailbox 时（投递与并发重建竞速，或结算 claim 落在另一事件正在改写同一队列之际），此前可能丢消息、重复或乱序。现在队列状态在所有内存路径上都由同一把锁串行推进，绕过该锁的访问已经收口，交错执行未同步写入的情况不再可能发生。

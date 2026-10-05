@@ -31,7 +31,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Shift+Tab`        | Cycle the main agent role shown in the status bar. A switch is announced with a toast (`role: planner → builder`) because it rebuilds permissions, invalidates the cached prompt prefix, and may select the role's own model. On a SubAgent view, where a role switch does not apply, it cycles the focused view instead |
 | `Tab`              | Complete the visible slash-command or `@`-mention suggestion; otherwise does nothing            |
 
-Undo keeps at most 64 edits within an 8 MiB budget, including attachment bytes. Consecutive typing within 750 ms is merged; cursor movement, paste, completion, and deletion split transactions. An oversized snapshot clears undo history. Sending, switching session or agent, and history navigation end the undo history. Restoring clears the selection. Remap the shortcut with `insert_undo`.
+Undo keeps at most 64 edits within an 8 MiB budget, including attachment bytes. Consecutive typing within 750 ms is merged; cursor movement, paste, completion, and deletion split transactions. An oversized snapshot clears undo history; large attachments can therefore also prevent undoing ordinary text edits. Sending, switching session or agent, and history navigation end the undo history. Restoring clears the selection. Remap the shortcut with `insert_undo`.
 
 ### Normal mode: leaving and meta
 
