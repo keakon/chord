@@ -154,9 +154,9 @@ openai:
   (`1050000 − min(64000, 128000) = 986000`). A declared independent
   `input` limit still takes priority. Above 272K is a pricing threshold here, not an input cap, so
   do not add `input: 272000`.
-- Codex OAuth uses the same model windows as the API: GPT-5.4 / 5.6 / 6 run
-  the `1050000 / 922000 / 128000` allocation there too (see
-  [OpenAI Codex preset](#openai-codex-preset) below).
+- The catalog's GPT-5.6 / 6 Codex bindings use a `1050000` total window
+  and `128000` output capacity, without a separate input cap. Chord derives
+  their input budgets in the same way (see [OpenAI Codex preset](#openai-codex-preset) below).
 - Supported API reasoning efforts are `none`, `low`, `medium`, `high`, `xhigh`, and `max`; select a configured variant with a ref such as `openai/gpt-5.6-sol@xhigh`.
 - When reasoning is active, Responses defaults `reasoning.summary` to `auto`; set it to `none` to opt out explicitly. Chord does not currently expose GPT-5.6 `reasoning.mode: pro`.
 - `preset: codex` providers can also use `max` when the selected model/backend supports it. Whether a given effort level is accepted is model/provider-specific.
@@ -168,7 +168,7 @@ follow the gateway's published model catalog.
 Read model limits in this order:
 
 1. `limit.context` is the total window. For most models, input + requested output just needs to fit inside this number.
-2. `limit.input` is only needed when the provider also lists a separate input cap. Some GPT models work this way; if you omit it, Chord derives the usable input budget as `limit.context` minus the effective planned output budget (`min(max_output_tokens, limit.output)` when both are positive). A declared `limit.input` is always used as-is.
+2. `limit.input` is only needed when the provider also lists a separate input cap. If you omit it, Chord derives the usable input budget as `limit.context` minus the effective planned output budget (`min(max_output_tokens, limit.output)` when both are positive). A declared `limit.input` is always used as-is; do not store `context - output` as an independent input limit.
 3. `limit.output` is the model's own output capacity. Chord's default requested output cap (`max_output_tokens`) is `64000`, so Chord plans `min(64000, limit.output)` before the available-context clamp. Set `max_output_tokens` explicitly to choose a different global cap. If a model's real output capacity is below `64000` and `limit.output` is omitted, backends that validate the requested `max_tokens` server-side will reject those requests. Declare `limit.output` for such models, or lower the global `max_output_tokens`.
 
 `parallel_tool_calls` defaults to `true` for Responses and Chat Completions providers. Set it to `false` on a provider, model, or variant only when the backend or workflow requires serial tool calls. Provider-level `user_agent` is also available for gateways that require a specific client identifier.
@@ -195,36 +195,23 @@ For Anthropic's gated 1M context beta, Chord opts in only when the model declare
 
 ### OpenAI Codex preset
 
-Codex OAuth uses the same model windows as the API examples.
+Use catalog-backed pool references to inherit verified model limits:
 
 ```yaml
 providers:
   codex:
     preset: codex
-    type: responses
-    models:
-      gpt-5.5:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
-      gpt-5.4:
-        limit:
-          context: 1050000
-          input: 922000
-          output: 128000
-      gpt-5.6-sol:
-        limit:
-          context: 1050000
-          input: 922000
-          output: 128000
+model_pools:
+  default:
+    - codex/gpt-6.1-sol
+    - codex/gpt-6-astra
 ```
 
-The verified catalog supplies each Codex model's allocation (for these
-models the catalog records `1050000 / 922000 / 128000`; its explicit
-922K input allocation remains authoritative); when the
-wizard's values are not enough, look them up with `chord config show
---catalog` instead of copying numbers by hand.
+These bindings inherit a `1050000` context window and `128000` output
+capacity. With the default requested output budget of `64000`, Chord plans
+`986000` input tokens. A separately documented route input cap can be set
+explicitly and takes priority. Inspect `chord config show --catalog` for
+model facts, or add `--json` for sources and pricing scope.
 
 `preset: codex` can use OpenAI / ChatGPT OAuth credentials from `auth.yaml`. OAuth entries are mappings:
 

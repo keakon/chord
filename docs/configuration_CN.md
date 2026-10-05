@@ -148,8 +148,9 @@ openai:
   （此处为 `1050000 - min(64000, 128000) = 986000`）。独立声明的 `input`
   上限仍然优先。这里超过 272K 是计价阈值，不是输入上限，因此**不要**
   再补 `input: 272000`。
-- Codex OAuth 与 API 使用相同的模型窗口：GPT-5.4 / 5.6 / 6 在 Codex 上同样是
-  `1050000 / 922000 / 128000` 档位（见下方 [OpenAI Codex preset](#openai-codex-preset)）。
+- 目录中的 GPT-5.6 / 6 Codex 绑定使用 `1050000` 总窗口和 `128000` 最大输出，
+  不另设独立输入上限；Chord 同样按本次输出预算推导可用输入
+  （见下方 [OpenAI Codex preset](#openai-codex-preset)）。
 - API 支持的 reasoning effort 为 `none`、`low`、`medium`、`high`、`xhigh`、`max`；可用 `openai/gpt-5.6-sol@xhigh` 这样的 ref 选择已配置 variant。
 - Responses 在启用 reasoning 时默认使用 `reasoning.summary: auto`；如需明确关闭，请配置为 `none`。Chord 当前尚未暴露 GPT-5.6 的 `reasoning.mode: pro`。
 - `preset: codex` provider 也可以使用 `max`；是否接受该 effort 由具体模型 / 后端决定。
@@ -161,7 +162,7 @@ openai:
 按这个顺序理解模型限制：
 
 1. `limit.context` 是总窗口。对大多数模型，只要「输入 + 请求输出」放得进这个数字即可。
-2. `limit.input` 只在 provider 还单独列出输入上限时才需要。部分 GPT 模型属于这种情况；如果省略，Chord 按 `limit.context` 减去客户端计划输出预算推导输入预算（正数 `limit.output` 会约束 `max_output_tokens`，后者默认 `64000`）。显式声明的 `limit.input` 始终按原值使用。
+2. `limit.input` 只在 provider 还单独列出输入上限时才需要。如果省略，Chord 按 `limit.context` 减去客户端计划输出预算推导输入预算（正数 `limit.output` 会约束 `max_output_tokens`，后者默认 `64000`）。显式声明的 `limit.input` 始终按原值使用，不要把 `context - output` 的结果填成独立输入上限。
 3. `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此在按可用上下文继续收缩前，实际请求上限为 `min(64000, limit.output)`。如需不同的全局上限，请显式设置 `max_output_tokens`。若某模型实际输出能力低于 `64000` 且未配置 `limit.output`，在服务端校验 `max_tokens` 的后端会直接拒绝这类请求，请为该模型声明 `limit.output`，或调低全局 `max_output_tokens`。
 
 Responses 和 Chat Completions 服务商的 `parallel_tool_calls` 默认都是 `true`。只有后端或工作流要求串行工具调用时，才在服务商、模型或变体上设为 `false`。部分网关要求特定客户端标识时，还可以配置服务商级 `user_agent`。
@@ -188,34 +189,19 @@ Azure OpenAI Responses endpoint 用普通 `type: responses` provider 配置：`a
 
 ### OpenAI Codex preset
 
-Codex OAuth 与 API 示例使用相同的模型窗口，区别只在 provider preset 与认证方式。
+用模型池引用继承目录中的模型限额：
 
 ```yaml
 providers:
   codex:
     preset: codex
-    type: responses
-    models:
-      gpt-5.5:
-        limit:
-          context: 400000
-          input: 272000
-          output: 128000
-      gpt-5.4:
-        limit:
-          context: 1050000
-          input: 922000
-          output: 128000
-      gpt-5.6-sol:
-        limit:
-          context: 1050000
-          input: 922000
-          output: 128000
+model_pools:
+  default:
+    - codex/gpt-6.1-sol
+    - codex/gpt-6-astra
 ```
 
-各 Codex 模型的额度由已验证目录供给（这些模型为 `1050000 / 922000 / 128000`，
-目录记录的显式 922K 输入额度仍然优先）；
-向导给出的数值不够用时，用 `chord config show --catalog` 查询，不要手工照抄数字。
+这些绑定继承 `1050000` 总窗口和 `128000` 最大输出。采用默认的 `64000` 请求输出预算时，Chord 规划的输入预算为 `986000`。若端点另有明确公布的独立输入上限，可显式配置，该值优先。用 `chord config show --catalog` 查询模型事实，加 `--json` 查看来源与价格适用范围。
 
 `preset: codex` 可使用 `auth.yaml` 中的 OpenAI / ChatGPT OAuth 凭据。OAuth 条目通常是 mapping：
 

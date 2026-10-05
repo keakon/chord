@@ -49,6 +49,14 @@ model_pools:
 	if !ok || model.Limit.Context != 1050000 || model.Limit.Output != 128000 {
 		t.Fatalf("materialized model = %+v, want catalog limits", model)
 	}
+	if model.Limit.Input != 0 {
+		t.Fatalf("catalog invented an independent input cap: %d", model.Limit.Input)
+	}
+	for outputCap, wantInput := range map[int]int{64000: 986000, 32000: 1018000} {
+		if got := model.Limit.EffectiveInputBudget(outputCap, 64000); got != wantInput {
+			t.Fatalf("input budget for output cap %d = %d, want %d", outputCap, got, wantInput)
+		}
+	}
 	mo, ok := rc.Index.Model("openai", "gpt-6.1-sol")
 	if !ok || len(mo.Limit.Context) == 0 || mo.Limit.Context[0].Layer != OriginLayerCatalog {
 		t.Fatalf("model origins = %+v, want catalog origin", mo)

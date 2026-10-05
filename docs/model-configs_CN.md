@@ -2,7 +2,7 @@
 
 <!-- description: 用内置模型目录接入模型：chord config add、目录刷新、自定义端点借用与网关行为经验。 -->
 
-模型能做什么——context / input / output 限额、输入模态、reasoning 档位，以及已验证端点绑定上的 Responses 字段发送规则——都由内置模型目录统一供给。目录数据来自公开的 [chord-models](https://github.com/keakon/chord-models) 仓库：每个 chord 发布版内嵌一份当时的已验证快照，目录刷新可以不等发版带来新数据。条目分两种状态：**verified**（官方资料核对过、请求行为验证过，可提供运行时默认值）和 **candidate**（社区发现，只带来源与作用域展示，永不成为默认值）。
+模型能做什么——context / input / output 限额、输入模态、reasoning 档位，以及已验证端点绑定上的 Responses 字段发送规则——都由内置模型目录统一供给。目录数据来自公开的 [chord-models](https://github.com/keakon/chord-models) 仓库：每个 chord 发布版内嵌一份当时的已验证快照，目录刷新可以不等发版带来新数据。已验证模型事实来自引用的文档；官方接入信息提供配置所需的地址和凭据变量，托管绑定另行记录经过验证的端点行为。模型事实或接入信息不代表已完成真实请求验证。**候选条目**保留尚待核实的发现及其来源、作用域，永不成为运行时默认值。
 
 用 `chord config show --catalog` 查看目录，输出会标明展示的是哪份快照、来自哪里——内嵌快照，还是带上游 tag 的刷新缓存。协议与字段语义见[配置参考](./configuration_CN.md)；本页讲怎么把模型接上、怎么保持配置不过期。
 
@@ -48,7 +48,7 @@ chord doctor models --model mygw/claude-gw
 
 ## 自定义端点：借用目录事实
 
-`chord config add ... --catalog <id>` 会在模型下写入 `catalog:` 引用。自定义端点（无 preset）继承限额、模态和上下文压缩建议；与官方使用相同协议时，还会继承模型行为、`compat`、reasoning 变体和 Responses 字段发送规则。provider 的地址、凭据和传输设置由用户自己的配置决定。按模型关闭借用用 `catalog: false`：
+`chord config add ... --catalog <id>` 会在模型下写入 `catalog:` 引用。显式选择优先于 preset 的自动绑定和已保存的目录选择，所选模型必须适用于当前 preset。自定义端点（无 preset）继承限额、模态和上下文压缩建议；与官方使用相同协议时，还会继承模型行为、`compat`、reasoning 变体和 Responses 字段发送规则。provider 的地址、凭据和传输设置由用户自己的配置决定。按模型关闭借用用 `catalog: false`：
 
 ```yaml
 providers:
@@ -80,7 +80,9 @@ Chord 的 `thinking.*` 键与 wire 无关，但把 `/v1/chat/completions` 翻译
 
 ### 压缩阈值调优
 
-自动压缩的预算从模型 context 窗口推导，目录填好的窗口配合全局默认值（`threshold` 0.8）就是正确的起点。只有当模型的长上下文可靠性或计价给出理由时才调 `compaction` 块——机制见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。目前记录到的家族起点：Claude 5 长时间 agentic 会话 0.7；GPT 长上下文计价档位附近约 0.25、reminder 略低于它；Gemini 0.2/0.15；GLM 与 DeepSeek 0.25/0.2；Grok 0.4/0.35；MiniMax 0.5/0.45。模型长上下文行为无资料可查时，保持默认即可。
+自动压缩使用有效输入预算：provider 公布了独立输入上限时使用该值，否则从总窗口中减去本次请求的输出预算。显式设置的模型或全局阈值优先；未设置时采用该模型的目录建议，没有目录建议才使用全局默认值 0.8。机制见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。
+
+目录阈值是调优起点，不是 provider 限制，也不代表已测得的性能最优值。应按实际任务质量、延迟、请求费用和缓存复用效果调整。用 `chord config show --catalog --json` 查看所选模型的 `config_profile` 和 `cost.notes`；长上下文价格可能高于基础单价。
 
 ## 目录配方包含什么
 
@@ -91,3 +93,5 @@ Chord 的 `thinking.*` 键与 wire 无关，但把 `/v1/chat/completions` 翻译
 compat 按字段继承，显式模型值及 provider 值优先于目录默认值。其他已有模型配置块按用户配置保留，目录只填充缺失的块；将块设为 `null` 会阻止目录重新填充。模型压缩建议只补齐未设置的字段。显式设置全局或模型 `threshold` 时，目录不再填充缺省的 `reminder`，提醒线按有效阈值派生；显式全局 reminder 也优先于目录建议。模型显式值仍优先于全局设置。
 
 请求体压缩和上下文 compaction 是两件事。自动添加的 provider 默认不启用请求体压缩，包括官方连接。目录中记录的 Codex `zstd`、Anthropic `gzip` 支持信息仅供参考。确认端点支持后，用户可手动设置 provider 的 `compress: gzip` 或 `compress: zstd`；添加模型会保留已有的显式压缩设置。
+
+模型文档中的推理档位可能多于某个托管端点已验证的变体。Opus 5.5 配方采用官方默认的 `medium` effort；用户的显式配置仍然优先。

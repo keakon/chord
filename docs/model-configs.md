@@ -8,10 +8,11 @@ verified endpoint bindings — the Responses fields a route accepts. The
 catalog's data lives in the public
 [chord-models](https://github.com/keakon/chord-models) repository; each chord
 release embeds a verified snapshot of it, and a catalog refresh brings newer
-data without waiting for a release. Entries are either **verified** (official
-docs checked, request behavior validated — they provide runtime defaults) or
-**candidate** (discovered, shown with their scope and sources, never
-defaults).
+data without waiting for a release. Verified model facts come from cited
+documentation. Documented connections supply setup information; managed
+bindings separately record verified route behavior. A model fact or connection
+does not imply a live request test. **Candidates** retain incomplete discoveries
+with their scope and sources and never supply runtime defaults.
 
 Inspect the catalog with `chord config show --catalog`. The view states which
 snapshot it shows and where that snapshot came from — the embedded one, or a
@@ -78,7 +79,9 @@ chord doctor models --model mygw/claude-gw
 ## Custom endpoints: borrowing catalog facts
 
 `chord config add ... --catalog <id>` writes a `catalog:` reference under the
-model. A custom endpoint (no preset) inherits limits, modalities and compaction
+model. The explicit selection takes priority over the preset binding and any
+saved catalog choice; it must be valid for the selected preset. A custom
+endpoint (no preset) inherits limits, modalities and compaction
 hints. When its protocol matches the official connection, it also inherits
 the model behavior, `compat`, reasoning variants and Responses field-send rules.
 The provider keeps its URL, credentials and transport settings.
@@ -150,16 +153,17 @@ the full history on their own; recipes that preserve thinking
 
 ### Compaction tuning
 
-Automatic compaction derives its budget from the model's context window, so
-with catalog-filled windows the global default (`threshold` 0.8) is the right
-starting point. Tune a model's `compaction` block only when its long-context
-reliability or pricing gives a reason to — see
-[Context compaction](./context-management.md#context-compaction) for the
-mechanics. Family starting points recorded so far: Claude 5 long agentic
-sessions 0.7; GPT long-context pricing tiers around 0.25 with the reminder
-just below; Gemini 0.2/0.15; GLM and DeepSeek 0.25/0.2; Grok 0.4/0.35;
-MiniMax 0.5/0.45. When a model's long-context behavior is undocumented, stay
-on the default.
+Automatic compaction uses the effective input budget: a documented independent
+input cap, or the total window minus the requested output budget. An explicit
+model or global threshold takes priority; otherwise, Chord uses the model's
+catalog recommendation, or the global default of 0.8 when none is recorded.
+See [Context compaction](./context-management.md#context-compaction).
+
+Catalog thresholds are starting recommendations, not provider limits or
+measured performance optima. Tune against representative tasks, considering
+quality, latency, request cost and cache reuse. Inspect the selected model's
+`config_profile` and `cost.notes` with `chord config show --catalog --json`;
+long-context pricing can differ from the listed base rate.
 
 ## What a catalog recipe contains
 
@@ -190,3 +194,7 @@ The catalog records known endpoint support (`zstd` for Codex, `gzip` for
 Anthropic) as reference information. To enable it, set provider `compress: gzip`
 or `compress: zstd` after confirming endpoint support. Adding a model preserves
 an existing explicit compression setting.
+
+Documented model reasoning options may exceed the variants verified on a
+managed route. The Opus 5.5 profile uses its official `medium` effort default;
+explicit user settings take priority.

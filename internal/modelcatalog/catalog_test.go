@@ -53,7 +53,7 @@ func TestModelFactsAndBindings(t *testing.T) {
 	if !ok {
 		t.Fatal("Model(openai/gpt-6.1-sol) missing")
 	}
-	if m.Context != 1050000 || m.Input != 922000 || m.Output != 128000 {
+	if m.Context != 1050000 || m.Input != 0 || m.Output != 128000 {
 		t.Fatalf("gpt-6.1-sol facts = %+v", m)
 	}
 	if m.Cost != nil && (m.Cost.InputPerMillion <= 0 || m.Cost.OutputPerMillion <= 0) {

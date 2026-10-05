@@ -30,7 +30,7 @@
 
 ### 新功能
 
-- 内嵌模型目录包含 31 个已验证模型、20 个 preset 绑定，固定到 chord-models `v2026-10-05.4`，记录公布的限额、模态、价格和模型行为配方。`chord config add` 可接入已记录的官方端点并写入必需的协议设置；自定义 URL 可用 `--catalog` 显式借用模型事实。
+- 内嵌模型目录包含 31 个已验证模型、20 个 preset 绑定，固定到 chord-models `v2026-10-05.5`，记录公布的限额、模态、价格和模型行为配方。`chord config add` 可接入已记录的官方端点并写入必需的协议设置；自定义 URL 可用 `--catalog` 显式借用模型事实。
 - 模型目录现在可以从上游数据仓库 [chord-models](https://github.com/keakon/chord-models) 刷新，不必等 chord 发版：`chord config refresh-catalog` 把最新版本 tag 拉进本地缓存，`chord config add --refresh-catalog` 在添加模型前顺带执行。刷新快照按版本号整体取代内置目录——绝不按条目合并——在下一次 chord 命令启动时生效；任何一步失败（网络、快照损坏、schema 不兼容）都回退到当前生效的快照。`chord config show --catalog` 会标明当前生效的快照及其来源。
 - 目录刷新同时带来 candidate 条目——社区发现、尚未完整验证的 wire 名——它们会进入 `chord config add` 的建议列表，标注被观察到的 provider 作用域与来源。候选永不填充默认值：采纳意味着把观测值写成你自己的显式配置；同一 wire 名在多个作用域被观察到时并列展示，Chord 不替你挑选。
 - 很可能已被更新的已验证模型取代的目录引用现在会以 advisory 形式上报：`chord doctor config` 列出它们及重新绑定 / 保留现状的命令，启动时提示未处理数量，`chord config add <provider>/<model> --keep-current` 可在当前目录版本下确认不再提示。

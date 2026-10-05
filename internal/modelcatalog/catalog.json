@@ -1,8 +1,8 @@
 {
-  "version": "2026-10-05.4",
+  "version": "2026-10-05.5",
   "source": {
     "repository": "https://github.com/keakon/chord-models",
-    "revision": "v2026-10-05.4"
+    "revision": "v2026-10-05.5"
   },
   "endpoints": [
     {
@@ -247,6 +247,13 @@
         "text",
         "image"
       ],
+      "reasoning_options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
       "cost": {
         "input_per_million": 4,
         "output_per_million": 20,
@@ -258,6 +265,10 @@
         }
       },
       "sources": [
+        {
+          "url": "https://platform.claude.com/docs/en/build-with-claude/effort",
+          "checked": "2026-10-05"
+        },
         {
           "url": "https://models.dev/anthropic/claude-opus-5-5",
           "checked": "2026-10-01"
@@ -275,7 +286,7 @@
             "ttl": "5m"
           },
           "thinking": {
-            "effort": "high",
+            "effort": "medium",
             "type": "adaptive"
           }
         },
@@ -285,6 +296,10 @@
           "notes": "Preserve a larger recent tail for long-running coding agents."
         },
         "sources": [
+          {
+            "url": "https://platform.claude.com/docs/en/build-with-claude/effort",
+            "checked": "2026-10-05"
+          },
           {
             "url": "https://platform.claude.com/docs/en/models/overview",
             "checked": "2026-10-05"
@@ -342,6 +357,13 @@
         "text",
         "image"
       ],
+      "reasoning_options": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
       "cost": {
         "input_per_million": 2,
         "output_per_million": 10,
@@ -353,6 +375,10 @@
         }
       },
       "sources": [
+        {
+          "url": "https://platform.claude.com/docs/en/build-with-claude/effort",
+          "checked": "2026-10-05"
+        },
         {
           "url": "https://models.dev/anthropic/claude-sonnet-5-5",
           "checked": "2026-10-01"
@@ -380,6 +406,10 @@
           "notes": "Preserve a larger recent tail for coding and tool loops."
         },
         "sources": [
+          {
+            "url": "https://platform.claude.com/docs/en/build-with-claude/effort",
+            "checked": "2026-10-05"
+          },
           {
             "url": "https://platform.claude.com/docs/en/models/overview",
             "checked": "2026-10-05"
@@ -954,19 +984,24 @@
     {
       "id": "openai/gpt-5.6-luna",
       "context": 1050000,
-      "input": 922000,
       "output": 128000,
       "input_modalities": [
         "text",
         "image"
       ],
       "reasoning_options": [
+        "none",
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "sources": [
+        {
+          "url": "https://developers.openai.com/api/docs/models/gpt-5.6-luna",
+          "checked": "2026-10-05"
+        },
         {
           "url": "https://models.dev/openai/gpt-5.6-luna",
           "checked": "2026-10-01"
@@ -984,19 +1019,24 @@
     {
       "id": "openai/gpt-5.6-sol",
       "context": 1050000,
-      "input": 922000,
       "output": 128000,
       "input_modalities": [
         "text",
         "image"
       ],
       "reasoning_options": [
+        "none",
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "sources": [
+        {
+          "url": "https://developers.openai.com/api/docs/models/gpt-5.6-sol",
+          "checked": "2026-10-05"
+        },
         {
           "url": "https://models.dev/openai/gpt-5.6-sol",
           "checked": "2026-10-01"
@@ -1014,19 +1054,24 @@
     {
       "id": "openai/gpt-5.6-terra",
       "context": 1050000,
-      "input": 922000,
       "output": 128000,
       "input_modalities": [
         "text",
         "image"
       ],
       "reasoning_options": [
+        "none",
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "sources": [
+        {
+          "url": "https://developers.openai.com/api/docs/models/gpt-5.6-terra",
+          "checked": "2026-10-05"
+        },
         {
           "url": "https://models.dev/openai/gpt-5.6-terra",
           "checked": "2026-10-01"
@@ -1044,7 +1089,6 @@
     {
       "id": "openai/gpt-6-astra",
       "context": 1050000,
-      "input": 922000,
       "output": 128000,
       "input_modalities": [
         "text",
@@ -1061,13 +1105,18 @@
         "input_per_million": 10,
         "output_per_million": 50,
         "currency": "USD",
-        "checked": "2026-10-04",
+        "checked": "2026-10-05",
         "source": {
-          "url": "https://developers.openai.com/api/docs/pricing",
-          "checked": "2026-10-04"
-        }
+          "url": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+          "checked": "2026-10-05"
+        },
+        "notes": "Standard USD API rates for uncached text input and text output up to 272K input tokens. Above 272K, the entire request uses 2x input and cache rates and 1.5x output rates. Cache writes, processing tiers and regional pricing are separate; these are not Codex subscription rates."
       },
       "sources": [
+        {
+          "url": "https://developers.openai.com/api/docs/models/gpt-6-astra",
+          "checked": "2026-10-05"
+        },
         {
           "url": "https://models.dev/openai/gpt-6-astra",
           "checked": "2026-10-01"
@@ -1085,13 +1134,13 @@
     {
       "id": "openai/gpt-6-luna",
       "context": 1050000,
-      "input": 922000,
       "output": 128000,
       "input_modalities": [
         "text",
         "image"
       ],
       "reasoning_options": [
+        "none",
         "low",
         "medium",
         "high",
@@ -1102,13 +1151,18 @@
         "input_per_million": 0.1,
         "output_per_million": 0.5,
         "currency": "USD",
-        "checked": "2026-10-04",
+        "checked": "2026-10-05",
         "source": {
-          "url": "https://developers.openai.com/api/docs/pricing",
-          "checked": "2026-10-04"
-        }
+          "url": "https://developers.openai.com/api/docs/models/gpt-6-luna",
+          "checked": "2026-10-05"
+        },
+        "notes": "Standard USD API rates for uncached text input and text output up to 272K input tokens. Above 272K, the entire request uses 2x input and cache rates and 1.5x output rates. Cache writes, processing tiers and regional pricing are separate; these are not Codex subscription rates."
       },
       "sources": [
+        {
+          "url": "https://developers.openai.com/api/docs/models/gpt-6-luna",
+          "checked": "2026-10-05"
+        },
         {
           "url": "https://models.dev/openai/gpt-6-luna",
           "checked": "2026-10-01"
@@ -1126,19 +1180,24 @@
     {
       "id": "openai/gpt-6-sol",
       "context": 1050000,
-      "input": 922000,
       "output": 128000,
       "input_modalities": [
         "text",
         "image"
       ],
       "reasoning_options": [
+        "none",
         "low",
         "medium",
         "high",
-        "xhigh"
+        "xhigh",
+        "max"
       ],
       "sources": [
+        {
+          "url": "https://developers.openai.com/api/docs/models/gpt-6-sol",
+          "checked": "2026-10-05"
+        },
         {
           "url": "https://models.dev/openai/gpt-6-sol",
           "checked": "2026-10-01"
@@ -1156,7 +1215,6 @@
     {
       "id": "openai/gpt-6.1-sol",
       "context": 1050000,
-      "input": 922000,
       "output": 128000,
       "input_modalities": [
         "text",
@@ -1173,13 +1231,18 @@
         "input_per_million": 2,
         "output_per_million": 10,
         "currency": "USD",
-        "checked": "2026-10-04",
+        "checked": "2026-10-05",
         "source": {
-          "url": "https://developers.openai.com/api/docs/pricing",
-          "checked": "2026-10-04"
-        }
+          "url": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+          "checked": "2026-10-05"
+        },
+        "notes": "Standard USD API rates for uncached text input and text output up to 272K input tokens. Above 272K, the entire request uses 2x input and cache rates and 1.5x output rates. Cache writes, processing tiers and regional pricing are separate; these are not Codex subscription rates."
       },
       "sources": [
+        {
+          "url": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+          "checked": "2026-10-05"
+        },
         {
           "url": "https://models.dev/openai/gpt-6.1-sol",
           "checked": "2026-10-01"
@@ -1202,9 +1265,13 @@
         "compaction": {
           "threshold": 0.25,
           "reminder": 0.2,
-          "notes": "Long-context API pricing and request cost favor early archival; tune with project workload."
+          "notes": "Chord starting heuristic to stay below the 272K input pricing tier; not a provider limit or a measured optimum. Tune for task quality, latency and cache reuse."
         },
         "sources": [
+          {
+            "url": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+            "checked": "2026-10-05"
+          },
           {
             "url": "https://developers.openai.com/api/docs/guides/reasoning",
             "checked": "2026-10-05"
