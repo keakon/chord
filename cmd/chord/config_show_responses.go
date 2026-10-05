@@ -27,7 +27,7 @@ func hasConfigErrors(diagnostics []config.Diagnostic) bool {
 }
 
 // configShowResponses explains request values separately from field emission.
-func configShowResponses(cfg *config.Config, pathFilter string) []configShowResponsesRequest {
+func configShowResponses(cfg *config.Config, pathFilter []string) []configShowResponsesRequest {
 	if cfg == nil {
 		return nil
 	}
@@ -37,8 +37,7 @@ func configShowResponses(cfg *config.Config, pathFilter string) []configShowResp
 			continue
 		}
 		for modelName, model := range provider.Models {
-			path := "providers." + name + ".models." + modelName
-			if pathFilter != "" && pathFilter != path && !strings.HasPrefix(path, pathFilter+".") && !strings.HasPrefix(pathFilter, path+".") {
+			if !configShowPathIncludesModel(pathFilter, name, modelName) {
 				continue
 			}
 			compat, sources := config.ResolveResponsesCompat(provider.Preset, modelName, model, provider.Compat)

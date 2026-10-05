@@ -75,6 +75,11 @@ func RecordCatalogAdvisoryAcknowledgment(provider, model string) error {
 	if provider == "" || model == "" {
 		return fmt.Errorf("provider and model are required")
 	}
+	lock, err := LockConfigMutation(path)
+	if err != nil {
+		return fmt.Errorf("lock catalog advisory state: %w", err)
+	}
+	defer func() { _ = lock.Close() }()
 	var state catalogAdvisoryAckFile
 	if data, err := os.ReadFile(path); err == nil {
 		if err := json.Unmarshal(data, &state); err != nil {
@@ -84,18 +89,22 @@ func RecordCatalogAdvisoryAcknowledgment(provider, model string) error {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 	entry := catalogAdvisoryAck{Provider: provider, Model: model, CatalogVersion: modelcatalog.Version()}
+	previousCount := len(state.Acks)
+	state.Acks = slices.DeleteFunc(state.Acks, func(ack catalogAdvisoryAck) bool {
+		return ack.CatalogVersion != entry.CatalogVersion
+	})
 	if slices.Contains(state.Acks, entry) {
-		return nil
+		if len(state.Acks) == previousCount {
+			return nil
+		}
+	} else {
+		state.Acks = append(state.Acks, entry)
 	}
-	state.Acks = append(state.Acks, entry)
 	data, err := json.MarshalIndent(&state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return fmt.Errorf("create advisory state dir: %w", err)
-	}
-	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+	if err := writeConfigFileAtomicallyReplace(path, append(data, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

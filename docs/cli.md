@@ -224,7 +224,7 @@ Values that may carry credentials (API keys, tokens, authorization headers, cred
 
 JSON `ok` is false when an error diagnostic exists; inspection still exits successfully, while `chord doctor config` provides the pass/fail check. Responses models also have `request_settings`, showing `store` and `parallel_tool_calls` values separately from field emission, with their sources. This is read-only explanation, not a YAML configuration field. These are defaults before `request_overrides` patches. Tool fields require tools in the request; variants or request tuning can override capability values.
 
-`--path` filters the effective config, so it cannot be combined with `--catalog`.
+`--path` filters the effective config, so it cannot be combined with `--catalog`. Paths match actual configuration keys, preserving dots inside provider or model names, for example `providers.openai.models.gpt-6.1-sol.limit`. When several keys match at a level, the longest key wins.
 
 ### Catalog view
 
@@ -254,9 +254,15 @@ How the model resolves:
 
 - **Wire name bound to the provider's preset** (for example `gpt-6.1-sol` under `preset: openai`): only a pool reference is written; context, modalities, reasoning variants and field send rules fill in at load.
 - **Custom endpoint**: pass `--catalog <id>` to inherit a catalog model under your own wire name. Limits, modalities and compaction hints transfer; the same protocol also inherits model behavior, compat, reasoning variants and field send rules. Your URL, credentials and compression settings stay explicit. Request-body compression is disabled by default and can be enabled with provider `compress: gzip` or `compress: zstd`.
-- **No match**: the closest verified models are listed with their catalog IDs, together with any refreshed candidates annotated with their provider scope and sources. Adoption is always an explicit `--catalog` choice; the command fails instead of guessing.
+- **No match**: the closest verified models are listed with their catalog IDs. In an interactive terminal, press a number to select immediately without Enter, press `m` to enter a verified catalog ID, or press Esc/`0` to cancel; the request model name stays unchanged. Non-interactive mode also shows refreshed candidates with their provider scope and sources, then returns an error; it never adopts one automatically.
 
-Existing pool entries keep their order — new references are appended. Files that use YAML anchors or aliases are refused rather than rewritten.
+In an interactive terminal, the command guides you through catalog selection and any missing provider URL or API-key environment variable. You can then choose an existing pool or create a new one, and configure the reasoning variant and request-body compression. It previews resolved limits and the settings to save, and writes only after confirmation. Numbered menus and `y/n` confirmations respond immediately; Enter accepts a displayed default. Press Esc, `q` or `0` in menus, enter `q` / `cancel` in text prompts, or decline saving to cancel. URLs, environment variable names and new pool names still require Enter. End of input also cancels, leaving configuration and credential files unchanged. Existing provider URLs and credentials are reused; accepting the compression default preserves the current setting, while changing it affects every model on that provider.
+
+If another command changes the selected provider's endpoint or protocol while you review it, saving stops and you must run the command again to review the current endpoint. Configuration and credentials are saved separately. If credential saving fails after the configuration is saved, the error identifies the saved file and the environment-variable reference to add to `auth.yaml`.
+
+Use `--no-interactive` to skip prompts and confirmation in scripts. Redirecting stdin or stdout also disables prompts; missing arguments produce an error.
+
+Existing pool entries keep their order — new references are appended. Untouched YAML anchors and aliases are preserved. Editing a shared value creates independent settings without changing other references; `<<` merges are supported too.
 
 ### Flags
 
@@ -266,6 +272,9 @@ Existing pool entries keep their order — new references are appended. Files th
 | `--catalog <id>`    | Catalog model ID to borrow facts from (custom endpoints)                                 |
 | `--pool <name>`     | Model pool to append the reference to (default `default`)                                |
 | `--api-key-env <v>` | Write `$VAR` as the provider credential in `auth.yaml` when it has none                  |
+| `--variant <name>` | Use a defined reasoning variant in the pool reference (`@variant`)                       |
+| `--compress <mode>` | Provider request compression: `off`, `gzip` or `zstd`; omission preserves the current setting |
+| `--no-interactive` | Disable guided choices and save confirmation for scripts                                |
 | `--keep-current`    | Acknowledge freshness advisories for this model without changing anything                |
 | `--refresh-catalog` | First pull the latest tagged catalog snapshot from the upstream repository (network); a failure continues with the catalog already in effect |
 
@@ -275,9 +284,13 @@ Existing pool entries keep their order — new references are appended. Files th
 # A verified model on an official endpoint: one pool reference, nothing else
 chord config add openai/gpt-6-sol
 
+# Guided gateway setup: select a catalog entry and fill connection details
+chord config add mygw/gpt-6-sol
+
+# Scripted gateway setup with explicit arguments
 # Serve a catalog model through your own gateway under its wire name
 chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
-  --catalog anthropic/claude-opus-5-5
+  --catalog anthropic/claude-opus-5-5 --no-interactive
 
 # Add credentials for a new provider in the same step
 chord config add mygw2/m1 --url https://gateway.example.com/v1/chat/completions \

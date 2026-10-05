@@ -663,7 +663,7 @@ func promptLine(termIO *setupTerminal, prompt string) (string, error) {
 		return "", err
 	}
 	line, err := termIO.reader.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
+	if err != nil && (!errors.Is(err, io.EOF) || len(line) == 0) {
 		return "", err
 	}
 	return strings.TrimRight(line, "\r\n"), nil

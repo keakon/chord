@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -186,5 +188,106 @@ func TestCatalogAddDoesNotEnableOfficialCompression(t *testing.T) {
 				t.Fatalf("automatic compression = %q", got)
 			}
 		})
+	}
+}
+
+// configAddWriteObserver changes external state at a visible prompt/save boundary.
+type configAddWriteObserver struct {
+	strings.Builder
+	observe func(string)
+}
+
+func (w *configAddWriteObserver) Write(p []byte) (int, error) {
+	n, err := w.Builder.Write(p)
+	if w.observe != nil {
+		w.observe(string(p))
+	}
+	return n, err
+}
+
+func TestConfigAddRechecksConfirmedProvider(t *testing.T) {
+	for _, changedEndpoint := range []bool{false, true} {
+		t.Run(fmt.Sprintf("endpointChanged=%t", changedEndpoint), func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("CHORD_CONFIG_HOME", dir)
+			path := filepath.Join(dir, "config.yaml")
+			original := "providers:\n  openai:\n    type: responses\n    api_url: https://example.invalid/v1/responses\n"
+			if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "auth.yaml"), []byte("openai: [$SAMPLE_API_KEY]\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			concurrent := original + "log_level: debug\n"
+			if changedEndpoint {
+				concurrent = strings.ReplaceAll(concurrent, "example.invalid/v1", "example.invalid/other")
+			}
+			var out configAddWriteObserver
+			updated := false
+			out.observe = func(text string) {
+				if !updated && strings.Contains(text, "Save configuration?") {
+					updated = true
+					if err := os.WriteFile(path, []byte(concurrent), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			opts := configAddOptions{terminal: &setupTerminal{reader: bufio.NewReader(strings.NewReader("ny")), out: &out}}
+			err := runConfigAdd(context.Background(), &out, "openai/gpt-6.1-sol", opts)
+			if !updated {
+				t.Fatalf("confirmation was not reached: %v; %s", err, out.String())
+			}
+			raw, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if changedEndpoint {
+				if err == nil || !strings.Contains(err.Error(), "endpoint changed") || string(raw) != concurrent {
+					t.Fatalf("err=%v config=%s", err, raw)
+				}
+			} else if err != nil || !strings.Contains(string(raw), "log_level: debug") || !strings.Contains(string(raw), "openai/gpt-6.1-sol") {
+				t.Fatalf("unrelated update was not merged: err=%v config=%s", err, raw)
+			}
+		})
+	}
+}
+
+func TestConfigAddRejectsInvalidCredentialsBeforeSaving(t *testing.T) {
+	for _, invalid := range []string{"[", "[]", "openai: invalid"} {
+		t.Run(invalid, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("CHORD_CONFIG_HOME", dir)
+			if err := os.WriteFile(filepath.Join(dir, "auth.yaml"), []byte(invalid), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out strings.Builder
+			err := runConfigAdd(context.Background(), &out, "openai/gpt-6.1-sol", configAddOptions{envVar: "SAMPLE_API_KEY"})
+			if err == nil || !strings.Contains(err.Error(), "before saving config") {
+				t.Fatalf("err=%v", err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "config.yaml")); !os.IsNotExist(err) {
+				t.Fatalf("config was written: %v", err)
+			}
+		})
+	}
+}
+
+func TestConfigAddReportsCredentialsFailureAfterSaving(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CHORD_CONFIG_HOME", dir)
+	var out configAddWriteObserver
+	out.observe = func(text string) {
+		if strings.Contains(text, "Updated") {
+			if err := os.WriteFile(filepath.Join(dir, "auth.yaml"), []byte("["), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	err := runConfigAdd(context.Background(), &out, "openai/gpt-6.1-sol", configAddOptions{envVar: "SAMPLE_API_KEY"})
+	if err == nil || !strings.Contains(err.Error(), "configuration saved") || !strings.Contains(err.Error(), "$SAMPLE_API_KEY in auth.yaml") {
+		t.Fatalf("partial success not explained: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "config.yaml")); err != nil {
+		t.Fatalf("saved config missing: %v", err)
 	}
 }

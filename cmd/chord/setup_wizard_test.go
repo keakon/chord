@@ -694,6 +694,7 @@ func TestRunInitialSetupWizardUsesABCDefaultWhenIMEPromptDefaultsYes(t *testing.
 		"3",
 		"n",
 		"",
+		"", // accept the default IME target with an explicit Enter
 	}
 	if err := os.WriteFile(inputPath, []byte(strings.Join(inputs, "\n")+"\n"), 0o600); err != nil {
 		t.Fatalf("write wizard input: %v", err)

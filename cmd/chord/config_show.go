@@ -137,17 +137,19 @@ func renderConfigShowResult(out io.Writer, opts configShowOptions, rc *config.Re
 	origins := configShowOrigins(rc.Index)
 	budgets := configShowBudgets(rc.Config, rc.Index)
 	cfgMap := configToShowMap(rc.Config)
-	requests := configShowResponses(rc.Config, opts.Path)
+	var pathKeys []string
 
 	if opts.Path != "" {
-		subtree, err := filterShowMap(cfgMap, opts.Path)
+		subtree, keys, err := filterShowMap(cfgMap, opts.Path)
 		if err != nil {
 			return err
 		}
 		cfgMap = subtree
+		pathKeys = keys
 		origins = filterShowOrigins(origins, opts.Path)
-		budgets = filterShowBudgets(budgets, opts.Path)
+		budgets = filterShowBudgets(budgets, pathKeys)
 	}
+	requests := configShowResponses(rc.Config, pathKeys)
 
 	if opts.JSON {
 		report := configShowReport{
@@ -392,29 +394,45 @@ func redactShowDiagnostic(d config.Diagnostic) config.Diagnostic {
 	return d
 }
 
-// filterShowMap narrows the rendered config map to a dotted path. A path
-// ending on a leaf wraps that leaf so it still renders as YAML.
-func filterShowMap(m map[string]any, path string) (map[string]any, error) {
+// filterShowMap narrows the rendered config map to a dotted path. At each
+// level the longest matching key wins, so dots in provider/model names remain
+// part of those keys. A leaf is wrapped so it still renders as YAML.
+func filterShowMap(m map[string]any, path string) (map[string]any, []string, error) {
 	cur := m
-	segs := strings.Split(path, ".")
-	for i, seg := range segs {
-		child, ok := cur[seg]
-		if !ok {
-			return nil, fmt.Errorf("config path %q not found", path)
-		}
-		if i == len(segs)-1 {
-			if leafMap, ok := child.(map[string]any); ok {
-				return leafMap, nil
+	remaining := path
+	var keys []string
+	if remaining == "" {
+		return cur, keys, nil
+	}
+	for {
+		key := remaining
+		var child any
+		for {
+			var ok bool
+			child, ok = cur[key]
+			if ok {
+				break
 			}
-			return map[string]any{seg: child}, nil
+			dot := strings.LastIndexByte(key, '.')
+			if dot < 0 {
+				return nil, nil, fmt.Errorf("config path %q not found", path)
+			}
+			key = key[:dot]
+		}
+		keys = append(keys, key)
+		if key == remaining {
+			if leafMap, ok := child.(map[string]any); ok {
+				return leafMap, keys, nil
+			}
+			return map[string]any{key: child}, keys, nil
 		}
 		next, ok := child.(map[string]any)
 		if !ok {
-			return nil, fmt.Errorf("config path %q not found", path)
+			return nil, nil, fmt.Errorf("config path %q not found", path)
 		}
 		cur = next
+		remaining = remaining[len(key)+1:]
 	}
-	return cur, nil
 }
 
 func filterShowOrigins(origins []configShowOrigin, path string) []configShowOrigin {
@@ -428,16 +446,16 @@ func filterShowOrigins(origins []configShowOrigin, path string) []configShowOrig
 	return out
 }
 
-func filterShowBudgets(budgets []configShowBudget, path string) []configShowBudget {
-	fullPath := path
-	if !strings.HasPrefix(fullPath, "providers.") {
-		fullPath = "providers." + fullPath
-	}
-	prefix := fullPath + "."
+func configShowPathIncludesModel(path []string, provider, model string) bool {
+	modelPath := []string{"providers", provider, "models", model}
+	n := min(len(path), len(modelPath))
+	return slices.Equal(path[:n], modelPath[:n])
+}
+
+func filterShowBudgets(budgets []configShowBudget, path []string) []configShowBudget {
 	var out []configShowBudget
 	for _, b := range budgets {
-		modelPath := "providers." + b.Provider + ".models." + b.Model
-		if modelPath == fullPath || strings.HasPrefix(modelPath, prefix) {
+		if configShowPathIncludesModel(path, b.Provider, b.Model) {
 			out = append(out, b)
 		}
 	}

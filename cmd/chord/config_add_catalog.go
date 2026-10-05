@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/modelcatalog"
 )
+
+var errCatalogConnectionRequired = errors.New("catalog model needs an explicit API connection")
 
 // prepareCatalogAdd recognizes only an explicitly selected, exact catalog ID.
 // A documented official connection contributes its explicit protocol recipe.
@@ -75,5 +78,5 @@ func prepareCatalogAdd(ref string, provider config.ProviderConfig, exists bool, 
 		}
 		return provider, facts.Connection.WireModelID, opts, nil
 	}
-	return provider, wire, opts, fmt.Errorf("model %q has no unambiguous API connection; pass --url for your endpoint", ref)
+	return provider, wire, opts, fmt.Errorf("%w: model %q has no unambiguous API connection; pass --url for your endpoint", errCatalogConnectionRequired, ref)
 }

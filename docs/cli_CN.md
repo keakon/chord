@@ -224,7 +224,7 @@ chord acp
 
 JSON 的 `ok` 表示是否存在 error 级诊断；有错误时为 `false`，查询命令仍保持成功退出，配置是否通过检查以 `chord doctor config` 为准。Responses 模型另有 `request_settings`，分别显示 `store`、`parallel_tool_calls` 的取值、字段是否发送及其来源。它是只读说明，不是可写入 YAML 的配置字段；这里显示 `request_overrides` 补丁之前的默认值；工具字段需要请求含工具，档位或单次请求调优还可覆盖能力取值。
 
-`--path` 过滤的是有效配置，与 `--catalog` 互斥。
+`--path` 过滤的是有效配置，与 `--catalog` 互斥。路径按实际配置键匹配，provider 或模型名中的点保留为名称的一部分，例如 `providers.openai.models.gpt-6.1-sol.limit`。同一层有多个匹配键时，选择最长的键。
 
 ### 目录视图
 
@@ -254,9 +254,15 @@ chord config show --json
 
 - **wire 名已绑定 provider 的 preset**（例如 `preset: openai` 下的 `gpt-6.1-sol`）：只写入一条池引用；上下文、模态、推理档位与字段发送规则在加载时自动填充。
 - **自定义端点**：传 `--catalog <id>`，用自己的 wire 名继承目录模型的限额、模态和上下文压缩建议；同协议还会继承模型行为、compat、reasoning 变体和字段发送规则。地址、凭据和请求体压缩保持用户自己的设置。请求体压缩默认关闭，可手动设置 provider 的 `compress: gzip` 或 `compress: zstd`。
-- **未命中**：列出最接近的已验证模型及其目录 ID，并一并列出刷新得到的候选条目（标注 provider 作用域与来源）。采纳永远是显式的 `--catalog` 选择；命令直接失败，不做猜测。
+- **未命中**：列出最接近的已验证模型及其目录 ID。交互终端中可按数字键立即选择目录模型，无需回车；按 `m` 可输入完整目录 ID，按 Esc 或 `0` 取消；模型的请求名称保持不变。非交互模式还会列出刷新得到的候选条目（标注 provider 作用域与来源），然后返回错误，不会自动采纳。
 
-既有池条目保持原顺序，新引用只追加。使用 YAML 锚点或别名的文件会被拒绝，而不是被重写。
+在交互终端中运行时，命令会引导你选择目录模型、填写尚未配置的 provider 地址和密钥环境变量。选择后可从已有模型池中选择或创建新池，并配置推理档位和请求体压缩，最后展示解析后的限额与待写入设置，确认后才保存。编号菜单和 `y/n` 确认均直接响应按键；回车可接受显示的默认值。菜单中按 Esc、`q` 或 `0`，文本输入中输入 `q` / `cancel`，或拒绝保存，都可取消。地址、环境变量名和新池名称等文本输入需要回车；输入结束也会取消，配置和凭据文件保持原样。已有 provider 的地址和凭据会沿用；接受压缩默认值会保留已有设置，改变压缩选项会影响该 provider 下的全部模型。
+
+预览期间，若其他命令改变了所选 provider 的接入地址或协议，保存会停止，需要重新运行命令确认当前配置。配置与凭据分别保存；若配置已保存而凭据写入失败，错误提示会说明已保存的文件，以及需要在 `auth.yaml` 中补充的环境变量引用。
+
+脚本使用 `--no-interactive` 跳过引导与确认。stdin 或 stdout 被重定向时同样不会询问；缺失参数会给出错误。
+
+既有池条目保持原顺序，新引用只追加。未涉及的 YAML 锚点和别名会保留。编辑共享值时，命令会生成独立配置，保持其他引用的有效值不变；`<<` 合并同样支持。
 
 ### Flags
 
@@ -266,6 +272,9 @@ chord config show --json
 | `--catalog <id>`    | 要借用事实的目录模型 ID（自定义端点）                                |
 | `--pool <name>`     | 追加引用的模型池（默认 `default`）                                   |
 | `--api-key-env <v>` | provider 尚无凭据时，向 `auth.yaml` 写入 `$VAR` 凭据                 |
+| `--variant <name>` | 池引用使用模型已定义的推理档位（写入 `@variant`）                     |
+| `--compress <mode>` | provider 请求体压缩：`off`、`gzip` 或 `zstd`；省略则保留已有设置       |
+| `--no-interactive` | 关闭引导和保存确认，供脚本调用                                       |
 | `--keep-current`    | 确认本模型的新鲜度提示，不做任何更改                                 |
 | `--refresh-catalog` | 先从上游仓库拉取最新 tag 的目录快照（联网）；失败时以当前生效的目录继续 |
 
@@ -275,9 +284,13 @@ chord config show --json
 # 官方端点上的已验证模型：一条池引用，其余免填
 chord config add openai/gpt-6-sol
 
+# 引导添加网关模型：选择目录条目，再填写接入信息
+chord config add mygw/gpt-6-sol
+
+# 脚本中通过完整参数添加网关模型
 # 在自己的网关上以自定义 wire 名使用目录模型
 chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
-  --catalog anthropic/claude-opus-5-5
+  --catalog anthropic/claude-opus-5-5 --no-interactive
 
 # 同一步骤为新 provider 写入凭据
 chord config add mygw2/m1 --url https://gateway.example.com/v1/chat/completions \

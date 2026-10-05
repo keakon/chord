@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
@@ -21,7 +22,7 @@ import (
 // configAddOptions controls offline model onboarding. Preset-bound models
 // write pool references; other connections inherit same-protocol recipes
 // through catalog references. Request compression remains an explicit choice.
-// The command is non-interactive.
+// Interactive terminals can complete missing choices before any file is written.
 type configAddOptions struct {
 	url            string
 	catalogID      string
@@ -29,6 +30,11 @@ type configAddOptions struct {
 	envVar         string
 	keepCurrent    bool
 	refreshCatalog bool
+	noInteractive  bool
+	compress       string
+	variant        string
+	terminal       *setupTerminal
+	customize      bool
 }
 
 func newConfigAddCmd() *cobra.Command {
@@ -50,11 +56,17 @@ The model resolves against the verified model catalog. A wire name bound to
 the provider's preset needs nothing else: context, modalities, reasoning
 variants and field send rules fill in at load. For custom endpoints, pass
 --catalog <id> to inherit the same-protocol recipe of a catalog model
-under your own wire name.
+under your own wire name. An explicit --catalog selection takes priority over
+the preset binding and any saved catalog choice.
 
-When the wire name matches nothing, the closest verified models are listed
-together with any candidates that came with a catalog refresh; adopting one
-is always an explicit --catalog choice, never automatic.
+In an interactive terminal, choose a suggested catalog model, fill missing
+connection details and optionally configure the pool, reasoning variant and
+request compression. Numbered choices and y/n respond immediately, without
+Enter. Choose an existing pool or create one. Press m to enter a catalog ID.
+Review the resolved configuration before saving. Press Esc/q to cancel menus
+or enter q in text prompts. Suggestions never bind a model without your choice.
+Pass --no-interactive for scripts. Redirected input or output also disables
+prompts; unmatched names then show suggestions and return an error.
 
 The command is offline by default. Pass --refresh-catalog to first pull the
 latest tagged snapshot of the upstream model catalog repository; if that
@@ -63,13 +75,25 @@ effect. The candidate config is resolved in full before anything is written,
 and the file is only replaced when that resolution reports no errors.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			opts.terminal = nil
+			if !opts.noInteractive {
+				in, inOK := cmd.InOrStdin().(*os.File)
+				out, outOK := cmd.OutOrStdout().(*os.File)
+				if inOK && outOK && term.IsTerminal(in.Fd()) && term.IsTerminal(out.Fd()) {
+					terminal, err := openSetupTerminal(SetupWizardOptions{In: in, Out: out})
+					if err != nil {
+						return fmt.Errorf("open configuration terminal: %w", err)
+					}
+					opts.terminal = terminal
+				}
+			}
 			return runConfigAdd(cmd.Context(), cmd.OutOrStdout(), args[0], *opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.url, "url", "",
 		"API URL when the provider does not exist yet (the path must end in a known protocol suffix)")
 	cmd.Flags().StringVar(&opts.catalogID, "catalog", "",
-		"catalog model ID to borrow facts from (custom endpoints)")
+		"catalog model ID to use instead of the automatic or saved binding")
 	cmd.Flags().StringVar(&opts.pool, "pool", "default", "model pool to append the reference to")
 	cmd.Flags().StringVar(&opts.envVar, "api-key-env", "",
 		"write $VAR as the provider credential in auth.yaml when it has none")
@@ -77,10 +101,22 @@ and the file is only replaced when that resolution reports no errors.`,
 		"acknowledge freshness advisories for this model without changing anything")
 	cmd.Flags().BoolVar(&opts.refreshCatalog, "refresh-catalog", false,
 		"first pull the latest tagged catalog snapshot from the upstream repository (network)")
+	cmd.Flags().BoolVar(&opts.noInteractive, "no-interactive", false, "disable guided choices and confirmation (for scripts)")
+	cmd.Flags().StringVar(&opts.compress, "compress", "", "provider request compression: off, gzip or zstd (default: preserve existing setting)")
+	cmd.Flags().StringVar(&opts.variant, "variant", "", "reasoning variant to use in the model pool")
 	return cmd
 }
 
-func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAddOptions) error {
+func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAddOptions) (err error) {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	defer func() {
+		if errors.Is(err, errConfigAddCancelled) {
+			fmt.Fprintln(out, "Cancelled. No configuration was changed.")
+			err = nil
+		}
+	}()
 	providerName, wireModel := config.SplitProviderModelRef(strings.TrimSpace(ref))
 	providerName, wireModel = strings.TrimSpace(providerName), strings.TrimSpace(wireModel)
 	if providerName == "" || wireModel == "" {
@@ -117,8 +153,17 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 	}
 	providerCfg, providerExists := rc.Config.Providers[providerName]
 	providerCfg, wireModel, opts, err = prepareCatalogAdd(ref, providerCfg, providerExists, wireModel, opts)
-	if err != nil {
+	if err != nil && !(opts.terminal != nil && errors.Is(err, errCatalogConnectionRequired)) {
 		return err
+	}
+	if opts.terminal != nil {
+		opts, err = guideConfigAdd(opts, providerName, wireModel, providerCfg, providerExists, rc.Config.ModelPools)
+		if err != nil {
+			return err
+		}
+	}
+	if opts.envVar != "" && !validConfigAddEnvName(opts.envVar) {
+		return fmt.Errorf("invalid API key environment variable name %q", opts.envVar)
 	}
 	if providerExists && strings.TrimSpace(opts.url) != "" &&
 		!strings.EqualFold(strings.TrimSpace(opts.url), strings.TrimSpace(providerCfg.APIURL)) {
@@ -148,6 +193,12 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 		poolName = "default"
 	}
 	poolRef := providerName + "/" + wireModel
+	if opts.variant != "" {
+		poolRef += "@" + opts.variant
+	}
+	if opts.compress != "" && opts.compress != "off" && opts.compress != config.RequestCompressionGzip && opts.compress != config.RequestCompressionZstd {
+		return fmt.Errorf("invalid request compression %q; choose off, gzip or zstd", opts.compress)
+	}
 
 	edit := configAddEdit{
 		providerName: providerName,
@@ -155,6 +206,10 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 		borrowID:     borrowID,
 		poolName:     poolName,
 		poolRef:      poolRef,
+		compress:     opts.compress,
+		providerType: providerCfg.Type,
+		apiURL:       providerCfg.APIURL,
+		preset:       providerCfg.Preset,
 	}
 	if !providerExists {
 		edit.providerNew = true
@@ -165,18 +220,53 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 			return fmt.Errorf("cannot infer a provider type from %q; use a URL ending in /responses, /messages, /chat/completions or /models", opts.url)
 		}
 	}
+	if opts.customize {
+		if err := configureConfigAddVariant(opts.terminal, globalPath, &edit); err != nil {
+			return err
+		}
+		poolRef = edit.poolRef
+	}
 
-	produce := func(current []byte) ([]byte, error) {
+	// Parse credentials before writing config.yaml, including in scripts.
+	// The write rechecks under its own lock; later I/O failures are reported
+	// as partial success with credential recovery instructions.
+	if opts.envVar != "" {
+		authPath, err := config.AuthPath()
+		if err != nil {
+			return fmt.Errorf("resolve auth path: %w", err)
+		}
+		if _, err := config.LoadAuthConfig(authPath); err != nil {
+			return fmt.Errorf("read credentials before saving config: %w", err)
+		}
+	}
+	produce := func(current []byte, showPreview bool) ([]byte, error) {
 		edited, err := editConfigYAMLForAdd(current, edit)
 		if err != nil {
 			return nil, err
 		}
-		if err := validateCandidateConfig(out, edited, edit); err != nil {
+		if err := validateCandidateConfig(out, edited, edit, showPreview); err != nil {
 			return nil, err
 		}
 		return edited, nil
 	}
-	if err := config.CreateOrUpdateConfigFileLocked(globalPath, produce); err != nil {
+	if opts.terminal != nil {
+		current, readErr := os.ReadFile(globalPath)
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			return fmt.Errorf("read config preview: %w", readErr)
+		}
+		if _, err := produce(current, true); err != nil {
+			return err
+		}
+		if err := confirmConfigAdd(opts.terminal, providerName, wireModel, providerCfg, edit, opts.envVar); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := config.CreateOrUpdateConfigFileLocked(globalPath, func(current []byte) ([]byte, error) {
+		return produce(current, opts.terminal == nil)
+	}); err != nil {
 		return fmt.Errorf("update %s: %w", globalPath, err)
 	}
 	printConfigAddSummary(out, edit, mode, poolName, poolRef)
@@ -186,7 +276,7 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 
 	if opts.envVar != "" {
 		if err := addProviderEnvCredential(providerName, strings.TrimSpace(opts.envVar), out); err != nil {
-			return err
+			return fmt.Errorf("configuration saved to %s, but credentials were not saved; after resolving the error, set provider %q to $%s in auth.yaml: %w", globalPath, providerName, strings.TrimSpace(opts.envVar), err)
 		}
 	}
 	return nil
@@ -204,8 +294,8 @@ const (
 var errNoCatalogMatch = errors.New("no catalog match")
 
 // resolveConfigAddMode decides how the wire name maps onto the catalog.
-// Nothing here writes: an unmatched name fails with the suggestion list so
-// adoption always stays an explicit --catalog choice.
+// Nothing here writes: an unmatched name requires an explicit catalog choice,
+// supplied either by a flag or by the interactive guide.
 func resolveConfigAddMode(preset, wireModel, catalogID string) (configAddMode, string, error) {
 	if strings.TrimSpace(catalogID) == "" {
 		if preset != "" {
@@ -371,26 +461,32 @@ func addProviderEnvCredential(providerName, envVar string, out io.Writer) error 
 	return nil
 }
 
-// validateCandidateConfig resolves the edited bytes through the real loader
-// and fails on any error-level diagnostic, so an unusable candidate never
-// reaches disk.
-func validateCandidateConfig(out io.Writer, edited []byte, edit configAddEdit) error {
+// loadConfigAddCandidate resolves edited bytes without replacing config.yaml.
+func loadConfigAddCandidate(edited []byte) (*config.ResolvedConfig, error) {
 	tmp, err := os.CreateTemp("", "chord-config-add-*.yaml")
 	if err != nil {
-		return fmt.Errorf("create candidate temp file: %w", err)
+		return nil, fmt.Errorf("create candidate temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
 	if _, err := tmp.Write(edited); err != nil {
 		_ = tmp.Close()
-		return fmt.Errorf("write candidate temp file: %w", err)
+		return nil, fmt.Errorf("write candidate temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("write candidate temp file: %w", err)
+		return nil, fmt.Errorf("write candidate temp file: %w", err)
 	}
 	candidate, err := config.LoadResolvedConfig(tmpPath, "")
 	if err != nil {
-		return fmt.Errorf("candidate config does not resolve: %w", err)
+		return nil, fmt.Errorf("candidate config does not resolve: %w", err)
+	}
+	return candidate, nil
+}
+
+func validateCandidateConfig(out io.Writer, edited []byte, edit configAddEdit, showPreview bool) error {
+	candidate, err := loadConfigAddCandidate(edited)
+	if err != nil {
+		return err
 	}
 	if hasConfigErrors(candidate.Diagnostics) {
 		fmt.Fprintln(out, "The candidate config has errors; nothing was written:")
@@ -405,8 +501,8 @@ func validateCandidateConfig(out io.Writer, edited []byte, edit configAddEdit) e
 	if !exists {
 		return fmt.Errorf("candidate config discarded provider %q", edit.providerName)
 	}
-	if edit.providerNew && (provider.APIURL != edit.apiURL || provider.Type != edit.providerType || provider.Preset != edit.preset) {
-		return fmt.Errorf("candidate config discarded the selected endpoint for %q", edit.providerName)
+	if provider.APIURL != edit.apiURL || provider.Type != edit.providerType || provider.Preset != edit.preset {
+		return fmt.Errorf("provider %q endpoint changed during this edit; run the command again to review its current endpoint", edit.providerName)
 	}
 	model, exists := provider.Models[edit.wireModel]
 	if !exists || (edit.borrowID != "" && (model.Catalog == nil || model.Catalog.ID != edit.borrowID)) {
@@ -420,7 +516,9 @@ func validateCandidateConfig(out io.Writer, edited []byte, edit configAddEdit) e
 			fmt.Fprintf(out, "Warning: %s\n", redactShowDiagnostic(diagnostic).String())
 		}
 	}
-	printConfigAddPreview(out, candidate, edit.providerName, edit.wireModel)
+	if showPreview {
+		printConfigAddPreview(out, candidate, edit.providerName, edit.wireModel)
+	}
 	return nil
 }
 
@@ -468,62 +566,74 @@ type configAddEdit struct {
 	borrowID     string
 	poolName     string
 	poolRef      string
+	compress     string // empty preserves the provider setting; "off" explicitly disables it
 }
 
 // editConfigYAMLForAdd applies the add edit to the raw config bytes with a
 // yaml.Node round-trip, which preserves comments and ordering of everything
-// it does not touch. Files that use anchors or aliases fail instead of being
-// rewritten, because node editing cannot keep them faithful.
+// it does not touch. Shared YAML values are copied before their selected
+// path changes, leaving other alias and merge users semantically unchanged.
 func editConfigYAMLForAdd(current []byte, e configAddEdit) ([]byte, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(current, &doc); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	if err := rejectAnchoredConfig(&doc); err != nil {
-		return nil, err
-	}
+	editor := configAddYAML{doc: &doc}
 	root, err := documentRootMapping(&doc)
 	if err != nil {
 		return nil, err
 	}
-	providersNode, err := ensureMappingChild(root, "providers")
+	providersNode, err := editor.child(root, "providers", yaml.MappingNode, "!!map")
 	if err != nil {
 		return nil, err
 	}
-	if e.providerNew && mappingValue(providersNode, e.providerName) != nil {
+	existingProvider, err := effectiveConfigValue(providersNode, e.providerName)
+	if err != nil {
+		return nil, err
+	}
+	if e.providerNew && existingProvider != nil {
 		return nil, fmt.Errorf("provider %q was created during this edit; run the command again to use its current endpoint", e.providerName)
 	}
-	providerNode, err := ensureMappingChild(providersNode, e.providerName)
+	providerNode, err := editor.child(providersNode, e.providerName, yaml.MappingNode, "!!map")
 	if err != nil {
 		return nil, err
 	}
 	if e.providerNew {
 		for _, field := range []struct{ key, value string }{{"preset", e.preset}, {"type", e.providerType}, {"api_url", e.apiURL}} {
 			if field.value != "" {
-				if err := setMappingScalar(providerNode, field.key, field.value); err != nil {
+				if err := editor.scalar(providerNode, field.key, field.value); err != nil {
 					return nil, err
 				}
 			}
 		}
 	}
-	if e.borrowID != "" {
-		modelsNode, err := ensureMappingChild(providerNode, "models")
-		if err != nil {
-			return nil, err
+	if e.compress != "" {
+		value := e.compress
+		if value == "off" {
+			value = ""
 		}
-		modelNode, err := ensureMappingChild(modelsNode, e.wireModel)
-		if err != nil {
-			return nil, err
-		}
-		if err := setMappingScalar(modelNode, "catalog", e.borrowID); err != nil {
+		if err := editor.scalar(providerNode, "compress", value); err != nil {
 			return nil, err
 		}
 	}
-	poolsNode, err := ensureMappingChild(root, "model_pools")
+	if e.borrowID != "" {
+		modelsNode, err := editor.child(providerNode, "models", yaml.MappingNode, "!!map")
+		if err != nil {
+			return nil, err
+		}
+		modelNode, err := editor.child(modelsNode, e.wireModel, yaml.MappingNode, "!!map")
+		if err != nil {
+			return nil, err
+		}
+		if err := editor.scalar(modelNode, "catalog", e.borrowID); err != nil {
+			return nil, err
+		}
+	}
+	poolsNode, err := editor.child(root, "model_pools", yaml.MappingNode, "!!map")
 	if err != nil {
 		return nil, err
 	}
-	poolNode, err := ensureSequenceChild(poolsNode, e.poolName)
+	poolNode, err := editor.child(poolsNode, e.poolName, yaml.SequenceNode, "!!seq")
 	if err != nil {
 		return nil, err
 	}
@@ -539,24 +649,6 @@ func editConfigYAMLForAdd(current []byte, e configAddEdit) ([]byte, error) {
 		return nil, fmt.Errorf("encode config: %w", err)
 	}
 	return edited.Bytes(), nil
-}
-
-// rejectAnchoredConfig walks the document and fails when any node defines or
-// references an anchor: round-tripping such files through node editing can
-// silently change merge semantics, so the edit is refused up front.
-func rejectAnchoredConfig(n *yaml.Node) error {
-	if n == nil {
-		return nil
-	}
-	if n.Kind == yaml.AliasNode || strings.TrimSpace(n.Anchor) != "" {
-		return fmt.Errorf("config uses YAML anchors or aliases; automatic editing cannot preserve them — add the model by editing config.yaml directly")
-	}
-	for _, child := range n.Content {
-		if err := rejectAnchoredConfig(child); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // documentRootMapping returns the document's root mapping, building an empty
@@ -579,55 +671,11 @@ func documentRootMapping(doc *yaml.Node) (*yaml.Node, error) {
 	return root, nil
 }
 
-// mappingValue returns the value node for key in a mapping, or nil.
-func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
-	for i := 0; i+1 < len(mapping.Content); i += 2 {
-		if mapping.Content[i].Value == key {
-			return mapping.Content[i+1]
-		}
-	}
-	return nil
-}
-
-// ensureMappingChild returns the mapping stored under key, creating an empty
-// one when the key is missing. A non-mapping existing value is a conflict.
-func ensureMappingChild(mapping *yaml.Node, key string) (*yaml.Node, error) {
-	return ensureConfigChild(mapping, key, yaml.MappingNode, "!!map")
-}
-
-func ensureSequenceChild(mapping *yaml.Node, key string) (*yaml.Node, error) {
-	return ensureConfigChild(mapping, key, yaml.SequenceNode, "!!seq")
-}
-
-func ensureConfigChild(mapping *yaml.Node, key string, kind yaml.Kind, tag string) (*yaml.Node, error) {
-	if existing := mappingValue(mapping, key); existing != nil {
-		if existing.Tag == "!!null" {
-			*existing = yaml.Node{Kind: kind, Tag: tag, HeadComment: existing.HeadComment, LineComment: existing.LineComment}
-		}
-		if existing.Kind != kind {
-			return nil, fmt.Errorf("config key %q at line %d must be %s", key, existing.Line, strings.TrimPrefix(tag, "!!"))
-		}
-		return existing, nil
-	}
-	value := &yaml.Node{Kind: kind, Tag: tag}
-	mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, value)
-	return value, nil
-}
-
-func setMappingScalar(mapping *yaml.Node, key, value string) error {
-	if existing := mappingValue(mapping, key); existing != nil {
-		if existing.Kind != yaml.ScalarNode {
-			return fmt.Errorf("config key %q at line %d must be a scalar", key, existing.Line)
-		}
-		existing.Value, existing.Tag = value, "!!str"
-		return nil
-	}
-	mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
-	return nil
-}
-
 func appendSequenceValue(seq *yaml.Node, value string) bool {
 	for _, item := range seq.Content {
+		if item.Kind == yaml.AliasNode && item.Alias != nil {
+			item = item.Alias
+		}
 		if item.Value == value {
 			return false
 		}

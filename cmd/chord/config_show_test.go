@@ -77,21 +77,21 @@ func TestFilterShowMap(t *testing.T) {
 			},
 		},
 	}
-	sub, err := filterShowMap(m, "providers.sample")
+	sub, _, err := filterShowMap(m, "providers.sample")
 	if err != nil {
 		t.Fatalf("filterShowMap: %v", err)
 	}
 	if _, ok := sub["preset"]; !ok {
 		t.Fatalf("filterShowMap = %+v, want the sample subtree", sub)
 	}
-	leaf, err := filterShowMap(m, "providers.sample.preset")
+	leaf, _, err := filterShowMap(m, "providers.sample.preset")
 	if err != nil {
 		t.Fatalf("filterShowMap: %v", err)
 	}
 	if leaf["preset"] != "sample" {
 		t.Fatalf("filterShowMap leaf = %+v, want the wrapped value", leaf)
 	}
-	if _, err := filterShowMap(m, "providers.absent"); err == nil {
+	if _, _, err := filterShowMap(m, "providers.absent"); err == nil {
 		t.Fatal("filterShowMap: want an error for a missing path")
 	}
 }
@@ -101,10 +101,58 @@ func TestFilterShowBudgetsProviderPath(t *testing.T) {
 		{Provider: "sample", Model: "model-1", Input: 10},
 		{Provider: "other", Model: "model-2", Input: 20},
 	}
-	for _, path := range []string{"providers.sample", "sample", "providers.sample.models"} {
+	for _, path := range [][]string{{"providers", "sample"}, {"providers", "sample", "models"}} {
 		got := filterShowBudgets(budgets, path)
 		if len(got) != 1 || got[0].Provider != "sample" {
 			t.Fatalf("filterShowBudgets(%q) = %+v, want sample budget", path, got)
+		}
+	}
+}
+
+func TestConfigShowDottedNamesAcrossReportSections(t *testing.T) {
+	rc := writeCatalogShowConfig(t, `providers:
+  sample.gateway:
+    type: responses
+    api_url: https://example.invalid/v1/responses
+    models:
+      model-1:
+        limit: {context: 10000, output: 1000}
+      model-1.2:
+        limit: {context: 20000, output: 2000}
+model_pools:
+  default: [sample.gateway/model-1.2]
+`, "")
+	path := "providers.sample.gateway.models.model-1.2"
+	for _, query := range []string{path, path + ".limit.output"} {
+		var buf bytes.Buffer
+		if err := renderConfigShowResult(&buf, configShowOptions{JSON: true, Path: query}, rc); err != nil {
+			t.Fatal(err)
+		}
+		var report configShowReport
+		if err := json.Unmarshal(buf.Bytes(), &report); err != nil {
+			t.Fatal(err)
+		}
+		if query == path {
+			limit, ok := report.Config["limit"].(map[string]any)
+			if !ok || limit["output"] != float64(2000) {
+				t.Fatalf("config = %+v, want selected model limits", report.Config)
+			}
+		} else if report.Config["output"] != float64(2000) {
+			t.Fatalf("config = %+v, want selected output limit", report.Config)
+		}
+		if len(report.Budgets) != 1 || report.Budgets[0].Model != "model-1.2" || report.Budgets[0].Output != 2000 {
+			t.Fatalf("budgets = %+v, want selected model", report.Budgets)
+		}
+		if len(report.RequestSettings) != 1 || report.RequestSettings[0].Provider != "sample.gateway" || report.RequestSettings[0].Model != "model-1.2" {
+			t.Fatalf("request settings = %+v, want selected model", report.RequestSettings)
+		}
+		if len(report.Origins) == 0 {
+			t.Fatal("missing selected origins")
+		}
+		for _, origin := range report.Origins {
+			if origin.Path != query && !strings.HasPrefix(origin.Path, query+".") {
+				t.Fatalf("unrelated origin = %+v", origin)
+			}
 		}
 	}
 }

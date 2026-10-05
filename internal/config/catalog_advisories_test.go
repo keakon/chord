@@ -1,6 +1,8 @@
 package config
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -9,6 +11,63 @@ import (
 
 	"github.com/keakon/chord/internal/modelcatalog"
 )
+
+func TestCatalogAcknowledgmentsSerializeWriters(t *testing.T) {
+	t.Setenv("CHORD_CONFIG_HOME", t.TempDir())
+	const count = 16
+	start := make(chan struct{})
+	results := make(chan error, count)
+	for i := range count {
+		go func() {
+			<-start
+			results <- RecordCatalogAdvisoryAcknowledgment("sample", fmt.Sprintf("model-%d", i))
+		}()
+	}
+	close(start)
+	for range count {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+	acks, err := loadCatalogAdvisoryAcks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(acks) != count {
+		t.Fatalf("acknowledgments = %d, want %d", len(acks), count)
+	}
+	for i := range count {
+		if !acknowledged("sample", fmt.Sprintf("model-%d", i), modelcatalog.Version(), acks) {
+			t.Fatalf("missing acknowledgment %d", i)
+		}
+	}
+}
+
+func TestCatalogAcknowledgmentPrunesInactiveVersions(t *testing.T) {
+	t.Setenv("CHORD_CONFIG_HOME", t.TempDir())
+	path, err := catalogAdvisoryAckPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := catalogAdvisoryAckFile{Acks: []catalogAdvisoryAck{
+		{Provider: "sample", Model: "model-1", CatalogVersion: "2000-01-01.1"},
+		{Provider: "sample", Model: "model-1", CatalogVersion: modelcatalog.Version()},
+	}}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordCatalogAdvisoryAcknowledgment("sample", "model-1"); err != nil {
+		t.Fatal(err)
+	}
+	acks, err := loadCatalogAdvisoryAcks()
+	if err != nil || len(acks) != 1 || acks[0].CatalogVersion != modelcatalog.Version() {
+		t.Fatalf("acknowledgments = %+v, err=%v, want current version only", acks, err)
+	}
+}
 
 func TestCatalogFreshnessAdvisories(t *testing.T) {
 	t.Setenv("CHORD_CONFIG_HOME", t.TempDir())

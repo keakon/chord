@@ -42,11 +42,9 @@ chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
   --catalog anthropic/claude-opus-5-5
 ```
 
-When a wire name matches nothing, the command fails closed and prints the
-closest verified models plus any refreshed candidates. Adoption is always an
-explicit `--catalog` choice — Chord never binds by name pattern. To onboard a
-brand-new model first, ask the command to refresh the catalog from the
-upstream repository (an explicit network step):
+In an interactive terminal, run `chord config add mygw/gpt-6-sol` directly. If there is no catalog binding, press a number to choose a suggested verified model without Enter, press `m` to enter a catalog ID, or press Esc to cancel. For a new provider, supply the API URL and API-key environment variable. You can then choose an existing pool or create a new one, and adjust the reasoning variant and request compression, review the preview and confirm saving. Existing providers reuse their URL and credentials. Enter `q` or decline saving to cancel without changing files.
+
+For scripts, pass `--no-interactive` and explicit arguments. An unmatched name in non-interactive mode shows verified suggestions and refreshed candidates, then returns an error; no model or candidate is adopted automatically. To fetch recently published catalog updates, opt into network access:
 
 ```bash
 chord config add mygw/gpt-6.2-sol --url ... --refresh-catalog

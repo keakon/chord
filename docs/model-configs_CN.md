@@ -23,7 +23,9 @@ chord config add mygw/claude-gw --url https://gateway.example.com/v1/messages \
   --catalog anthropic/claude-opus-5-5
 ```
 
-wire 名完全未命中时，命令以失败收场并列出最接近的已验证模型和刷新带来的候选条目。采纳永远是显式的 `--catalog` 选择——Chord 绝不按名字模式自动绑定。要接入刚发布的新模型，先让命令从上游仓库刷新目录（显式联网操作）：
+在交互终端中，可以直接运行 `chord config add mygw/gpt-6-sol`。没有目录绑定时，Chord 会列出接近的已验证模型，由你按数字键立即选择，无需回车；按 `m` 可输入完整目录 ID，按 Esc 取消；新 provider 接着填写 API 地址和密钥环境变量。选择后可选择已有模型池或创建新池，并调整推理档位和请求体压缩，查看预览后确认保存。已有 provider 会沿用地址和凭据。输入 `q` 或在保存时选择否即可取消，文件保持原样。
+
+脚本可传 `--no-interactive` 和完整参数。非交互模式未命中时会列出已验证模型及刷新候选，然后返回错误；不会根据名字自动绑定或采纳候选。要接入刚发布的新模型，先让命令从上游仓库刷新目录（显式联网操作）：
 
 ```bash
 chord config add mygw/gpt-6.2-sol --url ... --refresh-catalog

@@ -80,7 +80,7 @@ func TestEditConfigYAMLForAddCreatesPool(t *testing.T) {
 	}
 }
 
-func TestEditConfigYAMLForAddRejectsAnchors(t *testing.T) {
+func TestEditConfigYAMLForAddPreservesUntouchedAnchors(t *testing.T) {
 	current := []byte(`providers:
   openai: &base
     preset: openai
@@ -88,12 +88,12 @@ model_pools:
   default:
     - openai/gpt-6.1-sol
 `)
-	_, err := editConfigYAMLForAdd(current, configAddEdit{
+	edited, err := editConfigYAMLForAdd(current, configAddEdit{
 		providerName: "gw", wireModel: "m", borrowID: "openai/gpt-6-sol",
 		poolName: "default", poolRef: "gw/m",
 	})
-	if err == nil || !strings.Contains(err.Error(), "anchors") {
-		t.Fatalf("anchor-bearing config must be refused, got %v", err)
+	if err != nil || !strings.Contains(string(edited), "&base") {
+		t.Fatalf("untouched anchor must survive editing: %s, %v", edited, err)
 	}
 }
 
@@ -112,8 +112,7 @@ func TestResolveConfigAddMode(t *testing.T) {
 	if _, _, err := resolveConfigAddMode("", "claude-gw", "nope/missing"); err == nil {
 		t.Fatal("unknown catalog ID must fail")
 	}
-	// A verified binding on the preset outranks an explicit borrow of a model
-	// the preset does not serve; borrowing across presets is an error.
+	// Explicit catalog choices must be served by the selected preset.
 	if _, _, err := resolveConfigAddMode("openai", "gpt-6-sol-mirror", "anthropic/claude-opus-5-5"); err == nil {
 		t.Fatal("catalog model not bound to the preset must fail")
 	}

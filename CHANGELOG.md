@@ -42,6 +42,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- `chord config add` guides model onboarding: select a suggested catalog model with a single number key, fill gateway URLs and API-key environment variables, choose or create a pool, and optionally configure the reasoning variant and request compression, then review and confirm saving. YAML anchors and merges are supported without changing other users of shared values. Cancellation leaves files unchanged; scripts can use `--no-interactive`.
 - The composer supports `Ctrl+Z` undo for text, inline pastes, attachments, and cursor position with bounded edit history; remap it through `insert_undo`.
 - Headless `send` accepts a `request_id` for a consumption reply (`handled`, `queued`, `started`, or `rejected`), distinguishing local commands, queued input, and started turns. Replies bypass optional event subscriptions.
 
