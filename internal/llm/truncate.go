@@ -5,20 +5,9 @@ import "unicode/utf8"
 // TruncateStringRunes truncates s at a UTF-8 rune boundary and appends suffix
 // only when truncation occurs.
 func TruncateStringRunes(s string, maxRunes int, suffix string) string {
-	if maxRunes <= 0 {
-		if s == "" {
-			return ""
-		}
-		return suffix
-	}
-	if utf8.RuneCountInString(s) <= maxRunes {
-		return s
-	}
-	for i := range s {
-		if maxRunes == 0 {
-			return s[:i] + suffix
-		}
-		maxRunes--
+	prefix := TruncateStringFirstRunes(s, maxRunes)
+	if len(prefix) < len(s) {
+		return prefix + suffix
 	}
 	return s
 }
@@ -29,22 +18,22 @@ func TruncateStringRunes(s string, maxRunes int, suffix string) string {
 // compacted history snippets written to disk and later re-read). When the whole
 // string fits within headRunes+tailRunes+len(sep) runes it is returned whole.
 func TruncateStringHeadTail(s string, headRunes, tailRunes int, sep string) string {
-	if headRunes < 0 {
-		headRunes = 0
-	}
-	if tailRunes < 0 {
-		tailRunes = 0
-	}
-	total := utf8.RuneCountInString(s)
-	sepRunes := utf8.RuneCountInString(sep)
-	if total <= headRunes+tailRunes+sepRunes {
+	head := TruncateStringFirstRunes(s, headRunes)
+	if len(head) == len(s) {
 		return s
 	}
-	if total == len(s) {
-		return s[:headRunes] + sep + s[len(s)-tailRunes:]
-	}
-	head := TruncateStringFirstRunes(s, headRunes)
 	tail := TruncateStringLastRunes(s, tailRunes)
+	tailStart := len(s) - len(tail)
+	if len(head) >= tailStart {
+		return s
+	}
+	// Only inspect enough of the gap to decide whether the separator saves
+	// space. This bounds scanning by the retained runes, even for large logs,
+	// and avoids adding budgets that could overflow an int.
+	gap := s[len(head):tailStart]
+	if len(TruncateStringFirstRunes(gap, utf8.RuneCountInString(sep))) == len(gap) {
+		return s
+	}
 	return head + sep + tail
 }
 
@@ -88,16 +77,15 @@ func TruncateStringLastRunes(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
-	total := utf8.RuneCountInString(s)
-	if total <= n {
-		return s
-	}
-	skip := total - n
-	for i := range s {
-		if skip == 0 {
-			return s[i:]
+	start := len(s)
+	for n > 0 && start > 0 {
+		if s[start-1] < utf8.RuneSelf {
+			start--
+		} else {
+			_, size := utf8.DecodeLastRuneInString(s[:start])
+			start -= size
 		}
-		skip--
+		n--
 	}
-	return s
+	return s[start:]
 }
