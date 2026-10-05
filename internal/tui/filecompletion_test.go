@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -67,7 +68,7 @@ func TestStartAtMentionFileLoadIsSingleFlight(t *testing.T) {
 		t.Fatal("second startAtMentionFileLoad() should be nil while loading")
 	}
 
-	updated, _ := m.Update(atMentionFilesLoadedMsg{files: []string{"docs/ARCHITECTURE.md"}})
+	updated, _ := m.Update(atMentionFilesLoadedMsg{files: []string{"docs/ARCHITECTURE.md"}, workDir: m.workingDir, generation: m.workingDirGeneration})
 	model := updated.(*Model)
 	if model.atMentionLoading {
 		t.Fatal("atMentionLoading = true after load completion, want false")
@@ -84,6 +85,52 @@ func TestStartAtMentionFileLoadIsSingleFlight(t *testing.T) {
 	}
 }
 
+func TestAtMentionFilesLoadedDropsOlderGeneration(t *testing.T) {
+	for _, generation := range []uint64{0, 1} {
+		t.Run(fmt.Sprint(generation), func(t *testing.T) {
+			m := NewModel(nil)
+			m.workingDir = "/tmp/current-checkout"
+			m.workingDirGeneration = 2
+			m.atMentionLoading = true
+
+			updated, _ := m.Update(atMentionFilesLoadedMsg{
+				files:      []string{"old/checkout.go"},
+				workDir:    "/tmp/current-checkout",
+				generation: generation,
+			})
+			model := updated.(*Model)
+			if model.atMentionLoaded {
+				t.Fatal("stale at-mention result marked index loaded")
+			}
+			if model.atMentionFiles != nil {
+				t.Fatalf("stale at-mention files = %#v, want nil", model.atMentionFiles)
+			}
+		})
+	}
+}
+
+func TestApplyWorkDirSnapshotInvalidatesAtMentionOnGenerationChange(t *testing.T) {
+	m := NewModel(nil)
+	m.workingDir = "/tmp/checkouts/project"
+	m.workingDirID = "main"
+	m.workingDirGeneration = 4
+	m.atMentionLoaded = true
+	m.atMentionLoadedAt = time.Now()
+	m.atMentionFiles = []string{"old.go"}
+	m.atMentionFilesLower = map[string]string{"old.go": "old.go"}
+
+	if !m.applyWorkDirSnapshot(agent.WorkDirSnapshot{
+		Path:       "/tmp/checkouts/project",
+		WorktreeID: "main",
+		Generation: 5,
+	}) {
+		t.Fatal("generation-only checkout change was not reported")
+	}
+	if m.atMentionLoaded || m.atMentionLoading || m.atMentionFiles != nil {
+		t.Fatalf("at-mention index survived generation change: loaded=%v loading=%v files=%#v", m.atMentionLoaded, m.atMentionLoading, m.atMentionFiles)
+	}
+}
+
 func TestAtMentionFilesLoadedKeepsBareAtPopupOpen(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeInsert
@@ -94,7 +141,7 @@ func TestAtMentionFilesLoadedKeepsBareAtPopupOpen(t *testing.T) {
 	m.atMentionTriggerCol = 1
 	m.atMentionLoading = true
 
-	updated, _ := m.Update(atMentionFilesLoadedMsg{files: []string{"docs/ARCHITECTURE.md"}})
+	updated, _ := m.Update(atMentionFilesLoadedMsg{files: []string{"docs/ARCHITECTURE.md"}, workDir: m.workingDir, generation: m.workingDirGeneration})
 	model := updated.(*Model)
 
 	if !model.atMentionOpen {
@@ -136,7 +183,7 @@ func TestLoadAtMentionFilesUsesGitTrackedAndUntracked(t *testing.T) {
 		t.Fatalf("Remove(deleted.txt) error = %v", err)
 	}
 
-	loaded := loadAtMentionFileList(atMentionMaxFiles)
+	loaded := loadAtMentionFileListInDir("", atMentionMaxFiles)
 	if !slices.Contains(loaded, "tracked.go") {
 		t.Fatalf("tracked file missing from git preload: %v", loaded)
 	}
@@ -214,7 +261,7 @@ func TestLoadAtMentionFilesIncludesAttachableMediaAndExcludesOtherBinary(t *test
 		t.Fatalf("Chdir(%q) error = %v", wd, err)
 	}
 
-	msg := loadAtMentionFiles()()
+	msg := loadAtMentionFilesForWorkDir("", 0, atMentionMaxFiles)()
 	loaded, ok := msg.(atMentionFilesLoadedMsg)
 	if !ok {
 		t.Fatalf("loadAtMentionFiles() msg = %T, want atMentionFilesLoadedMsg", msg)
@@ -257,7 +304,7 @@ func TestLoadAtMentionFilesIncludesDeeperRepoPaths(t *testing.T) {
 		t.Fatalf("Chdir(%q) error = %v", wd, err)
 	}
 
-	msg := loadAtMentionFiles()()
+	msg := loadAtMentionFilesForWorkDir("", 0, atMentionMaxFiles)()
 	loaded, ok := msg.(atMentionFilesLoadedMsg)
 	if !ok {
 		t.Fatalf("loadAtMentionFiles() msg = %T, want atMentionFilesLoadedMsg", msg)
@@ -268,6 +315,24 @@ func TestLoadAtMentionFilesIncludesDeeperRepoPaths(t *testing.T) {
 	}
 	if slices.Contains(loaded.files, ".cursor/rules.md") {
 		t.Fatalf("hidden dot-directory file should be excluded from preload: %v", loaded.files)
+	}
+}
+
+func TestLoadAtMentionFilesKeepsGeneratedRootNames(t *testing.T) {
+	for _, name := range []string{"build", "vendor", "dist"} {
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), name)
+			mustWriteFile(t, filepath.Join(root, "main.go"), "package main")
+			mustWriteFile(t, filepath.Join(root, "nested", "build", "generated.go"), "package nested")
+
+			files := loadAtMentionFileListInDir(root, atMentionMaxFiles)
+			if !slices.Contains(files, "main.go") {
+				t.Fatalf("explicit root %q was skipped: %v", name, files)
+			}
+			if slices.Contains(files, "nested/build/generated.go") {
+				t.Fatalf("nested generated directory should stay excluded: %v", files)
+			}
+		})
 	}
 }
 
@@ -288,7 +353,7 @@ func TestLoadAtMentionFilesCapsAtNewLimit(t *testing.T) {
 		t.Fatalf("Chdir(%q) error = %v", wd, err)
 	}
 
-	msg := loadAtMentionFilesWithLimit(3)()
+	msg := loadAtMentionFilesForWorkDir("", 0, 3)()
 	loaded, ok := msg.(atMentionFilesLoadedMsg)
 	if !ok {
 		t.Fatalf("loadAtMentionFiles() msg = %T, want atMentionFilesLoadedMsg", msg)

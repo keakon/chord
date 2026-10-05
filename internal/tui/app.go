@@ -659,7 +659,7 @@ func (m *Model) workDirSnapshotFromAgent() agent.WorkDirSnapshot {
 // leaves it falls back to that same path with the identity cleared) counts as a
 // change because the identity did.
 func (m *Model) applyWorkDirSnapshot(snap agent.WorkDirSnapshot) bool {
-	changed := snap.Path != m.workingDir || snap.WorktreeID != m.workingDirID
+	changed := snap.Path != m.workingDir || snap.WorktreeID != m.workingDirID || snap.Generation != m.workingDirGeneration
 	m.workingDir = snap.Path
 	m.workingDirID = snap.WorktreeID
 	m.workingDirGeneration = snap.Generation
@@ -670,6 +670,16 @@ func (m *Model) applyWorkDirSnapshot(snap agent.WorkDirSnapshot) bool {
 	if !changed {
 		return false
 	}
+	// File completion results are produced asynchronously against a specific
+	// checkout. A checkout change invalidates both the old index and any in-flight
+	// load; the next open/query starts a scan rooted at the new published path.
+	m.atMentionLoaded = false
+	m.atMentionLoading = false
+	m.atMentionLoadedAt = time.Time{}
+	m.atMentionFiles = nil
+	m.atMentionFilesLower = nil
+	m.atMentionNarrow = atMentionNarrowCache{}
+	m.atMentionList = nil
 	m.invalidateStatusBarAgentSnapshot()
 	m.invalidateDrawCaches()
 	return true
@@ -1018,6 +1028,12 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, m.insertComposerText(string(msg))
 
 	case atMentionFilesLoadedMsg:
+		if msg.workDir != m.workingDir || msg.generation != m.workingDirGeneration {
+			// A previous checkout's scan completed after the active checkout
+			// changed. Keep the invalidation state so a fresh query starts a new
+			// load instead of accepting stale candidates.
+			return m, m.syncAtMentionIfOpen()
+		}
 		m.atMentionFiles = msg.files
 		m.atMentionFilesLower = buildAtMentionLowerIndex(msg.files)
 		// The candidate set the narrowing cache remembers belongs to the

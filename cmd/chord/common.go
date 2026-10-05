@@ -943,6 +943,13 @@ func newLSPShutdownContext() (context.Context, context.CancelFunc) {
 func (ac *AppContext) Close() {
 	log.Info("shutting down")
 	ac.Cancel()
+	if ac.Registry != nil {
+		if tool, ok := ac.Registry.Get(tools.NameWebFetch); ok {
+			if fetch, ok := tool.(tools.WebFetchTool); ok {
+				fetch.Close()
+			}
+		}
+	}
 
 	if ac.LSPManager != nil {
 		stopCtx, cancel := newLSPShutdownContext()

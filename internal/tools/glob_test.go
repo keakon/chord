@@ -150,6 +150,21 @@ func TestGlobExactPatternFastPathMissesGracefully(t *testing.T) {
 	}
 }
 
+func TestGlobHonorsCancellationBeforeWork(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "sample.go"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, patterns := range [][]string{{"sample.go"}, {"**/*.go"}} {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		raw, _ := json.Marshal(map[string]any{"patterns": patterns, "path": dir})
+		if _, err := (GlobTool{}).Execute(ctx, raw); err != context.Canceled {
+			t.Fatalf("patterns %v: Execute error = %v, want context.Canceled", patterns, err)
+		}
+	}
+}
+
 // TestGlobBroadSearchGuardAborts scans a temp root (which isBroadSearchRoot
 // treats as broad) with a tight visited threshold so the guard fires without
 // creating a huge directory tree.

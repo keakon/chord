@@ -111,6 +111,9 @@ func (GlobTool) argumentAliases() map[string]string {
 }
 
 func (t GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	startedAt := time.Now()
 	var a globArgs
 	if err := json.Unmarshal(raw, &a); err != nil {
@@ -141,6 +144,11 @@ func (t GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	if exactFiles, ok := resolveExactIncludeFiles(resolvedBaseDir, patterns); ok {
 		acc := newGlobMatchAccumulator(resolvedBaseDir, len(exactFiles), captureFullOutput)
 		for _, file := range exactFiles {
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			default:
+			}
 			info, statErr := os.Stat(file)
 			if statErr != nil || info.IsDir() {
 				continue
@@ -158,14 +166,17 @@ func (t GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	if rel, ok := worktreeSkipRel(resolvedBaseDir, t.WorktreeRoot); ok {
 		skipDir = filepath.Join(resolvedBaseDir, rel)
 	}
-	result, err := globWalkMatches(resolvedBaseDir, patterns, captureFullOutput, skipDir)
+	result, err := globWalkMatches(ctx, resolvedBaseDir, patterns, captureFullOutput, skipDir)
 	if err != nil {
 		return "", err
 	}
 	return formatGlobResult(ctx, a, resolvedBaseDir, patterns, result, startedAt)
 }
 
-func globWalkMatches(resolvedBaseDir string, patterns []string, captureFullOutput bool, skipDir string) (globResult, error) {
+func globWalkMatches(ctx context.Context, resolvedBaseDir string, patterns []string, captureFullOutput bool, skipDir string) (globResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if err := validateGlobPatterns(patterns); err != nil {
 		return globResult{}, err
 	}
@@ -177,6 +188,11 @@ func globWalkMatches(resolvedBaseDir string, patterns []string, captureFullOutpu
 	acc := newGlobMatchAccumulator(resolvedBaseDir, 0, captureFullOutput)
 	guard := newBroadSearchGuard("Glob", resolvedBaseDir, "patterns", patterns)
 	err := fs.WalkDir(os.DirFS(resolvedBaseDir), ".", func(path string, d fs.DirEntry, walkErr error) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		if walkErr != nil {
 			return nil
 		}

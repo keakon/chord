@@ -22,29 +22,34 @@ const (
 )
 
 type atMentionFilesLoadedMsg struct {
-	files []string
+	files      []string
+	workDir    string
+	generation uint64
 }
 
-func loadAtMentionFiles() tea.Cmd {
-	return loadAtMentionFilesWithLimit(atMentionMaxFiles)
-}
-
-func loadAtMentionFilesWithLimit(limit int) tea.Cmd {
+func loadAtMentionFilesForWorkDir(workDir string, generation uint64, limit int) tea.Cmd {
 	return func() tea.Msg {
-		return atMentionFilesLoadedMsg{files: loadAtMentionFileList(limit)}
+		return atMentionFilesLoadedMsg{
+			files:      loadAtMentionFileListInDir(workDir, limit),
+			workDir:    workDir,
+			generation: generation,
+		}
 	}
 }
 
-func loadAtMentionFileList(limit int) []string {
+func loadAtMentionFileListInDir(workDir string, limit int) []string {
 	if limit <= 0 {
 		return nil
 	}
+	if strings.TrimSpace(workDir) == "" {
+		workDir = "."
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), atMentionLoadTimeout)
 	defer cancel()
-	if files, ok := loadAtMentionGitFiles(ctx, ".", limit); ok {
+	if files, ok := loadAtMentionGitFiles(ctx, workDir, limit); ok {
 		return files
 	}
-	return loadAtMentionWalkFiles(limit)
+	return loadAtMentionWalkFilesInDir(ctx, workDir, limit)
 }
 
 func loadAtMentionGitFiles(ctx context.Context, workDir string, limit int) ([]string, bool) {
@@ -112,32 +117,51 @@ func skipAtMentionIndexedPath(path string) bool {
 	return tools.IsBinaryExtension(path) && attachmentKindForPath(path) == ""
 }
 
-func loadAtMentionWalkFiles(limit int) []string {
+func loadAtMentionWalkFilesInDir(ctx context.Context, workDir string, limit int) []string {
 	var files []string
-	ignore := tools.NewGitIgnoreMatcher(".")
-	_ = filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+	if strings.TrimSpace(workDir) == "" {
+		workDir = "."
+	}
+	root := workDir
+	if abs, err := filepath.Abs(workDir); err == nil {
+		root = abs
+	}
+	ignore := tools.NewGitIgnoreMatcher(workDir)
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return filepath.SkipAll
+		}
 		if err != nil {
 			return nil
 		}
 		if d.IsDir() {
-			if path != "." && strings.HasPrefix(d.Name(), ".") {
-				return filepath.SkipDir
+			// Rules that exclude generated or hidden directories apply below
+			// the walk root only: an explicitly opened project may itself be
+			// named `build`, `vendor`, or `dist`.
+			if path != root {
+				if strings.HasPrefix(d.Name(), ".") {
+					return filepath.SkipDir
+				}
+				if tools.IsSkippedDirName(d.Name()) {
+					return filepath.SkipDir
+				}
+				switch d.Name() {
+				case "node_modules", ".idea", ".vscode", "vendor", "dist", "build":
+					return filepath.SkipDir
+				}
 			}
-			if tools.IsSkippedDirName(d.Name()) {
-				return filepath.SkipDir
-			}
-			switch d.Name() {
-			case "node_modules", ".idea", ".vscode", "vendor", "dist", "build":
-				return filepath.SkipDir
-			}
-			if strings.Count(path, string(os.PathSeparator)) >= atMentionMaxDepth {
+			if strings.Count(path, string(os.PathSeparator))-strings.Count(root, string(os.PathSeparator)) >= atMentionMaxDepth {
 				return filepath.SkipDir
 			}
 			// Honor .gitignore at the walk root so project-specific
 			// generated / cached directories (e.g. `out/`, `target/`,
 			// `coverage/`) don't pollute @-mention suggestions.
-			if ignore != nil && path != "." {
-				rel := filepath.ToSlash(strings.TrimPrefix(path, "./"))
+			if ignore != nil && path != root {
+				rel, relErr := filepath.Rel(root, path)
+				if relErr != nil {
+					return nil
+				}
+				rel = filepath.ToSlash(rel)
 				if ignore.Match(rel, true) {
 					return filepath.SkipDir
 				}
@@ -148,7 +172,11 @@ func loadAtMentionWalkFiles(limit int) []string {
 		if skipAtMentionIndexedPath(d.Name()) {
 			return nil
 		}
-		rel := filepath.ToSlash(strings.TrimPrefix(path, "./"))
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
 		if ignore != nil && ignore.Match(rel, false) {
 			return nil
 		}
@@ -174,5 +202,5 @@ func (m *Model) startAtMentionFileLoadIfStale(now time.Time) tea.Cmd {
 		return nil
 	}
 	m.atMentionLoading = true
-	return loadAtMentionFiles()
+	return loadAtMentionFilesForWorkDir(m.workingDir, m.workingDirGeneration, atMentionMaxFiles)
 }

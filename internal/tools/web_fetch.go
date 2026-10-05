@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -53,8 +54,15 @@ func extractReadableHTML(htmlText string, options readability.ReadabilityOptions
 
 // WebFetchTool fetches a URL and returns its content as plain text or Markdown.
 type WebFetchTool struct {
-	cfg         config.WebFetchConfig
-	globalProxy string
+	cfg           config.WebFetchConfig
+	globalProxy   string
+	transportPool *webFetchTransportPool
+}
+
+type webFetchTransportPool struct {
+	mu         sync.Mutex
+	transports map[string]*http.Transport
+	closed     bool
 }
 
 type webFetchArgs struct {
@@ -142,7 +150,7 @@ type webFetchHTMLRender struct {
 }
 
 func NewWebFetchTool(cfg config.WebFetchConfig, globalProxy string) WebFetchTool {
-	return WebFetchTool{cfg: cfg, globalProxy: globalProxy}
+	return WebFetchTool{cfg: cfg, globalProxy: globalProxy, transportPool: &webFetchTransportPool{}}
 }
 
 func (t WebFetchTool) effectiveProxy() string {
@@ -155,7 +163,7 @@ func (t WebFetchTool) effectiveProxy() string {
 	return t.globalProxy
 }
 
-func newHTTPClientWithProxy(proxyURL string, timeout time.Duration) (*http.Client, error) {
+func newHTTPTransportWithProxy(proxyURL string) (*http.Transport, error) {
 	proxyURL = strings.TrimSpace(proxyURL)
 	dialer := &net.Dialer{
 		Timeout:   60 * time.Second,
@@ -200,7 +208,49 @@ func newHTTPClientWithProxy(proxyURL string, timeout time.Duration) (*http.Clien
 		transport.Proxy = nil
 	}
 
-	return &http.Client{Timeout: timeout, Transport: transport}, nil
+	return transport, nil
+}
+
+func (t WebFetchTool) transportForProxy(proxyURL string) (*http.Transport, error) {
+	pool := t.transportPool
+	if pool == nil {
+		return nil, fmt.Errorf("WebFetch tool is not initialized")
+	}
+	proxyURL = strings.TrimSpace(proxyURL)
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	if pool.closed {
+		return nil, fmt.Errorf("WebFetch tool is closed")
+	}
+	if pool.transports == nil {
+		pool.transports = make(map[string]*http.Transport)
+	}
+	if transport := pool.transports[proxyURL]; transport != nil {
+		return transport, nil
+	}
+	transport, err := newHTTPTransportWithProxy(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+	pool.transports[proxyURL] = transport
+	return transport, nil
+}
+
+// Close releases idle connections and prevents new requests. The application
+// owns this pool; workers borrowing the registered tool must not close it.
+// Active requests finish through their own cancellation contexts.
+func (t WebFetchTool) Close() {
+	pool := t.transportPool
+	if pool == nil {
+		return
+	}
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	pool.closed = true
+	for _, transport := range pool.transports {
+		transport.CloseIdleConnections()
+	}
+	clear(pool.transports)
 }
 
 func (WebFetchTool) Name() string { return NameWebFetch }
@@ -262,10 +312,11 @@ func (t WebFetchTool) Execute(ctx context.Context, raw json.RawMessage) (string,
 	defer cancel()
 
 	effectiveProxy := t.effectiveProxy()
-	client, err := newHTTPClientWithProxy(effectiveProxy, timeout)
+	transport, err := t.transportForProxy(effectiveProxy)
 	if err != nil {
-		return "", fmt.Errorf("create HTTP client: %w", err)
+		return "", fmt.Errorf("create HTTP transport: %w", err)
 	}
+	client := &http.Client{Timeout: timeout, Transport: transport}
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return fmt.Errorf("stopped after 5 redirects")

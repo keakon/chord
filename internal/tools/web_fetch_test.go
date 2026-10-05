@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -563,6 +565,58 @@ func TestTruncateValidUTF8DoesNotBreakRune(t *testing.T) {
 
 func webFetchTestConfig() config.WebFetchConfig {
 	return config.WebFetchConfig{}
+}
+
+func TestWebFetchReusesTransportConnections(t *testing.T) {
+	var newConnections atomic.Int64
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "sample")
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			newConnections.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	tool := NewWebFetchTool(webFetchTestConfig(), "direct")
+	t.Cleanup(tool.Close)
+	for range 4 {
+		executeWebFetchForTest(t, tool, map[string]any{"url": server.URL, "raw": true})
+	}
+	if got := newConnections.Load(); got != 1 {
+		t.Fatalf("new TCP connections = %d, want one reused connection", got)
+	}
+}
+
+func TestWebFetchCloseReleasesIdleConnections(t *testing.T) {
+	closed := make(chan struct{}, 1)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = io.WriteString(w, "sample")
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateClosed {
+			closed <- struct{}{}
+		}
+	}
+	server.Start()
+	t.Cleanup(server.Close)
+	tool := NewWebFetchTool(webFetchTestConfig(), "direct")
+	t.Cleanup(tool.Close)
+	executeWebFetchForTest(t, tool, map[string]any{"url": server.URL, "raw": true})
+	tool.Close()
+	select {
+	case <-closed:
+	case <-time.After(time.Second):
+		t.Fatal("idle connection was not closed")
+	}
+	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL})
+	if err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("request after close = %v, want closed tool error", err)
+	}
 }
 
 func executeWebFetchForTest(t *testing.T, tool WebFetchTool, args map[string]any) string {
