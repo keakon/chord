@@ -35,8 +35,64 @@ func TestPersistencePumpFlushUntilDeadlineDoesNotWaitForBlockedHandler(t *testin
 		t.Fatal("flushUntil = true, want deadline timeout")
 	}
 	close(release)
-	pump.close()
+	pump.closeUntil(nil)
 	<-pump.done
+}
+
+func TestPersistencePumpCloseStopsAdmissionBeforeDrainingFullQueue(t *testing.T) {
+	pump := newPersistencePump(1)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	releaseHandler := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(func() {
+		releaseHandler()
+		pump.closeUntil(time.After(time.Second))
+		select {
+		case <-pump.done:
+		case <-time.After(time.Second):
+			t.Error("pump did not stop during cleanup")
+		}
+	})
+	var handled []string
+	pump.start(func(entry persistEntry) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		handled = append(handled, entry.agentID)
+	})
+	if !pump.enqueue(persistEntry{agentID: "first"}, nil) {
+		t.Fatal("first entry was rejected")
+	}
+	<-started
+	if !pump.enqueue(persistEntry{agentID: "second"}, nil) {
+		t.Fatal("second entry was rejected")
+	}
+	if !pump.closeUntil(time.After(time.Second)) {
+		t.Fatal("closeUntil waited for the handler to drain the queue")
+	}
+	if pump.enqueue(persistEntry{agentID: "late"}, nil) {
+		t.Fatal("closed pump accepted a new entry")
+	}
+	select {
+	case <-pump.done:
+		t.Fatal("pump reported completion while its handler was blocked")
+	default:
+	}
+	releaseHandler()
+	if !pump.closeUntil(time.After(time.Second)) {
+		t.Fatal("repeated closeUntil failed")
+	}
+	select {
+	case <-pump.done:
+	case <-time.After(time.Second):
+		t.Fatal("closed pump did not drain after releasing its handler")
+	}
+	if len(handled) != 2 || handled[0] != "first" || handled[1] != "second" {
+		t.Fatalf("handled = %v, want accepted entries in order", handled)
+	}
 }
 
 type barrierRecordingTool struct {
@@ -640,7 +696,7 @@ func TestIntentBarrierSuccessResetsBarrierFailureRounds(t *testing.T) {
 	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
 	t.Cleanup(a.recoveryManager().Close)
 	a.startPersistLoop()
-	t.Cleanup(a.closePersistLoop)
+	t.Cleanup(func() { a.closePersistLoopUntil(nil) })
 	a.newTurn()
 	a.turn.BarrierFailureRounds = 1
 

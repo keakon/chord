@@ -201,7 +201,9 @@ func TestHeadlessInitialStatusSeqSurvivesWireEncoding(t *testing.T) {
 	go writer.run()
 	state := &headlessState{sessionID: "session-start"}
 	handleHeadlessCommand(headlessCommand{Type: "status"}, &mockBackend{}, state, writer)
-	writer.close()
+	if !writer.closeUntil(nil) {
+		t.Fatal("closeUntil returned false")
+	}
 
 	var envelope struct {
 		Type string  `json:"type"`

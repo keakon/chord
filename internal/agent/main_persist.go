@@ -22,74 +22,101 @@ type persistEntry struct {
 	walltimeLedger *analytics.UsageLedger
 	walltimeEvent  *analytics.UsageEvent
 	barrier        chan struct{}
-	stop           bool
 }
 
-// persistencePump owns the ordered async-persistence channel and its drain
-// goroutine's lifecycle. It was carved out of MainAgent, where the channel, the
-// done signal, and the two sync.Once guards were four loose fields. The pump
-// only knows how to enqueue and drain entries; the per-entry work (recovery
-// writes, barriers) is supplied by the caller via start's handler, and
-// MainAgent-specific concerns (shutdown gating, tool-trace timing) stay on
-// MainAgent.
+// persistencePump owns ordered async persistence and its drain lifecycle.
+// The handler supplies per-entry writes and barriers; MainAgent owns shutdown
+// gating and tool-trace timing.
 type persistencePump struct {
 	ch        chan persistEntry
 	done      chan struct{}
-	mu        sync.RWMutex
-	stopped   bool
-	closeOnce sync.Once
+	admission chan struct{}
+	stopping  chan struct{}
+	stopOnce  sync.Once
+	closed    chan struct{}
 	loopOnce  sync.Once
 }
 
 func newPersistencePump(buffer int) *persistencePump {
 	return &persistencePump{
-		ch:   make(chan persistEntry, buffer),
-		done: make(chan struct{}),
+		ch:        make(chan persistEntry, buffer),
+		done:      make(chan struct{}),
+		admission: make(chan struct{}, 1),
+		stopping:  make(chan struct{}),
+		closed:    make(chan struct{}),
 	}
 }
 
 // start launches the drain loop exactly once. handle is invoked for each entry
-// in arrival order; done is closed after a FIFO stop sentinel is consumed.
+// in arrival order; done is closed after the closed queue is drained.
 func (p *persistencePump) start(handle func(persistEntry)) {
 	p.loopOnce.Do(func() {
 		go func() {
 			defer close(p.done)
 			for entry := range p.ch {
-				if entry.stop {
-					return
-				}
 				handle(entry)
 			}
 		}()
 	})
 }
 
-// close stops new enqueues and sends a FIFO stop sentinel without closing ch,
-// avoiding send/close races with producers already inside enqueue.
-func (p *persistencePump) close() {
-	p.closeOnce.Do(func() {
-		p.mu.Lock()
-		p.stopped = true
-		p.ch <- persistEntry{stop: true}
-		p.mu.Unlock()
+// closeUntil stops admission and closes the queue after the last admitted
+// sender leaves. Closure continues even if the caller's deadline expires;
+// the drain loop owns completion of every accepted entry.
+func (p *persistencePump) closeUntil(deadline <-chan time.Time) bool {
+	if p == nil || p.ch == nil {
+		return true
+	}
+	p.stopOnce.Do(func() {
+		close(p.stopping)
+		go func() {
+			p.admission <- struct{}{}
+			defer func() { <-p.admission }()
+			close(p.ch)
+			close(p.closed)
+		}()
 	})
+	select {
+	case <-p.closed:
+		return true
+	case <-deadline:
+		return false
+	}
 }
 
 // enqueue sends entry, returning false if the pump is unusable (nil channel) or
 // stopping fired before the send completed.
 func (p *persistencePump) enqueue(entry persistEntry, stopping <-chan struct{}) bool {
+	return p.enqueueUntil(entry, stopping, nil)
+}
+
+func (p *persistencePump) enqueueUntil(entry persistEntry, stopping <-chan struct{}, deadline <-chan time.Time) bool {
 	if p == nil || p.ch == nil {
 		return false
 	}
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if p.stopped {
+	select {
+	case p.admission <- struct{}{}:
+	case <-p.stopping:
 		return false
+	case <-stopping:
+		return false
+	case <-deadline:
+		return false
+	}
+	defer func() { <-p.admission }()
+	select {
+	case <-p.stopping:
+		return false
+	default:
 	}
 	select {
 	case p.ch <- entry:
 		return true
+	case <-p.stopping:
+		return false
 	case <-stopping:
+		return false
+	case <-deadline:
 		return false
 	}
 }
@@ -107,18 +134,9 @@ func (p *persistencePump) flushUntil(deadline <-chan time.Time) bool {
 		return false
 	}
 	barrier := make(chan struct{})
-	p.mu.RLock()
-	if p.stopped {
-		p.mu.RUnlock()
+	if !p.enqueueUntil(persistEntry{barrier: barrier}, nil, deadline) {
 		return false
 	}
-	select {
-	case p.ch <- persistEntry{barrier: barrier}:
-	case <-deadline:
-		p.mu.RUnlock()
-		return false
-	}
-	p.mu.RUnlock()
 	if deadline == nil {
 		<-barrier
 		return true
@@ -156,8 +174,8 @@ func (a *MainAgent) startPersistLoop() {
 	})
 }
 
-func (a *MainAgent) closePersistLoop() {
-	a.persist.close()
+func (a *MainAgent) closePersistLoopUntil(deadline <-chan time.Time) bool {
+	return a.persist.closeUntil(deadline)
 }
 
 // persistAsync sends a persistence request to the ordered channel.

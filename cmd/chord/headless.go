@@ -26,7 +26,12 @@ import (
 )
 
 const (
-	headlessStdinMaxLineBytes = 1024 * 1024
+	// headlessMaxEnvelopeBytes is the encoded JSONL frame budget shared with
+	// chord-gateway. It is large enough for bounded shell/tool results while
+	// bounding the size written to the transport. Encoding still materializes
+	// the envelope before enforcing this limit.
+	headlessMaxEnvelopeBytes  = 16 * 1024 * 1024
+	headlessStdinMaxLineBytes = 1 * 1024 * 1024
 	// headlessGenesisSeq is the version of state that has never been pushed.
 	// Status snapshots copy it; the first push bumps past it so a snapshot
 	// taken before that push is strictly older.
@@ -174,30 +179,72 @@ type headlessEnvelope struct {
 
 // stdoutWriter serializes JSON envelopes to stdout via a single goroutine.
 type stdoutWriter struct {
-	enc       *json.Encoder
-	ch        chan any
-	ctx       context.Context
-	orderMu   sync.Mutex
-	closeOnce sync.Once
-	done      chan struct{}
+	writer           io.Writer
+	ch               chan any
+	ctx              context.Context
+	commandCtx       context.Context
+	cancel           context.CancelFunc
+	admission        chan struct{}
+	ordering         chan struct{}
+	closeOnce        sync.Once
+	shutdownOnce     sync.Once
+	shutdownDeadline time.Time
+	done             chan struct{}
+	errCh            chan error
 }
 
 // newStdoutWriter creates a stdoutWriter with a buffered channel.
 func newStdoutWriter(ctx context.Context, w io.Writer) *stdoutWriter {
+	writerCtx, cancel := context.WithCancel(ctx)
 	return &stdoutWriter{
-		enc:  json.NewEncoder(w),
-		ch:   make(chan any, 256),
-		ctx:  ctx,
-		done: make(chan struct{}),
+		writer:    w,
+		ch:        make(chan any, 256),
+		ctx:       writerCtx,
+		cancel:    cancel,
+		admission: make(chan struct{}, 1),
+		ordering:  make(chan struct{}, 1),
+		done:      make(chan struct{}),
+		errCh:     make(chan error, 1),
 	}
 }
 
 // run processes the channel and writes JSON envelopes to stdout.
 func (w *stdoutWriter) run() {
 	defer close(w.done)
+	defer close(w.errCh)
 	for msg := range w.ch {
-		_ = w.enc.Encode(msg)
+		line, err := json.Marshal(msg)
+		if err == nil && len(line)+1 > headlessMaxEnvelopeBytes {
+			err = fmt.Errorf("encoded envelope exceeds %d bytes", headlessMaxEnvelopeBytes)
+		}
+		if err == nil {
+			line = append(line, '\n')
+			for len(line) > 0 {
+				n, writeErr := w.writer.Write(line)
+				if writeErr != nil {
+					err = writeErr
+					break
+				}
+				if n <= 0 {
+					err = io.ErrShortWrite
+					break
+				}
+				line = line[n:]
+			}
+		}
+		if err != nil {
+			w.errCh <- fmt.Errorf("write headless output: %w", err)
+			w.cancel()
+			return
+		}
 	}
+}
+
+func (w *stdoutWriter) errors() <-chan error {
+	if w == nil {
+		return nil
+	}
+	return w.errCh
 }
 
 // ordered runs f while holding the push-ordering lock. Seq allocation and the
@@ -208,12 +255,32 @@ func (w *stdoutWriter) run() {
 // role_change that loss is permanent — the announcement dedupe marker already
 // advanced at stamp time, so the switch is never re-announced.
 //
-// Sections must not take this lock while holding state.mu, and f must not block
-// indefinitely: emit under the lock only ever waits on the channel buffer
-// (stdout backpressure), which the writer goroutine drains independently.
+// Sections must not enter while holding state.mu. Ordering and queue admission
+// are cancellable so output backpressure cannot trap the command loop during
+// application shutdown. Event draining uses the writer's separate lifetime.
 func (w *stdoutWriter) ordered(f func()) {
-	w.orderMu.Lock()
-	defer w.orderMu.Unlock()
+	w.orderedWithContext(w.sendContext(), f)
+}
+
+func (w *stdoutWriter) sendContext() context.Context {
+	if w.commandCtx != nil {
+		return w.commandCtx
+	}
+	return w.ctx
+}
+
+func (w *stdoutWriter) orderedWithContext(ctx context.Context, f func()) {
+	select {
+	case w.ordering <- struct{}{}:
+	case <-ctx.Done():
+		return
+	case <-w.ctx.Done():
+		return
+	}
+	defer func() { <-w.ordering }()
+	if ctx.Err() != nil || w.ctx.Err() != nil {
+		return
+	}
 	f()
 }
 
@@ -221,28 +288,61 @@ func (w *stdoutWriter) ordered(f func()) {
 // (stdio is a reliable pipe; control requests, SubAgent lifecycle events,
 // and response events must never be silently dropped).
 // Returns false if the context was cancelled before the message could be sent.
-func (w *stdoutWriter) emit(msg any) (ok bool) {
-	defer func() {
-		if recover() != nil {
-			ok = false
-		}
-	}()
+func (w *stdoutWriter) emit(msg any) bool {
+	return w.emitWithContext(w.sendContext(), msg)
+}
+
+func (w *stdoutWriter) emitWithContext(ctx context.Context, msg any) bool {
+	select {
+	case w.admission <- struct{}{}:
+	case <-ctx.Done():
+		return false
+	case <-w.ctx.Done():
+		return false
+	}
+	defer func() { <-w.admission }()
+	if ctx.Err() != nil || w.ctx.Err() != nil {
+		return false
+	}
 	select {
 	case w.ch <- msg:
 		return true
+	case <-ctx.Done():
+		return false
 	case <-w.ctx.Done():
 		return false
 	}
 }
 
-func (w *stdoutWriter) close() {
+// closeUntil cancels new sends, closes the input queue, and waits for the
+// writer to finish up to deadline. A blocked underlying Write cannot always be
+// interrupted through io.Writer, so a bounded close may return while that
+// goroutine remains alive; callers must then abandon the transport rather than
+// waiting indefinitely.
+func (w *stdoutWriter) closeUntil(deadline <-chan time.Time) bool {
 	if w == nil {
-		return
+		return true
+	}
+	w.cancel()
+	select {
+	case w.admission <- struct{}{}:
+	case <-deadline:
+		return false
 	}
 	w.closeOnce.Do(func() {
 		close(w.ch)
-		<-w.done
 	})
+	<-w.admission
+	if deadline == nil {
+		<-w.done
+		return true
+	}
+	select {
+	case <-w.done:
+		return true
+	case <-deadline:
+		return false
+	}
 }
 
 // headlessCommand represents a command received from stdin.
@@ -962,7 +1062,7 @@ func runHeadless(_ *cobra.Command, _ []string) error {
 	return runHeadlessWithDeps(defaultHeadlessRunDeps())
 }
 
-func runHeadlessWithDeps(deps headlessRunDeps) error {
+func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 	if deps.initApp == nil {
 		deps.initApp = defaultHeadlessRunDeps().initApp
 	}
@@ -1003,7 +1103,16 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	// Keep the writer alive through runtime shutdown so the event forwarder can
 	// drain already-published events after the application context is cancelled.
 	out := newStdoutWriter(context.Background(), deps.stdout)
+	// Command replies must release the stdin loop when the application stops.
+	// Event forwarding uses the writer context to drain accepted runtime events.
+	out.commandCtx = ac.Ctx
+	stopShutdownDeadline := context.AfterFunc(ac.Ctx, func() { out.shutdownOutputDeadline() })
+	defer stopShutdownDeadline()
 	go out.run()
+	// Release command admission on transport failure without consuming the
+	// error. Cleanup reads it after draining, including failures during close.
+	stopOutputCancellation := context.AfterFunc(out.ctx, ac.Cancel)
+	defer stopOutputCancellation()
 
 	sessionID := filepath.Base(ac.SessionDir)
 	state := &headlessState{sessionID: sessionID, workDir: headlessWorkDirSnapshot(rt.Backend()), updatedAt: time.Now()}
@@ -1038,26 +1147,39 @@ func runHeadlessWithDeps(deps headlessRunDeps) error {
 	go func() {
 		defer close(eventDone)
 		for ev := range events {
-			out.ordered(func() {
+			out.orderedWithContext(out.ctx, func() {
 				envs := filterHeadlessEvent(ev, state, backend)
 				for _, env := range envs {
-					out.emit(env)
+					out.emitWithContext(out.ctx, env)
 				}
 			})
 		}
 	}()
 	defer func() {
+		deadline := out.shutdownOutputDeadline()
 		rt.Close()
 		ac.Close()
 		// Drain already-published events before closing stdout, but never hang
-		// on a wedged event loop: the agent shutdown above got the same budget,
-		// so a stuck channel must not keep headless from exiting.
+		// on a wedged event loop. These output waits share the remaining budget
+		// after runtime cleanup rather than each adding a fresh shutdown wait.
 		select {
 		case <-eventDone:
-		case <-time.After(agentShutdownWait):
+		case <-time.After(max(time.Until(deadline), 0)):
 			log.Warnf("headless event drain timed out")
 		}
-		out.close()
+		if !out.closeUntil(time.After(max(time.Until(deadline), 0))) {
+			err := errors.New("headless output writer did not stop within shutdown budget")
+			log.Warnf("%v", err)
+			runErr = errors.Join(runErr, err)
+		}
+		select {
+		case err := <-out.errors():
+			if err != nil {
+				log.Warnf("headless output transport failed error=%v", err)
+				runErr = errors.Join(runErr, err)
+			}
+		default:
+		}
 	}()
 
 	// Command loop: read stdin JSON lines.

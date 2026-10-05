@@ -319,7 +319,7 @@ func TestWalltimeRecorderFlushesThroughPersistencePump(t *testing.T) {
 		}
 	})
 	defer func() {
-		pump.close()
+		pump.closeUntil(nil)
 		<-pump.done
 	}()
 

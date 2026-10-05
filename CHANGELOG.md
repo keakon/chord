@@ -82,6 +82,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Repeated WebFetch requests to the same site reuse network connections; closing the application releases idle connections.
+
 - Image token estimates use a conservative allowance for the largest normalized
   image instead of estimating image tokens from encoded file size.
 - Extracting excerpts from large tool outputs during context compaction now scans only the retained text, reducing time spent building summaries while preserving the same excerpt contents.
@@ -120,6 +122,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Compaction checkpoints now include a bounded worklog of confirmed file changes, shell tool outcomes and observed commits, plus a repository snapshot captured when the checkpoint is built. Partial changes remain visible when a tool fails; calls that never started are excluded and unknown outcomes are explicit. These historical snapshots give way to newer tool results and runtime state. Task notes retain semantic progress, verification details, decisions, blockers and next actions without duplicating mechanical status.
 
 ### Fixes
+
+- Full persistence queues and blocked headless output no longer cause the corresponding shutdown waits to run indefinitely. Headless encoding or write failures stop ongoing work, and encoded output frames are limited to 16 MiB.
+- Glob respects cancellation for both exact paths and directory traversal.
 
 - Retryable Responses stream errors, WebSocket error frames, and HTTP 5xx responses now honor valid `Retry-After` advice for the failed key. Healthy keys and fallback models remain available, and WebSocket advice takes precedence over `resets_in_seconds`.
 

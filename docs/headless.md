@@ -28,6 +28,14 @@ CLI flags: `-d/--session-dir`, `-c/--continue`, `-r/--resume`, `-w/--worktree`. 
 - **stdin**: one JSON command per line
 - **stdout**: one JSON envelope per line. Other diagnostic output goes to stderr; never parse stderr as protocol.
 
+An encoded JSONL envelope is limited to 16 MiB. Input command lines are limited
+to 1 MiB; an oversized input line produces a recoverable `error` envelope with
+`code: "stdin_line_too_long"`. Keep individual command and result payloads
+below these limits so the process and gateway can keep the stream framed.
+If an output envelope exceeds the limit, cannot be encoded, or cannot be
+written, Chord cancels ongoing work and exits with a nonzero status. Check the Chord log for the
+transport error; the failed output is not delivered as an `error` envelope.
+
 Every outbound envelope has the shape:
 
 ```json

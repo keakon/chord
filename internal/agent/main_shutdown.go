@@ -73,23 +73,25 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	// shortly after Shutdown's budget expires.
 	defer a.closeSubAgentMCPServersAfterRun()
 
-	// Close the persistence channel and wait for the loop to drain.
+	// Stop persistence admission and wait for the loop to drain.
 	// The persist loop may be started outside Run (tests), so don't gate the wait
-	// on the main event loop start flag. Closing the channel is itself an
+	// on the main event loop start flag. Closing the queue is itself an
 	// ordering barrier: the drain loop processes every already-enqueued entry
 	// (including walltime segments settled during cancellation) in FIFO order
 	// before it exits, so no separate pre-close flush is needed.
 	persistDrained := true
 	if a.persist.ch != nil {
-		a.closePersistLoop()
-		if wait := remaining(); wait > 0 {
-			select {
-			case <-a.persist.done:
-			case <-time.After(wait):
+		persistDrained = a.closePersistLoopUntil(time.After(remaining()))
+		if persistDrained {
+			if wait := remaining(); wait > 0 {
+				select {
+				case <-a.persist.done:
+				case <-time.After(wait):
+					persistDrained = false
+				}
+			} else {
 				persistDrained = false
 			}
-		} else {
-			persistDrained = false
 		}
 	}
 	if !persistDrained {

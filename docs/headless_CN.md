@@ -28,6 +28,12 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 - **stdin**：每行一条 JSON 命令
 - **stdout**：每行一条 JSON envelope。其他诊断输出走 stderr，**不要**把 stderr 当协议解析。
 
+编码后的 JSONL envelope 上限为 16 MiB。stdin 单行命令上限为 1 MiB；超出
+时会收到带 `code: "stdin_line_too_long"` 的可恢复 `error` envelope。请让
+单条命令和结果保持在这些上限内，确保进程和网关能按行解析协议。
+输出 envelope 超限、无法编码或无法写入时，Chord 会取消当前工作，并以非零退出码退出。
+请在 Chord 日志中查看传输错误；失败的输出不会转换成 `error` envelope 发出。
+
 每个出站 envelope 的结构：
 
 ```json

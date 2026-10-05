@@ -126,7 +126,7 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 	)
 	a.startPersistLoop()
 	defer func() {
-		a.closePersistLoop()
+		a.closePersistLoopUntil(nil)
 		<-a.persist.done
 		a.cancel()
 		if a.recoveryManager() != nil {

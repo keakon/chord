@@ -3520,7 +3520,7 @@ func TestPersistencePumpCloseDrainsAcceptedEntriesAndRejectsLaterEnqueues(t *tes
 	if !pump.enqueue(persistEntry{msg: message.Message{Content: "accepted"}}, make(chan struct{})) {
 		t.Fatal("initial enqueue rejected")
 	}
-	pump.close()
+	pump.closeUntil(nil)
 	<-pump.done
 	if len(got) != 1 || got[0] != "accepted" {
 		t.Fatalf("drained entries = %#v, want accepted entry", got)

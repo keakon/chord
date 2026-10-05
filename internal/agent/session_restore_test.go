@@ -1597,7 +1597,7 @@ func newTestMainAgentForRestore(t *testing.T, projectRoot, sessionDir string) *M
 	)
 	a.startPersistLoop()
 	t.Cleanup(func() {
-		a.closePersistLoop()
+		a.closePersistLoopUntil(nil)
 		<-a.persist.done
 		// Ensure all background workers (compaction/persist/LLM) are stopped
 		// before TempDir cleanup starts, otherwise a late walltime/usage ledger
