@@ -1,0 +1,27 @@
+name: Model catalog integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pinned-catalog:
+    name: Verify pinned upstream catalog
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Compare pinned upstream snapshot
+        env:
+          CHORD_RUN_MODELCATALOG_INTEGRATION_TESTS: "1"
+        run: go test ./internal/modelcatalog/refresh -run '^TestPinnedCatalogRepository$' -count=1 -timeout=3m

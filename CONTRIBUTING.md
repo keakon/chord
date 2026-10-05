@@ -104,6 +104,30 @@ Optional integration tests that require external tools are not part of the defau
 CHORD_RUN_REAL_PYRIGHT_TESTS=1 go test ./internal/tools -run Pyright
 ```
 
+To compare the embedded catalog with its pinned upstream tag, run the optional
+model catalog integration test:
+
+```bash
+CHORD_RUN_MODELCATALOG_INTEGRATION_TESTS=1 go test ./internal/modelcatalog/refresh -run '^TestPinnedCatalogRepository$' -count=1
+```
+
+This clones the repository and tag recorded in the embedded snapshot into a
+temporary directory. To use a local checkout, set
+`CHORD_MODELCATALOG_TEST_CONFIG` to a YAML file containing `local_path`. Relative
+paths resolve against that file's directory. An empty or absent local path
+uses the recorded upstream; a nonexistent checkout also falls back to cloning
+upstream. The test never modifies the configured checkout. A supplied config
+file must exist and contain valid keys. Default unit tests create temporary
+fixture repositories and require neither this config nor network access.
+An existing checkout must contain the pinned tag; a missing tag fails rather
+than silently falling back to network access. GitHub Actions provides the
+manual **Model catalog integration** workflow for the upstream clone path;
+normal push and pull request CI uses only the offline fixture tests.
+
+```yaml
+local_path: ./catalog-checkout
+```
+
 ## Performance-sensitive changes
 
 `./scripts/bench_tui_regression.sh` is the canonical validation entry point for TUI hot paths — it combines correctness tests, alloc guards, and the stable micro-benchmark set, and accepts two result files for a `benchstat` comparison:
