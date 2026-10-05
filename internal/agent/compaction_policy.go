@@ -194,7 +194,8 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 				if stableReductionSurfaceNeedsReview(previous, scan, currentBatch, externalReadInvalidated) {
 					wrapUpGraceActive = false
 				} else {
-					reused, compatible := reuseStableReductionPrefix(previous, messages, messages)
+					owned := append([]message.Message(nil), messages...)
+					reused, compatible := reuseStableReductionPrefix(previous, owned, messages)
 					if compatible {
 						stats := highLevelContextReductionStats(a.ctxMgr, messages, reused)
 						if len(stats.ByToolAndRule) == 0 {
@@ -242,7 +243,7 @@ func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message,
 	if incrementalEnabled && frozenBoundary > 0 {
 		for i := range frozenBoundary {
 			if frozenReducedIndices != nil && i < len(frozenReducedIndices) && frozenReducedIndices[i] {
-				prepared[i] = cloneMessageForRequestShape(frozenPrefix[i])
+				prepared[i] = frozenPrefix[i].Clone()
 			}
 		}
 	}
@@ -1477,18 +1478,15 @@ func reuseStableReductionPrefix(previous stableReductionSurface, current, shapeS
 	if len(current) < len(previousMessages) || len(shapeSource) < len(previousMessages) || !stableReductionPrefixCompatible(previous, shapeSource[:len(previousMessages)]) {
 		return current, false
 	}
-	// Build the output in one pass: the prefix is cloned from the stored
-	// surface, the tail from current. Cloning current first and overwriting
-	// the prefix would clone every prefix message twice for nothing.
-	out := make([]message.Message, len(current))
+	// current is caller-owned request storage. Reuse writes the stored reduced
+	// prefix into it and leaves the fresh tail in place, avoiding a second full
+	// message-slice allocation. Prefix compatibility already compares every
+	// tool-call identity and argument, so replacing it cannot introduce a new
+	// orphan tool result; the old defensive full-slice comparison repeated that
+	// invariant after cloning.
+	out := current
 	for i := range previousMessages {
-		out[i] = cloneMessageForRequestShape(previousMessages[i])
-	}
-	for i := len(previousMessages); i < len(current); i++ {
-		out[i] = cloneMessageForRequestShape(current[i])
-	}
-	if stableReductionReuseWouldCreateOrphans(current, out) {
-		return current, false
+		out[i] = previousMessages[i].Clone()
 	}
 	return out, true
 }
@@ -1810,52 +1808,6 @@ func stableReductionWriteInt(h interface{ Write([]byte) (int, error) }, value in
 	_, _ = h.Write(buf[:])
 }
 
-func stableReductionReuseWouldCreateOrphans(current, reused []message.Message) bool {
-	currentDropped := message.CountDroppedOrphanToolResults(current)
-	reusedDropped := message.CountDroppedOrphanToolResults(reused)
-	if reusedDropped > currentDropped {
-		return true
-	}
-	currentSupported := supportedToolResultIDs(current)
-	reusedSupported := supportedToolResultIDs(reused)
-	for id := range currentSupported {
-		if _, ok := reusedSupported[id]; !ok {
-			return true
-		}
-	}
-	return false
-}
-
-func supportedToolResultIDs(messages []message.Message) map[string]struct{} {
-	supported := make(map[string]struct{})
-	for i, msg := range messages {
-		if msg.Role != message.RoleTool || msg.ToolCallID == "" {
-			continue
-		}
-		if toolResultSupportedByNearestAssistant(messages, i) {
-			supported[msg.ToolCallID] = struct{}{}
-		}
-	}
-	return supported
-}
-
-func toolResultSupportedByNearestAssistant(messages []message.Message, toolIdx int) bool {
-	id := messages[toolIdx].ToolCallID
-	for i := toolIdx - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.Role != message.RoleAssistant || len(msg.ToolCalls) == 0 {
-			continue
-		}
-		for _, call := range msg.ToolCalls {
-			if call.ID == id {
-				return true
-			}
-		}
-		return false
-	}
-	return false
-}
-
 func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []message.Message, policy contextReductionPolicy, scan *reductionHistoryScan, currentBatch uint64, externalInvalidated map[int]bool) ([]message.Message, ContextReductionStats, bool) {
 	previous, ok := a.stableReductionSurfaceCandidate(a.currentTurnID())
 	if !ok || len(previous.Messages) == 0 || len(messages) < len(previous.Messages) {
@@ -1880,7 +1832,10 @@ func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []mess
 	if tailTokens >= policy.MinIncrementalTokens {
 		return nil, ContextReductionStats{}, false
 	}
-	reused, compatible := reuseStableReductionPrefix(previous, messages, messages)
+	// The reuse helper writes into its current slice. Own the copy first so the
+	// durable request surface supplied by the caller is never modified.
+	owned := append([]message.Message(nil), messages...)
+	reused, compatible := reuseStableReductionPrefix(previous, owned, messages)
 	if !compatible {
 		return nil, ContextReductionStats{}, false
 	}
@@ -2300,7 +2255,7 @@ func cloneMessageSliceForRequestShape(messages []message.Message) []message.Mess
 	}
 	cloned := make([]message.Message, len(messages))
 	for i := range messages {
-		cloned[i] = cloneMessageForRequestShape(messages[i])
+		cloned[i] = messages[i].Clone()
 	}
 	return cloned
 }
@@ -2330,58 +2285,7 @@ func cowRequestShapeSlice(previous, prepared []message.Message) []message.Messag
 			cloned[i] = previous[i]
 			continue
 		}
-		cloned[i] = cloneMessageForRequestShape(prepared[i])
-	}
-	return cloned
-}
-
-func cloneMessageForRequestShape(msg message.Message) message.Message {
-	cloned := msg
-	if len(msg.Parts) > 0 {
-		cloned.Parts = cloneContentParts(msg.Parts)
-	}
-	if len(msg.ToolCalls) > 0 {
-		cloned.ToolCalls = make([]message.ToolCall, len(msg.ToolCalls))
-		for i, tc := range msg.ToolCalls {
-			cloned.ToolCalls[i] = tc
-			if len(tc.Args) > 0 {
-				cloned.ToolCalls[i].Args = append([]byte(nil), tc.Args...)
-			}
-		}
-	}
-	if len(msg.ThinkingBlocks) > 0 {
-		cloned.ThinkingBlocks = append([]message.ThinkingBlock(nil), msg.ThinkingBlocks...)
-	}
-	if len(msg.ResponsesOutput) > 0 {
-		cloned.ResponsesOutput = make([]message.ResponsesOutputItem, len(msg.ResponsesOutput))
-		copy(cloned.ResponsesOutput, msg.ResponsesOutput)
-		for i := range cloned.ResponsesOutput {
-			cloned.ResponsesOutput[i].Content = append([]message.ResponsesOutputContent(nil), msg.ResponsesOutput[i].Content...)
-			cloned.ResponsesOutput[i].Summary = append([]message.ResponsesReasoningSummary(nil), msg.ResponsesOutput[i].Summary...)
-		}
-	}
-	if len(msg.GeminiParts) > 0 {
-		cloned.GeminiParts = append([]message.GeminiReplayPart(nil), msg.GeminiParts...)
-	}
-	cloned.CompactionFileRevisions = cloneCompactionFileRevisions(msg.CompactionFileRevisions)
-	if msg.FileState != nil {
-		cloned.FileState = msg.FileState.Clone()
-	}
-	if len(msg.ToolChangedPaths) > 0 {
-		cloned.ToolChangedPaths = append([]string(nil), msg.ToolChangedPaths...)
-	}
-	if len(msg.LSPReviews) > 0 {
-		cloned.LSPReviews = append([]message.LSPReview(nil), msg.LSPReviews...)
-	}
-	if msg.Audit != nil {
-		cloned.Audit = msg.Audit.Clone()
-	}
-	if msg.Provenance != nil {
-		cloned.Provenance = cloneProvenance(msg.Provenance)
-	}
-	if msg.Usage != nil {
-		usage := *msg.Usage
-		cloned.Usage = &usage
+		cloned[i] = prepared[i].Clone()
 	}
 	return cloned
 }

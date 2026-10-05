@@ -114,20 +114,3 @@ func RepairOrphanToolResults(msgs []Message) ([]Message, int) {
 	}
 	return out, removed
 }
-
-// CountDroppedOrphanToolResults reports how many tool-role messages
-// RepairOrphanToolResults would drop, without allocating the repaired copy.
-// Use this when only the drop count matters (e.g. request-surface reuse checks).
-func CountDroppedOrphanToolResults(msgs []Message) int {
-	if len(msgs) == 0 {
-		return 0
-	}
-	msgs = repairAdjacentOutOfOrderToolResults(msgs)
-	removed := 0
-	for i := range msgs {
-		if msgs[i].Role == RoleTool && !toolMessageSupportedByHistory(msgs, i) {
-			removed++
-		}
-	}
-	return removed
-}

@@ -32,7 +32,7 @@ import (
 func assertRequestSurfaceInvariants(t *testing.T, prepared []message.Message, sessionDir string) {
 	t.Helper()
 	for i := range prepared {
-		if prepared[i].Role == message.RoleTool && !toolResultSupportedByNearestAssistant(prepared, i) {
+		if prepared[i].Role == message.RoleTool && !testToolResultSupportedByNearestAssistant(prepared, i) {
 			t.Fatalf("tool result at %d lost its call: %q", i, compactTextSnippet(prepared[i].Content, 80))
 		}
 	}
@@ -56,6 +56,23 @@ func assertRequestSurfaceInvariants(t *testing.T, prepared []message.Message, se
 			}
 		}
 	}
+}
+
+func testToolResultSupportedByNearestAssistant(messages []message.Message, toolIdx int) bool {
+	id := messages[toolIdx].ToolCallID
+	for i := toolIdx - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != message.RoleAssistant || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			if call.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }
 
 func stateMachineReadBody(start, end, total int, line string) string {

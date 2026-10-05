@@ -9,6 +9,58 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+func TestSystemPromptDoesNotExposeNestedState(t *testing.T) {
+	m := NewManager(1000, 0)
+	m.SetSystemPrompt(message.Message{Role: message.RoleSystem, Parts: []message.ContentPart{{Type: message.ContentPartText, Text: "instructions"}}})
+	prompt := m.SystemPrompt()
+	prompt.Parts[0].Text = "changed"
+	if got := m.SystemPrompt().Parts[0].Text; got != "instructions" {
+		t.Fatalf("system prompt changed through its snapshot: %q", got)
+	}
+}
+
+func TestSnapshotDeepCopiesNestedMessageState(t *testing.T) {
+	m := NewManager(1000, 0)
+	msg := message.Message{
+		Role:  message.RoleAssistant,
+		Parts: []message.ContentPart{{Type: message.ContentPartImage, Data: []byte("image")}},
+		ToolCalls: []message.ToolCall{{
+			ID:   "call-1",
+			Args: json.RawMessage(`{"path":"old.go"}`),
+		}},
+		ResponsesOutput: []message.ResponsesOutputItem{{
+			Content: []message.ResponsesOutputContent{{Text: "response"}},
+			Summary: []message.ResponsesReasoningSummary{{Text: "reasoning"}},
+		}},
+		FileState:               &message.ToolFileState{Reads: []message.TrackedFileState{{Path: "old.go"}}},
+		Audit:                   &message.ToolArgsAudit{IgnoredArgs: []message.IgnoredToolArg{{Path: "args.old"}}},
+		CompactionFileRevisions: map[string]string{"old.go": "rev-1"},
+		Provenance:              &message.MessageProvenance{ModelID: "sample-model"},
+		Mailbox:                 &message.MailboxMetadata{MessageID: "mail-1"},
+	}
+	m.Append(msg)
+	snapshot := m.Snapshot()
+	snapshot[0].Parts[0].Data[0] = 'X'
+	snapshot[0].ToolCalls[0].Args[0] = 'X'
+	snapshot[0].ResponsesOutput[0].Content[0].Text = "changed"
+	snapshot[0].FileState.Reads[0].Path = "changed.go"
+	snapshot[0].Audit.IgnoredArgs[0].Path = "changed"
+	snapshot[0].CompactionFileRevisions["old.go"] = "changed"
+	snapshot[0].Provenance.ModelID = "changed"
+	snapshot[0].Mailbox.MessageID = "changed"
+
+	got := m.Snapshot()[0]
+	if string(got.Parts[0].Data) != "image" || string(got.ToolCalls[0].Args) != `{"path":"old.go"}` {
+		t.Fatalf("nested byte fields were aliased: %+v", got)
+	}
+	if got.ResponsesOutput[0].Content[0].Text != "response" || got.FileState.Reads[0].Path != "old.go" || got.Audit.IgnoredArgs[0].Path != "args.old" {
+		t.Fatalf("nested slices were aliased: %+v", got)
+	}
+	if got.CompactionFileRevisions["old.go"] != "rev-1" || got.Provenance.ModelID != "sample-model" || got.Mailbox.MessageID != "mail-1" {
+		t.Fatalf("nested map/pointer fields were aliased: %+v", got)
+	}
+}
+
 func TestEstimateMessageTokensCountsOpaqueReasoningState(t *testing.T) {
 	msg := message.Message{
 		Role:           message.RoleAssistant,

@@ -125,7 +125,7 @@ func (m *Manager) SetSystemPrompt(msg message.Message) {
 func (m *Manager) SystemPrompt() message.Message {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.systemPrompt
+	return m.systemPrompt.Clone()
 }
 
 // SetMaxTokens updates the context window size (token budget). Thread-safe.
@@ -325,7 +325,9 @@ func (m *Manager) Snapshot() []message.Message {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	out := make([]message.Message, len(m.messages))
-	copy(out, m.messages)
+	for i, msg := range m.messages {
+		out[i] = msg.Clone()
+	}
 	return out
 }
 
