@@ -32,8 +32,8 @@ type skillSelectState struct {
 }
 
 const (
-	skillSelectIdleHint   = "j/k move  g/G jump  enter load  / filter  esc close"
-	skillSelectFilterHint = "type to filter  enter keep  esc clear"
+	skillSelectIdleHint   = "j/k move  g/G jump  enter fill command  / filter  esc close"
+	skillSelectFilterHint = selectorFilterHint
 )
 
 // skillVisibilityGlyph encodes model visibility in the glyph shape and leaves

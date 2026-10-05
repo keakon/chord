@@ -102,7 +102,7 @@ func TestPoolSelectIndexAtUsesListBaseRow(t *testing.T) {
 
 	dialogRect := m.overlayRect(m.renderModelSelectDialog())
 	x := dialogRect.Min.X + 2
-	y := dialogRect.Min.Y + 1 + 2 // title + blank
+	y := dialogRect.Min.Y + 1 + 4 // title, filter and spacing
 	idx, ok := m.poolSelectIndexAt(x, y)
 	if !ok {
 		t.Fatal("expected hit test to resolve first list row")
@@ -139,7 +139,7 @@ func TestPoolSelectIndexAtAccountsForScrollWindowStart(t *testing.T) {
 
 	dialogRect := m.overlayRect(m.renderModelSelectDialog())
 	x := dialogRect.Min.X + 2
-	y := dialogRect.Min.Y + 1 + 2 // first visible row
+	y := dialogRect.Min.Y + 1 + 4 // first visible row
 	idx, ok := m.poolSelectIndexAt(x, y)
 	if !ok {
 		t.Fatal("expected hit test to resolve first visible list row")

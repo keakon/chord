@@ -12,6 +12,8 @@
 
 ### 不兼容变更
 
+- TUI 在主视图中使用 `Alt+R` 切换角色，`Shift+Tab` 在输入模式与普通模式中都切换 Agent 视图。`switch_role` 和 `switch_agent` 仍可自定义，建议分别绑定不同按键。
+
 - `compat.reasoning_continuity.preserve_history` 被 `compat.reasoning_continuity.reasoning_replay` 取代：`current_turn`（新的默认值）只保留当前轮的 reasoning，`all` 原样回放已完成轮次（等价原来的 `preserve_history: true`），`none` 连当前轮一起剥离。回放窗口现在覆盖所有 reasoning 载荷，不再局限于明文，因此已完成轮次的 Claude 签名 thinking 块、Responses reasoning items、Gemini thought 签名默认也会被剥离；当前轮（含工具循环）始终原样回传。DeepSeek 的 Chat/Messages 会自动保留完整的 reasoning 历史。其他契约要求完整 assistant 历史的后端用 `reasoning_replay: all` 保留（Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`），模型配置指南的模板已同步设置。保留历史轮 thinking 的 Claude 模型（Opus 4.5+、Sonnet 4.6+）在默认值下还会失去跨轮思考连续性，需要保留就让这些模型用 `all`。旧键不再读取：残留的 `preserve_history` 会由配置加载器报出（`chord doctor config` 也会列出），随后按新默认值生效，迁移需要手动完成。
 
 - 移除 `context.compaction.preset` 配置及 remote 压缩后端。需要模型生成压缩摘要时，统一使用普通模型请求；模型驱动 checkpoint 和运行期降级保持原有行为。被移除的后端返回不透明条目，无法通过 Chord 的文本摘要校验。请删除 `context.compaction` 下残留的 `preset` 键：配置加载器会将它报告为未知字段（`chord doctor config` 也会列出），其余压缩配置照常生效。
@@ -77,6 +79,7 @@
 - 图片 token 按张数和保守额度估算，不再按图片文件字节数折算。
 - 上下文压缩截取大工具输出的摘要时，只扫描需要保留的文本，减少摘要构建耗时，摘录内容保持一致。
 - 大型 Write、Edit 和 Shell 参数流减少了 TUI 的处理与内存分配开销；路径和命令说明在字段完整到达后即可显示。
+- TUI 新增 `Ctrl+X`，可停止当前操作并保留会话；模型池选择器支持 `/` 筛选，状态栏区分连接、等待与接收回复。
 
 - 启用 `context.compaction.model_driven` 后，agent 正忙时的 `/compact` 现在也会让模型自己尝试 checkpoint：一条持久的 "COMPACT REQUESTED" 指令在 checkpoint 应用前随每个请求重放，要求模型立刻单独调用 `compact_context`。先完成的一方生效——模型的 checkpoint 替代运行时摘要；运行时摘要先应用后，模型再调用则按新窗口的常规门槛判定；模型侧尝试收口但未应用（被低收益或间隔门槛跳过、失败或取消）时，后台压缩直接重启，不再向模型重复提示。手动指令存续期间，阈值 warning、宽限倒计时和压力提醒不再新注入；已送达的通知照常重放。
 - 同一条请求不再叠加两条上下文压力通知：每次只注入当前适用的最高一级（手动 `/compact` 指令、阈值 warning、宽限倒计时、提醒），越线请求不再把压力提醒和外部化 warning 叠在同一条请求上。窗口内压力提醒从未送达过的越线（包括提醒被禁用、或提醒线不低于阈值的配置）按突变处理：跳过宽限倒计时，立即启动压缩并只注入一条 warning。
@@ -116,6 +119,7 @@
 - Responses 流不再仅凭参数能解析为 JSON 就执行尚未完成的写操作请求，明确标为未完成的工具项也不会执行。只在最终响应中出现的调用会逐项恢复，与流中已完成的调用同时保留；重复调用在执行和历史回放中均只保留一次。调用标识冲突时拒绝解析，避免混用参数。
 
 - MCP 工具发现会读取后续分页，页面失败时保留上次完整目录。工具结果保留结构化 JSON 和嵌入文本、图片资源；链接只作为引用展示，不支持的内容会给出提示，不再静默消失。
+- 提问框返回选项时保留自定义回答草稿，小窗口中保持输入框和操作提示可见，长问题支持滚动阅读。帮助说明与确认框、技能选择器的实际操作保持一致。
 
 - 修复并发模型请求时，上下文压力提醒可能读取到不一致模型设置的问题。
 

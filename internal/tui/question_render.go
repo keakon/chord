@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/keakon/bubbles/v2/textarea"
 	"github.com/mattn/go-runewidth"
 
@@ -14,8 +15,6 @@ import (
 
 const (
 	questionDialogMaxWidth = 88
-	questionInputWidthPad  = 4
-	questionInputMinWidth  = 20
 	questionInputHeight    = 4
 )
 
@@ -24,8 +23,11 @@ func newQuestionTextarea(width int) textarea.Model {
 }
 
 func questionInputWidth(totalWidth int) int {
-	w := max(min(totalWidth-6, questionDialogMaxWidth)-questionInputWidthPad, questionInputMinWidth)
-	return w
+	return max(dialogContentWidth(questionDialogWidth(totalWidth))-2, 1)
+}
+
+func questionDialogWidth(totalWidth int) int {
+	return max(min(totalWidth-1, questionDialogMaxWidth), 5)
 }
 
 // renderQuestionDialog produces the question dialog as a bordered overlay box,
@@ -34,44 +36,34 @@ func (m *Model) renderQuestionDialog() string {
 	if m.question.request == nil {
 		return ""
 	}
-	if m.question.currentQ >= len(m.question.request.Questions) {
-		return ""
-	}
 
-	q := m.question.request.Questions[m.question.currentQ]
+	q := m.question.request.Item
 	selectedKey := questionSelectedFingerprint(m.question.selected)
 	if !m.question.custom && m.question.deadline.IsZero() && len(q.Options) > 0 && m.question.renderCacheText != "" &&
 		m.question.renderCacheWidth == m.width &&
+		m.question.renderCacheHeight == m.height &&
+		m.question.renderCacheOffset == m.question.scrollOffset &&
+		m.question.renderCacheFollow == m.question.followCursor &&
 		m.question.renderCacheTheme == m.theme.Name &&
 		m.question.renderCacheReq == m.question.request &&
-		m.question.renderCacheCurrentQ == m.question.currentQ &&
 		m.question.renderCacheCursor == m.question.cursor &&
 		m.question.renderCacheSelected == selectedKey {
 		return m.question.renderCacheText
 	}
 
 	// Cap dialog width for readability.
-	maxWidth := max(min(m.width-6, questionDialogMaxWidth), 40)
-	innerWidth := max(
-		// account for border padding
-		maxWidth-2, 20)
+	maxWidth := questionDialogWidth(m.width)
+	innerWidth := max(dialogContentWidth(maxWidth), 1)
 
-	total := len(m.question.request.Questions)
-
-	// Title line with optional progress indicator.
 	titleText := fmt.Sprintf("❓ %s", sanitizeToolDisplayText(q.Header))
-	if total > 1 {
-		titleText = fmt.Sprintf("❓ %s  (%d / %d)", sanitizeToolDisplayText(q.Header), m.question.currentQ+1, total)
-	}
-	title := QuestionSeparatorStyle.Render(titleText)
 
 	var lines []string
-	lines = append(lines, title, "")
+	focusLine := 0
 
 	// Question text — split on <br> and newlines for multi-line display.
 	qRaw := sanitizeToolDisplayText(strings.ReplaceAll(q.Question, "<br>", "\n"))
 	for qLine := range strings.SplitSeq(qRaw, "\n") {
-		for _, wrapped := range wrapText(qLine, innerWidth-4) {
+		for _, wrapped := range wrapText(qLine, max(innerWidth-2, 1)) {
 			lines = append(lines, QuestionTextStyle.Render(wrapped))
 		}
 	}
@@ -107,9 +99,10 @@ func (m *Model) renderQuestionDialog() string {
 
 			line := " " + textPlain
 			if i == currentOption {
+				focusLine = len(lines)
 				line = QuestionSelectedStyle.MarginLeft(1).Width(innerWidth - 2).Render(labelText)
 			}
-			lines = append(lines, line)
+			lines = append(lines, strings.Split(ansi.Hardwrap(line, innerWidth, true), "\n")...)
 			if i == currentOption {
 				lines = append(lines, renderCurrentQuestionOptionDescription(opt.Description, numKey, innerWidth)...)
 			}
@@ -121,46 +114,98 @@ func (m *Model) renderQuestionDialog() string {
 			text := "✎ Type your own answer"
 			line := " " + text
 			if idx == m.question.cursor && !m.question.custom {
+				focusLine = len(lines)
 				line = QuestionSelectedStyle.MarginLeft(1).Width(innerWidth - 2).Render(text)
 			}
-			lines = append(lines, line)
+			lines = append(lines, strings.Split(ansi.Hardwrap(line, innerWidth, true), "\n")...)
 		}
 	}
 
-	// Custom text input (shown when focused or when no options)
+	// Budget borders, title, body, editor and controls before adding hints.
+	maxHeight := max(m.height-2, 6)
+	editing := m.question.custom || len(q.Options) == 0
+	editorRows := 0
+	if editing {
+		editorRows = 1
+	}
+	timeoutText := ""
+	timeoutRows := 0
+	if !m.question.deadline.IsZero() {
+		secs := int(ceilDuration(max(time.Until(m.question.deadline), 0), time.Second) / time.Second)
+		if maxHeight < 6+editorRows {
+			titleText = fmt.Sprintf("❓ %ds · %s", secs, sanitizeToolDisplayText(q.Header))
+		} else {
+			timeoutText = fmt.Sprintf("Closes in %ds", secs)
+			timeoutRows = 1
+		}
+	}
+	maxHintRows := max(maxHeight-4-editorRows-timeoutRows, 1)
+	hint := questionHint(q, m.question.custom) + "  [PgUp/PgDn] Scroll"
+	hintLines := wrapText(hint, innerWidth)
+	if len(hintLines) > maxHintRows {
+		action, escape := "select", "decline"
+		if editing || q.Multiple {
+			action = "send"
+		}
+		if m.question.custom && len(q.Options) > 0 {
+			escape = "back"
+		}
+		secondary := "Tab custom  PgUp/PgDn scroll"
+		if editing {
+			secondary = "Shift+Enter newline  PgUp/PgDn scroll"
+		} else if q.Multiple {
+			secondary = "Space toggle  Tab custom  PgUp/PgDn scroll"
+		}
+		hintLines = wrapText("Enter "+action+"  Esc "+escape+"\n"+secondary, innerWidth)
+		hintLines = hintLines[:min(len(hintLines), maxHintRows)]
+	}
+	footer := make([]string, 0, len(hintLines)+timeoutRows+questionInputHeight)
+	for _, line := range hintLines {
+		footer = append(footer, QuestionHintStyle.Render(line))
+	}
+	if timeoutText != "" {
+		footer = append(footer, QuestionTimeoutStyle.Render(truncateOneLine(timeoutText, innerWidth)))
+	}
 	if m.question.custom || len(q.Options) == 0 {
-		inputView := strings.TrimSuffix(m.question.input.View(), "\n")
-		inputLines := strings.Split(inputView, "\n")
+		editorHeight := max(min(questionInputHeight, maxHeight-len(footer)-4), 1)
+		configureDialogTextarea(&m.question.input, questionInputWidth(m.width), 1, editorHeight)
+		inputLines := strings.Split(strings.TrimSuffix(m.question.input.View(), "\n"), "\n")
 		if len(inputLines) > 0 {
 			inputLines[0] = QuestionSelectedStyle.Render("> ") + inputLines[0]
 		}
-		lines = append(lines, inputLines...)
+		footer = append(inputLines, footer...)
 	}
-
-	lines = append(lines, "")
-	lines = append(lines, QuestionHintStyle.Render(questionHint(q, m.question.custom)))
-
-	// Timeout countdown
-	if !m.question.deadline.IsZero() {
-		remaining := max(time.Until(m.question.deadline), 0)
-		secs := int(remaining.Seconds()) + 1
-		lines = append(lines, QuestionTimeoutStyle.Render(
-			fmt.Sprintf("⏱ Closes in %ds", secs),
-		))
+	bodyHeight := max(maxHeight-3-len(footer), 1) // borders and title
+	m.question.bodyHeight, m.question.visibleBodyHeight = len(lines), bodyHeight
+	offset := m.question.scrollOffset
+	if m.question.followCursor && !m.question.custom && len(q.Options) > 0 {
+		if focusLine < offset {
+			offset = focusLine
+		}
+		if focusLine >= offset+bodyHeight {
+			offset = focusLine - bodyHeight + 1
+		}
 	}
-
-	// Route the body through renderDialogBox so every line (including the
-	// textarea's custom-answer lines) keeps the dialog background. The textarea
-	// View() emits its own SGR resets that would otherwise wipe the DialogBg
-	// established by the border box, leaving the answer rows on the terminal's
-	// default background. styleDialogBodyLines re-applies DialogBg after each
-	// reset (preserveBackground), matching renderConfirmDialog.
-	out := renderDialogBox(maxWidth, lines)
+	offset = max(0, min(offset, len(lines)-bodyHeight))
+	m.question.scrollOffset = offset
+	visible := lines[offset:min(offset+bodyHeight, len(lines))]
+	if len(lines) > bodyHeight {
+		titleText += fmt.Sprintf(" [%d-%d/%d]", offset+1, offset+len(visible), len(lines))
+	}
+	title := QuestionSeparatorStyle.Render(truncateOneLine(titleText, innerWidth))
+	framed := append([]string{title}, visible...)
+	framed = append(framed, footer...)
+	for i, line := range framed {
+		framed[i] = ansi.Truncate(line, innerWidth, "…")
+	}
+	out := renderDialogBox(maxWidth, framed)
 	if !m.question.custom && m.question.deadline.IsZero() && len(q.Options) > 0 {
 		m.question.renderCacheWidth = m.width
+		m.question.renderCacheHeight = m.height
+		m.question.renderCacheOffset = m.question.scrollOffset
+		m.question.renderCacheFollow = m.question.followCursor
 		m.question.renderCacheTheme = m.theme.Name
 		m.question.renderCacheReq = m.question.request
-		m.question.renderCacheCurrentQ = m.question.currentQ
 		m.question.renderCacheCursor = m.question.cursor
 		m.question.renderCacheSelected = selectedKey
 		m.question.renderCacheText = out
@@ -174,8 +219,8 @@ func renderCurrentQuestionOptionDescription(description, numKey string, innerWid
 	}
 	description = sanitizeToolDisplayText(description)
 	prefix := " " + strings.Repeat(" ", runewidth.StringWidth(numKey)+3)
-	wrapWidth := max(innerWidth-2, 10)
-	available := max(wrapWidth-runewidth.StringWidth(prefix), 10)
+	wrapWidth := max(innerWidth-2, 1)
+	available := max(wrapWidth-runewidth.StringWidth(prefix), 1)
 	var lines []string
 	for line := range strings.SplitSeq(strings.ReplaceAll(description, "<br>", "\n"), "\n") {
 		for _, wrapped := range wrapText(line, available) {
@@ -199,7 +244,7 @@ func questionHint(q tools.QuestionItem, customMode bool) string {
 	} else {
 		parts = append(parts, "[Enter] Select")
 	}
-	parts = append(parts, "[Tab] Custom")
+	parts = append(parts, "[Tab] Custom", "[Esc] Decline")
 	if quick := questionQuickSelectHint(len(q.Options)); quick != "" {
 		parts = append(parts, quick)
 	}

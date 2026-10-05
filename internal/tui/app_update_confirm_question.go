@@ -123,7 +123,7 @@ func (m *Model) presentQuestionRequest(dlg questionDialog, prevMode Mode) tea.Cm
 		timeoutCmd = questionTimeoutTick()
 	}
 	var focusCmd tea.Cmd
-	if len(dlg.request.Questions) > 0 && len(dlg.request.Questions[0].Options) == 0 {
+	if len(dlg.request.Item.Options) == 0 {
 		focusCmd = m.question.input.Focus()
 	}
 	cmd := m.switchModeWithIME(ModeQuestion)

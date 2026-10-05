@@ -397,12 +397,12 @@ func questionDialogFromEvent(evt agent.QuestionRequestEvent) questionDialog {
 	}
 	return questionDialog{
 		request: QuestionRequest{
-			Questions: []tools.QuestionItem{{
+			Item: tools.QuestionItem{
 				Header:   evt.Header,
 				Question: evt.Question,
 				Options:  opts,
 				Multiple: evt.Multiple,
-			}},
+			},
 			Deadline: evt.Deadline,
 			AgentID:  evt.AgentID,
 		},

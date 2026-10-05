@@ -6130,11 +6130,11 @@ func TestRenderQuestionDialogEscapesANSIRichPromptAndDescriptions(t *testing.T) 
 	m := NewModel(nil)
 	m.width = 100
 	m.theme = DefaultTheme()
-	m.question.request = &QuestionRequest{Questions: []tools.QuestionItem{{
+	m.question.request = &QuestionRequest{Item: tools.QuestionItem{
 		Header:   "\u001b[31munsafe\u001b[0m",
 		Question: "line1\n\u001b[32mline2\u001b[0m",
 		Options:  []tools.QuestionOption{{Label: "one", Description: "\u001b[34mdesc\u001b[0m"}},
-	}}}
+	}}
 	m.question.input = newQuestionTextarea(m.width)
 
 	view := stripANSI(m.renderQuestionDialog())

@@ -259,7 +259,7 @@ func TestResolveQuestionRestoresInsertModeWithIMERestore(t *testing.T) {
 	m := NewModel(loopBusyAgentStub{})
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?"}}},
+		request:   &QuestionRequest{Item: tools.QuestionItem{Header: "name", Question: "who?"}},
 		requestID: "req-ime",
 		prevMode:  ModeInsert,
 	}
@@ -569,7 +569,7 @@ func TestQuestionRequestSwitchesIMEWhenEnteringQuestion(t *testing.T) {
 	m.mode = ModeInsert
 	m.ime.switchTarget = "com.apple.keylayout.ABC"
 
-	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?", Options: []tools.QuestionOption{{Label: "alice"}}}}}})
+	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Item: tools.QuestionItem{Header: "name", Question: "who?", Options: []tools.QuestionOption{{Label: "alice"}}}}})
 	if m.mode != ModeQuestion {
 		t.Fatalf("mode = %v, want ModeQuestion", m.mode)
 	}

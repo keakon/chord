@@ -164,7 +164,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 ### `role`
 
-查询或切换当前主角色：TUI Shift+Tab 的远程等价。`list` 返回当前角色与有序的主模式角色列表（builder 恒第一、planner 若配置则第二、自定义角色按字母序）；`set` 切换角色并保留会话上下文，与 TUI 循环一致。
+查询或切换当前主角色：TUI Alt+R 的远程等价。`list` 返回当前角色与有序的主模式角色列表（builder 恒第一、planner 若配置则第二、自定义角色按字母序）；`set` 切换角色并保留会话上下文，与 TUI 循环一致。
 
 ```json
 {"type": "role", "action": "list"}
@@ -287,7 +287,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `notification`       | agent 需要用户注意，但等待点不是标准 modal 请求 | `reason`、`message` |
 | `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}`；没有合法目标时 `agents` 为空列表 |
 | `handoff_cancelled`  | 待决 handoff 在 client 决策前被丢弃——更新的回合、会话切换或 `send` 自动关闭接管了它 | `request_id`、`reason`（`superseded`） |
-| `role_change`        | 当前主角色已切换（经 TUI Shift+Tab 或 `role set` 命令） | `role` |
+| `role_change`        | 当前主角色已切换（经 TUI Alt+R 或 `role set` 命令） | `role` |
 | `local_shell_result` | `local_shell` 命令的执行结果                 | `command`、`output`、`failed`、`error` |
 | `agent_started`      | 某个委托的 SubAgent runtime 开始运行（包括 parked task 的按需 rehydrate） | `agent_id`、`previous_agent_id`（rehydrate 时存在）、`task_id`、`agent_type`、`description`、`parent_agent_id`、`parent_task_id` |
 | `agent_notify`       | 某个 agent 向 owner 或指定委派工作流发送非阻塞更新 | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`parent_task_id`、`target_agent_id`、`target_task_id`、`kind`、`subtype`、`message` |

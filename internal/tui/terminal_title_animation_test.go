@@ -196,7 +196,7 @@ func TestQuestionRequestStartsBlinkingBackgroundRequestTitle(t *testing.T) {
 	m.displayState = stateBackground
 	m.terminalTitleBase = "Question pending"
 
-	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "Name", Question: "Who?"}}}})
+	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Item: tools.QuestionItem{Header: "Name", Question: "Who?"}}})
 	if cmd == nil {
 		t.Fatal("question request should schedule follow-up work")
 	}
@@ -284,7 +284,7 @@ func TestQuestionTickTogglesBackgroundRequestBlinkState(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateBackground
 	m.terminalTitleBase = "Question pending"
-	m.question.request = &QuestionRequest{Questions: []tools.QuestionItem{{Header: "Name", Question: "Who?"}}}
+	m.question.request = &QuestionRequest{Item: tools.QuestionItem{Header: "Name", Question: "Who?"}}
 	m.terminalTitleTickRunning = true
 	m.terminalTitleTickGeneration = 7
 
@@ -643,7 +643,7 @@ func TestRequestTitleTakesPriorityOverCompletionTitle(t *testing.T) {
 	m.displayState = stateBackground
 	m.terminalTitleBase = "needs input"
 	m.terminalTitleBackgroundCompletedAgentID = "main"
-	m.question.request = &QuestionRequest{Questions: []tools.QuestionItem{{Header: "Name", Question: "Who?"}}}
+	m.question.request = &QuestionRequest{Item: tools.QuestionItem{Header: "Name", Question: "Who?"}}
 
 	if got := m.currentTitleMode(); got != terminalTitleModeRequest {
 		t.Fatalf("title mode = %v, want request", got)

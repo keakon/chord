@@ -31,9 +31,12 @@ Chord 有两条主要使用路径：
 
 Chord 在后台运行时，当前聚焦的 Agent 从 busy 变为 idle 后，终端标题栏会显示一次性的 `✅` 完成标记。重新聚焦终端会清除该标记；普通的标签页/窗口焦点切换不会重复添加，除非之后又有新的后台工作完成。
 
+状态栏用“Connecting”“Waiting for response”“Waiting for reply”“Receiving reply”标明连接、等待与接收状态，并显示耗时；宽屏还会显示已接收的数据量。提问框保留切换选项时的回答草稿；长问题用 `PgUp` / `PgDown` 或滚轮阅读。模型池选择器支持 `/` 筛选。详见[快捷键速查](keybindings_CN.md)。
+
 常用操作：
 
 - `Esc`：切换到 Normal 模式；main 视图运行中再按 `Esc` 可取消当前 turn
+- `Ctrl+X`：停止当前操作，保留输入草稿与会话；同时退出循环模式
 - `i`：回到 Insert 模式
 - `j` / `k`：在消息卡片之间移动
 - `gg` / `G`：跳到开头 / 结尾
@@ -122,7 +125,7 @@ pill 和 `x` 都只认鼠标，没有鼠标上报的终端点不到。任何宽�
 
 自己动手停的 job 不发 toast。job 结束后 owner 照样会收到完成结果，并写明是你停的；已经活过发起它那一轮的 job 会以 JOB RESULT 卡送达。
 
-`Esc` 和 `Ctrl+C` 都不会停掉后台 job，包括还挂在当前轮里跑的那些：超过前台预算的长命令已经变成 job 了。停它只有一条路：在确认框里确认（点行尾 `x`，或 `ctrl+j` 后用 `j` / `k` 选中再 `Enter`）。job 也不会活过 Chord 进程，退出或切换会话都会终止所有 job。
+`Esc`、`Ctrl+X` 和 `Ctrl+C` 都不会停掉后台 job，包括还挂在当前轮里跑的那些：超过前台预算的长命令已经变成 job 了。停它只有一条路：在确认框里确认（点行尾 `x`，或 `ctrl+j` 后用 `j` / `k` 选中再 `Enter`）。job 也不会活过 Chord 进程，退出或切换会话都会终止所有 job。
 
 取消一轮也不会让这一轮留下的 job 闭嘴。它们稍后完成时，结果照样送达并开出一个新的轮次——Chord 有意为每一次投递唤醒主 agent，而不是丢掉没人要的结果——所以取消之后，每个完成的 job 都会带出一个简短的结果轮次。想让会话保持安静，就把这些 job 停掉，或直接退出 Chord。
 
@@ -255,7 +258,7 @@ worktree 工具和命令都要求 `PATH` 里有 `git`。找不到 git 时，work
 - `/rename <标题>`：设置当前会话的显示标题；单独执行 `/rename` 会清空标题，但不会改变 session ID
 - `/models`：查看模型池状态或切换当前视图对象的模型池（main 视图 = 当前主角色；SubAgent 视图 = 该 agent）
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池
-- `/role`：弹出角色对话框并切换当前主角色（builder、planner 与自定义主模式角色），即 `Shift+Tab` 的对话框形式；`/role <name>` 直接切换不弹对话框；`/role status` 打印当前角色与可选角色列表
+- `/role`：弹出角色对话框并切换当前主角色（builder、planner 与自定义主模式角色），即 `Alt+R` 的对话框形式；`/role <name>` 直接切换不弹对话框；`/role status` 打印当前角色与可选角色列表
 - `/mcp`：打开 MCP server 选择器；`/mcp status` 输出状态；`/mcp enable|disable <server>` 可切换手动 server。运行时切换会在下一次 LLM 请求生效，不影响当前正在进行的请求。
 - `/skill <name> [args]`：显式加载技能，包括被 `disable-model-invocation` 挡在模型目录外的技能；只敲 `/skill` 打开技能选择器。详见 [Skills：自己加载 skill](./customization_CN.md#自己加载-skill)。
 - `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档；agent 正忙且启用 `context.compaction.model_driven` 时，还会要求模型立即 checkpoint，其 checkpoint 可替代运行时结果，详见 [上下文管理：上下文压缩](./context-management_CN.md#上下文压缩compaction)
@@ -374,7 +377,8 @@ Loop 模式还会检测连续重复的相同工具调用。发现卡住后，Cho
 
 Chord 支持 MainAgent 与 SubAgent 协作。
 
-- `Shift+Tab`：Insert 模式下循环切换 main agent 的模式（role，显示在状态栏；仅在 main 视图生效）；Normal 模式下在 main agent 与各 sub agent 之间循环切换当前查看的 agent 视图
+- `Shift+Tab`：输入模式与普通模式中都在主 Agent 与各子 Agent 之间切换查看对象
+- `Alt+R`：在主 Agent 视图循环切换角色，状态栏显示当前角色
 
 在 SubAgent 视图中可查看该 agent 的上下文与输出，也可提交新输入。completed、failed、cancelled 只描述上一次执行结果，不会让该视图变成只读。
 
@@ -413,7 +417,7 @@ Chord 支持 MainAgent 与 SubAgent 协作。
 - 可在转录区内用鼠标拖选 TUI 里的文本
 - `yy` 复制当前聚焦的消息卡片；工具卡片会按 Markdown 复制，包含 `# Tool call`、`## Arguments`、`## Result`、`## Diff` 等段落（`edit` 卡片会用 `## old_string` / `## new_string` 展示替换文本，而不是 diff；只有启用时才增加 `## replace_all`）。Done 的拒绝理由会单独放在 `## Rejection reason` 段落中。
 - `Cmd+C`：在会把这个按键转发给 Chord 的 macOS 终端中，复制当前转录区选中的文本；若焦点在权限确认弹窗的输入框，则复制该输入框内容
-- `Ctrl+C`：仍用于取消/退出，不用于复制转录区文本
+- `Ctrl+C`：用于双击退出；弹窗中相当于 `Esc`，不用于复制转录区文本
 
 ## Headless 模式
 

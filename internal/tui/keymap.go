@@ -55,13 +55,10 @@ type KeyMap struct {
 	SearchNext  []string // jump to next match
 	SearchPrev  []string // jump to previous match
 
-	// Multi-agent switching. Both default to Shift+Tab and are told apart by
-	// the input mode: Insert cycles the role (a role change is normally
-	// followed by typing), Normal cycles the focused view (a view change is
-	// normally followed by scrolling). Only the action belonging to the
-	// current mode is consulted, so the shared default is not a conflict.
-	SwitchAgent []string // cycle focused agent view (Shift+Tab, Normal mode)
-	SwitchRole  []string // cycle main agent role (Shift+Tab, Insert mode, only when focused on main)
+	// Agent view and role actions have the same meaning in Insert and Normal modes.
+	SwitchAgent []string // cycle the focused agent view
+	SwitchRole  []string // cycle the main agent role while viewing main
+	Stop        []string // stop the current operation without closing the session
 
 	// Both Insert and Normal modes
 	SwitchModel []string // open model pool selector
@@ -130,9 +127,10 @@ func DefaultKeyMap() KeyMap {
 		SearchNext:  []string{"n"},
 		SearchPrev:  []string{"N"},
 
-		// Normal mode – multi-agent
+		// Both modes – agent views, roles and stopping
 		SwitchAgent: []string{"shift+tab"},
-		SwitchRole:  []string{"shift+tab"},
+		SwitchRole:  []string{"alt+r"},
+		Stop:        []string{"ctrl+x"},
 
 		// Both Insert and Normal modes
 		SwitchModel: []string{"ctrl+p"},

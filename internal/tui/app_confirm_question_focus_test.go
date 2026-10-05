@@ -104,8 +104,8 @@ func TestQuestionRequestSwitchesFocusToAskingSubAgent(t *testing.T) {
 	m.handleQuestionRequest(questionDialog{
 		requestID: "q-1",
 		request: QuestionRequest{
-			Questions: []tools.QuestionItem{{Header: "pick", Question: "which one?", Options: []tools.QuestionOption{{Label: "one"}, {Label: "two"}}}},
-			AgentID:   "agent-2",
+			Item:    tools.QuestionItem{Header: "pick", Question: "which one?", Options: []tools.QuestionOption{{Label: "one"}, {Label: "two"}}},
+			AgentID: "agent-2",
 		},
 	})
 	if m.focusedAgentID != "agent-2" {
@@ -127,7 +127,7 @@ func TestQueuedHandoffWithoutTargetsIsSkipped(t *testing.T) {
 		agentID:   identity.MainAgentID,
 	})
 	m.handleQuestionRequest(questionDialog{request: QuestionRequest{
-		Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
+		Item: tools.QuestionItem{Header: "pick", Question: "which?"},
 	}})
 	if len(m.pendingDialogs) != 2 {
 		t.Fatalf("pendingDialogs = %d, want 2", len(m.pendingDialogs))
@@ -272,8 +272,8 @@ func TestDialogRequestsQueueAndPresentInArrivalOrder(t *testing.T) {
 	m.handleQuestionRequest(questionDialog{
 		requestID: "req-question",
 		request: QuestionRequest{
-			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?", Options: []tools.QuestionOption{{Label: "one"}}}},
-			AgentID:   "agent-2",
+			Item:    tools.QuestionItem{Header: "pick", Question: "which?", Options: []tools.QuestionOption{{Label: "one"}}},
+			AgentID: "agent-2",
 		},
 	})
 	if m.question.request != nil {
@@ -391,9 +391,9 @@ func TestQueuedQuestionUsesAbsoluteDeadline(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	m.handleQuestionRequest(questionDialog{
 		request: QuestionRequest{
-			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
-			Deadline:  deadline,
-			AgentID:   "agent-2",
+			Item:     tools.QuestionItem{Header: "pick", Question: "which?"},
+			Deadline: deadline,
+			AgentID:  "agent-2",
 		},
 	})
 	m.pendingDialogs[0].arrivedAt = time.Now().Add(-2 * time.Second)
@@ -416,9 +416,9 @@ func TestQueuedQuestionWithElapsedDeadlineStillPresented(t *testing.T) {
 	deadline := time.Now().Add(-time.Second)
 	m.handleQuestionRequest(questionDialog{
 		request: QuestionRequest{
-			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
-			Deadline:  deadline,
-			AgentID:   "agent-2",
+			Item:     tools.QuestionItem{Header: "pick", Question: "which?"},
+			Deadline: deadline,
+			AgentID:  "agent-2",
 		},
 	})
 
@@ -441,8 +441,8 @@ func TestSessionSwitchStartedClearsActiveAndQueuedDialogs(t *testing.T) {
 
 	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
 	m.handleQuestionRequest(questionDialog{request: QuestionRequest{
-		Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
-		AgentID:   "agent-2",
+		Item:    tools.QuestionItem{Header: "pick", Question: "which?"},
+		AgentID: "agent-2",
 	}})
 	if !m.dialogActive() || len(m.pendingDialogs) != 1 {
 		t.Fatalf("setup: active=%v queued=%d, want an active confirm and one queued question", m.dialogActive(), len(m.pendingDialogs))
@@ -534,8 +534,8 @@ func TestQuestionResolvedEventClosesMatchingActiveQuestion(t *testing.T) {
 	m.handleQuestionRequest(questionDialog{
 		requestID: "q-active",
 		request: QuestionRequest{
-			Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}},
-			AgentID:   "agent-1",
+			Item:    tools.QuestionItem{Header: "pick", Question: "which?"},
+			AgentID: "agent-1",
 		},
 	})
 	if m.question.request == nil || m.question.requestID != "q-active" {
@@ -571,7 +571,7 @@ func TestQuestionResolvedEventDropsMatchingQueuedQuestion(t *testing.T) {
 	m.handleConfirmRequest(confirmRequestMsg{request: ConfirmRequest{ToolName: tools.NameEdit}})
 	m.handleQuestionRequest(questionDialog{
 		requestID: "q-queued",
-		request:   QuestionRequest{Questions: []tools.QuestionItem{{Header: "pick", Question: "which?"}}},
+		request:   QuestionRequest{Item: tools.QuestionItem{Header: "pick", Question: "which?"}},
 	})
 	if len(m.pendingDialogs) != 1 || m.pendingDialogs[0].question == nil {
 		t.Fatalf("setup: pendingDialogs = %+v, want one queued question", m.pendingDialogs)

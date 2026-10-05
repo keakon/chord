@@ -44,16 +44,16 @@ func TestQuestionTextOnlySupportsMultilineSubmit(t *testing.T) {
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}},
+		request:   &QuestionRequest{Item: tools.QuestionItem{Header: "log", Question: "paste log"}},
 		requestID: "req-log",
 		input:     newQuestionTextarea(m.width),
 	}
 	m.question.input.Focus()
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}), m.question.request.Questions[0])
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}), m.question.request.Questions[0])
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "b", Code: 'b'}), m.question.request.Questions[0])
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Questions[0])
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}), m.question.request.Item)
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}), m.question.request.Item)
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "b", Code: 'b'}), m.question.request.Item)
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item)
 
 	if len(backend.calls) != 1 {
 		t.Fatalf("resolve calls = %d, want 1", len(backend.calls))
@@ -73,14 +73,14 @@ func TestQuestionSubmitPreservesLeadingWhitespace(t *testing.T) {
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}},
+		request:   &QuestionRequest{Item: tools.QuestionItem{Header: "log", Question: "paste log"}},
 		requestID: "req-log",
 		input:     newQuestionTextarea(m.width),
 	}
 	m.question.input.Focus()
 	m.question.input.SetValue("  foo\n bar")
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Questions[0])
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item)
 
 	if len(backend.calls) != 1 || len(backend.calls[0].answers) != 1 {
 		t.Fatalf("resolve calls = %+v, want one answer", backend.calls)
@@ -96,18 +96,18 @@ func TestQuestionCustomSupportsCtrlJNewline(t *testing.T) {
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{{
+		request: &QuestionRequest{Item: tools.QuestionItem{
 			Header:   "top",
 			Question: "paste output",
 			Options:  []tools.QuestionOption{{Label: "skip"}},
-		}}},
+		}},
 		requestID: "req-top",
 		custom:    true,
 		input:     newQuestionTextarea(m.width),
 	}
 	m.question.input.Focus()
 
-	q := m.question.request.Questions[0]
+	q := m.question.request.Item
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "x", Code: 'x'}), q)
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModCtrl}), q)
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}), q)
@@ -130,14 +130,14 @@ func TestQuestionSubmitSurfacesRefusedResponse(t *testing.T) {
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "target", Question: "which?"}}},
+		request:   &QuestionRequest{Item: tools.QuestionItem{Header: "target", Question: "which?"}},
 		requestID: "req-late",
 		input:     newQuestionTextarea(m.width),
 	}
 	m.question.input.Focus()
 	m.question.input.SetValue("late")
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Questions[0])
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item)
 
 	if len(backend.calls) != 1 {
 		t.Fatalf("resolve calls = %d, want 1", len(backend.calls))
@@ -159,14 +159,14 @@ func TestQuestionSubmitReportsTheWinningTerminalReason(t *testing.T) {
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "target", Question: "which?"}}},
+		request:   &QuestionRequest{Item: tools.QuestionItem{Header: "target", Question: "which?"}},
 		requestID: "req-expired",
 		input:     newQuestionTextarea(m.width),
 	}
 	m.question.input.Focus()
 	m.question.input.SetValue("late")
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Questions[0])
+	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item)
 
 	if m.activeToast == nil {
 		t.Fatal("a response that lost its race with the deadline must surface a toast")
@@ -176,23 +176,23 @@ func TestQuestionSubmitReportsTheWinningTerminalReason(t *testing.T) {
 	}
 }
 
-func TestQuestionTextInputEscReturnsToOptionsAndClearsDraft(t *testing.T) {
+func TestQuestionTextInputEscReturnsToOptionsAndKeepsDraft(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{{
+		request: &QuestionRequest{Item: tools.QuestionItem{
 			Header:   "top",
 			Question: "paste output",
 			Options:  []tools.QuestionOption{{Label: "skip"}},
-		}}},
+		}},
 		custom: true,
 		input:  newQuestionTextarea(m.width),
 	}
 	m.question.input.Focus()
 	m.question.input.SetValue("draft")
 
-	q := m.question.request.Questions[0]
+	q := m.question.request.Item
 	cmd := m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}), q)
 	if cmd != nil {
 		t.Fatalf("esc with options should not return cmd, got %#v", cmd)
@@ -200,8 +200,8 @@ func TestQuestionTextInputEscReturnsToOptionsAndClearsDraft(t *testing.T) {
 	if m.question.custom {
 		t.Fatal("custom should be false after esc back to options")
 	}
-	if got := m.question.input.Value(); got != "" {
-		t.Fatalf("input value = %q, want empty after esc", got)
+	if got := m.question.input.Value(); got != "draft" {
+		t.Fatalf("input value = %q, want draft after esc", got)
 	}
 }
 
@@ -271,7 +271,7 @@ func TestQuestionTextareaShrinksToContentHeight(t *testing.T) {
 func TestQuestionRequestTextOnlyReturnsFocusCmd(t *testing.T) {
 	m := NewModel(nil)
 
-	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}}})
+	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Item: tools.QuestionItem{Header: "log", Question: "paste log"}}})
 	if cmd == nil {
 		t.Fatal("a text-only question request should return a focus cmd")
 	}
@@ -280,36 +280,16 @@ func TestQuestionRequestTextOnlyReturnsFocusCmd(t *testing.T) {
 	}
 }
 
-func TestQuestionAdvanceToTextOnlyReturnsFocusCmd(t *testing.T) {
-	m := NewModel(nil)
-	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{
-			{Header: "pick", Question: "choose", Options: []tools.QuestionOption{{Label: "one"}}},
-			{Header: "detail", Question: "explain"},
-		}},
-		selected: map[int]bool{0: true},
-		input:    newQuestionTextarea(80),
-	}
-
-	cmd := m.submitCurrentQuestion(m.question.request.Questions[0])
-	if cmd == nil {
-		t.Fatal("advance to text-only question should return focus cmd")
-	}
-	if !m.question.input.Focused() {
-		t.Fatal("next text-only question input should be focused")
-	}
-}
-
 func TestQuestionTextInputSupportsUpDownNavigation(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{{Header: "log", Question: "paste log"}}},
+		request: &QuestionRequest{Item: tools.QuestionItem{Header: "log", Question: "paste log"}},
 		input:   newQuestionTextarea(m.width),
 	}
 	m.question.input.Focus()
-	q := m.question.request.Questions[0]
+	q := m.question.request.Item
 
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}), q)
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}), q)
@@ -333,7 +313,7 @@ func TestResolveQuestionRestoresInsertModeWithTextareaState(t *testing.T) {
 	m := NewModel(loopBusyAgentStub{})
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request:   &QuestionRequest{Questions: []tools.QuestionItem{{Header: "name", Question: "who?"}}},
+		request:   &QuestionRequest{Item: tools.QuestionItem{Header: "name", Question: "who?"}},
 		requestID: "req-ime",
 		prevMode:  ModeInsert,
 		input:     newQuestionTextarea(80),
@@ -355,14 +335,14 @@ func TestQuestionDialogWrapsCurrentOptionDescription(t *testing.T) {
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{{
+		request: &QuestionRequest{Item: tools.QuestionItem{
 			Header:   "Direction",
 			Question: "Choose one",
 			Options: []tools.QuestionOption{
 				{Label: "Option A", Description: "Show the full setup instructions in the dialog so the content wraps across multiple lines instead of being shortened with an ellipsis."},
 				{Label: "Option B", Description: "Keep the current setup."},
 			},
-		}}},
+		}},
 		cursor: 0,
 	}
 
@@ -383,14 +363,14 @@ func TestQuestionDialogQuickSelectHintMatchesOptionCount(t *testing.T) {
 	m.width = 80
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{{
+		request: &QuestionRequest{Item: tools.QuestionItem{
 			Header:   "Direction",
 			Question: "Choose one",
 			Options: []tools.QuestionOption{
 				{Label: "Option A", Description: "desc1"},
 				{Label: "Option B", Description: "desc2"},
 			},
-		}}},
+		}},
 	}
 
 	plain := stripANSI(m.renderQuestionDialog())
@@ -414,10 +394,10 @@ func TestQuestionDialogCustomInputPreservesDialogBackground(t *testing.T) {
 	ta := newQuestionTextarea(80)
 	ta.SetValue("alpha query\nbeta view\n")
 	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{{
+		request: &QuestionRequest{Item: tools.QuestionItem{
 			Header:   "Direction",
 			Question: "Choose one",
-		}}},
+		}},
 		input:  ta,
 		custom: true,
 	}

@@ -82,7 +82,10 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding(km.Directory, "open message directory"),
 		helpBinding(km.UsageStats, "open usage stats"),
 		helpBinding(km.ErrorPanel, "open error panel"),
+		helpBinding(km.BackgroundJobs, "open background jobs"),
 		helpBinding(km.SwitchAgent, "switch focused agent (cycle)"),
+		helpBinding(km.SwitchRole, "switch main agent role (main view only)"),
+		helpBinding(km.Stop, "stop active turn and running subagents"),
 		helpBinding(km.SwitchModel, "open model pool selector"),
 		helpBinding(km.ServiceTier, "switch service tier for subsequent model requests"),
 		helpBinding(km.Yolo, "toggle YOLO permission bypass"),
@@ -105,14 +108,9 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding(km.InsertUndo, "undo composer edit"),
 		helpBinding(km.InsertPageUp, "page transcript up"),
 		helpBinding(km.InsertPageDown, "page transcript down"),
-		helpBinding(km.SwitchRole, "switch main agent role (cycle; switches focused agent instead on a SubAgent view)"),
-	}
-	// Insert mode also honours switch_agent, but under the default keymap it
-	// shares a key with switch_role and the row above already describes what
-	// that key does. List it only once a keymap splits the two, which is
-	// exactly when Insert mode gains a distinct view-cycling key.
-	if !slices.Equal(km.SwitchRole, km.SwitchAgent) {
-		insertBindings = append(insertBindings, helpBinding(km.SwitchAgent, "switch focused agent (cycle)"))
+		helpBinding(km.SwitchRole, "switch main agent role (main view only)"),
+		helpBinding(km.SwitchAgent, "switch focused agent (cycle)"),
+		helpBinding(km.Stop, "stop active turn and running subagents"),
 	}
 	insertBindings = append(insertBindings,
 		helpBinding(km.SwitchModel, "open model pool selector"),
@@ -147,7 +145,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 				helpBinding([]string{"r"}, "deny with reason"),
 				helpBinding([]string{"e"}, "edit arguments"),
 				helpBinding([]string{"m"}, "add remembered rule"),
-				helpBinding([]string{"tab"}, "toggle details"),
+				helpBinding([]string{"v"}, "view arguments or completion report"),
 			},
 		},
 		{
@@ -159,7 +157,8 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 				helpBinding([]string{"tab"}, "toggle custom input"),
 				helpBinding([]string{"shift+enter / ctrl+j"}, "insert newline"),
 				helpBinding([]string{"enter"}, "confirm"),
-				helpBinding([]string{"esc"}, "cancel"),
+				helpBinding([]string{"esc"}, "back to options or decline"),
+				helpBinding([]string{"pgup / pgdown"}, "scroll question content"),
 			},
 		},
 		{
@@ -178,8 +177,8 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		{
 			Title: "Pool Selector",
 			Bindings: []HelpBinding{
-				helpBinding([]string{"type text"}, "filter pool"),
-				helpBinding([]string{"backspace"}, "delete filter"),
+				helpBinding([]string{"/"}, "edit pool filter (enter switches the highlighted pool; esc clears it)"),
+				helpBinding([]string{"backspace"}, "delete a character while editing the filter"),
 				helpBinding([]string{"j / down"}, "move down"),
 				helpBinding([]string{"k / up"}, "move up"),
 				helpBinding([]string{"g"}, "jump to top"),

@@ -638,7 +638,7 @@ func TestBackgroundIdleSweepRecognizesPendingDialogAsBusy(t *testing.T) {
 	}
 
 	m.confirm.request = nil
-	m.question.request = &QuestionRequest{Questions: []tools.QuestionItem{{Question: "continue?"}}}
+	m.question.request = &QuestionRequest{Item: tools.QuestionItem{Question: "continue?"}}
 	if cmd := m.updateBackgroundIdleSweepState(); cmd != nil {
 		t.Fatal("pending question should keep background from becoming idle")
 	}

@@ -751,49 +751,15 @@ func TestAgentNotifyDoesNotCreateUnpersistedCard(t *testing.T) {
 	}
 }
 
-// Shift+Tab switches the role in Insert mode and the view in Normal mode. Tab
-// no longer switches either: it used to change permissions, the prompt surface
-// and possibly the model from the terminal's completion key, mid-typing.
-func TestShiftTabSwitchesRoleInInsertModeOnly(t *testing.T) {
-	newModel := func() (Model, *sessionControlAgent) {
-		backend := &sessionControlAgent{
-			events:         make(chan agent.AgentEvent, 1),
-			currentRole:    "builder",
-			availableRoles: []string{"builder", "planner"},
+func TestRoleShortcutWorksInInsertAndNormalModes(t *testing.T) {
+	for _, mode := range []Mode{ModeInsert, ModeNormal} {
+		backend := &sessionControlAgent{currentRole: "builder", availableRoles: []string{"builder", "planner"}}
+		m := NewModelWithSize(backend, 100, 24)
+		m.mode = mode
+		m.handleModeKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModAlt}))
+		if backend.currentRole != "planner" {
+			t.Fatalf("role in mode %v = %s", mode, backend.currentRole)
 		}
-		return NewModelWithSize(backend, 100, 24), backend
-	}
-	shiftTab := tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift})
-	plainTab := tea.KeyPressMsg(tea.Key{Code: tea.KeyTab})
-
-	m, backend := newModel()
-	m.mode = ModeInsert
-	if cmd := m.handleInsertKey(shiftTab); cmd == nil {
-		t.Fatal("Shift+Tab in Insert mode should return the role-switch toast command")
-	}
-	if got := backend.currentRole; got != "planner" {
-		t.Fatalf("Insert mode Shift+Tab: currentRole = %q, want planner", got)
-	}
-
-	m, backend = newModel()
-	m.mode = ModeInsert
-	_ = m.handleInsertKey(plainTab)
-	if got := backend.currentRole; got != "builder" {
-		t.Fatalf("Insert mode Tab must not switch role, currentRole = %q", got)
-	}
-
-	m, backend = newModel()
-	m.mode = ModeNormal
-	_ = m.handleNormalKey(shiftTab)
-	if got := backend.currentRole; got != "builder" {
-		t.Fatalf("Normal mode Shift+Tab must switch the view, not the role; currentRole = %q", got)
-	}
-
-	m, backend = newModel()
-	m.mode = ModeNormal
-	_ = m.handleNormalKey(plainTab)
-	if got := backend.currentRole; got != "builder" {
-		t.Fatalf("Normal mode Tab must not switch role, currentRole = %q", got)
 	}
 }
 
@@ -833,11 +799,6 @@ func TestInsertTabStillSwitchesRoleWhenRebound(t *testing.T) {
 	}
 }
 
-// The documented escape hatch for the Tab → Shift+Tab move is
-// keymap.switch_role: ["tab"], and it must restore *both* halves of the old
-// behaviour: Tab switches the role and Shift+Tab goes back to cycling the agent
-// view in Insert mode, exactly as it does in Normal mode. Insert mode only
-// consulted SwitchRole, so the rebind turned Shift+Tab into a dead key there.
 func TestInsertShiftTabCyclesAgentViewWhenSwitchRoleIsRebound(t *testing.T) {
 	backend := &sessionControlAgent{
 		events:         make(chan agent.AgentEvent, 1),
@@ -863,10 +824,7 @@ func TestInsertShiftTabCyclesAgentViewWhenSwitchRoleIsRebound(t *testing.T) {
 	}
 }
 
-// The default keymap binds switch_role and switch_agent to the same key, and
-// the role must keep winning there: adding the SwitchAgent branch must not
-// reorder the default. Shift+Tab on the main view still cycles the role.
-func TestInsertShiftTabStillSwitchesRoleUnderTheDefaultKeymap(t *testing.T) {
+func TestInsertShiftTabCyclesViewUnderTheDefaultKeymap(t *testing.T) {
 	backend := &sessionControlAgent{
 		events:         make(chan agent.AgentEvent, 1),
 		currentRole:    "builder",
@@ -882,11 +840,11 @@ func TestInsertShiftTabStillSwitchesRoleUnderTheDefaultKeymap(t *testing.T) {
 	m.mode = ModeInsert
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}))
-	if got := backend.currentRole; got != "planner" {
-		t.Fatalf("default Shift+Tab should switch the role, currentRole = %q", got)
+	if got := backend.currentRole; got != "builder" {
+		t.Fatalf("default Shift+Tab must preserve the role, currentRole = %q", got)
 	}
-	if got := m.focusedAgentID; got != "" {
-		t.Fatalf("default Shift+Tab must not cycle the agent view, focusedAgentID = %q", got)
+	if got := m.focusedAgentID; got != "agent-1" {
+		t.Fatalf("default Shift+Tab should cycle the agent view, focusedAgentID = %q", got)
 	}
 }
 

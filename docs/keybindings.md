@@ -1,6 +1,6 @@
 # Keybindings
 
-This page is the complete reference for Chord's TUI key bindings. Every binding listed here can be remapped via the `keymap:` section in `config.yaml`.
+This page lists Chord's TUI key bindings. Insert and Normal mode actions can be remapped via `keymap:` in `config.yaml`; dialogs use the keys shown in their action hints.
 
 ## Modes
 
@@ -28,7 +28,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | `Ctrl+U`           | Clear the input box and pending attachments                                                    |
 | `Ctrl+Z` | Undo the last composer edit, including text, inline pastes, and attachments |
 | `PgUp` / `PgDown`  | Page the transcript up / down without leaving Insert mode                                      |
-| `Shift+Tab`        | Cycle the main agent role shown in the status bar. A switch is announced with a toast (`role: planner → builder`) because it rebuilds permissions, invalidates the cached prompt prefix, and may select the role's own model. On a SubAgent view, where a role switch does not apply, it cycles the focused view instead |
+| `Shift+Tab` | Cycle the focused agent view without changing the role. |
 | `Tab`              | Complete the visible slash-command or `@`-mention suggestion; otherwise does nothing            |
 
 Undo keeps at most 64 edits within an 8 MiB budget, including attachment bytes. Consecutive typing within 750 ms is merged; cursor movement, paste, completion, and deletion split transactions. An oversized snapshot clears undo history; large attachments can therefore also prevent undoing ordinary text edits. Sending, switching session or agent, and history navigation end the undo history. Restoring clears the selection. Remap the shortcut with `insert_undo`.
@@ -39,18 +39,12 @@ Undo keeps at most 64 edits within an 8 MiB budget, including attachment bytes. 
 | ------------------ | ----------------------------------------------- |
 | `i`                | Return to Insert mode                           |
 | `q`                | Press twice within ~2s to quit                  |
-| `Ctrl+C`           | Press twice within ~2s to quit; inside any overlay or dialog it closes the overlay instead (like `Esc`) |
+| `Ctrl+C`           | Press twice within ~2s to quit; inside an overlay or dialog it performs the same back, close, or decline action as `Esc` |
 | `?`                | Toggle the in-app help / cheatsheet overlay     |
 | `Esc`              | (when agent is running) Cancel the current turn |
-| `Shift+Tab`        | Cycle the focused agent view. Main is always available; stopped-but-incomplete SubAgents remain switchable |
+| `Shift+Tab` | Cycle the focused agent view without changing the role. |
 
-`Shift+Tab` is deliberately the same key in both modes, and the mode decides
-what it does: a role change is normally followed by typing a message, so it
-belongs in Insert mode, while a view change is normally followed by scrolling
-and reading, so it belongs in Normal mode. Because only the action belonging to
-the current mode is consulted, `switch_role` and `switch_agent` sharing a
-default binding is not a conflict. Press `?` to see each mode's effective
-bindings separately.
+`Shift+Tab` cycles agent views in both Insert and Normal modes. `Alt+R` changes the role in the main agent view. `Ctrl+X` stops the active turn and running subagents, leaves loop mode, and keeps the unsent draft.
 
 ### Normal mode: scrolling
 
@@ -102,6 +96,8 @@ Search also covers older regions of lazily loaded large sessions. Chord loads a 
 
 | Key          | Action                                                                                                    |
 | ------------ | --------------------------------------------------------------------------------------------------------- |
+| `Alt+R` | Cycle roles in the main agent view; a worker view prompts you to return to main |
+| `Ctrl+X` | Stop the current operation; also leave loop mode, keeping the draft and session |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
 | `Ctrl+R`     | Cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model; `/tier` slash completion predicts the same next tier and is hidden when there is no actual switch target |
 | `Ctrl+Y`     | Toggle YOLO mode; ordinary tools skip their permission checks and confirmations; handoff, delegate, cancel, done, and compact_context keep following their configured rules                 |
@@ -136,6 +132,14 @@ Done confirmation dialogs and Handoff plan selectors can open a read-only Markdo
 | `yy`                     | Copy the full raw Markdown content                                        |
 
 Handoff plan views include the plan path at the top so it can be selected and copied with the same controls.
+
+### Questions and selectors
+
+Press `Tab` in a question dialog to enter a custom answer. Returning to the options with `Tab` or `Esc` keeps your draft. Number keys immediately submit a choice in single-select questions; in multi-select questions, numbers or Space toggle choices and `Enter` submits the selection. `Esc` in the options declines the question; a text-only question can also be declined directly with `Esc`.
+
+Read long questions with `PgUp` / `PgDown` or the mouse wheel. Moving the option cursor brings that option into view. The editor and action hints stay at the bottom.
+
+In the model-pool selector, press `/` to edit a filter, then `Enter` to switch to the highlighted pool. While editing a filter, `Esc` clears it and returns to the list; in the list, `Esc` closes the selector. In the skill selector, `Enter` fills the composer with a command. The skill loads only after you add any arguments and send it.
 
 ## Customizing key bindings
 
@@ -213,8 +217,10 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `search_start`             | `["/"]`                          |
 | `search_next`              | `["n"]`                          |
 | `search_prev`              | `["N"]`                          |
-| `switch_agent`             | `["shift+tab"]` (Normal mode only) |
-| `switch_role`              | `["shift+tab"]` (Insert mode only) |
+| `switch_agent` | `["shift+tab"]` |
+| `switch_role` | `["alt+r"]` |
+| `stop` | `["ctrl+x"]` |
+| `background_jobs` | `["ctrl+j"]` |
 | `switch_model`             | `["ctrl+p"]`                     |
 | `service_tier`             | `["ctrl+r"]`                     |
 | `yolo`                     | `["ctrl+y"]`                     |

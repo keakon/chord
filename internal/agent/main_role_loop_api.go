@@ -190,7 +190,7 @@ func (a *MainAgent) RoleStatusText() string {
 // switchRoleByName switches to the named role with user-facing feedback.
 // Switching to the already-active role is a no-op with an info toast; failures
 // (unknown name, SubAgent-only config) surface as an error toast. This mirrors
-// the TUI Shift+Tab handler while remaining callable from headless send.
+// the TUI Alt+R handler while remaining callable from headless send.
 func (a *MainAgent) switchRoleByName(name string) {
 	from := a.CurrentRole()
 	if name == from {

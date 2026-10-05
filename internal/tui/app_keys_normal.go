@@ -11,6 +11,12 @@ import (
 
 func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+	if keyMatches(key, m.keyMap.Stop) {
+		return m.stopCurrentOperation()
+	}
+	if keyMatches(key, m.keyMap.SwitchRole) {
+		return m.switchMainRoleFromView()
+	}
 	m.maybeClearSearchSessionForNormalKey(key)
 	// Any key other than Quit clears the "press again to quit" hint.
 	if !keyMatches(key, m.keyMap.Quit) {

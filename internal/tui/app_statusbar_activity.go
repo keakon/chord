@@ -275,7 +275,6 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 	}
 
 	elapsedText := ""
-	prog, ok := m.requestProgress[agentID]
 	hasRequestState := false
 	if act, okAct := m.activities[agentID]; okAct {
 		hasRequestState = act.Type == agent.ActivityConnecting || act.Type == agent.ActivityWaitingHeaders || act.Type == agent.ActivityWaitingToken || act.Type == agent.ActivityStreaming
@@ -293,17 +292,26 @@ func (m Model) buildStatusBarActivityDisplayAt(a agent.AgentActivityEvent, now t
 	elapsedText = m.statusBarElapsedText(agentID)
 	if hasRequestState {
 		display.Icon = "↓"
-		bytes := int64(0)
-		events := int64(0)
-		if ok {
-			bytes = max(prog.VisibleBytes-prog.BaseBytes, 0)
-			events = max(prog.VisibleEvents-prog.BaseEvents, 0)
+		label := "Waiting for response"
+		switch a.Type {
+		case agent.ActivityConnecting:
+			display.Icon = "⇋"
+			label = "Connecting"
+		case agent.ActivityWaitingToken:
+			label = "Waiting for reply"
+		case agent.ActivityStreaming:
+			label = "Receiving reply"
 		}
-		display.Text = formatStatusBarBytes(bytes)
-		if e := formatStatusBarEvents(events, false); e != "" {
-			display.Text += " · " + e
+		display.Text = label + " · " + elapsedText
+		display.CompactText = label + " · " + elapsedText
+		display.NarrowText = label
+		if a.Type == agent.ActivityStreaming {
+			if progress, ok := m.requestProgress[agentID]; ok {
+				if bytes := max(progress.VisibleBytes-progress.BaseBytes, 0); bytes > 0 {
+					display.Text = label + " · " + formatStatusBarBytes(bytes) + " · " + elapsedText
+				}
+			}
 		}
-		display.Text += " · " + elapsedText
 		return display
 	}
 

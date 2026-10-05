@@ -379,10 +379,19 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 			m.handoffSelect.denyReasonInput, cmd = m.handoffSelect.denyReasonInput.Update(msg)
 			return cmd
 		}
+	case ModeModelSelect:
+		if pm, ok := msg.(tea.PasteMsg); ok && m.modelSelect.filterFocused {
+			m.modelSelect.filter += sanitizeToolDisplayText(strings.Join(strings.Fields(pm.Content), " "))
+			m.rebuildModelSelectFilter()
+		}
 	case ModeQuestion:
 		if m.question.custom || (m.question.request != nil &&
-			m.question.currentQ < len(m.question.request.Questions) &&
-			len(m.question.request.Questions[m.question.currentQ].Options) == 0) {
+			len(m.question.request.Item.Options) == 0) {
+			if pm, ok := msg.(tea.PasteMsg); ok {
+				m.question.input.InsertString(pm.Content)
+				m.recalcViewportSize()
+				return nil
+			}
 			var cmd tea.Cmd
 			m.question.input, cmd = m.question.input.Update(msg)
 			return cmd

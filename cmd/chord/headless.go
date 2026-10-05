@@ -1338,7 +1338,7 @@ func emitHeadlessRoleResponse(out *stdoutWriter, ok bool, message string, role s
 }
 
 // handleHeadlessRoleCommand serves the role list/set actions. A set mirrors the
-// TUI Shift+Tab no-op protection (refusing the current role) and adds the
+// TUI Alt+R no-op protection (refusing the current role) and adds the
 // headless-specific pending-handoff guard; target existence/availability is
 // validated by the backend's SwitchRole so the "unknown role" and "not
 // available (SubAgent-only)" answers live next to switchRole instead of being

@@ -10,15 +10,14 @@ func benchmarkModelForQuestionDialog() Model {
 	m := benchmarkModelForView()
 	m.mode = ModeQuestion
 	m.question = questionState{
-		request: &QuestionRequest{Questions: []tools.QuestionItem{{
+		request: &QuestionRequest{Item: tools.QuestionItem{
 			Header:   "Deploy?",
 			Question: "Choose an action before continuing.",
 			Options: []tools.QuestionOption{{Label: "Ship", Description: "Deploy the current build."}, {
 				Label:       "Wait",
 				Description: "Keep gathering more evidence before deployment.",
 			}, {Label: "Abort", Description: "Stop and revisit the plan."}},
-		}}},
-		currentQ: 0,
+		}},
 		cursor:   1,
 		selected: map[int]bool{},
 		custom:   false,

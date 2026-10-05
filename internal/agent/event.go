@@ -912,7 +912,7 @@ func (RoleChangedEvent) agentEvent() {}
 
 // RoleSelectEvent signals the TUI to open the main-role selector overlay.
 // Emitted in response to /role with no arguments so the user can pick the
-// active main-mode role from a dialog instead of cycling with Shift+Tab.
+// active main-mode role from a dialog instead of cycling with Alt+R.
 type RoleSelectEvent struct{}
 
 func (RoleSelectEvent) agentEvent() {}

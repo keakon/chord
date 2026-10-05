@@ -14,7 +14,15 @@ func (m *Model) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
 	if m.question.request == nil {
 		return nil
 	}
-	q := m.question.request.Questions[m.question.currentQ]
+	if msg.String() == "pgup" || msg.String() == "pgdown" {
+		delta := max(m.height/3, 1)
+		if msg.String() == "pgup" {
+			delta = -delta
+		}
+		m.scrollQuestion(delta)
+		return nil
+	}
+	q := m.question.request.Item
 
 	// If custom text input is focused, route most keys to the textarea.
 	if m.question.custom || len(q.Options) == 0 {
@@ -26,6 +34,10 @@ func (m *Model) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
 
 // handleQuestionOptionKey handles keys while navigating the option list.
 func (m *Model) handleQuestionOptionKey(msg tea.KeyMsg, q tools.QuestionItem) tea.Cmd {
+	key := msg.String()
+	if key == "j" || key == "k" || key == "up" || key == "down" || key == "space" || (len(key) == 1 && key >= "1" && key <= "9") {
+		m.question.followCursor = true
+	}
 	optCount := len(q.Options) + 1 // +1 for the "custom" virtual entry
 	if msg.Key().Code == tea.KeySpace {
 		idx := m.question.cursor
@@ -121,19 +133,14 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 		if strings.TrimSpace(text) == "" {
 			return nil // ignore empty submit
 		}
-		answer := tools.QuestionAnswer{
-			Header:   q.Header,
-			Selected: []string{text},
-		}
-		return m.advanceQuestion(answer)
+		return m.resolveQuestion([]string{text}, false)
 
 	case msg.Key().Code == tea.KeyEscape:
 		if len(q.Options) > 0 {
 			// Escape goes back to option selection.
 			m.question.custom = false
+			m.question.followCursor = true
 			m.question.input.Blur()
-			m.question.input.SetValue("")
-			m.question.input.MoveToBegin()
 			m.recalcViewportSize()
 			return nil
 		}
@@ -144,9 +151,8 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 		if len(q.Options) > 0 {
 			// Tab goes back to option selection.
 			m.question.custom = false
+			m.question.followCursor = true
 			m.question.input.Blur()
-			m.question.input.SetValue("")
-			m.question.input.MoveToBegin()
 			m.recalcViewportSize()
 			return nil
 		}
@@ -159,51 +165,18 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 	}
 }
 
-// submitCurrentQuestion collects selected options and advances.
+// submitCurrentQuestion submits selected options in their display order.
 func (m *Model) submitCurrentQuestion(q tools.QuestionItem) tea.Cmd {
 	var selected []string
-	for idx := range m.question.selected {
-		if idx >= 0 && idx < len(q.Options) {
-			selected = append(selected, q.Options[idx].Label)
+	for i, option := range q.Options {
+		if m.question.selected[i] {
+			selected = append(selected, option.Label)
 		}
 	}
 	if len(selected) == 0 {
 		return nil // nothing selected, no-op
 	}
-	answer := tools.QuestionAnswer{
-		Header:   q.Header,
-		Selected: selected,
-	}
-	return m.advanceQuestion(answer)
-}
-
-// advanceQuestion records the answer and either moves to the next question
-// or resolves the entire dialog.
-func (m *Model) advanceQuestion(answer tools.QuestionAnswer) tea.Cmd {
-	m.question.answers = append(m.question.answers, answer)
-
-	m.question.currentQ++
-	if m.question.currentQ < len(m.question.request.Questions) {
-		// Prepare state for the next question
-		m.question.cursor = 0
-		m.question.selected = make(map[int]bool)
-		m.question.custom = false
-		m.question.input.SetValue("")
-		m.question.input.MoveToBegin()
-		m.question.input.Blur()
-
-		var cmd tea.Cmd
-		// If next question is text-only, auto-focus input.
-		nextQ := m.question.request.Questions[m.question.currentQ]
-		if len(nextQ.Options) == 0 {
-			cmd = m.question.input.Focus()
-		}
-		m.recalcViewportSize()
-		return cmd
-	}
-
-	// All questions answered — send results back.
-	return m.resolveQuestion(m.question.answers, false)
+	return m.resolveQuestion(selected, false)
 }
 
 // declineQuestion dismisses the dialog with an explicit declined outcome, so
@@ -212,29 +185,19 @@ func (m *Model) declineQuestion() tea.Cmd {
 	return m.resolveQuestion(nil, true)
 }
 
-// flattenQuestionAnswers converts TUI question answers to the []string form
-// expected by agent.ResolveQuestion (selected labels or free-text per question).
-func flattenQuestionAnswers(answers []tools.QuestionAnswer) []string {
-	var out []string
-	for _, a := range answers {
-		out = append(out, a.Selected...)
-	}
-	return out
-}
-
 // resolveQuestion submits the dialog's result to the agent, clears the dialog,
 // restores the previous mode, and presents the next queued dialog. declined
 // marks an explicit refusal (Esc) rather than a submitted answer. The broker
 // decides the terminal state, so a response can lose to the deadline or to a
 // newer message; whatever reason won is surfaced as a toast instead of being
 // silently dropped.
-func (m *Model) resolveQuestion(answers []tools.QuestionAnswer, declined bool) tea.Cmd {
+func (m *Model) resolveQuestion(answers []string, declined bool) tea.Cmd {
 	if m.question.request == nil {
 		return nil
 	}
 
 	reason := tools.QuestionOutcomeAnswered
-	submitted := flattenQuestionAnswers(answers)
+	submitted := answers
 	if declined {
 		reason = tools.QuestionOutcomeDeclined
 		submitted = nil

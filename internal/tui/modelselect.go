@@ -27,10 +27,13 @@ func (s pendingPoolSwitchState) display(currentPool string, busy bool) string {
 }
 
 type modelSelectState struct {
-	target     agent.ModelPoolSelectorTarget
-	poolNames  []string
-	poolCursor int
-	prevMode   Mode
+	target        agent.ModelPoolSelectorTarget
+	poolNames     []string
+	poolCursor    int
+	prevMode      Mode
+	filter        string
+	filterFocused bool
+	currentPool   string
 
 	selector overlayListSelectorState
 }
@@ -147,10 +150,11 @@ func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
 	}
 
 	m.modelSelect = modelSelectState{
-		target:     target,
-		poolNames:  poolNames,
-		poolCursor: poolCursor,
-		prevMode:   prevMode,
+		target:      target,
+		currentPool: currentPool,
+		poolNames:   poolNames,
+		poolCursor:  poolCursor,
+		prevMode:    prevMode,
 	}
 	m.modelSelect.selector.list = list
 	if m.mode == ModeInsert {
@@ -162,6 +166,9 @@ func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
 
 func (m *Model) handleModelSelectKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+	if m.modelSelect.filterFocused && !keyMatches(key, m.keyMap.SwitchModel) {
+		return m.handleModelSelectFilterKey(msg)
+	}
 
 	if keyMatches(key, m.keyMap.SwitchModel) || key == "esc" {
 		prevMode := m.modelSelect.prevMode
@@ -174,7 +181,13 @@ func (m *Model) handleModelSelectKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	itemCount := len(m.modelSelect.poolNames)
+	if m.modelSelect.selector.list != nil {
+		itemCount = m.modelSelect.selector.list.Len()
+	}
 	switch key {
+	case "/":
+		m.modelSelect.filterFocused = true
+		return nil
 	case "j", "down":
 		if itemCount > 0 {
 			if m.modelSelect.selector.list != nil {
@@ -226,16 +239,19 @@ func (m *Model) handleModelSelectKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) selectPoolAtCursor() tea.Cmd {
-	if len(m.modelSelect.poolNames) == 0 || m.modelSelect.poolCursor >= len(m.modelSelect.poolNames) {
-		prevMode := m.modelSelect.prevMode
-		cmd := m.restoreModeWithIME(prevMode)
-		m.recalcViewportSize()
-		if prevMode == ModeInsert {
-			return tea.Batch(cmd, m.input.Focus())
+	var pool string
+	if m.modelSelect.selector.list != nil {
+		item, ok := m.modelSelect.selector.list.SelectedItem()
+		if !ok {
+			return nil
 		}
-		return cmd
+		pool = item.ID
+	} else {
+		if m.modelSelect.poolCursor < 0 || m.modelSelect.poolCursor >= len(m.modelSelect.poolNames) {
+			return nil
+		}
+		pool = m.modelSelect.poolNames[m.modelSelect.poolCursor]
 	}
-	pool := m.modelSelect.poolNames[m.modelSelect.poolCursor]
 	ag := m.agent
 	var switchCmd tea.Cmd
 	if ag != nil {
@@ -281,25 +297,37 @@ func (m *Model) renderModelSelectDialog() string {
 		}
 	}
 
+	m.modelSelect.currentPool = currentPool
+	hint := modelSelectHint(m.modelSelect.target)
+	if m.modelSelect.filterFocused {
+		hint = modelSelectFilterHint
+	}
+	prefix := truncateOneLine("Filter: "+m.modelSelect.filter, max(min(m.width-1, 60)-4, 1))
+	if m.modelSelect.filter == "" && !m.modelSelect.filterFocused {
+		prefix = "/ to filter pools"
+	}
+	if m.modelSelect.selector.list != nil && m.modelSelect.selector.list.Len() == 0 {
+		prefix += "\nNo matching pools"
+	}
 	overlayCfg := OverlayConfig{
 		Title:    modelSelectTitle(m.modelSelect.target),
-		Hint:     modelSelectHint(m.modelSelect.target),
+		Hint:     hint,
 		MinWidth: 30,
 		MaxWidth: 60,
 	}
 
-	extraKey := strings.Join(m.modelSelect.poolNames, ",") + "|" + currentPool + "|" + string(m.modelSelect.target.Kind) + "|" + strings.TrimSpace(m.modelSelect.target.AgentName)
+	extraKey := strings.Join(m.modelSelect.poolNames, ",") + "|" + currentPool + "|" + string(m.modelSelect.target.Kind) + "|" + strings.TrimSpace(m.modelSelect.target.AgentName) + "|" + m.modelSelect.filter + "|" + hint
 	maxVisible := m.modelSelectMaxVisible()
 
 	return m.modelSelect.selector.Render(
 		m,
 		overlayCfg,
-		"",
-		0,
+		prefix,
+		1,
 		maxVisible,
 		extraKey,
 		func(list *OverlayList) {
-			list.SetItems(buildModelSelectItems(m.modelSelect.poolNames, currentPool))
+			list.SetItems(m.modelSelect.filteredItems())
 			list.SetCursor(m.modelSelect.poolCursor)
 		},
 		image.Rect(0, 0, m.width, m.height),
@@ -331,5 +359,5 @@ func modelSelectTitle(target agent.ModelPoolSelectorTarget) string {
 
 func modelSelectHint(target agent.ModelPoolSelectorTarget) string {
 	_ = target
-	return "j/k move  g/G jump  enter select  esc cancel"
+	return modelSelectIdleHint
 }

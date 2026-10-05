@@ -101,6 +101,9 @@ func (m *Model) sendSlashShortcut(key string, binding []string, command string) 
 
 func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+	if keyMatches(key, m.keyMap.Stop) {
+		return m.stopCurrentOperation()
+	}
 	if keyMatches(key, m.keyMap.InsertUndo) {
 		return m.undoComposerEdit()
 	}
@@ -516,24 +519,11 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				return nil
 			}
 		}
-		// Insert mode owns role switching: a role change is normally followed by
-		// typing a message, so it belongs where the composer already has focus
-		// instead of costing an Esc/i round trip. Checked before the bare tab
-		// guard below so a keymap that rebinds switch_role back to tab works.
+		// Explicit role and view bindings also work while composing a message.
 		if keyMatches(key, m.keyMap.SwitchRole) {
-			if m.focusedAgentID == "" {
-				return m.handleSwitchRole()
-			}
-			// Role switching does not apply to a SubAgent view. Cycle the view
-			// instead so the key always has a visible effect rather than
-			// silently doing nothing.
-			return m.handleSwitchAgent()
+			return m.switchMainRoleFromView()
 		}
-		// Checked after SwitchRole so the shared default (both bound to
-		// shift+tab) keeps switching the role here. It matters once the two
-		// bindings differ — a keymap that moves switch_role back to tab leaves
-		// shift+tab to cycle the agent view, the same as in Normal mode,
-		// instead of turning it into a dead key.
+
 		if keyMatches(key, m.keyMap.SwitchAgent) {
 			return m.handleSwitchAgent()
 		}

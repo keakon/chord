@@ -164,7 +164,7 @@ Response:
 
 ### `role`
 
-Query or switch the active main role: the remote equivalent of TUI Shift+Tab. `list` returns the current role and the ordered main-mode role list (builder first, planner second when configured, then custom roles alphabetically); `set` switches roles and keeps the conversation history, just like TUI cycling.
+Query or switch the active main role: the remote equivalent of TUI Alt+R. `list` returns the current role and the ordered main-mode role list (builder first, planner second when configured, then custom roles alphabetically); `set` switches roles and keeps the conversation history, just like TUI cycling.
 
 ```json
 {"type": "role", "action": "list"}
@@ -287,7 +287,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `notification`          | A user-facing reminder for an explicit wait that is not a modal request                       | `reason`, `message` |
 | `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}`; `agents` is empty when no eligible target exists |
 | `handoff_cancelled`     | A pending handoff was discarded before the client decided — a newer turn, a session switch, or an auto-dismissing `send` superseded it | `request_id`, `reason` (`superseded`)                                                                        |
-| `role_change`          | The active main role switched (via TUI Shift+Tab or a `role set` command)                        | `role`                                                                                                   |
+| `role_change`          | The active main role switched (via TUI Alt+R or a `role set` command)                        | `role`                                                                                                   |
 | `local_shell_result`    | Result for a `local_shell` command                                                                | `command`, `output`, `failed`, `error` |
 | `agent_started`         | A delegated SubAgent runtime started, including an on-demand rehydration of a parked task           | `agent_id`, `previous_agent_id` (set for rehydration), `task_id`, `agent_type`, `description`, `parent_agent_id`, `parent_task_id` |
 | `agent_notify`          | An agent sent a non-blocking owner or targeted delegated-workstream update                         | `agent_id`, `task_id`, `agent_type`, `parent_agent_id`, `parent_task_id`, `target_agent_id`, `target_task_id`, `kind`, `subtype`, `message` |

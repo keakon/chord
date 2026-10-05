@@ -27,7 +27,7 @@ type roleSelectState struct {
 // openRoleSelect opens the main-role selector overlay. It lists the ordered
 // main-mode roles (builder first, planner second when configured, then custom
 // roles alphabetically) with the current one preselected — the dialog form of
-// TUI Shift+Tab, opened by /role.
+// TUI Alt+R, opened by /role.
 func (m *Model) openRoleSelect() {
 	if m.agent == nil {
 		return
@@ -130,7 +130,7 @@ func (m *Model) selectRoleAtCursor() tea.Cmd {
 	// Confirming the already-active role is a no-op: SwitchRole would rebuild
 	// the permission ruleset, write a recovery snapshot and emit a
 	// RoleChangedEvent for a role that did not change. Skip it (mirroring
-	// switchRoleByName and the Shift+Tab single-role cycle) and keep the draw
+	// switchRoleByName and the Alt+R single-role cycle) and keep the draw
 	// caches valid.
 	sameRole := m.agent != nil && role == m.agent.CurrentRole()
 	var switchCmd tea.Cmd

@@ -11,14 +11,14 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
-func TestRenderStatusBarShowsLatestCumulativeProgressAfterMultipleAgentEvents(t *testing.T) {
+func TestRequestProgressKeepsLatestCumulativeCounters(t *testing.T) {
 	m := NewModelWithSize(nil, 180, 24)
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 17_869, Events: 105}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 18_041, Events: 106}})
-	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "↓ 18 KB · 106 events · 0s") {
+	plain := m.renderRequestProgressSummary("main")
+	if !strings.Contains(plain, "↓ 18 KB · 106 events") {
 		t.Fatalf("status bar should show latest cumulative progress, got %q", plain)
 	}
 }
@@ -30,7 +30,7 @@ func TestRequestCycleStartedResetsProgressForNewRequest(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 300 * 1024, Events: 120}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestCycleStartedEvent{AgentID: "main", TurnID: 2}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 5 * 1024, Events: 2}})
-	plain := stripANSI(m.renderStatusBar())
+	plain := m.renderRequestProgressSummary("main")
 	if !strings.Contains(plain, "↓ 5.0 KB · 2 events") {
 		t.Fatalf("new request cycle should reset progress state before next bytes arrive, got %q", plain)
 	}
@@ -44,7 +44,7 @@ func TestPendingDraftConsumedResetsProgressBaselineForNewRequest(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.PendingDraftConsumedEvent{DraftID: "draft-1", Parts: []message.ContentPart{{Type: "text", Text: "continue"}}, AgentID: "main"}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityConnecting, AgentID: "main"}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 305 * 1024, Events: 122}})
-	plain := stripANSI(m.renderStatusBar())
+	plain := m.renderRequestProgressSummary("main")
 	if !strings.Contains(plain, "↓ 5.0 KB · 2 events") {
 		t.Fatalf("pending draft consumed should reset request progress baseline for the next request, got %q", plain)
 	}
@@ -57,8 +57,8 @@ func TestRequestProgressStartsFromZeroOnFirstStreamTextAssistantCard(t *testing.
 	m.requestProgress["main"] = requestProgressState{VisibleBytes: 200 * 1024, VisibleEvents: 80}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "main", Text: "hi"}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 205 * 1024, Events: 82}})
-	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "↓ 5.0 KB · 2 events · 0s") {
+	plain := m.renderRequestProgressSummary("main")
+	if !strings.Contains(plain, "↓ 5.0 KB · 2 events") {
 		t.Fatalf("assistant stream should start from zero baseline on first text, got %q", plain)
 	}
 }
@@ -70,8 +70,8 @@ func TestRequestProgressStartsFromZeroForNewAssistantCard(t *testing.T) {
 	m.requestProgress["main"] = requestProgressState{VisibleBytes: 200 * 1024, VisibleEvents: 80}
 	m.markRequestProgressBaseline("main")
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 205 * 1024, Events: 82}})
-	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "↓ 5.0 KB · 2 events · 0s") {
+	plain := m.renderRequestProgressSummary("main")
+	if !strings.Contains(plain, "↓ 5.0 KB · 2 events") {
 		t.Fatalf("new assistant card progress should start from zero baseline, got %q", plain)
 	}
 }
@@ -84,8 +84,8 @@ func TestRequestProgressResetsPerCardAcrossAssistantToolAssistant(t *testing.T) 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 200 * 1024, Events: 80}})
 	m.markRequestProgressBaseline("main")
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 220 * 1024, Events: 90}})
-	plain1 := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain1, "↓ 20 KB · 10 events · 0s") {
+	plain1 := m.renderRequestProgressSummary("main")
+	if !strings.Contains(plain1, "↓ 20 KB · 10 events") {
 		t.Fatalf("first assistant card progress = %q, want delta from card baseline", plain1)
 	}
 
@@ -101,52 +101,49 @@ func TestRequestProgressResetsPerCardAcrossAssistantToolAssistant(t *testing.T) 
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	m.markRequestProgressBaseline("main")
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 230 * 1024, Events: 95}})
-	plain3 := stripANSI(m.renderStatusBar())
+	plain3 := m.renderRequestProgressSummary("main")
 	if !strings.Contains(plain3, "↓ 5.0 KB · 2 events") {
 		t.Fatalf("second assistant card progress should restart from zero, got %q", plain3)
 	}
 }
 
-func TestRenderStatusBarShowsZeroByteDownloadForWaitingDownloadStates(t *testing.T) {
-	m := NewModelWithSize(nil, 180, 24)
-	m.mode = ModeNormal
-	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}
-	m.activityStartTime["main"] = time.Now()
-	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "↓ 0 B · 0s") {
-		t.Fatalf("waiting_headers should render zero-byte download state, got %q", plain)
-	}
-
-	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}
-	plain = stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "↓ 0 B · 0s") {
-		t.Fatalf("waiting_token should render zero-byte download state, got %q", plain)
+func TestRenderStatusBarNamesWaitingStates(t *testing.T) {
+	for _, tc := range []struct {
+		activity agent.ActivityType
+		label    string
+	}{{agent.ActivityWaitingHeaders, "Waiting for response"}, {agent.ActivityWaitingToken, "Waiting for reply"}} {
+		m := NewModelWithSize(nil, 180, 24)
+		m.activities["main"] = agent.AgentActivityEvent{Type: tc.activity, AgentID: "main"}
+		plain := stripANSI(m.renderStatusBar())
+		if !strings.Contains(plain, tc.label) || strings.Contains(plain, "0 B") {
+			t.Fatalf("waiting status = %q", plain)
+		}
 	}
 }
 
-func TestRenderStatusBarKeepsMainPrefixedSubAgentProgressSeparate(t *testing.T) {
+func TestRequestProgressKeepsMainPrefixedSubAgentSeparate(t *testing.T) {
 	m := NewModelWithSize(nil, 180, 24)
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main-1", Bytes: 128 * 1024, Events: 42}})
-	plain := stripANSI(m.renderStatusBar())
+	plain := m.renderRequestProgressSummary("main")
 	if strings.Contains(plain, "↓ 128 KB · 42 events") {
 		t.Fatalf("status bar should not map a main-prefixed subagent to the main progress lane, got %q", plain)
 	}
 }
 
-func TestRenderStatusBarShowsRequestProgressAfterAgentEventInjection(t *testing.T) {
+func TestRequestProgressAfterAgentEventInjection(t *testing.T) {
 	m := NewModelWithSize(nil, 180, 24)
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 128 * 1024, Events: 42}})
-	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "↓ 128 KB · 42 events · 0s") {
+	plain := m.renderRequestProgressSummary("main")
+	if !strings.Contains(plain, "↓ 128 KB · 42 events") {
 		t.Fatalf("status bar should show request progress summary after progress injection, got %q", plain)
 	}
 }
 
-func TestRenderStatusBarShowsRequestProgressInsteadOfStreamingLabel(t *testing.T) {
+func TestRenderStatusBarNamesStreamingActivity(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 180
 	m.workingDir = "/home/user/projects/myapp"
@@ -154,8 +151,23 @@ func TestRenderStatusBarShowsRequestProgressInsteadOfStreamingLabel(t *testing.T
 	m.requestProgress["main"] = requestProgressState{VisibleBytes: 128 * 1024, VisibleEvents: 42}
 
 	got := stripANSI(m.renderStatusBar())
-	if !strings.Contains(got, "↓ 128 KB · 42 events · 0s") {
-		t.Fatalf("status bar should show request progress summary in new icon style; got %q", got)
+	if !strings.Contains(got, "Receiving reply") || !strings.Contains(got, "128 KB") || strings.Contains(got, "42 events") {
+		t.Fatalf("status bar should name the current activity; got %q", got)
+	}
+}
+
+func TestStreamingActivityRetainsLabelWhenProgressDoesNotFit(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	activity := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.activities["main"] = activity
+	m.requestProgress["main"] = requestProgressState{VisibleBytes: 128 * 1024, BaseBytes: 64 * 1024}
+	wide := stripANSI(m.renderActivityAt(activity, 50, time.Now()))
+	narrow := stripANSI(m.renderActivityAt(activity, 24, time.Now()))
+	if !strings.Contains(wide, "Receiving reply") || !strings.Contains(wide, "64 KB") {
+		t.Fatalf("wide activity loses label or per-card progress: %q", wide)
+	}
+	if !strings.Contains(narrow, "Receiving reply") || strings.Contains(narrow, "64 KB") {
+		t.Fatalf("narrow activity loses label: %q", narrow)
 	}
 }
 
@@ -238,12 +250,11 @@ func TestRequestDoneThenNextConnectingStartsAtZero(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 128 * 1024, Events: 42}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 128 * 1024, Events: 42, Done: true}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityConnecting, AgentID: "main"}})
-	plain := stripANSI(m.renderStatusBar())
-	if !strings.Contains(plain, "↓ 0 B · 0s") {
-		t.Fatalf("next request connecting should start from zero immediately after previous request done, got %q", plain)
+	if progress := m.requestProgress["main"]; progress.VisibleBytes != 0 || progress.VisibleEvents != 0 {
+		t.Fatalf("next request inherited progress: %+v", progress)
 	}
-	if strings.Contains(plain, "128 KB") || strings.Contains(plain, "42 events") {
-		t.Fatalf("next request connecting should not inherit previous request length, got %q", plain)
+	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "Connecting") {
+		t.Fatalf("next request should show connecting: %q", plain)
 	}
 }
 

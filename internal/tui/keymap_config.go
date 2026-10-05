@@ -16,7 +16,7 @@ package tui
 //	toggle_collapse, fork_session, directory, usage_stats
 //	error_panel
 //	search_start, search_next, search_prev
-//	switch_agent, switch_role, switch_model, service_tier
+//	switch_agent, switch_role, switch_model, service_tier, stop
 //
 // Example config.yaml snippet:
 //
@@ -76,6 +76,8 @@ func KeyMapFromConfig(m map[string][]string) KeyMap {
 	apply(&km.SearchPrev, "search_prev")
 	apply(&km.SwitchAgent, "switch_agent")
 	apply(&km.SwitchRole, "switch_role")
+	apply(&km.Stop, "stop")
+	apply(&km.BackgroundJobs, "background_jobs")
 	apply(&km.SwitchModel, "switch_model")
 	apply(&km.ServiceTier, "service_tier")
 	apply(&km.Diagnostics, "diagnostics")

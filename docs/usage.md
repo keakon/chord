@@ -31,9 +31,12 @@ Tool cards show terminal-safe previews. File paths inside the session working di
 
 When Chord is running in the background, the terminal title shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle. Focusing the terminal clears the marker; ordinary tab/window focus changes do not re-add it unless new background work later completes.
 
+The status bar names the current activity (Connecting, Waiting for response, Waiting for reply, or Receiving reply) and shows elapsed time; wide terminals also show the received data size. Question dialogs keep custom drafts when you return to the options. Use `PgUp` / `PgDown` or the wheel to read long questions. The model-pool selector supports `/` filtering. See the [key bindings reference](keybindings.md).
+
 Common keys:
 
 - `Esc`: switch to Normal mode; pressing `Esc` again in the running main view cancels the current turn
+- `Ctrl+X`: stop the current operation, keeping the unsent draft and session; also leave loop mode
 - `i`: return to insert/input mode
 - `j` / `k`: move between message cards
 - `gg` / `G`: jump to top / bottom
@@ -122,7 +125,7 @@ Only `y` confirms. `n` and `esc` cancel, and `Enter` is not bound. After you con
 
 Stopping a job yourself does not raise a toast. When the job ends, its owner still receives the result, stating plainly that you stopped it; a job that had outlived the turn that started it arrives as a JOB RESULT card.
 
-`Esc` and `Ctrl+C` do not stop a background job, including one still running inside the current turn: a long command that outran the foreground budget has already become a job. Confirming the stop dialog (reached by clicking `x`, or with `ctrl+j` then `j` / `k` and `Enter`) is the only way to stop one. Jobs do not outlive Chord itself: quitting or switching sessions terminates all of them.
+`Esc`, `Ctrl+X`, and `Ctrl+C` do not stop a background job, including one still running inside the current turn: a long command that outran the foreground budget has already become a job. Confirming the stop dialog (reached by clicking `x`, or with `ctrl+j` then `j` / `k` and `Enter`) is the only way to stop one. Jobs do not outlive Chord itself: quitting or switching sessions terminates all of them.
 
 Cancelling a turn does not mute the jobs it left behind either. When one finishes later, its result still arrives and opens a new turn — Chord wakes the main agent for every delivery rather than dropping a result nobody asked for — so a cancelled turn can be followed by a short result turn per job that completes. Stop those jobs, or quit Chord, if you want the session to stay quiet.
 
@@ -257,7 +260,7 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/rename <title>`: set the current session's display title; bare `/rename` clears it without changing the session ID
 - `/models`: view pool status or switch the current view's model pool (`main` view = current main role; `SubAgent` view = that agent)
 - `/models --agent <name> <pool>`: directly set a named agent's pool
-- `/role`: open a role-picker dialog and switch the active main agent (builder, planner, and custom main-mode roles), the dialog form of `Shift+Tab`; `/role <name>` switches directly without the dialog, and `/role status` prints the current role and the available roles
+- `/role`: open a role-picker dialog and switch the active main agent (builder, planner, and custom main-mode roles), the dialog form of `Alt+R`; `/role <name>` switches directly without the dialog, and `/role status` prints the current role and the available roles
 - `/mcp`: open the MCP server selector; `/mcp status` prints status; `/mcp enable|disable <server>` toggles manual servers. Runtime changes take effect for the next LLM request, not the currently in-flight request.
 - `/skill <name> [args]`: load a skill explicitly, including one kept out of the model's catalog by `disable-model-invocation`; bare `/skill` opens the skill selector. See [Skills: Explicit loads](./customization.md#explicit-loads).
 - `/compact`: manually trigger context compaction to summarize the current conversation as a structured archive; while the agent is busy with `context.compaction.model_driven` enabled, the model is also asked to checkpoint immediately and its checkpoint can replace the runtime result; see [Context management: Compaction](./context-management.md#context-compaction)
@@ -376,7 +379,8 @@ You can also define **custom** slash commands (per project or globally). See [Cu
 
 Chord supports cooperation between MainAgent and SubAgents.
 
-- `Shift+Tab`: in Insert mode, cycle the main agent mode (role) shown in the status bar (main view only); in Normal mode, cycle the focused agent view between the main agent and subagents
+- `Shift+Tab`: cycle the focused view between the main agent and subagents in both Insert and Normal modes
+- `Alt+R`: cycle the main agent role while viewing main; the status bar shows the active role
 
 In a SubAgent view, you can inspect that agent's context and output and submit new input. Completed, failed, and cancelled states describe the previous turn; they do not make the view read-only.
 
@@ -415,7 +419,7 @@ Common actions:
 - Drag in the transcript to select text inside the TUI
 - `yy` copies the focused message card; tool cards are copied as Markdown with `# Tool call`, `## Arguments`, `## Result`, and `## Diff` sections (`edit` cards use `## old_string` / `## new_string` for the replaced text instead, plus `## replace_all` only when it is enabled). Done rejection reasons are copied in a separate `## Rejection reason` section.
 - `Cmd+C`: copy the current transcript selection in macOS terminals that forward the key to Chord; when a confirmation dialog input is focused, copies that input instead
-- `Ctrl+C`: remains reserved for cancel / quit and is not used for transcript copy
+- `Ctrl+C`: press twice to quit; in a dialog it acts like `Esc` and is not used for transcript copy
 
 ## Headless
 

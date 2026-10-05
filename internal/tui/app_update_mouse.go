@@ -234,7 +234,16 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 	// Confirm/Question/Rules/UsageStats/Help/StopJob overlay modes keep clicks
 	// from passing through, but allow wheel scrolling of the underlying viewport
 	// so long background cards remain readable while the overlay is open.
-	if m.mode == ModeConfirm || m.mode == ModeQuestion || m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeHelp || m.mode == ModeStopJobConfirm {
+	if m.mode == ModeQuestion {
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			m.scrollQuestion(-3)
+		case tea.MouseWheelDown:
+			m.scrollQuestion(3)
+		}
+		return nil, true
+	}
+	if m.mode == ModeConfirm || m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeHelp || m.mode == ModeStopJobConfirm {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp, tea.MouseWheelDown:

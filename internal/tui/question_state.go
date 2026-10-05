@@ -10,7 +10,7 @@ import (
 )
 
 type QuestionRequest struct {
-	Questions []tools.QuestionItem
+	Item tools.QuestionItem
 	// Deadline is the absolute time after which the request is closed as
 	// no_response (zero = wait indefinitely). The countdown is anchored to it;
 	// the dialog never closes itself when it elapses, it waits for the matching
@@ -38,24 +38,28 @@ type questionTimeoutTickMsg struct{}
 
 // questionState holds the transient state for the active question dialog.
 type questionState struct {
-	request   *QuestionRequest       // full request (nil when inactive)
-	requestID string                 // broker request this dialog answers
-	currentQ  int                    // index of the question being answered
-	cursor    int                    // highlighted option (0-based)
-	selected  map[int]bool           // toggled option indices (multi-select)
-	answers   []tools.QuestionAnswer // accumulated answers from previous questions
-	custom    bool                   // true when custom text input is focused
-	input     textarea.Model         // free-text input for custom answers / text-only Qs
-	prevMode  Mode                   // mode to restore on close
+	request           *QuestionRequest // full request (nil when inactive)
+	requestID         string           // broker request this dialog answers
+	cursor            int              // highlighted option (0-based)
+	selected          map[int]bool     // toggled option indices (multi-select)
+	custom            bool             // true when custom text input is focused
+	input             textarea.Model   // free-text input for custom answers / text-only Qs
+	scrollOffset      int
+	followCursor      bool
+	bodyHeight        int
+	visibleBodyHeight int
+	prevMode          Mode // mode to restore on close
 
 	// deadline is the request's absolute close time from question_timeout.
 	// The dialog only displays the countdown; the broker owns termination.
 	deadline time.Time // zero value = no timeout
 
 	renderCacheWidth    int
+	renderCacheHeight   int
+	renderCacheOffset   int
+	renderCacheFollow   bool
 	renderCacheTheme    string
 	renderCacheReq      *QuestionRequest
-	renderCacheCurrentQ int
 	renderCacheCursor   int
 	renderCacheSelected string
 	renderCacheText     string
