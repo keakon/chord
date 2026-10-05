@@ -44,6 +44,7 @@ func newMixedBatchTestSubAgent(t *testing.T) (*MainAgent, *SubAgent) {
 	parent := newTestMainAgent(t, t.TempDir())
 	reg := tools.NewRegistry()
 	reg.Register(dummyTool{name: "Dummy"})
+	ctx, cancel := context.WithCancel(parent.parentCtx)
 	sub := NewSubAgent(SubAgentConfig{
 		InstanceID:   "worker-1",
 		TaskID:       "adhoc-1",
@@ -53,14 +54,22 @@ func newMixedBatchTestSubAgent(t *testing.T) (*MainAgent, *SubAgent) {
 		Recovery:     parent.recoveryManager(),
 		SessionEpoch: parent.recoverySessionEpoch(),
 		Parent:       parent,
-		ParentCtx:    parent.parentCtx,
-		Cancel:       func() {},
+		ParentCtx:    ctx,
+		Cancel:       cancel,
 		BaseTools:    reg,
 		WorkDir:      t.TempDir(),
 		SessionDir:   parent.sessionDir,
 		ModelName:    "test-model",
 	})
-	sub.turn = &Turn{ID: 1, Epoch: 1, Ctx: context.Background()}
+	sub.turn = &Turn{ID: 1, Epoch: 1, Ctx: ctx}
+	t.Cleanup(func() {
+		// These tests call handlers directly without a run loop, so nothing
+		// else joins LLM continuations started by completion or escalation.
+		parent.signalStopping()
+		cancel()
+		sub.llmWG.Wait()
+		sub.llmClient.Close()
+	})
 	return parent, sub
 }
 
