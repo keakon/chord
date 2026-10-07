@@ -18,6 +18,19 @@ const (
 
 func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 	mouse := msg.Mouse()
+	if m.mode == ModeStatus {
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			m.scrollInfoPanel(-mouseWheelScrollStep)
+		case tea.MouseWheelDown:
+			m.scrollInfoPanel(mouseWheelScrollStep)
+		default:
+			if _, ok := msg.(tea.MouseClickMsg); ok && mouse.Button == tea.MouseLeft && m.infoPanelContainsPoint(mouse.X, mouse.Y) {
+				return m.handleInfoPanelMouseClick(mouse), true
+			}
+		}
+		return nil, true
+	}
 
 	// Session select overlay (modal): wheel scrolls list.
 	if m.mode == ModeSessionSelect {

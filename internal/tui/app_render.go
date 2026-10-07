@@ -202,7 +202,7 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 	m.drawMainLayer(scr, layout)
 	// Info panel
-	if layout.infoPanel.Dx() > 0 {
+	if layout.infoPanel.Dx() > 0 && m.mode != ModeStatus {
 		infoView := m.renderInfoPanel(layout.infoPanel.Dx(), m.viewport.height)
 		if m.cachedDirRender.text != infoView {
 			m.renderToCache(&m.cachedDirRender, infoView)
@@ -360,6 +360,8 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 	// (sidebar, infoPanel, etc.) so they appear on top of all other layers.
 
 	switch m.mode {
+	case ModeStatus:
+		m.drawStatusPanel(scr, layout)
 	case ModeHandoffSelect:
 		dialog := m.renderHandoffSelectDialog()
 		dialogRect := centeredRect(area, dialog)

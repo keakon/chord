@@ -408,7 +408,7 @@ func (m *Model) clampAndSliceInfoPanelContent(lines []string, height int) string
 	maxOffset := m.infoPanelContentHeight - height
 	if maxOffset <= 0 {
 		m.infoPanelScrollOffset = 0
-		return strings.Join(lines, "\n")
+		return strings.Join(m.highlightStatusSection(lines, 0), "\n")
 	}
 	if m.infoPanelScrollOffset < 0 {
 		m.infoPanelScrollOffset = 0
@@ -420,7 +420,7 @@ func (m *Model) clampAndSliceInfoPanelContent(lines []string, height int) string
 		return ""
 	}
 	end := min(start+height, len(lines))
-	return strings.Join(lines[start:end], "\n")
+	return strings.Join(m.highlightStatusSection(lines[start:end], start), "\n")
 }
 
 func (m *Model) clearInfoPanelRenderCache() {

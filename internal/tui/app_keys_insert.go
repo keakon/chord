@@ -270,6 +270,13 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			m.slashCompleteSelected = 0
 			return m.openHelp()
 		}
+		if len(m.attachments) == 0 && strings.EqualFold(value, statusCommand) {
+			m.recordTUIDiagnostic("local-command", "%s", value)
+			m.input.AddCurrentToHistory()
+			m.input.Reset()
+			m.slashCompleteSelected = 0
+			return m.openStatusPanel()
+		}
 		if len(m.attachments) == 0 && strings.EqualFold(value, "/stats") {
 			m.recordTUIDiagnostic("local-command", "%s", value)
 			m.input.AddCurrentToHistory()

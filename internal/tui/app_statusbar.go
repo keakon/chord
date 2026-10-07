@@ -168,7 +168,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		memoryEnabled = m.agent.MemoryEnabled()
 		memoryDegraded = m.agent.MemoryDegraded()
 	}
-	infoPanelVisible := m.rightPanelVisible && m.mode != ModeHelp
+	infoPanelVisible := m.mode == ModeStatus || (m.rightPanelVisible && m.mode != ModeHelp)
 	runningJobs := 0
 	fallbackAgents := 0
 	if !infoPanelVisible {
@@ -421,6 +421,8 @@ func (m *Model) statusBarModeText() string {
 		return "DELETE"
 	case ModeHandoffSelect:
 		return "HANDOFF"
+	case ModeStatus:
+		return "STATUS"
 	case ModeUsageStats:
 		return "STATS"
 	case ModeErrorPanel:

@@ -46,6 +46,7 @@ const (
 	ModeStopJobConfirm                   // stop-background-job confirmation overlay
 	ModeJobsOverlay                      // background jobs overlay (status-bar pill)
 	ModeSkillSelect                      // skill selector overlay (/skill)
+	ModeStatus                           // full-screen runtime overview (/status)
 )
 
 // ---------------------------------------------------------------------------
@@ -194,10 +195,11 @@ type Model struct {
 	chordTickGeneration uint64
 
 	// Message-directory state (Ctrl+T)
-	dirEntries []DirectoryEntry
-	dirList    *OverlayList
-	help       helpState
-	usageStats usageStatsState
+	dirEntries  []DirectoryEntry
+	dirList     *OverlayList
+	help        helpState
+	statusPanel statusPanelState
+	usageStats  usageStatsState
 
 	// Streaming assistant block (nil when idle)
 	currentAssistantBlock  *Block

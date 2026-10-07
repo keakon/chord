@@ -30,6 +30,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- Add `/status` in the TUI to view live runtime information at any terminal width, with keyboard navigation and mouse interaction.
+
 - The built-in catalog contains 31 verified models and 20 preset bindings, pinned to chord-models `v2026-10-05.5`. It records published limits, modalities, pricing, and model behavior recipes. `chord config add` connects supported official endpoints and writes required protocol settings; custom URLs can explicitly borrow model facts with `--catalog`.
 - The model catalog can now be refreshed from the upstream [chord-models](https://github.com/keakon/chord-models) data repository instead of waiting for a chord release: `chord config refresh-catalog` pulls the newest version tag into a local cache, and `chord config add --refresh-catalog` does the same before adding a model. A refreshed snapshot supersedes the built-in catalog as a whole, by version — never merged entry by entry — takes effect on the next start of every chord command, and any failure (network, corrupt snapshot, incompatible schema) falls back to the snapshot already in effect. `chord config show --catalog` states which snapshot is in effect and where it came from.
 - Catalog refresh also delivers candidate entries — community-discovered wire names that are not fully verified yet — into `chord config add` suggestions, annotated with the provider scope they were observed on and their sources. Candidates never fill defaults: adopting one means writing its observed values as your own explicit settings, and when a wire name was seen on several scopes, the sightings are listed side by side without Chord choosing between them.

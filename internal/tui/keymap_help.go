@@ -81,6 +81,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding([]string{"ee"}, "fork from user message"),
 		helpBinding(km.Directory, "open message directory"),
 		helpBinding(km.UsageStats, "open usage stats"),
+		helpBinding([]string{statusCommand}, "open runtime overview from input"),
 		helpBinding(km.ErrorPanel, "open error panel"),
 		helpBinding(km.BackgroundJobs, "open background jobs"),
 		helpBinding(km.SwitchAgent, "switch focused agent (cycle)"),

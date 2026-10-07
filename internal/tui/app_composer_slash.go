@@ -170,6 +170,8 @@ func attachmentsFromParts(parts []message.ContentPart) []Attachment {
 }
 
 // slashCommand describes one slash command for autocomplete.
+const statusCommand = "/status"
+
 type slashCommand struct {
 	Cmd   string // e.g. "/resume"
 	Desc  string // short description for the dropdown
@@ -195,6 +197,7 @@ var slashCommands = []slashCommand{
 	{Cmd: "/role", Desc: "switch main agent role"},
 	{Cmd: "/rules", Desc: "manage permission rules"},
 	{Cmd: "/stats", Desc: "usage statistics"},
+	{Cmd: statusCommand, Desc: "runtime overview"},
 	{Cmd: "/rename", Desc: "set or clear session title"},
 }
 

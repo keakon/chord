@@ -191,6 +191,7 @@ type viewCacheState struct {
 	cachedInputCursorOK                bool
 	cachedStatusKey                    string
 	cachedStatusRender                 cachedRenderable
+	cachedStatusPanelHint              cachedRenderable
 	cachedStatusBarModeKey             string
 	cachedStatusBarModePill            string
 	cachedStatusBarViewingKey          string

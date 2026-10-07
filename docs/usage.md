@@ -89,6 +89,8 @@ The error panel keeps the most recent 80 errors in a ring buffer (newest first),
 
 The right panel keeps a stable order: agents, background jobs, and todos appear and disappear during a session, so they render after the model, usage, integration, and repository sections and never shift the information above them. A focused agent has a `▸` marker alongside its status icon, so its running, waiting, or failed state remains visible.
 
+Enter `/status` to open the same live information across the full conversation area, including in narrow terminals. Use `j` / `k` or the arrow keys to scroll, `PgUp` / `PgDn` to page, and `g` / `G` to jump to the top or bottom. `Tab` / `Shift+Tab` selects a section; `Enter` or `Space` folds or expands it. Mouse scrolling and clicks work as in the right panel. `Esc` or `q` returns to the conversation.
+
 ### `USAGE` block
 
 - `Context` shows the input-side token burden of the most recent model request, as reported by the provider. A `≈` prefix marks the single estimate used when that response omitted usage; a session that has not had a measured response yet shows `0`.

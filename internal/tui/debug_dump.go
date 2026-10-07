@@ -560,6 +560,8 @@ func debugModeString(mode Mode) string {
 		return "session-delete-confirm"
 	case ModeHandoffSelect:
 		return "handoff-select"
+	case ModeStatus:
+		return "status"
 	case ModeUsageStats:
 		return "usage-stats"
 	case ModeErrorPanel:
