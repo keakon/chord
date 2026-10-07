@@ -35,17 +35,16 @@ func writeStatusBarSpaces(b *strings.Builder, count int) {
 }
 
 func (m *Model) statusBarDynamicCacheKeyFromState(now time.Time, localShellPending bool, progress string, compacting, busy, latestStatusStart bool) string {
-	if localShellPending {
-		return m.visualAnimationCacheKeyAt(now)
-	}
-	if progress != "" {
-		return m.visualAnimationCacheKeyAt(now) + "|" + progress
+	if localShellPending || progress != "" || busy {
+		key := "sec:" + strconv.FormatInt(now.Unix(), 10)
+		activity := m.activityForAgent(m.focusedAgentIDOrMain())
+		if activity.Type == agent.ActivityConnecting || (busy && (activity.Type == "" || activity.Type == agent.ActivityIdle) && m.inflightDraft != nil) {
+			key += "|" + m.statusBarConnectingFrameAt(now)
+		}
+		return key
 	}
 	if compacting {
 		return compactionBackgroundStatusFrameKey(now)
-	}
-	if busy {
-		return m.visualAnimationCacheKeyAt(now)
 	}
 	if latestStatusStart {
 		return "min:" + strconv.FormatInt(now.Unix()/60, 10)
@@ -154,7 +153,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		localShellPending,
 		m.renderRequestProgressSummary(statusActiveID),
 		m.activityForAgent(statusActiveID).Type == agent.ActivityCompacting,
-		snap.busy,
+		m.isFocusedAgentBusy(),
 		latestStatusStart,
 	)
 	loopState := agent.LoopState("")
@@ -521,6 +520,10 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	b.WriteString(string(statusActivity.Type))
 	b.WriteByte('|')
 	b.WriteString(statusActivity.Detail)
+	fmt.Fprintf(&b, "|%d|%d|%d|%d|%t",
+		statusActivity.Deadline.UnixNano(), m.activityStartTime[inputs.StatusActiveID].UnixNano(),
+		m.requestProgress[inputs.StatusActiveID].BaseBytes, m.requestProgress[inputs.StatusActiveID].BaseEvents,
+		m.requestProgress[inputs.StatusActiveID].Done)
 	b.WriteByte('|')
 	b.WriteString(snap.modelRef)
 	b.WriteByte('|')
@@ -536,7 +539,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	b.WriteByte('|')
 	b.WriteString(inputs.WorkDirCheckoutName)
 	b.WriteByte('|')
-	b.WriteString(compactionBackgroundStatusKey(m.compactionBgStatus))
+	b.WriteString(compactionBackgroundStatusKey(m.statusBarSampledCompactionAt(now)))
 	if compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
 		b.WriteByte('|')
 		b.WriteString(compactionBackgroundStatusFrameKey(now))
@@ -820,7 +823,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 	if !compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
 		rightKey += "|"
 	} else {
-		rightKey += "|" + compactionBackgroundStatusKey(m.compactionBgStatus) + "|" + compactionBackgroundStatusFrameKey(now)
+		rightKey += "|" + compactionBackgroundStatusKey(m.statusBarSampledCompactionAt(now)) + "|" + compactionBackgroundStatusFrameKey(now)
 	}
 	if m.cachedStatusBarRightKey == rightKey {
 		m.statusPath.value = m.cachedStatusBarPathValue

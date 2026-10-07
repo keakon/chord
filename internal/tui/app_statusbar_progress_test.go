@@ -110,12 +110,12 @@ func TestRequestProgressResetsPerCardAcrossAssistantToolAssistant(t *testing.T) 
 func TestRenderStatusBarNamesWaitingStates(t *testing.T) {
 	for _, tc := range []struct {
 		activity agent.ActivityType
-		label    string
-	}{{agent.ActivityWaitingHeaders, "Waiting for response"}, {agent.ActivityWaitingToken, "Waiting for reply"}} {
+		icon     string
+	}{{agent.ActivityWaitingHeaders, "◷"}, {agent.ActivityWaitingToken, "◌"}} {
 		m := NewModelWithSize(nil, 180, 24)
 		m.activities["main"] = agent.AgentActivityEvent{Type: tc.activity, AgentID: "main"}
 		plain := stripANSI(m.renderStatusBar())
-		if !strings.Contains(plain, tc.label) || strings.Contains(plain, "0 B") {
+		if !strings.Contains(plain, tc.icon) || strings.Contains(plain, "Waiting for") || strings.Contains(plain, "0 B") {
 			t.Fatalf("waiting status = %q", plain)
 		}
 	}
@@ -151,23 +151,42 @@ func TestRenderStatusBarNamesStreamingActivity(t *testing.T) {
 	m.requestProgress["main"] = requestProgressState{VisibleBytes: 128 * 1024, VisibleEvents: 42}
 
 	got := stripANSI(m.renderStatusBar())
-	if !strings.Contains(got, "Receiving reply") || !strings.Contains(got, "128 KB") || strings.Contains(got, "42 events") {
-		t.Fatalf("status bar should name the current activity; got %q", got)
+	if !strings.Contains(got, "↓") || !strings.Contains(got, "128 KB") || strings.Contains(got, "Receiving reply") || !strings.Contains(got, "42 events") {
+		t.Fatalf("status bar should use a compact receiving indicator; got %q", got)
 	}
 }
 
-func TestStreamingActivityRetainsLabelWhenProgressDoesNotFit(t *testing.T) {
+func TestStreamingActivityRetainsNumericProgressWhenWidthIsTight(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
+	now := time.Unix(100, 0)
 	activity := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	m.activities["main"] = activity
-	m.requestProgress["main"] = requestProgressState{VisibleBytes: 128 * 1024, BaseBytes: 64 * 1024}
-	wide := stripANSI(m.renderActivityAt(activity, 50, time.Now()))
-	narrow := stripANSI(m.renderActivityAt(activity, 24, time.Now()))
-	if !strings.Contains(wide, "Receiving reply") || !strings.Contains(wide, "64 KB") {
-		t.Fatalf("wide activity loses label or per-card progress: %q", wide)
+	m.activityStartTime["main"] = now.Add(-12 * time.Second)
+	m.requestProgress["main"] = requestProgressState{VisibleBytes: 128 * 1024, BaseBytes: 64 * 1024, VisibleEvents: 50, BaseEvents: 8}
+	for _, tc := range []struct {
+		width int
+		want  string
+	}{
+		{50, "↓ 64 KB · 42 events · 12s"},
+		{16, "↓ 64 KB · 12s"},
+		{7, "↓ 64 KB"},
+		{1, "↓"},
+	} {
+		got := stripANSI(m.renderActivityAt(activity, tc.width, now))
+		if got != tc.want {
+			t.Fatalf("activity at width %d = %q, want %q", tc.width, got, tc.want)
+		}
 	}
-	if !strings.Contains(narrow, "Receiving reply") || strings.Contains(narrow, "64 KB") {
-		t.Fatalf("narrow activity loses label: %q", narrow)
+}
+
+func TestStreamingActivityShowsEventsWithoutBytes(t *testing.T) {
+	m := NewModelWithSize(nil, 180, 24)
+	now := time.Unix(100, 0)
+	activity := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
+	m.activityStartTime["main"] = now
+	m.requestProgress["main"] = requestProgressState{VisibleEvents: 1}
+	if got := stripANSI(m.renderActivityAt(activity, 50, now)); got != "↓ 0 B · 1 event · 0s" {
+		t.Fatalf("events-only progress = %q", got)
 	}
 }
 
@@ -253,8 +272,8 @@ func TestRequestDoneThenNextConnectingStartsAtZero(t *testing.T) {
 	if progress := m.requestProgress["main"]; progress.VisibleBytes != 0 || progress.VisibleEvents != 0 {
 		t.Fatalf("next request inherited progress: %+v", progress)
 	}
-	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "Connecting") {
-		t.Fatalf("next request should show connecting: %q", plain)
+	if plain := stripANSI(m.renderStatusBar()); (!strings.Contains(plain, "⠋") && !strings.Contains(plain, "⠹") && !strings.Contains(plain, "⠴") && !strings.Contains(plain, "⠧")) || strings.Contains(plain, "Connecting") {
+		t.Fatalf("next request should show the compact connecting indicator: %q", plain)
 	}
 }
 
@@ -384,13 +403,14 @@ func TestRequestProgressCountsAsActiveAnimation(t *testing.T) {
 	}
 }
 
-func TestStatusBarDynamicCacheKeyIncludesRequestProgress(t *testing.T) {
+func TestStatusBarDynamicCacheKeyCoalescesRequestProgress(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityCompacting}
 	m.requestProgress["main"] = requestProgressState{VisibleBytes: 1024, VisibleEvents: 2}
 	got := m.statusBarDynamicCacheKeyAt(time.UnixMilli(1000))
-	if !strings.Contains(got, "frame:") || !strings.Contains(got, "↓ 1.0 KB · 2 events") {
-		t.Fatalf("statusBarDynamicCacheKeyAt = %q, want frame-based progress summary", got)
+	m.requestProgress["main"] = requestProgressState{VisibleBytes: 2048, VisibleEvents: 3}
+	if later := m.statusBarDynamicCacheKeyAt(time.UnixMilli(1200)); got != "sec:1" || later != got {
+		t.Fatalf("progress cache key changed within a second: %q -> %q", got, later)
 	}
 }
 

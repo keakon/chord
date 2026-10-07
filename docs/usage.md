@@ -31,7 +31,7 @@ Tool cards show terminal-safe previews. File paths inside the session working di
 
 When Chord is running in the background, the terminal title shows a one-shot `✅` completion marker when the focused agent transitions from busy to idle. Focusing the terminal clears the marker; ordinary tab/window focus changes do not re-add it unless new background work later completes.
 
-The status bar names the current activity (Connecting, Waiting for response, Waiting for reply, or Receiving reply) and shows elapsed time; wide terminals also show the received data size. Question dialogs keep custom drafts when you return to the options. Use `PgUp` / `PgDown` or the wheel to read long questions. The model-pool selector supports `/` filtering. See the [key bindings reference](keybindings.md).
+The status bar uses compact activity icons instead of repeating phase labels: `✶` means preparing, `⠋` frames mean connecting, `◷` waiting for response headers, `◌` waiting for the first token, `↓` receiving, `↻` retrying, `⇄` switching API keys, `⏸` cooling down, `⚙` executing tools, and `■` / `▪` compacting. Connecting frames change every 500ms and compaction icons every second; other activity icons remain static, with fixed theme colors. Elapsed time, received bytes, event counts (`events`), and retry/cooldown countdowns update once per second. When space is tight, event counts are omitted first, followed by elapsed time. State transitions, completion, and user actions appear immediately. Detailed fallback and provider errors remain in the error panel. Question dialogs keep custom drafts when you return to the options. Use `PgUp` / `PgDown` or the wheel to read long questions. The model-pool selector supports `/` filtering. See the [key bindings reference](keybindings.md).
 
 Common keys:
 
@@ -57,7 +57,7 @@ Question dialogs keep the action shortcuts visible while the question and choice
 
 Press `Ctrl+E` in normal mode to open the error panel, which lists the errors encountered so far. This includes:
 
-- **Intermediate retry errors**: API errors that triggered a key rotation, model fallback, or stream retry (e.g., 429 rate limits, 503 service unavailable, context length exceeded, timeouts). These are recorded silently and only appear in the error panel, keeping the conversation flow clean. Switching to a different fallback model is the exception: the notification appears as soon as the fallback starts, naming the reason and the target model, and the status bar keeps showing that target, reason, and elapsed time while the new model is being reached.
+- **Intermediate retry errors**: API errors that triggered a key rotation, model fallback, or stream retry (e.g., 429 rate limits, 503 service unavailable, context length exceeded, timeouts). These are recorded silently and only appear in the error panel, keeping the conversation flow clean. Switching to a different fallback model is the exception: the notification appears as soon as the fallback starts, naming the reason and the target model. While the next attempt is pending, the status bar stays compact and shows only the retry icon with its elapsed time or countdown.
 - **Final errors**: errors that exhausted all retries and appear as red error blocks in the conversation.
 
 Each error record shows:

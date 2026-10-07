@@ -10,8 +10,7 @@ import (
 
 // The preparing activity marks the focused agent busy, so an empty-input
 // continue is gated in the TUI while the first request waits for the session
-// readiness gates. The status bar shows what the wait is on instead of the
-// press being a silent no-op against an idle-looking lane.
+// readiness gates. The compact footer keeps only the icon and elapsed time.
 func TestPreparingActivityBlocksContinueAndShowsInStatusBar(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	now := time.Now()
@@ -37,14 +36,14 @@ func TestPreparingActivityBlocksContinueAndShowsInStatusBar(t *testing.T) {
 	if display.Icon != "✶" {
 		t.Fatalf("preparing icon = %q, want ✶", display.Icon)
 	}
-	if got := display.Text; !strings.Contains(got, "waiting for MCP servers") || !strings.Contains(got, "7s") {
-		t.Fatalf("preparing lane text = %q, want detail and elapsed", got)
+	if got := display.Text; !strings.Contains(got, "7s") || strings.Contains(got, "waiting for MCP servers") {
+		t.Fatalf("preparing lane text = %q, want elapsed without detail", got)
 	}
-	if display.CompactText != "waiting for MCP servers" {
-		t.Fatalf("preparing compact text = %q, want the detail", display.CompactText)
+	if display.CompactText != "" {
+		t.Fatalf("preparing compact text = %q, want empty", display.CompactText)
 	}
-	if display.NarrowText != "7s" {
-		t.Fatalf("preparing narrow text = %q, want the elapsed", display.NarrowText)
+	if display.NarrowText != "" {
+		t.Fatalf("preparing narrow text = %q, want empty", display.NarrowText)
 	}
 }
 

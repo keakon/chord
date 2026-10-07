@@ -174,8 +174,8 @@ func TestRenderStatusBarHidesEscHintFirstWhenNarrow(t *testing.T) {
 	if strings.Contains(rendered, "esc ⇢ cancel turn") {
 		t.Fatalf("status bar = %q, did not want narrow esc hint", rendered)
 	}
-	if !strings.Contains(rendered, "Connecting") {
-		t.Fatalf("status bar = %q, want activity text preserved", rendered)
+	if strings.Contains(rendered, "Connecting") || !strings.Contains(rendered, "⠋") {
+		t.Fatalf("status bar = %q, should keep the compact activity indicator", rendered)
 	}
 }
 

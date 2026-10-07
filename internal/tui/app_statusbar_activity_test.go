@@ -60,6 +60,71 @@ func TestRenderActivityExecutingWithoutStartShowsActivityGlyph(t *testing.T) {
 	}
 }
 
+func TestRequestActivityIconsKeepPhaseSemanticsWithoutLabels(t *testing.T) {
+	m := NewModelWithSize(nil, 200, 24)
+	cases := []struct {
+		activity agent.ActivityType
+		want     string
+	}{
+		{agent.ActivityConnecting, "⠋"},
+		{agent.ActivityWaitingHeaders, "◷"},
+		{agent.ActivityWaitingToken, "◌"},
+		{agent.ActivityStreaming, "↓"},
+		{agent.ActivityRetrying, "↻"},
+		{agent.ActivityRetryingKey, "⇄"},
+		{agent.ActivityCooling, "⏸"},
+	}
+	for _, tc := range cases {
+		display := m.buildStatusBarActivityDisplayAt(agent.AgentActivityEvent{AgentID: "main", Type: tc.activity}, time.Now())
+		if display.Icon != tc.want {
+			t.Fatalf("%s icon = %q, want %q", tc.activity, display.Icon, tc.want)
+		}
+		for _, label := range []string{"Connecting", "Waiting for", "Receiving reply", "cooling down", "retry in"} {
+			if strings.Contains(display.Text, label) {
+				t.Fatalf("%s text = %q, should not contain status label %q", tc.activity, display.Text, label)
+			}
+		}
+	}
+}
+
+func TestRenderActivityUsesIconOnlyAtOneColumn(t *testing.T) {
+	m := NewModelWithSize(nil, 200, 24)
+	out := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}, 1, time.Now()))
+	if out != "⠋" {
+		t.Fatalf("one-column connecting render = %q, want icon only", out)
+	}
+}
+
+func TestConnectingActivityUsesIndependentHalfSecondFrames(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 24)
+	m.cadenceProfiles = defaultCadenceProfiles()
+	a := agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}
+	m.activities["main"] = a
+	m.animRunning = true
+	now := time.Unix(100, 0)
+	for _, tc := range []struct {
+		offset time.Duration
+		want   string
+	}{
+		{0, "⠋"}, {200 * time.Millisecond, "⠋"}, {400 * time.Millisecond, "⠋"},
+		{500 * time.Millisecond, "⠹"}, {time.Second, "⠴"}, {1500 * time.Millisecond, "⠧"}, {2 * time.Second, "⠋"},
+	} {
+		_ = m.handleAnimTick(animTickMsg{generation: m.animTickGeneration, source: animTickSourceVisual})
+		if got := m.buildStatusBarActivityDisplayAt(a, now.Add(tc.offset)).Icon; got != tc.want {
+			t.Fatalf("connecting icon at %v = %q, want %q", tc.offset, got, tc.want)
+		}
+	}
+	m.cadenceProfiles = lowCadenceProfiles()
+	if got := m.statusBarConnectingFrameAt(now.Add(500 * time.Millisecond)); got != "⠋" {
+		t.Fatalf("low-cadence icon = %q, want static frame", got)
+	}
+	m.cadenceProfiles = defaultCadenceProfiles()
+	m.displayState = stateBackground
+	if got := m.statusBarConnectingFrameAt(now.Add(500 * time.Millisecond)); got != "⠋" {
+		t.Fatalf("background icon = %q, want static frame", got)
+	}
+}
+
 func TestFormatStatusBarElapsed(t *testing.T) {
 	tests := []struct {
 		in   time.Duration
@@ -257,7 +322,7 @@ func TestRenderActivityStreamingUsesElapsedWhenNoProgress(t *testing.T) {
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hi", StartedAt: started})
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
-	if !strings.Contains(out, "⣿") && !strings.Contains(out, "⣶") {
+	if !strings.Contains(out, "↓") {
 		t.Fatalf("expected streaming icon in %q", out)
 	}
 	if !strings.Contains(out, "1m30s") {
@@ -278,21 +343,21 @@ func TestRenderActivityCompactingUsesUnifiedProgressStyle(t *testing.T) {
 	}
 }
 
-func TestRenderActivityRetryingShowsDetailAndElapsed(t *testing.T) {
+func TestRenderActivityRetryingKeepsElapsedWithoutDetail(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-17 * time.Second)
 
 	retrying := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 6"}, 200, time.Now()))
-	if !strings.Contains(retrying, "↺") {
+	if !strings.Contains(retrying, "↻") {
 		t.Fatalf("retrying render should still show icon, got %q", retrying)
 	}
-	if !strings.Contains(retrying, "round 6") || !strings.Contains(retrying, "17s") {
-		t.Fatalf("retrying render should show the detail and the phase timer, got %q", retrying)
+	if strings.Contains(retrying, "round 6") || !strings.Contains(retrying, "17s") {
+		t.Fatalf("retrying render should keep only the phase timer in the status bar, got %q", retrying)
 	}
 
 	fallback := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback: fallback-model (5xx)"}, 200, time.Now()))
-	if !strings.Contains(fallback, "fallback: fallback-model (5xx)") || !strings.Contains(fallback, "17s") {
-		t.Fatalf("fallback wait render should name the target, reason, and elapsed time, got %q", fallback)
+	if strings.Contains(fallback, "fallback: fallback-model (5xx)") || !strings.Contains(fallback, "17s") {
+		t.Fatalf("fallback wait render should keep the compact phase timer, got %q", fallback)
 	}
 }
 
@@ -303,20 +368,20 @@ func TestRenderActivityRetryingCountsDownToNextAttempt(t *testing.T) {
 	a := agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 12", Deadline: now.Add(45 * time.Second)}
 
 	out := stripANSI(m.renderActivityAt(a, 200, now))
-	if !strings.Contains(out, "round 12") || !strings.Contains(out, "retry in 45s") {
-		t.Fatalf("retrying render with a deadline should count down to the next attempt, got %q", out)
+	if strings.Contains(out, "round 12") || !strings.Contains(out, "↻ 45s") {
+		t.Fatalf("retrying render with a deadline should show only the retry icon and countdown, got %q", out)
 	}
 	if strings.Contains(out, "40s") {
 		t.Fatalf("retrying countdown should replace the elapsed phase time, got %q", out)
 	}
 
 	later := stripANSI(m.renderActivityAt(a, 200, now.Add(30*time.Second)))
-	if !strings.Contains(later, "retry in 15s") {
+	if !strings.Contains(later, "↻ 15s") {
 		t.Fatalf("retrying countdown should shrink as time passes, got %q", later)
 	}
 
 	compact := stripANSI(m.renderActivityAt(a, 16, now))
-	if !strings.Contains(compact, "retry in 45s") {
+	if !strings.Contains(compact, "↻ 45s") {
 		t.Fatalf("narrow retrying render should keep the countdown instead of truncating, got %q", compact)
 	}
 	narrow := stripANSI(m.renderActivityAt(a, 12, now))
@@ -332,12 +397,12 @@ func TestRenderActivityCoolingShowsRemainingCountdown(t *testing.T) {
 	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s", Deadline: now.Add(33 * time.Second)}
 
 	out := stripANSI(m.renderActivityAt(a, 200, now))
-	if !strings.Contains(out, "cooling down") || !strings.Contains(out, "33s left") {
-		t.Fatalf("cooling render should name the cause and show the remaining wait, got %q", out)
+	if !strings.Contains(out, "⏸ 33s") || strings.Contains(out, "cooling down") {
+		t.Fatalf("cooling render should show the pause icon and remaining wait, got %q", out)
 	}
 
 	later := stripANSI(m.renderActivityAt(a, 200, now.Add(20*time.Second)))
-	if !strings.Contains(later, "13s left") {
+	if !strings.Contains(later, "⏸ 13s") {
 		t.Fatalf("cooling countdown should shrink as time passes, got %q", later)
 	}
 }
@@ -348,16 +413,16 @@ func TestRenderActivityCoolingDegradesBeforeTruncating(t *testing.T) {
 	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Deadline: now.Add(33 * time.Second)}
 
 	compact := stripANSI(m.renderActivityAt(a, 20, now))
-	if strings.Contains(compact, "cooling down") {
-		t.Fatalf("tight cooling render should drop the cause to keep the wait, got %q", compact)
+	if strings.Contains(compact, "cooling down") || !strings.Contains(compact, "⏸ 33s") {
+		t.Fatalf("tight cooling render should keep the pause icon and wait, got %q", compact)
 	}
-	if !strings.Contains(compact, "33s left") {
+	if !strings.Contains(compact, "33s") {
 		t.Fatalf("tight cooling render should keep the remaining wait, got %q", compact)
 	}
 
 	narrow := stripANSI(m.renderActivityAt(a, 8, now))
-	if strings.Contains(narrow, "left") || strings.Contains(narrow, "…") {
-		t.Fatalf("narrow cooling render should drop the label instead of truncating, got %q", narrow)
+	if strings.Contains(narrow, "left") || strings.Contains(narrow, "…") || !strings.Contains(narrow, "⏸") {
+		t.Fatalf("narrow cooling render should keep the icon without truncating, got %q", narrow)
 	}
 	if !strings.Contains(narrow, "33s") {
 		t.Fatalf("narrow cooling render should keep the remaining time, got %q", narrow)
@@ -432,12 +497,12 @@ func TestRenderActivityUsesCompactParenStyleWhenWidthIsTight(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 
 	waiting := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}, 32, time.Now()))
-	if !strings.Contains(waiting, "↺ 7s") {
+	if !strings.Contains(waiting, "◷ 7s") {
 		t.Fatalf("narrow waiting render should use icon+elapsed style, got %q", waiting)
 	}
 
 	waitingToken := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}, 64, time.Now()))
-	if !strings.Contains(waitingToken, "↺ 7s") {
+	if !strings.Contains(waitingToken, "◌ 7s") {
 		t.Fatalf("waiting_token render should use icon+elapsed style, got %q", waitingToken)
 	}
 }
@@ -468,7 +533,7 @@ func TestRenderActivityTruncatesToCoreWhenWidthIsTight(t *testing.T) {
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	wide := stripANSI(m.renderActivityAt(a, 200, time.Now()))
-	if !strings.Contains(wide, "⣿") && !strings.Contains(wide, "⣶") {
+	if !strings.Contains(wide, "↓") {
 		t.Fatalf("wide render should include streaming icon; got %q", wide)
 	}
 	if !strings.Contains(wide, " 2s") {
@@ -492,7 +557,7 @@ func TestRenderActivityUsesCompactLastLabelInCompactExtras(t *testing.T) {
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	compact := stripANSI(m.renderActivityAt(a, 46, time.Now()))
-	if !strings.Contains(compact, "⣿") && !strings.Contains(compact, "⣶") {
+	if !strings.Contains(compact, "↓") {
 		t.Fatalf("compact render should keep streaming icon; got %q", compact)
 	}
 }
@@ -505,7 +570,7 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	full := stripANSI(m.renderActivityAt(a, 200, time.Now()))
-	if !strings.Contains(full, "⣿") && !strings.Contains(full, "⣶") {
+	if !strings.Contains(full, "↓") {
 		t.Fatalf("full render should keep streaming icon, got %q", full)
 	}
 	if !strings.Contains(full, " 20s") {
@@ -543,20 +608,20 @@ func TestRenderStatusBarUsesQueuedDraftStartWhenIdle(t *testing.T) {
 	}
 }
 
-func TestStatusBarDynamicCacheKeyBusyUsesAnimationFrameBucket(t *testing.T) {
+func TestStatusBarDynamicCacheKeyBusyUsesSecondBucket(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s"}
 	t0 := time.Unix(100, 0)
-	t1 := t0.Add(199 * time.Millisecond)
-	t2 := t0.Add(200 * time.Millisecond)
-	if got := m.statusBarDynamicCacheKeyAt(t0); got != "frame:500" {
-		t.Fatalf("busy cache key at t0 = %q, want frame:500", got)
+	t1 := t0.Add(999 * time.Millisecond)
+	t2 := t0.Add(time.Second)
+	if got := m.statusBarDynamicCacheKeyAt(t0); got != "sec:100" {
+		t.Fatalf("busy cache key at t0 = %q, want sec:100", got)
 	}
-	if got := m.statusBarDynamicCacheKeyAt(t1); got != "frame:500" {
-		t.Fatalf("busy cache key at t1 = %q, want frame:500", got)
+	if got := m.statusBarDynamicCacheKeyAt(t1); got != "sec:100" {
+		t.Fatalf("busy cache key at t1 = %q, want sec:100", got)
 	}
-	if got := m.statusBarDynamicCacheKeyAt(t2); got != "frame:501" {
-		t.Fatalf("busy cache key at t2 = %q, want frame:501", got)
+	if got := m.statusBarDynamicCacheKeyAt(t2); got != "sec:101" {
+		t.Fatalf("busy cache key at t2 = %q, want sec:101", got)
 	}
 }
 
@@ -625,7 +690,7 @@ func TestRenderActivityUsesQueuedDraftStartForTotal(t *testing.T) {
 	m.queuedDrafts = []queuedDraft{{ID: "draft-1", Content: "queued", DisplayContent: "queued", QueuedAt: queuedAt}}
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
-	if !strings.Contains(out, "⣿") && !strings.Contains(out, "⣶") {
+	if !strings.Contains(out, "↓") {
 		t.Fatalf("expected streaming icon in %q", out)
 	}
 }
@@ -650,7 +715,7 @@ func TestRenderActivityShowsUnifiedBusyElapsedStyle(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-20 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityConnecting, AgentID: "main"}
 	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
-	if !strings.Contains(out, "⇋ 20s") {
+	if !strings.Contains(out, "⠋ 20s") {
 		t.Fatalf("expected unified busy elapsed style in %q", out)
 	}
 }

@@ -44,7 +44,7 @@ func TestCompactionPillShowsBytesAndEvents(t *testing.T) {
 	// must surface the suffix.
 	m.compactionBgStatus.Bytes = 0
 	m.compactionBgStatus.Events = 3
-	if got := stripANSI(m.renderCompactionBackgroundPill(now)); !strings.Contains(got, "3 events") {
+	if got := stripANSI(m.renderCompactionBackgroundPill(now.Add(time.Second))); !strings.Contains(got, "3 events") {
 		t.Fatalf("compaction pill = %q, want events-only progress", got)
 	}
 }
@@ -151,7 +151,7 @@ func TestCompactionModelDrivenStartedShowsLabel(t *testing.T) {
 	}
 }
 
-func TestStatusBarFingerprintTracksCompactionProgressAndTimeFrame(t *testing.T) {
+func TestStatusBarFingerprintSamplesCompactionProgressOncePerSecond(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	now := time.Unix(1_700_000_000, 0)
 	m.compactionBgStatus = compactionBackgroundStatus{
@@ -163,8 +163,8 @@ func TestStatusBarFingerprintTracksCompactionProgressAndTimeFrame(t *testing.T) 
 
 	initial := m.statusBarFingerprint(now)
 	m.compactionBgStatus.Bytes = 16
-	if updated := m.statusBarFingerprint(now); updated == initial {
-		t.Fatal("status bar fingerprint did not change with compaction progress")
+	if updated := m.statusBarFingerprint(now.Add(200 * time.Millisecond)); updated != initial {
+		t.Fatal("status bar fingerprint changed with progress within a second")
 	}
 	if later := m.statusBarFingerprint(now.Add(compactionPillBreathPhase)); later == m.statusBarFingerprint(now) {
 		t.Fatal("status bar fingerprint did not change with compaction animation frame")

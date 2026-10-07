@@ -4,6 +4,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/agent"
 )
 
 const compactionStatusTerminalDuration = 2 * time.Second
@@ -54,20 +56,28 @@ func (m *Model) statusBarNextRefreshDelayAt(now time.Time) time.Duration {
 	if m == nil {
 		return 0
 	}
-	if m.viewport != nil && m.viewport.HasUserLocalShellPending() {
-		return 0
+	var delay time.Duration
+	if m.isFocusedAgentBusy() || (m.viewport != nil && m.viewport.HasUserLocalShellPending()) {
+		unit := time.Second
+		activity := m.activityForAgent(m.focusedAgentIDOrMain())
+		if m.currentCadence().visualAnimDelay > 0 && (activity.Type == agent.ActivityConnecting || ((activity.Type == "" || activity.Type == agent.ActivityIdle) && m.inflightDraft != nil)) {
+			unit = statusBarConnectingCadence
+		}
+		delay = nextTimeBucketTransition(now, unit)
 	}
-	// The active compaction indicator owns a fixed animation cadence. Without
-	// this, it refreshed once per second while idle but happened to refresh on
-	// the faster activity ticker during another model request.
 	if m.compactionBgStatus.Active {
-		return nextTimeBucketTransition(now, compactionPillBreathPhase)
+		candidate := nextTimeBucketTransition(now, compactionPillBreathPhase)
+		if delay == 0 || candidate < delay {
+			delay = candidate
+		}
+	} else if compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
+		candidate := min(nextTimeBucketTransition(now, time.Second), m.compactionBgStatus.TerminalAt.Add(compactionStatusTerminalDuration).Sub(now))
+		if delay == 0 || candidate < delay {
+			delay = candidate
+		}
 	}
-	if compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
-		return min(nextTimeBucketTransition(now, time.Second), m.compactionBgStatus.TerminalAt.Add(compactionStatusTerminalDuration).Sub(now))
-	}
-	if m.isFocusedAgentBusy() {
-		return 0
+	if delay > 0 {
+		return delay
 	}
 	if m.focusedAgentCanShowIdleSince() {
 		return nextTimeBucketTransition(now, time.Minute)
@@ -76,22 +86,37 @@ func (m *Model) statusBarNextRefreshDelayAt(now time.Time) time.Duration {
 }
 
 func (m *Model) scheduleStatusBarTick() tea.Cmd {
+	return m.scheduleStatusBarTickAt(time.Now())
+}
+
+func (m *Model) scheduleStatusBarTickAt(now time.Time) tea.Cmd {
 	if m == nil || m.statusBarTickScheduled {
 		return nil
 	}
-	delay := m.statusBarNextRefreshDelayAt(time.Now())
+	delay := m.statusBarNextRefreshDelayAt(now)
 	if delay <= 0 {
 		return nil
 	}
 	m.statusBarTickScheduled = true
+	m.statusBarTickAt = now.Add(delay)
 	return statusBarTickCmd(m.statusBarTickGeneration, delay)
 }
 
 func (m *Model) restartStatusBarTick() tea.Cmd {
+	return m.restartStatusBarTickAt(time.Now())
+}
+
+func (m *Model) restartStatusBarTickAt(now time.Time) tea.Cmd {
 	if m == nil {
+		return nil
+	}
+	// Progress events share the pending tick unless a transition needs an
+	// earlier refresh. Repeated updates must not create extra timers.
+	delay := m.statusBarNextRefreshDelayAt(now)
+	if m.statusBarTickScheduled && delay > 0 && !now.Add(delay).Before(m.statusBarTickAt) {
 		return nil
 	}
 	m.statusBarTickGeneration++
 	m.statusBarTickScheduled = false
-	return m.scheduleStatusBarTick()
+	return m.scheduleStatusBarTickAt(now)
 }

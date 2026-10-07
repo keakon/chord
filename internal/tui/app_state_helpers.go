@@ -30,6 +30,7 @@ type activityRuntimeState struct {
 }
 
 type renderCacheState struct {
+	statusBarCadence            statusBarCadenceState
 	statusBarAgentSnapshotDirty bool
 }
 
@@ -49,6 +50,7 @@ type renderRuntimeState struct {
 	activitySpinnerFrameIndex        int
 	statusBarTickGeneration          uint64
 	statusBarTickScheduled           bool
+	statusBarTickAt                  time.Time
 	terminalTitleTickRunning         bool
 	terminalTitleTickGeneration      uint64
 	terminalTitleTickerMode          terminalTitleMode

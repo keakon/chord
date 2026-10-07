@@ -1306,8 +1306,8 @@ func TestCompactionRebuildPreservesActiveMainRequest(t *testing.T) {
 	if _, ok := m.activities["agent-1"]; ok {
 		t.Fatal("compaction rebuild should not preserve unrelated sub-agent activity")
 	}
-	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "Connecting") {
-		t.Fatalf("status bar after compaction rebuild should show request activity, got %q", plain)
+	if plain := stripANSI(m.renderStatusBar()); strings.Contains(plain, "Connecting") || (!strings.Contains(plain, "⠋") && !strings.Contains(plain, "⠹") && !strings.Contains(plain, "⠴") && !strings.Contains(plain, "⠧")) {
+		t.Fatalf("status bar after compaction rebuild should show compact request activity, got %q", plain)
 	}
 	blocks := m.viewport.visibleBlocks()
 	if len(blocks) != 1 || blocks[0].Type != BlockCompactionSummary {
