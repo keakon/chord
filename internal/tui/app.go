@@ -1004,6 +1004,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, m.imageProtocolCmd()
 
 	// -- clipboard text paste ---------------------------------------------
+	case composerClipboardTextMsg:
+		return m, m.handleComposerClipboardText(msg)
+
 	case clipboardTextMsg:
 		if m.mode == ModeConfirm && m.confirm.editing {
 			m.confirm.editInput.InsertString(string(msg))
@@ -1020,14 +1023,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			m.recalcViewportSize()
 			return m, nil
 		}
-		m.input.ClearSelection()
-		if m.input.InsertLargePaste(string(msg)) {
-			m.input.syncHeight()
-			cmd := m.syncAtMentionIfOpen()
-			m.recalcViewportSize()
-			return m, cmd
-		}
-		return m, m.insertComposerText(string(msg))
+		return m, nil
 
 	case atMentionFilesLoadedMsg:
 		if msg.workDir != m.workingDir || msg.generation != m.workingDirGeneration {

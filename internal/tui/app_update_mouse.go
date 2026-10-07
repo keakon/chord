@@ -452,7 +452,7 @@ func (m *Model) handleInfoPanelMouseClick(mouse tea.Mouse) tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleInputSelectionClick(mouse tea.Mouse, line, col int) bool {
+func (m *Model) handleInputSelectionClick(mouse tea.Mouse, x, y int) bool {
 	m.clearMouseSelection()
 
 	now := time.Now()
@@ -467,40 +467,31 @@ func (m *Model) handleInputSelectionClick(mouse tea.Mouse, line, col int) bool {
 	m.inputLastClickX = mouse.X
 	m.inputLastClickY = mouse.Y
 
-	content, ok := m.input.visibleContentLine(line)
+	offset, ok := m.input.SelectionPositionAt(x, y)
 	if !ok {
 		m.input.ClearSelection()
 		m.inputMouseDown = false
 		return false
 	}
-
-	if m.inputClickCount == 2 {
-		sCol, eCol := WordBoundsAtCol(content, col)
-		if sCol < eCol {
-			m.input.StartSelection(line, sCol)
-			m.input.UpdateSelection(line, eCol)
+	row := m.input.selectionDisplayRows()[y+m.input.ScrollYOffset()]
+	_, characterHit := m.input.RunePositionAt(x, y)
+	if m.inputClickCount == 2 && characterHit {
+		start, end := m.input.selectionWordRange(offset, row)
+		if start < end {
+			m.input.SelectRuneRange(start, end)
 			m.inputMouseDown = false
-		} else {
-			m.input.StartSelection(line, col)
-			m.inputMouseDown = true
+			return true
 		}
-		return true
 	}
 	if m.inputClickCount >= 3 {
 		m.inputClickCount = 0
-		lineWidth := selectionPlainTextWidth(content)
-		if lineWidth > 0 {
-			m.input.StartSelection(line, 0)
-			m.input.UpdateSelection(line, lineWidth)
+		if row.start < row.end {
+			m.input.SelectRuneRange(row.start, row.end)
 			m.inputMouseDown = false
-		} else {
-			m.input.StartSelection(line, col)
-			m.inputMouseDown = true
+			return true
 		}
-		return true
 	}
-
-	m.input.StartSelection(line, col)
+	m.input.StartSelection(offset)
 	m.inputMouseDown = true
 	return true
 }
@@ -517,15 +508,7 @@ func (m *Model) handleInputZoneMouseClick(mouse tea.Mouse, hits mouseHitZones) (
 			}
 			return nil, false
 		}
-		if line, col, ok := m.input.SelectionPointAt(
-			mouse.Y-m.layout.input.Min.Y-1,
-			mouse.X-m.layout.input.Min.X-inputPromptWidth,
-		); ok {
-			m.handleInputSelectionClick(mouse, line, col)
-		} else {
-			m.input.ClearSelection()
-			m.inputMouseDown = false
-		}
+		m.handleInputSelectionClick(mouse, mouse.X-m.layout.input.Min.X, mouse.Y-m.layout.input.Min.Y-1)
 		return nil, true
 	}
 	// Normal mode: click in input zone -> switch to Insert and focus.
@@ -533,15 +516,7 @@ func (m *Model) handleInputZoneMouseClick(mouse tea.Mouse, hits mouseHitZones) (
 		m.switchModeWithIME(ModeInsert)
 		m.recalcViewportSize()
 		m.clearFocusedBlock()
-		if line, col, ok := m.input.SelectionPointAt(
-			mouse.Y-m.layout.input.Min.Y-1,
-			mouse.X-m.layout.input.Min.X-inputPromptWidth,
-		); ok {
-			m.handleInputSelectionClick(mouse, line, col)
-		} else {
-			m.input.ClearSelection()
-			m.inputMouseDown = false
-		}
+		m.handleInputSelectionClick(mouse, mouse.X-m.layout.input.Min.X, mouse.Y-m.layout.input.Min.Y-1)
 		return m.input.Focus(), true
 	}
 	return nil, false
@@ -683,11 +658,8 @@ func (m *Model) handleOutsideViewportMouseClick(mouse tea.Mouse) tea.Cmd {
 
 func (m *Model) handleMouseMotion(mouse tea.Mouse, hits mouseHitZones) tea.Cmd {
 	if m.inputMouseDown && hits.inInputZone {
-		if line, col, ok := m.input.SelectionPointAt(
-			mouse.Y-m.layout.input.Min.Y-1,
-			mouse.X-m.layout.input.Min.X-inputPromptWidth,
-		); ok {
-			m.input.UpdateSelection(line, col)
+		if offset, ok := m.input.SelectionPositionAt(mouse.X-m.layout.input.Min.X, mouse.Y-m.layout.input.Min.Y-1); ok {
+			m.input.UpdateSelection(offset)
 		}
 		return nil
 	}

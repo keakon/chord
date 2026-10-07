@@ -28,13 +28,13 @@ func TestViewRebuildsInputRenderWhenBangModeChanges(t *testing.T) {
 func TestViewRebuildsInputRenderWhenSelectionRangeChanges(t *testing.T) {
 	m := NewModelWithSize(nil, 24, 12)
 	m.input.SetValue("abcdef")
-	m.input.StartSelection(0, 1)
-	m.input.UpdateSelection(0, 3)
+	m.input.StartSelection(1)
+	m.input.UpdateSelection(3)
 
 	_ = m.View()
 	before := m.cachedInputRender.text
 
-	m.input.UpdateSelection(0, 5)
+	m.input.UpdateSelection(5)
 	_ = m.View()
 	after := m.cachedInputRender.text
 

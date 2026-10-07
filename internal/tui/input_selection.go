@@ -11,91 +11,101 @@ import (
 
 const inputPromptWidth = 2
 
+// Endpoints index runes in the display buffer, independent of wrapping and scroll.
 type inputSelection struct {
-	active              bool
-	startLine, startCol int
-	endLine, endCol     int
+	active       bool
+	anchor, head int
 }
 
-func (s inputSelection) empty() bool {
-	return !s.active || (s.startLine == s.endLine && s.startCol == s.endCol)
-}
-
-func (s inputSelection) normalized() inputSelection {
-	if !s.active {
-		return s
-	}
-	if s.endLine < s.startLine || (s.endLine == s.startLine && s.endCol < s.startCol) {
-		s.startLine, s.endLine = s.endLine, s.startLine
-		s.startCol, s.endCol = s.endCol, s.startCol
-	}
-	return s
-}
+func (s inputSelection) empty() bool { return !s.active || s.anchor == s.head }
 
 func (i *Input) ClearSelection() {
+	if i.selection.active {
+		i.interactionVersion++
+	}
 	i.selection = inputSelection{}
 }
 
-func (i *Input) HasSelection() bool {
-	return !i.selection.empty()
+func (i *Input) HasSelection() bool             { return !i.selection.empty() }
+func (i *Input) SelectionState() inputSelection { return i.selection }
+
+func (i *Input) StartSelection(offset int) {
+	offset = i.graphemeBoundary(offset, false)
+	i.selection = inputSelection{active: true, anchor: offset, head: offset}
+	i.interactionVersion++
+	i.setCursorRuneOffset(offset)
+	i.ensureCursorOutsideInlinePastes()
 }
 
-func (i *Input) SelectionState() inputSelection {
-	return i.selection
-}
-
-func (i *Input) StartSelection(line, col int) {
-	i.selection = inputSelection{
-		active:    true,
-		startLine: line,
-		startCol:  col,
-		endLine:   line,
-		endCol:    col,
-	}
-}
-
-func (i *Input) UpdateSelection(line, col int) {
+func (i *Input) UpdateSelection(offset int) {
 	if !i.selection.active {
-		i.StartSelection(line, col)
+		i.StartSelection(offset)
 		return
 	}
-	i.selection.endLine = line
-	i.selection.endCol = col
+	offset = i.graphemeBoundary(offset, offset > i.selection.anchor)
+	if i.selection.head != offset {
+		i.interactionVersion++
+	}
+	i.selection.head = offset
+	start, end, selected := i.SelectionRange()
+	cursor := offset
+	if selected {
+		cursor = end
+		if offset < i.selection.anchor {
+			cursor = start
+		}
+	}
+	i.setCursorRuneOffset(cursor)
 }
 
-// SelectionPointAt maps a visible input row and content column to a clamped
-// selection point. The returned column is relative to the content area (prompt excluded).
-func (i *Input) SelectionPointAt(displayLine, contentCol int) (line, col int, ok bool) {
-	content, ok := i.visibleContentLine(displayLine)
-	if !ok {
+// SelectionRange expands non-empty intersections to complete graphemes and objects.
+func (i *Input) SelectionRange() (start, end int, ok bool) {
+	if !i.HasSelection() {
 		return 0, 0, false
 	}
-	if contentCol < 0 {
-		contentCol = 0
+	start, end = min(i.selection.anchor, i.selection.head), max(i.selection.anchor, i.selection.head)
+	start = i.graphemeBoundary(start, false)
+	end = i.graphemeBoundary(end, true)
+	for _, paste := range i.inlinePastes {
+		if start < paste.End && end > paste.Start {
+			start, end = min(start, paste.Start), max(end, paste.End)
+		}
 	}
-	width := ansi.StringWidth(content)
-	if contentCol > width {
-		contentCol = width
-	}
-	return displayLine, contentCol, true
+	return start, end, start < end
 }
 
-// ViewWithSelection renders the textarea and overlays a reverse-video highlight
-// for the current visible selection, if any.
+func (i *Input) SelectRuneRange(start, end int) {
+	i.StartSelection(start)
+	i.UpdateSelection(end)
+}
+
+func (i *Input) SelectionText() string {
+	start, end, ok := i.SelectionRange()
+	if !ok {
+		return ""
+	}
+	return string([]rune(i.DisplayValue())[start:end])
+}
+
 func (i *Input) ViewWithSelection() string {
 	view := i.textarea.View()
-	if !i.HasSelection() {
+	start, end, ok := i.SelectionRange()
+	if !ok {
 		return view
 	}
 	lines := splitRenderedLines(view)
-	visibleCount := i.visibleContentLineCount()
-	sel := i.selection.normalized()
-	for idx := 0; idx < len(lines) && idx < visibleCount; idx++ {
-		colStart, colEnd, inRange := inputSelectionColRange(idx, sel)
-		if !inRange {
+	rows := i.selectionDisplayRows()
+	offset := i.ScrollYOffset()
+	for y := 0; y < len(lines) && y < i.Height() && y+offset < len(rows); y++ {
+		row := rows[y+offset]
+		from, to := max(start, row.start), min(end, row.end)
+		if from >= to {
 			continue
 		}
-		lines[idx] = applyHighlightToLine(lines[idx], inputPromptWidth+colStart, inputPromptWidth+colEnd)
+		content := []rune(row.text)
+		x1 := ansi.StringWidth(string(content[:from-row.start]))
+		x2 := ansi.StringWidth(string(content[:to-row.start]))
+		lines[y] = highlightInputColumns(lines[y], inputPromptWidth+x1, inputPromptWidth+x2)
 	}
 	out := strings.Join(lines, "\n")
 	if strings.HasSuffix(view, "\n") {
@@ -104,141 +114,49 @@ func (i *Input) ViewWithSelection() string {
 	return out
 }
 
-// SelectionText returns the selected text from the currently visible input content.
-// The minimal input-selection feature is intentionally view-based: wrapped lines are
-// copied as visible lines, rather than reconstructing the underlying unwrapped buffer.
-func (i *Input) SelectionText() string {
-	if !i.HasSelection() {
-		return ""
-	}
-	sel := i.selection.normalized()
-	var parts []string
-	for line := sel.startLine; line <= sel.endLine; line++ {
-		content, ok := i.visibleContentLine(line)
-		if !ok {
-			continue
+// DecodeSequence advances by whole graphemes while keeping the original ANSI
+// bytes and surface styles. Rune-width slicing would split combining emoji.
+func highlightInputColumns(line string, from, to int) string {
+	start, end, column, offset := -1, -1, 0, 0
+	var state byte
+	for offset < len(line) {
+		_, width, n, next := ansi.DecodeSequence(line[offset:], state, nil)
+		if n == 0 {
+			break
 		}
-		colStart, colEnd, inRange := inputSelectionColRange(line, sel)
-		if !inRange {
-			continue
+		state = next
+		if width > 0 {
+			if column >= to {
+				break
+			}
+			if column >= from {
+				if start < 0 {
+					start = offset
+				}
+				end = offset + n
+			}
+			column += width
+		} else if start >= 0 {
+			end = offset + n
 		}
-		width := ansi.StringWidth(content)
-		if colStart > width {
-			colStart = width
-		}
-		if colEnd > width {
-			colEnd = width
-		}
-		segment := extractPlainByColumns(content, colStart, colEnd)
-		segment = strings.TrimRight(segment, " ")
-		if line != sel.startLine || line != sel.endLine || segment != "" {
-			parts = append(parts, segment)
-		}
+		offset += n
 	}
-	return strings.TrimRight(strings.Join(parts, "\n"), "\n")
-}
-
-func (i *Input) visibleContentLine(displayLine int) (string, bool) {
-	lines := i.visibleWrappedContentLines()
-	if displayLine < 0 || displayLine >= len(lines) {
-		return "", false
+	if start < 0 || end <= start {
+		return line
 	}
-	return strings.TrimRight(lines[displayLine], " "), true
-}
-
-func (i *Input) visibleContentLineCount() int {
-	total := i.totalDisplayLineCount()
-	offset := i.textarea.ScrollYOffset()
-	if total <= offset {
-		return 0
-	}
-	visible := total - offset
-	if height := i.textarea.Height(); visible > height {
-		visible = height
-	}
-	return visible
+	const on, off = "\x1b[7m", "\x1b[27m"
+	selected := ansiSGRRegex.ReplaceAllString(line[start:end], "$0"+on)
+	return line[:start] + on + selected + off + line[end:]
 }
 
 func (i *Input) totalDisplayLineCount() int {
-	lines := i.wrappedContentLines()
-	if len(lines) == 0 {
-		return 1
-	}
-	return len(lines)
+	return len(i.selectionDisplayRows())
 }
 
-func (i *Input) visibleWrappedContentLines() []string {
-	all := i.wrappedContentLines()
-	if len(all) == 0 {
-		return []string{""}
-	}
-	offset := max(i.textarea.ScrollYOffset(), 0)
-	if offset >= len(all) {
-		return []string{""}
-	}
-	visible := len(all) - offset
-	if height := i.textarea.Height(); visible > height {
-		visible = height
-	}
-	return all[offset : offset+visible]
-}
-
-func (i *Input) wrappedContentLines() []string {
-	width := i.inputContentWidth()
-	rawLines := strings.Split(i.textarea.Value(), "\n")
-	if len(rawLines) == 0 {
-		return []string{""}
-	}
-	out := make([]string, 0, len(rawLines))
-	for _, line := range rawLines {
-		wrapped := inputWrap([]rune(line), width)
-		if len(wrapped) == 0 {
-			out = append(out, "")
-			continue
-		}
-		for _, row := range wrapped {
-			out = append(out, string(row))
-		}
-	}
-	if len(out) == 0 {
-		return []string{""}
-	}
-	return out
-}
-
-func (i *Input) inputContentWidth() int {
-	width := i.textarea.Width()
-	if width < 1 {
-		return 1
-	}
-	return width
-}
+func (i *Input) inputContentWidth() int { return max(i.textarea.Width(), 1) }
 
 func splitRenderedLines(view string) []string {
-	view = strings.TrimSuffix(view, "\n")
-	if view == "" {
-		return []string{""}
-	}
-	return strings.Split(view, "\n")
-}
-
-func inputSelectionColRange(line int, sel inputSelection) (colStart, colEnd int, inRange bool) {
-	if !sel.active {
-		return 0, 0, false
-	}
-	if line < sel.startLine || line > sel.endLine {
-		return 0, 0, false
-	}
-	inRange = true
-	if line == sel.startLine {
-		colStart = sel.startCol
-	}
-	if line == sel.endLine {
-		colEnd = sel.endCol
-	} else {
-		colEnd = 1 << 30
-	}
-	return colStart, colEnd, inRange
+	return strings.Split(strings.TrimSuffix(view, "\n"), "\n")
 }
 
 func inputWrap(runes []rune, width int) [][]rune {

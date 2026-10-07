@@ -107,7 +107,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	if keyMatches(key, m.keyMap.InsertUndo) {
 		return m.undoComposerEdit()
 	}
-	defer m.beginComposerEdit(msg.Key().Text != "" && key != "!")()
+	defer m.beginComposerEdit(isComposerTextKey(msg) && key != "!" && !m.input.HasSelection())()
 	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
 		return cmd
 	}
@@ -121,6 +121,25 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	m.clearPendingQuit()
+	// Business bindings retain priority over textarea editing bindings.
+	composerAction := keyMatches(key, m.keyMap.InsertEscape) || keyMatches(key, m.keyMap.InsertSubmit) ||
+		keyMatches(key, m.keyMap.InsertAttachClipboard) || keyMatches(key, m.keyMap.InsertAttachFile) ||
+		keyMatches(key, m.keyMap.InsertClearInput) || keyMatches(key, m.keyMap.SwitchRole) ||
+		keyMatches(key, m.keyMap.SwitchAgent) || keyMatches(key, m.keyMap.SwitchModel) ||
+		keyMatches(key, m.keyMap.InsertPageUp) || keyMatches(key, m.keyMap.InsertPageDown)
+	if !composerAction {
+		if cmd, handled := m.input.handleSelectionKey(msg); handled {
+			m.syncAttachmentsToInlineImagePlaceholders()
+			m.input.syncHeight()
+			m.recalcViewportSize()
+			if key == "@" && !m.atMentionOpen {
+				return tea.Batch(cmd, m.openAtMentionAtCursor())
+			}
+			return tea.Batch(cmd, m.syncAtMentionIfOpen())
+		}
+	}
+	// Copy/selection bindings have already been handled. Other positioning and
+	// mode actions cancel the range before following their normal route.
 	if key != "" {
 		m.input.ClearSelection()
 	}
@@ -542,21 +561,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		if key == "tab" {
 			return nil
 		}
-		if key == "@" && !m.atMentionOpen {
-			col := m.input.Column()
-			curLine := m.input.Line()
-			row, _ := inputLineAt(m.input.Value(), curLine)
-			if canTriggerAtMention(row, col) {
-				cmd := m.input.Update(msg)
-				m.input.syncHeight()
-				m.recalcViewportSize()
-				m.atMentionOpen = true
-				m.atMentionLine = curLine
-				m.atMentionTriggerCol = m.input.Column()
-				m.atMentionQuery = ""
-				return tea.Batch(cmd, m.syncAtMentionQuery())
-			}
-		}
+
 		cmd := m.input.Update(msg)
 		m.syncAttachmentsToInlineImagePlaceholders()
 		m.input.syncHeight()
@@ -564,7 +569,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		if m.atMentionOpen {
 			cmd = tea.Batch(cmd, m.syncAtMentionQuery())
 		} else if key == "@" {
-			m.closeAtMention()
+			cmd = tea.Batch(cmd, m.openAtMentionAtCursor())
 		}
 		return cmd
 	}

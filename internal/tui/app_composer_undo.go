@@ -89,6 +89,8 @@ func (m *Model) beginComposerEdit(typing bool) func() {
 			m.composerUndo.typing = false
 			return
 		}
+		// Include attachment-only edits in clipboard request invalidation.
+		m.input.interactionVersion++
 		now := time.Now()
 		cursor := runeOffsetFromRowCol(before.draft.Entry.Display, before.draft.Row, before.draft.Col)
 		merge := typing && m.composerUndo.typing && now.Sub(m.composerUndo.lastEdit) <= composerTypingWindow && cursor == m.composerUndo.lastCursor

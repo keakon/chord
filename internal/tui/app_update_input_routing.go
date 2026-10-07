@@ -294,8 +294,14 @@ func (m *Model) syncAttachmentsToInlineImagePlaceholders() {
 
 func (m *Model) insertComposerText(text string) tea.Cmd {
 	defer m.beginComposerEdit(false)()
-	m.input.ClearSelection()
-	if !m.input.InsertLargePaste(text) {
+	if text == "" {
+		return nil
+	}
+	if m.input.HasSelection() {
+		if !m.input.ReplaceSelectionWithTextPaste(text) {
+			return nil
+		}
+	} else if !m.input.InsertLargePaste(text) {
 		m.input.InsertStringPreserveInlinePastes(text)
 	}
 	m.syncAttachmentsToInlineImagePlaceholders()
@@ -336,7 +342,7 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 			if suppress {
 				return nil
 			}
-			if strings.TrimSpace(pm.Content) == "" {
+			if pm.Content == "" {
 				return nil
 			}
 			return m.insertComposerText(pm.Content)

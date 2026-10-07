@@ -32,7 +32,7 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 		switch m.mode {
 		case ModeInsert:
 			m.clipboardPasteSuppressUntil = time.Now().Add(150 * time.Millisecond)
-			return pasteTextFromClipboard()
+			return m.pasteComposerTextFromClipboard()
 		case ModeConfirm:
 			if m.confirm.editing || m.confirm.denyingWithReason {
 				return pasteTextFromClipboard()

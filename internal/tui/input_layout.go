@@ -10,7 +10,7 @@ const (
 // clampedDisplayLineCount returns the number of visible rows after soft wrap (same rules
 // as selection / bubbles textarea), clamped to [inputMinLines, inputMaxLines].
 // Result is cached by (value, width) so repeated calls during View()/recalcViewportSize()
-// do not re-run the expensive wrappedContentLines() on every streaming token.
+// do not re-run wrapped layout projection on every streaming token.
 func (i *Input) clampedDisplayLineCount() int {
 	val := i.textarea.Value()
 	width := i.inputContentWidth()

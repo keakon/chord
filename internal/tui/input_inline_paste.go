@@ -48,37 +48,11 @@ func (i *Input) inlinePastesValid() bool {
 }
 
 func (i *Input) rebuildDisplay(display string, cursor int) {
+	i.interactionVersion++
 	i.textarea.SetValue(display)
 	row, col := rowColFromRuneOffset(display, cursor)
 
-	// Restore cursor after a SetValue() rebuild.
-	//
-	// CursorDown moves by visual (soft-wrapped) rows. Instead of trying to map a
-	// logical row to a visual row (which depends on wrap width), we advance until
-	// textarea's logical line index matches the target. We include a conservative
-	// guard to prevent accidental infinite loops if upstream cursor movement rules
-	// ever change.
-	i.textarea.MoveToBegin()
-	guard := 0
-	for i.textarea.Line() < row {
-		prevLine := i.textarea.Line()
-		i.textarea.CursorDown()
-		guard++
-		if guard > 10000 {
-			break
-		}
-		// If we didn't advance the logical line, we are still walking soft-wrapped
-		// rows within the same logical line; continue.
-		if i.textarea.Line() == prevLine {
-			continue
-		}
-	}
-	// If we bailed out via guard, fall back to end-of-input rather than leaving
-	// the cursor at the top.
-	if i.textarea.Line() < row {
-		i.textarea.MoveToEnd()
-	}
-	i.textarea.SetCursorColumn(col)
+	i.SetCursorPosition(row, col)
 }
 
 func (i *Input) RemoveInlinePasteAtCursor() (inlineLargePaste, bool) {
@@ -179,6 +153,7 @@ func (i *Input) insertInlinePaste(paste *inlineLargePaste) bool {
 	if paste == nil {
 		return false
 	}
+	i.ensureCursorOutsideInlinePastes()
 	display := i.DisplayValue()
 	cursor := runeOffsetFromRowCol(display, i.Line(), i.Column())
 	displayRunes := []rune(display)

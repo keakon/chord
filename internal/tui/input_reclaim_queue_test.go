@@ -18,7 +18,7 @@ func TestClipboardTextPasteShortInsertsIntoComposer(t *testing.T) {
 	m := NewModel(nil)
 	m.mode = ModeInsert
 
-	updated, cmd := m.Update(clipboardTextMsg("line1\nline2"))
+	updated, cmd := m.Update(composerClipboardTextMsg{target: m.composerClipboardTarget(), text: "line1\nline2"})
 	model := updated.(*Model)
 	if cmd != nil {
 		t.Fatalf("clipboard short paste command = %#v, want nil", cmd)
@@ -39,7 +39,7 @@ func TestClipboardTextPasteUpdatesAtMentionQuery(t *testing.T) {
 	m.atMentionLine = 0
 	m.atMentionTriggerCol = 1
 
-	updated, _ := m.Update(clipboardTextMsg("docs/RATE_LIMIT_PLAN.md"))
+	updated, _ := m.Update(composerClipboardTextMsg{target: m.composerClipboardTarget(), text: "docs/RATE_LIMIT_PLAN.md"})
 	model := updated.(*Model)
 
 	if got := model.atMentionQuery; got != "docs/RATE_LIMIT_PLAN.md" {
@@ -55,7 +55,7 @@ func TestClipboardTextPasteLongUsesInlinePlaceholder(t *testing.T) {
 	m.mode = ModeInsert
 	text := strings.Join([]string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}, "\n")
 
-	updated, _ := m.Update(clipboardTextMsg(text))
+	updated, _ := m.Update(composerClipboardTextMsg{target: m.composerClipboardTarget(), text: text})
 	model := updated.(*Model)
 	if got := model.input.Value(); got != "[Pasted text #1 +11 lines]" {
 		t.Fatalf("input value = %q, want inline placeholder", got)

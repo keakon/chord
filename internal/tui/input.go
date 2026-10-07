@@ -6,3 +6,6 @@ package tui
 // - input_history.go
 // - input_layout.go
 // - input_selection.go
+// - input_selection_position.go
+// - input_selection_keys.go
+// - input_selection_edit.go

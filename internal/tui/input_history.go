@@ -46,7 +46,7 @@ func (i *Input) PushHistory(entry inputHistoryEntry) {
 // If the cursor is not on the first line, it moves the cursor up instead and returns false.
 func (i *Input) HistoryUp() bool {
 	if i.textarea.Line() > 0 {
-		i.textarea.CursorUp()
+		i.moveCursorVertical(false)
 		return false
 	}
 	if len(i.history) == 0 {
@@ -68,7 +68,7 @@ func (i *Input) HistoryUp() bool {
 // If the cursor is not on the last line, it moves the cursor down instead and returns false.
 func (i *Input) HistoryDown() bool {
 	if i.textarea.Line() < i.textarea.LineCount()-1 {
-		i.textarea.CursorDown()
+		i.moveCursorVertical(true)
 		return false
 	}
 	if i.histIdx >= len(i.history) {

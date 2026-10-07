@@ -7,6 +7,22 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 )
 
+// openAtMentionAtCursor uses the position after insertion, including selection
+// replacements, so completion and ordinary typing share the same trigger rule.
+func (m *Model) openAtMentionAtCursor() tea.Cmd {
+	line, col := m.input.Line(), m.input.Column()
+	row, _ := inputLineAt(m.input.Value(), line)
+	runes := []rune(row)
+	if col <= 0 || col > len(runes) || runes[col-1] != '@' || !canTriggerAtMention(row, col-1) {
+		m.closeAtMention()
+		return nil
+	}
+	m.atMentionOpen = true
+	m.atMentionLine, m.atMentionTriggerCol = line, col
+	m.atMentionQuery = ""
+	return m.syncAtMentionQuery()
+}
+
 func (m *Model) syncAtMentionIfOpen() tea.Cmd {
 	if !m.atMentionOpen {
 		return nil

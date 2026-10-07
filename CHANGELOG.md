@@ -30,6 +30,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- Composer selections can be deleted or replaced by typing, newlines, or text paste, including complete image and large-paste placeholders; one undo restores the entire edit.
+
 - Add `/status` in the TUI to view live runtime information at any terminal width, with keyboard navigation and mouse interaction.
 
 - The built-in catalog contains 31 verified models and 20 preset bindings, pinned to chord-models `v2026-10-05.5`. It records published limits, modalities, pricing, and model behavior recipes. `chord config add` connects supported official endpoints and writes required protocol settings; custom URLs can explicitly borrow model facts with `--catalog`.

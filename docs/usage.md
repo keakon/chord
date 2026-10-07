@@ -141,6 +141,17 @@ Cancelling a turn does not mute the jobs it left behind either. When one finishe
 
 The terminal title spinner keeps turning while only background jobs are running. With the window unfocused, that spinner is the only sign of life.
 
+## Editing a composer selection
+
+Drag to select text in the main composer. `Backspace` or `Delete` removes the entire selection; typing, inserting a newline, or pasting text replaces it. `Enter` still sends the message; use `Shift+Enter` or `Ctrl+J` for a newline. Left and Right collapse the selection to its start and end, respectively. `Esc` clears it and leaves Insert mode.
+
+- `Shift+Left` / `Shift+Right` extend the selection; add `Alt` or `Ctrl` to extend by word. `Shift+Up` / `Shift+Down` extend by display row. Ordinary Up and Down still navigate input history.
+- Images and large-paste placeholders are selected as complete objects. Touching any part selects and edits the whole object; deleting an image placeholder also removes its attachment.
+- `Ctrl+Z` undoes the entire deletion or replacement, restoring text, the cursor, placeholders, and attachments.
+- If text, the cursor, or the selection changes while `Cmd+V` reads the clipboard, Chord preserves the current draft and asks you to paste again. Empty clipboard contents or a failed read leave the draft intact.
+
+Resizing and scrolling keep the same source text selected. Switching agents, recalling history, and sending clear the selection. These operations require the terminal to forward mouse events to Chord; native terminal selections support copying only.
+
 ## File mentions (`@path`)
 
 Type `@` in the composer at the start of a line or after a space to open file completion.
@@ -424,9 +435,9 @@ Common actions:
 
 ## Copying text
 
-- Drag in the transcript to select text inside the TUI
+- Drag in the transcript or main composer to select text. Composer selections preserve actual newlines and trailing spaces when copied, without adding soft line breaks. `Ctrl+Shift+C` copies the composer selection.
 - `yy` copies the focused message card; tool cards are copied as Markdown with `# Tool call`, `## Arguments`, `## Result`, and `## Diff` sections (`edit` cards use `## old_string` / `## new_string` for the replaced text instead, plus `## replace_all` only when it is enabled). Done rejection reasons are copied in a separate `## Rejection reason` section.
-- `Cmd+C`: copy the current transcript selection in macOS terminals that forward the key to Chord; when a confirmation dialog input is focused, copies that input instead
+- `Cmd+C`: copy the current transcript or composer selection in macOS terminals that forward the key to Chord; when a confirmation dialog input is focused, copies that input instead
 - `Ctrl+C`: press twice to quit; in a dialog it acts like `Esc` and is not used for transcript copy
 
 ## Headless

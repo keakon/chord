@@ -29,18 +29,23 @@ type Input struct {
 	histIdx  int // index into history; len(history) means "current (new) entry"
 	draft    inputDraftSnapshot
 	// shellLine: heap bool so PromptFunc (closure) stays correct when Input is copied into Model.
-	shellLine    *bool
-	selection    inputSelection
-	inlinePastes []inlineLargePaste
-	nextPasteSeq int
-	editBoundary uint64
+	shellLine          *bool
+	selection          inputSelection
+	selectionKeys      inputSelectionKeys
+	interactionVersion uint64
+	inlinePastes       []inlineLargePaste
+	nextPasteSeq       int
+	editBoundary       uint64
 
 	// displayLineCache caches the result of clampedDisplayLineCount to avoid
-	// re-running the expensive wrappedContentLines() on every View()/recalcViewportSize().
+	// re-running wrapped layout projection on every View()/recalcViewportSize().
 	// Invalidated when content or width changes.
 	displayLineCacheResult int
 	displayLineCacheVal    string
 	displayLineCacheWidth  int
+	selectionRows          []inputDisplayRow
+	selectionRowsValue     string
+	selectionRowsWidth     int
 }
 
 // NewInput creates a focused Input ready for use.
@@ -70,12 +75,13 @@ func NewInput() Input {
 	// Disable up/down line navigation so parent can use them for history.
 	km.LineNext.SetKeys()
 	km.LinePrevious.SetKeys()
+	selectionKeys := disableTextareaSelection(&km)
 	ta.KeyMap = km
 
 	ta.SetStyles(newTextareaStyles())
 	ta.SetVirtualCursor(false)
 	ta.Focus()
-	return Input{textarea: ta, shellLine: shell}
+	return Input{textarea: ta, shellLine: shell, selectionKeys: selectionKeys}
 }
 
 // SyncNewlineKeys updates the textarea's internal InsertNewline binding to match
@@ -89,6 +95,7 @@ func (i *Input) SyncNewlineKeys(keys []string) {
 
 // SetBangMode switches the first-line prompt between "> " and "! " (shell line).
 func (i *Input) SetBangMode(on bool) {
+	i.interactionVersion++
 	if i.shellLine == nil {
 		i.shellLine = new(bool)
 	}
@@ -117,6 +124,7 @@ func (i *Input) Focus() tea.Cmd {
 
 // Blur removes focus from the underlying textarea.
 func (i *Input) Blur() {
+	i.ClearSelection()
 	i.textarea.Blur()
 }
 
@@ -143,6 +151,7 @@ func (i *Input) draftSnapshot() inputDraftSnapshot {
 }
 
 func (i *Input) applyHistoryEntry(entry inputHistoryEntry) {
+	i.interactionVersion++
 	i.editBoundary++
 	if i.shellLine == nil {
 		i.shellLine = new(bool)
@@ -165,6 +174,7 @@ func (i *Input) applyDraftSnapshot(snapshot inputDraftSnapshot) {
 }
 
 func (i *Input) SetValue(s string) {
+	i.interactionVersion++
 	if i.shellLine != nil {
 		*i.shellLine = false
 	}
@@ -175,6 +185,7 @@ func (i *Input) SetValue(s string) {
 
 // InsertString inserts a string at the current cursor position.
 func (i *Input) InsertString(s string) {
+	i.interactionVersion++
 	i.textarea.InsertString(s)
 	i.inlinePastes = nil
 	i.ClearSelection()
@@ -183,7 +194,6 @@ func (i *Input) InsertString(s string) {
 // SetWidth adjusts the textarea width (call on resize).
 func (i *Input) SetWidth(w int) {
 	i.textarea.SetWidth(w)
-	i.ClearSelection()
 }
 
 // SetHeight adjusts the visible height of the textarea (content lines, excluding border).
@@ -269,7 +279,22 @@ func remapInlinePastesAfterEdit(before, after string, pastes []inlineLargePaste)
 // Update forwards a tea.Msg to the underlying textarea.
 // Note: height syncing is handled by the parent (app.go) before rendering.
 func (i *Input) Update(msg tea.Msg) tea.Cmd {
+	if paste, ok := msg.(tea.PasteMsg); ok && i.HasSelection() {
+		if paste.Content != "" {
+			i.ReplaceSelection(paste.Content)
+		}
+		return nil
+	}
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		if cmd, handled := i.handleSelectionKey(keyMsg); handled {
+			return cmd
+		}
+		if keyMsg.String() != "" {
+			i.ClearSelection()
+		}
+	}
 	before := i.DisplayValue()
+	row, col := i.Line(), i.Column()
 	beforePastes := copyInlineLargePastes(i.inlinePastes)
 	var cmd tea.Cmd
 	i.textarea, cmd = i.textarea.Update(msg)
@@ -297,6 +322,9 @@ func (i *Input) Update(msg tea.Msg) tea.Cmd {
 		}
 	}
 	i.ensureCursorOutsideInlinePastes()
+	if before != i.DisplayValue() || row != i.Line() || col != i.Column() {
+		i.interactionVersion++
+	}
 	return cmd
 }
 
@@ -316,31 +344,8 @@ func (i *Input) Cursor() *tea.Cursor {
 
 // CursorEnd moves the cursor to the end of the input.
 func (i *Input) CursorEnd() {
+	i.interactionVersion++
 	i.textarea.CursorEnd()
-}
-
-// SetCursorPosition moves the cursor to the given 0-based row and column.
-//
-// Note: bubbles/textarea.CursorDown() moves by *visual* (soft-wrapped) rows.
-// This helper intentionally restores by logical \n-delimited line first by
-// jumping to the beginning and then repeating CursorDown(). This is safe only
-// when there is no soft-wrapping before the target row.
-//
-// Callers that rebuild content (e.g. paste placeholder insertion) should avoid
-// using this helper and instead restore the cursor by replaying edits or using
-// the textarea model's own movement APIs.
-func (i *Input) SetCursorPosition(row, col int) {
-	if row < 0 {
-		row = 0
-	}
-	if col < 0 {
-		col = 0
-	}
-	i.textarea.MoveToBegin()
-	for j := 0; j < row; j++ {
-		i.textarea.CursorDown()
-	}
-	i.textarea.SetCursorColumn(col)
 }
 
 func runeOffsetFromRowCol(s string, row, col int) int {
@@ -403,6 +408,7 @@ func rowColFromRuneOffset(s string, offset int) (row, col int) {
 // Returns false if the requested range intersects an inline paste placeholder,
 // since editing inside placeholders is not supported.
 func (i *Input) ReplaceRuneRangePreserveInlinePastes(start, end int, replacement string) bool {
+	replacement = canonicalInputText(replacement)
 	display := i.DisplayValue()
 	runes := []rune(display)
 	if start < 0 {
