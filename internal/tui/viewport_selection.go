@@ -169,8 +169,8 @@ func (v *Viewport) selectionLinePrefixWidth(block *Block, lineIdx int, plain str
 }
 
 func selectionRailPrefixWidth(plain string) int {
-	if strings.HasPrefix(plain, "│") {
-		return ansi.StringWidth("│")
+	if strings.HasPrefix(plain, cardRailGlyph) || strings.HasPrefix(plain, focusedCardRailGlyph) {
+		return ansi.StringWidth(cardRailGlyph)
 	}
 	return 0
 }

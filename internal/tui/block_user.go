@@ -110,7 +110,7 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 
 	cardBg := currentTheme.UserCardBg
 	finalLines = preserveCardBg(finalLines, cardBg)
-	return renderPrewrappedCard(style, innerWidth, finalLines, cardBg, railANSISeq("user", b.Focused))
+	return renderPrewrappedCard(style, innerWidth, finalLines, cardBg, cardRailPrefix("user", b.Focused))
 }
 
 func (b *Block) renderUser(width int, spinnerFrame string) []string {
@@ -175,5 +175,5 @@ func (b *Block) renderUserPlain(width int) []string {
 
 	cardBg := currentTheme.UserCardBg
 	finalLines = preserveCardBg(finalLines, cardBg)
-	return renderPrewrappedCard(style, innerWidth, finalLines, cardBg, railANSISeq("user", b.Focused))
+	return renderPrewrappedCard(style, innerWidth, finalLines, cardBg, cardRailPrefix("user", b.Focused))
 }

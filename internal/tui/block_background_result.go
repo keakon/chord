@@ -467,7 +467,7 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			body = append(body, toolFieldMarker(style, part))
 		}
 	}
-	return renderPrewrappedToolCard(metrics.blockStyle, metrics.cardWidth, toolCardTitle(backgroundResultCardTitle, b.displayLabelID()), body, metrics.toolCardBg, railANSISeq("tool", b.Focused))
+	return renderPrewrappedToolCard(metrics.blockStyle, metrics.cardWidth, toolCardTitle(backgroundResultCardTitle, b.displayLabelID()), body, metrics.toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 // backgroundResultStatusDetail returns the status text a JOB RESULT card owes

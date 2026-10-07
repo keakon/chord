@@ -82,6 +82,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Sidebar sections that come and go (agents, background jobs, and todos) now render after the fixed model, usage, integration, and repository sections, so their appearance no longer shifts the sections above. Focused agents’ status icons stay visible, focused message cards use a distinct rail shape, and error, assistant-label, and thinking text has higher contrast.
+
 - Repeated WebFetch requests to the same site reuse network connections; closing the application releases idle connections.
 
 - Image token estimates use a conservative allowance for the largest normalized

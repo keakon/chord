@@ -861,7 +861,7 @@ func TestGlobCardShowsIgnoredAndMissingArgumentsInline(t *testing.T) {
 	if !strings.Contains(rendered, `;9m`) {
 		t.Fatalf("unrecognized argument is not struck through: %q", rendered)
 	}
-	if !strings.Contains(rendered, "38;5;196m") {
+	if !strings.Contains(rendered, "38;5;"+currentTheme.ErrorFg+"m") {
 		t.Fatalf("missing required argument is not red: %q", rendered)
 	}
 }
@@ -959,7 +959,7 @@ func TestGrepCardShowsMissingPatternInMainSlot(t *testing.T) {
 	if !strings.Contains(rendered, `;9m`) {
 		t.Fatalf("ignored grep pattern is not struck through: %q", rendered)
 	}
-	if !strings.Contains(rendered, "38;5;196m") {
+	if !strings.Contains(rendered, "38;5;"+currentTheme.ErrorFg+"m") {
 		t.Fatalf("missing grep pattern is not red: %q", rendered)
 	}
 }
@@ -1020,7 +1020,7 @@ func TestGrepCardFoldsPluralPatternsIntoOptionGroup(t *testing.T) {
 	if !strings.Contains(rendered, `;9m`) {
 		t.Fatalf("discarded plural patterns are not struck through: %q", rendered)
 	}
-	if !strings.Contains(rendered, "38;5;196m") {
+	if !strings.Contains(rendered, "38;5;"+currentTheme.ErrorFg+"m") {
 		t.Fatalf("missing grep pattern is not red: %q", rendered)
 	}
 }
@@ -1047,7 +1047,7 @@ func TestReadCardShowsInvalidArgumentInRed(t *testing.T) {
 	if !strings.Contains(plain, "limit=forty") {
 		t.Fatalf("invalid argument missing:\n%s", plain)
 	}
-	if !strings.Contains(rendered, "38;5;196m") {
+	if !strings.Contains(rendered, "38;5;"+currentTheme.ErrorFg+"m") {
 		t.Fatalf("invalid argument is not red: %q", rendered)
 	}
 }
@@ -2865,7 +2865,7 @@ func TestPrewrappedToolCardRestoresCardBackgroundAfterTruncatedANSILine(t *testi
 	}
 
 	innerANSI := "\x1b[48;5;236m" + strings.Repeat("x", 80)
-	lines := renderPrewrappedToolCard(ToolBlockStyle, 24, toolCardTitle("TOOL CALL", 1), []string{innerANSI}, currentTheme.ToolCallBg, railANSISeq("tool", false))
+	lines := renderPrewrappedToolCard(ToolBlockStyle, 24, toolCardTitle("TOOL CALL", 1), []string{innerANSI}, currentTheme.ToolCallBg, cardRailPrefix("tool", false))
 	var body string
 	for _, line := range lines {
 		if strings.Contains(stripANSI(line), strings.Repeat("x", 24)) {
@@ -2946,7 +2946,7 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 				ToolCallDetailExpanded: false,
 			},
 			marker: "✗",
-			ansi:   "\x1b[38;5;196m✗",
+			ansi:   "\x1b[38;5;" + currentTheme.ErrorFg + "m✗",
 		},
 		{
 			name: "cancelled",
@@ -3005,7 +3005,7 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	if !strings.Contains(joinedPlain, "exit code 1") {
 		t.Fatalf("expected collapsed Shell error summary; got:\n%s", joinedPlain)
 	}
-	if !strings.Contains(joinedANSI, "\x1b[1;38;5;196m") && !strings.Contains(joinedANSI, "\x1b[38;5;196m") {
+	if !strings.Contains(joinedANSI, "\x1b[1;38;5;"+currentTheme.ErrorFg+"m") && !strings.Contains(joinedANSI, "\x1b[38;5;"+currentTheme.ErrorFg+"m") {
 		t.Fatalf("expected error styling ANSI sequence; got:\n%q", joinedANSI)
 	}
 }
@@ -4275,7 +4275,7 @@ func TestReplaceEditToolCallErrorRenderTruncatesLongLines(t *testing.T) {
 	metrics := newToolCardMetrics(width)
 	style := metrics.blockStyle
 	maxLineWidth := style.GetMarginLeft() + style.GetPaddingLeft() + metrics.cardWidth + style.GetPaddingRight() + style.GetMarginRight()
-	if railANSISeq("tool", false) != "" {
+	if cardRailPrefix("tool", false) != "" {
 		maxLineWidth++
 	}
 	for i, line := range lines {
@@ -4993,7 +4993,7 @@ func TestDoneCallUsesProseWidthForReportCard(t *testing.T) {
 	metrics := newDoneToolCardMetrics(width)
 	style := metrics.blockStyle
 	want := style.GetMarginLeft() + style.GetPaddingLeft() + metrics.cardWidth + style.GetPaddingRight() + style.GetMarginRight()
-	if railANSISeq("tool", false) != "" {
+	if cardRailPrefix("tool", false) != "" {
 		want++
 	}
 	if got != want {

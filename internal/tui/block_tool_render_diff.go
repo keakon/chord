@@ -410,7 +410,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		appendToolOutcomeBody(&result, toolOutcomeCancelled, toolDisplayResultContent(b), textWrap, true)
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 type applyPatchErrorSections struct {

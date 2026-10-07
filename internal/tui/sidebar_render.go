@@ -191,11 +191,11 @@ func (s Sidebar) buildInfoPanelRenderedLines(innerWidth int) []sidebarRenderedLi
 	var lines []sidebarRenderedLine
 	for _, entry := range s.agents {
 		isFocused := s.isFocused(entry.ID)
-		indicator := statusIndicator(entry.Status, isFocused)
+		indicator := sidebarIndicator(entry.Status, isFocused)
 
-		nameWidth := max(4, innerWidth-2)
+		nameWidth := max(1, innerWidth-4)
 		if isFocused || entry.ID == "main" {
-			nameWidth = innerWidth - 2
+			nameWidth = max(1, innerWidth-4)
 		}
 		name := sidebarRenderedName(entry, nameWidth)
 
@@ -225,11 +225,11 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 	var lines []string
 	for _, entry := range s.agents {
 		isFocused := s.isFocused(entry.ID)
-		indicator := statusIndicator(entry.Status, isFocused)
+		indicator := sidebarIndicator(entry.Status, isFocused)
 
-		nameWidth := max(4, innerWidth-2)
+		nameWidth := max(1, innerWidth-4)
 		if isFocused || entry.ID == "main" {
-			nameWidth = innerWidth - 2
+			nameWidth = max(1, innerWidth-4)
 		}
 		name := sidebarRenderedName(entry, nameWidth)
 
@@ -317,10 +317,15 @@ func (s *Sidebar) isFocused(agentID string) bool {
 //
 // The reachable inputs are the sub-agent states and the "done"/"error" names
 // AgentStatusEvent carries for them.
-func statusIndicator(status string, focused bool) string {
+func sidebarIndicator(status string, focused bool) string {
+	prefix := " "
 	if focused {
-		return "●"
+		prefix = "▸"
 	}
+	return prefix + " " + statusIndicator(status)
+}
+
+func statusIndicator(status string) string {
 	switch status {
 	case "running":
 		return "○"

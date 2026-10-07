@@ -139,8 +139,8 @@ func countLeadingWhitespace(s string) int {
 	for {
 		if strings.HasPrefix(s, "|") {
 			s = s[1:]
-		} else if strings.HasPrefix(s, "│") {
-			s = s[len("│"):]
+		} else if strings.HasPrefix(s, cardRailGlyph) || strings.HasPrefix(s, focusedCardRailGlyph) {
+			s = s[len(cardRailGlyph):]
 		} else if strings.HasPrefix(s, "▏") {
 			s = s[len("▏"):]
 		} else {
@@ -252,7 +252,7 @@ type streamCardHeadKey struct {
 // streaming block. The stable head (label + settled prefix) is cached across
 // flushes so only the cheap tail lines are re-wrapped per render; output is
 // identical to preserveCardBg + renderPrewrappedCard over all body lines.
-func (b *Block) renderStreamingCardLines(kind uint8, style lipgloss.Style, innerWidth int, bgColorNum, railSeq string, bodyLines []string, tailCount int) []string {
+func (b *Block) renderStreamingCardLines(kind uint8, style lipgloss.Style, innerWidth int, bgColorNum, railPrefix string, bodyLines []string, tailCount int) []string {
 	if tailCount < 0 {
 		tailCount = 0
 	}
@@ -260,7 +260,7 @@ func (b *Block) renderStreamingCardLines(kind uint8, style lipgloss.Style, inner
 		tailCount = len(bodyLines)
 	}
 	headCount := len(bodyLines) - tailCount
-	frame := newPrewrappedCardFrame(style, innerWidth, bgColorNum, railSeq)
+	frame := newPrewrappedCardFrame(style, innerWidth, bgColorNum, railPrefix)
 	key := streamCardHeadKey{
 		kind:         kind,
 		blockID:      b.ID,
@@ -832,7 +832,7 @@ func (b *Block) renderAssistant(width int) []string {
 			// Re-insert card background after inner ANSI resets.
 			thinkBg := currentTheme.ThinkingCardBg
 			tLines = preserveCardBg(tLines, thinkBg)
-			out = append(out, renderPrewrappedCard(tStyle, thinkingInnerWidth, tLines, thinkBg, railANSISeq("thinking", b.Focused))...)
+			out = append(out, renderPrewrappedCard(tStyle, thinkingInnerWidth, tLines, thinkBg, cardRailPrefix("thinking", b.Focused))...)
 			out = append(out, "") // margin between blocks
 		}
 	}
@@ -1023,13 +1023,13 @@ func (b *Block) renderAssistant(width int) []string {
 
 		// Re-insert card background after inner ANSI resets.
 		assBg := currentTheme.AssistantCardBg
-		railSeq := railANSISeq("assistant", b.Focused)
+		railPrefix := cardRailPrefix("assistant", b.Focused)
 		var cardLines []string
 		if b.Streaming {
-			cardLines = b.renderStreamingCardLines(streamCardKindAssistant, style, innerWidth, assBg, railSeq, assistantLines, len(b.streamTailLines))
+			cardLines = b.renderStreamingCardLines(streamCardKindAssistant, style, innerWidth, assBg, railPrefix, assistantLines, len(b.streamTailLines))
 		} else {
 			assistantLines = preserveCardBg(assistantLines, assBg)
-			cardLines = renderPrewrappedCard(style, innerWidth, assistantLines, assBg, railSeq)
+			cardLines = renderPrewrappedCard(style, innerWidth, assistantLines, assBg, railPrefix)
 		}
 		// Body lines start after any preceding thinking card plus the card's own
 		// top margin/padding. Deriving this from the trailing-inclusive
@@ -1430,10 +1430,10 @@ func (b *Block) renderThinking(width int) []string {
 
 	// Re-insert card background after inner ANSI resets.
 	thinkBg2 := currentTheme.ThinkingCardBg
-	railSeq := railANSISeq("thinking", b.Focused)
+	railPrefix := cardRailPrefix("thinking", b.Focused)
 	if b.Streaming {
-		return b.renderStreamingCardLines(streamCardKindThinking, style, innerWidth, thinkBg2, railSeq, rawLines, len(mdLines)-settledLineCount)
+		return b.renderStreamingCardLines(streamCardKindThinking, style, innerWidth, thinkBg2, railPrefix, rawLines, len(mdLines)-settledLineCount)
 	}
 	rawLines = preserveCardBg(rawLines, thinkBg2)
-	return renderPrewrappedCard(style, innerWidth, rawLines, thinkBg2, railSeq)
+	return renderPrewrappedCard(style, innerWidth, rawLines, thinkBg2, railPrefix)
 }

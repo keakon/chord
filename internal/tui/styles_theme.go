@@ -171,7 +171,7 @@ func applyBlockStyles(t Theme) {
 	// visually distinct from the main reply across terminals. Italic adds
 	// emphasis without relying on character-line decorations.
 	ThinkingContentStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(t.DimFg)).
+		Foreground(lipgloss.Color(t.ThinkingCardFg)).
 		Italic(true)
 
 	// ThinkingTitleStyle highlights the first non-empty line in a thinking

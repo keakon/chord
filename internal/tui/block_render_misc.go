@@ -38,7 +38,7 @@ func (b *Block) renderError(width int) []string {
 
 	cardBg := currentTheme.ErrorCardBg
 	lines = preserveCardBg(lines, cardBg)
-	return renderPrewrappedCard(style, innerWidth, lines, cardBg, railANSISeq("error", b.Focused))
+	return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("error", b.Focused))
 }
 
 func (b *Block) renderStatus(width int) []string {
@@ -92,7 +92,7 @@ func (b *Block) renderStatus(width int) []string {
 		// is at a glance, and the body stays one keystroke away.
 		line := label + DimStyle.Render(" "+toolDisclosureCollapsed)
 		lines := preserveCardBg([]string{line}, cardBg)
-		return renderPrewrappedCard(style, innerWidth, lines, cardBg, railANSISeq("thinking", b.Focused))
+		return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("thinking", b.Focused))
 	}
 	if foldable {
 		// The expanded card marks what Space does next.
@@ -109,7 +109,7 @@ func (b *Block) renderStatus(width int) []string {
 	}
 
 	lines = preserveCardBg(lines, cardBg)
-	return renderPrewrappedCard(style, innerWidth, lines, cardBg, railANSISeq("thinking", b.Focused))
+	return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("thinking", b.Focused))
 }
 
 // statusCardMetrics returns the card's inner width and the body width a status
@@ -257,5 +257,5 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	}
 	cardBg := currentTheme.CompactionSummaryBg
 	lines = preserveCardBg(lines, cardBg)
-	return renderPrewrappedCard(style, innerWidth, lines, cardBg, railANSISeq("assistant", b.Focused))
+	return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("assistant", b.Focused))
 }

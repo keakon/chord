@@ -354,12 +354,12 @@ func TestRenderTodoCallCancelledItemDoesNotStrikeThroughPadding(t *testing.T) {
 	}
 }
 
-func TestRailANSISeqUsesFocusedColor(t *testing.T) {
+func TestCardRailPrefixUsesFocusedGlyphAndColor(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	if got, want := railANSISeq("assistant", false), "\x1b[38;5;"+currentTheme.RailAssistantFg+"m"; got != want {
+	if got, want := cardRailPrefix("assistant", false), "\x1b[38;5;"+currentTheme.RailAssistantFg+"m│\x1b[m"; got != want {
 		t.Fatalf("assistant base rail seq=%q want %q", got, want)
 	}
-	if got, want := railANSISeq("assistant", true), "\x1b[38;5;"+currentTheme.RailAssistantFocusedFg+"m"; got != want {
+	if got, want := cardRailPrefix("assistant", true), "\x1b[38;5;"+currentTheme.RailAssistantFocusedFg+"m┃\x1b[m"; got != want {
 		t.Fatalf("assistant focused rail seq=%q want %q", got, want)
 	}
 }
@@ -484,7 +484,7 @@ func TestRenderPrewrappedCardDoesNotOverpadEmojiVariationSelector(t *testing.T) 
 func TestRenderPrewrappedCardAppliesRailToPaddingRows(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	style := lipgloss.NewStyle().Padding(1, 1).MarginLeft(1).Background(lipgloss.Color(currentTheme.AssistantCardBg))
-	out := renderPrewrappedCard(style, 8, []string{"  hello"}, currentTheme.AssistantCardBg, railANSISeq("assistant", false))
+	out := renderPrewrappedCard(style, 8, []string{"  hello"}, currentTheme.AssistantCardBg, cardRailPrefix("assistant", false))
 	if len(out) < 3 {
 		t.Fatalf("renderPrewrappedCard lines=%d want >=3", len(out))
 	}
@@ -508,7 +508,7 @@ func TestRenderPrewrappedCardAppliesRailToPaddingRows(t *testing.T) {
 func TestRenderPrewrappedCardSplitsEmbeddedNewlinesBeforeWrapping(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	style := lipgloss.NewStyle().Padding(0, 1).Background(lipgloss.Color(currentTheme.ToolCallBg))
-	out := renderPrewrappedCard(style, 16, []string{"first\nsecond", "third"}, currentTheme.ToolCallBg, railANSISeq("tool", false))
+	out := renderPrewrappedCard(style, 16, []string{"first\nsecond", "third"}, currentTheme.ToolCallBg, cardRailPrefix("tool", false))
 	plain := stripANSI(strings.Join(out, "\n"))
 	if !strings.Contains(plain, "first") || !strings.Contains(plain, "second") || !strings.Contains(plain, "third") {
 		t.Fatalf("expected all embedded newline segments to render; got:\n%s", plain)
@@ -533,7 +533,7 @@ func TestRenderPrewrappedCardOwnsANSIBackgroundRestoration(t *testing.T) {
 	}
 	style := lipgloss.NewStyle().Padding(0, 2).Background(lipgloss.Color(bg))
 	markdownANSI := "\x1b[1m" + strings.Repeat("x", 40) + "\x1b[0m"
-	out := renderPrewrappedCard(style, 12, []string{markdownANSI}, bg, railANSISeq("assistant", false))
+	out := renderPrewrappedCard(style, 12, []string{markdownANSI}, bg, cardRailPrefix("assistant", false))
 	if len(out) != 1 {
 		t.Fatalf("renderPrewrappedCard lines=%d want 1", len(out))
 	}
@@ -590,7 +590,7 @@ func TestFocusedStatusCardUsesFocusedRailColor(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatal("expected rendered lines")
 	}
-	focusSeq := railANSISeq("thinking", true)
+	focusSeq := cardRailPrefix("thinking", true)
 	if focusSeq == "" {
 		t.Fatal("expected focused thinking rail ANSI sequence")
 	}
@@ -617,7 +617,7 @@ func TestFocusedCompactionSummaryCardUsesFocusedRailColor(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatal("expected rendered lines")
 	}
-	focusSeq := railANSISeq("assistant", true)
+	focusSeq := cardRailPrefix("assistant", true)
 	if focusSeq == "" {
 		t.Fatal("expected focused assistant rail ANSI sequence")
 	}
@@ -660,7 +660,7 @@ func TestRenderPrewrappedCardMarginBottomStaysTransparentBetweenCards(t *testing
 		MarginBottom(1).
 		Background(lipgloss.Color(bg))
 	innerWidth := 8
-	out := renderPrewrappedCard(style, innerWidth, []string{"  hello"}, bg, railANSISeq("assistant", false))
+	out := renderPrewrappedCard(style, innerWidth, []string{"  hello"}, bg, cardRailPrefix("assistant", false))
 	if len(out) < 2 {
 		t.Fatalf("renderPrewrappedCard lines=%d want >=2 to include marginBottom", len(out))
 	}

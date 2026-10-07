@@ -508,11 +508,11 @@ func TestStatusIndicatorCoversEveryProducibleStatus(t *testing.T) {
 		{string(agent.SubAgentStateIdle), "…"},
 	}
 	for _, tc := range cases {
-		if got := statusIndicator(tc.status, false); got != tc.want {
+		if got := statusIndicator(tc.status); got != tc.want {
 			t.Errorf("statusIndicator(%q) = %q, want %q", tc.status, got, tc.want)
 		}
 	}
-	if got := statusIndicator(string(agent.SubAgentStateRunning), true); got != "●" {
+	if got := sidebarIndicator(string(agent.SubAgentStateRunning), true); got != "▸ ○" {
 		t.Errorf("focused statusIndicator = %q, want the focused marker", got)
 	}
 }

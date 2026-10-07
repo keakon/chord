@@ -662,18 +662,16 @@ func wrapLineWithBackground(marginPrefix, innerPrefix, line, innerSuffix, bgSeq,
 	return b.String()
 }
 
-func wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, railSeq string, pad int) string {
-	if railSeq == "" {
+func wrapLineWithBackgroundAndRail(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, railPrefix string, pad int) string {
+	if railPrefix == "" {
 		return wrapLineWithBackground(marginPrefix, innerPrefix, line, innerSuffix, bgSeq, marginSuffix, pad)
 	}
 	if bgSeq == "" && pad == 0 {
-		return railSeq + "│" + ansi.ResetStyle + marginPrefix + innerPrefix + line + innerSuffix + marginSuffix
+		return railPrefix + marginPrefix + innerPrefix + line + innerSuffix + marginSuffix
 	}
 	var b strings.Builder
-	b.Grow(len(railSeq) + len("│") + len(ansi.ResetStyle) + len(bgSeq) + len(marginPrefix) + len(innerPrefix) + len(line) + pad + len(innerSuffix) + len(ansi.ResetStyle) + len(marginSuffix))
-	b.WriteString(railSeq)
-	b.WriteString("│")
-	b.WriteString(ansi.ResetStyle)
+	b.Grow(len(railPrefix) + len(bgSeq) + len(marginPrefix) + len(innerPrefix) + len(line) + pad + len(innerSuffix) + len(ansi.ResetStyle) + len(marginSuffix))
+	b.WriteString(railPrefix)
 	b.WriteString(bgSeq)
 	b.WriteString(marginPrefix)
 	b.WriteString(innerPrefix)
@@ -698,7 +696,7 @@ type prewrappedCardFrame struct {
 	marginSuffix string
 	innerPrefix  string
 	innerSuffix  string
-	railSeq      string
+	railPrefix   string
 	padTop       int
 	padBottom    int
 	marginTop    int
@@ -707,7 +705,7 @@ type prewrappedCardFrame struct {
 	blankMargin  string
 }
 
-func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, railSeq string) prewrappedCardFrame {
+func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, railPrefix string) prewrappedCardFrame {
 	if innerWidth < 0 {
 		innerWidth = 0
 	}
@@ -718,11 +716,11 @@ func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, ra
 	marginSuffix := strings.Repeat(" ", marginRight)
 	lineWidth := padLeft + innerWidth + padRight
 	// blankMargin (the outer top/bottom margin rows) must span the same horizontal
-	// extent as a body line. A rail-bearing body line is railSeq+"│"+Reset wider
+	// extent as a body line. A rail-bearing body line is the rail prefix wider
 	// than its inner content, so reserve that column here too; otherwise the
 	// margin rows render one column short of the card's right edge.
 	marginExtent := marginLeft + lineWidth + marginRight
-	if railSeq != "" {
+	if railPrefix != "" {
 		marginExtent += cardRailWidth
 	}
 	return prewrappedCardFrame{
@@ -733,12 +731,12 @@ func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, ra
 		marginSuffix: marginSuffix,
 		innerPrefix:  strings.Repeat(" ", padLeft),
 		innerSuffix:  strings.Repeat(" ", padRight),
-		railSeq:      railSeq,
+		railPrefix:   railPrefix,
 		padTop:       padTop,
 		padBottom:    padBottom,
 		marginTop:    marginTop,
 		marginBottom: marginBottom,
-		blankWrapped: wrapLineWithBackgroundAndRail(marginPrefix, "", strings.Repeat(" ", lineWidth), "", bgSeq, marginSuffix, railSeq, 0),
+		blankWrapped: wrapLineWithBackgroundAndRail(marginPrefix, "", strings.Repeat(" ", lineWidth), "", bgSeq, marginSuffix, railPrefix, 0),
 		blankMargin:  strings.Repeat(" ", marginExtent),
 	}
 }
@@ -752,13 +750,13 @@ func (f *prewrappedCardFrame) renderBodyLine(line string) string {
 	if lineDisplayWidth > f.innerWidth {
 		line = truncateLineToDisplayWidth(line, f.innerWidth)
 		line = preserveBackground(line, f.bgColorNum)
-		return wrapLineWithBackgroundAndRail(f.marginPrefix, f.innerPrefix, line, f.innerSuffix, f.bgSeq, f.marginSuffix, f.railSeq, 0)
+		return wrapLineWithBackgroundAndRail(f.marginPrefix, f.innerPrefix, line, f.innerSuffix, f.bgSeq, f.marginSuffix, f.railPrefix, 0)
 	}
 	pad := 0
 	if lineDisplayWidth < f.innerWidth {
 		pad = f.innerWidth - lineDisplayWidth
 	}
-	return wrapLineWithBackgroundAndRail(f.marginPrefix, f.innerPrefix, line, f.innerSuffix, f.bgSeq, f.marginSuffix, f.railSeq, pad)
+	return wrapLineWithBackgroundAndRail(f.marginPrefix, f.innerPrefix, line, f.innerSuffix, f.bgSeq, f.marginSuffix, f.railPrefix, pad)
 }
 
 // appendBodyLines renders already-wrapped body lines into dst, splitting any
@@ -802,8 +800,8 @@ func (f *prewrappedCardFrame) appendBottom(dst []string) []string {
 // preservation after inner ANSI resets and after width truncation.
 // This avoids sending a large ANSI-rich multi-line string back through lipgloss
 // Width(...).Render(...), which would otherwise re-wrap and re-measure every line.
-func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, bgColorNum string, railSeq string) []string {
-	frame := newPrewrappedCardFrame(style, innerWidth, bgColorNum, railSeq)
+func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, bgColorNum string, railPrefix string) []string {
+	frame := newPrewrappedCardFrame(style, innerWidth, bgColorNum, railPrefix)
 	out := make([]string, 0, frame.marginTop+frame.padTop+len(lines)+frame.padBottom+frame.marginBottom)
 	out = frame.appendTop(out)
 	out = frame.appendBodyLines(out, lines)
@@ -816,17 +814,20 @@ func renderPrewrappedCard(style lipgloss.Style, innerWidth int, lines []string, 
 // pass raw logical lines here; this helper owns the final card-bg preservation
 // and delegates width completion to renderPrewrappedCard so selection/copy use
 // the same visible column baseline as the rendered card.
-func renderPrewrappedToolCard(style lipgloss.Style, cardWidth int, title string, body []string, bgColorNum string, railSeq string) []string {
+func renderPrewrappedToolCard(style lipgloss.Style, cardWidth int, title string, body []string, bgColorNum string, railPrefix string) []string {
 	final := make([]string, 0, len(body)+2)
 	final = append(final, title, "")
 	final = append(final, body...)
 	final = preserveCardBg(final, bgColorNum)
-	return renderPrewrappedCard(style, cardWidth, final, bgColorNum, railSeq)
+	return renderPrewrappedCard(style, cardWidth, final, bgColorNum, railPrefix)
 }
 
-// railANSISeq returns the ANSI foreground sequence for the conversation rail
+// cardRailPrefix returns the styled glyph for the conversation rail
 // matching the given card kind, or "" if the kind has no rail.
-func railANSISeq(kind string, focused bool) string {
+const cardRailGlyph = "│"
+const focusedCardRailGlyph = "┃"
+
+func cardRailPrefix(kind string, focused bool) string {
 	pick := func(base, focusedColor string) string {
 		color := strings.TrimSpace(base)
 		if focused {
@@ -837,7 +838,11 @@ func railANSISeq(kind string, focused bool) string {
 		if color == "" {
 			return ""
 		}
-		return "\x1b[38;5;" + color + "m"
+		glyph := cardRailGlyph
+		if focused {
+			glyph = focusedCardRailGlyph
+		}
+		return "\x1b[38;5;" + color + "m" + glyph + ansi.ResetStyle
 	}
 	switch kind {
 	case "user":

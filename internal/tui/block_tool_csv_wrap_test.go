@@ -39,7 +39,7 @@ func TestDoneReportCSVCodeBlockWrapsLongLines(t *testing.T) {
 	metrics := newDoneToolCardMetrics(width)
 	style := metrics.blockStyle
 	maxLineWidth := style.GetMarginLeft() + style.GetPaddingLeft() + metrics.cardWidth + style.GetPaddingRight() + style.GetMarginRight()
-	if railANSISeq("tool", false) != "" {
+	if cardRailPrefix("tool", false) != "" {
 		maxLineWidth++ // rail adds one column
 	}
 
@@ -102,7 +102,7 @@ func TestDoneReportGenericCodeBlockWrapsLongLines(t *testing.T) {
 	metrics := newDoneToolCardMetrics(width)
 	style := metrics.blockStyle
 	maxLineWidth := style.GetMarginLeft() + style.GetPaddingLeft() + metrics.cardWidth + style.GetPaddingRight() + style.GetMarginRight()
-	if railANSISeq("tool", false) != "" {
+	if cardRailPrefix("tool", false) != "" {
 		maxLineWidth++
 	}
 

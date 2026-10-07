@@ -127,7 +127,7 @@ func TestInfoPanelJobsShowsRunningJob(t *testing.T) {
 	if !strings.HasPrefix(plain, "  ") {
 		t.Fatalf("job row must be indented by 2 columns, got %q", plain)
 	}
-	if strings.Contains(plain, statusIndicator("running", false)) {
+	if strings.Contains(plain, statusIndicator("running")) {
 		t.Fatalf("a running job row must not repeat the status dot: %q", plain)
 	}
 	if trimmed := strings.TrimLeft(plain, " "); !strings.HasPrefix(trimmed, "Run") {

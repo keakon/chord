@@ -244,7 +244,7 @@ func DefaultTheme() Theme {
 	surfaceDialog := surfacePanel
 
 	accentUserBadge := "65"
-	accentAssistantBadge := "61"
+	accentAssistantBadge := "104"
 	accentToolBadge := "30"
 	accentThinkingBadge := "243"
 
@@ -282,9 +282,9 @@ func DefaultTheme() Theme {
 		CodeBlockBg:             "232", // darker than any card surface (user=233) so fenced blocks read as inset surfaces; only rendered inside cards, never adjacent to the terminal background
 		CodeBlockFg:             "252",
 		CodeBlockLabelFg:        "245",
-		ErrorFg:                 "196",
+		ErrorFg:                 "210",
 		ErrorCardBg:             "52",
-		ErrorCardFg:             "196",
+		ErrorCardFg:             "210",
 		LabelBadgeFg:            "232",
 		UserLabelBg:             accentUserBadge,      // desaturated olive green (was 82)
 		AssistantLabelBg:        accentAssistantBadge, // desaturated blue-purple (was 69)
@@ -319,9 +319,9 @@ func DefaultTheme() Theme {
 		DimFg:                   "250", // lighter so dim text (thinking, tool body) is readable
 		ConfirmSeparatorFg:      "220",
 		ConfirmToolFg:           "252",
-		ConfirmHintFg:           "245",
+		ConfirmHintFg:           "246",
 		ConfirmAllowFg:          "82",
-		ConfirmDenyFg:           "196",
+		ConfirmDenyFg:           "210",
 		ConfirmEditFg:           "220",
 		SidebarBorderFg:         "63",
 		SidebarFocusedFg:        "230",
@@ -334,7 +334,7 @@ func DefaultTheme() Theme {
 		InfoPanelWarningFg:      "214",
 		InfoPanelCriticalFg:     "196",
 		InfoPanelPendingFg:      "243",
-		InfoPanelDiagErrorFg:    "196",
+		InfoPanelDiagErrorFg:    "210",
 		InfoPanelDiagWarnFg:     "214",
 		InfoPanelDiagInfoFg:     "248",
 		InfoPanelDiagHintFg:     "245",
@@ -350,7 +350,7 @@ func DefaultTheme() Theme {
 		RailAssistantFg:         "61",
 		RailToolFg:              "30",
 		RailThinkingFg:          "243",
-		RailErrorFg:             "196",
+		RailErrorFg:             "210",
 		RailUserFocusedFg:       "114",
 		RailAssistantFocusedFg:  "111",
 		RailToolFocusedFg:       "51",

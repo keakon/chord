@@ -141,7 +141,7 @@ func (b *Block) streamingApplyPatchCardLayout(width int, spinnerFrame string) st
 		"",
 	}
 	fixedLines = append(fixedLines, bodyLines...)
-	frame := newPrewrappedCardFrame(blockStyle, cardWidth, toolCardBg, railANSISeq("tool", b.Focused))
+	frame := newPrewrappedCardFrame(blockStyle, cardWidth, toolCardBg, cardRailPrefix("tool", b.Focused))
 	contentStart := frame.marginTop + frame.padTop
 	patchStart := contentStart + len(fixedLines)
 	tailStart := patchStart + len(lineStarts)

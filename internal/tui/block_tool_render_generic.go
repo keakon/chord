@@ -288,7 +288,7 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	}
 
 	result = appendToolElapsedToHeader(result, b, cardWidth)
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
@@ -351,7 +351,7 @@ func (b *Block) renderDoneCall(width int, spinnerFrame string) []string {
 			}
 		}
 	}
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 type proseControlArgs struct {
@@ -471,7 +471,7 @@ func (b *Block) renderProseControlCall(width int, spinnerFrame string) []string 
 		}
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 // compactContextDisplaySection describes one labelled section in the
@@ -566,7 +566,7 @@ func (b *Block) renderCompactContextCall(width int, spinnerFrame string) []strin
 	}
 
 	result = appendToolElapsedToHeader(result, b, cardWidth)
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 // appendGenericToolArgSections renders the arguments a generic card could not
@@ -1077,7 +1077,7 @@ func (b *Block) renderCompactExpandableToolCall(width int, spinnerFrame string) 
 	if headerSuffix != "" && len(result) > 0 {
 		result[0] = appendToolHeaderSuffix(result[0], DimStyle.Render(" · "+headerSuffix), cardWidth-4)
 	}
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 // renderToolPrefix returns a concise status indicator.
@@ -1516,7 +1516,7 @@ func (b *Block) renderToolResult(width int) []string {
 			}
 		}
 		b.appendImagePreviewLines(&body, contentWidth, toolCardBg, style.GetPaddingTop(), len(body) > 0)
-		return b.renderToolCardWithIgnoredArgs(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), body, toolCardBg, railANSISeq("tool", b.Focused))
+		return b.renderToolCardWithIgnoredArgs(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), body, toolCardBg, cardRailPrefix("tool", b.Focused))
 	}
 	headerStyle := ToolResultExpandedStyle
 	renderBody := func(s string) string { return s }
@@ -1543,5 +1543,5 @@ func (b *Block) renderToolResult(width int) []string {
 		result = append(result, "    "+renderBody(line))
 	}
 	b.appendImagePreviewLines(&result, contentWidth, toolCardBg, style.GetPaddingTop(), len(result) > 0)
-	return b.renderToolCardWithIgnoredArgs(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(style, cardWidth, toolCardTitle("TOOL RESULT", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }

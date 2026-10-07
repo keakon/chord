@@ -55,7 +55,7 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 
 	if strings.TrimSpace(b.ResultContent) == "" {
 		result = appendDeleteRequestedPaths(result, b, parseDeleteHeaderPaths(vals), contentWidth)
-		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 	}
 
 	displayResult := b.stripResultNotes(b.ResultContent)
@@ -85,7 +85,7 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 func appendDeleteRequestedPaths(result []string, b *Block, paths []string, width int) []string {

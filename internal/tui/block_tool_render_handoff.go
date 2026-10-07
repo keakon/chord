@@ -59,7 +59,7 @@ func (b *Block) renderHandoffCall(width int, spinnerFrame string) []string {
 		}
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 // handoffPlanPathFromArgs extracts the plan_path argument from the handoff

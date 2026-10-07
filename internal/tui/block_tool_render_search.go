@@ -49,12 +49,12 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 	if kind := toolOutcomeKindOf(b); kind == toolOutcomeError {
 		appendToolOutcomeBody(&result, kind, toolDisplayResultContent(b), contentWidth, expanded)
 		result = appendToolElapsedToHeader(result, b, cardWidth)
-		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 	}
 	if b.toolResultIsCancelled() {
 		appendToolOutcomeBody(&result, toolOutcomeCancelled, toolDisplayResultContent(b), contentWidth, expanded)
 		result = appendToolElapsedToHeader(result, b, cardWidth)
-		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 	}
 
 	if !showInline && !expanded && strings.TrimSpace(summary) != "" {
@@ -65,7 +65,7 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 			}
 		}
 		result = appendToolElapsedToHeader(result, b, cardWidth)
-		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+		return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 	}
 
 	if expanded && strings.TrimSpace(b.ResultContent) != "" {
@@ -80,7 +80,7 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 	}
 
 	result = appendToolElapsedToHeader(result, b, cardWidth)
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }
 
 func (b *Block) searchResultSummaryLine() (string, bool) {

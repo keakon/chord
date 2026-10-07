@@ -136,5 +136,5 @@ func (b *Block) renderWriteCall(width int, spinnerFrame string) []string {
 		appendToolOutcomeBody(&result, toolOutcomeCancelled, toolDisplayResultContent(b), cardWidth-4, true)
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
-	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, railANSISeq("tool", b.Focused))
+	return b.renderToolCardWithIgnoredArgs(blockStyle, cardWidth, toolCardTitle("TOOL CALL", b.displayLabelID()), result, toolCardBg, cardRailPrefix("tool", b.Focused))
 }

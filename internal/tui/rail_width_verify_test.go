@@ -62,7 +62,7 @@ func TestNoCardOverflowsTerminal(t *testing.T) {
 func TestRailGlyphIsLeftmost(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	b := &Block{ID: 5, Type: BlockThinking, Content: "Adjusting add-before context formatting"}
-	if railANSISeq("thinking", false) == "" {
+	if cardRailPrefix("thinking", false) == "" {
 		t.Skip("thinking rail disabled in this theme")
 	}
 	lines := b.Render(100, "")
@@ -80,5 +80,5 @@ func TestRailGlyphIsLeftmost(t *testing.T) {
 	if found == 0 {
 		t.Fatal("no rail-bearing line found; rail glyph missing from thinking card")
 	}
-	t.Logf("thinking card: %d rail-bearing lines, rail seq=%q", found, railANSISeq("thinking", false))
+	t.Logf("thinking card: %d rail-bearing lines, rail seq=%q", found, cardRailPrefix("thinking", false))
 }

@@ -553,6 +553,79 @@ func TestRenderInfoPanelInsertsBlankLineBetweenSections(t *testing.T) {
 	}
 }
 
+func TestRenderInfoPanelTransientSectionsKeepStableSectionsInPlace(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.contextCurrent = 12_300
+	backend.contextMessageCount = 4
+	backend.walltimeStats = analytics.WalltimeStats{Model: 2 * time.Second, Tool: time.Second}
+	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", OK: true}}
+
+	m := NewModel(backend)
+	m.sidebar.Update(nil, "main", "builder")
+	m.sidebar.AddFileEdit("main", "/tmp/main.go", 3, 1)
+
+	stableTitles := []string{"USAGE", "TIME", "▼ LSP", "▼ CHANGED FILES"}
+	stableIndex := func(lines []string) map[string]int {
+		index := make(map[string]int, len(stableTitles))
+		for _, title := range stableTitles {
+			index[title] = -1
+			for i, line := range lines {
+				if strings.HasPrefix(line, title) {
+					index[title] = i
+					break
+				}
+			}
+			if index[title] < 0 {
+				t.Fatalf("stable section %q missing: %#v", title, lines)
+			}
+		}
+		return index
+	}
+
+	before := stableIndex(infoPanelPlainLines(m.renderInfoPanel(44, 60)))
+
+	// Transient sections appear: agents, background jobs, and todos.
+	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "worker", TaskDesc: "Review changes"}}, "main", "builder")
+	m.jobsSnapshot = []tools.JobState{{
+		ID:          "job-1",
+		Description: "run tests",
+		Status:      jobStatusRunning,
+		StartedAt:   time.Now().Add(-time.Minute),
+	}}
+	m.activeJobsSnapshot = m.jobsSnapshot
+	m.jobsSnapshotValid = true
+	m.jobsSnapshotFrame = m.renderFrameGeneration
+	backend.todos = []tools.TodoItem{
+		{ID: "1", Content: "Inspect layout", Status: "in_progress"},
+		{ID: "2", Content: "Run tests", Status: "pending"},
+	}
+
+	lines := infoPanelPlainLines(m.renderInfoPanel(44, 60))
+	after := stableIndex(lines)
+	for _, title := range stableTitles {
+		if after[title] != before[title] {
+			t.Fatalf("stable section %q moved from line %d to %d after transient sections appeared: %#v", title, before[title], after[title], lines)
+		}
+	}
+
+	lastStable := after["▼ CHANGED FILES"]
+	for _, title := range []string{"▼ AGENTS", "▼ JOBS", "▼ TODOS"} {
+		index := -1
+		for i, line := range lines {
+			if strings.HasPrefix(line, title) {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			t.Fatalf("transient section %q missing: %#v", title, lines)
+		}
+		if index <= lastStable {
+			t.Fatalf("transient section %q at line %d should follow the last stable section at line %d", title, index, lastStable)
+		}
+	}
+}
+
 func TestRenderInfoPanelUsageUsesSingleColumnAndHidesZeroValues(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.contextLimit = 0 // isolate: only test token summary hiding zero values
@@ -1790,17 +1863,17 @@ func TestRenderInfoPanelAgentsPreserveInfoPanelBackground(t *testing.T) {
 	if len(section) < 2 {
 		t.Fatalf("AGENTS section = %#v, want rows", section)
 	}
-	if section[0] != "● builder" {
-		t.Fatalf("AGENTS main row = %q, want %q", section[0], "● builder")
+	if section[0] != "▸ ○ builder" {
+		t.Fatalf("AGENTS main row = %q, want %q", section[0], "▸ ○ builder")
 	}
 	if section[1] != "○ ship tests" {
 		t.Fatalf("AGENTS sub-agent row = %q, want %q", section[1], "○ ship tests")
 	}
 
-	if !strings.Contains(rendered, InfoPanelAgentFocusedStyle.Render("● builder")) {
+	if !strings.Contains(rendered, InfoPanelAgentFocusedStyle.Render("▸ ○ builder")) {
 		t.Fatalf("AGENTS focused line should use info-panel-aware style; want styled content in output")
 	}
-	entryPrefix := InfoPanelAgentEntryStyle.Render("○ ship tests")
+	entryPrefix := InfoPanelAgentEntryStyle.Render("  ○ ship tests")
 	if !strings.Contains(rendered, entryPrefix) {
 		t.Fatalf("AGENTS sub-agent line should preserve info-panel background with collapsible content indent; want %q in output", entryPrefix)
 	}
@@ -1817,8 +1890,8 @@ func TestRenderInfoPanelAgentsShowCompactingActivityWithoutStatusBarIconDuplicat
 	if len(section) < 1 {
 		t.Fatalf("AGENTS section = %#v, want main row", section)
 	}
-	if section[0] != "● builder" {
-		t.Fatalf("AGENTS main row = %q, want %q", section[0], "● builder")
+	if section[0] != "▸ ○ builder" {
+		t.Fatalf("AGENTS main row = %q, want %q", section[0], "▸ ○ builder")
 	}
 	if strings.Contains(section[0], "↺") {
 		t.Fatalf("AGENTS row should not duplicate status-bar icon, got %q", section[1])
@@ -1834,8 +1907,8 @@ func TestRenderInfoPanelAgentsRefreshWhenFocusChangesWithoutModelChange(t *testi
 	if len(before) < 2 {
 		t.Fatalf("AGENTS section before focus switch = %#v, want rows", before)
 	}
-	if before[0] != "● builder" {
-		t.Fatalf("AGENTS main row before focus switch = %q, want %q", before[0], "● builder")
+	if before[0] != "▸ ○ builder" {
+		t.Fatalf("AGENTS main row before focus switch = %q, want %q", before[0], "▸ ○ builder")
 	}
 	if before[1] != "○ ship tests" {
 		t.Fatalf("AGENTS sub-agent row before focus switch = %q, want %q", before[1], "○ ship tests")
@@ -1849,8 +1922,8 @@ func TestRenderInfoPanelAgentsRefreshWhenFocusChangesWithoutModelChange(t *testi
 	if after[0] != "○ builder" {
 		t.Fatalf("AGENTS main row after focus switch = %q, want %q", after[0], "○ builder")
 	}
-	if after[1] != "● ship tests" {
-		t.Fatalf("AGENTS sub-agent row after focus switch = %q, want %q", after[1], "● ship tests")
+	if after[1] != "▸ ○ ship tests" {
+		t.Fatalf("AGENTS sub-agent row after focus switch = %q, want %q", after[1], "▸ ○ ship tests")
 	}
 }
 
@@ -1894,8 +1967,8 @@ func TestRenderInfoPanelAgentsRendersEveryAgentWithoutOverflowRow(t *testing.T) 
 	if joined := strings.Join(section, "\n"); strings.Contains(joined, "more") {
 		t.Fatalf("AGENTS must not collapse the tail behind an overflow row; section=%#v", section)
 	}
-	if section[0] != "● builder" {
-		t.Fatalf("AGENTS main row = %q, want %q", section[0], "● builder")
+	if section[0] != "▸ ○ builder" {
+		t.Fatalf("AGENTS main row = %q, want %q", section[0], "▸ ○ builder")
 	}
 	joined := strings.Join(section, "\n")
 	for i := range agents {
@@ -1911,7 +1984,7 @@ func TestRenderInfoPanelAgentsApplyConfiguredColorToNonFocusedRows(t *testing.T)
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", Color: "196"}}, "main", "builder")
 
 	rendered := m.renderInfoPanel(48, 24)
-	want := infoPanelAgentRowStyle(SidebarEntry{ID: "agent-1", Color: "196"}, false).Render("○ agent-1")
+	want := infoPanelAgentRowStyle(SidebarEntry{ID: "agent-1", Color: "196"}, false).Render("  ○ agent-1")
 	if !strings.Contains(rendered, want) {
 		t.Fatalf("AGENTS non-focused row should use configured color; want %q in %q", want, rendered)
 	}
@@ -2490,7 +2563,7 @@ func TestRenderInfoPanelCollapsibleSectionsIndentContentNotHeaders(t *testing.T)
 		{title: "▼ TODOS", want: "   ▶ Investigate spacing"},
 		{title: "▼ SKILLS", want: "   ○ go-expert"},
 		{title: "▼ CHANGED FILES", want: "   foo.go +2 -1"},
-		{title: "▼ AGENTS", want: "   ● builder"},
+		{title: "▼ AGENTS", want: "   ▸ ○ builder"},
 	}
 	for _, tc := range cases {
 		section := infoPanelSectionLines(rawLines, tc.title)

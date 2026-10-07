@@ -347,10 +347,12 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 		appendBlock("", m.buildInfoPanelTimeBlock(lineW))
 		appendBlock(infoPanelSectionLSP, m.buildInfoPanelLSPBlock(lineW))
 		appendBlock(infoPanelSectionMCP, m.buildInfoPanelMCPBlock(lineW))
-		appendBlock(infoPanelSectionTodos, m.buildInfoPanelTodoBlock(lineW))
 		appendBlock(infoPanelSectionSkills, m.buildInfoPanelSkillsBlock(lineW))
 		appendBlock(infoPanelSectionGit, m.buildInfoPanelGitBlock(lineW))
 		appendBlock(infoPanelSectionFiles, m.buildInfoPanelFilesBlock(lineW))
+		// Transient sections render after every stable one: agents, jobs, and
+		// todos come and go during a session, and inserting them above would
+		// shift the sections a user is reading or clicking.
 		if agentBlock, agentRows := m.buildInfoPanelAgentListBlockWithHits(lineW); agentBlock != "" {
 			baseY := m.infoPanelRenderCursorY
 			appendBlock(infoPanelSectionAgents, agentBlock)
@@ -365,6 +367,7 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 				m.recordInfoPanelJobHitBox(hit.jobID, baseY+hit.startLine, baseY+hit.endLine, hit.stopZoneStartX, hit.stopZoneEndX)
 			}
 		}
+		appendBlock(infoPanelSectionTodos, m.buildInfoPanelTodoBlock(lineW))
 
 		var content string
 		switch len(blockParts) {

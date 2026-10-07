@@ -13,9 +13,9 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func (b *Block) renderToolCardWithIgnoredArgs(style lipgloss.Style, cardWidth int, title string, body []string, bgColorNum string, railSeq string) []string {
+func (b *Block) renderToolCardWithIgnoredArgs(style lipgloss.Style, cardWidth int, title string, body []string, bgColorNum string, railPrefix string) []string {
 	body = b.appendToolArgDiagnostics(body, max(cardWidth-4, 10))
-	return renderPrewrappedToolCard(style, cardWidth, title, body, bgColorNum, railSeq)
+	return renderPrewrappedToolCard(style, cardWidth, title, body, bgColorNum, railPrefix)
 }
 
 type toolArgDiagnostic struct {

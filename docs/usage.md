@@ -83,6 +83,8 @@ The error panel keeps the most recent 80 errors in a ring buffer (newest first),
 
 ## Info panel
 
+The right panel keeps a stable order: agents, background jobs, and todos appear and disappear during a session, so they render after the model, usage, integration, and repository sections and never shift the information above them. A focused agent has a `▸` marker alongside its status icon, so its running, waiting, or failed state remains visible.
+
 ### `USAGE` block
 
 - `Context` shows the input-side token burden of the most recent model request, as reported by the provider. A `≈` prefix marks the single estimate used when that response omitted usage; a session that has not had a measured response yet shows `0`.

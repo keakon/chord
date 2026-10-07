@@ -53,7 +53,7 @@ func TestFileToolsRenderWithoutOverflow(t *testing.T) {
 			metrics := newToolCardMetrics(w)
 			style := metrics.blockStyle
 			maxLineWidth := style.GetMarginLeft() + style.GetPaddingLeft() + metrics.cardWidth + style.GetPaddingRight() + style.GetMarginRight()
-			if railANSISeq("tool", false) != "" {
+			if cardRailPrefix("tool", false) != "" {
 				maxLineWidth++
 			}
 			lines := b.Render(w, "")
