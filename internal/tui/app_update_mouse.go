@@ -508,6 +508,10 @@ func (m *Model) handleInputZoneMouseClick(mouse tea.Mouse, hits mouseHitZones) (
 			}
 			return nil, false
 		}
+		offset, hit := m.input.RunePositionAt(mouse.X-m.layout.input.Min.X, mouse.Y-m.layout.input.Min.Y-1)
+		if cmd, handled := m.handleInputImageClick(mouse, offset, hit); handled {
+			return cmd, true
+		}
 		m.handleInputSelectionClick(mouse, mouse.X-m.layout.input.Min.X, mouse.Y-m.layout.input.Min.Y-1)
 		return nil, true
 	}
@@ -516,6 +520,10 @@ func (m *Model) handleInputZoneMouseClick(mouse tea.Mouse, hits mouseHitZones) (
 		m.switchModeWithIME(ModeInsert)
 		m.recalcViewportSize()
 		m.clearFocusedBlock()
+		offset, hit := m.input.RunePositionAt(mouse.X-m.layout.input.Min.X, mouse.Y-m.layout.input.Min.Y-1)
+		if cmd, handled := m.handleInputImageClick(mouse, offset, hit); handled {
+			return tea.Batch(cmd, m.input.Focus()), true
+		}
 		m.handleInputSelectionClick(mouse, mouse.X-m.layout.input.Min.X, mouse.Y-m.layout.input.Min.Y-1)
 		return m.input.Focus(), true
 	}
@@ -659,6 +667,12 @@ func (m *Model) handleOutsideViewportMouseClick(mouse tea.Mouse) tea.Cmd {
 func (m *Model) handleMouseMotion(mouse tea.Mouse, hits mouseHitZones) tea.Cmd {
 	if m.inputMouseDown && hits.inInputZone {
 		if offset, ok := m.input.SelectionPositionAt(mouse.X-m.layout.input.Min.X, mouse.Y-m.layout.input.Min.Y-1); ok {
+			if m.handleInputImageDrag(mouse, offset) {
+				return nil
+			}
+			if abs(mouse.X-m.inputLastClickX) > mouseClickTolerance || abs(mouse.Y-m.inputLastClickY) > mouseClickTolerance {
+				m.inputClickCount = 0
+			}
 			m.input.UpdateSelection(offset)
 		}
 		return nil

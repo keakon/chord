@@ -1,144 +1,150 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"image"
 	"math"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	tea "github.com/keakon/bubbletea/v2"
 )
 
+// Items are a stable snapshot for both transcript and composer previews.
 type imageViewerState struct {
-	Open            bool
-	Part            BlockImagePart
-	BlockID         int
-	Index           int
-	Total           int
-	Backend         ImageBackend
-	FitWidth        int
-	FitHeight       int
-	RenderGen       int
-	ImageID         int
-	PlacementID     int
-	AnchorRow       int
-	AnchorCol       int
-	PixelOffsetX    int
-	PixelOffsetY    int
-	PhysicalValid   bool
-	NeedsRetransmit bool
-	TitleLabel      string
+	Open                 bool
+	Items                []BlockImagePart
+	Index                int
+	ReturnMode           Mode
+	Cursor               int
+	Owner                imageViewerOwner
+	cancel               context.CancelFunc
+	Loading              bool
+	Error                string
+	Prepared             *imageViewerPrepared
+	ImageID, PlacementID int
+	NeedsRetransmit      bool
 }
 
-const imageViewerUsesPhysicalPlacement = true
+func (v imageViewerState) currentPart() BlockImagePart {
+	if v.Index < 0 || v.Index >= len(v.Items) {
+		return BlockImagePart{}
+	}
+	return v.Items[v.Index]
+}
 
-func (m *Model) imageViewerParts(blockID int) ([]BlockImagePart, int, bool) {
+func (m *Model) imageViewerParts(blockID int) ([]BlockImagePart, bool) {
 	if m.viewport == nil {
-		return nil, -1, false
+		return nil, false
 	}
-	if blockID >= 0 {
-		for _, block := range m.viewport.visibleBlocks() {
-			if block == nil || block.ID != blockID {
-				continue
-			}
-			block = m.viewport.materialize(block)
-			if !blockSupportsImagePreview(block) {
-				return nil, -1, false
-			}
-			_ = block.Render(m.viewport.width, "")
-			parts := make([]BlockImagePart, 0, len(block.ImageParts))
-			for idx, part := range block.ImageParts {
-				part.Index = idx
-				parts = append(parts, part)
-			}
-			return parts, block.ID, true
+	if blockID < 0 {
+		blockID = m.focusedBlockID
+	}
+	for _, block := range m.viewport.visibleBlocks() {
+		if block == nil || block.ID != blockID {
+			continue
 		}
-	}
-	if m.focusedBlockID >= 0 {
-		for _, block := range m.viewport.visibleBlocks() {
-			if block == nil || block.ID != m.focusedBlockID {
-				continue
-			}
-			block = m.viewport.materialize(block)
-			if !blockSupportsImagePreview(block) {
-				return nil, -1, false
-			}
-			_ = block.Render(m.viewport.width, "")
-			parts := make([]BlockImagePart, 0, len(block.ImageParts))
-			for idx, part := range block.ImageParts {
-				part.Index = idx
-				parts = append(parts, part)
-			}
-			return parts, block.ID, true
+		block = m.viewport.materialize(block)
+		if !blockSupportsImagePreview(block) {
+			return nil, false
 		}
+		parts := slices.Clone(block.ImageParts)
+		for idx := range parts {
+			parts[idx].Index = idx
+		}
+		return parts, true
 	}
-	return nil, -1, false
+	return nil, false
 }
 
-func (m *Model) openImageViewer(blockID, imageIndex int) {
-	caps := m.imageCaps
-	if caps.Backend == ImageBackendNone || !caps.SupportsFullscreen {
-		return
+func (m *Model) openImageViewer(blockID, imageIndex int) tea.Cmd {
+	parts, ok := m.imageViewerParts(blockID)
+	if !ok {
+		return nil
 	}
-	parts, resolvedBlockID, ok := m.imageViewerParts(blockID)
-	if !ok || len(parts) == 0 {
-		return
+	return m.openImageViewerItems(parts, imageIndex, ModeNormal)
+}
+
+func (m *Model) imageViewerOwner() imageViewerOwner {
+	return imageViewerOwner{AgentID: m.focusedAgentID, Session: m.sessionTranscriptEpoch, Composer: m.input.editBoundary}
+}
+
+func (m *Model) openImageViewerItems(parts []BlockImagePart, index int, returnMode Mode) tea.Cmd {
+	if len(parts) == 0 {
+		return nil
 	}
-	if imageIndex < 0 || imageIndex >= len(parts) {
-		imageIndex = 0
+	if m.imageCaps.Backend == ImageBackendNone || !m.imageCaps.SupportsFullscreen {
+		return m.enqueueToast("Image preview is unavailable in this terminal", "info")
 	}
-	part := parts[imageIndex]
-	label := strings.TrimSpace(part.FileName)
-	if label == "" {
-		label = "image"
-	}
-	m.clearChordState()
-	m.clearActiveSearch()
+	cleanup := m.dismissImageViewer()
 	m.imageViewer = imageViewerState{
-		Open:            true,
-		Part:            part,
-		BlockID:         resolvedBlockID,
-		Index:           imageIndex,
-		Total:           len(parts),
-		Backend:         caps.Backend,
-		FitWidth:        0,
-		FitHeight:       0,
-		RenderGen:       m.imageViewer.RenderGen + 1,
-		ImageID:         0,
-		PlacementID:     0,
-		AnchorRow:       0,
-		AnchorCol:       0,
-		PixelOffsetX:    0,
-		PixelOffsetY:    0,
-		PhysicalValid:   false,
-		NeedsRetransmit: true,
-		TitleLabel:      label,
+		Open: true, Items: slices.Clone(parts), Index: min(max(index, 0), len(parts)-1),
+		ReturnMode: returnMode, Cursor: runeOffsetFromRowCol(m.input.Value(), m.input.Line(), m.input.Column()),
+		Owner: m.imageViewerOwner(), NeedsRetransmit: true,
 	}
-	m.mode = ModeImageViewer
+	m.input.ClearSelection()
+	m.inputMouseDown = false
+	m.inputClickCount = 0
+	m.inputImageClick = inputImageClickState{}
+	m.clearMouseSelection()
+	imeCmd := m.switchModeWithIME(ModeImageViewer)
 	m.recalcViewportSize()
+	return tea.Sequence(cleanup, tea.Batch(imeCmd, m.prepareImageViewer()))
+}
+
+// dismissImageViewer invalidates work without restoring a previous business mode.
+// Mode transitions, focus/session switches and ordinary close share this cleanup.
+func (m *Model) dismissImageViewer() tea.Cmd {
+	if !m.imageViewer.Open {
+		return nil
+	}
+	if m.imageViewer.cancel != nil {
+		m.imageViewer.cancel()
+	}
+	var cleanup tea.Cmd
+	if m.imageCaps.Backend == ImageBackendKitty && m.imageViewer.ImageID > 0 {
+		cleanup = tea.Raw(kittyDeleteSequenceForPlacement(m.imageViewer.ImageID, m.imageViewer.PlacementID))
+	} else if m.imageCaps.Backend == ImageBackendITerm2 {
+		cleanup = tea.ClearScreen
+	}
+	m.imageViewerGeneration++
+	m.imageViewer = imageViewerState{}
+	return cleanup
 }
 
 func (m *Model) closeImageViewer() tea.Cmd {
 	if !m.imageViewer.Open {
 		return nil
 	}
-	var cmd tea.Cmd
-	if m.imageCaps.Backend == ImageBackendKitty && m.imageViewer.ImageID > 0 && imageViewerUsesPhysicalPlacement {
-		// Viewer close is different from image draw/update: the delete command must
-		// not rely on deferred flushing, otherwise it can arrive after the normal
-		// frame has already been rendered and remain pending until some unrelated
-		// later redraw (for example a tab switch / resize). Send it directly.
-		cmd = tea.Raw(kittyDeleteSequenceForPlacement(m.imageViewer.ImageID, m.imageViewer.PlacementID))
+	viewer := m.imageViewer
+	cleanup := m.dismissImageViewer()
+	if m.mode != ModeImageViewer {
+		return cleanup
 	}
-	m.imageViewer = imageViewerState{}
-	m.mode = ModeNormal
+	target := ModeNormal
+	if viewer.Owner == m.imageViewerOwner() {
+		target = viewer.ReturnMode
+	}
+	imeCmd := m.switchModeWithIME(target)
+	var focus tea.Cmd
+	if target == ModeInsert {
+		m.input.ClearSelection()
+		m.input.setCursorRuneOffset(min(viewer.Cursor, len([]rune(m.input.Value()))))
+		focus = m.input.Focus()
+	}
 	m.recalcViewportSize()
-	return cmd
+	// Preserve immediate Kitty deletion, then restore the visible transcript.
+	restore := tea.Batch(imeCmd, focus, m.imageProtocolCmd())
+	if restore == nil {
+		return cleanup
+	}
+	return tea.Sequence(cleanup, restore)
 }
 
 func (m *Model) imageViewerPhysicalPlacement() (placementID, row, col, pxOffsetX, pxOffsetY int, ok bool) {
-	if m.imageCaps.Backend != ImageBackendKitty || !imageViewerUsesPhysicalPlacement {
+	if m.imageCaps.Backend != ImageBackendKitty {
 		return 0, 0, 0, 0, 0, false
 	}
 	metrics := m.kittyMetrics
@@ -172,7 +178,7 @@ func (m *Model) imageViewerPhysicalPlacement() (placementID, row, col, pxOffsetX
 	if col < 0 {
 		col = 0
 	}
-	placementID = m.imageViewer.RenderGen
+	placementID = int(m.imageViewerGeneration)
 	if placementID <= 0 {
 		placementID = 1
 	}
@@ -189,6 +195,7 @@ func (m *Model) imageViewerContentRect() (cols, rows int) {
 	if rows <= 0 {
 		rows = m.height
 	}
+	cols = max(1, min(cols, m.width-4)-DirectoryBorderStyle.GetHorizontalFrameSize()-2*imageViewerInnerPadX)
 	rows -= imageViewerMinReservedLines + 2*imageViewerInnerPadY
 	if rows < 1 {
 		rows = 1
@@ -200,19 +207,17 @@ func (m *Model) imageViewerContentRect() (cols, rows int) {
 }
 
 func (m *Model) imageViewerFitSize() (cols, rows int, err error) {
-	cols, rows = m.imageViewerContentRect()
-	part := m.imageViewer.Part
-	if cols <= 0 || rows <= 0 {
-		return 1, 1, fmt.Errorf("viewer has no available space")
+	v := m.imageViewer
+	if v.Error != "" {
+		return 0, 0, fmt.Errorf("%s", v.Error)
 	}
-	entry, err := imageRuntimeEntryForPart(part)
-	if err != nil {
-		return 0, 0, err
+	if v.Prepared == nil || v.Loading {
+		return 0, 0, fmt.Errorf("image is loading")
 	}
-	cfg, _, err := entry.decodeConfig(part)
-	if err != nil {
-		return 0, 0, err
-	}
+	return v.Prepared.Cols, v.Prepared.Rows, nil
+}
+
+func imageViewerFitDimensions(cfg image.Config, cols, rows int, metrics kittyTerminalMetrics) (int, int, error) {
 	if cfg.Width <= 0 || cfg.Height <= 0 {
 		return 0, 0, fmt.Errorf("image has invalid dimensions")
 	}
@@ -225,7 +230,6 @@ func (m *Model) imageViewerFitSize() (cols, rows int, err error) {
 		fitRows = rows
 	}
 
-	metrics := m.kittyMetrics
 	if metrics.Valid && metrics.CellWidthPx > 0 && metrics.CellHeightPx > 0 {
 		naturalCols := max(1, int(math.Ceil(float64(cfg.Width)/float64(metrics.CellWidthPx))))
 		naturalRows := max(1, int(math.Ceil(float64(cfg.Height)/float64(metrics.CellHeightPx))))
@@ -249,27 +253,11 @@ func (m *Model) imageViewerFitSize() (cols, rows int, err error) {
 }
 
 func (m *Model) stepImageViewer(delta int) tea.Cmd {
-	if !m.imageViewer.Open || delta == 0 || m.imageViewer.Total <= 1 {
+	if !m.imageViewer.Open || delta == 0 || len(m.imageViewer.Items) <= 1 {
 		return nil
 	}
-	parts, blockID, ok := m.imageViewerParts(m.imageViewer.BlockID)
-	if !ok || len(parts) == 0 {
-		return nil
-	}
-	next := m.imageViewer.Index + delta
-	if next < 0 {
-		next = len(parts) - 1
-	} else if next >= len(parts) {
-		next = 0
-	}
-	oldImageID := m.imageViewer.ImageID
-	oldPlacementID := m.imageViewer.PlacementID
-	m.openImageViewer(blockID, next)
-	if oldImageID > 0 && m.imageCaps.Backend == ImageBackendKitty && imageViewerUsesPhysicalPlacement {
-		deleteCmd := tea.Raw(kittyDeleteSequenceForPlacement(oldImageID, oldPlacementID))
-		return tea.Sequence(deleteCmd, m.imageProtocolCmd())
-	}
-	return m.imageProtocolCmd()
+	m.imageViewer.Index = (m.imageViewer.Index + delta%len(m.imageViewer.Items) + len(m.imageViewer.Items)) % len(m.imageViewer.Items)
+	return m.prepareImageViewer()
 }
 
 func (m *Model) handleImageViewerKey(msg tea.KeyMsg) tea.Cmd {
@@ -278,12 +266,10 @@ func (m *Model) handleImageViewerKey(msg tea.KeyMsg) tea.Cmd {
 		return m.stepImageViewer(-1)
 	case "right", "l":
 		return m.stepImageViewer(1)
+	case "r":
+		return m.prepareImageViewer()
 	case "esc", "q", "enter", "o", " ", "space":
-		closeCmd := m.closeImageViewer()
-		if closeCmd != nil {
-			return closeCmd
-		}
-		return tea.ClearScreen
+		return m.closeImageViewer()
 	default:
 		return nil
 	}
@@ -300,10 +286,10 @@ func (m *Model) imageViewerOverlayRect() (image.Rectangle, string) {
 
 func (m *Model) imageViewerTitle() string {
 	left := "Image Viewer"
-	if m.imageViewer.Total > 1 {
-		left = fmt.Sprintf("Image Viewer (%d/%d)", m.imageViewer.Index+1, m.imageViewer.Total)
+	if len(m.imageViewer.Items) > 1 {
+		left = fmt.Sprintf("Image Viewer (%d/%d)", m.imageViewer.Index+1, len(m.imageViewer.Items))
 	}
-	label := strings.TrimSpace(m.imageViewer.TitleLabel)
+	label := strings.TrimSpace(m.imageViewer.currentPart().FileName)
 	if label != "" {
 		left += " · " + truncateOneLine(label, 28)
 	}
@@ -330,18 +316,23 @@ func (m *Model) renderImageViewerOverlay() string {
 	if !m.imageViewer.Open {
 		return ""
 	}
-	caps := m.imageCaps
-	fitCols, fitRows, err := m.imageViewerFitSize()
-	if err != nil {
-		errWidth := max(24, min(m.width-4, 60))
-		return renderDialogBox(errWidth, []string{
-			DialogTitleStyle.Render(m.imageViewerTitle()),
-			"",
-			ErrorStyle.Render(err.Error()),
+	if m.imageViewer.Loading || m.imageViewer.Prepared == nil && m.imageViewer.Error == "" {
+		width := min(max(24, min(m.width-4, 60)), m.width)
+		return renderDialogBox(width, []string{
+			DialogTitleStyle.Render(m.imageViewerTitleLine(width - 4)), "",
+			DimStyle.Render("Loading image…"),
 		})
 	}
-	m.imageViewer.FitWidth = fitCols
-	m.imageViewer.FitHeight = fitRows
+	fitCols, fitRows, err := m.imageViewerFitSize()
+	if err != nil {
+		errWidth := min(max(24, min(m.width-4, 60)), m.width)
+		return renderDialogBox(errWidth, []string{
+			DialogTitleStyle.Render(m.imageViewerTitleLine(errWidth - 4)),
+			"",
+			ErrorStyle.Render(err.Error()),
+			DimStyle.Render("Esc: close · r: retry"),
+		})
+	}
 
 	contentWidth := max(24, min(m.width-4, max(fitCols+2*imageViewerInnerPadX+2, 40))) -
 		DirectoryBorderStyle.GetHorizontalBorderSize() - DirectoryBorderStyle.GetHorizontalPadding()
@@ -351,41 +342,36 @@ func (m *Model) renderImageViewerOverlay() string {
 		lines = append(lines, "")
 	}
 
-	label := strings.TrimSpace(m.imageViewer.Part.FileName)
-	if label == "" {
-		label = "image"
-	}
 	placeholderLine := strings.Repeat(" ", imageViewerInnerPadX) + lipgloss.NewStyle().
-		Background(lipgloss.Color(currentTheme.UserCardBg)).
+		Background(lipgloss.Color(currentTheme.DialogBg)).
 		Render(strings.Repeat(" ", fitCols)) + strings.Repeat(" ", imageViewerInnerPadX)
 
-	if caps.Backend == ImageBackendKitty {
-		if imageViewerUsesPhysicalPlacement {
-			for range fitRows {
-				lines = append(lines, placeholderLine)
-			}
-		} else {
-			imageID, err := kittyImageIDForVariant(m.imageViewer.Part, fmt.Sprintf("viewer:%d:%d", fitCols, fitRows))
-			if err == nil {
-				m.imageViewer.ImageID = imageID
-				lines = append(lines, kittyViewerLines(imageID, fitCols, fitRows, currentTheme.UserCardBg)...)
-			} else {
-				lines = append(lines, renderImageFallback(m.imageViewer.Part, fitCols+imagePlaceholderMargin)...)
-			}
-		}
-	} else {
-		for range fitRows {
-			lines = append(lines, placeholderLine)
-		}
+	for range fitRows {
+		lines = append(lines, placeholderLine)
 	}
+
 	for range imageViewerInnerPadY {
 		lines = append(lines, "")
 	}
-	if m.imageViewer.Total > 1 {
-		lines = append(lines, DimStyle.Render(fmt.Sprintf("%d / %d", m.imageViewer.Index+1, m.imageViewer.Total)))
+	if len(m.imageViewer.Items) > 1 {
+		lines = append(lines, DimStyle.Render(fmt.Sprintf("%d / %d", m.imageViewer.Index+1, len(m.imageViewer.Items))))
 	}
 	body := strings.Join(lines, "\n")
 	body = preserveDialogBackground(body)
 	width := min(max(24, min(m.width-4, max(fitCols+2*imageViewerInnerPadX+4, 40))), m.width)
 	return DirectoryBorderStyle.Width(width).Render(body)
+}
+
+// retireImageViewer is used by synchronous focus/session boundary helpers.
+// Update flushes its cleanup before the next business command.
+func (m *Model) retireImageViewer() {
+	if !m.imageViewer.Open {
+		return
+	}
+	cleanup := m.dismissImageViewer()
+	var ime tea.Cmd
+	if m.mode == ModeImageViewer {
+		ime = m.switchModeWithIME(ModeNormal)
+	}
+	m.imageViewerCleanup = tea.Sequence(m.imageViewerCleanup, cleanup, ime)
 }

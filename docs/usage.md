@@ -432,6 +432,9 @@ Common actions:
 - To attach an image or PDF by path, enter the path in the composer and configure a custom `insert_attach_file` key binding
 - PDFs that appear to be encrypted are marked with a warning; Chord still allows sending them because provider-side parsing is authoritative.
 - `Enter` / `o` / `Space`: open the image in the current user message or tool result in Normal mode
+- In the composer, click a real image placeholder once to select the whole attachment, then delete or type to replace it; `Ctrl+Z` restores the edit. Double-click the same placeholder to preview it before sending. Typed placeholder text and PDFs do not open image previews.
+- In image preview, use `Left` / `Right` to browse the images present when it opened. Press `Esc` or click outside the preview to close it; composer previews return to the same draft in Insert mode, with the cursor restored and the selection cleared. Reading and preparing images happens in the background. If loading fails, press `r` to retry or close the preview to continue editing.
+- Image preview requires a terminal with fullscreen image support; other terminals show a short notice and keep the selected attachment available for editing.
 
 ## Copying text
 

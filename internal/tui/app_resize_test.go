@@ -229,6 +229,7 @@ func TestFocusMsgWhenKittyImageViewerSchedulesDeferredReplay(t *testing.T) {
 	m.kittyMetrics = kittyTerminalMetrics{CellWidthPx: 8, CellHeightPx: 16, WindowWidthPx: 640, WindowHeightPx: 384, Valid: true}
 	m.layout = m.generateLayout(m.width, m.height)
 	m.openImageViewer(block.ID, 0)
+	finishImageViewerLoad(t, &m)
 	m.imageViewer.ImageID = 123
 	m.imageViewer.PlacementID = 456
 	m.imageViewer.NeedsRetransmit = false

@@ -30,6 +30,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- Preview images before sending: click a composer image placeholder to select its whole attachment, double-click to open the existing image viewer, and close it to continue editing the same draft.
+
 - Composer selections can be deleted or replaced by typing, newlines, or text paste, including complete image and large-paste placeholders; one undo restores the entire edit.
 
 - Add `/status` in the TUI to view live runtime information at any terminal width, with keyboard navigation and mouse interaction.

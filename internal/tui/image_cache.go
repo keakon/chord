@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -87,6 +88,9 @@ func imageRuntimeCacheKeyCached(part BlockImagePart) (string, error) {
 type imageRuntimeCacheEntry struct {
 	mu sync.Mutex
 
+	// Published independently of construction so budget checks never wait for I/O.
+	residentBytes atomic.Int64
+
 	rawLoaded bool
 	rawData   []byte
 	rawErr    error
@@ -108,14 +112,6 @@ type imageRuntimeCacheEntry struct {
 
 	// lastAccess drives budget eviction; guarded by the store mutex.
 	lastAccess int64
-}
-
-// approxBytes reports the resident payload bytes held by the entry.
-func (e *imageRuntimeCacheEntry) approxBytes() int64 {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	total := int64(len(e.rawData)) + int64(len(e.pngData)) + int64(len(e.base64PNG))
-	return total
 }
 
 var imageRuntimeCache = imageRuntimeCacheStore{entries: make(map[string]*imageRuntimeCacheEntry)}
@@ -146,8 +142,8 @@ func imageRuntimeEntryForPart(part BlockImagePart) (*imageRuntimeCacheEntry, err
 }
 
 // enforceBudgetLocked evicts least-recently-accessed entries until resident
-// payload bytes fit the budget. Callers hold the store mutex; entry locks are
-// taken inside, which is the consistent store→entry order.
+// payload bytes fit the budget. Callers hold only the store mutex; entry locks
+// are never taken here: background decoding must not stall foreground lookups.
 func (s *imageRuntimeCacheStore) enforceBudgetLocked() {
 	const minEntriesBeforeEnforce = 8
 	if len(s.entries) < minEntriesBeforeEnforce {
@@ -161,7 +157,7 @@ func (s *imageRuntimeCacheStore) enforceBudgetLocked() {
 	total := int64(0)
 	residents := make([]resident, 0, len(s.entries))
 	for key, entry := range s.entries {
-		cost := entry.approxBytes()
+		cost := entry.residentBytes.Load()
 		total += cost
 		residents = append(residents, resident{key: key, entry: entry, bytes: cost})
 	}
@@ -230,6 +226,7 @@ func (e *imageRuntimeCacheEntry) base64TransportPNG(part BlockImagePart) (string
 		return "", 0, err
 	}
 	e.base64PNG = base64.StdEncoding.EncodeToString(pngData)
+	e.residentBytes.Add(int64(len(e.base64PNG)))
 	e.base64Loaded = true
 	return e.base64PNG, len(pngData), nil
 }
@@ -241,6 +238,7 @@ func (e *imageRuntimeCacheEntry) ensureRawUnlocked(part BlockImagePart) ([]byte,
 	e.rawLoaded = true
 	if len(part.Data) > 0 {
 		e.rawData = part.Data
+		e.residentBytes.Add(int64(len(e.rawData)))
 		return e.rawData, nil
 	}
 	path := strings.TrimSpace(part.ImagePath)
@@ -254,6 +252,7 @@ func (e *imageRuntimeCacheEntry) ensureRawUnlocked(part BlockImagePart) ([]byte,
 		return nil, e.rawErr
 	}
 	e.rawData = data
+	e.residentBytes.Add(int64(len(e.rawData)))
 	return e.rawData, nil
 }
 
@@ -303,6 +302,7 @@ func (e *imageRuntimeCacheEntry) ensureTransportPNGUnlocked(part BlockImagePart)
 		return nil, 0, 0, e.pngErr
 	}
 	e.pngData = buf.Bytes()
+	e.residentBytes.Add(int64(len(e.pngData)))
 	e.pngWidth = bounds.Dx()
 	e.pngHeight = bounds.Dy()
 	return e.pngData, e.pngWidth, e.pngHeight, nil

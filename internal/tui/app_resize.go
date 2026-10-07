@@ -36,7 +36,6 @@ func (m *Model) applyTerminalSize(width, height int, refreshKitty bool) {
 		sr.SetWidth(m.width - 4)
 		m.search.Input = sr
 	}
-	m.imageViewer.RenderGen++
 	if refreshKitty {
 		m.refreshKittyTerminalMetrics()
 	}

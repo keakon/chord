@@ -437,6 +437,9 @@ type Model struct {
 	statusPath               statusPathState
 	imageCaps                TerminalImageCapabilities
 	imageViewer              imageViewerState
+	imageViewerGeneration    uint64
+	imageViewerCleanup       tea.Cmd
+	inputImageClick          inputImageClickState
 	kittyMetrics             kittyTerminalMetrics
 	kittyImageCache          map[int]struct{}
 	kittyPlacementCache      map[int]struct{}
@@ -842,6 +845,19 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			cmd = tea.Batch(cmd, tea.Sequence(tea.ClearScreen, m.imageProtocolCmdWithReason("overlay-dismissed")))
 		}
 	}()
+	defer func() {
+		if m.imageViewerCleanup != nil {
+			cmd = tea.Sequence(m.imageViewerCleanup, cmd)
+			m.imageViewerCleanup = nil
+		}
+		if m.imageViewer.Open && (m.mode != ModeImageViewer || m.imageViewer.Owner != m.imageViewerOwner()) {
+			cmd = tea.Sequence(m.dismissImageViewer(), cmd)
+			if m.mode == ModeImageViewer {
+				cmd = tea.Sequence(cmd, m.switchModeWithIME(ModeNormal))
+			}
+			m.recalcViewportSize()
+		}
+	}()
 	m.ensureViewportCallbacks()
 	switch msg := msg.(type) {
 
@@ -984,6 +1000,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case clipboardAttachmentReadyMsg:
 		return m, m.handleClipboardAttachmentReady(msg)
 
+	case imageViewerLoadedMsg:
+		return m, m.handleImageViewerLoaded(msg)
+
 	case openImageResultMsg:
 		if msg.err != nil {
 			return m, m.enqueueToast(msg.err.Error(), "warn")
@@ -1000,8 +1019,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			}
 			m.refreshBlockFocus()
 		}
-		m.openImageViewer(msg.blockID, msg.imageIndex)
-		return m, m.imageProtocolCmd()
+		return m, m.openImageViewer(msg.blockID, msg.imageIndex)
 
 	// -- clipboard text paste ---------------------------------------------
 	case composerClipboardTextMsg:

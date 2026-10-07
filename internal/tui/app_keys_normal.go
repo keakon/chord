@@ -299,8 +299,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 				if block.ToolName == tools.NameDelegate && block.LinkedAgentID != "" {
 					m.maybeSwitchToTaskAgent(block)
 				} else if part, ok := block.firstImagePart(m.viewport.width); ok && m.imageCaps.SupportsFullscreen {
-					m.openImageViewer(block.ID, part.Index)
-					return m.imageProtocolCmd()
+					return m.openImageViewer(block.ID, part.Index)
 				} else if block.ToolName == tools.NameDelegate {
 					// Always-expanded: nothing to toggle.
 				} else {

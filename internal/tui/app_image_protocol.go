@@ -156,56 +156,42 @@ func (m *Model) imageProtocolCmdWithReason(reason string) tea.Cmd {
 }
 
 func (m *Model) imageViewerProtocolCmd() tea.Cmd {
-	if !m.imageViewer.Open {
+	v := &m.imageViewer
+	if !v.Open {
 		return nil
 	}
-	cols, rows, err := m.imageViewerFitSize()
-	if err != nil {
+	cols, rows := m.imageViewerContentRect()
+	if v.Prepared != nil && (v.Prepared.AvailableCols != cols || v.Prepared.AvailableRows != rows || v.Prepared.Metrics != m.kittyMetrics) {
+		return m.prepareImageViewer()
+	}
+	if v.Loading || v.Error != "" || v.Prepared == nil {
 		return nil
 	}
+	seq := v.Prepared.Sequence
 	switch m.imageCaps.Backend {
 	case ImageBackendKitty:
-		placementID, row, col, pxOffsetX, pxOffsetY, ok := m.imageViewerPhysicalPlacement()
+		placementID, row, col, _, _, ok := m.imageViewerPhysicalPlacement()
 		if !ok {
 			return nil
 		}
-		imgID, err := kittyImageIDForVariant(m.imageViewer.Part, fmt.Sprintf("viewer:%d:%d", cols, rows))
-		if err != nil {
-			return nil
+		v.ImageID = v.Prepared.ImageID
+		v.PlacementID = placementID
+		if v.NeedsRetransmit {
+			delete(m.kittyImageCache, v.ImageID)
+			delete(m.kittyPlacementCache, v.ImageID)
 		}
-		seq, imageID, err := kittyViewerSequence(m.imageViewer.Part, placementID, cols, rows, -1, pxOffsetX, pxOffsetY)
-		if err != nil {
-			return nil
-		}
-		if m.imageViewer.NeedsRetransmit {
-			delete(m.kittyImageCache, imgID)
-			delete(m.kittyPlacementCache, imgID)
-		}
-		m.imageViewer.ImageID = imageID
-		m.imageViewer.PlacementID = placementID
-		m.imageViewer.AnchorRow = row
-		m.imageViewer.AnchorCol = col
-		m.imageViewer.PixelOffsetX = pxOffsetX
-		m.imageViewer.PixelOffsetY = pxOffsetY
-		m.imageViewer.PhysicalValid = true
-		m.imageViewer.NeedsRetransmit = false
-		m.markKittyImageTransmitted(imageID)
+		v.NeedsRetransmit = false
+		m.markKittyImageTransmitted(v.ImageID)
 		return tea.Raw(deferredCursorSequence(row+1, col+1, seq))
 	case ImageBackendITerm2:
 		rect, _ := m.imageViewerOverlayRect()
-		row := rect.Min.Y + 4
-		col := rect.Min.X + 3
-		if row < 0 {
-			row = 0
-		}
-		if col < 0 {
-			col = 0
-		}
-		seq, err := iterm2ViewerSequence(m.imageViewer.Part, cols, rows)
-		if err != nil {
-			return nil
-		}
-		return tea.Raw(encodeDeferredTerminalSequence(deferredCursorSequence(row+1, col+1, seq)))
+		row := max(0, rect.Min.Y+2+imageViewerInnerPadY)
+		col := max(0, rect.Min.X+1+DirectoryBorderStyle.GetPaddingLeft()+imageViewerInnerPadX)
+		// The large payload was encoded in the prepare command. Only these small
+		// cursor wrappers depend on the current overlay position.
+		start := encodeDeferredTerminalSequence(fmt.Sprintf("\x1b7\x1b[%d;%dH", row+1, col+1))
+		end := encodeDeferredTerminalSequence("\x1b8")
+		return tea.Raw(start + seq + end)
 	default:
 		return nil
 	}

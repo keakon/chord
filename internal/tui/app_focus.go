@@ -14,6 +14,8 @@ import (
 func (m *Model) setFocusedAgent(id string) {
 	prev := m.focusedAgentID
 	if prev != id {
+		m.retireImageViewer()
+		m.inputImageClick = inputImageClickState{}
 		m.cancelClipboardAttachmentPaste()
 		m.saveComposerStateForAgent(prev)
 		m.clearRunningModelDisplay("")

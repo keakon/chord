@@ -34,10 +34,10 @@ func TestOpenImageViewerUsesRequestedImageIndex(t *testing.T) {
 	if got := m.imageViewer.Index; got != 1 {
 		t.Fatalf("imageViewer.Index = %d, want 1", got)
 	}
-	if got := m.imageViewer.Total; got != 2 {
+	if got := len(m.imageViewer.Items); got != 2 {
 		t.Fatalf("imageViewer.Total = %d, want 2", got)
 	}
-	if got := m.imageViewer.Part.FileName; got != "image2.png" {
+	if got := m.imageViewer.currentPart().FileName; got != "image2.png" {
 		t.Fatalf("imageViewer.Part.FileName = %q, want %q", got, "image2.png")
 	}
 }
@@ -59,6 +59,7 @@ func TestStepImageViewerUsesSequenceForKittyPhysicalPlacement(t *testing.T) {
 	m.focusedBlockID = block.ID
 	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsFullscreen: true}
 	m.openImageViewer(block.ID, 0)
+	finishImageViewerLoad(t, &m)
 	m.imageViewer.ImageID = 123
 	m.imageViewer.PlacementID = 456
 	m.kittyMetrics = kittyTerminalMetrics{CellWidthPx: 8, CellHeightPx: 16, WindowWidthPx: 640, WindowHeightPx: 384, Valid: true}
@@ -122,6 +123,7 @@ func TestImageViewerOutsideClickClosesWithoutClearScreenSequence(t *testing.T) {
 	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsFullscreen: true}
 	m.kittyMetrics = kittyTerminalMetrics{CellWidthPx: 8, CellHeightPx: 16, WindowWidthPx: 640, WindowHeightPx: 384, Valid: true}
 	m.openImageViewer(block.ID, 0)
+	finishImageViewerLoad(t, &m)
 	m.imageViewer.ImageID = 11
 	m.imageViewer.PlacementID = 22
 	m.layout = m.generateLayout(m.width, m.height)
@@ -175,7 +177,15 @@ func TestToggleCollapseOnFocusedImageReturnsImageProtocolCmd(t *testing.T) {
 		t.Fatal("space on focused image should open viewer")
 	}
 	msg := cmd()
-	raw, ok := msg.(tea.RawMsg)
+	loaded, ok := msg.(imageViewerLoadedMsg)
+	if !ok {
+		t.Fatalf("open command returned %T, want asynchronous load", msg)
+	}
+	protocol := m.handleImageViewerLoaded(loaded)
+	if protocol == nil {
+		t.Fatal("loaded image should produce protocol command")
+	}
+	raw, ok := protocol().(tea.RawMsg)
 	if !ok {
 		t.Fatalf("space open viewer msg = %T, want tea.RawMsg", msg)
 	}
@@ -200,6 +210,7 @@ func TestSingleImageViewerDoesNotNavigateOrShowSwitchHint(t *testing.T) {
 	m.kittyMetrics = kittyTerminalMetrics{CellWidthPx: 8, CellHeightPx: 16, WindowWidthPx: 640, WindowHeightPx: 384, Valid: true}
 	m.layout = m.generateLayout(m.width, m.height)
 	m.openImageViewer(block.ID, 0)
+	finishImageViewerLoad(t, &m)
 	m.imageViewer.ImageID = 123
 	m.imageViewer.PlacementID = 456
 
@@ -209,7 +220,7 @@ func TestSingleImageViewerDoesNotNavigateOrShowSwitchHint(t *testing.T) {
 	if got := m.imageViewer.Index; got != 0 {
 		t.Fatalf("imageViewer.Index = %d, want 0", got)
 	}
-	if got := imageViewerHintText(m.imageCaps, m.imageViewer.Total); got != imageViewerSingleHint {
+	if got := imageViewerHintText(m.imageCaps, len(m.imageViewer.Items)); got != imageViewerSingleHint {
 		t.Fatalf("imageViewerHintText(single) = %q, want %q", got, imageViewerSingleHint)
 	}
 	overlay := stripANSI(m.renderImageViewerOverlay())
@@ -231,6 +242,7 @@ func TestOpenImageViewerMarksNeedsRetransmit(t *testing.T) {
 	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsFullscreen: true}
 
 	m.openImageViewer(block.ID, 0)
+	finishImageViewerLoad(t, &m)
 	if !m.imageViewer.NeedsRetransmit {
 		t.Fatal("opening image viewer should mark it for retransmit")
 	}
@@ -252,6 +264,7 @@ func TestImageViewerFitSizeLimitsUpscaleWithKittyMetrics(t *testing.T) {
 	m.kittyMetrics = kittyTerminalMetrics{CellWidthPx: 8, CellHeightPx: 16, WindowWidthPx: 1280, WindowHeightPx: 960, Valid: true}
 	m.layout = m.generateLayout(m.width, m.height)
 	m.openImageViewer(block.ID, 0)
+	finishImageViewerLoad(t, &m)
 
 	cols, rows, err := m.imageViewerFitSize()
 	if err != nil {
@@ -278,6 +291,7 @@ func TestImageViewerPhysicalPlacementMatchesOverlayContentGeometry(t *testing.T)
 	m.kittyMetrics = kittyTerminalMetrics{CellWidthPx: 8, CellHeightPx: 16, WindowWidthPx: 640, WindowHeightPx: 384, Valid: true}
 	m.layout = m.generateLayout(m.width, m.height)
 	m.openImageViewer(block.ID, 0)
+	finishImageViewerLoad(t, &m)
 
 	rect, _ := m.imageViewerOverlayRect()
 	if rect.Empty() {
@@ -307,8 +321,8 @@ func TestImageViewerPhysicalPlacementMatchesOverlayContentGeometry(t *testing.T)
 	if row != expectedRow {
 		t.Fatalf("anchor row = %d, want %d", row, expectedRow)
 	}
-	if m.imageViewer.FitHeight != fitRows && m.imageViewer.FitHeight != 0 {
-		t.Fatalf("imageViewer.FitHeight = %d, want %d or 0 before render", m.imageViewer.FitHeight, fitRows)
+	if m.imageViewer.Prepared.Rows != fitRows {
+		t.Fatalf("imageViewer.FitHeight = %d, want %d or 0 before render", m.imageViewer.Prepared.Rows, fitRows)
 	}
 }
 
@@ -329,6 +343,7 @@ func TestStepImageViewerDeleteCmdIsImmediateForKittyPhysicalPlacement(t *testing
 	m.focusedBlockID = block.ID
 	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsFullscreen: true}
 	m.openImageViewer(block.ID, 0)
+	finishImageViewerLoad(t, &m)
 	m.imageViewer.ImageID = 123
 	m.imageViewer.PlacementID = 456
 	m.kittyMetrics = kittyTerminalMetrics{CellWidthPx: 8, CellHeightPx: 16, WindowWidthPx: 640, WindowHeightPx: 384, Valid: true}
@@ -360,5 +375,37 @@ func TestStepImageViewerDeleteCmdIsImmediateForKittyPhysicalPlacement(t *testing
 	}
 	if got, want := fmt.Sprint(raw.Msg), kittyDeleteSequenceForPlacement(123, 456); got != want {
 		t.Fatalf("delete raw msg = %q, want %q", got, want)
+	}
+}
+
+func finishImageViewerLoad(t *testing.T, m *Model) {
+	t.Helper()
+	// Complete a command explicitly, without starting timers or goroutines.
+	cmd := m.prepareImageViewer()
+	var run func(tea.Cmd)
+	run = func(command tea.Cmd) {
+		if command == nil {
+			return
+		}
+		msg := command()
+		if loaded, ok := msg.(imageViewerLoadedMsg); ok {
+			if loaded.Err != nil {
+				t.Fatal(loaded.Err)
+			}
+			m.handleImageViewerLoaded(loaded)
+			return
+		}
+		value := reflect.ValueOf(msg)
+		if value.IsValid() && value.Kind() == reflect.Slice {
+			for idx := 0; idx < value.Len(); idx++ {
+				if c, ok := reflect.TypeAssert[tea.Cmd](value.Index(idx)); ok {
+					run(c)
+				}
+			}
+		}
+	}
+	run(cmd)
+	if m.imageViewer.Loading || m.imageViewer.Prepared == nil {
+		t.Fatal("viewer preparation did not finish")
 	}
 }

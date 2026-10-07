@@ -91,7 +91,3 @@ func kittyDeleteSequenceForPlacement(imageID, placementID int) string {
 func kittyRenderImageID(part BlockImagePart, cols, rows int) (int, error) {
 	return kittyImageIDForVariant(part, fmt.Sprintf("inline:%d:%d", cols, rows))
 }
-
-func kittyViewerLines(imageID, cols, rows int, bg string) []string {
-	return kittyStyledPlaceholderLines(imageID, cols, rows, bg)
-}
