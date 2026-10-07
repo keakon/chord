@@ -11,9 +11,7 @@ import (
 )
 
 func (m *Model) usageStatsLines(width int) []string {
-	if width < 40 {
-		width = 40
-	}
+	width = max(width, 1)
 	if m.usageStats.linesCacheLines != nil && m.usageStats.linesCacheWidth == width && m.usageStats.linesCacheVer == m.usageStats.renderVersion {
 		return m.usageStats.linesCacheLines
 	}
@@ -27,6 +25,7 @@ func (m *Model) usageStatsLines(width int) []string {
 	}
 	lines = append(lines, "")
 	lines = append(lines, m.usageStatsContentLines(width)...)
+	lines = wrapDialogLines(lines, width)
 	m.usageStats.linesCacheWidth = width
 	m.usageStats.linesCacheVer = m.usageStats.renderVersion
 	m.usageStats.linesCacheLines = lines

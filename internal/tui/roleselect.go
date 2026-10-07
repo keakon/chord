@@ -168,11 +168,11 @@ func (m *Model) handleRoleSwitchResult(msg roleSwitchResultMsg) tea.Cmd {
 func (m *Model) renderRoleSelectDialog() string {
 	if len(m.roleSelect.roles) == 0 {
 		dialog, _ := RenderOverlay(OverlayConfig{
-			Title:    "Main Role",
-			Hint:     "esc cancel",
-			MinWidth: 40,
+			Title: "Main Role",
+			Hint:  "esc cancel",
+
 			MaxWidth: 60,
-		}, DimStyle.Render("(no roles configured)"), 1, image.Rect(0, 0, m.width, m.height))
+		}, DimStyle.Render("(no roles configured)"), image.Rect(0, 0, m.width, m.height))
 		return dialog
 	}
 
@@ -182,9 +182,9 @@ func (m *Model) renderRoleSelectDialog() string {
 	}
 
 	overlayCfg := OverlayConfig{
-		Title:    "Main Role",
-		Hint:     "j/k move  g/G jump  enter select  esc cancel",
-		MinWidth: 30,
+		Title: "Main Role",
+		Hint:  "j/k move  g/G jump  enter select  esc cancel",
+
 		MaxWidth: 60,
 	}
 

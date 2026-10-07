@@ -49,6 +49,10 @@ Common keys:
 - `q`: press twice to quit
 - `Ctrl+C`: press twice to quit
 
+### Answering questions
+
+Question dialogs keep the action shortcuts visible while the question and choices scroll. Use the arrow keys or `j` / `k` to move between choices, and `PgUp` / `PgDn` or the mouse wheel to read long text without selecting another answer. `Tab` opens a custom answer; its input remains visible while you scroll the question. `Enter` submits, and `Shift+Enter` or `Ctrl+J` inserts a new line. In custom-answer mode, `Esc` returns to the choices when available; otherwise it declines the question.
+
 ### Error panel
 
 Press `Ctrl+E` in normal mode to open the error panel, which lists the errors encountered so far. This includes:

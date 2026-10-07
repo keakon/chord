@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -14,18 +15,33 @@ func (m Model) helpLines(width int) []string {
 	}
 	contentWidth := max(width-4, 24)
 
-	lines := []string{
-		centerHelpLine("Chord "+buildinfo.Current().Short(), width),
-		"",
-		DimStyle.Render("Press Esc, q, or ? to close. /help also opens this view."),
-		DimStyle.Render("In the local main-agent view, Enter completes a visible / command suggestion, otherwise it sends, queues (when busy), or continues (when idle with empty input). Ctrl+C starts quit confirmation; normal-mode Esc stops the current run, and queued drafts are committed without auto-resuming on that cancel."),
-		DimStyle.Render("Click a queued draft to edit it, or click [del] to remove it before send."),
-		"",
+	lines := []string{centerHelpLine("Chord "+buildinfo.Current().Short(), width), ""}
+	intro := []string{
+		"Press Esc, q, or ? to close. /help also opens this view.",
+		fmt.Sprintf("%s completes a visible / command suggestion. Otherwise it sends, queues when busy, or continues when idle with empty input.", keysDisplay(m.keyMap.InsertSubmit)),
+		"Ctrl+C starts quit confirmation.",
+		"In normal mode, Esc stops the current run. Queued drafts are committed without resuming the run.",
+		"Click a queued draft to edit it, or click [del] to remove it before send.",
 	}
+	for _, paragraph := range intro {
+		for _, line := range wrapText(paragraph, contentWidth) {
+			lines = append(lines, DimStyle.Render(line))
+		}
+	}
+	lines = append(lines, "")
 
+	groups := m.keyMap.HelpGroups()
+	count := 0
+	for _, group := range groups {
+		if len(group.Bindings) > 0 {
+			count++
+		}
+	}
+	cols := helpColumnCount(count, contentWidth)
+	columnWidth := (contentWidth - (cols-1)*helpColumnGap) / cols
 	var blocks [][]string
-	for _, group := range m.keyMap.HelpGroups() {
-		if block := renderHelpGroupLines(group, contentWidth); len(block) > 0 {
+	for _, group := range groups {
+		if block := renderHelpGroupLines(group, columnWidth); len(block) > 0 {
 			blocks = append(blocks, block)
 		}
 	}

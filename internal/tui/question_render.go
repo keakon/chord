@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image"
 	"sort"
 	"strings"
 	"time"
@@ -121,61 +122,45 @@ func (m *Model) renderQuestionDialog() string {
 		}
 	}
 
-	// Budget borders, title, body, editor and controls before adding hints.
-	maxHeight := max(m.height-2, 6)
+	area := image.Rect(0, 0, m.width, m.height)
+	cfg := OverlayConfig{Title: titleText, MaxWidth: maxWidth}
+	cfg.Hint = questionHint(q, m.question.custom) + "  [PgUp/PgDn] Scroll"
 	editing := m.question.custom || len(q.Options) == 0
-	editorRows := 0
-	if editing {
-		editorRows = 1
+	action, escape := "select", "decline"
+	if editing || q.Multiple {
+		action = "send"
 	}
-	timeoutText := ""
-	timeoutRows := 0
+	if m.question.custom && len(q.Options) > 0 {
+		escape = "back"
+	}
+	secondary := "Tab custom  PgUp/PgDn scroll"
+	if editing {
+		secondary = "Shift+Enter newline  PgUp/PgDn scroll"
+	} else if q.Multiple {
+		secondary = "Space toggle  Tab custom  PgUp/PgDn scroll"
+	}
+	cfg.CompactHint = "Enter " + action + "  Esc " + escape + "\n" + secondary
 	if !m.question.deadline.IsZero() {
 		secs := int(ceilDuration(max(time.Until(m.question.deadline), 0), time.Second) / time.Second)
-		if maxHeight < 6+editorRows {
-			titleText = fmt.Sprintf("❓ %ds · %s", secs, sanitizeToolDisplayText(q.Header))
+		if editing && m.height < 9 {
+			cfg.Title = fmt.Sprintf("❓ %ds · %s", secs, sanitizeToolDisplayText(q.Header))
 		} else {
-			timeoutText = fmt.Sprintf("Closes in %ds", secs)
-			timeoutRows = 1
+			cfg.Footer = QuestionTimeoutStyle.Render(truncateOneLine(fmt.Sprintf("Closes in %ds", secs), innerWidth))
 		}
 	}
-	maxHintRows := max(maxHeight-4-editorRows-timeoutRows, 1)
-	hint := questionHint(q, m.question.custom) + "  [PgUp/PgDn] Scroll"
-	hintLines := wrapText(hint, innerWidth)
-	if len(hintLines) > maxHintRows {
-		action, escape := "select", "decline"
-		if editing || q.Multiple {
-			action = "send"
-		}
-		if m.question.custom && len(q.Options) > 0 {
-			escape = "back"
-		}
-		secondary := "Tab custom  PgUp/PgDn scroll"
-		if editing {
-			secondary = "Shift+Enter newline  PgUp/PgDn scroll"
-		} else if q.Multiple {
-			secondary = "Space toggle  Tab custom  PgUp/PgDn scroll"
-		}
-		hintLines = wrapText("Enter "+action+"  Esc "+escape+"\n"+secondary, innerWidth)
-		hintLines = hintLines[:min(len(hintLines), maxHintRows)]
-	}
-	footer := make([]string, 0, len(hintLines)+timeoutRows+questionInputHeight)
-	for _, line := range hintLines {
-		footer = append(footer, QuestionHintStyle.Render(line))
-	}
-	if timeoutText != "" {
-		footer = append(footer, QuestionTimeoutStyle.Render(truncateOneLine(timeoutText, innerWidth)))
-	}
-	if m.question.custom || len(q.Options) == 0 {
-		editorHeight := max(min(questionInputHeight, maxHeight-len(footer)-4), 1)
+	if editing {
+		editorHeight := max(min(questionInputHeight, overlayContentHeight(cfg, area)-1), 1)
 		configureDialogTextarea(&m.question.input, questionInputWidth(m.width), 1, editorHeight)
 		inputLines := strings.Split(strings.TrimSuffix(m.question.input.View(), "\n"), "\n")
 		if len(inputLines) > 0 {
 			inputLines[0] = QuestionSelectedStyle.Render("> ") + inputLines[0]
 		}
-		footer = append(inputLines, footer...)
+		if cfg.Footer != "" {
+			inputLines = append(inputLines, cfg.Footer)
+		}
+		cfg.Footer = strings.Join(inputLines, "\n")
 	}
-	bodyHeight := max(maxHeight-3-len(footer), 1) // borders and title
+	bodyHeight := overlayContentHeight(cfg, area)
 	m.question.bodyHeight, m.question.visibleBodyHeight = len(lines), bodyHeight
 	offset := m.question.scrollOffset
 	if m.question.followCursor && !m.question.custom && len(q.Options) > 0 {
@@ -190,15 +175,9 @@ func (m *Model) renderQuestionDialog() string {
 	m.question.scrollOffset = offset
 	visible := lines[offset:min(offset+bodyHeight, len(lines))]
 	if len(lines) > bodyHeight {
-		titleText += fmt.Sprintf(" [%d-%d/%d]", offset+1, offset+len(visible), len(lines))
+		cfg.Title += fmt.Sprintf(" [%d-%d/%d]", offset+1, offset+len(visible), len(lines))
 	}
-	title := QuestionSeparatorStyle.Render(truncateOneLine(titleText, innerWidth))
-	framed := append([]string{title}, visible...)
-	framed = append(framed, footer...)
-	for i, line := range framed {
-		framed[i] = ansi.Truncate(line, innerWidth, "…")
-	}
-	out := renderDialogBox(maxWidth, framed)
+	out, _ := RenderOverlay(cfg, strings.Join(visible, "\n"), area)
 	if !m.question.custom && m.question.deadline.IsZero() && len(q.Options) > 0 {
 		m.question.renderCacheWidth = m.width
 		m.question.renderCacheHeight = m.height

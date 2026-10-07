@@ -1,11 +1,46 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	tea "github.com/keakon/bubbletea/v2"
 )
+
+func TestPoolFilterSmallTerminalKeepsSelectionAndMouseTargetVisible(t *testing.T) {
+	for _, size := range [][2]int{{30, 6}, {40, 12}, {80, 24}} {
+		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
+			m, backend := newPoolSwitchModel()
+			backend.mainModelPoolNames = []string{"alpha", "beta"}
+			backend.mainModelPool = "alpha"
+			m.applyTerminalSize(size[0], size[1], false)
+			m.openModelSelect()
+			m.handleModelSelectKey(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
+			m.Update(tea.PasteMsg{Content: "beta"})
+			m.handleModelSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+			dialog := m.renderModelSelectDialog()
+			plain := stripANSI(dialog)
+			if lipgloss.Height(dialog) > size[1] || lipgloss.Width(dialog) > size[0]-1 {
+				t.Fatal("model selector exceeds terminal bounds")
+			}
+			if !strings.Contains(plain, "Filter: beta") || !strings.Contains(strings.ToLower(plain), "enter") || !strings.Contains(strings.ToLower(plain), "esc") {
+				t.Fatalf("filter or actions are hidden: %s", plain)
+			}
+			rect := m.overlayRect(dialog)
+			row := rect.Min.Y + 1 + m.modelSelect.selector.listBaseRow
+			lines := strings.Split(plain, "\n")
+			if localRow := row - rect.Min.Y; localRow >= len(lines) || !strings.Contains(lines[localRow], "beta") {
+				t.Fatalf("mouse target does not match the visible result: %s", plain)
+			}
+			idx, ok := m.poolSelectIndexAt(rect.Min.X+2, row)
+			if !ok || idx != 0 {
+				t.Fatalf("mouse selection = %d, %t", idx, ok)
+			}
+		})
+	}
+}
 
 func TestPoolFilterSelectsVisibleIdentityAndKeepsNavigationLetters(t *testing.T) {
 	m, backend := newPoolSwitchModel()

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"image"
 	"strings"
 	"time"
 
@@ -154,9 +155,9 @@ func (m *Model) handleErrorPanelKey(msg tea.KeyMsg) tea.Cmd {
 		m.errorPanel.scrollOffset++
 	case "k", "up":
 		m.errorPanel.scrollOffset--
-	case "ctrl+f":
+	case "ctrl+f", "pgdown":
 		m.errorPanel.scrollOffset += m.errorPanelVisibleLines()
-	case "ctrl+b":
+	case "ctrl+b", "pgup":
 		m.errorPanel.scrollOffset -= m.errorPanelVisibleLines()
 	case "g":
 		m.errorPanel.scrollOffset = 0
@@ -171,18 +172,20 @@ func (m *Model) handleErrorPanelKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+func (m *Model) errorPanelOverlayConfig() OverlayConfig {
+	return OverlayConfig{Title: "Error Panel", Hint: m.errorPanelHint(), MaxWidth: max(min(m.width-12, 110), 60)}
+}
+
 func (m *Model) errorPanelVisibleLines() int {
-	visible := max(m.height-12, 8)
-	return visible
+	return overlayScrollContentHeight(m.errorPanelOverlayConfig(), image.Rect(0, 0, m.width, m.height), len(m.errorPanelLines(m.errorPanelInnerWidth())))
 }
 
 func (m *Model) errorPanelMaxWidth() int {
-	maxWidth := max(min(m.width-12, 110), 60)
-	return maxWidth
+	return normalizeOverlayConfig(m.errorPanelOverlayConfig(), image.Rect(0, 0, m.width, m.height)).MaxWidth
 }
 
 func (m *Model) errorPanelInnerWidth() int {
-	return m.errorPanelMaxWidth() - 4
+	return max(dialogContentWidth(m.errorPanelMaxWidth()), 1)
 }
 
 func (m *Model) errorPanelMaxScroll() int {

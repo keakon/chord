@@ -54,8 +54,8 @@ func TestHandoffSelectOptionIndexAtAccountsForScrollWindowStart(t *testing.T) {
 	_ = m.renderHandoffSelectDialog()
 
 	start, end := m.handoffSelect.selector.list.WindowRange()
-	if end-start != 3 {
-		t.Fatalf("visible window = %d, want 3", end-start)
+	if end-start < 1 || end-start > 3 {
+		t.Fatalf("visible window = %d, want 1..3 fitted rows", end-start)
 	}
 	if start == 0 {
 		t.Fatal("expected list to be scrolled")

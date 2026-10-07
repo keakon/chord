@@ -1,70 +1,65 @@
 package tui
 
 import (
+	"fmt"
 	"image"
-	"strings"
 
-	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type OverlayConfig struct {
-	Title          string
-	Hint           string
-	MinWidth       int
-	MaxWidth       int
-	MaxHeightRatio float64
+	Title            string
+	Hint             string
+	CompactHint      string
+	Footer           string
+	MinContentHeight int
+
+	MaxWidth int
 }
 
 func normalizeOverlayConfig(cfg OverlayConfig, area image.Rectangle) OverlayConfig {
-	if cfg.MinWidth <= 0 {
-		cfg.MinWidth = 40
-	}
 	if cfg.MaxWidth <= 0 {
 		cfg.MaxWidth = 80
 	}
-	if cfg.MaxHeightRatio <= 0 {
-		cfg.MaxHeightRatio = 0.67
-	}
-	// Leave the terminal's last physical column unwritten, matching
-	// drawableLineWidth: a full-width dialog that paints into it makes hosts such
-	// as Ghostty emit an extra wrap for the frame, and the cell-level diff then
-	// keeps the stale row until a full repaint.
-	maxAllowed := max(area.Dx()-1, 1)
-	if cfg.MaxWidth > maxAllowed {
-		cfg.MaxWidth = maxAllowed
-	}
-	if cfg.MinWidth > cfg.MaxWidth {
-		cfg.MinWidth = cfg.MaxWidth
-	}
+	// Keep the last physical column unwritten to avoid terminal autowrap.
+	cfg.MaxWidth = min(cfg.MaxWidth, max(area.Dx()-1, 1))
 	return cfg
 }
 
-func RenderOverlay(cfg OverlayConfig, content string, contentHeight int, area image.Rectangle) (string, image.Rectangle) {
-	cfg = normalizeOverlayConfig(cfg, area)
-	_ = contentHeight
+// overlayContentHeight is the scroll window after the fixed frame and footer.
+func overlayContentHeight(cfg OverlayConfig, area image.Rectangle) int {
+	return layoutOverlay(cfg, area).contentHeight
+}
 
-	bodyLines := make([]string, 0, 5)
+func RenderOverlay(cfg OverlayConfig, content string, area image.Rectangle) (string, image.Rectangle) {
+	layout := layoutOverlay(cfg, area)
+	cfg = layout.config
+	width := max(dialogContentWidth(cfg.MaxWidth), 1)
+	lines := make([]string, 0, 8)
 	if cfg.Title != "" {
-		bodyLines = append(bodyLines, DialogTitleStyle.Render(cfg.Title), "")
+		lines = append(lines, DialogTitleStyle.Render(ansi.Truncate(cfg.Title, width, "…")))
+		for range layout.titleGap {
+			lines = append(lines, "")
+		}
 	}
-	bodyLines = append(bodyLines, content)
-	if cfg.Hint != "" {
-		bodyLines = append(bodyLines, "", DimStyle.Render(cfg.Hint))
+	body := tuiHardwrap(content, width)
+	lines = append(lines, body[:min(len(body), layout.contentHeight)]...)
+	lines = append(lines, layout.footerLines...)
+	for range layout.hintGap {
+		lines = append(lines, "")
 	}
-	body := strings.Join(bodyLines, "\n")
-	body = preserveDialogBackground(body)
-
-	innerWidth := lipgloss.Width(body)
-	if innerWidth+4 < cfg.MinWidth {
-		innerWidth = cfg.MinWidth - 4
+	for _, line := range layout.hintLines {
+		lines = append(lines, DimStyle.Render(line))
 	}
-	if innerWidth+4 > cfg.MaxWidth {
-		innerWidth = cfg.MaxWidth - 4
-	}
-	if innerWidth < 0 {
-		innerWidth = 0
-	}
-
-	box := DirectoryBorderStyle.Width(innerWidth + 4).Render(body)
+	box := renderDialogBox(cfg.MaxWidth, lines)
 	return box, centeredRect(area, box)
+}
+
+func overlayScrollContentHeight(cfg OverlayConfig, area image.Rectangle, total int) int {
+	visible := overlayContentHeight(cfg, area)
+	if total <= visible {
+		return visible
+	}
+	cfg.Hint += fmt.Sprintf("  %d/%d", total, total)
+	return overlayContentHeight(cfg, area)
 }

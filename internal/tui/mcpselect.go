@@ -118,9 +118,9 @@ func (m *Model) renderMCPSelectDialog() string {
 		hint = mcpSelectBusyHint
 	}
 	overlayCfg := OverlayConfig{
-		Title:    "MCP Servers",
-		Hint:     hint,
-		MinWidth: 30,
+		Title: "MCP Servers",
+		Hint:  hint,
+
 		MaxWidth: 70,
 	}
 	area := image.Rect(0, 0, m.width, m.height)

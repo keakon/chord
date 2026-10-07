@@ -378,9 +378,9 @@ func (m *Model) renderSkillSelectDialog() string {
 		hint = skillSelectFilterHint
 	}
 	overlayCfg := OverlayConfig{
-		Title:    "Skills",
-		Hint:     hint,
-		MinWidth: 30,
+		Title: "Skills",
+		Hint:  hint,
+
 		MaxWidth: 70,
 	}
 	area := image.Rect(0, 0, m.width, m.height)

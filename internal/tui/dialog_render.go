@@ -1,9 +1,18 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/charmbracelet/x/ansi"
+)
 
 func renderDialogBox(width int, lines []string) string {
-	body := strings.Join(styleDialogBodyLines(lines, dialogContentWidth(width)), "\n")
+	contentWidth := dialogContentWidth(width)
+	bounded := make([]string, len(lines))
+	for i, line := range lines {
+		bounded[i] = ansi.Truncate(line, contentWidth, "…")
+	}
+	body := strings.Join(styleDialogBodyLines(bounded, contentWidth), "\n")
 	return DirectoryBorderStyle.Width(width).Render(body)
 }
 
@@ -49,4 +58,14 @@ func preserveDialogBackground(body string) string {
 		lines[i] = ensureStyledLineReset(preserveBackground(line, currentTheme.DialogBg))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// wrapDialogLines runs before scroll-window sizing, so navigation counts the
+// physical rows that will be drawn rather than logical lines that may wrap.
+func wrapDialogLines(lines []string, width int) []string {
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, strings.Split(tuiWidthMethod.Wrap(line, max(width, 1), ""), "\n")...)
+	}
+	return out
 }

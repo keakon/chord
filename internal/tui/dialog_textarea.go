@@ -27,9 +27,15 @@ func newDialogTextarea(width, minHeight, maxHeight int, value string) textarea.M
 }
 
 func configureDialogTextarea(ta *textarea.Model, width, minHeight, maxHeight int) {
+	oldWidth, oldHeight, oldMaxHeight := ta.Width(), ta.Height(), ta.MaxHeight
 	ta.MinHeight = minHeight
 	ta.MaxHeight = maxHeight
 	ta.DynamicHeight = true
 	ta.MaxContentHeight = dialogTextareaMaxContentHeight
 	ta.SetWidth(width)
+	if ta.Focused() && (oldWidth != ta.Width() || oldHeight != ta.Height() || oldMaxHeight != ta.MaxHeight) {
+		// Refresh the component's viewport content before it follows the cursor.
+		// SetWidth/SetHeight alone can clamp scrolling against stale rendered rows.
+		*ta, _ = ta.Update(nil)
+	}
 }

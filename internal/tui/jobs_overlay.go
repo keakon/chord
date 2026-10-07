@@ -111,11 +111,20 @@ func (m *Model) jobsOverlayMaxWidth() int {
 }
 
 func (m *Model) jobsOverlayInnerWidth() int {
-	return max(m.jobsOverlayMaxWidth()-4, 1)
+	return max(dialogContentWidth(m.jobsOverlayMaxWidth()), 1)
+}
+
+func (m *Model) jobsOverlayConfig() OverlayConfig {
+	return OverlayConfig{
+		Title:       "Background Jobs",
+		Hint:        "j/k select  enter stop  esc close",
+		CompactHint: "Enter stop Esc",
+		MaxWidth:    m.jobsOverlayMaxWidth(),
+	}
 }
 
 func (m *Model) jobsOverlayVisibleRows() int {
-	return max(m.height-12, 4)
+	return overlayScrollContentHeight(m.jobsOverlayConfig(), image.Rect(0, 0, m.width, m.height), len(m.activeJobs()))
 }
 
 func (m *Model) jobsOverlayMaxScroll() int {
@@ -180,6 +189,8 @@ func (m *Model) refreshJobsOverlayLive(now time.Time) {
 
 func (m *Model) renderJobsOverlayDialog() string {
 	jobs := m.activeJobs()
+	m.clampJobsOverlayScroll()
+	m.ensureJobsOverlayCursorVisible()
 	innerWidth := m.jobsOverlayInnerWidth()
 	visible := min(m.jobsOverlayVisibleRows(), len(jobs))
 	start := 0
@@ -218,15 +229,10 @@ func (m *Model) renderJobsOverlayDialog() string {
 	if maxScroll := m.jobsOverlayMaxScroll(); maxScroll > 0 {
 		scroll = fmt.Sprintf("  %d/%d", start+visible, len(jobs))
 	}
-	// A fixed min=max width keeps the content width — and so the stop-zone
-	// columns the click handler maps back — independent of the longest row.
-	maxWidth := m.jobsOverlayMaxWidth()
-	dialog, _ := RenderOverlay(OverlayConfig{
-		Title:    "Background Jobs",
-		Hint:     "j/k select  enter stop  esc close" + scroll,
-		MinWidth: maxWidth,
-		MaxWidth: maxWidth,
-	}, content, len(contentLines), image.Rect(0, 0, m.width, m.height))
+	// The fixed frame width keeps the stop-zone columns independent of row labels.
+	cfg := m.jobsOverlayConfig()
+	cfg.Hint += scroll
+	dialog, _ := RenderOverlay(cfg, content, image.Rect(0, 0, m.width, m.height))
 	m.jobsOverlay.renderCacheW = m.width
 	m.jobsOverlay.renderCacheH = m.height
 	m.jobsOverlay.renderCacheScroll = start
@@ -254,7 +260,12 @@ func (m *Model) jobsOverlayRowAt(x, y int) (jobID string, inStopZone bool, ok bo
 	if visible > 0 {
 		windowStart = max(min(m.jobsOverlay.scrollOffset, len(jobs)-visible), 0)
 	}
-	idx, hit := overlayItemIndexAt(rect, y, 2, windowStart, visible)
+	cfg := m.jobsOverlayConfig()
+	if len(jobs) > visible {
+		cfg.Hint += fmt.Sprintf("  %d/%d", windowStart+visible, len(jobs))
+	}
+	layout := layoutOverlay(cfg, image.Rect(0, 0, m.width, m.height))
+	idx, hit := overlayItemIndexAt(rect, y, layout.contentBaseRow(), windowStart, visible)
 	if !hit || idx < 0 || idx >= len(jobs) {
 		return "", false, false
 	}

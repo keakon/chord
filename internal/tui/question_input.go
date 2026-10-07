@@ -15,7 +15,7 @@ func (m *Model) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	if msg.String() == "pgup" || msg.String() == "pgdown" {
-		delta := max(m.height/3, 1)
+		delta := max(m.question.visibleBodyHeight, 1)
 		if msg.String() == "pgup" {
 			delta = -delta
 		}

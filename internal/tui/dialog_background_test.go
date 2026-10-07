@@ -154,11 +154,11 @@ func TestRenderOverlayPreservesButtons(t *testing.T) {
 		ConfirmDenyStyle.Render("[Esc/D] Deny"),
 	)
 	dialog, _ := RenderOverlay(OverlayConfig{
-		Title:    "Buttons",
-		Hint:     "esc close",
-		MinWidth: 40,
+		Title: "Buttons",
+		Hint:  "esc close",
+
 		MaxWidth: 70,
-	}, content, 1, image.Rect(0, 0, m.width, m.height))
+	}, content, image.Rect(0, 0, m.width, m.height))
 	line := findRenderedLineContaining(dialog, "[Esc/D] Deny")
 	if line == "" {
 		t.Fatalf("missing deny button: %q", stripANSI(dialog))

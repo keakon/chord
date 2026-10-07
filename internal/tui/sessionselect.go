@@ -619,9 +619,9 @@ func (m *Model) renderSessionSelectFilterLine(innerWidth int) string {
 func (m *Model) renderSessionSelectDialog() string {
 	opts := m.sessionSelect.options
 	overlayCfg := OverlayConfig{
-		Title:    "Sessions",
-		Hint:     "j/k or wheel move  g/G jump  enter resume  d delete  / filter  esc cancel",
-		MinWidth: 40,
+		Title: "Sessions",
+		Hint:  "j/k or wheel move  g/G jump  enter resume  d delete  / filter  esc cancel",
+
 		MaxWidth: 90,
 	}
 	area := image.Rect(0, 0, m.width, m.height)
@@ -629,18 +629,18 @@ func (m *Model) renderSessionSelectDialog() string {
 	innerWidth := overlayCfg.MaxWidth - 4
 
 	if m.sessionSelect.loading {
-		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render("Loading sessions..."), 1, area)
+		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render("Loading sessions..."), area)
 		return dialog
 	}
 	if m.sessionSelect.loadErr != "" {
 		errMsg := fmt.Sprintf("Failed to load sessions: %s", m.sessionSelect.loadErr)
-		dialog, _ := RenderOverlay(overlayCfg, ErrorStyle.Render(errMsg), 1, area)
+		dialog, _ := RenderOverlay(overlayCfg, ErrorStyle.Render(errMsg), area)
 		return dialog
 	}
 
 	if len(opts) == 0 {
 		emptyMsg := "No previous sessions to choose from. Start a conversation to create one."
-		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render(emptyMsg), 1, area)
+		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render(emptyMsg), area)
 		return dialog
 	}
 	if m.sessionSelect.selector.list == nil {
@@ -660,7 +660,7 @@ func (m *Model) renderSessionSelectDialog() string {
 		}
 		listBody := DimStyle.Render(fmt.Sprintf(`No sessions match %q`, query))
 		content := filterLine + "\n\n" + listBody
-		dialog, _ := RenderOverlay(overlayCfg, content, lipgloss.Height(content), area)
+		dialog, _ := RenderOverlay(overlayCfg, content, area)
 		return dialog
 	}
 

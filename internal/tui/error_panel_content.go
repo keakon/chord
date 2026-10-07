@@ -32,6 +32,7 @@ func (m *Model) errorPanelLines(innerWidth int) []string {
 		}
 	}
 
+	lines = wrapDialogLines(lines, innerWidth)
 	m.errorPanel.linesCacheLines = lines
 	m.errorPanel.linesCacheWidth = innerWidth
 	m.errorPanel.linesCacheVer = m.errorPanel.renderVersion

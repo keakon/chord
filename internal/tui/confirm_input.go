@@ -42,11 +42,11 @@ func isPlainKey(msg tea.KeyMsg, code rune) bool {
 
 func confirmDialogWidth(totalWidth int) int {
 	maxWidth := max(min(totalWidth-6, confirmDialogMaxWidth), 40)
-	return maxWidth
+	return min(maxWidth, max(totalWidth-1, 1))
 }
 
 func confirmDialogInnerWidth(totalWidth int) int {
-	innerWidth := max(confirmDialogWidth(totalWidth)-DirectoryBorderStyle.GetHorizontalPadding()-DirectoryBorderStyle.GetHorizontalBorderSize(), 20)
+	innerWidth := max(confirmDialogWidth(totalWidth)-DirectoryBorderStyle.GetHorizontalPadding()-DirectoryBorderStyle.GetHorizontalBorderSize(), 1)
 	return innerWidth
 }
 

@@ -23,11 +23,12 @@ const handoffOverlayMaxWidth = 70
 // handoffOverlayContentWidth returns the content width inside the Handoff
 // overlay frame. renderHandoffSelectDialog renders through RenderOverlay with
 // MaxWidth handoffOverlayMaxWidth (clamped to the terminal width), whose inner
-// content width is MaxWidth-4. The deny-reason textarea must be sized with
+// content width excludes the border and padding. The deny-reason textarea must be sized with
 // this same width so its already wrapped lines are not re-wrapped (and
 // possibly split mid-character) by the overlay border render.
 func handoffOverlayContentWidth(width int) int {
-	return max(min(handoffOverlayMaxWidth, width)-4, 1)
+	cfg := normalizeOverlayConfig(OverlayConfig{MaxWidth: handoffOverlayMaxWidth}, image.Rect(0, 0, width, 0))
+	return max(dialogContentWidth(cfg.MaxWidth), 1)
 }
 
 // handoffOption describes a single agent entry in the Handoff selector.
@@ -372,9 +373,9 @@ func (m *Model) renderHandoffSelectDialog() string {
 	}
 
 	overlayCfg := OverlayConfig{
-		Title:    "Handoff To Agent",
-		Hint:     "j/k move  g/G jump  v view plan  enter/a approve  r deny reason  esc close",
-		MinWidth: 30,
+		Title: "Handoff To Agent",
+		Hint:  "j/k move  g/G jump  v view plan  enter/a approve  r deny reason  esc close",
+
 		MaxWidth: handoffOverlayMaxWidth,
 	}
 	area := image.Rect(0, 0, m.width, m.height)
@@ -398,19 +399,7 @@ func (m *Model) renderHandoffSelectDialog() string {
 	}, "\n")
 
 	if m.handoffSelect.denyingWithReason {
-		lines := []string{planPrefix, "", ConfirmToolStyle.Render("Deny handoff with reason:")}
-		lines = append(lines, strings.Split(m.handoffSelect.denyReasonInput.View(), "\n")...)
-		if strings.TrimSpace(m.handoffSelect.error) != "" {
-			lines = append(lines, "")
-			for _, line := range wrapText(m.handoffSelect.error, max(10, contentWidth-2)) {
-				lines = append(lines, ConfirmDenyStyle.Render("! "+line))
-			}
-		}
-		lines = append(lines, "", ConfirmHintStyle.Render("[Enter] Deny  [Shift+Enter/Ctrl+J] New line  [Esc] Back"))
-		denyCfg := overlayCfg
-		denyCfg.Hint = ""
-		box, _ := RenderOverlay(denyCfg, strings.Join(lines, "\n"), len(lines), area)
-		return box
+		return m.renderHandoffDenyReasonDialog(overlayCfg, planPrefix, area)
 	}
 
 	extraKey := fmt.Sprintf("plan=%s scroll=%d total=%d", m.handoffSelect.planPath, m.handoffSelect.scroll, planTotal)

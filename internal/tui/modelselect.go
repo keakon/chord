@@ -276,11 +276,11 @@ func (m *Model) selectPoolAtCursor() tea.Cmd {
 func (m *Model) renderModelSelectDialog() string {
 	if len(m.modelSelect.poolNames) == 0 {
 		dialog, _ := RenderOverlay(OverlayConfig{
-			Title:    modelSelectTitle(m.modelSelect.target),
-			Hint:     "esc cancel",
-			MinWidth: 40,
+			Title: modelSelectTitle(m.modelSelect.target),
+			Hint:  "esc cancel",
+
 			MaxWidth: 60,
-		}, DimStyle.Render("(no pools configured)"), 1, image.Rect(0, 0, m.width, m.height))
+		}, DimStyle.Render("(no pools configured)"), image.Rect(0, 0, m.width, m.height))
 		return dialog
 	}
 
@@ -310,10 +310,10 @@ func (m *Model) renderModelSelectDialog() string {
 		prefix += "\nNo matching pools"
 	}
 	overlayCfg := OverlayConfig{
-		Title:    modelSelectTitle(m.modelSelect.target),
-		Hint:     hint,
-		MinWidth: 30,
-		MaxWidth: 60,
+		Title:       modelSelectTitle(m.modelSelect.target),
+		Hint:        hint,
+		CompactHint: "Enter select  Esc cancel",
+		MaxWidth:    60,
 	}
 
 	extraKey := strings.Join(m.modelSelect.poolNames, ",") + "|" + currentPool + "|" + string(m.modelSelect.target.Kind) + "|" + strings.TrimSpace(m.modelSelect.target.AgentName) + "|" + m.modelSelect.filter + "|" + hint

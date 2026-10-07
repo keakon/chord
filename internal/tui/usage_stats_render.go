@@ -5,8 +5,6 @@ import (
 	"image"
 	"strings"
 
-	"charm.land/lipgloss/v2"
-
 	"github.com/keakon/chord/internal/analytics"
 )
 
@@ -29,12 +27,10 @@ func (m *Model) renderUsageStatsDialog() string {
 	if maxScroll := m.usageStatsMaxScroll(); maxScroll > 0 {
 		scroll = fmt.Sprintf("  %d/%d", start+visible, len(lines))
 	}
-	dialog, _ := RenderOverlay(OverlayConfig{
-		Title:    "Stats Panel",
-		Hint:     m.usageStatsHint() + scroll,
-		MinWidth: 60,
-		MaxWidth: m.usageStatsMaxWidth(),
-	}, content, lipgloss.Height(content), image.Rect(0, 0, m.width, m.height))
+	cfg := m.usageStatsOverlayConfig()
+	cfg.Hint += scroll
+	dialog, _ := RenderOverlay(cfg, content, image.Rect(0, 0, m.width, m.height))
+
 	m.usageStats.dialogCacheW = m.width
 	m.usageStats.dialogCacheH = m.height
 	m.usageStats.dialogCacheScroll = start
@@ -45,6 +41,9 @@ func (m *Model) renderUsageStatsDialog() string {
 }
 
 func (m *Model) usageStatsHint() string {
+	if m.width < 60 {
+		return "Tab view  s scope  ↑/↓ scroll  Esc close"
+	}
 	base := "tab/shift+tab view  s scope  j/k scroll  g/G jump  ctrl+f/b page  esc/$ close"
 	if m.usageStats.scope == statsScopeProject {
 		if m.usageStats.projectLoadErr != "" && m.usageStats.projectReport == nil {

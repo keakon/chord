@@ -3,8 +3,6 @@ package tui
 import (
 	"image"
 	"strings"
-
-	"charm.land/lipgloss/v2"
 )
 
 // overlayListSelectorState is a reusable building block for modal selector
@@ -74,6 +72,29 @@ func (s *overlayListSelectorState) Render(
 		return ""
 	}
 
+	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
+	contentWidth := max(dialogContentWidth(overlayCfg.MaxWidth), 1)
+	prefix = strings.TrimSuffix(prefix, "\n")
+	prefixParts := tuiHardwrap(prefix, contentWidth)
+	if prefix == "" {
+		prefixParts = nil
+	}
+	overlayCfg.MinContentHeight = len(prefixParts) + gapBlankLines + 1
+	budget := overlayContentHeight(overlayCfg, area)
+	// Keep at least one selectable row, even when filter/header text is tall.
+	allowedPrefix := max(budget-1, 0)
+	if len(prefixParts)+gapBlankLines > allowedPrefix {
+		gapBlankLines = 0
+	}
+	if len(prefixParts) > allowedPrefix {
+		prefixParts = prefixParts[:allowedPrefix]
+	}
+	prefix = strings.Join(prefixParts, "\n")
+	prefixHeight := len(prefixParts)
+	if prefix != "" {
+		prefixHeight += gapBlankLines
+	}
+	maxVisible = max(min(maxVisible, budget-prefixHeight), 1)
 	s.ensureList(maxVisible)
 	if s.list == nil {
 		return ""
@@ -96,9 +117,6 @@ func (s *overlayListSelectorState) Render(
 		listVersion = s.list.RenderVersion()
 	}
 
-	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
-	contentWidth := max(overlayCfg.MaxWidth-4, 1)
-
 	prefix = strings.TrimSuffix(prefix, "\n")
 	prefixLines := 0
 	contentParts := make([]string, 0, 3)
@@ -113,10 +131,7 @@ func (s *overlayListSelectorState) Render(
 	contentParts = append(contentParts, s.list.Render(contentWidth))
 	content := strings.Join(contentParts, "")
 
-	s.listBaseRow = 0
-	if strings.TrimSpace(overlayCfg.Title) != "" {
-		s.listBaseRow += 2 // title + blank
-	}
+	s.listBaseRow = layoutOverlay(overlayCfg, area).contentBaseRow()
 	// When prefix is present, the list starts after:
 	//   prefixLines rows + gapBlankLines blank rows.
 	// (The newline that terminates the prefix line does not itself add a row.)
@@ -124,7 +139,7 @@ func (s *overlayListSelectorState) Render(
 		s.listBaseRow += prefixLines + gapBlankLines
 	}
 
-	dialog, _ := RenderOverlay(overlayCfg, content, lipgloss.Height(content), area)
+	dialog, _ := RenderOverlay(overlayCfg, content, area)
 
 	s.renderCacheWidth = m.width
 	s.renderCacheHeight = m.height

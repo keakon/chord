@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image"
 	"slices"
 	"strings"
 
@@ -149,9 +150,9 @@ func (m *Model) handleUsageStatsKey(msg tea.KeyMsg) tea.Cmd {
 		m.usageStats.scrollOffset++
 	case "k", "up":
 		m.usageStats.scrollOffset--
-	case "ctrl+f":
+	case "ctrl+f", "pgdown":
 		m.usageStats.scrollOffset += m.usageStatsVisibleLines()
-	case "ctrl+b":
+	case "ctrl+b", "pgup":
 		m.usageStats.scrollOffset -= m.usageStatsVisibleLines()
 	case "g":
 		m.usageStats.scrollOffset = 0
@@ -271,18 +272,20 @@ func (m *Model) usageStatsContentRoot() string {
 	return root
 }
 
+func (m *Model) usageStatsOverlayConfig() OverlayConfig {
+	return OverlayConfig{Title: "Stats Panel", Hint: m.usageStatsHint(), MaxWidth: max(min(m.width-12, 110), 60)}
+}
+
 func (m *Model) usageStatsVisibleLines() int {
-	visible := max(m.height-12, 8)
-	return visible
+	return overlayScrollContentHeight(m.usageStatsOverlayConfig(), image.Rect(0, 0, m.width, m.height), len(m.usageStatsLines(m.usageStatsInnerWidth())))
 }
 
 func (m *Model) usageStatsMaxWidth() int {
-	maxWidth := max(min(m.width-12, 110), 60)
-	return maxWidth
+	return normalizeOverlayConfig(m.usageStatsOverlayConfig(), image.Rect(0, 0, m.width, m.height)).MaxWidth
 }
 
 func (m *Model) usageStatsInnerWidth() int {
-	return m.usageStatsMaxWidth() - 4
+	return max(dialogContentWidth(m.usageStatsMaxWidth()), 1)
 }
 
 func (m *Model) usageStatsMaxScroll() int {
