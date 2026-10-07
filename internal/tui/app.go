@@ -46,6 +46,7 @@ const (
 	ModeStopJobConfirm                   // stop-background-job confirmation overlay
 	ModeJobsOverlay                      // background jobs overlay (status-bar pill)
 	ModeSkillSelect                      // skill selector overlay (/skill)
+	ModeMemoryPanel                      // project memory management overlay
 	ModeStatus                           // full-screen runtime overview (/status)
 )
 
@@ -199,6 +200,7 @@ type Model struct {
 	dirList     *OverlayList
 	help        helpState
 	statusPanel statusPanelState
+	memoryPanel memoryPanelState
 	usageStats  usageStatsState
 
 	// Streaming assistant block (nil when idle)
@@ -1205,6 +1207,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 	case clipboardWriteResultMsg:
 		return m, m.handleClipboardWriteResult(msg)
+
+	case memoryPanelResultMsg:
+		return m, m.handleMemoryPanelResult(msg)
 
 	case sessionSummariesLoadedMsg:
 		return m, m.handleSessionSummariesLoaded(msg)

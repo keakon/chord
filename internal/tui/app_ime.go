@@ -98,7 +98,7 @@ func (m *Model) queueIMEApply(target string) {
 
 func modeNeedsEnglishIME(mode Mode) bool {
 	switch mode {
-	case ModeNormal, ModeDirectory, ModeMCPSelect, ModeSkillSelect, ModeSessionSelect, ModeSessionDeleteConfirm, ModeConfirm, ModeQuestion, ModeRules, ModeContentViewer, ModeImageViewer, ModeStopJobConfirm, ModeJobsOverlay:
+	case ModeMemoryPanel, ModeNormal, ModeDirectory, ModeMCPSelect, ModeSkillSelect, ModeSessionSelect, ModeSessionDeleteConfirm, ModeConfirm, ModeQuestion, ModeRules, ModeContentViewer, ModeImageViewer, ModeStopJobConfirm, ModeJobsOverlay:
 		return true
 	default:
 		return false
@@ -138,6 +138,9 @@ func (m *Model) switchModeWithIME(to Mode) tea.Cmd {
 		m.runIMERestoreIfNeeded()
 	}
 	imeCmd := m.runIMESwitchIfTransition(from, to)
+	if to == ModeMemoryPanel {
+		imeCmd = tea.Batch(imeCmd, m.resumeMemoryPanel())
+	}
 	if cleanup == nil {
 		return imeCmd
 	}

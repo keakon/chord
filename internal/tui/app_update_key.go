@@ -65,6 +65,8 @@ func (m *Model) handleModeKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handleMCPSelectKey(msg)
 	case ModeSkillSelect:
 		return m.handleSkillSelectKey(msg)
+	case ModeMemoryPanel:
+		return m.handleMemoryPanelKey(msg)
 	case ModeSessionSelect:
 		return m.handleSessionSelectKey(msg)
 	case ModeSessionDeleteConfirm:

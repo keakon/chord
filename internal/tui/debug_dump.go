@@ -554,6 +554,8 @@ func debugModeString(mode Mode) string {
 		return "role-select"
 	case ModeSkillSelect:
 		return "skill-select"
+	case ModeMemoryPanel:
+		return "memory"
 	case ModeSessionSelect:
 		return "session-select"
 	case ModeSessionDeleteConfirm:

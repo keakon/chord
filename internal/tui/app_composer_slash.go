@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/agent"
+
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/identity"
@@ -196,6 +198,8 @@ var slashCommands = []slashCommand{
 	{Cmd: "/resume", Desc: "resume previous session"},
 	{Cmd: "/role", Desc: "switch main agent role"},
 	{Cmd: "/rules", Desc: "manage permission rules"},
+	{Cmd: agent.MemoryCommand, Desc: "view and manage project memory"},
+	{Cmd: agent.MemoryOrganizeCommand, Desc: "organize all active memories (uses model)"},
 	{Cmd: "/stats", Desc: "usage statistics"},
 	{Cmd: statusCommand, Desc: "runtime overview"},
 	{Cmd: "/rename", Desc: "set or clear session title"},

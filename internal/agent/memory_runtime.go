@@ -648,7 +648,7 @@ var errMemorySetupFailed = errors.New("memory extraction setup failed")
 // request time. On the main pool a new turn also cancels the in-flight request
 // and requeues its job (see preemptMemoryExtractionForTurn).
 func (a *MainAgent) memoryAdmission() bool {
-	if a.memoryMgr == nil || !a.memoryExtractEnabled.Load() {
+	if a.memoryMgr == nil || !a.memoryExtractEnabled.Load() || a.memoryManual.active.Load() {
 		return false
 	}
 	if a.shuttingDown.Load() {
@@ -693,6 +693,7 @@ func (a *MainAgent) memoryUsesDedicatedPool() bool {
 // extraction on the main model pool: the in-flight request is cancelled and
 // its job stays pending for a later idle pass. A dedicated pool keeps running.
 func (a *MainAgent) preemptMemoryExtractionForTurn() {
+	a.cancelMemoryOrganization()
 	if a.memoryUsesDedicatedPool() {
 		return
 	}
@@ -702,6 +703,7 @@ func (a *MainAgent) preemptMemoryExtractionForTurn() {
 // shutdownMemoryWorker cancels the in-flight extraction. It does not wait for
 // the worker or any LLM request; shutdown never blocks on extraction.
 func (a *MainAgent) shutdownMemoryWorker() {
+	a.cancelMemoryOrganization()
 	a.cancelInFlightMemoryExtraction()
 }
 

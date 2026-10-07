@@ -293,7 +293,7 @@ The following commands have more interactive detail, expanded below.
 
 ### Project Memory
 
-Chord's optional cross-session project memory (stable preferences, project facts, and reusable workflows) has its own page: [Project Memory](./project-memory.md). It covers what gets stored, how the summary loads into a session, how to enable automatic extraction, and how to review or remove entries. There is no slash command for memory.
+Chord's optional cross-session project memory (stable preferences, project facts, and reusable workflows) has its own page: [Project Memory](./project-memory.md). It covers what gets stored, how the summary loads into a session, how to enable automatic extraction, and how to review or remove entries. Use `/memory` to browse, search, copy or remove records. `/memory organize [request]` generates a preview for all active records; only explicit approval applies it.
 
 ### MCP selector
 

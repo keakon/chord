@@ -97,6 +97,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 	if keyBindingContains(km.ToggleCollapse, "enter") {
 		normalBindings = append(normalBindings, helpBinding([]string{"enter", "space"}, "open linked delegate worker"))
 	}
+	normalBindings = append(normalBindings, helpBinding([]string{"/memory"}, "browse, copy, remove or organize memory"))
 
 	insertBindings := []HelpBinding{
 		helpBinding(km.InsertEscape, "exit insert mode"),

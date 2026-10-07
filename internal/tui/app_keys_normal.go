@@ -5,12 +5,13 @@ import (
 
 	"github.com/keakon/bubbles/v2/textinput"
 	tea "github.com/keakon/bubbletea/v2"
-
-	"github.com/keakon/chord/internal/tools"
 )
 
 func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
+	if key == "ctrl+m" {
+		return m.normalActivation()
+	}
 	if keyMatches(key, m.keyMap.Stop) {
 		return m.stopCurrentOperation()
 	}
@@ -286,33 +287,7 @@ func (m *Model) handleNormalKey(msg tea.KeyMsg) tea.Cmd {
 
 	// -- toggle collapse / open image viewer ------------------------------
 	case keyMatches(key, m.keyMap.ToggleCollapse):
-		toggleAtOffset := func() {
-			m.viewport.ToggleBlockAtOffset()
-		}
-		if m.focusedBlockID >= 0 {
-			if block := m.viewport.GetFocusedBlock(m.focusedBlockID); block != nil && m.viewport.FocusedBlockIsVisible(m.focusedBlockID) {
-				m.recordTUIDiagnostic("toggle-block", "block=%d type=%s collapsed=%t detail_expanded=%t linked_agent=%q", block.ID, debugBlockTypeString(block.Type), block.Collapsed, block.ToolCallDetailExpanded, block.LinkedAgentID)
-				// A linked Delegate card is always expanded and has no expand/collapse
-				// toggle: space/enter open its worker view. Click only selects the
-				// card (see mouse handling), so the view switch lives on the keyboard
-				// activation path.
-				if block.ToolName == tools.NameDelegate && block.LinkedAgentID != "" {
-					m.maybeSwitchToTaskAgent(block)
-				} else if part, ok := block.firstImagePart(m.viewport.width); ok && m.imageCaps.SupportsFullscreen {
-					return m.openImageViewer(block.ID, part.Index)
-				} else if block.ToolName == tools.NameDelegate {
-					// Always-expanded: nothing to toggle.
-				} else {
-					m.viewport.ToggleBlockByID(m.focusedBlockID)
-				}
-			} else {
-				m.focusedBlockID = -1
-				m.refreshBlockFocus()
-				toggleAtOffset()
-			}
-		} else {
-			toggleAtOffset()
-		}
+		return m.normalActivation()
 
 	// -- fork session (edit selected user block) -------------------------
 	case keyMatches(key, m.keyMap.ForkSession):

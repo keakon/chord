@@ -18,6 +18,21 @@ const (
 
 func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 	mouse := msg.Mouse()
+	if m.mode == ModeMemoryPanel {
+		delta := 0
+		if mouse.Button == tea.MouseWheelUp {
+			delta = -mouseWheelScrollStep
+		}
+		if mouse.Button == tea.MouseWheelDown {
+			delta = mouseWheelScrollStep
+		}
+		if m.memoryPanel.detail {
+			m.memoryPanel.viewer.scrollOffset = max(0, m.memoryPanel.viewer.scrollOffset+delta)
+		} else if m.memoryPanel.list != nil {
+			m.memoryPanel.list.HandleWheel(delta)
+		}
+		return nil, true
+	}
 	if m.mode == ModeStatus {
 		switch mouse.Button {
 		case tea.MouseWheelUp:

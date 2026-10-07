@@ -345,6 +345,13 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			// They must be recognized by the same predicate the agent uses to
 			// route them, or the TUI starts echoing a USER card for one the
 			// agent handles locally (or vice versa).
+			if trimmed == agent.MemoryCommand {
+				return m.openMemoryPanel(nil)
+			}
+			if trimmed == agent.MemoryOrganizeCommand || strings.HasPrefix(trimmed, agent.MemoryOrganizeCommand+" ") {
+				instruction := strings.TrimSpace(strings.TrimPrefix(trimmed, agent.MemoryOrganizeCommand))
+				return m.openMemoryPanel(&instruction)
+			}
 			if agent.IsTUILocalOnlySlashCommand(trimmed) || agent.IsLoopSlashCommand(trimmed) {
 				m.recordTUIDiagnostic("agent-command", "%s", trimmed)
 				m.agent.SendUserMessage(value)

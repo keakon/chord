@@ -84,6 +84,24 @@ func sessionSwitchLabel(kind, sessionID string) string {
 }
 
 func (m *Model) beginSessionSwitch(kind, sessionID string) {
+	if m.memoryPanel.cancel != nil {
+		m.memoryPanel.cancel()
+		m.memoryPanel.seq++
+	}
+	if m.mode == ModeMemoryPanel {
+		m.closeMemoryPanel()
+	} else {
+		m.memoryPanel = memoryPanelState{seq: m.memoryPanel.seq + 1}
+		if m.confirm.prevMode == ModeMemoryPanel {
+			m.confirm.prevMode = ModeNormal
+		}
+		if m.question.prevMode == ModeMemoryPanel {
+			m.question.prevMode = ModeNormal
+		}
+		if m.handoffSelect.prevMode == ModeMemoryPanel {
+			m.handoffSelect.prevMode = ModeNormal
+		}
+	}
 	m.retireImageViewer()
 	m.inputImageClick = inputImageClickState{}
 	m.input.editBoundary++

@@ -175,6 +175,10 @@ func (m *Manager) commitExtraction(ctx context.Context, sessionID, fingerprint s
 		return nil, err
 	}
 
+	if err := m.recoverManualCommit(); err != nil {
+		return nil, err
+	}
+
 	// Checkpoint is only consulted to skip already-covered fingerprints; it is
 	// committed last, so a stale read here is harmless.
 	existing, loadErr := LoadCheckpoint(m.layout)

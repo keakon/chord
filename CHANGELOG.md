@@ -30,6 +30,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- Added `/memory` for searching, reading, copying and removing project memory, with selected or full organization previews and persistent undo for the latest manual change.
+
 - Preview images before sending: click a composer image placeholder to select its whole attachment, double-click to open the existing image viewer, and close it to continue editing the same draft.
 
 - Composer selections can be deleted or replaced by typing, newlines, or text paste, including complete image and large-paste placeholders; one undo restores the entire edit.

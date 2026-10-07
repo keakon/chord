@@ -824,6 +824,7 @@ type MainAgent struct {
 	// block is appended to the session-context reminder under an untrusted
 	// wrapper, and the fixed load discipline is added to the stable system
 	// prompt only when a MEMORY.md is present.
+	memoryManual   memoryManualState
 	memoryMu       sync.Mutex
 	memoryMgr      *memory.Manager
 	memoryErr      error

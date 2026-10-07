@@ -119,6 +119,7 @@ type statusBarInputs struct {
 	ChordDisplay        string
 	SearchFP            string
 	NextEscHint         string
+	NextEnterHint       string
 	LoopState           agent.LoopState
 	YoloEnabled         bool
 	MemoryEnabled       bool
@@ -191,6 +192,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		ChordDisplay:        m.chord.display(),
 		SearchFP:            m.statusBarSearchFingerprint(),
 		NextEscHint:         m.nextEscHint(),
+		NextEnterHint:       m.nextEnterHint(),
 		LoopState:           loopState,
 		YoloEnabled:         m.yoloEnabled(),
 		MemoryEnabled:       memoryEnabled,
@@ -415,6 +417,8 @@ func (m *Model) statusBarModeText() string {
 		return "MCP"
 	case ModeSkillSelect:
 		return "SKILLS"
+	case ModeMemoryPanel:
+		return "MEMORY"
 	case ModeSessionSelect:
 		return "SESSION"
 	case ModeSessionDeleteConfirm:
@@ -507,6 +511,8 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		len(snap.modelVariant),
 		snap.busy,
 	)
+	b.WriteByte('|')
+	b.WriteString(inputs.NextEnterHint)
 	b.WriteByte('|')
 	b.WriteString(strconv.Itoa(inputs.RunningJobs))
 	b.WriteByte('|')
@@ -626,12 +632,22 @@ func (m *Model) renderStatusBar() string {
 	sessionValue := sessionID
 	activityText, activityWidth := m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
 	rightSide, rightStart, rightWidth := m.renderStatusBarRightSide(inputs.Now, effectiveWidth, leftWidth, activityWidth, path, sessionValue, inputs.RunningJobs, inputs.FallbackAgents)
-	if inputs.NextEscHint != "" && statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, inputs.NextEscHint) {
+	hint := ""
+	if inputs.NextEscHint != "" {
+		hint = "esc ⇢ " + inputs.NextEscHint
+	} else if inputs.NextEnterHint != "" {
+		hint = "enter ⇢ " + inputs.NextEnterHint
+	}
+	canFitHint := leftWidth+lipgloss.Width(hint)+5+activityWidth <= rightStart
+	if inputs.NextEscHint != "" {
+		canFitHint = statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, inputs.NextEscHint)
+	}
+	if hint != "" && canFitHint {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
 			leftSide,
 			DimStyle.Render("  ·  "),
-			DimStyle.Render("esc ⇢ "+inputs.NextEscHint),
+			DimStyle.Render(hint),
 		)
 		leftWidth = lipgloss.Width(leftSide)
 		activityText, activityWidth = m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)

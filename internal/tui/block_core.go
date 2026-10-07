@@ -320,27 +320,14 @@ func userLocalShellToggleable(b *Block) bool {
 	return b.UserLocalShellCmd != "" && !b.UserLocalShellPending && strings.TrimSpace(b.UserLocalShellResult) != ""
 }
 
-func (b *Block) ToggleAtWidth(width int) bool {
+func (b *Block) canToggleAtWidth(width int) bool {
 	switch b.Type {
 	case BlockUser:
-		if userLocalShellToggleable(b) {
-			b.Collapsed = !b.Collapsed
-			b.InvalidateCache()
-			return true
-		}
+		return userLocalShellToggleable(b)
 	case BlockToolCall, BlockToolResult:
-		// The always-expanded cards keep their full content visible; a
-		// disclosure hint would only offer a state they cannot have.
 		if toolCardAlwaysExpanded(b.ToolName) {
 			return false
 		}
-		// The read call card's disclosure depends on the body it will render;
-		// refuse the toggle when there is nothing to expand so the card never
-		// flips state with no visible change and no marker. BlockToolResult
-		// keeps the permissive toggle: its header shape changes between the
-		// compact and expanded forms, and only the short restore-path cards
-		// can flip without a disclosure marker. width <= 0 is a programmatic
-		// toggle (no layout width); keep it permissive.
 		if b.Type == BlockToolCall && b.ToolName == tools.NameRead && width > 0 && !b.readCardHasDisclosure(newWideHeaderToolCardMetrics(width).contentWidth) {
 			return false
 		}
@@ -348,51 +335,34 @@ func (b *Block) ToggleAtWidth(width int) bool {
 			if (b.ToolName == tools.NameGrep || b.ToolName == tools.NameGlob) && !b.searchResultCanExpand() {
 				return false
 			}
-			// A force-expanded card renders the same body either way, so the
-			// toggle would flip state with no visible change and no marker —
-			// refuse it in both directions, not only while it is expanded.
 			if width > 0 && b.compactToolResultForceExpandedForRenderWidth(width) {
 				return false
 			}
-			b.ToolCallDetailExpanded = !b.ToolCallDetailExpanded
-			b.InvalidateCache()
-			return true
 		}
-		b.Collapsed = !b.Collapsed
-		b.InvalidateCache()
 		return true
 	case BlockAssistant:
-		if len(b.ThinkingParts) > 0 {
-			b.ThinkingCollapsed = !b.ThinkingCollapsed
-			b.InvalidateCache()
-			return true
-		}
+		return len(b.ThinkingParts) > 0
 	case BlockStatus:
-		// JOB RESULT cards fold to each job's headline and always accept the
-		// toggle: the disclosure marker sits on the headline that survives the
-		// toggle, so the marker itself changes even for a job whose collapsed
-		// body already showed everything, and the toggle is never a silent
-		// no-op. Every other status card folds to its badge alone only when the
-		// collapsed form hides something: a mailbox card carries the worker
-		// model's own message and stays fully visible, and a body that renders
-		// to a single line is already its own summary.
-		if b.isBackgroundResultCard() {
-			b.Collapsed = !b.Collapsed
-			b.InvalidateCache()
-			return true
-		}
-		if !b.statusCardBodyFoldable(b.statusCardBodyLines(width)) {
-			return false
-		}
-		b.Collapsed = !b.Collapsed
-		b.InvalidateCache()
-		return true
-	case BlockCompactionSummary:
-		// Compaction summary cards are always fully expanded: the archived
-		// context (and any storage facts) must stay visible, matching the
-		// non-collapsible treatment of Delete cards. Toggle is a no-op.
+		return b.isBackgroundResultCard() || b.statusCardBodyFoldable(b.statusCardBodyLines(width))
 	}
 	return false
+}
+
+// ToggleAtWidth uses the same applicability predicate as Normal Enter routing.
+func (b *Block) ToggleAtWidth(width int) bool {
+	if !b.canToggleAtWidth(width) {
+		return false
+	}
+	switch {
+	case b.Type == BlockAssistant:
+		b.ThinkingCollapsed = !b.ThinkingCollapsed
+	case b.Type == BlockToolCall && toolUsesCompactDetailToggle(b.ToolName):
+		b.ToolCallDetailExpanded = !b.ToolCallDetailExpanded
+	default:
+		b.Collapsed = !b.Collapsed
+	}
+	b.InvalidateCache()
+	return true
 }
 
 // InvalidateCache clears render caches that must be recomputed after content

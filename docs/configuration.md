@@ -1175,7 +1175,7 @@ memory:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `enabled` | `false` | Enable automatic memory extraction for this machine + project. When on, frozen sessions may be sent to the model and auto-written into `MEMORY.md` / `.chord/memory/records/` as ordinary project files. When off (or unset), Chord never sends history to the model and never writes memory files, but still loads an existing `MEMORY.md`. |
+| `enabled` | `false` | Enable automatic memory extraction for this machine + project. When on, frozen sessions may be sent to the model and auto-written into `MEMORY.md` / `.chord/memory/records/` as ordinary project files. When off (or unset), automatic extraction does not send frozen history or write records. An existing `MEMORY.md` still loads, and explicit management through `/memory` remains available. |
 | `model_pool` | *(unset)* | Name of a `model_pools` entry used for extraction requests instead of the main model pool. Use it to choose extraction models and reasoning settings independently of the main conversation. When unset, extraction uses the main model pool. Both paths preserve each model's configured reasoning settings; an omitted effort is not overridden and retains the provider default. A configured pool must be defined in `model_pools`; otherwise extraction stops with a setup failure naming the missing pool. |
 
 ### Precedence

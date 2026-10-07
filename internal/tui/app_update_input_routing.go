@@ -385,6 +385,10 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 			m.handoffSelect.denyReasonInput, cmd = m.handoffSelect.denyReasonInput.Update(msg)
 			return cmd
 		}
+	case ModeMemoryPanel:
+		if pm, ok := msg.(tea.PasteMsg); ok && (m.memoryPanel.inputFocused || m.memoryPanel.instructionMode) {
+			m.appendMemoryInput(sanitizeToolDisplayText(strings.Join(strings.Fields(pm.Content), " ")))
+		}
 	case ModeModelSelect:
 		if pm, ok := msg.(tea.PasteMsg); ok && m.modelSelect.filterFocused {
 			m.modelSelect.filter += sanitizeToolDisplayText(strings.Join(strings.Fields(pm.Content), " "))

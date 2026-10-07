@@ -71,6 +71,7 @@ func (a *MainAgent) Run(ctx context.Context) error {
 		log.Debugf("agent event loop stopped instance=%v", a.instanceID)
 		// 1. Signal interactive senders to stop.
 		a.signalStopping()
+		a.cancelMemoryOrganization()
 		// 2. Wait for ConfirmFunc/QuestionFunc goroutines to exit.
 		a.toolWg.Wait()
 		// 3. Wait for async TUI producers (for example, main LLM goroutines) to
@@ -127,6 +128,10 @@ func (a *MainAgent) nextEvent(ctx context.Context) (Event, error) {
 func (a *MainAgent) dispatch(evt Event) {
 	defer a.emitGlobalIdleIfReady()
 	switch evt.Type {
+	case EventMemoryControl:
+		a.handleMemoryControl(evt.Payload.(*memoryControlRequest))
+	case EventMemoryControlDone:
+		a.handleMemoryControlDone(evt.Payload.(memoryControlResult))
 	case EventUserMessage:
 		a.handleUserMessage(evt)
 	case EventPendingDraftUpsert:
@@ -152,6 +157,7 @@ func (a *MainAgent) dispatch(evt Event) {
 	case EventExecutePlan:
 		a.handleExecutePlanEvent(evt)
 	case EventSessionControl:
+		a.cancelMemoryOrganization()
 		a.handleSessionControlEvent(evt)
 	case EventModelPoolSwitch:
 		a.handleModelPoolSwitchEvent(evt)

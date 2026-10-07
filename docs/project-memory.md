@@ -12,7 +12,7 @@ The `memory:` configuration keys are listed in [Configuration & Auth](./configur
 - **What your project stores:** [Files and layout](#files-and-layout).
 - **What the agent sees:** [Loading into a session](#loading-into-a-session).
 - **What gets written:** [What extraction writes](#what-extraction-writes), [The managed index](#the-managed-index).
-- **Reviewing and removing entries:** [Promotion suggestions](#promotion-suggestions), [Safety and version control](#safety-and-version-control).
+- **Reviewing and removing entries:** [Memory panel and manual organization](#memory-panel-and-manual-organization), [Promotion suggestions](#promotion-suggestions), [Safety and version control](#safety-and-version-control).
 
 ## Files and layout
 
@@ -21,7 +21,7 @@ The `memory:` configuration keys are listed in [Configuration & Auth](./configur
 
 ## Enabling extraction
 
-- **Extraction is opt-in via config.** Set `memory.enabled: true` in `~/.config/chord/config.yaml` (or a project's `.chord/config.yaml`) to enable automatic extraction. Project-level config overrides the user-level value like every other setting, so a project can force it off (or on) for its own sessions. When enabled, frozen history sessions may be sent to the model and written to ordinary project files under `MEMORY.md`. When disabled, Chord never sends history to the model and never writes memory files, but still reads an existing `MEMORY.md`.
+- **Extraction is opt-in via config.** Set `memory.enabled: true` in `~/.config/chord/config.yaml` (or a project's `.chord/config.yaml`) to enable automatic extraction. Project-level config overrides the user-level value like every other setting, so a project can force it off (or on) for its own sessions. When enabled, frozen history sessions may be sent to the model and written to ordinary project files under `MEMORY.md`. When disabled, Chord does not extract frozen history automatically. It still loads an existing `MEMORY.md`, and you can explicitly browse, remove, or organize memory through the memory panel.
 
 ## Loading into a session
 
@@ -33,12 +33,43 @@ The `memory:` configuration keys are listed in [Configuration & Auth](./configur
 
 - Extraction runs in the background after a session is frozen. On the main model pool, with the full fallback semantics and the configured reasoning settings, it calls the model only while the main agent is idle, and a new user message preempts the in-flight request, which is retried later. With a dedicated pool set by [`memory.model_pool`](./configuration.md#project-memory-automatic-extraction), it also runs while the agent is working and is not preempted. The extraction model sees bounded `AGENTS.md` guidance, the current active memory, and a sanitized transcript of user messages plus completed assistant replies (compaction summaries stay labeled as history). Tool calls, tool results, and `.chord/notes/` are not in that input, so a note the working model wrote is not treated as something you said. Temporary branch, commit, push, rebase, and worktree state is not eligible for long-term memory.
 - **What you stated is required, not sufficient.** A candidate has to come from something you said (or something the session could not proceed without asking you) that a later session on this project would still use, and that is not yet in `AGENTS.md` or docs. A host path, hostname, or other local layout you mentioned is still not memory. Facts the model found on its own that a later session could rediscover belong in project docs or nowhere: they become a promotion suggestion for you to review, or are dropped. A promotion is a human gate, not auto-recall: until you move it into your rules or docs, it is not injected like memory.
-- Each auto record carries a type (preference/fact/workflow/pitfall), source, and cognitive status; assistant statements are never upgraded to verified facts. Its body separates the conclusion, why it is worth retaining across sessions, and when/how a future agent should apply it. A short statement without meaningful detail does not get a separate record merely to populate the index. Exact duplicate conclusions are not written again; a revised record replaces the old entry in `MEMORY.md`, while the old immutable record remains as provenance. Statements keep subsystem or project-relative paths; a single session's commit SHA, temporary pin, absolute path, or one-off flaky-test noise never belongs in the durable text. A record file is read-only input: Chord never rewrites it, and a hand edit is not how a conclusion gets corrected — an edit that pushes the summary or statement past its size limit makes the record stop loading. Corrections go through the index: delete the line (or let extraction retire it), and a later extraction writes the corrected record.
+- Each auto record carries a type (preference/fact/workflow/pitfall), source, and cognitive status; assistant statements are never upgraded to verified facts. Its body separates the conclusion, why it is worth retaining across sessions, and when/how a future agent should apply it. A short statement without meaningful detail does not get a separate record merely to populate the index. Exact duplicate conclusions are not written again; a revised record replaces the old entry in `MEMORY.md`, while the old immutable record remains as provenance. Statements keep subsystem or project-relative paths; a single session's commit SHA, temporary pin, absolute path, or one-off flaky-test noise never belongs in the durable text. A record file is read-only input: Chord never rewrites it, and a hand edit is not how a conclusion gets corrected — an edit that pushes the summary or statement past its size limit makes the record stop loading. Use the memory panel to remove a conclusion or generate a reviewed replacement. You can also delete its index line by hand; a later extraction may write a corrected record.
 
 ## The managed index
 
 - **The index is curated.** Extraction also judges the entries already there: one that is no longer true, never belonged, or is already covered by your project rules is retired, removed from the index while its record file stays as provenance. What you stated yourself is exempt; only assistant-reported entries can be retired this way. Once the index reaches the size that fits the injection budget, an extra pass reviews the whole index on its own (no transcript) and consolidates it back under that size, so memory written by an earlier or weaker model does not become permanent.
 - **Index order is injection priority.** The bounded summary fills from the top of the managed section and drops the tail when the budget runs out, so newly written entries go first. Move a line up in `MEMORY.md` to make it inject earlier; your ordering is preserved across automatic writes.
+
+## Memory panel and manual organization
+
+Enter `/memory` to open the local memory panel. In Normal mode, `Enter` also opens it when the current card has no applicable action. Card folding, images and linked tasks keep their actions; dialogs retain their own Enter behavior. Traditional terminals deliver `Ctrl+M` as Enter, and an explicitly delivered `Ctrl+M` uses the same Normal-mode action.
+
+The panel has three views, switched with `Tab`: active project records, the summary actually applied to this session, and promotion drafts. The project view includes records beyond the session's injection budget. A pending-update label distinguishes current disk content from the applied summary. User-owned index notes and the other two views are read-only.
+
+| Key | Action |
+| --- | --- |
+| `/` | Search titles, types and full text; space-separated words must all match |
+| `j` / `k`, arrow keys | Move through results |
+| `Enter` | Finish searching, then open the highlighted entry |
+| `Space` | Select multiple project records; changing the filter clears selection |
+| `yy` | Copy the full current entry, or selected records in the project list |
+| `p` | Copy the current record or promotion file path |
+| `d` | Preview removal of the current or selected records |
+| `o` / `O` | Organize current/selected records, or all active records |
+| `a` | Apply the displayed change preview |
+| `u` | Undo the project's latest manual operation |
+| `r` | Refresh from disk |
+| `Esc` / `q` | Return from detail, or close the panel |
+
+Browsing, copying and removing records make no model calls. Removal updates only the managed index and retains immutable record files. The most recent manual removal or organization can be undone, including after a restart, without Git. Undo keeps unrelated new records and user notes; if affected entries changed or original records are unreadable, it refuses to overwrite them.
+
+Organization starts only while the main agent is idle. Press `o` or `O`, optionally enter a request, and press Enter to generate a preview. `/memory organize [request]` opens the panel and generates a preview for all active records. This uses `memory.model_pool` if configured; otherwise it copies the main pool and its current cursor. Normal pool/key fallback applies, and the request is billed by your provider. It does not include the main conversation or use tools. A new user message cancels generation; it is not automatically retried later.
+
+All-record organization ignores the filter and covers every active index entry with its full record body. A single generation is limited to an estimated 24,000 input tokens, including instructions. Oversized input or unreadable records stop generation and leave the index unchanged; select fewer records. Orphan records, promotions and user-owned index notes are not organized.
+
+Generated changes remain a preview until you press `a`. Conflicts needing clarification stay unchanged, and replacement records retain source IDs without becoming verified facts or user testimony. Applying a stale preview fails rather than overwriting concurrent changes. Closing a preview does not apply it; closing after pressing `a` cannot reverse a write already committed.
+
+A successful manual change refreshes this session's memory for subsequent main-agent requests. A request already running keeps its original input; other sessions keep their own snapshots until their usual refresh point. The refresh may require the provider to rebuild its prompt cache. `r` reloads the panel's disk view and does not by itself change the applied session summary.
 
 ## Promotion suggestions
 
@@ -46,7 +77,7 @@ The `memory:` configuration keys are listed in [Configuration & Auth](./configur
 
 ## Safety and version control
 
-- Sensitive-content cleaning (token/key, URL credentials, PEM/private-key blocks, high-risk environment variable assignments) runs both before the model call and before writing. This is best-effort protection only: it does not promise to recognize arbitrary custom secret formats, so reviewing normal git diffs remains a necessary boundary. The `<!-- chord:managed:start -->` / `<!-- chord:managed:end -->` region of `MEMORY.md` is the Chord-maintained index; everything else is yours and is never overwritten. New entries arrive only via background extraction; the working session never adds them itself. To remove a record, delete its line from the index: the record file is left as an orphan and is never re-indexed automatically; you can delete the file itself too.
-- Editing `MEMORY.md` by hand while other Chord sessions are running on the same project can race with a background commit rewriting the managed section. Close them first, or let the automatic review handle the cleanup.
+- Sensitive-content cleaning (token/key, URL credentials, PEM/private-key blocks, high-risk environment variable assignments) runs both before the model call and before writing. This is best-effort protection only: it does not promise to recognize arbitrary custom secret formats, so reviewing normal git diffs remains a necessary boundary. The `<!-- chord:managed:start -->` / `<!-- chord:managed:end -->` region of `MEMORY.md` is the Chord-maintained index; everything else is yours and is never overwritten. New entries come from background extraction or an explicitly approved manual organization preview; opening the panel does not create a conversation turn. To remove a record, delete its line from the index: the record file is left as an orphan and is never re-indexed automatically; you can delete the file itself too.
+- Editing `MEMORY.md` by hand while other Chord sessions are running on the same project can race with a background commit rewriting the managed section. Close them first, or use the panel, which checks its preview against the latest files under the project memory lock. External editors do not participate in that lock.
 - When automatic extraction is enabled, the status bar shows a `MEMORY` indicator (like `LOOP` / `YOLO`). A reply Chord cannot parse (bad JSON, an unknown field, something that is not a JSON object) is resampled on another model in the pool before it counts as a failure. The indicator switches to `MEMORY-FAIL` only when that retry fails too, or when setup or the `MEMORY.md` managed region is unusable; a one-line notice then says why. Memory that is already indexed keeps being injected, and the next successful extraction clears the indicator.
 - Memory files are ordinary project files: Chord never edits `.gitignore`, stages, or commits them. You may track them, or keep them local via `.gitignore` or `.git/info/exclude`; all automatic changes appear as ordinary worktree diffs.
