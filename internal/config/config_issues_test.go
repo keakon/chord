@@ -429,3 +429,18 @@ func resolvedFileIssues(globalPath, projectPath string) ([]string, error) {
 	}
 	return issues, nil
 }
+
+func TestQuestionAutoSelectionConfigValidation(t *testing.T) {
+	path := writeIssueTestConfig(t, t.TempDir(), "config.yaml", "question_auto_select_timeout: -1\n")
+	cfg, err := LoadConfigFromPath(path)
+	issues, issueErr := resolvedFileIssues(path, "")
+	if issueErr != nil {
+		t.Fatal(issueErr)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.QuestionAutoSelectTimeout != 0 || !strings.Contains(strings.Join(issues, "\n"), "question_auto_select_timeout") {
+		t.Fatalf("negative auto selection: %+v %v", cfg, issues)
+	}
+}

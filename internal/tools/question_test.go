@@ -7,132 +7,82 @@ import (
 	"testing"
 )
 
-// The user-language rule lives in the shared Values prompt and the questions
-// parameter description; the tool
-// description no longer repeats it.
-func TestQuestionToolDescriptionOmitsDuplicatedLanguageRule(t *testing.T) {
-	desc := NewQuestionTool(nil).Description()
-	if strings.Contains(desc, "user's current language") {
-		t.Fatalf("Description() should not duplicate the parameter-level language guidance: %q", desc)
+func TestQuestionArgumentModesAndPolicies(t *testing.T) {
+	tests := []struct {
+		name, raw string
+		valid     bool
+	}{
+		{"sync", `{"questions":[{"question":"Which?","header":"Choice"}]}`, true},
+		{"async", `{"questions":[{"question":"Which?","header":"Choice"}],"wait":false}`, true},
+		{"existing", `{"wait_for":["q-1"]}`, true},
+		{"empty", `{}`, false},
+		{"both", `{"questions":[{"question":"Which?","header":"Choice"}],"wait_for":["q-1"]}`, false},
+		{"wait_with_existing", `{"wait_for":["q-1"],"wait":true}`, false},
+		{"duplicate_wait", `{"wait_for":["q-1","q-1"]}`, false},
+		{"required_default", `{"questions":[{"question":"Which?","header":"Choice","default_option_id":"a"}]}`, false},
+		{"valid_default", `{"questions":[{"question":"Which?","header":"Choice","response_policy":"default_allowed","default_option_id":"a","options":[{"id":"a","label":"First"}]}]}`, true},
+		{"missing_default", `{"questions":[{"question":"Which?","header":"Choice","response_policy":"default_allowed"}]}`, false},
+		{"multi_default", `{"questions":[{"question":"Which?","header":"Choice","multiple":true,"response_policy":"default_allowed","default_option_id":"a","options":[{"id":"a","label":"First"}]}]}`, false},
+		{"duplicate_id", `{"questions":[{"question":"Which?","header":"Choice","options":[{"id":"a","label":"First"},{"id":"a","label":"Second"}]}]}`, false},
+		{"missing_id", `{"questions":[{"question":"Which?","header":"Choice","options":[{"label":"First"}]}]}`, false},
+		{"unknown_policy", `{"questions":[{"question":"Which?","header":"Choice","response_policy":"other"}]}`, false},
+		{"single_object", `{"questions":{"question":"Which?","header":"Choice"}}`, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := DecodeQuestionArgs(json.RawMessage(tt.raw))
+			if (err == nil) != tt.valid {
+				t.Fatalf("valid=%v err=%v", tt.valid, err)
+			}
+		})
 	}
 }
-
-// The Guidelines and dynamic capability/confirmation prompt blocks own the
-// decision threshold and routing for questions. Keep the tool description
-// focused on the callable tool contract so those policies have one source.
-func TestQuestionToolDescriptionKeepsPolicyInPromptBlocks(t *testing.T) {
-	desc := NewQuestionTool(nil).Description()
-	for _, unwanted := range []string{
-		"When to use:",
-		"When NOT to use:",
-		"scope, permissions, risk, or implementation choice",
-		"plain assistant text",
-		"easy for a non-implementer to answer",
-		"tradeoffs/risks",
-	} {
-		if strings.Contains(desc, unwanted) {
-			t.Fatalf("Description() should not own policy %q: %q", unwanted, desc)
+func TestQuestionExecuteReportsRuntimeResults(t *testing.T) {
+	tool := NewQuestionTool(func(_ context.Context, args QuestionArgs) (QuestionResult, error) {
+		if args.Waits() {
+			t.Fatal("expected async")
 		}
+		return QuestionResult{Status: QuestionStatusAccepted, QuestionIDs: []string{"q-1"}}, nil
+	})
+	result, err := tool.Execute(context.Background(), json.RawMessage(`{"questions":[{"question":"Which?","header":"Choice"}],"wait":false}`))
+	if err != nil || !strings.Contains(result, QuestionStatusAccepted) || strings.Contains(result, "Which?") {
+		t.Fatalf("result=%s err=%v", result, err)
+	}
+	if _, err = tool.Synchronous().Execute(context.Background(), json.RawMessage(`{"wait_for":["q-1"]}`)); err == nil {
+		t.Fatal("worker accepted wait_for")
+	}
+	if _, err = tool.Synchronous().Execute(context.Background(), json.RawMessage(`{"questions":[{"question":"Which?","header":"Choice"}],"wait":false}`)); err == nil {
+		t.Fatal("worker accepted async")
+	}
+	if _, err = NewQuestionTool(nil).Execute(context.Background(), json.RawMessage(`{"questions":[{"question":"Which?","header":"Choice"}]}`)); err == nil {
+		t.Fatal("unavailable callback accepted")
 	}
 }
-
-func TestQuestionToolParametersMentionUserLanguage(t *testing.T) {
-	params := NewQuestionTool(nil).Parameters()
-	data, err := json.Marshal(params)
-	if err != nil {
+func TestQuestionSchemaUsesOneQuestionDefinition(t *testing.T) {
+	tool := NewQuestionTool(nil)
+	props := tool.Parameters()["properties"].(map[string]any)
+	if props["wait"] == nil || props["wait_for"] == nil {
+		t.Fatal("missing wait modes")
+	}
+	sync := tool.Synchronous().Parameters()["properties"].(map[string]any)
+	if sync["wait"] != nil || sync["wait_for"] != nil {
+		t.Fatal("worker exposes unsupported modes")
+	}
+	raw := json.RawMessage(`{"questions":[{"question":"Which?","header":"Choice","options":[{"id":"a","label":"First"}]}]}`)
+	if err := ValidateToolArgs(tool, raw); err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(string(data), "user's current language"); n != 1 {
-		t.Fatalf("language rule appears %d times", n)
-	}
-	if desc := parameterDescription(t, NewQuestionTool(nil), "questions"); !strings.Contains(desc, "user's current language") {
-		t.Fatalf("questions description = %q", desc)
+	if !strings.Contains(tool.Description(), "never times out") || !strings.Contains(tool.Description(), "not user consent") {
+		t.Fatal("missing required/default boundary")
 	}
 }
-
-func TestQuestionToolParametersOptInToObjectCoercion(t *testing.T) {
-	params := NewQuestionTool(nil).Parameters()
-	properties, _ := params["properties"].(map[string]any)
-	questions, _ := properties["questions"].(map[string]any)
-	if coerce, _ := questions["coerceFromObject"].(bool); !coerce {
-		t.Fatalf("questions schema should opt in to coerceFromObject, got %v", questions["coerceFromObject"])
+func TestQuestionSizeLimits(t *testing.T) {
+	item := QuestionItem{Question: strings.Repeat("x", MaxQuestionTextBytes+1), Header: "Choice"}
+	if ValidateQuestionItems([]QuestionItem{item}) == nil {
+		t.Fatal("accepted oversized question")
 	}
-}
-
-func TestQuestionToolLabelLengthsAreGuidance(t *testing.T) {
-	tool := NewQuestionTool(func(_ context.Context, questions []QuestionItem) ([]QuestionAnswer, error) {
-		if len(questions) != 1 || len(questions[0].Header) <= 30 || len(strings.Fields(questions[0].Options[0].Label)) <= 5 {
-			t.Fatalf("unexpected questions: %+v", questions)
-		}
-		return []QuestionAnswer{{Header: questions[0].Header, Selected: []string{questions[0].Options[0].Label}}}, nil
-	})
-	properties := tool.Parameters()["properties"].(map[string]any)
-	items := properties["questions"].(map[string]any)["items"].(map[string]any)
-	fields := items["properties"].(map[string]any)
-	header := fields["header"].(map[string]any)
-	options := fields["options"].(map[string]any)["items"].(map[string]any)
-	label := options["properties"].(map[string]any)["label"].(map[string]any)
-	if !strings.Contains(header["description"].(string), "aim for 30 characters or fewer") {
-		t.Fatalf("header must state a recommendation: %v", header)
-	}
-	if _, hardLimit := header["maxLength"]; hardLimit || strings.Contains(label["description"].(string), "1-5 words") {
-		t.Fatalf("length guidance must not imply runtime limits: header=%v label=%v", header, label)
-	}
-	raw := json.RawMessage(`{"questions":[{"question":"Which option should be selected?","header":"Choose how to organize the generated report","options":[{"label":"Keep all related items in one report","description":"Group the related items together."}]}]}`)
-	if _, err := tool.Execute(context.Background(), raw); err != nil {
-		t.Fatalf("length recommendations must not reject valid questions: %v", err)
-	}
-}
-
-// Both the question dialog and the answered tool card render label-only
-// choices, so an omitted option description must not fail validation and cost
-// a model retry.
-func TestQuestionToolAcceptsLabelOnlyOptions(t *testing.T) {
-	raw := json.RawMessage(`{"questions":[{"question":"Which strategy should be used?","header":"Strategy","options":[{"label":"Additive"},{"label":"Replace"}]}]}`)
-	if err := ValidateToolArgs(NewQuestionTool(nil), raw); err != nil {
-		t.Fatalf("label-only options should pass validation: %v", err)
-	}
-
-	// The label stays mandatory, and a non-string description still fails the
-	// type check.
-	missingLabel := json.RawMessage(`{"questions":[{"question":"q","header":"h","options":[{"description":"d"}]}]}`)
-	if err := ValidateToolArgs(NewQuestionTool(nil), missingLabel); err == nil || !strings.Contains(err.Error(), "args.questions[0].options[0].label is required") {
-		t.Fatalf("missing label should still fail, got %v", err)
-	}
-	wrongType := json.RawMessage(`{"questions":[{"question":"q","header":"h","options":[{"label":"a","description":7}]}]}`)
-	if err := ValidateToolArgs(NewQuestionTool(nil), wrongType); err == nil || !strings.Contains(err.Error(), "args.questions[0].options[0].description must be a string") {
-		t.Fatalf("non-string description should still fail, got %v", err)
-	}
-}
-
-func TestQuestionToolExecuteAcceptsSingleObject(t *testing.T) {
-	var received []QuestionItem
-	tool := NewQuestionTool(func(_ context.Context, qs []QuestionItem) ([]QuestionAnswer, error) {
-		received = qs
-		out := make([]QuestionAnswer, len(qs))
-		for i, q := range qs {
-			out[i] = QuestionAnswer{Header: q.Header, Selected: []string{"ok"}}
-		}
-		return out, nil
-	})
-
-	// A single question object instead of the documented array is coerced into
-	// a one-element list and executes normally.
-	raw := json.RawMessage(`{"questions":{"header":"h","question":"q?"}}`)
-	out, err := tool.Execute(context.Background(), raw)
-	if err != nil {
-		t.Fatalf("Execute with single object: %v", err)
-	}
-	if len(received) != 1 || received[0].Header != "h" {
-		t.Fatalf("callback received %+v, want one question with header h", received)
-	}
-
-	// Result stays a clean JSON array of answers (no inline note).
-	var answers []QuestionAnswer
-	if err := json.Unmarshal([]byte(out), &answers); err != nil {
-		t.Fatalf("result is not a clean answers array: %v (out=%q)", err, out)
-	}
-	if len(answers) != 1 || answers[0].Header != "h" {
-		t.Fatalf("answers = %+v, want one answer for header h", answers)
+	item.Question = "Which?"
+	if ValidateQuestionItems([]QuestionItem{item, item, item, item}) == nil {
+		t.Fatal("accepted oversized batch")
 	}
 }

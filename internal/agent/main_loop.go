@@ -27,7 +27,9 @@ const outputDropLogMinInterval = 2 * time.Second
 //
 //	go agent.Run(ctx)
 func (a *MainAgent) Run(ctx context.Context) error {
-	a.started.Store(true)
+	if err := a.admitRun(); err != nil {
+		return err
+	}
 	log.Debugf("agent event loop started instance=%v model=%v", a.instanceID, a.modelName)
 	if _, err := a.fireHook(ctx, hook.OnSessionStart, 0, map[string]any{}); err != nil {
 		log.Warnf("on_session_start hook error error=%v", err)
@@ -53,6 +55,8 @@ func (a *MainAgent) Run(ctx context.Context) error {
 		a.emitToTUI(ToastEvent{Message: notice, Level: "warn"})
 	}
 
+	a.restoreQuestions(a.ctxMgr.Snapshot())
+	a.publishRestoredQuestions()
 	// Start the async persistence loop.
 	a.startPersistLoop()
 
@@ -71,6 +75,7 @@ func (a *MainAgent) Run(ctx context.Context) error {
 		log.Debugf("agent event loop stopped instance=%v", a.instanceID)
 		// 1. Signal interactive senders to stop.
 		a.signalStopping()
+		a.stopQuestionWork()
 		a.cancelMemoryOrganization()
 		// 2. Wait for ConfirmFunc/QuestionFunc goroutines to exit.
 		a.toolWg.Wait()
@@ -132,6 +137,17 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleMemoryControl(evt.Payload.(*memoryControlRequest))
 	case EventMemoryControlDone:
 		a.handleMemoryControlDone(evt.Payload.(memoryControlResult))
+	case EventQuestionConsumed:
+		a.consumeQuestionResults(evt.Payload.([]string))
+		if a.turn == nil && !a.questions.paused {
+			a.closeCompletedQuestions()
+		}
+	case EventQuestionCommand:
+		a.handleQuestionCommand(evt.Payload.(*questionCommand))
+	case EventQuestionCommitted:
+		a.handleQuestionCommitted(evt.Payload.(*questionCommit))
+	case EventQuestionCommitRetry:
+		a.retryQuestionCommit(evt.Payload.(*questionCommit))
 	case EventUserMessage:
 		a.handleUserMessage(evt)
 	case EventPendingDraftUpsert:
@@ -157,6 +173,9 @@ func (a *MainAgent) dispatch(evt Event) {
 	case EventExecutePlan:
 		a.handleExecutePlanEvent(evt)
 	case EventSessionControl:
+		if a.prepareQuestionSessionSwitch(evt) {
+			return
+		}
 		a.cancelMemoryOrganization()
 		a.handleSessionControlEvent(evt)
 	case EventModelPoolSwitch:
@@ -225,8 +244,16 @@ func (a *MainAgent) dispatch(evt Event) {
 // shutdown. Main-loop handlers must use queueLoopEvent so they never wait on
 // capacity that only the loop itself can release.
 func (a *MainAgent) sendEvent(evt Event) bool {
+	return a.sendEventUntil(evt, nil)
+}
+
+// sendEventUntil preserves event ordering while allowing request admission to
+// stop when its caller is cancelled. A nil done channel waits until shutdown.
+func (a *MainAgent) sendEventUntil(evt Event, done <-chan struct{}) bool {
 	for {
 		select {
+		case <-done:
+			return false
 		case <-a.stoppingCh:
 			return false
 		default:
@@ -257,6 +284,8 @@ func (a *MainAgent) sendEvent(evt Event) bool {
 		a.eventMu.Unlock()
 		select {
 		case <-a.eventSpaceCh:
+		case <-done:
+			return false
 		case <-a.stoppingCh:
 			return false
 		}
@@ -615,7 +644,7 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 			"event_type", fmt.Sprintf("%T", evt),
 			"status", e.Status,
 		}, true
-	case ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, WorkDirChangedEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, ContextNoticeEvent, ContextNoticeClearedEvent, HandoffEvent, HandoffCancelledEvent, StreamSegmentEndedEvent, StreamTextCommitEvent:
+	case QuestionWaitStateEvent, QuestionStateEvent, QuestionTranscriptEvent, ToolCallStartEvent, ToolCallDiscardEvent, ToolCallExecutionEvent, ToolResultEvent, SessionRestoredEvent, WorkDirChangedEvent, SessionTitleChangedEvent, PendingDraftConsumedEvent, ForkSessionEvent, ErrorEvent, AgentStatusEvent, AgentStartedEvent, AgentNotifyEvent, MailboxQueuedEvent, MailboxDeliveryDroppedEvent, MailboxTranscriptAppendedEvent, BackgroundResultAppendedEvent, AgentDoneEvent, GlobalIdleEvent, NotificationEvent, InfoEvent, ToastEvent, AssistantMessageEvent, LoopNoticeEvent, LoopStateChangedEvent, YoloModeChangedEvent, RunningModelChangedEvent, ContextNoticeEvent, ContextNoticeClearedEvent, HandoffEvent, HandoffCancelledEvent, StreamSegmentEndedEvent, StreamTextCommitEvent:
 		return "TUI output channel full, waiting to deliver critical event", []any{
 			"event_type", fmt.Sprintf("%T", evt),
 		}, true
@@ -750,7 +779,7 @@ func (a *MainAgent) shouldEmitSubAgentStreaming(agentID string) bool {
 	return false
 }
 
-// emitInteractiveToTUI sends an interactive event (ConfirmRequest / QuestionRequest)
+// emitInteractiveToTUI sends a reliable interactive event.
 // to the output channel with blocking semantics. Unlike emitToTUI, it will wait
 // for space in the channel, but respects ctx cancellation and stoppingCh to avoid
 // blocking forever during shutdown.

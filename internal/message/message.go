@@ -225,6 +225,12 @@ func (a *ToolArgsAudit) Clone() *ToolArgsAudit {
 	return &cloned
 }
 
+// KindQuestionState identifies a local-only durable question fact.
+const KindQuestionState = "question_state"
+
+// KindQuestionResult identifies a system decision, never user authorization.
+const KindQuestionResult = "question_result"
+
 // KindSubAgentMailbox identifies a durable SubAgent mailbox message.
 const KindSubAgentMailbox = "subagent_mailbox"
 
@@ -288,6 +294,7 @@ const (
 
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
+	Question         json.RawMessage       `json:"question,omitempty"`
 	Role             Role                  `json:"role"` // "user", "assistant", "tool"
 	Content          string                `json:"content"`
 	Parts            []ContentPart         `json:"parts,omitempty"`             // multi-part content (text + images); when set, supersedes Content
@@ -377,7 +384,7 @@ func IsUserAuthored(msg Message) bool {
 		return false
 	}
 	switch msg.Kind {
-	case KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice:
+	case KindQuestionState, KindQuestionResult, KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice:
 		return false
 	case KindTurnOverlay:
 		// Request-scoped runtime hints ride the request tail as user-role

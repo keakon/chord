@@ -1285,7 +1285,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 	if err != nil {
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}
-	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index, evidenceItemTopics(evidenceItems), bundle.archiveMeta)
+	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, headSnapshot, index, evidenceItemTopics(evidenceItems), bundle.archiveMeta)
 	if err != nil {
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}

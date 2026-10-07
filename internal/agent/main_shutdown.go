@@ -18,6 +18,9 @@ const sessionEndHookGrace = 300 * time.Millisecond
 // (up to the given timeout). The caller should cancel the context passed to
 // Run as well.
 func (a *MainAgent) Shutdown(timeout time.Duration) error {
+	// Close startup admission before any cleanup. An already-admitted Run is
+	// waited on below, even when it has not initialized its Question state yet.
+	a.closeRunAdmission()
 	log.Infof("agent shutting down instance=%v timeout=%v", a.instanceID, timeout)
 	// Cancel in-flight memory extraction and flush the usage ledger. Shutdown
 	// never starts new extraction and never waits on an in-flight one.
@@ -73,31 +76,6 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	// shortly after Shutdown's budget expires.
 	defer a.closeSubAgentMCPServersAfterRun()
 
-	// Stop persistence admission and wait for the loop to drain.
-	// The persist loop may be started outside Run (tests), so don't gate the wait
-	// on the main event loop start flag. Closing the queue is itself an
-	// ordering barrier: the drain loop processes every already-enqueued entry
-	// (including walltime segments settled during cancellation) in FIFO order
-	// before it exits, so no separate pre-close flush is needed.
-	persistDrained := true
-	if a.persist.ch != nil {
-		persistDrained = a.closePersistLoopUntil(time.After(remaining()))
-		if persistDrained {
-			if wait := remaining(); wait > 0 {
-				select {
-				case <-a.persist.done:
-				case <-time.After(wait):
-					persistDrained = false
-				}
-			} else {
-				persistDrained = false
-			}
-		}
-	}
-	if !persistDrained {
-		return a.shutdownTimeoutError(timeout)
-	}
-
 	compactionDrained := true
 	if wait := remaining(); wait > 0 {
 		done := make(chan struct{})
@@ -136,6 +114,33 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 			return a.shutdownTimeoutError(timeout)
 		}
 	}
+
+	// Stop persistence admission and wait for the loop to drain.
+	// The persist loop may be started outside Run (tests), so don't gate the wait
+	// on the main event loop start flag. Closing the queue is itself an
+	// ordering barrier: the drain loop processes every already-enqueued entry
+	// (including walltime segments settled during cancellation) in FIFO order
+	// before it exits, so no separate pre-close flush is needed.
+	persistDrained := true
+	if a.persist.ch != nil {
+		persistDrained = a.closePersistLoopUntil(time.After(remaining()))
+		if persistDrained {
+			if wait := remaining(); wait > 0 {
+				select {
+				case <-a.persist.done:
+				case <-time.After(wait):
+					persistDrained = false
+				}
+			} else {
+				persistDrained = false
+			}
+		}
+	}
+	if !persistDrained {
+		return a.shutdownTimeoutError(timeout)
+	}
+
+	a.persistQuestionShutdown()
 
 	// The event loop has fully exited: settle any handoff the user never
 	// decided so the transcript does not end on an unresolved tool call.

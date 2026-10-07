@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 // persistEntry is a queued persistence request for ordered JSONL writes.
 type persistEntry struct {
+	durable        bool
 	agentID        string
 	msg            message.Message
 	recovery       *recovery.RecoveryManager // manager resolved at enqueue time; nil means the write's session is gone
@@ -162,8 +164,15 @@ func (a *MainAgent) startPersistLoop() {
 			return
 		}
 		var persistErr error
+		if entry.durable && entry.recovery == nil {
+			persistErr = fmt.Errorf("durable message has no recovery manager")
+		}
 		if entry.recovery != nil {
-			if err := entry.recovery.PersistMessage(entry.agentID, entry.msg); err != nil {
+			write := entry.recovery.PersistMessage
+			if entry.durable {
+				write = entry.recovery.PersistMessageDurable
+			}
+			if err := write(entry.agentID, entry.msg); err != nil {
 				log.Warnf("failed to persist message agent_id=%v error=%v", entry.agentID, err)
 				persistErr = err
 			}
@@ -217,7 +226,7 @@ func (a *MainAgent) persistAsyncThrough(manager *recovery.RecoveryManager, agent
 		return false
 	}
 	start := time.Now()
-	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: manager, after: after}, a.stoppingCh) {
+	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: manager, after: after, durable: len(msg.Question) > 0}, a.stoppingCh) {
 		return false
 	}
 	blocked := time.Since(start)
@@ -383,7 +392,7 @@ func (a *MainAgent) resetPersistenceHealthForSessionTarget() {
 // transcript. Success restores healthy; failure stays degraded while the
 // Q&A-only turn is still allowed to proceed.
 func (a *MainAgent) tryRecoverPersistenceBeforeTurn() {
-	if a == nil {
+	if a == nil || a.questions.failed {
 		return
 	}
 	manager := a.recoveryManager()
@@ -404,4 +413,28 @@ func (a *MainAgent) tryRecoverPersistenceBeforeTurn() {
 	// The checkpoint rewrote the transcript from ctxmgr, so every deferred
 	// card's message is durable again and its card can be surfaced.
 	a.flushPendingOverlayAppends()
+}
+
+// tryEnqueue reserves admission without blocking the event loop.
+func (p *persistencePump) tryEnqueue(entry persistEntry) bool {
+	if p == nil || p.ch == nil {
+		return false
+	}
+	select {
+	case p.admission <- struct{}{}:
+	default:
+		return false
+	}
+	defer func() { <-p.admission }()
+	select {
+	case <-p.stopping:
+		return false
+	default:
+	}
+	select {
+	case p.ch <- entry:
+		return true
+	default:
+		return false
+	}
 }

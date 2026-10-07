@@ -499,6 +499,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		// session restore reads usage.jsonl as the sole analytics source.
 		Usage: payload.Usage,
 	}
+	a.attachQuestionConsumption(&assistantMsg, payload.QuestionResults)
 	a.ctxMgr.Append(assistantMsg)
 
 	// Emit finalized assistant message event for control-plane consumers.
@@ -515,7 +516,12 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		persistPending = a.persistAsyncAfter(identity.MainAgentID, assistantMsg, func(err error) {
 			a.notePersistenceFailure(err)
 			persistBarrier <- err
+			if err == nil && len(payload.QuestionResults) > 0 {
+				a.sendEvent(Event{Type: EventQuestionConsumed, Payload: payload.QuestionResults})
+			}
 		})
+	} else {
+		a.consumeQuestionResults(payload.QuestionResults)
 	}
 
 	// Thinking translation is a best-effort post-processing enhancement. It is
@@ -549,6 +555,9 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		default:
 			log.Debug("LLM response has no tool calls, agent going idle")
 		}
+		if a.parkForRequiredQuestions() {
+			return
+		}
 		if assessment := a.nextLoopAssessmentFromAssistant(assistantMsg); assessment != nil {
 			a.rememberIdleTurn(a.turn.ID)
 			a.clearPendingThinkingReplay()
@@ -557,6 +566,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			a.queueLoopEvent(Event{Type: EventLoopAssessment, Payload: assessment})
 			return
 		}
+		a.closeCompletedQuestions()
 		a.emitActivity("main", ActivityIdle, "")
 		a.setIdleAndDrainPending()
 		return
@@ -574,6 +584,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		}
 		a.turn.BarrierFailureRounds = 0
 		a.markPersistenceRecoveredAfterBarrier()
+		a.consumeQuestionResults(payload.QuestionResults)
 	}
 
 	a.turn.noteDispatchedToolRound(validCalls, wasLengthRecovery)

@@ -38,13 +38,14 @@ type Config struct {
 	// ModelTemplates is a pure YAML anchor namespace: entries are only
 	// reachable through anchors/aliases elsewhere in the document and are never
 	// interpreted directly. Declared so strict decoding accepts the key.
-	ModelTemplates  map[string]yaml.Node `json:"-" yaml:"model_templates,omitempty"`
-	Orchestration   OrchestrationConfig  `json:"orchestration" yaml:"orchestration,omitempty"` // multi-agent runtime resource limits
-	Context         ContextConfig        `json:"context" yaml:"context"`                       // context compression settings
-	Skills          SkillsConfig         `json:"skills" yaml:"skills"`                         // additional skill paths
-	ConfirmTimeout  int                  `json:"confirm_timeout" yaml:"confirm_timeout"`       // confirmation timeout in seconds (0 = infinite, default)
-	QuestionTimeout int                  `json:"question_timeout" yaml:"question_timeout"`     // question timeout in seconds (0 = wait indefinitely, default)
-	Diff            DiffConfig           `json:"diff" yaml:"diff"`                             // TUI diff rendering options
+	ModelTemplates            map[string]yaml.Node `json:"-" yaml:"model_templates,omitempty"`
+	Orchestration             OrchestrationConfig  `json:"orchestration" yaml:"orchestration,omitempty"` // multi-agent runtime resource limits
+	Context                   ContextConfig        `json:"context" yaml:"context"`                       // context compression settings
+	Skills                    SkillsConfig         `json:"skills" yaml:"skills"`                         // additional skill paths
+	ConfirmTimeout            int                  `json:"confirm_timeout" yaml:"confirm_timeout"`       // confirmation timeout in seconds (0 = infinite, default)
+	QuestionAutoSelectTimeout int                  `json:"question_auto_select_timeout" yaml:"question_auto_select_timeout"`
+	QuestionTimeout           int                  `json:"question_timeout" yaml:"question_timeout"` // optional-question timeout in seconds (0 = wait indefinitely)
+	Diff                      DiffConfig           `json:"diff" yaml:"diff"`                         // TUI diff rendering options
 	// DesktopNotification, when true, enables terminal notifications in local TUI.
 	// Chord auto-selects the terminal OSC protocol by environment (for example, OSC 777 vs OSC 9).
 	// YAML: desktop_notification: true
@@ -1728,6 +1729,10 @@ func collectSemanticIssues(cfg *Config) []string {
 	issues = append(issues, collectCompactionConfigIssues(cfg)...)
 	issues = append(issues, collectModelCompactionIssues(cfg)...)
 	issues = append(issues, collectOrchestrationConfigIssues(cfg)...)
+	if cfg.QuestionAutoSelectTimeout < 0 {
+		issues = append(issues, "question_auto_select_timeout must be non-negative; using 0")
+		cfg.QuestionAutoSelectTimeout = 0
+	}
 	if cfg.QuestionTimeout < 0 {
 		issues = append(issues, fmt.Sprintf("question_timeout must be a non-negative number of seconds (0 = wait indefinitely); got %d, using 0", cfg.QuestionTimeout))
 		cfg.QuestionTimeout = 0
@@ -2255,6 +2260,7 @@ var projectScopedTopLevelKeys = map[string]bool{
 	"skills":                          true,
 	"confirm_timeout":                 true,
 	"question_timeout":                true,
+	"question_auto_select_timeout":    true,
 	"diff":                            true,
 	"desktop_notification":            true,
 	"desktop_notification_foreground": true,

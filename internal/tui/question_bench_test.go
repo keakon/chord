@@ -13,10 +13,10 @@ func benchmarkModelForQuestionDialog() Model {
 		request: &QuestionRequest{Item: tools.QuestionItem{
 			Header:   "Deploy?",
 			Question: "Choose an action before continuing.",
-			Options: []tools.QuestionOption{{Label: "Ship", Description: "Deploy the current build."}, {
+			Options: []tools.QuestionOption{{ID: "Ship", Label: "Ship", Description: "Deploy the current build."}, {
 				Label:       "Wait",
 				Description: "Keep gathering more evidence before deployment.",
-			}, {Label: "Abort", Description: "Stop and revisit the plan."}},
+			}, {ID: "Abort", Label: "Abort", Description: "Stop and revisit the plan."}},
 		}},
 		cursor:   1,
 		selected: map[int]bool{},

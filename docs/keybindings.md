@@ -135,9 +135,9 @@ Handoff plan views include the plan path at the top so it can be selected and co
 
 ### Questions and selectors
 
-Press `Tab` in a question dialog to enter a custom answer. Returning to the options with `Tab` or `Esc` keeps your draft. Number keys immediately submit a choice in single-select questions; in multi-select questions, numbers or Space toggle choices and `Enter` submits the selection. `Esc` in the options declines the question; a text-only question can also be declined directly with `Esc`.
+Questions open automatically and share a queue with permission, completion, and Handoff dialogs. Automatic display keeps the timer running. Editing or navigating a question requests permanent timer cancellation; cancellation takes effect after acknowledgment.
 
-Read long questions with `PgUp` / `PgDown` or the mouse wheel. Moving the option cursor brings that option into view. The editor and action hints stay at the bottom.
+`Tab` switches between custom input and options and keeps the draft. `Enter` submits; `Shift+Enter` / `Ctrl+J` inserts a newline. Numbers submit single choices or toggle multiple choices; Space also toggles. `Esc` declines and `Ctrl+W` withdraws the requirement; the question stays on screen until you submit it or use one of them. Declining alone leaves a required decision unresolved. Use `PgUp` / `PgDown` or the wheel for long questions.
 
 In the model-pool selector, press `/` to edit a filter, then `Enter` to switch to the highlighted pool. While editing a filter, `Esc` clears it and returns to the list; in the list, `Esc` closes the selector. In the skill selector, `Enter` fills the composer with a command. The skill loads only after you add any arguments and send it.
 

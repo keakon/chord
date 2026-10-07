@@ -29,6 +29,7 @@ func (m *Model) syncVisibleMainUserBlockMsgIndexes() {
 		return
 	}
 	msgs := m.agent.GetMessages()
+	m.restoreQuestionProjection(msgs)
 	if len(msgs) == 0 {
 		return
 	}
@@ -772,6 +773,15 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 	toolIDToBlock := make(map[string]*Block)
 
 	for msgIdx, msg := range msgs {
+		if msg.Kind == message.KindQuestionState {
+			continue
+		}
+		if block := questionTranscriptBlock(msg, *nextID); block != nil {
+			block.MsgIndex = msgIdx
+			*nextID++
+			blocks = append(blocks, block)
+			continue
+		}
 		switch msg.Role {
 		case "user":
 			if msg.Kind == message.KindBackgroundResult {

@@ -866,19 +866,19 @@ func TestToolExecutionPipelineAuditsSchemaFailureArguments(t *testing.T) {
 // is what once made the card guess where the answers ended.
 func TestToolExecutionKeepsStructuredPayloadFreeOfNotes(t *testing.T) {
 	registry := tools.NewRegistry()
-	registry.Register(tools.NewQuestionTool(func(_ context.Context, _ []tools.QuestionItem) ([]tools.QuestionAnswer, error) {
-		return []tools.QuestionAnswer{{Header: "mode", Selected: []string{"fast"}, Outcome: tools.QuestionOutcomeAnswered}}, nil
+	registry.Register(tools.NewQuestionTool(func(_ context.Context, _ tools.QuestionArgs) (tools.QuestionResult, error) {
+		return tools.QuestionResult{Answers: []tools.QuestionAnswer{{Header: "mode", Selected: []string{"fast"}, Outcome: tools.QuestionOutcomeAnswered}}}, nil
 	}))
 	pipeline := toolExecutionPipeline{registry: registry}
 	execResult, err := pipeline.execute(context.Background(), message.ToolCall{
 		ID:   "call-question",
 		Name: tools.NameQuestion,
-		Args: json.RawMessage(`{"questions":[{"header":"first","header":"mode","question":"Which mode?","options":[{"label":"fast","description":"go fast"}]}]}`),
+		Args: json.RawMessage(`{"questions":[{"header":"first","header":"mode","question":"Which mode?","options":[{"id":"fast","label":"fast","description":"go fast"}]}]}`),
 	}, false)
 	if err != nil {
 		t.Fatalf("execute returned error: %v", err)
 	}
-	if execResult.Payload != `[{"header":"mode","selected":["fast"],"outcome":"answered"}]` {
+	if execResult.Payload != `{"status":"","answers":[{"question_id":"","header":"mode","selected":["fast"],"outcome":"answered"}]}` {
 		t.Fatalf("payload = %q, want the clean answers JSON", execResult.Payload)
 	}
 	if len(execResult.Notes) == 0 || !strings.Contains(execResult.Notes[0], "ignored earlier duplicate parameter value(s)") {

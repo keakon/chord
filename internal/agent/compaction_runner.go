@@ -264,14 +264,14 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	todos := a.GetTodos()
 	subAgents := a.taskInfosForCompaction()
 	backgroundObjects, jobSnapshotAt := jobStatesForSnapshotWithTime()
-	headSnapshot := snapshot[:headSplit]
+	headSnapshot := questionCompactionMessages(snapshot[:headSplit])
 
 	evidenceItems, _ = applyCompactionProfile(a.ctxMgr, profile, headSnapshot, a.ctxMgr.GetMaxTokens(), evidenceItems)
 	// Anchors are inherited from the previous checkpoint rather than re-derived,
 	// so recursive compaction cannot erode the original request or a standing
 	// constraint one summary at a time.
 	sessionAnchors := buildCompactionAnchors(latestCompactionAnchors(snapshot), originalRequest, evidenceItems)
-	recentTail := append([]message.Message(nil), snapshot[headSplit:]...)
+	recentTail := questionCompactionMessages(snapshot[headSplit:])
 	keyFiles := extractCompactionKeyFileCandidates(snapshot, a.effectiveToolBaseDir(), 8)
 	head, evidenceMsgs := splitMessagesForCompactionWithSelections(headSnapshot, nil, evidenceItems)
 	if len(head) == 0 {
@@ -294,7 +294,9 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 		return nil, fmt.Errorf("determine compaction index: %w", err)
 	}
 
-	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, index, evidenceItemTopics(evidenceItems), archiveMeta)
+	// head is the filtered archive view; the refs must cover the raw prefix
+	// the apply validates against.
+	absHistoryPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(head, snapshot[:headSplit], index, evidenceItemTopics(evidenceItems), archiveMeta)
 	if err != nil {
 		return nil, fmt.Errorf("export compacted history: %w", err)
 	}
@@ -490,6 +492,9 @@ func (a *MainAgent) applyCompactionDraft(d *compactionDraft) error {
 // applyCompactionDraftAsync applies a compaction draft using ReplacePrefixAtomic,
 // preserving tail messages that were added during the async compaction goroutine.
 func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
+	if a.questions.failed || a.questions.active != nil {
+		return errQuestionHistoryRewriteUnsettled
+	}
 	transactionCommitted := false
 	if d.TransactionID != "" {
 		defer func() {
@@ -585,6 +590,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// the drain duration.
 	a.flushPersist()
 	var backupPath string
+	questionHistory := a.ctxMgr.Snapshot()
 	err := a.ctxMgr.ReplacePrefixAtomic(headSplit, d.NewMessages, func(tail []message.Message) ([]message.Message, error) {
 		// Build the complete new message list: prefix (summary + evidence) + tail
 		newMessages := make([]message.Message, 0, len(d.NewMessages)+len(tail))
@@ -595,6 +601,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		// replaying pre-apply pressure text as if it described the fresh
 		// window, which is the stale reminder the new window must not inherit.
 		newMessages = dropContextNoticeMessages(newMessages)
+		newMessages = retainQuestionFacts(questionHistory, newMessages)
 		compactedMessages = newMessages
 
 		// The target transcript fingerprint is recorded BEFORE the session

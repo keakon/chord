@@ -8,7 +8,6 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
-	"github.com/keakon/chord/internal/tools"
 )
 
 // streamContinueCardTitle labels the status card rendered for a durable
@@ -153,11 +152,9 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// The handoff tool card itself shows the plan path and stays
 		// non-terminal until the user confirms, rejects, or cancels, so no
 		// separate "Plan saved to:" assistant block is inserted here. The
-		// selector opens as a follow-up so it queues behind any dialog already
-		// on screen instead of racing it.
-		effects.addFollowup(func() tea.Msg {
-			return handoffSelectRequestMsg{planPath: evt.PlanPath, requestID: evt.RequestID, agentID: evt.AgentID}
-		})
+		// Queue the selector immediately to preserve arrival order within the
+		// event batch, behind any dialog already on screen.
+		effects.addFollowup(m.handleHandoffSelectRequest(handoffSelectRequestMsg{planPath: evt.PlanPath, requestID: evt.RequestID, agentID: evt.AgentID}))
 		return true, effects
 	case agent.HandoffCancelledEvent:
 		// The runtime discarded a handoff wait before the user decided (a new
@@ -381,31 +378,4 @@ func (m *Model) scheduleKeyPoolTick() tea.Cmd {
 	return tickCmd(d, func(time.Time) tea.Msg {
 		return keyPoolTickMsg{gen: gen}
 	})
-}
-
-// questionDialogFromEvent builds the dialog a QuestionRequestEvent asks for. The
-// event carries one question: the agent publishes a batch as one request per
-// question, each with its own request id.
-func questionDialogFromEvent(evt agent.QuestionRequestEvent) questionDialog {
-	opts := make([]tools.QuestionOption, len(evt.Options))
-	for i, s := range evt.Options {
-		opt := tools.QuestionOption{Label: s}
-		if i < len(evt.OptionDetails) {
-			opt.Description = evt.OptionDetails[i]
-		}
-		opts[i] = opt
-	}
-	return questionDialog{
-		request: QuestionRequest{
-			Item: tools.QuestionItem{
-				Header:   evt.Header,
-				Question: evt.Question,
-				Options:  opts,
-				Multiple: evt.Multiple,
-			},
-			Deadline: evt.Deadline,
-			AgentID:  evt.AgentID,
-		},
-		requestID: evt.RequestID,
-	}
 }

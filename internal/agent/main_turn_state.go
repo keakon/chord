@@ -15,8 +15,10 @@ import (
 // starts a new turn; starting a new turn cancels any in-flight work from the
 // previous one.
 type Turn struct {
-	ID    uint64
-	Epoch uint64
+	questionCompletionBlocked bool
+	questionRequestScope      string
+	ID                        uint64
+	Epoch                     uint64
 	// LLMResponsesState is the turn-scoped sticky-routing state for the
 	// Responses/Codex transport. It is created when a turn starts, shared by
 	// every LLM request in that turn (main, compaction, replay), and dropped

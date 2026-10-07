@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -680,6 +681,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.turn.malformedInBatch++
 	}
 
+	if errors.Is(payload.Error, errRequiredQuestionDecisions) {
+		a.turn.questionCompletionBlocked = true
+	}
 	remaining := a.turn.PendingToolCalls.Add(-1)
 	if remaining < 0 {
 		log.Warnf("PendingToolCalls went negative after tool result turn_id=%v call_id=%v", a.turn.ID, payload.CallID)
@@ -692,6 +696,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.turn.activeToolBatchCancel = nil
 		if a.turn.nextToolBatch < len(a.turn.toolExecutionBatches) {
 			a.startNextToolBatch(a.turn)
+			return
+		}
+		if a.turn.questionCompletionBlocked && a.parkForRequiredQuestions() {
 			return
 		}
 		abnormalInBatch := a.turn.malformedInBatch
@@ -808,6 +815,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 						if report == "" {
 							report = "Done approved"
 						}
+						a.closeCompletedQuestions()
 						a.persistLoopDoneToolResult(pending.CallID, "Done approved")
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done approved", DoneReport: report, Status: ToolResultStatusSuccess})
@@ -844,6 +852,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				if report == "" {
 					report = "Done"
 				}
+				a.closeCompletedQuestions()
 				a.persistLoopDoneToolResult(pending.CallID, report)
 				a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 				a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: report, DoneReport: report, Status: ToolResultStatusSuccess})

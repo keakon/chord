@@ -46,7 +46,13 @@ func (a *MainAgent) captureCompactionArchiveMeta() compactionArchiveMeta {
 	}
 }
 
-func (a *MainAgent) exportCompactionHistory(messages []message.Message, index int, topics []string, meta compactionArchiveMeta) (absPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
+// exportCompactionHistory writes the archive for archivedHead and derives the
+// provenance refs from sourcePrefix. The two views differ: the archive drops
+// local question state, while the refs must fingerprint the raw transcript
+// prefix the apply validates against (validateCheckpointSourceRefs over
+// currentMessages[:headSplit]). Deriving refs from the filtered view would
+// make the ref list shorter than that prefix and fail every apply.
+func (a *MainAgent) exportCompactionHistory(archivedHead, sourcePrefix []message.Message, index int, topics []string, meta compactionArchiveMeta) (absPath string, sourceRefs []checkpointSourceRef, sourceFingerprint string, err error) {
 	// The archive, its permission root, and its status file all belong to the
 	// session captured at the barrier; a session switch cannot change where
 	// this draft writes.
@@ -58,7 +64,7 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 		session.MetadataKeySessionID:   meta.persistentSessionID,
 		session.MetadataKeyInstanceID:  meta.instanceID,
 	}
-	exported, err := session.Export(messages, nil, metadata)
+	exported, err := session.Export(archivedHead, nil, metadata)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -71,7 +77,9 @@ func (a *MainAgent) exportCompactionHistory(messages []message.Message, index in
 		return "", nil, "", err
 	}
 	generation := fmt.Sprintf("compaction-%d", index)
-	sourceRefs, err = buildCheckpointSourceRefs(meta.persistentSessionID, generation, filepath.Base(absPath), messages)
+	// Refs describe the replaced prefix, not the archive view: the apply
+	// checks them against the unfiltered transcript prefix.
+	sourceRefs, err = buildCheckpointSourceRefs(meta.persistentSessionID, generation, filepath.Base(absPath), sourcePrefix)
 	if err != nil {
 		return "", nil, "", err
 	}

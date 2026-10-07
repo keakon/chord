@@ -5127,7 +5127,7 @@ func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	msgs := []message.Message{{Role: "user", Content: "hello"}}
 
-	absPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(msgs, 1, nil, a.captureCompactionArchiveMeta())
+	absPath, sourceRefs, sourceFingerprint, err := a.exportCompactionHistory(msgs, msgs, 1, nil, a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatalf("exportCompactionHistory: %v", err)
 	}

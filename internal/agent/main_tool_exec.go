@@ -55,7 +55,12 @@ type ToolExecutionResult struct {
 
 // executeToolCall runs a single tool invocation with permission checks,
 // output truncation.
+var errRequiredQuestionDecisions = fmt.Errorf("question decisions must be received and consumed before completion")
+
 func (a *MainAgent) executeToolCall(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+	if tools.NormalizeName(tc.Name) == tools.NameDone && a.questionCompletionPending.Load() > 0 {
+		return ToolExecutionResult{ExecStartedAt: time.Now(), walltimeTarget: a.captureMainWalltimeTarget()}, errRequiredQuestionDecisions
+	}
 	if intercept, ok := a.maybeInterceptRepeatedToolCall(ctx, tc); ok {
 		execResult := ToolExecutionResult{
 			EffectiveArgsJSON: string(tc.Args),

@@ -498,21 +498,21 @@ func TestQuestionCardNamesNonAnsweredOutcomes(t *testing.T) {
 		}
 	}
 
-	plain := stripANSI(strings.Join(newBlock(`[{"header":"Target branch","selected":[],"outcome":"declined"},{"header":"Extra","selected":[],"outcome":"not_asked"}]`).Render(96, ""), "\n"))
+	plain := stripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":[],"outcome":"declined"},{"header":"Extra","selected":[],"outcome":"not_asked"}]}`).Render(96, ""), "\n"))
 	for _, want := range []string{"Outcome: declined", "Outcome: not_asked"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected %q in the question card, got:\n%s", want, plain)
 		}
 	}
 
-	expired := stripANSI(strings.Join(newBlock(`[{"header":"Target branch","selected":[],"outcome":"no_response"},{"header":"Extra","selected":[],"outcome":"superseded"}]`).Render(96, ""), "\n"))
+	expired := stripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":[],"outcome":"no_response"},{"header":"Extra","selected":[],"outcome":"superseded"}]}`).Render(96, ""), "\n"))
 	for _, want := range []string{"Outcome: no_response", "Outcome: superseded"} {
 		if !strings.Contains(expired, want) {
 			t.Fatalf("expected %q in the question card, got:\n%s", want, expired)
 		}
 	}
 
-	answered := stripANSI(strings.Join(newBlock(`[{"header":"Target branch","selected":["main"],"outcome":"answered"},{"header":"Extra","selected":["Ship it"],"outcome":"answered"}]`).Render(96, ""), "\n"))
+	answered := stripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":["main"],"outcome":"answered"},{"header":"Extra","selected":["Ship it"],"outcome":"answered"}]}`).Render(96, ""), "\n"))
 	if strings.Contains(answered, "Outcome:") {
 		t.Fatalf("an answered question already shows its selection and needs no outcome line, got:\n%s", answered)
 	}
@@ -533,8 +533,8 @@ func TestQuestionCardCarriesItsSectionsUnderABareHeader(t *testing.T) {
 		Content:       args,
 		RawArgs:       args,
 		ResultDone:    true,
-		ResultPayload: `[{"header":"Target branch","selected":["main"]}]`,
-		ResultContent: `[{"header":"Target branch","selected":["main"]}]`,
+		ResultPayload: `{"status":"resolved","answers":[{"header":"Target branch","selected":["main"]}]}`,
+		ResultContent: `{"status":"resolved","answers":[{"header":"Target branch","selected":["main"]}]}`,
 	}
 
 	plain := stripANSI(strings.Join(block.Render(96, ""), "\n"))

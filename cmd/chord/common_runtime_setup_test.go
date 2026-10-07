@@ -67,11 +67,11 @@ func TestCreateRuntimeWiresConfirmAndQuestionTools(t *testing.T) {
 
 	questionDone := make(chan error, 1)
 	go func() {
-		_, err := ac.Registry.Execute(context.Background(), tools.NameQuestion, []byte(`{"questions":[{"header":"h","question":"q","options":[{"label":"yes","description":"y"}]}]}`))
+		_, err := ac.Registry.Execute(context.Background(), tools.NameQuestion, []byte(`{"questions":[{"header":"h","question":"q","options":[{"id":"yes","label":"yes","description":"y"}]}]}`))
 		questionDone <- err
 	}()
-	questionReq := waitForQuestionRequestEvent(t, ac.MainAgent.Events())
-	_, _ = ac.MainAgent.ResolveQuestion([]string{"yes"}, tools.QuestionOutcomeAnswered, questionReq.RequestID)
+	questionReq := waitForQuestionSnapshot(t, ac.MainAgent.Events())
+	_, _ = ac.MainAgent.ApplyQuestionOperation(context.Background(), agent.QuestionOperation{Operation: agent.QuestionOpAnswer, OperationID: "answer:" + questionReq.ID, QuestionID: questionReq.ID, Answers: []string{"yes"}})
 	if err := <-questionDone; err != nil {
 		t.Fatalf("Question tool via runtime wiring: %v", err)
 	}
@@ -283,17 +283,17 @@ func waitForConfirmRequestEvent(t *testing.T, ch <-chan agent.AgentEvent) agent.
 	}
 }
 
-func waitForQuestionRequestEvent(t *testing.T, ch <-chan agent.AgentEvent) agent.QuestionRequestEvent {
+func waitForQuestionSnapshot(t *testing.T, ch <-chan agent.AgentEvent) agent.QuestionSnapshot {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
 		case evt := <-ch:
-			if req, ok := evt.(agent.QuestionRequestEvent); ok {
-				return req
+			if req, ok := evt.(agent.QuestionStateEvent); ok {
+				return req.Question
 			}
 		case <-deadline:
-			t.Fatal("timed out waiting for QuestionRequestEvent")
+			t.Fatal("timed out waiting for QuestionStateEvent")
 		}
 	}
 }
@@ -311,20 +311,21 @@ func TestCreateRuntimeQuestionToolRoundTripReturnsAnswers(t *testing.T) {
 
 	questionDone := make(chan string, 1)
 	go func() {
-		out, err := ac.Registry.Execute(context.Background(), tools.NameQuestion, []byte(`{"questions":[{"header":"h","question":"q","options":[{"label":"yes","description":"y"}]}]}`))
+		out, err := ac.Registry.Execute(context.Background(), tools.NameQuestion, []byte(`{"questions":[{"header":"h","question":"q","options":[{"id":"yes","label":"yes","description":"y"}]}]}`))
 		if err != nil {
 			questionDone <- err.Error()
 			return
 		}
 		questionDone <- out
 	}()
-	questionReq := waitForQuestionRequestEvent(t, ac.MainAgent.Events())
-	_, _ = ac.MainAgent.ResolveQuestion([]string{"yes"}, tools.QuestionOutcomeAnswered, questionReq.RequestID)
+	questionReq := waitForQuestionSnapshot(t, ac.MainAgent.Events())
+	_, _ = ac.MainAgent.ApplyQuestionOperation(context.Background(), agent.QuestionOperation{Operation: agent.QuestionOpAnswer, OperationID: "answer:" + questionReq.ID, QuestionID: questionReq.ID, Answers: []string{"yes"}})
 	out := <-questionDone
-	var answers []tools.QuestionAnswer
-	if err := json.Unmarshal([]byte(out), &answers); err != nil {
+	var result tools.QuestionResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatalf("unmarshal answers: %v", err)
 	}
+	answers := result.Answers
 	if len(answers) != 1 || len(answers[0].Selected) != 1 || answers[0].Selected[0] != "yes" {
 		t.Fatalf("answers = %#v, want yes", answers)
 	}

@@ -177,7 +177,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 	}
 	return statusBarInputs{
 		Now:                 now,
-		ModeText:            m.statusBarModeText(),
+		ModeText:            m.statusBarModeLabel(),
 		Snapshot:            snap,
 		StatusActiveID:      statusActiveID,
 		StatusActivity:      m.activityForAgent(statusActiveID),
@@ -390,7 +390,7 @@ func (m *Model) statusBarSearchPill() string {
 	return PillStyle.Render(fmt.Sprintf("/%s [%d/%d]", m.search.State.Query, current, total))
 }
 
-func (m *Model) statusBarModeText() string {
+func (m *Model) statusBarModeLabel() string {
 	switch m.mode {
 	case ModeInsert:
 		modeText := "INSERT"

@@ -10,8 +10,10 @@ import (
 func TestStaleReadyCompactionCleansExportedArchive(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
+	stale := []message.Message{{Role: message.RoleUser, Content: "stale archive"}}
 	historyPath, _, _, err := a.exportCompactionHistory(
-		[]message.Message{{Role: message.RoleUser, Content: "stale archive"}},
+		stale,
+		stale,
 		5,
 		nil,
 		a.captureCompactionArchiveMeta(),

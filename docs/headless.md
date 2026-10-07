@@ -75,7 +75,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`.
 
 ### `status`
 
@@ -97,7 +97,10 @@ Response:
     "phase": "",
     "phase_detail": "",
     "pending_confirm": null,
-    "pending_question": null,
+    "pending_questions": [],
+    "questions": [],
+    "question_binding_id": "question-binding",
+    "questions_next_after_id": "",
     "pending_handoff": null,
     "workdir": {
       "path": "/workspace/project",
@@ -113,6 +116,10 @@ Response:
 }
 ```
 
+`pending_questions` includes every visible unanswered question. `questions` includes those questions, requested closed questions, and a page of closed history in reverse creation order. A history page contains at most 32 records and 2 MiB of encoded snapshots. To read the next page, send `{"type":"status","binding_id":"<question_binding_id>","questions_after_id":"<questions_next_after_id>"}`. An empty `questions_next_after_id` ends pagination. Restart pagination when the binding changes; pages observe current committed state and are not a frozen export.
+
+A client reconciling previously open questions should include their IDs in `question_ids` (at most 32 per query). Those records are returned even when they lie outside the history page; unknown IDs are omitted. Requested closed records have a separate 6 MiB budget; an oversized query returns an `error` and should be retried with fewer IDs. Merge records by question ID and version, and never infer a terminal outcome from absence in a history page.
+
 `session_id` tracks the active session, not just the startup snapshot. An in-band switch that replaces the session without restarting the process (handoff plan execution, `/resume <id>`, `/new`) updates the tracked id, and the change is announced with an explicit `session_switched` push; the cached value alone never counts as the gateway having seen the new session. Restores that keep the session (startup replay, durable compaction rewrite) only refresh the timestamp and emit nothing. The tracked id moves even without a `session_switched` subscription, so `status_response` always reports the session the runtime actually runs.
 
 `workdir` is the checkout currently used by the agent. `path` is the effective working directory, `worktree_id` is empty for the main or unmanaged checkout, and `generation` changes whenever the binding changes. A mid-session worktree switch updates `status_response` and emits `workdir_changed` when subscribed; integrations should use the generation to discard stale snapshots.
@@ -127,7 +134,7 @@ Send a user message to the agent. Slash commands work the same as in the TUI; ba
 {"type": "send", "request_id": "input-1", "content": "Please summarize the project structure."}
 ```
 
-If a `confirm_request`, `question_request`, or `handoff_request` is pending and the user sends a regular message (not via `confirm`, `question`, or `handoff` below), Chord auto-dismisses the pending interaction so the new message is consumed. A pending `confirm_request` is auto-denied with an empty reason and emits no dedicated event; follow the next `status_response` (`pending_confirm` cleared) to stop waiting. A pending `question_request` is closed as `superseded`, and Chord pushes a `question_resolved` event with `reason: "superseded"` to subscribed clients. When the dismissed interaction is a `handoff_request`, Chord also pushes a `handoff_cancelled` event to subscribed clients, just like the runtime-initiated cancellation in the [`handoff`](#handoff) section. The dismissed interaction stops appearing as pending in the next `status_response`.
+A regular `send` retains questions and required decisions, interrupting the current wait so the agent can process new instructions. Pending confirmations are still auto-denied, and handoffs close with `handoff_cancelled`. Resolve questions through targeted answer, decline, withdrawal, or replacement operations.
 
 An optional `request_id` correlates one `input_result` consumption reply. Replies are always emitted regardless of `subscribe`; inputs without an ID have no correlated reply.
 
@@ -221,13 +228,26 @@ Resolve a pending `confirm_request`. Use the `request_id` from the request.
 
 ### `question`
 
-Answer a pending `question_request`.
+Operate on a stable question ID. Selections use IDs from `option_ids`; free text uses `custom: true`:
 
 ```json
-{"type": "question", "request_id": "r-…", "answers": ["yes"], "reason": "answered"}
+{"type":"question","action":"answer","operation_id":"answer-1","request_id":"q-1","answers":["brief"]}
 ```
 
-For multi-select questions, pass multiple strings in `answers`. `reason` must be `answered` (submit the selection) or `declined` (dismiss without answering); any other value is rejected with an `error`. Clients cannot submit `no_response`, `superseded`, `cancelled`, or `error` — those describe how Chord closed the request, and are reported through `question_resolved`. The response is accepted only if the request is still open and before its `deadline`; a rejected or late answer returns an `error` and never clears a different pending question.
+`question_receipt` is always emitted and contains `operation_id`, `request_id`, `accepted`, `status`, `version`, and `error`. Only `accepted: true` confirms durable acceptance. Timeouts or disconnects leave the outcome unknown; retry with the same operation ID and parameters.
+
+| action | Purpose |
+| --- | --- |
+| `presented` | Confirm that the answer entry and default notice are available; include current `version`, `binding_id`, and `supports_interaction`. Channels unable to detect interaction send `false` and wait for timer cancellation before opening their answer entry. |
+| `interact` | Permanently cancel this timer without answering. |
+| `answer` / `decline` | Answer a pending question / decline without an answer. |
+| `revise` | Append a historical revision, retaining the original outcome and task even when another question is pending. |
+| `withdraw_requirement` / `replace_requirement` | Explicitly withdraw using `user_text`, or replace with `replacement_id` in the same task. Models cannot silently remove requirements. |
+| `cancel_task` / `new_task` | Explicitly cancel the current task / start an independent task scope using `user_text`. |
+
+`user_required` never expires; `default_allowed` requires a valid explicit single-choice default; `optional` may close unanswered. Clients cannot submit system outcomes. Core owns deadlines; a local countdown does not establish success. `defaulted` never means user authorization. Core pause suspends timing; client disconnects do not.
+
+`status_response.pending_questions` lists open questions; `questions` also includes historical ones. Entries carry `task_id`, `request_scope_id`, `version`, policy, default, timer, and terminal `reason`. Accept only newer versions per ID and rebuild the projection after a session switch. A historical revision includes `revision_result` with a distinct `result_id` and new answer in `question_updated`; the original `reason` is retained.
 
 ### `handoff`
 
@@ -274,6 +294,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | Type                  | When                                                                                       | Notable payload fields                                            |
 | --------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
 | `ready`               | Server has finished startup and is ready to accept commands                                | `session_id`, worktree info (when applicable: `name`, `branch`, `path`, `repo_root`) |
+| `question_receipt` | Durable result of a question operation | `operation_id`, `request_id`, `accepted`, `status`, `version`, `error` |
 | `input_result` | Consumption reply for a `send` carrying `request_id` | `request_id`, `status`, optional `turn_id` / `message` |
 | `subscribe_response`  | Reply to a `subscribe` command                                                             | `events`                                                          |
 | `status_response`     | Reply to a `status` command                                                                | see [`status`](#status)                                           |
@@ -290,8 +311,9 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `idle`                  | The main agent and all SubAgents are globally quiescent and ready for input                         | `last_outcome` (`completed` / `cancelled` / `error`), `suppress_user_notification` (`true` unless the agent ran since the previous idle event), `running_jobs` (same count as `status_response`; while it is above zero, each counted job wakes the agent again when it ends and a new `idle` follows, so an integration waiting for the work to end should keep reading events) |
 | `done_completion`      | Done tool completed with a final report. Emitted only while a loop is running, since that is the only time `done` is mounted; the `mode` field is currently always `normal` | `call_id`, `report`, `reason`, `status`, `agent_id`, `mode`                                                  |
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `agent_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `needs_approval_rules`, `already_allowed_rules`, `timeout_ms` |
-| `question_request`      | The model asked the user a question                                                               | `request_id`, `agent_id`, `tool_name`, `header`, `question`, `options`, `option_details`, `multiple`, `deadline` (absolute RFC 3339 close time; omitted when no `question_timeout` is set) |
-| `question_resolved`     | A published question closed, whether by an answer or by Chord (deadline, supersede, cancel, execution error) | `request_id`, `reason` (`answered`, `declined`, `no_response`, `superseded`, `cancelled`, `error`) |
+| `question_request` | A question becomes available | `request_id`, `binding_id`, `task_id`, `request_scope_id`, `version`, `header`, `question`, `options`, `option_ids`, `option_details`, `multiple`, `response_policy`, `default_option_id`, `timer`, `duration_seconds`, optional `deadline` |
+| `question_updated` | Timing, interaction, requirement disposition, or historical revision changes | Full question snapshot; historical replies add `revision_result` with a distinct `result_id` |
+| `question_resolved` | A question reaches a terminal outcome | Full snapshot; `reason` is `answered`, `defaulted`, `declined`, `no_response`, `superseded`, `cancelled`, or `error` |
 | `notification`          | A user-facing reminder for an explicit wait that is not a modal request                       | `reason`, `message` |
 | `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}`; `agents` is empty when no eligible target exists |
 | `handoff_cancelled`     | A pending handoff was discarded before the client decided — a newer turn, a session switch, or an auto-dismissing `send` superseded it | `request_id`, `reason` (`superseded`)                                                                        |
@@ -363,7 +385,7 @@ send({"type": "subscribe",
 send({"type": "send", "content": "Summarize the project structure."})
 ```
 
-In production, also handle `confirm_request` (reply via `confirm`), `question_request` (reply via `question`), and `handoff_request` (reply via `handoff`); the agent will block waiting for those replies.
+In production, also handle `confirm_request` (reply via `confirm`), `question_request` (reply via `question`), and `handoff_request` (reply via `handoff`); confirmations and handoffs wait for a decision, while questions may allow independent work to continue.
 
 ## chord-gateway: recommended way to consume headless
 

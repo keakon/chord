@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
 
@@ -27,9 +29,10 @@ func (loopBusyAgentStub) QueuePendingUserDraft(string, []message.ContentPart) bo
 func (loopBusyAgentStub) UpdatePendingUserDraft(string, []message.ContentPart) bool { return false }
 func (loopBusyAgentStub) RemovePendingUserDraft(string) bool                        { return false }
 func (loopBusyAgentStub) ResolveConfirm(string, string, string, string, string)     {}
-func (loopBusyAgentStub) ResolveQuestion([]string, string, string) (string, bool) {
-	return "", true
+func (loopBusyAgentStub) ApplyQuestionOperation(context.Context, agent.QuestionOperation) (agent.QuestionReceipt, error) {
+	return agent.QuestionReceipt{Accepted: true}, nil
 }
+
 func (loopBusyAgentStub) ResolveHandoff(string, string, string, string) {}
 func (loopBusyAgentStub) ProviderModelRef() string                      { return "" }
 func (loopBusyAgentStub) RunningModelRef() string                       { return "" }
@@ -356,11 +359,8 @@ func TestQuestionRequestNotifiesWhileLoopStillBusy(t *testing.T) {
 	m.desktopNotificationsEnabled = true
 	m.terminalAppFocused = false
 
-	if cmd := m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
-		RequestID: "q-1",
-		Question:  "Continue?",
-		Options:   []string{"Yes", "No"},
-	}}); cmd == nil {
+	m.handleAgentEvent(agentEventMsg{event: questionEventForTest("q-1", "", "Continue?", []string{"Yes", "No"}, nil, false, time.Time{}, "")})
+	if m.question.requestID != "q-1" && len(m.pendingDialogs) == 0 {
 		t.Fatal("question request did not open the interaction overlay")
 	}
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.NotificationEvent{Reason: agent.NotificationReasonUserInputRequired, Message: "Chord: Question requires your input"}})

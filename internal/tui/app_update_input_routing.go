@@ -400,7 +400,7 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 			if pm, ok := msg.(tea.PasteMsg); ok {
 				m.question.input.InsertString(pm.Content)
 				m.recalcViewportSize()
-				return nil
+				return m.beginQuestionInteraction()
 			}
 			var cmd tea.Cmd
 			m.question.input, cmd = m.question.input.Update(msg)

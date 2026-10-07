@@ -88,6 +88,7 @@ type confirmState struct {
 	editInput textarea.Model  // textarea used in edit sub-mode
 	editError string          // inline validation error shown in edit sub-mode
 	prevMode  Mode            // mode to restore when the dialog closes
+	arrivedAt time.Time       // original arrival, retained across manual switching
 	deadline  time.Time       // zero value = no timeout
 
 	// Rule picker state

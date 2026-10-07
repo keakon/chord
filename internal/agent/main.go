@@ -38,7 +38,10 @@ import (
 // (eventCh) for sequencing work and an output channel (outputCh) that the TUI
 // consumes.
 type MainAgent struct {
-	compactionFiles compactionFileReplay
+	questions                 questionRuntime
+	questionWaiting           atomic.Bool
+	questionCompletionPending atomic.Int64
+	compactionFiles           compactionFileReplay
 
 	parentCtx              context.Context
 	cancel                 context.CancelFunc
@@ -733,8 +736,12 @@ type MainAgent struct {
 	// this flag to avoid overwriting the final snapshot.
 	shuttingDown atomic.Bool
 
-	// started is set to true when Run is called. Shutdown uses this to skip
-	// waiting for the event loop and persist goroutine if Run was never called.
+	// runMu orders Run admission against Shutdown. Once runClosed is set,
+	// started cannot transition from false to true.
+	runMu     sync.Mutex
+	runClosed bool
+	// started records an admitted Run; Shutdown waits for its done signal
+	// before reading loop-owned state.
 	started atomic.Bool
 
 	compactionWg sync.WaitGroup
@@ -984,6 +991,7 @@ func NewMainAgent(
 		mcpReady:                make(chan struct{}),
 	}
 	a.interaction = newInteractionBroker(a.stoppingCh)
+	a.interaction.questionWaiting = a.questionWaiting.Load
 	a.subPersists = newSubAgentPersistDebouncer(a.flushDirtySubPersists, a.SessionDir)
 	a.walltime = newWalltimeRecorder(a.usageLedger, a.persist, a.stoppingCh)
 	a.interaction.setSettledHook(func(target *walltimeTarget, d time.Duration) {
@@ -1439,7 +1447,14 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 		a.emitInputResult(requestID, InputHandled, "", 0)
 		return
 	}
+	if a.handleQuestionUserCommand(content, requestID) {
+		return
+	}
 	a.mailboxDeliveryPaused.Store(false)
+	if a.questions.paused {
+		a.handleQuestionCommand(&questionCommand{operation: QuestionOperation{Operation: questionOpResume, OperationID: makeRequestID()}, ctx: a.parentCtx})
+	}
+	a.interruptQuestionWaits()
 
 	a.explicitUserTurnCount.Add(1)
 	a.sweepSubAgentLifecycle()
@@ -1647,6 +1662,7 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 		return
 	}
 
+	a.pauseQuestionWork()
 	a.mainLLMRequestInFlight.Store(false)
 	// Cancelling the turn ends it: nothing resumes behind the pending
 	// compaction, so a round suspended oversize on a narrower fallback must
@@ -1731,6 +1747,7 @@ func (a *MainAgent) handleTurnCancelRequested(evt Event) {
 	}
 	a.raiseCancelUpTo(payload.AcceptedUpTo)
 	if a.turn == nil {
+		a.pauseQuestionWork()
 		log.Debugf("cancel request recorded without an active turn accepted_up_to=%v", payload.AcceptedUpTo)
 		return
 	}

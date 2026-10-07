@@ -320,6 +320,16 @@ func (r *RecoveryManager) persistBinaryParts(msg message.Message) (message.Messa
 // After Close is called, PersistMessage returns ErrClosed so callers never
 // mistake a dropped durability write for success.
 func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) error {
+	return r.persistMessage(agentID, msg, false)
+}
+
+// PersistMessageDurable commits a full transcript record and synchronizes its
+// file and directory before reporting success.
+func (r *RecoveryManager) PersistMessageDurable(agentID string, msg message.Message) error {
+	return r.persistMessage(agentID, msg, true)
+}
+
+func (r *RecoveryManager) persistMessage(agentID string, msg message.Message, durable bool) error {
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -347,6 +357,9 @@ func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) er
 	f, ok := r.handles[agentID]
 	if !ok {
 		path := r.messageLogPath(agentID)
+		if err := repairMessageTail(r.sessionDir, path); err != nil {
+			return fmt.Errorf("repair message log tail: %w", err)
+		}
 		f, err = privatefs.OpenFile(r.sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 		if err != nil {
 			return err
@@ -354,8 +367,26 @@ func (r *RecoveryManager) PersistMessage(agentID string, msg message.Message) er
 		r.handles[agentID] = f
 	}
 
-	_, err = f.Write(data)
-	return err
+	n, err := f.Write(data)
+	if err != nil || n != len(data) {
+		_ = f.Close()
+		delete(r.handles, agentID)
+	}
+	if err != nil {
+		return fmt.Errorf("write message: %w", err)
+	}
+	if n != len(data) {
+		return fmt.Errorf("incomplete message write: %w", io.ErrShortWrite)
+	}
+	if durable {
+		if err := f.Sync(); err != nil {
+			return fmt.Errorf("sync message: %w", err)
+		}
+		if err := privatefs.SyncDir(r.sessionDir); err != nil {
+			return fmt.Errorf("sync message directory: %w", err)
+		}
+	}
+	return nil
 }
 
 // AppendToolActivity durably appends and syncs one started record to the

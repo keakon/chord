@@ -738,7 +738,9 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.restoreCacheHitStats(loaded.UsageStats)
 	a.clearReductionCache(true)
 	a.resetLLMModelRun()
+	loaded.Messages = restoreQuestionToolResults(loaded.Messages)
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
+	a.restoreQuestions(loaded.Messages)
 	a.installContextNoticePresence(loaded.Messages)
 	a.mailboxDeliveryPaused.Store(true)
 	// Activation replaces the session: the replaced session's in-memory
@@ -1655,6 +1657,7 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 
 	a.llmClient.SetSessionID(targetID)
 	a.emitToTUI(SessionRestoredEvent{})
+	a.publishRestoredQuestions()
 	a.emitToTUI(ToastEvent{Message: result.infoMessage(), Level: "info"})
 	a.setIdleForComposerEdit()
 }

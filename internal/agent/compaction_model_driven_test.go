@@ -1516,7 +1516,7 @@ func TestModelDrivenCheckpointRenderReusesBuilderAndAddsExportedArchive(t *testi
 	builder := a.newModelDrivenCheckpointBuilder(t.Context(), bundle, snapshot, 2, req)
 
 	preflightContent, preflightStats := builder.render("")
-	exported, _, _, err := a.exportCompactionHistory(snapshot[:2], 1, evidenceItemTopics(filterCompactionEvidenceForArchival(evidence)), a.captureCompactionArchiveMeta())
+	exported, _, _, err := a.exportCompactionHistory(snapshot[:2], snapshot[:2], 1, evidenceItemTopics(filterCompactionEvidenceForArchival(evidence)), a.captureCompactionArchiveMeta())
 	if err != nil {
 		t.Fatal(err)
 	}

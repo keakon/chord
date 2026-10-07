@@ -266,8 +266,10 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		switch mouse.Button {
 		case tea.MouseWheelUp:
 			m.scrollQuestion(-mouseWheelScrollStep)
+			return m.beginQuestionInteraction(), true
 		case tea.MouseWheelDown:
 			m.scrollQuestion(mouseWheelScrollStep)
+			return m.beginQuestionInteraction(), true
 		}
 		return nil, true
 	}

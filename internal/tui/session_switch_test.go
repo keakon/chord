@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -4427,9 +4428,10 @@ func (s *sessionControlAgent) RemovePendingUserDraft(draftID string) bool {
 }
 func (s *sessionControlAgent) ResolveConfirm(action, finalArgsJSON, editSummary, denyReason, requestID string) {
 }
-func (s *sessionControlAgent) ResolveQuestion(answers []string, reason string, requestID string) (string, bool) {
-	return reason, true
+func (s *sessionControlAgent) ApplyQuestionOperation(context.Context, agent.QuestionOperation) (agent.QuestionReceipt, error) {
+	return agent.QuestionReceipt{Accepted: true}, nil
 }
+
 func (s *sessionControlAgent) ProviderModelRef() string {
 	if s.providerModelRefByFocus != nil {
 		if ref, ok := s.providerModelRefByFocus[s.focused]; ok {

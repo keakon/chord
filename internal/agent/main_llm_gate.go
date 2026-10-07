@@ -587,6 +587,12 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 }
 
 func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnID uint64, messages []message.Message, agentErrSourceID string) {
+	questionObservation := &questionRequestObservation{projection: a.snapshotQuestionRequest()}
+	turnCtx = context.WithValue(turnCtx, questionRequestContextKey{}, questionObservation)
+	if a.turn != nil && a.turn.ID == turnID {
+		a.turn.questionRequestScope = questionObservation.projection.scope
+	}
+	a.questions.resumeNeeded = false
 	a.mainLLMRequestInFlight.Store(true)
 	a.mainRequestSeq++
 	requestSeq := a.mainRequestSeq
@@ -662,6 +668,7 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 			a.emitToTUI(StreamTextCommitEvent{Text: resp.Content, TurnID: turnID, RequestSeq: requestSeq})
 		}
 		payload := &LLMResponsePayload{
+			QuestionResults:           questionObservation.results,
 			Content:                   resp.Content,
 			ThinkingBlocks:            resp.ThinkingBlocks,
 			ResponsesOutput:           resp.ResponsesOutput,
@@ -878,7 +885,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 // applyReadyDraft applies the compaction draft that was waiting for the continuation barrier.
 // This is called from barrier events (beginMainLLMAfterPreparation, IdleEvent).
 func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier bool) {
-	if a.compactionState.readyDraft == nil {
+	if a.compactionState.readyDraft == nil || a.questions.active != nil {
 		return false, false
 	}
 

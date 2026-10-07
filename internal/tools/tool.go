@@ -408,3 +408,13 @@ func (r *Registry) Execute(ctx context.Context, name string, args json.RawMessag
 	}
 	return t.Execute(ctx, args)
 }
+
+type questionCallIDKey struct{}
+
+func WithToolCallID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, questionCallIDKey{}, id)
+}
+func ToolCallIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(questionCallIDKey{}).(string)
+	return id
+}

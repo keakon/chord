@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/keakon/chord/internal/agent"
 
 	tea "github.com/keakon/bubbletea/v2"
 
@@ -27,15 +31,35 @@ type questionResolveCall struct {
 	requestID string
 }
 
-func (a *questionResolverAgent) ResolveQuestion(answers []string, reason, requestID string) (string, bool) {
-	a.calls = append(a.calls, questionResolveCall{answers: answers, reason: reason, requestID: requestID})
-	if !a.accepted {
-		return "", false
+func (a *questionResolverAgent) ApplyQuestionOperation(_ context.Context, op agent.QuestionOperation) (agent.QuestionReceipt, error) {
+	reason := tools.QuestionOutcomeAnswered
+	if op.Operation == agent.QuestionOpDecline {
+		reason = tools.QuestionOutcomeDeclined
 	}
+	if op.Operation == agent.QuestionOpInteract || op.Operation == agent.QuestionOpPresented {
+		return agent.QuestionReceipt{Accepted: true}, nil
+	}
+	a.calls = append(a.calls, questionResolveCall{answers: op.Answers, reason: reason, requestID: op.QuestionID})
+	receipt := agent.QuestionReceipt{Accepted: a.accepted, Status: reason, Error: "response was not accepted"}
 	if a.terminal != "" {
-		return a.terminal, true
+		receipt.Accepted = false
+		receipt.Status = a.terminal
+		receipt.Error = "question expired: " + a.terminal
 	}
-	return reason, true
+	return receipt, nil
+}
+func runQuestionCmd(m *Model, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case questionOperationMsg:
+		m.handleQuestionOperation(msg)
+	case tea.BatchMsg:
+		for _, c := range msg {
+			runQuestionCmd(m, c)
+		}
+	}
 }
 
 func TestQuestionTextOnlySupportsMultilineSubmit(t *testing.T) {
@@ -53,7 +77,7 @@ func TestQuestionTextOnlySupportsMultilineSubmit(t *testing.T) {
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "a", Code: 'a'}), m.question.request.Item)
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}), m.question.request.Item)
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "b", Code: 'b'}), m.question.request.Item)
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item)
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item))
 
 	if len(backend.calls) != 1 {
 		t.Fatalf("resolve calls = %d, want 1", len(backend.calls))
@@ -80,7 +104,7 @@ func TestQuestionSubmitPreservesLeadingWhitespace(t *testing.T) {
 	m.question.input.Focus()
 	m.question.input.SetValue("  foo\n bar")
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item)
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item))
 
 	if len(backend.calls) != 1 || len(backend.calls[0].answers) != 1 {
 		t.Fatalf("resolve calls = %+v, want one answer", backend.calls)
@@ -99,7 +123,7 @@ func TestQuestionCustomSupportsCtrlJNewline(t *testing.T) {
 		request: &QuestionRequest{Item: tools.QuestionItem{
 			Header:   "top",
 			Question: "paste output",
-			Options:  []tools.QuestionOption{{Label: "skip"}},
+			Options:  []tools.QuestionOption{{ID: "skip", Label: "skip"}},
 		}},
 		requestID: "req-top",
 		custom:    true,
@@ -111,7 +135,7 @@ func TestQuestionCustomSupportsCtrlJNewline(t *testing.T) {
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "x", Code: 'x'}), q)
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: 'j', Mod: tea.ModCtrl}), q)
 	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}), q)
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), q)
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), q))
 
 	if len(backend.calls) != 1 || len(backend.calls[0].answers) != 1 {
 		t.Fatalf("resolve calls = %+v, want one answer", backend.calls)
@@ -137,13 +161,13 @@ func TestQuestionSubmitSurfacesRefusedResponse(t *testing.T) {
 	m.question.input.Focus()
 	m.question.input.SetValue("late")
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item)
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item))
 
 	if len(backend.calls) != 1 {
 		t.Fatalf("resolve calls = %d, want 1", len(backend.calls))
 	}
-	if m.question.request != nil {
-		t.Fatal("the dialog must close even when the response was refused")
+	if m.question.request == nil {
+		t.Fatal("the draft must remain when the response was refused")
 	}
 	if m.activeToast == nil {
 		t.Fatal("a refused response must surface a toast")
@@ -166,7 +190,7 @@ func TestQuestionSubmitReportsTheWinningTerminalReason(t *testing.T) {
 	m.question.input.Focus()
 	m.question.input.SetValue("late")
 
-	_ = m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item)
+	runQuestionCmd(&m, m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}), m.question.request.Item))
 
 	if m.activeToast == nil {
 		t.Fatal("a response that lost its race with the deadline must surface a toast")
@@ -176,32 +200,19 @@ func TestQuestionSubmitReportsTheWinningTerminalReason(t *testing.T) {
 	}
 }
 
-func TestQuestionTextInputEscReturnsToOptionsAndKeepsDraft(t *testing.T) {
-	m := NewModel(nil)
-	m.width = 80
-	m.mode = ModeQuestion
-	m.question = questionState{
-		request: &QuestionRequest{Item: tools.QuestionItem{
-			Header:   "top",
-			Question: "paste output",
-			Options:  []tools.QuestionOption{{Label: "skip"}},
-		}},
-		custom: true,
-		input:  newQuestionTextarea(m.width),
-	}
-	m.question.input.Focus()
+func TestQuestionTextInputEscDeclines(t *testing.T) {
+	backend := &questionResolverAgent{accepted: true}
+	m := NewModelWithSize(backend, 80, 24)
+	m.mode = ModeInsert
+	m.handleQuestionState(questionEventForTest("q-1", "Choice", "Choose", []string{"one"}, nil, false, time.Time{}, "main").Question)
+	m.question.custom = true
 	m.question.input.SetValue("draft")
-
-	q := m.question.request.Item
-	cmd := m.handleQuestionTextKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}), q)
-	if cmd != nil {
-		t.Fatalf("esc with options should not return cmd, got %#v", cmd)
+	runQuestionCmd(&m, m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})))
+	if len(backend.calls) != 1 || backend.calls[0].reason != tools.QuestionOutcomeDeclined {
+		t.Fatalf("Esc must decline, calls = %+v", backend.calls)
 	}
-	if m.question.custom {
-		t.Fatal("custom should be false after esc back to options")
-	}
-	if got := m.question.input.Value(); got != "draft" {
-		t.Fatalf("input value = %q, want draft after esc", got)
+	if m.mode != ModeInsert || m.question.request != nil {
+		t.Fatal("a declined question must close the dialog")
 	}
 }
 
@@ -271,7 +282,7 @@ func TestQuestionTextareaShrinksToContentHeight(t *testing.T) {
 func TestQuestionRequestTextOnlyReturnsFocusCmd(t *testing.T) {
 	m := NewModel(nil)
 
-	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Item: tools.QuestionItem{Header: "log", Question: "paste log"}}})
+	cmd := m.presentQuestionRequest(questionDialog{request: QuestionRequest{Item: tools.QuestionItem{Header: "log", Question: "paste log"}}}, ModeNormal)
 	if cmd == nil {
 		t.Fatal("a text-only question request should return a focus cmd")
 	}
@@ -321,7 +332,7 @@ func TestResolveQuestionRestoresInsertModeWithTextareaState(t *testing.T) {
 	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
-	_ = m.resolveQuestion(nil, true)
+	runQuestionCmd(&m, m.resolveQuestion(nil, true))
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
@@ -339,8 +350,8 @@ func TestQuestionDialogWrapsCurrentOptionDescription(t *testing.T) {
 			Header:   "Direction",
 			Question: "Choose one",
 			Options: []tools.QuestionOption{
-				{Label: "Option A", Description: "Show the full setup instructions in the dialog so the content wraps across multiple lines instead of being shortened with an ellipsis."},
-				{Label: "Option B", Description: "Keep the current setup."},
+				{ID: "Option A", Label: "Option A", Description: "Show the full setup instructions in the dialog so the content wraps across multiple lines instead of being shortened with an ellipsis."},
+				{ID: "Option B", Label: "Option B", Description: "Keep the current setup."},
 			},
 		}},
 		cursor: 0,
@@ -367,8 +378,8 @@ func TestQuestionDialogQuickSelectHintMatchesOptionCount(t *testing.T) {
 			Header:   "Direction",
 			Question: "Choose one",
 			Options: []tools.QuestionOption{
-				{Label: "Option A", Description: "desc1"},
-				{Label: "Option B", Description: "desc2"},
+				{ID: "Option A", Label: "Option A", Description: "desc1"},
+				{ID: "Option B", Label: "Option B", Description: "desc2"},
 			},
 		}},
 	}

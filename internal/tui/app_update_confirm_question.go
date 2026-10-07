@@ -35,11 +35,7 @@ func (m *Model) dialogActive() bool {
 }
 
 func (m *Model) handleConfirmRequest(msg confirmRequestMsg) tea.Cmd {
-	if m.dialogActive() {
-		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{confirm: &msg, arrivedAt: time.Now()})
-		return nil
-	}
-	return m.presentConfirmRequest(msg, m.mode, time.Now())
+	return m.enqueueDialog(pendingDialog{confirm: &msg, arrivedAt: time.Now()})
 }
 
 // presentConfirmRequest installs a confirmation dialog (permission ask, Done
@@ -56,6 +52,7 @@ func (m *Model) presentConfirmRequest(msg confirmRequestMsg, prevMode Mode, arri
 		request:   &msg.request,
 		requestID: msg.request.RequestID,
 		prevMode:  prevMode,
+		arrivedAt: arrivedAt,
 	}
 	m.terminalTitleRequestSeen = m.displayState == stateForeground
 	var timeoutCmd tea.Cmd
@@ -91,14 +88,6 @@ func (m *Model) handleConfirmTimeoutTick() tea.Cmd {
 	return nil
 }
 
-func (m *Model) handleQuestionRequest(dlg questionDialog) tea.Cmd {
-	if m.dialogActive() {
-		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{question: &dlg, arrivedAt: time.Now()})
-		return nil
-	}
-	return m.presentQuestionRequest(dlg, m.mode)
-}
-
 // presentQuestionRequest installs a Question dialog as the active modal.
 // prevMode is restored once the dialog closes; it is passed in rather than read
 // from m.mode so a queued dialog restores the mode that was active before the
@@ -106,8 +95,8 @@ func (m *Model) handleQuestionRequest(dlg questionDialog) tea.Cmd {
 // request's own absolute deadline rather than to the moment the dialog reached
 // the screen, so time spent queued behind another modal never extends it.
 func (m *Model) presentQuestionRequest(dlg questionDialog, prevMode Mode) tea.Cmd {
+	m.questionGeneration++
 	m.exitRenderFreeze()
-	m.focusAgentForRequest(dlg.request.AgentID)
 	ei := newQuestionTextarea(m.width)
 	m.question = questionState{
 		request:   &dlg.request,
@@ -120,7 +109,7 @@ func (m *Model) presentQuestionRequest(dlg questionDialog, prevMode Mode) tea.Cm
 	var timeoutCmd tea.Cmd
 	if !dlg.request.Deadline.IsZero() {
 		m.question.deadline = dlg.request.Deadline
-		timeoutCmd = questionTimeoutTick()
+		timeoutCmd = questionTimeoutTick(m.questionGeneration)
 	}
 	var focusCmd tea.Cmd
 	if len(dlg.request.Item.Options) == 0 {
@@ -134,8 +123,11 @@ func (m *Model) presentQuestionRequest(dlg questionDialog, prevMode Mode) tea.Cm
 	return tea.Batch(cmd, focusCmd, idleCmd, flushCmd, titleCmd, timeoutCmd)
 }
 
-func (m *Model) handleQuestionTimeoutTick() tea.Cmd {
-	if m.mode == ModeQuestion && !m.question.deadline.IsZero() {
+func (m *Model) handleQuestionTimeoutTick(tick questionTimeoutTickMsg) tea.Cmd {
+	if tick.generation != m.questionGeneration {
+		return nil
+	}
+	if m.question.request != nil && !m.question.deadline.IsZero() {
 		if time.Now().After(m.question.deadline) {
 			// The broker owns termination: it closes the request as
 			// no_response and pushes the resolved event that dismisses this
@@ -144,7 +136,7 @@ func (m *Model) handleQuestionTimeoutTick() tea.Cmd {
 			return nil
 		}
 		m.recalcViewportSize()
-		return questionTimeoutTick()
+		return questionTimeoutTick(m.questionGeneration)
 	}
 	return nil
 }
@@ -159,6 +151,8 @@ func (m *Model) handleQuestionResolved(requestID string) tea.Cmd {
 	}
 	if m.question.request != nil && m.question.requestID == requestID {
 		prevMode := m.question.prevMode
+		m.question.submitting = false
+		m.question.interacting = false
 		m.question = questionState{}
 		m.terminalTitleRequestSeen = false
 		m.recalcViewportSize()
@@ -168,15 +162,6 @@ func (m *Model) handleQuestionResolved(requestID string) tea.Cmd {
 			cmds = append(cmds, m.updateBackgroundIdleSweepState())
 		}
 		return m.finishDialog(prevMode, cmds...)
-	}
-	// The request may still be queued behind another dialog.
-	for i := range m.pendingDialogs {
-		q := m.pendingDialogs[i].question
-		if q == nil || q.requestID != requestID {
-			continue
-		}
-		m.pendingDialogs = append(m.pendingDialogs[:i], m.pendingDialogs[i+1:]...)
-		break
 	}
 	return nil
 }

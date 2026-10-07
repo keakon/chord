@@ -43,6 +43,8 @@ type handoffSelectState struct {
 	options   []handoffOption
 	planPath  string
 	requestID string
+	agentID   string
+	arrivedAt time.Time
 	prevMode  Mode
 	planText  string
 	planErr   string
@@ -74,11 +76,7 @@ type handoffSelectRequestMsg struct {
 // handleHandoffSelectRequest presents the Handoff selector, or queues it behind
 // the dialog that is already on screen.
 func (m *Model) handleHandoffSelectRequest(msg handoffSelectRequestMsg) tea.Cmd {
-	if m.dialogActive() {
-		m.pendingDialogs = append(m.pendingDialogs, pendingDialog{handoff: &msg, arrivedAt: time.Now()})
-		return nil
-	}
-	return m.openHandoffSelect(msg.planPath, msg.requestID, msg.agentID, m.mode)
+	return m.enqueueDialog(pendingDialog{handoff: &msg, arrivedAt: time.Now()})
 }
 
 // clearHandoffSelect drops the selector state once the decision is delivered so
@@ -136,6 +134,7 @@ func (m *Model) openHandoffSelect(planPath, requestID, agentID string, prevMode 
 		options:   options,
 		planPath:  planPath,
 		requestID: requestID,
+		agentID:   agentID,
 		prevMode:  prevMode,
 	}
 	if content, err := os.ReadFile(planPath); err == nil {

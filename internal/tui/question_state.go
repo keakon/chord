@@ -34,21 +34,22 @@ type questionDialog struct {
 
 // questionTimeoutTickMsg is emitted every second while a question dialog is
 // active and a deadline is configured. It drives the countdown display only.
-type questionTimeoutTickMsg struct{}
+type questionTimeoutTickMsg struct{ generation uint64 }
 
 // questionState holds the transient state for the active question dialog.
 type questionState struct {
-	request           *QuestionRequest // full request (nil when inactive)
-	requestID         string           // broker request this dialog answers
-	cursor            int              // highlighted option (0-based)
-	selected          map[int]bool     // toggled option indices (multi-select)
-	custom            bool             // true when custom text input is focused
-	input             textarea.Model   // free-text input for custom answers / text-only Qs
-	scrollOffset      int
-	followCursor      bool
-	bodyHeight        int
-	visibleBodyHeight int
-	prevMode          Mode // mode to restore on close
+	interacted, interacting, submitting bool
+	request                             *QuestionRequest // full request (nil when inactive)
+	requestID                           string           // broker request this dialog answers
+	cursor                              int              // highlighted option (0-based)
+	selected                            map[int]bool     // toggled option indices (multi-select)
+	custom                              bool             // true when custom text input is focused
+	input                               textarea.Model   // free-text input for custom answers / text-only Qs
+	scrollOffset                        int
+	followCursor                        bool
+	bodyHeight                          int
+	visibleBodyHeight                   int
+	prevMode                            Mode // mode to restore on close
 
 	// deadline is the request's absolute close time from question_timeout.
 	// The dialog only displays the countdown; the broker owns termination.
@@ -67,8 +68,8 @@ type questionState struct {
 
 // questionTimeoutTick returns a tea.Cmd that sleeps for 1 second then
 // delivers a questionTimeoutTickMsg (for countdown display).
-func questionTimeoutTick() tea.Cmd {
+func questionTimeoutTick(generation uint64) tea.Cmd {
 	return tickCmd(time.Second, func(_ time.Time) tea.Msg {
-		return questionTimeoutTickMsg{}
+		return questionTimeoutTickMsg{generation: generation}
 	})
 }

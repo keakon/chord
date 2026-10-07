@@ -12,6 +12,8 @@
 
 ### 不兼容变更
 
+- Headless 问答改用按 ID 的多题集合与 `action` / `operation_id` 回执协议，状态包含所有可见待答题目与分页的已关闭历史。集成方需同步更新选项 ID、展示/介入与终态处理，并通过 `question_ids` 补齐历史页之外的已知决策。
+
 - TUI 在主视图中使用 `Alt+R` 切换角色，`Shift+Tab` 在输入模式与普通模式中都切换 Agent 视图。`switch_role` 和 `switch_agent` 仍可自定义，建议分别绑定不同按键。
 
 - `compat.reasoning_continuity.preserve_history` 被 `compat.reasoning_continuity.reasoning_replay` 取代：`current_turn`（新的默认值）只保留当前轮的 reasoning，`all` 原样回放已完成轮次（等价原来的 `preserve_history: true`），`none` 连当前轮一起剥离。回放窗口现在覆盖所有 reasoning 载荷，不再局限于明文，因此已完成轮次的 Claude 签名 thinking 块、Responses reasoning items、Gemini thought 签名默认也会被剥离；当前轮（含工具循环）始终原样回传。DeepSeek 的 Chat/Messages 会自动保留完整的 reasoning 历史。其他契约要求完整 assistant 历史的后端用 `reasoning_replay: all` 保留（Kimi K3 / `keep: all`、Qwen `preserve_thinking`、GLM `clear_thinking: false`），模型配置指南的模板已同步设置。保留历史轮 thinking 的 Claude 模型（Opus 4.5+、Sonnet 4.6+）在默认值下还会失去跨轮思考连续性，需要保留就让这些模型用 `all`。旧键不再读取：残留的 `preserve_history` 会由配置加载器报出（`chord doctor config` 也会列出），随后按新默认值生效，迁移需要手动完成。
@@ -19,7 +21,6 @@
 - 移除 `context.compaction.preset` 配置及 remote 压缩后端。需要模型生成压缩摘要时，统一使用普通模型请求；模型驱动 checkpoint 和运行期降级保持原有行为。被移除的后端返回不透明条目，无法通过 Chord 的文本摘要校验。请删除 `context.compaction` 下残留的 `preset` 键：配置加载器会将它报告为未知字段（`chord doctor config` 也会列出），其余压缩配置照常生效。
 - Agent 定义不再读取 `capabilities`、`preferred_tasks`、`write_mode`、`delegation_policy`。这些键从未被强制执行，只是 Delegate 选人列表上的标签。选人意图写进 `description`。角色能不能写文件仍由 `permission` 决定，Delegate 仍会在每个可选项上标 `empty_scope=allowed` 或 `non_empty_scope=required`。现有 agent 文件里残留的这些键会被忽略。
 - headless 的 `compaction_status` 事件不再携带 `model_downshift` 触发类型：切换到更小窗口引发的压缩现在以 `usage_driven` 上报，按旧值过滤的集成方请改匹配 `usage_driven`。
-- headless 的提问协议换了形状。`question_request` 不再带 `default_answer` 和 `timeout_ms`，改为带 `deadline`——Chord 关闭该问题的绝对 RFC 3339 时刻（未设置 `question_timeout` 时省略）。Chord 也不再拿第一个选项当兜底默认答案。`question` 命令用 `reason`（`answered` 或 `declined`）取代 `cancelled`，问题关闭改由新增的 `question_resolved` 事件通知，不再靠之后的快照推断。
 - worktree 会话现在按仓库共享：同一仓库的所有 checkout 共用一个 store，在 worktree 里开的会话能在主工作区列出、继续，反过来也一样。旧版本按 checkout 分片写入的会话不会迁移：它们仍留在自己那个 key 下，但 Chord 不再列出、不再恢复，也不会随 worktree 一起清理。
 - 点名仓库内路径的权限规则现在对同一仓库的每个 checkout 生效。主工作区里写的 `write src/**: allow`，在 `<worktree>/src/` 下同样允许；也没法写出「只允许某一个 checkout」的规则——Chord 按仓库相对拼写匹配仓库内的路径，绝对路径规则永远匹配不到它们。
 - 已经是 PNG 或 JPEG 的图片现在按原字节发给上游，不再先统一转成 JPEG。截图、图表和文字截图因此保留原画质，代价是过去会被重新压缩的图片上传体积变大。原样直传只适用于不需要任何变换的图片：长边超过 2000px、带 EXIF 旋转信息、或超出体积预算的 PNG / JPEG 仍会重新编码。需要转换或缩放的图片仍优先输出 PNG，只有在结果超过体积预算时才退回 JPEG。
@@ -29,6 +30,8 @@
 - 模型面的 `lsp` 工具已移除：definition、references、implementation 查询不再提供给模型，提示词里也不再提及。导航请用 `read`、`grep` 和 `glob`。写后诊断不受影响——`write`、`edit`、`apply_patch` 的结果仍会附带 language server 诊断，配置好的 server 仍显示在信息面板里——残留的 `lsp` 权限规则不再匹配任何调用。
 
 ### 新功能
+
+- 问题支持先继续独立工作，再等待答案。回答窗口自动弹出，与权限确认、完成审批和 Handoff 共用优先级队列；`Esc` 表示拒绝回答，问题不会收起或延后，只有提交、拒绝或撤回后才会关闭。必要确认没有期限；`question_auto_select_timeout` 支持明确的单选默认方案，开始操作后永久取消自动计时。默认方案不代表授权，`question_timeout` 只限制可选问题。
 
 - 新增 `/memory` 记忆面板，支持搜索、阅读、复制和移除记录，可预览所选或全量整理，撤销最近一次人工变更。
 
@@ -55,8 +58,7 @@
 - 工具确认框支持只读查看完整参数，包括较长的批量编辑；查看后仍需明确批准调用。
 - 新增 `chord acp`：通过 stdio 提供 Agent Client Protocol，让 Zed 这类 ACP 客户端把 Chord 当作自己的 agent。工作目录由客户端在 `session/new` 里给出；回答、思考块和工具调用（分类、标题、目标文件、原始参数、输出与文件 diff）以 `session/update` 流式回传；取消本轮返回 `cancelled`；`file://` 资源链接会变成与 TUI 一致的 `<file path="...">` 上下文块。stdout 只跑 JSON-RPC，每个进程把自己的日志写进日志目录。一个 `chord acp` 进程服务客户端开出的所有会话，上限由 `--max-sessions`（默认 8）控制，每个会话一个子进程，各自持有自己的工作目录、runtime 与 MCP server；`session/close` 会释放对应会话和它的进程。确认弹窗尚未接通，在此之前需要授权的工具会等 Chord 自己的确认超时。详见 [ACP Agent 模式](./docs/acp_CN.md)。
 - 新增 `chord sessions project <session-id>` 命令：把已落盘会话投影成每 turn 一行的 JSONL 事实（turn 边界、带 digest 的工具结果、工具归因的文件变更、压缩边界），用于复盘与完成报告取证。只读，源会话被别的进程占用时也能跑；turn 成因只报 `user_message` / `inferred` / `unknown`，不硬猜用户 continue 还是后台唤醒。`--out` 会拒绝写进会话目录内（或硬链接到其中文件）的路径，投影不可能覆盖源会话；`--max-bytes` 可调高 256 KiB 的 JSONL 上限，长会话不再受限。
-- 新增 `question_timeout`（秒，默认 `0`）单独控制 Question 工具等多久，不再跟 `confirm_timeout` 共用；`0` 表示无限等。这段倒计时覆盖整段等待，包括请求排在别的对话框后面的时间，且绝不会采用答案：到期后问题按 `no_response` 关闭。
-- headless 客户端可以订阅 `question_resolved` 推送。每个已发布的问题只会关闭一次，`reason` 为 `answered`、`declined`、`no_response`、`superseded`、`cancelled` 或 `error`，集成方据此清掉待决问题，也能区分超时、被替代和用户选择。
+- headless 客户端可以订阅 `question_resolved` 推送。每个已发布的问题只会关闭一次，`reason` 为 `answered`、`defaulted`、`declined`、`no_response`、`superseded`、`cancelled` 或 `error`，集成方据此清掉待决问题，也能区分超时、被替代和用户选择。
 
 - 文档新增[按工作选模型](./docs/model-choice_CN.md)：先看你已经在付的能不能进 Chord，再按预算和角色分模型。配方页和示例页仍填当前旗舰，方便把字段写全。
 - headless 控制面新增三个可订阅推送：`session_switched` 在进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`）广播新的 `session_id`，`status_response.session_id` 也改成跟当前实际会话，不再停在启动快照上；`background_result` 推送后台任务结束后的持久结果（`session_id`、`target_agent_id`、`message_index`、`content`），回合 `idle` 之后才落盘的 JOB RESULT 输出只走这个通道；`context_notice` 转发持久的上下文压力提醒（`session_id`、`level`、`message`、`message_index`），这类提醒在 headless 没有别的通道。

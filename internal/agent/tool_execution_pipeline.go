@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/agent/agentdiff"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/pathutil"
@@ -160,7 +161,10 @@ func (p toolExecutionPipeline) executeToolForCall(ctx context.Context, tc messag
 			tool = anchored.WithBaseDir(baseDir)
 		}
 	}
-	return tool.Execute(ctx, args)
+	if question, ok := tool.(*tools.QuestionTool); ok && p.agentID != identity.MainAgentID && !strings.HasPrefix(p.agentID, "main-") {
+		tool = question.Synchronous()
+	}
+	return tool.Execute(tools.WithToolCallID(ctx, tc.ID), args)
 }
 
 // effectivePathScope resolves the policy-root scope for a path-taking tool.
@@ -836,8 +840,8 @@ func normalizeCompatibleToolCallArgs(tc *message.ToolCall, result *ToolExecution
 }
 
 func toolExecDuration(toolName string, execResult ToolExecutionResult, completedAt time.Time) time.Duration {
-	// Question is an interaction-only tool: its Execute method blocks for the
-	// user's answers, so its wall time belongs in UserWait rather than Tools.
+	// Question measures explicit answer waits as UserWait. Creating a question
+	// is interaction bookkeeping, so neither path contributes to tool execution time.
 	if tools.NormalizeName(toolName) == tools.NameQuestion {
 		return 0
 	}

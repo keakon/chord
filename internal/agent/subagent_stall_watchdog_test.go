@@ -9,7 +9,6 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/tools"
 )
 
 // silenceUntilCanceledProvider stands in for a transport that never streams
@@ -295,9 +294,8 @@ func TestStallSweepHoldsQuietWorkersWhileUserInteractionPending(t *testing.T) {
 		{
 			name: "question",
 			open: func(a *MainAgent) (close func()) {
-				req := "adhoc-user-question"
-				a.interaction.registerQuestion(req, time.Time{}, testWalltimeTarget("main"))
-				return func() { a.interaction.terminateQuestion(req, tools.QuestionOutcomeDeclined, nil) }
+				a.questionWaiting.Store(true)
+				return func() { a.questionWaiting.Store(false) }
 			},
 		},
 		{

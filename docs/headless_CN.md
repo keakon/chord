@@ -40,7 +40,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 { "type": "<event-type>", "payload": { ... } }
 ```
 
-携带状态的 envelope（事件循环推送、命令路径上的 `role_change` / `handoff_cancelled` 公告、以及 `status_response` 快照）会多带一个单调递增的 `seq`（`{ "type": "<event-type>", "seq": 12, "payload": { ... } }`）。推送按 `seq` 顺序发出，但 `status_response` 快照是在命令路径上拷贝再发出的，所以它可能比之后更新的推送晚到。任何改了缓存状态的突变都会递增 `seq`，即使网关没订阅对应的推送、或者这次突变根本没有推送（`send` 自动关掉待决 confirm / question，或显式回复 `confirm` / `question` / `handoff`），因此之后的 `status_response` 一定比突变前拷的那份新。把 `status_response` 合并进缓存状态的集成方，必须丢掉 `seq` 比已见 `seq` 更小的快照。每条 `status_response` 都带非零的 `seq`，包括首次推送前的快照。版本号只在当前进程内有效；新进程发出 `ready` 时，清空已记录的最大版本号。
+携带状态的 envelope（事件循环推送、命令路径上的 `role_change` / `handoff_cancelled` 公告、以及 `status_response` 快照）会多带一个单调递增的 `seq`（`{ "type": "<event-type>", "seq": 12, "payload": { ... } }`）。推送按 `seq` 顺序发出，但 `status_response` 快照是在命令路径上拷贝再发出的，所以它可能比之后更新的推送晚到。任何改了缓存状态的突变都会递增 `seq`，即使网关没订阅对应的推送、或者这次突变根本没有推送（`send` 自动关掉待决 confirm，或显式回复 `confirm` / `question` / `handoff`），因此之后的 `status_response` 一定比突变前拷的那份新。把 `status_response` 合并进缓存状态的集成方，必须丢掉 `seq` 比已见 `seq` 更小的快照。每条 `status_response` 都带非零的 `seq`，包括首次推送前的快照。版本号只在当前进程内有效；新进程发出 `ready` 时，清空已记录的最大版本号。
 
 你收到的第一行一定是 `{"type": "ready", ...}`；在它之前不要发送其他命令。
 
@@ -73,7 +73,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`。
 
 ### `status`
 
@@ -95,7 +95,10 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
     "phase": "",
     "phase_detail": "",
     "pending_confirm": null,
-    "pending_question": null,
+    "pending_questions": [],
+    "questions": [],
+    "question_binding_id": "question-binding",
+    "questions_next_after_id": "",
     "pending_handoff": null,
     "workdir": {
       "path": "/workspace/project",
@@ -111,6 +114,10 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 }
 ```
 
+`pending_questions` 包含所有可见的待答题目。`questions` 包含这些待答题目、按 ID 查询的已关闭题目，以及按创建顺序从新到旧排列的一页历史。每页历史最多 32 条，编码后的快照合计不超过 2 MiB。读取下一页时发送 `{"type":"status","binding_id":"<question_binding_id>","questions_after_id":"<questions_next_after_id>"}`；`questions_next_after_id` 为空表示结束。绑定变化后重新分页；每页反映查询时的已提交状态，并非冻结的历史导出。
+
+客户端补齐已知待答题目的状态时，应在 `question_ids` 中携带它们的 ID，每次最多 32 个。即使这些题目不在当前历史页，也会返回其记录；不存在的 ID 会被略过。按 ID 查询的已关闭记录另有 6 MiB 上限，超出时返回 `error`，应减少 ID 数量后重试。按题目 ID 和版本合并记录，不要因某题未出现在历史页中就推断它已经结束。
+
 `session_id` 跟的是当前实际会话，不是启动时的快照。进程不重启、直接换会话时（执行 handoff plan、`/resume <id>`、`/new`），Chord 会更新这个跟踪值，并用一条显式的 `session_switched` 推送告诉订阅方；仅凭缓存值变化不能视为网关已看到新会话。会话没换的恢复（启动回放、持久压缩重写）只刷新时间戳，不推送。即使没订阅 `session_switched`，跟踪值照样会更新，所以 `status_response` 永远报实际运行的那个会话。
 
 `workdir` 是 agent 当前实际使用的 checkout。`path` 是生效的工作目录；主仓库或非 Chord 管理目录的 `worktree_id` 为空；每次 binding 变化都会递增 `generation`。会话中切换 worktree 时，`status_response` 会更新；订阅了 `workdir_changed` 的客户端还会收到推送，应该用 generation 丢弃过期快照。
@@ -125,7 +132,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "send", "request_id": "input-1", "content": "请总结一下项目结构。"}
 ```
 
-如果当前有待处理的 `confirm_request`、`question_request` 或 `handoff_request`，而用户发送了普通消息（不是下面的 `confirm`、`question` 或 `handoff`），Chord 会先自动关闭该待处理交互，再消费这条新消息。待决的 `confirm_request` 按空理由自动拒绝，且没有专门的关闭事件，看下一次 `status_response` 里 `pending_confirm` 已清空就知道不用再等。待决的 `question_request` 会以 `superseded` 关闭，Chord 向订阅了 `question_resolved` 的客户端推送 `reason: "superseded"` 的事件。如果被关闭的是 `handoff_request`，Chord 还会推送 `handoff_cancelled` 事件，和 [`handoff`](#handoff) 一节里 runtime 主动取消的路径一致。被关闭的交互不会在下一次 `status_response` 中继续显示为待决。
+普通 `send` 保留待答问题与必要决策，只中断当前等待，让 agent 处理新要求。权限确认仍会自动拒绝；Handoff 仍会关闭并推送 `handoff_cancelled`。问题通过指定 ID 的 `answer`、`decline`、撤回或替代操作处理。
 
 可选的 `request_id` 关联一条 `input_result` 消费回执。回执始终发送，不受 `subscribe` 过滤；不带 ID 的输入没有关联回执。
 
@@ -219,13 +226,26 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 ### `question`
 
-回答一个待决的 `question_request`。
+通过稳定 ID 操作题目。选择使用 `option_ids` 中的 ID，自定义文字用 `custom: true`：
 
 ```json
-{"type": "question", "request_id": "r-…", "answers": ["yes"], "reason": "answered"}
+{"type":"question","action":"answer","operation_id":"answer-1","request_id":"q-1","answers":["brief"]}
 ```
 
-多选题时可在 `answers` 里传多个字符串。`reason` 只能是 `answered`（提交选择）或 `declined`（关闭但不作答），传其他值会返回 `error`。客户端不能提交 `no_response`、`superseded`、`cancelled`、`error`——这些描述的是 Chord 如何关闭请求，通过 `question_resolved` 告知客户端。只有请求仍然打开且未过 `deadline` 时答案才会被接受；答案被拒绝或迟到会返回 `error`，也不会误清另一个待决问题。
+`question_receipt` 无需订阅，返回 `operation_id`、`request_id`、`accepted`、`status`、`version`、`error`。只有 `accepted: true` 表示可靠接受；超时或断连表示结果未知，重试同一操作必须复用 ID 与参数。
+
+| action | 用途 |
+| --- | --- |
+| `presented` | 确认回答入口与默认提示可用；必须带当前 `version`、`binding_id` 和 `supports_interaction`。不能检测用户开始操作的答题端先传 `false`，等成功停用计时后再开放入口。 |
+| `interact` | 永久取消本题计时，不提交答案。 |
+| `answer` / `decline` | 回答 pending 题 / 拒绝回答；拒绝不能携带答案。 |
+| `revise` | 为历史题追加修正，保留原终态与任务归属；即使有其它新题也可使用。 |
+| `withdraw_requirement` / `replace_requirement` | 带 `user_text` 明确撤回要求 / 用同任务的 `replacement_id` 替代，不能由模型默默解除门禁。 |
+| `cancel_task` / `new_task` | 用 `user_text` 明确取消当前任务 / 创建独立任务范围。 |
+
+`user_required` 无限等待；`default_allowed` 仅显式有效单选默认项可采用；`optional` 可到期无回答关闭。客户端不能提交系统终态。Core 控制期限，客户端本地倒计时不决定成功。`defaulted` 不表示用户授权。暂停 Core 与客户端断连语义不同：只有前者暂停已启用计时。
+
+`status_response.pending_questions` 是当前开放题目数组，`questions` 包含历史题；每题有 `task_id`、`request_scope_id`、`version`、策略、默认项、计时和终态 `reason`。同 ID 只接受更高版本，切会话后重新建立投影。历史修正的 `question_updated.revision_result` 含独立 `result_id` 与新答案，原 `reason` 保持不变。
 
 ### `handoff`
 
@@ -272,6 +292,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | 类型                 | 何时出现                                     | 主要 payload 字段 |
 | -------------------- | -------------------------------------------- | ----------------- |
 | `ready`              | 服务启动完成，可以接受命令                   | `session_id`，以及可选 worktree 信息：`name`、`branch`、`path`、`repo_root` |
+| `question_receipt` | 问题操作的可靠接纳回执 | `operation_id`、`request_id`、`accepted`、`status`、`version`、`error` |
 | `input_result` | 带 `request_id` 的 `send` 的消费回执 | `request_id`、`status`、可选 `turn_id` / `message` |
 | `subscribe_response` | 响应 `subscribe`                             | `events` |
 | `status_response`    | 响应 `status`                                | 见 [`status`](#status) |
@@ -288,8 +309,9 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 | `idle`               | 主 agent 与所有 SubAgent 均已全局静默，可再次接收输入 | `last_outcome`（`completed` / `cancelled` / `error`）、`suppress_user_notification`（除非 agent 在上一次 idle 事件后运行过，否则为 `true`）、`running_jobs`（与 `status_response` 同口径；大于 0 时，每个计入的 job 结束后 agent 都会再跑一轮，随后再发一条 `idle`，等待工作结束的集成方应继续读取事件） |
 | `done_completion`   | Done 工具完成并给出最终报告。只在 loop 运行期间产生——`done` 仅在此时挂载；`mode` 字段目前恒为 `normal` | `call_id`、`report`、`reason`、`status`、`agent_id`、`mode` |
 | `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`agent_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`timeout_ms` |
-| `question_request`   | 模型向用户提问                               | `request_id`、`agent_id`、`tool_name`、`header`、`question`、`options`、`option_details`、`multiple`、`deadline`（绝对的 RFC 3339 关闭时间；未配置 `question_timeout` 时省略） |
-| `question_resolved`  | 已发布的问题关闭，可能是用户作答，也可能是 Chord 关闭（到期、被替代、取消、执行出错） | `request_id`、`reason`（`answered`、`declined`、`no_response`、`superseded`、`cancelled`、`error`） |
+| `question_request` | 题目可供回答 | `request_id`、`binding_id`、`task_id`、`request_scope_id`、`version`、`header`、`question`、`options`、`option_ids`、`option_details`、`multiple`、`response_policy`、`default_option_id`、`timer`、`duration_seconds`，可选 `deadline` |
+| `question_updated` | 计时、介入、要求处置或历史补答发生变化 | 完整题目快照；历史补答附带含独立 `result_id` 的 `revision_result` |
+| `question_resolved` | 题目进入终态 | 完整快照；`reason` 为 `answered`、`defaulted`、`declined`、`no_response`、`superseded`、`cancelled` 或 `error` |
 | `notification`       | agent 需要用户注意，但等待点不是标准 modal 请求 | `reason`、`message` |
 | `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}`；没有合法目标时 `agents` 为空列表 |
 | `handoff_cancelled`  | 待决 handoff 在 client 决策前被丢弃——更新的回合、会话切换或 `send` 自动关闭接管了它 | `request_id`、`reason`（`superseded`） |
@@ -361,7 +383,7 @@ send({"type": "subscribe",
 send({"type": "send", "content": "Summarize the project structure."})
 ```
 
-生产环境中还需要处理 `confirm_request`（通过 `confirm` 回答）、`question_request`（通过 `question` 回答）和 `handoff_request`（通过 `handoff` 回答）；在它们得到答复前，agent 会阻塞等待。
+生产环境中还需要处理 `confirm_request`（通过 `confirm` 回答）、`question_request`（通过 `question` 回答）和 `handoff_request`（通过 `handoff` 回答）；权限与交接审批需要答复；问题允许先继续独立工作。
 
 ## chord-gateway：推荐的 headless 消费方式
 

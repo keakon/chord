@@ -551,7 +551,7 @@ func TestUserConfirmationPromptBlock_UsesQuestionAvailabilitySpecificBranch(t *t
 		t.Fatalf("userConfirmationPromptBlock without Question should use plain-text branch, got %q", got)
 	}
 
-	a.tools.Register(tools.NewQuestionTool(nil))
+	a.tools.Register(testQuestionTool())
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
 question: deny
@@ -608,7 +608,7 @@ func TestBuildSystemPrompt_IncludesPermissionSpecificUserConfirmationGuidance(t 
 		}
 	}
 
-	a.tools.Register(tools.NewQuestionTool(nil))
+	a.tools.Register(testQuestionTool())
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": allow
 question: deny
@@ -851,7 +851,7 @@ func TestSharedAgentValuesPrompt_AllowsNecessaryLowRiskAdjacentWork(t *testing.T
 
 func TestUserConfirmationPromptBlock_RequiresContextTradeoffsAndRecommendation(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
-	a.tools.Register(tools.NewQuestionTool(nil))
+	a.tools.Register(testQuestionTool())
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 question: allow
@@ -964,7 +964,7 @@ func TestPlannerModePromptBlock_UsesPermissionSpecificInstructions(t *testing.T)
 
 	a.tools = tools.NewRegistry()
 	a.tools.Register(tools.WriteTool{})
-	a.tools.Register(tools.NewQuestionTool(nil))
+	a.tools.Register(testQuestionTool())
 	a.tools.Register(tools.HandoffTool{})
 	a.activeConfig = &config.AgentConfig{Name: "planner", PromptPreset: config.PromptPresetPlanning, Permission: parsePermissionNode(t, `
 "*": deny
@@ -1593,7 +1593,7 @@ func TestMainAgentCapabilityPromptBlock_UsesQuestionWhenVisible(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
 	a.tools.Register(tools.NewShellTool("bash"))
-	a.tools.Register(tools.NewQuestionTool(nil))
+	a.tools.Register(testQuestionTool())
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 read: allow
@@ -1619,7 +1619,7 @@ func TestMainAgentCapabilityPromptBlock_OmitsQuestionWhenHidden(t *testing.T) {
 	a := &MainAgent{tools: tools.NewRegistry()}
 	a.tools.Register(tools.ReadTool{})
 	a.tools.Register(tools.NewShellTool("bash"))
-	a.tools.Register(tools.NewQuestionTool(nil))
+	a.tools.Register(testQuestionTool())
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 read: allow
@@ -1890,7 +1890,7 @@ func TestMainAndSubCapabilityPromptBlocksUseAudienceSpecificEscalation(t *testin
 	reg.Register(tools.ReadTool{})
 	reg.Register(tools.ApplyPatchTool{})
 	reg.Register(tools.NewShellTool("bash"))
-	reg.Register(tools.NewQuestionTool(nil))
+	reg.Register(testQuestionTool())
 	permNode := parsePermissionNode(t, `
 "*": deny
 read: allow
@@ -2057,7 +2057,7 @@ func TestLoopCompletionRequirementLinesUsePermissionSpecificConfirmationGuidance
 		t.Fatalf("loop completion requirements without Question should not mention completion follow-up Question, got %q", joined)
 	}
 
-	a.tools.Register(tools.NewQuestionTool(nil))
+	a.tools.Register(testQuestionTool())
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
 question: allow

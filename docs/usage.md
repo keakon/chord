@@ -51,7 +51,17 @@ Common keys:
 
 ### Answering questions
 
-Question dialogs keep the action shortcuts visible while the question and choices scroll. Use the arrow keys or `j` / `k` to move between choices, and `PgUp` / `PgDn` or the mouse wheel to read long text without selecting another answer. `Tab` opens a custom answer; its input remains visible while you scroll the question. `Enter` submits, and `Shift+Enter` or `Ctrl+J` inserts a new line. In custom-answer mode, `Esc` returns to the choices when available; otherwise it declines the question.
+Questions open automatically. If another dialog is active, they wait in a shared queue with permission confirmations, completion approvals, and Handoff decisions. Blocking decisions take priority, followed by completion approvals and nonblocking questions; requests at the same priority keep their arrival order. The current dialog stays open while you read or edit it. Nonblocking questions let the agent continue independent work while the answer dialog is open. The dialog keeps your input while it stays open, including when a submission fails.
+
+Arrow keys or `j` / `k` move between options. Numbers submit a single choice; for multiple choices, toggle with numbers or Space and submit with `Enter`. `Tab` switches between custom text and options; `Shift+Enter` or `Ctrl+J` inserts a newline. Use `PgUp` / `PgDn` or the wheel to read long questions. A question stays on screen until you submit it, decline it with `Esc` (you do not want to answer), or withdraw the requirement with `Ctrl+W`. Permission confirmations retain their own controls: `Esc` denies execution, and in completion approvals it opens the rejection-reason editor.
+
+At most 32 questions may remain unanswered, with a combined limit of 1 MiB for JSON-encoded question items. Resolve existing questions before adding more when either limit is reached. Closed decisions and historical revisions remain available.
+
+Required decisions never time out. A default can be adopted only when the model supplies an explicit valid option and `question_auto_select_timeout` is positive. The setting defaults to `0` (disabled); `60` means one minute. Timing starts when the answer dialog and its default are visible. Automatic display does not cancel the timer. Starting to edit or navigate a question requests permanent cancellation; after acknowledgment you can type at your own pace. Automatic adoption is labeled as a system decision, and never means you answered, consented, or authorized an operation.
+
+`question_timeout` applies only to optional questions. It does not limit required or default-choice questions. While Core continues running, client disconnects do not pause an armed timer. Explicit task pauses and Core shutdown suspend timing; resumption requires a new answer entry. IM channels that cannot detect text entry disable the question timer before offering an answer interface.
+
+Declining an answer does not withdraw the requirement. `Ctrl+W` explicitly withdraws it, as does `/question withdraw <id>`. Use `/question replace <old-id> <new-id>` to associate a replacement decision. `/question cancel-task` cancels the current task and its questions; `/new-task <text>` starts an independent task without inheriting old completion gates. An answer such as “do not execute” is a valid decision and does not authorize execution.
 
 ### Error panel
 

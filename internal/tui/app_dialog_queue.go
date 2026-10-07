@@ -4,32 +4,85 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tools"
 )
 
-// pendingDialog is a model-initiated dialog (permission confirm, Done approval,
-// a Question, or a Handoff plan prompt) that arrived while another dialog was
-// already on screen. The TUI shows one modal at a time, so a request that
-// arrives during an open dialog waits here and is presented — against its own
-// asking agent's view — in arrival order once the current dialog closes.
+const (
+	dialogPriorityBlocking = iota
+	dialogPriorityCompletion
+	dialogPriorityBackground
+)
+
+// pendingDialog retains each decision until it is presented or invalidated.
 type pendingDialog struct {
-	confirm   *confirmRequestMsg
-	question  *questionDialog
-	handoff   *handoffSelectRequestMsg
-	arrivedAt time.Time
+	confirm    *confirmRequestMsg
+	handoff    *handoffSelectRequestMsg
+	questionID string
+	arrivedAt  time.Time
 }
 
-// popPendingDialog returns the longest-waiting dialog that has not already
-// outlived its timeout, dropping expired entries so a request the agent has
-// auto-resolved is never shown. It reports false when no live dialog remains.
+// popPendingDialog selects the highest-priority live request, preserving FIFO
+// within a priority. A request that is already displayed is never preempted.
 func (m *Model) popPendingDialog() (pendingDialog, bool) {
-	for len(m.pendingDialogs) > 0 {
-		next := m.pendingDialogs[0]
-		m.pendingDialogs = m.pendingDialogs[1:]
-		if !next.expired(time.Now()) {
-			return next, true
+	m.prunePendingDialogs()
+	best := -1
+	for i, d := range m.pendingDialogs {
+		if best < 0 || m.compareDialogs(d, m.pendingDialogs[best]) < 0 {
+			best = i
 		}
 	}
-	return pendingDialog{}, false
+	if best < 0 {
+		return pendingDialog{}, false
+	}
+	next := m.pendingDialogs[best]
+	m.pendingDialogs = append(m.pendingDialogs[:best], m.pendingDialogs[best+1:]...)
+	return next, true
+}
+
+func (m *Model) dialogPriority(d pendingDialog) int {
+	if d.confirm != nil {
+		if toolNameKey(d.confirm.request.ToolName) == tools.NameDone {
+			return dialogPriorityCompletion
+		}
+		return dialogPriorityBlocking
+	}
+	if d.handoff != nil {
+		return dialogPriorityBlocking
+	}
+	q := m.questionRecords[d.questionID]
+	waiting := !q.Async
+	if m.questionWaitBinding == q.BindingID && q.BindingID != "" {
+		waiting = m.questionWaiting[q.ID]
+	}
+	if waiting {
+		return dialogPriorityBlocking
+	}
+	return dialogPriorityBackground
+}
+
+func (m *Model) compareDialogs(a, b pendingDialog) int {
+	if priority := m.dialogPriority(a) - m.dialogPriority(b); priority != 0 {
+		return priority
+	}
+	return a.arrivedAt.Compare(b.arrivedAt)
+}
+
+func (m *Model) prunePendingDialogs() {
+	kept := m.pendingDialogs[:0]
+	for _, d := range m.pendingDialogs {
+		if d.expired(time.Now()) {
+			continue
+		}
+		if d.questionID != "" {
+			q, ok := m.questionRecords[d.questionID]
+			if !ok || !q.Visible || q.Outcome != "" {
+				continue
+			}
+		}
+		kept = append(kept, d)
+	}
+	m.pendingDialogs = kept
 }
 
 // expired reports whether the request's own timeout elapsed while it queued.
@@ -45,9 +98,8 @@ func (d pendingDialog) timeout() time.Duration {
 		return d.confirm.request.Timeout
 	}
 	// A Question never expires locally: its deadline is absolute and the
-	// broker closes it with a QuestionResolvedEvent that removes the queued
-	// entry. Handoff prompts have no timeout either; the agent waits until the
-	// user decides.
+	// Core closes it with a committed question state update. Handoff prompts
+	// have no timeout either; the agent waits until the user decides.
 	return 0
 }
 
@@ -58,10 +110,14 @@ func (m *Model) presentPendingDialog(d pendingDialog, prevMode Mode) tea.Cmd {
 	switch {
 	case d.confirm != nil:
 		return m.presentConfirmRequest(*d.confirm, prevMode, d.arrivedAt)
-	case d.question != nil:
-		return m.presentQuestionRequest(*d.question, prevMode)
 	case d.handoff != nil:
-		return m.openHandoffSelect(d.handoff.planPath, d.handoff.requestID, d.handoff.agentID, prevMode)
+		cmd := m.openHandoffSelect(d.handoff.planPath, d.handoff.requestID, d.handoff.agentID, prevMode)
+		if m.handoffSelect.active() {
+			m.handoffSelect.arrivedAt = d.arrivedAt
+		}
+		return cmd
+	case d.questionID != "":
+		return m.presentQuestionByID(d.questionID, prevMode)
 	}
 	return nil
 }
@@ -74,6 +130,10 @@ func (m *Model) presentPendingDialog(d pendingDialog, prevMode Mode) tea.Cmd {
 // is restored (insert mode re-focuses the composer).
 func (m *Model) resetDialogsOnSessionSwitch() tea.Cmd {
 	m.pendingDialogs = nil
+	m.questionRecords = nil
+	m.questionShown = nil
+	m.questionWaiting = nil
+	m.questionWaitBinding = ""
 	prevMode := ModeNormal
 	hadDialog := false
 	if m.confirm.request != nil {
@@ -118,6 +178,9 @@ func (m *Model) resetDialogsOnSessionSwitch() tea.Cmd {
 // restored when nothing is on screen. Commands a skipped dialog returned (its
 // toast tick) are kept instead of dropped.
 func (m *Model) finishDialog(prevMode Mode, extraCmds ...tea.Cmd) tea.Cmd {
+	if prevMode != ModeInsert && prevMode != ModeNormal {
+		return tea.Batch(append(extraCmds, m.restoreModeWithIME(prevMode))...)
+	}
 	for {
 		next, ok := m.popPendingDialog()
 		if !ok {
@@ -131,9 +194,21 @@ func (m *Model) finishDialog(prevMode Mode, extraCmds ...tea.Cmd) tea.Cmd {
 			extraCmds = append(extraCmds, cmd)
 		}
 	}
-	extraCmds = append(extraCmds, m.restoreModeWithIME(prevMode))
+	extraCmds = append(extraCmds, m.restoreModeWithIME(prevMode), m.confirmQuestionPresentation())
 	if prevMode == ModeInsert {
 		extraCmds = append(extraCmds, m.input.Focus())
 	}
 	return tea.Batch(extraCmds...)
+}
+
+func (m *Model) enqueueDialog(d pendingDialog) tea.Cmd {
+	m.pendingDialogs = append(m.pendingDialogs, d)
+	return m.tryPresentNextDialog()
+}
+
+func (m *Model) tryPresentNextDialog() tea.Cmd {
+	if len(m.pendingDialogs) == 0 || m.dialogActive() || m.interactionSuppressed() || (m.mode != ModeInsert && m.mode != ModeNormal) {
+		return nil
+	}
+	return m.finishDialog(m.mode)
 }

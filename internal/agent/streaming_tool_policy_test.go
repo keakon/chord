@@ -112,7 +112,7 @@ func TestSpeculativeExecutionPolicyRejectsMutationTools(t *testing.T) {
 func TestSpeculativeExecutionPolicyRejectsHighRiskNonRollbackTools(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.NewShellTool("bash"))
-	registry.Register(tools.NewQuestionTool(nil))
+	registry.Register(testQuestionTool())
 
 	cases := []struct {
 		name string

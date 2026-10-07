@@ -57,8 +57,29 @@ func (m *Model) renderQuestionDialog() string {
 	innerWidth := max(dialogContentWidth(maxWidth), 1)
 
 	titleText := fmt.Sprintf("❓ %s", sanitizeToolDisplayText(q.Header))
+	if m.question.request.AgentID != "" {
+		titleText = fmt.Sprintf("❓ %s · %s", sanitizeToolDisplayText(m.question.request.AgentID), sanitizeToolDisplayText(q.Header))
+	}
 
 	var lines []string
+	if m.question.interacting {
+		lines = append(lines, "Cancelling automatic selection…")
+	}
+	if m.question.interacted {
+		lines = append(lines, "Automatic selection cancelled; answer when ready")
+	}
+	if m.question.submitting {
+		lines = append(lines, "Submitting…")
+	}
+	if q.DefaultOptionID != "" {
+		for _, o := range q.Options {
+			if o.ID == q.DefaultOptionID {
+				lines = append(lines, "Default: "+sanitizeToolDisplayText(o.Label))
+				break
+			}
+		}
+	}
+
 	focusLine := 0
 
 	// Question text — split on <br> and newlines for multi-line display.
@@ -126,12 +147,12 @@ func (m *Model) renderQuestionDialog() string {
 	cfg := OverlayConfig{Title: titleText, MaxWidth: maxWidth}
 	cfg.Hint = questionHint(q, m.question.custom) + "  [PgUp/PgDn] Scroll"
 	editing := m.question.custom || len(q.Options) == 0
-	action, escape := "select", "decline"
+	action, escape := "select", "hide"
 	if editing || q.Multiple {
 		action = "send"
 	}
 	if m.question.custom && len(q.Options) > 0 {
-		escape = "back"
+		escape = "hide"
 	}
 	secondary := "Tab custom  PgUp/PgDn scroll"
 	if editing {
@@ -139,13 +160,17 @@ func (m *Model) renderQuestionDialog() string {
 	} else if q.Multiple {
 		secondary = "Space toggle  Tab custom  PgUp/PgDn scroll"
 	}
-	cfg.CompactHint = "Enter " + action + "  Esc " + escape + "\n" + secondary
+	cfg.CompactHint = "Enter " + action + "  Esc " + escape + "  Ctrl+D decline  Ctrl+W withdraw\n" + secondary
 	if !m.question.deadline.IsZero() {
 		secs := int(ceilDuration(max(time.Until(m.question.deadline), 0), time.Second) / time.Second)
 		if editing && m.height < 9 {
 			cfg.Title = fmt.Sprintf("❓ %ds · %s", secs, sanitizeToolDisplayText(q.Header))
 		} else {
-			cfg.Footer = QuestionTimeoutStyle.Render(truncateOneLine(fmt.Sprintf("Closes in %ds", secs), innerWidth))
+			label := fmt.Sprintf("Closes in %ds", secs)
+			if q.ResponsePolicy == tools.QuestionPolicyDefaultAllowed {
+				label = fmt.Sprintf("Auto-select in %ds", secs)
+			}
+			cfg.Footer = QuestionTimeoutStyle.Render(truncateOneLine(label, innerWidth))
 		}
 	}
 	if editing {
@@ -211,10 +236,10 @@ func renderCurrentQuestionOptionDescription(description, numKey string, innerWid
 
 func questionHint(q tools.QuestionItem, customMode bool) string {
 	if len(q.Options) == 0 {
-		return "[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Esc] Decline"
+		return "[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Esc] Hide  [Ctrl+D] Decline  [Ctrl+W] Withdraw"
 	}
 	if customMode {
-		return "[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Tab/Esc] Back to options"
+		return "[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Tab] Options  [Esc] Hide  [Ctrl+D] Decline  [Ctrl+W] Withdraw"
 	}
 
 	parts := make([]string, 0, 4)
@@ -223,7 +248,7 @@ func questionHint(q tools.QuestionItem, customMode bool) string {
 	} else {
 		parts = append(parts, "[Enter] Select")
 	}
-	parts = append(parts, "[Tab] Custom", "[Esc] Decline")
+	parts = append(parts, "[Tab] Custom", "[Esc] Hide  [Ctrl+D] Decline  [Ctrl+W] Withdraw")
 	if quick := questionQuickSelectHint(len(q.Options)); quick != "" {
 		parts = append(parts, quick)
 	}

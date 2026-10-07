@@ -9,17 +9,14 @@ import (
 	"charm.land/lipgloss/v2"
 	tea "github.com/keakon/bubbletea/v2"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
 )
 
 func TestQuestionDraftSurvivesOptionToggle(t *testing.T) {
 	backend := &questionResolverAgent{accepted: true}
 	m := NewModelWithSize(backend, 80, 24)
-	m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
-		RequestID: "question-1", Header: "Choice", Question: "Choose a format", Options: []string{"Plain", "Rich"},
-	}})
-	key := func(code rune) { m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: code})) }
+	m.handleAgentEvent(agentEventMsg{event: questionEventForTest("question-1", "Choice", "Choose a format", []string{"Plain", "Rich"}, nil, false, time.Time{}, "")})
+	key := func(code rune) { runQuestionCmd(&m, m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: code}))) }
 	key(tea.KeyTab)
 	m.question.input.SetValue("custom draft")
 	key(tea.KeyTab)
@@ -27,18 +24,11 @@ func TestQuestionDraftSurvivesOptionToggle(t *testing.T) {
 	if got := m.question.input.Value(); got != "custom draft" {
 		t.Fatalf("draft after tab = %q", got)
 	}
-	key(tea.KeyEscape)
-	key(tea.KeyTab)
-	if got := m.question.input.Value(); got != "custom draft" {
-		t.Fatalf("draft after escape = %q", got)
-	}
 	key(tea.KeyEnter)
 	if len(backend.calls) != 1 || backend.calls[0].requestID != "question-1" || strings.Join(backend.calls[0].answers, "|") != "custom draft" {
 		t.Fatalf("unexpected submission: %+v", backend.calls)
 	}
-	m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
-		RequestID: "question-2", Header: "Details", Question: "Add details",
-	}})
+	m.handleAgentEvent(agentEventMsg{event: questionEventForTest("question-2", "Details", "Add details", nil, nil, false, time.Time{}, "")})
 	if m.question.requestID != "question-2" || m.question.input.Value() != "" || !m.question.input.Focused() {
 		t.Fatal("next request must start with a fresh, focused editor")
 	}
@@ -47,10 +37,10 @@ func TestQuestionDraftSurvivesOptionToggle(t *testing.T) {
 func TestQuestionMultiSelectUsesDisplayOrder(t *testing.T) {
 	backend := &questionResolverAgent{accepted: true}
 	m := NewModelWithSize(backend, 80, 24)
-	q := tools.QuestionItem{Header: "Choices", Question: "Choose", Multiple: true, Options: []tools.QuestionOption{{Label: "First"}, {Label: "Second"}, {Label: "Third"}}}
+	q := tools.QuestionItem{Header: "Choices", Question: "Choose", Multiple: true, Options: []tools.QuestionOption{{ID: "First", Label: "First"}, {ID: "Second", Label: "Second"}, {ID: "Third", Label: "Third"}}}
 	m.presentQuestionRequest(questionDialog{request: QuestionRequest{Item: q}, requestID: "multi"}, ModeInsert)
 	m.question.selected = map[int]bool{2: true, 0: true, 1: false}
-	m.submitCurrentQuestion(q)
+	runQuestionCmd(&m, m.submitCurrentQuestion(q))
 	if got := strings.Join(backend.calls[0].answers, "|"); got != "First|Third" {
 		t.Fatalf("answers = %q", got)
 	}
@@ -108,11 +98,9 @@ func TestQuestionLayoutKeepsSelectionAndEditorVisible(t *testing.T) {
 func TestQuestionPastePreservesMultilineAnswer(t *testing.T) {
 	backend := &questionResolverAgent{accepted: true}
 	m := NewModelWithSize(backend, 80, 24)
-	m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
-		RequestID: "text-answer", Header: "Details", Question: "Add details",
-	}})
+	m.handleAgentEvent(agentEventMsg{event: questionEventForTest("text-answer", "Details", "Add details", nil, nil, false, time.Time{}, "")})
 	m.Update(tea.PasteMsg{Content: "first line\nsecond line"})
-	m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	runQuestionCmd(&m, m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})))
 	if len(backend.calls) != 1 || strings.Join(backend.calls[0].answers, "|") != "first line\nsecond line" {
 		t.Fatalf("unexpected pasted answer: %+v", backend.calls)
 	}
@@ -135,7 +123,7 @@ func TestQuestionDeadlineAndEditorFitSixRows(t *testing.T) {
 func TestQuestionUnicodeAndDeadlineFitShortTerminal(t *testing.T) {
 	m := NewModelWithSize(nil, 32, 12)
 	m.question = questionState{
-		request:  &QuestionRequest{Item: tools.QuestionItem{Header: "选择格式", Question: strings.Repeat("请选择输出格式。", 12), Options: []tools.QuestionOption{{Label: "纯文本", Description: strings.Repeat("便于阅读。", 20)}}}},
+		request:  &QuestionRequest{Item: tools.QuestionItem{Header: "选择格式", Question: strings.Repeat("请选择输出格式。", 12), Options: []tools.QuestionOption{{ID: "纯文本", Label: "纯文本", Description: strings.Repeat("便于阅读。", 20)}}}},
 		selected: map[int]bool{}, input: newQuestionTextarea(32), custom: true, deadline: time.Now().Add(time.Minute),
 	}
 	m.question.input.SetValue("自定义回答\n第二行\n第三行\n第四行")

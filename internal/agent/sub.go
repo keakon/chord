@@ -1424,6 +1424,11 @@ func (s *SubAgent) filteredVisibleToolsForModel(modelName string, client *llm.Cl
 	// A zero context is correct for SubAgents: loop mode is a main-agent
 	// workflow, and neither done nor compact_context is ever registered here.
 	visibleTools := visibleLLMTools(s.tools, s.currentRuleset(), isSubAgentInternalTool, toolPermissionContext{})
+	for i, t := range visibleTools {
+		if q, ok := t.(*tools.QuestionTool); ok {
+			visibleTools[i] = q.Synchronous()
+		}
+	}
 	var patchSurfaceDecision *bool
 	if client != nil {
 		// The client resolves compat + primary model inference (stable tool

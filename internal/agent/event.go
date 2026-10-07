@@ -69,6 +69,7 @@ type Event struct {
 
 // LLMResponsePayload wraps an LLM response for the internal event bus.
 type LLMResponsePayload struct {
+	QuestionResults           []string
 	Content                   string
 	ThinkingBlocks            []message.ThinkingBlock
 	ResponsesOutput           []message.ResponsesOutputItem
@@ -1055,42 +1056,6 @@ type ConfirmRequestEvent struct {
 
 func (ConfirmRequestEvent) agentEvent() {}
 
-// QuestionRequestEvent is sent to the TUI when the agent asks a structured
-// question. The TUI shows the dialog and then calls ResolveQuestion.
-type QuestionRequestEvent struct {
-	ToolName      string
-	Header        string
-	Question      string
-	Options       []string
-	OptionDetails []string
-	Multiple      bool
-	RequestID     string
-	// Deadline is the absolute time after which the request is closed as
-	// no_response. The zero value means wait indefinitely. Clients show a
-	// countdown from it but never close the dialog on their own; a matching
-	// QuestionResolvedEvent is the only signal that the request ended.
-	Deadline time.Time
-	// AgentID is the instance id of the agent whose question tool call
-	// triggered the request, normalized so "main" identifies the main agent.
-	// The TUI switches focus to this agent so the user sees the context the
-	// question originated from before answering.
-	AgentID string
-}
-
-func (QuestionRequestEvent) agentEvent() {}
-
-// QuestionResolvedEvent reports that a published question request reached a
-// terminal state, so clients can drop the matching pending dialog. It carries
-// no answer: the tool result is the only place a model-visible outcome lives.
-type QuestionResolvedEvent struct {
-	RequestID string
-	// Reason is answered, declined, no_response, superseded, cancelled, or
-	// error.
-	Reason string
-}
-
-func (QuestionResolvedEvent) agentEvent() {}
-
 // Question close reasons that are not model-visible question outcomes. They
 // mean the request was closed by the system rather than answered or timed out.
 const (
@@ -1110,6 +1075,7 @@ type ActivityType string
 // an activity without a translation table. Idle, preparing, and executing have
 // no status-delta counterpart: they describe the agent loop itself.
 const (
+	ActivityWaitingInput   ActivityType = "waiting_input"
 	ActivityIdle           ActivityType = "idle"
 	ActivityPreparing      ActivityType = "preparing"
 	ActivityConnecting     ActivityType = message.StatusDeltaConnecting

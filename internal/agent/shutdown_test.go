@@ -223,15 +223,21 @@ func TestShutdownWaitsForMainLLMEmittersBeforeClosingOutput(t *testing.T) {
 	client := llm.NewClient(providerCfg, provider, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "test-provider/test-model")
 
+	// Prepare the blocked output producer before Run takes ownership of mutable
+	// loop state. Calling the dispatcher concurrently with Run violates that
+	// ownership contract and races request projection capture against restore.
+	turnCtx, cancelTurn := context.WithCancel(context.Background())
+	a.spawnMainLLMResponseGoroutine(turnCtx, 1, []message.Message{{Role: "user", Content: "hello"}}, "")
+	<-provider.started
+
 	runCtx := t.Context()
 	runDone := make(chan error, 1)
 	go func() {
 		runDone <- a.Run(runCtx)
 	}()
-
-	turnCtx, cancelTurn := context.WithCancel(context.Background())
-	a.spawnMainLLMResponseGoroutine(turnCtx, 1, []message.Message{{Role: "user", Content: "hello"}}, "")
-	<-provider.started
+	if _, err := a.QuestionSnapshots(t.Context(), QuestionSnapshotQuery{}); err != nil {
+		t.Fatalf("wait for event loop initialization: %v", err)
+	}
 
 	cancelTurn()
 	if err := a.Shutdown(2 * time.Second); err != nil {

@@ -179,13 +179,14 @@ func decodeQuestionAnswers(payload string) (answers []tools.QuestionAnswer, rest
 		return nil, trimmed, false
 	}
 	dec := json.NewDecoder(strings.NewReader(trimmed))
-	if err := dec.Decode(&answers); err != nil || len(answers) == 0 {
+	var result tools.QuestionResult
+	if err := dec.Decode(&result); err != nil || len(result.Answers) == 0 {
 		return nil, trimmed, false
 	}
 	if offset := dec.InputOffset(); offset >= 0 && offset < int64(len(trimmed)) {
 		rest = strings.TrimSpace(trimmed[offset:])
 	}
-	return answers, rest, true
+	return result.Answers, rest, true
 }
 
 // renderQuestionCall renders a Question tool call showing the question text and options.
@@ -349,6 +350,8 @@ func questionAnswerForRender(answers []tools.QuestionAnswer, index int, header s
 // the selection unchanged.
 func questionOutcomeDisplay(outcome string) string {
 	switch outcome {
+	case tools.QuestionOutcomeDefaulted:
+		return "default adopted by system (not user consent)"
 	case "", tools.QuestionOutcomeAnswered:
 		return ""
 	default:

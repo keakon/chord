@@ -2735,7 +2735,7 @@ func TestQuestionStructuredPromptAndAnswerEscapesANSIRichText(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      "question",
 		Content:       `{"questions":[{"header":"\u001b[31mHDR\u001b[0m","question":"Pick \u001b[32mone\u001b[0m","options":[{"label":"\u001b[34mA\u001b[0m","description":"\u001b[35mdesc\u001b[0m"}]}]}`,
-		ResultContent: `[{"header":"\u001b[31mHDR\u001b[0m","selected":["\u001b[34mA\u001b[0m","\u001b[33mcustom\u001b[0m"]}]`,
+		ResultContent: `{"status":"resolved","answers":[{"header":"\u001b[31mHDR\u001b[0m","selected":["\u001b[34mA\u001b[0m","\u001b[33mcustom\u001b[0m"]}]}`,
 		ResultDone:    true,
 	}
 
@@ -4500,7 +4500,7 @@ func TestCollapsedGlobUsesKeySummaryForLowCounts(t *testing.T) {
 func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
-	answers := `[{"header":"Messaging platform","selected":["Chat App"]}]`
+	answers := `{"status":"resolved","answers":[{"header":"Messaging platform","selected":["Chat App"]}]}`
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
@@ -4552,7 +4552,7 @@ func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
 func TestQuestionCallParsesCleanPayloadAndShowsNotesApart(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
-	answers := `[{"header":"document layout","selected":["Match the reference layout (recommended)"]}]`
+	answers := `{"status":"resolved","answers":[{"header":"document layout","selected":["Match the reference layout (recommended)"]}]}`
 	note := `Note: ignored earlier duplicate parameter value(s): args.questions[0].header; the last values were used`
 
 	block := &Block{
@@ -4598,7 +4598,7 @@ func TestQuestionCallFallsBackToCombinedResultForLegacyTranscript(t *testing.T) 
 			`{"label":"Match the reference layout (recommended)","description":"Mimic the reference formatting"},` +
 			`{"label":"Keep the markdown order","description":"Align each item with its model answer"}` +
 			`]}]}`,
-		ResultContent: `[{"header":"document layout","selected":["Match the reference layout (recommended)"]}]` + "\n" +
+		ResultContent: `{"status":"resolved","answers":[{"header":"document layout","selected":["Match the reference layout (recommended)"]}]}` + "\n" +
 			`Note: ignored earlier duplicate parameter value(s): args.questions[0].header; the last values were used`,
 		ResultDone: true,
 	}
@@ -4630,7 +4630,7 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      "question",
 		Content:       `{"questions":[{"header":"document layout","question":"Q","options":[{"label":"A"},{"label":"B"}]}]}`,
-		ResultContent: `[{"header":"document layout","selected":["A"]}]`,
+		ResultContent: `{"status":"resolved","answers":[{"header":"document layout","selected":["A"]}]}`,
 		ResultDone:    true,
 		Audit: &message.ToolArgsAudit{
 			IgnoredArgs: []message.IgnoredToolArg{{
@@ -4690,7 +4690,7 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 func TestQuestionCallRendersCustomAnswerInline(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
-	answers := `[{"header":"Project location","selected":["/tmp/sample-project\n/tmp/sample-cache"]}]`
+	answers := `{"status":"resolved","answers":[{"header":"Project location","selected":["/tmp/sample-project\n/tmp/sample-cache"]}]}`
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
@@ -4718,7 +4718,7 @@ func TestQuestionCallRendersCustomAnswerInline(t *testing.T) {
 func TestQuestionCallRendersMultilineAnswerWithContinuationIndent(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
-	answers := `[{"header":"top output","selected":["line 1\nline 2\nline 3"]}]`
+	answers := `{"status":"resolved","answers":[{"header":"top output","selected":["line 1\nline 2\nline 3"]}]}`
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -4748,7 +4748,7 @@ func TestQuestionCallRendersSingleObjectPromptAndStructuredAnswer(t *testing.T) 
 		Type:          BlockToolCall,
 		ToolName:      "question",
 		Content:       `{"questions":{"header":"log","question":"paste log"}}`,
-		ResultContent: `[{"header":"log","selected":["first line"]}]`,
+		ResultContent: `{"status":"resolved","answers":[{"header":"log","selected":["first line"]}]}`,
 		ResultDone:    true,
 	}
 
@@ -4766,7 +4766,7 @@ func TestQuestionCallRendersSingleObjectPromptAndStructuredAnswer(t *testing.T) 
 func TestQuestionCallPreservesWhitespaceInMultilineAnswer(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
-	answers := `[{"header":"top output","selected":["PID  CPU   COMMAND\n1    10%   sample-app"]}]`
+	answers := `{"status":"resolved","answers":[{"header":"top output","selected":["PID  CPU   COMMAND\n1    10%   sample-app"]}]}`
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,

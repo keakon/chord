@@ -262,12 +262,17 @@ type Model struct {
 	confirm         confirmState
 
 	// Question dialog state
-	question questionState
+	question            questionState
+	questionGeneration  uint64
+	questionRecords     map[string]agent.QuestionSnapshot
+	questionShown       map[string]bool
+	questionWaiting     map[string]bool
+	questionWaitBinding string
 
 	// pendingDialogs holds model-initiated dialogs (permission confirm, Done
 	// approval, question) that arrived while another dialog was on screen. The
 	// TUI renders a single modal at a time, so they are presented in arrival
-	// order as each dialog closes.
+	// priority order as each dialog closes.
 	pendingDialogs []pendingDialog
 
 	// Search state
@@ -860,6 +865,13 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			m.recalcViewportSize()
 		}
 	}()
+	defer func() {
+		if len(m.pendingDialogs) > 0 {
+			if next := m.tryPresentNextDialog(); next != nil {
+				cmd = tea.Batch(cmd, next)
+			}
+		}
+	}()
 	m.ensureViewportCallbacks()
 	switch msg := msg.(type) {
 
@@ -1080,7 +1092,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, m.handleWindowSizeUpdate(msg)
 
 	case applyResizeMsg:
-		return m, m.handleApplyResize(msg)
+		return m, tea.Batch(m.handleApplyResize(msg), m.confirmQuestionPresentation())
 
 	// -- agent events ----------------------------------------------------
 	case agentEventBatchMsg:
@@ -1243,8 +1255,10 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, m.handleRoleSwitchResult(msg)
 
 	// -- question timeout tick ------------------------------------------
+	case questionOperationMsg:
+		return m, m.handleQuestionOperation(msg)
 	case questionTimeoutTickMsg:
-		return m, m.handleQuestionTimeoutTick()
+		return m, m.handleQuestionTimeoutTick(msg)
 
 	// -- mouse (v2: MouseMsg has Mouse() for X,Y,Button; use type switch for action) --
 	case tea.MouseMsg:

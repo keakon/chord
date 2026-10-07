@@ -113,7 +113,7 @@ func (m *Model) terminalTitleNeedsUserResponse() bool {
 	if m == nil {
 		return false
 	}
-	return m.dialogActive()
+	return m.dialogActive() || len(m.pendingDialogs) > 0
 }
 
 func (m *Model) maybeShowBackgroundCompletionTitle(agentID string, prev agent.ActivityType, next agent.ActivityType) {

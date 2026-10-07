@@ -69,10 +69,7 @@ func TestQuestionRequestForcesPriorityBoundaryFlush(t *testing.T) {
 	m.streamRenderDeferred = true
 	m.streamRenderDeferNext = true
 
-	cmd := m.handleAgentEvent(agentEventMsg{event: agent.QuestionRequestEvent{
-		RequestID: "q-1",
-		Question:  "continue?",
-	}})
+	cmd := m.handleAgentEvent(agentEventMsg{event: questionEventForTest("q-1", "", "continue?", nil, nil, false, time.Time{}, "")})
 	if cmd == nil {
 		t.Fatal("question request should return followup command batch")
 	}

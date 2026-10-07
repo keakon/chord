@@ -11,7 +11,29 @@ import (
 
 // handleQuestionKey processes key events while in ModeQuestion.
 func (m *Model) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
+	cmd := m.handleQuestionKeyInput(msg)
+	var interact tea.Cmd
+	// Selection keys can submit directly. Only send an interaction operation
+	// when this key leaves the dialog open, avoiding concurrent state commits.
+	if msg.String() != "esc" && msg.String() != "ctrl+w" && !m.question.submitting {
+		interact = m.beginQuestionInteraction()
+	}
+	return tea.Batch(interact, cmd)
+}
+
+func (m *Model) handleQuestionKeyInput(msg tea.KeyMsg) tea.Cmd {
 	if m.question.request == nil {
+		return nil
+	}
+	if msg.String() == "esc" {
+		return m.declineQuestion()
+	}
+	if msg.String() == "ctrl+w" {
+		id := m.question.requestID
+		m.question.submitting = true
+		return m.questionOperation(agent.QuestionOperation{Operation: agent.QuestionOpWithdraw, OperationID: questionOperationID(id, agent.QuestionOpWithdraw), QuestionID: id, UserText: "Withdraw the requirement associated with question " + id})
+	}
+	if m.question.submitting {
 		return nil
 	}
 	if msg.String() == "pgup" || msg.String() == "pgdown" {
@@ -136,15 +158,6 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 		return m.resolveQuestion([]string{text}, false)
 
 	case msg.Key().Code == tea.KeyEscape:
-		if len(q.Options) > 0 {
-			// Escape goes back to option selection.
-			m.question.custom = false
-			m.question.followCursor = true
-			m.question.input.Blur()
-			m.recalcViewportSize()
-			return nil
-		}
-		// No options → Esc declines
 		return m.declineQuestion()
 
 	case msg.Key().Code == tea.KeyTab:
@@ -170,7 +183,7 @@ func (m *Model) submitCurrentQuestion(q tools.QuestionItem) tea.Cmd {
 	var selected []string
 	for i, option := range q.Options {
 		if m.question.selected[i] {
-			selected = append(selected, option.Label)
+			selected = append(selected, option.ID)
 		}
 	}
 	if len(selected) == 0 {
@@ -185,66 +198,20 @@ func (m *Model) declineQuestion() tea.Cmd {
 	return m.resolveQuestion(nil, true)
 }
 
-// resolveQuestion submits the dialog's result to the agent, clears the dialog,
-// restores the previous mode, and presents the next queued dialog. declined
-// marks an explicit refusal (Esc) rather than a submitted answer. The broker
-// decides the terminal state, so a response can lose to the deadline or to a
-// newer message; whatever reason won is surfaced as a toast instead of being
-// silently dropped.
+// resolveQuestion submits an explicit answer or refusal. The dialog closes
+// after Core acknowledgment; failed submissions keep the dialog for retry.
 func (m *Model) resolveQuestion(answers []string, declined bool) tea.Cmd {
-	if m.question.request == nil {
+	if m.question.request == nil || m.question.submitting {
 		return nil
 	}
-
-	reason := tools.QuestionOutcomeAnswered
-	submitted := answers
+	op := agent.QuestionOpAnswer
 	if declined {
-		reason = tools.QuestionOutcomeDeclined
-		submitted = nil
+		op = agent.QuestionOpDecline
 	}
-
-	terminal, accepted := m.agent.ResolveQuestion(submitted, reason, m.question.requestID)
-	var refusalCmd tea.Cmd
-	if !accepted || terminal != reason {
-		refusalCmd = m.enqueueToast(questionTerminalToast(terminal), "warn")
-	}
-
-	prevMode := m.question.prevMode
-	m.question = questionState{}
-	m.terminalTitleRequestSeen = false
-	m.recalcViewportSize()
-	titleCmd := m.syncTerminalTitleState()
-
-	// Present the next queued dialog or restore the pre-dialog mode.
-	cmds := []tea.Cmd{titleCmd}
-	if refusalCmd != nil {
-		cmds = append(cmds, refusalCmd)
-	}
-	if m.displayState == stateBackground {
-		cmds = append(cmds, m.updateBackgroundIdleSweepState())
-	}
-	return m.finishDialog(prevMode, cmds...)
+	m.question.submitting = true
+	return m.questionOperation(agent.QuestionOperation{Operation: op, OperationID: questionOperationID(m.question.requestID, op), QuestionID: m.question.requestID, Answers: answers, Custom: m.question.custom || len(m.question.request.Item.Options) == 0})
 }
 
 func textareaBlinkCmd() tea.Cmd {
 	return tea.Cmd(nil)
-}
-
-// questionTerminalToast explains a response that did not become the question's
-// outcome. A response loses either its request (already closed, unknown) or its
-// race with the deadline or a newer message; naming the winning reason tells
-// the user what actually happened after the dialog is gone.
-func questionTerminalToast(terminal string) string {
-	switch terminal {
-	case tools.QuestionOutcomeNoResponse:
-		return "Question expired before the response arrived; it closed with no answer"
-	case tools.QuestionOutcomeSuperseded:
-		return "Question was superseded by a newer message"
-	case agent.QuestionResolvedReasonCancelled:
-		return "Question was cancelled"
-	case agent.QuestionResolvedReasonError:
-		return "Question was closed because the agent shut down"
-	default:
-		return "Question response not accepted: the question already closed"
-	}
 }

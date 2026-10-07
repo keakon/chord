@@ -45,10 +45,12 @@ func TestFormatHistoryMapLinesPairsPathWithTopics(t *testing.T) {
 	a.sessionDir = sessionDir
 
 	// Export two generations so both carry topics in their status metadata.
-	if _, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u1"}}, 2, []string{"first topic"}, a.captureCompactionArchiveMeta()); err != nil {
+	first := []message.Message{{Role: message.RoleUser, Content: "u1"}}
+	if _, _, _, err := a.exportCompactionHistory(first, first, 2, []string{"first topic"}, a.captureCompactionArchiveMeta()); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u2"}}, 3, []string{"second topic", "third topic"}, a.captureCompactionArchiveMeta()); err != nil {
+	second := []message.Message{{Role: message.RoleUser, Content: "u2"}}
+	if _, _, _, err := a.exportCompactionHistory(second, second, 3, []string{"second topic", "third topic"}, a.captureCompactionArchiveMeta()); err != nil {
 		t.Fatal(err)
 	}
 	refs, err := listHistoryReferences(sessionDir)
@@ -89,7 +91,8 @@ func TestListCheckpointHistoryReferencesSkipsForeignPendingArchives(t *testing.T
 	a.sessionDir = sessionDir
 	meta := a.captureCompactionArchiveMeta()
 
-	applied, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u1"}}, 1, []string{"applied topic"}, meta)
+	appliedMsgs := []message.Message{{Role: message.RoleUser, Content: "u1"}}
+	applied, _, _, err := a.exportCompactionHistory(appliedMsgs, appliedMsgs, 1, []string{"applied topic"}, meta)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,12 +107,14 @@ func TestListCheckpointHistoryReferencesSkipsForeignPendingArchives(t *testing.T
 	}
 	// A concurrently cancelled worker's archive: still pending_apply, its
 	// cleanup has not run yet.
-	orphan, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u2"}}, 2, []string{"orphan topic"}, meta)
+	orphanMsgs := []message.Message{{Role: message.RoleUser, Content: "u2"}}
+	orphan, _, _, err := a.exportCompactionHistory(orphanMsgs, orphanMsgs, 2, []string{"orphan topic"}, meta)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// This draft's own freshly exported archive: pending_apply by construction.
-	self, _, _, err := a.exportCompactionHistory([]message.Message{{Role: message.RoleUser, Content: "u3"}}, 3, []string{"self topic"}, meta)
+	selfMsgs := []message.Message{{Role: message.RoleUser, Content: "u3"}}
+	self, _, _, err := a.exportCompactionHistory(selfMsgs, selfMsgs, 3, []string{"self topic"}, meta)
 	if err != nil {
 		t.Fatal(err)
 	}

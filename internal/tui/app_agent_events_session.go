@@ -6,6 +6,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -105,16 +106,25 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 			AgentID:             evt.AgentID,
 			PathScope:           evt.PathScope,
 		}
-		effects.addFollowup(func() tea.Msg { return confirmRequestMsg{request: req} })
+		effects.addFollowup(m.handleConfirmRequest(confirmRequestMsg{request: req}))
 		return true, effects
-	case agent.QuestionRequestEvent:
-		// Install the dialog inline: a batch of tea.Cmds runs concurrently, so
-		// routing the request through a follow-up message could land it after
-		// its own close and leave a dialog on screen that nothing will dismiss.
-		effects.addFollowup(m.handleQuestionRequest(questionDialogFromEvent(evt)))
+	case agent.QuestionTranscriptEvent:
+		for _, block := range messagesToBlocks([]message.Message{evt.Message}, &m.nextBlockID) {
+			block.MsgIndex = evt.MessageIndex
+			m.appendViewportBlock(block)
+			m.markBlockSettled(block)
+		}
+		m.recalcViewportSize()
 		return true, effects
-	case agent.QuestionResolvedEvent:
-		effects.addFollowup(m.handleQuestionResolved(evt.RequestID))
+	case agent.QuestionWaitStateEvent:
+		m.questionWaitBinding = evt.BindingID
+		m.questionWaiting = make(map[string]bool, len(evt.QuestionIDs))
+		for _, id := range evt.QuestionIDs {
+			m.questionWaiting[id] = true
+		}
+		return true, effects
+	case agent.QuestionStateEvent:
+		effects.addFollowup(m.handleQuestionState(evt.Question))
 		return true, effects
 	default:
 		return false, effects

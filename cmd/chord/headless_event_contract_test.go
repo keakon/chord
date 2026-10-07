@@ -522,7 +522,7 @@ func TestHeadlessCommandPathAutoDenyConfirmSeqOrdersSnapshot(t *testing.T) {
 func TestHeadlessQuestionResolvedSeqOrdersSnapshot(t *testing.T) {
 	backend := &mockBackend{}
 	state := &headlessState{
-		pendingQuestion: &headlessQuestionPayload{RequestID: "question-1", Question: "which file?"},
+		questions: map[string]*headlessQuestionPayload{"question-1": {RequestID: "question-1", Question: "which file?"}},
 	}
 
 	to := newTestOut()
@@ -531,16 +531,13 @@ func TestHeadlessQuestionResolvedSeqOrdersSnapshot(t *testing.T) {
 	if stale == nil {
 		t.Fatal("status_response not emitted")
 	}
-	if payload := headlessPayloadMap(t, stale.Payload); payload["pending_question"] == nil {
+	if payload := headlessPayloadMap(t, stale.Payload); payload["pending_questions"] == nil {
 		t.Fatal("stale status should still report the pending question")
 	}
 
 	handleHeadlessCommand(headlessCommand{Type: "send", Content: "never mind"}, backend, state, to.writer())
-	if len(backend.supersededQuestions) != 1 || backend.supersededQuestions[0] != "question-1" {
-		t.Fatalf("superseded questions = %#v, want [question-1]", backend.supersededQuestions)
-	}
 
-	filterHeadlessEvent(agent.QuestionResolvedEvent{RequestID: "question-1", Reason: tools.QuestionOutcomeSuperseded}, state)
+	filterHeadlessEvent(agent.QuestionStateEvent{Question: agent.QuestionSnapshot{ID: "question-1", Outcome: tools.QuestionOutcomeSuperseded, Version: 2}}, state)
 
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	fresh := findHeadlessEnvelopeValue(to.drain(), "status_response")
@@ -550,8 +547,8 @@ func TestHeadlessQuestionResolvedSeqOrdersSnapshot(t *testing.T) {
 	if stale.Seq == 0 || fresh.Seq <= stale.Seq {
 		t.Errorf("stale seq = %d, fresh seq = %d, want fresh strictly newer", stale.Seq, fresh.Seq)
 	}
-	if payload := headlessPayloadMap(t, fresh.Payload); payload["pending_question"] != nil {
-		t.Fatalf("pending_question = %#v, want null", payload["pending_question"])
+	if payload := headlessPayloadMap(t, fresh.Payload); len(payload["pending_questions"].([]any)) != 0 {
+		t.Fatalf("pending_question = %#v, want null", payload["pending_questions"])
 	}
 }
 

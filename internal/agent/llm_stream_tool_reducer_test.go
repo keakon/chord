@@ -217,7 +217,7 @@ func TestStreamToolDeltaReducerReconcilesToolUseAndStartsSpeculativeExecution(t 
 func TestStreamToolDeltaReducerRejectsSpeculativeExecutionWhenPolicyBlocks(t *testing.T) {
 	turn := newStreamToolReducerTestTurn()
 	registry := tools.NewRegistry()
-	registry.Register(tools.NewQuestionTool(nil))
+	registry.Register(testQuestionTool())
 	var started bool
 	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
 		started = true

@@ -266,7 +266,7 @@ func TestResolveQuestionRestoresInsertModeWithIMERestore(t *testing.T) {
 	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
-	_ = m.resolveQuestion(nil, true)
+	runQuestionCmd(&m, m.resolveQuestion(nil, true))
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}
@@ -569,7 +569,7 @@ func TestQuestionRequestSwitchesIMEWhenEnteringQuestion(t *testing.T) {
 	m.mode = ModeInsert
 	m.ime.switchTarget = "com.apple.keylayout.ABC"
 
-	cmd := m.handleQuestionRequest(questionDialog{request: QuestionRequest{Item: tools.QuestionItem{Header: "name", Question: "who?", Options: []tools.QuestionOption{{Label: "alice"}}}}})
+	cmd := m.receiveTestQuestion(questionDialog{request: QuestionRequest{Item: tools.QuestionItem{Header: "name", Question: "who?", Options: []tools.QuestionOption{{Label: "alice"}}}}})
 	if m.mode != ModeQuestion {
 		t.Fatalf("mode = %v, want ModeQuestion", m.mode)
 	}

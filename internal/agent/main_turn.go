@@ -729,6 +729,10 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	if !a.pendingUserDrainSuspended && !startedPendingUserTurn && a.turn == nil && !skipMailboxDrain {
 		a.drainSubAgentInbox()
 	}
+	if a.questions.resumeNeeded && a.turn == nil && !a.questions.paused {
+		a.questions.resumeNeeded = false
+		a.handleContinueFromContext()
+	}
 	// Foreground is idle again: wake the memory worker so extraction jobs that
 	// were deferred while a turn was active (or requeued after preemption) get
 	// a chance to run.

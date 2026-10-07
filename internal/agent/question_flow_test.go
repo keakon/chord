@@ -2,365 +2,305 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
-func waitQuestionRequestEvent(t *testing.T, a *MainAgent) QuestionRequestEvent {
-	t.Helper()
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case e := <-a.Events():
-			if q, ok := e.(QuestionRequestEvent); ok {
-				return q
-			}
-		case <-deadline:
-			t.Fatal("question request event not emitted")
-			return QuestionRequestEvent{}
-		}
-	}
-}
-
-func waitQuestionResolvedEvent(t *testing.T, a *MainAgent, requestID string) QuestionResolvedEvent {
-	t.Helper()
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case e := <-a.Events():
-			if r, ok := e.(QuestionResolvedEvent); ok && r.RequestID == requestID {
-				return r
-			}
-		case <-deadline:
-			t.Fatalf("question resolved event not emitted for %s", requestID)
-			return QuestionResolvedEvent{}
-		}
-	}
-}
-
 func questionItems(headers ...string) []tools.QuestionItem {
-	items := make([]tools.QuestionItem, 0, len(headers))
+	var items []tools.QuestionItem
 	for _, h := range headers {
-		items = append(items, tools.QuestionItem{
-			Header:   h,
-			Question: "q-" + h,
-			Options:  []tools.QuestionOption{{Label: "yes"}, {Label: "no"}},
-		})
+		items = append(items, tools.QuestionItem{Header: h, Question: "Choose an option", Options: []tools.QuestionOption{{ID: "yes", Label: "Yes"}, {ID: "no", Label: "No"}}})
 	}
 	return items
 }
-
-// TestAskQuestionsFillsNotAskedAfterNonAnswered pins the batch contract: an
-// answered question is preserved, the first non-answered question keeps its
-// outcome, and every later question becomes not_asked with no request event.
-func TestAskQuestionsFillsNotAskedAfterNonAnswered(t *testing.T) {
+func newQuestionTestAgent(t *testing.T) *MainAgent {
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn()
-	ctx := a.turn.Ctx
-
-	type outcome struct {
-		answers []tools.QuestionAnswer
-		err     error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		answers, err := a.AskQuestions(ctx, questionItems("h1", "h2", "h3"), 0)
-		done <- outcome{answers: answers, err: err}
-	}()
-
-	q1 := waitQuestionRequestEvent(t, a)
-	if _, accepted := a.ResolveQuestion([]string{"yes"}, tools.QuestionOutcomeAnswered, q1.RequestID); !accepted {
-		t.Fatal("first answer was not accepted")
-	}
-	if got := waitQuestionResolvedEvent(t, a, q1.RequestID); got.Reason != tools.QuestionOutcomeAnswered {
-		t.Fatalf("first resolved reason = %q, want answered", got.Reason)
-	}
-
-	q2 := waitQuestionRequestEvent(t, a)
-	if q2.Header != "h2" {
-		t.Fatalf("second request header = %q, want h2", q2.Header)
-	}
-	if _, accepted := a.ResolveQuestion(nil, tools.QuestionOutcomeDeclined, q2.RequestID); !accepted {
-		t.Fatal("decline was not accepted")
-	}
-	if got := waitQuestionResolvedEvent(t, a, q2.RequestID); got.Reason != tools.QuestionOutcomeDeclined {
-		t.Fatalf("second resolved reason = %q, want declined", got.Reason)
-	}
-
-	got := <-done
-	if got.err != nil {
-		t.Fatalf("AskQuestions err = %v", got.err)
-	}
-	if len(got.answers) != 3 {
-		t.Fatalf("answers = %#v, want 3 entries", got.answers)
-	}
-	if got.answers[0].Outcome != tools.QuestionOutcomeAnswered || len(got.answers[0].Selected) != 1 || got.answers[0].Selected[0] != "yes" {
-		t.Fatalf("answers[0] = %#v, want answered yes", got.answers[0])
-	}
-	if got.answers[1].Outcome != tools.QuestionOutcomeDeclined || len(got.answers[1].Selected) != 0 {
-		t.Fatalf("answers[1] = %#v, want declined with no selection", got.answers[1])
-	}
-	if got.answers[2].Outcome != tools.QuestionOutcomeNotAsked || len(got.answers[2].Selected) != 0 {
-		t.Fatalf("answers[2] = %#v, want not_asked", got.answers[2])
-	}
+	a.initQuestions()
+	t.Cleanup(func() { a.restoreQuestions(nil) })
+	return a
 }
-
-// TestAskQuestionsDeadlineYieldsNoResponse verifies the request carries an
-// absolute deadline and an unanswered request closes as no_response with a
-// matching resolved event, not an error.
-func TestAskQuestionsDeadlineYieldsNoResponse(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
-	ctx := a.turn.Ctx
-
-	type outcome struct {
-		answers []tools.QuestionAnswer
-		err     error
+func runQuestionCommand(t *testing.T, a *MainAgent, c *questionCommand) QuestionReceipt {
+	t.Helper()
+	if c.reply == nil {
+		c.reply = make(chan QuestionReceipt, 1)
 	}
-	done := make(chan outcome, 1)
-	go func() {
-		answers, err := a.AskQuestions(ctx, questionItems("h1"), 50*time.Millisecond)
-		done <- outcome{answers: answers, err: err}
-	}()
-
-	q1 := waitQuestionRequestEvent(t, a)
-	if q1.Deadline.IsZero() {
-		t.Fatal("a positive timeout must produce an absolute deadline")
+	if c.ctx == nil {
+		c.ctx = context.Background()
 	}
-
-	got := <-done
-	if got.err != nil {
-		t.Fatalf("AskQuestions err = %v", got.err)
+	if c.owner == "" {
+		c.owner = identity.MainAgentID
 	}
-	if len(got.answers) != 1 || got.answers[0].Outcome != tools.QuestionOutcomeNoResponse {
-		t.Fatalf("answers = %#v, want one no_response", got.answers)
+	if c.task == "" {
+		c.task = identity.MainAgentID
 	}
-	if resolved := waitQuestionResolvedEvent(t, a, q1.RequestID); resolved.Reason != tools.QuestionOutcomeNoResponse {
-		t.Fatalf("resolved reason = %q, want no_response", resolved.Reason)
-	}
-}
-
-// TestAskQuestionsSystemCancelReturnsError verifies a cancelled turn returns an
-// error rather than a fabricated successful batch, while still closing the
-// published request as cancelled.
-func TestAskQuestionsSystemCancelReturnsError(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
-	ctx := a.turn.Ctx
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := a.AskQuestions(ctx, questionItems("h1"), 0)
-		done <- err
-	}()
-
-	q1 := waitQuestionRequestEvent(t, a)
-	a.CancelCurrentTurn()
-
-	if err := <-done; err == nil {
-		t.Fatal("a cancelled turn must return an error, not a fabricated batch")
-	}
-	if resolved := waitQuestionResolvedEvent(t, a, q1.RequestID); resolved.Reason != QuestionResolvedReasonCancelled {
-		t.Fatalf("resolved reason = %q, want cancelled", resolved.Reason)
-	}
-}
-
-// TestAskQuestionsSupersedeClosesRequest verifies a superseded request returns
-// the superseded outcome and emits the matching resolved event.
-func TestAskQuestionsSupersedeClosesRequest(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
-	ctx := a.turn.Ctx
-
-	done := make(chan []tools.QuestionAnswer, 1)
-	go func() {
-		answers, _ := a.AskQuestions(ctx, questionItems("h1"), 0)
-		done <- answers
-	}()
-
-	q1 := waitQuestionRequestEvent(t, a)
-	if !a.SupersedeQuestion(q1.RequestID) {
-		t.Fatal("supersede was not accepted")
-	}
-	if resolved := waitQuestionResolvedEvent(t, a, q1.RequestID); resolved.Reason != tools.QuestionOutcomeSuperseded {
-		t.Fatalf("resolved reason = %q, want superseded", resolved.Reason)
-	}
-
-	answers := <-done
-	if len(answers) != 1 || answers[0].Outcome != tools.QuestionOutcomeSuperseded {
-		t.Fatalf("answers = %#v, want one superseded", answers)
-	}
-}
-
-// TestAskQuestionsSupersedeAfterUserMessageEnqueued pins the headless
-// supersede order at the agent level: the new user message is accepted (queued
-// on the event bus, sequenced) before the blocked Question is woken, so
-// whatever the resumed tool does next is ordered after it. The headless
-// handler test only pins the backend call order on a mock; this test pins the
-// underlying scheduling invariant on a real MainAgent.
-func TestAskQuestionsSupersedeAfterUserMessageEnqueued(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
-	ctx := a.turn.Ctx
-
-	done := make(chan []tools.QuestionAnswer, 1)
-	go func() {
-		answers, _ := a.AskQuestions(ctx, questionItems("h1"), 0)
-		done <- answers
-	}()
-
-	q1 := waitQuestionRequestEvent(t, a)
-
-	// Mirror the headless handler: accept the new message first, then wake.
-	a.SendUserMessage("skip the question")
-	select {
-	case evt := <-a.eventCh:
-		if evt.Type != EventUserMessage {
-			t.Fatalf("queued event type = %q, want %q", evt.Type, EventUserMessage)
+	a.handleQuestionCommand(c)
+	timeout := time.After(3 * time.Second)
+	for {
+		select {
+		case receipt := <-c.reply:
+			return receipt
+		case evt := <-a.eventCh:
+			if evt.Type == EventQuestionCommitted {
+				a.handleQuestionCommitted(evt.Payload.(*questionCommit))
+			} else if evt.Type == EventQuestionCommand {
+				a.handleQuestionCommand(evt.Payload.(*questionCommand))
+			}
+		case <-timeout:
+			t.Fatal("question command failed to settle")
+			return QuestionReceipt{}
 		}
-		if evt.Seq == 0 {
-			t.Fatal("the user message must be sequenced when queued, so later work orders after it")
-		}
-		// Hand it back: the loop (not started in tests) still owns it.
-		a.eventCh <- evt
-	default:
-		t.Fatal("the user message must be queued before the blocked question is woken")
 	}
-
-	if !a.SupersedeQuestion(q1.RequestID) {
-		t.Fatal("supersede was not accepted")
+}
+func createTestQuestions(t *testing.T, a *MainAgent, items []tools.QuestionItem, wait bool) QuestionReceipt {
+	t.Helper()
+	r := runQuestionCommand(t, a, &questionCommand{operation: QuestionOperation{Operation: questionOpCreate, OperationID: makeRequestID()}, call: makeRequestID(), args: tools.QuestionArgs{Questions: items, Wait: new(wait)}})
+	if !r.Accepted {
+		t.Fatalf("creation rejected: %+v", r)
 	}
-	if resolved := waitQuestionResolvedEvent(t, a, q1.RequestID); resolved.Reason != tools.QuestionOutcomeSuperseded {
-		t.Fatalf("resolved reason = %q, want superseded", resolved.Reason)
+	return r
+}
+func applyTestQuestion(t *testing.T, a *MainAgent, op QuestionOperation, at time.Time) QuestionReceipt {
+	t.Helper()
+	if op.Operation == QuestionOpPresented && op.Version == 0 {
+		op.Version = a.questions.records[op.QuestionID].Version
 	}
-	if answers := <-done; len(answers) != 1 || answers[0].Outcome != tools.QuestionOutcomeSuperseded {
-		t.Fatalf("answers = %#v, want one superseded", answers)
+	if op.Operation == QuestionOpPresented && op.BindingID == "" {
+		op.BindingID = a.questions.records[op.QuestionID].BindingID
 	}
-	// The queued message survives the supersede: it is still pending for the
-	// loop to consume as the next input.
+	if op.OperationID == "" {
+		op.OperationID = makeRequestID()
+	}
+	return runQuestionCommand(t, a, &questionCommand{operation: op, received: at})
+}
+func TestQuestionRequiredIgnoresConfiguredTimeouts(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	a.globalConfig.QuestionTimeout = 60
+	a.globalConfig.QuestionAutoSelectTimeout = 60
+	r := createTestQuestions(t, a, questionItems("Choice"), false)
+	q := a.questions.records[r.Result.QuestionIDs[0]]
+	if q.Timer != QuestionTimerDisabled || !q.Deadline.IsZero() || q.Dependency != QuestionDependencyPending {
+		t.Fatalf("required state: %+v", q)
+	}
+	if len(a.requiredQuestionIDs()) != 1 {
+		t.Fatal("missing completion gate")
+	}
+}
+func TestQuestionDefaultStartsAfterPresentationAndDoesNotAuthorize(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	a.globalConfig.QuestionAutoSelectTimeout = 3600
+	items := questionItems("Choice")
+	items[0].ResponsePolicy = tools.QuestionPolicyDefaultAllowed
+	items[0].DefaultOptionID = "no"
+	r := createTestQuestions(t, a, items, false)
+	id := r.Result.QuestionIDs[0]
+	if q := a.questions.records[id]; q.Timer != QuestionTimerAwaiting || !q.Deadline.IsZero() {
+		t.Fatalf("armed before presentation: %+v", q)
+	}
+	now := time.Now()
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpPresented, QuestionID: id, SupportsInteraction: true}, now)
+	q := a.questions.records[id]
+	if q.Deadline != now.Add(time.Hour) {
+		t.Fatal("incorrect presentation deadline")
+	}
+	receipt := applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: id, Answers: []string{"yes"}}, q.Deadline)
+	q = a.questions.records[id]
+	if receipt.Accepted || q.Outcome != tools.QuestionOutcomeDefaulted || q.SelectedIDs[0] != "no" {
+		t.Fatalf("deadline did not decide default: %+v %+v", q, receipt)
+	}
+	history := a.ctxMgr.Snapshot()
+	last := history[len(history)-1]
+	if message.IsUserAuthored(last) || last.Kind != message.KindQuestionResult {
+		t.Fatal("system default impersonated user")
+	}
+}
+func TestQuestionInterventionPermanentlyDisablesTimer(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	a.globalConfig.QuestionTimeout = 3600
+	items := questionItems("Choice")
+	items[0].ResponsePolicy = tools.QuestionPolicyOptional
+	r := createTestQuestions(t, a, items, false)
+	id := r.Result.QuestionIDs[0]
+	now := time.Now()
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpPresented, QuestionID: id, SupportsInteraction: true}, now)
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpInteract, OperationID: "interact", QuestionID: id}, now.Add(time.Second))
+	applyTestQuestion(t, a, QuestionOperation{Operation: questionOpExpire, QuestionID: id}, now.Add(2*time.Hour))
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpPresented, QuestionID: id, SupportsInteraction: true}, now.Add(3*time.Hour))
+	q := a.questions.records[id]
+	if !q.pending() || q.Timer != QuestionTimerCancelled || !q.Deadline.IsZero() {
+		t.Fatalf("intervention lost: %+v", q)
+	}
+}
+func TestQuestionBatchCommitRetryReturnsOriginalIDs(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	c := &questionCommand{operation: QuestionOperation{Operation: questionOpCreate, OperationID: "attempt-1"}, call: "call-1", args: tools.QuestionArgs{Questions: questionItems("First", "Second", "Third"), Wait: new(false)}}
+	first := runQuestionCommand(t, a, c)
+	before := len(a.ctxMgr.Snapshot())
+	retry := *c
+	retry.reply = nil
+	retry.operation.OperationID = "attempt-2"
+	second := runQuestionCommand(t, a, &retry)
+	if !second.Accepted || strings.Join(first.Result.QuestionIDs, ",") != strings.Join(second.Result.QuestionIDs, ",") || len(a.ctxMgr.Snapshot()) != before {
+		t.Fatal("retry duplicated batch")
+	}
+	retry.args.Questions = questionItems("Different")
+	retry.reply = nil
+	if got := runQuestionCommand(t, a, &retry); got.Accepted {
+		t.Fatal("same call accepted different arguments")
+	}
+}
+func TestQuestionBatchRejectsBeforePublishingAnyItem(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	items := questionItems("First", "Second")
+	items[1].ResponsePolicy = "invalid"
+	receipt := runQuestionCommand(t, a, &questionCommand{operation: QuestionOperation{Operation: questionOpCreate, OperationID: "batch"}, args: tools.QuestionArgs{Questions: items}})
+	if receipt.Accepted || len(a.questions.records) != 0 || len(a.ctxMgr.Snapshot()) != 0 {
+		t.Fatal("invalid batch partially committed")
+	}
+}
+func TestQuestionSyncBatchRestoresOrderAndCancelsUnopenedItems(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	r := createTestQuestions(t, a, questionItems("First", "Second", "Third"), true)
+	ids := r.Result.QuestionIDs
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: ids[0], Answers: []string{"yes"}}, time.Time{})
+	if !a.questions.records[ids[1]].Visible || a.questions.records[ids[2]].Visible {
+		t.Fatal("incorrect sequential progress")
+	}
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpDecline, QuestionID: ids[1]}, time.Time{})
+	if q := a.questions.records[ids[2]]; q.Outcome != tools.QuestionOutcomeCancelled || q.Reason != "batch_stopped" {
+		t.Fatalf("unopened item: %+v", q)
+	}
+	saved := a.ctxMgr.Snapshot()
+	a.restoreQuestions(saved)
+	if a.questions.records[ids[0]].Outcome != tools.QuestionOutcomeAnswered || a.questions.records[ids[2]].Outcome != tools.QuestionOutcomeCancelled {
+		t.Fatal("batch progress lost")
+	}
+}
+func TestQuestionDeclineWakesWaitAndReplacementResolvesDependency(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	created := createTestQuestions(t, a, questionItems("First", "Second"), false)
+	ids := created.Result.QuestionIDs
+	wait := &questionCommand{operation: QuestionOperation{Operation: questionOpWait, OperationID: "wait"}, args: tools.QuestionArgs{WaitFor: ids}, owner: identity.MainAgentID, task: identity.MainAgentID, scope: a.questions.scope, reply: make(chan QuestionReceipt, 1)}
+	a.installQuestionWait(wait)
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpDecline, QuestionID: ids[0]}, time.Time{})
 	select {
-	case evt := <-a.eventCh:
-		if evt.Type != EventUserMessage {
-			t.Fatalf("pending event type = %q, want %q", evt.Type, EventUserMessage)
+	case receipt := <-wait.reply:
+		if receipt.Result.Status != tools.QuestionStatusResolved {
+			t.Fatal("wrong wait status")
 		}
 	default:
-		t.Fatal("supersede must not drop the queued user message")
+		t.Fatal("decline did not wake waiter")
+	}
+	if len(a.requiredQuestionIDs()) != 2 {
+		t.Fatal("decline removed requirements")
+	}
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpReplace, QuestionID: ids[0], ReplacementID: ids[1], UserText: "Use the alternative decision instead"}, time.Time{})
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: ids[1], Answers: []string{"no"}}, time.Time{})
+	if len(a.requiredQuestionIDs()) != 0 {
+		t.Fatal("replacement left an impossible completion gate")
+	}
+	if a.questions.records[ids[0]].Outcome != tools.QuestionOutcomeDeclined {
+		t.Fatal("replacement rewrote old terminal")
 	}
 }
-
-// TestAskQuestionsSendTimeoutLeavesNoTrace verifies congestion handling: a
-// request that cannot reach the output channel before its deadline fails as a
-// send timeout, leaves no pending state, and emits neither event — the client
-// never saw the question, so there is nothing to resolve.
-func TestAskQuestionsSendTimeoutLeavesNoTrace(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
-
-	// Tests never start Run, so nothing drains outputCh. Filling it through the
-	// best-effort emit path keeps the fill itself non-blocking while the next
-	// interactive send still has to wait for space that never comes.
-	for len(a.outputCh) < cap(a.outputCh) {
-		a.emitToTUI(NotificationEvent{Message: "filler"})
-	}
-
-	answers, err := a.AskQuestions(a.turn.Ctx, questionItems("h1"), 30*time.Millisecond)
-	if err == nil || !strings.Contains(err.Error(), "question request send timed out") {
-		t.Fatalf("AskQuestions err = %v, want a send timeout", err)
-	}
-	if answers != nil {
-		t.Fatalf("answers = %#v, want nil when the request never reached the client", answers)
-	}
-	if a.interaction.hasPendingUserInteraction() {
-		t.Fatal("a request whose send failed must not stay pending")
-	}
-	for drained := false; !drained; {
-		select {
-		case e := <-a.Events():
-			if resolved, ok := e.(QuestionResolvedEvent); ok {
-				t.Fatalf("resolved event %+v emitted for a request that was never sent", resolved)
-			}
-		default:
-			drained = true
+func TestQuestionOutsideWaitSetInterruptsWithoutClosingQuestions(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	r := createTestQuestions(t, a, questionItems("First", "Second"), false)
+	ids := r.Result.QuestionIDs
+	c := &questionCommand{operation: QuestionOperation{Operation: questionOpWait, OperationID: "wait"}, args: tools.QuestionArgs{WaitFor: ids[:1]}, task: identity.MainAgentID, scope: a.questions.scope, reply: make(chan QuestionReceipt, 1)}
+	a.installQuestionWait(c)
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: ids[1], Answers: []string{"yes"}}, time.Time{})
+	select {
+	case reply := <-c.reply:
+		if reply.Result.Status != tools.QuestionStatusWaitInterrupted {
+			t.Fatal("did not interrupt")
 		}
+	default:
+		t.Fatal("missing wake")
+	}
+	if !a.questions.records[ids[0]].pending() {
+		t.Fatal("interruption closed unanswered question")
+	}
+}
+func TestQuestionHistoryRevisionWithNewPendingQuestion(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	old := createTestQuestions(t, a, questionItems("First"), false).Result.QuestionIDs[0]
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpDecline, QuestionID: old}, time.Time{})
+	next := createTestQuestions(t, a, questionItems("Second"), false).Result.QuestionIDs[0]
+	receipt := applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpRevise, QuestionID: old, Answers: []string{"yes"}}, time.Time{})
+	if !receipt.Accepted || !a.questions.records[next].pending() || a.questions.records[old].Outcome != tools.QuestionOutcomeDeclined || a.questions.records[old].Dependency != QuestionDependencyReceived {
+		t.Fatal("historical reply routed to new question or changed terminal")
+	}
+}
+func TestQuestionRecoveryPreservesInterventionAndResultConsumption(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	r := createTestQuestions(t, a, questionItems("Choice"), false)
+	id := r.Result.QuestionIDs[0]
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpInteract, QuestionID: id}, time.Time{})
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: id, Answers: []string{"yes"}}, time.Time{})
+	msgs := a.ctxMgr.Snapshot()
+	resultID := a.questions.records[id].ResultID
+	assistant := message.Message{Role: message.RoleAssistant, Content: "Decision received", RequestBatch: 1}
+	a.attachQuestionConsumption(&assistant, []string{resultID})
+	msgs = append(msgs, assistant)
+	a.restoreQuestions(msgs)
+	if a.questions.records[id].Outcome != tools.QuestionOutcomeAnswered || a.questions.unconsumed[resultID] {
+		t.Fatal("restore reopened terminal or lost consumption")
+	}
+}
+func TestQuestionPersistenceFailurePublishesNoSuccess(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	a.recoveryManager().Close()
+	receipt := runQuestionCommand(t, a, &questionCommand{operation: QuestionOperation{Operation: questionOpCreate, OperationID: "create"}, args: tools.QuestionArgs{Questions: questionItems("Choice"), Wait: new(false)}})
+	if receipt.Accepted || !a.questions.failed || len(a.questions.records) != 0 {
+		t.Fatal("failed commit reported success")
+	}
+}
+func TestQuestionCommitVisibleOnlyAfterPersistence(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	a.persist.admission <- struct{}{}
+	receipt := runQuestionCommand(t, a, &questionCommand{operation: QuestionOperation{Operation: questionOpCreate, OperationID: "create"}, args: tools.QuestionArgs{Questions: questionItems("Choice"), Wait: new(false)}})
+	<-a.persist.admission
+	if receipt.Accepted || len(a.questions.records) != 0 {
+		t.Fatal("queue congestion published a question")
+	}
+}
+func TestQuestionValidateSelectionsAndCustomText(t *testing.T) {
+	item := questionItems("Choice")[0]
+	if _, _, err := validateQuestionAnswer(item, []string{"Yes"}, false); err == nil {
+		t.Fatal("accepted display label as identity")
+	}
+	text, ids, err := validateQuestionAnswer(item, []string{"yes"}, true)
+	if err != nil || len(ids) != 0 || text[0] != "yes" {
+		t.Fatal("custom text misinterpreted as option")
+	}
+}
+func TestQuestionFactsExcludedFromModelAndPreservedByCompaction(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	createTestQuestions(t, a, questionItems("Choice"), false)
+	msgs := a.ctxMgr.Snapshot()
+	if len(filterQuestionStateMessages(msgs)) != 0 {
+		t.Fatal("local metadata leaked into model")
+	}
+	retained := retainQuestionFacts(msgs, []message.Message{{Role: message.RoleUser, Content: "Summary"}})
+	a.restoreQuestions(retained)
+	if len(a.questions.records) != 1 {
+		t.Fatal("compaction discarded pending question")
+	}
+	var fact QuestionFact
+	if json.Unmarshal(retained[1].Question, &fact) != nil || len(fact.Updates) != 1 {
+		t.Fatal("missing durable fact")
 	}
 }
 
-// TestAskQuestionsResolvesBeforeNextRequest verifies the event order clients
-// depend on: the answered request is closed before the next one is published,
-// so at most one question dialog is open at a time.
-func TestAskQuestionsResolvesBeforeNextRequest(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
-
-	done := make(chan []tools.QuestionAnswer, 1)
-	go func() {
-		answers, _ := a.AskQuestions(a.turn.Ctx, questionItems("h1", "h2"), 0)
-		done <- answers
-	}()
-
-	first := waitQuestionRequestEvent(t, a)
-	if _, accepted := a.ResolveQuestion([]string{"yes"}, tools.QuestionOutcomeAnswered, first.RequestID); !accepted {
-		t.Fatal("first answer was not accepted")
-	}
-
-	order := make([]string, 0, 2)
-	var nextRequestID string
-	deadline := time.After(3 * time.Second)
-	for len(order) < 2 {
-		select {
-		case e := <-a.Events():
-			switch ev := e.(type) {
-			case QuestionResolvedEvent:
-				if ev.RequestID == first.RequestID {
-					order = append(order, "resolved")
-				}
-			case QuestionRequestEvent:
-				if ev.Header != "h2" {
-					t.Fatalf("next request header = %q, want h2", ev.Header)
-				}
-				nextRequestID = ev.RequestID
-				order = append(order, "request")
-			}
-		case <-deadline:
-			t.Fatalf("question events = %v, want the resolution and the next request", order)
-		}
-	}
-	if order[0] != "resolved" || order[1] != "request" {
-		t.Fatalf("event order = %v, want the answered request resolved first", order)
-	}
-
-	if _, accepted := a.ResolveQuestion([]string{"yes"}, tools.QuestionOutcomeAnswered, nextRequestID); !accepted {
-		t.Fatal("second answer was not accepted")
-	}
-	if answers := <-done; len(answers) != 2 || answers[1].Outcome != tools.QuestionOutcomeAnswered || answers[1].Selected[0] != "yes" {
-		t.Fatalf("answers = %#v, want both questions answered", answers)
-	}
-}
-
-// TestAskQuestionsSecondBatchCancelsWhileFirstWaits verifies batch admission is
-// cancellable: a cancelled second batch returns without waiting for an
-// unbounded first one, and the first keeps ownership of the slot.
-func TestAskQuestionsSecondBatchCancelsWhileFirstWaits(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
-	first := make(chan []tools.QuestionAnswer, 1)
-	go func() {
-		answers, _ := a.AskQuestions(a.turn.Ctx, questionItems("h1"), 0)
-		first <- answers
-	}()
-	q1 := waitQuestionRequestEvent(t, a)
-
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := a.AskQuestions(cancelled, questionItems("h2"), 0); err == nil {
-		t.Fatal("a cancelled second batch must not block behind the first")
-	}
-
-	a.SupersedeQuestion(q1.RequestID)
-	if answers := <-first; len(answers) != 1 || answers[0].Outcome != tools.QuestionOutcomeSuperseded {
-		t.Fatalf("first batch answers = %#v, want one superseded", answers)
-	}
+func testQuestionTool() *tools.QuestionTool {
+	return tools.NewQuestionTool(func(context.Context, tools.QuestionArgs) (tools.QuestionResult, error) {
+		return tools.QuestionResult{}, nil
+	})
 }

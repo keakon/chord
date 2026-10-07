@@ -119,14 +119,14 @@ func TestHeadlessInputRejectedBeforeInteractions(t *testing.T) {
 	for _, content := range []string{" ", "/export", "new request"} {
 		t.Run(content, func(t *testing.T) {
 			backend := &rejectingInputBackend{}
-			state := &headlessState{pendingQuestion: &headlessQuestionPayload{RequestID: "question-1"}}
+			state := &headlessState{questions: map[string]*headlessQuestionPayload{"question-1": {RequestID: "question-1"}}}
 			out := newTestOut()
 			handleHeadlessCommand(headlessCommand{Type: "send", Content: content, RequestID: "input-1"}, backend, state, out.writer())
 			env := findHeadlessEnvelopeValue(out.drain(), "input_result")
 			if env == nil || env.Seq == 0 || env.Payload.(map[string]any)["status"] != agent.InputRejected {
 				t.Fatalf("missing rejection: %#v", env)
 			}
-			if len(backend.supersededQuestions) != 0 || state.pendingQuestion == nil {
+			if testPendingQuestion(state) == nil {
 				t.Fatal("rejected input superseded a pending question")
 			}
 		})

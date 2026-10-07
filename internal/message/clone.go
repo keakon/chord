@@ -8,6 +8,7 @@ import "encoding/json"
 // raw JSON and optional pointer fields being mutated by a caller.
 func (m Message) Clone() Message {
 	cloned := m
+	cloned.Question = append(json.RawMessage(nil), m.Question...)
 	if len(m.Parts) > 0 {
 		cloned.Parts = make([]ContentPart, len(m.Parts))
 		for i, part := range m.Parts {

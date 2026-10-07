@@ -206,6 +206,7 @@ func (a *MainAgent) stopCompactionForSessionSwitch() bool {
 
 func (a *MainAgent) finishSessionSwitch() {
 	a.admissionPaused.Store(false)
+	a.questions.switching = false
 }
 
 func (a *MainAgent) abandonSubAgentsForSessionSwitch() int {
@@ -300,6 +301,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 		a.emitLoopStateChanged()
 	}
 	a.ctxMgr.RestoreMessages(nil)
+	a.restoreQuestions(nil)
 	a.installContextNoticePresence(nil)
 	a.fileTrack = filelock.NewFileTracker()
 	a.clearEvidenceCandidates()
@@ -418,6 +420,7 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 	}
 
 	a.ctxMgr.RestoreMessages(prefix)
+	a.restoreQuestions(prefix)
 	a.installContextNoticePresence(prefix)
 	a.fileTrack = filelock.NewFileTracker()
 	a.restoreMainTrackedFileState(prefix)
@@ -523,6 +526,7 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 	a.todoMu.Unlock()
 
 	a.emitToTUI(SessionRestoredEvent{})
+	a.publishRestoredQuestions()
 	a.emitToTUI(ForkSessionEvent{Parts: forkMsgParts(forkMsg)})
 	a.emitToTUI(ToastEvent{
 		Message: "Removed the tail user message from the current session and loaded it into the composer",
@@ -633,6 +637,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.scheduleMemoryExtraction(oldSessionDir)
 
 	a.ctxMgr.RestoreMessages(prefix)
+	a.restoreQuestions(prefix)
 	a.installContextNoticePresence(prefix)
 	// The forked session carries the copied history prefix: dynamic MCP
 	// mounts could be mis-anchored against it, so this run stays on
@@ -649,6 +654,7 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	}
 
 	a.emitToTUI(SessionRestoredEvent{})
+	a.publishRestoredQuestions()
 	a.emitToTUI(ForkSessionEvent{Parts: forkMsgParts(forkMsg)})
 	a.emitToTUI(ToastEvent{
 		Message: fmt.Sprintf("Forked session %s from %s with %d prior messages; draft loaded into composer", filepath.Base(newSessionDir), forkedFrom, seededMessages),
