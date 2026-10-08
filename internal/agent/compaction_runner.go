@@ -380,7 +380,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// records the names before the head goes away. Runtime-owned like the todo
 	// snapshot above: whatever the summarizer wrote is replaced.
 	skillNames, skillsOmitted := collectCheckpointSkillNames(headSnapshot)
-	summaryText = ensureCheckpointSkillsSection(summaryText, skillNames, skillsOmitted)
+	summaryText = ensureCheckpointSkillsSection(summaryText, skillNames, skillsOmitted, checkpointModelLoadable(a.visibleSkillsSnapshot()))
 	// The runtime owns the continuation state a weak or fallback summary must
 	// not drop: the authoritative latest request (a Done rejected reason
 	// included) and the tool calls whose results never reached the transcript.

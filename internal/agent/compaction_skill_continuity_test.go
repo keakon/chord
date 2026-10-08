@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
@@ -27,8 +28,18 @@ func skillInvocationMessages(callID, skillName string) []message.Message {
 	}
 }
 
+// modelLoadableSkillNames returns a catalog predicate whose loadable set is
+// exactly the given names, mirroring a model-facing catalog with those entries.
+func modelLoadableSkillNames(names ...string) func(string) bool {
+	metas := make([]*skill.Meta, 0, len(names))
+	for _, name := range names {
+		metas = append(metas, &skill.Meta{Name: name})
+	}
+	return checkpointModelLoadable(metas)
+}
+
 func checkpointMessageWithSkills(names []string, omitted int) message.Message {
-	summary := ensureCheckpointSkillsSection("## Next Step\n- keep going", names, omitted)
+	summary := ensureCheckpointSkillsSection("## Next Step\n- keep going", names, omitted, modelLoadableSkillNames(names...))
 	return message.Message{
 		Role:                message.RoleUser,
 		IsCompactionSummary: true,
@@ -57,7 +68,7 @@ func TestCheckpointSkillsSectionRecordsArchivedInvocations(t *testing.T) {
 		t.Fatalf("names = %#v, want [code-review dataviz]", names)
 	}
 
-	section := ensureCheckpointSkillsSection("## Progress\n- read the diff", names, omitted)
+	section := ensureCheckpointSkillsSection("## Progress\n- read the diff", names, omitted, modelLoadableSkillNames(names...))
 	for _, want := range []string{
 		"## Progress",
 		checkpointSkillsHeading,
@@ -68,6 +79,56 @@ func TestCheckpointSkillsSectionRecordsArchivedInvocations(t *testing.T) {
 		if !strings.Contains(section, want) {
 			t.Errorf("section missing %q:\n%s", want, section)
 		}
+	}
+}
+
+// A recorded name the current model-facing catalog does not expose cannot be
+// loaded again — the skill tool refuses it — so the section must not invite
+// that call. The name stays in the record, listed apart with the archived
+// history and the user as recovery paths, and the reload hint survives only
+// while some recorded name is still loadable.
+func TestCheckpointSkillsSectionMarksUnloadableNames(t *testing.T) {
+	names := []string{"code-review", "manual-skill"}
+	// The predicate reads the model-facing catalog, which has already dropped
+	// the manual-only entry.
+	section := ensureCheckpointSkillsSection("## Progress\n- read the diff", names, 0,
+		checkpointModelLoadable([]*skill.Meta{{Name: "code-review"}}))
+
+	labelIdx := strings.Index(section, checkpointSkillsNotLoadableLabel)
+	if labelIdx < 0 {
+		t.Fatalf("section missing the not-loadable label:\n%s", section)
+	}
+	loadableIdx := strings.Index(section, "- code-review")
+	manualIdx := strings.Index(section, "- manual-skill")
+	if loadableIdx < 0 || manualIdx < 0 {
+		t.Fatalf("both names must stay recorded:\n%s", section)
+	}
+	if loadableIdx > labelIdx || manualIdx < labelIdx {
+		t.Errorf("each name must sit under its own label:\n%s", section)
+	}
+	if !strings.Contains(section, checkpointSkillsReloadHint) {
+		t.Errorf("a loadable name keeps the reload hint:\n%s", section)
+	}
+
+	checkpoint := buildCompactionCheckpointMessage(section, []string{"history-1.md"}, message.CompactionSummaryModeTruncateOnly, nil)
+	parsedNames, parsedOmitted := parseCheckpointSkillNames(checkpoint)
+	if strings.Join(parsedNames, ",") != "code-review,manual-skill" || parsedOmitted != 0 {
+		t.Fatalf("parsed %#v / omitted %d, want both names and no overflow", parsedNames, parsedOmitted)
+	}
+
+	// The label answers to the catalog, not to the record: an all-loadable set
+	// renders without it, and an all-unloadable set drops the reload hint.
+	allLoadable := ensureCheckpointSkillsSection("## Progress", names, 0,
+		checkpointModelLoadable([]*skill.Meta{{Name: "code-review"}, {Name: "manual-skill"}}))
+	if strings.Contains(allLoadable, checkpointSkillsNotLoadableLabel) {
+		t.Errorf("every name is loadable, so the label must not appear:\n%s", allLoadable)
+	}
+	noneLoadable := ensureCheckpointSkillsSection("## Progress", []string{"manual-skill"}, 0, checkpointModelLoadable(nil))
+	if strings.Contains(noneLoadable, checkpointSkillsReloadHint) {
+		t.Errorf("no name is loadable, so the reload hint must go:\n%s", noneLoadable)
+	}
+	if !strings.Contains(noneLoadable, checkpointSkillsNotLoadableLabel) {
+		t.Errorf("the unloadable name must be listed under the label:\n%s", noneLoadable)
 	}
 }
 
@@ -90,7 +151,7 @@ func TestCheckpointSkillsSectionIgnoresFailedInvocation(t *testing.T) {
 	if names, _ := collectCheckpointSkillNames(head); len(names) != 0 {
 		t.Fatalf("names = %#v, want none", names)
 	}
-	if section := ensureCheckpointSkillsSection("## Progress\n- nothing", nil, 0); strings.Contains(section, checkpointSkillsHeading) {
+	if section := ensureCheckpointSkillsSection("## Progress\n- nothing", nil, 0, modelLoadableSkillNames()); strings.Contains(section, checkpointSkillsHeading) {
 		t.Fatalf("empty skill set should render no section:\n%s", section)
 	}
 }
@@ -128,7 +189,7 @@ func TestCheckpointSkillsSectionNotDuplicatedByPriorCheckpointCarry(t *testing.T
 	}
 
 	names, omitted := collectCheckpointSkillNames([]message.Message{prior})
-	summary := ensureCheckpointSkillsSection("## Progress\n- continued", names, omitted)
+	summary := ensureCheckpointSkillsSection("## Progress\n- continued", names, omitted, modelLoadableSkillNames(names...))
 	summary = appendPriorCheckpointCarry(summary, carry)
 	if got := strings.Count(summary, checkpointSkillsHeading); got != 1 {
 		t.Fatalf("skills section appears %d times, want exactly 1:\n%s", got, summary)
@@ -141,7 +202,7 @@ func TestEnsureCheckpointSkillsSectionReplacesSummarizerCopy(t *testing.T) {
 	summarizerWrote := "## Progress\n- worked\n\n" + checkpointSkillsHeading +
 		"\nSome prose the model wrote.\n- invented-skill\n\n## Next Step\n- go on"
 
-	out := ensureCheckpointSkillsSection(summarizerWrote, []string{"code-review"}, 0)
+	out := ensureCheckpointSkillsSection(summarizerWrote, []string{"code-review"}, 0, modelLoadableSkillNames("code-review"))
 	if strings.Contains(out, "invented-skill") {
 		t.Errorf("summarizer-authored skill list must not survive:\n%s", out)
 	}
@@ -171,7 +232,7 @@ func TestCheckpointSkillsSectionCapsAndReportsOverflow(t *testing.T) {
 	if omitted != total-checkpointMaxSkillNames {
 		t.Fatalf("omitted = %d, want %d", omitted, total-checkpointMaxSkillNames)
 	}
-	section := renderCheckpointSkillsSection(names, omitted)
+	section := renderCheckpointSkillsSection(names, omitted, modelLoadableSkillNames(names...))
 	if !strings.Contains(section, "3 more omitted") {
 		t.Fatalf("section should report the overflow:\n%s", section)
 	}
@@ -245,8 +306,10 @@ func TestApplyCompactionDraftResetsInvokedSkills(t *testing.T) {
 // the same two things: the names in its checkpoint and an honest state
 // afterwards.
 func TestSubAgentCheckpointRecordsLoadedSkills(t *testing.T) {
-	_, sub := newMixedBatchTestSubAgent(t)
+	parent, sub := newMixedBatchTestSubAgent(t)
 	defer sub.cancel()
+	parent.agentConfigs = map[string]*config.AgentConfig{"worker": {Name: "worker"}}
+	parent.SetSkills([]*skill.Meta{{Name: "code-review"}})
 
 	if got := subAgentCheckpointSkills(sub, nil); got != "none" {
 		t.Fatalf("skills line with nothing loaded = %q, want \"none\"", got)
@@ -260,9 +323,59 @@ func TestSubAgentCheckpointRecordsLoadedSkills(t *testing.T) {
 	if !strings.Contains(line, "code-review") || !strings.Contains(line, "call `skill` again") {
 		t.Fatalf("skills line = %q, want the name plus the re-load hint", line)
 	}
+	if strings.Contains(line, subAgentCheckpointNotLoadablePrefix) {
+		t.Fatalf("a catalog-backed name must not be marked not loadable: %q", line)
+	}
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 7, "proactive", "archives/sub-1.md")
 	if !strings.Contains(checkpoint, "- Skills loaded earlier: code-review") {
 		t.Fatalf("checkpoint missing the skills line:\n%s", checkpoint)
+	}
+}
+
+// A name the worker's model-facing catalog does not expose must not come with a
+// reload hint the worker cannot satisfy: LoadSkill resolves against that same
+// catalog. The name stays in the record — carry parses the first line — and the
+// not-loadable line carries the actual recovery paths.
+func TestSubAgentCheckpointMarksUnloadableSkills(t *testing.T) {
+	parent, sub := newMixedBatchTestSubAgent(t)
+	defer sub.cancel()
+	parent.agentConfigs = map[string]*config.AgentConfig{"worker": {Name: "worker"}}
+	parent.SetSkills([]*skill.Meta{
+		{Name: "code-review"},
+		{Name: "manual-skill", DisableModelInvocation: true},
+	})
+
+	sub.MarkSkillInvoked(&skill.Meta{Name: "code-review"})
+	sub.MarkSkillInvoked(&skill.Meta{Name: "manual-skill", DisableModelInvocation: true})
+
+	line := subAgentCheckpointSkills(sub, nil)
+	if !strings.Contains(line, subAgentCheckpointSkillsHint) {
+		t.Fatalf("code-review is loadable, so the reload hint stays: %q", line)
+	}
+	if !strings.Contains(line, subAgentCheckpointNotLoadablePrefix+"manual-skill") {
+		t.Fatalf("manual-skill must be listed as not loadable: %q", line)
+	}
+	if strings.Contains(line, subAgentCheckpointNotLoadablePrefix+"code-review") {
+		t.Fatalf("code-review must not be listed as not loadable: %q", line)
+	}
+	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 7, "proactive", "archives/sub-1.md")
+	names, omitted, _ := parseSubAgentCheckpointSkills(checkpoint)
+	if strings.Join(names, ",") != "code-review,manual-skill" || omitted != 0 {
+		t.Fatalf("parsed %#v / omitted %d, want both names carried", names, omitted)
+	}
+
+	// With nothing loadable the hint must go, but the name stays recorded.
+	sub.restoreInvokedSkills(nil)
+	sub.MarkSkillInvoked(&skill.Meta{Name: "manual-skill", DisableModelInvocation: true})
+	noneLine := subAgentCheckpointSkills(sub, nil)
+	if strings.Contains(noneLine, subAgentCheckpointSkillsHint) {
+		t.Fatalf("no name is loadable, so the reload hint must go: %q", noneLine)
+	}
+	if !strings.Contains(noneLine, subAgentCheckpointNotLoadablePrefix+"manual-skill") {
+		t.Fatalf("the unloadable name must be listed under the label: %q", noneLine)
+	}
+	if names, _, _ := parseSubAgentCheckpointSkills(buildSubAgentStructuredCheckpoint(sub, nil, 7, "proactive", "archives/sub-2.md")); strings.Join(names, ",") != "manual-skill" {
+		t.Fatalf("parsed %#v, want [manual-skill]", names)
 	}
 }
 

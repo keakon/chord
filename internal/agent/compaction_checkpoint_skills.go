@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/skill"
 )
 
 // Checkpoint skill continuity.
@@ -31,14 +32,29 @@ import (
 // The section is built from runtime facts — the successful skill calls in the
 // archived head, merged with the names the previous checkpoint recorded — and
 // re-merged on every compaction, so recursion cannot erode it the way it
-// erodes a summarizer-written section.
+// erodes a summarizer-written section. Names the current model-facing catalog
+// does not expose — a manual-only skill, one the ruleset denies, or one that
+// left the catalog — are marked instead of being offered to a `skill` call the
+// execution path refuses; the archived history and the user remain their
+// recovery paths.
 const (
 	checkpointSkillsHeading = "## Skills Invoked Earlier"
+	// checkpointSkillsFact and checkpointSkillsReloadHint introduce the names
+	// the model can still load; the reload hint is dropped when none of them is
+	// loadable, so the section never asks for a call that would be refused.
+	checkpointSkillsFact       = "Loaded during the archived conversation; the instructions themselves are no longer in context, only these names."
+	checkpointSkillsReloadHint = "Call `skill` again with one of them when the continuation still has to follow that workflow — do not assume the content from the name."
+	// checkpointSkillsNotLoadableLabel introduces the names the model cannot
+	// load now, for the same three reasons the model face excludes a skill. They
+	// stay in the record — the continuation may still be following their
+	// workflow — but a reload attempt would fail, so the recovery paths are the
+	// archived history and the user.
+	checkpointSkillsNotLoadableLabel = "Not loadable by you — do not call `skill` for these; read the archived history if their workflow must continue, or ask the user to load one again:"
 	// checkpointMaxSkillNames bounds the list. Overflow is reported as a count
 	// and the archived history keeps the full record. Names are listed
-	// alphabetically rather than by recency: the cap is far above the number of
-	// skills a session realistically loads, so a stable order is worth more
-	// than choosing which name to drop.
+	// alphabetically within each group rather than by recency: the cap is far
+	// above the number of skills a session realistically loads, so a stable
+	// order is worth more than choosing which name to drop.
 	checkpointMaxSkillNames = 12
 	// checkpointSkillNameMaxLen rejects a parsed line that cannot be a skill
 	// name, so the omission note and any prose a summarizer left inside the
@@ -184,10 +200,11 @@ func stripCheckpointSkillsSection(body string) string {
 // carries with the authoritative one. Called on every checkpoint path — model
 // summary, structured fallback, truncate-only and model-driven — because the
 // record is a runtime fact and must not depend on what a summarizer chose to
-// restate.
-func ensureCheckpointSkillsSection(summary string, names []string, omitted int) string {
+// restate. modelLoadable answers whether the model can still call `skill` for
+// a recorded name.
+func ensureCheckpointSkillsSection(summary string, names []string, omitted int, modelLoadable func(string) bool) string {
 	summary = stripCheckpointSkillsSection(summary)
-	section := renderCheckpointSkillsSection(names, omitted)
+	section := renderCheckpointSkillsSection(names, omitted, modelLoadable)
 	switch {
 	case section == "":
 		return summary
@@ -198,24 +215,65 @@ func ensureCheckpointSkillsSection(summary string, names []string, omitted int) 
 	}
 }
 
+// checkpointModelLoadable reports whether the model can still load a recorded
+// skill by name. The model-facing catalog is the only authority: a manual-only
+// skill, a name the ruleset now denies, and a skill that left the catalog all
+// fail the `skill` tool the same way, so the section must not send the model
+// into a call that is refused.
+func checkpointModelLoadable(skills []*skill.Meta) func(string) bool {
+	visible := make(map[string]struct{}, len(skills))
+	for _, meta := range skills {
+		if meta != nil && meta.Name != "" {
+			visible[meta.Name] = struct{}{}
+		}
+	}
+	return func(name string) bool {
+		_, ok := visible[name]
+		return ok
+	}
+}
+
 // renderCheckpointSkillsSection renders the section, or "" when the archived
 // head loaded no skills. The wording has to keep the model from reading the
-// list as instructions that are still in effect: the names are all that
-// survived, so re-invoking is how it gets the workflow back.
-func renderCheckpointSkillsSection(names []string, omitted int) string {
+// list as instructions that are still in effect: the instructions themselves
+// are gone, so re-invoking is how it gets a workflow back — and a name the
+// model cannot load is listed apart, with its own recovery paths, instead of
+// inviting the refused call.
+func renderCheckpointSkillsSection(names []string, omitted int, modelLoadable func(string) bool) string {
 	if len(names) == 0 {
 		return ""
 	}
+	loadable := make([]string, 0, len(names))
+	notLoadable := make([]string, 0, len(names))
+	for _, name := range names {
+		if modelLoadable(name) {
+			loadable = append(loadable, name)
+			continue
+		}
+		notLoadable = append(notLoadable, name)
+	}
 	var sb strings.Builder
 	sb.WriteString(checkpointSkillsHeading)
-	sb.WriteString("\nLoaded during the archived conversation; the instructions themselves are no longer in context, only these names. Call `skill` again with one of them when the continuation still has to follow that workflow — do not assume the content from the name.\n")
-	for _, name := range names {
-		sb.WriteString("- ")
-		sb.WriteString(name)
-		sb.WriteByte('\n')
+	sb.WriteString("\n")
+	sb.WriteString(checkpointSkillsFact)
+	if len(loadable) > 0 {
+		sb.WriteString(" ")
+		sb.WriteString(checkpointSkillsReloadHint)
+		for _, name := range loadable {
+			sb.WriteString("\n- ")
+			sb.WriteString(name)
+		}
+	}
+	if len(notLoadable) > 0 {
+		sb.WriteString("\n")
+		sb.WriteString(checkpointSkillsNotLoadableLabel)
+		for _, name := range notLoadable {
+			sb.WriteString("\n- ")
+			sb.WriteString(name)
+		}
 	}
 	if omitted > 0 {
-		fmt.Fprintf(&sb, "- (%d more omitted; the archived history holds them)\n", omitted)
+		fmt.Fprintf(&sb, "\n- (%d more omitted; the archived history holds them)", omitted)
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	return sb.String()
 }

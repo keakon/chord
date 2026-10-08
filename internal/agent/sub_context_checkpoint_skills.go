@@ -26,10 +26,19 @@ import (
 // state-derived names with the names the previous checkpoint recorded — the
 // same carry the main agent's skills section performs — and the newest
 // checkpoint has itself merged everything older.
+//
+// A recorded name this worker's model-facing catalog does not expose — a
+// manual-only skill, one the worker's ruleset denies, or one that left the
+// catalog — cannot be loaded again by the model: LoadSkill resolves names
+// against that same catalog and refuses the rest. Such names stay in the
+// record but are listed apart, because a reload hint they cannot satisfy is
+// worse than no hint at all.
 const (
 	subAgentCheckpointSkillsPrefix       = "- Skills loaded earlier: "
 	subAgentCheckpointOmittedNamesPrefix = "- Omitted skill names carried: "
 	subAgentCheckpointSkillsHint         = " (instructions may have been removed above; call `skill` again when a workflow still applies)"
+	subAgentCheckpointNotLoadablePrefix  = "- Skills not loadable by you: "
+	subAgentCheckpointNotLoadableHint    = " (cannot be re-loaded by you; the archived history holds their instructions)"
 )
 
 // subAgentCheckpointSkillOmittedRe parses the overflow note back, so an
@@ -38,17 +47,26 @@ const (
 var subAgentCheckpointSkillOmittedRe = regexp.MustCompile(`^\(\+(\d+) more\)$`)
 
 // subAgentCheckpointSkills renders the skills line body, or "none" when the
-// subagent never loaded one.
+// subagent never loaded one. The reload hint appears only when at least one
+// recorded name is still loadable, so the line never invites a `skill` call
+// the worker's own catalog would refuse.
 func subAgentCheckpointSkills(s *SubAgent, messages []message.Message) string {
 	names, omitted, omittedNames := collectSubAgentCheckpointSkillNamesWithOverflow(s, messages)
 	if len(names) == 0 {
 		return "none"
 	}
+	notLoadable := subAgentNotLoadableSkillNames(s, names)
 	parts := append([]string(nil), names...)
 	if omitted > 0 {
 		parts = append(parts, fmt.Sprintf("(+%d more)", omitted))
 	}
-	result := strings.Join(parts, ", ") + subAgentCheckpointSkillsHint
+	result := strings.Join(parts, ", ")
+	if len(notLoadable) < len(names) {
+		result += subAgentCheckpointSkillsHint
+	}
+	if len(notLoadable) > 0 {
+		result += "\n" + subAgentCheckpointNotLoadablePrefix + strings.Join(notLoadable, ", ") + subAgentCheckpointNotLoadableHint
+	}
 	if len(omittedNames) > 0 {
 		encoded, err := json.Marshal(omittedNames)
 		if err == nil {
@@ -56,6 +74,21 @@ func subAgentCheckpointSkills(s *SubAgent, messages []message.Message) string {
 		}
 	}
 	return result
+}
+
+// subAgentNotLoadableSkillNames returns the recorded names this worker's
+// model-facing catalog no longer exposes, in input order. Judged by the same
+// catalog LoadSkill resolves against, so the two cannot disagree about which
+// names a `skill` call can still reach.
+func subAgentNotLoadableSkillNames(s *SubAgent, names []string) []string {
+	modelLoadable := checkpointModelLoadable(s.visibleSkillsSnapshot())
+	var notLoadable []string
+	for _, name := range names {
+		if !modelLoadable(name) {
+			notLoadable = append(notLoadable, name)
+		}
+	}
+	return notLoadable
 }
 
 // collectSubAgentCheckpointSkillNamesWithOverflow returns the skills whose instructions
