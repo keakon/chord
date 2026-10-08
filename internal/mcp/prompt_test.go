@@ -9,7 +9,7 @@ import (
 func TestConnectedServersPromptBlockFiltersAllowedTools(t *testing.T) {
 	ctx := context.Background()
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{
 			{Name: "alpha_tool", Description: "Search"},

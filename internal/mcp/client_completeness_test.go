@@ -24,7 +24,7 @@ func (s *scriptedMCPTransport) Send(ctx context.Context, req JSONRPCRequest) (JS
 }
 
 func TestClientListToolsPagination(t *testing.T) {
-	for _, end := range []string{``, `,"nextCursor":null`} {
+	for _, end := range []string{``, `,"nextCursor":null`, `,"nextCursor":""`} {
 		t.Run(end, func(t *testing.T) {
 			calls := 0
 			transport := &scriptedMCPTransport{fakeTransport: newFakeTransport()}
@@ -45,9 +45,9 @@ func TestClientListToolsPagination(t *testing.T) {
 					if params["cursor"] != " opaque cursor " {
 						t.Fatalf("cursor = %v", params)
 					}
-					result = `{"tools":[],"nextCursor":""}`
+					result = `{"tools":[],"nextCursor":" "}`
 				case 3:
-					if cursor, exists := params["cursor"]; !exists || cursor != "" {
+					if cursor, exists := params["cursor"]; !exists || cursor != " " {
 						t.Fatalf("cursor = %v", params)
 					}
 					result = `{"tools":[{"name":"second"}]` + end + `}`
@@ -64,10 +64,36 @@ func TestClientListToolsPagination(t *testing.T) {
 	}
 }
 
+func TestClientListToolsEmptyCursorEndsFirstPage(t *testing.T) {
+	for _, page := range []string{
+		`{"tools":[],"nextCursor":""}`,
+		`{"tools":[{"name":"first"}],"nextCursor":""}`,
+	} {
+		t.Run(page, func(t *testing.T) {
+			calls := 0
+			tr := &scriptedMCPTransport{fakeTransport: newFakeTransport()}
+			tr.send = func(context.Context, JSONRPCRequest) (JSONRPCResponse, error) {
+				calls++
+				return JSONRPCResponse{Result: json.RawMessage(page)}, nil
+			}
+			defs, err := NewClientWithInfo("sample", tr, testClientInfo).ListTools(t.Context())
+			if err != nil || calls != 1 {
+				t.Fatalf("defs=%v calls=%d err=%v", defs, calls, err)
+			}
+			var want toolsListResult
+			if err := json.Unmarshal([]byte(page), &want); err != nil {
+				t.Fatal(err)
+			}
+			if len(defs) != len(want.Tools) {
+				t.Fatalf("defs=%v want=%v", defs, want.Tools)
+			}
+		})
+	}
+}
+
 func TestClientListToolsRejectsIncompleteDirectory(t *testing.T) {
 	for _, tc := range []struct{ name, first, second, want string }{
 		{"cycle", `{"tools":[],"nextCursor":"a"}`, `{"tools":[],"nextCursor":"a"}`, "repeated cursor"},
-		{"empty cursor cycle", `{"tools":[],"nextCursor":""}`, `{"tools":[],"nextCursor":""}`, "repeated cursor"},
 		{"duplicate", `{"tools":[{"name":"same"}],"nextCursor":"a"}`, `{"tools":[{"name":"same","description":"different"}]}`, "duplicate tool name"},
 		{"bad cursor", `{"tools":[],"nextCursor":3}`, `{}`, "decode"},
 		{"missing tools", `{}`, `{}`, "tools array"},

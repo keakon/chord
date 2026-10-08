@@ -1249,6 +1249,8 @@ orchestration:
 
 ## MCP
 
+Chord supports MCP protocol `2025-06-18`. The server must negotiate that version; HTTP requests after initialization include the negotiated `MCP-Protocol-Version` header.
+
 MCP servers connect in two ways: Chord launches a local command and exchanges JSON-RPC over stdio, or it connects to a remote HTTP endpoint.
 
 ### Local command (stdio)

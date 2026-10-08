@@ -19,7 +19,7 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
   *'"method":"initialize"'*)
-    printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"sample","version":"1"}}}\n' "$id"
+    printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"sample","version":"1"}}}\n' "$id"
     ;;
   *'"method":"tools/list"'*)
     printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"sample_ping","description":"ping","inputSchema":{"type":"object"}}]}}\n' "$id"

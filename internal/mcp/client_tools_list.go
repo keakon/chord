@@ -71,7 +71,12 @@ func (c *Client) ListTools(ctx context.Context) ([]MCPToolDef, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("mcp tools/list %s: %w", c.name, err)
 		}
-		if result.NextCursor == nil {
+		if result.NextCursor == nil || *result.NextCursor == "" {
+			validators := compileToolOutputValidators(defs)
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("mcp tools/list %s: %w", c.name, err)
+			}
+			c.outputValidators.Store(validators)
 			log.Debugf("mcp tools discovered server=%v count=%v", c.name, len(defs))
 			return defs, nil
 		}

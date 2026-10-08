@@ -123,7 +123,7 @@ func (f *fakeTransport) notifCount() int {
 func TestClient_Initialize(t *testing.T) {
 	ft := newFakeTransport()
 	ft.onMethod("initialize", initializeResult{
-		ProtocolVersion: "2024-11-05",
+		ProtocolVersion: protocolVersion,
 		Capabilities:    map[string]any{},
 		ServerInfo: struct {
 			Name    string `json:"name"`
@@ -153,7 +153,7 @@ func TestClient_Initialize(t *testing.T) {
 
 func TestClient_ListTools(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{
 			{Name: "read_file", Description: "Read a file", InputSchema: map[string]any{"type": "object"}},
@@ -182,7 +182,7 @@ func TestClient_ListTools(t *testing.T) {
 
 func TestClient_CallTool(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
 			{Type: "text", Text: "hello world"},
@@ -204,7 +204,7 @@ func TestClient_CallTool(t *testing.T) {
 
 func TestClient_CallTool_MultipleContent(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	imgBytes := encodeToolPNG(t)
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
@@ -247,7 +247,7 @@ func encodeToolPNG(t *testing.T) []byte {
 
 func TestClient_CallTool_SkipsUnreadableImage(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/call", toolCallResult{
 		Content: []toolCallContent{
 			{Type: "text", Text: "ok"},
@@ -273,7 +273,7 @@ func TestClient_CallTool_SkipsUnreadableImage(t *testing.T) {
 
 func TestClient_CallTool_Error(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/call", toolCallResult{
 		IsError: true,
 		Content: []toolCallContent{
@@ -326,7 +326,7 @@ func TestClient_Close(t *testing.T) {
 
 func TestMCPTool_Interface(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{
 			{Name: "test_tool", Description: "A test tool", InputSchema: map[string]any{"type": "object"}},
@@ -368,7 +368,7 @@ func TestMCPTool_Interface(t *testing.T) {
 
 func TestMCPTool_Execute(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{
 			{Name: "echo", Description: "Echo tool", InputSchema: map[string]any{"type": "object"}},
@@ -402,7 +402,7 @@ func TestMCPTool_Execute(t *testing.T) {
 
 func TestDiscoverAllToolsSkipsEmptyName(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{
 			{Name: "", Description: "Bad tool", InputSchema: nil},
@@ -433,7 +433,7 @@ func TestDiscoverAllToolsSkipsEmptyName(t *testing.T) {
 
 func TestDiscoverAllToolsFiltersAllowedTools(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{
 			{Name: "alpha_tool", Description: "Search"},
@@ -486,7 +486,7 @@ func TestKnownRegisteredToolNamesUsesAllowedToolsBeforeDiscovery(t *testing.T) {
 
 func TestDiscoverAllToolsWithoutAllowedToolsKeepsAllTools(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{
 			{Name: "alpha_tool", Description: "Search"},
@@ -514,7 +514,7 @@ func TestDiscoverAllToolsWithoutAllowedToolsKeepsAllTools(t *testing.T) {
 
 func TestDiscoverAllToolsUsesCachedDefinitionsOnRefreshFailure(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{Tools: []MCPToolDef{{Name: "lookup", Description: "Lookup"}}})
 
 	ctx := context.Background()
@@ -538,7 +538,7 @@ func TestDiscoverAllToolsUsesCachedDefinitionsOnRefreshFailure(t *testing.T) {
 
 func TestConnectAllRefreshesAllowedTools(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{
 			{Name: "alpha_tool", Description: "Search"},
@@ -599,7 +599,7 @@ func TestHTTPTransport_Send(t *testing.T) {
 		switch req.Method {
 		case "initialize":
 			result, _ := json.Marshal(initializeResult{
-				ProtocolVersion: "2024-11-05",
+				ProtocolVersion: protocolVersion,
 			})
 			resp.Result = result
 		case "tools/list":
@@ -669,7 +669,7 @@ func TestHTTPTransport_SSE_Stream(t *testing.T) {
 		resp := JSONRPCResponse{JSONRPC: "2.0", ID: req.ID}
 		switch req.Method {
 		case "initialize":
-			b, _ := json.Marshal(initializeResult{ProtocolVersion: "2024-11-05"})
+			b, _ := json.Marshal(initializeResult{ProtocolVersion: protocolVersion})
 			resp.Result = b
 		case "tools/list":
 			b, _ := json.Marshal(toolsListResult{Tools: []MCPToolDef{{Name: "from_sse", Description: "ok"}}})
@@ -777,7 +777,7 @@ func TestManagerConnectAll_RetriesTransientInitializeErrorAndRecovers(t *testing
 		attempts++
 		ft := newFakeTransport()
 		ft.onMethod("initialize", initializeResult{
-			ProtocolVersion: "2024-11-05",
+			ProtocolVersion: protocolVersion,
 			Capabilities:    map[string]any{},
 			ServerInfo: struct {
 				Name    string `json:"name"`
@@ -846,7 +846,7 @@ func TestManagerConnectAll_FinalFailureStopsRetryingAndSetsError(t *testing.T) {
 	mgr.newClientFactory = func(_ context.Context, cfg ServerConfig) (*Client, error) {
 		attempts++
 		ft := newFakeTransport()
-		ft.onMethod("initialize", initializeResult{})
+		ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 		ft.onSendError("initialize", fmt.Errorf("mcp http: send request: net/http: TLS handshake timeout"))
 		return NewClientWithInfo(cfg.Name, ft, testClientInfo), nil
 	}
@@ -997,7 +997,7 @@ func TestClient_AllocID_Concurrent(t *testing.T) {
 func TestFullWorkflow_FakeTransport(t *testing.T) {
 	ft := newFakeTransport()
 	ft.onMethod("initialize", initializeResult{
-		ProtocolVersion: "2024-11-05",
+		ProtocolVersion: protocolVersion,
 		ServerInfo: struct {
 			Name    string `json:"name"`
 			Version string `json:"version"`

@@ -1098,6 +1098,8 @@ orchestration:
 
 ## MCP
 
+Chord 支持 MCP 协议 `2025-06-18`，服务端需要协商到这一版本。初始化后的 HTTP 请求会带上协商得到的 `MCP-Protocol-Version` 请求头。
+
 MCP server 有两种接入方式：本地命令（stdio）或远程 HTTP 地址（url）。
 
 ### 本地命令（stdio）

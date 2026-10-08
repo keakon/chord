@@ -157,7 +157,9 @@ Tools exposed by configured MCP servers are registered as `mcp_<server>_<tool>` 
 
 Tool discovery follows all pages before updating the directory. A discovery is limited to 1,000 pages, 10,000 tools, and 32 MiB of combined result JSON. A repeated cursor, duplicate remote tool name, invalid page, or exceeded limit fails discovery; an earlier complete directory is kept when available. Check the server's list response and Chord's log if tools are missing.
 
-Tool results include text and embedded text resources. Images, including embedded image resources, use the same image normalization described above. When there are no content blocks, a structured JSON result becomes text; when content blocks exist, the structured result is not appended again. Resource links show their name and URI without fetching them. Audio, other binary resources, and unsupported content types produce an omission notice. An unreadable image also produces a notice while preserving the text. Results marked as errors remain failed tool calls.
+Tool results include text and embedded text resources. Images, including embedded image resources, use the same image normalization described above. Structured JSON results become text unless an existing text block already contains the same JSON. Resource links show their name and URI without fetching them. Audio, other binary resources, and unsupported content types produce an omission notice. An unreadable image also produces a notice while preserving the text. Results marked as errors remain failed tool calls.
+
+When a server declares `outputSchema`, Chord validates successful `structuredContent` against it. A mismatch, missing structured content, or an invalid or unsupported schema adds a warning while preserving the result text and usable images. The warning does not trigger an automatic retry; check an action's effects before repeating it. Schemas use JSON Schema draft 2020-12 by default or a supported draft declared with `$schema`; references must resolve within the schema document, with no file reads or network requests. Validation checks structure, not factual accuracy.
 
 ## Related
 

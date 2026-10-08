@@ -12,6 +12,8 @@
 
 ### 不兼容变更
 
+- MCP 连接要求协议 `2025-06-18`；协商到其他版本的服务端会被拒绝。旧服务端需先升级再连接。
+
 - Headless 问答改用按 ID 的多题集合与 `action` / `operation_id` 回执协议，状态包含所有可见待答题目与分页的已关闭历史。集成方需同步更新选项 ID、展示/介入与终态处理，并通过 `question_ids` 补齐历史页之外的已知决策。
 
 - TUI 在主视图中使用 `Alt+R` 切换角色，`Shift+Tab` 在输入模式与普通模式中都切换 Agent 视图。`switch_role` 和 `switch_agent` 仍可自定义，建议分别绑定不同按键。
@@ -85,6 +87,8 @@
 - 新增 `web_search` 工具：通过 provider 的 hosted 搜索工具检索网络。默认关闭，需要在支持 hosted 搜索的 Anthropic Messages 或 OpenAI Responses 模型上用 `compat.hosted_tools: [web_search]` 开启。每次搜索另发一条声明 hosted 工具的请求，Chord 返回摘要和编号来源，主对话请求从不声明该工具。可用 `allowed_domains` / `blocked_domains` 过滤。同一个列表还能启用顶层 `hosted_tools` 目录里定义的其他服务端工具：工具的本地工具面与按 provider 类型的原始 wire 声明都写在配置里。详见[配置与认证：Hosted tools](./docs/configuration_CN.md#hosted-tools)。
 
 ### 改进
+
+- MCP 工具结果会按服务器声明的输出 schema 校验；schema 有问题时附上警告并保留可用输出，不会自动重复调用工具。
 
 - 侧栏临时出现的 Agent、后台任务和 Todo 现在排在固定的模型、用量、集成与仓库信息之后，不再推动上方内容。聚焦 Agent 时保留其状态图标，聚焦消息卡片时使用不同形状的轨道；错误文字、助手标签和思考正文的对比度提高。
 

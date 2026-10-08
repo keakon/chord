@@ -316,7 +316,10 @@ func (t *StdioTransport) removePending(id int) {
 //   - extra configured headers (for example x-api-key) sent with every request
 // ---------------------------------------------------------------------------
 
-const mcpSessionHeader = "Mcp-Session-Id"
+const (
+	mcpSessionHeader         = "Mcp-Session-Id"
+	mcpProtocolVersionHeader = "MCP-Protocol-Version"
+)
 
 // mcpMaxRedirects bounds a redirect chain. Go's default is 10; a JSON-RPC
 // endpoint that needs more than a couple of hops is misconfigured, not slow.
@@ -328,13 +331,14 @@ type HTTPTransport struct {
 	headers map[string]string // extra headers sent with every request
 	client  *http.Client
 
-	mu        sync.Mutex
-	sessionID string
+	mu              sync.Mutex
+	sessionID       string
+	protocolVersion string
 }
 
 // NewHTTPTransport creates an HTTP-based transport for the given URL.
 // headers are sent with every request; protocol-managed headers
-// (Content-Type, Accept, Mcp-Session-Id) always take precedence.
+// (Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version) always take precedence.
 func NewHTTPTransport(endpoint string, headers map[string]string) *HTTPTransport {
 	t := &HTTPTransport{
 		url:     endpoint,
@@ -398,24 +402,34 @@ func (t *HTTPTransport) applyHeaders(h http.Header) {
 
 // applyProtocolHeaders strips any user-configured values for the protocol-managed
 // headers, then sets the protocol values. Content-Type and Accept are always
-// set by the wire protocol, and Mcp-Session-Id is set by applySession when a
+// set by the wire protocol, and Mcp-Session-Id is set by applyConnectionHeaders when a
 // session exists; without this strip a user-configured Mcp-Session-Id would be
 // sent on the initial request before the server has assigned a session.
 func (t *HTTPTransport) applyProtocolHeaders(h http.Header) {
-	for _, k := range []string{"Content-Type", "Accept", mcpSessionHeader} {
+	for _, k := range []string{"Content-Type", "Accept", mcpSessionHeader, mcpProtocolVersionHeader} {
 		h.Del(k)
 	}
 	h.Set("Content-Type", "application/json")
 	h.Set("Accept", "application/json, text/event-stream")
 }
 
-func (t *HTTPTransport) applySession(h http.Header) {
+func (t *HTTPTransport) applyConnectionHeaders(h http.Header) {
 	t.mu.Lock()
 	sid := t.sessionID
+	version := t.protocolVersion
 	t.mu.Unlock()
 	if sid != "" {
 		h.Set(mcpSessionHeader, sid)
 	}
+	if version != "" {
+		h.Set(mcpProtocolVersionHeader, version)
+	}
+}
+
+func (t *HTTPTransport) setProtocolVersion(version string) {
+	t.mu.Lock()
+	t.protocolVersion = version
+	t.mu.Unlock()
 }
 
 func (t *HTTPTransport) rememberSession(h http.Header) {
@@ -504,7 +518,7 @@ func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCRe
 	}
 	t.applyHeaders(httpReq.Header)
 	t.applyProtocolHeaders(httpReq.Header)
-	t.applySession(httpReq.Header)
+	t.applyConnectionHeaders(httpReq.Header)
 
 	httpResp, err := t.client.Do(httpReq)
 	if err != nil {
@@ -535,7 +549,7 @@ func (t *HTTPTransport) Notify(ctx context.Context, notif JSONRPCNotification) e
 	}
 	t.applyHeaders(httpReq.Header)
 	t.applyProtocolHeaders(httpReq.Header)
-	t.applySession(httpReq.Header)
+	t.applyConnectionHeaders(httpReq.Header)
 
 	httpResp, err := t.client.Do(httpReq)
 	if err != nil {

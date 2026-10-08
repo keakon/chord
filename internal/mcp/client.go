@@ -27,9 +27,10 @@ import (
 
 // MCPToolDef is a tool definition returned by an MCP server's tools/list.
 type MCPToolDef struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	InputSchema  map[string]any  `json:"inputSchema"`
+	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
 }
 
 // initializeParams are sent in the initialize handshake.
@@ -46,6 +47,8 @@ type clientInfo struct {
 
 // ClientInfo identifies the application during MCP initialize handshakes.
 type ClientInfo = clientInfo
+
+const protocolVersion = "2025-06-18"
 
 var defaultClientInfo = clientInfo{Name: "chord", Version: "dev"}
 
@@ -77,11 +80,12 @@ type initializeResult struct {
 
 // Client manages a connection to one MCP server.
 type Client struct {
-	name       string
-	transport  Transport
-	clientInfo clientInfo
-	serverInfo initializeResult
-	nextID     atomic.Int64
+	name             string
+	transport        Transport
+	clientInfo       clientInfo
+	serverInfo       initializeResult
+	nextID           atomic.Int64
+	outputValidators atomic.Pointer[toolOutputValidators]
 }
 
 // NewClientWithInfo creates a new MCP client with explicit application metadata
@@ -110,7 +114,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		ID:      c.allocID(),
 		Method:  "initialize",
 		Params: initializeParams{
-			ProtocolVersion: "2024-11-05",
+			ProtocolVersion: protocolVersion,
 			Capabilities:    map[string]any{},
 			ClientInfo:      c.clientInfo,
 		},
@@ -128,6 +132,13 @@ func (c *Client) Initialize(ctx context.Context) error {
 		return fmt.Errorf("mcp initialize %s: decode result: %w", c.name, err)
 	}
 
+	if c.serverInfo.ProtocolVersion != protocolVersion {
+		return fmt.Errorf("mcp initialize %s: unsupported protocol version %q (expected %s)", c.name, c.serverInfo.ProtocolVersion, protocolVersion)
+	}
+	if transport, ok := c.transport.(*HTTPTransport); ok {
+		transport.setProtocolVersion(c.serverInfo.ProtocolVersion)
+	}
+
 	log.Debugf("mcp server initialized name=%v server=%v version=%v protocol=%v", c.name, c.serverInfo.ServerInfo.Name, c.serverInfo.ServerInfo.Version, c.serverInfo.ProtocolVersion)
 
 	// Send the initialized notification (required by MCP spec).
@@ -136,7 +147,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 		Method:  "notifications/initialized",
 	}
 	if err := c.transport.Notify(ctx, notif); err != nil {
-		log.Warnf("mcp initialized notification failed name=%v error=%v", c.name, err)
+		return fmt.Errorf("mcp initialized notification %s: %w", c.name, err)
 	}
 
 	return nil
@@ -146,6 +157,8 @@ func (c *Client) Initialize(ctx context.Context) error {
 // It returns the concatenated text content plus any image content blocks
 // (decoded from base64) so the runtime can re-inject images into model context.
 func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMessage) (string, []message.ContentPart, error) {
+	// Bind validation to the directory visible when the call starts.
+	validators := c.outputValidators.Load()
 	// Parse args into a map so the MCP server receives a proper object.
 	var argsMap map[string]any
 	if len(args) > 0 {
@@ -181,7 +194,14 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 		return "", nil, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err)
 	}
 
-	return c.normalizeToolCallResult(toolName, result)
+	text, images, err := c.normalizeToolCallResult(toolName, result)
+	if err != nil {
+		return text, images, err
+	}
+	if warning := validators.warning(toolName, result.StructuredContent); warning != "" {
+		text = warning + "\n\n" + text
+	}
+	return text, images, nil
 }
 
 // Close shuts down the transport (and the child process for stdio).

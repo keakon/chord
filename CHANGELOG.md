@@ -12,6 +12,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Breaking Changes
 
+- MCP connections require protocol `2025-06-18`; servers that negotiate another version are rejected. Update older servers before connecting.
+
 - Headless questions use ID-based collections and `action` / `operation_id` receipts. Status exposes all visible pending questions and paged closed history; integrations must update option IDs, presentation/interaction, and outcome handling, and use `question_ids` to reconcile known decisions outside the history page.
 
 - TUI role switching uses `Alt+R` in the main view. `Shift+Tab` cycles agent views in both Insert and Normal modes. Custom `switch_role` and `switch_agent` mappings remain configurable; give them separate keys to keep the actions distinct.
@@ -91,6 +93,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - New `web_search` tool: search the web through the provider's hosted search tool. It is off by default; enable it with `compat.hosted_tools: [web_search]` on an Anthropic Messages or OpenAI Responses model whose endpoint supports hosted search. Each search runs as a separate request that declares the hosted tool, and Chord returns a summary with numbered sources, so the main conversation request never declares it. Optional `allowed_domains` / `blocked_domains` filters travel as request parameters. The same list enables further provider-side tools from the top-level `hosted_tools` catalog, which defines a tool's local surface and its raw per-type wire declarations in configuration. See [Configuration & Auth: Hosted tools](./docs/configuration.md#hosted-tools).
 
 ### Improvements
+
+- MCP tool results are checked against the server's declared output schema. Schema problems add a warning while preserving usable output, without automatically repeating the tool call.
 
 - Sidebar sections that come and go (agents, background jobs, and todos) now render after the fixed model, usage, integration, and repository sections, so their appearance no longer shifts the sections above. Focused agents’ status icons stay visible, focused message cards use a distinct rail shape, and error, assistant-label, and thinking text has higher contrast.
 

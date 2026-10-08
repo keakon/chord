@@ -14,7 +14,7 @@ import (
 //     the transport.
 func TestCatalogExecutionBoundary(t *testing.T) {
 	ft := newFakeTransport()
-	ft.onMethod("initialize", initializeResult{})
+	ft.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
 	ft.onMethod("tools/list", toolsListResult{
 		Tools: []MCPToolDef{{Name: "echo", Description: "Echo tool", InputSchema: map[string]any{"type": "object"}}},
 	})
