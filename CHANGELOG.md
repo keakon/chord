@@ -147,6 +147,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Resuming an interrupted conversation no longer drops the session content when saving the restored history fails: the original content stays in place, and the failure is reported.
 
+- Automatic compaction no longer fires immediately for models whose maximum output spans their whole context window, and fractional thresholds trigger at their exact token boundary. Compaction and context percentages use a fixed model baseline while request-size safety checks account for the planned output.
+
 - A session no longer becomes unresponsive when automatic context compaction fails to apply its result. The pending request continues on the uncompacted context, and a later Enter or a new prompt can recover a stalled turn instead of being ignored.
 
 - Keep question, statistics, and error dialogs within narrow terminal bounds. Long question text and choices can be scrolled while answer input and action shortcuts stay visible; keyboard help wraps to the available width.

@@ -11,7 +11,7 @@ import (
 // must not raise the gauge or the trigger, because only provider usage may move
 // the effective reading.
 func TestObservedBaselineDoesNotGrowWithAppends(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
 
@@ -40,7 +40,7 @@ func TestObservedBaselineDoesNotGrowWithAppends(t *testing.T) {
 // change, so the display keeps it (marked stale) until the new window reports
 // usage — a switch, or a failing request after it, leaves the gauge intact.
 func TestInvalidateSizeObservationKeepsStaleReadingForGauge(t *testing.T) {
-	m := NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	m := NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 900000})
 	if !m.ShouldAutoCompact() {
@@ -83,7 +83,7 @@ func TestInvalidateSizeObservationKeepsStaleReadingForGauge(t *testing.T) {
 // The frozen estimate is retired the same way: a model change keeps it on the
 // gauge as a stale reading while the trigger waits for the new window's usage.
 func TestInvalidateSizeObservationKeepsFrozenEstimateAsStale(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
 	m.Append(message.Message{Role: message.RoleTool, Content: strings.Repeat("b", 150)})
@@ -109,7 +109,7 @@ func TestInvalidateSizeObservationKeepsFrozenEstimateAsStale(t *testing.T) {
 // measured no longer exist, so the gauge falls back to unknown until the next
 // response reports usage.
 func TestClearLastTokenUsageDropsStaleReading(t *testing.T) {
-	m := NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	m := NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 900000})
 	m.InvalidateSizeObservation()
@@ -125,7 +125,7 @@ func TestClearLastTokenUsageDropsStaleReading(t *testing.T) {
 }
 
 func TestRestoreContextReadingIsDisplayOnly(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 900})
 	m.RestoreContextReading(950)
 	if got := m.ContextUsageState(); got != ContextUsageStale {
@@ -147,7 +147,7 @@ func TestRestoreContextReadingIsDisplayOnly(t *testing.T) {
 // is nothing to estimate from, so the gauge displays 0 and the trigger stays
 // off even though the durable context is far larger than the line.
 func TestMissingUsageWithoutSamplesStaysUnknown(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 40000)}})
 	m.UpdateFromUsage(message.TokenUsage{})
 

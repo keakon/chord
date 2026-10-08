@@ -4786,7 +4786,7 @@ func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history: history-1.md\n- internal/agent/compaction.go\n\n## Todo State\n- none\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -4844,7 +4844,7 @@ func TestInjectCompactionFileContextDetectsChangeBeforeFirstInjection(t *testing
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -4874,7 +4874,7 @@ func TestInjectCompactionFileContextTreatsLegacyCheckpointAsChanged(t *testing.T
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## Files and Evidence\n- key.go\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -4918,7 +4918,7 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 	)
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	msgs := []message.Message{
 		{Role: "user", IsCompactionSummary: true, Content: summary},
 		{Role: "user", Content: "continue"},
@@ -4954,7 +4954,7 @@ func TestInjectCompactionFileContextSkipsWhenRequestBudgetIsExhausted(t *testing
 		t.Fatalf("WriteFile: %v", err)
 	}
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr.SetTokenBudgets(16384, 128, 0)
+	a.ctxMgr.SetTokenBudgets(16384, 128, 128, 0)
 	summary := buildCompactionCheckpointMessage(
 		"## Goal\n- continue\n\n## User Constraints\n- none\n\n## Progress\n- progress\n\n## Key Decisions\n- decisions\n\n## Files and Evidence\n- Archived history: history-1.md\n- pkg/f.txt\n\n## Todo State\n- none\n\n## SubAgent State\n- none\n\n## Open Problems\n- none\n\n## Next Step\n- continue",
 		[]string{".chord/sessions/test/history-1.md"},
@@ -5259,7 +5259,7 @@ func TestEnsureOversizeDrivenCompactionStartsMainResumeCompaction(t *testing.T) 
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	if !a.ensureOversizeDrivenCompaction() {
 		t.Fatal("expected oversize-driven compaction to start")
 	}
@@ -5297,7 +5297,7 @@ func TestEnsureOversizeDrivenCompactionStopsAfterRetryLimit(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn()
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	a.turn.OversizeRecoveryCount = maxOversizeRecoveryAttempts
 	if a.ensureOversizeDrivenCompaction() {
 		t.Fatal("expected oversize-driven compaction to stop after retry limit")

@@ -181,6 +181,10 @@ func (a *MainAgent) applyRunningModelRefIfCurrent(llmClient *llm.Client, ref str
 			inputLimit = llmClient.InputLimitForModelRef(ref)
 		}
 	}
+	compactionBudget := contextLimit
+	if llmClient != nil {
+		compactionBudget = llmClient.CompactionBudgetForModelRef(ref)
+	}
 	a.modelUpdateMu.Lock()
 	defer a.modelUpdateMu.Unlock()
 	a.llmMu.Lock()
@@ -189,7 +193,7 @@ func (a *MainAgent) applyRunningModelRefIfCurrent(llmClient *llm.Client, ref str
 		return
 	}
 	if a.ctxMgr != nil && contextLimit > 0 {
-		a.ctxMgr.SetTokenBudgets(contextLimit, inputLimit, a.effectiveCompactionReservedInput())
+		a.ctxMgr.SetTokenBudgets(contextLimit, inputLimit, compactionBudget, a.effectiveCompactionReservedInput())
 	}
 	prev := a.runningModelRef
 	a.runningModelRef = ref
@@ -432,7 +436,7 @@ func (a *MainAgent) swapLLMClientWithRefLocked(newClient *llm.Client, modelName 
 	newRunningRef := a.runningModelRef
 	a.installedSysPrompt = ""
 	if newClient != nil {
-		a.ctxMgr.SetTokenBudgets(contextLimit, newClient.InputLimitForModelRef(providerModelRef), a.effectiveCompactionReservedInput())
+		a.ctxMgr.SetTokenBudgets(contextLimit, newClient.InputLimitForModelRef(providerModelRef), newClient.CompactionBudgetForModelRef(providerModelRef), a.effectiveCompactionReservedInput())
 	} else {
 		a.ctxMgr.SetMaxTokens(contextLimit)
 	}

@@ -244,7 +244,7 @@ func TestMainLLMFailedModelPoolKeepsSidebarOnCursorHead(t *testing.T) {
 func TestMainLLMFallbackDownshiftKeepsCommittedFallbackRef(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(128000, 100000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(128000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
 	a.newTurn()
@@ -481,7 +481,7 @@ func TestKeySwitchedDeltaClearsRotatingProviderSnapshots(t *testing.T) {
 func TestMainTurnCancelledReleasesCommittedFallbackRef(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(128000, 100000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(128000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
 	a.newTurn()
@@ -582,7 +582,7 @@ func TestMainTurnCancelledReleasesCommittedFallbackRef(t *testing.T) {
 func TestMainTurnCancelledReleasesOversizeSuspendedFallbackRef(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(128000, 100000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(128000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
 	a.newTurn()

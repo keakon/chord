@@ -35,7 +35,7 @@ type Manager struct {
 	// for display and byte budgets, not token cost.
 	imagePayloadBytes      int
 	imageEstimateTokens    int
-	lastInputTokens        int // full prompt size for compaction thresholds and input-budget displays (observed only)
+	lastInputTokens        int // full prompt size for compaction thresholds and context displays (observed only)
 	lastTotalContextTokens int // post-response context baseline (full prompt + output, observed only)
 	// observedValid marks that the latest main response carried provider usage.
 	// frozenEstimateTokens/frozenValid carry the single frozen estimate allowed
@@ -74,12 +74,13 @@ type Manager struct {
 	calibratedRatioCache float64
 	maxTokens            int
 	inputBudget          int
+	compactionBudget     int
 	inputBudgetReserved  int
 	// tokenBudgetsEpoch counts token-budget value changes (see SetTokenBudgets);
 	// it identifies a usage-baseline window together with the session epoch.
 	tokenBudgetsEpoch uint64
 
-	threshold float64 // fraction of usable input budget that triggers compaction; <= 0 disables automatic compaction
+	threshold float64 // fraction of usable compaction budget; <= 0 disables automatic compaction
 
 	stats message.TokenUsage
 }
@@ -88,25 +89,29 @@ type Manager struct {
 // threshold. A threshold <= 0 disables automatic compaction.
 //
 //   - maxTokens: the model's context window size (in tokens).
-//   - threshold: fraction (0–1) of the input budget at which to trigger compaction.
+//   - threshold: fraction (0–1) of the compaction budget at which to trigger compaction.
 func NewManager(maxTokens int, threshold float64) *Manager {
-	return NewManagerWithInputBudget(maxTokens, 0, 0, threshold)
+	return NewManagerWithTokenBudgets(maxTokens, 0, 0, 0, threshold)
 }
 
-// NewManagerWithInputBudget creates a Manager with separate total-context,
-// input-side budget, and reserved input headroom. If inputBudget <= 0,
-// maxTokens is used as the input budget.
+// NewManagerWithTokenBudgets creates a Manager with separate total-context,
+// request-input and fixed compaction budgets, plus reserved input headroom.
+// Unknown input and compaction budgets use the total window.
 // A threshold <= 0 disables automatic compaction.
-func NewManagerWithInputBudget(maxTokens, inputBudget, reservedInput int, threshold float64) *Manager {
+func NewManagerWithTokenBudgets(maxTokens, inputBudget, compactionBudget, reservedInput int, threshold float64) *Manager {
 	if inputBudget <= 0 {
 		inputBudget = maxTokens
 	}
 	if reservedInput < 0 {
 		reservedInput = 0
 	}
+	if compactionBudget <= 0 {
+		compactionBudget = maxTokens
+	}
 	return &Manager{
 		maxTokens:           maxTokens,
 		inputBudget:         inputBudget,
+		compactionBudget:    compactionBudget,
 		inputBudgetReserved: reservedInput,
 		threshold:           threshold,
 	}
@@ -131,15 +136,15 @@ func (m *Manager) SystemPrompt() message.Message {
 // SetMaxTokens updates the context window size (token budget). Thread-safe.
 // This is used when switching to a model with a different context limit.
 func (m *Manager) SetMaxTokens(n int) {
-	m.SetTokenBudgets(n, 0, 0)
+	m.SetTokenBudgets(n, 0, 0, 0)
 }
 
-// SetTokenBudgets updates total context window, input-side budget, and reserved
-// input headroom. If inputBudget <= 0, maxTokens is used as the input budget.
+// SetTokenBudgets atomically updates the total window, request-input budget,
+// fixed compaction budget and reserved headroom. Unknown budgets use the window.
 // The token-budgets epoch increments only when a value actually changes, so it
 // counts model/provider/budget switches (the budget_epoch component of the
 // context-pressure reminder claim) rather than every per-response call.
-func (m *Manager) SetTokenBudgets(maxTokens, inputBudget, reservedInput int) {
+func (m *Manager) SetTokenBudgets(maxTokens, inputBudget, compactionBudget, reservedInput int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if inputBudget <= 0 {
@@ -148,9 +153,13 @@ func (m *Manager) SetTokenBudgets(maxTokens, inputBudget, reservedInput int) {
 	if reservedInput < 0 {
 		reservedInput = 0
 	}
-	if maxTokens != m.maxTokens || inputBudget != m.inputBudget || reservedInput != m.inputBudgetReserved {
+	if compactionBudget <= 0 {
+		compactionBudget = maxTokens
+	}
+	if maxTokens != m.maxTokens || inputBudget != m.inputBudget || compactionBudget != m.compactionBudget || reservedInput != m.inputBudgetReserved {
 		m.maxTokens = maxTokens
 		m.inputBudget = inputBudget
+		m.compactionBudget = compactionBudget
 		m.inputBudgetReserved = reservedInput
 		m.tokenBudgetsEpoch++
 	}
@@ -196,8 +205,8 @@ func (m *Manager) GetMaxTokens() int {
 	return m.maxTokens
 }
 
-// GetInputBudget returns the configured input-side token budget used for
-// auto-compaction before reserved headroom is applied.
+// GetInputBudget returns the request-input planning budget before reserved
+// headroom is applied.
 func (m *Manager) GetInputBudget() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -221,6 +230,14 @@ func (m *Manager) GetUsableInputBudget() int {
 		return 0
 	}
 	return budget
+}
+
+// GetUsableCompactionBudget returns the fixed ratio baseline after subtracting
+// reserved headroom. It is shared by automatic compaction and context displays.
+func (m *Manager) GetUsableCompactionBudget() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return max(m.compactionBudget-m.inputBudgetReserved, 0)
 }
 
 // IsAutoCompactEnabled reports whether automatic compaction is enabled.
@@ -909,16 +926,18 @@ func EstimateMessageTokens(msg message.Message) int {
 }
 
 type AutoCompactDecision struct {
-	LastInputTokens      int
-	EstimatedInputTokens int // planning-only live growth estimate, never a trigger input
-	EffectiveInputTokens int // observed baseline or frozen estimate: the only trigger/display input
-	UsageState           ContextUsageState
-	InputBudget          int
-	ReservedInput        int
-	UsableInputBudget    int
-	Threshold            float64
-	ThresholdTokens      int
-	ShouldCompact        bool
+	LastInputTokens        int
+	EstimatedInputTokens   int // planning-only live growth estimate, never a trigger input
+	EffectiveInputTokens   int // observed baseline or frozen estimate: the only trigger/display input
+	UsageState             ContextUsageState
+	InputBudget            int
+	ReservedInput          int
+	UsableInputBudget      int
+	CompactionBudget       int
+	UsableCompactionBudget int
+	Threshold              float64
+	ThresholdTokens        int
+	ShouldCompact          bool
 }
 
 // lastReadingLocked returns the last known reading in either frame: the
@@ -991,25 +1010,28 @@ func (m *Manager) AutoCompactDecision() AutoCompactDecision {
 		budget = m.maxTokens
 	}
 	usable := max(budget-m.inputBudgetReserved, 0)
+	usableCompaction := max(m.compactionBudget-m.inputBudgetReserved, 0)
 	thresholdTokens := 0
-	if m.threshold > 0 && usable > 0 {
-		thresholdTokens = int(m.threshold * float64(usable))
+	if m.threshold > 0 && usableCompaction > 0 {
+		thresholdTokens = int(m.threshold * float64(usableCompaction))
 	}
 	estimatedInputTokens := m.estimatedInputTokensFromPayloadBytesLocked()
 	effectiveInputTokens := m.observedEffectiveLocked()
 	state := m.usageStateLocked()
-	shouldCompact := m.threshold > 0 && usable > 0 && effectiveInputTokens > 0 && float64(effectiveInputTokens) >= m.threshold*float64(usable)
+	shouldCompact := m.threshold > 0 && usableCompaction > 0 && effectiveInputTokens > 0 && float64(effectiveInputTokens)/float64(usableCompaction) >= m.threshold
 	return AutoCompactDecision{
-		LastInputTokens:      m.lastInputTokens,
-		EstimatedInputTokens: estimatedInputTokens,
-		EffectiveInputTokens: effectiveInputTokens,
-		UsageState:           state,
-		InputBudget:          budget,
-		ReservedInput:        m.inputBudgetReserved,
-		UsableInputBudget:    usable,
-		Threshold:            m.threshold,
-		ThresholdTokens:      thresholdTokens,
-		ShouldCompact:        shouldCompact,
+		LastInputTokens:        m.lastInputTokens,
+		EstimatedInputTokens:   estimatedInputTokens,
+		EffectiveInputTokens:   effectiveInputTokens,
+		UsageState:             state,
+		InputBudget:            budget,
+		ReservedInput:          m.inputBudgetReserved,
+		UsableInputBudget:      usable,
+		CompactionBudget:       m.compactionBudget,
+		UsableCompactionBudget: usableCompaction,
+		Threshold:              m.threshold,
+		ThresholdTokens:        thresholdTokens,
+		ShouldCompact:          shouldCompact,
 	}
 }
 

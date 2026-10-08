@@ -185,7 +185,7 @@ func TestApplyModelCompactionConfigSetsThresholdOnModelChange(t *testing.T) {
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
 		"openai/gpt-5.6-luna",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	a.applyModelCompactionConfig()
 	if got := a.ctxMgr.Threshold(); got != 0.3 {
@@ -198,7 +198,7 @@ func TestApplyModelCompactionConfigSetsThresholdOnModelChange(t *testing.T) {
 
 func TestApplyModelCompactionConfigSameModelKeepsThreshold(t *testing.T) {
 	a := modelCompTestAgent(config.CompactionConfig{Threshold: 0.65}, nil, "p/m")
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "p/m"
 	a.applyModelCompactionConfig()
 	if got := a.ctxMgr.Threshold(); got != 0.65 {
@@ -213,7 +213,7 @@ func TestApplyModelCompactionConfigModelChangeMarksNoticesStale(t *testing.T) {
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
 		"openai/gpt-5.6-luna",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	// No durable notice row: the switch has nothing to withdraw, so no audit
 	// is armed.
@@ -238,7 +238,7 @@ func TestApplyModelCompactionConfigModelChangeSameThresholdKeepsNoticesFresh(t *
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
 		"openai/gpt-5.6-luna",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	a.contextNoticesPersisted.Store(true)
 	a.applyModelCompactionConfig()
@@ -257,7 +257,7 @@ func TestApplyModelCompactionConfigModelChangeReminderOnlyMarksNoticesStale(t *t
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Reminder: &perModelReminder}},
 		"openai/gpt-5.6-luna",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	a.contextNoticesPersisted.Store(true)
 	a.applyModelCompactionConfig()
@@ -271,7 +271,7 @@ func TestApplyModelCompactionConfigModelChangeReminderOnlyMarksNoticesStale(t *t
 
 func TestApplyModelCompactionConfigSameModelKeepsNoticesFresh(t *testing.T) {
 	a := modelCompTestAgent(config.CompactionConfig{Threshold: 0.65}, nil, "p/m")
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "p/m"
 	a.contextNoticesPersisted.Store(true)
 	a.applyModelCompactionConfig()
@@ -291,7 +291,7 @@ func TestApplyModelCompactionConfigModelChangeKeepsArmedWhenStillOverNewThreshol
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
 		"openai/gpt-5.6-luna",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	a.armUsageDrivenAutoCompactRequest()
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 500000}) // 0.5 of budget
@@ -318,7 +318,7 @@ func TestApplyModelCompactionConfigKeepsNewModelOwnedObservation(t *testing.T) {
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
 		"openai/gpt-5.6-luna",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000, 1000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 900})
 	a.setUsageObservationModelRef("openai/gpt-5.6-luna")
@@ -348,7 +348,7 @@ func TestApplyModelCompactionConfigInvalidatesOtherModelObservation(t *testing.T
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
 		"openai/gpt-5.6-luna",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000, 1000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 900})
 	a.setUsageObservationModelRef("openai/gpt-5.6-sol")
@@ -382,7 +382,7 @@ func TestApplyModelCompactionConfigModelChangeClearsStaleArmedRequest(t *testing
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-sol": {Threshold: &perModel}},
 		"openai/gpt-5.6-sol",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.3)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.3)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-luna"
 	a.armUsageDrivenAutoCompactRequest()
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 500000}) // 0.5 of budget
@@ -409,7 +409,7 @@ func TestIdleAutoCompactionReevaluatesStaleArmAgainstRealignedModel(t *testing.T
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-sol": {Threshold: new(0.7)}},
 		"openai/gpt-5.6-luna",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.3)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.3)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-luna"
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 500000}) // 0.5 of budget
 	if !a.ctxMgr.AutoCompactDecision().ShouldCompact {
@@ -441,7 +441,7 @@ func TestApplyModelCompactionConfigModelChangeArmsCrossedUsage(t *testing.T) {
 		map[string]*config.ModelCompactionConfig{"openai/gpt-5.6-luna": {Threshold: &perModel}},
 		"openai/gpt-5.6-luna",
 	)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "openai/gpt-5.6-sol"
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 500000}) // 0.5 of budget
 	if a.autoCompactRequested.Load() {
@@ -459,7 +459,7 @@ func TestApplyModelCompactionConfigModelChangeArmsCrossedUsage(t *testing.T) {
 func TestApplyModelCompactionConfigSameModelKeepsArmedRequest(t *testing.T) {
 	// No model change: the armed request is never re-evaluated or cleared.
 	a := modelCompTestAgent(config.CompactionConfig{Threshold: 0.65}, nil, "p/m")
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000000, 1000000, 0, 0.65)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000000, 1000000, 1000000, 0, 0.65)
 	a.appliedCompactionModelRef = "p/m"
 	a.armUsageDrivenAutoCompactRequest()
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 200000}) // below the threshold

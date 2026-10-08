@@ -115,7 +115,7 @@ func TestCallLLMOversizeRequestsEventLoopCompaction(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
 	a.newTurn()
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 16000, 0.8)
 
 	providerCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -210,7 +210,7 @@ func TestOversizeCompactionRequestHonorsRetryLimitOnEventLoop(t *testing.T) {
 func TestCallLLMOversizeStopsWhenAutoCompactionDisabled(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.newTurn()
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, 0)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 16000, 0)
 
 	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -262,7 +262,7 @@ func TestCallLLMMixedFallbackErrorsDoNotStartOversizeCompaction(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
 	a.newTurn()
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 16000, 0.8)
 
 	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,

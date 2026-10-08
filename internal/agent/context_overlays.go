@@ -695,7 +695,7 @@ func (a *MainAgent) queueContextPressureReminderForNextRequest() {
 func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDecision) {
 	a.setPendingContextNoticeText(contextNoticePressure, "")
 	threshold := decision.Threshold
-	usable := decision.UsableInputBudget
+	usable := decision.UsableCompactionBudget
 	// threshold<=0 means auto-compact is off: no reminder, even when
 	// model-driven is enabled, because without a usage-driven safety net the
 	// reminder would only induce premature resets.
@@ -785,7 +785,7 @@ func (a *MainAgent) queueContextPressureReminder(decision ctxmgr.AutoCompactDeci
 // usage-driven compaction request).
 func (a *MainAgent) contextPressureBelowReminderLine(decision ctxmgr.AutoCompactDecision, reminderPct float64) bool {
 	threshold := decision.Threshold
-	usable := decision.UsableInputBudget
+	usable := decision.UsableCompactionBudget
 	if threshold <= 0 || usable <= 0 {
 		return false
 	}

@@ -18,7 +18,7 @@ func newSuspendBarrierTestAgent(t *testing.T, planID uint64, continuation contin
 			Compaction: config.CompactionConfig{Threshold: 0.8},
 		},
 	}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 900})
 	a.newTurn()

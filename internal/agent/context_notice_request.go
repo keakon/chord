@@ -35,8 +35,8 @@ func (a *MainAgent) hasDurablePressureNotice(level string) bool {
 
 // Re-evaluate notices only across a model switch or a changed prefix before
 // an existing notice. Changes after a notice cannot invalidate its cache.
-func (a *MainAgent) reconcilePressureNoticesForModel(messages, prepared []message.Message, modelRef string, inputBudget int) []message.Message {
-	if a == nil || a.ctxMgr == nil || modelRef == "" || inputBudget <= 0 {
+func (a *MainAgent) reconcilePressureNoticesForModel(messages, prepared []message.Message, modelRef string, compactionBudget int) []message.Message {
+	if a == nil || a.ctxMgr == nil || modelRef == "" || compactionBudget <= 0 {
 		return a.omitStaleContextNoticesFromRequest(messages)
 	}
 	a.overlayClaims.mu.Lock()
@@ -63,7 +63,7 @@ func (a *MainAgent) reconcilePressureNoticesForModel(messages, prepared []messag
 	}
 	// Reduction makes the previous usage obsolete. A model switch alone can
 	// reuse that observation as an estimate against the target model's budget.
-	pressure, compaction := a.pressureNoticeValidity(messages, modelRef, inputBudget, !changedPrefix)
+	pressure, compaction := a.pressureNoticeValidity(messages, modelRef, compactionBudget, !changedPrefix)
 	// The manual dimension is armed-driven, not usage-driven: the notice stays
 	// justified while the intent is armed and is withdrawn once it is not.
 	manual := a.manualNoticeActive()
@@ -114,10 +114,10 @@ func (a *MainAgent) reconcilePressureNoticesForModel(messages, prepared []messag
 	return messages
 }
 
-func (a *MainAgent) pressureNoticeValidity(messages []message.Message, modelRef string, inputBudget int, preferUsage bool) (pressure, compaction bool) {
+func (a *MainAgent) pressureNoticeValidity(messages []message.Message, modelRef string, compactionBudget int, preferUsage bool) (pressure, compaction bool) {
 	threshold := a.effectiveCompactionThreshold(modelRef)
 	reminder := a.effectiveReminderPctForModelRef(modelRef, threshold)
-	usable := max(inputBudget-a.effectiveCompactionReservedInput(), 0)
+	usable := max(compactionBudget-a.effectiveCompactionReservedInput(), 0)
 	if !a.compactContextVisible() || threshold <= 0 || usable <= 0 {
 		return false, false
 	}
@@ -131,8 +131,9 @@ func (a *MainAgent) pressureNoticeValidity(messages []message.Message, modelRef 
 	if tokens <= 0 {
 		tokens = llm.EstimateRequestInputTokens(prompt, messages, a.mainLLMToolDefinitions())
 	}
-	return reminder > 0 && reminder < threshold && float64(tokens) >= reminder*float64(usable),
-		float64(tokens) >= threshold*float64(usable)
+	usage := float64(tokens) / float64(usable)
+	return reminder > 0 && reminder < threshold && usage >= reminder,
+		usage >= threshold
 }
 
 // A fallback is still the same in-flight round: filter invalid signals before
@@ -140,11 +141,11 @@ func (a *MainAgent) pressureNoticeValidity(messages []message.Message, modelRef 
 // Missing applicable notices are appended for the target, reusing durable rows
 // when available and persisting newly crossed thresholds through the same
 // dispatch path as the primary request.
-func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message, modelRef string, inputBudget int, preferUsage bool) []message.Message {
-	if a == nil || a.ctxMgr == nil || inputBudget <= 0 {
+func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message, modelRef string, compactionBudget int, preferUsage bool) []message.Message {
+	if a == nil || a.ctxMgr == nil || compactionBudget <= 0 {
 		return messages
 	}
-	pressure, compaction := a.pressureNoticeValidity(messages, modelRef, inputBudget, preferUsage)
+	pressure, compaction := a.pressureNoticeValidity(messages, modelRef, compactionBudget, preferUsage)
 	manual := a.manualNoticeActive()
 	a.setPressureNoticeValidity(pressure, compaction, manual)
 	var out []message.Message

@@ -138,8 +138,8 @@ permission:
 A few practical points matter here:
 
 - Most models only need `limit.context`: keep total input + output within that window.
-- Some GPT models also have a separate input cap. Set `limit.input` for those models so Chord knows when to compact before the prompt is too large; otherwise it derives the input budget from `limit.context` minus the model's own `limit.output` (falling back to the global output-cap default only when the model declares none).
-- `limit.output` is the model's own output capacity. Chord defaults `max_output_tokens` to `64000`, so its output budget is the smaller of that cap and the model limit; changing the global cap does not increase the provider's `272k` input cap.
+- Set `limit.input` only when the provider publishes a separate input cap. Compaction ratios use that fixed cap, or `limit.context - limit.output` when the model's maximum output is smaller than its window. Unknown output capacity or a capacity spanning the whole window uses the total window as the baseline.
+- `limit.output` is the model's own output capacity. Chord defaults `max_output_tokens` to `64000`, so its output budget is the smaller of that cap and the model limit; changing this request cap does not change the fixed compaction baseline or any published independent input limit.
 - Same-named models on different providers are still tried independently in the fallback chain; Chord does not skip them just because the model name matches.
 
 ## Credentials to prepare

@@ -107,7 +107,7 @@ func (a *MainAgent) usageStatsForTask(rec *DurableTaskRecord, liveInstanceID str
 }
 
 // GetContextStats returns the context-usage level shown for the focused agent
-// and its usable input budget. current is the usage-only reading the
+// and its usable fixed compaction budget. current is the usage-only reading the
 // automatic-compaction decision compares against its threshold: the last
 // observed post-response baseline (full prompt including cache tokens plus
 // generated output), or the single frozen estimate when the latest response
@@ -127,7 +127,7 @@ func (a *MainAgent) GetContextStats() (current, limit int) {
 	if target.parked || target.settled {
 		return 0, 0
 	}
-	return a.ctxMgr.EffectiveContextTokens(), a.ctxMgr.GetUsableInputBudget()
+	return a.ctxMgr.EffectiveContextTokens(), a.ctxMgr.GetUsableCompactionBudget()
 }
 
 // GetContextUsageState reports the observation state behind GetContextStats for

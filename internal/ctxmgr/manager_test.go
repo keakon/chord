@@ -320,20 +320,20 @@ func TestShouldAutoCompact(t *testing.T) {
 	}
 }
 
-func TestShouldAutoCompactUsesInputBudgetWhenConfigured(t *testing.T) {
-	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+func TestShouldAutoCompactUsesCompactionBudgetWhenConfigured(t *testing.T) {
+	m := NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 217599})
 	if m.ShouldAutoCompact() {
-		t.Fatal("expected threshold check to stay false below 80% of input budget")
+		t.Fatal("expected threshold check to stay false below 80% of compaction budget")
 	}
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 217600})
 	if !m.ShouldAutoCompact() {
-		t.Fatal("expected threshold check to become true at 80% of input budget")
+		t.Fatal("expected threshold check to become true at 80% of compaction budget")
 	}
 }
 
 func TestSetThresholdUpdatesDecisionAndBumpsEpoch(t *testing.T) {
-	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	epochBefore := m.TokenBudgetsEpoch()
 	// Same value is a no-op for the epoch (no budget change).
 	m.SetThreshold(0.8)
@@ -350,7 +350,7 @@ func TestSetThresholdUpdatesDecisionAndBumpsEpoch(t *testing.T) {
 	}
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 217600})
 	if !m.ShouldAutoCompact() {
-		t.Fatal("expected threshold check to become true at 30% of input budget")
+		t.Fatal("expected threshold check to become true at 30% of compaction budget")
 	}
 	m.SetThreshold(0)
 	if m.ShouldAutoCompact() {
@@ -358,18 +358,18 @@ func TestSetThresholdUpdatesDecisionAndBumpsEpoch(t *testing.T) {
 	}
 }
 
-func TestShouldAutoCompactUsesUsableInputBudgetWhenReserved(t *testing.T) {
-	m := NewManagerWithInputBudget(400000, 272000, 20000, 0.8)
-	if got := m.GetUsableInputBudget(); got != 252000 {
-		t.Fatalf("GetUsableInputBudget() = %d, want 252000", got)
+func TestShouldAutoCompactUsesUsableCompactionBudgetWhenReserved(t *testing.T) {
+	m := NewManagerWithTokenBudgets(400000, 272000, 272000, 20000, 0.8)
+	if got := m.GetUsableCompactionBudget(); got != 252000 {
+		t.Fatalf("GetUsableCompactionBudget() = %d, want 252000", got)
 	}
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 201599})
 	if m.ShouldAutoCompact() {
-		t.Fatal("expected threshold check to stay false below 80% of usable input budget")
+		t.Fatal("expected threshold check to stay false below 80% of usable compaction budget")
 	}
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 201600})
 	if !m.ShouldAutoCompact() {
-		t.Fatal("expected threshold check to become true at 80% of usable input budget")
+		t.Fatal("expected threshold check to become true at 80% of usable compaction budget")
 	}
 }
 
@@ -377,7 +377,7 @@ func TestShouldAutoCompactUsesUsableInputBudgetWhenReserved(t *testing.T) {
 // input_tokens even though the wire flags say the cached prefix is included; a
 // warm-cache request must not report a near-zero prompt to the threshold.
 func TestShouldAutoCompactNormalizesUncachedOnlyRelayUsage(t *testing.T) {
-	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	m.UpdateFromUsage(message.TokenUsage{
 		InputTokens:            2,
 		CacheReadTokens:        230000,
@@ -395,7 +395,7 @@ func TestShouldAutoCompactNormalizesUncachedOnlyRelayUsage(t *testing.T) {
 // Anthropic-style wires report cache-read and cache-write prefixes outside
 // input_tokens (semantics flags false): the full prompt is their sum.
 func TestShouldAutoCompactAddsCachePrefixesForAnthropicStyleUsage(t *testing.T) {
-	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	m.UpdateFromUsage(message.TokenUsage{
 		InputTokens:      100000,
 		CacheReadTokens:  100000,
@@ -412,7 +412,7 @@ func TestShouldAutoCompactAddsCachePrefixesForAnthropicStyleUsage(t *testing.T) 
 // The next request replays the last prompt plus the generated output, so the
 // threshold compares the post-response context baseline, not the prompt alone.
 func TestShouldAutoCompactIncludesGeneratedOutput(t *testing.T) {
-	m := NewManagerWithInputBudget(400000, 272000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	m.UpdateFromUsage(message.TokenUsage{
 		InputTokens:            210000,
 		OutputTokens:           10000,
@@ -436,7 +436,7 @@ func TestShouldAutoCompactIncludesGeneratedOutput(t *testing.T) {
 // the trigger, so a lower local estimate must never cancel a compaction that
 // usage already triggered.
 func TestShouldAutoCompactUsageAuthorityNotCanceledByLowerEstimate(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 300)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 800})
 
@@ -454,7 +454,7 @@ func TestShouldAutoCompactUsageAuthorityNotCanceledByLowerEstimate(t *testing.T)
 }
 
 func TestShouldAutoCompactUsesPayloadByteCalibrationWhenUsageMissing(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
 
@@ -477,7 +477,7 @@ func TestShouldAutoCompactUsesPayloadByteCalibrationWhenUsageMissing(t *testing.
 }
 
 func TestEffectiveContextTokensMatchesAutoCompactDecision(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
 
@@ -501,7 +501,7 @@ func TestEffectiveContextTokensMatchesAutoCompactDecision(t *testing.T) {
 }
 
 func TestShouldAutoCompactUsesContextByteCalibrationForToolCalls(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
 
@@ -522,7 +522,7 @@ func TestShouldAutoCompactUsesContextByteCalibrationForToolCalls(t *testing.T) {
 // estimate: byte scaling multiplied the whole context by the image's ~300 KB
 // and showed (and triggered compaction at) a phantom 100K+ tokens.
 func TestPayloadByteCalibrationIgnoresImagePayloadBytes(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
 
@@ -547,7 +547,7 @@ func TestPayloadByteCalibrationIgnoresImagePayloadBytes(t *testing.T) {
 // the current context are charged the per-image allowance on top instead of
 // being folded into that growth factor.
 func TestPayloadByteCalibrationAddsPerImageAllowance(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
 
@@ -566,7 +566,7 @@ func TestPayloadByteCalibrationAddsPerImageAllowance(t *testing.T) {
 }
 
 func TestPayloadByteCalibrationPreservesMixedSampleBaseline(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Content: strings.Repeat("a", 300)}})
 	m.Append(message.Message{Role: message.RoleUser, Parts: []message.ContentPart{{
 		Type: message.ContentPartImage,
@@ -583,7 +583,7 @@ func TestPayloadByteCalibrationPreservesMixedSampleBaseline(t *testing.T) {
 }
 
 func TestShouldAutoCompactPayloadByteCalibrationHonorsDisabledThreshold(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 100)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 400})
 	m.Append(message.Message{Role: "tool", Content: strings.Repeat("b", 150)})
@@ -599,7 +599,7 @@ func TestShouldAutoCompactPayloadByteCalibrationHonorsDisabledThreshold(t *testi
 }
 
 func TestReplacePrefixAtomicClearsPayloadByteCalibration(t *testing.T) {
-	m := NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: "user", Content: strings.Repeat("a", 250)}})
 	m.UpdateFromUsage(message.TokenUsage{InputTokens: 800})
 
@@ -1085,7 +1085,7 @@ func TestManagerImageAccountingTracksRestoreAndRepair(t *testing.T) {
 }
 
 func TestPayloadByteCalibrationSkipsMixedSamples(t *testing.T) {
-	m := NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	m := NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
 	m.RestoreMessages([]message.Message{{Role: message.RoleUser, Parts: []message.ContentPart{
 		{Type: message.ContentPartText, Text: strings.Repeat("a", 30000)},
 		{Type: message.ContentPartImage, Data: make([]byte, 4000)},

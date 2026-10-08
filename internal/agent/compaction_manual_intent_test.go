@@ -400,7 +400,7 @@ func TestReconcileKeepsManualRowWhileArmed(t *testing.T) {
 func TestAbruptCrossingBypassesGraceAndStacksNoReminder(t *testing.T) {
 	a := manualIntentAgent(t)
 	const budget = 1000000
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(budget, budget, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(budget, budget, budget, 0, 0.8)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: int(budget * 0.85)})
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 	snapshot := a.ctxMgr.Snapshot()
@@ -429,7 +429,7 @@ func TestAbruptCrossingBypassesGraceAndStacksNoReminder(t *testing.T) {
 func TestAbruptCrossingRequiresUndeliveredReminder(t *testing.T) {
 	a := manualIntentAgent(t)
 	const budget = 1000000
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(budget, budget, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(budget, budget, budget, 0, 0.8)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: int(budget * 0.85)})
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 	// The gradual climb delivered the sticky reminder earlier in the window.

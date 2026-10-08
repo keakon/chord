@@ -38,7 +38,7 @@ func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
 	sub.llmMu.Lock()
 	sub.llmClient = client
 	sub.llmMu.Unlock()
-	sub.ctxMgr.SetTokenBudgets(12000, 10000, 0)
+	sub.ctxMgr.SetTokenBudgets(12000, 10000, 10000, 0)
 	messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
 	for range 14 {
 		messages = append(messages,
@@ -121,7 +121,7 @@ func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) 
 	sub.taskDesc = "preserve the task contract"
 	sub.ownerAgentID = "main"
 	sub.compactUsage = 0.5
-	sub.ctxMgr.SetTokenBudgets(3000, 2400, 0)
+	sub.ctxMgr.SetTokenBudgets(3000, 2400, 2400, 0)
 	messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
 	for range 12 {
 		messages = append(messages,
@@ -156,9 +156,42 @@ func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) 
 	sub.cancel()
 }
 
+func TestSubAgentCompactionSeparatesFixedThresholdFromRequestSafety(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		fixedScale int
+		requestPct int
+		compact    bool
+	}{
+		{"fixed threshold crossed with roomy request", 1, 400, true},
+		{"below fixed threshold and request limit", 4, 200, false},
+		{"request limit exceeded below fixed threshold", 4, 75, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, sub := newMixedBatchTestSubAgent(t)
+			t.Cleanup(sub.cancel)
+			sub.compactUsage = 0.5
+			messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
+			for range 12 {
+				messages = append(messages,
+					message.Message{Role: message.RoleAssistant, Content: strings.Repeat("analysis ", 160)},
+					message.Message{Role: message.RoleUser, Content: "continue"},
+				)
+			}
+			sub.ctxMgr.RestoreMessages(messages)
+			estimated := estimateMessagesTokens(sub.ctxMgr, messages)
+			sub.ctxMgr.SetTokenBudgets(estimated*5, estimated*tc.requestPct/100, estimated*tc.fixedScale, 0)
+			prepared := sub.prepareContextForLLM(messages)
+			if got := len(prepared) < len(messages); got != tc.compact {
+				t.Fatalf("compacted = %v, want %v; messages before/after = %d/%d", got, tc.compact, len(messages), len(prepared))
+			}
+		})
+	}
+}
+
 func TestSubAgentContextLengthRecoveryIsBounded(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
-	sub.ctxMgr.SetTokenBudgets(12000, 10000, 0)
+	sub.ctxMgr.SetTokenBudgets(12000, 10000, 10000, 0)
 	sub.turn.SubAgentContextRecoveryCount = 1
 	err := &llm.ContextLengthExceededError{ProviderMessage: "too long"}
 	if sub.recoverFromContextLength(err) {
@@ -183,7 +216,7 @@ func TestSubAgentContextLengthRecoveryPreservesToolPairs(t *testing.T) {
 	ctx, cancel := context.WithCancel(sub.parentCtx)
 	defer cancel()
 	sub.turn.Ctx = ctx
-	sub.ctxMgr.SetTokenBudgets(12000, 10000, 0)
+	sub.ctxMgr.SetTokenBudgets(12000, 10000, 10000, 0)
 	messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
 	for i := range 10 {
 		callID := "call-" + string(rune('a'+i))

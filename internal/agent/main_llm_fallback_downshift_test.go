@@ -18,7 +18,7 @@ func newFallbackDownshiftTestAgent(t *testing.T) *MainAgent {
 			Compaction: config.CompactionConfig{Threshold: 0.8},
 		},
 	}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 900})
 	// The fallback boundary always runs inside a round that already passed the
@@ -116,7 +116,7 @@ func TestFallbackBoundaryCommitsSmallerInputBudgetOnly(t *testing.T) {
 // crosses the new line.
 func TestFallbackBoundaryCommitsWithoutArmingBelowTheNewLine(t *testing.T) {
 	a := newFallbackDownshiftTestAgent(t)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000, 1000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 300}) // below either line
 

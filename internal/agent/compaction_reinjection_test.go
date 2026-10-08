@@ -42,7 +42,7 @@ func TestCompactionReinjectionUsesRemainingInputBudget(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	for _, window := range []int{8192, 120000} {
 		for _, reserved := range []int{500, 3000} {
-			a.ctxMgr.SetTokenBudgets(window, 3000, reserved)
+			a.ctxMgr.SetTokenBudgets(window, 3000, 3000, reserved)
 			messages := []message.Message{{Role: message.RoleUser, Content: strings.Repeat("x", 7200)}}
 			plan := a.compactionInjectedFileBudgets(messages)
 			if plan.maxTotalBytes != 0 {
@@ -59,7 +59,7 @@ func TestCompactionKeyFilesDoNotCreateUserBoundary(t *testing.T) {
 	}
 	a := newTestMainAgent(t, root)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	messages := []message.Message{
 		{Role: message.RoleUser, Content: "Continue the task"},
 		{Role: message.RoleUser, IsCompactionSummary: true, Content: "## Files and Evidence\n- key.go\n\n## Next Step\n- continue"},
@@ -86,7 +86,7 @@ func TestInjectCompactionFileContextSkipsWhenPostCompactionMarginIsGone(t *testi
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 
 	const usable = 30000
-	a.ctxMgr.SetTokenBudgets(usable, usable, 0)
+	a.ctxMgr.SetTokenBudgets(usable, usable, usable, 0)
 
 	// Grow the checkpoint until it consumes two thirds of the usable budget:
 	// the remaining third sits inside the margin the overlay must keep free.
@@ -116,7 +116,7 @@ func TestInjectCompactionFileContextSkipsWhenPostCompactionMarginIsGone(t *testi
 
 	// The same request surface re-injects against a wider window, where the
 	// remaining budget sits above the margin.
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	wider, widerIdx := injectCompactionFileContextForTest(a, msgs)
 	if widerIdx != 1 || len(wider) != len(msgs)+1 {
 		t.Fatalf("wider window must re-inject, insertedAt=%d len=%d", widerIdx, len(wider))
@@ -139,7 +139,7 @@ func TestInjectCompactionFileContextRecordsFileSource(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	summary := "## Files and Evidence\n- key.go\n\n## Externalized State\n- .chord/notes/task.md\n\n## Next Step\n- continue"
 
 	got, gotIdx := injectCompactionFileContextForTest(a, []message.Message{{Role: message.RoleUser, IsCompactionSummary: true, Content: summary}})
@@ -186,7 +186,7 @@ func TestInjectCompactionFileContextBoundsOverlayOnSmallWindow(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(3000, 3000, 0)
+	a.ctxMgr.SetTokenBudgets(3000, 3000, 3000, 0)
 	msgs := []message.Message{{Role: message.RoleUser, IsCompactionSummary: true, Content: "## Files and Evidence\n- key.go\n\n## Next Step\n- continue"}}
 
 	window := a.ctxMgr.GetMaxTokens()
@@ -209,7 +209,7 @@ func TestInjectCompactionFileContextBoundsOverlayOnSmallWindow(t *testing.T) {
 
 	// The same request surface re-injects against a wider window, which takes
 	// the remaining-budget path.
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	if _, idx := injectCompactionFileContextForTest(a, msgs); idx != 1 {
 		t.Fatalf("wider window must inject, got insertedAt=%d", idx)
 	}

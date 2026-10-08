@@ -21,7 +21,7 @@ import (
 func TestGateKeepsStickyReminderWhenTheWarningClaimIsSpent(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000}) // 0.9: above the reminder line and the threshold
 	enableTestCompactContext(a)

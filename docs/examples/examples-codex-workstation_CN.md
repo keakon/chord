@@ -138,8 +138,8 @@ permission:
 这里有几点很关键：
 
 - 大多数模型只写 `limit.context` 就够了，也就是保证“输入 + 请求输出”不超过总窗口。
-- 某些 GPT 模型还额外有单独的输入上限。这时要配置 `limit.input`，让 Chord 知道何时在 prompt 过大前压缩；否则它会按 `limit.context` 减去模型自身的 `limit.output` 推导输入预算（只有模型未声明输出上限时才回退到全局默认值）。
-- `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此输出预算会取该上限与模型上限中的较小值；修改这个全局上限不会把 provider 的 `272k` 输入上限变大。
+- provider 公布单独的输入上限时，配置 `limit.input`。压缩比例以这个固定上限为基准；没有单独输入上限时，若模型最大输出小于总窗口，则以 `limit.context - limit.output` 为基准。输出能力未知或占满整个窗口时，基准取总窗口。
+- `limit.output` 是模型的最大输出能力。Chord 默认 `max_output_tokens` 为 `64000`，因此输出预算会取该上限与模型上限中的较小值；修改这个请求上限不会改变固定压缩基准，也不会改变 provider 公布的独立输入上限。
 - 不同 provider 的同名模型仍会分别参与 fallback；Chord 不会仅因为模型名相同就直接跳过。
 
 ## 需要准备的凭据

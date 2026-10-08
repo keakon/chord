@@ -114,7 +114,7 @@ func TestStopResponseKeepsExistingCompactionRunning(t *testing.T) {
 func TestIdleAutoCompactionClearsStaleRequestBelowCurrentThreshold(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(400000, 272000, 16000, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 16000, 0.8)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 50000})
 	a.autoCompactRequested.Store(true)
 	a.autoCompactFailureState = autoCompactionFailureState{
@@ -153,7 +153,7 @@ func TestAutomaticCompactionIgnoresPromptSizeWithoutUsageSignal(t *testing.T) {
 func TestUsageDrivenBreakerResetsAfterSuccessfulCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(2000, 1200, 200, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(2000, 1200, 1200, 200, 0.8)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 1000, CacheWriteTokens: 100})
 	a.autoCompactRequested.Store(true)
 	a.autoCompactFailureState = autoCompactionFailureState{
@@ -199,7 +199,7 @@ func TestUsageDrivenBreakerResetsAfterSuccessfulCompaction(t *testing.T) {
 func TestUsageDrivenBreakerResetsAfterSkipCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(2000, 1200, 200, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(2000, 1200, 1200, 200, 0.8)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 1000, CacheWriteTokens: 100})
 	a.autoCompactRequested.Store(true)
 	a.autoCompactFailureState = autoCompactionFailureState{

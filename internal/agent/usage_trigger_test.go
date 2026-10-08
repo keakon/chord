@@ -36,7 +36,7 @@ func waitForResponseHandled(t *testing.T, a *MainAgent) {
 func TestOversizedSuccessfulResponseDoesNotArmDisabledThreshold(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0}}}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(1000, 1000, 0, 0)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{
 		resp: &message.Response{Content: "done", StopReason: "stop", Usage: &message.TokenUsage{InputTokens: 2_000_000}},

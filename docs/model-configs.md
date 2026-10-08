@@ -153,8 +153,10 @@ the full history on their own; recipes that preserve thinking
 
 ### Compaction tuning
 
-Automatic compaction uses the effective input budget: a documented independent
-input cap, or the total window minus the requested output budget. An explicit
+Automatic compaction uses a fixed model baseline: a documented independent
+input cap, or the total window minus the model's maximum output capacity.
+If output capacity is unknown or spans the whole window, the baseline is the
+total window. Changing the requested output cap does not move the threshold. An explicit
 model or global threshold takes priority; otherwise, Chord uses the model's
 catalog recommendation, or the global default of 0.8 when none is recorded.
 See [Context compaction](./context-management.md#context-compaction).

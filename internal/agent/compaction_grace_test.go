@@ -19,7 +19,7 @@ func graceTestAgent(t *testing.T, usage float64) *MainAgent {
 	t.Helper()
 	a := newTestMainAgent(t, t.TempDir())
 	const budget = 1000000
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(budget, budget, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(budget, budget, budget, 0, 0.8)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: int(budget * usage)})
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))

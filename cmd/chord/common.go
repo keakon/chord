@@ -650,9 +650,10 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	}
 
 	// Context manager.
-	ac.CtxMgr = ctxmgr.NewManagerWithInputBudget(
+	ac.CtxMgr = ctxmgr.NewManagerWithTokenBudgets(
 		modelCfg.Limit.Context,
 		modelCfg.Limit.EffectiveInputBudget(cfg.MaxOutputTokens, llm.DefaultOutputTokenMax),
+		modelCfg.Limit.CompactionBudget(),
 		cfg.Context.Compaction.Reserved,
 		cfg.Context.Compaction.Threshold,
 	)

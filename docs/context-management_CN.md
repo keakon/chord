@@ -65,9 +65,9 @@ context:
 
 | 字段 | 类型 | 默认 | 说明 |
 |------|------|------|------|
-| `threshold` | 浮点数 | `0.8` | 触发自动压缩的上下文使用率阈值。取值 `0` ~ `1`，例如 `0.8` 表示用量达到可用输入预算的 80% 时触发；设为 `0` 可关闭自动压缩。超出 `0` ~ `1` 范围的值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到内置默认值。 |
+| `threshold` | 浮点数 | `0.8` | 触发自动压缩的上下文使用率阈值。取值 `0` ~ `1`，例如 `0.8` 表示用量达到可用固定压缩预算的 80% 时触发；设为 `0` 可关闭自动压缩。超出 `0` ~ `1` 范围的值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到内置默认值。 |
 | `model_pool` | 字符串 | 克隆当前 agent 模型池 | 执行压缩的专用模型池名。**优先选大上下文窗口，而不是单纯选便宜**：摘要输入会被剪裁到压缩模型自身的窗口内，且**从最早的归档消息开始丢**，小窗口模型会让摘要看不到会话是怎么开始的。理想选择是「窗口大且快而便宜」的模型。 |
-| `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从输入预算中扣除，再应用 `threshold`。 |
+| `reserved` | 整数 | `0` | 在 `threshold` 留出的比例余量之外，再为 tokenizer 误差、工具 schema 开销、压缩恢复安全等保留的固定 token 余量。通常建议省略（保持 `0`）；非零值会先从固定压缩预算中扣除，再应用 `threshold`。 |
 | `profile` | 字符串 | `auto` | 压缩策略，一般无需设置。 |
 | `reminder` | 浮点 | `0`（派生） | 上下文压力提醒线（usage 比例）。`0`（默认）按 `min(0.60, threshold × 0.90)` 派生；(0,1] 区间的值显式设置提醒线；`-1` 只关闭压力提醒、自动压缩保持开启（按模型同样可用）。低于 threshold 的 reminder 在 usage 到达 `min(reminder, threshold)`（任一先到）时触发；等于或高于 threshold 的 reminder 不单独触发——usage 只会在已经越线的请求上到达这条线，那些请求本就携带上阈值通知。`threshold: 0` 会一并关闭两者；其它取值（负数、大于 `1`，或 NaN/±Inf）会被拒绝并回退到派生默认值。 |
 | `model_driven` | 布尔 | `false` | 实验性开关：给主 agent 暴露 `compact_context` 工具，让模型在工作状态充分外化（写入文件或结构化参数）后主动请求 durable context checkpoint。checkpoint 不调用摘要模型，在工具批次收口后的 barrier 处原子应用并暂停下一次主模型请求，随后在同一 turn 的压缩上下文上继续。工具仅 MainAgent 可见、必须单独调用、`state_files` 与 `planned_state_files` 只作路径引用，工具自身不读取也不校验存在性；reset 后 runtime 会重新载入登记文件与 checkpoint 关键文件的一小段头部，且仅当当前 read 权限规则允许该路径。低收益请求会被自动跳过。默认关闭。 |
@@ -183,7 +183,13 @@ TUI 状态栏会把模型请求的 checkpoint 与 usage-driven 压缩区分开�
 
 ### 触发阈值如何计算
 
-以**可用输入预算**为基准。若模型配置了 `limit.input`，以此为准；否则按 `limit.context` 减去客户端计划输出预算（`max_output_tokens`，默认 `64000`，受正数 `limit.output` 约束）推导。这是本地规划的预留量：Responses 默认不发送 `max_output_tokens`，所以该预留量不代表服务端强制的输出上限。provider 公布了独立输入额度时应配置 `limit.input`。若设置了 `reserved`，再从预算中扣除。因此实际触发点为 `(输入预算 - reserved) × threshold`；`reserved` 会和 `threshold` 未使用的比例余量叠加，而不是替代它。TUI 信息面板和底部栏的 `Context` 百分比使用扣除 `reserved` 后的同一输入预算基准，与自动压缩阈值保持对齐。对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
+以**固定压缩预算**为基准。provider 公布了独立输入上限时，使用 `limit.input`；否则，若模型的 `limit.output` 为正数且小于 `limit.context`，使用 `limit.context - limit.output`。最大输出未知或可占满整个窗口时，使用总窗口。这是本地策略基数，不是额外的 provider 输入硬上限，也不会随 `max_output_tokens` 改变。
+
+实际触发点为 `(固定压缩预算 - reserved) × threshold`；压力提醒、TUI 信息面板和底部栏的 `Context` 百分比使用扣除 `reserved` 后的同一基数。例如，总窗口 `1050000`、最大输出 `128000` 对应固定基数 `922000`；`reserved` 为零、`threshold` 为 `0.28` 时，在 `258160` tokens 触发压缩。
+
+请求容量单独计算：未声明独立输入上限时，预留本次计划输出预算（`max_output_tokens`，默认 `64000`，受模型最大输出约束）。上下文超限恢复和宽限的安全上限仍使用请求预算。Responses 默认不发送 `max_output_tokens`，因此这个规划预留量不代表服务端强制的输出上限。
+
+对于会单独报告 prompt cache 写入的 provider，Chord 会把当前 prompt 侧用量按 `input_tokens + cache_write_tokens` 计算，因此新写入缓存的 prompt 片段也会计入显示的上下文负担。
 
 provider usage 是自动触发的权威依据。Chord 不会用请求级剪裁后的本地 token 估算去清除已经触发的自动压缩请求，因为多模态输入、工具 schema、provider/proxy framing 等都可能让本地估算与 provider 统计不一致。唯一的兜底是 usage 缺失场景：Chord 收到可信的非零 `input_tokens` 后，会记录当时会进入上下文的消息 bytes，包括正文、需要回放的 tool-call 参数、thinking blocks 和 reasoning text；之后某次响应缺少 usage 或返回 0 时，就按 bytes 比例缩放这个样本，把结果冻结成该次请求的估算值，估算值达到 `threshold` 时也会触发自动压缩。冻结后的估算值不会随后续追加的消息继续增长，只有下一次响应或压缩应用才会替换它。表盘上这个值标为 `≈`，与真实观测区分开；还没有任何可信样本的会话显示 `0`，也不会据此触发压缩。这个 byte-calibrated estimate 只用于提前压缩，不用于计费，也不表示精确的上下文窗口用量。
 

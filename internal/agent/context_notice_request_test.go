@@ -13,7 +13,7 @@ func noticeRequestAgent(t *testing.T) *MainAgent {
 	t.Helper()
 	a := newTestMainAgent(t, t.TempDir())
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.9, Reminder: 0.6}}}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.9)
 	enableTestCompactContext(a)
 	return a
 }

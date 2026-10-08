@@ -27,7 +27,7 @@ func TestCompactionFileReplayPreservesPrefixAndLatestVersion(t *testing.T) {
 	a := newTestMainAgent(t, root)
 	enableTestCheckpointFileReplay(a)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	checkpoint := message.Message{Role: message.RoleUser, IsCompactionSummary: true, Content: "## Files and Evidence\n- notes.md\n", CompactionFileRevisions: captureCompactionFileRevisions([]string{"notes.md"}, a.resolveCheckpointFilePath)}
 	raw := []message.Message{checkpoint, {Role: message.RoleUser, Content: "continue"}}
 	first, _ := injectCompactionFileContextForTest(a, raw)
@@ -97,7 +97,7 @@ func TestCompactionFileReplayRevocationAndDeletion(t *testing.T) {
 			}
 			a := newTestMainAgent(t, root)
 			a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-			a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+			a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 			raw := []message.Message{{Role: message.RoleUser, IsCompactionSummary: true, Content: "## Files and Evidence\n- notes.md\n"}}
 			first, _ := injectCompactionFileContextForTest(a, raw)
 			if len(first) != 2 {

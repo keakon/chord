@@ -1072,7 +1072,7 @@ orchestration:
 | `subagent_queue_bytes` | `4194304` | 每个 SubAgent 待处理输入的估算字节数上限。这是内存准入限制，不会溢写到磁盘 spool。 |
 | `mailbox_memory_messages` | `512` | MainAgent inbox 和按 owner 分类的 mailbox 在内存中保留的 SubAgent 消息总数上限。 |
 | `mailbox_memory_bytes` | `8388608` | 上述内存 mailbox 的估算总字节数上限。超过内存预算的持久化非 progress 消息会通过磁盘 mailbox spool 引用；progress 更新可能在内存中合并或省略。 |
-| `subagent_compact_usage` | `0.8` | 当 SubAgent 的估算上下文用量达到可用输入预算的这一比例时，主动压缩其上下文。默认值与 `context.compaction.threshold` 一致；SubAgent 使用本地 token 估算和轻量滑动窗口 checkpoint，而不是 MainAgent 的 usage 驱动压缩管线。有效值必须严格大于 `0` 且小于 `1`。 |
+| `subagent_compact_usage` | `0.8` | 当 SubAgent 的估算上下文用量达到固定压缩预算的这一比例时，主动压缩其上下文。默认值与 `context.compaction.threshold` 一致；SubAgent 使用本地 token 估算和轻量滑动窗口 checkpoint，而不是 MainAgent 的 usage 驱动压缩管线。有效值必须严格大于 `0` 且小于 `1`。 |
 | `waiting_main_expiry_turns` | `5` | SubAgent 停在 `waiting_main`、等待 owner 回复时允许经过的用户回合数。只有同时满足 `waiting_main_min_wait_sec` 后，这条回合数限制才会让任务过期；`waiting_main_max_wait_sec` 仍会无条件结束等待。 |
 | `waiting_main_min_wait_sec` | `300` | 回合数限制可以让 `waiting_main` 任务过期前必须经过的最短墙钟时间，单位为秒。 |
 | `waiting_main_max_wait_sec` | `3600` | `waiting_main` 任务最多等待的墙钟时间，单位为秒。达到后不论用户回合数如何都会过期；实际值不会小于 `waiting_main_min_wait_sec`。若两者都显式配置且该最大值小于最小值，配置加载会直接失败，而不是静默钳制。 |

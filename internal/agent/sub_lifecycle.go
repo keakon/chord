@@ -541,7 +541,7 @@ func (s *SubAgent) drainQueuedContextAppendsForContinue() {
 // observed post-response baseline, the frozen estimate when the latest response
 // missed usage, or 0 when unknown.
 func (s *SubAgent) GetContextStats() (current, limit int) {
-	return s.ctxMgr.EffectiveContextTokens(), s.ctxMgr.GetUsableInputBudget()
+	return s.ctxMgr.EffectiveContextTokens(), s.ctxMgr.GetUsableCompactionBudget()
 }
 
 // GetContextUsageState reports the observation state behind GetContextStats.

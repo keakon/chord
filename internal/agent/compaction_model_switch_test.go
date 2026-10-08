@@ -22,7 +22,7 @@ import (
 func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000}) // 0.9: over the old line, invalidated by the switch
 	// The running model just changed: the applied threshold still belongs to the
@@ -69,7 +69,7 @@ func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testin
 func TestPendingUpperThresholdNoticeSuppressesReminder(t *testing.T) {
 	newAgent := func(t *testing.T) *MainAgent {
 		a := newTestMainAgent(t, t.TempDir())
-		a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+		a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 		a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line (0.54)
 		enableTestCompactContext(a)
 		return a
@@ -113,7 +113,7 @@ func TestPendingUpperThresholdNoticeSuppressesReminder(t *testing.T) {
 func TestModelSwitchEstimatesPressureNoticesFromPreviousUsage(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000}) // 0.9: above both the reminder line and the threshold
 	// The running model just changed: the applied threshold still belongs to the
@@ -186,7 +186,7 @@ func waitForFailedRoundSettled(t *testing.T, a *MainAgent) {
 func TestModelSwitchFailedRoundKeepsRetiredGaugeReading(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000}) // 0.9: measured against the previous window
 	// The running model just changed: the applied threshold still belongs to the

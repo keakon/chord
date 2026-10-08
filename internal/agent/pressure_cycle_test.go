@@ -13,7 +13,7 @@ import (
 
 func TestPressureCycleIdentityAndStageTransitions(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	key := a.currentOverlayWindowKey()
 
 	a.notePressureStage(pressureStageReminded, key)
@@ -83,7 +83,7 @@ func TestPressureCycleIdentityAndStageTransitions(t *testing.T) {
 
 func TestPressureCycleRecordsOneDurableRowPerLevel(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line, below the threshold
 	enableTestCompactContext(a)
 
@@ -202,7 +202,7 @@ func TestAdoptedPressureRowRecoversLevels(t *testing.T) {
 // revived cycle writes its card.
 func TestPressureCycleAdoptionKeepsOtherLevelsRecordable(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 
@@ -247,7 +247,7 @@ func TestPressureCycleAdoptionKeepsOtherLevelsRecordable(t *testing.T) {
 
 func TestPressureCycleAdoptsRestoredRow(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 
@@ -318,7 +318,7 @@ func TestPressureCycleAdoptsRestoredRow(t *testing.T) {
 // carries and skip the card that documents it.
 func TestPressureCycleStaleRestoredRowReleasesAdoption(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	enableTestCompactContext(a)
 
 	restored := message.Message{
@@ -401,7 +401,7 @@ func lastPressureCycleEvent(t *testing.T, events []analytics.UsageEvent) analyti
 // when an action did not happen.
 func TestPressureCyclePreparationAuditDatesEachAction(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	var events []analytics.UsageEvent
 	a.SetUsageEventSink(func(event analytics.UsageEvent) { events = append(events, event) })
 
@@ -480,7 +480,7 @@ func TestPressureCyclePreparationAuditDatesEachAction(t *testing.T) {
 // wins, and only agent-owned notes or plans count as externalized state.
 func TestPressurePreparationAuditDropsMarksOutsideACycle(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	first := time.Unix(1_700_000_000, 0).UTC()
 
 	a.notePressurePreparation(pressurePreparationStateFileWrite, first)

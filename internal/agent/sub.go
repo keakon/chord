@@ -832,7 +832,7 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 		oldClient.Close()
 	}
 	providerRef := client.PrimaryModelRef()
-	s.ctxMgr.SetTokenBudgets(contextLimit, client.InputLimitForModelRef(providerRef), 0)
+	s.ctxMgr.SetTokenBudgets(contextLimit, client.InputLimitForModelRef(providerRef), client.CompactionBudgetForModelRef(providerRef), 0)
 	s.installSystemPrompt(prompt)
 	runningRef := client.RunningModelRef()
 	if runningRef == "" {
@@ -1099,7 +1099,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			// when TUI focus is on this SubAgent (mirrors MainAgent.callLLM).
 			if runningRef != "" {
 				if lim := llmClient.ContextLimitForModelRef(runningRef); lim > 0 {
-					s.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(runningRef), 0)
+					s.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(runningRef), llmClient.CompactionBudgetForModelRef(runningRef), 0)
 				}
 			}
 			s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage, callStatus.ServiceTier, nil)

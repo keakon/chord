@@ -47,7 +47,7 @@ func (s *SubAgent) prepareContextForLLM(messages []message.Message) []message.Me
 	if s == nil || len(messages) <= 2 {
 		return messages
 	}
-	budget := s.ctxMgr.GetUsableInputBudget()
+	budget := s.ctxMgr.GetUsableCompactionBudget()
 	if budget <= 0 {
 		budget = s.ctxMgr.GetMaxTokens()
 	}
@@ -59,10 +59,14 @@ func (s *SubAgent) prepareContextForLLM(messages []message.Message) []message.Me
 		usage = config.DefaultSubAgentCompactUsage
 	}
 	estimated := estimateMessagesTokens(s.ctxMgr, messages)
-	if estimated < int(float64(budget)*usage) {
+	requestBudget := s.ctxMgr.GetUsableInputBudget()
+	if estimated < int(float64(budget)*usage) && (requestBudget <= 0 || estimated < requestBudget) {
 		return messages
 	}
 	target := int(float64(budget) * usage * 0.85)
+	if requestBudget > 0 {
+		target = min(target, int(float64(requestBudget)*0.85))
+	}
 	if compressed, ok := s.compactContextForTarget(messages, target, "proactive context budget protection"); ok {
 		log.Infof("SubAgent proactively compressed context agent=%v turn_id=%v before=%v after=%v estimated_tokens=%v target_tokens=%v", s.instanceID, s.turn.ID, len(messages), len(compressed), estimated, target)
 		return compressed

@@ -431,7 +431,7 @@ func (a *MainAgent) modelDrivenDenyDiagnosticMessage() string {
 		return "automatic compaction availability depends on the current configuration and failure policy"
 	}
 	decision := a.ctxMgr.AutoCompactDecision()
-	if decision.Threshold <= 0 || decision.UsableInputBudget <= 0 {
+	if decision.Threshold <= 0 || decision.UsableCompactionBudget <= 0 {
 		return "automatic compaction is disabled by configuration"
 	}
 	if a.isUsageDrivenAutoCompactSuppressed() {

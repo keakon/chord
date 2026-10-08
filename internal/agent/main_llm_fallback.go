@@ -60,10 +60,9 @@ func (a *MainAgent) applyFallbackModelDownshift(payload *llmFallbackBoundaryPayl
 		payload.fallbackModelRef == "" || payload.fallbackContextLimit <= 0 {
 		return
 	}
-	// The auto-compaction line tracks the effective input budget, so a
-	// downshift must be detected against both windows: a fallback whose input
-	// budget is smaller (even when its total context window is unchanged)
-	// re-evaluates the same context against a lower line and can cross it.
+	// Detect a downshift using the request budgets, including an independent
+	// input limit even when the total window is unchanged. Committing the target
+	// model installs its fixed compaction baseline and re-evaluates its policy.
 	if !fallbackNarrowsRequestBudget(payload.fallbackContextLimit, payload.fallbackInputLimit,
 		a.ctxMgr.GetMaxTokens(), a.ctxMgr.GetInputBudget()) {
 		// A non-narrowing fallback commits nothing: the request was admitted
@@ -122,7 +121,7 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 	if !a.started.Load() {
 		// The pending queue is event-loop owned. A direct call without a running
 		// event loop cannot safely consume it, so leave it for the normal drain.
-		return a.reconcileFallbackPressureNotices(messages, fallbackModelDisplayRef(fallback), fallbackInputBudget(fallback), true), nil
+		return a.reconcileFallbackPressureNotices(messages, fallbackModelDisplayRef(fallback), fallback.CompactionBudget(), true), nil
 	}
 
 	payload := &llmFallbackBoundaryPayload{
@@ -158,7 +157,7 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 			estimateMessagesTokens(a.ctxMgr, messages), payload.fallbackInputLimit)
 		a.noteFallbackSurfaceDecision(rebuilt)
 		log.Debugf("LLM fallback %s", describeSurfaceDecision(primarySurface, targetSurface, rebuilt))
-		return a.reconcileFallbackPressureNotices(messages, payload.fallbackModelRef, fallbackInputBudget(fallback), !rebuilt), nil
+		return a.reconcileFallbackPressureNotices(messages, payload.fallbackModelRef, fallback.CompactionBudget(), !rebuilt), nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("fallback request update cancelled: %w", ctx.Err())
 	case <-a.parentCtx.Done():
@@ -230,13 +229,6 @@ func fallbackNarrowsRequestBudget(fallbackContextLimit, fallbackInputLimit, prim
 		fallbackInput = fallbackContextLimit
 	}
 	return primaryInputLimit > 0 && fallbackInput < primaryInputLimit
-}
-
-func fallbackInputBudget(fallback llm.FallbackModel) int {
-	if fallback.InputLimit > 0 {
-		return fallback.InputLimit
-	}
-	return fallback.ContextLimit
 }
 
 func trailingTurnOverlayCount(messages []message.Message) int {

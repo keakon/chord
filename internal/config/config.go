@@ -1053,7 +1053,7 @@ type ModelLimit struct {
 }
 
 // EffectiveInputBudget returns the input-side budget used for request sizing
-// and automatic compaction. An explicit limit.input is authoritative and used
+// and request safety checks. An explicit limit.input is authoritative and used
 // as-is, even when it is not additive with limit.output inside the context
 // window. Without limit.input, reserve this client's planned output budget,
 // bounded by the model's output capacity. A maximum output capacity is not a
@@ -1074,6 +1074,25 @@ func (l ModelLimit) EffectiveInputBudget(outputCapSetting, defaultOutputCap int)
 		return 1
 	}
 	return budget
+}
+
+// CompactionBudget is a fixed baseline for compaction ratios, independent of
+// the output cap of an individual request. An explicit input allowance wins.
+// Otherwise reserve the documented maximum output when it leaves a positive
+// input allocation. Models whose output capacity spans the whole window have
+// no fixed input/output partition, so their baseline is the total window.
+// This recommendation baseline is not a provider-enforced input limit.
+func (l ModelLimit) CompactionBudget() int {
+	if l.Input > 0 {
+		return l.Input
+	}
+	if l.Context <= 0 {
+		return 0
+	}
+	if l.Output > 0 && l.Output < l.Context {
+		return l.Context - l.Output
+	}
+	return l.Context
 }
 
 // normalizeModelLimits derives a total context window for models that publish

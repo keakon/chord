@@ -102,11 +102,11 @@ func TestCompactionWarningClaimGenerationBinding(t *testing.T) {
 func TestQueueContextPressureReminderGates(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 
 	// Auto-compact off (threshold 0): never a reminder, even with model-driven
 	// enabled — there is no usage-driven safety net to justify the nudge.
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 7000})
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != "" {
@@ -114,7 +114,7 @@ func TestQueueContextPressureReminderGates(t *testing.T) {
 	}
 
 	// Below the reminder line (0.6 for threshold 0.9): no reminder.
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4000}) // 4000/8192 ≈ 0.49 < 0.60
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
 	if a.pendingContextPressureReminder != "" {
@@ -173,7 +173,7 @@ func TestQueueContextPressureReminderKeepsArmWhenReminderDisabled(t *testing.T) 
 	// from: the usage-driven arm and grace must keep running so automatic
 	// compaction still starts at the threshold.
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 100})
 	enableTestCompactContext(a)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
@@ -202,7 +202,7 @@ func TestQueueContextPressureReminderKeepsArmWhenReminderDisabled(t *testing.T) 
 // just wrote and rewrite it on the next request.
 func TestQueueContextPressureReminderDisabledKeepsThresholdNotices(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 7600})
 	enableTestCompactContext(a)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
@@ -229,7 +229,7 @@ func TestQueueContextPressureReminderDisabledKeepsThresholdNotices(t *testing.T)
 
 func TestContextPressureBelowReminderLineDisabledLineIsNotBelow(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 100})
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
 	if a.contextPressureBelowReminderLine(a.ctxMgr.AutoCompactDecision(), -1) {
@@ -244,7 +244,7 @@ func TestContextPressureBelowReminderLineDisabledLineIsNotBelow(t *testing.T) {
 func TestQueueContextPressureReminderDeliveredOnceAcrossRequests(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // ≈0.61: above the 0.60 reminder line, below threshold 0.9
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
@@ -329,7 +329,7 @@ func TestCompactContextCallArmsAndStopsStickyReminder(t *testing.T) {
 func TestQueueContextPressureReminderSkipsWhenReminderAtThreshold(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.5)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.5)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4500}) // ≈0.55: above the reminder line
 	a.modelDrivenCompactionEnabled.Store(true)
 	a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))
@@ -435,7 +435,7 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 	// warning for the compaction a later crossing starts: the undelivered
 	// reminder yields, so the crossing request carries only the warning.
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line (0.54), below the threshold
 	enableTestCompactContext(a)
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
@@ -455,7 +455,7 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 	// Warning first, then the reminder on the next request: the reminder must
 	// not stage on top of it.
 	b := newTestMainAgent(t, t.TempDir())
-	b.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	b.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	b.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(b)
 	b.requestBatches.reserve(b.sessionEpoch, 0)
@@ -472,7 +472,7 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 	// The warning also supersedes a countdown left armed by a request whose
 	// dispatch never confirmed.
 	c := newTestMainAgent(t, t.TempDir())
-	c.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	c.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	c.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(c)
 	c.queueCompactionImminentNotice()
@@ -496,7 +496,7 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 // and a live durable row must keep suppressing.
 func TestRecrossBeforeIdleSweepRestagesWithdrawnWarning(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
 	enableTestCompactContext(a)
 	user := message.Message{Role: message.RoleUser, Content: "continue the task"}
 	row := message.Message{
@@ -540,7 +540,7 @@ func TestRecrossBeforeIdleSweepRestagesWithdrawnWarning(t *testing.T) {
 // fields is removed.
 func TestPendingContextNoticeFieldsConcurrentWriters(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(100000, 100000, 0, 0.8)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
 	enableTestCompactContext(a)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
 	messages := []message.Message{{Role: message.RoleUser, Content: "continue the task"}}
@@ -932,7 +932,7 @@ func enableTestCompactContext(a *MainAgent) {
 
 func TestQueueContextPressureReminderKeepsNoticesWhenUsageDrops(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 	a.armUsageDrivenAutoCompactRequest()
@@ -956,7 +956,7 @@ func TestQueueContextPressureReminderKeepsNoticesWhenUsageDrops(t *testing.T) {
 
 func TestQueueContextPressureReminderReCrossKeepsDurableNotice(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
@@ -984,7 +984,7 @@ func TestQueueContextPressureReminderReCrossKeepsDurableNotice(t *testing.T) {
 func TestMaybeClearStaleContextNoticesResetsReminderDeliveryForRecross(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.installSessionTarget(t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 
@@ -1025,7 +1025,7 @@ func TestMaybeClearStaleContextNoticesResetsReminderDeliveryForRecross(t *testin
 
 func TestMaybeClearStaleContextNoticesKeepsCcCalledQuiet(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 	a.queueContextPressureReminder(a.ctxMgr.AutoCompactDecision())
@@ -1169,7 +1169,7 @@ func TestQueueContextPressureReminderKeepsThresholdNoticesWhenUsageDrops(t *test
 		t.Run(tc.name, func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
 			a.installSessionTarget(t.TempDir())
-			a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+			a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 			a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 			enableTestCompactContext(a)
 			tc.mark(a)
@@ -1198,7 +1198,7 @@ func TestQueueContextPressureReminderKeepsThresholdNoticesWhenUsageDrops(t *test
 func TestMaybeClearStaleContextNoticesResetsImminentDeliveryForRecross(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.installSessionTarget(t.TempDir())
-	a.ctxMgr = ctxmgr.NewManagerWithInputBudget(8192, 8192, 0, 0.9)
+	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(a)
 

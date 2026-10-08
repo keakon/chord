@@ -131,7 +131,7 @@ func TestCompactionContinuationFilesLoadsInRootAbsoluteSymlink(t *testing.T) {
 	}
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	summary := "## Externalized State\n- state.md\n"
 
 	out, insertedAt := injectCompactionFileContextForTest(a, []message.Message{
@@ -200,7 +200,7 @@ func TestCompactionContinuationFilesGateStateFilesByReadPermission(t *testing.T)
 
 	a := newTestMainAgent(t, projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
-	a.ctxMgr.SetTokenBudgets(120000, 120000, 0)
+	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	summary := "## Externalized State\n- .chord/notes/task.md\n\n## Next Step\n- continue"
 
 	// A restore rebuilds the file tracker from the surviving transcript only,

@@ -639,7 +639,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 
 	beforeNotices := len(messages)
 	modelRef := llmClient.NextRequestModelRef()
-	messages = a.reconcilePressureNoticesForModel(messages, noticeRequestMessages, modelRef, llmClient.InputLimitForModelRef(modelRef))
+	messages = a.reconcilePressureNoticesForModel(messages, noticeRequestMessages, modelRef, llmClient.CompactionBudgetForModelRef(modelRef))
 	if len(messages) != beforeNotices {
 		// Removed notices shift source indices; the old explicit boundary no
 		// longer names the prepared prefix. The latest boundary remains valid.
@@ -913,7 +913,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	// window produced (see applyModelCompactionConfig).
 	a.setUsageObservationModelRef(callStatus.RunningModelRef)
 	decision := a.ctxMgr.AutoCompactDecision()
-	decisionFields := fmt.Sprintf("last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v usage_state=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.UsageState, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
+	decisionFields := fmt.Sprintf("last_input_tokens=%v estimated_input_tokens=%v effective_input_tokens=%v usage_state=%v threshold_tokens=%v input_budget=%v reserved_input=%v usable_input_budget=%v compaction_budget=%v usable_compaction_budget=%v threshold=%v selected_model=%v running_model=%v turn_id=%v", decision.LastInputTokens, decision.EstimatedInputTokens, decision.EffectiveInputTokens, decision.UsageState, decision.ThresholdTokens, decision.InputBudget, decision.ReservedInput, decision.UsableInputBudget, decision.CompactionBudget, decision.UsableCompactionBudget, decision.Threshold, selectedRef, callStatus.RunningModelRef, turnID)
 	// Suspicious-but-successful response: normalized input exceeds the local
 	// budget yet the provider succeeded. Keep the successful result and leave
 	// this as a diagnostic: never replay or discard the answer, and never arm

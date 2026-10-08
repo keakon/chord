@@ -395,7 +395,7 @@ See [Performance](./performance.md) for how rendering and streaming are optimize
 What to check:
 
 1. Verify `context.compaction.threshold` is set and greater than 0 (0 disables automatic compaction).
-2. Check the `Context` percentage in the TUI footer or info panel. It is based on the **usable input budget**, not the total context window, so it may be lower than expected (see [Context management: Compaction](./context-management.md#context-compaction)).
+2. Check the `Context` percentage in the TUI footer or info panel. It uses the **fixed compaction budget** after subtracting reserved headroom; the model's maximum output or independent input cap may make this baseline smaller than the total window (see [Context management: Compaction](./context-management.md#context-compaction)).
 3. If `context.compaction.reserved` is set, compaction triggers at a lower absolute token count because the reserve is subtracted before applying `threshold`; if compaction is too frequent, check whether reserved is too large.
 4. `/compact --no` temporarily disables automatic compaction for the current session. Restart the session or run `/compact` to re-enable.
 5. If your gateway returns missing or zero usage, enable `log_level: debug` and look for `estimated_input_tokens` and `effective_input_tokens` in automatic-compaction logs.

@@ -1704,7 +1704,7 @@ func (a *MainAgent) SwitchFocus(agentID string) {
 }
 
 func (a *MainAgent) GetAllAgentsContextUsage() []AgentContextUsage {
-	out := []AgentContextUsage{{AgentID: "main", ContextCurrent: a.ctxMgr.LastTotalContextTokens(), ContextLimit: a.ctxMgr.GetUsableInputBudget(), ContextMessageCount: a.ctxMgr.MessageCount()}}
+	out := []AgentContextUsage{{AgentID: "main", ContextCurrent: a.ctxMgr.LastTotalContextTokens(), ContextLimit: a.ctxMgr.GetUsableCompactionBudget(), ContextMessageCount: a.ctxMgr.MessageCount()}}
 	a.subs.mu.RLock()
 	defer a.subs.mu.RUnlock()
 	for id, sub := range a.subs.subAgents {
