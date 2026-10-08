@@ -272,17 +272,22 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
-	// Confirm/Question/Rules/UsageStats/Help/StopJob overlay modes keep clicks
-	// from passing through, but allow wheel scrolling of the underlying viewport
-	// so long background cards remain readable while the overlay is open.
+	// Overlay modes keep clicks from passing through. Question falls back to the
+	// conversation for wheels the dialog cannot spend itself (pointer outside it
+	// or body already at its edge), so the context behind a question stays
+	// readable while the dialog is open.
 	if m.mode == ModeQuestion {
 		switch mouse.Button {
-		case tea.MouseWheelUp:
-			m.scrollQuestion(-mouseWheelScrollStep)
-			return m.beginQuestionInteraction(), true
-		case tea.MouseWheelDown:
-			m.scrollQuestion(mouseWheelScrollStep)
-			return m.beginQuestionInteraction(), true
+		case tea.MouseWheelUp, tea.MouseWheelDown:
+			delta := mouseWheelScrollStep
+			if mouse.Button == tea.MouseWheelUp {
+				delta = -mouseWheelScrollStep
+			}
+			if m.questionWheelScrollsBody(mouse.X, mouse.Y, delta) {
+				m.scrollQuestion(delta)
+				return m.beginQuestionInteraction(), true
+			}
+			return tea.Batch(m.beginQuestionInteraction(), m.handleMouseWheel(mouse)), true
 		}
 		return nil, true
 	}

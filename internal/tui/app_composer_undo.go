@@ -27,6 +27,7 @@ type composerUndoState struct {
 	typing     bool
 	lastEdit   time.Time
 	lastCursor int
+	oversized  bool
 }
 
 func (s composerEditSnapshot) size() int {
@@ -96,7 +97,7 @@ func (m *Model) beginComposerEdit(typing bool) func() {
 		merge := typing && m.composerUndo.typing && now.Sub(m.composerUndo.lastEdit) <= composerTypingWindow && cursor == m.composerUndo.lastCursor
 		size := before.size()
 		if size > composerUndoBytes {
-			m.composerUndo = composerUndoState{boundary: boundary}
+			m.composerUndo = composerUndoState{boundary: boundary, oversized: true}
 			return
 		}
 		if !merge || len(m.composerUndo.entries) == 0 {
@@ -117,6 +118,9 @@ func (m *Model) beginComposerEdit(typing bool) func() {
 func (m *Model) undoComposerEdit() tea.Cmd {
 	m.syncComposerUndoBoundary()
 	if len(m.composerUndo.entries) == 0 {
+		if m.composerUndo.oversized {
+			return m.enqueueToast("Undo unavailable: the draft exceeded the 8 MiB undo limit", "info")
+		}
 		return nil
 	}
 	m.cancelClipboardAttachmentPaste()

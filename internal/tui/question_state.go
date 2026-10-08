@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"image"
 	"time"
 
 	"github.com/keakon/bubbles/v2/textarea"
@@ -49,7 +50,8 @@ type questionState struct {
 	followCursor                        bool
 	bodyHeight                          int
 	visibleBodyHeight                   int
-	prevMode                            Mode // mode to restore on close
+	dialogRect                          image.Rectangle // rendered overlay bounds, for wheel hit-testing
+	prevMode                            Mode            // mode to restore on close
 
 	// deadline is the request's absolute close time from question_timeout.
 	// The dialog only displays the countdown; the broker owns termination.

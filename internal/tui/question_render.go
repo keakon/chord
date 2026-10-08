@@ -208,7 +208,8 @@ func (m *Model) renderQuestionDialog() string {
 	if len(lines) > bodyHeight {
 		cfg.Title += fmt.Sprintf(" [%d-%d/%d]", offset+1, offset+len(visible), len(lines))
 	}
-	out, _ := RenderOverlay(cfg, strings.Join(visible, "\n"), area)
+	out, rect := RenderOverlay(cfg, strings.Join(visible, "\n"), area)
+	m.question.dialogRect = rect
 	if !m.question.submitting && !m.question.custom && m.question.deadline.IsZero() && len(q.Options) > 0 {
 		m.question.renderCacheWidth = m.width
 		m.question.renderCacheHeight = m.height

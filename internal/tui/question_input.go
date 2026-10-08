@@ -41,8 +41,15 @@ func (m *Model) handleQuestionKeyInput(msg tea.KeyMsg) tea.Cmd {
 		if msg.String() == "pgup" {
 			delta = -delta
 		}
-		m.scrollQuestion(delta)
-		return nil
+		if m.scrollQuestion(delta) {
+			return nil
+		}
+		// The question body has no more room: page the conversation instead,
+		// matching the pointer-aware wheel behavior.
+		if msg.String() == "pgup" {
+			return m.pageTranscript(-1)
+		}
+		return m.pageTranscript(1)
 	}
 	q := m.question.request.Item
 

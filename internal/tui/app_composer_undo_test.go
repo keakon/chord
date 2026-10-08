@@ -120,3 +120,30 @@ func TestComposerUndoUsesConfiguredBinding(t *testing.T) {
 		t.Fatal("configured undo ignored")
 	}
 }
+
+func TestComposerUndoReportsOversizedDraft(t *testing.T) {
+	m := NewModel(nil)
+	m.attachments = []Attachment{{Data: make([]byte, composerUndoBytes)}}
+	m.insertComposerText("draft")
+	if m.activeToast != nil {
+		t.Fatal("editing an oversized draft must not show a toast")
+	}
+	if cmd := m.undoComposerEdit(); cmd == nil || m.activeToast == nil || !strings.Contains(m.activeToast.Message, "8 MiB") {
+		t.Fatal("undo did not explain the draft size limit")
+	}
+	if m.input.Value() != "draft" || len(m.attachments) != 1 {
+		t.Fatal("unavailable undo changed the draft")
+	}
+
+	m.activeToast = nil
+	m.input.Reset()
+	m.attachments = nil
+	if cmd := m.undoComposerEdit(); cmd != nil || m.activeToast != nil {
+		t.Fatal("undo size warning crossed a composer boundary")
+	}
+	m.insertComposerText("small")
+	m.undoComposerEdit()
+	if m.input.Value() != "" || m.activeToast != nil {
+		t.Fatal("normal undo did not recover")
+	}
+}

@@ -161,7 +161,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 				helpBinding([]string{"enter"}, "confirm"),
 				helpBinding([]string{"esc"}, "decline without withdrawing requirement"),
 				helpBinding([]string{"ctrl+w"}, "withdraw this requirement"),
-				helpBinding([]string{"pgup / pgdown"}, "scroll question content"),
+				helpBinding([]string{"pgup / pgdown"}, "scroll question, then the conversation"),
 			},
 		},
 		{
