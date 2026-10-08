@@ -424,13 +424,13 @@ func (a *MainAgent) notePressurePreparationFromToolResult(payload *ToolResultPay
 
 // wrotePressureStateFile reports whether a committed set of mutations touched an
 // agent-owned note or plan document. Paths are matched in the spelling the tool
-// recorded them; see isPressureStateFilePath.
+// recorded them; see isNotesStatePath.
 func wrotePressureStateFile(state *message.ToolFileState) bool {
 	if state == nil {
 		return false
 	}
 	for _, written := range state.Writes {
-		if isPressureStateFilePath(written.Path) {
+		if isNotesStatePath(written.Path) {
 			return true
 		}
 	}
@@ -438,20 +438,21 @@ func wrotePressureStateFile(state *message.ToolFileState) bool {
 		if change.Deleted {
 			continue
 		}
-		if isPressureStateFilePath(change.Path) || isPressureStateFilePath(change.TargetPath) {
+		if isNotesStatePath(change.Path) || isNotesStatePath(change.TargetPath) {
 			return true
 		}
 	}
 	return false
 }
 
-// isPressureStateFilePath reports whether a recorded path names a document
-// under an agent-owned notes or plans root. Recorded paths are either
-// repository-relative (./.chord/notes/task.md) or absolute, and both spellings
-// are matched by shape without resolving the session working directory: an
-// absolute path counts when it contains /.chord/notes/ or /.chord/plans/,
-// because this mark is audit-only and the project root is not known here.
-func isPressureStateFilePath(path string) bool {
+// isNotesStatePath reports whether a recorded path names a document under an
+// agent-owned notes or plans root. Recorded paths are either repository-
+// relative (./.chord/notes/task.md) or absolute, and both spellings are matched
+// by shape without resolving the session working directory: an absolute path
+// counts when it contains /.chord/notes/ or /.chord/plans/. Both callers — the
+// pressure-externalization audit and the compaction evidence classifier — run
+// where the project root is not known.
+func isNotesStatePath(path string) bool {
 	cleaned := strings.TrimPrefix(strings.TrimSpace(filepath.ToSlash(path)), "./")
 	if cleaned == "" {
 		return false

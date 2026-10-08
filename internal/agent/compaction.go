@@ -888,7 +888,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					items = append(items, item)
 				}
 			}
-			if strings.TrimSpace(msg.ToolDiff) != "" {
+			if strings.TrimSpace(msg.ToolDiff) != "" && !notesStateOnlyToolDiff(msg) {
 				item := buildEvidenceItem(
 					evidenceToolDiff,
 					"Recent code diff",

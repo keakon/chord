@@ -69,7 +69,7 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 			)
 			a.addToolEvidenceCandidate(item, msg)
 		}
-		if strings.TrimSpace(msg.ToolDiff) != "" {
+		if strings.TrimSpace(msg.ToolDiff) != "" && !notesStateOnlyToolDiff(msg) {
 			item := buildEvidenceItem(
 				evidenceToolDiff,
 				"Recent code diff",
@@ -87,4 +87,43 @@ func (a *MainAgent) resetRuntimeEvidenceFromMessages(messages []message.Message)
 	for _, msg := range messages {
 		a.recordEvidenceFromMessage(msg)
 	}
+}
+
+// notesStateOnlyToolDiff reports whether a completed file-editing tool result
+// wrote only agent-owned note or plan documents (.chord/notes, .chord/plans).
+// Those writes are task state, not code: the checkpoint re-loads the documents
+// the model registered as state files, so an evidence excerpt would only
+// restate content the continuation already receives, while taking the pack's
+// single required diff slot — and the notes write tends to be the newest diff
+// exactly when compaction fires. A call that also touched checkout content
+// keeps its diff, and a result whose write targets were not recorded keeps it
+// too: an unclassifiable diff stays evidence instead of being dropped on a
+// guess.
+func notesStateOnlyToolDiff(msg message.Message) bool {
+	state := msg.FileState
+	if state == nil {
+		return false
+	}
+	matched := false
+	for _, write := range state.Writes {
+		if strings.TrimSpace(write.Path) == "" {
+			continue
+		}
+		if !isNotesStatePath(write.Path) {
+			return false
+		}
+		matched = true
+	}
+	for _, change := range state.Changes {
+		for _, path := range []string{change.Path, change.TargetPath} {
+			if strings.TrimSpace(path) == "" {
+				continue
+			}
+			if !isNotesStatePath(path) {
+				return false
+			}
+			matched = true
+		}
+	}
+	return matched
 }
