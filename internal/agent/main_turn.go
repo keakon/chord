@@ -180,6 +180,36 @@ func (a *MainAgent) abortTurn(t *Turn) Event {
 	}
 }
 
+// turnHasNoPendingWork reports whether a turn parked by a pre-request
+// compaction barrier failure is still waiting for a user-driven action. The
+// marker alone is not enough: it stays set until the next request starts, so
+// a turn that is already progressing (in-flight request, running tool batch,
+// active compaction or live question) must not be settled as stalled.
+func (a *MainAgent) turnHasNoPendingWork() bool {
+	if a.turn == nil || !a.compactionContinuationStalled {
+		return false
+	}
+	if a.mainLLMRequestInFlight.Load() || a.turn.PendingToolCalls.Load() > 0 || a.IsCompactionRunning() {
+		return false
+	}
+	if a.questions.active != nil || len(a.questions.waits) > 0 {
+		return false
+	}
+	return true
+}
+
+// settleStalledTurn ends an active turn that has no pending work so a
+// user-driven action (continue or new input) can proceed. It is a no-op for a
+// turn that is actually running, so callers keep their existing busy behavior.
+func (a *MainAgent) settleStalledTurn(reason string) {
+	if !a.turnHasNoPendingWork() {
+		return
+	}
+	log.Warnf("settling stalled turn with no pending work turn_id=%v reason=%v", a.turn.ID, reason)
+	a.handleTurnCancelled(a.abortTurn(a.turn))
+	a.compactionContinuationStalled = false
+}
+
 // cancelCoversAcceptedOrder reports whether a cancel request covers the message
 // accepted at this order: arrival orders only grow, and the watermark only
 // rises, so a covered message never starts work.

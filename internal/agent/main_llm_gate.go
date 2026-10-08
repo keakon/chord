@@ -459,6 +459,10 @@ func (a *MainAgent) noteModelDrivenDenyDiagnosticOnce() {
 }
 
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
+	// A pre-request barrier failure is recoverable once this request is about
+	// to be launched on the live context; do not let a later user message
+	// mistake the now-progressing turn for the original stall.
+	a.compactionContinuationStalled = false
 	a.applyPendingModelPoolSwitchesAtRequestBoundary()
 	// Apply the per-model compaction threshold for the current model
 	// reference. This runs after pending model-pool switches are applied so a
@@ -474,18 +478,25 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// Continuation barrier: apply any ready compaction draft first. When the
 	// apply path resumes a saved continuation (handled=true), it owns control
 	// flow from here; otherwise this fresh pre-request path should continue on
-	// the compacted context. Failed applies fall back to idle rather than running
-	// the same stale gate again.
+	// the compacted context. A failed apply must not park the turn: this gate
+	// owes the active turn its next request, so it continues on the uncompacted
+	// context and leaves the failure to the oversize path or the
+	// auto-compaction failure breaker.
 	if a.compactionState.readyDraft != nil {
 		applySucceeded, handled := a.applyReadyDraft()
 		if handled {
 			return
 		}
 		if !applySucceeded {
-			a.emitActivity("main", ActivityIdle, "")
-			a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
-			a.drainPendingUserMessages()
-			return
+			// Parking here used to emit idle and return with the turn still
+			// active and no request in flight; the active-turn guard then
+			// swallowed every later user action and the session could not
+			// continue. A stale draft failing provenance validation is the
+			// observed trigger: compaction ran in parallel with the turn, tool
+			// results kept changing the transcript generation, and the draft no
+			// longer covered the messages it wanted to archive.
+			log.Warnf("compaction draft did not apply at the pre-request gate; continuing on the uncompacted context turn_id=%v", turnID)
+			a.compactionContinuationStalled = true
 		}
 	}
 

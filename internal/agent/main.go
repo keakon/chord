@@ -152,11 +152,12 @@ type MainAgent struct {
 	// it, when it is about to start a turn for a covered message.
 	cancelUpTo atomic.Int64
 
-	turn           *Turn
-	nextTurnID     uint64
-	turnEpoch      uint64
-	eventSeq       atomic.Uint64
-	requestBatches requestBatchState
+	turn                          *Turn
+	nextTurnID                    uint64
+	turnEpoch                     uint64
+	compactionContinuationStalled bool
+	eventSeq                      atomic.Uint64
+	requestBatches                requestBatchState
 	// autoCompactRequested is set after an LLM round crosses the configured
 	// context threshold. The next main-agent request (or the idle fallback
 	// path) will honor it via the durable-compaction gate.
@@ -1461,6 +1462,10 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 
 	trimmedContent := strings.TrimSpace(content)
 	isMCPCommand := trimmedContent == "/mcp" || strings.HasPrefix(trimmedContent, "/mcp ")
+
+	// A turn with no pending work can never consume queued input: settle it so
+	// this message starts real work instead of queueing behind the stall.
+	a.settleStalledTurn("user message")
 
 	// When busy (turn != nil) or an MCP transition is in flight, queue the message;
 	// it will be drained and sent in one batch when idle.

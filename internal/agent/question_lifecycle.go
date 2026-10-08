@@ -264,6 +264,10 @@ func (a *MainAgent) resumeQuestionWork() bool {
 		return false
 	}
 	a.handleQuestionCommand(&questionCommand{operation: QuestionOperation{Operation: questionOpResume, OperationID: makeRequestID()}, ctx: context.Background()})
+	// Resuming owns the continuation only when a pending question will actually
+	// be re-presented or resumed. With none this is bookkeeping, and reporting
+	// it as handled would swallow the caller's continue and leave the session
+	// idle with nothing to do.
 	for _, q := range a.questions.records {
 		if q.ScopeID == a.questions.scope && q.TaskID == identity.MainAgentID && q.pending() {
 			return true
