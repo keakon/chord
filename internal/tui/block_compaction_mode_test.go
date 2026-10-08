@@ -38,6 +38,48 @@ func TestCompactionSummaryCardNamesTheMode(t *testing.T) {
 	}
 }
 
+// TestCompactionSummaryDegradedModeKeepsOneBadge pins the header surface for
+// degraded modes. The fallback/truncate modes used to render their suffix past
+// the badge edge, which left the separator flush against the label (its only
+// gap was the badge's trailing padding) and dropped the badge background
+// behind "· FALLBACK". Every mode now carries one badge, so the separator
+// keeps the same inset as the plain modes, and degraded modes only swap the
+// badge surface for the warning colour.
+func TestCompactionSummaryDegradedModeKeepsOneBadge(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	cases := []struct {
+		mode     string
+		wantText string
+		wantBg   interface{ RGBA() (r, g, b, a uint32) }
+	}{
+		{message.CompactionSummaryModeModelSummary, "CONTEXT SUMMARY #2 · AUTO", colorOfTheme(currentTheme.ThinkingLabelBg)},
+		{message.CompactionSummaryModeStructuredFallback, "CONTEXT SUMMARY #2 · FALLBACK", colorOfTheme(currentTheme.InfoPanelDiagWarnFg)},
+		{message.CompactionSummaryModeTruncateOnly, "CONTEXT SUMMARY #2 · TRUNCATED", colorOfTheme(currentTheme.InfoPanelDiagWarnFg)},
+	}
+	for _, c := range cases {
+		block := &Block{
+			ID:                    1,
+			Type:                  BlockCompactionSummary,
+			Content:               "[Context Summary]\nEarlier work was compacted.",
+			CompactionSummaryRaw:  "[Context Summary]\nEarlier work was compacted.",
+			CompactionSummaryMode: c.mode,
+			MsgIndex:              -1,
+		}
+		header := ""
+		for _, line := range block.Render(100, "") {
+			if strings.Contains(stripANSI(line), "CONTEXT SUMMARY") {
+				header = line
+				break
+			}
+		}
+		if header == "" {
+			t.Fatalf("mode %q: header line not found", c.mode)
+		}
+		assertRenderedTextBackground(t, header, c.wantText, c.wantBg)
+		assertRenderedTextBackground(t, header, "·", c.wantBg)
+	}
+}
+
 // TestCompactionSummaryCardOmitsUnknownMode pins the other direction: a
 // checkpoint whose mode was never recorded and can no longer be recovered
 // claims nothing instead of guessing a mode.

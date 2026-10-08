@@ -201,9 +201,12 @@ func renderCompactionSummaryLabel(b *Block) string {
 		return ThinkingLabelStyle.Render(label)
 	case degraded:
 		// A degraded checkpoint (a fallback digest, or no summary at all) is a
-		// warning about the history behind it, so its mode is styled apart
-		// from the badge. The badge's own padding separates the two.
-		return ThinkingLabelStyle.Render(label) + LSPWarnStyle.Render("· "+mode)
+		// warning about the history behind it, so the whole badge borrows the
+		// warning surface. Keeping the mode inside that badge is also what
+		// keeps the separator inset with a space on either side: rendering the
+		// suffix past the badge edge left the separator flush against the
+		// label and dropped the badge background behind it.
+		return CompactionDegradedLabelStyle.Render(label + " · " + mode)
 	default:
 		// One badge, so the label does not carry two lots of badge padding.
 		return ThinkingLabelStyle.Render(label + " · " + mode)

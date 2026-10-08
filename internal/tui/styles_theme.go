@@ -71,6 +71,16 @@ func applyBlockStyles(t Theme) {
 	ErrorLabelStyle = LabelStyle.
 		Background(lipgloss.Color(t.RailErrorFg)).
 		Foreground(lipgloss.Color(t.LabelBadgeFg))
+	// A degraded compaction checkpoint (a structured fallback digest, or a
+	// truncate-only archive with no summary) keeps the same badge as every
+	// other summary - so the separator sits inside it with a space on either
+	// side - and carries the warning in the badge surface itself, the way the
+	// error card's badge borrows its rail colour. The badge ink stays the
+	// shared dark label colour, which keeps the mode legible on the warning
+	// background.
+	CompactionDegradedLabelStyle = LabelStyle.
+		Background(lipgloss.Color(t.InfoPanelDiagWarnFg)).
+		Foreground(lipgloss.Color(t.LabelBadgeFg))
 	// Section labels sit inside the checkpoint card, so they are plain emphasis
 	// rather than a badge: a second badge style would read as a nested card.
 	CompactionSectionLabelStyle = lipgloss.NewStyle().
