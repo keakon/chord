@@ -339,14 +339,14 @@ func (m *Model) appendStatusBarLoopPill(pills []string, inputs statusBarInputs) 
 			}
 		}
 	}
-	return append(pills, StatusHintStyle.Render(label))
+	return append(pills, StatusChipStyle.Render(label))
 }
 
 func (m *Model) appendStatusBarYoloPill(pills []string, inputs statusBarInputs) []string {
 	if !inputs.YoloEnabled {
 		return pills
 	}
-	return append(pills, StatusHintStyle.Render("YOLO"))
+	return append(pills, StatusChipWarnStyle.Render("YOLO"))
 }
 
 func (m *Model) appendStatusBarMemoryPill(pills []string, inputs statusBarInputs) []string {
@@ -357,16 +357,16 @@ func (m *Model) appendStatusBarMemoryPill(pills []string, inputs statusBarInputs
 		// Memory extraction is stalled: setup failed, or the last commit could
 		// not proceed. Say so instead of implying a healthy region; the
 		// already-indexed memory is still injected.
-		return append(pills, ErrorStyle.Render("MEMORY-FAIL"))
+		return append(pills, StatusChipErrorStyle.Render("MEMORY-FAIL"))
 	}
-	return append(pills, StatusHintStyle.Render("MEMORY"))
+	return append(pills, StatusChipStyle.Render("MEMORY"))
 }
 
 func (m *Model) appendStatusBarPersistencePill(pills []string, inputs statusBarInputs) []string {
 	if !inputs.PersistenceDegraded {
 		return pills
 	}
-	return append(pills, ErrorStyle.Render("PERSIST-FAIL"))
+	return append(pills, StatusChipErrorStyle.Render("PERSIST-FAIL"))
 }
 
 func (m *Model) buildStatusBarLeadingPills(inputs statusBarInputs) []string {

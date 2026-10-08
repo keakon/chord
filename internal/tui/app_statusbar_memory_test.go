@@ -33,7 +33,15 @@ func TestStatusBarMemoryPillHasGapFromLoopPill(t *testing.T) {
 		loopMaxIterations: 10,
 	}, 120, 24)
 	got := stripANSI(m.renderStatusBar())
-	if !strings.Contains(got, "LOOP 1/10 MEMORY") {
-		t.Fatalf("status bar should keep a gap between LOOP and MEMORY pills, got:\n%s", got)
+	_, after, ok := strings.Cut(got, "LOOP 1/10")
+	if !ok {
+		t.Fatalf("status bar missing LOOP pill, got:\n%s", got)
+	}
+	gap, _, ok := strings.Cut(after, "MEMORY")
+	if !ok {
+		t.Fatalf("status bar missing MEMORY pill after LOOP, got:\n%s", got)
+	}
+	if strings.TrimSpace(gap) != "" {
+		t.Fatalf("LOOP and MEMORY chips should be separated by whitespace only, got:\n%s", got)
 	}
 }

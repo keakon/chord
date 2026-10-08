@@ -48,6 +48,10 @@ func TestRenderStatusBarHidesSessionIDWhenNarrow(t *testing.T) {
 	}
 }
 
+// Without any switch enabled the status bar has no filled surface at all:
+// only the switch chips carry a background (see
+// TestStatusBarSwitchChipsCarryGroupingSurface); path, mode and other status
+// elements stay foreground-only.
 func TestRenderStatusBarUsesForegroundOnlyStatusElements(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 140

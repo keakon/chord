@@ -215,6 +215,26 @@ func applyPanelStyles(t Theme) {
 	StatusHintStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.StatusFg))
 
+	// Status bar switches (LOOP / YOLO / MEMORY / PERSIST-FAIL) render as
+	// chips so each one reads as a single token; the rest of the status text
+	// stays foreground-only. The warning and failure chips reuse the badge
+	// syntax (bright fill, shared dark ink, bold) already used by the error
+	// card and the degraded-compaction badge.
+	StatusChipStyle = lipgloss.NewStyle().
+		Padding(0, 1).
+		Background(lipgloss.Color(t.StatusBg)).
+		Foreground(lipgloss.Color(t.StatusFg))
+	StatusChipWarnStyle = lipgloss.NewStyle().
+		Padding(0, 1).
+		Bold(true).
+		Background(lipgloss.Color(t.InfoPanelDiagWarnFg)).
+		Foreground(lipgloss.Color(t.LabelBadgeFg))
+	StatusChipErrorStyle = lipgloss.NewStyle().
+		Padding(0, 1).
+		Bold(true).
+		Background(lipgloss.Color(t.ErrorFg)).
+		Foreground(lipgloss.Color(t.LabelBadgeFg))
+
 	StatsTabLabelStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.StatsTabLabelFg))
 	TabStyle = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color(t.StatsTabFg)).Background(lipgloss.Color(t.StatsTabBg))
 	TabActiveStyle = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color(t.SelectedFg)).Background(lipgloss.Color(t.SelectedBg))

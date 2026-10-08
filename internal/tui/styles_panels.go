@@ -6,6 +6,9 @@ var (
 	StatusBarStyle             lipgloss.Style
 	StatusBarPathStyle         lipgloss.Style
 	StatusHintStyle            lipgloss.Style
+	StatusChipStyle            lipgloss.Style
+	StatusChipWarnStyle        lipgloss.Style
+	StatusChipErrorStyle       lipgloss.Style
 	StatsTabLabelStyle         lipgloss.Style
 	TabStyle                   lipgloss.Style
 	TabActiveStyle             lipgloss.Style
