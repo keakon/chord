@@ -102,6 +102,10 @@ bindings:
     model_id: anthropic/claude-sonnet-5-5
 
   - endpoint: anthropic
+    wire_model_id: claude-haiku-5-5
+    model_id: anthropic/claude-haiku-5-5
+
+  - endpoint: anthropic
     wire_model_id: claude-fable-5-1
     model_id: anthropic/claude-fable-5-1
 

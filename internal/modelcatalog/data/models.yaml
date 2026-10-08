@@ -91,6 +91,51 @@ models:
       - url: https://docs.anthropic.com/en/docs/about-claude/models
         checked: "2026-10-01"
 
+  - id: anthropic/claude-haiku-5-5
+    config_profile:
+      model:
+        thinking:
+          type: adaptive
+          effort: medium
+        prompt_cache:
+          mode: explicit
+          ttl: 5m
+          cache_tools: true
+      sources:
+        - url: https://platform.claude.com/docs/en/models/haiku-5-5/overview
+          checked: "2026-10-08"
+        - url: https://platform.claude.com/docs/en/build-with-claude/effort
+          checked: "2026-10-08"
+    input_modalities:
+    - text
+    - image
+    coding_sources:
+    - url: https://www.anthropic.com/claude-haiku-5-5
+      checked: "2026-10-08"
+    cost:
+      input_per_million: 0.1
+      output_per_million: 0.5
+      currency: USD
+      checked: "2026-10-08"
+      source:
+        url: https://platform.claude.com/docs/en/models/haiku-5-5/overview
+        checked: "2026-10-08"
+      notes: >-
+        Base rates for prompts up to 100K tokens. Prompts over 100K use
+        $0.50/$2.50 per million input/output tokens; cache and batch pricing
+        are separate.
+    context: 1000000
+    output: 128000
+    reasoning_options: [low, medium, high, xhigh, max]
+    released: "2026-10-07"
+    sources:
+      - url: https://platform.claude.com/docs/en/models/haiku-5-5/overview
+        checked: "2026-10-08"
+      - url: https://platform.claude.com/docs/en/build-with-claude/effort
+        checked: "2026-10-08"
+      - url: https://www.anthropic.com/claude-haiku-5-5
+        checked: "2026-10-08"
+
   - id: anthropic/claude-fable-5-1
     config_profile:
       model:
@@ -111,6 +156,9 @@ models:
     context: 1000000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://www.anthropic.com/claude/fable
+      checked: "2026-10-08"
     reasoning_options: [low, medium, high, xhigh, max]
     cost:
       input_per_million: 10
@@ -127,9 +175,22 @@ models:
         checked: "2026-10-04"
 
   - id: anthropic/claude-opus-5
+    config_profile:
+      compaction:
+        threshold: 0.70
+        reminder: 0.60
+        notes: Opus keeps long-context retrieval strong across the 1M window; compact late and preserve a larger recent tail for long-running coding agents.
+      sources:
+        - url: https://platform.claude.com/docs/en/about-claude/models/overview
+          checked: "2026-10-04"
+        - url: https://docs.anthropic.com/en/docs/build-with-claude/effort
+          checked: "2026-10-04"
     context: 1000000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://www.anthropic.com/news/claude-opus-5
+      checked: "2026-10-08"
     reasoning_options: [low, medium, high, xhigh, max]
     cost:
       input_per_million: 5
@@ -146,9 +207,22 @@ models:
         checked: "2026-10-04"
 
   - id: anthropic/claude-sonnet-5
+    config_profile:
+      compaction:
+        threshold: 0.70
+        reminder: 0.60
+        notes: Sonnet keeps long-context retrieval strong across the 1M window; compact late and preserve a larger recent tail for coding and tool loops.
+      sources:
+        - url: https://platform.claude.com/docs/en/about-claude/models/overview
+          checked: "2026-10-04"
+        - url: https://docs.anthropic.com/en/docs/build-with-claude/effort
+          checked: "2026-10-04"
     context: 1000000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://www.anthropic.com/news/claude-sonnet-5
+      checked: "2026-10-08"
     reasoning_options: [low, medium, high, xhigh, max]
     cost:
       input_per_million: 2
@@ -222,6 +296,16 @@ models:
         checked: "2026-10-04"
 
   - id: google/gemini-3.1-pro-preview
+    config_profile:
+      compaction:
+        threshold: 0.20
+        reminder: 0.15
+        notes: Multi-needle long-context retrieval degrades early on this Pro preview; compact early so long sessions stay inside the reliable window.
+      sources:
+        - url: https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
+          checked: "2026-10-04"
+        - url: https://ai.google.dev/gemini-api/docs/generate-content/thinking
+          checked: "2026-10-04"
     input: 1048576
     coding_sources:
     - url: https://ai.google.dev/gemini-api/docs/models/gemini-3.1-pro-preview
@@ -237,9 +321,22 @@ models:
         checked: "2026-10-04"
 
   - id: openai/gpt-5.6-luna
+    config_profile:
+      compaction:
+        threshold: 0.25
+        reminder: 0.20
+        notes: Long-context multi-needle retrieval degrades from ~256K; trigger before the degradation band, which also stays below the family's 272K whole-request 2x pricing tier.
+      sources:
+        - url: https://developers.openai.com/api/docs/models/gpt-5.6-luna
+          checked: "2026-10-05"
+        - url: https://openai.com/index/gpt-5-6/
+          checked: "2026-10-08"
     context: 1050000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://openai.com/index/gpt-5-6/
+      checked: "2026-10-08"
     reasoning_options: [none, low, medium, high, xhigh, max]
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-5.6-luna
@@ -252,9 +349,22 @@ models:
         checked: "2026-10-04"
 
   - id: openai/gpt-5.6-sol
+    config_profile:
+      compaction:
+        threshold: 0.28
+        reminder: 0.24
+        notes: Chord starting heuristic to stay below the family's 272K whole-request 2x pricing tier; no separate long-context quality limit is published. Tune for task quality, latency and cache reuse.
+      sources:
+        - url: https://developers.openai.com/api/docs/models/gpt-5.6-sol
+          checked: "2026-10-05"
+        - url: https://openai.com/index/gpt-5-6/
+          checked: "2026-10-08"
     context: 1050000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://openai.com/index/gpt-5-6/
+      checked: "2026-10-08"
     reasoning_options: [none, low, medium, high, xhigh, max]
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-5.6-sol
@@ -267,9 +377,22 @@ models:
         checked: "2026-10-04"
 
   - id: openai/gpt-5.6-terra
+    config_profile:
+      compaction:
+        threshold: 0.28
+        reminder: 0.24
+        notes: Chord starting heuristic to stay below the family's 272K whole-request 2x pricing tier; no separate long-context quality limit is published. Tune for task quality, latency and cache reuse.
+      sources:
+        - url: https://developers.openai.com/api/docs/models/gpt-5.6-terra
+          checked: "2026-10-05"
+        - url: https://openai.com/index/gpt-5-6/
+          checked: "2026-10-08"
     context: 1050000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://openai.com/index/gpt-5-6/
+      checked: "2026-10-08"
     reasoning_options: [none, low, medium, high, xhigh, max]
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-5.6-terra
@@ -282,9 +405,22 @@ models:
         checked: "2026-10-04"
 
   - id: openai/gpt-6-astra
+    config_profile:
+      compaction:
+        threshold: 0.28
+        reminder: 0.24
+        notes: Chord starting heuristic to stay below the 272K whole-request 2x pricing tier; not a provider limit or a measured optimum. Tune for task quality, latency and cache reuse.
+      sources:
+        - url: https://developers.openai.com/api/docs/pricing
+          checked: "2026-10-04"
+        - url: https://developers.openai.com/api/docs/models/gpt-6-astra
+          checked: "2026-10-05"
     context: 1050000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://openai.com/index/gpt-6-astra/
+      checked: "2026-10-08"
     reasoning_options: [low, medium, high, xhigh, max]
     cost:
       input_per_million: 10
@@ -310,9 +446,22 @@ models:
         checked: "2026-10-04"
 
   - id: openai/gpt-6-luna
+    config_profile:
+      compaction:
+        threshold: 0.25
+        reminder: 0.20
+        notes: Long-context multi-needle retrieval degrades from ~256K; trigger before the degradation band, which also stays below the 272K whole-request 2x tier.
+      sources:
+        - url: https://developers.openai.com/api/docs/models/gpt-6-luna
+          checked: "2026-10-05"
+        - url: https://developers.openai.com/api/docs/pricing
+          checked: "2026-10-04"
     context: 1050000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://openai.com/index/introducing-gpt-6-sol-and-luna/
+      checked: "2026-10-08"
     reasoning_options: [none, low, medium, high, xhigh, max]
     cost:
       input_per_million: 0.1
@@ -338,10 +487,36 @@ models:
         checked: "2026-10-04"
 
   - id: openai/gpt-6-sol
+    config_profile:
+      compaction:
+        threshold: 0.28
+        reminder: 0.24
+        notes: Chord starting heuristic to stay below the 272K whole-request 2x pricing tier; no separate long-context quality limit is published. Tune for task quality, latency and cache reuse.
+      sources:
+        - url: https://developers.openai.com/api/docs/models/gpt-6-sol
+          checked: "2026-10-05"
+        - url: https://openai.com/index/introducing-gpt-6-sol-and-luna/
+          checked: "2026-10-08"
     context: 1050000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://openai.com/index/introducing-gpt-6-sol-and-luna/
+      checked: "2026-10-08"
     reasoning_options: [none, low, medium, high, xhigh, max]
+    cost:
+      input_per_million: 2
+      output_per_million: 10
+      currency: USD
+      checked: "2026-10-05"
+      source:
+        url: https://developers.openai.com/api/docs/models/gpt-6-sol
+        checked: "2026-10-05"
+      notes: >-
+        Standard USD API rates for uncached text input and text output up to
+        272K input tokens. Above 272K, the entire request uses 2x input and
+        cache rates and 1.5x output rates. Cache writes, processing tiers
+        and regional pricing are separate; these are not Codex subscription rates.
     sources:
       - url: https://developers.openai.com/api/docs/models/gpt-6-sol
         checked: "2026-10-05"
@@ -350,6 +525,8 @@ models:
       - url: https://platform.openai.com/docs/models
         checked: "2026-10-01"
       - url: https://developers.openai.com/api/docs/models
+        checked: "2026-10-04"
+      - url: https://developers.openai.com/api/docs/pricing
         checked: "2026-10-04"
 
   - id: openai/gpt-6.1-sol
@@ -369,6 +546,9 @@ models:
     context: 1050000
     output: 128000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://developers.openai.com/api/docs/models/gpt-6.1-sol
+      checked: "2026-10-08"
     reasoning_options: [low, medium, high, xhigh, max]
     cost:
       input_per_million: 2
@@ -419,15 +599,18 @@ models:
     context: 1000000
     output: 131072
     input_modalities: [text]
+    coding_sources:
+    - url: https://docs.z.ai/guides/llm/glm-5.3
+      checked: "2026-10-08"
     reasoning_options: [low, high, max]
     cost:
       input_per_million: 1.4
       output_per_million: 4.4
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-10-08"
       source:
-        url: https://models.dev/zhipuai/glm-5.3
-        checked: "2026-10-04"
+        url: https://docs.z.ai/guides/overview/pricing
+        checked: "2026-10-08"
     sources:
       - url: https://docs.z.ai/guides/llm/glm-5.3
         checked: "2026-10-04"
@@ -454,15 +637,18 @@ models:
     context: 1048576
     output: 1048576
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://platform.kimi.ai/docs/guide/kimi-k3-quickstart
+      checked: "2026-10-08"
     reasoning_options: [low, high, max]
     cost:
       input_per_million: 3
       output_per_million: 15
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-10-08"
       source:
-        url: https://models.dev/moonshotai/kimi-k3
-        checked: "2026-10-04"
+        url: https://platform.kimi.ai/docs/pricing/chat
+        checked: "2026-10-08"
     sources:
       - url: https://platform.kimi.ai/docs/guide/kimi-k3-quickstart
         checked: "2026-10-04"
@@ -475,6 +661,9 @@ models:
     context: 1000000
     output: 131072
     input_modalities: [text, image, video]
+    coding_sources:
+    - url: https://qwen.ai/blog?id=qwen3.8
+      checked: "2026-10-08"
     cost:
       input_per_million: 1.65
       output_per_million: 4.951
@@ -495,6 +684,9 @@ models:
     context: 1000000
     output: 131072
     input_modalities: [text, image, video]
+    coding_sources:
+    - url: https://www.alibabacloud.com/blog/603503
+      checked: "2026-10-08"
     cost:
       input_per_million: 0.15
       output_per_million: 0.47
@@ -534,6 +726,9 @@ models:
     context: 1000000
     output: 393216
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://api-docs.deepseek.com/news/news260910
+      checked: "2026-10-08"
     cost:
       input_per_million: 0.3
       output_per_million: 1.2
@@ -553,10 +748,6 @@ models:
       compat:
         chat_completions:
           keep_reasoning_effort: true
-      compaction:
-        threshold: 0.40
-        reminder: 0.35
-        notes: Keep the current reasoning controls across tool-call replay; use a moderate compaction threshold.
       sources:
         - url: https://docs.x.ai/developers/grok-4-7
           checked: "2026-10-05"
@@ -570,6 +761,9 @@ models:
     context: 500000
     output: 500000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://x.ai/news/grok-4-7
+      checked: "2026-10-08"
     reasoning_options: [low, medium, high, xhigh]
     cost:
       input_per_million: 2
@@ -596,6 +790,9 @@ models:
     context: 500000
     output: 500000
     input_modalities: [text, image]
+    coding_sources:
+    - url: https://x.ai/news/grok-4-6
+      checked: "2026-10-08"
     reasoning_options: [low, medium, high, xhigh]
     cost:
       input_per_million: 2
@@ -622,6 +819,9 @@ models:
     context: 1048576
     output: 131072
     input_modalities: [text, image, video, pdf]
+    coding_sources:
+    - url: https://dev.meta.ai/models/muse-spark
+      checked: "2026-10-08"
     reasoning_options: [minimal, low, medium, high, xhigh, max]
     cost:
       input_per_million: 1.25
@@ -650,6 +850,9 @@ models:
     context: 1048576
     output: 131072
     input_modalities: [text, image, video, audio, pdf]
+    coding_sources:
+    - url: https://research.meta.ai/blog/introducing-muse-code-and-muse-spark-1-2
+      checked: "2026-10-08"
     reasoning_options: [minimal, low, medium, high, xhigh]
     cost:
       input_per_million: 1.25
@@ -668,6 +871,14 @@ models:
         checked: "2026-10-04"
 
   - id: zhipuai/glm-5.3-flash
+    config_profile:
+      compaction:
+        threshold: 0.25
+        reminder: 0.20
+        notes: Shares the GLM-5.x serving recipe; the reliable window is roughly 200K-256K, so compact early for long tool loops.
+      sources:
+        - url: https://docs.z.ai/guides/vlm/glm-5.3-flash
+          checked: "2026-10-04"
     context: 1000000
     output: 131072
     input_modalities:
@@ -693,6 +904,14 @@ models:
       checked: '2026-10-04'
 
   - id: zhipuai/glm-5.3-flashx
+    config_profile:
+      compaction:
+        threshold: 0.25
+        reminder: 0.20
+        notes: Shares the GLM-5.x serving recipe; the reliable window is roughly 200K-256K, so compact early for long tool loops.
+      sources:
+        - url: https://docs.z.ai/guides/vlm/glm-5.3-flash
+          checked: "2026-10-04"
     context: 1000000
     output: 131072
     input_modalities:
