@@ -233,6 +233,20 @@ lsp:
 
 Disabling one noisy analyzer does not require giving up staticcheck: keep `staticcheck: true` and set that analyzer to `false` under `analyses`. `ST1000: false`, for example, drops staticcheck's package-comment warnings while every other staticcheck check keeps running, whereas `staticcheck: false` disables the whole staticcheck set. gopls v0.23 has no `checks` option (`gopls api-json` lists the settings the installed version accepts), so the `checks: ["all", "-ST1000"]` form seen in older examples does nothing; the per-analyzer entry is the switch that works. Chord reads these settings when it starts a language server, so restart Chord after editing them.
 
+gopls also caches analyzer results on disk, and every project that uses the same gopls binary shares that cache: a restarted language server reuses the results for unchanged packages and only recomputes the packages you edited plus their dependents. `maxFileCacheBytes` tunes that cache's soft limit (default 1 GB; entries unused for five days are dropped regardless of the limit), keeping more results warm across restarts; `GOMAXPROCS` under `env` caps the analyzer parallelism behind the short multi-core CPU bursts after an edit, trading a longer analysis wall time for a lower peak.
+
+```yaml
+lsp:
+  gopls:
+    command: gopls
+    file_types: [".go"]
+    env:
+      GOMAXPROCS: "4"
+    options:
+      gopls:
+        maxFileCacheBytes: 4000000000
+```
+
 This edit-time LSP feedback is incremental and does not replace a whole-repository CI gate. If a project adopts the standalone `modernize` command for CI, first clear and review the existing findings, then pin the command version instead of using `@latest`; some suggested fixes, such as changing `omitempty` to `omitzero`, intentionally change serialization behavior and require review.
 
 Availability depends on whether the corresponding language server is installed locally. Chord automatically discovers nested TypeScript/JavaScript projects and Python environments without per-project configuration. For Pyright, when no Python interpreter is configured, it searches from the LSP workspace root upward for the nearest valid `.venv`, `venv`, or `env`, without crossing the Chord project root, and caches the resulting LSP client. It probes `.venv/bin/python`, `venv/bin/python`, and `env/bin/python` on Unix-like systems; Windows uses the corresponding `Scripts/python.exe` paths.

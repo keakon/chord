@@ -200,6 +200,20 @@ lsp:
 
 只想关掉个别噪音检查，不必放弃整个 staticcheck：保留 `staticcheck: true`，在 `analyses` 里把对应 analyzer 设为 `false` 就行。例如 `ST1000: false` 会去掉 staticcheck 的包注释告警，其它 staticcheck 检查照常运行；`staticcheck: false` 才是关闭整个 staticcheck 集合。gopls v0.23 没有 `checks` 选项（本机支持哪些设置可查 `gopls api-json`），老示例里的 `checks: ["all", "-ST1000"]` 写法不生效，能用的开关只有 `analyses` 里的单项设置。这些设置只在语言服务器启动时读取，改完要重启 Chord。
 
+gopls 还会把分析结果持久化到磁盘缓存，使用同一份 gopls 二进制的项目共用这份缓存：语言服务器重启后，未改动的包直接复用结果，只重算你改过的包及其依赖者。`maxFileCacheBytes` 调整的是该缓存的软上限（默认 1GB；超过 5 天未访问的条目无论预算多大都会被清掉），调大可以让更多结果跨重启保留；`env` 里的 `GOMAXPROCS` 则限制编辑后那阵多核 CPU 峰值背后的分析并行度，代价是分析墙钟时间变长。
+
+```yaml
+lsp:
+  gopls:
+    command: gopls
+    file_types: [".go"]
+    env:
+      GOMAXPROCS: "4"
+    options:
+      gopls:
+        maxFileCacheBytes: 4000000000
+```
+
 这种 LSP 反馈是编辑后的增量检查，不能替代 CI 中的全仓门禁。若项目要在 CI 中采用独立的 `modernize` 命令，应先清理并审查现有发现，再固定命令版本，而不是使用 `@latest`；部分建议修复（例如把 `omitempty` 改为 `omitzero`）会有意改变序列化行为，必须人工审查。
 
 需要先在本机安装对应语言服务器才能使用。对于 Pyright，未配置 Python 解释器时，Chord 会从 LSP workspace root 向上寻找最近的有效虚拟环境，不越过项目根；类 Unix 查找 `.venv/bin/python`、`venv/bin/python` 和 `env/bin/python`，Windows 查找对应的 `Scripts\python.exe`。同一 workspace root 的发现结果会随 LSP client 缓存，避免重复探测。
