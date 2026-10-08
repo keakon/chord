@@ -73,8 +73,18 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
-	if m.mode == ModeSessionDeleteConfirm {
+	if m.mode == ModeSessionDeleteConfirm || m.mode == ModeStopJobConfirm {
 		m.clearChordState()
+		scroll := &m.sessionDeleteConfirm.scroll
+		if m.mode == ModeStopJobConfirm {
+			scroll = &m.stopJobConfirm.scroll
+		}
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			scroll.move(-mouseWheelScrollStep)
+		case tea.MouseWheelDown:
+			scroll.move(mouseWheelScrollStep)
+		}
 		return nil, true
 	}
 
@@ -277,18 +287,53 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp, tea.MouseWheelDown:
-			return m.handleMouseWheel(mouse), true
+			delta, code := -mouseWheelScrollStep, tea.KeyUp
+			if mouse.Button == tea.MouseWheelDown {
+				delta, code = mouseWheelScrollStep, tea.KeyDown
+			}
+			if m.confirm.pickingRule && !m.confirm.editingRulePattern {
+				for range mouseWheelScrollStep {
+					m.handleConfirmRulePickerKey(tea.KeyPressMsg(tea.Key{Code: code}))
+				}
+			} else if !m.confirm.editing && !m.confirm.denyingWithReason && !m.confirm.pickingRule {
+				m.confirm.scroll.move(delta)
+			}
+			return nil, true
 		}
 		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
 			return m.handleConfirmMouseClick(mouse), true
 		}
 		return nil, true
 	}
-	if m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeHelp || m.mode == ModeStopJobConfirm {
+	if m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeHelp {
 		m.clearChordState()
-		switch mouse.Button {
-		case tea.MouseWheelUp, tea.MouseWheelDown:
-			return m.handleMouseWheel(mouse), true
+		key := ""
+		if mouse.Button == tea.MouseWheelUp {
+			key = "up"
+		}
+		if mouse.Button == tea.MouseWheelDown {
+			key = "down"
+		}
+		if key != "" {
+			for range mouseWheelScrollStep {
+				code := tea.KeyUp
+				if key == "down" {
+					code = tea.KeyDown
+				}
+				keyMsg := tea.KeyPressMsg(tea.Key{Code: code})
+				switch m.mode {
+				case ModeRules:
+					if !m.rules.adding {
+						m.handleRulesKey(keyMsg)
+					}
+				case ModeUsageStats:
+					m.handleUsageStatsKey(keyMsg)
+				case ModeErrorPanel:
+					m.handleErrorPanelKey(keyMsg)
+				case ModeHelp:
+					m.handleHelpKey(keyMsg)
+				}
+			}
 		}
 		return nil, true
 	}

@@ -40,7 +40,7 @@ func (m *Model) renderQuestionDialog() string {
 
 	q := m.question.request.Item
 	selectedKey := questionSelectedFingerprint(m.question.selected)
-	if !m.question.custom && m.question.deadline.IsZero() && len(q.Options) > 0 && m.question.renderCacheText != "" &&
+	if !m.question.submitting && !m.question.custom && m.question.deadline.IsZero() && len(q.Options) > 0 && m.question.renderCacheText != "" &&
 		m.question.renderCacheWidth == m.width &&
 		m.question.renderCacheHeight == m.height &&
 		m.question.renderCacheOffset == m.question.scrollOffset &&
@@ -145,20 +145,20 @@ func (m *Model) renderQuestionDialog() string {
 
 	area := image.Rect(0, 0, m.width, m.height)
 	cfg := OverlayConfig{Title: titleText, MaxWidth: maxWidth}
-	cfg.Hint = appendHintChip(questionHint(q, m.question.custom), hint("PgUp/PgDn", "scroll"))
+	cfg.Hint = questionHint(q, m.question.custom)
 	editing := m.question.custom || len(q.Options) == 0
 	action := "select"
 	if editing || q.Multiple {
 		action = "send"
 	}
-	secondary := hintLine(hint("Tab", "custom"), hint("PgUp/PgDn", "scroll"))
+	secondary := hintLine(hint("Tab", "custom"))
 	if editing {
-		secondary = hintLine(hint("Shift+Enter", "newline"), hint("PgUp/PgDn", "scroll"))
+		secondary = hintLine(hint("Shift+Enter", "newline"))
 	} else if q.Multiple {
-		secondary = hintLine(hint("Space", "toggle"), hint("Tab", "custom"), hint("PgUp/PgDn", "scroll"))
+		secondary = hintLine(hint("Space", "toggle"), hint("Tab", "custom"))
 	}
 	cfg.CompactHint = hintLine(
-		hint("Enter", action), hint("Esc", "decline"), hint("Ctrl+W", "withdraw"),
+		primaryHint("Enter", action), hint("Esc", "decline"), hint("Ctrl+W", "withdraw"),
 	) + "\n" + secondary
 	if !m.question.deadline.IsZero() {
 		secs := int(ceilDuration(max(time.Until(m.question.deadline), 0), time.Second) / time.Second)
@@ -184,6 +184,13 @@ func (m *Model) renderQuestionDialog() string {
 		}
 		cfg.Footer = strings.Join(inputLines, "\n")
 	}
+	if len(lines) > overlayContentHeight(cfg, area) {
+		cfg.Hint = appendHintChip(cfg.Hint, hint("PgUp/PgDn", "scroll"))
+	}
+	if m.question.submitting {
+		cfg.Hint = hintLine(hint("Ctrl+W", "withdraw"))
+		cfg.CompactHint = cfg.Hint
+	}
 	bodyHeight := overlayContentHeight(cfg, area)
 	m.question.bodyHeight, m.question.visibleBodyHeight = len(lines), bodyHeight
 	offset := m.question.scrollOffset
@@ -202,7 +209,7 @@ func (m *Model) renderQuestionDialog() string {
 		cfg.Title += fmt.Sprintf(" [%d-%d/%d]", offset+1, offset+len(visible), len(lines))
 	}
 	out, _ := RenderOverlay(cfg, strings.Join(visible, "\n"), area)
-	if !m.question.custom && m.question.deadline.IsZero() && len(q.Options) > 0 {
+	if !m.question.submitting && !m.question.custom && m.question.deadline.IsZero() && len(q.Options) > 0 {
 		m.question.renderCacheWidth = m.width
 		m.question.renderCacheHeight = m.height
 		m.question.renderCacheOffset = m.question.scrollOffset
@@ -236,7 +243,7 @@ func renderCurrentQuestionOptionDescription(description, numKey string, innerWid
 func questionHint(q tools.QuestionItem, customMode bool) string {
 	if len(q.Options) == 0 {
 		return hintLine(
-			hint("Enter", "submit"),
+			primaryHint("Enter", "submit"),
 			hint("Shift+Enter/Ctrl+J", "new line"),
 			hint("Esc", "decline"),
 			hint("Ctrl+W", "withdraw"),
@@ -244,7 +251,7 @@ func questionHint(q tools.QuestionItem, customMode bool) string {
 	}
 	if customMode {
 		return hintLine(
-			hint("Enter", "submit"),
+			primaryHint("Enter", "submit"),
 			hint("Shift+Enter/Ctrl+J", "new line"),
 			hint("Tab", "options"),
 			hint("Esc", "decline"),
@@ -254,7 +261,7 @@ func questionHint(q tools.QuestionItem, customMode bool) string {
 
 	chips := make([]hintChip, 0, 6)
 	if q.Multiple {
-		chips = append(chips, hint("Space", "toggle"), hint("Enter", "submit"))
+		chips = append(chips, hint("Space", "toggle"), primaryHint("Enter", "submit"))
 	} else {
 		chips = append(chips, hint("Enter", "select"))
 	}

@@ -82,16 +82,20 @@ type confirmTimeoutTickMsg struct{}
 
 // confirmState holds the transient state for the active confirmation dialog.
 type confirmState struct {
-	request   *ConfirmRequest // pending request (nil when inactive)
-	requestID string          // non-empty when from remote (ResolveConfirm)
-	editing   bool            // true while the user is editing args
-	editInput textarea.Model  // textarea used in edit sub-mode
-	editError string          // inline validation error shown in edit sub-mode
-	prevMode  Mode            // mode to restore when the dialog closes
-	arrivedAt time.Time       // original arrival, retained across manual switching
-	deadline  time.Time       // zero value = no timeout
+	scroll            dialogScrollState
+	renderCacheOffset int
+	request           *ConfirmRequest // pending request (nil when inactive)
+	requestID         string          // non-empty when from remote (ResolveConfirm)
+	editing           bool            // true while the user is editing args
+	editInput         textarea.Model  // textarea used in edit sub-mode
+	editError         string          // inline validation error shown in edit sub-mode
+	prevMode          Mode            // mode to restore when the dialog closes
+	arrivedAt         time.Time       // original arrival, retained across manual switching
+	deadline          time.Time       // zero value = no timeout
 
 	// Rule picker state
+	ruleScroll         dialogScrollState
+	ruleFollowCursor   bool
 	pickingRule        bool               // true while in rule picker sub-mode
 	candidates         []PatternCandidate // suggested patterns
 	patternIdx         int                // selected pattern index

@@ -345,14 +345,8 @@ func applyDialogStyles(t Theme) {
 
 	DimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.DimFg))
 
-	// KeyHintStyle renders the "[Key]" token in dialog footers. It reuses the
-	// selection highlight pair, the same surface as active tabs and the focused
-	// list row, instead of borrowing the confirm dialog's semantic allow/deny
-	// colours.
-	KeyHintStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(t.SelectedFg)).
-		Background(lipgloss.Color(t.SelectedBg))
+	// Keyboard hints are quiet navigation aids; selection surfaces belong to focus.
+	KeyHintStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.ConfirmToolFg))
 
 	InputSeparatorStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.ModeSearchFg))
@@ -372,17 +366,15 @@ func applyDialogStyles(t Theme) {
 	ConfirmToolStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.ConfirmToolFg))
 
-	ConfirmAllowStyle = lipgloss.NewStyle().
+	DialogPrimaryStyle = lipgloss.NewStyle().
 		Bold(true).
-		Foreground(lipgloss.Color(t.ConfirmAllowFg))
+		Foreground(lipgloss.Color(t.DialogPrimaryFg))
 
-	ConfirmDenyStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(t.ConfirmDenyFg))
+	DialogDangerStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(t.DialogDangerFg))
 
-	ConfirmEditStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color(t.ConfirmEditFg))
+	DialogWarningStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(t.DialogWarningFg))
 
 	ModeConfirmStyle = lipgloss.NewStyle().
 		Bold(true).
@@ -412,7 +404,7 @@ func applyAliasStyles() {
 	QuestionSeparatorStyle = ConfirmSeparatorStyle
 	QuestionTextStyle = ConfirmToolStyle
 	QuestionSelectedStyle = SelectedStyle
-	QuestionTimeoutStyle = ConfirmDenyStyle
+	QuestionTimeoutStyle = DialogWarningStyle
 
 	// search.go: same init-order trap as Question* (copy before ApplyTheme).
 	SearchMatchStyle = lipgloss.NewStyle().

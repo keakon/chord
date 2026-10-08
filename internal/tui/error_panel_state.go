@@ -176,7 +176,7 @@ func (m *Model) handleErrorPanelKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) errorPanelOverlayConfig() OverlayConfig {
-	return OverlayConfig{Title: "Error Panel", Hint: m.errorPanelHint(), MaxWidth: max(min(m.width-12, 110), 60)}
+	return OverlayConfig{Title: "Error Panel", Hint: m.errorPanelHint(), CompactHint: hintLine(hint("y", "copy"), hint("Esc", "close")), MaxWidth: max(min(m.width-12, 110), 60)}
 }
 
 func (m *Model) errorPanelVisibleLines() int {

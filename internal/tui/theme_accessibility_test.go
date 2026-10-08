@@ -43,8 +43,10 @@ func TestDefaultThemeReadableTextContrast(t *testing.T) {
 	for _, pair := range []struct{ name, fg, bg string }{
 		{"tool error", theme.ErrorFg, theme.ToolCallBg},
 		{"error body", theme.ErrorCardFg, theme.ErrorCardBg},
-		{"dialog deny", theme.ConfirmDenyFg, theme.DialogBg},
-		{"key hint", theme.SelectedFg, theme.SelectedBg},
+		{"dialog deny", theme.DialogDangerFg, theme.DialogBg},
+		{"key hint", theme.ConfirmToolFg, theme.DialogBg},
+		{"primary action", theme.DialogPrimaryFg, theme.DialogBg},
+		{"danger action", theme.DialogDangerFg, theme.DialogBg},
 		{"assistant badge", theme.LabelBadgeFg, theme.AssistantLabelBg},
 		{"thinking body", theme.ThinkingCardFg, theme.ThinkingCardBg},
 	} {

@@ -312,7 +312,7 @@ func (m *Model) handoffPlanRenderedLines(width int) []string {
 		width = 10
 	}
 	if strings.TrimSpace(m.handoffSelect.planErr) != "" {
-		return []string{ConfirmDenyStyle.Render("! Failed to read plan: ") + DimStyle.Render(m.handoffSelect.planErr)}
+		return []string{DialogDangerStyle.Render("! Failed to read plan: ") + DimStyle.Render(m.handoffSelect.planErr)}
 	}
 	content := strings.TrimSpace(m.handoffSelect.planText)
 	if content == "" {
@@ -382,7 +382,8 @@ func (m *Model) renderHandoffSelectDialog() string {
 			hint("Esc", "close"),
 		),
 
-		MaxWidth: handoffOverlayMaxWidth,
+		CompactHint: hintLine(hint("Enter/a", "approve"), hint("Esc", "close")),
+		MaxWidth:    handoffOverlayMaxWidth,
 	}
 	area := image.Rect(0, 0, m.width, m.height)
 	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
@@ -400,7 +401,7 @@ func (m *Model) renderHandoffSelectDialog() string {
 		ConfirmToolStyle.Render("Plan preview:"),
 		planBlock,
 		"",
-		ConfirmEditStyle.Render("[V] View full plan"),
+		renderHintChip(hint("V", "View full plan")),
 		ConfirmToolStyle.Render("Select model pool / target agent:"),
 	}, "\n")
 

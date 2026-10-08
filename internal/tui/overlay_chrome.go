@@ -12,8 +12,19 @@ import (
 
 // hintChip is one footer item: "[Keys] action", or prose when keys is empty.
 type hintChip struct {
-	keys   string
-	action string
+	keys    string
+	action  string
+	primary bool
+	danger  bool
+}
+
+// Importance and destructive intent are independent of focus and key dispatch.
+func primaryHint(keys, action string) hintChip {
+	return hintChip{keys: keys, action: action, primary: true}
+}
+
+func dangerHint(keys, action string) hintChip {
+	return hintChip{keys: keys, action: action, danger: true}
 }
 
 func hint(keys, action string) hintChip { return hintChip{keys: keys, action: action} }
@@ -23,6 +34,13 @@ func hintText(text string) hintChip { return hintChip{action: text} }
 func renderHintChip(c hintChip) string {
 	if c.keys == "" {
 		return DimStyle.Render(c.action)
+	}
+	text := "[" + c.keys + "] " + c.action
+	if c.danger {
+		return DialogDangerStyle.Bold(c.primary).Render(text)
+	}
+	if c.primary {
+		return DialogPrimaryStyle.Render(text)
 	}
 	return KeyHintStyle.Render("["+c.keys+"]") + " " + DimStyle.Render(c.action)
 }
@@ -62,10 +80,10 @@ func wrapHintLines(hint string, width int) []string {
 		return nil
 	}
 	var out []string
-	for _, logical := range strings.Split(hint, "\n") {
+	for logical := range strings.SplitSeq(hint, "\n") {
 		line := ""
 		lineWidth := 0
-		for _, chip := range strings.Split(logical, "  ") {
+		for chip := range strings.SplitSeq(logical, "  ") {
 			if chip == "" {
 				continue
 			}

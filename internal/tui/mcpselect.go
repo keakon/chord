@@ -139,11 +139,16 @@ func (m *Model) renderMCPSelectDialog() string {
 		Title: "MCP Servers",
 		Hint:  hints,
 
-		MaxWidth: 70,
+		CompactHint: hintLine(hint("Enter", "toggle"), hint("Esc", "close")),
+		MaxWidth:    70,
+	}
+	if _, ok := m.mcpSelect.selector.list.SelectedItem(); !ok {
+		overlayCfg.Hint = hintLine(hint("Esc", "close"))
+		overlayCfg.CompactHint = overlayCfg.Hint
 	}
 	area := image.Rect(0, 0, m.width, m.height)
 	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
-	contentWidth := overlayCfg.MaxWidth - 4
+	contentWidth := max(dialogContentWidth(overlayCfg.MaxWidth), 1)
 	prefixText := "Changes apply on the next request"
 	if readOnly {
 		prefixText = "Changes are allowed while running and apply on the next request"

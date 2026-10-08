@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -41,10 +42,12 @@ var rulesAddActions = []permission.Action{
 
 // rulesState holds transient state for the /rules overlay.
 type rulesState struct {
-	rules     []permission.AddedRule
-	cursor    int
-	prevMode  Mode
-	fromAgent bool
+	scroll       dialogScrollState
+	followCursor bool
+	rules        []permission.AddedRule
+	cursor       int
+	prevMode     Mode
+	fromAgent    bool
 
 	adding       bool
 	addField     rulesAddField
@@ -71,6 +74,10 @@ func (m *Model) handleRulesKey(msg tea.KeyMsg) tea.Cmd {
 	if m.rules.adding {
 		return m.handleRulesAddKey(msg)
 	}
+	if m.rules.scroll.handleKey(msg) {
+		m.rules.followCursor = false
+		return nil
+	}
 	switch msg.String() {
 	case "esc", "q":
 		m.mode = m.rules.prevMode
@@ -79,6 +86,7 @@ func (m *Model) handleRulesKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "up", "k":
+		m.rules.followCursor = true
 		if m.rules.cursor > 0 {
 			m.rules.cursor--
 			m.recalcViewportSize()
@@ -86,6 +94,7 @@ func (m *Model) handleRulesKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case "down", "j":
+		m.rules.followCursor = true
 		if m.rules.cursor < len(m.rules.rules)-1 {
 			m.rules.cursor++
 			m.recalcViewportSize()
@@ -199,6 +208,8 @@ func (m *Model) submitAddRule() tea.Cmd {
 		return nil
 	}
 	m.rules.adding = false
+	m.rules.scroll = dialogScrollState{}
+	m.rules.followCursor = true
 	m.rules.addError = ""
 	if len(m.rules.rules) > 0 {
 		m.rules.cursor = len(m.rules.rules) - 1
@@ -310,6 +321,8 @@ func (m *Model) openRules() tea.Cmd {
 		m.rules.fromAgent = false
 	}
 	m.rules.adding = false
+	m.rules.scroll = dialogScrollState{}
+	m.rules.followCursor = true
 	m.rules.addError = ""
 	if m.rules.cursor >= len(m.rules.rules) {
 		m.rules.cursor = len(m.rules.rules) - 1
@@ -324,15 +337,15 @@ func (m *Model) openRules() tea.Cmd {
 
 // renderRulesList renders the /rules overlay.
 func (m *Model) renderRulesList() string {
-	maxWidth := max(min(m.width-4, 100), 40)
+	maxWidth := min(max(m.width-1, 1), 100)
 
 	if m.rules.adding {
 		return m.renderRulesAdd(maxWidth)
 	}
 
 	title := fmt.Sprintf("Permission Rules (%d added)", len(m.rules.rules))
-	sep := ConfirmSeparatorStyle.Render(title)
-	lines := []string{sep}
+	lines := []string{}
+	focusLine := 0
 
 	if len(m.rules.rules) == 0 {
 		lines = append(lines, "")
@@ -347,7 +360,8 @@ func (m *Model) renderRulesList() string {
 			scopeStr := scopeLabelStr(r.Scope)
 			line := fmt.Sprintf("%s[%s] %s %s \"%s\"", prefix, scopeStr, r.Rule.Permission, r.Rule.Action, r.Rule.Pattern)
 			if i == m.rules.cursor {
-				lines = append(lines, ConfirmAllowStyle.Render(line))
+				focusLine = len(wrapDialogLines(lines, max(dialogContentWidth(maxWidth), 1)))
+				lines = append(lines, SelectedStyle.Width(dialogContentWidth(maxWidth)).Render(line))
 			} else {
 				lines = append(lines, line)
 			}
@@ -358,39 +372,72 @@ func (m *Model) renderRulesList() string {
 		}
 	}
 
-	lines = append(lines, "")
-	lines = append(lines, hintLine(
-		hint("A", "add"), hint("↑↓", "move"), hint("D", "delete"), hint("O", "open file"), hint("Esc/q", "close"),
-	))
-
-	return renderDialogBox(maxWidth, lines)
+	chips := []hintChip{hint("A", "add"), hint("Esc/q", "close")}
+	if len(m.rules.rules) > 0 {
+		chips = []hintChip{hint("A", "add"), hint("↑↓", "move"), hint("D", "delete"), hint("O", "open file"), hint("Esc/q", "close")}
+	}
+	cfg := OverlayConfig{Title: title, MaxWidth: maxWidth, Hint: hintLine(chips...), CompactHint: hintLine(hint("A", "add"), hint("Esc/q", "close"))}
+	area := image.Rect(0, 0, m.width, m.height)
+	out := renderScrollableDialog(cfg, lines, area, &m.rules.scroll)
+	if m.rules.followCursor {
+		old := m.rules.scroll.offset
+		if focusLine < old {
+			m.rules.scroll.offset = focusLine
+		}
+		if focusLine >= old+m.rules.scroll.visible {
+			m.rules.scroll.offset = focusLine - m.rules.scroll.visible + 1
+		}
+		if m.rules.scroll.offset != old {
+			out = renderScrollableDialog(cfg, lines, area, &m.rules.scroll)
+		}
+	}
+	return out
 }
 
 func (m *Model) renderRulesAdd(maxWidth int) string {
-	lines := []string{ConfirmSeparatorStyle.Render("Add Permission Rule"), ""}
+	width := max(dialogContentWidth(maxWidth), 1)
+	m.rules.addToolInput.SetWidth(max(width-2-len(m.rules.addToolInput.Prompt), 1))
+	m.rules.addPatInput.SetWidth(max(width-2-len(m.rules.addPatInput.Prompt), 1))
+	lines := []string{}
 	toolLine := m.rules.addToolInput.View()
 	patternLine := m.rules.addPatInput.View()
 	if m.rules.addField == rulesAddFieldTool {
-		toolLine = ConfirmAllowStyle.Render(toolLine)
+		toolLine = renderDialogInputField(toolLine, true)
 	} else {
-		toolLine = DimStyle.Render(toolLine)
+		toolLine = renderDialogInputField(toolLine, false)
 	}
 	if m.rules.addField == rulesAddFieldPattern {
-		patternLine = ConfirmAllowStyle.Render(patternLine)
+		patternLine = renderDialogInputField(patternLine, true)
 	} else {
-		patternLine = DimStyle.Render(patternLine)
+		patternLine = renderDialogInputField(patternLine, false)
 	}
 	lines = append(lines, toolLine, patternLine, "")
-	lines = append(lines, fmt.Sprintf("Scope: %s", ConfirmAllowStyle.Render(scopeLabelStr(rulesAddScopes[m.rules.addScopeIdx]))))
-	lines = append(lines, fmt.Sprintf("Action: %s", ConfirmAllowStyle.Render(string(rulesAddActions[m.rules.addActionIdx]))))
+	lines = append(lines, fmt.Sprintf("Scope: %s", ConfirmToolStyle.Bold(true).Render(scopeLabelStr(rulesAddScopes[m.rules.addScopeIdx]))))
+	lines = append(lines, fmt.Sprintf("Action: %s", ConfirmToolStyle.Bold(true).Render(string(rulesAddActions[m.rules.addActionIdx]))))
 	if m.rules.addError != "" {
-		lines = append(lines, "", ConfirmDenyStyle.Render(m.rules.addError))
+		lines = append(lines, "", DialogDangerStyle.Render(m.rules.addError))
 	}
-	lines = append(lines, "")
-	lines = append(lines, hintLine(
-		hint("Tab", "field"), hint("Ctrl+S", "scope"), hint("Ctrl+A", "action"), hint("Enter", "add"), hint("Esc", "back"),
-	))
-	return renderDialogBox(maxWidth, lines)
+	cfg := OverlayConfig{
+		Title: "Add Permission Rule", MaxWidth: maxWidth, MinContentHeight: 2,
+		Hint:        hintLine(primaryHint("Enter", "add"), hint("Esc", "back"), hint("Tab", "field"), hint("Ctrl+S", "scope"), hint("Ctrl+A", "action")),
+		CompactHint: hintLine(primaryHint("Enter", "add"), hint("Esc", "back")),
+	}
+	area := image.Rect(0, 0, m.width, m.height)
+	if overlayContentHeight(cfg, area) < len(wrapDialogLines(lines, width)) {
+		cfg.Title = fmt.Sprintf("Add rule · %s/%s", scopeLabelStr(rulesAddScopes[m.rules.addScopeIdx]), rulesAddActions[m.rules.addActionIdx])
+		lines = []string{toolLine, patternLine}
+		if m.rules.addError != "" {
+			cfg.Footer = DialogDangerStyle.Render(truncateOneLine(m.rules.addError, width))
+		}
+		if overlayContentHeight(cfg, area) < 2 {
+			lines = []string{toolLine}
+			if m.rules.addField == rulesAddFieldPattern {
+				lines = []string{patternLine}
+			}
+		}
+	}
+	out, _ := RenderOverlay(cfg, strings.Join(lines, "\n"), area)
+	return out
 }
 
 func scopeLabelStr(scope permission.RuleScope) string {

@@ -1,7 +1,7 @@
 package tui
 
 import (
-	"strings"
+	"charm.land/lipgloss/v2"
 
 	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
@@ -11,7 +11,7 @@ import (
 
 type confirmOptionSpec struct {
 	action confirmDialogAction
-	label  string
+	hint   hintChip
 }
 
 type confirmOptionHit struct {
@@ -37,44 +37,60 @@ func (m *Model) confirmOptionSpecs() []confirmOptionSpec {
 	if toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
 		if m.confirm.request.ForceDenyReason {
 			return []confirmOptionSpec{
-				{action: confirmDialogView, label: "[V] View"},
-				{action: confirmDialogDenyReason, label: "[Esc/R] Deny+Reason required"},
+				{action: confirmDialogView, hint: hint("V", "View")},
+				{action: confirmDialogDenyReason, hint: hint("Esc/R", "Deny+Reason")},
 			}
 		}
 		return []confirmOptionSpec{
-			{action: confirmDialogAllow, label: "[Enter/A] Allow"},
-			{action: confirmDialogView, label: "[V] View"},
-			{action: confirmDialogDenyReason, label: "[Esc/R] Deny+Reason"},
+			{action: confirmDialogAllow, hint: hint("Enter/A", "Allow")},
+			{action: confirmDialogView, hint: hint("V", "View")},
+			{action: confirmDialogDenyReason, hint: hint("Esc/R", "Deny+Reason")},
 		}
 	}
+	allow := hint("Enter/A", "Allow")
+	if toolNameKey(m.confirm.request.ToolName) == tools.NameDelete {
+		allow.danger = true
+	}
 	return []confirmOptionSpec{
-		{action: confirmDialogAllow, label: "[Enter/A] Allow"},
-		{action: confirmDialogDeny, label: "[Esc/D] Deny"},
-		{action: confirmDialogDenyReason, label: "[R] Deny+Reason"},
-		{action: confirmDialogEdit, label: "[E] Edit args"},
-		{action: confirmDialogAddRule, label: "[M] Remember…"},
+		{action: confirmDialogAllow, hint: allow},
+		{action: confirmDialogDeny, hint: hint("Esc/D", "Deny")},
+		{action: confirmDialogDenyReason, hint: hint("R", "Deny+Reason")},
+		{action: confirmDialogEdit, hint: hint("E", "Edit args")},
+		{action: confirmDialogAddRule, hint: hint("M", "Remember…")},
 	}
 }
 
 func renderConfirmOption(spec confirmOptionSpec) string {
-	switch spec.action {
-	case confirmDialogAllow:
-		return ConfirmAllowStyle.Render(spec.label)
-	case confirmDialogDeny, confirmDialogDenyReason:
-		return ConfirmDenyStyle.Render(spec.label)
-	default:
-		return ConfirmEditStyle.Render(spec.label)
-	}
+	return renderHintChip(spec.hint)
 }
 
 func (m *Model) confirmOptionRows() []confirmOptionRow {
 	specs := m.confirmOptionSpecs()
-	if len(specs) == 0 {
-		return nil
+	width := max(confirmDialogInnerWidth(m.width), 1)
+	rows := layoutConfirmOptionRows(specs, width)
+	maxRows := max(overlayHeight(m.confirmDialogArea())-4, 1)
+	if len(rows) <= maxRows {
+		return rows
 	}
+	// Compact actions retain the decision and its actual exit, even when the
+	// auxiliary edit/view/rule shortcuts do not fit.
+	var compact []confirmOptionSpec
+	hasDeny := false
+	for _, spec := range specs {
+		if spec.action == confirmDialogDeny {
+			hasDeny = true
+		}
+	}
+	for _, spec := range specs {
+		if spec.action == confirmDialogAllow || spec.action == confirmDialogDeny || spec.action == confirmDialogDenyReason && !hasDeny {
+			compact = append(compact, spec)
+		}
+	}
+	return layoutConfirmOptionRows(compact, width)
+}
 
-	maxLineWidth := confirmDialogInnerWidth(m.width) - 1
-	rows := make([]confirmOptionRow, 0, 2)
+func layoutConfirmOptionRows(specs []confirmOptionSpec, width int) []confirmOptionRow {
+	var rows []confirmOptionRow
 	current := confirmOptionRow{}
 	lineWidth := 0
 	flush := func() {
@@ -85,21 +101,19 @@ func (m *Model) confirmOptionRows() []confirmOptionRow {
 		current = confirmOptionRow{}
 		lineWidth = 0
 	}
-
 	for _, spec := range specs {
-		optionWidth := ansi.StringWidth(spec.label)
-		if len(current.options) > 0 && lineWidth+2+optionWidth > maxLineWidth {
+		if spec.action == confirmDialogView || spec.action == confirmDialogEdit {
+			flush()
+		}
+		optionWidth := ansi.StringWidth(renderConfirmOption(spec))
+		if len(current.options) > 0 && lineWidth+2+optionWidth > width {
 			flush()
 		}
 		start := lineWidth
 		if len(current.options) > 0 {
 			start += 2
 		}
-		current.options = append(current.options, confirmOptionHit{
-			spec:  spec,
-			start: start,
-			end:   start + optionWidth,
-		})
+		current.options = append(current.options, confirmOptionHit{spec: spec, start: start, end: start + optionWidth})
 		lineWidth = start + optionWidth
 	}
 	flush()
@@ -133,58 +147,32 @@ func (m *Model) confirmOptionHitboxes() []confirmOptionHitbox {
 		return nil
 	}
 
-	req := m.confirm.request
-	innerWidth := confirmDialogInnerWidth(m.width)
-	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed, req.DoneReport)
-	body := m.renderConfirmSummary("⚠ Confirmation Required", summary, innerWidth)
-	body = append(body, "")
-	for _, row := range rows {
-		parts := make([]string, len(row.options))
-		for i, option := range row.options {
-			parts[i] = renderConfirmOption(option.spec)
-		}
-		body = append(body, strings.Join(parts, "  "))
-	}
-
-	maxLines := confirmDialogMaxBodyLines(m.height)
-	fitted := fitConfirmDialogLines(body, maxLines, len(rows)+1)
-	visibleRows := len(rows)
-	firstRow := 0
-	if len(body) > maxLines {
-		preserveTail := len(rows) + 1
-		if preserveTail > maxLines-2 {
-			preserveTail = max(0, maxLines-2)
-		}
-		visibleRows = min(len(rows), preserveTail)
-		firstRow = len(rows) - visibleRows
-	}
-	if visibleRows == 0 {
-		return nil
-	}
-
 	dialog := m.renderConfirmDialog()
 	dialogRect := m.overlayRect(dialog)
 	contentLeft := dialogRect.Min.X + DirectoryBorderStyle.GetBorderLeftSize() + DirectoryBorderStyle.GetPaddingLeft()
 	contentTop := dialogRect.Min.Y + DirectoryBorderStyle.GetBorderTopSize() + DirectoryBorderStyle.GetPaddingTop()
-	optionStart := len(fitted) - visibleRows
-
-	hitboxes := make([]confirmOptionHitbox, 0, visibleRows*2)
-	for rowIndex := firstRow; rowIndex < len(rows); rowIndex++ {
-		row := rows[rowIndex]
-		y := contentTop + optionStart + rowIndex - firstRow
+	innerWidth := confirmDialogInnerWidth(m.width)
+	// The shared layout may compact away the scroll hint; action rows themselves
+	// are already selected by confirmOptionRows and stay at the end of the frame.
+	cfg := OverlayConfig{Title: "⚠ Confirmation Required", MaxWidth: confirmDialogWidth(m.width), Hint: m.renderConfirmOptions(), CompactHint: m.renderConfirmOptions()}
+	if m.confirm.scroll.total > m.confirm.scroll.visible {
+		cfg.Hint = appendHintChip(cfg.Hint, hint("PgUp/PgDn", "scroll"))
+	}
+	layout := layoutOverlay(cfg, m.confirmDialogArea())
+	optionStart := lipgloss.Height(dialog) - DirectoryBorderStyle.GetVerticalFrameSize() - len(layout.hintLines)
+	hitboxes := make([]confirmOptionHitbox, 0, len(rows)*2)
+	for rowIndex, row := range rows {
+		if rowIndex >= len(layout.hintLines) {
+			break
+		}
+		y := contentTop + optionStart + rowIndex
 		for _, option := range row.options {
 			start := min(max(option.start, 0), innerWidth)
 			end := min(max(option.end, start), innerWidth)
-			if end <= start {
+			if end <= start || y >= dialogRect.Max.Y-1 {
 				continue
 			}
-			hitboxes = append(hitboxes, confirmOptionHitbox{
-				action: option.spec.action,
-				minX:   contentLeft + start,
-				maxX:   contentLeft + end,
-				minY:   y,
-				maxY:   y + 1,
-			})
+			hitboxes = append(hitboxes, confirmOptionHitbox{action: option.spec.action, minX: contentLeft + start, maxX: contentLeft + end, minY: y, maxY: y + 1})
 		}
 	}
 	return hitboxes

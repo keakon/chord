@@ -656,11 +656,11 @@ func confirmYesNo(value bool) string {
 func confirmRiskStyle(risk confirmRiskLevel) string {
 	switch risk {
 	case confirmRiskLow:
-		return ConfirmAllowStyle.Render(risk.String())
+		return ConfirmToolStyle.Render(risk.String())
 	case confirmRiskHigh:
-		return ConfirmDenyStyle.Render(risk.String())
+		return DialogDangerStyle.Render(risk.String())
 	default:
-		return ConfirmEditStyle.Render(risk.String())
+		return DialogWarningStyle.Render(risk.String())
 	}
 }
 

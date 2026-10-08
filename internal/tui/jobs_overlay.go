@@ -115,10 +115,13 @@ func (m *Model) jobsOverlayInnerWidth() int {
 }
 
 func (m *Model) jobsOverlayConfig() OverlayConfig {
+	if len(m.activeJobs()) == 0 {
+		return OverlayConfig{Title: "Background Jobs", MaxWidth: m.jobsOverlayMaxWidth(), Hint: hintLine(hint("Esc", "close"))}
+	}
 	return OverlayConfig{
 		Title:       "Background Jobs",
-		Hint:        hintLine(hint("j/k", "select"), hint("Enter", "stop"), hint("Esc", "close")),
-		CompactHint: hintLine(hint("Enter", "stop"), hint("Esc", "close")),
+		Hint:        hintLine(hint("j/k", "select"), hint("Enter", "confirm stop"), hint("Esc", "close")),
+		CompactHint: hintLine(hint("Enter", "confirm stop"), hint("Esc", "close")),
 		MaxWidth:    m.jobsOverlayMaxWidth(),
 	}
 }

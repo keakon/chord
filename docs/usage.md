@@ -176,6 +176,8 @@ Type `@` in the composer at the start of a line or after a space to open file co
 
 ## Sessions
 
+In the session picker, press `d` to open deletion confirmation. Press `y` to delete the selected session permanently, or `n` / `Esc` to cancel. `Enter` does not confirm deletion. Long confirmation content can be read with `PgUp` / `PgDown` or the mouse wheel; the decision actions remain visible.
+
 Chord keeps persistent sessions for the current project.
 
 Common workflows:

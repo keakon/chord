@@ -55,8 +55,11 @@ const (
 // ---------------------------------------------------------------------------
 
 type sessionDeleteConfirmState struct {
-	session  *agent.SessionSummary
-	prevMode Mode
+	scroll            dialogScrollState
+	renderCacheHeight int
+	renderCacheOffset int
+	session           *agent.SessionSummary
+	prevMode          Mode
 
 	renderCacheWidth  int
 	renderCacheTheme  string

@@ -63,9 +63,9 @@ func requireCellBg(t *testing.T, line, needle, wantChar string, wantBg interface
 func TestPreserveDialogBackgroundKeepsMultiSegmentLine(t *testing.T) {
 	wantBg := dialogBgColor(t)
 	line := lipgloss.JoinHorizontal(lipgloss.Left,
-		ConfirmAllowStyle.Render("[y] Delete"),
+		renderHintChip(dangerHint("y", "Delete")),
 		DimStyle.Render("  "),
-		ConfirmDenyStyle.Render("[n/esc] Cancel"),
+		renderHintChip(hint("n/esc", "Cancel")),
 	)
 	out := renderDialogBox(60, []string{line})
 	buttonLine := findRenderedLineContaining(out, "[n/esc] Cancel")
@@ -149,9 +149,9 @@ func TestRenderOverlayPreservesButtons(t *testing.T) {
 	wantBg := dialogBgColor(t)
 	m := NewModelWithSize(nil, 120, 32)
 	content := lipgloss.JoinHorizontal(lipgloss.Left,
-		ConfirmAllowStyle.Render("[Enter/A] Allow"),
+		renderHintChip(hint("Enter/A", "Allow")),
 		DimStyle.Render("  "),
-		ConfirmDenyStyle.Render("[Esc/D] Deny"),
+		renderHintChip(hint("Esc/D", "Deny")),
 	)
 	dialog, _ := RenderOverlay(OverlayConfig{
 		Title: "Buttons",

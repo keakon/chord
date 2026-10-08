@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"image"
 	"strings"
 
 	"github.com/keakon/bubbles/v2/textarea"
@@ -39,6 +40,10 @@ func isPlainKey(msg tea.KeyMsg, code rune) bool {
 	return key.Code == code && key.Mod == 0
 }
 
+func (m *Model) confirmDialogArea() image.Rectangle {
+	return image.Rect(0, 0, m.width, min(m.height, max(6, confirmDialogMaxHeight(m.height)+2)))
+}
+
 func confirmDialogWidth(totalWidth int) int {
 	maxWidth := max(min(totalWidth-6, confirmDialogMaxWidth), 40)
 	return min(maxWidth, max(totalWidth-1, 1))
@@ -62,14 +67,6 @@ func confirmDialogMaxHeight(totalHeight int) int {
 		maxHeight = 1
 	}
 	return maxHeight
-}
-
-func confirmDialogMaxBodyLines(totalHeight int) int {
-	maxHeight := confirmDialogMaxHeight(totalHeight)
-	if maxHeight <= 2 {
-		return maxHeight
-	}
-	return maxHeight - 2
 }
 
 func confirmEditHeight(totalHeight int) int {
@@ -120,6 +117,10 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handleConfirmDenyReasonKey(msg)
 	}
 
+	if m.confirm.scroll.handleKey(msg) {
+		return nil
+	}
+
 	if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
 		if msg.String() == "v" || msg.String() == "V" {
 			return m.handleConfirmAction(confirmDialogView)
@@ -152,21 +153,14 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch {
 	case keyMatches(msg.String(), m.keyMap.ScrollDown):
-		return m.repeatNormalVertical(1, 1)
+		m.confirm.scroll.move(1)
+		return nil
 	case keyMatches(msg.String(), m.keyMap.ScrollUp):
-		return m.repeatNormalVertical(-1, 1)
-	case keyMatches(msg.String(), m.keyMap.FullPageDown):
-		prevOffset := m.viewport.offset
-		m.viewport.ScrollDown(m.viewport.height)
-		return m.refreshInlineImagesIfViewportMoved(prevOffset)
-	case keyMatches(msg.String(), m.keyMap.FullPageUp):
-		prevOffset := m.viewport.offset
-		m.viewport.ScrollUp(m.viewport.height)
-		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+		m.confirm.scroll.move(-1)
+		return nil
 	case keyMatches(msg.String(), m.keyMap.ScrollToBottom):
-		prevOffset := m.viewport.offset
-		m.viewport.ScrollToBottom()
-		return m.refreshInlineImagesIfViewportMoved(prevOffset)
+		m.confirm.scroll.move(m.confirm.scroll.total)
+		return nil
 	}
 
 	switch {
@@ -219,6 +213,8 @@ func (m *Model) enterRulePicker() {
 	}
 
 	m.confirm.pickingRule = true
+	m.confirm.ruleScroll = dialogScrollState{}
+	m.confirm.ruleFollowCursor = true
 	m.confirm.candidates = candidates
 	m.confirm.patternIdx = cursorIdx
 	m.confirm.selectedPatterns = selected
@@ -232,6 +228,10 @@ func (m *Model) enterRulePicker() {
 
 // handleConfirmRulePickerKey processes key events in the rule picker sub-mode.
 func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
+	if m.confirm.ruleScroll.handleKey(msg) {
+		m.confirm.ruleFollowCursor = false
+		return nil
+	}
 	if msg.Key().Code == tea.KeySpace {
 		if len(m.confirm.candidates) == 0 {
 			return nil
@@ -251,6 +251,7 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch {
 	case msg.Key().Code == tea.KeyUp || msg.String() == "k":
+		m.confirm.ruleFollowCursor = true
 		if m.confirm.patternIdx > 0 {
 			m.confirm.patternIdx--
 			m.confirm.renderCacheText = ""
@@ -259,6 +260,7 @@ func (m *Model) handleConfirmRulePickerKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 
 	case msg.Key().Code == tea.KeyDown || msg.String() == "j":
+		m.confirm.ruleFollowCursor = true
 		if m.confirm.patternIdx < len(m.confirm.candidates)-1 {
 			m.confirm.patternIdx++
 			m.confirm.renderCacheText = ""

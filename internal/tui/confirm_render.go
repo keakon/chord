@@ -17,6 +17,7 @@ func (m *Model) renderConfirmDialog() string {
 	if !m.confirm.editing && !m.confirm.pickingRule && !m.confirm.denyingWithReason && m.confirm.deadline.IsZero() && m.confirm.renderCacheText != "" &&
 		m.confirm.renderCacheWidth == m.width &&
 		m.confirm.renderCacheHeight == m.height &&
+		m.confirm.renderCacheOffset == m.confirm.scroll.offset &&
 		m.confirm.renderCacheTheme == m.theme.Name &&
 		m.confirm.renderCacheReq == m.confirm.request {
 		return m.confirm.renderCacheText
@@ -26,52 +27,20 @@ func (m *Model) renderConfirmDialog() string {
 	innerWidth := confirmDialogInnerWidth(m.width)
 
 	req := m.confirm.request
-	title := ConfirmSeparatorStyle.Render("⚠ Confirmation Required")
 
 	if m.confirm.editing {
-		header := ConfirmToolStyle.Render(
-			fmt.Sprintf("Tool: %s — edit args:", req.ToolName),
-		)
-		editLine := m.confirm.editInput.View()
-		hints := hintLine(
-			hint("Enter", "submit"),
-			hint("Shift+Enter/Ctrl+J", "new line"),
-			hint("Esc", "cancel edit"),
-		)
-		lines := []string{title, "", header}
-		lines = append(lines, strings.Split(editLine, "\n")...)
-		if strings.TrimSpace(m.confirm.editError) != "" {
-			lines = append(lines, "")
-			for _, line := range wrapText(m.confirm.editError, max(10, innerWidth-2)) {
-				lines = append(lines, ConfirmDenyStyle.Render("! "+line))
-			}
-		}
-		lines = append(lines, "", hints)
-		lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
-		return renderDialogBox(maxWidth, lines)
+		submit := primaryHint("Enter", "allow")
+		submit.danger = toolNameKey(req.ToolName) == tools.NameDelete
+		return m.renderConfirmEditor(maxWidth, "Edit args · "+req.ToolName, &m.confirm.editInput,
+			submit, hint("Esc", "back"))
 	}
-
 	if m.confirm.denyingWithReason {
-		header := ConfirmToolStyle.Render(
-			fmt.Sprintf("Tool: %s — deny with reason:", req.ToolName),
-		)
-		inputView := m.confirm.denyReasonInput.View()
-		chips := []hintChip{hint("Enter", "deny"), hint("Shift+Enter/Ctrl+J", "new line")}
-		if !req.ForceDenyReason {
-			chips = append(chips, hint("Esc", "back"))
+		exit := hint("Esc", "back")
+		if req.ForceDenyReason {
+			exit = hintText("")
 		}
-		hints := hintLine(chips...)
-		lines := []string{title, "", header}
-		lines = append(lines, strings.Split(inputView, "\n")...)
-		if strings.TrimSpace(m.confirm.editError) != "" {
-			lines = append(lines, "")
-			for _, line := range wrapText(m.confirm.editError, max(10, innerWidth-2)) {
-				lines = append(lines, ConfirmDenyStyle.Render("! "+line))
-			}
-		}
-		lines = append(lines, "", hints)
-		lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
-		return renderDialogBox(maxWidth, lines)
+		return m.renderConfirmEditor(maxWidth, "Deny with reason · "+req.ToolName, &m.confirm.denyReasonInput,
+			primaryHint("Enter", "deny"), exit)
 	}
 
 	if m.confirm.pickingRule {
@@ -79,15 +48,16 @@ func (m *Model) renderConfirmDialog() string {
 	}
 
 	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed, req.DoneReport)
-	lines := m.renderConfirmSummary(title, summary, innerWidth)
-	options := strings.Split(m.renderConfirmOptions(), "\n")
-	lines = append(lines, "")
-	lines = append(lines, options...)
-	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), len(options)+1)
-	out := renderDialogBox(maxWidth, lines)
+	lines := m.renderConfirmSummary("", summary, innerWidth)[2:]
+	actions := m.renderConfirmOptions()
+	out := renderScrollableDialog(OverlayConfig{
+		Title: "⚠ Confirmation Required", MaxWidth: maxWidth,
+		Hint: actions, CompactHint: actions,
+	}, lines, m.confirmDialogArea(), &m.confirm.scroll)
 	if m.confirm.deadline.IsZero() {
 		m.confirm.renderCacheWidth = m.width
 		m.confirm.renderCacheHeight = m.height
+		m.confirm.renderCacheOffset = m.confirm.scroll.offset
 		m.confirm.renderCacheTheme = m.theme.Name
 		m.confirm.renderCacheReq = m.confirm.request
 		m.confirm.renderCacheText = out
@@ -109,7 +79,7 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 		lines = append(lines, DimStyle.Render("Risk: ")+confirmRiskStyle(summary.Risk))
 		for _, warning := range summary.Warnings {
 			for _, line := range wrapText(warning, max(10, innerWidth-2)) {
-				lines = append(lines, ConfirmDenyStyle.Render("! ")+DimStyle.Render(line))
+				lines = append(lines, DialogWarningStyle.Render("! ")+DimStyle.Render(line))
 			}
 		}
 		fields := renderConfirmFields(summary.summaryFields(), innerWidth-1)
@@ -131,7 +101,7 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 
 	for _, warning := range summary.Warnings {
 		for _, line := range wrapText(warning, max(10, innerWidth-2)) {
-			lines = append(lines, ConfirmDenyStyle.Render("! ")+DimStyle.Render(line))
+			lines = append(lines, DialogWarningStyle.Render("! ")+DimStyle.Render(line))
 		}
 	}
 
@@ -170,133 +140,74 @@ func (m Model) renderConfirmOptions() string {
 	return strings.Join(lines, "\n")
 }
 
-// renderRulePicker renders the rule picker sub-dialog.
+// renderRulePicker keeps the selected scope and decision outside the candidate window.
 func (m *Model) renderRulePicker(maxWidth int) string {
-	title := ConfirmSeparatorStyle.Render("⚠ Remember rule — " + m.confirm.request.ToolName)
-
-	lines := []string{title, ""}
-
-	// Pattern section
-	lines = append(lines, ConfirmToolStyle.Render("Pattern:"))
 	if m.confirm.editingRulePattern {
-		lines = append(lines, ConfirmAllowStyle.Render(m.confirm.rulePatternInput.View()))
-		if m.confirm.editError != "" {
-			lines = append(lines, ConfirmDenyStyle.Render(m.confirm.editError))
-		}
-	} else {
-		for i, c := range m.confirm.candidates {
-			cursor := " "
-			if i == m.confirm.patternIdx {
-				cursor = "❯"
-			}
-			checked := "[ ]"
-			if _, ok := m.confirm.selectedPatterns[i]; ok {
-				checked = "[x]"
-			}
-			broadTag := ""
-			if c.Broad {
-				broadTag = "  ⚠ very broad"
-			}
-			line := fmt.Sprintf("  %s %s %s", cursor, checked, c.Pattern)
-			if c.Summary != "" {
-				line += "  — " + c.Summary
-			}
-			if broadTag != "" {
-				line += broadTag
-			}
-			if i == m.confirm.patternIdx {
-				lines = append(lines, ConfirmAllowStyle.Render(line))
-			} else {
-				lines = append(lines, DimStyle.Render(line))
-			}
-		}
-		if m.confirm.editError != "" {
-			lines = append(lines, ConfirmDenyStyle.Render(m.confirm.editError))
-		}
+		return m.renderConfirmEditor(maxWidth, "Edit rule pattern", &m.confirm.rulePatternInput,
+			primaryHint("Enter", "save"), hint("Esc", "back"))
 	}
-
-	lines = append(lines, "")
-
-	// Scope section
-	lines = append(lines, ConfirmToolStyle.Render("Scope:"))
+	width := max(dialogContentWidth(maxWidth), 1)
+	scope := permission.ScopeSession
+	if len(m.confirm.scopes) > 0 {
+		scope = m.confirm.scopes[m.confirm.scopeIdx]
+	}
 	roleName := ""
 	if m.agent != nil {
 		roleName = strings.TrimSpace(m.agent.CurrentRole())
 	}
-	for i, scope := range m.confirm.scopes {
-		marker := "○"
-		if i == m.confirm.scopeIdx {
-			marker = "●"
+	lines := []string{}
+	if path := resolveRuleScopePath(scope, m.usageStatsContentRoot(), roleName); path != "" {
+		lines = append(lines, "Rule file: "+path)
+	}
+	lines = append(lines, "Pattern:")
+	focusLine := 0
+	for i, c := range m.confirm.candidates {
+		cursor, checked := " ", "[ ]"
+		if i == m.confirm.patternIdx {
+			cursor = "❯"
+			focusLine = len(wrapDialogLines(lines, width))
 		}
-		scopeLabel := scopeLabel(scope)
-		scopePath := resolveRuleScopePath(scope, m.usageStatsContentRoot(), roleName)
-		scopePathSuffix := ""
-		if scopePath != "" {
-			scopePathSuffix = " (" + scopePath + ")"
+		if _, ok := m.confirm.selectedPatterns[i]; ok {
+			checked = "[x]"
 		}
-		line := fmt.Sprintf("  %s %s%s", marker, scopeLabel, scopePathSuffix)
-		if i == m.confirm.scopeIdx {
-			lines = append(lines, ConfirmAllowStyle.Render(line))
-		} else {
-			lines = append(lines, DimStyle.Render(line))
+		line := fmt.Sprintf("%s %s %s", cursor, checked, c.Pattern)
+		if c.Summary != "" {
+			line += " — " + c.Summary
 		}
+		if c.Broad {
+			line += " ⚠ very broad"
+		}
+		if i == m.confirm.patternIdx {
+			line = SelectedStyle.Width(width).Render(line)
+		}
+		lines = append(lines, line)
 	}
-
-	lines = append(lines, "")
-	hints := wrapHintLines(hintLine(
-		hint("↑↓", "pattern"),
-		hint("Space", "select"),
-		hint("E", "edit"),
-		hint("Tab", "scope"),
-		hint("Enter", "remember + allow"),
-		hint("Esc", "back"),
-	), max(dialogContentWidth(maxWidth), 1))
-	lines = append(lines, hints...)
-
-	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
-	return renderDialogBox(maxWidth, lines)
-}
-
-func scopeLabel(scope permission.RuleScope) string {
-	switch scope {
-	case permission.ScopeSession:
-		return "This session only"
-	case permission.ScopeProject:
-		return "This project"
-	case permission.ScopeUserGlobal:
-		return "User global"
-	default:
-		return scope.String()
+	cfg := OverlayConfig{
+		Title: "⚠ Remember rule — " + m.confirm.request.ToolName, MaxWidth: maxWidth,
+		Footer: "Scope: " + scopeLabelStr(scope),
+		Hint: hintLine(primaryHint("Enter", "remember + allow"), hint("Esc", "back"),
+			hint("↑↓", "pattern"), hint("Space", "select"), hint("E", "edit"), hint("Tab", "scope")),
+		CompactHint: hintLine(primaryHint("Enter", "save"), hint("Esc", "back")),
 	}
-}
-
-func fitConfirmDialogLines(lines []string, maxLines int, preserveTail int) []string {
-	if maxLines <= 0 || len(lines) <= maxLines {
-		return lines
+	if width < 30 {
+		cfg.Title = "Remember + allow"
 	}
-	if preserveTail < 0 {
-		preserveTail = 0
+	if m.confirm.editError != "" {
+		cfg.Footer = DialogDangerStyle.Render(truncateOneLine(m.confirm.editError, width))
 	}
-	if preserveTail > maxLines-2 {
-		preserveTail = max(0, maxLines-2)
-	}
-	headCount := maxLines - preserveTail - 1
-	if headCount < 1 {
-		headCount = 1
-		preserveTail = max(0, maxLines-2)
-	}
-	hidden := len(lines) - headCount - preserveTail
-	if hidden < 1 {
-		return lines[:maxLines]
-	}
-
-	marker := DimStyle.Render(fmt.Sprintf("... %d more lines hidden.", hidden))
-
-	out := make([]string, 0, maxLines)
-	out = append(out, lines[:headCount]...)
-	out = append(out, marker)
-	if preserveTail > 0 {
-		out = append(out, lines[len(lines)-preserveTail:]...)
+	area := m.confirmDialogArea()
+	firstRender := m.confirm.ruleScroll.visible == 0
+	out := renderScrollableDialog(cfg, lines, area, &m.confirm.ruleScroll)
+	if firstRender || m.confirm.ruleFollowCursor {
+		old := m.confirm.ruleScroll.offset
+		if focusLine < old {
+			m.confirm.ruleScroll.offset = focusLine
+		} else if focusLine >= old+m.confirm.ruleScroll.visible {
+			m.confirm.ruleScroll.offset = focusLine - m.confirm.ruleScroll.visible + 1
+		}
+		if m.confirm.ruleScroll.offset != old {
+			out = renderScrollableDialog(cfg, lines, area, &m.confirm.ruleScroll)
+		}
 	}
 	return out
 }

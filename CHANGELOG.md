@@ -96,6 +96,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Dialogs use quieter shortcut hints, distinct focus and risk cues, and fixed decision actions while long confirmation content scrolls. Deleting a session requires explicit `y` confirmation; `Enter` does not delete it.
+
 - MCP tool results are checked against the server's declared output schema. Schema problems add a warning while preserving usable output, without automatically repeating the tool call.
 
 - Tool calls a model issues in one response now run concurrently when their declared resources do not conflict: MCP calls can execute together even on one server, and edits to different files no longer serialize. Same-file edits, workspace-wide tools, and calls with a declared resource conflict still keep their model-response order; each result is returned independently so the model can decide whether a failed call is safe to retry.

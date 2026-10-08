@@ -393,8 +393,10 @@ func TestRenderDoneConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/R] Deny+Reason") {
 		t.Fatalf("expected Done confirm actions to remain visible, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "more lines hidden") {
-		t.Fatalf("expected truncation marker in constrained Done confirm dialog, got:\n%s", plain)
+	m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnd}))
+	lastPage := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(lastPage, "line 40") || !strings.Contains(lastPage, "[Enter/A] Allow") || !strings.Contains(lastPage, "[Esc/R] Deny+Reason") {
+		t.Fatalf("last report line and decisions must remain reachable:\n%s", lastPage)
 	}
 }
 
@@ -493,8 +495,10 @@ func TestRenderConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/D] Deny") || !strings.Contains(plain, "[E] Edit args") {
 		t.Fatalf("expected confirm actions to remain visible, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "more lines hidden") {
-		t.Fatalf("expected truncation marker in constrained confirm dialog, got:\n%s", plain)
+	m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnd}))
+	lastPage := stripANSI(m.renderConfirmDialog())
+	if !strings.Contains(lastPage, "/tmp/i") || !strings.Contains(lastPage, "[Enter/A] Allow") || !strings.Contains(lastPage, "[Esc/D] Deny") {
+		t.Fatalf("last approval path and decisions must remain reachable:\n%s", lastPage)
 	}
 }
 
@@ -650,7 +654,7 @@ func TestRenderConfirmDenyReasonModeShowsHint(t *testing.T) {
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 
 	plain := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(plain, "deny with reason") {
+	if !strings.Contains(strings.ToLower(plain), "deny with reason") {
 		t.Fatalf("expected 'deny with reason' header in deny-reason dialog, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "[Enter] deny") {
@@ -782,7 +786,7 @@ func TestRenderConfirmDialogForceDenyOnlyShowsDenyReason(t *testing.T) {
 	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`, ForceDenyReason: true}
 
 	plain := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(plain, "[Esc/R] Deny+Reason required") {
+	if !strings.Contains(plain, "[Esc/R] Deny+Reason") {
 		t.Fatalf("forced deny confirm options missing required deny action:\n%s", plain)
 	}
 	if strings.Contains(plain, "[Enter/A] Allow") || strings.Contains(plain, "[E] Edit args") || strings.Contains(plain, "[M] Remember") {

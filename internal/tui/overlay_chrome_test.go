@@ -182,8 +182,12 @@ func TestRulePickerRendersSharedMarkers(t *testing.T) {
 	if !strings.Contains(plain, "❯") {
 		t.Fatalf("pattern cursor should use the shared marker:\n%s", plain)
 	}
-	if !strings.Contains(plain, "●") || !strings.Contains(plain, "○") {
-		t.Fatalf("scope list should use filled and hollow markers:\n%s", plain)
+	if !strings.Contains(plain, "Scope: session") {
+		t.Fatalf("current scope should be independent of pattern focus:\n%s", plain)
+	}
+	m.handleConfirmRulePickerKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
+	if !strings.Contains(stripANSI(m.renderConfirmDialog()), "Scope: project") {
+		t.Fatal("Tab did not update the visible scope")
 	}
 	if !strings.Contains(plain, "[↑↓] pattern") || !strings.Contains(plain, "[Enter] remember + allow") {
 		t.Fatalf("rule picker should render key chips:\n%s", plain)

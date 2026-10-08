@@ -293,57 +293,39 @@ func TestMouseWheelScrollMovesViewportWhileCompacting(t *testing.T) {
 	}
 }
 
-func TestMouseWheelScrollMovesViewportWhileConfirmDialogOpen(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 12)
-	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
-	for i := range 6 {
-		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
-	}
-	m.layout = m.generateLayout(m.width, m.height)
-	m.viewport.ScrollDown(2)
-	startOffset := m.viewport.offset
-	if startOffset == 0 {
-		t.Fatal("expected setup to produce a non-zero scroll offset")
-	}
-
-	updated, cmd := m.Update(tea.MouseWheelMsg{X: 0, Y: 0, Button: tea.MouseWheelUp})
-	model, ok := updated.(*Model)
-	if !ok {
-		t.Fatalf("Update returned %T, want *Model", updated)
-	}
-	if cmd == nil {
-		t.Fatal("mouse wheel during confirm dialog should still schedule a scroll flush command")
-	}
-	if model.pendingScrollDelta != -mouseWheelScrollStep {
-		t.Fatalf("pendingScrollDelta = %d, want %d", model.pendingScrollDelta, -mouseWheelScrollStep)
-	}
-	model.consumeScrollFlush(scrollFlushTickMsg{generation: model.scrollFlushGeneration})
-	if model.viewport.offset >= startOffset {
-		t.Fatalf("expected confirm-dialog scroll flush to decrease offset, got start=%d end=%d", startOffset, model.viewport.offset)
-	}
-}
-
-func TestConfirmDialogArrowKeysScrollViewport(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 12)
-	m.mode = ModeConfirm
-	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
-	for i := range 6 {
-		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
-	}
-	m.layout = m.generateLayout(m.width, m.height)
-	m.viewport.ScrollDown(2)
-	startOffset := m.viewport.offset
-	if startOffset == 0 {
-		t.Fatal("expected setup to produce a non-zero scroll offset")
-	}
-
-	cmd := m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
-	if cmd != nil {
-		t.Fatalf("confirm-dialog arrow scroll should not schedule extra cmd, got %T", cmd)
-	}
-	if m.viewport.offset >= startOffset {
-		t.Fatalf("expected confirm-dialog key scroll to decrease offset, got start=%d end=%d", startOffset, m.viewport.offset)
+func TestConfirmNavigationScrollsBodyWithoutMovingConversation(t *testing.T) {
+	for _, input := range []string{"wheel", "arrow", "page"} {
+		t.Run(input, func(t *testing.T) {
+			m := NewModelWithSize(nil, 80, 12)
+			m.mode = ModeConfirm
+			m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`, DoneReport: strings.Repeat("sample line\n", 40)}
+			for i := range 6 {
+				m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("alpha ", 40)})
+			}
+			m.layout = m.generateLayout(m.width, m.height)
+			m.viewport.ScrollDown(2)
+			start := m.viewport.offset
+			m.renderConfirmDialog()
+			var cmd tea.Cmd
+			switch input {
+			case "wheel":
+				_, cmd = m.Update(tea.MouseWheelMsg{X: 0, Y: 0, Button: tea.MouseWheelDown})
+			case "arrow":
+				cmd = m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+			case "page":
+				cmd = m.handleKeyMsg(tea.KeyPressMsg(tea.Key{Code: tea.KeyPgDown}))
+			}
+			if cmd != nil || m.pendingScrollDelta != 0 || m.viewport.offset != start {
+				t.Fatal("dialog navigation changed conversation scrolling")
+			}
+			if m.confirm.scroll.offset == 0 {
+				t.Fatal("dialog body did not scroll")
+			}
+			plain := stripANSI(m.renderConfirmDialog())
+			if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/R] Deny+Reason") {
+				t.Fatalf("scroll lost decision actions:\n%s", plain)
+			}
+		})
 	}
 }
 

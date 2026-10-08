@@ -171,7 +171,8 @@ func (m *Model) renderRoleSelectDialog() string {
 			Title: "Main Role",
 			Hint:  hintLine(hint("Esc", "cancel")),
 
-			MaxWidth: 60,
+			CompactHint: hintLine(hint("Esc", "cancel")),
+			MaxWidth:    60,
 		}, DimStyle.Render("(no roles configured)"), image.Rect(0, 0, m.width, m.height))
 		return dialog
 	}
@@ -190,7 +191,8 @@ func (m *Model) renderRoleSelectDialog() string {
 			hint("Esc", "cancel"),
 		),
 
-		MaxWidth: 60,
+		CompactHint: hintLine(hint("Enter", "select"), hint("Esc", "cancel")),
+		MaxWidth:    60,
 	}
 
 	extraKey := strings.Join(m.roleSelect.roles, ",") + "|" + currentRole

@@ -2,9 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"image"
 	"strings"
 
-	"charm.land/lipgloss/v2"
 	tea "github.com/keakon/bubbletea/v2"
 )
 
@@ -37,10 +37,13 @@ func (m *Model) closeSessionDeleteConfirm() tea.Cmd {
 }
 
 func (m *Model) handleSessionDeleteConfirmKey(msg tea.KeyMsg) tea.Cmd {
+	if m.sessionDeleteConfirm.scroll.handleKey(msg) {
+		return nil
+	}
 	switch msg.String() {
 	case "esc", "n", "N":
 		return m.closeSessionDeleteConfirm()
-	case "y", "Y", "enter":
+	case "y", "Y":
 		return m.confirmSessionDeletion()
 	default:
 		return nil
@@ -95,6 +98,8 @@ func (m *Model) renderSessionDeleteConfirmDialog() string {
 	}
 	if m.sessionDeleteConfirm.renderCacheText != "" &&
 		m.sessionDeleteConfirm.renderCacheWidth == m.width &&
+		m.sessionDeleteConfirm.renderCacheHeight == m.height &&
+		m.sessionDeleteConfirm.renderCacheOffset == m.sessionDeleteConfirm.scroll.offset &&
 		m.sessionDeleteConfirm.renderCacheTheme == m.theme.Name &&
 		m.sessionDeleteConfirm.renderCacheID == target.ID &&
 		m.sessionDeleteConfirm.renderCacheForked == target.ForkedFrom &&
@@ -102,36 +107,32 @@ func (m *Model) renderSessionDeleteConfirmDialog() string {
 		return m.sessionDeleteConfirm.renderCacheText
 	}
 	const maxDialogWidth = 90
-	maxWidth := max(min(m.width-6, maxDialogWidth), 40)
-	innerWidth := max(maxWidth-2, 20)
+	maxWidth := min(maxDialogWidth, max(m.width-1, 1))
+	innerWidth := max(dialogContentWidth(maxWidth), 1)
 	previewLines := wrapText(preview, max(10, innerWidth-2))
 	for i := range previewLines {
 		previewLines[i] = DimStyle.Render(previewLines[i])
 	}
 	lines := []string{
-		ConfirmSeparatorStyle.Render("⚠ Delete Session?"),
-		"",
+		DialogWarningStyle.Render("Permanently deletes the selected session directory."),
 		ConfirmToolStyle.Render("Session ID: " + target.ID),
 	}
 	if target.ForkedFrom != "" {
 		lines = append(lines, ConfirmToolStyle.Render("Forked from: "+target.ForkedFrom))
 	}
 	lines = append(lines,
-		ConfirmDenyStyle.Render("This permanently deletes the selected session directory."),
 		"",
 		ConfirmToolStyle.Render("First message preview:"),
 	)
 	lines = append(lines, previewLines...)
-	lines = append(lines,
-		"",
-		lipgloss.JoinHorizontal(lipgloss.Left,
-			ConfirmAllowStyle.Render("[y] Delete"),
-			DimStyle.Render("  "),
-			ConfirmDenyStyle.Render("[n/esc] Cancel"),
-		),
-	)
-	out := renderDialogBox(maxWidth, lines)
+	actions := hintLine(dangerHint("y", "Delete"), hint("n/esc", "Cancel"))
+	out := renderScrollableDialog(OverlayConfig{
+		Title: "⚠ Delete Session?", MaxWidth: maxWidth,
+		Hint: actions, CompactHint: actions,
+	}, lines, image.Rect(0, 0, m.width, m.height), &m.sessionDeleteConfirm.scroll)
 	m.sessionDeleteConfirm.renderCacheWidth = m.width
+	m.sessionDeleteConfirm.renderCacheHeight = m.height
+	m.sessionDeleteConfirm.renderCacheOffset = m.sessionDeleteConfirm.scroll.offset
 	m.sessionDeleteConfirm.renderCacheTheme = m.theme.Name
 	m.sessionDeleteConfirm.renderCacheID = target.ID
 	m.sessionDeleteConfirm.renderCacheForked = target.ForkedFrom

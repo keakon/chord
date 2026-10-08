@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image"
 	"strings"
 	"time"
 
@@ -51,9 +52,12 @@ type stopJobConfirmState struct {
 	// lastLiveAt throttles the once-per-second elapsed/last-output refresh.
 	lastLiveAt time.Time
 
-	renderCacheWidth int
-	renderCacheTheme string
-	renderCacheText  string
+	scroll            dialogScrollState
+	renderCacheHeight int
+	renderCacheOffset int
+	renderCacheWidth  int
+	renderCacheTheme  string
+	renderCacheText   string
 }
 
 // openStopJobConfirm opens the confirmation for one job. It is a no-op toast
@@ -115,6 +119,9 @@ func (m *Model) closeStopJobConfirm() tea.Cmd {
 }
 
 func (m *Model) handleStopJobConfirmKey(msg tea.KeyMsg) tea.Cmd {
+	if m.stopJobConfirm.scroll.handleKey(msg) {
+		return nil
+	}
 	switch msg.String() {
 	case "y", "Y":
 		return m.confirmStopJob()
@@ -172,15 +179,17 @@ func (m *Model) renderStopJobConfirmDialog() string {
 	}
 	if s.renderCacheText != "" &&
 		s.renderCacheWidth == m.width &&
+		s.renderCacheHeight == m.height &&
+		s.renderCacheOffset == s.scroll.offset &&
 		s.renderCacheTheme == m.theme.Name {
 		return s.renderCacheText
 	}
 	const maxDialogWidth = 90
-	maxWidth := max(min(m.width-6, maxDialogWidth), 40)
+	maxWidth := min(maxDialogWidth, max(m.width-1, 1))
 	innerWidth := dialogContentWidth(maxWidth)
 	now := time.Now()
 
-	lines := []string{ConfirmSeparatorStyle.Render(truncateOneLine("⚠ Stop "+s.jobID+"?", innerWidth))}
+	lines := wrapStyledLines(DialogWarningStyle, "Stopping terminates the process. Captured output is kept.", innerWidth)
 	if s.label != "" {
 		lines = append(lines, stopJobInlineField("Label", s.label, innerWidth))
 	}
@@ -213,17 +222,15 @@ func (m *Model) renderStopJobConfirmDialog() string {
 		lines = append(lines, DimStyle.Render(truncateOneLine(notice, innerWidth)))
 	}
 	lines = append(lines, "")
-	lines = append(lines, wrapStyledLines(ConfirmDenyStyle, "Stopping sends SIGTERM, then SIGKILL after a grace period. Output captured so far is kept; the owner agent is notified when the job ends.", innerWidth)...)
-	lines = append(lines, "",
-		lipgloss.JoinHorizontal(lipgloss.Left,
-			ConfirmAllowStyle.Render("[y] Stop"),
-			DimStyle.Render("   "),
-			ConfirmDenyStyle.Render("[n/esc] Cancel"),
-		),
-	)
-
-	out := renderDialogBox(maxWidth, lines)
+	lines = append(lines, wrapStyledLines(DimStyle, "Stopping sends SIGTERM, then SIGKILL after a grace period. Output captured so far is kept; the owner agent is notified when the job ends.", innerWidth)...)
+	actions := hintLine(dangerHint("y", "Stop"), hint("n/esc", "Cancel"))
+	out := renderScrollableDialog(OverlayConfig{
+		Title: "⚠ Stop " + s.jobID + "?", MaxWidth: maxWidth,
+		Hint: actions, CompactHint: actions,
+	}, lines, image.Rect(0, 0, m.width, m.height), &s.scroll)
 	s.renderCacheWidth = m.width
+	s.renderCacheHeight = m.height
+	s.renderCacheOffset = s.scroll.offset
 	s.renderCacheTheme = m.theme.Name
 	s.renderCacheText = out
 	return out

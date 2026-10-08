@@ -1862,7 +1862,7 @@ func TestHandleSessionDeleteConfirmKeyDeletesSelectedSessionAndUpdatesList(t *te
 		prevMode: ModeSessionSelect,
 	}
 
-	cmd := m.handleSessionDeleteConfirmKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	cmd := m.handleSessionDeleteConfirmKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
 
 	if cmd == nil {
 		t.Fatal("expected delete confirm command")
@@ -1896,7 +1896,7 @@ func TestHandleSessionDeleteConfirmKeyShowsErrorAndKeepsListOnFailure(t *testing
 		prevMode: ModeSessionSelect,
 	}
 
-	cmd := m.handleSessionDeleteConfirmKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	cmd := m.handleSessionDeleteConfirmKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
 
 	if cmd == nil {
 		t.Fatal("expected delete error toast command")

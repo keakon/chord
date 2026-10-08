@@ -91,8 +91,10 @@ func (m *Model) memoryPanelOverlayConfig() OverlayConfig {
 		cfg.Hint = hintLine(hint("j/k", "scroll"), hint("g/G", "jump"), hint("yy", "copy"), hint("Esc", "back"))
 		cfg.CompactHint = hintLine(hint("j/k", "scroll"), hint("yy", "copy"), hint("Esc", "back"))
 		if p.preview != nil && !p.preview.Empty() {
-			cfg.Hint = hintLine(hint("a", "apply"), hint("Esc", "cancel"), hint("yy", "copy"), hint("j/k", "scroll"), hint("g/G", "jump"))
-			cfg.CompactHint = hintLine(hint("a", "apply"), hint("Esc", "cancel"), hint("yy", "copy"))
+			apply := primaryHint("a", "apply")
+			apply.danger = len(p.preview.Remove) > 0
+			cfg.Hint = hintLine(apply, hint("Esc", "cancel"), hint("yy", "copy"), hint("j/k", "scroll"), hint("g/G", "jump"))
+			cfg.CompactHint = hintLine(apply, hint("Esc", "cancel"), hint("yy", "copy"))
 		} else if p.preview == nil {
 			cfg.Hint = appendHintChip(cfg.Hint, hint("p", "copy path"))
 		}
@@ -106,7 +108,20 @@ func (m *Model) memoryPanelOverlayConfig() OverlayConfig {
 		cfg.Footer = "Working…"
 	}
 	if p.err != "" {
-		cfg.Footer = sanitizeToolDisplayText(p.err)
+		cfg.Footer = DialogDangerStyle.Render(truncateOneLine(sanitizeToolDisplayText(p.err), max(dialogContentWidth(cfg.MaxWidth), 1)))
+	}
+	if p.inputFocused {
+		cfg.Hint = hintLine(hint("type", "filter"), hint("Enter", "keep"), hint("Esc", "clear"))
+		cfg.CompactHint = hintLine(hint("Enter", "keep"), hint("Esc", "clear"))
+	} else if p.instructionMode {
+		cfg.Hint = hintLine(primaryHint("Enter", "organize"), hint("Esc", "cancel"))
+		cfg.CompactHint = cfg.Hint
+	} else if p.loading {
+		cfg.Hint = hintLine(hint("Esc", "close"))
+		cfg.CompactHint = cfg.Hint
+	} else if !p.detail && (p.list == nil || p.list.Len() == 0) {
+		cfg.Hint = hintLine(hint("/", "search"), hint("Tab", "views"), hint("r", "refresh"), hint("Esc", "close"))
+		cfg.CompactHint = hintLine(hint("Tab", "views"), hint("Esc", "close"))
 	}
 	return cfg
 }

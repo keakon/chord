@@ -60,7 +60,7 @@ func renderHelpGroupLines(group HelpGroup, contentWidth int) []string {
 			wrapped = []string{""}
 		}
 		lines = append(lines,
-			fmt.Sprintf("  %s  %s", InputPromptStyle.Render(padDisplayRight(keyLabel, keyWidth)), wrapped[0]),
+			fmt.Sprintf("  %s  %s", KeyHintStyle.Render(padDisplayRight(keyLabel, keyWidth)), wrapped[0]),
 		)
 		for _, extra := range wrapped[1:] {
 			lines = append(lines, fmt.Sprintf("  %s  %s", strings.Repeat(" ", keyWidth), extra))

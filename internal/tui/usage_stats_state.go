@@ -273,7 +273,7 @@ func (m *Model) usageStatsContentRoot() string {
 }
 
 func (m *Model) usageStatsOverlayConfig() OverlayConfig {
-	return OverlayConfig{Title: "Stats Panel", Hint: m.usageStatsHint(), MaxWidth: max(min(m.width-12, 110), 60)}
+	return OverlayConfig{Title: "Stats Panel", Hint: m.usageStatsHint(), CompactHint: hintLine(hint("Tab", "view"), hint("Esc", "close")), MaxWidth: max(min(m.width-12, 110), 60)}
 }
 
 func (m *Model) usageStatsVisibleLines() int {

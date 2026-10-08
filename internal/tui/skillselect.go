@@ -370,11 +370,22 @@ func (m *Model) renderSkillSelectDialog() string {
 		Title: "Skills",
 		Hint:  hints,
 
-		MaxWidth: 70,
+		CompactHint: hintLine(hint("Enter", "fill command"), hint("Esc", "close")),
+		MaxWidth:    70,
+	}
+	if m.skillSelect.filterFocused {
+		overlayCfg.CompactHint = hintLine(hint("Enter", "keep"), hint("Esc", "clear"))
+	}
+	if _, ok := m.skillSelect.selector.list.SelectedItem(); !ok {
+		overlayCfg.Hint = hintLine(hint("/", "filter"), hint("Esc", "close"))
+		if m.skillSelect.filterFocused {
+			overlayCfg.Hint = hintLine(hint("type", "filter"), hint("Enter", "keep"), hint("Esc", "clear"))
+		}
+		overlayCfg.CompactHint = overlayCfg.Hint
 	}
 	area := image.Rect(0, 0, m.width, m.height)
 	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
-	contentWidth := overlayCfg.MaxWidth - 4
+	contentWidth := max(dialogContentWidth(overlayCfg.MaxWidth), 1)
 	filterLine := m.renderSkillSelectFilterLine(contentWidth)
 
 	return m.skillSelect.selector.Render(

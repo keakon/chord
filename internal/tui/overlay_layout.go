@@ -59,7 +59,8 @@ func layoutOverlay(cfg OverlayConfig, area image.Rectangle) overlayLayout {
 		}
 	}
 	if len(layout.hintLines) > maxHints && cfg.CompactHint == "" {
-		layout.hintLines[maxHints-1] = DimStyle.Render(ansi.Truncate("… Esc", width, "…"))
+		tail := strings.Join(layout.hintLines[maxHints-1:], "  ")
+		layout.hintLines[maxHints-1] = ansi.Truncate(tail, width, "…")
 	}
 	layout.hintLines = layout.hintLines[:min(len(layout.hintLines), maxHints)]
 	layout.contentHeight = max(available-layout.titleGap-layout.hintGap-len(layout.hintLines), 1)

@@ -158,9 +158,9 @@ type Theme struct {
 	// Confirmation dialog
 	ConfirmSeparatorFg string
 	ConfirmToolFg      string
-	ConfirmAllowFg     string
-	ConfirmDenyFg      string
-	ConfirmEditFg      string
+	DialogPrimaryFg    string
+	DialogDangerFg     string
+	DialogWarningFg    string
 
 	// Sidebar (multi-agent)
 	SidebarBorderFg  string
@@ -314,9 +314,9 @@ func DefaultTheme() Theme {
 		DimFg:                   "250", // lighter so dim text (thinking, tool body) is readable
 		ConfirmSeparatorFg:      "220",
 		ConfirmToolFg:           "252",
-		ConfirmAllowFg:          "82",
-		ConfirmDenyFg:           "210",
-		ConfirmEditFg:           "220",
+		DialogPrimaryFg:         "141",
+		DialogDangerFg:          "210",
+		DialogWarningFg:         "220",
 		SidebarBorderFg:         "63",
 		SidebarFocusedFg:        "230",
 		SidebarFocusedBg:        "62",

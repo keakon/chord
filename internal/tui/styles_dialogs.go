@@ -19,9 +19,9 @@ var (
 	ConfirmSeparatorStyle     lipgloss.Style
 	ConfirmToolStyle          lipgloss.Style
 	KeyHintStyle              lipgloss.Style
-	ConfirmAllowStyle         lipgloss.Style
-	ConfirmDenyStyle          lipgloss.Style
-	ConfirmEditStyle          lipgloss.Style
+	DialogPrimaryStyle        lipgloss.Style
+	DialogDangerStyle         lipgloss.Style
+	DialogWarningStyle        lipgloss.Style
 	ModeConfirmStyle          lipgloss.Style
 	ModeQuestionStyle         lipgloss.Style
 	ModeSearchStyle           lipgloss.Style

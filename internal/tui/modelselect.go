@@ -303,14 +303,25 @@ func (m *Model) renderModelSelectDialog() string {
 		hints = modelSelectFilterHint()
 	}
 	prefix := renderFilterLine(m.modelSelect.filter, m.modelSelect.filterFocused, "", max(dialogContentWidth(min(m.width-1, 60)), 1))
-	if m.modelSelect.selector.list != nil && m.modelSelect.selector.list.Len() == 0 {
+	if len(m.modelSelect.filteredItems()) == 0 {
 		prefix += "\nNo matching pools"
 	}
 	overlayCfg := OverlayConfig{
 		Title:       modelSelectTitle(m.modelSelect.target),
 		Hint:        hints,
-		CompactHint: hintLine(hint("Enter", "select"), hint("Esc", "cancel")),
+		CompactHint: hintLine(hint("Enter", "select"), hint("Esc", "close")),
 		MaxWidth:    60,
+	}
+
+	if m.modelSelect.filterFocused {
+		overlayCfg.CompactHint = modelSelectFilterHint()
+	}
+	if len(m.modelSelect.filteredItems()) == 0 {
+		overlayCfg.Hint = hintLine(hint("/", "filter"), hint("Esc", "close"))
+		if m.modelSelect.filterFocused {
+			overlayCfg.Hint = hintLine(hint("type", "filter"), hint("Esc", "clear"))
+		}
+		overlayCfg.CompactHint = overlayCfg.Hint
 	}
 
 	extraKey := strings.Join(m.modelSelect.poolNames, ",") + "|" + currentPool + "|" + string(m.modelSelect.target.Kind) + "|" + strings.TrimSpace(m.modelSelect.target.AgentName) + "|" + m.modelSelect.filter + "|" + hints
