@@ -155,7 +155,7 @@ func (m *Model) resetDialogsOnSessionSwitch() tea.Cmd {
 		return nil
 	}
 	if m.mode == ModeContentViewer {
-		// A viewer opened over the dropped dialog (such as View args) has
+		// A viewer opened over the dropped dialog (such as the Done report) has
 		// nothing to return to; the dialog's own previous mode is restored
 		// below instead.
 		m.contentViewer = contentViewerState{}

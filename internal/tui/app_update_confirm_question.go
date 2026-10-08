@@ -69,7 +69,7 @@ func (m *Model) presentConfirmRequest(msg confirmRequestMsg, prevMode Mode, arri
 }
 
 func (m *Model) handleConfirmTimeoutTick() tea.Cmd {
-	// The chain follows the request, not the mode: viewing the arguments
+	// The chain follows the request, not the mode: viewing the Done report
 	// switches to ModeContentViewer, and mode-gated renewal would stop the
 	// countdown there with no path to restart it, leaving a dialog the broker
 	// has already auto-denied on screen.

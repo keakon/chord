@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"bytes"
-	"encoding/json"
-
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/tools"
@@ -48,19 +45,7 @@ func (m *Model) handleConfirmAction(action confirmDialogAction) tea.Cmd {
 		return textareaBlinkCmd()
 
 	case confirmDialogView:
-		if toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
-			return m.openContentViewer("Done report", doneConfirmReportContent(m.confirm.request))
-		}
-		content := m.confirm.request.ArgsJSON
-		var out bytes.Buffer
-		if err := json.Indent(&out, []byte(content), "", "  "); err == nil {
-			content = out.String()
-		}
-		cmd := m.openContentViewer("Tool arguments", content)
-		// Arguments are literal data, not Markdown: formatting must not hide
-		// characters the user is being asked to approve.
-		m.contentViewer.literal = true
-		return cmd
+		return m.openContentViewer("Done report", doneConfirmReportContent(m.confirm.request))
 
 	case confirmDialogEdit:
 		if toolNameKey(m.confirm.request.ToolName) == tools.NameDone {

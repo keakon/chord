@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"slices"
@@ -491,7 +490,7 @@ func TestRenderConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	if got, limit := lipgloss.Height(rendered), confirmDialogMaxHeight(m.height); got > limit {
 		t.Fatalf("confirm dialog height = %d, want <= %d\n%s", got, limit, plain)
 	}
-	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/D] Deny") || !strings.Contains(plain, "[E] Modify args") {
+	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/D] Deny") || !strings.Contains(plain, "[E] Edit args") {
 		t.Fatalf("expected confirm actions to remain visible, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "more lines hidden") {
@@ -510,23 +509,23 @@ func TestRenderConfirmOptionsIncludesDenyReason(t *testing.T) {
 	}
 }
 
-func TestRenderConfirmOptionsIncludesAddRuleForDelete(t *testing.T) {
+func TestRenderConfirmOptionsIncludesRememberRuleForDelete(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: `{"path":"old.txt"}`}
 
 	plain := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(plain, "[M] Add rule…") {
-		t.Fatalf("expected [M] Add rule option for Delete confirmation, got:\n%s", plain)
+	if !strings.Contains(plain, "[M] Remember…") {
+		t.Fatalf("expected [M] Remember option for Delete confirmation, got:\n%s", plain)
 	}
 }
 
-func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testing.T) {
+func TestRenderConfirmDialogRememberRuleKeyShowsRulePickerAfterCachedSummary(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.workingDir = "/tmp/project"
 	m.confirm.request = &ConfirmRequest{ToolName: tools.NameEdit, ArgsJSON: `{"path":"internal/tui/confirm_render.go","patch":"@@\n-old\n+new\n"}`}
 
 	summary := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(summary, "[M] Add rule…") {
+	if !strings.Contains(summary, "[M] Remember…") {
 		t.Fatalf("expected add-rule option in summary dialog, got:\n%s", summary)
 	}
 	if !strings.Contains(summary, "⚠ Confirmation Required") {
@@ -540,13 +539,13 @@ func TestRenderConfirmDialogAddRuleKeyShowsRulePickerAfterCachedSummary(t *testi
 	}
 
 	picker := stripANSI(m.renderConfirmDialog())
-	if !strings.Contains(picker, "⚠ Add rule — edit") {
+	if !strings.Contains(picker, "⚠ Remember rule — edit") {
 		t.Fatalf("expected rule picker title after pressing A, got:\n%s", picker)
 	}
 	if !strings.Contains(picker, "Pattern:") {
 		t.Fatalf("expected rule picker pattern section, got:\n%s", picker)
 	}
-	if !strings.Contains(picker, "[Enter] add selected + allow") {
+	if !strings.Contains(picker, "[Enter] remember + allow") {
 		t.Fatalf("expected rule picker enter hint, got:\n%s", picker)
 	}
 }
@@ -773,7 +772,7 @@ func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/R] Deny+Reason") {
 		t.Fatalf("Done confirm options missing expected actions:\n%s", plain)
 	}
-	if strings.Contains(plain, "[E] Modify args") || strings.Contains(plain, "[M] Add rule") || strings.Contains(plain, "Press E") {
+	if strings.Contains(plain, "[E] Edit args") || strings.Contains(plain, "[M] Remember") || strings.Contains(plain, "Press E") {
 		t.Fatalf("Done confirm should not show generic actions or edit hints:\n%s", plain)
 	}
 }
@@ -786,7 +785,7 @@ func TestRenderConfirmDialogForceDenyOnlyShowsDenyReason(t *testing.T) {
 	if !strings.Contains(plain, "[Esc/R] Deny+Reason required") {
 		t.Fatalf("forced deny confirm options missing required deny action:\n%s", plain)
 	}
-	if strings.Contains(plain, "[Enter/A] Allow") || strings.Contains(plain, "[E] Modify args") || strings.Contains(plain, "[M] Add rule") {
+	if strings.Contains(plain, "[Enter/A] Allow") || strings.Contains(plain, "[E] Edit args") || strings.Contains(plain, "[M] Remember") {
 		t.Fatalf("forced deny confirm should not show allow or generic actions:\n%s", plain)
 	}
 }
@@ -1167,44 +1166,27 @@ func TestConfirmRulePickerPreselectsAllMatchedAskRules(t *testing.T) {
 	}
 }
 
-func TestHandleConfirmViewPreservesFullArguments(t *testing.T) {
+func TestHandleConfirmViewKeyIgnoredForToolConfirm(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeConfirm
-	args := `{"path":"sample.txt","edits":[{"old_string":"**literal**","new_string":"` + strings.Repeat("value", 200) + `"}]}`
-	m.confirm.request = &ConfirmRequest{ToolName: "edit", ArgsJSON: args}
+	m.confirm.request = &ConfirmRequest{ToolName: "edit", ArgsJSON: `{"path":"sample.txt"}`}
+
 	if cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'})); cmd != nil {
-		cmd()
+		t.Fatal("tool confirmations no longer offer an arguments viewer")
 	}
-	if m.mode != ModeContentViewer || m.contentViewer.prevMode != ModeConfirm {
-		t.Fatal("viewer must return to pending confirmation")
-	}
-	var original, viewed any
-	if err := json.Unmarshal([]byte(args), &original); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(m.contentViewer.content), &viewed); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(original, viewed) || m.confirm.request.ArgsJSON != args {
-		t.Fatal("view changed or omitted arguments")
-	}
-	if lines := strings.Join(m.cachedContentViewerLines(80), "\n"); !strings.Contains(lines, "**literal**") {
-		t.Fatalf("viewer interpreted argument text as Markdown: %s", lines)
-	}
-	m.closeContentViewer()
-	if m.mode != ModeConfirm || m.confirm.request.ArgsJSON != args {
-		t.Fatal("view must leave approval pending")
+	if m.mode != ModeConfirm {
+		t.Fatalf("mode after v = %v, want ModeConfirm", m.mode)
 	}
 }
 
 // The confirm timeout chain follows the request, not the mode: viewing the
-// arguments switches to ModeContentViewer, and a mode-gated tick would stop
+// Done report switches to ModeContentViewer, and a mode-gated tick would stop
 // renewing with no path to restart the countdown.
-func TestConfirmTimeoutTickRenewsWhileViewingArguments(t *testing.T) {
+func TestConfirmTimeoutTickRenewsWhileViewingDoneReport(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeConfirm
 	m.confirm = confirmState{
-		request:  &ConfirmRequest{ToolName: "edit", ArgsJSON: `{"path":"sample.txt"}`},
+		request:  &ConfirmRequest{ToolName: "done", ArgsJSON: `{"report":"# Finished\n\nAll done."}`},
 		prevMode: ModeNormal,
 		deadline: time.Now().Add(time.Minute),
 	}
@@ -1215,22 +1197,23 @@ func TestConfirmTimeoutTickRenewsWhileViewingArguments(t *testing.T) {
 		t.Fatalf("setup: mode = %v, want ModeContentViewer", m.mode)
 	}
 	if cmd := m.handleConfirmTimeoutTick(); cmd == nil {
-		t.Fatal("tick chain stopped while the arguments viewer was open")
+		t.Fatal("tick chain stopped while the Done report viewer was open")
 	}
 	if m.mode != ModeContentViewer || m.confirm.request == nil || m.contentViewer.content == "" {
 		t.Fatalf("renewal must leave the confirm and viewer in place: mode=%v viewer=%q", m.mode, m.contentViewer.content)
 	}
 }
 
-// A deadline that elapses while the arguments are being viewed must close both
-// the viewer and the dialog: the broker has already auto-denied the request,
-// and keeping a stale confirm on screen would queue later dialogs behind it.
+// A deadline that elapses while the Done report is being viewed must close
+// both the viewer and the dialog: the broker has already auto-denied the
+// request, and keeping a stale confirm on screen would queue later dialogs
+// behind it.
 func TestConfirmTimeoutExpiryClosesViewerAndDialog(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.confirmResultCh = make(chan ConfirmResult, 1)
 	m.mode = ModeConfirm
 	m.confirm = confirmState{
-		request:  &ConfirmRequest{ToolName: "edit", ArgsJSON: `{"path":"sample.txt"}`},
+		request:  &ConfirmRequest{ToolName: "done", ArgsJSON: `{"report":"# Finished\n\nAll done."}`},
 		prevMode: ModeNormal,
 		deadline: time.Now().Add(-time.Second),
 	}
@@ -1257,13 +1240,13 @@ func TestConfirmTimeoutExpiryClosesViewerAndDialog(t *testing.T) {
 	}
 }
 
-// A session switch drops the pending confirmation; an arguments viewer opened
-// over it must go with it instead of lingering as stale viewer state.
-func TestSessionSwitchClosesArgumentsViewerWithDialog(t *testing.T) {
+// A session switch drops the pending confirmation; a Done report viewer
+// opened over it must go with it instead of lingering as stale viewer state.
+func TestSessionSwitchClosesDoneReportViewerWithDialog(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeConfirm
 	m.confirm = confirmState{
-		request:  &ConfirmRequest{ToolName: "edit", ArgsJSON: `{"path":"sample.txt"}`},
+		request:  &ConfirmRequest{ToolName: "done", ArgsJSON: `{"report":"# Finished\n\nAll done."}`},
 		prevMode: ModeNormal,
 	}
 	if cmd := m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Text: "v", Code: 'v'})); cmd != nil {

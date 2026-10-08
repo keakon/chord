@@ -6182,7 +6182,7 @@ func TestRenderQuestionDialogEscapesANSIRichPromptAndDescriptions(t *testing.T) 
 
 func TestRenderConfirmFieldEscapesANSIRichLiteralValue(t *testing.T) {
 	field := newConfirmLiteralField("Command", "\x1b[31mrm -rf /tmp/demo\x1b[0m", true)
-	lines := renderConfirmField(field, 60, true)
+	lines := renderConfirmField(field, 60)
 	joined := stripANSI(strings.Join(lines, "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected confirm field to not contain raw ESC: %q", joined)

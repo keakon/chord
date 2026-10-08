@@ -30,9 +30,9 @@ Rules are keyed by tool name; the full list of built-in tool names is in [Built-
 
 A rule that names a nonexistent tool matches nothing, so a typo silently leaves that tool unmatched instead of failing. Background work runs through `shell` (with `run_in_background: true`) plus the `job_output`, `job_list`, and `job_kill` tools.
 
-In the TUI confirmation dialog, `V` opens the full tool arguments in a read-only viewer, including entries hidden by the summary preview. Close the viewer to return to the pending confirmation; viewing does not approve or change the call. `E` edits the arguments.
+In the TUI confirmation dialog, `E` opens the arguments for editing: the editor shows the full JSON, and submitting allows the call with the edited arguments.
 
-In the TUI confirmation dialog, `M` opens the add-rule picker for the current tool call; press `Enter` in that picker to save the selected rule and allow the current call. For `delete`, the picker suggests reusable parent-directory rules instead of one-off exact-file rules, written in the same spelling permission matching uses, so the saved rule also applies to the same file from another checkout. Directories covering more paths that still need approval appear first, `*` (any delete path) is always available, and `**` (any path in the repository) is also available when every requested path lies inside the repository. The broad `**` and `*` choices are never selected by default.
+In the TUI confirmation dialog, `M` opens the rule picker for the current tool call; press `Enter` in that picker to save the selected rule and allow the current call. For `delete`, the picker suggests reusable parent-directory rules instead of one-off exact-file rules, written in the same spelling permission matching uses, so the saved rule also applies to the same file from another checkout. Directories covering more paths that still need approval appear first, `*` (any delete path) is always available, and `**` (any path in the repository) is also available when every requested path lies inside the repository. The broad `**` and `*` choices are never selected by default.
 
 Permissions can be defined in Agent config. Start with this recommended personal-development template, then tighten or relax it for your project's risk profile:
 

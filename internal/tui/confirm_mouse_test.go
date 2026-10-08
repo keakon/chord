@@ -98,25 +98,12 @@ func TestConfirmMouseClickActions(t *testing.T) {
 			},
 		},
 		{
-			name:   "view arguments",
-			action: confirmDialogView,
-			check: func(t *testing.T, m *Model) {
-				t.Helper()
-				if m.mode != ModeContentViewer {
-					t.Fatalf("mode = %v, want ModeContentViewer", m.mode)
-				}
-				if !m.contentViewer.literal {
-					t.Fatal("argument viewer should preserve literal content")
-				}
-			},
-		},
-		{
 			name:   "edit arguments",
 			action: confirmDialogEdit,
 			check: func(t *testing.T, m *Model) {
 				t.Helper()
 				if !m.confirm.editing {
-					t.Fatal("mouse Modify args click did not enter edit mode")
+					t.Fatal("mouse Edit args click did not enter edit mode")
 				}
 			},
 		},

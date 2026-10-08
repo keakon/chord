@@ -51,9 +51,8 @@ func (m *Model) confirmOptionSpecs() []confirmOptionSpec {
 		{action: confirmDialogAllow, label: "[Enter/A] Allow"},
 		{action: confirmDialogDeny, label: "[Esc/D] Deny"},
 		{action: confirmDialogDenyReason, label: "[R] Deny+Reason"},
-		{action: confirmDialogView, label: "[V] View args"},
-		{action: confirmDialogEdit, label: "[E] Modify args"},
-		{action: confirmDialogAddRule, label: "[M] Add rule…"},
+		{action: confirmDialogEdit, label: "[E] Edit args"},
+		{action: confirmDialogAddRule, label: "[M] Remember…"},
 	}
 }
 

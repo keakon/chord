@@ -112,7 +112,7 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 				lines = append(lines, ConfirmDenyStyle.Render("! ")+DimStyle.Render(line))
 			}
 		}
-		fields := renderConfirmFields(summary.summaryFields(), innerWidth-1, false)
+		fields := renderConfirmFields(summary.summaryFields(), innerWidth-1)
 		if len(fields) > 0 {
 			lines = append(lines, "")
 			lines = append(lines, fields...)
@@ -135,7 +135,7 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 		}
 	}
 
-	fields := renderConfirmFields(summary.summaryFields(), innerWidth-1, false)
+	fields := renderConfirmFields(summary.summaryFields(), innerWidth-1)
 	if len(fields) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, fields...)
@@ -172,7 +172,7 @@ func (m Model) renderConfirmOptions() string {
 
 // renderRulePicker renders the rule picker sub-dialog.
 func (m *Model) renderRulePicker(maxWidth int) string {
-	title := ConfirmSeparatorStyle.Render("⚠ Add rule — " + m.confirm.request.ToolName)
+	title := ConfirmSeparatorStyle.Render("⚠ Remember rule — " + m.confirm.request.ToolName)
 
 	lines := []string{title, ""}
 
@@ -243,15 +243,15 @@ func (m *Model) renderRulePicker(maxWidth int) string {
 	}
 
 	lines = append(lines, "")
-	hints := hintLine(
+	hints := wrapHintLines(hintLine(
 		hint("↑↓", "pattern"),
 		hint("Space", "select"),
 		hint("E", "edit"),
 		hint("Tab", "scope"),
-		hint("Enter", "add selected + allow"),
+		hint("Enter", "remember + allow"),
 		hint("Esc", "back"),
-	)
-	lines = append(lines, hints)
+	), max(dialogContentWidth(maxWidth), 1))
+	lines = append(lines, hints...)
 
 	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
 	return renderDialogBox(maxWidth, lines)

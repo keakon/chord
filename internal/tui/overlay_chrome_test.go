@@ -185,7 +185,7 @@ func TestRulePickerRendersSharedMarkers(t *testing.T) {
 	if !strings.Contains(plain, "●") || !strings.Contains(plain, "○") {
 		t.Fatalf("scope list should use filled and hollow markers:\n%s", plain)
 	}
-	if !strings.Contains(plain, "[↑↓] pattern") || !strings.Contains(plain, "[Enter] add selected + allow") {
+	if !strings.Contains(plain, "[↑↓] pattern") || !strings.Contains(plain, "[Enter] remember + allow") {
 		t.Fatalf("rule picker should render key chips:\n%s", plain)
 	}
 }

@@ -179,9 +179,6 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 	case msg.String() == "r" || msg.String() == "R":
 		return m.handleConfirmAction(confirmDialogDenyReason)
 
-	case msg.String() == "v" || msg.String() == "V":
-		return m.handleConfirmAction(confirmDialogView)
-
 	case msg.String() == "e" || msg.String() == "E":
 		return m.handleConfirmAction(confirmDialogEdit)
 

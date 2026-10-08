@@ -40,7 +40,6 @@ type confirmSummary struct {
 type confirmSummaryField struct {
 	Label              string
 	SummaryValue       string
-	DetailValue        string
 	Important          bool
 	PreserveWhitespace bool
 	Multiline          bool
@@ -56,16 +55,6 @@ func (r confirmRiskLevel) String() string {
 	default:
 		return "Medium"
 	}
-}
-
-func (f confirmSummaryField) value(detailed bool) string {
-	if detailed && f.DetailValue != "" {
-		return f.DetailValue
-	}
-	if f.SummaryValue != "" {
-		return f.SummaryValue
-	}
-	return f.DetailValue
 }
 
 func (s confirmSummary) summaryFields() []confirmSummaryField {
@@ -101,7 +90,7 @@ func buildConfirmSummary(toolName, argsJSON string, needsApproval, alreadyAllowe
 			raw = "(empty)"
 		}
 		summary.Fields = []confirmSummaryField{
-			newConfirmPreviewField("Arguments (raw)", raw, true, 4, 12),
+			newConfirmPreviewField("Arguments (raw)", raw, true, 4),
 		}
 		return summary
 	}
@@ -287,7 +276,7 @@ func buildPatchConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	}
 	appendConfirmField(&summary.Fields, newConfirmField("File", filePath, true))
 	if patchText != "" {
-		appendConfirmField(&summary.Fields, newConfirmPreviewField("Patch preview", patchText, true, 4, 10))
+		appendConfirmField(&summary.Fields, newConfirmPreviewField("Patch preview", patchText, true, 4))
 	}
 
 	appendUnhandledConfirmFields(summary, parsed, handled)
@@ -310,8 +299,8 @@ func buildReplaceEditConfirmSummary(summary *confirmSummary, parsed map[string]a
 			if edit, ok := value.(map[string]any); ok {
 				oldText, _ := confirmString(edit, "old_string")
 				newText, _ := confirmString(edit, "new_string")
-				appendConfirmField(&summary.Fields, newConfirmPreviewField(fmt.Sprintf("Edit %d old text", i+1), oldText, true, 3, 8))
-				appendConfirmField(&summary.Fields, newConfirmPreviewField(fmt.Sprintf("Edit %d new text", i+1), newText, true, 3, 8))
+				appendConfirmField(&summary.Fields, newConfirmPreviewField(fmt.Sprintf("Edit %d old text", i+1), oldText, true, 3))
+				appendConfirmField(&summary.Fields, newConfirmPreviewField(fmt.Sprintf("Edit %d new text", i+1), newText, true, 3))
 				if all, ok := confirmBool(edit, "replace_all"); ok {
 					appendConfirmField(&summary.Fields, newConfirmField(fmt.Sprintf("Edit %d replace all", i+1), confirmYesNo(all), true))
 				}
@@ -321,13 +310,13 @@ func buildReplaceEditConfirmSummary(summary *confirmSummary, parsed map[string]a
 	oldText, oldOK := confirmString(parsed, "old_string")
 	handled["old_string"] = true
 	if oldOK {
-		appendConfirmField(&summary.Fields, newConfirmPreviewField("Old text", oldText, true, 3, 8))
+		appendConfirmField(&summary.Fields, newConfirmPreviewField("Old text", oldText, true, 3))
 	}
 
 	newText, newOK := confirmString(parsed, "new_string")
 	handled["new_string"] = true
 	if newOK {
-		appendConfirmField(&summary.Fields, newConfirmPreviewField("New text", newText, true, 3, 8))
+		appendConfirmField(&summary.Fields, newConfirmPreviewField("New text", newText, true, 3))
 	}
 
 	if replaceAll, ok := confirmBool(parsed, "replace_all"); ok {
@@ -352,7 +341,7 @@ func buildWriteConfirmSummary(summary *confirmSummary, parsed map[string]any) {
 	content, ok := confirmString(parsed, "content")
 	handled["content"] = true
 	if ok {
-		appendConfirmField(&summary.Fields, newConfirmPreviewField("Content preview", content, true, 3, 8))
+		appendConfirmField(&summary.Fields, newConfirmPreviewField("Content preview", content, true, 3))
 	}
 
 	appendUnhandledConfirmFields(summary, parsed, handled)
@@ -500,7 +489,7 @@ func confirmFieldForKey(key string, value any, important bool) confirmSummaryFie
 	case "command":
 		return newConfirmLiteralField(label, confirmFormatValue(value), important)
 	case "content":
-		return newConfirmPreviewField("Content preview", confirmFormatValue(value), important, 3, 8)
+		return newConfirmPreviewField("Content preview", confirmFormatValue(value), important, 3)
 	case "paths":
 		return newConfirmLiteralField("Files", confirmFormatValue(value), important)
 	default:
@@ -531,7 +520,6 @@ func newConfirmField(label, value string, important bool) confirmSummaryField {
 	return confirmSummaryField{
 		Label:        label,
 		SummaryValue: value,
-		DetailValue:  value,
 		Important:    important,
 	}
 }
@@ -540,7 +528,6 @@ func newConfirmLiteralField(label, value string, important bool) confirmSummaryF
 	return confirmSummaryField{
 		Label:              label,
 		SummaryValue:       value,
-		DetailValue:        value,
 		Important:          important,
 		PreserveWhitespace: true,
 		Multiline:          true,
@@ -548,11 +535,10 @@ func newConfirmLiteralField(label, value string, important bool) confirmSummaryF
 	}
 }
 
-func newConfirmPreviewField(label, value string, important bool, summaryLines, detailLines int) confirmSummaryField {
+func newConfirmPreviewField(label, value string, important bool, previewLines int) confirmSummaryField {
 	return confirmSummaryField{
 		Label:              label,
-		SummaryValue:       confirmPreviewText(value, summaryLines),
-		DetailValue:        confirmPreviewText(value, detailLines),
+		SummaryValue:       confirmPreviewText(value, previewLines),
 		Important:          important,
 		PreserveWhitespace: true,
 		Multiline:          true,
@@ -560,7 +546,7 @@ func newConfirmPreviewField(label, value string, important bool, summaryLines, d
 }
 
 func appendConfirmField(dst *[]confirmSummaryField, field confirmSummaryField) {
-	value := strings.TrimSpace(field.value(true))
+	value := strings.TrimSpace(field.SummaryValue)
 	if value == "" {
 		return
 	}
@@ -678,16 +664,16 @@ func confirmRiskStyle(risk confirmRiskLevel) string {
 	}
 }
 
-func renderConfirmFields(fields []confirmSummaryField, width int, detailed bool) []string {
+func renderConfirmFields(fields []confirmSummaryField, width int) []string {
 	lines := make([]string, 0, len(fields)*2)
 	for _, field := range fields {
-		lines = append(lines, renderConfirmField(field, width, detailed)...)
+		lines = append(lines, renderConfirmField(field, width)...)
 	}
 	return lines
 }
 
-func renderConfirmField(field confirmSummaryField, width int, detailed bool) []string {
-	value := sanitizeToolDisplayText(field.value(detailed))
+func renderConfirmField(field confirmSummaryField, width int) []string {
+	value := sanitizeToolDisplayText(field.SummaryValue)
 	if value == "" {
 		value = "(empty)"
 	}
