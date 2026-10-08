@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
-
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -156,41 +154,15 @@ func renderConfirmPathSection(title string, paths []string, innerWidth int) []st
 }
 
 func (m Model) renderConfirmOptions() string {
-	if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
-		if m.confirm.request.ForceDenyReason {
-			return strings.Join([]string{
-				ConfirmEditStyle.Render("[V] View"),
-				ConfirmDenyStyle.Render("[Esc/R] Deny+Reason required"),
-			}, "  ")
-		}
-		parts := []string{
-			ConfirmAllowStyle.Render("[Enter/A] Allow"),
-			ConfirmEditStyle.Render("[V] View"),
-			ConfirmDenyStyle.Render("[Esc/R] Deny+Reason"),
-		}
-		return strings.Join(parts, "  ")
-	}
-	parts := []string{
-		ConfirmAllowStyle.Render("[Enter/A] Allow"),
-		ConfirmDenyStyle.Render("[Esc/D] Deny"),
-		ConfirmDenyStyle.Render("[R] Deny+Reason"),
-		ConfirmEditStyle.Render("[V] View args"),
-		ConfirmEditStyle.Render("[E] Modify args"),
-	}
-	parts = append(parts, ConfirmEditStyle.Render("[M] Add rule…"))
+	rows := m.confirmOptionRows()
 	var lines []string
-	line := ""
-	for _, part := range parts {
-		if line != "" && ansi.StringWidth(line)+2+ansi.StringWidth(part) > confirmDialogInnerWidth(m.width)-1 {
-			lines = append(lines, line)
-			line = ""
+	for _, row := range rows {
+		parts := make([]string, len(row.options))
+		for i, option := range row.options {
+			parts[i] = renderConfirmOption(option.spec)
 		}
-		if line != "" {
-			line += "  "
-		}
-		line += part
+		lines = append(lines, strings.Join(parts, "  "))
 	}
-	lines = append(lines, line)
 	return strings.Join(lines, "\n")
 }
 

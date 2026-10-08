@@ -273,7 +273,18 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	}
-	if m.mode == ModeConfirm || m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeHelp || m.mode == ModeStopJobConfirm {
+	if m.mode == ModeConfirm {
+		m.clearChordState()
+		switch mouse.Button {
+		case tea.MouseWheelUp, tea.MouseWheelDown:
+			return m.handleMouseWheel(mouse), true
+		}
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
+			return m.handleConfirmMouseClick(mouse), true
+		}
+		return nil, true
+	}
+	if m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeHelp || m.mode == ModeStopJobConfirm {
 		m.clearChordState()
 		switch mouse.Button {
 		case tea.MouseWheelUp, tea.MouseWheelDown:

@@ -55,7 +55,7 @@
 - 在 `auth.yaml` 中完全没有声明凭据来源的 provider，现在会回退到其 preset 的默认环境变量（`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GEMINI_API_KEY`）。已有声明但当前不可用的来源仍视为已声明，不会触发回退。
 - `chord doctor config` 现在还会加载有效配置，把无法解析的模型池引用（provider 或 model 不存在、`@variant` 未定义）作为问题上报并以状态码 2 退出；解析类问题仍归属到各自的文件。 启动提示复用同一份诊断，结构错误会阻止使用相关模型池，未选中的次要池不影响启动。
 - 初始安装向导的 Codex OAuth 目录现在包含 GPT-6.1 Sol（`gpt-6.1-sol`），分配同为 `1050000 / 922000 / 128000`，且新装的默认模型池以它开头（GPT-6 Astra 退为回退项）；API key 路径为 OpenAI Responses 端点预填的默认模型同样改为 GPT-6.1 Sol。`chord config show --catalog` 会列出这个新条目。已有的 `config.yaml` 不受影响，保持你原本的配置。
-- 工具确认框支持只读查看完整参数，包括较长的批量编辑；查看后仍需明确批准调用。
+- 工具确认框支持只读查看完整参数，包括较长的批量编辑；查看后仍需明确批准调用。实际显示的操作项也支持点击，鼠标操作与对应按键使用相同的行为和安全限制。
 - 新增 `chord acp`：通过 stdio 提供 Agent Client Protocol，让 Zed 这类 ACP 客户端把 Chord 当作自己的 agent。工作目录由客户端在 `session/new` 里给出；回答、思考块和工具调用（分类、标题、目标文件、原始参数、输出与文件 diff）以 `session/update` 流式回传；取消本轮返回 `cancelled`；`file://` 资源链接会变成与 TUI 一致的 `<file path="...">` 上下文块。stdout 只跑 JSON-RPC，每个进程把自己的日志写进日志目录。一个 `chord acp` 进程服务客户端开出的所有会话，上限由 `--max-sessions`（默认 8）控制，每个会话一个子进程，各自持有自己的工作目录、runtime 与 MCP server；`session/close` 会释放对应会话和它的进程。确认弹窗尚未接通，在此之前需要授权的工具会等 Chord 自己的确认超时。详见 [ACP Agent 模式](./docs/acp_CN.md)。
 - 新增 `chord sessions project <session-id>` 命令：把已落盘会话投影成每 turn 一行的 JSONL 事实（turn 边界、带 digest 的工具结果、工具归因的文件变更、压缩边界），用于复盘与完成报告取证。只读，源会话被别的进程占用时也能跑；turn 成因只报 `user_message` / `inferred` / `unknown`，不硬猜用户 continue 还是后台唤醒。`--out` 会拒绝写进会话目录内（或硬链接到其中文件）的路径，投影不可能覆盖源会话；`--max-bytes` 可调高 256 KiB 的 JSONL 上限，长会话不再受限。
 - headless 客户端可以订阅 `question_resolved` 推送。每个已发布的问题只会关闭一次，`reason` 为 `answered`、`defaulted`、`declined`、`no_response`、`superseded`、`cancelled` 或 `error`，集成方据此清掉待决问题，也能区分超时、被替代和用户选择。

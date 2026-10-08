@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -123,15 +122,11 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 
 	if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
 		if msg.String() == "v" || msg.String() == "V" {
-			return m.openContentViewer("Done report", doneConfirmReportContent(m.confirm.request))
+			return m.handleConfirmAction(confirmDialogView)
 		}
 		if m.confirm.request.ForceDenyReason {
 			if msg.Key().Code == tea.KeyEscape || msg.String() == "r" || msg.String() == "R" {
-				m.confirm.denyingWithReason = true
-				m.confirm.editError = ""
-				m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
-				m.recalcViewportSize()
-				return textareaBlinkCmd()
+				return m.handleConfirmAction(confirmDialogDenyReason)
 			}
 			// Force-deny Done dialog only exposes V/R/esc; swallow generic
 			// shortcuts (A/D/E/M) so the handler stays consistent with the
@@ -142,12 +137,9 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 		} else {
 			switch {
 			case isPlainKey(msg, tea.KeyEnter) || msg.String() == "a" || msg.String() == "A":
-				return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
+				return m.handleConfirmAction(confirmDialogAllow)
 			case msg.Key().Code == tea.KeyEscape || msg.String() == "r" || msg.String() == "R":
-				m.confirm.denyingWithReason = true
-				m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
-				m.recalcViewportSize()
-				return textareaBlinkCmd()
+				return m.handleConfirmAction(confirmDialogDenyReason)
 			}
 			// Done dialog only exposes A/V/R/esc; swallow generic shortcuts
 			// (D/E/M) so the handler stays consistent with the rendered
@@ -179,54 +171,25 @@ func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch {
 	case isPlainKey(msg, tea.KeyEnter) || msg.String() == "a" || msg.String() == "A":
-		if m.confirm.request != nil && m.confirm.request.ForceDenyReason {
-			return nil
-		}
-		return m.resolveConfirm(ConfirmResult{Action: ConfirmAllow})
+		return m.handleConfirmAction(confirmDialogAllow)
 
 	case msg.String() == "d" || msg.String() == "D":
-		return m.resolveConfirm(ConfirmResult{Action: ConfirmDeny})
+		return m.handleConfirmAction(confirmDialogDeny)
 
 	case msg.String() == "r" || msg.String() == "R":
-		m.confirm.denyingWithReason = true
-		m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
-		m.recalcViewportSize()
-		return textareaBlinkCmd()
+		return m.handleConfirmAction(confirmDialogDenyReason)
 
 	case msg.String() == "v" || msg.String() == "V":
-		if m.confirm.request != nil {
-			content := m.confirm.request.ArgsJSON
-			var out bytes.Buffer
-			if err := json.Indent(&out, []byte(content), "", "  "); err == nil {
-				content = out.String()
-			}
-			cmd := m.openContentViewer("Tool arguments", content)
-			// Arguments are literal data, not Markdown: formatting must not
-			// hide characters the user is being asked to approve.
-			m.contentViewer.literal = true
-			return cmd
-		}
-		return nil
+		return m.handleConfirmAction(confirmDialogView)
 
 	case msg.String() == "e" || msg.String() == "E":
-		if m.confirm.request != nil && toolNameKey(m.confirm.request.ToolName) == tools.NameDone {
-			return nil
-		}
-		m.confirm.editing = true
-		m.confirm.editError = ""
-		m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
-		m.recalcViewportSize()
-		return textareaBlinkCmd()
+		return m.handleConfirmAction(confirmDialogEdit)
 
 	case msg.String() == "m" || msg.String() == "M":
-		if m.confirm.request != nil {
-			m.enterRulePicker()
-			m.recalcViewportSize()
-		}
-		return nil
+		return m.handleConfirmAction(confirmDialogAddRule)
 
 	case msg.Key().Code == tea.KeyEscape:
-		return m.resolveConfirm(ConfirmResult{Action: ConfirmDeny})
+		return m.handleConfirmAction(confirmDialogDeny)
 	}
 
 	return nil
