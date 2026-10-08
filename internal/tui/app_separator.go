@@ -13,13 +13,24 @@ import (
 const (
 	statusBarLeftMargin             = 1
 	statusBarRightMargin            = 2
-	statusBarActivityPathGap        = "  ·  "
 	statusBarSessionMinWidth        = 8
 	statusBarSessionMinVisibleCols  = 90
 	statusBarSpacePad               = "                                                                "
 	animatedInputSeparatorBandWidth = 18
 	separatorPhaseOverscan          = 20
 )
+
+// statusBarActivityPathGap is the group separator shared by the right-side
+// members and the appended left-side hints. Keep one space per side: the same
+// " · " is what the status bar uses inside its own text, and the wider form only
+// ate status width.
+const statusBarActivityPathGap = " · "
+
+// statusBarGroupGapWidth is the display width of the rendered group separator;
+// every budget that reserves room for it must use this value.
+func statusBarGroupGapWidth() int {
+	return lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
+}
 
 func normalizeSeparatorVariant(variant string) string {
 	switch variant {

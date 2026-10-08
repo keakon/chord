@@ -202,3 +202,30 @@ func TestRenderStatusBarChordDoesNotDuplicateEscHint(t *testing.T) {
 		t.Fatalf("status bar = %q, did not want duplicated chord esc hint", rendered)
 	}
 }
+
+// The group separator is shared between the right-side members and the appended
+// left-side hints, and stays compact: one space per side. A wider form read
+// inconsistently against the in-text " · " separators and cost status width.
+func TestStatusBarGroupSeparatorStaysCompact(t *testing.T) {
+	backend := &sessionControlAgent{
+		loopState:         agent.LoopStateExecuting,
+		loopIteration:     1,
+		loopMaxIterations: 10,
+		sessionSummary:    &agent.SessionSummary{ID: "1775115074902"},
+	}
+	m := NewModelWithSize(backend, 180, 24)
+	m.mode = ModeNormal
+	m.workingDir = "/home/user/projects/myapp"
+	m.layout = m.generateLayout(m.width, m.height)
+
+	plain := stripANSI(m.renderStatusBar())
+	if strings.Contains(plain, "  ·  ") {
+		t.Fatalf("status bar still uses the wide group separator, got %q", plain)
+	}
+	if !strings.Contains(plain, statusBarActivityPathGap+"esc ⇢ exit loop") {
+		t.Fatalf("esc hint should be joined by the shared group separator, got %q", plain)
+	}
+	if !strings.Contains(plain, statusBarActivityPathGap+"SID 1775115074902") {
+		t.Fatalf("session id should be joined by the shared group separator, got %q", plain)
+	}
+}

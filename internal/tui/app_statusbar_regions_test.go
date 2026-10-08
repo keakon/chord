@@ -94,7 +94,7 @@ func assertStatusRegionDrawn(t *testing.T, width int, detail string, compacting 
 func TestStatusBarRightPlacementRegionsFollowCutRow(t *testing.T) {
 	const (
 		leftWidth      = 4
-		effectiveWidth = 40
+		effectiveWidth = 36
 		rightStart     = 10
 		pillText       = "PILL"
 		pathText       = "path/her"

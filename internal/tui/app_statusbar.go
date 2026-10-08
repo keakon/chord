@@ -614,7 +614,7 @@ func (m *Model) renderStatusBar() string {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
 			leftSide,
-			DimStyle.Render("  ·  "),
+			DimStyle.Render(statusBarActivityPathGap),
 			StatusHintStyle.Render(m.chord.display()),
 		)
 		leftWidth = lipgloss.Width(leftSide)
@@ -623,7 +623,7 @@ func (m *Model) renderStatusBar() string {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
 			leftSide,
-			DimStyle.Render("  ·  "),
+			DimStyle.Render(statusBarActivityPathGap),
 			StatusHintStyle.Render(quitHint),
 		)
 		leftWidth = lipgloss.Width(leftSide)
@@ -641,7 +641,7 @@ func (m *Model) renderStatusBar() string {
 	} else if inputs.NextEnterHint != "" {
 		hint = "enter ⇢ " + inputs.NextEnterHint
 	}
-	canFitHint := leftWidth+lipgloss.Width(hint)+5+activityWidth <= rightStart
+	canFitHint := leftWidth+lipgloss.Width(hint)+statusBarGroupGapWidth()+activityWidth <= rightStart
 	if inputs.NextEscHint != "" {
 		canFitHint = statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth, inputs.NextEscHint)
 	}
@@ -649,7 +649,7 @@ func (m *Model) renderStatusBar() string {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
 			leftSide,
-			DimStyle.Render("  ·  "),
+			DimStyle.Render(statusBarActivityPathGap),
 			DimStyle.Render(hint),
 		)
 		leftWidth = lipgloss.Width(leftSide)
@@ -711,7 +711,7 @@ func (m *Model) renderStatusBarLine(padded string) string {
 }
 
 func statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth int, hint string) bool {
-	escWidth := lipgloss.Width(DimStyle.Render("  ·  ")) + lipgloss.Width(DimStyle.Render("esc ⇢ "+hint))
+	escWidth := statusBarGroupGapWidth() + lipgloss.Width(DimStyle.Render("esc ⇢ "+hint))
 	leftWithEsc := leftWidth + escWidth
 	if activityWidth == 0 {
 		return leftWithEsc <= rightStart
@@ -818,7 +818,7 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 }
 
 func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidth, activityWidth int, path statusBarPathForms, sessionValue string, runningJobs, fallbackAgents int) (string, int, int) {
-	separatorWidth := lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
+	separatorWidth := statusBarGroupGapWidth()
 	rightKey := statusBarRightKey(effectiveWidth, leftWidth, activityWidth, path, sessionValue, runningJobs, fallbackAgents)
 	if !compactionBackgroundStatusVisibleAt(m.compactionBgStatus, now) {
 		rightKey += "|"
