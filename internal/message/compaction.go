@@ -8,7 +8,8 @@ const (
 	CompactionEvidenceTag   = "[Context Evidence]\n"
 	// CompactionTypedStateHeading introduces the machine-carryable state
 	// block inside a checkpoint body: one JSON bullet the carry parser reads
-	// back and the TUI card renders as a code block.
+	// back. The TUI may project it into a structured display without changing
+	// the persisted payload.
 	CompactionTypedStateHeading = "## Typed Checkpoint State"
 	// CompactionDisplayHint is a legacy marker: checkpoints written before the
 	// display-hint tail was removed end with it. Nothing new appends it; parsers

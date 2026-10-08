@@ -149,7 +149,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Context-pressure reminders now read the active model settings consistently when model requests run concurrently.
 
-- The context summary card keeps preserved excerpts readable: a quoted diff, log, or tool output renders as a code block, so its line structure and blank lines survive instead of being reflowed into one wrapped paragraph. The checkpoint's machine-readable state also renders inside a JSON code block instead of wrapping as an ordinary bullet.
+- The context summary card keeps preserved excerpts readable: a quoted diff, log, or tool output renders as a code block, so its line structure and blank lines survive instead of being reflowed into one wrapped paragraph. The checkpoint's machine-readable state now renders as structured stage, list, claim, and evidence sections instead of a wrapped JSON bullet.
 - Reading a file no longer starts a language server: a server starts on the first write to a matching file, so read-only exploration of a large workspace does not launch one. The first write after a cold start can wait for the server and may report diagnostics unavailable while it is still starting.
 - Context compaction preserves complete latest requests up to 8,192 characters, including completion rejection feedback, with their line structure. Longer requests explicitly direct the agent to recover omitted requirements from archived history.
 - Automatic continuation after compaction or an oversized response resumes the latest completion rejection feedback when it is newer than the last user message, instead of the older request.

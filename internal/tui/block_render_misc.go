@@ -240,9 +240,10 @@ func (b *Block) renderCompactionSummary(width int) []string {
 		}
 		body := section.body
 		if section.label == "" {
-			// The machine-carryable state is a single JSON bullet; render it as a
-			// code block instead of letting the prose renderer rewrap it (see
-			// wrapCompactionTypedStateForDisplay).
+			// Project the machine-carryable state into readable sections. This
+			// is display-only; carry and copy continue to use the raw
+			// checkpoint, and a payload that cannot be projected keeps its
+			// fenced JSON block.
 			body = wrapCompactionTypedStateForDisplay(body)
 		}
 		bodyLines = append(bodyLines, renderRichMarkdownContent(body, contentWidth, &b.compactionSectionHL[i])...)
