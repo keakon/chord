@@ -78,6 +78,12 @@ func (t EditTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPolicy {
 	return normalizeConcurrencyPolicy(NameEdit, filePathConcurrencyPolicyInDir(extractEditPathArg(args), false, t.BaseDir))
 }
 
+// ConcurrencyBatchable admits the call to concurrent batching: the policy is
+// scoped to the target file, so edits of different files may overlap while
+// same-file calls stay ordered. Arguments that do not resolve to a path fall
+// back to the exclusive default and remain a boundary.
+func (t EditTool) ConcurrencyBatchable(args json.RawMessage) bool { return true }
+
 func (t EditTool) Description() string {
 	// LSP diagnostic follow-up guidance lives in the system prompt
 	// (## LSP diagnostic follow-up), not per-tool descriptions; see

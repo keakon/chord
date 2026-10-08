@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -43,6 +45,30 @@ func TestConcurrencyConflictHierarchy(t *testing.T) {
 			b:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeRead},
 			want: false,
 		},
+		{
+			name: "concurrent calls share the same resource",
+			a:    ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeConcurrent},
+			b:    ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeConcurrent},
+			want: false,
+		},
+		{
+			name: "concurrent shares a resource with a read",
+			a:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeConcurrent},
+			b:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeRead},
+			want: false,
+		},
+		{
+			name: "concurrent conflicts with a write of the same resource",
+			a:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeConcurrent},
+			b:    ConcurrencyPolicy{Resource: "file:src/main.go", Mode: ConcurrencyModeWrite},
+			want: true,
+		},
+		{
+			name: "exclusive serializes against a concurrent call on another resource",
+			a:    ConcurrencyPolicy{Resource: "tool:question", Mode: ConcurrencyModeExclusive},
+			b:    ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeConcurrent},
+			want: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,6 +76,39 @@ func TestConcurrencyConflictHierarchy(t *testing.T) {
 				t.Fatalf("ConcurrencyConflict() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResourceOverlapResolvesFileAliases(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(root, "alias")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(real, "target.txt")
+	if err := os.WriteFile(target, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	aliasTarget := filepath.Join(alias, "target.txt")
+	if !sameResourcePath(target, aliasTarget) {
+		t.Fatal("a directory alias must name the same file")
+	}
+	if !resourceOverlap("file:"+target, "file:"+aliasTarget) {
+		t.Fatal("file resources through a directory alias must overlap")
+	}
+	if !resourceOverlap("path:"+alias, "file:"+target) || !resourceOverlap("file:"+target, "path:"+alias) {
+		t.Fatal("a directory alias must contain the file it holds")
+	}
+	// A target that does not exist yet still follows its parent alias.
+	if !resourceOverlap("file:"+filepath.Join(real, "future.txt"), "file:"+filepath.Join(alias, "future.txt")) {
+		t.Fatal("a nonexistent target under an aliased parent must overlap")
+	}
+	if resourceOverlap("file:"+target, "file:"+filepath.Join(real, "other.txt")) {
+		t.Fatal("unrelated files must stay independent")
 	}
 }
 
@@ -113,6 +172,54 @@ func TestConcurrencyClassShellAllowlist(t *testing.T) {
 	}
 }
 
+// fakeMutatingTool is a state-changing tool with a resource-scoped policy but
+// no batching declaration: it stays a Mutating serialization boundary.
+type fakeMutatingTool struct {
+	fakeReadOnlyTool
+	resource string
+	mode     ConcurrencyMode
+}
+
+func (fakeMutatingTool) Name() string     { return "FakeMutating" }
+func (fakeMutatingTool) IsReadOnly() bool { return false }
+func (t fakeMutatingTool) ConcurrencyPolicy(json.RawMessage) ConcurrencyPolicy {
+	return ConcurrencyPolicy{Resource: t.resource, Mode: t.mode}
+}
+
+// fakeBatchableMutatingTool additionally opts into concurrent batching through
+// the interface, the shape file writers and MCP tools use.
+type fakeBatchableMutatingTool struct{ fakeMutatingTool }
+
+func (fakeBatchableMutatingTool) Name() string                              { return "FakeBatchableMutating" }
+func (fakeBatchableMutatingTool) ConcurrencyBatchable(json.RawMessage) bool { return true }
+
+// TestConcurrencyClassFollowsBatchableInterface verifies that a mutating tool
+// becomes Concurrent only when it declares ConcurrencyBatchable: the same
+// policy without the interface stays Mutating (a boundary). It also pins the
+// batch builder's admission rule to those two classes.
+func TestConcurrencyClassFollowsBatchableInterface(t *testing.T) {
+	reg := NewRegistry()
+	reg.Register(fakeMutatingTool{resource: "file:/tmp/a", mode: ConcurrencyModeWrite})
+	reg.Register(fakeBatchableMutatingTool{fakeMutatingTool{resource: "file:/tmp/a", mode: ConcurrencyModeWrite}})
+
+	if got := ConcurrencyClassForTool(reg, "FakeMutating", nil); got != ToolConcurrencyClassMutating {
+		t.Fatalf("undeclared mutating class = %v, want Mutating", got)
+	}
+	if got := ConcurrencyClassForTool(reg, "FakeBatchableMutating", nil); got != ToolConcurrencyClassConcurrent {
+		t.Fatalf("batchable mutating class = %v, want Concurrent", got)
+	}
+	for _, class := range []ToolConcurrencyClass{ToolConcurrencyClassReadOnly, ToolConcurrencyClassConcurrent} {
+		if !ConcurrencyClassBatchable(class) {
+			t.Fatalf("class %v must be batchable", class)
+		}
+	}
+	for _, class := range []ToolConcurrencyClass{ToolConcurrencyClassUnknown, ToolConcurrencyClassMutating, ToolConcurrencyClassExclusive} {
+		if ConcurrencyClassBatchable(class) {
+			t.Fatalf("class %v must not be batchable", class)
+		}
+	}
+}
+
 func TestWorkspaceLeaseConflictScopesExclusiveByResource(t *testing.T) {
 	shell := ConcurrencyPolicy{Resource: "process:shell", Mode: ConcurrencyModeExclusive}
 	question := ConcurrencyPolicy{Resource: "tool:question", Mode: ConcurrencyModeExclusive}
@@ -138,5 +245,18 @@ func TestWorkspaceLeaseConflictScopesExclusiveByResource(t *testing.T) {
 	}
 	if WorkspaceLeaseConflict(fileRead, fileRead) {
 		t.Fatal("read/read on the same file must not conflict")
+	}
+	concurrent := ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeConcurrent}
+	if WorkspaceLeaseConflict(concurrent, concurrent) {
+		t.Fatal("concurrent/concurrent on the same resource must not conflict")
+	}
+	if WorkspaceLeaseConflict(concurrent, ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeRead}) {
+		t.Fatal("read/concurrent on the same resource must not conflict")
+	}
+	if !WorkspaceLeaseConflict(concurrent, ConcurrencyPolicy{Resource: "mcp:search", Mode: ConcurrencyModeWrite}) {
+		t.Fatal("write/concurrent on the same resource must conflict")
+	}
+	if WorkspaceLeaseConflict(concurrent, fileWrite) {
+		t.Fatal("concurrent resources must not conflict with unrelated files")
 	}
 }

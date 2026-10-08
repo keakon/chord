@@ -496,7 +496,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 	// Dispatch concurrency-safe finalize-time batches.
 	turn := s.turn
-	batches := buildToolExecutionBatches(s.tools, regularToolCalls)
+	batches := s.toolExecutionPipeline().buildToolExecutionBatches(regularToolCalls)
 
 	// Intent barrier: the assistant message carrying these tool calls must be
 	// process-crash durable before any tool body can produce side effects.

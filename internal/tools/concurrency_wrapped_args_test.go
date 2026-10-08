@@ -21,17 +21,14 @@ func (wrappedPolicyTool) ConcurrencyPolicy(args json.RawMessage) ConcurrencyPoli
 	return fileToolConcurrencyPolicyInDir(args, true, "")
 }
 
-func TestPolicyForToolUnwrapsWrappedArgs(t *testing.T) {
-	reg := NewRegistry()
-	reg.Register(wrappedPolicyTool{})
-
+func TestPolicyForInstanceUnwrapsWrappedArgs(t *testing.T) {
 	inner := `{"path":"/tmp/demo.txt"}`
 	wrapped, err := json.Marshal(inner)
 	if err != nil {
 		t.Fatalf("Marshal wrapped: %v", err)
 	}
 
-	p := PolicyForTool(reg, "WrappedPolicy", wrapped)
+	p := PolicyForInstance(wrappedPolicyTool{}, "WrappedPolicy", wrapped)
 	if p.Resource != "file:/tmp/demo.txt" {
 		t.Fatalf("Resource = %q, want file:/tmp/demo.txt", p.Resource)
 	}

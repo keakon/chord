@@ -150,21 +150,39 @@ func (p toolExecutionPipeline) withMachineStateBaseDir(tc message.ToolCall) tool
 // switch takes effect for the calls that bind the new snapshot and never
 // half-updates a call already in flight.
 func (p toolExecutionPipeline) executeToolForCall(ctx context.Context, tc message.ToolCall) (string, error) {
-	tool, ok := p.registry.Get(tc.Name)
-	if !ok {
-		return "", fmt.Errorf("tool not found: %s", tc.Name)
+	tool, err := p.boundToolForCall(tc)
+	if err != nil {
+		return "", err
 	}
 	args := llm.UnwrapToolArgs(tc.Args)
-	baseDir := p.effectiveToolBaseDir()
-	if baseDir != "" {
-		if anchored, ok := tool.(tools.BaseDirTool); ok {
-			tool = anchored.WithBaseDir(baseDir)
-		}
-	}
 	if question, ok := tool.(*tools.QuestionTool); ok && p.agentID != identity.MainAgentID && !strings.HasPrefix(p.agentID, "main-") {
 		tool = question.Synchronous()
 	}
 	return tool.Execute(tools.WithToolCallID(ctx, tc.ID), args)
+}
+
+// boundToolForCall is shared by batching, leases and execution. Rebinding
+// returns a per-call instance and never mutates the registry's shared tools.
+func (p toolExecutionPipeline) boundToolForCall(tc message.ToolCall) (tools.Tool, error) {
+	if p.registry == nil {
+		return nil, fmt.Errorf("tool not found: %s", tc.Name)
+	}
+	tool, ok := p.registry.Get(tc.Name)
+	if !ok {
+		return nil, fmt.Errorf("tool not found: %s", tc.Name)
+	}
+	p = p.withMachineStateBaseDir(tc)
+	if baseDir := p.effectiveToolBaseDir(); baseDir != "" {
+		if anchored, ok := tool.(tools.BaseDirTool); ok {
+			tool = anchored.WithBaseDir(baseDir)
+		}
+	}
+	return tool, nil
+}
+
+func (p toolExecutionPipeline) concurrencyPolicyForCall(tc message.ToolCall) tools.ConcurrencyPolicy {
+	tool, _ := p.boundToolForCall(tc)
+	return tools.PolicyForInstance(tool, tc.Name, llm.UnwrapToolArgs(tc.Args))
 }
 
 // effectivePathScope resolves the policy-root scope for a path-taking tool.
@@ -856,7 +874,7 @@ func (p toolExecutionPipeline) acquireWorkspaceLease(ctx context.Context, tc mes
 	if p.governor == nil {
 		return func() {}, nil
 	}
-	policy := tools.PolicyForTool(p.registry, tc.Name, llm.UnwrapToolArgs(tc.Args))
+	policy := p.concurrencyPolicyForCall(tc)
 	release, err := p.governor.acquireWorkspaceLease(ctx, policy)
 	if err != nil {
 		return nil, fmt.Errorf("acquire workspace lease for %s: %w", tc.Name, err)
@@ -971,7 +989,7 @@ func (p toolExecutionPipeline) validateKnownTool(name string) error {
 	return nil
 }
 
-func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) error {
+func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) error {
 	if p.bypassPermission != nil && p.bypassPermission(tc.Name) {
 		return nil
 	}
@@ -1038,10 +1056,17 @@ func (p toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.
 			ruleset = p.refreshRulesetAfterRuleIntent(tc.Name, resp.RuleIntent)
 		}
 		originalArgs := append(json.RawMessage(nil), tc.Args...)
-		editedArgs, err := applyConfirmedArgsEdits(p.registry, ruleset, tc.Name, tc.Args, resp.FinalArgsJSON, p.effectivePathScope())
+		editedBinding := *p
+		if strings.TrimSpace(resp.FinalArgsJSON) != "" {
+			candidate := *tc
+			candidate.Args = json.RawMessage(resp.FinalArgsJSON)
+			editedBinding = p.withMachineStateBaseDir(candidate)
+		}
+		editedArgs, err := applyConfirmedArgsEdits(p.registry, ruleset, tc.Name, tc.Args, resp.FinalArgsJSON, editedBinding.effectivePathScope())
 		if err != nil {
 			return err
 		}
+		*p = editedBinding
 		tc.Args = editedArgs
 		execResult.EffectiveArgsJSON = string(tc.Args)
 		execResult.Audit = buildToolArgsAudit(originalArgs, tc.Args, resp.EditSummary)

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -73,6 +74,10 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 	if len(discoveryTools) > 0 || hasVisibleTool(visible, tools.NameRead) {
 		lines = append(lines, "- Before issuing a lookup, identify the independent read-only calls needed for the current step whose arguments are already known. Issue those calls together in the same response so they can execute in parallel: for example, read several known files or ranges, or search for independent symbols, without waiting for one result at a time. If a search must first reveal a path or line range, wait for that result before constructing the dependent read. Preserve ordering around state-changing calls and keep expensive commands deliberate. Do not add unrelated lookups or enlarge read ranges merely to fill a batch.")
 	}
+	if toolSurfaceSupportsConcurrentScheduling(visible) {
+		lines = append(lines, "- Independent calls can share one response even when they change state (for example, edits to different files or calls to one MCP server): Chord runs non-conflicting calls from the same response concurrently. Put a call in a later response when it needs an earlier call's result or must observe another call's effect; known conflicting file or resource accesses are still serialized.")
+		lines = append(lines, "- If a call in a concurrent batch fails, use its result to decide the next step: retry only when the failure and the action are safe to repeat, otherwise inspect the affected state before repeating a side effect. A failed sibling does not invalidate successful results from the same response.")
+	}
 	if hasVisibleTool(visible, tools.NameRead) {
 		lines = append(lines, "- Use "+toolPromptName(tools.NameRead)+" for file contents when the target path is already known or has been verified.")
 		lines = append(lines, "- When the user provides complete file contents in a "+"`<file path=...>`"+" reference, treat that content as the working context; do not re-read the same file merely to obtain duplicate contents. Re-read only when the supplied content is incomplete, the file may have changed on disk, or the edit workflow requires fresh file state, and then read only the needed range.")
@@ -131,6 +136,24 @@ func toolSelectionPromptBlock(visible map[string]struct{}) string {
 		return ""
 	}
 	return "## Tool Selection\n" + strings.Join(lines, "\n")
+}
+
+// toolSurfaceSupportsConcurrentScheduling reports whether the visible surface
+// contains tools whose same-response calls can be scheduled concurrently:
+// resource-scoped file mutations and MCP calls. Read-only lookups already have
+// their own discovery bullet.
+func toolSurfaceSupportsConcurrentScheduling(visible map[string]struct{}) bool {
+	for _, name := range []string{tools.NameEdit, tools.NameApplyPatch, tools.NameWrite, tools.NameDelete} {
+		if hasVisibleTool(visible, name) {
+			return true
+		}
+	}
+	for name := range visible {
+		if strings.HasPrefix(name, toolname.MCPToolPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func visiblePathDiscoveryTools(visible map[string]struct{}) []string {

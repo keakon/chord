@@ -1419,7 +1419,7 @@ shell: allow
 			t.Fatalf("mainAgentCapabilityPromptBlock() missing %q in %q", want, got)
 		}
 	}
-	for _, unwanted := range []string{"Use `edit`", "Use `write`", "## File Inspection Constraints", "## Authorization & Decisions"} {
+	for _, unwanted := range []string{"Use `edit`", "Use `write`", "Chord runs non-conflicting calls from the same response concurrently", "## File Inspection Constraints", "## Authorization & Decisions"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("mainAgentCapabilityPromptBlock() unexpectedly contains %q in %q", unwanted, got)
 		}
@@ -1427,6 +1427,23 @@ shell: allow
 	// The main agent's authorization line lives with its confirmation channel.
 	if confirm := a.userConfirmationPromptBlock(); !strings.Contains(confirm, "Execution authorization is handled by the permission system") {
 		t.Fatalf("userConfirmationPromptBlock() missing authorization line: %q", confirm)
+	}
+}
+
+func TestToolSelectionPromptBlockAdvertisesConcurrentSchedulingOnlyForCapableSurfaces(t *testing.T) {
+	const guidance = "Chord runs non-conflicting calls from the same response concurrently"
+
+	editSurface := map[string]struct{}{tools.NameEdit: {}, tools.NameRead: {}}
+	if got := toolSelectionPromptBlock(editSurface); !strings.Contains(got, guidance) {
+		t.Fatalf("edit surface missing concurrent scheduling guidance: %q", got)
+	}
+	mcpSurface := map[string]struct{}{"mcp_alpha_search": {}, tools.NameRead: {}}
+	if got := toolSelectionPromptBlock(mcpSurface); !strings.Contains(got, guidance) {
+		t.Fatalf("MCP surface missing concurrent scheduling guidance: %q", got)
+	}
+	readOnlySurface := map[string]struct{}{tools.NameRead: {}, tools.NameGrep: {}, tools.NameGlob: {}}
+	if got := toolSelectionPromptBlock(readOnlySurface); strings.Contains(got, "non-conflicting calls") {
+		t.Fatalf("read-only surface must not advertise concurrent scheduling: %q", got)
 	}
 }
 

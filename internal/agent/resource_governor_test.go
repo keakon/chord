@@ -248,6 +248,40 @@ func TestResourceGovernorWorkspaceLeasesAllowDisjointWrites(t *testing.T) {
 	releaseB()
 }
 
+func TestResourceGovernorWorkspaceLeasesShareConcurrentResources(t *testing.T) {
+	g := newResourceGovernor(config.OrchestrationConfig{})
+	resource := "mcp:search"
+	releaseA, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeConcurrent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Overlapping concurrent calls and reads share the resource.
+	releaseB, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeConcurrent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseC, err := g.acquireWorkspaceLease(context.Background(), tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := g.snapshot(); got.LeaseActive != 3 || got.LeaseQueued != 0 {
+		t.Fatalf("concurrent lease snapshot = %+v, want three active leases", got)
+	}
+
+	// A write to the same resource still waits for the concurrent holders.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := g.acquireWorkspaceLease(ctx, tools.ConcurrencyPolicy{Resource: resource, Mode: tools.ConcurrencyModeWrite}); err == nil {
+		t.Fatal("write lease succeeded while concurrent leases were held")
+	}
+	releaseA()
+	releaseB()
+	releaseC()
+	if got := g.snapshot(); got.LeaseActive != 0 || got.LeaseQueued != 0 {
+		t.Fatalf("after release = %+v", got)
+	}
+}
+
 func TestResourceGovernorWorkspaceLeasesPreserveConflictingWaiterOrder(t *testing.T) {
 	g := newResourceGovernor(config.OrchestrationConfig{})
 	resource := "file:/workspace/a"

@@ -62,6 +62,16 @@ func (t *MCPTool) IsAvailable() bool {
 // IsReadOnly returns false (conservative default for external MCP tools).
 func (t *MCPTool) IsReadOnly() bool { return false }
 
+// ConcurrencyPolicy scopes MCP calls to their server. Calls emitted together
+// in one model response run concurrently as selected by the model.
+func (t *MCPTool) ConcurrencyPolicy(args json.RawMessage) tools.ConcurrencyPolicy {
+	return tools.ConcurrencyPolicy{Resource: "mcp:" + t.serverName, Mode: tools.ConcurrencyModeConcurrent}
+}
+
+// ConcurrencyBatchable admits the call to a batch selected by the model. MCP
+// calls keep their started journal record and never run speculatively.
+func (t *MCPTool) ConcurrencyBatchable(args json.RawMessage) bool { return true }
+
 // Execute calls the tool on the MCP server and returns the textual result.
 // Any image content blocks returned by the server are pushed to the image sink
 // in the context (if present) so the runtime can attach them to model context.

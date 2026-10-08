@@ -2,8 +2,11 @@ package tools
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/keakon/chord/internal/pathutil"
 )
 
 // unwrapToolArgs peels JSON string layers so tool handlers receive a JSON
@@ -25,9 +28,10 @@ func unwrapToolArgs(raw json.RawMessage) json.RawMessage {
 type ConcurrencyMode string
 
 const (
-	ConcurrencyModeExclusive ConcurrencyMode = "exclusive"
-	ConcurrencyModeRead      ConcurrencyMode = "read"
-	ConcurrencyModeWrite     ConcurrencyMode = "write"
+	ConcurrencyModeExclusive  ConcurrencyMode = "exclusive"
+	ConcurrencyModeRead       ConcurrencyMode = "read"
+	ConcurrencyModeConcurrent ConcurrencyMode = "concurrent"
+	ConcurrencyModeWrite      ConcurrencyMode = "write"
 )
 
 type ConcurrencyPolicy struct {
@@ -47,13 +51,10 @@ func defaultConcurrencyPolicy(toolName string) ConcurrencyPolicy {
 	}
 }
 
-func PolicyForTool(registry *Registry, toolName string, args json.RawMessage) ConcurrencyPolicy {
-	if registry != nil {
-		if tool, ok := registry.Get(toolName); ok {
-			if aware, ok := tool.(ConcurrencyAwareTool); ok {
-				return normalizeConcurrencyPolicy(toolName, aware.ConcurrencyPolicy(unwrapToolArgs(args)))
-			}
-		}
+// PolicyForInstance resolves resources on the instance bound to this call.
+func PolicyForInstance(tool Tool, toolName string, args json.RawMessage) ConcurrencyPolicy {
+	if aware, ok := tool.(ConcurrencyAwareTool); ok {
+		return normalizeConcurrencyPolicy(toolName, aware.ConcurrencyPolicy(unwrapToolArgs(args)))
 	}
 	return defaultConcurrencyPolicy(toolName)
 }
@@ -91,13 +92,23 @@ func ConcurrencyConflict(a, b ConcurrencyPolicy) bool {
 // reads or writes of unrelated files, and a `workspace` resource still
 // overlaps everything. Tools whose default policy names only `tool:<name>`
 // therefore serialize per tool instead of freezing every other agent.
+//
+// Read and concurrent calls share a resource: neither claims the exclusive
+// right to change it that a write or exclusive call claims.
 func WorkspaceLeaseConflict(a, b ConcurrencyPolicy) bool {
 	a = normalizeConcurrencyPolicy("", a)
 	b = normalizeConcurrencyPolicy("", b)
 	if !resourceOverlap(a.Resource, b.Resource) {
 		return false
 	}
-	return a.Mode != ConcurrencyModeRead || b.Mode != ConcurrencyModeRead
+	return !leaseShareableMode(a.Mode) || !leaseShareableMode(b.Mode)
+}
+
+// leaseShareableMode reports whether a holder with this mode may share the
+// resource with another holder. A concurrent call promises only that its
+// resource tolerates overlapping calls, not that it is read-only.
+func leaseShareableMode(mode ConcurrencyMode) bool {
+	return mode == ConcurrencyModeRead || mode == ConcurrencyModeConcurrent
 }
 
 func resourceOverlap(a, b string) bool {
@@ -119,16 +130,56 @@ func resourceOverlap(a, b string) bool {
 	}
 	switch {
 	case kindA == "file" && kindB == "file":
-		return pathA == pathB
+		return sameResourcePath(pathA, pathB)
 	case kindA == "path" && kindB == "path":
-		return pathContainsResourcePath(pathA, pathB) || pathContainsResourcePath(pathB, pathA)
+		return sameResourcePath(pathA, pathB) || resourcePathContains(pathA, pathB) || resourcePathContains(pathB, pathA)
 	case kindA == "path" && kindB == "file":
-		return pathContainsResourcePath(pathA, pathB)
+		return resourcePathContains(pathA, pathB)
 	case kindA == "file" && kindB == "path":
-		return pathContainsResourcePath(pathB, pathA)
+		return resourcePathContains(pathB, pathA)
 	default:
 		return false
 	}
+}
+
+// sameResourcePath reports whether two resource paths name the same physical
+// file. Equal spellings are already known to match; different ones are
+// re-checked through symlinked prefixes and, when both paths exist, the inode,
+// so a directory alias cannot slip past the conflict check.
+func sameResourcePath(a, b string) bool {
+	if a == b {
+		return true
+	}
+	resolvedA, resolvedB := a, b
+	if resolved, ok := pathutil.ResolveSymlinksBestEffort(a); ok {
+		resolvedA = resolved
+	}
+	if resolved, ok := pathutil.ResolveSymlinksBestEffort(b); ok {
+		resolvedB = resolved
+	}
+	if resolvedA == resolvedB {
+		return true
+	}
+	infoA, errA := os.Stat(resolvedA)
+	infoB, errB := os.Stat(resolvedB)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
+}
+
+// resourcePathContains is pathContainsResourcePath after the same best-effort
+// symlink resolution, so a directory alias still contains the files it
+// physically holds.
+func resourcePathContains(basePath, targetPath string) bool {
+	if pathContainsResourcePath(basePath, targetPath) {
+		return true
+	}
+	base, target := basePath, targetPath
+	if resolved, ok := pathutil.ResolveSymlinksBestEffort(base); ok {
+		base = resolved
+	}
+	if resolved, ok := pathutil.ResolveSymlinksBestEffort(target); ok {
+		target = resolved
+	}
+	return pathContainsResourcePath(base, target)
 }
 
 func splitConcurrencyResource(resource string) (kind, path string, ok bool) {

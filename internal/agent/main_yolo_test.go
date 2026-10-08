@@ -348,7 +348,8 @@ func TestYoloMainGateMechanismAskRelaxesAndRestores(t *testing.T) {
 	a.confirmFn = subYoloConfirmStub(&confirmCalls)
 
 	call := message.ToolCall{Name: tools.NameDelegate, Args: json.RawMessage(`{"agent_type":"worker"}`)}
-	if err := a.toolExecutionPipeline().applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
+	pipeline := a.toolExecutionPipeline()
+	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
 		t.Fatal("mechanism ask must confirm while YOLO is off")
 	}
 	if got := confirmCalls.Load(); got != 1 {
@@ -356,7 +357,8 @@ func TestYoloMainGateMechanismAskRelaxesAndRestores(t *testing.T) {
 	}
 
 	a.yoloEnabled.Store(true)
-	if err := a.toolExecutionPipeline().applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
+	pipeline = a.toolExecutionPipeline()
+	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
 		t.Fatalf("YOLO must relax the mechanism ask to allow, got %v", err)
 	}
 	if got := confirmCalls.Load(); got != 1 {
@@ -364,7 +366,8 @@ func TestYoloMainGateMechanismAskRelaxesAndRestores(t *testing.T) {
 	}
 
 	a.yoloEnabled.Store(false)
-	if err := a.toolExecutionPipeline().applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
+	pipeline = a.toolExecutionPipeline()
+	if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err == nil {
 		t.Fatal("mechanism ask must confirm again after YOLO is switched off")
 	}
 	if got := confirmCalls.Load(); got != 2 {

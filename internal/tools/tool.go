@@ -33,21 +33,29 @@ type ToolConcurrencyClass int
 const (
 	ToolConcurrencyClassUnknown ToolConcurrencyClass = iota
 	ToolConcurrencyClassReadOnly
+	ToolConcurrencyClassConcurrent
 	ToolConcurrencyClassMutating
 	ToolConcurrencyClassExclusive
 )
 
 // ConcurrencyClassForTool returns a conservative high-level batching class.
 // This is shared by speculative and finalized orchestration so both layers
-// preserve the same core rule: only consecutive concurrency-safe read-only
-// tools may run together; everything else becomes a serialization boundary.
+// preserve the same core rule: only consecutive concurrency-safe read-only or
+// concurrently batchable tools may run together; everything else becomes a
+// serialization boundary. ReadOnly additionally allows the speculative and
+// started-journal-skip optimizations; Concurrent only allows batching.
 func ConcurrencyClassForTool(registry *Registry, toolName string, args json.RawMessage) ToolConcurrencyClass {
-	name := strings.TrimSpace(toolName)
-	if name == "" || registry == nil {
-		return ToolConcurrencyClassExclusive
+	var tool Tool
+	if registry != nil {
+		tool, _ = registry.Get(strings.TrimSpace(toolName))
 	}
-	tool, ok := registry.Get(name)
-	if !ok {
+	return ConcurrencyClassForInstance(tool, toolName, args)
+}
+
+// ConcurrencyClassForInstance classifies the instance bound to this call.
+func ConcurrencyClassForInstance(tool Tool, toolName string, args json.RawMessage) ToolConcurrencyClass {
+	name := strings.TrimSpace(toolName)
+	if name == "" || tool == nil {
 		return ToolConcurrencyClassExclusive
 	}
 	// A tool that declares this invocation safe to batch alongside other
@@ -56,7 +64,10 @@ func ConcurrencyClassForTool(registry *Registry, toolName string, args json.RawM
 	if toolConcurrencySafeReadOnly(tool, args) {
 		return ToolConcurrencyClassReadOnly
 	}
-	policy := normalizeConcurrencyPolicy(name, PolicyForTool(registry, name, args))
+	if toolConcurrencyBatchable(tool, args) {
+		return ToolConcurrencyClassConcurrent
+	}
+	policy := normalizeConcurrencyPolicy(name, PolicyForInstance(tool, name, args))
 	if policy.Mode == ConcurrencyModeExclusive {
 		return ToolConcurrencyClassExclusive
 	}
@@ -64,6 +75,21 @@ func ConcurrencyClassForTool(registry *Registry, toolName string, args json.RawM
 		return ToolConcurrencyClassMutating
 	}
 	return ToolConcurrencyClassExclusive
+}
+
+// ConcurrencyClassBatchable reports whether calls in this class may share a
+// finalized execution batch when their policies do not conflict. It is the
+// single source of the batch builder's admission rule.
+func ConcurrencyClassBatchable(class ToolConcurrencyClass) bool {
+	return class == ToolConcurrencyClassReadOnly || class == ToolConcurrencyClassConcurrent
+}
+
+// toolConcurrencyBatchable reports whether the tool opts this invocation into
+// concurrent batching. Tools that do not implement ConcurrencyBatchableTool are
+// never admitted.
+func toolConcurrencyBatchable(tool Tool, args json.RawMessage) bool {
+	batchable, ok := tool.(ConcurrencyBatchableTool)
+	return ok && batchable.ConcurrencyBatchable(args)
 }
 
 // toolConcurrencySafeReadOnly reports whether the tool opts into read-only
@@ -116,6 +142,19 @@ type ConcurrencyAwareTool interface {
 type ConcurrencySafeReadOnlyTool interface {
 	Tool
 	ConcurrencySafeReadOnly(args json.RawMessage) bool
+}
+
+// ConcurrencyBatchableTool is implemented by tools whose invocation may share a
+// finalized execution batch with other non-conflicting calls. It is weaker than
+// ConcurrencySafeReadOnlyTool on purpose: the call may mutate state, so it keeps
+// its started journal record, never runs speculatively, and is not safe to retry
+// merely because it was batched. Declaring the interface only admits the call as
+// a batching candidate; the batch builder still consults ConcurrencyAwareTool,
+// so an implementor whose policy stays exclusive is still a serialization
+// boundary.
+type ConcurrencyBatchableTool interface {
+	Tool
+	ConcurrencyBatchable(args json.RawMessage) bool
 }
 
 // EarlyRenderableReadOnlyTool is implemented by local read-only tools whose

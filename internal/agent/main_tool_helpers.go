@@ -321,7 +321,7 @@ type toolExecutionBatch struct {
 	AbortSiblingsOnError bool
 }
 
-func buildToolExecutionBatches(registry *tools.Registry, calls []message.ToolCall) []toolExecutionBatch {
+func (p toolExecutionPipeline) buildToolExecutionBatches(calls []message.ToolCall) []toolExecutionBatch {
 	if len(calls) == 0 {
 		return nil
 	}
@@ -329,10 +329,11 @@ func buildToolExecutionBatches(registry *tools.Registry, calls []message.ToolCal
 	for i := 0; i < len(calls); {
 		call := calls[i]
 		args := llm.UnwrapToolArgs(call.Args)
-		class := tools.ConcurrencyClassForTool(registry, call.Name, args)
-		policy := tools.PolicyForTool(registry, call.Name, args)
+		tool, _ := p.boundToolForCall(call)
+		class := tools.ConcurrencyClassForInstance(tool, call.Name, args)
+		policy := tools.PolicyForInstance(tool, call.Name, args)
 		batch := toolExecutionBatch{Calls: []message.ToolCall{call}, AbortSiblingsOnError: policy.AbortSiblingsOnError}
-		if class != tools.ToolConcurrencyClassReadOnly {
+		if !tools.ConcurrencyClassBatchable(class) {
 			batches = append(batches, batch)
 			i++
 			continue
@@ -342,10 +343,11 @@ func buildToolExecutionBatches(registry *tools.Registry, calls []message.ToolCal
 		for j < len(calls) {
 			next := calls[j]
 			nextArgs := llm.UnwrapToolArgs(next.Args)
-			if tools.ConcurrencyClassForTool(registry, next.Name, nextArgs) != tools.ToolConcurrencyClassReadOnly {
+			nextTool, _ := p.boundToolForCall(next)
+			if !tools.ConcurrencyClassBatchable(tools.ConcurrencyClassForInstance(nextTool, next.Name, nextArgs)) {
 				break
 			}
-			nextPolicy := tools.PolicyForTool(registry, next.Name, nextArgs)
+			nextPolicy := tools.PolicyForInstance(nextTool, next.Name, nextArgs)
 			conflict := false
 			for _, existing := range usedPolicies {
 				if tools.ConcurrencyConflict(existing, nextPolicy) {

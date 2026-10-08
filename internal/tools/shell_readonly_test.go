@@ -286,7 +286,11 @@ func TestShellReadOnlyLeaseMatrix(t *testing.T) {
 	registry.Register(NewShellTool("bash"))
 	registry.Register(ReadTool{BaseDir: "/tmp"})
 	policy := func(name, args string) ConcurrencyPolicy {
-		return PolicyForTool(registry, name, json.RawMessage(args))
+		tool, ok := registry.Get(name)
+		if !ok {
+			t.Fatalf("missing policy fixture: %s", name)
+		}
+		return PolicyForInstance(tool, name, json.RawMessage(args))
 	}
 	readShell := policy(NameShell, `{"command":"git log --oneline -20"}`)
 	mutatingShell := policy(NameShell, `{"command":"go test ./..."}`)

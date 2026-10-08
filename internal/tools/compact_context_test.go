@@ -411,7 +411,7 @@ func TestCompactContextToolTraits(t *testing.T) {
 	if tool.Name() != NameCompactContext {
 		t.Fatalf("name = %q, want %q", tool.Name(), NameCompactContext)
 	}
-	policy := PolicyForTool(nil, NameCompactContext, json.RawMessage(validCompactArgs()))
+	policy := PolicyForInstance(tool, NameCompactContext, json.RawMessage(validCompactArgs()))
 	if policy.Mode != ConcurrencyModeExclusive {
 		t.Fatalf("concurrency mode = %q, want exclusive", policy.Mode)
 	}

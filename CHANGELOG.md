@@ -98,6 +98,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - MCP tool results are checked against the server's declared output schema. Schema problems add a warning while preserving usable output, without automatically repeating the tool call.
 
+- Tool calls a model issues in one response now run concurrently when their declared resources do not conflict: MCP calls can execute together even on one server, and edits to different files no longer serialize. Same-file edits, workspace-wide tools, and calls with a declared resource conflict still keep their model-response order; each result is returned independently so the model can decide whether a failed call is safe to retry.
+
 - Sidebar sections that come and go (agents, background jobs, and todos) now render after the fixed model, usage, integration, and repository sections, so their appearance no longer shifts the sections above. Focused agents’ status icons stay visible, focused message cards use a distinct rail shape, and error, assistant-label, and thinking text has higher contrast.
 
 - Repeated WebFetch requests to the same site reuse network connections; closing the application releases idle connections.

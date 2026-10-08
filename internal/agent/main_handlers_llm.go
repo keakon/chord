@@ -573,7 +573,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	}
 
 	// Execute finalized tool calls in concurrency-safe batches.
-	batches := buildToolExecutionBatches(a.tools, validCalls)
+	batches := a.toolExecutionPipeline().buildToolExecutionBatches(validCalls)
 
 	// Intent barrier: the assistant message carrying these tool calls must be
 	// process-crash durable before any tool body can produce side effects.

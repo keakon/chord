@@ -20,7 +20,7 @@ import (
 // serialization boundary for every later call in the same message. The scan
 // covers the package sources so a newly added tool cannot skip the policy.
 func TestReadOnlyBatchableToolsDeclareConcurrencyPolicy(t *testing.T) {
-	declared, aware := scanReadOnlyClassDeclarations(t)
+	declared, _, aware := scanBatchableToolDeclarations(t)
 	if len(declared) == 0 {
 		t.Fatal("no ConcurrencySafeReadOnly implementations found; the source scan is broken")
 	}
@@ -31,19 +31,19 @@ func TestReadOnlyBatchableToolsDeclareConcurrencyPolicy(t *testing.T) {
 	}
 }
 
-// scanReadOnlyClassDeclarations parses the package sources (test files excluded)
-// and reports the receiver types declaring ConcurrencySafeReadOnly, mapped to
-// the file that declares the class, plus the receiver types declaring
-// ConcurrencyPolicy. Both the presence check and the coverage check in
-// TestReadOnlyBatchableToolPoliciesStayNonExclusive build on it, so the two
-// cannot drift into scanning different sources.
-func scanReadOnlyClassDeclarations(t *testing.T) (declared map[string]string, aware map[string]bool) {
+// scanBatchableToolDeclarations parses the package sources (test files excluded)
+// and reports the receivers declaring each batching interface, mapped to the
+// file that declares it, plus the receiver types declaring ConcurrencyPolicy.
+// The presence checks and the coverage checks in the non-exclusive policy tests
+// build on it, so the checks cannot drift into scanning different sources.
+func scanBatchableToolDeclarations(t *testing.T) (readOnlyDeclared, concurrentDeclared map[string]string, aware map[string]bool) {
 	t.Helper()
 	files, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatalf("glob package sources: %v", err)
 	}
-	declared = map[string]string{}
+	readOnlyDeclared = map[string]string{}
+	concurrentDeclared = map[string]string{}
 	aware = map[string]bool{}
 	fset := token.NewFileSet()
 	for _, file := range files {
@@ -65,13 +65,15 @@ func scanReadOnlyClassDeclarations(t *testing.T) (declared map[string]string, aw
 			}
 			switch fn.Name.Name {
 			case "ConcurrencySafeReadOnly":
-				declared[recv] = file
+				readOnlyDeclared[recv] = file
+			case "ConcurrencyBatchable":
+				concurrentDeclared[recv] = file
 			case "ConcurrencyPolicy":
 				aware[recv] = true
 			}
 		}
 	}
-	return declared, aware
+	return readOnlyDeclared, concurrentDeclared, aware
 }
 
 // TestReadOnlyBatchableToolPoliciesStayNonExclusive asserts, for every tool that
@@ -98,14 +100,12 @@ func TestReadOnlyBatchableToolPoliciesStayNonExclusive(t *testing.T) {
 		{NameWebSearch, NewHostedTool(BuiltinHostedToolSpecs()[NameWebSearch], nil), `{"query":"example query"}`},
 		{NameWorktreeList, WorktreeListTool{}, `{}`},
 	}
-	declared, _ := scanReadOnlyClassDeclarations(t)
+	declared, _, _ := scanBatchableToolDeclarations(t)
 	covered := make(map[string]string, len(cases)) // receiver type -> case name
 	for _, tc := range cases {
 		covered[concreteToolTypeName(tc.tool)] = tc.name
 		t.Run(tc.name, func(t *testing.T) {
-			registry := NewRegistry()
-			registry.Register(tc.tool)
-			policy := PolicyForTool(registry, tc.name, json.RawMessage(tc.args))
+			policy := PolicyForInstance(tc.tool, tc.name, json.RawMessage(tc.args))
 			if policy.Mode == ConcurrencyModeExclusive {
 				t.Fatalf("policy = %#v, want a non-exclusive mode", policy)
 			}
@@ -126,6 +126,62 @@ func TestReadOnlyBatchableToolPoliciesStayNonExclusive(t *testing.T) {
 	}
 }
 
+// TestConcurrentBatchableToolsDeclareConcurrencyPolicy pins the same two-layer
+// contract for ConcurrencyBatchableTool: the interface alone admits a call as a
+// batching candidate, but only a non-exclusive policy lets it actually merge
+// with siblings instead of forming a serialization boundary.
+func TestConcurrentBatchableToolsDeclareConcurrencyPolicy(t *testing.T) {
+	_, declared, aware := scanBatchableToolDeclarations(t)
+	if len(declared) == 0 {
+		t.Fatal("no ConcurrencyBatchable implementations found; the source scan is broken")
+	}
+	for recv, file := range declared {
+		if !aware[recv] {
+			t.Errorf("%s: %s declares ConcurrencyBatchable without ConcurrencyPolicy; give it a non-exclusive policy scoped to what the call touches", file, recv)
+		}
+	}
+}
+
+// TestConcurrentBatchableToolPoliciesStayNonExclusive asserts, for every tool
+// that declares the concurrent batching class, that a representative invocation
+// stays non-exclusive. The AST scan cannot call a policy, so the table must
+// cover the whole class: an uncovered tool would keep the exclusive default and
+// silently turn every message it appears in into a serialization boundary.
+func TestConcurrentBatchableToolPoliciesStayNonExclusive(t *testing.T) {
+	cases := []struct {
+		name string
+		tool Tool
+		args string
+	}{
+		{NameEdit, EditTool{}, `{"path":"tool.go","old_string":"a","new_string":"b"}`},
+		{NameWrite, WriteTool{}, `{"path":"tool.go","content":"x"}`},
+	}
+	_, declared, _ := scanBatchableToolDeclarations(t)
+	covered := make(map[string]string, len(cases)) // receiver type -> case name
+	for _, tc := range cases {
+		covered[concreteToolTypeName(tc.tool)] = tc.name
+		t.Run(tc.name, func(t *testing.T) {
+			policy := PolicyForInstance(tc.tool, tc.name, json.RawMessage(tc.args))
+			if policy.Mode == ConcurrencyModeExclusive {
+				t.Fatalf("policy = %#v, want a non-exclusive mode", policy)
+			}
+			if strings.TrimSpace(policy.Resource) == "" {
+				t.Fatalf("policy = %#v, want a named resource", policy)
+			}
+		})
+	}
+	for recv, file := range declared {
+		if _, ok := covered[recv]; !ok {
+			t.Errorf("%s: %s declares ConcurrencyBatchable but has no representative invocation here; add one so its policy is asserted non-exclusive", file, recv)
+		}
+	}
+	for recv, name := range covered {
+		if _, ok := declared[recv]; !ok {
+			t.Errorf("%s (%s) no longer declares ConcurrencyBatchable; drop this table entry", name, recv)
+		}
+	}
+}
+
 // concreteToolTypeName resolves a tool value to the bare receiver type name the
 // source scan reports: *T reports T, without the package qualifier or any type
 // arguments.
@@ -141,10 +197,9 @@ func concreteToolTypeName(tool Tool) string {
 }
 
 func TestJobOutputPolicyScopesResourceByJob(t *testing.T) {
-	registry := NewRegistry()
-	registry.Register(JobOutputTool{})
+	tool := JobOutputTool{}
 	policy := func(jobID string) ConcurrencyPolicy {
-		return PolicyForTool(registry, NameJobOutput, json.RawMessage(`{"job_id":"`+jobID+`"}`))
+		return PolicyForInstance(tool, NameJobOutput, json.RawMessage(`{"job_id":"`+jobID+`"}`))
 	}
 
 	first := policy("job-1")
@@ -154,19 +209,18 @@ func TestJobOutputPolicyScopesResourceByJob(t *testing.T) {
 	if ConcurrencyConflict(first, policy("job-2")) {
 		t.Fatal("reads of different jobs must batch together")
 	}
-	if empty := PolicyForTool(registry, NameJobOutput, json.RawMessage(`{}`)); empty.Mode != ConcurrencyModeExclusive {
+	if empty := PolicyForInstance(tool, NameJobOutput, json.RawMessage(`{}`)); empty.Mode != ConcurrencyModeExclusive {
 		t.Fatalf("policy without a job id = %#v, want the conservative exclusive default", empty)
 	}
 }
 
 func TestShellPolicySplitsReadOnlyCommandsFromMutations(t *testing.T) {
-	registry := NewRegistry()
-	registry.Register(NewShellTool("bash"))
-	readOnly := PolicyForTool(registry, NameShell, json.RawMessage(`{"command":"git status"}`))
+	tool := NewShellTool("bash")
+	readOnly := PolicyForInstance(tool, NameShell, json.RawMessage(`{"command":"git status"}`))
 	if readOnly.Resource != "process:shell" || readOnly.Mode != ConcurrencyModeRead || readOnly.AbortSiblingsOnError {
 		t.Fatalf("read-only shell policy = %#v, want process:shell read without sibling aborts", readOnly)
 	}
-	mutating := PolicyForTool(registry, NameShell, json.RawMessage(`{"command":"go test ./..."}`))
+	mutating := PolicyForInstance(tool, NameShell, json.RawMessage(`{"command":"go test ./..."}`))
 	if mutating.Resource != "process:shell" || mutating.Mode != ConcurrencyModeExclusive || !mutating.AbortSiblingsOnError {
 		t.Fatalf("mutating shell policy = %#v, want the exclusive process:shell with sibling aborts", mutating)
 	}

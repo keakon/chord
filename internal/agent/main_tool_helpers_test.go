@@ -1,15 +1,20 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
-func TestBuildToolExecutionBatchesKeepsMutationsAsBoundaries(t *testing.T) {
+func TestBuildToolExecutionBatchesKeepsSameFileConflictsAsBoundaries(t *testing.T) {
 	registry := tools.NewRegistry()
 	registry.Register(tools.ReadTool{})
 	registry.Register(tools.GrepTool{})
@@ -20,13 +25,54 @@ func TestBuildToolExecutionBatchesKeepsMutationsAsBoundaries(t *testing.T) {
 		{ID: "3", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","paths":["."]}`)},
 	}
 
-	batches := buildToolExecutionBatches(registry, calls)
+	// A write is no longer a boundary by itself, but these three all touch the
+	// same file resource (the directory read overlaps README.md), so each call
+	// still forms its own serialization boundary in model order.
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
 	if len(batches) != 3 {
 		t.Fatalf("len(batches) = %d, want 3", len(batches))
 	}
 	for i, wantID := range []string{"1", "2", "3"} {
 		if len(batches[i].Calls) != 1 || batches[i].Calls[0].ID != wantID {
 			t.Fatalf("batch[%d] = %#v, want single call %s", i, batches[i].Calls, wantID)
+		}
+	}
+}
+
+// Two spellings of one file through a directory alias must stay serialized,
+// and both must remain executable so the boundary is about scheduling, not a
+// rejected path.
+func TestBuildToolExecutionBatchesSerializesFileAliases(t *testing.T) {
+	root := t.TempDir()
+	real := filepath.Join(root, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "target.txt"), []byte("first\nsecond\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registry := tools.NewRegistry()
+	registry.Register(tools.EditTool{BaseDir: root})
+	calls := []message.ToolCall{
+		{ID: "first", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"real/target.txt","old_string":"first","new_string":"one"}`)},
+		{ID: "second", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"alias/target.txt","old_string":"second","new_string":"two"}`)},
+	}
+	first := (toolExecutionPipeline{registry: registry}).concurrencyPolicyForCall(calls[0])
+	second := (toolExecutionPipeline{registry: registry}).concurrencyPolicyForCall(calls[1])
+	if !tools.WorkspaceLeaseConflict(first, second) {
+		t.Fatal("the cross-agent lease must serialize one file through a directory alias")
+	}
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
+	if len(batches) != 2 {
+		t.Fatalf("batches = %d, want 2: a directory alias must not admit both edits concurrently", len(batches))
+	}
+	editor := tools.EditTool{BaseDir: root}
+	for _, call := range calls {
+		if _, err := editor.Execute(context.Background(), call.Args); err != nil {
+			t.Fatalf("alias path is not an executable edit target: %v", err)
 		}
 	}
 }
@@ -42,7 +88,7 @@ func TestBuildToolExecutionBatchesGroupsOnlyConsecutiveReadOnlyCalls(t *testing.
 		{ID: "3", Name: tools.NameGlob, Args: json.RawMessage(`{"path":"src","patterns":["**/*.go"]}`)},
 	}
 
-	batches := buildToolExecutionBatches(registry, calls)
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
 	if len(batches) != 1 {
 		t.Fatalf("len(batches) = %d, want 1", len(batches))
 	}
@@ -60,7 +106,7 @@ func TestBuildToolExecutionBatchesSplitsDirectoryReadFromFileWrite(t *testing.T)
 		{ID: "2", Name: tools.NameWrite, Args: json.RawMessage(`{"path":"internal/agent/main.go","content":"x"}`)},
 	}
 
-	batches := buildToolExecutionBatches(registry, calls)
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
 	if len(batches) != 2 {
 		t.Fatalf("len(batches) = %d, want 2", len(batches))
 	}
@@ -133,7 +179,7 @@ func TestBuildToolExecutionBatchesMergesJobReadsWithReadOnlySiblings(t *testing.
 		{ID: "4", Name: tools.NameJobOutput, Args: json.RawMessage(`{"job_id":"job-2"}`)},
 	}
 
-	batches := buildToolExecutionBatches(registry, calls)
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
 	if len(batches) != 1 {
 		t.Fatalf("len(batches) = %d, want 1: a waiting job read must not hold back read-only siblings", len(batches))
 	}
@@ -152,7 +198,7 @@ func TestBuildToolExecutionBatchesMergesSameJobReads(t *testing.T) {
 
 	// Each call claims its own window from the job's shared cursor, so two reads
 	// of one job stay independent instead of serializing the turn.
-	batches := buildToolExecutionBatches(registry, calls)
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
 	if len(batches) != 1 || len(batches[0].Calls) != 2 {
 		t.Fatalf("batches = %#v, want one batch of two same-job reads", batches)
 	}
@@ -167,7 +213,7 @@ func TestBuildToolExecutionBatchesMergesReadOnlyShellCommand(t *testing.T) {
 		{ID: "2", Name: tools.NameShell, Args: json.RawMessage(`{"command":"git status"}`)},
 	}
 
-	batches := buildToolExecutionBatches(registry, calls)
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
 	if len(batches) != 1 || len(batches[0].Calls) != 2 {
 		t.Fatalf("batches = %#v, want one batch for an allowlisted read-only command", batches)
 	}
@@ -182,7 +228,7 @@ func TestBuildToolExecutionBatchesKeepsMutatingShellAsBoundary(t *testing.T) {
 		{ID: "2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)},
 	}
 
-	batches := buildToolExecutionBatches(registry, calls)
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
 	if len(batches) != 2 {
 		t.Fatalf("len(batches) = %d, want 2: a mutating shell may touch any path and stays a boundary", len(batches))
 	}
@@ -199,7 +245,7 @@ func TestBuildToolExecutionBatchesMergesRgWithReadsWithoutSiblingAbort(t *testin
 		{ID: "3", Name: tools.NameGrep, Args: json.RawMessage(`{"pattern":"TODO","paths":["."]}`)},
 	}
 
-	batches := buildToolExecutionBatches(registry, calls)
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
 	if len(batches) != 1 || len(batches[0].Calls) != 3 {
 		t.Fatalf("batches = %#v, want one batch of rg + read + grep", batches)
 	}
@@ -210,8 +256,174 @@ func TestBuildToolExecutionBatchesMergesRgWithReadsWithoutSiblingAbort(t *testin
 	// cancels siblings when the batch flag is set, and the flag is the OR of
 	// these per-call policies.
 	for _, call := range calls {
-		if policy := tools.PolicyForTool(registry, call.Name, call.Args); policy.AbortSiblingsOnError {
+		if policy := (toolExecutionPipeline{registry: registry}).concurrencyPolicyForCall(call); policy.AbortSiblingsOnError {
 			t.Fatalf("policy for %s = %#v, want no sibling abort so a failing read cannot cancel the batch", call.Name, policy)
 		}
+	}
+}
+
+// fakeConcurrentTool mimics the scheduling shape of a batchable state-changing
+// tool (file writers and MCP tools share it) without starting a server: calls
+// are batchable unless exclusive, and the policy scopes to a shared resource.
+type fakeConcurrentTool struct {
+	name      string
+	resource  string
+	exclusive bool
+}
+
+func (t fakeConcurrentTool) Name() string               { return t.name }
+func (t fakeConcurrentTool) Description() string        { return "" }
+func (t fakeConcurrentTool) Parameters() map[string]any { return map[string]any{"type": "object"} }
+func (t fakeConcurrentTool) Execute(context.Context, json.RawMessage) (string, error) {
+	return "ok", nil
+}
+func (t fakeConcurrentTool) IsReadOnly() bool { return false }
+func (t fakeConcurrentTool) ConcurrencyPolicy(json.RawMessage) tools.ConcurrencyPolicy {
+	mode := tools.ConcurrencyModeConcurrent
+	if t.exclusive {
+		mode = tools.ConcurrencyModeExclusive
+	}
+	return tools.ConcurrencyPolicy{Resource: t.resource, Mode: mode}
+}
+func (t fakeConcurrentTool) ConcurrencyBatchable(json.RawMessage) bool { return !t.exclusive }
+
+func TestBuildToolExecutionBatchesMergesDisjointFileWrites(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(tools.EditTool{})
+	registry.Register(tools.WriteTool{})
+	registry.Register(tools.ReadTool{})
+	calls := []message.ToolCall{
+		{ID: "1", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"a.go","old_string":"a","new_string":"b"}`)},
+		{ID: "2", Name: tools.NameWrite, Args: json.RawMessage(`{"path":"b.go","content":"x"}`)},
+		{ID: "3", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)},
+	}
+
+	// edit(a.go) and write(b.go) do not overlap, so they share a batch; the read
+	// of a.go still serializes behind the edit of the same file.
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
+	if len(batches) != 2 {
+		t.Fatalf("len(batches) = %d, want 2", len(batches))
+	}
+	if len(batches[0].Calls) != 2 || batches[0].Calls[0].ID != "1" || batches[0].Calls[1].ID != "2" {
+		t.Fatalf("batch[0] = %#v, want edit(a.go) + write(b.go)", batches[0].Calls)
+	}
+	if len(batches[1].Calls) != 1 || batches[1].Calls[0].ID != "3" {
+		t.Fatalf("batch[1] = %#v, want the read of a.go alone", batches[1].Calls)
+	}
+}
+
+func TestBuildToolExecutionBatchesMergesConcurrentCallsOnOneResource(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(fakeConcurrentTool{name: "mcp_alpha_search", resource: "mcp:alpha"})
+	registry.Register(fakeConcurrentTool{name: "mcp_alpha_fetch", resource: "mcp:alpha"})
+	calls := []message.ToolCall{
+		{ID: "1", Name: "mcp_alpha_search"},
+		{ID: "2", Name: "mcp_alpha_fetch"},
+	}
+
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
+	if len(batches) != 1 || len(batches[0].Calls) != 2 {
+		t.Fatalf("batches = %#v, want one batch of two calls to the same server", batches)
+	}
+}
+
+func TestBuildToolExecutionBatchesKeepsExclusiveToolAsBarrier(t *testing.T) {
+	registry := tools.NewRegistry()
+	registry.Register(fakeConcurrentTool{name: "mcp_alpha_search", resource: "mcp:alpha"})
+	registry.Register(fakeConcurrentTool{name: "sample_exclusive", resource: "mcp:alpha", exclusive: true})
+	calls := []message.ToolCall{
+		{ID: "1", Name: "mcp_alpha_search"},
+		{ID: "2", Name: "sample_exclusive"},
+		{ID: "3", Name: "mcp_alpha_search"},
+	}
+
+	// An exclusive call must not merge with calls before or after it: following
+	// calls may not cross its barrier, even when their resources do not overlap.
+	batches := (toolExecutionPipeline{registry: registry}).buildToolExecutionBatches(calls)
+	if len(batches) != 3 {
+		t.Fatalf("len(batches) = %d, want 3: an exclusive call is its own barrier", len(batches))
+	}
+	for i, wantID := range []string{"1", "2", "3"} {
+		if len(batches[i].Calls) != 1 || batches[i].Calls[0].ID != wantID {
+			t.Fatalf("batch[%d] = %#v, want single call %s", i, batches[i].Calls, wantID)
+		}
+	}
+}
+
+func TestToolBatchAndLeaseUseExecutionBinding(t *testing.T) {
+	startup, checkout := t.TempDir(), t.TempDir()
+	registry := tools.NewRegistry()
+	registry.Register(tools.WriteTool{BaseDir: startup})
+	registry.Register(tools.ReadTool{BaseDir: startup})
+	for _, path := range []string{"src/a.go", ".chord/notes/a.md", "MEMORY.md"} {
+		t.Run(path, func(t *testing.T) {
+			root := checkout
+			if strings.HasPrefix(path, ".chord/") || path == "MEMORY.md" {
+				root = startup
+			}
+			writeArgs, _ := json.Marshal(map[string]string{"path": path, "content": "updated"})
+			readArgs, _ := json.Marshal(map[string]string{"path": filepath.Join(root, path)})
+			calls := []message.ToolCall{{ID: "write", Name: tools.NameWrite, Args: writeArgs}, {ID: "read", Name: tools.NameRead, Args: readArgs}}
+			pipeline := toolExecutionPipeline{registry: registry, toolBaseDir: checkout, machineStateRoot: startup}
+			if batches := pipeline.buildToolExecutionBatches(calls); len(batches) != 2 {
+				t.Fatalf("conflicting calls batched: %+v", batches)
+			}
+			if !tools.WorkspaceLeaseConflict(pipeline.concurrencyPolicyForCall(calls[0]), pipeline.concurrencyPolicyForCall(calls[1])) {
+				t.Fatal("execution lease missed the same file")
+			}
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for _, call := range calls {
+				if _, err := pipeline.executeToolForCall(context.Background(), call); err != nil {
+					t.Fatal(err)
+				}
+			}
+			content, err := os.ReadFile(filepath.Join(root, path))
+			if err != nil || string(content) != "updated" {
+				t.Fatalf("executed at a different resource: %q %v", content, err)
+			}
+			tool, _ := registry.Get(tools.NameWrite)
+			if tool.(tools.WriteTool).BaseDir != startup {
+				t.Fatal("binding mutated the registry")
+			}
+		})
+	}
+}
+
+func TestConfirmationEditsRebindPermissionAndExecution(t *testing.T) {
+	for _, machineTarget := range []bool{false, true} {
+		t.Run(fmt.Sprintf("machine=%v", machineTarget), func(t *testing.T) {
+			root, checkout := t.TempDir(), t.TempDir()
+			original, edited, expectedBase := ".chord/notes/a.md", "src/a.go", checkout
+			if machineTarget {
+				original, edited, expectedBase = edited, original, root
+			}
+			registry := tools.NewRegistry()
+			registry.Register(tools.WriteTool{BaseDir: root})
+			originalArgs, _ := json.Marshal(map[string]string{"path": original, "content": "original"})
+			editedArgs, _ := json.Marshal(map[string]string{"path": edited, "content": "edited"})
+			call := message.ToolCall{ID: "write", Name: tools.NameWrite, Args: originalArgs}
+			ruleset := permissionRuleset(t, "write: ask")
+			pipeline := toolExecutionPipeline{registry: registry, toolBaseDir: checkout, machineStateRoot: root, currentRuleset: func() permission.Ruleset { return ruleset }, confirm: func(context.Context, string, string, []string, []string, []string, []string) (ConfirmResponse, error) {
+				return ConfirmResponse{Approved: true, FinalArgsJSON: string(editedArgs)}, nil
+			}}
+			pipeline = pipeline.withMachineStateBaseDir(call)
+			if err := pipeline.applyPermission(context.Background(), &call, &ToolExecutionResult{}); err != nil {
+				t.Fatal(err)
+			}
+			if pipeline.effectiveToolBaseDir() != expectedBase {
+				t.Fatal("confirmation retained the original target's directory")
+			}
+			if err := os.MkdirAll(filepath.Dir(filepath.Join(expectedBase, edited)), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := pipeline.executeToolForCall(context.Background(), call); err != nil {
+				t.Fatal(err)
+			}
+			if policy := pipeline.concurrencyPolicyForCall(call); policy.Resource != "file:"+filepath.Join(expectedBase, edited) {
+				t.Fatalf("lease resource = %s", policy.Resource)
+			}
+		})
 	}
 }
