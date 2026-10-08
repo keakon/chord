@@ -68,6 +68,72 @@ func TestPlanInitAppStartupReturnsSessionPathError(t *testing.T) {
 	}
 }
 
+func TestPlanInitAppStartupCollectsCatalogRecommendationLogLines(t *testing.T) {
+	withTestStateDir(t)
+	if err := os.WriteFile(filepath.Join(flagConfigHome, "config.yaml"), []byte(`providers:
+  openai:
+    preset: openai
+    models:
+      gpt-6.1-sol:
+        compaction:
+          threshold: 0.8
+model_pools:
+  default: [openai/gpt-6.1-sol]
+`), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+	root := t.TempDir()
+	plan, err := planInitAppStartup(root, root)
+	if err != nil {
+		t.Fatalf("planInitAppStartup: %v", err)
+	}
+	if len(plan.CatalogConfigLogLines) != 2 {
+		t.Fatalf("log lines = %+v, want one compact detail and the summary", plan.CatalogConfigLogLines)
+	}
+	detail := plan.CatalogConfigLogLines[0]
+	for _, want := range []string{
+		"providers.openai.models.gpt-6.1-sol.compaction.threshold",
+		"differs from verified catalog profile",
+		"(current 0.8, recommended 0.25)",
+		"declared at " + plan.PathLocator.ConfigHome,
+	} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("detail = %q, want %q", detail, want)
+		}
+	}
+	for _, command := range []string{"chord config advise", "--keep-current", "--accept"} {
+		if strings.Contains(detail, command) {
+			t.Fatalf("detail line must leave %q to the CLI: %s", command, detail)
+		}
+	}
+	if !strings.Contains(plan.CatalogConfigLogLines[1], `run "chord config advise"`) {
+		t.Fatalf("summary = %q, want the action pointer", plan.CatalogConfigLogLines[1])
+	}
+	if len(plan.CatalogAdvisories) != 1 {
+		t.Fatalf("toast messages = %+v, want the profile recommendation", plan.CatalogAdvisories)
+	}
+}
+
+func TestPlanInitAppStartupSkipsCatalogLogLinesWhenNothingIsOutstanding(t *testing.T) {
+	withTestStateDir(t)
+	if err := os.WriteFile(filepath.Join(flagConfigHome, "config.yaml"), []byte(`providers:
+  openai:
+    preset: openai
+model_pools:
+  default: [openai/gpt-6.1-sol]
+`), 0o644); err != nil {
+		t.Fatalf("write global config: %v", err)
+	}
+	root := t.TempDir()
+	plan, err := planInitAppStartup(root, root)
+	if err != nil {
+		t.Fatalf("planInitAppStartup: %v", err)
+	}
+	if len(plan.CatalogConfigLogLines) != 0 {
+		t.Fatalf("log lines = %+v, want silence when nothing is outstanding", plan.CatalogConfigLogLines)
+	}
+}
+
 func TestApplyInitAppStartupPlanCopiesResolvedState(t *testing.T) {
 	globalCfg := &config.Config{Proxy: "https://global.example"}
 	projectCfg := &config.Config{Proxy: "https://project.example"}

@@ -39,6 +39,15 @@ type BlockOrigin struct {
 	Null bool
 }
 
+// ModelFieldOrigin records one scalar leaf declared inside a model block.
+// Fields are indexed separately from Blocks because catalog recommendations
+// need to distinguish explicit leaves from catalog-materialized blocks.
+type ModelFieldOrigin struct {
+	Origin
+	Value    any
+	Editable bool
+}
+
 // LimitOrigin records which limit leaves the indexed layers declared. An
 // explicitly declared input leaf is an independent input contract; an absent
 // one derives from context/output at budget time. Slices are ordered lowest
@@ -59,6 +68,10 @@ type ModelOrigin struct {
 	// Blocks holds the layered declarations of the nullable capability blocks
 	// this index tracks, lowest priority first.
 	Blocks map[string][]BlockOrigin
+	// Fields holds scalar leaves inside tracked model blocks, keyed by their
+	// block-relative path (for example "thinking.effort"). Slices are ordered
+	// lowest priority layer first.
+	Fields map[string][]ModelFieldOrigin
 	Limit  LimitOrigin
 }
 
@@ -78,10 +91,10 @@ type PoolRefOrigin struct {
 
 // SourceIndex is the sparse origin index over the raw config layers. It tracks
 // only the paths resolution needs: provider preset selection, model presence,
-// nullable capability blocks, limit leaves, and model pool references. It is
-// built from sanitized layer bytes (invalid overrides are stripped before
-// indexing, so the index records only effective declarations) and never enters
-// request hot paths.
+// nullable capability blocks, model profile scalar leaves, limit leaves, and
+// model pool references. It is built from sanitized layer bytes (invalid
+// overrides are stripped before indexing, so the index records only effective
+// declarations) and never enters request hot paths.
 type SourceIndex struct {
 	Providers  map[string]ProviderOrigin
 	ModelPools map[string][]PoolRefOrigin
@@ -171,6 +184,61 @@ func (idx *SourceIndex) ModelBlock(provider, model, block string) ([]BlockOrigin
 	}
 	decls, ok := mo.Blocks[block]
 	return decls, ok
+}
+
+// ModelField returns the highest-priority effective raw declaration of a
+// scalar model field. A declaration hidden by an explicit block clear is not
+// returned, because the clear prevents catalog and lower-layer values from
+// participating in the effective block.
+func (idx *SourceIndex) ModelField(provider, model, field string) (ModelFieldOrigin, bool) {
+	mo, ok := idx.Model(provider, model)
+	if !ok {
+		return ModelFieldOrigin{}, false
+	}
+	fields := mo.Fields[field]
+	if len(fields) == 0 {
+		return ModelFieldOrigin{}, false
+	}
+	block := field
+	if before, _, ok := strings.Cut(field, "."); ok {
+		block = before
+	}
+	nullRank := -1
+	for _, decl := range mo.Blocks[block] {
+		if decl.Null {
+			if rank := originLayerRank(decl.Layer); rank > nullRank {
+				nullRank = rank
+			}
+		}
+	}
+	var selected ModelFieldOrigin
+	selectedRank := -1
+	found := false
+	for _, fieldOrigin := range fields {
+		rank := originLayerRank(fieldOrigin.Layer)
+		if rank <= nullRank {
+			continue
+		}
+		if !found || rank >= selectedRank {
+			selected = fieldOrigin
+			selectedRank = rank
+			found = true
+		}
+	}
+	return selected, found
+}
+
+func originLayerRank(layer OriginLayer) int {
+	switch layer {
+	case OriginLayerCatalog:
+		return -1
+	case OriginLayerGlobal:
+		return 0
+	case OriginLayerProject:
+		return 1
+	default:
+		return 0
+	}
 }
 
 // PoolRefs returns the tracked references of one model pool with their
@@ -283,14 +351,14 @@ func (b *sourceIndexBuilder) walkDocument(root *yaml.Node) {
 				}
 			}
 		case "providers":
-			b.walkProviders(e.Val)
+			b.walkProviders(e.Val, !e.ViaMerge && !e.ViaAlias)
 		case "model_pools":
 			b.walkModelPools(e.Val)
 		}
 	}
 }
 
-func (b *sourceIndexBuilder) walkProviders(node *yaml.Node) {
+func (b *sourceIndexBuilder) walkProviders(node *yaml.Node, editable bool) {
 	for _, e := range mappingEntries(node) {
 		po, ok := b.idx.Providers[e.Key]
 		if !ok {
@@ -304,18 +372,21 @@ func (b *sourceIndexBuilder) walkProviders(node *yaml.Node) {
 					po.Preset = append(po.Preset, b.origin(fe.KeyNode))
 				}
 			case "models":
-				b.walkModels(po, fe.Val)
+				b.walkModels(po, fe.Val, editable && !e.ViaMerge && !e.ViaAlias && !fe.ViaMerge && !fe.ViaAlias)
 			}
 		}
 		b.idx.Providers[e.Key] = po
 	}
 }
 
-func (b *sourceIndexBuilder) walkModels(po ProviderOrigin, node *yaml.Node) {
+func (b *sourceIndexBuilder) walkModels(po ProviderOrigin, node *yaml.Node, editable bool) {
 	for _, e := range mappingEntries(node) {
 		mo, ok := po.Models[e.Key]
 		if !ok {
-			mo = ModelOrigin{Blocks: make(map[string][]BlockOrigin)}
+			mo = ModelOrigin{
+				Blocks: make(map[string][]BlockOrigin),
+				Fields: make(map[string][]ModelFieldOrigin),
+			}
 		}
 		mo.Defined = append(mo.Defined, b.origin(e.KeyNode))
 		for _, fe := range mappingEntries(e.Val) {
@@ -333,11 +404,57 @@ func (b *sourceIndexBuilder) walkModels(po ProviderOrigin, node *yaml.Node) {
 					null = false
 				}
 				mo.Blocks[fe.Key] = append(mo.Blocks[fe.Key], BlockOrigin{Origin: b.origin(fe.KeyNode), Null: null})
+				if !null {
+					fieldEditable := editable && !e.ViaMerge && !e.ViaAlias && !fe.ViaMerge && !fe.ViaAlias
+					if fe.Val != nil && fe.Val.Kind == yaml.ScalarNode {
+						var value any
+						if err := fe.Val.Decode(&value); err == nil {
+							mo.Fields[fe.Key] = append(mo.Fields[fe.Key], ModelFieldOrigin{
+								Origin:   b.origin(fe.KeyNode),
+								Value:    value,
+								Editable: fieldEditable,
+							})
+						}
+					} else {
+						b.walkModelFields(&mo, fe.Key, fe.Val, fieldEditable)
+					}
+				}
 			case fe.Key == "limit":
 				b.walkLimit(&mo.Limit, fe.Val)
 			}
 		}
 		po.Models[e.Key] = mo
+	}
+}
+
+func (b *sourceIndexBuilder) walkModelFields(mo *ModelOrigin, prefix string, node *yaml.Node, editable bool) {
+	if mo.Fields == nil {
+		mo.Fields = make(map[string][]ModelFieldOrigin)
+	}
+	node = resolveYAMLNode(node)
+	if node == nil || node.Kind != yaml.MappingNode {
+		return
+	}
+	for _, entry := range mappingEntries(node) {
+		path := prefix + "." + entry.Key
+		if entry.Val == nil || entry.Val.Kind == yaml.ScalarNode {
+			if entry.Val == nil || entry.Val.Tag == "!!null" {
+				continue
+			}
+			var value any
+			if err := entry.Val.Decode(&value); err != nil {
+				continue
+			}
+			mo.Fields[path] = append(mo.Fields[path], ModelFieldOrigin{
+				Origin:   b.origin(entry.KeyNode),
+				Value:    value,
+				Editable: editable && !entry.ViaMerge && !entry.ViaAlias,
+			})
+			continue
+		}
+		if entry.Val.Kind == yaml.MappingNode {
+			b.walkModelFields(mo, path, entry.Val, editable && !entry.ViaMerge && !entry.ViaAlias)
+		}
 	}
 }
 
@@ -447,7 +564,10 @@ func (idx *SourceIndex) ensureModelOrigin(provider, model string) {
 		po.Models = make(map[string]ModelOrigin)
 	}
 	if _, ok := po.Models[model]; !ok {
-		po.Models[model] = ModelOrigin{Blocks: make(map[string][]BlockOrigin)}
+		po.Models[model] = ModelOrigin{
+			Blocks: make(map[string][]BlockOrigin),
+			Fields: make(map[string][]ModelFieldOrigin),
+		}
 	}
 	idx.Providers[provider] = po
 }
@@ -464,9 +584,11 @@ type yamlEntry struct {
 	KeyNode  *yaml.Node
 	Val      *yaml.Node
 	ViaMerge bool
+	ViaAlias bool
 }
 
 // mappingEntries projects validated YAML declarations into the origin index.
+// Values are resolved for traversal, while ViaAlias keeps direct-edit safety.
 func mappingEntries(node *yaml.Node) []yamlEntry {
 	entries, err := YAMLMappingEntries(node)
 	if err != nil {
@@ -477,6 +599,7 @@ func mappingEntries(node *yaml.Node) []yamlEntry {
 		out = append(out, yamlEntry{
 			Key: entry.Key, KeyNode: entry.KeyNode,
 			Val: resolveYAMLNode(entry.Val), ViaMerge: entry.ViaMerge,
+			ViaAlias: entry.Val != resolveYAMLNode(entry.Val),
 		})
 	}
 	return out
@@ -656,13 +779,22 @@ func mergeSourceIndex(dst, src *SourceIndex) {
 		for model, mo := range po.Models {
 			target, ok := existing.Models[model]
 			if !ok {
-				target = ModelOrigin{Blocks: make(map[string][]BlockOrigin, len(mo.Blocks))}
+				target = ModelOrigin{
+					Blocks: make(map[string][]BlockOrigin, len(mo.Blocks)),
+					Fields: make(map[string][]ModelFieldOrigin, len(mo.Fields)),
+				}
 				existing.Models[model] = target
 			}
 			target.Defined = append(target.Defined, mo.Defined...)
 			target.Catalog = append(target.Catalog, mo.Catalog...)
 			for block, decls := range mo.Blocks {
 				target.Blocks[block] = append(target.Blocks[block], decls...)
+			}
+			if target.Fields == nil {
+				target.Fields = make(map[string][]ModelFieldOrigin, len(mo.Fields))
+			}
+			for field, decls := range mo.Fields {
+				target.Fields[field] = append(target.Fields[field], decls...)
 			}
 			target.Limit.Context = append(target.Limit.Context, mo.Limit.Context...)
 			target.Limit.Input = append(target.Limit.Input, mo.Limit.Input...)

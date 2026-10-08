@@ -20,6 +20,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord auth [provider]`          | Sign in with a `preset: codex` OAuth provider                    |
 | `chord config show`              | Show the effective config with origins, or the built-in model catalog |
 | `chord config add <provider>/<model>` | Add a model reference from the model catalog and append it to a pool |
+| `chord config advise`            | Review and apply catalog-based model configuration recommendations |
 | `chord config refresh-catalog`       | Pull the latest tagged catalog snapshot from the upstream data repository |
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
 | `chord acp`                      | Serve the Agent Client Protocol over stdio for ACP clients       |
@@ -246,6 +247,38 @@ chord config show --catalog
 chord config show --json
 ```
 
+## `chord config advise`
+
+Review explicit model settings that differ from a verified `config_profile` in the active model catalog. These are deterministic configuration recommendations, not automatic model selection or a claim that one setting is best for every task. Catalog-filled defaults do not produce recommendations; only an explicit user value that differs from the profile does.
+
+Without arguments, the command lists the model, YAML path, current value, recommended value, and catalog source. Use `--json` for automation. Select one recommendation with `<provider>/<model> <field>`:
+
+```bash
+# List active profile recommendations
+chord config advise
+
+# Inspect machine-readable recommendations
+chord config advise --json
+
+# Remove a safe direct override and follow the catalog at load time
+chord config advise openai/gpt-6.1-sol reasoning.summary \
+  --accept follow-catalog
+
+# Pin the recommended scalar in config.yaml
+chord config advise openai/gpt-6.1-sol reasoning.summary --accept pin
+
+# Keep the current value for this exact catalog/value combination
+chord config advise openai/gpt-6.1-sol reasoning.summary --keep-current
+
+# Apply every active recommendation
+chord config advise --accept pin
+
+# Keep every current value
+chord config advise --keep-current
+```
+
+`follow-catalog` applies only to directly declared leaves; it is offered when removing the selected leaf cannot change another explicit leaf in the same block. When a value is inherited through YAML aliases or merge keys, `--accept pin` writes an explicit override by trying three locations in order: the declaring scalar (only when that is safe for other bindings), an override under the model's own mapping (every binding of that model inherits it), and an expansion of the selected provider's `models` entry (only that binding changes). Each candidate is resolved and validated: it must resolve the selected recommendation without introducing a new recommendation or changing an unrelated one. When no safe write location exists, the command reports the manual edit to make instead. Without a model and field, the same flags apply to every active recommendation: `--accept pin` resolves all of them, `--accept follow-catalog` does so only when every recommendation is a removable direct leaf, and `--keep-current` acknowledges them all. A batch applies and verifies each edit in turn; the first recommendation that cannot be resolved stops the command and is reported, while the edits already applied stay in place, so re-running resumes with the rest. When several bindings inherit the same declaration (same layer, file, and line), the listing shows a single entry that names the affected bindings. Editing that declaration changes every binding, and `--keep-current` on any one binding acknowledges all of them; `--json` still reports one entry per binding. The command locks the target config, reloads the recommendation, validates a candidate configuration, and replaces the file only after successful resolution. A write re-encodes the whole document, so blank lines between entries are not preserved (comments and key order are preserved). Keep-current suppression is fingerprinted by provider, model, field, catalog ID/version, current value, and recommended value; changing any of those facts re-arms the recommendation.
+
 ## `chord config add`
 
 Add a model reference to `config.yaml` and append it to a model pool, using the model catalog as the source of verified facts. The command is offline by default, and the candidate config is resolved in full before anything is written — the file is only replaced when that resolution reports no errors.
@@ -308,7 +341,7 @@ Pull the newest version tag of the upstream model catalog repository ([chord-mod
 
 Check the global and project `config.yaml` files for unrecognized keys, wrongly typed values, malformed YAML, and invalid setting values (such as an unknown `retry_backoff` or a negative diagnostics threshold). The command reports every problem it finds in one pass instead of stopping at the first one.
 
-It also loads the effective config the runtime would start with (project merged over global) and reports model pool references that do not resolve — a reference naming an unknown provider or model, or a `@variant` the model does not define. Parse problems stay attributed to their file; such effective-config problems are reported as `problem:` lines (the `errors` field in `--json`). The report also lists advisories: settings that load exactly as written but may not behave as intended, including catalog references that a newer verified model likely supersedes, each with the command to rebind or to keep the current choice. Advisories never change the exit status.
+It also loads the effective config the runtime would start with (project merged over global) and reports model pool references that do not resolve — a reference naming an unknown provider or model, or a `@variant` the model does not define. Parse problems stay attributed to their file; such effective-config problems are reported as `problem:` lines (the `errors` field in `--json`). The report also lists advisories: settings that load exactly as written but may not behave as intended, including catalog references that a newer verified model likely supersedes and explicit model settings that differ from a verified profile. Each includes an action for accepting the recommendation or keeping the current choice. Advisories never change the exit status.
 
 Chord's config loader logs these problems and starts anyway, treating the offending value as not configured. This command surfaces them explicitly so you can validate a config file without reading the log.
 

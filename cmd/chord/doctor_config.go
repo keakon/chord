@@ -99,7 +99,7 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 			report.Warnings = append(report.Warnings, diagnostic.String())
 		}
 	}
-	report.Warnings = append(report.Warnings, config.Advisories(rc.Config)...)
+	report.Warnings = append(report.Warnings, config.ResolvedAdvisories(rc)...)
 
 	report.OK = true
 	totalIssues := 0

@@ -148,6 +148,11 @@ type initAppStartupPlan struct {
 	Config            *config.Config
 	ProjectConfigPath string
 	Diagnostics       []config.Diagnostic
+	CatalogAdvisories []string
+	// CatalogConfigLogLines carries the compact profile recommendation lines
+	// and their summary for the runtime log file; the console printed only the
+	// summary before the log file was set up.
+	CatalogConfigLogLines []string
 }
 
 // planInitAppStartup resolves everything startup needs before initApp wires the
@@ -177,8 +182,16 @@ func planInitAppStartup(contentRoot, workDir string) (*initAppStartupPlan, error
 		return nil, initialSetupRequiredError()
 	}
 	globalCfg, projectCfg, cfg := resolved.Global, resolved.Project, resolved.Config
-	for _, advisory := range config.Advisories(cfg) {
+	// Keep the console short: effective-config checks and catalog freshness
+	// hints log in full, while profile recommendations print one summary line
+	// here and their compact detail to the runtime log file once it is set up.
+	for _, advisory := range config.Advisories(resolved.Config) {
 		log.Warnf("config: %s", advisory)
+	}
+	catalogRecommendations := config.CatalogConfigAdvisories(resolved)
+	catalogSummary := config.CatalogConfigAdvisorySummary(catalogRecommendations)
+	if catalogSummary != "" {
+		log.Warnf("config: %s", catalogSummary)
 	}
 	pathLocator, err := config.ResolvePathLocator(globalCfg, config.PathOptions{})
 	if err != nil {
@@ -188,17 +201,23 @@ func planInitAppStartup(contentRoot, workDir string) (*initAppStartupPlan, error
 	if err != nil {
 		return nil, fmt.Errorf("resolve project storage paths: %w", err)
 	}
+	catalogLogLines := config.CatalogConfigAdvisoryLogMessages(catalogRecommendations)
+	if len(catalogLogLines) > 0 {
+		catalogLogLines = append(catalogLogLines, catalogSummary)
+	}
 	return &initAppStartupPlan{
-		ContentRoot:       contentRoot,
-		WorkDir:           workDir,
-		PathLocator:       pathLocator,
-		ProjectLocator:    projectLocator,
-		ConfigHome:        pathLocator.ConfigHome,
-		GlobalConfig:      globalCfg,
-		ProjectConfig:     projectCfg,
-		Config:            cfg,
-		ProjectConfigPath: projectConfigPath,
-		Diagnostics:       resolved.Diagnostics,
+		ContentRoot:           contentRoot,
+		WorkDir:               workDir,
+		PathLocator:           pathLocator,
+		ProjectLocator:        projectLocator,
+		ConfigHome:            pathLocator.ConfigHome,
+		GlobalConfig:          globalCfg,
+		ProjectConfig:         projectCfg,
+		Config:                cfg,
+		ProjectConfigPath:     projectConfigPath,
+		Diagnostics:           resolved.Diagnostics,
+		CatalogAdvisories:     append(config.CatalogFreshnessAdvisories(cfg), config.CatalogConfigAdvisoryMessages(catalogRecommendations)...),
+		CatalogConfigLogLines: catalogLogLines,
 	}, nil
 }
 
@@ -499,6 +518,11 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		log.Info("loaded project config")
 		log.Debugf("loaded project config path=%v", projectConfigPath)
 	}
+	// Profile recommendations were summarized on the console before the log
+	// file was set up; their compact detail belongs in the file.
+	for _, line := range startupPlan.CatalogConfigLogLines {
+		log.Warnf("config: %s", line)
+	}
 
 	// Resolve agent configs once and reuse the result for both default-model
 	// selection and MainAgent setup. Agent definitions are control-plane
@@ -749,7 +773,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.MainAgent.SetSessionLock(ac.SessionLock)
 	ac.MainAgent.SetStartupSkippedLockedSessions(ac.StartupSkippedLockedSessions)
 	ac.MainAgent.SetStartupConfigIssues(startupConfigIssues(startupPlan))
-	ac.MainAgent.SetStartupCatalogAdvisories(config.CatalogFreshnessAdvisories(startupPlan.Config))
+	ac.MainAgent.SetStartupCatalogAdvisories(startupPlan.CatalogAdvisories)
 	ac.MainAgent.SetSessionArtifactsDirFunc(func() string {
 		if ac == nil || strings.TrimSpace(ac.SessionDir) == "" {
 			return ""

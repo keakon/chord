@@ -20,6 +20,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord auth [provider]`           | 用 `preset: codex` provider 登录 OAuth                            |
 | `chord config show`               | 查看带来源的有效配置，或浏览内置模型目录                          |
 | `chord config add <provider>/<model>` | 从模型目录添加模型引用并追加到模型池                              |
+| `chord config advise`             | 查看并处理模型目录给出的配置建议                                    |
 | `chord config refresh-catalog`       | 从上游数据仓库拉取最新 tag 的目录快照                             |
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
 | `chord acp`                       | 为 ACP 客户端提供 stdio 版 Agent Client Protocol 服务             |
@@ -246,6 +247,38 @@ chord config show --catalog
 chord config show --json
 ```
 
+## `chord config advise`
+
+查看当前生效模型目录中已核验 `config_profile` 与用户显式配置之间的差异。它只提供确定性的配置建议，不会自动切换模型，也不声称某个设置适合所有任务。目录自动填充的默认值不会触发建议，只有用户明确写入且与 profile 不同的值才会出现。
+
+不带参数时列出模型、YAML 路径、当前值、推荐值和目录来源；脚本可加 `--json`。指定 `<provider>/<model> <field>` 后，可以接受单条建议：
+
+```bash
+# 查看当前建议
+chord config advise
+
+# 输出机器可读结果
+chord config advise --json
+
+# 删除安全的直接覆盖，后续跟随目录值
+chord config advise openai/gpt-6.1-sol reasoning.summary \
+  --accept follow-catalog
+
+# 把推荐标量固定写入 config.yaml
+chord config advise openai/gpt-6.1-sol reasoning.summary --accept pin
+
+# 保留当前值，只抑制这一次目录/数值组合
+chord config advise openai/gpt-6.1-sol reasoning.summary --keep-current
+
+# 接受全部生效建议
+chord config advise --accept pin
+
+# 保留全部当前值
+chord config advise --keep-current
+```
+
+`follow-catalog` 只适用于直接声明的叶子：仅当删除该叶子不会改变同一配置块中的其他显式叶子时才会提供。值通过 YAML 别名或合并键继承时，改用 `--accept pin` 写入显式覆盖，按以下顺序尝试三级写入位置：声明处的标量（仅当对其他绑定安全时）、模型自身映射下的覆盖（该模型的所有绑定都会继承）、展开所选 provider 的 `models` 条目（只有当前绑定改变）。每一级都会解析并校验候选配置：必须消解所选建议，且不得新增建议或改变无关建议；找不到安全写入位置时，命令改为给出需要手工执行的修改。不带模型与字段时，这些参数作用于全部生效建议：`--accept pin` 全部接受，`--accept follow-catalog` 仅在全部都是可移除的直接叶子时可用，`--keep-current` 一次保留全部。批量执行会逐条应用并校验；第一条无法处理的建议会中止命令并报错，已完成的修改保留，重新执行会继续处理剩余部分。同一处声明（同一层、同一文件与行）被多个绑定继承时，列表只显示一条并列出这些绑定；编辑该声明会影响全部绑定，对其中任意一条执行 `--keep-current` 会同时认可全部。`--json` 仍按绑定逐条输出。命令会锁定目标配置、重新加载建议、解析候选配置；只有候选解析成功才替换文件。写盘会重新编码整份文档，因此条目之间的空行不会保留（注释与键顺序不变）。`--keep-current` 按 provider、模型、字段、目录 ID/版本、当前值和推荐值生成指纹；其中任一事实变化后，建议会重新出现。
+
 ## `chord config add`
 
 向 `config.yaml` 添加模型引用并追加到模型池，以模型目录为已验证事实来源。命令默认离线；写入之前会对候选配置执行完整解析，只有解析无错误时才会替换文件。
@@ -308,7 +341,7 @@ chord config add mygw2/gpt-6-sol-gw --keep-current
 
 检查全局与项目 `config.yaml` 里的未知字段、类型不对的值、YAML 语法错误，以及不合理的配置值（比如非法的 `retry_backoff`、负数 diagnostics 阈值）。命令会一次性列出所有问题，而不是遇到第一个就停。
 
-命令还会加载运行时将要使用的有效配置（项目层叠加在全局层之上），报告无法解析的模型池引用——引用了不存在的 provider 或 model，或使用了模型未定义的 `@variant`。解析类问题归属到各自的文件；这类有效配置问题以 `problem:` 行输出（`--json` 里是 `errors` 字段）。 报告中还会列出 advisory：加载完全按原文生效、但实际行为可能不符合预期的设置，其中包括很可能已被更新的已验证模型取代的目录引用，每条都附有重新绑定或保留现状的命令。advisory 不会改变退出状态。
+命令还会加载运行时将要使用的有效配置（项目层叠加在全局层之上），报告无法解析的模型池引用——引用了不存在的 provider 或 model，或使用了模型未定义的 `@variant`。解析类问题归属到各自的文件；这类有效配置问题以 `problem:` 行输出（`--json` 里是 `errors` 字段）。报告中还会列出 advisory：加载完全按原文生效、但实际行为可能不符合预期的设置，其中包括很可能已被更新的已验证模型取代的目录引用，以及显式模型设置与已核验 profile 不一致的配置，每条都附有接受建议或保留现状的命令。advisory 不会改变退出状态。
 
 Chord 的配置加载器遇到这些问题只会写日志并照常启动，把出错的值当作未配置处理。这个命令把它们显式列出来，方便你在不翻日志的情况下校验配置文件。
 
