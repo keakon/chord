@@ -58,8 +58,6 @@ type SessionMeta struct {
 const (
 	WorktreeSwitchCreate         = "create"
 	WorktreeSwitchResume         = "resume"
-	WorktreeSwitchEnter          = "enter"
-	WorktreeSwitchExit           = "exit"
 	WorktreeSwitchResumeFallback = "resume_fallback"
 	// WorktreeSwitchStartup records a session that began in a checkout because
 	// chord was launched from inside it, without --worktree or --resume naming

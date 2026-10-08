@@ -59,32 +59,3 @@ func TestRecordTaskToolChangesSpellsPathsAgainstActiveCheckout(t *testing.T) {
 		t.Fatalf("attributed files = %#v, want the active checkout spelling", files)
 	}
 }
-
-func TestRecordTaskToolChangesWorktreeSwitchesAreAttributionNeutral(t *testing.T) {
-	_, sub := newMixedBatchTestSubAgent(t)
-	sub.tools.Register(tools.NewWorktreeExitTool(nil))
-
-	cases := []struct {
-		name     string
-		args     string
-		removing bool
-	}{
-		{tools.NameWorktreeEnter, `{"name":"feat-x"}`, false},
-		{tools.NameWorktreeExit, `{"action":"keep"}`, false},
-		{tools.NameWorktreeExit, `{}`, false},
-		{tools.NameWorktreeExit, `{"action":"remove"}`, true},
-		{tools.NameWorktreeExit, `{"action":"remove","discard_changes":true}`, true},
-		{tools.NameWorktreeExit, `{"action":"delete"}`, true},
-		{tools.NameWorktreeExit, `{"action":`, true},
-	}
-	for _, tc := range cases {
-		sub.fileAttributionIncomplete = false
-		files, incomplete := sub.recordTaskToolChanges(&toolResult{Name: tc.name, ArgsJSON: tc.args}, false)
-		if incomplete != tc.removing {
-			t.Fatalf("%s %s: incomplete=%v, want %v", tc.name, tc.args, incomplete, tc.removing)
-		}
-		if len(files) != 0 {
-			t.Fatalf("%s %s: files=%#v, want none", tc.name, tc.args, files)
-		}
-	}
-}

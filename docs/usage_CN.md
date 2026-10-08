@@ -263,9 +263,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 创建或进入 worktree 会改变 Chord 运行所在的目录。你可以用 `chord --worktree <name>`，也可以用 `chord worktree <name>`；`worktree` 子命令同时承担 `list`、`remove`、`finish` 等管理操作。这些命令是启动 worktree 会话的常规入口。
 
-会话内的 `worktree_enter`、`worktree_exit`、`worktree_list` 工具只对已经运行在 Chord 管理 worktree 中的会话，以及明确被放入 worktree 的子代理开放。普通会话不会加载这些工具，避免无关的工具定义占用提示词。任务需要在会话内控制 worktree 时，先用 `chord worktree <name>` 启动会话。会话一旦拥有这些工具，离开 worktree 后在本次对话里仍然可用；`/new`、`/resume` 和重启会按会话所在的 checkout 重新判断。
-
-worktree 工具和命令都要求 `PATH` 里有 `git`。找不到 git 时，worktree 工具不会出现在工具列表里，创建或进入 worktree、`list`、`remove`、`finish` 都会拒绝执行，并直接说明缺的是 git 二进制，而不是报成仓库错误。记录过 checkout 的会话照样能恢复：Chord 会说明无法验证该 checkout，在解析出的仓库检出里继续，并保留记录，之后装回 git 再恢复仍会切回那个 checkout。
+worktree 命令要求 `PATH` 里有 `git`。找不到 git 时，创建或进入 worktree、`list`、`remove`、`finish` 都会拒绝执行，并直接说明缺的是 git 二进制，而不是报成仓库错误。记录过 checkout 的会话照样能恢复：Chord 会说明无法验证该 checkout，在解析出的仓库检出里继续，并保留记录，之后装回 git 再恢复仍会切回那个 checkout。
 
 **落在哪里。** 默认在 `<state-dir>/worktrees/<repo-id>/<slug>`，也就是仓库之外。想换位置就设 `worktree.root`：相对路径以主仓库根为基准，`root: .chord/worktrees` 会落在 `<repo>/.chord/worktrees/<slug>`。这个目录在仓库内时，Chord 会在其中放一个内容为 `*` 的 `.gitignore`，这些 checkout 就不会出现在未跟踪文件里；该文件只负责 `git status` 整洁，而 chord 自己的 `grep` / `glob` 会跳过这个根目录。但别的工具并不知道它：仓库内的 checkout 就是磁盘上的第二份代码树，凡是依赖索引或全仓扫描的工具（LSP 建索引、`docker` build context、会遍历整个仓库的测试运行器）都可能把它一并算进去。留在默认位置就不会有这个问题。
 
@@ -277,9 +275,7 @@ worktree 工具和命令都要求 `PATH` 里有 `git`。找不到 git 时，work
 
 **checkout 不是独占的。** 创建或进入 worktree 时，只要目录已存在就复用同一个，也不会阻止两个会话在同一个 checkout 里干活：它们看到的是同一份未提交改动，也可能互相覆盖文件。要并行推进的任务就各给一个 worktree；已经攒了未提交改动的 checkout，就当成只能有一个写者。
 
-**权限跟着会话，不跟着 checkout。** 权限规则对同一仓库的每个 checkout 都生效：主工作区里写 `write src/**: allow`，在 `<worktree>/src/` 里同样允许写；也没法写出「只允许某一个 checkout」的规则。Chord 把仓库内的路径按仓库相对拼写去匹配，所以绝对路径规则永远匹配不到它们。worktree 是用来并行干活的，不是用来收窄权限的。hook、agent 配置、权限规则和 worktree 创建配置都在会话启动时从主工作区读取，会话中途进出 worktree 不会改变它们——想用分支上改过的配置，就在该 checkout 新开一个会话。
-
-**会话内的 worktree 工具同样按权限规则判定。** `worktree_enter`、`worktree_exit`、`worktree_list` 与其他工具一样受权限规则约束，而且 `worktree_exit` 的规则可以点名 action：`worktree_exit: {remove: deny}` 会拦住删除 checkout，退出（`keep`）照常允许；传了 `discard_changes: true` 的删除也由同一条规则拦住。详见[权限与安全](./permissions-and-safety_CN.md#特殊权限语义)。
+**权限跟着会话，不跟着 checkout。** 权限规则对同一仓库的每个 checkout 都生效：主工作区里写 `write src/**: allow`，在 `<worktree>/src/` 里同样允许写；也没法写出「只允许某一个 checkout」的规则。Chord 把仓库内的路径按仓库相对拼写去匹配，所以绝对路径规则永远匹配不到它们。worktree 是用来并行干活的，不是用来收窄权限的。hook、agent 配置、权限规则和 worktree 创建配置都在会话启动时从主工作区读取；恢复到记录在别的 checkout 的会话不会重新加载它们——想用分支上改过的配置，就在该 checkout 新开一个会话。
 
 ## 常用本地控制命令
 

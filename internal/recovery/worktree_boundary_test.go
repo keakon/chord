@@ -12,7 +12,7 @@ func TestRecordWorktreeBoundarySetsBindingAndAppendsTimeline(t *testing.T) {
 	}
 	binding := WorktreeBinding{RepoID: "abc123", RepoRoot: "/repo/main", Name: "feat-a", Branch: "chord/feat-a", Path: "/state/wt/feat-a"}
 	entry := WorktreeTimelineEntry{
-		Reason:     WorktreeSwitchEnter,
+		Reason:     WorktreeSwitchCreate,
 		Name:       "feat-a",
 		Branch:     "chord/feat-a",
 		Path:       "/state/wt/feat-a",
@@ -40,18 +40,18 @@ func TestRecordWorktreeBoundarySetsBindingAndAppendsTimeline(t *testing.T) {
 	if len(got.WorktreeTimeline) != 1 {
 		t.Fatalf("timeline = %+v, want one entry", got.WorktreeTimeline)
 	}
-	if entry := got.WorktreeTimeline[0]; entry.Reason != WorktreeSwitchEnter || entry.Head != "deadbeef" || entry.Generation != 1 {
+	if entry := got.WorktreeTimeline[0]; entry.Reason != WorktreeSwitchCreate || entry.Head != "deadbeef" || entry.Generation != 1 {
 		t.Fatalf("timeline entry = %+v", entry)
 	}
 }
 
-func TestRecordWorktreeBoundaryClearsBindingOnExit(t *testing.T) {
+func TestRecordWorktreeBoundaryClearsBindingOnResumeFallback(t *testing.T) {
 	dir := t.TempDir()
-	if err := RecordWorktreeBoundary(dir, WorktreeBinding{RepoID: "abc", RepoRoot: "/repo/main", Name: "feat-a", Branch: "chord/feat-a", Path: "/state/wt/feat-a"}, WorktreeTimelineEntry{Reason: WorktreeSwitchEnter, At: time.Now().UTC()}); err != nil {
-		t.Fatalf("enter: %v", err)
+	if err := RecordWorktreeBoundary(dir, WorktreeBinding{RepoID: "abc", RepoRoot: "/repo/main", Name: "feat-a", Branch: "chord/feat-a", Path: "/state/wt/feat-a"}, WorktreeTimelineEntry{Reason: WorktreeSwitchCreate, At: time.Now().UTC()}); err != nil {
+		t.Fatalf("create: %v", err)
 	}
-	if err := RecordWorktreeBoundary(dir, WorktreeBinding{}, WorktreeTimelineEntry{Reason: WorktreeSwitchExit, Generation: 2, At: time.Now().UTC()}); err != nil {
-		t.Fatalf("exit: %v", err)
+	if err := RecordWorktreeBoundary(dir, WorktreeBinding{}, WorktreeTimelineEntry{Reason: WorktreeSwitchResumeFallback, Generation: 2, At: time.Now().UTC()}); err != nil {
+		t.Fatalf("resume fallback: %v", err)
 	}
 
 	got, err := LoadSessionMeta(dir)
@@ -62,9 +62,9 @@ func TestRecordWorktreeBoundaryClearsBindingOnExit(t *testing.T) {
 		t.Fatalf("exit must clear the recorded worktree: %+v", got)
 	}
 	if got.RepoID != "abc" || got.RepoRoot != "/repo/main" {
-		t.Fatalf("repository identity should survive a worktree exit: %+v", got)
+		t.Fatalf("repository identity should survive a resume fallback: %+v", got)
 	}
-	if len(got.WorktreeTimeline) != 2 || got.WorktreeTimeline[1].Reason != WorktreeSwitchExit || got.WorktreeTimeline[1].Generation != 2 {
+	if len(got.WorktreeTimeline) != 2 || got.WorktreeTimeline[1].Reason != WorktreeSwitchResumeFallback || got.WorktreeTimeline[1].Generation != 2 {
 		t.Fatalf("timeline = %+v", got.WorktreeTimeline)
 	}
 }
@@ -72,7 +72,7 @@ func TestRecordWorktreeBoundaryClearsBindingOnExit(t *testing.T) {
 func TestRecordWorktreeBoundaryTrimsTimeline(t *testing.T) {
 	dir := t.TempDir()
 	for i := range maxWorktreeTimelineEntries + 5 {
-		entry := WorktreeTimelineEntry{Reason: WorktreeSwitchEnter, Generation: uint64(i + 1), At: time.Now().UTC()}
+		entry := WorktreeTimelineEntry{Reason: WorktreeSwitchCreate, Generation: uint64(i + 1), At: time.Now().UTC()}
 		if err := RecordWorktreeBoundary(dir, WorktreeBinding{RepoID: "abc", RepoRoot: "/repo", Name: "feat-a", Branch: "chord/feat-a", Path: "/state/wt/feat-a"}, entry); err != nil {
 			t.Fatalf("record %d: %v", i, err)
 		}
@@ -98,13 +98,13 @@ func TestSessionMetaIsZeroTracksWorktreeTimeline(t *testing.T) {
 	if !(SessionMeta{WorktreeTimeline: []WorktreeTimelineEntry{}}).IsZero() {
 		t.Fatal("an empty timeline must not make the metadata meaningful")
 	}
-	if (SessionMeta{WorktreeTimeline: []WorktreeTimelineEntry{{Reason: WorktreeSwitchEnter}}}).IsZero() {
+	if (SessionMeta{WorktreeTimeline: []WorktreeTimelineEntry{{Reason: WorktreeSwitchCreate}}}).IsZero() {
 		t.Fatal("a recorded switch boundary must make the metadata meaningful")
 	}
 }
 
 func TestRecordWorktreeBoundaryEmptySessionDirIsNoop(t *testing.T) {
-	if err := RecordWorktreeBoundary("  ", WorktreeBinding{Path: "/state/wt/feat-a"}, WorktreeTimelineEntry{Reason: WorktreeSwitchEnter}); err != nil {
+	if err := RecordWorktreeBoundary("  ", WorktreeBinding{Path: "/state/wt/feat-a"}, WorktreeTimelineEntry{Reason: WorktreeSwitchCreate}); err != nil {
 		t.Fatalf("empty session dir must be a no-op: %v", err)
 	}
 }

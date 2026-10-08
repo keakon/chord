@@ -78,10 +78,7 @@ func TestSubAgentSessionReminderNamesInheritedWorktree(t *testing.T) {
 	a, _ := newWorktreeTestAgent(t, "session-sub-env")
 	configureNestedDelegationTestRuntime(a, 1)
 
-	res, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-env"})
-	if err != nil {
-		t.Fatalf("WorktreeEnter: %v", err)
-	}
+	installed := installTestCheckout(t, a, "feat-env")
 	handle, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "work", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent: %v", err)
@@ -93,39 +90,5 @@ func TestSubAgentSessionReminderNamesInheritedWorktree(t *testing.T) {
 	if state := child.workDirState.load(); state.WorktreeID != "feat-env" {
 		t.Fatalf("child binding = %#v, want the inherited feat-env", state)
 	}
-	assertEnvBlockStatesWorktree(t, subAgentReminderContent(t, child), res.Path, "feat-env", res.Branch)
-}
-
-// TestSubAgentSessionReminderFollowsWorktreeSwitch pins the live side of the
-// reminder: a worker that switches checkout mid-task must not keep describing
-// the directory it left in every later request.
-func TestSubAgentSessionReminderFollowsWorktreeSwitch(t *testing.T) {
-	ctx := context.Background()
-	a, repo := newWorktreeTestAgent(t, "session-sub-switch")
-	sub := newControllableTestSubAgent(t, a, "task-switch")
-
-	before := subAgentReminderContent(t, sub)
-	if !strings.Contains(before, "Working directory: "+repo) {
-		t.Fatalf("initial reminder missing startup dir %q:\n%s", repo, before)
-	}
-	if strings.Contains(before, "Worktree:") {
-		t.Fatalf("initial reminder should not claim a worktree:\n%s", before)
-	}
-
-	res, err := sub.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-switch"})
-	if err != nil {
-		t.Fatalf("sub WorktreeEnter: %v", err)
-	}
-	assertEnvBlockStatesWorktree(t, subAgentReminderContent(t, sub), res.Path, "feat-switch", res.Branch)
-
-	if _, err := sub.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-switch"}); err != nil {
-		t.Fatalf("sub WorktreeExit: %v", err)
-	}
-	after := subAgentReminderContent(t, sub)
-	if !strings.Contains(after, "Working directory: "+repo) {
-		t.Fatalf("reminder after exit missing startup dir %q:\n%s", repo, after)
-	}
-	if strings.Contains(after, "Worktree:") {
-		t.Fatalf("reminder after exit still claims a worktree:\n%s", after)
-	}
+	assertEnvBlockStatesWorktree(t, subAgentReminderContent(t, child), installed.Path, "feat-env", installed.Branch)
 }

@@ -16,7 +16,7 @@ import (
 )
 
 // resolveWorktreeBranchPrefix normalizes the configured branch prefix once, so
-// the policy-root resolver and the worktree tools agree on which worktrees are
+// the policy-root resolver and worktree creation agree on which worktrees are
 // chord-managed. Invalid values are logged and fall back to the default.
 func resolveWorktreeBranchPrefix(cfg *config.Config) string {
 	if cfg == nil {

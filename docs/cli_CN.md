@@ -503,7 +503,7 @@ removed 1 sessions, total 263.5 MB
 
 管理 chord 管理的 git worktree。可使用 `chord worktree <name>`（或 `chord --worktree <name>`）创建或进入一个 worktree 并在其中启动会话；本命令的子命令用于 `list`、`remove`、`finish` 等管理操作。
 
-这组命令要求 `PATH` 里有 `git`。会话内的 worktree 工具也要求 git，并且只在已经运行于 Chord 管理 worktree 的会话中开放，或开放给明确放入 worktree 的子代理；普通会话不会加载这些工具。找不到 git 时工具会被隐藏，`chord worktree <name>`、`--worktree` 以及 `list`、`remove`、`finish` 都会拒绝执行，并说明缺的是 git 二进制，而不是报成仓库错误。
+这组命令要求 `PATH` 里有 `git`。找不到 git 时，`chord worktree <name>`、`--worktree` 以及 `list`、`remove`、`finish` 都会拒绝执行，并直接说明缺的是 git 二进制，而不是报成仓库错误。
 
 Worktree 默认落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外）；也可以用 `worktree.root` 改位置，相对路径以主仓库根为基准，例如 `root: .chord/worktrees` 会落在 `<repo>/.chord/worktrees/<slug>`。这个目录在仓库内时，Chord 会在其中保存一个内容为 `*` 的 `.gitignore`，让这些 checkout 不出现在主工作区的未跟踪文件里。该文件只负责 `git status` 整洁，删掉它不会削弱任何保护。其他工具不知道这层跳过：仓库内的 checkout 是磁盘上的第二份树，索引或扫描类工具也可能扫到它（见 [Worktree 用法](./usage_CN.md#worktree)）。
 
@@ -511,9 +511,7 @@ Worktree 默认落地在 `<state-dir>/worktrees/<repo-id>/<slug>`（仓库之外
 
 worktree 只包含被 git 追踪的文件。被 gitignore 的内容——本地 `AGENTS.md`、`.chord/config.yaml`、agents、skills、plans——不会复制过去；在 worktree 里运行的会话会从主工作区读取它们，所以项目指令、技能、子代理与记忆的表现和主工作区一致。checkout 自带 `AGENTS.md` 或项目技能时以它为准。想让新 worktree 拿到哪些被忽略的文件，就在仓库根放一个 `.worktreeinclude`（gitignore 语法；文件不存在或没有任何 pattern 时默认 `.env*`）。这些文件在创建时复制过去，已被跟踪的文件绝不会被覆盖。复制只在创建那一刻发生，之后主工作区再改也不会同步；而默认复制 `.env*` 意味着本地凭据可能落进每个 checkout。
 
-权限规则、hook、agent 配置与 worktree 创建配置在会话启动时从主工作区解析，会话进出 worktree 不会改变它们；分支里改的这些配置只在该 checkout 新开的会话里生效。规则对每个 checkout 的效力见 [Worktree 用法](./usage_CN.md#worktree)。
-
-会话内也可以让 agent 自己管理 worktree：`WorktreeEnter` 创建或重新打开一个 worktree 并把 agent 的工作目录切进去（参数：`name`、`path`、`base`、`branch`、`reset_branch`；对应的 CLI `--worktree` / `chord worktree <name>` 只能给名字和 `--reset-branch`），`WorktreeExit` 退出并可按需删除 checkout，`WorktreeList` 列出仓库的 worktree 及其归属与 dirty 状态。进入已存在的 worktree 是复用同一个 checkout，agent 会和当时可能的其他使用者共享这个目录及其未提交改动；要并行推进就各自开 worktree。不必离开 TUI，直接让 agent 去某个 worktree 工作即可。会话在创建 worktree 过程中崩溃时，恢复后会按结果未知呈现，用 `chord worktree list` 查看是否有残留的 checkout。
+权限规则、hook、agent 配置与 worktree 创建配置在会话启动时从主工作区解析；恢复到记录在别的 checkout 的会话不会重新解析它们。规则对每个 checkout 的效力见 [Worktree 用法](./usage_CN.md#worktree)。
 
 ### `chord worktree list`
 

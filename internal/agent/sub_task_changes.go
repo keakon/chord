@@ -114,16 +114,9 @@ func (s *SubAgent) restoreTaskToolChanges(msgs []message.Message) {
 
 // isFileAttributionNeutralTool reports whether a tool cannot change the files
 // its owner tracks, so its call must not put the completion's file list under
-// suspicion. WorktreeEnter and WorktreeExit{keep} only move the agent between
-// checkouts; WorktreeExit{remove} deletes a checkout — including the
-// gitignored files copied into it — without recording any path, so it stays
-// flagged.
+// suspicion.
 func isFileAttributionNeutralTool(name string, args json.RawMessage) bool {
 	switch tools.NormalizeName(name) {
-	case tools.NameWorktreeEnter:
-		return true
-	case tools.NameWorktreeExit:
-		return !worktreeExitRemovesCheckout(args)
 	case tools.NameComplete,
 		tools.NameDelegate,
 		tools.NameNotify,
@@ -144,14 +137,6 @@ func isFileAttributionNeutralTool(name string, args json.RawMessage) bool {
 	default:
 		return false
 	}
-}
-
-// worktreeExitRemovesCheckout reports whether a worktree_exit call may delete
-// its checkout; unparseable args or an unknown action count as a removal so
-// the conservative flag survives.
-func worktreeExitRemovesCheckout(args json.RawMessage) bool {
-	action, err := tools.WorktreeExitAction(args)
-	return err != nil || action == tools.WorktreeActionRemove
 }
 
 func (s *SubAgent) taskChangeSnapshot() (files []string, incomplete bool) {

@@ -556,15 +556,6 @@ func (a *MainAgent) cachedAgentsMDSnapshot() string {
 	return a.cachedAgentsMD
 }
 
-// cachedWorkDirSnapshot returns the directory the session started in. Readers
-// outside the constructor take the lock like every other prompt-meta reader:
-// the async git status fetch and tests pin the field at different times.
-func (a *MainAgent) cachedWorkDirSnapshot() string {
-	a.promptMetaMu.RLock()
-	defer a.promptMetaMu.RUnlock()
-	return a.cachedWorkDir
-}
-
 func (a *MainAgent) cachedVenvPathSnapshot() string {
 	a.promptMetaMu.RLock()
 	defer a.promptMetaMu.RUnlock()

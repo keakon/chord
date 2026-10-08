@@ -741,17 +741,15 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		PathLocator:  ac.PathLocator,
 		RepoRoot:     contentRoot,
 		BranchPrefix: worktreeBranchPrefix,
-		Root:         cfg.Worktree.Root,
-		SessionID:    filepath.Base(ac.SessionDir),
 		RebindLSP:    ac.rebindLSPForWorkDir,
 		RefreshSkills: func(workDir string) {
 			refreshSkillsForWorkDir(ac, workDir)
 		},
 	})
 	// A session remembers the checkout it works in. Stamp the agent's binding
-	// so WorktreeList, Exit and the completion reports agree with the directory
-	// the session was started (or resumed) in; when the recorded checkout is
-	// gone the agent falls back and the notice is shown once as a toast.
+	// so completion reports agree with the directory the session was started
+	// (or resumed) in; when the recorded checkout is gone the agent falls back
+	// and the notice is shown once as a toast.
 	if flagWorktreeResumeNotice != "" {
 		ac.MainAgent.SetStartupWorkDirNotice(flagWorktreeResumeNotice)
 	}
@@ -831,11 +829,6 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	viewImageTool := tools.NewViewImageTool(ac.MainAgent)
 	viewImageTool.BaseDir = ac.WorkDir
 	ac.Registry.Register(viewImageTool)
-	// Worktree tools are rebound per agent: a SubAgent gets its own instances
-	// so entering a worktree switches only that sub-agent's working directory.
-	ac.Registry.Register(tools.NewWorktreeEnterTool(ac.MainAgent))
-	ac.Registry.Register(tools.NewWorktreeExitTool(ac.MainAgent))
-	ac.Registry.Register(tools.NewWorktreeListTool(ac.MainAgent))
 
 	// LLM factory for SubAgents.
 	ac.MainAgent.SetLLMFactory(buildSubAgentLLMFactory(ac, providerCfg, llmProvider, modelID, modelCfg, cfg, auth))

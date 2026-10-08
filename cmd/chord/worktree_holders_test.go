@@ -48,7 +48,7 @@ func seedSessionInCheckout(t *testing.T, pl *config.PathLocator, contentRoot, se
 	}
 	if err := recovery.RecordWorktreeBoundary(sessionDir,
 		recovery.WorktreeBinding{Path: checkoutPath},
-		recovery.WorktreeTimelineEntry{Reason: recovery.WorktreeSwitchEnter, At: time.Now().UTC()}); err != nil {
+		recovery.WorktreeTimelineEntry{Reason: recovery.WorktreeSwitchCreate, At: time.Now().UTC()}); err != nil {
 		t.Fatalf("RecordWorktreeBoundary: %v", err)
 	}
 	return sessionDir

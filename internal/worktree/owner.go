@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -14,10 +13,6 @@ import (
 type OwnerKind string
 
 const (
-	// OwnerKindMain is a MainAgent session.
-	OwnerKindMain OwnerKind = "main"
-	// OwnerKindSub is a SubAgent.
-	OwnerKindSub OwnerKind = "sub"
 	// OwnerKindCLI is the `chord worktree` command line.
 	OwnerKindCLI OwnerKind = "cli"
 )
@@ -28,12 +23,9 @@ const (
 // corruption.
 const OwnerFilename = "chord-owner.json"
 
-// Owner records who created a worktree. Ownership is used to decide whether an
-// agent tool may delete it: the repo index only caches these fields for
-// display, this record is authoritative.
+// Owner records worktree creation metadata. The repository index caches it
+// for display; it does not authorize removal.
 type Owner struct {
-	SessionID string    `json:"session_id"`
-	AgentID   string    `json:"agent_id"`
 	Kind      OwnerKind `json:"kind"`
 	CreatedAt time.Time `json:"created_at"`
 }
@@ -75,14 +67,8 @@ func WriteOwner(ctx context.Context, dir string, o Owner) error {
 	return nil
 }
 
-// ReadOwner loads the ownership record for the worktree at dir. A missing or
-// malformed record is an error: callers must treat "no owner" as unknown and
-// refuse destructive actions instead of assuming ownership.
-//
-// A record without a session id is accepted only for the CLI kind, which has
-// no session to name. An agent-owned record must name its session: session
-// equality is exactly what CanRemoveBySession decides on, so a sessionless
-// main/sub record would be an unverifiable claim to ownership.
+// ReadOwner loads the creation metadata for the worktree at dir. A missing or
+// malformed record is an error; callers can display the checkout without it.
 func ReadOwner(ctx context.Context, dir string) (*Owner, error) {
 	path, err := OwnerPath(ctx, dir)
 	if err != nil {
@@ -96,34 +82,5 @@ func ReadOwner(ctx context.Context, dir string) (*Owner, error) {
 	if err := json.Unmarshal(data, &o); err != nil {
 		return nil, fmt.Errorf("parse worktree owner %s: %w", path, err)
 	}
-	if strings.TrimSpace(o.SessionID) == "" && o.Kind != OwnerKindCLI {
-		return nil, fmt.Errorf("worktree owner %s has no session id", path)
-	}
 	return &o, nil
-}
-
-// CanRemoveBySession reports whether an agent of requesterKind acting for
-// sessionID may delete the worktree described by owner. Ownership is scoped to
-// the session, so a resumed session (which is a new agent instance) can still
-// clean up after itself, and to the requester's own kind: a SubAgent may only
-// reclaim worktrees it created itself, while the session's MainAgent may also
-// reclaim a finished worker's leftover checkout. CLI-created worktrees are
-// never removable through a tool, an unknown requester kind is refused, and an
-// unknown or unreadable owner is always refused.
-func CanRemoveBySession(owner *Owner, sessionID string, requesterKind OwnerKind) bool {
-	if owner == nil {
-		return false
-	}
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" || owner.SessionID != sessionID {
-		return false
-	}
-	switch requesterKind {
-	case OwnerKindMain:
-		return owner.Kind == OwnerKindMain || owner.Kind == OwnerKindSub
-	case OwnerKindSub:
-		return owner.Kind == OwnerKindSub
-	default:
-		return false
-	}
 }

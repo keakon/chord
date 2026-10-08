@@ -88,11 +88,10 @@ func toolSurfaceChange(before, after []message.ToolDefinition) string {
 
 // TestWorktreeSwitchKeepsModelVisibleSurfaceStable pins the cache contract for
 // a volatile working directory: the system prompt and the tool descriptions and
-// schemas are the provider's cached prefix, so entering or leaving a worktree
-// must not rewrite them. The active checkout reaches the model only through the
+// schemas are the provider's cached prefix, so switching checkout must not
+// rewrite them. The active checkout reaches the model only through the
 // per-request session-context reminder, which is rebuilt on the switch.
 func TestWorktreeSwitchKeepsModelVisibleSurfaceStable(t *testing.T) {
-	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-stable-prefix")
 	registerCheckoutSurfaceTools(t, a, repo)
 	a.refreshSessionContextReminder()
@@ -111,67 +110,54 @@ func TestWorktreeSwitchKeepsModelVisibleSurfaceStable(t *testing.T) {
 		t.Fatalf("the reminder should state the startup directory %q:\n%s", repo, reminder)
 	}
 
-	res, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-stable"})
-	if err != nil {
-		t.Fatalf("WorktreeEnter: %v", err)
-	}
+	entered := adoptTestCheckout(t, a, "feat-stable")
 
 	promptAfter := a.currentSystemPromptCandidate()
 	if promptAfter != prompt {
-		t.Errorf("the system prompt changed when a worktree was entered; it must stay the cached prefix")
+		t.Errorf("the system prompt changed when the checkout switched; it must stay the cached prefix")
 	}
-	entered := llmToolDefinitionsFromVisibleTools(a.stableVisibleLLMTools())
-	if !reflect.DeepEqual(entered, defs) {
-		t.Errorf("the tool surface changed when a worktree was entered: %s", toolSurfaceChange(defs, entered))
+	enteredDefs := llmToolDefinitionsFromVisibleTools(a.stableVisibleLLMTools())
+	if !reflect.DeepEqual(enteredDefs, defs) {
+		t.Errorf("the tool surface changed when the checkout switched: %s", toolSurfaceChange(defs, enteredDefs))
 	}
-	assertSurfaceOmitsPaths(t, "the system prompt after entering a worktree", promptAfter, res.Path)
-	assertToolDefsOmitPaths(t, entered, res.Path)
+	assertSurfaceOmitsPaths(t, "the system prompt after the switch", promptAfter, entered.Path)
+	assertToolDefsOmitPaths(t, enteredDefs, entered.Path)
 	if a.surfaceDirty.Load() {
-		t.Error("entering a worktree must not mark the runtime surface dirty: rebuilding re-sends the cached prefix")
+		t.Error("switching checkout must not mark the runtime surface dirty: rebuilding re-sends the cached prefix")
 	}
-	assertEnvBlockStatesWorktree(t, mainAgentReminderContent(t, a), res.Path, "feat-stable", res.Branch)
+	assertEnvBlockStatesWorktree(t, mainAgentReminderContent(t, a), entered.Path, "feat-stable", entered.Branch)
 
-	if _, err := a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-stable"}); err != nil {
-		t.Fatalf("WorktreeExit: %v", err)
+	// A second switch keeps the same guarantees: the cached prefix never names
+	// either checkout, and the reminder names the current one.
+	second := adoptTestCheckout(t, a, "feat-stable-two")
+	switchedPrompt := a.currentSystemPromptCandidate()
+	if switchedPrompt != prompt {
+		t.Errorf("the system prompt changed on the second switch; it must stay the cached prefix")
 	}
-	if got := a.currentSystemPromptCandidate(); got != prompt {
-		t.Error("the system prompt changed when the worktree was left; it must stay the cached prefix")
+	switched := llmToolDefinitionsFromVisibleTools(a.stableVisibleLLMTools())
+	if !reflect.DeepEqual(switched, defs) {
+		t.Errorf("the tool surface changed on the second switch: %s", toolSurfaceChange(defs, switched))
 	}
-	left := llmToolDefinitionsFromVisibleTools(a.stableVisibleLLMTools())
-	if !reflect.DeepEqual(left, defs) {
-		t.Errorf("the tool surface changed when the worktree was left: %s", toolSurfaceChange(defs, left))
-	}
-	after := mainAgentReminderContent(t, a)
-	if !strings.Contains(after, "Working directory: "+repo) {
-		t.Fatalf("the reminder should go back to the startup directory %q:\n%s", repo, after)
-	}
-	if strings.Contains(after, "Worktree:") {
-		t.Fatalf("the reminder still claims a worktree after leaving it:\n%s", after)
-	}
+	assertSurfaceOmitsPaths(t, "the system prompt after the second switch", switchedPrompt, second.Path)
+	assertEnvBlockStatesWorktree(t, mainAgentReminderContent(t, a), second.Path, "feat-stable-two", second.Branch)
 }
 
 // TestWorktreeSwitchReanchorsShellWorkingDirectory pins the execution half of
 // the contract: a tool call runs against the checkout that was active when its
-// batch was dispatched, so a shell command issued inside a fresh worktree runs
+// batch was dispatched, so a shell command issued inside a fresh checkout runs
 // there even though the registered ShellTool still carries the startup
 // directory.
 func TestWorktreeSwitchReanchorsShellWorkingDirectory(t *testing.T) {
-	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-shell-reanchor")
 	a.tools.Register(tools.ShellTool{BaseDir: repo})
 
 	assertShellPwd(t, a.toolExecutionPipeline(), repo)
 
-	res, err := a.WorktreeEnter(ctx, tools.WorktreeEnterRequest{Name: "feat-shell"})
-	if err != nil {
-		t.Fatalf("WorktreeEnter: %v", err)
-	}
-	assertShellPwd(t, a.toolExecutionPipeline(), res.Path)
+	installed := installTestCheckout(t, a, "feat-shell")
+	assertShellPwd(t, a.toolExecutionPipeline(), installed.Path)
 
-	if _, err := a.WorktreeExit(ctx, tools.WorktreeExitRequest{Name: "feat-shell"}); err != nil {
-		t.Fatalf("WorktreeExit: %v", err)
-	}
-	assertShellPwd(t, a.toolExecutionPipeline(), repo)
+	second := adoptTestCheckout(t, a, "feat-shell-two")
+	assertShellPwd(t, a.toolExecutionPipeline(), second.Path)
 }
 
 // assertShellPwd runs `pwd` through the pipeline and compares the printed

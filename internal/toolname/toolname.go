@@ -35,9 +35,6 @@ const (
 	ReadArtifact   = "read_artifact"
 	ViewImage      = "view_image"
 	CompactContext = "compact_context"
-	WorktreeEnter  = "worktree_enter"
-	WorktreeExit   = "worktree_exit"
-	WorktreeList   = "worktree_list"
 )
 
 // MCPToolPrefix marks the ids of dynamically registered MCP tools, whose shape

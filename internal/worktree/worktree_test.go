@@ -201,29 +201,6 @@ func TestCreate_FastResume(t *testing.T) {
 	}
 }
 
-// TestCreate_FastResumeDerivesNameFromBranch pins the branch-only resume: the
-// caller names only a branch, so the name is derived from it and opts.Name is
-// still empty. The resumed Info must still carry the derived name, or the index
-// entry built from it records no worktree name.
-func TestCreate_FastResumeDerivesNameFromBranch(t *testing.T) {
-	repo := setupTestRepo(t)
-	pl := setupTestLocator(t)
-	ctx := context.Background()
-	if _, err := Create(ctx, CreateOptions{Name: "feat-b", RepoRoot: repo, PathLocator: pl}); err != nil {
-		t.Fatalf("Create #1: %v", err)
-	}
-	resumed, err := Create(ctx, CreateOptions{Branch: "chord/feat-b", RepoRoot: repo, PathLocator: pl})
-	if err != nil {
-		t.Fatalf("Create #2 (fast-resume by branch): %v", err)
-	}
-	if !resumed.Existed {
-		t.Errorf("Existed=false on resume")
-	}
-	if resumed.Name != "feat-b" {
-		t.Errorf("resumed Info = %+v, want Name feat-b", resumed)
-	}
-}
-
 func TestCreate_RefusesLeftoverBranchWithoutReset(t *testing.T) {
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)

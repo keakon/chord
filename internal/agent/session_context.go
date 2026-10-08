@@ -251,12 +251,6 @@ func (s *SubAgent) agentsMDSnapshot() string {
 	return s.agentsMD
 }
 
-func (s *SubAgent) setAgentsMD(content string) {
-	s.agentsMDMu.Lock()
-	s.agentsMD = content
-	s.agentsMDMu.Unlock()
-}
-
 // injectSessionContextReminder is the SubAgent counterpart: same every-request
 // contract as MainAgent, with content rebuilt from the live environment at
 // construction and on every worktree switch instead of on session-head resets.

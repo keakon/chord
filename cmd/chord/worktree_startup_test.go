@@ -205,7 +205,7 @@ func TestPrepareStartupWorktree_AutoSlug(t *testing.T) {
 // TestPrepareStartupWorktree_RecordsCLIOwner pins the creator identity of a
 // worktree made by the command line. Without the record the worktree is
 // anonymous: `chord worktree list` cannot name its creator after the repo index
-// is dropped, and the plan's `kind ∈ {main, sub, cli}` has no producer for cli.
+// is dropped.
 func TestPrepareStartupWorktree_RecordsCLIOwner(t *testing.T) {
 	repo := setupStartupRepo(t)
 	withTestStateDir(t)
@@ -216,8 +216,8 @@ func TestPrepareStartupWorktree_RecordsCLIOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadOwner: %v", err)
 	}
-	if owner.Kind != worktree.OwnerKindCLI || owner.SessionID != "" {
-		t.Fatalf("owner = %+v, want a sessionless cli record", owner)
+	if owner.Kind != worktree.OwnerKindCLI {
+		t.Fatalf("owner = %+v, want a cli owner record", owner)
 	}
 	if owner.CreatedAt.IsZero() {
 		t.Error("owner record should carry a creation time")

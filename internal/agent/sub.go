@@ -269,14 +269,9 @@ type SubAgent struct {
 	// system prompt from it.
 	agentsMDMu sync.RWMutex
 	agentsMD   string
-	// workDirState is this SubAgent's active checkout; a worktree switch
+	// workDirState is this SubAgent's active checkout; a checkout switch
 	// publishes a new generation here and never touches the parent's binding.
 	workDirState workDirBinding
-	// worktreeTools mirrors MainAgent.worktreeTools: a sticky capability, set
-	// when the worker starts in a managed worktree. Like the MainAgent's it
-	// lives in process memory, so a rehydrated worker re-derives it from the
-	// checkout it is restored in.
-	worktreeTools atomic.Bool
 
 	// cachedSessionReminderContent is the meta user message content carrying
 	// environment + AGENTS.md (under "# AGENTS.md instructions" /
@@ -603,9 +598,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		switch t.Name() {
 		case tools.NameTodoWrite, tools.NameHandoff, tools.NameReadArtifact, tools.NameSaveArtifact, tools.NameCompactContext:
 			// Skip MainAgent-only tools.
-		case tools.NameWorktreeEnter, tools.NameWorktreeExit, tools.NameWorktreeList:
-			// Rebound per SubAgent below: each agent owns its own active
-			// working directory, so a switch must not move the parent.
 		case tools.NameNotify:
 			// SubAgents get a dedicated Notify tool so owner-notify and
 			// targeted-notify availability can diverge by permission group.
@@ -729,14 +721,11 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	if !s.setState(SubAgentStateRunning, "") {
 		panic(fmt.Sprintf("new SubAgent %s rejected initial running state", s.instanceID))
 	}
-	// Install the initial binding before registering capability-gated tools.
-	// A worker placed in a managed worktree gets the runtime controls; a
-	// normal worker stays on the lightweight default tool surface.
+	// Install the initial binding before any tool can run: a worker that
+	// inherited its caller's managed checkout reports and tracks that checkout
+	// from its very first call.
 	if cfg.WorkDirState.Path != "" || cfg.WorkDirState.WorktreeID != "" {
 		s.workDirState.store(cfg.WorkDirState)
-	}
-	if strings.TrimSpace(cfg.WorkDirState.WorktreeID) != "" {
-		s.worktreeTools.Store(true)
 	}
 	if hasSkillTool && !cfg.Ruleset.IsDisabled(tools.NameSkill) {
 		s.tools.Register(tools.NewSkillTool(s))
@@ -746,16 +735,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		tool.BaseDir = cfg.WorkDir
 		s.tools.Register(tool)
 	}
-	if !cfg.Ruleset.IsDisabled(tools.NameWorktreeEnter) {
-		s.tools.Register(tools.NewWorktreeEnterTool(s))
-	}
-	if !cfg.Ruleset.IsDisabled(tools.NameWorktreeExit) {
-		s.tools.Register(tools.NewWorktreeExitTool(s))
-	}
-	if !cfg.Ruleset.IsDisabled(tools.NameWorktreeList) {
-		s.tools.Register(tools.NewWorktreeListTool(s))
-	}
-
 	// Build and install the system prompt.
 	prompt := s.buildSystemPrompt()
 	cfg.LLMClient.SetSystemPrompt(prompt)

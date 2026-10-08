@@ -16,8 +16,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/shell"
 )
 
@@ -1533,53 +1531,6 @@ func PendingWakeJobs(sessionDir string) int {
 		n++
 	}
 	return n
-}
-
-// RunningJobsInDir reports the live jobs whose working directory is dir or a
-// descendant of it. The worktree removal guard uses it so a checkout a
-// background command is still running in — and writing into — is never deleted
-// under it. Comparisons are canonical because a shell's working directory and
-// the worktree metadata can reach the same directory through a symlinked root.
-func RunningJobsInDir(dir string) []JobState {
-	target := canonicalJobDir(dir)
-	if target == "" {
-		return nil
-	}
-	return globalJobRegistry.runningJobsInDir(target)
-}
-
-func canonicalJobDir(dir string) string {
-	dir = strings.TrimSpace(dir)
-	if dir == "" {
-		return ""
-	}
-	if canonical, err := config.CanonicalProjectRoot(dir); err == nil {
-		return canonical
-	}
-	return filepath.Clean(dir)
-}
-
-func (r *JobRegistry) runningJobsInDir(target string) []JobState {
-	r.mu.RLock()
-	jobs := make([]*job, 0, len(r.jobs))
-	for _, j := range r.jobs {
-		jobs = append(jobs, j)
-	}
-	r.mu.RUnlock()
-	var out []JobState
-	for _, j := range jobs {
-		jobDir := canonicalJobDir(j.workDir)
-		if jobDir == "" {
-			continue
-		}
-		if _, ok := pathutil.RelToBase(jobDir, target); !ok {
-			continue
-		}
-		if state := j.state(); state.Active() {
-			out = append(out, state)
-		}
-	}
-	return out
 }
 
 // JobDisplayPeek is a read-only projection of one job for the interface. It

@@ -33,16 +33,14 @@ type RepoIndex struct {
 // Path is the canonical worktree root. The Owner fields are a display cache
 // of the authoritative chord-owner.json that lives in the worktree's own git
 // administration directory; they may be missing or stale after the index is
-// rebuilt, so removal decisions must re-read the file.
+// rebuilt. Removal uses checkout and live-session checks, not these fields.
 type RepoIndexWorktree struct {
-	Name           string    `json:"name"`
-	Branch         string    `json:"branch"`
-	Path           string    `json:"path"`
-	OwnerSessionID string    `json:"owner_session_id,omitempty"`
-	OwnerAgentID   string    `json:"owner_agent_id,omitempty"`
-	OwnerKind      string    `json:"owner_kind,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	LastUsedAt     time.Time `json:"last_used_at"`
+	Name       string    `json:"name"`
+	Branch     string    `json:"branch"`
+	Path       string    `json:"path"`
+	OwnerKind  string    `json:"owner_kind,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastUsedAt time.Time `json:"last_used_at"`
 }
 
 // RepoIDFor returns a short stable identifier for a canonical main repo

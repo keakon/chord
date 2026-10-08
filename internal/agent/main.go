@@ -804,15 +804,10 @@ type MainAgent struct {
 	cachedVenvPath  string // absolute path to detected Python virtual environment, or ""
 	cachedAgentsMD  string
 	gitStatusReady  chan struct{} // closed when cachedGitStatus is set
-	// workDirState is the active checkout of this agent. A worktree switch
+	// workDirState is the active checkout of this agent. A checkout switch
 	// publishes a whole new state here; cachedWorkDir stays the immutable
 	// directory the session started in.
 	workDirState workDirBinding
-	// worktreeTools is the sticky session capability behind the worktree
-	// runtime tools: it is set when the session starts in (or adopts) a
-	// chord-managed worktree and stays set after leaving it, so a model switch
-	// or compaction rebuild cannot drop tools the session legitimately has.
-	worktreeTools atomic.Bool
 	// worktreeRT carries cmd-injected worktree services (storage locator,
 	// repository root, LSP rebind). Written before the agent runs turns.
 	worktreeRT  WorktreeRuntime

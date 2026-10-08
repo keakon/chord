@@ -161,9 +161,7 @@ func prepareStartupWorktree(ctx context.Context, name string, resetBranch bool) 
 		Root:         wc.Root,
 		ResetBranch:  resetBranch,
 		// The command line has no session to name, but recording the creator
-		// keeps the worktree identifiable in `chord worktree list` and keeps it
-		// unremovable through the agent tools (the same fail-closed outcome as
-		// having no record at all).
+		// keeps the worktree identifiable in `chord worktree list`.
 		Owner: &worktree.Owner{Kind: worktree.OwnerKindCLI, CreatedAt: time.Now().UTC()},
 	})
 	if err != nil {

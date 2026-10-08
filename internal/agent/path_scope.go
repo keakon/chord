@@ -10,8 +10,8 @@ import (
 // repository plus the container directories whose immediate children are
 // checkout roots (the configured worktree root). cmd/chord injects it because
 // it is the layer that resolves the repository's git topology and configured
-// worktree root; the worktree tools in this package only switch the agent's
-// own active checkout, they never extend the policy roots.
+// worktree root; the agent only switches its own active checkout and never
+// extends the policy roots itself.
 type PathRootsResolver func() (roots, containers []string)
 
 // pathRootsSnapshot is the immutable result of a PathRootsResolver for one

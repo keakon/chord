@@ -99,24 +99,3 @@ func BranchFullyMerged(ctx context.Context, dir, branch string) (bool, string, e
 	}
 	return n == 0, target, nil
 }
-
-// UnmergedCommits reports how many commits reachable from branch are not
-// reachable from any other ref: commits that would only exist on that branch.
-// The branch under test is excluded from the comparison, so a branch whose tip
-// is also reachable from the main checkout counts as merged. The comparison
-// covers all local and remote branches and tags.
-func UnmergedCommits(ctx context.Context, dir, branch string) (int, error) {
-	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		return 0, fmt.Errorf("count unmerged commits: empty branch")
-	}
-	out, err := runGitText(ctx, dir, "rev-list", "--count", branch, "--not", "--exclude="+branch, "--branches", "--remotes", "--tags")
-	if err != nil {
-		return 0, err
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(out))
-	if err != nil {
-		return 0, fmt.Errorf("parse rev-list count %q: %w", out, err)
-	}
-	return n, nil
-}

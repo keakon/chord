@@ -115,10 +115,6 @@ type SubAgentRequest struct {
 	PlanTaskRef        string
 	SemanticTaskKey    string
 	ExpectedWriteScope WriteScope
-	// WorkDir is an existing chord-managed worktree (name or path) the worker
-	// starts in. Empty means the worker inherits the delegating agent's
-	// working directory.
-	WorkDir string
 	// ResultSchema is the canonical encoding of the delegated result contract
 	// as validated by CompileResultSchema, or empty for a task with no
 	// contract.
@@ -159,10 +155,6 @@ type delegateArgs struct {
 	// while an empty object is valid only for roles whose surface registers no
 	// file-modifying tools.
 	ExpectedWriteScope *WriteScope `json:"expected_write_scope"`
-	// Workdir is an existing chord-managed worktree (name or path) the worker
-	// starts in. Omitted means the worker inherits the delegating agent's
-	// working directory.
-	Workdir string `json:"workdir,omitempty"`
 	// Optional result contract the worker's reported result must satisfy. The
 	// declared schema is only an object at the tool surface; the accepted
 	// subset is compiled and checked here before a worker is started.
@@ -171,28 +163,13 @@ type delegateArgs struct {
 
 func (DelegateTool) Name() string { return NameDelegate }
 
-func (t DelegateTool) Description() string {
-	return t.DescriptionForTools(nil)
-}
-
-// DescriptionForTools points at worktree_enter for creating a worker's
-// worktree only when that tool is on the model's surface: sessions that do
-// not run in a worktree hide it. A nil visible map means the caller does not
-// know the surface and keeps the reference.
-func (DelegateTool) DescriptionForTools(visible map[string]struct{}) string {
-	createWorktree := " A workdir must name an existing worktree; create a new one first with `" + NameWorktreeEnter + "`."
-	if visible != nil {
-		if _, ok := visible[NameWorktreeEnter]; !ok {
-			createWorktree = ""
-		}
-	}
+func (DelegateTool) Description() string {
 	return "Delegate a task to a SubAgent for parallel execution. " +
 		"The SubAgent runs independently with its own context and tool access, and reports back when done. " +
 		"Your system prompt's delegation workflow governs task selection, follow-up, and safe parallelism. " +
 		"The result is delivered asynchronously and flows back to you automatically; do not poll for or retrieve SubAgent results. " +
 		"The returned task_id is the stable durable handle for that delegate and identifies the same task across follow-up attempts. " +
-		"Roles that can write files must declare a non-empty expected_write_scope; a read-only delegation pairs a read-only role with an empty scope object {}." +
-		createWorktree
+		"Roles that can write files must declare a non-empty expected_write_scope; a read-only delegation pairs a read-only role with an empty scope object {}."
 }
 
 // IsAvailable reports whether the DelegateTool should be registered.
@@ -259,10 +236,6 @@ func (t *DelegateTool) Parameters() map[string]any {
 				"description":          "Required declaration of the narrowest files, path_prefix, or modules that honestly cover the paths this task expects to modify. It is a coordination declaration, not an enforced boundary: the worker's role permissions decide which tools it may use, and the declaration only feeds sibling-overlap hints (a started handle may carry scope_conflict with suggested_task_id) and your own planning. An empty object {} is accepted only for an agent_type whose role cannot write files.",
 				"properties":           scopeProperties,
 				"additionalProperties": false,
-			},
-			"workdir": map[string]any{
-				"type":        "string",
-				"description": "Optional existing chord worktree (its name or path) to start this worker in. The worktree must already exist: this tool never creates one. Omit it and the worker inherits your working directory. Several workers may share a worktree (for example, one reviewing what another just wrote); concurrent writes to the same file are still caught by the shared path tracker. The worker's own permission rules decide what it may do there.",
 			},
 			"agent_type": map[string]any{
 				"type":        "string",
@@ -356,7 +329,6 @@ func (t *DelegateTool) Execute(ctx context.Context, raw json.RawMessage) (string
 		PlanTaskRef:        a.PlanTaskRef,
 		SemanticTaskKey:    a.SemanticTaskKey,
 		ExpectedWriteScope: expectedWriteScope,
-		WorkDir:            strings.TrimSpace(a.Workdir),
 		ResultSchema:       resultSchema,
 	})
 	if err != nil {

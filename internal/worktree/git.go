@@ -27,8 +27,8 @@ var gitNoPromptEnv = []string{
 // cause.
 var ErrGitUnavailable = errors.New("git is not installed or not on PATH")
 
-// gitAvailableCache memoizes LookPath by PATH so every tool-surface scan does
-// not rescan PATH once per worktree tool. The key is the full PATH value, so
+// gitAvailableCache memoizes LookPath by PATH so every probe does not rescan
+// PATH once per worktree command. The key is the full PATH value, so
 // a PATH change (including the test hook that empties it) re-probes instead of
 // reusing a stale answer. A git binary that appears without a PATH change is
 // picked up on restart; that staleness is the documented cost of the cache.
@@ -37,8 +37,8 @@ var gitAvailableCache sync.Map // string -> bool
 // GitAvailable reports whether the git executable can be resolved on PATH.
 // Chord runs without git — project content roots and policy roots fall back to
 // the working directory — so callers use this to keep git-backed surfaces out
-// of the way (the worktree tools are hidden, `chord worktree` refuses with a
-// clear message) instead of failing later inside a probe.
+// of the way (`chord worktree` refuses with a clear message) instead of failing
+// later inside a probe.
 func GitAvailable() bool {
 	pathKey := os.Getenv("PATH")
 	if cached, ok := gitAvailableCache.Load(pathKey); ok {

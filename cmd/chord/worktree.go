@@ -54,9 +54,9 @@ var (
 )
 
 // requireWorktreeGit refuses worktree work on a machine without git. Every
-// `chord worktree` command, --worktree, and the agent's worktree tools shell
-// out to git; without this check they would fail deep inside a probe with a
-// message about the repository instead of the machine.
+// `chord worktree` command and --worktree shell out to git; without this check
+// they would fail deep inside a probe with a message about the repository
+// instead of the machine.
 func requireWorktreeGit() error {
 	if worktree.GitAvailable() {
 		return nil
@@ -226,35 +226,17 @@ func buildWorktreeListRows(ctx context.Context, infos []worktree.Info, idx *work
 // directory is authoritative; the index only caches the creator for display,
 // so a missing or rebuilt index still reports who made the worktree.
 func worktreeOwnerLabel(ctx context.Context, path string, entry *worktree.RepoIndexWorktree) string {
-	if entry != nil && (entry.OwnerSessionID != "" || entry.OwnerKind != "") {
-		return formatOwnerLabel(entry.OwnerKind, entry.OwnerSessionID, entry.OwnerAgentID)
+	if entry != nil && entry.OwnerKind != "" {
+		return entry.OwnerKind
 	}
 	owner, err := worktree.ReadOwner(ctx, path)
 	if err != nil {
 		return "?"
 	}
-	return formatOwnerLabel(string(owner.Kind), owner.SessionID, owner.AgentID)
-}
-
-func formatOwnerLabel(kind, sessionID, agentID string) string {
-	if strings.TrimSpace(kind) == "" && strings.TrimSpace(sessionID) == "" {
+	if owner.Kind == "" {
 		return "?"
 	}
-	label := strings.TrimSpace(kind)
-	if sessionID != "" {
-		label += ":" + shortOwnerID(sessionID)
-	}
-	if agentID != "" {
-		label += "/" + shortOwnerID(agentID)
-	}
-	return label
-}
-
-func shortOwnerID(id string) string {
-	if len(id) <= 8 {
-		return id
-	}
-	return id[:8]
+	return string(owner.Kind)
 }
 
 // newWorktreeSessionHolders returns the resolver the command line uses to find

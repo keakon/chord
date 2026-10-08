@@ -116,30 +116,13 @@ type CreateOptions struct {
 	// such a branch is refused, because the branch may hold the only copy
 	// of commits from that earlier worktree.
 	ResetBranch bool
-	// Path overrides the default location. Empty means
-	// <stateDir>/worktrees/<repoID>/<slug>. A relative path is resolved
-	// against the caller's directory.
-	Path string
 	// Root overrides where the worktree is created (worktree.root): empty
 	// keeps the state-dir layout, a relative path resolves against the main
 	// repository root, an absolute path is used as-is. See WorktreeRoot.
 	Root string
-	// Base is the commit-ish a newly created branch starts at. Empty means
-	// the main repository's HEAD. Callers that want the current checkout's
-	// HEAD (the Enter tool) pass it explicitly.
-	Base string
-	// Branch checks out an existing chord-managed branch instead of creating
-	// one from Name. Name then defaults to the branch's slug. The branch must
-	// already exist, must carry the effective branch prefix, and must not be
-	// checked out by another worktree; ResetBranch and Base are rejected.
-	Branch string
-	// AllowNested permits creating a worktree while the caller is already
-	// inside a linked worktree (the Enter tool creates sibling checkouts).
-	// The command line leaves this false and refuses nested creation.
-	AllowNested bool
 	// Owner is written to the new worktree's git directory right after
 	// `git worktree add` succeeds. A failed write removes the fresh worktree
-	// again: chord never leaves behind a worktree nobody can delete.
+	// again, so a half-created checkout never survives.
 	Owner *Owner
 }
 
@@ -165,10 +148,6 @@ type RemoveOptions struct {
 	// DeleteBranch removes the chord-managed branch using `git branch -d`
 	// (refused unless merged). Implied by Force.
 	DeleteBranch bool
-	// DiscardChanges removes the worktree even when its working tree is
-	// dirty, without touching the branch. It is the tool-facing counterpart
-	// of Force, which additionally force-deletes the branch.
-	DiscardChanges bool
 	// BranchPrefix scopes the lookup of the worktree's name to a specific
 	// prefix. Empty falls back to DefaultBranchPrefix. Must match the
 	// prefix Create used, otherwise the worktree won't be found.
@@ -226,42 +205,21 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 	if err != nil {
 		return nil, err
 	}
-	if inLinked && !opts.AllowNested {
+	if inLinked {
 		return nil, fmt.Errorf("nested worktree creation refused: %s is inside a linked worktree; create from the main repo", rootIn)
 	}
 	repoID := ResolveRepoID(ctx, rootIn, mainRoot)
 	prefix := effectiveBranchPrefix(opts.BranchPrefix)
 	name := strings.TrimSpace(opts.Name)
-	if name == "" && strings.TrimSpace(opts.Branch) != "" {
-		name = strings.TrimPrefix(strings.TrimSpace(opts.Branch), prefix)
-	}
 	if err := ValidateSlug(name); err != nil {
 		return nil, err
 	}
 	branch := prefix + name
-	if b := strings.TrimSpace(opts.Branch); b != "" {
-		if opts.ResetBranch {
-			return nil, fmt.Errorf("create worktree: branch and reset_branch are mutually exclusive")
-		}
-		if strings.TrimSpace(opts.Base) != "" {
-			return nil, fmt.Errorf("create worktree: branch and base are mutually exclusive")
-		}
-		if !strings.HasPrefix(b, prefix) {
-			return nil, fmt.Errorf("create worktree: branch %s is not chord-managed (expected the %q prefix)", b, prefix)
-		}
-		branch = b
-	}
 	worktreeRoot, err := WorktreeRoot(opts.PathLocator, mainRoot, opts.Root)
 	if err != nil {
 		return nil, err
 	}
 	wantPath := filepath.Join(worktreeRoot, name)
-	if p := strings.TrimSpace(opts.Path); p != "" {
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(rootIn, p)
-		}
-		wantPath = filepath.Clean(p)
-	}
 
 	// Fast-resume: branch already registered to a worktree.
 	listOut, err := runGit(ctx, mainRoot, "worktree", "list", "--porcelain")
@@ -286,9 +244,6 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 		path, _ := canonicalDir(e.Path)
 		head, _ := runGitText(ctx, path, "rev-parse", "HEAD")
 		return &Info{
-			// name, not opts.Name: when the caller named only a branch,
-			// name was derived from it and opts.Name is still empty, so
-			// reading opts.Name here would lose the derived name.
 			Name:     name,
 			Branch:   branch,
 			Path:     path,
@@ -304,17 +259,12 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 	}
 	// A leftover branch (an earlier worktree was removed but the branch was
 	// kept) must not be reset silently: it may hold the only copy of that
-	// work's commits. The same guard doubles as the existence check when the
-	// caller explicitly asks to check out an existing branch.
+	// work's commits.
 	branchExists, err := BranchRefExists(ctx, mainRoot, branch)
 	if err != nil {
 		return nil, err
 	}
-	if b := strings.TrimSpace(opts.Branch); b != "" {
-		if !branchExists {
-			return nil, fmt.Errorf("branch %s does not exist; omit branch to create a new branch from %s", branch, baseRefLabel(opts.Base))
-		}
-	} else if branchExists && !opts.ResetBranch {
+	if branchExists && !opts.ResetBranch {
 		return nil, fmt.Errorf("branch %s already exists and is not checked out in any worktree; pass --reset-branch to reset it to HEAD, or choose another worktree name", branch)
 	}
 	if err := os.MkdirAll(filepath.Dir(wantPath), 0o755); err != nil {
@@ -326,20 +276,11 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 		log.Warnf("write worktree root .gitignore failed root=%v error=%v", worktreeRoot, err)
 	}
 	mainDirty, _ := IsDirty(ctx, mainRoot)
-	var addArgs []string
-	if strings.TrimSpace(opts.Branch) != "" {
-		addArgs = []string{"worktree", "add", wantPath, branch}
-	} else {
-		addFlag := "-b"
-		if opts.ResetBranch {
-			addFlag = "-B"
-		}
-		baseRef := "HEAD"
-		if b := strings.TrimSpace(opts.Base); b != "" {
-			baseRef = b
-		}
-		addArgs = []string{"worktree", "add", addFlag, branch, wantPath, baseRef}
+	addFlag := "-b"
+	if opts.ResetBranch {
+		addFlag = "-B"
 	}
+	addArgs := []string{"worktree", "add", addFlag, branch, wantPath, "HEAD"}
 	if _, err := runGit(ctx, mainRoot, addArgs...); err != nil {
 		return nil, err
 	}
@@ -349,8 +290,9 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 	}
 	if opts.Owner != nil {
 		if err := WriteOwner(ctx, canonical, *opts.Owner); err != nil {
-			// Fail closed: a worktree whose owner record cannot be written
-			// would be undeletable through the tools, so undo the checkout.
+			// A worktree whose creator record cannot be written would be left
+			// without the provenance `chord worktree list` reports, so undo the
+			// checkout.
 			if _, rmErr := runGit(ctx, mainRoot, "worktree", "remove", "--force", canonical); rmErr != nil {
 				return nil, fmt.Errorf("record worktree owner: %w (rollback of the new worktree also failed: %v)", err, rmErr)
 			}
@@ -374,14 +316,6 @@ func Create(ctx context.Context, opts CreateOptions) (*Info, error) {
 		MainDirty:  mainDirty,
 		Owner:      opts.Owner,
 	}, nil
-}
-
-// baseRefLabel renders the base ref for error messages.
-func baseRefLabel(base string) string {
-	if b := strings.TrimSpace(base); b != "" {
-		return b
-	}
-	return "HEAD"
 }
 
 // guardWorktreePath fails when the target path already exists but is
@@ -414,8 +348,6 @@ func RegisterInIndex(pl *config.PathLocator, info *Info) error {
 		Path:   info.Path,
 	}
 	if info.Owner != nil {
-		entry.OwnerSessionID = info.Owner.SessionID
-		entry.OwnerAgentID = info.Owner.AgentID
 		entry.OwnerKind = string(info.Owner.Kind)
 	}
 	return WithRepoIndexLock(pl.StateDir, info.RepoID, func(idx *RepoIndex) error {
@@ -659,7 +591,7 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 	if cwdMatch, _ := canonicalDir(cwd); cwdMatch != "" && cwdMatch == info.Path {
 		return fmt.Errorf("refusing to remove worktree %q: it is the current working directory", name)
 	}
-	if !opts.Force && !opts.DiscardChanges {
+	if !opts.Force {
 		statusOut, err := runGit(ctx, info.Path, "status", "--porcelain")
 		if err != nil {
 			return err
@@ -699,7 +631,7 @@ func Remove(ctx context.Context, repoRoot, name string, opts RemoveOptions, path
 			}
 		}
 		gitArgs := []string{"worktree", "remove"}
-		if opts.Force || opts.DiscardChanges {
+		if opts.Force {
 			gitArgs = append(gitArgs, "--force")
 		}
 		gitArgs = append(gitArgs, info.Path)
