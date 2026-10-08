@@ -2,7 +2,6 @@ package tui
 
 import (
 	"image"
-	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
 
@@ -39,16 +38,9 @@ func (m *Model) handleMemoryPanelKey(msg tea.KeyMsg) tea.Cmd {
 			return m.applyMemoryChange(false)
 		}
 		if key == "p" && p.preview == nil {
-			_, _, path := m.memoryCurrentContent()
-			if path != "" {
-				return writeClipboardCmd(path, "Memory path copied")
-			}
-			return nil
+			return m.copyMemoryPath()
 		}
 		return m.handleMemoryDetailKey(msg)
-	}
-	if key != "y" {
-		m.clearChordState()
 	}
 	switch key {
 	case "/":
@@ -58,7 +50,6 @@ func (m *Model) handleMemoryPanelKey(msg tea.KeyMsg) tea.Cmd {
 	case "tab":
 		p.tab = (p.tab + 1) % 3
 		p.query = ""
-		p.selected = map[string]bool{}
 		p.list = nil
 		m.rebuildMemoryList()
 	case "j", "down":
@@ -91,41 +82,23 @@ func (m *Model) handleMemoryPanelKey(msg tea.KeyMsg) tea.Cmd {
 			m.showMemoryDetail(title, content)
 		}
 	case "space":
-		if p.tab == 0 && p.list != nil {
-			if item, ok := p.list.SelectedItem(); ok && memory.ValidateRecordID(item.ID) {
-				if p.selected[item.ID] {
-					delete(p.selected, item.ID)
-				} else {
-					p.selected[item.ID] = true
-				}
-				m.rebuildMemoryList()
+		if m.memoryPanelCursorIsRecord() {
+			item, _ := p.list.SelectedItem()
+			if p.selected[item.ID] {
+				delete(p.selected, item.ID)
+			} else {
+				p.selected[item.ID] = true
 			}
+			m.rebuildMemoryList()
 		}
-	case "y":
-		if m.chord.op == chordY {
-			m.clearChordState()
-			_, content, _ := m.memoryCurrentContent()
-			if len(p.selected) > 0 {
-				if base, err := m.memorySelectedSnapshot(false); err == nil {
-					var parts []string
-					for _, i := range base.Items {
-						parts = append(parts, i.Content)
-					}
-					content = strings.Join(parts, "\n\n---\n\n")
-				}
-			}
-			if content != "" {
-				return writeClipboardCmd(content, "Memory copied")
-			}
-			return nil
-		}
-		return m.startChordOp(chordY)
+	case "y", "Y":
+		return m.copyMemoryContent()
 	case "p":
-		_, _, path := m.memoryCurrentContent()
-		if path != "" {
-			return writeClipboardCmd(path, "Memory path copied")
-		}
+		return m.copyMemoryPath()
 	case "d":
+		if p.tab != 0 {
+			return m.enqueueToast("Switch to project memories to remove", "info")
+		}
 		base, err := m.memorySelectedSnapshot(false)
 		if err != nil {
 			return m.enqueueToast(err.Error(), "info")
@@ -144,9 +117,13 @@ func (m *Model) handleMemoryPanelKey(msg tea.KeyMsg) tea.Cmd {
 		p.instruction = ""
 		m.memoryPanelInputIME()
 	case "u":
-		if p.view != nil && p.view.Snapshot.CanUndo {
-			return m.applyMemoryChange(true)
+		if p.tab != 0 {
+			return m.enqueueToast("Switch to project memories to undo", "info")
 		}
+		if p.view == nil || !p.view.Snapshot.CanUndo {
+			return m.enqueueToast("Nothing to undo", "info")
+		}
+		return m.applyMemoryChange(true)
 	case "r":
 		c, _ := m.memoryController()
 		p.seq++
@@ -243,13 +220,37 @@ func (m *Model) handleMemoryDetailKey(msg tea.KeyMsg) tea.Cmd {
 	case "G", "end":
 		m.contentViewer.scrollOffset = limit
 	case "y", "Y":
-		return m.handleContentViewerKey(msg)
-	}
-	if msg.String() != "y" && msg.String() != "Y" {
-		m.clearChordState()
+		return m.copyMemoryText(m.contentViewer.content)
 	}
 	m.contentViewer.scrollOffset = min(max(0, m.contentViewer.scrollOffset), limit)
 	return nil
+}
+
+// clickMemoryPanelList maps a click in the list to a row: the first click moves
+// the cursor, a click on the active row opens it. Wheel handling stays in the
+// mouse dispatcher.
+func (m *Model) clickMemoryPanelList(x, y int) {
+	p := &m.memoryPanel
+	if p.list == nil || p.list.Len() == 0 {
+		return
+	}
+	dialog := m.renderMemoryPanel()
+	rect := m.overlayRect(dialog)
+	if x < rect.Min.X || x >= rect.Max.X || y < rect.Min.Y || y >= rect.Max.Y {
+		return
+	}
+	start, end := p.list.WindowRange()
+	idx, ok := overlayItemIndexAt(rect, y, p.listBaseRow, start, end-start)
+	if !ok {
+		return
+	}
+	wasActive := p.list.CursorAt() == idx
+	if !p.list.HandleClick(idx-start) || !wasActive {
+		return
+	}
+	if title, content, _ := m.memoryCurrentContent(); content != "" {
+		m.showMemoryDetail(title, content)
+	}
 }
 
 func (m *Model) memoryPanelInputIME() {

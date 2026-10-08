@@ -248,7 +248,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 				helpBinding([]string{"o / O"}, "organize selected / all"),
 				helpBinding([]string{"u"}, "undo last change"),
 				helpBinding([]string{"r"}, "refresh"),
-				helpBinding([]string{"y y"}, "copy entry"),
+				helpBinding([]string{"y"}, "copy entry or selection"),
 				helpBinding([]string{"p"}, "copy path"),
 				helpBinding([]string{"a"}, "apply change"),
 				helpBinding([]string{"tab"}, "switch view"),

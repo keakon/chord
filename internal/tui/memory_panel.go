@@ -21,6 +21,7 @@ type memoryPanelState struct {
 	instructionAll  bool
 	instruction     string
 	list            *OverlayList
+	listBaseRow     int
 	selected        map[string]bool
 	detail          bool
 	preview         *memory.ManualDraft
@@ -204,7 +205,7 @@ func memoryItemType(item memory.ReviewItem) memory.Type {
 }
 func memoryQueryMatches(query, content string) bool {
 	content = strings.ToLower(content)
-	for _, word := range strings.Fields(strings.ToLower(query)) {
+	for word := range strings.FieldsSeq(strings.ToLower(query)) {
 		if !strings.Contains(content, word) {
 			return false
 		}
@@ -216,7 +217,7 @@ func memoryMatchSnippet(content, query string) string {
 	if len(words) == 0 {
 		return ""
 	}
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		if strings.Contains(strings.ToLower(line), words[0]) {
 			return strings.TrimSpace(line)
 		}

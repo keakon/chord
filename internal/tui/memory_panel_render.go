@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/keakon/chord/internal/memory"
 )
 
 func (m *Model) renderMemoryPanel() string {
@@ -22,39 +24,15 @@ func (m *Model) renderMemoryPanel() string {
 		m.contentViewer.scrollOffset = min(max(0, m.contentViewer.scrollOffset), maxScroll)
 		body = strings.Join(lines[m.contentViewer.scrollOffset:min(len(lines), m.contentViewer.scrollOffset+height)], "\n")
 	} else {
-		tabs := []string{"Project memories", "Session applied", "Suggestions"}
-		if m.width < 60 {
-			body = TabActiveStyle.Render(tabs[p.tab]) + "  " + hintLine(hint("Tab", "views")) + "\n"
-		} else {
-			body = renderTabRow(tabs, p.tab) + "\n"
-		}
-		if p.view != nil {
-			state := "off"
-			if p.view.Enabled {
-				state = "on"
-			}
-			body += "Auto extraction: " + state
-			if p.view.Pending {
-				body += " · disk updates pending"
-			}
-			body += "\n"
-		}
-		if p.instructionMode {
-			count := 0
-			if base, err := m.memorySelectedSnapshot(p.instructionAll); err == nil {
-				count = len(base.Items)
-			}
-			body += fmt.Sprintf("Organize %d records (uses model)\n", count)
-			body += "Request: " + ansi.TruncateLeft(p.instruction, max(1, dialogContentWidth(cfg.MaxWidth)-10), "…") + "_\n"
-		} else {
-			body += renderFilterLine(p.query, p.inputFocused, "", max(1, dialogContentWidth(cfg.MaxWidth))) + "\n"
-		}
-		body += "\n"
+		contentWidth := max(1, dialogContentWidth(cfg.MaxWidth))
+		const gapRows = 1
+		headerLines := tuiHardwrap(m.memoryPanelListHeader(cfg), contentWidth)
+		body = strings.Join(headerLines, "\n") + "\n\n"
 		if p.list != nil {
-			headerRows := len(tuiHardwrap(body, max(1, dialogContentWidth(cfg.MaxWidth)))) - 1
-			p.list.SetMaxVisible(max(1, overlayContentHeight(cfg, area)-headerRows))
+			p.list.SetMaxVisible(max(1, overlayContentHeight(cfg, area)-(len(headerLines)+gapRows)))
+			p.listBaseRow = layoutOverlay(cfg, area).contentBaseRow() + len(headerLines) + gapRows
 			if p.list.Len() > 0 {
-				body += p.list.Render(max(1, dialogContentWidth(cfg.MaxWidth)))
+				body += p.list.Render(contentWidth)
 			} else if p.query != "" {
 				body += "No matching memories."
 			} else {
@@ -64,6 +42,42 @@ func (m *Model) renderMemoryPanel() string {
 	}
 	box, _ := RenderOverlay(cfg, body, area)
 	return box
+}
+
+// memoryPanelListHeader renders the rows above the list: view tabs, the
+// auto-extraction state, and the filter or organize request line.
+func (m *Model) memoryPanelListHeader(cfg OverlayConfig) string {
+	p := &m.memoryPanel
+	width := max(1, dialogContentWidth(cfg.MaxWidth))
+	var b strings.Builder
+	tabs := []string{"Project memories", "Session applied", "Suggestions"}
+	if m.width < 60 {
+		fmt.Fprintf(&b, "%s  %s\n", TabActiveStyle.Render(tabs[p.tab]), hintLine(hint("Tab", "views")))
+	} else {
+		fmt.Fprintf(&b, "%s\n", renderTabRow(tabs, p.tab))
+	}
+	if p.view != nil {
+		state := "off"
+		if p.view.Enabled {
+			state = "on"
+		}
+		fmt.Fprintf(&b, "Auto extraction: %s", state)
+		if p.view.Pending {
+			b.WriteString(" · disk updates pending")
+		}
+		b.WriteString("\n")
+	}
+	if p.instructionMode {
+		count := 0
+		if base, err := m.memorySelectedSnapshot(p.instructionAll); err == nil {
+			count = len(base.Items)
+		}
+		fmt.Fprintf(&b, "Organize %d records (uses model)\n", count)
+		fmt.Fprintf(&b, "Request: %s_\n", ansi.TruncateLeft(p.instruction, max(1, width-10), "…"))
+	} else {
+		fmt.Fprintf(&b, "%s\n", renderFilterLine(p.query, p.inputFocused, "", width))
+	}
+	return strings.TrimSuffix(b.String(), "\n")
 }
 
 // memoryPanelMaxWidth caps the memory panel so long record summaries keep a
@@ -80,29 +94,23 @@ func (m *Model) memoryPanelOverlayConfig() OverlayConfig {
 		Title:            "Memory",
 		MaxWidth:         m.memoryPanelWidth(),
 		MinContentHeight: 5,
-		Hint: hintLine(
-			hint("/", "search"), hint("j/k", "move"), hint("Enter", "read"),
-			hint("yy", "copy"), hint("p", "path"), hint("Tab", "views"), hint("Esc", "close"),
-		),
-		CompactHint: hintLine(hint("/", "search"), hint("Enter", "read"), hint("yy", "copy"), hint("Esc", "close")),
+		Hint:             m.memoryPanelListHint(),
+		CompactHint:      hintLine(hint("/", "search"), hint("Enter", "read"), hint("y", "copy"), hint("Esc", "close")),
 	}
 	if p.detail {
 		cfg.Title = p.viewer.title
-		cfg.Hint = hintLine(hint("j/k", "scroll"), hint("g/G", "jump"), hint("yy", "copy"), hint("Esc", "back"))
-		cfg.CompactHint = hintLine(hint("j/k", "scroll"), hint("yy", "copy"), hint("Esc", "back"))
+		cfg.Hint = hintLine(hint("j/k", "scroll"), hint("g/G", "jump"), hint("y", "copy"), hint("Esc", "back"))
+		cfg.CompactHint = hintLine(hint("j/k", "scroll"), hint("y", "copy"), hint("Esc", "back"))
 		if p.preview != nil && !p.preview.Empty() {
 			apply := primaryHint("a", "apply")
 			apply.danger = len(p.preview.Remove) > 0
-			cfg.Hint = hintLine(apply, hint("Esc", "cancel"), hint("yy", "copy"), hint("j/k", "scroll"), hint("g/G", "jump"))
-			cfg.CompactHint = hintLine(apply, hint("Esc", "cancel"), hint("yy", "copy"))
-		} else if p.preview == nil {
+			cfg.Hint = hintLine(apply, hint("Esc", "cancel"), hint("y", "copy"), hint("j/k", "scroll"), hint("g/G", "jump"))
+			cfg.CompactHint = hintLine(apply, hint("Esc", "cancel"), hint("y", "copy"))
+		} else if p.preview == nil && m.memoryPanelCurrentPath() != "" {
 			cfg.Hint = appendHintChip(cfg.Hint, hint("p", "copy path"))
 		}
-	} else if p.tab == 0 {
-		cfg.Hint += "\n" + hintLine(
-			hint("Space", "select"), hint("d", "remove"), hint("o", "organize selected"),
-			hint("O", "organize all"), hint("u", "undo"), hint("r", "refresh"),
-		)
+	} else if p.tab == 0 && p.list != nil && p.list.Len() > 0 {
+		cfg.Hint += "\n" + m.memoryPanelProjectHint()
 	}
 	if p.loading {
 		cfg.Footer = "Working…"
@@ -124,6 +132,64 @@ func (m *Model) memoryPanelOverlayConfig() OverlayConfig {
 		cfg.CompactHint = hintLine(hint("Tab", "views"), hint("Esc", "close"))
 	}
 	return cfg
+}
+
+// memoryPanelListHint advertises only the actions the current view and entry
+// can run; keys that would do nothing stay out of the footer.
+func (m *Model) memoryPanelListHint() string {
+	p := &m.memoryPanel
+	chips := []hintChip{hint("/", "search")}
+	if p.list != nil && p.list.Len() > 0 {
+		chips = append(chips, hint("j/k", "move"), hint("Enter", "read"), hint("y", "copy"))
+		if m.memoryPanelCurrentPath() != "" {
+			chips = append(chips, hint("p", "path"))
+		}
+	}
+	chips = append(chips, hint("Tab", "views"), hint("Esc", "close"))
+	return hintLine(chips...)
+}
+
+// memoryPanelProjectHint lists project-view actions that have a target: the
+// record under the cursor or the current multi-selection.
+func (m *Model) memoryPanelProjectHint() string {
+	var chips []hintChip
+	if m.memoryPanelCursorIsRecord() {
+		chips = append(chips, hint("Space", "select"))
+	}
+	if m.memoryPanelCanModify() {
+		chips = append(chips, hint("d", "remove"), hint("o", "organize selected"), hint("O", "organize all"))
+	}
+	if p := &m.memoryPanel; p.view != nil && p.view.Snapshot.CanUndo {
+		chips = append(chips, hint("u", "undo"))
+	}
+	chips = append(chips, hint("r", "refresh"))
+	return hintLine(chips...)
+}
+
+func (m *Model) memoryPanelCurrentPath() string {
+	_, _, path := m.memoryCurrentContent()
+	return path
+}
+
+// memoryPanelCursorIsRecord reports whether the cursor sits on a managed record
+// rather than the read-only user-notes entry.
+func (m *Model) memoryPanelCursorIsRecord() bool {
+	p := &m.memoryPanel
+	if p.tab != 0 || p.list == nil {
+		return false
+	}
+	item, ok := p.list.SelectedItem()
+	return ok && memory.ValidateRecordID(item.ID)
+}
+
+// memoryPanelCanModify reports whether the project view has a removal or
+// organization target.
+func (m *Model) memoryPanelCanModify() bool {
+	if m.memoryPanel.tab != 0 {
+		return false
+	}
+	_, err := m.memorySelectedSnapshot(false)
+	return err == nil
 }
 
 func (m *Model) memoryDetailLines() []string {

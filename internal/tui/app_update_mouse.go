@@ -31,6 +31,9 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		} else if m.memoryPanel.list != nil {
 			m.memoryPanel.list.HandleWheel(delta)
 		}
+		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft && !m.memoryPanel.detail {
+			m.clickMemoryPanelList(mouse.X, mouse.Y)
+		}
 		return nil, true
 	}
 	if m.mode == ModeStatus {

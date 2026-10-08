@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
 
@@ -67,4 +68,39 @@ func (m *Model) applyMemoryChange(undo bool) tea.Cmd {
 		}
 		return memoryPanelResultMsg{seq: seq, epoch: epoch, changed: err == nil, err: err}
 	}
+}
+
+// copyMemoryContent copies the selected project records when any are marked,
+// otherwise the entry under the cursor.
+func (m *Model) copyMemoryContent() tea.Cmd {
+	p := &m.memoryPanel
+	_, content, _ := m.memoryCurrentContent()
+	if len(p.selected) > 0 {
+		if base, err := m.memorySelectedSnapshot(false); err == nil {
+			parts := make([]string, 0, len(base.Items))
+			for _, item := range base.Items {
+				parts = append(parts, item.Content)
+			}
+			content = strings.Join(parts, "\n\n---\n\n")
+		}
+	}
+	return m.copyMemoryText(content)
+}
+
+// copyMemoryPath copies the file path of the entry under the cursor.
+func (m *Model) copyMemoryPath() tea.Cmd {
+	_, _, path := m.memoryCurrentContent()
+	if path == "" {
+		return m.enqueueToast("No file path for this entry", "info")
+	}
+	return writeClipboardCmd(path, "Memory path copied")
+}
+
+// copyMemoryText keeps panel copy feedback on one message instead of the
+// content viewer wording.
+func (m *Model) copyMemoryText(content string) tea.Cmd {
+	if strings.TrimSpace(content) == "" {
+		return m.enqueueToast("Nothing to copy", "info")
+	}
+	return writeClipboardCmd(content, "Memory copied")
 }

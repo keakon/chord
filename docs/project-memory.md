@@ -42,7 +42,7 @@ The `memory:` configuration keys are listed in [Configuration & Auth](./configur
 
 ## Memory panel and manual organization
 
-Enter `/memory` to open the local memory panel. In Normal mode, `Enter` also opens it when the current card has no applicable action. Card folding, images and linked tasks keep their actions; dialogs retain their own Enter behavior. Traditional terminals deliver `Ctrl+M` as Enter, and an explicitly delivered `Ctrl+M` uses the same Normal-mode action.
+Enter `/memory` to open the local memory panel. Card folding, images and linked tasks keep their own Enter actions; dialogs retain their own Enter behavior. Traditional terminals deliver `Ctrl+M` as Enter, and an explicitly delivered `Ctrl+M` uses the same Normal-mode action.
 
 The panel has three views, switched with `Tab`: active project records, the summary actually applied to this session, and promotion drafts. The project view includes records beyond the session's injection budget. A pending-update label distinguishes current disk content from the applied summary. User-owned index notes and the other two views are read-only.
 
@@ -50,9 +50,10 @@ The panel has three views, switched with `Tab`: active project records, the summ
 | --- | --- |
 | `/` | Search titles, types and full text; space-separated words must all match |
 | `j` / `k`, arrow keys | Move through results |
-| `Enter` | Finish searching, then open the highlighted entry |
-| `Space` | Select multiple project records; changing the filter clears selection |
-| `yy` | Copy the full current entry, or selected records in the project list |
+| `g` / `G`, `Ctrl+F` / `Ctrl+B` | Jump to the start or end, or page through the list and detail |
+| `Enter` | Leave the search box; press Enter again to open the highlighted entry |
+| `Space` | Select multiple project records; changing the filter clears selection, switching views keeps it |
+| `y` | Copy the full current entry, or selected records in the project list |
 | `p` | Copy the current record or promotion file path |
 | `d` | Preview removal of the current or selected records |
 | `o` / `O` | Organize current/selected records, or all active records |
@@ -60,6 +61,8 @@ The panel has three views, switched with `Tab`: active project records, the summ
 | `u` | Undo the project's latest manual operation |
 | `r` | Refresh from disk |
 | `Esc` / `q` | Return from detail, or close the panel |
+
+The footer hint line only lists keys that can act on the current view and entry. The mouse wheel scrolls the list and the detail view. Clicking a row moves the cursor; clicking the row under the cursor opens it. Removal, organization and undo apply to the project view.
 
 Browsing, copying and removing records make no model calls. Removal updates only the managed index and retains immutable record files. The most recent manual removal or organization can be undone, including after a restart, without Git. Undo keeps unrelated new records and user notes; if affected entries changed or original records are unreadable, it refuses to overwrite them.
 
