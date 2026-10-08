@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -441,6 +442,9 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		m.storeStreamState(evt.AgentID, state)
 		return true, effects
 	case agent.StreamThinkingDeltaEvent:
+		if evt.ThinkingMode == message.StreamThinkingModeHidden {
+			return true, effects
+		}
 		m.touchStreamDelta(evt.AgentID)
 		state := m.streamState(evt.AgentID)
 		incoming := streamSegmentIdentity{turnID: evt.TurnID, requestSeq: evt.RequestSeq}
@@ -477,6 +481,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 			m.ensureStreamingThinkingBlock(evt.AgentID, &state)
 		}
 		adoptStreamSegmentIdentity(state.thinking, incoming)
+		state.thinking.ThinkingMarkdownProvisional = evt.ThinkingMode == message.StreamThinkingModeSummary
 		state.thinking.appendStreamingContent(evt.Text)
 		firstVisibleThinkingDelta := !state.thinkingAppended && state.thinking.syncStreamingContent()
 		if strings.TrimSpace(state.thinking.Content) != "" && !state.thinkingAppended {
@@ -499,6 +504,26 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 		m.exitRenderFreeze()
 		m.markStreamRenderDirty()
 		effects.addFollowup(m.scheduleStreamFlush(0))
+		return true, effects
+	case agent.StreamThinkingPartEndEvent:
+		state := m.streamState(evt.AgentID)
+		if evt.TurnID != 0 || evt.RequestSeq != 0 {
+			incoming := streamSegmentIdentity{turnID: evt.TurnID, requestSeq: evt.RequestSeq}
+			current := blockStreamSegmentIdentity(state.thinking)
+			if state.thinking == nil || (current.known() && current != incoming) {
+				return true, effects
+			}
+		}
+		if state.thinking == nil {
+			return true, effects
+		}
+		state.thinking.ThinkingMarkdownProvisional = true
+		state.thinking.InvalidateCache()
+		if state.thinkingAppended {
+			m.viewport.InvalidateBlock(state.thinking.ID)
+		}
+		m.storeStreamState(evt.AgentID, state)
+		effects.addFollowup(m.requestStreamBoundaryFlush())
 		return true, effects
 	case agent.StreamThinkingEvent:
 		state := m.streamState(evt.AgentID)
@@ -559,6 +584,7 @@ func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEv
 				}
 			}
 			state.thinking.Streaming = false
+			state.thinking.ThinkingMarkdownProvisional = false
 			state.thinking.InvalidateCache()
 			if state.thinkingAppended {
 				if flushedThinking {

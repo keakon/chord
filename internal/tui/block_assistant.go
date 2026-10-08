@@ -1147,10 +1147,19 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 		if cache.tailRaw == tail && cache.tailWidth == contentWidth {
 			tailLines = cache.tailLines
 		} else {
-			// Sanitize control sequences like the settled prefix (renderMarkdownContent
-			// runs sanitizeDisplayText) so the streaming tail cannot inject cursor
-			// moves or other ANSI commands into the thinking card.
-			tailLines = wrapText(sanitizeDisplayText(tail), contentWidth)
+			// Summary parts are user-visible Markdown even while the surrounding
+			// thinking card remains open. Render only the active tail here; the
+			// settled prefix keeps its incremental cache and raw reasoning never
+			// reaches this path.
+			if b.ThinkingMarkdownProvisional {
+				tailLines = renderMarkdownContent(preprocessStreamingThinkingMarkdown(tail), contentWidth)
+			} else {
+				// Sanitize control sequences like the settled prefix
+				// (renderMarkdownContent runs sanitizeDisplayText) so the
+				// streaming tail cannot inject cursor moves or other ANSI
+				// commands into the thinking card.
+				tailLines = wrapText(sanitizeDisplayText(tail), contentWidth)
+			}
 			cache.tailRaw = tail
 			cache.tailWidth = contentWidth
 			cache.tailLines = tailLines

@@ -83,9 +83,8 @@ func validReasoningReplay(v string) bool {
 // resolving a request, where an unknown value is indistinguishable from unset:
 // a misspelled reasoning_replay silently drops the cross-turn reasoning
 // continuity the backend's contract requires, and a misspelled mode silently
-// replays nothing. The field these replaced (preserve_history) is instead
-// rejected loudly by the strict decoder, so a typo in the same block is
-// reported on one side and swallowed on the other.
+// replays nothing. Validate both fields so unknown values are reported before
+// any request is sent.
 func ValidateProviderReasoningContinuity(providerName string, cfg ProviderConfig) error {
 	if compat := providerReasoningContinuity(cfg); compat != nil {
 		if err := validateReasoningContinuityConfig(compat, fmt.Sprintf("provider %q", providerName)); err != nil {

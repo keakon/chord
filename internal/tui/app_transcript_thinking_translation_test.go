@@ -125,3 +125,30 @@ func TestMessagesToBlocksReusesTranslationAfterTargetLangChange(t *testing.T) {
 		t.Fatalf("expected restored translation regardless of target_lang, got %#v", blocks[0].ThinkingTranslations)
 	}
 }
+
+func TestMessagesToBlocksKeepsResponsesWireReasoningHidden(t *testing.T) {
+	msgs := []message.Message{{
+		Role:             "assistant",
+		Content:          "answer",
+		ReasoningContent: "private reasoning sample",
+		Provenance:       &message.MessageProvenance{WireFamily: message.WireFamilyResponses},
+	}}
+	var nextID int
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 || blocks[0].Type != BlockAssistant || blocks[0].Content != "answer" {
+		t.Fatalf("blocks = %#v, want only the assistant answer", blocks)
+	}
+}
+
+func TestMessagesToBlocksShowsImportedResponsesReasoning(t *testing.T) {
+	msgs := []message.Message{{
+		Role:             "assistant",
+		ReasoningContent: "imported reasoning sample",
+		Provenance:       &message.MessageProvenance{WireFamily: message.WireFamilyResponses, Imported: true},
+	}}
+	var nextID int
+	blocks := messagesToBlocks(msgs, &nextID)
+	if len(blocks) != 1 || blocks[0].Type != BlockThinking || blocks[0].Content != "imported reasoning sample" {
+		t.Fatalf("blocks = %#v, want imported reasoning restored as thinking", blocks)
+	}
+}

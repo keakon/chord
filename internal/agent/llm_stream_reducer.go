@@ -47,10 +47,12 @@ type streamContentReducer struct {
 	textAccum    strings.Builder
 	textLastEmit time.Time
 
-	thinkingAccum    strings.Builder
-	thinkingFull     strings.Builder
-	thinkingActive   bool
-	thinkingLastEmit time.Time
+	thinkingAccum      strings.Builder
+	thinkingFull       strings.Builder
+	thinkingActive     bool
+	thinkingMode       string
+	thinkingPartClosed bool
+	thinkingLastEmit   time.Time
 
 	responseTextStarted bool
 }
@@ -64,7 +66,10 @@ func (r *streamContentReducer) Handle(delta message.StreamDelta) bool {
 		r.handleText(delta.Text)
 		return true
 	case message.StreamDeltaThinking:
-		r.handleThinking(delta.Text)
+		r.handleThinking(delta.Text, delta.ThinkingMode)
+		return true
+	case message.StreamDeltaThinkingPartEnd:
+		r.closeThinkingPart()
 		return true
 	case message.StreamDeltaThinkingEnd:
 		r.closeThinkingBlock()
@@ -98,6 +103,8 @@ func (r *streamContentReducer) Rollback() {
 	r.thinkingAccum.Reset()
 	r.thinkingFull.Reset()
 	r.thinkingActive = false
+	r.thinkingMode = ""
+	r.thinkingPartClosed = false
 	r.thinkingLastEmit = time.Time{}
 	r.responseTextStarted = false
 }
@@ -125,24 +132,30 @@ func (r *streamContentReducer) handleText(text string) {
 	}
 }
 
-func (r *streamContentReducer) handleThinking(text string) {
+func (r *streamContentReducer) handleThinking(text, mode string) {
+	if mode == message.StreamThinkingModeHidden {
+		return
+	}
 	if r.ignoreThinkingAfterText && r.responseTextStarted {
 		return
 	}
 	r.flushTextDelta()
 	if !r.thinkingActive {
 		r.thinkingActive = true
+		r.thinkingMode = mode
 		if r.emitThinkingStarted && r.emit != nil {
 			r.emit(ThinkingStartedEvent{AgentID: r.agentID, TurnID: r.turnID, RequestSeq: r.requestSeq})
 		}
 		r.thinkingLastEmit = time.Now()
 	}
+	r.thinkingPartClosed = false
 	r.thinkingAccum.WriteString(text)
 	r.thinkingFull.WriteString(text)
 	if r.thinkingFlushInterval <= 0 {
 		// No batching interval: forward each delta immediately while still
 		// retaining the full accumulated block for thinking_end.
 		r.emitThinkingDelta(text, r.scrubThinkingDelta)
+		r.thinkingAccum.Reset()
 		return
 	}
 	if time.Since(r.thinkingLastEmit) >= r.thinkingFlushInterval {
@@ -184,7 +197,13 @@ func (r *streamContentReducer) emitThinkingDelta(text string, scrub bool) {
 		text = scrubThinkingToolcallMarkers(text)
 	}
 	if strings.TrimSpace(text) != "" {
-		r.emit(StreamThinkingDeltaEvent{Text: text, AgentID: r.agentID, TurnID: r.turnID, RequestSeq: r.requestSeq})
+		r.emit(StreamThinkingDeltaEvent{
+			Text:         text,
+			AgentID:      r.agentID,
+			TurnID:       r.turnID,
+			RequestSeq:   r.requestSeq,
+			ThinkingMode: r.thinkingMode,
+		})
 	}
 }
 
@@ -207,6 +226,8 @@ func (r *streamContentReducer) closeThinkingBlock() {
 			r.thinkingAccum.Reset()
 			r.thinkingFull.Reset()
 			r.thinkingActive = false
+			r.thinkingMode = ""
+			r.thinkingPartClosed = false
 			return
 		}
 	default:
@@ -215,8 +236,25 @@ func (r *streamContentReducer) closeThinkingBlock() {
 	r.thinkingAccum.Reset()
 	r.thinkingFull.Reset()
 	r.thinkingActive = false
+	r.thinkingMode = ""
+	r.thinkingPartClosed = false
 	if r.emit != nil {
 		r.emit(StreamThinkingEvent{Text: finalText, AgentID: r.agentID, TurnID: r.turnID, RequestSeq: r.requestSeq})
+	}
+}
+
+func (r *streamContentReducer) closeThinkingPart() {
+	if r == nil || !r.thinkingActive || r.thinkingPartClosed || r.thinkingMode != message.StreamThinkingModeSummary {
+		return
+	}
+	r.flushThinkingDelta()
+	r.thinkingPartClosed = true
+	if r.emit != nil {
+		r.emit(StreamThinkingPartEndEvent{
+			AgentID:    r.agentID,
+			TurnID:     r.turnID,
+			RequestSeq: r.requestSeq,
+		})
 	}
 }
 

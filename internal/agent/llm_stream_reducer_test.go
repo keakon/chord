@@ -73,6 +73,71 @@ func TestStreamContentReducerThinkingStartedIncludesSegmentIdentity(t *testing.T
 	}
 }
 
+func TestStreamContentReducerSummaryPartEndKeepsThinkingOpen(t *testing.T) {
+	var events []AgentEvent
+	reducer := streamContentReducer{
+		agentID:               "agent-1",
+		turnID:                4,
+		requestSeq:            2,
+		emit:                  func(evt AgentEvent) { events = append(events, evt) },
+		emitThinkingStarted:   true,
+		thinkingCommitMode:    streamContentCommitFullText,
+		thinkingFlushInterval: 0,
+	}
+
+	reducer.Handle(message.StreamDelta{
+		Type:         message.StreamDeltaThinking,
+		Text:         "**First section**",
+		ThinkingMode: message.StreamThinkingModeSummary,
+	})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaThinkingPartEnd})
+	reducer.Handle(message.StreamDelta{
+		Type:         message.StreamDeltaThinking,
+		Text:         "**Second section**",
+		ThinkingMode: message.StreamThinkingModeSummary,
+	})
+
+	if len(events) != 4 {
+		t.Fatalf("events = %#v, want start, first delta, part end, second delta", events)
+	}
+	if _, ok := events[0].(ThinkingStartedEvent); !ok {
+		t.Fatalf("events[0] = %T, want ThinkingStartedEvent", events[0])
+	}
+	if got, ok := events[1].(StreamThinkingDeltaEvent); !ok || got.Text != "**First section**" {
+		t.Fatalf("events[1] = %#v, want first summary delta", events[1])
+	}
+	if got, ok := events[2].(StreamThinkingPartEndEvent); !ok || got.TurnID != 4 || got.RequestSeq != 2 {
+		t.Fatalf("events[2] = %#v, want summary part boundary with segment identity", events[2])
+	}
+	if got, ok := events[3].(StreamThinkingDeltaEvent); !ok || got.Text != "**Second section**" {
+		t.Fatalf("events[3] = %#v, want second summary delta", events[3])
+	}
+	if reducer.thinkingActive == false || reducer.thinkingFull.String() != "**First section****Second section**" {
+		t.Fatalf("reducer thinking state = active:%v text:%q, want one open block", reducer.thinkingActive, reducer.thinkingFull.String())
+	}
+}
+
+func TestStreamContentReducerHiddenReasoningDoesNotEmitThinking(t *testing.T) {
+	var events []AgentEvent
+	reducer := streamContentReducer{
+		emit:                  func(evt AgentEvent) { events = append(events, evt) },
+		emitThinkingStarted:   true,
+		closeThinkingOnFinish: true,
+		thinkingCommitMode:    streamContentCommitFullText,
+	}
+
+	reducer.Handle(message.StreamDelta{
+		Type:         message.StreamDeltaThinking,
+		Text:         "**private raw reasoning**",
+		ThinkingMode: message.StreamThinkingModeHidden,
+	})
+	reducer.Finish()
+
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want no visible thinking events", events)
+	}
+}
+
 func TestStreamContentReducerZeroThinkingIntervalEmitsImmediateDeltaAndFinalText(t *testing.T) {
 	var events []AgentEvent
 	reducer := streamContentReducer{

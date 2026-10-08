@@ -458,7 +458,7 @@ func NewSystemToolsMessage(tools []ToolDefinition) Message {
 // StreamDelta represents an incremental piece of a streaming LLM response.
 type StreamDelta struct {
 	// Type is one of: "text", "tool_use_start", "tool_use_delta", "tool_use_end",
-	// "thinking", "thinking_end", "reasoning_item", "error", "status",
+	// "thinking", "thinking_part_end", "thinking_end", "reasoning_item", "error", "status",
 	// "rate_limits", "rollback", "key_switched", "key_confirmed",
 	// "key_deactivated", "key_invalidated", "key_expired", "retry_error".
 	//
@@ -474,8 +474,13 @@ type StreamDelta struct {
 	// encrypted_content) so an interrupted turn can persist the reasoning
 	// alongside its partial message and replay it as the message's required
 	// preceding item.
-	Type          string                          // delta category
-	Text          string                          // for Type="text" or "thinking"
+	Type string // delta category
+	Text string // for Type="text" or "thinking"
+	// ThinkingMode identifies the semantics of a thinking delta. Empty keeps
+	// the provider's existing generic thinking behavior; summary is user-visible
+	// generated summary text; hidden is provider-internal reasoning that must
+	// never reach the TUI.
+	ThinkingMode  string
 	ToolCall      *ToolCallDelta                  // for Type="tool_use_*"
 	Status        *StatusDelta                    // for Type="status"
 	RateLimit     *ratelimit.KeyRateLimitSnapshot // for Type="rate_limits"
@@ -493,14 +498,19 @@ type StreamDelta struct {
 }
 
 const (
-	StreamDeltaText          = "text"
-	StreamDeltaThinking      = "thinking"
-	StreamDeltaThinkingEnd   = "thinking_end"
-	StreamDeltaReasoningItem = "reasoning_item"
-	StreamDeltaError         = "error"
-	StreamDeltaStatus        = "status"
-	StreamDeltaRateLimits    = "rate_limits"
-	StreamDeltaRollback      = "rollback"
+	StreamDeltaText     = "text"
+	StreamDeltaThinking = "thinking"
+	// StreamDeltaThinkingPartEnd marks the end of a visible thinking summary
+	// part without closing the surrounding thinking block. Providers use it
+	// when the current summary is complete but more reasoning or a tool call
+	// may follow in the same response.
+	StreamDeltaThinkingPartEnd = "thinking_part_end"
+	StreamDeltaThinkingEnd     = "thinking_end"
+	StreamDeltaReasoningItem   = "reasoning_item"
+	StreamDeltaError           = "error"
+	StreamDeltaStatus          = "status"
+	StreamDeltaRateLimits      = "rate_limits"
+	StreamDeltaRollback        = "rollback"
 
 	StreamDeltaToolUseStart = "tool_use_start"
 	StreamDeltaToolUseDelta = "tool_use_delta"
@@ -512,6 +522,9 @@ const (
 	StreamDeltaKeyInvalidated = "key_invalidated"
 	StreamDeltaKeyExpired     = "key_expired"
 	StreamDeltaRetryError     = "retry_error"
+
+	StreamThinkingModeSummary = "summary"
+	StreamThinkingModeHidden  = "hidden"
 )
 
 // StatusDelta represents a technical state change during an LLM request.
@@ -667,6 +680,29 @@ type MessageProvenance struct {
 	// session-analysis projections can tell a user-triggered load from a model
 	// tool call that produced the same message shape.
 	Origin string `json:"origin,omitempty"`
+}
+
+// WireFamilyResponses identifies the OpenAI Responses wire protocol in
+// MessageProvenance.WireFamily. modelcompat names the same wire families for
+// request normalization; message cannot import it without an import cycle.
+const WireFamilyResponses = "openai-responses"
+
+// RawReasoningDisplayable reports whether ReasoningContent may stand in for
+// structured thinking blocks on display surfaces when none were captured.
+// Responses reasoning_text is wire replay data unless the target explicitly
+// exposes it, in which case the parser also projects it into ThinkingBlocks;
+// other protocols carry user-visible reasoning in ReasoningContent directly.
+func (m Message) RawReasoningDisplayable() bool {
+	if strings.TrimSpace(m.ReasoningContent) == "" {
+		return false
+	}
+	prov := m.Provenance
+	if prov == nil || prov.WireFamily != WireFamilyResponses {
+		return true
+	}
+	// Imported Responses transcripts already decided visibility at import
+	// time: visible mode attaches reasoning for display, strict mode drops it.
+	return prov.Imported
 }
 
 // Origin values carried by MessageProvenance.Origin.

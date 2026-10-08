@@ -165,7 +165,7 @@ func extractThinkingTranslationBlocks(msg message.Message) []thinkingTranslation
 		}
 		return blocks
 	}
-	if strings.TrimSpace(msg.ReasoningContent) != "" {
+	if msg.RawReasoningDisplayable() {
 		blocks = append(blocks, thinkingTranslationBlock{BlockIndex: 0, Original: msg.ReasoningContent})
 	}
 	return blocks

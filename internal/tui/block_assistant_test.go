@@ -786,6 +786,27 @@ func TestRenderThinkingStreamingHeadingSettledPrefixNeverRegresses(t *testing.T)
 	}
 }
 
+func TestRenderThinkingStreamingSummaryTailUsesMarkdownBeforeThinkingEnd(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	block := &Block{
+		ID:                          1,
+		Type:                        BlockThinking,
+		Streaming:                   true,
+		ThinkingMarkdownProvisional: true,
+		Content:                     "**Adjusting commit behavior and updating docs**\n\nThe summary continues here.",
+	}
+	plain := stripANSI(strings.Join(block.renderThinking(120), "\n"))
+	if strings.Contains(plain, "**Adjusting") {
+		t.Fatalf("summary tail still exposes markdown markers: %q", plain)
+	}
+	if !strings.Contains(plain, "Adjusting commit behavior and updating docs") {
+		t.Fatalf("summary heading missing from rendered tail: %q", plain)
+	}
+	if strings.Contains(plain, "THINKING") && !strings.Contains(plain, "Adjusting") {
+		t.Fatalf("thinking card did not render summary tail: %q", plain)
+	}
+}
+
 func TestCloneBlockForDeferredSourceClearsThinkingStreamCache(t *testing.T) {
 	block := &Block{
 		Type:          BlockAssistant,

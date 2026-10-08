@@ -555,9 +555,10 @@ func TestResponsesProvider_CodexPresetCompactionUsesOrdinaryResponsesRequest(t *
 	if last, ok := input[len(input)-1].(map[string]any); !ok || last["type"] != "message" {
 		t.Fatalf("request input last item = %#v, want the summary user message", input[len(input)-1])
 	}
-	if got := gotHeaders.Get(headerCodexBetaFeatures); strings.Contains(got, "remote_compaction_v2") {
-		t.Fatalf("compaction request %s = %q, want no remote-compaction beta feature", headerCodexBetaFeatures, got)
+	if got := gotHeaders.Get("x-codex-beta-features"); got != "" {
+		t.Fatalf("unexpected beta features header = %q", got)
 	}
+
 	if got := gotHeaders.Get("originator"); got != openAICodexOriginator {
 		t.Fatalf("compaction request originator = %q, want %q", got, openAICodexOriginator)
 	}

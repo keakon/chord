@@ -176,7 +176,7 @@ func TestParseResponsesSSECapturesHostedToolCall(t *testing.T) {
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"sample_tool_call","id":"call_1","status":"completed","action":{"type":"search","query":"golang generics","sources":[{"type":"url","url":"https://example.invalid/a","title":"Result A"},{"type":"url","url":"https://example.invalid/b","title":"Result B"}]}}}`,
 		`{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"sample_tool_call","id":"call_1","status":"completed","action":{"type":"search","query":"golang generics","sources":[{"type":"url","url":"https://example.invalid/a","title":"Result A"},{"type":"url","url":"https://example.invalid/b","title":"Result B"}]}},{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"Search summary."}]}]}}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -215,7 +215,7 @@ func TestParseResponsesSSECapturesHostedToolFailureAndPending(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":0,"item":{"type":"sample_tool_call","id":"call_2","status":"failed"}}`,
 			`{"type":"response.completed","response":{"id":"resp_2","status":"completed","output":[{"type":"sample_tool_call","id":"call_2","status":"failed"}]}}`,
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -233,7 +233,7 @@ func TestParseResponsesSSECapturesHostedToolFailureAndPending(t *testing.T) {
 			`{"type":"response.output_item.added","output_index":0,"item":{"type":"sample_tool_call","id":"call_3","status":"in_progress"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -247,7 +247,7 @@ func TestParseResponsesSSECapturesHostedToolFailureAndPending(t *testing.T) {
 		stream := buildSSEStream([]string{
 			`{"type":"response.completed","response":{"id":"resp_4","status":"completed","output":[{"type":"sample_tool_call","id":"call_4","status":"completed","action":{"type":"search","query":"q"}}]}}`,
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -266,7 +266,7 @@ func TestParseResponsesSSECapturesHostedToolFailureAndPending(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"sample_tool","arguments":"{}"}}`,
 			`{"type":"response.completed","response":{"id":"resp_5","status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"sample_tool","arguments":"{}"}]}}`,
 		}
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false, true)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false, true, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -282,7 +282,7 @@ func TestParseResponsesSSECapturesHostedToolFailureAndPending(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":0,"item":{"type":"sample_tool_call","id":"call_6","status":"completed"}}`,
 			`{"type":"response.completed","response":{"id":"resp_6","status":"completed","output":[{"type":"sample_tool_call","id":"call_6","status":"completed"}]}}`,
 		}
-		resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(hostedEvents), nil, nil, nil, "", false, false)
+		resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(hostedEvents), nil, nil, nil, "", false, false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}

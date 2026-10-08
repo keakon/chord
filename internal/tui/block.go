@@ -267,6 +267,11 @@ type Block struct {
 	// rendered dimmed above the main response text.
 	ThinkingParts []string
 
+	// ThinkingMarkdownProvisional allows a visible summary stream to render
+	// its active tail through the Markdown pipeline before the whole thinking
+	// block ends. Hidden/raw reasoning never sets this flag.
+	ThinkingMarkdownProvisional bool
+
 	// ThinkingTranslations holds post-processed translated thinking content for
 	// the corresponding ThinkingParts index. Empty entries mean no translated
 	// content is currently available for that thinking block.

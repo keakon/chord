@@ -625,7 +625,7 @@ func assistantThinkingBlocksForTranscript(msg message.Message) []message.Thinkin
 	if len(msg.ThinkingBlocks) > 0 {
 		return msg.ThinkingBlocks
 	}
-	if strings.TrimSpace(msg.ReasoningContent) == "" {
+	if !msg.RawReasoningDisplayable() {
 		return nil
 	}
 	return []message.ThinkingBlock{{Thinking: msg.ReasoningContent}}

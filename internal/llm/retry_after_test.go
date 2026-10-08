@@ -96,7 +96,7 @@ func TestResponsesSSEErrorsRetainRetryAdvice(t *testing.T) {
 		{"malformed", `{"type":"response.failed","response":{"error":{"message":"unavailable","headers":true}}}`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream([]string{tc.event}), nil, nil, nil, "", false, false)
+			_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream([]string{tc.event}), nil, nil, nil, "", false, false, false)
 			apiErr, ok := errors.AsType[*APIError](err)
 			if !ok || apiErr.RetryAfter != tc.want || apiErr.StatusCode != 0 || apiErr.Origin != APIErrorOriginSSEEvent {
 				t.Fatalf("parsed SSE error = %#v, want status-less error with %v advice", err, tc.want)

@@ -26,7 +26,7 @@ func TestHostedToolsExplicitEmptyOverride(t *testing.T) {
 func TestResponsesHostedErrorsApprovalAndFiles(t *testing.T) {
 	for _, status := range []string{"", ",\"status\":\"completed\""} {
 		stream := buildSSEStream([]string{`{"type":"response.completed","response":{"status":"completed","output":[{"type":"mcp_call","id":"mcp-1","name":"remote_action","arguments":"{}","error":{"message":"failed"}` + status + `},{"type":"message","id":"msg-1","content":[{"type":"output_text","text":"File ready","annotations":[{"type":"container_file_citation","container_id":"container-1","file_id":"file-1","filename":"result.csv"}]}]},{"type":"mcp_approval_request","id":"approval-1"},{"type":"sample_native_output","id":"native-1","data":"retained"}]}}`})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +67,7 @@ func TestResponsesHostedTerminalOrderAndAuthoritativeError(t *testing.T) {
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"mcp_call","id":"call-1","status":"completed","error":null}}`,
 		`{"type":"response.completed","response":{"status":"completed","output":[{"type":"mcp_call","id":"call-1","error":{"message":"failed"}},{"type":"message","id":"msg-1","content":[]}]}}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestHostedParsersRetainEvidenceOnStreamFailure(t *testing.T) {
 		t.Fatalf("response=%+v err=%v", resp, err)
 	}
 	stream := buildSSEStream([]string{`{"type":"response.output_item.added","output_index":0,"item":{"type":"mcp_approval_request","id":"approval-1"}}`, `{"type":"error","message":"connection interrupted"}`})
-	resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true)
+	resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, true, false)
 	if err == nil || resp == nil || resp.Hosted == nil || !resp.Hosted.RequiresApproval {
 		t.Fatalf("response=%+v err=%v", resp, err)
 	}

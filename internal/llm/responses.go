@@ -908,7 +908,8 @@ func (r *ResponsesProvider) sendAndParse(
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity, freeform, hosted != nil)
+	visibleReasoningText := responsesVisibleReasoningText(r.provider, model)
+	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity, freeform, hosted != nil, visibleReasoningText)
 	if parseErr != nil {
 		if _, ok := errors.AsType[*ChunkTimeoutError](parseErr); ok {
 			snap := cr.chunkTimeoutSnapshot()

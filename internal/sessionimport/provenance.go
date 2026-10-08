@@ -6,7 +6,7 @@ func importedCodexProvenance() *message.MessageProvenance {
 	return &message.MessageProvenance{
 		Source:     "import:codex",
 		ProviderID: "openai",
-		WireFamily: "openai-responses",
+		WireFamily: message.WireFamilyResponses,
 		Imported:   true,
 	}
 }

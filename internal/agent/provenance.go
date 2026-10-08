@@ -181,7 +181,7 @@ func wireFamilyFromProviderType(providerType string) string {
 	case config.ProviderTypeChatCompletions:
 		return "openai-chat"
 	case config.ProviderTypeResponses:
-		return "openai-responses"
+		return message.WireFamilyResponses
 	case config.ProviderTypeGenerateContent:
 		return "gemini"
 	default:
@@ -197,7 +197,7 @@ func wireFamilyFromProviderID(providerID string) string {
 	case strings.Contains(providerID, "gemini") || strings.Contains(providerID, "google"):
 		return "gemini"
 	case strings.Contains(providerID, "openai") || strings.Contains(providerID, "codex"):
-		return "openai-responses"
+		return message.WireFamilyResponses
 	default:
 		return "unknown"
 	}

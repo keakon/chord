@@ -324,6 +324,10 @@ func (StreamThinkingEvent) agentEvent() {}
 type StreamThinkingDeltaEvent struct {
 	Text    string // incremental thinking content since last delta
 	AgentID string // originating agent ("" = main agent)
+	// ThinkingMode is non-empty for provider-classified streams. "summary" is
+	// user-visible generated reasoning summary text; hidden reasoning never
+	// produces this event.
+	ThinkingMode string
 	// TurnID and RequestSeq mirror StreamTextEvent's segment identity so a
 	// thinking card is attributed to the same producer segment as the answer
 	// text of that request.
@@ -332,6 +336,17 @@ type StreamThinkingDeltaEvent struct {
 }
 
 func (StreamThinkingDeltaEvent) agentEvent() {}
+
+// StreamThinkingPartEndEvent marks the end of a visible thinking summary part
+// while keeping the surrounding thinking card open. The next thinking delta
+// may continue in the same card, including when a tool call is interleaved.
+type StreamThinkingPartEndEvent struct {
+	AgentID    string
+	TurnID     uint64
+	RequestSeq uint64
+}
+
+func (StreamThinkingPartEndEvent) agentEvent() {}
 
 // StreamRollbackEvent asks the UI to discard the currently streaming assistant
 // output for an agent (used when a provider-side incremental attempt must be

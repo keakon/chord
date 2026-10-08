@@ -795,7 +795,7 @@ func TestParseResponsesSSEEmitsProgressDeltas(t *testing.T) {
 		if delta.Progress != nil {
 			progress = append(progress, *delta.Progress)
 		}
-	}, nil, nil, "", false, false)
+	}, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -820,7 +820,7 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_abc","name":"Shell","status":"completed"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -849,7 +849,7 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_xyz","name":"Shell","arguments":"{\"command\":\"ls -la\"}","status":"completed"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -880,7 +880,7 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"i1","call_id":"c1","name":"Read","status":"completed"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -913,7 +913,7 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","index":1,"output_index":0,"item":{"type":"function_call","id":"i1","call_id":"c1","name":"Shell","status":"completed"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -934,7 +934,7 @@ func TestParseResponsesSSE_ToolCall(t *testing.T) {
 			`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"c0","name":"Shell","arguments":"{\"command\":\"echo 1\"}","status":"completed"}}`,
 			"[DONE]",
 		})
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 		if err != nil {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 		}
@@ -967,7 +967,7 @@ func TestParseResponsesSSE_MultilineDataEvent(t *testing.T) {
 		"",
 	}, "\n")
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -999,7 +999,7 @@ func TestParseResponsesSSE_MidLineTimeoutReturnsTruncatedEvent(t *testing.T) {
 	cr := NewChunkTimeoutReader(reader, 10*time.Millisecond, cancel)
 	defer cr.Stop()
 
-	_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(cr, nil, nil, nil, "", false, false)
+	_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(cr, nil, nil, nil, "", false, false, false)
 	if err == nil {
 		t.Fatal("parseResponsesSSEWithOutputItemsAndTurnState err = nil, want truncated SSE event error")
 	}
@@ -1022,7 +1022,7 @@ func TestParseResponsesSSE_EarlyCloseAfterTextDeltaReturnsInterruptedPartialResp
 		"",
 	}, "\n")
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1044,7 +1044,7 @@ func TestParseResponsesSSE_EarlyCloseAfterTextDoneReturnsInterruptedPartialRespo
 		"",
 	}, "\n")
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1065,7 +1065,7 @@ func TestParseResponsesSSE_ReadErrorAfterTextDeltaReturnsInterruptedPartialRespo
 	}, "\n")
 	reader := &errorAfterReader{payload: []byte(raw), err: errors.New("network reset")}
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1089,7 +1089,7 @@ func TestParseResponsesSSE_ReadErrorAfterTextDoneReturnsInterruptedPartialRespon
 	}, "\n")
 	reader := &errorAfterReader{payload: []byte(raw), err: errors.New("network reset")}
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1105,7 +1105,7 @@ func TestParseResponsesSSE_EarlyCloseBeforeCompletedWithNoOutputReturnsError(t *
 		"",
 	}, "\n")
 
-	_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false)
+	_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false, false)
 	if err == nil {
 		t.Fatal("parseResponsesSSEWithOutputItemsAndTurnState err = nil, want incomplete stream error")
 	}
@@ -1121,7 +1121,7 @@ func TestParseResponsesSSE_EarlyCloseAfterToolDoneReturnsRecoveredToolCall(t *te
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell","status":"completed"}}`,
 	})
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1154,7 +1154,7 @@ func TestParseResponsesSSE_ChunkTimeoutAfterAllOutputItemsDoneReturnsRecoveredTo
 	}, "\n\n") + "\n\n"
 	reader := &chunkTimeoutAfterPayloadReader{payload: []byte(raw)}
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1191,7 +1191,7 @@ func TestParseResponsesSSE_ChunkTimeoutWithReasoningItemRecoversToolCalls(t *tes
 	}, "\n\n") + "\n\n"
 	reader := &chunkTimeoutAfterPayloadReader{payload: []byte(raw)}
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1221,7 +1221,7 @@ func TestParseResponsesSSE_xAIReasoningText(t *testing.T) {
 		`data: {"type":"response.output_text.delta","delta":"answer"}`,
 		`data: {"type":"response.completed","response":{"id":"resp_xai","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}}`,
 	}, "\n\n") + "\n\n"
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(strings.NewReader(raw), nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(strings.NewReader(raw), nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1291,7 +1291,7 @@ func TestParseResponsesSSE_ChunkTimeoutBeforeOutputItemDoneStillFails(t *testing
 	}, "\n\n") + "\n\n"
 	reader := &chunkTimeoutAfterPayloadReader{payload: []byte(raw)}
 
-	_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false)
+	_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false, false)
 	if err == nil {
 		t.Fatal("parseResponsesSSEWithOutputItemsAndTurnState err = nil, want timeout/incomplete error")
 	}
@@ -1309,7 +1309,7 @@ func TestParseResponsesSSE_ChunkTimeoutAfterTextOnlyDoneReturnsInterruptedPartia
 	}, "\n\n") + "\n\n"
 	reader := &chunkTimeoutAfterPayloadReader{payload: []byte(raw)}
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1324,7 +1324,7 @@ func TestParseResponsesSSE_EarlyCloseBeforeToolDoneReturnsError(t *testing.T) {
 		`{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\"echo unsafe\"}"}`,
 	})
 
-	_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err == nil {
 		t.Fatal("parseResponsesSSEWithOutputItemsAndTurnState err = nil, want incomplete stream error")
 	}
@@ -1338,7 +1338,7 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 		stream := buildSSEStream([]string{
 			`{"type":"response.failed","response":{"status":"failed","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"Input is too long for this model","param":"input"}}}`,
 		})
-		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 		if err == nil {
 			t.Fatal("parseResponsesSSEWithOutputItemsAndTurnState err = nil, want APIError")
 		}
@@ -1360,7 +1360,7 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 			`data: {"type":"error","error":{"type":"invalid_request_error","code":"context_length_exceeded","message":"This request exceeds the context window","param":"input"}}`,
 			"",
 		}, "\n")
-		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false)
+		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false, false)
 		if err == nil {
 			t.Fatal("parseResponsesSSEWithOutputItemsAndTurnState err = nil, want APIError")
 		}
@@ -1380,7 +1380,7 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 		stream := buildSSEStream([]string{
 			`{"type":"error","error":{"type":"future_gateway_error","code":"future_unknown_v7","message":"stream failed"}}`,
 		})
-		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 		apiErr, ok := errors.AsType[*APIError](err)
 		if !ok || apiErr.Origin != APIErrorOriginSSEEvent || apiErr.StatusCode != 0 {
 			t.Fatalf("err = %T %v, want status-less SSE APIError", err, err)
@@ -1402,7 +1402,7 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 			`data: {"type":"error","error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
 			"",
 		}, "\n")
-		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false)
+		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false, false)
 		apiErr, ok := errors.AsType[*APIError](err)
 		if !ok || apiErr.Code != "upstream_connection_error" {
 			t.Fatalf("err = %T %v, want provider API error (partial stays on screen, no rollback)", err, err)
@@ -1421,7 +1421,7 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 			`data: {"type":"error","error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
 			"",
 		}, "\n")
-		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false)
+		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false, false)
 		apiErr, ok := errors.AsType[*APIError](err)
 		if !ok || apiErr.Code != "upstream_connection_error" {
 			t.Fatalf("err = %T %v, want provider API error for half-built tool call", err, err)
@@ -1446,7 +1446,7 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 			`data: {"type":"error","error":{"type":"upstream_error","code":"upstream_connection_error","message":"Upstream response stream was interrupted"}}`,
 			"",
 		}, "\n")
-		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false)
+		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(bytes.NewReader([]byte(raw)), nil, nil, nil, "", false, false, false)
 		apiErr, ok := errors.AsType[*APIError](err)
 		if !ok || apiErr.Code != "upstream_connection_error" {
 			t.Fatalf("err = %T %v, want provider API error after error event", err, err)
@@ -1458,7 +1458,7 @@ func TestParseResponsesSSE_ProviderErrorEvents(t *testing.T) {
 			`{"type":"error","error":{"type":"future_gateway_error","code":"upstream_failed","message":"stream failed"}}`,
 			`{"type":"response.completed","response":{"status":"completed","output":[]}}`,
 		})
-		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+		_, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 		if _, ok := errors.AsType[*APIError](err); !ok {
 			t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState err = %T %v, want provider API error", err, err)
 		}
@@ -1490,7 +1490,7 @@ func TestParseResponsesSSE_DuplicateToolCallFromProxy(t *testing.T) {
 		}
 	}
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, cb, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, cb, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1537,7 +1537,7 @@ func TestParseResponsesSSE_DuplicateAddedWithEmptyNameKeepsToolName(t *testing.T
 		}
 	}
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, cb, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, cb, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1586,7 +1586,7 @@ func TestParseResponsesSSE_FirstAddedMalformedEmitsNoToolCallbacks(t *testing.T)
 		case message.StreamDeltaToolUseEnd:
 			ends++
 		}
-	}, nil, nil, "", false, false)
+	}, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1626,7 +1626,7 @@ func TestParseResponsesSSE_ArgumentsDoneEmitsEarlyToolUseEnd(t *testing.T) {
 		}
 	}
 
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, cb, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, cb, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1678,7 +1678,7 @@ func TestParseResponsesSSE_CustomInputDoneEmitsEarlyToolUseEnd(t *testing.T) {
 			ends++
 			endIDs = append(endIDs, delta.ToolCall.ID)
 		}
-	}, nil, nil, "", false, false)
+	}, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1709,7 +1709,7 @@ func TestParseResponsesSSE_LateNameEmitsPairedToolCallbacks(t *testing.T) {
 		}
 		events = append(events, delta.Type)
 		toolDeltas = append(toolDeltas, *delta.ToolCall)
-	}, nil, nil, "", false, false)
+	}, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1749,7 +1749,7 @@ func TestParseResponsesSSE_StartEndUseStableStreamIDWhenDoneAddsCallID(t *testin
 		case message.StreamDeltaToolUseEnd:
 			ends = append(ends, *delta.ToolCall)
 		}
-	}, nil, nil, "", false, false)
+	}, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1778,7 +1778,7 @@ func TestParseResponsesSSE_ExecuteShellTool(t *testing.T) {
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"shell","status":"completed"}}`,
 		"[DONE]",
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1813,7 +1813,7 @@ func TestParseResponsesSSE_ExecuteShellTool_DoneArgumentsAsString(t *testing.T) 
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"item_1","call_id":"call_2","name":"shell","arguments":"{\"command\":\"echo done-args\"}","status":"completed"}}`,
 		"[DONE]",
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1846,7 +1846,7 @@ func TestParseResponsesSSE_TruncatedStream(t *testing.T) {
 		// No output_item.done; stream ends with response.incomplete (truncation).
 		`{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":5000,"output_tokens":32000}}}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1868,7 +1868,7 @@ func TestParseResponsesSSE_DONEWithIncompleteJSON(t *testing.T) {
 		// No more deltas, no output_item.done; stream ends with [DONE]. Args are invalid JSON.
 		"[DONE]",
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1885,7 +1885,7 @@ func TestParseResponsesSSE_ExtractsProviderResponseID(t *testing.T) {
 	stream := buildSSEStream([]string{
 		`{"type":"response.completed","response":{"id":"resp-abc123","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}
@@ -1900,7 +1900,7 @@ func TestParseResponsesSSE_ReturnsOnTerminalDataLineWithoutBlankDelimiter(t *tes
 	var resp *message.Response
 	var err error
 	go func() {
-		resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false)
+		resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false, false)
 		close(done)
 	}()
 
@@ -1923,7 +1923,7 @@ func TestParseResponsesSSE_ReturnsOnStandardTerminalEventWithoutBlankDelimiter(t
 	var resp *message.Response
 	var err error
 	go func() {
-		resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false)
+		resp, _, err = parseResponsesSSEWithOutputItemsAndTurnState(reader, nil, nil, nil, "", false, false, false)
 		close(done)
 	}()
 
@@ -1944,7 +1944,7 @@ func TestParseResponsesSSEWithOutputItems_CompletedOutputToBaseline(t *testing.T
 	stream := buildSSEStream([]string{
 		`{"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]},{"type":"function_call","id":"fc_1","call_id":"call_1","name":"Read","arguments":"{\"file\":\"README.md\"}"}],"usage":{"input_tokens":10,"output_tokens":5}}}`,
 	})
-	resp, outputItems, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, outputItems, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItems: %v", err)
 	}
@@ -1969,7 +1969,7 @@ func TestParseResponsesSSEWithOutputItems_FallsBackToStreamToolCallsWhenOutputMi
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"i0","call_id":"call_1","name":"Read","status":"completed"}}`,
 		`{"type":"response.completed","response":{"id":"resp-2","status":"completed","output":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
 	})
-	resp, outputItems, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, outputItems, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItems: %v", err)
 	}
@@ -3690,7 +3690,7 @@ func TestParseResponsesSSE_ReviewUncommittedCode_E2E(t *testing.T) {
 		// Simulate truncation before done (e.g. token limit hit). API sends response.incomplete.
 		`{"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"},"usage":{"input_tokens":10000,"output_tokens":32000}}}`,
 	})
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
 	}

@@ -95,6 +95,12 @@ func (m *eventMapper) Map(ev agent.AgentEvent) ([]acp.SessionUpdate, eventEffect
 		}
 		return []acp.SessionUpdate{acp.UpdateAgentThoughtText(e.Text)}, eventEffects{busy: true, streamStarted: true, segment: segment}
 
+	case agent.StreamThinkingPartEndEvent:
+		if e.AgentID != "" {
+			return nil, eventEffects{}
+		}
+		return nil, eventEffects{busy: true, streamStarted: true, segment: segmentOf(e.TurnID, e.RequestSeq)}
+
 	case agent.StreamThinkingEvent:
 		if e.AgentID != "" {
 			return nil, eventEffects{}

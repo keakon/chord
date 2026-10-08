@@ -18,6 +18,7 @@ import (
 	sonicjson "github.com/bytedance/sonic"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/modelcompat"
 )
 
 // Event-specific types for Responses API streaming events.
@@ -366,7 +367,7 @@ func (s responsesPartialCompletionState) outputItemsComplete() bool {
 	return len(s.openOutputItems) == 0
 }
 
-func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCallback, collector *SSECollector, turnState *ResponsesTurnState, turnStateID string, freeform bool, captureHosted bool) (response *message.Response, nativeItems []responsesInputItem, parseErr error) {
+func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCallback, collector *SSECollector, turnState *ResponsesTurnState, turnStateID string, freeform bool, captureHosted bool, visibleReasoningText bool) (response *message.Response, nativeItems []responsesInputItem, parseErr error) {
 	phaser, _ := reader.(chunkPhaser)
 	br := bufio.NewReaderSize(reader, sseInitialBufferSize)
 
@@ -390,6 +391,13 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		progressEvents  int64
 		providerErr     error
 	)
+	// pendingVisibleReasoning accumulates reasoning_text deltas that a
+	// compatibility target exposes as visible reasoning, so the part boundary
+	// can project them into a durable thinking block.
+	var pendingVisibleReasoning strings.Builder
+	if visibleReasoningText {
+		defer projectVisibleReasoningText(&resp, &pendingVisibleReasoning, "")
+	}
 	if captureHosted {
 		defer func() {
 			if parseErr != nil {
@@ -454,22 +462,24 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		}
 
 		state := responsesEventState{
-			resp:              &resp,
-			textItems:         &textItems,
-			toolCalls:         toolCalls,
-			customItemToIndex: customItemToIdx,
-			finalizedCalls:    finalizedCalls,
-			incompleteCalls:   incompleteCalls,
-			hostedCalls:       hostedCalls,
-			captureHosted:     captureHosted,
-			truncated:         &truncated,
-			outputItems:       &outputItems,
-			partial:           &partial,
-			cb:                cb,
-			phaser:            phaser,
-			turnState:         turnState,
-			turnStateID:       turnStateID,
-			freeform:          freeform,
+			resp:                    &resp,
+			textItems:               &textItems,
+			toolCalls:               toolCalls,
+			customItemToIndex:       customItemToIdx,
+			finalizedCalls:          finalizedCalls,
+			incompleteCalls:         incompleteCalls,
+			hostedCalls:             hostedCalls,
+			captureHosted:           captureHosted,
+			truncated:               &truncated,
+			outputItems:             &outputItems,
+			partial:                 &partial,
+			cb:                      cb,
+			phaser:                  phaser,
+			turnState:               turnState,
+			turnStateID:             turnStateID,
+			freeform:                freeform,
+			visibleReasoningText:    visibleReasoningText,
+			pendingVisibleReasoning: &pendingVisibleReasoning,
 		}
 		outResp, outItems, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
 		if err != nil {
@@ -650,7 +660,7 @@ type responsesEventState struct {
 	toolCalls         map[int]*responsesToolAccumulator
 	customItemToIndex map[string]int // custom tool item_id → output index
 	finalizedCalls    map[string]bool
-	incompleteCalls   map[string]bool // explicit incomplete status blocks terminal recovery
+	incompleteCalls   map[string]bool                      // explicit incomplete status blocks terminal recovery
 	hostedCalls       map[string]*responsesHostedCallState // hosted item id → dedup state
 	// captureHosted enables hosted-call capture: the raw item payloads are
 	// re-read from the event data only on sub-requests that declared a hosted
@@ -666,6 +676,42 @@ type responsesEventState struct {
 	// freeform replays apply_patch output items in the custom_tool_call shape
 	// (raw patch text) so incremental baselines match the main history replay.
 	freeform bool
+	// visibleReasoningText is enabled only for configured Responses
+	// compatibility targets that explicitly expose reasoning_text as user-visible
+	// reasoning. Official OpenAI Responses keeps that channel hidden.
+	visibleReasoningText bool
+	// pendingVisibleReasoning accumulates visible reasoning_text deltas until
+	// the part's done event projects them into a thinking block.
+	pendingVisibleReasoning *strings.Builder
+}
+
+func responsesVisibleReasoningText(provider *ProviderConfig, model string) bool {
+	if provider == nil {
+		return false
+	}
+	// The explicit openai_visible continuity contract is the existing opt-in
+	// for gateways whose Responses reasoning_text is a displayable carrier.
+	// Official Codex/OpenAI Responses has no such opt-in and remains hidden.
+	return reasoningContinuityCompatMode(provider, model) == modelcompat.ReasoningContinuityOpenAIVisible
+}
+
+// projectVisibleReasoningText turns reasoning_text that a compatibility
+// target exposes as user-visible reasoning into a durable thinking block. The
+// done event's text is authoritative; pending deltas cover streams that omit
+// it. Hidden Responses reasoning stays out of ThinkingBlocks and remains
+// replay-only in ReasoningContent.
+func projectVisibleReasoningText(resp *message.Response, pending *strings.Builder, doneText string) {
+	if resp == nil || pending == nil {
+		return
+	}
+	text := doneText
+	if text == "" {
+		text = pending.String()
+	}
+	pending.Reset()
+	if text != "" {
+		resp.ThinkingBlocks = append(resp.ThinkingBlocks, message.ThinkingBlock{Thinking: text})
+	}
 }
 
 func processResponsesEventPayload(state responsesEventState, eventType string, eventData []byte, flushContent func()) (*message.Response, []responsesInputItem, bool, error) {
@@ -925,7 +971,11 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		if delta.Delta != "" && state.cb != nil {
-			state.cb(message.StreamDelta{Type: message.StreamDeltaThinking, Text: delta.Delta})
+			state.cb(message.StreamDelta{
+				Type:         message.StreamDeltaThinking,
+				Text:         delta.Delta,
+				ThinkingMode: message.StreamThinkingModeSummary,
+			})
 		}
 		return nil, nil, false, nil
 
@@ -936,7 +986,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			return nil, nil, false, nil
 		}
 		if state.cb != nil {
-			state.cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
+			state.cb(message.StreamDelta{Type: message.StreamDeltaThinkingPartEnd})
 		}
 		if done.Text != "" {
 			// A backend may flatten the whole summary into this one part and glue
@@ -948,6 +998,15 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		return nil, nil, false, nil
 
+	case "response.reasoning_summary_part.done":
+		// A summary part boundary is display-relevant but does not close the
+		// response's reasoning stream. The text.done event may have already
+		// emitted the same boundary; the reducer coalesces duplicate closes.
+		if state.cb != nil {
+			state.cb(message.StreamDelta{Type: message.StreamDeltaThinkingPartEnd})
+		}
+		return nil, nil, false, nil
+
 	case "response.reasoning_text.delta":
 		var delta responseReasoningTextDelta
 		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
@@ -956,8 +1015,17 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		}
 		if delta.Delta != "" {
 			state.resp.ReasoningContent += delta.Delta
-			if state.cb != nil {
-				state.cb(message.StreamDelta{Type: message.StreamDeltaThinking, Text: delta.Delta})
+			if state.visibleReasoningText {
+				if state.pendingVisibleReasoning != nil {
+					state.pendingVisibleReasoning.WriteString(delta.Delta)
+				}
+				if state.cb != nil {
+					state.cb(message.StreamDelta{
+						Type:         message.StreamDeltaThinking,
+						Text:         delta.Delta,
+						ThinkingMode: message.StreamThinkingModeSummary,
+					})
+				}
 			}
 		}
 		return nil, nil, false, nil
@@ -971,8 +1039,11 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		if state.resp.ReasoningContent == "" && done.Text != "" {
 			state.resp.ReasoningContent = done.Text
 		}
-		if state.cb != nil {
-			state.cb(message.StreamDelta{Type: message.StreamDeltaThinkingEnd})
+		if state.visibleReasoningText {
+			projectVisibleReasoningText(state.resp, state.pendingVisibleReasoning, done.Text)
+			if state.cb != nil {
+				state.cb(message.StreamDelta{Type: message.StreamDeltaThinkingPartEnd})
+			}
 		}
 		return nil, nil, false, nil
 

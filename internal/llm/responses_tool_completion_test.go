@@ -69,7 +69,7 @@ func TestResponsesUnfinishedToolCallsAreNotExecutable(t *testing.T) {
 					if withCallback {
 						cb = func(message.StreamDelta) {}
 					}
-					resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), cb, nil, nil, "", false, false)
+					resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), cb, nil, nil, "", false, false, false)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -95,7 +95,7 @@ func TestResponsesIncompleteItemKeepsCompletedSibling(t *testing.T) {
 		if delta.Type == message.StreamDeltaToolUseEnd && delta.ToolCall != nil {
 			ended = append(ended, delta.ToolCall.ID)
 		}
-	}, nil, nil, "", false, false)
+	}, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestResponsesExplicitIncompleteItemBlocksTerminalRecovery(t *testing.T) {
 		`{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"sample_tool","status":"incomplete","arguments":"{}"}}`,
 		`{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"sample_tool","arguments":"{}"}]}}`,
 	}
-	resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false, false)
+	resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestResponsesCompletedRecoversEachMissingCallExactlyOnce(t *testing.T) {
 		case message.StreamDeltaToolUseEnd:
 			ends[delta.ToolCall.ID]++
 		}
-	}, nil, nil, "", false, false)
+	}, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestResponsesCompletedSettlesCustomInputFromTerminal(t *testing.T) {
 			`{"type":"response.custom_tool_call_input.delta","item_id":"ct_1","delta":"*** Begin Patch\n*** End Patch"}`,
 			`{"type":"response.completed","response":{"status":"completed","output":[{"type":"custom_tool_call","id":"ct_1","name":"apply_patch"` + terminalInput + `}]}}`,
 		}
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", true, false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", true, false, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -197,7 +197,7 @@ func TestResponsesRejectsToolIdentityCollision(t *testing.T) {
 			event,
 			`[DONE]`,
 		}
-		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false, false)
+		resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false, false, false)
 		if err == nil || !strings.Contains(err.Error(), "conflicting Responses tool call identity") || resp != nil {
 			t.Fatalf("resp=%+v err=%v, want identity conflict", resp, err)
 		}
@@ -208,7 +208,7 @@ func TestResponsesTerminalDoesNotRecoverUnfinishedOutputItem(t *testing.T) {
 	stream := buildSSEStream([]string{
 		`{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"sample_tool","status":"in_progress","arguments":"{}"}]}}`,
 	})
-	resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestResponsesCompletedPreservesFunctionArgsWhenTerminalOmitsThem(t *testing
 		`{"type":"response.function_call_arguments.delta","output_index":2,"delta":"{\"value\":1}"}`,
 		`{"type":"response.completed","response":{"status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"sample_tool"}]}}`,
 	})
-	resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false)
+	resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestResponsesCompletedPreservesFunctionArgsWhenTerminalOmitsThem(t *testing
 
 func TestResponsesDuplicateCustomItemDoneDoesNotRepeatCall(t *testing.T) {
 	done := `{"type":"response.output_item.done","output_index":0,"item":{"type":"custom_tool_call","id":"ct_1","name":"apply_patch","input":"*** Begin Patch\n*** End Patch"}}`
-	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream([]string{done, done, `[DONE]`}), nil, nil, nil, "", true, false)
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream([]string{done, done, `[DONE]`}), nil, nil, nil, "", true, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestResponsesUnfinishedCallKeepsCompletedCall(t *testing.T) {
 		`{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_2","call_id":"call_2","name":"sample_tool"}}`,
 		`{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{}"}`,
 		`[DONE]`,
-	}), nil, nil, nil, "", false, false)
+	}), nil, nil, nil, "", false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +350,7 @@ func TestResponsesTerminalPreservesToolOrderAcrossMissingEvents(t *testing.T) {
 					t.Fatal(err)
 				}
 				events = append(events, string(raw))
-				resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false, false)
+				resp, items, err := parseResponsesSSEWithOutputItemsAndTurnState(buildSSEStream(events), nil, nil, nil, "", false, false, false)
 				if err != nil {
 					t.Fatal(err)
 				}
