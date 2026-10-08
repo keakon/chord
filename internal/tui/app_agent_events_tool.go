@@ -574,11 +574,21 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		delete(m.toolArgRenderState, evt.ID)
 		block, created := m.ensureToolCallBlock(evt.ID, evt.Name, evt.ArgsJSON, evt.AgentID, evt.State, false)
 		argsCompleted := markToolArgsComplete(block)
+		// The queued badge decides the card's status glyph (⏸ vs the speculative
+		// ⧗), so flipping it is a visible change and must invalidate the rendered
+		// card like any other. It is tracked separately from the state comparison
+		// below: the args-completion path already moved the card to queued, so the
+		// execution event sees an equal state and the badge flip would otherwise
+		// leave the card rendering the stale pending glyph until an unrelated
+		// redraw (for example clicking the card).
+		badgeChanged := false
 		if block != nil {
 			switch evt.State {
 			case agent.ToolCallExecutionStateQueued:
+				badgeChanged = !block.ToolQueuedByExecutionEvent
 				block.ToolQueuedByExecutionEvent = true
 			case agent.ToolCallExecutionStateRunning:
+				badgeChanged = block.ToolQueuedByExecutionEvent
 				block.ToolQueuedByExecutionEvent = false
 			}
 		}
@@ -589,7 +599,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if created {
 			return true, effects
 		}
-		updated := argsCompleted
+		updated := argsCompleted || badgeChanged
 		// Execution-state events may carry effective arguments after a hook or
 		// confirmation. The card already contains the model's original call;
 		// update arguments only for a recovery event that created an empty card.
@@ -604,18 +614,13 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			block.ToolExecutionState = evt.State
 			updated = true
 		}
-		switch evt.State {
-		case agent.ToolCallExecutionStateQueued:
-			block.ToolQueuedByExecutionEvent = true
-		case agent.ToolCallExecutionStateRunning:
-			block.ToolQueuedByExecutionEvent = false
-		}
 		if block.ToolProgress != nil {
 			block.ToolProgress = nil
 			updated = true
 		}
-		if evt.State == agent.ToolCallExecutionStateQueued && !toolCardAlwaysExpanded(block.ToolName) {
+		if evt.State == agent.ToolCallExecutionStateQueued && !toolCardAlwaysExpanded(block.ToolName) && !block.Collapsed {
 			block.Collapsed = true
+			updated = true
 		}
 		if updated {
 			block.InvalidateCache()

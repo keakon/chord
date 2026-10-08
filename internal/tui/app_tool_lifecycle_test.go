@@ -49,6 +49,75 @@ func TestToolCallExecutionEventMarksToolQueuedWithoutAnimating(t *testing.T) {
 	}
 }
 
+// The args-completion path already moves a card to queued (the speculative ⧗),
+// so by the time the real execution event arrives the state comparison sees no
+// change; the queued-by-event badge flip is then the only signal. It must
+// invalidate the card's cached frame, or the screen keeps rendering ⧗ until an
+// unrelated redraw (such as clicking the card) rebuilds it.
+func TestQueuedExecutionEventRefreshesPendingGlyph(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 24)
+	args := `{"path":"src/demo.go"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: "call-glyph-1", Name: tools.NameRead, AgentID: "", ArgsJSON: args,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID: "call-glyph-1", Name: tools.NameRead, AgentID: "", ArgsJSON: args, ArgsStreamingDone: true,
+	}})
+	block, ok := m.viewport.FindBlockByToolID("call-glyph-1")
+	if !ok {
+		t.Fatal("expected the waiting tool block")
+	}
+	if frame := stripANSI(m.viewport.Render("▖", nil, -1, -1, "")); !strings.Contains(frame, pendingToolGlyph) {
+		t.Fatalf("expected the speculative pending glyph before dispatch, got:\n%s", frame)
+	}
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
+		ID: "call-glyph-1", Name: tools.NameRead, AgentID: "", ArgsJSON: args, State: agent.ToolCallExecutionStateQueued,
+	}})
+	if !block.ToolQueuedByExecutionEvent {
+		t.Fatal("execution event did not set the queued-by-event badge")
+	}
+	if frame := stripANSI(m.viewport.Render("▖", nil, -1, -1, "")); strings.Contains(frame, pendingToolGlyph) || !strings.Contains(frame, queuedToolGlyph) {
+		t.Fatalf("queued card kept its stale pending frame, want %s:\n%s", queuedToolGlyph, frame)
+	}
+}
+
+// Dispatch folds a waiting card back to its compact status view. The fold has
+// to invalidate the cached frame too: otherwise the expanded body stays on
+// screen after the model already collapsed the card.
+func TestQueuedExecutionEventFoldsExpandedCard(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 24)
+	args := `{"path":"src/demo.go"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: "call-fold-1", Name: tools.NameRead, AgentID: "", ArgsJSON: args,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID: "call-fold-1", Name: tools.NameRead, AgentID: "", ArgsJSON: args, ArgsStreamingDone: true,
+	}})
+	block, ok := m.viewport.FindBlockByToolID("call-fold-1")
+	if !ok {
+		t.Fatal("expected the waiting tool block")
+	}
+	// The user expanded the card while its arguments streamed; a result-less
+	// read card has no visible body difference to assert on, so pin the frame
+	// cache the fold must drop.
+	block.Collapsed = false
+	block.InvalidateCache()
+	_ = m.viewport.Render("▖", nil, -1, -1, "")
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
+		ID: "call-fold-1", Name: tools.NameRead, AgentID: "", ArgsJSON: args, State: agent.ToolCallExecutionStateQueued,
+	}})
+	if !block.Collapsed {
+		t.Fatal("queued execution event did not fold the expanded card")
+	}
+	if cached := block.GetViewportCache(m.viewport.width, ""); cached != nil {
+		t.Fatal("queued fold left the expanded frame cached")
+	}
+}
+
 // The last call in a batch gets no successor, so nothing infers its completion.
 // On the normal path finalize dispatches an execution event soon after, but when
 // streaming ends without a finalized response the card would keep rendering a

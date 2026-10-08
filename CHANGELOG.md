@@ -244,6 +244,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Boundary context reduction derives the cached-prefix rewrite penalty from the current provider/model's prices and the request's cache TTL. Models without pricing keep the fallback assumption instead of borrowing another provider's price. The policy uses a bounded 30-request horizon rather than extrapolating from past requests, excludes newly appended content from the rewrite penalty, and defers speculative rewrites while a checkpoint is queued or running.
 - Compaction checkpoints no longer tell the model to reload a skill it cannot load. A recorded name the current model-facing catalog does not expose — a manual-only skill, one the ruleset denies, or one that left the catalog — is listed under its own label pointing at the archived history and the user, instead of a `skill` call the execution path would refuse; the reload hint stays only while some recorded name is still loadable, and subagent checkpoints mark the same names on their own line.
 
+- A tool call waiting behind other parallel calls now shows the queued status icon as soon as it is queued. The card kept the pending icon — and an expanded card kept its body — until an unrelated redraw, such as clicking the card.
+
 ## 0.8.1 - 2026-09-16
 
 ### Highlights
