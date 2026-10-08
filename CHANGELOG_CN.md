@@ -86,6 +86,8 @@
 - 新增 `memory.model_pool` 配置：自动项目记忆抽取改走指定的 `model_pools` 条目，不再用主模型池，适用于主模型开着激进推理设置（例如 `effort: max`）导致有界 JSON 答案被截断的场景。该池必须在 `model_pools` 中定义；名字写错会让抽取以指明缺失池名的 setup 失败停止。
 - 新增 `web_search` 工具：通过 provider 的 hosted 搜索工具检索网络。默认关闭，需要在支持 hosted 搜索的 Anthropic Messages 或 OpenAI Responses 模型上用 `compat.hosted_tools: [web_search]` 开启。每次搜索另发一条声明 hosted 工具的请求，Chord 返回摘要和编号来源，主对话请求从不声明该工具。可用 `allowed_domains` / `blocked_domains` 过滤。同一个列表还能启用顶层 `hosted_tools` 目录里定义的其他服务端工具：工具的本地工具面与按 provider 类型的原始 wire 声明都写在配置里。详见[配置与认证：Hosted tools](./docs/configuration_CN.md#hosted-tools)。
 
+- 错误面板支持用 `y` 或 `Cmd+C` / `Super+C` 复制全部错误到剪贴板，按新到旧排列，带完整日期，正文不按面板宽度折行。
+
 ### 改进
 
 - MCP 工具结果会按服务器声明的输出 schema 校验；schema 有问题时附上警告并保留可用输出，不会自动重复调用工具。

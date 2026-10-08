@@ -91,6 +91,7 @@ Navigation:
 - `j` / `k`: scroll one line
 - `Ctrl+F` / `Ctrl+B`: page down / up
 - `g` / `G`: jump to top / bottom
+- `y`: copy every recorded error to the clipboard, with full dates and unwrapped messages (`Cmd+C` / `Super+C` does the same)
 - `Esc`: close the panel
 
 The error panel keeps the most recent 80 errors in a ring buffer (newest first), and the buffer lives in process memory: it starts empty when Chord launches and clears when you start or resume a session; a forked session keeps the records it inherits. Use it to diagnose why a model fallback occurred or which keys are hitting rate limits.

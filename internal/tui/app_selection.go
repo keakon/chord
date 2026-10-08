@@ -719,6 +719,9 @@ func longestBacktickRun(s string) int {
 }
 
 func (m *Model) handleSuperCopy() tea.Cmd {
+	if m.mode == ModeErrorPanel {
+		return m.copyErrorPanelAll()
+	}
 	if m.mode == ModeContentViewer {
 		if m.contentViewerHasSelection() {
 			return m.copyContentViewerSelection()

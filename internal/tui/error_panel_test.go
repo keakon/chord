@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -267,5 +268,116 @@ func TestFormatErrorRecordLinesAccountsForMessageIndent(t *testing.T) {
 		if got := stripANSI(strings.Join(lines, "\n")); !strings.Contains(got, "  ") {
 			t.Fatalf("message lost its indent: %q", got)
 		}
+	}
+}
+
+// errorPanelClipboardResult runs the writeClipboardCmd sequence returned by a
+// panel copy action and returns its result message.
+func errorPanelClipboardResult(t *testing.T, cmd tea.Cmd) clipboardWriteResultMsg {
+	t.Helper()
+	msg := cmd()
+	v := reflect.ValueOf(msg)
+	if v.Kind() != reflect.Slice || v.Len() != 2 {
+		t.Fatalf("clipboard command msg = %T, want 2-command sequence", msg)
+	}
+	return v.Index(1).Call(nil)[0].Interface().(clipboardWriteResultMsg)
+}
+
+func TestErrorPanelCopyAllWritesPlainText(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(&sessionControlAgent{}, 100, 40)
+	m.openErrorPanel()
+	m.recordAgentError("", &llm.APIError{StatusCode: 429, Code: "rate_limit", Type: "rate_limit_error", Message: "slow down"}, "provider", "model-1", "gate...xyz9", "acc-1", "user@example.com", false)
+	longMessage := "connection timeout " + strings.Repeat("x", 200)
+	m.recordAgentError("", fmt.Errorf("%s", longMessage), "", "", "", "", "", false)
+
+	cmd := m.handleErrorPanelKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd == nil {
+		t.Fatal("y should return a clipboard command")
+	}
+	result := errorPanelClipboardResult(t, cmd)
+	if result.err != nil {
+		t.Fatalf("clipboard write err = %v", result.err)
+	}
+	if result.success != "Error log copied to clipboard" {
+		t.Fatalf("clipboard success = %q, want %q", result.success, "Error log copied to clipboard")
+	}
+	for _, want := range []string{
+		"provider/model-1", "key=gate...xyz9", "email=user@example.com",
+		"HTTP 429", "code=rate_limit", "type=rate_limit_error", "slow down", longMessage,
+	} {
+		if !strings.Contains(copied, want) {
+			t.Fatalf("copied text missing %q\n%s", want, copied)
+		}
+	}
+	if strings.Contains(copied, "\x1b[") {
+		t.Fatalf("copied text contains ANSI escapes: %q", copied)
+	}
+	// Newest error first, matching the panel display order.
+	newestAt := strings.Index(copied, "connection timeout")
+	oldestAt := strings.Index(copied, "slow down")
+	if newestAt < 0 || oldestAt < 0 || newestAt > oldestAt {
+		t.Fatalf("copied text order = %d/%d, want the newest error first\n%s", newestAt, oldestAt, copied)
+	}
+	// The copy carries a full date rather than the panel's HH:MM:SS.
+	if ts := m.snapshotAgentErrors()[0].Timestamp.Format("2006-01-02 15:04:05"); !strings.Contains(copied, ts) {
+		t.Fatalf("copied text missing full timestamp %q\n%s", ts, copied)
+	}
+	if hint := m.errorPanelHint(); !strings.Contains(hint, "y copy") {
+		t.Fatalf("error panel hint = %q, want y copy", hint)
+	}
+	if cmd := m.handleErrorPanelKey(tea.KeyPressMsg(tea.Key{Text: "Y", Code: 'Y'})); cmd == nil {
+		t.Fatal("Y should also copy the error log")
+	}
+}
+
+func TestErrorPanelCopyAllEmpty(t *testing.T) {
+	origWrite := clipboardWriteAll
+	writeCalled := false
+	clipboardWriteAll = func(text string) error {
+		writeCalled = true
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(&sessionControlAgent{}, 100, 40)
+	m.openErrorPanel()
+	if cmd := m.handleErrorPanelKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'})); cmd == nil {
+		t.Fatal("y on an empty panel should enqueue an info toast")
+	}
+	if writeCalled {
+		t.Fatal("empty panel must not write to the clipboard")
+	}
+}
+
+func TestErrorPanelSuperCopyCopiesAll(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(&sessionControlAgent{}, 100, 40)
+	m.openErrorPanel()
+	m.recordAgentError("", fmt.Errorf("panel failure"), "", "", "", "", "", false)
+
+	cmd := m.handleSuperCopy()
+	if cmd == nil {
+		t.Fatal("Cmd+C in the error panel should copy the error log")
+	}
+	if result := errorPanelClipboardResult(t, cmd); result.err != nil {
+		t.Fatalf("clipboard write err = %v", result.err)
+	}
+	if !strings.Contains(copied, "panel failure") {
+		t.Fatalf("copied text = %q, want panel failure", copied)
 	}
 }

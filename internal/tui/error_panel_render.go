@@ -40,7 +40,7 @@ func (m *Model) renderErrorPanelDialog() string {
 
 func (m *Model) errorPanelHint() string {
 	if m.width < 60 {
-		return "↑/↓ scroll  PgUp/PgDn page  Esc close"
+		return "↑/↓ scroll  PgUp/PgDn page  y copy  Esc close"
 	}
-	return "j/k scroll  g/G jump  ctrl+f/b page  esc close"
+	return "j/k scroll  g/G jump  ctrl+f/b page  y copy  esc close"
 }

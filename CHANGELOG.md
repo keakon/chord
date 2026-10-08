@@ -92,6 +92,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - New `memory.model_pool` option routes automatic project-memory extraction through a named `model_pools` entry instead of the main model pool, for setups whose main models use aggressive reasoning settings (such as `effort: max`) that can leave the bounded JSON answer truncated. The pool must be defined in `model_pools`; an unknown name stops extraction with a setup failure naming it.
 - New `web_search` tool: search the web through the provider's hosted search tool. It is off by default; enable it with `compat.hosted_tools: [web_search]` on an Anthropic Messages or OpenAI Responses model whose endpoint supports hosted search. Each search runs as a separate request that declares the hosted tool, and Chord returns a summary with numbered sources, so the main conversation request never declares it. Optional `allowed_domains` / `blocked_domains` filters travel as request parameters. The same list enables further provider-side tools from the top-level `hosted_tools` catalog, which defines a tool's local surface and its raw per-type wire declarations in configuration. See [Configuration & Auth: Hosted tools](./docs/configuration.md#hosted-tools).
 
+- The error panel copies all recorded errors to the clipboard with `y`, or `Cmd+C` / `Super+C`, newest first, with full dates and unwrapped messages.
+
 ### Improvements
 
 - MCP tool results are checked against the server's declared output schema. Schema problems add a warning while preserving usable output, without automatically repeating the tool call.

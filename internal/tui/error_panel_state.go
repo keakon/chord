@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"image"
+	"slices"
 	"strings"
 	"time"
 
@@ -151,6 +152,8 @@ func (m *Model) closeErrorPanel() tea.Cmd {
 func (m *Model) handleErrorPanelKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 	switch key {
+	case "y", "Y":
+		return m.copyErrorPanelAll()
 	case "j", "down":
 		m.errorPanel.scrollOffset++
 	case "k", "up":
@@ -234,4 +237,18 @@ func (m *Model) snapshotAgentErrors() []agentErrorRecord {
 		out = append(out, m.agentErrors[idx])
 	}
 	return out
+}
+
+// copyErrorPanelAll writes all recorded errors to the clipboard as plain
+// text, newest first to match the panel display order.
+func (m *Model) copyErrorPanelAll() tea.Cmd {
+	records := m.snapshotAgentErrors()
+	if len(records) == 0 {
+		return m.enqueueToast("No errors recorded", "info")
+	}
+	parts := make([]string, 0, len(records))
+	for _, rec := range slices.Backward(records) {
+		parts = append(parts, plainErrorRecordText(rec))
+	}
+	return writeClipboardCmd(strings.Join(parts, "\n\n"), "Error log copied to clipboard")
 }

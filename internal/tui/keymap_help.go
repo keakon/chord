@@ -216,6 +216,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 				helpBinding([]string{"ctrl+b"}, "page up"),
 				helpBinding([]string{"g"}, "jump to top"),
 				helpBinding([]string{"G"}, "jump to bottom"),
+				helpBinding([]string{"y"}, "copy all"),
 				helpBinding(append([]string{}, km.ErrorPanel...), "close"),
 				helpBinding([]string{"esc / q"}, "close"),
 			},
