@@ -1004,9 +1004,8 @@ func (c *Client) completeStreamTarget(
 			}
 			result.setLastErr(t.provider, err)
 			oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
-			if !visibleStarted {
-				emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
-			} else {
+			emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
+			if visibleStarted {
 				log.Warnf("context length exceeded; trying next model provider=%v model=%v key_id=%v input_tokens_est=%v context_limit=%v input_limit=%v error=%v", t.provider.Name(), t.modelID, keyLogID(apiKey), estimateRequestInputTokens(systemPrompt, targetMessages, tools), t.contextLimit, t.inputLimit, err)
 			}
 			modelDone = true

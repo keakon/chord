@@ -3458,6 +3458,66 @@ func TestClientContextLengthExceededDoesNotRetryKeysAndFallsBackWithinRound(t *t
 	}
 }
 
+func TestClientContextLengthExceededAfterVisibleOutputStillEmitsRetryError(t *testing.T) {
+	primaryCfg := testProviderConfigWithKeys("primary-prov", "primary-model", []string{"k1", "k2"})
+	fallbackCfg := testProviderConfig("fallback-prov", "fallback-model")
+
+	primaryImpl := &recordingProvider{}
+	primaryImpl.calls = []scriptedCall{{
+		streams: []message.StreamDelta{{Type: message.StreamDeltaText, Text: "partial"}},
+		err:     &APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"},
+	}}
+	fallbackImpl := &scriptedProvider{calls: []scriptedCall{{resp: &message.Response{Content: "ok from fallback"}}}}
+
+	c := NewClient(primaryCfg, primaryImpl, "primary-model", 4096, "sys")
+	c.SetFallbackModels([]FallbackModel{{
+		ProviderConfig: fallbackCfg,
+		ProviderImpl:   fallbackImpl,
+		ModelID:        "fallback-model",
+		MaxTokens:      4096,
+		ContextLimit:   128000,
+		InputLimit:     128000,
+	}})
+
+	var deltas []message.StreamDelta
+	resp, err := c.CompleteStream(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, nil, func(delta message.StreamDelta) {
+		deltas = append(deltas, delta)
+	})
+	if err != nil {
+		t.Fatalf("CompleteStream: %v", err)
+	}
+	if resp == nil || resp.Content != "ok from fallback" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+
+	var sawText, sawRollback, sawRetryError bool
+	for _, d := range deltas {
+		switch d.Type {
+		case message.StreamDeltaText:
+			sawText = true
+		case message.StreamDeltaRollback:
+			sawRollback = true
+		case message.StreamDeltaRetryError:
+			sawRetryError = true
+		}
+	}
+	if !sawText {
+		t.Fatal("expected visible text before the context-length failure")
+	}
+	if !sawRollback {
+		t.Fatal("expected rollback after visible failed attempt")
+	}
+	if !sawRetryError {
+		t.Fatal("expected retry error record for context-length failure after visible output")
+	}
+	if got := primaryImpl.CallCount(); got != 1 {
+		t.Fatalf("primary calls = %d, want 1 (do not retry next key on oversize)", got)
+	}
+	if len(primaryImpl.apiKeys) != 1 || primaryImpl.apiKeys[0] != "k1" {
+		t.Fatalf("primary keys = %#v, want only first key tried", primaryImpl.apiKeys)
+	}
+}
+
 func TestClientSkipsRequestWhenInputFillsContextWindow(t *testing.T) {
 	cfg := NewProviderConfig("provider", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
