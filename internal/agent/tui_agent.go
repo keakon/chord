@@ -38,10 +38,6 @@ type MessageSender interface {
 	// ContinueFromContext re-runs the LLM using the existing context without
 	// appending a new user message. Routes to focused SubAgent if one is active.
 	ContinueFromContext()
-	// RemoveLastMessage removes the last message from context and rewrites
-	// persistence. Used before ContinueFromContext when last message is a
-	// thinking-only assistant block that was interrupted.
-	RemoveLastMessage()
 }
 
 // ConversationTarget identifies one conversation independently of the mutable
@@ -59,7 +55,6 @@ type TargetedConversationController interface {
 	GetMessagesForTarget(target ConversationTarget) []message.Message
 	SendUserMessageToTarget(target ConversationTarget, content string)
 	ContinueFromContextForTarget(target ConversationTarget)
-	RemoveLastMessageForTarget(target ConversationTarget)
 }
 
 // PromptResolver delivers user responses for confirm/question dialogs back to

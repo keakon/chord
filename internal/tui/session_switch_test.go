@@ -2635,10 +2635,6 @@ func (a *targetedConversationAgent) ContinueFromContextForTarget(target agent.Co
 	a.targetedCalls = append(a.targetedCalls, "continue:"+a.targetLabel(target))
 }
 
-func (a *targetedConversationAgent) RemoveLastMessageForTarget(target agent.ConversationTarget) {
-	a.targetedCalls = append(a.targetedCalls, "remove:"+a.targetLabel(target))
-}
-
 func TestFocusedContinueActionsKeepCapturedTarget(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -2646,7 +2642,7 @@ func TestFocusedContinueActionsKeepCapturedTarget(t *testing.T) {
 		wantTail []string
 	}{
 		{name: "continue", last: message.Message{Role: message.RoleUser, Content: "work"}, wantTail: []string{"continue:agent-1/task-1"}},
-		{name: "remove and continue", last: message.Message{Role: message.RoleAssistant, ThinkingBlocks: []message.ThinkingBlock{{Thinking: "partial"}}}, wantTail: []string{"remove:agent-1/task-1", "continue:agent-1/task-1"}},
+		{name: "thinking-only continue", last: message.Message{Role: message.RoleAssistant, ThinkingBlocks: []message.ThinkingBlock{{Thinking: "partial"}}}, wantTail: []string{"continue:agent-1/task-1"}},
 		{name: "send continue", last: message.Message{Role: message.RoleAssistant, Content: "done", StopReason: "stop"}, wantTail: []string{"send:agent-1/task-1:continue"}},
 	}
 	for _, tt := range tests {
@@ -4128,6 +4124,7 @@ func TestRebuildViewportFromMessagesClearsTimingState(t *testing.T) {
 }
 
 func TestSessionRestoredEventSchedulesImageProtocolRedrawForRestoredImages(t *testing.T) {
+	stubTUITicks(t)
 	pngData := makeTestPNG(t)
 	backend := &sessionControlAgent{messages: []message.Message{{
 		Role: "user",
@@ -4148,6 +4145,21 @@ func TestSessionRestoredEventSchedulesImageProtocolRedrawForRestoredImages(t *te
 		t.Fatal("SessionRestoredEvent should schedule an image protocol redraw")
 	}
 	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		msg = nil
+		for _, child := range batch {
+			if child == nil {
+				continue
+			}
+			if raw, ok := child().(tea.RawMsg); ok {
+				msg = raw
+				break
+			}
+		}
+		if msg == nil {
+			t.Fatalf("command batch %#v has no tea.RawMsg child", batch)
+		}
+	}
 	raw, ok := msg.(tea.RawMsg)
 	if !ok {
 		t.Fatalf("command returned %T, want tea.RawMsg", msg)
@@ -4555,7 +4567,6 @@ func (s *sessionControlAgent) StartupResumeStatus() (bool, string) {
 	return s.resumePending, s.startupResumeID
 }
 func (s *sessionControlAgent) ContinueFromContext()                  { s.continueCalls++ }
-func (s *sessionControlAgent) RemoveLastMessage()                    {}
 func (s *sessionControlAgent) GetTokenUsage() message.TokenUsage     { return s.tokenUsage }
 func (s *sessionControlAgent) GetUsageStats() analytics.SessionStats { return s.usageStats }
 func (s *sessionControlAgent) GetSidebarUsageStats() analytics.SessionStats {

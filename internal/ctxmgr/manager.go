@@ -276,22 +276,6 @@ func (m *Manager) rebuildToolCallIDIndexLocked() {
 	}
 }
 
-// DropLastMessage removes the last message from the conversation history.
-// Safe to call from multiple goroutines.
-func (m *Manager) DropLastMessage() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if n := len(m.messages); n > 0 {
-		m.payloadBytes -= MessagePayloadBytes(m.messages[n-1:])
-		m.contextBytes -= messageContextBytes(m.messages[n-1:])
-		imagePayloadBytes, imageTokens := imagePartAccounting(m.messages[n-1:])
-		m.imagePayloadBytes -= imagePayloadBytes
-		m.imageEstimateTokens -= imageTokens
-		m.messages = m.messages[:n-1]
-		m.rebuildToolCallIDIndexLocked()
-	}
-}
-
 // DropLastMessages removes the last n messages from the conversation history.
 // Used when a turn is cancelled after an assistant message with tool calls was
 // appended and some (or all) tool results were already appended, so the next

@@ -51,7 +51,6 @@ func (loopBusyAgentStub) FocusedAgentID() string                        { return
 func (loopBusyAgentStub) FocusedAgentName() string                      { return "" }
 func (loopBusyAgentStub) StartupResumeStatus() (bool, string)           { return false, "" }
 func (loopBusyAgentStub) ContinueFromContext()                          {}
-func (loopBusyAgentStub) RemoveLastMessage()                            {}
 func (loopBusyAgentStub) GetTokenUsage() message.TokenUsage             { return message.TokenUsage{} }
 func (loopBusyAgentStub) GetUsageStats() analytics.SessionStats         { return analytics.SessionStats{} }
 func (loopBusyAgentStub) GetSidebarUsageStats() analytics.SessionStats {

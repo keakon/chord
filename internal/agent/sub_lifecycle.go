@@ -511,25 +511,15 @@ func (s *SubAgent) continueWithContextAppends(drainContextAppends, restartStoppe
 	}
 }
 
-// RemoveLastMessage removes the last message from the SubAgent's context
-// and rewrites the persistence log. Only safe when idle (turn == nil),
-// but since this is called from the TUI goroutine and the actual mutation
-// happens on the runLoop goroutine via handleContinue, we use DropLastMessage
-// which is mutex-protected. The persistence rewrite is best-effort.
-func (s *SubAgent) RemoveLastMessage() {
-	s.ctxMgr.DropLastMessage()
-	if manager := s.recoveryManager(); manager != nil {
-		remaining := s.ctxMgr.Snapshot()
-		if err := manager.RewriteLog(s.instanceID, remaining); err != nil {
-			log.Warnf("SubAgent.RemoveLastMessage: failed to rewrite log agent=%v error=%v", s.instanceID, err)
-			s.notePersistenceFailure(err)
-		}
-	}
-}
-
 // handleContinue starts a new turn and calls LLM without appending a new
 // user message. Runs on the SubAgent's event loop goroutine.
 func (s *SubAgent) handleContinue() {
+	if err := s.prepareContextContinuation(); err != nil {
+		log.Warnf("SubAgent continue could not prepare transcript agent=%v error=%v", s.instanceID, err)
+		s.notePersistenceFailure(err)
+		s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("prepare SubAgent continuation: %w", err)})
+		return
+	}
 	s.drainQueuedContextAppendsForContinue()
 	s.newTurn()
 	s.continueLLMWithPendingUserMessages()

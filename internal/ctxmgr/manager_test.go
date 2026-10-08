@@ -147,10 +147,10 @@ func TestDropMessagesRebuildDeclaredToolCallIDIndex(t *testing.T) {
 		t.Fatal("both declared calls should be indexed")
 	}
 
-	// DropLastMessage removes the declaring assistant message.
-	m.DropLastMessage()
+	// DropLastMessages(1) removes the declaring assistant message.
+	m.DropLastMessages(1)
 	if m.AnyAssistantDeclaresToolCallID("call-1") || m.AnyAssistantDeclaresToolCallID("call-2") {
-		t.Fatal("declarations survived DropLastMessage")
+		t.Fatal("declarations survived DropLastMessages(1)")
 	}
 
 	// DropLastMessages must also re-index when tool results trail the
@@ -723,9 +723,9 @@ func TestManagerPayloadBytesTracksIncrementalMessageChanges(t *testing.T) {
 		t.Fatalf("ContextPayloadBytes() = %d, want %d", got, want)
 	}
 
-	m.DropLastMessage()
+	m.DropLastMessages(1)
 	if got, want := m.PayloadBytes(), len("abcd"); got != want {
-		t.Fatalf("PayloadBytes() after DropLastMessage = %d, want %d", got, want)
+		t.Fatalf("PayloadBytes() after DropLastMessages(1) = %d, want %d", got, want)
 	}
 
 	m.SetSystemPrompt(message.Message{Role: "system", Content: "longer system"})
@@ -770,9 +770,9 @@ func TestManagerImageAccountingTracksMessageChanges(t *testing.T) {
 	if got := m.ContextPayloadBytes(); got != 300_000 {
 		t.Fatalf("ContextPayloadBytes() = %d, want the image payload still counted for byte budgets", got)
 	}
-	m.DropLastMessage()
+	m.DropLastMessages(1)
 	if m.imagePayloadBytes != 0 || m.imageEstimateTokens != 0 {
-		t.Fatalf("after DropLastMessage: payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
+		t.Fatalf("after DropLastMessages(1): payload=%d tokens=%d", m.imagePayloadBytes, m.imageEstimateTokens)
 	}
 
 	m.Append(image)

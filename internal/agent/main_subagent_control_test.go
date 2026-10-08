@@ -3202,42 +3202,6 @@ func TestParkSubAgentRecoversDegradedTranscriptWithCheckpoint(t *testing.T) {
 	}
 }
 
-func TestParkedSubAgentRemoveLastMessageDoesNotRewriteMainTranscript(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	mainMsgs := []message.Message{{Role: "user", Content: "keep main"}}
-	a.ctxMgr.RestoreMessages(mainMsgs)
-	if err := a.recoveryManager().RewriteLog("main", mainMsgs); err != nil {
-		t.Fatalf("RewriteLog(main): %v", err)
-	}
-
-	sub := newControllableTestSubAgent(t, a, "adhoc-park-remove")
-	subMsgs := []message.Message{{Role: "user", Content: "worker prompt"}, {Role: "assistant", Content: "remove worker reply"}}
-	sub.ctxMgr.RestoreMessages(subMsgs)
-	if err := a.recoveryManager().RewriteLog(sub.instanceID, subMsgs); err != nil {
-		t.Fatalf("RewriteLog(sub): %v", err)
-	}
-	sub.setState(SubAgentStateCompleted, "done")
-	a.syncTaskRecordFromSub(sub, "")
-	a.SwitchFocus(sub.instanceID)
-	if !a.parkSubAgent(sub.instanceID) {
-		t.Fatal("parkSubAgent() = false")
-	}
-
-	a.RemoveLastMessage()
-
-	gotMain, err := a.recoveryManager().LoadMessages("main")
-	if err != nil {
-		t.Fatalf("LoadMessages(main): %v", err)
-	}
-	if len(gotMain) != 1 || gotMain[0].Content != "keep main" {
-		t.Fatalf("main transcript = %#v, want unchanged", gotMain)
-	}
-	gotWorker := a.GetMessages()
-	if len(gotWorker) != 1 || gotWorker[0].Content != "worker prompt" {
-		t.Fatalf("parked worker transcript = %#v, want last worker message removed", gotWorker)
-	}
-}
-
 func TestParkedSubAgentFocusedStatsAndPoolDoNotFallBackToMain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.modelPoolPolicy = NewRuntimeModelPoolPolicy()

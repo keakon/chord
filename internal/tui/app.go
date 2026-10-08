@@ -903,17 +903,6 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 				}
 				return nil
 			}
-		case focusedContinueAfterRemovingLast:
-			return m, func() tea.Msg {
-				if hasTargeted {
-					targeted.RemoveLastMessageForTarget(msg.target)
-					targeted.ContinueFromContextForTarget(msg.target)
-				} else {
-					backend.RemoveLastMessage()
-					backend.ContinueFromContext()
-				}
-				return nil
-			}
 		case focusedContinueWithDraft:
 			draft := queuedDraft{Content: "continue", AgentID: msg.target.AgentID}
 			m.finalizeAgentStream(msg.target.AgentID)
@@ -927,6 +916,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 				return nil
 			}
 			return m, tea.Batch(staged, send)
+		case focusedContinueNothing:
+			m.stopActiveAnimationIfIdle()
+			return m, m.enqueueToast("Nothing to continue in this conversation", "warn")
 		default:
 			m.stopActiveAnimationIfIdle()
 			return m, nil
@@ -963,7 +955,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		if staleErr != nil {
 			log.Warnf("tui runtime cache reset failed error=%v", staleErr)
 		}
-		return m, tea.Batch(animationCmd, m.imageProtocolCmd(), m.scheduleStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay))
+		return m, tea.Batch(animationCmd, m.notifyInterruptedTail(), m.imageProtocolCmd(), m.scheduleStartupDeferredTranscriptPreheat(startupDeferredTranscriptPreheatDelay))
 
 	// -- IME: got current IM before switching to English; save and switch to target
 	case imeCurrentMsg:

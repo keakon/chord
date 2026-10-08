@@ -15,8 +15,8 @@ type focusedContinueAction uint8
 
 const (
 	focusedContinueFromContext focusedContinueAction = iota + 1
-	focusedContinueAfterRemovingLast
 	focusedContinueWithDraft
+	focusedContinueNothing
 )
 
 type focusedContinueActionMsg struct {
@@ -452,6 +452,17 @@ func (m *Model) focusedAgentBusyForIdleSweep() bool {
 	return m.focusedAgentHasRuntimeActivity()
 }
 
+// lastContinuableMessage returns the newest transcript message tryContinue can
+// resume from. Local-only records such as question_state facts trail the
+// conversation in the snapshot without ever taking part in a turn, so the scan
+// skips them instead of letting an inactive tail swallow the key press.
+func lastContinuableMessage(msgs []message.Message) (message.Message, bool) {
+	if index := message.LastConversationMessageIndex(msgs); index >= 0 {
+		return msgs[index], true
+	}
+	return message.Message{}, false
+}
+
 func (m *Model) tryContinue() tea.Cmd {
 	if m.agent == nil || m.continueBlocked() {
 		return nil
@@ -469,7 +480,10 @@ func (m *Model) tryContinue() tea.Cmd {
 			if len(msgs) == 0 {
 				return focusedContinueActionMsg{target: target}
 			}
-			last := msgs[len(msgs)-1]
+			last, ok := lastContinuableMessage(msgs)
+			if !ok {
+				return focusedContinueActionMsg{action: focusedContinueNothing, target: target}
+			}
 			switch last.Role {
 			case message.RoleUser, message.RoleTool:
 				return focusedContinueActionMsg{action: focusedContinueFromContext, target: target}
@@ -477,7 +491,7 @@ func (m *Model) tryContinue() tea.Cmd {
 				if len(last.ToolCalls) > 0 {
 					return focusedContinueActionMsg{action: focusedContinueFromContext, target: target}
 				} else if len(last.ThinkingBlocks) > 0 && strings.TrimSpace(last.Content) == "" {
-					return focusedContinueActionMsg{action: focusedContinueAfterRemovingLast, target: target}
+					return focusedContinueActionMsg{action: focusedContinueFromContext, target: target}
 				} else if last.StopReason == "stop" || last.StopReason == "end_turn" {
 					return focusedContinueActionMsg{action: focusedContinueWithDraft, target: target}
 				} else {
@@ -491,7 +505,10 @@ func (m *Model) tryContinue() tea.Cmd {
 	if len(msgs) == 0 {
 		return nil
 	}
-	last := msgs[len(msgs)-1]
+	last, ok := lastContinuableMessage(msgs)
+	if !ok {
+		return m.enqueueToast("Nothing to continue in this conversation", "warn")
+	}
 	switch last.Role {
 	case message.RoleUser, message.RoleTool:
 		backend.ContinueFromContext()
@@ -499,7 +516,6 @@ func (m *Model) tryContinue() tea.Cmd {
 		if len(last.ToolCalls) > 0 {
 			backend.ContinueFromContext()
 		} else if len(last.ThinkingBlocks) > 0 && strings.TrimSpace(last.Content) == "" {
-			backend.RemoveLastMessage()
 			backend.ContinueFromContext()
 		} else if last.StopReason == "stop" || last.StopReason == "end_turn" {
 			return tea.Batch(m.startActiveAnimation(), m.sendDraft(queuedDraft{Content: "continue"}))
@@ -508,6 +524,21 @@ func (m *Model) tryContinue() tea.Cmd {
 		}
 	}
 	return m.startActiveAnimation()
+}
+
+// notifyInterruptedTail surfaces the restored state that would otherwise stay
+// invisible: the newest message the model can see is a user message it never
+// answered because the turn was interrupted after the message was committed
+// without starting a request. Enter continues from there.
+func (m *Model) notifyInterruptedTail() tea.Cmd {
+	if m.agent == nil || m.focusedAgentID != "" || m.continueBlocked() {
+		return nil
+	}
+	last, ok := lastContinuableMessage(m.agent.GetMessages())
+	if !ok || last.Role != message.RoleUser || !message.IsUserAuthored(last) {
+		return nil
+	}
+	return m.enqueueToastWithCategory("The last message was interrupted before a reply; press Enter to continue", "warn", "interrupted-tail")
 }
 
 func (m *Model) focusedConversationTarget(agentID string) agent.ConversationTarget {

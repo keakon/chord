@@ -293,58 +293,6 @@ func (a *MainAgent) ContinueFromContextForTarget(conversation ConversationTarget
 	a.sendEvent(Event{Type: EventContinue})
 }
 
-// RemoveLastMessage removes the last message from context and rewrites the
-// persistence log. Routes to the focused SubAgent if active.
-// Only valid when the agent is idle.
-func (a *MainAgent) RemoveLastMessage() {
-	a.RemoveLastMessageForTarget(a.focusedConversationTarget())
-}
-
-// RemoveLastMessageForTarget removes the last message from a captured target.
-func (a *MainAgent) RemoveLastMessageForTarget(conversation ConversationTarget) {
-	target, ok := a.resolveConversationTarget(conversation)
-	if !ok {
-		return
-	}
-	if target.settled {
-		// A settled transcript is immutable history; drop the request silently
-		// instead of letting it fall through to the main conversation.
-		return
-	}
-	if target.sub != nil {
-		target.sub.RemoveLastMessage()
-		return
-	}
-	if target.parked {
-		manager := a.recoveryManager()
-		msgs, err := loadTaskHistoryMessagesRaw(manager, target.task)
-		if err != nil {
-			log.Warnf("RemoveLastMessage: failed to load parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
-			return
-		}
-		if len(msgs) == 0 {
-			return
-		}
-		if err := rewriteTaskHistoryMessages(manager, target.task, msgs[:len(msgs)-1]); err != nil {
-			log.Warnf("RemoveLastMessage: failed to rewrite parked subagent transcript task_id=%v error=%v", target.task.TaskID, err)
-		}
-		return
-	}
-	a.turnMu.Lock()
-	idle := a.turn == nil
-	a.turnMu.Unlock()
-	if !idle {
-		return
-	}
-	a.ctxMgr.DropLastMessage()
-	if manager := a.recoveryManager(); manager != nil {
-		remaining := a.ctxMgr.Snapshot()
-		if err := manager.RewriteLog("main", remaining); err != nil {
-			log.Warnf("RemoveLastMessage: failed to rewrite main log error=%v", err)
-		}
-	}
-}
-
 // handleContinueFromContext starts a new turn and calls LLM without appending
 // any new user message.
 func (a *MainAgent) handleContinueFromContext() {
@@ -353,6 +301,11 @@ func (a *MainAgent) handleContinueFromContext() {
 	}
 	if a.turn != nil {
 		log.Debug("handleContinueFromContext: ignored, turn already active")
+		return
+	}
+	if err := a.prepareContextContinuation(); err != nil {
+		log.Warnf("continue could not prepare transcript error=%v", err)
+		a.emitToTUI(ToastEvent{Message: "Could not prepare the conversation to continue", Level: "warn"})
 		return
 	}
 	// Every continue dispatches a request, so the pending mailbox batch must be

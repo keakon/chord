@@ -430,14 +430,6 @@ func TestSettledTerminalTaskFocusIsReadOnly(t *testing.T) {
 	if msgs := a.GetMessages(); len(msgs) != 2 {
 		t.Fatalf("settled transcript = %d rows after ContinueFromContext, want 2", len(msgs))
 	}
-
-	a.RemoveLastMessage()
-	if msgs := a.GetMessages(); len(msgs) != 2 {
-		t.Fatalf("settled transcript = %d rows after RemoveLastMessage, want 2", len(msgs))
-	}
-	if rows := a.ctxMgr.Snapshot(); len(rows) != 0 {
-		t.Fatalf("main context = %d rows after RemoveLastMessage, want 0", len(rows))
-	}
 }
 
 func TestStaleFocusedAgentFallsBackToMainForUserInput(t *testing.T) {

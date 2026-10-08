@@ -145,6 +145,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Resuming an interrupted conversation no longer drops the session content when saving the restored history fails: the original content stays in place, and the failure is reported.
+
+
 - Keep question, statistics, and error dialogs within narrow terminal bounds. Long question text and choices can be scrolled while answer input and action shortcuts stay visible; keyboard help wraps to the available width.
 
 - Full persistence queues and blocked headless output no longer cause the corresponding shutdown waits to run indefinitely. Headless encoding or write failures stop ongoing work, and encoded output frames are limited to 16 MiB.
