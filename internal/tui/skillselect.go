@@ -31,10 +31,12 @@ type skillSelectState struct {
 	filterFocused bool
 }
 
-const (
-	skillSelectIdleHint   = "j/k move  g/G jump  enter fill command  / filter  esc close"
-	skillSelectFilterHint = selectorFilterHint
-)
+func skillSelectIdleHint() string {
+	return hintLine(
+		hint("j/k", "move"), hint("g/G", "jump"), hint("Enter", "fill command"),
+		hint("/", "filter"), hint("Esc", "close"),
+	)
+}
 
 // skillVisibilityGlyph encodes model visibility in the glyph shape and leaves
 // the load color to the caller: dashed ◌ marks a skill the model never sees
@@ -352,20 +354,7 @@ func (m *Model) renderSkillSelectFilterLine(innerWidth int) string {
 	if innerWidth <= 0 {
 		return ""
 	}
-	hintMode := !m.skillSelect.filterFocused && strings.TrimSpace(m.skillSelect.filter) == ""
-	text := "filter: "
-	if hintMode {
-		text += "(press / to search)"
-	} else {
-		text += m.skillSelect.filter
-		if m.skillSelect.filterFocused {
-			text += "_"
-		}
-	}
-	if hintMode {
-		return DimStyle.Render(truncateOneLine(text, innerWidth))
-	}
-	return truncateOneLine(text, innerWidth)
+	return renderFilterLine(m.skillSelect.filter, m.skillSelect.filterFocused, "", innerWidth)
 }
 
 func (m *Model) renderSkillSelectDialog() string {
@@ -373,13 +362,13 @@ func (m *Model) renderSkillSelectDialog() string {
 		return ""
 	}
 
-	hint := skillSelectIdleHint
+	hints := skillSelectIdleHint()
 	if m.skillSelect.filterFocused {
-		hint = skillSelectFilterHint
+		hints = selectorFilterHint()
 	}
 	overlayCfg := OverlayConfig{
 		Title: "Skills",
-		Hint:  hint,
+		Hint:  hints,
 
 		MaxWidth: 70,
 	}
@@ -394,7 +383,7 @@ func (m *Model) renderSkillSelectDialog() string {
 		filterLine,
 		0,
 		m.skillSelectMaxVisible(),
-		filterLine+"\x00"+hint,
+		filterLine+"\x00"+hints,
 		nil,
 		area,
 	)

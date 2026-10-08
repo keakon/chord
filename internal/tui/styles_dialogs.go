@@ -18,7 +18,7 @@ var (
 	InputBoxDimmedStyle       lipgloss.Style
 	ConfirmSeparatorStyle     lipgloss.Style
 	ConfirmToolStyle          lipgloss.Style
-	ConfirmHintStyle          lipgloss.Style
+	KeyHintStyle              lipgloss.Style
 	ConfirmAllowStyle         lipgloss.Style
 	ConfirmDenyStyle          lipgloss.Style
 	ConfirmEditStyle          lipgloss.Style
@@ -44,9 +44,6 @@ var (
 
 	// QuestionSelectedStyle highlights the cursor-selected option.
 	QuestionSelectedStyle lipgloss.Style
-
-	// QuestionHintStyle styles the hint/key-binding line.
-	QuestionHintStyle lipgloss.Style
 
 	// QuestionTimeoutStyle styles the timeout countdown line.
 	QuestionTimeoutStyle lipgloss.Style

@@ -6,11 +6,19 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 )
 
-const (
-	modelSelectIdleHint   = "j/k move  enter select  / filter  esc close"
-	modelSelectFilterHint = "type to filter  enter select  esc clear"
-	selectorFilterHint    = "type to filter  enter keep  esc clear"
-)
+func modelSelectIdleHint() string {
+	return hintLine(
+		hint("j/k", "move"), hint("Enter", "select"), hint("/", "filter"), hint("Esc", "close"),
+	)
+}
+
+func modelSelectFilterHint() string {
+	return hintLine(hint("type", "filter"), hint("Enter", "select"), hint("Esc", "clear"))
+}
+
+func selectorFilterHint() string {
+	return hintLine(hint("type", "filter"), hint("Enter", "keep"), hint("Esc", "clear"))
+}
 
 func (s *modelSelectState) filteredItems() []OverlayListItem {
 	tokens := strings.Fields(strings.ToLower(s.filter))

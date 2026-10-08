@@ -23,7 +23,7 @@ func layoutOverlay(cfg OverlayConfig, area image.Rectangle) overlayLayout {
 	width := max(dialogContentWidth(cfg.MaxWidth), 1)
 	layout := overlayLayout{config: cfg}
 	if cfg.Hint != "" {
-		layout.hintLines = wrapText(cfg.Hint, width)
+		layout.hintLines = wrapHintLines(cfg.Hint, width)
 	}
 	if cfg.Footer != "" {
 		layout.footerLines = tuiHardwrap(strings.TrimSuffix(cfg.Footer, "\n"), width)
@@ -50,10 +50,16 @@ func layoutOverlay(cfg OverlayConfig, area image.Rectangle) overlayLayout {
 	}
 	maxHints := max(available-minContent-layout.titleGap-layout.hintGap, hintRows)
 	if len(layout.hintLines) > maxHints && cfg.CompactHint != "" {
-		layout.hintLines = wrapText(cfg.CompactHint, width)
+		layout.hintLines = wrapHintLines(cfg.CompactHint, width)
+		if len(layout.hintLines) > maxHints {
+			// Fill the available rows and truncate only the last one, so keys
+			// that would otherwise be cut with the tail stay visible.
+			last := strings.Join(layout.hintLines[maxHints-1:], "  ")
+			layout.hintLines = append(layout.hintLines[:maxHints-1], ansi.Truncate(last, width, "…"))
+		}
 	}
 	if len(layout.hintLines) > maxHints && cfg.CompactHint == "" {
-		layout.hintLines[maxHints-1] = ansi.Truncate("… Esc", width, "…")
+		layout.hintLines[maxHints-1] = DimStyle.Render(ansi.Truncate("… Esc", width, "…"))
 	}
 	layout.hintLines = layout.hintLines[:min(len(layout.hintLines), maxHints)]
 	layout.contentHeight = max(available-layout.titleGap-layout.hintGap-len(layout.hintLines), 1)

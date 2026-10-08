@@ -101,12 +101,12 @@ func (m *Model) cycleStatusPanelSection(backward bool) {
 func (m *Model) drawStatusPanel(scr uv.Screen, layout tuiLayout) {
 	body := m.renderInfoPanel(layout.infoPanel.Dx(), layout.infoPanel.Dy())
 	m.renderOverlayCached(scr, layout.infoPanel, &m.cachedDirRender, body)
-	hint := "j/k scroll  Tab section  Enter fold  Esc close"
+	hint := hintLine(hint("j/k", "scroll"), hint("Tab", "section"), hint("Enter", "fold"), hint("Esc", "close"))
 	if m.infoPanelContentHeight > m.infoPanelViewportHeight {
-		hint += " · " + formatTokens(m.infoPanelScrollOffset+m.infoPanelViewportHeight) + "/" + formatTokens(m.infoPanelContentHeight)
+		hint = appendHintText(hint, formatTokens(m.infoPanelScrollOffset+m.infoPanelViewportHeight)+"/"+formatTokens(m.infoPanelContentHeight))
 	}
 	rect := image.Rect(layout.main.Min.X, layout.infoPanel.Max.Y, layout.main.Max.X, layout.main.Max.Y)
-	m.renderOverlayCached(scr, rect, &m.cachedStatusPanelHint, DimStyle.Render(ansi.Truncate(hint, max(rect.Dx()-1, 1), "…")))
+	m.renderOverlayCached(scr, rect, &m.cachedStatusPanelHint, ansi.Truncate(hint, max(rect.Dx()-1, 1), "…"))
 }
 
 // highlightStatusSection adds a shape cue without modifying the complete panel

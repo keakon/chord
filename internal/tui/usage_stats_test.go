@@ -89,11 +89,11 @@ func TestHandleUsageStatsKeyScopeStartsProjectLoad(t *testing.T) {
 
 func TestUsageStatsTabUsesActiveStyle(t *testing.T) {
 	m := NewModel(&sessionControlAgent{})
-	if got := m.renderUsageStatsTab("Project", true); got != StatsTabActiveStyle.Render("Project") {
-		t.Fatalf("active tab render = %q, want active style %q", got, StatsTabActiveStyle.Render("Project"))
+	if got := m.renderUsageStatsTab("Project", true); got != TabActiveStyle.Render("Project") {
+		t.Fatalf("active tab render = %q, want active style %q", got, TabActiveStyle.Render("Project"))
 	}
-	if got := m.renderUsageStatsTab("Project", false); got != StatsTabStyle.Render("Project") {
-		t.Fatalf("inactive tab render = %q, want base style %q", got, StatsTabStyle.Render("Project"))
+	if got := m.renderUsageStatsTab("Project", false); got != TabStyle.Render("Project") {
+		t.Fatalf("inactive tab render = %q, want base style %q", got, TabStyle.Render("Project"))
 	}
 }
 

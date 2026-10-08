@@ -385,10 +385,10 @@ func TestQuestionDialogQuickSelectHintMatchesOptionCount(t *testing.T) {
 	}
 
 	plain := stripANSI(m.renderQuestionDialog())
-	if !strings.Contains(plain, "[1-2] Quick-select") {
+	if !strings.Contains(plain, "[1-2] quick-select") {
 		t.Fatalf("quick-select hint should reflect 2 options, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "[1-9] Quick-select") {
+	if strings.Contains(plain, "[1-9] quick-select") {
 		t.Fatalf("quick-select hint should not advertise 1-9 for 2 options, got:\n%s", plain)
 	}
 }

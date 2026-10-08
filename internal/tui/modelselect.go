@@ -277,7 +277,7 @@ func (m *Model) renderModelSelectDialog() string {
 	if len(m.modelSelect.poolNames) == 0 {
 		dialog, _ := RenderOverlay(OverlayConfig{
 			Title: modelSelectTitle(m.modelSelect.target),
-			Hint:  "esc cancel",
+			Hint:  hintLine(hint("Esc", "cancel")),
 
 			MaxWidth: 60,
 		}, DimStyle.Render("(no pools configured)"), image.Rect(0, 0, m.width, m.height))
@@ -298,25 +298,22 @@ func (m *Model) renderModelSelectDialog() string {
 	}
 
 	m.modelSelect.currentPool = currentPool
-	hint := modelSelectHint(m.modelSelect.target)
+	hints := modelSelectIdleHint()
 	if m.modelSelect.filterFocused {
-		hint = modelSelectFilterHint
+		hints = modelSelectFilterHint()
 	}
-	prefix := truncateOneLine("Filter: "+m.modelSelect.filter, max(min(m.width-1, 60)-4, 1))
-	if m.modelSelect.filter == "" && !m.modelSelect.filterFocused {
-		prefix = "/ to filter pools"
-	}
+	prefix := renderFilterLine(m.modelSelect.filter, m.modelSelect.filterFocused, "", max(dialogContentWidth(min(m.width-1, 60)), 1))
 	if m.modelSelect.selector.list != nil && m.modelSelect.selector.list.Len() == 0 {
 		prefix += "\nNo matching pools"
 	}
 	overlayCfg := OverlayConfig{
 		Title:       modelSelectTitle(m.modelSelect.target),
-		Hint:        hint,
-		CompactHint: "Enter select  Esc cancel",
+		Hint:        hints,
+		CompactHint: hintLine(hint("Enter", "select"), hint("Esc", "cancel")),
 		MaxWidth:    60,
 	}
 
-	extraKey := strings.Join(m.modelSelect.poolNames, ",") + "|" + currentPool + "|" + string(m.modelSelect.target.Kind) + "|" + strings.TrimSpace(m.modelSelect.target.AgentName) + "|" + m.modelSelect.filter + "|" + hint
+	extraKey := strings.Join(m.modelSelect.poolNames, ",") + "|" + currentPool + "|" + string(m.modelSelect.target.Kind) + "|" + strings.TrimSpace(m.modelSelect.target.AgentName) + "|" + m.modelSelect.filter + "|" + hints
 	maxVisible := m.modelSelectMaxVisible()
 
 	return m.modelSelect.selector.Render(
@@ -355,9 +352,4 @@ func modelSelectTitle(target agent.ModelPoolSelectorTarget) string {
 		return fmt.Sprintf("%s Model Pool", target.AgentName)
 	}
 	return "Main Role Model Pool"
-}
-
-func modelSelectHint(target agent.ModelPoolSelectorTarget) string {
-	_ = target
-	return modelSelectIdleHint
 }

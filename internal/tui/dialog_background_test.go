@@ -155,7 +155,7 @@ func TestRenderOverlayPreservesButtons(t *testing.T) {
 	)
 	dialog, _ := RenderOverlay(OverlayConfig{
 		Title: "Buttons",
-		Hint:  "esc close",
+		Hint:  hintLine(hint("Esc", "close")),
 
 		MaxWidth: 70,
 	}, content, image.Rect(0, 0, m.width, m.height))

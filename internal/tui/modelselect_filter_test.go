@@ -25,7 +25,7 @@ func TestPoolFilterSmallTerminalKeepsSelectionAndMouseTargetVisible(t *testing.T
 			if lipgloss.Height(dialog) > size[1] || lipgloss.Width(dialog) > size[0]-1 {
 				t.Fatal("model selector exceeds terminal bounds")
 			}
-			if !strings.Contains(plain, "Filter: beta") || !strings.Contains(strings.ToLower(plain), "enter") || !strings.Contains(strings.ToLower(plain), "esc") {
+			if !strings.Contains(plain, "filter: beta") || !strings.Contains(strings.ToLower(plain), "enter") || !strings.Contains(strings.ToLower(plain), "esc") {
 				t.Fatalf("filter or actions are hidden: %s", plain)
 			}
 			rect := m.overlayRect(dialog)

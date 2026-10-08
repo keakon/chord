@@ -7,8 +7,8 @@ var (
 	StatusBarPathStyle         lipgloss.Style
 	StatusHintStyle            lipgloss.Style
 	StatsTabLabelStyle         lipgloss.Style
-	StatsTabStyle              lipgloss.Style
-	StatsTabActiveStyle        lipgloss.Style
+	TabStyle                   lipgloss.Style
+	TabActiveStyle             lipgloss.Style
 	SidebarFocusedStyle        lipgloss.Style
 	SidebarEntryStyle          lipgloss.Style
 	SidebarTaskStyle           lipgloss.Style

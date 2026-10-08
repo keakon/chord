@@ -21,12 +21,10 @@ func (m *Model) renderErrorPanelDialog() string {
 	}
 
 	content := strings.Join(lines[start:start+visible], "\n")
-	scroll := ""
-	if m.errorPanelMaxScroll() > 0 {
-		scroll = fmt.Sprintf("  %d/%d", start+visible, len(lines))
-	}
 	cfg := m.errorPanelOverlayConfig()
-	cfg.Hint += scroll
+	if m.errorPanelMaxScroll() > 0 {
+		cfg.Hint = appendHintText(cfg.Hint, fmt.Sprintf("%d/%d", start+visible, len(lines)))
+	}
 	dialog, _ := RenderOverlay(cfg, content, image.Rect(0, 0, m.width, m.height))
 
 	m.errorPanel.dialogCacheW = m.width
@@ -40,7 +38,9 @@ func (m *Model) renderErrorPanelDialog() string {
 
 func (m *Model) errorPanelHint() string {
 	if m.width < 60 {
-		return "↑/↓ scroll  PgUp/PgDn page  y copy  Esc close"
+		return hintLine(hint("j/k", "scroll"), hint("PgUp/PgDn", "page"), hint("y", "copy"), hint("Esc", "close"))
 	}
-	return "j/k scroll  g/G jump  ctrl+f/b page  y copy  esc close"
+	return hintLine(
+		hint("j/k", "scroll"), hint("g/G", "jump"), hint("Ctrl+f/b", "page"), hint("y", "copy"), hint("Esc", "close"),
+	)
 }

@@ -52,7 +52,7 @@ func previewCommandMessage(t *testing.T, command tea.Cmd) imageViewerLoadedMsg {
 		value := reflect.ValueOf(msg)
 		if value.IsValid() && value.Kind() == reflect.Slice {
 			for idx := 0; idx < value.Len(); idx++ {
-				if child, ok := value.Index(idx).Interface().(tea.Cmd); ok {
+				if child, ok := reflect.TypeAssert[tea.Cmd](value.Index(idx)); ok {
 					run(child)
 				}
 			}
@@ -213,8 +213,12 @@ func TestImageViewerLoadFailurePreservesDraftAndRetry(t *testing.T) {
 		t.Fatal("missing path should fail")
 	}
 	m.handleImageViewerLoaded(result)
-	if !strings.Contains(m.renderImageViewerOverlay(), "read image file") || m.input.Value() != before || len(m.attachments) != 3 {
+	errorOverlay := stripANSI(m.renderImageViewerOverlay())
+	if !strings.Contains(errorOverlay, "read image file") || m.input.Value() != before || len(m.attachments) != 3 {
 		t.Fatal("load error lost draft or did not display error")
+	}
+	if !strings.Contains(errorOverlay, "[Esc] close") || !strings.Contains(errorOverlay, "[r] retry") {
+		t.Fatalf("load error should advertise retry as key chips:\n%s", errorOverlay)
 	}
 	if err := os.WriteFile(path, makeTestPNG(t), 0600); err != nil {
 		t.Fatal(err)
@@ -403,7 +407,7 @@ func TestImageViewerITerm2DeferredCursorAndClearOnClose(t *testing.T) {
 		}
 		return
 	}
-	first, ok := value.Index(0).Interface().(tea.Cmd)
+	first, ok := reflect.TypeAssert[tea.Cmd](value.Index(0))
 	if !ok {
 		t.Fatal("missing cleanup command")
 	}

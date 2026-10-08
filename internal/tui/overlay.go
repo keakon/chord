@@ -48,9 +48,7 @@ func RenderOverlay(cfg OverlayConfig, content string, area image.Rectangle) (str
 	for range layout.hintGap {
 		lines = append(lines, "")
 	}
-	for _, line := range layout.hintLines {
-		lines = append(lines, DimStyle.Render(line))
-	}
+	lines = append(lines, layout.hintLines...)
 	box := renderDialogBox(cfg.MaxWidth, lines)
 	return box, centeredRect(area, box)
 }
@@ -60,6 +58,6 @@ func overlayScrollContentHeight(cfg OverlayConfig, area image.Rectangle, total i
 	if total <= visible {
 		return visible
 	}
-	cfg.Hint += fmt.Sprintf("  %d/%d", total, total)
+	cfg.Hint = appendHintText(cfg.Hint, fmt.Sprintf("%d/%d", total, total))
 	return overlayContentHeight(cfg, area)
 }

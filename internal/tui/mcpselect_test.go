@@ -63,7 +63,7 @@ func TestRenderMCPSelectDialogShowsReadOnlyWhenBusy(t *testing.T) {
 	if !strings.Contains(plain, "Changes are allowed while running") {
 		t.Fatalf("rendered MCP dialog = %q, want running next-request hint", plain)
 	}
-	if !strings.Contains(plain, "enter toggle next request") {
+	if !strings.Contains(plain, "[Enter] toggle next request") {
 		t.Fatalf("rendered MCP dialog = %q, want active toggle hint while busy", plain)
 	}
 }
@@ -235,7 +235,7 @@ func TestHandleAgentEventEnvStatusUpdateRefreshesMCPSelectItems(t *testing.T) {
 	if !strings.Contains(plain, "alpha — connecting") {
 		t.Fatalf("rendered MCP dialog = %q, want updated connecting state", plain)
 	}
-	if !strings.Contains(plain, "esc close") {
+	if !strings.Contains(plain, "[Esc] close") {
 		t.Fatalf("rendered MCP dialog = %q, want close hint", plain)
 	}
 }

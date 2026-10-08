@@ -373,7 +373,14 @@ func (m *Model) renderHandoffSelectDialog() string {
 
 	overlayCfg := OverlayConfig{
 		Title: "Handoff To Agent",
-		Hint:  "j/k move  g/G jump  v view plan  enter/a approve  r deny reason  esc close",
+		Hint: hintLine(
+			hint("j/k", "move"),
+			hint("g/G", "jump"),
+			hint("v", "view plan"),
+			hint("Enter/a", "approve"),
+			hint("r", "deny reason"),
+			hint("Esc", "close"),
+		),
 
 		MaxWidth: handoffOverlayMaxWidth,
 	}

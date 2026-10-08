@@ -92,6 +92,9 @@ func TestOpenRulesWithNoRulesOpensEmptyOverlay(t *testing.T) {
 	if !strings.Contains(plain, "No remembered rules yet") || !strings.Contains(plain, "Press A to add") {
 		t.Fatalf("empty /rules view = %q", plain)
 	}
+	if !strings.Contains(plain, "[A] add") || !strings.Contains(plain, "[Esc/q] close") {
+		t.Fatalf("empty /rules view should render key chips: %q", plain)
+	}
 }
 
 func TestRulesAddManualRuleUsesAgentBackend(t *testing.T) {

@@ -44,7 +44,7 @@ func TestDefaultThemeReadableTextContrast(t *testing.T) {
 		{"tool error", theme.ErrorFg, theme.ToolCallBg},
 		{"error body", theme.ErrorCardFg, theme.ErrorCardBg},
 		{"dialog deny", theme.ConfirmDenyFg, theme.DialogBg},
-		{"dialog hint", theme.ConfirmHintFg, theme.DialogBg},
+		{"key hint", theme.SelectedFg, theme.SelectedBg},
 		{"assistant badge", theme.LabelBadgeFg, theme.AssistantLabelBg},
 		{"thinking body", theme.ThinkingCardFg, theme.ThinkingCardBg},
 	} {

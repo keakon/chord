@@ -33,7 +33,11 @@ func (m *Model) renderConfirmDialog() string {
 			fmt.Sprintf("Tool: %s — edit args:", req.ToolName),
 		)
 		editLine := m.confirm.editInput.View()
-		hint := ConfirmHintStyle.Render("[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Esc] Cancel edit")
+		hints := hintLine(
+			hint("Enter", "submit"),
+			hint("Shift+Enter/Ctrl+J", "new line"),
+			hint("Esc", "cancel edit"),
+		)
 		lines := []string{title, "", header}
 		lines = append(lines, strings.Split(editLine, "\n")...)
 		if strings.TrimSpace(m.confirm.editError) != "" {
@@ -42,7 +46,7 @@ func (m *Model) renderConfirmDialog() string {
 				lines = append(lines, ConfirmDenyStyle.Render("! "+line))
 			}
 		}
-		lines = append(lines, "", hint)
+		lines = append(lines, "", hints)
 		lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
 		return renderDialogBox(maxWidth, lines)
 	}
@@ -52,11 +56,11 @@ func (m *Model) renderConfirmDialog() string {
 			fmt.Sprintf("Tool: %s — deny with reason:", req.ToolName),
 		)
 		inputView := m.confirm.denyReasonInput.View()
-		hintText := "[Enter] Deny  [Shift+Enter/Ctrl+J] New line  [Esc] Back"
-		if req.ForceDenyReason {
-			hintText = "[Enter] Deny  [Shift+Enter/Ctrl+J] New line"
+		chips := []hintChip{hint("Enter", "deny"), hint("Shift+Enter/Ctrl+J", "new line")}
+		if !req.ForceDenyReason {
+			chips = append(chips, hint("Esc", "back"))
 		}
-		hint := ConfirmHintStyle.Render(hintText)
+		hints := hintLine(chips...)
 		lines := []string{title, "", header}
 		lines = append(lines, strings.Split(inputView, "\n")...)
 		if strings.TrimSpace(m.confirm.editError) != "" {
@@ -65,7 +69,7 @@ func (m *Model) renderConfirmDialog() string {
 				lines = append(lines, ConfirmDenyStyle.Render("! "+line))
 			}
 		}
-		lines = append(lines, "", hint)
+		lines = append(lines, "", hints)
 		lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
 		return renderDialogBox(maxWidth, lines)
 	}
@@ -183,7 +187,7 @@ func (m *Model) renderRulePicker(maxWidth int) string {
 		for i, c := range m.confirm.candidates {
 			cursor := " "
 			if i == m.confirm.patternIdx {
-				cursor = "›"
+				cursor = "❯"
 			}
 			checked := "[ ]"
 			if _, ok := m.confirm.selectedPatterns[i]; ok {
@@ -220,9 +224,9 @@ func (m *Model) renderRulePicker(maxWidth int) string {
 		roleName = strings.TrimSpace(m.agent.CurrentRole())
 	}
 	for i, scope := range m.confirm.scopes {
-		marker := "( )"
+		marker := "○"
 		if i == m.confirm.scopeIdx {
-			marker = "(●)"
+			marker = "●"
 		}
 		scopeLabel := scopeLabel(scope)
 		scopePath := resolveRuleScopePath(scope, m.usageStatsContentRoot(), roleName)
@@ -239,8 +243,15 @@ func (m *Model) renderRulePicker(maxWidth int) string {
 	}
 
 	lines = append(lines, "")
-	hint := ConfirmHintStyle.Render("[↑↓] pattern  [Space] select  [E] edit  [Tab] scope  [Enter] add selected + allow  [Esc] back")
-	lines = append(lines, hint)
+	hints := hintLine(
+		hint("↑↓", "pattern"),
+		hint("Space", "select"),
+		hint("E", "edit"),
+		hint("Tab", "scope"),
+		hint("Enter", "add selected + allow"),
+		hint("Esc", "back"),
+	)
+	lines = append(lines, hints)
 
 	lines = fitConfirmDialogLines(lines, confirmDialogMaxBodyLines(m.height), 2)
 	return renderDialogBox(maxWidth, lines)

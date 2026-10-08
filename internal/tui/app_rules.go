@@ -359,7 +359,9 @@ func (m *Model) renderRulesList() string {
 	}
 
 	lines = append(lines, "")
-	lines = append(lines, DimStyle.Render("[A] Add  [↑↓] Move  [D] Delete  [O] Open file  [Esc/Q] Close"))
+	lines = append(lines, hintLine(
+		hint("A", "add"), hint("↑↓", "move"), hint("D", "delete"), hint("O", "open file"), hint("Esc/q", "close"),
+	))
 
 	return renderDialogBox(maxWidth, lines)
 }
@@ -385,7 +387,9 @@ func (m *Model) renderRulesAdd(maxWidth int) string {
 		lines = append(lines, "", ConfirmDenyStyle.Render(m.rules.addError))
 	}
 	lines = append(lines, "")
-	lines = append(lines, DimStyle.Render("[Tab] field  [Ctrl+S] scope  [Ctrl+A] action  [Enter] add  [Esc] back"))
+	lines = append(lines, hintLine(
+		hint("Tab", "field"), hint("Ctrl+S", "scope"), hint("Ctrl+A", "action"), hint("Enter", "add"), hint("Esc", "back"),
+	))
 	return renderDialogBox(maxWidth, lines)
 }
 

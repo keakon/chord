@@ -169,7 +169,7 @@ func (m *Model) renderRoleSelectDialog() string {
 	if len(m.roleSelect.roles) == 0 {
 		dialog, _ := RenderOverlay(OverlayConfig{
 			Title: "Main Role",
-			Hint:  "esc cancel",
+			Hint:  hintLine(hint("Esc", "cancel")),
 
 			MaxWidth: 60,
 		}, DimStyle.Render("(no roles configured)"), image.Rect(0, 0, m.width, m.height))
@@ -183,7 +183,12 @@ func (m *Model) renderRoleSelectDialog() string {
 
 	overlayCfg := OverlayConfig{
 		Title: "Main Role",
-		Hint:  "j/k move  g/G jump  enter select  esc cancel",
+		Hint: hintLine(
+			hint("j/k", "move"),
+			hint("g/G", "jump"),
+			hint("Enter", "select"),
+			hint("Esc", "cancel"),
+		),
 
 		MaxWidth: 60,
 	}

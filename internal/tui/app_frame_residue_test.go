@@ -220,7 +220,7 @@ func TestBottomLeftOverlayNotReportedWhenDropdownOutgrowsMainArea(t *testing.T) 
 
 	// The renderer agrees: the dropdown's own help line never reaches the frame.
 	m.View()
-	if strings.Contains(frameText(&m), "Tab/Enter complete") {
+	if strings.Contains(frameText(&m), "[Tab/Enter] complete") {
 		t.Fatalf("renderer drew the oversized dropdown anyway:\n%s", frameText(&m))
 	}
 

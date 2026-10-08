@@ -23,12 +23,10 @@ func (m *Model) renderUsageStatsDialog() string {
 	}
 	contentLines := lines[start : start+visible]
 	content := strings.Join(contentLines, "\n")
-	scroll := ""
-	if maxScroll := m.usageStatsMaxScroll(); maxScroll > 0 {
-		scroll = fmt.Sprintf("  %d/%d", start+visible, len(lines))
-	}
 	cfg := m.usageStatsOverlayConfig()
-	cfg.Hint += scroll
+	if maxScroll := m.usageStatsMaxScroll(); maxScroll > 0 {
+		cfg.Hint = appendHintText(cfg.Hint, fmt.Sprintf("%d/%d", start+visible, len(lines)))
+	}
 	dialog, _ := RenderOverlay(cfg, content, image.Rect(0, 0, m.width, m.height))
 
 	m.usageStats.dialogCacheW = m.width
@@ -42,16 +40,20 @@ func (m *Model) renderUsageStatsDialog() string {
 
 func (m *Model) usageStatsHint() string {
 	if m.width < 60 {
-		return "Tab view  s scope  ↑/↓ scroll  Esc close"
+		return hintLine(hint("Tab", "view"), hint("s", "scope"), hint("j/k", "scroll"), hint("Esc", "close"))
 	}
-	base := "tab/shift+tab view  s scope  j/k scroll  g/G jump  ctrl+f/b page  esc/$ close"
+	chips := []hintChip{hint("Tab/Shift+Tab", "view"), hint("s", "scope")}
 	if m.usageStats.scope == statsScopeProject {
 		if m.usageStats.projectLoadErr != "" && m.usageStats.projectReport == nil {
-			return "tab/shift+tab view  s scope  r retry  j/k scroll  g/G jump  ctrl+f/b page  esc/$ close"
+			chips = append(chips, hint("r", "retry"))
+		} else {
+			chips = append(chips, hint("r", "range"))
 		}
-		return "tab/shift+tab view  s scope  r range  j/k scroll  g/G jump  ctrl+f/b page  esc/$ close"
 	}
-	return base
+	chips = append(chips,
+		hint("j/k", "scroll"), hint("g/G", "jump"), hint("Ctrl+f/b", "page"), hint("Esc/$", "close"),
+	)
+	return hintLine(chips...)
 }
 
 func (m *Model) renderUsageStatsScopeTabs() string {
@@ -84,9 +86,9 @@ func (m *Model) renderUsageStatsRangeTabs() string {
 
 func (m *Model) renderUsageStatsTab(label string, active bool) string {
 	if active {
-		return StatsTabActiveStyle.Render(label)
+		return TabActiveStyle.Render(label)
 	}
-	return StatsTabStyle.Render(label)
+	return TabStyle.Render(label)
 }
 
 func renderUsageTable(columns []TableColumn, items []OverlayTableItem, width int) []string {

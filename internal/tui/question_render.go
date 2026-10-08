@@ -145,22 +145,21 @@ func (m *Model) renderQuestionDialog() string {
 
 	area := image.Rect(0, 0, m.width, m.height)
 	cfg := OverlayConfig{Title: titleText, MaxWidth: maxWidth}
-	cfg.Hint = questionHint(q, m.question.custom) + "  [PgUp/PgDn] Scroll"
+	cfg.Hint = appendHintChip(questionHint(q, m.question.custom), hint("PgUp/PgDn", "scroll"))
 	editing := m.question.custom || len(q.Options) == 0
-	action, escape := "select", "hide"
+	action := "select"
 	if editing || q.Multiple {
 		action = "send"
 	}
-	if m.question.custom && len(q.Options) > 0 {
-		escape = "hide"
-	}
-	secondary := "Tab custom  PgUp/PgDn scroll"
+	secondary := hintLine(hint("Tab", "custom"), hint("PgUp/PgDn", "scroll"))
 	if editing {
-		secondary = "Shift+Enter newline  PgUp/PgDn scroll"
+		secondary = hintLine(hint("Shift+Enter", "newline"), hint("PgUp/PgDn", "scroll"))
 	} else if q.Multiple {
-		secondary = "Space toggle  Tab custom  PgUp/PgDn scroll"
+		secondary = hintLine(hint("Space", "toggle"), hint("Tab", "custom"), hint("PgUp/PgDn", "scroll"))
 	}
-	cfg.CompactHint = "Enter " + action + "  Esc " + escape + "  Ctrl+D decline  Ctrl+W withdraw\n" + secondary
+	cfg.CompactHint = hintLine(
+		hint("Enter", action), hint("Esc", "decline"), hint("Ctrl+W", "withdraw"),
+	) + "\n" + secondary
 	if !m.question.deadline.IsZero() {
 		secs := int(ceilDuration(max(time.Until(m.question.deadline), 0), time.Second) / time.Second)
 		if editing && m.height < 9 {
@@ -236,23 +235,40 @@ func renderCurrentQuestionOptionDescription(description, numKey string, innerWid
 
 func questionHint(q tools.QuestionItem, customMode bool) string {
 	if len(q.Options) == 0 {
-		return "[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Esc] Hide  [Ctrl+D] Decline  [Ctrl+W] Withdraw"
+		return hintLine(
+			hint("Enter", "submit"),
+			hint("Shift+Enter/Ctrl+J", "new line"),
+			hint("Esc", "decline"),
+			hint("Ctrl+W", "withdraw"),
+		)
 	}
 	if customMode {
-		return "[Enter] Submit  [Shift+Enter/Ctrl+J] New line  [Tab] Options  [Esc] Hide  [Ctrl+D] Decline  [Ctrl+W] Withdraw"
+		return hintLine(
+			hint("Enter", "submit"),
+			hint("Shift+Enter/Ctrl+J", "new line"),
+			hint("Tab", "options"),
+			hint("Esc", "decline"),
+			hint("Ctrl+W", "withdraw"),
+		)
 	}
 
-	parts := make([]string, 0, 4)
+	chips := make([]hintChip, 0, 6)
 	if q.Multiple {
-		parts = append(parts, "[Space] Toggle", "[Enter] Submit")
+		chips = append(chips, hint("Space", "toggle"), hint("Enter", "submit"))
 	} else {
-		parts = append(parts, "[Enter] Select")
+		chips = append(chips, hint("Enter", "select"))
 	}
-	parts = append(parts, "[Tab] Custom", "[Esc] Hide  [Ctrl+D] Decline  [Ctrl+W] Withdraw")
-	if quick := questionQuickSelectHint(len(q.Options)); quick != "" {
-		parts = append(parts, quick)
+	chips = append(chips,
+		hint("Tab", "custom"),
+		hint("Esc", "decline"),
+		hint("Ctrl+W", "withdraw"),
+	)
+	if maxNum := min(len(q.Options), 9); maxNum == 1 {
+		chips = append(chips, hint("1", "quick-select"))
+	} else if maxNum > 1 {
+		chips = append(chips, hint(fmt.Sprintf("1-%d", maxNum), "quick-select"))
 	}
-	return strings.Join(parts, "  ")
+	return hintLine(chips...)
 }
 
 func questionSelectedFingerprint(selected map[int]bool) string {
@@ -274,15 +290,4 @@ func questionSelectedFingerprint(selected map[int]bool) string {
 		parts[i] = fmt.Sprintf("%d", idx)
 	}
 	return strings.Join(parts, ",")
-}
-
-func questionQuickSelectHint(optionCount int) string {
-	maxNum := min(optionCount, 9)
-	if maxNum <= 0 {
-		return ""
-	}
-	if maxNum == 1 {
-		return "[1] Quick-select"
-	}
-	return fmt.Sprintf("[1-%d] Quick-select", maxNum)
 }

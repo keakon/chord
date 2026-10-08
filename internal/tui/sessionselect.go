@@ -600,39 +600,7 @@ func (m *Model) renderSessionSelectFilterLine(innerWidth int) string {
 		filtered = total
 	}
 	count := fmt.Sprintf("%d/%d", filtered, total)
-	countWidth := runewidth.StringWidth(count)
-	if countWidth >= innerWidth {
-		return runewidth.Truncate(count, innerWidth, "…")
-	}
-
-	filterText := m.sessionSelect.filter
-	if m.sessionSelect.filterFocused {
-		filterText += "_"
-	}
-	hintMode := !m.sessionSelect.filterFocused && strings.TrimSpace(m.sessionSelect.filter) == ""
-	leftPlain := "filter: "
-	if hintMode {
-		leftPlain += "(press / to search)"
-	} else {
-		leftPlain += filterText
-	}
-	leftBudget := innerWidth - countWidth
-	if leftBudget < 1 {
-		return runewidth.Truncate(count, innerWidth, "…")
-	}
-	if runewidth.StringWidth(leftPlain) > leftBudget {
-		leftPlain = runewidth.Truncate(leftPlain, leftBudget, "…")
-	}
-	leftWidth := runewidth.StringWidth(leftPlain)
-	gap := max(innerWidth-countWidth-leftWidth, 0)
-
-	leftRendered := leftPlain
-	if hintMode {
-		leftRendered = DimStyle.Render(leftPlain)
-	} else {
-		leftRendered = DimStyle.Render("filter: ") + strings.TrimPrefix(leftPlain, "filter: ")
-	}
-	line := leftRendered + strings.Repeat(" ", gap) + DimStyle.Render(count)
+	line := renderFilterLine(m.sessionSelect.filter, m.sessionSelect.filterFocused, count, innerWidth)
 	return styleDialogBodyLines([]string{line}, innerWidth)[0]
 }
 
@@ -640,7 +608,11 @@ func (m *Model) renderSessionSelectDialog() string {
 	opts := m.sessionSelect.options
 	overlayCfg := OverlayConfig{
 		Title: "Sessions",
-		Hint:  "j/k or wheel move  g/G jump  enter resume  d delete  / filter  esc cancel",
+		Hint: hintLine(
+			hint("j/k", "move"), hint("g/G", "jump"), hint("Enter", "resume"),
+			hint("d", "delete"), hint("/", "filter"), hint("Esc", "cancel"),
+		),
+		CompactHint: hintLine(hint("j/k", "move"), hint("Enter", "resume"), hint("/", "filter"), hint("Esc", "cancel")),
 
 		MaxWidth: 90,
 	}

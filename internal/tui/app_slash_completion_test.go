@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
@@ -398,5 +399,30 @@ func TestSlashCompletionShowsLoopOnAfterLoopStops(t *testing.T) {
 	}
 	if strings.Contains(got, "/loop off") {
 		t.Fatalf("slash completions = %q, should not show /loop off after loop stops", got)
+	}
+}
+
+func TestSlashCompletionHelpUsesKeyChips(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
+	plain := stripANSI(m.renderSlashCompletionDropdown("/"))
+	if !strings.Contains(plain, "[Tab/Enter] complete") || !strings.Contains(plain, "[↑/↓] select") || !strings.Contains(plain, "[Esc] close") {
+		t.Fatalf("slash completion help should render key chips:\n%s", plain)
+	}
+}
+
+func TestSlashCompletionHelpWrapsChipsOnNarrowWidth(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 50, 30)
+	plain := stripANSI(m.renderSlashCompletionDropdown("/"))
+	for _, want := range []string{"[Tab/Enter] complete", "[Esc] close"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("narrow dropdown lost chip %q:\n%s", want, plain)
+		}
+	}
+	lines := strings.Split(plain, "\n")
+	boxWidth := ansi.StringWidth(lines[0])
+	for _, line := range lines {
+		if width := ansi.StringWidth(line); width != boxWidth {
+			t.Fatalf("dropdown line width = %d, want the box width %d: %q", width, boxWidth, line)
+		}
 	}
 }

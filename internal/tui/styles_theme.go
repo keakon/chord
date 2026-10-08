@@ -216,8 +216,8 @@ func applyPanelStyles(t Theme) {
 		Foreground(lipgloss.Color(t.StatusFg))
 
 	StatsTabLabelStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(t.StatsTabLabelFg))
-	StatsTabStyle = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color(t.StatsTabFg)).Background(lipgloss.Color(t.StatsTabBg))
-	StatsTabActiveStyle = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color(t.StatsTabActiveFg)).Background(lipgloss.Color(t.StatsTabActiveBg))
+	TabStyle = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color(t.StatsTabFg)).Background(lipgloss.Color(t.StatsTabBg))
+	TabActiveStyle = lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Color(t.SelectedFg)).Background(lipgloss.Color(t.SelectedBg))
 
 	SidebarFocusedStyle = lipgloss.NewStyle().
 		Bold(true).
@@ -345,6 +345,15 @@ func applyDialogStyles(t Theme) {
 
 	DimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(t.DimFg))
 
+	// KeyHintStyle renders the "[Key]" token in dialog footers. It reuses the
+	// selection highlight pair, the same surface as active tabs and the focused
+	// list row, instead of borrowing the confirm dialog's semantic allow/deny
+	// colours.
+	KeyHintStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(t.SelectedFg)).
+		Background(lipgloss.Color(t.SelectedBg))
+
 	InputSeparatorStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.ModeSearchFg))
 
@@ -362,9 +371,6 @@ func applyDialogStyles(t Theme) {
 
 	ConfirmToolStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(t.ConfirmToolFg))
-
-	ConfirmHintStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(t.ConfirmHintFg))
 
 	ConfirmAllowStyle = lipgloss.NewStyle().
 		Bold(true).
@@ -402,11 +408,10 @@ func applyDialogStyles(t Theme) {
 func applyAliasStyles() {
 	// question.go sets Question*Style = Confirm* / SelectedStyle in a var block.
 	// That copy runs before init()'s ApplyTheme, so without reassignment here the
-	// aliases stay empty lipgloss styles (no cursor row highlight, wrong hint colours).
+	// aliases stay empty lipgloss styles (no cursor row highlight, wrong text colours).
 	QuestionSeparatorStyle = ConfirmSeparatorStyle
 	QuestionTextStyle = ConfirmToolStyle
 	QuestionSelectedStyle = SelectedStyle
-	QuestionHintStyle = ConfirmHintStyle
 	QuestionTimeoutStyle = ConfirmDenyStyle
 
 	// search.go: same init-order trap as Question* (copy before ApplyTheme).

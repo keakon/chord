@@ -23,14 +23,10 @@ func (m *Model) renderMemoryPanel() string {
 		body = strings.Join(lines[m.contentViewer.scrollOffset:min(len(lines), m.contentViewer.scrollOffset+height)], "\n")
 	} else {
 		tabs := []string{"Project memories", "Session applied", "Suggestions"}
-		for i := range tabs {
-			if p.tab == i {
-				tabs[i] = "[" + tabs[i] + "]"
-			}
-		}
-		body = strings.Join(tabs, "  ") + "\n"
 		if m.width < 60 {
-			body = tabs[p.tab] + " (Tab views)\n"
+			body = TabActiveStyle.Render(tabs[p.tab]) + "  " + hintLine(hint("Tab", "views")) + "\n"
+		} else {
+			body = renderTabRow(tabs, p.tab) + "\n"
 		}
 		if p.view != nil {
 			state := "off"
@@ -51,11 +47,7 @@ func (m *Model) renderMemoryPanel() string {
 			body += fmt.Sprintf("Organize %d records (uses model)\n", count)
 			body += "Request: " + ansi.TruncateLeft(p.instruction, max(1, dialogContentWidth(cfg.MaxWidth)-10), "…") + "_\n"
 		} else {
-			body += "filter: " + ansi.TruncateLeft(p.query, max(1, dialogContentWidth(cfg.MaxWidth)-10), "…")
-			if p.inputFocused {
-				body += "_"
-			}
-			body += "\n"
+			body += renderFilterLine(p.query, p.inputFocused, "", max(1, dialogContentWidth(cfg.MaxWidth))) + "\n"
 		}
 		body += "\n"
 		if p.list != nil {
@@ -74,21 +66,41 @@ func (m *Model) renderMemoryPanel() string {
 	return box
 }
 
+// memoryPanelMaxWidth caps the memory panel so long record summaries keep a
+// readable line length and the footer does not stretch across wide terminals.
+const memoryPanelMaxWidth = 120
+
+func (m *Model) memoryPanelWidth() int {
+	return max(1, min(m.width-2, memoryPanelMaxWidth))
+}
+
 func (m *Model) memoryPanelOverlayConfig() OverlayConfig {
 	p := &m.memoryPanel
-	cfg := OverlayConfig{Title: "Memory", MaxWidth: max(1, m.width-2), MinContentHeight: 5, Hint: "/ search  j/k move  Enter read  yy copy  p path  Tab views  Esc close", CompactHint: "/ search  Enter read  yy copy  Esc close"}
+	cfg := OverlayConfig{
+		Title:            "Memory",
+		MaxWidth:         m.memoryPanelWidth(),
+		MinContentHeight: 5,
+		Hint: hintLine(
+			hint("/", "search"), hint("j/k", "move"), hint("Enter", "read"),
+			hint("yy", "copy"), hint("p", "path"), hint("Tab", "views"), hint("Esc", "close"),
+		),
+		CompactHint: hintLine(hint("/", "search"), hint("Enter", "read"), hint("yy", "copy"), hint("Esc", "close")),
+	}
 	if p.detail {
 		cfg.Title = p.viewer.title
-		cfg.Hint = "j/k scroll  g/G jump  yy copy  Esc back"
+		cfg.Hint = hintLine(hint("j/k", "scroll"), hint("g/G", "jump"), hint("yy", "copy"), hint("Esc", "back"))
+		cfg.CompactHint = hintLine(hint("j/k", "scroll"), hint("yy", "copy"), hint("Esc", "back"))
 		if p.preview != nil && !p.preview.Empty() {
-			cfg.Hint = "a apply  Esc cancel  yy copy  j/k scroll  g/G jump"
-			cfg.CompactHint = "a apply  Esc cancel  yy copy"
+			cfg.Hint = hintLine(hint("a", "apply"), hint("Esc", "cancel"), hint("yy", "copy"), hint("j/k", "scroll"), hint("g/G", "jump"))
+			cfg.CompactHint = hintLine(hint("a", "apply"), hint("Esc", "cancel"), hint("yy", "copy"))
 		} else if p.preview == nil {
-			cfg.Hint += "  p copy path"
-			cfg.CompactHint = "j/k scroll  yy copy  Esc back"
+			cfg.Hint = appendHintChip(cfg.Hint, hint("p", "copy path"))
 		}
 	} else if p.tab == 0 {
-		cfg.Hint += "\nSpace select  d remove  o selected / O all organize  u undo  r refresh"
+		cfg.Hint += "\n" + hintLine(
+			hint("Space", "select"), hint("d", "remove"), hint("o", "organize selected"),
+			hint("O", "organize all"), hint("u", "undo"), hint("r", "refresh"),
+		)
 	}
 	if p.loading {
 		cfg.Footer = "Working…"
@@ -100,7 +112,7 @@ func (m *Model) memoryPanelOverlayConfig() OverlayConfig {
 }
 
 func (m *Model) memoryDetailLines() []string {
-	width := max(1, dialogContentWidth(max(1, m.width-2)))
+	width := max(1, dialogContentWidth(m.memoryPanelWidth()))
 	v := &m.contentViewer
 	if v.cachedWidth != width || v.cachedLines == nil {
 		v.cachedLines = renderDialogMarkdownContent(v.content, width)

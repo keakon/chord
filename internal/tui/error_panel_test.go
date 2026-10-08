@@ -330,7 +330,7 @@ func TestErrorPanelCopyAllWritesPlainText(t *testing.T) {
 	if ts := m.snapshotAgentErrors()[0].Timestamp.Format("2006-01-02 15:04:05"); !strings.Contains(copied, ts) {
 		t.Fatalf("copied text missing full timestamp %q\n%s", ts, copied)
 	}
-	if hint := m.errorPanelHint(); !strings.Contains(hint, "y copy") {
+	if hint := stripANSI(m.errorPanelHint()); !strings.Contains(hint, "[y] copy") {
 		t.Fatalf("error panel hint = %q, want y copy", hint)
 	}
 	if cmd := m.handleErrorPanelKey(tea.KeyPressMsg(tea.Key{Text: "Y", Code: 'Y'})); cmd == nil {

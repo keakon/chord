@@ -409,7 +409,7 @@ func TestRenderConfirmDialogEditModeShowsMultilineTextareaAndHint(t *testing.T) 
 	if !strings.Contains(plain, "\"a\": 1") || !strings.Contains(plain, "\"b\": 2") {
 		t.Fatalf("expected multiline args to be visible in edit dialog, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "[Shift+Enter/Ctrl+J] New line") {
+	if !strings.Contains(plain, "[Shift+Enter/Ctrl+J] new line") {
 		t.Fatalf("expected multiline edit hint, got:\n%s", plain)
 	}
 }
@@ -654,11 +654,11 @@ func TestRenderConfirmDenyReasonModeShowsHint(t *testing.T) {
 	if !strings.Contains(plain, "deny with reason") {
 		t.Fatalf("expected 'deny with reason' header in deny-reason dialog, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "[Enter] Deny") {
-		t.Fatalf("expected '[Enter] Deny' hint in deny-reason dialog, got:\n%s", plain)
+	if !strings.Contains(plain, "[Enter] deny") {
+		t.Fatalf("expected '[Enter] deny' hint in deny-reason dialog, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "[Esc] Back") {
-		t.Fatalf("expected '[Esc] Back' hint in deny-reason dialog, got:\n%s", plain)
+	if !strings.Contains(plain, "[Esc] back") {
+		t.Fatalf("expected '[Esc] back' hint in deny-reason dialog, got:\n%s", plain)
 	}
 }
 

@@ -91,3 +91,14 @@ func TestStatusCommandIsLocalEvenWhenAgentIsBusy(t *testing.T) {
 		t.Fatal("status command was queued or sent instead of opening the overview")
 	}
 }
+
+func TestStatusPanelHintUsesKeyChips(t *testing.T) {
+	m := NewModelWithSize(newInfoPanelAgent(), 120, 24)
+	m.openStatusPanel()
+	text := ansi.Strip(m.View().Content)
+	for _, want := range []string{"[j/k] scroll", "[Tab] section", "[Enter] fold", "[Esc] close"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("status panel hint missing %q:\n%s", want, text)
+		}
+	}
+}

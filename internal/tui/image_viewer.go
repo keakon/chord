@@ -330,7 +330,7 @@ func (m *Model) renderImageViewerOverlay() string {
 			DialogTitleStyle.Render(m.imageViewerTitleLine(errWidth - 4)),
 			"",
 			ErrorStyle.Render(err.Error()),
-			DimStyle.Render("Esc: close · r: retry"),
+			hintLine(hint("Esc", "close"), hint("r", "retry")),
 		})
 	}
 

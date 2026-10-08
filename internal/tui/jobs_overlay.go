@@ -117,8 +117,8 @@ func (m *Model) jobsOverlayInnerWidth() int {
 func (m *Model) jobsOverlayConfig() OverlayConfig {
 	return OverlayConfig{
 		Title:       "Background Jobs",
-		Hint:        "j/k select  enter stop  esc close",
-		CompactHint: "Enter stop Esc",
+		Hint:        hintLine(hint("j/k", "select"), hint("Enter", "stop"), hint("Esc", "close")),
+		CompactHint: hintLine(hint("Enter", "stop"), hint("Esc", "close")),
 		MaxWidth:    m.jobsOverlayMaxWidth(),
 	}
 }
@@ -225,13 +225,11 @@ func (m *Model) renderJobsOverlayDialog() string {
 		contentLines = append(contentLines, renderJobRow(innerWidth, job, now, rowStyles, true).text)
 	}
 	content := strings.Join(contentLines, "\n")
-	scroll := ""
-	if maxScroll := m.jobsOverlayMaxScroll(); maxScroll > 0 {
-		scroll = fmt.Sprintf("  %d/%d", start+visible, len(jobs))
-	}
 	// The fixed frame width keeps the stop-zone columns independent of row labels.
 	cfg := m.jobsOverlayConfig()
-	cfg.Hint += scroll
+	if maxScroll := m.jobsOverlayMaxScroll(); maxScroll > 0 {
+		cfg.Hint = appendHintText(cfg.Hint, fmt.Sprintf("%d/%d", start+visible, len(jobs)))
+	}
 	dialog, _ := RenderOverlay(cfg, content, image.Rect(0, 0, m.width, m.height))
 	m.jobsOverlay.renderCacheW = m.width
 	m.jobsOverlay.renderCacheH = m.height
@@ -262,7 +260,7 @@ func (m *Model) jobsOverlayRowAt(x, y int) (jobID string, inStopZone bool, ok bo
 	}
 	cfg := m.jobsOverlayConfig()
 	if len(jobs) > visible {
-		cfg.Hint += fmt.Sprintf("  %d/%d", windowStart+visible, len(jobs))
+		cfg.Hint = appendHintText(cfg.Hint, fmt.Sprintf("%d/%d", windowStart+visible, len(jobs)))
 	}
 	layout := layoutOverlay(cfg, image.Rect(0, 0, m.width, m.height))
 	idx, hit := overlayItemIndexAt(rect, y, layout.contentBaseRow(), windowStart, visible)

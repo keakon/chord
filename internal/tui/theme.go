@@ -115,8 +115,6 @@ type Theme struct {
 	StatsTabLabelFg  string
 	StatsTabFg       string
 	StatsTabBg       string
-	StatsTabActiveFg string
-	StatsTabActiveBg string
 	SidebarAddedFg   string
 	SidebarRemovedFg string
 
@@ -160,7 +158,6 @@ type Theme struct {
 	// Confirmation dialog
 	ConfirmSeparatorFg string
 	ConfirmToolFg      string
-	ConfirmHintFg      string
 	ConfirmAllowFg     string
 	ConfirmDenyFg      string
 	ConfirmEditFg      string
@@ -294,8 +291,6 @@ func DefaultTheme() Theme {
 		StatsTabLabelFg:         "245",
 		StatsTabFg:              "250",
 		StatsTabBg:              "236",
-		StatsTabActiveFg:        "230",
-		StatsTabActiveBg:        "63",
 		SidebarAddedFg:          "76",
 		SidebarRemovedFg:        "167",
 		StatusBg:                surfaceStatus,
@@ -319,7 +314,6 @@ func DefaultTheme() Theme {
 		DimFg:                   "250", // lighter so dim text (thinking, tool body) is readable
 		ConfirmSeparatorFg:      "220",
 		ConfirmToolFg:           "252",
-		ConfirmHintFg:           "246",
 		ConfirmAllowFg:          "82",
 		ConfirmDenyFg:           "210",
 		ConfirmEditFg:           "220",

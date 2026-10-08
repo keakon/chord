@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/identity"
@@ -298,10 +299,10 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 		return m.slashCache.text
 	}
 
-	help := DimStyle.Render("Tab/Enter complete  ↑/↓ select  Esc close")
+	help := hintLine(hint("Tab/Enter", "complete"), hint("↑/↓", "select"), hint("Esc", "close"))
 
 	// Calculate dynamic width based on content
-	contentWidth := runewidth.StringWidth("Tab/Enter complete  ↑/↓ select  Esc close")
+	contentWidth := ansi.StringWidth(help)
 	for i := start; i < end; i++ {
 		c := matches[i]
 		w := runewidth.StringWidth(fmt.Sprintf(" ▸ %s", slashCompletionLine(c)))
@@ -319,8 +320,9 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 		contentWidth = 30
 	}
 
-	lines := make([]string, 0, maxVisible+2)
-	lines = append(lines, help, "")
+	lines := make([]string, 0, maxVisible+3)
+	lines = append(lines, wrapHintLines(help, contentWidth)...)
+	lines = append(lines, "")
 
 	for i := start; i < end; i++ {
 		c := matches[i]

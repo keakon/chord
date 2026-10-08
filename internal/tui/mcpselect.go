@@ -21,10 +21,28 @@ type mcpSelectState struct {
 	prevMode Mode
 }
 
-const (
-	mcpSelectIdleHint = "j/k move  g/G jump  enter toggle  e enable  d disable  esc close  (auto servers are read-only)"
-	mcpSelectBusyHint = "j/k move  g/G jump  enter toggle next request  e enable  d disable  esc close"
-)
+func mcpSelectIdleHint() string {
+	return hintLine(
+		hint("j/k", "move"),
+		hint("g/G", "jump"),
+		hint("Enter", "toggle"),
+		hint("e", "enable"),
+		hint("d", "disable"),
+		hint("Esc", "close"),
+		hintText("(auto servers are read-only)"),
+	)
+}
+
+func mcpSelectBusyHint() string {
+	return hintLine(
+		hint("j/k", "move"),
+		hint("g/G", "jump"),
+		hint("Enter", "toggle next request"),
+		hint("e", "enable"),
+		hint("d", "disable"),
+		hint("Esc", "close"),
+	)
+}
 
 func buildMCPSelectItems(rows []agent.MCPServerDisplay) []OverlayListItem {
 	rowsCopy := append([]agent.MCPServerDisplay(nil), rows...)
@@ -113,13 +131,13 @@ func (m *Model) renderMCPSelectDialog() string {
 	}
 
 	readOnly := m.mcpSelectReadOnly()
-	hint := mcpSelectIdleHint
+	hints := mcpSelectIdleHint()
 	if readOnly {
-		hint = mcpSelectBusyHint
+		hints = mcpSelectBusyHint()
 	}
 	overlayCfg := OverlayConfig{
 		Title: "MCP Servers",
-		Hint:  hint,
+		Hint:  hints,
 
 		MaxWidth: 70,
 	}
@@ -139,7 +157,7 @@ func (m *Model) renderMCPSelectDialog() string {
 		prefix,
 		0,
 		maxVisible,
-		prefix+"\x00"+hint,
+		prefix+"\x00"+hints,
 		nil,
 		area,
 	)

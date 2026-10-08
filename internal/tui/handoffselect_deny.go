@@ -7,8 +7,8 @@ import (
 
 func (m *Model) renderHandoffDenyReasonDialog(cfg OverlayConfig, plan string, area image.Rectangle) string {
 	cfg.Title = "Deny handoff with reason"
-	cfg.Hint = "[Enter] Deny  [Shift+Enter/Ctrl+J] New line  [Esc] Back"
-	cfg.CompactHint = "Enter deny  Esc back"
+	cfg.Hint = hintLine(hint("Enter", "deny"), hint("Shift+Enter/Ctrl+J", "new line"), hint("Esc", "back"))
+	cfg.CompactHint = hintLine(hint("Enter", "deny"), hint("Esc", "back"))
 	width := max(dialogContentWidth(cfg.MaxWidth), 1)
 	var errorLines []string
 	if errText := strings.TrimSpace(m.handoffSelect.error); errText != "" {
