@@ -697,6 +697,33 @@ func TestToolCallCopyContentFormatsGenericToolAsMarkdown(t *testing.T) {
 	}
 }
 
+func TestToolCallCopyContentKeepsIgnoredArgsWithReason(t *testing.T) {
+	block := &Block{
+		Type:          BlockToolCall,
+		ToolName:      tools.NameGrep,
+		Content:       `{"paths":["internal/tui"],"pattern":"TODO"}`,
+		ResultContent: "internal/tui/app.go:1:TODO one",
+		Audit: &message.ToolArgsAudit{
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.include",
+				ValueJSON: `"*.go"`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+
+	got := blockCopyContent(block)
+	argumentsAt := strings.Index(got, "## Arguments")
+	ignoredAt := strings.Index(got, "## Ignored arguments")
+	resultAt := strings.Index(got, "## Result")
+	if argumentsAt < 0 || ignoredAt < 0 || resultAt < 0 || !(argumentsAt < ignoredAt && ignoredAt < resultAt) {
+		t.Fatalf("ignored arguments should sit between Arguments and Result, got %q", got)
+	}
+	if !strings.Contains(got, "include=*.go (unrecognized parameter)") {
+		t.Fatalf("copy should keep the dropped value and its reason, got %q", got)
+	}
+}
+
 func TestMessageCardCopyContentIncludesCardType(t *testing.T) {
 	tests := []struct {
 		name  string

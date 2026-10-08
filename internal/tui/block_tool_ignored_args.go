@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -184,49 +185,15 @@ func diagnosticOptionPlain(diagnostic toolArgDiagnostic) string {
 	return text
 }
 
-// diagnosticArgHeaderOption renders the diagnostic option for canonical with
-// the same styling contract as formatDiagnosticOption: struck-through for
-// ignored values, error-styled for missing ones, plain otherwise.
-func (b *Block) diagnosticArgHeaderOption(canonical string) string {
-	text, ignored, missing := b.diagnosticArgHeaderItem(canonical)
-	if text == "" {
-		return ""
+// ignoredArgCopyLines renders the dropped arguments for the copied or exported
+// card as "path=value (reason)" lines. A copy has no strikethrough to mark a
+// value as dropped, so each line names the reason instead: without it a reader
+// cannot tell why the argued value is missing from the executed arguments.
+func (b *Block) ignoredArgCopyLines() []string {
+	if b == nil {
+		return nil
 	}
-	if ignored {
-		return DimStyle.Strikethrough(true).Render(text)
-	}
-	if missing {
-		return ErrorStyle.Render(text)
-	}
-	return text
-}
-
-func (b *Block) diagnosticArgHeaderItem(canonical string) (text string, ignored, missing bool) {
-	if b == nil || b.Audit == nil {
-		return "", false, false
-	}
-	for _, item := range b.Audit.InvalidArgs {
-		if canonicalDiagnosticPath(item.Path) != canonical || item.Reason != message.InvalidToolArgReasonMissing {
-			continue
-		}
-		if text := b.diagnosticArgText(item.Path, item.ValueJSON, canonical); text != "" {
-			return text, false, true
-		}
-	}
-	for _, item := range b.Audit.InvalidArgs {
-		if canonicalDiagnosticPath(item.Path) != canonical || item.Reason == message.InvalidToolArgReasonMissing {
-			continue
-		}
-		if text := b.diagnosticArgText(item.Path, item.ValueJSON, canonical); text != "" {
-			return text, false, false
-		}
-	}
-	for _, item := range b.Audit.IgnoredArgs {
-		if text := b.diagnosticArgText(item.Path, item.ValueJSON, canonical); text != "" {
-			return text, true, false
-		}
-	}
-	return "", false, false
+	return convformat.IgnoredArgLines(b.Audit)
 }
 
 func canonicalDiagnosticPath(rawPath string) string {
@@ -235,50 +202,6 @@ func canonicalDiagnosticPath(rawPath string) string {
 		path = strings.TrimPrefix(path, ".")
 	}
 	return path
-}
-
-func (b *Block) diagnosticArgText(rawPath, valueJSON, canonical string) string {
-	path := sanitizeToolDisplayText(strings.TrimPrefix(strings.TrimSpace(rawPath), "args."))
-	if path == "" || canonicalDiagnosticPath(rawPath) != canonical {
-		return ""
-	}
-	value := b.toolArgDiagnosticValue(path, valueJSON)
-	if value == "" && !b.diagnosticArgIsMissing(path) {
-		return ""
-	}
-	if b.diagnosticArgUsesValueOnly(path) {
-		return value
-	}
-	if b.diagnosticArgIsMissing(path) {
-		return "<missing>"
-	}
-	return path + "=" + value
-}
-
-func (b *Block) diagnosticArgIsMissing(path string) bool {
-	if b == nil || b.Audit == nil {
-		return false
-	}
-	canonical := strings.TrimLeft(strings.TrimSpace(path), ".")
-	for _, item := range b.Audit.InvalidArgs {
-		if canonicalDiagnosticPath(item.Path) != canonical {
-			continue
-		}
-		return item.Reason == message.InvalidToolArgReasonMissing
-	}
-	return false
-}
-
-func (b *Block) diagnosticArgUsesValueOnly(path string) bool {
-	canonical := strings.TrimLeft(strings.TrimSpace(path), ".")
-	switch b.ToolName {
-	case "glob":
-		return canonical == "patterns"
-	case "grep":
-		return canonical == "pattern"
-	default:
-		return false
-	}
 }
 
 // globDiagnosticHeaderParts keeps schema-broken glob calls on the same header
@@ -305,45 +228,41 @@ func (b *Block) globDiagnosticHeaderParts(vals map[string]string) (mainPart, gra
 
 // grepDiagnosticHeaderParts keeps schema-broken grep calls on the same header
 // shape as successful ones: the pattern slot shows the missing marker or the
-// effective pattern, while every ignored or invalid argument joins the
-// parenthesized option group instead of trailing the header line.
+// effective pattern, and the parenthesized option group carries the effective
+// options followed by every ignored or invalid argument, so no diagnostic
+// trails the header line behind the result summary.
 func (b *Block) grepDiagnosticHeaderParts(vals map[string]string) (mainPart, grayPart string) {
-	pattern := b.diagnosticPrimaryText("pattern")
-	if pattern == "" {
-		pattern = strings.TrimSpace(vals["pattern"])
+	mainPart = b.diagnosticPrimaryText("pattern")
+	if mainPart == "" {
+		mainPart = strings.TrimSpace(vals["pattern"])
 	}
-	if pattern == "" {
-		return "", ""
-	}
+	vals = cloneToolValsWithDisplayDirs(b, vals)
 	var opts []string
 	if paths := nonCurrentDirToolPaths(vals["paths"]); len(paths) > 0 {
 		opts = append(opts, "paths="+formatStringListParam(paths))
 	}
-	if paths := b.diagnosticArgHeaderOption("paths"); paths != "" {
-		opts = append(opts, paths)
-	}
 	if includes := paramStringList(vals["includes"]); len(includes) > 0 {
 		opts = append(opts, "includes="+formatStringListParam(includes))
 	}
-	if includes := b.diagnosticArgHeaderOption("includes"); includes != "" {
-		opts = append(opts, includes)
-	}
 	if path := strings.TrimSpace(vals["path"]); path != "" && path != "." {
-		opts = append(opts, "path="+b.displayToolDir(path))
+		opts = append(opts, "path="+path)
 	}
-	if ignored := b.firstIgnoredDiagnostic("pattern"); ignored != nil && ignored.value != "" {
-		opts = append(opts, b.formatDiagnosticOption(ignored))
-	}
-	// Models routinely pluralize the singular "pattern" schema field the way
-	// glob spells it. Without this the discarded value trails the header behind
-	// a " · " separator, so a broken call no longer looks like a valid one.
-	if ignored := b.firstIgnoredDiagnostic("patterns"); ignored != nil && ignored.value != "" {
-		opts = append(opts, b.formatDiagnosticOption(ignored))
+	diagnostics := b.toolArgDiagnostics()
+	for i := range diagnostics {
+		// A missing pattern already holds the main slot; every other
+		// diagnostic belongs to the option group, including the plural
+		// "patterns" a model reaches for by analogy with glob.
+		if diagnostics[i].missing && canonicalDiagnosticPath(diagnostics[i].path) == "pattern" {
+			continue
+		}
+		if option := b.formatDiagnosticOption(&diagnostics[i]); option != "" {
+			opts = append(opts, option)
+		}
 	}
 	if len(opts) == 0 {
-		return pattern, ""
+		return mainPart, ""
 	}
-	return pattern, "(" + strings.Join(opts, ", ") + ")"
+	return mainPart, "(" + strings.Join(opts, ", ") + ")"
 }
 
 func (b *Block) diagnosticPrimaryText(canonical string) string {
@@ -571,11 +490,10 @@ func (b *Block) diagnosticArgOccupiesHeader(diagnostic toolArgDiagnostic) bool {
 	case tools.NameGlob:
 		return canonical == "patterns"
 	case tools.NameGrep:
-		// "patterns" is the plural a model reaches for by analogy with glob;
-		// grepDiagnosticHeaderParts folds it into the option group, so the
-		// shared header-suffix slot must not repeat it.
-		return canonical == "pattern" || canonical == "patterns" ||
-			canonical == "paths" || canonical == "includes"
+		// grepDiagnosticHeaderParts folds every ignored or invalid argument
+		// into the option group (or the main slot for a missing pattern), so
+		// the shared header-suffix slot must not append a second copy.
+		return true
 	case tools.NameQuestion:
 		// A Question card is all body: it renders every parameter it was given
 		// below the header ("▸ <header>", the question text, the option list),

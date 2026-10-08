@@ -515,13 +515,14 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameWebFetch, tools.NameSkill:
 		mainPart, grayPart := formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
 		if b.ToolName == tools.NameGrep {
+			// grepDiagnosticHeaderParts rebuilds the whole option group from the
+			// effective arguments plus every ignored or invalid one, so it
+			// replaces the generic group instead of merging into it.
 			if diagMain, diagGray := b.grepDiagnosticHeaderParts(vals); diagMain != "" || diagGray != "" {
 				if mainPart == "" {
 					mainPart = diagMain
 				}
-				if grayPart == "" {
-					grayPart = diagGray
-				}
+				grayPart = diagGray
 			}
 		}
 		if b.ToolName == tools.NameShell {
@@ -538,8 +539,6 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 			switch b.ToolName {
 			case tools.NameGlob:
 				mainPart, grayPart = b.globDiagnosticHeaderParts(vals)
-			case tools.NameGrep:
-				mainPart, grayPart = b.grepDiagnosticHeaderParts(vals)
 			}
 		}
 		return mainPart, grayPart

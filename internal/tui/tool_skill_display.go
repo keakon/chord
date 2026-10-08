@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )
@@ -337,7 +338,7 @@ func skillToolBodyFromResult(result string) string {
 	return ""
 }
 
-func skillToolCopyContent(displayArgs, result string) string {
+func skillToolCopyContent(displayArgs string, ignoredArgs []string, result string) string {
 	name := skillToolNameFromArgs(displayArgs)
 	path := skillToolPathFromResult(result)
 	body := tools.FormatSkillBodyForDisplay(skillToolBodyFromResult(result))
@@ -353,6 +354,9 @@ func skillToolCopyContent(displayArgs, result string) string {
 		parts = append(parts, body)
 	} else if trimmed := strings.TrimSpace(result); trimmed != "" {
 		parts = append(parts, trimmed)
+	}
+	if ignored := convformat.IgnoredArgsSection(ignoredArgs); ignored != "" {
+		parts = append(parts, ignored)
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }

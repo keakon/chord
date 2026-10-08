@@ -590,7 +590,7 @@ func blockCopyContent(b *Block) string {
 		return convformat.BlockString(convformat.LabelThinking, strings.TrimSpace(b.Content))
 	case BlockToolCall:
 		if tools.NormalizeName(b.ToolName) == tools.NameSkill {
-			return skillToolCopyContent(b.Content, b.ResultContent)
+			return skillToolCopyContent(b.Content, b.ignoredArgCopyLines(), b.ResultContent)
 		}
 		return appendImagePlaceholderLabels(toolCallMarkdownContent(b), b)
 	case BlockToolResult:
@@ -630,13 +630,13 @@ func toolCallMarkdownContent(b *Block) string {
 		toolName = "unknown"
 	}
 	if toolNameKey(toolName) == tools.NameDone {
-		return convformat.DoneToolCallMarkdown(b.DoneReport, b.ResultContent)
+		return convformat.DoneToolCallMarkdown(b.DoneReport, b.ignoredArgCopyLines(), b.ResultContent)
 	}
 	if toolNameKey(toolName) == tools.NameEdit || toolNameKey(toolName) == tools.NameApplyPatch {
 		return fileDiffToolCallMarkdownContent(b)
 	}
 
-	return convformat.ToolCallMarkdown(b.ToolName, b.Content, toolExpandedResultContent(b.ToolName, b.ResultContent), b.Diff)
+	return convformat.ToolCallMarkdown(b.ToolName, b.Content, b.ignoredArgCopyLines(), toolExpandedResultContent(b.ToolName, b.ResultContent), b.Diff)
 }
 
 func fileDiffToolCallMarkdownContent(b *Block) string {
@@ -685,6 +685,9 @@ func fileDiffToolCallMarkdownContent(b *Block) string {
 		if diff != "" {
 			parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
 		}
+	}
+	if ignored := convformat.IgnoredArgsSection(b.ignoredArgCopyLines()); ignored != "" {
+		parts = append(parts, ignored)
 	}
 	if result := strings.TrimSpace(toolExpandedResultContent(b.ToolName, b.ResultContent)); result != "" {
 		parts = append(parts, "## Result\n\n"+result)

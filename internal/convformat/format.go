@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 // BlockSep is the separator between blocks. Used by both /export and yy/y3y copy.
@@ -102,8 +104,8 @@ func UserShellPersistedBody(userLine, cmd, output string, failed bool) string {
 }
 
 // ToolCallMarkdown formats a tool call as Markdown with optional arguments,
-// result, and diff sections.
-func ToolCallMarkdown(toolName, args, result, diff string) string {
+// ignored-argument audit, result, and diff sections.
+func ToolCallMarkdown(toolName, args string, ignoredArgs []string, result, diff string) string {
 	name := strings.TrimSpace(toolName)
 	if name == "" {
 		name = "unknown"
@@ -112,6 +114,9 @@ func ToolCallMarkdown(toolName, args, result, diff string) string {
 	if args = strings.TrimSpace(args); args != "" && args != "{}" {
 		parts = append(parts, "## Arguments\n\n```json\n"+args+"\n```")
 	}
+	if ignored := IgnoredArgsSection(ignoredArgs); ignored != "" {
+		parts = append(parts, ignored)
+	}
 	if result = strings.TrimSpace(result); result != "" {
 		parts = append(parts, "## Result\n\n"+result)
 	}
@@ -119,6 +124,113 @@ func ToolCallMarkdown(toolName, args, result, diff string) string {
 		parts = append(parts, "## Diff\n\n```diff\n"+diff+"\n```")
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// IgnoredArgsSection formats the arguments a tool call carried but the runtime
+// dropped before execution, so a copy or export keeps the values the tool card
+// shows struck through in its header. Callers pass one "path=value (reason)"
+// line per dropped argument; blank lines are dropped and no lines yield "".
+func IgnoredArgsSection(lines []string) string {
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if line = strings.TrimSpace(line); line != "" {
+			cleaned = append(cleaned, line)
+		}
+	}
+	if len(cleaned) == 0 {
+		return ""
+	}
+	return "## Ignored arguments\n\n" + strings.Join(cleaned, "\n")
+}
+
+// IgnoredArgLines renders one line per argument an audit records as dropped:
+// "path=value (reason)". Unlike a live tool card, an export has no display
+// working directory to relativize paths against, so values keep the spelling of
+// the model's original JSON.
+func IgnoredArgLines(audit *message.ToolArgsAudit) []string {
+	if audit == nil || len(audit.IgnoredArgs) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(audit.IgnoredArgs))
+	for _, item := range audit.IgnoredArgs {
+		path := strings.TrimPrefix(strings.TrimSpace(item.Path), "args.")
+		if path == "" {
+			continue
+		}
+		line := path
+		if value := ignoredArgValueText(item.ValueJSON); value != "" {
+			line += "=" + value
+		}
+		if label := ignoredArgReasonLabel(item.Reason); label != "" {
+			line += " (" + label + ")"
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// ignoredArgReasonLabel explains why one argument did not participate in
+// execution. Reasons come from the persisted audit, so the wording must stay
+// stable for live cards, copies, and exported sessions alike.
+func ignoredArgReasonLabel(reason message.IgnoredToolArgReason) string {
+	switch reason {
+	case message.IgnoredToolArgReasonShadowed:
+		return "earlier duplicate value; the last occurrence was used"
+	case message.IgnoredToolArgReasonNull:
+		return "null value, treated as unset"
+	default:
+		return "unrecognized parameter"
+	}
+}
+
+// ignoredArgValueText renders the audit's original JSON value on one line:
+// strings drop their JSON quotes, uninformative scalars (null, false, empty
+// containers) render as nothing, and everything else keeps its compact JSON.
+// The value is never truncated: a copy or export has no card width to respect,
+// and the executed Arguments document only the effective value, so the dropped
+// value would otherwise be lost.
+func ignoredArgValueText(valueJSON string) string {
+	value := strings.TrimSpace(valueJSON)
+	if value == "" {
+		return ""
+	}
+	encoded := ""
+	dec := json.NewDecoder(strings.NewReader(value))
+	dec.UseNumber()
+	var parsed any
+	if err := dec.Decode(&parsed); err == nil {
+		switch typed := parsed.(type) {
+		case nil:
+			return ""
+		case string:
+			encoded = typed
+		case json.Number:
+			encoded = typed.String()
+		case bool:
+			if !typed {
+				return ""
+			}
+			encoded = "true"
+		default:
+			marshaled, err := json.Marshal(typed)
+			if err != nil {
+				return collapseWhitespace(value)
+			}
+			encoded = string(marshaled)
+			if encoded == "null" || encoded == "{}" || encoded == "[]" {
+				return ""
+			}
+		}
+	} else {
+		encoded = value
+	}
+	return collapseWhitespace(encoded)
+}
+
+// collapseWhitespace keeps one dropped argument on one line even when the model
+// sent a value with embedded newlines or tabs.
+func collapseWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // ToolResultMarkdown formats a standalone tool result as Markdown.
@@ -140,10 +252,13 @@ func ToolResultMarkdown(toolName, result, diff string) string {
 // DoneToolCallMarkdown formats the Done tool copy/export representation. When
 // result is a rejection, the reason is shown in a separate paragraph without the
 // raw "Done rejected:" prefix.
-func DoneToolCallMarkdown(report, result string) string {
+func DoneToolCallMarkdown(report string, ignoredArgs []string, result string) string {
 	parts := []string{"# Tool call: Done"}
 	if report = strings.TrimSpace(report); report != "" {
 		parts = append(parts, "## Report\n\n"+report)
+	}
+	if ignored := IgnoredArgsSection(ignoredArgs); ignored != "" {
+		parts = append(parts, ignored)
 	}
 	if reason := DoneRejectedReason(result); reason != "" {
 		parts = append(parts, "## Rejection reason\n\n"+reason)

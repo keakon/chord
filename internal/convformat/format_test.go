@@ -1,8 +1,11 @@
 package convformat
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 func TestLocalShellBlockString_success(t *testing.T) {
@@ -114,5 +117,78 @@ func TestTryParseUserShellPersistedMessage_plainUser(t *testing.T) {
 	_, _, _, _, ok := TryParseUserShellPersistedMessage("hello world")
 	if ok {
 		t.Fatal("expected false")
+	}
+}
+
+func TestToolCallMarkdownPlacesIgnoredArgsBetweenArgumentsAndResult(t *testing.T) {
+	got := ToolCallMarkdown("grep", `{"pattern":"TODO"}`, []string{"include=*.go (unrecognized parameter)"}, "a.go:1:TODO", "")
+	argumentsAt := strings.Index(got, "## Arguments")
+	ignoredAt := strings.Index(got, "## Ignored arguments")
+	resultAt := strings.Index(got, "## Result")
+	if argumentsAt < 0 || ignoredAt < 0 || resultAt < 0 || !(argumentsAt < ignoredAt && ignoredAt < resultAt) {
+		t.Fatalf("ignored arguments should sit between Arguments and Result:\n%s", got)
+	}
+	if !strings.Contains(got, "include=*.go (unrecognized parameter)") {
+		t.Fatalf("dropped value missing from the section:\n%s", got)
+	}
+
+	if got := ToolCallMarkdown("read", `{"path":"a.go"}`, nil, "content", ""); strings.Contains(got, "## Ignored arguments") {
+		t.Fatalf("no dropped arguments should mean no section:\n%s", got)
+	}
+}
+
+func TestDoneToolCallMarkdownPlacesIgnoredArgsAfterReport(t *testing.T) {
+	got := DoneToolCallMarkdown("done", []string{"args.reason=null (null value, treated as unset)"}, "")
+	reportAt := strings.Index(got, "## Report")
+	ignoredAt := strings.Index(got, "## Ignored arguments")
+	if reportAt < 0 || ignoredAt < 0 || reportAt > ignoredAt {
+		t.Fatalf("ignored arguments should follow the report:\n%s", got)
+	}
+}
+
+func TestIgnoredArgsSectionDropsBlankLines(t *testing.T) {
+	if got := IgnoredArgsSection([]string{"", "  "}); got != "" {
+		t.Fatalf("IgnoredArgsSection() = %q, want empty", got)
+	}
+	got := IgnoredArgsSection([]string{" path=value ", ""})
+	if got != "## Ignored arguments\n\npath=value" {
+		t.Fatalf("IgnoredArgsSection() = %q", got)
+	}
+}
+
+func TestIgnoredArgLines(t *testing.T) {
+	audit := &message.ToolArgsAudit{
+		IgnoredArgs: []message.IgnoredToolArg{
+			{Path: "args.include", ValueJSON: `"*.go"`, Reason: message.IgnoredToolArgReasonUnrecognized},
+			{Path: "args.paths", ValueJSON: `["internal","cmd"]`, Reason: message.IgnoredToolArgReasonUnrecognized},
+			{Path: "args.reason", ValueJSON: `null`, Reason: message.IgnoredToolArgReasonNull},
+			{Path: "args.pattern", ValueJSON: `"first"`, Reason: message.IgnoredToolArgReasonShadowed},
+		},
+	}
+	want := []string{
+		"include=*.go (unrecognized parameter)",
+		`paths=["internal","cmd"] (unrecognized parameter)`,
+		"reason (null value, treated as unset)",
+		"pattern=first (earlier duplicate value; the last occurrence was used)",
+	}
+	if got := IgnoredArgLines(audit); !slices.Equal(got, want) {
+		t.Fatalf("IgnoredArgLines() = %q, want %q", got, want)
+	}
+	if got := IgnoredArgLines(nil); got != nil {
+		t.Fatalf("IgnoredArgLines(nil) = %q, want nil", got)
+	}
+}
+
+func TestIgnoredArgLinesKeepsLongValueWhole(t *testing.T) {
+	value := strings.Repeat("x", 400)
+	audit := &message.ToolArgsAudit{IgnoredArgs: []message.IgnoredToolArg{{
+		Path:      "args.query",
+		ValueJSON: `"` + value + `"`,
+		Reason:    message.IgnoredToolArgReasonUnrecognized,
+	}}}
+	lines := IgnoredArgLines(audit)
+	want := "query=" + value + " (unrecognized parameter)"
+	if len(lines) != 1 || lines[0] != want {
+		t.Fatalf("IgnoredArgLines() = %q, want %q", lines, want)
 	}
 }

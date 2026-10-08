@@ -606,6 +606,43 @@ func TestExportToMarkdownToolCall(t *testing.T) {
 	}
 }
 
+// The tool call keeps the model's original arguments, so a dropped value is
+// still visible there; the audit section states that the runtime discarded it
+// and why, which is the only place the export can learn the reason.
+func TestExportToMarkdownToolCallKeepsIgnoredArgs(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "search it"},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{
+			ID:   "call-ignored",
+			Name: "grep",
+			Args: json.RawMessage(`{"paths":["internal"],"include":"*.go","pattern":"TODO"}`),
+		}}},
+		{Role: message.RoleTool, ToolCallID: "call-ignored", Content: "internal/app.go:1:TODO", ToolStatus: "success", Audit: &message.ToolArgsAudit{
+			EffectiveArgsJSON: `{"paths":["internal"],"pattern":"TODO"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.include",
+				ValueJSON: `"*.go"`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		}},
+	}
+	session, err := Export(msgs, nil, nil)
+	if err != nil {
+		t.Fatalf("Export() error: %v", err)
+	}
+
+	md := ExportToMarkdown(session)
+	argumentsAt := strings.Index(md, "## Arguments")
+	ignoredAt := strings.Index(md, "## Ignored arguments")
+	resultAt := strings.Index(md, "## Result")
+	if argumentsAt < 0 || ignoredAt < 0 || resultAt < 0 || !(argumentsAt < ignoredAt && ignoredAt < resultAt) {
+		t.Fatalf("ignored arguments should sit between Arguments and Result:\n%s", md)
+	}
+	if !strings.Contains(md, "include=*.go (unrecognized parameter)") {
+		t.Fatalf("dropped argument and its reason missing:\n%s", md)
+	}
+}
+
 func TestExportToMarkdownToolResult(t *testing.T) {
 	session, err := Export(sampleMessages(), nil, nil)
 	if err != nil {

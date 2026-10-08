@@ -896,9 +896,9 @@ func TestGrepCardShowsDiagnosticListsLikeNormalHeader(t *testing.T) {
 	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
 	plain = strings.ReplaceAll(plain, "\x1b", "")
 	for _, want := range []string{
-		"grep TODO (.paths=internal,cmd, .includes=**/*.go,**/*.md)",
-		".paths=internal,cmd",
-		".includes=**/*.go,**/*.md",
+		"grep TODO (ignored .paths=internal,cmd, ignored .includes=**/*.go,**/*.md)",
+		"ignored .paths=internal,cmd",
+		"ignored .includes=**/*.go,**/*.md",
 	} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("grep diagnostic list formatting mismatch, want %q:\n%s", want, plain)
@@ -1022,6 +1022,38 @@ func TestGrepCardFoldsPluralPatternsIntoOptionGroup(t *testing.T) {
 	}
 	if !strings.Contains(rendered, "38;5;"+currentTheme.ErrorFg+"m") {
 		t.Fatalf("missing grep pattern is not red: %q", rendered)
+	}
+}
+
+// A model that writes the singular "include" instead of the schema's
+// "includes" must not push the dropped value behind the result summary: the
+// diagnostic shares the option group with the effective arguments, before the
+// match counts that belong to the executed call.
+func TestGrepCardFoldsSingularIncludeIntoOptionGroup(t *testing.T) {
+	block := &Block{
+		ID:                1,
+		Type:              BlockToolCall,
+		ToolName:          tools.NameGrep,
+		Content:           `{"paths":["internal/tui"],"pattern":"TODO"}`,
+		ResultDone:        true,
+		ResultContent:     "internal/tui/app.go:1:TODO one\nNote: ignored unrecognized parameter(s): args.include",
+		displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace"),
+		Audit: &message.ToolArgsAudit{
+			OriginalArgsJSON:  `{"paths":["internal/tui"],"pattern":"TODO","include":"*.go"}`,
+			EffectiveArgsJSON: `{"paths":["internal/tui"],"pattern":"TODO"}`,
+			IgnoredArgs: []message.IgnoredToolArg{{
+				Path:      "args.include",
+				ValueJSON: `"*.go"`,
+				Reason:    message.IgnoredToolArgReasonUnrecognized,
+			}},
+		},
+	}
+	plain := strings.ReplaceAll(stripANSI(strings.Join(block.Render(160, ""), "\n")), "…", "")
+	if !strings.Contains(plain, "grep TODO (paths=internal/tui, ignored include=*.go) · 1 match · 1 file") {
+		t.Fatalf("dropped singular include should join the option group before the result summary:\n%s", plain)
+	}
+	if strings.Contains(plain, "· ignored include") {
+		t.Fatalf("dropped singular include should not trail the result summary:\n%s", plain)
 	}
 }
 

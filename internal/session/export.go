@@ -249,9 +249,17 @@ func ExportToMarkdown(session *ExportedSession) string {
 	sb.WriteString(convformat.BlockSep)
 
 	toolCallNames := make(map[string]string)
+	ignoredToolArgs := make(map[string][]string)
 	for _, em := range session.Messages {
 		for _, tc := range em.ToolCalls {
 			toolCallNames[tc.ID] = tc.Name
+		}
+		// The audit lives on the tool result, while the tool call is printed
+		// with the assistant message, so collect the dropped arguments up front.
+		if em.ToolCallID != "" {
+			if lines := convformat.IgnoredArgLines(em.Audit); len(lines) > 0 {
+				ignoredToolArgs[em.ToolCallID] = lines
+			}
 		}
 	}
 
@@ -295,7 +303,7 @@ func ExportToMarkdown(session *ExportedSession) string {
 				sb.WriteString("\n\n")
 			}
 			for _, tc := range em.ToolCalls {
-				sb.WriteString(convformat.ToolCallMarkdown(tc.Name, tc.Args, "", ""))
+				sb.WriteString(convformat.ToolCallMarkdown(tc.Name, tc.Args, ignoredToolArgs[tc.ID], "", ""))
 				sb.WriteString("\n\n")
 			}
 			needSep = true
