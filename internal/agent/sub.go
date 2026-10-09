@@ -736,6 +736,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		s.tools.Register(tool)
 	}
 	// Build and install the system prompt.
+	s.tools.Register(tools.NewToolSearchTool(s))
 	prompt := s.buildSystemPrompt()
 	cfg.LLMClient.SetSystemPrompt(prompt)
 	s.setSessionID(cfg.LLMClient)
@@ -930,7 +931,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 	s.llmMu.RLock()
 	toolDefs := append([]message.ToolDefinition(nil), s.frozenToolDefs...)
 	s.llmMu.RUnlock()
-	if toolDefs == nil {
+	if toolDefs == nil || s.HasDeferredTools() {
 		toolDefs = llmToolDefinitionsFromVisibleTools(s.filteredVisibleTools())
 	}
 	messages = s.injectSessionContextReminder(messages)
@@ -1400,6 +1401,14 @@ func (s *SubAgent) filteredVisibleTools() []tools.Tool {
 }
 
 func (s *SubAgent) filteredVisibleToolsForModel(modelName string, client *llm.Client) []tools.Tool {
+	visible := s.visibleCatalogToolsForModel(modelName, client)
+	if !s.HasDeferredTools() || s.ctxMgr == nil {
+		return visible
+	}
+	return projectDiscoveredTools(visible, s.ctxMgr.ToolDiscoveryNames())
+}
+
+func (s *SubAgent) visibleCatalogToolsForModel(modelName string, client *llm.Client) []tools.Tool {
 	// A zero context is correct for SubAgents: loop mode is a main-agent
 	// workflow, and neither done nor compact_context is ever registered here.
 	visibleTools := visibleLLMTools(s.tools, s.currentRuleset(), isSubAgentInternalTool, toolPermissionContext{})

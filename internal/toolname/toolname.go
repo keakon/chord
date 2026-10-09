@@ -17,6 +17,7 @@ const (
 	Glob           = "glob"
 	WebFetch       = "web_fetch"
 	WebSearch      = "web_search"
+	ToolSearch     = "tool_search"
 	Shell          = "shell"
 	JobOutput      = "job_output"
 	JobList        = "job_list"

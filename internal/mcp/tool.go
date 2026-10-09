@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -31,6 +32,26 @@ func (t *MCPTool) Name() string               { return t.registeredName }
 func (t *MCPTool) Description() string        { return t.description }
 func (t *MCPTool) Parameters() map[string]any { return t.schema }
 func (t *MCPTool) MCPServerName() string      { return t.serverName }
+
+func (t *MCPTool) IsDeferred() bool {
+	if t == nil || t.handle == nil || t.handle.mgr == nil {
+		return false
+	}
+	m := t.handle.mgr
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.deferred[t.serverName]
+}
+
+func (t *MCPTool) DiscoveryStatus() string {
+	if t.handle != nil && t.handle.catalog != nil && !t.handle.catalog.DesiredEnabled(t.serverName) {
+		return tools.DiscoveryDisabled
+	}
+	if !t.IsAvailable() {
+		return tools.DiscoveryUnavailable
+	}
+	return message.ToolDiscoveryLoaded
+}
 
 // IsManual reports whether the tool belongs to a manual server, i.e. one that
 // can be enabled/disabled at runtime. Manual-server tools are mounted through

@@ -13,7 +13,10 @@ func visibleLLMTools(registry *toolpkg.Registry, ruleset permission.Ruleset, kee
 	if registry == nil {
 		return nil
 	}
-	allTools := registry.ListTools()
+	return filterLLMToolVisibility(registry.ListTools(), ruleset, keepInternal, pctx)
+}
+
+func filterLLMToolVisibility(allTools []toolpkg.Tool, ruleset permission.Ruleset, keepInternal func(string) bool, pctx toolPermissionContext) []toolpkg.Tool {
 	if len(allTools) == 0 {
 		return nil
 	}
@@ -116,6 +119,14 @@ func isMainAgentReservedTool(toolName string) bool {
 }
 
 func (a *MainAgent) mainVisibleLLMTools() []toolpkg.Tool {
+	visible := a.mainVisibleCatalogTools()
+	if !a.HasDeferredTools() || a.ctxMgr == nil {
+		return visible
+	}
+	return projectDiscoveredTools(visible, a.ctxMgr.ToolDiscoveryNames())
+}
+
+func (a *MainAgent) mainVisibleCatalogTools() []toolpkg.Tool {
 	if a == nil {
 		return nil
 	}

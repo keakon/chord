@@ -285,6 +285,7 @@ type MCPServerConfig struct {
 	Headers      map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`             // extra HTTP headers (for HTTP transport); values starting with $ are expanded from the environment
 	AllowedTools []string          `json:"allowed_tools,omitempty" yaml:"allowed_tools,omitempty"` // optional remote MCP tool allowlist
 	Manual       bool              `json:"manual,omitempty" yaml:"manual,omitempty"`               // when true, do not auto-start; must be enabled via /mcp or shortcut
+	Deferred     bool              `json:"deferred,omitempty" yaml:"deferred,omitempty"`           // expose schemas only after tool_search; connection/enable intent is unchanged
 }
 
 // MCPConfig holds MCP server configurations keyed by server name.

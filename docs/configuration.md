@@ -1331,6 +1331,45 @@ Calls a model issues in one response are scheduled concurrently when their decla
 
 Auto-start MCP servers still connect asynchronously after the TUI starts, but **the first LLM request waits** until each auto-start server has either connected successfully or reached a terminal failure state. This avoids tool-surface inconsistency between the agent and the model.
 
+### Load MCP definitions on demand
+
+Set `deferred: true` on an MCP server to connect normally but expose its individual
+tool schemas only after the model calls `tool_search`:
+
+```yaml
+mcp:
+  records:
+    url: https://example.invalid/mcp
+    deferred: true
+```
+
+`tool_search` is exposed only when the current agent has at least one available,
+permission-visible deferred tool. It stays hidden when there are no MCP tools,
+all tools are eager, or all deferred tools are disabled, disconnected, or denied.
+
+`tool_search` accepts a natural-language `query` or exact `tool_names`, loads at
+most five definitions, and reports loaded, not found, permission denied,
+disabled, unavailable, or budget exceeded. It never executes the discovered
+tools. `manual: true` still requires `/mcp enable`; discovery does not connect or
+enable servers. A never-connected server has no known tool schemas to search.
+
+Each Agent derives its loaded set from its own saved discovery results. Requests
+use current schemas while preserving historical snapshots. Loaded tools are not
+automatically evicted because of context size, model-pool changes, or later loads.
+Context pressure uses the existing model-pool fallback and compaction mechanisms.
+Load a definition again by name if compaction removes its discovery record.
+Disabling tools or revoking permissions still takes effect, and execution still
+checks permissions.
+
+Each discovery returns at most five definitions, 4,096 estimated schema tokens,
+and 12,000 schema bytes. Candidates exceeding these fixed result limits return
+`budget_exceeded` without affecting already loaded tools or model requests.
+
+Deferred servers use ordinary function calling with top-level definitions on
+all protocols. This mode does not use Claude `tool_reference`, OpenAI native
+tool search, or dynamic MCP declaration anchors; definition changes may break
+prefix-cache reuse.
+
 ## Agent config
 
 Built-in roles include `builder` and `planner`. Both are main-mode, so

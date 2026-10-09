@@ -33,6 +33,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- MCP connections require protocol `2025-06-18`; servers that negotiate another version are rejected. Update older servers before connecting.
+
 - Questions allow independent work before waiting for answers. TUI questions open automatically and share a priority queue with permission, completion, and Handoff dialogs. `Esc` declines the question; there is no hide-and-reopen state. Required decisions never time out; `question_auto_select_timeout` enables explicit single-choice defaults and permanently stops on interaction. Defaults are not authorization; `question_timeout` applies only to optional questions.
 
 - Added `/memory` for searching, reading, copying and removing project memory, with selected or full organization previews and persistent undo for the latest manual change.

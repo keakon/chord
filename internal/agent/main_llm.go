@@ -149,6 +149,9 @@ func (a *MainAgent) prepareBusyResources(ctx context.Context) error {
 // switch commits, because running it again after the old session is frozen can
 // turn a recoverable preparation error into a half-installed new session.
 func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) error {
+	if a.HasDeferredTools() {
+		a.markRuntimeSurfaceDirty()
+	}
 	if a.sessionBuilt.Load() {
 		// Common per-request path: the surface is already built. A pending
 		// Memory commit is deliberately not applied here: it would rewrite the

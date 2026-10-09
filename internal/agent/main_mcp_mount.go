@@ -29,6 +29,11 @@ func (m mcpToolMountMode) cacheFriendly() bool {
 // top-level tools array by the LLM layer, so pool composition never forces the
 // selected target to rebuild its surface.
 func (a *MainAgent) mcpToolMountMode() mcpToolMountMode {
+	// Deferred schemas use the ordinary top-level contract. Rebuild the
+	// request projection when loads, availability, or schema versions change.
+	if a.HasDeferredTools() {
+		return mcpMountFullInjection
+	}
 	if a.mcpMountFullInjectionOnly.Load() {
 		return mcpMountFullInjection
 	}

@@ -245,6 +245,7 @@ type ServerConfig struct {
 	Headers      map[string]string // extra HTTP headers (for HTTP transport); values starting with $ are expanded from the environment
 	AllowedTools []string          // optional allowlist of remote MCP tool names
 	Manual       bool              // when true, do not auto-connect on startup
+	Deferred     bool              // load individual schemas through tool_search
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +276,7 @@ var (
 
 // Manager manages connections to multiple MCP servers.
 type Manager struct {
+	deferred         map[string]bool
 	mu               sync.RWMutex
 	clients          map[string]*Client
 	toolDefs         map[string][]MCPToolDef
@@ -289,6 +291,7 @@ type Manager struct {
 func NewPendingManagerWithClientInfo(configs []ServerConfig, info ClientInfo) *Manager {
 	info = normalizeClientInfo(info)
 	m := &Manager{
+		deferred:     make(map[string]bool),
 		clients:      make(map[string]*Client),
 		toolDefs:     make(map[string][]MCPToolDef),
 		allowedTools: makeAllowedToolsByServer(configs),
@@ -304,6 +307,7 @@ func NewPendingManagerWithClientInfo(configs []ServerConfig, info ClientInfo) *M
 	byName := make(map[string]ServerEndpointStatus)
 	for _, cfg := range configs {
 		name := serverConfigName(cfg)
+		m.deferred[name] = cfg.Deferred
 		if cfg.Command == "" && cfg.URL == "" {
 			byName[name] = ServerEndpointStatus{
 				Name:        name,
@@ -370,6 +374,10 @@ func (m *Manager) ConnectAll(ctx context.Context, configs []ServerConfig) {
 
 	m.mu.Lock()
 	m.allowedTools = makeAllowedToolsByServer(configs)
+	m.deferred = make(map[string]bool, len(configs))
+	for _, cfg := range configs {
+		m.deferred[serverConfigName(cfg)] = cfg.Deferred
+	}
 	m.mu.Unlock()
 
 	for _, cfg := range configs {
@@ -446,6 +454,10 @@ func (m *Manager) ConnectOne(ctx context.Context, cfg ServerConfig) error {
 	name := serverConfigName(cfg)
 
 	m.mu.Lock()
+	if m.deferred == nil {
+		m.deferred = make(map[string]bool)
+	}
+	m.deferred[name] = cfg.Deferred
 	if m.allowedTools == nil {
 		m.allowedTools = make(map[string]map[string]struct{})
 	}

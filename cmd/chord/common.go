@@ -826,6 +826,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	// configs are loaded, only when subagent-mode agents are available.
 	ac.Registry.Register(tools.NewTodoWriteTool(ac.MainAgent))
 	ac.Registry.Register(tools.NewSkillTool(ac.MainAgent))
+	ac.Registry.Register(tools.NewToolSearchTool(ac.MainAgent))
 	viewImageTool := tools.NewViewImageTool(ac.MainAgent)
 	viewImageTool.BaseDir = ac.WorkDir
 	ac.Registry.Register(viewImageTool)

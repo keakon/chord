@@ -153,6 +153,12 @@ The runtime, not the model, is the source of truth for delegation state. A worke
 
 ## MCP tools
 
+| Tool | What it does |
+| --- | --- |
+| `tool_search` | Find and load MCP tool definitions by a natural-language `query` or exact `tool_names`. Returns up to five definitions without executing them. Available when at least one deferred MCP tool is available and visible under the current agent's permissions. |
+
+Set `deferred: true` on an MCP server to load its tools through `tool_search` instead of including all definitions in every request. This does not enable a disabled server or change tool permissions. See [Configuration: load MCP definitions on demand](./configuration.md#load-mcp-definitions-on-demand).
+
 Tools exposed by configured MCP servers are registered as `mcp_<server>_<tool>` (for example `mcp_search_web_search_exa`) and can be referenced in permission rules by that full name. Use `allowed_tools` in the MCP server config to limit which remote tools are registered at all; see [Configuration: MCP](./configuration.md#mcp). Calls a model issues in one response can run concurrently when their resources do not conflict, including multiple calls to one server. Each result is returned separately so the model can inspect a failure and decide whether a retry is safe.
 
 Tool discovery follows all pages before updating the directory. A discovery is limited to 1,000 pages, 10,000 tools, and 32 MiB of combined result JSON. A repeated cursor, duplicate remote tool name, invalid page, or exceeded limit fails discovery; an earlier complete directory is kept when available. Check the server's list response and Chord's log if tools are missing.

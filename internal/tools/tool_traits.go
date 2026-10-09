@@ -14,6 +14,7 @@ const (
 	NameGlob           = toolname.Glob
 	NameWebFetch       = toolname.WebFetch
 	NameWebSearch      = toolname.WebSearch
+	NameToolSearch     = toolname.ToolSearch
 	NameShell          = toolname.Shell
 	NameJobOutput      = toolname.JobOutput
 	NameJobList        = toolname.JobList
