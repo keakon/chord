@@ -424,6 +424,7 @@ func (a *MainAgent) swapLLMClientWithRefLocked(newClient *llm.Client, modelName 
 	a.llmMu.Lock()
 	oldClient := a.llmClient
 	oldRunningRef := a.runningModelRef
+	a.ensureLLMSessionID(newClient)
 	a.llmClient = newClient
 	a.forgetHostedCaller("")
 	a.modelName = modelName
@@ -588,9 +589,6 @@ func (a *MainAgent) installPreparedMainModel(prepared *preparedMainModel) {
 	}
 	a.modelUpdateMu.Lock()
 	defer a.modelUpdateMu.Unlock()
-	if sid := strings.TrimSpace(filepath.Base(a.sessionDir)); sid != "" && sid != "." {
-		prepared.client.SetSessionID(sid)
-	}
 	a.swapLLMClientWithRefLocked(prepared.client, prepared.modelName, prepared.contextLimit, prepared.selectedRef)
 	a.mainModelPolicyDirty.Store(false)
 	if a.modelPoolPolicy != nil {

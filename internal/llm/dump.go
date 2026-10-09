@@ -23,18 +23,19 @@ import (
 // LLMDump captures a complete LLM request/response cycle for debugging.
 // Each dump is written as a JSON file to the configured dump directory.
 type LLMDump struct {
-	Timestamp   string          `json:"timestamp"`
-	Provider    string          `json:"provider"`
-	Model       string          `json:"model"`
-	RequestBody json.RawMessage `json:"request_body"`
-	HTTPStatus  int             `json:"http_status,omitempty"`
-	HTTPHeaders http.Header     `json:"http_headers,omitempty"`
-	HTTPBody    string          `json:"http_body,omitempty"`
-	SSEChunks   []string        `json:"sse_chunks"`
-	Response    *DumpResponse   `json:"response,omitempty"`
-	Recovery    *DumpRecovery   `json:"recovery,omitempty"`
-	Error       string          `json:"error,omitempty"`
-	DurationMS  int64           `json:"duration_ms"`
+	Timestamp      string          `json:"timestamp"`
+	Provider       string          `json:"provider"`
+	Model          string          `json:"model"`
+	RequestBody    json.RawMessage `json:"request_body"`
+	RequestHeaders http.Header     `json:"request_headers,omitempty"`
+	HTTPStatus     int             `json:"http_status,omitempty"`
+	HTTPHeaders    http.Header     `json:"http_headers,omitempty"`
+	HTTPBody       string          `json:"http_body,omitempty"`
+	SSEChunks      []string        `json:"sse_chunks"`
+	Response       *DumpResponse   `json:"response,omitempty"`
+	Recovery       *DumpRecovery   `json:"recovery,omitempty"`
+	Error          string          `json:"error,omitempty"`
+	DurationMS     int64           `json:"duration_ms"`
 }
 
 // DumpRecovery captures structured recovery metadata useful for diagnosing
@@ -137,6 +138,7 @@ func (w *DumpWriter) Write(dump *LLMDump) error {
 	}
 	dumpToWrite := *dump
 	dumpToWrite.RequestBody = requestBody
+	dumpToWrite.RequestHeaders = dumpRequestHeaders(dump.RequestHeaders)
 
 	w.mu.Lock()
 	dir := w.dir

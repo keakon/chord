@@ -78,9 +78,15 @@ curl -I https://api.openai.com/v1
 
 ### OpenAI 兼容网关的 400 与超时
 
-遵循官方 API 错误语义的端点请设置 `trust_http_400: true`，Chord 会把 HTTP 400 视为终止性请求错误。`Retry-After` 头始终作为 key 冷却时长生效，并优先于任何已配置的重试节奏；`retry_after_max_s` 限制最长采纳的等待时间（第三方网关默认 60 秒，`preset: codex` 默认 86400 秒）。聚合或代理网关可能把上游故障包装成 HTTP 400；这类端点可设置 `trust_http_400: false` 或省略该字段，让未知 400 进入正常的重试和备用模型流程。
+遵循官方 API 错误语义的端点请设置 `trust_http_400: true`，Chord 会把 HTTP 400 视为终止性请求错误。对于可重试的错误，`Retry-After` 头作为 key 冷却时长生效，并优先于任何已配置的重试节奏；`retry_after_max_s` 限制最长采纳的等待时间（第三方网关默认 60 秒，`preset: codex` 默认 86400 秒）。聚合或代理网关可能把上游故障包装成 HTTP 400；这类端点可设置 `trust_http_400: false` 或省略该字段，让未知 400 进入正常的重试和备用模型流程。
 
 如果请求长时间停在 `connecting` 后重试，请直接测试端点、检查代理设置并查看错误面板。Chord 会限制连接等待时间，避免单个不可用密钥或网关无限阻塞。
+
+### Responses 客户端契约错误
+
+`400 invalid_responses_request` 或 `invalid codex request` 表示端点拒绝了 Responses 客户端契约。Chord 不会在当前模型上轮换密钥或重放历史，但仍可能尝试已配置的其他模型。请确认 provider URL 支持 Responses，且 `compat.responses.send_prompt_cache_key` 已开启。检查会话 LLM dump 的 `request_body` 是否包含 `prompt_cache_key` 和 `client_metadata`，以及请求覆盖配置是否删除或替换了这些字段或会话请求头。
+
+HTTP LLM dump 的 `request_headers` 保存部分协议及会话请求头，内容反映请求覆盖配置生效后的值。凭据值会被隐藏，未识别的请求头不会保存。请求体看起来正确时，可将这些请求头与端点要求对照检查。
 
 ### DeepSeek / OpenAI 兼容 thinking 模式 400
 

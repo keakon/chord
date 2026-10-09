@@ -190,6 +190,26 @@ func TestShouldFallback400RequestShapeError(t *testing.T) {
 	}
 }
 
+// A relay that validates the Responses client contract rejects the body before
+// routing it anywhere, so the request never reaches a channel. The body is
+// ours: rotating the API key on the same model can never change the verdict,
+// and it used to burn every key in the pool and cool them all down.
+func TestRelayResponsesContract400StopsKeyRotation(t *testing.T) {
+	t.Parallel()
+	cases := []*APIError{
+		{StatusCode: 400, Code: invalidResponsesRequestCode, Message: "invalid codex request (request id: req-1)"},
+		{StatusCode: 400, Type: "new_api_error", Message: "invalid codex request (request id: req-1)"},
+	}
+	for _, err := range cases {
+		if !hasExplicitRequestOrParamSignal(err) {
+			t.Fatalf("relay responses-contract 400 should classify as a request-shape error: %+v", err)
+		}
+		if !hasTerminalNonRetriable400Signal(err) {
+			t.Fatalf("relay responses-contract 400 should stop instead of rotating keys: %+v", err)
+		}
+	}
+}
+
 func TestReasoningReplay400FallsBackToAnotherModel(t *testing.T) {
 	t.Parallel()
 	err := &APIError{StatusCode: 400, Message: "The `reasoning_content` in the thinking mode must be passed back to the API."}

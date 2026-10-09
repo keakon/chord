@@ -102,6 +102,9 @@ type APIError struct {
 }
 
 func (e *APIError) Error() string {
+	if e.StatusCode == 400 && hasResponsesClientContractSignal(e) {
+		return fmt.Sprintf("API error %d: %s; check the Responses endpoint and request overrides for prompt_cache_key, client_metadata, and session headers", e.StatusCode, e.Message)
+	}
 	if e.StatusCode <= 0 {
 		if e.Origin != "" {
 			return fmt.Sprintf("API %s error: %s", e.Origin, e.Message)
@@ -425,6 +428,9 @@ func isReasoningReplayRejection(err error) bool {
 func isAmbiguousReplayRecoveryCandidate(err error, provider *ProviderConfig, report modelcompat.NormalizeReport) bool {
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr == nil || report.ReplaySensitiveItems == 0 {
+		return false
+	}
+	if apiErr.StatusCode == 400 && hasResponsesClientContractSignal(apiErr) {
 		return false
 	}
 	if hasTransientProviderCapacitySignal(apiErr) {
@@ -881,6 +887,7 @@ func isRequestOrParamError(apiErr *APIError) bool {
 		"invalid_parameter",
 		"invalid_argument",
 		"missing_required_parameter",
+		invalidResponsesRequestCode,
 	)
 }
 
@@ -899,6 +906,9 @@ func hasExplicitRequestOrParamSignal(apiErr *APIError) bool {
 		"invalid_argument",
 		"missing_required_parameter",
 	) {
+		return true
+	}
+	if hasResponsesClientContractSignal(apiErr) {
 		return true
 	}
 	// Keep the text markers intentionally narrow. Compatible gateways often wrap

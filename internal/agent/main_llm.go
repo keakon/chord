@@ -601,6 +601,11 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	// old client with new model name). All subsequent reads in this
 	// function use the snapshot variables.
 	llmClient, modelName, selectedRef, prevRunningRef := a.llmSnapshot()
+	// Re-apply the session identity on the snapshot: a client installed before
+	// the session directory was final (or by a path that predates it) would
+	// otherwise send its first request without the Responses prompt-cache key
+	// and client metadata some relays require.
+	a.ensureLLMSessionID(llmClient)
 	if filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient); dropped.any() {
 		log.Warnf("dropping unsupported binary parts before LLM request kinds=%s", dropped.summary())
 		if a.unsupportedPartToast.first(modelName, toastCategoryInput, dropped.summary()) {

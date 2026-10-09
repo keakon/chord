@@ -149,6 +149,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Responses requests carry session identity from the first request and after model changes, avoiding HTTP 400 from gateways that require client metadata. Explicit client-contract errors stop retries on the current model without rotating or cooling keys or replaying history, and identify the request settings to check.
+
 - Resuming an interrupted conversation no longer drops the session content when saving the restored history fails: the original content stays in place, and the failure is reported.
 
 - Automatic compaction no longer fires immediately for models whose maximum output spans their whole context window, and fractional thresholds trigger at their exact token boundary. Compaction and context percentages use a fixed model baseline while request-size safety checks account for the planned output.

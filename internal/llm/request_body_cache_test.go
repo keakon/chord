@@ -15,28 +15,34 @@ func TestRequestBodyIdentityDistinguishesResliceAndRebuild(t *testing.T) {
 	msgs := []message.Message{{Role: message.RoleUser, Content: "a"}, {Role: message.RoleUser, Content: "b"}}
 	tools := []message.ToolDefinition{{Name: "read"}}
 
-	base := requestBodyIdentityFor("sys", msgs, tools, 1024)
-	if base != requestBodyIdentityFor("sys", msgs, tools, 1024) {
+	base := requestBodyIdentityFor("sys", msgs, tools, 1024, "sid")
+	if base != requestBodyIdentityFor("sys", msgs, tools, 1024, "sid") {
 		t.Fatal("identity differs for the same slices, want a hit")
 	}
 
-	if base == requestBodyIdentityFor("sys", msgs[:1], tools, 1024) {
+	if base == requestBodyIdentityFor("sys", msgs[:1], tools, 1024, "sid") {
 		t.Fatal("a resliced prefix matched; the length must be compared alongside the pointer")
 	}
 
 	rebuilt := append([]message.Message(nil), msgs...)
-	if base == requestBodyIdentityFor("sys", rebuilt, tools, 1024) {
+	if base == requestBodyIdentityFor("sys", rebuilt, tools, 1024, "sid") {
 		t.Fatal("a rebuilt slice with equal contents matched; identity must be the backing array, not the values")
 	}
 
-	if base == requestBodyIdentityFor("other", msgs, tools, 1024) {
+	if base == requestBodyIdentityFor("other", msgs, tools, 1024, "sid") {
 		t.Fatal("a different system prompt matched")
 	}
-	if base == requestBodyIdentityFor("sys", msgs, tools, 2048) {
+	if base == requestBodyIdentityFor("sys", msgs, tools, 2048, "sid") {
 		t.Fatal("a different max_tokens matched")
 	}
-	if base == requestBodyIdentityFor("sys", msgs, nil, 1024) {
+	if base == requestBodyIdentityFor("sys", msgs, nil, 1024, "sid") {
 		t.Fatal("dropping the tool surface matched")
+	}
+	// The session key lands inside the body (Responses prompt_cache_key /
+	// client_metadata), so a surface reused after the identity becomes known
+	// must rebuild instead of serving the body built before it was known.
+	if base == requestBodyIdentityFor("sys", msgs, tools, 1024, "") {
+		t.Fatal("a missing session key matched a body built with one")
 	}
 }
 
@@ -44,7 +50,7 @@ func TestRequestBodyIdentityDistinguishesResliceAndRebuild(t *testing.T) {
 // still compare equal rather than depending on whether the caller passed nil
 // or an allocated-but-empty slice.
 func TestRequestBodyIdentityTreatsEmptySlicesAlike(t *testing.T) {
-	if requestBodyIdentityFor("sys", nil, nil, 1024) != requestBodyIdentityFor("sys", []message.Message{}, []message.ToolDefinition{}, 1024) {
+	if requestBodyIdentityFor("sys", nil, nil, 1024, "") != requestBodyIdentityFor("sys", []message.Message{}, []message.ToolDefinition{}, 1024, "") {
 		t.Fatal("nil and empty surfaces produced different identities")
 	}
 }

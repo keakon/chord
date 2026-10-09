@@ -31,30 +31,38 @@ func sliceID[T any](s []T) *T {
 
 // requestBodyIdentity captures the inputs a provider's marshaled body derives
 // from, comparable by value. The message and tool slices are identified by
-// sliceID. Request tuning is deliberately not part of the identity, which is
-// sound only while one (messages, tools) slice is converted under a single
+// sliceID. Most request tuning is deliberately not part of the identity, which
+// is sound only while one (messages, tools) slice is converted under a single
 // model and tuning: the pool's key-attempt loop reuses one target's slice while
 // rotating only the auth key, and modelcompat.NormalizeForTarget builds a fresh
 // slice per target. A future path that re-converts the same slice under a
 // different model or tuning would reuse the wrong body, so it must rebuild the
 // slice (or extend this identity) instead.
+//
+// sessionKey is the exception: it is tuning that lands inside the body itself
+// (the Responses prompt_cache_key / client_metadata pair), and it can change
+// between two requests that share a messages slice — the identity a client only
+// learns after a swap would otherwise keep serving a body built before it was
+// known.
 type requestBodyIdentity struct {
-	system    string
-	maxTokens int
-	msgs      *message.Message
-	msgsLen   int
-	tools     *message.ToolDefinition
-	toolsLen  int
+	system     string
+	maxTokens  int
+	sessionKey string
+	msgs       *message.Message
+	msgsLen    int
+	tools      *message.ToolDefinition
+	toolsLen   int
 }
 
-func requestBodyIdentityFor(systemPrompt string, messages []message.Message, tools []message.ToolDefinition, maxTokens int) requestBodyIdentity {
+func requestBodyIdentityFor(systemPrompt string, messages []message.Message, tools []message.ToolDefinition, maxTokens int, sessionKey string) requestBodyIdentity {
 	return requestBodyIdentity{
-		system:    systemPrompt,
-		maxTokens: maxTokens,
-		msgs:      sliceID(messages),
-		msgsLen:   len(messages),
-		tools:     sliceID(tools),
-		toolsLen:  len(tools),
+		system:     systemPrompt,
+		maxTokens:  maxTokens,
+		sessionKey: sessionKey,
+		msgs:       sliceID(messages),
+		msgsLen:    len(messages),
+		tools:      sliceID(tools),
+		toolsLen:   len(tools),
 	}
 }
 

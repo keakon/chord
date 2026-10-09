@@ -245,7 +245,7 @@ func (g *GeminiProvider) CompleteStream(
 	// tuning) plus static provider config — not on the API key. Caching it per
 	// target lets key rotation resend the identical bytes instead of
 	// re-converting and re-marshaling the full history on every attempt.
-	bodyBytes, err := g.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), func() ([]byte, error) {
+	bodyBytes, err := g.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, strings.TrimSpace(tuning.SessionKey)), func() ([]byte, error) {
 		contents := convertMessagesToGemini(messages)
 		if gemini3Target(g.provider, model) {
 			ensureGeminiActiveLoopSignatures(contents)
@@ -313,6 +313,11 @@ func (g *GeminiProvider) CompleteStream(
 	req, _ = compressRequestBody(req, bodyBytes, g.provider.RequestCompression())
 	applyRequestHeaderOverrides(req.Header, overrides)
 
+	var requestHeaders http.Header
+	if dumpWriter != nil {
+		requestHeaders = dumpRequestHeaders(req.Header)
+	}
+
 	log.Debugf("gemini request model=%v max_tokens=%v messages=%v tools=%v", model, maxTokens, len(messages), len(tools))
 
 	start := time.Now()
@@ -346,7 +351,7 @@ func (g *GeminiProvider) CompleteStream(
 			statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
-				dump := &LLMDump{Timestamp: start.Format(time.RFC3339Nano), Provider: "gemini", Model: model, RequestBody: dumpRequestBody, HTTPStatus: statusCode, HTTPHeaders: headers, HTTPBody: bodyCopy, Error: apiErr.Error(), DurationMS: time.Since(start).Milliseconds()}
+				dump := &LLMDump{Timestamp: start.Format(time.RFC3339Nano), Provider: "gemini", Model: model, RequestBody: dumpRequestBody, RequestHeaders: requestHeaders, HTTPStatus: statusCode, HTTPHeaders: headers, HTTPBody: bodyCopy, Error: apiErr.Error(), DurationMS: time.Since(start).Milliseconds()}
 				if wErr := dumpWriter.Write(dump); wErr != nil {
 					log.Warnf("failed to write LLM dump error=%v", wErr)
 				}
@@ -367,7 +372,7 @@ func (g *GeminiProvider) CompleteStream(
 	if dumpWriter != nil {
 		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
-			dump := &LLMDump{Timestamp: start.Format(time.RFC3339Nano), Provider: "gemini", Model: model, RequestBody: dumpRequestBody, HTTPStatus: statusCode, HTTPHeaders: headers, SSEChunks: collector.Chunks(), Response: DumpResponseFromResponse(resp), DurationMS: time.Since(start).Milliseconds()}
+			dump := &LLMDump{Timestamp: start.Format(time.RFC3339Nano), Provider: "gemini", Model: model, RequestBody: dumpRequestBody, RequestHeaders: requestHeaders, HTTPStatus: statusCode, HTTPHeaders: headers, SSEChunks: collector.Chunks(), Response: DumpResponseFromResponse(resp), DurationMS: time.Since(start).Milliseconds()}
 			if parseErr != nil {
 				dump.Error = parseErr.Error()
 			}

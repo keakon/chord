@@ -301,7 +301,7 @@ func (a *AnthropicProvider) CompleteStream(
 		// plain body built from the same (system, messages, tools, maxTokens).
 		bodyBytes, err = buildBody()
 	} else {
-		bodyBytes, err = a.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), buildBody)
+		bodyBytes, err = a.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, strings.TrimSpace(tuning.SessionKey)), buildBody)
 	}
 	if err != nil {
 		return nil, err
@@ -336,6 +336,11 @@ func (a *AnthropicProvider) CompleteStream(
 	applyRequestHeaderOverrides(req.Header, overrides)
 	if err := applyHostedToolHeaders(req.Header, tuning.HostedTool); err != nil {
 		return nil, err
+	}
+
+	var requestHeaders http.Header
+	if dumpWriter != nil {
+		requestHeaders = dumpRequestHeaders(req.Header)
 	}
 
 	// Send the request.
@@ -378,15 +383,16 @@ func (a *AnthropicProvider) CompleteStream(
 			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
 				dump := &LLMDump{
-					Timestamp:   start.Format(time.RFC3339Nano),
-					Provider:    "anthropic",
-					Model:       model,
-					RequestBody: dumpRequestBody,
-					HTTPStatus:  statusCode,
-					HTTPHeaders: headers,
-					HTTPBody:    bodyCopy,
-					Error:       apiErr.Error(),
-					DurationMS:  time.Since(start).Milliseconds(),
+					Timestamp:      start.Format(time.RFC3339Nano),
+					Provider:       "anthropic",
+					Model:          model,
+					RequestBody:    dumpRequestBody,
+					RequestHeaders: requestHeaders,
+					HTTPStatus:     statusCode,
+					HTTPHeaders:    headers,
+					HTTPBody:       bodyCopy,
+					Error:          apiErr.Error(),
+					DurationMS:     time.Since(start).Milliseconds(),
 				}
 				if wErr := dumpWriter.Write(dump); wErr != nil {
 					log.Warnf("failed to write LLM dump error=%v", wErr)
@@ -411,15 +417,16 @@ func (a *AnthropicProvider) CompleteStream(
 		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
 			dump := &LLMDump{
-				Timestamp:   start.Format(time.RFC3339Nano),
-				Provider:    "anthropic",
-				Model:       model,
-				RequestBody: dumpRequestBody,
-				HTTPStatus:  statusCode,
-				HTTPHeaders: headers,
-				SSEChunks:   collector.Chunks(),
-				Response:    DumpResponseFromResponse(resp),
-				DurationMS:  time.Since(start).Milliseconds(),
+				Timestamp:      start.Format(time.RFC3339Nano),
+				Provider:       "anthropic",
+				Model:          model,
+				RequestBody:    dumpRequestBody,
+				RequestHeaders: requestHeaders,
+				HTTPStatus:     statusCode,
+				HTTPHeaders:    headers,
+				SSEChunks:      collector.Chunks(),
+				Response:       DumpResponseFromResponse(resp),
+				DurationMS:     time.Since(start).Milliseconds(),
 			}
 			if parseErr != nil {
 				dump.Error = parseErr.Error()

@@ -78,9 +78,15 @@ curl -I https://api.openai.com/v1
 
 ### OpenAI-compatible 400s and timeouts
 
-Set `trust_http_400: true` for endpoints that follow official API error semantics: Chord then treats HTTP 400 as a terminal request error. The `Retry-After` header always applies as the key cooldown hint, ahead of any configured retry pacing; `retry_after_max_s` bounds the longest honored wait (default 60 seconds for third-party gateways, 86400 for `preset: codex`). For aggregating or proxy gateways that may wrap upstream failures as HTTP 400, set `trust_http_400: false` or omit the field so unknown 400s can use the normal retry and fallback path.
+Set `trust_http_400: true` for endpoints that follow official API error semantics: Chord then treats HTTP 400 as a terminal request error. For retryable errors, the `Retry-After` header applies as the key cooldown hint, ahead of any configured retry pacing; `retry_after_max_s` bounds the longest honored wait (default 60 seconds for third-party gateways, 86400 for `preset: codex`). For aggregating or proxy gateways that may wrap upstream failures as HTTP 400, set `trust_http_400: false` or omit the field so unknown 400s can use the normal retry and fallback path.
 
 If requests remain in `connecting` and then retry, test the endpoint directly, check proxy settings, and inspect the error panel. Chord applies a connection timeout so one unavailable key or gateway does not wait indefinitely.
+
+### Responses client-contract errors
+
+A `400 invalid_responses_request` or `invalid codex request` means the endpoint rejected the Responses client contract. Chord does not rotate keys or replay history on the current model for this error; another configured model may still be tried. Check that the provider URL supports Responses and that `compat.responses.send_prompt_cache_key` is enabled. Inspect `request_body` in the session LLM dump for `prompt_cache_key` and `client_metadata`, and check whether request overrides removed or replaced these fields or session headers.
+
+HTTP LLM dumps include `request_headers` for selected protocol and session headers after request overrides. Credential values are redacted and unrecognized headers are omitted. Compare these headers with the endpoint's requirements when the request body looks correct.
 
 ### DeepSeek / OpenAI-compatible thinking-mode 400s
 

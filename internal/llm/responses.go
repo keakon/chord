@@ -612,7 +612,7 @@ func (r *ResponsesProvider) CompleteStream(
 		// plain body built from the same (system, messages, tools, maxTokens).
 		bodyBytes, builtAny, err = buildResponsesRequest()
 	} else {
-		bodyBytes, builtAny, err = r.bodyReuse.bodyWithExtra(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens), buildResponsesRequest)
+		bodyBytes, builtAny, err = r.bodyReuse.bodyWithExtra(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, sessionKey), buildResponsesRequest)
 	}
 	if err != nil {
 		return nil, err
@@ -819,6 +819,11 @@ func (r *ResponsesProvider) sendAndParse(
 		return nil, 0, err
 	}
 
+	var requestHeaders http.Header
+	if dumpWriter != nil {
+		requestHeaders = dumpRequestHeaders(req.Header)
+	}
+
 	// Send request.
 	start := time.Now()
 	if r.proxyScheme != "" {
@@ -874,15 +879,16 @@ func (r *ResponsesProvider) sendAndParse(
 			bodyCopy := string(append([]byte(nil), errBody...))
 			go func() {
 				dump := &LLMDump{
-					Timestamp:   start.Format(time.RFC3339Nano),
-					Provider:    "responses",
-					Model:       model,
-					RequestBody: dumpRequestBody,
-					HTTPStatus:  statusCode,
-					HTTPHeaders: headers,
-					HTTPBody:    bodyCopy,
-					Error:       apiErr.Error(),
-					DurationMS:  time.Since(start).Milliseconds(),
+					Timestamp:      start.Format(time.RFC3339Nano),
+					Provider:       "responses",
+					Model:          model,
+					RequestBody:    dumpRequestBody,
+					RequestHeaders: requestHeaders,
+					HTTPStatus:     statusCode,
+					HTTPHeaders:    headers,
+					HTTPBody:       bodyCopy,
+					Error:          apiErr.Error(),
+					DurationMS:     time.Since(start).Milliseconds(),
 				}
 				if IsContextLengthExceeded(apiErr) {
 					dump.Recovery = &DumpRecovery{
@@ -950,15 +956,16 @@ func (r *ResponsesProvider) sendAndParse(
 		statusCode, headers := dumpHTTPResponseMetadata(httpResp)
 		go func() {
 			dump := &LLMDump{
-				Timestamp:   start.Format(time.RFC3339Nano),
-				Provider:    "responses",
-				Model:       model,
-				RequestBody: dumpRequestBody,
-				HTTPStatus:  statusCode,
-				HTTPHeaders: headers,
-				SSEChunks:   collector.Chunks(),
-				Response:    DumpResponseFromResponse(resp),
-				DurationMS:  time.Since(start).Milliseconds(),
+				Timestamp:      start.Format(time.RFC3339Nano),
+				Provider:       "responses",
+				Model:          model,
+				RequestBody:    dumpRequestBody,
+				RequestHeaders: requestHeaders,
+				HTTPStatus:     statusCode,
+				HTTPHeaders:    headers,
+				SSEChunks:      collector.Chunks(),
+				Response:       DumpResponseFromResponse(resp),
+				DurationMS:     time.Since(start).Milliseconds(),
 			}
 			if parseErr != nil {
 				dump.Error = parseErr.Error()
