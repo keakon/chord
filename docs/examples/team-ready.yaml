@@ -9,27 +9,31 @@
 # See docs/examples/examples-team*.md for the full multi-file layout.
 
 providers:
+  openai:
+    preset: openai
   anthropic:
-    type: messages
-    api_url: https://api.anthropic.com/v1/messages
+    preset: anthropic
     models:
       claude-opus-5-5:
-        limit:
-          context: 1000000
-          output: 128000
         thinking:
           type: adaptive
-          effort: medium
-          display: summarized
+          effort: high
+      claude-sonnet-5-5:
+        thinking:
+          type: adaptive
+          effort: high
 
 model_pools:
   deep:
     - anthropic/claude-opus-5-5
+  coding:
+    - anthropic/claude-sonnet-5-5
   fast:
-    - anthropic/claude-opus-5-5
+    - openai/gpt-6-luna
 
 context:
   compaction:
     threshold: 0.8
+    model_pool: coding
 desktop_notification: true
 log_level: info

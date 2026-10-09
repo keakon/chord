@@ -1,10 +1,10 @@
 # Choosing models
 
-<!-- description: Decide what to connect to Chord, then split models by role. Recipes and examples show how to wire a flagship after you have chosen one. -->
+<!-- description: Choose concrete models by task difficulty, then assign coordination, implementation, and review roles. Includes four task tiers and team recipes. -->
 
-> Snapshot: October 2026. Plans change; confirm on the vendor's site before you buy or reconfigure.
+> Selection date: October 9, 2026. Candidates are listed in suggested trial order, not as a Chord benchmark ranking. Confirm official model names, prices, and account availability before buying or reconfiguring.
 
-Start here if you still need to choose a channel. Wiring is one command with [`chord config add`](./cli.md#chord-config-add) — the catalog fills in limits, modalities, and reasoning variants; copy-paste provider layouts live in [Examples](./examples/index.md).
+Start with the balanced tier for everyday development and the reliability-first tier for concurrency, permissions, or recovery. Use cheaper models for explicit mechanical work. A single main agent can finish a small task without starting a team. Add models with [`chord config add`](./cli.md#chord-config-add); the catalog supplies limits, modalities, and reasoning variants. Full layouts are in [Examples](./examples/index.md).
 
 ## Will what you already pay for reach Chord?
 
@@ -17,83 +17,102 @@ Chord accepts an API key, or Codex OAuth (`chord auth codex`). A subscription th
 | Claude Pro / Max, SuperGrok, Muse Code, Google AI Pro / Ultra, or another vendor-only coding plan | No |
 | GLM Coding Plan | No (only in the tools and products GLM officially supports) |
 
-## Four ways to decide
+If you already have a supported plan, start with models your account actually exposes. Whether a subscription saves money depends on its quotas, throttling, and your workload. API costs also include retries, review, and rework. With a limited strong-model budget, prioritize decisions that affect the whole task instead of allocating it by role name alone.
 
-### 1. You already subscribe to something
+## Choose a task tier
 
-If the table says Yes, use it. If it says No, leave that app alone and continue with case 2, 3, or 4. On Codex, one plan fills all five roles: orchestrator, explorer, and coder on the cheapest model your account lists; expert and reviewer on the strongest model the plan can sustain. For a cheap plan or an API key, follow case 2.
+These tiers are configuration recommendations. Chord does not switch between them based on task difficulty. Price tiers are not capability tiers, and one model can serve several roles.
 
-### 2. Light use, and you want value
+### Economy: explicit, local, easy to verify
 
-Get a cheap official API key (for example Gemini 3.8 Flash, DeepSeek V4.1 Flash, or GPT-6 Luna), or a cheap plan that exposes a standard endpoint (for example Command Code GOAT or OpenCode Go). Use it for routing, search, most edits, and all five roles. Upgrade expert and reviewer only when hard decisions become common; if the cheap plan does not carry a strong enough model, add a separate official key for them.
+Use this tier to locate files and callers, apply fixed renaming rules, adjust configuration, or add tests against a settled interface.
 
-### 3. Heavy use
+1. GPT-6 Luna: structured extraction, mechanical execution, and dispatch against a settled plan.
+2. DeepSeek V4.1 Flash: repository discovery, repeated reads, and code work with explicit specifications.
+3. Gemini 3.8 Flash: move it first for material containing PDFs, charts, or screenshots.
 
-A flat subscription beats per-token billing when you use it every day. Subscribe to Codex and sign in: orchestrator, explorer, and coder on the cheapest model your account lists; expert and reviewer on the strongest model the plan can sustain.
+A coordinator in this tier needs a settled goal, dependencies, and acceptance criteria. Escalate when it must decompose the requirement again, choose behavior, or resolve design disagreements. Root-cause analysis and security-sensitive decisions are not mechanical work.
 
-### 4. Bill size is not the issue
+### Balanced: everyday development
 
-Give the strongest API models you can get (GPT-6.1 Sol and Claude Opus 5.5 as of this snapshot) to expert and reviewer, and keep GPT-6 Astra and Claude Fable 5.1 for architecture design and for work that is unusually hard or has already failed. Keep a cheap fast model on orchestrator, explorer, and coder; they do not need a flagship.
+Use this tier for ordinary features, multi-file edits, reproducible bugs, and refactoring whose interfaces are mostly settled.
 
-## Which model goes to which role?
+1. GPT-6.1 Sol: a starting choice for the daily main agent and implementation. Start at `medium`; try `high` for harder planning or review.
+2. Claude Sonnet 5.5: a candidate for the everyday coder or main agent. Start implementation at `high`, then test whether lower effort preserves quality.
+3. Claude Opus 5.5: use for coordination, implementation, or review when requirements are less clear, call chains are longer, or rework is expensive.
 
-Routing and mechanical edits do not need a flagship; a cheap model handles them. Split pools by job: one for cheap, fast models, one for the flagship you will pay for; the team example calls them `fast` and `deep`.
+The coder can choose local implementation details. Changes to behavior, public interfaces, or security boundaries still need owner agreement. Each edit need not pass through an explorer, expert, coder, and reviewer in sequence.
 
-The names below are not built-in. Chord ships `builder` and `planner`. The five-role split is the optional [team example](./examples/examples-team.md). Copy it if you want that layout.
+### Reliability-first: complex repositories and high-risk changes
 
-| In the team example | Suggested model | Because |
+Use this tier for cross-subsystem changes, intermittent failures, concurrency and lifetimes, permissions, durable recovery, and performance hot paths.
+
+1. Claude Opus 5.5: the default candidate for coordination, difficult implementation, and review; try `high` first.
+2. GPT-6 Astra: invoke for important design decisions, difficult root causes, or an independent investigation.
+3. GPT-6.1 Sol: a cost-conscious candidate starting at `high`. Validate it on project tasks before expanding its responsibilities.
+
+An expert may investigate, implement, and verify a difficult part directly. Forcing a handoff to a cheaper coder before the implementation is unambiguous can add handoff and rework costs.
+
+### Intensive: stalled approaches or costly failures
+
+First check whether the failure comes from the environment, a false assumption, or unclear acceptance criteria before spending more on model capability.
+
+1. GPT-6 Astra: give it a complete difficult investigation or design task.
+2. Claude Fable 5.1: use for difficult reasoning or a second independent investigation.
+3. Claude Opus 5.5: raise effort for a new approach supported by evidence. A more expensive model does not guarantee a better result.
+
+Keep the ordinary coder and explorer; reserve intensive models for the difficult parts. When a second opinion is needed, let the investigations gather evidence independently before comparing conclusions.
+
+## Team roles and model pools
+
+Chord ships `builder` and `planner`. The roles below come from the optional [team example](./examples/examples-team.md); create only those you need. The same model can serve multiple independent sessions.
+
+| Role | Default pool | Responsibility |
 | --- | --- | --- |
-| orchestrator | Gemini 3.8 Flash, DeepSeek V4.1 Flash, GPT-6 Luna | It classifies, dispatches, and synthesizes every turn. |
-| explorer | DeepSeek V4.1 Flash, Gemini 3.8 Flash, GPT-6 Luna | Read-only scouting; it reports where files are and makes no judgment calls. DeepSeek has the cheapest cache reads, Gemini reads material better. |
-| coder | DeepSeek V4.1 Flash, Gemini 3.8 Flash, GPT-6 Luna | What to change and how is already written down; mechanical edits are within reach of any of them. |
-| expert | Claude Opus 5.5, GPT-6.1 Sol | Root cause, architecture, concurrency, and hot paths; a wrong call becomes hidden debt. |
-| reviewer | Claude Opus 5.5, GPT-6.1 Sol | Catches regressions and invariant breaks; it does not redesign. |
+| orchestrator | `deep` | Preserve the full requirements, decompose work, coordinate design, correct course, and accept the whole deliverable. Handle small tasks directly. |
+| coder | `coding` | Implement and verify bounded changes; report unsettled behavior or interfaces. |
+| explorer | `fast` | Locate files, call relationships, and tests; return traceable evidence and uncertainty. |
+| reviewer | `deep` | Review independently against original requirements and actual changes; check regressions and verification gaps. |
+| expert | `deep`, with an intensive model when needed | Handle root causes, design, and difficult implementation; finish a specialty task directly when useful. |
 
-Architecture design and root-cause work are the judgment-heavy end of expert. Fable 5.1 (Anthropic) and GPT-6 Astra (OpenAI) still have the strongest record there, so treat them as the first choice for design-level calls. The two defaults above carry the rest of expert work; escalate to Fable 5.1 or Astra when they stall.
+### How capable must the coordinator be?
 
-If you only have a subscription and no separate API keys, pick the same two levels from that plan's catalog: the cheapest model for orchestrator, explorer, and coder, and the strongest the plan can sustain for expert and reviewer. On Codex that is GPT-6 Luna and GPT-6 Astra (use GPT-6.1 Sol when the account does not include Astra).
+A dispatcher executing a settled plan can use a validated midrange or lightweight model. An open-ended team lead also has to detect missing constraints, judge dependencies, reconcile conflicting reports, and decide when work is complete. Establish its baseline with the balanced or reliability-first tier.
 
-In practice, split pools by job: `deep` holds the expert and reviewer models and `fast` holds the explorer and coder models. The team example keeps orchestrator on `deep`; in real use it needs no flagship, so `fast` or its own cheap pool works too.
+Having an expert does not remove the coordinator's judgment work. The expert needs the relevant goals and constraints and must be able to report conflicts between the plan and the evidence. The coordinator must preserve caveats instead of turning “local tests passed” into “the whole task is complete.”
 
-### Which model for retrieval?
+### Three starting recipes
 
-- **Files and code inside the repo**: DeepSeek V4.1 Flash. Read-only scouting does not need closed-book knowledge, and its cache reads are the cheapest, which suits re-reading the same files.
-- **Web material, PDFs, charts**: Gemini 3.8 Flash. Long PDFs and charts are where it is strongest; DeepSeek is weak closed-book, so retrieval has to come from a search tool rather than its memory.
-- **Codex subscription only**: use GPT-6 Luna for repo scouting; narrow the range first on very large repos.
-- **Need both and want a single model**: use Gemini 3.8 Flash.
+| Recipe | `deep` | `coding` | `fast` |
+| --- | --- | --- | --- |
+| Economy, explicit specifications | GPT-6.1 Sol | GPT-6 Luna | GPT-6 Luna |
+| Everyday development | GPT-6.1 Sol | Claude Sonnet 5.5 | GPT-6 Luna |
+| Complex development | Claude Opus 5.5 | Claude Sonnet 5.5 | GPT-6 Luna |
 
-### Can coder use a cheap model?
+The [team example](./examples/examples-team.md) uses the complex-development recipe. With Codex alone, choose Sol from the account catalog for coordination, implementation, and review, and Luna for discovery and mechanical work; use Astra for intensive work when available. With only an Anthropic API key, Sonnet can cover everyday implementation and discovery while Opus handles difficult decisions. API keys do not require a subscription to the vendor's chat app.
 
-Yes, and it should by default. Coder is for changes that are already decided: renames, mechanical refactors, format and config updates, small local fixes, tests behind a fixed interface. Judgment stays with expert, and for this kind of work DeepSeek V4.1 Flash, Gemini 3.8 Flash, and GPT-6 Luna are all enough, for far less money than a flagship.
+Replace the discovery model with DeepSeek V4.1 Flash or Gemini 3.8 Flash when the task suits it. For other providers, apply the same role criteria and run representative project tasks before assigning coordination or final review.
 
-It is not for work that still needs judgment: an open "why" or "which approach", a change to protocol, data models, concurrency or lifetimes, permissions, or recovery, or a task that has already failed twice. System-level work in an unfamiliar environment (new language, new build system, inside a container) needs its path and acceptance criteria pinned down first, and of the three, DeepSeek V4.1 Flash is the weakest there.
+Multiple entries in a model pool provide fallback on request failures. They do not select by task difficulty or escalate because an answer is wrong. Choose the appropriate role or pool explicitly when changing tiers; a pool containing all three candidates is not a task router.
 
-When the cheap tier keeps coming back with execution mistakes (multi-file edits against a fixed spec, bug fixes spread across files, fast iteration on an existing feature), Claude Sonnet 5.5 is the middle option. It is the faster complement to Opus 5.5, priced far below the Opus-class flagships, with agentic coding near their level at higher effort and a much lower cost per task at lower effort. Open-ended judgment still belongs to expert.
+## Tuning and verification
 
-### No GPT or Claude subscription — what should expert use?
+- Compare a single agent, a strong coordinator with midrange workers, and a midrange coordinator with the same workers on the same real tasks. Change one factor at a time and repeat close comparisons.
+- Record end-to-end acceptance, false completion, human corrections, total cost, and elapsed time. Token prices exclude the effect of retries, review, and rework.
+- Start with few workers. Parallel writes need independent deliverables and settled shared decisions; different files can still have semantic dependencies. `expected_write_scope` is a coordination declaration, while role rules determine actual permissions.
+- Review original requirements, actual changes, and verification evidence, not just the implementer's summary. Different models offer another perspective but do not guarantee independent errors.
+- Start with supported `medium` or `high` effort and adjust from results. Effort labels across vendors do not represent equal compute, and `max` does not guarantee better cost or quality.
+- Run `chord doctor models --pool <pool-name>` to check connectivity. It does not measure task success. Use Responses for GPT-6.1 Sol tool tasks; see [Model configuration](./model-configs.md).
 
-Neither vendor requires a subscription: both sell API keys, so Opus 5.5 and Sol stay on the table without a ChatGPT or Claude plan. If you want to stay off both vendors entirely, start at item 3.
+## Sources and limits
 
-1. **Claude Opus 5.5**: pay as you go with an Anthropic API key. It lands near Fable 5.1 on most work for much less, and its cache reads suit re-reading the same files; for architecture design and other calls you would not want a cheaper model to get wrong, step up to Fable 5.1.
-2. **GPT-6.1 Sol**: buy an OpenAI API key on its own. It is the GPT-6 generation's coding and agentic model at a fraction of Astra's price, with the same 1.05M window and cheap cache reads; use it for coding, debugging, and agentic implementation work, and step up to GPT-6 Astra for architecture design and root-cause judgment; stay on Astra where a relay does not list Sol yet.
-3. **Muse Spark 1.3** (Meta Model API): the strongest model outside the GPT and Claude channels. Long-horizon implementation and large-repo work are its strengths; its root-cause and architecture judgment is a notch lower, so split expert work smaller and verify more.
-4. **GLM-5.3 or Kimi K3**: the strongest open models, carried by open-model plans such as OpenCode Go and Command Code GOAT. They can hold expert work, but not the final word on architecture or concurrency.
-5. **None of these**: keep the expert question small (have a cheap model reproduce it and narrow the range) and revisit the paid options above when a wrong call would become hidden debt. Gemini 3.8 Flash can hold a first discussion; do not let it be the final reviewer.
+Use the [OpenAI model docs](https://developers.openai.com/api/docs/models), [Anthropic model docs](https://platform.claude.com/docs/en/models/overview), [Gemini 3.8 Flash model card](https://deepmind.google/models/model-cards/gemini-3-8-flash/), and [DeepSeek V4.1 Flash model card](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) for model identity and API capabilities. [Artificial Analysis](https://artificialanalysis.ai/models) compares general capability, speed, and cost; its scores do not directly measure Chord coordination success.
 
-Reviewer runs the same model as expert. With only one flagship budget, give it to expert first and open reviewer after a substantial change.
+Public work from 2026 supports allocating models by responsibility, without establishing a universal coordinator threshold:
 
-### What does orchestrator need?
+- [Cursor's multi-agent engineering experiment](https://cursor.com/blog/agent-swarm-model-economics) demonstrates strong planners with cheaper workers but does not cover every model pairing.
+- [The small-agent collaboration study](https://arxiv.org/abs/2601.11327) finds coordinator reasoning important, primarily on question-answering and tool tasks.
+- [The software-repair manager/worker experiment](https://arxiv.org/abs/2603.26458) supports the value of strong direction, with limited model pairings and a small weak-coordinator sample.
+- [DeOrch](https://arxiv.org/abs/2610.07556) studies a specially trained small coordinator. Its results do not transfer directly to cheap general-purpose models without orchestration training.
 
-It runs every turn: read the task, classify it, dispatch, collect results, decide between correcting and escalating. It needs to:
-
-- call tools reliably and read a worker's report well enough to restate the conclusion;
-- tell whether a task still needs a product decision: if yes, send expert; if the path and the replacement are already written down, send coder; if it is only about where files are, send explorer;
-- stay cheap and fast. Flagship reasoning and taste are wasted here; the only risk worth paying to avoid is misrouting.
-
-Default to Gemini 3.8 Flash, DeepSeek V4.1 Flash, or GPT-6 Luna; DeepSeek has the cheapest cache reads, and Luna's uncached input and output are lower. Upgrade only if you observe frequent misrouting; do not start on a flagship.
-
-## After you decide
-
-1. Add the model with [`chord config add`](./cli.md#chord-config-add), or copy a provider layout from [Examples](./examples/index.md).
-2. For a full file layout, start from [Examples](./examples/index.md) and replace the flagship IDs with what you actually picked.
-3. Confirm with `chord doctor models`.
+These sources inform candidate configurations. Validate any downgrade against your own repository and acceptance criteria.

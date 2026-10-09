@@ -1,10 +1,10 @@
 # 按工作选模型
 
-<!-- description: 先决定 Chord 接什么，再按角色分模型。配方和示例页用来演示旗舰怎么接线，选定之后再去复制。 -->
+<!-- description: 按任务难度选择具体模型，再配置协调、执行和审查角色；包含四个任务档位与团队配方。 -->
 
-> 口径：2026 年 10 月。套餐会变，买之前、改配置之前以各家官网为准。
+> 选型日期：2026 年 10 月 9 日。下面的候选顺序是建议的试用顺序，不是 Chord 实测排名。购买或改配置前，请确认官方型号、价格和账号可用性。
 
-还没选定渠道时看这一页。接线通常一条 [`chord config add`](./cli_CN.md#chord-config-add) 就够——限额、模态和 reasoning 档位由目录补齐；需要整段 provider 布局时看[配置示例](./examples/index_CN.md)。
+日常开发从均衡档开始，涉及并发、权限或恢复时用可靠性优先档。明确的机械任务可以降档；小任务由单个主代理直接完成，不必启动整套团队。接入模型用 [`chord config add`](./cli_CN.md#chord-config-add)，限额、模态和 reasoning 档位由目录补齐；完整布局见[配置示例](./examples/index_CN.md)。
 
 ## 你已经在付的，Chord 用得上吗？
 
@@ -17,83 +17,102 @@ Chord 只接受 API key，或 Codex OAuth（`chord auth codex`）。订阅如果
 | Claude Pro / Max、SuperGrok、Muse Code、Google AI Pro / Ultra，或其他只能登录自家客户端的编程套餐 | 不能 |
 | GLM Coding Plan | 不能（仅限官方支持的指定工具与产品环境中使用） |
 
-## 四种情况怎么选
+已有可用套餐时，先从账号实际提供的模型中选择。包月是否划算取决于额度、限流和任务量；按量 API 还要计算重试、审查及返工成本。只有一份强模型预算时，优先覆盖会影响整个任务的判断，不固定按角色名称分配。
 
-### 1. 已经在订别的
+## 按任务选档位
 
-表里是「能」，就用它。是「不能」，原来的应用照旧，接着看第 2、3、4 条。Codex：一份套餐就能填满五个角色：orchestrator、explorer、coder 用账号目录里最便宜的模型，expert 和 reviewer 用在额度允许范围内最强的模型。便宜套餐或 API key，分法见第 2 条。
+这些档位是配置建议，Chord 不会根据任务难度自动切换。价格档位也不等于能力档位；同一模型可以承担多个角色。
 
-### 2. 少量使用，追求性价比
+### 经济档：明确、局部、容易验证
 
-买一个便宜的官方 API key（例如 Gemini 3.8 Flash、DeepSeek V4.1 Flash 或 GPT-6 Luna），或订一份提供标准端点的便宜套餐（例如 Command Code GOAT、OpenCode Go）。调度、搜索、大部分改代码，五个角色全走它。难的决策变多时，再把 expert 和 reviewer 换成更强的模型；便宜套餐没有够强的模型时，给这两个角色另配一个官方 key。
+适合定位文件和调用方、固定规则的重命名、配置调整，以及按已确定接口补测试。
 
-### 3. 大量使用
+1. GPT-6 Luna：结构化提取、机械执行和已确定计划的调度。
+2. DeepSeek V4.1 Flash：仓库探索、重复读取和明确规格的代码工作。
+3. Gemini 3.8 Flash：包含 PDF、图表或截图的资料任务优先考虑它。
 
-天天用的话，包月比按 token 计费划算。订 Codex，登录进去：orchestrator、explorer、coder 用账号目录里最便宜的模型，expert 和 reviewer 用在额度允许范围内最强的模型。
+协调者使用这一档时，目标、依赖和验收应已确定。需要重新拆解需求、选择行为或解决设计分歧时，转交更强模型。根因分析和安全敏感判断不按机械任务处理。
 
-### 4. 不太在意账单
+### 均衡档：日常开发
 
-把当时能拿到的最强 API 模型（按这份口径是 GPT-6.1 Sol 和 Claude Opus 5.5）留给 expert 和 reviewer；架构设计这类判断型工作，以及特别难或已经失败过的活，再退回 GPT-6 Astra、Claude Fable 5.1。orchestrator、explorer、coder 用便宜、快的模型就够了，用不到旗舰。
+适合常规功能、多文件修改、已有稳定复现的 bug，以及接口大体明确的重构。
 
-## 哪个角色用什么模型？
+1. GPT-6.1 Sol：日常主代理和常规实现的起始选择；从 `medium` 开始，复杂规划或审查再试 `high`。
+2. Claude Sonnet 5.5：常规 coder 或主代理的候选；实现任务可从 `high` 开始，再测试降低 effort 是否影响质量。
+3. Claude Opus 5.5：需求更模糊、调用链更长或返工成本较高时，用于协调、实现或审查。
 
-调度、机械改代码这些活，便宜模型就能干，用旗舰是浪费。池子按用途拆：便宜快的装一个，你愿意付钱的旗舰装一个；团队示例里叫 `fast` 和 `deep`。
+coder 可以决定局部实现细节；行为、公共接口或安全边界仍需负责人确认。没有必要让每次修改都经过 explorer、expert、coder、reviewer 的完整接力。
 
-下面这些名字不是内置角色。Chord 自带的是 `builder` 和 `planner`。五人分工来自可选的[团队方案](./examples/examples-team_CN.md)，想要那种布局再去复制。
+### 可靠性优先档：复杂代码库与高风险修改
 
-| 团队示例里的角色 | 建议模型 | 为什么 |
+适合跨子系统改动、间歇性故障、并发与生命周期、权限、持久化恢复和性能热路径。
+
+1. Claude Opus 5.5：协调、复杂实现和审查的默认候选，先试 `high`。
+2. GPT-6 Astra：用于重要设计决策、困难根因或独立调查路线，按需调用。
+3. GPT-6.1 Sol：控制成本的候选，从 `high` 开始，在本项目任务上验证后再扩大职责。
+
+复杂部分可由 expert 直接调查、实现并验证。结论尚未消除实现歧义时，强制转交便宜 coder 容易增加交接和返工成本。
+
+### 攻坚档：已有路线无法收敛或失败代价很高
+
+先检查失败是否来自环境、错误假设或验收不明确，再决定是否提高模型能力。
+
+1. GPT-6 Astra：承担完整的高难度调查或设计任务。
+2. Claude Fable 5.1：用于困难推理或第二条独立调查路线。
+3. Claude Opus 5.5：提高 effort 后重试有证据支持的新路线；更贵的型号不保证更好的结果。
+
+保留常规 coder 和 explorer，仅把困难部分交给攻坚模型。需要第二意见时，让两条路线先独立收集证据，再比较结论。
+
+## 团队角色与模型池
+
+Chord 自带 `builder` 和 `planner`。下面的角色来自可选的[团队方案](./examples/examples-team_CN.md)，需要时再创建；同一模型可以用于多个独立会话。
+
+| 角色 | 默认池 | 职责 |
 | --- | --- | --- |
-| orchestrator | Gemini 3.8 Flash、DeepSeek V4.1 Flash、GPT-6 Luna | 分类、派工、合成，每个回合都跑。 |
-| explorer | DeepSeek V4.1 Flash、Gemini 3.8 Flash、GPT-6 Luna | 只读探路，报告文件在哪，不做判断；DeepSeek 缓存读最省，Gemini 读资料更强。 |
-| coder | DeepSeek V4.1 Flash、Gemini 3.8 Flash、GPT-6 Luna | 改哪、改成什么都已写清，这类机械改动它们都够用。 |
-| expert | Claude Opus 5.5、GPT-6.1 Sol | 根因、架构取舍、并发与热路径，判断错了会变成隐性债。 |
-| reviewer | Claude Opus 5.5、GPT-6.1 Sol | 只抓回归与不变量，不重做设计。 |
+| orchestrator | `deep` | 保留完整需求，拆解任务，协调设计，纠偏并验收整体交付；小任务直接完成。 |
+| coder | `coding` | 实现范围明确的改动并验证，发现行为或接口未确定时反馈。 |
+| explorer | `fast` | 定位文件、调用关系和测试，返回可追溯证据及不确定性。 |
+| reviewer | `deep` | 根据原始需求和实际改动独立审查，检查回归与验证缺口。 |
+| expert | `deep`，按需换攻坚模型 | 处理根因、设计和复杂实现，必要时直接完成专项任务。 |
 
-架构设计和根因判断是 expert 里最吃判断力的一头。Fable 5.1（Anthropic 渠道）和 GPT-6 Astra（OpenAI 渠道）在这类活上的记录仍最扎实，设计级决策优先用它们。其余 expert 活交给上面表里那两个默认模型，啃不动再升到 Fable 5.1 或 Astra。
+### 协调者需要多强？
 
-只订了套餐、没单独买 API key 时，就从套餐目录里挑：orchestrator、explorer、coder 用最便宜的模型，expert、reviewer 用额度允许范围内最强的模型。Codex 对应 GPT-6 Luna 和 GPT-6 Astra（账号里没有 Astra 就用 GPT-6.1 Sol）。
+执行已确定计划的调度员，可以使用经过验证的中等或轻量模型。开放式团队负责人还要识别遗漏约束、判断任务依赖、处理矛盾报告和决定何时完成，应从均衡档或可靠性优先档建立基线。
 
-落地就按用途拆池：`deep` 放 expert 和 reviewer 的模型，`fast` 放 explorer 和 coder 的模型。团队示例把 orchestrator 也放在 `deep`；实际使用中它用不到旗舰，放进 `fast` 或单独的便宜池都行。
+有 expert 不会自动消除协调者的判断工作。expert 必须收到相关目标和约束，并能反馈计划与证据的冲突。协调者需要保留报告里的限制，不能把“局部测试通过”变成“整体完成”。
 
-### 检索用哪个模型？
+### 三套起始配方
 
-- **仓库里找文件、读代码**：DeepSeek V4.1 Flash。只读探路用不到闭卷知识，它缓存读最便宜，适合反复读同一批文件。
-- **网页资料、PDF、图表**：Gemini 3.8 Flash。读长 PDF、理解图表是它的强项；DeepSeek 闭卷很弱，检索只能靠外部搜索工具补，别让它凭记忆答。
-- **只有 Codex 订阅**：仓库探路用 GPT-6 Luna；超大仓库先收窄范围再派。
-- **两类都要、只想要一个模型**：用 Gemini 3.8 Flash。
+| 配方 | `deep` | `coding` | `fast` |
+| --- | --- | --- | --- |
+| 省钱、规格明确 | GPT-6.1 Sol | GPT-6 Luna | GPT-6 Luna |
+| 日常开发 | GPT-6.1 Sol | Claude Sonnet 5.5 | GPT-6 Luna |
+| 复杂开发 | Claude Opus 5.5 | Claude Sonnet 5.5 | GPT-6 Luna |
 
-### coder 可以用便宜的模型吗？
+[团队示例](./examples/examples-team_CN.md)采用复杂开发配方。只有 Codex 时，从账号目录中选择 Sol 承担协调、实现和审查，Luna 承担探索及机械任务；Astra 在可用时用于攻坚。只有 Anthropic API 时，可以让 Sonnet 承担日常实现和探索，Opus 承担复杂判断。API key 不要求订阅该厂商的聊天应用。
 
-可以，而且默认就该用。coder 适合「改哪、改成什么」已经定下来的活：重命名、机械重构、格式和配置调整、小的局部修复、按固定接口补测试。判断发生在 expert 那边；这类活 DeepSeek V4.1 Flash、Gemini 3.8 Flash、GPT-6 Luna 都够用，账单比旗舰低得多。
+按任务将探索模型替换为 DeepSeek V4.1 Flash 或 Gemini 3.8 Flash。只使用其他渠道时，也按同样职责筛选，先让候选模型完成本项目的代表性任务，再决定是否承担协调或终审。
 
-还需要判断的活就不适合它：问题还没有定论（「查一下为什么」「选个方案」「注意并发」），要动的行为涉及协议、数据模型、并发与生命周期、权限或恢复，或者已经失败过两次。系统级、陌生环境的活（新语言、新构建系统、容器里）也要先把路径和验收写清楚再跑；三个模型里 DeepSeek V4.1 Flash 在这种环境下最弱。
+模型池中的多个条目提供请求失败时的回退，不会按难度自动选模，也不会因为答案错误而自动升级。需要换档时，明确选择对应角色或模型池。不要把三个候选全部放入一个池，就把它当作任务路由器。
 
-便宜位在范围明确的活上反复出错时（按固定规格改多个文件、跨文件的 bug 修复、在既有功能上快速迭代），可以换用 Claude Sonnet 5.5 这个中档位：它是 Opus 5.5 更快的补充，价格远低于 Opus 级旗舰，调高 effort 后 agentic 编程接近旗舰水平，调低 effort 则每任务成本低得多。开放式判断仍然交给 expert。
+## 调整与验证
 
-### 没有 GPT 或 Claude 订阅，expert 用什么？
+- 同一组真实任务上比较单代理、强协调者配中档执行者，以及中等协调者配相同执行者。每次只改变一个因素；结果接近时重复运行。
+- 记录整体验收成功率、错误宣告完成、人工纠正次数、总费用和耗时。token 单价不能代表含重试、审查和返工的任务成本。
+- 从少量 worker 开始。并行写入需要独立交付与明确的共享决策；文件不同仍可能存在语义依赖。`expected_write_scope` 是协调声明，实际权限由角色规则决定。
+- 审查要看原始需求、实际改动和验证证据，不能只读实现者摘要。不同模型可以提供另一种视角，但不保证错误相互独立。
+- 先使用模型支持的 `medium` 或 `high` 档位，按结果调整。不同厂商的 effort 名称不代表相同计算量；`max` 不保证更好的成本或质量。
+- 用 `chord doctor models --pool <池名>` 检查接入。它不验证上述任务成功率。GPT-6.1 Sol 的工具任务应使用 Responses 接入；配置方式见[模型配置](./model-configs_CN.md)。
 
-这两家都不用订阅，单买 API key 就能用，所以没有 ChatGPT、Claude 套餐也能选 Opus 5.5 和 Sol；完全不想碰这两家的话，从第 3 条往下看。
+## 资料与适用范围
 
-1. **Claude Opus 5.5**：用 Anthropic API key 按量付费。多数工作上能接近 Fable 5.1，价格低得多，缓存读取也适合反复读同一批文件；架构设计、根因判断这类不想让便宜模型拿主意的活，再升到 Fable 5.1。
-2. **GPT-6.1 Sol**：单独买 OpenAI API key 就行。它是 GPT-6 一代的编程与 agentic 模型，价格只是 Astra 的一小部分，窗口同为 1.05M，缓存读取也便宜；编程、调试和 agentic 实现这类活用它，架构设计和根因判断再升到 GPT-6 Astra；中转还没上架 Sol 时继续用 Astra。
-3. **Muse Spark 1.3**（Meta Model API）：GPT、Claude 渠道之外最强的一个。长程实现、大仓库是它的强项；根因和架构上的判断弱一档，派给它时把 expert 的活拆小、多验证。
-4. **GLM-5.3 或 Kimi K3**：开源模型里最强的两个，OpenCode Go、Command Code GOAT 这类开源模型套餐就有。能顶 expert 的活，但架构、并发的终审别交给它们。
-5. **上面都没有**：把 expert 的问题压小：让便宜模型复现、缩小范围；等判断错了会变成隐性债时，再回头看前面几条。日常讨论可以让 Gemini 3.8 Flash 先顶一轮，别让它当终审。
+型号与接入能力以 [OpenAI 模型文档](https://developers.openai.com/api/docs/models)、[Anthropic 模型文档](https://platform.claude.com/docs/en/models/overview)、[Gemini 3.8 Flash 模型卡](https://deepmind.google/models/model-cards/gemini-3-8-flash/)和 [DeepSeek V4.1 Flash 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)为准。[Artificial Analysis](https://artificialanalysis.ai/models)可用于比较通用能力、速度和成本，其分数不直接代表 Chord 的协调成功率。
 
-reviewer 跟 expert 用同一个模型。只有一份旗舰预算时先给 expert，reviewer 在实质改动后再开。
+2026 年的公开经验支持按职责分配模型，但没有给出适用于所有任务的协调者门槛：
 
-### orchestrator 需要什么能力？
+- [Cursor 的多代理工程实验](https://cursor.com/blog/agent-swarm-model-economics)展示了强规划者与便宜执行者的组合，尚未覆盖全部模型配对。
+- [小模型协作研究](https://arxiv.org/abs/2601.11327)发现协调者推理很重要，实验主要涉及问答和工具任务。
+- [软件修复中的 manager/worker 实验](https://arxiv.org/abs/2603.26458)支持强指导者的价值，但模型配对和弱协调者样本有限。
+- [DeOrch](https://arxiv.org/abs/2610.07556)展示了专门训练的小协调模型；结果不能直接推广到未经协调训练的便宜通用模型。
 
-它每个回合都跑：读任务、分类、派人、收结果、决定纠偏还是升级。要的是：
-
-- 工具调用稳，能读懂 worker 的报告并转述结论；
-- 能分清「这题还要不要做产品级决定」：要就派 expert，路径和替换都写死就派 coder，只是找文件在哪就派 explorer；
-- 便宜、快。旗舰的推理和品味用在这里是浪费，值得花钱防的只有派错人。
-
-默认用 Gemini 3.8 Flash、DeepSeek V4.1 Flash 或 GPT-6 Luna；DeepSeek 缓存读最省，Luna 非缓存输入/输出更低。观察到它经常派错人，再换更强的模型；别一上来就用旗舰。
-
-## 决定之后
-
-1. 用 [`chord config add`](./cli_CN.md#chord-config-add) 添加模型，或从[配置示例](./examples/index_CN.md)复制 provider 布局。
-2. 需要完整文件布局时，从[配置示例](./examples/index_CN.md)起步，把旗舰 ID 换成你真正选的。
-3. 用 `chord doctor models` 确认能通。
+这些资料用于提出候选配置。是否降档，仍要用自己的代码库和验收条件验证。

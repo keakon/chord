@@ -4,4 +4,4 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root"
 
-go test ./internal/config -run TestDocsExampleConfigsLoad -count=1
+go test ./internal/config -run '^TestDocs(ExampleConfigsLoad|TeamExampleRoles)$' -count=1
