@@ -235,6 +235,9 @@ jobs:
             exit 1
           fi
 
+      - name: Check pre-push hook environment
+        run: scripts/test_pre_push.sh
+
   deadcode:
     name: Deadcode gate
     runs-on: ubuntu-latest

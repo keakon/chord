@@ -4,6 +4,10 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
+# Tests create foreign repositories. Git's hook environment must not redirect
+# their commands to this checkout's repository, worktree, or index.
+unset $(git rev-parse --local-env-vars)
+
 has_doc_changes=0
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
