@@ -50,7 +50,10 @@ func TestStableReductionMessageEquivalentMatchesShapeHashes(t *testing.T) {
 		"tool_diff_removed": func(m *message.Message) { m.ToolDiffRemoved = 9 },
 		"tool_status":       func(m *message.Message) { m.ToolStatus = "error" },
 		"kind":              func(m *message.Message) { m.Kind = "loop_notice" },
-		"compaction_flag":   func(m *message.Message) { m.IsCompactionSummary = true },
+		"compaction_request_sources": func(m *message.Message) {
+			m.CompactionRequestSources = map[string]string{checkpointOriginalRequestSource: "source-1"}
+		},
+		"compaction_flag": func(m *message.Message) { m.IsCompactionSummary = true },
 		"tool_call_id_field": func(m *message.Message) {
 			m.ToolCalls = []message.ToolCall{{ID: "x", Name: "read", Args: json.RawMessage(`{"path":"a.go"}`)}}
 		},

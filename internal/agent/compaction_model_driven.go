@@ -1347,10 +1347,11 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 		return modelDrivenSkipDraft(planID, target, reason, modelDrivenSkipReasonLowGain, bundle.currentRequestBatch, &preflight), nil
 	}
 	contextSummaryMsg := message.Message{
-		Role:                  "user",
-		Content:               checkpointContent,
-		IsCompactionSummary:   true,
-		CompactionSummaryMode: compactionSummaryModeModelDriven,
+		Role:                     "user",
+		Content:                  checkpointContent,
+		IsCompactionSummary:      true,
+		CompactionSummaryMode:    compactionSummaryModeModelDriven,
+		CompactionRequestSources: checkpointBuilder.requestSources,
 	}
 
 	newMessages := make([]message.Message, 0, 1+len(retainedFailures))
@@ -1621,6 +1622,8 @@ type modelDrivenCheckpointBuilder struct {
 	req           *modelDrivenCheckpointRequest
 	summaryText   string
 	evidenceItems []evidenceItem
+	// requestSources identifies full instruction sources across renderings.
+	requestSources map[string]string
 	// refMetadata indexes the classification and validity the runtime resolved
 	// for every evidence ID this checkpoint's submission may declare, so a
 	// declared ref the pack itself does not carry can be re-rendered as a
@@ -1649,11 +1652,12 @@ func (a *MainAgent) newModelDrivenCheckpointBuilder(ctx context.Context, bundle 
 		return bundle.estimateTokens([]message.Message{{Role: message.RoleUser, Content: text}})
 	})
 	return &modelDrivenCheckpointBuilder{
-		bundle:        bundle,
-		req:           req,
-		summaryText:   summaryText,
-		evidenceItems: filterCompactionEvidenceForArchival(bundle.evidenceItems),
-		refMetadata:   checkpointEvidenceRefMetadata(bundle, headSnapshot),
+		bundle:         bundle,
+		req:            req,
+		summaryText:    summaryText,
+		requestSources: buildCheckpointRequestSources(summaryText, headSnapshot, bundle.originalRequest, bundle.evidenceItems),
+		evidenceItems:  filterCompactionEvidenceForArchival(bundle.evidenceItems),
+		refMetadata:    checkpointEvidenceRefMetadata(bundle, headSnapshot),
 		// The newest real user messages of the archived head (and any dangling
 		// interrupted reply) stay verbatim inside the checkpoint within the
 		// retention budget, deterministic like the rest of this path — no model
@@ -1884,7 +1888,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 
 	sections := []fallbackSummarySection{
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
-		{"## User Constraints", constraints},
+		{checkpointUserConstraintsHeading, constraints},
 		{"## Active Objective", renderModelState(req.Args.ActiveObjective)},
 		{"## Background Goals", "- Earlier goals and the model-declared Active Objective are subordinate to the Current User Request and User Constraints."},
 		{"## Next Step", renderModelState(req.Args.NextStep)},

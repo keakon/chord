@@ -41,9 +41,10 @@ const (
 // Checkpoint summary sections and labels shared by the renderers and by the
 // request-local checkpoint view, which recognizes their rendered form.
 const (
-	checkpointProgressHeading     = "## Progress"
-	checkpointKeyDecisionsHeading = "## Key Decisions"
-	checkpointOpenProblemsHeading = "## Open Problems"
+	checkpointProgressHeading        = "## Progress"
+	checkpointKeyDecisionsHeading    = "## Key Decisions"
+	checkpointOpenProblemsHeading    = "## Open Problems"
+	checkpointUserConstraintsHeading = "## User Constraints"
 	// latestUserRequestLabel labels the Current User Request bullet taken
 	// from a real user message.
 	latestUserRequestLabel = "Latest user request"
@@ -226,7 +227,7 @@ func renderCheckpointRetainedRecentMessages(messages []message.Message, maxUserM
 	}
 	var sb strings.Builder
 	sb.WriteString(retainedRecentMessagesHeading)
-	sb.WriteString("\nReal messages kept verbatim from just before the checkpoint so the conversation continues on the actual work boundary; an exact repeat of the current request is summarized as a duplicate above; everything older lives in the summarized sections above and the archived history files.\n")
+	sb.WriteByte('\n')
 	for _, block := range slices.Backward(blocks) {
 		sb.WriteByte('\n')
 		sb.WriteString(block.label)
@@ -305,34 +306,41 @@ func renderEvidenceArtifactContent(items []evidenceItem) string {
 		}
 		if item.Excerpt != "" {
 			sb.WriteString("Excerpt:\n")
-			// Render the excerpt as a fenced code block: it is raw quoted text
-			// (diff, log, tool output) whose own line structure carries the
-			// information, and bare indented prose loses it — a blank line
-			// inside the excerpt ends the surrounding list item, and the
-			// Markdown renderer then reflows the remaining lines into one
-			// paragraph and wraps them at arbitrary character boundaries.
-			//
-			// Every excerpt line stays indented by two spaces: the excerpt is
-			// raw quoted text that can contain a line shaped exactly like a pack
-			// row, so the parser only accepts column-0 structural lines and
-			// quoted text can never forge one.
-			fence := evidenceExcerptFence(item.Excerpt)
-			sb.WriteString(fence)
-			sb.WriteString("text\n")
-			for line := range strings.SplitSeq(item.Excerpt, "\n") {
-				if line == "" {
-					sb.WriteByte('\n')
-					continue
-				}
-				sb.WriteString("  ")
-				sb.WriteString(line)
-				sb.WriteByte('\n')
-			}
-			sb.WriteString(fence)
-			sb.WriteByte('\n')
+			writeEvidenceExcerptBlock(&sb, item.Excerpt)
 		}
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// writeEvidenceExcerptBlock renders one excerpt as the fenced, two-space
+// indented block used inside the evidence artifact. It is the single renderer
+// for that block: request-view dedup recognizes an excerpt that is the same
+// snippet rendering of the latest request by rebuilding this exact form.
+//
+// Render the excerpt as a fenced code block: it is raw quoted text (diff, log,
+// tool output) whose own line structure carries the information, and bare
+// indented prose loses it — a blank line inside the excerpt ends the
+// surrounding list item, and the Markdown renderer then reflows the remaining
+// lines into one paragraph and wraps them at arbitrary character boundaries.
+//
+// Every excerpt line stays indented by two spaces: the excerpt is raw quoted
+// text that can contain a line shaped exactly like a pack row, so the parser
+// only accepts column-0 structural lines and quoted text can never forge one.
+func writeEvidenceExcerptBlock(sb *strings.Builder, excerpt string) {
+	fence := evidenceExcerptFence(excerpt)
+	sb.WriteString(fence)
+	sb.WriteString("text\n")
+	for line := range strings.SplitSeq(excerpt, "\n") {
+		if line == "" {
+			sb.WriteByte('\n')
+			continue
+		}
+		sb.WriteString("  ")
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+	}
+	sb.WriteString(fence)
+	sb.WriteByte('\n')
 }
 
 // buildCompactionCheckpointMessage renders the checkpoint message: the summary

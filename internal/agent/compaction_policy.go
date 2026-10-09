@@ -1406,25 +1406,26 @@ type toolDefHashMemoEntry struct {
 }
 
 type stableReductionMessageShape struct {
-	Role                message.Role
-	ContentHash         [sha256.Size]byte
-	PartsHash           [sha256.Size]byte
-	ThinkingHash        [sha256.Size]byte
-	ResponsesOutputHash [sha256.Size]byte
-	GeminiPartsHash     [sha256.Size]byte
-	ReasoningHash       [sha256.Size]byte
-	CompactionFilesHash [sha256.Size]byte
-	ToolCallsHash       [sha256.Size]byte
-	ToolCallID          string
-	RequestBatch        uint64
-	ToolDiffHash        [sha256.Size]byte
-	ToolDiffAdded       int
-	ToolDiffRemoved     int
-	ToolStatus          string
-	Provenance          stableReductionProvenanceShape
-	IsCompactionSummary bool
-	Kind                string
-	ToolRecoveryState   string
+	Role                  message.Role
+	ContentHash           [sha256.Size]byte
+	PartsHash             [sha256.Size]byte
+	ThinkingHash          [sha256.Size]byte
+	ResponsesOutputHash   [sha256.Size]byte
+	GeminiPartsHash       [sha256.Size]byte
+	ReasoningHash         [sha256.Size]byte
+	CompactionFilesHash   [sha256.Size]byte
+	CompactionSourcesHash [sha256.Size]byte
+	ToolCallsHash         [sha256.Size]byte
+	ToolCallID            string
+	RequestBatch          uint64
+	ToolDiffHash          [sha256.Size]byte
+	ToolDiffAdded         int
+	ToolDiffRemoved       int
+	ToolStatus            string
+	Provenance            stableReductionProvenanceShape
+	IsCompactionSummary   bool
+	Kind                  string
+	ToolRecoveryState     string
 }
 
 type stableReductionProvenanceShape struct {
@@ -1530,25 +1531,26 @@ func stableReductionMessageShapes(messages []message.Message) []stableReductionM
 
 func stableReductionMessageShapeOf(msg *message.Message) stableReductionMessageShape {
 	return stableReductionMessageShape{
-		Role:                msg.Role,
-		ContentHash:         stableReductionHashString(msg.Content),
-		PartsHash:           stableReductionContentPartsHash(msg.Parts),
-		ThinkingHash:        stableReductionThinkingBlocksHash(msg.ThinkingBlocks),
-		ResponsesOutputHash: stableReductionResponsesOutputHash(msg.ResponsesOutput),
-		GeminiPartsHash:     stableReductionGeminiPartsHash(msg.GeminiParts),
-		ReasoningHash:       stableReductionHashString(msg.ReasoningContent),
-		CompactionFilesHash: stableReductionStringMapHash(msg.CompactionFileRevisions),
-		ToolCallsHash:       stableReductionToolCallsHash(msg.ToolCalls),
-		ToolCallID:          msg.ToolCallID,
-		RequestBatch:        msg.RequestBatch,
-		ToolDiffHash:        stableReductionHashString(msg.ToolDiff),
-		ToolDiffAdded:       msg.ToolDiffAdded,
-		ToolDiffRemoved:     msg.ToolDiffRemoved,
-		ToolStatus:          msg.ToolStatus,
-		Provenance:          stableReductionProvenanceShapeFor(msg.Provenance),
-		IsCompactionSummary: msg.IsCompactionSummary,
-		Kind:                msg.Kind,
-		ToolRecoveryState:   msg.ToolRecoveryState,
+		Role:                  msg.Role,
+		ContentHash:           stableReductionHashString(msg.Content),
+		PartsHash:             stableReductionContentPartsHash(msg.Parts),
+		ThinkingHash:          stableReductionThinkingBlocksHash(msg.ThinkingBlocks),
+		ResponsesOutputHash:   stableReductionResponsesOutputHash(msg.ResponsesOutput),
+		GeminiPartsHash:       stableReductionGeminiPartsHash(msg.GeminiParts),
+		ReasoningHash:         stableReductionHashString(msg.ReasoningContent),
+		CompactionFilesHash:   stableReductionStringMapHash(msg.CompactionFileRevisions),
+		CompactionSourcesHash: stableReductionStringMapHash(msg.CompactionRequestSources),
+		ToolCallsHash:         stableReductionToolCallsHash(msg.ToolCalls),
+		ToolCallID:            msg.ToolCallID,
+		RequestBatch:          msg.RequestBatch,
+		ToolDiffHash:          stableReductionHashString(msg.ToolDiff),
+		ToolDiffAdded:         msg.ToolDiffAdded,
+		ToolDiffRemoved:       msg.ToolDiffRemoved,
+		ToolStatus:            msg.ToolStatus,
+		Provenance:            stableReductionProvenanceShapeFor(msg.Provenance),
+		IsCompactionSummary:   msg.IsCompactionSummary,
+		Kind:                  msg.Kind,
+		ToolRecoveryState:     msg.ToolRecoveryState,
 	}
 }
 
@@ -1578,7 +1580,7 @@ func stableReductionMessageEquivalent(a, b *message.Message) bool {
 		a.ToolRecoveryState != b.ToolRecoveryState {
 		return false
 	}
-	if !maps.Equal(a.CompactionFileRevisions, b.CompactionFileRevisions) {
+	if !maps.Equal(a.CompactionRequestSources, b.CompactionRequestSources) || !maps.Equal(a.CompactionFileRevisions, b.CompactionFileRevisions) {
 		return false
 	}
 	if stableReductionProvenanceShapeFor(a.Provenance) != stableReductionProvenanceShapeFor(b.Provenance) {

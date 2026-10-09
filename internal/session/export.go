@@ -60,6 +60,7 @@ type ExportedMessage struct {
 	GeminiParts               []message.GeminiReplayPart    `json:"gemini_parts,omitempty"`
 	ReasoningContent          string                        `json:"reasoning_content,omitempty"`
 	IsCompactionSummary       bool                          `json:"is_compaction_summary,omitempty"`
+	CompactionRequestSources  map[string]string             `json:"compaction_request_sources,omitempty"`
 	CompactionFileRevisions   map[string]string             `json:"compaction_file_revisions,omitempty"`
 	Provenance                *message.MessageProvenance    `json:"provenance,omitempty"`
 	Timestamp                 time.Time                     `json:"timestamp"`
@@ -151,6 +152,7 @@ func Export(
 			ReasoningContent:          msg.ReasoningContent,
 			IsCompactionSummary:       msg.IsCompactionSummary,
 			CompactionFileRevisions:   cloneStringMap(msg.CompactionFileRevisions),
+			CompactionRequestSources:  cloneStringMap(msg.CompactionRequestSources),
 			Provenance:                provenance,
 			ToolRecoveryState:         msg.ToolRecoveryState,
 			// Use incremental timestamps (1µs apart) to preserve ordering
@@ -398,6 +400,7 @@ func (es *ExportedSession) ToMessages() []message.Message {
 			ReasoningContent:          em.ReasoningContent,
 			IsCompactionSummary:       em.IsCompactionSummary,
 			CompactionFileRevisions:   cloneStringMap(em.CompactionFileRevisions),
+			CompactionRequestSources:  cloneStringMap(em.CompactionRequestSources),
 			Provenance:                provenance,
 			ToolRecoveryState:         em.ToolRecoveryState,
 		}

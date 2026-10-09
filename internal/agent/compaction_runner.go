@@ -414,11 +414,12 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	checkpointKeyFiles := extractCompactionKeyFiles(checkpointContent, a.effectiveToolBaseDir())
 	keyFileRevisions := captureCompactionFileRevisions(checkpointKeyFiles, a.resolveCheckpointFilePath)
 	contextSummaryMsg := message.Message{
-		Role:                    "user",
-		Content:                 checkpointContent,
-		IsCompactionSummary:     true,
-		CompactionSummaryMode:   summaryMode,
-		CompactionFileRevisions: keyFileRevisions,
+		Role:                     "user",
+		Content:                  checkpointContent,
+		IsCompactionSummary:      true,
+		CompactionSummaryMode:    summaryMode,
+		CompactionFileRevisions:  keyFileRevisions,
+		CompactionRequestSources: buildCheckpointRequestSources(checkpointContent, headSnapshot, originalRequest, evidenceItems),
 	}
 
 	// Async mode: NewMessages only contains [summary + evidence], no recentTail

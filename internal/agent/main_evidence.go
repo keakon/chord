@@ -41,13 +41,7 @@ func (a *MainAgent) recordEvidenceFromMessage(msg message.Message) {
 				compactTextSnippet(text, 700),
 			))
 		case looksLikeUserCorrection(text):
-			a.addEvidenceCandidate(buildEvidenceItem(
-				evidenceUserCorrection,
-				"User correction / constraint",
-				"This explicitly constrains the next code change and should be preserved verbatim.",
-				"runtime user message",
-				compactTextSnippet(text, 600),
-			))
+			a.addEvidenceCandidate(buildUserCorrectionEvidence("runtime user message", text))
 		case looksLikeStatedConstraint(text):
 			a.addEvidenceCandidate(buildStatedConstraintEvidence("runtime user message", text))
 		case isPlainUserRequestForCompaction(text):

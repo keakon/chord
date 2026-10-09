@@ -328,6 +328,9 @@ type Message struct {
 	CompactionFileRevisions   map[string]string  `json:"compaction_file_revisions,omitempty"`   // key-file revisions captured when this checkpoint was created
 	StopReason                string             `json:"stop_reason,omitempty"`                 // assistant only; e.g. "stop", "end_turn", "max_tokens", "tool_use"
 	Provenance                *MessageProvenance `json:"provenance,omitempty"`                  // optional producer/source metadata for model-compat replay decisions
+	// CompactionRequestSources holds full-source fingerprints for request-copy
+	// projection. It is persisted for resume and never sent as prompt content.
+	CompactionRequestSources map[string]string `json:"compaction_request_sources,omitempty"`
 	// Usage carries provider usage on imported messages; runtime session totals
 	// are restored from the usage ledger, not by re-aggregating this field.
 	Usage *TokenUsage `json:"usage,omitempty"`

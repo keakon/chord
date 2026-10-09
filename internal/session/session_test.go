@@ -153,18 +153,27 @@ func TestExportPreservesToolCalls(t *testing.T) {
 
 func TestExportPreservesCompactionFileRevisions(t *testing.T) {
 	msgs := []message.Message{{
-		Role:                    message.RoleUser,
-		Content:                 "[Context Summary]\nsummary",
-		IsCompactionSummary:     true,
-		CompactionFileRevisions: map[string]string{"key.go": "abc123"},
+		Role:                     message.RoleUser,
+		Content:                  "[Context Summary]\nsummary",
+		IsCompactionSummary:      true,
+		CompactionFileRevisions:  map[string]string{"key.go": "abc123"},
+		CompactionRequestSources: map[string]string{"original_request": "source-1"},
 	}}
 	session, err := Export(msgs, nil, nil)
 	if err != nil {
 		t.Fatalf("Export: %v", err)
 	}
 	restored := session.ToMessages()
-	if len(restored) != 1 || !restored[0].IsCompactionSummary || restored[0].CompactionFileRevisions["key.go"] != "abc123" {
+	if len(restored) != 1 || !restored[0].IsCompactionSummary || restored[0].CompactionFileRevisions["key.go"] != "abc123" || restored[0].CompactionRequestSources["original_request"] != "source-1" {
 		t.Fatalf("restored checkpoint = %#v", restored)
+	}
+	msgs[0].CompactionRequestSources["original_request"] = "mutated-source"
+	if session.Messages[0].CompactionRequestSources["original_request"] != "source-1" {
+		t.Fatal("exported source provenance was aliased")
+	}
+	restored[0].CompactionRequestSources["original_request"] = "mutated-restored"
+	if session.Messages[0].CompactionRequestSources["original_request"] != "source-1" {
+		t.Fatal("restored source provenance was aliased")
 	}
 	msgs[0].CompactionFileRevisions["key.go"] = "mutated-source"
 	if got := session.Messages[0].CompactionFileRevisions["key.go"]; got != "abc123" {

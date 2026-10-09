@@ -144,3 +144,84 @@ func TestCheckpointValidationReportsIndependentRepairsTogether(t *testing.T) {
 		t.Fatalf("unbounded or accepted errors: %v", err)
 	}
 }
+
+// requestDedupFixture builds a model-driven checkpoint whose anchor, user
+// constraint, retained, and evidence sections are rendered from the given
+// source texts the same way the runtime builders render them. Passing the
+// current request for every source makes each copy deduplicable; passing other
+// texts makes them independent copies.
+func requestDedupFixture(request, original, constraint, retained string) message.Message {
+	retained = strings.TrimSpace(retained)
+	constraintExcerpt := compactTextSnippet(constraint, compactUserConstraintExcerptChars)
+	item := buildUserCorrectionEvidence("message 1 (user)", constraint)
+	evidence := renderEvidenceArtifactContent([]evidenceItem{item, buildEvidenceItem(evidenceToolError, "Latest failing tool result", "Preserve the failure", "message 2 (tool)", "sample tool error output")})
+	body := message.CompactionAnchorsOpenTag +
+		compactAnchorsRequestLabel + "\n- " + anchorLine(original, compactAnchorsRequestChars) + "\n" +
+		compactAnchorsConstraintsLabel + "\n- " + anchorLine(constraintExcerpt, compactAnchorsConstraintChars) + "\n" +
+		compactAnchorsSupersededLabel + "\n- Old direction no longer in force.\n" +
+		message.CompactionAnchorsCloseTag +
+		"\n\n## Current User Request\n" + modelDrivenCurrentUserRequestSection(fallbackAnchor{Kind: "user_request", Label: latestUserRequestLabel, Text: request}) +
+		"\n\n## Progress\n- parser checked\n" +
+		"\n\n## Key Decisions\n- preserve input\n" +
+		"\n\n## Open Problems\n- add test\n" +
+		"\n\n" + checkpointUserConstraintsHeading + "\n- " + strings.ReplaceAll(constraintExcerpt, "\n", " ") +
+		"\n\n" + retainedRecentMessagesHeading + "\n" + retainedUserLabel + ":\n> " + strings.ReplaceAll(retained, "\n", "\n> ") +
+		"\n\n" + evidence
+	return message.Message{Role: message.RoleUser, Content: body, IsCompactionSummary: true, CompactionSummaryMode: compactionSummaryModeModelDriven, CompactionRequestSources: buildCheckpointRequestSources(body, nil, original, []evidenceItem{item})}
+}
+
+func TestCheckpointRequestProjectionDeduplicatesSameSourceSections(t *testing.T) {
+	request := "Fix the parser.\n\n## Requirements\nKeep empty input valid."
+	msg := requestDedupFixture(request, request, request, request)
+	before := msg.Content
+	projected := projectCheckpointRequests([]message.Message{msg})[0].Content
+	if msg.Content != before {
+		t.Fatal("projection changed the durable checkpoint")
+	}
+	if got := strings.Count(projected, checkpointSameRequestPointer); got != 1 {
+		t.Fatalf("pointers = %d, want 1:\n%s", got, projected)
+	}
+	if got := strings.Count(projected, "Keep empty input valid"); got != 1 {
+		t.Fatalf("request copies = %d, want only the authoritative section", got)
+	}
+	for _, want := range []string{
+		compactAnchorsSupersededLabel,
+		"Old direction no longer in force.",
+		"Evidence ID: " + evidenceItemID(buildUserCorrectionEvidence("message 1 (user)", request)), "Evidence Kind: user_correction",
+		"## Progress",
+	} {
+		if !strings.Contains(projected, want) {
+			t.Fatalf("lost %q in\n%s", want, projected)
+		}
+	}
+	again := projectCheckpointRequests([]message.Message{{Role: message.RoleUser, Content: projected, IsCompactionSummary: true, CompactionSummaryMode: compactionSummaryModeModelDriven, CompactionRequestSources: msg.CompactionRequestSources}})[0].Content
+	if again != projected {
+		t.Fatal("projection not idempotent")
+	}
+}
+
+func TestCheckpointRequestProjectionKeepsDifferentSourceCopies(t *testing.T) {
+	request := "Fix the parser.\n\n## Requirements\nKeep empty input valid."
+	msg := requestDedupFixture(request, "Add feature X first.", "Do not touch the docs.", "Earlier instruction kept verbatim.")
+	projected := projectCheckpointRequests([]message.Message{msg})[0].Content
+	if strings.Contains(projected, checkpointSameRequestPointer) {
+		t.Fatalf("unrelated copies collapsed:\n%s", projected)
+	}
+	for _, want := range []string{"Add feature X first.", "Do not touch the docs.", "Earlier instruction kept verbatim."} {
+		if !strings.Contains(projected, want) {
+			t.Fatalf("lost %q in\n%s", want, projected)
+		}
+	}
+}
+
+func TestCheckpointRequestProjectionKeepsTruncatedRequestCopies(t *testing.T) {
+	request := strings.Repeat("Keep the parser behavior stable. ", 300)
+	msg := requestDedupFixture(request, request, request, request)
+	projected := projectCheckpointRequests([]message.Message{msg})[0].Content
+	if !strings.Contains(projected, "\n"+truncatedRequestNotice) {
+		t.Fatal("fixture request was not truncated")
+	}
+	if strings.Contains(projected, checkpointSameRequestPointer) {
+		t.Fatalf("truncated request copies collapsed:\n%s", projected)
+	}
+}

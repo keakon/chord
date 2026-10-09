@@ -32,11 +32,12 @@ func TestSnapshotDeepCopiesNestedMessageState(t *testing.T) {
 			Content: []message.ResponsesOutputContent{{Text: "response"}},
 			Summary: []message.ResponsesReasoningSummary{{Text: "reasoning"}},
 		}},
-		FileState:               &message.ToolFileState{Reads: []message.TrackedFileState{{Path: "old.go"}}},
-		Audit:                   &message.ToolArgsAudit{IgnoredArgs: []message.IgnoredToolArg{{Path: "args.old"}}},
-		CompactionFileRevisions: map[string]string{"old.go": "rev-1"},
-		Provenance:              &message.MessageProvenance{ModelID: "sample-model"},
-		Mailbox:                 &message.MailboxMetadata{MessageID: "mail-1"},
+		FileState:                &message.ToolFileState{Reads: []message.TrackedFileState{{Path: "old.go"}}},
+		Audit:                    &message.ToolArgsAudit{IgnoredArgs: []message.IgnoredToolArg{{Path: "args.old"}}},
+		CompactionFileRevisions:  map[string]string{"old.go": "rev-1"},
+		CompactionRequestSources: map[string]string{"original_request": "source-1"},
+		Provenance:               &message.MessageProvenance{ModelID: "sample-model"},
+		Mailbox:                  &message.MailboxMetadata{MessageID: "mail-1"},
 	}
 	m.Append(msg)
 	snapshot := m.Snapshot()
@@ -46,6 +47,7 @@ func TestSnapshotDeepCopiesNestedMessageState(t *testing.T) {
 	snapshot[0].FileState.Reads[0].Path = "changed.go"
 	snapshot[0].Audit.IgnoredArgs[0].Path = "changed"
 	snapshot[0].CompactionFileRevisions["old.go"] = "changed"
+	snapshot[0].CompactionRequestSources["original_request"] = "changed"
 	snapshot[0].Provenance.ModelID = "changed"
 	snapshot[0].Mailbox.MessageID = "changed"
 
@@ -56,7 +58,7 @@ func TestSnapshotDeepCopiesNestedMessageState(t *testing.T) {
 	if got.ResponsesOutput[0].Content[0].Text != "response" || got.FileState.Reads[0].Path != "old.go" || got.Audit.IgnoredArgs[0].Path != "args.old" {
 		t.Fatalf("nested slices were aliased: %+v", got)
 	}
-	if got.CompactionFileRevisions["old.go"] != "rev-1" || got.Provenance.ModelID != "sample-model" || got.Mailbox.MessageID != "mail-1" {
+	if got.CompactionRequestSources["original_request"] != "source-1" || got.CompactionFileRevisions["old.go"] != "rev-1" || got.Provenance.ModelID != "sample-model" || got.Mailbox.MessageID != "mail-1" {
 		t.Fatalf("nested map/pointer fields were aliased: %+v", got)
 	}
 }

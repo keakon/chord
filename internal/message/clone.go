@@ -1,6 +1,9 @@
 package message
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"maps"
+)
 
 // Clone returns an ownership-isolated copy of a message. Message values are
 // copied by value in many request and persistence paths, so this method is the
@@ -54,10 +57,9 @@ func (m Message) Clone() Message {
 	}
 	if len(m.CompactionFileRevisions) > 0 {
 		cloned.CompactionFileRevisions = make(map[string]string, len(m.CompactionFileRevisions))
-		for key, value := range m.CompactionFileRevisions {
-			cloned.CompactionFileRevisions[key] = value
-		}
+		maps.Copy(cloned.CompactionFileRevisions, m.CompactionFileRevisions)
 	}
+	cloned.CompactionRequestSources = maps.Clone(m.CompactionRequestSources)
 	if m.Provenance != nil {
 		provenance := *m.Provenance
 		cloned.Provenance = &provenance

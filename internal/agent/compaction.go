@@ -261,6 +261,8 @@ type evidenceItem struct {
 	SourceID  string
 	ToolState string
 	Revisions map[string]string
+	// RequestSource fingerprints the full user text before excerpt truncation.
+	RequestSource string
 }
 
 func evidenceItemID(item evidenceItem) string {
@@ -321,6 +323,15 @@ func (m *toolCallMeta) parsedReadRequest() readRequestSummary {
 	}
 	return m.readRequest
 }
+
+// Excerpt caps shared by the evidence builders and the request-view dedup: a
+// checkpoint section or evidence excerpt counts as a repeat of the latest
+// request only when it matches the builder's rendering exactly, so both sides
+// must derive the snippet with the same cap.
+const (
+	compactUserConstraintExcerptChars = 600
+	compactUserRequestExcerptChars    = 700
+)
 
 func compactTextSnippet(s string, maxChars int) string {
 	s = strings.TrimSpace(s)
@@ -546,28 +557,28 @@ func buildDoneRejectedEvidence(source, reason string) evidenceItem {
 		"Latest Done rejection",
 		"The rejection reason is recent user feedback/request and may supersede older todos.",
 		source,
-		compactTextSnippet(reason, 700),
+		compactTextSnippet(reason, compactUserRequestExcerptChars),
 	)
 }
 
 func buildStatedConstraintEvidence(source, text string) evidenceItem {
-	return buildEvidenceItem(
+	return requestEvidenceSource(buildEvidenceItem(
 		evidenceStatedConstraint,
 		"Stated constraint",
 		"This declarative compatibility / output-contract / file-scope constraint must survive compaction even though it is not phrased as an imperative correction.",
 		source,
-		compactTextSnippet(text, 600),
-	)
+		compactTextSnippet(text, compactUserConstraintExcerptChars),
+	), text)
 }
 
 func buildLatestUserRequestEvidence(source, text string) evidenceItem {
-	return buildEvidenceItem(
+	return requestEvidenceSource(buildEvidenceItem(
 		evidenceUserRequest,
 		"Latest user request",
 		"This is the latest ordinary user request and should anchor the current objective unless superseded by a later correction or Done rejection.",
 		source,
-		compactTextSnippet(text, 700),
-	)
+		compactTextSnippet(text, compactUserRequestExcerptChars),
+	), text)
 }
 
 func isCompactionSummaryText(text string) bool {
@@ -832,13 +843,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					compactTextSnippet(text, 700),
 				)
 			case looksLikeUserCorrection(text):
-				item = buildEvidenceItem(
-					evidenceUserCorrection,
-					"User correction / constraint",
-					"This explicitly constrains the next code change and should be preserved verbatim.",
-					fmt.Sprintf("message %d (user)", i+1),
-					compactTextSnippet(text, 600),
-				)
+				item = buildUserCorrectionEvidence(fmt.Sprintf("message %d (user)", i+1), text)
 			case looksLikeStatedConstraint(text):
 				item = buildStatedConstraintEvidence(fmt.Sprintf("message %d (user)", i+1), text)
 			case isPlainUserRequestForCompaction(text) && !capturedLatestUserRequest:
