@@ -581,7 +581,13 @@ models:
         chat_completions:
           native_thinking: thinking
         reasoning_continuity:
+          mode: openai_visible
           reasoning_replay: all
+        request_overrides:
+          body:
+            thinking:
+              type: enabled
+              clear_thinking: false
       compaction:
         threshold: 0.25
         reminder: 0.20
@@ -589,6 +595,8 @@ models:
       sources:
         - url: https://docs.z.ai/guides/llm/glm-5.3
           checked: "2026-10-05"
+        - url: https://docs.z.ai/guides/capabilities/thinking-mode
+          checked: "2026-10-09"
     connection:
       request_url: https://api.z.ai/api/paas/v4/chat/completions
       wire_model_id: glm-5.3
@@ -623,10 +631,13 @@ models:
         chat_completions:
           native_thinking: thinking
         reasoning_continuity:
+          mode: openai_visible
           reasoning_replay: all
       sources:
         - url: https://platform.kimi.ai/docs/api/models-overview
           checked: "2026-10-05"
+        - url: https://platform.kimi.ai/docs/guide/kimi-k3-quickstart
+          checked: "2026-10-09"
     connection:
       request_url: https://api.moonshot.ai/v1/chat/completions
       wire_model_id: kimi-k3
@@ -659,6 +670,9 @@ models:
 
   - id: alibaba/qwen3.8-max
     context: 1000000
+    # Ordinary mode allows 991808; use the smaller documented thinking cap
+    # across modes because the catalog has one shared input limit.
+    input: 983616
     output: 131072
     input_modalities: [text, image, video]
     coding_sources:
@@ -668,13 +682,17 @@ models:
       input_per_million: 1.65
       output_per_million: 4.951
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-10-09"
       source:
         url: https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max
-        checked: "2026-10-04"
+        checked: "2026-10-09"
+      notes: >-
+        Standard uncached USD API rates for China (Beijing) and Global scopes.
+        Singapore International and Virginia US scopes cost $2 input and $6
+        output per million tokens. Cache, batch and promotional prices are separate.
     sources:
       - url: https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max
-        checked: "2026-10-04"
+        checked: "2026-10-09"
       - url: https://docs.modelstudio.console.alibabacloud.com/en/model-studio/deep-thinking
         checked: "2026-10-04"
       - url: https://models.dev/alibaba/qwen3.8-max
@@ -733,13 +751,15 @@ models:
       input_per_million: 0.3
       output_per_million: 1.2
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-10-09"
       source:
-        url: https://api-docs.deepseek.com/quick_start/pricing
-        checked: "2026-10-04"
+        url: https://api-docs.deepseek.com/quick_start/pricing/
+        checked: "2026-10-09"
+      notes: Peak, uncached USD API rates. Off-peak prices are half; cache hits are priced
+        separately.
     sources:
-      - url: https://api-docs.deepseek.com/quick_start/pricing
-        checked: "2026-10-04"
+      - url: https://api-docs.deepseek.com/quick_start/pricing/
+        checked: "2026-10-09"
       - url: https://api-docs.deepseek.com/news/news260910
         checked: "2026-10-04"
 
@@ -769,17 +789,31 @@ models:
       input_per_million: 2
       output_per_million: 6
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-10-09"
       source:
-        url: https://x.ai/api
-        checked: "2026-10-04"
+        url: https://docs.x.ai/developers/pricing
+        checked: "2026-10-09"
+      notes: >-
+        Standard global USD API rates for uncached input and text output below
+        200K prompt tokens. At 200K or more, the entire request costs $4 input
+        and $12 output per million tokens. The US regional endpoint adds a
+        1.1x multiplier; cache hits and batch pricing are separate.
     sources:
       - url: https://x.ai/api
         checked: "2026-10-04"
+      - url: https://docs.x.ai/developers/pricing
+        checked: "2026-10-09"
       - url: https://models.dev/xai/grok-4.7
         checked: "2026-10-04"
 
   - id: xai/grok-4.6
+    config_profile:
+      compat:
+        chat_completions:
+          keep_reasoning_effort: true
+      sources:
+        - url: https://docs.x.ai/developers/model-capabilities/text/reasoning
+          checked: "2026-10-09"
     connection:
       request_url: https://api.x.ai/v1/chat/completions
       wire_model_id: grok-4.6
@@ -798,15 +832,22 @@ models:
       input_per_million: 2
       output_per_million: 6
       currency: USD
-      checked: "2026-10-04"
+      checked: "2026-10-09"
       source:
-        url: https://docs.x.ai/developers/models/grok-4.6
-        checked: "2026-10-04"
+        url: https://docs.x.ai/developers/pricing
+        checked: "2026-10-09"
+      notes: >-
+        Standard global USD API rates for uncached input and text output below
+        200K prompt tokens. At 200K or more, the entire request costs $4 input
+        and $12 output per million tokens. The US regional endpoint adds a
+        1.1x multiplier; cache hits and batch pricing are separate.
     sources:
       - url: https://docs.x.ai/developers/grok-4-6
         checked: "2026-10-04"
       - url: https://docs.x.ai/developers/models/grok-4.6
         checked: "2026-10-04"
+      - url: https://docs.x.ai/developers/pricing
+        checked: "2026-10-09"
 
   - id: meta/muse-spark-1.3
     connection:
@@ -872,13 +913,26 @@ models:
 
   - id: zhipuai/glm-5.3-flash
     config_profile:
+      compat:
+        chat_completions:
+          native_thinking: thinking
+        reasoning_continuity:
+          mode: openai_visible
+          reasoning_replay: all
+        request_overrides:
+          body:
+            thinking:
+              type: enabled
+              clear_thinking: false
       compaction:
         threshold: 0.25
         reminder: 0.20
         notes: Shares the GLM-5.x serving recipe; the reliable window is roughly 200K-256K, so compact early for long tool loops.
       sources:
         - url: https://docs.z.ai/guides/vlm/glm-5.3-flash
-          checked: "2026-10-04"
+          checked: "2026-10-09"
+        - url: https://docs.z.ai/guides/capabilities/thinking-mode
+          checked: "2026-10-09"
     context: 1000000
     output: 131072
     input_modalities:
@@ -905,13 +959,26 @@ models:
 
   - id: zhipuai/glm-5.3-flashx
     config_profile:
+      compat:
+        chat_completions:
+          native_thinking: thinking
+        reasoning_continuity:
+          mode: openai_visible
+          reasoning_replay: all
+        request_overrides:
+          body:
+            thinking:
+              type: enabled
+              clear_thinking: false
       compaction:
         threshold: 0.25
         reminder: 0.20
         notes: Shares the GLM-5.x serving recipe; the reliable window is roughly 200K-256K, so compact early for long tool loops.
       sources:
         - url: https://docs.z.ai/guides/vlm/glm-5.3-flash
-          checked: "2026-10-04"
+          checked: "2026-10-09"
+        - url: https://docs.z.ai/guides/capabilities/thinking-mode
+          checked: "2026-10-09"
     context: 1000000
     output: 131072
     input_modalities:
@@ -983,6 +1050,16 @@ models:
       checked: '2026-10-04'
 
   - id: cohere/north-mini-code-1-0
+    config_profile:
+      compat:
+        request_overrides:
+          body:
+            parallel_tool_calls: null
+          rename_body_fields:
+            max_completion_tokens: max_tokens
+      sources:
+        - url: https://docs.cohere.com/docs/compatibility-api
+          checked: "2026-10-09"
     released: '2026-06-09'
     context: 256000
     output: 64000

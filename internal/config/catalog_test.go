@@ -476,8 +476,15 @@ model_pools:
 		t.Fatal("explicit compression changed")
 	}
 	inherited := p.Models["inherited"]
-	if inherited.Compat == nil || inherited.Compat.ChatCompletions == nil || inherited.Compat.ReasoningContinuity != nil {
-		t.Fatalf("catalog must keep native thinking but defer replay to provider: %+v", inherited.Compat)
+	if inherited.Compat == nil || inherited.Compat.ChatCompletions == nil {
+		t.Fatalf("catalog must keep native thinking: %+v", inherited.Compat)
+	}
+	continuity := inherited.Compat.ReasoningContinuity
+	if continuity == nil || continuity.Mode != ReasoningContinuityModeOpenAIVisible || continuity.ReasoningReplay != "" {
+		t.Fatalf("catalog must keep continuity mode but defer replay to provider: %+v", continuity)
+	}
+	if p.Compat == nil || p.Compat.ReasoningContinuity == nil || p.Compat.ReasoningContinuity.ReasoningReplay != ReasoningReplayCurrentTurn {
+		t.Fatal("explicit provider replay override lost")
 	}
 	if overridden := p.Models["overridden"]; overridden.Compat.ReasoningContinuity.ReasoningReplay != ReasoningReplayNone {
 		t.Fatal("model override lost")

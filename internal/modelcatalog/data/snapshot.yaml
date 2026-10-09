@@ -1,5 +1,5 @@
 # Records which chord-models revision this snapshot was synced from, written
 # by scripts/sync_model_catalog.sh. The generator copies it into catalog.json
 # and the golden test keeps both honest. Not part of the upstream repository.
-repository: https://github.com/keakon/chord-models
-revision: v2026-10-08.5
+repository: https://github.com/keakon/chord-models.git
+revision: v2026-10-09.1
