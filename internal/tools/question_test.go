@@ -15,6 +15,9 @@ func TestQuestionArgumentModesAndPolicies(t *testing.T) {
 		{"sync", `{"questions":[{"question":"Which?","header":"Choice"}]}`, true},
 		{"async", `{"questions":[{"question":"Which?","header":"Choice"}],"wait":false}`, true},
 		{"existing", `{"wait_for":["q-1"]}`, true},
+		{"padded_wait_id", `{"wait_for":["q-1",""]}`, true},
+		{"blank_wait_for_with_questions", `{"questions":[{"question":"Which?","header":"Choice"}],"wait":false,"wait_for":[""]}`, true},
+		{"blank_wait_for_only", `{"wait_for":[" "]}`, false},
 		{"empty", `{}`, false},
 		{"both", `{"questions":[{"question":"Which?","header":"Choice"}],"wait_for":["q-1"]}`, false},
 		{"wait_with_existing", `{"wait_for":["q-1"],"wait":true}`, false},
@@ -37,6 +40,60 @@ func TestQuestionArgumentModesAndPolicies(t *testing.T) {
 		})
 	}
 }
+
+// TestDecodeQuestionArgsBlankWaitFor pins the tolerance for the shape models
+// kept producing in practice: a valid questions payload padded with an empty
+// wait_for placeholder (the call never reached the dialog because the old XOR
+// check rejected it). Both error messages must also name the fields involved so
+// the model can fix a genuinely ambiguous call.
+func TestDecodeQuestionArgsBlankWaitFor(t *testing.T) {
+	args, err := DecodeQuestionArgs(json.RawMessage(`{"questions":[{"question":"Which?","header":"Choice"}],"wait":false,"wait_for":[""]}`))
+	if err != nil {
+		t.Fatalf("blank wait_for placeholder must decode: %v", err)
+	}
+	if len(args.Questions) != 1 || len(args.WaitFor) != 0 || args.Waits() {
+		t.Fatalf("args = %#v, want questions kept, placeholder dropped, async", args)
+	}
+
+	args, err = DecodeQuestionArgs(json.RawMessage(`{"wait_for":[" q-1 ",""]}`))
+	if err != nil {
+		t.Fatalf("padded wait_for must decode: %v", err)
+	}
+	if len(args.WaitFor) != 1 || args.WaitFor[0] != "q-1" {
+		t.Fatalf("WaitFor = %#v, want [q-1]", args.WaitFor)
+	}
+
+	_, err = DecodeQuestionArgs(json.RawMessage(`{"questions":[{"question":"Which?","header":"Choice"}],"wait_for":["q-1"]}`))
+	if err == nil || !strings.Contains(err.Error(), "questions") || !strings.Contains(err.Error(), "wait_for") {
+		t.Fatalf("mutual exclusion error = %v, want both field names", err)
+	}
+
+	if _, err = DecodeQuestionArgs(json.RawMessage(`{"wait_for":[""]}`)); err == nil || !strings.Contains(err.Error(), "provide") {
+		t.Fatalf("empty error = %v, want provide-message", err)
+	}
+}
+
+func TestQuestionExecuteAcceptsBlankWaitForPlaceholder(t *testing.T) {
+	raw := json.RawMessage(`{"questions":[{"question":"Which?","header":"Choice"}],"wait":false,"wait_for":[""]}`)
+	called := false
+	tool := NewQuestionTool(func(_ context.Context, args QuestionArgs) (QuestionResult, error) {
+		called = true
+		if len(args.WaitFor) != 0 || args.Waits() {
+			t.Fatalf("args = %#v, want async questions without wait_for", args)
+		}
+		return QuestionResult{Status: QuestionStatusAccepted, QuestionIDs: []string{"q-1"}}, nil
+	})
+	// The schema must let the placeholder through: rejecting it in validation
+	// would put the dialog back out of reach for the same model shape.
+	if err := ValidateToolArgs(tool, raw); err != nil {
+		t.Fatalf("schema rejected blank wait_for placeholder: %v", err)
+	}
+	result, err := tool.Execute(context.Background(), raw)
+	if err != nil || !called {
+		t.Fatalf("called=%v result=%q err=%v", called, result, err)
+	}
+}
+
 func TestQuestionExecuteReportsRuntimeResults(t *testing.T) {
 	tool := NewQuestionTool(func(_ context.Context, args QuestionArgs) (QuestionResult, error) {
 		if args.Waits() {

@@ -123,8 +123,15 @@ func DecodeQuestionArgs(raw json.RawMessage) (QuestionArgs, error) {
 		}
 		args = QuestionArgs{Questions: []QuestionItem{single.Questions}, Wait: single.Wait, WaitFor: single.WaitFor}
 	}
-	if (len(args.Questions) == 0) == (len(args.WaitFor) == 0) {
+	// Models sometimes pad optional arrays with blank placeholders; a blank ID
+	// can never match a stored question, so drop it instead of failing a call
+	// that only wanted to create questions.
+	args.WaitFor = nonemptyWaitForIDs(args.WaitFor)
+	switch {
+	case len(args.Questions) == 0 && len(args.WaitFor) == 0:
 		return args, fmt.Errorf("provide either nonempty questions or wait_for")
+	case len(args.Questions) > 0 && len(args.WaitFor) > 0:
+		return args, fmt.Errorf("questions and wait_for are mutually exclusive; provide only one")
 	}
 	if len(args.WaitFor) > 0 {
 		if args.Wait != nil {
@@ -132,7 +139,7 @@ func DecodeQuestionArgs(raw json.RawMessage) (QuestionArgs, error) {
 		}
 		seen := map[string]bool{}
 		for _, id := range args.WaitFor {
-			if strings.TrimSpace(id) == "" || seen[id] {
+			if seen[id] {
 				return args, fmt.Errorf("wait_for requires distinct nonempty IDs")
 			}
 			seen[id] = true
@@ -144,6 +151,19 @@ func DecodeQuestionArgs(raw json.RawMessage) (QuestionArgs, error) {
 		return args, err
 	}
 	return args, nil
+}
+
+func nonemptyWaitForIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return ids
+	}
+	out := ids[:0]
+	for _, id := range ids {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func ValidateQuestionItems(items []QuestionItem) error {
