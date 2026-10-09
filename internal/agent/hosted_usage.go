@@ -1,0 +1,40 @@
+package agent
+
+import (
+	"strconv"
+	"time"
+
+	"github.com/keakon/chord/internal/message"
+)
+
+type hostedWireAttempt struct {
+	response *message.Response
+	err      error
+	elapsed  time.Duration
+}
+
+func hostedAttemptDiagnostics(attempt hostedWireAttempt, retry, continuation bool) map[string]string {
+	callCount := 0
+	usageKnown := false
+	if resp := attempt.response; resp != nil {
+		usageKnown = resp.Usage != nil
+		if resp.Hosted != nil {
+			for _, call := range resp.Hosted.Calls {
+				// A continuation can contain only the result for an earlier call.
+				if call.Name != "" || len(call.Input) > 0 {
+					callCount++
+				}
+			}
+		}
+	}
+	return map[string]string{
+		"model_requests":      "1",
+		"observed_tool_calls": strconv.Itoa(callCount),
+		"retry":               strconv.FormatBool(retry),
+		"continuation":        strconv.FormatBool(continuation),
+		"request_failed":      strconv.FormatBool(attempt.err != nil),
+		"request_duration_ms": strconv.FormatInt(attempt.elapsed.Milliseconds(), 10),
+		"usage_known":         strconv.FormatBool(usageKnown),
+		"tool_fee_known":      "false",
+	}
+}

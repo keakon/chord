@@ -928,7 +928,7 @@ providers:
 
 `compat.hosted_tools` 列出该 provider 的模型可以提供的 hosted 工具；模型未配置该字段时继承 provider 列表；显式 `hosted_tools: []` 关闭该模型的全部 hosted 工具，非空列表替换 provider 列表。`web_search` 是内置条目，在 Anthropic Messages 上声明为 `web_search_20250305`，在 OpenAI Responses 上声明为 `web_search`。
 
-只有工具的路由源里存在已启用、能承载该声明的目标时，工具才会出现在模型的工具列表里。未设置 `model_pool` 时，路由源是调用 agent 当前的模型池；设置具名 `model_pool` 后，路由源是该 hosted 请求指定的模型池。否则 Chord 会隐藏工具。每次调用另发一条只带 query 的请求，在那里声明 hosted 搜索工具；Chord 把返回的原生结果作为普通工具结果返回，主对话请求从不声明该工具，历史里也不会出现 provider 专属块。`allowed_domains` 和 `blocked_domains` 按请求参数下发，不会拼进 query 文本。
+只有工具的路由源里存在已启用、能承载该声明的目标时，工具才会出现在模型的工具列表里。未设置 `model_pool` 时，路由源是调用 agent 当前的模型池；设置具名 `model_pool` 后，路由源是该 hosted 请求指定的模型池。否则 Chord 会隐藏工具。使用 hosted 桥时，每次调用另发一条只带 query 的请求，在那里声明 hosted 搜索工具；Chord 把返回的原生结果作为普通工具结果返回，主对话请求从不声明该工具，历史里也不会出现 provider 专属块。`allowed_domains` 和 `blocked_domains` 按请求参数下发，不会拼进 query 文本。
 
 OpenAI 的搜索限制取决于型号和子请求的推理设置：`gpt-5` 在 `reasoning.effort: minimal` 下不支持网络搜索，`gpt-5.4` 在 `reasoning.effort: none` 下可能降低结果质量。各型号支持范围以 [OpenAI 的 web search 指南](https://developers.openai.com/api/docs/guides/tools-web-search)为准。
 

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -14,6 +15,7 @@ type hostedRequestProvider struct {
 	llm.Provider
 	governor     *resourceGovernor
 	providerName string
+	observe      func(*message.Response, error, time.Duration)
 }
 
 func (p hostedRequestProvider) CompleteStream(ctx context.Context, key, model, system string, messages []message.Message, defs []message.ToolDefinition, maxTokens int, tuning llm.RequestTuning, cb llm.StreamCallback) (*message.Response, error) {
@@ -22,5 +24,10 @@ func (p hostedRequestProvider) CompleteStream(ctx context.Context, key, model, s
 		return nil, fmt.Errorf("acquire hosted LLM request capacity: %w", err)
 	}
 	defer release()
-	return p.Provider.CompleteStream(ctx, key, model, system, messages, defs, maxTokens, tuning, cb)
+	started := time.Now()
+	resp, err := p.Provider.CompleteStream(ctx, key, model, system, messages, defs, maxTokens, tuning, cb)
+	if p.observe != nil {
+		p.observe(resp, err, time.Since(started))
+	}
+	return resp, err
 }

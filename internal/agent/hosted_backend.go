@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
@@ -232,6 +233,7 @@ type hostedCaller struct {
 	pool     []llm.FallbackModel
 	cursor   int
 	source   hostedRouteSource
+	requests int // wire attempts across targets, keys, and continuations
 }
 
 // resolveCaller validates the view default against the request context and
@@ -478,8 +480,14 @@ func (b *hostedBackend) runAttempt(ctx context.Context, caller *hostedCaller, ta
 		return nil, err
 	}
 	prompt := tools.RenderHostedPrompt(spec, args)
+	var attempts []hostedWireAttempt
 	clientTarget := target
-	clientTarget.ProviderImpl = hostedRequestProvider{Provider: target.ProviderImpl, governor: b.agent.governor, providerName: target.ProviderConfig.Name()}
+	clientTarget.ProviderImpl = hostedRequestProvider{
+		Provider: target.ProviderImpl, governor: b.agent.governor, providerName: target.ProviderConfig.Name(),
+		observe: func(resp *message.Response, err error, elapsed time.Duration) {
+			attempts = append(attempts, hostedWireAttempt{response: resp, err: err, elapsed: elapsed})
+		},
+	}
 	client := newAuxClientFromPool([]llm.FallbackModel{clientTarget}, 0, hostedToolMaxOutputTokens, b.agent.ServiceTier())
 	if client == nil {
 		return nil, fmt.Errorf("could not build a client for the target")
@@ -517,7 +525,10 @@ func (b *hostedBackend) runAttempt(ctx context.Context, caller *hostedCaller, ta
 		if unknown, ok := errors.AsType[*llm.HostedOutcomeUnknownError](err); ok && resp == nil {
 			resp = unknown.Response
 		}
-		b.recordAttemptUsage(ctx, caller, client, spec.Name, resp)
+		for i, attempt := range attempts {
+			b.recordAttemptUsage(ctx, caller, client, spec.Name, attempt, continuation > 0 && i == 0)
+		}
+		attempts = attempts[:0]
 		if err != nil {
 			if continuation > 0 && ctx.Err() == nil {
 				return nil, &llm.HostedOutcomeUnknownError{Cause: err, Response: resp}
@@ -570,10 +581,10 @@ func hostedToolHintSystemPrompt(tool string) string {
 	return fmt.Sprintf("%s Always call the %s tool for the request before answering.", hostedToolSystemPrompt, tool)
 }
 
-// recordAttemptUsage books every attempt that produced a response, including
-// attempts whose result later fails validation: those tokens were spent.
-func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCaller, client *llm.Client, tool string, resp *message.Response) {
-	if b == nil || b.agent == nil || resp == nil {
+// recordAttemptUsage books every wire attempt, including failed attempts and
+// protocol continuations. Missing usage and tool fees remain unknown.
+func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCaller, client *llm.Client, tool string, attempt hostedWireAttempt, continuation bool) {
+	if b == nil || b.agent == nil {
 		return
 	}
 	selectedRef := client.PrimaryModelRef()
@@ -582,9 +593,11 @@ func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCa
 	if serviceTier == "" {
 		serviceTier = client.EffectiveServiceTierForModelRef(runningRef)
 	}
-	var diagnostic map[string]string
-	if resp.Hosted != nil {
-		diagnostic = map[string]string{tool + "_requests": strconv.Itoa(len(resp.Hosted.Calls))}
+	diagnostic := hostedAttemptDiagnostics(attempt, caller.requests > 0 && !continuation, continuation)
+	caller.requests++
+	var usage *message.TokenUsage
+	if attempt.response != nil {
+		usage = attempt.response.Usage
 	}
 	agentID, agentKind, agentName := identity.MainAgentID, identity.MainAgentID, b.agent.currentAgentName()
 	turnID := tools.TurnIDFromContext(ctx)
@@ -600,7 +613,7 @@ func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCa
 			agentName = sub.agentDefName
 		}
 	}
-	b.agent.recordUsage(agentID, agentKind, agentName, tool, selectedRef, runningRef, turnID, resp.Usage, serviceTier, diagnostic)
+	b.agent.recordUsage(agentID, agentKind, agentName, tool, selectedRef, runningRef, turnID, usage, serviceTier, diagnostic)
 }
 
 // hostedObservationFromResponse enforces the success contract and annotates

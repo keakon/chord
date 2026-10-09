@@ -271,11 +271,13 @@ func parseHostedToolArgs(raw json.RawMessage) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	var args map[string]any
-	if err := json.Unmarshal(trimmed, &args); err != nil {
+	value, err := decodeArgsForSchema(nil, trimmed, nil)
+	if err != nil {
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
-	if args == nil {
-		args = map[string]any{}
+	args, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid arguments: expected an object")
 	}
 	return args, nil
 }
@@ -339,15 +341,17 @@ func RenderHostedPrompt(spec HostedToolSpec, args map[string]any) string {
 		}
 		return string(encoded)
 	}
-	out := template
+	replacements := make([]string, 0, len(args)*2)
 	for name, value := range args {
 		placeholder := "{" + name + "}"
-		if !strings.Contains(out, placeholder) {
+		if !strings.Contains(template, placeholder) {
 			continue
 		}
-		out = strings.ReplaceAll(out, placeholder, hostedArgText(value))
+		replacements = append(replacements, placeholder, hostedArgText(value))
 	}
-	return out
+	// Replacer scans only the template; inserted argument text is never
+	// interpreted as another placeholder.
+	return strings.NewReplacer(replacements...).Replace(template)
 }
 
 func hostedArgText(value any) string {
@@ -368,11 +372,7 @@ func copyHostedDeclaration(tool map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var copied map[string]any
-	if err := json.Unmarshal(encoded, &copied); err != nil {
-		return nil, err
-	}
-	return copied, nil
+	return parseHostedToolArgs(encoded)
 }
 
 // resolveHostedArgs replaces {"$arg": "<name>"} placeholders in a decoded
@@ -461,6 +461,7 @@ func formatHostedObservation(obs *message.HostedObservation) string {
 	}
 	var b strings.Builder
 	if summary := strings.TrimSpace(obs.Summary); summary != "" {
+		b.WriteString("Assistant summary:\n")
 		b.WriteString(summary)
 		b.WriteString("\n\n")
 	}

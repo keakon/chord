@@ -26,34 +26,7 @@ func mergeHostedObservations(dst, src *message.HostedObservation) *message.Hoste
 	if dst == nil {
 		return src
 	}
-	byID := make(map[string]int, len(dst.Calls))
-	for i, c := range dst.Calls {
-		if c.ID != "" {
-			byID[c.ID] = i
-		}
-	}
-	for _, c := range src.Calls {
-		if i, ok := byID[c.ID]; ok && c.ID != "" {
-			if len(c.Result) > 0 || c.Error != "" {
-				old := &dst.Calls[i]
-				if c.Name == "" {
-					c.Name = old.Name
-				}
-				if len(c.Input) == 0 {
-					c.Input = old.Input
-				}
-				if c.Kind == "" || old.Kind == "server_tool_use" {
-					c.Kind = old.Kind
-				}
-				*old = c
-			}
-		} else {
-			dst.Calls = append(dst.Calls, c)
-			if c.ID != "" {
-				byID[c.ID] = len(dst.Calls) - 1
-			}
-		}
-	}
+	dst.Calls = message.MergeHostedCalls(dst.Calls, src.Calls)
 	if src.Summary != "" {
 		dst.Summary = src.Summary
 	}

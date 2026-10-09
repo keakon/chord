@@ -214,8 +214,14 @@ func formatWebSearchObservation(obs *message.HostedObservation) string {
 		return "(no search results returned)"
 	}
 	if summary := strings.TrimSpace(obs.Summary); summary != "" {
+		b.WriteString("Assistant summary (not full source text):\n")
 		b.WriteString(summary)
 		b.WriteString("\n\n")
+	}
+	for _, call := range obs.Calls {
+		if len(call.Input) > 0 {
+			fmt.Fprintf(&b, "Provider-reported input: %s\n", hostedPayloadSnippet(call.Input))
+		}
 	}
 	sources := webSearchObservationSources(obs)
 	if len(sources) == 0 {
@@ -298,7 +304,7 @@ func webSearchObservationSources(obs *message.HostedObservation) []hostedSearchS
 			}
 		}
 	}
-	for _, citation := range webSearchObservationCitations(obs) {
+	for _, citation := range message.WebSearchCitations(obs.Items) {
 		add(citation.URL, citation.Title)
 	}
 	return out

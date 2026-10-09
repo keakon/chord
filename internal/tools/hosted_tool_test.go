@@ -455,3 +455,55 @@ func TestHostedToolCatalogModelPoolOverlay(t *testing.T) {
 		t.Fatalf("blank model_pool = %q, want unset", got)
 	}
 }
+
+func TestHostedArgumentsPreserveNumbersAndLiteralPlaceholders(t *testing.T) {
+	backend := &stubHostedBackend{available: true, obs: &message.HostedObservation{}}
+	spec := HostedToolSpec{
+		Name: "sample", Prompt: "Find {query}. {query} {unknown} {record_id} {nested}",
+		Parameters: map[string]any{"type": "object", "properties": map[string]any{
+			"query":     map[string]any{"type": "string"},
+			"label":     map[string]any{"type": "string"},
+			"record_id": map[string]any{"type": "integer"},
+			"nested":    map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "number"}}}},
+		}},
+		Declarations: map[string]config.HostedToolDeclarationConfig{
+			config.ProviderTypeResponses: {Tool: map[string]any{"type": "sample", "id": map[string]any{"$arg": "record_id"}, "nested": map[string]any{"$arg": "nested"}, "limit": json.Number("9007199254740993")}},
+		},
+	}
+	tool := NewHostedTool(spec, backend)
+	raw := json.RawMessage(`{"query":"literal {label}","label":"changed","record_id":9007199254740993,"nested":[{"value":1.234567890123456789}]}`)
+	sanitized, _, _, err := SanitizeUnknownArgsWithDiagnostics(tool, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tool.Execute(context.Background(), sanitized); err != nil {
+		t.Fatal(err)
+	}
+	args := backend.runs[0].args
+	for range 100 {
+		got := RenderHostedPrompt(spec, args)
+		want := `Find literal {label}. literal {label} {unknown} 9007199254740993 [{"value":1.234567890123456789}]`
+		if got != want {
+			t.Fatalf("prompt = %q, want %q", got, want)
+		}
+	}
+	decl, err := ResolveHostedDeclaration(spec, config.ProviderTypeResponses, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"id":9007199254740993,"limit":9007199254740993,"nested":[{"value":1.234567890123456789}],"type":"sample"}`
+	if string(decl.Tool) != want {
+		t.Fatalf("declaration = %s", decl.Tool)
+	}
+	if got := RenderHostedPrompt(HostedToolSpec{}, args); !strings.Contains(got, `"record_id":9007199254740993`) {
+		t.Fatalf("JSON prompt = %s", got)
+	}
+}
+
+func TestHostedArgumentsRejectTrailingJSON(t *testing.T) {
+	for _, raw := range []string{`{} {}`, `{} extra`, `null {}`, `[]`, `42`} {
+		if _, err := parseHostedToolArgs(json.RawMessage(raw)); err == nil {
+			t.Errorf("accepted %s", raw)
+		}
+	}
+}
