@@ -513,3 +513,73 @@ func TestHandleTurnCancelledIgnoresStaleEventAfterNewTurn(t *testing.T) {
 		}
 	}
 }
+
+// TestCancelTurnParksMailboxDeliveryUntilUserAction pins the mailbox half of the
+// parked-queue contract on the cancel path: closing out a cancelled turn marks
+// the batch it had not consumed as retryable and re-queues it, and that retry
+// must wait for the next explicit user action. Otherwise the next global idle
+// starts a fresh turn by itself and a user cancel reads as inert (Escape looks
+// like it did nothing).
+func TestCancelTurnParksMailboxDeliveryUntilUserAction(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn()
+	if a.turn == nil {
+		t.Fatal("expected active turn")
+	}
+	mailbox := &SubAgentMailboxMessage{
+		MessageID: "worker-1-1",
+		AgentID:   "worker-1",
+		TaskID:    "task-1",
+		Kind:      SubAgentMailboxKindCompleted,
+		Summary:   "finished review",
+	}
+	a.activeSubAgentMailboxes = []*SubAgentMailboxMessage{mailbox}
+	a.activeSubAgentMailbox = mailbox
+	a.activeSubAgentMailboxAck = true
+
+	if !a.CancelCurrentTurn() {
+		t.Fatal("CancelCurrentTurn() = false, want true")
+	}
+	var cancelEvt Event
+	select {
+	case cancelEvt = <-a.eventCh:
+		if _, ok := cancelEvt.Payload.(*TurnCancelledPayload); !ok {
+			t.Fatalf("payload = %T, want *TurnCancelledPayload", cancelEvt.Payload)
+		}
+	default:
+		t.Fatal("expected a turn-cancelled event")
+	}
+	a.handleTurnCancelled(cancelEvt)
+	drainAgentEvents(a.outputCh)
+
+	if a.turn != nil {
+		t.Fatal("expected turn to be cleared after cancellation")
+	}
+	if !a.mailboxDeliveryPaused.Load() {
+		t.Fatal("a cancelled main turn must park mailbox delivery")
+	}
+	if a.hasRunnableMailboxWork() {
+		t.Fatal("a parked mailbox retry must not count as runnable automatic work")
+	}
+	if !a.emitGlobalIdleIfReady() {
+		t.Fatal("global idle must be reportable while the retry waits for a user action")
+	}
+	if a.turn != nil {
+		t.Fatal("a parked mailbox retry must not start a turn on its own")
+	}
+	if queued := len(a.subAgentInbox.urgent) + len(a.subAgentInbox.normal); queued == 0 {
+		t.Fatal("the retryable mailbox message must stay queued for the next user action")
+	}
+
+	// The next explicit user action resumes delivery, and the retry rides that
+	// request instead of opening a turn on its own.
+	a.handleUserMessage(Event{Payload: "the next action"})
+	if a.mailboxDeliveryPaused.Load() {
+		t.Fatal("a user action must resume mailbox delivery")
+	}
+	waitForAgentState(t, "mailbox retry staged by the next user action", func() bool {
+		return len(a.pendingSubAgentMailboxes) > 0 || len(a.activeSubAgentMailboxes) > 0 ||
+			countSubAgentMailboxMessages(a.ctxMgr.Snapshot(), mailbox.MessageID) == 1
+	})
+	drainAgentEvents(a.outputCh)
+}

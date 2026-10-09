@@ -246,6 +246,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - A tool call waiting behind other parallel calls now shows the queued status icon as soon as it is queued. The card kept the pending icon — and an expanded card kept its body — until an unrelated redraw, such as clicking the card.
 
+- Cancelling a turn keeps the agent idle: a background result that was still waiting for delivery no longer starts a new turn on its own, so `Esc` stops the agent instead of immediately re-sending the same request. The result is delivered with your next input.
+
 ## 0.8.1 - 2026-09-16
 
 ### Highlights

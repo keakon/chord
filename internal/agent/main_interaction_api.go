@@ -289,7 +289,6 @@ func (a *MainAgent) ContinueFromContextForTarget(conversation ConversationTarget
 		sub.continueWithContextAppends(a.drainOwnedSubAgentMailboxes(sub.instanceID), true)
 		return
 	}
-	a.mailboxDeliveryPaused.Store(false)
 	a.sendEvent(Event{Type: EventContinue})
 }
 

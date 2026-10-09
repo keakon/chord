@@ -221,6 +221,7 @@ func (a *MainAgent) dispatch(evt Event) {
 	case EventJobFinished:
 		a.handleJobFinished(evt)
 	case EventContinue:
+		a.mailboxDeliveryPaused.Store(false)
 		a.handleContinueFromContext()
 	case EventHandoffResolve:
 		a.handleHandoffResolveEvent(evt)

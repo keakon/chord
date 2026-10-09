@@ -133,6 +133,9 @@ type TurnCancelledPayload struct {
 	// drain so cancellation does not immediately auto-run any remaining queued
 	// work on the IdleEvent it just produced.
 	KeepPendingUserMessagesQueued bool
+	// PauseMailboxDelivery prevents retryable mailbox results from opening a
+	// new turn until the next explicit user action.
+	PauseMailboxDelivery bool
 	// CommitPendingUserMessagesWithoutTurn appends queued user messages to the
 	// durable context/transcript but does not start a follow-up LLM turn.
 	CommitPendingUserMessagesWithoutTurn bool

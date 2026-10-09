@@ -614,7 +614,7 @@ type MainAgent struct {
 	spoolAppendMu            sync.Mutex          // serializes mailbox.jsonl append/rollback so a recorded spool-index byte span bounds one record
 	subAgentMailboxIDs       map[string]struct{} // session-scoped idempotency keys for persisted and live mailbox events
 	subAgentMailboxConsumed  map[string]struct{} // consumed mailbox IDs loaded once and updated with ack writes
-	mailboxDeliveryPaused    atomic.Bool         // restored sessions wait for explicit user continuation before mailbox delivery
+	mailboxDeliveryPaused    atomic.Bool         // restored sessions and user-cancelled turns hold mailbox delivery until an explicit user action
 	pendingSubAgentMailboxes []*SubAgentMailboxMessage
 	activeSubAgentMailboxes  []*SubAgentMailboxMessage
 	activeSubAgentMailbox    *SubAgentMailboxMessage
@@ -1446,7 +1446,9 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	if a.handleQuestionUserCommand(content, requestID) {
 		return
 	}
-	a.mailboxDeliveryPaused.Store(false)
+	if !a.cancelCoversAcceptedOrder(acceptedOrder) {
+		a.mailboxDeliveryPaused.Store(false)
+	}
 	if a.questions.paused {
 		a.handleQuestionCommand(&questionCommand{operation: QuestionOperation{Operation: questionOpResume, OperationID: makeRequestID()}, ctx: a.parentCtx})
 	}
@@ -1532,7 +1534,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	if a.cancelCoversAcceptedOrder(acceptedOrder) {
 		a.emitInputResult(requestID, InputRejected, "cancelled before model work started", turnID)
 		log.Infof("accepted user message cancelled before its first request order=%v turn_id=%v", acceptedOrder, turnID)
-		a.handleTurnCancelled(a.abortTurn(a.turn))
+		a.handleTurnCancelled(a.abortTurn(a.turn, true))
 		return
 	}
 
@@ -1662,6 +1664,11 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 		return
 	}
 
+	if payload.PauseMailboxDelivery {
+		// Publish the pause on the loop before closeout requeues the batch:
+		// the next idle drain must not race the off-loop cancel caller.
+		a.mailboxDeliveryPaused.Store(true)
+	}
 	a.pauseQuestionWork()
 	a.mainLLMRequestInFlight.Store(false)
 	// Cancelling the turn ends it: nothing resumes behind the pending
@@ -1761,7 +1768,7 @@ func (a *MainAgent) handleTurnCancelRequested(evt Event) {
 		return
 	}
 	log.Infof("cancel request applied to active turn accepted_up_to=%v turn_id=%v", payload.AcceptedUpTo, a.turn.ID)
-	a.handleTurnCancelled(a.abortTurn(a.turn))
+	a.handleTurnCancelled(a.abortTurn(a.turn, true))
 }
 
 func (a *MainAgent) resumeTurnAfterRoutingInvalidation(turnID uint64) bool {

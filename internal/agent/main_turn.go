@@ -125,7 +125,7 @@ func (a *MainAgent) CancelCurrentTurn() bool {
 
 	cancelled := false
 	if t != nil {
-		a.sendEvent(a.abortTurn(t))
+		a.sendEvent(a.abortTurn(t, true))
 		cancelled = true
 	} else {
 		// No turn yet, but messages may already be accepted and waiting in the
@@ -150,7 +150,7 @@ func (a *MainAgent) CancelCurrentTurn() bool {
 // the tool calls that were cancelled with it, and reports them for synthetic
 // terminal results. Off-loop callers must send the event; the loop may hand it
 // to handleTurnCancelled directly.
-func (a *MainAgent) abortTurn(t *Turn) Event {
+func (a *MainAgent) abortTurn(t *Turn, pauseMailboxDelivery bool) Event {
 	pending := t.PendingToolCalls.Load()
 	// Cancel the whole turn before cancelling any narrower tool-batch context.
 	// Tool goroutines use turn.Ctx.Err() to distinguish a user turn cancellation
@@ -175,6 +175,7 @@ func (a *MainAgent) abortTurn(t *Turn) Event {
 			Calls:                                merged,
 			MarkToolCallsFailed:                  true,
 			KeepPendingUserMessagesQueued:        true,
+			PauseMailboxDelivery:                 pauseMailboxDelivery,
 			CommitPendingUserMessagesWithoutTurn: true,
 		},
 	}
@@ -206,7 +207,7 @@ func (a *MainAgent) settleStalledTurn(reason string) {
 		return
 	}
 	log.Warnf("settling stalled turn with no pending work turn_id=%v reason=%v", a.turn.ID, reason)
-	a.handleTurnCancelled(a.abortTurn(a.turn))
+	a.handleTurnCancelled(a.abortTurn(a.turn, false))
 	a.compactionContinuationStalled = false
 }
 
@@ -860,6 +861,7 @@ func (a *MainAgent) drainPendingUserMessages() {
 
 	log.Debugf("draining pending user messages count=%v", len(batch))
 	if manualInputConsumed {
+		a.mailboxDeliveryPaused.Store(false)
 		a.stageNextSubAgentMailboxBatch()
 	}
 	a.newTurn()
@@ -894,5 +896,5 @@ func (a *MainAgent) closeCoveredPendingUserMessagesAsCancelled(pending []pending
 	}
 	a.syncBugTriagePromptFromSnapshot()
 	log.Infof("queued user messages cancelled before their turn count=%v turn_id=%v", len(pending), turnID)
-	a.handleTurnCancelled(a.abortTurn(a.turn))
+	a.handleTurnCancelled(a.abortTurn(a.turn, true))
 }
