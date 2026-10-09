@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/modelcatalog"
 )
 
 func setupDoctorConfigHome(t *testing.T, content string) {
@@ -115,6 +117,59 @@ func TestRunDoctorConfigMissingGlobal(t *testing.T) {
 	err := runDoctorConfig(doctorConfigOptions{Out: &out})
 	if err == nil || err.Error() != initialSetupRequiredMessage {
 		t.Fatalf("err = %v, want initial setup required", err)
+	}
+}
+
+// The catalog identity of the effective snapshot is part of the diagnostics
+// surface: script consumers get it as JSON, humans as a text line.
+func TestRunDoctorConfigReportsCatalog(t *testing.T) {
+	setupDoctorConfigHome(t, "providers:\n  sample:\n    type: responses\n")
+	t.Chdir(t.TempDir())
+
+	var out bytes.Buffer
+	if err := runDoctorConfig(doctorConfigOptions{Out: &out}); err != nil {
+		t.Fatalf("runDoctorConfig: %v", err)
+	}
+	if !strings.Contains(out.String(), "model catalog: "+modelcatalog.Version()) {
+		t.Fatalf("output = %q, want the effective catalog version", out.String())
+	}
+
+	var jsonOut bytes.Buffer
+	if err := runDoctorConfig(doctorConfigOptions{Out: &jsonOut, JSON: true}); err != nil {
+		t.Fatalf("runDoctorConfig JSON: %v", err)
+	}
+	var report doctorConfigReport
+	if err := json.Unmarshal(jsonOut.Bytes(), &report); err != nil {
+		t.Fatalf("decode JSON report: %v\n%s", err, jsonOut.String())
+	}
+	if report.Catalog.Version != modelcatalog.Version() || report.Catalog.FromRefreshCache {
+		t.Fatalf("catalog report = %+v, want the embedded snapshot", report.Catalog)
+	}
+	if report.Catalog.Source == nil || report.Catalog.Source.Repository == "" {
+		t.Fatalf("catalog report = %+v, want the upstream source", report.Catalog)
+	}
+}
+
+func TestDescribeDoctorCatalog(t *testing.T) {
+	embedded := describeDoctorCatalog(doctorConfigCatalogReport{
+		Version: "2026-10-01.1",
+		Source:  &modelcatalog.CatalogSource{Repository: "https://example.invalid/catalog", Revision: "v2026-10-01.1"},
+	})
+	for _, want := range []string{"2026-10-01.1", "embedded snapshot of https://example.invalid/catalog @ v2026-10-01.1"} {
+		if !strings.Contains(embedded, want) {
+			t.Fatalf("embedded = %q, want mention of %q", embedded, want)
+		}
+	}
+	cached := describeDoctorCatalog(doctorConfigCatalogReport{
+		Version:          "2026-10-02.1",
+		FromRefreshCache: true,
+		Commit:           "0123456789abcdef",
+		CacheDetail:      "cache version 2026-10-01.1 is older than the catalog in effect",
+	})
+	for _, want := range []string{"refresh cache", "commit 0123456789abcdef", "local cache not in effect: cache version 2026-10-01.1"} {
+		if !strings.Contains(cached, want) {
+			t.Fatalf("cached = %q, want mention of %q", cached, want)
+		}
 	}
 }
 

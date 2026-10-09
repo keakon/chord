@@ -39,7 +39,7 @@ func guideConfigAdd(opts configAddOptions, providerName, wireModel string, provi
 		return opts, err
 	}
 	if exists {
-		fmt.Fprintf(t.out, "Using provider %q: %s (existing credentials and settings are preserved).\n", providerName, redactShowURL(provider.APIURL))
+		fmt.Fprintf(t.out, "Using provider %q: %s (existing credentials and settings are preserved).\n", providerName, redactConfigURL(provider.APIURL))
 	} else if strings.TrimSpace(opts.url) == "" {
 		fmt.Fprintln(t.out, "Enter the full API endpoint, e.g. https://gateway.example/v1/responses or /v1/chat/completions.")
 		for {
@@ -234,7 +234,7 @@ func confirmConfigAdd(t *setupTerminal, providerName, wireModel string, provider
 	if compression == "" {
 		compression = "off"
 	}
-	fmt.Fprintf(t.out, "Configuration to save:\n  model: %s/%s\n  API URL: %s\n  pool: %s -> %s\n  request compression: %s\n", providerName, wireModel, redactShowURL(apiURL), edit.poolName, edit.poolRef, compression)
+	fmt.Fprintf(t.out, "Configuration to save:\n  model: %s/%s\n  API URL: %s\n  pool: %s -> %s\n  request compression: %s\n", providerName, wireModel, redactConfigURL(apiURL), edit.poolName, edit.poolRef, compression)
 	if edit.borrowID != "" {
 		fmt.Fprintf(t.out, "  catalog recipe: %s (explicit settings take priority over catalog defaults)\n", edit.borrowID)
 	}

@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/modelcatalog"
 )
 
 type doctorConfigOptions struct {
@@ -22,8 +23,17 @@ type doctorConfigFileReport struct {
 	OK     bool     `json:"ok"`
 }
 
+type doctorConfigCatalogReport struct {
+	Version          string                      `json:"version"`
+	Source           *modelcatalog.CatalogSource `json:"source,omitempty"`
+	Commit           string                      `json:"commit,omitempty"`
+	FromRefreshCache bool                        `json:"from_refresh_cache"`
+	CacheDetail      string                      `json:"cache_detail,omitempty"`
+}
+
 type doctorConfigReport struct {
-	Files []doctorConfigFileReport `json:"files"`
+	Files   []doctorConfigFileReport  `json:"files"`
+	Catalog doctorConfigCatalogReport `json:"catalog"`
 	// Errors are problems of the effective config the runtime would start
 	// with, such as model pool references that do not resolve. They fail the
 	// command exactly like file issues.
@@ -101,6 +111,17 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 	}
 	report.Warnings = append(report.Warnings, config.ResolvedAdvisories(rc)...)
 
+	origin := modelcatalog.OriginInfo()
+	report.Catalog = doctorConfigCatalogReport{
+		Version:          origin.Version,
+		Source:           origin.Source,
+		Commit:           origin.Commit,
+		FromRefreshCache: origin.Cached,
+	}
+	if status := modelcatalog.CurrentCacheStatus(); status.Detail != "" {
+		report.Catalog.CacheDetail = status.Detail
+	}
+
 	report.OK = true
 	totalIssues := 0
 	for _, f := range report.Files {
@@ -131,6 +152,7 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 				}
 			}
 		}
+		fmt.Fprintln(out, describeDoctorCatalog(report.Catalog))
 		for _, problem := range report.Errors {
 			fmt.Fprintf(out, "problem: %s\n", problem)
 		}
@@ -150,4 +172,28 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 		return cliExitError{code: 2, err: fmt.Errorf("config has %d %s", totalIssues, plural)}
 	}
 	return nil
+}
+
+// describeDoctorCatalog names the snapshot the runtime resolves against and,
+// when a refresh cache is present but not in effect, why it was rejected.
+func describeDoctorCatalog(catalog doctorConfigCatalogReport) string {
+	kind := "embedded snapshot"
+	if catalog.FromRefreshCache {
+		kind = "refresh cache"
+	}
+	description := fmt.Sprintf("model catalog: %s (%s", catalog.Version, kind)
+	if catalog.Source != nil {
+		description += " of " + catalog.Source.Repository
+		if catalog.Source.Revision != "" {
+			description += " @ " + catalog.Source.Revision
+		}
+	}
+	if catalog.Commit != "" {
+		description += ", commit " + catalog.Commit
+	}
+	description += ")"
+	if catalog.CacheDetail != "" {
+		description += "; local cache not in effect: " + catalog.CacheDetail
+	}
+	return description
 }

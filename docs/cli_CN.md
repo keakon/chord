@@ -18,8 +18,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | --------------------------------- | ----------------------------------------------------------------- |
 | `chord`                           | 启动本地 TUI                                                      |
 | `chord auth [provider]`           | 用 `preset: codex` provider 登录 OAuth                            |
-| `chord config show`               | 查看带来源的有效配置，或浏览内置模型目录                          |
-| `chord config add <provider>/<model>` | 从模型目录添加模型引用并追加到模型池                              |
+| `chord config add [<provider>/<model>]` | 浏览已验证目录，或添加已知模型引用，并追加到模型池 |
 | `chord config advise`             | 查看并处理模型目录给出的配置建议                                    |
 | `chord config refresh-catalog`       | 从上游数据仓库拉取最新 tag 的目录快照                             |
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
@@ -209,44 +208,6 @@ chord acp
 
 客户端配置、客户端能看到什么、以及当前限制见 [ACP Agent 模式](./acp_CN.md)。
 
-## `chord config show`
-
-查看有效配置（项目层叠加在全局层之上），以及每个被跟踪字段的来源——它在哪一层、哪个文件、哪一行声明，覆盖 `catalog`、`global`、`project` 三层——外加每个模型的预算事实和结构化诊断。命令完全离线：只读取配置文件和环境变量，不初始化 LLM client、不刷新 OAuth 状态、不探测网络、不写任何文件。诊断只列出、不影响退出码；以通过/失败为准的入口是 `chord doctor config`。
-
-可能携带凭据的值（API key、token、authorization header、URL 中的凭据参数）在文本和 JSON 输出中都会脱敏。
-
-### Flag
-
-| Flag           | 说明                                                            |
-| -------------- | --------------------------------------------------------------- |
-| `--path <p>`   | 只输出某个点分配置路径的子树（例如 `providers.sample`）         |
-| `--catalog`    | 显示内置模型目录，而不是有效配置                                |
-| `--json`       | 输出机器可读的 JSON 报告                                        |
-
-JSON 的 `ok` 表示是否存在 error 级诊断；有错误时为 `false`，查询命令仍保持成功退出，配置是否通过检查以 `chord doctor config` 为准。Responses 模型另有 `request_settings`，分别显示 `store`、`parallel_tool_calls` 的取值、字段是否发送及其来源。它是只读说明，不是可写入 YAML 的配置字段；这里显示 `request_overrides` 补丁之前的默认值；工具字段需要请求含工具，档位或单次请求调优还可覆盖能力取值。
-
-`--path` 过滤的是有效配置，与 `--catalog` 互斥。路径按实际配置键匹配，provider 或模型名中的点保留为名称的一部分，例如 `providers.openai.models.gpt-6.1-sol.limit`。同一层有多个匹配键时，选择最长的键。
-
-### 目录视图
-
-加 `--catalog` 时，命令列出内置模型目录（见[内置模型目录](./configuration_CN.md#内置模型目录)）：每个托管 preset 的端点契约，以及每个已核验模型的限额与 reasoning 档位；被当前有效配置定义或引用的条目标为 `configured`，其余标为 `not configured`。该视图是只读参考：不写文件、不探测网络、不改动你的模型池，即使没有任何配置文件也能打开。
-
-### 示例
-
-```bash
-# 有效配置 + 来源 + 预算 + 诊断
-chord config show
-
-# 只看某个 provider 的子树
-chord config show --path providers.sample
-
-# 浏览内置模型目录
-chord config show --catalog
-
-# 脚本用的机器可读报告
-chord config show --json
-```
-
 ## `chord config advise`
 
 查看当前生效模型目录中已核验 `config_profile` 与用户显式配置之间的差异。它只提供确定性的配置建议，不会自动切换模型，也不声称某个设置适合所有任务。目录自动填充的默认值不会触发建议，只有用户明确写入且与 profile 不同的值才会出现。
@@ -289,11 +250,13 @@ chord config advise --keep-current
 - **自定义端点**：传 `--catalog <id>`，用自己的 wire 名继承目录模型的限额、模态和上下文压缩建议；同协议还会继承模型行为、compat、reasoning 变体和字段发送规则。地址、凭据和请求体压缩保持用户自己的设置。请求体压缩默认关闭，可手动设置 provider 的 `compress: gzip` 或 `compress: zstd`。
 - **未命中**：列出最接近的已验证模型及其目录 ID。交互终端中可按数字键立即选择目录模型，无需回车；按 `m` 可输入完整目录 ID，按 Esc 或 `0` 取消；模型的请求名称保持不变。非交互模式还会列出刷新得到的候选条目（标注 provider 作用域与来源），然后返回错误，不会自动采纳。
 
+不带参数运行时先进入目录浏览：列出托管 preset 以及这些 preset 下已配置的 provider，选定后再列出该 preset 已验证服务的 wire 模型，随后继续常规引导。非交互终端下必须显式传入 `<provider>/<model>`。
+
 在交互终端中运行时，命令会引导你选择目录模型、填写尚未配置的 provider 地址和密钥环境变量。选择后可从已有模型池中选择或创建新池，并配置推理档位和请求体压缩，最后展示解析后的限额与待写入设置，确认后才保存。编号菜单和 `y/n` 确认均直接响应按键；回车可接受显示的默认值。菜单中按 Esc、`q` 或 `0`，文本输入中输入 `q` / `cancel`，或拒绝保存，都可取消。地址、环境变量名和新池名称等文本输入需要回车；输入结束也会取消，配置和凭据文件保持原样。已有 provider 的地址和凭据会沿用；接受压缩默认值会保留已有设置，改变压缩选项会影响该 provider 下的全部模型。
 
 预览期间，若其他命令改变了所选 provider 的接入地址或协议，保存会停止，需要重新运行命令确认当前配置。配置与凭据分别保存；若配置已保存而凭据写入失败，错误提示会说明已保存的文件，以及需要在 `auth.yaml` 中补充的环境变量引用。
 
-脚本使用 `--no-interactive` 跳过引导与确认。stdin 或 stdout 被重定向时同样不会询问；缺失参数会给出错误。
+脚本使用 `--no-interactive` 跳过引导与确认。stdin 或 stdout 被重定向时同样不会询问；此时必须显式传入 `<provider>/<model>`，否则命令报错。
 
 既有池条目保持原顺序，新引用只追加。未涉及的 YAML 锚点和别名会保留。编辑共享值时，命令会生成独立配置，保持其他引用的有效值不变；`<<` 合并同样支持。
 
@@ -314,6 +277,9 @@ chord config advise --keep-current
 ### 示例
 
 ```bash
+# 浏览已验证的 provider 与模型，然后继续常规引导
+chord config add
+
 # 官方端点上的已验证模型：一条池引用，其余免填
 chord config add openai/gpt-6-sol
 
@@ -335,13 +301,13 @@ chord config add mygw2/gpt-6-sol-gw --keep-current
 
 ## `chord config refresh-catalog`
 
-从上游模型目录仓库（[chord-models](https://github.com/keakon/chord-models)）拉取最新版本 tag 到本地缓存。刷新快照按目录版本整体取代内置目录——绝不按条目合并——并在下一次 chord 命令启动时生效。刷新是显式联网操作：绝不在后台运行，任何失败都会保留原缓存和内置目录。`--repo <url>` 可换镜像源。用 `chord config show --catalog` 查看当前生效的快照。
+从上游模型目录仓库（[chord-models](https://github.com/keakon/chord-models)）拉取最新版本 tag 到本地缓存。刷新快照按目录版本整体取代内置目录——绝不按条目合并——并在下一次 chord 命令启动时生效。刷新是显式联网操作：绝不在后台运行，任何失败都会保留原缓存和内置目录。`--repo <url>` 可换镜像源。用 `chord doctor config` 查看当前生效的快照。
 
 ## `chord doctor config`
 
 检查全局与项目 `config.yaml` 里的未知字段、类型不对的值、YAML 语法错误，以及不合理的配置值（比如非法的 `retry_backoff`、负数 diagnostics 阈值）。命令会一次性列出所有问题，而不是遇到第一个就停。
 
-命令还会加载运行时将要使用的有效配置（项目层叠加在全局层之上），报告无法解析的模型池引用——引用了不存在的 provider 或 model，或使用了模型未定义的 `@variant`。解析类问题归属到各自的文件；这类有效配置问题以 `problem:` 行输出（`--json` 里是 `errors` 字段）。报告中还会列出 advisory：加载完全按原文生效、但实际行为可能不符合预期的设置，其中包括很可能已被更新的已验证模型取代的目录引用，以及显式模型设置与已核验 profile 不一致的配置，每条都附有接受建议或保留现状的命令。advisory 不会改变退出状态。
+命令还会加载运行时将要使用的有效配置（项目层叠加在全局层之上），报告无法解析的模型池引用——引用了不存在的 provider 或 model，或使用了模型未定义的 `@variant`。解析类问题归属到各自的文件；这类有效配置问题以 `problem:` 行输出（`--json` 里是 `errors` 字段）。报告还会给出当前生效的目录快照（`--json` 里是 `catalog` 字段）：版本、上游仓库与 tag、来自内嵌快照还是刷新缓存，以及缓存存在但未生效的原因。报告中还会列出 advisory：加载完全按原文生效、但实际行为可能不符合预期的设置，其中包括很可能已被更新的已验证模型取代的目录引用，以及显式模型设置与已核验 profile 不一致的配置，每条都附有接受建议或保留现状的命令。advisory 不会改变退出状态。
 
 Chord 的配置加载器遇到这些问题只会写日志并照常启动，把出错的值当作未配置处理。这个命令把它们显式列出来，方便你在不翻日志的情况下校验配置文件。
 

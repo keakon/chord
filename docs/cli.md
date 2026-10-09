@@ -18,8 +18,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | -------------------------------- | ---------------------------------------------------------------- |
 | `chord`                          | Run the local TUI                                                |
 | `chord auth [provider]`          | Sign in with a `preset: codex` OAuth provider                    |
-| `chord config show`              | Show the effective config with origins, or the built-in model catalog |
-| `chord config add <provider>/<model>` | Add a model reference from the model catalog and append it to a pool |
+| `chord config add [<provider>/<model>]` | Browse the verified catalog, or add a known model reference, and append it to a pool |
 | `chord config advise`            | Review and apply catalog-based model configuration recommendations |
 | `chord config refresh-catalog`       | Pull the latest tagged catalog snapshot from the upstream data repository |
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
@@ -209,44 +208,6 @@ chord acp
 
 See [ACP Agent Mode](./acp.md) for client setup, what the client sees, and current limits.
 
-## `chord config show`
-
-Show the effective configuration (project merged over global) with the origin of every tracked field — which config file and line declared it, across the `catalog`, `global`, and `project` layers — plus per-model budget facts and structured diagnostics. The command is fully offline: it reads the config files and environment variables only, and never initializes LLM clients, refreshes OAuth state, probes the network, or writes any file. Diagnostics are listed without changing the exit status; `chord doctor config` is the pass/fail entry.
-
-Values that may carry credentials (API keys, tokens, authorization headers, credential query parameters) are redacted in both text and JSON output.
-
-### Flags
-
-| Flag           | Description                                                                       |
-| -------------- | --------------------------------------------------------------------------------- |
-| `--path <p>`   | Restrict the output to a dotted config path (for example `providers.sample`)      |
-| `--catalog`    | Show the built-in model catalog instead of the effective config                   |
-| `--json`       | Write a machine-readable JSON report                                              |
-
-JSON `ok` is false when an error diagnostic exists; inspection still exits successfully, while `chord doctor config` provides the pass/fail check. Responses models also have `request_settings`, showing `store` and `parallel_tool_calls` values separately from field emission, with their sources. This is read-only explanation, not a YAML configuration field. These are defaults before `request_overrides` patches. Tool fields require tools in the request; variants or request tuning can override capability values.
-
-`--path` filters the effective config, so it cannot be combined with `--catalog`. Paths match actual configuration keys, preserving dots inside provider or model names, for example `providers.openai.models.gpt-6.1-sol.limit`. When several keys match at a level, the longest key wins.
-
-### Catalog view
-
-With `--catalog`, the command lists the built-in model catalog (see [Built-in model catalog](./configuration.md#built-in-model-catalog)): each managed preset's endpoint contract, and every verified model with its limits and reasoning variants, marked as `configured` when your effective config defines or references it and `not configured` otherwise. The view is read-only reference: it never writes files, probes the network, or previews into your pools, and it works with no config file at all.
-
-### Examples
-
-```bash
-# Effective config with origins, budgets, and diagnostics
-chord config show
-
-# Only one provider's subtree
-chord config show --path providers.sample
-
-# Browse the built-in model catalog
-chord config show --catalog
-
-# Machine-readable report for scripts
-chord config show --json
-```
-
 ## `chord config advise`
 
 Review explicit model settings that differ from a verified `config_profile` in the active model catalog. These are deterministic configuration recommendations, not automatic model selection or a claim that one setting is best for every task. Catalog-filled defaults do not produce recommendations; only an explicit user value that differs from the profile does.
@@ -283,6 +244,8 @@ chord config advise --keep-current
 
 Add a model reference to `config.yaml` and append it to a model pool, using the model catalog as the source of verified facts. The command is offline by default, and the candidate config is resolved in full before anything is written — the file is only replaced when that resolution reports no errors.
 
+Run the command without arguments to browse the catalog interactively: pick a managed provider (or one of your configured providers on that preset), then one of the wire models the preset is verified to serve, and the guided setup continues from there. Outside an interactive terminal, pass `<provider>/<model>` explicitly.
+
 How the model resolves:
 
 - **Wire name bound to the provider's preset** (for example `gpt-6.1-sol` under `preset: openai`): only a pool reference is written; context, modalities, reasoning variants and field send rules fill in at load.
@@ -293,7 +256,7 @@ In an interactive terminal, the command guides you through catalog selection and
 
 If another command changes the selected provider's endpoint or protocol while you review it, saving stops and you must run the command again to review the current endpoint. Configuration and credentials are saved separately. If credential saving fails after the configuration is saved, the error identifies the saved file and the environment-variable reference to add to `auth.yaml`.
 
-Use `--no-interactive` to skip prompts and confirmation in scripts. Redirecting stdin or stdout also disables prompts; missing arguments produce an error.
+Use `--no-interactive` to skip prompts and confirmation in scripts. Redirecting stdin or stdout also disables prompts; pass `<provider>/<model>` explicitly in that case, or the command fails.
 
 Existing pool entries keep their order — new references are appended. Untouched YAML anchors and aliases are preserved. Editing a shared value creates independent settings without changing other references; `<<` merges are supported too.
 
@@ -314,6 +277,9 @@ Existing pool entries keep their order — new references are appended. Untouche
 ### Examples
 
 ```bash
+# Browse verified providers and models, then finish the guided setup
+chord config add
+
 # A verified model on an official endpoint: one pool reference, nothing else
 chord config add openai/gpt-6-sol
 
@@ -335,13 +301,13 @@ chord config add mygw2/gpt-6-sol-gw --keep-current
 
 ## `chord config refresh-catalog`
 
-Pull the newest version tag of the upstream model catalog repository ([chord-models](https://github.com/keakon/chord-models)) into a local cache. A refreshed snapshot supersedes the built-in catalog as a whole — by catalog version, never merged entry by entry — and takes effect on the next start of every chord command. Refresh is an explicit network operation: it never runs in the background, and any failure leaves the previous cache and the built-in catalog untouched. Pass `--repo <url>` to pull from a different mirror. Use `chord config show --catalog` to see which snapshot is in effect.
+Pull the newest version tag of the upstream model catalog repository ([chord-models](https://github.com/keakon/chord-models)) into a local cache. A refreshed snapshot supersedes the built-in catalog as a whole — by catalog version, never merged entry by entry — and takes effect on the next start of every chord command. Refresh is an explicit network operation: it never runs in the background, and any failure leaves the previous cache and the built-in catalog untouched. Pass `--repo <url>` to pull from a different mirror. `chord doctor config` prints which snapshot is in effect.
 
 ## `chord doctor config`
 
 Check the global and project `config.yaml` files for unrecognized keys, wrongly typed values, malformed YAML, and invalid setting values (such as an unknown `retry_backoff` or a negative diagnostics threshold). The command reports every problem it finds in one pass instead of stopping at the first one.
 
-It also loads the effective config the runtime would start with (project merged over global) and reports model pool references that do not resolve — a reference naming an unknown provider or model, or a `@variant` the model does not define. Parse problems stay attributed to their file; such effective-config problems are reported as `problem:` lines (the `errors` field in `--json`). The report also lists advisories: settings that load exactly as written but may not behave as intended, including catalog references that a newer verified model likely supersedes and explicit model settings that differ from a verified profile. Each includes an action for accepting the recommendation or keeping the current choice. Advisories never change the exit status.
+It also loads the effective config the runtime would start with (project merged over global) and reports model pool references that do not resolve — a reference naming an unknown provider or model, or a `@variant` the model does not define. Parse problems stay attributed to their file; such effective-config problems are reported as `problem:` lines (the `errors` field in `--json`). The report also names the catalog snapshot in effect (`catalog` in `--json`): its version, upstream repository and tag, whether it came from the embedded snapshot or the refresh cache, and why a present cache was not installed. The report also lists advisories: settings that load exactly as written but may not behave as intended, including catalog references that a newer verified model likely supersedes and explicit model settings that differ from a verified profile. Each includes an action for accepting the recommendation or keeping the current choice. Advisories never change the exit status.
 
 Chord's config loader logs these problems and starts anyway, treating the offending value as not configured. This command surfaces them explicitly so you can validate a config file without reading the log.
 

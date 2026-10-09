@@ -201,7 +201,7 @@ model_pools:
     - codex/gpt-6-astra
 ```
 
-这些绑定继承 `1050000` 总窗口和 `128000` 最大输出。采用默认的 `64000` 请求输出预算时，Chord 规划的输入预算为 `986000`。若端点另有明确公布的独立输入上限，可显式配置，该值优先。用 `chord config show --catalog` 查询模型事实，加 `--json` 查看来源与价格适用范围。
+这些绑定继承 `1050000` 总窗口和 `128000` 最大输出。采用默认的 `64000` 请求输出预算时，Chord 规划的输入预算为 `986000`。若端点另有明确公布的独立输入上限，可显式配置，该值优先。模型事实、来源与价格适用范围发布在 [chord-models](https://github.com/keakon/chord-models) 仓库。
 
 `preset: codex` 可使用 `auth.yaml` 中的 OpenAI / ChatGPT OAuth 凭据。OAuth 条目通常是 mapping：
 
@@ -323,24 +323,15 @@ providers:
 
 Chord 内置一份版本化目录，收录编程模型事实、官方 API 接入信息，以及托管 preset（`openai`、`anthropic`、`gemini`、`codex`）的端点契约。目录随二进制分发，只读且完全离线：不会访问网络，也永远不会覆盖你写下的内容。
 
-先查看模型，再复制添加命令：
+先运行一条命令：
 
 ```bash
-chord config show --catalog
-chord config add openai/gpt-6.1-sol
+chord config add
 ```
 
-目录会列出全部已核验模型，包括没有托管 preset 的模型。`add` 可以直接
-创建首次配置，按官方文档填写 API 地址、请求模型名和密钥环境变量，并
-提示你设置哪个变量。目录不会保存或复制 API 密钥。已有 provider 会继续
-使用原地址和凭据。OAuth 模型还需执行提示中的 `chord auth <provider>` 登录。
+不带参数时，先列出托管 preset 和这些 preset 下已配置的 provider，再列出该 preset 已验证服务的 wire 模型，随后进入常规引导。已知目录 ID 可直接执行 `chord config add openai/gpt-6.1-sol`。`add` 可以直接创建首次配置，按官方文档填写 API 地址、请求模型名和密钥环境变量，并提示你设置哪个变量。目录不会保存或复制 API 密钥。已有 provider 会继续使用原地址和凭据。OAuth 模型还需执行提示中的 `chord auth <provider>` 登录。
 
-官方接入信息只用于生成配置，不表示已完成真实请求验证，也不提供端点
-专用的推理档位或字段发送规则。需要业务空间地址、自部署地址的模型仍需
-显式传入 `--url`；自定义请求模型名可用 `--catalog <vendor/model>` 借用事实。
-用 `chord config show --catalog --json` 查看完整来源、发布日期、价格适用
-范围和刷新得到的候选。候选不会填充运行默认值。获取目录更新请执行
-`chord config refresh-catalog`；普通查看和添加操作都可离线完成。
+官方接入信息只用于生成配置，不表示已完成真实请求验证，也不提供端点专用的推理档位或字段发送规则。需要业务空间地址、自部署地址的模型仍需显式传入 `--url`；自定义请求模型名可用 `--catalog <vendor/model>` 借用事实。完整来源、发布日期、价格适用范围和刷新得到的候选发布在 [chord-models](https://github.com/keakon/chord-models) 仓库；候选不会填充运行默认值。获取目录更新请执行 `chord config refresh-catalog`，普通添加操作都可离线完成。
 
 托管 preset 代表一份已核验的端点契约。provider 使用托管 preset 时，Chord 只在字段留空处填充 `type`、`api_url` 和 `auth_scheme`——你显式写的值始终优先；与契约冲突的取值（例如 preset 不使用的 `auth_scheme`，或非 OAuth preset 上的 `token_url`）会被判为配置错误。如果要把 provider 指向其他端点，删除 `preset` 并显式配置端点即可。
 
@@ -348,14 +339,13 @@ chord config add openai/gpt-6.1-sol
 
 - `limit.context`、`limit.input`、`limit.output` 和 reasoning `variants` 只在所有配置层都未声明时填充。用显式 null 清空的块保持清空，不会被目录重新填上。
 - 被 `model_pools` 引用但从未定义的模型会按目录整体创建，引用目录里的模型无需手工抄写限额。
-- 每个由目录填充的值都带 `catalog` 来源层，可用 `chord config show` 查询。
 - 默认只按 preset 下的精确 wire model ID 匹配；自定义 wire 名称可在模型下用 `catalog: openai/gpt-6.1-sol` 显式绑定稳定目录 ID，`catalog: false` 则关闭该模型的全部目录填充。
 
 目录只填充实际核验过的事实；未知事实（例如价格）保持缺席，不做猜测。事实条目附带核验来源与核验日期。
 
 无 preset 的自定义端点也可显式写 `catalog: openai/gpt-6.1-sol`，借用目录中的窗口、输入模态等模型事实；它不会继承官方线路的发送规则或档位。不存在的目录 ID 会报错。当前模型使用的结构错误会阻止启动或切换；未选中的次要池问题会进入启动提示，可用 `chord doctor config` 查询。
 
-在托管 preset 上，显式的 `compat.responses.send_*` 覆盖仍按来源矩阵生效；但若绑定已核验该端点从不接受该字段，`chord config show` 和 `chord doctor config` 会将其报为错误——覆盖仍会发送、该模型的请求会失败——而不是静默丢弃你的取值。
+在托管 preset 上，显式的 `compat.responses.send_*` 覆盖仍按来源矩阵生效；但若绑定已核验该端点从不接受该字段，`chord doctor config` 会将其报为错误——覆盖仍会发送、该模型的请求会失败——而不是静默丢弃你的取值。
 
 ### 凭据
 
@@ -363,7 +353,7 @@ chord config add openai/gpt-6.1-sol
 
 ### 查看目录
 
-`chord config show --catalog`（见 [CLI 参考](./cli_CN.md#chord-config-show)）列出目录中的端点、模型与 reasoning 档位，并按当前有效配置标注每项「已配置 / 未配置」。该视图只是只读参考：不写文件、不探测网络、不改动你的模型池。
+目录数据发布在公开的 [chord-models](https://github.com/keakon/chord-models) 仓库：端点契约、带来源与核验日期的模型事实，以及 reasoning 档位。不带参数的 `chord config add` 可以浏览托管 preset 及其已验证的 wire 模型；`chord doctor config` 会给出当前生效的是哪份快照。两者都离线使用内嵌快照。
 
 ## Thinking 附加翻译
 

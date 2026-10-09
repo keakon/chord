@@ -66,7 +66,6 @@ func TestCatalogAccessorsKeepSnapshotImmutable(t *testing.T) {
 		"endpoint":         func() { e, _ := EndpointContract("sample"); e.Docs[0].URL = "changed" },
 		"endpoints":        func() { EndpointContracts()[0].Docs[0].URL = "changed" },
 		"model":            func() { m, _ := Model("sample/model"); mutateModel(m) },
-		"models":           func() { mutateModel(Models()[0]) },
 		"binding":          func() { b, _ := LookupBinding("sample", "test-model"); mutateBinding(b) },
 		"binding by model": func() { b, _ := LookupBindingByModelID("sample", "sample/model"); mutateBinding(b) },
 		"bindings":         func() { mutateBinding(BindingsForEndpoint("sample")[0]) },

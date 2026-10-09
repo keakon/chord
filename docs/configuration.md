@@ -210,8 +210,9 @@ model_pools:
 These bindings inherit a `1050000` context window and `128000` output
 capacity. With the default requested output budget of `64000`, Chord plans
 `986000` input tokens. A separately documented route input cap can be set
-explicitly and takes priority. Inspect `chord config show --catalog` for
-model facts, or add `--json` for sources and pricing scope.
+explicitly and takes priority. The
+[chord-models](https://github.com/keakon/chord-models) repository publishes each
+model's facts with their sources and pricing scope.
 
 `preset: codex` can use OpenAI / ChatGPT OAuth credentials from `auth.yaml`. OAuth entries are mappings:
 
@@ -333,28 +334,30 @@ If none of these rules match, set `type` explicitly.
 
 Chord ships a versioned catalog of coding model facts, documented API connections, and managed endpoint contracts (`openai`, `anthropic`, `gemini`, and `codex`). It is read-only and fully offline: nothing in it probes the network, and it never overrides what you write.
 
-Start with two commands:
+Start with one command:
 
 ```bash
-chord config show --catalog
-chord config add openai/gpt-6.1-sol
+chord config add
 ```
 
-The catalog view lists every verified model, including those without a managed
-preset, with a copyable add command. `add` can create your first config and
-uses the documented API URL, wire model ID and API key environment variable.
-It prints which variable to export; API secrets are never copied from the
-catalog. Existing providers keep their endpoint and credentials. OAuth models
-also require the printed `chord auth <provider>` login command.
+Without arguments it lists the managed presets and your configured providers,
+then the wire models each preset is verified to serve, and continues into the
+guided setup. `chord config add openai/gpt-6.1-sol` adds a known catalog ID
+directly. `add` can create your first config and uses the documented API URL,
+wire model ID and API key environment variable. It prints which variable to
+export; API secrets are never copied from the catalog. Existing providers keep
+their endpoint and credentials. OAuth models also require the printed
+`chord auth <provider>` login command.
 
 Documented connections are setup recipes. They do not imply a successful live
 request or contribute endpoint-specific reasoning variants or send rules.
 Models requiring a workspace-specific or self-hosted URL need an explicit
 `--url`. For a custom wire name, use `--catalog <vendor/model>` to borrow facts.
-Use `chord config show --catalog --json` for complete evidence, release dates,
-pricing scope and refreshed discovery candidates. Candidates never supply
-runtime defaults. `chord config refresh-catalog` explicitly fetches a tagged
-update; ordinary viewing and adding stay offline.
+The [chord-models](https://github.com/keakon/chord-models) repository carries
+complete evidence, release dates, pricing scope and refreshed discovery
+candidates; candidates never supply runtime defaults. `chord config
+refresh-catalog` explicitly fetches a tagged update, and ordinary adding stays
+offline.
 
 A managed preset stands for a verified endpoint contract. When a provider uses one, Chord fills `type`, `api_url`, and `auth_scheme` only where you left them empty — an explicit value of yours always wins, and a value that contradicts the contract (for example an `auth_scheme` the preset does not use, or a `token_url` on a preset that is not OAuth) is a config error. To point a provider at a different endpoint, remove the `preset` and configure the endpoint explicitly.
 
@@ -362,14 +365,13 @@ For providers with a managed preset, the catalog also supplies model facts you d
 
 - `limit.context`, `limit.input`, `limit.output`, and reasoning `variants` are filled only when no config layer declared them. A block you cleared with an explicit null stays cleared.
 - A model referenced from a `model_pools` entry but never defined is created from the catalog, so pool references to catalog models work without hand-copied limits.
-- Every filled value carries a `catalog` origin in `chord config show`.
 - Matching is exact within the provider preset. A custom wire name can explicitly bind a stable catalog model with `catalog: openai/gpt-6.1-sol`; `catalog: false` disables all catalog filling for that model.
 
 Only facts the catalog actually verified are filled; unknown facts (such as pricing) stay absent instead of being guessed. Facts carry their verification sources and check dates.
 
 A custom endpoint without a preset can explicitly set `catalog: openai/gpt-6.1-sol` to borrow known model facts such as limits and input modalities. It does not inherit official route-specific field emission or variants. Unknown catalog IDs are errors. Structural errors in the selected model or pool block startup or switching; problems in unselected secondary pools appear in the startup notice and `chord doctor config`.
 
-On a managed preset, an explicit `compat.responses.send_*` override still wins over the catalog's field-emission rules. When the binding verified the endpoint never accepts that field, `chord config show` and `chord doctor config` report it as an error — the override is still sent and requests on that model will fail — instead of silently dropping your value.
+On a managed preset, an explicit `compat.responses.send_*` override still wins over the catalog's field-emission rules. When the binding verified the endpoint never accepts that field, `chord doctor config` reports it as an error — the override is still sent and requests on that model will fail — instead of silently dropping your value.
 
 ### Credentials
 
@@ -377,7 +379,12 @@ A provider that declared no credential source in `auth.yaml` falls back to its p
 
 ### Inspecting the catalog
 
-`chord config show --catalog` (see [CLI reference](./cli.md#chord-config-show)) lists the catalog's endpoints, models, and reasoning variants, marking each candidate as configured or not configured in your effective config. The view is read-only reference: it never writes files, probes the network, or changes your pools.
+The verified catalog data lives in the public
+[chord-models](https://github.com/keakon/chord-models) repository: endpoint
+contracts, model facts with their sources and check dates, and reasoning
+variants. `chord config add` without arguments browses the managed presets and
+their bound wire models; `chord doctor config` prints which snapshot is in
+effect. Both work offline against the embedded snapshot.
 
 ## Appended thinking translation
 

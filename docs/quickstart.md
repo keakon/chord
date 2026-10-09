@@ -55,12 +55,12 @@ chord
 ```
 
 The add command creates your config and fills the documented API connection.
-For another model, run `chord config show --catalog` and copy its add command.
-It tells you which API key variable to set. Existing providers keep their
+For another model, run `chord config add` without arguments and pick from the
+verified catalog. It tells you which API key variable to set. Existing providers keep their
 endpoint and credentials.
 
-Use `chord config show` to inspect the resolved config and `chord doctor config`
-to check it. See [model configuration](./model-configs.md) for custom gateways
+Use `chord doctor config` to check the configuration and the catalog snapshot
+in effect. See [model configuration](./model-configs.md) for custom gateways
 and other connection options.
 
 ## 3. Check the connection

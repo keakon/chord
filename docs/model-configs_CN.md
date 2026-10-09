@@ -4,7 +4,7 @@
 
 模型能做什么——context / input / output 限额、输入模态、reasoning 档位，以及已验证端点绑定上的 Responses 字段发送规则——都由内置模型目录统一供给。目录数据来自公开的 [chord-models](https://github.com/keakon/chord-models) 仓库：每个 chord 发布版内嵌一份当时的已验证快照，目录刷新可以不等发版带来新数据。已验证模型事实来自引用的文档；官方接入信息提供配置所需的地址和凭据变量，托管绑定另行记录经过验证的端点行为。模型事实或接入信息不代表已完成真实请求验证。**候选条目**保留尚待核实的发现及其来源、作用域，永不成为运行时默认值。
 
-用 `chord config show --catalog` 查看目录，输出会标明展示的是哪份快照、来自哪里——内嵌快照，还是带上游 tag 的刷新缓存。协议与字段语义见[配置参考](./configuration_CN.md)；本页讲怎么把模型接上、怎么保持配置不过期。
+不带参数的 `chord config add` 可以浏览目录；`chord doctor config` 会标明当前生效的是哪份快照、来自哪里——内嵌快照，还是带上游 tag 的刷新缓存。协议与字段语义见[配置参考](./configuration_CN.md)；本页讲怎么把模型接上、怎么保持配置不过期。
 
 ## 最快路径：`chord config add`
 
@@ -60,7 +60,7 @@ providers:
         catalog: anthropic/claude-opus-5-5
 ```
 
-目录没有的事实保持缺失，并以诊断形式明确报出——请手动补齐，不要照抄相邻模型的数字。显式配置的值永远优先于目录事实；每个由目录填充的值都会在 `chord config show` 里带 `catalog` 来源层。
+目录没有的事实保持缺失，并以诊断形式明确报出——请手动补齐，不要照抄相邻模型的数字。显式配置的值永远优先于目录事实；`chord config advise` 也只对你显式声明的值给建议。
 
 刷新得到的**候选条目**会出现在建议列表里，标注被观察到的 provider 作用域和来源。同一 wire 名在多个作用域被观察到时，Chord 并列展示、优先展示与你的端点匹配的作用域，但绝不替你挑选：非匹配作用域的数值只作参考。采纳候选条目意味着把它的观测值作为你自己的显式配置写进配置文件——候选永远不成为默认值。若候选引用了某个已验证模型，借用那个模型（`--catalog <id>`）是经过验证的采纳路径。
 
@@ -82,11 +82,11 @@ Chord 的 `thinking.*` 键与 wire 无关，但把 `/v1/chat/completions` 翻译
 
 自动压缩使用固定模型基数：provider 公布了独立输入上限时使用该值，否则从总窗口中减去模型的最大输出容量。最大输出未知或可占满整个窗口时，以总窗口为基数。修改请求输出上限不会移动压缩阈值。显式设置的模型或全局阈值优先；未设置时采用该模型的目录建议，没有目录建议才使用全局默认值 0.8。机制见[上下文压缩](./context-management_CN.md#上下文压缩compaction)。
 
-目录阈值是调优起点，不是 provider 限制，也不代表已测得的性能最优值。应按实际任务质量、延迟、请求费用和缓存复用效果调整。用 `chord config show --catalog --json` 查看所选模型的 `config_profile` 和 `cost.notes`；长上下文价格可能高于基础单价。
+目录阈值是调优起点，不是 provider 限制，也不代表已测得的性能最优值。应按实际任务质量、延迟、请求费用和缓存复用效果调整。所选模型的 `config_profile` 和 `cost.notes` 发布在 [chord-models](https://github.com/keakon/chord-models) 仓库；长上下文价格可能高于基础单价。
 
 ## 目录配方包含什么
 
-目录配方包含 token 限额和输入模态、reasoning 或 thinking 变体、模型级 `compat` 和有依据的上下文压缩提示。preset 绑定和同协议的自定义端点均在加载配置时继承配方。`chord config add` 为新 provider 填入官方 URL，或保留你的自定义地址并写入 `catalog` 引用。例如为 `sample/model` 指定 `--catalog moonshotai/kimi-k3`，即可继承完整 reasoning 历史回放，无需手工复制 compat。用 `chord config show --catalog --json` 可以查看全部字段及其来源。
+目录配方包含 token 限额和输入模态、reasoning 或 thinking 变体、模型级 `compat` 和有依据的上下文压缩提示。preset 绑定和同协议的自定义端点均在加载配置时继承配方。`chord config add` 为新 provider 填入官方 URL，或保留你的自定义地址并写入 `catalog` 引用。例如为 `sample/model` 指定 `--catalog moonshotai/kimi-k3`，即可继承完整 reasoning 历史回放，无需手工复制 compat。全部字段及其来源发布在 [chord-models](https://github.com/keakon/chord-models) 仓库。
 
 网关提供不同协议时，仍继承限额、模态和上下文压缩建议；协议专用参数需按网关的接口配方设置。
 

@@ -54,11 +54,10 @@ chord config add openai/gpt-6.1-sol
 chord
 ```
 
-添加命令会创建配置并填入官方接入信息。想选其他模型，先运行
-`chord config show --catalog`，复制对应的添加命令即可。命令会提示应设置
-哪个密钥环境变量；已有 provider 的地址和凭据会继续沿用。
+添加命令会创建配置并填入官方接入信息。想选其他模型，直接运行 `chord config add`，从已验证目录里挑一个即可。
+命令会提示应设置哪个密钥环境变量；已有 provider 的地址和凭据会继续沿用。
 
-用 `chord config show` 查看有效配置，`chord doctor config` 检查配置问题。
+用 `chord doctor config` 检查配置问题和当前生效的目录快照。
 自定义网关及更多接入方式见[模型配置](./model-configs_CN.md)。
 
 ## 3. 检查连接

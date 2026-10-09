@@ -40,11 +40,12 @@ type configAddOptions struct {
 func newConfigAddCmd() *cobra.Command {
 	opts := &configAddOptions{}
 	cmd := &cobra.Command{
-		Use:   "add <provider>/<model>",
+		Use:   "add [<provider>/<model>]",
 		Short: "Add a model reference to config.yaml from the model catalog",
 		Long: `Add a model reference to config.yaml and append it to a model pool.
 
-Select a catalog ID from chord config show --catalog, then run:
+Run without arguments to browse the verified providers and models and pick
+one interactively, or add a known catalog ID directly:
   chord config add openai/gpt-6.1-sol
 
 For a new provider, Chord fills the documented API URL and records its API
@@ -73,7 +74,7 @@ latest tagged snapshot of the upstream model catalog repository; if that
 network step fails, the command continues with the catalog already in
 effect. The candidate config is resolved in full before anything is written,
 and the file is only replaced when that resolution reports no errors.`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.terminal = nil
 			if !opts.noInteractive {
@@ -87,7 +88,11 @@ and the file is only replaced when that resolution reports no errors.`,
 					opts.terminal = terminal
 				}
 			}
-			return runConfigAdd(cmd.Context(), cmd.OutOrStdout(), args[0], *opts)
+			ref := ""
+			if len(args) > 0 {
+				ref = args[0]
+			}
+			return runConfigAdd(cmd.Context(), cmd.OutOrStdout(), ref, *opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.url, "url", "",
@@ -117,22 +122,28 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 			err = nil
 		}
 	}()
-	providerName, wireModel := config.SplitProviderModelRef(strings.TrimSpace(ref))
+	ref = strings.TrimSpace(ref)
+	providerName, wireModel := config.SplitProviderModelRef(ref)
 	providerName, wireModel = strings.TrimSpace(providerName), strings.TrimSpace(wireModel)
-	if providerName == "" || wireModel == "" {
-		return fmt.Errorf("model reference must be <provider>/<model>")
-	}
-	if strings.Contains(wireModel, "@") {
-		return fmt.Errorf("wire model names containing %q collide with the @variant reference syntax; rename the model entry", "@")
-	}
-
-	if opts.keepCurrent {
-		if err := config.RecordCatalogAdvisoryAcknowledgment(providerName, wireModel); err != nil {
-			return err
+	if ref == "" {
+		if opts.keepCurrent {
+			return fmt.Errorf("--keep-current needs an explicit <provider>/<model> reference")
 		}
-		fmt.Fprintf(out, "Acknowledged freshness advisories for %s/%s under catalog version %s.\n",
-			providerName, wireModel, modelcatalog.Version())
-		return nil
+	} else {
+		if providerName == "" || wireModel == "" {
+			return fmt.Errorf("model reference must be <provider>/<model>")
+		}
+		if opts.keepCurrent {
+			if err := config.RecordCatalogAdvisoryAcknowledgment(providerName, wireModel); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Acknowledged freshness advisories for %s/%s under catalog version %s.\n",
+				providerName, wireModel, modelcatalog.Version())
+			return nil
+		}
+		if strings.Contains(wireModel, "@") {
+			return fmt.Errorf("wire model names containing %q collide with the @variant reference syntax; rename the model entry", "@")
+		}
 	}
 
 	globalPath, err := config.ConfigPath()
@@ -150,6 +161,16 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 	rc, err := config.LoadResolvedConfig(globalPath, "")
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+	if ref == "" {
+		if opts.terminal == nil {
+			return fmt.Errorf("pass <provider>/<model> to add a model, for example `chord config add openai/gpt-6.1-sol`; browsing the catalog needs an interactive terminal")
+		}
+		providerName, wireModel, err = browseConfigAdd(opts.terminal, rc.Config)
+		if err != nil {
+			return err
+		}
+		ref = providerName + "/" + wireModel
 	}
 	providerCfg, providerExists := rc.Config.Providers[providerName]
 	providerCfg, wireModel, opts, err = prepareCatalogAdd(ref, providerCfg, providerExists, wireModel, opts)
@@ -307,7 +328,7 @@ func resolveConfigAddMode(preset, wireModel, catalogID string) (configAddMode, s
 	}
 	borrowID := strings.TrimSpace(catalogID)
 	if _, ok := modelcatalog.Model(borrowID); !ok {
-		return "", "", fmt.Errorf("catalog model %q does not exist; run `chord config show --catalog` for the verified list", borrowID)
+		return "", "", fmt.Errorf("catalog model %q does not exist; run `chord config add` without arguments to browse the verified catalog, or see https://github.com/keakon/chord-models", borrowID)
 	}
 	if preset != "" {
 		if _, bound := modelcatalog.LookupBindingByModelID(preset, borrowID); !bound {
@@ -513,7 +534,7 @@ func validateCandidateConfig(out io.Writer, edited []byte, edit configAddEdit, s
 	}
 	for _, diagnostic := range candidate.Diagnostics {
 		if diagnostic.Severity == config.DiagnosticSeverityWarning {
-			fmt.Fprintf(out, "Warning: %s\n", redactShowDiagnostic(diagnostic).String())
+			fmt.Fprintf(out, "Warning: %s\n", redactConfigDiagnostic(diagnostic).String())
 		}
 	}
 	if showPreview {

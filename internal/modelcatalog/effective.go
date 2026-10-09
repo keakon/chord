@@ -45,7 +45,7 @@ type Origin struct {
 }
 
 // OriginInfo reports the effective catalog's identity for diagnostics
-// surfaces such as `chord config show --catalog`.
+// surfaces such as `chord doctor config`.
 func OriginInfo() Origin {
 	s := current()
 	origin := Origin{Version: s.catalog.Version, Source: cloneCatalogSource(s.catalog.Source), Cached: s.cache != nil}

@@ -18,7 +18,7 @@ const (
 )
 
 // Diagnostic is one structured config problem. Loader surfaces (startup
-// notice, doctor, config show) share it so they never re-run divergent
+// notice, doctor, config advise) share it so they never re-run divergent
 // validation passes. Free-form issue strings collected by the existing load
 // path remain the user-visible log; Diagnostic is the structured sidecar.
 type Diagnostic struct {

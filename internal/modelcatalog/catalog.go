@@ -326,17 +326,6 @@ func Model(id string) (ModelFacts, bool) {
 	return cloneModelFacts(catalog.Models[i]), true
 }
 
-// Models lists all verified facts, including models with no managed binding.
-func Models() []ModelFacts {
-	catalog := effective()
-	out := make([]ModelFacts, len(catalog.Models))
-	for i, model := range catalog.Models {
-		out[i] = cloneModelFacts(model)
-	}
-	slices.SortFunc(out, func(a, b ModelFacts) int { return strings.Compare(a.ID, b.ID) })
-	return out
-}
-
 // BindingFacts resolves endpoint overrides without changing the model identity.
 func BindingFacts(b Binding) (ModelFacts, bool) {
 	facts, ok := Model(b.ModelID)

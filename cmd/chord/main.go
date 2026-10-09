@@ -138,7 +138,7 @@ func newRootCmd() *cobra.Command {
 			// Install a newer refreshed catalog snapshot when one is cached.
 			// A missing, stale, or unreadable cache keeps the embedded
 			// snapshot: refresh is an explicit operation and the cache is
-			// never required. `chord config show --catalog` reports what is
+			// never required. `chord doctor config` reports what is
 			// in effect and why a cache was not installed.
 			if cachePath, cacheErr := config.ModelCatalogCachePath(); cacheErr == nil {
 				_ = modelcatalog.InstallCachedCatalog(cachePath, config.ValidateCatalogProfiles)

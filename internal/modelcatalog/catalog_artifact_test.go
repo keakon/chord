@@ -31,8 +31,7 @@ func TestCatalogArtifactUpToDate(t *testing.T) {
 // same identity the generator derives from the sources, so a regeneration
 // that forgets to rebuild can never go unnoticed. The committed snapshot must
 // also record the chord-models revision it was synced from, so diagnostics
-// and `chord config show --catalog` can always say where the catalog came
-// from.
+// and `chord doctor config` can always say where the catalog came from.
 func TestRuntimeEmbedMatchesSources(t *testing.T) {
 	sources, err := gen.Load("data")
 	if err != nil {

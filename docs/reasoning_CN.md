@@ -117,8 +117,8 @@ API 模型名、后端却不是 DeepSeek 时，用 `compat.reasoning_continuity.
 ## 把模型接上
 
 各家族的接线方式与网关行为经验（含上文归纳的 thinking 选择器）见
-[模型配置](./model-configs_CN.md)；目录视图（`chord config show --catalog`）
-列出每个已验证模型及其 reasoning 档位。
+[模型配置](./model-configs_CN.md)；运行不带参数的 `chord config add` 可以浏览
+每个已验证模型及其 reasoning 档位。
 
 请求报 thinking 模式错误时，从
 [常见问题排查](./troubleshooting_CN.md#deepseek--openai-兼容-thinking-模式-400)

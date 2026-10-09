@@ -139,9 +139,9 @@ structured, and that is the part which must survive a provider switch. See
 ## Wiring a model
 
 Per-family wire-in and gateway experience, including the thinking selectors
-summarized above, lives in [Model configuration](./model-configs.md); the
-catalog view (`chord config show --catalog`) lists every verified model with
-its reasoning options.
+summarized above, lives in [Model configuration](./model-configs.md); run
+`chord config add` without arguments to browse every verified model and its
+reasoning options.
 
 When a request fails with a thinking-mode error, start from
 [Troubleshooting](./troubleshooting.md#deepseek--openai-compatible-thinking-mode-400s).

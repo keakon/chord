@@ -14,8 +14,9 @@ bindings separately record verified route behavior. A model fact or connection
 does not imply a live request test. **Candidates** retain incomplete discoveries
 with their scope and sources and never supply runtime defaults.
 
-Inspect the catalog with `chord config show --catalog`. The view states which
-snapshot it shows and where that snapshot came from — the embedded one, or a
+Browse the catalog with `chord config add` (no arguments), which lists the
+managed presets and their verified wire models; `chord doctor config` states
+which snapshot is in effect and where it came from — the embedded one, or a
 refreshed cache with its upstream tag. Protocol and field semantics live in
 [Configuration](./configuration.md); this page is about connecting a model and
 keeping the setup current.
@@ -99,8 +100,8 @@ providers:
 
 Facts the catalog does not have stay unset and are reported as diagnostics —
 fill them in manually instead of copying a neighbor's numbers. Explicitly
-configured values always win over catalog facts; every catalog-filled value
-is visible as the `catalog` layer in `chord config show`.
+configured values always win over catalog facts; `chord config advise` only
+compares values you declared yourself.
 
 Refreshed **candidates** appear in the suggestion list annotated with the
 provider scope they were observed on and their sources. When the same wire
@@ -163,9 +164,10 @@ See [Context compaction](./context-management.md#context-compaction).
 
 Catalog thresholds are starting recommendations, not provider limits or
 measured performance optima. Tune against representative tasks, considering
-quality, latency, request cost and cache reuse. Inspect the selected model's
-`config_profile` and `cost.notes` with `chord config show --catalog --json`;
-long-context pricing can differ from the listed base rate.
+quality, latency, request cost and cache reuse. The selected model's
+`config_profile` and `cost.notes` are published in the
+[chord-models](https://github.com/keakon/chord-models) repository; long-context
+pricing can differ from the listed base rate.
 
 ## What a catalog recipe contains
 
@@ -176,7 +178,7 @@ and custom endpoints using the same protocol inherit the model recipe at load.
 custom URL and records a `catalog` reference. This also works for an alias such
 as `sample/model` with `--catalog moonshotai/kimi-k3`: full reasoning replay is
 inherited without having to copy its compat settings.
-Inspect every field and its sources with `chord config show --catalog --json`.
+Every field and its sources are published in the [chord-models](https://github.com/keakon/chord-models) repository.
 
 When a gateway exposes a different protocol, limits, modalities and compaction
 hints still transfer; protocol-specific fields require that gateway's recipe.
