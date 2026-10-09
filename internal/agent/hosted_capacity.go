@@ -15,18 +15,24 @@ type hostedRequestProvider struct {
 	llm.Provider
 	governor     *resourceGovernor
 	providerName string
+	retry        func() bool
 	observe      func(*message.Response, error, time.Duration)
 }
 
 func (p hostedRequestProvider) CompleteStream(ctx context.Context, key, model, system string, messages []message.Message, defs []message.ToolDefinition, maxTokens int, tuning llm.RequestTuning, cb llm.StreamCallback) (*message.Response, error) {
-	release, err := p.governor.acquireLLM(ctx, p.providerName+"/"+model)
+	reservation, err := p.governor.acquireHostedLLM(ctx, p.providerName+"/"+model, p.retry != nil && p.retry())
 	if err != nil {
 		return nil, fmt.Errorf("acquire hosted LLM request capacity: %w", err)
 	}
-	defer release()
+	if err := ctx.Err(); err != nil {
+		reservation.release(true)
+		return nil, err
+	}
+	requestCtx, dispatch := llm.WithRequestDispatch(ctx, reservation.markSent)
+	defer func() { reservation.release(dispatch.NotSent()) }()
 	started := time.Now()
-	resp, err := p.Provider.CompleteStream(ctx, key, model, system, messages, defs, maxTokens, tuning, cb)
-	if p.observe != nil {
+	resp, err := p.Provider.CompleteStream(requestCtx, key, model, system, messages, defs, maxTokens, tuning, cb)
+	if p.observe != nil && !dispatch.NotSent() {
 		p.observe(resp, err, time.Since(started))
 	}
 	return resp, err

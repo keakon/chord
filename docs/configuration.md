@@ -1162,9 +1162,25 @@ A named `model_pool` that is missing or empty prevents startup. Chord skips mode
 
 With the default `retry_safe: false`, a possibly executed operation whose outcome is unknown (connection interruption, stream error, or exhausted continuation limit) stops automatic key/model replay. A clear rejection before execution may still try another target. Set `retry_safe: true` only when repeating the operation is safe.
 
-Hosted requests share `orchestration.max_active_llm_requests`, `provider_max_active_requests`, and `model_max_active_requests` with other Agent requests. For a provider that allows only one concurrent request, set its entry under `provider_max_active_requests` to `1`. Limits are local to this Chord process; separate provider entries or processes sharing one account do not share a quota gate.
+Hosted requests share `orchestration.max_active_llm_requests`, `provider_max_active_requests`, and `model_max_active_requests` with other Agent requests. You can also limit hosted bridge concurrency, requests per rolling 60 seconds, and additional retries by provider configuration name:
 
-For `retry_safe: true` tools, including the built-in `web_search`, transient rate limits, upstream unavailability, and transport failures get at most three rounds per target, with configured key rotation, provider backoff, and `Retry-After` pacing. Each round can try multiple keys; the total `timeout_s` budget also includes queueing and retry waits. Capacity is released while waiting between attempts. Exhausted account quota, rejected declarations, and responses without an observed hosted call do not trigger another retry round; another capable target may still be tried. Failure messages distinguish these cases and suggest an appropriate next action.
+```yaml
+orchestration:
+  provider_max_active_hosted_requests:
+    openai: 2
+  provider_hosted_requests_per_minute:
+    openai: 10
+  provider_hosted_retries_per_minute:
+    openai: 3
+```
+
+Each dispatched request consumes request quota, including failures, key rotation, declaration retries, and protocol continuations. The retry budget counts repeated attempts at a target, including another key, a declaration retry, or an additional round. A fallback target's first attempt and a normal protocol continuation do not consume retry budget. Concurrency exhaustion queues requests. Request-rate exhaustion tries other targets before waiting for the window to recover. Exhausted retry budget stops extra attempts at that target while preserving first attempts at fallback targets.
+
+These three limits are disabled by default and shared across agents, tools, and models using the same provider configuration in this process. They cover hosted bridge sub-requests only, excluding ordinary chat and native search within a main request. Separate processes or provider configurations do not coordinate a shared account's quota. Leave headroom for other requests when choosing account-based limits.
+
+For `retry_safe: true` tools, including the built-in `web_search`, Chord traverses the available pool before retrying transient rate limits, upstream unavailability, or transport failures, with at most three pool rounds. Each target retains key rotation; generated backoff includes slight jitter and `Retry-After` respects the provider's wait cap. Cooling targets do not block other ready targets in the same round. Each round can try multiple keys; queueing and waits count toward `timeout_s`, with request slots released during waits. Exhausted account quota, authentication failures, rejected declarations, and missing hosted calls do not trigger additional rounds; other targets may still be tried.
+
+After two missing execution receipts for the same tool, route pool, and target, Chord cools that combination for 30 seconds, then admits only one probe. A completed hosted call restores it; an ordinary chat answer cannot establish recovery. This temporary state does not change `compat.hosted_tools` declarations.
 
 Responses remote MCP errors fail the call. Requests requiring provider-side approval stop and direct you to the local MCP integration for interactive approval; the bridge never automatically approves them. Native message citations, file references, and unknown output fields are retained. Full native output and truncated call payloads are saved as session artifacts with readable references in the tool result. Provider files currently retain `container_id`, `file_id`, and filename references; Chord does not automatically download these files. Configure `image_paths` to attach base64 image data actually returned by the provider.
 
@@ -1281,6 +1297,12 @@ orchestration:
   provider_max_active_requests:
     openai: 6
     anthropic: 4
+  provider_max_active_hosted_requests:
+    openai: 2
+  provider_hosted_requests_per_minute:
+    openai: 10
+  provider_hosted_retries_per_minute:
+    openai: 3
   model_max_active_requests:
     openai/gpt-5.5: 3
   subagent_queue_messages: 256
@@ -1300,6 +1322,9 @@ orchestration:
 | `max_bypass_runtimes` | `4` | Maximum wake reactivations that may bypass both the normal and borrowed runtime pools when neither can make progress. When it is exhausted, the wake is refused and the durable message remains queued. |
 | `max_active_llm_requests` | `10` | Process-wide maximum concurrent LLM requests across orchestrated agents. Eligible requests wait when the limit is full. |
 | `provider_max_active_requests` | none | Optional concurrent-request limits keyed by provider name, for example `openai`. A request must satisfy this limit and the process-wide limit. |
+| `provider_max_active_hosted_requests` | none | Concurrent hosted bridge sub-requests per provider, also subject to general concurrency limits. |
+| `provider_hosted_requests_per_minute` | none | Hosted bridge sub-requests dispatched per provider in a rolling 60-second window, including failures and continuations. |
+| `provider_hosted_retries_per_minute` | none | Additional hosted retries dispatched per provider in a rolling 60-second window; excludes first fallback attempts and normal protocol continuations. |
 | `model_max_active_requests` | none | Optional concurrent-request limits keyed by `provider/model`. Inline variants such as `@high` are ignored for matching, so `openai/gpt-5.5` covers all variants of that model. |
 | `subagent_queue_messages` | `256` | Maximum pending input messages for each SubAgent. A new enqueue is rejected when either this count or the byte limit is reached; existing queued messages are preserved. |
 | `subagent_queue_bytes` | `4194304` | Maximum estimated bytes of pending input for each SubAgent. This is an in-memory admission bound, not a disk spool. |
@@ -1316,6 +1341,7 @@ orchestration:
 - `provider_max_active_requests` and `model_max_active_requests` are merged by key. A project entry replaces the same global key while preserving unrelated global entries.
 - Scalar values that are zero or negative do not mean "unlimited": they retain the inherited or built-in default. `subagent_compact_usage` is only valid strictly between `0` and `1`: an out-of-range value (including `0`) is ignored with a warning, a project value then inherits the merged global value, and an unset global falls back to `0.8`. Unlike `context.compaction.threshold: 0`, zero does not disable SubAgent context protection.
 - Only positive provider/model map limits are enforced. Keep map keys explicit and use positive integers; do not rely on zero as a general unlimited-mode switch.
+- The three hosted limit maps also merge by key and enforce only positive values. Set a provider entry to `0` in project configuration to remove that inherited hosted limit; other concurrency limits still apply.
 - Limits are process-local. They do not coordinate quotas across multiple Chord processes.
 
 ### Tuning guidance

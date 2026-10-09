@@ -33,6 +33,7 @@
 
 ### 新功能
 
+- hosted 工具支持按 provider 限制并发数、请求频率和重试预算，先遍历模型池再重试，并在多次缺少执行回执时短暂冷却目标。
 - MCP 工具支持通过 `deferred: true` 与 `tool_search` 按需加载，各 Agent 独立恢复已加载集合，并限制单次发现结果的大小。
 - OpenAI Responses 与 Anthropic Messages 搜索可通过绑定端点的显式预授权在主请求内执行，默认关闭；逐调用审批、自定义 hosted 工具和显式工具池继续使用 hosted 桥，结果未知时不自动重放。
 

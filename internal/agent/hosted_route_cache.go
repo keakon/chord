@@ -151,6 +151,11 @@ func (b *hostedBackend) diagnoseOnce(source hostedRouteSource, tool, reason stri
 
 func (b *hostedBackend) forgetCallerLocked(callerID string) {
 	delete(b.callerBindings, callerID)
+	for key := range b.health {
+		if key.source.kind == hostedRouteSourceCaller && key.source.id == callerID {
+			delete(b.health, key)
+		}
+	}
 	for key := range b.routes {
 		if key.source.kind == hostedRouteSourceCaller && key.source.id == callerID {
 			delete(b.routes, key)
@@ -174,10 +179,16 @@ func (a *MainAgent) forgetHostedCaller(callerID string) {
 	}
 }
 
+// Named-pool affinity and health belong to the shared pool and survive session switches.
 func (a *MainAgent) resetHostedCallers() {
 	if b, ok := a.hostedBackend.(*hostedBackend); ok {
 		b.mu.Lock()
 		clear(b.callerBindings)
+		for key := range b.health {
+			if key.source.kind == hostedRouteSourceCaller {
+				delete(b.health, key)
+			}
+		}
 		for key := range b.routes {
 			if key.source.kind == hostedRouteSourceCaller {
 				delete(b.routes, key)

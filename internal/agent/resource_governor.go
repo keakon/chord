@@ -6,17 +6,22 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/tools"
 )
 
 type llmRequestWaiter struct {
-	provider string
-	modelRef string
-	ready    chan struct{}
-	granted  bool
-	released atomic.Bool
+	provider   string
+	modelRef   string
+	ready      chan struct{}
+	granted    bool
+	dispatched bool // protected by llmMu
+	hosted     bool
+	retry      bool
+	err        error
+	released   atomic.Bool
 }
 
 type workspaceLease struct {
@@ -46,6 +51,7 @@ type resourceGovernor struct {
 	modelLimits    map[string]int
 	modelActive    map[string]int
 	llmWaiters     []*llmRequestWaiter
+	hosted         hostedAdmission
 
 	leaseMu      sync.Mutex
 	leases       []*workspaceLease
@@ -79,13 +85,7 @@ type resourceGovernorSnapshot struct {
 
 func newResourceGovernor(cfg config.OrchestrationConfig) *resourceGovernor {
 	runtimeLimit := cfg.EffectiveMaxLiveRuntimes()
-	providerLimits := make(map[string]int, len(cfg.ProviderMaxActiveRequests))
-	for key, limit := range cfg.ProviderMaxActiveRequests {
-		key = strings.TrimSpace(key)
-		if key != "" && limit > 0 {
-			providerLimits[key] = limit
-		}
-	}
+	providerLimits := normalizedProviderLimits(cfg.ProviderMaxActiveRequests)
 	modelLimits := make(map[string]int, len(cfg.ModelMaxActiveRequests))
 	for key, limit := range cfg.ModelMaxActiveRequests {
 		key = normalizedLLMModelRef(key)
@@ -103,6 +103,7 @@ func newResourceGovernor(cfg config.OrchestrationConfig) *resourceGovernor {
 		modelLimits:    modelLimits,
 		modelActive:    make(map[string]int),
 		llmWaiters:     make([]*llmRequestWaiter, 0),
+		hosted:         newHostedAdmission(cfg),
 	}
 }
 
@@ -115,6 +116,7 @@ func effectiveOrchestrationConfig(globalCfg, projectCfg *config.Config) config.O
 		return out
 	}
 	override := projectCfg.Orchestration
+	mergeHostedAdmissionConfig(&out, override)
 	if override.MaxLiveRuntimes > 0 {
 		out.MaxLiveRuntimes = override.MaxLiveRuntimes
 	}
@@ -263,13 +265,26 @@ func normalizedLLMModelRef(ref string) string {
 }
 
 func (g *resourceGovernor) acquireLLM(ctx context.Context, providerRef string) (func(), error) {
+	reservation, err := g.acquireRequest(ctx, providerRef, false, false)
+	if err != nil {
+		return nil, err
+	}
+	return func() { reservation.release(false) }, nil
+}
+
+func (g *resourceGovernor) acquireRequest(ctx context.Context, providerRef string, hosted, retry bool) (*llmRequestReservation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if g == nil {
-		return func() {}, nil
+		return &llmRequestReservation{}, nil
 	}
 	waiter := &llmRequestWaiter{
 		provider: llmProviderKey(providerRef),
 		modelRef: normalizedLLMModelRef(providerRef),
 		ready:    make(chan struct{}),
+		hosted:   hosted,
+		retry:    retry,
 	}
 	g.llmMu.Lock()
 	g.llmWaiters = append(g.llmWaiters, waiter)
@@ -278,16 +293,20 @@ func (g *resourceGovernor) acquireLLM(ctx context.Context, providerRef string) (
 
 	select {
 	case <-waiter.ready:
-		return func() {
-			if waiter.released.CompareAndSwap(false, true) {
-				g.releaseLLM(waiter.provider, waiter.modelRef)
-			}
-		}, nil
+		if waiter.err != nil {
+			return nil, waiter.err
+		}
+		if err := ctx.Err(); err != nil {
+			g.releaseLLM(waiter, true)
+			return nil, err
+		}
+		return &llmRequestReservation{governor: g, waiter: waiter}, nil
 	case <-ctx.Done():
 		g.llmMu.Lock()
 		if waiter.granted {
 			if waiter.released.CompareAndSwap(false, true) {
 				g.llmActive--
+				g.hosted.release(waiter, true)
 				if waiter.provider != "" {
 					g.providerActive[waiter.provider]--
 				}
@@ -297,7 +316,7 @@ func (g *resourceGovernor) acquireLLM(ctx context.Context, providerRef string) (
 			}
 			g.dispatchLLMWaitersLocked()
 			g.llmMu.Unlock()
-			return func() {}, ctx.Err()
+			return nil, ctx.Err()
 		}
 		for i := range g.llmWaiters {
 			if g.llmWaiters[i] == waiter {
@@ -319,7 +338,12 @@ func (g *resourceGovernor) dispatchLLMWaitersLocked() {
 		}
 		waiter := g.llmWaiters[index]
 		g.llmWaiters = append(g.llmWaiters[:index], g.llmWaiters[index+1:]...)
+		if waiter.err = g.hosted.check(waiter, time.Now()); waiter.err != nil {
+			close(waiter.ready)
+			continue
+		}
 		waiter.granted = true
+		g.hosted.start(waiter)
 		g.llmActive++
 		if waiter.provider != "" {
 			g.providerActive[waiter.provider]++
@@ -338,6 +362,14 @@ func (g *resourceGovernor) nextEligibleLLMWaiterLocked() int {
 		if _, blocked := blockedKeys[key]; blocked {
 			continue
 		}
+		if waiter.hosted {
+			if g.hosted.check(waiter, time.Now()) != nil {
+				return i
+			}
+			if limit := g.hosted.activeLimits[waiter.provider]; limit > 0 && g.hosted.active[waiter.provider] >= limit {
+				continue
+			}
+		}
 		limit := g.providerLimits[waiter.provider]
 		if limit > 0 && g.providerActive[waiter.provider] >= limit {
 			blockedKeys[key] = struct{}{}
@@ -352,8 +384,10 @@ func (g *resourceGovernor) nextEligibleLLMWaiterLocked() int {
 	return -1
 }
 
-func (g *resourceGovernor) releaseLLM(provider, modelRef string) {
+func (g *resourceGovernor) releaseLLM(waiter *llmRequestWaiter, cancelledBeforeDispatch bool) {
+	provider, modelRef := waiter.provider, waiter.modelRef
 	g.llmMu.Lock()
+	g.hosted.release(waiter, cancelledBeforeDispatch)
 	if g.llmActive > 0 {
 		g.llmActive--
 	}

@@ -45,8 +45,10 @@ func (e *hostedAllTargetsFailedError) Unwrap() []error {
 
 func hostedFailureAdvice(kind llm.HostedFailureKind) (string, string) {
 	switch kind {
+	case llm.HostedFailureRetryBudget:
+		return "shared hosted retry budget exhausted", "Wait for the retry window to reset or use another available target."
 	case llm.HostedFailureRateLimited:
-		return "request capacity or rate limit reached", "Retry later with fewer parallel requests; configure orchestration.provider_max_active_requests for the provider's quota."
+		return "request capacity or rate limit reached", "Retry later. Limit concurrent hosted requests with orchestration.provider_max_active_hosted_requests; use orchestration.provider_hosted_requests_per_minute for a requests-per-minute limit."
 	case llm.HostedFailureQuota:
 		return "account quota or balance exhausted", "Use a target with available quota or restore the account's quota before retrying."
 	case llm.HostedFailureUnavailable:
@@ -55,10 +57,12 @@ func hostedFailureAdvice(kind llm.HostedFailureKind) (string, string) {
 		return "request transport failed", "Check connectivity and retry later."
 	case llm.HostedFailureDeclaration:
 		return "hosted declaration rejected", "Check the endpoint's declaration support and the compat.hosted_tools entry."
+	case llm.HostedFailureCooling:
+		return "target is cooling or a recovery probe is already in progress; no request was sent", "Wait for recovery or use another capable target."
 	case llm.HostedFailureNotObserved:
-		return "no hosted call was observed in this response", "Try another capable target; verify that the endpoint accepts and executes the declaration enabled by compat.hosted_tools."
+		return "hosted execution was not observed", "Repeated missing calls temporarily cool this target. Try another capable target or retry later; verify that the endpoint accepts and executes the declaration enabled by compat.hosted_tools."
 	case llm.HostedFailureAuth:
-		return "authentication or permission rejected", "Check the target's credentials and account permissions."
+		return "authentication or permission rejected", "Check the target's credentials, upstream authorization, and account permissions."
 	default:
 		return "hosted execution failed", "Inspect the request diagnostics before retrying or changing the request."
 	}

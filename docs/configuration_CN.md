@@ -994,9 +994,25 @@ hosted_tools:
 
 默认 `retry_safe: false`。请求可能已执行而结果未知（如连接中断、流错误或续跑上限耗尽）时，Chord 停止自动换 key 或模型重放；明确的请求前拒绝仍可尝试其他目标。只有确认重复执行安全时才设置 `retry_safe: true`。
 
-hosted 子请求与其他 Agent 请求共用 `orchestration.max_active_llm_requests`、`provider_max_active_requests` 和 `model_max_active_requests` 限制。如果 provider 只允许一个请求同时执行，将 `provider_max_active_requests` 中对应的条目设为 `1`。这些限制只在当前 Chord 进程内生效；多个 provider 配置或多个进程共用同一账户时，不会自动共用额度限制。
+hosted 子请求与其他 Agent 请求共用 `orchestration.max_active_llm_requests`、`provider_max_active_requests` 和 `model_max_active_requests` 并发限制。还可按 provider 配置名单独设置 hosted 桥的并发数、滚动 60 秒请求数和额外重试数：
 
-对 `retry_safe: true` 的工具（包括内置 `web_search`），瞬态限流、上游不可用和传输失败在每个目标上最多尝试 3 轮，沿用已有的 key 轮转、provider 退避与 `Retry-After` 等待规则。每轮可能尝试多个 key；排队和重试等待都计入 `timeout_s` 总预算，等待期间释放请求槽。账户额度耗尽、声明被拒绝、未观察到 hosted 调用时，不会在同一目标上开启下一轮重试，仍可尝试其他可用目标。失败提示会区分这些情况并给出对应的处理建议。
+```yaml
+orchestration:
+  provider_max_active_hosted_requests:
+    openai: 2
+  provider_hosted_requests_per_minute:
+    openai: 10
+  provider_hosted_retries_per_minute:
+    openai: 3
+```
+
+请求额度在实际派发时扣除，失败请求也计数；key 轮转、声明重试和协议续跑都受请求数限制。额外重试预算只计同一目标的重复尝试，包括换 key、声明重试和额外轮次；首次尝试备用目标、正常协议续跑不占重试预算。达到并发上限时排队，达到分钟请求上限时先尝试其他目标，再等待窗口恢复；重试预算耗尽后停止该目标的额外尝试，保留备用目标的首次机会。
+
+这三项限制默认不启用；同一进程内，各 Agent、工具和模型按 provider 配置名共用额度。它们仅覆盖 hosted 桥子请求，不统计主对话或主请求内的原生搜索，也不协调多个进程或多个 provider 配置共用的账户。按账户额度设置时，需要为其他请求留出余量。
+
+对 `retry_safe: true` 的工具（包括内置 `web_search`），Chord 先遍历可用模型池，再对瞬态限流、上游不可用和传输失败开启下一轮，整池最多 3 轮。每个目标保留已有 key 轮转；退避加入小幅随机抖动，`Retry-After` 遵守 provider 的等待上限。冷却中的目标不阻塞本轮其他可用目标。每轮可能尝试多个 key；排队和等待都计入 `timeout_s` 总预算，等待期间释放请求槽。账户额度耗尽、授权失败、声明被拒绝、未观察到 hosted 调用时，不会开启额外轮次，仍可尝试其他目标。
+
+同一工具、路由池和目标累计两次未观察到执行回执后，Chord 暂停使用该组合 30 秒，到期只放行一个探测请求。真正完成 hosted 调用后恢复；普通聊天回答不能证明工具已恢复。该状态不修改 `compat.hosted_tools` 能力声明。
 
 Responses 的远程 MCP 错误会作为失败返回；需要 provider 侧审批的请求会停止并提示使用本地 MCP 集成完成交互审批。此桥不会自动批准远程操作。原生消息中的引用信息、文件引用与未知输出字段会保留，完整原生输出及被截断的调用结果会保存为会话产物，工具结果提供读取引用。provider 生成的文件目前保留 `container_id` / `file_id` / 文件名，Chord 不会自动下载这些文件；配置 `image_paths` 可将实际返回的 base64 图片附到工具结果。
 
@@ -1097,6 +1113,12 @@ orchestration:
   provider_max_active_requests:
     openai: 6
     anthropic: 4
+  provider_max_active_hosted_requests:
+    openai: 2
+  provider_hosted_requests_per_minute:
+    openai: 10
+  provider_hosted_retries_per_minute:
+    openai: 3
   model_max_active_requests:
     openai/gpt-5.5: 3
   subagent_queue_messages: 256
@@ -1116,6 +1138,9 @@ orchestration:
 | `max_bypass_runtimes` | `4` | 正常 runtime 池和 borrowed pool 都耗尽时，唤醒重激活可以使用的最大 bypass 数量；达到上限后，唤醒会被拒绝，持久化消息留在队列中等待后续处理。 |
 | `max_active_llm_requests` | `10` | 进程内所有编排 Agent 的 LLM 请求总并发上限。达到上限后，符合条件的请求等待。 |
 | `provider_max_active_requests` | 无 | 可选的 provider 级请求并发上限，key 如 `openai`。请求必须同时满足该限制和进程总限制。 |
+| `provider_max_active_hosted_requests` | 无 | 每个 provider 的 hosted 桥子请求并发上限，同时受通用并发限制约束。 |
+| `provider_hosted_requests_per_minute` | 无 | 每个 provider 在滚动 60 秒内最多派发的 hosted 桥子请求数，失败和续跑也计数。 |
+| `provider_hosted_retries_per_minute` | 无 | 每个 provider 在滚动 60 秒内最多派发的额外 hosted 重试数；首次尝试备用目标和正常协议续跑不计入。 |
 | `model_max_active_requests` | 无 | 可选的 `provider/model` 级请求并发上限。匹配时忽略 `@high` 等 inline variant，因此 `openai/gpt-5.5` 覆盖该模型的所有 variant。 |
 | `subagent_queue_messages` | `256` | 每个 SubAgent 的待处理输入消息上限。消息数或字节数任一达到上限时，新的入队会被拒绝，已排队消息不会被丢弃。 |
 | `subagent_queue_bytes` | `4194304` | 每个 SubAgent 待处理输入的估算字节数上限。这是内存准入限制，不会溢写到磁盘 spool。 |
@@ -1132,6 +1157,7 @@ orchestration:
 - `provider_max_active_requests` 和 `model_max_active_requests` 按 key 合并：项目配置替换同名全局条目，同时保留其他全局条目。
 - 标量为零或负数不表示「无限制」，而是保留继承值或内置默认值。`subagent_compact_usage` 只有严格位于 `(0, 1)` 时才有效：越界值（含 `0`）会被忽略并记录警告，项目层此时继承合并后的全局值，全局未配置时回退到 `0.8`。与 `context.compaction.threshold: 0` 不同，零不会关闭 SubAgent 上下文保护。
 - provider/model map 中只有正数限制会生效。建议使用明确的 key 和正整数，不要把零当作通用的「无限制」开关。
+- 三个 hosted 限制 map 同样按 key 合并，只有正数生效；项目中将某个 provider 条目设为 `0` 可取消继承的对应 hosted 限制，其他并发限制仍然生效。
 - 所有限制只在单个进程内生效，不会协调多个 Chord 进程之间的配额。
 
 ### 调优建议

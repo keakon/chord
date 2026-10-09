@@ -108,22 +108,26 @@ const (
 )
 
 // OrchestrationConfig controls process-local multi-agent resource admission.
-// Zero values retain the built-in defaults for backward compatibility.
+// Nonpositive scalars retain inherited or built-in defaults. Map entries only
+// enforce positive limits; a zero entry removes that inherited map limit.
 type OrchestrationConfig struct {
-	MaxLiveRuntimes           int            `json:"max_live_runtimes,omitempty" yaml:"max_live_runtimes,omitempty"`
-	MaxBorrowedRuntimes       int            `json:"max_borrowed_runtimes,omitempty" yaml:"max_borrowed_runtimes,omitempty"`
-	MaxBypassRuntimes         int            `json:"max_bypass_runtimes,omitempty" yaml:"max_bypass_runtimes,omitempty"`
-	MaxActiveLLMRequests      int            `json:"max_active_llm_requests,omitempty" yaml:"max_active_llm_requests,omitempty"`
-	ProviderMaxActiveRequests map[string]int `json:"provider_max_active_requests,omitempty" yaml:"provider_max_active_requests,omitempty"`
-	ModelMaxActiveRequests    map[string]int `json:"model_max_active_requests,omitempty" yaml:"model_max_active_requests,omitempty"`
-	SubAgentQueueMessages     int            `json:"subagent_queue_messages,omitempty" yaml:"subagent_queue_messages,omitempty"`
-	SubAgentQueueBytes        int            `json:"subagent_queue_bytes,omitempty" yaml:"subagent_queue_bytes,omitempty"`
-	MailboxMemoryMessages     int            `json:"mailbox_memory_messages,omitempty" yaml:"mailbox_memory_messages,omitempty"`
-	MailboxMemoryBytes        int            `json:"mailbox_memory_bytes,omitempty" yaml:"mailbox_memory_bytes,omitempty"`
-	SubAgentCompactUsage      float64        `json:"subagent_compact_usage,omitempty" yaml:"subagent_compact_usage,omitempty"`
-	WaitingMainExpiryTurns    int            `json:"waiting_main_expiry_turns,omitempty" yaml:"waiting_main_expiry_turns,omitempty"`
-	WaitingMainMinWaitSec     int            `json:"waiting_main_min_wait_sec,omitempty" yaml:"waiting_main_min_wait_sec,omitempty"`
-	WaitingMainMaxWaitSec     int            `json:"waiting_main_max_wait_sec,omitempty" yaml:"waiting_main_max_wait_sec,omitempty"`
+	MaxLiveRuntimes                 int            `json:"max_live_runtimes,omitempty" yaml:"max_live_runtimes,omitempty"`
+	MaxBorrowedRuntimes             int            `json:"max_borrowed_runtimes,omitempty" yaml:"max_borrowed_runtimes,omitempty"`
+	MaxBypassRuntimes               int            `json:"max_bypass_runtimes,omitempty" yaml:"max_bypass_runtimes,omitempty"`
+	MaxActiveLLMRequests            int            `json:"max_active_llm_requests,omitempty" yaml:"max_active_llm_requests,omitempty"`
+	ProviderMaxActiveRequests       map[string]int `json:"provider_max_active_requests,omitempty" yaml:"provider_max_active_requests,omitempty"`
+	ModelMaxActiveRequests          map[string]int `json:"model_max_active_requests,omitempty" yaml:"model_max_active_requests,omitempty"`
+	ProviderMaxActiveHostedRequests map[string]int `json:"provider_max_active_hosted_requests,omitempty" yaml:"provider_max_active_hosted_requests,omitempty"`
+	ProviderHostedRequestsPerMinute map[string]int `json:"provider_hosted_requests_per_minute,omitempty" yaml:"provider_hosted_requests_per_minute,omitempty"`
+	ProviderHostedRetriesPerMinute  map[string]int `json:"provider_hosted_retries_per_minute,omitempty" yaml:"provider_hosted_retries_per_minute,omitempty"`
+	SubAgentQueueMessages           int            `json:"subagent_queue_messages,omitempty" yaml:"subagent_queue_messages,omitempty"`
+	SubAgentQueueBytes              int            `json:"subagent_queue_bytes,omitempty" yaml:"subagent_queue_bytes,omitempty"`
+	MailboxMemoryMessages           int            `json:"mailbox_memory_messages,omitempty" yaml:"mailbox_memory_messages,omitempty"`
+	MailboxMemoryBytes              int            `json:"mailbox_memory_bytes,omitempty" yaml:"mailbox_memory_bytes,omitempty"`
+	SubAgentCompactUsage            float64        `json:"subagent_compact_usage,omitempty" yaml:"subagent_compact_usage,omitempty"`
+	WaitingMainExpiryTurns          int            `json:"waiting_main_expiry_turns,omitempty" yaml:"waiting_main_expiry_turns,omitempty"`
+	WaitingMainMinWaitSec           int            `json:"waiting_main_min_wait_sec,omitempty" yaml:"waiting_main_min_wait_sec,omitempty"`
+	WaitingMainMaxWaitSec           int            `json:"waiting_main_max_wait_sec,omitempty" yaml:"waiting_main_max_wait_sec,omitempty"`
 }
 
 func (c OrchestrationConfig) EffectiveWaitingMainExpiryTurns() uint64 {

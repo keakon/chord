@@ -190,11 +190,11 @@ func isAccountInvalidated(apiErr *APIError) bool {
 	return apiErrMessageContainsAny(apiErr, "invalidated", "revoked", "could not parse your authentication token")
 }
 
-// retryAfterForProvider returns the Retry-After hint bounded by the provider's
+// RetryAfterForProvider returns the Retry-After hint bounded by the provider's
 // retry_after_max_s cap. The header always applies as the key cooldown; the
 // cap (60s by default, a day for preset codex) only bounds how long a
 // hostile or stale hint can block a key.
-func retryAfterForProvider(provider *ProviderConfig, apiErr *APIError) time.Duration {
+func RetryAfterForProvider(provider *ProviderConfig, apiErr *APIError) time.Duration {
 	if provider == nil || apiErr == nil {
 		return 0
 	}
@@ -210,7 +210,7 @@ func serverDirectedRetryCooldown(provider *ProviderConfig, err error) time.Durat
 		return 0
 	}
 	if apiErr.StatusCode == 0 && apiErr.isStreamEvent() || apiErr.StatusCode >= 500 && apiErr.StatusCode < 600 {
-		return retryAfterForProvider(provider, apiErr)
+		return RetryAfterForProvider(provider, apiErr)
 	}
 	return 0
 }
@@ -224,7 +224,7 @@ func applyCodexQuotaOrCooldown(provider *ProviderConfig, key string, apiErr *API
 	if result, ok := applyConfirmedCodexQuotaReset(provider, key, apiErr, quotaLogPrefix); ok {
 		return result
 	}
-	if cooldown := retryAfterForProvider(provider, apiErr); cooldown > 0 {
+	if cooldown := RetryAfterForProvider(provider, apiErr); cooldown > 0 {
 		log.Warnf("%s, honoring Retry-After key_id=%v cooldown=%v", cooldownLogPrefix, keyLogID(key), cooldown)
 		provider.MarkServerDirectedCooldown(key, cooldown)
 		return markKeyCooldownResult{cooldownApplied: true}
@@ -249,7 +249,7 @@ func applyRateLimitCooldown(provider *ProviderConfig, key string, apiErr *APIErr
 	if result, ok := applyConfirmedCodexQuotaReset(provider, key, apiErr, "API key quota exhausted"); ok {
 		return result
 	}
-	retryAfter := retryAfterForProvider(provider, apiErr)
+	retryAfter := RetryAfterForProvider(provider, apiErr)
 	applied := provider.markRateLimitCooldown(key, retryAfter)
 	log.Warnf("API key rate limited, applying retry pacing key_id=%v configured=%v retry_after=%v cooldown_applied=%v", keyLogID(key), provider.retryPacingExplicit, retryAfter, applied)
 	return markKeyCooldownResult{cooldownApplied: applied}
@@ -296,7 +296,7 @@ func applyKeyCooldown(ctx context.Context, provider *ProviderConfig, key string,
 		if providerTrustsHTTP400(provider) || isRequestOrParamError(apiErr) {
 			return markKeyCooldownResult{}
 		}
-		if cooldown := retryAfterForProvider(provider, apiErr); cooldown > 0 {
+		if cooldown := RetryAfterForProvider(provider, apiErr); cooldown > 0 {
 			log.Warnf("compatible API key returned 400, honoring Retry-After key_id=%v cooldown=%v", keyLogID(key), cooldown)
 			provider.MarkServerDirectedCooldown(key, cooldown)
 			return markKeyCooldownResult{cooldownApplied: true}
@@ -366,7 +366,7 @@ func applyKeyCooldown(ctx context.Context, provider *ProviderConfig, key string,
 		return markKeyCooldownResult{cooldownApplied: true}
 	case 403:
 		if isGlobalQuotaExhausted(apiErr) {
-			cooldown := retryAfterForProvider(provider, apiErr)
+			cooldown := RetryAfterForProvider(provider, apiErr)
 			if cooldown <= 0 {
 				cooldown = time.Minute
 			}

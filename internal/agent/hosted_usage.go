@@ -7,13 +7,21 @@ import (
 	"github.com/keakon/chord/internal/message"
 )
 
+const (
+	hostedAttemptInitial      = "initial"
+	hostedAttemptRetry        = "retry"
+	hostedAttemptFallback     = "fallback"
+	hostedAttemptContinuation = "continuation"
+)
+
 type hostedWireAttempt struct {
+	reason   string
 	response *message.Response
 	err      error
 	elapsed  time.Duration
 }
 
-func hostedAttemptDiagnostics(attempt hostedWireAttempt, retry, continuation bool) map[string]string {
+func hostedAttemptDiagnostics(attempt hostedWireAttempt) map[string]string {
 	callCount := 0
 	usageKnown := false
 	if resp := attempt.response; resp != nil {
@@ -28,10 +36,11 @@ func hostedAttemptDiagnostics(attempt hostedWireAttempt, retry, continuation boo
 		}
 	}
 	return map[string]string{
+		"request_reason":      attempt.reason,
 		"model_requests":      "1",
 		"observed_tool_calls": strconv.Itoa(callCount),
-		"retry":               strconv.FormatBool(retry),
-		"continuation":        strconv.FormatBool(continuation),
+		"retry":               strconv.FormatBool(attempt.reason == hostedAttemptRetry),
+		"continuation":        strconv.FormatBool(attempt.reason == hostedAttemptContinuation),
 		"request_failed":      strconv.FormatBool(attempt.err != nil),
 		"request_duration_ms": strconv.FormatInt(attempt.elapsed.Milliseconds(), 10),
 		"usage_known":         strconv.FormatBool(usageKnown),

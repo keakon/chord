@@ -154,12 +154,15 @@ func (a *MainAgent) handleNativeReceipt(evt Event) {
 func (a *MainAgent) nativeUsageRecorder(agentID, kind, name string, turnID uint64) func(llm.NativeRequestRecord, *message.Response, error) {
 	return func(record llm.NativeRequestRecord, resp *message.Response, err error) {
 		var usage *message.TokenUsage
-		attempt := hostedWireAttempt{response: resp, err: err}
+		attempt := hostedWireAttempt{response: resp, err: err, reason: hostedAttemptInitial}
+		if record.Continuation > 0 {
+			attempt.reason = hostedAttemptContinuation
+		}
 		if resp != nil {
 			usage = resp.Usage
 			attempt.elapsed = resp.NativeRequestDuration
 		}
-		diagnostic := hostedAttemptDiagnostics(attempt, false, record.Continuation > 0)
+		diagnostic := hostedAttemptDiagnostics(attempt)
 		diagnostic["native_contract"] = record.Authorization.Contract
 		a.recordUsage(agentID, kind, name, "chat", record.Target, record.Target, turnID, usage, record.ServiceTier, diagnostic)
 	}

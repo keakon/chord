@@ -23,7 +23,14 @@ func TestClassifyHostedFailure(t *testing.T) {
 		{"other_dependency", &APIError{StatusCode: 424, Message: "required resource missing"}, HostedFailureExecution, false},
 		{"declaration", &APIError{StatusCode: 400, Message: "unsupported tool type"}, HostedFailureDeclaration, false},
 		{"event", &APIError{StatusCode: 400, Origin: APIErrorOriginSSEEvent, Message: "unsupported tool type"}, HostedFailureExecution, false},
+		{"local_rate", &HostedAdmissionError{}, HostedFailureRateLimited, true},
+		{"local_budget", &HostedAdmissionError{RetryBudget: true}, HostedFailureRetryBudget, false},
+		{"upstream_auth_code", &APIError{StatusCode: 400, Code: "invalid_grant"}, HostedFailureAuth, false},
+		{"upstream_auth_message", &APIError{StatusCode: 400, Message: "upstream: token endpoint HTTP 400: invalid_grant"}, HostedFailureAuth, false},
+		{"upstream_client", &APIError{StatusCode: 503, Code: "invalid_client"}, HostedFailureAuth, false},
 		{"auth", &APIError{StatusCode: 401}, HostedFailureAuth, false},
+		{"target_cooling", &HostedTargetCoolingError{Tool: "sample_tool"}, HostedFailureCooling, false},
+		{"probe_in_flight", &HostedTargetCoolingError{Tool: "sample_tool", ProbeInFlight: true}, HostedFailureCooling, false},
 		{"no_call", &HostedCallNotObservedError{Tool: "sample_tool"}, HostedFailureNotObserved, false},
 		{"network", &net.OpError{Op: "dial", Net: "tcp", Err: io.EOF}, HostedFailureTransport, true},
 		{"truncated", io.ErrUnexpectedEOF, HostedFailureTransport, true},
@@ -36,7 +43,7 @@ func TestClassifyHostedFailure(t *testing.T) {
 			if got := ClassifyHostedFailure(err); got != tc.kind {
 				t.Fatalf("kind=%s want=%s", got, tc.kind)
 			}
-			if got := hostedFailureAllowsRetryRound(err); got != tc.retry {
+			if got := HostedFailureAllowsRetryRound(err); got != tc.retry {
 				t.Fatalf("retry=%t want=%t", got, tc.retry)
 			}
 		})

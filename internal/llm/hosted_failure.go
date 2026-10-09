@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"time"
 )
 
 // HostedFailureKind describes the action appropriate after a hosted request.
@@ -18,8 +19,10 @@ const (
 	HostedFailureTransport   HostedFailureKind = "transport_failed"
 	HostedFailureDeclaration HostedFailureKind = "declaration_rejected"
 	HostedFailureNotObserved HostedFailureKind = "call_not_observed"
+	HostedFailureCooling     HostedFailureKind = "target_cooling"
 	HostedFailureAuth        HostedFailureKind = "authentication_failed"
 	HostedFailureExecution   HostedFailureKind = "execution_failed"
+	HostedFailureRetryBudget HostedFailureKind = "retry_budget_exhausted"
 )
 
 // HostedCallNotObservedError means this response did not demonstrate execution;
@@ -30,9 +33,33 @@ func (e *HostedCallNotObservedError) Error() string {
 	return "no " + e.Tool + " call was observed: the model did not run it or the endpoint ignored the hosted declaration"
 }
 
+// HostedTargetCoolingError means no request was sent because this target is
+// cooling after missing executions or already has a recovery probe in flight.
+type HostedTargetCoolingError struct {
+	Tool          string
+	Until         time.Time
+	ProbeInFlight bool
+}
+
+func (e *HostedTargetCoolingError) Error() string {
+	if e.ProbeInFlight {
+		return e.Tool + " target already has a recovery probe in flight; no request was sent"
+	}
+	return e.Tool + " target is cooling until " + e.Until.UTC().Format(time.RFC3339) + "; no request was sent"
+}
+
 // ClassifyHostedFailure retains the original cause when key cooldown masks the
 // wire error. Only known transient classes are eligible for another round.
 func ClassifyHostedFailure(err error) HostedFailureKind {
+	if _, ok := errors.AsType[*HostedTargetCoolingError](err); ok {
+		return HostedFailureCooling
+	}
+	if admission, ok := errors.AsType[*HostedAdmissionError](err); ok {
+		if admission.RetryBudget {
+			return HostedFailureRetryBudget
+		}
+		return HostedFailureRateLimited
+	}
 	if cooling, ok := errors.AsType[*AllKeysCoolingError](err); ok {
 		if cooling.cause != nil && cooling.cause.Err != nil {
 			return ClassifyHostedFailure(cooling.cause.Err)
@@ -43,6 +70,9 @@ func ClassifyHostedFailure(err error) HostedFailureKind {
 		return HostedFailureNotObserved
 	}
 	if apiErr, ok := errors.AsType[*APIError](err); ok {
+		if apiErrorSignalEquals(apiErr, "invalid_grant", "invalid_client") || apiErrMessageContainsAny(apiErr, "token endpoint http 400: invalid_grant", "token endpoint http 400: invalid_client") {
+			return HostedFailureAuth
+		}
 		if apiErr.StatusCode == 402 || isGlobalQuotaExhausted(apiErr) || apiErrorSignalContains(apiErr, "insufficient_quota", "quota_exceeded", "usage_limit_reached", "quota_exhausted", "insufficient_balance", "credit_balance_too_low") || apiErrMessageContainsAny(apiErr, "insufficient balance", "insufficient credits", "quota exhausted") {
 			return HostedFailureQuota
 		}
@@ -74,7 +104,8 @@ func ClassifyHostedFailure(err error) HostedFailureKind {
 	return HostedFailureExecution
 }
 
-func hostedFailureAllowsRetryRound(err error) bool {
+// HostedFailureAllowsRetryRound identifies transient failures eligible for another pool round.
+func HostedFailureAllowsRetryRound(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}

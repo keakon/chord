@@ -33,6 +33,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- Hosted tools support per-provider concurrency, request-rate, and retry-budget limits, with pool-first retries and temporary cooldown for missing tool executions.
 - MCP tools can be loaded on demand with `deferred: true` and `tool_search`, with per-agent history and bounded discovery results.
 - OpenAI Responses and Anthropic Messages search can run in the main request with explicit endpoint-bound preauthorization. It is off by default; per-call approval, custom hosted tools and explicit tool pools retain the hosted bridge. Unknown execution outcomes stop automatic replay.
 

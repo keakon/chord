@@ -27,7 +27,7 @@ const (
 	hostedToolSystemPrompt = "You are a tool-use assistant. Run the requested tool and reply with a short factual summary of its output."
 	// hostedToolMaxOutputTokens bounds one sub-request's summary text.
 	hostedToolMaxOutputTokens = 4096
-	// hostedToolRetryRounds bounds transient recovery per capable target.
+	// hostedToolRetryRounds bounds transient recovery across the whole capable pool.
 	hostedToolRetryRounds = 3
 )
 
@@ -61,14 +61,16 @@ func (s hostedRouteSource) key() string {
 // would rebuild tuning per fallback target and drop the hosted marker). The
 // main pool cursor is never advanced: ModelPoolSnapshot is an explicit copy.
 type hostedBackend struct {
-	agent           *MainAgent
-	catalog         map[string]tools.HostedToolSpec
-	pools           map[string]*hostedPoolSnapshot // named model_pool snapshots, built at startup
-	mu              sync.Mutex
-	routes          map[hostedRouteCacheKey]hostedRoute
-	seenDiag        map[hostedDiagnosticKey]struct{}
-	callerBindings  map[string]hostedCallerBinding
-	nextCallerEpoch uint64
+	agent                *MainAgent
+	catalog              map[string]tools.HostedToolSpec
+	pools                map[string]*hostedPoolSnapshot // named model_pool snapshots, built at startup
+	mu                   sync.Mutex
+	routes               map[hostedRouteCacheKey]hostedRoute
+	health               map[hostedHealthKey]hostedHealth
+	nextHealthGeneration uint64
+	seenDiag             map[hostedDiagnosticKey]struct{}
+	callerBindings       map[string]hostedCallerBinding
+	nextCallerEpoch      uint64
 }
 
 // hostedRoute is the remembered sticky target for one route source and tool.
@@ -116,6 +118,7 @@ func NewHostedBackend(a *MainAgent, catalog map[string]tools.HostedToolSpec, mod
 		catalog:        catalog,
 		pools:          make(map[string]*hostedPoolSnapshot),
 		routes:         make(map[hostedRouteCacheKey]hostedRoute),
+		health:         make(map[hostedHealthKey]hostedHealth),
 		seenDiag:       make(map[hostedDiagnosticKey]struct{}),
 		callerBindings: make(map[string]hostedCallerBinding),
 	}
@@ -193,47 +196,23 @@ func (b *hostedBackend) runForCaller(callerID string, ctx context.Context, tool 
 		b.diagnoseOnce(plan.source, tool, plan.reason)
 		return nil, newHostedUnavailableError(tool, plan.unavailable)
 	}
-	targets := b.preferredTargets(plan, tool)
-	failures := make([]hostedTargetFailure, 0, len(targets))
-	for _, target := range targets {
-		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("%s cancelled: %w", tool, err)
-		}
-		obs, err := b.runTarget(ctx, caller, target, spec, args)
-		if err == nil {
-			b.rememberTarget(caller, spec, plan, tool, target)
-			return obs, nil
-		}
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, fmt.Errorf("%s cancelled: %w", tool, ctxErr)
-		}
-		if _, approval := errors.AsType[*hostedApprovalRequiredError](err); approval {
-			return nil, err
-		}
-		if _, unknown := errors.AsType[*llm.HostedOutcomeUnknownError](err); unknown {
-			return nil, err
-		}
-		if hostedInputLevelError(err) {
-			return nil, fmt.Errorf("%s request was rejected before running: %w", tool, err)
-		}
-		failures = append(failures, hostedTargetFailure{target: hostedTargetRef(target), cause: err})
-	}
-	return nil, newHostedAllTargetsFailedError(tool, failures)
+	return b.runPool(ctx, caller, spec, plan, args)
 }
 
 // hostedCaller is the resolved default caller for one hosted call: the agent
 // instance, its current client for unset routing, and its effective agent
 // config for named-pool authorization (nil = unrestricted).
 type hostedCaller struct {
-	id       string // "" for the main agent
-	client   *llm.Client
-	agentCfg *config.AgentConfig
-	turnID   uint64 // captured when the request context does not carry one
-	sub      *SubAgent
-	pool     []llm.FallbackModel
-	cursor   int
-	source   hostedRouteSource
-	requests int // wire attempts across targets, keys, and continuations
+	id         string // "" for the main agent
+	client     *llm.Client
+	agentCfg   *config.AgentConfig
+	turnID     uint64 // captured when the request context does not carry one
+	sub        *SubAgent
+	pool       []llm.FallbackModel
+	cursor     int
+	source     hostedRouteSource
+	requests   int  // wire attempts across targets, keys, and continuations
+	retryRound bool // additional pool round, independent of target fallback
 }
 
 // resolveCaller validates the view default against the request context and
@@ -481,11 +460,28 @@ func (b *hostedBackend) runAttempt(ctx context.Context, caller *hostedCaller, ta
 	}
 	prompt := tools.RenderHostedPrompt(spec, args)
 	var attempts []hostedWireAttempt
+	wireCalls := 0
+	isContinuation := false
+	isRetry := func() bool {
+		return (!isContinuation && caller.retryRound) || (!isContinuation && hintOnly) || wireCalls > 0
+	}
 	clientTarget := target
 	clientTarget.ProviderImpl = hostedRequestProvider{
 		Provider: target.ProviderImpl, governor: b.agent.governor, providerName: target.ProviderConfig.Name(),
+		retry: isRetry,
 		observe: func(resp *message.Response, err error, elapsed time.Duration) {
-			attempts = append(attempts, hostedWireAttempt{response: resp, err: err, elapsed: elapsed})
+			reason := hostedAttemptInitial
+			switch {
+			case isRetry():
+				reason = hostedAttemptRetry
+			case isContinuation:
+				reason = hostedAttemptContinuation
+			case caller.requests > 0:
+				reason = hostedAttemptFallback
+			}
+			wireCalls++
+			caller.requests++
+			attempts = append(attempts, hostedWireAttempt{response: resp, err: err, elapsed: elapsed, reason: reason})
 		},
 	}
 	client := newAuxClientFromPool([]llm.FallbackModel{clientTarget}, 0, hostedToolMaxOutputTokens, b.agent.ServiceTier())
@@ -498,11 +494,9 @@ func (b *hostedBackend) runAttempt(ctx context.Context, caller *hostedCaller, ta
 		systemPrompt = hostedToolHintSystemPrompt(spec.Name)
 	}
 	client.SetSystemPrompt(systemPrompt)
-	if spec.RetrySafe {
-		client.SetStreamRetryRounds(hostedToolRetryRounds)
-	} else {
-		client.SetStreamRetryRounds(1)
-	}
+	// runPool owns retry eligibility and backoff across targets; this client
+	// traverses the target's keys once.
+	client.SetStreamRetryRounds(1)
 	hosted := &llm.HostedToolRequest{
 		Name:        spec.Name,
 		Declaration: decl.Tool,
@@ -515,6 +509,8 @@ func (b *hostedBackend) runAttempt(ctx context.Context, caller *hostedCaller, ta
 	}
 	var combined *message.HostedObservation
 	for continuation := 0; ; continuation++ {
+		isContinuation = continuation > 0
+		wireCalls = 0
 		if continuation > 0 {
 			if err := b.checkContinuation(ctx, target, spec, args); err != nil {
 				return nil, &llm.HostedOutcomeUnknownError{Cause: err}
@@ -525,8 +521,8 @@ func (b *hostedBackend) runAttempt(ctx context.Context, caller *hostedCaller, ta
 		if unknown, ok := errors.AsType[*llm.HostedOutcomeUnknownError](err); ok && resp == nil {
 			resp = unknown.Response
 		}
-		for i, attempt := range attempts {
-			b.recordAttemptUsage(ctx, caller, client, spec.Name, attempt, continuation > 0 && i == 0)
+		for _, attempt := range attempts {
+			b.recordAttemptUsage(ctx, caller, client, spec.Name, attempt)
 		}
 		attempts = attempts[:0]
 		if err != nil {
@@ -583,7 +579,7 @@ func hostedToolHintSystemPrompt(tool string) string {
 
 // recordAttemptUsage books every wire attempt, including failed attempts and
 // protocol continuations. Missing usage and tool fees remain unknown.
-func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCaller, client *llm.Client, tool string, attempt hostedWireAttempt, continuation bool) {
+func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCaller, client *llm.Client, tool string, attempt hostedWireAttempt) {
 	if b == nil || b.agent == nil {
 		return
 	}
@@ -593,8 +589,7 @@ func (b *hostedBackend) recordAttemptUsage(ctx context.Context, caller *hostedCa
 	if serviceTier == "" {
 		serviceTier = client.EffectiveServiceTierForModelRef(runningRef)
 	}
-	diagnostic := hostedAttemptDiagnostics(attempt, caller.requests > 0 && !continuation, continuation)
-	caller.requests++
+	diagnostic := hostedAttemptDiagnostics(attempt)
 	var usage *message.TokenUsage
 	if attempt.response != nil {
 		usage = attempt.response.Usage
