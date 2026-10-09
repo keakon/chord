@@ -206,6 +206,7 @@ type MainAgent struct {
 	// Degraded means writes are failing; the intent barrier then blocks tool
 	// dispatch while Q&A turns keep working until a checkpoint recovers.
 	persistenceHealth agentPersistenceHealth
+	nativeReceipt     atomic.Pointer[nativeReceiptPersistence]
 
 	// loopReductionMu protects request-shape snapshots, reduction stats, and
 	// loopState fields that may be read by callLLM on a worker goroutine while
@@ -1871,7 +1872,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		// request is still marked in flight, and this is exactly the boundary a
 		// pool switch that invalidated the routing must be applied at.
 		a.mainLLMRequestInFlight.Store(false)
-		if llm.IsRoutingInvalidated(err) {
+		if !llm.IsNativeToolError(err) && llm.IsRoutingInvalidated(err) {
 			log.Infof("routing invalidated during active turn; restarting request turn_id=%v instance=%v", evt.TurnID, a.instanceID)
 			a.applyPendingModelPoolSwitchesAtRequestBoundary()
 			// The restart can land on a different model or backend, and a
@@ -1896,7 +1897,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		// back-to-back. When nothing visible was streamed, this falls through
 		// to ordinary error handling below — which then discards nothing,
 		// since the partial text has already been drained and saved.
-		if a.turn != nil && llm.IsPreservableStreamInterruption(err) {
+		if a.turn != nil && !llm.IsNativeToolError(err) && llm.IsPreservableStreamInterruption(err) {
 			if a.resumeAfterPreservedStreamInterruption(evt.TurnID, err) {
 				return
 			}

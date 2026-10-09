@@ -70,6 +70,7 @@ func (a *AnthropicProvider) SetTraceWriter(w *TraceWriter) {
 
 // anthropicRequest is the top-level request body for the Messages API.
 type anthropicRequest struct {
+	Container    string                 `json:"container,omitempty"`
 	Model        string                 `json:"model"`
 	MaxTokens    int                    `json:"max_tokens"`
 	System       []anthropicContent     `json:"system,omitempty"`
@@ -127,6 +128,7 @@ type anthropicMessage struct {
 
 // anthropicContent is a content block in the Anthropic API format.
 type anthropicContent struct {
+	Raw          json.RawMessage       `json:"-"`
 	Type         string                `json:"type"`
 	Text         string                `json:"text,omitempty"`
 	Thinking     string                `json:"thinking,omitempty"`      // thinking block: content
@@ -183,6 +185,7 @@ func (a *AnthropicProvider) CompleteStream(
 	tuning RequestTuning,
 	cb StreamCallback,
 ) (*message.Response, error) {
+	markRequestPrepared(ctx)
 	dumpWriter := a.dumpWriter.Load()
 	traceWriter := a.traceWriter.Load()
 	// The trace collector only books diagnostics; without a trace writer it
@@ -238,6 +241,11 @@ func (a *AnthropicProvider) CompleteStream(
 			Tools:     apiTools,
 			Stream:    true,
 		}
+		for _, msg := range messages {
+			if msg.NativeTools != nil && msg.NativeTools.Container != "" {
+				reqBody.Container = msg.NativeTools.Container
+			}
+		}
 		if at.ToolChoice != "" && len(apiTools) > 0 && !forcedToolChoiceDowngraded(a.provider, model, at.ToolChoice) {
 			// Extended thinking is incompatible with forced tool use: Anthropic
 			// returns 400 for tool_choice "any"/"tool" when thinking is
@@ -284,10 +292,10 @@ func (a *AnthropicProvider) CompleteStream(
 		if err != nil {
 			return nil, err
 		}
-		return bodyBytes, nil
+		return addNativeToolDeclaration(bodyBytes, tuning.nativeTool)
 	}
 	var bodyBytes []byte
-	if tuning.HostedTool != nil {
+	if tuning.HostedTool != nil || tuning.nativeTool != nil {
 		// Hosted sub-requests bypass the body-reuse cache: the cache identity
 		// deliberately ignores request tuning, and a hosted body differs from a
 		// plain body built from the same (system, messages, tools, maxTokens).
@@ -336,7 +344,11 @@ func (a *AnthropicProvider) CompleteStream(
 		log.Debugf("LLM request via proxy provider=%v scheme=%v", "anthropic", a.proxyScheme)
 	}
 	traceCB(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
-	httpResp, err := doRequestUntilHeaders(a.client, req, providerResponseHeaderTimeout(a.provider))
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("anthropic request aborted: %w", err)
+	}
+	markRequestSent(ctx)
+	httpResp, err := doRequestUntilHeaders(nativeToolHTTPClient(a.client, tuning.nativeTool != nil), req, providerResponseHeaderTimeout(a.provider))
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)
 		persistLLMTrace(traceWriter, traceCollector, 0, "http", start, nil, callErr)
@@ -392,7 +404,7 @@ func (a *AnthropicProvider) CompleteStream(
 	}
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, a.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
-	resp, parseErr := parseSSEStream(cr, traceCB, collector, tuning.HostedTool != nil)
+	resp, parseErr := parseSSEStream(cr, traceCB, collector, tuning.HostedTool != nil || tuning.nativeTool != nil)
 
 	// Write dump asynchronously.
 	if dumpWriter != nil {
@@ -793,6 +805,15 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 
 		case "assistant":
 			var content []anthropicContent
+			if native := msg.NativeTools; native != nil && len(native.Items) > 0 {
+				for _, raw := range native.Items {
+					content = append(content, anthropicNativeContent(raw))
+				}
+				result = append(result, anthropicMessage{Role: "assistant", Content: content})
+				messageMap[sourceIndex] = anthropicMessageMapEntry{MessageIndex: len(result) - 1, BlockIndex: len(content) - 1, Valid: true}
+				i++
+				continue
+			}
 
 			// Thinking blocks must come before text/tool_use in the assistant message.
 			// Anthropic requires them to be replayed verbatim (including signature).
@@ -998,7 +1019,13 @@ func applyCacheBreakpoints(system []anthropicContent, messages []anthropicMessag
 			start = preferredBlock
 		}
 		for j := start; j >= 0; j-- {
-			if skipThinking && blocks[j].Type == "thinking" {
+			if skipThinking && (blocks[j].Type == "thinking" || blocks[j].Type == "redacted_thinking") {
+				if preferredBlock >= 0 {
+					return false
+				}
+				continue
+			}
+			if len(blocks[j].Raw) > 0 && (blocks[j].Type == "" || (blocks[j].Type == "text" && blocks[j].Text == "")) {
 				if preferredBlock >= 0 {
 					return false
 				}

@@ -810,8 +810,15 @@ func MessagePayloadBytes(messages []message.Message) int {
 }
 
 func messageContextBytes(messages []message.Message) int {
-	total := MessagePayloadBytes(messages)
+	total := 0
 	for _, msg := range messages {
+		if msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 {
+			for _, item := range msg.NativeTools.Items {
+				total += len(item)
+			}
+			continue
+		}
+		total += MessagePayloadBytes([]message.Message{msg})
 		total += len(msg.ToolCallID)
 		for _, tc := range msg.ToolCalls {
 			total += len(tc.ID) + len(tc.Name) + len(tc.Args)
@@ -858,6 +865,9 @@ const imagePartEstimateTokens = (2000*2000 + 749) / 750
 // and the per-image token allowance replacing them.
 func imagePartAccounting(messages []message.Message) (payloadBytes, tokens int) {
 	for _, msg := range messages {
+		if msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 {
+			continue
+		}
 		for _, part := range msg.Parts {
 			if part.Type != message.ContentPartImage {
 				continue
@@ -889,6 +899,15 @@ func EstimateMessagesTokens(messages []message.Message) int {
 
 // EstimateMessageTokens returns approximate token count for a single message.
 func EstimateMessageTokens(msg message.Message) int {
+	// Native adapters replay the complete raw surface instead of its display
+	// mirrors (content, thinking and client calls).
+	if msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 {
+		n := 0
+		for _, item := range msg.NativeTools.Items {
+			n += len(item)
+		}
+		return max(1, n/3)
+	}
 	payloadBytes := len(msg.Content)
 	imageTokens := 0
 	if len(msg.Parts) > 0 {

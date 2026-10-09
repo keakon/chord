@@ -146,14 +146,15 @@ type responsesSource struct {
 }
 
 type bindingSource struct {
-	Endpoint        string                      `yaml:"endpoint"`
-	WireModelID     string                      `yaml:"wire_model_id"`
-	ModelID         string                      `yaml:"model_id"`
-	Variants        map[string]variantSource    `yaml:"variants"`
-	Responses       *responsesSource            `yaml:"responses"`
-	Limit           *modelcatalog.LimitOverride `yaml:"limit"`
-	InputModalities []string                    `yaml:"input_modalities"`
-	ConfigProfile   *configProfileSource        `yaml:"config_profile"`
+	ServerTools     map[string]modelcatalog.ServerToolCapability `yaml:"server_tools"`
+	Endpoint        string                                       `yaml:"endpoint"`
+	WireModelID     string                                       `yaml:"wire_model_id"`
+	ModelID         string                                       `yaml:"model_id"`
+	Variants        map[string]variantSource                     `yaml:"variants"`
+	Responses       *responsesSource                             `yaml:"responses"`
+	Limit           *modelcatalog.LimitOverride                  `yaml:"limit"`
+	InputModalities []string                                     `yaml:"input_modalities"`
+	ConfigProfile   *configProfileSource                         `yaml:"config_profile"`
 }
 
 type configProfileSource struct {
@@ -326,6 +327,7 @@ func buildCatalog(version string, source *modelcatalog.CatalogSource, endpointsS
 	bindings := make([]modelcatalog.Binding, 0, len(bindingsSrc))
 	for _, b := range bindingsSrc {
 		converted := modelcatalog.Binding{
+			ServerTools:     b.ServerTools,
 			Endpoint:        b.Endpoint,
 			WireModelID:     b.WireModelID,
 			ModelID:         b.ModelID,

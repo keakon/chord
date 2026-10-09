@@ -261,6 +261,12 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 			})
 
 		case "assistant":
+			if native := msg.NativeTools; native != nil && len(native.Items) > 0 {
+				for _, raw := range native.Items {
+					result = append(result, responsesInputItem{Raw: raw})
+				}
+				continue
+			}
 			if len(msg.ResponsesOutput) > 0 {
 				// Native ResponsesOutput replays provider-ordered items; tool
 				// results are separate messages that follow. A trailing run of

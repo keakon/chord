@@ -961,6 +961,17 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				})
 				*nextID++
 			}
+			for _, display := range tools.NativeToolDisplays(msg.NativeTools) {
+				if _, exists := toolIDToBlock[display.ID]; exists {
+					continue
+				}
+				b := newTranscriptToolCallBlock(*nextID, message.ToolCall{ID: display.ID, Name: display.Name, Args: json.RawMessage(display.Args)})
+				b.MsgIndex = msgIdx
+				applyStableToolResultToBlock(b, transcriptToolResult{result: display.Result, payload: display.Result, status: agent.ToolResultStatus(display.Status), displayArgs: stableToolDisplayArgs, resetExecution: true})
+				blocks = append(blocks, b)
+				toolIDToBlock[display.ID] = b
+				*nextID++
+			}
 			for _, tc := range msg.ToolCalls {
 				b := newTranscriptToolCallBlock(*nextID, tc)
 				b.MsgIndex = msgIdx

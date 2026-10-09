@@ -124,6 +124,7 @@ type SubAgent struct {
 	llmRequestSeq        uint64
 	unsupportedPartToast toastGate
 	persistenceHealth    agentPersistenceHealth
+	nativeReceipt        atomic.Pointer[nativeReceiptPersistence]
 	startupWatchdogSeq   atomic.Uint64
 	done                 chan struct{}
 	doneOnce             sync.Once
@@ -350,11 +351,18 @@ func (s *SubAgent) persistMessageAsync(msg message.Message, description string, 
 	}
 	if s.parent == nil {
 		if manager := s.recoveryManager(); manager != nil {
-			if err := manager.PersistMessage(s.instanceID, msg); err != nil {
+			write := manager.PersistMessage
+			if requiresDurableMessage(msg) {
+				write = manager.PersistMessageDurable
+			}
+			if err := write(s.instanceID, msg); err != nil {
 				log.Warnf("SubAgent: failed to persist %s agent=%v error=%v", description, s.instanceID, err)
 				s.notePersistenceFailure(err)
 				return
 			}
+		} else if requiresDurableMessage(msg) {
+			s.notePersistenceFailure(fmt.Errorf("durable message has no recovery manager"))
+			return
 		}
 		if after != nil {
 			after()
@@ -389,29 +397,55 @@ func (s *SubAgent) persistMessageBarrier(msg message.Message, description string
 	barrier := make(chan error, 1)
 	manager := s.recoveryManager()
 	if s == nil || manager == nil {
+		if requiresDurableMessage(msg) {
+			err := fmt.Errorf("durable message has no recovery manager")
+			s.notePersistenceFailure(err)
+			barrier <- err
+			return barrier, true
+		}
 		barrier <- nil
 		return barrier, true
 	}
+	journal := s.nativeJournal()
+	nativeBarrier := newNativeReceiptPersistence(msg)
+	if nativeBarrier != nil {
+		s.nativeReceipt.Store(nativeBarrier)
+	}
 	if s.parent == nil {
 		var err error
-		if writeErr := manager.PersistMessage(s.instanceID, msg); writeErr != nil {
+		write := manager.PersistMessage
+		if requiresDurableMessage(msg) {
+			write = manager.PersistMessageDurable
+		}
+		if writeErr := write(s.instanceID, msg); writeErr != nil {
 			log.Warnf("SubAgent: failed to persist %s agent=%v error=%v", description, s.instanceID, writeErr)
 			err = writeErr
 		}
+		if err == nil {
+			err = s.acknowledgeNativeMessage(journal, msg)
+		}
 		if err != nil {
 			s.notePersistenceFailure(err)
 		}
+		nativeBarrier.finish(err)
 		barrier <- err
+		s.publishNativeReceipt(msg, err)
 		return barrier, true
 	}
 	enqueued := s.parent.persistAsyncForEpoch(s.sessionEpoch, s.instanceID, msg, func(err error) {
+		if err == nil {
+			err = s.acknowledgeNativeMessage(journal, msg)
+		}
 		if err != nil {
 			s.notePersistenceFailure(err)
 		}
+		nativeBarrier.finish(err)
 		barrier <- err
+		s.publishNativeReceipt(msg, err)
 	})
 	if !enqueued {
 		s.notePersistenceFailure(errPersistenceQueueUnavailable)
+		nativeBarrier.finish(errPersistenceQueueUnavailable)
 		barrier <- errPersistenceQueueUnavailable
 	}
 	return barrier, enqueued
@@ -1041,7 +1075,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			wallReq.wireStreamReducer(streamReducer)
 		}
 		requestCtx := llm.WithResponsesTurnState(turn.Ctx, turn.LLMResponsesState)
-		resp, err := llmClient.CompleteStream(requestCtx, messages, toolDefs, callback)
+		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{NativeTools: s.nativeRequestPolicy(turn)})
 		// Settle the walltime segment before the flush events so the TUI
 		// re-render they trigger sees the updated TIME buckets; finishing at
 		// return would leave the sidebar stale until the next unrelated
@@ -1082,7 +1116,9 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 					s.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(runningRef), llmClient.CompactionBudgetForModelRef(runningRef), 0)
 				}
 			}
-			s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage, callStatus.ServiceTier, nil)
+			if resp.NativeTools == nil {
+				s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage, callStatus.ServiceTier, nil)
+			}
 
 			// Hook: on_after_llm_call.
 			subInputTok, subOutputTok := 0, 0

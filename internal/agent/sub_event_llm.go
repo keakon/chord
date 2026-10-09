@@ -33,6 +33,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// attempt that never emitted visible output must not keep defining it.
 	s.syncRunningModelRefToCursorHead()
 	if result.err != nil {
+		if llm.IsNativeToolError(result.err) {
+			s.sendEvent(Event{Type: EventAgentError, Payload: result.err})
+			return
+		}
 		if s.recoverFromContextLength(result.err) {
 			return
 		}
@@ -91,6 +95,12 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	}
 
 	// --- Diagnostic logging (Fix 5) ---
+	if resp.NativeTools != nil && len(malformedCalls) > 0 {
+		resp.NativeTools.OutcomeUnknown = true
+		s.persistNativeFailure(resp.NativeTools)
+		s.sendEvent(Event{Type: EventAgentError, Payload: &llm.NativeToolError{Cause: fmt.Errorf("native response contains malformed client tool arguments; inspect the saved receipt")}})
+		return
+	}
 	isTruncated := resp.StopReason == "max_tokens" || resp.StopReason == "length"
 	if len(malformedCalls) > 0 {
 		log.Warnf("SubAgent: malformed tool calls detected in LLM response agent=%v total_tool_calls=%v malformed_count=%v valid_count=%v stop_reason=%v last_input_tokens=%v", s.instanceID, len(resp.ToolCalls), len(malformedCalls), len(validCalls), resp.StopReason, s.ctxMgr.LastInputTokens())
@@ -201,6 +211,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		log.Warnf("subagent finalized without assistant text agent=%v turn_id=%v tool_calls=%v thinking_blocks=%v stop_reason=%v", s.instanceID, s.turn.ID, len(sanitizedCalls), len(resp.ThinkingBlocks), resp.StopReason)
 	}
 	s.ctxMgr.Append(message.Message{
+		NativeTools:      resp.NativeTools,
 		Role:             "assistant",
 		Content:          resp.Content,
 		ThinkingBlocks:   thinkingBlocks,
@@ -225,6 +236,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 	// Persist assistant message (with usage for session resume).
 	persistMsg := message.Message{
+		NativeTools:      resp.NativeTools,
 		Role:             "assistant",
 		Content:          resp.Content,
 		ThinkingBlocks:   thinkingBlocks,

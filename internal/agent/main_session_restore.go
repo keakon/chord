@@ -567,6 +567,9 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	}
 
 	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery, started)
+	if err := restoreNativeSessionReceipts(loaded, tmpRecovery); err != nil {
+		return nil, fmt.Errorf("restore native request receipts: %w", err)
+	}
 	// Crash-window reconciliation of a model-driven apply. A crash between
 	// the durable transcript rewrite and the applied settlement leaves the
 	// recovery snapshot's proposal record reading accepted/preparing although

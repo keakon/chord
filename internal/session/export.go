@@ -33,12 +33,6 @@ type ExportedSession struct {
 //
 // Note: multi-part user attachments (e.g. image ContentParts) are intentionally
 // not embedded in export files; only the plain message Content is exported.
-//
-// The kind/file_state/file_attribution_incomplete/tool_changed_paths fields
-// were added after v1 without bumping CurrentVersion: they are all omitempty,
-// so files written by the new exporter still validate as v1 and old readers
-// ignore the unknown fields. See projection.go for why analysis needs them
-// (turn-trigger downgrade needs kind; file attribution needs FileState).
 type ExportedMessage struct {
 	Role                      message.Role                  `json:"role"`
 	Content                   string                        `json:"content"`
@@ -57,6 +51,7 @@ type ExportedMessage struct {
 	ToolCalls                 []ExportedToolCall            `json:"tool_calls,omitempty"`
 	ThinkingBlocks            []message.ThinkingBlock       `json:"thinking_blocks,omitempty"`
 	ResponsesOutput           []message.ResponsesOutputItem `json:"responses_output,omitempty"`
+	NativeTools               *message.NativeToolHistory    `json:"native_tools,omitempty"`
 	GeminiParts               []message.GeminiReplayPart    `json:"gemini_parts,omitempty"`
 	ReasoningContent          string                        `json:"reasoning_content,omitempty"`
 	IsCompactionSummary       bool                          `json:"is_compaction_summary,omitempty"`
@@ -149,6 +144,7 @@ func Export(
 			ThinkingBlocks:            append([]message.ThinkingBlock(nil), msg.ThinkingBlocks...),
 			ResponsesOutput:           cloneResponsesOutput(msg.ResponsesOutput),
 			GeminiParts:               append([]message.GeminiReplayPart(nil), msg.GeminiParts...),
+			NativeTools:               msg.NativeTools.Clone(),
 			ReasoningContent:          msg.ReasoningContent,
 			IsCompactionSummary:       msg.IsCompactionSummary,
 			CompactionFileRevisions:   cloneStringMap(msg.CompactionFileRevisions),
@@ -304,6 +300,7 @@ func ExportToMarkdown(session *ExportedSession) string {
 				sb.WriteString(em.Content)
 				sb.WriteString("\n\n")
 			}
+			writeNativeToolMarkdown(&sb, em.NativeTools)
 			for _, tc := range em.ToolCalls {
 				sb.WriteString(convformat.ToolCallMarkdown(tc.Name, tc.Args, ignoredToolArgs[tc.ID], "", ""))
 				sb.WriteString("\n\n")
@@ -397,6 +394,7 @@ func (es *ExportedSession) ToMessages() []message.Message {
 			ThinkingBlocks:            append([]message.ThinkingBlock(nil), em.ThinkingBlocks...),
 			ResponsesOutput:           cloneResponsesOutput(em.ResponsesOutput),
 			GeminiParts:               append([]message.GeminiReplayPart(nil), em.GeminiParts...),
+			NativeTools:               em.NativeTools.Clone(),
 			ReasoningContent:          em.ReasoningContent,
 			IsCompactionSummary:       em.IsCompactionSummary,
 			CompactionFileRevisions:   cloneStringMap(em.CompactionFileRevisions),

@@ -19,7 +19,7 @@ type anthropicHostedCapture struct {
 	complete map[int]json.RawMessage
 }
 
-// capture retains native blocks only for hosted sub-requests. Complete blocks
+// capture retains native blocks for hosted and preauthorized main requests. Complete blocks
 // can be sent back on pause_turn without rebuilding or reordering their types.
 func (c *anthropicHostedCapture) capture(resp *message.Response, eventType, data string) error {
 	var ev struct {

@@ -36,7 +36,8 @@ func BuiltinHostedToolSpecs() map[string]HostedToolSpec {
 // models, and newer versions move options inside the declaration object.
 func webSearchHostedSpec() HostedToolSpec {
 	return HostedToolSpec{
-		Name: NameWebSearch,
+		NativeMapping: true,
+		Name:          NameWebSearch,
 		Description: `Search the public web and return a summary with numbered sources (URL and title).
 
 Use this when the answer depends on current information beyond your knowledge, and cite the numbered sources in your reply. The search runs server-side on the configured provider; results are a summary, not the full page, so use web_fetch when you need a specific page's content.

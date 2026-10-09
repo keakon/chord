@@ -288,6 +288,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	allowStructuredTools := opts.StructuredTools && target.SupportsStructuredTools && strings.TrimSpace(target.ToolResultEncoding) != "" && strings.TrimSpace(target.ToolResultEncoding) != ToolResultEncodingNone
 	toolResultsByID := collectToolResults(out)
 	toolResultMessagesByID := collectToolResultMessages(out)
+	nativeToolResults := collectNativeToolResultIDs(out)
 	droppedNonImportedToolIDs := make(map[string]bool)
 	textifiedToolResultIDs := make(map[string]bool)
 	strictToolEvidence := make(map[int]message.Message)
@@ -300,6 +301,12 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 
 	for i := range out {
 		msg := &out[i]
+		if msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 {
+			// Raw server receipts and signed blocks own the complete trajectory.
+			// Endpoint binding and client-call pairing are checked before dispatch;
+			// generic replay degradation must not rewrite this history.
+			continue
+		}
 		// The replay window is a per-target policy (reasoning_replay): most
 		// thinking-mode chat backends validate reasoning presence only after
 		// the last user message, and their chat templates drop earlier-turn
@@ -602,7 +609,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 	}
 
 	for i := range out {
-		if out[i].Role != message.RoleTool {
+		if out[i].Role != message.RoleTool || nativeToolResults[out[i].ToolCallID] {
 			continue
 		}
 		if textifiedToolResultIDs[strings.TrimSpace(out[i].ToolCallID)] {
@@ -637,7 +644,7 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 			report.DroppedToolResults++
 			msg.Role = ""
 		}
-		if msg.Role != "" && !(msg.Role == message.RoleAssistant && strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && !hasSerializableThinkingBlocks(msg.ThinkingBlocks) && strings.TrimSpace(msg.ReasoningContent) == "") {
+		if msg.Role != "" && !(msg.Role == message.RoleAssistant && msg.NativeTools == nil && strings.TrimSpace(msg.Content) == "" && len(msg.Parts) == 0 && len(msg.ToolCalls) == 0 && !hasSerializableThinkingBlocks(msg.ThinkingBlocks) && strings.TrimSpace(msg.ReasoningContent) == "") {
 			filtered = append(filtered, msg)
 		}
 		if evidence, ok := strictToolEvidence[i]; ok {
@@ -1024,7 +1031,7 @@ func compactAdjacentAssistantMessages(msgs []message.Message) []message.Message 
 			continue
 		}
 		last := &out[len(out)-1]
-		if last.Role == message.RoleAssistant && msg.Role == message.RoleAssistant && last.Kind == msg.Kind && len(last.ToolCalls) == 0 && len(msg.ToolCalls) == 0 && len(last.Parts) == 0 && len(msg.Parts) == 0 && len(last.ThinkingBlocks) == 0 && len(msg.ThinkingBlocks) == 0 && len(last.ResponsesOutput) == 0 && len(msg.ResponsesOutput) == 0 && len(last.GeminiParts) == 0 && len(msg.GeminiParts) == 0 && strings.TrimSpace(last.ReasoningContent) == "" && strings.TrimSpace(msg.ReasoningContent) == "" {
+		if last.NativeTools == nil && msg.NativeTools == nil && last.Role == message.RoleAssistant && msg.Role == message.RoleAssistant && last.Kind == msg.Kind && len(last.ToolCalls) == 0 && len(msg.ToolCalls) == 0 && len(last.Parts) == 0 && len(msg.Parts) == 0 && len(last.ThinkingBlocks) == 0 && len(msg.ThinkingBlocks) == 0 && len(last.ResponsesOutput) == 0 && len(msg.ResponsesOutput) == 0 && len(last.GeminiParts) == 0 && len(msg.GeminiParts) == 0 && strings.TrimSpace(last.ReasoningContent) == "" && strings.TrimSpace(msg.ReasoningContent) == "" {
 			last.Content = joinNonEmpty(last.Content, msg.Content)
 			continue
 		}
@@ -1040,6 +1047,7 @@ func deepCopyMessages(msgs []message.Message) []message.Message {
 	out := make([]message.Message, len(msgs))
 	for i, msg := range msgs {
 		out[i] = msg
+		out[i].NativeTools = msg.NativeTools.Clone()
 		if len(msg.Parts) > 0 {
 			parts := make([]message.ContentPart, len(msg.Parts))
 			copy(parts, msg.Parts)

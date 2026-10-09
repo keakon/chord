@@ -1335,11 +1335,11 @@ func TestRehydratePersistenceFailureDoesNotRegisterRuntime(t *testing.T) {
 		ExpectedWriteScope: tools.WriteScope{PathPrefix: []string{"internal/agent"}},
 	}
 	a.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
-	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
-	if err := os.WriteFile(blockedRoot, []byte("x"), 0o600); err != nil {
-		t.Fatalf("WriteFile(blockedRoot): %v", err)
+	// Block the registration file while keeping transcript and native journal
+	// recovery readable, so admission reaches the intended persistence failure.
+	if err := os.MkdirAll(durableTaskRegistryPath(a.sessionDir), 0o700); err != nil {
+		t.Fatalf("block task registry: %v", err)
 	}
-	a.sessionDir = blockedRoot
 
 	_, _, err := a.rehydrateTask(record)
 	if err == nil || !strings.Contains(err.Error(), "persist rehydrated durable task registration") {

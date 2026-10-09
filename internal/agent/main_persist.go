@@ -217,16 +217,21 @@ func (a *MainAgent) persistAsyncForEpoch(sessionEpoch uint64, agentID string, ms
 	return a.persistAsyncThrough(a.recoveryManagerForEpoch(sessionEpoch), agentID, msg, after)
 }
 
+func requiresDurableMessage(msg message.Message) bool {
+	// Journal acknowledgements must never survive the canonical receipt they
+	// retire, including receipts that record an unknown execution outcome.
+	return len(msg.Question) > 0 || msg.NativeTools != nil
+}
+
 // persistAsyncThrough queues one write against an already-resolved manager. A
-// nil manager still queues and still reports success to the caller: there is no
-// session file to write for, which is not a durability fault the writer can act
-// on (the same reasoning as ignoring ErrClosed in notePersistenceFailure).
+// nil manager still queues. Ordinary messages need no session file; durable
+// messages fail closed in the writer when there is no recovery manager.
 func (a *MainAgent) persistAsyncThrough(manager *recovery.RecoveryManager, agentID string, msg message.Message, after func(error)) bool {
 	if a.shuttingDown.Load() {
 		return false
 	}
 	start := time.Now()
-	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: manager, after: after, durable: len(msg.Question) > 0}, a.stoppingCh) {
+	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: manager, after: after, durable: requiresDurableMessage(msg)}, a.stoppingCh) {
 		return false
 	}
 	blocked := time.Since(start)

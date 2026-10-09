@@ -175,6 +175,7 @@ type CallStatus struct {
 // the target's model and context budgets and may return an updated message
 // snapshot for that fallback attempt.
 type CompleteStreamOptions struct {
+	NativeTools    *NativeToolPolicy
 	BeforeFallback func(context.Context, []message.Message, FallbackModel) ([]message.Message, error)
 	// MCPDeclarations is the request's currently effective incremental MCP
 	// tool set. A target that cannot accept the dynamic declaration shape
@@ -1124,6 +1125,9 @@ func (c *Client) CompleteStreamWithOptions(
 	if c == nil || c.closed.Load() {
 		return nil, errors.New("llm client is closed")
 	}
+	if options.NativeTools != nil {
+		ctx = context.WithValue(ctx, nativePolicyContextKey{}, options.NativeTools)
+	}
 	c.mu.Lock()
 	if c.closed.Load() {
 		c.mu.Unlock()
@@ -1162,6 +1166,15 @@ func (c *Client) CompleteStreamWithOptions(
 	streamRetryRounds := c.streamRetryRounds
 	serviceTier := c.serviceTier
 	c.mu.Unlock()
+
+	if policy := options.NativeTools; policy != nil && policy.Preflight != nil {
+		if err := policy.Preflight(ctx); err != nil {
+			if failure, ok := errors.AsType[*NativeToolError](err); ok && failure.Receipt != nil && policy.Failed != nil {
+				policy.Failed(failure.Receipt)
+			}
+			return nil, err
+		}
+	}
 
 	// A request with a callback also replays key failures recorded while no
 	// request could show them (background extraction or thinking translation);

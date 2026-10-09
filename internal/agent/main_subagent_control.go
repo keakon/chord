@@ -697,6 +697,11 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 		return nil, "", false, fmt.Errorf("load task history for %s: %w", record.TaskID, err)
 	}
 
+	msgs, err = restoreNativeTranscript(manager, a.sessionDir, record.TaskID, record.LatestInstanceID, msgs)
+	if err != nil {
+		return nil, "", false, fmt.Errorf("restore native task receipts: %w", err)
+	}
+
 	subLLMClient := a.llmFactory("", a.effectiveSubAgentModels(agentDef), agentDef.Variant)
 	if subLLMClient == nil {
 		return nil, "", false, fmt.Errorf("cannot initialize model pool for agent %q; check chord doctor config", agentDef.Name)

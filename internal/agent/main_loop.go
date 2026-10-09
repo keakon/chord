@@ -180,6 +180,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleSessionControlEvent(evt)
 	case EventModelPoolSwitch:
 		a.handleModelPoolSwitchEvent(evt)
+	case EventNativeReceipt:
+		a.handleNativeReceipt(evt)
 	case EventMCPControl:
 		a.handleMCPControlEvent(evt)
 	case EventMCPControlDone:

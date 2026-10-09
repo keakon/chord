@@ -122,6 +122,7 @@ type HostedToolRequest struct {
 // RequestTuning bundles all provider-specific tuning parameters for a single
 // LLM request. Each provider reads only its own sub-struct.
 type RequestTuning struct {
+	nativeTool            *nativeToolRequest
 	Anthropic             AnthropicTuning
 	OpenAI                OpenAITuning
 	Gemini                GeminiTuning

@@ -294,6 +294,7 @@ const (
 
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
+	NativeTools      *NativeToolHistory    `json:"native_tools,omitempty"`
 	Question         json.RawMessage       `json:"question,omitempty"`
 	Role             Role                  `json:"role"` // "user", "assistant", "tool"
 	Content          string                `json:"content"`
@@ -716,13 +717,15 @@ const (
 
 // Response represents a complete LLM response.
 type Response struct {
-	Content         string
-	ThinkingBlocks  []ThinkingBlock // non-nil when extended thinking was enabled
-	ResponsesOutput []ResponsesOutputItem
-	GeminiParts     []GeminiReplayPart
-	ToolCalls       []ToolCall
-	Usage           *TokenUsage
-	StopReason      string
+	NativeRequestDuration time.Duration
+	NativeTools           *NativeToolHistory
+	Content               string
+	ThinkingBlocks        []ThinkingBlock // non-nil when extended thinking was enabled
+	ResponsesOutput       []ResponsesOutputItem
+	GeminiParts           []GeminiReplayPart
+	ToolCalls             []ToolCall
+	Usage                 *TokenUsage
+	StopReason            string
 	// ThinkingToolcallMarkerHit is true when provider-side reasoning content
 	// contained pseudo tool-call template markers (e.g. "<|tool_call_begin|>").
 	// This is observational metadata only; tool execution must still come from

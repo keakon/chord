@@ -3,7 +3,9 @@ package message
 import (
 	"encoding/json"
 	"net/url"
+	"slices"
 	"strings"
+	"unicode"
 )
 
 // SearchCitation is a provider-authored web citation, not a link inferred from
@@ -88,4 +90,84 @@ func WebSearchCitations(items []json.RawMessage) []SearchCitation {
 		out = append(out, block.citations...)
 	}
 	return out
+}
+
+func (c SearchCitation) markdownLink() string {
+	label := strings.TrimSpace(c.Title)
+	if label == "" {
+		label = c.URL
+	}
+	label = strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]", "\n", " ", "\r", " ").Replace(label)
+	destination := strings.NewReplacer("<", "%3C", ">", "%3E", " ", "%20").Replace(c.URL)
+	return "[" + label + "](<" + destination + ">)"
+}
+
+// CitedContent projects visible, clickable citations without modifying the raw
+// blocks needed for provider replay. Missing offsets place links at block end.
+func (h *NativeToolHistory) CitedContent(content string) string {
+	if h == nil {
+		return content
+	}
+	blocks := searchTextBlocks(h.Items)
+	var plain, cited strings.Builder
+	for _, block := range blocks {
+		plain.WriteString(block.text)
+		runes := []rune(block.text)
+		citations := slices.Clone(block.citations)
+		position := func(c SearchCitation) int {
+			if c.validRange(block.text) {
+				return *c.end
+			}
+			end := len(runes)
+			for end > 0 && unicode.IsSpace(runes[end-1]) {
+				end--
+			}
+			return end
+		}
+		slices.SortStableFunc(citations, func(a, b SearchCitation) int { return position(a) - position(b) })
+		cursor := 0
+		seen := make(map[struct {
+			url string
+			end int
+		}]bool)
+		for _, c := range citations {
+			end := position(c)
+			textEnd := end
+			if c.validRange(block.text) && *c.start >= cursor && strings.HasPrefix(string(runes[*c.start:end]), "cite") {
+				// Responses citation markers are protocol tokens, not prose.
+				textEnd = *c.start
+			}
+			cited.WriteString(string(runes[cursor:textEnd]))
+			cursor = end
+			// Multiple citations at one position can share a source.
+			key := struct {
+				url string
+				end int
+			}{c.URL, end}
+			if !seen[key] {
+				cited.WriteByte(' ')
+				cited.WriteString(c.markdownLink())
+				seen[key] = true
+			}
+		}
+		cited.WriteString(string(runes[cursor:]))
+	}
+	if plain.String() == content {
+		return cited.String()
+	}
+	// Partial or nonstandard provider output must retain the terminal text.
+	// Links still remain visible even when block-local offsets cannot be used.
+	var fallback strings.Builder
+	fallback.WriteString(content)
+	seen := make(map[string]bool)
+	for _, block := range blocks {
+		for _, c := range block.citations {
+			if !seen[c.URL] {
+				fallback.WriteByte(' ')
+				fallback.WriteString(c.markdownLink())
+				seen[c.URL] = true
+			}
+		}
+	}
+	return fallback.String()
 }

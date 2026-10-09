@@ -1000,7 +1000,66 @@ hosted 子请求与其他 Agent 请求共用 `orchestration.max_active_llm_reque
 
 Responses 的远程 MCP 错误会作为失败返回；需要 provider 侧审批的请求会停止并提示使用本地 MCP 集成完成交互审批。此桥不会自动批准远程操作。原生消息中的引用信息、文件引用与未知输出字段会保留，完整原生输出及被截断的调用结果会保存为会话产物，工具结果提供读取引用。provider 生成的文件目前保留 `container_id` / `file_id` / 文件名，Chord 不会自动下载这些文件；配置 `image_paths` 可将实际返回的 base64 图片附到工具结果。
 
-当前支持 `messages` 和 `responses` 的子请求桥。主会话沿用普通工具结果历史；Gemini、Chat Completions 的 hosted 声明和主会话原生块回放需要各自的协议适配。
+当前支持 `messages` 和 `responses` 的子请求桥。主会话沿用普通工具结果历史；Gemini、Chat Completions 的 hosted 声明需要各自的协议适配。显式开启主请求原生搜索的配置见下文。
+
+## 主请求原生搜索
+
+原生搜索需要独立的请求级预授权，默认关闭。模型名称、能力目录、未设置工具池或
+`compat.hosted_tools` 都不会自动开启原生搜索。开启后，模型在你授权的静态范围内
+自主选择查询；它与逐次批准普通 `web_search` 调用的语义不同。
+
+```yaml
+providers:
+  openai:
+    type: responses
+    api_url: https://api.openai.com/v1/responses
+    compat:
+      hosted_tools: [web_search]  # 保留 hosted 桥的可用性
+    models:
+      YOUR_MODEL_ID:
+        native_web_search:
+          contract: openai.responses.web_search
+          api_url: https://api.openai.com/v1/responses
+          preauthorized: true
+          allowed_domains: [openai.com]
+          max_uses: 2
+```
+
+使用 Anthropic Messages 时，将 `type` 改为 `messages`，两处 URL 都改为
+`https://api.anthropic.com/v1/messages`，契约改为
+`anthropic.messages.web_search_20250305`。型号和账号必须支持所选工具契约。
+授权 URL 必须与实际请求 URL 完全一致；改写 API 地址不会继承授权。此路径不支持
+Codex OAuth 和请求覆盖配置。
+
+当前角色必须对 `web_search` 的全部参数设置 `allow`。存在 `ask`、匹配该工具的
+参数规则、工具调用或结果 hook、自定义 hosted 定义，或显式 hosted `model_pool`
+时，继续使用普通 hosted 桥。桥的确认只覆盖外层调用，不能逐次审批辅助模型自行
+生成的查询。需要逐次控制参数时，不要开启原生预授权。
+
+YOLO 不改变原生搜索授权，仍按角色配置核验。要求强制调用工具的请求
+（如 loop 或 worker 的收口请求）保留普通工具声明，通过 hosted 桥执行搜索。
+
+`allowed_domains` 与 `blocked_domains` 互斥，分别最多 100 个裸域名，直接作为
+厂商约束发送，不会降级成提示词建议。`max_uses` 为 1–8，默认 8，限制的是
+**每次实际请求**，包括每次续跑，并非会话消费上限。Messages 最多在同一目标上
+续跑 4 次，共用当前 turn 的取消上下文。厂商要求审批时停止，不会自动批准。
+
+发送前，Chord 将请求授权写入会话的 `native-requests` 目录。结果未确认、结果
+落盘失败、发送后取消或断流后，都不会自动重试或切换模型。没有确认结果表示
+**结果未知**，仍可能已执行并计费。请先核对保存的请求、结果与厂商用量记录，再
+决定是否新建会话；删除记录不是恢复办法。恢复时，未确认记录会形成持久工具卡，
+关闭原生搜索或修改权限也不能绕过它。已完成的回执进入会话历史后，Chord 可以
+补齐确认记录。原生历史保留厂商协议块，目前要求继续
+使用相同型号、协议和端点；切换到不兼容目标需要新建会话。
+
+请求确定未发送，或厂商明确在执行前拒绝请求，且失败记录已保存时，不会将会话
+锁定为结果未知，可以纠正配置后继续。仅凭 HTTP 状态码不足以判断未执行。
+原生历史中的普通工具调用若缺少配对结果，Chord 会在发送前停止并提示新建会话。
+
+Token 用量按每次实际请求记录，包含失败尝试与续跑；工具执行次数单独统计，未知
+工具费用不按零处理。搜索输出区分模型摘要、厂商结果和来源；回答中的厂商引用显示为可点击链接。
+JSON 导出保留原生回执；Markdown 导出和上下文压缩的历史记录包含搜索参数、
+来源、错误及结果未知状态，不嵌入不透明的协议回放数据。
 
 ## 项目记忆（自动抽取）
 
@@ -1431,7 +1490,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `parallel_tool_calls` | bool | `true` — provider 级 Responses / Chat Completions 工具并行默认值；模型和变体配置会覆盖它。 |
 | `compat.responses.*` | object | 协议默认值 — provider 级 Responses 可选字段开关：`send_store`、`send_reasoning_include`、`send_tool_choice`、`send_prompt_cache_key`、`send_max_output_tokens`、`mcp_additional_tools`。 |
 | `compat.responses.mcp_additional_tools` | bool | `false` — 把运行时 manual MCP schema 挂成固定位置的 `input[type="additional_tools"]` item，不改写顶层 `tools`。只为已确认接受该 item 的 Responses endpoint / 模型开启。挂载形态跟随当前选中的目标；请求最终落到不接受该 item 的池成员时，Chord 会把声明并入该请求的顶层 `tools` 数组。 |
-| `compat.hosted_tools` | list | （空）— 允许该 provider 的模型提供的 hosted 工具名列表。每次调用另发一条请求，在那里声明该工具按 provider 类型的 wire 声明，Chord 把 provider 返回的结果作为普通工具结果返回；主对话请求不声明该工具。只为确认支持该声明的端点启用：端点拒绝声明时调用会带着端点返回的原因失败，端点静默忽略时错误会提示检查这个列表。条目形状见 [Hosted tools](#hosted-tools)。 |
+| `compat.hosted_tools` | list | （空）— 允许该 provider 的模型提供的 hosted 工具名列表。使用 hosted 桥时，每次调用另发一条请求，在那里按 provider 类型声明工具，Chord 把 provider 返回的结果作为普通工具结果返回。主请求内的搜索需要上文所述的独立原生预授权。只为确认支持该声明的端点启用：端点拒绝声明时调用会带着端点返回的原因失败，端点静默忽略时错误会提示检查这个列表。条目形状见 [Hosted tools](#hosted-tools)。 |
 | `compat.apply_patch.enabled` | bool | 三态 — 省略时按模型名推断。`true` 保留 `apply_patch`（同时隐藏 `edit`、`write`、`delete`）；`false` 退回 `edit`，`write`/`delete` 重新可见。gpt-5 及之后家族（`gpt-5`、`gpt-5-mini`、`gpt-5-nano`、`gpt-5-codex`、任意 `gpt-5.*` 名称，以及 `gpt-6-astra` 等更高的主版本）和 `codex-auto-review` 默认 `true`；`gpt-oss-*`、gpt-3.5、gpt-4/4o、o 系列及非 OpenAI 模型默认 `false`。 |
 | `compat.apply_patch.freeform` | bool | 三态 — 省略时按模型名和 wire 类型推断。`true` 把 `apply_patch` 作为 freeform custom tool 发送（`type: "custom"`，随请求带上 grammar）；`false` 按 JSON function tool 发送。gpt-5 及之后家族名称和 `codex-auto-review` 在 Responses 端点上默认 `true`；非 Responses wire 一律默认 `false`（没有 custom tool 类型）。接受 Responses 但拒绝 custom tool 的主机没有内置例外：请在那里设置 `false`；只有确实支持 custom tool 的网关才设 `true`。 |
 | `compat.chat_completions.send_stream_options` | bool | `true` — 对拒绝 `stream_options` 的网关设为 `false`；此时流式 token usage 不再可用。 |

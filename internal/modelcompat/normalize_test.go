@@ -845,3 +845,15 @@ func TestNormalizeForTargetStrictDropsAnthropicThinkingForReplayCompat(t *testin
 		t.Fatalf("input transcript mutated: %+v", msgs[1])
 	}
 }
+
+func TestNormalizeRetainsNativeReceiptsWithoutMerging(t *testing.T) {
+	messages := []message.Message{
+		{Role: message.RoleAssistant, NativeTools: &message.NativeToolHistory{OutcomeUnknown: true, RequestIDs: []string{"request-1"}}},
+		{Role: message.RoleAssistant, Content: "Follow-up"},
+		{Role: message.RoleAssistant, NativeTools: &message.NativeToolHistory{RequestIDs: []string{"request-2"}}},
+	}
+	out, _ := NormalizeForTarget(messages, TargetModel{WireFamily: WireFamilyAnthropic}, NormalizeOptions{})
+	if len(out) != 3 || out[0].NativeTools == nil || !out[0].NativeTools.OutcomeUnknown || out[2].NativeTools == nil {
+		t.Fatalf("native receipts lost or merged: %+v", out)
+	}
+}

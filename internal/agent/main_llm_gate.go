@@ -679,6 +679,7 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 			a.emitToTUI(StreamTextCommitEvent{Text: resp.Content, TurnID: turnID, RequestSeq: requestSeq})
 		}
 		payload := &LLMResponsePayload{
+			NativeTools:               resp.NativeTools,
 			QuestionResults:           questionObservation.results,
 			Content:                   resp.Content,
 			ThinkingBlocks:            resp.ThinkingBlocks,

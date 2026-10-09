@@ -291,10 +291,9 @@ func parseSSEStream(reader io.Reader, cb StreamCallback, collector *SSECollector
 					if p, ok := reader.(chunkPhaser); ok {
 						p.SetChunkTimeout(SlowPhaseChunkTimeout)
 					}
-					// Hosted (server-side) tool call. Main-conversation requests never
-					// declare hosted tools, so this appears only on hosted
-					// sub-requests, where it is captured for flattening instead of
-					// being replayed as a client tool call.
+					// Server-side calls belong to hosted sub-requests or explicit
+					// preauthorized main requests. Capture them as receipts; they
+					// must never enter the client-tool dispatcher.
 					block.toolID = ev.ContentBlock.ID
 					block.toolName = ev.ContentBlock.Name
 					block.hostedCall = appendAnthropicHostedCall(&resp, ev.ContentBlock.ID, ev.ContentBlock.Name, anthropicServerToolUseBlock, ev.ContentBlock.Input)

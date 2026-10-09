@@ -771,6 +771,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		wallReq.wireStreamReducer(streamReducer)
 	}
 	requestOptions := llm.CompleteStreamOptions{
+		NativeTools:     a.nativeRequestPolicy(turn),
 		MCPDeclarations: a.effectiveRuntimeMCPDeclarations(),
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {
 			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback)
@@ -814,6 +815,9 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	streamReducer.Finish()
 	a.emitToTUI(RequestProgressEvent{AgentID: identity.MainAgentID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 	if err != nil {
+		if llm.IsNativeToolError(err) {
+			return nil, err
+		}
 		// The next request starts from the sticky cursor head, so a request that
 		// ends without a confirmed switch must return the sidebar to it: leaving
 		// a failed attempt's target in place would show one model's name with
@@ -963,7 +967,9 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		maps.Copy(cacheDiag, reductionDiag)
 	}
 	a.observedCacheHit(callStatus.RunningModelRef, resp.Usage)
-	a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier, cacheDiag)
+	if resp.NativeTools == nil {
+		a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier, cacheDiag)
+	}
 
 	// Hook: on_after_llm_call (after LLM call).
 	inputTok, outputTok := 0, 0

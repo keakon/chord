@@ -17,6 +17,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -268,6 +269,12 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	}
 
 	// --- Diagnostic logging (Fix 5) ---
+	if payload.NativeTools != nil && len(malformedCalls) > 0 {
+		payload.NativeTools.OutcomeUnknown = true
+		a.persistNativeFailure(payload.NativeTools)
+		a.handleAgentError(Event{Type: EventAgentError, TurnID: evt.TurnID, Payload: &llm.NativeToolError{Cause: fmt.Errorf("native response contains malformed client tool arguments; inspect the saved receipt")}})
+		return
+	}
 	isTruncated := payload.StopReason == "max_tokens" || payload.StopReason == "length"
 	malformedToolNames := make([]string, 0, len(malformedCalls))
 	for _, tc := range malformedCalls {
@@ -485,6 +492,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		}
 	}
 	assistantMsg := message.Message{
+		NativeTools:      payload.NativeTools,
 		Role:             "assistant",
 		Content:          payload.Content,
 		ThinkingBlocks:   thinkingBlocks,
@@ -513,13 +521,29 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 	persistBarrier := make(chan error, 1)
 	persistPending := false
 	if a.recoveryManager() != nil {
+		nativeJournal := recovery.NativeRequestJournal{SessionDir: a.SessionDir(), AgentID: identity.MainAgentID}
+		nativeEpoch := a.sessionEpoch
+		nativeBarrier := newNativeReceiptPersistence(assistantMsg)
+		if nativeBarrier != nil {
+			a.nativeReceipt.Store(nativeBarrier)
+		}
 		persistPending = a.persistAsyncAfter(identity.MainAgentID, assistantMsg, func(err error) {
+			if err == nil {
+				err = nativeJournal.Acknowledge(assistantMsg.NativeTools)
+			}
 			a.notePersistenceFailure(err)
+			nativeBarrier.finish(err)
 			persistBarrier <- err
+			if err == nil && assistantMsg.NativeTools != nil {
+				a.sendEvent(Event{Type: EventNativeReceipt, Payload: nativeReceiptPayload{epoch: nativeEpoch, receipt: assistantMsg.NativeTools}})
+			}
 			if err == nil && len(payload.QuestionResults) > 0 {
 				a.sendEvent(Event{Type: EventQuestionConsumed, Payload: payload.QuestionResults})
 			}
 		})
+		if !persistPending {
+			nativeBarrier.finish(errPersistenceQueueUnavailable)
+		}
 	} else {
 		a.consumeQuestionResults(payload.QuestionResults)
 	}

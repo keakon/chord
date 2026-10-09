@@ -319,6 +319,9 @@ func responseHasUsableOutput(resp *message.Response) bool {
 	if resp == nil {
 		return false
 	}
+	if resp.NativeTools != nil {
+		return true
+	}
 	if resp.Hosted != nil && (len(resp.Hosted.Calls) > 0 || len(resp.Hosted.Items) > 0 || resp.Hosted.RequiresApproval) {
 		// Hosted output must reach the backend for validation and continuation.
 		return true
@@ -728,7 +731,7 @@ func (c *Client) completeStreamTarget(
 	if keyCount == 0 {
 		keyCount = 1
 	}
-	targetMessages := messages
+	targetMessages := message.ProjectToolDiscoveryHistory(messages)
 	poolTarget := FallbackModel{
 		ProviderConfig: t.provider,
 		ProviderImpl:   t.impl,
@@ -869,10 +872,13 @@ func (c *Client) completeStreamTarget(
 		tracker = newStreamAttemptTracker(cb, t, apiKey, modelRef, attemptReason, keyAttempt, keyCount)
 		tracker.pendingRollback = pendingRollback
 
+		hadEarlierAttempt := result.hadRequestAttempt
 		result.hadRequestAttempt = true
 		attemptStartedAt := time.Now()
-		resp, err = t.impl.CompleteStream(
+		resp, err = completeWithNativeTools(
 			ctx,
+			t.impl,
+			t.provider,
 			apiKey,
 			t.modelID,
 			systemPrompt,
@@ -880,6 +886,7 @@ func (c *Client) completeStreamTarget(
 			tools,
 			effectiveMaxTokens,
 			requestTuning,
+			t.serviceTier,
 			tracker.Callback,
 		)
 		if tracker.rollbackFired {
@@ -887,12 +894,22 @@ func (c *Client) completeStreamTarget(
 			// visible delta arrived; the card now shows this attempt's output.
 			pendingRollback = ""
 		}
-		normalizeResponseUsage(t.provider, resp)
+		if _, terminal := errors.AsType[*NativeToolError](err); terminal {
+			return result, lastInputTokens, err
+		}
+		if resp == nil || resp.NativeTools == nil {
+			normalizeResponseUsage(t.provider, resp)
+		}
 		if requestTuning.HostedTool != nil && resp != nil && resp.Hosted != nil && resp.Hosted.RequiresApproval {
 			// Approval is an execution boundary even if its stream ends early.
 			// Let the hosted backend surface it; never retry or switch credentials.
 			updateSuccessfulCallStatus(status, t)
 			result.resp = resp
+			return result, lastInputTokens, nil
+		}
+		if _, local := errors.AsType[*HostedAdmissionError](err); local {
+			result.hadRequestAttempt = hadEarlierAttempt
+			result.setLastErr(t.provider, err)
 			return result, lastInputTokens, nil
 		}
 		if ht := requestTuning.HostedTool; ht != nil && !ht.RetrySafe && ctx.Err() == nil && ((err != nil && !hostedRequestRejected(err)) || (resp != nil && resp.StopReason == "interrupted")) {
@@ -903,7 +920,7 @@ func (c *Client) completeStreamTarget(
 			return result, lastInputTokens, &HostedOutcomeUnknownError{Cause: err, Response: resp}
 		}
 		if err == nil {
-			if resp != nil && modelcompat.IsReplayEvidenceEcho(resp.Content, targetMessages) {
+			if resp != nil && resp.NativeTools == nil && modelcompat.IsReplayEvidenceEcho(resp.Content, targetMessages) {
 				echoErr := &ReplayEvidenceEchoError{}
 				if tracker.EmitRollback(echoErr.Error()) {
 					pendingRollback = ""
@@ -1708,9 +1725,6 @@ func (c *Client) completeStreamWithRetry(
 				return nil, lastErr
 			}
 			log.Warnf("model pool exhausted with no usable keys; retrying full pool provider=%v model=%v had_request_attempt=%v error=%v", startProvider.Name(), startModelID, roundHadRequestAttempt, lastErr)
-		}
-		if startTuning.HostedTool != nil && !hostedFailureAllowsRetryRound(lastErr) {
-			return nil, lastErr
 		}
 		if isTerminalModelPoolFailureForProvider(lastErrProvider, lastErr) {
 			return nil, lastErr

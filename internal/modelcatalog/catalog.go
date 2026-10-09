@@ -22,8 +22,8 @@ var catalogData []byte
 
 // Source records where a fact was verified.
 type Source struct {
-	URL     string `json:"url"`
-	Checked string `json:"checked"` // YYYY-MM-DD
+	URL     string `json:"url" yaml:"url"`
+	Checked string `json:"checked" yaml:"checked"` // YYYY-MM-DD
 }
 
 // Cost is per-token pricing in currency per million tokens. It is recorded
@@ -90,14 +90,15 @@ type ResponsesContract struct {
 // Binding ties one endpoint to one wire model ID served under that endpoint,
 // with the endpoint-specific defaults (variants) verified for the route.
 type Binding struct {
-	Endpoint        string             `json:"endpoint"` // preset ID
-	WireModelID     string             `json:"wire_model_id"`
-	ModelID         string             `json:"model_id"`
-	Variants        map[string]Variant `json:"variants,omitempty"`
-	Responses       *ResponsesContract `json:"responses,omitempty"`
-	Limit           *LimitOverride     `json:"limit,omitempty"`
-	InputModalities []string           `json:"input_modalities,omitempty"`
-	Profile         *ConfigProfile     `json:"config_profile,omitempty"`
+	ServerTools     map[string]ServerToolCapability `json:"server_tools,omitempty"`
+	Endpoint        string                          `json:"endpoint"` // preset ID
+	WireModelID     string                          `json:"wire_model_id"`
+	ModelID         string                          `json:"model_id"`
+	Variants        map[string]Variant              `json:"variants,omitempty"`
+	Responses       *ResponsesContract              `json:"responses,omitempty"`
+	Limit           *LimitOverride                  `json:"limit,omitempty"`
+	InputModalities []string                        `json:"input_modalities,omitempty"`
+	Profile         *ConfigProfile                  `json:"config_profile,omitempty"`
 }
 
 // CatalogSource records which upstream revision a catalog snapshot was
@@ -266,6 +267,9 @@ func (c *Catalog) validate() error {
 		}
 		c.byBinding[key] = i
 		if err := validateBindingOverrides(b, c.Models[c.byModelID[b.ModelID]]); err != nil {
+			return err
+		}
+		if err := validateServerTools(b, c.Endpoints[c.byPreset[b.Endpoint]]); err != nil {
 			return err
 		}
 		if err := b.Profile.validate(b.ModelID); err != nil {

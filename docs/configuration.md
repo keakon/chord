@@ -1168,7 +1168,82 @@ For `retry_safe: true` tools, including the built-in `web_search`, transient rat
 
 Responses remote MCP errors fail the call. Requests requiring provider-side approval stop and direct you to the local MCP integration for interactive approval; the bridge never automatically approves them. Native message citations, file references, and unknown output fields are retained. Full native output and truncated call payloads are saved as session artifacts with readable references in the tool result. Provider files currently retain `container_id`, `file_id`, and filename references; Chord does not automatically download these files. Configure `image_paths` to attach base64 image data actually returned by the provider.
 
-The bridge currently supports `messages` and `responses` sub-requests. Main conversation history uses ordinary tool results. Hosted declarations for Gemini and Chat Completions, and native main-conversation replay, require separate protocol adapters.
+The bridge currently supports `messages` and `responses` sub-requests. Main conversation history uses ordinary tool results. Hosted declarations for Gemini and Chat Completions require separate protocol adapters. Explicit native main-request search is described below.
+
+## Native search in the main request
+
+Native search is opt-in and uses separate request-level preauthorization. Chord
+never enables it automatically from a model name, a catalog entry, an empty tool
+pool, or `compat.hosted_tools`. The model chooses queries within the static scope
+you authorize; this differs from approving each ordinary `web_search` call.
+
+```yaml
+providers:
+  openai:
+    type: responses
+    api_url: https://api.openai.com/v1/responses
+    compat:
+      hosted_tools: [web_search]  # keep the hosted bridge available
+    models:
+      YOUR_MODEL_ID:
+        native_web_search:
+          contract: openai.responses.web_search
+          api_url: https://api.openai.com/v1/responses
+          preauthorized: true
+          allowed_domains: [openai.com]
+          max_uses: 2
+```
+
+For Anthropic Messages, use `type: messages`, both URLs
+`https://api.anthropic.com/v1/messages`, and contract
+`anthropic.messages.web_search_20250305`. Use a model and account that support the
+specified tool contract. The URL must exactly match the effective request URL;
+API overrides do not inherit authorization. Codex OAuth and request overrides
+are not supported by this route.
+
+The active role must allow `web_search` for all arguments. An `ask` rule, any
+matching argument-specific permission rule, a tool-call/result hook, a custom
+hosted definition, or an explicit hosted `model_pool` keeps the ordinary hosted
+bridge. Bridge approval covers the outer call; it does not approve every query
+that the auxiliary model may generate. For per-query control, leave native
+preauthorization disabled.
+
+YOLO does not change native authorization; Chord still checks the configured role
+rules. Requests that require a tool call, such as loop or worker completion
+requests, retain ordinary tool declarations and use the hosted bridge for search.
+
+`allowed_domains` and `blocked_domains` are mutually exclusive lists of up to
+100 bare domains. They are sent as provider constraints, not prompt suggestions.
+`max_uses` is 1–8 (default 8) **per wire request**, including each continuation;
+it is not a session spending cap. Messages may continue on the same target up
+to four times under the turn's cancellation context. A provider approval request
+stops execution; Chord never automatically approves it.
+
+Before sending, Chord saves the request authorization in the session's
+`native-requests` directory. Missing or failed result persistence, cancellation after sending,
+and interrupted streams stop automatic retries and fallback. A request without
+a confirmed result means **outcome unknown**, including possible execution and
+charges. Inspect the saved receipts and the provider's usage records before
+starting a new session; deleting receipts is not a recovery procedure. On resume,
+unconfirmed records produce durable tool cards. Disabling native search or
+changing permissions cannot bypass them. Chord can complete the acknowledgement
+when a completed receipt is already in session history. Native
+history retains provider blocks and currently requires the same model, protocol
+and endpoint. Start a new session to use an incompatible target.
+
+A request that was never sent, or was explicitly rejected before execution, does
+not lock the session as outcome unknown once its failure record is saved. Correct
+the configuration and continue. HTTP status alone does not prove that execution
+never started. If native history contains a client tool call without its paired
+result, Chord stops before sending and asks you to start a new session.
+
+Token usage records each actual request, including failed attempts and
+continuations. Tool executions are counted separately; unknown tool fees are
+not reported as zero. Search summaries are labeled separately from provider
+results and sources. Answers show provider citations as clickable links. JSON
+exports preserve native receipts; Markdown exports and compaction transcripts
+include search inputs, sources, errors, and unknown outcomes without embedding
+opaque replay data.
 
 ## Project memory (automatic extraction)
 
@@ -1638,7 +1713,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `parallel_tool_calls` | bool | `true` — Provider-level default for Responses / Chat Completions tool parallelism; model and variant values override it. |
 | `compat.responses.*` | object | protocol defaults — Provider-level optional Responses fields: `send_store`, `send_reasoning_include`, `send_tool_choice`, `send_prompt_cache_key`, `send_max_output_tokens`, and `mcp_additional_tools`. |
 | `compat.responses.mcp_additional_tools` | bool | `false` — Mount runtime manual-MCP schemas as fixed-anchor `input[type="additional_tools"]` items instead of changing top-level `tools`. Enable only for Responses endpoints/models known to accept this item. The mount follows the currently selected target; when a fallback pool member without this capability serves the request, Chord inlines the declarations into that request's top-level `tools` array. |
-| `compat.hosted_tools` | list | *(empty)* — Hosted tool names this provider's models may serve. Each call runs as a separate request that declares the tool's per-type wire declaration and returns the provider's result as an ordinary tool result; the main conversation request never declares it. Enable only on endpoints known to support the declaration: one that rejects it fails the call with the endpoint's error, and one that silently ignores it fails with a message pointing back at this list. The catalog shape is documented under [Hosted tools](#hosted-tools). |
+| `compat.hosted_tools` | list | *(empty)* — Hosted tool names this provider's models may serve. With the hosted bridge, each call runs as a separate request that declares the tool's per-type wire declaration and returns the provider's result as an ordinary tool result. Explicit main-request search requires the separate native preauthorization described above. Enable only on endpoints known to support the declaration: one that rejects it fails the call with the endpoint's error, and one that silently ignores it fails with a message pointing back at this list. The catalog shape is documented under [Hosted tools](#hosted-tools). |
 | `compat.apply_patch.enabled` | bool | Three-state — when omitted, Chord infers from the model name. `true` keeps `apply_patch` (hiding `edit`, `write`, and `delete`); `false` falls back to `edit` with `write`/`delete` visible. gpt-5-and-later family names (`gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5-codex`, any `gpt-5.*` name, later majors like `gpt-6-astra`) and `codex-auto-review` default to `true`; `gpt-oss-*`, gpt-3.5, gpt-4/4o, the o-series, and non-OpenAI models default to `false`. |
 | `compat.apply_patch.freeform` | bool | Three-state — when omitted, Chord infers from the model name and the wire type. `true` emits `apply_patch` as a freeform custom tool (`type: "custom"` with a grammar); `false` emits a JSON function tool. gpt-5-and-later family names and `codex-auto-review` on Responses endpoints default to `true`; all non-Responses wires default to `false` (they have no custom tool type). Hosts that accept Responses but reject custom tools have no built-in exception: set `false` there, or `true` only for gateways that actually accept custom tools. |
 | `compat.chat_completions.send_stream_options` | bool | `true` — Omit `stream_options.include_usage` for gateways that reject it; streaming token usage then remains unavailable. |

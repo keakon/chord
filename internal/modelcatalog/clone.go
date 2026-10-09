@@ -142,6 +142,7 @@ func cloneResponsesContract(in *ResponsesContract) *ResponsesContract {
 
 func cloneBinding(in Binding) Binding {
 	out := in
+	out.ServerTools = cloneServerTools(in.ServerTools)
 	out.Variants = maps.Clone(in.Variants)
 	out.Responses = cloneResponsesContract(in.Responses)
 	out.Limit = cloneLimitOverride(in.Limit)

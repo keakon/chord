@@ -14,6 +14,7 @@ import (
 
 // Internal event types used by the MainAgent event loop.
 const (
+	EventNativeReceipt       = "native_receipt"
 	EventUserMessage         = "user_message"
 	EventAppendContext       = "append_context" // append user message to ctx without calling LLM (e.g. !shell output)
 	EventLLMResponse         = "llm_response"
@@ -69,6 +70,7 @@ type Event struct {
 
 // LLMResponsePayload wraps an LLM response for the internal event bus.
 type LLMResponsePayload struct {
+	NativeTools               *message.NativeToolHistory
 	QuestionResults           []string
 	Content                   string
 	ThinkingBlocks            []message.ThinkingBlock

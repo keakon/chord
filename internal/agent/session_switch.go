@@ -270,6 +270,7 @@ func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) 
 }
 
 func (a *MainAgent) resetSessionRuntimeState() {
+	a.nativeReceipt.Store(nil)
 	a.resetHostedCallers()
 	a.compactionFiles.reset()
 	a.resetCacheRoutingState()

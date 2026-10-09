@@ -379,3 +379,30 @@ func TestGenerateConfigProfileRoundTrip(t *testing.T) {
 		t.Fatalf("profile lost: %#v", profile)
 	}
 }
+
+func TestGenerateServerToolBindingEvidence(t *testing.T) {
+	bindings := validBindings + `    server_tools:
+      web_search:
+        state: unknown
+        contract: openai.responses.web_search
+        evidence: documentation
+        sources:
+          - url: https://example.invalid/tools
+            checked: "2026-10-09"
+`
+	data, err := Generate(writeSources(t, validCatalog, validEndpoints, validModels, bindings))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"server_tools"`) || !strings.Contains(string(data), `"unknown"`) {
+		t.Fatalf("capability omitted: %s", data)
+	}
+	bindings = strings.Replace(bindings, "state: unknown", "state: supported", 1)
+	if _, err = Generate(writeSources(t, validCatalog, validEndpoints, validModels, bindings)); err == nil {
+		t.Fatal("documentation promoted to supported")
+	}
+	bindings = strings.Replace(bindings, "evidence: documentation", "evidence: api", 1)
+	if _, err = Generate(writeSources(t, validCatalog, validEndpoints, validModels, bindings)); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -517,6 +517,7 @@ func (r *ModelCatalogRef) UnmarshalJSON(data []byte) error {
 
 // ModelConfig specifies a model and its parameters.
 type ModelConfig struct {
+	NativeWebSearch       *NativeWebSearchConfig  `json:"native_web_search,omitempty" yaml:"native_web_search,omitempty"`
 	Name                  string                  `json:"name" yaml:"name"`
 	Limit                 ModelLimit              `json:"limit" yaml:"limit"`
 	Catalog               *ModelCatalogRef        `json:"catalog,omitempty" yaml:"catalog,omitempty"`

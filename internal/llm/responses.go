@@ -152,14 +152,15 @@ func (r responsesRequest) MarshalJSON() ([]byte, error) {
 // responsesInputItem represents an item in the Responses API input array.
 // The API expects "arguments" to be a string (JSON-serialized object), not an object.
 type responsesInputItem struct {
-	Type      string `json:"type"` // "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "reasoning", "additional_tools"
-	ID        string `json:"id,omitempty"`
-	Role      string `json:"role,omitempty"`
-	Content   any    `json:"content,omitempty"`
-	Name      string `json:"name,omitempty"`
-	CallID    string `json:"call_id,omitempty"`
-	Output    any    `json:"output,omitempty"`    // string or []responsesContentBlock for *_call_output items
-	Arguments string `json:"arguments,omitempty"` // JSON object as string per API spec
+	Raw       json.RawMessage `json:"-"`
+	Type      string          `json:"type"` // "message", "function_call", "function_call_output", "custom_tool_call", "custom_tool_call_output", "reasoning", "additional_tools"
+	ID        string          `json:"id,omitempty"`
+	Role      string          `json:"role,omitempty"`
+	Content   any             `json:"content,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	CallID    string          `json:"call_id,omitempty"`
+	Output    any             `json:"output,omitempty"`    // string or []responsesContentBlock for *_call_output items
+	Arguments string          `json:"arguments,omitempty"` // JSON object as string per API spec
 	// Input carries the freeform text of a custom_tool_call input item.
 	Input  string          `json:"input,omitempty"`
 	Status string          `json:"status,omitempty"` // custom_tool_call replay status, e.g. "completed"
@@ -370,6 +371,7 @@ func (r *ResponsesProvider) CompleteStream(
 	tuning RequestTuning,
 	cb StreamCallback,
 ) (*message.Response, error) {
+	markRequestPrepared(ctx)
 	ot := tuning.OpenAI
 	dumpWriter := r.dumpWriter.Load()
 	traceWriter := r.traceWriter.Load()
@@ -402,7 +404,7 @@ func (r *ResponsesProvider) CompleteStream(
 	sessionKey := strings.TrimSpace(tuning.SessionKey)
 	// The WebSocket transport takes the live request struct and mutates it for
 	// incremental sends, so cached bodies only serve the plain HTTP path.
-	wsEligible := useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && requestOverridesEmpty(overrides) && tuning.HostedTool == nil
+	wsEligible := useOpenAIOAuth && r.provider != nil && r.provider.IsCodexOAuthTransport() && r.provider.EffectiveResponsesWebsocket() && requestOverridesEmpty(overrides) && tuning.HostedTool == nil && tuning.nativeTool == nil
 
 	// buildResponsesRequest converts the history and marshals the body. It is
 	// cached per target across key-rotation attempts (requestBodyReuse): the
@@ -594,13 +596,17 @@ func (r *ResponsesProvider) CompleteStream(
 		}
 
 		log.Debugf("responses request model=%v max_output_tokens=%v messages=%v tools=%v reasoning_effort=%v reasoning_summary=%v request_bytes=%v", model, reqBody.MaxOutputTokens, len(messages), len(tools), effectiveReasoningEffort, ot.ReasoningSummary, len(bodyBytes))
+		bodyBytes, err = addNativeToolDeclaration(bodyBytes, tuning.nativeTool)
+		if err != nil {
+			return nil, nil, err
+		}
 		return bodyBytes, responsesBuiltBody{fullInput: fullInput, reqBody: reqBody}, nil
 	}
 
 	var bodyBytes []byte
 	var builtAny any
 	var err error
-	if wsEligible || tuning.HostedTool != nil {
+	if wsEligible || tuning.HostedTool != nil || tuning.nativeTool != nil {
 		// Hosted sub-requests bypass the body-reuse cache: the cache identity
 		// deliberately ignores request tuning, and a hosted body differs from a
 		// plain body built from the same (system, messages, tools, maxTokens).
@@ -699,7 +705,7 @@ func (r *ResponsesProvider) CompleteStream(
 	}
 
 	r.lastTransportUsed.Store("http")
-	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, sessionKey, reqBody.ClientMetadata, overrides, tuning.HostedTool, traceCB)
+	resp, httpStatus, parseErr := r.sendAndParse(ctx, url, bodyBytes, dumpRequestBody, dumpWriter, model, apiKey, useOpenAIOAuth, sessionKey, reqBody.ClientMetadata, overrides, tuning.HostedTool, tuning.nativeTool != nil, traceCB)
 
 	// HTTP full-input path: no previous_response_id retry/rollback handling required.
 
@@ -770,6 +776,7 @@ func (r *ResponsesProvider) sendAndParse(
 	clientMetadata map[string]string,
 	overrides config.RequestOverridesConfig,
 	hosted *HostedToolRequest,
+	captureNative bool,
 	cb StreamCallback,
 ) (*message.Response, int, error) {
 	if err := ctx.Err(); err != nil {
@@ -820,7 +827,11 @@ func (r *ResponsesProvider) sendAndParse(
 	if cb != nil {
 		cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
 	}
-	httpResp, err := doRequestUntilHeaders(r.client, req, providerResponseHeaderTimeout(r.provider))
+	if err := ctx.Err(); err != nil {
+		return nil, 0, fmt.Errorf("responses request aborted: %w", err)
+	}
+	markRequestSent(ctx)
+	httpResp, err := doRequestUntilHeaders(nativeToolHTTPClient(r.client, captureNative), req, providerResponseHeaderTimeout(r.provider))
 	if err != nil {
 		return nil, 0, fmt.Errorf("send request: %w", err)
 	}
@@ -909,7 +920,7 @@ func (r *ResponsesProvider) sendAndParse(
 	cr := NewProviderChunkTimeoutReader(httpResp.Body, r.provider, DefaultChunkTimeout, streamCancel)
 	defer cr.Stop()
 	visibleReasoningText := responsesVisibleReasoningText(r.provider, model)
-	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity, freeform, hosted != nil, visibleReasoningText)
+	resp, _, parseErr := parseResponsesSSEWithOutputItemsAndTurnState(cr, cb, collector, turnState, turnStateIdentity, freeform, hosted != nil || captureNative, visibleReasoningText)
 	if parseErr != nil {
 		if _, ok := errors.AsType[*ChunkTimeoutError](parseErr); ok {
 			snap := cr.chunkTimeoutSnapshot()

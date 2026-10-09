@@ -33,7 +33,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
-- MCP connections require protocol `2025-06-18`; servers that negotiate another version are rejected. Update older servers before connecting.
+- MCP tools can be loaded on demand with `deferred: true` and `tool_search`, with per-agent history and bounded discovery results.
+- OpenAI Responses and Anthropic Messages search can run in the main request with explicit endpoint-bound preauthorization. It is off by default; per-call approval, custom hosted tools and explicit tool pools retain the hosted bridge. Unknown execution outcomes stop automatic replay.
 
 - Questions allow independent work before waiting for answers. TUI questions open automatically and share a priority queue with permission, completion, and Handoff dialogs. `Esc` declines the question; there is no hide-and-reopen state. Required decisions never time out; `question_auto_select_timeout` enables explicit single-choice defaults and permanently stops on interaction. Defaults are not authorization; `question_timeout` applies only to optional questions.
 

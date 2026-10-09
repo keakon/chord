@@ -49,6 +49,7 @@ type HostedToolBackend interface {
 // declarations. It is built from the built-in catalog plus the user's
 // hosted_tools configuration (see ResolveHostedToolCatalog).
 type HostedToolSpec struct {
+	NativeMapping   bool
 	Name            string
 	Description     string
 	Parameters      map[string]any
@@ -94,6 +95,10 @@ func ResolveHostedToolCatalog(user map[string]config.HostedToolConfig) map[strin
 
 // applyHostedToolConfig overlays one user entry onto a catalog spec.
 func applyHostedToolConfig(spec *HostedToolSpec, cfg config.HostedToolConfig) {
+	// Customized hosted semantics cannot be replaced by request-level search.
+	if cfg.Description != "" || cfg.Parameters != nil || cfg.Prompt != "" || cfg.ReadOnly != nil || cfg.ConcurrencySafe != nil || cfg.RetrySafe != nil || cfg.ImagePaths != nil || cfg.TimeoutSeconds != 0 || len(cfg.Declarations) > 0 {
+		spec.NativeMapping = false
+	}
 	if cfg.Description != "" {
 		spec.Description = cfg.Description
 	}
@@ -192,6 +197,10 @@ func (t HostedTool) WithBackend(backend HostedToolBackend) HostedTool {
 }
 
 func (t HostedTool) Name() string { return t.spec.Name }
+
+func (t HostedTool) NativeEligible() bool {
+	return t.spec.NativeMapping && t.spec.ModelPool == ""
+}
 
 func (t HostedTool) Description() string { return t.spec.Description }
 
