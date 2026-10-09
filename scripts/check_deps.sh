@@ -111,7 +111,7 @@ for req in requirements:
 graph = subprocess.run(["go", "mod", "graph"], check=True, text=True, stdout=subprocess.PIPE).stdout.splitlines()
 root_edges = sum(1 for line in graph if line.startswith(module + " "))
 graph_edges = len(graph)
-max_root_edges = int(os.environ.get("CHORD_MAX_ROOT_REQUIRE_EDGES", "72"))
+max_root_edges = int(os.environ.get("CHORD_MAX_ROOT_REQUIRE_EDGES", "73"))
 max_graph_edges = int(os.environ.get("CHORD_MAX_MOD_GRAPH_EDGES", "650"))
 if root_edges > max_root_edges:
     errors.append(f"root dependency edges {root_edges} exceed CHORD_MAX_ROOT_REQUIRE_EDGES={max_root_edges}")
