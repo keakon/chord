@@ -226,6 +226,12 @@ func (a *AnthropicProvider) CompleteStream(
 
 		// Convert internal messages to Anthropic API format.
 		apiMessages, messageMap := convertMessagesWithMap(messages)
+		// Derive the latest boundary from this target's actual source surface.
+		// Fallback admission can replace messages without carrying main-request
+		// tuning hints, and subagents do not use the main-request assembler.
+		if durableLen := promptCacheDurableMessageCount(messages); durableLen > 0 && (!at.CacheLatestBoundary.Valid || durableLen < len(messages)) {
+			at.CacheLatestBoundary = AnthropicCacheBoundary{MessageIndex: durableLen - 1, Valid: true}
+		}
 		at.CacheBoundary = resolveAnthropicCacheBoundary(at.CacheBoundary, messageMap)
 		at.CacheLatestBoundary = resolveAnthropicCacheBoundary(at.CacheLatestBoundary, messageMap)
 

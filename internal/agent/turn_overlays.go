@@ -142,14 +142,6 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 		}
 	}
 
-	if block := strings.TrimSpace(a.bugTriagePromptBlock()); block != "" {
-		overlays = append(overlays, message.Message{
-			Role:    "user",
-			Kind:    message.KindTurnOverlay,
-			Content: "<system-reminder>\n" + block + "\n</system-reminder>",
-		})
-	}
-
 	// Model-driven checkpoint outcome (skip/failure/cancel): request-scoped
 	// overlay so the model learns why the checkpoint did not apply without the
 	// reason becoming a durable user message that a later compaction could

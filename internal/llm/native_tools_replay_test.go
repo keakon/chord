@@ -86,8 +86,8 @@ func TestNativeEstimateMatchesReplaySurface(t *testing.T) {
 	native := &message.NativeToolHistory{Items: []json.RawMessage{raw}}
 	mirrored := []message.Message{{Role: message.RoleAssistant, Content: text, NativeTools: native}}
 	rawOnly := []message.Message{{Role: message.RoleAssistant, NativeTools: native}}
-	wireA, _ := json.Marshal(convertMessagesToResponsesWithItemIDs("", mirrored, false, false))
-	wireB, _ := json.Marshal(convertMessagesToResponsesWithItemIDs("", rawOnly, false, false))
+	wireA, _ := json.Marshal(convertMessagesToResponsesWithItemIDs("", mirrored, false, false, false))
+	wireB, _ := json.Marshal(convertMessagesToResponsesWithItemIDs("", rawOnly, false, false, false))
 	if string(wireA) != string(wireB) {
 		t.Fatal("test requires identical wire requests")
 	}
@@ -120,7 +120,7 @@ func TestNativeClientToolReplaySurvivesStrictNormalization(t *testing.T) {
 			}
 			var wire []byte
 			if protocol == config.ProviderTypeResponses {
-				wire, _ = json.Marshal(convertMessagesToResponsesWithItemIDs("", projected, false, false))
+				wire, _ = json.Marshal(convertMessagesToResponsesWithItemIDs("", projected, false, false, false))
 			} else {
 				messages, _ := convertMessagesWithMap(projected)
 				wire, _ = json.Marshal(messages)

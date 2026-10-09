@@ -140,16 +140,20 @@ Chord 会跳过尚未完成的写操作请求，即使已收到的参数看起�
 
 ### `Cache R` 百分比明显偏低
 
-**现象**：信息面板的缓存读取百分比在 50% 左右（或其他远低于实际命中率的值），但请求体在轮次之间几乎没变，命中率本应接近 100%。
+信息面板的 `Cache R` = cache-read token 数 ÷ 完整输入侧（未缓存 + cache-read + cache-write）。它只看输入侧，输出量不会稀释它。较长的相同上下文前缀并不保证高命中率：前缀还必须在服务端可查找的缓存断点结束。
 
-排查步骤：
+先检查这些因素：
 
-1. 该百分比 = cache-read token 数 ÷ 完整输入侧（未缓存 + cache-read + cache-write）。它只看输入侧，输出量不会稀释它。
-2. Chord 按协议假设 usage 字段语义：`messages` provider 的 `input_tokens` 是未缓存输入，缓存桶单独上报；`chat-completions` / `responses` provider 的 `input_tokens` 已包含缓存命中部分。
-3. 兼容网关可能在暴露 `messages` 端点的同时，按另一套协议语义上报 usage，常见的是 `input_tokens` 为包含缓存命中的总输入，`cache_read_input_tokens` 只是其中的命中子集。Chord 于是把 cache-read 重复计了一次，显示出来的百分比大约被砍半。
-4. 要确认，可查看该会话的 LLM dump，再对照网关 usage 文档，或用相同请求的 token counting 结果核验原始字段。若文档或对照结果能确认 `input_tokens` 是完整输入，而 `cache_read_input_tokens` 只是其中一部分，再给该 provider 设置 `compat.usage.input_includes_cache_read: true`（见[配置](./configuration_CN.md)）。仅凭两个字段的大小关系不足以判断语义。
+- **缓存断点**：GPT-5.6 及之后的 Responses 模型按消息边界缓存。Chord 会在可标记的持久文本消息和工具结果上设置显式断点；有临时尾部提醒且存在显式断点时，只写入这些断点，避免缓存一次性提醒。旧模型沿用其隐式缓存规则。可在 LLM dump 的 `request_body` 中检查 `prompt_cache_options` 和 `prompt_cache_breakpoint`，以及端点或请求覆盖配置是否保留了这些字段。
+- **请求变化**：模型、工具定义与顺序、系统提示、reasoning effort、verbosity 或输出格式变化都可能改变服务端前缀。上下文剪裁或持久压缩也可能缩短可复用范围。
+- **缓存身份与有效期**：检查 `prompt_cache_key` 是否稳定，以及是否切换了端点、凭据或模型。长时间空闲、服务端路由变化和缓存淘汰都可能导致未命中。同一用户 turn 内，`client_metadata` 的 turn ID 与开始时间保持一致。
+- **统计语义**：兼容网关可能使用与其端点协议不同的 usage 定义，导致同一批缓存 token 被重复计数。按下方步骤核对原始响应，而不要仅凭低百分比判断服务端异常。
 
-已写入的 usage 记录是 append-only 的，改配置后不会被重算；只有新请求会按修正后的语义统计。
+Chord 对 `messages` provider 默认把 `input_tokens` 视为未缓存输入，缓存桶单独上报；对 `chat-completions` / `responses` provider 默认把输入总量视为已包含缓存命中部分。如果网关的 `messages` 响应中，`input_tokens` 实际是完整输入，而 `cache_read_input_tokens` 只是其中的命中子集，显示的百分比可能大约被砍半。
+
+查看会话 LLM dump 的原始 usage，并核对网关的 usage 文档。只有确认上述定义后，才给该 provider 设置 `compat.usage.input_includes_cache_read: true`（见[配置](./configuration_CN.md)）。两个字段的大小关系不足以判断语义。已写入的 usage 记录不会因配置修改而重算，只有新请求会采用调整后的定义。
+
+缓存诊断中的 `suspected_provider_miss` 只是怀疑：本地消息估算不能证明服务端渲染、缓存路由或有效期一致。没有显式前置断点的协议会将临时尾部纳入请求比较，避免把客户端请求变化隐藏掉。
 
 ## MCP 一直未就绪
 

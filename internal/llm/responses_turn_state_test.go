@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
@@ -141,5 +143,49 @@ func TestResponsesProvider_NoTurnStateEchoAcrossDifferentKey(t *testing.T) {
 	}
 	if sawEcho {
 		t.Fatal("turn state minted for key-1 was echoed on a key-2 request")
+	}
+}
+
+func TestResponsesClientMetadataStableWithinTurn(t *testing.T) {
+	state := NewResponsesTurnState()
+	first := responsesClientMetadata("session-a", state)
+	for range 3 {
+		if got := responsesClientMetadata("session-a", state); !reflect.DeepEqual(first, got) {
+			t.Fatalf("metadata changed within turn: %v versus %v", first, got)
+		}
+	}
+	next := responsesClientMetadata("session-a", NewResponsesTurnState())
+	if first[responsesClientMetadataTurnID] == next[responsesClientMetadataTurnID] {
+		t.Fatal("new turn reused the previous identity")
+	}
+	other := responsesClientMetadata("session-b", state)
+	if other[responsesClientMetadataSessionID] == first[responsesClientMetadataSessionID] {
+		t.Fatal("session identity leaked")
+	}
+	if first[responsesClientMetadataTurnID] != other[responsesClientMetadataTurnID] {
+		t.Fatal("fallback changed the turn identity")
+	}
+	if got := responsesClientMetadata("", state); got != nil {
+		t.Fatal("empty session received metadata")
+	}
+}
+
+func TestResponsesClientMetadataConcurrentZeroState(t *testing.T) {
+	state := &ResponsesTurnState{}
+	results := make(chan map[string]string, 32)
+	var workers sync.WaitGroup
+	for range 32 {
+		workers.Go(func() { results <- responsesClientMetadata("session-a", state) })
+	}
+	workers.Wait()
+	close(results)
+	var first map[string]string
+	for got := range results {
+		if first == nil {
+			first = got
+		}
+		if !reflect.DeepEqual(first, got) || got[responsesClientMetadataTurnID] == "" {
+			t.Fatal("concurrent metadata initialization was not stable")
+		}
 	}
 }

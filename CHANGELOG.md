@@ -99,6 +99,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Investigation workflows test direct explanations first and expand from evidence, without imposing a fixed step count or report template.
 - Dialogs use quieter shortcut hints, distinct focus and risk cues, and fixed decision actions while long confirmation content scrolls. Deleting a session requires explicit `y` confirmation; `Enter` does not delete it.
 
 - MCP tool results are checked against the server's declared output schema. Schema problems add a warning while preserving usable output, without automatically repeating the tool call.
@@ -149,6 +150,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Responses requests preserve reusable cache boundaries before temporary reminders on GPT-5.6 and later models. Turn metadata stays stable across tool continuations and retries, and cache diagnostics account for the actual protocol boundaries.
 - Responses requests carry session identity from the first request and after model changes, avoiding HTTP 400 from gateways that require client metadata. Explicit client-contract errors stop retries on the current model without rotating or cooling keys or replaying history, and identify the request settings to check.
 
 - Resuming an interrupted conversation no longer drops the session content when saving the restored history fails: the original content stays in place, and the failure is reported.

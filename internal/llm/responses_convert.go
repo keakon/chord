@@ -183,14 +183,17 @@ func toCustomApplyPatchCallItem(item responsesInputItem, freeform bool) response
 // call it belongs to: apply_patch replays as custom_tool_call_output under a
 // freeform target, everything else stays function_call_output. isApplyPatch is
 // true when the paired call was an apply_patch call.
-func toMatchingResponsesToolOutput(item responsesInputItem, isApplyPatch, freeform bool) responsesInputItem {
+func toMatchingResponsesToolOutput(item responsesInputItem, isApplyPatch, freeform, cacheBreakpoints bool) responsesInputItem {
+	if cacheBreakpoints {
+		item.Output = markResponsesCacheText(item.Output)
+	}
 	if freeform && isApplyPatch {
 		item.Type = "custom_tool_call_output"
 	}
 	return item
 }
 
-func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.Message, includeItemIDs bool, freeform bool) []responsesInputItem {
+func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.Message, includeItemIDs bool, freeform bool, cacheBreakpoints bool) []responsesInputItem {
 	// Always return a non-nil slice to ensure JSON marshaling produces [] instead of null.
 	result := make([]responsesInputItem, 0)
 
@@ -207,9 +210,11 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 		})
 	}
 
+	cacheEnd := promptCacheDurableMessageCount(msgs)
 	applyPatchCallIDs := responsesApplyPatchCallIDs(msgs)
 	for i := 0; i < len(msgs); i++ {
 		msg := msgs[i]
+		cacheThisMessage := cacheBreakpoints && i < cacheEnd && msg.Kind != message.KindTurnOverlay && msg.Kind != message.KindThinkingReplayPrefix
 		if len(msg.MCPTools) > 0 {
 			result = append(result, responsesInputItem{
 				Type:  "additional_tools",
@@ -254,10 +259,12 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 			} else {
 				content = append(content, responsesContentBlock{Type: "input_text", Text: msg.Content})
 			}
+			var wireContent any = content
+			if cacheThisMessage {
+				wireContent = markResponsesCacheText(content)
+			}
 			result = append(result, responsesInputItem{
-				Type:    "message",
-				Role:    "user",
-				Content: content,
+				Type: "message", Role: "user", Content: wireContent,
 			})
 
 		case "assistant":
@@ -296,7 +303,7 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 					}
 					if output, ok := outputs[item.CallID]; ok {
 						_, isApplyPatch := applyPatchCallIDs[item.CallID]
-						result = append(result, toMatchingResponsesToolOutput(output, isApplyPatch, freeform))
+						result = append(result, toMatchingResponsesToolOutput(output, isApplyPatch, freeform, cacheThisMessage))
 					}
 				}
 				i += consumed
@@ -366,7 +373,7 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 					Arguments: string(tc.Args),
 				}, freeform))
 				if out, ok := outputs[tc.ID]; ok {
-					result = append(result, toMatchingResponsesToolOutput(out, tc.Name == toolname.ApplyPatch, freeform))
+					result = append(result, toMatchingResponsesToolOutput(out, tc.Name == toolname.ApplyPatch, freeform, cacheThisMessage))
 				}
 			}
 
@@ -389,7 +396,7 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 				Type:   "function_call_output",
 				CallID: msg.ToolCallID,
 				Output: responsesToolOutput(msg),
-			}, isApplyPatch, freeform))
+			}, isApplyPatch, freeform, cacheThisMessage))
 		}
 	}
 

@@ -144,7 +144,6 @@ func (a *MainAgent) clearCurrentTurnKeepLoopState() {
 	a.pendingModelDriven = nil
 	a.turnMu.Unlock()
 	a.rememberIdleTurn(turnID)
-	a.setBugTriagePromptActive(false)
 	a.emitActivity("main", ActivityIdle, "")
 	if a.loopState.Enabled {
 		a.loopState.State = LoopStateExecuting

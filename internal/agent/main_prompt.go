@@ -145,7 +145,7 @@ func (a *MainAgent) buildSystemPrompt() string {
 	if mcpBlock != "" {
 		parts = append(parts, mcpBlock)
 	}
-	// pendingLoopContinuation, bug triage hint, and SubAgent mailbox are
+	// Loop continuation hints and SubAgent mailbox messages are
 	// per-turn overlays assembled by buildTurnOverlayMessages; they do not
 	// belong in the stable system prompt.
 

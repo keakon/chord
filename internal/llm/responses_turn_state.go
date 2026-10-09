@@ -6,21 +6,24 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 type responsesTurnStateContextKey struct{}
 
 // ResponsesTurnState carries the sticky-routing token returned by a Responses
-// backend for one turn. The token is scoped by both provider and credential so
+// backend and the stable client metadata for one turn. The token is scoped by both provider and credential so
 // fallback cannot echo state to another endpoint or OAuth account.
 type ResponsesTurnState struct {
-	mu     sync.RWMutex
-	values map[string]string
+	mu        sync.RWMutex
+	values    map[string]string
+	turnID    string
+	startedAt time.Time
 }
 
 // NewResponsesTurnState creates empty state for one Responses turn.
 func NewResponsesTurnState() *ResponsesTurnState {
-	return &ResponsesTurnState{}
+	return &ResponsesTurnState{turnID: newOpenAIOAuthSessionID(), startedAt: time.Now()}
 }
 
 // WithResponsesTurnState attaches state to a request context. A nil state is
@@ -39,6 +42,16 @@ func ResponsesTurnStateFromContext(ctx context.Context) *ResponsesTurnState {
 	}
 	state, _ := ctx.Value(responsesTurnStateContextKey{}).(*ResponsesTurnState)
 	return state
+}
+
+func (s *ResponsesTurnState) metadataIdentity() (string, time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.turnID == "" {
+		s.turnID = newOpenAIOAuthSessionID()
+		s.startedAt = time.Now()
+	}
+	return s.turnID, s.startedAt
 }
 
 func (s *ResponsesTurnState) headerValue(identity string) string {

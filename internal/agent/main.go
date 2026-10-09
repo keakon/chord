@@ -732,7 +732,6 @@ type MainAgent struct {
 	// dynamically again.
 	mcpMountFullInjectionOnly atomic.Bool
 	sessionBuilt              atomic.Bool
-	bugTriagePromptActive     atomic.Bool
 
 	// shuttingDown is set to true when Shutdown begins. UpdateTodos checks
 	// this flag to avoid overwriting the final snapshot.
@@ -1527,7 +1526,6 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 		Parts:   outP,
 	}
 	a.recordCommittedUserMessage(userMsg)
-	a.syncBugTriagePromptFromSnapshot()
 
 	// A cancel request accepted before this message was dispatched keeps the
 	// message but not the work: the turn exists, so the transcript and recovery
@@ -1780,7 +1778,6 @@ func (a *MainAgent) resumeTurnAfterRoutingInvalidation(turnID uint64) bool {
 	// mailbox that arrived while the turn was paused so its next request carries
 	// it alongside the queued user input.
 	a.mergePendingInputsForTurnContinuation()
-	a.syncBugTriagePromptFromSnapshot()
 	turnCtx := a.turn.Ctx
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 	return true

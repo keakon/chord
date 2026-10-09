@@ -101,7 +101,7 @@ func TestConvertMessagesReplaysResponsesOutputInProviderOrder(t *testing.T) {
 	if strings.Contains(string(raw3), "summary") {
 		t.Fatalf("function_call must not carry summary field: %s", raw3)
 	}
-	withIDs := convertMessagesToResponsesWithItemIDs("", msgs[1:2], true, false)
+	withIDs := convertMessagesToResponsesWithItemIDs("", msgs[1:2], true, false, false)
 	if len(withIDs) != 3 || withIDs[0].ID != "rs_1" || withIDs[1].ID != "fc_1" {
 		t.Fatalf("stored replay must preserve item ids: %+v", withIDs)
 	}
@@ -401,7 +401,7 @@ func TestConvertMessagesInterruptedMessageReplaysReasoningBeforeMessage(t *testi
 		},
 	}
 
-	items := convertMessagesToResponsesWithItemIDs("", msgs, true, false)
+	items := convertMessagesToResponsesWithItemIDs("", msgs, true, false, false)
 	// user message, reasoning (preceded-by message requirement satisfied by the
 	// message item that follows it), assistant message with the partial text.
 	want := []struct {

@@ -100,7 +100,6 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 		requestMessages = append(requestMessages, a.appendUserSkillInvocation(item.msg)...)
 	}
 	requestMessages = append(requestMessages, messages[insertionAt:]...)
-	a.syncBugTriagePromptFromSnapshot()
 	return requestMessages
 }
 
@@ -379,7 +378,6 @@ func (a *MainAgent) commitPendingUserMessagesWithoutTurn() {
 		a.pendingUserMessages = deferred
 	}
 	if committed > 0 {
-		a.syncBugTriagePromptFromSnapshot()
 		log.Debugf("committed pending user messages without starting llm turn count=%v deferred=%v", committed, len(deferred))
 	}
 }
@@ -637,7 +635,6 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	a.rememberIdleTurn(turnID)
 	a.clearReductionCache(false)
 	a.clearStageCompletionCandidate()
-	a.setBugTriagePromptActive(false)
 	skipMailboxDrain := false
 	// The staged batch is shared with the TUI-facing manual-delivery path
 	// (takeOutstandingMailboxForSub), so the batch snapshot and the final
@@ -788,7 +785,6 @@ func (a *MainAgent) setIdleForComposerEdit() {
 	a.rememberIdleTurn(turnID)
 	a.clearReductionCache(false)
 	a.clearStageCompletionCandidate()
-	a.setBugTriagePromptActive(false)
 	a.emitInteractiveToTUI(a.parentCtx, IdleEvent{})
 	// Foreground is idle again: wake the memory worker (see setIdleAndDrainPending).
 	a.memoryWakeIdle()
@@ -871,7 +867,6 @@ func (a *MainAgent) drainPendingUserMessages() {
 		a.recordCommittedUserMessage(item.msg)
 		a.emitPendingDraftConsumed(item.draftID, item.msg)
 	}
-	a.syncBugTriagePromptFromSnapshot()
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }
 
@@ -894,7 +889,6 @@ func (a *MainAgent) closeCoveredPendingUserMessagesAsCancelled(pending []pending
 		a.recordCommittedUserMessage(userMsg)
 		a.emitPendingDraftConsumed(p.DraftID, userMsg)
 	}
-	a.syncBugTriagePromptFromSnapshot()
 	log.Infof("queued user messages cancelled before their turn count=%v turn_id=%v", len(pending), turnID)
 	a.handleTurnCancelled(a.abortTurn(a.turn, true))
 }

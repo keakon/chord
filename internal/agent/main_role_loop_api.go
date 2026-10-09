@@ -375,7 +375,6 @@ func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
 	turnCtx := a.turn.Ctx
 	userMsg := message.Message{Role: "user", Content: target}
 	a.recordCommittedUserMessage(userMsg)
-	a.syncBugTriagePromptFromSnapshot()
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }
 

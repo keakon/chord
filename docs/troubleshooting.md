@@ -145,34 +145,20 @@ Chord skips unfinished write requests even when their partial arguments look val
 
 ### `Cache R` percentage is much lower than expected
 
-**Symptom**: the info panel shows a cache-read percentage around 50% (or any
-value far from the actual hit rate) while the request body has barely changed
-between turns, so the hit rate should be close to 100%.
+`Cache R` is cache-read tokens divided by the full input side (`uncached + cache-read + cache-write`). Output tokens do not dilute it. A long shared prefix does not guarantee a cache hit: it must end at a cache boundary the server can look up.
 
-What to check:
+Check these factors first:
 
-1. The percentage is cache-read tokens divided by the full input side
-   (`uncached + cache-read + cache-write`). It only counts the input side, so
-   a large output does not dilute it.
-2. Chord assumes protocol semantics for usage fields: for `messages`
-   providers, `input_tokens` is the uncached input and the cache buckets are
-   reported separately; for `chat-completions` / `responses` providers,
-   `input_tokens` already includes the cached portion.
-3. A compatible gateway may report usage with the other protocol's semantics
-   while still exposing a `messages` endpoint: most commonly `input_tokens`
-   is the full input including cache hits, and `cache_read_input_tokens` is
-   only the hit subset. Chord then counts the cache reads twice, which
-   roughly halves the displayed percentage.
-4. To confirm, inspect a session LLM dump and compare its raw usage fields with
-   the gateway's usage documentation or a token-counting response for the same
-   request. If `input_tokens` is documented or verified as the full input while
-   `cache_read_input_tokens` is only a subset, set
-   `compat.usage.input_includes_cache_read: true` on that provider (see
-   [Configuration](./configuration.md)). The inequality between these two
-   fields alone is not enough to identify their semantics.
+- **Cache boundaries**: GPT-5.6 and later Responses models cache at message boundaries. Chord adds explicit markers to eligible durable text messages and tool results. When a transient suffix follows explicit markers, only those markers receive cache writes, avoiding one-use reminders. Earlier models retain their implicit caching rules. Inspect `prompt_cache_options` and `prompt_cache_breakpoint` in the LLM dump's `request_body`, including whether the endpoint or request overrides preserve these fields.
+- **Request changes**: model, tool definitions and ordering, system instructions, reasoning effort, verbosity, and output format can change the server-rendered prefix. Request-time trimming or durable compaction can also reduce reuse.
+- **Cache identity and lifetime**: check that `prompt_cache_key` stays stable and whether the endpoint, credentials, or model changed. Idle time, server routing, and eviction can cause misses. The turn ID and start time in `client_metadata` stay stable within one user turn.
+- **Usage semantics**: a compatible gateway may report usage with semantics different from its endpoint protocol, causing cache tokens to be counted twice. Check raw responses as described below before treating a low percentage as a server fault.
 
-Existing usage records are append-only and are not recalculated after a
-config change; only new requests use the corrected semantics.
+For `messages` providers, Chord treats `input_tokens` as uncached input with separate cache buckets. For `chat-completions` / `responses`, the input total already includes cache hits. If a gateway's `messages` response instead reports full input in `input_tokens` and its cached subset in `cache_read_input_tokens`, the displayed percentage can be roughly halved.
+
+Inspect raw usage in the session LLM dump and check the gateway's usage documentation. Only after confirming that definition, set `compat.usage.input_includes_cache_read: true` on the provider (see [Configuration](./configuration.md)). Comparing field sizes alone cannot establish their semantics. Existing usage records are not recalculated after a configuration change; only new requests use the adjusted definition.
+
+A `suspected_provider_miss` diagnostic is tentative: local message estimates cannot establish identical server rendering, routing, or cache lifetime. Protocols without an explicit boundary before transient input compare the full request, so client-side suffix changes remain visible.
 
 ## MCP never becomes ready
 

@@ -108,23 +108,21 @@ func classifyCacheOutcome(localRewriteReason string, expectedTokens int, sinceLa
 // noteCacheExpectation compares the outgoing request against the previous
 // request sent to the same running model ref and returns usage diagnostics
 // that attribute cache misses: if actual cache_read is far below
-// cache_expected_tokens, the provider dropped a cache chord kept byte-stable;
+// cache_expected_tokens, cache routing or retention may explain the shortfall;
 // if cache_prefix_divergence is small, chord itself mutated an early message
 // (e.g. context reduction) and the miss is self-inflicted. The provider-
 // reported usage for the current response, when available, resolves the
 // attribution into cache_outcome. It then records the current request as the
 // new expectation for that ref.
 //
-// tailOverlayCount transient messages at the end of the request are excluded
-// from the expectation: the cache boundary is placed before them, so their
-// churn across requests is not a chord-side prefix rewrite.
+// Transient tails are excluded only when the selected renderer has an explicit
+// cache boundary before them. Other protocols compare the full sent request.
 func (a *MainAgent) noteCacheExpectation(modelRef string, messages []message.Message, tailOverlayCount int, toolDefHash [sha256.Size]byte, sentAt time.Time, usage *message.TokenUsage) map[string]string {
 	if a == nil || modelRef == "" || len(messages) == 0 {
 		return nil
 	}
-	if tailOverlayCount > 0 && tailOverlayCount < len(messages) {
-		messages = messages[:len(messages)-tailOverlayCount]
-	}
+	cacheMessageCount := a.llmClient.PromptCacheMessageCountForModelRef(modelRef, messages, tailOverlayCount)
+	messages = messages[:cacheMessageCount]
 	a.cacheExpectMu.Lock()
 	previous := a.cacheExpectations[modelRef]
 	a.cacheExpectMu.Unlock()

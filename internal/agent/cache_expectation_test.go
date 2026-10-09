@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -163,21 +165,23 @@ func TestNoteCacheExpectationAttributesDivergence(t *testing.T) {
 // request must read as an append, not as a chord-side prefix rewrite.
 func TestNoteCacheExpectationIgnoresTailOverlayChurn(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	cfg := llm.NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}}}, []string{"test-key"})
+	a.llmClient = llm.NewClient(cfg, &recordingLoopTuningProvider{}, "gpt-6.1-sol", 4096, "sys")
 	hash := a.computeToolDefinitionHash()
 	durable := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", Content: "a1"},
 	}
 	withOverlay := append(append([]message.Message(nil), durable...),
-		message.Message{Role: "user", Content: "<system-reminder>turn hint</system-reminder>"})
+		message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "<system-reminder>turn hint</system-reminder>"})
 
-	a.noteCacheExpectation("p/m", withOverlay, 1, hash, time.Now(), nil)
+	a.noteCacheExpectation("p/gpt-6.1-sol", withOverlay, 1, hash, time.Now(), nil)
 
 	grown := append(append([]message.Message(nil), durable...),
 		message.Message{Role: "assistant", Content: "a2"},
 		message.Message{Role: "user", Content: "u2"})
-	diag := a.noteCacheExpectation("p/m", grown, 0, hash, time.Now(), nil)
-	if diag["cache_prefix_divergence"] != "2" || diag["cache_divergence_kind"] != "append" {
+	diag := a.noteCacheExpectation("p/gpt-6.1-sol", grown, 0, hash, time.Now(), nil)
+	if diag["cache_prefix_divergence"] != "1" || diag["cache_divergence_kind"] != "append" {
 		t.Fatalf("overlay churn diag = %v", diag)
 	}
 	if diag["cache_outcome"] == cacheOutcomeLocalRewrite {
@@ -244,5 +248,17 @@ func TestCacheExpectationInvalidatesAcrossPromptAndSessionBoundaries(t *testing.
 	}
 	if _, ok := a.cacheHitTracker.HitRate("p/m"); ok {
 		t.Fatal("new session inherited the previous session's cache hit observations")
+	}
+}
+
+func TestNoteCacheExpectationKeepsOverlayWithoutBoundaryContract(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	hash := a.computeToolDefinitionHash()
+	first := []message.Message{{Role: message.RoleUser, Content: "request"}, {Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "hint"}}
+	a.noteCacheExpectation("p/m", first, 1, hash, time.Now(), nil)
+	next := []message.Message{{Role: message.RoleUser, Content: "request"}, {Role: message.RoleAssistant, Content: "response"}, {Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "hint"}}
+	diag := a.noteCacheExpectation("p/m", next, 1, hash, time.Now(), &message.TokenUsage{CacheReadTokens: 1, CacheWriteTokens: 2000})
+	if diag["cache_outcome"] != cacheOutcomeLocalRewrite || diag["cache_prev_messages"] != "2" {
+		t.Fatalf("unmarked overlay was hidden: %v", diag)
 	}
 }

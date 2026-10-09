@@ -326,22 +326,24 @@ func TestCodexWSBaselineSignatureMatchesNextTurnConversion(t *testing.T) {
 	}
 	userTurn := []message.Message{{Role: message.RoleUser, Content: "hello"}}
 
-	for _, store := range []bool{false, true} {
-		fullInput := convertMessagesToResponsesWithItemIDs("", userTurn, store, false)
-		_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, responsesOutputToInputItems(output, store), store)
+	for _, cacheBreakpoints := range []bool{false, true} {
+		for _, store := range []bool{false, true} {
+			fullInput := convertMessagesToResponsesWithItemIDs("", userTurn, store, false, cacheBreakpoints)
+			_, baselineLen, baselineSig := codexWSBuildBaseline(fullInput, responsesOutputToInputItems(output, store), store)
 
-		resp := &message.Response{}
-		collectResponsesOutput(resp, output)
-		next := append(append([]message.Message(nil), userTurn...),
-			message.Message{Role: message.RoleAssistant, ResponsesOutput: resp.ResponsesOutput},
-			message.Message{Role: message.RoleUser, Content: "next"},
-		)
-		nextInput := convertMessagesToResponsesWithItemIDs("", next, store, false)
-		if len(nextInput) <= baselineLen {
-			t.Fatalf("store=%v next input must extend the baseline: len=%d baseline=%d", store, len(nextInput), baselineLen)
-		}
-		if got := responsesInputPrefixSignature(nextInput, baselineLen); got != baselineSig {
-			t.Fatalf("store=%v baseline signature mismatch: got %q want %q", store, got, baselineSig)
+			resp := &message.Response{}
+			collectResponsesOutput(resp, output)
+			next := append(append([]message.Message(nil), userTurn...),
+				message.Message{Role: message.RoleAssistant, ResponsesOutput: resp.ResponsesOutput},
+				message.Message{Role: message.RoleUser, Content: "next"},
+			)
+			nextInput := convertMessagesToResponsesWithItemIDs("", next, store, false, cacheBreakpoints)
+			if len(nextInput) <= baselineLen {
+				t.Fatalf("store=%v next input must extend the baseline: len=%d baseline=%d", store, len(nextInput), baselineLen)
+			}
+			if got := responsesInputPrefixSignature(nextInput, baselineLen); got != baselineSig {
+				t.Fatalf("store=%v baseline signature mismatch: got %q want %q", store, got, baselineSig)
+			}
 		}
 	}
 }
@@ -1032,5 +1034,39 @@ func TestCompleteStreamCodexWebSocket_ConnectingBeforeDial(t *testing.T) {
 	}
 	if !foundWaiting {
 		t.Fatalf("expected 'waiting_headers' in statuses, got %v", statuses)
+	}
+}
+
+func TestCodexWebSocketPreservesCacheOptionsAndTurnMetadata(t *testing.T) {
+	srv := newCodexWSCaptureServer(t, []string{"prewarm-a", "response-a"})
+	defer srv.Close()
+	msgs := []message.Message{{Role: message.RoleUser, Content: "request"}, {Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "hint"}}
+	input := convertMessagesToResponsesWithItemIDs("", msgs, false, false, true)
+	metadata := responsesClientMetadata("session-a", NewResponsesTurnState())
+	req := testCodexWSResponsesRequest("gpt-6.1-sol", input)
+	req.PromptCacheOptions = responsesPromptCacheOptions(msgs, input)
+	req.ClientMetadata = metadata
+	r := &ResponsesProvider{}
+	if _, _, err := r.completeStreamCodexWebSocket(context.Background(), srv.ResponsesURL(), "test-key", "gpt-6.1-sol", req, input, nil, time.Now(), codexWSCompleteOptions{SessionKey: "session-a"}); err != nil {
+		t.Fatal(err)
+	}
+	requests := srv.Requests()
+	if len(requests) != 2 {
+		t.Fatalf("expected prewarm and generate requests, got %d", len(requests))
+	}
+	for _, body := range requests {
+		options, ok := body["prompt_cache_options"].(map[string]any)
+		if !ok || options["mode"] != "explicit" {
+			t.Fatalf("WS cache mode lost: %v", body)
+		}
+		meta, ok := body["client_metadata"].(map[string]any)
+		if !ok || meta[responsesClientMetadataTurnID] != metadata[responsesClientMetadataTurnID] {
+			t.Fatal("WS turn identity changed")
+		}
+	}
+	first := requests[0]["input"].([]any)
+	content := first[0].(map[string]any)["content"].([]any)
+	if content[0].(map[string]any)["prompt_cache_breakpoint"] == nil {
+		t.Fatal("prewarm omitted the durable breakpoint")
 	}
 }

@@ -102,22 +102,23 @@ func (r *ResponsesProvider) LastTransportUsed() string {
 
 // responsesRequest is the request body for the Responses API.
 type responsesRequest struct {
-	Model              string               `json:"model"`
-	Instructions       *string              `json:"instructions,omitempty"`
-	Input              []responsesInputItem `json:"input"`
-	Tools              []responsesTool      `json:"tools"`
-	ToolChoice         string               `json:"tool_choice,omitempty"`
-	ParallelToolCalls  *bool                `json:"parallel_tool_calls,omitempty"`
-	ServiceTier        string               `json:"service_tier,omitempty"`
-	Reasoning          *reasoningConfig     `json:"reasoning,omitempty"`
-	Text               *textConfig          `json:"text,omitempty"`
-	PreviousResponseID string               `json:"previous_response_id,omitempty"`
-	MaxOutputTokens    int                  `json:"max_output_tokens,omitempty"`
-	Store              bool                 `json:"store"`
-	Stream             bool                 `json:"stream"`
-	Include            []string             `json:"include"`
-	PromptCacheKey     string               `json:"prompt_cache_key,omitempty"`
-	ClientMetadata     map[string]string    `json:"client_metadata,omitempty"`
+	Model              string                 `json:"model"`
+	Instructions       *string                `json:"instructions,omitempty"`
+	Input              []responsesInputItem   `json:"input"`
+	Tools              []responsesTool        `json:"tools"`
+	ToolChoice         string                 `json:"tool_choice,omitempty"`
+	ParallelToolCalls  *bool                  `json:"parallel_tool_calls,omitempty"`
+	ServiceTier        string                 `json:"service_tier,omitempty"`
+	Reasoning          *reasoningConfig       `json:"reasoning,omitempty"`
+	Text               *textConfig            `json:"text,omitempty"`
+	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
+	MaxOutputTokens    int                    `json:"max_output_tokens,omitempty"`
+	Store              bool                   `json:"store"`
+	Stream             bool                   `json:"stream"`
+	Include            []string               `json:"include"`
+	PromptCacheOptions *responsesCacheControl `json:"prompt_cache_options,omitempty"`
+	PromptCacheKey     string                 `json:"prompt_cache_key,omitempty"`
+	ClientMetadata     map[string]string      `json:"client_metadata,omitempty"`
 	omitStore          bool
 	omitInclude        bool
 }
@@ -176,13 +177,14 @@ const responsesAdditionalToolsRole = "developer"
 
 // responsesContentBlock is a content block within a message item.
 type responsesContentBlock struct {
-	Type     string `json:"type"` // "input_text", "output_text", "input_image", "input_file"
-	Text     string `json:"text,omitempty"`
-	Refusal  string `json:"refusal,omitempty"`
-	ImageURL string `json:"image_url,omitempty"`
-	Detail   string `json:"detail,omitempty"`
-	Filename string `json:"filename,omitempty"`  // input_file: display filename
-	FileData string `json:"file_data,omitempty"` // input_file: data URL (data:application/pdf;base64,...)
+	PromptCacheBreakpoint *responsesCacheControl `json:"prompt_cache_breakpoint,omitempty"`
+	Type                  string                 `json:"type"` // "input_text", "output_text", "input_image", "input_file"
+	Text                  string                 `json:"text,omitempty"`
+	Refusal               string                 `json:"refusal,omitempty"`
+	ImageURL              string                 `json:"image_url,omitempty"`
+	Detail                string                 `json:"detail,omitempty"`
+	Filename              string                 `json:"filename,omitempty"`  // input_file: display filename
+	FileData              string                 `json:"file_data,omitempty"` // input_file: data URL (data:application/pdf;base64,...)
 }
 
 // responsesTool is a tool definition for the Responses API.
@@ -307,13 +309,16 @@ func responsesInstallationID(sessionID string) string {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 
-func responsesClientMetadata(sessionID string, startedAt time.Time) map[string]string {
+func responsesClientMetadata(sessionID string, state *ResponsesTurnState) map[string]string {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return nil
 	}
 	windowID := responsesWindowID(sessionID)
-	turnID := newOpenAIOAuthSessionID()
+	if state == nil {
+		state = NewResponsesTurnState()
+	}
+	turnID, startedAt := state.metadataIdentity()
 	installationID := responsesInstallationID(sessionID)
 	metadata := map[string]string{
 		responsesClientMetadataInstallationID: installationID,
@@ -371,6 +376,9 @@ func (r *ResponsesProvider) CompleteStream(
 	tuning RequestTuning,
 	cb StreamCallback,
 ) (*message.Response, error) {
+	if ResponsesTurnStateFromContext(ctx) == nil {
+		ctx = WithResponsesTurnState(ctx, NewResponsesTurnState())
+	}
 	markRequestPrepared(ctx)
 	ot := tuning.OpenAI
 	dumpWriter := r.dumpWriter.Load()
@@ -440,7 +448,7 @@ func (r *ResponsesProvider) CompleteStream(
 		// system messages in input. apply_patch history replays in the shape matching
 		// this request's tool declarations (freeform custom_tool_call or JSON
 		// function_call), so the model sees the same wire form it is asked to emit.
-		apiInput := convertMessagesToResponsesWithItemIDs("", messages, store, freeform)
+		apiInput := convertMessagesToResponsesWithItemIDs("", messages, store, freeform, modelcompat.SupportsResponsesCacheBreakpoints(model))
 
 		// Validate that we have at least one input item.
 		if len(apiInput) == 0 {
@@ -457,7 +465,6 @@ func (r *ResponsesProvider) CompleteStream(
 		// HTTP path is full-input only. We do not send previous_response_id here;
 		// connection-scoped reuse belongs to the Codex WebSocket transport.
 		fullInput := apiInput
-		metadataStart := time.Now()
 
 		// Keep the Responses HTTP request shape aligned with codex-rs for every
 		// Responses provider, not only preset:codex. Some relay endpoints validate
@@ -547,9 +554,12 @@ func (r *ResponsesProvider) CompleteStream(
 		reqBody.omitStore = !compatBool(sendStore, true)
 		reqBody.omitInclude = !compatBool(sendReasoningInclude, true)
 		reqBody.Input = fullInput
+		if modelcompat.SupportsResponsesCacheBreakpoints(model) {
+			reqBody.PromptCacheOptions = responsesPromptCacheOptions(messages, fullInput)
+		}
 		if sessionKey != "" && compatBool(sendPromptCacheKey, true) {
 			reqBody.PromptCacheKey = sessionKey
-			reqBody.ClientMetadata = responsesClientMetadata(sessionKey, metadataStart)
+			reqBody.ClientMetadata = responsesClientMetadata(sessionKey, ResponsesTurnStateFromContext(ctx))
 		}
 		if ot.ServiceTier != "" {
 			reqBody.ServiceTier = ot.ServiceTier

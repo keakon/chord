@@ -7,8 +7,7 @@ import (
 )
 
 func (a *MainAgent) primaryAgentCoordinationPromptBlock() string {
-	// bugTriagePromptBlock is delivered as a per-turn overlay, not part of the
-	// stable system prompt. Todo usage rules live entirely in the TodoWrite
+	// Todo usage rules live entirely in the TodoWrite
 	// tool description, so no separate todo workflow block is rendered here.
 	return a.subAgentWorkflowPromptBlock()
 }

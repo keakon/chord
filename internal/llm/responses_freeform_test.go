@@ -473,7 +473,7 @@ func TestResponsesFreeformReplayPairsToolResults(t *testing.T) {
 		{Role: message.RoleTool, ToolCallID: "c_read", Content: "file read"},
 		{Role: message.RoleTool, ToolCallID: "c_patch", Content: "patched"},
 	}
-	items := convertMessagesToResponsesWithItemIDs("", msgs, false, true)
+	items := convertMessagesToResponsesWithItemIDs("", msgs, false, true, false)
 	if len(items) != 5 {
 		t.Fatalf("got %d items, want 5 (user + call/output x2)", len(items))
 	}
@@ -604,7 +604,7 @@ func TestResponsesReplayNeverDropsArguments(t *testing.T) {
 			{Type: "function_call", CallID: "call_1", Name: toolname.ApplyPatch},
 		},
 	}}
-	items := convertMessagesToResponsesWithItemIDs("", msgs, false, false)
+	items := convertMessagesToResponsesWithItemIDs("", msgs, false, false, false)
 	var found bool
 	for _, item := range items {
 		if item.Type == "function_call" && item.CallID == "call_1" {
@@ -950,7 +950,7 @@ func TestResponsesFreeformReplayPairsInterleavedOutputs(t *testing.T) {
 		},
 		{Role: message.RoleTool, ToolCallID: "c_patch", Content: "patched"},
 	}
-	items := convertMessagesToResponsesWithItemIDs("", msgs, false, true)
+	items := convertMessagesToResponsesWithItemIDs("", msgs, false, true, false)
 	if len(items) != 4 {
 		t.Fatalf("got %d items, want 4 (user + call + reasoning + output)", len(items))
 	}
@@ -980,7 +980,7 @@ func TestResponsesLegacyToolCallsReplayAsFreeformCustomCalls(t *testing.T) {
 		},
 		{Role: message.RoleTool, ToolCallID: "c_patch", Content: "patched"},
 	}
-	items := convertMessagesToResponsesWithItemIDs("", msgs, false, true)
+	items := convertMessagesToResponsesWithItemIDs("", msgs, false, true, false)
 	if len(items) != 3 {
 		t.Fatalf("got %d items, want 3 (user + call + output)", len(items))
 	}

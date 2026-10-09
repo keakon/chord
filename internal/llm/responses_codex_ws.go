@@ -86,12 +86,13 @@ type codexWSResponseCreate struct {
 	Stream            bool                 `json:"stream"`
 	// Responses clients always send include as an array; encrypted reasoning is
 	// requested only when the request carries a reasoning block.
-	Include            []string          `json:"include"`
-	PromptCacheKey     string            `json:"prompt_cache_key,omitempty"`
-	PreviousResponseID string            `json:"previous_response_id,omitempty"`
-	Reasoning          *reasoningConfig  `json:"reasoning,omitempty"`
-	Text               *textConfig       `json:"text,omitempty"`
-	ClientMetadata     map[string]string `json:"client_metadata,omitempty"`
+	Include            []string               `json:"include"`
+	PromptCacheOptions *responsesCacheControl `json:"prompt_cache_options,omitempty"`
+	PromptCacheKey     string                 `json:"prompt_cache_key,omitempty"`
+	PreviousResponseID string                 `json:"previous_response_id,omitempty"`
+	Reasoning          *reasoningConfig       `json:"reasoning,omitempty"`
+	Text               *textConfig            `json:"text,omitempty"`
+	ClientMetadata     map[string]string      `json:"client_metadata,omitempty"`
 }
 
 func (e codexWSResponseCreate) MarshalJSON() ([]byte, error) {
@@ -733,21 +734,22 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	if newConnection && !opts.SkipPrewarm {
 		generate := false
 		prewarmEnv := codexWSResponseCreate{
-			Type:              "response.create",
-			Model:             req.Model,
-			Instructions:      req.Instructions,
-			Input:             fullInput,
-			Tools:             req.Tools,
-			ToolChoice:        req.ToolChoice,
-			ParallelToolCalls: req.ParallelToolCalls,
-			Store:             req.Store,
-			Generate:          &generate,
-			Stream:            true,
-			Include:           req.Include,
-			PromptCacheKey:    strings.TrimSpace(opts.SessionKey),
-			Reasoning:         req.Reasoning,
-			Text:              req.Text,
-			ClientMetadata:    req.ClientMetadata,
+			Type:               "response.create",
+			Model:              req.Model,
+			Instructions:       req.Instructions,
+			Input:              fullInput,
+			Tools:              req.Tools,
+			ToolChoice:         req.ToolChoice,
+			ParallelToolCalls:  req.ParallelToolCalls,
+			Store:              req.Store,
+			Generate:           &generate,
+			Stream:             true,
+			Include:            req.Include,
+			PromptCacheKey:     strings.TrimSpace(opts.SessionKey),
+			Reasoning:          req.Reasoning,
+			Text:               req.Text,
+			ClientMetadata:     req.ClientMetadata,
+			PromptCacheOptions: req.PromptCacheOptions,
 		}
 		prewarmResp, prewarmOutputItems, prewarmErr := r.codexWSExecuteRequestLocked(
 			ctx, apiKey, model, prewarmEnv, nil, false, start, false, opts.TurnState, opts.TurnStateIdentity, freeform,
@@ -792,6 +794,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		Reasoning:          req.Reasoning,
 		Text:               req.Text,
 		ClientMetadata:     req.ClientMetadata,
+		PromptCacheOptions: req.PromptCacheOptions,
 	}
 	// reusingConn is always true here: if we just dialed+prewarmed, the WS
 	// connection is already established; if we reused an existing connection,
