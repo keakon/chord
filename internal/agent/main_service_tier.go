@@ -18,19 +18,56 @@ func (a *MainAgent) ServiceTier() config.ServiceTier {
 }
 
 func (a *MainAgent) EffectiveServiceTier() config.ServiceTier {
-	client, _, _, runningRef := a.llmSnapshot()
+	client, runningRef := a.tuiFocusedLLMAndRef()
 	if client == nil {
 		return config.ServiceTierStandard
 	}
-	return client.EffectiveServiceTierForModelRef(runningRef)
+	return a.effectiveDisplayServiceTier(client, runningRef)
 }
 
 func (a *MainAgent) SupportedServiceTiers() []config.ServiceTier {
-	client, _, _, runningRef := a.llmSnapshot()
+	client, runningRef := a.tuiFocusedLLMAndRef()
 	if client == nil {
 		return []config.ServiceTier{config.ServiceTierStandard}
 	}
-	return client.SupportedServiceTiersForModelRef(runningRef)
+	return a.supportedDisplayServiceTiers(client, runningRef)
+}
+
+// A pending pool target may not exist in the installed client. Its tier
+// capabilities are still known from configuration, without installing it early.
+func (a *MainAgent) supportedDisplayServiceTiers(client *llm.Client, ref string) []config.ServiceTier {
+	if client != nil && client.ProviderForModelRef(ref) != nil {
+		return client.SupportedServiceTiersForModelRef(ref)
+	}
+	base, _ := config.ParseModelRef(ref)
+	provider, modelID, _ := strings.Cut(base, "/")
+	cfg, ok := a.providerConfigByName(provider)
+	if !ok {
+		return []config.ServiceTier{config.ServiceTierStandard}
+	}
+	model := cfg.Models[modelID]
+	set := model.SupportedServiceTierSet(cfg.Preset, cfg.SupportedServiceTiers)
+	tiers := []config.ServiceTier{config.ServiceTierStandard}
+	for _, tier := range []config.ServiceTier{config.ServiceTierFast, config.ServiceTierSlow} {
+		if set[tier] {
+			tiers = append(tiers, tier)
+		}
+	}
+	return tiers
+}
+
+func (a *MainAgent) effectiveDisplayServiceTier(client *llm.Client, ref string) config.ServiceTier {
+	if client == nil {
+		return config.ServiceTierStandard
+	}
+	if client.ProviderForModelRef(ref) != nil {
+		return client.EffectiveServiceTierForModelRef(ref)
+	}
+	tier := client.ServiceTier()
+	if slices.Contains(a.supportedDisplayServiceTiers(client, ref), tier) {
+		return tier
+	}
+	return config.ServiceTierStandard
 }
 
 func (a *MainAgent) applyServiceTierToClient(client *llm.Client) {
@@ -83,7 +120,7 @@ func (a *MainAgent) handleTierCommand(content string, busy bool) {
 		}
 		return
 	}
-	supported := client.SupportedServiceTiersForModelRef(client.RunningModelRef())
+	supported := a.SupportedServiceTiers()
 	supportedTier := slices.Contains(supported, tier)
 	if !supportedTier {
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Service tier %s is not supported by the current model", tier), Level: "error"})

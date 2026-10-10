@@ -69,13 +69,14 @@ func renderInfoPanelIndentedLine(lineW, inset int, content string) string {
 }
 
 func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
-	requested := m.serviceTier()
+	state := m.focusedModelState()
+	requested := state.ServiceTier
 	if requested == config.ServiceTierStandard {
 		return ""
 	}
 	label := InfoPanelValue.Render("tier: ")
 	valueStyle := InfoPanelValue
-	if requested != m.effectiveServiceTier() {
+	if requested != state.EffectiveTier {
 		valueStyle = InfoPanelDim.Strikethrough(true)
 	}
 	line := lipgloss.JoinHorizontal(lipgloss.Left, label, valueStyle.Render(string(requested)))
@@ -83,15 +84,8 @@ func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
 }
 
 func (m *Model) buildInfoPanelModelBlock(lineW int) string {
-	busy := m.isFocusedAgentBusy()
 	modelState := m.focusedModelState()
-	runningRef, selectedRef := m.focusedModelRefs()
-	if !busy {
-		if nextRef := nextRequestModelRefForAgent(m.agent); strings.TrimSpace(nextRef) != "" {
-			selectedRef = nextRef
-		}
-	}
-	provider, model, variant := modelref.SplitRequestModelRefForDisplay(runningRef, selectedRef, modelState.Variant)
+	provider, model, variant := modelref.SplitRunningModelRef(modelState.DisplayRef)
 	modelShown := modelref.FormatModelVariantForDisplay(model, variant, lineW)
 	modelLines := []string{
 		InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("MODEL")),
@@ -102,7 +96,7 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 			renderInfoPanelKVLine(lineW, "Provider", InfoPanelValue.Render(truncateOneLine(provider, lineW-10))),
 		)
 	}
-	keysConfirmed, keysTotal := m.agent.KeyStats()
+	keysConfirmed, keysTotal := modelState.KeysConfirmed, modelState.KeysTotal
 	keysStyle := InfoPanelValue
 	if keysTotal > 1 {
 		switch keyPoolHealthSeverity(keysConfirmed, keysTotal) {

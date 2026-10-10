@@ -339,7 +339,8 @@ type MainAgent struct {
 	// compaction lifecycle. The detailed compaction state remains event-loop
 	// owned; activity heartbeats and IsCompactionRunning use this atomic view so
 	// they do not read that state concurrently.
-	compactionSlotActive        atomic.Bool
+	compactionSlotActive atomic.Bool
+	// Pending pool writes hold stateMu so display snapshots can read them.
 	pendingMainModelPoolSwitch  bool
 	pendingAgentModelPoolSwitch map[string]struct{}
 	pendingModelPoolRollback    *modelPoolSelectionSnapshot

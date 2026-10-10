@@ -55,38 +55,10 @@ func (a *MainAgent) mainModelRefLocked() string {
 	return ref
 }
 
-// tuiFocusedLLMAndRef returns the LLM client and provider/model ref for the
-// agent currently shown in the TUI (focused SubAgent, else MainAgent). Used by
-// sidebar MODEL/Keys and Codex rate-limit snapshot selection.
+// tuiFocusedLLMAndRef captures the same display identity as FocusedModelState.
 func (a *MainAgent) tuiFocusedLLMAndRef() (client *llm.Client, ref string) {
-	target := a.focusedAgentSnapshot()
-	if target.sub != nil {
-		client, _ = target.sub.llmSnapshot()
-		if client == nil {
-			return nil, ""
-		}
-		ref = strings.TrimSpace(client.RunningModelRef())
-		if ref == "" {
-			ref = strings.TrimSpace(client.PrimaryModelRef())
-		}
-		return client, ref
-	}
-	if target.parked || target.settled {
-		return nil, ""
-	}
-	a.llmMu.RLock()
-	client = a.llmClient
-	if !a.mainLLMRequestInFlight.Load() && client != nil {
-		ref = strings.TrimSpace(client.NextRequestModelRef())
-	}
-	if ref == "" {
-		ref = strings.TrimSpace(a.runningModelRef)
-	}
-	if ref == "" {
-		ref = strings.TrimSpace(a.providerModelRef)
-	}
-	a.llmMu.RUnlock()
-	return client, ref
+	client, state := a.modelStateForTarget(a.focusedAgentSnapshot())
+	return client, state.DisplayRef
 }
 
 func (a *MainAgent) providerConfigByName(providerName string) (config.ProviderConfig, bool) {
@@ -136,7 +108,7 @@ func (a *MainAgent) clearInlineRateLimitSnapshotForCurrentMainClient(ref string)
 // clearCurrentRateLimitSnapshot drops the cached/key-polled rate-limit snapshot
 // of the provider that rotated its key. ref is the attempt target the rotation
 // came from, so a rotation inside an unconfirmed fallback clears that
-// provider's snapshot instead of the sidebar model's. It resolves the provider
+// provider's snapshot. It resolves the provider
 // name from the ref's provider segment because the cached map is keyed by that
 // name — unlike clearInlineRateLimitSnapshotForCurrentMainClient, which resolves
 // the same ref to a *llm.ProviderConfig to clear the client-side inline
@@ -204,13 +176,8 @@ func (a *MainAgent) updateRateLimitSnapshot(snap *ratelimit.KeyRateLimitSnapshot
 // that key/account's polled /wham/usage snapshot, or nothing until fresh data is
 // available.
 func (a *MainAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
-	providerName := a.currentRateLimitProviderName()
-	if providerName == "" || !a.providerUsesCodexRateLimit(providerName) {
-		return nil
-	}
-
 	client, ref := a.tuiFocusedLLMAndRef()
-	if client == nil {
+	if client == nil || !a.providerUsesCodexRateLimit(providerNameFromModelRef(ref)) {
 		return nil
 	}
 	return client.CurrentRateLimitSnapshotForRef(ref)
@@ -220,11 +187,11 @@ func (a *MainAgent) CurrentRateLimitSnapshot() *ratelimit.KeyRateLimitSnapshot {
 // currently focused agent's provider, when configured with preset: codex.
 // It is a best-effort hint used by the TUI when a reset timestamp is reached.
 func (a *MainAgent) WakeCodexRateLimitPolling() {
-	client, _ := a.tuiFocusedLLMAndRef()
+	client, ref := a.tuiFocusedLLMAndRef()
 	if client == nil {
 		return
 	}
-	if prov := client.ProviderConfig(); prov != nil {
+	if prov := client.ProviderForModelRef(ref); prov != nil {
 		prov.WakeCodexRateLimitPolling()
 	}
 }

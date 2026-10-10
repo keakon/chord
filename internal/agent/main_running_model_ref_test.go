@@ -15,8 +15,8 @@ import (
 )
 
 // newSidebarTestProviderConfig builds a single-model provider config for the
-// sidebar identity tests, where the context window is the observable that must
-// stay paired with the displayed model ref.
+// budget identity tests, where the context window must stay paired with the
+// committed running model ref.
 func newSidebarTestProviderConfig(name, model string, contextLimit, inputLimit int) *llm.ProviderConfig {
 	return llm.NewProviderConfig(name, config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -26,12 +26,8 @@ func newSidebarTestProviderConfig(name, model string, contextLimit, inputLimit i
 	}, []string{name + "-key"})
 }
 
-// TestMainLLMAbortedFallbackAttemptKeepsCursorHeadModelRef pins the sidebar
-// contract behind the reported bug: an attempt that has not emitted visible
-// output is not a switch. When the user aborts while the fallback request is
-// still waiting for its response, the sidebar must keep showing the model the
-// request started on — with that model's window — and must agree with the
-// sticky cursor the next request will use.
+// An unconfirmed fallback attempt does not change the committed budget. After
+// cancellation, the budget identity agrees with the next request's cursor.
 func TestMainLLMAbortedFallbackAttemptKeepsCursorHeadModelRef(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 
@@ -76,7 +72,7 @@ func TestMainLLMAbortedFallbackAttemptKeepsCursorHeadModelRef(t *testing.T) {
 	}
 	for _, evt := range drainAgentEvents(a.Events()) {
 		if changed, ok := evt.(RunningModelChangedEvent); ok {
-			t.Fatalf("unconfirmed fallback attempt moved the sidebar model: %+v", changed)
+			t.Fatalf("unconfirmed fallback attempt moved the budget identity: %+v", changed)
 		}
 	}
 
@@ -98,16 +94,15 @@ func TestMainLLMAbortedFallbackAttemptKeepsCursorHeadModelRef(t *testing.T) {
 	}
 	for _, evt := range drainAgentEvents(a.Events()) {
 		if changed, ok := evt.(RunningModelChangedEvent); ok {
-			t.Fatalf("aborting an unconfirmed attempt changed the sidebar model: %+v", changed)
+			t.Fatalf("aborting an unconfirmed attempt changed the budget identity: %+v", changed)
 		}
 	}
 }
 
 // TestMainLLMAbortedConfirmedFallbackReturnsToCursorHead covers the other half:
 // once the fallback emitted visible output the switch is real, but a request that
-// still ends in cancellation never confirmed it for the next request. The sidebar
-// must return to the cursor head — both the identity and the window — so MODEL
-// and the key/limit section keep resolving to the same model.
+// still ends in cancellation never confirmed it for the next request. The budget
+// identity and context window must return to the cursor head.
 func TestMainLLMAbortedConfirmedFallbackReturnsToCursorHead(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 
@@ -180,15 +175,15 @@ func TestMainLLMAbortedConfirmedFallbackReturnsToCursorHead(t *testing.T) {
 		}
 	}
 	if !sawReturn {
-		t.Fatal("missing RunningModelChangedEvent when the sidebar returned to the cursor head")
+		t.Fatal("missing RunningModelChangedEvent when the budget identity returned to the cursor head")
 	}
 }
 
-// TestMainLLMFailedModelPoolKeepsSidebarOnCursorHead pins the exhausted-round
+// TestMainLLMFailedModelPoolKeepsBudgetOnCursorHead pins the exhausted-round
 // case: the last attempted target is not what the next request will use, so the
-// sidebar must show the sticky cursor head instead of the model that just failed
+// budget identity must follow the sticky cursor instead of the model that failed
 // last.
-func TestMainLLMFailedModelPoolKeepsSidebarOnCursorHead(t *testing.T) {
+func TestMainLLMFailedModelPoolKeepsBudgetOnCursorHead(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 
 	impls := []*blockingStreamProvider{
@@ -223,7 +218,7 @@ func TestMainLLMFailedModelPoolKeepsSidebarOnCursorHead(t *testing.T) {
 	}
 
 	// The cursor advanced past the failed primary, so the next request starts on
-	// the second model; the sidebar must follow it rather than the last failure.
+	// the second model; the budget identity must follow it rather than the last failure.
 	if got := client.NextRequestModelRef(); got != "second-prov/second-model" {
 		t.Fatalf("cursor head = %q, want second-prov/second-model", got)
 	}
@@ -238,9 +233,8 @@ func TestMainLLMFailedModelPoolKeepsSidebarOnCursorHead(t *testing.T) {
 // TestMainLLMFallbackDownshiftKeepsCommittedFallbackRef covers the fallback
 // identity contract: a fallback that narrows the request budget commits its
 // reference and budgets at the boundary before the request runs on it, and once
-// that request succeeds the sidebar must keep reporting the fallback. The
-// compaction line is evaluated against that window, so realigning the sidebar to
-// the sticky cursor would show one model's name with another model's window.
+// that request succeeds the committed identity keeps the fallback window for
+// the next compaction decision.
 func TestMainLLMFallbackDownshiftKeepsCommittedFallbackRef(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
@@ -324,7 +318,7 @@ fallbackLoop:
 
 	// A successful fallback pins the sticky cursor to the model that served the
 	// round, so the next request starts from it instead of retrying the dead
-	// primary; the sidebar identity must agree with that pinned cursor.
+	// primary; the budget identity must agree with that pinned cursor.
 	if got := client.NextRequestModelRef(); got != "second-prov/second-model" {
 		t.Fatalf("cursor head = %q, want the fallback that served the round", got)
 	}
@@ -337,7 +331,7 @@ fallbackLoop:
 }
 
 // TestMainInterruptedPartialKeepsConfirmedProducerProvenance pins the provenance
-// contract for a preserved partial reply: the sidebar identity returns to the
+// contract for a preserved partial reply: the budget identity returns to the
 // sticky cursor when the cancelled request unwinds, but the message must stay
 // attributed to the fallback model that actually wrote it. Otherwise a replay
 // strips the native reasoning items the producer's wire family vouched for and
@@ -418,8 +412,7 @@ func inlineCodexSnapshot(provider string, usedPct float64) *ratelimit.KeyRateLim
 
 // TestKeySwitchedDeltaClearsRotatingProviderSnapshots pins the attribution of a
 // key rotation inside an unconfirmed fallback: the delta names the attempt
-// target, so that provider's snapshots are invalidated — not the sidebar model's,
-// which is the model the user is actually looking at.
+// target, so only that provider's key snapshots are invalidated.
 func TestKeySwitchedDeltaClearsRotatingProviderSnapshots(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Providers: map[string]config.ProviderConfig{
@@ -577,7 +570,7 @@ func TestMainTurnCancelledReleasesCommittedFallbackRef(t *testing.T) {
 // contract for a round held behind a pending compaction: the oversize
 // suspension legitimately keeps the narrowed fallback's identity and budgets
 // because the continuation is admitted against that same window, but cancelling
-// the turn ends the round for good, so the sidebar must drop the suspended
+// the turn ends the round for good, so the budget identity must drop the suspended
 // target and return to the cursor the next request starts from.
 func TestMainTurnCancelledReleasesOversizeSuspendedFallbackRef(t *testing.T) {
 	a := newReadyTestMainAgent(t)
@@ -635,9 +628,8 @@ func TestMainTurnCancelledReleasesOversizeSuspendedFallbackRef(t *testing.T) {
 
 // TestSubAgentRunningModelRefFollowsConfirmedSwitchOnly pins the worker's
 // identity rule: an attempt target announced before any visible output must not
-// move the displayed model, the first visible output confirms it, and the end of
-// a request whose switch was never confirmed leaves the sidebar on the cursor
-// head the next request starts from.
+// move the budget identity, the first visible output confirms it, and the end
+// of a request realigns the identity to the cursor head.
 func TestSubAgentRunningModelRefFollowsConfirmedSwitchOnly(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 
@@ -715,7 +707,7 @@ func TestApplyRunningModelRefIfCurrentSkipsSupersededClient(t *testing.T) {
 	}
 	for _, evt := range drainAgentEvents(a.Events()) {
 		if changed, ok := evt.(RunningModelChangedEvent); ok && changed.RunningModelRef == "prov-b/model-b" {
-			t.Fatalf("superseded client moved the sidebar model: %+v", changed)
+			t.Fatalf("superseded client moved the budget identity: %+v", changed)
 		}
 	}
 }

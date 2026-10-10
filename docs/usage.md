@@ -35,6 +35,8 @@ When Chord is running in the background, the terminal title shows a one-shot `�
 
 The status bar uses compact activity icons instead of repeating phase labels: `✶` means preparing, `⠋` frames mean connecting, `◷` waiting for response headers, `◌` waiting for the first token, `↓` receiving, `↻` retrying, `⇄` switching API keys, `⏸` cooling down, `⚙` executing tools, and `■` / `▪` compacting. Connecting frames change every 500ms and compaction icons every second; other activity icons remain static, with fixed theme colors. Elapsed time, received bytes, event counts (`events`), and retry/cooldown countdowns update once per second. When space is tight, event counts are omitted first, followed by elapsed time. State transitions, completion, and user actions appear immediately. Detailed fallback and provider errors remain in the error panel. Question dialogs keep custom drafts when you return to the options; `PgUp` / `PgDown` and the wheel read long questions. The model-pool selector supports `/` filtering. See the [key bindings reference](keybindings.md).
 
+The sidebar MODEL section and status bar show the current request target, including fallback attempts and the target of a retry wait. After a request ends, they show the next model, including a model-pool change waiting for the next request. The variant, key count, rate limits, and effective service tier follow that target. Context usage and its warning colors follow the model whose context budget is already in effect; while a switch is pending, that budget can still belong to the previous model.
+
 Common keys:
 
 - `Esc`: switch to Normal mode; pressing `Esc` again in the running main view cancels the current turn

@@ -211,15 +211,17 @@ func toolDefinitionBytes(defs []message.ToolDefinition) int {
 	return total
 }
 
-// KeyStats returns (healthy, total) API keys for the focused agent's provider
-// (SubAgent when focused, else MainAgent), aligned with RunningModelRef.
+// KeyStats returns (healthy, total) API keys for the provider of the model the
+// sidebar shows (SubAgent when focused, else MainAgent): the in-flight request's
+// attempt target while one is running, else the next-request/confirmed ref, so
+// the key list can never describe a different provider than the MODEL row.
 // healthy = selectable AND not recovering (re-proven healthy since last failure/reset).
 func (a *MainAgent) KeyStats() (confirmed, total int) {
 	client, ref := a.tuiFocusedLLMAndRef()
 	if client == nil {
 		return 0, 0
 	}
-	return client.ConfirmedKeyStatsForRef(ref)
+	return client.KeyStatsForRef(ref)
 }
 
 // KeyPoolNextTransition returns how soon the key pool sidebar line may need a

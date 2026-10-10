@@ -326,6 +326,8 @@ func (a *MainAgent) handleModelPoolSwitchEvent(evt Event) {
 }
 
 func (a *MainAgent) markMainModelPoolSwitchPending() {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
 	a.pendingMainModelPoolSwitch = true
 }
 
@@ -334,6 +336,8 @@ func (a *MainAgent) markAgentModelPoolSwitchPending(agentName string) {
 	if agentName == "" {
 		return
 	}
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
 	if a.pendingAgentModelPoolSwitch == nil {
 		a.pendingAgentModelPoolSwitch = make(map[string]struct{})
 	}
@@ -466,10 +470,6 @@ func (a *MainAgent) applyPendingModelPoolSwitchesAtRequestBoundary() {
 	if !pendingMain && len(pendingAgents) == 0 {
 		return
 	}
-	if pendingMain {
-		a.pendingMainModelPoolSwitch = false
-	}
-	a.pendingAgentModelPoolSwitch = nil
 
 	var applyErr error
 	appliedAny := false
@@ -506,6 +506,12 @@ func (a *MainAgent) applyPendingModelPoolSwitchesAtRequestBoundary() {
 	if mainChanged {
 		a.notifyMainRoutingChanged("model_pool_changed")
 	}
+	a.stateMu.Lock()
+	if pendingMain {
+		a.pendingMainModelPoolSwitch = false
+	}
+	a.pendingAgentModelPoolSwitch = nil
+	a.stateMu.Unlock()
 	if applyErr != nil {
 		if !appliedAny {
 			a.restorePendingModelPoolRollback()

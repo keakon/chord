@@ -104,9 +104,18 @@ type ModelSelector interface {
 type FocusedModelState struct {
 	SelectedRef string
 	RunningRef  string
-	Variant     string
-	PoolName    string
-	PoolNames   []string
+	// DisplayRef is a complete provider/model@variant identity: the current
+	// request target, or the next request's model while idle or preparing.
+	// An absent variant is explicit. Context budgets still follow RunningRef.
+	DisplayRef string
+	PoolName   string
+	PoolNames  []string
+	// Provider data is resolved from DisplayRef once for this snapshot.
+	KeysConfirmed int
+	KeysTotal     int
+	RateLimit     *ratelimit.KeyRateLimitSnapshot
+	ServiceTier   config.ServiceTier
+	EffectiveTier config.ServiceTier
 }
 
 // FocusedModelStateProvider avoids assembling model state through several

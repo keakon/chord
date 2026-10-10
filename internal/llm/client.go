@@ -63,6 +63,10 @@ type Client struct {
 	poolCursor         int             // sticky cursor over the effective model pool; success pins, failure advances
 	toolSurfacePrimary FallbackModel   // first entry of the effective model pool; defines stable modality-dependent tool visibility
 	lastCallStatus     CallStatus
+	// attemptModelRef names the current request target, including the next
+	// round's start target while waiting between rounds. It is display-only;
+	// budgets follow lastCallStatus.RunningModelRef.
+	attemptModelRef string
 	// candidateScorer, when set, ranks interchangeable fallback providers
 	// (same model served by different providers) by preference; higher is
 	// better. Used for cache-aware routing: a provider whose prompt cache is
@@ -662,15 +666,7 @@ func (c *Client) NextRequestModelRef() string {
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	pool := c.modelPoolLocked()
-	cursor := c.poolCursor
-	if cursor < 0 || cursor >= len(pool) {
-		cursor = 0
-	}
-	if len(pool) == 0 {
-		return ""
-	}
-	return modelRefWithVariant(pool[cursor])
+	return c.nextRequestModelRefLocked()
 }
 
 // modelPoolTargetForRefLocked returns the requested model-pool target, or the
@@ -851,9 +847,19 @@ func (c *Client) RunningModelRef() string {
 	return st.SelectedModelRef
 }
 
-// NoteRunningModelRef records the model ref currently attempted by an in-flight
-// streaming request. It lets status surfaces reflect fallback routing before the
-// request completes and LastCallStatus is replaced by the final call status.
+// noteAttemptModelRef records the request target; empty clears it.
+func (c *Client) noteAttemptModelRef(ref string) {
+	ref = strings.TrimSpace(ref)
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.attemptModelRef = ref
+	c.mu.Unlock()
+}
+
+// NoteRunningModelRef commits the model identity and limits after visible
+// output, or realigns them to the cursor when an interrupted request ends.
 func (c *Client) NoteRunningModelRef(ref string) {
 	ref = strings.TrimSpace(ref)
 	if c == nil || ref == "" {
@@ -1145,6 +1151,7 @@ func (c *Client) CompleteStreamWithOptions(
 	}
 	requestTuning.SessionKey = c.sessionKey
 	startRef := modelRefWithVariant(start)
+	c.attemptModelRef = startRef
 	startLimit := start.ContextLimit
 	startInputLimit := resolveFallbackInputLimit(start, c.outputTokenMax)
 	if startLimit <= 0 && start.ProviderConfig != nil {
@@ -1164,6 +1171,7 @@ func (c *Client) CompleteStreamWithOptions(
 
 	if policy := options.NativeTools; policy != nil && policy.Preflight != nil {
 		if err := policy.Preflight(ctx); err != nil {
+			c.noteAttemptModelRef("")
 			if failure, ok := errors.AsType[*NativeToolError](err); ok && failure.Receipt != nil && policy.Failed != nil {
 				policy.Failed(failure.Receipt)
 			}
@@ -1200,6 +1208,8 @@ func (c *Client) CompleteStreamWithOptions(
 	)
 
 	c.mu.Lock()
+	// Clear the request target and update the next cursor under the same lock.
+	c.attemptModelRef = ""
 	switch {
 	case err == nil:
 		if idx := findPoolIndexByRef(pool, status.RunningModelRef); idx >= 0 {
@@ -1272,7 +1282,7 @@ func (c *Client) providerForModelRefLocked(ref string) *ProviderConfig {
 			return fb.ProviderConfig
 		}
 	}
-	return c.provider
+	return nil
 }
 
 // contextLimitForModelRefLocked must be called with c.mu held (read or write).

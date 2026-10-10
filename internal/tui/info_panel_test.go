@@ -2734,12 +2734,9 @@ func TestRenderInfoPanelContextColorFollowsPressureLines(t *testing.T) {
 	}
 }
 
-// TestRenderInfoPanelContextColorFollowsPendingModelSwitch verifies the model
-// the display resolves drives the color: while idle the display shows the
-// next-request model, so a pending switch to a model with a lower threshold
-// re-colors the Context value immediately instead of lingering on the running
-// model's lines until the next request boundary.
-func TestRenderInfoPanelContextColorFollowsPendingModelSwitch(t *testing.T) {
+// Context colors follow the committed budget while MODEL previews a pending
+// switch. They change only when the budget identity changes too.
+func TestRenderInfoPanelContextColorKeepsBudgetDuringPendingModelSwitch(t *testing.T) {
 	renderContextLine := func(percent float64) string {
 		backend := newInfoPanelAgent()
 		backend.sessionControlAgent.providerModelRef = "old-model"
@@ -2766,46 +2763,12 @@ func TestRenderInfoPanelContextColorFollowsPendingModelSwitch(t *testing.T) {
 		return ""
 	}
 
-	// 55% is green under the old model (below its 0.6 reminder) but already
-	// warning under the pending new model (past its 0.5 reminder): the color
-	// must follow the pending model while idle.
 	line := renderContextLine(0.55)
-	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) {
-		t.Fatalf("Context at 55%% should follow the pending new-model lines (warning): %q", line)
+	if strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) || strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+		t.Fatalf("Context at 55%% should use the committed model's 0.6 reminder: %q", line)
 	}
-	if strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
-		t.Fatalf("Context at 55%% should not be critical: %q", line)
-	}
-
-	// 62% passes the pending new-model threshold (0.6) — critical now.
 	line = renderContextLine(0.62)
-	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
-		t.Fatalf("Context at 62%% should be critical under the pending new-model threshold 0.6: %q", line)
-	}
-}
-
-// TestContextPressureDisplayRefPicksTheDisplayedModel pins the ref-resolution
-// that ties the context color to the model the focused agent shows: running
-// while busy, next-request (pending switch) otherwise, selected as fallback.
-func TestContextPressureDisplayRefPicksTheDisplayedModel(t *testing.T) {
-	busy := true
-	idle := false
-	if got := contextPressureDisplayRef(busy, "running", "selected", "next"); got != "running" {
-		t.Fatalf("busy ref = %q, want running", got)
-	}
-	if got := contextPressureDisplayRef(idle, "running", "selected", "next"); got != "next" {
-		t.Fatalf("idle ref = %q, want next (pending switch)", got)
-	}
-	if got := contextPressureDisplayRef(idle, "running", "selected", ""); got != "selected" {
-		t.Fatalf("idle without next ref = %q, want selected", got)
-	}
-	if got := contextPressureDisplayRef(idle, "", "", "next"); got != "next" {
-		t.Fatalf("idle without running ref = %q, want next", got)
-	}
-	if got := contextPressureDisplayRef(busy, "", "selected", "next"); got != "selected" {
-		t.Fatalf("busy without running ref = %q, want selected", got)
-	}
-	if got := contextPressureDisplayRef(idle, "", "", ""); got != "" {
-		t.Fatalf("no refs = %q, want empty", got)
+	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) || strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+		t.Fatalf("Context at 62%% should use the committed model's 0.8 threshold: %q", line)
 	}
 }

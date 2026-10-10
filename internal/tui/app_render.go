@@ -39,6 +39,9 @@ func debugViewportOffset(v *Viewport) int {
 }
 
 func (m *Model) drawFrame(scr uv.Screen, area image.Rectangle) *tea.Cursor {
+	if m.beginModelDisplayFrame() {
+		defer m.endModelDisplayFrame()
+	}
 	m.renderFrameGeneration++
 	w, h := area.Dx(), area.Dy()
 	layout := m.generateLayout(w, h)

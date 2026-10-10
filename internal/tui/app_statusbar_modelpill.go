@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/tui/modelref"
 )
 
 func formatTokens(n int) string {
@@ -35,35 +36,27 @@ func formatCost(cost float64) string {
 
 func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSnapshot, effectiveWidth, leftWidth int) []string {
 	modelRef := snap.modelRef
-	selectedRef := snap.selectedModelRef
-	if !snap.busy && snap.nextModelRef != "" {
-		selectedRef = snap.nextModelRef
-	}
-	modelVariant := snap.modelVariant
 
 	const modelPillPrefixRunes = 2
 	modelSlotMax := max(effectiveWidth-leftWidth-modelPillPrefixRunes-1, 8)
 
 	var modelPill string
-	if m.cachedModelPillRef == modelRef && m.cachedModelPillSelectedRef == selectedRef && m.cachedModelPillVariant == modelVariant && m.cachedModelPillBusy == snap.busy &&
+	if m.cachedModelPillRef == modelRef &&
 		m.cachedModelPillEffW == effectiveWidth && m.cachedModelPillLeftW == leftWidth {
 		modelPill = m.cachedModelPill
 	} else {
 		modelStr := "unknown"
-		if modelRef != "" || selectedRef != "" {
-			modelStr = formatModelRefForRequestState(modelRef, selectedRef, modelVariant, modelSlotMax)
+		if modelRef != "" {
+			modelStr = modelref.TruncateRunningModelRef(modelRef, modelSlotMax)
 		}
 		modelPill = PillStyle.Render("◇ " + modelStr)
 		m.cachedModelPillRef = modelRef
-		m.cachedModelPillSelectedRef = selectedRef
-		m.cachedModelPillVariant = modelVariant
-		m.cachedModelPillBusy = snap.busy
 		m.cachedModelPillEffW = effectiveWidth
 		m.cachedModelPillLeftW = leftWidth
 		m.cachedModelPill = modelPill
 	}
 	pills = append(pills, modelPill)
-	tier := m.effectiveServiceTier()
+	tier := snap.effectiveTier
 	if tier != config.ServiceTierStandard {
 		pills = append(pills, StatusHintStyle.Render("TIER "+string(tier)))
 	}

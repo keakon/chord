@@ -39,6 +39,10 @@ type startupRestoreState struct {
 }
 
 type renderRuntimeState struct {
+	// One identity snapshot is shared by every surface in the current draw.
+	frameModelState       agent.FocusedModelState
+	frameModelStateActive bool
+
 	// Startup wordmark reveal. splashStep is only consulted while
 	// splashAnimating is set, so a zero-value Model renders the finished mark
 	// instead of an empty one. No tick generation is needed: the step only
@@ -245,9 +249,6 @@ type viewCacheState struct {
 	cachedStatusJobsRunning            int
 	cachedStatusJobsAgents             int
 	cachedModelPillRef                 string
-	cachedModelPillSelectedRef         string
-	cachedModelPillVariant             string
-	cachedModelPillBusy                bool
 	cachedModelPillEffW                int
 	cachedModelPillLeftW               int
 	cachedModelPill                    string

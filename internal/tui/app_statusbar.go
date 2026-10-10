@@ -14,7 +14,6 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/tui/modelref"
 )
 
 type statusBarPlacedSegment struct {
@@ -84,11 +83,8 @@ type statusBarAgentSnapshot struct {
 	viewingColor     string
 	sessionID        string
 	modelRef         string
-	selectedModelRef string
-	nextModelRef     string
-	modelVariant     string
-	busy             bool
 	proxyInUse       bool
+	effectiveTier    config.ServiceTier
 	tokenUsage       message.TokenUsage
 	cost             float64
 	contextCurrent   int
@@ -198,7 +194,7 @@ func (m *Model) statusBarInputs(now time.Time) statusBarInputs {
 		PersistenceDegraded: m.persistenceDegraded,
 		LoopIteration:       loopIteration,
 		LoopMaxIterations:   loopMaxIterations,
-		ServiceTier:         m.effectiveServiceTier(),
+		ServiceTier:         snap.effectiveTier,
 		DynamicCacheKey:     dynamicCacheKey,
 		InflightDraft:       m.inflightDraft != nil,
 		LocalShellPending:   localShellPending,
@@ -238,10 +234,14 @@ func (m *Model) computeStatusBarCurrentAgentColor() string {
 }
 
 func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
+	modelState := m.focusedModelState()
+	if m.statusBarAgentSnapshot.modelRef != modelState.DisplayRef || m.statusBarAgentSnapshot.effectiveTier != modelState.EffectiveTier {
+		m.statusBarAgentSnapshotDirty = true
+	}
 	if !m.statusBarAgentSnapshotDirty {
 		return m.statusBarAgentSnapshot
 	}
-	snap := statusBarAgentSnapshot{}
+	snap := statusBarAgentSnapshot{effectiveTier: config.ServiceTierStandard}
 	if m.agent != nil {
 		snap.currentRole = strings.TrimSpace(m.agent.CurrentRole())
 		snap.viewingLabel = m.computeStatusBarCurrentAgentLabel(snap.currentRole)
@@ -249,23 +249,9 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 		if summary := m.agent.GetSessionSummary(); summary != nil {
 			snap.sessionID = strings.TrimSpace(summary.ID)
 		}
-		modelState := m.focusedModelState()
-		snap.modelRef, snap.selectedModelRef = m.focusedModelRefs()
-		snap.busy = m.isFocusedAgentBusy()
-		snap.nextModelRef = strings.TrimSpace(nextRequestModelRefForAgent(m.agent))
-		if snap.nextModelRef == "" {
-			snap.nextModelRef = snap.selectedModelRef
-		}
-		snap.modelRef = modelref.EnsureRefShowsProvider(snap.modelRef, snap.selectedModelRef)
-		snap.modelVariant = modelState.Variant
-		ref := snap.modelRef
-		if !snap.busy {
-			ref = snap.nextModelRef
-		}
-		if ref == "" {
-			ref = snap.selectedModelRef
-		}
-		snap.proxyInUse = m.agent.ProxyInUseForRef(ref)
+		snap.modelRef = modelState.DisplayRef
+		snap.effectiveTier = modelState.EffectiveTier
+		snap.proxyInUse = m.agent.ProxyInUseForRef(modelState.DisplayRef)
 		// MCP pill intentionally omitted from the status bar: space is limited and MCP is not critical status info.
 		// Users can view MCP details in the sidebar when needed.
 		snap.tokenUsage = m.agent.GetTokenUsage()
@@ -463,7 +449,7 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	snap := inputs.Snapshot
 	statusActivity := inputs.StatusActivity
 	usage := snap.tokenUsage
-	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%t|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%d|%f|%d|%d|%f|%f|%t|%d|%d|%d|%d|%t",
+	fmt.Fprintf(&b, "%d|%d|%d|%d|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%d|%d|%t|%t|%t|%t|%t|%s|%s|%s|%s|%s|%t|%t|%d|%d|%d|%d|%f|%d|%d|%f|%f|%t|%d",
 		inputs.Width,
 		inputs.Height,
 		m.mode,
@@ -504,10 +490,6 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		snap.contextThreshold,
 		snap.proxyInUse,
 		len(snap.modelRef),
-		len(snap.selectedModelRef),
-		len(snap.nextModelRef),
-		len(snap.modelVariant),
-		snap.busy,
 	)
 	b.WriteByte('|')
 	b.WriteString(inputs.NextEnterHint)
@@ -525,12 +507,6 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		m.requestProgress[inputs.StatusActiveID].Done)
 	b.WriteByte('|')
 	b.WriteString(snap.modelRef)
-	b.WriteByte('|')
-	b.WriteString(snap.selectedModelRef)
-	b.WriteByte('|')
-	b.WriteString(snap.nextModelRef)
-	b.WriteByte('|')
-	b.WriteString(snap.modelVariant)
 	b.WriteByte('|')
 	b.WriteString(inputs.WorkDirRepoName)
 	b.WriteByte('|')

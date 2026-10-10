@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -109,7 +110,7 @@ func TestHandleTierCommandRejectsUnsupportedTier(t *testing.T) {
 	}
 }
 
-func TestEffectiveAndSupportedServiceTierUseAgentRunningModelRef(t *testing.T) {
+func TestEffectiveAndSupportedServiceTierUseNextRequestModelRef(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	providerA := llm.NewProviderConfig("slow-provider", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -139,12 +140,12 @@ func TestEffectiveAndSupportedServiceTierUseAgentRunningModelRef(t *testing.T) {
 	if got := a.ServiceTier(); got != config.ServiceTierSlow {
 		t.Fatalf("ServiceTier() = %q, want requested slow", got)
 	}
-	if got := a.EffectiveServiceTier(); got != config.ServiceTierStandard {
-		t.Fatalf("EffectiveServiceTier() = %q, want standard for unsupported running model", got)
+	if got := a.EffectiveServiceTier(); got != config.ServiceTierSlow {
+		t.Fatalf("EffectiveServiceTier() = %q, want slow for the next request model", got)
 	}
 	supported := a.SupportedServiceTiers()
-	if len(supported) != 1 || supported[0] != config.ServiceTierStandard {
-		t.Fatalf("SupportedServiceTiers() = %#v, want [standard] for running model", supported)
+	if !slices.Equal(supported, []config.ServiceTier{config.ServiceTierStandard, config.ServiceTierSlow}) {
+		t.Fatalf("SupportedServiceTiers() = %#v, want [standard slow] for the next request model", supported)
 	}
 }
 

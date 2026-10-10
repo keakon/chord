@@ -1540,12 +1540,15 @@ func (c *Client) completeStreamWithRetry(
 		if err := abortIfCancelled(); err != nil {
 			return nil, err
 		}
+		// Publish the upcoming target before waiting: the preceding round's last
+		// failed target is no longer the model this request is preparing to use.
+		startDisplayRef := providerModelRef(startProvider, startModelID)
+		if variantForStart != "" {
+			startDisplayRef += "@" + variantForStart
+		}
+		c.noteAttemptModelRef(startDisplayRef)
 		// Apply backoff delay only between full retry rounds.
 		if round > 0 {
-			startDisplayRef := providerModelRef(startProvider, startModelID)
-			if variantForStart != "" {
-				startDisplayRef += "@" + variantForStart
-			}
 			waitingForCooling := isAllKeysCoolingError(lastErr) && pendingRoundWait.waiting()
 			delay := roundRetryDelay(startProvider.GetRetryDelay(retryCount), pendingRoundWait.sleep)
 			if waitingForCooling {
@@ -1639,6 +1642,8 @@ func (c *Client) completeStreamWithRetry(
 				log.Infof("skipping model: oversize already confirmed for this provider/model target in this round provider=%v model=%v variant=%v", t.provider.Name(), t.modelID, t.variant)
 				continue
 			}
+			// The target is fixed before request preparation and its status events.
+			c.noteAttemptModelRef(t.displayRef())
 			if t.isFallback && beforeFallback != nil {
 				updatedMessages, err := beforeFallback(ctx, messages, t.fallbackModel())
 				if err != nil {

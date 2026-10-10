@@ -43,21 +43,16 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendInt(height)
 	appendSep()
 
-	// Model ref / variant / key stats
-	keysConfirmed, keysTotal := m.agent.KeyStats()
+	// Model identity and provider data share the render pass's snapshot.
 	modelState := m.focusedModelState()
-	runningRef, selectedRef := m.focusedModelRefs()
-	b.WriteString(runningRef)
+	keysConfirmed, keysTotal := modelState.KeysConfirmed, modelState.KeysTotal
+	b.WriteString(modelState.DisplayRef)
 	appendSep()
-	b.WriteString(selectedRef)
+	b.WriteString(modelState.RunningRef)
 	appendSep()
-	b.WriteString(nextRequestModelRefForAgent(m.agent))
+	b.WriteString(string(modelState.ServiceTier))
 	appendSep()
-	b.WriteString(string(m.serviceTier()))
-	appendSep()
-	b.WriteString(string(m.effectiveServiceTier()))
-	appendSep()
-	b.WriteString(modelState.Variant)
+	b.WriteString(string(modelState.EffectiveTier))
 	appendSep()
 	appendBool(m.isFocusedAgentBusy())
 	appendSep()
@@ -77,7 +72,7 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendSep()
 
 	// Rate limit snapshot (1-second bucket for countdown display)
-	snap := m.agent.CurrentRateLimitSnapshot()
+	snap := modelState.RateLimit
 	if snap != nil {
 		ts := time.Now().Unix() // 1-second granularity matches displayed precision
 		if snap.Primary != nil {
@@ -304,6 +299,9 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 }
 
 func (m *Model) renderInfoPanel(width int, height int) string {
+	if m.beginModelDisplayFrame() {
+		defer m.endModelDisplayFrame()
+	}
 	if width <= 0 {
 		return ""
 	}
@@ -339,7 +337,7 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 		}
 
 		appendBlock("", m.buildInfoPanelModelBlock(lineW))
-		if snap := m.agent.CurrentRateLimitSnapshot(); snap != nil {
+		if snap := m.focusedModelState().RateLimit; snap != nil {
 			appendBlock("", m.renderRateLimitBlock(snap, lineW))
 		}
 		appendBlock("", m.buildInfoPanelUsageBlock(width, lineW))

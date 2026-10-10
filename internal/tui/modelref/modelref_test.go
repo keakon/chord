@@ -77,37 +77,6 @@ func TestTruncateRunningModelRef(t *testing.T) {
 	}
 }
 
-func TestFormatRunningModelRefForDisplay(t *testing.T) {
-	got := FormatRunningModelRefForDisplay("model-alpha", "sample/model-alpha", "balanced", 30)
-	if got != "sample/model-alpha@balanced" {
-		t.Fatalf("FormatRunningModelRefForDisplay = %q", got)
-	}
-}
-
-func TestSplitRequestModelRefForDisplay(t *testing.T) {
-	tests := []struct {
-		name, running, selected, active string
-		provider, model, variant        string
-	}{
-		{name: "running wins with own variant", running: "sample/model-alpha@high", selected: "sample/model-beta", active: "balanced", provider: "sample", model: "model-alpha", variant: "high"},
-		{name: "selected fallback without variant backfill", selected: "sample/model-beta", active: "balanced", provider: "sample", model: "model-beta"},
-		{name: "selected inline variant kept", selected: "sample/model-beta@low", active: "balanced", provider: "sample", model: "model-beta", variant: "low"},
-		{name: "provider backfilled from selected", running: "model-alpha", selected: "sample/model-alpha", active: "balanced", provider: "sample", model: "model-alpha", variant: "balanced"},
-		{name: "matching variant appended", running: "sample/model-alpha", selected: "sample/model-alpha", active: "balanced", provider: "sample", model: "model-alpha", variant: "balanced"},
-		{name: "mismatched base keeps no variant", running: "sample/model-beta", selected: "sample/model-alpha", active: "balanced", provider: "sample", model: "model-beta"},
-		{name: "all empty"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			p, m, v := SplitRequestModelRefForDisplay(tc.running, tc.selected, tc.active)
-			if p != tc.provider || m != tc.model || v != tc.variant {
-				t.Fatalf("SplitRequestModelRefForDisplay(%q, %q, %q) = (%q, %q, %q), want (%q, %q, %q)",
-					tc.running, tc.selected, tc.active, p, m, v, tc.provider, tc.model, tc.variant)
-			}
-		})
-	}
-}
-
 func TestFormatModelVariantForDisplay(t *testing.T) {
 	tests := []struct {
 		name, model, variant string

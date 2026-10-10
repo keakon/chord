@@ -137,7 +137,7 @@ func (a *MainAgent) ProviderModelRef() string {
 	return a.providerModelRef
 }
 
-// RunningModelRef returns the effective provider/model for the TUI sidebar
+// RunningModelRef returns the committed budget identity
 // (focused SubAgent if any, else MainAgent). It may differ from
 // ProviderModelRef() while fallback is in effect on that agent's client.
 func (a *MainAgent) RunningModelRef() string {
@@ -231,10 +231,8 @@ func (a *MainAgent) clearUsageObservation() {
 	a.setUsageObservationModelRef("")
 }
 
-// syncRunningModelRefToCursorHead realigns the sidebar with the sticky model
-// cursor after a request ended without a confirmed switch. The cursor head is the
-// model the next request will start from, so keeping a failed attempt's target
-// would show that model's name with the cursor model's keys, window, and limits.
+// syncRunningModelRefToCursorHead realigns the committed budget identity with
+// the sticky cursor after a request ends without a confirmed switch.
 // The cursor is read from the captured client before locking; if a concurrent
 // switch supersedes it, the currency check under the same lock discards the
 // stale read instead of overwriting the new identity.
@@ -247,47 +245,6 @@ func (a *MainAgent) syncRunningModelRefToCursorHead(llmClient *llm.Client) {
 		return
 	}
 	a.applyRunningModelRefIfCurrent(llmClient, ref, 0, 0)
-}
-
-// FocusedModelState returns an atomic-by-target model view for the TUI. Values
-// for parked SubAgents come from durable state and current agent configuration;
-// callers do not need separate live/parked fallbacks.
-func (a *MainAgent) FocusedModelState() FocusedModelState {
-	target := a.focusedAgentSnapshot()
-	if target.sub != nil {
-		client, _ := target.sub.llmSnapshot()
-		selected, running, variant := "", "", ""
-		if client != nil {
-			selected = strings.TrimSpace(client.PrimaryModelRef())
-			variant = strings.TrimSpace(client.ActiveVariant())
-			if variant != "" && selected != "" {
-				selected += "@" + variant
-			}
-			running = formatModelRefForNotification(client.RunningModelRef(), selected, variant)
-		}
-		pool, pools := a.focusedModelPools(target)
-		return FocusedModelState{SelectedRef: selected, RunningRef: running, Variant: variant, PoolName: pool, PoolNames: pools}
-	}
-	if (target.parked || target.settled) && target.task != nil {
-		selected := a.restoredSubAgentModelRef(target.task)
-		running := restoredRunningModelRef(target.task, selected)
-		_, variant := config.ParseModelRef(selected)
-		pool, pools := a.focusedModelPools(target)
-		return FocusedModelState{SelectedRef: selected, RunningRef: running, Variant: variant, PoolName: pool, PoolNames: pools}
-	}
-	a.llmMu.RLock()
-	selected := strings.TrimSpace(a.providerModelRef)
-	running := strings.TrimSpace(a.runningModelRef)
-	variant := ""
-	if a.llmClient != nil {
-		variant = strings.TrimSpace(a.llmClient.ActiveVariant())
-	}
-	a.llmMu.RUnlock()
-	if running == "" {
-		running = selected
-	}
-	pool, pools := a.focusedModelPools(target)
-	return FocusedModelState{SelectedRef: selected, RunningRef: running, Variant: variant, PoolName: pool, PoolNames: pools}
 }
 
 func (a *MainAgent) focusedModelPools(target focusedAgentSnapshot) (string, []string) {
@@ -313,37 +270,19 @@ func (a *MainAgent) focusedModelPools(target focusedAgentSnapshot) (string, []st
 // NextRequestModelRef returns the provider/model ref the focused agent will use
 // to start its next LLM request.
 func (a *MainAgent) NextRequestModelRef() string {
-	if sub := a.validFocusedSubAgent(); sub != nil {
-		client, _ := sub.llmSnapshot()
-		if client == nil {
-			return ""
-		}
-		ref := strings.TrimSpace(client.NextRequestModelRef())
-		if ref == "" {
-			ref = strings.TrimSpace(client.RunningModelRef())
-		}
-		if ref == "" {
-			ref = strings.TrimSpace(client.PrimaryModelRef())
-		}
-		return ref
-	}
-	if rec := a.focusedDurableTask(); rec != nil {
+	target := a.focusedAgentSnapshot()
+	if target.parked || target.settled {
 		return ""
 	}
-	a.llmMu.RLock()
-	client := a.llmClient
-	providerRef := a.providerModelRef
-	runningRef := a.runningModelRef
-	a.llmMu.RUnlock()
+	client, state := a.modelStateForTarget(target)
+	ref := state.SelectedRef
 	if client != nil {
-		if ref := strings.TrimSpace(client.NextRequestModelRef()); ref != "" {
-			return ref
-		}
+		ref = client.NextRequestModelRef()
 	}
-	if strings.TrimSpace(providerRef) != "" {
-		return strings.TrimSpace(providerRef)
+	if ref == "" {
+		ref = state.RunningRef
 	}
-	return strings.TrimSpace(runningRef)
+	return a.previewModelPoolRef(target, state.SelectedRef, ref)
 }
 
 // RunningVariant returns the active variant name for the running model
@@ -376,7 +315,7 @@ func (a *MainAgent) SetProviderModelRef(ref string) {
 	a.llmMu.Lock()
 	defer a.llmMu.Unlock()
 	a.providerModelRef = ref
-	// Keep sidebar/source-of-truth aligned before the first successful LLM round.
+	// Initialize the committed identity before the first LLM round.
 	// Otherwise runningModelRef can stay as a bare model id (without provider).
 	a.runningModelRef = ref
 }

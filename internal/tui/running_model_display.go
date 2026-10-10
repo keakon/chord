@@ -4,40 +4,23 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/tui/modelref"
 )
 
-// contextPressureDisplayRef picks the model reference whose reminder/threshold
-// lines should color the context display, mirroring exactly which model the
-// focused agent's MODEL row shows: the running model while busy, otherwise the
-// next-request model (a pending model switch), falling back to the selected
-// model. Keeping the color tied to the displayed model means a model switch
-// with a different threshold re-colors the context value, gauge and pill as
-// soon as the switch is shown, instead of lingering on the previous model's
-// lines until the next request boundary.
-func contextPressureDisplayRef(busy bool, runningRef, selectedRef, nextRef string) string {
-	ref := strings.TrimSpace(runningRef)
-	if !busy {
-		ref = strings.TrimSpace(nextRef)
-	}
-	if ref == "" {
-		ref = strings.TrimSpace(selectedRef)
-	}
-	return ref
-}
-
-// contextPressureLinesForFocusedModel resolves the reminder/threshold lines
-// for the model the focused agent currently displays. The main agent manages
-// its context with usage-driven compaction lines, so it is queried per the
-// displayed model ref. Focused SubAgents and parked targets keep their context
-// with sliding-window compaction rather than usage lines, so they keep the
-// fixed fallback lines instead (both lines 0).
+// contextPressureLinesForFocusedModel uses the committed budget identity even
+// when MODEL already previews the next request. Workers use sliding-window
+// compaction, so they keep the fixed fallback lines (both zero).
 func (m *Model) contextPressureLinesForFocusedModel() (reminder, threshold float64) {
 	if m == nil || m.agent == nil || m.focusedAgentIDOrMain() != identity.MainAgentID {
 		return 0, 0
 	}
-	runningRef, selectedRef := m.focusedModelRefs()
-	ref := contextPressureDisplayRef(m.isFocusedAgentBusy(), runningRef, selectedRef, nextRequestModelRefForAgent(m.agent))
+	state := m.focusedModelState()
+	ref := strings.TrimSpace(state.RunningRef)
+	if ref == "" {
+		ref = strings.TrimSpace(state.SelectedRef)
+	}
 	if ref == "" {
 		return 0, 0
 	}
@@ -76,57 +59,74 @@ func (m *Model) clearRunningModelDisplay(agentID string) {
 	}
 }
 
-func (m *Model) focusedModelRefs() (runningRef, selectedRef string) {
-	if m == nil || m.agent == nil {
-		return "", ""
+// beginModelDisplayFrame captures model/provider data once for a render pass.
+// Nested surfaces share the caller's snapshot, including its cache fingerprint.
+func (m *Model) beginModelDisplayFrame() bool {
+	if m.frameModelStateActive {
+		return false
 	}
-	state := m.focusedModelState()
-	selectedRef = strings.TrimSpace(state.SelectedRef)
-	runningRef = strings.TrimSpace(state.RunningRef)
-	if m.focusedAgentID != "" && selectedRef == "" && runningRef == "" {
-		if selected, running, ok := m.sidebar.SubAgentModelRefs(m.focusedAgentID); ok {
-			selectedRef = strings.TrimSpace(selected)
-			runningRef = strings.TrimSpace(running)
-		} else {
-			selectedRef = runningRef
-		}
-	}
-	if m.isFocusedAgentBusy() && m.runningModelDisplay.agentID == m.focusedAgentIDOrMain() {
-		if ref := strings.TrimSpace(m.runningModelDisplay.providerModelRef); ref != "" {
-			selectedRef = ref
-		}
-		if ref := strings.TrimSpace(m.runningModelDisplay.runningModelRef); ref != "" {
-			runningRef = ref
-		}
-	}
-	return runningRef, selectedRef
+	m.frameModelState = m.captureFocusedModelState()
+	m.frameModelStateActive = true
+	return true
+}
+
+func (m *Model) endModelDisplayFrame() {
+	m.frameModelStateActive = false
+	m.frameModelState = agent.FocusedModelState{}
 }
 
 func (m *Model) focusedModelState() agent.FocusedModelState {
-	if m == nil || m.agent == nil {
+	if m == nil {
 		return agent.FocusedModelState{}
 	}
-	if provider, ok := m.agent.(agent.FocusedModelStateProvider); ok {
-		return provider.FocusedModelState()
+	if m.frameModelStateActive {
+		return m.frameModelState
 	}
+	return m.captureFocusedModelState()
+}
+
+func (m *Model) captureFocusedModelState() agent.FocusedModelState {
+	if m.agent == nil {
+		return agent.FocusedModelState{ServiceTier: config.ServiceTierStandard, EffectiveTier: config.ServiceTierStandard}
+	}
+	if provider, ok := m.agent.(agent.FocusedModelStateProvider); ok {
+		state := provider.FocusedModelState()
+		state.ServiceTier = config.NormalizeServiceTier(string(state.ServiceTier))
+		state.EffectiveTier = config.NormalizeServiceTier(string(state.EffectiveTier))
+		return state
+	}
+	state := agent.FocusedModelState{
+		SelectedRef:   strings.TrimSpace(m.agent.ProviderModelRef()),
+		RunningRef:    strings.TrimSpace(m.agent.RunningModelRef()),
+		PoolName:      strings.TrimSpace(m.agent.CurrentPoolName()),
+		PoolNames:     m.agent.PoolNames(),
+		RateLimit:     m.agent.CurrentRateLimitSnapshot(),
+		ServiceTier:   m.serviceTier(),
+		EffectiveTier: m.effectiveServiceTier(),
+	}
+	state.KeysConfirmed, state.KeysTotal = m.agent.KeyStats()
 	if m.focusedAgentID != "" {
 		if selected, running, ok := m.sidebar.SubAgentModelRefs(m.focusedAgentID); ok {
-			return agent.FocusedModelState{
-				SelectedRef: strings.TrimSpace(selected),
-				RunningRef:  strings.TrimSpace(running),
-				Variant:     strings.TrimSpace(m.agent.RunningVariant()),
-				PoolName:    strings.TrimSpace(m.agent.CurrentPoolName()),
-				PoolNames:   m.agent.PoolNames(),
-			}
+			state.SelectedRef = strings.TrimSpace(selected)
+			state.RunningRef = strings.TrimSpace(running)
 		}
 	}
-	return agent.FocusedModelState{
-		SelectedRef: strings.TrimSpace(m.agent.ProviderModelRef()),
-		RunningRef:  strings.TrimSpace(m.agent.RunningModelRef()),
-		Variant:     strings.TrimSpace(m.agent.RunningVariant()),
-		PoolName:    strings.TrimSpace(m.agent.CurrentPoolName()),
-		PoolNames:   m.agent.PoolNames(),
+	if m.isFocusedAgentBusy() && m.runningModelDisplay.agentID == m.focusedAgentIDOrMain() {
+		state.SelectedRef = m.runningModelDisplay.providerModelRef
+		state.RunningRef = m.runningModelDisplay.runningModelRef
 	}
+	state.DisplayRef = modelref.EnsureRefShowsProvider(state.RunningRef, state.SelectedRef)
+	state.DisplayRef = modelref.EnsureRefShowsMatchingVariant(state.DisplayRef, state.SelectedRef, strings.TrimSpace(m.agent.RunningVariant()))
+	if state.DisplayRef == "" {
+		state.DisplayRef = state.SelectedRef
+	}
+	activity := m.activityForAgent(m.focusedAgentIDOrMain()).Type
+	if !m.isFocusedAgentBusy() || activity == agent.ActivityPreparing || activity == agent.ActivityExecuting {
+		if next := nextRequestModelRefForAgent(m.agent); next != "" {
+			state.DisplayRef = next
+		}
+	}
+	return state
 }
 
 func normalizeRunningModelDisplayAgentID(agentID string) string {

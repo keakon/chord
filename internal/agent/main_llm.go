@@ -462,12 +462,9 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		}
 	}
 	streamReducer.beforeStatus = func(status *message.StatusDelta) {
-		// A ModelRef on a status means the retry loop is attempting that target,
-		// but an attempt is not a switch: the sidebar keeps the previous identity
-		// until the target emits visible output (key_confirmed) or the request
-		// succeeds. Only the attempt notice is emitted here, because key_confirmed
-		// arrives tens of seconds later on a slow fallback and the user needs the
-		// reason while waiting.
+		// Retrying names an upcoming attempt. The display snapshot follows that
+		// target immediately; budget changes still use their commit boundary.
+		// Announce a different model before its first visible output arrives.
 		if status.ModelRef == "" || status.Type != message.StatusDeltaRetrying {
 			return
 		}
@@ -518,8 +515,8 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		// interrupted before it completes: the sidebar may realign to the sticky
 		// cursor, but the partial reply came from this model.
 		turn.noteProducingModelRef(confirmedRef)
-		// Ensure the sidebar reflects the model that actually produced the first
-		// visible token, together with that model's context budgets.
+		// Commit the producing model identity and its context budgets after
+		// the first visible token.
 		a.applyRunningModelRefIfCurrent(llmClient, confirmedRef, 0, 0)
 		// Confirmed toasts must be keyed off the model that actually emitted output.
 		emitConfirmedSwitchToast(confirmedRef)
@@ -824,14 +821,9 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		if llm.IsNativeToolError(err) {
 			return nil, err
 		}
-		// The next request starts from the sticky cursor head, so a request that
-		// ends without a confirmed switch must return the sidebar to it: leaving
-		// a failed attempt's target in place would show one model's name with
-		// another model's keys, window, and limits. An oversize suspension that
-		// resumes this same turn keeps its target: the continuation is admitted
-		// against those same committed budgets, so widening the sidebar to the
-		// cursor head's window here would stop the compaction line from tracking
-		// the window the resumed request is admitted against.
+		// Terminal failure realigns the budget identity to the next cursor head.
+		// An oversize suspension keeps its committed target because the resumed
+		// request must be rebuilt against that same window and compaction line.
 		// Both gate flags are read once: the classification here and the oversize
 		// branch below must not disagree when a compaction starts or finishes
 		// between the two reads.

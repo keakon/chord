@@ -775,8 +775,8 @@ func TestFocusedModelStateForParkedSubAgentUsesDurableRefsAndConfigPool(t *testi
 	if got.SelectedRef != "provider-y/gpt-5.6-sol@high" || got.RunningRef != "provider-x/gpt-5.6-sol@high" {
 		t.Fatalf("focused refs = %#v", got)
 	}
-	if got.Variant != "high" {
-		t.Fatalf("variant = %q, want high", got.Variant)
+	if got.DisplayRef != "provider-x/gpt-5.6-sol@high" {
+		t.Fatalf("display ref = %q, want durable running ref with variant", got.DisplayRef)
 	}
 	if got.PoolName != "gpt-5.6-sol" || !slices.Equal(got.PoolNames, []string{"gpt-5.6-sol"}) {
 		t.Fatalf("focused pools = %q %#v", got.PoolName, got.PoolNames)

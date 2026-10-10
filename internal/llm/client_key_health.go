@@ -8,7 +8,7 @@ import (
 
 // KeyStats returns healthy key-pool stats for the provider resolved from the last
 // CompleteStream outcome (lastCallStatus.RunningModelRef). Prefer KeyStatsForRef
-// when the UI source of truth is the agent's RunningModelRef (see MainAgent.KeyStats).
+// when the UI names a current or upcoming request target.
 func (c *Client) KeyStats() (healthy, total int) {
 	c.mu.RLock()
 	ref := c.lastCallStatus.RunningModelRef
@@ -27,12 +27,6 @@ func (c *Client) KeyStatsForRef(ref string) (healthy, total int) {
 		return 0, 0
 	}
 	return prov.HealthyKeyCount()
-}
-
-// ConfirmedKeyStatsForRef returns (healthy, total) keys for the provider owning ref.
-// It is retained as a semantic alias for the sidebar's healthy key count.
-func (c *Client) ConfirmedKeyStatsForRef(ref string) (confirmed, total int) {
-	return c.KeyStatsForRef(ref)
 }
 
 // KeyPoolNextTransitionForRef returns the next key-pool transition time for the

@@ -96,36 +96,6 @@ func EnsureRefShowsProvider(runningRef, selectedRef string) string {
 	return p + "/" + runningRef
 }
 
-// FormatRunningModelRefForDisplay backfills provider and matching variant from
-// selectedRef/activeVariant, then truncates to maxLen display columns when needed.
-func FormatRunningModelRefForDisplay(runningRef, selectedRef, activeVariant string, maxLen int) string {
-	ref := EnsureRefShowsProvider(runningRef, selectedRef)
-	ref = EnsureRefShowsMatchingVariant(ref, selectedRef, activeVariant)
-	if runewidth.StringWidth(ref) > maxLen {
-		ref = TruncateRunningModelRef(ref, maxLen)
-	}
-	return ref
-}
-
-// SplitRequestModelRefForDisplay returns the provider, model id and variant for the
-// info panel MODEL display, after the same normalization as FormatRunningModelRefForDisplay:
-// the running ref wins when non-empty (provider backfilled from selectedRef, matching
-// variant from activeVariant); otherwise the selected ref is used as its own base without
-// variant backfill.
-func SplitRequestModelRefForDisplay(runningRef, selectedRef, activeVariant string) (provider, model, variant string) {
-	runningRef = strings.TrimSpace(runningRef)
-	if runningRef == "" {
-		selectedRef = strings.TrimSpace(selectedRef)
-		if selectedRef == "" {
-			return "", "", ""
-		}
-		return SplitRunningModelRef(selectedRef)
-	}
-	ref := EnsureRefShowsProvider(runningRef, selectedRef)
-	ref = EnsureRefShowsMatchingVariant(ref, selectedRef, activeVariant)
-	return SplitRunningModelRef(ref)
-}
-
 // TruncateRunningModelRef returns ref unchanged if it already fits in maxLen display columns.
 // Otherwise it simplifies until it fits (runewidth-aware): it strips leading model path segments
 // first (after provider/), one segment per step.

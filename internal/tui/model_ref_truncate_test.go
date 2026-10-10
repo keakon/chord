@@ -87,24 +87,21 @@ func TestTruncateRunningModelRefSingleSegmentDropsVariantBeforeProvider(t *testi
 	}
 }
 
-// FormatRunningModelRefForDisplay is the end-to-end path used by both the
-// sidebar info panel and the narrow status-bar model pill. When the LLM
-// client now returns RunningModelRef with @variant baked in, the display
-// pipeline should still work correctly — including truncation that drops
-// variant and provider when space is tight.
-func TestFormatRunningModelRefForDisplayWithBuiltinVariant(t *testing.T) {
-	// Full display: variant comes from runningRef itself (post-fix path).
-	if got := modelref.FormatRunningModelRefForDisplay("openai/gpt-5.5@high", "openai/gpt-5.5@high", "high", 80); got != "openai/gpt-5.5@high" {
+// Complete model references retain their inline variant until the status bar
+// runs out of space, then drop the variant and provider in that order.
+func TestTruncateRunningModelRefWithBuiltinVariant(t *testing.T) {
+	// Full display retains the complete reference.
+	if got := modelref.TruncateRunningModelRef("openai/gpt-5.5@high", 80); got != "openai/gpt-5.5@high" {
 		t.Fatalf("full display = %q, want openai/gpt-5.5@high", got)
 	}
 	// Narrow: drop variant first, keep provider/model.
 	wantNoVariant := "openai/gpt-5.5"
-	if got := modelref.FormatRunningModelRefForDisplay("openai/gpt-5.5@high", "openai/gpt-5.5@high", "high", runewidth.StringWidth(wantNoVariant)); got != wantNoVariant {
+	if got := modelref.TruncateRunningModelRef("openai/gpt-5.5@high", runewidth.StringWidth(wantNoVariant)); got != wantNoVariant {
 		t.Fatalf("narrow (drop variant) = %q, want %q", got, wantNoVariant)
 	}
 	// Very narrow: drop provider too, keep bare model.
 	wantBare := "gpt-5.5"
-	if got := modelref.FormatRunningModelRefForDisplay("openai/gpt-5.5@high", "openai/gpt-5.5@high", "high", runewidth.StringWidth(wantBare)); got != wantBare {
+	if got := modelref.TruncateRunningModelRef("openai/gpt-5.5@high", runewidth.StringWidth(wantBare)); got != wantBare {
 		t.Fatalf("very narrow (drop provider) = %q, want %q", got, wantBare)
 	}
 }
