@@ -194,7 +194,7 @@ func (c *Client) CallTool(ctx context.Context, toolName string, args json.RawMes
 		return "", nil, fmt.Errorf("mcp tools/call %s/%s: decode: %w", c.name, toolName, err)
 	}
 
-	text, images, err := c.normalizeToolCallResult(toolName, result)
+	text, images, err := c.normalizeToolCallResult(ctx, toolName, result)
 	if err != nil {
 		return text, images, err
 	}

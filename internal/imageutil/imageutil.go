@@ -7,6 +7,7 @@ package imageutil
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"image"
 	"image/color"
@@ -16,6 +17,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/disintegration/imaging"
 
 	xdraw "golang.org/x/image/draw"
 )
@@ -42,9 +45,8 @@ const jpegQuality = 85
 // maxConcurrentDecodes bounds how many images are decoded at once. Entry
 // points such as a read-only view_image batch or one MCP result can carry
 // several images, and a decoded image can be up to MaxImagePixels, which is
-// ~160 MB of RGBA at the limit; serializing most of them keeps the transient
-// decoder peak near ~320 MB instead of letting it scale with the batch size,
-// without meaningfully slowing the common single-image case.
+// ~160 MB of 8-bit RGBA at the limit. Transform buffers and 16-bit inputs add
+// to this, so this is a concurrency limit, not a process-memory ceiling.
 const maxConcurrentDecodes = 2
 
 var decodeSlots = make(chan struct{}, maxConcurrentDecodes)
@@ -71,8 +73,8 @@ func (n NormalizedImage) WasScaled() bool {
 
 // NormalizeImageBytes is NormalizeImage without the size report, for callers
 // that only need the provider-ready bytes.
-func NormalizeImageBytes(data []byte, declaredMime string) ([]byte, string, error) {
-	out, err := NormalizeImage(data, declaredMime)
+func NormalizeImageBytes(ctx context.Context, data []byte, declaredMime string) ([]byte, string, error) {
+	out, err := NormalizeImage(ctx, data, declaredMime)
 	if err != nil {
 		return nil, "", err
 	}
@@ -89,7 +91,10 @@ func NormalizeImageBytes(data []byte, declaredMime string) ([]byte, string, erro
 // Inputs that are already a conforming PNG/JPEG are returned unchanged, which
 // makes normalization idempotent; anything else is decoded and re-encoded
 // exactly once.
-func NormalizeImage(data []byte, declaredMime string) (NormalizedImage, error) {
+func NormalizeImage(ctx context.Context, data []byte, declaredMime string) (out NormalizedImage, err error) {
+	if err := ctx.Err(); err != nil {
+		return NormalizedImage{}, err
+	}
 	if len(data) == 0 {
 		return NormalizedImage{}, fmt.Errorf("image data is empty")
 	}
@@ -107,14 +112,14 @@ func NormalizeImage(data []byte, declaredMime string) (NormalizedImage, error) {
 	if err != nil {
 		return NormalizedImage{}, fmt.Errorf("invalid %s image: %w", decoder.name, err)
 	}
-	if err := checkImageDimensions(cfg); err != nil {
+	if err := CheckImageDimensions(cfg); err != nil {
 		return NormalizedImage{}, err
 	}
 	orientation := 1
 	if decoder.mimeType == "image/jpeg" {
 		orientation = jpegOrientation(data)
 	}
-	out := NormalizedImage{
+	out = NormalizedImage{
 		OriginalWidth:  cfg.Width,
 		OriginalHeight: cfg.Height,
 		Width:          cfg.Width,
@@ -127,15 +132,27 @@ func NormalizeImage(data []byte, declaredMime string) (NormalizedImage, error) {
 	// several images at once) would otherwise decode up to MaxImagePixels each
 	// in parallel, which is hundreds of megabytes of transient decoder buffers.
 	// Acquiring here, after the cheap header checks, keeps rejects immediate.
-	release, err := AcquireDecodeSlot(context.Background())
+	release, err := AcquireDecodeSlot(ctx)
 	if err != nil {
 		return NormalizedImage{}, err
 	}
 	defer release()
+	// Pixel decoders and transforms are synchronous; discard their result if cancelled.
+	defer func() {
+		if cancelled := ctx.Err(); cancelled != nil {
+			out, err = NormalizedImage{}, cancelled
+		}
+	}()
 
 	img, err := decoder.decode(bytes.NewReader(data))
 	if err != nil {
 		return NormalizedImage{}, fmt.Errorf("failed to decode %s image: %w", decoder.name, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return NormalizedImage{}, err
+	}
+	if decoder.mimeType == "image/png" || decoder.mimeType == "image/jpeg" {
+		rememberVerifiedImage(sha256.Sum256(data))
 	}
 	if orientation == 1 && !needsScale && len(data) <= MaxImageBytes &&
 		(decoder.mimeType == "image/png" || decoder.mimeType == "image/jpeg") {
@@ -232,13 +249,17 @@ func encodePNG(img image.Image) ([]byte, error) {
 // partially transparent pixels do not turn into dark blocks, then encodes it
 // at the fixed normalization quality.
 func encodeJPEG(img image.Image) ([]byte, error) {
-	bounds := img.Bounds()
-	flat := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
-	xdraw.Draw(flat, flat.Bounds(), image.NewUniform(color.White), image.Point{}, xdraw.Src)
-	xdraw.Draw(flat, flat.Bounds(), img, bounds.Min, xdraw.Over)
+	source := img
+	if opaque, ok := img.(interface{ Opaque() bool }); !ok || !opaque.Opaque() {
+		bounds := img.Bounds()
+		flat := image.NewRGBA(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+		xdraw.Draw(flat, flat.Bounds(), image.NewUniform(color.White), image.Point{}, xdraw.Src)
+		xdraw.Draw(flat, flat.Bounds(), img, bounds.Min, xdraw.Over)
+		source = flat
+	}
 
 	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, flat, &jpeg.Options{Quality: jpegQuality}); err != nil {
+	if err := jpeg.Encode(&buf, source, &jpeg.Options{Quality: jpegQuality}); err != nil {
 		return nil, fmt.Errorf("encode image as JPEG: %w", err)
 	}
 	return buf.Bytes(), nil
@@ -292,9 +313,9 @@ func scaledDimensions(width, height int) (int, int) {
 }
 
 func scaleImage(img image.Image, width, height int) image.Image {
-	dst := image.NewRGBA(image.Rect(0, 0, width, height))
-	xdraw.CatmullRom.Scale(dst, dst.Bounds(), img, img.Bounds(), xdraw.Src, nil)
-	return dst
+	// Keep the antialiasing cubic filter used for model input, but store the
+	// separable intermediate as NRGBA instead of four float64s per pixel.
+	return imaging.Resize(img, width, height, imaging.CatmullRom)
 }
 
 func ceilDiv(a, b int) int {
@@ -321,12 +342,17 @@ func pdfTooLargeError(size int) error {
 // Supported inputs are PNG, JPEG, WebP, GIF, BMP and TIFF; the format is
 // detected from the content, so a misleading extension is only reported as a
 // diagnostic.
-func ReadImageFile(path string) (NormalizedImage, error) {
-	data, err := readFileBounded(path, MaxImageSourceBytes)
+func ReadImageFile(ctx context.Context, path string) (NormalizedImage, error) {
+	data, err := ReadImageSource(path)
 	if err != nil {
 		return NormalizedImage{}, err
 	}
-	return NormalizeImage(data, declaredMimeType(path))
+	return NormalizeImage(ctx, data, declaredMimeType(path))
+}
+
+// ReadImageSource reads bounded original bytes without normalizing them.
+func ReadImageSource(path string) ([]byte, error) {
+	return readFileBounded(path, MaxImageSourceBytes)
 }
 
 // ReadPDFFile reads a PDF from the given file path without compression and
@@ -410,11 +436,11 @@ func PDFAppearsEncrypted(data []byte) bool {
 // PDF goes through ReadPDFFile (uncompressed, 32 MB limit), everything else
 // through ReadImageFile (normalized to PNG/JPEG, 5 MB limit). Non-image
 // extensions are rejected by content detection.
-func ReadAttachmentFile(path string) ([]byte, string, error) {
+func ReadAttachmentFile(ctx context.Context, path string) ([]byte, string, error) {
 	if strings.ToLower(filepath.Ext(path)) == ".pdf" {
 		return ReadPDFFile(path)
 	}
-	image, err := ReadImageFile(path)
+	image, err := ReadImageFile(ctx, path)
 	if err != nil {
 		return nil, "", err
 	}

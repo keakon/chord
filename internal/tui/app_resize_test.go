@@ -187,9 +187,9 @@ func TestFocusMsgWhenImageViewerOpenMarksViewerForRetransmitAndClearsViewerCache
 	m.mode = ModeImageViewer
 	m.imageViewer = imageViewerState{Open: true, ImageID: 123, NeedsRetransmit: false}
 	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsFullscreen: true}
-	m.kittyImageCache[123] = struct{}{}
+	m.kittyImageCache[123] = time.Time{}
 	m.kittyPlacementCache[123] = struct{}{}
-	m.kittyImageCache[999] = struct{}{}
+	m.kittyImageCache[999] = time.Time{}
 	m.kittyPlacementCache[999] = struct{}{}
 
 	updated, _ := m.Update(tea.FocusMsg{})
@@ -233,7 +233,7 @@ func TestFocusMsgWhenKittyImageViewerSchedulesDeferredReplay(t *testing.T) {
 	m.imageViewer.ImageID = 123
 	m.imageViewer.PlacementID = 456
 	m.imageViewer.NeedsRetransmit = false
-	m.kittyImageCache[123] = struct{}{}
+	m.kittyImageCache[123] = time.Time{}
 	m.kittyPlacementCache[123] = struct{}{}
 
 	updated, cmd := m.Update(tea.FocusMsg{})
@@ -244,8 +244,8 @@ func TestFocusMsgWhenKittyImageViewerSchedulesDeferredReplay(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("FocusMsg should schedule kitty image viewer replay when viewer is renderable")
 	}
-	if model.imageViewer.NeedsRetransmit {
-		t.Fatal("FocusMsg should replay renderable kitty viewer immediately")
+	if !model.imageViewer.NeedsRetransmit || !model.imageViewer.Loading {
+		t.Fatal("FocusMsg should rebuild the released Kitty transport asynchronously")
 	}
 	if model.lastImageProtocolReason != "focus-restore" {
 		t.Fatalf("lastImageProtocolReason = %q, want focus-restore", model.lastImageProtocolReason)

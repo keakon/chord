@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	tea "github.com/keakon/bubbletea/v2"
@@ -26,6 +27,7 @@ type imageViewerState struct {
 	Prepared             *imageViewerPrepared
 	ImageID, PlacementID int
 	NeedsRetransmit      bool
+	lastProtocolAt       time.Time
 }
 
 func (v imageViewerState) currentPart() BlockImagePart {
@@ -97,6 +99,7 @@ func (m *Model) openImageViewerItems(parts []BlockImagePart, index int, returnMo
 // dismissImageViewer invalidates work without restoring a previous business mode.
 // Mode transitions, focus/session switches and ordinary close share this cleanup.
 func (m *Model) dismissImageViewer() tea.Cmd {
+	m.cancelInlineImages()
 	if !m.imageViewer.Open {
 		return nil
 	}
@@ -105,7 +108,7 @@ func (m *Model) dismissImageViewer() tea.Cmd {
 	}
 	var cleanup tea.Cmd
 	if m.imageCaps.Backend == ImageBackendKitty && m.imageViewer.ImageID > 0 {
-		cleanup = tea.Raw(kittyDeleteSequenceForPlacement(m.imageViewer.ImageID, m.imageViewer.PlacementID))
+		cleanup = m.releaseKittyViewerImage(m.imageViewer.ImageID, m.imageViewer.PlacementID)
 	} else if m.imageCaps.Backend == ImageBackendITerm2 {
 		cleanup = tea.ClearScreen
 	}

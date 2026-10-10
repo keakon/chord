@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/imageutil"
 )
 
 type imageViewerOwner struct {
@@ -12,10 +14,9 @@ type imageViewerOwner struct {
 	Session, Composer uint64
 }
 
-// Prepared transport is immutable. Rendering and protocol dispatch never invoke
-// the cache's constructing APIs, even if another image evicts its entry.
+// Commands prepare transport data; the main loop consumes or expires Sequence.
+// Rendering never invokes constructing APIs, even after cache eviction.
 type imageViewerPrepared struct {
-	Part                         BlockImagePart
 	Cols, Rows                   int
 	AvailableCols, AvailableRows int
 	Metrics                      kittyTerminalMetrics
@@ -42,7 +43,7 @@ func (m *Model) prepareImageViewer() tea.Cmd {
 	}
 	var cleanup tea.Cmd
 	if v.ImageID > 0 && m.imageCaps.Backend == ImageBackendKitty {
-		cleanup = tea.Raw(kittyDeleteSequenceForPlacement(v.ImageID, v.PlacementID))
+		cleanup = m.releaseKittyViewerImage(v.ImageID, v.PlacementID)
 	} else if v.Prepared != nil && m.imageCaps.Backend == ImageBackendITerm2 {
 		cleanup = tea.ClearScreen
 	}
@@ -90,7 +91,8 @@ func prepareImageViewerPart(ctx context.Context, part BlockImagePart, cols, rows
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// Path data belongs to the viewer snapshot; never write it to the composer.
+	// Snapshot file bytes for this preparation only; keep browsing items and the
+	// composer path-backed so loaded originals do not accumulate outside the cache.
 	part.Data = data
 	part.ImagePath = ""
 	entry, err = imageRuntimeEntryForPart(part)
@@ -108,7 +110,12 @@ func prepareImageViewerPart(ctx context.Context, part BlockImagePart, cols, rows
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	prepared := &imageViewerPrepared{Part: part, Cols: fitCols, Rows: fitRows, AvailableCols: cols, AvailableRows: rows, Metrics: metrics}
+	prepared := &imageViewerPrepared{Cols: fitCols, Rows: fitRows, AvailableCols: cols, AvailableRows: rows, Metrics: metrics}
+	release, err := imageutil.AcquireDecodeSlot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	switch backend {
 	case ImageBackendKitty:
 		prepared.Sequence, prepared.ImageID, err = kittyViewerSequence(part, placementID, fitCols, fitRows, -1, 0, 0)
@@ -140,6 +147,5 @@ func (m *Model) handleImageViewerLoaded(msg imageViewerLoadedMsg) tea.Cmd {
 		return nil
 	}
 	v.Prepared = msg.Prepared
-	v.Items[v.Index] = msg.Prepared.Part
 	return m.imageViewerProtocolCmd()
 }

@@ -137,13 +137,13 @@ func sniffSVG(data []byte) bool {
 		bytes.HasPrefix(trimmed, []byte("<?xml")) && bytes.Contains(trimmed, []byte("<svg"))
 }
 
-// checkImageDimensions validates decoded dimensions and enforces the pixel
-// budget with an int64 multiplication so huge header values cannot overflow.
-func checkImageDimensions(cfg image.Config) error {
+// CheckImageDimensions validates decoded dimensions and enforces the pixel
+// budget using division so huge header values cannot overflow a multiplication.
+func CheckImageDimensions(cfg image.Config) error {
 	if cfg.Width <= 0 || cfg.Height <= 0 {
 		return fmt.Errorf("image has invalid dimensions %dx%d", cfg.Width, cfg.Height)
 	}
-	if int64(cfg.Width)*int64(cfg.Height) > MaxImagePixels {
+	if int64(cfg.Width) > MaxImagePixels/int64(cfg.Height) {
 		return fmt.Errorf("image dimensions %dx%d exceed the %d megapixel limit",
 			cfg.Width, cfg.Height, MaxImagePixels/1_000_000)
 	}

@@ -52,6 +52,8 @@ func TestViewImageResultDisplaysImageAfterTextOnlyPreview(t *testing.T) {
 					}
 				case streamFlushTickMsg:
 					run(m.handleStreamFlushTick(msg))
+				case inlineImagesLoadedMsg:
+					run(m.handleInlineImagesLoaded(msg))
 				case tea.RawMsg:
 					if _, err := wrapped.Write(fmt.Append(nil, msg.Msg)); err != nil {
 						t.Fatal(err)

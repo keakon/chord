@@ -62,6 +62,9 @@ func TestEditUploadsReferencesWithTheirImageMIME(t *testing.T) {
 				t.Error("reference bytes changed")
 			}
 		}
+		if r.ContentLength <= 0 {
+			t.Error("streaming multipart omitted Content-Length")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"b64_json": base64.StdEncoding.EncodeToString(pngData)}}}); err != nil {
 			t.Error(err)

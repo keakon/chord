@@ -46,7 +46,7 @@ func (t HostedTool) renderResult(ctx context.Context, obs *message.HostedObserva
 				notices = append(notices, "Image output at "+path+" has invalid base64")
 				continue
 			}
-			normalized, mime, err := imageutil.NormalizeImageBytes(raw, "")
+			normalized, mime, err := imageutil.NormalizeImageBytes(ctx, raw, "")
 			if err != nil {
 				notices = append(notices, "Image output at "+path+" could not be decoded: "+err.Error())
 				continue

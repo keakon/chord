@@ -1,9 +1,10 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"image"
-	"io"
+	"image/jpeg"
 	"sync"
 	"testing"
 	"time"
@@ -12,9 +13,13 @@ import (
 func TestImageViewerPreparationDoesNotBlockOtherInlineImages(t *testing.T) {
 	resetImageRuntimeCache()
 	defer resetImageRuntimeCache()
-	data := makeTestPNG(t)
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 3, 2)), nil); err != nil {
+		t.Fatal(err)
+	}
+	data := encoded.Bytes()
 	for n := range 7 {
-		part := BlockImagePart{Data: append(append([]byte{}, data...), byte(n)), MimeType: "image/png"}
+		part := BlockImagePart{Data: append(append([]byte{}, data...), byte(n)), MimeType: "image/jpeg"}
 		if _, err := imageRuntimeEntryForPart(part); err != nil {
 			t.Fatal(err)
 		}
@@ -22,10 +27,10 @@ func TestImageViewerPreparationDoesNotBlockOtherInlineImages(t *testing.T) {
 	entered, release, done, loaded := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	original := imageCacheDecode
 	var once sync.Once
-	imageCacheDecode = func(r io.Reader) (image.Image, string, error) {
+	imageCacheDecode = func(data []byte) (image.Image, string, error) {
 		close(entered)
 		<-release
-		return original(r)
+		return original(data)
 	}
 	defer func() {
 		once.Do(func() { close(release) })
@@ -34,7 +39,7 @@ func TestImageViewerPreparationDoesNotBlockOtherInlineImages(t *testing.T) {
 	}()
 	go func() {
 		defer close(done)
-		_, err := prepareImageViewerPart(context.Background(), BlockImagePart{Data: data, MimeType: "image/png"}, 20, 10, kittyTerminalMetrics{}, ImageBackendKitty, 1)
+		_, err := prepareImageViewerPart(context.Background(), BlockImagePart{Data: data, MimeType: "image/jpeg"}, 20, 10, kittyTerminalMetrics{}, ImageBackendKitty, 1)
 		loaded <- err
 	}()
 	select {
@@ -44,7 +49,7 @@ func TestImageViewerPreparationDoesNotBlockOtherInlineImages(t *testing.T) {
 	}
 	rendered := make(chan error, 1)
 	go func() {
-		part := BlockImagePart{Data: append(append([]byte{}, data...), 255), MimeType: "image/png"}
+		part := BlockImagePart{Data: append(append([]byte{}, data...), 255), MimeType: "image/jpeg"}
 		_, _, err := imageRenderSize(part, 40, TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsInline: true})
 		rendered <- err
 	}()
@@ -77,15 +82,15 @@ func TestImageCacheResidentBytesTrackPublishedPayloads(t *testing.T) {
 	if _, err := entry.raw(part); err != nil {
 		t.Fatal(err)
 	}
-	if got := entry.residentBytes.Load(); got != int64(len(part.Data)) {
-		t.Fatalf("raw bytes = %d, want %d", got, len(part.Data))
+	if got := entry.residentBytes.Load(); got != int64(cap(part.Data)) {
+		t.Fatalf("raw bytes = %d, want %d", got, cap(part.Data))
 	}
 	for range 2 {
-		encoded, size, err := entry.base64TransportPNG(part)
+		encoded, _, err := entry.base64TransportPNG(part)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got, want := entry.residentBytes.Load(), int64(len(part.Data)+size+len(encoded)); got != want {
+		if got, want := entry.residentBytes.Load(), int64(cap(part.Data)+len(encoded)); got != want {
 			t.Fatalf("resident bytes = %d, want %d", got, want)
 		}
 	}

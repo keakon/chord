@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"strings"
 
@@ -36,13 +37,23 @@ func imageRenderSize(part BlockImagePart, width int, caps TerminalImageCapabilit
 	if caps.Backend == ImageBackendNone || !caps.SupportsInline {
 		return labelWidth, 1, nil
 	}
-	entry, err := imageRuntimeEntryForPart(part)
-	if err != nil {
-		return 0, 0, err
-	}
-	cfg, _, err := entry.decodeConfig(part)
-	if err != nil {
-		return 0, 0, err
+	cfg := image.Config{Width: 1, Height: 1}
+	if len(part.Data) == 0 {
+		if metadata, ok := imagePathMetadataSnapshot(part); ok {
+			if metadata.err != nil {
+				return 0, 0, metadata.err
+			}
+			cfg = metadata.config
+		}
+	} else {
+		entry, err := imageRuntimeEntryForPart(part)
+		if err != nil {
+			return 0, 0, err
+		}
+		cfg, _, err = entry.decodeConfig(part)
+		if err != nil {
+			return 0, 0, err
+		}
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 {
 		return 0, 0, fmt.Errorf("image has invalid dimensions")
@@ -79,26 +90,28 @@ func visibleImageLabelWidth(part BlockImagePart, width int) int {
 	return w
 }
 
-func renderImageBlock(part BlockImagePart, width int, cardBG string, caps TerminalImageCapabilities) ([]string, int, int, error) {
+func renderImageBlock(part *BlockImagePart, width int, cardBG string, caps TerminalImageCapabilities) ([]string, int, int, error) {
+	part.RenderImageID = 0
 	if width <= 0 {
 		width = 1
 	}
 	if caps.Backend == ImageBackendNone || !caps.SupportsInline {
-		return renderImageFallback(part, width), visibleImageLabelWidth(part, width), 1, nil
+		return renderImageFallback(*part, width), visibleImageLabelWidth(*part, width), 1, nil
 	}
-	cols, totalRows, err := imageRenderSize(part, width, caps)
+	cols, totalRows, err := imageRenderSize(*part, width, caps)
 	if err != nil {
-		return renderImageFallback(part, width), visibleImageLabelWidth(part, width), 1, nil
+		return renderImageFallback(*part, width), visibleImageLabelWidth(*part, width), 1, nil
 	}
 	bodyRows := max(totalRows-1, 1)
 	useKittyBackend := caps.Backend == ImageBackendKitty
 	imageID := 0
 	if useKittyBackend {
-		imageID, err = kittyImageIDForVariant(part, fmt.Sprintf("inline:%d:%d", cols, bodyRows))
+		imageID, err = kittyRenderImageID(*part, cols, bodyRows)
 		if err != nil {
-			return renderImageFallback(part, width), visibleImageLabelWidth(part, width), 1, nil
+			return renderImageFallback(*part, width), visibleImageLabelWidth(*part, width), 1, nil
 		}
 	}
+	part.RenderImageID = imageID
 	lines := make([]string, 0, totalRows)
 	if useKittyBackend {
 		lines = append(lines, kittyStyledPlaceholderLines(imageID, cols, bodyRows, cardBG)...)
@@ -160,7 +173,11 @@ func indexedColor(spec string) color.Color {
 }
 
 func encodeKittyTransmit(part BlockImagePart, imageID int) (string, error) {
-	entry, err := imageRuntimeEntryForPart(part)
+	return encodeKittyTransmitVariant(part, imageID, false)
+}
+
+func encodeKittyTransmitVariant(part BlockImagePart, imageID int, preview bool) (string, error) {
+	entry, err := imageRuntimeEntryForVariant(part, preview)
 	if err != nil {
 		return "", err
 	}
@@ -178,6 +195,7 @@ func encodeKittyTransmit(part BlockImagePart, imageID int) (string, error) {
 
 	var sb strings.Builder
 	chunk := xkitty.MaxChunkSize
+	sb.Grow(len(payload) + (len(payload)/chunk+1)*128)
 	for start := 0; start < len(payload); start += chunk {
 		end := min(start+chunk, len(payload))
 		chunkOpts := opts
@@ -189,7 +207,11 @@ func encodeKittyTransmit(part BlockImagePart, imageID int) (string, error) {
 		} else if start > 0 || len(payload) > chunk {
 			chunkOpts = append(chunkOpts, "m=0")
 		}
-		sb.WriteString(xansi.KittyGraphics([]byte(payload[start:end]), chunkOpts...))
+		sb.WriteString("\x1b_G")
+		sb.WriteString(strings.Join(chunkOpts, ","))
+		sb.WriteByte(';')
+		sb.WriteString(payload[start:end])
+		sb.WriteString("\x1b\\")
 	}
 	if len(payload) == 0 {
 		sb.WriteString(xansi.KittyGraphics(nil, opts...))
@@ -237,7 +259,7 @@ func encodeKittyDeletePlacement(imageID, placementID int) string {
 		ID:              imageID,
 		PlacementID:     placementID,
 		Delete:          xkitty.DeleteID,
-		DeleteResources: false,
+		DeleteResources: true,
 	}).Options()...)
 }
 

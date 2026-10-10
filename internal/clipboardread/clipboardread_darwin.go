@@ -63,21 +63,21 @@ func Read() ([]byte, string, error) {
 		log.Warnf("clipboard reader payload was rejected error=%v stderr=%q", decodeErr, strings.TrimSpace(stderr.String()))
 		return nil, "", decodeErr
 	}
-	return normalizeAttachment(data, mimeType)
+	return normalizeAttachment(ctx, data, mimeType)
 }
 
 // normalizeAttachment applies the limits and conversions the attachment path
 // expects: PDFs stay as they are, everything else goes through the shared
 // image normalizer, which re-encodes formats a provider does not accept (TIFF
 // among them) and enforces the size and pixel limits.
-func normalizeAttachment(data []byte, mimeType string) ([]byte, string, error) {
+func normalizeAttachment(ctx context.Context, data []byte, mimeType string) ([]byte, string, error) {
 	if mimeType == "application/pdf" {
 		if err := imageutil.CheckPDFSize(data); err != nil {
 			return nil, "", err
 		}
 		return data, "application/pdf", nil
 	}
-	return imageutil.NormalizeImageBytes(data, mimeType)
+	return imageutil.NormalizeImageBytes(ctx, data, mimeType)
 }
 
 // readerError turns the reader's exit status into the error the user sees. The

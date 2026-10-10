@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -67,7 +68,7 @@ func attachmentFromImagePath(path string, index int) (Attachment, error) {
 	if cleanPath == "" {
 		return Attachment{}, fmt.Errorf("empty attachment path")
 	}
-	data, mimeType, err := imageutil.ReadAttachmentFile(cleanPath)
+	data, mimeType, err := imageutil.ReadAttachmentFile(context.Background(), cleanPath)
 	if err != nil {
 		return Attachment{}, err
 	}

@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -38,7 +39,7 @@ type toolCallResource struct {
 
 // normalizeToolCallResult projects MCP content onto the existing text/image
 // tool result path. Resource links are references; they are never fetched here.
-func (c *Client) normalizeToolCallResult(toolName string, result toolCallResult) (string, []message.ContentPart, error) {
+func (c *Client) normalizeToolCallResult(ctx context.Context, toolName string, result toolCallResult) (string, []message.ContentPart, error) {
 	var text []string
 	var images []message.ContentPart
 	var imageFailures []error
@@ -55,7 +56,7 @@ func (c *Client) normalizeToolCallResult(toolName string, result toolCallResult)
 			raw, err = base64.StdEncoding.DecodeString(data)
 		}
 		if err == nil {
-			raw, mime, err = imageutil.NormalizeImageBytes(raw, mime)
+			raw, mime, err = imageutil.NormalizeImageBytes(ctx, raw, mime)
 		}
 		if err != nil {
 			log.Warnf("mcp tools/call %s/%s: omitting image block error=%v", c.name, toolName, err)

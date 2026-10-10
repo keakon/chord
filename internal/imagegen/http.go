@@ -129,10 +129,12 @@ func BuildRequest(ctx context.Context, t Target, r Request, key string) (*http.R
 	secrets := diagnosticRedactions(key, r)
 	diagnostics := newRequestDiagnostics(t, r, fields, secrets)
 	var body io.Reader
+	var contentLength int64
 	contentType := "application/json"
 	if t.Preset == PresetOpenAI && (r.Operation == Edit || len(r.References) > 0) {
 		endpoint = t.BaseURL + "/edits"
 		var buf bytes.Buffer
+		var segments []io.Reader
 		w := multipart.NewWriter(&buf)
 		for k, v := range fields {
 			if err := w.WriteField(k, fmt.Sprint(v)); err != nil {
@@ -146,19 +148,22 @@ func BuildRequest(ctx context.Context, t Target, r Request, key string) (*http.R
 				"Content-Disposition": {mime.FormatMediaType("form-data", map[string]string{"name": imageEditFormField, "filename": fmt.Sprintf("reference-%d.%s", i, ext)})},
 				"Content-Type":        {img.MIME},
 			}
-			f, err := w.CreatePart(header)
+			_, err := w.CreatePart(header)
 			if err != nil {
 				return nil, nil, fmt.Errorf("encode image edit: %w", err)
 			}
 			diagnostics.Images[i].PartMIME = header.Get("Content-Type")
-			if _, err = f.Write(img.Data); err != nil {
-				return nil, nil, fmt.Errorf("encode image edit bytes: %w", err)
-			}
+			prefix := bytes.Clone(buf.Bytes())
+			segments = append(segments, bytes.NewReader(prefix), bytes.NewReader(img.Data))
+			contentLength += int64(len(prefix) + len(img.Data))
+			buf.Reset()
 		}
 		if err := w.Close(); err != nil {
 			return nil, nil, fmt.Errorf("finish image edit: %w", err)
 		}
-		body = &buf
+		segments = append(segments, bytes.NewReader(buf.Bytes()))
+		contentLength += int64(buf.Len())
+		body = io.MultiReader(segments...)
 		contentType = w.FormDataContentType()
 	} else {
 		data, err := json.Marshal(fields)
@@ -170,6 +175,9 @@ func BuildRequest(ctx context.Context, t Target, r Request, key string) (*http.R
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("build image request: %w", err)
+	}
+	if contentLength != 0 {
+		req.ContentLength = contentLength
 	}
 	// POST is not idempotent. In particular, do not install a replay body.
 	req.GetBody = nil

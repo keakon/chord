@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"fmt"
 	"sync/atomic"
 
@@ -109,7 +110,7 @@ func normalizeImageForWire(source []byte, mime string, part message.ContentPart)
 		return nil, "", false
 	}
 
-	normalized, normalizedMime, err := imageutil.NormalizeImageBytes(source, mime)
+	normalized, normalizedMime, err := imageutil.NormalizeImageBytes(context.Background(), source, mime)
 	if err != nil {
 		imageWireCache.putFailure(key)
 		reportBinaryPartDrop(part, err)

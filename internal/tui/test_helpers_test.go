@@ -49,6 +49,10 @@ func (m *Model) prependQueuedDraft(draft queuedDraft) {
 // resetImageRuntimeCache clears the package-global image cache so each test
 // starts from a known-empty state.
 func resetImageRuntimeCache() {
+	imagePathMetadataCache.Lock()
+	clear(imagePathMetadataCache.entries)
+	imagePathMetadataCache.order.Init()
+	imagePathMetadataCache.Unlock()
 	imageRuntimeCache.mu.Lock()
 	imageRuntimeCache.entries = make(map[string]*imageRuntimeCacheEntry)
 	imageRuntimeCache.mu.Unlock()

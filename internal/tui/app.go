@@ -448,15 +448,22 @@ type Model struct {
 	imageCaps                TerminalImageCapabilities
 	imageViewer              imageViewerState
 	imageViewerGeneration    uint64
+	inlineImageGeneration    uint64
+	inlineImageLoading       bool
+	inlineImageSignature     string
+	inlineImageCancel        func()
 	imageViewerCleanup       tea.Cmd
 	inputImageClick          inputImageClickState
 	kittyMetrics             kittyTerminalMetrics
-	kittyImageCache          map[int]struct{}
+	kittyImageCache          map[int]time.Time // Zero timestamps denote visible images; others start the off-screen grace.
 	kittyPlacementCache      map[int]struct{}
 	lastImageProtocolAt      time.Time
 	lastImageProtocolReason  string
 	lastImageProtocolSummary string
 	screenBuf                uv.ScreenBuffer
+
+	imageMemorySweepGeneration uint64
+
 	// screenBlankLine caches one EmptyCell-filled row matching the current
 	// screen buffer width, so Draw can clear the reused buffer with row copies
 	// instead of per-cell loops.
@@ -601,7 +608,7 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		workingDirGeneration:         workDirSnap.Generation,
 		homeDir:                      homeDir,
 		imageCaps:                    caps,
-		kittyImageCache:              make(map[int]struct{}),
+		kittyImageCache:              make(map[int]time.Time),
 		kittyPlacementCache:          make(map[int]struct{}),
 		statusPath:                   statusPathState{},
 		terminalAppFocused:           true,
@@ -768,6 +775,7 @@ func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		func() tea.Msg { return focusInputMsg{} },
 		m.startAtMentionFileLoad(),
+		m.startImageMemorySweep(),
 	}
 	if cmd := m.startRuntimeCacheCleanup(); cmd != nil {
 		cmds = append(cmds, cmd)
@@ -849,10 +857,15 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	// behind. Force one full repaint on that transition, and re-announce the
 	// inline images the repaint can drop, like the resize path does.
 	overlayWasDrawn := m.bottomLeftOverlayDrawn()
+	inlineImagesWereAllowed := m.inlineImagesAllowed()
 	defer func() {
 		if overlayWasDrawn && !m.bottomLeftOverlayDrawn() {
 			m.resetKittyPlacements()
 			cmd = tea.Batch(cmd, tea.Sequence(tea.ClearScreen, m.imageProtocolCmdWithReason("overlay-dismissed")))
+		} else if !inlineImagesWereAllowed && m.inlineImagesAllowed() {
+			cmd = tea.Batch(cmd, m.imageProtocolCmdWithReason("dialog-dismissed"))
+		} else if inlineImagesWereAllowed && !m.inlineImagesAllowed() {
+			m.cancelInlineImages()
 		}
 	}()
 	defer func() {
@@ -1008,6 +1021,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 	case clipboardAttachmentReadyMsg:
 		return m, m.handleClipboardAttachmentReady(msg)
+
+	case inlineImagesLoadedMsg:
+		return m, m.handleInlineImagesLoaded(msg)
 
 	case imageViewerLoadedMsg:
 		return m, m.handleImageViewerLoaded(msg)
@@ -1190,6 +1206,12 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 
 	case splashTickMsg:
 		return m, m.handleSplashTick()
+
+	case kittyImagesReleasedMsg:
+		return m, m.handleKittyImagesReleased(msg)
+
+	case imageMemorySweepTickMsg:
+		return m, m.handleImageMemorySweepTick(msg)
 
 	case idleSweepTickMsg:
 		return m, m.handleIdleSweepTick(msg)

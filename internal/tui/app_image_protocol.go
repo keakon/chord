@@ -36,9 +36,9 @@ func (m *Model) markKittyImageTransmitted(imageID int) {
 		return
 	}
 	if m.kittyImageCache == nil {
-		m.kittyImageCache = make(map[int]struct{})
+		m.kittyImageCache = make(map[int]time.Time)
 	}
-	m.kittyImageCache[imageID] = struct{}{}
+	m.kittyImageCache[imageID] = time.Time{}
 }
 
 func (m *Model) kittyPlacementSent(imageID int) bool {
@@ -84,6 +84,7 @@ func (m *Model) imageProtocolCmdWithReason(reason string) tea.Cmd {
 	}
 	var cmds []tea.Cmd
 	if m.mode == ModeImageViewer && m.imageViewer.Open {
+		m.cancelInlineImages()
 		m.lastImageProtocolAt = time.Now()
 		m.lastImageProtocolReason = reason
 		m.lastImageProtocolSummary = fmt.Sprintf("mode=image-viewer open=%t inline_visible=%t", m.imageViewer.Open, m.viewport != nil && m.viewport.HasVisibleInlineImage())
@@ -94,65 +95,15 @@ func (m *Model) imageProtocolCmdWithReason(reason string) tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 	visibleInline := m.viewport != nil && m.viewport.HasVisibleInlineImage()
-	if m.viewport == nil || !m.imageCaps.SupportsInline || !visibleInline {
+	if m.viewport == nil || !m.imageCaps.SupportsInline || !visibleInline || !m.inlineImagesAllowed() {
+		m.cancelInlineImages()
 		m.lastImageProtocolAt = time.Now()
 		m.lastImageProtocolReason = reason
 		m.lastImageProtocolSummary = fmt.Sprintf("skipped viewport_nil=%t supports_inline=%t visible_inline=%t backend=%s", m.viewport == nil, m.imageCaps.SupportsInline, visibleInline, m.imageCaps.Backend.String())
 		m.recordTUIDiagnostic("image-protocol-skip", "reason=%s viewport_nil=%t supports_inline=%t visible_inline=%t backend=%s", reason, m.viewport == nil, m.imageCaps.SupportsInline, visibleInline, m.imageCaps.Backend.String())
 		return nil
 	}
-	kittyVisibleParts := 0
-	kittySeqBytes := 0
-	if m.imageCaps.Backend == ImageBackendKitty {
-		blocks := m.viewport.visibleBlocks()
-		starts := m.viewport.blockStarts()
-		windowStart := m.viewport.offset
-		windowEnd := m.viewport.offset + m.viewport.height
-		var seq strings.Builder
-		for i, block := range blocks {
-			if !blockSupportsImagePreview(block) {
-				continue
-			}
-			block = m.viewport.materialize(block)
-			blockStart := starts[i]
-			for _, part := range block.ImageParts {
-				if part.RenderRows <= 0 || part.RenderStartLine < 0 {
-					continue
-				}
-				globalStart := blockStart + part.RenderStartLine
-				globalEnd := blockStart + part.RenderEndLine
-				if globalEnd < windowStart || globalStart >= windowEnd {
-					continue
-				}
-				imgID, err := kittyRenderImageID(part, part.RenderCols, part.RenderRows)
-				if err != nil {
-					continue
-				}
-				inlineSeq, _, err := kittyInlineSequence(part, part.RenderCols, part.RenderRows, m.kittyImageTransmitted(imgID) && m.kittyPlacementSent(imgID))
-				if err != nil {
-					continue
-				}
-				kittyVisibleParts++
-				seq.WriteString(inlineSeq)
-				m.markKittyImageTransmitted(imgID)
-				m.markKittyPlacementSent(imgID)
-			}
-		}
-		kittySeqBytes = seq.Len()
-		if seq.Len() > 0 {
-			cmds = append(cmds, tea.Raw(seq.String()))
-		}
-	}
-	if m.imageCaps.Backend == ImageBackendITerm2 {
-		if cmd := m.iterm2InlineProtocolCmd(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	}
-	m.lastImageProtocolAt = time.Now()
-	m.lastImageProtocolReason = reason
-	m.lastImageProtocolSummary = fmt.Sprintf("backend=%s visible_inline=%t kitty_visible_parts=%d kitty_seq_bytes=%d cmds=%d", m.imageCaps.Backend.String(), visibleInline, kittyVisibleParts, kittySeqBytes, len(cmds))
-	m.recordTUIDiagnostic("image-protocol", "reason=%s backend=%s visible_inline=%t kitty_visible_parts=%d kitty_seq_bytes=%d cmds=%d", reason, m.imageCaps.Backend.String(), visibleInline, kittyVisibleParts, kittySeqBytes, len(cmds))
-	return tea.Batch(cmds...)
+	return m.prepareInlineImages(reason)
 }
 
 func (m *Model) imageViewerProtocolCmd() tea.Cmd {
@@ -170,20 +121,28 @@ func (m *Model) imageViewerProtocolCmd() tea.Cmd {
 	seq := v.Prepared.Sequence
 	switch m.imageCaps.Backend {
 	case ImageBackendKitty:
-		placementID, row, col, _, _, ok := m.imageViewerPhysicalPlacement()
+		placementID, row, col, offsetX, offsetY, ok := m.imageViewerPhysicalPlacement()
 		if !ok {
 			return nil
 		}
 		v.ImageID = v.Prepared.ImageID
 		v.PlacementID = placementID
-		if v.NeedsRetransmit {
-			delete(m.kittyImageCache, v.ImageID)
-			delete(m.kittyPlacementCache, v.ImageID)
+		if seq == "" {
+			if v.NeedsRetransmit || !m.kittyImageTransmitted(v.ImageID) {
+				return m.prepareImageViewer()
+			}
+			seq = encodeKittyDisplayPlacement(v.ImageID, placementID, v.Prepared.Cols, v.Prepared.Rows, -1, offsetX, offsetY)
 		}
 		v.NeedsRetransmit = false
 		m.markKittyImageTransmitted(v.ImageID)
+		v.Prepared.Sequence = ""
+		v.lastProtocolAt = time.Now()
 		return tea.Raw(deferredCursorSequence(row+1, col+1, seq))
 	case ImageBackendITerm2:
+		if seq == "" {
+			return m.prepareImageViewer()
+		}
+		v.lastProtocolAt = time.Now()
 		rect, _ := m.imageViewerOverlayRect()
 		row := max(0, rect.Min.Y+2+imageViewerInnerPadY)
 		col := max(0, rect.Min.X+1+DirectoryBorderStyle.GetPaddingLeft()+imageViewerInnerPadX)
@@ -195,57 +154,4 @@ func (m *Model) imageViewerProtocolCmd() tea.Cmd {
 	default:
 		return nil
 	}
-}
-
-func (m *Model) iterm2InlineProtocolCmd() tea.Cmd {
-	if m.viewport == nil || m.imageCaps.Backend != ImageBackendITerm2 || !m.imageCaps.SupportsInline {
-		return nil
-	}
-	layout := m.ensureLayout()
-	blocks := m.viewport.visibleBlocks()
-	starts := m.viewport.blockStarts()
-	windowStart := m.viewport.offset
-	windowEnd := m.viewport.offset + m.viewport.height
-	mainLeft := layout.main.Min.X
-	mainTop := layout.main.Min.Y
-	var seq strings.Builder
-	for i, block := range blocks {
-		if !blockSupportsImagePreview(block) {
-			continue
-		}
-		block = m.viewport.materialize(block)
-		blockStart := starts[i]
-		style := UserCardStyle
-		cardInnerOffset := style.GetMarginLeft() + style.GetBorderLeftSize() + style.GetPaddingLeft()
-		imageCol := mainLeft + cardInnerOffset
-		for _, part := range block.ImageParts {
-			if part.RenderRows <= 0 || part.RenderStartLine < 0 || part.RenderCols <= 0 {
-				continue
-			}
-			globalStart := blockStart + part.RenderStartLine
-			globalEnd := blockStart + part.RenderEndLine
-			if globalEnd < windowStart || globalStart >= windowEnd {
-				continue
-			}
-			visibleStart := max(globalStart, windowStart)
-			row := mainTop + (visibleStart - windowStart)
-			col := imageCol + 2
-			bodyRows := part.RenderRows
-			if clippedTop := visibleStart - globalStart; clippedTop > 0 {
-				bodyRows -= clippedTop
-			}
-			if bodyRows <= 0 {
-				continue
-			}
-			seqPart, err := iterm2InlineSequence(part, part.RenderCols, bodyRows)
-			if err != nil {
-				continue
-			}
-			seq.WriteString(deferredCursorSequence(row+1, col+1, seqPart))
-		}
-	}
-	if seq.Len() == 0 {
-		return nil
-	}
-	return tea.Raw(encodeDeferredTerminalSequence(seq.String()))
 }

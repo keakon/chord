@@ -120,7 +120,7 @@ func (t *ViewImageTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 
 	// Read and normalize; ReadImageFile rejects unsupported or oversized inputs
 	// and reports how the image was transformed.
-	normalized, err := imageutil.ReadImageFile(resolvedPath)
+	normalized, err := imageutil.ReadImageFile(ctx, resolvedPath)
 	if err != nil {
 		return "", err
 	}

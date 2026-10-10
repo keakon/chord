@@ -126,9 +126,9 @@ func assertPixelNRGBA(t *testing.T, img image.Image, x, y int, want color.NRGBA)
 }
 
 func TestNormalizeImageBytesUsesFirstFrameOfAnimatedWebP(t *testing.T) {
-	data, mimeType, err := NormalizeImageBytes(decodeBase64Fixture(t, animatedLosslessWebPBase64), "image/webp")
+	data, mimeType, err := NormalizeImageBytes(t.Context(), decodeBase64Fixture(t, animatedLosslessWebPBase64), "image/webp")
 	if err != nil {
-		t.Fatalf("NormalizeImageBytes(animated webp): %v", err)
+		t.Fatalf("NormalizeImageBytes(t.Context(), animated webp): %v", err)
 	}
 	if mimeType != "image/png" {
 		t.Fatalf("mime = %q, want image/png", mimeType)
@@ -146,7 +146,7 @@ func TestNormalizeImageBytesUsesFirstFrameOfAnimatedWebP(t *testing.T) {
 		}
 	}
 
-	again, againMime, err := NormalizeImageBytes(data, mimeType)
+	again, againMime, err := NormalizeImageBytes(t.Context(), data, mimeType)
 	if err != nil {
 		t.Fatalf("second normalization: %v", err)
 	}
@@ -156,9 +156,9 @@ func TestNormalizeImageBytesUsesFirstFrameOfAnimatedWebP(t *testing.T) {
 }
 
 func TestNormalizeImageBytesFillsAnimatedWebPCanvasBackground(t *testing.T) {
-	data, mimeType, err := NormalizeImageBytes(decodeBase64Fixture(t, animatedBackgroundWebPBase64), "image/webp")
+	data, mimeType, err := NormalizeImageBytes(t.Context(), decodeBase64Fixture(t, animatedBackgroundWebPBase64), "image/webp")
 	if err != nil {
-		t.Fatalf("NormalizeImageBytes(animated webp): %v", err)
+		t.Fatalf("NormalizeImageBytes(t.Context(), animated webp): %v", err)
 	}
 	if mimeType != "image/png" {
 		t.Fatalf("mime = %q, want image/png", mimeType)
@@ -206,7 +206,7 @@ func TestNormalizeImageBytesRendersAnimatedWebPVP8Frame(t *testing.T) {
 			webpTestANIM(testWebPBackground),
 			webpTestANMF(0, 0, 3, 4, testWebPNoBlendFlag, frameChunk),
 		)
-		data, mimeType, err := NormalizeImageBytes(container, "image/webp")
+		data, mimeType, err := NormalizeImageBytes(t.Context(), container, "image/webp")
 		if err != nil {
 			t.Fatalf("NormalizeImageBytes: %v", err)
 		}
@@ -226,7 +226,7 @@ func TestNormalizeImageBytesRendersAnimatedWebPVP8Frame(t *testing.T) {
 			webpTestANIM(testWebPBackground),
 			webpTestANMF(2, 2, 3, 4, testWebPNoBlendFlag, frameChunk),
 		)
-		data, _, err := NormalizeImageBytes(container, "image/webp")
+		data, _, err := NormalizeImageBytes(t.Context(), container, "image/webp")
 		if err != nil {
 			t.Fatalf("NormalizeImageBytes: %v", err)
 		}
@@ -264,7 +264,7 @@ func TestNormalizeImageBytesCompositesAnimatedWebPAlphaFrame(t *testing.T) {
 			webpTestANIM(testWebPBackground),
 			webpTestANMF(0, 0, 3, 4, 0, frameData),
 		)
-		data, _, err := NormalizeImageBytes(container, "image/webp")
+		data, _, err := NormalizeImageBytes(t.Context(), container, "image/webp")
 		if err != nil {
 			t.Fatalf("NormalizeImageBytes: %v", err)
 		}
@@ -279,7 +279,7 @@ func TestNormalizeImageBytesCompositesAnimatedWebPAlphaFrame(t *testing.T) {
 			webpTestANIM(testWebPBackground),
 			webpTestANMF(0, 0, 3, 4, testWebPNoBlendFlag, frameData),
 		)
-		data, _, err := NormalizeImageBytes(container, "image/webp")
+		data, _, err := NormalizeImageBytes(t.Context(), container, "image/webp")
 		if err != nil {
 			t.Fatalf("NormalizeImageBytes: %v", err)
 		}
@@ -304,9 +304,9 @@ func TestNormalizeImageBytesKeepsStillWebPOnLibraryPath(t *testing.T) {
 		webpTestChunk(nil, "ALPH", webpTestALPH(alphas)),
 		webpTestChunk(nil, "VP8 ", bitstream),
 	)
-	data, _, err := NormalizeImageBytes(container, "image/webp")
+	data, _, err := NormalizeImageBytes(t.Context(), container, "image/webp")
 	if err != nil {
-		t.Fatalf("NormalizeImageBytes(still webp): %v", err)
+		t.Fatalf("NormalizeImageBytes(t.Context(), still webp): %v", err)
 	}
 	img := decodeTestImage(t, data)
 	if got := color.NRGBAModel.Convert(img.At(0, 0)).(color.NRGBA); got.A != 0 {
@@ -406,7 +406,7 @@ func TestNormalizeImageBytesRejectsMalformedAnimatedWebP(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := NormalizeImageBytes(tc.data, "image/webp")
+			_, _, err := NormalizeImageBytes(t.Context(), tc.data, "image/webp")
 			if err == nil {
 				t.Fatal("expected error")
 			}

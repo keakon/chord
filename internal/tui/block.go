@@ -17,10 +17,13 @@ type BlockImagePart struct {
 	Data      []byte
 	Index     int
 
+	cacheKey string // Immutable source key captured by a background image command.
+
 	RenderStartLine int
 	RenderEndLine   int
 	RenderCols      int
 	RenderRows      int
+	RenderImageID   int // ID encoded in the rendered Kitty placeholders.
 }
 
 // ThinkingTranslationView stores translated thinking content rendered below the

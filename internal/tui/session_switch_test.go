@@ -4151,7 +4151,13 @@ func TestSessionRestoredEventSchedulesImageProtocolRedrawForRestoredImages(t *te
 			if child == nil {
 				continue
 			}
-			if raw, ok := child().(tea.RawMsg); ok {
+			childMsg := child()
+			if loaded, ok := childMsg.(inlineImagesLoadedMsg); ok {
+				if next := m.handleInlineImagesLoaded(loaded); next != nil {
+					childMsg = next()
+				}
+			}
+			if raw, ok := childMsg.(tea.RawMsg); ok {
 				msg = raw
 				break
 			}

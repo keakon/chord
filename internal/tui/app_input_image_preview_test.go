@@ -249,7 +249,7 @@ func TestImageViewerRenderAndProtocolUsePreparedDataOnly(t *testing.T) {
 			read, decode, encode := imageCacheReadFile, imageCacheDecode, imageCacheEncodePNG
 			t.Cleanup(func() { imageCacheReadFile, imageCacheDecode, imageCacheEncodePNG = read, decode, encode })
 			imageCacheReadFile = func(string) ([]byte, error) { t.Fatal("read on UI loop"); return nil, nil }
-			imageCacheDecode = func(io.Reader) (image.Image, string, error) { t.Fatal("decode on UI loop"); return nil, "", nil }
+			imageCacheDecode = func([]byte) (image.Image, string, error) { t.Fatal("decode on UI loop"); return nil, "", nil }
 			imageCacheEncodePNG = func(io.Writer, image.Image) error { t.Fatal("encode on UI loop"); return nil }
 			imageRuntimeCache.mu.Lock()
 			imageRuntimeCache.entries = make(map[string]*imageRuntimeCacheEntry)

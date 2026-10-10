@@ -82,18 +82,18 @@ func assertNormalizedMIME(t *testing.T, mimeType string) {
 
 func TestNormalizeImageBytesPassesThroughConformingPNGAndJPEG(t *testing.T) {
 	pngData := encodeTestPNG(t, gradientImage(64, 64))
-	data, mimeType, err := NormalizeImageBytes(pngData, "image/png")
+	data, mimeType, err := NormalizeImageBytes(t.Context(), pngData, "image/png")
 	if err != nil {
-		t.Fatalf("NormalizeImageBytes(png): %v", err)
+		t.Fatalf("NormalizeImageBytes(t.Context(), png): %v", err)
 	}
 	if mimeType != "image/png" || !bytes.Equal(data, pngData) {
 		t.Fatalf("conforming PNG was re-encoded: mime=%q equal=%v", mimeType, bytes.Equal(data, pngData))
 	}
 
 	jpegData := encodeTestJPEG(t, gradientImage(32, 32))
-	data, mimeType, err = NormalizeImageBytes(jpegData, "image/jpeg")
+	data, mimeType, err = NormalizeImageBytes(t.Context(), jpegData, "image/jpeg")
 	if err != nil {
-		t.Fatalf("NormalizeImageBytes(jpeg): %v", err)
+		t.Fatalf("NormalizeImageBytes(t.Context(), jpeg): %v", err)
 	}
 	if mimeType != "image/jpeg" || !bytes.Equal(data, jpegData) {
 		t.Fatalf("conforming JPEG was re-encoded: mime=%q equal=%v", mimeType, bytes.Equal(data, jpegData))
@@ -133,7 +133,7 @@ func TestNormalizeImageBytesConvertsAcceptedFormats(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			data, mimeType, err := NormalizeImageBytes(tc.data, tc.declaredMime)
+			data, mimeType, err := NormalizeImageBytes(t.Context(), tc.data, tc.declaredMime)
 			if err != nil {
 				t.Fatalf("NormalizeImageBytes: %v", err)
 			}
@@ -153,9 +153,9 @@ func TestNormalizeImageBytesUsesFirstGIFAndTIFFFrame(t *testing.T) {
 	if err := gif.EncodeAll(&buf, &gif.GIF{Image: []*image.Paletted{first, second}, Delay: []int{0, 100}}); err != nil {
 		t.Fatal(err)
 	}
-	data, mimeType, err := NormalizeImageBytes(buf.Bytes(), "image/gif")
+	data, mimeType, err := NormalizeImageBytes(t.Context(), buf.Bytes(), "image/gif")
 	if err != nil {
-		t.Fatalf("NormalizeImageBytes(animated gif): %v", err)
+		t.Fatalf("NormalizeImageBytes(t.Context(), animated gif): %v", err)
 	}
 	assertNormalizedMIME(t, mimeType)
 	img := decodeTestImage(t, data)
@@ -186,7 +186,7 @@ func TestNormalizeImageBytesRejectsUnsupportedFormats(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := NormalizeImageBytes(tc.data, tc.declaredMime)
+			_, _, err := NormalizeImageBytes(t.Context(), tc.data, tc.declaredMime)
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -198,7 +198,7 @@ func TestNormalizeImageBytesRejectsUnsupportedFormats(t *testing.T) {
 }
 
 func TestNormalizeImageBytesEnforcesSourceBudget(t *testing.T) {
-	_, _, err := NormalizeImageBytes(make([]byte, MaxImageSourceBytes+1), "image/bmp")
+	_, _, err := NormalizeImageBytes(t.Context(), make([]byte, MaxImageSourceBytes+1), "image/bmp")
 	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("too large")) {
 		t.Fatalf("oversized source error = %v", err)
 	}
@@ -206,7 +206,7 @@ func TestNormalizeImageBytesEnforcesSourceBudget(t *testing.T) {
 
 func TestNormalizeImageBytesRejectsTruncatedBody(t *testing.T) {
 	data := encodeTestPNG(t, gradientImage(32, 32))
-	if _, _, err := NormalizeImageBytes(data[:len(data)-8], "image/png"); err == nil {
+	if _, _, err := NormalizeImageBytes(t.Context(), data[:len(data)-8], "image/png"); err == nil {
 		t.Fatal("expected error for truncated PNG body")
 	}
 }
@@ -226,13 +226,13 @@ func TestNormalizeImageBytesRejectsTruncatedJPEGScan(t *testing.T) {
 	if _, err := jpeg.DecodeConfig(bytes.NewReader(truncated)); err != nil {
 		t.Fatalf("fixture must retain its configuration: %v", err)
 	}
-	if _, _, err := NormalizeImageBytes(truncated, "image/jpeg"); err == nil {
+	if _, _, err := NormalizeImageBytes(t.Context(), truncated, "image/jpeg"); err == nil {
 		t.Fatal("expected error for missing JPEG scan data")
 	}
 }
 
 func TestNormalizeImageBytesRejectsOversizedDimensions(t *testing.T) {
-	_, _, err := NormalizeImageBytes(craftPNGHeader(30_000, 30_000), "image/png")
+	_, _, err := NormalizeImageBytes(t.Context(), craftPNGHeader(30_000, 30_000), "image/png")
 	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("megapixel")) {
 		t.Fatalf("oversized dimension error = %v", err)
 	}
@@ -271,7 +271,7 @@ func TestNormalizeImageBytesScalesDown(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			img := image.NewRGBA(image.Rect(0, 0, tc.width, tc.height))
-			data, _, err := NormalizeImageBytes(encodeTestPNG(t, img), "image/png")
+			data, _, err := NormalizeImageBytes(t.Context(), encodeTestPNG(t, img), "image/png")
 			if err != nil {
 				t.Fatalf("NormalizeImageBytes: %v", err)
 			}
@@ -285,7 +285,7 @@ func TestNormalizeImageBytesScalesDown(t *testing.T) {
 
 func TestNormalizeImageBytesDoesNotScaleUp(t *testing.T) {
 	data := encodeTestPNG(t, gradientImage(20, 10))
-	out, _, err := NormalizeImageBytes(data, "image/png")
+	out, _, err := NormalizeImageBytes(t.Context(), data, "image/png")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,13 +299,13 @@ func TestNormalizeImageBytesIsIdempotent(t *testing.T) {
 	if err := bmp.Encode(&bmpBuf, gradientImage(3000, 1500)); err != nil {
 		t.Fatal(err)
 	}
-	first, firstMime, err := NormalizeImageBytes(bmpBuf.Bytes(), "image/bmp")
+	first, firstMime, err := NormalizeImageBytes(t.Context(), bmpBuf.Bytes(), "image/bmp")
 	if err != nil {
 		t.Fatalf("first normalization: %v", err)
 	}
 	assertNormalizedMIME(t, firstMime)
 
-	second, secondMime, err := NormalizeImageBytes(first, firstMime)
+	second, secondMime, err := NormalizeImageBytes(t.Context(), first, firstMime)
 	if err != nil {
 		t.Fatalf("second normalization: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestNormalizeImageBytesFallsBackToJPEGOverBudget(t *testing.T) {
 		t.Fatalf("test fixture PNG is only %d bytes, needs to exceed %d", len(pngData), MaxImageBytes)
 	}
 
-	data, mimeType, err := NormalizeImageBytes(pngData, "image/png")
+	data, mimeType, err := NormalizeImageBytes(t.Context(), pngData, "image/png")
 	if err != nil {
 		t.Fatalf("NormalizeImageBytes: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestNormalizeImageShrinksJPEGOverBudget(t *testing.T) {
 		t.Fatalf("test fixture JPEG is only %d bytes, needs to exceed %d", len(jpegData), MaxImageBytes)
 	}
 
-	out, err := NormalizeImage(jpegData, "image/jpeg")
+	out, err := NormalizeImage(t.Context(), jpegData, "image/jpeg")
 	if err != nil {
 		t.Fatalf("NormalizeImage: %v", err)
 	}
@@ -459,7 +459,7 @@ func TestNormalizeImageBytesAppliesEXIFOrientation(t *testing.T) {
 	}
 	base := encodeTestJPEGWithQuality(t, img, 95)
 
-	plain, mimeType, err := NormalizeImageBytes(base, "image/jpeg")
+	plain, mimeType, err := NormalizeImageBytes(t.Context(), base, "image/jpeg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func TestNormalizeImageBytesAppliesEXIFOrientation(t *testing.T) {
 	}
 
 	rotated := insertExifOrientation(base, binary.LittleEndian, 6)
-	data, mimeType, err := NormalizeImageBytes(rotated, "image/jpeg")
+	data, mimeType, err := NormalizeImageBytes(t.Context(), rotated, "image/jpeg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ func TestNormalizeImageBytesAppliesEXIFOrientation(t *testing.T) {
 	}
 
 	// The normalized output carries no EXIF and must stay stable.
-	again, againMime, err := NormalizeImageBytes(data, mimeType)
+	again, againMime, err := NormalizeImageBytes(t.Context(), data, mimeType)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,7 +501,7 @@ func TestNormalizeImageBytesOrientationWithScaling(t *testing.T) {
 	base := encodeTestJPEG(t, img)
 	rotated := insertExifOrientation(base, binary.BigEndian, 8)
 
-	data, mimeType, err := NormalizeImageBytes(rotated, "image/jpeg")
+	data, mimeType, err := NormalizeImageBytes(t.Context(), rotated, "image/jpeg")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,9 +541,9 @@ func TestReadImageFile(t *testing.T) {
 
 	pngPath := filepath.Join(dir, "p.png")
 	writePNG(t, pngPath, 64, 64)
-	out, err := ReadImageFile(pngPath)
+	out, err := ReadImageFile(t.Context(), pngPath)
 	if err != nil {
-		t.Fatalf("ReadImageFile(png): %v", err)
+		t.Fatalf("ReadImageFile(t.Context(), png): %v", err)
 	}
 	if out.MimeType != "image/png" || len(out.Data) == 0 {
 		t.Fatalf("png result = %q, %d bytes", out.MimeType, len(out.Data))
@@ -551,9 +551,9 @@ func TestReadImageFile(t *testing.T) {
 
 	jpgPath := filepath.Join(dir, "p.jpg")
 	writeJPEG(t, jpgPath, 32, 32)
-	out, err = ReadImageFile(jpgPath)
+	out, err = ReadImageFile(t.Context(), jpgPath)
 	if err != nil {
-		t.Fatalf("ReadImageFile(jpg): %v", err)
+		t.Fatalf("ReadImageFile(t.Context(), jpg): %v", err)
 	}
 	if out.MimeType != "image/jpeg" {
 		t.Fatalf("jpeg mime = %q, want image/jpeg", out.MimeType)
@@ -563,13 +563,13 @@ func TestReadImageFile(t *testing.T) {
 	if err := os.WriteFile(txtPath, []byte("hi"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadImageFile(txtPath); err == nil {
+	if _, err := ReadImageFile(t.Context(), txtPath); err == nil {
 		t.Fatal("expected error for unsupported image format")
 	}
 }
 
 func TestNormalizeImageReportsScaling(t *testing.T) {
-	scaled, err := NormalizeImage(encodeTestPNG(t, gradientImage(3000, 1500)), "image/png")
+	scaled, err := NormalizeImage(t.Context(), encodeTestPNG(t, gradientImage(3000, 1500)), "image/png")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -580,7 +580,7 @@ func TestNormalizeImageReportsScaling(t *testing.T) {
 		t.Fatalf("size report = %dx%d -> %dx%d", scaled.OriginalWidth, scaled.OriginalHeight, scaled.Width, scaled.Height)
 	}
 
-	plain, err := NormalizeImage(encodeTestPNG(t, gradientImage(20, 10)), "image/png")
+	plain, err := NormalizeImage(t.Context(), encodeTestPNG(t, gradientImage(20, 10)), "image/png")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -596,9 +596,9 @@ func TestReadImageFileTrustsContentOverExtension(t *testing.T) {
 	if err := os.WriteFile(mislabeled, encodeTestPNG(t, gradientImage(4, 4)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, err := ReadImageFile(mislabeled)
+	out, err := ReadImageFile(t.Context(), mislabeled)
 	if err != nil {
-		t.Fatalf("ReadImageFile(mislabeled png): %v", err)
+		t.Fatalf("ReadImageFile(t.Context(), mislabeled png): %v", err)
 	}
 	if out.MimeType != "image/png" || len(out.Data) == 0 {
 		t.Fatalf("mislabeled result = %q, %d bytes", out.MimeType, len(out.Data))
@@ -608,7 +608,7 @@ func TestReadImageFileTrustsContentOverExtension(t *testing.T) {
 	if err := os.WriteFile(heic, []byte("\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadImageFile(heic); err == nil {
+	if _, err := ReadImageFile(t.Context(), heic); err == nil {
 		t.Fatal("expected HEIC rejection")
 	}
 }
@@ -619,7 +619,7 @@ func TestReadImageFileRejectsOversizedFile(t *testing.T) {
 	if err := os.WriteFile(path, bytes.Repeat([]byte("a"), MaxImageSourceBytes+1), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ReadImageFile(path)
+	_, err := ReadImageFile(t.Context(), path)
 	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("too large")) {
 		t.Fatalf("oversized file error = %v", err)
 	}
@@ -670,16 +670,16 @@ func TestReadAttachmentFileDispatch(t *testing.T) {
 	if err := os.WriteFile(pdfPath, []byte("%PDF-1.7"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, mime, err := ReadAttachmentFile(pdfPath)
+	_, mime, err := ReadAttachmentFile(t.Context(), pdfPath)
 	if err != nil || mime != "application/pdf" {
-		t.Fatalf("ReadAttachmentFile(pdf) = %q, %v", mime, err)
+		t.Fatalf("ReadAttachmentFile(t.Context(), pdf) = %q, %v", mime, err)
 	}
 
 	pngPath := filepath.Join(dir, "p.png")
 	writePNG(t, pngPath, 8, 8)
-	_, mime, err = ReadAttachmentFile(pngPath)
+	_, mime, err = ReadAttachmentFile(t.Context(), pngPath)
 	if err != nil {
-		t.Fatalf("ReadAttachmentFile(png): %v", err)
+		t.Fatalf("ReadAttachmentFile(t.Context(), png): %v", err)
 	}
 	if mime != "image/png" {
 		t.Fatalf("png attachment mime = %q", mime)
@@ -781,3 +781,14 @@ func FuzzJPEGOrientation(f *testing.F) {
 }
 
 const tinyWebPBase64 = "UklGRrIBAABXRUJQVlA4TKUBAAAvSsAYAA8w//M///MfeJAkbXvaSG7m8Q3GfYSBJekwQztm/IcZlgwnmWImn2BK7aFmBtnVir6q//8VOkFE/xm4baTIu8c48ArEo6+B3zFKYln3pqClSCKX0begFTAXFOLXHSyF8cCNcZEG4OywuA4KVVfJCiArU7GAgJI8+lJP/OKMT/fBAjevg1cYB7YVkFuWga2lyPi5I0HFy5YTpWIHg0RZpkniRVW9odHAKOwosWuOGdxIyn2OvaCDvhg/we6TwadPBPbqBV58MsLmMJ8yZnOWk8SRz4N+QoyPL+MnamzMvcE1rHNEr91F9GKZPVUcS9w7PhhH36suB9qPeYb/oLk6cuTiJ0wOK3m5h1cKjW6EVZCYMK7dxcKCBdgP9HkKr9gkAO2P8GKZGWVdIAatQa+1IDpt6qyorVwdy01xdW8Jkfk6xjEXmVQQ+HQdFr6OKhIN34dXWq0+0qr6EJSCeeVLH9+gvGTLyqM65PQ44ihzlTXxQKjKbAvshXgir7Lil9w4L2bvMycmjQcqXaMCO6BlY28i+FOLzbfI1vEqxAhotocAAA=="
+
+func TestNormalizeImageSharesFullDecodeValidation(t *testing.T) {
+	data := encodeTestPNG(t, gradientImage(17, 9))
+	out, err := NormalizeImage(t.Context(), data, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(out.Data, data) || !HasVerifiedImage(data) {
+		t.Fatal("normalization did not share original validation")
+	}
+}

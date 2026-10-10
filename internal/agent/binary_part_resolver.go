@@ -2,6 +2,7 @@ package agent
 
 import (
 	"container/list"
+	"context"
 	"fmt"
 	"os"
 	"sync"
@@ -105,7 +106,7 @@ func (a *MainAgent) resolveBinaryPart(part message.ContentPart) ([]byte, string,
 	}
 	mime := part.MimeType
 	if part.Type == message.ContentPartImage {
-		data, mime, err = imageutil.NormalizeImageBytes(data, part.MimeType)
+		data, mime, err = imageutil.NormalizeImageBytes(context.Background(), data, part.MimeType)
 		if err != nil {
 			return nil, "", fmt.Errorf("normalize attachment: %w", err)
 		}

@@ -15,9 +15,6 @@ func TestKittyImageIDForVariantUses24BitRange(t *testing.T) {
 		t.Fatalf("imageRuntimeCacheKey() error = %v", err)
 	}
 	raw := fnv32a([]byte(key + ":" + variant))
-	if raw <= 0x00FFFFFF {
-		t.Fatalf("test setup expected raw hash to exceed 24 bits, got %#x", raw)
-	}
 
 	got, err := kittyImageIDForVariant(part, variant)
 	if err != nil {

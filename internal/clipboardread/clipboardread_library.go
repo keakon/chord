@@ -82,7 +82,7 @@ func Read() ([]byte, string, error) {
 
 	if clipboardHasFormat(formats, clipboard.FmtImage) {
 		if data, ok := readClipboardData(ctx, clipboard.FmtImage, &firstErr); ok {
-			if normalized, mimeType, err := imageutil.NormalizeImageBytes(data, "image/png"); err == nil {
+			if normalized, mimeType, err := imageutil.NormalizeImageBytes(ctx, data, "image/png"); err == nil {
 				return normalized, mimeType, nil
 			} else if firstErr == nil {
 				firstErr = err
@@ -95,7 +95,7 @@ func Read() ([]byte, string, error) {
 			continue
 		}
 		if data, ok := readClipboardData(ctx, clipboardRegister(mimeType), &firstErr); ok {
-			normalized, normalizedMIME, err := imageutil.NormalizeImageBytes(data, mimeType)
+			normalized, normalizedMIME, err := imageutil.NormalizeImageBytes(ctx, data, mimeType)
 			if err == nil {
 				return normalized, normalizedMIME, nil
 			}

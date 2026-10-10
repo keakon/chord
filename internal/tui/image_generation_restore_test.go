@@ -78,6 +78,8 @@ func TestSessionRestoredToolImagesRenderAndTransmit(t *testing.T) {
 				case sessionRestoredRebuildMsg:
 					_, next := m.Update(msg)
 					run(next)
+				case inlineImagesLoadedMsg:
+					run(m.handleInlineImagesLoaded(msg))
 				case tea.RawMsg:
 					rawCommands++
 					if _, err := wrapped.Write(fmt.Append(nil, msg.Msg)); err != nil {

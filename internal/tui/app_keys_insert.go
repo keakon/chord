@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -422,7 +423,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				for i, a := range m.attachments {
 					loaded[i] = a
 					if len(loaded[i].Data) == 0 && strings.TrimSpace(loaded[i].ImagePath) != "" {
-						data, mimeType, err := imageutil.ReadAttachmentFile(loaded[i].ImagePath)
+						data, mimeType, err := imageutil.ReadAttachmentFile(context.Background(), loaded[i].ImagePath)
 						if err != nil {
 							return m.enqueueToast(fmt.Sprintf("Failed to read image %s: %v", loaded[i].FileName, err), "error")
 						}

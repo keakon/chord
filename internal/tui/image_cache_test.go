@@ -53,13 +53,13 @@ func TestImageRuntimeCacheReusesTransportPNGAndBase64(t *testing.T) {
 		resetImageRuntimeCache()
 	}()
 
-	pngData := makeTestPNG(t)
+	pngData := unverifiedTestPNG(t)
 	part := BlockImagePart{MimeType: "image/png", Data: pngData}
 	decodeCalls := 0
 	encodeCalls := 0
-	imageCacheDecode = func(r io.Reader) (image.Image, string, error) {
+	imageCacheDecode = func(data []byte) (image.Image, string, error) {
 		decodeCalls++
-		return origDecode(r)
+		return origDecode(data)
 	}
 	imageCacheEncodePNG = func(w io.Writer, m image.Image) error {
 		encodeCalls++
@@ -95,8 +95,8 @@ func TestImageRuntimeCacheReusesTransportPNGAndBase64(t *testing.T) {
 	if decodeCalls != 1 {
 		t.Fatalf("decode calls = %d, want 1", decodeCalls)
 	}
-	if encodeCalls != 1 {
-		t.Fatalf("png encode calls = %d, want 1", encodeCalls)
+	if encodeCalls != 0 {
+		t.Fatalf("png encode calls = %d, want 0 for original PNG", encodeCalls)
 	}
 }
 

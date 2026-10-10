@@ -52,7 +52,7 @@ func TestRenderUserPlainImageRenderRangeIncludesCardPadding(t *testing.T) {
 	boxWidth := renderWidth - style.GetHorizontalMargins()
 	innerWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
 	contentWidth := innerWidth - 2
-	imageLines, _, _, err := renderImageBlock(block.ImageParts[0], contentWidth, currentTheme.UserCardBg, currentImageCapabilities())
+	imageLines, _, _, err := renderImageBlock(&block.ImageParts[0], contentWidth, currentTheme.UserCardBg, currentImageCapabilities())
 	if err != nil {
 		t.Fatalf("renderImageBlock: %v", err)
 	}

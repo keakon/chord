@@ -38,7 +38,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
-- Generate and edit images with a dedicated image model pool. Images APIs accept full `/images/generations` addresses or resource roots, Gemini accepts version roots or full `:generateContent` endpoints for the configured model, and image model types are inferred automatically; unrecognized explicit addresses fail validation. Authorized server image tools take priority; confirmed unexecuted rejections can use the local tool. TUI loads all thumbnails in the background, the fullscreen viewer and sessions retain originals, and ACP/headless deliver the image artifacts.
+- Generate and edit images with a dedicated image model pool. Images APIs accept full `/images/generations` addresses or resource roots, Gemini accepts version roots or full `:generateContent` endpoints for the configured model, and image model types are inferred automatically; unrecognized provider `api_url` addresses fail validation. An explicit `base_url` supplies the image resource root. Authorized server image tools take priority; confirmed unexecuted rejections can use the local tool. TUI loads all thumbnails in the background, the fullscreen viewer and sessions retain originals, and ACP/headless deliver the image artifacts.
 
 - Hosted tools support per-provider concurrency, request-rate, and retry-budget limits, with pool-first retries and temporary cooldown for missing tool executions.
 - MCP tools can be loaded on demand with `deferred: true` and `tool_search`, with per-agent history and bounded discovery results.
@@ -105,6 +105,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The error panel copies all recorded errors to the clipboard with `y`, or `Cmd+C` / `Super+C`, newest first, with full dates and unwrapped messages.
 
 ### Improvements
+
+- Large-image input normalization uses less temporary memory while retaining resampling quality. Transcript thumbnails use bounded previews, and image caches enforce a byte budget and release idle payloads. Off-screen Kitty images are reclaimed after a short grace period; visible images and saved originals remain available. Fullscreen previews release redundant original-byte references and terminal resources on close.
 
 - Image tool cards show images directly without a result detail toggle; warnings, scaling information, and unsuccessful outcomes remain visible.
 

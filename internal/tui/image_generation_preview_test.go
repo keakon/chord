@@ -96,6 +96,8 @@ func TestGeneratedImageResultRendersAllThumbnailsWithoutOpeningViewer(t *testing
 					}
 				case streamFlushTickMsg:
 					run(m.handleStreamFlushTick(msg))
+				case inlineImagesLoadedMsg:
+					run(m.handleInlineImagesLoaded(msg))
 				case tea.RawMsg:
 					rawCommands++
 					if _, err := wrapped.Write(fmt.Append(nil, msg.Msg)); err != nil {

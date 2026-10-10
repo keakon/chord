@@ -2,12 +2,11 @@ package imagegen
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"slices"
-	"sync"
 	"testing"
+
+	"github.com/keakon/chord/internal/imageutil"
 )
 
 func TestImageValidationCachePreservesChecks(t *testing.T) {
@@ -23,7 +22,7 @@ func TestImageValidationCachePreservesChecks(t *testing.T) {
 		if _, err := ValidateImage(t.Context(), broken, ""); err == nil {
 			t.Fatal("truncated image accepted")
 		}
-		if verifiedImage(sha256.Sum256(broken)) {
+		if imageutil.HasVerifiedImage(broken) {
 			t.Fatal("failed decode entered cache")
 		}
 	}
@@ -31,25 +30,5 @@ func TestImageValidationCachePreservesChecks(t *testing.T) {
 	cancel()
 	if _, err := ValidateImage(ctx, data, ""); !errors.Is(err, context.Canceled) {
 		t.Fatal("cache bypassed cancellation", err)
-	}
-}
-
-func TestImageValidationCacheBoundedConcurrent(t *testing.T) {
-	var workers sync.WaitGroup
-	for i := range 512 {
-		workers.Go(func() {
-			var data [8]byte
-			binary.LittleEndian.PutUint64(data[:], uint64(i))
-			digest := sha256.Sum256(data[:])
-			rememberVerifiedImage(digest)
-			verifiedImage(digest)
-		})
-	}
-	workers.Wait()
-	verifiedImages.Lock()
-	size := len(verifiedImages.entries)
-	verifiedImages.Unlock()
-	if size != len(verifiedImages.order) {
-		t.Fatalf("cache size %d exceeds or underfills capacity", size)
 	}
 }

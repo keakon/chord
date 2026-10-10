@@ -90,7 +90,7 @@ The usual tool permissions and hooks apply to `generate_image`, reference reads 
 
 When a service returns a download URL, its address must also be allowed by the `web_fetch` network permissions. A blocked address stops image delivery with an explicit permission error.
 
-In terminals with image support, the tool card displays a thumbnail of every returned image in order. Click a thumbnail or use a view shortcut to open the full-screen viewer; generation never opens the viewer automatically.
+In terminals with image support, the tool card displays a thumbnail of every returned image in order. Thumbnails load in the background and use a preview of at most 1024px on the longest edge. Click a thumbnail or use a view shortcut to open the full-screen viewer with the original image; generation never opens the viewer automatically.
 
 ## Saved images and interrupted requests
 

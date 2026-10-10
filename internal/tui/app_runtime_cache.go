@@ -154,6 +154,14 @@ func (m *Model) Close() error {
 	if m == nil {
 		return nil
 	}
+	m.cancelInlineImages()
+	m.imageMemorySweepGeneration++
+	if m.imageViewer.cancel != nil {
+		m.imageViewer.cancel()
+	}
+	m.imageViewer = imageViewerState{}
+	clear(m.kittyImageCache)
+	clear(m.kittyPlacementCache)
 	var firstErr error
 	if m.viewport != nil {
 		if err := m.viewport.Close(); err != nil {

@@ -11,6 +11,10 @@ func kittyImageIDForVariant(part BlockImagePart, variant string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	return kittyImageIDForKey(key, variant), nil
+}
+
+func kittyImageIDForKey(key, variant string) int {
 	// Kitty Unicode placeholders encode the image ID in the placeholder's
 	// foreground truecolor value, which only carries 24 bits directly. Keep the
 	// generated IDs within that range so Kitty/Ghostty can resolve placeholders
@@ -19,7 +23,7 @@ func kittyImageIDForVariant(part BlockImagePart, variant string) (int, error) {
 	if hash == 0 {
 		hash = 1
 	}
-	return int(hash), nil
+	return int(hash)
 }
 
 func kittyStyledPlaceholderLines(imageID, cols, rows int, cardBG string) []string {
@@ -56,7 +60,7 @@ func kittyInlineSequence(part BlockImagePart, cols, rows int, alreadyPlaced bool
 	}
 	var seq string
 	if !alreadyPlaced {
-		seq, err = encodeKittyTransmit(part, imageID)
+		seq, err = encodeKittyTransmitVariant(part, imageID, true)
 		if err != nil {
 			return "", 0, err
 		}
@@ -89,5 +93,9 @@ func kittyDeleteSequenceForPlacement(imageID, placementID int) string {
 }
 
 func kittyRenderImageID(part BlockImagePart, cols, rows int) (int, error) {
-	return kittyImageIDForVariant(part, fmt.Sprintf("inline:%d:%d", cols, rows))
+	key, err := imageInlineCacheKey(part)
+	if err != nil {
+		return 0, err
+	}
+	return kittyImageIDForKey(key, fmt.Sprintf("inline:%d:%d", cols, rows)), nil
 }

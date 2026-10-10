@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -128,7 +129,7 @@ func (m *Model) splitAtMentionRefs(refs []atMentionFileRef) ([]filectx.FileRef, 
 			textRefs = append(textRefs, filectx.FileRef{Path: ref.Path, Lines: ref.Lines})
 			continue
 		}
-		data, mimeType, err := imageutil.ReadAttachmentFile(resolved)
+		data, mimeType, err := imageutil.ReadAttachmentFile(context.Background(), resolved)
 		if err != nil {
 			textRefs = append(textRefs, filectx.FileRef{Path: ref.Path, Lines: ref.Lines})
 			continue

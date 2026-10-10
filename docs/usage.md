@@ -447,6 +447,9 @@ Common actions:
 - In the composer, click a real image placeholder once to select the whole attachment, then delete or type to replace it; `Ctrl+Z` restores the edit. Double-click the same placeholder to preview it before sending. Typed placeholder text and PDFs do not open image previews.
 - In image preview, use `Left` / `Right` to browse the images present when it opened. Press `Esc` or click outside the preview to close it; composer previews return to the same draft in Insert mode, with the cursor restored and the selection cleared. Reading and preparing images happens in the background. If loading fails, press `r` to retry or close the preview to continue editing.
 - Image preview requires a terminal with fullscreen image support; other terminals show a short notice and keep the selected attachment available for editing.
+- Transcript thumbnails load in the background and use previews of at most 1024px on the longest edge. Opening the fullscreen viewer uses the stored image at its original resolution; thumbnail preparation does not change attachments or saved images.
+
+Unused image byte and transport caches are released after about 30–45 seconds; image dimensions remain cached so layout stays stable. Kitty images outside the viewport have a short grace period before Chord requests terminal resource deletion, and returning to them reloads them in the background. Visible images remain displayed. Closing or switching images releases Kitty viewer resources; an idle iTerm2 viewer releases its redraw payload after five minutes and rebuilds it on the next redraw. Attachments and saved originals are preserved. Actual process memory falls when Go collects the released data; iTerm2 manages its own bitmap memory.
 
 ## Copying text
 
