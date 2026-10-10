@@ -98,6 +98,18 @@ Per-model overrides live on the model definition (`ModelConfig.compaction`,
 with `threshold` and `reminder` subfields), so `model_templates` can share them
 through `<<:`. There is no `context.compaction.models` map.
 
+Main agents and SubAgents share the effective compaction threshold: explicit
+model settings take precedence over explicit global settings, catalog
+recommendations and the built-in default. SubAgents resolve the threshold and
+budgets from the current model-pool cursor before each request, using local
+token estimates and a lightweight checkpoint. A threshold of `0` disables
+proactive compaction for both agent types. SubAgents retain recovery from
+provider context-length errors; the main agent stops oversized requests and
+suggests `/compact`. `reminder` controls only the main agent's pressure reminders. The
+Haiku 5.5 profile recommends `threshold: 0.10` and `reminder: 0.08`: compaction
+near 87K tokens and main-agent reminders near 70K for small tasks and subtasks.
+This is not a hard billing cap that guarantees prompts below 100K.
+
 `threshold` and `reminder` (global or per-model) drive the usage-driven
 compaction path and the context-pressure reminder for **all** users; they do
 not depend on `model_driven`, which only registers the `compact_context` tool.

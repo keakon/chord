@@ -75,6 +75,8 @@ context:
 
 按模型覆盖写在**模型定义**上（`ModelConfig.compaction`，含 `threshold` 与 `reminder` 两个子字段），可经 `model_templates` 用 `<<:` 共享；**没有** `context.compaction.models` 这张表。
 
+主代理和子代理共用有效压缩阈值：显式模型配置优先，其次是显式全局配置、目录建议和内置默认值。子代理在每次请求前按模型池当前游标重新解析阈值和预算，使用本地 token 估算与轻量 checkpoint；`threshold: 0` 关闭两类代理的主动压缩；子代理仍可在超长请求错误后恢复，主代理会停止超长请求并提示使用 `/compact`。`reminder` 只控制主代理的压力提醒。Haiku 5.5 目录建议 `threshold: 0.10`、`reminder: 0.08`，约在 87K token 压缩、主代理约在 70K 提醒，面向小任务和子任务的成本控制；这不是保证低于 100K 的计费上限。
+
 `threshold` / `reminder`（全局或按模型）驱动 usage-driven 压缩路径和上下文配色，对**所有**用户生效，与 `model_driven` 无关：后者只注册 `compact_context` 工具。TUI 的上下文用量显示（侧边栏 Context 数值与进度条、状态栏百分比 pill）用这两条线取色：reminder 以下为绿色，reminder 到 threshold 之间为橙/黄色，达到 threshold 为红色。请求面的 reminder / warning overlay 则只在启用 `model_driven` 时注入（见下文）。
 
 全局行写在 `context.compaction` 下，按模型调参写在模型定义上（`ModelConfig.compaction`），可用模板 `<<:` 复用：

@@ -2,4 +2,7 @@
 # by scripts/sync_model_catalog.sh. The generator copies it into catalog.json
 # and the golden test keeps both honest. Not part of the upstream repository.
 repository: https://github.com/keakon/chord-models.git
-revision: v2026-10-09.1
+# Unpublished snapshot based on this chord-models commit, retaining the endpoint
+# correction already embedded in Chord. Replace with the published catalog tag
+# through scripts/sync_model_catalog.sh when the catalog is released.
+revision: 24abdf5a0e1b23dcf65a7421e216817e8c87df2e+local-endpoints

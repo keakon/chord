@@ -1309,7 +1309,6 @@ orchestration:
   subagent_queue_bytes: 4194304       # 4 MiB
   mailbox_memory_messages: 512
   mailbox_memory_bytes: 8388608       # 8 MiB
-  subagent_compact_usage: 0.8
   waiting_main_expiry_turns: 5
   waiting_main_min_wait_sec: 300      # 5 minutes
   waiting_main_max_wait_sec: 3600     # 1 hour
@@ -1330,7 +1329,6 @@ orchestration:
 | `subagent_queue_bytes` | `4194304` | Maximum estimated bytes of pending input for each SubAgent. This is an in-memory admission bound, not a disk spool. |
 | `mailbox_memory_messages` | `512` | Maximum SubAgent mailbox messages retained in memory across the MainAgent inbox and owner-specific mailboxes. |
 | `mailbox_memory_bytes` | `8388608` | Maximum estimated bytes retained by those in-memory mailboxes. Durable non-progress messages that exceed the memory budget are referenced through the on-disk mailbox spool; progress updates may be coalesced or omitted from memory. |
-| `subagent_compact_usage` | `0.8` | Proactively compress a SubAgent's context when estimated usage reaches this fraction of its fixed compaction budget. The default matches `context.compaction.threshold`; SubAgents use local token estimates and a lightweight sliding-window checkpoint rather than MainAgent's usage-driven compaction pipeline. Must be greater than `0` and less than `1`. |
 | `waiting_main_expiry_turns` | `5` | User-turn budget for a SubAgent parked while waiting for its owner. The turn budget expires only after `waiting_main_min_wait_sec` has also elapsed; `waiting_main_max_wait_sec` still expires the wait unconditionally. |
 | `waiting_main_min_wait_sec` | `300` | Minimum wall-clock wait, in seconds, before the turn budget can expire a `waiting_main` task. |
 | `waiting_main_max_wait_sec` | `3600` | Maximum wall-clock wait, in seconds, after which a `waiting_main` task expires regardless of user-turn activity. The effective value is never below `waiting_main_min_wait_sec`; when both clocks are set explicitly and this maximum is below the minimum, loading fails instead of clamping. |
@@ -1339,7 +1337,7 @@ orchestration:
 
 - These settings may appear in the global config and in project `.chord/config.yaml`. Positive project scalar values override the corresponding global values.
 - `provider_max_active_requests` and `model_max_active_requests` are merged by key. A project entry replaces the same global key while preserving unrelated global entries.
-- Scalar values that are zero or negative do not mean "unlimited": they retain the inherited or built-in default. `subagent_compact_usage` is only valid strictly between `0` and `1`: an out-of-range value (including `0`) is ignored with a warning, a project value then inherits the merged global value, and an unset global falls back to `0.8`. Unlike `context.compaction.threshold: 0`, zero does not disable SubAgent context protection.
+- Scalar values that are zero or negative do not mean "unlimited": they retain the inherited or built-in default.
 - Only positive provider/model map limits are enforced. Keep map keys explicit and use positive integers; do not rely on zero as a general unlimited-mode switch.
 - The three hosted limit maps also merge by key and enforce only positive values. Set a provider entry to `0` in project configuration to remove that inherited hosted limit; other concurrency limits still apply.
 - Limits are process-local. They do not coordinate quotas across multiple Chord processes.
@@ -1352,7 +1350,7 @@ orchestration:
 - Reduce SubAgent queue limits only when producers can handle enqueue rejection. These queues do not spill to disk, and overly small limits can interrupt parent/child coordination.
 - Keep `max_borrowed_runtimes` small but positive. Borrowed slots exist to break orchestration progress stalls, not to increase ordinary throughput.
 - A `waiting_main` task expires when its turn budget and minimum wait are both satisfied, or when the maximum wait is reached. Increase the turn budget or minimum wait when owners need more time to respond; increase the maximum only when parked tasks should remain recoverable for longer.
-- Lowering `subagent_compact_usage` reduces context-overflow risk but causes earlier and more frequent compression. Raising it reduces compression work but leaves less recovery headroom.
+- SubAgents use the same `context.compaction.threshold` and model-level `compaction.threshold` as the main agent, including catalog recommendations. Lower thresholds compact earlier; higher thresholds retain more context. Setting the effective threshold to `0` disables proactive compaction while preserving recovery from provider context-length errors. SubAgents use local token estimates and a lightweight checkpoint; context-pressure reminders apply to the main agent.
 - Increasing concurrency is not automatically faster: provider throttling, model latency, local memory pressure, and workspace lease contention can reduce effective throughput. Change limits using observed queue/rejection metrics and end-to-end latency rather than CPU count alone.
 
 ## Image generation

@@ -29,6 +29,8 @@ func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
 	client := llm.NewClient(providerCfg, provider, "model", 1024, "")
 
 	parent, sub := newMixedBatchTestSubAgent(t)
+	parent.globalConfig = config.DefaultConfig()
+	parent.globalConfig.Context.Compaction.Threshold = 0
 	// The test drives the LLM loop by hand, so give the turn its own cancellable
 	// context: the join at the end must be able to abort the request the
 	// SubAgent issues after a plain-text reply.
@@ -120,7 +122,10 @@ func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) 
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.taskDesc = "preserve the task contract"
 	sub.ownerAgentID = "main"
-	sub.compactUsage = 0.5
+	parent.globalConfig = config.DefaultConfig()
+	parent.globalConfig.Context.Compaction.Threshold = 0.5
+	sub.llmClient.Close()
+	sub.llmClient = nil // This test supplies its own token budgets.
 	sub.ctxMgr.SetTokenBudgets(3000, 2400, 2400, 0)
 	messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
 	for range 12 {
@@ -168,9 +173,12 @@ func TestSubAgentCompactionSeparatesFixedThresholdFromRequestSafety(t *testing.T
 		{"request limit exceeded below fixed threshold", 4, 75, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, sub := newMixedBatchTestSubAgent(t)
+			parent, sub := newMixedBatchTestSubAgent(t)
 			t.Cleanup(sub.cancel)
-			sub.compactUsage = 0.5
+			parent.globalConfig = config.DefaultConfig()
+			parent.globalConfig.Context.Compaction.Threshold = 0.5
+			sub.llmClient.Close()
+			sub.llmClient = nil // This test supplies its own token budgets.
 			messages := []message.Message{{Role: message.RoleUser, Content: "task"}}
 			for range 12 {
 				messages = append(messages,

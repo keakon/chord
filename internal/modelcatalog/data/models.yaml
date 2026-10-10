@@ -101,11 +101,21 @@ models:
           mode: explicit
           ttl: 5m
           cache_tools: true
+      compaction:
+        threshold: 0.10
+        reminder: 0.08
+        notes: >-
+          Cost-first starting point for small coding tasks and subagents.
+          The 872K fixed compaction budget places the trigger near 87K tokens,
+          leaving headroom below the 100K prompt pricing boundary. This is not
+          a hard billing cap; raise the threshold when task continuity matters more.
       sources:
         - url: https://platform.claude.com/docs/en/models/haiku-5-5/overview
           checked: "2026-10-08"
         - url: https://platform.claude.com/docs/en/build-with-claude/effort
           checked: "2026-10-08"
+        - url: https://www.anthropic.com/claude-haiku-5-5
+          checked: "2026-10-10"
     input_modalities:
     - text
     - image

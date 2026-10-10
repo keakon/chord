@@ -9,12 +9,28 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
 
 const subAgentContextRecoveryHeadroom = 4096
+
+// applyModelCompactionConfig resolves the next request's model through the same
+// configuration path as the main agent. Read it at each request boundary so
+// model switches and fallback pool cursors do not retain another model's line.
+func (s *SubAgent) applyModelCompactionConfig() float64 {
+	client, _ := s.llmSnapshot()
+	modelRef := ""
+	if client != nil {
+		modelRef = client.NextRequestModelRef()
+		if limit := client.ContextLimitForModelRef(modelRef); limit > 0 {
+			reserved := s.parent.effectiveCompactionReservedInput()
+			s.ctxMgr.SetTokenBudgets(limit, client.InputLimitForModelRef(modelRef), client.CompactionBudgetForModelRef(modelRef), reserved)
+		}
+	}
+	threshold := s.parent.effectiveCompactionThreshold(modelRef)
+	return threshold
+}
 
 func (s *SubAgent) recoverFromContextLength(err error) bool {
 	if s == nil || s.turn == nil || !llm.IsContextLengthExceeded(err) || s.turn.SubAgentContextRecoveryCount >= 1 {
@@ -50,16 +66,16 @@ func (s *SubAgent) prepareContextForLLM(messages []message.Message) (prepared []
 	if s == nil || len(messages) <= 2 {
 		return messages
 	}
+	usage := s.applyModelCompactionConfig()
+	if usage <= 0 {
+		return messages
+	}
 	budget := s.ctxMgr.GetUsableCompactionBudget()
 	if budget <= 0 {
 		budget = s.ctxMgr.GetMaxTokens()
 	}
 	if budget <= 0 {
 		return messages
-	}
-	usage := s.compactUsage
-	if usage <= 0 || usage >= 1 {
-		usage = config.DefaultSubAgentCompactUsage
 	}
 	estimated := estimateMessagesTokens(s.ctxMgr, projectGeneratedImagePreviews(messages))
 	requestBudget := s.ctxMgr.GetUsableInputBudget()

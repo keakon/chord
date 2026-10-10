@@ -13,6 +13,8 @@
 
 ### 不兼容变更
 
+- 子代理与主代理统一使用全局和模型级压缩阈值，也会采用模型目录建议。请删除 `orchestration.subagent_compact_usage`，Chord 会忽略该键并报告未知字段告警，配置仍会继续加载；改用 `context.compaction.threshold` 或模型定义中的 `compaction.threshold`。阈值为 `0` 时，两类代理都关闭主动压缩，子代理仍可在超长请求错误后恢复，主代理会停止超长请求并提示使用 `/compact`。Haiku 5.5 的目录配方面向小型编程任务和子任务，建议约在 87K token 压缩，为 100K 价格分界留出余量。
+
 - Gemini 原生 `api_url` 统一使用 API 版本根，如 `https://generativelanguage.googleapis.com/v1beta/`，对话和图片模型共享地址。已有原生 Gemini 配置需去掉末尾的 `/models`；模型资源和操作路径由 Chord 自动追加。
 
 - MCP 连接要求协议 `2025-06-18`；协商到其他版本的服务端会被拒绝。旧服务端需先升级再连接。

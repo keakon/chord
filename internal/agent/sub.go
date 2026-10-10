@@ -177,7 +177,6 @@ type SubAgent struct {
 	ctxAppendBytes             int
 	queueMessageLimit          int
 	queueByteLimit             int
-	compactUsage               float64
 	reductionMu                sync.RWMutex
 	reductionStats             ContextReductionStats
 	promotedToolQueue          []*toolResult // event-loop-owned FIFO; avoids sending results back into the active loop
@@ -742,7 +741,6 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		modelName:         cfg.ModelName,
 		queueMessageLimit: cfg.Orchestration.EffectiveSubAgentQueueMessages(),
 		queueByteLimit:    cfg.Orchestration.EffectiveSubAgentQueueBytes(),
-		compactUsage:      cfg.Orchestration.EffectiveSubAgentCompactUsage(),
 		customPrompt:      cfg.SystemPrompt,
 		startupTimeout:    cfg.StartupTimeout,
 		llmSilenceBudget:  defaultSubAgentLLMSilenceBudget,
@@ -848,7 +846,7 @@ func (s *SubAgent) switchModel(client *llm.Client, modelName string, contextLimi
 		oldClient.Close()
 	}
 	providerRef := client.PrimaryModelRef()
-	s.ctxMgr.SetTokenBudgets(contextLimit, client.InputLimitForModelRef(providerRef), client.CompactionBudgetForModelRef(providerRef), 0)
+	s.ctxMgr.SetTokenBudgets(contextLimit, client.InputLimitForModelRef(providerRef), client.CompactionBudgetForModelRef(providerRef), s.parent.effectiveCompactionReservedInput())
 	s.installSystemPrompt(prompt)
 	runningRef := client.RunningModelRef()
 	if runningRef == "" {
@@ -1116,7 +1114,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			// when TUI focus is on this SubAgent (mirrors MainAgent.callLLM).
 			if runningRef != "" {
 				if lim := llmClient.ContextLimitForModelRef(runningRef); lim > 0 {
-					s.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(runningRef), llmClient.CompactionBudgetForModelRef(runningRef), 0)
+					s.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(runningRef), llmClient.CompactionBudgetForModelRef(runningRef), s.parent.effectiveCompactionReservedInput())
 				}
 			}
 			if resp.NativeTools == nil {

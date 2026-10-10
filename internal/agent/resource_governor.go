@@ -150,9 +150,6 @@ func effectiveOrchestrationConfig(globalCfg, projectCfg *config.Config) config.O
 	if override.MailboxMemoryBytes > 0 {
 		out.MailboxMemoryBytes = override.MailboxMemoryBytes
 	}
-	if override.SubAgentCompactUsage > 0 {
-		out.SubAgentCompactUsage = override.SubAgentCompactUsage
-	}
 	if len(override.ProviderMaxActiveRequests) > 0 {
 		baseLimits := out.ProviderMaxActiveRequests
 		out.ProviderMaxActiveRequests = make(map[string]int, len(baseLimits)+len(override.ProviderMaxActiveRequests))

@@ -848,8 +848,6 @@ func TestProjectWhitelistCoversAllConfigKeys(t *testing.T) {
 //     documented default-retaining semantics ("effective maximum is never
 //     below the effective minimum", "zero or negative retain the inherited or
 //     built-in default") and never fail the load.
-//   - subagent_compact_usage outside (0,1) falls back to the default with a
-//     visible issue instead of silently riding through.
 //   - At the project layer, zero or negative orchestration scalar overrides
 //     are stripped before the merge so the global line they overlay survives
 //     (only positive project scalar values override per the docs); before
@@ -905,7 +903,7 @@ func TestLoadConfigOrchestrationZeroAndSingleSidedValuesKeepDocumentedSemantics(
 	// maximum is never below the effective minimum (an explicit minimum above
 	// the default maximum raises the effective maximum to match). None of
 	// these may fail the load or be rewritten.
-	body := "orchestration:\n  max_live_runtimes: 0\n  max_borrowed_runtimes: -1\n  max_bypass_runtimes: 0\n  subagent_compact_usage: 0\n  waiting_main_min_wait_sec: 7200\n"
+	body := "orchestration:\n  max_live_runtimes: 0\n  max_borrowed_runtimes: -1\n  max_bypass_runtimes: 0\n  waiting_main_min_wait_sec: 7200\n"
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	writeTestFile(t, path, body)
 	cfg, err := LoadConfigFromPath(path)
@@ -921,59 +919,11 @@ func TestLoadConfigOrchestrationZeroAndSingleSidedValuesKeepDocumentedSemantics(
 	if got := cfg.Orchestration.EffectiveMaxBypassRuntimes(); got != DefaultMaxBypassRuntimes {
 		t.Fatalf("EffectiveMaxBypassRuntimes = %d, want default %d", got, DefaultMaxBypassRuntimes)
 	}
-	if got := cfg.Orchestration.EffectiveSubAgentCompactUsage(); got != DefaultSubAgentCompactUsage {
-		t.Fatalf("EffectiveSubAgentCompactUsage = %v, want default %v", got, DefaultSubAgentCompactUsage)
-	}
 	if got, want := cfg.Orchestration.EffectiveWaitingMainMinWait().Seconds(), float64(7200); got != want {
 		t.Fatalf("EffectiveWaitingMainMinWait = %v, want %v", got, want)
 	}
 	if got, want := cfg.Orchestration.EffectiveWaitingMainMaxWait().Seconds(), float64(7200); got != want {
 		t.Fatalf("EffectiveWaitingMainMaxWait = %v, want %v (effective max never below min)", got, want)
-	}
-}
-
-func TestLoadConfigOrchestrationCompactUsageOutOfRangeFallsBackToDefault(t *testing.T) {
-	// A subagent_compact_usage outside (0,1) — including exactly 1, which is
-	// rejected here unlike context.compaction.threshold, and NaN/±Inf — is
-	// reset to the unset state so the effective default applies, and reported
-	// by the issue collector instead of silently riding through. The reset
-	// also proves NaN/Inf did not survive: a NaN value compares unequal to 0.
-	for _, value := range []string{"1.5", "1", "-0.5", ".nan", ".inf"} {
-		path := filepath.Join(t.TempDir(), "config.yaml")
-		writeTestFile(t, path, "orchestration:\n  subagent_compact_usage: "+value+"\n")
-		cfg, err := LoadConfigFromPath(path)
-		if err != nil {
-			t.Fatalf("LoadConfigFromPath(usage %s): %v", value, err)
-		}
-		if cfg.Orchestration.SubAgentCompactUsage != 0 {
-			t.Fatalf("subagent_compact_usage %s = %v after load, want reset to 0 (unset)", value, cfg.Orchestration.SubAgentCompactUsage)
-		}
-		if got := cfg.Orchestration.EffectiveSubAgentCompactUsage(); got != DefaultSubAgentCompactUsage {
-			t.Fatalf("EffectiveSubAgentCompactUsage for %s = %v, want default %v", value, got, DefaultSubAgentCompactUsage)
-		}
-	}
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	writeTestFile(t, path, "orchestration:\n  subagent_compact_usage: 1.5\n")
-	issues, err := resolvedFileIssues(path, "")
-	if err != nil {
-		t.Fatalf("ResolvedConfigIssues: %v", err)
-	}
-	if joined := strings.Join(issues, "\n"); !strings.Contains(joined, "orchestration.subagent_compact_usage") {
-		t.Fatalf("issues = %q, want an orchestration.subagent_compact_usage report", joined)
-	}
-}
-
-func TestLoadConfigOrchestrationKeepsValidCompactUsage(t *testing.T) {
-	for _, value := range []string{"0.4", "0.999", "0.001"} {
-		path := filepath.Join(t.TempDir(), "config.yaml")
-		writeTestFile(t, path, "orchestration:\n  subagent_compact_usage: "+value+"\n")
-		cfg, err := LoadConfigFromPath(path)
-		if err != nil {
-			t.Fatalf("LoadConfigFromPath(usage %s): %v", value, err)
-		}
-		if got := cfg.Orchestration.SubAgentCompactUsage; got <= 0 || got >= 1 {
-			t.Fatalf("subagent_compact_usage %s = %v after load, want it kept in (0,1)", value, got)
-		}
 	}
 }
 
@@ -1036,37 +986,6 @@ func TestMergeProjectConfigOrchestrationStripsZeroLeafKeepsValidSibling(t *testi
 	}
 	if got := merged.Orchestration.MaxBorrowedRuntimes; got != 2 {
 		t.Fatalf("merged max_borrowed_runtimes = %d, want the valid project 2 kept", got)
-	}
-}
-
-func TestMergeProjectConfigOrchestrationCompactUsageOverrideHandling(t *testing.T) {
-	global := DefaultConfig()
-	global.Orchestration.SubAgentCompactUsage = 0.6
-
-	// A valid project fraction overrides the global line...
-	projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
-	writeTestFile(t, projectPath, "orchestration:\n  subagent_compact_usage: 0.4\n")
-	_, merged, err := MergeProjectConfig(global, projectPath)
-	if err != nil {
-		t.Fatalf("MergeProjectConfig(valid): %v", err)
-	}
-	if got := merged.Orchestration.SubAgentCompactUsage; got != 0.4 {
-		t.Fatalf("merged subagent_compact_usage = %v, want project 0.4", got)
-	}
-
-	// ...while out-of-range project fractions (0, 1.5, NaN) must not clobber
-	// the global line: the runtime would otherwise silently fall back to the
-	// built-in 0.8 instead of the inherited 0.6.
-	for _, value := range []string{"0", "1.5", ".nan"} {
-		projectPath := filepath.Join(t.TempDir(), ".chord", "config.yaml")
-		writeTestFile(t, projectPath, "orchestration:\n  subagent_compact_usage: "+value+"\n")
-		_, merged, err := MergeProjectConfig(global, projectPath)
-		if err != nil {
-			t.Fatalf("MergeProjectConfig(usage %s): %v", value, err)
-		}
-		if got := merged.Orchestration.SubAgentCompactUsage; got != 0.6 {
-			t.Fatalf("merged subagent_compact_usage for %s = %v, want inherited global 0.6", value, got)
-		}
 	}
 }
 

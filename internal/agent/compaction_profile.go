@@ -36,6 +36,9 @@ func (a *MainAgent) configuredCompactionProfile() compactionProfile {
 }
 
 func (a *MainAgent) effectiveCompactionReservedInput() int {
+	if a == nil {
+		return 0
+	}
 	for _, cfg := range []*config.Config{a.projectConfig, a.globalConfig} {
 		if cfg == nil {
 			continue

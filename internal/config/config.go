@@ -93,7 +93,6 @@ const (
 	DefaultMailboxMemoryMessages = 512
 	DefaultMailboxMemoryBytes    = 8 << 20
 	DefaultContextCompactUsage   = 0.8
-	DefaultSubAgentCompactUsage  = DefaultContextCompactUsage
 
 	// A worker that escalated parks until its owner replies. Two independent
 	// clocks decide when that wait is abandoned, because neither is sufficient
@@ -125,7 +124,6 @@ type OrchestrationConfig struct {
 	SubAgentQueueBytes              int            `json:"subagent_queue_bytes,omitempty" yaml:"subagent_queue_bytes,omitempty"`
 	MailboxMemoryMessages           int            `json:"mailbox_memory_messages,omitempty" yaml:"mailbox_memory_messages,omitempty"`
 	MailboxMemoryBytes              int            `json:"mailbox_memory_bytes,omitempty" yaml:"mailbox_memory_bytes,omitempty"`
-	SubAgentCompactUsage            float64        `json:"subagent_compact_usage,omitempty" yaml:"subagent_compact_usage,omitempty"`
 	WaitingMainExpiryTurns          int            `json:"waiting_main_expiry_turns,omitempty" yaml:"waiting_main_expiry_turns,omitempty"`
 	WaitingMainMinWaitSec           int            `json:"waiting_main_min_wait_sec,omitempty" yaml:"waiting_main_min_wait_sec,omitempty"`
 	WaitingMainMaxWaitSec           int            `json:"waiting_main_max_wait_sec,omitempty" yaml:"waiting_main_max_wait_sec,omitempty"`
@@ -181,13 +179,6 @@ func (c OrchestrationConfig) EffectiveMailboxMemoryBytes() int {
 		return c.MailboxMemoryBytes
 	}
 	return DefaultMailboxMemoryBytes
-}
-
-func (c OrchestrationConfig) EffectiveSubAgentCompactUsage() float64 {
-	if c.SubAgentCompactUsage > 0 && c.SubAgentCompactUsage < 1 {
-		return c.SubAgentCompactUsage
-	}
-	return DefaultSubAgentCompactUsage
 }
 
 func (c OrchestrationConfig) EffectiveMaxLiveRuntimes() int {
@@ -1756,7 +1747,6 @@ func collectSemanticIssues(cfg *Config) []string {
 	resetInvalidDiagnosticsFields(&cfg.Diagnostics)
 	issues = append(issues, collectCompactionConfigIssues(cfg)...)
 	issues = append(issues, collectModelCompactionIssues(cfg)...)
-	issues = append(issues, collectOrchestrationConfigIssues(cfg)...)
 	if cfg.QuestionAutoSelectTimeout < 0 {
 		issues = append(issues, "question_auto_select_timeout must be non-negative; using 0")
 		cfg.QuestionAutoSelectTimeout = 0
@@ -1898,7 +1888,7 @@ func collectModelCompactionIssues(cfg *Config) []string {
 //     semantics for unset or default-retaining values.
 //   - Detectably out-of-range single values are reset to their unset state
 //     and reported as issues, mirroring how the compaction thresholds are
-//     handled (collectOrchestrationConfigIssues), so a broken value behaves
+//     handled, so a broken value behaves
 //     as not configured instead of riding through to the runtime.
 //
 // The three runtime pools (max_live_runtimes / max_borrowed_runtimes /
@@ -1922,32 +1912,6 @@ func orchestrationConfigLoadError(cfg *Config) error {
 		return fmt.Errorf("orchestration: waiting_main_max_wait_sec %d is below waiting_main_min_wait_sec %d; the unconditional expiry clock must not run before the guarded one — raise the maximum or lower the minimum", orch.WaitingMainMaxWaitSec, orch.WaitingMainMinWaitSec)
 	}
 	return nil
-}
-
-// validOrchestrationCompactUsage reports whether a subagent_compact_usage line
-// is usable. It is a usage fraction strictly between 0 and 1; unlike
-// context.compaction.threshold there is no zero-off switch, and unlike that
-// threshold a value of exactly 1 is not accepted either because the usable
-// budget boundary itself must stay protected.
-func validOrchestrationCompactUsage(v float64) bool {
-	return v > 0 && v < 1
-}
-
-// collectOrchestrationConfigIssues reports orchestration values that are
-// detectably out of range and resets them to their unset state so the
-// effective-value fallback applies. Only values that cannot come from an
-// omitted key are flagged: an explicit 0 is indistinguishable from "not set"
-// at the decoded struct level and keeps its documented default-retaining
-// meaning (it cannot disable SubAgent compaction).
-func collectOrchestrationConfigIssues(cfg *Config) []string {
-	orch := cfg.Orchestration
-	var issues []string
-	if v := orch.SubAgentCompactUsage; v != 0 && !validOrchestrationCompactUsage(v) {
-		issues = append(issues, fmt.Sprintf("orchestration.subagent_compact_usage must be a usage fraction strictly between 0 and 1; got %v, using the default %v", v, DefaultSubAgentCompactUsage))
-		orch.SubAgentCompactUsage = 0
-	}
-	cfg.Orchestration = orch
-	return issues
 }
 
 // orchestrationScalarLeaf pairs one scalar orchestration leaf path with the
@@ -2406,8 +2370,8 @@ func marshalSanitizedMerge(baseMap, overrideMap map[string]any, path string, dia
 // semanticInvalidOverridePaths evaluates a merged candidate config and returns
 // the paths of leaves that violate semantic validation (invalid retry/key
 // settings, out-of-range diagnostics values, orchestration scalar leaves that
-// a project override wrote as zero or negative, out-of-range compaction or
-// subagent_compact_usage fractions). Values that only fail because of
+// a project override wrote as zero or negative, or out-of-range compaction
+// fractions). Values that only fail because of
 // cross-layer inheritance (for example key_order=smart without a codex preset
 // in the same override) are intentionally left in place: the final decode
 // resets them against the fully merged preset instead of guessing here.
@@ -2471,8 +2435,7 @@ func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
 	// Orchestration scalar leaves: only positive project scalar values override
 	// the corresponding global values, so a project leaf that merged to zero or
 	// below must be stripped for the global line it overlays to survive. The
-	// same applies to an out-of-range subagent_compact_usage (including NaN
-	// and ±Inf). The waiting_main clock pair is deliberately not listed here:
+	// waiting_main clock pair is deliberately not listed here:
 	// an inversion is a contradiction between two individually valid leaves
 	// that cannot be fixed by dropping either one, so it fails the final merge
 	// decode instead of guessing a side.
@@ -2480,9 +2443,6 @@ func semanticInvalidOverridePaths(data []byte) ([][]string, error) {
 		if leaf.value <= 0 {
 			paths = append(paths, leaf.path)
 		}
-	}
-	if !validOrchestrationCompactUsage(cfg.Orchestration.SubAgentCompactUsage) {
-		paths = append(paths, []string{"orchestration", "subagent_compact_usage"})
 	}
 	return paths, nil
 }

@@ -13,6 +13,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Breaking Changes
 
+- SubAgents now use the same global and per-model compaction thresholds as the main agent, including catalog recommendations. Remove `orchestration.subagent_compact_usage`; Chord ignores it and reports an unknown-field warning while continuing to load the configuration. Configure `context.compaction.threshold` or the model's `compaction.threshold` instead. A threshold of `0` disables proactive compaction for both agent types; SubAgents retain context-length error recovery, while the main agent stops oversized requests and suggests `/compact`. The Haiku 5.5 catalog profile recommends compaction near 87K tokens for small coding tasks and subagents, leaving headroom below its 100K pricing boundary.
+
 - Gemini native `api_url` now uses the API version root, such as `https://generativelanguage.googleapis.com/v1beta/`, shared by chat and image models. Remove the trailing `/models` from existing native Gemini URLs; Chord appends model resources and operations.
 
 - MCP connections require protocol `2025-06-18`; servers that negotiate another version are rejected. Update older servers before connecting.

@@ -2496,10 +2496,11 @@ func TestSendMessageToCompletedTaskRehydratesParkedWorker(t *testing.T) {
 
 func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	a.globalConfig = config.DefaultConfig()
+	a.globalConfig.Context.Compaction.Threshold = 0.65
 	a.projectConfig = &config.Config{Orchestration: config.OrchestrationConfig{
 		SubAgentQueueMessages: 7,
 		SubAgentQueueBytes:    12345,
-		SubAgentCompactUsage:  0.65,
 	}}
 	wantWorkDir := filepath.Join(a.contentRoot, "workspace")
 	setCachedWorkDirForTest(a, wantWorkDir)
@@ -2531,8 +2532,11 @@ func TestRehydratePreservesConfiguredOrchestrationAndWorkDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rehydrateTask: %v", err)
 	}
-	if sub.queueMessageLimit != 7 || sub.queueByteLimit != 12345 || sub.compactUsage != 0.65 {
-		t.Fatalf("rehydrated orchestration = messages:%d bytes:%d compact:%v", sub.queueMessageLimit, sub.queueByteLimit, sub.compactUsage)
+	if sub.queueMessageLimit != 7 || sub.queueByteLimit != 12345 {
+		t.Fatalf("rehydrated orchestration = messages:%d bytes:%d", sub.queueMessageLimit, sub.queueByteLimit)
+	}
+	if got := sub.applyModelCompactionConfig(); got != 0.65 {
+		t.Fatalf("rehydrated compaction threshold = %v, want shared global 0.65", got)
 	}
 	if sub.workDir != wantWorkDir {
 		t.Fatalf("rehydrated workDir = %q, want %q", sub.workDir, wantWorkDir)

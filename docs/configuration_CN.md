@@ -1125,7 +1125,6 @@ orchestration:
   subagent_queue_bytes: 4194304       # 4 MiB
   mailbox_memory_messages: 512
   mailbox_memory_bytes: 8388608       # 8 MiB
-  subagent_compact_usage: 0.8
   waiting_main_expiry_turns: 5
   waiting_main_min_wait_sec: 300      # 5 分钟
   waiting_main_max_wait_sec: 3600     # 1 小时
@@ -1146,7 +1145,6 @@ orchestration:
 | `subagent_queue_bytes` | `4194304` | 每个 SubAgent 待处理输入的估算字节数上限。这是内存准入限制，不会溢写到磁盘 spool。 |
 | `mailbox_memory_messages` | `512` | MainAgent inbox 和按 owner 分类的 mailbox 在内存中保留的 SubAgent 消息总数上限。 |
 | `mailbox_memory_bytes` | `8388608` | 上述内存 mailbox 的估算总字节数上限。超过内存预算的持久化非 progress 消息会通过磁盘 mailbox spool 引用；progress 更新可能在内存中合并或省略。 |
-| `subagent_compact_usage` | `0.8` | 当 SubAgent 的估算上下文用量达到固定压缩预算的这一比例时，主动压缩其上下文。默认值与 `context.compaction.threshold` 一致；SubAgent 使用本地 token 估算和轻量滑动窗口 checkpoint，而不是 MainAgent 的 usage 驱动压缩管线。有效值必须严格大于 `0` 且小于 `1`。 |
 | `waiting_main_expiry_turns` | `5` | SubAgent 停在 `waiting_main`、等待 owner 回复时允许经过的用户回合数。只有同时满足 `waiting_main_min_wait_sec` 后，这条回合数限制才会让任务过期；`waiting_main_max_wait_sec` 仍会无条件结束等待。 |
 | `waiting_main_min_wait_sec` | `300` | 回合数限制可以让 `waiting_main` 任务过期前必须经过的最短墙钟时间，单位为秒。 |
 | `waiting_main_max_wait_sec` | `3600` | `waiting_main` 任务最多等待的墙钟时间，单位为秒。达到后不论用户回合数如何都会过期；实际值不会小于 `waiting_main_min_wait_sec`。若两者都显式配置且该最大值小于最小值，配置加载会直接失败，而不是静默钳制。 |
@@ -1155,7 +1153,7 @@ orchestration:
 
 - 这些设置既可写在全局配置，也可写在项目 `.chord/config.yaml` 中。项目配置中的正数标量会覆盖对应的全局值。
 - `provider_max_active_requests` 和 `model_max_active_requests` 按 key 合并：项目配置替换同名全局条目，同时保留其他全局条目。
-- 标量为零或负数不表示「无限制」，而是保留继承值或内置默认值。`subagent_compact_usage` 只有严格位于 `(0, 1)` 时才有效：越界值（含 `0`）会被忽略并记录警告，项目层此时继承合并后的全局值，全局未配置时回退到 `0.8`。与 `context.compaction.threshold: 0` 不同，零不会关闭 SubAgent 上下文保护。
+- 标量为零或负数不表示「无限制」，而是保留继承值或内置默认值。
 - provider/model map 中只有正数限制会生效。建议使用明确的 key 和正整数，不要把零当作通用的「无限制」开关。
 - 三个 hosted 限制 map 同样按 key 合并，只有正数生效；项目中将某个 provider 条目设为 `0` 可取消继承的对应 hosted 限制，其他并发限制仍然生效。
 - 所有限制只在单个进程内生效，不会协调多个 Chord 进程之间的配额。
@@ -1168,7 +1166,7 @@ orchestration:
 - 只有消息生产方能够处理入队拒绝，才降低 SubAgent 队列限制。这些队列不会溢写到磁盘，限制过小可能中断父子 Agent 协作。
 - `max_borrowed_runtimes` 应保持较小的正数。借用槽位用于解除编排推进停滞，不用于提高普通吞吐量。
 - `waiting_main` 任务会在「回合数限制与最短等待时间都满足」或「达到最长等待时间」时过期。owner 需要更多时间回复时，可提高回合数限制或最短等待时间；只有希望任务更久保持可恢复状态时，才提高最长等待时间。
-- 降低 `subagent_compact_usage` 可减少上下文溢出风险，但会更早、更频繁地压缩；提高它可减少压缩开销，但会缩小恢复余量。
+- 子代理与主代理统一使用 `context.compaction.threshold` 和模型定义中的 `compaction.threshold`，也会采用目录建议。阈值越低，压缩越早；阈值越高，保留的上下文越多。有效阈值为 `0` 时关闭主动压缩，服务商拒绝超长请求后的恢复仍保留。子代理使用本地 token 估算和轻量 checkpoint；上下文压力提醒只用于主代理。
 - 提高并发不一定更快：provider 限流、模型延迟、本地内存压力和 workspace lease 竞争都可能降低实际吞吐。应依据排队/拒绝指标和端到端延迟调参，而不是只看 CPU 数量。
 
 ## 图片生成
