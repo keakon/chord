@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"

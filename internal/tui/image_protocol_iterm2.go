@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	xiterm2 "github.com/charmbracelet/x/ansi/iterm2"
+	xiterm2 "github.com/keakon/x/ansi/iterm2"
 )
 
 func iterm2InlineSequence(part BlockImagePart, cols, rows int) (string, error) {

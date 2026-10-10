@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
 )

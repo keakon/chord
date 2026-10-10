@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"charm.land/lipgloss/v2"
+	"github.com/keakon/lipgloss/v2"
 )
 
 func isAssistantSummaryFieldLine(line string) bool {

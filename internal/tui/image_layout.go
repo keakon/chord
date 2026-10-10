@@ -6,8 +6,8 @@ import (
 	"image/color"
 	"strings"
 
-	xansi "github.com/charmbracelet/x/ansi"
-	xkitty "github.com/charmbracelet/x/ansi/kitty"
+	xansi "github.com/keakon/x/ansi"
+	xkitty "github.com/keakon/x/ansi/kitty"
 )
 
 const (

@@ -1,6 +1,10 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/keakon/bubbles/v2/textarea"
+)
 
 const (
 	inputMinLines = 1
@@ -81,7 +85,7 @@ func (i *Input) visualCursorRow() int {
 	rawLines := strings.Split(val, "\n")
 	visual := 0
 	for r := 0; r < logicalRow && r < len(rawLines); r++ {
-		wrapped := inputWrap([]rune(rawLines[r]), width)
+		wrapped := textarea.Wrap([]rune(rawLines[r]), width)
 		if len(wrapped) == 0 {
 			visual++
 		} else {

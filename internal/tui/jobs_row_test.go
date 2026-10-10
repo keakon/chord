@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/tools"
 )

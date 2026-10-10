@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/lipgloss/v2"
 	uv "github.com/keakon/ultraviolet"
+	"github.com/keakon/x/ansi"
 )
 
 // sgrActiveOnTrailingSpaces walks an ANSI-encoded line, tracks SGR state and

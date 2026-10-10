@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	xkitty "github.com/charmbracelet/x/ansi/kitty"
+	xkitty "github.com/keakon/x/ansi/kitty"
 )
 
 func TestKittyImageIDForVariantUses24BitRange(t *testing.T) {

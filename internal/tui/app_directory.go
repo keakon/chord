@@ -3,7 +3,7 @@ package tui
 import (
 	"fmt"
 
-	"charm.land/lipgloss/v2"
+	"github.com/keakon/lipgloss/v2"
 )
 
 // renderDirectory produces the Ctrl+T message directory within the main viewport area.

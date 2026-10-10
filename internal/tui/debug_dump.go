@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	uv "github.com/keakon/ultraviolet"
+	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/tui/markdownutil"

@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/lipgloss/v2"
+	"github.com/keakon/x/ansi"
 )
 
 // Compact wordmark, mirroring the SVG wordmark (assets/logo/chord-wordmark.svg):

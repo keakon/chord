@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/keakon/bubbletea/v2"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/memory"

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/lipgloss/v2"
+	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/thinkingtranslate"

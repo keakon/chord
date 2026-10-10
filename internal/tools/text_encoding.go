@@ -572,9 +572,8 @@ func runeSet(chars string) map[rune]struct{} {
 // are not preceded by a base character able to carry an emoji or text
 // presentation. Models occasionally emit these orphans (e.g. "️0" instead of
 // "0"): inside edit/apply_patch arguments they make matching fail because the
-// file content does not contain the selector, and inside rendered text they
-// are charged one display column by the width library while the terminal
-// paints them zero-width, under-filling card backgrounds by that column.
+// file content does not contain the selector. Rendered text also drops these
+// marks while keeping valid presentation sequences intact.
 //
 // Stripping a selector that was *not* orphaned costs a column in the other
 // direction — "1️⃣" measures 2 and paints 2, while a stripped "1⃣" measures 1

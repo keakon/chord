@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	xansi "github.com/charmbracelet/x/ansi"
-	xiterm2 "github.com/charmbracelet/x/ansi/iterm2"
-	xkitty "github.com/charmbracelet/x/ansi/kitty"
+	xansi "github.com/keakon/x/ansi"
+	xiterm2 "github.com/keakon/x/ansi/iterm2"
+	xkitty "github.com/keakon/x/ansi/kitty"
 )
 
 func TestKittyFramingPreservesPayloadAndChunkMetadata(t *testing.T) {

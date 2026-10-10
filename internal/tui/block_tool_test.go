@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/lipgloss/v2"
 	uv "github.com/keakon/ultraviolet"
+	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"

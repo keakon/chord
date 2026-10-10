@@ -5,14 +5,11 @@ go 1.27.0
 toolchain go1.27.1
 
 require (
-	charm.land/glamour/v2 v2.0.1
-	charm.land/lipgloss/v2 v2.0.6
 	github.com/abadojack/whatlanggo v1.0.1
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/atotto/clipboard v0.1.4
 	github.com/bmatcuk/doublestar/v4 v4.10.2
 	github.com/bytedance/sonic v1.15.4
-	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/dgraph-io/ristretto/v2 v2.4.2
@@ -20,10 +17,13 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/keakon/bubbles/v2 v2.2.1-fork
-	github.com/keakon/bubbletea/v2 v2.0.9-fork
+	github.com/keakon/bubbles/v2 v2.2.1-fork.2
+	github.com/keakon/bubbletea/v2 v2.0.9-fork.1
+	github.com/keakon/glamour/v2 v2.0.1-fork.1
 	github.com/keakon/golog v0.4.1
-	github.com/keakon/ultraviolet v0.0.1-fork.9
+	github.com/keakon/lipgloss/v2 v2.0.6-fork.1
+	github.com/keakon/ultraviolet v0.0.1-fork.10
+	github.com/keakon/x/ansi v0.11.8-fork.2
 	github.com/keakon/x/powernap v0.1.10-fork
 	github.com/klauspost/compress v1.20.0
 	github.com/mackee/go-readability v0.3.1
@@ -51,7 +51,7 @@ require (
 	github.com/bytedance/sonic/loader v0.5.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
-	github.com/charmbracelet/ultraviolet v0.0.0-20260910203606-6c9e17dc7a16 // indirect
+	github.com/charmbracelet/x/ansi v0.11.8 // indirect
 	github.com/charmbracelet/x/exp/slice v0.0.0-20260920004010-53e2afe73ae5 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
@@ -63,6 +63,7 @@ require (
 	github.com/ebitengine/purego v0.11.0 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/keakon/displaywidth v0.11.0-fork.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect

@@ -5,7 +5,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/bubbles/v2/textarea"
+	"github.com/keakon/x/ansi"
 	"github.com/rivo/uniseg"
 )
 
@@ -47,7 +48,7 @@ func (i *Input) selectionDisplayRows() []inputDisplayRow {
 	for line := range strings.SplitSeq(value, "\n") {
 		length := utf8.RuneCountInString(line)
 		consumed := 0
-		for _, wrapped := range inputWrap([]rune(line), width) {
+		for _, wrapped := range textarea.Wrap([]rune(line), width) {
 			n := min(len(wrapped), length-consumed)
 			rows = append(rows, inputDisplayRow{start: base + consumed, end: base + consumed + n, text: string(wrapped[:n])})
 			consumed += n
@@ -66,18 +67,15 @@ func (i *Input) SelectionPositionAt(x, y int) (int, bool) {
 	if y < 0 || y >= i.Height() || rowIndex >= len(rows) {
 		return 0, false
 	}
-	pos := i.textarea.PositionAt(inputPromptWidth, y)
-	offset := runeOffsetFromRowCol(i.DisplayValue(), pos.Row, pos.Col)
 	row := rows[rowIndex]
-	// PositionAt counts widths per rune. Correct it using complete graphemes,
-	// including cumulative widths after modifiers and ZWJ sequences.
+	// Map columns within the shared wrapped row to complete source graphemes.
 	x = max(x-inputPromptWidth, 0)
 	column, consumed := 0, 0
 	g := uniseg.NewGraphemes(row.text)
 	for g.Next() {
 		width := ansi.StringWidth(g.Str())
 		if column+width > x {
-			return i.graphemeBoundary(offset+consumed, false), true
+			return i.graphemeBoundary(row.start+consumed, false), true
 		}
 		column += width
 		consumed += utf8.RuneCountInString(g.Str())

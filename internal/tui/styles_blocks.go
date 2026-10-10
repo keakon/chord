@@ -1,6 +1,6 @@
 package tui
 
-import "charm.land/lipgloss/v2"
+import "github.com/keakon/lipgloss/v2"
 
 const (
 	// SectionSeparator is the visual separator rune used by the animated input divider.

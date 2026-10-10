@@ -1,6 +1,6 @@
 package tui
 
-import "charm.land/lipgloss/v2"
+import "github.com/keakon/lipgloss/v2"
 
 var appliedThemeVersion uint64
 

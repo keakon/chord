@@ -8,7 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/identity"

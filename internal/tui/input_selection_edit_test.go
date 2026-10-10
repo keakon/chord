@@ -6,8 +6,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/x/ansi"
 )
 
 func TestSelectionDeletesSourceRangeInBothDirections(t *testing.T) {
@@ -94,7 +94,7 @@ func TestSelectionCopiesSoftWrapAndTrailingSpaces(t *testing.T) {
 }
 
 func TestSelectionGraphemeMappingAndRendering(t *testing.T) {
-	for _, glyph := range []string{"中", "e\u0301", "👍🏽", "👩‍💻", "🇺🇳"} {
+	for _, glyph := range []string{"中", "e\u0301", "👍🏽", "👩‍💻", "🇺🇳", "a\u093e\u093e", "a\u0cf3"} {
 		t.Run(glyph, func(t *testing.T) {
 			in := NewInput()
 			in.SetWidth(40)

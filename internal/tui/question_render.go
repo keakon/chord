@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/keakon/bubbles/v2/textarea"
+	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"

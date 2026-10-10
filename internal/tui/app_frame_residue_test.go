@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/x/ansi"
 
 	uv "github.com/keakon/ultraviolet"
 )

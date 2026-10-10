@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	"github.com/keakon/bubbles/v2/textarea"
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
 )

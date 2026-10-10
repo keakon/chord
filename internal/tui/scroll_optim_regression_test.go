@@ -29,8 +29,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
 	uv "github.com/keakon/ultraviolet"
+	"github.com/keakon/x/ansi"
 )
 
 // padToWidth pads s with spaces so its display width equals width. Inputs

@@ -4,7 +4,7 @@ import (
 	"image"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/x/ansi"
 )
 
 // overlayLayout uses one height budget for the frame, scrollable content and

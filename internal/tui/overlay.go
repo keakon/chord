@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"image"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/x/ansi"
 )
 
 type OverlayConfig struct {

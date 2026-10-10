@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/lipgloss/v2"
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/ultraviolet/screen"
+	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/buildinfo"
 )

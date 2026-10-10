@@ -72,13 +72,16 @@ if replace_or_exclude:
         errors.append(f"go.mod:{lineno}: replace/exclude directives require explicit dependency-audit review: {text}")
 
 allowed_pseudo = {
-    "github.com/charmbracelet/ultraviolet": "Charm TUI syntax highlighter API currently pinned before a stable tag.",
     "github.com/charmbracelet/x/exp/slice": "Transitive Charm experimental helper pinned by the current TUI stack.",
     "golang.org/x/exp/shiny": "Transitive desktop dependency of the native clipboard backend; upstream currently publishes pseudo-version releases.",
     "golang.org/x/mobile": "Transitive platform dependency of the native clipboard backend; upstream currently publishes pseudo-version releases.",
     "golang.org/x/telemetry": "Transitive dependency of the go.mod-pinned deadcode analyzer that the unreachable-code gate runs.",
 }
 allowed_forks = {
+    "github.com/keakon/displaywidth": "Grapheme width fork accounting for spacing components and upstream VS16 eligibility fixes.",
+    "github.com/keakon/x/ansi": "ANSI wrapping and cutting fork using the corrected grapheme width while sharing palette types with colorprofile.",
+    "github.com/keakon/lipgloss/v2": "Lipgloss fork sharing the corrected ANSI width and Chord's Ultraviolet renderer.",
+    "github.com/keakon/glamour/v2": "Glamour fork using the same Lipgloss and ANSI width for Markdown layout.",
     "github.com/keakon/bubbles/v2": "Bubbles fork rebased to github.com/keakon/bubbletea/v2 so component tea.Msg/Cmd types match Chord's Bubble Tea fork.",
     "github.com/keakon/bubbletea/v2": "Bubble Tea fork used for renderer control while Chord disables terminal hard-scroll optimization to avoid stale terminal rows.",
     "github.com/keakon/ultraviolet": "Ultraviolet fork used for lower-cost cached screen rendering after disabling scroll optimization.",
@@ -111,7 +114,9 @@ for req in requirements:
 graph = subprocess.run(["go", "mod", "graph"], check=True, text=True, stdout=subprocess.PIPE).stdout.splitlines()
 root_edges = sum(1 for line in graph if line.startswith(module + " "))
 graph_edges = len(graph)
-max_root_edges = int(os.environ.get("CHORD_MAX_ROOT_REQUIRE_EDGES", "74"))
+# The width fork retains upstream ANSI palette types for colorprofile; its
+# original width dependency adds one edge without adding another renderer.
+max_root_edges = int(os.environ.get("CHORD_MAX_ROOT_REQUIRE_EDGES", "75"))
 max_graph_edges = int(os.environ.get("CHORD_MAX_MOD_GRAPH_EDGES", "650"))
 if root_edges > max_root_edges:
     errors.append(f"root dependency edges {root_edges} exceed CHORD_MAX_ROOT_REQUIRE_EDGES={max_root_edges}")

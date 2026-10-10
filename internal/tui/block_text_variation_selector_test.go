@@ -9,9 +9,8 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// Orphaned variation selectors are invisible but not harmless: the width
-// method charges them a column the terminal never paints, which shortens card
-// background padding and lets the terminal default bleed in at the right edge.
+// Orphaned variation selectors carry no presentation information. Display
+// normalization drops them while preserving valid emoji/keycap sequences.
 // These tests pin both the stripping rule and the layout consequence.
 
 func TestStripOrphanVariationSelectors(t *testing.T) {
@@ -79,11 +78,10 @@ func TestStripOrphanVariationSelectors(t *testing.T) {
 
 // The width method must not charge a column for a stripped orphan.
 func TestOrphanSelectorWidthAfterStrip(t *testing.T) {
-	// Premise of the whole strip fix: the width library charges an orphaned
-	// selector one column the terminal never paints. If that ever changes,
-	// the strip's rationale must be re-examined.
-	if got := tuiStringWidth(" ️"); got != 2 {
-		t.Fatalf("tuiStringWidth(%q) = %d, want 2 (width library no longer charges orphans a column; revisit the strip premise)", " ️", got)
+	// Width calculation also rejects VS16 on an ineligible base. Normalizing
+	// display text must preserve that width rather than change the layout.
+	if got := tuiStringWidth(" \ufe0f"); got != 1 {
+		t.Fatalf("tuiStringWidth(%q) = %d, want 1", " \ufe0f", got)
 	}
 	stripped := tools.StripOrphanVariationSelectors(" ️")
 	if got := tuiStringWidth(stripped); got != 1 {
@@ -135,7 +133,6 @@ func TestSanitizeDisplayTextStripsOrphanAfterControl(t *testing.T) {
 
 // End-to-end: a card built from orphan-bearing content must paint its surface
 // across the full width, with no terminal-default columns at the right edge.
-// Before stripping, each orphan left the card one column short.
 func TestCardBackgroundFillsWidthWithOrphans(t *testing.T) {
 	const cardWidth = 100
 	// Realistic content: prose with orphaned selectors and a markdown table.

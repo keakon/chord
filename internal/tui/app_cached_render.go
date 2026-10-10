@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/x/ansi"
 	tea "github.com/keakon/bubbletea/v2"
 	uv "github.com/keakon/ultraviolet"
+	"github.com/keakon/x/ansi"
 )
 
 type cachedRenderable struct {

@@ -3,8 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
-	"github.com/mattn/go-runewidth"
+	"github.com/keakon/x/ansi"
 )
 
 type OverlayTable struct {
@@ -159,7 +158,7 @@ func formatTableCell(s string, width, align int) string {
 		return ""
 	}
 	s = ansi.Truncate(s, width, "…")
-	actual := runewidth.StringWidth(s)
+	actual := tuiStringWidth(s)
 	if actual >= width {
 		return s
 	}

@@ -5,8 +5,8 @@ import (
 	"encoding/base64"
 	"sync"
 
-	xansi "github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
+	xansi "github.com/keakon/x/ansi"
 )
 
 const deferredImageSequencePrefix = "\x00CHORD_IMAGE:"

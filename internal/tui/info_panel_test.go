@@ -11,8 +11,8 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 
-	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/lipgloss/v2"
+	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"

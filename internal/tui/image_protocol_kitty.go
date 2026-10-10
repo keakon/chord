@@ -3,7 +3,7 @@ package tui
 import (
 	"fmt"
 
-	xansi "github.com/charmbracelet/x/ansi"
+	xansi "github.com/keakon/x/ansi"
 )
 
 func kittyImageIDForVariant(part BlockImagePart, variant string) (int, error) {

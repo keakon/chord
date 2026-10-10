@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/x/ansi"
 
 	tea "github.com/keakon/bubbletea/v2"
 

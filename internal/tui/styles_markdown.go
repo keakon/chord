@@ -3,8 +3,8 @@ package tui
 import (
 	"strings"
 
-	"charm.land/glamour/v2"
-	"charm.land/glamour/v2/ansi"
+	"github.com/keakon/glamour/v2"
+	"github.com/keakon/glamour/v2/ansi"
 
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )

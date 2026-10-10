@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/x/ansi"
 )
 
 // cleanJobOutputText renders job output for the model: terminal escape

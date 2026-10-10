@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"charm.land/lipgloss/v2"
+	"github.com/keakon/lipgloss/v2"
 )
 
 // TestSplitStyleRenderParity verifies that appendStyledWrappedBody's per-line

@@ -10,11 +10,11 @@ import (
 	"strings"
 	"sync"
 
-	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
-	"github.com/charmbracelet/x/ansi"
+	"github.com/keakon/lipgloss/v2"
+	"github.com/keakon/x/ansi"
 )
 
 // Tool results often contain partial files, so Chroma Error tokens can mean

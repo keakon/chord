@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/lipgloss/v2"
+	"github.com/keakon/lipgloss/v2"
 )
 
 // Status bar horizontal margins so content is not flush against edges or covered by scrollbar.

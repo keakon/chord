@@ -6,7 +6,7 @@ import (
 	"slices"
 	"strings"
 
-	"charm.land/lipgloss/v2"
+	"github.com/keakon/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/convformat"

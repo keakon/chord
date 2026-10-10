@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/glamour/v2"
+	"github.com/keakon/glamour/v2"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tui/markdownutil"
