@@ -74,9 +74,8 @@ func (a *grepArgs) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	// Accept deprecated singular/plural spellings when their current
-	// counterparts are absent so habit-shaped calls still work; current fields
-	// always win.
+	// Tolerate alternative singular/plural spellings when the schema fields
+	// are absent; schema spellings always take precedence.
 	if len(raw.Paths) == 0 {
 		raw.Paths = raw.Path
 	}

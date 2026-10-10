@@ -41,8 +41,8 @@ func (a *globArgs) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	// Accept the deprecated singular "pattern" field when "patterns" is absent
-	// so legacy-shaped calls still work; the current field always wins.
+	// Tolerate singular "pattern" when "patterns" is absent; the schema
+	// spelling takes precedence when both are supplied.
 	if len(raw.Patterns) == 0 {
 		raw.Patterns = raw.Pattern
 	}

@@ -52,7 +52,7 @@ func (ToolSearchTool) Description() string {
 	return "Find and load available MCP tools using a natural-language query or exact tool_names. Loads a small set of definitions for subsequent calls; it does not execute tools or enable disconnected/disabled servers. Definitions stay loaded while their successful discovery records remain in history. If compaction removes a record, load that tool again by name."
 }
 func (ToolSearchTool) Parameters() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
 		"query":      map[string]any{"type": "string", "maxLength": discoveryMaxQueryChars},
 		"tool_names": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": DiscoveryMaxResults},
 	}}

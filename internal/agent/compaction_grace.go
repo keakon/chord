@@ -144,7 +144,7 @@ func (a *MainAgent) exhaustCompactionGraceAfterModelDriven() {
 	if !a.compactionGraceActive && !a.autoCompactRequested.Load() {
 		return
 	}
-	a.endCompactionGrace("model_driven_settled", a.currentRequestBatch(a.ctxMgr.Snapshot()))
+	a.endCompactionGrace("model_driven_settled", a.currentRequestBatch(nil))
 }
 
 // clearCompactionGrace resets the grace state for a fresh compaction window

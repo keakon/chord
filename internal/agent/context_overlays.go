@@ -324,13 +324,14 @@ func (a *MainAgent) stageContextNotice(level, text string) {
 	if a.hasDurablePressureNotice(level) {
 		return
 	}
+	durableWarning := level == contextNoticePressure && a.hasDurablePressureNotice(contextNoticeWarning)
 	a.overlayClaims.mu.Lock()
 	defer a.overlayClaims.mu.Unlock()
 	switch level {
 	case contextNoticePressure:
 		if a.manualNoticeActive() ||
 			a.pendingCompactionWarning != "" || a.pendingCompactionImminent != "" ||
-			a.hasDurablePressureNotice(contextNoticeWarning) {
+			durableWarning {
 			return
 		}
 		a.pendingContextPressureReminder = text
@@ -970,7 +971,7 @@ func (a *MainAgent) queueCompactionWarning() {
 	// so the armed flag alone is the binding condition (the gate triggers on
 	// the armed request even when the instantaneous decision does not re-arm).
 	requestID := a.autoCompactRequestGeneration.Load()
-	batch := a.currentRequestBatch(a.ctxMgr.Snapshot())
+	batch := a.currentRequestBatch(nil)
 	if !a.tryClaimCompactionWarning(requestID, batch) {
 		return
 	}

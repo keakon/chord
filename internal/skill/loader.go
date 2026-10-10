@@ -146,7 +146,7 @@ func LoadMeta(path string) (*Meta, error) {
 		Effort:                 fm.Effort,
 		AllowedTools:           fm.AllowedTools,
 		Paths:                  fm.Paths,
-		Resources:              NormalizeResourceList(fm.Resources),
+		Resources:              normalizeResourceList(fm.Resources),
 		DisableModelInvocation: fm.DisableModelInvocation != nil && *fm.DisableModelInvocation,
 	}
 
@@ -234,7 +234,7 @@ func loadSidecarMeta(rootDir string, meta *Meta) {
 			meta.Paths = sidecar.Paths
 		}
 		if len(sidecar.Resources) > 0 {
-			meta.Resources = NormalizeResourceList(sidecar.Resources)
+			meta.Resources = normalizeResourceList(sidecar.Resources)
 		}
 		if sidecar.DisableModelInvocation != nil {
 			meta.DisableModelInvocation = *sidecar.DisableModelInvocation

@@ -856,6 +856,9 @@ func (a *MainAgent) currentRequestBatch(messages []message.Message) uint64 {
 			return batch
 		}
 	}
+	if messages == nil && a != nil && a.ctxMgr != nil {
+		messages = a.ctxMgr.Snapshot()
+	}
 	return maxRequestBatch(messages)
 }
 

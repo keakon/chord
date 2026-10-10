@@ -199,7 +199,7 @@ func (a *MainAgent) recordCompactionAppliedAnalyticsEvent(d *compactionDraft, he
 	// apply of a session has no previous anchor and omits the field.
 	if d.SummaryMode == compactionSummaryModeModelDriven {
 		if last := a.lastModelDrivenApplyBatch; last > 0 {
-			if current := a.currentRequestBatch(a.ctxMgr.Snapshot()); current > last {
+			if current := a.currentRequestBatch(nil); current > last {
 				diagnostic["request_batches_since_last_apply"] = strconv.FormatUint(current-last, 10)
 			}
 		}

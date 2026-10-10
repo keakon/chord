@@ -566,7 +566,7 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// restored counter would restart from 0 and read as a stale anchor,
 	// re-admitting requests the interval gate meant to throttle. The stamp
 	// keeps the persisted sequence continuous across the restart.
-	applyBatch := a.currentRequestBatch(a.ctxMgr.Snapshot())
+	applyBatch := a.currentRequestBatch(nil)
 	d.NewMessages[0].RequestBatch = applyBatch
 
 	// Capture the original first user message BEFORE entering ReplacePrefixAtomic,

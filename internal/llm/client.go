@@ -1540,9 +1540,9 @@ func providerWireFamily(provider *ProviderConfig) string {
 // The DeepSeek family follows deepSeekTarget, never the model name by itself:
 // an explicit contract, including "none", decides it the same way it decides
 // the DeepSeek request contract. On the Chat Completions wire an explicit
-// selector still names the family first, because it declares which backend
-// validates the replayed thinking state; the DeepSeek request contract keeps
-// applying to such a target all the same.
+// selector takes precedence when its dialect identifies a native family;
+// generic thinking dialects leave the family unknown. The DeepSeek request
+// contract keeps applying to such a target all the same.
 func (p *ProviderConfig) NativeFamily(modelID string) string {
 	wire := providerWireFamily(p)
 	// Messages aliases need the endpoint contract to preserve same-target

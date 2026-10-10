@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
@@ -617,5 +618,17 @@ func TestCreateSubAgentRejectsUncompilableResultSchema(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "result_schema") {
 		t.Fatalf("CreateSubAgent error = %v, want a result_schema rejection", err)
+	}
+}
+
+func TestResultContractPreviewPreservesUTF8ByteBoundary(t *testing.T) {
+	for _, tail := range []string{"é", "中", "🙂"} {
+		for cut := 1; cut < len(tail); cut++ {
+			prefix := strings.Repeat("a", tools.MaxInlineResultBytes-cut)
+			preview := truncateResultContractPreview(json.RawMessage(prefix + tail + "tail"))
+			if !utf8.Valid(preview) || len(preview) > tools.MaxInlineResultBytes || string(preview) != prefix {
+				t.Fatalf("cut=%d tail=%q: bytes=%d valid=%v", cut, tail, len(preview), utf8.Valid(preview))
+			}
+		}
 	}
 }

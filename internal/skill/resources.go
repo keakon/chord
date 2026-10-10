@@ -41,10 +41,10 @@ type ResourceEntry struct {
 	Placeholder bool // true when the entry comes from a body placeholder scan
 }
 
-// NormalizeResourceList trims and cleans resource declarations so equivalent
+// normalizeResourceList trims and cleans resource declarations so equivalent
 // spellings (such as "./references/a.md" and "references/a.md") share one
 // canonical form before digest comparison and filesystem checks.
-func NormalizeResourceList(in []string) []string {
+func normalizeResourceList(in []string) []string {
 	if len(in) == 0 {
 		return nil
 	}
@@ -202,7 +202,7 @@ func PlaceholderResourceRefs(content string) []string {
 		if ref == "" {
 			continue
 		}
-		normalized := NormalizeResourceList([]string{ref})
+		normalized := normalizeResourceList([]string{ref})
 		if len(normalized) == 0 {
 			continue
 		}

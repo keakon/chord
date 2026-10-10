@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -226,7 +227,11 @@ func truncateResultContractPreview(inline json.RawMessage) json.RawMessage {
 	if len(inline) <= tools.MaxInlineResultBytes {
 		return inline
 	}
-	return inline[:tools.MaxInlineResultBytes]
+	end := tools.MaxInlineResultBytes
+	for end > 0 && !utf8.RuneStart(inline[end]) {
+		end--
+	}
+	return inline[:end]
 }
 
 // setResultContractFailure records the terminal contract failure for the

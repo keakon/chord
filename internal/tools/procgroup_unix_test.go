@@ -50,8 +50,8 @@ func TestConfiguredCommandTTYAccessFailsFastWithoutControllingTTY(t *testing.T) 
 func TestBashTTYAccessFailsFastWithoutControllingTTY(t *testing.T) {
 	start := time.Now()
 	out, err := ShellTool{}.Execute(context.Background(), mustMarshal(t, map[string]any{
-		"command": "cat </dev/tty",
-		"timeout": 5,
+		"command":    "cat </dev/tty",
+		"timeout_ms": 5000,
 	}))
 	if err == nil {
 		t.Fatal("expected /dev/tty command to fail or be rejected")

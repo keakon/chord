@@ -194,7 +194,7 @@ func TestFileToolsResolveRelativePathsFromBaseDir(t *testing.T) {
 	shellOut, err := (ShellTool{BaseDir: base}).Execute(context.Background(), mustMarshal(t, map[string]any{
 		"command":     "pwd",
 		"description": "print working directory",
-		"timeout":     5,
+		"timeout_ms":  5000,
 	}))
 	if err != nil {
 		t.Fatalf("ShellTool.Execute: %v", err)
@@ -379,7 +379,7 @@ func TestShellToolSupportsTildeWorkdir(t *testing.T) {
 		"command":     "pwd",
 		"description": "print working directory",
 		"workdir":     "~",
-		"timeout":     5,
+		"timeout_ms":  5000,
 	}))
 	if err != nil {
 		t.Fatalf("ShellTool.Execute: %v", err)
@@ -392,7 +392,7 @@ func TestShellToolSupportsTildeWorkdir(t *testing.T) {
 		"command":     fmt.Sprintf("printf ok > %q", filepath.Base(marker)),
 		"description": "write marker file",
 		"workdir":     "~",
-		"timeout":     5,
+		"timeout_ms":  5000,
 	}))
 	if err != nil {
 		t.Fatalf("ShellTool.Execute write: %v", err)
