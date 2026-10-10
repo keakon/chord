@@ -2,7 +2,7 @@
   "version": "2026-10-10.1",
   "source": {
     "repository": "https://github.com/keakon/chord-models.git",
-    "revision": "24abdf5a0e1b23dcf65a7421e216817e8c87df2e+local-endpoints"
+    "revision": "v2026-10-10.1"
   },
   "endpoints": [
     {
