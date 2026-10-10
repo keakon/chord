@@ -100,8 +100,38 @@ function sitePath(lang, slug, anchor = '') {
   return `${SITE_BASE}${langPrefix}/${slug}/${anchor}`;
 }
 
-function rewriteLinks(body, lang) {
-  return body
+export function rewriteLinks(body, lang) {
+  const rewriteProse = (text) => text.replace(
+    /(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)|(?<!\\)\[[^\]\n]*\]\([^)]*\)/g,
+    (match, codeDelimiter) => codeDelimiter ? match : rewriteLinkDestination(match, lang),
+  );
+  let result = '';
+  let prose = '';
+  let fence = '';
+  for (const line of body.split(/(?<=\n)/)) {
+    const content = line.replace(/^(?: {0,3}> ?)+/, '');
+    const marker = content.match(/^ {0,3}(`{3,}|~{3,})([^\n]*)/);
+    if (fence) {
+      result += line;
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && marker[2].trim() === '') {
+        fence = '';
+      }
+    } else if (marker && (marker[1][0] === '~' || !marker[2].includes('`'))) {
+      result += rewriteProse(prose) + line;
+      prose = '';
+      fence = marker[1];
+    } else if (/^(?: {4}|\t)/.test(content)) {
+      result += rewriteProse(prose) + line;
+      prose = '';
+    } else {
+      prose += line;
+    }
+  }
+  return result + rewriteProse(prose);
+}
+
+function rewriteLinkDestination(destination, lang) {
+  return destination
     // ./examples/index.md  → /chord/examples/   (special-case the directory index)
     // ./examples/index_CN.md → /chord/zh/examples/
     .replace(/\(\.\/examples\/index(_CN)?\.md([^)]*)\)/g, (_m, cn, rest) => {
@@ -120,8 +150,8 @@ function rewriteLinks(body, lang) {
     .replace(/\(\.\/([\w.-]+)\.yaml\)/g, (_m, name) =>
       `(https://github.com/keakon/chord/blob/main/docs/examples/${name}.yaml)`,
     )
-    // Sibling .md links: ./xxx_CN.md → /chord/zh/xxx/ ; ./xxx.md → /chord/xxx/
-    .replace(/\(\.\/([\w-]+?)(_CN)?\.md([^)]*)\)/g, (_m, slug, cn, rest) => {
+    // Sibling .md links accept both xxx.md and ./xxx.md spellings.
+    .replace(/\((?:\.\/)?([\w-]+?)(_CN)?\.md([^)]*)\)/g, (_m, slug, cn, rest) => {
       const anchor = (rest || '').startsWith('#') ? rest : '';
       return `(${sitePath(cn ? 'zh' : lang, slug, anchor)})`;
     })

@@ -318,6 +318,8 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 | 类型                 | 何时出现                                     | 主要 payload 字段 |
 | -------------------- | -------------------------------------------- | ----------------- |
+| `workdir_changed` | 当前工作目录发生变化 | `path`、`worktree_id`、`generation` |
+| `image_result` | 图片工具结果或原图交付错误 | `call_id`、`agent_id`、`status`、`result`、`delivery_error`；随后的 `image_artifact` 数据块见[图片交付](#图片交付)。 |
 | `activity`           | Agent 进入新阶段                             | `agent_id`、`type`（如 `preparing`、`connecting`、`streaming`、`compacting`） 、`detail` |
 | `assistant_message`  | 一条完整 assistant 消息可供消费              | `agent_id`、`task_id`、`agent_type`、`parent_agent_id`、`text`、`tool_calls`；main agent 的委托字段为空 |
 | `idle`               | 主 agent 与所有 SubAgent 均已全局静默，可再次接收输入 | `last_outcome`（`completed` / `cancelled` / `error`）、`suppress_user_notification`（除非 agent 在上一次 idle 事件后运行过，否则为 `true`）、`running_jobs`（与 `status_response` 同口径；大于 0 时，每个计入的 job 结束后 agent 都会再跑一轮，随后再发一条 `idle`，等待工作结束的集成方应继续读取事件） |
