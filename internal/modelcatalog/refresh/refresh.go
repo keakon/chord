@@ -1,8 +1,9 @@
 // Package refresh pulls a pinned snapshot of the model catalog from the
 // upstream chord-models repository into the local refresh cache. It runs only
 // when the user asks for it: every call is an explicit network operation, and
-// a failure anywhere leaves the previously effective catalog and the previous
-// cache file untouched.
+// fetching and validation failures leave the existing cache untouched. Once
+// the validated cache is published, installation can fail without rolling back
+// that file; the running process retains its previously effective catalog.
 package refresh
 
 import (

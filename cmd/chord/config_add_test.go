@@ -84,6 +84,8 @@ func TestEditConfigYAMLForAddPreservesUntouchedAnchors(t *testing.T) {
 	current := []byte(`providers:
   openai: &base
     preset: openai
+  secondary:
+    <<: *base
 model_pools:
   default:
     - openai/gpt-6.1-sol
@@ -94,6 +96,9 @@ model_pools:
 	})
 	if err != nil || !strings.Contains(string(edited), "&base") {
 		t.Fatalf("untouched anchor must survive editing: %s, %v", edited, err)
+	}
+	if strings.Contains(string(edited), "!!merge") || !strings.Contains(string(edited), "<<: *base") {
+		t.Fatalf("merge key spelling changed: %s", edited)
 	}
 }
 

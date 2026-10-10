@@ -559,7 +559,7 @@ MainAgent 忙碌时收到的用户消息会排队，等到安全的请求边界�
 
 ## 用 YAML anchor 复用协议模板
 
-Chord 没有 `model_templates` 配置字段，但可以在该顶层容器中使用 YAML
+`model_templates` 是专用于 YAML 锚点的顶层容器，不参与运行配置解析；可以在其中使用 YAML
 anchor 和 merge key。Chord 会忽略容器本身，只读取 `providers` 下展开后的
 模型配置。
 
@@ -1166,7 +1166,7 @@ orchestration:
 - 只有消息生产方能够处理入队拒绝，才降低 SubAgent 队列限制。这些队列不会溢写到磁盘，限制过小可能中断父子 Agent 协作。
 - `max_borrowed_runtimes` 应保持较小的正数。借用槽位用于解除编排推进停滞，不用于提高普通吞吐量。
 - `waiting_main` 任务会在「回合数限制与最短等待时间都满足」或「达到最长等待时间」时过期。owner 需要更多时间回复时，可提高回合数限制或最短等待时间；只有希望任务更久保持可恢复状态时，才提高最长等待时间。
-- 子代理与主代理统一使用 `context.compaction.threshold` 和模型定义中的 `compaction.threshold`，也会采用目录建议。阈值越低，压缩越早；阈值越高，保留的上下文越多。有效阈值为 `0` 时关闭主动压缩，服务商拒绝超长请求后的恢复仍保留。子代理使用本地 token 估算和轻量 checkpoint；上下文压力提醒只用于主代理。
+- 子代理与主代理统一使用 `context.compaction.threshold` 和模型定义中的 `compaction.threshold`，也会采用目录建议。阈值越低，压缩越早；阈值越高，保留的上下文越多。有效阈值为 `0` 时，主代理和子代理都关闭主动压缩。子代理仍会在服务商拒绝超长请求后尝试恢复；主代理则停止请求并提示使用 `/compact`。子代理使用本地 token 估算和轻量 checkpoint；上下文压力提醒只用于主代理。
 - 提高并发不一定更快：provider 限流、模型延迟、本地内存压力和 workspace lease 竞争都可能降低实际吞吐。应依据排队/拒绝指标和端到端延迟调参，而不是只看 CPU 数量。
 
 ## 图片生成

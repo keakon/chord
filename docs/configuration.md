@@ -615,9 +615,9 @@ request starts wait for the next request boundary.
 
 ## Reusing protocol templates with YAML anchors
 
-Chord has no `model_templates` schema field. You can still use YAML anchors and
-merge keys under that top-level container; Chord ignores the container itself
-and reads the expanded model entries under `providers`.
+`model_templates` is a YAML anchor namespace. Chord accepts the top-level
+container without interpreting its entries, then reads the expanded model
+entries under `providers`.
 
 Merge keys (`<<:`) copy the referenced mapping into the current entry **at the
 key level**, and the current entry wins on conflict:
@@ -1350,7 +1350,7 @@ orchestration:
 - Reduce SubAgent queue limits only when producers can handle enqueue rejection. These queues do not spill to disk, and overly small limits can interrupt parent/child coordination.
 - Keep `max_borrowed_runtimes` small but positive. Borrowed slots exist to break orchestration progress stalls, not to increase ordinary throughput.
 - A `waiting_main` task expires when its turn budget and minimum wait are both satisfied, or when the maximum wait is reached. Increase the turn budget or minimum wait when owners need more time to respond; increase the maximum only when parked tasks should remain recoverable for longer.
-- SubAgents use the same `context.compaction.threshold` and model-level `compaction.threshold` as the main agent, including catalog recommendations. Lower thresholds compact earlier; higher thresholds retain more context. Setting the effective threshold to `0` disables proactive compaction while preserving recovery from provider context-length errors. SubAgents use local token estimates and a lightweight checkpoint; context-pressure reminders apply to the main agent.
+- SubAgents use the same `context.compaction.threshold` and model-level `compaction.threshold` as the main agent, including catalog recommendations. Lower thresholds compact earlier; higher thresholds retain more context. Setting the effective threshold to `0` disables proactive compaction for both agent types. SubAgents retain recovery from provider context-length errors; the main agent stops oversized requests and suggests `/compact`. SubAgents use local token estimates and a lightweight checkpoint; context-pressure reminders apply to the main agent.
 - Increasing concurrency is not automatically faster: provider throttling, model latency, local memory pressure, and workspace lease contention can reduce effective throughput. Change limits using observed queue/rejection metrics and end-to-end latency rather than CPU count alone.
 
 ## Image generation

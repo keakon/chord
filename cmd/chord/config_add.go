@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -662,16 +661,7 @@ func editConfigYAMLForAdd(current []byte, e configAddEdit) ([]byte, error) {
 	}
 	appendSequenceValue(poolNode, e.poolRef)
 
-	var edited bytes.Buffer
-	enc := yaml.NewEncoder(&edited)
-	enc.SetIndent(2)
-	if err := enc.Encode(&doc); err != nil {
-		return nil, fmt.Errorf("encode config: %w", err)
-	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("encode config: %w", err)
-	}
-	return edited.Bytes(), nil
+	return encodeConfigYAMLDocument(&doc)
 }
 
 // documentRootMapping returns the document's root mapping, building an empty

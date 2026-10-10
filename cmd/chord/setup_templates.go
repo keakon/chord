@@ -45,7 +45,7 @@ type initialSetupProviderYAML struct {
 }
 
 type initialSetupModelYAML struct {
-	Limit initialSetupLimitYAML `yaml:"limit"`
+	Limit initialSetupLimitYAML `yaml:"limit,omitempty"`
 }
 
 type initialSetupLimitYAML struct {
@@ -59,13 +59,6 @@ type initialSetupEndpointDefaults struct {
 	ProviderType string
 	APIURL       string
 	ModelName    string
-	ContextLimit int
-	InputLimit   int
-	OutputLimit  int
-}
-
-type initialSetupModelDefaults struct {
-	Name         string
 	ContextLimit int
 	InputLimit   int
 	OutputLimit  int
@@ -89,10 +82,8 @@ func buildInitialSetupConfigYAML(input initialSetupConfigInput) ([]byte, error) 
 		provider.Type = "responses"
 		provider.Models = make(map[string]initialSetupModelYAML)
 		for _, model := range initialSetupCodexModels() {
-			provider.Models[model.Name] = initialSetupModelYAML{
-				Limit: initialSetupLimitYAML{Context: model.ContextLimit, Input: model.InputLimit, Output: model.OutputLimit},
-			}
-			modelPool = append(modelPool, providerName+"/"+model.Name)
+			provider.Models[model] = initialSetupModelYAML{}
+			modelPool = append(modelPool, providerName+"/"+model)
 		}
 	default:
 		provider.Type = strings.TrimSpace(input.ProviderType)
@@ -125,21 +116,12 @@ func buildInitialSetupConfigYAML(input initialSetupConfigInput) ([]byte, error) 
 	return data, nil
 }
 
-// initialSetupCodexModels returns the model allocations the first-run wizard
-// writes for a Codex OAuth provider. They must stay in step with the Codex
-// OAuth preset table in docs/model-configs.md: the 1.05M-window models publish
-// no separate input cap, so their input budget is context minus output
-// (1050000 - 128000 = 922000). List order is the default pool order, so the
-// first entry is the preferred model and the rest are fallback targets.
-func initialSetupCodexModels() []initialSetupModelDefaults {
-	return []initialSetupModelDefaults{
-		{Name: "gpt-6.1-sol", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
-		{Name: "gpt-6-astra", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
-		{Name: "gpt-6-sol", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
-		{Name: "gpt-6-luna", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
-		{Name: "gpt-5.6-sol", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
-		{Name: "gpt-5.6-terra", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
-		{Name: "gpt-5.6-luna", ContextLimit: 1050000, InputLimit: 922000, OutputLimit: 128000},
+// initialSetupCodexModels defines the preferred model and fallback order.
+// Limits and model capabilities resolve from the Codex catalog binding at load.
+func initialSetupCodexModels() []string {
+	return []string{
+		"gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna",
+		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 	}
 }
 

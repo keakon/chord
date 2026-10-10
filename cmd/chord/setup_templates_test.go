@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
@@ -127,10 +128,11 @@ func TestBuildInitialSetupConfigYAML_Codex(t *testing.T) {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	cfg, err := config.LoadConfigFromPath(path)
+	resolved, err := config.LoadResolvedConfig(path, "")
 	if err != nil {
-		t.Fatalf("LoadConfigFromPath: %v", err)
+		t.Fatalf("LoadResolvedConfig: %v", err)
 	}
+	cfg := resolved.Config
 	prov := cfg.Providers["codex"]
 	if prov.Preset != config.ProviderPresetCodex || prov.Type != config.ProviderTypeResponses {
 		t.Fatalf("provider = %#v", prov)
@@ -150,13 +152,13 @@ func TestBuildInitialSetupConfigYAML_Codex(t *testing.T) {
 			t.Fatalf("missing codex model %q in %#v", model, prov.Models)
 		}
 	}
-	// The 1.05M-window models publish no separate input cap, so the wizard
-	// writes context minus output as the input budget, matching the Codex
-	// OAuth preset table in docs/model-configs.md.
-	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"} {
+	if strings.Contains(string(data), "limit:") {
+		t.Fatalf("Codex setup must leave catalog limits unset: %s", data)
+	}
+	for _, model := range initialSetupCodexModels() {
 		limit := prov.Models[model].Limit
-		if limit.Context != 1050000 || limit.Input != 922000 || limit.Output != 128000 {
-			t.Fatalf("codex %s limits = %#v, want 1050000/922000/128000", model, limit)
+		if limit.Context != 1050000 || limit.Input != 0 || limit.Output != 128000 {
+			t.Fatalf("codex %s resolved limits = %#v", model, limit)
 		}
 	}
 	if normalized, err := normalizeProviderConfig("codex", prov, nil); err != nil {
