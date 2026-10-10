@@ -1,6 +1,33 @@
 package llm
 
-import "github.com/keakon/chord/internal/message"
+import (
+	"slices"
+
+	"github.com/keakon/chord/internal/message"
+)
+
+// responsesCacheTextPartEnd selects the source endpoint of the last input_text
+// block. Zero denotes a string/empty fallback; -1 means there is no text block.
+// Attachments after text are outside the endpoint. Check wire validity only for
+// attachment-only messages, where invalid parts can produce a text fallback.
+func responsesCacheTextPartEnd(msg message.Message) int {
+	if len(msg.Parts) == 0 {
+		return 0
+	}
+	for i, part := range slices.Backward(msg.Parts) {
+		if !part.IsBinary() && part.Text != "" {
+			return i + 1
+		}
+	}
+	for _, part := range msg.Parts {
+		if part.IsBinary() {
+			if _, _, ok := binaryPartForWire(part); ok {
+				return -1
+			}
+		}
+	}
+	return 0
+}
 
 // responsesCacheControl is shared by the request mode and explicit content
 // markers. Implicit mode keeps historical eligible message endings available

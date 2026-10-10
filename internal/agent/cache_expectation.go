@@ -121,8 +121,7 @@ func (a *MainAgent) noteCacheExpectation(modelRef string, messages []message.Mes
 	if a == nil || modelRef == "" || len(messages) == 0 {
 		return nil
 	}
-	cacheMessageCount := a.llmClient.PromptCacheMessageCountForModelRef(modelRef, messages, tailOverlayCount)
-	messages = messages[:cacheMessageCount]
+	messages = a.llmClient.PromptCacheMessagesForModelRef(modelRef, messages, tailOverlayCount)
 	a.cacheExpectMu.Lock()
 	previous := a.cacheExpectations[modelRef]
 	a.cacheExpectMu.Unlock()

@@ -215,6 +215,9 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 	for i := 0; i < len(msgs); i++ {
 		msg := msgs[i]
 		cacheThisMessage := cacheBreakpoints && i < cacheEnd && msg.Kind != message.KindTurnOverlay && msg.Kind != message.KindThinkingReplayPrefix
+		if cacheThisMessage && (msg.Role == message.RoleUser || msg.Role == message.RoleTool) {
+			cacheThisMessage = responsesCacheTextPartEnd(msg) >= 0
+		}
 		if len(msg.MCPTools) > 0 {
 			result = append(result, responsesInputItem{
 				Type:  "additional_tools",

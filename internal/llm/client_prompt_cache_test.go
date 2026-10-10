@@ -76,7 +76,7 @@ func TestPromptCacheSettingsPreferExactVariantPoolTarget(t *testing.T) {
 	}
 }
 
-func TestPromptCacheMessageCountUsesTargetContract(t *testing.T) {
+func TestPromptCacheMessagesUseTargetContract(t *testing.T) {
 	cfg := NewProviderConfig("primary", config.ProviderConfig{Type: config.ProviderTypeChatCompletions, Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}}}, nil)
 	fallback := NewProviderConfig("backup", config.ProviderConfig{Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}}}, nil)
 	client := NewClient(cfg, nil, "gpt-6.1-sol", 4096, "")
@@ -86,7 +86,7 @@ func TestPromptCacheMessageCountUsesTargetContract(t *testing.T) {
 		ref  string
 		want int
 	}{{"primary/gpt-6.1-sol", 4}, {"backup/gpt-6.1-sol", 2}, {"unknown/model", 4}} {
-		if got := client.PromptCacheMessageCountForModelRef(tc.ref, msgs, 1); got != tc.want {
+		if got := len(client.PromptCacheMessagesForModelRef(tc.ref, msgs, 1)); got != tc.want {
 			t.Errorf("%s prefix=%d want=%d", tc.ref, got, tc.want)
 		}
 	}
