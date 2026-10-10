@@ -31,8 +31,9 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-host_os="$(go env GOHOSTOS)"
-host_arch="$(go env GOHOSTARCH)"
+go_command="${CHORD_GO:-go}"
+host_os="$("${go_command}" env GOHOSTOS)"
+host_arch="$("${go_command}" env GOHOSTARCH)"
 target_os="${GOOS:-$host_os}"
 target_arch="${GOARCH:-$host_arch}"
 baseline="scripts/deadcode-baseline/${target_os}-${target_arch}.txt"
@@ -49,7 +50,7 @@ findings="${tmp_dir}/findings.json"
 # Build the analyzer for the host platform so it stays runnable when GOOS/GOARCH
 # point at another platform. The tool version is pinned by the go.mod tool
 # directive, which keeps CI and local runs on the same analysis.
-GOOS="${host_os}" GOARCH="${host_arch}" go build -o "${bin}" golang.org/x/tools/cmd/deadcode
+GOOS="${host_os}" GOARCH="${host_arch}" "${go_command}" build -o "${bin}" golang.org/x/tools/cmd/deadcode
 GOOS="${target_os}" GOARCH="${target_arch}" "${bin}" -json -test=false -generated=false ./... >"${findings}"
 
 python3 - "${findings}" "${baseline}" "${target_os}/${target_arch}" "${CHORD_DEADCODE_UPDATE:-}" <<'PY'

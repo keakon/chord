@@ -10,6 +10,7 @@ set -euo pipefail
 # a focused run skips the whole-program deadcode gate that full runs add.
 
 min_coverage="${MIN_COVERAGE:-80.0}"
+go_command="${CHORD_GO:-go}"
 coverage_file="${COVERAGE_FILE:-coverage.out}"
 test_count="${CHORD_TEST_COUNT:-}"
 if [[ -z "${test_count}" && ("${GITHUB_ACTIONS:-}" == "true" || "${CHORD_CI_STRICT:-}" == "1") ]]; then
@@ -43,7 +44,7 @@ if ! CI="${CI:-true}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" \
   GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-chord-test@example.invalid}" \
   GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Chord Test}" \
   GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-chord-test@example.invalid}" \
-  go test "${test_args[@]}" "${packages[@]}" \
+  "${go_command}" test "${test_args[@]}" "${packages[@]}" \
   >"${stdout_file}" 2>"${stderr_file}"; then
   echo "go test failed" >&2
   if [[ -s "${stderr_file}" ]]; then
@@ -76,7 +77,7 @@ fi
 
 cat "${stdout_file}"
 
-cover_output="$(go tool cover -func="${coverage_file}")"
+cover_output="$("${go_command}" tool cover -func="${coverage_file}")"
 printf '%s\n' "${cover_output}"
 
 total_coverage="$(printf '%s\n' "${cover_output}" | awk '/^total:/ {gsub(/%/, "", $3); print $3}')"

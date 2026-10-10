@@ -40,8 +40,7 @@ test:
 	$(GO) test -count=1 $(PKGS)
 
 test-cover:
-	$(GO) test -count=1 -coverprofile=coverage.out $(PKGS)
-	$(GO) tool cover -func=coverage.out
+	CHORD_GO='$(GO)' CHORD_TEST_COUNT=1 ./scripts/check_ci_local.sh $(PKGS)
 
 race:
 	./scripts/check_ci_race.sh $(PKGS)
