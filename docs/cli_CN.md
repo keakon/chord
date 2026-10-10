@@ -591,7 +591,7 @@ chord import claude --id <session-id>
 
 完整的工具/推理策略、转换告警、provider 安全 wire view 见 [使用指南：导入外部会话](./usage_CN.md#导入外部会话)。
 
-## `chord sessions project <session-id>`
+## `chord sessions project [<session-id>]`
 
 把已落盘会话投影成每 turn 一行的 JSONL 事实：turn 边界、工具结果（含 digest）、工具归因的文件变更、压缩边界。只读：不写会话目录，源会话正被别的进程占用也能跑。复盘会话、给完成报告取证、或把结构化事实喂给其他工具时用它，不用再裸 grep 原始 transcript。
 
@@ -603,8 +603,8 @@ turn 成因只给降级结论：你的消息开的 turn 报 `user_message`，其
 
 | Flag                   | 说明                                              |
 | ---------------------- | ------------------------------------------------- |
-| `--out <path>`         | 投影写进这个文件，而不是 stdout。写进会话目录内、或硬链接到会话目录内文件的路径会被拒绝，投影不可能覆盖它正在读取的会话 |
-| `--session-dir <path>` | 直接投影这个会话目录，不解析 `<session-id>`       |
+| `--out <path>`         | 投影写进这个文件，而不是 stdout，文件仅允许所有者读写。写进会话目录内、或硬链接到会话目录内文件的路径会被拒绝，投影不可能覆盖它正在读取的会话 |
+| `--session-dir <path>` | 直接投影这个会话目录，可以省略 `<session-id>`       |
 | `--max-bytes <n>`      | 调高或调低 JSONL 大小上限（字节）。超过上限直接报错，不会悄悄截断。`0` 保持默认（256 KiB） |
 
 ### 示例
@@ -612,6 +612,7 @@ turn 成因只给降级结论：你的消息开的 turn 报 `user_message`，其
 ```bash
 chord sessions project 20260428064910975 > projection.jsonl
 chord sessions project 20260428064910975 --out projection.jsonl
+chord sessions project --session-dir /path/to/session --out projection.jsonl
 ```
 
 ## `chord completion <shell>`

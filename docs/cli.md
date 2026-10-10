@@ -591,7 +591,7 @@ chord import claude --id <session-id>
 
 See the [Importing external sessions](./usage.md#importing-external-sessions) section for the full notes on tool/reasoning policy, conversion warnings, and provider-safe wire normalization.
 
-## `chord sessions project <session-id>`
+## `chord sessions project [<session-id>]`
 
 Project a persisted session into per-turn facts as JSONL, one line per turn: turn boundaries, tool outcomes with result digests, tool-attributed file changes, and compaction boundaries. It is read-only: the session directory is never written, so it works while the session is open in another process. Use it when reviewing a session, preparing evidence for a completion report, or feeding structured facts to another tool instead of grepping the raw transcript.
 
@@ -603,8 +603,8 @@ Each turn carries `turn_index`, `trigger`, bounded `user_text` / `assistant_fina
 
 | Flag                  | Description                                                        |
 | --------------------- | ------------------------------------------------------------------ |
-| `--out <path>`        | Write the JSONL projection to this file instead of stdout. A path inside the session directory — or a hard link to a file in it — is rejected, so a projection can never overwrite the session it reads |
-| `--session-dir <path>`| Project this session directory directly instead of resolving `<session-id>` |
+| `--out <path>`        | Write the JSONL projection to this file instead of stdout, with owner-only read/write permissions. A path inside the session directory — or a hard link to a file in it — is rejected, so a projection can never overwrite the session it reads |
+| `--session-dir <path>`| Project this session directory directly; `<session-id>` can be omitted |
 | `--max-bytes <n>`     | Raise or lower the JSONL size cap (bytes). A projection above the cap fails instead of being silently cut. `0` keeps the default (256 KiB) |
 
 ### Examples
@@ -612,6 +612,7 @@ Each turn carries `turn_index`, `trigger`, bounded `user_text` / `assistant_fina
 ```bash
 chord sessions project 20260428064910975 > projection.jsonl
 chord sessions project 20260428064910975 --out projection.jsonl
+chord sessions project --session-dir /path/to/session --out projection.jsonl
 ```
 
 ## `chord completion <shell>`

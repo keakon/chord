@@ -359,23 +359,9 @@ func triggerForStarter(em ExportedMessage) string {
 }
 
 func isUserAuthoredExported(em ExportedMessage) bool {
-	if em.Role != message.RoleUser || em.IsCompactionSummary {
-		return false
-	}
-	switch em.Kind {
-	case "":
-		return true
-	case message.KindSubAgentMailbox,
-		message.KindLoopNotice,
-		message.KindBackgroundResult,
-		message.KindHookFeedback,
-		message.KindStreamContinue,
-		message.KindContextNotice:
-		return false
-	default:
-		// Unknown future kinds are synthetic until proven otherwise.
-		return false
-	}
+	return message.IsUserAuthored(message.Message{
+		Role: em.Role, Kind: em.Kind, IsCompactionSummary: em.IsCompactionSummary,
+	})
 }
 
 func isInferredStarterWithContent(em ExportedMessage) bool {

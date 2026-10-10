@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -38,7 +39,7 @@ func TestSessionsProjectStdout(t *testing.T) {
 		`{"role":"user","content":"second request"}`,
 		`{"role":"assistant","content":"done"}`,
 	)
-	out, err := runSessionsProject(t, "project", "ignored-id", "--session-dir", dir)
+	out, err := runSessionsProject(t, "project", "--session-dir", dir)
 	if err != nil {
 		t.Fatalf("project: %v", err)
 	}
@@ -161,7 +162,68 @@ func TestSessionsProjectEmptySessionErrors(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.jsonl"), []byte(""), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := runSessionsProject(t, "project", "ignored-id", "--session-dir", dir); err == nil {
+	if _, err := runSessionsProject(t, "project", "--session-dir", dir); err == nil {
 		t.Fatal("empty session must fail instead of emitting empty output")
+	}
+}
+
+func TestSessionsProjectRejectsNestedSessionHardLink(t *testing.T) {
+	dir := writeTestSessionDir(t, `{"role":"user","content":"hello"}`)
+	source := filepath.Join(dir, "subagents", "worker", "main.jsonl")
+	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	before := []byte("worker transcript")
+	if err := os.WriteFile(source, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "projection.jsonl")
+	if err := os.Link(source, alias); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runSessionsProject(t, "project", "--session-dir", dir, "--out", alias); err == nil {
+		t.Fatal("nested session hard link must be rejected")
+	}
+	after, err := os.ReadFile(source)
+	if err != nil || !bytes.Equal(after, before) {
+		t.Fatalf("source changed: %q, %v", after, err)
+	}
+}
+
+func TestSessionsProjectRequiresSource(t *testing.T) {
+	for _, args := range [][]string{{"project"}, {"project", "--session-dir", ""}, {"project", "one", "two"}} {
+		if _, err := runSessionsProject(t, args...); err == nil {
+			t.Fatalf("invalid source accepted: %v", args)
+		}
+	}
+}
+
+func TestSessionsProjectOutputOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permissions")
+	}
+	for _, mode := range []os.FileMode{0, 0o600, 0o644} {
+		t.Run(mode.String(), func(t *testing.T) {
+			dir := writeTestSessionDir(t, `{"role":"user","content":"hello"}`)
+			out := filepath.Join(t.TempDir(), "projection.jsonl")
+			if mode != 0 {
+				if err := os.WriteFile(out, []byte("previous"), mode); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(out, mode); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := runSessionsProject(t, "project", "--session-dir", dir, "--out", out); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := info.Mode().Perm(); got != 0o600 {
+				t.Fatalf("output permissions = %o, want 600", got)
+			}
+		})
 	}
 }

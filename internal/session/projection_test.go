@@ -697,3 +697,15 @@ func TestProjectToolCallOriginDistinguishesUserSkillLoad(t *testing.T) {
 		t.Fatalf("origin should appear once (model call omitted), got %d:\n%s", got, data)
 	}
 }
+
+func TestProjectionUsesUserAuthoredClassification(t *testing.T) {
+	for _, kind := range []string{"", "user_annotation", message.KindQuestionState, message.KindQuestionResult, message.KindTurnOverlay, message.KindSubAgentMailbox, message.KindContextNotice} {
+		for _, summary := range []bool{false, true} {
+			msg := message.Message{Role: message.RoleUser, Kind: kind, IsCompactionSummary: summary}
+			got := isUserAuthoredExported(ExportedMessage{Role: msg.Role, Kind: msg.Kind, IsCompactionSummary: summary})
+			if got != message.IsUserAuthored(msg) {
+				t.Fatalf("kind=%q summary=%v: got %v", kind, summary, got)
+			}
+		}
+	}
+}
