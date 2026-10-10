@@ -1856,7 +1856,6 @@ func TestRenderInfoPanelAgentsPreserveInfoPanelBackground(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")
-	m.sidebar.UpdateActivity("main", "Streaming")
 	rendered := m.renderInfoPanel(48, 24)
 
 	section := infoPanelSectionLines(infoPanelPlainLines(rendered), "▼ AGENTS")
@@ -1879,11 +1878,11 @@ func TestRenderInfoPanelAgentsPreserveInfoPanelBackground(t *testing.T) {
 	}
 }
 
-func TestRenderInfoPanelAgentsShowCompactingActivityWithoutStatusBarIconDuplication(t *testing.T) {
+func TestRenderInfoPanelAgentsOmitCompactingActivity(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")
-	m.sidebar.UpdateActivity("main", "Compacting context...")
+	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityCompacting}
 	rendered := m.renderInfoPanel(56, 24)
 
 	section := infoPanelSectionLines(infoPanelPlainLines(rendered), "▼ AGENTS")

@@ -204,10 +204,10 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 	// Info panel
 	if layout.infoPanel.Dx() > 0 && m.mode != ModeStatus {
 		infoView := m.renderInfoPanel(layout.infoPanel.Dx(), m.viewport.height)
-		if m.cachedDirRender.text != infoView {
-			m.renderToCache(&m.cachedDirRender, infoView)
+		if m.cachedInfoPanelRender.text != infoView {
+			m.renderToCache(&m.cachedInfoPanelRender, infoView)
 		}
-		m.drawCachedRenderableToClearedArea(scr, layout.infoPanel, &m.cachedDirRender)
+		m.drawCachedRenderableToClearedArea(scr, layout.infoPanel, &m.cachedInfoPanelRender)
 	}
 
 	// Sync textarea height (safety net; primary sync happens in Update paths).
@@ -365,74 +365,74 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 	case ModeHandoffSelect:
 		dialog := m.renderHandoffSelectDialog()
 		dialogRect := centeredRect(area, dialog)
-		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+		m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 	case ModeMCPSelect:
 		dialog := m.renderMCPSelectDialog()
 		dialogRect := centeredRect(area, dialog)
-		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+		m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 	case ModeSkillSelect:
 		dialog := m.renderSkillSelectDialog()
 		dialogRect := centeredRect(area, dialog)
-		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+		m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 	case ModeMemoryPanel:
 		dialog := m.renderMemoryPanel()
-		m.renderOverlayCached(scr, centeredRect(area, dialog), &m.cachedDirRender, dialog)
+		m.renderOverlayCached(scr, centeredRect(area, dialog), &m.cachedOverlayRender, dialog)
 	case ModeSessionSelect:
 		dialog := m.renderSessionSelectDialog()
 		dialogRect := centeredRect(area, dialog)
-		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+		m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 	case ModeSessionDeleteConfirm:
 		if dialog := m.renderSessionDeleteConfirmDialog(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)
-			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 		}
 	case ModeModelSelect:
 		dialog := m.renderModelSelectDialog()
 		dialogRect := centeredRect(area, dialog)
-		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+		m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 	case ModeRoleSelect:
 		dialog := m.renderRoleSelectDialog()
 		dialogRect := centeredRect(area, dialog)
-		m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+		m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 	case ModeUsageStats:
 		if dialog := m.renderUsageStatsDialog(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)
-			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 		}
 	case ModeErrorPanel:
 		if dialog := m.renderErrorPanelDialog(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)
-			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 		}
 	case ModeConfirm:
 		if dialog := m.renderConfirmDialog(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)
-			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 		}
 	case ModeQuestion:
 		if dialog := m.renderQuestionDialog(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)
-			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 		}
 	case ModeImageViewer:
 		if dialog := m.renderImageViewerOverlay(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)
-			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 		}
 	case ModeRules:
 		if dialog := m.renderRulesList(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)
-			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 		}
 	case ModeStopJobConfirm:
 		if dialog := m.renderStopJobConfirmDialog(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)
-			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 		}
 	case ModeJobsOverlay:
 		if dialog := m.renderJobsOverlayDialog(); dialog != "" {
 			dialogRect := centeredRect(area, dialog)
-			m.renderOverlayCached(scr, dialogRect, &m.cachedDirRender, dialog)
+			m.renderOverlayCached(scr, dialogRect, &m.cachedOverlayRender, dialog)
 		}
 	}
 	if m.sessionSwitch.active() {

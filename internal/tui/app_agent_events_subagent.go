@@ -230,7 +230,6 @@ func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEff
 		}
 
 		m.activities[evt.AgentID] = evt
-		m.sidebar.UpdateActivity(evt.AgentID, strings.TrimSpace(stripANSI(m.renderActivitySummary(evt))))
 		effects.refreshSidebar = true
 		if evt.Type != prev.Type {
 			now := time.Now()

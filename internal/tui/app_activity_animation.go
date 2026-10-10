@@ -306,17 +306,3 @@ func lastVisibleBlockStartedWall(v *Viewport) (time.Time, bool) {
 	}
 	return v.LastVisibleBlockStartedWall()
 }
-
-func (m Model) renderActivityPrimaryText(a agent.AgentActivityEvent) string {
-	if a.Type == agent.ActivityExecuting {
-		return m.renderExecutingSummary(a.AgentID)
-	}
-	if summary := m.renderRequestProgressSummary(a.AgentID); summary != "" {
-		return summary
-	}
-	return ""
-}
-
-func (m Model) renderActivitySummary(a agent.AgentActivityEvent) string {
-	return m.renderActivityPrimaryText(a)
-}

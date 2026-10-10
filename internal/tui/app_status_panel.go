@@ -100,7 +100,7 @@ func (m *Model) cycleStatusPanelSection(backward bool) {
 
 func (m *Model) drawStatusPanel(scr uv.Screen, layout tuiLayout) {
 	body := m.renderInfoPanel(layout.infoPanel.Dx(), layout.infoPanel.Dy())
-	m.renderOverlayCached(scr, layout.infoPanel, &m.cachedDirRender, body)
+	m.renderOverlayCached(scr, layout.infoPanel, &m.cachedInfoPanelRender, body)
 	hint := hintLine(hint("j/k", "scroll"), hint("Tab", "section"), hint("Enter", "fold"), hint("Esc", "close"))
 	if m.infoPanelContentHeight > m.infoPanelViewportHeight {
 		hint = appendHintText(hint, formatTokens(m.infoPanelScrollOffset+m.infoPanelViewportHeight)+"/"+formatTokens(m.infoPanelContentHeight))

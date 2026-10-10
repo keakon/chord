@@ -44,7 +44,6 @@ type SidebarEntry struct {
 	SelectedRef  string     // last known primary model ref (SubAgent only; may include @variant)
 	RunningRef   string     // last known effective running ref (SubAgent only)
 	EditedFiles  []FileEdit // recent file changes, oldest first
-	Activity     string     // latest runtime activity/detail snapshot; AGENTS rows may choose not to render it
 	LastSummary  string
 	UrgentCount  int
 	LastArtifact tools.ArtifactRef
@@ -123,14 +122,10 @@ func (s *Sidebar) Update(subAgents []agent.SubAgentInfo, focusedID, mainRole str
 		ID:       "main",
 		TaskDesc: mainLabel,
 		Status:   "running",
-		Activity: "Idle",
 	}
 	if existing, ok := existingByID["main"]; ok {
 		mainEntry.EditedFiles = existing.EditedFiles
 		mainEntry.Color = existing.Color
-		if existing.Activity != "" {
-			mainEntry.Activity = existing.Activity
-		}
 	}
 	entries = append(entries, mainEntry)
 
@@ -170,7 +165,6 @@ func (s *Sidebar) Update(subAgents []agent.SubAgentInfo, focusedID, mainRole str
 		}
 		if existing, ok := existingByID[info.InstanceID]; ok {
 			entry.EditedFiles = existing.EditedFiles
-			entry.Activity = existing.Activity
 		}
 		entries = append(entries, entry)
 	}
@@ -292,10 +286,6 @@ func (s *Sidebar) UpdateStatus(agentID, status string) {
 	for i := range s.agents {
 		if s.agents[i].ID == agentID {
 			s.agents[i].Status = status
-			switch status {
-			case "done", "completed", "cancelled", "error", "waiting_main", "waiting_descendant", "idle":
-				s.agents[i].Activity = ""
-			}
 			return
 		}
 	}
@@ -303,22 +293,6 @@ func (s *Sidebar) UpdateStatus(agentID, status string) {
 	s.agents = append(s.agents, SidebarEntry{
 		ID:     agentID,
 		Status: status,
-	})
-}
-
-// UpdateActivity stores an agent activity label for AGENTS panel rendering.
-func (s *Sidebar) UpdateActivity(agentID, activity string) {
-	agentID = normalizeSidebarAgentID(agentID)
-	for i := range s.agents {
-		if s.agents[i].ID == agentID {
-			s.agents[i].Activity = activity
-			return
-		}
-	}
-	s.agents = append(s.agents, SidebarEntry{
-		ID:       agentID,
-		Status:   "running",
-		Activity: activity,
 	})
 }
 

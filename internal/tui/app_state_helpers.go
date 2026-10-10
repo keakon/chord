@@ -228,7 +228,8 @@ type viewCacheState struct {
 	cachedToastKey                     string
 	cachedToastRender                  cachedRenderable
 	cachedHelpRender                   cachedRenderable
-	cachedDirRender                    cachedRenderable
+	cachedInfoPanelRender              cachedRenderable
+	cachedOverlayRender                cachedRenderable
 	cachedInfoPanelW                   int
 	cachedInfoPanelH                   int
 	cachedInfoPanelFP                  string

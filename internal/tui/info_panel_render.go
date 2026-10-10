@@ -267,7 +267,6 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 		b.WriteString(e.Color)
 		b.WriteString(e.SelectedRef)
 		b.WriteString(e.RunningRef)
-		b.WriteString(e.Activity)
 		b.WriteString(e.LastSummary)
 		appendInt(e.UrgentCount)
 		b.WriteString(e.LastArtifact.RelPath)

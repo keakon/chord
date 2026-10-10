@@ -341,3 +341,23 @@ func TestSpaceToggleInvalidatesMainRenderCache(t *testing.T) {
 		t.Fatal("second Space should collapse the shell card again")
 	}
 }
+
+func TestInfoPanelAndOverlayReuseIndependentCellCaches(t *testing.T) {
+	m := NewModelWithSize(newInfoPanelAgent(), 160, 30)
+	m.mode = ModeRules
+	m.View()
+	if m.layout.infoPanel.Dx() == 0 || len(m.cachedInfoPanelRender.lines) == 0 || len(m.cachedOverlayRender.lines) == 0 {
+		t.Fatal("expected a visible info panel and overlay")
+	}
+	panelCells := &m.cachedInfoPanelRender.lines[0]
+	overlayCells := &m.cachedOverlayRender.lines[0]
+	m.View()
+	if panelCells != &m.cachedInfoPanelRender.lines[0] || overlayCells != &m.cachedOverlayRender.lines[0] {
+		t.Fatal("unchanged frame rebuilt info panel or overlay cells")
+	}
+	m.mode = ModeInsert
+	m.View()
+	if panelCells != &m.cachedInfoPanelRender.lines[0] {
+		t.Fatal("closing the overlay rebuilt unchanged info panel cells")
+	}
+}

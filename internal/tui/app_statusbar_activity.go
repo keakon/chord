@@ -145,17 +145,6 @@ func (m Model) executingStartedAt(agentID string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (m Model) renderExecutingSummary(agentID string) string {
-	if agentID == "" {
-		agentID = "main"
-	}
-	startedAt, ok := m.executingStartedAt(agentID)
-	if !ok {
-		return executingGlyph
-	}
-	return executingGlyph + " · " + tools.FormatElapsed(time.Since(startedAt))
-}
-
 func statusBarTimingAnchor(agentID string) string {
 	if agentID == "" || agentID == "main" {
 		return "main"

@@ -71,9 +71,6 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 	if snap.proxyInUse {
 		pills = append(pills, PillStyle.Render("↗"))
 	}
-	if snap.mcpPill != "" {
-		pills = append(pills, snap.mcpPill)
-	}
 
 	usage := snap.tokenUsage
 	fullInputTokens := usage.InputTokens + usage.CacheWriteTokens

@@ -565,14 +565,6 @@ func (m *Model) sessionSelectCurrentOptionIndex() int {
 		return -1
 	}
 	if cursor >= len(m.sessionSelect.filteredIdx) {
-		// Compatibility fallback for tests that may construct picker state
-		// without rebuildSessionSelectFilteredView.
-		if strings.TrimSpace(m.sessionSelect.filter) == "" &&
-			len(m.sessionSelect.filteredIdx) == 0 &&
-			m.sessionSelect.selector.list.Len() == len(m.sessionSelect.options) &&
-			cursor < len(m.sessionSelect.options) {
-			return cursor
-		}
 		return -1
 	}
 	idx := m.sessionSelect.filteredIdx[cursor]
@@ -596,9 +588,6 @@ func (m *Model) renderSessionSelectFilterLine(innerWidth int) string {
 	}
 	total := len(m.sessionSelect.options)
 	filtered := len(m.sessionSelect.filteredIdx)
-	if filtered == 0 && strings.TrimSpace(m.sessionSelect.filter) == "" && m.sessionSelect.selector.list != nil && m.sessionSelect.selector.list.Len() == total {
-		filtered = total
-	}
 	count := fmt.Sprintf("%d/%d", filtered, total)
 	line := renderFilterLine(m.sessionSelect.filter, m.sessionSelect.filterFocused, count, innerWidth)
 	return styleDialogBodyLines([]string{line}, innerWidth)[0]

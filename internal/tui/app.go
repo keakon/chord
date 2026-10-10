@@ -471,7 +471,7 @@ type Model struct {
 	// renderScratch renders one line of a region's text into cells while a
 	// cachedRenderable is rebuilt. Every region shares it because the cells are
 	// copied out before the next line is rendered; a buffer per region would
-	// only retain another row of cells (112 bytes each).
+	// only retain another row of cells (48 bytes each).
 	renderScratch   uv.ScreenBuffer
 	renderScratchW  int
 	renderScratchOK bool

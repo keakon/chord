@@ -8,35 +8,6 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
-func TestRenderActivitySummaryFallsBackToExistingLabels(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 12)
-	got := m.renderActivityPrimaryText(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityWaitingHeaders})
-	if got != "" {
-		t.Fatalf("renderActivityPrimaryText = %q, want empty string for non-connecting non-progress state", got)
-	}
-}
-
-func TestRenderExecutingSummaryShowsElapsed(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 12)
-	m.activityStartTime["main"] = time.Now().Add(-12 * time.Second)
-	got := m.renderExecutingSummary("main")
-	if !strings.HasPrefix(got, "⚙ ") {
-		t.Fatalf("renderExecutingSummary = %q, want activity glyph prefix", got)
-	}
-	if !strings.Contains(got, "12s") {
-		t.Fatalf("renderExecutingSummary = %q, want elapsed seconds", got)
-	}
-}
-
-func TestRenderExecutingSummaryStartsFromZero(t *testing.T) {
-	m := NewModelWithSize(nil, 80, 12)
-	m.activityStartTime["main"] = time.Now()
-	got := m.renderExecutingSummary("main")
-	if got != "⚙ · 0s" {
-		t.Fatalf("renderExecutingSummary = %q, want activity glyph with zero elapsed", got)
-	}
-}
-
 func TestRenderActivityExecutingUsesElapsedStyle(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-12 * time.Second)
@@ -54,9 +25,6 @@ func TestRenderActivityExecutingWithoutStartShowsActivityGlyph(t *testing.T) {
 	out := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200, time.Now()))
 	if out != "⚙" {
 		t.Fatalf("renderActivityAt(executing without start) = %q, want activity glyph without elapsed", out)
-	}
-	if got := m.renderExecutingSummary("main"); got != "⚙" {
-		t.Fatalf("renderExecutingSummary without start = %q, want activity glyph", got)
 	}
 }
 

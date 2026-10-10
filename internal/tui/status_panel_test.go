@@ -51,7 +51,7 @@ func TestStatusPanelKeyboardAndMouseUseTheVisiblePanel(t *testing.T) {
 	if m.statusPanel.section != infoPanelSectionAgents {
 		t.Fatalf("first actionable section = %q, want agents", m.statusPanel.section)
 	}
-	if !strings.Contains(ansi.Strip(m.cachedDirRender.text), "▸ ▼ AGENTS") {
+	if !strings.Contains(ansi.Strip(m.cachedInfoPanelRender.text), "▸ ▼ AGENTS") {
 		t.Fatal("keyboard section focus has no shape cue")
 	}
 	m.handleStatusPanelKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))

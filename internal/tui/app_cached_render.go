@@ -267,7 +267,7 @@ func (m *Model) renderToCache(cache *cachedRenderable, text string) {
 		buf := m.renderScratchBuffer(w)
 		uv.NewStyledString(part).Draw(buf, buf.Bounds())
 		line := buf.Line(0)
-		// Trailing blank cells cost 112 bytes each and are indistinguishable
+		// Trailing blank cells cost 48 bytes each and are indistinguishable
 		// from the cleared destination the blit writes them onto, so keep only
 		// the cells that can actually change the frame.
 		end := min(w, len(line))

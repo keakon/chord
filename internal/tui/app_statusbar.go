@@ -89,7 +89,6 @@ type statusBarAgentSnapshot struct {
 	modelVariant     string
 	busy             bool
 	proxyInUse       bool
-	mcpPill          string
 	tokenUsage       message.TokenUsage
 	cost             float64
 	contextCurrent   int
@@ -532,8 +531,6 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 	b.WriteString(snap.nextModelRef)
 	b.WriteByte('|')
 	b.WriteString(snap.modelVariant)
-	b.WriteByte('|')
-	b.WriteString(snap.mcpPill)
 	b.WriteByte('|')
 	b.WriteString(inputs.WorkDirRepoName)
 	b.WriteByte('|')
