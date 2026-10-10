@@ -74,6 +74,8 @@ Shell 和后台输出超过 16 KiB 时，结果会显示简短预览及日志文
 
 `web_search` 只在路由源里存在已启用、能承载声明的目标时出现：未设置 `model_pool` 时使用调用 agent 的模型池，设置具名 `model_pool` 后使用该配置池；目标必须是列出 `compat.hosted_tools` 的 Anthropic Messages 或 OpenAI Responses 模型。每次调用在 provider 侧执行一次搜索，返回摘要和编号来源；可用 `allowed_domains` / `blocked_domains` 缩小范围。顶层 `hosted_tools` 目录还能定义其他 hosted 工具（见[Hosted tools](./configuration_CN.md#hosted-tools)）。
 
+启用[主请求原生搜索](./configuration_CN.md#主请求原生搜索)后，Anthropic 可以同时返回待执行的搜索和本地工具调用。Chord 用本地工具结果续跑，并将运行期提醒放在结果内部；新用户输入和邮箱消息留在队列中，等原生搜索完成后再投递。
+
 ## 工作流
 
 | 工具 | 用途 |

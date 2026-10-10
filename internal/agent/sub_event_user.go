@@ -92,7 +92,10 @@ func (s *SubAgent) appendPendingUserMessages(pending []pendingUserMessage) {
 
 func (s *SubAgent) messagesForLLMContinuation() []message.Message {
 	s.inputQueueMu.Lock()
-	pending := s.takePendingUserMessagesLocked()
+	var pending []pendingUserMessage
+	if !nativeMessagesTurnPending(s.ctxMgr) {
+		pending = s.takePendingUserMessagesLocked()
+	}
 	s.llmRequestInFlight.Store(true)
 	s.inputQueueMu.Unlock()
 	s.appendPendingUserMessages(pending)
@@ -142,12 +145,18 @@ func (s *SubAgent) openToolBatchDefersContextAppends() bool {
 	if s == nil {
 		return false
 	}
+	if nativeMessagesTurnPending(s.ctxMgr) {
+		return true
+	}
 	s.turnMu.Lock()
 	defer s.turnMu.Unlock()
 	return s.turn != nil && s.turn.PendingToolCalls.Load() > 0
 }
 
 func (s *SubAgent) drainContextAppendsBeforeTurn() {
+	if nativeMessagesTurnPending(s.ctxMgr) {
+		return
+	}
 	for {
 		s.refillContextAppendChannelFromOverflow()
 		pending, ok := s.tryReceiveContextAppend()

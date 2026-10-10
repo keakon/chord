@@ -76,6 +76,8 @@ Read a background job's output since the previous read, then its `[status: ...]`
 
 `web_search` appears only while its routing source has an enabled target that can carry the declaration: without `model_pool` this is the calling agent's model pool, and with a named `model_pool` it is that configured pool. Targets must be Anthropic Messages or OpenAI Responses models with `compat.hosted_tools` listing it. Each call runs a provider-side search and returns a summary plus numbered sources; optional `allowed_domains` / `blocked_domains` filters narrow the results. The same catalog can define further hosted tools through the top-level `hosted_tools` section ([Hosted tools](./configuration.md#hosted-tools)).
 
+With [native search in the main request](./configuration.md#native-search-in-the-main-request), Anthropic can return a pending search alongside local tool calls. Chord returns the local results to continue that turn, including runtime reminders inside the results. New user input and mailbox messages stay queued until the native turn completes.
+
 ## Workflow
 
 | Tool | What it does |

@@ -40,7 +40,8 @@ func (a *MainAgent) mergePendingInputsForTurnContinuation() {
 }
 
 func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Message, tailOverlayCount int) []message.Message {
-	if len(a.pendingUserMessages) == 0 {
+	messages = a.flushPendingNativeContextAppends(messages, tailOverlayCount)
+	if len(a.pendingUserMessages) == 0 || nativeMessagesTurnPending(a.ctxMgr) {
 		return messages
 	}
 	// This request injects the queue, so a parked state ends here: the injected
@@ -617,6 +618,7 @@ func (a *MainAgent) rememberIdleTurn(turnID uint64) {
 // agent was busy and messages were queued). Call this wherever IdleEvent was previously
 // emitted so that queued input is injected after the model has finished.
 func (a *MainAgent) setIdleAndDrainPending() {
+	a.flushPendingNativeContextAppends(nil, 0)
 	// This method runs on the main event loop. The provider goroutine may have
 	// returned earlier, but the foreground slot remains claimed until the
 	// corresponding response/error/cancel path reaches this point.

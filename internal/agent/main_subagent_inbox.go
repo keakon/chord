@@ -1623,7 +1623,7 @@ func (a *MainAgent) loadDurableMailboxMessage(messageID string) (*SubAgentMailbo
 }
 
 func (a *MainAgent) stageNextSubAgentMailboxBatch() bool {
-	if a.mailboxDeliveryPaused.Load() {
+	if a.mailboxDeliveryPaused.Load() || nativeMessagesTurnPending(a.ctxMgr) {
 		return false
 	}
 	// One staging cycle drains the whole routable main-inbox backlog — every
@@ -1824,6 +1824,9 @@ func (a *MainAgent) requeueActiveSubAgentMailbox() {
 }
 
 func (a *MainAgent) takePendingSubAgentMailboxes() []*SubAgentMailboxMessage {
+	if nativeMessagesTurnPending(a.ctxMgr) {
+		return nil
+	}
 	a.subAgentMailboxIDsMu.Lock()
 	msgs := a.pendingSubAgentMailboxes
 	a.pendingSubAgentMailboxes = nil

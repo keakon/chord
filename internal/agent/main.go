@@ -38,10 +38,11 @@ import (
 // (eventCh) for sequencing work and an output channel (outputCh) that the TUI
 // consumes.
 type MainAgent struct {
-	questions                 questionRuntime
-	questionWaiting           atomic.Bool
-	questionCompletionPending atomic.Int64
-	compactionFiles           compactionFileReplay
+	questions                   questionRuntime
+	questionWaiting             atomic.Bool
+	questionCompletionPending   atomic.Int64
+	compactionFiles             compactionFileReplay
+	pendingNativeContextAppends []message.Message // owned by the main event loop
 
 	parentCtx              context.Context
 	cancel                 context.CancelFunc
@@ -1301,6 +1302,7 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 
 	if clearHistory {
 		// Clear conversation history so the new role starts fresh.
+		a.pendingNativeContextAppends = nil
 		a.ctxMgr.RestoreMessages(nil)
 		a.installContextNoticePresence(nil)
 		a.clearEvidenceCandidates()
@@ -1631,6 +1633,11 @@ func (a *MainAgent) handleAppendContext(evt Event) {
 		return
 	}
 	msg.Role = "user"
+	if nativeMessagesTurnPending(a.ctxMgr) {
+		msg.Parts = cloneContentParts(msg.Parts)
+		a.pendingNativeContextAppends = append(a.pendingNativeContextAppends, msg)
+		return
+	}
 	a.ctxMgr.Append(msg)
 	a.recordEvidenceFromMessage(msg)
 	if a.recoveryManager() != nil {

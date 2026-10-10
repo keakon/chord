@@ -222,6 +222,10 @@ func (a *AnthropicProvider) CompleteStream(
 		}
 
 		// Build system content blocks.
+		if err := validateAnthropicNativeContinuation(messages); err != nil {
+			return nil, err
+		}
+
 		systemBlocks := buildSystemBlocks(systemPrompt)
 
 		// Convert internal messages to Anthropic API format.
@@ -229,8 +233,11 @@ func (a *AnthropicProvider) CompleteStream(
 		// Derive the latest boundary from this target's actual source surface.
 		// Fallback admission can replace messages without carrying main-request
 		// tuning hints, and subagents do not use the main-request assembler.
-		if durableLen := promptCacheDurableMessageCount(messages); durableLen > 0 && (!at.CacheLatestBoundary.Valid || durableLen < len(messages)) {
+		if durableLen := anthropicCacheDurableMessageCount(messages); durableLen > 0 && (!at.CacheLatestBoundary.Valid || durableLen < len(messages)) {
 			at.CacheLatestBoundary = AnthropicCacheBoundary{MessageIndex: durableLen - 1, Valid: true}
+			if at.CacheBoundary.Valid && at.CacheBoundary.MessageIndex >= durableLen {
+				at.CacheBoundary = at.CacheLatestBoundary
+			}
 		}
 		at.CacheBoundary = resolveAnthropicCacheBoundary(at.CacheBoundary, messageMap)
 		at.CacheLatestBoundary = resolveAnthropicCacheBoundary(at.CacheLatestBoundary, messageMap)
@@ -717,6 +724,7 @@ type anthropicMessageMapEntry struct {
 func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthropicMessageMapEntry) {
 	var result []anthropicMessage
 	messageMap := make([]anthropicMessageMapEntry, len(msgs))
+	nativeContinuation := anthropicNativeContinuationIndex(msgs)
 
 	i := 0
 	for i < len(msgs) {
@@ -725,6 +733,10 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 
 		switch msg.Role {
 		case "user":
+			if nativeContinuation >= 0 && sourceIndex > nativeContinuation && isAnthropicNativeOverlay(msg) && foldAnthropicNativeOverlay(result, anthropicNativeOverlayText(msg)) {
+				i++
+				continue
+			}
 			if len(msg.Parts) > 0 {
 				// Multi-part message (may include images).
 				var blocks []anthropicContent

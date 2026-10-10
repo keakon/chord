@@ -165,6 +165,7 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	a.markControlAction()
 	turnCtx := a.turn.Ctx
 	a.pendingUserMessages = nil
+	a.pendingNativeContextAppends = nil
 	a.resumePendingUserDrain()
 	a.abandonPendingHandoff()
 	a.clearUsageDrivenAutoCompactRequest()
@@ -270,6 +271,7 @@ func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) 
 }
 
 func (a *MainAgent) resetSessionRuntimeState() {
+	a.pendingNativeContextAppends = nil
 	a.nativeReceipt.Store(nil)
 	a.resetHostedCallers()
 	a.compactionFiles.reset()

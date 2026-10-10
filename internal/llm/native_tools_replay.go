@@ -13,12 +13,14 @@ import (
 // request projection. Reject that projection before dispatch rather than
 // restoring an orphan call from the raw blocks or rewriting signed history.
 func validateNativeClientToolReplay(messages []message.Message) error {
+	if err := validateAnthropicNativeContinuation(messages); err != nil {
+		return err
+	}
 	if !slices.ContainsFunc(messages, func(msg message.Message) bool { return msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 }) {
 		return nil
 	}
 	results := make(map[string]bool)
-	for i := len(messages) - 1; i >= 0; i-- {
-		msg := messages[i]
+	for _, msg := range slices.Backward(messages) {
 		if msg.Role == message.RoleTool {
 			results[msg.ToolCallID] = true
 		}
