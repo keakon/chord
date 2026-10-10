@@ -14,7 +14,7 @@ import (
 // ValidateHostedToolCatalog checks the entire catalog before registration so
 // a bad entry cannot replace a built-in tool or depend on map iteration order.
 func ValidateHostedToolCatalog(user map[string]config.HostedToolConfig, registry *Registry) error {
-	reserved := []string{NameRead, NameWrite, NameEdit, NameApplyPatch, NameDelete, NameGrep, NameGlob, NameWebFetch, NameShell, NameJobOutput, NameJobList, NameJobKill, NameTodoWrite, NameQuestion, NameDone, NameDelegate, NameNotify, NameSkill, NameHandoff, NameEscalate, NameCancel, NameComplete, NameSaveArtifact, NameReadArtifact, NameViewImage, NameCompactContext, NameToolSearch}
+	reserved := []string{NameRead, NameWrite, NameEdit, NameApplyPatch, NameDelete, NameGrep, NameGlob, NameWebFetch, NameShell, NameJobOutput, NameJobList, NameJobKill, NameTodoWrite, NameQuestion, NameDone, NameDelegate, NameNotify, NameSkill, NameHandoff, NameEscalate, NameCancel, NameComplete, NameSaveArtifact, NameReadArtifact, NameViewImage, NameGenerateImage, NameCompactContext, NameToolSearch}
 	seen := make(map[string]string)
 	for _, raw := range slices.Sorted(maps.Keys(user)) {
 		name := NormalizeName(raw)

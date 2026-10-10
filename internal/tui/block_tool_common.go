@@ -131,7 +131,7 @@ func toolUsesCompactDetailToggle(toolName string) bool {
 	// straight from b.Collapsed. Toggling ToolCallDetailExpanded would flip
 	// only the header marker while the card body stayed put.
 	switch toolName {
-	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete, tools.NameRead, tools.NameTodoWrite, tools.NameHandoff, tools.NameQuestion, tools.NameDelegate, tools.NameCancel:
+	case tools.NameWrite, tools.NameEdit, tools.NameApplyPatch, tools.NameDelete, tools.NameRead, tools.NameTodoWrite, tools.NameHandoff, tools.NameQuestion, tools.NameDelegate, tools.NameCancel, tools.NameGenerateImage, tools.NameViewImage:
 		return false
 	}
 	return true
@@ -140,7 +140,8 @@ func toolUsesCompactDetailToggle(toolName string) bool {
 // toolCardAlwaysExpanded names the cards that must keep their whole body
 // visible: report-style cards (done / complete / escalate / compact_context),
 // the delegation card (delegate), the interactive card (question), the
-// notification card (notify), and the cards whose body is content the model
+// notification card (notify), image cards (generate_image / view_image), and
+// the cards whose body is content the model
 // authored (write / edit / apply_patch / todo_write / handoff / delete). Cards
 // that render tool output the reader consults on demand — read, grep, glob,
 // shell, cancel and generic calls — fold instead, and start folded.
@@ -157,7 +158,7 @@ func toolCardAlwaysExpanded(toolName string) bool {
 		tools.NameCompactContext, tools.NameDelegate, tools.NameQuestion,
 		tools.NameNotify, tools.NameWrite, tools.NameEdit,
 		tools.NameApplyPatch, tools.NameTodoWrite, tools.NameHandoff,
-		tools.NameDelete:
+		tools.NameDelete, tools.NameGenerateImage, tools.NameViewImage:
 		return true
 	}
 	return false

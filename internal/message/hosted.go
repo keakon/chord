@@ -24,11 +24,14 @@ type HostedObservation struct {
 	RequiresApproval bool
 }
 
+const HostedCallKindImageGeneration = "image_generation_call"
+
 // HostedCall is one provider-side tool call. Input and Result carry the raw
 // wire payloads so family- and tool-specific formatting stays in the tool
 // layer: the transport only pairs and classifies them. Result is filled only
 // on a terminal success; a failed or interrupted call carries Error instead.
 type HostedCall struct {
+	Parts []ContentPart `json:"parts,omitempty"`
 	// ID is the provider-side call id (Anthropic tool_use id, Responses item id).
 	ID string
 	// Name is the tool name when the provider reports one; empty when only a

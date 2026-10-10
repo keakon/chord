@@ -1,5 +1,5 @@
 # Verified endpoint contracts. One entry per managed preset: the protocol,
-# the full request URL, the authentication method, and the default credential
+# the request URL (Gemini uses its version root), authentication and credential
 # environment variable. docs records where the contract was verified.
 endpoints:
   - preset_id: anthropic
@@ -26,7 +26,7 @@ endpoints:
 
   - preset_id: gemini
     protocol: generate-content
-    request_url: https://generativelanguage.googleapis.com/v1beta/models
+    request_url: https://generativelanguage.googleapis.com/v1beta/
     auth_method: x-goog-api-key
     env_var: GEMINI_API_KEY
     docs:

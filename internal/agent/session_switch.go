@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -17,28 +18,31 @@ import (
 )
 
 // cloneMessageForForkSeed prepares a prefix message for the forked session's
-// own transcript. Clearing ImagePath makes the fork persist its own copy of the
-// attachment instead of pointing at the source session's file — but only once
+// own transcript. Generated originals retain their content-addressed identities
+// and are copied unchanged. Clearing ImagePath makes the fork persist its own
+// copy of ordinary attachments instead of pointing at the source file, once
 // the bytes are in hand. A restored session holds its attachments lazily (no
 // Data, just the path and the size), so the path is dropped only when the
-// payload resolves; otherwise it is kept, and the fork shares the source file
-// rather than losing the attachment entirely.
-func (a *MainAgent) cloneMessageForForkSeed(msg message.Message) message.Message {
-	cloned := msg
+// payload resolves. Missing attachments abort preparation before publication.
+func (a *MainAgent) cloneMessageForForkSeed(msg message.Message, dstDir string) (message.Message, error) {
+	cloned, err := tools.RelocateGeneratedImages(a.parentCtx, msg, a.SessionDir(), dstDir)
+	if err != nil {
+		return msg, fmt.Errorf("relocate generated images: %w", err)
+	}
+	msg = cloned
 	if len(msg.Parts) == 0 {
-		return cloned
+		return cloned, nil
 	}
 	parts := make([]message.ContentPart, len(msg.Parts))
 	copy(parts, msg.Parts)
 	for i := range parts {
-		if !parts[i].IsBinary() {
+		if !parts[i].IsBinary() || parts[i].ArtifactID != "" {
 			continue
 		}
 		if len(parts[i].Data) == 0 && parts[i].ImagePath != "" {
 			data, mime, err := a.resolveBinaryPart(parts[i])
 			if err != nil {
-				log.Warnf("fork session: keeping source attachment path, payload unavailable path=%v error=%v", parts[i].ImagePath, err)
-				continue
+				return msg, fmt.Errorf("resolve fork attachment: %w", err)
 			}
 			// The resolver may have normalized the payload, so the MIME type
 			// must travel with the bytes or the fork would store a mismatched
@@ -53,7 +57,7 @@ func (a *MainAgent) cloneMessageForForkSeed(msg message.Message) message.Message
 		parts[i].ImagePath = ""
 	}
 	cloned.Parts = parts
-	return cloned
+	return cloned, nil
 }
 
 const (
@@ -588,23 +592,23 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 		return
 	}
 
+	prepared := false
+	defer func() {
+		if prepared {
+			return
+		}
+		if err := newLock.Release(); err != nil {
+			log.Warnf("fork session: release unprepared session lock error=%v", err)
+		}
+		if err := os.RemoveAll(newSessionDir); err != nil {
+			log.Warnf("fork session: remove unprepared session error=%v", err)
+		}
+	}()
+
 	// Seed the target session before touching the current one so failures keep
 	// the current session intact. Fork must follow the same acquire-before-
 	// activate rule as /resume and /new: if target preparation fails, we release
 	// the new lock and leave the old session/lock untouched.
-	seedRecovery := recovery.NewRecoveryManager(newSessionDir)
-	seededMessages := 0
-	for _, msg := range prefix {
-		seedMsg := a.cloneMessageForForkSeed(msg)
-		if err := seedRecovery.PersistMessage("main", seedMsg); err != nil {
-			seedRecovery.Close()
-			_ = newLock.Release()
-			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("fork session: seed prefix: %w", err)})
-			a.setIdleAndDrainPending()
-			return
-		}
-		seededMessages++
-	}
 	// Fork copies the source session's persisted manual-MCP enabled intent so the
 	// forked session reconnects the same servers (connections are rebuilt fresh).
 	forkMeta := recovery.SessionMeta{ForkedFrom: forkedFrom}
@@ -614,13 +618,21 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 		log.Warnf("fork session: failed to load source metadata for MCP intent error=%v", loadErr)
 	}
 	if err := recovery.SaveSessionMeta(newSessionDir, forkMeta); err != nil {
-		seedRecovery.Close()
-		_ = newLock.Release()
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("fork session: save metadata: %w", err)})
 		a.setIdleAndDrainPending()
 		return
 	}
-	seedRecovery.Close()
+	seeded, err := recovery.SeedForkTranscript(newSessionDir, len(prefix), func(i int) (message.Message, error) {
+		return a.cloneMessageForForkSeed(prefix[i], newSessionDir)
+	})
+	if err != nil {
+		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("fork session: seed prefix: %w", err)})
+		a.setIdleAndDrainPending()
+		return
+	}
+	prepared = true
+	prefix = seeded
+	seededMessages := len(prefix)
 
 	oldRecovery, _ := a.prepareSessionSwitch()
 	oldLock := a.sessionLock

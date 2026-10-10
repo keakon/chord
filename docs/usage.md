@@ -4,6 +4,8 @@
 
 Keep daily TUI work moving: send messages, read tool cards, recover sessions, and steer long tasks. Chord runs either as the local TUI or as the `chord headless` control plane; most of this page is about the TUI.
 
+For image generation and explicit reference editing, configure a separate image target; see [Image generation and editing](image-generation.md).
+
 ## How to use this page
 
 You do not need to read this page from top to bottom:
@@ -426,9 +428,9 @@ Currently supported:
 - Attach image and PDF files to the currently focused agent's message when the active model supports that input type
 - View images directly in supported terminals; PDFs are sent to the model and shown as file chips in the transcript, but are not previewed inline
 - Edit historical user messages that contain images or PDFs; tail messages reopen in the current session, while earlier messages fork a new session, and path-restored attachments are reloaded when the edited message is sent again
-- Let the model use the built-in `view_image` tool to load a local PNG/JPEG/WebP/GIF/BMP/TIFF image into context (normalized to PNG or JPEG, scaled down to 2000px on the longest edge, first frame for animated WebP/GIF/TIFF) when the tool is permitted, the first model in the effective model pool supports image input, and that first model does not use the OpenAI Chat Completions API. The tool uses the same local-path permission handling as `read`.
+- Let the model use the built-in `view_image` tool to load a local PNG/JPEG/WebP/GIF/BMP/TIFF image into context (normalized to PNG or JPEG, scaled down to 2000px on the longest edge, first frame for animated WebP/GIF/TIFF) when the tool is permitted and the first model in the effective model pool supports image input. The tool uses the same local-path permission handling as `read`.
 
-`view_image` availability follows the first model in the effective pool. For OpenAI models, use the Responses API when tools need to return images or files; Chat Completions accepts images in user messages but not in tool results. After an image/PDF tool result enters the conversation, Chord skips fallback models that cannot replay it safely.
+`view_image` availability follows image input support in the first model of the effective pool. Both Chat Completions and the Responses API can send tool-returned images to models that support image input. After an image or PDF tool result enters the conversation, Chord skips fallback models that do not support the corresponding input type.
 
 Common actions:
 
@@ -440,6 +442,7 @@ Common actions:
 - `@` file completion includes image/PDF files only when the current model supports that input type. Manually typed image/PDF `@` references are still accepted as attachments; unsupported attachments are ignored at send time with a warning.
 - To attach an image or PDF by path, enter the path in the composer and configure a custom `insert_attach_file` key binding
 - PDFs that appear to be encrypted are marked with a warning; Chord still allows sending them because provider-side parsing is authoritative.
+- `generate_image` and `view_image` tool cards show images directly, without a result JSON pane or a fold toggle. Important warnings, image scaling, and unsuccessful outcomes remain visible.
 - `Enter` / `o` / `Space`: open the image in the current user message or tool result in Normal mode
 - In the composer, click a real image placeholder once to select the whole attachment, then delete or type to replace it; `Ctrl+Z` restores the edit. Double-click the same placeholder to preview it before sending. Typed placeholder text and PDFs do not open image previews.
 - In image preview, use `Left` / `Right` to browse the images present when it opened. Press `Esc` or click outside the preview to close it; composer previews return to the same draft in Insert mode, with the cursor restored and the selection cleared. Reading and preparing images happens in the background. If loading fails, press `r` to retry or close the preview to continue editing.

@@ -66,8 +66,8 @@ func normalizeProviderConfig(provName string, cfg config.ProviderConfig, _ []con
 	}
 
 	if normalized.Type == config.ProviderTypeGenerateContent {
-		if !config.APIURLPathHasSuffix(normalized.APIURL, "/models") {
-			return cfg, fmt.Errorf("provider %q type %q requires api_url path ending in /models", provName, config.ProviderTypeGenerateContent)
+		if !config.IsGeminiAPIURL(normalized.APIURL) {
+			return cfg, fmt.Errorf("provider %q type %q requires %s", provName, config.ProviderTypeGenerateContent, config.GeminiAPIURLRequirement)
 		}
 	}
 

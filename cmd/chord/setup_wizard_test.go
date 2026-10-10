@@ -634,7 +634,7 @@ func TestRunInitialSetupWizardInfersGeminiDefaultsFromModelsEndpoint(t *testing.
 	inputPath := filepath.Join(t.TempDir(), "wizard-input.txt")
 	inputs := []string{
 		"1",
-		"https://generativelanguage.googleapis.com/v1beta/models",
+		"https://generativelanguage.googleapis.com/v1beta/",
 		"",
 		"",
 		"3",
@@ -673,7 +673,7 @@ func TestRunInitialSetupWizardInfersGeminiDefaultsFromModelsEndpoint(t *testing.
 	if prov.Type != config.ProviderTypeGenerateContent {
 		t.Fatalf("provider type = %q, want %q", prov.Type, config.ProviderTypeGenerateContent)
 	}
-	if prov.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" {
+	if prov.APIURL != "https://generativelanguage.googleapis.com/v1beta/" {
 		t.Fatalf("provider api_url = %q", prov.APIURL)
 	}
 	if _, ok := prov.Models["gemini-3.8-flash"]; !ok {

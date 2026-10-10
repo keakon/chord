@@ -1,6 +1,7 @@
 package acpagent
 
 import (
+	"context"
 	"strings"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -69,7 +70,7 @@ type eventMapper struct{}
 // Map converts one Chord event. Sub-agent events are dropped: the ACP client
 // watches one conversation, and delegated work already shows up through the
 // main agent's tool calls.
-func (m *eventMapper) Map(ev agent.AgentEvent) ([]acp.SessionUpdate, eventEffects) {
+func (m *eventMapper) Map(ctx context.Context, ev agent.AgentEvent) ([]acp.SessionUpdate, eventEffects) {
 	switch e := ev.(type) {
 	case agent.StreamTextEvent:
 		if e.AgentID != "" {
@@ -180,7 +181,7 @@ func (m *eventMapper) Map(ev agent.AgentEvent) ([]acp.SessionUpdate, eventEffect
 		if e.AgentID != "" {
 			return nil, eventEffects{}
 		}
-		return []acp.SessionUpdate{toolCallResult(e)}, eventEffects{busy: true}
+		return []acp.SessionUpdate{toolCallResult(ctx, e)}, eventEffects{busy: true}
 
 	case agent.AssistantMessageEvent:
 		if e.AgentID != "" {

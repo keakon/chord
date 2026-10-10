@@ -77,6 +77,7 @@ export default defineConfig({
             { slug: 'permissions-and-safety', translations: { 'zh-CN': '权限与安全' } },
             { slug: 'tools', translations: { 'zh-CN': '内置工具' } },
             { slug: 'edit-tools', translations: { 'zh-CN': '编辑工具' } },
+            { slug: 'image-generation', translations: { 'zh-CN': '图片生成与编辑' } },
           ],
         },
         {

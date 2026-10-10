@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -287,12 +288,17 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 	if block := m.ensureToolResultBlock(evt); block != nil {
 		delete(m.toolArgRenderState, evt.CallID)
 		block.streamArgs = nil
-		if block.ResultDone && block.ResultStatus == evt.Status && block.ResultContent == evt.Result && strings.TrimSpace(block.ToolID) == strings.TrimSpace(evt.CallID) {
+		imageParts := imagePartsFromContentParts(evt.Parts)
+		sameImages := imageParts == nil || slices.EqualFunc(block.ImageParts, imageParts, func(a, b BlockImagePart) bool {
+			return a.FileName == b.FileName && a.ImagePath == b.ImagePath && a.MimeType == b.MimeType && bytes.Equal(a.Data, b.Data)
+		})
+		if block.ResultDone && block.ResultStatus == evt.Status && block.ResultContent == evt.Result && strings.TrimSpace(block.ToolID) == strings.TrimSpace(evt.CallID) && sameImages {
 			return effects
 		}
 		if block.ResultDone && block.ResultStatus == agent.ToolResultStatusSuccess && evt.Status != agent.ToolResultStatusSuccess {
 			return effects
 		}
+		m.recordToolErrorDiagnostic(evt)
 		m.recordTUIDiagnostic("tool-result", "tool=%s call=%s block=%d status=%s result_len=%d had_diff=%t", evt.Name, evt.CallID, block.ID, evt.Status, len(evt.Result), evt.Diff != "")
 		displayArgsJSON := evt.ArgsJSON
 		if block.RawArgs != "" {
@@ -312,7 +318,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			duration:       evt.Duration,
 			doneReport:     evt.DoneReport,
 			displayArgs:    stableToolDisplayArgs,
-			imageParts:     imagePartsFromContentParts(evt.Parts),
+			imageParts:     imageParts,
 			resetExecution: true,
 			recoveryState:  evt.RecoveryState,
 		})
@@ -362,6 +368,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.updateViewportBlock(block)
 		m.markBlockSettled(block)
 	} else {
+		m.recordToolErrorDiagnostic(evt)
 		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultPayload: evt.Payload, ResultNotes: append([]string(nil), evt.Notes...), ResultStatus: evt.Status, ResultDone: true, Collapsed: !toolCardAlwaysExpanded(evt.Name), AgentID: evt.AgentID, Audit: evt.Audit.Clone(), ImageParts: imagePartsFromContentParts(evt.Parts), RecoveryState: evt.RecoveryState}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
@@ -369,6 +376,11 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 	}
 	m.setStreamRenderInvalidation(streamRenderInvalidateForce)
 	effects.addFollowup(m.requestStreamBoundaryFlush())
+	if slices.ContainsFunc(evt.Parts, func(part message.ContentPart) bool { return part.Type == message.ContentPartImage }) {
+		// Updating the card only draws placeholders. Send image data without
+		// waiting for scrolling, focus changes, or another model response.
+		effects.addFollowup(m.imageProtocolCmdWithReason("tool-result"))
+	}
 	return effects
 }
 

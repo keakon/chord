@@ -263,7 +263,7 @@ func (r *RecoveryManager) imagesDir() string {
 // persistBinaryParts writes any image/pdf ContentParts with raw Data to disk,
 // replacing Data with an empty slice and setting ImagePath. The returned
 // message is a shallow copy safe to marshal without the large byte slices.
-func (r *RecoveryManager) persistBinaryParts(msg message.Message) (message.Message, error) {
+func (r *RecoveryManager) persistBinaryParts(msg message.Message, durable bool) (message.Message, error) {
 	if len(msg.Parts) == 0 {
 		return msg, nil
 	}
@@ -299,12 +299,21 @@ func (r *RecoveryManager) persistBinaryParts(msg message.Message) (message.Messa
 		}
 		fileName := fmt.Sprintf("%d-%d%s", time.Now().UnixNano(), i, ext)
 		filePath := filepath.Join(r.imagesDir(), fileName)
-		if err := privatefs.WriteFile(r.sessionDir, filePath, p.Data); err != nil {
+		write := privatefs.WriteFile
+		if durable {
+			write = privatefs.WriteFileSynced
+		}
+		if err := write(r.sessionDir, filePath, p.Data); err != nil {
 			return msg, fmt.Errorf("write attachment file: %w", err)
 		}
 		parts[i].Data = nil
 		parts[i].ImagePath = filePath
 		parts[i].DataBytes = int64(len(p.Data))
+	}
+	if durable {
+		if err := privatefs.SyncDir(r.imagesDir()); err != nil {
+			return msg, fmt.Errorf("sync attachment directory: %w", err)
+		}
 	}
 	msg.Parts = parts
 	return msg, nil
@@ -338,7 +347,7 @@ func (r *RecoveryManager) persistMessage(agentID string, msg message.Message, du
 	r.mu.Unlock()
 
 	var err error
-	msg, err = r.persistBinaryParts(msg)
+	msg, err = r.persistBinaryParts(msg, durable)
 	if err != nil {
 		log.Warnf("failed to persist binary parts, storing inline error=%v", err)
 	}

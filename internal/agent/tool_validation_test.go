@@ -133,7 +133,7 @@ func TestApplyConfirmedArgsEditsRejectsInvalidJSON(t *testing.T) {
 		},
 	})
 
-	_, err := applyConfirmedArgsEdits(registry, permission.Ruleset{{Permission: "shell", Pattern: "*", Action: permission.ActionAsk}}, "shell", json.RawMessage(`{"command":"pwd"}`), `{"command":`, permission.PathScope{})
+	_, err := applyConfirmedArgsEdits(registry, permission.Ruleset{{Permission: "shell", Pattern: "*", Action: permission.ActionAsk}}, "shell", json.RawMessage(`{"command":"pwd"}`), `{"command":`, permission.PathScope{}, toolPermissionContext{})
 	if err == nil || !strings.Contains(err.Error(), "valid JSON") {
 		t.Fatalf("err = %v, want invalid JSON error", err)
 	}
@@ -154,7 +154,7 @@ func TestApplyConfirmedArgsEditsToleratesUnknownFields(t *testing.T) {
 	})
 
 	ruleset := permission.Ruleset{{Permission: "read", Pattern: "*", Action: permission.ActionAllow}}
-	edited, err := applyConfirmedArgsEdits(registry, ruleset, "read", json.RawMessage(`{"path":"notes.txt"}`), `{"path":"other.txt","extra":1}`, permission.PathScope{})
+	edited, err := applyConfirmedArgsEdits(registry, ruleset, "read", json.RawMessage(`{"path":"notes.txt"}`), `{"path":"other.txt","extra":1}`, permission.PathScope{}, toolPermissionContext{})
 	if err != nil {
 		t.Fatalf("applyConfirmedArgsEdits: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestApplyConfirmedArgsEditsRejectsDeniedPermissionAfterEdit(t *testing.T) {
 		{Permission: "read", Pattern: "secret/*", Action: permission.ActionDeny},
 	}
 
-	_, err := applyConfirmedArgsEdits(registry, ruleset, "read", json.RawMessage(`{"path":"notes.txt"}`), `{"path":"secret/plan.txt"}`, permission.PathScope{})
+	_, err := applyConfirmedArgsEdits(registry, ruleset, "read", json.RawMessage(`{"path":"notes.txt"}`), `{"path":"secret/plan.txt"}`, permission.PathScope{}, toolPermissionContext{})
 	if err == nil || !errors.Is(err, errEditedArgsPermissionDeny) {
 		t.Fatalf("err = %v, want permission deny error", err)
 	}
@@ -238,6 +238,7 @@ func TestApplyConfirmedArgsEditsBashDeniedBySubcommandPermission(t *testing.T) {
 		json.RawMessage(`{"command":"pwd"}`),
 		`{"command":"cd build && rm out.txt"}`,
 		permission.PathScope{},
+		toolPermissionContext{},
 	)
 	if err == nil || !errors.Is(err, errEditedArgsPermissionDeny) {
 		t.Fatalf("err = %v, want permission deny error", err)

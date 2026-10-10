@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	ServerToolUnknown     = "unknown"
-	ServerToolSupported   = "supported"
-	ServerToolUnsupported = "unsupported"
+	ServerToolUnknown                          = "unknown"
+	ServerToolSupported                        = "supported"
+	ServerToolUnsupported                      = "unsupported"
+	ServerToolContractResponsesImageGeneration = "openai.responses.image_generation"
 )
 
 // ServerToolCapability belongs to one endpoint and wire model, never to a
@@ -26,7 +27,7 @@ type ServerToolCapability struct {
 
 func validateServerTools(binding Binding, endpoint Endpoint) error {
 	for name, capability := range binding.ServerTools {
-		if name != toolname.WebSearch {
+		if name != toolname.WebSearch && name != toolname.GenerateImage {
 			return fmt.Errorf("binding %s: unknown server tool %q", binding.ModelID, name)
 		}
 		switch capability.State {
@@ -43,8 +44,11 @@ func validateServerTools(binding Binding, endpoint Endpoint) error {
 		if capability.State == ServerToolSupported && capability.Contract == "" {
 			return fmt.Errorf("binding %s: supported server tool requires a contract", binding.ModelID)
 		}
-		if capability.Contract == "openai.responses.web_search" && endpoint.Protocol != "responses" || capability.Contract == "anthropic.messages.web_search_20250305" && endpoint.Protocol != "messages" {
+		if capability.Contract == "openai.responses.web_search" && endpoint.Protocol != "responses" || capability.Contract == "anthropic.messages.web_search_20250305" && endpoint.Protocol != "messages" || capability.Contract == ServerToolContractResponsesImageGeneration && endpoint.Protocol != "responses" {
 			return fmt.Errorf("binding %s: server tool contract does not match endpoint protocol", binding.ModelID)
+		}
+		if name == toolname.GenerateImage && capability.Contract != "" && capability.Contract != ServerToolContractResponsesImageGeneration {
+			return fmt.Errorf("binding %s: image generation contract is not implemented", binding.ModelID)
 		}
 		for _, source := range capability.Sources {
 			if err := validateMetadataSource(source); err != nil {

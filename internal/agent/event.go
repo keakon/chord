@@ -496,11 +496,13 @@ func (ToolProgressEvent) agentEvent() {}
 
 // ToolResultEvent is emitted after a tool execution completes.
 type ToolResultEvent struct {
-	CallID   string
-	Name     string
-	ArgsJSON string // full tool arguments (available after streaming completes)
-	Audit    *message.ToolArgsAudit
-	Result   string
+	// Diagnostic adds a non-fatal error-panel record without emitting an agent-loop error.
+	Diagnostic *ToolErrorDiagnostic
+	CallID     string
+	Name       string
+	ArgsJSON   string // full tool arguments (available after streaming completes)
+	Audit      *message.ToolArgsAudit
+	Result     string
 	// Payload is Result before diagnostic notes were appended, Notes are those
 	// notes. They travel separately so the card can parse the tool's own output
 	// instead of a string the runtime decorated for the model.

@@ -816,6 +816,8 @@ func messageContextBytes(messages []message.Message) int {
 			for _, item := range msg.NativeTools.Items {
 				total += len(item)
 			}
+			imageBytes, _ := nativeImageAccounting(msg.NativeTools)
+			total += imageBytes
 			continue
 		}
 		total += MessagePayloadBytes([]message.Message{msg})
@@ -866,6 +868,9 @@ const imagePartEstimateTokens = (2000*2000 + 749) / 750
 func imagePartAccounting(messages []message.Message) (payloadBytes, tokens int) {
 	for _, msg := range messages {
 		if msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 {
+			imageBytes, imageTokens := nativeImageAccounting(msg.NativeTools)
+			payloadBytes += imageBytes
+			tokens += imageTokens
 			continue
 		}
 		for _, part := range msg.Parts {
@@ -906,7 +911,8 @@ func EstimateMessageTokens(msg message.Message) int {
 		for _, item := range msg.NativeTools.Items {
 			n += len(item)
 		}
-		return max(1, n/3)
+		_, imageTokens := nativeImageAccounting(msg.NativeTools)
+		return max(1, n/3+imageTokens)
 	}
 	payloadBytes := len(msg.Content)
 	imageTokens := 0

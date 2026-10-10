@@ -250,7 +250,7 @@ func applyRateLimitCooldown(provider *ProviderConfig, key string, apiErr *APIErr
 		return result
 	}
 	retryAfter := RetryAfterForProvider(provider, apiErr)
-	applied := provider.markRateLimitCooldown(key, retryAfter)
+	applied := provider.MarkRateLimitCooldown(key, retryAfter)
 	log.Warnf("API key rate limited, applying retry pacing key_id=%v configured=%v retry_after=%v cooldown_applied=%v", keyLogID(key), provider.retryPacingExplicit, retryAfter, applied)
 	return markKeyCooldownResult{cooldownApplied: applied}
 }

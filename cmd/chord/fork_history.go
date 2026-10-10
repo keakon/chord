@@ -21,6 +21,7 @@ import (
 	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // forkHistoryFlagHelp is the shared --fork-history help text used by both the
@@ -319,6 +320,9 @@ func forkSessionAtHistory(srcDir, projectSessionsDir, stateDir string, boundaryI
 // parts whose bytes must land in the fork's own images/ directory. Records
 // without such parts are copied into the fork byte-for-byte.
 func forkMessageNeedsRelocation(msg message.Message) bool {
+	if tools.HasGeneratedImages(msg) {
+		return true
+	}
 	for _, p := range msg.Parts {
 		if p.IsBinary() && (p.ImagePath != "" || len(p.Data) > 0) {
 			return true
@@ -351,15 +355,21 @@ func forkAttachmentExtension(mimeType string) string {
 // recovery manager's PersistMessage persists live messages: inline bytes are
 // written out to a file, and ImagePath references are re-read from the source
 // session and copied over so the fork does not depend on the source surviving.
-// Message text is never touched. An attachment the source session can no
+// Generated-image summaries retain their stable session-relative references.
+// Message text is unchanged. An attachment the source session can no
 // longer provide is a hard error: silently forking a record whose image would
 // be missing on restore is what this relocation exists to prevent.
 func relocForkAttachmentParts(msg message.Message, srcDir, newDir string) (message.Message, error) {
+	var err error
+	msg, err = tools.RelocateGeneratedImages(context.Background(), msg, srcDir, newDir)
+	if err != nil {
+		return msg, fmt.Errorf("fork session: relocate generated images: %w", err)
+	}
 	parts := make([]message.ContentPart, len(msg.Parts))
 	copy(parts, msg.Parts)
 	for i := range parts {
 		p := &parts[i]
-		if !p.IsBinary() {
+		if !p.IsBinary() || p.ArtifactID != "" {
 			continue
 		}
 		if p.ImagePath == "" && len(p.Data) == 0 {
@@ -510,8 +520,8 @@ func relocForkCheckpointPaths(msg message.Message, srcDir, newDir string) messag
 // without source-session path references are copied byte-for-byte; records
 // that need relocation are re-encoded by relocForkAttachmentParts (binary
 // attachments) and relocForkCheckpointPaths (a checkpoint's history map). The
-// per-record differences from the archived bytes are the relocated image_path
-// and the repointed history-map paths. The caller renames the temp file into
+// per-record differences are relocated attachment paths and
+// repointed history-map paths. The caller renames the temp file into
 // place once the whole transcript — and the rest of the fork — is staged, so
 // main.jsonl appears complete or not at all.
 func writeForkTranscript(newDir, srcDir string, lines []string) (int, error) {

@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/golog/log"
-
 	"github.com/gorilla/websocket"
+	"github.com/keakon/golog/log"
 	"golang.org/x/net/proxy"
 
+	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 )
@@ -60,7 +60,7 @@ func parseCodexWebSocketErrorJSON(msg []byte) (*APIError, http.Header) {
 		apiErr.RetryAfter = durationFromPositiveSecondsClamped(*frame.Error.ResetsInSeconds, 0)
 	}
 	h := responseErrorHeaders(frame.Headers)
-	if delay, ok := parseRetryAfter(h.Get("Retry-After")); ok {
+	if delay, ok := httpheader.ParseRetryAfter(h.Get("Retry-After")); ok {
 		apiErr.RetryAfter = delay
 	}
 	if len(h) == 0 {

@@ -257,7 +257,7 @@ azure:
 ```yaml
 providers:
   gemini:
-    api_url: https://generativelanguage.googleapis.com/v1beta/models
+    api_url: https://generativelanguage.googleapis.com/v1beta/
     models:
       gemini-3.8-flash:
         limit:
@@ -267,7 +267,7 @@ providers:
           input: [text, image, pdf]
 ```
 
-Gemini 的 `api_url` 应设为 `/models` 基础路径。Chord 根据 URL path 的 `/models` 后缀自动识别为 `type: generate-content`，可省略 `type`。不要在 URL 中包含模型名或 `:streamGenerateContent?alt=sse`，Chord 会自动追加 `/{model}:streamGenerateContent?alt=sse`。`models` 下的 key（如 `gemini-3.8-flash`）即为发送给 Gemini 的模型 ID。
+Gemini 的 `api_url` 配置为原生 API 版本根，如 `https://generativelanguage.googleapis.com/v1beta/`，供对话和生图共用。Chord 从 `/v1beta`、`/v1alpha` 或 Google 官方 `/v1` 地址识别 `type: generate-content`，可省略 `type`；代理使用 `/v1` 时需显式设置类型。不要附加 `models`、模型名或操作名，Chord 会为对话追加 `/models/{model}:streamGenerateContent?alt=sse`，为生图追加 `/models/{model}:generateContent`。`models` 下的 key（如 `gemini-3.8-flash`）即为发送给 Gemini 的模型 ID。
 
 Gemini 的 thinking 参数与其他 provider 一样统一放在 `thinking` 下（不使用 `gemini_thinking` 之类的专有键）：
 
@@ -287,7 +287,7 @@ Gemini 的 thinking 参数与其他 provider 一样统一放在 `thinking` 下�
 ```yaml
 providers:
   gemini:
-    api_url: https://generativelanguage.googleapis.com/v1beta/models
+    api_url: https://generativelanguage.googleapis.com/v1beta/
     models:
       gemini-2.5-flash:
         limit:
@@ -315,7 +315,7 @@ providers:
 - `api_url` 的 path 以 `/responses` 结尾 → `responses`
 - `api_url` 的 path 以 `/chat/completions` 结尾 → `chat-completions`
 - `api_url` 的 path 以 `/messages` 结尾 → `messages`
-- `api_url` 的 path 以 `/models` 结尾 → `generate-content`
+- `api_url` 的 path 以 `/v1beta`、`/v1alpha` 结尾，或 Google 官方 `/v1` 根地址 → `generate-content`
 
 不匹配以上规则时，需显式设置 `type`。
 
@@ -1171,6 +1171,10 @@ orchestration:
 - 降低 `subagent_compact_usage` 可减少上下文溢出风险，但会更早、更频繁地压缩；提高它可减少压缩开销，但会缩小恢复余量。
 - 提高并发不一定更快：provider 限流、模型延迟、本地内存压力和 workspace lease 竞争都可能降低实际吞吐。应依据排队/拒绝指标和端到端延迟调参，而不是只看 CPU 数量。
 
+## 图片生成
+
+`image_generation` 通过 `enabled`、`model_pool` 和 `timeout_seconds` 启用独立图片模型池。图片模型用 `image_generation: {}` 标记；可由 API 地址和已知模型名推断类型，也可显式设置 `type`。默认复用 provider 的 `/images/generations` 完整生图地址、图片资源根、Gemini 版本根或匹配型号的 `:generateContent` 完整地址，仅在图片接口使用不同地址时设置 `base_url`。无法识别的 provider `api_url` 会报配置错误，不会改用官方默认地址。显式 `base_url` 用于指定图片资源根，Images API 会在其后追加 `/generations` 或 `/edits`。对话模型的 `native_image_generation` 声明服务端工具，获准时优先使用。配置与保存原图的说明见[图片生成与编辑](image-generation_CN.md)。
+
 ## MCP
 
 Chord 支持 MCP 协议 `2025-06-18`，服务端需要协商到这一版本。初始化后的 HTTP 请求会带上协商得到的 `MCP-Protocol-Version` 请求头。
@@ -1500,7 +1504,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | 字段          | 类型   | 说明                                                                                                                                                |
 | ------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`        | string | `messages` / `chat-completions` / `responses` / `generate-content`。省略时按 `api_url` 或 `preset` 自动推断。                                       |
-| `api_url`     | string | 接口地址。Chord 根据 URL path 自动识别 provider type，忽略 query string 和 fragment。Gemini 用 `/models` 基础路径，Chord 自动附加 `/{model}:streamGenerateContent?alt=sse`。Azure Responses 的 `?api-version=...` 是可选项，可用于固定特定 API 版本。 |
+| `api_url`     | string | 接口地址。Chord 根据 URL path 自动识别 provider type，忽略 query string 和 fragment。Gemini 用原生 API 版本根（如 `/v1beta/`），Chord 自动附加 `/models/{model}:streamGenerateContent?alt=sse`。Azure Responses 的 `?api-version=...` 是可选项，可用于固定特定 API 版本。 |
 | `preset`      | string | 可选 `openai`、`anthropic`、`gemini` 或 `codex`（OpenAI Codex / ChatGPT OAuth），分别选择对应的官方端点契约。Azure OpenAI Responses 使用普通 `type: responses` provider，配合 `auth_scheme: api-key`、`store: true`，并在 `compat.request_overrides.headers` 中将 Codex 身份 header 置为 `null`。 |
 | `trust_http_400`| bool   | 是否把 HTTP 400 视为终止性请求错误。`preset: codex` 默认 `true`；聚合/代理网关默认 `false`，因为常把上游过载包装成 400。 |
 | `retry_after_max_s`| int    | 采纳 `Retry-After` 头的最长等待秒数（1-86400）。该头始终作为 key 冷却时长生效，优先于 `retry_backoff`/`retry_delay_ms`；本参数只限制单次提示最长能占用 key 多久。`preset: codex` 默认 `86400`；第三方网关可能回显任意值，默认 `60`。 |

@@ -39,7 +39,7 @@ func TestEndpointContracts(t *testing.T) {
 		t.Fatalf("openai contract = %+v", openai)
 	}
 	gemini, _ := EndpointContract("gemini")
-	if gemini.AuthMethod != "x-goog-api-key" || !strings.HasSuffix(gemini.RequestURL, "/models") {
+	if gemini.AuthMethod != "x-goog-api-key" || gemini.RequestURL != "https://generativelanguage.googleapis.com/v1beta/" {
 		t.Fatalf("gemini contract = %+v, want the generate-content endpoint shape", gemini)
 	}
 	codex, _ := EndpointContract("codex")
@@ -97,6 +97,7 @@ func TestLoadCatalogRejectsInvalidData(t *testing.T) {
 		{"duplicate endpoint", `{"version":"v","endpoints":[{"preset_id":"a","protocol":"responses","request_url":"https://x.invalid/v1","auth_method":"bearer","env_var":"A"},{"preset_id":"a","protocol":"responses","request_url":"https://y.invalid/v1","auth_method":"bearer","env_var":"A"}]}`},
 		{"unknown field", `{"version":"v","bogus":true}`},
 		{"bad protocol", `{"version":"v","endpoints":[{"preset_id":"a","protocol":"nope","request_url":"https://x.invalid/v1","auth_method":"bearer","env_var":"A"}]}`},
+		{"Gemini resource instead of version root", `{"version":"v","endpoints":[{"preset_id":"gemini","protocol":"generate-content","request_url":"https://example.invalid/v1beta/models","auth_method":"x-goog-api-key","env_var":"GEMINI_API_KEY"}]}`},
 		{"http url", `{"version":"v","endpoints":[{"preset_id":"a","protocol":"responses","request_url":"http://x.invalid/v1","auth_method":"bearer","env_var":"A"}]}`},
 		{"model without source", `{"version":"v","models":[{"id":"m","context":100,"output":10}]}`},
 		{"input exceeds context", `{"version":"v","models":[{"id":"m","context":100,"input":200,"output":10,"sources":[{"url":"https://x.invalid","checked":"2026-10-01"}]}]}`},

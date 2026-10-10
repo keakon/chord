@@ -73,7 +73,7 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`。
+可订阅事件类型：`activity`、`assistant_message`、`idle`、`confirm_request`、`question_request`、`question_updated`、`question_resolved`、`notification`、`handoff_request`、`handoff_cancelled`、`role_change`、`error`、`agent_started`、`agent_notify`、`agent_done`、`info`、`toast`、`done_completion`、`local_shell_result`、`assistant_rollback`、`todos`、`compaction_status`、`session_switched`、`workdir_changed`、`background_result`、`context_notice`、`image_result`。
 
 ### `status`
 
@@ -282,6 +282,20 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 ```json
 {"type": "cancel"}
 ```
+
+## 图片交付
+
+订阅 `image_result` 可接收 `generate_image` 的完成结果。结果包含 `call_id`、`agent_id`、`status`，以及 `result` 中的简洁图片摘要。成功结果后会发送每张原图的 `image_artifact` 数据分块。原图无法读取时，会再发送一条具有相同 `call_id` 和 `agent_id` 的 `image_result`，其中包含 `delivery_error`；此时可能已经收到部分数据块。摘要中的成功 `status` 表示工具执行成功，只有全部图片收到末块且哈希匹配后，才表示原图传输完成。传输失败不会再次调用生图服务。
+
+每块包含 `reference`、`call_id`、`request_id`、`agent_id`、`mime_type`、`width`、`height`、`size_bytes`、字节偏移 `offset`、末块标记 `last` 和 base64 `data`。逐块解码并按字节偏移拼接，收到 `last: true` 后核对摘要中的原图 SHA-256。每块原始数据最多 384 KiB，JSON 帧小于 600 KiB。传输内容是原图。
+
+获取当前会话中已保存的原图：
+
+```json
+{"type":"image_artifact","request_id":"download-1","content":"artifact:images/sha256-<digest>.png"}
+```
+
+响应使用相同分块格式，并回传 `request_id`。只接受当前会话中的生成图片引用，拒绝任意磁盘路径和其他会话的文件。该命令不会调用生图服务。Gateway 订阅图片结果后，需要拼接数据并通过对应聊天平台的文件或图片 API 转发。
 
 ## 事件
 

@@ -27,6 +27,7 @@ In one DeepSWE v1.1 task Chord finished first and cheapest (6m37s, $0.052); see 
 - [Permissions & Safety](./permissions-and-safety.md): Set approval rules and understand risks
 - [Built-in tools](./tools.md): Look up tool names, purposes, and key limits
 - [Edit tools](./edit-tools.md): Understand file edits, partial success, and retries
+- [Image generation and editing](./image-generation.md): Configure an image pool, generate or edit images, and keep saved originals
 
 ## Customization and integration
 

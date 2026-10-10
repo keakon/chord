@@ -27,6 +27,7 @@
 - [权限与安全](./permissions-and-safety_CN.md)：设置审批规则，了解操作风险
 - [内置工具](./tools_CN.md)：查找工具名、用途和重要限制
 - [编辑工具](./edit-tools_CN.md)：理解文件修改、部分成功和重试
+- [图片生成与编辑](./image-generation_CN.md)：配置图片模型池，生成或编辑图片并保留原图
 
 ## 扩展与集成
 

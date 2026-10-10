@@ -29,7 +29,7 @@ func TestRequestOverridesPreserveSchemaOrderOnEveryWire(t *testing.T) {
 			defer server.Close()
 			apiURL := server.URL
 			if wire == config.ProviderTypeGenerateContent {
-				apiURL += "/models"
+				apiURL += "/v1beta/"
 			}
 			cfg := NewProviderConfig("sample", config.ProviderConfig{Type: wire, APIURL: apiURL, Compat: &config.ProviderCompatConfig{RequestOverrides: &config.RequestOverridesConfig{Body: map[string]any{"sample_flag": true}}}}, []string{"test-key"})
 			var provider Provider

@@ -100,12 +100,22 @@ func (t *ViewImageTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 		return "", fmt.Errorf("image input is not available in this context")
 	}
 
-	resolvedPath, _, err := resolveExistingToolPathInDir(a.Path, t.BaseDir, PathTargetRegularFile, "read")
+	imagePath, err := ResolveImageArtifactPath(SessionDirFromContext(ctx), a.Path, t.BaseDir)
+	if err != nil {
+		return "", err
+	}
+	resolvedPath, _, err := resolveExistingToolPathInDir(imagePath, t.BaseDir, PathTargetRegularFile, "read")
 	if err != nil {
 		if strings.Contains(err.Error(), "path not found") {
 			return "", fileNotFoundErrorWithPathSuggestionsInDir(a.Path, t.BaseDir, PathTargetRegularFile)
 		}
 		return "", err
+	}
+
+	if guard, ok := ImageAccessGuardFromContext(ctx); ok {
+		if err := guard(NameViewImage, resolvedPath); err != nil {
+			return "", err
+		}
 	}
 
 	// Read and normalize; ReadImageFile rejects unsupported or oversized inputs

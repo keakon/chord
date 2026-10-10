@@ -201,11 +201,15 @@ func TestConvertMessagesToOpenAI_ToolOutputWithImageParts(t *testing.T) {
 	}}
 
 	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
-	if len(out) != 1 || out[0].Role != "tool" || out[0].ToolCallID != "c1" {
+	if len(out) != 2 || out[0].Role != "tool" || out[0].ToolCallID != "c1" {
 		t.Fatalf("tool message = %#v", out)
 	}
 	if out[0].Content != "Loaded image" {
 		t.Fatalf("content = %#v, want text-only tool result", out[0].Content)
+	}
+	blocks, ok := out[1].Content.([]openAIContentBlock)
+	if out[1].Role != "user" || !out[1].Transient || !ok || len(blocks) != 2 || blocks[1].Type != "image_url" || blocks[1].ImageURL.URL != "data:image/png;base64,"+tinyPNGBase64 {
+		t.Fatalf("tool image projection = %#v", out[1])
 	}
 }
 

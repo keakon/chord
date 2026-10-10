@@ -15,6 +15,8 @@ import (
 // starts a new turn; starting a new turn cancels any in-flight work from the
 // previous one.
 type Turn struct {
+	nativeImageFallback       atomic.Bool
+	nativeImageDeadline       atomic.Int64
 	questionCompletionBlocked bool
 	questionRequestScope      string
 	ID                        uint64

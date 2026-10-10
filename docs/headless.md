@@ -75,7 +75,7 @@ Response:
 {"type": "subscribe_response", "payload": {"events": ["activity", "assistant_message", "idle", "done_completion"]}}
 ```
 
-Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`.
+Available event types: `activity`, `assistant_message`, `idle`, `confirm_request`, `question_request`, `question_updated`, `question_resolved`, `notification`, `handoff_request`, `handoff_cancelled`, `role_change`, `error`, `agent_started`, `agent_notify`, `agent_done`, `info`, `toast`, `done_completion`, `local_shell_result`, `assistant_rollback`, `todos`, `compaction_status`, `session_switched`, `workdir_changed`, `background_result`, `context_notice`, `image_result`.
 
 ### `status`
 
@@ -284,6 +284,20 @@ Cancel the current turn (equivalent to pressing `Esc` twice in the TUI).
 ```json
 {"type": "cancel"}
 ```
+
+## Image delivery
+
+Subscribe to `image_result` to receive completed `generate_image` results. Each result contains `call_id`, `agent_id`, `status` and the small saved-image summary in `result`. A successful result is followed by `image_artifact` envelopes for every original. If an original cannot be read, another `image_result` with the same `call_id` and `agent_id` reports `delivery_error`; some chunks may already have arrived. The summary’s successful `status` confirms the tool result, while delivery is complete only after every referenced image has a final chunk and a matching hash. Delivery errors never trigger generation again.
+
+Each chunk has `reference`, `call_id`, `request_id`, `agent_id`, `mime_type`, `width`, `height`, `size_bytes`, byte `offset`, `last` and base64 `data`. Decode each chunk separately and append at its byte offset; stop at `last: true` and verify the original's SHA-256 from the summary. Raw chunks are at most 384 KiB, keeping JSON frames below 600 KiB. The data is the original, not a resized model preview.
+
+To retrieve a saved original from the active session, send:
+
+```json
+{"type":"image_artifact","request_id":"download-1","content":"artifact:images/sha256-<digest>.png"}
+```
+
+The response uses the same chunk shape and echoes `request_id`. Only generated image references under the active session are accepted; arbitrary disk paths and files from another session are rejected. This command never calls an image service. A gateway that subscribes to image results must assemble and forward the bytes using its platform's file or image API.
 
 ## Events
 

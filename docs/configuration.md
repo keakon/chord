@@ -268,7 +268,7 @@ azure:
 ```yaml
 providers:
   gemini:
-    api_url: https://generativelanguage.googleapis.com/v1beta/models
+    api_url: https://generativelanguage.googleapis.com/v1beta/
     models:
       gemini-3.8-flash:
         limit:
@@ -278,7 +278,7 @@ providers:
           input: [text, image, pdf]
 ```
 
-For Gemini, set `api_url` to the `/models` base path. Chord detects `type: generate-content` from the URL path's `/models` suffix, so `type` can be omitted. Do not include the model name or `:streamGenerateContent?alt=sse`; Chord appends `/{model}:streamGenerateContent?alt=sse` automatically. The model map key, such as `gemini-3.8-flash`, is the model ID sent to Gemini.
+For Gemini, set `api_url` to the native API version root, such as `https://generativelanguage.googleapis.com/v1beta/`, shared by chat and image models. Chord detects `type: generate-content` from `/v1beta`, `/v1alpha`, or Google's official `/v1` root; proxies using `/v1` need an explicit type. Do not append `models`, a model name or an operation. Chord appends `/models/{model}:streamGenerateContent?alt=sse` for chat and `/models/{model}:generateContent` for images. The model map key, such as `gemini-3.8-flash`, is the model ID sent to Gemini.
 
 Gemini thinking options use the same unified `thinking` object as other providers (no separate `gemini_thinking` key):
 
@@ -298,7 +298,7 @@ Example:
 ```yaml
 providers:
   gemini:
-    api_url: https://generativelanguage.googleapis.com/v1beta/models
+    api_url: https://generativelanguage.googleapis.com/v1beta/
     models:
       gemini-2.5-flash:
         limit:
@@ -326,7 +326,7 @@ If `type` is omitted, Chord auto-detects it from provider config:
 - `api_url` path ending in `/responses` → `responses`
 - `api_url` path ending in `/chat/completions` → `chat-completions`
 - `api_url` path ending in `/messages` → `messages`
-- `api_url` path ending in `/models` → `generate-content`
+- `api_url` path ending in `/v1beta` or `/v1alpha`, or Google's official `/v1` root → `generate-content`
 
 If none of these rules match, set `type` explicitly.
 
@@ -1355,6 +1355,10 @@ orchestration:
 - Lowering `subagent_compact_usage` reduces context-overflow risk but causes earlier and more frequent compression. Raising it reduces compression work but leaves less recovery headroom.
 - Increasing concurrency is not automatically faster: provider throttling, model latency, local memory pressure, and workspace lease contention can reduce effective throughput. Change limits using observed queue/rejection metrics and end-to-end latency rather than CPU count alone.
 
+## Image generation
+
+`image_generation` enables a dedicated image pool with `enabled`, `model_pool` and `timeout_seconds`. Mark image models with `image_generation: {}`. Chord can infer the type from the API URL and a known model ID, or you can set `type` explicitly. Models inherit the provider's full `/images/generations` endpoint, image resource root, Gemini version root or full `:generateContent` endpoint for the configured model; set `base_url` only when the image API uses a different address. Unrecognized provider `api_url` addresses fail configuration validation rather than selecting an official default. An explicit `base_url` overrides the image resource root; Images APIs append `/generations` or `/edits` to that root. Conversation models can declare `native_image_generation` to prefer an authorized server tool. See [Image generation and editing](image-generation.md) for configuration and saved originals.
+
 ## MCP
 
 Chord supports MCP protocol `2025-06-18`. The server must negotiate that version; HTTP requests after initialization include the negotiated `MCP-Protocol-Version` header.
@@ -1722,7 +1726,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | Field          | Type   | Description                                                                                                                                              |
 | -------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`         | string | `messages` / `chat-completions` / `responses` / `generate-content`. Auto-detected from `api_url` or `preset` when omitted.                              |
-| `api_url`      | string | Endpoint URL. Chord detects provider type from the URL path, ignoring query strings and fragments. For Gemini, the `/models` base path; Chord appends `/{model}:streamGenerateContent?alt=sse`. For Azure Responses, `?api-version=...` is optional and can be used to pin a specific API version. |
+| `api_url`      | string | Endpoint URL. Chord detects provider type from the URL path, ignoring query strings and fragments. For Gemini, the native API version root (such as `/v1beta/`); Chord appends `/models/{model}:streamGenerateContent?alt=sse`. For Azure Responses, `?api-version=...` is optional and can be used to pin a specific API version. |
 | `preset`       | string | `openai`, `anthropic`, `gemini`, or `codex` (OpenAI Codex / ChatGPT OAuth), each selecting its official endpoint contract. Azure OpenAI Responses uses a plain `type: responses` provider with `auth_scheme: api-key`, `store: true`, and `compat.request_overrides.headers` set to `null` for the Codex identity headers. |
 | `trust_http_400` | bool   | Treat HTTP 400 as a terminal request error. `preset: codex` defaults to `true`; aggregating/proxy gateways default to `false` because they often wrap upstream overload as 400. |
 | `retry_after_max_s` | int    | Longest `Retry-After` wait honored, in seconds (1-86400). The header always applies as the key cooldown, ahead of `retry_backoff`/`retry_delay_ms`; this only bounds how long a single hint may block a key. `preset: codex` defaults to `86400`; third-party gateways, which can echo arbitrary values, default to `60`. |

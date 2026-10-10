@@ -61,6 +61,7 @@ const (
 
 // ContentPart is one part of a multi-part user message (text, image, or pdf).
 type ContentPart struct {
+	ArtifactID  string          `json:"artifact_id,omitempty"`  // immutable generated original kept even for text-only callers
 	Type        ContentPartType `json:"type"`                   // "text", "image", or "pdf"
 	Text        string          `json:"text,omitempty"`         // for type="text"
 	DisplayText string          `json:"display_text,omitempty"` // optional TUI-only summary for large hidden text parts

@@ -18,12 +18,14 @@ func nativeToolPermitted(registry *tools.Registry, rules permission.Ruleset, hoo
 		return false
 	}
 	tool, ok := registry.Get(name)
-	if !ok {
-		return false
-	}
-	hosted, ok := tool.(tools.HostedTool)
-	if !ok || !hosted.NativeEligible() {
-		return false
+	if name != tools.NameGenerateImage {
+		if !ok {
+			return false
+		}
+		hosted, ok := tool.(tools.HostedTool)
+		if !ok || !hosted.NativeEligible() {
+			return false
+		}
 	}
 	match := rules.LastMatch(name, "*")
 	if !match.Found || match.Rule.Action != permission.ActionAllow {
@@ -82,6 +84,7 @@ func (a *MainAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
 	journal := recovery.NativeRequestJournal{SessionDir: a.SessionDir(), AgentID: identity.MainAgentID, TurnID: turn.ID, Generation: turn.Epoch}
 	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(a.tools, a.snapshotRuleset(), a.hookEngine, name) }, a.nativeUsageRecorder(identity.MainAgentID, identity.MainAgentID, a.currentAgentName(), turn.ID))
 	policy.Preflight = nativeReceiptPreflight(policy.Preflight, a.nativeReceipt.Load())
+	a.configureNativeImagePolicy(policy, turn, a.tools, journal, a.instanceID)
 	policy.Failed = func(receipt *message.NativeToolHistory) {
 		a.sendEvent(Event{Type: EventNativeReceipt, Payload: nativeReceiptPayload{epoch: journal.Generation, receipt: receipt, failed: true}})
 	}
@@ -103,6 +106,7 @@ func (s *SubAgent) nativeRequestPolicy(turn *Turn) *llm.NativeToolPolicy {
 	policy := nativePolicy(journal, func(name string) bool { return nativeToolPermitted(s.tools, s.currentRuleset(), hooks, name) }, recorder)
 	policy.Preflight = nativeReceiptPreflight(policy.Preflight, s.nativeReceipt.Load())
 	if s.parent != nil {
+		s.parent.configureNativeImagePolicy(policy, turn, s.tools, journal, s.instanceID)
 		policy.Failed = func(receipt *message.NativeToolHistory) {
 			s.parent.sendEvent(Event{Type: EventNativeReceipt, Payload: nativeReceiptPayload{epoch: journal.Generation, agentID: s.instanceID, receipt: receipt, failed: true, sub: s}})
 		}
@@ -147,7 +151,7 @@ func (a *MainAgent) handleNativeReceipt(evt Event) {
 	}
 	for _, display := range tools.NativeToolDisplays(payload.receipt) {
 		a.emitToTUI(ToolCallStartEvent{ID: display.ID, Name: display.Name, ArgsJSON: display.Args, AgentID: payload.agentID})
-		a.emitToTUI(ToolResultEvent{CallID: display.ID, Name: display.Name, ArgsJSON: display.Args, Result: display.Result, Payload: display.Result, Status: ToolResultStatus(display.Status), AgentID: payload.agentID})
+		a.emitToTUI(ToolResultEvent{CallID: display.ID, Name: display.Name, ArgsJSON: display.Args, Result: display.Result, Payload: display.Result, Parts: display.Parts, Status: ToolResultStatus(display.Status), AgentID: payload.agentID})
 	}
 }
 

@@ -32,6 +32,7 @@ const (
 	NameSaveArtifact   = toolname.SaveArtifact
 	NameReadArtifact   = toolname.ReadArtifact
 	NameViewImage      = toolname.ViewImage
+	NameGenerateImage  = toolname.GenerateImage
 	NameCompactContext = toolname.CompactContext
 )
 

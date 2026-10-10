@@ -275,33 +275,44 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	if a == nil || payload == nil {
 		return
 	}
+	if payload.Name == tools.NameGenerateImage && payload.RecoveryState == "" {
+		payload.RecoveryState = imageToolRecoveryState(payload.Error)
+	}
 	rawResult := payload.Result
 	displayResult, contextResult, _, isError := composeToolResultTexts(rawResult, payload.Error)
 	contextResult = applyToolArgsAuditToContextResult(contextResult, payload.Audit)
 	parts := a.toolResultParts(contextResult, payload.Images)
 
-	a.emitToTUI(ToolResultEvent{
-		CallID:      payload.CallID,
-		Name:        payload.Name,
-		ArgsJSON:    payload.ArgsJSON,
-		Audit:       payload.Audit.Clone(),
-		Result:      displayResult,
-		Payload:     payload.Payload,
-		Notes:       append([]string(nil), payload.Notes...),
-		Status:      toolResultStatusFromError(isError),
-		Parts:       parts,
-		Diff:        payload.Diff,
-		DiffAdded:   payload.DiffAdded,
-		DiffRemoved: payload.DiffRemoved,
-		FileCreated: payload.FileCreated,
-		FileState:   payload.FileState.Clone(),
-		Duration:    payload.Duration,
-	})
+	event := ToolResultEvent{
+		CallID:        payload.CallID,
+		Name:          payload.Name,
+		ArgsJSON:      payload.ArgsJSON,
+		Audit:         payload.Audit.Clone(),
+		Result:        displayResult,
+		Payload:       payload.Payload,
+		Notes:         append([]string(nil), payload.Notes...),
+		Status:        toolResultStatusFromError(isError),
+		Parts:         parts,
+		Diff:          payload.Diff,
+		DiffAdded:     payload.DiffAdded,
+		DiffRemoved:   payload.DiffRemoved,
+		FileCreated:   payload.FileCreated,
+		FileState:     payload.FileState.Clone(),
+		Duration:      payload.Duration,
+		RecoveryState: payload.RecoveryState,
+	}
+	if payload.Name == tools.NameGenerateImage {
+		event.Diagnostic = imageToolErrorDiagnostic(payload.Error)
+	} else {
+		a.emitToTUI(event)
+	}
 
 	a.queueLSPDiagnosticOverlayFromContext(payload)
 	toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, toolProvenanceFromContext(a.ctxMgr, payload.CallID))
 	a.ctxMgr.Append(toolMsg)
-	if a.recoveryManager() != nil {
+	if payload.Name == tools.NameGenerateImage {
+		a.persistImageResult(a.recoveryManager(), identity.MainAgentID, toolMsg, event, a.notePersistenceFailure)
+	} else if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, toolMsg)
 	}
 	a.recordEvidenceFromMessage(toolMsg)
@@ -527,6 +538,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		a.notePressurePreparationFromToolResult(payload)
 	}
 
+	if payload.Name == tools.NameGenerateImage && payload.RecoveryState == "" {
+		payload.RecoveryState = imageToolRecoveryState(payload.Error)
+	}
 	rawResult := payload.Result
 	var displayResult, contextResult, errorText string
 	var isError bool
@@ -639,8 +653,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	// to the batch-end barrier.
 	deferToolResultEmission := payload.Error == nil && (payload.Name == tools.NameDone || payload.Name == tools.NameHandoff || (payload.Name == tools.NameCompactContext && modelDrivenAccepted))
 	parts := a.toolResultParts(contextResult, payload.Images)
+	var imageEvent ToolResultEvent
 	if !deferToolResultEmission {
-		a.emitToTUI(ToolResultEvent{
+		event := ToolResultEvent{
 			CallID:        payload.CallID,
 			Name:          payload.Name,
 			ArgsJSON:      payload.ArgsJSON,
@@ -657,14 +672,22 @@ func (a *MainAgent) handleToolResult(evt Event) {
 			FileState:     payload.FileState.Clone(),
 			Duration:      payload.Duration,
 			RecoveryState: payload.RecoveryState,
-		})
+		}
+		if payload.Name == tools.NameGenerateImage {
+			event.Diagnostic = imageToolErrorDiagnostic(payload.Error)
+			imageEvent = event
+		} else {
+			a.emitToTUI(event)
+		}
 	}
 
 	a.queueLSPDiagnosticOverlayFromContext(payload)
 	if !deferToolResultEmission {
 		toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, toolProvenanceFromContext(a.ctxMgr, payload.CallID))
 		a.ctxMgr.Append(toolMsg)
-		if a.recoveryManager() != nil {
+		if payload.Name == tools.NameGenerateImage {
+			a.persistImageResult(a.recoveryManager(), identity.MainAgentID, toolMsg, imageEvent, a.notePersistenceFailure)
+		} else if a.recoveryManager() != nil {
 			a.persistAsync(identity.MainAgentID, toolMsg)
 		}
 		a.recordEvidenceFromMessage(toolMsg)

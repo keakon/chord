@@ -5,6 +5,8 @@ import (
 	"strings"
 )
 
+const GeminiAPIURLRequirement = "api_url version root ending in /v1, /v1beta or /v1alpha; remove a trailing /models from Gemini URLs"
+
 // APIURLPathHasSuffix reports whether apiURL's path ends with suffix.
 // Query strings and fragments are ignored so endpoint URLs such as
 // /responses?api-version=v1 still match /responses.
@@ -40,11 +42,26 @@ func InferProviderTypeFromAPIURL(apiURL string) string {
 		return ProviderTypeChatCompletions
 	case APIURLPathHasSuffix(apiURL, "/messages"):
 		return ProviderTypeMessages
-	case APIURLPathHasSuffix(apiURL, "/models"):
+	case IsGeminiAPIURL(apiURL) && (APIURLPathHasSuffix(apiURL, "/v1beta") || APIURLPathHasSuffix(apiURL, "/v1alpha") || isOfficialGeminiURL(apiURL)):
 		return ProviderTypeGenerateContent
 	default:
 		return ""
 	}
+}
+
+// IsGeminiAPIURL reports whether apiURL names a native Gemini version root.
+// A proxy can include a path prefix; model resources are appended by the client.
+func IsGeminiAPIURL(apiURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "https" && u.Scheme != "http") {
+		return false
+	}
+	return APIURLPathHasSuffix(apiURL, "/v1") || APIURLPathHasSuffix(apiURL, "/v1beta") || APIURLPathHasSuffix(apiURL, "/v1alpha")
+}
+
+func isOfficialGeminiURL(apiURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(apiURL))
+	return err == nil && strings.EqualFold(u.Hostname(), "generativelanguage.googleapis.com")
 }
 
 // EffectiveProviderType returns the provider type the runtime resolves for a

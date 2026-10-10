@@ -26,6 +26,7 @@ While `write` and `edit` arguments arrive, their TUI cards show the path once th
 | `apply_patch` | Apply a Codex-style patch envelope (`*** Begin Patch`): add, update, delete, or move files. Independent file groups may succeed partially; check applied changes before retrying. |
 | `delete` | Remove whole files. |
 | `view_image` | Load a local PNG/JPEG/WebP/GIF/BMP/TIFF image into context, normalized to PNG or JPEG and scaled down to 2000px on the longest edge (animated WebP/GIF/TIFF use their first frame; HEIC/HEIF/AVIF/SVG are rejected); available only when the active model pool's first model supports image input. Uses the same local-path permission handling as `read`. |
+| `generate_image` | Generate or edit images with a configured image model pool. Reference images require `read` permission; an optional `output_path` requires `write` permission. See [Image generation and editing](./image-generation.md). |
 
 Only one of `edit` / `apply_patch` is exposed to the model at a time, chosen by model family; patch-native models also route file creation/deletion through the `apply_patch` envelope instead of `write`/`delete`. See [Edit tools](./edit-tools.md).
 

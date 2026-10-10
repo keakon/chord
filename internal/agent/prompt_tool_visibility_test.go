@@ -216,3 +216,18 @@ func TestToolSelectionOwnsVisibilityAwareNavigation(t *testing.T) {
 		}
 	}
 }
+
+func TestImageGuidanceFollowsVisibleTools(t *testing.T) {
+	for _, audience := range []capabilityPromptAudience{capabilityPromptAudienceMain, capabilityPromptAudienceSub} {
+		for _, visible := range []bool{true, false} {
+			names := map[string]struct{}{}
+			if visible {
+				names[tools.NameGenerateImage] = struct{}{}
+			}
+			block := buildDynamicCapabilityPromptBlock(names, nil, audience)
+			if strings.Contains(block, tools.ImageGenerationUsageGuidance) != visible {
+				t.Fatalf("audience=%d visible=%v block=%q", audience, visible, block)
+			}
+		}
+	}
+}

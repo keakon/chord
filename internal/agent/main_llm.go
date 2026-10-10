@@ -606,12 +606,13 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	// otherwise send its first request without the Responses prompt-cache key
 	// and client metadata some relays require.
 	a.ensureLLMSessionID(llmClient)
-	if filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient); dropped.any() {
+	filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient)
+	messages = filtered
+	if dropped.any() {
 		log.Warnf("dropping unsupported binary parts before LLM request kinds=%s", dropped.summary())
 		if a.unsupportedPartToast.first(modelName, toastCategoryInput, dropped.summary()) {
 			a.emitToTUI(ToastEvent{Level: "warn", Message: "The current model does not support " + dropped.summary() + " input; attachments were ignored", AgentID: a.instanceID})
 		}
-		messages = filtered
 	}
 
 	noticeRequestMessages := messages

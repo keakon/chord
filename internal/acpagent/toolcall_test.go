@@ -1,9 +1,19 @@
 package acpagent
 
 import (
+	"bytes"
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/png"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/imagegen"
+	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 
 	acp "github.com/coder/acp-go-sdk"
 
@@ -112,5 +122,48 @@ func TestRawInputKeepsValidJSONOnly(t *testing.T) {
 		if got := rawInput(args); got != nil {
 			t.Fatalf("rawInput(%q) = %#v, want nil", args, got)
 		}
+	}
+}
+
+func TestGenerateImageACPContentIncludesOriginal(t *testing.T) {
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	img, err := imagegen.ValidateImage(t.Context(), buf.Bytes(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	ref, err := tools.SaveImageArtifact(t.Context(), dir, img)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(tools.ImageGenerationSummary{State: imagegen.StateSaved, Images: []tools.GeneratedImage{{ArtifactRef: ref, Reference: tools.ImageArtifactPrefix + ref.RelPath, Width: 2, Height: 2}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := agent.ToolResultEvent{Name: tools.NameGenerateImage, Status: agent.ToolResultStatusSuccess, Payload: string(raw), Parts: []message.ContentPart{{Type: message.ContentPartImage, ImagePath: filepath.Join(dir, ref.RelPath), ArtifactID: ref.ID}}}
+	content := toolResultContent(t.Context(), event)
+	encoded, err := json.Marshal(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) != 2 || !bytes.Contains(encoded, []byte(base64.StdEncoding.EncodeToString(img.Data))) {
+		t.Fatal("ACP omitted original image bytes")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	cancelledContent := toolResultContent(ctx, event)
+	cancelledJSON, err := json.Marshal(cancelledContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(cancelledJSON, []byte(base64.StdEncoding.EncodeToString(img.Data))) || !bytes.Contains(cancelledJSON, []byte("context canceled")) {
+		t.Fatal("cancelled delivery published original or lost cancellation")
+	}
+	event.Status = agent.ToolResultStatusCancelled
+	if len(toolResultContent(t.Context(), event)) != 1 {
+		t.Fatal("cancelled result published image success")
 	}
 }

@@ -35,7 +35,7 @@ chord
 
 缺少 `config.yaml` 时，初始化向导会引导你选择接入方式：
 
-- **API key**：准备服务商给出的完整 API URL、模型名称和密钥；需要代理时可在向导中填写。URL 路径以 `/responses`、`/messages`、`/chat/completions` 或 `/models` 结尾都可以，向导会按后缀推荐 provider / 模型的默认值。
+- **API key**：准备服务商给出的完整 API URL、模型名称和密钥；需要代理时可在向导中填写。URL 路径可以 `/responses`、`/messages`、`/chat/completions` 结尾，Gemini 则使用 `/v1beta/` 等版本根地址，向导会按后缀推荐 provider / 模型的默认值。
 - **Codex OAuth**：按提示完成登录，无需手动填写 API key。
 
 向导会创建最小可用的 `config.yaml`，必要时创建 `auth.yaml`，并显示保存位置；已有匹配凭据时会尽量复用。首次进入项目时，Chord 也会按需创建 `.chord/`。

@@ -35,6 +35,7 @@ const (
 	SaveArtifact   = "save_artifact"
 	ReadArtifact   = "read_artifact"
 	ViewImage      = "view_image"
+	GenerateImage  = "generate_image"
 	CompactContext = "compact_context"
 )
 

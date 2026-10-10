@@ -47,6 +47,7 @@ JetBrains IDEs read the same `agent_servers` entry from `~/.jetbrains/acp.json`.
 - Tool calls arrive with a category (`read`, `edit`, `search`, `execute`, and so on), a title naming the file or command, the target file location, and the model's raw arguments. Each call then closes as completed or failed, with the tool's output and, for file edits, the diff.
 - `@`-style file references work: when a client sends a `file://` resource link for a readable local file, Chord loads it as a `<file path="...">` context block, the same shape the TUI's file references produce.
 - Image attachments work when the model accepts images; Chord persists them with the session like any other attachment.
+- Successful `generate_image` results include the original images as image content blocks. See [Image generation](image-generation.md) for configuration and permissions.
 - Cancelling in the client aborts the turn and answers with `cancelled`, after the tool cards are closed out.
 - One turn runs at a time. A prompt that arrives while a turn is running cancels that turn: the earlier prompt answers `cancelled`, and the new one starts right after. Zed queues messages while the agent is generating, so this only shows up with clients that send during a turn.
 

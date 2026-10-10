@@ -375,8 +375,8 @@ func TestPrimarySupportsViewImageToolUsesFirstPoolModel(t *testing.T) {
 		{ProviderConfig: chatCfg, ProviderImpl: &scriptedProvider{}, ModelID: "vision", MaxTokens: 1024},
 		{ProviderConfig: responsesCfg, ProviderImpl: &scriptedProvider{}, ModelID: "vision", MaxTokens: 1024},
 	}, 1)
-	if client.PrimarySupportsViewImageTool() {
-		t.Fatal("PrimarySupportsViewImageTool() = true, want false when first model-pool entry is OpenAI Chat")
+	if !client.PrimarySupportsViewImageTool() {
+		t.Fatal("PrimarySupportsViewImageTool() = false for an image-capable Chat Completions primary")
 	}
 
 	textOnlyCfg := NewProviderConfig("text-only", config.ProviderConfig{

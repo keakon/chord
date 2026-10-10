@@ -175,6 +175,13 @@ type DescriptiveTool interface {
 	DescriptionForTools(visible map[string]struct{}) string
 }
 
+// StrictArgumentsTool rejects omitted, unrecognized or duplicate argument values
+// instead of silently sanitizing them before externally charged operations.
+type StrictArgumentsTool interface {
+	Tool
+	StrictArguments() bool
+}
+
 // AvailableTool can opt out of registration in the LLM-visible tool list even if
 // it is present in the registry. This is used for tools whose backing runtime
 // provider is not yet configured.

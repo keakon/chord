@@ -14,14 +14,14 @@ import (
 	"os/user"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/keakon/golog/log"
 
-	"sync"
-
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -461,7 +461,7 @@ func parseHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *A
 		Origin:     APIErrorOriginHTTPResponse,
 	}
 
-	apiErr.RetryAfter, _ = parseRetryAfter(header.Get("Retry-After"))
+	apiErr.RetryAfter, _ = httpheader.ParseRetryAfter(header.Get("Retry-After"))
 
 	// Try to parse JSON error body.
 	if len(body) == 0 {

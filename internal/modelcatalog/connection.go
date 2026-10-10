@@ -44,7 +44,7 @@ func validateModelMetadata(m ModelFacts) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return fmt.Errorf("model %q: connection requires an https API URL without credentials, query or fragment", m.ID)
 	}
-	if !strings.HasSuffix(u.Path, "/chat/completions") && !strings.HasSuffix(u.Path, "/responses") && !strings.HasSuffix(u.Path, "/messages") && !strings.HasSuffix(u.Path, "/models") {
+	if !strings.HasSuffix(u.Path, "/chat/completions") && !strings.HasSuffix(u.Path, "/responses") && !strings.HasSuffix(u.Path, "/messages") && !isGenerateContentRoot(u) {
 		return fmt.Errorf("model %q: connection URL has no supported protocol suffix", m.ID)
 	}
 	if strings.TrimSpace(c.WireModelID) == "" || strings.ContainsAny(c.WireModelID, "@ \t\r\n") || !validEnvVar(c.EnvVar) || len(c.Sources) == 0 {
@@ -56,6 +56,11 @@ func validateModelMetadata(m ModelFacts) error {
 		}
 	}
 	return nil
+}
+
+func isGenerateContentRoot(u *url.URL) bool {
+	path := strings.TrimRight(u.Path, "/")
+	return strings.HasSuffix(path, "/v1beta") || strings.HasSuffix(path, "/v1alpha") || strings.EqualFold(u.Hostname(), "generativelanguage.googleapis.com") && path == "/v1"
 }
 
 func validateMetadataSource(s Source) error {

@@ -448,7 +448,11 @@ func (r *ResponsesProvider) CompleteStream(
 		// system messages in input. apply_patch history replays in the shape matching
 		// this request's tool declarations (freeform custom_tool_call or JSON
 		// function_call), so the model sees the same wire form it is asked to emit.
-		apiInput := convertMessagesToResponsesWithItemIDs("", messages, store, freeform, modelcompat.SupportsResponsesCacheBreakpoints(model))
+		replayMessages, err := projectNativeImageReplay(ctx, messages)
+		if err != nil {
+			return nil, nil, &NativeToolError{Cause: err}
+		}
+		apiInput := convertMessagesToResponsesWithItemIDs("", replayMessages, store, freeform, modelcompat.SupportsResponsesCacheBreakpoints(model))
 
 		// Validate that we have at least one input item.
 		if len(apiInput) == 0 {

@@ -81,7 +81,7 @@ func TestBuildInitialSetupConfigYAML_Gemini(t *testing.T) {
 		Kind:         initialSetupProviderAPIKey,
 		ProviderName: "gemini",
 		ProviderType: "generate-content",
-		APIURL:       "https://generativelanguage.googleapis.com/v1beta/models",
+		APIURL:       "https://generativelanguage.googleapis.com/v1beta/",
 		ModelName:    "gemini-3.8-flash",
 		ContextLimit: 1048576,
 		OutputLimit:  65536,
@@ -97,7 +97,7 @@ func TestBuildInitialSetupConfigYAML_Gemini(t *testing.T) {
 		t.Fatalf("LoadConfigFromPath: %v", err)
 	}
 	prov := cfg.Providers["gemini"]
-	if prov.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" {
+	if prov.APIURL != "https://generativelanguage.googleapis.com/v1beta/" {
 		t.Fatalf("provider api_url = %q", prov.APIURL)
 	}
 	if prov.Models["gemini-3.8-flash"].Limit.Context != 1048576 || prov.Models["gemini-3.8-flash"].Limit.Output != 65536 {
@@ -186,13 +186,13 @@ func TestInitialSetupDefaultsForProviderType(t *testing.T) {
 	}
 
 	defaults = initialSetupDefaultsForProviderType("generate-content")
-	if defaults.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" || defaults.ProviderName != "gemini" || defaults.ModelName != "gemini-3.8-flash" {
+	if defaults.APIURL != "https://generativelanguage.googleapis.com/v1beta/" || defaults.ProviderName != "gemini" || defaults.ModelName != "gemini-3.8-flash" {
 		t.Fatalf("generate-content defaults = %#v", defaults)
 	}
 }
 
 func TestDefaultAPIURLForProviderType(t *testing.T) {
-	if got := defaultAPIURLForProviderType("generate-content"); got != "https://generativelanguage.googleapis.com/v1beta/models" {
+	if got := defaultAPIURLForProviderType("generate-content"); got != "https://generativelanguage.googleapis.com/v1beta/" {
 		t.Fatalf("defaultAPIURLForProviderType(generate-content) = %q", got)
 	}
 	if got := defaultAPIURLForProviderType("responses"); got != "https://api.openai.com/v1/responses" {

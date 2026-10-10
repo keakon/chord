@@ -11,16 +11,22 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/toolname"
 )
 
 // NativeToolPolicy is supplied only by an agent request. Auxiliary requests
 // cannot inherit authorization from a model's configuration.
 type NativeToolPolicy struct {
-	Permitted func(string) bool
-	Preflight func(context.Context) error
-	Failed    func(*message.NativeToolHistory)
-	Begin     func(context.Context, NativeRequestRecord) (string, error)
-	Finish    func(string, message.NativeRequestOutcome, *message.Response, error) error
+	ImageTimeout    time.Duration
+	DisableImage    bool
+	ImageFallback   func() bool
+	ProjectResponse func(context.Context, *message.Response) error
+	ImageOriginal   func(context.Context, message.ContentPart) ([]byte, error)
+	Permitted       func(string) bool
+	Preflight       func(context.Context) error
+	Failed          func(*message.NativeToolHistory)
+	Begin           func(context.Context, NativeRequestRecord) (string, error)
+	Finish          func(string, message.NativeRequestOutcome, *message.Response, error) error
 }
 
 type NativeRequestRecord struct {
@@ -96,14 +102,22 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 		return nil, &NativeToolError{Cause: fmt.Errorf("native tools require an explicit API endpoint without request overrides")}
 	}
 	authorization := request.authorization
+	if authorization.Tool == toolname.GenerateImage && policy.ImageTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, policy.ImageTimeout)
+		defer cancel()
+	}
 	if err := validateNativeToolBinding(provider, model, authorization, defs); err != nil {
 		return nil, &NativeToolError{Cause: err}
 	}
 	if hasPending && !authorization.Equal(pendingAuthorization) {
 		return nil, &NativeToolError{Cause: fmt.Errorf("pending native tool authorization changed")}
 	}
+	clientDefs := slices.Clone(defs)
 	tuning.nativeTool = request
-	defs = slices.DeleteFunc(slices.Clone(defs), func(def message.ToolDefinition) bool { return def.Name == authorization.Tool })
+	defs = slices.DeleteFunc(slices.Clone(defs), func(def message.ToolDefinition) bool {
+		return def.Name == authorization.Tool || slices.Contains(request.additionalTools, def.Name)
+	})
 	history := &message.NativeToolHistory{Authorization: authorization, Target: target, Protocol: provider.Type(), APIURL: provider.APIURL()}
 	defer func() {
 		if failure, ok := errors.AsType[*NativeToolError](retErr); ok && len(history.RequestIDs) > 0 {
@@ -121,6 +135,11 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 		}
 		if !policy.Permitted(authorization.Tool) {
 			return nil, &NativeToolError{Cause: fmt.Errorf("native request authorization was revoked")}
+		}
+		for _, tool := range request.additionalTools {
+			if !policy.Permitted(tool) {
+				return nil, &NativeToolError{Cause: fmt.Errorf("native request authorization was revoked")}
+			}
 		}
 		id, err := policy.Begin(ctx, NativeRequestRecord{Tuning: tuning, ServiceTier: serviceTier, Target: target, Protocol: provider.Type(), APIURL: provider.APIURL(), Authorization: authorization, System: system, Messages: messages, Tools: defs, MaxTokens: maxTokens, Continuation: continuation})
 		if err != nil {
@@ -155,9 +174,18 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 				if call.ID == "" || call.Name == "" || !json.Valid(call.Args) {
 					callErr = fmt.Errorf("native response contains malformed client tool calls")
 				}
+				if !slices.ContainsFunc(defs, func(def message.ToolDefinition) bool { return def.Name == call.Name }) {
+					callErr = fmt.Errorf("native response called an unavailable client tool")
+				}
 			}
 			if resp.StopReason == "pause_turn" && (continuation == 4 || resp.Hosted == nil || len(resp.Hosted.Items) == 0 || len(resp.ToolCalls) > 0) {
 				callErr = fmt.Errorf("native pause cannot be continued safely")
+			}
+			if policy.ProjectResponse != nil {
+				projectionErr := policy.ProjectResponse(ctx, resp)
+				if callErr == nil {
+					callErr = projectionErr
+				}
 			}
 			if resp.Hosted != nil {
 				if resp.Hosted.Container != "" {
@@ -193,6 +221,20 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 				if outcome == message.NativeRequestNotSent {
 					// A local request-construction failure needs correction, not
 					// another key. Its durable not_sent result releases the session.
+					return nil, &NativeToolError{Cause: callErr}
+				}
+				if authorization.Tool == toolname.GenerateImage && nativeImageFallbackAllowed(callErr) && policy.ImageFallback != nil && slices.ContainsFunc(clientDefs, func(def message.ToolDefinition) bool { return def.Name == toolname.GenerateImage }) && ctx.Err() == nil {
+					if !policy.ImageFallback() {
+						return nil, &NativeToolError{Cause: fmt.Errorf("local image fallback is unavailable or its decision could not be persisted")}
+					}
+					tuning.nativeTool = nil
+					fallbackResp, fallbackErr := impl.CompleteStream(ctx, key, model, system, messages, nativeImageFallbackDefinitions(clientDefs, provider, model, messages), maxTokens, tuning, cb)
+					if fallbackErr != nil {
+						return nil, &NativeToolError{Cause: fallbackErr}
+					}
+					return fallbackResp, nil
+				}
+				if authorization.Tool == toolname.GenerateImage {
 					return nil, &NativeToolError{Cause: callErr}
 				}
 				return nil, callErr

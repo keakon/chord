@@ -258,6 +258,9 @@ func TestGeminiCompleteStreamEncodesToolChoice(t *testing.T) {
 	var captured geminiRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+		if r.URL.Path != "/v1beta/models/gemini-test:streamGenerateContent" || r.URL.Query().Get("alt") != "sse" {
+			t.Errorf("unexpected Gemini request URL: %s", r.URL)
+		}
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
 			t.Fatalf("decode request body: %v", err)
 		}
@@ -267,7 +270,7 @@ func TestGeminiCompleteStreamEncodesToolChoice(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models"}, []string{"test-key"})
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/v1beta/"}, []string{"test-key"})
 	geminiProvider, err := NewGeminiProvider(provider, "")
 	if err != nil {
 		t.Fatalf("NewGeminiProvider: %v", err)
@@ -309,7 +312,7 @@ func TestGeminiCompleteStreamOmitsForcedToolChoiceWhenAutoOnly(t *testing.T) {
 
 	provider := NewProviderConfig("gemini", config.ProviderConfig{
 		Type:   config.ProviderTypeGenerateContent,
-		APIURL: srv.URL + "/models",
+		APIURL: srv.URL + "/v1beta/",
 		Models: map[string]config.ModelConfig{
 			"gemini-test": {
 				Compat: &config.ModelCompatConfig{
@@ -359,7 +362,7 @@ func TestGeminiCompleteStreamAppliesRequestOverrides(t *testing.T) {
 	custom := "custom"
 	provider := NewProviderConfig("gemini", config.ProviderConfig{
 		Type:   config.ProviderTypeGenerateContent,
-		APIURL: srv.URL + "/models",
+		APIURL: srv.URL + "/v1beta/",
 		Compat: &config.ProviderCompatConfig{RequestOverrides: &config.RequestOverridesConfig{
 			Body: map[string]any{
 				"generationConfig": map[string]any{"responseMimeType": "application/json"},
@@ -404,7 +407,7 @@ func TestGeminiCompleteStreamSetsDefaultUserAgent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models"}, []string{"test-key"})
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/v1beta/"}, []string{"test-key"})
 	geminiProvider, err := NewGeminiProvider(provider, "")
 	if err != nil {
 		t.Fatalf("NewGeminiProvider: %v", err)
@@ -428,7 +431,7 @@ func TestGeminiCompleteStreamSetsProviderUserAgent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models", UserAgent: "ProviderUA/1.0"}, []string{"test-key"})
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/v1beta/", UserAgent: "ProviderUA/1.0"}, []string{"test-key"})
 	geminiProvider, err := NewGeminiProvider(provider, "")
 	if err != nil {
 		t.Fatalf("NewGeminiProvider: %v", err)
@@ -454,7 +457,7 @@ func TestParseGeminiHTTPErrorFromBytes(t *testing.T) {
 }
 
 func TestGeminiStreamURL(t *testing.T) {
-	got := geminiStreamURL("https://generativelanguage.googleapis.com/v1beta/models/", "/gemini-2.5-flash")
+	got := geminiStreamURL("https://generativelanguage.googleapis.com/v1beta/", "/gemini-2.5-flash")
 	want := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse"
 	if got != want {
 		t.Fatalf("geminiStreamURL() = %q, want %q", got, want)
@@ -462,7 +465,7 @@ func TestGeminiStreamURL(t *testing.T) {
 }
 
 func TestGeminiStreamURLPreservesConfiguredQuery(t *testing.T) {
-	got := geminiStreamURL("https://example.invalid/v1beta/models?region=test", "test-model")
+	got := geminiStreamURL("https://example.invalid/v1beta/?region=test", "test-model")
 	want := "https://example.invalid/v1beta/models/test-model:streamGenerateContent?alt=sse&region=test"
 	if got != want {
 		t.Fatalf("geminiStreamURL() = %q, want %q", got, want)
@@ -470,7 +473,7 @@ func TestGeminiStreamURLPreservesConfiguredQuery(t *testing.T) {
 }
 
 func TestValidateGeminiAPIURLIgnoresQuery(t *testing.T) {
-	if err := validateGeminiAPIURL("https://example.invalid/v1beta/models?region=test"); err != nil {
+	if err := validateGeminiAPIURL("https://example.invalid/v1beta/?region=test"); err != nil {
 		t.Fatalf("validateGeminiAPIURL() error = %v", err)
 	}
 }
@@ -488,7 +491,7 @@ func TestGeminiCompleteStreamOmitsToolConfigWithoutTools(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models"}, []string{"test-key"})
+	provider := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/v1beta/"}, []string{"test-key"})
 	geminiProvider, err := NewGeminiProvider(provider, "")
 	if err != nil {
 		t.Fatalf("NewGeminiProvider: %v", err)
@@ -611,7 +614,7 @@ func TestGeminiCompleteStreamOmitsThinkingBudgetWhenLevelSet(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models"}, []string{"test-key"})
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/v1beta/"}, []string{"test-key"})
 	geminiProvider, err := NewGeminiProvider(provider, "")
 	if err != nil {
 		t.Fatalf("NewGeminiProvider: %v", err)
@@ -668,7 +671,7 @@ func TestGeminiActiveLoopSignatureContract(t *testing.T) {
 		}
 		provider := NewProviderConfig("gemini", config.ProviderConfig{
 			Type:   config.ProviderTypeGenerateContent,
-			APIURL: srv.URL + "/models",
+			APIURL: srv.URL + "/v1beta/",
 			Models: map[string]config.ModelConfig{model: modelCfg},
 		}, []string{"test-key"})
 		geminiProvider, err := NewGeminiProvider(provider, "")
@@ -773,7 +776,7 @@ func TestGeminiRequestDropsUnrepresentableSchemaKeywords(t *testing.T) {
 		},
 	}
 
-	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/models"}, []string{"test-key"})
+	provider := NewProviderConfig("gemini", config.ProviderConfig{Type: config.ProviderTypeGenerateContent, APIURL: srv.URL + "/v1beta/"}, []string{"test-key"})
 	geminiProvider, err := NewGeminiProvider(provider, "")
 	if err != nil {
 		t.Fatalf("NewGeminiProvider: %v", err)

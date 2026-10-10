@@ -89,9 +89,12 @@ type Server struct {
 	started bool
 	closed  bool
 
+	// Original image validation and delivery stop when the session closes.
+	deliveryCtx    context.Context
+	deliveryCancel context.CancelFunc
+
 	// sessionClosed is closed once session/close has been handled and logged.
-	// The entrypoint watches it to tear the runtime down and exit, which is
-	// what frees the session's resources.
+	// The entrypoint watches it to tear the runtime down and exit.
 	sessionClosed chan struct{}
 	closeOnce     sync.Once
 }
@@ -101,7 +104,8 @@ var _ acp.Agent = (*Server)(nil)
 // New creates a Server. Bind must be called with the connection built from it
 // before any client traffic arrives.
 func New(opts Options) *Server {
-	return &Server{opts: opts, sessionClosed: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Server{opts: opts, deliveryCtx: ctx, deliveryCancel: cancel, sessionClosed: make(chan struct{})}
 }
 
 // SessionClosed reports that the session was closed and this process has
@@ -397,6 +401,7 @@ func (s *Server) CloseSession(_ context.Context, req acp.CloseSessionRequest) (a
 	s.startMu.Lock()
 	s.mu.Lock()
 	s.closed = true
+	s.deliveryCancel()
 	rt := s.rt
 	waiter := s.waiter
 	s.mu.Unlock()
@@ -447,9 +452,10 @@ func (s *Server) waitSettled(waiter *turnWaiter, timeout time.Duration) {
 
 // pump forwards main-agent events to the client and tracks turn boundaries.
 func (s *Server) pump(events <-chan agent.AgentEvent) {
+	defer s.deliveryCancel()
 	mapper := &eventMapper{}
 	for ev := range events {
-		updates, effects := mapper.Map(ev)
+		updates, effects := mapper.Map(s.deliveryCtx, ev)
 		for _, update := range updates {
 			s.sendUpdate(update)
 		}

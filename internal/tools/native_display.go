@@ -10,6 +10,7 @@ const unnamedNativeTool = "server_tool"
 
 type NativeToolDisplay struct {
 	ID, Name, Args, Result, Status string
+	Parts                          []message.ContentPart
 }
 
 // NativeToolDisplays renders terminal server receipts without inventing local
@@ -53,6 +54,9 @@ func NativeToolDisplays(native *message.NativeToolHistory) []NativeToolDisplay {
 			args = "{}"
 		}
 		name := call.Name
+		if call.Kind == "image_generation_call" {
+			name = NameGenerateImage
+		}
 		if name == "" {
 			name = nativeDisplayName(native)
 		}
@@ -64,8 +68,12 @@ func NativeToolDisplays(native *message.NativeToolHistory) []NativeToolDisplay {
 		} else {
 			result = formatHostedObservation(observation)
 		}
-		result = "Server-side tool\n" + result
-		out = append(out, NativeToolDisplay{ID: id, Name: name, Args: args, Result: result, Status: status})
+		if name == NameGenerateImage && call.Error == "" {
+			result = string(call.Result)
+		} else {
+			result = "Server-side tool\n" + result
+		}
+		out = append(out, NativeToolDisplay{ID: id, Name: name, Args: args, Result: result, Status: status, Parts: call.Parts})
 		unknownShown = unknownShown || (native.OutcomeUnknown && unknownCall)
 	}
 	if native.OutcomeUnknown && !unknownShown && len(native.RequestIDs) > 0 {

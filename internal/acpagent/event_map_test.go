@@ -267,7 +267,7 @@ func TestEventMapperMap(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mapper := &eventMapper{}
-			updates, effects := mapper.Map(tt.ev)
+			updates, effects := mapper.Map(t.Context(), tt.ev)
 			if !reflect.DeepEqual(updates, tt.wantUpdates) {
 				t.Fatalf("updates = %#v, want %#v", updates, tt.wantUpdates)
 			}
@@ -294,11 +294,11 @@ func TestEventMapperPublishesOnlyFinalizedText(t *testing.T) {
 				agent.StreamTextCommitEvent{Text: text},
 				agent.StreamSegmentEndedEvent{TurnID: 1, RequestSeq: 1},
 			} {
-				if updates, _ := mapper.Map(ev); len(updates) != 0 {
+				if updates, _ := mapper.Map(t.Context(), ev); len(updates) != 0 {
 					t.Fatalf("provisional update: %#v", updates)
 				}
 			}
-			updates, effects := mapper.Map(agent.AssistantMessageEvent{Text: text})
+			updates, effects := mapper.Map(t.Context(), agent.AssistantMessageEvent{Text: text})
 			var want []acp.SessionUpdate
 			if text != "" {
 				want = []acp.SessionUpdate{acp.UpdateAgentMessageText(text)}

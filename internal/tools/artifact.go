@@ -736,8 +736,8 @@ func ResolveSessionArtifactPath(sessionDir, relPath string) (string, error) {
 		return "", fmt.Errorf("artifact path escapes session directory")
 	}
 	parts := strings.Split(relPath, string(filepath.Separator))
-	if len(parts) == 0 || parts[0] != "artifacts" {
-		return "", fmt.Errorf("artifact path must be under artifacts/")
+	if len(parts) == 0 || (parts[0] != "artifacts" && parts[0] != "images") {
+		return "", fmt.Errorf("artifact path must be under artifacts/ or images/")
 	}
 	sessionAbs, err := filepath.Abs(sessionDir)
 	if err != nil {
@@ -748,7 +748,7 @@ func ResolveSessionArtifactPath(sessionDir, relPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	artifactsRoot := filepath.Join(sessionAbs, "artifacts")
+	artifactsRoot := filepath.Join(sessionAbs, parts[0])
 	if abs != artifactsRoot && !strings.HasPrefix(abs, artifactsRoot+string(filepath.Separator)) {
 		return "", fmt.Errorf("artifact path escapes artifacts directory")
 	}

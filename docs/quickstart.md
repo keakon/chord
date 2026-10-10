@@ -35,7 +35,7 @@ chord
 
 If `config.yaml` is missing, the setup wizard offers two ways to connect:
 
-- **API key**: have your provider's full API URL, model name, and key ready. You can also enter a proxy URL if needed. Accepted endpoint paths end in `/responses`, `/messages`, `/chat/completions`, or `/models`, and the wizard recommends starter provider/model defaults from that suffix.
+- **API key**: have your provider's full API URL, model name, and key ready. You can also enter a proxy URL if needed. Accepted endpoint paths end in `/responses`, `/messages`, `/chat/completions`, or use a Gemini version root such as `/v1beta/`, and the wizard recommends starter provider/model defaults from that suffix.
 - **Codex OAuth**: follow the sign-in prompts without entering an API key manually.
 
 The wizard creates a minimal `config.yaml` and, when needed, `auth.yaml`, then shows where it saved them. It reuses matching credentials when possible. Chord also creates the project's `.chord/` directory as needed.

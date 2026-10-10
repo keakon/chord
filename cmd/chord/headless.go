@@ -390,6 +390,7 @@ type headlessCommand struct {
 
 // All available push event types that can be subscribed to.
 var headlessEventTypes = map[string]bool{
+	headlessImageResult:  true,
 	"activity":           true,
 	"assistant_message":  true,
 	"idle":               true,
@@ -754,6 +755,9 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		}
 	case agent.ToolResultEvent:
 		touch()
+		if e.Name == tools.NameGenerateImage && state.isSubscribed(headlessImageResult) {
+			out = append(out, headlessImageResultEnvelope(e))
+		}
 		if strings.EqualFold(e.Name, tools.NameDone) && e.AgentID == "" {
 			reason, report := parseHeadlessDoneArgs(e.ArgsJSON)
 			if strings.TrimSpace(e.DoneReport) != "" {
@@ -1175,7 +1179,12 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 			out.orderedWithContext(out.ctx, func() {
 				envs := filterHeadlessEvent(ev, state, backend)
 				for _, env := range envs {
-					out.emitWithContext(out.ctx, env)
+					if !out.emitWithContext(out.ctx, env) {
+						return
+					}
+				}
+				if e, ok := ev.(agent.ToolResultEvent); ok && e.Name == tools.NameGenerateImage && state.isSubscribed(headlessImageResult) {
+					emitHeadlessImageOriginals(out.ctx, e, func(env *headlessEnvelope) bool { return out.emitWithContext(out.ctx, env) })
 				}
 			})
 		}
@@ -1606,6 +1615,8 @@ func emitHeadlessLocalShellResult(out *stdoutWriter, command, output string, err
 // handleHeadlessCommand processes a single command from stdin.
 func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *headlessState, out *stdoutWriter) {
 	switch cmd.Type {
+	case "image_artifact":
+		handleHeadlessImageArtifact(cmd, backend, out)
 	case "subscribe":
 		subs := make(map[string]bool, len(cmd.Events))
 		for _, ev := range cmd.Events {

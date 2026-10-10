@@ -13,10 +13,10 @@ import (
 	"strings"
 	"time"
 
+	sonicjson "github.com/bytedance/sonic"
 	"github.com/keakon/golog/log"
 
-	sonicjson "github.com/bytedance/sonic"
-
+	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 )
@@ -1301,10 +1301,10 @@ func parseResponsesProviderErrorEvent(eventType string, eventData []byte) (*APIE
 		msg = strings.TrimSpace(string(eventData))
 	}
 	apiErr := &APIError{Origin: APIErrorOriginSSEEvent, Code: code, Type: typ, Param: param, Message: msg}
-	if delay, ok := parseRetryAfter(responseErrorHeaders(errObj.Headers).Get("Retry-After")); ok {
+	if delay, ok := httpheader.ParseRetryAfter(responseErrorHeaders(errObj.Headers).Get("Retry-After")); ok {
 		apiErr.RetryAfter = delay
 	} else if eventType == "error" {
-		apiErr.RetryAfter, _ = parseRetryAfter(responseErrorHeaders(payload.Headers).Get("Retry-After"))
+		apiErr.RetryAfter, _ = httpheader.ParseRetryAfter(responseErrorHeaders(payload.Headers).Get("Retry-After"))
 	}
 	return apiErr, nil
 }

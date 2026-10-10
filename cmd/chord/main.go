@@ -598,6 +598,9 @@ func resolveModelRef(
 	if err != nil {
 		return nil, nil, "", 0, 0, err
 	}
+	if mc.ImageGeneration != nil {
+		return nil, nil, "", 0, 0, fmt.Errorf("model %q is image-only and cannot be used for conversation or auxiliary text calls", ref)
+	}
 	providerCfg = applyRuntimeAPIBaseOverride(providerCfg)
 
 	creds := auth[provName]

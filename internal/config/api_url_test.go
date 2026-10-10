@@ -50,11 +50,11 @@ func TestAPIURLPathHasSuffixIgnoresQueryAndFragment(t *testing.T) {
 	}
 }
 
-func TestInferProviderTypeFromAPIURL_GeminiModels(t *testing.T) {
-	if got := InferProviderTypeFromAPIURL("https://generativelanguage.googleapis.com/v1beta/models"); got != ProviderTypeGenerateContent {
+func TestInferProviderTypeFromAPIURL_GeminiRoots(t *testing.T) {
+	if got := InferProviderTypeFromAPIURL("https://generativelanguage.googleapis.com/v1beta"); got != ProviderTypeGenerateContent {
 		t.Fatalf("InferProviderTypeFromAPIURL(gemini) = %q", got)
 	}
-	if got := InferProviderTypeFromAPIURL("https://generativelanguage.googleapis.com/v1beta/models/"); got != ProviderTypeGenerateContent {
+	if got := InferProviderTypeFromAPIURL("https://generativelanguage.googleapis.com/v1beta/"); got != ProviderTypeGenerateContent {
 		t.Fatalf("InferProviderTypeFromAPIURL(gemini trailing slash) = %q", got)
 	}
 }
@@ -68,7 +68,7 @@ func TestInferProviderTypeFromAPIURLIgnoresQuery(t *testing.T) {
 		{"responses", "https://example.invalid/openai/v1/responses?api-version=v1", ProviderTypeResponses},
 		{"messages", "https://example.invalid/v1/messages?version=preview", ProviderTypeMessages},
 		{"chat completions", "https://example.invalid/v1/chat/completions?source=test", ProviderTypeChatCompletions},
-		{"models", "https://example.invalid/v1beta/models?region=test", ProviderTypeGenerateContent},
+		{"Gemini root", "https://example.invalid/v1beta/?region=test", ProviderTypeGenerateContent},
 	}
 
 	for _, tc := range cases {
@@ -97,5 +97,28 @@ func TestEffectiveProviderType(t *testing.T) {
 				t.Fatalf("EffectiveProviderType() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGeminiVersionRootDetection(t *testing.T) {
+	for _, tc := range []struct {
+		url             string
+		valid, inferred bool
+	}{
+		{"https://example.invalid/proxy/v1beta/?region=test#fragment", true, true},
+		{"https://example.invalid/v1alpha", true, true},
+		{"https://generativelanguage.googleapis.com/v1/", true, true},
+		{"https://example.invalid/v1/", true, false},
+		{"https://example.invalid/v1beta/models", false, false},
+		{"https://example.invalid/v1beta/openai/chat/completions", false, false},
+		{"ftp://example.invalid/v1beta", false, false},
+		{"https://key@example.invalid/v1beta", false, false},
+	} {
+		if got := IsGeminiAPIURL(tc.url); got != tc.valid {
+			t.Errorf("IsGeminiAPIURL(%q) = %v, want %v", tc.url, got, tc.valid)
+		}
+		if got := InferProviderTypeFromAPIURL(tc.url) == ProviderTypeGenerateContent; got != tc.inferred {
+			t.Errorf("Gemini inference for %q = %v, want %v", tc.url, got, tc.inferred)
+		}
 	}
 }

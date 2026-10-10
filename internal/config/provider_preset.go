@@ -96,6 +96,9 @@ func NormalizeProviderPreset(cfg ProviderConfig) (ProviderConfig, CodexTransport
 // values that contradict the verified contract are errors, while unset
 // endpoint fields are filled from it.
 func applyEndpointContract(cfg *ProviderConfig, endpoint modelcatalog.Endpoint) error {
+	if endpoint.Protocol == ProviderTypeGenerateContent && cfg.APIURL != "" && strings.TrimRight(cfg.APIURL, "/") == strings.TrimRight(endpoint.RequestURL, "/") {
+		cfg.APIURL = endpoint.RequestURL
+	}
 	if cfg.Type != "" && cfg.Type != endpoint.Protocol {
 		return fmt.Errorf("preset %q requires provider.type %q; got %q", endpoint.PresetID, endpoint.Protocol, cfg.Type)
 	}

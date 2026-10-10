@@ -17,10 +17,10 @@ import (
 	"time"
 
 	sonicjson "github.com/bytedance/sonic"
-
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -56,8 +56,8 @@ func NewGeminiProvider(provider *ProviderConfig, proxyURL string) (*GeminiProvid
 }
 
 func validateGeminiAPIURL(apiURL string) error {
-	if !config.APIURLPathHasSuffix(apiURL, "/models") {
-		return fmt.Errorf("gemini provider requires api_url path ending in /models")
+	if !config.IsGeminiAPIURL(apiURL) {
+		return fmt.Errorf("gemini provider requires %s", config.GeminiAPIURLRequirement)
 	}
 	return nil
 }
@@ -389,7 +389,8 @@ func geminiStreamURL(apiURL, model string) string {
 	apiURL = strings.TrimSpace(apiURL)
 	model = strings.TrimLeft(model, "/")
 	if parsed, err := url.Parse(apiURL); err == nil && parsed.Path != "" {
-		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + model + ":streamGenerateContent"
+		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/models/" + model + ":streamGenerateContent"
+		parsed.RawPath = ""
 		query := parsed.Query()
 		query.Set("alt", "sse")
 		parsed.RawQuery = query.Encode()
@@ -401,7 +402,7 @@ func geminiStreamURL(apiURL, model string) string {
 	if strings.Contains(base, "?") {
 		separator = "&"
 	}
-	return base + "/" + model + ":streamGenerateContent" + separator + "alt=sse"
+	return base + "/models/" + model + ":streamGenerateContent" + separator + "alt=sse"
 }
 
 func convertMessagesToGemini(msgs []message.Message) []geminiContent {
@@ -1005,7 +1006,7 @@ func appendGeminiResponseTextPart(resp *message.Response, part geminiPart) {
 
 func parseGeminiHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *APIError {
 	apiErr := &APIError{StatusCode: statusCode, Origin: APIErrorOriginHTTPResponse}
-	apiErr.RetryAfter, _ = parseRetryAfter(header.Get("Retry-After"))
+	apiErr.RetryAfter, _ = httpheader.ParseRetryAfter(header.Get("Retry-After"))
 	var errResp geminiErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {
 		apiErr.Message = errResp.Error.Message

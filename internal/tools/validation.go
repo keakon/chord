@@ -187,6 +187,9 @@ func SanitizeUnknownArgsWithDiagnostics(tool Tool, args json.RawMessage) (json.R
 	if err != nil {
 		return args, ignored, invalid, err
 	}
+	if strict, ok := tool.(StrictArgumentsTool); ok && strict.StrictArguments() && len(ignored) > 0 {
+		return args, ignored, invalid, fmt.Errorf("%s rejects unsupported, duplicate or null parameters before execution", tool.Name())
+	}
 	return sanitized, ignored, invalid, nil
 }
 

@@ -1080,12 +1080,7 @@ func fallbackModelCanReplayToolResultModalities(model FallbackModel, modalities 
 			return false
 		}
 	}
-	switch providerWireFamily(model.ProviderConfig) {
-	case modelcompat.WireFamilyOpenAIChat:
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 // CompleteStream sends a streaming completion request with automatic retries.

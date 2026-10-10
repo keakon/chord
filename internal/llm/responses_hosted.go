@@ -184,19 +184,29 @@ func recordResponsesHostedItem(resp *message.Response, calls map[string]*respons
 	if !terminalEvent {
 		return
 	}
-	if rawError := bytes.TrimSpace(item.Error); len(rawError) > 0 && string(rawError) != "null" && string(rawError) != "\"\"" {
+	rawError := bytes.TrimSpace(item.Error)
+	hasError := len(rawError) > 0 && string(rawError) != "null" && string(rawError) != "\"\""
+	if item.Type == message.HostedCallKindImageGeneration &&
+		!message.NativeImageFailureStatus(status) && (status != message.HostedCallStatusCompleted || hasError) {
+		// Never promote another tool's terminal statuses or contradictory image
+		// metadata to a confirmed failure. The request must reconcile this outcome.
+		state.terminal = false
+		call.Result, call.Error = nil, ""
+		return
+	}
+	if hasError {
 		state.terminal = true
-		call.Status = "failed"
+		call.Status = message.HostedCallStatusFailed
 		call.Result = nil
 		call.Error = item.Type + ": " + string(item.Error)
 		return
 	}
 	switch status {
-	case "completed":
+	case message.HostedCallStatusCompleted:
 		state.terminal = true
 		call.Result = cloneHostedRaw(raw)
 		call.Error = ""
-	case "failed", "cancelled", "incomplete":
+	case message.HostedCallStatusFailed, "cancelled", "incomplete":
 		state.terminal = true
 		call.Result = nil
 		call.Error = item.Type + ": " + status

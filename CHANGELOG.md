@@ -6,11 +6,14 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Highlights
 
+- Generate and edit images with a dedicated model pool, with previews and original-image delivery through TUI, ACP and headless.
 - Model onboarding uses a verified offline catalog with explicit gateway bindings and optional catalog refresh.
 - The composer supports undo for text, inline pastes, and attachments.
 - Headless clients receive correlated replies when input is consumed.
 
 ### Breaking Changes
+
+- Gemini native `api_url` now uses the API version root, such as `https://generativelanguage.googleapis.com/v1beta/`, shared by chat and image models. Remove the trailing `/models` from existing native Gemini URLs; Chord appends model resources and operations.
 
 - MCP connections require protocol `2025-06-18`; servers that negotiate another version are rejected. Update older servers before connecting.
 
@@ -32,6 +35,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The model-facing `lsp` tool has been removed: definition, references, and implementation lookups are no longer offered to the model, and prompts no longer mention them. Navigate with `read`, `grep`, and `glob`. Post-write diagnostics are unchanged — `write`, `edit`, and `apply_patch` results still carry language-server diagnostics, and configured servers keep showing in the info panel — so a leftover `lsp` permission rule matches nothing.
 
 ### Features
+
+- Generate and edit images with a dedicated image model pool. Images APIs accept full `/images/generations` addresses or resource roots, Gemini accepts version roots or full `:generateContent` endpoints for the configured model, and image model types are inferred automatically; unrecognized explicit addresses fail validation. Authorized server image tools take priority; confirmed unexecuted rejections can use the local tool. TUI loads all thumbnails in the background, the fullscreen viewer and sessions retain originals, and ACP/headless deliver the image artifacts.
 
 - Hosted tools support per-provider concurrency, request-rate, and retry-budget limits, with pool-first retries and temporary cooldown for missing tool executions.
 - MCP tools can be loaded on demand with `deferred: true` and `tool_search`, with per-agent history and bounded discovery results.
@@ -99,6 +104,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Image tool cards show images directly without a result detail toggle; warnings, scaling information, and unsuccessful outcomes remain visible.
+
 - Investigation workflows test direct explanations first and expand from evidence, without imposing a fixed step count or report template.
 - Dialogs use quieter shortcut hints, distinct focus and risk cues, and fixed decision actions while long confirmation content scrolls. Deleting a session requires explicit `y` confirmation; `Enter` does not delete it.
 
@@ -149,6 +156,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Status bar switches now sit on a themed background block, so `LOOP`, `YOLO`, `MEMORY`, and `PERSIST-FAIL` each read as one token; `YOLO` uses the warning fill and a degraded `MEMORY-FAIL` or `PERSIST-FAIL` uses the error fill.
 
 ### Fixes
+
+- Fixed missing images in `view_image` tool cards during streaming and after restoring a session.
 
 - Responses requests preserve reusable cache boundaries before temporary reminders on GPT-5.6 and later models. Turn metadata stays stable across tool continuations and retries, and cache diagnostics account for the actual protocol boundaries.
 - Responses requests carry session identity from the first request and after model changes, avoiding HTTP 400 from gateways that require client metadata. Explicit client-contract errors stop retries on the current model without rotating or cooling keys or replaying history, and identify the request settings to check.

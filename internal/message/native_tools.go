@@ -59,6 +59,7 @@ func (h *NativeToolHistory) Clone() *NativeToolHistory {
 	}
 	out.Calls = slices.Clone(h.Calls)
 	for i := range out.Calls {
+		out.Calls[i].Parts = slices.Clone(h.Calls[i].Parts)
 		out.Calls[i].Input = slices.Clone(h.Calls[i].Input)
 		out.Calls[i].Result = slices.Clone(h.Calls[i].Result)
 	}

@@ -1,6 +1,8 @@
 package acpagent
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -8,7 +10,9 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/imagegen"
 	"github.com/keakon/chord/internal/toolname"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // toolArgs is the subset of tool arguments worth showing in a client-side tool
@@ -196,7 +200,7 @@ func progressText(progress agent.ToolProgressSnapshot) string {
 	return strings.TrimSpace(progress.Label)
 }
 
-func toolCallResult(e agent.ToolResultEvent) acp.SessionUpdate {
+func toolCallResult(ctx context.Context, e agent.ToolResultEvent) acp.SessionUpdate {
 	// Chord keeps cancellation as a distinct terminal state; ACP only knows
 	// completed and failed, and a cancelled tool produced no valid result.
 	status := acp.ToolCallStatusCompleted
@@ -204,7 +208,7 @@ func toolCallResult(e agent.ToolResultEvent) acp.SessionUpdate {
 		status = acp.ToolCallStatusFailed
 	}
 	opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
-	if content := toolResultContent(e); len(content) > 0 {
+	if content := toolResultContent(ctx, e); len(content) > 0 {
 		opts = append(opts, acp.WithUpdateContent(content))
 	}
 	output := strings.TrimSpace(e.Payload)
@@ -221,7 +225,7 @@ func toolCallResult(e agent.ToolResultEvent) acp.SessionUpdate {
 // output, plus the unified diff when the tool changed a file. Diffs travel as
 // text because Chord's diff is already rendered and its file states no longer
 // carry the pre-edit text ACP's diff content requires.
-func toolResultContent(e agent.ToolResultEvent) []acp.ToolCallContent {
+func toolResultContent(ctx context.Context, e agent.ToolResultEvent) []acp.ToolCallContent {
 	var content []acp.ToolCallContent
 	output := strings.TrimSpace(e.Payload)
 	if output == "" {
@@ -229,6 +233,16 @@ func toolResultContent(e agent.ToolResultEvent) []acp.ToolCallContent {
 	}
 	if output != "" {
 		content = append(content, acp.ToolContent(acp.TextBlock(output)))
+	}
+	if e.Name == tools.NameGenerateImage && e.Status == agent.ToolResultStatusSuccess {
+		err := tools.VisitGeneratedOriginals(ctx, output, e.Parts, func(_ tools.GeneratedImage, img imagegen.Image) error {
+			content = append(content, acp.ToolContent(acp.ImageBlock(base64.StdEncoding.EncodeToString(img.Data), img.MIME)))
+			return nil
+		})
+		if err != nil {
+			content = append(content, acp.ToolContent(acp.TextBlock("Image delivery failed: "+err.Error())))
+		}
+
 	}
 	if diff := strings.TrimSpace(e.Diff); diff != "" {
 		content = append(content, acp.ToolContent(acp.TextBlock(diff)))

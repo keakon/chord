@@ -967,7 +967,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				}
 				b := newTranscriptToolCallBlock(*nextID, message.ToolCall{ID: display.ID, Name: display.Name, Args: json.RawMessage(display.Args)})
 				b.MsgIndex = msgIdx
-				applyStableToolResultToBlock(b, transcriptToolResult{result: display.Result, payload: display.Result, status: agent.ToolResultStatus(display.Status), displayArgs: stableToolDisplayArgs, resetExecution: true})
+				applyStableToolResultToBlock(b, transcriptToolResult{result: display.Result, payload: display.Result, imageParts: imagePartsFromContentParts(display.Parts), status: agent.ToolResultStatus(display.Status), displayArgs: stableToolDisplayArgs, resetExecution: true})
 				blocks = append(blocks, b)
 				toolIDToBlock[display.ID] = b
 				*nextID++
@@ -985,6 +985,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					result:         toolResultContentForDisplay(msg.Content),
 					payload:        msg.ToolPayload,
 					notes:          msg.ToolNotes,
+					imageParts:     imagePartsFromContentParts(msg.Parts),
 					status:         toolResultStatusFromRestoredMessage(msg),
 					audit:          msg.Audit,
 					diff:           msg.ToolDiff,

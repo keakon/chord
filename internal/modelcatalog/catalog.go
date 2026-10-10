@@ -202,6 +202,9 @@ func (c *Catalog) validate() error {
 		if err != nil || u.Scheme != "https" || u.Host == "" {
 			return fmt.Errorf("endpoint %q: invalid request URL %q", e.PresetID, e.RequestURL)
 		}
+		if e.Protocol == "generate-content" && !isGenerateContentRoot(u) {
+			return fmt.Errorf("endpoint %q: generate-content requires a native API version root", e.PresetID)
+		}
 		if strings.TrimSpace(e.EnvVar) == "" && e.AuthMethod != "oauth" {
 			return fmt.Errorf("endpoint %q: env_var is required for non-OAuth endpoints", e.PresetID)
 		}

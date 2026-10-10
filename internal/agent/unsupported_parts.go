@@ -20,6 +20,7 @@ type unsupportedPartCounts struct {
 }
 
 func filterUnsupportedBinaryPartsForModel(messages []message.Message, capability inputCapability) ([]message.Message, unsupportedPartCounts) {
+	messages = projectGeneratedImagePreviews(messages)
 	if capability == nil {
 		return messages, unsupportedPartCounts{}
 	}

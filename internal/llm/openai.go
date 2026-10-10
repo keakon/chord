@@ -15,10 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	sonicjson "github.com/bytedance/sonic"
 	"github.com/keakon/golog/log"
 
-	sonicjson "github.com/bytedance/sonic"
-
+	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 )
@@ -698,8 +698,25 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 
 	toolNames := make(map[string]string)
 	lastWasTool := false
+	var toolMedia []openAIContentBlock
+	flushToolMedia := func() {
+		if len(toolMedia) == 0 {
+			return
+		}
+		// Chat tool messages only accept text. Project binary results after
+		// the complete tool-result group, without altering durable history.
+		if opts.requiresAssistantAfterToolResult && lastWasTool {
+			result = append(result, openAIMessage{Role: "assistant", Content: assistantAfterToolResultText})
+		}
+		result = append(result, openAIMessage{Role: "user", Content: toolMedia, Transient: true})
+		toolMedia = nil
+		lastWasTool = false
+	}
 
 	for _, msg := range msgs {
+		if msg.Role != message.RoleTool || len(msg.MCPTools) > 0 {
+			flushToolMedia()
+		}
 		if len(msg.MCPTools) > 0 {
 			result = append(result, openAIMessage{
 				Role:  "system",
@@ -719,48 +736,7 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 			lastWasTool = false
 			if len(msg.Parts) > 0 {
 				// Multi-part message (may include images).
-				var blocks []openAIContentBlock
-				for _, p := range msg.Parts {
-					switch p.Type {
-					case "image":
-						data, mime, ok := binaryPartForWire(p)
-						if !ok {
-							continue
-						}
-						blocks = append(blocks, openAIContentBlock{
-							Type: "image_url",
-							ImageURL: &openAIImageURL{
-								URL: binaryPartDataURL(mime, data),
-							},
-						})
-					case "pdf":
-						data, mime, ok := binaryPartForWire(p)
-						if !ok {
-							continue
-						}
-						blocks = append(blocks, openAIContentBlock{
-							Type: "file",
-							File: &openAIFile{
-								Filename: defaultPDFFilename(p.FileName),
-								FileData: binaryPartDataURL(defaultPDFMediaType(mime), data),
-							},
-						})
-					default: // "text"
-						// Fold adjacent pure-text parts into a single text block
-						// so a text-only message takes one block. Insert a
-						// newline only when neither side provides one, keeping
-						// separately-authored segments from being glued
-						// together. image/file blocks are never folded.
-						if p.Text == "" {
-							continue
-						}
-						if last := len(blocks) - 1; last >= 0 && blocks[last].Type == "text" {
-							blocks[last].Text = joinAdjacentPartText(blocks[last].Text, p.Text)
-						} else {
-							blocks = append(blocks, openAIContentBlock{Type: "text", Text: p.Text})
-						}
-					}
-				}
+				blocks := openAIContentParts(msg.Parts)
 				if len(blocks) == 0 {
 					blocks = append(blocks, openAIContentBlock{Type: "text", Text: ""})
 				}
@@ -871,10 +847,12 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 				omi.Name = toolNames[msg.ToolCallID]
 			}
 			result = append(result, omi)
+			toolMedia = appendOpenAIToolMedia(toolMedia, msg)
 			lastWasTool = true
 		}
 	}
 
+	flushToolMedia()
 	return result
 }
 
@@ -908,7 +886,7 @@ func parseOpenAIHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 		Origin:     APIErrorOriginHTTPResponse,
 	}
 
-	apiErr.RetryAfter, _ = parseRetryAfter(header.Get("Retry-After"))
+	apiErr.RetryAfter, _ = httpheader.ParseRetryAfter(header.Get("Retry-After"))
 
 	var errResp openAIErrorResponse
 	if err := json.Unmarshal(body, &errResp); err == nil && errResp.Error.Message != "" {

@@ -142,6 +142,9 @@ func TestCloseSessionReportsSessionClosed(t *testing.T) {
 	if _, err := server.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: session}); err != nil {
 		t.Fatalf("CloseSession: %v", err)
 	}
+	if !errors.Is(server.deliveryCtx.Err(), context.Canceled) {
+		t.Fatal("session close did not cancel original image delivery")
+	}
 	select {
 	case <-server.SessionClosed():
 	case <-time.After(time.Second):

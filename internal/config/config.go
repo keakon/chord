@@ -33,8 +33,9 @@ const (
 
 // Config is the top-level configuration for the chord agent.
 type Config struct {
-	Providers  map[string]ProviderConfig `json:"providers" yaml:"providers"`                         // LLM providers
-	ModelPools map[string][]string       `json:"model_pools,omitempty" yaml:"model_pools,omitempty"` // reusable model pool definitions
+	ImageGeneration ImageGenerationConfig     `json:"image_generation" yaml:"image_generation,omitempty"`
+	Providers       map[string]ProviderConfig `json:"providers" yaml:"providers"`                         // LLM providers
+	ModelPools      map[string][]string       `json:"model_pools,omitempty" yaml:"model_pools,omitempty"` // reusable model pool definitions
 	// ModelTemplates is a pure YAML anchor namespace: entries are only
 	// reachable through anchors/aliases elsewhere in the document and are never
 	// interpreted directly. Declared so strict decoding accepts the key.
@@ -521,22 +522,24 @@ func (r *ModelCatalogRef) UnmarshalJSON(data []byte) error {
 
 // ModelConfig specifies a model and its parameters.
 type ModelConfig struct {
-	NativeWebSearch       *NativeWebSearchConfig  `json:"native_web_search,omitempty" yaml:"native_web_search,omitempty"`
-	Name                  string                  `json:"name" yaml:"name"`
-	Limit                 ModelLimit              `json:"limit" yaml:"limit"`
-	Catalog               *ModelCatalogRef        `json:"catalog,omitempty" yaml:"catalog,omitempty"`
-	Modalities            *ModelModalities        `json:"modalities,omitempty" yaml:"modalities,omitempty"`
-	SupportedServiceTiers []ServiceTier           `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"` // explicit non-standard tiers supported by this model
-	Compaction            *ModelCompactionConfig  `json:"compaction,omitempty" yaml:"compaction,omitempty"`                           // per-model compaction threshold/reminder overrides; nil inherits the global context.compaction values
-	Thinking              *ThinkingConfig         `json:"thinking,omitempty" yaml:"thinking,omitempty"`
-	Reasoning             *ReasoningConfig        `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
-	Text                  *TextConfig             `json:"text,omitempty" yaml:"text,omitempty"`
-	ParallelToolCalls     *bool                   `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = inherit provider default (itself defaulting to true); non-nil = explicit override
-	PromptCache           *PromptCacheConfig      `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
-	Compat                *ModelCompatConfig      `json:"compat,omitempty" yaml:"compat,omitempty"`
-	Cost                  *ModelCost              `json:"cost,omitempty" yaml:"cost,omitempty"`
-	Store                 *bool                   `json:"store,omitempty" yaml:"store,omitempty"` // model-level Responses storage preference; nil inherits provider/default false
-	Variants              map[string]ModelVariant `json:"variants,omitempty" yaml:"variants,omitempty"`
+	ImageGeneration       *ImageModelConfig            `json:"image_generation,omitempty" yaml:"image_generation,omitempty"`
+	NativeImageGeneration *NativeImageGenerationConfig `json:"native_image_generation,omitempty" yaml:"native_image_generation,omitempty"`
+	NativeWebSearch       *NativeWebSearchConfig       `json:"native_web_search,omitempty" yaml:"native_web_search,omitempty"`
+	Name                  string                       `json:"name" yaml:"name"`
+	Limit                 ModelLimit                   `json:"limit" yaml:"limit"`
+	Catalog               *ModelCatalogRef             `json:"catalog,omitempty" yaml:"catalog,omitempty"`
+	Modalities            *ModelModalities             `json:"modalities,omitempty" yaml:"modalities,omitempty"`
+	SupportedServiceTiers []ServiceTier                `json:"supported_service_tiers,omitempty" yaml:"supported_service_tiers,omitempty"` // explicit non-standard tiers supported by this model
+	Compaction            *ModelCompactionConfig       `json:"compaction,omitempty" yaml:"compaction,omitempty"`                           // per-model compaction threshold/reminder overrides; nil inherits the global context.compaction values
+	Thinking              *ThinkingConfig              `json:"thinking,omitempty" yaml:"thinking,omitempty"`
+	Reasoning             *ReasoningConfig             `json:"reasoning,omitempty" yaml:"reasoning,omitempty"`
+	Text                  *TextConfig                  `json:"text,omitempty" yaml:"text,omitempty"`
+	ParallelToolCalls     *bool                        `json:"parallel_tool_calls,omitempty" yaml:"parallel_tool_calls,omitempty"` // nil = inherit provider default (itself defaulting to true); non-nil = explicit override
+	PromptCache           *PromptCacheConfig           `json:"prompt_cache,omitempty" yaml:"prompt_cache,omitempty"`
+	Compat                *ModelCompatConfig           `json:"compat,omitempty" yaml:"compat,omitempty"`
+	Cost                  *ModelCost                   `json:"cost,omitempty" yaml:"cost,omitempty"`
+	Store                 *bool                        `json:"store,omitempty" yaml:"store,omitempty"` // model-level Responses storage preference; nil inherits provider/default false
+	Variants              map[string]ModelVariant      `json:"variants,omitempty" yaml:"variants,omitempty"`
 }
 
 // EffectiveResponsesWebsocket returns whether Responses WebSocket should be used.
@@ -2020,6 +2023,12 @@ func loadConfigData(path string, data []byte, withDefaults bool, diagnostics *[]
 		log.Warnf("config %s: ignoring invalid value(s): %s", path, issue)
 		appendLoadDiagnostic(diagnostics, path, "", issue, "inherited/default value")
 	}
+	if withDefaults {
+		if err := cfg.ImageGeneration.Validate(cfg); err != nil {
+			return nil, fmt.Errorf("config %s: %w", path, err)
+		}
+	}
+
 	normalizeModelLimits(cfg)
 	return cfg, nil
 }
@@ -2277,6 +2286,7 @@ func removeFailingNodes(node *yaml.Node, prefix []string, failures yamlFailures)
 }
 
 var projectScopedTopLevelKeys = map[string]bool{
+	"image_generation":                true,
 	"providers":                       true,
 	"model_pools":                     true,
 	"orchestration":                   true,

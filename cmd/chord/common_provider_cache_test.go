@@ -24,7 +24,7 @@ func TestOAuthCredentialMapIncludesRefreshStateForAccessCredential(t *testing.T)
 
 func TestNormalizeProviderConfigDetectsGeminiFromModelsPath(t *testing.T) {
 	got, err := normalizeProviderConfig("gemini", config.ProviderConfig{
-		APIURL: "https://generativelanguage.googleapis.com/v1beta/models",
+		APIURL: "https://generativelanguage.googleapis.com/v1beta/",
 		Models: map[string]config.ModelConfig{"gemini-2.5-flash": {}},
 	}, nil)
 	if err != nil {
@@ -33,7 +33,7 @@ func TestNormalizeProviderConfigDetectsGeminiFromModelsPath(t *testing.T) {
 	if got.Type != config.ProviderTypeGenerateContent {
 		t.Fatalf("Type = %q, want %q", got.Type, config.ProviderTypeGenerateContent)
 	}
-	if got.APIURL != "https://generativelanguage.googleapis.com/v1beta/models" {
+	if got.APIURL != "https://generativelanguage.googleapis.com/v1beta/" {
 		t.Fatalf("APIURL = %q", got.APIURL)
 	}
 }
@@ -61,7 +61,7 @@ func TestNormalizeProviderConfigDetectsTypeFromURLPathWithQuery(t *testing.T) {
 		},
 		{
 			name:   "generate content",
-			apiURL: "https://example.invalid/v1beta/models?region=test",
+			apiURL: "https://example.invalid/v1beta/?region=test",
 			want:   config.ProviderTypeGenerateContent,
 		},
 	}

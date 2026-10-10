@@ -160,7 +160,7 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 		fmt.Fprintln(out, "  - /responses         OpenAI Responses API and compatible gateways (example: https://api.openai.com/v1/responses)")
 		fmt.Fprintln(out, "  - /messages          Anthropic Messages API and compatible gateways (example: https://api.anthropic.com/v1/messages)")
 		fmt.Fprintln(out, "  - /chat/completions  OpenAI Chat Completions compatible gateways (example: https://gateway.example.com/v1/chat/completions)")
-		fmt.Fprintln(out, "  - /models            Gemini Generate Content base path (example: https://generativelanguage.googleapis.com/v1beta/models)")
+		fmt.Fprintln(out, "  - /v1beta/           Gemini native API version root (example: https://generativelanguage.googleapis.com/v1beta/)")
 		fmt.Fprintln(out)
 		defaultAPIURL := defaultAPIURLForProviderType(config.ProviderTypeResponses)
 		cfgInput.APIURL, err = promptText(termIO, "API URL", defaultAPIURL)
@@ -206,7 +206,7 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 				limitReminder = "This compatible gateway uses starter limit defaults for messages. If your provider documents different limits, edit config.yaml after setup."
 			}
 		case config.ProviderTypeGenerateContent:
-			if !strings.EqualFold(strings.TrimSpace(cfgInput.APIURL), "https://generativelanguage.googleapis.com/v1beta/models") {
+			if !strings.EqualFold(strings.TrimSpace(cfgInput.APIURL), "https://generativelanguage.googleapis.com/v1beta/") {
 				limitReminder = "This compatible gateway uses starter limit defaults for generate-content. If your provider documents different limits, edit config.yaml after setup."
 			}
 		case config.ProviderTypeResponses:

@@ -167,7 +167,7 @@ func TestAdvisoriesNativeThinkingSelector(t *testing.T) {
 			name: "native endpoint needs no selector",
 			config: `providers:
   sample:
-    api_url: https://example.invalid/v1beta/models
+    api_url: https://example.invalid/v1beta/
     models:
       gemini-3-flash:
         thinking:

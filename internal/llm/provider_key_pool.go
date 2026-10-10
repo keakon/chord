@@ -549,7 +549,8 @@ func (p *ProviderConfig) MarkServerDirectedCooldown(key string, d time.Duration)
 	})
 }
 
-func (p *ProviderConfig) markRateLimitCooldown(key string, retryAfter time.Duration) bool {
+// MarkRateLimitCooldown applies provider pacing, preferring bounded server advice.
+func (p *ProviderConfig) MarkRateLimitCooldown(key string, retryAfter time.Duration) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	applied := false

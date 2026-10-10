@@ -27,7 +27,7 @@ func nativeRequestOutcome(dispatch *RequestDispatch, err error) message.NativeRe
 	rejected := false
 	switch apiErr.StatusCode {
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
-		rejected = apiErrorSignalEquals(apiErr, "invalid_request_error", invalidResponsesRequestCode, "invalid_parameter", "invalid_argument", "missing_required_parameter", "context_length_exceeded")
+		rejected = apiErrorSignalEquals(apiErr, "invalid_request_error", invalidResponsesRequestCode, "invalid_parameter", "invalid_argument", "missing_required_parameter", "context_length_exceeded", "unsupported_tool", "unsupported_parameter", "unsupported_value")
 	case http.StatusUnauthorized:
 		rejected = apiErrorSignalEquals(apiErr, "authentication_error", "invalid_api_key")
 	case http.StatusForbidden:

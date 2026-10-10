@@ -52,7 +52,7 @@ func guideConfigAdd(opts configAddOptions, providerName, wireModel string, provi
 				opts.url = value
 				break
 			}
-			fmt.Fprintln(t.out, "Use an http(s) endpoint ending in /responses, /messages, /chat/completions or /models.")
+			fmt.Fprintln(t.out, configAddEndpointHint)
 		}
 	}
 

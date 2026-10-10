@@ -168,6 +168,9 @@ func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
 	cardWidth := metrics.cardWidth
 	contentWidth := metrics.contentWidth
 
+	if toolIsImageCard(b.ToolName) {
+		return b.renderImageToolCard(width, spinnerFrame)
+	}
 	if b.ToolName == tools.NameTodoWrite {
 		return b.renderTodoCall(width, spinnerFrame)
 	}
@@ -1487,6 +1490,9 @@ func tuiCutRight(s string, maxWidth int) string {
 }
 
 func (b *Block) renderToolResult(width int) []string {
+	if toolIsImageCard(b.ToolName) {
+		return b.renderImageToolCard(width, "")
+	}
 	contentLines := strings.Split(b.Content, "\n")
 	lineCount := len(contentLines)
 	metrics := newToolCardMetrics(width)

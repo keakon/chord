@@ -125,6 +125,12 @@ func SyncDir(dir string) error {
 		return err
 	}
 	defer d.Close()
+	return SyncDirectory(d)
+}
+
+// SyncDirectory syncs an already-open directory using the same filesystem
+// exceptions as SyncDir, without resolving its pathname again.
+func SyncDirectory(d *os.File) error {
 	if err := d.Sync(); err != nil {
 		if runtime.GOOS == "windows" || os.IsPermission(err) || errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) {
 			return nil

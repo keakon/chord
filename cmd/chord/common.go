@@ -830,6 +830,10 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	viewImageTool := tools.NewViewImageTool(ac.MainAgent)
 	viewImageTool.BaseDir = ac.WorkDir
 	ac.Registry.Register(viewImageTool)
+	if err := configureImageGeneration(ac); err != nil {
+		ac.cleanup()
+		return nil, err
+	}
 
 	// LLM factory for SubAgents.
 	ac.MainAgent.SetLLMFactory(buildSubAgentLLMFactory(ac, providerCfg, llmProvider, modelID, modelCfg, cfg, auth))

@@ -196,7 +196,7 @@ func initialSetupDefaultsForProviderType(providerType string) initialSetupEndpoi
 		return initialSetupEndpointDefaults{
 			ProviderName: "gemini",
 			ProviderType: "generate-content",
-			APIURL:       "https://generativelanguage.googleapis.com/v1beta/models",
+			APIURL:       "https://generativelanguage.googleapis.com/v1beta/",
 			ModelName:    "gemini-3.8-flash",
 			ContextLimit: 1048576,
 			OutputLimit:  65536,

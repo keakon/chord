@@ -6,6 +6,7 @@ package imageutil
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/color"
@@ -126,8 +127,11 @@ func NormalizeImage(data []byte, declaredMime string) (NormalizedImage, error) {
 	// several images at once) would otherwise decode up to MaxImagePixels each
 	// in parallel, which is hundreds of megabytes of transient decoder buffers.
 	// Acquiring here, after the cheap header checks, keeps rejects immediate.
-	decodeSlots <- struct{}{}
-	defer func() { <-decodeSlots }()
+	release, err := AcquireDecodeSlot(context.Background())
+	if err != nil {
+		return NormalizedImage{}, err
+	}
+	defer release()
 
 	img, err := decoder.decode(bytes.NewReader(data))
 	if err != nil {

@@ -40,7 +40,7 @@
     {
       "preset_id": "gemini",
       "protocol": "generate-content",
-      "request_url": "https://generativelanguage.googleapis.com/v1beta/models",
+      "request_url": "https://generativelanguage.googleapis.com/v1beta/",
       "auth_method": "x-goog-api-key",
       "env_var": "GEMINI_API_KEY",
       "docs": [

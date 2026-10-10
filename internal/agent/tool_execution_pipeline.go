@@ -87,6 +87,7 @@ type toolExecutionPipeline struct {
 	// pipeline was built. effectivePathScope fills in the base dir from this
 	// pipeline's own binding, so the permission rules a call is evaluated
 	// against never mix the checkout it was dispatched in with a later switch.
+	imageAccessGuard      tools.ImageAccessGuard
 	pathScope             permission.PathScope
 	visibleToolNames      func() map[string]struct{}
 	appendToolActivity    func(recovery.ToolActivityRecord) error
@@ -422,7 +423,7 @@ func appendNotes(result string, notes []string) string {
 // tools keep a clean pre-note copy: everything else is truncated or artifacted
 // into Content already, so a second copy would double large results for nothing.
 func toolPayloadIsStructured(toolName string) bool {
-	return toolName == tools.NameQuestion
+	return toolName == tools.NameQuestion || toolName == tools.NameGenerateImage
 }
 
 func appendUniqueString(values []string, value string) []string {
@@ -495,6 +496,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	agentCtx := buildToolExecContext(ctx, tc, p.agentID, p.taskID, p.sessionDir, p.eventSender, p.jobAccess, p.emit)
 	if p.currentTurnID != nil {
 		agentCtx = tools.WithTurnID(agentCtx, p.currentTurnID())
+	}
+	if p.imageAccessGuard != nil {
+		agentCtx = tools.WithImageAccessGuard(agentCtx, p.imageAccessGuard)
 	}
 	imageSink := &tools.ImageCollector{}
 	agentCtx = tools.WithImageSink(agentCtx, imageSink)
@@ -717,6 +721,9 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	if tc.Name == tools.NameTodoWrite {
 		agentCtx = tools.WithTodoWriteSpeculativePreview(agentCtx)
+	}
+	if p.imageAccessGuard != nil {
+		agentCtx = tools.WithImageAccessGuard(agentCtx, p.imageAccessGuard)
 	}
 	imageSink := &tools.ImageCollector{}
 	agentCtx = tools.WithImageSink(agentCtx, imageSink)
@@ -989,7 +996,13 @@ func (p toolExecutionPipeline) validateKnownTool(name string) error {
 	return nil
 }
 
-func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) error {
+func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message.ToolCall, execResult *ToolExecutionResult) (err error) {
+	var approvedRules permission.Ruleset
+	defer func() {
+		if err == nil && (tc.Name == tools.NameGenerateImage || tc.Name == tools.NameViewImage) {
+			p.imageAccessGuard = p.imagePermissionGuard(*tc, approvedRules)
+		}
+	}()
 	if p.bypassPermission != nil && p.bypassPermission(tc.Name) {
 		return nil
 	}
@@ -997,6 +1010,7 @@ func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message
 		return nil
 	}
 	ruleset := p.currentRuleset()
+	approvedRules = ruleset
 	if len(ruleset) == 0 {
 		return nil
 	}
@@ -1005,6 +1019,9 @@ func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message
 	}
 
 	pctx := toolPermissionContext{}
+	if tc.Name == tools.NameGenerateImage || tc.Name == tools.NameViewImage {
+		pctx.SessionDir = p.sessionDir
+	}
 	if p.loopExitAuthorized != nil {
 		pctx.LoopExitAuthorized = p.loopExitAuthorized()
 	}
@@ -1054,6 +1071,7 @@ func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message
 		}
 		if resp.RuleIntent != nil && p.refreshRulesetAfterRuleIntent != nil {
 			ruleset = p.refreshRulesetAfterRuleIntent(tc.Name, resp.RuleIntent)
+			approvedRules = ruleset
 		}
 		originalArgs := append(json.RawMessage(nil), tc.Args...)
 		editedBinding := *p
@@ -1062,7 +1080,7 @@ func (p *toolExecutionPipeline) applyPermission(ctx context.Context, tc *message
 			candidate.Args = json.RawMessage(resp.FinalArgsJSON)
 			editedBinding = p.withMachineStateBaseDir(candidate)
 		}
-		editedArgs, err := applyConfirmedArgsEdits(p.registry, ruleset, tc.Name, tc.Args, resp.FinalArgsJSON, editedBinding.effectivePathScope())
+		editedArgs, err := applyConfirmedArgsEdits(p.registry, ruleset, tc.Name, tc.Args, resp.FinalArgsJSON, editedBinding.effectivePathScope(), pctx)
 		if err != nil {
 			return err
 		}

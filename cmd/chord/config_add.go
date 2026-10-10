@@ -19,6 +19,8 @@ import (
 	"github.com/keakon/chord/internal/modelcatalog"
 )
 
+const configAddEndpointHint = "Use an http(s) endpoint ending in /responses, /messages or /chat/completions, or a Gemini version root ending in /v1beta or /v1alpha (the official Gemini endpoint also accepts /v1). Remove a trailing /models from Gemini URLs."
+
 // configAddOptions controls offline model onboarding. Preset-bound models
 // write pool references; other connections inherit same-protocol recipes
 // through catalog references. Request compression remains an explicit choice.
@@ -238,7 +240,7 @@ func runConfigAdd(ctx context.Context, out io.Writer, ref string, opts configAdd
 		edit.apiURL = strings.TrimSpace(opts.url)
 		edit.preset = providerCfg.Preset
 		if edit.providerType == "" {
-			return fmt.Errorf("cannot infer a provider type from %q; use a URL ending in /responses, /messages, /chat/completions or /models", opts.url)
+			return fmt.Errorf("cannot infer a provider type from %q; %s", opts.url, configAddEndpointHint)
 		}
 	}
 	if opts.customize {

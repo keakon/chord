@@ -43,7 +43,10 @@ func (s *SubAgent) recoverFromContextLength(err error) bool {
 	return true
 }
 
-func (s *SubAgent) prepareContextForLLM(messages []message.Message) []message.Message {
+func (s *SubAgent) prepareContextForLLM(messages []message.Message) (prepared []message.Message) {
+	// Compression must consume and persist the full history. Preview selection
+	// happens only on the returned request copy.
+	defer func() { prepared = projectGeneratedImagePreviews(prepared) }()
 	if s == nil || len(messages) <= 2 {
 		return messages
 	}
@@ -58,7 +61,7 @@ func (s *SubAgent) prepareContextForLLM(messages []message.Message) []message.Me
 	if usage <= 0 || usage >= 1 {
 		usage = config.DefaultSubAgentCompactUsage
 	}
-	estimated := estimateMessagesTokens(s.ctxMgr, messages)
+	estimated := estimateMessagesTokens(s.ctxMgr, projectGeneratedImagePreviews(messages))
 	requestBudget := s.ctxMgr.GetUsableInputBudget()
 	if estimated < int(float64(budget)*usage) && (requestBudget <= 0 || estimated < requestBudget) {
 		return messages

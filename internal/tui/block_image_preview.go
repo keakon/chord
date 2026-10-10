@@ -32,5 +32,5 @@ func (b *Block) appendImagePreviewLines(finalLines *[]string, contentWidth int, 
 }
 
 func blockSupportsImagePreview(block *Block) bool {
-	return block != nil && (block.Type == BlockUser || block.Type == BlockToolResult) && len(block.ImageParts) > 0
+	return block != nil && (block.Type == BlockUser || block.Type == BlockToolCall || block.Type == BlockToolResult) && len(block.ImageParts) > 0
 }

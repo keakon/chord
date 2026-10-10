@@ -180,6 +180,7 @@ type toolPermissionContext struct {
 	// LoopExitAuthorized reports that loop mode is currently active, which
 	// authorizes done against wildcard-only rules. See donePermissionAction.
 	LoopExitAuthorized bool
+	SessionDir         string
 }
 
 // evaluateToolPermissionInDir is the scope-aware entry point. scope carries the
@@ -213,6 +214,26 @@ func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName
 
 	unwrapped := llm.UnwrapToolArgs(args)
 	switch toolName {
+	case tools.NameGenerateImage:
+		return evaluateImageGenerationPermission(ruleset, unwrapped, scope, pctx.SessionDir)
+	case tools.NameViewImage:
+		path := extractToolArgument(toolName, unwrapped)
+		resolved := path
+		if scope.Cwd != "" || strings.HasPrefix(path, tools.ImageArtifactPrefix) {
+			var err error
+			resolved, err = tools.ResolveImageArtifactPath(pctx.SessionDir, path, scope.Cwd)
+			if err != nil {
+				return decision
+			}
+		}
+		decision.Action = ruleset.EvaluatePath(toolName, resolved, scope)
+		decision.MatchArgument = resolved
+		if decision.Action == permission.ActionAsk {
+			decision.NeedsApprovalPaths = []string{resolved}
+		} else if decision.Action == permission.ActionAllow {
+			decision.AlreadyAllowedPaths = []string{resolved}
+		}
+		return decision
 	case tools.NameApplyPatch:
 		return evaluateApplyPatchPermissionInDir(ruleset, unwrapped, scope)
 	case tools.NameDelete:

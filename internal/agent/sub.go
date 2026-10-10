@@ -44,6 +44,8 @@ type toolResult struct {
 	ArgsJSON    string // original args JSON string for malformed detection
 	Audit       *message.ToolArgsAudit
 	Result      string
+	Payload     string
+	Notes       []string
 	Images      []message.ContentPart // image parts to inject into model context after the batch completes
 	Error       error
 	TurnID      uint64
@@ -981,12 +983,13 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 	if providerSupportsRequiredToolChoice(llmClient.ProviderConfig()) {
 		llmClient.MergeNextRequestTuningOverride(requiredToolChoiceTuning(llm.RequestTuning{}))
 	}
-	if filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient); dropped.any() {
+	filtered, dropped := filterUnsupportedBinaryPartsForModel(messages, llmClient)
+	messages = filtered
+	if dropped.any() {
 		log.Warnf("SubAgent dropping unsupported binary parts before LLM request agent=%v kinds=%s", s.instanceID, dropped.summary())
 		if s.unsupportedPartToast.first(modelName, toastCategoryInput, dropped.summary()) {
 			s.parent.emitToTUI(ToastEvent{Level: "warn", Message: "Input dropped (unsupported): " + dropped.summary(), AgentID: s.instanceID})
 		}
-		messages = filtered
 	}
 	compatCfg := llmClient.ThinkingToolcallCompat()
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
