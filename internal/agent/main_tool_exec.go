@@ -145,6 +145,13 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 			}
 			return nil
 		},
+		// YOLO bypasses ordinary tools outright, including rules the user
+		// wrote as deny: on the main agent a role is a permission preset
+		// rather than a capability boundary, so running a read-only role with
+		// YOLO on makes it writable. That is intended. The protected control
+		// tools keep their rules, and a SubAgent never installs this hook, so
+		// the scope it was delegated with survives the parent's YOLO (see
+		// subAgentBaseRuleset).
 		bypassPermission: func(name string) bool {
 			return a.YoloEnabled() && !yoloProtectedPermissionTool(name)
 		},

@@ -132,3 +132,71 @@ func TestSubAgentYoloInheritanceRelaxesMechanismAsk(t *testing.T) {
 		t.Fatalf("confirm calls after YOLO off = %d, want 2", got)
 	}
 }
+
+// TestYoloScopeAsymmetryBetweenMainAgentAndDelegatedWorker pins the two-sided
+// YOLO contract where a user meets it: enabling YOLO while the main agent runs
+// a read-only role makes that role writable, but a worker it delegates to
+// stays read-only. The rule under test is the active role's own permission
+// config (a planner's `write: deny`), which reaches the main agent's ruleset
+// through rebuildRuleset and a SubAgent's base ruleset through
+// subAgentBaseRuleset.
+//
+// This is the only test covering the inheritance path. Its neighbour,
+// TestSubAgentYoloInheritanceKeepsDenyGuardrail, puts its deny on the worker's
+// own agent definition, so it cannot see a change that lets YOLO's rule filter
+// reach the SubAgent base — such as making subAgentBaseRuleset return
+// effectiveRuleset instead of snapshotRuleset, which would silently make every
+// delegated worker writable under YOLO.
+func TestYoloScopeAsymmetryBetweenMainAgentAndDelegatedWorker(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.agentConfigs = map[string]*config.AgentConfig{
+		"planner": {Name: "planner", Permission: parsePermissionNode(t, "write: deny\n")},
+		"worker":  {Name: "worker"},
+	}
+
+	// A read-only active role: its own permission config becomes the overlay
+	// base, which rebuildRuleset folds into the main agent's ruleset.
+	a.activeConfig = a.agentConfigs["planner"]
+	a.rebuildRuleset()
+	if !a.snapshotRuleset().IsDisabled(tools.NameWrite) {
+		t.Fatal("the active role's write deny must reach the main agent ruleset")
+	}
+
+	a.newTurn()
+	writeCall := func() *message.ToolCall {
+		return &message.ToolCall{Name: tools.NameWrite, Args: json.RawMessage(`{"path":"notes.txt"}`)}
+	}
+	sub := newControllableTestSubAgent(t, a, "adhoc-scope")
+	sub.setRuleset(a.buildSubAgentRuleset(a.agentConfigs["worker"]))
+
+	// YOLO off: both sides honour the active role's deny.
+	pipeline := a.toolExecutionPipeline()
+	if err := pipeline.applyPermission(context.Background(), writeCall(), &ToolExecutionResult{}); err == nil {
+		t.Fatal("main agent write must be denied while YOLO is off")
+	}
+	if err := subYoloApplyPermission(t, sub, tools.NameWrite); err == nil {
+		t.Fatal("worker write must be denied while YOLO is off")
+	}
+
+	a.yoloEnabled.Store(true)
+
+	// The main agent's ordinary permission limits are lifted, including the
+	// ones coming from the active role's own config.
+	if a.effectiveRuleset().IsDisabled(tools.NameWrite) {
+		t.Fatal("YOLO must lift the active role's own write deny on the main agent")
+	}
+	pipeline = a.toolExecutionPipeline()
+	if err := pipeline.applyPermission(context.Background(), writeCall(), &ToolExecutionResult{}); err != nil {
+		t.Fatalf("main agent write must be allowed under YOLO, got %v", err)
+	}
+
+	// The worker's ruleset is the delegation contract, so YOLO must not filter
+	// it: deny still blocks, and only the ask→allow downgrade crosses over.
+	if !a.buildSubAgentRuleset(a.agentConfigs["worker"]).IsDisabled(tools.NameWrite) {
+		t.Fatal("YOLO must not drop the active role's deny from a SubAgent's base ruleset")
+	}
+	sub.setRuleset(a.buildSubAgentRuleset(a.agentConfigs["worker"]))
+	if err := subYoloApplyPermission(t, sub, tools.NameWrite); err == nil {
+		t.Fatal("worker write must stay denied under the parent's YOLO")
+	}
+}
