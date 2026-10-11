@@ -410,8 +410,31 @@ func appendModelContextNote(contextResult, note string) string {
 	return contextResult + "\n\n" + note
 }
 
-func applyToolArgsAuditToContextResult(content string, _ *message.ToolArgsAudit) string {
-	return content
+// applyToolArgsAuditToContextResult adds the argument diagnostics a failing call
+// has no other way to show the model.
+//
+// A call that executes reports what it stripped through execResult.Notes and the
+// notes appended to its payload. A call that fails schema validation returns
+// before any of that, so its diagnostics would reach only the tool card: the
+// model sees the single field the schema complained about and never learns that
+// another parameter it sent was dropped. That is how a model concludes the
+// missing field was the whole mistake, invents a value for it, and re-sends the
+// same call — the schema's own complaint then reads as the reason the call was
+// wrong, when the dropped parameter was.
+//
+// The notes are appended only when the payload does not already carry them,
+// because the execution paths append the same lines before this runs.
+func applyToolArgsAuditToContextResult(content string, audit *message.ToolArgsAudit) string {
+	if audit == nil || len(audit.IgnoredArgs) == 0 {
+		return content
+	}
+	var missing []string
+	for _, note := range ignoredArgsNotes(audit.IgnoredArgs) {
+		if !strings.Contains(content, note) {
+			missing = append(missing, note)
+		}
+	}
+	return appendNotes(content, missing)
 }
 
 // contextCancelledError returns the error from ctx.Err(), or context.Canceled

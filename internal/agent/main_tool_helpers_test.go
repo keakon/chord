@@ -427,3 +427,35 @@ func TestConfirmationEditsRebindPermissionAndExecution(t *testing.T) {
 		})
 	}
 }
+
+// TestApplyToolArgsAuditToContextResultSurfacesDroppedParameters pins the
+// feedback a call that fails schema validation used to withhold. A call that
+// executes appends its diagnostics to the payload; a validation failure returns
+// before that, so the model saw only the one field the schema named, invented a
+// value for it, and re-sent the call — with the dropped parameter still dropped.
+func TestApplyToolArgsAuditToContextResultSurfacesDroppedParameters(t *testing.T) {
+	audit := &message.ToolArgsAudit{IgnoredArgs: []message.IgnoredToolArg{{
+		Path: "args.questions[0].wait_for", ValueJSON: `["q-1"]`, Reason: message.IgnoredToolArgReasonUnrecognized,
+	}}}
+	content := applyToolArgsAuditToContextResult("Error: arguments do not match question schema: args.questions[0].question is required", audit)
+	if !strings.Contains(content, "args.questions[0].wait_for") || !strings.Contains(content, "unrecognized") {
+		t.Fatalf("context = %q, want the dropped parameter named", content)
+	}
+	if !strings.HasPrefix(content, "Error: arguments do not match") {
+		t.Fatalf("context = %q, want the schema error left in front", content)
+	}
+
+	// The execution paths append the same lines before this runs, so a payload
+	// that already carries them must come back untouched.
+	if got := applyToolArgsAuditToContextResult(content, audit); got != content {
+		t.Fatalf("second pass = %q, want the payload unchanged", got)
+	}
+	for _, tt := range []struct {
+		name  string
+		audit *message.ToolArgsAudit
+	}{{"nil audit", nil}, {"empty audit", &message.ToolArgsAudit{}}} {
+		if got := applyToolArgsAuditToContextResult("ok", tt.audit); got != "ok" {
+			t.Fatalf("%s changed the payload: %q", tt.name, got)
+		}
+	}
+}

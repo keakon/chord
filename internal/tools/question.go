@@ -84,21 +84,42 @@ func (t *QuestionTool) IsAvailable() bool { return t.questionFn != nil }
 func (t *QuestionTool) Description() string {
 	s := "Ask for user decisions in the user's language. Users can select options or enter text. user_required (default) never times out; default_allowed requires an explicit single-choice default; optional may close unanswered. A system default or missing answer is not user consent or authorization."
 	if !t.synchronous {
-		s += " Supply questions to create and wait, set wait=false to create and continue independent work, or supply wait_for IDs to wait for existing questions. questions and wait_for are exclusive; wait applies only to creation. Never poll or recreate pending questions."
+		// The wait contract has to be spelled out here: nothing else tells the
+		// model what a wait returns. A later wait reports only the outcome,
+		// because the chosen values were delivered when each decision was made,
+		// and a wait ends early when another decision in the task arrives.
+		s += " Supply questions to create and wait, set wait=false to create and continue independent work, or supply wait_for IDs to block until those decisions arrive. wait_for is an argument of this tool, never a field of a question object; questions and wait_for are exclusive; wait applies only to creation. A wait for questions this call did not ask reports only their outcome, because the chosen values were delivered when each decision was made; a wait also returns early with pending_ids when another decision in the task arrives. Never poll or recreate pending questions."
 	}
 	return s
 }
+
+// questionItemSchema describes one entry of "questions". A create needs
+// question and header, but the requirement is declared as an alternative rather
+// than as the item's own required pair: a model waiting for a question it has
+// already asked tends to hang wait_for off the question object it is looking at,
+// and that item then carries wait_for and nothing else. DecodeQuestionArgs
+// accepts that spelling and hoists the IDs, so the item schema has to admit it —
+// the validator strips an undeclared field silently, and the call that follows
+// then reads as "create", which is how one pending question becomes two.
+func questionItemSchema(allowWaitFor bool) map[string]any {
+	props := map[string]any{
+		"question": map[string]any{"type": "string"}, "header": map[string]any{"type": "string", "description": "Short display label"},
+		"options":           map[string]any{"type": "array", "maxItems": MaxQuestionOptions, "items": map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "description": "Unique stable option ID"}, "label": map[string]any{"type": "string"}, "description": map[string]any{"type": "string"}}, "required": []string{"id", "label"}, "additionalProperties": false}},
+		"multiple":          map[string]any{"type": "boolean", "description": "Allow multiple choices. Defaults to false."},
+		"response_policy":   map[string]any{"type": "string", "enum": []string{QuestionPolicyUserRequired, QuestionPolicyDefaultAllowed, QuestionPolicyOptional}},
+		"default_option_id": map[string]any{"type": "string", "description": "Required only for default_allowed; references options.id"},
+	}
+	alternatives := []map[string]any{{"required": []string{"question", "header"}}}
+	if allowWaitFor {
+		props["wait_for"] = map[string]any{"type": "array", "minItems": 1, "maxItems": MaxPendingQuestions, "items": map[string]any{"type": "string"}, "description": "Existing question IDs to wait for. Prefer the top-level wait_for; this spelling is accepted only on an item that carries nothing else, and is then treated exactly like the top-level argument."}
+		alternatives = append(alternatives, map[string]any{"required": []string{"wait_for"}})
+	}
+	return map[string]any{"type": "object", "properties": props, "anyOf": alternatives, "additionalProperties": false}
+}
+
 func (t *QuestionTool) Parameters() map[string]any {
 	properties := map[string]any{
-		"questions": map[string]any{"type": "array", "minItems": 1, "maxItems": MaxQuestionBatch, "coerceFromObject": true, "items": map[string]any{
-			"type": "object", "properties": map[string]any{
-				"question": map[string]any{"type": "string"}, "header": map[string]any{"type": "string", "description": "Short display label"},
-				"options":           map[string]any{"type": "array", "maxItems": MaxQuestionOptions, "items": map[string]any{"type": "object", "properties": map[string]any{"id": map[string]any{"type": "string", "description": "Unique stable option ID"}, "label": map[string]any{"type": "string"}, "description": map[string]any{"type": "string"}}, "required": []string{"id", "label"}, "additionalProperties": false}},
-				"multiple":          map[string]any{"type": "boolean", "description": "Allow multiple choices. Defaults to false."},
-				"response_policy":   map[string]any{"type": "string", "enum": []string{QuestionPolicyUserRequired, QuestionPolicyDefaultAllowed, QuestionPolicyOptional}},
-				"default_option_id": map[string]any{"type": "string", "description": "Required only for default_allowed; references options.id"},
-			}, "required": []string{"question", "header"}, "additionalProperties": false,
-		}},
+		"questions": map[string]any{"type": "array", "minItems": 1, "maxItems": MaxQuestionBatch, "coerceFromObject": true, "items": questionItemSchema(!t.synchronous)},
 	}
 	schema := map[string]any{"type": "object", "properties": properties, "additionalProperties": false}
 	if t.synchronous {
@@ -108,62 +129,6 @@ func (t *QuestionTool) Parameters() map[string]any {
 		properties["wait_for"] = map[string]any{"type": "array", "minItems": 1, "maxItems": MaxPendingQuestions, "items": map[string]any{"type": "string"}, "description": "Existing question IDs owned by the current task"}
 	}
 	return schema
-}
-
-func DecodeQuestionArgs(raw json.RawMessage) (QuestionArgs, error) {
-	var args QuestionArgs
-	if err := json.Unmarshal(raw, &args); err != nil {
-		var single struct {
-			Questions QuestionItem `json:"questions"`
-			Wait      *bool        `json:"wait"`
-			WaitFor   []string     `json:"wait_for"`
-		}
-		if e := json.Unmarshal(raw, &single); e != nil || single.Questions.Question == "" {
-			return args, fmt.Errorf("invalid arguments: %w", err)
-		}
-		args = QuestionArgs{Questions: []QuestionItem{single.Questions}, Wait: single.Wait, WaitFor: single.WaitFor}
-	}
-	// Models sometimes pad optional arrays with blank placeholders; a blank ID
-	// can never match a stored question, so drop it instead of failing a call
-	// that only wanted to create questions.
-	args.WaitFor = nonemptyWaitForIDs(args.WaitFor)
-	switch {
-	case len(args.Questions) == 0 && len(args.WaitFor) == 0:
-		return args, fmt.Errorf("provide either nonempty questions or wait_for")
-	case len(args.Questions) > 0 && len(args.WaitFor) > 0:
-		return args, fmt.Errorf("questions and wait_for are mutually exclusive; provide only one")
-	}
-	if len(args.WaitFor) > 0 {
-		if args.Wait != nil {
-			return args, fmt.Errorf("wait is only valid when creating questions")
-		}
-		seen := map[string]bool{}
-		for _, id := range args.WaitFor {
-			if seen[id] {
-				return args, fmt.Errorf("wait_for requires distinct nonempty IDs")
-			}
-			seen[id] = true
-		}
-		if len(args.WaitFor) > MaxPendingQuestions {
-			return args, fmt.Errorf("too many wait_for IDs")
-		}
-	} else if err := ValidateQuestionItems(args.Questions); err != nil {
-		return args, err
-	}
-	return args, nil
-}
-
-func nonemptyWaitForIDs(ids []string) []string {
-	if len(ids) == 0 {
-		return ids
-	}
-	out := ids[:0]
-	for _, id := range ids {
-		if trimmed := strings.TrimSpace(id); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
 }
 
 func ValidateQuestionItems(items []QuestionItem) error {

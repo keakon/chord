@@ -139,6 +139,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- When tool argument validation fails, the model also receives notes about ignored parameters, helping it correct the call and reduce repeated invalid attempts.
 - Fix code-block backgrounds, sidebar alignment, and leftover color blocks when text contains spacing combining marks or Thai/Lao SARA AM.
 - Fixed missing images in `view_image` tool cards during streaming and after restoring a session.
 - Responses requests preserve reusable cache boundaries before temporary reminders on GPT-5.6 and later models. Turn metadata stays stable across tool continuations and retries, and cache diagnostics account for the actual protocol boundaries.
