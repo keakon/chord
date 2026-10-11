@@ -80,8 +80,8 @@ github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUq
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
-github.com/keakon/bubbles/v2 v2.2.1-fork.2 h1:iKZnbX2iirqHkeqiq7e6Kpq91Df1cKnsW4PRjk+sXtA=
-github.com/keakon/bubbles/v2 v2.2.1-fork.2/go.mod h1:QE9o4DL+SBAlczWWpl/x/n/Lj0pauW95GGVvSr+p3hE=
+github.com/keakon/bubbles/v2 v2.2.1-fork.3 h1:R0SLMohWwLnxkM0IcMDpNj1v56derDlg3thmoYXmEvI=
+github.com/keakon/bubbles/v2 v2.2.1-fork.3/go.mod h1:QE9o4DL+SBAlczWWpl/x/n/Lj0pauW95GGVvSr+p3hE=
 github.com/keakon/bubbletea/v2 v2.0.9-fork.1 h1:PA+vjnrqoxYwNTJJZ948LbbAYDCDtBAa0YFo2cM7wcw=
 github.com/keakon/bubbletea/v2 v2.0.9-fork.1/go.mod h1:/DhCivLg0TwQVzii5dnRMTLK3bX+HmO8Icu+14CoBIY=
 github.com/keakon/displaywidth v0.11.0-fork.1 h1:j+GtJQQCfI2alTHFOFD+HMnBdA0yMRoPRednaVFI/rc=

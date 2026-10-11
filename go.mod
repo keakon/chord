@@ -17,7 +17,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/keakon/bubbles/v2 v2.2.1-fork.2
+	github.com/keakon/bubbles/v2 v2.2.1-fork.3
 	github.com/keakon/bubbletea/v2 v2.0.9-fork.1
 	github.com/keakon/glamour/v2 v2.0.1-fork.1
 	github.com/keakon/golog v0.4.1
