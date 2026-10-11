@@ -93,7 +93,7 @@ With [native search in the main request](./configuration.md#native-search-in-the
 
 ## Orchestration and control
 
-These tools control agent workflows rather than local side effects, so YOLO does not sweep their permission rules aside: it removes the confirmation friction of file edits and shell commands, not the role's boundary. See [Permissions & Safety: Special permission semantics](./permissions-and-safety.md#special-permission-semantics) for how `handoff`, `delegate`, `cancel`, `done`, and `compact_context` resolve under YOLO.
+These tools control agent workflows rather than local side effects, so YOLO does not sweep their permission rules aside the way it does for ordinary tools: it removes the confirmation friction of file edits and shell commands, and never redefines the role's orchestration boundary. It does lift the main agent's ordinary permission limits, including the ones coming from the active role's own permission config, but it never grants an orchestration capability the rules do not already allow. See [Permissions & Safety: Special permission semantics](./permissions-and-safety.md#special-permission-semantics) for how `handoff`, `delegate`, `cancel`, `done`, and `compact_context` resolve under YOLO.
 
 | Tool | What it does |
 | --- | --- |

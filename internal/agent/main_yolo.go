@@ -13,9 +13,12 @@ import (
 // yoloProtectedTools are the control tools whose permission rules stay
 // evaluated under YOLO mode — YOLO bypasses ordinary tools outright, it never
 // bypasses these. YOLO exists to remove the high-frequency confirmation
-// friction of ordinary work (file edits, shell commands); it is not a
-// redefinition of the role's boundary. These tools change the agent topology
-// or the session lifecycle rather than the risk of one operation.
+// friction of ordinary work (file edits, shell commands); it never redefines
+// the role's orchestration boundary. On the main agent it does lift ordinary
+// permission limits, including those from the active role's own config, so a
+// read-only role becomes writable while the mode is on — that is intended.
+// These tools change the agent topology or the session lifecycle rather than
+// the risk of one operation.
 var yoloProtectedTools = []string{tools.NameHandoff, tools.NameDelegate, tools.NameCancel, tools.NameDone, tools.NameCompactContext}
 
 // yoloCapabilityControlTools are the protected tools that hand the agent a

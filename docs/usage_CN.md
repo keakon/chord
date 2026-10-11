@@ -297,7 +297,7 @@ worktree 命令要求 `PATH` 里有 `git`。找不到 git 时，创建或进入 
 - `/skill <name> [args]`：显式加载技能，包括被 `disable-model-invocation` 挡在模型目录外的技能；只敲 `/skill` 打开技能选择器。详见 [Skills：自己加载 skill](./customization_CN.md#自己加载-skill)。
 - `/compact`：手动触发上下文压缩，将当前对话摘要为结构化归档；agent 正忙且启用 `context.compaction.model_driven` 时，还会要求模型立即 checkpoint，其 checkpoint 可替代运行时结果，详见 [上下文管理：上下文压缩](./context-management_CN.md#上下文压缩compaction)
 - `/tier standard|fast|slow`：设置后续模型请求的 service tier（包括尚未开始的后续 retry round）。空的 `/tier` 不是状态查询命令；当前有效 tier 请看侧边栏/状态显示。如果手动输入当前 provider/model 不支持的 tier，Chord 会保持当前 tier 不变并显示错误提示。
-- `/yolo on|off`：临时放开主 agent 对普通工具的权限检查。开启期间，文件编辑、shell 命令这类调用直接放行：`ask` 不弹确认框，`deny` 规则也不拦截。放开是单向的，只放宽不收紧：关闭 YOLO 时能用的工具，开启期间不会变得不可用；关掉 YOLO 即恢复原权限。`handoff`、`delegate`、`cancel` 仍按配置的规则判定：`allow` 照常放行，`deny` 照常拒绝，`ask` 不再弹确认框、直接放行，通配默认与关闭时行为一致。`done` 和 `compact_context` 维持各自的专门语义。Agent 运行中也可以切换 YOLO：执行期的变化会立刻影响后续工具调用，LLM 可见的工具描述和权限提示则在下一次请求刷新。开启期间 SubAgent 也会继承该模式：需要 `ask` 的调用（普通工具和机制工具都一样）不再弹确认框，但 `deny` 规则依然拒绝。切换 YOLO 会立即影响 SubAgent 的后续调用。
+- `/yolo on|off`：临时放开主 agent 对普通工具的权限检查。开启期间，文件编辑、shell 命令这类调用直接放行：`ask` 不弹确认框，`deny` 规则也不拦截。放开是单向的，只放宽不收紧：关闭 YOLO 时能用的工具，开启期间不会变得不可用；关掉 YOLO 即恢复原权限。它同样会放开当前角色自身的权限配置：在主 agent 上，角色是权限预设而不是能力边界，因此只读角色（如 `planner`）在 YOLO 开启期间会变为可写。完整范围（包括 SubAgent 为何是有意保留的例外）见[权限与安全：特殊权限语义](./permissions-and-safety_CN.md#特殊权限语义)。`handoff`、`delegate`、`cancel` 仍按配置的规则判定：`allow` 照常放行，`deny` 照常拒绝，`ask` 不再弹确认框、直接放行，通配默认与关闭时行为一致。`done` 和 `compact_context` 维持各自的专门语义。Agent 运行中也可以切换 YOLO：执行期的变化会立刻影响后续工具调用，LLM 可见的工具描述和权限提示则在下一次请求刷新。开启期间 SubAgent 也会继承该模式：需要 `ask` 的调用（普通工具和机制工具都一样）不再弹确认框，但 `deny` 规则依然拒绝。切换 YOLO 会立即影响 SubAgent 的后续调用。
 - `/help`：切换内置 cheatsheet 浮层（等同 Normal 模式按 `?`）
 
 启用非标准服务等级后，侧边栏会显示当前值。如果切换模型后该等级不再可用，它会以灰色删除线显示。`Ctrl+R` 只在当前服务商和模型支持的等级之间切换。

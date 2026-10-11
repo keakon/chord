@@ -91,7 +91,7 @@ Shell 和后台输出超过 16 KiB 时，结果会显示简短预览及日志文
 
 ## 编排与控制
 
-这些工具控制的是 agent 工作流而不是本地副作用，YOLO 不会像对普通工具那样把它们的权限规则一起放开：它消除的是确认文件编辑和 shell 命令的摩擦，不是角色的边界。`handoff`、`delegate`、`cancel`、`done`、`compact_context` 在 YOLO 下如何判定，见[权限与安全：特殊权限语义](./permissions-and-safety_CN.md#特殊权限语义)。
+这些工具控制的是 agent 工作流而不是本地副作用，YOLO 不会像对普通工具那样把它们的权限规则一起放开：它消除的是确认文件编辑和 shell 命令的摩擦，从不重新定义角色的编排边界。它确实会放开主 agent 的普通权限限制，包括来自当前角色自身权限配置的限制，但不会授予规则之外的新编排能力。`handoff`、`delegate`、`cancel`、`done`、`compact_context` 在 YOLO 下如何判定，见[权限与安全：特殊权限语义](./permissions-and-safety_CN.md#特殊权限语义)。
 
 | 工具 | 用途 |
 | --- | --- |
