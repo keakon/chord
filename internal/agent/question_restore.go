@@ -9,10 +9,10 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-// A committed question batch is sufficient to settle a missing Question tool
-// result after a crash. Pending decisions return wait_interrupted; they remain
-// available through their durable IDs and are never re-created here.
-func restoreQuestionToolResults(msgs []message.Message) []message.Message {
+// restoreQuestionMessages derives visible decisions and missing tool results
+// from committed facts. Pending questions retain their IDs and are never
+// re-created; local state facts and user-authored commands retain their shape.
+func restoreQuestionMessages(msgs []message.Message) []message.Message {
 	records := map[string]QuestionSnapshot{}
 	calls := map[string]message.ToolCall{}
 	for _, msg := range msgs {
@@ -32,6 +32,16 @@ func restoreQuestionToolResults(msgs []message.Message) []message.Message {
 	}
 	restored := slices.Clone(msgs)
 	for i, msg := range restored {
+		if message.IsQuestionDecision(msg) {
+			var fact QuestionFact
+			if json.Unmarshal(msg.Question, &fact) == nil {
+				msg.Role = message.RoleUser
+				msg.Kind = message.KindQuestionResult
+				msg.Content = questionDecisionText(fact)
+				msg.Parts = nil
+				restored[i] = msg
+			}
+		}
 		call, ok := calls[msg.ToolCallID]
 		if !ok || msg.Role != message.RoleTool || msg.ToolRecoveryState != message.ToolRecoveryStateOutcomeUnknown {
 			continue

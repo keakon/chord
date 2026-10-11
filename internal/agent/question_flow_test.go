@@ -120,6 +120,79 @@ func TestQuestionDefaultStartsAfterPresentationAndDoesNotAuthorize(t *testing.T)
 		t.Fatal("system default impersonated user")
 	}
 }
+
+// TestQuestionAsyncAnswerStaysADecisionNotUserProse covers the other half of the
+// same contract: an answer that arrives while the asking turn is still running.
+// An asynchronous question leaves no pending tool result to carry the decision
+// back, so it reaches the model on a user-role row — but as a recorded decision,
+// not as prose a person typed. A user-authored row feeds composer recall, runtime
+// evidence and the reasoning-replay turn boundary, and a decision is none of
+// those; an empty kind additionally put a second USER card in the transcript.
+//
+// The text has to name the question as well, because by the time the answer
+// lands the call that asked it may already be out of the request.
+func TestQuestionAsyncAnswerStaysADecisionNotUserProse(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	id := createTestQuestions(t, a, questionItems("Push the tag"), false).Result.QuestionIDs[0]
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: id, Answers: []string{"yes"}}, time.Time{})
+
+	history := a.ctxMgr.Snapshot()
+	last := history[len(history)-1]
+	if last.Role != message.RoleUser || last.Kind != message.KindQuestionResult {
+		t.Fatalf("async answer shape = role %q kind %q, want a user-role decision", last.Role, last.Kind)
+	}
+	if message.IsUserAuthored(last) {
+		t.Fatal("a recorded decision counted as user prose")
+	}
+	if a.explicitUserTurnCount.Load() != 0 {
+		t.Fatalf("explicit user turns = %d, want 0", a.explicitUserTurnCount.Load())
+	}
+	for _, want := range []string{"Push the tag", "Choose an option", "Yes", "Question ID: " + id} {
+		if !strings.Contains(last.Content, want) {
+			t.Fatalf("decision text = %q, want it to name %q", last.Content, want)
+		}
+	}
+	if resultID := a.questions.records[id].ResultID; resultID == "" || !strings.Contains(last.Content, "Result ID: "+resultID) {
+		t.Fatalf("decision text = %q, want its result ID %q", last.Content, resultID)
+	}
+	if strings.Contains(last.Content, "question_id") {
+		t.Fatalf("decision text = %q, want text, not the raw answer JSON", last.Content)
+	}
+}
+
+// TestQuestionWithdrawAfterDeadlineKeepsTheUsersWords covers the one withdrawal
+// that does not reach the transcript through the ordinary decision path. The
+// user role used to be set only while the question was unexpired, so a
+// withdrawal arriving after the deadline was written to a system row — a shape
+// every wire converter and the transcript renderer drop, which lost the text
+// the user actually wrote.
+func TestQuestionWithdrawAfterDeadlineKeepsTheUsersWords(t *testing.T) {
+	a := newQuestionTestAgent(t)
+	a.globalConfig.QuestionTimeout = 60
+	items := questionItems("Choice")
+	items[0].ResponsePolicy = tools.QuestionPolicyOptional
+	id := createTestQuestions(t, a, items, true).Result.QuestionIDs[0]
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpPresented, QuestionID: id, SupportsInteraction: true}, time.Now())
+	deadline := a.questions.records[id].Deadline
+	if deadline.IsZero() {
+		t.Fatal("question was never armed; the deadline case cannot be reached")
+	}
+
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpWithdraw, QuestionID: id, UserText: "changed my mind"}, deadline)
+
+	history := a.ctxMgr.Snapshot()
+	last := history[len(history)-1]
+	if last.Role != message.RoleUser || last.Kind != "" {
+		t.Fatalf("withdrawal shape = role %q kind %q, want the user's own prose", last.Role, last.Kind)
+	}
+	if last.Content != "changed my mind" || !message.IsUserAuthored(last) {
+		t.Fatalf("withdrawal = %q userAuthored=%v, want the user's words as a user turn", last.Content, message.IsUserAuthored(last))
+	}
+	if outcome := a.questions.records[id].Outcome; outcome != tools.QuestionOutcomeCancelled {
+		t.Fatalf("outcome = %q, want the question cancelled", outcome)
+	}
+}
+
 func TestQuestionInterventionPermanentlyDisablesTimer(t *testing.T) {
 	a := newQuestionTestAgent(t)
 	a.globalConfig.QuestionTimeout = 3600

@@ -149,6 +149,15 @@ type geminiPart struct {
 	// It must be preserved and replayed verbatim with the same part in
 	// conversation history (Gemini 3 requires it on functionCall parts).
 	ThoughtSignature string `json:"thoughtSignature,omitempty"`
+	// Transient marks a part that came from a request-scoped overlay
+	// (message.KindTurnOverlay) rather than from a turn the user took. The
+	// native wire has no other way to tell them apart once a message is
+	// converted, and ensureGeminiActiveLoopSignatures keys the active loop on
+	// the last user content carrying text: an overlay counted there would push
+	// the window past the turn's own function calls and disable the Gemini 3
+	// thought-signature repair. Never serialized; the OpenAI-family wires carry
+	// the same distinction on openAIMessage.Transient.
+	Transient bool `json:"-"`
 }
 
 type geminiInlineData struct {
@@ -512,6 +521,13 @@ func ensureGeminiActiveLoopSignatures(contents []geminiContent) {
 			continue
 		}
 		for _, part := range content.Parts {
+			// A request-scoped overlay rides the request tail as a user row so
+			// the model sees it, but it is not a turn the user took: counting
+			// its text as the boundary would start the active loop after the
+			// current turn's function calls and leave them unrepaired.
+			if part.Transient {
+				continue
+			}
 			if part.Text != "" || part.InlineData != nil {
 				activeStart = i
 				break
@@ -598,7 +614,7 @@ func geminiToolFunctionResponse(name string, msg message.Message) *geminiFunctio
 
 func geminiUserParts(msg message.Message) []geminiPart {
 	if len(msg.Parts) == 0 {
-		return []geminiPart{{Text: msg.Content}}
+		return markGeminiOverlayParts(msg, []geminiPart{{Text: msg.Content}})
 	}
 	parts := make([]geminiPart, 0, len(msg.Parts))
 	for _, p := range msg.Parts {
@@ -632,7 +648,24 @@ func geminiUserParts(msg message.Message) []geminiPart {
 		}
 	}
 	if len(parts) == 0 {
-		return []geminiPart{{Text: ""}}
+		parts = []geminiPart{{Text: ""}}
+	}
+	return markGeminiOverlayParts(msg, parts)
+}
+
+// markGeminiOverlayParts flags every part of a request-scoped overlay so the
+// converted wire can still tell it apart from a turn the user took (see
+// geminiPart.Transient). It runs on the finished part list because an overlay
+// reaches this point through several shapes — plain content, folded text parts,
+// or binary parts — and all of them are overlay-sourced. The flag has to
+// survive the merge into a preceding user content that appendGeminiUserContent
+// performs, which is where an overlay following tool results lands.
+func markGeminiOverlayParts(msg message.Message, parts []geminiPart) []geminiPart {
+	if msg.Kind != message.KindTurnOverlay {
+		return parts
+	}
+	for i := range parts {
+		parts[i].Transient = true
 	}
 	return parts
 }

@@ -229,7 +229,12 @@ func (a *ToolArgsAudit) Clone() *ToolArgsAudit {
 // KindQuestionState identifies a local-only durable question fact.
 const KindQuestionState = "question_state"
 
-// KindQuestionResult identifies a system decision, never user authorization.
+// KindQuestionResult identifies a decision the runtime recorded for a question
+// outside the tool result that asked it: an asynchronous answer, or a default
+// the system adopted on the user's behalf. Such a message is delivered to the
+// model with the user role, but it is never prose the user typed, so it does
+// not count as a user turn. The outcome — not this kind — says whether the
+// decision came from the user; "defaulted" is explicitly not user consent.
 const KindQuestionResult = "question_result"
 
 // KindSubAgentMailbox identifies a durable SubAgent mailbox message.
@@ -397,7 +402,7 @@ func IsUserAuthored(msg Message) bool {
 		// inspects a request face still must not treat one as a user turn.
 		return false
 	default:
-		return true
+		return !IsQuestionDecision(msg)
 	}
 }
 

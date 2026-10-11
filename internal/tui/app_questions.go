@@ -188,29 +188,6 @@ func (m *Model) restoreQuestionProjection(msgs []message.Message) {
 	}
 }
 
-func questionTranscriptBlock(msg message.Message, id int) *Block {
-	if len(msg.Question) == 0 {
-		return nil
-	}
-	var fact agent.QuestionFact
-	if json.Unmarshal(msg.Question, &fact) != nil || fact.Result == nil {
-		return nil
-	}
-	result := fact.Result
-	if msg.Kind == message.KindQuestionState {
-		return nil
-	}
-	body := result.Header + "\n" + strings.Join(result.Selected, "\n")
-	if msg.Kind == message.KindQuestionResult {
-		title := "Question · " + result.Outcome
-		if result.Outcome == "defaulted" {
-			title = "Question · Default adopted by system"
-		}
-		return &Block{ID: id, Type: BlockStatus, StatusTitle: title, Content: body}
-	}
-	return &Block{ID: id, Type: BlockUser, Content: body, Collapsed: true}
-}
-
 // A timer can start only when the answer UI and its default are visible.
 func (m *Model) confirmQuestionPresentation() tea.Cmd {
 	if m.mode != ModeQuestion || m.question.request == nil || m.question.interacted || m.question.interacting {

@@ -662,28 +662,47 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 				receipt.Error = "question deadline decided the outcome"
 			}
 			if !expired {
+				// A decision always reaches the model as a user-role message:
+				// an asynchronous question has no pending tool call left to
+				// carry it back, and the resumed turn needs it in the request.
 				msg.Role = message.RoleUser
 				msg.Kind = message.KindQuestionState
 			}
-			if (q.Async || op.Operation == QuestionOpRevise) && !expired {
-				msg.Kind = ""
-			}
-			if op.Operation == QuestionOpWithdraw || op.Operation == QuestionOpReplace {
+			switch {
+			case op.Operation == QuestionOpWithdraw || op.Operation == QuestionOpReplace:
+				// Withdraw and replace carry the user's own words, so they stay
+				// user prose rather than a recorded decision. The role is set
+				// here rather than left to the block above because that one only
+				// runs while the question is unexpired, and a withdrawal that
+				// arrives after the deadline is still something the user wrote:
+				// on a system row every wire converter and the transcript
+				// renderer drop it, losing the text entirely.
+				msg.Role = message.RoleUser
 				msg.Kind = ""
 				msg.Content = op.UserText
+			case !expired && (q.Async || op.Operation == QuestionOpRevise):
+				// A decision recorded outside the tool result that asked for it
+				// is not prose the user typed. Marking it as a decision keeps
+				// the transcript on a decision card and keeps it out of the
+				// user-authored surfaces (composer recall, runtime evidence,
+				// the reasoning-replay turn boundary) while the user role above
+				// still delivers it to the model.
+				msg.Kind = message.KindQuestionResult
 			}
 		}
+		// The decision text mirrors what the synchronous path returns in its
+		// tool result. The raw JSON of QuestionAnswer used to be written here,
+		// which made a machine-recorded decision read as a JSON blob everywhere
+		// the message is shown or treated as something a person wrote.
 		if fact.Result != nil && msg.Content == "" && q.Async {
-			b, _ := json.Marshal(fact.Result)
-			msg.Content = string(b)
+			msg.Content = questionDecisionText(fact)
 			if msg.Role != message.RoleUser {
 				msg.Role = message.RoleUser
 				msg.Kind = message.KindQuestionResult
 			}
 		}
 		if op.Operation == QuestionOpRevise && msg.Content == "" {
-			b, _ := json.Marshal(fact.Result)
-			msg.Content = string(b)
+			msg.Content = questionDecisionText(fact)
 		}
 	}
 	fact.Receipt = receipt

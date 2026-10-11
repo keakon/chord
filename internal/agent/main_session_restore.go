@@ -741,7 +741,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.restoreCacheHitStats(loaded.UsageStats)
 	a.clearReductionCache(true)
 	a.resetLLMModelRun()
-	loaded.Messages = restoreQuestionToolResults(loaded.Messages)
+	loaded.Messages = restoreQuestionMessages(loaded.Messages)
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
 	a.restoreQuestions(loaded.Messages)
 	a.installContextNoticePresence(loaded.Messages)

@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mattn/go-runewidth"
@@ -162,31 +163,12 @@ func decodeQuestionItemsForDisplay(argsJSON string) []tools.QuestionItem {
 		if json.Unmarshal(raw, &item) != nil {
 			continue
 		}
+		if strings.TrimSpace(item.Question) == "" && strings.TrimSpace(item.Header) == "" {
+			continue
+		}
 		items = append(items, item)
 	}
 	return items
-}
-
-// decodeQuestionAnswers parses the answers array from a Question tool's own
-// output. It must be given the clean payload, never the model-visible result:
-// the runtime appends diagnostic notes after the payload, and a parser that
-// tolerates them has to guess where the JSON ends. Transcripts written before
-// the payload/notes split have no clean copy, so tolerate trailing prose there
-// rather than dropping the user's answers.
-func decodeQuestionAnswers(payload string) (answers []tools.QuestionAnswer, rest string, ok bool) {
-	trimmed := strings.TrimSpace(payload)
-	if trimmed == "" || (trimmed[0] != '[' && trimmed[0] != '{') {
-		return nil, trimmed, false
-	}
-	dec := json.NewDecoder(strings.NewReader(trimmed))
-	var result tools.QuestionResult
-	if err := dec.Decode(&result); err != nil || len(result.Answers) == 0 {
-		return nil, trimmed, false
-	}
-	if offset := dec.InputOffset(); offset >= 0 && offset < int64(len(trimmed)) {
-		rest = strings.TrimSpace(trimmed[offset:])
-	}
-	return result.Answers, rest, true
 }
 
 // renderQuestionCall renders a Question tool call showing the question text and options.
@@ -200,23 +182,17 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 	questions := decodeQuestionItemsForDisplay(b.Content)
 
 	var answers []tools.QuestionAnswer
+	var questionResult tools.QuestionResult
+	hasStructuredResult := false
 	hasStructuredAnswers := false
-	resultNotes := append([]string(nil), b.ResultNotes...)
+	resultNotes := b.ResultNotes
 	if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-		// Parse the tool's own output, not the model-visible result: the result
-		// has diagnostic notes appended and parsing it means guessing where the
-		// payload ended. Transcripts predating the split keep only the combined
-		// text, so fall back to it and recover the notes from the tail.
-		payload := b.ResultPayload
-		if strings.TrimSpace(payload) == "" {
-			payload = b.ResultContent
-		}
-		if parsed, rest, ok := decodeQuestionAnswers(payload); ok {
-			answers = parsed
-			if rest != "" && len(resultNotes) == 0 {
-				resultNotes = []string{rest}
-			}
-			hasStructuredAnswers = len(questions) > 0
+		// Structured results and diagnostics have separate durable fields.
+		if parsed, ok := decodeQuestionResult(b.ResultPayload); ok {
+			questionResult = parsed
+			hasStructuredResult = true
+			answers = parsed.Answers
+			hasStructuredAnswers = len(questions) > 0 && len(answers) > 0
 		}
 	}
 
@@ -232,7 +208,10 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 
 	for i, q := range questions {
 		answer, hasAnswer := questionAnswerForRender(answers, i, q.Header)
-		selectedOptions, customAnswers := splitQuestionSelections(q, answer)
+		var customAnswers []string
+		if len(answer.SelectedIDs) == 0 {
+			customAnswers = answer.Selected
+		}
 		if q.Header != "" {
 			// "↳ Label:" like every other card section: ▸ now means "this card
 			// toggles", so it cannot double as a section separator.
@@ -256,7 +235,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 			result = append(result, DimStyle.Render("    Mode: "+mode))
 			for i, opt := range q.Options {
 				displayLabel := sanitizeToolDisplayText(opt.Label)
-				_, isSelected := selectedOptions[displayLabel]
+				isSelected := slices.Contains(answer.SelectedIDs, opt.ID)
 				marker := " "
 				if isSelected {
 					marker = "✓"
@@ -307,16 +286,13 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		result = appendErrorResultLines(result, b.ResultContent, contentWidth)
 	case b.toolResultIsCancelled() && b.ResultContent != "":
 		result = appendCancelledResultLines(result, b.ResultContent, contentWidth)
-	case hasStructuredAnswers:
-		// The option list already carries the selection inline, so the answers
-		// payload itself must not be echoed back. What is left is the runtime's
-		// own commentary about the call, which is worth showing.
-		if len(resultNotes) > 0 {
+	case hasStructuredResult:
+		lines := questionResultDisplayLines(questionResult, hasStructuredAnswers)
+		lines = append(lines, resultNotes...)
+		if len(lines) > 0 {
 			result = append(result, toolFieldMarker(ToolResultStyle, "✓"))
-			for _, note := range resultNotes {
-				for _, line := range wrapText(sanitizeToolDisplayText(note), contentWidth) {
-					result = append(result, ToolResultStyle.Render("    "+line))
-				}
+			for _, line := range lines {
+				result = appendQuestionAnswerLines(result, line, "    ", "    ", contentWidth)
 			}
 		}
 	case strings.TrimSpace(b.ResultContent) != "":
@@ -344,42 +320,26 @@ func questionAnswerForRender(answers []tools.QuestionAnswer, index int, header s
 	return tools.QuestionAnswer{}, false
 }
 
-// questionOutcomeDisplay names a non-answered question outcome for the card.
-// It returns "" for answered (the checked option already shows it) and for
-// answers recorded before outcomes existed, so such transcripts keep rendering
-// the selection unchanged.
+// questionOutcomeDisplay names non-answered outcomes for the card.
 func questionOutcomeDisplay(outcome string) string {
 	switch outcome {
 	case tools.QuestionOutcomeDefaulted:
 		return "default adopted by system (not user consent)"
+	case tools.QuestionOutcomeNoResponse:
+		return "closed without an answer (not user consent)"
+	case tools.QuestionOutcomeDeclined:
+		return "declined"
+	case tools.QuestionOutcomeCancelled:
+		return "cancelled"
+	case tools.QuestionOutcomeSuperseded:
+		return "superseded"
+	case tools.QuestionOutcomeError:
+		return "error"
 	case "", tools.QuestionOutcomeAnswered:
 		return ""
 	default:
-		return outcome
+		return "unknown outcome"
 	}
-}
-
-func splitQuestionSelections(question tools.QuestionItem, answer tools.QuestionAnswer) (map[string]struct{}, []string) {
-	selectedOptions := make(map[string]struct{}, len(answer.Selected))
-	if len(answer.Selected) == 0 {
-		return selectedOptions, nil
-	}
-
-	labels := make(map[string]struct{}, len(question.Options))
-	for _, opt := range question.Options {
-		labels[sanitizeToolDisplayText(opt.Label)] = struct{}{}
-	}
-
-	customAnswers := make([]string, 0, len(answer.Selected))
-	for _, sel := range answer.Selected {
-		displaySel := sanitizeToolDisplayText(sel)
-		if _, ok := labels[displaySel]; ok {
-			selectedOptions[displaySel] = struct{}{}
-			continue
-		}
-		customAnswers = append(customAnswers, displaySel)
-	}
-	return selectedOptions, customAnswers
 }
 
 // renderCancelCall renders a Cancel tool call with semantic display.

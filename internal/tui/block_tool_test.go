@@ -2762,26 +2762,32 @@ func TestCollapsedLargeBashResultDoesNotRenderEntireHiddenOutput(t *testing.T) {
 }
 
 func TestQuestionStructuredPromptAndAnswerEscapesANSIRichText(t *testing.T) {
-	block := &Block{
-		ID:            1,
-		Type:          BlockToolCall,
-		ToolName:      "question",
-		Content:       `{"questions":[{"header":"\u001b[31mHDR\u001b[0m","question":"Pick \u001b[32mone\u001b[0m","options":[{"label":"\u001b[34mA\u001b[0m","description":"\u001b[35mdesc\u001b[0m"}]}]}`,
-		ResultContent: `{"status":"resolved","answers":[{"header":"\u001b[31mHDR\u001b[0m","selected":["\u001b[34mA\u001b[0m","\u001b[33mcustom\u001b[0m"]}]}`,
-		ResultDone:    true,
-	}
-
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
-	if strings.ContainsRune(joined, '\x1b') {
-		t.Fatalf("expected question card to not contain raw ESC: %q", joined)
-	}
-	for _, want := range []string{`\x1b[31mHDR\x1b[0m`, `\x1b[32mone\x1b[0m`, `\x1b[34mA\x1b[0m`, `\x1b[35mdesc\x1b[0m`, `\x1b[33mcustom\x1b[0m`} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("expected question card to contain %q, got:\n%s", want, joined)
+	for _, custom := range []bool{false, true} {
+		payload := `{"status":"resolved","answers":[{"header":"HDR","selected":["A"],"selected_ids":["a"],"outcome":"answered"}]}`
+		if custom {
+			payload = `{"status":"resolved","answers":[{"header":"HDR","selected":["\u001b[33mcustom\u001b[0m"],"outcome":"answered"}]}`
 		}
-	}
-	if !strings.Contains(joined, `✓ 1. \x1b[34mA\x1b[0m`) {
-		t.Fatalf("expected sanitized selected option label to stay checked, got:\n%s", joined)
+		block := &Block{
+			ID: 1, Type: BlockToolCall, ToolName: tools.NameQuestion,
+			Content:       `{"questions":[{"header":"\u001b[31mHDR\u001b[0m","question":"Pick \u001b[32mone\u001b[0m","options":[{"id":"a","label":"\u001b[34mA\u001b[0m","description":"\u001b[35mdesc\u001b[0m"}]}]}`,
+			ResultContent: payload, ResultPayload: payload, ResultDone: true,
+		}
+		joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+		if strings.ContainsRune(joined, '\x1b') {
+			t.Fatalf("raw ESC: %q", joined)
+		}
+		for _, want := range []string{`\x1b[31mHDR\x1b[0m`, `\x1b[32mone\x1b[0m`, `\x1b[34mA\x1b[0m`, `\x1b[35mdesc\x1b[0m`} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("missing %q:\n%s", want, joined)
+			}
+		}
+		if custom {
+			if !strings.Contains(joined, `Custom: \x1b[33mcustom\x1b[0m`) {
+				t.Fatalf("custom answer lost:\n%s", joined)
+			}
+		} else if !strings.Contains(joined, `✓ 1. \x1b[34mA\x1b[0m`) {
+			t.Fatalf("selected option lost:\n%s", joined)
+		}
 	}
 }
 
@@ -4532,16 +4538,17 @@ func TestCollapsedGlobUsesKeySummaryForLowCounts(t *testing.T) {
 func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
-	answers := `{"status":"resolved","answers":[{"header":"Messaging platform","selected":["Chat App"]}]}`
+	answers := `{"status":"resolved","answers":[{"header":"Messaging platform","selected":["Chat App"],"selected_ids":["chat"],"outcome":"answered"}]}`
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
 		ToolName: "question",
 		Content: `{"questions":[{"header":"Messaging platform","question":"Which one should we use first?","options":[` +
-			`{"label":"Email","description":"One inbox per workspace"},` +
-			`{"label":"Chat App","description":"Single workspace with direct messages"}` +
-			`],"custom":true}]}`,
+			`{"id":"email","label":"Email","description":"One inbox per workspace"},` +
+			`{"id":"chat","label":"Chat App","description":"Single workspace with direct messages"}` +
+			`]}]}`,
 		ResultContent: answers,
+		ResultPayload: answers,
 		ResultDone:    true,
 	}
 
@@ -4584,7 +4591,7 @@ func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
 func TestQuestionCallParsesCleanPayloadAndShowsNotesApart(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 
-	answers := `{"status":"resolved","answers":[{"header":"document layout","selected":["Match the reference layout (recommended)"]}]}`
+	answers := `{"status":"resolved","answers":[{"header":"document layout","selected":["Match the reference layout (recommended)"],"selected_ids":["match"],"outcome":"answered"}]}`
 	note := `Note: ignored earlier duplicate parameter value(s): args.questions[0].header; the last values were used`
 
 	block := &Block{
@@ -4592,8 +4599,8 @@ func TestQuestionCallParsesCleanPayloadAndShowsNotesApart(t *testing.T) {
 		Type:     BlockToolCall,
 		ToolName: "question",
 		Content: `{"questions":[{"header":"document layout","question":"How should the target document be organized?","options":[` +
-			`{"label":"Match the reference layout (recommended)","description":"Mimic the reference formatting"},` +
-			`{"label":"Keep the markdown order","description":"Align each item with its model answer"}` +
+			`{"id":"match","label":"Match the reference layout (recommended)","description":"Mimic the reference formatting"},` +
+			`{"id":"order","label":"Keep the markdown order","description":"Align each item with its model answer"}` +
 			`]}]}`,
 		ResultContent: answers + "\n" + note,
 		ResultPayload: answers,
@@ -4604,40 +4611,6 @@ func TestQuestionCallParsesCleanPayloadAndShowsNotesApart(t *testing.T) {
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "✓ 1. Match the reference layout (recommended)") {
 		t.Fatalf("expected the selection to be marked inline, got:\n%s", plain)
-	}
-	if strings.Contains(plain, `[{"header"`) {
-		t.Fatalf("expected no raw answers JSON once the selection renders inline, got:\n%s", plain)
-	}
-	if !strings.Contains(plain, "Note: ignored earlier duplicate") {
-		t.Fatalf("expected the diagnostic note to stay visible, got:\n%s", plain)
-	}
-	if strings.Contains(plain, "Custom: Enabled") {
-		t.Fatalf("expected no custom-answer hint once answers resolved, got:\n%s", plain)
-	}
-}
-
-// Transcripts written before the payload/notes split keep only the combined
-// model-visible text. The card must still recover the selection from it rather
-// than dropping the user's answers.
-func TestQuestionCallFallsBackToCombinedResultForLegacyTranscript(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-
-	block := &Block{
-		ID:       1,
-		Type:     BlockToolCall,
-		ToolName: "question",
-		Content: `{"questions":[{"header":"document layout","question":"How should the target document be organized?","options":[` +
-			`{"label":"Match the reference layout (recommended)","description":"Mimic the reference formatting"},` +
-			`{"label":"Keep the markdown order","description":"Align each item with its model answer"}` +
-			`]}]}`,
-		ResultContent: `{"status":"resolved","answers":[{"header":"document layout","selected":["Match the reference layout (recommended)"]}]}` + "\n" +
-			`Note: ignored earlier duplicate parameter value(s): args.questions[0].header; the last values were used`,
-		ResultDone: true,
-	}
-
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
-	if !strings.Contains(plain, "✓ 1. Match the reference layout (recommended)") {
-		t.Fatalf("expected the selection to be marked inline despite the trailing note, got:\n%s", plain)
 	}
 	if strings.Contains(plain, `[{"header"`) {
 		t.Fatalf("expected no raw answers JSON once the selection renders inline, got:\n%s", plain)
@@ -4661,8 +4634,9 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      "question",
-		Content:       `{"questions":[{"header":"document layout","question":"Q","options":[{"label":"A"},{"label":"B"}]}]}`,
-		ResultContent: `{"status":"resolved","answers":[{"header":"document layout","selected":["A"]}]}`,
+		Content:       `{"questions":[{"header":"document layout","question":"Q","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}]}`,
+		ResultContent: `{"status":"resolved","answers":[{"header":"document layout","selected":["A"],"selected_ids":["a"],"outcome":"answered"}]}`,
+		ResultPayload: `{"status":"resolved","answers":[{"header":"document layout","selected":["A"],"selected_ids":["a"],"outcome":"answered"}]}`,
 		ResultDone:    true,
 		Audit: &message.ToolArgsAudit{
 			IgnoredArgs: []message.IgnoredToolArg{{
@@ -4728,10 +4702,11 @@ func TestQuestionCallRendersCustomAnswerInline(t *testing.T) {
 		Type:     BlockToolCall,
 		ToolName: "question",
 		Content: `{"questions":[{"header":"Project location","question":"Where should it go?","options":[` +
-			`{"label":"Sibling directory","description":"For example /home/user/projects/sample-gateway"},` +
-			`{"label":"Project subdirectory","description":"For example /home/user/projects/sample-app/gateway"}` +
-			`],"custom":true}]}`,
+			`{"id":"sibling","label":"Sibling directory","description":"For example /home/user/projects/sample-gateway"},` +
+			`{"id":"project","label":"Project subdirectory","description":"For example /home/user/projects/sample-app/gateway"}` +
+			`]}]}`,
 		ResultContent: answers,
+		ResultPayload: answers,
 		ResultDone:    true,
 	}
 
@@ -4755,8 +4730,9 @@ func TestQuestionCallRendersMultilineAnswerWithContinuationIndent(t *testing.T) 
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      "question",
-		Content:       `{"questions":[{"header":"top output","question":"Paste a few lines from top","custom":true}]}`,
+		Content:       `{"questions":[{"header":"top output","question":"Paste a few lines from top"}]}`,
 		ResultContent: answers,
+		ResultPayload: answers,
 		ResultDone:    true,
 	}
 
@@ -4780,7 +4756,8 @@ func TestQuestionCallRendersSingleObjectPromptAndStructuredAnswer(t *testing.T) 
 		Type:          BlockToolCall,
 		ToolName:      "question",
 		Content:       `{"questions":{"header":"log","question":"paste log"}}`,
-		ResultContent: `{"status":"resolved","answers":[{"header":"log","selected":["first line"]}]}`,
+		ResultContent: `{"status":"resolved","answers":[{"header":"log","selected":["first line"],"outcome":"answered"}]}`,
+		ResultPayload: `{"status":"resolved","answers":[{"header":"log","selected":["first line"],"outcome":"answered"}]}`,
 		ResultDone:    true,
 	}
 
@@ -4803,8 +4780,9 @@ func TestQuestionCallPreservesWhitespaceInMultilineAnswer(t *testing.T) {
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      "question",
-		Content:       `{"questions":[{"header":"top output","question":"Paste a few lines from top","custom":true}]}`,
+		Content:       `{"questions":[{"header":"top output","question":"Paste a few lines from top"}]}`,
 		ResultContent: answers,
+		ResultPayload: answers,
 		ResultDone:    true,
 	}
 

@@ -78,7 +78,7 @@ func TestQuestionRestoreRebuildsCompleteBatchToolResult(t *testing.T) {
 	r := runQuestionCommand(t, a, &questionCommand{operation: QuestionOperation{Operation: questionOpCreate, OperationID: "batch"}, call: "call-1", args: args})
 	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: r.Result.QuestionIDs[0], Answers: []string{"no"}}, time.Time{})
 	msgs := append(a.ctxMgr.Snapshot(), message.Message{Role: message.RoleTool, ToolCallID: "call-1", ToolRecoveryState: message.ToolRecoveryStateOutcomeUnknown})
-	restored := restoreQuestionToolResults(msgs)
+	restored := restoreQuestionMessages(msgs)
 	var result tools.QuestionResult
 	tool := restored[len(restored)-1]
 	if err := json.Unmarshal([]byte(tool.ToolPayload), &result); err != nil {

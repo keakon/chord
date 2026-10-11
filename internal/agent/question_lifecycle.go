@@ -405,18 +405,23 @@ func questionRequestContext(r questionRequestProjection, msgs []message.Message)
 		if !ok || q.ScopeID != r.scope || q.TaskID != identity.MainAgentID {
 			continue
 		}
-		data, _ := json.Marshal(fact.Result)
 		meta, _ := json.Marshal(QuestionFact{Result: fact.Result})
-		source := "User decision: "
-		if fact.Result.Outcome == tools.QuestionOutcomeDefaulted || fact.Result.Outcome == tools.QuestionOutcomeNoResponse {
-			source = "System decision (not user authorization): "
-		}
-		visible = append(visible, message.Message{Role: message.RoleSystem, Content: source + string(data), Question: meta})
+		// Re-state the whole decision, not just its identifier: the call that
+		// asked the question may already be gone from the request, so this row
+		// is the only place the model can still see what was asked and chosen.
+		// The record supplies the question text the answer alone does not carry.
+		body := questionDecisionText(QuestionFact{Operation: fact.Operation, Result: fact.Result, Updates: []QuestionSnapshot{q}})
+		visible = append(visible, questionProjectionMessage(body, meta))
 		seen[fact.Result.ResultID] = true
 	}
 	var questions []pending
 	for _, q := range r.records {
 		if q.ScopeID == r.scope && q.TaskID == identity.MainAgentID && (q.pending() || q.Dependency == QuestionDependencyPending) {
+			// The question body is echoed whole. Its aggregate is already
+			// bounded where it is created (maxPendingQuestionBytes, shared by
+			// all pending questions), and the model needs the text to judge
+			// whether it has to wait for the decision at all — a header alone
+			// would force a wait to find out.
 			questions = append(questions, pending{q.ID, q.Item.Header, q.Item.Question, q.Outcome, q.Dependency})
 		}
 	}
@@ -425,7 +430,36 @@ func questionRequestContext(r questionRequestProjection, msgs []message.Message)
 	}
 	slices.SortFunc(questions, func(x, y pending) int { return strings.Compare(x.ID, y.ID) })
 	data, _ := json.Marshal(questions)
-	return append(visible, message.Message{Role: message.RoleSystem, Content: "Current questions: " + string(data) + ". Continue independent work; use Question(wait_for) only when these decisions are needed. A declined question still requires a user decision or explicit withdrawal. Never recreate pending questions."})
+	return append(visible, questionProjectionMessage("<system-reminder>\nCurrent questions: "+string(data)+". Continue independent work; use Question(wait_for) only when these decisions are needed. A declined question still requires a user decision or explicit withdrawal. Never recreate pending questions.\n</system-reminder>", nil))
+}
+
+// questionProjectionMessage builds one request-scoped question projection row.
+//
+// The row carries the user role because that is the only role every provider
+// conversion delivers mid-conversation: a mid-conversation system row is
+// dropped by all four wire converters (OpenAI chat, Anthropic, Gemini and
+// Responses), which left the model blind to archived question state after a
+// compaction even though the row was built and tested.
+//
+// It is not prose the user typed, so it is marked KindTurnOverlay: a
+// request-scoped overlay is excluded from IsUserAuthored and from the
+// prompt-cache durable prefix, and — unlike a plain user row — it does not move
+// the current-turn boundary that reasoning replay (fillMissingReasoning) and
+// Gemini signature placeholders are keyed on. A plain user row appended at the
+// request tail would push that boundary past the turn's own assistant tool
+// calls and make those endpoints reject the request.
+//
+// Each caller frames its own body: the pending-set row is a harness
+// instruction and carries the <system-reminder> framing every other overlay
+// uses, while a recorded decision stays plain so the model weighs it as the
+// answer it is.
+func questionProjectionMessage(body string, meta json.RawMessage) message.Message {
+	return message.Message{
+		Role:     message.RoleUser,
+		Kind:     message.KindTurnOverlay,
+		Content:  body,
+		Question: meta,
+	}
 }
 
 func (a *MainAgent) publishRestoredQuestions() {
