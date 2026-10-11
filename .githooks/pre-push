@@ -8,6 +8,35 @@ cd "$repo_root"
 # their commands to this checkout's repository, worktree, or index.
 unset $(git rev-parse --local-env-vars)
 
+# The release script sets this only after CI has passed for the exact SHA.
+# Skip duplicate local gates for that verified lightweight release-tag push,
+# but only when every ref in this push is a matching vX.Y.Z tag at that SHA.
+# Ordinary tag pushes and mixed branch/tag pushes continue through all checks.
+# The marker verifies Go CI; documentation gates belong to main pushes and
+# the docs workflow, rather than the release-tag push.
+release_ci_sha="${CHORD_RELEASE_CI_VERIFIED_SHA:-}"
+release_tag_only=1
+release_tag_count=0
+if [[ -n "$release_ci_sha" ]]; then
+  while read -r local_ref local_sha remote_ref _remote_sha; do
+    [[ -n "$local_ref" ]] || continue
+    release_tag_count=$((release_tag_count + 1))
+
+    if [[ "$local_sha" != "$release_ci_sha" || \
+          ! "$local_ref" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ || \
+          "$remote_ref" != "$local_ref" || \
+          "$(git cat-file -t "$local_ref" 2>/dev/null || true)" != "commit" || \
+          "$(git rev-parse "$local_ref^{commit}" 2>/dev/null || true)" != "$release_ci_sha" ]]; then
+      release_tag_only=0
+    fi
+  done
+fi
+
+if [[ -n "$release_ci_sha" && "$release_tag_count" -gt 0 && "$release_tag_only" -eq 1 ]]; then
+  echo "pre-push: CI already passed for $release_ci_sha; skipping duplicate checks for release tag"
+  exit 0
+fi
+
 has_doc_changes=0
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
