@@ -287,9 +287,13 @@ func TestAuthStateMonitorReloadEmitsPolledUpdate(t *testing.T) {
 	defer p.Close()
 
 	updated := make(chan struct{}, 1)
+	// Stop and join the watcher so only explicit reloads can update state.
 	p.mu.Lock()
+	monitor := p.authStateMonitor
+	p.stopAuthStateMonitorLocked()
 	p.lastSelectedSlot = 0
 	p.mu.Unlock()
+	monitor.wait()
 	p.SetOnPolledRateLimitUpdated(func() {
 		select {
 		case updated <- struct{}{}:
@@ -334,9 +338,13 @@ func TestAuthStateMonitorReloadClearsSnapshotWhenStateFileRemoved(t *testing.T) 
 	defer p.Close()
 
 	updated := make(chan struct{}, 1)
+	// Stop and join the watcher so only explicit reloads can update state.
 	p.mu.Lock()
+	monitor := p.authStateMonitor
+	p.stopAuthStateMonitorLocked()
 	p.lastSelectedSlot = 0
 	p.mu.Unlock()
+	monitor.wait()
 	p.SetOnPolledRateLimitUpdated(func() {
 		select {
 		case updated <- struct{}{}:
@@ -389,9 +397,13 @@ func TestAuthStateMonitorReloadDetectsSameStatContentChange(t *testing.T) {
 	defer p.Close()
 
 	updated := make(chan struct{}, 2)
+	// Stop and join the watcher so only explicit reloads can update state.
 	p.mu.Lock()
+	monitor := p.authStateMonitor
+	p.stopAuthStateMonitorLocked()
 	p.lastSelectedSlot = 0
 	p.mu.Unlock()
+	monitor.wait()
 	p.SetOnPolledRateLimitUpdated(func() {
 		select {
 		case updated <- struct{}{}:
@@ -460,9 +472,13 @@ func TestAuthStateMonitorReloadIgnoresNonCurrentSnapshot(t *testing.T) {
 	defer p.Close()
 
 	updated := make(chan struct{}, 1)
+	// Stop and join the watcher so only explicit reloads can update state.
 	p.mu.Lock()
+	monitor := p.authStateMonitor
+	p.stopAuthStateMonitorLocked()
 	p.lastSelectedSlot = 0
 	p.mu.Unlock()
+	monitor.wait()
 	p.SetOnPolledRateLimitUpdated(func() {
 		select {
 		case updated <- struct{}{}:
