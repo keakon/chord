@@ -59,9 +59,12 @@ generate_image: deny
 }
 
 func TestGeneratedOriginalSurvivesTextOnlyCaller(t *testing.T) {
-	parts, dropped := toolResultPartsForCapability("saved image", []message.ContentPart{{Type: message.ContentPartImage, ArtifactID: "sha256-sample", ImagePath: "sample.png"}}, stubInputCapability{"image": false})
-	if len(parts) != 2 || dropped.Images != 0 {
-		t.Fatal("generated original was discarded for text-only caller")
+	images := []message.ContentPart{{Type: message.ContentPartImage, ArtifactID: "sha256-sample", ImagePath: "sample.png"}}
+	if dropped := unsupportedToolResultParts(images, stubInputCapability{"image": false}); dropped.Images != 0 {
+		t.Fatalf("dropped images = %d, want 0 for an artifact-backed original", dropped.Images)
+	}
+	if parts := toolResultParts("saved image", images); len(parts) != 2 || parts[1].ArtifactID != "sha256-sample" {
+		t.Fatalf("generated original was discarded for text-only caller: %#v", parts)
 	}
 }
 

@@ -274,13 +274,15 @@ func (s *SubAgent) filterUnsupportedParts(content string, parts []message.Conten
 
 func (s *SubAgent) toolResultParts(text string, images []message.ContentPart) []message.ContentPart {
 	llmClient, modelName := s.llmSnapshot()
-	parts, dropped := toolResultPartsForCapability(text, images, llmClient)
-	if dropped.any() && s.unsupportedPartToast.first(modelName, toastCategoryToolResult, dropped.summary()) {
+	// Binary parts always stay in the durable transcript; the request wire
+	// strips modalities the resolved target cannot accept, so they survive a
+	// later switch to a model that can see them. See MainAgent.toolResultParts.
+	if dropped := unsupportedToolResultParts(images, llmClient); dropped.any() && s.unsupportedPartToast.first(modelName, toastCategoryToolResult, dropped.summary()) {
 		s.parent.emitToTUI(ToastEvent{
 			Level:   "warn",
-			Message: "Tool-result attachments dropped (unsupported): " + dropped.summary(),
+			Message: "Tool-result attachments stay in the transcript but this model will not see them (unsupported): " + dropped.summary(),
 			AgentID: s.instanceID,
 		})
 	}
-	return parts
+	return toolResultParts(text, images)
 }

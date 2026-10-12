@@ -54,28 +54,33 @@ func toolResultParts(text string, images []message.ContentPart) []message.Conten
 	return parts
 }
 
-func toolResultPartsForCapability(text string, images []message.ContentPart, capability inputCapability) ([]message.ContentPart, unsupportedPartCounts) {
+// unsupportedToolResultParts reports the binary parts of a tool result the
+// capability cannot replay to the model. The counts drive the user-facing
+// toast only — the parts themselves are never dropped here: they stay in the
+// durable transcript and the TUI event, and the request wire strips modalities
+// the resolved target cannot accept (filterUnsupportedBinaryPartsForTarget).
+// Dropping them at commit time would lose them for good, including after a
+// later switch to a model that can see them.
+func unsupportedToolResultParts(images []message.ContentPart, capability inputCapability) unsupportedPartCounts {
 	if len(images) == 0 || capability == nil {
-		return toolResultParts(text, images), unsupportedPartCounts{}
+		return unsupportedPartCounts{}
 	}
-	filtered := make([]message.ContentPart, 0, len(images))
 	var dropped unsupportedPartCounts
 	for _, part := range images {
 		switch part.Type {
 		case "image":
+			// Artifact-backed parts are re-resolved per request from the
+			// stored original, so they never depend on the current model.
 			if part.ArtifactID == "" && !canReplayToolResultModality(capability, "image") {
 				dropped.Images++
-				continue
 			}
 		case "pdf":
 			if !canReplayToolResultModality(capability, "pdf") {
 				dropped.PDFs++
-				continue
 			}
 		}
-		filtered = append(filtered, part)
 	}
-	return toolResultParts(text, filtered), dropped
+	return dropped
 }
 
 func canReplayToolResultModality(capability inputCapability, modality string) bool {

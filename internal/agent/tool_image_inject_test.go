@@ -37,29 +37,51 @@ func TestToolResultParts_NoImages(t *testing.T) {
 	}
 }
 
-func TestToolResultPartsForCapability_DropsUnsupportedImages(t *testing.T) {
-	parts, dropped := toolResultPartsForCapability("Loaded 1 image", []message.ContentPart{
+func TestUnsupportedToolResultParts_CountsUnsupportedImages(t *testing.T) {
+	images := []message.ContentPart{
 		{Type: "image", MimeType: "image/png", Data: []byte("a"), FileName: "image.png"},
-	}, stubInputCapability{"image": false})
+		{Type: "pdf", MimeType: "application/pdf", Data: []byte("%PDF"), FileName: "doc.pdf"},
+	}
 
-	if dropped.Images != 1 || dropped.PDFs != 0 {
+	if dropped := unsupportedToolResultParts(images, stubInputCapability{"image": false, "pdf": true}); dropped.Images != 1 || dropped.PDFs != 0 {
 		t.Fatalf("dropped = %#v, want one image", dropped)
 	}
-	if parts != nil {
-		t.Fatalf("parts = %#v, want nil after unsupported image drop", parts)
+	if dropped := unsupportedToolResultParts(images, stubInputCapability{"image": false, "pdf": false}); dropped.Images != 1 || dropped.PDFs != 1 {
+		t.Fatalf("dropped = %#v, want one image and one PDF", dropped)
+	}
+	// Counting is for the toast only: the parts themselves are never dropped.
+	if parts := toolResultParts("Loaded 1 image", images); len(parts) != 3 {
+		t.Fatalf("parts len = %d, want 3 (text + image + PDF)", len(parts))
 	}
 }
 
-func TestToolResultPartsForCapability_UsesToolResultReplayCapability(t *testing.T) {
-	parts, dropped := toolResultPartsForCapability("Loaded 1 image", []message.ContentPart{
+func TestUnsupportedToolResultParts_UsesToolResultReplayCapability(t *testing.T) {
+	images := []message.ContentPart{
 		{Type: "image", MimeType: "image/png", Data: []byte("a"), FileName: "image.png"},
-	}, stubToolResultCapability{stubInputCapability{"image": true}})
+	}
 
-	if dropped.Images != 1 {
+	// Input modality is supported, but tool-result replay is not: the image is
+	// still counted (and still kept — the request wire strips it per target).
+	if dropped := unsupportedToolResultParts(images, stubToolResultCapability{stubInputCapability{"image": true}}); dropped.Images != 1 {
 		t.Fatalf("dropped images = %d, want 1", dropped.Images)
 	}
-	if parts != nil {
-		t.Fatalf("parts = %#v, want nil when tool-result replay is unsupported", parts)
+}
+
+func TestUnsupportedToolResultParts_ExemptsArtifactsAndSupportedModalities(t *testing.T) {
+	images := []message.ContentPart{
+		// Artifact-backed originals are re-resolved per request, so a text-only
+		// current model never counts them as unsupported.
+		{Type: "image", ArtifactID: "sha256-sample", ImagePath: "sample.png"},
+	}
+
+	if dropped := unsupportedToolResultParts(images, stubInputCapability{"image": false}); dropped.any() {
+		t.Fatalf("dropped = %#v, want none for artifact-backed parts", dropped)
+	}
+	if dropped := unsupportedToolResultParts(images, stubInputCapability{"image": true}); dropped.any() {
+		t.Fatalf("dropped = %#v, want none for supported modalities", dropped)
+	}
+	if dropped := unsupportedToolResultParts(images, nil); dropped.any() {
+		t.Fatalf("dropped = %#v, want none for a nil capability", dropped)
 	}
 }
 

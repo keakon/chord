@@ -329,16 +329,22 @@ func rawToolResultForVerification(payload *ToolResultPayload) string {
 	return payload.Result
 }
 
+// toolResultParts builds the parts committed for a tool result. Binary parts
+// always stay in the durable transcript and the TUI event: the request wire
+// strips modalities the resolved target cannot accept
+// (filterUnsupportedBinaryPartsForTarget), so dropping them here would lose
+// them for good, including after a later switch to a model that can see them.
+// The current model only decides whether the user is warned that it will not
+// see them.
 func (a *MainAgent) toolResultParts(text string, images []message.ContentPart) []message.ContentPart {
 	a.llmMu.RLock()
 	client := a.llmClient
 	modelName := a.modelName
 	a.llmMu.RUnlock()
-	parts, dropped := toolResultPartsForCapability(text, images, client)
-	if dropped.any() && a.unsupportedPartToast.first(modelName, toastCategoryToolResult, dropped.summary()) {
-		a.emitToTUI(ToastEvent{Message: "The current model does not support " + dropped.summary() + " tool-result attachments; attachments were ignored", Level: "warn"})
+	if dropped := unsupportedToolResultParts(images, client); dropped.any() && a.unsupportedPartToast.first(modelName, toastCategoryToolResult, dropped.summary()) {
+		a.emitToTUI(ToastEvent{Message: "The current model does not support " + dropped.summary() + " tool-result attachments; they stay in the transcript but this model will not see them", Level: "warn"})
 	}
-	return parts
+	return toolResultParts(text, images)
 }
 
 // toolCallSkillNameFromContext is the Snapshot-free form of
