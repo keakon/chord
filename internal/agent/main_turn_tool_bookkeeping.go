@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/patchinput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -214,9 +215,13 @@ func (t *Turn) streamingArgsFlushDue(callID string, now time.Time) bool {
 
 // canonicalApplyPatchArgsJSON builds the canonical {"patch": ...} args object
 // for raw freeform patch text, so a custom-tool call is indistinguishable from
-// a JSON function call to tool execution, hooks, permissions and audits.
+// a JSON function call to tool execution, hooks, permissions and audits. Text
+// the model wrapped in a JSON envelope ({"input": ...} despite the freeform
+// tool contract) is unwrapped first (see patchinput.UnwrapEnvelope), so the
+// streamed args — and every consumer reading them before execution — carry the
+// real patch instead of the envelope.
 func canonicalApplyPatchArgsJSON(text string) string {
-	canonical, err := json.Marshal(map[string]string{"patch": text})
+	canonical, err := json.Marshal(map[string]string{"patch": patchinput.UnwrapEnvelope(text)})
 	if err != nil {
 		return `{"patch":""}`
 	}

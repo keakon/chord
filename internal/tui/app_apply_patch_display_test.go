@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -412,6 +413,43 @@ func TestApplyPatchStreamingCardFreeformInputTextPreview(t *testing.T) {
 	assertRenderedTextBackground(t, deleted, "old", colorOfTheme(currentTheme.DiffDelLineBg))
 }
 
+func TestApplyPatchStreamingCardEnvelopeInputTextPreview(t *testing.T) {
+	m := NewModelWithSize(nil, 100, 30)
+	callID := "call-envelope"
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{ID: callID, Name: tools.NameApplyPatch}})
+	block, ok := m.viewport.FindBlockByToolID(callID)
+	if !ok {
+		t.Fatal("missing apply_patch block")
+	}
+	for _, input := range []string{
+		`{"input":"*** Begin Patch\n`,
+		`{"input":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new`,
+	} {
+		_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+			ID: callID, Name: tools.NameApplyPatch, InputText: input,
+		}})
+	}
+	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	for _, want := range []string{"apply_patch src/demo.go", "*** Update File: src/demo.go", "-old", "+new"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("missing %q in streaming preview:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, `{"input"`) || strings.Contains(plain, `\n`) {
+		t.Fatalf("streaming preview contains JSON:\n%s", plain)
+	}
+	args, err := json.Marshal(map[string]string{"patch": "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
+		ID: callID, Name: tools.NameApplyPatch, ArgsJSON: string(args), ArgsStreamingDone: true,
+	}})
+	if !strings.Contains(stripANSI(strings.Join(block.Render(100, ""), "\n")), "+new") {
+		t.Fatal("final arguments lost the streamed patch")
+	}
+}
+
 func TestApplyPatchStreamingCardWithoutPatchTextStaysCompact(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	callID := "call-patch-empty-1"
@@ -597,6 +635,42 @@ func TestFreeformApplyPatchErrorCardShowsPatchNotJSONEnvelope(t *testing.T) {
 	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(rendered, `{"patch"`) {
 		t.Fatalf("expected error card to show freeform patch, not the JSON envelope, got:\n%s", rendered)
+	}
+	for _, want := range []string{"apply_patch src/demo.go", "*** Update File: src/demo.go", "+new", "hunk not found", "↳ Requested patch:"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("expected error card to contain %q, got:\n%s", want, rendered)
+		}
+	}
+}
+
+// TestFreeformApplyPatchEnvelopeArgsShowPatchNotJSONEnvelope covers freeform
+// custom-tool input arriving in a JSON envelope despite the tool contract,
+// so the streamed args are the double envelope
+// {"patch":"{\"input\":\"*** Begin Patch...\"}"}. The card must render the
+// inner patch and the target path, never the raw JSON.
+func TestFreeformApplyPatchEnvelopeArgsShowPatchNotJSONEnvelope(t *testing.T) {
+	ApplyTheme(DefaultTheme())
+	patch := "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"
+	envelope, err := json.Marshal(map[string]string{"input": patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawArgs, err := json.Marshal(map[string]string{"patch": string(envelope)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := &Block{
+		ID:            1,
+		Type:          BlockToolCall,
+		ToolName:      tools.NameApplyPatch,
+		RawArgs:       string(rawArgs),
+		ResultDone:    true,
+		ResultStatus:  agent.ToolResultStatusError,
+		ResultContent: "hunk not found",
+	}
+	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	if strings.Contains(rendered, `{"input"`) || strings.Contains(rendered, `{"patch"`) {
+		t.Fatalf("expected error card to show the unwrapped patch, not the JSON envelope, got:\n%s", rendered)
 	}
 	for _, want := range []string{"apply_patch src/demo.go", "*** Update File: src/demo.go", "+new", "hunk not found", "↳ Requested patch:"} {
 		if !strings.Contains(rendered, want) {

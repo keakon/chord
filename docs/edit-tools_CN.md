@@ -62,7 +62,7 @@ providers:
 - `enabled: false` 强制 edit 工具面，即使对补丁原生模型也生效。
 - `freeform: true` 强制 custom tool 形式；`freeform: false` 强制 JSON function 形式。
 
-如果网关把 custom tool 错误降级成 `{"input": "..."}`（而不是 `{"patch": "..."}`），Chord 会返回指向 `compat.apply_patch.freeform: false` 的可操作错误；设置后请求会以 function tool 发送。
+如果网关将 custom 调用改成 JSON function 调用，却使用 `{"input": "..."}` 参数而不是 `{"patch": "..."}`，Chord 会返回指向 `compat.apply_patch.freeform: false` 的可操作错误；设置后请求会以 function tool 发送。如果调用仍是 custom 形式，只是 freeform 输入将补丁包成了 JSON，Chord 会提取补丁正文用于流式预览、执行和回放。
 
 ## apply_patch 工具（Codex 补丁格式）
 

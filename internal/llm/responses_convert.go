@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/patchinput"
 	"github.com/keakon/chord/internal/toolname"
 )
 
@@ -107,10 +108,10 @@ func applyPatchFreeformInput(raw json.RawMessage) string {
 			Patch string `json:"patch"`
 		}
 		if err := json.Unmarshal(text, &obj); err == nil && obj.Patch != "" {
-			return obj.Patch
+			return patchinput.UnwrapEnvelope(obj.Patch)
 		}
 	}
-	return string(text)
+	return patchinput.UnwrapEnvelope(string(text))
 }
 
 // appendResponsesTextBlock folds a text part into the trailing input_text block

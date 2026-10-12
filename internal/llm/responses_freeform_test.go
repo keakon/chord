@@ -244,7 +244,8 @@ func TestCanonicalApplyPatchArgs(t *testing.T) {
 		{"json_string_wrapped", `"*** Begin Patch"`, `{"patch":"*** Begin Patch"}`},
 		{"already_canonical_object", `{"patch":"@@\n-old\n+new"}`, `{"patch":"@@\n-old\n+new"}`},
 		{"empty_patch_object_passes", `{"patch":""}`, `{"patch":""}`},
-		{"input_object_is_wrapped_as_text", `{"input":"*** Begin Patch"}`, `{"patch":"{\"input\":\"*** Begin Patch\"}"}`},
+		{"input_object_is_unwrapped", `{"input":"*** Begin Patch"}`, `{"patch":"*** Begin Patch"}`},
+		{"nested_input_is_unwrapped", `{"patch":"{\"input\":\"*** Begin Patch\"}"}`, `{"patch":"*** Begin Patch"}`},
 		{"empty_text", "", `{"patch":""}`},
 	}
 	for _, tt := range tests {
@@ -254,6 +255,57 @@ func TestCanonicalApplyPatchArgs(t *testing.T) {
 				t.Errorf("canonicalApplyPatchArgs(%q) = %s, want %s", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestResponsesPatchEnvelopeFinalizationAndReplay(t *testing.T) {
+	patch := "*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch"
+	envelope, err := json.Marshal(map[string]string{"input": patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantArgs, err := json.Marshal(map[string]string{"patch": patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := []responsesOutputEntry{{Type: "custom_tool_call", ID: "item-patch", CallID: "call-patch", Name: toolname.ApplyPatch, Input: string(envelope)}}
+	var resp message.Response
+	recoverResponsesToolCallsFromOutput(&resp, output, nil)
+	collectResponsesOutput(&resp, output)
+	if len(resp.ToolCalls) != 1 || string(resp.ToolCalls[0].Args) != string(wantArgs) {
+		t.Fatalf("final calls = %+v, want unwrapped arguments %s", resp.ToolCalls, wantArgs)
+	}
+	if len(resp.ResponsesOutput) != 1 || resp.ResponsesOutput[0].Arguments != string(wantArgs) {
+		t.Fatalf("stored output = %+v, want unwrapped arguments %s", resp.ResponsesOutput, wantArgs)
+	}
+	msgs := []message.Message{
+		{Role: message.RoleUser, Content: "Update file.txt"},
+		{Role: message.RoleAssistant, ToolCalls: resp.ToolCalls, ResponsesOutput: resp.ResponsesOutput},
+		{Role: message.RoleTool, ToolCallID: "call-patch", Content: "Applied patch"},
+	}
+	for _, freeform := range []bool{false, true} {
+		items := convertMessagesToResponsesWithItemIDs("", msgs, false, freeform, false)
+		if len(items) != 3 {
+			t.Fatalf("replay items = %+v, want user, call and output", items)
+		}
+		call, result := items[1], items[2]
+		if freeform {
+			if call.Type != "custom_tool_call" || call.Input != patch || result.Type != "custom_tool_call_output" {
+				t.Fatalf("freeform replay = %+v, want unwrapped patch and paired output", items)
+			}
+		} else if call.Type != "function_call" || call.Arguments != string(wantArgs) || result.Type != "function_call_output" {
+			t.Fatalf("function replay = %+v, want canonical arguments and paired output", items)
+		}
+	}
+	if resp.ResponsesOutput[0].Arguments != string(wantArgs) {
+		t.Fatal("replay mutated stored output")
+	}
+}
+
+func TestResponsesFreeformReplayUnwrapsPatchArgumentEnvelope(t *testing.T) {
+	args := json.RawMessage(`{"patch":"{\"input\":\"*** Begin Patch\\n*** Delete File: file.txt\\n*** End Patch\"}"}`)
+	if got := applyPatchFreeformInput(args); got != "*** Begin Patch\n*** Delete File: file.txt\n*** End Patch" {
+		t.Fatalf("replay input = %q, want unwrapped patch", got)
 	}
 }
 

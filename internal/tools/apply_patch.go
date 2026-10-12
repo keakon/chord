@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/lsp"
+	"github.com/keakon/chord/internal/patchinput"
 	"github.com/keakon/chord/internal/toolname"
 )
 
@@ -39,7 +40,10 @@ type ApplyPatchArgs struct {
 // sanitization applied to tool arguments before Execute (see
 // SanitizeUnknownArgsWithDiagnostics): only `patch` participates, and it must
 // satisfy the apply_patch constraints (non-empty, and the Codex `*** Begin
-// Patch` envelope enforced by ParseApplyPatch).
+// Patch` envelope enforced by ParseApplyPatch). A `patch` value that is itself
+// a JSON envelope around patch text is unwrapped first (see
+// patchinput.UnwrapEnvelope), so a freeform call the model wrapped in
+// {"input": ...} still normalizes to the real patch.
 func NormalizeApplyPatchArgs(raw json.RawMessage) (json.RawMessage, error) {
 	unwrapped := unwrapToolArgs(raw)
 	if len(unwrapped) == 0 || unwrapped[0] != '{' {
@@ -61,6 +65,12 @@ func NormalizeApplyPatchArgs(raw json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(unwrapped, &args); err != nil {
 		return nil, fmt.Errorf("invalid arguments: %w", err)
 	}
+	// A freeform custom-tool call whose input the model wrapped in a JSON
+	// envelope reaches here as {"patch":"{\"input\":\"*** Begin Patch...\"}"}
+	// (see patchinput.UnwrapEnvelope). Strip the envelope so the canonical form
+	// carries the patch text itself; the no-patch-key lowering diagnostic
+	// above still governs the args-level {"input":...} shape.
+	args.Patch = patchinput.UnwrapEnvelope(args.Patch)
 	if strings.TrimSpace(args.Patch) == "" {
 		return nil, fmt.Errorf("patch is required")
 	}

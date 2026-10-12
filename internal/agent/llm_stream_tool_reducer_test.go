@@ -139,6 +139,34 @@ func TestStreamToolFreeformInputTextCoalescesToFlushCadence(t *testing.T) {
 	}
 }
 
+func TestStreamToolFreeformInputTextUnwrapsJSONEnvelope(t *testing.T) {
+	// A model that wrapped its freeform custom-tool input in a JSON envelope
+	// ({"input": "..."} despite the custom-tool contract) must still
+	// materialize canonical {"patch": "<real patch>"} arguments.
+	turn := newStreamToolReducerTestTurn()
+	reducer := streamToolDeltaReducer{turn: turn, emit: func(AgentEvent) {}}
+	patch := "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"
+	envelope, err := json.Marshal(map[string]string{"input": patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: "call-env", Name: tools.NameApplyPatch}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-env", Name: tools.NameApplyPatch, InputText: string(envelope)}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "call-env"}})
+
+	call, ok := turn.getStreamingToolCall("call-env")
+	if !ok {
+		t.Fatal("streaming tool call not recorded")
+	}
+	if call.InputText != string(envelope) {
+		t.Fatalf("stored InputText = %q, want the raw envelope preserved for the live preview", call.InputText)
+	}
+	if want := canonicalApplyPatchArgsJSON(patch); call.ArgsJSON != want {
+		t.Fatalf("stored ArgsJSON = %s, want canonical unwrapped args %s", call.ArgsJSON, want)
+	}
+}
+
 func TestStreamToolDeltaReducerReconcilesToolUseAndStartsSpeculativeExecution(t *testing.T) {
 	turn := newStreamToolReducerTestTurn()
 	registry := tools.NewRegistry()

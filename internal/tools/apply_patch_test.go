@@ -1743,6 +1743,37 @@ func TestNormalizeApplyPatchArgsEmptyObjectStillRequiresPatch(t *testing.T) {
 	}
 }
 
+func TestNormalizeApplyPatchArgsUnwrapsFreeformEnvelope(t *testing.T) {
+	// A model that wrapped its freeform custom-tool input in a JSON envelope
+	// despite the custom-tool contract reaches
+	// execution as {"patch":"{\"input\":\"*** Begin Patch...\"}"}: the
+	// freeform canonicalization double-wraps the envelope. Normalization must
+	// strip it so the real patch reaches ParseApplyPatch.
+	patch := "*** Begin Patch\n*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch"
+	envelope, err := json.Marshal(map[string]string{"input": patch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]string{"patch": string(envelope)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized, err := NormalizeApplyPatchArgs(raw)
+	if err != nil {
+		t.Fatalf("NormalizeApplyPatchArgs error = %v", err)
+	}
+	var args ApplyPatchArgs
+	if err := json.Unmarshal(normalized, &args); err != nil {
+		t.Fatalf("normalized = %s, want canonical object: %v", normalized, err)
+	}
+	if args.Patch != patch {
+		t.Fatalf("patch = %q, want the unwrapped freeform text", args.Patch)
+	}
+	if _, err := ParseApplyPatch(args.Patch); err != nil {
+		t.Fatalf("ParseApplyPatch on normalized patch: %v", err)
+	}
+}
+
 func TestParseApplyPatchRecoversMissingBeginMarker(t *testing.T) {
 	doc, err := ParseApplyPatch("*** Update File: file.txt\n@@\n-old\n+new\n*** End Patch")
 	if err != nil {

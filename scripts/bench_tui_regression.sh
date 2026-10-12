@@ -8,6 +8,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./scripts/bench_tui_regression.sh                 # smoke subset: default 1x benchtime
+#   CHORD_BENCH_SKIP_TESTS=1 ./scripts/bench_tui_regression.sh # benchmarks only
 #   ./scripts/bench_tui_regression.sh ./old.txt ./new.txt   # optional benchstat compare
 #   CHORD_BENCH_FULL=1 CHORD_BENCH_TIME=1s ./scripts/bench_tui_regression.sh # stable local comparison
 #
@@ -23,7 +24,7 @@ FULL_BENCH_PATTERN='^(BenchmarkRenderAssistantCard|BenchmarkRenderAssistantCardC
 # Flow benchmarks that rebuild their model inside b.StopTimer(): each round's wall
 # clock is dominated by the untimed setup, so a time-based benchtime would balloon
 # the iteration count and run for minutes. Keep them on a fixed count.
-PACED_BENCH_PATTERN='^(BenchmarkStreamTextDeltaBurstDeferredView|BenchmarkStreamTextDeltaBurstCadenceFlush|BenchmarkStreamThinkingDeltaBurstDeferredView|BenchmarkToolCallUpdateArgsStreamingCadence|BenchmarkToolArgumentStream)$'
+PACED_BENCH_PATTERN='^(BenchmarkStreamTextDeltaBurstDeferredView|BenchmarkStreamTextDeltaBurstCadenceFlush|BenchmarkStreamThinkingDeltaBurstDeferredView|BenchmarkToolCallUpdateArgsStreamingCadence|BenchmarkToolArgumentStream|BenchmarkApplyPatchArgumentStream)$'
 FRONTIER_BENCH_PATTERN='^(BenchmarkStreamingFrontierScannerAppendSnapshots)$'
 SSE_BENCH_PATTERN='^(BenchmarkSSEParseWithCallbackCumulative|BenchmarkSSEParseWithCallbackIncremental|BenchmarkSSEParseWithCollector)$'
 TRUNCATE_BENCH_PATTERN='^BenchmarkTruncateStringHeadTail$'
@@ -43,8 +44,10 @@ else
   PACED_BENCH_TIME=1x
 fi
 
-printf '==> Running targeted TUI regression tests\n'
-go test ./internal/tui -run "$TEST_PATTERN"
+if [[ "${CHORD_BENCH_SKIP_TESTS:-}" != "1" ]]; then
+  printf '==> Running targeted TUI regression tests\n'
+  go test ./internal/tui -run "$TEST_PATTERN"
+fi
 
 printf '\n==> Running image cache and protocol benchmarks\n'
 go test ./internal/tui -run '^$' -bench '^(BenchmarkImageRuntimeCacheLookup|BenchmarkImageProtocolFraming)$' -benchmem -benchtime "${CHORD_IMAGE_BENCH_TIME:-$CHORD_BENCH_TIME}" -count "${CHORD_IMAGE_BENCH_COUNT:-1}" | tee /tmp/chord-image-cache-bench.txt

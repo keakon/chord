@@ -1,13 +1,16 @@
 package llm
 
 import (
+	"bytes"
 	"encoding/json"
 	"slices"
 	"strings"
 
+	sonicjson "github.com/bytedance/sonic"
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/patchinput"
 	"github.com/keakon/chord/internal/toolname"
 )
 
@@ -29,20 +32,28 @@ func toolArgumentsFallback(toolName string, raw json.RawMessage) json.RawMessage
 
 // canonicalApplyPatchArgs converts freeform custom_tool_call input into the
 // canonical {"patch": "..."} arguments object every downstream consumer sees
-// (finalize, replay, audit, execution). A payload that already carries a patch
-// field passes through unchanged (gateway-lowered objects); everything else —
-// bare patch text or a JSON string wrapping it — is treated as patch text.
+// (finalize, replay, audit, execution). Complete patch/input envelopes are
+// unwrapped before building the canonical object. Other arguments objects
+// carrying a patch field pass through for the tool parser to validate.
 func canonicalApplyPatchArgs(raw json.RawMessage) json.RawMessage {
 	text := unwrapJSONString(raw)
-	if json.Valid(text) {
+	patch := ""
+	trimmed := bytes.TrimSpace(text)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
 		var obj struct {
 			Patch *string `json:"patch"`
 		}
-		if err := json.Unmarshal(text, &obj); err == nil && obj.Patch != nil {
-			return text
+		if err := sonicjson.ConfigStd.Unmarshal(text, &obj); err == nil && obj.Patch != nil {
+			patch = patchinput.UnwrapEnvelope(*obj.Patch)
+			if patch == *obj.Patch {
+				return text
+			}
 		}
 	}
-	out, err := json.Marshal(map[string]string{"patch": string(text)})
+	if patch == "" {
+		patch = patchinput.UnwrapEnvelope(string(text))
+	}
+	out, err := json.Marshal(map[string]string{"patch": patch})
 	if err != nil {
 		return json.RawMessage(`{"patch":""}`)
 	}

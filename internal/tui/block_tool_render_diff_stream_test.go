@@ -215,7 +215,7 @@ func streamingArgsApplyPatchTestBlock(patch string) *Block {
 		ToolExecutionState: agent.ToolCallExecutionStateReceiving,
 	}
 	block.RawArgs = `{"patch":"` + strings.ReplaceAll(patch, "\n", `\n`)
-	block.Content = block.cachedApplyPatchStreamingArgs(block.RawArgs)
+	block.Content = block.cachedApplyPatchStreamingArgs(block.RawArgs, false)
 	return block
 }
 
@@ -329,5 +329,29 @@ func TestDiffToolPathsSeparateDisplaySummaryFromLexerSeed(t *testing.T) {
 	}
 	if want := "src/demo.go"; streamSyntax != want {
 		t.Fatalf("streaming syntax path = %q, want %q", streamSyntax, want)
+	}
+}
+
+func TestReceivingPatchDefersOperationTotalsUntilComplete(t *testing.T) {
+	patch := "*** Begin Patch\n*** Add File: sample.txt\n+sample content"
+	b := &Block{
+		Type: BlockToolCall, ToolName: tools.NameApplyPatch, Content: patch,
+		ToolExecutionState: agent.ToolCallExecutionStateReceiving,
+	}
+	if targets := b.applyPatchTargets(); len(targets) != 0 {
+		t.Fatalf("incomplete input showed operation totals: %#v", targets)
+	}
+	if path, _ := b.diffToolPathsWithTargets(nil); path != "sample.txt" {
+		t.Fatalf("incomplete input lost its target path: %q", path)
+	}
+	b.Content += "\n*** End Patch"
+	if targets := b.applyPatchTargets(); len(targets) != 1 || targets[0].Added != 1 {
+		t.Fatalf("complete input lost operation totals: %#v", targets)
+	}
+	b.patchPreviewLen = 100
+	b.patchPreviewText = patch
+	b.clearApplyPatchPreviewMemo()
+	if b.patchPreviewLen != 0 || b.patchPreviewText != "" {
+		t.Fatal("settled card retained transient input preview")
 	}
 }

@@ -1718,7 +1718,7 @@ func TestApplyPatchPreviewIncrementalRenderEqualsCold(t *testing.T) {
 	for frac := 1; frac <= 100; frac++ {
 		args := string(fullArgs[:len(fullArgs)*frac/100])
 		stream.RawArgs = args
-		if d := stream.cachedApplyPatchStreamingArgs(args); d != "" {
+		if d := stream.cachedApplyPatchStreamingArgs(args, false); d != "" {
 			stream.Content = d
 		}
 		stream.InvalidateCache()

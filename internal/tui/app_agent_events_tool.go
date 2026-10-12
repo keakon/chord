@@ -505,15 +505,18 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if argsStreamingDone {
 			displayArgs = stableToolDisplayArgs(evt.Name, evt.ArgsJSON, block.ResultContent)
 		} else if evt.InputText != "" {
-			// Freeform custom-tool input (Responses apply_patch): the raw text
-			// arrives through the InputText channel; render it verbatim instead
-			// of re-deriving it from the canonical ArgsJSON envelope.
-			displayArgs = sanitizeToolDisplayText(evt.InputText)
+			// Bare freeform text needs no decoding. JSON envelopes use the
+			// function preview's growth cache and incremental decoder.
+			if strings.HasPrefix(strings.TrimSpace(evt.InputText), "{") {
+				displayArgs = block.cachedApplyPatchStreamingArgs(evt.InputText, true)
+			} else {
+				displayArgs = sanitizeToolDisplayText(evt.InputText)
+			}
 		} else if livePatchPreview {
 			// The growing patch is the card's primary content. The cached
 			// variant keeps the per-delta extraction off the quadratic path,
 			// and its coalesce window doubles as the preview's refresh gate.
-			displayArgs = block.cachedApplyPatchStreamingArgs(evt.ArgsJSON)
+			displayArgs = block.cachedApplyPatchStreamingArgs(evt.ArgsJSON, false)
 		} else {
 			displayArgs = block.streamedDisplayArgs(evt.ArgsJSON, block.ResultContent)
 		}

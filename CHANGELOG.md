@@ -10,6 +10,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- `apply_patch` previews show patch text and target paths when a model wraps freeform input in JSON, including while the input is streaming. Execution and history replay use the same unwrapped patch.
 - Fixed Question tool cards showing raw JSON during live updates; receipts and diagnostic notes now match their display after resuming a session.
 
 ## 0.8.2 - 2026-10-11

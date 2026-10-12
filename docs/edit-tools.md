@@ -64,7 +64,7 @@ providers:
 - `enabled: false` forces the edit surface even for patch-native models.
 - `freeform: true` forces the custom tool shape; `freeform: false` forces the JSON function shape.
 
-If a gateway lowers a custom tool into `{"input": "..."}` instead of `{"patch": "..."}`, Chord reports an actionable error pointing at `compat.apply_patch.freeform: false`; set it and the request will be sent as a function tool.
+If a gateway changes a custom call into a JSON function call with `{"input": "..."}` arguments instead of `{"patch": "..."}`, Chord reports an actionable error pointing at `compat.apply_patch.freeform: false`; set it and the request will be sent as a function tool. If the call remains a custom call and its freeform input wraps the patch in JSON, Chord extracts the patch for streaming previews, execution, and replay.
 
 ## apply_patch Tool (Codex envelope)
 
