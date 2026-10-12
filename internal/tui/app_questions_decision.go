@@ -19,7 +19,7 @@ func questionTranscriptBlock(msg message.Message, id int) *Block {
 		return nil
 	}
 	body := questionDecisionCardBody(fact)
-	return &Block{ID: id, Type: BlockStatus, StatusTitle: questionDecisionCardTitle(fact), Content: body}
+	return &Block{ID: id, Type: BlockStatus, StatusTitle: questionDecisionCardTitle(fact), Content: body, QuestionDecision: true}
 }
 
 const questionDecisionCardBadge = "QUESTION"
@@ -74,12 +74,15 @@ func questionDecisionCardBody(fact agent.QuestionFact) string {
 		lines = append(lines, header)
 	}
 	if question := strings.TrimSpace(item.Question); question != "" && question != header {
-		lines = append(lines, question)
+		lines = append(lines, "Question: "+question)
+	}
+	if len(lines) > 0 {
+		lines = append(lines, "")
 	}
 	for _, option := range result.SelectedOptions(item) {
 		lines = append(lines, "Selected: "+option.Label)
 		if option.Description != "" {
-			lines = append(lines, option.Description)
+			lines = append(lines, "Description: "+option.Description)
 		}
 	}
 	if len(result.SelectedIDs) == 0 && len(result.Selected) > 0 {

@@ -2,6 +2,16 @@
 
 This project follows Semantic Versioning-style releases. Before 1.0, releases may include breaking changes.
 
+## Unreleased
+
+### Improvements
+
+- Question decision cards keep the original question and answers fully visible without folding, with separate lines for the question, selections, and option descriptions.
+
+### Fixes
+
+- Fixed Question tool cards showing raw JSON during live updates; receipts and diagnostic notes now match their display after resuming a session.
+
 ## 0.8.2 - 2026-10-11
 
 ### Highlights

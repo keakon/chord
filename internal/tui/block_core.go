@@ -343,6 +343,9 @@ func (b *Block) canToggleAtWidth(width int) bool {
 	case BlockAssistant:
 		return len(b.ThinkingParts) > 0
 	case BlockStatus:
+		if b.QuestionDecision {
+			return false
+		}
 		return b.isBackgroundResultCard() || b.statusCardBodyFoldable(b.statusCardBodyLines(width))
 	}
 	return false

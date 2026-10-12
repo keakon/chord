@@ -247,6 +247,10 @@ type Block struct {
 	// StatusTitle is the badge label for BlockStatus cards (e.g. "LOOP", "LOOP CONTINUE").
 	StatusTitle string
 
+	// QuestionDecision marks a status card created from a durable Question fact.
+	// Its question and answer remain visible and retain their field boundaries.
+	QuestionDecision bool
+
 	// NoticeLevel is set on status cards built from a durable
 	// message.KindContextNotice message and holds the context-pressure level
 	// the card badged. It also marks the card for the context-notice cleanup

@@ -133,6 +133,11 @@ func (b *Block) statusCardBodyLines(width int) []string {
 	if b.StatusFrom != "" || b.StatusKind != "" {
 		bodyWidth = max(contentWidth-2, 10)
 	}
+	if b.QuestionDecision {
+		// Decision fields are plain text: Markdown soft breaks would merge the
+		// question, selected answers and multiline custom input into paragraphs.
+		return wrapText(sanitizeDisplayText(strings.TrimSpace(b.Content)), bodyWidth)
+	}
 	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), bodyWidth, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
 		return []string{""}
@@ -145,7 +150,7 @@ func (b *Block) statusCardBodyLines(width int) []string {
 // fully visible, and a body that renders to a single line is already its own
 // summary.
 func (b *Block) statusCardBodyFoldable(bodyLines []string) bool {
-	if b.StatusFrom != "" || b.StatusKind != "" {
+	if b.QuestionDecision || b.StatusFrom != "" || b.StatusKind != "" {
 		return false
 	}
 	return len(bodyLines) > 1

@@ -292,7 +292,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		sameImages := imageParts == nil || slices.EqualFunc(block.ImageParts, imageParts, func(a, b BlockImagePart) bool {
 			return a.FileName == b.FileName && a.ImagePath == b.ImagePath && a.MimeType == b.MimeType && bytes.Equal(a.Data, b.Data)
 		})
-		if block.ResultDone && block.ResultStatus == evt.Status && block.ResultContent == evt.Result && strings.TrimSpace(block.ToolID) == strings.TrimSpace(evt.CallID) && sameImages {
+		if block.ResultDone && block.ResultStatus == evt.Status && block.ResultContent == evt.Result && block.ResultPayload == evt.Payload && slices.Equal(block.ResultNotes, evt.Notes) && strings.TrimSpace(block.ToolID) == strings.TrimSpace(evt.CallID) && sameImages {
 			return effects
 		}
 		if block.ResultDone && block.ResultStatus == agent.ToolResultStatusSuccess && evt.Status != agent.ToolResultStatusSuccess {
@@ -312,6 +312,8 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		applyStableToolResultToBlock(block, transcriptToolResult{
 			argsJSON:       displayArgsJSON,
 			result:         evt.Result,
+			payload:        evt.Payload,
+			notes:          evt.Notes,
 			status:         evt.Status,
 			audit:          evt.Audit,
 			diff:           evt.Diff,
