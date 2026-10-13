@@ -15,6 +15,10 @@ Run `chord --version` in a terminal first to check that the command is available
 
 The wizard only runs when `config.yaml` is missing; it does not overwrite an existing malformed file. Without a controlling terminal it returns an initialization error, so complete configuration interactively first.
 
+## Custom shortcuts do not work
+
+Run `chord doctor config` and check startup notices. Keymap diagnostics show the original file, line, and field path; rejected actions also show the effective binding and its source. An invalid project declaration leaves the global binding in effect, including an empty list that disables the shortcut. Correct the reported declaration and restart. See [Keybindings](./keybindings.md#key-names-and-configuration-diagnostics) for accepted key names and the limited checks for keys handled by an earlier action. When the configuration is valid, check whether your terminal forwards the key.
+
 ## 401 / 403 / auth failures
 
 Check:

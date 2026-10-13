@@ -70,75 +70,7 @@ type KeyMap struct {
 
 // DefaultKeyMap returns the built-in Vim-style key bindings.
 func DefaultKeyMap() KeyMap {
-	return KeyMap{
-		// Insert mode
-		InsertEscape:          []string{"esc"},
-		InsertSubmit:          []string{"enter"},
-		InsertNewline:         []string{"shift+enter", "ctrl+j"},
-		InsertHistoryUp:       []string{"up"},
-		InsertHistoryDown:     []string{"down", "ctrl+n"},
-		InsertAttachClipboard: []string{"ctrl+v", "alt+v"},
-		InsertAttachFile:      nil,
-		InsertClearInput:      []string{"ctrl+u"},
-		InsertUndo:            []string{"ctrl+z"},
-		// PgUp/PgDown scroll the transcript instead of the textarea cursor: the
-		// input box is height-clamped to a few lines, so in-input paging is
-		// nearly useless while glancing back at earlier output is common.
-		InsertPageUp:   []string{"pgup"},
-		InsertPageDown: []string{"pgdown"},
-
-		// Normal mode – mode switches
-		EnterInsert: []string{"i"},
-		Quit:        []string{"q"},
-		HelpToggle:  []string{"?"},
-
-		// Normal mode – scrolling
-		ScrollDown:     []string{"down"},
-		ScrollUp:       []string{"up"},
-		FullPageDown:   []string{"ctrl+f", "pgdown"},
-		FullPageUp:     []string{"ctrl+b", "pgup"},
-		ScrollToBottom: []string{"G"},
-		ScrollToTopSeq: []string{"g"},
-
-		// Normal mode – block navigation
-		NextBlock:          []string{"j"},
-		PrevBlock:          []string{"k"},
-		NextUserBlock:      []string{"}"},
-		PrevUserBlock:      []string{"{"},
-		NextAssistantBlock: []string{")"},
-		PrevAssistantBlock: []string{"("},
-		NextSameTypeBlock:  []string{"]"},
-		PrevSameTypeBlock:  []string{"["},
-		ToggleCollapse:     []string{"o", "enter", " ", "space"},
-		ForkSession:        []string{"e"},
-
-		// Normal mode – overlays
-		// ctrl+j opens the background jobs list. It is bound in Normal mode
-		// only: Insert mode already uses ctrl+j for a newline. Background jobs
-		// are reachable without a mouse from Normal mode, which is where every
-		// other overlay key lives.
-		Directory:      []string{"ctrl+t"},
-		UsageStats:     []string{"$"},
-		ErrorPanel:     []string{"ctrl+e"},
-		BackgroundJobs: []string{"ctrl+j"},
-
-		// Normal mode – search
-		SearchStart: []string{"/"},
-		SearchNext:  []string{"n"},
-		SearchPrev:  []string{"N"},
-
-		// Both modes – agent views, roles and stopping
-		SwitchAgent: []string{"shift+tab"},
-		SwitchRole:  []string{"alt+r"},
-		Stop:        []string{"ctrl+x"},
-
-		// Both Insert and Normal modes
-		SwitchModel: []string{"ctrl+p"},
-		ServiceTier: []string{"ctrl+r"},
-		Diagnostics: []string{"ctrl+g"},
-		Yolo:        []string{"ctrl+y"},
-		MCP:         []string{"ctrl+o"},
-	}
+	return KeyMapFromConfig(nil)
 }
 
 // keyMatches returns true if key matches any of the given bindings.

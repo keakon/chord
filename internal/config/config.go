@@ -57,7 +57,7 @@ type Config struct {
 	// PreventSleep, when true, prevents macOS idle sleep while any agent is active (non-idle). YAML: prevent_sleep: true
 	// Only effective in the local TUI.
 	PreventSleep        *bool                       `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
-	KeyMap              map[string][]string         `json:"keymap,omitempty" yaml:"keymap,omitempty"`                             // custom key bindings (snake_case action → key list)
+	KeyMap              KeyMapConfig                `json:"keymap,omitempty" yaml:"keymap,omitempty"`                             // custom key bindings (snake_case action → key list)
 	Commands            map[string]string           `json:"commands,omitempty" yaml:"commands,omitempty"`                         // custom slash commands: "/cmd" → text to send as message
 	IMESwitchTarget     string                      `json:"ime_switch_target,omitempty" yaml:"ime_switch_target,omitempty"`       // English IM key (e.g. com.apple.keylayout.ABC); switch/restore use im-select or im-select.exe by platform
 	LogLevel            string                      `json:"log_level" yaml:"log_level"`                                           // log verbosity: "debug", "info" (default), "warn", "error"
@@ -1675,7 +1675,18 @@ func LoadConfigFromPath(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
-	return loadConfigData(path, data, true, nil)
+	layer, err := inspectKeymapLayer(path, data, OriginLayerGlobal)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := loadConfigData(path, data, true, nil)
+	if err != nil {
+		return nil, err
+	}
+	rc := &ResolvedConfig{}
+	rc.addKeymapLayer(layer)
+	logKeymapDiagnostics(keymapDiagnostics(cfg, rc.Index, []keymapLayer{layer}, nil))
+	return cfg, nil
 }
 
 // MergeProjectConfig overlays a project-level .chord/config.yaml onto an
@@ -1696,6 +1707,10 @@ func MergeProjectConfig(base *Config, path string) (projectCfg *Config, merged *
 		}
 		return nil, nil, fmt.Errorf("read config %s: %w", path, readErr)
 	}
+	layer, err := inspectKeymapLayer(path, data, OriginLayerProject)
+	if err != nil {
+		return nil, nil, err
+	}
 	cleanedData, drops, err := stripTypeInvalidOverride(path, data)
 	if err != nil {
 		return nil, nil, err
@@ -1711,6 +1726,13 @@ func MergeProjectConfig(base *Config, path string) (projectCfg *Config, merged *
 	if err != nil {
 		return nil, nil, err
 	}
+	rc := &ResolvedConfig{}
+	rc.addKeymapLayer(layer)
+	var inherited KeyMapConfig
+	if base != nil {
+		inherited = base.KeyMap
+	}
+	logKeymapDiagnostics(keymapDiagnostics(merged, rc.Index, []keymapLayer{layer}, inherited))
 	return projectCfg, merged, nil
 }
 
@@ -2305,12 +2327,15 @@ func unsupportedProjectTopLevelKeys(overrideMap map[string]any) []string {
 }
 
 func mergeConfigOverrideData(base *Config, overrideData []byte, overridePath string, diagnostics *[]Diagnostic) (*Config, error) {
+	if _, err := inspectKeymapLayer(overridePath, overrideData, OriginLayerProject); err != nil {
+		return nil, err
+	}
 	baseMap, err := configToYAMLMap(base)
 	if err != nil {
 		return nil, err
 	}
-	var overrideMap map[string]any
-	if err := yaml.Unmarshal(overrideData, &overrideMap); err != nil {
+	overrideMap, err := decodeConfigOverrideMap(overrideData)
+	if err != nil {
 		log.Warnf("config %s: ignoring invalid project config: %v", overridePath, err)
 		return base, nil
 	}

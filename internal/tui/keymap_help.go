@@ -51,34 +51,35 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding(km.SearchPrev, "previous search match"),
 		helpBinding(km.NextBlock, "next message card"),
 		helpBinding(km.PrevBlock, "previous message card"),
-		helpBinding([]string{"[count] " + keysDisplay(km.NextBlock)}, "repeat next message card"),
-		helpBinding([]string{"[count] " + keysDisplay(km.PrevBlock)}, "repeat previous message card"),
+		helpBinding(countHelpKeys(km.NextBlock), "repeat next message card"),
+		helpBinding(countHelpKeys(km.PrevBlock), "repeat previous message card"),
 		helpBinding(km.NextUserBlock, "next user message card"),
 		helpBinding(km.PrevUserBlock, "previous user message card"),
 		helpBinding(km.NextAssistantBlock, "next assistant message card"),
 		helpBinding(km.PrevAssistantBlock, "previous assistant message card"),
 		helpBinding(km.NextSameTypeBlock, "next message card of the same type"),
 		helpBinding(km.PrevSameTypeBlock, "previous message card of the same type"),
-		helpBinding([]string{"[count] " + keysDisplay(km.NextUserBlock)}, "repeat next user card"),
-		helpBinding([]string{"[count] " + keysDisplay(km.PrevUserBlock)}, "repeat previous user card"),
-		helpBinding([]string{"[count] " + keysDisplay(km.NextAssistantBlock)}, "repeat next assistant card"),
-		helpBinding([]string{"[count] " + keysDisplay(km.PrevAssistantBlock)}, "repeat previous assistant card"),
-		helpBinding([]string{"[count] " + keysDisplay(km.NextSameTypeBlock)}, "repeat next same-type card"),
-		helpBinding([]string{"[count] " + keysDisplay(km.PrevSameTypeBlock)}, "repeat previous same-type card"),
+		helpBinding(countHelpKeys(km.NextUserBlock), "repeat next user card"),
+		helpBinding(countHelpKeys(km.PrevUserBlock), "repeat previous user card"),
+		helpBinding(countHelpKeys(km.NextAssistantBlock), "repeat next assistant card"),
+		helpBinding(countHelpKeys(km.PrevAssistantBlock), "repeat previous assistant card"),
+		helpBinding(countHelpKeys(km.NextSameTypeBlock), "repeat next same-type card"),
+		helpBinding(countHelpKeys(km.PrevSameTypeBlock), "repeat previous same-type card"),
 		helpBinding(km.ScrollDown, "scroll down one line"),
 		helpBinding(km.ScrollUp, "scroll up one line"),
-		helpBinding([]string{"[count] " + keysDisplay(km.ScrollDown)}, "repeat line scroll down"),
-		helpBinding([]string{"[count] " + keysDisplay(km.ScrollUp)}, "repeat line scroll up"),
+		helpBinding(countHelpKeys(km.ScrollDown), "repeat line scroll down"),
+		helpBinding(countHelpKeys(km.ScrollUp), "repeat line scroll up"),
 		helpBinding(km.FullPageDown, "page down"),
 		helpBinding(km.FullPageUp, "page up"),
-		helpBinding([]string{"gg"}, "jump to first visible message card"),
-		helpBinding([]string{"[count]gg / [count]G"}, "jump to visible message card by number"),
+		helpBinding(sequenceHelpKeys(km.ScrollToTopSeq), "jump to first visible message card (press any listed binding twice)"),
+		helpBinding(countHelpKeys(sequenceHelpKeys(km.ScrollToTopSeq)), "jump to visible message card by number (press any listed binding twice)"),
+		helpBinding(countHelpKeys(km.ScrollToBottom), "jump to visible message card by number"),
 		helpBinding(km.ScrollToBottom, "jump to bottom"),
 		helpBinding([]string{"yy"}, "copy current message card"),
 		helpBinding([]string{"[count]yy"}, "copy count message cards from current card"),
 		helpBinding([]string{"dd / [count]dd"}, "clear input and attachments"),
 		helpBinding(km.ToggleCollapse, "toggle focused message card"),
-		helpBinding([]string{"ee"}, "fork from user message"),
+		helpBinding(sequenceHelpKeys(km.ForkSession), "fork from user message (press any listed binding twice)"),
 		helpBinding(km.Directory, "open message directory"),
 		helpBinding(km.UsageStats, "open usage stats"),
 		helpBinding([]string{statusCommand}, "open runtime overview from input"),
@@ -105,6 +106,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding(km.InsertNewline, "insert newline"),
 		helpBinding(km.InsertHistoryUp, "previous history"),
 		helpBinding(km.InsertHistoryDown, "next history"),
+		helpBinding(km.InsertAttachFile, "attach a file"),
 		helpBinding(km.InsertAttachClipboard, "attach clipboard image or PDF"),
 		helpBinding(km.InsertClearInput, "clear input"),
 		helpBinding(km.InsertUndo, "undo composer edit"),
@@ -121,7 +123,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 		helpBinding(km.Diagnostics, "export diagnostics bundle"),
 	)
 
-	return []HelpGroup{
+	groups := []HelpGroup{
 		{
 			Title:    "Insert Mode",
 			Bindings: insertBindings,
@@ -275,8 +277,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 				helpBinding([]string{"ctrl+b"}, "page up"),
 				helpBinding([]string{"g"}, "jump to top"),
 				helpBinding([]string{"G"}, "jump to bottom"),
-				helpBinding(append([]string{}, km.HelpToggle...), "close"),
-				helpBinding([]string{"esc / q"}, "close"),
+				helpBinding([]string{"esc", "q", "?", "shift+/"}, "close"),
 			},
 		},
 		{
@@ -288,4 +289,24 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 			},
 		},
 	}
+	for i := range groups {
+		groups[i].Bindings = slices.DeleteFunc(groups[i].Bindings, func(b HelpBinding) bool { return len(b.Keys) == 0 })
+	}
+	return slices.DeleteFunc(groups, func(g HelpGroup) bool { return len(g.Bindings) == 0 })
+}
+
+func countHelpKeys(keys []string) []string {
+	result := make([]string, len(keys))
+	for i, key := range keys {
+		result[i] = "[count] " + key
+	}
+	return result
+}
+
+func sequenceHelpKeys(keys []string) []string {
+	result := make([]string, len(keys))
+	for i, key := range keys {
+		result[i] = key + " " + key
+	}
+	return result
 }

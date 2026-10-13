@@ -17,11 +17,13 @@ func (m Model) helpLines(width int) []string {
 
 	lines := []string{centerHelpLine("Chord "+buildinfo.Current().Short(), width), ""}
 	intro := []string{
-		"Press Esc, q, or ? to close. /help also opens this view.",
-		fmt.Sprintf("%s completes a visible / command suggestion. Otherwise it sends, queues when busy, or continues when idle with empty input.", keysDisplay(m.keyMap.InsertSubmit)),
+		"Press Esc, q, or ? to close.",
 		"Ctrl+C starts quit confirmation.",
 		"In normal mode, Esc stops the current run. Queued drafts are committed without resuming the run.",
 		"Click a queued draft to edit it, or click [del] to remove it before send.",
+	}
+	if keys := keysDisplay(m.keyMap.InsertSubmit); keys != "" {
+		intro = append(intro, fmt.Sprintf("%s completes a visible / command suggestion. Otherwise it sends, queues when busy, or continues when idle with empty input.", keys))
 	}
 	for _, paragraph := range intro {
 		for _, line := range wrapText(paragraph, contentWidth) {

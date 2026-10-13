@@ -161,6 +161,41 @@ keymap:
   switch_model: ["ctrl+t"]     # choose a different key if you prefer
 ```
 
+### Disable a shortcut and inherit settings
+
+Use an empty list to disable an action's configurable shortcut:
+
+```yaml
+keymap:
+  insert_undo: []
+```
+
+Project settings override global settings one action at a time; an unconfigured action uses its built-in default.
+
+| Declaration in a configuration layer | Result |
+| --- | --- |
+| Action omitted, or `keymap: {}` | Inherit the action from the lower layer |
+| `quit: []` | Disable the configurable Quit shortcut |
+| `quit: ["Q"]` | Replace the action's entire key list |
+| `quit: null`, a scalar, or a list containing an invalid item | Ignore the entire action declaration and inherit from the lower layer |
+| `keymap: null`, a scalar, or a list | Ignore this layer's entire `keymap` |
+
+For example, global `quit: []` stays disabled when the project omits `quit` or supplies an invalid declaration. Project `quit: ["Q"]` binds it again. Other valid actions still apply when one declaration is invalid.
+
+Disabling a shortcut leaves the key available for other actions or text input. Fixed `Ctrl+C`, Normal mode's cancel `Esc`, and dialogs' own keys remain available. Disabling `insert_newline` clears the composer's newline bindings while preserving multiline paste and dialog editing. Help and startup hints omit unbound actions. If you disable the sending or mode-switching shortcuts you need, edit the configuration and restart to restore them.
+
+### Key names and configuration diagnostics
+
+Each action takes a list of strings. Quote keys such as `"1"`: YAML numbers, booleans, and null are invalid list items. A key can be a named key such as `enter`, `esc`, `space`, `pgup`, or `f1` through `f63`, a printable character, or a single Unicode grapheme such as an accented character or emoji. Names are case-sensitive: `g` and `G` differ; `escape`, `return`, `f01`, and `gg` are not key names.
+
+Modifiers are `ctrl`, `alt`, `shift`, `meta`, `hyper`, and `super`, each at most once. Their order is normalized to that order, so `shift+ctrl+left` becomes `ctrl+shift+left`. `+` and `ctrl++` are valid. A single space becomes `space`; identical normalized keys are deduplicated. Extra whitespace is not trimmed, and `shift+a` is not converted to `A`. Chord keeps `ctrl+i` distinct from `tab` and `ctrl+m` from `enter`.
+
+For `scroll_to_top_seq` and `fork_session`, list the keys that can occupy each position in the two-key sequence. For example, `["f1"]` means press F1 twice; `["g", "h"]` allows either key at either position. Do not write `"gg"` as one key.
+
+Startup notices and `chord doctor config` report unknown actions, invalid types, and invalid key names with the source file, line, and field path. A rejected action's report also shows its effective binding (or `disabled`) and where that setting came from. Fix the declaration at the reported location and restart.
+
+Chord also detects some definite cases where an earlier handler takes a configured key: fixed `ctrl+c` and `super+c`, Stop before Undo in Insert mode, and Stop before Switch Role in Normal mode (excluding the fixed `ctrl+m` entry). These warnings preserve your bindings. Other contexts, sequences, completion, selection, and overlays are not fully analyzed; no warning does not guarantee a shortcut is reachable. A valid key name also does not guarantee your terminal can send it.
+
 ### Terminal compatibility notes
 
 Custom key bindings only work when your terminal emulator, OS, and any multiplexer such as tmux forward that key sequence to Chord. Prefer plain printable keys in Normal mode or simple `ctrl+letter` combinations that do not already have strong terminal meanings.
@@ -175,7 +210,7 @@ Avoid these as default/custom bindings unless you have tested them in your exact
 - `ctrl+c`, `ctrl+z`, and `ctrl+\\`: these have signal/cancel/suspend meanings in terminals.
 - Function keys or `ctrl+shift+...` combinations: support varies across terminals, keyboard layouts, SSH, and tmux.
 
-If a custom binding does not work, press `?` to confirm Chord loaded the mapping, then check whether the terminal receives the key with tools such as `showkey`, `cat`, or your terminal's key-event inspector.
+If a custom binding does not work, run `chord doctor config` first. Open help with your configured help key (default `?` in Normal mode) to inspect the effective mapping, then check whether the terminal receives the key with tools such as `showkey`, `cat`, or your terminal's key-event inspector.
 
 Action names are the lower snake_case identifiers you set in `config.yaml`; the table below lists the ones Chord ships. Keys are the strings produced by Bubble Tea's `tea.KeyMsg.String()`, e.g. `"esc"`, `"enter"`, `"shift+enter"`, `"ctrl+p"`, `"ctrl+shift+left"`, `"j"`, `"down"`, `"space"`, `" "`.
 
@@ -235,7 +270,7 @@ Only the actions you list are overridden; all others fall back to the defaults a
 
 ## Discovering bindings at runtime
 
-Press `?` in Normal mode to toggle an in-app cheatsheet that reflects your current effective bindings, useful after you have customized `keymap`.
+Press your configured help key (default `?`) in Normal mode to toggle an in-app cheatsheet that reflects your current effective bindings, useful after you have customized `keymap`.
 
 ## Related
 

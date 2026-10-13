@@ -1,88 +1,68 @@
 package tui
 
-// KeyMapFromConfig builds a KeyMap by starting from DefaultKeyMap() and
-// overriding only the entries present in m. Keys are snake_case action names;
-// values are slices of key strings (e.g. []string{"j", "down"}).
-//
-// Supported action names mirror the KeyMap fields in lower_snake_case:
-//
-//	insert_escape, insert_submit, insert_newline, insert_history_up, insert_history_down
-//	insert_attach_clipboard, insert_attach_file, insert_clear_input
-//	insert_page_up, insert_page_down
-//	enter_insert, quit, help_toggle
-//	scroll_down, scroll_up, full_page_down, full_page_up, scroll_to_bottom, scroll_to_top_seq
-//	next_block, prev_block, next_user_block, prev_user_block, next_assistant_block,
-//	prev_assistant_block, next_same_type_block, prev_same_type_block
-//	toggle_collapse, fork_session, directory, usage_stats
-//	error_panel
-//	search_start, search_next, search_prev
-//	switch_agent, switch_role, switch_model, service_tier, stop
-//
-// Example config.yaml snippet:
-//
-//	keymap:
-//	  next_block: ["j"]          # j moves to next message card
-//	  prev_block: ["k"]          # k moves to previous message card
-//	  scroll_down: ["down"]      # keep arrow key for line scrolling
-//	  scroll_up: ["up"]          # keep arrow key for line scrolling
-//	  quit: ["Q"]                # require shift for quit
+import "github.com/keakon/chord/internal/keybinding"
+
+type keyMapSetter struct {
+	id    keybinding.ActionID
+	field func(*KeyMap) *[]string
+}
+
+var keyMapSetters = []keyMapSetter{
+	{keybinding.ActionInsertEscape, func(km *KeyMap) *[]string { return &km.InsertEscape }},
+	{keybinding.ActionInsertSubmit, func(km *KeyMap) *[]string { return &km.InsertSubmit }},
+	{keybinding.ActionInsertNewline, func(km *KeyMap) *[]string { return &km.InsertNewline }},
+	{keybinding.ActionInsertHistoryUp, func(km *KeyMap) *[]string { return &km.InsertHistoryUp }},
+	{keybinding.ActionInsertHistoryDown, func(km *KeyMap) *[]string { return &km.InsertHistoryDown }},
+	{keybinding.ActionInsertAttachClipboard, func(km *KeyMap) *[]string { return &km.InsertAttachClipboard }},
+	{keybinding.ActionInsertAttachFile, func(km *KeyMap) *[]string { return &km.InsertAttachFile }},
+	{keybinding.ActionInsertClearInput, func(km *KeyMap) *[]string { return &km.InsertClearInput }},
+	{keybinding.ActionInsertUndo, func(km *KeyMap) *[]string { return &km.InsertUndo }},
+	{keybinding.ActionInsertPageUp, func(km *KeyMap) *[]string { return &km.InsertPageUp }},
+	{keybinding.ActionInsertPageDown, func(km *KeyMap) *[]string { return &km.InsertPageDown }},
+	{keybinding.ActionEnterInsert, func(km *KeyMap) *[]string { return &km.EnterInsert }},
+	{keybinding.ActionQuit, func(km *KeyMap) *[]string { return &km.Quit }},
+	{keybinding.ActionHelpToggle, func(km *KeyMap) *[]string { return &km.HelpToggle }},
+	{keybinding.ActionScrollDown, func(km *KeyMap) *[]string { return &km.ScrollDown }},
+	{keybinding.ActionScrollUp, func(km *KeyMap) *[]string { return &km.ScrollUp }},
+	{keybinding.ActionFullPageDown, func(km *KeyMap) *[]string { return &km.FullPageDown }},
+	{keybinding.ActionFullPageUp, func(km *KeyMap) *[]string { return &km.FullPageUp }},
+	{keybinding.ActionScrollToBottom, func(km *KeyMap) *[]string { return &km.ScrollToBottom }},
+	{keybinding.ActionScrollToTopSeq, func(km *KeyMap) *[]string { return &km.ScrollToTopSeq }},
+	{keybinding.ActionNextBlock, func(km *KeyMap) *[]string { return &km.NextBlock }},
+	{keybinding.ActionPrevBlock, func(km *KeyMap) *[]string { return &km.PrevBlock }},
+	{keybinding.ActionNextUserBlock, func(km *KeyMap) *[]string { return &km.NextUserBlock }},
+	{keybinding.ActionPrevUserBlock, func(km *KeyMap) *[]string { return &km.PrevUserBlock }},
+	{keybinding.ActionNextAssistantBlock, func(km *KeyMap) *[]string { return &km.NextAssistantBlock }},
+	{keybinding.ActionPrevAssistantBlock, func(km *KeyMap) *[]string { return &km.PrevAssistantBlock }},
+	{keybinding.ActionNextSameTypeBlock, func(km *KeyMap) *[]string { return &km.NextSameTypeBlock }},
+	{keybinding.ActionPrevSameTypeBlock, func(km *KeyMap) *[]string { return &km.PrevSameTypeBlock }},
+	{keybinding.ActionToggleCollapse, func(km *KeyMap) *[]string { return &km.ToggleCollapse }},
+	{keybinding.ActionForkSession, func(km *KeyMap) *[]string { return &km.ForkSession }},
+	{keybinding.ActionDirectory, func(km *KeyMap) *[]string { return &km.Directory }},
+	{keybinding.ActionUsageStats, func(km *KeyMap) *[]string { return &km.UsageStats }},
+	{keybinding.ActionErrorPanel, func(km *KeyMap) *[]string { return &km.ErrorPanel }},
+	{keybinding.ActionBackgroundJobs, func(km *KeyMap) *[]string { return &km.BackgroundJobs }},
+	{keybinding.ActionSearchStart, func(km *KeyMap) *[]string { return &km.SearchStart }},
+	{keybinding.ActionSearchNext, func(km *KeyMap) *[]string { return &km.SearchNext }},
+	{keybinding.ActionSearchPrev, func(km *KeyMap) *[]string { return &km.SearchPrev }},
+	{keybinding.ActionSwitchAgent, func(km *KeyMap) *[]string { return &km.SwitchAgent }},
+	{keybinding.ActionSwitchRole, func(km *KeyMap) *[]string { return &km.SwitchRole }},
+	{keybinding.ActionStop, func(km *KeyMap) *[]string { return &km.Stop }},
+	{keybinding.ActionSwitchModel, func(km *KeyMap) *[]string { return &km.SwitchModel }},
+	{keybinding.ActionServiceTier, func(km *KeyMap) *[]string { return &km.ServiceTier }},
+	{keybinding.ActionDiagnostics, func(km *KeyMap) *[]string { return &km.Diagnostics }},
+	{keybinding.ActionYolo, func(km *KeyMap) *[]string { return &km.Yolo }},
+	{keybinding.ActionMCP, func(km *KeyMap) *[]string { return &km.MCP }},
+}
+
+// KeyMapFromConfig resolves overrides against the shared action catalog. Empty
+// lists disable actions; absent or invalid declarations retain their defaults.
+// Returned bindings never share mutable slices with the input configuration.
 func KeyMapFromConfig(m map[string][]string) KeyMap {
-	km := DefaultKeyMap()
-	if len(m) == 0 {
-		return km
+	var km KeyMap
+	resolved := keybinding.Resolve(m)
+	for _, setter := range keyMapSetters {
+		*setter.field(&km) = resolved[setter.id]
 	}
-
-	apply := func(field *[]string, key string) {
-		if v, ok := m[key]; ok && len(v) > 0 {
-			*field = v
-		}
-	}
-
-	apply(&km.InsertEscape, "insert_escape")
-	apply(&km.InsertSubmit, "insert_submit")
-	apply(&km.InsertNewline, "insert_newline")
-	apply(&km.InsertHistoryUp, "insert_history_up")
-	apply(&km.InsertHistoryDown, "insert_history_down")
-	apply(&km.InsertAttachClipboard, "insert_attach_clipboard")
-	apply(&km.InsertAttachFile, "insert_attach_file")
-	apply(&km.InsertClearInput, "insert_clear_input")
-	apply(&km.InsertUndo, "insert_undo")
-	apply(&km.InsertPageUp, "insert_page_up")
-	apply(&km.InsertPageDown, "insert_page_down")
-	apply(&km.EnterInsert, "enter_insert")
-	apply(&km.Quit, "quit")
-	apply(&km.HelpToggle, "help_toggle")
-	apply(&km.ScrollDown, "scroll_down")
-	apply(&km.ScrollUp, "scroll_up")
-	apply(&km.FullPageDown, "full_page_down")
-	apply(&km.FullPageUp, "full_page_up")
-	apply(&km.ScrollToBottom, "scroll_to_bottom")
-	apply(&km.ScrollToTopSeq, "scroll_to_top_seq")
-	apply(&km.NextBlock, "next_block")
-	apply(&km.PrevBlock, "prev_block")
-	apply(&km.NextUserBlock, "next_user_block")
-	apply(&km.PrevUserBlock, "prev_user_block")
-	apply(&km.NextAssistantBlock, "next_assistant_block")
-	apply(&km.PrevAssistantBlock, "prev_assistant_block")
-	apply(&km.NextSameTypeBlock, "next_same_type_block")
-	apply(&km.PrevSameTypeBlock, "prev_same_type_block")
-	apply(&km.ToggleCollapse, "toggle_collapse")
-	apply(&km.ForkSession, "fork_session")
-	apply(&km.Directory, "directory")
-	apply(&km.UsageStats, "usage_stats")
-	apply(&km.ErrorPanel, "error_panel")
-	apply(&km.SearchStart, "search_start")
-	apply(&km.SearchNext, "search_next")
-	apply(&km.SearchPrev, "search_prev")
-	apply(&km.SwitchAgent, "switch_agent")
-	apply(&km.SwitchRole, "switch_role")
-	apply(&km.Stop, "stop")
-	apply(&km.BackgroundJobs, "background_jobs")
-	apply(&km.SwitchModel, "switch_model")
-	apply(&km.ServiceTier, "service_tier")
-	apply(&km.Diagnostics, "diagnostics")
-	apply(&km.Yolo, "yolo")
-	apply(&km.MCP, "mcp")
-
 	return km
 }

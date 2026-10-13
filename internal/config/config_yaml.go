@@ -46,11 +46,15 @@ func yamlMappingEntries(node *yaml.Node, visiting map[*yaml.Node]bool) ([]YAMLMa
 			merges = append(merges, value)
 			continue
 		}
-		entry := YAMLMappingEntry{Key: key.Value, KeyNode: key, Val: value}
-		if index, exists := positions[key.Value]; exists {
+		var name string
+		if err := key.Decode(&name); err != nil {
+			return nil, fmt.Errorf("decode YAML mapping key at line %d: %w", key.Line, err)
+		}
+		entry := YAMLMappingEntry{Key: name, KeyNode: key, Val: value}
+		if index, exists := positions[name]; exists {
 			entries[index] = entry
 		} else {
-			positions[key.Value] = len(entries)
+			positions[name] = len(entries)
 			entries = append(entries, entry)
 		}
 	}

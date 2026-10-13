@@ -130,7 +130,7 @@ func TestNormalModeHelpListsCountedChordBindings(t *testing.T) {
 	m := NewModel(nil)
 	lines := m.helpLines(120)
 	text := strings.Join(lines, "\n")
-	for _, want := range []string{"[count]gg / [count]G", "[count]yy", "dd / [count]dd"} {
+	for _, want := range []string{"[count] g g", "[count] G", "[count]yy", "dd / [count]dd"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help text should contain %q, got:\n%s", want, text)
 		}

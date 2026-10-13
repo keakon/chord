@@ -88,9 +88,7 @@ func NewInput() Input {
 // the TUI KeyMap. Must be called whenever the KeyMap changes so that the
 // textarea recognizes remapped newline keys.
 func (i *Input) SyncNewlineKeys(keys []string) {
-	if len(keys) > 0 {
-		i.textarea.KeyMap.InsertNewline.SetKeys(keys...)
-	}
+	i.textarea.KeyMap.InsertNewline.SetKeys(keys...)
 }
 
 // SetBangMode switches the first-line prompt between "> " and "! " (shell line).

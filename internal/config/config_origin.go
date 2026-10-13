@@ -8,6 +8,8 @@ import (
 
 	"github.com/keakon/golog/log"
 	"gopkg.in/yaml.v3"
+
+	"github.com/keakon/chord/internal/keybinding"
 )
 
 // OriginLayer identifies the config file layer a raw declaration came from.
@@ -94,8 +96,10 @@ type PoolRefOrigin struct {
 // nullable capability blocks, model profile scalar leaves, limit leaves, and
 // model pool references. It is built from sanitized layer bytes (invalid
 // overrides are stripped before indexing, so the index records only effective
-// declarations) and never enters request hot paths.
+// declarations) and never enters request hot paths. KeyMap origins are attached
+// separately by the original-layer inspector to preserve original locations.
 type SourceIndex struct {
+	KeyMap     map[keybinding.ActionID][]Origin
 	Providers  map[string]ProviderOrigin
 	ModelPools map[string][]PoolRefOrigin
 	Compaction map[string][]Origin
@@ -636,10 +640,16 @@ type ResolvedConfig struct {
 // rather than an error or the first-run wizard; surfacing is up to callers.
 func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*ResolvedConfig, error) {
 	rc := &ResolvedConfig{}
+	var keymapLayers []keymapLayer
 
 	globalData, err := os.ReadFile(globalPath)
 	switch {
 	case err == nil:
+		keymap, inspectErr := inspectKeymapLayer(globalPath, globalData, OriginLayerGlobal)
+		if inspectErr != nil {
+			return nil, inspectErr
+		}
+		keymapLayers = append(keymapLayers, keymap)
 		globalCleaned, _, serr := stripTypeInvalidOverride(globalPath, globalData)
 		if serr != nil {
 			return nil, serr
@@ -649,6 +659,7 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 			return nil, err
 		}
 		rc.addIndexLayer(ConfigLayer{Layer: OriginLayerGlobal, File: globalPath, Data: globalCleaned})
+		rc.addKeymapLayer(keymap)
 	case os.IsNotExist(err):
 		rc.Diagnostics = append(rc.Diagnostics, Diagnostic{
 			Severity:  DiagnosticSeverityWarning,
@@ -666,8 +677,13 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 		projectData, readErr := os.ReadFile(projectPath)
 		switch {
 		case readErr == nil:
-			var projectMap map[string]any
-			if err := yaml.Unmarshal(projectData, &projectMap); err != nil {
+			keymap, inspectErr := inspectKeymapLayer(projectPath, projectData, OriginLayerProject)
+			if inspectErr != nil {
+				return nil, inspectErr
+			}
+			keymapLayers = append(keymapLayers, keymap)
+			projectMap, err := decodeConfigOverrideMap(projectData)
+			if err != nil {
 				return nil, fmt.Errorf("parse config %s: %w", projectPath, err)
 			}
 			unsupported := unsupportedProjectTopLevelKeys(projectMap)
@@ -701,6 +717,7 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 				return nil, err
 			}
 			rc.addIndexLayer(ConfigLayer{Layer: OriginLayerProject, File: projectPath, Data: cleaned})
+			rc.addKeymapLayer(keymap)
 		case os.IsNotExist(readErr):
 			rc.Config = rc.Global
 			readErr = nil
@@ -744,6 +761,9 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 	rc.Diagnostics = append(rc.Diagnostics, catalogSendOverrideDiagnostics(rc.Config, CatalogResponsesCompat)...)
 	rc.CatalogVersion = modelcatalogVersion()
 	rc.Diagnostics = append(rc.Diagnostics, ResolveConfiguredPoolRefs(rc.Config)...)
+	keymapDiags := keymapDiagnostics(rc.Config, rc.Index, keymapLayers, nil)
+	rc.Diagnostics = append(rc.Diagnostics, keymapDiags...)
+	logKeymapDiagnostics(keymapDiags)
 	return rc, nil
 }
 
@@ -766,6 +786,21 @@ func (rc *ResolvedConfig) addIndexLayer(layer ConfigLayer) {
 // mergeSourceIndex folds one layer's entries into an existing index. Later
 // calls append higher-priority layers; declarations keep their build order.
 func mergeSourceIndex(dst, src *SourceIndex) {
+	if dst.KeyMap == nil {
+		dst.KeyMap = make(map[keybinding.ActionID][]Origin)
+	}
+	for id, origins := range src.KeyMap {
+		dst.KeyMap[id] = append(dst.KeyMap[id], origins...)
+	}
+	if dst.Compaction == nil {
+		dst.Compaction = make(map[string][]Origin)
+	}
+	if dst.Providers == nil {
+		dst.Providers = make(map[string]ProviderOrigin)
+	}
+	if dst.ModelPools == nil {
+		dst.ModelPools = make(map[string][]PoolRefOrigin)
+	}
 	for key, origins := range src.Compaction {
 		dst.Compaction[key] = append(dst.Compaction[key], origins...)
 	}

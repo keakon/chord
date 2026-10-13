@@ -23,7 +23,10 @@ func (m *Model) nextEscHint() string {
 	case ModeErrorPanel:
 		return "close errors"
 	case ModeInsert:
-		return "normal mode"
+		if keyMatches("esc", m.keyMap.InsertEscape) {
+			return "normal mode"
+		}
+		return ""
 	case ModeNormal:
 		// continue below
 	default:

@@ -131,18 +131,9 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 		if len(m.viewport.blocks) == 0 {
 			// Hints must match the active mode: the TUI starts in Insert mode,
 			// where "?" would just type a character instead of opening help.
-			var welcomeHints []string
-			if m.mode == ModeInsert {
-				welcomeHints = []string{
-					DimStyle.Render(fmt.Sprintf("Type your task and press %s to send · /help for commands", keysDisplay(m.keyMap.InsertSubmit))),
-					DimStyle.Render(fmt.Sprintf("%s: normal mode (%s for help)  %s: model pool", keysDisplay(m.keyMap.InsertEscape), keysDisplay(m.keyMap.HelpToggle), keysDisplay(m.keyMap.SwitchModel))),
-					DimStyle.Render(fmt.Sprintf("%s: attach image/PDF  terminal paste: text", keysDisplay(m.keyMap.InsertAttachClipboard))),
-				}
-			} else {
-				welcomeHints = []string{
-					DimStyle.Render(fmt.Sprintf("Press %s for help · /help for commands", keysDisplay(m.keyMap.HelpToggle))),
-					DimStyle.Render(fmt.Sprintf("%s: insert  %s: search  %s: model pool  %s: directory", keysDisplay(m.keyMap.EnterInsert), keysDisplay(m.keyMap.SearchStart), keysDisplay(m.keyMap.SwitchModel), keysDisplay(m.keyMap.Directory))),
-				}
+			welcomeHints := welcomeKeyHints(m.mode, m.keyMap)
+			for i := range welcomeHints {
+				welcomeHints[i] = DimStyle.Render(welcomeHints[i])
 			}
 			emptyMessage := DimStyle.Render("No messages yet. Start a conversation!")
 			if m.startupRestorePending {
