@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
-
-	"github.com/keakon/chord/internal/agent"
 
 	"github.com/charmbracelet/x/term"
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/inputhistory"
 	"github.com/keakon/chord/internal/tui"
 )
 
@@ -144,6 +145,13 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 		tuiModel.SetDesktopNotification(osc9, foreground)
 	}
 
+	if ac != nil && ac.Cfg != nil && ac.PathLocator != nil && ac.ProjectLocator != nil {
+		historyOptions, err := ac.Cfg.InputHistory.Effective()
+		if err != nil {
+			return tuiProgramPlan{}, err
+		}
+		tuiModel.SetInputHistory(inputhistory.New(ac.PathLocator.StateDir, historyOptions), ac.ProjectLocator.ProjectKey, filepath.Base(ac.ProjectLocator.CanonicalRoot))
+	}
 	opts = append(opts, tea.WithWindowSize(initialWidth, initialHeight))
 	// Chord renders streaming transcript updates near sticky separators and side
 	// panels. Terminal hard-scroll optimizations can leave stale rows in that

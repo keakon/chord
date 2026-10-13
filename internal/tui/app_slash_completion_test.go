@@ -127,7 +127,7 @@ func TestServiceTierShortcutSendsToggleCommand(t *testing.T) {
 	m := NewModel(backend)
 	m.mode = ModeInsert
 
-	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
 	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier fast" {
 		t.Fatalf("sentMessages = %#v, want [/tier fast]", backend.sentMessages)
 	}
@@ -146,7 +146,7 @@ func TestServiceTierShortcutRotatesOnlySupportedTiers(t *testing.T) {
 		m := NewModel(backend)
 		m.mode = ModeInsert
 
-		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
 		if len(backend.sentMessages) != 0 {
 			t.Fatalf("sentMessages = %#v, want none", backend.sentMessages)
 		}
@@ -161,7 +161,7 @@ func TestServiceTierShortcutRotatesOnlySupportedTiers(t *testing.T) {
 		m := NewModel(backend)
 		m.mode = ModeInsert
 
-		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
 		if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier standard" {
 			t.Fatalf("sentMessages = %#v, want [/tier standard]", backend.sentMessages)
 		}
@@ -172,7 +172,7 @@ func TestServiceTierShortcutRotatesOnlySupportedTiers(t *testing.T) {
 		m := NewModel(backend)
 		m.mode = ModeInsert
 
-		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
 		if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier fast" {
 			t.Fatalf("sentMessages = %#v, want [/tier fast]", backend.sentMessages)
 		}
@@ -190,7 +190,7 @@ func TestServiceTierShortcutRotatesOnlySupportedTiers(t *testing.T) {
 		m := NewModel(backend)
 		m.mode = ModeInsert
 
-		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
 		if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier slow" {
 			t.Fatalf("sentMessages = %#v, want [/tier slow]", backend.sentMessages)
 		}
@@ -209,7 +209,7 @@ func TestServiceTierShortcutKeepsUnsupportedRequestedTierVisibleUntilSwitched(t 
 		t.Fatalf("service tier line = %q, want unsupported requested fast visible", plain)
 	}
 
-	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+	_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
 	if len(backend.sentMessages) != 1 || backend.sentMessages[0] != "/tier standard" {
 		t.Fatalf("sentMessages = %#v, want [/tier standard]", backend.sentMessages)
 	}
@@ -253,7 +253,7 @@ func TestSlashCompletionShowsTierCommandMatchingServiceTierShortcut(t *testing.T
 		}
 
 		m.mode = ModeInsert
-		_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
+		_ = m.handleNormalKey(tea.KeyPressMsg(tea.Key{Code: 'r', Mod: tea.ModCtrl}))
 		if want == "" {
 			if len(backend.sentMessages) != 0 {
 				t.Fatalf("sentMessages = %#v, want none", backend.sentMessages)

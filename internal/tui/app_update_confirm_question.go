@@ -46,6 +46,10 @@ func (m *Model) handleConfirmRequest(msg confirmRequestMsg) tea.Cmd {
 // displayed deadline anchors there rather than resetting to show a full timeout
 // the agent may already have auto-resolved.
 func (m *Model) presentConfirmRequest(msg confirmRequestMsg, prevMode Mode, arrivedAt time.Time) tea.Cmd {
+	if m.historyActive() {
+		m.closeInputHistory()
+		prevMode = ModeInsert
+	}
 	m.exitRenderFreeze()
 	m.focusAgentForRequest(msg.request.AgentID)
 	m.confirm = confirmState{
@@ -95,6 +99,10 @@ func (m *Model) handleConfirmTimeoutTick() tea.Cmd {
 // request's own absolute deadline rather than to the moment the dialog reached
 // the screen, so time spent queued behind another modal never extends it.
 func (m *Model) presentQuestionRequest(dlg questionDialog, prevMode Mode) tea.Cmd {
+	if m.historyActive() {
+		m.closeInputHistory()
+		prevMode = ModeInsert
+	}
 	m.questionGeneration++
 	m.exitRenderFreeze()
 	ei := newQuestionTextarea(m.width)

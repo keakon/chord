@@ -33,6 +33,8 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 	// insert_attach_clipboard binding (Ctrl+V by default).
 	if isSuperV(msg) {
 		switch m.mode {
+		case ModeInputHistorySearch:
+			return m.pasteInputHistoryClipboard()
 		case ModeInsert:
 			m.clipboardPasteSuppressUntil = time.Now().Add(150 * time.Millisecond)
 			return m.pasteComposerTextFromClipboard()
@@ -48,6 +50,8 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
 
 func (m *Model) handleModeKey(msg tea.KeyMsg) tea.Cmd {
 	switch m.mode {
+	case ModeInputHistorySearch, ModeInputHistoryClearConfirm:
+		return m.handleInputHistoryKey(msg)
 	case ModeInsert:
 		return m.handleInsertKey(msg)
 	case ModeNormal:

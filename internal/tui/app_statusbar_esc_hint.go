@@ -10,6 +10,8 @@ func (m *Model) nextEscHint() string {
 	switch m.mode {
 	case ModeSearch:
 		return "cancel search"
+	case ModeInputHistorySearch, ModeInputHistoryClearConfirm:
+		return "close history"
 	case ModeMemoryPanel:
 		return "close memory"
 	case ModeFileViewer:

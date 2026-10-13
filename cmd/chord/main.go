@@ -394,6 +394,8 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	tuiModel := programPlan.model
+	cleanupTUI := tuiCleanup(&tuiModel, cmd.ErrOrStderr())
+	defer cleanupTUI()
 	endpoint, endpointErr := startRuntimeTakeover(ac, "tui")
 	if endpointErr != nil {
 		log.Warnf("session takeover unavailable error=%v", endpointErr)
@@ -414,9 +416,7 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	}()
 
 	_, tuiErr := programPlan.runner.Run()
-	if err := tuiModel.Close(); err != nil {
-		log.Warnf("tui runtime cache cleanup failed error=%v", err)
-	}
+	cleanupTUI()
 
 	if status, ok := savedTakeoverStatus(ac); ok {
 		if err := ac.MainAgent.ReleasePausedSession(status.TransferID); err != nil {

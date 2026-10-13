@@ -99,7 +99,7 @@ TUI 有两种模式：
 | `Alt+R` | 在主 Agent 视图循环切换角色；子 Agent 视图提示先返回主视图 |
 | `Ctrl+X` | 停止当前轮次及运行中的子任务，同时退出循环模式，保留草稿与会话 |
 | `Ctrl+P`      | 在 Insert 和 Normal 两种模式下都打开模型池选择器                                                   |
-| `Ctrl+R`      | 在当前 provider/model 支持的 tier 中循环切换后续模型请求的 service tier；`/tier` slash 补全会预测相同的下一个 tier，没有实际可切换目标时隐藏 |
+| `Ctrl+R`      | Normal 模式：在当前 provider/model 支持的 tier 中循环切换后续模型请求的 service tier；`/tier` slash 补全会预测相同的下一个 tier，没有实际可切换目标时隐藏 |
 | `Ctrl+Y`      | 切换 YOLO 模式；普通工具跳过权限检查、不再弹确认；handoff、delegate、cancel、done 和 compact_context 仍按各自配置的规则执行                         |
 | `Ctrl+O`      | 打开 MCP server 选择器；agent 运行中修改会在下一次模型请求生效                                                |
 | `Ctrl+G`      | 导出 diagnostics 包                                                                                             |
@@ -223,6 +223,7 @@ action 名就是 `config.yaml` 里可设置的 lower snake_case 标识符，下�
 | `insert_escape`            | `["esc"]`                         |
 | `insert_submit`            | `["enter"]`                       |
 | `insert_newline`           | `["shift+enter", "ctrl+j"]`       |
+| `insert_history_search` | `["ctrl+r"]` |
 | `insert_history_up`        | `["up"]`                           |
 | `insert_history_down`      | `["down", "ctrl+n"]`              |
 | `insert_attach_clipboard`  | `["ctrl+v", "alt+v"]`（附加剪贴板图片或 PDF） |
@@ -277,3 +278,7 @@ action 名就是 `config.yaml` 里可设置的 lower snake_case 标识符，下�
 - [使用指南](./usage_CN.md)：键位对应的工作流上下文
 - [配置与认证](./configuration_CN.md)：完整 `config.yaml` schema
 - [扩展与定制](./customization_CN.md)：agents、hooks、skills、MCP、LSP
+
+## 输入历史搜索
+
+Insert 模式的 `Ctrl+R` 打开输入历史搜索；Normal 模式保留速度切换。可通过 `keymap.insert_history_search` 自定义搜索入口。搜索内 `Ctrl+R` 选择下一条，`Enter` 回填但不发送，`Esc` / `Ctrl+C` 关闭，`Ctrl+U` 清空查询，`Tab` / `Shift+Tab` 切换查询与筛选控件，`Ctrl+PageUp` / `Ctrl+PageDown` 翻动预览。

@@ -119,7 +119,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 	}
 	insertBindings = append(insertBindings,
 		helpBinding(km.SwitchModel, "open model pool selector"),
-		helpBinding(km.ServiceTier, "switch service tier for subsequent model requests"),
+		helpBinding(km.InsertHistorySearch, "search saved inputs"),
 		helpBinding(km.Yolo, "toggle YOLO permission bypass"),
 		helpBinding(km.Diagnostics, "export diagnostics bundle"),
 	)

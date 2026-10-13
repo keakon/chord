@@ -33,6 +33,7 @@ const (
 
 // Config is the top-level configuration for the chord agent.
 type Config struct {
+	InputHistory    InputHistoryConfig        `json:"input_history" yaml:"input_history,omitempty"`
 	ImageGeneration ImageGenerationConfig     `json:"image_generation" yaml:"image_generation,omitempty"`
 	Providers       map[string]ProviderConfig `json:"providers" yaml:"providers"`                         // LLM providers
 	ModelPools      map[string][]string       `json:"model_pools,omitempty" yaml:"model_pools,omitempty"` // reusable model pool definitions
@@ -2027,6 +2028,11 @@ func loadConfigData(path string, data []byte, withDefaults bool, diagnostics *[]
 		}
 	}
 
+	if withDefaults {
+		if _, err := cfg.InputHistory.Effective(); err != nil {
+			return nil, fmt.Errorf("config %s: %w", path, err)
+		}
+	}
 	normalizeModelLimits(cfg)
 	return cfg, nil
 }
@@ -2318,6 +2324,7 @@ var projectScopedTopLevelKeys = map[string]bool{
 // deliberately ignored in project config (documented in docs/configuration.md);
 // anything else outside projectScopedTopLevelKeys is logged and dropped.
 var projectIgnoredTopLevelKeys = map[string]bool{
+	"input_history":   true,
 	"paths":           true,
 	"maintenance":     true,
 	"model_templates": true,

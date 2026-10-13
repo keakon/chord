@@ -13,6 +13,7 @@
 - 支持通过 `chord doctor config --model ... --field ...` 查询模型配置值，展示磁盘解析值、覆盖关系、目录或推导来源及修改位置，提供文本和 JSON 输出。
 - `prevent_sleep` 在 macOS 之外新增 Linux（本地 logind/GNOME 服务）和 Windows（系统电源请求）支持。TUI、headless、ACP 均保护执行主机；覆盖范围取决于服务和设备电源策略，WSL 无法保护 Windows 宿主机。
 - 新增 `/context`，展示当前任务最近请求的输入构成、剪裁和已报告的缓存用量；诊断包包含匿名化的上下文详情。
+- 在 Insert 模式按 Ctrl+R 或执行 `/history`，跨会话搜索已提交输入，回填后可修改再发送，也可撤销替换；`/history clear` 清空全部项目的输入历史。Normal 模式的 Ctrl+R 仍切换模型速度。
 - macOS 和 Linux 支持 TUI 与本机网关之间接管运行中的会话。Chord 会等待已开始的工作结束、保存排队输入，恢复后保持暂停，直到你明确继续。
 
 ### 改进

@@ -401,6 +401,10 @@ func (m *Model) statusBarModeLabel() string {
 		return "MCP"
 	case ModeSkillSelect:
 		return "SKILLS"
+	case ModeInputHistorySearch:
+		return "HISTORY"
+	case ModeInputHistoryClearConfirm:
+		return "CLEAR HISTORY"
 	case ModeMemoryPanel:
 		return "MEMORY"
 	case ModeSessionSelect:

@@ -10,6 +10,7 @@ type KeyMap struct {
 	InsertEscape          []string
 	InsertSubmit          []string
 	InsertNewline         []string
+	InsertHistorySearch   []string
 	InsertHistoryUp       []string
 	InsertHistoryDown     []string
 	InsertAttachClipboard []string // attach image/PDF from the system clipboard

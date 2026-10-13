@@ -6,6 +6,7 @@ const (
 )
 
 func (m *Model) applyTerminalSize(width, height int, refreshKitty bool) {
+	defer m.resizeInputHistoryPreview()
 	m.recordTUIDiagnostic("apply-terminal-size", "from=%dx%d to=%dx%d refresh_kitty=%t", m.width, m.height, width, height, refreshKitty)
 	m.width = width
 	m.height = height

@@ -17,6 +17,9 @@ const (
 )
 
 func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
+	if m.historyActive() {
+		return m.handleInputHistoryMouse(msg), true
+	}
 	mouse := msg.Mouse()
 	if m.mode == ModeMemoryPanel {
 		delta := 0

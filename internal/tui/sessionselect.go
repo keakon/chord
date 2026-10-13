@@ -84,6 +84,7 @@ func sessionSwitchLabel(kind, sessionID string) string {
 }
 
 func (m *Model) beginSessionSwitch(kind, sessionID string) {
+	m.closeInputHistory()
 	if m.memoryPanel.cancel != nil {
 		m.memoryPanel.cancel()
 		m.memoryPanel.seq++

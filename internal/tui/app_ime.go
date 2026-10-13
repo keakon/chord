@@ -117,6 +117,9 @@ func (m *Model) reapplyIMEForCurrentModeOnFocus() {
 }
 
 func (m *Model) switchModeWithIME(to Mode) tea.Cmd {
+	if m.historyActive() && to != m.mode {
+		m.closeInputHistory()
+	}
 	from := m.mode
 	if from == to {
 		return nil

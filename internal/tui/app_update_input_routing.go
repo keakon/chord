@@ -336,6 +336,13 @@ func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	switch m.mode {
+	case ModeInputHistorySearch:
+		if pm, ok := msg.(tea.PasteMsg); ok {
+			return m.pasteInputHistoryQuery(pm.Content)
+		}
+		return nil
+	case ModeInputHistoryClearConfirm:
+		return nil
 	case ModeInsert:
 		// Terminal paste events are text-only. Clipboard attachments use the
 		// explicit insert_attach_clipboard binding (Ctrl+V by default).

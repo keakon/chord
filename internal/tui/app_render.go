@@ -354,6 +354,9 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 	// (sidebar, infoPanel, etc.) so they appear on top of all other layers.
 
 	switch m.mode {
+	case ModeInputHistorySearch, ModeInputHistoryClearConfirm:
+		dialog := m.renderInputHistory()
+		m.renderOverlayCached(scr, centeredRect(area, dialog), &m.cachedOverlayRender, dialog)
 	case ModeStatus:
 		m.drawStatusPanel(scr, layout)
 	case ModeHandoffSelect:

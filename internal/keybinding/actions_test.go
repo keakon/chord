@@ -8,7 +8,7 @@ import (
 
 func TestActionsCatalog(t *testing.T) {
 	catalog := Actions()
-	if len(catalog) != 45 {
+	if len(catalog) != 46 {
 		t.Fatalf("catalog has %d actions", len(catalog))
 	}
 	seen := map[ActionID]bool{}

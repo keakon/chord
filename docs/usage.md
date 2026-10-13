@@ -343,7 +343,7 @@ These commands are handled by the local runtime and are not sent to the model as
 - `/yolo on|off`: temporarily bypass the main agent's permission checks for ordinary tools. While YOLO is on, file edits, shell commands, and similar calls run directly: `ask` rules do not raise a confirmation and `deny` rules do not block. The bypass is one-way: it only widens permissions, so a tool that works with YOLO off keeps working with YOLO on, and switching YOLO off restores the original permissions. It also lifts the active role's own permission config: on the main agent a role is a permission preset rather than a capability boundary, so a read-only role such as `planner` becomes writable while YOLO is on. The full scope, including why SubAgents are the deliberate exception, is in [Permissions & Safety: Special permission semantics](./permissions-and-safety.md#special-permission-semantics). `handoff`, `delegate`, and `cancel` keep following their configured rules: `allow` stays allowed, `deny` keeps rejecting, an `ask` rule passes without raising the confirmation dialog, and wildcard defaults behave exactly as they do with YOLO off. `done` and `compact_context` keep their dedicated semantics. YOLO can be toggled while the agent is running; the execution-time change applies immediately to later tool calls, while the LLM-visible tool descriptions and permission prompt are refreshed on the next request. SubAgents inherit the mode while it is on: their `ask` decisions (ordinary tools and mechanism tools alike) stop prompting too, while their `deny` rules keep rejecting. Toggling YOLO applies to a SubAgent's later calls immediately.
 - `/help`: toggle the in-app cheatsheet overlay (same as pressing `?` in Normal mode)
 
-When a non-standard tier is active, the sidebar shows it. If a model switch makes the selected tier unavailable, it appears dimmed and struck through. `Ctrl+R` cycles only through tiers supported by the current provider and model.
+When a non-standard tier is active, the sidebar shows it. If a model switch makes the selected tier unavailable, it appears dimmed and struck through. In Normal mode, `Ctrl+R` cycles only through tiers supported by the current provider and model.
 
 The following commands have more interactive detail, expanded below.
 
@@ -571,3 +571,13 @@ When a model name or gateway behaves differently from the inference, override it
 - [Edit tools](./edit-tools.md)
 - [Customization](./customization.md)
 - [Troubleshooting](./troubleshooting.md)
+
+## Search saved inputs
+
+In Insert mode, press **Ctrl+R** or run `/history` to search inputs submitted in the TUI, including inputs waiting in the send queue. Search defaults to prompts from the current project. Use Tab to focus the project/type filters and Space or arrow keys to switch to all projects or all input types. Up/Down and PageUp/PageDown select results; Ctrl+R selects the next result. Enter replaces the draft without sending it. Esc or Ctrl+C closes the search and preserves your draft. Ctrl+U clears the query; Ctrl+PageUp/PageDown scrolls the preview. Mouse clicks select results and mouse wheels scroll the list or preview.
+
+History keeps the original text and folded pastes, before file references are expanded. Shell inputs restore shell mode. Restoring clears current attachments, and attachments from history must be added again; one Undo restores the previous draft and its attachments. Restoring while editing a queued input preserves that queue item's identity. The up/down composer history remains limited to the current process.
+
+Run `/history clear` to clear **all projects'** saved inputs, plus this process's temporary records accepted before confirmation. Cancel is selected by default. Other processes may still save queued inputs afterwards. Deleting a session does not delete input history. History is local to your user state directory and is not sent to the model automatically.
+
+Prompts, slash commands, and local shell commands are saved by default; attachment-only and generated inputs are excluded. If saving fails, sending continues and a notice explains whether the input is available only in this process or saving could not be confirmed. Failed writes are not retried automatically. See [input history configuration](configuration.md#input-history) to disable recording or change retention.

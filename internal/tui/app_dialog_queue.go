@@ -107,6 +107,10 @@ func (d pendingDialog) timeout() time.Duration {
 // active before the dialog queue started, so chained queued dialogs all restore
 // the same base mode instead of depending on the dialog before them.
 func (m *Model) presentPendingDialog(d pendingDialog, prevMode Mode) tea.Cmd {
+	if m.historyActive() {
+		m.closeInputHistory()
+		prevMode = ModeInsert
+	}
 	switch {
 	case d.confirm != nil:
 		return m.presentConfirmRequest(*d.confirm, prevMode, d.arrivedAt)
@@ -207,8 +211,11 @@ func (m *Model) enqueueDialog(d pendingDialog) tea.Cmd {
 }
 
 func (m *Model) tryPresentNextDialog() tea.Cmd {
-	if len(m.pendingDialogs) == 0 || m.dialogActive() || m.interactionSuppressed() || (m.mode != ModeInsert && m.mode != ModeNormal) {
+	if len(m.pendingDialogs) == 0 || m.dialogActive() || m.interactionSuppressed() || (m.mode != ModeInsert && m.mode != ModeNormal && !m.historyActive()) {
 		return nil
+	}
+	if m.historyActive() {
+		m.closeInputHistory()
 	}
 	return m.finishDialog(m.mode)
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -163,14 +164,18 @@ func (m *Model) Close() error {
 	clear(m.kittyImageCache)
 	clear(m.kittyPlacementCache)
 	var firstErr error
+	if m.inputHistoryStore != nil {
+		firstErr = m.inputHistoryStore.Close(context.Background())
+	}
+	m.inputHistoryRuntime.close()
 	if m.viewport != nil {
 		if err := m.viewport.Close(); err != nil {
-			firstErr = err
+			firstErr = errors.Join(firstErr, err)
 		}
 	}
 	if m.runtimeCacheHandle != nil {
-		if err := m.runtimeCacheHandle.Remove(); err != nil && firstErr == nil {
-			firstErr = err
+		if err := m.runtimeCacheHandle.Remove(); err != nil {
+			firstErr = errors.Join(firstErr, err)
 		}
 		m.runtimeCacheHandle = nil
 		m.runtimeCacheSession = ""

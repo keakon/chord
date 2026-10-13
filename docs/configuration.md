@@ -1828,3 +1828,18 @@ OpenAI reasoning items can also be returned as `reasoning.encrypted_content` whe
 - [Customization](./customization.md)
 - [Hooks](./hooks.md)
 - [Troubleshooting](./troubleshooting.md)
+
+## Input history
+
+`input_history` is **user-level only**; project configuration ignores the entire block.
+
+```yaml
+input_history:
+  enabled: true
+  max_entries: 10000
+  max_bytes: 33554432
+```
+
+`max_entries` accepts 1–100,000; `max_bytes` accepts 1–268,435,456 bytes. Explicit zero is invalid. The defaults retain at most 10,000 entries and 32 MiB across all projects in `StateDir/input-history.jsonl`. When either limit is exceeded, older entries are removed in a batch to approximately 90% of both limits. The newest valid entry can exceed that lower watermark. A single record cannot exceed 4 MiB of JSON, or `max_bytes`; oversized inputs still send normally but are not saved.
+
+`enabled: false` stops new persistent records and their process-local fallback copies. Existing records can still be searched or cleared, and the composer's current-process up/down navigation still works. Restart all running instances after changing retention limits: each writer uses its startup configuration, so an instance with a smaller limit can remove entries written by another instance. Saved records contain original text and paste content, project/session identifiers, and attachment counts; attachment data and paths are not saved. Use `/history clear` to remove history independently of sessions.

@@ -22,6 +22,7 @@ const (
 	ActionInsertEscape          ActionID = "insert_escape"
 	ActionInsertSubmit          ActionID = "insert_submit"
 	ActionInsertNewline         ActionID = "insert_newline"
+	ActionInsertHistorySearch   ActionID = "insert_history_search"
 	ActionInsertHistoryUp       ActionID = "insert_history_up"
 	ActionInsertHistoryDown     ActionID = "insert_history_down"
 	ActionInsertAttachClipboard ActionID = "insert_attach_clipboard"
@@ -70,6 +71,7 @@ var actions = []Action{
 	{ActionInsertEscape, BindingSingle, []string{"esc"}},
 	{ActionInsertSubmit, BindingSingle, []string{"enter"}},
 	{ActionInsertNewline, BindingSingle, []string{"shift+enter", "ctrl+j"}},
+	{ActionInsertHistorySearch, BindingSingle, []string{"ctrl+r"}},
 	{ActionInsertHistoryUp, BindingSingle, []string{"up"}},
 	{ActionInsertHistoryDown, BindingSingle, []string{"down", "ctrl+n"}},
 	{ActionInsertAttachClipboard, BindingSingle, []string{"ctrl+v", "alt+v"}},

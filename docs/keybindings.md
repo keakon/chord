@@ -99,7 +99,7 @@ Search also covers older regions of lazily loaded large sessions. Chord loads a 
 | `Alt+R` | Cycle roles in the main agent view; a worker view prompts you to return to main |
 | `Ctrl+X` | Stop the current operation; also leave loop mode, keeping the draft and session |
 | `Ctrl+P`     | Open the model-pool selector in both Insert and Normal modes.                                          |
-| `Ctrl+R`     | Cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model; `/tier` slash completion predicts the same next tier and is hidden when there is no actual switch target |
+| `Ctrl+R`     | Normal mode: cycle service tier for subsequent model requests, limited to tiers supported by the current provider/model; `/tier` slash completion predicts the same next tier and is hidden when there is no actual switch target |
 | `Ctrl+Y`     | Toggle YOLO mode; ordinary tools skip their permission checks and confirmations; handoff, delegate, cancel, done, and compact_context keep following their configured rules                 |
 | `Ctrl+O`     | Open the MCP server selector; manual changes while running apply on the next model request                   |
 | `Ctrl+G`     | Export a diagnostics bundle                                                                               |
@@ -223,6 +223,7 @@ Action names here are the names used in `config.yaml` (for `keymap:`).
 | `insert_escape`            | `["esc"]`                        |
 | `insert_submit`            | `["enter"]`                      |
 | `insert_newline`           | `["shift+enter", "ctrl+j"]`      |
+| `insert_history_search` | `["ctrl+r"]` |
 | `insert_history_up`        | `["up"]`                          |
 | `insert_history_down`      | `["down", "ctrl+n"]`             |
 | `insert_attach_clipboard`  | `["ctrl+v", "alt+v"]` (attach a clipboard image or PDF) |
@@ -277,3 +278,7 @@ Press your configured help key (default `?`) in Normal mode to toggle an in-app 
 - [Usage](./usage.md): workflow context for the bindings above
 - [Configuration & Auth](./configuration.md): full `config.yaml` schema
 - [Customization](./customization.md): agents, hooks, skills, MCP, LSP
+
+## Input history search
+
+`Ctrl+R` opens saved input search in Insert mode and retains service-tier switching in Normal mode. Customize the search binding with `keymap.insert_history_search`. Inside search, `Ctrl+R` selects the next result, `Enter` restores without sending, `Esc` / `Ctrl+C` closes, `Ctrl+U` clears the query, `Tab` / `Shift+Tab` cycles the query and filters, and `Ctrl+PageUp` / `Ctrl+PageDown` pages the preview.

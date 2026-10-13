@@ -100,7 +100,9 @@ func (m *Model) sendSlashShortcut(key string, binding []string, command string) 
 	return true
 }
 
-func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
+func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
+	var historyCmd tea.Cmd
+	defer func() { result = tea.Batch(result, historyCmd) }()
 	key := msg.String()
 	if keyMatches(key, m.keyMap.Stop) {
 		return m.stopCurrentOperation()
@@ -112,8 +114,8 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
 		return cmd
 	}
-	if m.maybeServiceTierShortcut(key) {
-		return nil
+	if keyMatches(key, m.keyMap.InsertHistorySearch) {
+		return m.openInputHistory(false)
 	}
 	if m.maybeYoloShortcut(key) {
 		return nil
@@ -276,6 +278,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				currentValue = m.input.Value()
 			}
 		}
+		submitted := m.captureSubmittedInput()
 		raw := strings.TrimSpace(currentValue)
 		var value string
 		if m.input.BangMode() {
@@ -286,12 +289,15 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		if value == "" && len(m.attachments) == 0 {
 			return m.tryContinue()
 		}
+		if value == historyCommand || strings.HasPrefix(value, historyCommand+" ") {
+			return m.routeInputHistoryCommand(value, submitted)
+		}
 		if value == takeoverCommand || strings.HasPrefix(value, takeoverCommand+" ") {
 			return m.startTakeoverCommand(value)
 		}
 		if len(m.attachments) == 0 && strings.EqualFold(value, "/help") {
 			m.recordTUIDiagnostic("local-command", "%s", value)
-			m.input.AddCurrentToHistory()
+			historyCmd = m.recordSubmittedInput(submitted)
 			m.input.Reset()
 			m.slashCompleteSelected = 0
 			return m.openHelp()
@@ -307,14 +313,14 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		if len(m.attachments) == 0 && strings.EqualFold(value, statusCommand) {
 			m.recordTUIDiagnostic("local-command", "%s", value)
-			m.input.AddCurrentToHistory()
+			historyCmd = m.recordSubmittedInput(submitted)
 			m.input.Reset()
 			m.slashCompleteSelected = 0
 			return m.openStatusPanel()
 		}
 		if len(m.attachments) == 0 && strings.EqualFold(value, "/stats") {
 			m.recordTUIDiagnostic("local-command", "%s", value)
-			m.input.AddCurrentToHistory()
+			historyCmd = m.recordSubmittedInput(submitted)
 			m.input.Reset()
 			m.slashCompleteSelected = 0
 			m.openUsageStats()
@@ -328,7 +334,9 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			contentParts := m.input.ContentParts()
 			cmdStr := localShellCommandFromParts(display, contentParts)
 			userLine := localShellUserLine(display)
-			m.input.AddCurrentToHistory()
+			if strings.TrimSpace(cmdStr) != "" {
+				historyCmd = m.recordSubmittedInput(submitted)
+			}
 			m.input.Reset()
 			m.finalizeTurn()
 			shellID := m.nextBlockID
@@ -353,8 +361,6 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		inlineParts := m.input.ContentParts()
 		inlinePasteTexts := m.input.InlinePasteRawContents()
 		hasInlinePastes := m.input.HasInlinePastes()
-		m.input.AddCurrentToHistory()
-		m.input.Reset()
 		trimmed := strings.TrimSpace(value)
 		if m.agent != nil && len(m.attachments) == 0 && !hasInlinePastes {
 			// Local-only commands run on the agent's event loop without a turn.
@@ -362,37 +368,49 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			// route them, or the TUI starts echoing a USER card for one the
 			// agent handles locally (or vice versa).
 			if trimmed == agent.MemoryCommand {
+				historyCmd = m.recordSubmittedInput(submitted)
+				m.input.Reset()
 				return m.openMemoryPanel(nil)
 			}
 			if trimmed == agent.MemoryOrganizeCommand || strings.HasPrefix(trimmed, agent.MemoryOrganizeCommand+" ") {
 				instruction := strings.TrimSpace(strings.TrimPrefix(trimmed, agent.MemoryOrganizeCommand))
+				historyCmd = m.recordSubmittedInput(submitted)
+				m.input.Reset()
 				return m.openMemoryPanel(&instruction)
 			}
 			if agent.IsTUILocalOnlySlashCommand(trimmed) || agent.IsLoopSlashCommand(trimmed) {
 				m.recordTUIDiagnostic("agent-command", "%s", trimmed)
+				historyCmd = m.recordSubmittedInput(submitted)
+				m.input.Reset()
 				m.agent.SendUserMessage(value)
 				return nil
 			}
 			switch {
 			case trimmed == "/new":
 				m.recordTUIDiagnostic("agent-command", "%s", trimmed)
+				historyCmd = m.recordSubmittedInput(submitted)
+				m.input.Reset()
 				m.beginSessionSwitch("new", "")
 				m.agent.NewSession()
 				m.resetTerminalTitle()
 				return nil
 			case trimmed == "/resume":
 				m.recordTUIDiagnostic("agent-command", "%s", trimmed)
+				historyCmd = m.recordSubmittedInput(submitted)
+				m.input.Reset()
 				m.agent.ResumeSession()
 				return nil
 			case strings.HasPrefix(trimmed, "/resume "):
 				m.recordTUIDiagnostic("agent-command", "%s", trimmed)
 				targetID := strings.TrimSpace(strings.TrimPrefix(trimmed, "/resume "))
+				historyCmd = m.recordSubmittedInput(submitted)
+				m.input.Reset()
 				m.beginSessionSwitch("resume", targetID)
 				m.agent.ResumeSessionID(targetID)
 				return nil
 			case trimmed == "/rules":
 				m.recordTUIDiagnostic("local-command", "%s", trimmed)
-				m.input.AddCurrentToHistory()
+				historyCmd = m.recordSubmittedInput(submitted)
 				m.input.Reset()
 				m.slashCompleteSelected = 0
 				return m.openRules()
@@ -401,6 +419,8 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		fileRefTexts := append([]string{value}, inlinePasteTexts...)
 		fileRefs := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs(fileRefTexts, m.workingDir), m.workingDir))
 		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && len(fileRefs) == 0 {
+			historyCmd = m.recordSubmittedInput(submitted)
+			m.input.Reset()
 			draft := queuedDraft{ID: m.draftIDForSubmit(), Content: value, DisplayContent: value, FileRefs: fileRefs, QueuedAt: time.Now(), AgentID: m.focusedAgentID}
 			if !m.shouldQueueDraft() {
 				m.finalizeTurn()
@@ -416,7 +436,6 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			m.recalcViewportSize()
 			return nil
 		}
-		draftID := m.draftIDForSubmit()
 		var draft queuedDraft
 		composerParts := inlineParts
 		if len(composerParts) == 0 && value != "" {
@@ -451,12 +470,15 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 				}
 				parts = interleaveAttachments(parts, loaded)
 			}
-			draft = queuedDraft{ID: draftID, Parts: parts, FileRefs: fileRefs, Content: value, DisplayContent: draftListDisplayText(parts, value), QueuedAt: time.Now(), AgentID: m.focusedAgentID}
+			draft = queuedDraft{Parts: parts, FileRefs: fileRefs, Content: value, DisplayContent: draftListDisplayText(parts, value), QueuedAt: time.Now(), AgentID: m.focusedAgentID}
 			m.attachments = nil
 			m.recalcViewportSize()
 		} else {
-			draft = queuedDraft{ID: draftID, Content: value, DisplayContent: value, FileRefs: fileRefs, QueuedAt: time.Now(), AgentID: m.focusedAgentID}
+			draft = queuedDraft{Content: value, DisplayContent: value, FileRefs: fileRefs, QueuedAt: time.Now(), AgentID: m.focusedAgentID}
 		}
+		draft.ID = m.draftIDForSubmit()
+		historyCmd = m.recordSubmittedInput(submitted)
+		m.input.Reset()
 		if m.shouldQueueDraft() {
 			synced := m.syncQueuedDraft(draft)
 			draft.Mirrored = synced

@@ -1603,3 +1603,18 @@ OpenAI 的 reasoning item 还可能通过 `reasoning.encrypted_content` 返回�
 - [扩展与定制](./customization_CN.md)
 - [Hooks](./hooks_CN.md)
 - [常见问题排查](./troubleshooting_CN.md)
+
+## 输入历史
+
+`input_history` **仅支持用户级配置**；项目配置会忽略整个配置块。
+
+```yaml
+input_history:
+  enabled: true
+  max_entries: 10000
+  max_bytes: 33554432
+```
+
+`max_entries` 范围为 1～100,000，`max_bytes` 范围为 1～268,435,456 字节，显式设置为 0 无效。默认在 `StateDir/input-history.jsonl` 中为全部项目合计保留最多 10,000 条、32 MiB。超过任一上限时，批量删除较旧记录至两个上限的约 90%；最新一条合法记录允许超过该低水位。单条 JSON 不能超过 4 MiB 或 `max_bytes`；过长输入仍正常发送，但不保存到历史。
+
+`enabled: false` 停止新增持久记录及其本进程临时副本，仍允许搜索和清空已有记录，输入框原有的上下键导航也仍可使用。修改保留量后请重启所有实例：每个写入进程使用启动时的配置，较小的上限可能删除其他实例写入的记录。历史保存原文、粘贴内容、项目及会话标识和附件数量，不保存附件数据或路径。可用 `/history clear` 独立于会话清空历史。

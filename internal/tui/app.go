@@ -15,6 +15,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/desktop"
+	"github.com/keakon/chord/internal/inputhistory"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -49,6 +50,8 @@ const (
 	ModeContext
 	ModeJobsOverlay // background jobs overlay (status-bar pill)
 	ModeSkillSelect // skill selector overlay (/skill)
+	ModeInputHistorySearch
+	ModeInputHistoryClearConfirm
 	ModeMemoryPanel // project memory management overlay
 	ModeStatus      // full-screen runtime overview (/status)
 )
@@ -186,14 +189,20 @@ type kittyTerminalMetrics struct {
 
 // Model is the top-level Bubble Tea model for the Chord TUI.
 type Model struct {
-	fileActionToken      uint64
-	filePreviewCache     *fileViewerCache
-	fileActionsBusy      map[string]uint64
-	fileViewer           fileViewerState
-	fileViewerGeneration uint64
-	fileViewerBusy       bool
-	fileViewerNext       *fileViewerRequest
-	desktopService       desktop.Service
+	fileActionToken                                  uint64
+	filePreviewCache                                 *fileViewerCache
+	fileActionsBusy                                  map[string]uint64
+	fileViewer                                       fileViewerState
+	fileViewerGeneration                             uint64
+	fileViewerBusy                                   bool
+	fileViewerNext                                   *fileViewerRequest
+	desktopService                                   desktop.Service
+	inputHistoryStore                                *inputhistory.Store
+	inputHistoryProjectKey, inputHistoryProjectLabel string
+	inputHistoryRuntime                              *historySearchRuntime
+	inputHistory                                     inputHistorySearchState
+	inputHistoryLastIssue                            time.Time
+	inputHistoryIssueCount                           uint64
 
 	agent                       agent.AgentForTUI
 	viewport                    *Viewport
@@ -796,6 +805,8 @@ func (m *Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		func() tea.Msg { return focusInputMsg{} },
 		m.startAtMentionFileLoad(),
+		m.waitInputHistoryStore(),
+		m.waitInputHistorySearch(),
 		m.startImageMemorySweep(),
 	}
 	if cmd := m.startRuntimeCacheCleanup(); cmd != nil {
@@ -881,6 +892,11 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		}
 	}()
 
+	defer func() {
+		if m.mode == ModeInputHistorySearch && m.inputHistory.token.owner != m.inputHistoryOwner() {
+			m.closeInputHistory()
+		}
+	}()
 	// A bottom-left overlay can go away without anything else on that row
 	// changing (dismissing the slash completion dropdown, leaving insert mode),
 	// and the incremental renderer then never rewrites the stale cell it left
@@ -933,6 +949,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		}
 	}()
 	m.ensureViewportCallbacks()
+	if cmd, ok := m.handleInputHistoryMessage(msg); ok {
+		return m, cmd
+	}
 	switch msg := msg.(type) {
 	case takeoverPreparedMsg:
 		return m, m.applyTakeoverPrepared(msg)

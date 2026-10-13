@@ -12,6 +12,9 @@ import (
 )
 
 func (m *Model) setFocusedAgent(id string) {
+	if id != m.focusedAgentID {
+		m.closeInputHistory()
+	}
 	prev := m.focusedAgentID
 	if prev != id {
 		m.retireImageViewer()

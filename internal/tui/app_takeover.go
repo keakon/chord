@@ -116,13 +116,13 @@ func (m *Model) startTakeoverCommand(value string) tea.Cmd {
 	if !ok {
 		return m.enqueueToast("Session takeover is unavailable in this runtime", "warn")
 	}
-	m.input.AddCurrentToHistory()
+	historyCmd := m.recordSubmittedInput(m.captureSubmittedInput())
 	m.input.Reset()
 	m.slashCompleteSelected = 0
 	m.takeover.waiting = true
 	m.takeover.sequence++
 	seq, handler := m.takeover.sequence, m.takeover.handler
-	return func() tea.Msg {
+	return tea.Batch(historyCmd, func() tea.Msg {
 		status, err := handler(context.Background(), sid, timeout)
 		if err == nil && status.State != agent.SessionPauseReleased {
 			err = fmt.Errorf("transfer %s is %s; query status with --session %s --transfer-id %s", status.TransferID, status.State, sid, status.TransferID)
@@ -134,10 +134,11 @@ func (m *Model) startTakeoverCommand(value string) tea.Cmd {
 			err = resume.ResumePausedSession(context.Background(), sid, status.TransferIdentity)
 		}
 		return takeoverResultMsg{sequence: seq, status: status, err: err}
-	}
+	})
 }
 
 func (m *Model) prepareSourceTakeover(evt agent.SessionTransferPreparingEvent) tea.Cmd {
+	m.closeInputHistory()
 	if m.takeover.waiting || evt.Identity.SessionID != m.currentSessionID() {
 		evt.Reply <- fmt.Errorf("target_not_ready: session changed or another takeover is active")
 		return nil

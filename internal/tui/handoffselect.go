@@ -95,6 +95,10 @@ func (m *Model) clearHandoffSelect() {
 // result. agentID is the asking agent (only the main agent can call handoff),
 // used to orient the viewport; prevMode is restored once the decision lands.
 func (m *Model) openHandoffSelect(planPath, requestID, agentID string, prevMode Mode) tea.Cmd {
+	if m.historyActive() {
+		m.closeInputHistory()
+		prevMode = ModeInsert
+	}
 	if m.agent == nil {
 		return nil
 	}

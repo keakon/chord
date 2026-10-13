@@ -193,6 +193,8 @@ type CustomCommand struct {
 
 // slashCommands is the list of available slash commands (alphabetical by Cmd).
 var slashCommands = []slashCommand{
+	{Cmd: historyCommand, Desc: "search saved inputs"},
+	{Cmd: historyClearCommand, Desc: "clear saved inputs from all projects"},
 	{Cmd: "/compact", Desc: "compact old context"},
 	{Cmd: "/export", Desc: "export session (Markdown/JSON)"},
 	{Cmd: "/help", Desc: "show keyboard help"},
@@ -259,6 +261,9 @@ func (m *Model) getSlashCompletions(input string) []slashCommand {
 		}
 	}
 	for _, c := range m.customCommands {
+		if c.Cmd == historyCommand || strings.HasPrefix(c.Cmd, historyCommand+" ") {
+			continue
+		}
 		if strings.HasPrefix(strings.ToLower(c.Cmd), prefix) {
 			out = append(out, c)
 		}

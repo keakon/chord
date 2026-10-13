@@ -11,6 +11,7 @@ var keyMapSetters = []keyMapSetter{
 	{keybinding.ActionInsertEscape, func(km *KeyMap) *[]string { return &km.InsertEscape }},
 	{keybinding.ActionInsertSubmit, func(km *KeyMap) *[]string { return &km.InsertSubmit }},
 	{keybinding.ActionInsertNewline, func(km *KeyMap) *[]string { return &km.InsertNewline }},
+	{keybinding.ActionInsertHistorySearch, func(km *KeyMap) *[]string { return &km.InsertHistorySearch }},
 	{keybinding.ActionInsertHistoryUp, func(km *KeyMap) *[]string { return &km.InsertHistoryUp }},
 	{keybinding.ActionInsertHistoryDown, func(km *KeyMap) *[]string { return &km.InsertHistoryDown }},
 	{keybinding.ActionInsertAttachClipboard, func(km *KeyMap) *[]string { return &km.InsertAttachClipboard }},
