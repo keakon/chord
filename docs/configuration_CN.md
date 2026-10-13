@@ -43,6 +43,14 @@
 
 全局 `config.yaml` 缺失时，首次运行 `chord` 会启动一次性的初始化向导，写入 `config.yaml`，必要时再写入 `auth.yaml`，具体交互见[快速开始](./quickstart_CN.md#2-第一次运行)。想自己写这两个文件也没问题，本页以下内容就是完整的字段参考。
 
+## 查明模型配置值的来源
+
+配置合法但修改似乎没有生效时，在项目目录运行 `chord doctor config --model sample/model-1 --field reasoning.effort`；需要结构化报告时加 `--json`。两个 flag 必须成对传入，字段仅支持 `reasoning.effort`、`thinking.type`、`limit.context`、`limit.input`、`limit.output`，模型使用不带 `@variant` 的基础 `provider/model` 引用。
+
+命令只读当前磁盘配置，展示声明、覆盖关系、实际采用的目录值、context 推导来源及修改位置，不包含 CLI、角色、会话覆盖和最终请求值。显式 `limit.input: 0` 有声明来源，但表示没有独立的运行时输入上限；没有填写 input 时，目录仍可能提供正值。输出限制是模型的静态上限，不等于请求的 `max_tokens`。
+
+值来自共享 YAML alias/merge 时，建议在目标模型下单独覆盖，避免修改共享 anchor；父级为 `null` 时，需先将它改为映射再设置子字段；部分 `null` 声明的来源只能部分追踪。命令始终检查完整配置，其他配置有错时，即使目标值已解析也会退出 2。输出状态和示例见 [CLI 参考](cli_CN.md#chord-doctor-config)。
+
 ## 最小 provider 配置
 
 ### ModelScope

@@ -44,6 +44,14 @@ Project configuration is read from `.chord/config.yaml` in the startup directory
 
 If global `config.yaml` is missing, the first `chord` run starts a one-time setup wizard that writes `config.yaml` and, when needed, `auth.yaml`; see [Quickstart](./quickstart.md#2-first-run). Prefer to write both files yourself? Everything below is the full field reference.
 
+## Find the source of a model setting
+
+When a valid edit seems to have no effect, run `chord doctor config --model sample/model-1 --field reasoning.effort` from the project directory. Add `--json` for a structured report. The paired flags accept exactly `reasoning.effort`, `thinking.type`, `limit.context`, `limit.input`, or `limit.output`; use a base `provider/model`, without `@variant`.
+
+The command reads the current disk configuration and explains declarations, overrides, actual catalog assignments and derived context limits, with an edit location. It excludes CLI/role/session overrides and final request values. An explicit `limit.input: 0` has a declaration but no independent runtime input cap; an omitted input limit may still receive a positive catalog value. The output limit is a static model limit, not request `max_tokens`.
+
+For shared YAML aliases/merges, add an override under the target model rather than changing the shared anchor. If an ancestor is `null`, replace it with a mapping before setting the nested field. Some `null` declarations may have only partial source evidence. The full configuration is always checked: unrelated errors still cause exit 2 even when the queried value is resolved. See [CLI reference](cli.md#chord-doctor-config) for output states and examples.
+
 ## Minimal provider config
 
 ### OpenRouter

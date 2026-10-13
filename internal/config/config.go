@@ -1718,7 +1718,7 @@ func MergeProjectConfig(base *Config, path string) (projectCfg *Config, merged *
 		return nil, nil, err
 	}
 	for _, drop := range drops {
-		log.Warnf("config %s: ignoring invalid value: %s", path, drop)
+		log.Warnf("config %s: ignoring invalid value: %s", path, strings.Join(drop.Segments, "."))
 	}
 	projectCfg, err = loadConfigData(path, cleanedData, false, nil)
 	if err != nil {
@@ -2003,9 +2003,10 @@ func loadConfigData(path string, data []byte, withDefaults bool, diagnostics *[]
 	if err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	locator := newTypeIssueLocator(data, len(terrors) > 0 && diagnostics != nil)
 	for _, issue := range terrors {
 		log.Warnf("config %s: ignoring invalid value: %s", path, issue)
-		appendLoadDiagnostic(diagnostics, path, "", issue, "inherited/default value")
+		appendLoadPathDiagnostic(diagnostics, path, locator.path(issue), issue, "inherited/default value")
 	}
 	if err := orchestrationConfigLoadError(cfg); err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
@@ -2081,11 +2082,11 @@ func resetInvalidProviderFields(cfg ProviderConfig) ProviderConfig {
 // decoded into the config schema (unknown fields, wrong types). Removing them
 // before the map merge keeps every global value intact — an undecodable
 // project value must fall back to the inherited value, never clobber it with a
-// zero value. Returns the cleaned YAML bytes plus one dotted path per removed
+// zero value. Returns the cleaned YAML bytes plus one structured path per removed
 // leaf. Malformed YAML (syntax errors) is returned as a fatal error.
-func stripTypeInvalidOverride(path string, data []byte) ([]byte, []string, error) {
+func stripTypeInvalidOverride(path string, data []byte) ([]byte, []configDroppedPath, error) {
 	current := data
-	var dropped []string
+	var dropped []configDroppedPath
 	for range maxOverrideSanitizeRounds {
 		// Re-parse every round instead of carrying the first tree forward:
 		// Marshal drops blank lines, so a node's Line only matches the lines
@@ -2233,17 +2234,17 @@ func (f yamlFailures) descendantMatches(n *yaml.Node) bool {
 // removeFailingNodes prunes mapping pairs and sequence items the failures blame.
 // The most specific node is removed first so sibling fields survive; a container
 // is dropped whole only when the failure is about the container itself or its
-// children could not absorb it. Returns dotted paths of everything removed.
-func removeFailingNodes(node *yaml.Node, prefix []string, failures yamlFailures) []string {
+// children could not absorb it. Returns path segments of everything removed.
+func removeFailingNodes(node *yaml.Node, prefix []string, failures yamlFailures) []configDroppedPath {
 	switch node.Kind {
 	case yaml.MappingNode:
 		kept := make([]*yaml.Node, 0, len(node.Content))
-		var removed []string
+		var removed []configDroppedPath
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			keyNode, valNode := node.Content[i], node.Content[i+1]
 			path := append(slices.Clip(prefix), keyNode.Value)
 			if failures.matchesKey(keyNode) || failures.matchesValue(valNode) {
-				removed = append(removed, strings.Join(path, "."))
+				removed = append(removed, configDroppedPath{Segments: slices.Clone(path)})
 				continue
 			}
 			childRemoved := removeFailingNodes(valNode, path, failures)
@@ -2251,7 +2252,7 @@ func removeFailingNodes(node *yaml.Node, prefix []string, failures yamlFailures)
 				// Deeper nesting still failing after child cleanup: drop the
 				// pair rather than loop forever. Its path supersedes the child
 				// paths already collected under it.
-				removed = append(removed, strings.Join(path, "."))
+				removed = append(removed, configDroppedPath{Segments: slices.Clone(path)})
 				continue
 			}
 			removed = append(removed, childRemoved...)
@@ -2261,15 +2262,15 @@ func removeFailingNodes(node *yaml.Node, prefix []string, failures yamlFailures)
 		return removed
 	case yaml.SequenceNode:
 		kept := make([]*yaml.Node, 0, len(node.Content))
-		var removed []string
+		var removed []configDroppedPath
 		for _, item := range node.Content {
 			if failures.matchesValue(item) {
-				removed = append(removed, strings.Join(prefix, "."))
+				removed = append(removed, configDroppedPath{Segments: slices.Clone(prefix)})
 				continue
 			}
 			childRemoved := removeFailingNodes(item, prefix, failures)
 			if failures.descendantMatches(item) {
-				removed = append(removed, strings.Join(prefix, "."))
+				removed = append(removed, configDroppedPath{Segments: slices.Clone(prefix)})
 				continue
 			}
 			removed = append(removed, childRemoved...)
@@ -2397,7 +2398,7 @@ func marshalSanitizedMerge(baseMap, overrideMap map[string]any, path string, dia
 		for _, p := range removable {
 			removeMapPath(overrideMap, p)
 			log.Warnf("config %s: ignoring semantically invalid override value: %s", path, strings.Join(p, "."))
-			appendLoadDiagnostic(diagnostics, path, strings.Join(p, "."), "ignoring semantically invalid override value", "inherited global/default value")
+			appendLoadPathDiagnostic(diagnostics, path, p, "ignoring semantically invalid override value", "inherited global/default value")
 		}
 	}
 	return nil, fmt.Errorf("config %s: too many invalid project values to sanitize", path)

@@ -616,7 +616,8 @@ func mappingEntries(node *yaml.Node) []yamlEntry {
 // MergeProjectConfig would produce.
 type ResolvedConfig struct {
 	// Config is the effective project-merged config.
-	Config *Config
+	Config          *Config
+	ExplainEvidence *ConfigExplainEvidence
 	// Global and Project are the per-layer configs as loaded; nil when the
 	// respective file is missing.
 	Global  *Config
@@ -639,7 +640,7 @@ type ResolvedConfig struct {
 // materialization to the resulting snapshot. A missing global config yields a diagnostic and an empty index
 // rather than an error or the first-run wizard; surfacing is up to callers.
 func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*ResolvedConfig, error) {
-	rc := &ResolvedConfig{}
+	rc := &ResolvedConfig{ExplainEvidence: newConfigExplainEvidence(globalPath, projectPath)}
 	var keymapLayers []keymapLayer
 
 	globalData, err := os.ReadFile(globalPath)
@@ -650,10 +651,11 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 			return nil, inspectErr
 		}
 		keymapLayers = append(keymapLayers, keymap)
-		globalCleaned, _, serr := stripTypeInvalidOverride(globalPath, globalData)
+		globalCleaned, drops, serr := stripTypeInvalidOverride(globalPath, globalData)
 		if serr != nil {
 			return nil, serr
 		}
+		rc.ExplainEvidence.collect(ConfigLayer{Layer: OriginLayerGlobal, File: globalPath, Data: globalData}, globalCleaned, drops)
 		rc.Global, err = loadConfigData(globalPath, globalData, true, &rc.Diagnostics)
 		if err != nil {
 			return nil, err
@@ -695,19 +697,21 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 				return nil, serr
 			}
 			for _, drop := range drops {
-				if slices.Contains(unsupported, drop) {
+				if slices.Contains(unsupported, strings.Join(drop.Segments, ".")) {
 					continue
 				}
-				log.Warnf("config %s: ignoring invalid value: %s", projectPath, drop)
+				log.Warnf("config %s: ignoring invalid value: %s", projectPath, strings.Join(drop.Segments, "."))
 				rc.Diagnostics = append(rc.Diagnostics, Diagnostic{
-					Severity:  DiagnosticSeverityWarning,
-					File:      projectPath,
-					Path:      drop,
-					Message:   "ignoring invalid value: " + drop,
-					Continues: true,
-					Fallback:  "inherited global/default value",
+					Severity:     DiagnosticSeverityWarning,
+					File:         projectPath,
+					Path:         strings.Join(drop.Segments, "."),
+					PathSegments: slices.Clone(drop.Segments),
+					Message:      "ignoring invalid value: " + strings.Join(drop.Segments, "."),
+					Continues:    true,
+					Fallback:     "inherited global/default value",
 				})
 			}
+			rc.ExplainEvidence.collect(ConfigLayer{Layer: OriginLayerProject, File: projectPath, Data: projectData}, cleaned, drops)
 			rc.Project, err = loadConfigData(projectPath, cleaned, false, nil)
 			if err != nil {
 				return nil, err
@@ -743,23 +747,26 @@ func LoadResolvedConfig(globalPath, projectPath string, extraRefs ...string) (*R
 		normalized, _, normalizeErr := NormalizeProviderPreset(provider)
 		if normalizeErr != nil {
 			rc.Diagnostics = append(rc.Diagnostics, Diagnostic{
-				Severity:  DiagnosticSeverityError,
-				Path:      "providers." + providerName + ".preset",
-				Message:   normalizeErr.Error(),
-				Continues: true,
-				Scope:     "provider " + providerName,
+				Severity:     DiagnosticSeverityError,
+				Path:         "providers." + providerName + ".preset",
+				PathSegments: []string{"providers", providerName, "preset"},
+				Message:      normalizeErr.Error(),
+				Continues:    true,
+				Scope:        "provider " + providerName,
 			})
 			continue
 		}
 		rc.Config.Providers[providerName] = normalized
 	}
 
+	rc.ExplainEvidence.finalize(rc.Diagnostics)
+	rc.CatalogVersion = modelcatalogVersion()
+
 	// Catalog materialization runs before pool reference validation so a pool
 	// entry that references a catalog-only model (never declared by the user)
 	// resolves instead of reporting a broken reference.
 	rc.Diagnostics = append(rc.Diagnostics, materializeCatalogModels(rc, extraRefs...)...)
 	rc.Diagnostics = append(rc.Diagnostics, catalogSendOverrideDiagnostics(rc.Config, CatalogResponsesCompat)...)
-	rc.CatalogVersion = modelcatalogVersion()
 	rc.Diagnostics = append(rc.Diagnostics, ResolveConfiguredPoolRefs(rc.Config)...)
 	keymapDiags := keymapDiagnostics(rc.Config, rc.Index, keymapLayers, nil)
 	rc.Diagnostics = append(rc.Diagnostics, keymapDiags...)

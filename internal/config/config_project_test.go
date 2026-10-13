@@ -611,7 +611,7 @@ func TestMergeProjectConfigDropsLeadingUnknownKeyKeepsSiblings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stripTypeInvalidOverride: %v", err)
 	}
-	if len(drops) != 1 || drops[0] != "providers.sample.bogus_field" {
+	if len(drops) != 1 || strings.Join(drops[0].Segments, ".") != "providers.sample.bogus_field" {
 		t.Fatalf("drops = %v, want only providers.sample.bogus_field", drops)
 	}
 	if !strings.Contains(string(cleaned), "retry_delay_ms") {
@@ -639,7 +639,7 @@ func TestStripTypeInvalidOverrideDropsWronglyTypedContainerWhole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stripTypeInvalidOverride: %v", err)
 	}
-	if len(drops) != 1 || drops[0] != "log_level" {
+	if len(drops) != 1 || strings.Join(drops[0].Segments, ".") != "log_level" {
 		t.Fatalf("drops = %v, want only log_level", drops)
 	}
 	if strings.Contains(string(cleaned), "log_level") {

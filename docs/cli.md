@@ -330,6 +330,8 @@ Chord's config loader logs these problems and starts anyway, treating the offend
 | Flag      | Description                            |
 | --------- | -------------------------------------- |
 | `--json`  | Emit a machine-readable JSON report    |
+| `--model <provider/model>` | Base model to explain; requires `--field` |
+| `--field <field>` | One supported field; requires `--model` |
 
 The global config is always checked; the project config (`.chord/config.yaml`) under the current working directory is checked when present. Any problem makes the command exit with status 2, which is convenient for scripts and CI.
 
@@ -344,6 +346,23 @@ chord doctor config
 # Machine-readable report for scripts
 chord doctor config --json
 ```
+
+### Explain why a model setting has its current value
+
+Use a model and field together to inspect the configuration currently on disk:
+
+```bash
+chord doctor config --model sample/model-1 --field reasoning.effort
+chord doctor config --model sample/model-1 --field limit.input --json
+```
+
+Supported fields are exactly `reasoning.effort`, `thinking.type`, `limit.context`, `limit.input`, and `limit.output`. Both flags must be explicit and nonempty. Use a base `provider/model` reference; `@variant` queries, wildcards and multiple fields are not supported.
+
+The result shows the resolved value, global/project declarations, actual catalog contributions or context derivation, related diagnostics, and where to edit. It distinguishes an explicit empty string or zero from an absent value, and a cleared capability block from an untracked source. Shared YAML aliases and merges suggest an explicit override under the target model instead of editing the shared anchor. A `null` ancestor masks lower-layer declarations; the edit suggestion points to that ancestor so it can be replaced with a mapping. Some `null` declarations leave the source partially tracked; the reported value still comes from the resolved configuration.
+
+This is a read-only disk view. It does not include CLI, role or session overrides, the running model-pool selection, or the final API request. It does not contact a provider or refresh the catalog. A nonpositive `limit.input` means there is no independent input cap: runtime capacity depends on the context window and planned output. `limit.output` is the static model limit, not the request's `max_tokens`.
+
+The full configuration is still checked. A resolved query can accompany an overall failure (exit 2); partial source evidence or an unset/cleared value alone does not fail the command. With `--json`, the existing report gains a `query` object containing `status`, `view: "disk"`, the resolved file paths, `project_exists`, and either `result` or a structured `error`. Argument, unknown-model and load errors also produce JSON reports once flag parsing succeeds.
 
 ## `chord doctor models`
 

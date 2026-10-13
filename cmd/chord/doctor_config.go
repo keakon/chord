@@ -13,8 +13,11 @@ import (
 )
 
 type doctorConfigOptions struct {
-	Out  io.Writer
-	JSON bool
+	Out            io.Writer
+	JSON           bool
+	Model          string
+	Field          string
+	QueryRequested bool
 }
 
 type doctorConfigFileReport struct {
@@ -32,6 +35,7 @@ type doctorConfigCatalogReport struct {
 }
 
 type doctorConfigReport struct {
+	Query   *doctorConfigQuery        `json:"query,omitempty"`
 	Files   []doctorConfigFileReport  `json:"files"`
 	Catalog doctorConfigCatalogReport `json:"catalog"`
 	// Errors are problems of the effective config the runtime would start
@@ -62,10 +66,13 @@ receives); they are listed without changing the exit status.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			opts.Out = cmd.OutOrStdout()
+			opts.QueryRequested = cmd.Flags().Changed("model") || cmd.Flags().Changed("field")
 			return runDoctorConfig(opts)
 		},
 	}
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "Write a JSON report")
+	cmd.Flags().StringVar(&opts.Model, "model", "", "Explain a base model (provider/model; requires --field)")
+	cmd.Flags().StringVar(&opts.Field, "field", "", "Explain reasoning.effort, thinking.type, limit.context, limit.input, or limit.output (requires --model)")
 	return cmd
 }
 
@@ -75,27 +82,63 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 		out = os.Stdout
 	}
 	report := doctorConfigReport{Files: []doctorConfigFileReport{}}
+	var canonicalRef string
+	if opts.QueryRequested {
+		report.Query = &doctorConfigQuery{View: "disk"}
+		var queryErr *doctorConfigQueryError
+		canonicalRef, queryErr = validateDoctorConfigQuery(opts)
+		if queryErr != nil {
+			return finishDoctorConfigQueryError(out, opts.JSON, report, queryErr)
+		}
+	}
+	failLoad := func(err error) error {
+		if !opts.QueryRequested {
+			return cliExitError{code: 2, err: err}
+		}
+		return finishDoctorConfigQueryError(out, opts.JSON, report, &doctorConfigQueryError{Code: doctorQueryLoadFailed, Message: err.Error()})
+	}
 
 	globalPath, err := config.ConfigPath()
 	if err != nil {
-		return cliExitError{code: 2, err: fmt.Errorf("resolve config path: %w", err)}
+		return failLoad(fmt.Errorf("resolve config path: %w", err))
 	}
-	if _, statErr := os.Stat(globalPath); os.IsNotExist(statErr) {
-		return cliExitError{code: 2, err: initialSetupRequiredError()}
+	if report.Query != nil {
+		report.Query.GlobalPath = globalPath
 	}
 	projectPath := ""
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 		projectPath = config.ProjectConfigPath(cwd)
 	}
-	rc, err := config.LoadResolvedConfig(globalPath, projectPath)
-	if err != nil {
-		return cliExitError{code: 2, err: err}
+	if report.Query != nil {
+		report.Query.ProjectPath = projectPath
+		if _, err := os.Stat(projectPath); err == nil {
+			report.Query.ProjectExists = true
+		}
+		report.Files = append(report.Files, doctorConfigFileReport{Path: globalPath})
+		if report.Query.ProjectExists {
+			report.Files = append(report.Files, doctorConfigFileReport{Path: projectPath})
+		}
 	}
+	if _, statErr := os.Stat(globalPath); os.IsNotExist(statErr) {
+		return failLoad(initialSetupRequiredError())
+	}
+	var extraRefs []string
+	if opts.QueryRequested {
+		extraRefs = []string{canonicalRef}
+	}
+	rc, err := config.LoadResolvedConfig(globalPath, projectPath, extraRefs...)
+	if err != nil {
+		return failLoad(err)
+	}
+	report.Files = nil
 	report.Files = append(report.Files, doctorConfigFileReport{Path: globalPath, OK: true})
 	if rc.Project != nil {
 		report.Files = append(report.Files, doctorConfigFileReport{Path: projectPath, OK: true})
 	}
 	for _, diagnostic := range rc.Diagnostics {
+		if opts.QueryRequested {
+			diagnostic = redactConfigDiagnostic(diagnostic)
+		}
 		if diagnostic.Fallback != "" && diagnostic.File != "" {
 			for i := range report.Files {
 				if report.Files[i].Path == diagnostic.File {
@@ -135,33 +178,24 @@ func runDoctorConfig(opts doctorConfigOptions) error {
 		totalIssues += len(report.Errors)
 	}
 
-	if opts.JSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(report); err != nil {
-			return cliExitError{code: 2, err: fmt.Errorf("write JSON report: %w", err)}
+	if report.Query != nil {
+		provider, model := config.SplitProviderModelRef(canonicalRef)
+		result, queryErr := config.ExplainModelField(rc, provider, model, config.ExplainField(opts.Field))
+		if queryErr != nil {
+			report.Query.Status = doctorQueryError
+			report.Query.Error = &doctorConfigQueryError{Code: doctorQueryUnknownModel, Message: redactConfigDiagnostic(config.Diagnostic{Message: queryErr.Error()}).Message}
+			report.OK = false
+		} else {
+			redactModelFieldExplanation(&result)
+			report.Query.Status = doctorQueryResolved
+			report.Query.Result = &result
 		}
-	} else {
-		for _, f := range report.Files {
-			if f.OK {
-				fmt.Fprintf(out, "%s: OK\n", f.Path)
-			} else {
-				fmt.Fprintf(out, "%s: %d problem(s):\n", f.Path, len(f.Issues))
-				for _, issue := range f.Issues {
-					fmt.Fprintf(out, "  - %s\n", issue)
-				}
-			}
-		}
-		fmt.Fprintln(out, describeDoctorCatalog(report.Catalog))
-		for _, problem := range report.Errors {
-			fmt.Fprintf(out, "problem: %s\n", problem)
-		}
-		for _, warning := range report.Warnings {
-			fmt.Fprintf(out, "warning: %s\n", warning)
-		}
-		if report.OK {
-			fmt.Fprintln(out, "config OK")
-		}
+	}
+	if err := writeDoctorConfigReport(out, opts.JSON, report); err != nil {
+		return err
+	}
+	if report.Query != nil && report.Query.Error != nil {
+		return cliExitError{code: 2, err: fmt.Errorf("%s", report.Query.Error.Message)}
 	}
 
 	if !report.OK {
@@ -196,4 +230,41 @@ func describeDoctorCatalog(catalog doctorConfigCatalogReport) string {
 		description += "; local cache not in effect: " + catalog.CacheDetail
 	}
 	return description
+}
+
+func writeDoctorConfigReport(out io.Writer, asJSON bool, report doctorConfigReport) error {
+
+	if asJSON {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			return cliExitError{code: 2, err: fmt.Errorf("write JSON report: %w", err)}
+		}
+	} else {
+		if report.Query != nil {
+			renderDoctorConfigQuery(out, report.Query)
+		}
+		for _, f := range report.Files {
+			if f.OK {
+				fmt.Fprintf(out, "%s: OK\n", f.Path)
+			} else {
+				fmt.Fprintf(out, "%s: %d problem(s):\n", f.Path, len(f.Issues))
+				for _, issue := range f.Issues {
+					fmt.Fprintf(out, "  - %s\n", issue)
+				}
+			}
+		}
+		fmt.Fprintln(out, describeDoctorCatalog(report.Catalog))
+		for _, problem := range report.Errors {
+			fmt.Fprintf(out, "problem: %s\n", problem)
+		}
+		for _, warning := range report.Warnings {
+			fmt.Fprintf(out, "warning: %s\n", warning)
+		}
+		if report.OK {
+			fmt.Fprintln(out, "config OK")
+		}
+	}
+
+	return nil
 }

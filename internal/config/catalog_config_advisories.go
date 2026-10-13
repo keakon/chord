@@ -226,7 +226,7 @@ func catalogConfigAdvisories(rc *ResolvedConfig) []CatalogConfigAdvisory {
 		provider := rc.Config.Providers[providerName]
 		for _, modelName := range slices.Sorted(maps.Keys(provider.Models)) {
 			model := provider.Models[modelName]
-			facts, _, profile, found, err := catalogModelDefaults(provider, modelName, model)
+			facts, _, profile, _, found, err := catalogModelDefaults(provider, modelName, model)
 			if err != nil || !found || profile == nil {
 				continue
 			}

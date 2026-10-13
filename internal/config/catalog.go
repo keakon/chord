@@ -184,9 +184,9 @@ func catalogCandidateModels(cfg *Config, providerName string, extraRefs ...strin
 
 // catalogModelDefaults resolves preset bindings and explicitly selected
 // catalog IDs. Custom endpoints inherit recipes when the wire protocol matches.
-func catalogModelDefaults(provider ProviderConfig, wireModel string, model ModelConfig) (modelcatalog.ModelFacts, map[string]modelcatalog.Variant, *modelcatalog.ConfigProfile, bool, error) {
+func catalogModelDefaults(provider ProviderConfig, wireModel string, model ModelConfig) (modelcatalog.ModelFacts, map[string]modelcatalog.Variant, *modelcatalog.ConfigProfile, *modelcatalog.Binding, bool, error) {
 	if model.Catalog != nil && model.Catalog.Disabled {
-		return modelcatalog.ModelFacts{}, nil, nil, false, nil
+		return modelcatalog.ModelFacts{}, nil, nil, nil, false, nil
 	}
 	preset := strings.ToLower(strings.TrimSpace(provider.Preset))
 	var binding modelcatalog.Binding
@@ -194,25 +194,25 @@ func catalogModelDefaults(provider ProviderConfig, wireModel string, model Model
 	if model.Catalog != nil && model.Catalog.ID != "" {
 		facts, exists := modelcatalog.Model(model.Catalog.ID)
 		if !exists {
-			return modelcatalog.ModelFacts{}, nil, nil, false, fmt.Errorf("catalog model %q not found", model.Catalog.ID)
+			return modelcatalog.ModelFacts{}, nil, nil, nil, false, fmt.Errorf("catalog model %q not found", model.Catalog.ID)
 		}
 		if preset == "" {
 			variants, profile, err := customCatalogProfile(provider, facts)
-			return facts, variants, profile, true, err
+			return facts, variants, profile, nil, true, err
 		}
 		binding, bound = modelcatalog.LookupBindingByModelID(preset, model.Catalog.ID)
 		if !bound {
-			return modelcatalog.ModelFacts{}, nil, nil, false, fmt.Errorf("catalog model %q is not bound to preset %q", model.Catalog.ID, preset)
+			return modelcatalog.ModelFacts{}, nil, nil, nil, false, fmt.Errorf("catalog model %q is not bound to preset %q", model.Catalog.ID, preset)
 		}
 	} else {
 		binding, bound = modelcatalog.LookupBinding(preset, wireModel)
 	}
 	if !bound {
-		return modelcatalog.ModelFacts{}, nil, nil, false, nil
+		return modelcatalog.ModelFacts{}, nil, nil, nil, false, nil
 	}
 	facts, exists := modelcatalog.BindingFacts(binding)
 	profile := modelcatalog.MergeConfigProfiles(facts.Profile, binding.Profile)
-	return facts, binding.Variants, profile, exists, nil
+	return facts, binding.Variants, profile, &binding, exists, nil
 }
 
 // customCatalogProfile borrows the official recipe for the same wire protocol.
@@ -338,12 +338,13 @@ func materializeCatalogModels(rc *ResolvedConfig, extraRefs ...string) []Diagnos
 		changed := false
 		for _, modelName := range catalogCandidateModels(rc.Config, providerName, extraRefs...) {
 			mc, userDefined := provider.Models[modelName]
-			facts, variants, profile, found, err := catalogModelDefaults(provider, modelName, mc)
+			facts, variants, profile, binding, found, err := catalogModelDefaults(provider, modelName, mc)
 			if err != nil {
 				diagnostics = append(diagnostics, Diagnostic{
-					Severity: DiagnosticSeverityError,
-					Path:     "providers." + providerName + ".models." + modelName + ".catalog",
-					Message:  err.Error(), Continues: true, Scope: "model " + providerName + "/" + modelName,
+					Severity:     DiagnosticSeverityError,
+					Path:         "providers." + providerName + ".models." + modelName + ".catalog",
+					PathSegments: []string{"providers", providerName, "models", modelName, "catalog"},
+					Message:      err.Error(), Continues: true, Scope: "model " + providerName + "/" + modelName,
 				})
 				continue
 			}
@@ -360,7 +361,7 @@ func materializeCatalogModels(rc *ResolvedConfig, extraRefs ...string) []Diagnos
 					defaults.ParallelToolCalls = nil
 				}
 				if err != nil {
-					diagnostics = append(diagnostics, Diagnostic{Severity: DiagnosticSeverityError, Path: "providers." + providerName + ".models." + modelName + ".catalog", Message: err.Error(), Continues: true})
+					diagnostics = append(diagnostics, Diagnostic{Severity: DiagnosticSeverityError, Path: "providers." + providerName + ".models." + modelName + ".catalog", PathSegments: []string{"providers", providerName, "models", modelName, "catalog"}, Message: err.Error(), Continues: true})
 					continue
 				}
 			}
@@ -373,7 +374,11 @@ func materializeCatalogModels(rc *ResolvedConfig, extraRefs ...string) []Diagnos
 			if rc.Index != nil {
 				rc.Index.ensureModelOrigin(providerName, modelName)
 			}
-			if mc.fillFromCatalog(facts, variants, profile, defaults, rc.Index, providerName, modelName, userDefined) {
+			identity := ExplainSource{Kind: ExplainSourceCatalog, CatalogModelID: facts.ID, CatalogVersion: rc.CatalogVersion, Preset: strings.ToLower(strings.TrimSpace(provider.Preset))}
+			if binding != nil {
+				identity.WireModel = binding.WireModelID
+			}
+			if mc.fillFromCatalog(facts, variants, profile, defaults, rc.Index, providerName, modelName, userDefined, rc.ExplainEvidence, identity) {
 				if provider.Models == nil {
 					provider.Models = make(map[string]ModelConfig)
 				}
@@ -392,7 +397,7 @@ func materializeCatalogModels(rc *ResolvedConfig, extraRefs ...string) []Diagnos
 // and reports whether anything changed. Nullable blocks cleared by a user
 // layer are skipped; the catalog origin of every filled path is recorded as
 // the lowest-priority layer in the index.
-func (m *ModelConfig) fillFromCatalog(facts modelcatalog.ModelFacts, variants map[string]modelcatalog.Variant, profile *modelcatalog.ConfigProfile, defaults ModelConfig, idx *SourceIndex, provider, model string, userDefined bool) bool {
+func (m *ModelConfig) fillFromCatalog(facts modelcatalog.ModelFacts, variants map[string]modelcatalog.Variant, profile *modelcatalog.ConfigProfile, defaults ModelConfig, idx *SourceIndex, provider, model string, userDefined bool, evidence *ConfigExplainEvidence, identity ExplainSource) bool {
 	changed := false
 	leafDeclared := func(leaf string) bool {
 		if !userDefined || idx == nil {
@@ -424,6 +429,10 @@ func (m *ModelConfig) fillFromCatalog(facts modelcatalog.ModelFacts, variants ma
 		return state.Cleared || state.LowerCleared
 	}
 	recordLimit := func(leaf string) {
+		field := ExplainField("limit." + leaf)
+		d, _ := explainDescriptor(field)
+		scalar, _ := d.get(*m)
+		evidence.recordCatalog(provider, model, field, scalar, identity)
 		if idx != nil {
 			idx.prependCatalogLimitOrigin(provider, model, leaf)
 		}
@@ -490,6 +499,12 @@ func (m *ModelConfig) fillFromCatalog(facts modelcatalog.ModelFacts, variants ma
 				return
 			}
 			assign()
+			for _, d := range explainFields {
+				if d.block == block {
+					scalar, _ := d.get(*m)
+					evidence.recordCatalog(provider, model, d.field, scalar, identity)
+				}
+			}
 			if idx != nil {
 				idx.prependCatalogBlockOrigin(provider, model, block)
 			}

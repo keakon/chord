@@ -330,6 +330,8 @@ Chord 的配置加载器遇到这些问题只会写日志并照常启动，把�
 | Flag      | 说明                          |
 | --------- | ----------------------------- |
 | `--json`  | 输出机器可读的 JSON 报告      |
+| `--model <provider/model>` | 要解释的基础模型，须同时指定 `--field` |
+| `--field <field>` | 一个受支持的字段，须同时指定 `--model` |
 
 全局配置始终会检查；当前工作目录下的项目配置（`.chord/config.yaml`）存在时也会检查。只要有问题，命令就以状态码 2 退出，方便脚本和 CI 使用。
 
@@ -344,6 +346,23 @@ chord doctor config
 # 脚本用的机器可读报告
 chord doctor config --json
 ```
+
+### 查明模型配置为什么没有生效
+
+同时指定模型和字段，即可查看磁盘配置当前解析出的值：
+
+```bash
+chord doctor config --model sample/model-1 --field reasoning.effort
+chord doctor config --model sample/model-1 --field limit.input --json
+```
+
+支持的字段固定为 `reasoning.effort`、`thinking.type`、`limit.context`、`limit.input`、`limit.output`，名称必须精确匹配。`--model` 与 `--field` 必须同时显式传入且非空。模型使用基础 `provider/model` 引用，不支持 `@variant`、通配符或一次查询多个字段。
+
+结果会显示解析值、全局与项目配置的声明和覆盖关系、实际采用的目录值或 context 推导来源、相关诊断以及建议修改的位置。显式空字符串、`0`、未设置、整块清空和来源未知会分别标明。值来自共享 YAML alias/merge 时，建议在目标模型下添加显式覆盖，避免影响共享同一 anchor 的其他模型；父级为 `null` 时，低层声明已被遮蔽，修改建议会指向该父级，提示先改为映射。部分 `null` 声明的来源只能部分追踪，显示的值仍以实际解析结果为准。
+
+这是只读的磁盘视图，不包含 CLI、角色、会话覆盖、运行中的模型池选择或最终 API 请求，也不会调用 provider 或刷新目录。`limit.input<=0` 表示没有独立输入上限，运行时会结合上下文窗口和计划输出预算计算；`limit.output` 是模型的静态输出上限，不等于请求中的 `max_tokens`。
+
+查询仍会检查完整配置：即使目标字段可以解释，其他配置有问题时仍退出 2；仅来源证据不完整、字段未设置或被清空不会导致失败。`--json` 在原报告上增加 `query`，包含查询状态、`view: "disk"`、实际解析路径、`project_exists`，以及 `result` 或结构化 `error`。通过 flag 解析后，参数错误、模型不存在和加载失败也会输出 JSON 报告。
 
 ## `chord doctor models`
 

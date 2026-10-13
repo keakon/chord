@@ -1,6 +1,10 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
 
 // DiagnosticSeverity classifies how a config problem affects execution.
 type DiagnosticSeverity string
@@ -29,7 +33,8 @@ type Diagnostic struct {
 	// Path is the dotted YAML path of the offending field, e.g.
 	// "providers.sample.models.model-1.thinking". Empty when no single field
 	// is at fault.
-	Path string `json:"path,omitempty"`
+	Path         string   `json:"path,omitempty"`
+	PathSegments []string `json:"path_segments,omitempty"`
 	// Line and Col locate the offending node (1-based, as reported by the
 	// YAML parser). Zero when the problem has no single location.
 	Line int `json:"line,omitempty"`
@@ -71,4 +76,12 @@ func appendLoadDiagnostic(diagnostics *[]Diagnostic, file, path, message, fallba
 		File:     file, Path: path, Message: message,
 		Continues: true, Fallback: fallback,
 	})
+}
+
+func appendLoadPathDiagnostic(diagnostics *[]Diagnostic, file string, segments []string, message, fallback string) {
+	if diagnostics == nil {
+		return
+	}
+	*diagnostics = append(*diagnostics, Diagnostic{Severity: DiagnosticSeverityWarning, File: file,
+		Path: strings.Join(segments, "."), PathSegments: slices.Clone(segments), Message: message, Continues: true, Fallback: fallback})
 }
