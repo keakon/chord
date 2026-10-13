@@ -5,15 +5,20 @@ const (
 	InputQueued   = "queued"
 	InputStarted  = "started"
 	InputRejected = "rejected"
+	InputUnknown  = "unknown"
 )
 
 // InputResultEvent reports consumption of one input, not completion of its
 // model work or durable delivery across a disconnected control-plane client.
 type InputResultEvent struct {
-	RequestID string `json:"request_id"`
-	Status    string `json:"status"`
-	TurnID    uint64 `json:"turn_id,omitempty"`
-	Message   string `json:"message,omitempty"`
+	Target        *InputTarget `json:"target,omitempty"`
+	InputID       string       `json:"input_id,omitempty"`
+	Revision      uint64       `json:"revision,omitempty"`
+	QueueRevision uint64       `json:"queue_revision,omitempty"`
+	RequestID     string       `json:"request_id"`
+	Status        string       `json:"status"`
+	TurnID        uint64       `json:"turn_id,omitempty"`
+	Message       string       `json:"message,omitempty"`
 }
 
 func (InputResultEvent) agentEvent() {}

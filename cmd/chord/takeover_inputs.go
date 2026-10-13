@@ -8,7 +8,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 )
@@ -20,7 +19,7 @@ const (
 )
 
 type headlessPausedInputsBackend interface {
-	CurrentSessionPauseStatus() agent.SessionPauseStatus
+	CurrentSessionPauseStatus() recovery.SessionPauseStatus
 	PendingSessionInputs() []recovery.PendingInput
 }
 
@@ -52,7 +51,7 @@ func headlessPausedInputProjection(backend any) *headlessPausedInputs {
 	status := reader.CurrentSessionPauseStatus()
 	out := &headlessPausedInputs{PendingInputCount: len(inputs), Inputs: make([]headlessPausedInputSummary, 0, min(len(inputs), headlessPausedInputLimit))}
 	switch status.State {
-	case agent.SessionPauseReady, agent.SessionPauseDraining, agent.SessionPauseSaving, agent.SessionPauseSaveFailed, agent.SessionPauseSaved, agent.SessionPauseReleased:
+	case recovery.SessionPauseReady, recovery.SessionPauseDraining, recovery.SessionPauseSaving, recovery.SessionPauseSaveFailed, recovery.SessionPauseSaved, recovery.SessionPauseReleased:
 		out.Paused = true
 	}
 	seen := make(map[string]struct{}, min(len(inputs), headlessPausedInputLimit))

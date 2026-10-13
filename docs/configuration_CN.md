@@ -9,6 +9,15 @@
 - `.chord/config.yaml`：项目级覆盖配置
 - `~/.config/chord/agents/` / `.chord/agents/`：角色配置
 
+## 完成后执行的快捷键
+
+`keymap.insert_submit_after_completion` 默认使用 `alt+enter`。设为空列表可禁用，也可重绑；帮助界面显示实际生效的键位。该操作仅支持 MainAgent，不改变普通发送和换行。
+
+```yaml
+keymap:
+  insert_submit_after_completion: [alt+enter]
+```
+
 ## 如何使用本页
 
 无需从头到尾阅读本页：

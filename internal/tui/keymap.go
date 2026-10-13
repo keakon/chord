@@ -7,18 +7,19 @@ import "slices"
 // be bound to the same action.
 type KeyMap struct {
 	// Insert mode
-	InsertEscape          []string
-	InsertSubmit          []string
-	InsertNewline         []string
-	InsertHistorySearch   []string
-	InsertHistoryUp       []string
-	InsertHistoryDown     []string
-	InsertAttachClipboard []string // attach image/PDF from the system clipboard
-	InsertAttachFile      []string // pick image from file (optional; default unbound)
-	InsertClearInput      []string // clear input box and attachments
-	InsertUndo            []string // undo the last composer edit
-	InsertPageUp          []string // page the transcript up without leaving insert mode
-	InsertPageDown        []string // page the transcript down without leaving insert mode
+	InsertEscape                []string
+	InsertSubmit                []string
+	InsertNewline               []string
+	InsertHistorySearch         []string
+	InsertHistoryUp             []string
+	InsertHistoryDown           []string
+	InsertAttachClipboard       []string // attach image/PDF from the system clipboard
+	InsertAttachFile            []string // pick image from file (optional; default unbound)
+	InsertClearInput            []string // clear input box and attachments
+	InsertUndo                  []string // undo the last composer edit
+	InsertPageUp                []string // page the transcript up without leaving insert mode
+	InsertPageDown              []string // page the transcript down without leaving insert mode
+	InsertSubmitAfterCompletion []string
 
 	// Normal mode – mode switches
 	EnterInsert []string

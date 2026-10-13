@@ -91,8 +91,12 @@ func TestScenarioToolChainAndPermissionBoundary(t *testing.T) {
 				close(release)
 			}
 			collectAgentEventsUntil(t, a.Events(), func(events []AgentEvent) bool {
+				started := false
 				for _, ev := range events {
-					if _, ok := ev.(GlobalIdleEvent); ok {
+					if _, ok := ev.(RequestCycleStartedEvent); ok {
+						started = true
+					}
+					if _, ok := ev.(GlobalIdleEvent); ok && started {
 						return true
 					}
 				}
@@ -129,6 +133,8 @@ func TestScenarioCancellationAndResume(t *testing.T) {
 		scriptedStreamCall{resp: &message.Response{Content: "resumed", StopReason: "end_turn"}},
 	)
 	p.streamedCh, p.releaseCh = make(chan struct{}), make(chan struct{})
+	// A startup idle notification may still be buffered when the first input arrives.
+	a.emitToTUI(GlobalIdleEvent{SuppressUserNotification: true})
 	startMainAgentLoopForTest(t, a)
 	a.SendUserMessageWithReceipt("first", "input-1")
 	select {
@@ -140,8 +146,12 @@ func TestScenarioCancellationAndResume(t *testing.T) {
 		t.Fatal("active request not cancelled")
 	}
 	collectAgentEventsUntil(t, a.Events(), func(events []AgentEvent) bool {
+		started := false
 		for _, ev := range events {
-			if _, ok := ev.(GlobalIdleEvent); ok {
+			if request, ok := ev.(RequestCycleStartedEvent); ok && request.AgentID == identity.MainAgentID {
+				started = true
+			}
+			if _, ok := ev.(GlobalIdleEvent); ok && started {
 				return true
 			}
 		}
@@ -149,8 +159,12 @@ func TestScenarioCancellationAndResume(t *testing.T) {
 	})
 	a.SendUserMessageWithReceipt("second", "input-2")
 	collectAgentEventsUntil(t, a.Events(), func(events []AgentEvent) bool {
+		started := false
 		for _, ev := range events {
-			if _, ok := ev.(GlobalIdleEvent); ok {
+			if request, ok := ev.(RequestCycleStartedEvent); ok && request.AgentID == identity.MainAgentID {
+				started = true
+			}
+			if _, ok := ev.(GlobalIdleEvent); ok && started {
 				return true
 			}
 		}

@@ -144,7 +144,7 @@ func TestPrepareMessagesForLLM_ArchivesIrreducibleJobOutput(t *testing.T) {
 		StaleAgeTurns:       1,
 		StaleOutputBytes:    40,
 	}}}
-	a.newTurn()
+	a.newTurn("")
 	content := strings.Repeat("job output log\n", 60)
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u1"},

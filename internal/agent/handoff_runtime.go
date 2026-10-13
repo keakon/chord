@@ -150,7 +150,7 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		if a.recoveryManager() != nil {
 			a.persistAsync(identity.MainAgentID, msg)
 		}
-		a.handleContinueFromContext()
+		a.handleContinueFromContext(a.delivery.currentWorkID)
 	case handoffResolveCancel:
 		a.emitDeferredHandoffToolResult(pc, "Cancelled", ToolResultStatusCancelled)
 	default:

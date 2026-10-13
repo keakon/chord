@@ -47,7 +47,7 @@ func TestDeliveryAcknowledgmentSettlesCanonicalHistory(t *testing.T) {
 				}()
 				owner := identity.MainAgentID
 				contextManager := a.ctxMgr
-				a.newTurn()
+				a.newTurn("")
 				turn := a.turn
 				var sub *SubAgent
 				if worker {
@@ -112,7 +112,7 @@ func TestDeliverySurvivesRepeatedCompactionAndReload(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	manager := recovery.NewRecoveryManager(a.sessionDir)
 	a.installRecoveryManager(manager)
-	a.newTurn()
+	a.newTurn("")
 	first := message.DeliveredFile{ID: "first", DisplayName: "first.txt"}
 	second := message.DeliveredFile{ID: "second", DisplayName: "second.txt"}
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "create reports"})

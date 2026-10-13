@@ -58,11 +58,27 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 			effects.addFollowup(m.maybeTerminalNotifyCmd(m.idleNotificationText()))
 		}
 		return true, effects
+	case agent.InputQueueChangedEvent:
+		m.applyInputQueueSnapshot(evt.Snapshot)
+		return true, effects
+	case agent.InputQueueOperationResultEvent:
+		effects.addFollowup(m.handleInputQueueResult(evt))
+		return true, effects
 	case agent.PendingDraftConsumedEvent:
+		if evt.InputID != "" && evt.Target.RuntimeID != "" && m.agent != nil && !sameInputQueueBinding(evt.Target, m.agent.InputDeliveryTarget()) {
+			return true, effects
+		}
 		draft := queuedDraftFromParts(evt.Parts)
 		draft.ID = evt.DraftID
-		if idx := m.findQueuedDraftIndex(evt.DraftID); idx >= 0 {
-			draft = m.removeQueuedDraftAt(idx)
+		for idx, queued := range m.queuedDrafts {
+			matches := evt.InputID != "" && queued.InputID == evt.InputID
+			if evt.InputID == "" || evt.Revision == 0 && queued.DeliveryStatus == "Saving" {
+				matches = queued.ID == evt.DraftID
+			}
+			if matches {
+				draft = m.removeQueuedDraftAt(idx)
+				break
+			}
 		}
 		if m.editingQueuedDraftID == evt.DraftID {
 			m.editingQueuedDraftID = ""
@@ -82,7 +98,7 @@ func (m *Model) handleTurnAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				if !message.IsUserAuthored(msg) {
 					continue
 				}
-				if userPromptMatchesContent(msg, content) {
+				if evt.InputID != "" && msg.InputID == evt.InputID || evt.InputID == "" && userPromptMatchesContent(msg, content) {
 					msgIndex = i
 					break
 				}

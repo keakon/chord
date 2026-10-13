@@ -816,17 +816,17 @@ func (a *MainAgent) handleQuestionCommitted(commit *questionCommit) {
 			a.explicitUserTurnCount.Add(1)
 		}
 		if commit.fact.Paused != nil && !*commit.fact.Paused {
-			a.handleContinueFromContext()
+			a.handleContinueFromContext(a.delivery.currentWorkID)
 		}
 		if commit.fact.Operation == QuestionOpNewTask && a.turn == nil && !r.paused {
-			a.handleContinueFromContext()
+			a.handleContinueFromContext(a.delivery.currentWorkID)
 		}
 		if (commit.fact.Result != nil || commit.fact.SourceID != "") && len(commit.fact.Updates) > 0 {
 			if !r.completed[r.scope] && commit.command.owner == "" && commit.fact.Updates[0].ScopeID == r.scope && commit.fact.Updates[0].TaskID == identity.MainAgentID {
 				if a.turn != nil {
 					r.resumeNeeded = true
 				} else if !r.paused {
-					a.handleContinueFromContext()
+					a.handleContinueFromContext(a.delivery.currentWorkID)
 				}
 			}
 		}

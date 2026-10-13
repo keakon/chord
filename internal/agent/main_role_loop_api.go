@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/keakon/chord/internal/recovery"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
@@ -375,7 +377,7 @@ func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
 		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{Content: target, FromUser: true})
 		return
 	}
-	a.newTurn()
+	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx
 	userMsg := message.Message{Role: "user", Content: target}

@@ -431,7 +431,7 @@ func TestModelDrivenCheckpointBuilderIncludesMachineSections(t *testing.T) {
 	}
 	projectRoot := newWorktreeTestRepo(t)
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "keep working"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{
 		{ID: "c1", Name: tools.NameEdit, Args: checkpointWorklogPathArgs(t, "internal/agent/a.go")},

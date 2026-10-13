@@ -24,11 +24,11 @@ type SessionPendingInputsUpdatedEvent struct {
 func (SessionPendingInputsUpdatedEvent) agentEvent() {}
 
 // CurrentSessionPauseStatus returns a read-only view for the local UI.
-func (a *MainAgent) CurrentSessionPauseStatus() SessionPauseStatus {
+func (a *MainAgent) CurrentSessionPauseStatus() recovery.SessionPauseStatus {
 	a.pause.mu.Lock()
 	defer a.pause.mu.Unlock()
 	status := a.pause.status
-	status.Blockers = append([]SessionPauseBlocker(nil), status.Blockers...)
+	status.Blockers = append([]recovery.SessionPauseBlocker(nil), status.Blockers...)
 	return status
 }
 

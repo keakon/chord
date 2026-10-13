@@ -73,7 +73,7 @@ func TestDeliveryCancellationWaitsForQueuedAck(t *testing.T) {
 	release := make(chan struct{})
 	a.persist.start(func(entry persistEntry) { received <- entry; <-release; entry.after(nil) })
 	a.installRecoveryManager(recovery.NewRecoveryManager(t.TempDir()))
-	a.newTurn()
+	a.newTurn("")
 	payload := &ToolResultPayload{CallID: "delivery-call", Name: "present", TurnID: a.turn.ID, Result: "declared", DeliveredFiles: []message.DeliveredFile{{ID: "delivery"}}, composedTexts: &composedToolResultTexts{Display: "hook rewritten text", Context: "hook rewritten text"}}
 	if !a.beginDeliveryCommit(payload) {
 		t.Fatal("delivery did not wait for ack")

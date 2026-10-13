@@ -39,7 +39,7 @@ func TestGateKeepsStickyReminderWhenTheWarningClaimIsSpent(t *testing.T) {
 		},
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, provider, "current-model", 4096, "sys")
-	a.newTurn()
+	a.newTurn("")
 	a.started.Store(true)
 	t.Cleanup(func() {
 		if a.IsCompactionRunning() {

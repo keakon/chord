@@ -414,7 +414,7 @@ func TestManualMainContinueBatchesCompletedMailboxesIntoSingleTurn(t *testing.T)
 		{MessageID: "b-1", AgentID: "worker-b", TaskID: "task-b", Kind: SubAgentMailboxKindCompleted, Priority: SubAgentMailboxPriorityUrgent, Summary: "done b"},
 	}
 
-	a.handleContinueFromContext()
+	a.handleContinueFromContext("")
 	if a.turn == nil {
 		t.Fatal("expected manual continue to start a main turn")
 	}
@@ -467,7 +467,7 @@ func TestPrepareSubAgentMailboxBatchForTurnContinuationStagesDecisionMailbox(t *
 		Summary:     "need main decision",
 		RequiresAck: true,
 	}}
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 
 	if !a.prepareSubAgentMailboxBatchForTurnContinuation() {
@@ -494,7 +494,7 @@ func TestParkedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-root")
 	sub.agentDefName = "worker"
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleAgentDone(Event{
 		Type:     EventAgentDone,
@@ -553,7 +553,7 @@ func TestParkedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
 
 func TestClosedUnknownCompletedMailboxIsDropped(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleSubAgentMailboxEvent(Event{
 		Type:     EventSubAgentMailbox,
@@ -3986,7 +3986,7 @@ func TestHandleAgentDonePersistsCompletionMailboxBeforeTerminalCommit(t *testing
 		t.Fatalf("MkdirAll(subagents): %v", err)
 	}
 	sub := newControllableTestSubAgent(t, a, "adhoc-durable-first")
-	a.newTurn() // keep a busy turn so dispatching delivery does not start an LLM turn
+	a.newTurn("") // keep a busy turn so dispatching delivery does not start an LLM turn
 
 	a.handleAgentDone(Event{
 		Type:     EventAgentDone,
@@ -4085,7 +4085,7 @@ func TestAgentDoneCompletionMailboxEventDeliversExactlyOnceWithoutRewriting(t *t
 		t.Fatalf("MkdirAll(subagents): %v", err)
 	}
 	sub := newControllableTestSubAgent(t, a, "adhoc-deliver-once")
-	a.newTurn() // keep a busy turn so dispatch does not auto-drain into a new LLM turn
+	a.newTurn("") // keep a busy turn so dispatch does not auto-drain into a new LLM turn
 
 	a.handleAgentDone(Event{
 		Type:     EventAgentDone,
@@ -4164,7 +4164,7 @@ func TestHandleAgentErrorPersistsRiskAlertMailboxBeforeTerminalCommit(t *testing
 		t.Fatalf("MkdirAll(subagents): %v", err)
 	}
 	sub := newControllableTestSubAgent(t, a, "adhoc-risk-durable-first")
-	a.newTurn() // keep a busy turn so dispatching delivery does not start an LLM turn
+	a.newTurn("") // keep a busy turn so dispatching delivery does not start an LLM turn
 
 	a.handleAgentError(Event{Type: EventAgentError, SourceID: sub.instanceID, Payload: context.DeadlineExceeded})
 
@@ -4595,7 +4595,7 @@ func TestStageNextSubAgentMailboxBatchDrainsEveryQueuedMessage(t *testing.T) {
 func TestIdleMailboxDrainLeavesActiveTurnAndProgressUntouched(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "update"})
-	a.newTurn()
+	a.newTurn("")
 	if a.currentTurn() == nil {
 		t.Fatal("active turn was not created")
 	}
@@ -4629,7 +4629,7 @@ func TestTurnContinuationStagingIncludesPendingProgress(t *testing.T) {
 		Priority:  SubAgentMailboxPriorityInterrupt,
 		Summary:   "needs a decision",
 	}}
-	a.newTurn()
+	a.newTurn("")
 	if a.currentTurn() == nil {
 		t.Fatal("active turn was not created")
 	}
@@ -4818,7 +4818,7 @@ func TestTurnContinuationStagesQueueResidentProgressHead(t *testing.T) {
 		Kind:      SubAgentMailboxKindProgress,
 		Summary:   "still working",
 	}}
-	a.newTurn()
+	a.newTurn("")
 	if a.currentTurn() == nil {
 		t.Fatal("active turn was not created")
 	}
@@ -4847,7 +4847,7 @@ func TestTurnContinuationStagesQueueResidentProgressHead(t *testing.T) {
 // batch bookkeeping from the earlier delivery.
 func TestTurnContinuationStagesLaterBatchAfterFirstConsumed(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
 		MessageID: "c-1",
@@ -4900,7 +4900,7 @@ func TestTurnContinuationStagesLaterBatchAfterFirstConsumed(t *testing.T) {
 // ctxmgr, without interrupting the in-flight request or starting a new turn.
 func TestTurnContinuationStagesProgressSnapshotForNextRequest(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.currentTurn().ID
 
 	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"})
@@ -4925,7 +4925,7 @@ func TestTurnContinuationStagesProgressSnapshotForNextRequest(t *testing.T) {
 // nor acked twice.
 func TestTurnCloseoutAcksEveryBatchStagedInTurn(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 
 	stage := func(id string) {
 		a.subAgentInbox.urgent = []SubAgentMailboxMessage{{

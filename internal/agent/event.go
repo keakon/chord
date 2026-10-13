@@ -27,8 +27,6 @@ const (
 	EventModelPoolSwitch     = "model_pool_switch"
 	EventMCPControl          = "mcp_control"
 	EventMCPControlDone      = "mcp_control_done"
-	EventPendingDraftUpsert  = "pending_draft_upsert"
-	EventPendingDraftRemove  = "pending_draft_remove"
 
 	// Multi-agent orchestration event types.
 	EventAgentDone               = "agent_done" // SubAgent completed its task
@@ -608,9 +606,13 @@ const NotificationReasonUserInputRequired = "user_input_required"
 // PendingDraftConsumedEvent signals that a queued draft was actually appended
 // to the conversation context and is now part of the transcript.
 type PendingDraftConsumedEvent struct {
-	DraftID string
-	Parts   []message.ContentPart
-	AgentID string // "" = main agent
+	Target   InputTarget
+	InputID  string
+	Revision uint64
+	WorkID   string
+	DraftID  string
+	Parts    []message.ContentPart
+	AgentID  string // "" = main agent
 }
 
 func (PendingDraftConsumedEvent) agentEvent() {}

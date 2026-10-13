@@ -157,7 +157,7 @@ func TestMainFrozenToolBatchPersistsNotStarted(t *testing.T) {
 	a := newGateTestMainAgent(t)
 	a.tools.Register(dummyTool{name: "sample_tool"})
 	a.ruleset = permission.Ruleset{{Permission: "sample_tool", Pattern: "*", Action: permission.ActionAllow}}
-	a.newTurn()
+	a.newTurn("")
 	engine := gateTestHookEngineOf(a)
 	engine.hasHooks = true
 	engine.modify = func(env hook.Envelope) *hook.Result {

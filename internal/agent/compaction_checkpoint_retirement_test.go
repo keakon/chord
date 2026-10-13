@@ -45,7 +45,7 @@ func TestModelDrivenDerivedEvidenceStillValidatesAtBarrier(t *testing.T) {
 	for _, valid := range []bool{true, false} {
 		t.Run(fmt.Sprint(valid), func(t *testing.T) {
 			agent := newTestMainAgent(t, t.TempDir())
-			agent.newTurn()
+			agent.newTurn("")
 			item := evidenceItem{Kind: evidenceToolDiff, Key: "parser", Excerpt: "parser updated"}
 			agent.evidence.add(item)
 			ref := evidenceItemID(item)
@@ -100,7 +100,7 @@ func TestCheckpointCompletedCarryIsBounded(t *testing.T) {
 
 func TestCheckpointProgressSurvivesRepeatedDurableApplies(t *testing.T) {
 	agent := newTestMainAgent(t, t.TempDir())
-	agent.newTurn()
+	agent.newTurn("")
 	agent.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement and verify the parser"})
 	for round := 1; round <= 20; round++ {
 		agent.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "working on parser"})

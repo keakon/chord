@@ -57,7 +57,7 @@ func TestOversizedSuccessfulResponseDoesNotArmDisabledThreshold(t *testing.T) {
 	a.modelUpdateMu.Lock()
 	a.appliedCompactionModelRef = "provider/current-model"
 	a.modelUpdateMu.Unlock()
-	a.newTurn()
+	a.newTurn("")
 	a.started.Store(true)
 	t.Cleanup(func() {
 		if a.IsCompactionRunning() {

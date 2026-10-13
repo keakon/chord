@@ -37,7 +37,7 @@ func testPauseIdentity(a *MainAgent) recovery.TransferIdentity {
 	return recovery.TransferIdentity{TransferID: "transfer-1", SessionID: filepath.Base(a.SessionDir()), SourceRuntimeID: "runtime-1", SourceSessionEpoch: a.sessionEpoch, Workspace: a.ContentRoot(), TargetKind: "gateway", TargetInstanceID: "target-1"}
 }
 
-func waitPauseState(t *testing.T, a *MainAgent, state string) SessionPauseStatus {
+func waitPauseState(t *testing.T, a *MainAgent, state string) recovery.SessionPauseStatus {
 	t.Helper()
 	for {
 		select {
@@ -63,7 +63,7 @@ func TestSessionPauseAPIsRejectStoppedAgent(t *testing.T) {
 	if _, err := a.BeginSessionPause(context.Background(), SessionPauseRequest{Identity: id}); !errors.Is(err, ErrAgentShutdown) {
 		t.Fatalf("begin error=%v", err)
 	}
-	a.pause.status = SessionPauseStatus{TransferIdentity: id, State: SessionPauseSaveFailed}
+	a.pause.status = recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPauseSaveFailed}
 	if err := a.RetrySessionPauseSave(context.Background(), id.TransferID); !errors.Is(err, ErrAgentShutdown) {
 		t.Fatalf("retry error=%v", err)
 	}
@@ -71,7 +71,7 @@ func TestSessionPauseAPIsRejectStoppedAgent(t *testing.T) {
 
 func TestSessionPauseNaturalToolCompletionAndOrdinaryResume(t *testing.T) {
 	a, provider := scenarioAgent(t, scriptedStreamCall{resp: &message.Response{ToolCalls: []message.ToolCall{{ID: "call-1", Name: "sample_tool", Args: json.RawMessage(`{}`)}}, StopReason: "tool_use"}})
-	tool := &pauseBarrierTool{dummyTool: dummyTool{name: "sample_tool"}, entered: make(chan struct{}), release: make(chan struct{})}
+	tool := &pauseBarrierTool{name: "sample_tool", entered: make(chan struct{}), release: make(chan struct{})}
 	a.tools.Register(tool)
 	a.ruleset = permission.Ruleset{{Permission: "sample_tool", Pattern: "*", Action: permission.ActionAllow}}
 	lock, err := recovery.AcquireSessionLock(a.SessionDir())
@@ -86,14 +86,14 @@ func TestSessionPauseNaturalToolCompletionAndOrdinaryResume(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("tool did not start")
 	}
-	if !a.QueuePendingUserDraft("draft-1", []message.ContentPart{{Type: message.ContentPartText, Text: "queued input"}, {Type: message.ContentPartImage, MimeType: "image/png", Data: []byte("sample image")}}) {
+	if !submitMainDraftForTest(a, "draft-1", []message.ContentPart{{Type: message.ContentPartText, Text: "queued input"}, {Type: message.ContentPartImage, MimeType: "image/png", Data: []byte("sample image")}}) {
 		t.Fatal("input not accepted")
 	}
 	status, err := a.BeginSessionPause(context.Background(), SessionPauseRequest{Identity: testPauseIdentity(a)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.State != SessionPauseDraining {
+	if status.State != recovery.SessionPauseDraining {
 		t.Fatalf("state=%#v", status)
 	}
 	if status.BlockerCount == 0 || len(status.Blockers) == 0 {
@@ -113,7 +113,7 @@ func TestSessionPauseNaturalToolCompletionAndOrdinaryResume(t *testing.T) {
 		t.Fatal("new model work while draining")
 	}
 	close(tool.release)
-	waitPauseState(t, a, SessionPauseSaved)
+	waitPauseState(t, a, recovery.SessionPauseSaved)
 	if err := a.ReleasePausedSession("transfer-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -122,10 +122,14 @@ func TestSessionPauseNaturalToolCompletionAndOrdinaryResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Pause == nil || !snapshot.Pause.CheckpointComplete || len(snapshot.Pause.PendingInputs) != 1 {
+	if snapshot.Pause == nil || !snapshot.Pause.CheckpointComplete || len(snapshot.Pause.PendingInputs) != 0 || snapshot.Pause.InputDeliveryRevision == 0 {
 		t.Fatalf("checkpoint=%#v", snapshot.Pause)
 	}
-	if _, err := os.Stat(snapshot.Pause.PendingInputs[0].Parts[1].ImagePath); err != nil {
+	queue, err := manager.LoadInputDelivery()
+	if err != nil || queue == nil || len(queue.Inputs) != 1 {
+		t.Fatalf("queue=%+v error=%v", queue, err)
+	}
+	if _, err := os.Stat(queue.Inputs[0].Parts[1].ImagePath); err != nil {
 		t.Fatal(err)
 	}
 	messages, err := manager.LoadMessages(identity.MainAgentID)
@@ -153,6 +157,7 @@ func TestSessionPauseNaturalToolCompletionAndOrdinaryResume(t *testing.T) {
 	}
 	b.SetSessionLock(newLock)
 	b.activateLoadedSession(loaded)
+	b.workDirState.store(WorkDirState{Path: a.WorkDirSnapshot().Path, WorktreeID: a.WorkDirSnapshot().WorktreeID})
 	if !b.sessionExecutionPaused() || len(b.PendingSessionInputs()) != 1 {
 		t.Fatal("ordinary resume did not pause")
 	}
@@ -163,7 +168,7 @@ func TestSessionPauseNaturalToolCompletionAndOrdinaryResume(t *testing.T) {
 	b.SendUserMessageWithReceipt("continue with the queued input", "request-3")
 	collectAgentEventsUntil(t, b.Events(), func(events []AgentEvent) bool {
 		for _, e := range events {
-			if _, ok := e.(GlobalIdleEvent); ok {
+			if changed, ok := e.(InputQueueChangedEvent); ok && changed.Snapshot.State != nil && len(changed.Snapshot.State.Inputs) == 0 {
 				return true
 			}
 		}

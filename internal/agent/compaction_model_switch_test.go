@@ -38,7 +38,7 @@ func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testin
 		},
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, provider, "current-model", 4096, "sys")
-	a.newTurn()
+	a.newTurn("")
 	a.started.Store(true)
 	t.Cleanup(func() {
 		if a.IsCompactionRunning() {
@@ -130,7 +130,7 @@ func TestModelSwitchEstimatesPressureNoticesFromPreviousUsage(t *testing.T) {
 		},
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, provider, "current-model", 4096, "sys")
-	a.newTurn()
+	a.newTurn("")
 	a.started.Store(true)
 	t.Cleanup(func() {
 		if a.IsCompactionRunning() {
@@ -208,7 +208,7 @@ func TestModelSwitchFailedRoundKeepsRetiredGaugeReading(t *testing.T) {
 	a.providerModelRef = "provider/current-model"
 	a.runningModelRef = "provider/current-model"
 	a.llmMu.Unlock()
-	a.newTurn()
+	a.newTurn("")
 	a.started.Store(true)
 	t.Cleanup(func() {
 		if a.IsCompactionRunning() {

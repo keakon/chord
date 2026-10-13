@@ -144,7 +144,7 @@ func (a *MainAgent) releaseTakeoverInputAdmission(req sessionTakeoverTarget) {
 	a.pause.mu.Lock()
 	defer a.pause.mu.Unlock()
 	switch a.pause.status.State {
-	case SessionPausePreparing, SessionPauseDraining, SessionPauseSaving, SessionPauseSaved, SessionPauseReleased, SessionPauseSaveFailed:
+	case recovery.SessionPausePreparing, recovery.SessionPauseDraining, recovery.SessionPauseSaving, recovery.SessionPauseSaved, recovery.SessionPauseReleased, recovery.SessionPauseSaveFailed:
 		return
 	}
 	a.pause.inputClosed = false

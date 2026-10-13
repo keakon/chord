@@ -205,6 +205,9 @@ type RecoveryManager struct {
 	snapshotWrite   func(string, string, []byte) error
 	snapshotRename  func(string, string) error
 	snapshotSyncDir func(string) error
+	deliveryWrite   func(string, string, []byte) error
+	deliveryRename  func(string, string) error
+	deliverySyncDir func(string) error
 
 	// The tool-activity journal is written from tool-execution goroutines, so it
 	// uses its own mutex and file handle instead of sharing r.mu with message
@@ -590,7 +593,15 @@ func (r *RecoveryManager) SaveSnapshot(snap *SessionSnapshot) error {
 	copy := *snap
 	copy.Pause = snap.Pause.Clone()
 	if copy.Pause != nil {
-		pending, err := r.persistPendingInputsLocked(copy.Pause.PendingInputs)
+		if err := r.validateInputDeliveryCheckpointLocked(copy.Pause); err != nil {
+			return err
+		}
+		for _, input := range copy.Pause.PendingInputs {
+			if input.Stage != PendingInputStageQueued && input.Stage != PendingInputStageTranscriptStaged {
+				return fmt.Errorf("invalid checkpoint input stage %q", input.Stage)
+			}
+		}
+		pending, err := r.persistPendingInputsLocked(copy.Pause.PendingInputs, nil)
 		if err != nil {
 			return err
 		}
@@ -756,7 +767,9 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
 		info, err := os.Stat(mainPath)
 		if err != nil || info.Size() == 0 {
-			continue
+			if queueInfo, queueErr := os.Stat(filepath.Join(sessionPath, "input-delivery.json")); queueErr != nil || queueInfo.Size() == 0 {
+				continue
+			}
 		}
 		lastModTime, ok := sessionActivityTime(sessionPath)
 		if !ok {
@@ -767,7 +780,9 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 			originalFirstUser = firstUser
 		}
 		messageCount := UnknownMessageCount
-		if count, ok := cachedMessageCount(mainPath, info); ok {
+		if info == nil {
+			messageCount = 0
+		} else if count, ok := cachedMessageCount(mainPath, info); ok {
 			messageCount = count
 		}
 		locked, err := sessionDirLockedByLiveOwner(sessionPath)
@@ -939,9 +954,15 @@ func FirstUserMessageFromFile(mainPath string) (string, error) {
 func sessionActivityTime(sessionPath string) (time.Time, bool) {
 	mainInfo, err := os.Stat(filepath.Join(sessionPath, identity.MainSessionLogFilename))
 	if err != nil || mainInfo.Size() == 0 {
-		return time.Time{}, false
+		mainInfo, err = os.Stat(filepath.Join(sessionPath, "input-delivery.json"))
+		if err != nil || mainInfo.Size() == 0 {
+			return time.Time{}, false
+		}
 	}
 	lastActive := mainInfo.ModTime()
+	if queueInfo, err := os.Stat(filepath.Join(sessionPath, "input-delivery.json")); err == nil && queueInfo.ModTime().After(lastActive) {
+		lastActive = queueInfo.ModTime()
+	}
 	if summaryInfo, err := os.Stat(filepath.Join(sessionPath, analytics.SessionUsageSummaryFileName)); err == nil {
 		if modTime := summaryInfo.ModTime(); modTime.After(lastActive) {
 			lastActive = modTime

@@ -267,7 +267,7 @@ func TestCompactionHeartbeatWaitsForResponseHandler(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, nil)
 	defer a.resetCompactionState()
-	a.newTurn()
+	a.newTurn("")
 	a.mainLLMRequestInFlight.Store(true)
 	a.emitActivity("main", ActivityStreaming, "")
 	drainAgentEvents(a.outputCh)
@@ -548,7 +548,7 @@ func TestPrepareMessagesForLLM_DefersUnchangedToolUntilFrontier(t *testing.T) {
 		ShellSuccessBytes:    1 << 20,
 		MinIncrementalTokens: 1,
 	}}}
-	a.newTurn()
+	a.newTurn("")
 	messages := []message.Message{
 		{Role: message.RoleUser, Content: "start"},
 		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "custom-1", Name: "custom_tool", Args: json.RawMessage(`{"query":"x"}`)}}},
@@ -589,7 +589,7 @@ func TestPrepareMessagesForLLM_StableReuseHonorsDueFrontier(t *testing.T) {
 		ShellSuccessBytes:    1 << 20,
 		MinIncrementalTokens: 1 << 20,
 	}}}
-	a.newTurn()
+	a.newTurn("")
 	a.runningModelRef = "p/m"
 	a.recordLLMModelRun("p/m")
 	a.recordLLMModelRun("p/m")
@@ -622,7 +622,7 @@ func TestPrepareMessagesForLLM_ReducedReadBecomesStaleAfterTailEdit(t *testing.T
 		ShellSuccessBytes:    1 << 20,
 		MinIncrementalTokens: 1 << 20,
 	}}}
-	a.newTurn()
+	a.newTurn("")
 	a.runningModelRef = "p/m"
 	a.recordLLMModelRun("p/m")
 	a.recordLLMModelRun("p/m")
@@ -663,7 +663,7 @@ func TestPrepareMessagesForLLM_ReducedReadBecomesStaleAfterMutatingShell(t *test
 		ShellSuccessBytes:    1 << 20,
 		MinIncrementalTokens: 1 << 20,
 	}}}
-	a.newTurn()
+	a.newTurn("")
 	a.runningModelRef = "p/m"
 	a.recordLLMModelRun("p/m")
 	a.recordLLMModelRun("p/m")
@@ -707,7 +707,7 @@ func TestPrepareMessagesForLLM_ShellInvalidationVerdictMemoizedPerShell(t *testi
 		ShellSuccessBytes:    1 << 20,
 		MinIncrementalTokens: 1 << 20,
 	}}}
-	a.newTurn()
+	a.newTurn("")
 	a.runningModelRef = "p/m"
 	a.recordLLMModelRun("p/m")
 	a.recordLLMModelRun("p/m")
@@ -801,7 +801,7 @@ func TestPrepareMessagesForLLM_RestoredReadBecomesStaleAfterMutatingShell(t *tes
 		ShellSuccessBytes:    1 << 20,
 		MinIncrementalTokens: 1,
 	}}}
-	a.newTurn()
+	a.newTurn("")
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u"},
 		{Role: message.RoleAssistant, RequestBatch: 1, ToolCalls: []message.ToolCall{{ID: "read", Name: tools.NameRead, Args: json.RawMessage(`{"path":"a.go"}`)}}},
@@ -840,7 +840,7 @@ func TestPrepareMessagesForLLM_RestoredShellOnlyInvalidatesEarlierReads(t *testi
 		ShellSuccessBytes:    1 << 20,
 		MinIncrementalTokens: 1,
 	}}}
-	a.newTurn()
+	a.newTurn("")
 	content := "READ_RESULT lines=1-100 total=100\n" + strings.Repeat("source line\n", 100)
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "u"},
@@ -941,7 +941,7 @@ func TestPrepareMessagesForLLM_WrapUpGracePrunesWhenSavingsAreWorthIt(t *testing
 		ShellSuccessBytes:    1,
 		MinIncrementalTokens: 64,
 	}}}}
-	a.newTurn()
+	a.newTurn("")
 	a.providerModelRef = "test/model"
 	a.lastLLMRequestModelRef = "test/model"
 	a.llmModelRunLength = 1
@@ -979,7 +979,7 @@ func TestPrepareMessagesForLLM_WrapUpGraceSkipsLowValueReduction(t *testing.T) {
 		ShellSuccessBytes:    1,
 		MinIncrementalTokens: 4096,
 	}}}}
-	a.newTurn()
+	a.newTurn("")
 	a.providerModelRef = "test/model"
 	a.lastLLMRequestModelRef = "test/model"
 	a.llmModelRunLength = 1
@@ -1017,7 +1017,7 @@ func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectWithQueuedUserMessage(t 
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
 	}}}}
-	a.newTurn()
+	a.newTurn("")
 	a.providerModelRef = "test/model"
 	a.lastLLMRequestModelRef = "test/model"
 	a.llmModelRunLength = 1
@@ -1049,7 +1049,7 @@ func TestPrepareMessagesForLLM_WrapUpGraceReusesPreviouslyReducedPrefix(t *testi
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
 	}}}}
-	a.newTurn()
+	a.newTurn("")
 	a.providerModelRef = "test/model"
 	a.lastLLMRequestModelRef = "test/model"
 	a.llmModelRunLength = 1
@@ -1100,7 +1100,7 @@ func TestPrepareMessagesForLLM_SkipsStableReuseWhenProvenanceDiffers(t *testing.
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
 	}}}}
-	a.newTurn()
+	a.newTurn("")
 	a.providerModelRef = "test/model"
 	a.lastLLMRequestModelRef = "test/model"
 	a.llmModelRunLength = 1
@@ -1140,7 +1140,7 @@ func TestPrepareMessagesForLLM_SkipsIncompatibleStableReuse(t *testing.T) {
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
 	}}}}
-	a.newTurn()
+	a.newTurn("")
 	a.providerModelRef = "test/model"
 	a.lastLLMRequestModelRef = "test/model"
 	a.llmModelRunLength = 1
@@ -1186,7 +1186,7 @@ func TestPrepareMessagesForLLM_SkipsStableReuseWhenToolCallIDIsReusedForDifferen
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
 	}}}}
-	a.newTurn()
+	a.newTurn("")
 	a.providerModelRef = "test/model"
 	a.lastLLMRequestModelRef = "test/model"
 	a.llmModelRunLength = 1
@@ -1226,7 +1226,7 @@ func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectAfterModelSwitch(t *test
 		ShellSuccessAgeTurns: 99,
 		ShellSuccessBytes:    1,
 	}}}}
-	a.newTurn()
+	a.newTurn("")
 	a.providerModelRef = "test/model-b"
 	a.lastLLMRequestModelRef = "test/model-a"
 	a.llmModelRunLength = 3
@@ -2176,7 +2176,7 @@ func TestCallLLMLogsPreparedReductionStatsWhenFocusedSubAgentExists(t *testing.T
 	defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
 
 	a := newReadyTestMainAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ShellSuccessAgeTurns: 1,
 		ShellSuccessBytes:    10,
@@ -2275,7 +2275,7 @@ func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIn
 	a.llmMu.Lock()
 	a.runningModelRef = "codex/gpt-5.5"
 	a.llmMu.Unlock()
-	a.newTurn()
+	a.newTurn("")
 
 	largeOutput := strings.Repeat("first output line\n", 900)
 	msgs := []message.Message{
@@ -2709,7 +2709,7 @@ func TestPrepareMessagesForLLM_RecordsSkipAndOverCompressionStats(t *testing.T) 
 	readContent := "READ_RESULT lines=1-120 total=120\n" + strings.Repeat("line content for read result\n", 120)
 	freshHighRisk := "panic: boom\n" + strings.Repeat("stack frame\n", 40)
 	largeFreshUnmatched := strings.Repeat("fresh unmatched output\n", 20)
-	a.newTurn()
+	a.newTurn("")
 
 	// Pass 1: the only copy of the fetch ages out and is genuinely summarized
 	// away. A same-pass duplicate would collapse as repeated instead, which is
@@ -2791,7 +2791,7 @@ func TestPrepareMessagesForLLM_ClassifiesRereadRevisionStats(t *testing.T) {
 				ReadLikeOutputBytes:  40,
 				MinIncrementalTokens: 1,
 			}}}
-			a.newTurn()
+			a.newTurn("")
 			filePath := filepath.Join(projectRoot, "a.go")
 			writeRevision := func(content string) string {
 				if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
@@ -3056,7 +3056,7 @@ func focusTestSubAgent(t *testing.T, a *MainAgent, instanceID, providerName, pre
 
 func TestContextReductionStatsSnapshotsCloneMaps(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.currentTurnID()
 	preparedMessages := []message.Message{{Role: "user", Content: "u"}}
 
@@ -3110,7 +3110,7 @@ func TestContextReductionStatsSnapshotsCloneMaps(t *testing.T) {
 
 func TestSetIdleAndDrainPendingKeepsVisibleContextReductionStats(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	want := ContextReductionStats{Messages: 2, Bytes: 2048, TokensBefore: 1000, TokensAfter: 700, TokensSaved: 300}
 	a.setContextReductionStats(want)
 	a.rememberPreparedLLMRequest(a.currentTurnID(), []message.Message{{Role: "user", Content: "u"}}, []message.Message{{Role: "user", Content: "u"}}, nil, nil, 0, a.contextReductionPolicy())
@@ -3515,7 +3515,7 @@ func TestHandleCompactionReadyRechecksGateAfterQueuedInput(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1024)
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -3592,7 +3592,7 @@ func TestHandleCompactCommandSchedulesAsyncCompactionWhileBusy(t *testing.T) {
 	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "two"})
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "three"})
 	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "four"})
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	turnEpoch := a.turn.Epoch
 
@@ -5258,7 +5258,7 @@ func TestJobFinishedHandledImmediatelyDuringCompaction(t *testing.T) {
 func TestEnsureOversizeDrivenCompactionStartsMainResumeCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	if !a.ensureOversizeDrivenCompaction() {
 		t.Fatal("expected oversize-driven compaction to start")
@@ -5296,7 +5296,7 @@ func TestEnsureOversizeDrivenCompactionStartsMainResumeCompaction(t *testing.T) 
 func TestEnsureOversizeDrivenCompactionStopsAfterRetryLimit(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	a.turn.OversizeRecoveryCount = maxOversizeRecoveryAttempts
 	if a.ensureOversizeDrivenCompaction() {
@@ -5311,7 +5311,7 @@ func TestCompactionFailureDoesNotRetrySameGate(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1000)
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -6586,7 +6586,7 @@ func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing
 	a.llmMu.Lock()
 	a.runningModelRef = "codex/gpt-5.5"
 	a.llmMu.Unlock()
-	a.newTurn()
+	a.newTurn("")
 
 	// First request: two large read outputs that will be reduced.
 	largeRead1 := strings.Repeat("line from file A\n", 100)
@@ -6758,7 +6758,7 @@ func TestPrepareMessagesForLLM_IncrementalReExaminesNotYetReducedPrefix(t *testi
 	a.llmMu.Lock()
 	a.runningModelRef = "codex/gpt-5.5"
 	a.llmMu.Unlock()
-	a.newTurn()
+	a.newTurn("")
 
 	largeRead := strings.Repeat("line from file\n", 100)
 	// First request: tc1 is age 0 (same user turn), so NOT reduced.
@@ -6824,7 +6824,7 @@ func TestPrepareMessagesForLLM_IncrementalDisabledOnToolDefChange(t *testing.T) 
 	a.llmMu.Lock()
 	a.runningModelRef = "codex/gpt-5.5"
 	a.llmMu.Unlock()
-	a.newTurn()
+	a.newTurn("")
 
 	largeRead := strings.Repeat("line from file\n", 100)
 	msgs := []message.Message{
@@ -6925,7 +6925,7 @@ func TestPrepareMessagesForLLM_IncrementalDisabledOnInputSchemaChange(t *testing
 	a.llmMu.Lock()
 	a.runningModelRef = "codex/gpt-5.5"
 	a.llmMu.Unlock()
-	a.newTurn()
+	a.newTurn("")
 
 	a.frozenToolDefs.Store(&[]message.ToolDefinition{
 		{Name: tools.NameRead, Description: "Read a file", InputSchema: map[string]any{"type": "object"}},

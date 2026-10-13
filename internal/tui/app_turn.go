@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 type focusedContinueAction uint8
@@ -337,13 +338,13 @@ func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 }
 
 func (m *Model) drainQueuedDrafts() tea.Cmd {
-	if m.takeoverInputFrozen() || m.takeover.status.State == agent.SessionPauseReady {
+	if m.takeoverInputFrozen() || m.takeover.status.State == recovery.SessionPauseReady {
 		return nil
 	}
 	agentID := normalizeDraftAgentID(m.focusedAgentID)
 	idx := -1
 	for i, draft := range m.queuedDrafts {
-		if strings.HasPrefix(draft.ID, "restored:") {
+		if draft.Withdrawn || draft.DeliveryManaged || strings.HasPrefix(draft.ID, "restored:") {
 			continue
 		}
 		if normalizeDraftAgentID(draft.AgentID) == agentID {

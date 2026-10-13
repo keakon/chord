@@ -83,6 +83,7 @@ func (a *MainAgent) applyFallbackModelDownshift(payload *llmFallbackBoundaryPayl
 
 type llmFallbackBoundaryPayload struct {
 	turnID               uint64
+	inputMessages        []message.Message
 	messages             []message.Message
 	tailOverlayCount     int
 	primaryContextLimit  int
@@ -105,9 +106,9 @@ type llmFallbackBoundaryResult struct {
 }
 
 // updateMainLLMRequestBeforeFallback pauses the retry worker at the boundary
-// before a fallback provider request. The event loop owns pendingUserMessages,
-// so it must decide which queued inputs have arrived and append them to both
-// the durable context and the fallback request snapshot.
+// before a fallback provider request. The event loop admits queued inputs only
+// after their transcript and execution permit are durable, then extends the
+// fallback snapshot without dispatching a second primary request.
 func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turnID uint64, messages []message.Message, tailOverlayCount int, fallback llm.FallbackModel) ([]message.Message, error) {
 	if a == nil {
 		return messages, nil
@@ -183,7 +184,20 @@ func (a *MainAgent) handleLLMFallbackBoundary(evt Event) {
 		payload.reply <- llmFallbackBoundaryResult{err: context.Canceled}
 		return
 	}
-	messages := a.consumePendingUserMessagesForRequest(payload.messages, payload.tailOverlayCount)
+	if a.prepareInputDeliveryRequest(deliveryRequest{turnID: a.turn.ID, turnEpoch: a.turn.Epoch, fallback: payload}) {
+		return
+	}
+	messages := payload.messages
+	if len(payload.inputMessages) > 0 {
+		tail := min(max(payload.tailOverlayCount, 0), len(messages))
+		at := len(messages) - tail
+		merged := make([]message.Message, 0, len(messages)+len(payload.inputMessages))
+		merged = append(merged, messages[:at]...)
+		merged = append(merged, payload.inputMessages...)
+		messages = append(merged, messages[at:]...)
+		a.stageNextSubAgentMailboxBatch()
+	}
+	messages = a.consumePendingUserMessagesForRequest(messages, payload.tailOverlayCount)
 	messages = a.injectPendingMailboxMessagesForRequest(messages, payload.tailOverlayCount)
 	a.applyFallbackModelDownshift(payload)
 	// A prepared surface is only reusable when the fallback admits the request
@@ -196,7 +210,7 @@ func (a *MainAgent) handleLLMFallbackBoundary(evt Event) {
 	// event-loop handler.
 	payload.reply <- llmFallbackBoundaryResult{
 		messages: messages,
-		rebuild:  fallbackRequiresFreshAdmission(payload),
+		rebuild:  len(payload.inputMessages) > 0 || fallbackRequiresFreshAdmission(payload),
 	}
 }
 

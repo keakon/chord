@@ -379,8 +379,8 @@ func TestInsertAttachClipboardBlocksSubmitUntilImageReady(t *testing.T) {
 	if cmd := m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})); cmd == nil {
 		t.Fatal("enter while clipboard attachment is pending should return a toast command")
 	}
-	if got := len(backend.sentMultipart); got != 0 {
-		t.Fatalf("SendUserMessageWithParts() calls while pending = %d, want 0", got)
+	if got := len(backend.submittedInputs); got != 0 {
+		t.Fatalf("SubmitUserInput() calls while pending = %d, want 0", got)
 	}
 
 	m.Update(readCmd())
@@ -388,10 +388,10 @@ func TestInsertAttachClipboardBlocksSubmitUntilImageReady(t *testing.T) {
 		t.Fatalf("attachments after read completion = %d, want 1", got)
 	}
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
-	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls after completion = %d, want 1", got)
+	if got := len(backend.submittedInputs); got != 1 {
+		t.Fatalf("SubmitUserInput() calls after completion = %d, want 1", got)
 	}
-	parts := backend.sentMultipart[0]
+	parts := backend.submittedInputs[0].Parts
 	if len(parts) != 1 {
 		t.Fatalf("sent parts = %#v, want single image part", parts)
 	}

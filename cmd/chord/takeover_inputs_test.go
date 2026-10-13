@@ -15,15 +15,17 @@ import (
 
 type pausedInputsBackend struct {
 	mockBackend
-	status agent.SessionPauseStatus
+	status recovery.SessionPauseStatus
 	inputs []recovery.PendingInput
 }
 
-func (b *pausedInputsBackend) CurrentSessionPauseStatus() agent.SessionPauseStatus { return b.status }
-func (b *pausedInputsBackend) PendingSessionInputs() []recovery.PendingInput       { return b.inputs }
+func (b *pausedInputsBackend) CurrentSessionPauseStatus() recovery.SessionPauseStatus {
+	return b.status
+}
+func (b *pausedInputsBackend) PendingSessionInputs() []recovery.PendingInput { return b.inputs }
 
 func TestHeadlessPausedInputsProjectionBoundsAndOmitsAttachments(t *testing.T) {
-	backend := &pausedInputsBackend{status: agent.SessionPauseStatus{State: agent.SessionPauseReady}}
+	backend := &pausedInputsBackend{status: recovery.SessionPauseStatus{State: recovery.SessionPauseReady}}
 	for i := range 10 {
 		backend.inputs = append(backend.inputs, recovery.PendingInput{InputID: fmt.Sprintf("input-%d", i), OwnerTaskID: "task-1", Content: "  Input\n  preview\ttext  ", Parts: []message.ContentPart{{Type: message.ContentPartImage, ImagePath: "/private/attachment", Data: []byte("private-bytes")}, {Type: message.ContentPartPDF, FileName: "private-document.pdf"}}})
 	}
@@ -64,7 +66,7 @@ func TestHeadlessInputPreviewUsesUnicodeBoundAndTextParts(t *testing.T) {
 
 func TestHeadlessPausedInputProjectionRejectsInvalidIdentity(t *testing.T) {
 	for _, id := range []string{"", strings.Repeat("x", 129), "input\n1", "input 1"} {
-		backend := &pausedInputsBackend{status: agent.SessionPauseStatus{State: agent.SessionPauseReady}, inputs: []recovery.PendingInput{{InputID: id, OwnerTaskID: "main"}}}
+		backend := &pausedInputsBackend{status: recovery.SessionPauseStatus{State: recovery.SessionPauseReady}, inputs: []recovery.PendingInput{{InputID: id, OwnerTaskID: "main"}}}
 		if projection := headlessPausedInputProjection(backend); projection != nil {
 			t.Fatalf("invalid identity accepted %q", id)
 		}
@@ -91,7 +93,7 @@ func TestHeadlessPausedInputProjectionRejectsInvalidIdentity(t *testing.T) {
 }
 
 func TestHeadlessStatusResponseIncludesCurrentPausedInputs(t *testing.T) {
-	backend := &pausedInputsBackend{status: agent.SessionPauseStatus{State: agent.SessionPauseReady}, inputs: []recovery.PendingInput{{InputID: "input-1", OwnerTaskID: "main", Content: "Pending constraint"}}}
+	backend := &pausedInputsBackend{status: recovery.SessionPauseStatus{State: recovery.SessionPauseReady}, inputs: []recovery.PendingInput{{InputID: "input-1", OwnerTaskID: "main", Content: "Pending constraint"}}}
 	out := newTestOut()
 	defer out.out.closeUntil(time.After(time.Second))
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, &headlessState{sessionID: "session-1"}, out.writer())

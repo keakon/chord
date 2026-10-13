@@ -75,10 +75,14 @@ func TestHandleInsertKeySubmitsLargePasteAsHiddenTextPart(t *testing.T) {
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	if got := len(backend.submittedInputs); got != 1 {
+		t.Fatalf("SubmitUserInput() calls = %d, want 1", got)
 	}
-	parts := backend.sentMultipart[0]
+	parts := backend.submittedInputs[0].Parts
+	if got := len(m.viewport.visibleBlocks()); got != 0 {
+		t.Fatalf("user card before durable consumption: %d", got)
+	}
+	m.handleTurnAgentEvent(agent.PendingDraftConsumedEvent{Target: backend.InputDeliveryTarget(), InputID: "input-1", DraftID: backend.submittedInputs[0].DraftID, Revision: 1, Parts: parts})
 	if len(parts) != 1 {
 		t.Fatalf("sent parts len = %d, want 1", len(parts))
 	}
@@ -119,10 +123,14 @@ func TestHandleInsertKeySubmitsFileRefsParsedFromLargePaste(t *testing.T) {
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	if got := len(backend.submittedInputs); got != 1 {
+		t.Fatalf("SubmitUserInput() calls = %d, want 1", got)
 	}
-	parts := backend.sentMultipart[0]
+	parts := backend.submittedInputs[0].Parts
+	if got := len(m.viewport.visibleBlocks()); got != 0 {
+		t.Fatalf("user card before durable consumption: %d", got)
+	}
+	m.handleTurnAgentEvent(agent.PendingDraftConsumedEvent{Target: backend.InputDeliveryTarget(), InputID: "input-1", DraftID: backend.submittedInputs[0].DraftID, Revision: 1, Parts: parts})
 	if len(parts) != 2 {
 		t.Fatalf("sent parts len = %d, want 2 (hidden paste + file)", len(parts))
 	}
@@ -183,10 +191,14 @@ func TestHandleInsertKeySubmitsImagePlaceholderBeforeLargePasteAndFileRef(t *tes
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	if got := len(backend.submittedInputs); got != 1 {
+		t.Fatalf("SubmitUserInput() calls = %d, want 1", got)
 	}
-	parts := backend.sentMultipart[0]
+	parts := backend.submittedInputs[0].Parts
+	if got := len(m.viewport.visibleBlocks()); got != 0 {
+		t.Fatalf("user card before durable consumption: %d", got)
+	}
+	m.handleTurnAgentEvent(agent.PendingDraftConsumedEvent{Target: backend.InputDeliveryTarget(), InputID: "input-1", DraftID: backend.submittedInputs[0].DraftID, Revision: 1, Parts: parts})
 	if len(parts) != 3 {
 		t.Fatalf("sent parts len = %d, want 3 (image + hidden paste + file)", len(parts))
 	}
@@ -216,10 +228,14 @@ func TestHandleInsertKeyKeepsLiteralImagePlaceholderText(t *testing.T) {
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	if got := len(backend.submittedInputs); got != 1 {
+		t.Fatalf("SubmitUserInput() calls = %d, want 1", got)
 	}
-	parts := backend.sentMultipart[0]
+	parts := backend.submittedInputs[0].Parts
+	if got := len(m.viewport.visibleBlocks()); got != 0 {
+		t.Fatalf("user card before durable consumption: %d", got)
+	}
+	m.handleTurnAgentEvent(agent.PendingDraftConsumedEvent{Target: backend.InputDeliveryTarget(), InputID: "input-1", DraftID: backend.submittedInputs[0].DraftID, Revision: 1, Parts: parts})
 	if len(parts) != 2 {
 		t.Fatalf("sent parts len = %d, want 2 (literal text + image)", len(parts))
 	}
@@ -414,7 +430,7 @@ func TestHandleInsertKeyQueuesBusyMainDraftLocally(t *testing.T) {
 		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
 	}
 	if got := len(backend.queuedDraftIDs); got != 1 {
-		t.Fatalf("QueuePendingUserDraft() calls = %d, want 1", got)
+		t.Fatalf("QueueSubAgentDraft() calls = %d, want 1", got)
 	}
 	if backend.queuedDraftIDs[0] == "" {
 		t.Fatal("queued draft id = empty, want generated id")
@@ -523,7 +539,7 @@ func TestHandleInsertKeyBusySubAgentQueuesUntilConsumed(t *testing.T) {
 		t.Fatalf("len(queuedDrafts) = %d, want 1", got)
 	}
 	if got := len(backend.queuedDraftIDs); got != 1 {
-		t.Fatalf("QueuePendingUserDraft() calls = %d, want 1", got)
+		t.Fatalf("QueueSubAgentDraft() calls = %d, want 1", got)
 	}
 	if got := len(backend.sentMessages); got != 0 {
 		t.Fatalf("SendUserMessage() calls = %d, want 0", got)
@@ -545,10 +561,10 @@ func TestHandleInsertKeyBusySubAgentWithImageQueuesParts(t *testing.T) {
 		t.Fatalf("len(queuedDrafts) = %d, want 1", got)
 	}
 	if got := len(backend.queuedDraftIDs); got != 1 {
-		t.Fatalf("QueuePendingUserDraft() calls = %d, want 1", got)
+		t.Fatalf("QueueSubAgentDraft() calls = %d, want 1", got)
 	}
-	if got := len(backend.sentMultipart); got != 0 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 0", got)
+	if got := len(backend.submittedInputs); got != 0 {
+		t.Fatalf("SubmitUserInput() calls = %d, want 0", got)
 	}
 	parts := m.queuedDrafts[0].contentParts()
 	if len(parts) != 2 {
@@ -863,7 +879,7 @@ func TestEditQueuedDraftRemovesPendingDraftAndLoadsComposer(t *testing.T) {
 		t.Fatalf("editingQueuedDraftID = %q, want draft-1", got)
 	}
 	if got := len(backend.removedDraftIDs); got != 1 || backend.removedDraftIDs[0] != "draft-1" {
-		t.Fatalf("RemovePendingUserDraft() calls = %+v, want [draft-1]", backend.removedDraftIDs)
+		t.Fatalf("RemoveSubAgentDraft() calls = %+v, want [draft-1]", backend.removedDraftIDs)
 	}
 }
 
@@ -879,7 +895,7 @@ func TestDeleteQueuedDraftRemovesPendingDraft(t *testing.T) {
 		t.Fatalf("len(queuedDrafts) = %d, want 0", got)
 	}
 	if got := len(backend.removedDraftIDs); got != 1 || backend.removedDraftIDs[0] != "draft-1" {
-		t.Fatalf("RemovePendingUserDraft() calls = %+v, want [draft-1]", backend.removedDraftIDs)
+		t.Fatalf("RemoveSubAgentDraft() calls = %+v, want [draft-1]", backend.removedDraftIDs)
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/recovery"
+
 	"github.com/keakon/chord/internal/agent"
 
 	"github.com/keakon/x/ansi"
@@ -19,15 +21,24 @@ import (
 // It is stored locally in the TUI and sent to the agent after the main turn's
 // IdleEvent barrier. User-facing idle notifications wait for GlobalIdleEvent.
 type queuedDraft struct {
-	ID             string
-	AgentID        string // "" = main agent; non-empty = focused subagent at submit time
-	Content        string
-	DisplayContent string
-	Parts          []message.ContentPart // non-nil for multi-part (text+images)
-	FileRefs       []string              // @-mentioned file paths (deduped, display only)
-	Mirrored       bool                  // true when also mirrored into MainAgent pending queue
-	QueuedAt       time.Time             // local enqueue/submission time for status-bar timing
-	LoopAnchor     bool                  // UI-only marker for the user prompt that started loop mode
+	Withdrawn        bool // Local draft retained after withdrawal; never auto-send.
+	DeliveryRunnable bool
+	DeliveryManaged  bool
+	InputID          string
+	Revision         uint64
+	DeliveryPolicy   recovery.InputDeliveryPolicy
+	DeliveryStage    string
+	DeliveryStatus   string
+	EditHeld         bool
+	ID               string
+	AgentID          string // "" = main agent; non-empty = focused subagent at submit time
+	Content          string
+	DisplayContent   string
+	Parts            []message.ContentPart // non-nil for multi-part (text+images)
+	FileRefs         []string              // @-mentioned file paths (deduped, display only)
+	Mirrored         bool                  // true when also mirrored into MainAgent pending queue
+	QueuedAt         time.Time             // local enqueue/submission time for status-bar timing
+	LoopAnchor       bool                  // UI-only marker for the user prompt that started loop mode
 }
 
 type agentComposerState struct {
@@ -40,6 +51,7 @@ type agentComposerState struct {
 }
 
 type composerRuntimeState struct {
+	inputQueue                  inputQueueUI
 	queuedDrafts                []queuedDraft
 	mailboxQueue                []queuedMailbox
 	agentComposerStates         map[string]agentComposerState
@@ -81,6 +93,9 @@ func fileRefsFromParts(parts []message.ContentPart) []string {
 
 func queuedDraftTextAndImageCount(draft queuedDraft) (string, int) {
 	text := draft.DisplayContent
+	if draft.DeliveryStatus != "" {
+		text = draft.DeliveryStatus + " · " + text
+	}
 	if text == "" {
 		text = displayTextFromParts(draft.Parts, draft.Content)
 	}
@@ -202,6 +217,7 @@ var slashCommands = []slashCommand{
 	{Cmd: "/new", Desc: "start a fresh session"},
 	{Cmd: "/resume", Desc: "resume previous session"},
 	{Cmd: "/role", Desc: "switch main agent role"},
+	{Cmd: "/queue", Desc: "manage queued inputs"},
 	{Cmd: "/rules", Desc: "manage permission rules"},
 	{Cmd: agent.MemoryCommand, Desc: "view and manage project memory"},
 	{Cmd: agent.MemoryOrganizeCommand, Desc: "organize all active memories (uses model)"},

@@ -18,6 +18,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -349,6 +350,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 				a.emitToTUI(ToastEvent{Message: strings.TrimSpace(compactHint), Level: "warn"})
 				a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "args_invalid")
 				a.applyPendingModelPoolSwitchesAtRequestBoundary()
+				a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
 				a.setIdleAndDrainPending()
 				return
 			}
@@ -411,6 +413,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		})
 		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery_no_output")
 		a.applyPendingModelPoolSwitchesAtRequestBoundary()
+		a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
 		a.setIdleAndDrainPending()
 		return
 	}
@@ -463,6 +466,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			})
 			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "provider_drift")
 			a.applyPendingModelPoolSwitchesAtRequestBoundary()
+			a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
 			a.setIdleAndDrainPending()
 			return
 		}
@@ -473,6 +477,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "tool_call_limit")
 		a.emitToTUI(ErrorEvent{Err: err})
 		a.stopLoopAsBlocked(err.Error())
+		a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
 		a.setIdleAndDrainPending()
 		return
 	}

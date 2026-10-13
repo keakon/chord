@@ -86,7 +86,7 @@ func TestStopResponseDoesNotStartIdleAutoCompaction(t *testing.T) {
 	a.ctxMgr = ctxmgr.NewManager(10000, 0.8)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 9000})
 	a.autoCompactRequested.Store(true)
-	a.newTurn()
+	a.newTurn("")
 
 	a.setIdleAndDrainPending()
 
@@ -101,7 +101,7 @@ func TestStopResponseDoesNotStartIdleAutoCompaction(t *testing.T) {
 func TestStopResponseKeepsExistingCompactionRunning(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue})
 
 	a.setIdleAndDrainPending()

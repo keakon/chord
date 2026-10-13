@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/recovery"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
@@ -309,7 +311,11 @@ func (a *MainAgent) ContinueFromContextForTarget(conversation ConversationTarget
 
 // handleContinueFromContext starts a new turn and calls LLM without appending
 // any new user message.
-func (a *MainAgent) handleContinueFromContext() {
+func (a *MainAgent) handleContinueFromContext(workID string) {
+	if workID == "" && !a.sessionExecutionPaused() && a.turn != nil && a.delivery.request != nil {
+		a.resumeDeliveryRequest()
+		return
+	}
 	if a.sessionExecutionPaused() {
 		a.pause.resumeContinue = true
 		if !a.resumePausedSessionForUser() {
@@ -345,7 +351,12 @@ func (a *MainAgent) handleContinueFromContext() {
 		a.loopState.State = LoopStateExecuting
 		a.emitLoopStateChanged()
 	}
-	a.newTurn()
+	if workID == "" {
+		a.delivery.restoredNextInputsBlocked = false
+		workID = a.newDeliveryWork(recovery.DeliveryWorkContext)
+		a.adoptConsumedDeliveryInputs(workID)
+	}
+	a.newTurn(workID)
 	a.processPendingUserMessagesBeforeLLMInTurn()
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx

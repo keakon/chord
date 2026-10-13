@@ -26,7 +26,7 @@ func TestSessionPauseRejectedBeforePreparationReturnsPreflight(t *testing.T) {
 	a := startPauseStatusTestAgent(t)
 	a.admissionPaused.Store(true)
 	status, err := a.BeginSessionPause(t.Context(), SessionPauseRequest{Identity: testPauseIdentity(a)})
-	if err == nil || status.State != SessionPausePreflight || status.TransferIdentity != testPauseIdentity(a) {
+	if err == nil || status.State != recovery.SessionPausePreflight || status.TransferIdentity != testPauseIdentity(a) {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 	if a.sessionExecutionPaused() || a.CurrentSessionPauseStatus().TransferID != "" {
@@ -41,7 +41,7 @@ func TestSessionPausePreparationFailureConfirmsUnfrozenSource(t *testing.T) {
 		return errors.New("preparation unavailable")
 	})
 	status, err := a.BeginSessionPause(t.Context(), SessionPauseRequest{Identity: testPauseIdentity(a)})
-	if err == nil || status.State != SessionPausePrepareFailed || status.ErrorCode != "target_not_ready" || status.TransferIdentity != testPauseIdentity(a) {
+	if err == nil || status.State != recovery.SessionPausePrepareFailed || status.ErrorCode != "target_not_ready" || status.TransferIdentity != testPauseIdentity(a) {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 	if a.sessionExecutionPaused() {
@@ -76,7 +76,7 @@ func TestSessionPausePublishesBlockerChanges(t *testing.T) {
 	a.sendEvent(Event{Type: eventSessionPauseWake})
 	collectAgentEventsUntil(t, a.Events(), func(events []AgentEvent) bool {
 		for _, event := range events {
-			if update, ok := event.(SessionTransferEvent); ok && update.Status.State == SessionPauseDraining && update.Status.BlockerCount == 1 {
+			if update, ok := event.(SessionTransferEvent); ok && update.Status.State == recovery.SessionPauseDraining && update.Status.BlockerCount == 1 {
 				if len(update.Status.Blockers) != 1 || update.Status.Blockers[0].OwnerTaskID != "task-2" {
 					t.Fatalf("blockers=%+v", update.Status.Blockers)
 				}
@@ -87,5 +87,5 @@ func TestSessionPausePublishesBlockerChanges(t *testing.T) {
 	})
 	second.Finish()
 	a.sendEvent(Event{Type: eventSessionPauseWake})
-	waitPauseState(t, a, SessionPauseSaved)
+	waitPauseState(t, a, recovery.SessionPauseSaved)
 }

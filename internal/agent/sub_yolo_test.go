@@ -162,7 +162,7 @@ func TestYoloScopeAsymmetryBetweenMainAgentAndDelegatedWorker(t *testing.T) {
 		t.Fatal("the active role's write deny must reach the main agent ruleset")
 	}
 
-	a.newTurn()
+	a.newTurn("")
 	writeCall := func() *message.ToolCall {
 		return &message.ToolCall{Name: tools.NameWrite, Args: json.RawMessage(`{"path":"notes.txt"}`)}
 	}

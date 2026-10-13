@@ -109,7 +109,7 @@ func TestModelDrivenApplyContinuesAfterStageCandidate(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			agent := newTestMainAgent(t, t.TempDir())
-			agent.newTurn()
+			agent.newTurn("")
 			agent.requestBatches.reserve(agent.sessionEpoch, 0)
 			agent.stageCompletionCandidatePending = true
 			agent.stageCompletionCandidateTurnID = agent.turn.ID

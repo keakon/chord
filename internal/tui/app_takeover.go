@@ -16,16 +16,16 @@ import (
 const takeoverCommand = "/takeover"
 
 type takeoverRuntimeState struct {
-	handler      func(context.Context, string, *time.Duration) (agent.SessionPauseStatus, error)
+	handler      func(context.Context, string, *time.Duration) (recovery.SessionPauseStatus, error)
 	waiting      bool
 	sourceFrozen bool
-	status       agent.SessionPauseStatus
+	status       recovery.SessionPauseStatus
 	sequence     uint64
 }
 
 type takeoverResultMsg struct {
 	sequence uint64
-	status   agent.SessionPauseStatus
+	status   recovery.SessionPauseStatus
 	err      error
 }
 
@@ -35,7 +35,7 @@ type takeoverPreparedMsg struct {
 	err         error
 }
 
-func takeoverFailureMessage(status agent.SessionPauseStatus, err error) string {
+func takeoverFailureMessage(status recovery.SessionPauseStatus, err error) string {
 	text := err.Error()
 	if status.TransferID != "" && !strings.Contains(text, status.TransferID) {
 		return fmt.Sprintf("%s · Transfer %s · Session %s", text, status.TransferID, status.SessionID)
@@ -45,7 +45,7 @@ func takeoverFailureMessage(status agent.SessionPauseStatus, err error) string {
 
 // SetTakeoverHandler connects the UI to the local runtime coordinator. The
 // callback waits for source release; the Core separately validates activation.
-func (m *Model) SetTakeoverHandler(fn func(context.Context, string, *time.Duration) (agent.SessionPauseStatus, error)) {
+func (m *Model) SetTakeoverHandler(fn func(context.Context, string, *time.Duration) (recovery.SessionPauseStatus, error)) {
 	m.takeover.handler = fn
 }
 
@@ -124,7 +124,7 @@ func (m *Model) startTakeoverCommand(value string) tea.Cmd {
 	seq, handler := m.takeover.sequence, m.takeover.handler
 	return tea.Batch(historyCmd, func() tea.Msg {
 		status, err := handler(context.Background(), sid, timeout)
-		if err == nil && status.State != agent.SessionPauseReleased {
+		if err == nil && status.State != recovery.SessionPauseReleased {
 			err = fmt.Errorf("transfer %s is %s; query status with --session %s --transfer-id %s", status.TransferID, status.State, sid, status.TransferID)
 		}
 		if err == nil && (status.SessionID != sid || status.TransferID == "") {
@@ -166,6 +166,13 @@ func (m *Model) prepareSourceTakeover(evt agent.SessionTransferPreparingEvent) t
 			}
 		}
 		for _, draft := range drafts {
+			if draft.DeliveryManaged {
+				if !draft.Mirrored {
+					result.err = fmt.Errorf("wait for pending input saves before transferring")
+					break
+				}
+				continue
+			}
 			if draft.Mirrored {
 				continue
 			}
@@ -174,7 +181,7 @@ func (m *Model) prepareSourceTakeover(evt agent.SessionTransferPreparingEvent) t
 				break
 			}
 			backend.SwitchFocus(draft.AgentID)
-			if !backend.QueuePendingUserDraft(draft.ID, draft.contentParts()) {
+			if !backend.QueueSubAgentDraft(draft.ID, draft.contentParts()) {
 				result.err = fmt.Errorf("queued input could not be accepted; keep the source session open")
 				break
 			}
@@ -212,21 +219,21 @@ func (m *Model) handleTakeoverAgentEvent(evt agent.AgentEvent) (bool, agentEvent
 		}
 		m.takeover.status = evt.Status
 		switch evt.Status.State {
-		case agent.SessionPausePreparing, agent.SessionPauseDraining, agent.SessionPauseSaving, agent.SessionPauseSaveFailed:
+		case recovery.SessionPausePreparing, recovery.SessionPauseDraining, recovery.SessionPauseSaving, recovery.SessionPauseSaveFailed:
 			m.takeover.sourceFrozen = true
-			if evt.Status.State == agent.SessionPauseSaveFailed {
+			if evt.Status.State == recovery.SessionPauseSaveFailed {
 				text := "Session save failed; the source keeps ownership. Check storage and session history before restarting and resuming"
-				if evt.Status.RecoverableAction == agent.SessionPauseActionRetrySave {
+				if evt.Status.RecoverableAction == recovery.SessionPauseActionRetrySave {
 					text = "Session save failed; the source keeps ownership. Use takeover retry-save to retry"
 				}
 				effects.addFollowup(m.enqueueToast(text, "warn"))
 			}
-		case agent.SessionPauseSaved:
+		case recovery.SessionPauseSaved:
 			m.takeover.sourceFrozen = true
 			// The runtime releases ownership after this dedicated exit. Ordinary
 			// cancellation and shutdown must not write to the sealed checkpoint.
 			effects.addFollowup(tea.Quit)
-		case agent.SessionPauseReady, agent.SessionPausePrepareFailed, "running":
+		case recovery.SessionPauseReady, recovery.SessionPausePrepareFailed, "running":
 			m.takeover.sourceFrozen = false
 		}
 	default:
@@ -255,7 +262,7 @@ func (m *Model) applyTakeoverPrepared(msg takeoverPreparedMsg) tea.Cmd {
 func (m *Model) restoreTakeoverPendingInputs() {
 	reader, ok := m.agent.(interface {
 		PendingSessionInputs() []recovery.PendingInput
-		CurrentSessionPauseStatus() agent.SessionPauseStatus
+		CurrentSessionPauseStatus() recovery.SessionPauseStatus
 	})
 	if !ok {
 		return
@@ -267,6 +274,9 @@ func (m *Model) restoreTakeoverPendingInputs() {
 		owners[sub.TaskID] = sub.InstanceID
 	}
 	for _, p := range reader.PendingSessionInputs() {
+		if p.OwnerTaskID == identity.MainAgentID && p.DeliveryPolicy != "" {
+			continue
+		}
 		id := "restored:" + p.InputID
 		if m.findQueuedDraftIndex(id) >= 0 {
 			continue
@@ -282,6 +292,7 @@ func (m *Model) restoreTakeoverPendingInputs() {
 		m.queuedDrafts = append(m.queuedDrafts, draft)
 	}
 	m.queueSyncEnabled = len(m.queuedDrafts) > 0
+	m.applyInputQueueSnapshot(m.agent.InputQueueSnapshot())
 }
 
 func (m *Model) takeoverStatusText() string {
@@ -290,20 +301,20 @@ func (m *Model) takeoverStatusText() string {
 	}
 	s := m.takeover.status
 	switch s.State {
-	case agent.SessionPausePreparing:
+	case recovery.SessionPausePreparing:
 		return "Preparing session transfer"
-	case agent.SessionPauseDraining:
+	case recovery.SessionPauseDraining:
 		return fmt.Sprintf("Waiting for %d active operations", s.BlockerCount)
-	case agent.SessionPauseSaving:
+	case recovery.SessionPauseSaving:
 		return "Saving paused session"
-	case agent.SessionPauseSaveFailed:
-		if s.RecoverableAction != agent.SessionPauseActionRetrySave {
+	case recovery.SessionPauseSaveFailed:
+		if s.RecoverableAction != recovery.SessionPauseActionRetrySave {
 			return "Save failed; check session recovery"
 		}
 		return "Save failed; retry-save is available"
-	case agent.SessionPauseSaved:
+	case recovery.SessionPauseSaved:
 		return "Session saved; transferring"
-	case agent.SessionPauseReady:
+	case recovery.SessionPauseReady:
 		if s.PendingInputCount == 0 {
 			return ""
 		}

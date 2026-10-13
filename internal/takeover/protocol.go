@@ -10,7 +10,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -68,7 +67,7 @@ type Record struct {
 type Blocker struct {
 	OwnerTaskID string    `json:"owner_task_id"`
 	Type        string    `json:"type"`
-	StartedAt   time.Time `json:"started_at,omitempty"`
+	StartedAt   time.Time `json:"started_at"`
 	Description string    `json:"description"`
 }
 
@@ -78,7 +77,7 @@ type Status struct {
 	BindingInstanceID string `json:"binding_instance_id,omitempty"`
 	recovery.TransferIdentity
 	State             string    `json:"state"`
-	StartedAt         time.Time `json:"started_at,omitempty"`
+	StartedAt         time.Time `json:"started_at"`
 	WaitExpired       bool      `json:"wait_expired,omitempty"`
 	PendingInputs     int       `json:"pending_inputs,omitempty"`
 	CheckpointID      string    `json:"checkpoint_id,omitempty"`
@@ -91,8 +90,8 @@ type Status struct {
 	NextOffset        int       `json:"next_offset,omitempty"`
 }
 
-func PublicStatus(s agent.SessionPauseStatus) Status { return pageStatus(s, 0) }
-func pageStatus(s agent.SessionPauseStatus, offset int) Status {
+func PublicStatus(s recovery.SessionPauseStatus) Status { return pageStatus(s, 0) }
+func pageStatus(s recovery.SessionPauseStatus, offset int) Status {
 	total := max(s.BlockerCount, len(s.Blockers))
 	out := Status{TransferIdentity: s.TransferIdentity, State: s.State, StartedAt: s.StartedAt, WaitExpired: s.WaitExpired, PendingInputs: s.PendingInputCount, CheckpointID: s.CheckpointID, ErrorCode: s.ErrorCode, Message: boundedText(s.Error, 512), RecoverableAction: boundedText(s.RecoverableAction, 128), BlockerCount: total, BlockerOffset: offset}
 	start := min(max(offset, 0), len(s.Blockers))
@@ -117,10 +116,10 @@ func pageStatus(s agent.SessionPauseStatus, offset int) Status {
 	}
 	return out
 }
-func (s Status) AgentStatus() agent.SessionPauseStatus {
-	out := agent.SessionPauseStatus{TransferIdentity: s.TransferIdentity, State: s.State, StartedAt: s.StartedAt, WaitExpired: s.WaitExpired, PendingInputCount: s.PendingInputs, CheckpointID: s.CheckpointID, ErrorCode: s.ErrorCode, Error: s.Message, RecoverableAction: s.RecoverableAction, BlockerCount: s.BlockerCount}
+func (s Status) AgentStatus() recovery.SessionPauseStatus {
+	out := recovery.SessionPauseStatus{TransferIdentity: s.TransferIdentity, State: s.State, StartedAt: s.StartedAt, WaitExpired: s.WaitExpired, PendingInputCount: s.PendingInputs, CheckpointID: s.CheckpointID, ErrorCode: s.ErrorCode, Error: s.Message, RecoverableAction: s.RecoverableAction, BlockerCount: s.BlockerCount}
 	for _, b := range s.Blockers {
-		out.Blockers = append(out.Blockers, agent.SessionPauseBlocker{OwnerTaskID: b.OwnerTaskID, Kind: b.Type, StartedAt: b.StartedAt, Description: b.Description})
+		out.Blockers = append(out.Blockers, recovery.SessionPauseBlocker{OwnerTaskID: b.OwnerTaskID, Kind: b.Type, StartedAt: b.StartedAt, Description: b.Description})
 	}
 	return out
 }
@@ -193,7 +192,7 @@ func publicError(err error) *Error {
 	if e, ok := errors.AsType[*Error](err); ok {
 		return &Error{Code: e.Code, Message: boundedText(e.Message, 512)}
 	}
-	if e, ok := errors.AsType[*agent.SessionPauseError](err); ok {
+	if e, ok := errors.AsType[*recovery.SessionPauseError](err); ok {
 		return &Error{Code: e.Code, Message: boundedText(e.Cause.Error(), 512)}
 	}
 	return &Error{Code: CodePersistenceFailed, Message: "session transfer operation failed"}

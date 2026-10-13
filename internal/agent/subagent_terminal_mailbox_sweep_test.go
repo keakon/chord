@@ -83,7 +83,7 @@ func TestLifecycleSweepDrainsStrandedOwnedTerminalMailbox(t *testing.T) {
 
 	// Keep a busy main turn so dispatching the sweep drains into the inbox
 	// without auto-starting an LLM turn on the staged mailbox.
-	a.newTurn()
+	a.newTurn("")
 	a.dispatch(Event{Type: EventSubAgentLifecycleSweep})
 
 	if queued := a.ownedSubAgentMailboxes[ownerInstanceID]; len(queued) != 0 {
@@ -156,7 +156,7 @@ func TestLifecycleSweepLeavesUnroutableOwnedMailboxUntouched(t *testing.T) {
 
 	// Even a dispatched sweep leaves the message queued; nothing is dropped or
 	// force-forwarded.
-	a.newTurn()
+	a.newTurn("")
 	a.dispatch(Event{Type: EventSubAgentLifecycleSweep})
 	if queued := a.ownedSubAgentMailboxes[ownerInstanceID]; len(queued) != 1 || queued[0].MessageID != msg.MessageID {
 		t.Fatalf("owned completion queue = %#v, want the unroutable message untouched", queued)

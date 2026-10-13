@@ -33,7 +33,7 @@ func manualNoticeRow(cycleID uint64) message.Message {
 
 func TestHandleCompactCommandBusyArmsManualIntent(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleCompactCommand()
 	if !a.IsCompactionRunning() {
@@ -65,7 +65,7 @@ func TestHandleCompactCommandIdleDoesNotArm(t *testing.T) {
 func TestHandleCompactCommandInvisibleToolDoesNotArm(t *testing.T) {
 	a := manualIntentAgent(t)
 	a.modelDrivenCompactionEnabled.Store(false)
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleCompactCommand()
 	if !a.IsCompactionRunning() {
@@ -78,7 +78,7 @@ func TestHandleCompactCommandInvisibleToolDoesNotArm(t *testing.T) {
 
 func TestHandleCompactCommandWhileWorkerRunningKeepsIntent(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	if !a.manualNoticeActive() {
 		t.Fatal("premise: the first command armed the intent")
@@ -96,7 +96,7 @@ func TestHandleCompactCommandWhileWorkerRunningKeepsIntent(t *testing.T) {
 
 func TestHandleCompactCommandArmedWithoutWorkerReschedules(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	if !a.manualNoticeActive() {
 		t.Fatal("premise: the first command armed the intent")
@@ -112,7 +112,7 @@ func TestHandleCompactCommandArmedWithoutWorkerReschedules(t *testing.T) {
 
 func TestManualGateInjectsNoticeOnce(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	planID := a.compactionState.planID
 
@@ -157,7 +157,7 @@ func TestManualGateInjectsNoticeOnce(t *testing.T) {
 
 func TestManualGateRestartsWorkerWithoutInjecting(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	armedPlanID := a.compactionState.planID
 	// The model's checkpoint displaced the worker and settled without apply.
@@ -180,7 +180,7 @@ func TestManualGateRestartsWorkerWithoutInjecting(t *testing.T) {
 
 func TestManualArmedSuppressesAutoNoticesAndKeepsWarningClaim(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
@@ -208,7 +208,7 @@ func TestManualArmedSuppressesAutoNoticesAndKeepsWarningClaim(t *testing.T) {
 
 func TestManualWorkerSkipClearsIntentAndWithdrawsNotice(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	a.handleManualCompactionIntentAtGate()
 	a.buildTurnOverlayMessages()
@@ -250,7 +250,7 @@ func TestManualWorkerSkipClearsIntentAndWithdrawsNotice(t *testing.T) {
 
 func TestModelSettleKeepsIntentAndWithdrawsNotice(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	a.handleManualCompactionIntentAtGate()
 	a.buildTurnOverlayMessages()
@@ -273,7 +273,7 @@ func TestModelSettleKeepsIntentAndWithdrawsNotice(t *testing.T) {
 
 func TestSettlePointRestartsArmedWorkerWhenTurnDead(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	armedPlanID := a.compactionState.planID
 	a.discardCompactionForModelOverride()
@@ -296,7 +296,7 @@ func TestSettlePointRestartsArmedWorkerWhenTurnDead(t *testing.T) {
 
 func TestSettlePointSkipsRestartWhenTurnAlive(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	a.discardCompactionForModelOverride()
 
@@ -311,7 +311,7 @@ func TestSettlePointSkipsRestartWhenTurnAlive(t *testing.T) {
 
 func TestTurnCancellationClearsIntentButKeepsWorker(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	a.handleManualCompactionIntentAtGate()
 	a.buildTurnOverlayMessages()
@@ -338,7 +338,7 @@ func TestTurnCancellationClearsIntentButKeepsWorker(t *testing.T) {
 
 func TestSessionSwitchClearsManualIntent(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	if !a.manualNoticeActive() {
 		t.Fatal("premise: the command armed the intent")
@@ -510,7 +510,7 @@ func TestManualCompactionNoticeTextIsSelfContained(t *testing.T) {
 // consumes the intent and the gate writes no notice row.
 func TestManualGateAfterReadyApplyWritesNoNotice(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	a.armManualCompactionIntent(a.compactionState.planID)
 
@@ -549,7 +549,7 @@ func TestManualGateAfterReadyApplyWritesNoNotice(t *testing.T) {
 // never injects, and its apply clears the armed intent.
 func TestManualRestartWorkerAppliesWithoutNotice(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	armedPlanID := a.compactionState.planID
 	a.discardCompactionForModelOverride()
@@ -611,7 +611,7 @@ func TestManualApplyFailureSettlesIntent(t *testing.T) {
 			// rewriting the transcript or relying on filesystem permissions.
 			switch path {
 			case "barrier":
-				a.newTurn()
+				a.newTurn("")
 				a.compactionState.readyDraft = draft
 				if applied, _ := a.applyReadyDraft(); applied {
 					t.Fatal("an invalid source boundary must not apply")
@@ -653,7 +653,7 @@ func TestManualApplyFailureSettlesIntent(t *testing.T) {
 // failure is terminal without touching the usage-driven failure breaker.
 func TestManualWorkerFailureKeepsBreakerUntouched(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	a.handleCompactionFailed(Event{Payload: &compactionFailure{
 		planID: a.compactionState.planID,
@@ -679,7 +679,7 @@ func TestManualWorkerFailureKeepsBreakerUntouched(t *testing.T) {
 // nothing new while the worker runs, and injects nothing.
 func TestManualIntentRequiresVisibleToolForInjection(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	if !a.manualNoticeActive() {
 		t.Fatal("premise: the command armed the intent")
@@ -701,7 +701,7 @@ func TestManualIntentRequiresVisibleToolForInjection(t *testing.T) {
 // session boundaries do.
 func TestManualArmedSurvivesUsageResets(t *testing.T) {
 	a := manualIntentAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.handleCompactCommand()
 	a.manualCompactArmedPlanID.Store(a.compactionState.planID)
 

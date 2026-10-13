@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/takeover"
 )
 
@@ -32,7 +32,7 @@ func takeoverCLIErrorCode(err error) string {
 	if typed, ok := errors.AsType[*takeover.Error](err); ok {
 		return knownTakeoverErrorCode(typed.Code)
 	}
-	if typed, ok := errors.AsType[*agent.SessionPauseError](err); ok {
+	if typed, ok := errors.AsType[*recovery.SessionPauseError](err); ok {
 		return knownTakeoverErrorCode(typed.Code)
 	}
 	code, _, _ := strings.Cut(err.Error(), ":")
@@ -50,7 +50,7 @@ func knownTakeoverErrorCode(code string) string {
 
 // Encode before writing so an oversized status cannot partially contaminate
 // the machine-readable stdout stream.
-func writeTakeoverCLIStatus(out io.Writer, status agent.SessionPauseStatus) error {
+func writeTakeoverCLIStatus(out io.Writer, status recovery.SessionPauseStatus) error {
 	return writeTakeoverCLIPublicStatus(out, takeover.PublicStatus(status))
 }
 

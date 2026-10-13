@@ -15,7 +15,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/recovery"
 )
@@ -23,8 +22,8 @@ import (
 type ServerOptions struct {
 	StateDir  string
 	Record    Record
-	Start     func(context.Context, recovery.TransferIdentity) (agent.SessionPauseStatus, error)
-	Status    func(string) (agent.SessionPauseStatus, error)
+	Start     func(context.Context, recovery.TransferIdentity) (recovery.SessionPauseStatus, error)
+	Status    func(string) (recovery.SessionPauseStatus, error)
 	RetrySave func(context.Context, string) error
 }
 
@@ -224,7 +223,7 @@ func (s *Server) handle(conn *net.UnixConn) {
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, HandshakeTimeout)
 	defer cancel()
-	var status agent.SessionPauseStatus
+	var status recovery.SessionPauseStatus
 	var err error
 	switch req.Action {
 	case ActionStart:
@@ -292,7 +291,7 @@ func validateTransfer(id recovery.TransferIdentity, record Record) error {
 	}
 	return nil
 }
-func validateStatusIdentity(status agent.SessionPauseStatus, record Record, transferID string) error {
+func validateStatusIdentity(status recovery.SessionPauseStatus, record Record, transferID string) error {
 	if status.TransferID != transferID || status.SessionID != record.SessionID || status.SourceRuntimeID != record.RuntimeID || status.SourceSessionEpoch != record.SessionEpoch || status.Workspace != record.Workspace {
 		return protocolError(CodeStaleSource, "transfer status does not match source identity")
 	}

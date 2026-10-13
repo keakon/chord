@@ -57,7 +57,7 @@ func (h *headlessTransferAdapter) prepare(ctx context.Context, req agent.Session
 	reply := h.reply
 	h.mu.Unlock()
 	defer func() { h.mu.Lock(); h.pending = nil; h.reply = nil; h.mu.Unlock() }()
-	status := takeover.PublicStatus(agent.SessionPauseStatus{TransferIdentity: id, State: agent.SessionPausePreparing})
+	status := takeover.PublicStatus(recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPausePreparing})
 	status.BindingInstanceID = h.binding
 	if !h.out.emitWithContext(ctx, headlessEnvelope{Type: headlessTransferPreparing, Payload: status}) {
 		return fmt.Errorf("target_not_ready: preparing output unavailable")
@@ -92,12 +92,12 @@ func (h *headlessTransferAdapter) ack(ack transferPreparedAck) error {
 	}
 }
 
-func transferEnvelope(status agent.SessionPauseStatus, binding string) *headlessEnvelope {
+func transferEnvelope(status recovery.SessionPauseStatus, binding string) *headlessEnvelope {
 	kind := "session_transfer_status"
 	switch status.State {
-	case agent.SessionPauseSaved:
+	case recovery.SessionPauseSaved:
 		kind = headlessTransferSaved
-	case agent.SessionPauseReleased:
+	case recovery.SessionPauseReleased:
 		kind = headlessTransferReleased
 	}
 	payload := takeover.PublicStatus(status)

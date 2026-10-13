@@ -42,7 +42,7 @@ func TestStashTruncatedThinkingReplayDeepSeek(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
-	a.newTurn()
+	a.newTurn("")
 
 	a.stashTruncatedThinkingReplay(&LLMResponsePayload{
 		ReasoningContent: "deep thinking about the problem",
@@ -69,10 +69,10 @@ func TestTakePendingThinkingReplayPrefixDropsOnTurnChange(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
-	a.newTurn()
+	a.newTurn("")
 	a.stashTruncatedThinkingReplay(&LLMResponsePayload{ReasoningContent: "old turn reasoning", StopReason: "length"})
 
-	a.newTurn()
+	a.newTurn("")
 	if prefix := a.takePendingThinkingReplayPrefix(); prefix != nil {
 		t.Fatalf("expected prefix dropped after turn change, got %+v", prefix)
 	}
@@ -82,7 +82,7 @@ func TestStashTruncatedThinkingReplaySkipsWhenNoReasoning(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
-	a.newTurn()
+	a.newTurn("")
 
 	a.stashTruncatedThinkingReplay(&LLMResponsePayload{StopReason: "length"})
 	if a.pendingThinkingReplayPrefix != nil {
@@ -98,7 +98,7 @@ func TestStashTruncatedThinkingReplayIsBoundedToFirstRecovery(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
-	a.newTurn()
+	a.newTurn("")
 
 	a.stashTruncatedThinkingReplay(&LLMResponsePayload{ReasoningContent: "repeated reasoning", StopReason: "length"})
 	a.takePendingThinkingReplayPrefix()
@@ -112,7 +112,7 @@ func TestStashTruncatedThinkingReplaySkipsUnsupportedTarget(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newPlainThinkingClient(t)
-	a.newTurn()
+	a.newTurn("")
 
 	a.stashTruncatedThinkingReplay(&LLMResponsePayload{
 		ReasoningContent: "thinking on a plain chat model",
@@ -127,7 +127,7 @@ func TestTakePendingThinkingReplayPrefixRefMatch(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
-	a.newTurn()
+	a.newTurn("")
 	a.stashTruncatedThinkingReplay(&LLMResponsePayload{ReasoningContent: "continued reasoning", StopReason: "length"})
 
 	prefix := a.takePendingThinkingReplayPrefix()
@@ -147,7 +147,7 @@ func TestTakePendingThinkingReplayPrefixDropsOnModelSwitch(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
-	a.newTurn()
+	a.newTurn("")
 	a.stashTruncatedThinkingReplay(&LLMResponsePayload{ReasoningContent: "reasoning bound to deepseek", StopReason: "length"})
 
 	// User switches the model before the recovery request: cursor now targets a
@@ -166,7 +166,7 @@ func TestTakePendingThinkingReplayPrefixDropsOnCapabilityLost(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
-	a.newTurn()
+	a.newTurn("")
 	a.stashTruncatedThinkingReplay(&LLMResponsePayload{ReasoningContent: "reasoning", StopReason: "length"})
 
 	// Same provider/model ref but the model config no longer enables visible
@@ -187,7 +187,7 @@ func TestHandleLLMResponseTruncatedNoOutputStashesThinking(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: &LLMResponsePayload{
 		ReasoningContent: "113KB of truncated reasoning",
@@ -211,7 +211,7 @@ func TestHandleLLMResponseTruncatedNoOutputPlainModelKeepsDiscard(t *testing.T) 
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newPlainThinkingClient(t)
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: &LLMResponsePayload{
 		ReasoningContent: "reasoning on a plain chat model",
@@ -233,7 +233,7 @@ func TestCallLLMInjectsThinkingReplayPrefixWireOnly(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
-	a.newTurn()
+	a.newTurn("")
 	a.stashTruncatedThinkingReplay(&LLMResponsePayload{ReasoningContent: "wire-only reasoning", StopReason: "length"})
 	a.pendingRecoveryPrompt = "continue from where you stopped"
 

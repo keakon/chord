@@ -16,10 +16,11 @@ func TestInputConsumptionReceipts(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newReadyTestMainAgent(t)
 			if tc.busy {
-				a.newTurn()
+				a.newTurn("")
 			}
 			a.mcpTransitionActive.Store(tc.transition)
 			a.handleUserMessage(Event{Type: EventUserMessage, Payload: acceptedUserMessage{Content: tc.content, RequestID: "input-1"}})
+			finishDeliveryWrites(t, a)
 			events := collectAgentEventsUntil(t, a.Events(), func(events []AgentEvent) bool {
 				for _, e := range events {
 					if _, ok := e.(InputResultEvent); ok {
@@ -47,19 +48,25 @@ func TestInputReceiptCancelAndRecovery(t *testing.T) {
 	}
 	startMainAgentLoopForTest(t, a)
 	collectAgentEventsUntil(t, a.Events(), func(events []AgentEvent) bool {
-		rejected := false
+		inputID := ""
+		consumed := false
 		for _, e := range events {
-			if r, ok := e.(InputResultEvent); ok && r.RequestID == "input-1" && r.Status == InputRejected {
-				rejected = true
+			if r, ok := e.(InputResultEvent); ok && r.RequestID == "input-1" {
+				if r.Status != InputQueued || r.InputID == "" {
+					t.Fatalf("cancelled admission receipt: %#v", r)
+				}
+				inputID = r.InputID
 			}
-			if _, ok := e.(GlobalIdleEvent); ok && rejected {
+			if r, ok := e.(PendingDraftConsumedEvent); ok && inputID != "" && r.InputID == inputID {
+				consumed = true
+			}
+			if _, ok := e.(GlobalIdleEvent); ok && consumed {
 				return true
 			}
 		}
 		return false
 	})
-	// A new input wakes the parked drain; its admission is queued, and actual
-	// work is announced by activity rather than a second consumption reply.
+	// A new idle input starts immediately after the cancelled queue retires.
 	if !a.SendUserMessageWithReceipt("second", "input-2") {
 		t.Fatal("admission failed")
 	}
@@ -72,7 +79,7 @@ func TestInputReceiptCancelAndRecovery(t *testing.T) {
 		}
 		return len(receipts) == 1
 	})
-	if receipts["input-2"].Status != InputQueued {
+	if receipts["input-2"].Status != InputStarted {
 		t.Fatalf("receipts = %#v", receipts)
 	}
 	waitForAgentState(t, "recovered input answered", func() bool { return len(a.GetMessages()) == 3 })

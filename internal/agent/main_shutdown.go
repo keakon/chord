@@ -121,6 +121,14 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 		}
 	}
 
+	producersDone := make(chan struct{})
+	go func() { a.outputWg.Wait(); close(producersDone) }()
+	select {
+	case <-producersDone:
+	case <-time.After(remaining()):
+		return a.shutdownTimeoutError(timeout)
+	}
+
 	// Stop persistence admission and wait for the loop to drain.
 	// The persist loop may be started outside Run (tests), so don't gate the wait
 	// on the main event loop start flag. Closing the queue is itself an

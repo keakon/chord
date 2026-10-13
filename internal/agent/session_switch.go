@@ -111,6 +111,9 @@ func (a *MainAgent) handleSessionControlEvent(evt Event) {
 }
 
 func (a *MainAgent) handleNewSessionCommand() {
+	if a.deferDeliverySessionSwitch(a.handleNewSessionCommand) {
+		return
+	}
 	defer a.finishSessionSwitch()
 	if !a.stopCompactionForSessionSwitch() {
 		return
@@ -177,7 +180,7 @@ func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.C
 	a.focusedAgent.Store(nil)
 	a.setFocusedTaskID("")
 	a.clearSystemPromptOverride()
-	a.newTurn()
+	a.newTurn("")
 	// A session switch is user-initiated navigation, not task completion:
 	// reset the notification baseline after cancelling the old turn.
 	a.markControlAction()
@@ -224,6 +227,7 @@ func (a *MainAgent) stopCompactionForSessionSwitch() bool {
 
 func (a *MainAgent) finishSessionSwitch() {
 	a.contextDiagnostics.reset()
+	a.initializeInputDelivery()
 	a.admissionPaused.Store(false)
 	a.questions.switching = false
 }
@@ -304,6 +308,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 		r.cancel()
 	}
 	a.directoryPreparation = nil
+	a.resetInputDeliverySession()
 	a.pendingNativeContextAppends = nil
 	a.nativeReceipt.Store(nil)
 	a.resetHostedCallers()
@@ -581,6 +586,9 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 // msgIndex, emits SessionRestoredEvent + ForkSessionEvent so the TUI can
 // load the forked message into the composer.
 func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
+	if a.deferDeliverySessionSwitch(func() { a.handleForkSessionCommand(msgIndex) }) {
+		return
+	}
 	defer a.finishSessionSwitch()
 	if !a.stopCompactionForSessionSwitch() {
 		return

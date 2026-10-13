@@ -288,7 +288,7 @@ func TestIntentBarrierPersistsAssistantBeforeToolDispatch(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
 	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
-	a.newTurn()
+	a.newTurn("")
 
 	payload := &LLMResponsePayload{
 		ToolCalls:  []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)}},
@@ -320,7 +320,7 @@ func TestIntentBarrierPersistsAssistantBeforeToolDispatch(t *testing.T) {
 func TestIntentBarrierSuccessRecoversMainPersistenceHealth(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.persistenceHealth.markDegraded(errors.New("temporary persistence error"))
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: &LLMResponsePayload{
 		ToolCalls:  []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)}},
@@ -358,7 +358,7 @@ func newBrokenPathRecoveryManager(t *testing.T) *recovery.RecoveryManager {
 func TestAssistantPersistenceFailureWithoutToolsDegradesMainAgent(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: &LLMResponsePayload{
 		Content:    "final answer",
@@ -623,7 +623,7 @@ func awaitSyntheticToolResult(t *testing.T, a *MainAgent) {
 func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.installRecoveryManager(newBrokenPathRecoveryManager(t)) // force the intent barrier to fail closed
-	a.newTurn()
+	a.newTurn("")
 
 	payload := &LLMResponsePayload{
 		ToolCalls:  []message.ToolCall{{ID: "call-1", Name: tools.NameWrite, Args: json.RawMessage(`{"path":"a.txt","content":"x"}`)}},
@@ -661,7 +661,7 @@ func TestRepeatedIntentBarrierFailuresAbortTurn(t *testing.T) {
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
 	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
 	a.recoveryManager().Close() // force every intent barrier to fail closed
-	a.newTurn()
+	a.newTurn("")
 	// Simulate a prior LLM round in this turn whose dispatch already failed the
 	// barrier; this round's failure is the second consecutive one.
 	a.turn.BarrierFailureRounds = 1
@@ -697,7 +697,7 @@ func TestIntentBarrierSuccessResetsBarrierFailureRounds(t *testing.T) {
 	t.Cleanup(func() { _ = a.recoveryManager().Close() })
 	a.startPersistLoop()
 	t.Cleanup(func() { a.closePersistLoopUntil(nil) })
-	a.newTurn()
+	a.newTurn("")
 	a.turn.BarrierFailureRounds = 1
 
 	payload := &LLMResponsePayload{

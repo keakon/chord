@@ -194,7 +194,7 @@ func TestPrepareMessagesForLLM_SummarizesAgedSkillKeepingAnchors(t *testing.T) {
 		StaleAgeTurns:       1,
 		StaleOutputBytes:    40,
 	}}}
-	a.newTurn()
+	a.newTurn("")
 	root := t.TempDir()
 	content := skillEnvelopeContent(root, skillTestBody())
 	msgs := []message.Message{

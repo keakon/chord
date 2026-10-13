@@ -36,7 +36,7 @@ func TestCancelCurrentTurnWithoutPendingToolsEmitsIdle(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -72,7 +72,7 @@ func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -132,7 +132,7 @@ func TestCancelCurrentTurnDoesNotCancelCompletedToolCalls(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -194,7 +194,7 @@ func TestCancelCurrentTurnDiscardsSpeculativeToolCardWithoutPersistingToolMessag
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -378,7 +378,7 @@ func TestCancelCurrentTurnStreamSegmentEndFollowsFlushedTail(t *testing.T) {
 	a.MarkSkillsReady()
 	a.markMCPReady()
 
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hello"}}}, "")
 	<-provider.started
@@ -471,13 +471,13 @@ func TestHandleTurnCancelledIgnoresStaleEventAfterNewTurn(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected first active turn")
 	}
 	staleTurnID := a.turn.ID
 
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected second active turn")
 	}
@@ -522,7 +522,7 @@ func TestHandleTurnCancelledIgnoresStaleEventAfterNewTurn(t *testing.T) {
 // like it did nothing).
 func TestCancelTurnParksMailboxDeliveryUntilUserAction(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}

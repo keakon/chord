@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/takeover"
 )
@@ -40,7 +39,7 @@ func TestTakeoverInvalidRequestProducesOnlyOneJSONStatus(t *testing.T) {
 func TestHeadlessTransferACKRequiresCurrentIdentity(t *testing.T) {
 	id := recovery.TransferIdentity{TransferID: "transfer-1", SessionID: "session-1", SourceRuntimeID: "runtime-1", SourceSessionEpoch: 1, Workspace: "/sample", TargetKind: "tui", TargetInstanceID: "target-1"}
 	adapter := &headlessTransferAdapter{pending: &id, reply: make(chan error, 1), binding: "binding-1"}
-	ack := transferPreparedAck{TransferIdentity: recovery.TransferIdentity{TransferID: id.TransferID, SessionID: id.SessionID, SourceRuntimeID: id.SourceRuntimeID, SourceSessionEpoch: id.SourceSessionEpoch}, BindingInstanceID: "binding-2", Accepted: true}
+	ack := transferPreparedAck{TransferID: id.TransferID, SessionID: id.SessionID, SourceRuntimeID: id.SourceRuntimeID, SourceSessionEpoch: id.SourceSessionEpoch, BindingInstanceID: "binding-2", Accepted: true}
 	if err := adapter.ack(ack); err == nil {
 		t.Fatal("foreign binding ACK admitted")
 	}
@@ -75,7 +74,7 @@ func TestHeadlessTransferACKRejectionPreservesReason(t *testing.T) {
 }
 
 func TestHeadlessTransferOutputBypassesSubscriptionAndUsesPublicDTO(t *testing.T) {
-	s := agent.SessionPauseStatus{TransferIdentity: recovery.TransferIdentity{TransferID: "transfer-1"}, State: agent.SessionPauseSaved, PendingInputCount: 2, Error: "sample detail", Blockers: []agent.SessionPauseBlocker{{Kind: "tool", Description: "sample"}}}
+	s := recovery.SessionPauseStatus{TransferID: "transfer-1", State: recovery.SessionPauseSaved, PendingInputCount: 2, Error: "sample detail", Blockers: []recovery.SessionPauseBlocker{{Kind: "tool", Description: "sample"}}}
 	env := transferEnvelope(s, "binding-1")
 	if env.Type != headlessTransferSaved {
 		t.Fatal(env.Type)

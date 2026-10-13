@@ -20,15 +20,15 @@ import (
 
 type loopBusyAgentStub struct{}
 
-func (loopBusyAgentStub) Events() <-chan agent.AgentEvent                           { return nil }
-func (loopBusyAgentStub) SendUserMessage(string)                                    {}
-func (loopBusyAgentStub) SendUserMessageWithParts([]message.ContentPart)            {}
-func (loopBusyAgentStub) AppendContextMessage(message.Message)                      {}
-func (loopBusyAgentStub) CancelCurrentTurn() bool                                   { return false }
-func (loopBusyAgentStub) QueuePendingUserDraft(string, []message.ContentPart) bool  { return false }
-func (loopBusyAgentStub) UpdatePendingUserDraft(string, []message.ContentPart) bool { return false }
-func (loopBusyAgentStub) RemovePendingUserDraft(string) bool                        { return false }
-func (loopBusyAgentStub) ResolveConfirm(string, string, string, string, string)     {}
+func (loopBusyAgentStub) Events() <-chan agent.AgentEvent                        { return nil }
+func (loopBusyAgentStub) SendUserMessage(string)                                 {}
+func (loopBusyAgentStub) SendUserMessageWithParts([]message.ContentPart)         {}
+func (loopBusyAgentStub) AppendContextMessage(message.Message)                   {}
+func (loopBusyAgentStub) CancelCurrentTurn() bool                                { return false }
+func (loopBusyAgentStub) QueueSubAgentDraft(string, []message.ContentPart) bool  { return false }
+func (loopBusyAgentStub) UpdateSubAgentDraft(string, []message.ContentPart) bool { return false }
+func (loopBusyAgentStub) RemoveSubAgentDraft(string) bool                        { return false }
+func (loopBusyAgentStub) ResolveConfirm(string, string, string, string, string)  {}
 func (loopBusyAgentStub) ApplyQuestionOperation(context.Context, agent.QuestionOperation) (agent.QuestionReceipt, error) {
 	return agent.QuestionReceipt{Accepted: true}, nil
 }

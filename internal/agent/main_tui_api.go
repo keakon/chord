@@ -17,6 +17,9 @@ import (
 // agent is busy (not queued), including when the submitted message carries
 // image parts.
 func (a *MainAgent) handleLocalOnlySlashCommands(content string, parts []message.ContentPart, busy bool) bool {
+	if a.handleInputQueueSlash(content) {
+		return true
+	}
 	return a.executeLocalOnlySlashCommand(content, parts, busy)
 }
 
@@ -29,6 +32,8 @@ func (a *MainAgent) handleLocalOnlySlashCommands(content string, parts []message
 func IsTUILocalOnlySlashCommand(content string) bool {
 	c := strings.TrimSpace(content)
 	switch {
+	case c == "/queue" || strings.HasPrefix(c, "/queue "):
+		return true
 	case c == "/export" || strings.HasPrefix(c, "/export "):
 		return true
 	case c == "/models" || strings.HasPrefix(c, "/models "):
@@ -258,9 +263,9 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 	a.sendSessionInput(content.String(), parts, "")
 }
 
-// QueuePendingUserDraft mirrors a busy local TUI draft into the agent's
+// QueueSubAgentDraft mirrors a busy local TUI draft into the agent's
 // pending queue so it can be consumed in-turn or at the next idle drain.
-func (a *MainAgent) QueuePendingUserDraft(draftID string, parts []message.ContentPart) bool {
+func (a *MainAgent) QueueSubAgentDraft(draftID string, parts []message.ContentPart) bool {
 	if strings.TrimSpace(draftID) == "" || len(parts) == 0 {
 		return false
 	}
@@ -269,29 +274,29 @@ func (a *MainAgent) QueuePendingUserDraft(draftID string, parts []message.Conten
 			return sub.QueuePendingUserDraft(draftID, parts)
 		})
 	}
-	return a.sendSessionDraft(draftID, parts, false)
+	return false
 }
 
-// UpdatePendingUserDraft replaces a queued draft before it is consumed.
-func (a *MainAgent) UpdatePendingUserDraft(draftID string, parts []message.ContentPart) bool {
+// UpdateSubAgentDraft replaces a queued draft before it is consumed.
+func (a *MainAgent) UpdateSubAgentDraft(draftID string, parts []message.ContentPart) bool {
 	if strings.TrimSpace(draftID) == "" || len(parts) == 0 {
 		return false
 	}
 	if focused := a.validFocusedSubAgent(); focused != nil && focused.State() == SubAgentStateRunning {
 		return focused.UpdatePendingUserDraft(draftID, parts)
 	}
-	return a.sendSessionDraft(draftID, parts, false)
+	return false
 }
 
-// RemovePendingUserDraft removes a queued draft before it is consumed.
-func (a *MainAgent) RemovePendingUserDraft(draftID string) bool {
+// RemoveSubAgentDraft removes a queued draft before it is consumed.
+func (a *MainAgent) RemoveSubAgentDraft(draftID string) bool {
 	if strings.TrimSpace(draftID) == "" {
 		return false
 	}
 	if focused := a.validFocusedSubAgent(); focused != nil && focused.State() == SubAgentStateRunning {
 		return focused.RemovePendingUserDraft(draftID)
 	}
-	return a.sendSessionDraft(draftID, nil, true)
+	return false
 }
 
 // AppendContextMessage appends a user-role message to the focused agent's
@@ -375,7 +380,15 @@ func (a *MainAgent) PendingUserMessageCount() int {
 	}
 	a.stateMu.RLock()
 	defer a.stateMu.RUnlock()
-	return len(a.pendingUserMessages)
+	count := len(a.pendingUserMessages)
+	if snapshot := a.InputQueueSnapshot(); snapshot != nil && snapshot.State != nil {
+		for _, input := range snapshot.State.Inputs {
+			if input.Stage == "queued" {
+				count++
+			}
+		}
+	}
+	return count
 }
 
 // SetAgentConfigs stores the pre-resolved agent configurations (built-in →

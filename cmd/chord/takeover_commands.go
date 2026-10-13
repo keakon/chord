@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/takeover"
 )
 
@@ -29,7 +29,7 @@ func newTakeoverCmd() *cobra.Command {
 			if err == nil {
 				loc, err = locateTakeover(c.Context(), dir, sid)
 			}
-			var status agent.SessionPauseStatus
+			var status recovery.SessionPauseStatus
 			var page *takeover.Status
 			if err == nil {
 				switch action {
@@ -71,7 +71,7 @@ func newTakeoverCmd() *cobra.Command {
 				status.TargetInstanceID = boundedTakeoverCLIIdentity(targetInstance)
 				status.State = takeover.CodeStatusUnknown
 				if action == takeover.ActionPreflight || action == takeover.ActionStart {
-					status.State = agent.SessionPausePreflight
+					status.State = recovery.SessionPausePreflight
 				}
 			}
 			if err != nil {
@@ -129,7 +129,7 @@ func prepareRootTakeover(c *cobra.Command) error {
 		fmt.Fprintf(c.ErrOrStderr(), "Transfer %s can be queried with chord takeover status --session %s --transfer-id %s --json\n", transferID, flagTakeoverSession, transferID)
 		return err
 	}
-	if status.State != agent.SessionPauseReleased {
+	if status.State != recovery.SessionPauseReleased {
 		fmt.Fprintf(c.ErrOrStderr(), "Transfer %s remains %s; query with chord takeover status --session %s --transfer-id %s --json\n", status.TransferID, status.State, status.SessionID, status.TransferID)
 		return cliExitError{code: 0}
 	}

@@ -325,6 +325,9 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	}
+	if m.mode == ModeInputQueue {
+		return nil, true
+	}
 	if m.mode == ModeRules || m.mode == ModeUsageStats || m.mode == ModeErrorPanel || m.mode == ModeHelp {
 		m.clearChordState()
 		key := ""

@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/takeover"
 )
@@ -51,7 +50,7 @@ func TestTakeoverCLIRejectsOversizedIdentityWithBoundedJSON(t *testing.T) {
 
 func TestTakeoverCLIStatusEncodeDoesNotPartiallyWriteOversizedOutput(t *testing.T) {
 	var out bytes.Buffer
-	status := agent.SessionPauseStatus{Error: strings.Repeat("\x00", takeover.MaxFrameBytes), ErrorCode: takeover.CodeStatusUnknown}
+	status := recovery.SessionPauseStatus{Error: strings.Repeat("\x00", takeover.MaxFrameBytes), ErrorCode: takeover.CodeStatusUnknown}
 	if err := writeTakeoverCLIStatus(&out, status); err != nil || out.Len() >= takeover.MaxFrameBytes {
 		t.Fatalf("bounded message failed err=%v size=%d", err, out.Len())
 	}
@@ -68,7 +67,7 @@ func TestTakeoverCLIErrorCodesRemainBoundedAndTyped(t *testing.T) {
 		code string
 	}{
 		{fmt.Errorf("context: %w", &takeover.Error{Code: takeover.CodeStaleSource, Message: "Source changed"}), takeover.CodeStaleSource},
-		{&agent.SessionPauseError{Code: takeover.CodePersistenceFailed, Cause: errors.New("Save failed")}, takeover.CodePersistenceFailed},
+		{&recovery.SessionPauseError{Code: takeover.CodePersistenceFailed, Cause: errors.New("Save failed")}, takeover.CodePersistenceFailed},
 		{errors.New(strings.Repeat("x", takeover.MaxFrameBytes) + ": detail"), takeover.CodeInvalidRequest},
 		{&takeover.Error{Code: strings.Repeat("x", takeover.MaxFrameBytes), Message: "Invalid code"}, takeover.CodeInvalidRequest},
 	} {
@@ -101,16 +100,16 @@ func TestTakeoverCLIStatusSupportsBlockerPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := takeover.Record{Protocol: takeover.ProtocolVersion, RuntimeID: "runtime-page", SessionID: "session-1", Workspace: workspace, OwnerKind: takeover.OwnerTUI}
-	var blockers []agent.SessionPauseBlocker
+	var blockers []recovery.SessionPauseBlocker
 	for i := range 130 {
-		blockers = append(blockers, agent.SessionPauseBlocker{OwnerTaskID: fmt.Sprintf("task-%d", i), Kind: "tool", Description: "Active tool"})
+		blockers = append(blockers, recovery.SessionPauseBlocker{OwnerTaskID: fmt.Sprintf("task-%d", i), Kind: "tool", Description: "Active tool"})
 	}
 	server, err := takeover.StartServer(takeover.ServerOptions{StateDir: dir, Record: record,
-		Start: func(context.Context, recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
-			return agent.SessionPauseStatus{}, nil
+		Start: func(context.Context, recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
+			return recovery.SessionPauseStatus{}, nil
 		},
-		Status: func(transferID string) (agent.SessionPauseStatus, error) {
-			return agent.SessionPauseStatus{TransferIdentity: recovery.TransferIdentity{TransferID: transferID, SessionID: record.SessionID, SourceRuntimeID: record.RuntimeID, Workspace: workspace, TargetKind: takeover.OwnerGateway, TargetInstanceID: "target-1"}, State: agent.SessionPauseDraining, Blockers: blockers, BlockerCount: len(blockers)}, nil
+		Status: func(transferID string) (recovery.SessionPauseStatus, error) {
+			return recovery.SessionPauseStatus{TransferID: transferID, SessionID: record.SessionID, SourceRuntimeID: record.RuntimeID, Workspace: workspace, TargetKind: takeover.OwnerGateway, TargetInstanceID: "target-1", State: recovery.SessionPauseDraining, Blockers: blockers, BlockerCount: len(blockers)}, nil
 		},
 		RetrySave: func(context.Context, string) error { return nil },
 	})

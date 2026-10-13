@@ -16,6 +16,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Search saved TUI inputs across sessions with Ctrl+R in Insert mode or `/history`, restore them without sending, and undo the replacement. `/history clear` clears saved inputs across projects. Ctrl+R still switches service tiers in Normal mode.
 - Discover directory-specific `AGENTS.md` rules as files are accessed, and reconsider changes before executing when new rules are found.
 - Suggest conditional skills after successful file reads match their `paths`, with explicit discovery and loading states in the skill selector.
+- MainAgent supports persistent after-completion inputs with Alt+Enter, a `/queue` editor and explicit pause/resume, plus headless queue snapshots and revision-checked controls.
 
 - Take over a live local session between TUI and a gateway on macOS and Linux. Chord waits for already-started work, saves queued inputs, and restores the session paused until you explicitly continue.
 

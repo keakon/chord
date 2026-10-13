@@ -94,15 +94,16 @@ func TestTUISetCurrentModelPoolRunsOnEventLoopBeforeQueuedUserMessageDrain(t *te
 	a.ApplyInitialModel("provider/model-a")
 	drainAgentEvents(a.Events())
 
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
-	a.QueuePendingUserDraft("draft-1", []message.ContentPart{{Type: "text", Text: "queued message"}})
+	submitMainDraftForTest(a, "draft-1", []message.ContentPart{{Type: "text", Text: "queued message"}})
 	a.SetCurrentModelPool("fast")
 	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "base" {
 		t.Fatalf("CurrentModelPool changed before event-loop dispatch = %q, want base", got)
 	}
 
 	dispatchPendingEvents(t, a)
+	finishDeliveryWrites(t, a)
 	if got := a.ModelPoolPolicy().CurrentModelPool(); got != "fast" {
 		t.Fatalf("CurrentModelPool after dispatch = %q, want fast", got)
 	}
@@ -125,7 +126,7 @@ func TestInFlightModelPoolSwitchDefersClientSwapUntilRequestBoundary(t *testing.
 	}
 	drainAgentEvents(a.Events())
 
-	a.newTurn()
+	a.newTurn("")
 	a.mainLLMRequestInFlight.Store(true)
 	a.SetCurrentModelPool("fast")
 	dispatchPendingEvents(t, a)
@@ -159,7 +160,7 @@ func TestInFlightModelPoolSwitchStaysDeferredAcrossOversizeSuspend(t *testing.T)
 	}
 	drainAgentEvents(a.Events())
 
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	turnEpoch := a.turn.Epoch
 	a.beginCompactionState(
@@ -217,7 +218,7 @@ func TestRoutingInvalidationAppliesPendingModelPoolSwitchBeforeRestart(t *testin
 	}
 	drainAgentEvents(a.Events())
 
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	a.mainLLMRequestInFlight.Store(true)
 	a.SetCurrentModelPool("fast")
@@ -253,7 +254,7 @@ func TestInFlightModelPoolSwitchRollsBackWhenDeferredClientSwapFails(t *testing.
 		return nil, "", 0, errors.New("factory unavailable for " + providerModel)
 	})
 
-	a.newTurn()
+	a.newTurn("")
 	a.mainLLMRequestInFlight.Store(true)
 	a.SetCurrentModelPool("fast")
 	dispatchPendingEvents(t, a)
@@ -337,7 +338,7 @@ func TestInFlightModelPoolSwitchRestoresOnlyFailedDeferredSelections(t *testing.
 		return llm.NewClient(providerCfg, stubProvider{}, modelID, 1024, ""), modelID, 8192, nil
 	})
 
-	a.newTurn()
+	a.newTurn("")
 	a.mainLLMRequestInFlight.Store(true)
 	a.SetCurrentModelPool("fast")
 	a.SetAgentModelPool("worker", "fast")
@@ -518,14 +519,15 @@ func TestResumeTurnAfterRoutingInvalidationConsumesQueuedUserDraft(t *testing.T)
 	a.ApplyInitialModel("provider/model-a")
 	drainAgentEvents(a.Events())
 
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	if turn == nil {
 		t.Fatal("expected active turn")
 	}
-	a.QueuePendingUserDraft("draft-1", []message.ContentPart{{Type: "text", Text: "queued message"}})
+	submitMainDraftForTest(a, "draft-1", []message.ContentPart{{Type: "text", Text: "queued message"}})
 	a.SetCurrentModelPool("fast")
 	dispatchPendingEvents(t, a)
+	finishDeliveryWrites(t, a)
 
 	if a.PendingUserMessageCount() != 1 {
 		t.Fatalf("PendingUserMessageCount before resume = %d, want 1", a.PendingUserMessageCount())
@@ -533,6 +535,7 @@ func TestResumeTurnAfterRoutingInvalidationConsumesQueuedUserDraft(t *testing.T)
 	if ok := a.resumeTurnAfterRoutingInvalidation(turn.ID); !ok {
 		t.Fatal("resumeTurnAfterRoutingInvalidation returned false, want true")
 	}
+	finishDeliveryWrites(t, a)
 	if a.turn != turn {
 		t.Fatal("resumeTurnAfterRoutingInvalidation should keep the active turn")
 	}
@@ -563,7 +566,7 @@ func TestHandleModelsCommandBusyDoesNotClearTurn(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
 			installPoolPolicyForTest(t, a)
 
-			a.newTurn()
+			a.newTurn("")
 			turn := a.turn
 			if turn == nil {
 				t.Fatal("expected active turn")
@@ -625,7 +628,7 @@ func TestHandleUserMessageMCPWhileBusyRunsImmediately(t *testing.T) {
 		return MCPControlResult{}, nil
 	})
 	t.Cleanup(func() { close(releaseControl) })
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	drainAgentEvents(a.Events())
 
@@ -672,7 +675,7 @@ func TestHandleUserMessageMCPDuringTransitionWarnsInsteadOfQueueing(t *testing.T
 func TestHandleExportCommandBusyDoesNotClearTurn(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	if turn == nil {
 		t.Fatal("expected active turn")
@@ -706,7 +709,7 @@ func TestSendUserMessageRoutesLocalOnlyCommandThroughEventLoop(t *testing.T) {
 
 	// Pretend a turn is in flight so we'd see the bug if SendUserMessage
 	// short-circuited inline.
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	drainAgentEvents(a.Events())
 

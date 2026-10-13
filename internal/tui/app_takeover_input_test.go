@@ -6,6 +6,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -70,12 +71,12 @@ func TestTakeoverExistingJobCanStillBeStopped(t *testing.T) {
 
 func TestTakeoverRestoredEmptyQueueKeepsIdleStatus(t *testing.T) {
 	m, backend := newTakeoverTestModel()
-	backend.status = agent.SessionPauseStatus{State: agent.SessionPauseReady}
+	backend.status = recovery.SessionPauseStatus{State: recovery.SessionPauseReady}
 	m.restoreTakeoverPendingInputs()
 	if text := m.takeoverStatusText(); text != "" {
 		t.Fatalf("empty queue replaced idle status: %q", text)
 	}
-	if m.takeover.status.State != agent.SessionPauseReady || len(backend.sentMessages) != 0 {
+	if m.takeover.status.State != recovery.SessionPauseReady || len(backend.sentMessages) != 0 {
 		t.Fatal("idle presentation resumed execution")
 	}
 	backend.status.PendingInputCount = 1

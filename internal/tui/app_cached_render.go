@@ -321,6 +321,8 @@ func (m *Model) queuedDraftsFingerprint(width, maxLines int) string {
 		b.WriteByte('|')
 		b.WriteString(draft.ID)
 		b.WriteByte(':')
+		b.WriteString(draft.DeliveryStatus)
+		b.WriteByte(':')
 		b.WriteString(draft.DisplayContent)
 		b.WriteByte(':')
 		b.WriteString(draft.Content)

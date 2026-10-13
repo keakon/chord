@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/takeover"
@@ -99,11 +98,11 @@ func flagConfigHomeResolved() string {
 	return pl.ConfigHome
 }
 
-func startTakeover(ctx context.Context, loc takeoverLocation, sid, transferID, targetKind, targetInstance string, timeout *time.Duration) (agent.SessionPauseStatus, error) {
+func startTakeover(ctx context.Context, loc takeoverLocation, sid, transferID, targetKind, targetInstance string, timeout *time.Duration) (recovery.SessionPauseStatus, error) {
 	id := recovery.TransferIdentity{TransferID: transferID, SessionID: sid, Workspace: loc.workspace, TargetKind: targetKind, TargetInstanceID: targetInstance}
-	initial := agent.SessionPauseStatus{TransferIdentity: id, State: agent.SessionPausePreflight}
+	initial := recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPausePreflight}
 	if err := validateTakeoverCLIArguments(takeover.ActionStart, sid, transferID, targetKind, targetInstance); err != nil {
-		return agent.SessionPauseStatus{}, err
+		return recovery.SessionPauseStatus{}, err
 	}
 	if timeout != nil && *timeout < 0 {
 		return initial, fmt.Errorf("invalid_request: timeout must be nonnegative")
@@ -137,9 +136,9 @@ func startTakeover(ctx context.Context, loc takeoverLocation, sid, transferID, t
 	defer timer.Stop()
 	for {
 		switch status.State {
-		case agent.SessionPauseReleased:
+		case recovery.SessionPauseReleased:
 			return status, nil
-		case agent.SessionPauseSaveFailed:
+		case recovery.SessionPauseSaveFailed:
 			return status, fmt.Errorf("persistence_failed: %s", status.Error)
 		}
 		select {
@@ -164,10 +163,10 @@ func startTakeover(ctx context.Context, loc takeoverLocation, sid, transferID, t
 	}
 }
 
-func queryTakeover(ctx context.Context, loc takeoverLocation, sid, transferID string) (agent.SessionPauseStatus, error) {
+func queryTakeover(ctx context.Context, loc takeoverLocation, sid, transferID string) (recovery.SessionPauseStatus, error) {
 	if rec, err := takeover.Find(loc.stateDir, sid); err == nil {
 		if rec.Workspace != loc.workspace {
-			return agent.SessionPauseStatus{}, fmt.Errorf("wrong_workspace: source belongs to another workspace")
+			return recovery.SessionPauseStatus{}, fmt.Errorf("wrong_workspace: source belongs to another workspace")
 		}
 		status, err := (takeover.Client{StateDir: loc.stateDir, Record: rec}).Status(ctx, transferID)
 		if err == nil {
@@ -179,23 +178,23 @@ func queryTakeover(ctx context.Context, loc takeoverLocation, sid, transferID st
 	manager := recovery.NewRecoveryManager(loc.sessionDir)
 	snapshot, err := manager.Recover()
 	if err != nil {
-		return agent.SessionPauseStatus{}, fmt.Errorf("status_unknown: %w", err)
+		return recovery.SessionPauseStatus{}, fmt.Errorf("status_unknown: %w", err)
 	}
 	p := snapshot.Pause
 	if p == nil || p.Identity.TransferID != transferID || p.Identity.SessionID != sid || p.Identity.Workspace != loc.workspace {
-		return agent.SessionPauseStatus{}, fmt.Errorf("status_unknown: transfer identity is unknown")
+		return recovery.SessionPauseStatus{}, fmt.Errorf("status_unknown: transfer identity is unknown")
 	}
-	status := agent.SessionPauseStatus{TransferIdentity: p.Identity, StartedAt: p.FrozenAt, CheckpointID: p.CheckpointID, PendingInputCount: len(p.PendingInputs), State: agent.SessionPauseDraining}
+	status := recovery.SessionPauseStatus{TransferIdentity: p.Identity, StartedAt: p.FrozenAt, CheckpointID: p.CheckpointID, PendingInputCount: len(p.PendingInputs), State: recovery.SessionPauseDraining}
 	if !p.CheckpointComplete {
 		return status, nil
 	}
-	status.State = agent.SessionPauseSaved
+	status.State = recovery.SessionPauseSaved
 	lock, err := recovery.AcquireSessionLock(loc.sessionDir)
 	if err == nil {
 		if err = lock.Release(); err != nil {
 			return status, err
 		}
-		status.State = agent.SessionPauseReleased
+		status.State = recovery.SessionPauseReleased
 		return status, nil
 	}
 	if _, ok := errors.AsType[*recovery.SessionLockedError](err); ok {

@@ -12,7 +12,7 @@ func TestHandleToolResultMarksSkillInvokedOnlyOnSuccess(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills(nil)
-	a.newTurn()
+	a.newTurn("")
 
 	assistant := message.Message{
 		Role: "assistant",
@@ -43,7 +43,7 @@ func TestHandleToolResultMarksSuccessfulVisibleSkillInvoked(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{{Name: "go-expert", Description: "Go language development expert", Location: "/tmp/go-expert/SKILL.md", RootDir: "/tmp/go-expert"}})
-	a.newTurn()
+	a.newTurn("")
 
 	assistant := message.Message{
 		Role: "assistant",

@@ -60,7 +60,7 @@ func TestCompactContextSoleToolCallDetection(t *testing.T) {
 func TestTryArmModelDrivenCheckpointAcceptsValidArgs(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	ccID, args := testCompactContextCall()
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall(ccID, tools.NameCompactContext)}})
 	result, err := a.tryArmModelDrivenCheckpoint(ccID, args)
@@ -84,7 +84,7 @@ func TestTryArmModelDrivenCheckpointAcceptsValidArgs(t *testing.T) {
 func TestTryArmModelDrivenCheckpointRejectsBadArgs(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	if _, err := a.tryArmModelDrivenCheckpoint("cc-1", `{"state_files":["/etc/passwd"]}`); err == nil {
 		t.Fatal("expected rejection for absolute state path")
 	}
@@ -114,7 +114,7 @@ func TestTryArmModelDrivenCheckpointRejectsBadArgs(t *testing.T) {
 func TestMaybeStartModelDrivenBarrierSkipsWithoutPending(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	if a.maybeStartModelDrivenBarrier() {
 		t.Fatal("barrier must not start with no pending request")
 	}
@@ -123,7 +123,7 @@ func TestMaybeStartModelDrivenBarrierSkipsWithoutPending(t *testing.T) {
 func TestMaybeStartModelDrivenBarrierStartsWorker(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	for _, msg := range []message.Message{
 		{Role: message.RoleUser, Content: "first request"},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
@@ -159,7 +159,7 @@ func TestMaybeStartModelDrivenBarrierStartsWorker(t *testing.T) {
 func TestMaybeStartModelDrivenBarrierOverridesRunningUsageCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	for _, msg := range []message.Message{
 		{Role: message.RoleUser, Content: "first request"},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
@@ -197,7 +197,7 @@ func TestMaybeStartModelDrivenBarrierOverridesRunningUsageCompaction(t *testing.
 func TestMaybeStartModelDrivenBarrierDiscardsReadyUsageDraft(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	for _, msg := range []message.Message{
 		{Role: message.RoleUser, Content: "first request"},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
@@ -235,7 +235,7 @@ func TestMaybeStartModelDrivenBarrierDiscardsReadyUsageDraft(t *testing.T) {
 func TestMaybeStartModelDrivenBarrierIntervalSkipKeepsRunningUsageCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	for _, msg := range []message.Message{
 		{Role: message.RoleUser, Content: "first request"},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
@@ -308,7 +308,7 @@ func TestMaybeStartModelDrivenBarrierIntervalSkipKeepsRunningUsageCompaction(t *
 func TestMaybeStartModelDrivenBarrierCooldownSkipIsSynchronous(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}})
 	// The previous request skipped for low_gain two batches ago, so the same
@@ -370,7 +370,7 @@ func TestMaybeStartModelDrivenBarrierCooldownSkipIsSynchronous(t *testing.T) {
 func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	for _, msg := range []message.Message{
 		{Role: message.RoleUser, Content: "short request"},
 		{Role: message.RoleAssistant, Content: "short reply"},
@@ -399,7 +399,7 @@ func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
 func TestModelDrivenSkipSettlesWithoutClearingUsageState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.autoCompactRequested.Store(true)
 	a.ctxMgr.RestoreStats(message.TokenUsage{InputTokens: 1000})
 	a.modelDrivenSkipNotice = ""
@@ -428,7 +428,7 @@ func TestModelDrivenSkipSettlesWithoutClearingUsageState(t *testing.T) {
 func TestModelDrivenSettleRecordsLifecycleAndTerminalTrigger(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.beginCompactionState(7, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: 1}, 4, nil)
 
 	preflight := &modelDrivenPreflightStats{CurrentTokens: 8000, ProjectedTokens: 5000, SavedTokens: 3000, SavedRatioPct: 37, ContinuationTokens: 90}
@@ -470,7 +470,7 @@ func TestModelDrivenSkipKeepsUsageDrivenSafetyNetArmed(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1024)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	a.autoCompactRequested.Store(true)
 	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
@@ -508,7 +508,7 @@ func TestModelDrivenApplyFailureSurfacesRealReason(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1024)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "head message being compacted"})
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
 	a.startCompactionState(5, target, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: turnID, turnEpoch: a.turn.Epoch, agentErrSourceID: "main"})
@@ -561,7 +561,7 @@ func TestModelDrivenCheckpointWrapperNamesItsMode(t *testing.T) {
 func TestModelDrivenAppliedDraftCarriesPreflightStats(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 
 	snapshot := []message.Message{
 		{Role: message.RoleUser, Content: "original user request"},
@@ -750,7 +750,7 @@ func TestCancelCompactionForTurnCancellationDiscardsModelDrivenWorker(t *testing
 	// work. The worker context is parented on parentCtx, not the turn context,
 	// so without explicit cancellation it would keep running past ESC.
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	workerCtx, cancel := context.WithCancel(context.Background())
 	a.beginCompactionState(
@@ -788,7 +788,7 @@ func TestCancelCompactionForTurnCancellationDiscardsModelDrivenWorker(t *testing
 	// Cancelling a different turn's checkpoint (e.g. a usage-driven compaction
 	// from an earlier turn) must be a no-op.
 	a2 := newTestMainAgent(t, t.TempDir())
-	a2.newTurn()
+	a2.newTurn("")
 	otherCtx, otherCancel := context.WithCancel(context.Background())
 	a2.beginCompactionState(
 		6,
@@ -815,7 +815,7 @@ func TestCancelCompactionForTurnCancellationSettlesParkedDraftWithLiveTrigger(t 
 	// reset — then clean its orphan history files and reset the state.
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	history := filepath.Join(projectRoot, "history-7.md")
 	if err := os.WriteFile(history, []byte("parked archive body"), 0o644); err != nil {
@@ -876,7 +876,7 @@ func TestModelDrivenDraftCommittedArchiveSurvives(t *testing.T) {
 	// them.
 	dir := t.TempDir()
 	a := newTestMainAgent(t, dir)
-	a.newTurn()
+	a.newTurn("")
 
 	snapshot := []message.Message{
 		{Role: message.RoleUser, Content: "original user request"},
@@ -918,7 +918,7 @@ func TestModelDrivenDraftPreExportCancellationLeavesNoFiles(t *testing.T) {
 	// so no history/meta files are ever created.
 	dir := t.TempDir()
 	a := newTestMainAgent(t, dir)
-	a.newTurn()
+	a.newTurn("")
 
 	snapshot := []message.Message{
 		{Role: message.RoleUser, Content: "original user request"},
@@ -996,7 +996,7 @@ func TestModelDrivenIntervalVerdictStaleAnchorCountsAsSatisfied(t *testing.T) {
 func TestModelDrivenPreflightReusesLastPreparedSurface(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	snapshot := []message.Message{
 		{Role: message.RoleUser, Content: "original user request"},
 		{Role: message.RoleAssistant, Content: strings.Repeat("analysis ", 4000)},
@@ -1025,7 +1025,7 @@ func TestModelDrivenPreflightReusesLastPreparedSurface(t *testing.T) {
 func TestModelDrivenPreflightFallsBackToScratchWhenHeadChanged(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	snapshot := []message.Message{
 		{Role: message.RoleUser, Content: "original user request"},
 		{Role: message.RoleAssistant, Content: strings.Repeat("analysis ", 4000)},
@@ -1197,7 +1197,7 @@ func TestModelDrivenLowGainCheckComparesRawSavings(t *testing.T) {
 func TestModelDrivenApplyRecordsLastApplyBatch(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
 	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "two"})
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "three"})
@@ -1243,7 +1243,7 @@ func TestModelDrivenApplyRecordsLastApplyBatch(t *testing.T) {
 func TestUsageDrivenApplyClearsSkipCooldownAndGrace(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
 	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "two"})
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "three"})
@@ -1282,7 +1282,7 @@ func TestUsageDrivenApplyClearsSkipCooldownAndGrace(t *testing.T) {
 func TestModelDrivenSettleRecordsSkipCooldownState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.settleModelDrivenSkip(&compactionDraft{Skip: true, InfoMessage: "Context checkpoint skipped: the minimum 3-request-batch interval since the last applied context checkpoint has not elapsed", ModelDrivenSkipReason: "interval", ModelDrivenSkipBatch: 7})
 	if a.lastModelDrivenSkipReason != "interval" || a.lastModelDrivenSkipBatch != 7 {
 		t.Fatalf("interval skip must record the cooldown state, got reason=%q batch=%d", a.lastModelDrivenSkipReason, a.lastModelDrivenSkipBatch)
@@ -1328,7 +1328,7 @@ func TestEstimatePostResetFixedRequestTokensAtLeastCurrentFixed(t *testing.T) {
 func TestMaybeStartModelDrivenBarrierReleasesStaleForegroundActivity(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	for _, msg := range []message.Message{
 		{Role: message.RoleUser, Content: "first request"},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)}},
@@ -1379,7 +1379,7 @@ func TestMaybeStartModelDrivenBarrierReleasesStaleForegroundActivity(t *testing.
 func TestModelDrivenCooldownExpiresDespitePerBatchRetries(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	// A genuine low-gain skip settled at batch 10.
 	a.settleModelDrivenSkip(modelDrivenSkipDraft(1, compactionTarget{}, "projected savings too small", modelDrivenSkipReasonLowGain, 10, nil))
 	if a.lastModelDrivenSkipBatch != 10 {
@@ -1420,7 +1420,7 @@ func TestModelDrivenCooldownExpiresDespitePerBatchRetries(t *testing.T) {
 func TestModelDrivenDuplicateSkipKeepsLowGainCooldownAnchor(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.settleModelDrivenSkip(modelDrivenSkipDraft(1, compactionTarget{}, "projected savings too small", modelDrivenSkipReasonLowGain, 10, nil))
 
 	// A duplicate request settles at a later batch: the low-gain anchor and its
@@ -1550,7 +1550,7 @@ func TestModelDrivenCheckpointRenderReusesBuilderAndAddsExportedArchive(t *testi
 // the payload/notes split, diff counters, audit, LSP reviews and provenance.
 func TestAppendDeferredModelDrivenToolResultCarriesFullMessageShape(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr.Append(message.Message{
 		Role:       message.RoleAssistant,
 		ToolCalls:  []message.ToolCall{testToolCall("cc-1", tools.NameCompactContext)},
@@ -1610,7 +1610,7 @@ func TestAppendDeferredModelDrivenToolResultCarriesFullMessageShape(t *testing.T
 func TestModelDrivenResumeMergesQueuedUserMessageIntoContinuation(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
 	a.startCompactionState(11, target, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: turnID, turnEpoch: a.turn.Epoch, agentErrSourceID: "main"})
@@ -1673,7 +1673,7 @@ func TestModelDrivenResumeMergesQueuedUserMessageIntoContinuation(t *testing.T) 
 func TestModelDrivenResumeWithEmptyQueueAppendsContinueInstruction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
 	a.startCompactionState(11, target, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: turnID, turnEpoch: a.turn.Epoch, agentErrSourceID: "main"})
@@ -1714,7 +1714,7 @@ func TestModelDrivenResumeWithEmptyQueueAppendsContinueInstruction(t *testing.T)
 func TestModelDrivenTerminalCandidateContinuesAfterApply(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
 	a.startCompactionState(11, target, compactionTriggerModelDriven, continuationPlan{
@@ -1748,7 +1748,7 @@ func TestModelDrivenTerminalCandidateContinuesAfterApply(t *testing.T) {
 func TestModelDrivenTerminalCandidateContinuesForFreshUserInput(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
 	a.startCompactionState(11, target, compactionTriggerModelDriven, continuationPlan{
@@ -1814,7 +1814,7 @@ func TestModelDrivenCheckpointDuplicateUsesArgsAndRuntimeFingerprint(t *testing.
 // stops recording it or records a different input.
 func TestModelDrivenApplyRecordsFingerprintForDuplicateSkip(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "verify parser"})
@@ -1881,7 +1881,7 @@ func TestModelDrivenApplyRecordsFingerprintForDuplicateSkip(t *testing.T) {
 func TestModelDrivenResumeBackgroundCompletionDoesNotSuppressContinueInstruction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
 	a.startCompactionState(11, target, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: turnID, turnEpoch: a.turn.Epoch, agentErrSourceID: "main"})
@@ -1924,7 +1924,7 @@ func TestModelDrivenResumeBackgroundCompletionDoesNotSuppressContinueInstruction
 func TestModelDrivenResumeKeepsIdleOnlySlashQueuedForIdleDrain(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
 	a.startCompactionState(11, target, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: turnID, turnEpoch: a.turn.Epoch, agentErrSourceID: "main"})
@@ -1966,7 +1966,7 @@ func TestModelDrivenResumeKeepsIdleOnlySlashQueuedForIdleDrain(t *testing.T) {
 func TestModelDrivenResumeAfterFailedApplyMergesQueuedUserInput(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "original request"})
 	target := compactionTarget{turnID: turnID, turnEpoch: a.turn.Epoch, sessionEpoch: a.sessionEpoch}
@@ -2012,7 +2012,7 @@ func TestModelDrivenResumeAfterFailedApplyMergesQueuedUserInput(t *testing.T) {
 func TestModelDrivenResumeAfterDiscardPreservesQueuedUserInput(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	a.ctxMgr.Append(message.Message{
 		Role:                  message.RoleUser,
@@ -2079,7 +2079,7 @@ func TestApplyModelDrivenDraftRejectsChangedRuntimeGeneration(t *testing.T) {
 func TestApplyModelDrivenDraftKeepsQueuedUserInputCurrent(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement the parser contract"})
@@ -2328,7 +2328,7 @@ func TestUnknownEvidenceRefHintWithoutEvidence(t *testing.T) {
 // hinted one, and a rejected request must not arm a pending checkpoint.
 func TestTryArmModelDrivenCheckpointHintsResolvableEvidence(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "arm-hint-diff", Excerpt: "diff"})
 	id := evidenceItemID(a.evidence.snapshot()[0])
 	ccID := "cc-observed"
@@ -2352,7 +2352,7 @@ func TestTryArmModelDrivenCheckpointHintsResolvableEvidence(t *testing.T) {
 // checkpoint.
 func TestTryArmModelDrivenCheckpointUnknownEvidenceRefHintsResolvable(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "unknown-arm", Excerpt: "diff"})
 	id := evidenceItemID(a.evidence.snapshot()[0])
 	ccID := "cc-unknown"
@@ -2705,7 +2705,7 @@ func TestValidateModelDrivenEvidenceRefsResolvesCheckpointPackID(t *testing.T) {
 func TestE2EModelDrivenEvidenceIDSurvivesApplyIntoNextGeneration(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
 	// Round 1: real context whose tool diff becomes runtime evidence, then an

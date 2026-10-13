@@ -301,7 +301,7 @@ func TestQueueContextPressureReminderDeliveredOnceAcrossRequests(t *testing.T) {
 func TestCompactContextCallArmsAndStopsStickyReminder(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr.SetThreshold(0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the 0.60 reminder line, below threshold
 	a.modelDrivenCompactionEnabled.Store(true)
@@ -646,7 +646,7 @@ func TestArmUsageDrivenAutoCompactRequestGeneration(t *testing.T) {
 func TestCompactionStatusEventCarriesPlanID(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.beginCompactionState(42, compactionTarget{turnID: 1, turnEpoch: 1, sessionEpoch: a.sessionEpoch}, compactionTriggerModelDriven, continuationPlan{kind: compactionResumeModelDriven, turnID: 1}, 2, nil)
 	evt := a.compactionStatusEvent(CompactionStatusSucceeded, "")
 	if evt.PlanID != "42" {
@@ -850,7 +850,7 @@ func TestMaybeClearStaleContextNoticesWaitsForIdle(t *testing.T) {
 	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 
-	a.newTurn()
+	a.newTurn("")
 	a.maybeClearStaleContextNotices()
 	if !a.contextNoticesStale.Load() {
 		t.Fatal("cleanup must keep the stale marker while a turn is active")

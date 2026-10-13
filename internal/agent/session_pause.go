@@ -14,17 +14,6 @@ import (
 )
 
 const (
-	SessionPausePreflight             = "preflight"
-	SessionPausePreparing             = "preparing"
-	SessionPausePrepareFailed         = "prepare_failed"
-	SessionPauseDraining              = "draining"
-	SessionPauseSaving                = "saving"
-	SessionPauseSaved                 = "saved"
-	SessionPauseReleased              = "released"
-	SessionPauseSaveFailed            = "save_failed"
-	SessionPauseReady                 = "ready_paused"
-	SessionPauseActionRetrySave       = "retry-save"
-	SessionPauseActionManualRecovery  = "manual-recovery"
 	eventSessionPause                 = "session_pause"
 	eventSessionPausePrepared         = "session_pause_prepared"
 	eventSessionPauseCheckpoint       = "session_pause_checkpoint"
@@ -41,41 +30,12 @@ const (
 
 type SessionPauseRequest struct{ Identity recovery.TransferIdentity }
 
-type SessionPauseBlocker struct {
-	OwnerTaskID string    `json:"owner_task_id"`
-	Kind        string    `json:"kind"`
-	StartedAt   time.Time `json:"started_at,omitempty"`
-	Description string    `json:"description"`
-}
-
-type SessionPauseStatus struct {
-	recovery.TransferIdentity
-	State             string                `json:"state"`
-	StartedAt         time.Time             `json:"started_at,omitempty"`
-	WaitExpired       bool                  `json:"wait_expired,omitempty"`
-	Blockers          []SessionPauseBlocker `json:"blockers,omitempty"`
-	BlockerCount      int                   `json:"blocker_count"`
-	PendingInputCount int                   `json:"pending_input_count"`
-	CheckpointID      string                `json:"checkpoint_id,omitempty"`
-	ErrorCode         string                `json:"error_code,omitempty"`
-	Error             string                `json:"error,omitempty"`
-	RecoverableAction string                `json:"recoverable_action,omitempty"`
-}
-
-type SessionPauseError struct {
-	Code  string
-	Cause error
-}
-
-func (e *SessionPauseError) Error() string { return e.Code + ": " + e.Cause.Error() }
-func (e *SessionPauseError) Unwrap() error { return e.Cause }
-
 func pauseError(code, detail string) error {
-	return &SessionPauseError{Code: code, Cause: errors.New(detail)}
+	return &recovery.SessionPauseError{Code: code, Cause: errors.New(detail)}
 }
 
 type SessionTransferEvent struct {
-	Status SessionPauseStatus `json:"status"`
+	Status recovery.SessionPauseStatus `json:"status"`
 }
 
 func (SessionTransferEvent) agentEvent() {}
@@ -84,9 +44,8 @@ type sessionPauseRuntime struct {
 	inputMu         sync.Mutex
 	inputClosed     bool
 	inputPrefix     string
-	drafts          map[string]pendingUserMessage
 	mu              sync.Mutex
-	status          SessionPauseStatus
+	status          recovery.SessionPauseStatus
 	preparer        func(context.Context, SessionPauseRequest) error
 	checkpoint      *recovery.SessionPauseCheckpoint // guarded by recoverySnapshotMu
 	finalSnapshot   *recovery.SessionSnapshot        // owned by loop; reused for save-only retries
@@ -122,21 +81,21 @@ func (a *MainAgent) SetSessionPausePreparer(fn func(context.Context, SessionPaus
 
 // BeginSessionPause admits a transfer independently of the caller's observation
 // lifetime. Its accepted work remains owned by the source session.
-func (a *MainAgent) BeginSessionPause(ctx context.Context, req SessionPauseRequest) (SessionPauseStatus, error) {
+func (a *MainAgent) BeginSessionPause(ctx context.Context, req SessionPauseRequest) (recovery.SessionPauseStatus, error) {
 	if req.Identity.TransferID == "" || req.Identity.SessionID != filepath.Base(a.SessionDir()) {
-		return SessionPauseStatus{}, pauseError("invalid_request", "transfer and current session identity are required")
+		return recovery.SessionPauseStatus{}, pauseError("invalid_request", "transfer and current session identity are required")
 	}
 	cmd := &sessionPauseCommand{req: req, result: make(chan error, 1)}
 	if !a.sendEventUntil(Event{Type: eventSessionPause, Payload: cmd}, ctx.Done()) {
 		if err := ctx.Err(); err != nil {
-			return SessionPauseStatus{}, err
+			return recovery.SessionPauseStatus{}, err
 		}
-		return SessionPauseStatus{}, ErrAgentShutdown
+		return recovery.SessionPauseStatus{}, ErrAgentShutdown
 	}
 	select {
 	case err := <-cmd.result:
 		if !cmd.admitted {
-			return SessionPauseStatus{TransferIdentity: req.Identity, State: SessionPausePreflight}, err
+			return recovery.SessionPauseStatus{TransferIdentity: req.Identity, State: recovery.SessionPausePreflight}, err
 		}
 		status, _ := a.SessionPauseStatus(req.Identity.TransferID)
 		return status, err
@@ -146,22 +105,22 @@ func (a *MainAgent) BeginSessionPause(ctx context.Context, req SessionPauseReque
 	}
 }
 
-func (a *MainAgent) SessionPauseStatus(transferID string) (SessionPauseStatus, error) {
+func (a *MainAgent) SessionPauseStatus(transferID string) (recovery.SessionPauseStatus, error) {
 	a.pause.mu.Lock()
 	status := a.pause.status
-	status.Blockers = append([]SessionPauseBlocker(nil), status.Blockers...)
+	status.Blockers = append([]recovery.SessionPauseBlocker(nil), status.Blockers...)
 	a.pause.mu.Unlock()
 	if status.TransferID == "" || status.TransferID != transferID {
-		return SessionPauseStatus{}, pauseError("status_unknown", "transfer identity is unknown")
+		return recovery.SessionPauseStatus{}, pauseError("status_unknown", "transfer identity is unknown")
 	}
 	return status, nil
 }
 
-func (a *MainAgent) setSessionPauseStatus(update func(*SessionPauseStatus)) {
+func (a *MainAgent) setSessionPauseStatus(update func(*recovery.SessionPauseStatus)) {
 	a.pause.mu.Lock()
 	update(&a.pause.status)
 	status := a.pause.status
-	status.Blockers = append([]SessionPauseBlocker(nil), status.Blockers...)
+	status.Blockers = append([]recovery.SessionPauseBlocker(nil), status.Blockers...)
 	a.pause.mu.Unlock()
 	a.emitReliableToTUI(SessionTransferEvent{Status: status}, "session transfer status delivery")
 }
@@ -183,10 +142,10 @@ func (a *MainAgent) dispatchSessionPause(evt Event) bool {
 			a.pause.inputMu.Lock()
 			a.pause.inputClosed = false
 			a.pause.inputMu.Unlock()
-			a.setSessionPauseStatus(func(s *SessionPauseStatus) {
+			a.setSessionPauseStatus(func(s *recovery.SessionPauseStatus) {
 				s.ErrorCode = "target_not_ready"
 				s.Error = result.err.Error()
-				s.State = SessionPausePrepareFailed
+				s.State = recovery.SessionPausePrepareFailed
 			})
 			result.command.result <- pauseError("target_not_ready", result.err.Error())
 			return true
@@ -203,8 +162,8 @@ func (a *MainAgent) dispatchSessionPause(evt Event) bool {
 			a.recoverySnapshotMu.Lock()
 			a.pause.checkpoint = result.checkpoint
 			a.recoverySnapshotMu.Unlock()
-			a.setSessionPauseStatus(func(s *SessionPauseStatus) {
-				s.PendingInputCount = len(result.checkpoint.PendingInputs)
+			a.setSessionPauseStatus(func(s *recovery.SessionPauseStatus) {
+				s.PendingInputCount = len(result.checkpoint.PendingInputs) + a.managedDeliveryInputCount()
 				s.CheckpointID = result.checkpoint.CheckpointID
 			})
 		}
@@ -232,8 +191,8 @@ func (a *MainAgent) dispatchSessionPause(evt Event) bool {
 			return true
 		}
 		a.pause.sealed.Store(true)
-		a.setSessionPauseStatus(func(s *SessionPauseStatus) {
-			s.State = SessionPauseSaved
+		a.setSessionPauseStatus(func(s *recovery.SessionPauseStatus) {
+			s.State = recovery.SessionPauseSaved
 			s.Blockers = nil
 			s.BlockerCount = 0
 			s.Error = ""
@@ -262,7 +221,7 @@ func (a *MainAgent) dispatchSessionPause(evt Event) bool {
 			return true
 		}
 		status, err := a.SessionPauseStatus(cmd.req.Identity.TransferID)
-		if err != nil || status.State != SessionPauseSaveFailed {
+		if err != nil || status.State != recovery.SessionPauseSaveFailed {
 			cmd.result <- pauseError("invalid_request", "transfer has no failed save")
 			return true
 		}
@@ -292,7 +251,7 @@ func (a *MainAgent) dispatchSessionPause(evt Event) bool {
 		return true
 	}
 	a.pause.mu.Lock()
-	preparing := a.pause.status.State == SessionPausePreparing
+	preparing := a.pause.status.State == recovery.SessionPausePreparing
 	a.pause.mu.Unlock()
 	if preparing || a.sessionExecutionPaused() && !a.pause.restored {
 		switch evt.Type {
@@ -321,7 +280,7 @@ func (a *MainAgent) prepareSessionPause(cmd *sessionPauseCommand) {
 		return
 	}
 	a.pause.mu.Lock()
-	busy := a.pause.status.TransferID != "" && a.pause.status.State != SessionPausePrepareFailed && a.pause.status.State != "running" && a.pause.status.State != SessionPauseReady
+	busy := a.pause.status.TransferID != "" && a.pause.status.State != recovery.SessionPausePrepareFailed && a.pause.status.State != "running" && a.pause.status.State != recovery.SessionPauseReady
 	a.pause.mu.Unlock()
 	if busy {
 		cmd.result <- pauseError("transfer_busy", "source already has a transfer")
@@ -336,8 +295,8 @@ func (a *MainAgent) prepareSessionPause(cmd *sessionPauseCommand) {
 		return
 	}
 	cmd.admitted = true
-	a.setSessionPauseStatus(func(s *SessionPauseStatus) {
-		*s = SessionPauseStatus{TransferIdentity: cmd.req.Identity, State: SessionPausePreparing}
+	a.setSessionPauseStatus(func(s *recovery.SessionPauseStatus) {
+		*s = recovery.SessionPauseStatus{TransferIdentity: cmd.req.Identity, State: recovery.SessionPausePreparing}
 	})
 	a.pause.mu.Lock()
 	preparer := a.pause.preparer
@@ -361,29 +320,42 @@ func (a *MainAgent) freezeSessionPause(cmd *sessionPauseCommand) {
 	state := a.sessionExecutionGate().Freeze()
 	a.suspendPendingUserDrain()
 	blockers := a.sessionPauseBlockers()
-	a.setSessionPauseStatus(func(s *SessionPauseStatus) {
-		s.State = SessionPauseDraining
+	a.setSessionPauseStatus(func(s *recovery.SessionPauseStatus) {
+		s.State = recovery.SessionPauseDraining
 		s.StartedAt = state.FrozenAt
 		s.Blockers = blockers
 		s.BlockerCount = len(s.Blockers)
 	})
-	checkpoint := a.captureMainPauseInputs(cmd.req.Identity, state.FrozenAt)
 	a.pause.capturing = true
-	snapshot := a.buildRecoverySnapshot()
-	go a.saveInitialSessionPause(cmd, checkpoint, snapshot)
+	a.delivery.cancelGeneration.Add(1)
+	if a.delivery.committed != nil || a.delivery.inflight != nil || len(a.delivery.pending) > 0 {
+		op := &deliveryOperation{}
+		op.mutate = func(queue *recovery.InputDeliveryState) error {
+			if queue.Gate.Mode == recovery.FollowupGateRunning {
+				queue.Gate.Mode, queue.Gate.Reason = recovery.FollowupGatePaused, recovery.FollowupSessionPaused
+			}
+			return nil
+		}
+		op.finish = func() { a.captureInitialDeliveryPause(cmd, state.FrozenAt) }
+		op.failed = func(err error) { a.pause.capturing = false; a.failSessionPauseSave(err); cmd.result <- err }
+		a.delivery.pending = append(a.delivery.pending, op)
+		a.startNextDeliveryOperation()
+		return
+	}
+	a.captureInitialDeliveryPause(cmd, state.FrozenAt)
 }
 
 func (a *MainAgent) failSessionPauseSave(err error) {
-	a.setSessionPauseStatus(func(s *SessionPauseStatus) {
-		s.State = SessionPauseSaveFailed
+	a.setSessionPauseStatus(func(s *recovery.SessionPauseStatus) {
+		s.State = recovery.SessionPauseSaveFailed
 		s.ErrorCode = "persistence_failed"
 		s.Error = err.Error()
-		s.RecoverableAction = SessionPauseActionRetrySave
+		s.RecoverableAction = recovery.SessionPauseActionRetrySave
 		if _, closed := errors.AsType[*SessionPauseWriterClosedError](err); closed {
-			s.RecoverableAction = SessionPauseActionManualRecovery
+			s.RecoverableAction = recovery.SessionPauseActionManualRecovery
 		}
 		if write, unknown := errors.AsType[*recovery.PersistWriteError](err); unknown && !write.RetrySafe {
-			s.RecoverableAction = SessionPauseActionManualRecovery
+			s.RecoverableAction = recovery.SessionPauseActionManualRecovery
 		}
 	})
 }
@@ -393,7 +365,7 @@ func (a *MainAgent) advanceSessionPause() {
 		return
 	}
 	status, _ := a.SessionPauseStatus(a.pauseTransferID())
-	if status.State != SessionPauseDraining {
+	if status.State != recovery.SessionPauseDraining {
 		return
 	}
 	blockers := a.sessionPauseBlockers()
@@ -425,33 +397,36 @@ func (a *MainAgent) pauseTransferID() string {
 	return a.pause.status.TransferID
 }
 
-func (a *MainAgent) sessionPauseBlockers() []SessionPauseBlocker {
-	var out []SessionPauseBlocker
+func (a *MainAgent) sessionPauseBlockers() []recovery.SessionPauseBlocker {
+	var out []recovery.SessionPauseBlocker
+	if a.delivery.inflight != nil || len(a.delivery.pending) > 0 {
+		out = append(out, recovery.SessionPauseBlocker{Kind: "input_queue", Description: "waiting for input queue persistence"})
+	}
 	for _, activity := range a.sessionExecutionGate().Snapshot().Activities {
-		out = append(out, SessionPauseBlocker{OwnerTaskID: activity.Owner, Kind: string(activity.Kind), StartedAt: activity.StartedAt, Description: "execution is still running"})
+		out = append(out, recovery.SessionPauseBlocker{OwnerTaskID: activity.Owner, Kind: string(activity.Kind), StartedAt: activity.StartedAt, Description: "execution is still running"})
 	}
 	if a.mainLLMRequestInFlight.Load() {
-		out = append(out, SessionPauseBlocker{Kind: "llm_result", Description: "waiting for model result processing"})
+		out = append(out, recovery.SessionPauseBlocker{Kind: "llm_result", Description: "waiting for model result processing"})
 	}
 	if turn := a.currentTurn(); turn != nil && turn.PendingToolCalls.Load() > 0 {
-		out = append(out, SessionPauseBlocker{Kind: "tool_result", Description: "waiting for tool results and hooks"})
+		out = append(out, recovery.SessionPauseBlocker{Kind: "tool_result", Description: "waiting for tool results and hooks"})
 	}
 	if a.compactionState.running {
-		out = append(out, SessionPauseBlocker{Kind: "compaction", Description: "waiting for context checkpoint processing"})
+		out = append(out, recovery.SessionPauseBlocker{Kind: "compaction", Description: "waiting for context checkpoint processing"})
 	}
 	for _, job := range tools.SnapshotJobs() {
 		if job.SessionDir != "" && job.SessionDir != a.SessionDir() {
 			continue
 		}
 		if job.Active() || job.PendingWake() {
-			out = append(out, SessionPauseBlocker{OwnerTaskID: job.AgentID, Kind: "job", StartedAt: job.StartedAt, Description: job.ID})
+			out = append(out, recovery.SessionPauseBlocker{OwnerTaskID: job.AgentID, Kind: "job", StartedAt: job.StartedAt, Description: job.ID})
 		}
 	}
 	a.memoryMu.Lock()
 	memoryBusy := a.memoryInflight != nil
 	a.memoryMu.Unlock()
 	if memoryBusy {
-		out = append(out, SessionPauseBlocker{Kind: "memory", Description: "waiting for memory result persistence"})
+		out = append(out, recovery.SessionPauseBlocker{Kind: "memory", Description: "waiting for memory result persistence"})
 	}
 	sortSessionPauseBlockers(out)
 	return out
@@ -462,7 +437,7 @@ func (a *MainAgent) RetrySessionPauseSave(ctx context.Context, transferID string
 	if err != nil {
 		return err
 	}
-	if status.State != SessionPauseSaveFailed {
+	if status.State != recovery.SessionPauseSaveFailed {
 		return pauseError("invalid_request", "transfer has no failed save")
 	}
 	cmd := &sessionPauseCommand{req: SessionPauseRequest{Identity: status.TransferIdentity}, result: make(chan error, 1)}
@@ -487,10 +462,10 @@ func (a *MainAgent) ReleasePausedSession(transferID string) error {
 	if err != nil {
 		return err
 	}
-	if status.State == SessionPauseReleased {
+	if status.State == recovery.SessionPauseReleased {
 		return nil
 	}
-	if !a.pause.sealed.Load() || status.State != SessionPauseSaved {
+	if !a.pause.sealed.Load() || status.State != recovery.SessionPauseSaved {
 		return pauseError("invalid_request", "session is not sealed")
 	}
 	if a.started.Load() {
@@ -500,7 +475,7 @@ func (a *MainAgent) ReleasePausedSession(transferID string) error {
 		return fmt.Errorf("release paused session lock: %w", err)
 	}
 	a.pause.mu.Lock()
-	a.pause.status.State = SessionPauseReleased
+	a.pause.status.State = recovery.SessionPauseReleased
 	a.pause.mu.Unlock()
 	return nil
 }
@@ -521,4 +496,10 @@ func (a *MainAgent) hasPauseBlockingInteraction() bool {
 	handoff := len(a.interaction.handoffStart) > 0
 	a.interaction.handoffMapMu.Unlock()
 	return confirm || handoff
+}
+
+func (a *MainAgent) captureInitialDeliveryPause(cmd *sessionPauseCommand, frozenAt time.Time) {
+	checkpoint := a.captureMainPauseInputs(cmd.req.Identity, frozenAt)
+	snapshot := a.buildRecoverySnapshot()
+	go a.saveInitialSessionPause(cmd, checkpoint, snapshot)
 }

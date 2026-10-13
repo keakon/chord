@@ -52,8 +52,8 @@ func TestSessionPauseSnapshotDirectoryFailureCanRetryThroughMainLoop(t *testing.
 				t.Fatal(err)
 			}
 			defer lease.Finish()
-			a.newTurn()
-			if !a.QueuePendingUserDraft("draft-1", []message.ContentPart{{Type: message.ContentPartText, Text: "Queued constraint"}}) {
+			a.newTurn("")
+			if !submitMainDraftForTest(a, "draft-1", []message.ContentPart{{Type: message.ContentPartText, Text: "Queued constraint"}}) {
 				t.Fatal("draft rejected")
 			}
 			path := filepath.Join(a.SessionDir(), "snapshot.json")
@@ -65,7 +65,7 @@ func TestSessionPauseSnapshotDirectoryFailureCanRetryThroughMainLoop(t *testing.
 			startMainAgentLoopForTest(t, a)
 			status, err := a.BeginSessionPause(context.Background(), SessionPauseRequest{Identity: testPauseIdentity(a)})
 			if initial {
-				if err == nil || status.State != SessionPauseSaveFailed {
+				if err == nil || status.State != recovery.SessionPauseSaveFailed {
 					t.Fatalf("status=%+v err=%v", status, err)
 				}
 			} else {
@@ -80,7 +80,7 @@ func TestSessionPauseSnapshotDirectoryFailureCanRetryThroughMainLoop(t *testing.
 				}
 				lease.Finish()
 				a.sendEvent(Event{Type: eventSessionPauseWake})
-				status = waitPauseState(t, a, SessionPauseSaveFailed)
+				status = waitPauseState(t, a, recovery.SessionPauseSaveFailed)
 			}
 			assertFailedPauseKeepsOwnership(t, a)
 			if status.RecoverableAction != "retry-save" {
@@ -107,7 +107,7 @@ func TestSessionPauseSnapshotDirectoryFailureCanRetryThroughMainLoop(t *testing.
 					accepted++
 					continue
 				}
-				pauseErr, ok := errors.AsType[*SessionPauseError](err)
+				pauseErr, ok := errors.AsType[*recovery.SessionPauseError](err)
 				if !ok || (pauseErr.Code != "transfer_busy" && pauseErr.Code != "invalid_request") {
 					t.Fatalf("unexpected retry result: %v", err)
 				}
@@ -117,7 +117,7 @@ func TestSessionPauseSnapshotDirectoryFailureCanRetryThroughMainLoop(t *testing.
 			}
 			lease.Finish()
 			a.sendEvent(Event{Type: eventSessionPauseWake})
-			waitPauseState(t, a, SessionPauseSaved)
+			waitPauseState(t, a, recovery.SessionPauseSaved)
 			if err := a.ReleasePausedSession("transfer-1"); err != nil {
 				t.Fatal(err)
 			}
@@ -127,8 +127,12 @@ func TestSessionPauseSnapshotDirectoryFailureCanRetryThroughMainLoop(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if snapshot.Pause == nil || !snapshot.Pause.CheckpointComplete || len(snapshot.Pause.PendingInputs) != 1 || snapshot.Pause.PendingInputs[0].Content != "Queued constraint" {
+			if snapshot.Pause == nil || !snapshot.Pause.CheckpointComplete || len(snapshot.Pause.PendingInputs) != 0 || snapshot.Pause.InputDeliveryRevision == 0 {
 				t.Fatalf("recovered checkpoint=%+v", snapshot.Pause)
+			}
+			queue, err := manager.LoadInputDelivery()
+			if err != nil || queue == nil || len(queue.Inputs) != 1 || queue.Inputs[0].Content != "Queued constraint" {
+				t.Fatalf("queue=%+v error=%v", queue, err)
 			}
 			if requests, _ := provider.snapshot(); len(requests) != 0 {
 				t.Fatal("save retry dispatched model work")
@@ -163,7 +167,7 @@ func TestSessionPauseStickyCloseFailureStaysFrozenThroughMainLoop(t *testing.T) 
 	if _, err := a.BeginSessionPause(context.Background(), SessionPauseRequest{Identity: testPauseIdentity(a)}); err != nil {
 		t.Fatal(err)
 	}
-	status := waitPauseState(t, a, SessionPauseSaveFailed)
+	status := waitPauseState(t, a, recovery.SessionPauseSaveFailed)
 	if status.RecoverableAction != "manual-recovery" {
 		t.Fatalf("action=%q error=%q", status.RecoverableAction, status.Error)
 	}
@@ -173,7 +177,7 @@ func TestSessionPauseStickyCloseFailureStaysFrozenThroughMainLoop(t *testing.T) 
 		t.Fatalf("sticky close error lost: %v", err)
 	}
 	status, _ = a.SessionPauseStatus("transfer-1")
-	if status.State != SessionPauseSaveFailed || status.RecoverableAction != "manual-recovery" {
+	if status.State != recovery.SessionPauseSaveFailed || status.RecoverableAction != "manual-recovery" {
 		t.Fatalf("unsafe retry status=%+v", status)
 	}
 	assertFailedPauseKeepsOwnership(t, a)
@@ -192,16 +196,16 @@ func TestSessionPauseRetryRejectsConcurrentAdmissionAndStaleCompletion(t *testin
 	id := testPauseIdentity(a)
 	active := &sessionPauseCommand{req: SessionPauseRequest{Identity: id}, result: make(chan error, 1)}
 	a.pause.retry = active
-	a.pause.status = SessionPauseStatus{TransferIdentity: id, State: SessionPauseSaveFailed}
+	a.pause.status = recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPauseSaveFailed}
 	other := &sessionPauseCommand{req: active.req, result: make(chan error, 1)}
 	a.dispatchSessionPause(Event{Type: eventSessionPauseRetry, Payload: other})
 	if err := <-other.result; err == nil {
 		t.Fatal("concurrent retry was admitted")
-	} else if pauseErr, ok := errors.AsType[*SessionPauseError](err); !ok || pauseErr.Code != "transfer_busy" {
+	} else if pauseErr, ok := errors.AsType[*recovery.SessionPauseError](err); !ok || pauseErr.Code != "transfer_busy" {
 		t.Fatalf("concurrent retry error=%v", err)
 	}
 	a.dispatchSessionPause(Event{Type: eventSessionPauseRetried, Payload: sessionPauseResult{command: other, err: errors.New("sample stale failure")}})
-	if a.pause.retry != active || a.pause.status.Error != "" || a.pause.status.State != SessionPauseSaveFailed {
+	if a.pause.retry != active || a.pause.status.Error != "" || a.pause.status.State != recovery.SessionPauseSaveFailed {
 		t.Fatal("stale completion changed active retry")
 	}
 	select {

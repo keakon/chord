@@ -22,7 +22,7 @@ func TestPausedMainResponsePreservesCompletedOutput(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
-			a.newTurn()
+			a.newTurn("")
 			turn := a.turn
 			a.sessionExecutionGate().Freeze()
 			tc.payload.Usage = &message.TokenUsage{InputTokens: 123, OutputTokens: 45}
@@ -65,7 +65,7 @@ func TestPausedMainResponsePreservesCompletedOutput(t *testing.T) {
 
 func TestPausedMainResponseSettlesStartedSpeculativeTool(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	started, release := make(chan struct{}), make(chan struct{})
 	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, turn.Ctx, nil, func(ctx context.Context, call message.ToolCall) (ToolExecutionResult, error) {

@@ -16,7 +16,7 @@ import (
 
 func TestSessionPauseMainAndSubPendingInputsRestoreWithoutExecution(t *testing.T) {
 	a, mainProvider := scenarioAgent(t, scriptedStreamCall{resp: &message.Response{ToolCalls: []message.ToolCall{{ID: "main-call", Name: "sample_tool", Args: json.RawMessage(`{}`)}}, StopReason: "tool_use"}})
-	tool := &pauseBarrierTool{dummyTool: dummyTool{name: "sample_tool"}, entered: make(chan struct{}), release: make(chan struct{})}
+	tool := &pauseBarrierTool{name: "sample_tool", entered: make(chan struct{}), release: make(chan struct{})}
 	a.tools.Register(tool)
 	a.ruleset = permission.Ruleset{{Permission: "sample_tool", Pattern: "*", Action: permission.ActionAllow}}
 	lock, err := recovery.AcquireSessionLock(a.SessionDir())
@@ -60,7 +60,7 @@ func TestSessionPauseMainAndSubPendingInputsRestoreWithoutExecution(t *testing.T
 	case <-time.After(5 * time.Second):
 		t.Fatal("main tool did not start")
 	}
-	if !a.QueuePendingUserDraft("main-draft", []message.ContentPart{{Type: message.ContentPartText, Text: "main queued input"}}) {
+	if !submitMainDraftForTest(a, "main-draft", []message.ContentPart{{Type: message.ContentPartText, Text: "main queued input"}}) {
 		t.Fatal("main queue rejected")
 	}
 	if !sub.InjectUserMessage("sub queued input") {
@@ -107,7 +107,7 @@ func TestSessionPauseMainAndSubPendingInputsRestoreWithoutExecution(t *testing.T
 	}
 	close(tool.release)
 	close(subProvider.releaseCh)
-	waitPauseState(t, a, SessionPauseSaved)
+	waitPauseState(t, a, recovery.SessionPauseSaved)
 	if err := a.ReleasePausedSession("transfer-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestSessionPauseMainAndSubPendingInputsRestoreWithoutExecution(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Pause == nil || !snapshot.Pause.CheckpointComplete || len(snapshot.Pause.PendingInputs) != 3 {
+	if snapshot.Pause == nil || !snapshot.Pause.CheckpointComplete || len(snapshot.Pause.PendingInputs) != 2 || snapshot.Pause.InputDeliveryRevision == 0 {
 		t.Fatalf("final checkpoint=%#v", snapshot.Pause)
 	}
 	subMessages, err := manager.LoadMessages(sub.instanceID)

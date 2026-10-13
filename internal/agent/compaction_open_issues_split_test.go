@@ -397,7 +397,7 @@ func TestCarriedOpenIssueSurvivesUsageSummaryAppendixWithoutUpgrade(t *testing.T
 // chain must not resurrect it.
 func TestOpenIssueDemotionSurvivesDurableApplyChain(t *testing.T) {
 	agent := newTestMainAgent(t, t.TempDir())
-	agent.newTurn()
+	agent.newTurn("")
 	agent.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement and verify the parser"})
 	request := func(openIssues, retired []string) *modelDrivenCheckpointRequest {
 		return &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{

@@ -54,6 +54,7 @@ const (
 	ModeInputHistoryClearConfirm
 	ModeMemoryPanel // project memory management overlay
 	ModeStatus      // full-screen runtime overview (/status)
+	ModeInputQueue
 )
 
 // ---------------------------------------------------------------------------

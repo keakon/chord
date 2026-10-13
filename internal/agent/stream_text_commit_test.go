@@ -80,7 +80,7 @@ func TestMainAgentEmitsStreamTextCommitBeforeSegmentEnd(t *testing.T) {
 	a.MarkSkillsReady()
 	a.markMCPReady()
 
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hello"}}}, "")
 	<-provider.started
@@ -152,7 +152,7 @@ func TestMainAgentCommitsEmptyContent(t *testing.T) {
 	a.MarkSkillsReady()
 	a.markMCPReady()
 
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hello"}}}, "")
 	<-provider.started

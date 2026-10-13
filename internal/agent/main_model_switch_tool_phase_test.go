@@ -64,7 +64,7 @@ func newToolPhaseSwitchTestAgent(t *testing.T) *MainAgent {
 // must run before the edit-only model's surface takes effect.
 func TestModelPoolSwitchWaitsForResponseToolPhase(t *testing.T) {
 	a := newToolPhaseSwitchTestAgent(t)
-	a.newTurn()
+	a.newTurn("")
 
 	a.mainLLMRequestInFlight.Store(true)
 	a.SetCurrentModelPool("fast")
@@ -121,7 +121,7 @@ func TestModelPoolSwitchWaitsForResponseToolPhase(t *testing.T) {
 // the tool phase ends and the next request is prepared.
 func TestModelPoolSwitchDuringToolPhaseStaysDeferred(t *testing.T) {
 	a := newToolPhaseSwitchTestAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.PendingToolCalls.Store(1)
 
 	a.SetCurrentModelPool("fast")
@@ -154,7 +154,7 @@ func TestModelPoolSwitchDuringToolPhaseStaysDeferred(t *testing.T) {
 // not land while that client's response tool calls are still executing.
 func TestMainRoleAgentModelPoolSwitchDuringToolPhaseStaysDeferred(t *testing.T) {
 	a := newToolPhaseSwitchTestAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.PendingToolCalls.Store(1)
 
 	if err := a.SetAgentModelPool("test", "fast"); err != nil {

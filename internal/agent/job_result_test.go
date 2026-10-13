@@ -78,7 +78,7 @@ func TestHandleBackgroundObjectFinishedForMainIdleStartsTurnAndDelivers(t *testi
 func TestHandleBackgroundObjectFinishedForMainQueuesDurablyWhileBusy(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -147,7 +147,7 @@ func TestHandleBackgroundObjectFinishedForMainQueuesDurablyWhileBusy(t *testing.
 
 func TestHandleBackgroundObjectFinishedForMainKeepsDistinctDurableRows(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
 	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
@@ -172,14 +172,15 @@ func TestHandleBackgroundObjectFinishedForMainKeepsDistinctDurableRows(t *testin
 
 func TestHandleBackgroundObjectFinishedForMainDoesNotCoalesceAcrossUserInput(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
 	a.handleUserMessage(Event{Payload: "queued user follow-up"})
 	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
 
-	if got := len(a.pendingUserMessages); got != 1 || a.pendingUserMessages[0].Content != "queued user follow-up" {
-		t.Fatalf("pendingUserMessages = %#v, want only the queued user follow-up", a.pendingUserMessages)
+	finishDeliveryWrites(t, a)
+	if got := a.delivery.committed.Inputs; len(got) != 1 || got[0].Content != "queued user follow-up" {
+		t.Fatalf("durable inputs = %#v, want only the queued user follow-up", got)
 	}
 	rows := mainInboxBackgroundResults(a)
 	if len(rows) != 2 {
@@ -192,7 +193,7 @@ func TestHandleBackgroundObjectFinishedForMainDoesNotCoalesceAcrossUserInput(t *
 
 func TestHandleBackgroundObjectFinishedForMainDeliversAfterToolBatch(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	assistant := message.Message{
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{
@@ -287,7 +288,7 @@ func TestHandleBackgroundObjectFinishedRoutesToOwnerSubAgentOnly(t *testing.T) {
 
 func TestHandleBackgroundObjectFinishedOrphanOwnerFallsBackToMain(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 
 	payload := backgroundResultPayload("builder-gone", "job-9", "Run production build")
 	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: payload.AgentID, Payload: payload})

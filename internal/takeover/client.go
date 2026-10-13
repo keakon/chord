@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/recovery"
 )
 
@@ -16,16 +15,16 @@ type Client struct {
 	StateDir string
 }
 
-func (c Client) Start(ctx context.Context, identity recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
+func (c Client) Start(ctx context.Context, identity recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
 	if err := validateTransfer(identity, c.Record); err != nil {
-		return agent.SessionPauseStatus{}, err
+		return recovery.SessionPauseStatus{}, err
 	}
 	return c.call(ctx, ActionStart, identity, 0)
 }
-func (c Client) Status(ctx context.Context, transferID string) (agent.SessionPauseStatus, error) {
+func (c Client) Status(ctx context.Context, transferID string) (recovery.SessionPauseStatus, error) {
 	return c.call(ctx, ActionStatus, recovery.TransferIdentity{TransferID: transferID}, 0)
 }
-func (c Client) RetrySave(ctx context.Context, transferID string) (agent.SessionPauseStatus, error) {
+func (c Client) RetrySave(ctx context.Context, transferID string) (recovery.SessionPauseStatus, error) {
 	return c.call(ctx, ActionRetrySave, recovery.TransferIdentity{TransferID: transferID}, 0)
 }
 func (c Client) StatusPage(ctx context.Context, transferID string, offset int) (Status, error) {
@@ -35,10 +34,10 @@ func (c Client) StatusPage(ctx context.Context, transferID string, offset int) (
 	}
 	return *reply.Status, err
 }
-func (c Client) call(ctx context.Context, action string, id recovery.TransferIdentity, offset int) (agent.SessionPauseStatus, error) {
+func (c Client) call(ctx context.Context, action string, id recovery.TransferIdentity, offset int) (recovery.SessionPauseStatus, error) {
 	reply, err := c.exchange(ctx, action, id, offset)
 	if reply.Status == nil {
-		return agent.SessionPauseStatus{}, err
+		return recovery.SessionPauseStatus{}, err
 	}
 	return reply.Status.AgentStatus(), err
 }

@@ -95,7 +95,7 @@ func e2eCheckpointAt(t *testing.T, a *MainAgent) message.Message {
 func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
 	appendConversation := func(userText, assistantText, toolText string) {
@@ -222,7 +222,7 @@ func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 func TestE2EModelDrivenLatestRequestOverridesCheckpointedClaim(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "compare API A against API B"})
@@ -279,7 +279,7 @@ func TestE2EModelDrivenLatestRequestOverridesCheckpointedClaim(t *testing.T) {
 func TestE2EModelDrivenApplyWithQueuedUserInputMergesIntoContinuation(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement the parser contract"})
@@ -364,7 +364,7 @@ func TestE2EModelDrivenApplyWithQueuedUserInputMergesIntoContinuation(t *testing
 func TestE2EModelDrivenStageSwitchAcrossUnrelatedTasks(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "finish task one"})

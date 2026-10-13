@@ -134,7 +134,7 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 		}
 	}()
 
-	a.newTurn()
+	a.newTurn("")
 	a.turn.recordPendingToolCall(PendingToolCall{CallID: "tool-1", Name: "shell", ArgsJSON: `{"command":"sleep 10"}`})
 
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
@@ -177,7 +177,7 @@ func TestHandleAgentErrorDiscardsCompletedSpeculativeToolWithoutAssistantDeclara
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.newTurn()
+	a.newTurn("")
 	call := PendingToolCall{CallID: "spec-read-orphan", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`}
 	a.turn.recordStreamingToolCall(call)
 	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, context.Background(), nil, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
@@ -233,7 +233,7 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.newTurn()
+	a.newTurn("")
 	assistant := message.Message{
 		Role: "assistant",
 		ToolCalls: []message.ToolCall{{
@@ -290,7 +290,7 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 // told to continue with.
 func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.turn.appendPartialText("the second conflict is caused by the next commit touching the same file")
 
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
@@ -330,7 +330,7 @@ func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
 func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationMessage(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.llmClient = newChatCompletionsTestClient()
-	a.newTurn()
+	a.newTurn("")
 	a.turn.appendPartialText("the second conflict is caused by the next commit touching the same file")
 
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
@@ -361,7 +361,7 @@ func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationMessage(t *testing.T
 // back-to-back; the round count itself is not the stop condition.
 func TestHandleAgentErrorAutoContinueIsUnbounded(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 
 	for round := 1; round <= 4; round++ {
 		a.turn.appendPartialText(fmt.Sprintf("round %d partial reply", round))
@@ -380,7 +380,7 @@ func TestHandleAgentErrorAutoContinueIsUnbounded(t *testing.T) {
 
 func TestHandleAgentErrorRollsBackVisiblePartialAssistantText(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleAgentError(Event{Type: EventAgentError, TurnID: a.turn.ID, Payload: context.DeadlineExceeded})
 

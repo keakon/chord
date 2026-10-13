@@ -122,7 +122,7 @@ func TestMainLLMRunningModelMovesOnlyAfterVisibleOutput(t *testing.T) {
 
 func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -190,7 +190,7 @@ func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 func TestCallLLMDoesNotTranslateStreamingThinkingBlocks(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "hi"})
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -242,7 +242,7 @@ func TestCallLLMDoesNotTranslateStreamingThinkingBlocks(t *testing.T) {
 
 func TestMaybeTranslateLatestThinkingAllowsMultipleAssistantMessagesInSameTurn(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -308,7 +308,7 @@ func TestHandleLLMResponsePersistsOpenAIChatReasoningWithChatCompletionsProvenan
 	}, []string{"test-key"})
 	client := llm.NewClient(providerCfg, stubProvider{}, "deepseek-v4-pro", 4096, "sys")
 	a.swapLLMClientWithRef(client, "deepseek-v4-pro", 128000, "deepseek/deepseek-v4-pro")
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}

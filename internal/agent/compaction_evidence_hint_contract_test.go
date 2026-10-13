@@ -44,7 +44,7 @@ func TestCheckpointHintMatchesObservedValidation(t *testing.T) {
 
 func TestCheckpointWorkerUsesCapturedRequestIdentity(t *testing.T) {
 	agent := newTestMainAgent(t, t.TempDir())
-	agent.newTurn()
+	agent.newTurn("")
 	request := &modelDrivenCheckpointRequest{ToolCallID: "captured-request"}
 	agent.modelDrivenProposal.requestID = "different-live-request"
 	bundle := agent.captureModelDrivenBarrierSnapshot(nil)

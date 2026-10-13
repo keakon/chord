@@ -71,7 +71,7 @@ func TestImageFailureTerminalCarriesMainAndSubDiagnostics(t *testing.T) {
 				sub.handleToolResult(&toolResult{CallID: "image-call", Name: tools.NameGenerateImage, TurnID: sub.turn.ID, Error: failure})
 			} else {
 				parent = newReadyTestMainAgent(t)
-				parent.newTurn()
+				parent.newTurn("")
 				parent.turn.PendingToolCalls.Store(2)
 				parent.handleToolResult(Event{Type: EventToolResult, TurnID: parent.turn.ID, Payload: &ToolResultPayload{CallID: "image-call", Name: tools.NameGenerateImage, TurnID: parent.turn.ID, Error: failure}})
 			}

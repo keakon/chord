@@ -1756,7 +1756,7 @@ func (a *MainAgent) drainSubAgentInbox() {
 	if !a.stageNextSubAgentMailboxBatch() {
 		return
 	}
-	a.newTurn()
+	a.newTurn("")
 	// A dispatching request: any parked user queue rides it too, in FIFO order.
 	a.flushParkedPendingUserMessages()
 	turnID := a.turn.ID

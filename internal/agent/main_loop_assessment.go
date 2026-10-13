@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/keakon/chord/internal/recovery"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
@@ -17,6 +19,9 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 	payload, ok := evt.Payload.(*LoopAssessment)
 	if !ok || payload == nil {
 		log.Warnf("handleLoopAssessment: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
+		return
+	}
+	if payload.Target.RuntimeID != "" && (payload.Target != a.InputDeliveryTarget() || payload.WorkID != a.delivery.currentWorkID || a.turn != nil && payload.TurnEpoch != a.turn.Epoch) {
 		return
 	}
 	if !a.loopState.Enabled {
@@ -35,13 +40,14 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 			a.emitLoopContinuationNote(a.buildLoopContinuationNote(payload))
 		}
 		a.emitActivity("main", ActivityExecuting, "loop")
-		a.handleContinueFromContext()
+		a.handleContinueFromContext(a.delivery.currentWorkID)
 	case LoopAssessmentActionCompleted:
 		a.loopState.State = LoopStateCompleted
 		a.emitLoopStateChanged()
 		a.emitToTUI(InfoEvent{Message: strings.TrimSpace(payload.Message)})
 		a.loopState.disable()
 		a.emitLoopStateChanged()
+		a.settleDeliveryWork(a.delivery.currentWorkID, recovery.DeliveryWorkCompleted)
 		a.setIdleAndDrainPending()
 	case LoopAssessmentActionBlocked:
 		a.loopState.State = LoopStateBlocked
@@ -49,6 +55,7 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 		a.emitToTUI(InfoEvent{Message: strings.TrimSpace(payload.Message)})
 		a.loopState.disable()
 		a.emitLoopStateChanged()
+		a.settleDeliveryWork(a.delivery.currentWorkID, recovery.DeliveryWorkFailed)
 		a.setIdleAndDrainPending()
 	case LoopAssessmentActionBudgetExhausted:
 		a.loopState.State = LoopStateBudgetExhausted
@@ -56,12 +63,14 @@ func (a *MainAgent) handleLoopAssessment(evt Event) {
 		a.emitToTUI(InfoEvent{Message: strings.TrimSpace(payload.Message)})
 		a.loopState.disable()
 		a.emitLoopStateChanged()
+		a.settleDeliveryWork(a.delivery.currentWorkID, recovery.DeliveryWorkFailed)
 		a.setIdleAndDrainPending()
 	default:
 		a.loopState.State = LoopStateIdle
 		a.emitLoopStateChanged()
 		a.loopState.disable()
 		a.emitLoopStateChanged()
+		a.settleDeliveryWork(a.delivery.currentWorkID, recovery.DeliveryWorkFailed)
 		a.setIdleAndDrainPending()
 	}
 }

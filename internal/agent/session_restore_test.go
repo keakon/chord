@@ -992,7 +992,7 @@ func TestRestoreSessionAtStartupSkipsConsumedMailboxMessages(t *testing.T) {
 		t.Fatalf("len(urgent) = %d, want 1", len(a.subAgentInbox.urgent))
 	}
 	a.mailboxDeliveryPaused.Store(false)
-	a.handleContinueFromContext()
+	a.handleContinueFromContext("")
 	if a.activeSubAgentMailbox == nil {
 		t.Fatal("expected activeSubAgentMailbox after drain")
 	}

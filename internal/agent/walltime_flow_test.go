@@ -51,7 +51,7 @@ func TestWalltimeMainLLMCallSettlesModelTime(t *testing.T) {
 func TestWalltimeMainToolResultSettlesToolTime(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	callID := "read-1"
 	a.ctxMgr.Append(message.Message{
@@ -151,7 +151,7 @@ func TestWalltimeConfirmRejectionClassifiesAsUserWaitOnly(t *testing.T) {
 	})
 	parent.ruleset = permission.Ruleset{{Permission: "RequiredValue", Pattern: "*", Action: permission.ActionAsk}}
 	a := parent
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	callID := "ask-deny-1"
 	a.ctxMgr.Append(message.Message{
@@ -222,7 +222,7 @@ func TestWalltimeConfirmRejectionClassifiesAsUserWaitOnly(t *testing.T) {
 
 func TestNewTurnPreservesCompletedSpeculativeResultWithoutWalltimeDeadlock(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	oldTurn := a.turn
 	call := message.ToolCall{ID: "spec-read-replacement", Name: tools.NameRead, Args: []byte(`{"path":"README.md"}`)}
 	a.ctxMgr.Append(message.Message{Role: "assistant", ToolCalls: []message.ToolCall{call}})
@@ -251,7 +251,7 @@ func TestNewTurnPreservesCompletedSpeculativeResultWithoutWalltimeDeadlock(t *te
 
 	done := make(chan struct{})
 	go func() {
-		a.newTurn()
+		a.newTurn("")
 		close(done)
 	}()
 	select {

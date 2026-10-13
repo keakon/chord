@@ -20,6 +20,19 @@ Text preview loads at most 1 MiB and 20,000 source lines; rendered output retain
 
 macOS lists system associations; Windows uses the native Open with chooser; Linux prefers GIO and supports default opening only when just `xdg-open` is available. Selecting an application does not change default associations. SSH, headless desktops, and remote sessions cannot open server files on the local desktop; the original path can still be copied. Programs, scripts, and system shortcuts cannot be launched through these actions.
 
+## Choose when an input takes effect
+
+For MainAgent, **Enter** sends an input to the next model request. While tools are running, they finish their current work first; a new input does not immediately interrupt them. **Alt+Enter** queues a separate task to run after the current task ends normally. For example, send “Include the test results in the final report” with Enter, or “Check the documentation after this task” with Alt+Enter.
+
+After-completion tasks run one at a time in the same session and share its conversation history. A normal final response, or an accepted Done in loop mode, releases the next task. This is a runtime completion signal, not a guarantee that the business objective was achieved. Failure, cancellation, or an uncertain outcome pauses later tasks. Sending and completing an ordinary task does not resume that queue.
+
+Open **`/queue`** to inspect pending inputs. Select a row with the arrow keys; Enter edits, `d` deletes, `w` withdraws to the composer, `n` switches to next-request delivery, and `a` switches to after-completion delivery. `p` pauses, `r` resumes, `c` clears unstarted after-completion items, and `x` releases an editing hold. These controls are also available as `/queue pause`, `/queue resume`, `/queue clear`, `/queue cancel-edit`, `/queue next N`, `/queue after N`, and `/queue withdraw N`.
+
+Editing holds the original input in the queue until you save or cancel the edit. Saving uses its current revision; a conflict preserves your draft. Inputs that have already started cannot be edited or deleted. Editing does not automatically resume after-completion tasks: use `/queue resume` after finishing your edits. Resume requires the current work to be idle, ordinary queued inputs to be handled, editing holds to be released, and the original working directory to be active.
+
+Queued inputs and attachments are saved with the session. Restoring a session leaves the queue paused; Continue or a new ordinary message permits ordinary queued inputs, while after-completion tasks require `/queue resume`. A “result unknown” receipt requires checking the queue and history before resending. The queue holds up to 128 inputs and 4 MiB of text.
+
+After-completion delivery is available only for MainAgent. It accepts text, attachments, and expanded custom text commands. Local slash commands, `/skill`, and `!` shell commands cannot be queued this way; the composer keeps the draft. Empty Alt+Enter does nothing. Shift+Enter and Ctrl+J still insert a newline.
 
 ## How to use this page
 

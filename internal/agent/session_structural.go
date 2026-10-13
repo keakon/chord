@@ -5,6 +5,7 @@ import (
 
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 // beginSessionStructural admits one operation before its first side effect.
@@ -21,7 +22,7 @@ func (a *MainAgent) beginSessionStructural(ctx context.Context, allowExistingToo
 	a.pause.mu.Lock()
 	defer a.pause.mu.Unlock()
 	switch a.pause.status.State {
-	case SessionPausePreparing, SessionPauseDraining, SessionPauseSaving, SessionPauseSaved, SessionPauseReleased, SessionPauseSaveFailed, SessionPauseReady:
+	case recovery.SessionPausePreparing, recovery.SessionPauseDraining, recovery.SessionPauseSaving, recovery.SessionPauseSaved, recovery.SessionPauseReleased, recovery.SessionPauseSaveFailed, recovery.SessionPauseReady:
 		return nil, &executiongate.ErrSessionPaused{}
 	}
 	lease, err := gate.TryBegin(executiongate.Structural, identity.MainAgentID)

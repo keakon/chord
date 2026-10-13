@@ -97,7 +97,7 @@ func malformedToolCallResponse(stopReason string) *LLMResponsePayload {
 // request instead of waiting for the next idle drain.
 func TestMalformedToolArgsRetryCarriesQueuedUserMessage(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	const queued = "queued follow-up while the model retried"
 	a.pendingUserMessages = []pendingUserMessage{{Content: queued, FromUser: true}}
 
@@ -119,7 +119,7 @@ func TestMalformedToolArgsRetryCarriesQueuedUserMessage(t *testing.T) {
 // queued user input before the recovery request is assembled.
 func TestTruncatedLengthRecoveryCarriesQueuedUserMessage(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	const queued = "queued follow-up while the model truncated"
 	a.pendingUserMessages = []pendingUserMessage{{Content: queued, FromUser: true}}
 
@@ -237,7 +237,7 @@ func TestContinueFromContextStagesMailboxOnlyQueue(t *testing.T) {
 		Summary:   "still working",
 	})
 
-	a.handleContinueFromContext()
+	a.handleContinueFromContext("")
 
 	select {
 	case <-provider.started:

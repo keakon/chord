@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/recovery"
+
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
@@ -125,7 +127,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 	}
 	m.clearPendingQuit()
 	// Business bindings retain priority over textarea editing bindings.
-	composerAction := keyMatches(key, m.keyMap.InsertEscape) || keyMatches(key, m.keyMap.InsertSubmit) ||
+	composerAction := keyMatches(key, m.keyMap.InsertEscape) || keyMatches(key, m.keyMap.InsertSubmit) || keyMatches(key, m.keyMap.InsertSubmitAfterCompletion) ||
 		keyMatches(key, m.keyMap.InsertAttachClipboard) || keyMatches(key, m.keyMap.InsertAttachFile) ||
 		keyMatches(key, m.keyMap.InsertClearInput) || keyMatches(key, m.keyMap.SwitchRole) ||
 		keyMatches(key, m.keyMap.SwitchAgent) || keyMatches(key, m.keyMap.SwitchModel) ||
@@ -257,16 +259,20 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		m.recalcViewportSize()
 		return cmd
 
-	case keyMatches(key, m.keyMap.InsertSubmit):
+	case keyMatches(key, m.keyMap.InsertSubmit), keyMatches(key, m.keyMap.InsertSubmitAfterCompletion):
 		if m.takeoverInputFrozen() {
 			return m.enqueueToast("Session transfer is in progress; input remains paused", "info")
 		}
 		if m.clipboardAttachmentPending && m.clipboardAttachmentAgentID == m.focusedAgentID {
 			return m.enqueueToast("Reading clipboard attachment; wait for it to finish before sending", "info")
 		}
+		policy := recovery.InputDeliveryNextRequest
+		if keyMatches(key, m.keyMap.InsertSubmitAfterCompletion) {
+			policy = recovery.InputDeliveryAfterCompletion
+		}
 		currentValue := m.input.Value()
 		matches := m.getSlashCompletions(currentValue)
-		if len(matches) > 0 {
+		if len(matches) > 0 && policy == recovery.InputDeliveryNextRequest {
 			trimmedInput := strings.TrimSpace(currentValue)
 			// Clamp the same way the dropdown does. Typing narrows the list
 			// without resetting the index, and an out-of-range index is the
@@ -287,8 +293,18 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 			value = raw
 		}
 		if value == "" && len(m.attachments) == 0 {
+			if policy == recovery.InputDeliveryAfterCompletion {
+				return nil
+			}
 			return m.tryContinue()
 		}
+		if policy == recovery.InputDeliveryAfterCompletion && (m.focusedAgentID != "" || agent.IsUnsupportedAfterCompletionInput(value)) {
+			return m.enqueueToast("This input cannot run after completion; the draft was preserved", "warn")
+		}
+		if strings.TrimSpace(value) == "/queue" || strings.HasPrefix(strings.TrimSpace(value), "/queue ") {
+			return m.handleInputQueueCommand(value)
+		}
+
 		if value == historyCommand || strings.HasPrefix(value, historyCommand+" ") {
 			return m.routeInputHistoryCommand(value, submitted)
 		}
@@ -479,6 +495,10 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		draft.ID = m.draftIDForSubmit()
 		historyCmd = m.recordSubmittedInput(submitted)
 		m.input.Reset()
+		if m.agent != nil && m.focusedAgentID == "" {
+			draft.DeliveryPolicy = policy
+			return m.submitManagedDraft(draft)
+		}
 		if m.shouldQueueDraft() {
 			synced := m.syncQueuedDraft(draft)
 			draft.Mirrored = synced

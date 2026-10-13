@@ -144,7 +144,7 @@ func runTakeoverProcessHelper(t *testing.T, mode string) {
 			}
 			parts = append(parts, message.ContentPart{Type: message.ContentPartImage, MimeType: "image/png", ImagePath: path})
 		}
-		if !ac.MainAgent.QueuePendingUserDraft("sample-draft", parts) {
+		if !ac.MainAgent.SubmitUserInput(agent.SubmitInput{OperationID: "sample-submit", DraftID: "sample-draft", Target: ac.MainAgent.InputDeliveryTarget(), DeliveryPolicy: recovery.InputDeliveryNextRequest, Parts: parts}) {
 			t.Error("pending input rejected")
 			return
 		}
@@ -202,7 +202,7 @@ func runTakeoverProcessHelper(t *testing.T, mode string) {
 		if e, ok := event.(agent.ErrorEvent); ok {
 			t.Fatal(e.Err)
 		}
-		if e, ok := event.(agent.SessionTransferEvent); ok && e.Status.State == agent.SessionPauseSaved {
+		if e, ok := event.(agent.SessionTransferEvent); ok && e.Status.State == recovery.SessionPauseSaved {
 			if err := ac.MainAgent.ReleasePausedSession(e.Status.TransferID); err != nil {
 				t.Fatal(err)
 			}
@@ -378,14 +378,14 @@ func TestTakeoverProcessRoundTrip(t *testing.T) {
 				targetKind = takeover.OwnerTUI
 			}
 			result := make(chan struct {
-				status agent.SessionPauseStatus
+				status recovery.SessionPauseStatus
 				err    error
 			}, 1)
 			go func() {
 				timeout := time.Duration(0)
 				status, err := startTakeover(ctx, loc, "sample-session", "transfer-sample", targetKind, "binding-sample", &timeout)
 				result <- struct {
-					status agent.SessionPauseStatus
+					status recovery.SessionPauseStatus
 					err    error
 				}{status, err}
 			}()
@@ -401,7 +401,7 @@ func TestTakeoverProcessRoundTrip(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			var status agent.SessionPauseStatus
+			var status recovery.SessionPauseStatus
 			select {
 			case got := <-result:
 				if got.err != nil {
@@ -411,7 +411,7 @@ func TestTakeoverProcessRoundTrip(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal("start coordinator timed out")
 			}
-			if status.State != agent.SessionPauseDraining {
+			if status.State != recovery.SessionPauseDraining {
 				t.Fatalf("accepted state=%s", status.State)
 			}
 			if lock, err := recovery.AcquireSessionLock(loc.sessionDir); err == nil {
@@ -433,7 +433,7 @@ func TestTakeoverProcessRoundTrip(t *testing.T) {
 				t.Fatalf("source exit=%v stderr=%s", err, source.stderr.String())
 			}
 			status, err = queryTakeover(ctx, loc, "sample-session", "transfer-sample")
-			if err != nil || status.State != agent.SessionPauseReleased {
+			if err != nil || status.State != recovery.SessionPauseReleased {
 				t.Fatalf("durable status=%#v err=%v", status, err)
 			}
 			manager := recovery.NewRecoveryManager(loc.sessionDir)
@@ -441,7 +441,7 @@ func TestTakeoverProcessRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if snapshot.Pause == nil || !snapshot.Pause.Paused || !snapshot.Pause.CheckpointComplete || len(snapshot.Pause.PendingInputs) != 1 {
+			if snapshot.Pause == nil || !snapshot.Pause.Paused || !snapshot.Pause.CheckpointComplete || len(snapshot.Pause.PendingInputs) != 0 || snapshot.Pause.InputDeliveryRevision == 0 {
 				t.Fatalf("pending checkpoint=%#v", snapshot.Pause)
 			}
 			transcript, err := manager.LoadMessages(identity.MainAgentID)

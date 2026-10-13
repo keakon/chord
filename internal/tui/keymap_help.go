@@ -104,6 +104,7 @@ func (km KeyMap) HelpGroups() []HelpGroup {
 	insertBindings := []HelpBinding{
 		helpBinding(km.InsertEscape, "exit insert mode"),
 		helpBinding(km.InsertSubmit, "send or continue"),
+		helpBinding(km.InsertSubmitAfterCompletion, "run after completion"),
 		helpBinding(km.InsertNewline, "insert newline"),
 		helpBinding(km.InsertHistoryUp, "previous history"),
 		helpBinding(km.InsertHistoryDown, "next history"),

@@ -241,7 +241,7 @@ func TestMainLLMFallbackDownshiftKeepsCommittedFallbackRef(t *testing.T) {
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(128000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
-	a.newTurn()
+	a.newTurn("")
 	a.started.Store(true)
 	t.Cleanup(func() {
 		if a.IsCompactionRunning() {
@@ -360,7 +360,7 @@ func TestMainInterruptedPartialKeepsConfirmedProducerProvenance(t *testing.T) {
 		InputLimit:     64000,
 	}})
 	a.swapLLMClientWithRef(client, "primary-model", 128000, "primary-prov/primary-model")
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 
 	done := make(chan error, 1)
@@ -477,7 +477,7 @@ func TestMainTurnCancelledReleasesCommittedFallbackRef(t *testing.T) {
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(128000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	a.started.Store(true)
 
@@ -578,7 +578,7 @@ func TestMainTurnCancelledReleasesOversizeSuspendedFallbackRef(t *testing.T) {
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(128000, 100000, 100000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	a.started.Store(true)
 

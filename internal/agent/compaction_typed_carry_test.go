@@ -833,7 +833,7 @@ func TestTypedCarryRecoveredFromUsageCheckpointAppendix(t *testing.T) {
 func TestTypedStateSurvivesTwoRealGenericAppliesIntoModelDriven(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
 	// Round 0: real context plus a model-driven checkpoint carrying typed

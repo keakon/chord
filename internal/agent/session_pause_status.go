@@ -3,12 +3,14 @@ package agent
 import (
 	"cmp"
 	"slices"
+
+	"github.com/keakon/chord/internal/recovery"
 )
 
 // Stable ordering keeps an unchanged set of active leases from publishing
 // another status just because the gate's map iteration order changed.
-func sortSessionPauseBlockers(blockers []SessionPauseBlocker) {
-	slices.SortFunc(blockers, func(a, b SessionPauseBlocker) int {
+func sortSessionPauseBlockers(blockers []recovery.SessionPauseBlocker) {
+	slices.SortFunc(blockers, func(a, b recovery.SessionPauseBlocker) int {
 		if order := cmp.Compare(a.Kind, b.Kind); order != 0 {
 			return order
 		}
@@ -24,14 +26,14 @@ func sortSessionPauseBlockers(blockers []SessionPauseBlocker) {
 
 // The owner loop publishes only changed blockers. Queries and the source UI
 // then observe the same status without adding an idle polling worker.
-func (a *MainAgent) publishSessionPauseBlockers(blockers []SessionPauseBlocker) {
+func (a *MainAgent) publishSessionPauseBlockers(blockers []recovery.SessionPauseBlocker) {
 	a.pause.mu.Lock()
 	unchanged := a.pause.status.BlockerCount == len(blockers) && slices.Equal(a.pause.status.Blockers, blockers)
 	a.pause.mu.Unlock()
 	if unchanged {
 		return
 	}
-	a.setSessionPauseStatus(func(status *SessionPauseStatus) {
+	a.setSessionPauseStatus(func(status *recovery.SessionPauseStatus) {
 		status.Blockers = blockers
 		status.BlockerCount = len(blockers)
 	})

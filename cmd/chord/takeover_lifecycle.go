@@ -27,13 +27,13 @@ func startRuntimeTakeover(ac *AppContext, kind string) (*runtimeTakeover, error)
 	if ac == nil || ac.MainAgent == nil || ac.PathLocator == nil || ac.ProjectLocator == nil {
 		return nil, fmt.Errorf("takeover runtime unavailable")
 	}
-	rt := &runtimeTakeover{main: ac.MainAgent, stateDir: ac.PathLocator.StateDir, record: takeover.Record{Protocol: takeover.ProtocolVersion, RuntimeID: newTakeoverIdentity(), SessionID: filepath.Base(ac.MainAgent.SessionDir()), SessionEpoch: ac.MainAgent.SessionEpoch(), Workspace: ac.ProjectLocator.CanonicalRoot, OwnerKind: kind}}
-	server, err := takeover.StartServer(takeover.ServerOptions{StateDir: rt.stateDir, Record: rt.record, Start: func(ctx context.Context, id recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
+	rt := &runtimeTakeover{main: ac.MainAgent, stateDir: ac.PathLocator.StateDir, record: takeover.Record{Protocol: takeover.ProtocolVersion, RuntimeID: ac.MainAgent.InputDeliveryTarget().RuntimeID, SessionID: filepath.Base(ac.MainAgent.SessionDir()), SessionEpoch: ac.MainAgent.SessionEpoch(), Workspace: ac.ProjectLocator.CanonicalRoot, OwnerKind: kind}}
+	server, err := takeover.StartServer(takeover.ServerOptions{StateDir: rt.stateDir, Record: rt.record, Start: func(ctx context.Context, id recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
 		rt.mu.Lock()
 		rec := rt.record
 		rt.mu.Unlock()
 		if id.SourceRuntimeID != rec.RuntimeID || id.SourceSessionEpoch != rec.SessionEpoch || id.SessionID != rec.SessionID || rec.SessionID != filepath.Base(rt.main.SessionDir()) || rec.SessionEpoch != rt.main.SessionEpoch() {
-			return agent.SessionPauseStatus{}, &takeover.Error{Code: takeover.CodeStaleSource, Message: "source session changed"}
+			return recovery.SessionPauseStatus{}, &takeover.Error{Code: takeover.CodeStaleSource, Message: "source session changed"}
 		}
 		return rt.main.BeginSessionPause(ctx, agent.SessionPauseRequest{Identity: id})
 	}, Status: rt.main.SessionPauseStatus, RetrySave: rt.main.RetrySessionPauseSave})
@@ -78,28 +78,28 @@ func (rt *runtimeTakeover) identity() takeover.Record {
 	return rt.record
 }
 
-func pausedStartupStatus(ac *AppContext) (agent.SessionPauseStatus, bool) {
+func pausedStartupStatus(ac *AppContext) (recovery.SessionPauseStatus, bool) {
 	if ac == nil || ac.MainAgent == nil {
-		return agent.SessionPauseStatus{}, false
+		return recovery.SessionPauseStatus{}, false
 	}
 	manager := recovery.NewRecoveryManager(ac.MainAgent.SessionDir())
 	snap, err := manager.Recover()
 	if err != nil || snap.Pause == nil {
-		return agent.SessionPauseStatus{}, false
+		return recovery.SessionPauseStatus{}, false
 	}
 	status, err := ac.MainAgent.SessionPauseStatus(snap.Pause.Identity.TransferID)
-	return status, err == nil && status.State == agent.SessionPauseReady
+	return status, err == nil && status.State == recovery.SessionPauseReady
 }
 
-func savedTakeoverStatus(ac *AppContext) (agent.SessionPauseStatus, bool) {
+func savedTakeoverStatus(ac *AppContext) (recovery.SessionPauseStatus, bool) {
 	if ac == nil || ac.MainAgent == nil {
-		return agent.SessionPauseStatus{}, false
+		return recovery.SessionPauseStatus{}, false
 	}
 	manager := recovery.NewRecoveryManager(ac.MainAgent.SessionDir())
 	snap, err := manager.Recover()
 	if err != nil || snap.Pause == nil {
-		return agent.SessionPauseStatus{}, false
+		return recovery.SessionPauseStatus{}, false
 	}
 	status, err := ac.MainAgent.SessionPauseStatus(snap.Pause.Identity.TransferID)
-	return status, err == nil && status.State == agent.SessionPauseSaved
+	return status, err == nil && status.State == recovery.SessionPauseSaved
 }

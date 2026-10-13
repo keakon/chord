@@ -376,7 +376,7 @@ func TestRestoreTrackedFileStateUsesPersistedHookOnlyEffectiveArgs(t *testing.T)
 	a.persistAsync("main", assistant)
 	a.flushPersist()
 
-	a.newTurn()
+	a.newTurn("")
 	a.turn.PendingToolCalls.Store(2)
 	a.turn.recordPendingToolCall(PendingToolCall{CallID: "read-hook-1", Name: tools.NameRead, ArgsJSON: string(oldArgs)})
 

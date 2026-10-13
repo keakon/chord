@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -30,7 +31,7 @@ func TestSessionPauseRejectsExistingQuestionWaitWithoutChangingIt(t *testing.T) 
 			a.prepareSessionPause(cmd)
 			if err := <-cmd.result; err == nil {
 				t.Fatal("takeover accepted while a synchronous question was waiting")
-			} else if pauseErr, ok := errors.AsType[*SessionPauseError](err); !ok || pauseErr.Code != "interaction_blocked" {
+			} else if pauseErr, ok := errors.AsType[*recovery.SessionPauseError](err); !ok || pauseErr.Code != "interaction_blocked" {
 				t.Fatalf("takeover error=%v", err)
 			}
 			if cmd.admitted || a.sessionExecutionPaused() || a.pause.inputClosed || len(a.questions.waits) != 1 {

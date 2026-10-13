@@ -1,0 +1,65 @@
+package recovery
+
+import (
+	"slices"
+
+	"github.com/keakon/chord/internal/message"
+)
+
+// ReconcileInputDelivery never grants permission to execute. In particular,
+// transcript presence proves append, not whether a request reached a provider.
+// The returned candidate must be saved before accepting further operations.
+func ReconcileInputDelivery(state *InputDeliveryState, transcript []message.Message) *InputDeliveryState {
+	out := state.Clone()
+	if out == nil {
+		return nil
+	}
+	present := make(map[string]bool)
+	for _, msg := range transcript {
+		if msg.InputID != "" {
+			present[msg.InputID] = true
+		}
+	}
+	if out.Gate.Mode == FollowupGateRunning {
+		out.Gate.Mode, out.Gate.Reason = FollowupGatePaused, FollowupRestored
+	}
+	for i := range out.Inputs {
+		input := &out.Inputs[i]
+		switch input.Stage {
+		case PendingInputStageClaimed:
+			if !present[input.InputID] {
+				input.Stage, input.WorkID = PendingInputStageQueued, ""
+				input.Revision++
+			}
+		case PendingInputStageStarted:
+			for j := range out.Works {
+				work := &out.Works[j]
+				if work.WorkID == input.WorkID && work.Outcome == DeliveryWorkActive {
+					work.Outcome = DeliveryWorkUnknown
+					if out.Gate.Reason == FollowupRestored {
+						out.Gate.Reason = FollowupOutcomeUnknown
+					}
+				}
+			}
+		}
+	}
+	referenced := make(map[string]bool)
+	for _, input := range out.Inputs {
+		if input.WorkID != "" {
+			referenced[input.WorkID] = true
+		}
+	}
+	if out.Gate.WaitingWorkID != "" {
+		for _, work := range out.Works {
+			if work.WorkID == out.Gate.WaitingWorkID && (work.Outcome != DeliveryWorkActive || referenced[work.WorkID]) {
+				referenced[work.WorkID] = true
+			}
+		}
+		if !referenced[out.Gate.WaitingWorkID] {
+			out.Gate.WaitingWorkID = ""
+		}
+	}
+	out.Works = slices.DeleteFunc(out.Works, func(work DeliveryWork) bool { return !referenced[work.WorkID] })
+	out.Revision++
+	return out
+}

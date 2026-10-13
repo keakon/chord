@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/privatefs"
 	"github.com/keakon/chord/internal/recovery"
 )
@@ -40,21 +39,21 @@ func testServer(t *testing.T) (*Server, Client, *atomic.Int32) {
 	}
 	record := Record{Protocol: ProtocolVersion, RuntimeID: rand.Text(), SessionID: "session-1", Workspace: workspace, OwnerKind: OwnerTUI}
 	var mu sync.Mutex
-	var status agent.SessionPauseStatus
+	var status recovery.SessionPauseStatus
 	starts := new(atomic.Int32)
 	s, err := StartServer(ServerOptions{StateDir: dir, Record: record,
-		Start: func(ctx context.Context, id recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
+		Start: func(ctx context.Context, id recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
 			starts.Add(1)
 			mu.Lock()
 			defer mu.Unlock()
-			status = agent.SessionPauseStatus{TransferIdentity: id, State: agent.SessionPauseDraining}
+			status = recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPauseDraining}
 			return status, nil
 		},
-		Status: func(id string) (agent.SessionPauseStatus, error) {
+		Status: func(id string) (recovery.SessionPauseStatus, error) {
 			mu.Lock()
 			defer mu.Unlock()
 			if status.TransferID != id {
-				return agent.SessionPauseStatus{}, protocolError(CodeStatusUnknown, "unknown transfer")
+				return recovery.SessionPauseStatus{}, protocolError(CodeStatusUnknown, "unknown transfer")
 			}
 			return status, nil
 		},
@@ -64,7 +63,7 @@ func testServer(t *testing.T) (*Server, Client, *atomic.Int32) {
 			if status.TransferID != id {
 				return protocolError(CodeStatusUnknown, "unknown transfer")
 			}
-			status.State = agent.SessionPauseSaved
+			status.State = recovery.SessionPauseSaved
 			return nil
 		},
 	})
@@ -95,13 +94,13 @@ func TestServerAuthenticatesSourceAndStatus(t *testing.T) {
 		t.Fatalf("record=%+v err=%v", record, err)
 	}
 	status, err := client.Start(t.Context(), testTransfer(record))
-	if err != nil || status.State != agent.SessionPauseDraining {
+	if err != nil || status.State != recovery.SessionPauseDraining {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 	if status, err = client.Status(t.Context(), "transfer-1"); err != nil || status.TransferID != "transfer-1" {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
-	if status, err = client.RetrySave(t.Context(), "transfer-1"); err != nil || status.State != agent.SessionPauseSaved {
+	if status, err = client.RetrySave(t.Context(), "transfer-1"); err != nil || status.State != recovery.SessionPauseSaved {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 	if starts.Load() != 1 {
@@ -206,13 +205,13 @@ func TestServerUpdateRecordKeepsListenerAndRejectsStaleBinding(t *testing.T) {
 func TestServerBoundsBlockersAndSupportsPages(t *testing.T) {
 	s, client, _ := testServer(t)
 	id := testTransfer(client.Record)
-	var blockers []agent.SessionPauseBlocker
+	var blockers []recovery.SessionPauseBlocker
 	for range 130 {
-		blockers = append(blockers, agent.SessionPauseBlocker{OwnerTaskID: "task", Kind: "tool", Description: strings.Repeat("x", 400)})
+		blockers = append(blockers, recovery.SessionPauseBlocker{OwnerTaskID: "task", Kind: "tool", Description: strings.Repeat("x", 400)})
 	}
 	s.mu.Lock()
-	s.options.Status = func(string) (agent.SessionPauseStatus, error) {
-		return agent.SessionPauseStatus{TransferIdentity: id, State: agent.SessionPauseDraining, Blockers: blockers, BlockerCount: 130}, nil
+	s.options.Status = func(string) (recovery.SessionPauseStatus, error) {
+		return recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPauseDraining, Blockers: blockers, BlockerCount: 130}, nil
 	}
 	s.mu.Unlock()
 	page, err := client.StatusPage(t.Context(), id.TransferID, 0)
@@ -290,10 +289,10 @@ func TestClientCancellationDoesNotCancelAcceptedTransfer(t *testing.T) {
 	continueWork := make(chan struct{})
 	done := make(chan struct{})
 	s.mu.Lock()
-	s.options.Start = func(ctx context.Context, id recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
+	s.options.Start = func(ctx context.Context, id recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
 		close(accepted)
 		go func() { <-continueWork; close(done) }()
-		return agent.SessionPauseStatus{TransferIdentity: id, State: agent.SessionPauseDraining}, nil
+		return recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPauseDraining}, nil
 	}
 	s.mu.Unlock()
 	ctx, cancel := context.WithCancel(t.Context())
@@ -330,10 +329,10 @@ func TestServerCloseWaitsForAlreadyAdmittedCallback(t *testing.T) {
 	release := make(chan struct{})
 	closed := make(chan error, 1)
 	s.mu.Lock()
-	s.options.Start = func(context.Context, recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
+	s.options.Start = func(context.Context, recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
 		close(entered)
 		<-release
-		return agent.SessionPauseStatus{}, nil
+		return recovery.SessionPauseStatus{}, nil
 	}
 	s.mu.Unlock()
 	called := make(chan struct{})
@@ -470,12 +469,12 @@ func TestDiscoveryRejectsSymlinkAndTrailingJSON(t *testing.T) {
 func TestSourceObservationDeadlineKeepsStatusUnknown(t *testing.T) {
 	s, client, _ := testServer(t)
 	s.mu.Lock()
-	s.options.Start = func(_ context.Context, id recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
-		return agent.SessionPauseStatus{TransferIdentity: id, State: agent.SessionPauseDraining}, context.DeadlineExceeded
+	s.options.Start = func(_ context.Context, id recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
+		return recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPauseDraining}, context.DeadlineExceeded
 	}
 	s.mu.Unlock()
 	status, err := client.Start(t.Context(), testTransfer(client.Record))
-	if errorCode(err) != CodeStatusUnknown || !status.WaitExpired || status.State != agent.SessionPauseDraining {
+	if errorCode(err) != CodeStatusUnknown || !status.WaitExpired || status.State != recovery.SessionPauseDraining {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 }
@@ -486,7 +485,7 @@ func TestInterruptedStartResponseIsUnknownAndQueryable(t *testing.T) {
 	release := make(chan struct{})
 	s.mu.Lock()
 	original := s.options.Start
-	s.options.Start = func(ctx context.Context, id recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
+	s.options.Start = func(ctx context.Context, id recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
 		status, err := original(ctx, id)
 		close(entered)
 		<-release
@@ -507,7 +506,7 @@ func TestInterruptedStartResponseIsUnknownAndQueryable(t *testing.T) {
 		t.Fatal("client cancellation did not finish")
 	}
 	close(release)
-	if status, err := client.Status(t.Context(), "transfer-1"); err != nil || status.State != agent.SessionPauseDraining {
+	if status, err := client.Status(t.Context(), "transfer-1"); err != nil || status.State != recovery.SessionPauseDraining {
 		t.Fatalf("accepted transfer disappeared status=%+v err=%v", status, err)
 	}
 }

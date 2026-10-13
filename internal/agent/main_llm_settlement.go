@@ -141,6 +141,13 @@ func (a *MainAgent) settleMainLLMResponse(payload *LLMResponsePayload, validCall
 			a.queueLoopEvent(Event{Type: EventLoopAssessment, Payload: assessment})
 			return
 		}
+		outcome := recovery.DeliveryWorkFailed
+		if isDeliveryFinalResponse(payload) && !isTruncated {
+			outcome = recovery.DeliveryWorkCompleted
+		} else if payload.NativeTools != nil && payload.NativeTools.OutcomeUnknown {
+			outcome = recovery.DeliveryWorkUnknown
+		}
+		a.settleDeliveryWork(a.turn.DeliveryWorkID, outcome)
 		a.closeCompletedQuestions()
 		a.emitActivity("main", ActivityIdle, "")
 		a.setIdleAndDrainPending()

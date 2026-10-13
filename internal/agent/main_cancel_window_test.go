@@ -59,8 +59,8 @@ func newCancelWindowTestAgent(t *testing.T, provider *keyRecordingProvider) *Mai
 // TestCancelCurrentTurnCoversMessageAcceptedBeforeItsTurn pins the window where
 // a message is accepted but the loop has not created its turn yet. The cancel
 // must keep the message in the transcript and close the turn as cancelled
-// without asking the model, and it must still emit the busy marker a started
-// turn produces plus the global idle that settles an ACP prompt.
+// without asking the model, then emit consumption and aggregate idle so an
+// ACP prompt settles without inventing a request cycle.
 func TestCancelCurrentTurnCoversMessageAcceptedBeforeItsTurn(t *testing.T) {
 	provider := &keyRecordingProvider{}
 	a := newCancelWindowTestAgent(t, provider)
@@ -76,7 +76,7 @@ func TestCancelCurrentTurnCoversMessageAcceptedBeforeItsTurn(t *testing.T) {
 		started := false
 		for _, evt := range collected {
 			switch evt.(type) {
-			case RequestCycleStartedEvent:
+			case PendingDraftConsumedEvent:
 				started = true
 			case GlobalIdleEvent:
 				if started {
@@ -152,14 +152,12 @@ func TestCancelCurrentTurnWhileIdleLeavesLaterMessagesAlone(t *testing.T) {
 	}
 }
 
-// TestCancelCurrentTurnWithActiveTurnArmsNoWatermark pins that the active-turn
-// path is unchanged: the turn is aborted directly, and a message queued behind
-// it keeps the ordinary queued-cancel semantics instead of being matched against
-// a message order.
-func TestCancelCurrentTurnWithActiveTurnArmsNoWatermark(t *testing.T) {
+// Cancellation covers both the active turn and every input already accepted;
+// a durable queued input must not execute after that cancellation.
+func TestCancelCurrentTurnWithActiveTurnCoversAcceptedInputs(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected an active turn")
 	}
@@ -168,8 +166,8 @@ func TestCancelCurrentTurnWithActiveTurnArmsNoWatermark(t *testing.T) {
 	if cancelled := a.CancelCurrentTurn(); !cancelled {
 		t.Fatal("CancelCurrentTurn() = false, want true for an active turn")
 	}
-	if got := a.cancelUpTo.Load(); got != 0 {
-		t.Fatalf("cancelUpTo = %d, want 0: an active turn is cancelled directly, never by message order", got)
+	if got := a.cancelUpTo.Load(); got != a.acceptedRawMessages.Load() {
+		t.Fatalf("cancelUpTo = %d, want all accepted messages covered", got)
 	}
 }
 
@@ -205,7 +203,7 @@ func TestCancelRequestAbortsATurnItsMessageWasAcceptedUnder(t *testing.T) {
 
 	// The loop already started this turn for a message the cancel covers, which
 	// is the interleaving where the message does not wait in the queue.
-	a.newTurn()
+	a.newTurn("")
 	a.turn.originAcceptedOrder = 1
 
 	a.handleTurnCancelRequested(Event{
@@ -221,8 +219,8 @@ func TestCancelRequestAbortsATurnItsMessageWasAcceptedUnder(t *testing.T) {
 // TestCancelCoversQueuedMessageThatNeverStartedATurn pins the queueing half of
 // the watermark: a message accepted before the cancel but unable to start a turn
 // (an MCP transition blocks new turns) waits in the queue, and the drain must
-// keep it in the transcript without asking the model. The turn it opens still
-// reports the busy marker and the global idle an ACP prompt settles on.
+// keep it in the transcript without asking the model. Consumption precedes
+// the global idle an ACP prompt settles on.
 func TestCancelCoversQueuedMessageThatNeverStartedATurn(t *testing.T) {
 	provider := &keyRecordingProvider{}
 	a := newCancelWindowTestAgent(t, provider)
@@ -248,7 +246,7 @@ func TestCancelCoversQueuedMessageThatNeverStartedATurn(t *testing.T) {
 		started, settled := false, false
 		for _, evt := range collected {
 			switch evt.(type) {
-			case RequestCycleStartedEvent:
+			case PendingDraftConsumedEvent:
 				started = true
 			case GlobalIdleEvent:
 				settled = settled || started

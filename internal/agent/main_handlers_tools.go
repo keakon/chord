@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/keakon/chord/internal/recovery"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/analytics"
@@ -793,6 +795,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 					a.turn.MalformedCount,
 				),
 			})
+			a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
 			a.setIdleAndDrainPending()
 			return
 		}
@@ -806,6 +809,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 					a.turn.BarrierFailureRounds,
 				),
 			})
+			a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
 			a.setIdleAndDrainPending()
 			return
 		}
@@ -895,6 +899,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 						a.loopState.disable()
 						a.emitLoopStateChanged()
 						a.emitActivity("main", ActivityIdle, "")
+						a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkCompleted)
 						a.setIdleAndDrainPending()
 						return
 					} else {
@@ -928,6 +933,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
 				a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: report, DoneReport: report, Status: ToolResultStatusSuccess})
 				a.emitActivity("main", ActivityIdle, "")
+				a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkCompleted)
 				a.setIdleAndDrainPending()
 				return
 			}

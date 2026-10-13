@@ -176,7 +176,7 @@ func TestMCPControlWhileBusyDefersToolsAndPromptUntilNextRequest(t *testing.T) {
 	})
 	a.sessionBuilt.Store(true)
 	a.freezeToolSurface()
-	a.newTurn()
+	a.newTurn("")
 	beforePrompt := a.installedSysPrompt
 
 	a.handleMCPControlEvent(Event{Payload: MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}}})
@@ -528,7 +528,7 @@ func mcpControlAgentWithBuiltSurface(t *testing.T) *MainAgent {
 	a.tools.Register(tools.GlobTool{})
 	a.sessionBuilt.Store(true)
 	a.freezeToolSurface()
-	a.newTurn()
+	a.newTurn("")
 	if !a.effectiveMCPMountIsFullInjection() {
 		t.Fatal("test setup needs a full-injection mount")
 	}

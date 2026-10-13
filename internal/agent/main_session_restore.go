@@ -32,8 +32,9 @@ type sessionRestoreResult struct {
 }
 
 type loadedSessionState struct {
-	Pause       *recovery.SessionPauseCheckpoint
-	SessionPath string
+	InputDelivery *recovery.InputDeliveryState
+	Pause         *recovery.SessionPauseCheckpoint
+	SessionPath   string
 	// RecordedWorkDir is the checkout the session was working in when it
 	// stopped, read from its metadata. The zero value means the main checkout.
 	// An in-process /resume adopts it so the transcript keeps meaning the same
@@ -369,7 +370,13 @@ func (a *MainAgent) loadMainTranscript(tmpRecovery *recovery.RecoveryManager, se
 		return nil, mainLoadDuration, 0, fmt.Errorf("load session %s transcript: %w", filepath.Base(sessionPath), err)
 	}
 	if len(msgs) == 0 && !completePausedSessionWithoutMessages(tmpRecovery, sessionPath) {
-		return nil, mainLoadDuration, 0, fmt.Errorf("no messages found in session %s", filepath.Base(sessionPath))
+		queue, queueErr := tmpRecovery.LoadInputDelivery()
+		if queueErr != nil {
+			return nil, mainLoadDuration, 0, queueErr
+		}
+		if queue == nil || len(queue.Inputs) == 0 {
+			return nil, mainLoadDuration, 0, fmt.Errorf("no messages found in session %s", filepath.Base(sessionPath))
+		}
 	}
 	normalizeStarted := time.Now()
 	msgs = normalizeRestoredMessages(msgs, started, identity.MainAgentID)
@@ -470,6 +477,10 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	tmpRecovery := recovery.NewRecoveryManager(sessionPath)
 	defer tmpRecovery.Close()
 
+	queue, err := tmpRecovery.LoadInputDelivery()
+	if err != nil {
+		return nil, fmt.Errorf("load input queue: %w", err)
+	}
 	started := loadToolActivityStarted(tmpRecovery)
 
 	msgs, mainLoadDuration, normalizeDuration, err := a.loadMainTranscript(tmpRecovery, sessionPath, started)
@@ -482,9 +493,10 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	summaryDuration := time.Since(summaryStarted)
 
 	loaded := &loadedSessionState{
-		SessionPath: sessionPath,
-		Messages:    append([]message.Message(nil), msgs...),
-		Summary:     summary,
+		InputDelivery: queue,
+		SessionPath:   sessionPath,
+		Messages:      append([]message.Message(nil), msgs...),
+		Summary:       summary,
 	}
 	if meta, metaErr := recovery.LoadSessionMeta(sessionPath); metaErr != nil {
 		log.Warnf("failed to load session metadata session=%v error=%v", sessionPath, metaErr)
@@ -577,6 +589,9 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 
 	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery, started)
 	if loaded.Pause != nil {
+		if err := tmpRecovery.ValidateInputDeliveryCheckpoint(loaded.Pause); err != nil {
+			return nil, err
+		}
 		var err error
 		loaded.Pause.PendingInputs, err = tmpRecovery.RestorePendingInputs(loaded.Pause.PendingInputs)
 		if err != nil {
@@ -875,7 +890,14 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	// so the per-directory map cannot grow with every restore.
 	a.pruneCompactionIndexAllocators(loaded.SessionPath)
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
+	a.resetInputDeliverySession()
 	a.installRecoveryManager(recovery.NewRecoveryManager(loaded.SessionPath))
+	if loaded.InputDelivery != nil {
+		a.delivery.committed = loaded.InputDelivery.Clone()
+		a.delivery.loading = true
+		a.delivery.restoredNextInputsBlocked = true
+		a.publishInputDelivery()
+	}
 	a.ensureLLMSessionID(a.llmClient)
 	if a.usageLedger != nil {
 		a.usageLedger.Close()
@@ -1630,6 +1652,9 @@ func (a *MainAgent) RestoreSessionAtStartup() error {
 // the most recently active openable session is chosen, and candidates another
 // process owns are skipped.
 func (a *MainAgent) handleResumeCommand(sessionID string) {
+	if a.deferDeliverySessionSwitch(func() { a.handleResumeCommand(sessionID) }) {
+		return
+	}
 	defer a.finishSessionSwitch()
 	if !a.stopCompactionForSessionSwitch() {
 		return

@@ -343,7 +343,7 @@ func TestYoloProtectedPermissionToolNormalizesNames(t *testing.T) {
 func TestYoloMainGateMechanismAskRelaxesAndRestores(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.ruleset = permissionRuleset(t, "delegate: ask")
-	a.newTurn()
+	a.newTurn("")
 	var confirmCalls atomic.Int32
 	a.confirmFn = subYoloConfirmStub(&confirmCalls)
 

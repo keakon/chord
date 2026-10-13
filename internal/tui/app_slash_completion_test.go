@@ -85,8 +85,8 @@ func TestSlashCompletionEnterSubmitsHighlightedCommandAfterFilter(t *testing.T) 
 	if len(backend.sentMessages) != 0 {
 		t.Fatalf("sentMessages = %#v, want none", backend.sentMessages)
 	}
-	if len(backend.sentMultipart) != 1 || len(backend.sentMultipart[0]) != 1 || backend.sentMultipart[0][0].Text != "/review" {
-		t.Fatalf("sent parts = %#v, want [/review]", backend.sentMultipart)
+	if len(backend.submittedInputs) != 1 || len(backend.submittedInputs[0].Parts) != 1 || backend.submittedInputs[0].Parts[0].Text != "/review" {
+		t.Fatalf("submitted inputs = %#v, want [/review]", backend.submittedInputs)
 	}
 	if got := m.input.Value(); got != "" {
 		t.Fatalf("input value after Enter = %q, want empty", got)

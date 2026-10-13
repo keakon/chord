@@ -2,6 +2,27 @@
 
 `chord headless` is Chord's lightweight control-plane entry point, suitable for bot, gateway, or automation-script integration.
 
+## Persistent input queue
+
+`send` accepts `delivery_policy: "next_request"` (the default) or `"after_completion"` for MainAgent. Supply a `request_id` for after-completion sends. A send receives exactly one `input_result`: `handled`, `queued`, `started`, `rejected`, or `unknown`. `queued` confirms durable acceptance, not execution; it is not followed by a second `started` receipt. `unknown` means the client must reconcile queue/history before retrying.
+
+```json
+{"type":"send","request_id":"request-1","content":"Check the documentation","delivery_policy":"after_completion"}
+```
+
+`ready`, `ready_paused`, `session_switched`, and `status_response` can carry `input_queue`. A missing/null projection is unknown; an empty `inputs` array is a confirmed empty queue. Subscribe to `input_queue_changed` for updates. Its projection contains runtime/session identity, `view_version`, `queue_revision`, the gate, work outcomes, and up to 128 input summaries with previews limited to 160 Unicode characters and attachment counts. Binary data and attachment paths are omitted. Compare runtime/session identity first, then `view_version`; `queue_revision` is for durable compare-and-swap and can remain unchanged during a storage-error update.
+
+Send `input_queue` operations with a unique `operation_id`, current `binding_id` where required, and the complete `target` from the projection: `runtime_id`, `session_id`, `session_epoch`, `owner_task_id`, and `work_dir_generation`. The target owner must be `main`. Responses use `input_queue_result` regardless of event subscriptions, with `committed`, `rejected`, `conflict`, or `unknown`, and current revisions.
+
+| Action | Required additional fields |
+| --- | --- |
+| `get` | `input_id`; returns full text and attachment count |
+| `update` | `input_id`, `expected_revision`; optional `content` and/or `delivery_policy` |
+| `delete`, `hold_edit`, `release_edit` | `input_id`, `expected_revision` |
+| `pause`, `resume`, `clear` | `expected_queue_revision` |
+
+Omitting `content` preserves the body and attachments. Providing it replaces the text; body edits on attachment-bearing inputs require the local TUI. Holds and edits do not automatically resume the after-completion queue. `clear` removes only unstarted after-completion inputs. Resume does not retry a failed task. ACP prompts retain ordinary next-request delivery.
+
 ## What it is
 
 - No TUI

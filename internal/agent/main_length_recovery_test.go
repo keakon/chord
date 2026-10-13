@@ -89,7 +89,7 @@ func (p *recordingLengthRecoveryProvider) Complete(
 func TestHandleLLMResponseTruncatedMalformedStartsLengthRecovery(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 
 	payload := &LLMResponsePayload{
 		ToolCalls: []message.ToolCall{{
@@ -127,7 +127,7 @@ func TestHandleLLMResponseTruncatedMalformedStartsLengthRecovery(t *testing.T) {
 func TestHandleLLMResponseTruncatedMalformedAbortMentionsCompactWhenCompactionUnavailable(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.LengthRecoveryCount = maxLengthRecoveryAttempts
 	a.turn.MalformedCount = maxMalformedToolCalls - 1
 	a.turn.LengthRecoveryAutoCompactAttempted = true
@@ -166,7 +166,7 @@ func TestHandleLLMResponseTruncatedMalformedAbortMentionsCompactWhenCompactionUn
 func TestHandleLLMResponseTruncatedMalformedSchedulesCompactionBeforeAbort(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.LengthRecoveryCount = maxLengthRecoveryAttempts
 	a.turn.MalformedCount = maxMalformedToolCalls - 1
 
@@ -203,7 +203,7 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryReinjectsRecoveryPromp
 		},
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 1024, "")
-	a.newTurn()
+	a.newTurn("")
 	a.turn.InLengthRecovery = true
 	a.turn.LastTruncatedToolName = "Shell"
 	a.pendingUserMessages = []pendingUserMessage{{Content: "queued after compaction"}}
@@ -387,7 +387,7 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToGenerateContentProvi
 func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliedWhenCompactionAlreadyRunning(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.loopState.Enabled = true
-	a.newTurn()
+	a.newTurn("")
 	provider := &recordingLoopTuningProvider{}
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -430,7 +430,7 @@ func TestResumePendingMainLLMAfterCompactionOversizeResumeInjectsReplayOverlay(t
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = testProjectSessionDir(t, projectRoot, "oversize-overlay")
 	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "finish the refactor safely"})
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
@@ -504,7 +504,7 @@ func TestResumePendingMainLLMAfterCompactionOversizeResumeInjectsReplayOverlay(t
 func TestHandleLLMResponseValidResponseClearsLengthRecoveryState(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.InLengthRecovery = true
 	a.turn.LengthRecoveryCount = 2
 	a.turn.LastTruncatedToolName = "Shell"
@@ -532,7 +532,7 @@ func TestHandleLLMResponseValidResponseClearsLengthRecoveryState(t *testing.T) {
 func TestHandleLLMResponseLengthRecoveryRejectsMultipleToolCalls(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.InLengthRecovery = true
 	a.turn.LengthRecoveryCount = 1
 
@@ -589,7 +589,7 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryFailureAborts(t *testi
 		},
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, &recordingLengthRecoveryProvider{}, "test-model", 1024, "")
-	a.newTurn()
+	a.newTurn("")
 	a.turn.InLengthRecovery = true
 	a.turn.LastTruncatedToolName = "Shell"
 
@@ -635,7 +635,7 @@ func TestOversizeCompactionFailureAbortsSuspendedMainContinuation(t *testing.T) 
 		},
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, &recordingLengthRecoveryProvider{}, "test-model", 1024, "")
-	a.newTurn()
+	a.newTurn("")
 
 	pending := &pendingMainLLMCall{
 		turnID:            a.turn.ID,
@@ -670,7 +670,7 @@ func TestOversizeCompactionFailureAbortsSuspendedMainContinuation(t *testing.T) 
 func TestScheduleCompactionForLengthRecoveryUsesLengthRecoveryTrigger(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 
 	if !a.scheduleCompactionForLengthRecovery() {
 		t.Fatal("expected scheduleCompactionForLengthRecovery to return true")
@@ -690,7 +690,7 @@ func TestScheduleCompactionForLengthRecoveryHandsOffForegroundActivity(t *testin
 	for _, activity := range []ActivityType{ActivityStreaming, ActivityExecuting} {
 		t.Run(string(activity), func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
-			a.newTurn()
+			a.newTurn("")
 			a.emitActivity("main", activity, "")
 			drainAgentEvents(a.outputCh)
 			if !a.mainSlotForeground.Load() {
@@ -739,7 +739,7 @@ func TestHandleCompactionReadyLengthRecoveryAppliesImmediately(t *testing.T) {
 	a.llmClient = llm.NewClient(providerCfg, provider, "test-model", 1024, "")
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "original request"})
 	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "partial tool call"})
-	a.newTurn()
+	a.newTurn("")
 	a.turn.InLengthRecovery = true
 	a.turn.LastTruncatedToolName = "shell"
 	target := compactionTarget{
@@ -794,7 +794,7 @@ func TestHandleCompactionReadyLengthRecoveryAppliesImmediately(t *testing.T) {
 func TestScheduleCompactionForLengthRecoveryOnlyOncePerTurn(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 
 	if !a.scheduleCompactionForLengthRecovery() {
 		t.Fatal("expected first scheduleCompactionForLengthRecovery to succeed")
@@ -811,7 +811,7 @@ func TestScheduleCompactionForLengthRecoveryOnlyOncePerTurn(t *testing.T) {
 func TestRecoveryCompactionFailureDoesNotAdvanceUsageBreaker(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	turnEpoch := a.turn.Epoch
 
@@ -888,7 +888,7 @@ func TestRecoveryPromptNotInCompactionCheckpoint(t *testing.T) {
 func TestHandleLLMResponseTruncatedWithNoOutputStartsLengthRecovery(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 
 	// Output limit reached while still emitting thinking: no tool calls, and
 	// content that is whitespace only.
@@ -929,7 +929,7 @@ func TestHandleLLMResponseTruncatedWithNoOutputStartsLengthRecovery(t *testing.T
 func TestHandleLLMResponseTruncatedWithNoOutputAbortsAfterMaxAttempts(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.LengthRecoveryCount = maxLengthRecoveryAttempts
 
 	payload := &LLMResponsePayload{
@@ -965,7 +965,7 @@ func TestHandleLLMResponseTruncatedWithNoOutputAbortsAfterMaxAttempts(t *testing
 func TestHandleLLMResponseTruncatedWithTextKeepsReplyAndWarns(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 
 	payload := &LLMResponsePayload{
 		Content:    "partial answer that got cut off mid-",

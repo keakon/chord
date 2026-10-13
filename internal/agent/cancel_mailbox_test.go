@@ -23,7 +23,7 @@ func stageCancelTestMailbox(a *MainAgent) *SubAgentMailboxMessage {
 
 func TestCancelParksMailboxBeforeSubAgentInterruptCompletes(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	stageCancelTestMailbox(a)
 	sub := newPersistenceTestSubAgent(a, "worker-2")
 	entered := make(chan struct{})
@@ -65,15 +65,15 @@ func TestCancelParksMailboxBeforeSubAgentInterruptCompletes(t *testing.T) {
 
 func TestCancelledMailboxResumesWithDraft(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	stageCancelTestMailbox(a)
 	if !a.CancelCurrentTurn() {
 		t.Fatal("cancel returned false")
 	}
 	a.handleTurnCancelled(<-a.eventCh)
-	a.handlePendingDraftUpsert(Event{Payload: pendingUserMessage{
-		DraftID: "draft-1", Content: "Continue the review", FromUser: true,
-	}})
+	runDeliveryOperation(t, a, &deliveryOperation{submit: &SubmitInput{OperationID: "draft-1", DraftID: "draft-1", Target: a.InputDeliveryTarget(), Content: "Continue the review"}})
+	a.advanceInputDelivery()
+	finishDeliveryWrites(t, a)
 	if a.turn == nil {
 		t.Fatal("draft did not start a turn")
 	}
@@ -115,7 +115,7 @@ func TestCancelledMailboxConsumedWithNextUserAction(t *testing.T) {
 			provider := &keyRecordingProvider{calls: []scriptedStreamCall{completedReply("Result received")}}
 			a := newCancelWindowTestAgent(t, provider)
 			a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "Review the result"})
-			a.newTurn()
+			a.newTurn("")
 			mailbox := stageCancelTestMailbox(a)
 			if !a.CancelCurrentTurn() {
 				t.Fatal("cancel returned false")
@@ -126,7 +126,7 @@ func TestCancelledMailboxConsumedWithNextUserAction(t *testing.T) {
 			case "input":
 				a.SendUserMessage("Continue the review")
 			case "draft":
-				if !a.QueuePendingUserDraft("draft-1", []message.ContentPart{{Type: message.ContentPartText, Text: "Continue the review"}}) {
+				if !submitMainDraftForTest(a, "draft-1", []message.ContentPart{{Type: message.ContentPartText, Text: "Continue the review"}}) {
 					t.Fatal("draft was not accepted")
 				}
 			case "continue":
@@ -176,9 +176,9 @@ func TestCancelledMailboxConsumedWithNextUserAction(t *testing.T) {
 
 func TestMailboxPauseIgnoresStaleCancel(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	stale := a.abortTurn(a.turn, true)
-	a.newTurn()
+	a.newTurn("")
 	a.handleTurnCancelled(stale)
 	if a.mailboxDeliveryPaused.Load() {
 		t.Fatal("stale cancel paused the replacement turn")
@@ -202,7 +202,7 @@ func TestMailboxPauseUnaffectedByStalledTurnSettlement(t *testing.T) {
 	for _, paused := range []bool{false, true} {
 		t.Run(map[bool]string{false: "running", true: "paused"}[paused], func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
-			a.newTurn()
+			a.newTurn("")
 			stageCancelTestMailbox(a)
 			a.mailboxDeliveryPaused.Store(paused)
 			a.compactionContinuationStalled = true

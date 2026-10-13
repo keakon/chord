@@ -11,7 +11,7 @@ import (
 // context instead of parking the turn behind an event that never comes.
 func TestMainLLMGateKeepsTurnRunningWhenCompactionDraftFailsToApply(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 
 	// A draft whose source refs cannot match the live transcript (the observed
@@ -56,8 +56,9 @@ func TestMainLLMGateKeepsTurnRunningWhenCompactionDraftFailsToApply(t *testing.T
 	if a.turn == nil || a.turn.ID != turnID {
 		t.Fatal("follow-up message settled the running turn")
 	}
-	if got := len(a.pendingUserMessages); got != 1 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 1 queued behind the running request", got)
+	finishDeliveryWrites(t, a)
+	if got := len(a.delivery.committed.Inputs); got != 1 {
+		t.Fatalf("len(durable inputs) = %d, want 1 queued behind the running request", got)
 	}
 	if !a.mainLLMRequestInFlight.Load() {
 		t.Fatal("follow-up message cleared the running request")
@@ -71,11 +72,11 @@ func TestMainLLMGateKeepsTurnRunningWhenCompactionDraftFailsToApply(t *testing.T
 func TestStalledTurnSettlesForContinueAndUserInput(t *testing.T) {
 	t.Run("continue", func(t *testing.T) {
 		a := newReadyTestMainAgent(t)
-		a.newTurn()
+		a.newTurn("")
 		stalledID := a.turn.ID
 		a.compactionContinuationStalled = true
 
-		a.handleContinueFromContext()
+		a.handleContinueFromContext("")
 
 		if a.compactionContinuationStalled {
 			t.Fatal("continue left the stall marker set")
@@ -87,7 +88,7 @@ func TestStalledTurnSettlesForContinueAndUserInput(t *testing.T) {
 
 	t.Run("user message", func(t *testing.T) {
 		a := newReadyTestMainAgent(t)
-		a.newTurn()
+		a.newTurn("")
 		stalledID := a.turn.ID
 		a.compactionContinuationStalled = true
 
@@ -106,7 +107,7 @@ func TestStalledTurnSettlesForContinueAndUserInput(t *testing.T) {
 
 	t.Run("busy turn still queues", func(t *testing.T) {
 		a := newReadyTestMainAgent(t)
-		a.newTurn()
+		a.newTurn("")
 		busyID := a.turn.ID
 
 		a.handleUserMessage(Event{Type: EventUserMessage, Payload: "queued while busy"})
@@ -114,8 +115,9 @@ func TestStalledTurnSettlesForContinueAndUserInput(t *testing.T) {
 		if a.turn == nil || a.turn.ID != busyID {
 			t.Fatal("busy turn was settled by a queued message")
 		}
-		if got := len(a.pendingUserMessages); got != 1 {
-			t.Fatalf("len(pendingUserMessages) = %d, want 1 queued while busy", got)
+		finishDeliveryWrites(t, a)
+		if got := len(a.delivery.committed.Inputs); got != 1 {
+			t.Fatalf("len(durable inputs) = %d, want 1 queued while busy", got)
 		}
 	})
 }

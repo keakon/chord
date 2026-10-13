@@ -97,7 +97,7 @@ func TestMainModelPoolSwitchDoesNotAffectSubAgent(t *testing.T) {
 	beforeClient := sub.llmClient
 	beforeRef := sub.llmClient.PrimaryModelRef()
 
-	a.newTurn()
+	a.newTurn("")
 	a.SetCurrentModelPool("fast") // focus is on the main agent (no focused sub-agent)
 	dispatchPendingEvents(t, a)
 

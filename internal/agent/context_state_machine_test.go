@@ -92,7 +92,7 @@ func stateMachineReadBody(start, end, total int, line string) string {
 func TestStateMachineReadEditReread(t *testing.T) {
 	sessionDir := t.TempDir()
 	a := &MainAgent{parentCtx: context.Background(), sessionDir: sessionDir}
-	a.newTurn()
+	a.newTurn("")
 	original := stateMachineReadBody(1, 400, 400, "alpha")
 
 	msgs := []message.Message{
@@ -157,7 +157,7 @@ func TestStateMachineReadExternalMutationArchivesPriorContent(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ShellTool{})
 	a := &MainAgent{parentCtx: context.Background(), sessionDir: sessionDir, contentRoot: projectRoot, tools: reg}
-	a.newTurn()
+	a.newTurn("")
 	original := stateMachineReadBody(1, 400, 400, "alpha")
 
 	msgs := []message.Message{
@@ -224,7 +224,7 @@ func TestStateMachineFailedBuildFixRebuild(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(tools.ShellTool{})
 	a := &MainAgent{parentCtx: context.Background(), sessionDir: sessionDir, tools: reg}
-	a.newTurn()
+	a.newTurn("")
 	failure := strings.Repeat("internal/agent/main.go: undefined: helperFn\n", 120)
 
 	msgs := []message.Message{
@@ -272,7 +272,7 @@ func TestStateMachineFailedBuildFixRebuild(t *testing.T) {
 func TestStateMachineReferencedResultKeepsItsEvidence(t *testing.T) {
 	sessionDir := t.TempDir()
 	a := &MainAgent{parentCtx: context.Background(), sessionDir: sessionDir}
-	a.newTurn()
+	a.newTurn("")
 	output := "{\n" + strings.Repeat(`  "internal/agent/context_reduction.go": "ok",`+"\n", 100) + `  "internal/agent/last_entry.go": "ok"` + "\n}"
 
 	msgs := []message.Message{

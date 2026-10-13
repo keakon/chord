@@ -30,7 +30,7 @@ func notifyCallArgs(t *testing.T, target, messageType, correlationID, kind, mess
 // they belong to the same "no valid response correlation" error family.
 func TestNotifyProtocolStreakCountsAcrossChangingArgs(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	const target = "task-notify-1"
 	missingCorrelation := errors.New("correlation_id is required for response: message_type=response answers only a real pending request")
 	unknownRequest := errors.New(`unknown pending request "corr-forged" for task task-notify-1`)
@@ -60,7 +60,7 @@ func TestNotifyProtocolStreakCountsAcrossChangingArgs(t *testing.T) {
 // plain (non-response) notify failures, must never feed the counter.
 func TestNotifyProtocolStreakIgnoresNonProtocolErrors(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	const target = "task-notify-io"
 	for _, tc := range []struct {
 		name string
@@ -93,7 +93,7 @@ func TestNotifyProtocolStreakIgnoresNonProtocolErrors(t *testing.T) {
 // mistake starts over instead of inheriting stale failures.
 func TestNotifyProtocolStreakResetsOnSuccessAndRecoversWithPlainNotify(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	const target = "task-notify-recover"
 	missing := errors.New("correlation_id is required for response: message_type=response answers only a real pending request")
 	if _, pause := a.observeNotifyProtocolFailure(tools.NameNotify, notifyCallArgs(t, target, "response", "", "reply", "one"), missing); pause {
@@ -126,7 +126,7 @@ func TestNotifyProtocolStreakResetsOnSuccessAndRecoversWithPlainNotify(t *testin
 // target does not clear the other.
 func TestNotifyProtocolStreakSeparatesTargets(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	missing := errors.New("correlation_id is required for response: message_type=response answers only a real pending request")
 	unknown := errors.New(`unknown pending request "corr-fake" for task task-a`)
 	a.observeNotifyProtocolFailure(tools.NameNotify, notifyCallArgs(t, "task-a", "response", "corr-fake", "reply", "x"), unknown)
@@ -151,7 +151,7 @@ func TestNotifyProtocolStreakSeparatesTargets(t *testing.T) {
 // explicit correction instead of auto-retrying.
 func TestNotifyProtocolPauseIsTurnScopedAndClearedOnConsume(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	firstTurn := a.turn.ID
 	const target = "task-notify-turn"
 	missing := errors.New("correlation_id is required for response: message_type=response answers only a real pending request")
@@ -168,7 +168,7 @@ func TestNotifyProtocolPauseIsTurnScopedAndClearedOnConsume(t *testing.T) {
 		t.Fatal("consumeNotifyProtocolPause fired without a pause flag")
 	}
 	// A fresh turn (a new user message / session) starts with a clean streak.
-	a.newTurn()
+	a.newTurn("")
 	if a.turn.ID == firstTurn {
 		t.Fatalf("expected a fresh turn id, got %v", a.turn.ID)
 	}
@@ -186,7 +186,7 @@ func TestNotifyProtocolPauseIsTurnScopedAndClearedOnConsume(t *testing.T) {
 // decision point the third failure must reach).
 func TestNotifyProtocolPauseEmitsUserInputRequest(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.turn.notifyProtocolPause = true
 	a.turn.notifyProtocolPauseTask = "task-notify-user"
 	if !a.consumeNotifyProtocolPause() {
@@ -214,7 +214,7 @@ func TestNotifyProtocolPauseEmitsUserInputRequest(t *testing.T) {
 // not change this protection (unlike the repeated-tool-call interception).
 func TestNotifyProtocolGuardIgnoresLoopSwitch(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.loopState.Enabled = true
 	missing := errors.New("correlation_id is required for response: message_type=response answers only a real pending request")
 	a.observeNotifyProtocolFailure(tools.NameNotify, notifyCallArgs(t, "task-a", "response", "", "reply", "x"), missing)

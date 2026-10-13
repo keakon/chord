@@ -132,7 +132,7 @@ func TestNonIdleActivityRearmsGlobalIdle(t *testing.T) {
 
 func TestSilentBaselineSuppressesPendingCompletion(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.setIdleAndDrainPending()
 	a.markControlAction()
 
@@ -169,7 +169,7 @@ func TestGlobalIdleSuppressionFollowsActivitySinceLastIdle(t *testing.T) {
 	}
 
 	// A real task runs to completion: the following idle must notify.
-	a.newTurn()
+	a.newTurn("")
 	a.emitGlobalIdleIfReady() // busy probe arms the saw-busy state
 	a.setIdleAndDrainPending()
 	if !a.emitGlobalIdleIfReady() {
@@ -216,7 +216,7 @@ func TestModelPoolSwitchAfterCompletedIdleStaysSilent(t *testing.T) {
 
 	// A completed task is announced before a later model-pool switch. The
 	// switch itself must remain silent.
-	a.newTurn()
+	a.newTurn("")
 	a.emitGlobalIdleIfReady() // busy probe arms the saw-busy state
 	a.setIdleAndDrainPending()
 	if !a.emitGlobalIdleIfReady() {
@@ -306,7 +306,7 @@ func TestQueuedAutomaticWorkDoesNotArmCompletionNotification(t *testing.T) {
 
 	// A queued task that actually runs arms the notification for its own
 	// completion (the drain starts a real turn, which is real work).
-	a.newTurn()
+	a.newTurn("")
 	a.emitGlobalIdleIfReady() // busy probe arms the saw-busy state
 	a.setIdleAndDrainPending()
 	if !a.emitGlobalIdleIfReady() {
@@ -327,7 +327,7 @@ func TestGlobalIdleHookKeepsLastMainTurnID(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	hooks := &recordingBackgroundHookManager{}
 	a.hookEngine = hooks
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.currentTurnID()
 
 	a.setIdleAndDrainPending()

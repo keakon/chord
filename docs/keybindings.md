@@ -19,6 +19,7 @@ Press `Esc` to leave Insert mode for Normal mode; press `i` (or any unbound prin
 | ------------------ | ---------------------------------------------------------------------------------------------- |
 | `Esc`              | Leave Insert mode, switch to Normal mode                                                       |
 | `Enter`            | Complete the visible slash-command suggestion; otherwise send the message                         |
+| `Alt+Enter` | MainAgent: save a task to run after the current task ends normally |
 | `Shift+Enter`      | Insert a newline                                                                               |
 | `Ctrl+J`           | Insert a newline (alternative when terminal does not deliver `Shift+Enter`)                    |
 | `Up`               | Recall the previous user message into the composer (or move history up if composer non-empty)  |

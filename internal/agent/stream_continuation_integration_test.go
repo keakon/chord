@@ -131,7 +131,7 @@ func newContinuationTestAgent(t *testing.T, wireType string, keys []string, call
 		},
 	}, keys)
 	a.llmClient = llm.NewClient(providerCfg, provider, "primary-model", 1024, "")
-	a.newTurn()
+	a.newTurn("")
 	return a, provider, providerCfg
 }
 

@@ -35,6 +35,9 @@ const (
 )
 
 type LoopAssessment struct {
+	Target            InputTarget
+	WorkID            string
+	TurnEpoch         uint64
 	Action            LoopAssessmentAction
 	Message           string
 	Reasons           []string

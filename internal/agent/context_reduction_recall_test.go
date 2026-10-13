@@ -293,7 +293,7 @@ func TestCanonicalRepeatedToolCallArgsPreservesLargeIntegerIdentity(t *testing.T
 
 func TestPrepareMessagesForLLMRecallProtectsNewestOutput(t *testing.T) {
 	a := &MainAgent{parentCtx: context.Background()}
-	a.newTurn()
+	a.newTurn("")
 	args := json.RawMessage(`{"pattern":"callSite","paths":["internal"]}`)
 	output := bigSearchOutput(80, 2)
 	if len(output) <= defaultContextReductionPolicy().ReadLikeOutputBytes {
@@ -363,7 +363,7 @@ func TestRecordDiscardedInputEvidenceIsBounded(t *testing.T) {
 
 func TestPrepareMessagesForLLMRepeatedCollapseIsNotRecallEvidence(t *testing.T) {
 	a := &MainAgent{parentCtx: context.Background()}
-	a.newTurn()
+	a.newTurn("")
 	args := json.RawMessage(`{"pattern":"callSite","paths":["internal"]}`)
 	output := bigSearchOutput(80, 2)
 	// Two identical live copies in one pass: the older collapses to a repeated

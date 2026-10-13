@@ -12,7 +12,7 @@ import (
 func TestMainAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	if turn == nil || turn.streamingToolExec == nil {
 		t.Fatal("expected active turn with streamingToolExec")
@@ -73,7 +73,7 @@ func TestMainAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T
 func TestMainAgentAcquireExecutionSlotTurnCancelDoesNotEmitToolResult(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	if turn == nil || turn.streamingToolExec == nil {
 		t.Fatal("expected active turn with streamingToolExec")

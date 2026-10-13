@@ -66,9 +66,9 @@ func (a *MainAgent) saveFinalSessionPause(checkpoint *recovery.SessionPauseCheck
 	// before the immutable snapshot leaves the loop.
 	a.pause.saving = true
 	checkpoint.CheckpointComplete = true
-	a.setSessionPauseStatus(func(s *SessionPauseStatus) {
-		s.State = SessionPauseSaving
-		s.PendingInputCount = len(checkpoint.PendingInputs)
+	a.setSessionPauseStatus(func(s *recovery.SessionPauseStatus) {
+		s.State = recovery.SessionPauseSaving
+		s.PendingInputCount = len(checkpoint.PendingInputs) + a.managedDeliveryInputCount()
 		s.CheckpointID = checkpoint.CheckpointID
 	})
 	snapshot := a.buildRecoverySnapshot()

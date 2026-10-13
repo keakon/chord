@@ -316,7 +316,9 @@ type Message struct {
 	SkillActivation            *SkillActivationFact      `json:"skill_activation,omitempty"`
 	SkillDiscovery             *SkillDiscoveryRecord     `json:"skill_discovery,omitempty"`
 	CompactionSkillActivation  *SkillActivationCarry     `json:"compaction_skill_activation,omitempty"`
-	// InputID is local recovery metadata and is never a provider wire field.
+	// InputID and InputRequestID are local recovery/control-plane metadata;
+	// neither field is sent to providers or included in independent exports.
+	InputRequestID   string                `json:"input_request_id,omitempty"`
 	InputID          string                `json:"input_id,omitempty"`
 	NativeTools      *NativeToolHistory    `json:"native_tools,omitempty"`
 	Question         json.RawMessage       `json:"question,omitempty"`

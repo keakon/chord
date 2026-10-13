@@ -62,7 +62,7 @@ func contains(text, fragment string) bool {
 func TestApplyCompactionDraftCommitsTransactionOnReplaceSuccess(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "first reply"})
@@ -124,7 +124,7 @@ func TestApplyCompactionDraftCommitsTransactionOnReplaceSuccess(t *testing.T) {
 func TestApplyCompactionDraftLogsOnlyWhenPostCommitAuditWriteFails(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "first reply"})
@@ -205,7 +205,7 @@ func TestApplyCompactionDraftLogsOnlyWhenPostCommitAuditWriteFails(t *testing.T)
 func TestFailedApplyLeavesTransactionAborted(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "first reply"})
@@ -264,7 +264,7 @@ func TestFailedApplyLeavesTransactionAborted(t *testing.T) {
 func TestApplyCompactionDraftKeepsManifestWhenAppliedSnapshotSaveFails(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "first request"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "first reply"})

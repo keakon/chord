@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -64,7 +65,7 @@ func TestSessionStructuralExistingToolMayCompleteChildRegistration(t *testing.T)
 func TestSessionStructuralPreparationBlocksMutationsBeforeFreeze(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.pause.mu.Lock()
-	a.pause.status.State = SessionPausePreparing
+	a.pause.status.State = recovery.SessionPausePreparing
 	a.pause.mu.Unlock()
 	if a.sessionExecutionPaused() {
 		t.Fatal("preparing unexpectedly froze transport")
@@ -85,8 +86,7 @@ func TestMainPreparationFreezeInterruptsHookWithoutCancellingTurn(t *testing.T) 
 		<-ctx.Done()
 		return ctx.Err()
 	})
-	turnCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	turnCtx := t.Context()
 	result := make(chan error, 1)
 	go func() {
 		_, err := a.callLLMForRequest(turnCtx, llmRequestInput{Messages: []message.Message{{Role: message.RoleUser, Content: "Sample request"}}}, 0)

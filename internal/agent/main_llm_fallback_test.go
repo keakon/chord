@@ -67,6 +67,10 @@ func TestFallbackRequestIncludesQueuedUserInput(t *testing.T) {
 	}
 
 	a.SendUserMessage("queued follow-up")
+	waitForAgentState(t, "queued input committed", func() bool {
+		snapshot := a.InputQueueSnapshot()
+		return snapshot != nil && snapshot.State != nil && len(snapshot.State.Inputs) == 1
+	})
 	close(primaryImpl.releaseCh)
 
 	select {
@@ -114,7 +118,7 @@ func requestHasUserText(messages []message.Message, want string) bool {
 func TestCallLLMOversizeRequestsEventLoopCompaction(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 16000, 0.8)
 
 	providerCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
@@ -180,7 +184,7 @@ func TestCallLLMOversizeRequestsEventLoopCompaction(t *testing.T) {
 
 func TestOversizeCompactionRequestHonorsRetryLimitOnEventLoop(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.OversizeRecoveryCount = maxOversizeRecoveryAttempts
 	a.mainLLMRequestInFlight.Store(true)
 
@@ -209,7 +213,7 @@ func TestOversizeCompactionRequestHonorsRetryLimitOnEventLoop(t *testing.T) {
 
 func TestCallLLMOversizeStopsWhenAutoCompactionDisabled(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 16000, 0)
 
 	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
@@ -261,7 +265,7 @@ func TestCallLLMOversizeStopsWhenAutoCompactionDisabled(t *testing.T) {
 func TestCallLLMMixedFallbackErrorsDoNotStartOversizeCompaction(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 16000, 0.8)
 
 	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
@@ -913,7 +917,7 @@ func TestFallbackBoundaryDefersReductionToTheCaller(t *testing.T) {
 	// a consumer that will never exist.
 	a := &MainAgent{parentCtx: context.Background(), outputCh: make(chan AgentEvent, 8)}
 	a.ctxMgr = ctxmgr.NewManager(128000, 4096)
-	a.newTurn()
+	a.newTurn("")
 	toolOutput := strings.Repeat("processed record without a recognizable shape\n", 400)
 	messages := []message.Message{
 		{Role: message.RoleUser, Content: "run it"},
@@ -937,7 +941,12 @@ func TestFallbackBoundaryDefersReductionToTheCaller(t *testing.T) {
 	}
 	a.handleLLMFallbackBoundary(Event{Type: EventLLMFallbackBoundary, TurnID: payload.turnID, Payload: payload})
 
-	result := <-payload.reply
+	var result llmFallbackBoundaryResult
+	select {
+	case result = <-payload.reply:
+	case <-time.After(3 * time.Second):
+		t.Fatal("fallback boundary did not resume")
+	}
 	if result.err != nil {
 		t.Fatalf("boundary returned an error: %v", result.err)
 	}
@@ -1057,12 +1066,18 @@ func fallbackBoundaryMessages(t *testing.T, a *MainAgent, messages []message.Mes
 		reply:                make(chan llmFallbackBoundaryResult, 1),
 	}
 	a.handleLLMFallbackBoundary(Event{Type: EventLLMFallbackBoundary, TurnID: payload.turnID, Payload: payload})
-	result := <-payload.reply
+	finishDeliveryWrites(t, a)
+	var result llmFallbackBoundaryResult
+	select {
+	case result = <-payload.reply:
+	case <-time.After(3 * time.Second):
+		t.Fatal("fallback boundary did not resume")
+	}
 	if result.err != nil {
 		t.Fatalf("boundary err = %v", result.err)
 	}
-	if result.rebuild {
-		t.Fatal("rebuild = true, want equivalent budgets without a rebuild")
+	if result.rebuild != (len(payload.inputMessages) > 0) {
+		t.Fatal("rebuild must reflect newly admitted input at equivalent budgets")
 	}
 	return result.messages
 }
@@ -1081,7 +1096,7 @@ func requestHasBackgroundResult(messages []message.Message, want string) bool {
 // must ride that retry, exactly like a queued user message does.
 func TestFallbackBoundaryIncludesQueuedMailboxResult(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "hi"})
 
 	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
@@ -1119,7 +1134,7 @@ func TestFallbackBoundaryIncludesQueuedMailboxResult(t *testing.T) {
 // comes first, then the JOB RESULT, matching the turn-continuation order.
 func TestFallbackBoundaryMergesUserInputBeforeMailboxResult(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "hi"})
 
 	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})

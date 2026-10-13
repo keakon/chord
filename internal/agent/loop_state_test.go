@@ -144,7 +144,7 @@ done: allow
 	a.rebuildRuleset()
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	callID := "done-confirm-1"
 	report := "**Completion status**: done\n\n**Verification**: tested"
@@ -247,7 +247,7 @@ read: allow
 `),
 	}
 	a.rebuildRuleset()
-	a.newTurn()
+	a.newTurn("")
 
 	call := message.ToolCall{ID: "read-repeat-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md","limit":10,"offset":0}`)}
 
@@ -293,7 +293,7 @@ func TestRepeatedToolCallInLoopRequiresConfirmationAtIterationLimit(t *testing.T
 	a.loopState.MaxIterations = 1
 	a.loopState.MaxIterationsSet = true
 	a.loopState.Iteration = 1
-	a.newTurn()
+	a.newTurn("")
 	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error) {
 		return a.AwaitConfirmWithRuleContext(ctx, toolName, args, 0, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 	}
@@ -380,7 +380,7 @@ func TestRepeatedToolCallInLoopRejectsApprovalAtIterationLimit(t *testing.T) {
 	a.loopState.MaxIterations = 1
 	a.loopState.MaxIterationsSet = true
 	a.loopState.Iteration = 1
-	a.newTurn()
+	a.newTurn("")
 	a.confirmFn = func(ctx context.Context, toolName string, args string, needsApproval []string, alreadyAllowed []string, needsApprovalRules []string, alreadyAllowedRules []string) (ConfirmResponse, error) {
 		return a.AwaitConfirmWithRuleContext(ctx, toolName, args, 0, needsApproval, alreadyAllowed, needsApprovalRules, alreadyAllowedRules)
 	}
@@ -451,7 +451,7 @@ done: ask
 `),
 	}
 	a.rebuildRuleset()
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	callID := "done-nonloop-ask-1"
 	a.ctxMgr.Append(message.Message{
@@ -521,7 +521,7 @@ done: allow
 `),
 	}
 	a.rebuildRuleset()
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	callID := "done-nonloop-deny-1"
 	a.ctxMgr.Append(message.Message{
@@ -594,7 +594,7 @@ done: allow
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
 	a.todoItems = []tools.TodoItem{{ID: "1", Content: "unfinished cleanup", Status: "pending"}}
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	callID := "done-reject-1"
 	a.ctxMgr.Append(message.Message{
@@ -737,7 +737,7 @@ done: allow
 	a.rebuildRuleset()
 	a.loopState.enableWithTarget("finish current task")
 	a.todoItems = []tools.TodoItem{{ID: "1", Content: "remaining work", Status: "in_progress"}}
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	firstCallID := "done-batch-1"
 	secondCallID := "done-batch-2"
@@ -809,7 +809,7 @@ done: ask
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
 	a.loopState.markProgress()
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	callID := "done-user-deny-1"
 	a.ctxMgr.Append(message.Message{
@@ -902,7 +902,7 @@ done: ask
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
 	a.loopState.markProgress()
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	callID := "done-user-deny-long-1"
 	a.ctxMgr.Append(message.Message{
@@ -1405,7 +1405,7 @@ done: allow
 	}
 	a.rebuildRuleset()
 	a.loopState.enableWithTarget("finish current task")
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 
 	verifyCallID := "verify-pytest-1"
@@ -1416,7 +1416,7 @@ done: allow
 		Result:   "2 passed in 0.10s",
 		TurnID:   turn.ID,
 	}})
-	a.newTurn()
+	a.newTurn("")
 	turn = a.turn
 	callID := "done-after-pytest-1"
 	a.ctxMgr.Append(message.Message{
@@ -1495,7 +1495,7 @@ func TestHandleUserMessageTreatsLoopOffAsBusyControlCommand(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.EnableLoopMode("finish current task")
 	a.pendingLoopContinuation = &LoopContinuationNote{Title: "LOOP CONTINUE", Text: "Call `done` when complete."}
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop off"})
 
@@ -1517,7 +1517,7 @@ func TestHandleUserMessageTreatsLoopOffAsBusyControlCommand(t *testing.T) {
 
 func TestHandleUserMessageTreatsLoopOnAsBusyControlCommand(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
 
@@ -1541,7 +1541,7 @@ done: allow
 `),
 	}
 	a.rebuildRuleset()
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
 
@@ -1602,7 +1602,7 @@ func TestShouldEmitLoopContinuationForAssessmentRespectsDeferredGate(t *testing.
 
 func TestHandleUserMessageRejectsLoopOnWhenDoneIsDenied(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.tools.Register(tools.ReadTool{})
 	// Only a rule naming done keeps a role out of loop mode; see
 	// donePermissionAction.
@@ -1628,7 +1628,7 @@ done: deny
 // authorization for done, so a wildcard-only deny does not reach it.
 func TestHandleUserMessageAllowsLoopOnUnderWildcardOnlyDeny(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.tools.Register(tools.ReadTool{})
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
 "*": deny
@@ -1654,7 +1654,7 @@ done: allow
 	}
 	a.rebuildRuleset()
 	a.SetInitialYoloMode(true)
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on finish current task"})
 
@@ -1701,7 +1701,7 @@ func TestSubAgentTerminalTransitionMarksLoopProgress(t *testing.T) {
 func TestHandleAgentErrorStopsLoopAsBlocked(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.EnableLoopMode("finish current task")
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 
 	a.handleAgentError(Event{
@@ -1886,7 +1886,7 @@ done: ask
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
 	a.loopState.markProgress()
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	callID := "done-user-deny-count-1"
 	a.ctxMgr.Append(message.Message{
@@ -1951,7 +1951,7 @@ done: allow
 	a.loopState.enableWithTarget("finish current task")
 	a.todoItems = []tools.TodoItem{{ID: "1", Content: "finish current task", Status: "pending"}}
 	a.loopState.MaxIterations = 1
-	a.newTurn()
+	a.newTurn("")
 	turn := a.turn
 	callID := "done-auto-reject-budget-stop-1"
 	a.ctxMgr.Append(message.Message{
@@ -2019,7 +2019,7 @@ func TestHandleUserMessageBusyLoopOnUpdatesTargetAndMaxIterations(t *testing.T) 
 done: allow
 `)}
 	a.rebuildRuleset()
-	a.newTurn()
+	a.newTurn("")
 
 	a.handleUserMessage(Event{Type: EventUserMessage, Payload: "/loop on revised target --max-iterations 7"})
 

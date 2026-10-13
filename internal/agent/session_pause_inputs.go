@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/keakon/chord/internal/identity"
@@ -72,43 +71,6 @@ func (a *MainAgent) sendSessionInput(content string, parts []message.ContentPart
 			return false
 		}
 	}
-}
-
-func (a *MainAgent) sendSessionDraft(draftID string, parts []message.ContentPart, remove bool) bool {
-	a.pause.inputMu.Lock()
-	defer a.pause.inputMu.Unlock()
-	if a.pause.inputClosed {
-		return false
-	}
-	if remove {
-		if !a.sendEvent(Event{Type: EventPendingDraftRemove, Payload: strings.TrimSpace(draftID)}) {
-			return false
-		}
-		delete(a.pause.drafts, draftID)
-		return true
-	}
-	if a.pause.drafts == nil {
-		a.pause.drafts = make(map[string]pendingUserMessage)
-	}
-	if a.pause.inputPrefix == "" {
-		a.pause.inputPrefix = rand.Text()
-	}
-	p := pendingUserMessageFromDraft(draftID, parts)
-	if existing, ok := a.pause.drafts[draftID]; ok {
-		p.InputID = existing.InputID
-		p.AcceptedOrder = existing.AcceptedOrder
-		p.Revision = existing.Revision + 1
-	} else {
-		raw := a.acceptRawUserMessage(p.Content, p.Parts)
-		p.InputID = raw.InputID
-		p.AcceptedOrder = raw.AcceptedOrder
-		p.Revision = 1
-	}
-	if !a.sendEvent(Event{Type: EventPendingDraftUpsert, Payload: p}) {
-		return false
-	}
-	a.pause.drafts[draftID] = p
-	return true
 }
 
 func (a *MainAgent) stageSessionInput(p pendingUserMessage) {
@@ -230,6 +192,12 @@ func restorePauseInput(p recovery.PendingInput) pendingUserMessage {
 func (a *MainAgent) captureMainPauseInputs(id recovery.TransferIdentity, frozenAt time.Time) *recovery.SessionPauseCheckpoint {
 	checkpoint := &recovery.SessionPauseCheckpoint{Identity: id, CheckpointID: rand.Text(), Paused: true, FrozenAt: frozenAt}
 	seen := make(map[string]bool)
+	if state := a.delivery.committed; state != nil {
+		checkpoint.InputDeliveryRevision = state.Revision
+		for _, input := range state.Inputs {
+			seen[input.InputID] = true
+		}
+	}
 	appendInput := func(p pendingUserMessage, owner string) {
 		if p.InputID == "" {
 			p.InputID = rand.Text()
@@ -284,13 +252,22 @@ func (a *MainAgent) captureSubPauseInputs(checkpoint *recovery.SessionPauseCheck
 // submission channel. Binary content remains in session-owned attachments.
 func (a *MainAgent) PendingSessionInputs() []recovery.PendingInput {
 	a.recoverySnapshotMu.Lock()
-	defer a.recoverySnapshotMu.Unlock()
-	if a.pause.checkpoint == nil {
-		return nil
+	var inputs []recovery.PendingInput
+	if a.pause.checkpoint != nil {
+		inputs = a.pause.checkpoint.Clone().PendingInputs
 	}
-	inputs := append([]recovery.PendingInput(nil), a.pause.checkpoint.PendingInputs...)
-	for i := range inputs {
-		inputs[i].Parts = cloneContentParts(inputs[i].Parts)
+	a.recoverySnapshotMu.Unlock()
+	seen := make(map[string]bool, len(inputs))
+	for _, input := range inputs {
+		seen[input.InputID] = true
+	}
+	if snapshot := a.InputQueueSnapshot(); snapshot != nil && snapshot.State != nil {
+		for _, input := range snapshot.State.Inputs {
+			if !seen[input.InputID] {
+				inputs = append(inputs, input)
+				seen[input.InputID] = true
+			}
+		}
 	}
 	return inputs
 }
@@ -298,6 +275,10 @@ func (a *MainAgent) PendingSessionInputs() []recovery.PendingInput {
 func (a *MainAgent) handlePausedSessionInput(content string, parts []message.ContentPart, inputID, requestID string, order int64) bool {
 	if !a.sessionExecutionPaused() {
 		return false
+	}
+	if !a.pause.restored && !IsTUILocalOnlySlashCommand(content) && !IsIdleOnlySlashCommand(content) {
+		a.handleDeliveryOperation(&deliveryOperation{admittedBeforePause: true, inputID: inputID, acceptedOrder: order, submit: &SubmitInput{OperationID: makeRequestID(), RequestID: requestID, Target: a.InputDeliveryTarget(), DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: content, Parts: parts}})
+		return true
 	}
 	if !a.pause.restored {
 		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{InputID: inputID, RequestID: requestID, AcceptedOrder: order, Content: content, Parts: parts, FromUser: true})

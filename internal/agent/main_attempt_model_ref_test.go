@@ -157,7 +157,7 @@ func TestFocusedModelStateDisplayRefFollowsFocusedSubAgent(t *testing.T) {
 
 func TestFocusedModelStatePreviewsPoolDuringToolPhase(t *testing.T) {
 	a := newToolPhaseSwitchTestAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	a.mainLLMRequestInFlight.Store(true)
 	a.SetCurrentModelPool("fast")
 	dispatchPendingEvents(t, a)
@@ -228,7 +228,7 @@ func TestFocusedModelStatePreviewsOverlappingPoolAtSelectedModel(t *testing.T) {
 	}
 	pool = append(pool, llm.FallbackModel{ProviderConfig: other.ProviderConfig(), ModelID: "claude-opus-4"})
 	client.SetModelPool(pool, 1)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.PendingToolCalls.Store(1)
 	a.SetCurrentModelPool("fast")
 	dispatchPendingEvents(t, a)
@@ -250,7 +250,7 @@ func TestPendingPoolTierCapabilitiesAreAvailableBeforeInstallation(t *testing.T)
 		}},
 	}}
 	a.llmClient.SetServiceTier(config.ServiceTierFast)
-	a.newTurn()
+	a.newTurn("")
 	a.turn.PendingToolCalls.Store(1)
 	a.SetCurrentModelPool("fast")
 	dispatchPendingEvents(t, a)

@@ -12,7 +12,7 @@ func TestCancelCurrentTurnKeepsPendingInputsQueuedAndFailsToolCalls(t *testing.T
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}

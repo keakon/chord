@@ -1,6 +1,8 @@
 package recovery
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,17 +33,22 @@ type TransferIdentity struct {
 // SessionPauseCheckpoint preserves accepted input independently of runtime queues.
 // Complete means contents are sealed, not that the source lock was released.
 type SessionPauseCheckpoint struct {
-	Identity           TransferIdentity `json:"identity"`
-	CheckpointID       string           `json:"checkpoint_id"`
-	Paused             bool             `json:"paused"`
-	CheckpointComplete bool             `json:"checkpoint_complete"`
-	PendingInputs      []PendingInput   `json:"pending_inputs,omitempty"`
-	FrozenAt           time.Time        `json:"frozen_at"`
+	InputDeliveryRevision uint64           `json:"input_delivery_revision,omitempty"`
+	Identity              TransferIdentity `json:"identity"`
+	CheckpointID          string           `json:"checkpoint_id"`
+	Paused                bool             `json:"paused"`
+	CheckpointComplete    bool             `json:"checkpoint_complete"`
+	PendingInputs         []PendingInput   `json:"pending_inputs,omitempty"`
+	FrozenAt              time.Time        `json:"frozen_at"`
 }
 
 // PendingInput contains no runtime handles. OwnerTaskID is the durable owner;
 // Sequence only orders inputs belonging to that owner.
 type PendingInput struct {
+	DeliveryPolicy      InputDeliveryPolicy      `json:"delivery_policy,omitempty"`
+	WorkDir             string                   `json:"work_dir,omitempty"`
+	WorktreeID          string                   `json:"worktree_id,omitempty"`
+	WorkID              string                   `json:"work_id,omitempty"`
 	InputID             string                   `json:"input_id"`
 	OwnerTaskID         string                   `json:"owner_task_id"`
 	Sequence            int64                    `json:"sequence"`
@@ -85,16 +92,16 @@ func (r *RecoveryManager) PersistPendingInputs(inputs []PendingInput) ([]Pending
 	if r.closed {
 		return nil, ErrClosed
 	}
-	return r.persistPendingInputsLocked(inputs)
+	return r.persistPendingInputsLocked(inputs, nil)
 }
 
-func (r *RecoveryManager) persistPendingInputsLocked(inputs []PendingInput) ([]PendingInput, error) {
+func (r *RecoveryManager) persistPendingInputsLocked(inputs []PendingInput, durableAttachments map[string]int64) ([]PendingInput, error) {
 	out := clonePendingInputs(inputs)
 	for i := range out {
 		if out[i].InputID == "" || out[i].OwnerTaskID == "" {
 			return nil, fmt.Errorf("pending input requires input and owner identity")
 		}
-		if out[i].Stage != PendingInputStageQueued && out[i].Stage != PendingInputStageTranscriptStaged {
+		if out[i].Stage != PendingInputStageQueued && out[i].Stage != PendingInputStageTranscriptStaged && out[i].Stage != PendingInputStageClaimed && out[i].Stage != PendingInputStageStarted {
 			return nil, fmt.Errorf("invalid pending input stage %q", out[i].Stage)
 		}
 		// Path-only parts may still point at temporary uploads. Read them before
@@ -115,6 +122,12 @@ func (r *RecoveryManager) persistPendingInputsLocked(inputs []PendingInput) ([]P
 					}
 					if !info.Mode().IsRegular() {
 						return nil, fmt.Errorf("pending attachment is not a regular file")
+					}
+					// References already committed by this queue passed the attachment
+					// durability barrier. Metadata-only edits need validation, not fsync.
+					if size, ok := durableAttachments[part.ImagePath]; ok && size == info.Size() {
+						part.DataBytes = size
+						continue
 					}
 					f, err := privatefs.OpenFile(r.sessionDir, part.ImagePath, os.O_RDWR)
 					if err != nil {
@@ -227,39 +240,51 @@ func (r *RecoveryManager) ValidatePendingInputRewrite(agentID string, msgs []mes
 }
 
 func (r *RecoveryManager) guardPendingInputRewriteLocked(agentID string, msgs []message.Message) error {
-	snap, err := r.Recover()
-	if os.IsNotExist(err) {
-		return nil
-	}
+	pending := make(map[string]bool)
+	state, err := r.loadInputDeliveryLocked()
 	if err != nil {
+		return fmt.Errorf("read input delivery rewrite guard: %w", err)
+	}
+	if state != nil {
+		for _, input := range state.Inputs {
+			if input.Stage == PendingInputStageClaimed {
+				pending[input.InputID] = true
+			}
+		}
+	}
+	snap, err := r.Recover()
+	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read pending input checkpoint: %w", err)
 	}
-	if snap.Pause == nil || len(snap.Pause.PendingInputs) == 0 {
+	if snap != nil && snap.Pause != nil {
+		for _, input := range snap.Pause.PendingInputs {
+			pending[input.InputID] = true
+		}
+	}
+	if len(pending) == 0 {
 		return nil
 	}
 	existing, err := r.LoadMessages(agentID)
 	if err != nil {
 		return err
 	}
-	retained := make(map[string]message.Message)
+	retained := make(map[string][]message.Message)
 	for _, msg := range msgs {
 		if msg.InputID != "" {
-			retained[msg.InputID] = msg
+			retained[msg.InputID] = append(retained[msg.InputID], msg)
 		}
-	}
-	pending := make(map[string]bool)
-	for _, input := range snap.Pause.PendingInputs {
-		pending[input.InputID] = true
 	}
 	for _, msg := range existing {
 		if !pending[msg.InputID] {
 			continue
 		}
-		replacement, ok := retained[msg.InputID]
-		if !ok {
+		candidates := retained[msg.InputID]
+		if len(candidates) == 0 {
 			return fmt.Errorf("rewrite would remove pending input %s before checkpoint acknowledgement", msg.InputID)
 		}
-		if replacement.Role != msg.Role || replacement.Content != msg.Content || !samePendingParts(msg.Parts, replacement.Parts) {
+		replacement := candidates[0]
+		retained[msg.InputID] = candidates[1:]
+		if replacement.Role != msg.Role || replacement.Content != msg.Content || replacement.InputRequestID != msg.InputRequestID || replacement.ToolCallID != msg.ToolCallID || !samePendingToolCalls(replacement.ToolCalls, msg.ToolCalls) || !samePendingParts(msg.Parts, replacement.Parts) {
 			return fmt.Errorf("rewrite would change pending input %s before checkpoint acknowledgement", msg.InputID)
 		}
 	}
@@ -276,4 +301,18 @@ func samePendingParts(a, b []message.ContentPart) bool {
 		}
 	}
 	return true
+}
+
+func samePendingToolCalls(a, b []message.ToolCall) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	if len(a) == 0 {
+		return true
+	}
+	// Compare the persisted representation: a nil RawMessage is serialized as
+	// null, and valid argument JSON may contain insignificant whitespace.
+	left, leftErr := json.Marshal(a)
+	right, rightErr := json.Marshal(b)
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
 }

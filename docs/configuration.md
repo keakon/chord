@@ -9,6 +9,15 @@ Connect your models once, then reuse pools, fallback, and project overrides. Cho
 - `.chord/config.yaml`: project-level overrides
 - `~/.config/chord/agents/` and `.chord/agents/`: agent role definitions
 
+## After-completion shortcut
+
+`keymap.insert_submit_after_completion` defaults to `alt+enter`. Use an empty list to disable it, or assign another key. Help displays the effective binding. This action is MainAgent-only and leaves ordinary send and newline bindings unchanged.
+
+```yaml
+keymap:
+  insert_submit_after_completion: [alt+enter]
+```
+
 ## How to use this page
 
 You do not need to read this page from top to bottom:

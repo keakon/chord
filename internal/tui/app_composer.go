@@ -7,6 +7,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 func (m Model) hasComposerContent() bool {
@@ -99,7 +100,7 @@ func (m *Model) syncQueuedDraft(draft queuedDraft) bool {
 	if m.agent == nil {
 		return false
 	}
-	ok := m.agent.QueuePendingUserDraft(draft.ID, draft.contentParts())
+	ok := m.agent.QueueSubAgentDraft(draft.ID, draft.contentParts())
 	if ok {
 		m.queueSyncEnabled = true
 	}
@@ -107,11 +108,14 @@ func (m *Model) syncQueuedDraft(draft queuedDraft) bool {
 }
 
 func (m Model) queuedDraftsAutoContinue() bool {
-	if m.takeoverInputFrozen() || m.takeover.status.State == agent.SessionPauseReady {
+	if m.takeoverInputFrozen() || m.takeover.status.State == recovery.SessionPauseReady {
 		return false
 	}
 	agentID := normalizeDraftAgentID(m.focusedAgentID)
 	for _, draft := range m.queuedDrafts {
+		if draft.DeliveryManaged && !draft.DeliveryRunnable {
+			continue
+		}
 		if draft.Mirrored && normalizeDraftAgentID(draft.AgentID) == agentID {
 			return true
 		}
@@ -123,7 +127,7 @@ func (m *Model) dropQueuedDraftFromAgent(draftID string) {
 	if m.agent == nil || !m.queueSyncEnabled || draftID == "" {
 		return
 	}
-	m.agent.RemovePendingUserDraft(draftID)
+	m.agent.RemoveSubAgentDraft(draftID)
 }
 
 func (m *Model) loadQueuedDraftIntoComposer(draft queuedDraft) tea.Cmd {
@@ -161,6 +165,9 @@ func (m *Model) editQueuedDraftAt(idx int) tea.Cmd {
 	if m.hasComposerContent() {
 		return m.enqueueToast("Submit or clear the current draft before editing a queued item", "info")
 	}
+	if m.queuedDrafts[idx].DeliveryManaged {
+		return m.editManagedDraft(m.queuedDrafts[idx])
+	}
 	draft := m.removeQueuedDraftAt(idx)
 	m.dropQueuedDraftFromAgent(draft.ID)
 	return tea.Batch(
@@ -175,6 +182,9 @@ func (m *Model) deleteQueuedDraftAt(idx int) tea.Cmd {
 	}
 	if idx < 0 || idx >= len(m.queuedDrafts) {
 		return nil
+	}
+	if m.queuedDrafts[idx].DeliveryManaged {
+		return m.deleteManagedDraft(m.queuedDrafts[idx], false)
 	}
 	draft := m.removeQueuedDraftAt(idx)
 	m.dropQueuedDraftFromAgent(draft.ID)

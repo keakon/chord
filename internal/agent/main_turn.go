@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/recovery"
+
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/identity"
@@ -128,6 +130,8 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 // are appended when the cancellation event is handled so the conversation and
 // persisted session keep a matching output for each tool call.
 func (a *MainAgent) CancelCurrentTurn() bool {
+	a.delivery.cancelGeneration.Add(1)
+	a.raiseCancelUpTo(a.acceptedRawMessages.Load())
 	a.turnMu.Lock()
 	t := a.turn
 	a.turnMu.Unlock()
@@ -285,16 +289,6 @@ func pendingUserMessageFromDraft(draftID string, parts []message.ContentPart) pe
 	}
 }
 
-func pendingDraftParts(p pendingUserMessage) []message.ContentPart {
-	if len(p.Parts) > 0 {
-		return cloneContentParts(p.Parts)
-	}
-	if p.Content == "" {
-		return nil
-	}
-	return []message.ContentPart{{Type: message.ContentPartText, Text: p.Content}}
-}
-
 func pendingUserMessageText(p pendingUserMessage) string {
 	if strings.TrimSpace(p.Content) != "" {
 		return p.Content
@@ -348,10 +342,19 @@ func messagePartsForTUI(msg message.Message) []message.ContentPart {
 }
 
 func (a *MainAgent) emitPendingDraftConsumed(draftID string, msg message.Message) {
-	if strings.TrimSpace(draftID) == "" {
+	if strings.TrimSpace(draftID) == "" && msg.InputID == "" {
 		return
 	}
+	revision := uint64(0)
+	if state := a.delivery.committed; state != nil {
+		for _, input := range state.Inputs {
+			if input.InputID == msg.InputID {
+				revision = input.Revision
+			}
+		}
+	}
 	a.emitToTUI(PendingDraftConsumedEvent{
+		Target: a.InputDeliveryTarget(), InputID: msg.InputID, Revision: revision, WorkID: a.delivery.currentWorkID,
 		DraftID: draftID,
 		Parts:   messagePartsForTUI(msg),
 	})
@@ -472,16 +475,6 @@ func enqueuePendingUserMessage(queue []pendingUserMessage, pending pendingUserMe
 	return append(queue, pending)
 }
 
-func removePendingDraft(queue []pendingUserMessage, draftID string) ([]pendingUserMessage, bool) {
-	for i := range queue {
-		if queue[i].DraftID != draftID {
-			continue
-		}
-		return append(queue[:i], queue[i+1:]...), true
-	}
-	return queue, false
-}
-
 // interruptCurrentTurnForReplacement terminates any still-active main-agent turn
 // because another runtime control path is about to replace it with a fresh turn
 // (e.g. background completion, wake-main, session switch). Unlike explicit user
@@ -542,7 +535,7 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 }
 
 // newTurn cancels any in-flight work and creates a fresh Turn.
-func (a *MainAgent) newTurn() {
+func (a *MainAgent) newTurn(workID string) {
 	a.directoryInstructions.Load().clearTurnDiscovery()
 	// Policy roots are re-listed once per turn so a checkout created since the
 	// previous turn (by the user, or by a resume that adopted a recorded
@@ -571,6 +564,7 @@ func (a *MainAgent) newTurn() {
 	a.applyPatchRetry.reset()
 	ctx, cancel := context.WithCancel(a.parentCtx)
 	a.turn = &Turn{
+		DeliveryWorkID:        workID,
 		ID:                    a.nextTurnID,
 		Epoch:                 a.turnEpoch,
 		Ctx:                   ctx,
@@ -635,6 +629,11 @@ func (a *MainAgent) rememberIdleTurn(turnID uint64) {
 // agent was busy and messages were queued). Call this wherever IdleEvent was previously
 // emitted so that queued input is injected after the model has finished.
 func (a *MainAgent) setIdleAndDrainPending() {
+	// Idle is only a chance to recheck the durable gate. It never supplies a
+	// completed outcome (mailbox/control turns may have no user work).
+	if a.delivery.committed != nil {
+		defer a.sendEvent(Event{Type: eventInputDeliveryAdvance})
+	}
 	a.flushPendingNativeContextAppends(nil, 0)
 	// This method runs on the main event loop. The provider goroutine may have
 	// returned earlier, but the foreground slot remains claimed until the
@@ -779,7 +778,7 @@ func (a *MainAgent) setIdleAndDrainPending() {
 	}
 	if a.questions.resumeNeeded && a.turn == nil && !a.questions.paused {
 		a.questions.resumeNeeded = false
-		a.handleContinueFromContext()
+		a.handleContinueFromContext(a.delivery.currentWorkID)
 	}
 	// Foreground is idle again: wake the memory worker so extraction jobs that
 	// were deferred while a turn was active (or requeued after preemption) get
@@ -825,6 +824,12 @@ func latestAssistantReplySummary(msgs []message.Message) string {
 // runs slash-command handlers for any that are commands, and sends the rest
 // to the model in one batch (newTurn + append all + single LLM call).
 func (a *MainAgent) drainPendingUserMessages() {
+	if a.delivery.inflight != nil || len(a.delivery.pending) > 0 || a.delivery.persistenceError != nil {
+		return
+	}
+	if a.delivery.committed != nil {
+		defer a.sendEvent(Event{Type: eventInputDeliveryAdvance})
+	}
 	if a.sessionExecutionPaused() {
 		return
 	}
@@ -887,7 +892,7 @@ func (a *MainAgent) drainPendingUserMessages() {
 		a.mailboxDeliveryPaused.Store(false)
 		a.stageNextSubAgentMailboxBatch()
 	}
-	a.newTurn()
+	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx
 	for _, item := range consumed {
@@ -906,7 +911,7 @@ func (a *MainAgent) drainPendingUserMessages() {
 func (a *MainAgent) closeCoveredPendingUserMessagesAsCancelled(pending []pendingUserMessage) {
 	a.tryRecoverPersistenceBeforeTurn()
 	a.stageNextSubAgentMailboxBatch()
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	for _, p := range pending {
 		userMsg, ok := a.pendingUserMessageToConversationMessage(p)

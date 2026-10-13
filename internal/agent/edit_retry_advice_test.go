@@ -245,7 +245,7 @@ func TestAppendEditRetryAdviceNilStreakSuccessNoNote(t *testing.T) {
 // stored in ctxMgr while the TUI display result stays untouched.
 func TestMainAgentHandleToolResultAppendsAdvisoryToContextOnly(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	callID := "edit-fail-1"
 	argsJSON := `{"path":"demo.md"}`
@@ -334,7 +334,7 @@ func TestEditRetryStreakResetsOnNewTurn(t *testing.T) {
 	if !strings.Contains(firstTurn, "2 repeated") {
 		t.Fatalf("first turn second failure = %q, want advisory", firstTurn)
 	}
-	a.newTurn()
+	a.newTurn("")
 	after := applyAdvice(a, "err", payload, true) // streak restarts at 1
 	if strings.Contains(after, "repeated") {
 		t.Fatalf("after new turn first failure = %q, want no advisory (streak reset)", after)
@@ -354,7 +354,7 @@ func TestMainAgentApplyPatchRetryRequiresSuccessfulRead(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{BaseDir: projectRoot})
 	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
-	a.newTurn()
+	a.newTurn("")
 
 	patch := "*** Begin Patch\n" +
 		"*** Update File: demo.txt\n" +
@@ -505,7 +505,7 @@ func TestApplyPatchRetryUnblocksAfterTargetRewriteWithoutRead(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.ReadTool{BaseDir: projectRoot})
 	a.tools.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
-	a.newTurn()
+	a.newTurn("")
 
 	patch := "*** Begin Patch\n" +
 		"*** Update File: demo.txt\n" +

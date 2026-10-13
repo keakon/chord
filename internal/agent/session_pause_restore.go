@@ -16,7 +16,6 @@ func (a *MainAgent) installPausedSession(loaded *loadedSessionState) {
 	a.stateMu.Unlock()
 	a.pause.inputMu.Lock()
 	a.pause.inputClosed = false
-	a.pause.drafts = nil
 	a.pause.inputMu.Unlock()
 	a.pause.restored = loaded.Pause != nil && (loaded.Pause.Paused || len(loaded.Pause.PendingInputs) > 0)
 	a.pause.initialSaved = false
@@ -35,7 +34,7 @@ func (a *MainAgent) installPausedSession(loaded *loadedSessionState) {
 	a.pause.checkpoint = loaded.Pause.Clone()
 	a.recoverySnapshotMu.Unlock()
 	a.pause.mu.Lock()
-	a.pause.status = SessionPauseStatus{}
+	a.pause.status = recovery.SessionPauseStatus{}
 	a.pause.mu.Unlock()
 	if !a.pause.restored {
 		return
@@ -53,8 +52,12 @@ func (a *MainAgent) installPausedSession(loaded *loadedSessionState) {
 			a.pause.parkedInputs[input.OwnerTaskID] = append(a.pause.parkedInputs[input.OwnerTaskID], p)
 		}
 	}
+	managedCount := 0
+	if loaded.InputDelivery != nil {
+		managedCount = len(loaded.InputDelivery.Inputs)
+	}
 	a.pause.mu.Lock()
-	a.pause.status = SessionPauseStatus{TransferIdentity: loaded.Pause.Identity, State: SessionPauseReady, StartedAt: loaded.Pause.FrozenAt, CheckpointID: loaded.Pause.CheckpointID, PendingInputCount: len(loaded.Pause.PendingInputs)}
+	a.pause.status = recovery.SessionPauseStatus{TransferIdentity: loaded.Pause.Identity, State: recovery.SessionPauseReady, StartedAt: loaded.Pause.FrozenAt, CheckpointID: loaded.Pause.CheckpointID, PendingInputCount: len(loaded.Pause.PendingInputs) + managedCount}
 	a.pause.mu.Unlock()
 }
 
@@ -129,16 +132,18 @@ func (a *MainAgent) finishPausedSessionResume(result sessionPauseResult) {
 	}
 	if err != nil {
 		a.finishPausedFollowups(err)
+		a.finishDeliveryResumeOperations(err)
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Could not resume the paused session: %v", err), Level: "warn"})
 		return
 	}
 	a.pause.restored = false
-	a.setSessionPauseStatus(func(s *SessionPauseStatus) { s.State = "running" })
+	a.setSessionPauseStatus(func(s *recovery.SessionPauseStatus) { s.State = "running" })
 	a.finishPausedFollowups(nil)
+	a.finishDeliveryResumeOperations(nil)
 	if a.pause.resumeContinue {
 		a.pause.resumeContinue = false
 		a.pause.resumeMain = false
-		a.handleContinueFromContext()
+		a.handleContinueFromContext("")
 		return
 	}
 	if !a.pause.resumeMain {

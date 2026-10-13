@@ -177,6 +177,7 @@ func (a *MainAgent) appendUserSkillInvocation(userMsg message.Message) []message
 		}
 		return nil
 	}
+	assistantMsg.InputID, toolMsg.InputID = userMsg.InputID, userMsg.InputID
 	pair := []message.Message{assistantMsg, toolMsg}
 	for _, m := range pair {
 		a.ctxMgr.Append(m)

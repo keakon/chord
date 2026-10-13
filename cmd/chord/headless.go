@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
-
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/agent"
@@ -106,6 +105,7 @@ type headlessState struct {
 	mcpRole        string
 	mcpSession     string
 	mcp            mcp.RuntimeSnapshot
+	inputQueue     *headlessInputQueue
 	mu             sync.Mutex
 	busy           bool
 	phase          string
@@ -373,6 +373,13 @@ func (w *stdoutWriter) closeUntil(deadline <-chan time.Time) bool {
 
 // headlessCommand represents a command received from stdin.
 type headlessCommand struct {
+	InputTarget           *agent.InputTarget           `json:"target,omitempty"`
+	InputID               string                       `json:"input_id,omitempty"`
+	ExpectedRevision      *uint64                      `json:"expected_revision,omitempty"`
+	ExpectedQueueRevision *uint64                      `json:"expected_queue_revision,omitempty"`
+	DeliveryPolicy        recovery.InputDeliveryPolicy `json:"delivery_policy,omitempty"`
+	ContentPresent        bool                         `json:"-"`
+
 	BindingID           string   `json:"binding_id"`
 	QuestionsAfterID    string   `json:"questions_after_id,omitempty"`
 	QuestionIDs         []string `json:"question_ids,omitempty"`
@@ -429,6 +436,7 @@ var headlessEventTypes = map[string]bool{
 	"background_result":      true,
 	"context_notice":         true,
 	headlessMCPStatusChanged: true,
+	"input_queue_changed":    true,
 }
 
 // filterHeadlessEvent converts an AgentEvent to one or more headlessEnvelopes.
@@ -491,6 +499,27 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			}
 		}
 
+	case agent.InputQueueOperationResultEvent:
+		out = append(out, &headlessEnvelope{Type: "input_queue_result", Payload: e})
+	case agent.InputQueueChangedEvent:
+		projection := inputQueueProjection(e.Snapshot)
+		if projection == nil {
+			break
+		}
+		if state.inputQueue != nil && state.inputQueue.RuntimeID == projection.RuntimeID && state.inputQueue.SessionID == projection.SessionID && state.inputQueue.SessionEpoch == projection.SessionEpoch && state.inputQueue.ViewVersion >= projection.ViewVersion {
+			break
+		}
+		if queue, ok := backend.(headlessInputQueueBackend); ok && projection.InputTarget != queue.InputDeliveryTarget() {
+			break
+		}
+		if projection.SessionID != headlessBackendSessionID(backend) {
+			break
+		}
+		state.inputQueue = projection
+		touch()
+		if state.isSubscribed("input_queue_changed") {
+			out = append(out, &headlessEnvelope{Type: "input_queue_changed", Payload: projection})
+		}
 	case agent.InputResultEvent:
 		// Correlated command replies are always delivered, independent of
 		// optional push subscriptions, and never clear an active turn.
@@ -837,10 +866,15 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			clearHeadlessMCPStateLocked(state)
 		}
 		state.sessionID = sessionID
+		if queue, ok := backend.(headlessInputQueueBackend); ok {
+			target := queue.InputDeliveryTarget()
+			state.runtimeID, state.sessionEpoch = target.RuntimeID, target.SessionEpoch
+		}
+		state.inputQueue = headlessInputQueueSnapshot(backend)
 		state.questions = nil
 		if state.isSubscribed("session_switched") {
 			out = append(out, &headlessEnvelope{Type: "session_switched", Payload: map[string]any{
-				"session_id": sessionID, "runtime_id": state.runtimeID, "session_epoch": state.sessionEpoch, "workspace": state.workspace,
+				"session_id": sessionID, "runtime_id": state.runtimeID, "session_epoch": state.sessionEpoch, "workspace": state.workspace, "input_queue": state.inputQueue,
 			}})
 		}
 		if state.mcpSession == sessionID && state.isSubscribed(headlessMCPStatusChanged) {
@@ -1261,12 +1295,19 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 		state.runtimeID = rec.RuntimeID
 		state.sessionEpoch = rec.SessionEpoch
 	}
+	if queue, ok := rt.Backend().(headlessInputQueueBackend); ok {
+		target := queue.InputDeliveryTarget()
+		state.runtimeID, state.sessionEpoch = target.RuntimeID, target.SessionEpoch
+		state.inputQueue = headlessInputQueueSnapshot(rt.Backend())
+	}
 	// Emit a one-time ready marker so gateways can detect successful init.
 	readyPayload := map[string]any{
 		"session_id":    sessionID,
 		"workspace":     state.workspace,
 		"workdir":       headlessWorkDirPayload(state.workDir),
 		"paused_inputs": headlessPausedInputProjection(ac.MainAgent),
+		"input_queue":   state.inputQueue,
+		"runtime_id":    state.runtimeID, "session_epoch": state.sessionEpoch,
 	}
 	if endpoint != nil {
 		rec := endpoint.identity()
@@ -1274,7 +1315,7 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 		readyPayload["session_epoch"] = rec.SessionEpoch
 	}
 	if paused, ok := pausedStartupStatus(ac); ok {
-		readyPayload["state"] = agent.SessionPauseReady
+		readyPayload["state"] = recovery.SessionPauseReady
 		readyPayload["transfer_id"] = paused.TransferID
 		readyPayload["binding_instance_id"] = flagGatewayInstance
 	}
@@ -1316,7 +1357,7 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 				if !out.emitWithContext(out.ctx, env) {
 					continue
 				}
-				if e.Status.State == agent.SessionPauseSaved {
+				if e.Status.State == recovery.SessionPauseSaved {
 					if !out.flush(out.ctx) {
 						continue
 					}
@@ -1874,6 +1915,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		mcpSnapshot := state.mcp.Clone()
 		runtimeID := state.runtimeID
 		sessionEpoch := state.sessionEpoch
+		inputQueue := state.inputQueue
 		seq := state.stampHeadlessSeq(workDirChanged)
 		state.mu.Unlock()
 		out.emit(headlessEnvelope{
@@ -1901,6 +1943,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 				"mcp":                     mcpSnapshot,
 				"running_jobs":            headlessRunningJobs(backend),
 				"paused_inputs":           headlessPausedInputProjection(backend),
+				"input_queue":             inputQueue,
 			},
 		})
 
@@ -1916,7 +1959,12 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		output, err := tools.RunLocalShellCapture(context.Background(), "", command)
 		emitHeadlessLocalShellResult(out, command, output, err)
 
+	case "input_queue":
+		handleHeadlessInputQueue(cmd, backend, out)
 	case "send":
+		if headlessSendWithPolicy(cmd, backend, state, out) {
+			return
+		}
 		if isHeadlessMCPCommand(cmd.Content) {
 			handleHeadlessMCPCommand(cmd, state, out)
 			return

@@ -80,7 +80,7 @@ func TestCallLLMShowsKeySwitchToastOnFirstToolCallToken(t *testing.T) {
 
 func TestHandleLLMResponseNormalizesInvisibleAssistantContent(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.handleLLMResponse(Event{
 		Type:   EventLLMResponse,
 		TurnID: a.turn.ID,
@@ -105,7 +105,7 @@ func TestHandleLLMResponseNormalizesInvisibleAssistantContent(t *testing.T) {
 }
 func TestCallLLMEmitsToolArgCompletionUpdateOnToolUseEnd(t *testing.T) {
 	a := newReadyTestMainAgent(t)
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -169,7 +169,7 @@ func TestHandleLLMResponseDoesNotPromoteReadOnlyShellBehindAskGatedCommit(t *tes
 		{Permission: tools.NameShell, Pattern: "git commit *", Action: permission.ActionAsk},
 		{Permission: tools.NameShell, Pattern: "git status *", Action: permission.ActionAllow},
 	}
-	a.newTurn()
+	a.newTurn("")
 	if a.turn == nil {
 		t.Fatal("expected active turn")
 	}
@@ -250,7 +250,7 @@ func TestHandleLLMResponseDoesNotPromoteReadOnlyShellBehindAskGatedCommit(t *tes
 
 func TestMainLLMResponseRejectsExcessiveToolCalls(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	calls := make([]message.ToolCall, maxToolCallsPerResponse+1)
 	for i := range calls {
 		calls[i] = message.ToolCall{ID: fmt.Sprintf("call-%d", i), Name: tools.NameRead, Args: json.RawMessage(`{"path":"README.md"}`)}

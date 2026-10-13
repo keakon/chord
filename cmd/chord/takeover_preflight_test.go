@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/takeover"
 )
@@ -40,12 +39,12 @@ func TestTakeoverPreflightDoesNotDispatchStart(t *testing.T) {
 	server, err := takeover.StartServer(takeover.ServerOptions{
 		StateDir: stateDir,
 		Record:   takeover.Record{Protocol: takeover.ProtocolVersion, RuntimeID: "runtime-1", SessionEpoch: 2, SessionID: "session-1", Workspace: workspace, OwnerKind: takeover.OwnerTUI},
-		Start: func(context.Context, recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
+		Start: func(context.Context, recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
 			starts.Add(1)
-			return agent.SessionPauseStatus{}, context.DeadlineExceeded
+			return recovery.SessionPauseStatus{}, context.DeadlineExceeded
 		},
-		Status: func(string) (agent.SessionPauseStatus, error) {
-			return agent.SessionPauseStatus{}, &takeover.Error{Code: takeover.CodeStatusUnknown, Message: "unknown transfer"}
+		Status: func(string) (recovery.SessionPauseStatus, error) {
+			return recovery.SessionPauseStatus{}, &takeover.Error{Code: takeover.CodeStatusUnknown, Message: "unknown transfer"}
 		},
 		RetrySave: func(context.Context, string) error { return nil },
 	})
@@ -55,11 +54,11 @@ func TestTakeoverPreflightDoesNotDispatchStart(t *testing.T) {
 	t.Cleanup(func() { _ = server.Close() })
 	loc := takeoverLocation{stateDir: stateDir, workspace: workspace, sessionDir: sessionDir}
 	status, err := preflightTakeoverTarget(t.Context(), loc, "session-1", "transfer-1", takeover.OwnerGateway, "binding-1")
-	if err != nil || status.State != agent.SessionPausePreflight || status.Workspace != workspace || status.SourceRuntimeID != "runtime-1" || status.SourceSessionEpoch != 2 || status.TargetInstanceID != "binding-1" {
+	if err != nil || status.State != recovery.SessionPausePreflight || status.Workspace != workspace || status.SourceRuntimeID != "runtime-1" || status.SourceSessionEpoch != 2 || status.TargetInstanceID != "binding-1" {
 		t.Fatalf("status=%+v err=%v", status, err)
 	}
 	status, err = preflightTakeoverTarget(t.Context(), loc, "session-1", "transfer-1", takeover.OwnerTUI, "target-1")
-	if err == nil || status.State != agent.SessionPausePreflight {
+	if err == nil || status.State != recovery.SessionPausePreflight {
 		t.Fatalf("same-owner status=%+v err=%v", status, err)
 	}
 	if starts.Load() != 0 {

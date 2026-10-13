@@ -16,7 +16,7 @@ import (
 
 type takeoverAgentStub struct {
 	*sessionControlAgent
-	status            agent.SessionPauseStatus
+	status            recovery.SessionPauseStatus
 	pending           []recovery.PendingInput
 	resumeErr         error
 	resumeIdentity    recovery.TransferIdentity
@@ -26,9 +26,9 @@ type takeoverAgentStub struct {
 	queuedOwners      []string
 }
 
-func (s *takeoverAgentStub) UseSessionPauseEventPreparer()                       { s.preparerInstalled = true }
-func (s *takeoverAgentStub) CurrentSessionPauseStatus() agent.SessionPauseStatus { return s.status }
-func (s *takeoverAgentStub) PendingSessionInputs() []recovery.PendingInput       { return s.pending }
+func (s *takeoverAgentStub) UseSessionPauseEventPreparer()                          { s.preparerInstalled = true }
+func (s *takeoverAgentStub) CurrentSessionPauseStatus() recovery.SessionPauseStatus { return s.status }
+func (s *takeoverAgentStub) PendingSessionInputs() []recovery.PendingInput          { return s.pending }
 func (s *takeoverAgentStub) ResumePausedSession(_ context.Context, sid string, id recovery.TransferIdentity) error {
 	s.resumeCount++
 	s.resumeIdentity = id
@@ -36,15 +36,15 @@ func (s *takeoverAgentStub) ResumePausedSession(_ context.Context, sid string, i
 		return s.resumeErr
 	}
 	s.sessionSummary = &agent.SessionSummary{ID: sid}
-	s.status = agent.SessionPauseStatus{TransferIdentity: id, State: agent.SessionPauseReady}
+	s.status = recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPauseReady}
 	return nil
 }
-func (s *takeoverAgentStub) QueuePendingUserDraft(id string, parts []message.ContentPart) bool {
+func (s *takeoverAgentStub) QueueSubAgentDraft(id string, parts []message.ContentPart) bool {
 	if s.mirrorRejected {
 		return false
 	}
 	s.queuedOwners = append(s.queuedOwners, s.focused)
-	return s.sessionControlAgent.QueuePendingUserDraft(id, parts)
+	return s.sessionControlAgent.QueueSubAgentDraft(id, parts)
 }
 
 func newTakeoverTestModel() (Model, *takeoverAgentStub) {
@@ -123,11 +123,11 @@ func TestTakeoverCommandWaitsForValidatedActivation(t *testing.T) {
 			if fail {
 				backend.resumeErr = errors.New("lock busy")
 			}
-			m.SetTakeoverHandler(func(_ context.Context, sid string, timeout *time.Duration) (agent.SessionPauseStatus, error) {
+			m.SetTakeoverHandler(func(_ context.Context, sid string, timeout *time.Duration) (recovery.SessionPauseStatus, error) {
 				if sid != "target-session" || timeout == nil || *timeout != 2*time.Second {
 					t.Fatal("command arguments changed")
 				}
-				return agent.SessionPauseStatus{TransferIdentity: id, State: agent.SessionPauseReleased}, nil
+				return recovery.SessionPauseStatus{TransferIdentity: id, State: recovery.SessionPauseReleased}, nil
 			})
 			m.input.SetValue("/takeover target-session --timeout 2s")
 			cmd := m.startTakeoverCommand(m.input.Value())
@@ -156,8 +156,8 @@ func TestTakeoverCommandWaitsForValidatedActivation(t *testing.T) {
 
 func TestTakeoverCommandDoesNotActivateUnreleasedSource(t *testing.T) {
 	m, backend := newTakeoverTestModel()
-	m.SetTakeoverHandler(func(context.Context, string, *time.Duration) (agent.SessionPauseStatus, error) {
-		return agent.SessionPauseStatus{State: agent.SessionPauseDraining}, nil
+	m.SetTakeoverHandler(func(context.Context, string, *time.Duration) (recovery.SessionPauseStatus, error) {
+		return recovery.SessionPauseStatus{State: recovery.SessionPauseDraining}, nil
 	})
 	m.Update(m.startTakeoverCommand("/takeover target-session")())
 	if backend.resumeCount != 0 || m.currentSessionID() != "source-session" {
@@ -168,12 +168,12 @@ func TestTakeoverCommandDoesNotActivateUnreleasedSource(t *testing.T) {
 func TestTakeoverZeroTimeoutStartsWithoutActivating(t *testing.T) {
 	m, backend := newTakeoverTestModel()
 	called := false
-	m.SetTakeoverHandler(func(_ context.Context, sid string, timeout *time.Duration) (agent.SessionPauseStatus, error) {
+	m.SetTakeoverHandler(func(_ context.Context, sid string, timeout *time.Duration) (recovery.SessionPauseStatus, error) {
 		called = true
 		if timeout == nil || *timeout != 0 {
 			t.Fatal("zero observation timeout was not preserved")
 		}
-		return agent.SessionPauseStatus{TransferIdentity: recovery.TransferIdentity{SessionID: sid, TransferID: "transfer-1"}, State: agent.SessionPauseDraining}, nil
+		return recovery.SessionPauseStatus{SessionID: sid, TransferID: "transfer-1", State: recovery.SessionPauseDraining}, nil
 	})
 	m.Update(m.startTakeoverCommand("/takeover target-session --timeout 0s")())
 	if !called || backend.resumeCount != 0 {
@@ -182,7 +182,7 @@ func TestTakeoverZeroTimeoutStartsWithoutActivating(t *testing.T) {
 }
 
 func TestTakeoverFailurePreservesQueryableIdentity(t *testing.T) {
-	status := agent.SessionPauseStatus{TransferIdentity: recovery.TransferIdentity{TransferID: "transfer-1", SessionID: "target-session"}}
+	status := recovery.SessionPauseStatus{TransferID: "transfer-1", SessionID: "target-session"}
 	text := takeoverFailureMessage(status, errors.New("source observation unavailable"))
 	if !strings.Contains(text, status.TransferID) || !strings.Contains(text, status.SessionID) {
 		t.Fatal("failure hid the transfer identity")
@@ -191,7 +191,7 @@ func TestTakeoverFailurePreservesQueryableIdentity(t *testing.T) {
 
 func TestTakeoverRestoredInputProjectionNeverResubmitsOnIdle(t *testing.T) {
 	m, backend := newTakeoverTestModel()
-	backend.status = agent.SessionPauseStatus{State: agent.SessionPauseReady, PendingInputCount: 1}
+	backend.status = recovery.SessionPauseStatus{State: recovery.SessionPauseReady, PendingInputCount: 1}
 	backend.pending = []recovery.PendingInput{{InputID: "input-1", OwnerTaskID: "main", Content: "pending constraint"}}
 	m.restoreTakeoverPendingInputs()
 	m.restoreTakeoverPendingInputs()
@@ -209,7 +209,7 @@ func TestTakeoverRestoredInputProjectionNeverResubmitsOnIdle(t *testing.T) {
 
 func TestTakeoverSavedExitsWithoutCancellation(t *testing.T) {
 	m, backend := newTakeoverTestModel()
-	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionTransferEvent{Status: agent.SessionPauseStatus{TransferIdentity: recovery.TransferIdentity{SessionID: "source-session"}, State: agent.SessionPauseSaved}}})
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.SessionTransferEvent{Status: recovery.SessionPauseStatus{TransferIdentity: recovery.TransferIdentity{SessionID: "source-session"}, State: recovery.SessionPauseSaved}}})
 	found := false
 	for _, msg := range runCmdTree(cmd) {
 		if _, ok := msg.(tea.QuitMsg); ok {
@@ -222,17 +222,17 @@ func TestTakeoverSavedExitsWithoutCancellation(t *testing.T) {
 }
 
 func TestTakeoverSaveFailureShowsAvailableRecoveryAction(t *testing.T) {
-	for _, action := range []string{agent.SessionPauseActionRetrySave, agent.SessionPauseActionManualRecovery, ""} {
+	for _, action := range []string{recovery.SessionPauseActionRetrySave, recovery.SessionPauseActionManualRecovery, ""} {
 		t.Run(action, func(t *testing.T) {
 			m, backend := newTakeoverTestModel()
-			m.handleAgentEvent(agentEventMsg{event: agent.SessionTransferEvent{Status: agent.SessionPauseStatus{
+			m.handleAgentEvent(agentEventMsg{event: agent.SessionTransferEvent{Status: recovery.SessionPauseStatus{
 				TransferIdentity: recovery.TransferIdentity{SessionID: "source-session"},
-				State:            agent.SessionPauseSaveFailed, RecoverableAction: action,
+				State:            recovery.SessionPauseSaveFailed, RecoverableAction: action,
 			}}})
 			if !m.takeoverInputFrozen() || backend.cancelCalls != 0 || m.activeToast == nil {
 				t.Fatal("save failure did not preserve frozen ownership and show recovery guidance")
 			}
-			if got := strings.Contains(m.activeToast.Message, "retry-save"); got != (action == agent.SessionPauseActionRetrySave) {
+			if got := strings.Contains(m.activeToast.Message, "retry-save"); got != (action == recovery.SessionPauseActionRetrySave) {
 				t.Fatalf("incorrect recovery guidance: %q", m.activeToast.Message)
 			}
 		})
@@ -241,7 +241,7 @@ func TestTakeoverSaveFailureShowsAvailableRecoveryAction(t *testing.T) {
 
 func TestTakeoverDurableRetirementRemovesProjection(t *testing.T) {
 	m, backend := newTakeoverTestModel()
-	backend.status = agent.SessionPauseStatus{State: agent.SessionPauseReady, PendingInputCount: 2}
+	backend.status = recovery.SessionPauseStatus{State: recovery.SessionPauseReady, PendingInputCount: 2}
 	backend.pending = []recovery.PendingInput{{InputID: "input-1", OwnerTaskID: "main", Content: "first"}, {InputID: "input-2", OwnerTaskID: "main", Content: "second"}}
 	m.restoreTakeoverPendingInputs()
 	m.handleAgentEvent(agentEventMsg{event: agent.SessionPendingInputsUpdatedEvent{InputIDs: []string{"input-1"}}})

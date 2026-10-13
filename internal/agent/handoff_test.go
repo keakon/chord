@@ -23,7 +23,7 @@ import (
 // pendingHandoff carries the deferred result.
 func setupHandoffTurn(t *testing.T, a *MainAgent, planPath string) string {
 	t.Helper()
-	a.newTurn()
+	a.newTurn("")
 	turnID := a.turn.ID
 	callID := "handoff-1"
 	argsJSON := `{"plan_path":"` + planPath + `"}`
@@ -505,7 +505,7 @@ func TestHandoffAbandonEmitsCancelledResult(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 
-	a.newTurn()
+	a.newTurn("")
 
 	if a.pendingHandoff != nil {
 		t.Fatalf("pendingHandoff = %#v, want nil after newTurn", a.pendingHandoff)

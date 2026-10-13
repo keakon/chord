@@ -29,13 +29,13 @@ type MessageSender interface {
 	AppendContextMessage(msg message.Message)
 	CancelCurrentTurn() bool
 
-	// QueuePendingUserDraft mirrors a busy local draft into the agent's pending
+	// QueueSubAgentDraft mirrors a busy local draft into the agent's pending
 	// queue so it can be consumed later without showing in the transcript early.
-	QueuePendingUserDraft(draftID string, parts []message.ContentPart) bool
-	// UpdatePendingUserDraft replaces a queued draft before it is consumed.
-	UpdatePendingUserDraft(draftID string, parts []message.ContentPart) bool
-	// RemovePendingUserDraft removes a queued draft before it is consumed.
-	RemovePendingUserDraft(draftID string) bool
+	QueueSubAgentDraft(draftID string, parts []message.ContentPart) bool
+	// UpdateSubAgentDraft replaces a queued draft before it is consumed.
+	UpdateSubAgentDraft(draftID string, parts []message.ContentPart) bool
+	// RemoveSubAgentDraft removes a queued draft before it is consumed.
+	RemoveSubAgentDraft(draftID string) bool
 
 	// ContinueFromContext re-runs the LLM using the existing context without
 	// appending a new user message. Routes to focused SubAgent if one is active.
@@ -290,6 +290,12 @@ type WorkDirSnapshot struct {
 // consumes only a slice of this surface should target the smaller sub-interfaces
 // (MessageSender, ModelSelector, …) instead.
 type AgentForTUI interface {
+	InputDeliveryTarget() InputTarget
+	InputQueueSnapshot() *InputQueueSnapshot
+	SubmitUserInput(SubmitInput) bool
+	UpdateQueuedInput(UpdateInput) bool
+	DeleteQueuedInput(DeleteInput) bool
+	ControlInputQueue(QueueControl) bool
 	Events() <-chan AgentEvent
 	GetMessages() []message.Message
 	StartupResumeStatus() (pending bool, sessionID string)

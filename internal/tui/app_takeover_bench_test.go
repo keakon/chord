@@ -31,10 +31,10 @@ func BenchmarkTakeoverStreamingLongTranscript(b *testing.B) {
 				s, err := takeover.StartServer(takeover.ServerOptions{
 					StateDir: dir,
 					Record:   takeover.Record{Protocol: takeover.ProtocolVersion, RuntimeID: "sample-runtime", SessionID: "sample-session", Workspace: workspace, OwnerKind: takeover.OwnerTUI},
-					Start: func(context.Context, recovery.TransferIdentity) (agent.SessionPauseStatus, error) {
-						return agent.SessionPauseStatus{}, nil
+					Start: func(context.Context, recovery.TransferIdentity) (recovery.SessionPauseStatus, error) {
+						return recovery.SessionPauseStatus{}, nil
 					},
-					Status:    func(string) (agent.SessionPauseStatus, error) { return agent.SessionPauseStatus{}, nil },
+					Status:    func(string) (recovery.SessionPauseStatus, error) { return recovery.SessionPauseStatus{}, nil },
 					RetrySave: func(context.Context, string) error { return nil },
 				})
 				if err != nil {
@@ -54,7 +54,7 @@ func BenchmarkTakeoverStreamingLongTranscript(b *testing.B) {
 				m.viewport = benchmarkLargeViewport(5000)
 				m.viewport.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 				if state == "draining" {
-					m.takeover.status = agent.SessionPauseStatus{State: agent.SessionPauseDraining}
+					m.takeover.status = recovery.SessionPauseStatus{State: recovery.SessionPauseDraining}
 					m.takeover.sourceFrozen = true
 				}
 				_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "seed"}})

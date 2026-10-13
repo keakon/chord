@@ -12,7 +12,6 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/identity"
-	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/takeover"
 )
@@ -87,7 +86,7 @@ func runTakeoverStressCycle(t *testing.T, workspace string, retry bool) {
 	defer cancel()
 	ac, provider := takeoverProcessApp(t, workspace, false)
 	runDone, outputDone := make(chan error, 1), make(chan struct{})
-	statuses := make(chan agent.SessionPauseStatus, 16)
+	statuses := make(chan recovery.SessionPauseStatus, 16)
 	outputErrors := make(chan error, 1)
 	go func() {
 		defer close(outputDone)
@@ -116,7 +115,7 @@ func runTakeoverStressCycle(t *testing.T, workspace string, retry bool) {
 	case <-ctx.Done():
 		t.Fatal("source request never started")
 	}
-	if !ac.MainAgent.QueuePendingUserDraft("stress-draft", []message.ContentPart{{Type: message.ContentPartText, Text: "Queued instruction."}}) {
+	if !ac.MainAgent.SubmitUserInput(agent.SubmitInput{OperationID: "stress-submit", DraftID: "stress-draft", Target: ac.MainAgent.InputDeliveryTarget(), DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: "Queued instruction."}) {
 		t.Fatal("queued input rejected")
 	}
 	loc, err := locateTakeover(ctx, workspace, "sample-session")
@@ -125,7 +124,7 @@ func runTakeoverStressCycle(t *testing.T, workspace string, retry bool) {
 	}
 	zero := time.Duration(0)
 	status, err := startTakeover(ctx, loc, "sample-session", "transfer-stress", takeover.OwnerGateway, "binding-stress", &zero)
-	if err != nil || status.State != agent.SessionPauseDraining {
+	if err != nil || status.State != recovery.SessionPauseDraining {
 		t.Fatalf("start state=%s error=%v", status.State, err)
 	}
 	if lock, err := recovery.AcquireSessionLock(ac.SessionDir); err == nil {
@@ -141,14 +140,14 @@ func runTakeoverStressCycle(t *testing.T, workspace string, retry bool) {
 	if err := os.WriteFile(filepath.Join(workspace, "release-request"), []byte("ready"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	waitState := func(want string) agent.SessionPauseStatus {
+	waitState := func(want string) recovery.SessionPauseStatus {
 		for {
 			select {
 			case status := <-statuses:
 				if status.State == want {
 					return status
 				}
-				if status.State == agent.SessionPauseSaveFailed && want != agent.SessionPauseSaveFailed {
+				if status.State == recovery.SessionPauseSaveFailed && want != recovery.SessionPauseSaveFailed {
 					t.Fatalf("unexpected save failure: %s", status.Error)
 				}
 			case err := <-outputErrors:
@@ -159,8 +158,8 @@ func runTakeoverStressCycle(t *testing.T, workspace string, retry bool) {
 		}
 	}
 	if retry {
-		failed := waitState(agent.SessionPauseSaveFailed)
-		if failed.RecoverableAction != agent.SessionPauseActionRetrySave {
+		failed := waitState(recovery.SessionPauseSaveFailed)
+		if failed.RecoverableAction != recovery.SessionPauseActionRetrySave {
 			t.Fatalf("failure is not safely retryable: %+v", failed)
 		}
 		if lock, err := recovery.AcquireSessionLock(ac.SessionDir); err == nil {
@@ -174,7 +173,7 @@ func runTakeoverStressCycle(t *testing.T, workspace string, retry bool) {
 			t.Fatal(err)
 		}
 	}
-	saved := waitState(agent.SessionPauseSaved)
+	saved := waitState(recovery.SessionPauseSaved)
 	if saved.PendingInputCount != 1 || provider.calls.Load() != 1 {
 		t.Fatal("save or retry lost input or replayed model work")
 	}
@@ -201,13 +200,13 @@ func runTakeoverStressCycle(t *testing.T, workspace string, retry bool) {
 		t.Fatal("source cleanup wrote after ownership release")
 	}
 	released, err := queryTakeover(ctx, loc, "sample-session", saved.TransferID)
-	if err != nil || released.State != agent.SessionPauseReleased {
+	if err != nil || released.State != recovery.SessionPauseReleased {
 		t.Fatalf("released status=%s error=%v", released.State, err)
 	}
 	target, targetProvider := takeoverProcessApp(t, workspace, true)
 	t.Cleanup(target.Close)
 	ready, ok := pausedStartupStatus(target)
-	if !ok || ready.State != agent.SessionPauseReady || ready.PendingInputCount != 1 || targetProvider.calls.Load() != 0 {
+	if !ok || ready.State != recovery.SessionPauseReady || ready.PendingInputCount != 1 || targetProvider.calls.Load() != 0 {
 		t.Fatal("ordinary target restore did not preserve paused input")
 	}
 	if lock, err := recovery.AcquireSessionLock(target.SessionDir); err == nil {

@@ -487,7 +487,7 @@ func TestHandleAgentDoneDoesNotAppendPseudoUserMessage(t *testing.T) {
 	a.subs.subAgents[sub.instanceID] = sub
 	a.subs.mu.Unlock()
 
-	a.newTurn()
+	a.newTurn("")
 	a.handleAgentDone(Event{
 		SourceID: sub.instanceID,
 		Payload:  &AgentResult{Summary: "finished"},

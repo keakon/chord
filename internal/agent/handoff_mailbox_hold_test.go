@@ -375,7 +375,7 @@ func TestHandoffAbandonEmitsCancelledEvent(t *testing.T) {
 	}
 	drainAgentEvents(a.outputCh)
 
-	a.newTurn()
+	a.newTurn("")
 
 	if a.pendingHandoff != nil {
 		t.Fatal("newTurn must clear the pending handoff")

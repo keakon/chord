@@ -12,7 +12,7 @@ import (
 // suppress global idle and must not auto-start a turn.
 func TestParkedUserQueueReportsGlobalIdleWithoutStartingTurn(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	// A system-generated entry survives the interrupt commit (which only commits
 	// FromUser non-slash input), so the queue stays non-empty while the user has
 	// not acted again.
@@ -126,7 +126,7 @@ func TestHandoffCancelParkedQueueConsumedByNextAction(t *testing.T) {
 // resumes normal semantics.
 func TestInterruptResidualSlashCommandProcessedAfterResume(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.pendingUserMessages = []pendingUserMessage{{Content: "/rename parked-title", FromUser: true}}
 
 	if !a.CancelCurrentTurn() {

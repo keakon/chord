@@ -39,7 +39,7 @@ func TestPrepareMessagesForLLM_StableReusePreservesToolResultBoundaries(t *testi
 						ShellSuccessAgeTurns: 99,
 						ShellSuccessBytes:    1,
 					}}}}
-					a.newTurn()
+					a.newTurn("")
 					a.providerModelRef = "sample/test-model"
 					a.lastLLMRequestModelRef = a.providerModelRef
 					a.llmModelRunLength = 1

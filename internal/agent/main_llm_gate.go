@@ -12,11 +12,13 @@ import (
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 type compactionContinuationKind string
 
 type continuationPlan struct {
+	deliveryWorkID   string
 	kind             compactionContinuationKind
 	turnID           uint64
 	turnEpoch        uint64
@@ -64,6 +66,7 @@ const (
 
 // pendingMainLLMCall remembers which continuation should resume after async compaction.
 type pendingMainLLMCall struct {
+	deliveryWorkID    string
 	turnID            uint64
 	turnEpoch         uint64
 	agentErrSourceID  string
@@ -84,6 +87,7 @@ func (s *compactionState) pendingCall() *pendingMainLLMCall {
 		return nil
 	}
 	return &pendingMainLLMCall{
+		deliveryWorkID:    s.continuation.deliveryWorkID,
 		turnID:            s.continuation.turnID,
 		turnEpoch:         s.continuation.turnEpoch,
 		agentErrSourceID:  s.continuation.agentErrSourceID,
@@ -104,6 +108,7 @@ func (a *MainAgent) resetCompactionState() {
 }
 
 func (a *MainAgent) beginCompactionState(planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, headSplit int, cancel context.CancelFunc) {
+	continuation.deliveryWorkID = a.delivery.currentWorkID
 	a.compactionState = compactionState{
 		running:      true,
 		planID:       planID,
@@ -460,6 +465,9 @@ func (a *MainAgent) noteModelDrivenDenyDiagnosticOnce() {
 }
 
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
+	if a.prepareDeliveryRequest(turnCtx, turnID, agentErrSourceID) {
+		return
+	}
 	if !a.ensureDirectoryInstructionsBeforeRequest(turnCtx, turnID, agentErrSourceID) {
 		return
 	}
@@ -925,7 +933,7 @@ func (a *MainAgent) handleCompactionReady(evt Event) {
 // applyReadyDraft applies the compaction draft that was waiting for the continuation barrier.
 // This is called from barrier events (beginMainLLMAfterPreparation, IdleEvent).
 func (a *MainAgent) applyReadyDraft() (applySucceeded bool, handledIdleBarrier bool) {
-	if a.compactionState.readyDraft == nil || a.questions.active != nil {
+	if a.compactionState.readyDraft == nil || a.questions.active != nil || a.delivery.inflight != nil || len(a.delivery.pending) > 0 {
 		return false, false
 	}
 
@@ -1006,12 +1014,18 @@ func (a *MainAgent) handleCompactionOversizeSuspend(evt Event) {
 			)
 			a.mainLLMRequestInFlight.Store(false)
 			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("LLM stream failed: automatic context compaction already retried %d times and the context still exceeds all available models; try /compact or reduce the active context", a.turn.OversizeRecoveryCount)})
+			if a.turn != nil {
+				a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
+			}
 			a.setIdleAndDrainPending()
 			return
 		}
 		if !a.ensureOversizeDrivenCompaction() {
 			a.mainLLMRequestInFlight.Store(false)
 			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("automatic context compaction could not start; please try /compact or reduce the active context")})
+			if a.turn != nil {
+				a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
+			}
 			a.setIdleAndDrainPending()
 			return
 		}
@@ -1232,7 +1246,7 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 			a.loopState.State = LoopStateExecuting
 			a.emitLoopStateChanged()
 		}
-		a.newTurn()
+		a.newTurn(pending.deliveryWorkID)
 		a.mergePendingInputsForTurnContinuation()
 		if a.turn == nil {
 			return true
@@ -1264,6 +1278,9 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 				Level:   "warn",
 			})
 			a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "length_recovery")
+			if a.turn != nil {
+				a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
+			}
 			a.setIdleAndDrainPending()
 			return true
 		}
@@ -1337,13 +1354,18 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 			Level:   "warn",
 		})
 		a.discardSpeculativeStreamToolsAndClearToolTrace(a.turn, "oversize_compaction_failed")
+		if a.turn != nil {
+			a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkFailed)
+		}
 		a.setIdleAndDrainPending()
 		return true
 	}
 	// If compaction itself failed for a regular main continuation, do not
 	// immediately retry the same gate; resume the pending continuation directly.
 	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
-	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, pending.turnID, snapshotLLMRequest(a.ctxMgr), pending.agentErrSourceID)
+	if !a.prepareDeliveryRequest(a.turn.Ctx, pending.turnID, pending.agentErrSourceID) {
+		a.spawnMainLLMResponseGoroutine(a.turn.Ctx, pending.turnID, snapshotLLMRequest(a.ctxMgr), pending.agentErrSourceID)
+	}
 	return true
 }
 

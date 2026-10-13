@@ -410,7 +410,7 @@ func TestCheckpointRetainedFailureRecordsStatusVocabulary(t *testing.T) {
 func TestModelDrivenCheckpointKeepsFailedToolRecordsLive(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
-	a.newTurn()
+	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)
 
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement the retention"})

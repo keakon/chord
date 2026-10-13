@@ -10,6 +10,7 @@ type keyMapSetter struct {
 var keyMapSetters = []keyMapSetter{
 	{keybinding.ActionInsertEscape, func(km *KeyMap) *[]string { return &km.InsertEscape }},
 	{keybinding.ActionInsertSubmit, func(km *KeyMap) *[]string { return &km.InsertSubmit }},
+	{keybinding.ActionInsertSubmitAfterCompletion, func(km *KeyMap) *[]string { return &km.InsertSubmitAfterCompletion }},
 	{keybinding.ActionInsertNewline, func(km *KeyMap) *[]string { return &km.InsertNewline }},
 	{keybinding.ActionInsertHistorySearch, func(km *KeyMap) *[]string { return &km.InsertHistorySearch }},
 	{keybinding.ActionInsertHistoryUp, func(km *KeyMap) *[]string { return &km.InsertHistoryUp }},

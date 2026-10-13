@@ -59,6 +59,7 @@ func (a *MainAgent) Run(ctx context.Context) error {
 	a.publishRestoredQuestions()
 	// Start the async persistence loop.
 	a.startPersistLoop()
+	a.initializeInputDelivery()
 
 	// WaitingMain expiry must not depend on user speech: parked workers are
 	// reclaimed by an independent wall-clock trigger (see
@@ -146,6 +147,17 @@ func (a *MainAgent) dispatch(evt Event) {
 		if payload, ok := evt.Payload.(skillDiscoveryPublishEvent); ok {
 			a.handleSkillDiscoveryPublish(payload)
 		}
+	case eventInputDeliveryEnvironmentChanged:
+		a.delivery.environmentError = ""
+		if a.delivery.snapshot.Load() != nil {
+			a.publishInputDelivery()
+		}
+	case eventInputDeliveryAdvance:
+		a.advanceInputDelivery()
+	case eventInputDeliveryOperation:
+		a.handleDeliveryOperation(evt.Payload.(*deliveryOperation))
+	case eventInputDeliveryCommitted:
+		a.handleDeliveryCommitted(evt.Payload.(deliveryCommit))
 	case EventMemoryControl:
 		a.handleMemoryControl(evt.Payload.(*memoryControlRequest))
 	case EventMemoryControlDone:
@@ -163,10 +175,6 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.retryQuestionCommit(evt.Payload.(*questionCommit))
 	case EventUserMessage:
 		a.handleUserMessage(evt)
-	case EventPendingDraftUpsert:
-		a.handlePendingDraftUpsert(evt)
-	case EventPendingDraftRemove:
-		a.handlePendingDraftRemove(evt)
 	case EventAppendContext:
 		a.handleAppendContext(evt)
 	case EventLLMResponse:
@@ -244,7 +252,7 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleJobFinished(evt)
 	case EventContinue:
 		a.mailboxDeliveryPaused.Store(false)
-		a.handleContinueFromContext()
+		a.handleContinueFromContext("")
 	case EventHandoffResolve:
 		a.handleHandoffResolveEvent(evt)
 	case EventLoopAssessment:
@@ -301,6 +309,12 @@ func (a *MainAgent) sendEventUntil(evt Event, done <-chan struct{}) bool {
 }
 
 func (a *MainAgent) queueLoopEvent(evt Event) {
+	if assessment, ok := evt.Payload.(*LoopAssessment); ok && evt.Type == EventLoopAssessment {
+		assessment.Target, assessment.WorkID = a.InputDeliveryTarget(), a.delivery.currentWorkID
+		if a.turn != nil {
+			assessment.TurnEpoch = a.turn.Epoch
+		}
+	}
 	if !a.started.Load() {
 		a.sendEvent(evt)
 		return
@@ -460,6 +474,10 @@ func (a *MainAgent) EventQueueStats() EventQueueStats {
 }
 
 func (a *MainAgent) emitGlobalIdleIfReady() bool {
+	if a.deliveryPreventsGlobalIdle() {
+		a.globalIdle.Store(false)
+		return false
+	}
 	if a.sessionExecutionPaused() {
 		return false
 	}
@@ -636,6 +654,8 @@ func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 		return "TUI output channel full, waiting to deliver session transfer", []any{"transfer_id", e.Status.TransferID, "state", e.Status.State}, true
 	case SessionPendingInputsUpdatedEvent:
 		return "TUI output channel full, waiting to deliver pending input acknowledgement", nil, true
+	case InputQueueChangedEvent, InputQueueOperationResultEvent:
+		return "TUI output channel full, waiting to deliver input queue state", nil, true
 	case InputResultEvent:
 		return "TUI output channel full, waiting to deliver input result", []any{"request_id", e.RequestID}, true
 	case AgentActivityEvent:

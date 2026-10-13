@@ -19,6 +19,7 @@ type Turn struct {
 	deliveryPending           atomic.Bool
 	deliveryCancel            *Event
 	deliverySubCancel         atomic.Bool
+	DeliveryWorkID            string
 	nativeImageFallback       atomic.Bool
 	nativeImageDeadline       atomic.Int64
 	questionCompletionBlocked bool

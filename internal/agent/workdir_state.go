@@ -118,6 +118,9 @@ func (a *MainAgent) publishWorkDirChange(prev, next WorkDirState) {
 		return
 	}
 	a.emitToTUI(WorkDirChangedEvent{Generation: next.Generation})
+	if a.delivery.snapshot.Load() != nil {
+		a.sendEvent(Event{Type: eventInputDeliveryEnvironmentChanged})
+	}
 }
 
 // WorkDirSnapshot reports the display-relevant view of this agent's active

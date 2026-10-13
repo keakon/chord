@@ -29,7 +29,7 @@ func newStaleReadArchiveAgent(t *testing.T) (*MainAgent, []message.Message) {
 	t.Helper()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = staleReadArchivePolicy()
-	a.newTurn()
+	a.newTurn("")
 	a.runningModelRef = "p/m"
 	a.recordLLMModelRun("p/m")
 	a.recordLLMModelRun("p/m")

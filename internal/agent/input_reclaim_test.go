@@ -1,180 +1,42 @@
 package agent
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 )
 
-func TestProcessPendingUserMessagesBeforeLLMInTurnEmitsConsumedEvent(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-
-	a.handleUserMessage(Event{Payload: "first"})
-	if a.turn == nil {
-		t.Fatal("expected active turn after first user message")
+func submitMainDraftForTest(a *MainAgent, draftID string, parts []message.ContentPart) bool {
+	return a.SubmitUserInput(SubmitInput{OperationID: makeRequestID(), DraftID: draftID, Target: a.InputDeliveryTarget(), DeliveryPolicy: recovery.InputDeliveryNextRequest, Parts: parts})
+}
+func TestInputDeliveryDraftDeletionUsesIdentityAndRevision(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
+	first := submitDeliveryForTest(t, a, "first", recovery.InputDeliveryNextRequest)
+	second := submitDeliveryForTest(t, a, "second", recovery.InputDeliveryNextRequest)
+	result := runDeliveryOperation(t, a, &deliveryOperation{delete: &DeleteInput{OperationID: "delete", Target: a.InputDeliveryTarget(), InputID: first, ExpectedRevision: 1}})
+	if result.Result != InputQueueCommitted || len(a.delivery.committed.Inputs) != 1 || a.delivery.committed.Inputs[0].InputID != second {
+		t.Fatalf("delete: %+v", result)
 	}
-	a.handlePendingDraftUpsert(Event{
-		Payload: pendingUserMessageFromDraft("draft-1", []message.ContentPart{{Type: "text", Text: "queued"}}),
-	})
-
-	a.processPendingUserMessagesBeforeLLMInTurn()
-
-	msgs := a.ctxMgr.Snapshot()
-	if len(msgs) != 2 || msgs[1].Role != "user" || msgs[1].Content != "queued" {
-		t.Fatalf("messages after pending consume = %+v, want second user message 'queued'", msgs)
+	stale := runDeliveryOperation(t, a, &deliveryOperation{delete: &DeleteInput{OperationID: "again", Target: a.InputDeliveryTarget(), InputID: first, ExpectedRevision: 1}})
+	if stale.Result != InputQueueConflict {
+		t.Fatal("deleted identity could be reused")
 	}
-
-	// The turn's first request waits on the session readiness gates and reports
-	// preparing activities from its goroutine; their arrival order against the
-	// consumed event is not a contract, so skip them.
-	var consumed PendingDraftConsumedEvent
-	for i := 0; ; i++ {
-		if i == 20 {
-			t.Fatal("PendingDraftConsumedEvent not observed within 20 events")
+}
+func TestInputDeliveryIdleDraftConsumedIdentity(t *testing.T) {
+	a := newTestMainAgent(t, t.TempDir())
+	a.handleDeliveryOperation(&deliveryOperation{submit: &SubmitInput{OperationID: "submit", DraftID: "draft", Target: a.InputDeliveryTarget(), Content: "sample"}})
+	for range 20 {
+		if event, ok := nextAgentEvent(t, a.Events()).(PendingDraftConsumedEvent); ok {
+			if event.DraftID != "draft" || event.InputID == "" || event.InputID != a.ctxMgr.Snapshot()[0].InputID {
+				t.Fatalf("consumed identity: %+v", event)
+			}
+			return
 		}
-		ev := nextNonRequestCycleEvent(t, a.Events())
-		if _, ok := ev.(AgentActivityEvent); ok {
-			continue
-		}
-		c, ok := ev.(PendingDraftConsumedEvent)
-		if !ok {
-			t.Fatalf("event type = %T, want PendingDraftConsumedEvent", ev)
-		}
-		consumed = c
-		break
 	}
-	if consumed.DraftID != "draft-1" {
-		t.Fatalf("DraftID = %q, want draft-1", consumed.DraftID)
-	}
-	if len(consumed.Parts) != 1 || consumed.Parts[0].Text != "queued" {
-		t.Fatalf("Parts = %+v, want single queued text part", consumed.Parts)
-	}
-}
-
-func TestHandlePendingDraftRemoveDeletesMirroredQueueItem(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-
-	a.handleUserMessage(Event{Payload: "first"})
-	a.handlePendingDraftUpsert(Event{
-		Payload: pendingUserMessageFromDraft("draft-1", []message.ContentPart{{Type: "text", Text: "one"}}),
-	})
-	a.handlePendingDraftUpsert(Event{
-		Payload: pendingUserMessageFromDraft("draft-2", []message.ContentPart{{Type: "text", Text: "two"}}),
-	})
-
-	a.handlePendingDraftRemove(Event{
-		Payload: "draft-1",
-	})
-
-	if len(a.pendingUserMessages) != 1 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 1", len(a.pendingUserMessages))
-	}
-	if got := a.pendingUserMessages[0].DraftID; got != "draft-2" {
-		t.Fatalf("remaining DraftID = %q, want draft-2", got)
-	}
-}
-
-func TestHandlePendingDraftUpsertWhenIdleEmitsConsumedEvent(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-
-	a.handlePendingDraftUpsert(Event{
-		Payload: pendingUserMessageFromDraft("draft-1", []message.ContentPart{{Type: "text", Text: "queued"}}),
-	})
-
-	msgs := a.ctxMgr.Snapshot()
-	if len(msgs) != 1 || msgs[0].Role != "user" || msgs[0].Content != "queued" {
-		t.Fatalf("messages after idle pending consume = %+v, want single user message 'queued'", msgs)
-	}
-	ev := nextNonRequestCycleEvent(t, a.Events())
-	if _, ok := ev.(PendingDraftConsumedEvent); !ok {
-		t.Fatalf("event type = %T, want PendingDraftConsumedEvent", ev)
-	}
-}
-
-func TestHandlePendingDraftUpsertWhenIdleDropsStaleQueuedCopy(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-
-	// Busy: the draft is mirrored into the queue instead of being committed.
-	a.handleUserMessage(Event{Payload: "first"})
-	a.handlePendingDraftUpsert(Event{
-		Payload: pendingUserMessageFromDraft("draft-1", []message.ContentPart{{Type: "text", Text: "retried"}}),
-	})
-	if len(a.pendingUserMessages) != 1 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 1 mirrored draft", len(a.pendingUserMessages))
-	}
-
-	// The client retries the same draft once the agent is idle. The mirror left
-	// behind by the earlier submission must not survive to be injected again.
-	a.turn = nil
-	a.handlePendingDraftUpsert(Event{
-		Payload: pendingUserMessageFromDraft("draft-1", []message.ContentPart{{Type: "text", Text: "retried"}}),
-	})
-
-	if len(a.pendingUserMessages) != 0 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 0 after idle commit", len(a.pendingUserMessages))
-	}
-	msgs := a.ctxMgr.Snapshot()
-	if len(msgs) != 2 || msgs[1].Role != "user" || msgs[1].Content != "retried" {
-		t.Fatalf("messages after idle commit = %+v, want exactly one retried draft", msgs)
-	}
-
-	a.processPendingUserMessagesBeforeLLMInTurn()
-	if got := len(a.ctxMgr.Snapshot()); got != 2 {
-		t.Fatalf("messages after drain = %d, want 2", got)
-	}
-}
-
-func TestHandleUserMessageWhenBusyDoesNotDropQueuedUserInput(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-
-	a.handleUserMessage(Event{Payload: "first"})
-	if a.turn == nil {
-		t.Fatal("expected active turn after first user message")
-	}
-	for i := range 96 {
-		a.handleUserMessage(Event{Payload: fmt.Sprintf("queued-%02d", i)})
-	}
-
-	if got := len(a.pendingUserMessages); got != 96 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 96", got)
-	}
-	if got := a.pendingUserMessages[0].Content; got != "queued-00" {
-		t.Fatalf("first queued content = %q, want queued-00", got)
-	}
-	if got := a.pendingUserMessages[len(a.pendingUserMessages)-1].Content; got != "queued-95" {
-		t.Fatalf("last queued content = %q, want queued-95", got)
-	}
-}
-
-func TestHandlePendingDraftUpsertWhenBusyDoesNotDropAtLargeQueueDepth(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-
-	a.handleUserMessage(Event{Payload: "first"})
-	if a.turn == nil {
-		t.Fatal("expected active turn after first user message")
-	}
-	for i := range 96 {
-		a.handleUserMessage(Event{Payload: fmt.Sprintf("queued-%02d", i)})
-	}
-	a.handlePendingDraftUpsert(Event{
-		Payload: pendingUserMessageFromDraft("draft-large", []message.ContentPart{{Type: "text", Text: "draft payload"}}),
-	})
-
-	if got := len(a.pendingUserMessages); got != 97 {
-		t.Fatalf("len(pendingUserMessages) = %d, want 97", got)
-	}
-	last := a.pendingUserMessages[len(a.pendingUserMessages)-1]
-	if last.DraftID != "draft-large" {
-		t.Fatalf("last DraftID = %q, want draft-large", last.DraftID)
-	}
+	t.Fatal("missing consumed event")
 }
 
 func nextAgentEvent(t *testing.T, events <-chan AgentEvent) AgentEvent {

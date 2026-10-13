@@ -26,7 +26,7 @@ func newFallbackDownshiftTestAgent(t *testing.T) *MainAgent {
 	// application so the boundary re-evaluates against a genuine model change
 	// instead of the first-application case that arms nothing.
 	a.applyModelCompactionConfig()
-	a.newTurn()
+	a.newTurn("")
 	a.started.Store(true)
 	t.Cleanup(func() {
 		if a.IsCompactionRunning() {

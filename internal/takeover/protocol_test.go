@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 func TestFramesRejectOversizeMalformedAndUnknownFields(t *testing.T) {
@@ -22,7 +22,7 @@ func TestFramesRejectOversizeMalformedAndUnknownFields(t *testing.T) {
 }
 
 func TestPublicStatusMatchesGatewayFieldNames(t *testing.T) {
-	status := PublicStatus(agent.SessionPauseStatus{PendingInputCount: 3, Error: "error detail", Blockers: []agent.SessionPauseBlocker{{Kind: "tool", Description: "Running tool"}}})
+	status := PublicStatus(recovery.SessionPauseStatus{PendingInputCount: 3, Error: "error detail", Blockers: []recovery.SessionPauseBlocker{{Kind: "tool", Description: "Running tool"}}})
 	var buf bytes.Buffer
 	if err := writeFrame(&buf, status); err != nil {
 		t.Fatal(err)
@@ -35,11 +35,11 @@ func TestPublicStatusMatchesGatewayFieldNames(t *testing.T) {
 }
 
 func TestEscapedBlockersStayInsideWireLimit(t *testing.T) {
-	var blockers []agent.SessionPauseBlocker
+	var blockers []recovery.SessionPauseBlocker
 	for range 130 {
-		blockers = append(blockers, agent.SessionPauseBlocker{OwnerTaskID: strings.Repeat("\x00", 128), Kind: strings.Repeat("\x00", 64), Description: strings.Repeat("\x00", 256)})
+		blockers = append(blockers, recovery.SessionPauseBlocker{OwnerTaskID: strings.Repeat("\x00", 128), Kind: strings.Repeat("\x00", 64), Description: strings.Repeat("\x00", 256)})
 	}
-	status := agent.SessionPauseStatus{Blockers: blockers, BlockerCount: len(blockers)}
+	status := recovery.SessionPauseStatus{Blockers: blockers, BlockerCount: len(blockers)}
 	for offset := 0; ; {
 		page := pageStatus(status, offset)
 		var buf bytes.Buffer

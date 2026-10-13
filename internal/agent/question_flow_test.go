@@ -21,7 +21,7 @@ func questionItems(headers ...string) []tools.QuestionItem {
 }
 func newQuestionTestAgent(t *testing.T) *MainAgent {
 	a := newTestMainAgent(t, t.TempDir())
-	a.newTurn()
+	a.newTurn("")
 	a.initQuestions()
 	t.Cleanup(func() { a.restoreQuestions(nil) })
 	return a

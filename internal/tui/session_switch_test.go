@@ -4338,6 +4338,7 @@ func (f *focusedMessagesAgent) StartupResumeStatus() (bool, string) {
 }
 
 type sessionControlAgent struct {
+	submittedInputs         []agent.SubmitInput
 	events                  chan agent.AgentEvent
 	messages                []message.Message
 	messagesByFocus         map[string][]message.Message
@@ -4431,16 +4432,16 @@ func (s *sessionControlAgent) CancelCurrentTurn() bool {
 	s.cancelCalls++
 	return s.cancelResult
 }
-func (s *sessionControlAgent) QueuePendingUserDraft(draftID string, parts []message.ContentPart) bool {
+func (s *sessionControlAgent) QueueSubAgentDraft(draftID string, parts []message.ContentPart) bool {
 	s.queuedDraftIDs = append(s.queuedDraftIDs, draftID)
 	cp := append([]message.ContentPart(nil), parts...)
 	s.queuedDrafts = append(s.queuedDrafts, cp)
 	return true
 }
-func (s *sessionControlAgent) UpdatePendingUserDraft(draftID string, parts []message.ContentPart) bool {
-	return s.QueuePendingUserDraft(draftID, parts)
+func (s *sessionControlAgent) UpdateSubAgentDraft(draftID string, parts []message.ContentPart) bool {
+	return s.QueueSubAgentDraft(draftID, parts)
 }
-func (s *sessionControlAgent) RemovePendingUserDraft(draftID string) bool {
+func (s *sessionControlAgent) RemoveSubAgentDraft(draftID string) bool {
 	s.removedDraftIDs = append(s.removedDraftIDs, draftID)
 	return true
 }
@@ -4869,10 +4870,10 @@ func TestForkSessionEventSubmitReloadsImagePathOnlyAttachment(t *testing.T) {
 	applyTestCmd(t, &m, cmd)
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	if got := len(backend.submittedInputs); got != 1 {
+		t.Fatalf("SubmitUserInput() calls = %d, want 1", got)
 	}
-	sent := backend.sentMultipart[0]
+	sent := backend.submittedInputs[0].Parts
 	if got := len(sent); got != 2 {
 		t.Fatalf("sent parts = %d, want 2", got)
 	}
@@ -4910,10 +4911,10 @@ func TestForkSessionEventSubmitRestoresImageAfterPlainTextEdit(t *testing.T) {
 	m.input.SetValue("edited " + m.input.Value())
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	if got := len(backend.submittedInputs); got != 1 {
+		t.Fatalf("SubmitUserInput() calls = %d, want 1", got)
 	}
-	sent := backend.sentMultipart[0]
+	sent := backend.submittedInputs[0].Parts
 	if got := len(sent); got != 2 {
 		t.Fatalf("sent parts = %d, want 2", got)
 	}
@@ -4948,10 +4949,10 @@ func TestForkSessionEventSubmitKeepsLiteralImageTextAfterPlainTextEdit(t *testin
 	m.input.SetValue("edited " + m.input.Value())
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 
-	if got := len(backend.sentMultipart); got != 1 {
-		t.Fatalf("SendUserMessageWithParts() calls = %d, want 1", got)
+	if got := len(backend.submittedInputs); got != 1 {
+		t.Fatalf("SubmitUserInput() calls = %d, want 1", got)
 	}
-	sent := backend.sentMultipart[0]
+	sent := backend.submittedInputs[0].Parts
 	if got := len(sent); got != 2 {
 		t.Fatalf("sent parts = %d, want 2", got)
 	}

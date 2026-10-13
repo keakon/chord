@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/x/term"
 	tea "github.com/keakon/bubbletea/v2"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/inputhistory"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tui"
 )
 
@@ -109,10 +109,10 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 	tuiModel.ApplyCadenceProfileFromEnv()
 	if ac != nil {
 		tuiModel.SetInstanceID(ac.InstanceID)
-		tuiModel.SetTakeoverHandler(func(ctx context.Context, sid string, timeout *time.Duration) (agent.SessionPauseStatus, error) {
+		tuiModel.SetTakeoverHandler(func(ctx context.Context, sid string, timeout *time.Duration) (recovery.SessionPauseStatus, error) {
 			loc, err := locateTakeover(ctx, ac.ContentRoot, sid)
 			if err != nil {
-				return agent.SessionPauseStatus{}, err
+				return recovery.SessionPauseStatus{}, err
 			}
 			return startTakeover(ctx, loc, sid, newTakeoverIdentity(), "tui", ac.InstanceID, timeout)
 		})

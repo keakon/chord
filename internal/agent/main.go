@@ -46,6 +46,7 @@ type MainAgent struct {
 	directoryPreparation  *directoryInstructionPreparation
 
 	skillPublisher              skillDiscoveryPublisher
+	delivery                    inputDeliveryRuntime
 	pause                       sessionPauseRuntime
 	stagedMainInputs            []stagedSessionInput // owned by the event loop
 	requestStarts               atomic.Uint64
@@ -1470,6 +1471,10 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	}
 
 	log.Debugf("handling user message content_len=%v", len(content))
+	if a.sessionExecutionPaused() && a.pause.restored && !IsTUILocalOnlySlashCommand(content) && !IsIdleOnlySlashCommand(content) {
+		a.handleDeliveryOperation(&deliveryOperation{inputID: inputID, acceptedOrder: acceptedOrder, submit: &SubmitInput{OperationID: makeRequestID(), RequestID: requestID, Target: a.InputDeliveryTarget(), DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: content, Parts: parts}})
+		return
+	}
 	if a.handlePausedSessionInput(content, parts, inputID, requestID, acceptedOrder) {
 		return
 	}
@@ -1516,6 +1521,10 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 			a.emitToTUI(ToastEvent{Message: "MCP change already in progress", Level: "warn"})
 			return
 		}
+		if !IsIdleOnlySlashCommand(strings.TrimSpace(content)) {
+			a.handleDeliveryOperation(&deliveryOperation{userIntentApplied: true, inputID: inputID, acceptedOrder: acceptedOrder, submit: &SubmitInput{OperationID: makeRequestID(), RequestID: requestID, Target: a.InputDeliveryTarget(), DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: content, Parts: parts}})
+			return
+		}
 		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
 			InputID: inputID, RequestID: requestID,
 			AcceptedOrder: acceptedOrder,
@@ -1533,6 +1542,11 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 		return
 	}
 
+	a.delivery.restoredNextInputsBlocked = false
+	if a.delivery.inflight != nil || len(a.delivery.pending) > 0 || a.delivery.persistenceError != nil || a.deliveryHasRunnableQueue() {
+		a.handleDeliveryOperation(&deliveryOperation{userIntentApplied: true, inputID: inputID, acceptedOrder: acceptedOrder, submit: &SubmitInput{OperationID: makeRequestID(), RequestID: requestID, Target: a.InputDeliveryTarget(), DeliveryPolicy: recovery.InputDeliveryNextRequest, Content: content, Parts: parts}})
+		return
+	}
 	// A parked queue waits for this action: enqueue the new message behind it and
 	// dispatch the whole batch in arrival order instead of starting a turn with
 	// only the new message.
@@ -1553,7 +1567,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	// Start a new turn and call LLM.
 	a.tryRecoverPersistenceBeforeTurn()
 	a.stageNextSubAgentMailboxBatch()
-	a.newTurn()
+	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
 	a.turn.originAcceptedOrder = acceptedOrder
 	turnID := a.turn.ID
 	turnCtx := a.turn.Ctx
@@ -1581,87 +1595,6 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 
 	a.emitInputResult(requestID, InputStarted, "", turnID)
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
-}
-
-func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
-	pending, ok := evt.Payload.(pendingUserMessage)
-	if !ok {
-		log.Errorf("handlePendingDraftUpsert: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
-		return
-	}
-	pending.DraftID = strings.TrimSpace(pending.DraftID)
-	if pending.DraftID == "" {
-		return
-	}
-	pending.Parts = pendingDraftParts(pending)
-	pending.Content = pendingUserMessageText(pending)
-	if a.sessionExecutionPaused() {
-		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pending)
-		return
-	}
-
-	if a.turn != nil || a.mcpTransitionActive.Load() {
-		if a.turn != nil {
-			if a.tryHandleBusySlashCommand(pending.Content) {
-				return
-			}
-		}
-		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pending)
-		return
-	}
-
-	content := pendingUserMessageText(pending)
-	if a.handleLocalOnlySlashCommands(content, pending.Parts, false) {
-		return
-	}
-	if a.tryHandleSlashCommand(content) {
-		return
-	}
-	userMsg, ok := a.pendingUserMessageToConversationMessage(pending)
-	if !ok {
-		return
-	}
-
-	// A parked queue waits for this action: enqueue the submitted draft behind it
-	// and dispatch the whole batch in arrival order.
-	if a.pendingUserDrainSuspended {
-		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pending)
-		a.resumePendingUserDrain()
-		a.drainPendingUserMessages()
-		return
-	}
-
-	a.mailboxDeliveryPaused.Store(false)
-	a.tryRecoverPersistenceBeforeTurn()
-	a.stageNextSubAgentMailboxBatch()
-	a.newTurn()
-	turnID := a.turn.ID
-	turnCtx := a.turn.Ctx
-	// Committing this draft here makes any queue entry carrying the same DraftID
-	// stale: it was mirrored there while the agent was busy (or during an MCP
-	// transition), and a later drain would inject the same draft a second time.
-	a.pendingUserMessages, _ = removePendingDraft(a.pendingUserMessages, pending.DraftID)
-	a.recordCommittedUserMessage(userMsg)
-	a.stageSessionInput(pending)
-	a.emitPendingDraftConsumed(pending.DraftID, userMsg)
-	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
-}
-
-func (a *MainAgent) handlePendingDraftRemove(evt Event) {
-	draftID, ok := evt.Payload.(string)
-	if !ok {
-		log.Errorf("handlePendingDraftRemove: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
-		return
-	}
-	draftID = strings.TrimSpace(draftID)
-	if draftID == "" {
-		return
-	}
-	var removed bool
-	a.pendingUserMessages, removed = removePendingDraft(a.pendingUserMessages, draftID)
-	if !removed {
-		log.Debugf("pending mirrored draft already absent draft_id=%v", draftID)
-	}
 }
 
 func (a *MainAgent) handleAppendContext(evt Event) {
@@ -1726,6 +1659,8 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 		// the next idle drain must not race the off-loop cancel caller.
 		a.mailboxDeliveryPaused.Store(true)
 	}
+	a.pauseInputDeliveryForCancel()
+	a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkCancelled)
 	a.pauseQuestionWork()
 	a.mainLLMRequestInFlight.Store(false)
 	// Cancelling the turn ends it: nothing resumes behind the pending
@@ -1810,6 +1745,7 @@ func (a *MainAgent) handleTurnCancelRequested(evt Event) {
 		return
 	}
 	a.raiseCancelUpTo(payload.AcceptedUpTo)
+	a.pauseInputDeliveryForCancel()
 	if a.turn == nil {
 		a.pauseQuestionWork()
 		log.Debugf("cancel request recorded without an active turn accepted_up_to=%v", payload.AcceptedUpTo)
@@ -1969,6 +1905,13 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		})
 		a.emitToTUI(StreamRollbackEvent{Reason: err.Error()})
 		a.emitToTUI(ErrorEvent{Err: err})
+		if a.turn != nil {
+			outcome := recovery.DeliveryWorkFailed
+			if llm.IsNativeToolError(err) {
+				outcome = recovery.DeliveryWorkUnknown
+			}
+			a.settleDeliveryWork(a.turn.DeliveryWorkID, outcome)
+		}
 		a.stopLoopAsBlocked(err.Error())
 		a.markActiveSubAgentMailboxAck(false)
 		a.setIdleAndDrainPending()
