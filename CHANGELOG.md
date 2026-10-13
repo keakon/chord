@@ -10,11 +10,13 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Configurable shortcuts can be disabled with an empty list (`[]`), with help and input hints reflecting the effective bindings. Startup notices and `chord doctor config` identify invalid shortcut declarations, show the binding and source that apply, and warn about some definite cases where an earlier action handles the same key.
 - Explain a model setting with `chord doctor config --model ... --field ...`: see the resolved disk value, overrides, catalog or derived sources, and where to edit, in text or JSON.
+- `prevent_sleep` now supports Linux through local logind/GNOME services and Windows through system power requests, alongside macOS. TUI, headless, and ACP protect the execution host; coverage depends on available services and device power policies, and WSL cannot protect the Windows host.
 - Take over a live local session between TUI and a gateway on macOS and Linux. Chord waits for already-started work, saves queued inputs, and restores the session paused until you explicitly continue.
 
 ### Improvements
 
 - Compaction summaries exclude independent thinking so the input budget prioritizes user requests, replies, and execution records.
+- The first-run `prevent_sleep` prompt now defaults to No on macOS, Linux, and Windows; existing saved settings are unchanged.
 - Question decision cards keep the original question and answers fully visible without folding, with separate lines for the question, selections, and option descriptions.
 
 ### Fixes

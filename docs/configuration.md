@@ -1053,8 +1053,7 @@ prevent_sleep: true
   to the specified input method when entering Normal mode, and restore the
   previous input method when returning to Insert mode. This is useful when you
   want command keys to use an English keyboard layout.
-- `prevent_sleep`: prevents macOS idle sleep while any agent is active. It is
-  only effective in local TUI mode.
+- `prevent_sleep`: requests sleep prevention on the host running agent work in TUI, headless, and ACP; releases it after all agents are idle for one second. Defaults to `false`, and the setup wizard defaults to No. Supports macOS, Linux (local logind/GNOME services), and Windows, subject to service availability and device policy. It does not keep the display on or control remote client/WSL host power. See [platform support](platforms.md#prevent_sleep) for coverage and limits.
 
 ## WebFetch
 
@@ -1684,7 +1683,7 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 | `diff`                  | object                | `{inline_max_columns: 200}`      | global / project         | TUI diff rendering. `inline_max_columns` caps one-line inline diff width.                                                |
 | `desktop_notification`  | bool                  | `false`                          | global / project         | Enable local-TUI terminal notifications; Chord auto-selects OSC 9 or OSC 777 by terminal and pairs each notification with a terminal bell (BEL). (Unsupported terminals ignore the sequence; see [Platforms](./platforms.md#desktop_notification-terminal-notifications).) |
 | `desktop_notification_foreground` | bool | `true` | global / project | Send local-TUI terminal notifications (escape sequence and bell) while the terminal is focused. Set to `false` for background-only notifications. |
-| `prevent_sleep`         | bool                  | `false`                          | global / project         | Prevent macOS idle sleep while any agent is active. macOS-only; no-op elsewhere.                                         |
+| `prevent_sleep`         | bool                  | `false`                          | global / project         | Request host sleep prevention during agent work on macOS/Linux/Windows; platform limits apply.                                         |
 | `keymap`                | `map[action][]key`    | see [Keybindings](./keybindings.md#action-name-reference) | global / project | Override key bindings. Action names use lower snake_case.                                                                |
 | `commands`              | `map[/cmd]text`       | empty                            | global / project         | Custom slash commands; `"/cmd"` → text inserted as a user message. See [Customization: Custom slash commands](./customization.md#custom-slash-commands). |
 | `ime_switch_target`     | string                | empty                            | global / project         | IM identifier passed to `im-select` / `im-select.exe` when entering Normal mode. Linux/macOS/Windows.                    |

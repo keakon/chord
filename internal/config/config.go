@@ -54,8 +54,8 @@ type Config struct {
 	// DesktopNotificationForeground controls notifications while the TUI is focused.
 	// Nil defaults to true. YAML: desktop_notification_foreground: true
 	DesktopNotificationForeground *bool `json:"desktop_notification_foreground,omitempty" yaml:"desktop_notification_foreground,omitempty"`
-	// PreventSleep, when true, prevents macOS idle sleep while any agent is active (non-idle). YAML: prevent_sleep: true
-	// Only effective in the local TUI.
+	// PreventSleep requests host sleep prevention during agent work on macOS, Linux, and Windows.
+	// Defaults to false; applies to TUI, headless, and ACP. Platform services and policies limit coverage. YAML: prevent_sleep: true
 	PreventSleep        *bool                       `json:"prevent_sleep,omitempty" yaml:"prevent_sleep,omitempty"`
 	KeyMap              KeyMapConfig                `json:"keymap,omitempty" yaml:"keymap,omitempty"`                             // custom key bindings (snake_case action → key list)
 	Commands            map[string]string           `json:"commands,omitempty" yaml:"commands,omitempty"`                         // custom slash commands: "/cmd" → text to send as message

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -72,8 +71,8 @@ func TestRunInitialSetupWizardWritesFilesAndHidesAPIKey(t *testing.T) {
 	if got := cfg.ModelPools["default"]; len(got) != 1 || got[0] != "openai/gpt-6.1-sol" {
 		t.Fatalf("model_pools.default = %#v", got)
 	}
-	if runtime.GOOS == "darwin" {
-		if cfg.PreventSleep == nil || !*cfg.PreventSleep {
+	if defaultShouldPromptPreventSleep() {
+		if cfg.PreventSleep == nil || *cfg.PreventSleep {
 			t.Fatalf("prevent_sleep = %#v", cfg.PreventSleep)
 		}
 	}
@@ -738,5 +737,71 @@ func TestRunInitialSetupWizardUsesABCDefaultWhenIMEPromptDefaultsYes(t *testing.
 	}
 	if !strings.Contains(string(outData), "Configure IME switching for Normal mode? [Y/n]:") {
 		t.Fatalf("wizard output missing default-yes IME prompt: %s", string(outData))
+	}
+}
+
+func TestRunInitialSetupWizardPreventSleepChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		prompt bool
+		input  string
+		want   bool
+	}{
+		{name: "default", prompt: true},
+		{name: "yes", prompt: true, input: "yes", want: true},
+		{name: "no", prompt: true, input: "no"},
+		{name: "unsupported"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configHome := t.TempDir()
+			t.Setenv("CHORD_CONFIG_HOME", configHome)
+			inputPath := filepath.Join(t.TempDir(), "input.txt")
+			inputs := []string{"1", "", "", "", "3", "n"}
+			if tc.prompt {
+				inputs = append(inputs, tc.input)
+			}
+			if err := os.WriteFile(inputPath, []byte(strings.Join(inputs, "\n")+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			outputPath := filepath.Join(t.TempDir(), "output.txt")
+			err := RunInitialSetupWizard(context.Background(), SetupWizardOptions{
+				OpenTTY: func() (*os.File, *os.File, error) {
+					in, err := os.Open(inputPath)
+					if err != nil {
+						return nil, nil, err
+					}
+					out, err := os.OpenFile(outputPath, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0o600)
+					if err != nil {
+						_ = in.Close()
+						return nil, nil, err
+					}
+					return in, out, nil
+				},
+				ReadPassword:             func(int) ([]byte, error) { return nil, nil },
+				ShouldPromptIME:          func() bool { return false },
+				ShouldPromptPreventSleep: func() bool { return tc.prompt },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.LoadConfigFromPath(filepath.Join(configHome, "config.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.prompt {
+				if cfg.PreventSleep == nil || *cfg.PreventSleep != tc.want {
+					t.Fatalf("prevent_sleep = %v, want %v", cfg.PreventSleep, tc.want)
+				}
+			} else if cfg.PreventSleep != nil {
+				t.Fatalf("unsupported platform stored prevent_sleep = %v", cfg.PreventSleep)
+			}
+			output, err := os.ReadFile(outputPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(output), "Enable prevent_sleep while agents are active? [y/N]:"); got != tc.prompt {
+				t.Fatalf("prompt present = %v, want %v", got, tc.prompt)
+			}
+		})
 	}
 }

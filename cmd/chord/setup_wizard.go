@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/power"
 )
 
 type SetupWizardOptions struct {
@@ -318,8 +319,14 @@ func RunInitialSetupWizard(ctx context.Context, opts SetupWizardOptions) error {
 
 	if opts.ShouldPromptPreventSleep() {
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "On macOS, prevent_sleep keeps the system awake while long-running agent work is active.")
-		preventSleep, err := promptYesNo(termIO, "Enable prevent_sleep on macOS while agents are active? [Y/n]: ", true)
+		fmt.Fprintln(out, "prevent_sleep requests sleep prevention on the host running agent work; it does not keep the display on.")
+		switch runtime.GOOS {
+		case "linux":
+			fmt.Fprintln(out, "Linux requires local logind or GNOME services; coverage differs by service. WSL does not control Windows host sleep.")
+		case "windows":
+			fmt.Fprintln(out, "Windows coverage is limited by device power policies, including Modern Standby on battery.")
+		}
+		preventSleep, err := promptYesNo(termIO, "Enable prevent_sleep while agents are active? [y/N]: ", false)
 		if err != nil {
 			return err
 		}
@@ -462,7 +469,7 @@ func defaultIMEPromptEnabled() bool {
 }
 
 func defaultShouldPromptPreventSleep() bool {
-	return runtime.GOOS == "darwin"
+	return power.SupportedPlatform()
 }
 
 func existingCredentialStateForProvider(providerName string) (*existingSetupCredentialState, error) {

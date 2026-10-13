@@ -886,7 +886,7 @@ prevent_sleep: true
 - `desktop_notification`：启用本地 TUI 的终端通知。每次通知都会同时发出通知转义序列（按终端自动选择 OSC 9 或 OSC 777）和一声终端铃声（BEL）。终端聚焦时多数终端会隐藏通知横幅，铃声保证此时也能听到提示。Chord 只在 agent 真正运行过然后停下（回合完成、被取消、loop 结束，或所有 SubAgent 都完成）以及权限、Question、Handoff、loop 决策、notify 协议纠正等待用户输入时通知；会话 / model pool / MCP 切换、空闲型斜杠命令这类用户主动操作导致回到空闲时保持静默。铃声是否出声取决于终端配置，各终端的开启方式见[平台说明](platforms_CN.md)。
 - `desktop_notification_foreground`：控制 TUI 聚焦时是否发送通知（转义序列和铃声一起），默认值为 `true`；设为 `false` 后仅在终端失焦时通知。
 - `ime_switch_target`：进入 Normal 模式时通过 `im-select`（Windows 为 `im-select.exe`）切换到指定输入法，回到 Insert 模式时恢复。常用于让快捷键在英文键盘布局下工作。
-- `prevent_sleep`：任意 agent 活跃时阻止 macOS 空闲睡眠，仅本地 TUI 模式生效。
+- `prevent_sleep`：Agent 工作期间申请阻止运行主机休眠，所有 Agent 空闲一秒后释放；TUI、headless、ACP 均适用。默认 `false`，首次运行向导默认 No。支持 macOS、Linux（依赖本地 logind/GNOME 服务）和 Windows，实际覆盖受服务可用性和设备策略限制，不请求保持显示器点亮，也不控制远程客户端或 WSL 宿主机电源。详见[平台说明](platforms_CN.md#prevent_sleep)。
 
 ## WebFetch
 
@@ -1472,7 +1472,7 @@ chord doctor models --pool thinking
 | `diff`                  | object                | `{inline_max_columns: 200}`     | global / project         | TUI diff 渲染。`inline_max_columns` 限制单行 inline diff 宽度。                                                    |
 | `desktop_notification`  | bool                  | `false`                         | global / project         | 启用本地 TUI 终端通知；Chord 按终端自动选择 OSC 9 或 OSC 777，并在每次通知时附一声终端铃声（BEL）（不支持的终端通常会忽略该序列；见[平台说明](./platforms_CN.md#desktop_notification终端通知)）。 |
 | `desktop_notification_foreground` | bool | `true` | global / project | TUI 聚焦时是否发送本地终端通知（转义序列和铃声一起）；设为 `false` 后仅在终端失焦时通知。 |
-| `prevent_sleep`         | bool                  | `false`                         | global / project         | agent 活动时阻止 macOS idle sleep。仅 macOS 生效，其他平台 no-op。                                              |
+| `prevent_sleep`         | bool                  | `false`                         | global / project         | Agent 工作期间申请阻止 macOS/Linux/Windows 主机休眠，受平台条件限制。                                              |
 | `keymap`                | `map[action][]key`    | 见 [快捷键：Action 名速查](./keybindings_CN.md#action-名速查) | global / project | 覆盖键位绑定。Action 名采用 lower snake_case。                                                                       |
 | `commands`              | `map[/cmd]text`       | 空                              | global / project         | 自定义 slash 命令；`"/cmd"` → 作为用户消息发送的文本。见 [扩展与定制：自定义 slash 命令](./customization_CN.md#自定义-slash-commands)。 |
 | `ime_switch_target`     | string                | 空                              | global / project         | 进 Normal 模式时传给 `im-select` / `im-select.exe` 的 IM 标识。                           |

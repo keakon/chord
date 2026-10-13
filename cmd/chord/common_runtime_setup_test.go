@@ -1,19 +1,25 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
+
+	"github.com/keakon/golog"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/mcp"
+	"github.com/keakon/chord/internal/power"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -544,4 +550,64 @@ func TestBeginMCPRestoreCancelsSupersededGeneration(t *testing.T) {
 	default:
 		t.Fatal("current finish did not release its context")
 	}
+}
+
+func TestCreateRuntimePreventSleepConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		enabled *bool
+	}{
+		{name: "omitted"},
+		{name: "disabled", enabled: new(bool)},
+		{name: "enabled", enabled: new(true)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ac := newTestAppContext(t)
+			ac.Ctx, ac.Cancel = context.WithCancel(context.Background())
+			defer ac.Cancel()
+			ac.Registry = tools.NewRegistry()
+			ac.Cfg = &config.Config{PreventSleep: tc.enabled}
+			rt, err := createRuntime(ac)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rt.Close()
+			want := tc.enabled != nil && *tc.enabled
+			if (rt.powerMgr != nil) != want {
+				t.Fatalf("power manager created = %v, want %v", rt.powerMgr != nil, want)
+			}
+			// An idle runtime never requests a platform resource, even when enabled.
+			if rt.powerMgr != nil && rt.powerMgr.IsHeld() {
+				t.Fatal("idle runtime holds sleep prevention")
+			}
+			rt.Close()
+		})
+	}
+}
+
+type runtimePowerBackend struct {
+	acquire func(context.Context) (power.Lease, error)
+}
+
+func (b runtimePowerBackend) Acquire(ctx context.Context) (power.Lease, error) {
+	return b.acquire(ctx)
+}
+
+func TestRuntimeCloseLogsPowerCleanupError(t *testing.T) {
+	var output bytes.Buffer
+	old := defaultLogger
+	setDefaultLogger(newGologLogger(&output, golog.WarnLevel))
+	t.Cleanup(func() { setDefaultLogger(old) })
+	synctest.Test(t, func(t *testing.T) {
+		mgr := power.NewManager(runtimePowerBackend{acquire: func(context.Context) (power.Lease, error) {
+			return nil, errors.Join(power.ErrCleanupFailed, errors.New("test cleanup failure"))
+		}})
+		rt := &Runtime{powerMgr: mgr}
+		mgr.UpdateActivity("main", power.ActivityExecuting)
+		synctest.Wait()
+		rt.Close()
+		if !strings.Contains(output.String(), "prevent_sleep runtime cleanup failed:") || !strings.Contains(output.String(), "test cleanup failure") {
+			t.Fatalf("cleanup diagnostic missing: %s", output.String())
+		}
+	})
 }

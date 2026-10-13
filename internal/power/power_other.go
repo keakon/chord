@@ -1,20 +1,12 @@
-//go:build !darwin
+//go:build !darwin && !linux && !windows
 
 package power
 
-// NoopBackend is a no-op backend for non-darwin platforms.
-type NoopBackend struct{}
+import "context"
 
-// NewBackend creates a no-op backend.
-func NewBackend() *NoopBackend {
-	return &NoopBackend{}
-}
+type unsupportedBackend struct{}
 
-// Acquire is a no-op.
-func (b *NoopBackend) Acquire() error { return nil }
+// NewBackend constructs an unsupported-platform backend.
+func NewBackend() Backend { return unsupportedBackend{} }
 
-// Release is a no-op.
-func (b *NoopBackend) Release() error { return nil }
-
-// Close is a no-op.
-func (b *NoopBackend) Close() error { return nil }
+func (unsupportedBackend) Acquire(context.Context) (Lease, error) { return nil, ErrUnsupported }

@@ -11,7 +11,7 @@ Chord is developed and tested primarily on macOS. Other platforms work to varyin
 | Core TUI (modes, transcript, sessions)              | ✅     | ✅            | ⚠️ (best-effort) | ✅               |
 | `chord headless` JSON control plane                 | ✅     | ✅            | ✅              | ✅               |
 | Worktrees (`chord --worktree`, `chord worktree …`)  | ✅     | ✅            | ✅              | ✅               |
-| `prevent_sleep` (idle-sleep prevention)             | ✅     | ❌ (no-op)   | ❌ (no-op)      | ❌ (no-op)       |
+| `prevent_sleep` (idle-sleep prevention) | ✅ | ⚠️ (logind / GNOME) | ⚠️ (power policy) | ⚠️ (Linux only) |
 | `ime_switch_target` (auto IM switch on mode change) | ✅[^im]| ⚠️[^im-linux]| ✅[^im-win]    | ⚠️[^im-wsl]     |
 | `desktop_notification` (terminal notifications)       | ⚠️[^osc] | ⚠️[^osc] | ⚠️[^osc]    | ⚠️[^osc]      |
 | Clipboard image/PDF attachment (`Ctrl+V` / `Alt+V`) | ✅     | ⚠️[^clip]   | ⚠️[^clip]      | ⚠️[^clip]       |
@@ -19,7 +19,6 @@ Chord is developed and tested primarily on macOS. Other platforms work to varyin
 | LSP — gopls / typescript / rust-analyzer            | ✅[^lsp]| ✅[^lsp]   | ✅[^lsp]      | ✅[^lsp]        |
 | LSP — Pyright with project venv auto-discovery      | ✅[^py-unix] | ✅[^py-unix] | ✅[^py-win] | ✅[^py-unix] (WSL Linux venvs only — see below) |
 | MCP servers (stdio / HTTP)                          | ✅     | ✅            | ✅              | ✅               |
-| Power-aware idle handling                           | ✅     | ❌ (no-op)   | ❌ (no-op)      | ❌ (no-op)       |
 
 [^im]: Requires the `im-select` binary in `PATH` (`im-select.exe` on Windows). Install separately; Chord ships only the integration, not the binary itself.
 [^im-linux]: `im-select` is a macOS-first tool; on Linux you need a compatible build or a wrapper script with the same CLI.
@@ -38,9 +37,14 @@ Legend: ✅ supported · ⚠️ supported with caveats · ❌ not supported / no
 
 ### `prevent_sleep`
 
-macOS uses `caffeinate(1)` under the hood. On Linux / Windows / WSL this setting is a no-op. If you depend on always-on behavior elsewhere, configure your OS power settings directly.
+`prevent_sleep: true` requests sleep prevention on the host running Chord while the main agent or a SubAgent is working. The request is released once all agents have been idle for one second. It applies to TUI, headless, and ACP; remote clients do not control their own machine's power. Omitted or `false` leaves power management untouched. The first-run wizard offers this option on macOS, Linux, and Windows, with **No** as the default.
 
-The first-run setup wizard asks about `prevent_sleep` only on macOS, and only as an explicit opt-in confirmation. It is intended for longer-running agent sessions where idle sleep would be disruptive.
+- **macOS:** uses `caffeinate -i`, bound to the Chord process lifetime, to inhibit system idle sleep.
+- **Linux:** independently requests logind `idle/block` and GNOME session `suspend` inhibition over local Unix D-Bus sockets. Either available service can provide partial coverage: logind covers its `IdleAction`, while GNOME covers session suspension. GNOME inhibition can also prompt during user-requested suspend; users can override it. No GNOME idle inhibitor is requested, so Chord does not request changes to screen blanking or locking. KDE and other desktops are only covered by any available logind IdleAction inhibition. Containers, SSH, and servers depend on available local services; Chord does not use forwarded or TCP D-Bus connections.
+- **Windows:** requests `SystemRequired` through the Windows power API. Device policy still applies. On battery-powered Modern Standby devices, system/execution requests terminate five minutes after the system sleep timeout expires; a successful API request does not guarantee indefinite protection.
+- **WSL:** only requests available Linux services; it cannot prevent the Windows host from sleeping. Other platforms are unsupported.
+
+Chord does not request that the display stay on. This setting does not guarantee protection against manual sleep, lid closure, shutdown, administrator overrides, forced policies, or low-battery protection. Service or authorization failures are logged and do not stop agent work. Chord does not change persistent power settings.
 
 ### `ime_switch_target`
 
@@ -147,7 +151,7 @@ Key disambiguation note: in terminal multiplexers like `tmux` / `zellij`, modifi
 Chord runs on Windows but is not the primary platform. Concretely:
 
 - TUI works in modern terminals (Windows Terminal, WezTerm).
-- `prevent_sleep` is a no-op: use Windows power settings.
+- `prevent_sleep` requests system sleep prevention, subject to device power policy; see the limits above.
 - `ime_switch_target` works with `im-select.exe`.
 - File paths in tool calls follow Windows conventions; backslashes are preserved verbatim.
 - `shell` (foreground commands and background jobs) remains non-interactive on Windows too, but timeout/cancellation cleanup uses direct process termination instead of Unix-style session/process-group control; descendant process cleanup may therefore be less complete than on Unix.
@@ -158,7 +162,7 @@ Chord runs on Windows but is not the primary platform. Concretely:
 WSL behaves like Linux for the most part:
 
 - Chord runs as a Linux binary inside WSL; sessions and config use Linux paths (`~/.config/chord/`, etc.).
-- `prevent_sleep` is a no-op; use Windows power settings on the host.
+- `prevent_sleep` only affects available Linux services; Windows host power settings remain separate.
 - `ime_switch_target` typically goes through Windows interop (`im-select.exe`).
 - Pyright venv auto-discovery uses **Linux** venvs (`.venv/bin/python` etc.) inside WSL; Windows-style `Scripts\python.exe` venvs are intentionally not selected.
 - Terminal capabilities depend on the Windows terminal hosting WSL (Windows Terminal, WezTerm, Ghostty).

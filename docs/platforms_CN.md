@@ -11,7 +11,7 @@ Chord 主要在 macOS 上开发和测试。其他平台不同程度可用：大�
 | 核心 TUI（模式切换、消息、会话）                         | ✅    | ✅             | ⚠️（尽力而为） | ✅                |
 | `chord headless` JSON 控制面                             | ✅    | ✅             | ✅               | ✅                |
 | Worktree（`chord --worktree`、`chord worktree …`）       | ✅    | ✅             | ✅               | ✅                |
-| `prevent_sleep`（阻止系统休眠）                          | ✅    | ❌（no-op）    | ❌（no-op）      | ❌（no-op）       |
+| `prevent_sleep`（阻止系统休眠） | ✅ | ⚠️（logind / GNOME） | ⚠️（受电源策略限制） | ⚠️（仅 Linux 环境） |
 | `ime_switch_target`（模式切换时自动切输入法）            | ✅[^im]| ⚠️[^im-linux]| ✅[^im-win]    | ⚠️[^im-wsl]      |
 | `desktop_notification`（终端通知）                         | ⚠️[^osc] | ⚠️[^osc] | ⚠️[^osc]      | ⚠️[^osc]        |
 | 剪贴板图片/PDF 附件（`Ctrl+V` / `Alt+V`）              | ✅    | ⚠️[^clip]    | ⚠️[^clip]       | ⚠️[^clip]        |
@@ -19,7 +19,6 @@ Chord 主要在 macOS 上开发和测试。其他平台不同程度可用：大�
 | LSP — gopls / typescript / rust-analyzer                 | ✅[^lsp]| ✅[^lsp]   | ✅[^lsp]       | ✅[^lsp]         |
 | LSP — Pyright + 项目 venv 自动探测                       | ✅[^py-unix] | ✅[^py-unix] | ✅[^py-win] | ✅[^py-unix]（仅 WSL Linux venv，详见下文） |
 | MCP servers（stdio / HTTP）                              | ✅    | ✅             | ✅               | ✅                |
-| 电源感知 idle 处理                                       | ✅    | ❌（no-op）    | ❌（no-op）      | ❌（no-op）       |
 
 [^im]: 需要 `PATH` 中存在 `im-select` 二进制（Windows 用 `im-select.exe`）。Chord 只做集成，不附带二进制。
 [^im-linux]: `im-select` 始于 macOS；Linux 上可用兼容 build 或自己写一个同 CLI 的 wrapper 脚本。
@@ -38,9 +37,14 @@ Chord 主要在 macOS 上开发和测试。其他平台不同程度可用：大�
 
 ### `prevent_sleep`
 
-macOS 下用 `caffeinate(1)` 实现。Linux / Windows / WSL 上是 no-op。其他平台需常驻不休眠的话，直接用 OS 自带的电源设置。
+设置 `prevent_sleep: true` 后，主 Agent 或任一 SubAgent 工作期间，Chord 会申请阻止运行主机休眠；所有 Agent 空闲一秒后释放。TUI、headless、ACP 均适用，远程客户端不会控制自己的电脑电源。省略或设为 `false` 时不介入电源管理。macOS、Linux、Windows 的首次运行向导都会询问此选项，统一默认 **No**。
 
-首次运行向导只会在 macOS 上询问 `prevent_sleep`，并且必须由用户显式确认开启。它主要适用于长时间运行 agent、又不希望系统因空闲进入睡眠的场景。
+- **macOS：**通过 `caffeinate -i` 阻止系统空闲休眠，并绑定 Chord 进程生命周期。
+- **Linux：**通过本地 Unix D-Bus 分别申请 logind 的 `idle/block` 锁和 GNOME 会话的 `suspend` 锁。任一服务可用即可提供对应的部分保护：logind 覆盖自身的 `IdleAction`，GNOME 覆盖会话挂起。GNOME 锁也可能让用户主动挂起时出现提示，用户仍可强制操作。Chord 不申请 GNOME idle 锁，不请求改变屏幕熄灭或锁屏策略。KDE 等其它桌面仅由可用的 logind IdleAction 抑制提供保护。容器、SSH 和服务器取决于可用的本地服务；Chord 不使用转发或 TCP D-Bus 连接。
+- **Windows：**通过 Windows 电源 API 申请 `SystemRequired`，仍受设备电源策略限制。Modern Standby 设备使用电池时，系统/执行请求会在系统睡眠超时届满五分钟后终止；API 申请成功不代表可以无限期阻止休眠。
+- **WSL：**只向可用的 Linux 服务申请，无法阻止 Windows 宿主机休眠。其它平台不支持。
+
+Chord 不请求保持显示器点亮，也不保证阻止主动休眠、合盖、关机、管理员覆盖、强制策略或低电量保护。服务不可用或授权失败时会记录日志，Agent 继续工作。此选项不会修改持久电源设置。
 
 ### `ime_switch_target`
 
@@ -148,7 +152,7 @@ WSL 自动探测不会选 `Scripts\python.exe` 里的 Windows venv。WSL 内开�
 Chord 能在 Windows 上跑，但 Windows 不是主要平台。具体：
 
 - TUI 在现代终端（Windows Terminal、WezTerm）下工作正常。
-- `prevent_sleep` 是 no-op：请用 Windows 电源设置。
+- `prevent_sleep` 可申请阻止系统休眠，仍受设备电源策略限制，详见上文。
 - `ime_switch_target` 需要 `im-select.exe`。
 - 工具调用中的文件路径走 Windows 风格，反斜杠原样保留。
 - `shell`（前台命令与后台 job）在 Windows 上也仍是非交互的，但超时 / 取消清理依赖直接终止进程，而不是 Unix 风格的 session / 进程组控制；因此对后代进程的清理可能不如 Unix 完整。
@@ -159,7 +163,7 @@ Chord 能在 Windows 上跑，但 Windows 不是主要平台。具体：
 WSL 大致表现得像 Linux：
 
 - Chord 作为 Linux 二进制在 WSL 内运行；sessions、配置用 Linux 路径（`~/.config/chord/` 等）。
-- `prevent_sleep` 是 no-op；请用宿主 Windows 的电源设置。
+- `prevent_sleep` 只影响可用的 Linux 服务，宿主 Windows 的电源设置需单独管理。
 - `ime_switch_target` 通常通过 Windows interop 调 `im-select.exe`。
 - Pyright venv 自动探测在 WSL 内使用 **Linux** venv（`.venv/bin/python` 等）；Windows 风格 `Scripts\python.exe` venv 不会被选。
 - 终端能力取决于宿主 Windows 上跑的终端（Windows Terminal、WezTerm、Ghostty 等）。

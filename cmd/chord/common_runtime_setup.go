@@ -48,7 +48,7 @@ func createRuntime(ac *AppContext) (*Runtime, error) {
 			&activityObserverAdapter{mgr: powerMgr},
 			resourceCtrl,
 		))
-		log.Debug("prevent_sleep enabled: activity-based sleep prevention active")
+		log.Debug("prevent_sleep enabled: will request sleep prevention during agent activity")
 	} else {
 		ac.MainAgent.SetActivityObserver(resourceCtrl)
 	}
@@ -112,7 +112,9 @@ func (rt *Runtime) Close() {
 		return
 	}
 	if rt.powerMgr != nil {
-		rt.powerMgr.Close()
+		if err := rt.powerMgr.Close(); err != nil {
+			log.Warnf("prevent_sleep runtime cleanup failed: %v", err)
+		}
 	}
 	if rt.Agent != nil {
 		rt.Agent.SetBusyPreparationHook(nil)

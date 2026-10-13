@@ -4,99 +4,98 @@ package power
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
 	"os/exec"
+	"strconv"
 	"sync"
-	"syscall"
 	"time"
-
-	"github.com/keakon/golog/log"
 )
 
-// DarwinBackend uses the caffeinate command to prevent idle sleep.
-type DarwinBackend struct {
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	cancel context.CancelFunc
+// DarwinBackend prevents idle system sleep with an owned caffeinate process.
+type DarwinBackend struct{ command func() *exec.Cmd }
+
+// NewBackend constructs a backend without acquiring any resources.
+func NewBackend() Backend { return &DarwinBackend{} }
+
+func caffeinateCommand() *exec.Cmd {
+	return exec.Command("/usr/bin/caffeinate", "-i", "-w", strconv.Itoa(os.Getpid()))
 }
 
-// NewBackend creates a new darwin power backend.
-func NewBackend() *DarwinBackend {
-	return &DarwinBackend{}
-}
-
-// Acquire starts a caffeinate process to prevent idle sleep.
-func (b *DarwinBackend) Acquire() error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.cmd != nil {
-		// Already running.
-		return nil
+// Acquire starts a process whose lifetime is independent of the acquisition context.
+func (b *DarwinBackend) Acquire(ctx context.Context) (Lease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-
-	// The caffeinate process is owned by this backend and stopped explicitly by
-	// Release/Close, so it uses its own lifecycle root instead of a caller ctx.
-	ctx, cancel := context.WithCancel(context.Background())
-	// Use -i to prevent idle sleep only. Do not use -d (display) or -s (sleep on AC).
-	cmd := exec.CommandContext(ctx, "caffeinate", "-i")
-	cmd.Stdout = nil
-	cmd.Stderr = nil
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true,
+	command := b.command
+	if command == nil {
+		command = caffeinateCommand
 	}
-
+	cmd := command()
 	if err := cmd.Start(); err != nil {
-		cancel()
-		return err
+		return nil, fmt.Errorf("caffeinate start: %w", err)
 	}
-
-	b.cmd = cmd
-	b.cancel = cancel
-	return nil
-}
-
-// Release stops the caffeinate process.
-func (b *DarwinBackend) Release() error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.cmd == nil {
-		return nil
-	}
-
-	if b.cancel != nil {
-		b.cancel()
-	}
-
-	// Wait for the process to exit with a timeout.
-	done := make(chan struct{})
+	l := &darwinLease{cmd: cmd, done: make(chan struct{}), waitDone: make(chan struct{})}
 	go func() {
-		if b.cmd != nil {
-			_ = b.cmd.Wait()
+		err := cmd.Wait()
+		l.mu.Lock()
+		if !l.closing {
+			if err == nil {
+				err = errors.New("caffeinate exited unexpectedly")
+			}
+			l.err = fmt.Errorf("caffeinate wait: %w", err)
+			l.doneOnce.Do(func() { close(l.done) })
 		}
-		close(done)
+		l.mu.Unlock()
+		close(l.waitDone)
 	}()
-
-	select {
-	case <-done:
-		// Process exited cleanly.
-	case <-time.After(2 * time.Second):
-		// Force kill if it doesn't exit gracefully.
-		if b.cmd != nil && b.cmd.Process != nil {
-			log.Warn("power: caffeinate did not exit gracefully, killing")
-			b.cmd.Process.Kill()
-			<-done
-		}
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Join(err, l.Close())
 	}
-
-	b.cmd = nil
-	b.cancel = nil
-	return nil
+	select {
+	case <-l.done:
+		return nil, errors.Join(l.Err(), l.Close())
+	default:
+		return l, nil
+	}
 }
 
-// Close releases any held assertion.
-func (b *DarwinBackend) Close() error {
-	return b.Release()
+type darwinLease struct {
+	cmd                 *exec.Cmd
+	done, waitDone      chan struct{}
+	mu                  sync.Mutex
+	closing             bool
+	err                 error
+	doneOnce, closeOnce sync.Once
+	closeErr            error
 }
 
-// No-op implementation for non-darwin platforms.
+func (l *darwinLease) Done() <-chan struct{} { return l.done }
+func (l *darwinLease) Err() error            { l.mu.Lock(); defer l.mu.Unlock(); return l.err }
+func (l *darwinLease) Close() error {
+	l.closeOnce.Do(func() {
+		l.mu.Lock()
+		l.closing = true
+		l.mu.Unlock()
+		killErr := l.cmd.Process.Kill()
+		if errors.Is(killErr, os.ErrProcessDone) {
+			killErr = nil
+		}
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-l.waitDone:
+			// A reaped process confirms cleanup even if Kill raced with its exit.
+		case <-timer.C:
+			l.closeErr = errors.Join(ErrCleanupFailed, errors.New("caffeinate reap timed out"), killErr)
+		}
+		l.mu.Lock()
+		if l.closeErr != nil {
+			l.err = errors.Join(l.err, l.closeErr)
+		}
+		l.doneOnce.Do(func() { close(l.done) })
+		l.mu.Unlock()
+	})
+	return l.closeErr
+}

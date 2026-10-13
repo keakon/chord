@@ -84,6 +84,8 @@ github.com/keakon/bubbles/v2 v2.2.1-fork.3 h1:R0SLMohWwLnxkM0IcMDpNj1v56derDlg3t
 github.com/keakon/bubbles/v2 v2.2.1-fork.3/go.mod h1:QE9o4DL+SBAlczWWpl/x/n/Lj0pauW95GGVvSr+p3hE=
 github.com/keakon/bubbletea/v2 v2.0.9-fork.1 h1:PA+vjnrqoxYwNTJJZ948LbbAYDCDtBAa0YFo2cM7wcw=
 github.com/keakon/bubbletea/v2 v2.0.9-fork.1/go.mod h1:/DhCivLg0TwQVzii5dnRMTLK3bX+HmO8Icu+14CoBIY=
+github.com/keakon/dbus/v5 v5.2.3-fork.2 h1:wZV4kKnHfmxE4fLeYn+pJaOVBKFsuA8WESEWvwULAjQ=
+github.com/keakon/dbus/v5 v5.2.3-fork.2/go.mod h1:pAqbc97fdJQ3GEaqumpyE42LS5iTyQPATBlUtmUF10c=
 github.com/keakon/displaywidth v0.11.0-fork.1 h1:j+GtJQQCfI2alTHFOFD+HMnBdA0yMRoPRednaVFI/rc=
 github.com/keakon/displaywidth v0.11.0-fork.1/go.mod h1:ZP2VZM0pecj/mAcpmPoXldxITNP7jgYWWEukRofoGJg=
 github.com/keakon/glamour/v2 v2.0.1-fork.1 h1:szIAgatkVX9Mu6ogpVCgWE6AoFTkW/w0LkL2To5y4EQ=
