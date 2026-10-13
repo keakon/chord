@@ -103,6 +103,9 @@ func (a *MainAgent) buildSystemPrompt() string {
 		parts = append(parts, block)
 	}
 	parts = append(parts, mainAgentCommunicationPrompt)
+	if _, ok := a.mainLLMVisibleToolNames()[tools.NamePresent]; ok {
+		parts = append(parts, fileDeliveryPrompt)
+	}
 	parts = append(parts, a.responseClosurePromptBlock())
 	if block := a.userConfirmationPromptBlock(); block != "" {
 		parts = append(parts, block)

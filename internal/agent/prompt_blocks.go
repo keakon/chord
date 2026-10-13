@@ -150,3 +150,8 @@ var subAgentResponseClosurePrompt = `## SubAgent Task Closure
 - Deliver the final task report through ` + toolPromptName(tools.NameComplete) + `: the key result and verification status in ` + "`summary`" + `, the changed files in ` + "`files_changed`" + `, and non-blocking gaps in ` + "`remaining_limitations`" + `; progress and blockers go through the coordination channels above
 - Assistant text alongside that call is read by the human watching this task, not by the owner: keep it to what a reader needs beyond the call, and do not compose the report a second time there
 - After reporting completion, stop there; do not append routine in-scope follow-up work as an optional invitation to the owner agent`
+
+const fileDeliveryPrompt = `## File Delivery
+- When you have final files for the user to read or use, declare them with present. Do not declare every edited source file, and do not call present when no file delivery is needed.
+- present does not create files, open applications, or establish test success. Explain the file purpose and actual verification status in the final response.
+- Workspace deliveries show the current file at its original location. For existing child-task artifacts, use the exact artifact reference and digest; do not reinterpret child paths relative to your working directory.`

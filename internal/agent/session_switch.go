@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/filedelivery"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
@@ -83,6 +84,10 @@ func (a *MainAgent) requestSessionControl(kind, sessionID string) {
 }
 
 func (a *MainAgent) handleSessionControlEvent(evt Event) {
+	if a.turn != nil && a.turn.deliveryPending.Load() {
+		a.emitToTUI(ToastEvent{Message: "File delivery is waiting for durable storage; retry after it settles", Level: "warn"})
+		return
+	}
 	if a.sessionExecutionPaused() {
 		a.emitToTUI(ToastEvent{Message: "Session is paused; continue it before switching sessions", Level: "warn"})
 		return
@@ -628,6 +633,11 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	}
 	if err := recovery.SaveSessionMeta(newSessionDir, forkMeta); err != nil {
 		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("fork session: save metadata: %w", err)})
+		a.setIdleAndDrainPending()
+		return
+	}
+	if err := filedelivery.CopyArtifacts(a.parentCtx, message.CollectDeliveredFiles(prefix), a.SessionDir(), newSessionDir); err != nil {
+		a.emitToTUI(ErrorEvent{Err: fmt.Errorf("fork session: copy delivered artifacts: %w", err)})
 		a.setIdleAndDrainPending()
 		return
 	}

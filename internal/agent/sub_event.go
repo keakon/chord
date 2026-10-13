@@ -367,7 +367,7 @@ func (s *SubAgent) canStartUserTurn() bool {
 	}
 	s.turnMu.Lock()
 	defer s.turnMu.Unlock()
-	return s.turn.PendingToolCalls.Load() == 0 && s.turn.activeToolBatchCancel == nil
+	return !s.turn.deliveryPending.Load() && s.turn.PendingToolCalls.Load() == 0 && s.turn.activeToolBatchCancel == nil
 }
 
 func (s *SubAgent) canPark() bool {
@@ -485,7 +485,7 @@ func (s *SubAgent) handleContinueSignal(msg continueMsg) {
 		s.cancelCurrentTurnFromLoop()
 		return
 	}
-	if s.llmRequestInFlight.Load() {
+	if s.llmRequestInFlight.Load() || (s.turn != nil && s.turn.deliveryPending.Load()) {
 		if msg.restartStoppedTurn {
 			pending := msg
 			s.pendingContinue = &pending
@@ -498,7 +498,7 @@ func (s *SubAgent) handleContinueSignal(msg continueMsg) {
 }
 
 func (s *SubAgent) tryHandlePendingContinue() bool {
-	if s.sessionExecutionPaused() || s.pendingContinue == nil || s.llmRequestInFlight.Load() {
+	if s.sessionExecutionPaused() || s.pendingContinue == nil || s.llmRequestInFlight.Load() || (s.turn != nil && s.turn.deliveryPending.Load()) {
 		return false
 	}
 	msg := *s.pendingContinue

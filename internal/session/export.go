@@ -34,6 +34,9 @@ type ExportedSession struct {
 // Note: multi-part user attachments (e.g. image ContentParts) are intentionally
 // not embedded in export files; only the plain message Content is exported.
 type ExportedMessage struct {
+	DeliveredFiles            []message.DeliveredFile       `json:"delivered_files,omitempty"`
+	CompactionDeliveredFiles  []message.DeliveredFile       `json:"compaction_delivered_files,omitempty"`
+	FileLinkBaseDir           string                        `json:"file_link_base_dir,omitempty"`
 	Role                      message.Role                  `json:"role"`
 	Content                   string                        `json:"content"`
 	Kind                      string                        `json:"kind,omitempty"`
@@ -147,6 +150,9 @@ func Export(
 			NativeTools:               msg.NativeTools.Clone(),
 			ReasoningContent:          msg.ReasoningContent,
 			IsCompactionSummary:       msg.IsCompactionSummary,
+			DeliveredFiles:            message.CloneDeliveredFiles(msg.DeliveredFiles),
+			CompactionDeliveredFiles:  message.CloneDeliveredFiles(msg.CompactionDeliveredFiles),
+			FileLinkBaseDir:           msg.FileLinkBaseDir,
 			CompactionFileRevisions:   cloneStringMap(msg.CompactionFileRevisions),
 			CompactionRequestSources:  cloneStringMap(msg.CompactionRequestSources),
 			Provenance:                provenance,
@@ -397,6 +403,9 @@ func (es *ExportedSession) ToMessages() []message.Message {
 			NativeTools:               em.NativeTools.Clone(),
 			ReasoningContent:          em.ReasoningContent,
 			IsCompactionSummary:       em.IsCompactionSummary,
+			DeliveredFiles:            message.CloneDeliveredFiles(em.DeliveredFiles),
+			CompactionDeliveredFiles:  message.CloneDeliveredFiles(em.CompactionDeliveredFiles),
+			FileLinkBaseDir:           em.FileLinkBaseDir,
 			CompactionFileRevisions:   cloneStringMap(em.CompactionFileRevisions),
 			CompactionRequestSources:  cloneStringMap(em.CompactionRequestSources),
 			Provenance:                provenance,

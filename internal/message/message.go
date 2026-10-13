@@ -305,7 +305,10 @@ const (
 )
 
 type Message struct {
-	DiagnosticSource string `json:"-"`
+	DiagnosticSource         string          `json:"-"`
+	DeliveredFiles           []DeliveredFile `json:"delivered_files,omitempty"`
+	CompactionDeliveredFiles []DeliveredFile `json:"compaction_delivered_files,omitempty"`
+	FileLinkBaseDir          string          `json:"file_link_base_dir,omitempty"`
 	// InputID is local recovery metadata and is never a provider wire field.
 	InputID          string                `json:"input_id,omitempty"`
 	NativeTools      *NativeToolHistory    `json:"native_tools,omitempty"`

@@ -165,7 +165,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 							batchCancel()
 						}
 					}
-					tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
+					tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
 					tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 					select {
 					case s.toolCh <- tr:
@@ -233,7 +233,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					batchCancel()
 				}
 			}
-			tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
+			tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
 			tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 			select {
 			case s.toolCh <- tr:
@@ -312,7 +312,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		result.RecoveryState = imageToolRecoveryState(result.Error)
 	}
 	// Turn isolation: discard stale results.
-	if s.turn == nil || result.TurnID != s.turn.ID {
+	if s.turn == nil || result.TurnID != s.turn.ID || (result.deliveryCommit != nil && result.deliveryCommit.turn != s.turn) {
 		log.Debugf("SubAgent: discarding stale tool result agent=%v result_turn=%v current_turn=%v", s.instanceID, result.TurnID, s.currentTurnID())
 		return
 	}
@@ -328,6 +328,9 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		return
 	}
 
+	if s.beginDeliveryCommit(result) {
+		return
+	}
 	rawResult := result.Result
 	var displayResult, contextResult, errorText string
 	var isError bool
@@ -397,23 +400,24 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	// Emit tool result to TUI so the tool call block shows its result.
 	s.turn.markToolCallCompleted(result.CallID)
 	event := ToolResultEvent{
-		CallID:        result.CallID,
-		Name:          result.Name,
-		ArgsJSON:      result.ArgsJSON,
-		Audit:         result.Audit.Clone(),
-		Result:        displayResult,
-		Payload:       result.Payload,
-		Notes:         append([]string(nil), result.Notes...),
-		Status:        toolResultStatusFromError(isError),
-		AgentID:       s.instanceID,
-		Parts:         parts,
-		Diff:          result.Diff,
-		DiffAdded:     result.DiffAdded,
-		DiffRemoved:   result.DiffRemoved,
-		FileCreated:   result.FileCreated,
-		FileState:     result.FileState.Clone(),
-		Duration:      result.Duration,
-		RecoveryState: result.RecoveryState,
+		CallID:         result.CallID,
+		Name:           result.Name,
+		ArgsJSON:       result.ArgsJSON,
+		Audit:          result.Audit.Clone(),
+		Result:         displayResult,
+		Payload:        result.Payload,
+		Notes:          append([]string(nil), result.Notes...),
+		Status:         toolResultStatusFromError(isError),
+		AgentID:        s.instanceID,
+		Parts:          parts,
+		DeliveredFiles: successfulDeliveredFiles(result.DeliveredFiles, isError),
+		Diff:           result.Diff,
+		DiffAdded:      result.DiffAdded,
+		DiffRemoved:    result.DiffRemoved,
+		FileCreated:    result.FileCreated,
+		FileState:      result.FileState.Clone(),
+		Duration:       result.Duration,
+		RecoveryState:  result.RecoveryState,
 	}
 	if result.Name == tools.NameGenerateImage {
 		event.Diagnostic = imageToolErrorDiagnostic(result.Error)
@@ -423,6 +427,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 
 	toolMsg := message.Message{
 		Role:                      "tool",
+		DeliveredFiles:            successfulDeliveredFiles(result.DeliveredFiles, isError),
 		ToolCallID:                result.CallID,
 		Content:                   contextResult,
 		ToolPayload:               result.Payload,
@@ -441,12 +446,15 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		Provenance:                toolProvenanceFromContext(s.ctxMgr, result.CallID),
 		ToolRecoveryState:         result.RecoveryState,
 	}
+	if result.deliveryCommit != nil && result.deliveryCommit.Err == nil {
+		toolMsg = result.deliveryCommit.Message.Clone()
+	}
 	s.ctxMgr.Append(toolMsg)
 
 	// Persist tool result.
 	if result.Name == tools.NameGenerateImage {
 		s.parent.persistImageResult(s.recoveryManager(), s.instanceID, toolMsg, event, s.notePersistenceFailure)
-	} else {
+	} else if result.deliveryCommit == nil {
 		s.persistMessageAsync(toolMsg, "tool result", nil)
 	}
 
@@ -472,6 +480,19 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		s.turn.malformedInBatch++
 	}
 
+	if result.deliveryCommit != nil {
+		s.turn.deliveryPending.Store(false)
+		if s.turn.deliverySubCancel.Load() {
+			s.turn.deliverySubCancel.Store(false)
+			s.cancelCurrentTurnFromLoop()
+			return
+		}
+		if result.deliveryCommit.Err != nil {
+			s.turn.Cancel()
+			s.parent.emitToTUI(ErrorEvent{Err: result.deliveryCommit.Err, AgentID: s.instanceID})
+			return
+		}
+	}
 	if s.turn.PendingToolCalls.Load() > 0 {
 		return // still waiting for tool calls in this batch
 	}

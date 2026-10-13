@@ -632,8 +632,9 @@ func assistantThinkingBlocksForTranscript(msg message.Message) []message.Thinkin
 }
 
 type transcriptToolResult struct {
-	argsJSON string
-	result   string
+	deliveredFiles []message.DeliveredFile
+	argsJSON       string
+	result         string
 	// payload is the tool's own output before notes; notes are the diagnostic
 	// lines the runtime appended. Both are empty in transcripts written before
 	// the split, where result holds the combination.
@@ -688,6 +689,7 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 	}
 	block.streamArgs = nil
 	block.ResultContent = result.result
+	block.DeliveredFiles = message.CloneDeliveredFiles(result.deliveredFiles)
 	// A restored transcript carries the payload and notes separately when they
 	// were recorded; older sessions only have the combined text, and the card
 	// falls back to it.
@@ -903,6 +905,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 						ID:                    *nextID,
 						Type:                  BlockCompactionSummary,
 						CompactionSummaryRaw:  content,
+						DeliveredFiles:        message.CloneDeliveredFiles(msg.CompactionDeliveredFiles),
 						CompactionSummaryMode: strings.TrimSpace(msg.CompactionSummaryMode),
 						Content:               content,
 						MsgIndex:              -1,
@@ -954,10 +957,11 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 			// Emit assistant body (text) as a separate block.
 			if assistantContentHasVisibleText(msg.Content) {
 				blocks = append(blocks, &Block{
-					ID:       *nextID,
-					Type:     BlockAssistant,
-					Content:  msg.Content,
-					MsgIndex: msgIdx,
+					ID:              *nextID,
+					Type:            BlockAssistant,
+					Content:         msg.Content,
+					FileLinkBaseDir: msg.FileLinkBaseDir,
+					MsgIndex:        msgIdx,
 				})
 				*nextID++
 			}
@@ -985,6 +989,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					result:         toolResultContentForDisplay(msg.Content),
 					payload:        msg.ToolPayload,
 					notes:          msg.ToolNotes,
+					deliveredFiles: msg.DeliveredFiles,
 					imageParts:     imagePartsFromContentParts(msg.Parts),
 					status:         toolResultStatusFromRestoredMessage(msg),
 					audit:          msg.Audit,

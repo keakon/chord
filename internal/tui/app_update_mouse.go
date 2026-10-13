@@ -354,6 +354,9 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		}
 		return nil, true
 	}
+	if m.mode == ModeFileViewer {
+		return m.handleFileViewerMouse(msg), true
+	}
 	if m.mode == ModeImageViewer {
 		m.clearChordState()
 		if _, isClick := msg.(tea.MouseClickMsg); isClick && mouse.Button == tea.MouseLeft {
@@ -523,6 +526,12 @@ func (m *Model) handleInfoPanelMouseClick(mouse tea.Mouse) tea.Cmd {
 	m.clearMouseSelection()
 	m.input.ClearSelection()
 	m.inputMouseDown = false
+	localFileY := mouse.Y - m.layout.infoPanel.Min.Y + m.infoPanelScrollOffset
+	for _, hit := range m.infoPanelHitBoxes {
+		if hit.filePath != "" && localFileY >= hit.startY && localFileY < hit.endY {
+			return m.openLocalFileLinks([]localFileLink{{path: hit.filePath}})
+		}
+	}
 	if agentID, ok := m.infoPanelAgentAtPoint(mouse.X, mouse.Y); ok {
 		if agentID == "main" {
 			agentID = ""
@@ -629,6 +638,9 @@ func (m *Model) handleViewportMouseClick(mouse tea.Mouse, hits mouseHitZones) te
 	block, lineInBlock := m.viewportResolveMouse(hits.viewportLine)
 	if block == nil {
 		return nil
+	}
+	if len(block.DeliveredFiles) > 0 {
+		return m.activateDeliveryCard(block, lineInBlock, hits.viewportCol)
 	}
 	col := clampCol(hits.viewportCol, m.viewport.width)
 	if cmd, handled := m.handleViewportSelectionClick(mouse, block, lineInBlock, col); handled {

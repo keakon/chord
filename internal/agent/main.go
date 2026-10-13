@@ -1691,6 +1691,10 @@ func (a *MainAgent) handleAppendContext(evt Event) {
 // cancelled tool has no conversation-visible result and should not be sent back
 // to the model on the next turn.
 func (a *MainAgent) handleTurnCancelled(evt Event) {
+	if a.turn != nil && a.turn.ID == evt.TurnID && a.turn.deliveryPending.Load() {
+		a.turn.deliveryCancel = &evt
+		return
+	}
 	// Turn isolation: ignore duplicate/stale cancel events so an old cancellation
 	// cannot force a newer turn back to idle.
 	if a.turn == nil || evt.TurnID == 0 || evt.TurnID != a.turn.ID {

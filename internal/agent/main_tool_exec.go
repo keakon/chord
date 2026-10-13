@@ -18,6 +18,7 @@ import (
 )
 
 type ToolExecutionResult struct {
+	DeliveredFiles []message.DeliveredFile
 	// ExecutionStarted records whether the tool body actually entered Execute.
 	// Gate admission, hooks and journal writes do not establish this fact.
 	ExecutionStarted bool

@@ -1415,6 +1415,7 @@ type toolDefHashMemoEntry struct {
 }
 
 type stableReductionMessageShape struct {
+	DeliveryHash          [32]byte
 	Role                  message.Role
 	ContentHash           [sha256.Size]byte
 	PartsHash             [sha256.Size]byte
@@ -1541,6 +1542,7 @@ func stableReductionMessageShapes(messages []message.Message) []stableReductionM
 func stableReductionMessageShapeOf(msg *message.Message) stableReductionMessageShape {
 	return stableReductionMessageShape{
 		Role:                  msg.Role,
+		DeliveryHash:          deliveryMetadataHash(*msg),
 		ContentHash:           stableReductionHashString(msg.Content),
 		PartsHash:             stableReductionContentPartsHash(msg.Parts),
 		ThinkingHash:          stableReductionThinkingBlocksHash(msg.ThinkingBlocks),
@@ -1587,6 +1589,9 @@ func stableReductionMessageEquivalent(a, b *message.Message) bool {
 		a.IsCompactionSummary != b.IsCompactionSummary ||
 		a.Kind != b.Kind ||
 		a.ToolRecoveryState != b.ToolRecoveryState {
+		return false
+	}
+	if deliveryMetadataHash(*a) != deliveryMetadataHash(*b) {
 		return false
 	}
 	if !maps.Equal(a.CompactionRequestSources, b.CompactionRequestSources) || !maps.Equal(a.CompactionFileRevisions, b.CompactionFileRevisions) {
@@ -2400,4 +2405,15 @@ func countToolResults(messages []message.Message) int {
 		}
 	}
 	return total
+}
+
+func deliveryMetadataHash(m message.Message) [32]byte {
+	if len(m.DeliveredFiles) == 0 && len(m.CompactionDeliveredFiles) == 0 && m.FileLinkBaseDir == "" {
+		return [32]byte{}
+	}
+	raw, _ := json.Marshal(struct {
+		Files, Checkpoint []message.DeliveredFile
+		Base              string
+	}{m.DeliveredFiles, m.CompactionDeliveredFiles, m.FileLinkBaseDir})
+	return stableReductionHashString(string(raw))
 }

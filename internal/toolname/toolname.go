@@ -8,6 +8,7 @@ import (
 const maxToolNameLength = 128
 
 const (
+	Present        = "present"
 	Read           = "read"
 	Write          = "write"
 	Edit           = "edit"

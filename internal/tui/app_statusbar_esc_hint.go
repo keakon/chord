@@ -12,6 +12,8 @@ func (m *Model) nextEscHint() string {
 		return "cancel search"
 	case ModeMemoryPanel:
 		return "close memory"
+	case ModeFileViewer:
+		return "back / close file view"
 	case ModeContentViewer:
 		return "close view"
 	case ModeContext:

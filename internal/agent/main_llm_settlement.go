@@ -37,6 +37,7 @@ func (a *MainAgent) settleMainLLMResponse(payload *LLMResponsePayload, validCall
 	assistantMsg := message.Message{
 		NativeTools:      payload.NativeTools,
 		Role:             "assistant",
+		FileLinkBaseDir:  a.effectiveToolBaseDir(),
 		Content:          payload.Content,
 		ThinkingBlocks:   thinkingBlocks,
 		ResponsesOutput:  responsesOutput,
@@ -54,7 +55,7 @@ func (a *MainAgent) settleMainLLMResponse(payload *LLMResponsePayload, validCall
 	a.ctxMgr.Append(assistantMsg)
 
 	// Emit finalized assistant message event for control-plane consumers.
-	a.emitToTUI(AssistantMessageEvent{
+	a.emitToTUI(AssistantMessageEvent{FileLinkBaseDir: a.effectiveToolBaseDir(),
 		Text:      payload.Content,
 		ToolCalls: len(sanitizedToolCalls),
 	})

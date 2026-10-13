@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -346,7 +347,17 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 		appendBlock(infoPanelSectionMCP, m.buildInfoPanelMCPBlock(lineW))
 		appendBlock(infoPanelSectionSkills, m.buildInfoPanelSkillsBlock(lineW))
 		appendBlock(infoPanelSectionGit, m.buildInfoPanelGitBlock(lineW))
+		fileBaseY := m.infoPanelRenderCursorY
 		appendBlock(infoPanelSectionFiles, m.buildInfoPanelFilesBlock(lineW))
+		if !m.isInfoPanelSectionCollapsed(infoPanelSectionFiles) {
+			files := m.sidebar.CurrentAgentFiles()
+			for i := len(files) - 1; i >= max(0, len(files)-infoPanelEditedFilesHardLimit); i-- {
+				if filepath.IsAbs(files[i].Path) {
+					row := fileBaseY + 1 + (len(files) - 1 - i)
+					m.infoPanelHitBoxes = append(m.infoPanelHitBoxes, infoPanelSectionHitBox{filePath: files[i].Path, startY: row, endY: row + 1})
+				}
+			}
+		}
 		// Transient sections render after every stable one: agents, jobs, and
 		// todos come and go during a session, and inserting them above would
 		// shift the sections a user is reading or clicking.

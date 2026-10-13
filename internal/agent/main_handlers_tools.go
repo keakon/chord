@@ -246,10 +246,11 @@ func todoWriteArgsAllDone(argsJSON string) bool {
 // (toolProvenanceFromContext) instead of copying the whole history.
 func (a *MainAgent) buildToolResultMessage(payload *ToolResultPayload, contextResult string, parts []message.ContentPart, isError bool, provenance *message.MessageProvenance) message.Message {
 	return message.Message{
-		Role:       message.RoleTool,
-		Content:    contextResult,
-		Parts:      parts,
-		ToolCallID: payload.CallID,
+		Role:           message.RoleTool,
+		DeliveredFiles: successfulDeliveredFiles(payload.DeliveredFiles, isError),
+		Content:        contextResult,
+		Parts:          parts,
+		ToolCallID:     payload.CallID,
 		// Content is the model-visible combination of payload and notes; both
 		// are also stored apart so a restored transcript can show the tool's own
 		// output without splitting the notes back out.
@@ -275,6 +276,11 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	if a == nil || payload == nil {
 		return
 	}
+	if len(payload.DeliveredFiles) > 0 && payload.deliveryCommit == nil {
+		payload.DeliveredFiles = nil
+		payload.Error = context.Canceled
+		payload.Result = "File delivery canceled before durable submission"
+	}
 	if payload.Name == tools.NameGenerateImage && payload.RecoveryState == "" {
 		payload.RecoveryState = imageToolRecoveryState(payload.Error)
 	}
@@ -284,22 +290,23 @@ func (a *MainAgent) appendCompletedInterruptedToolResult(payload *ToolResultPayl
 	parts := a.toolResultParts(contextResult, payload.Images)
 
 	event := ToolResultEvent{
-		CallID:        payload.CallID,
-		Name:          payload.Name,
-		ArgsJSON:      payload.ArgsJSON,
-		Audit:         payload.Audit.Clone(),
-		Result:        displayResult,
-		Payload:       payload.Payload,
-		Notes:         append([]string(nil), payload.Notes...),
-		Status:        toolResultStatusFromError(isError),
-		Parts:         parts,
-		Diff:          payload.Diff,
-		DiffAdded:     payload.DiffAdded,
-		DiffRemoved:   payload.DiffRemoved,
-		FileCreated:   payload.FileCreated,
-		FileState:     payload.FileState.Clone(),
-		Duration:      payload.Duration,
-		RecoveryState: payload.RecoveryState,
+		CallID:         payload.CallID,
+		Name:           payload.Name,
+		ArgsJSON:       payload.ArgsJSON,
+		Audit:          payload.Audit.Clone(),
+		Result:         displayResult,
+		Payload:        payload.Payload,
+		Notes:          append([]string(nil), payload.Notes...),
+		Status:         toolResultStatusFromError(isError),
+		Parts:          parts,
+		DeliveredFiles: successfulDeliveredFiles(payload.DeliveredFiles, isError),
+		Diff:           payload.Diff,
+		DiffAdded:      payload.DiffAdded,
+		DiffRemoved:    payload.DiffRemoved,
+		FileCreated:    payload.FileCreated,
+		FileState:      payload.FileState.Clone(),
+		Duration:       payload.Duration,
+		RecoveryState:  payload.RecoveryState,
 	}
 	if payload.Name == tools.NameGenerateImage {
 		event.Diagnostic = imageToolErrorDiagnostic(payload.Error)
@@ -475,6 +482,9 @@ func finalizeToolResultTexts(ctx context.Context, turn *Turn, fireHook func(cont
 	} else if hookResult != nil {
 		switch hookResult.Action {
 		case hook.ActionBlock:
+			if name == tools.NamePresent {
+				return &composedToolResultTexts{Display: "File delivery blocked by hook", Context: "File delivery blocked by hook", ErrorText: "File delivery blocked by hook", IsError: true}
+			}
 			log.Warn("on_before_tool_result_append returned block; ignoring")
 		case hook.ActionModify:
 			displayResult, contextResult = applyBeforeToolResultAppendHook(displayResult, contextResult, hookResult)
@@ -508,6 +518,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		log.Errorf("handleToolResult: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
 		return
 	}
+	if payload.deliveryCommit != nil && payload.deliveryCommit.turn != a.turn {
+		return
+	}
 	if payload.composedTexts == nil && a.syncToolHooksConfigured() {
 		// Synthetic results (persistence-barrier failures, batch cancellations)
 		// are built without composed texts. Composing one here would run the
@@ -515,6 +528,9 @@ func (a *MainAgent) handleToolResult(evt Event) {
 		// on a goroutine and re-deliver the finished payload; the composed branch
 		// below then owns the bookkeeping exactly once.
 		a.composeToolResultTextsOffLoop(evt.TurnID, payload)
+		return
+	}
+	if a.beginDeliveryCommit(payload) {
 		return
 	}
 	if a.walltime != nil {
@@ -662,22 +678,23 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	var imageEvent ToolResultEvent
 	if !deferToolResultEmission {
 		event := ToolResultEvent{
-			CallID:        payload.CallID,
-			Name:          payload.Name,
-			ArgsJSON:      payload.ArgsJSON,
-			Audit:         payload.Audit.Clone(),
-			Result:        displayResult,
-			Payload:       payload.Payload,
-			Notes:         append([]string(nil), payload.Notes...),
-			Status:        toolResultStatusFromError(isError),
-			Parts:         parts,
-			Diff:          payload.Diff,
-			DiffAdded:     payload.DiffAdded,
-			DiffRemoved:   payload.DiffRemoved,
-			FileCreated:   payload.FileCreated,
-			FileState:     payload.FileState.Clone(),
-			Duration:      payload.Duration,
-			RecoveryState: payload.RecoveryState,
+			CallID:         payload.CallID,
+			Name:           payload.Name,
+			ArgsJSON:       payload.ArgsJSON,
+			Audit:          payload.Audit.Clone(),
+			Result:         displayResult,
+			Payload:        payload.Payload,
+			Notes:          append([]string(nil), payload.Notes...),
+			Status:         toolResultStatusFromError(isError),
+			Parts:          parts,
+			DeliveredFiles: successfulDeliveredFiles(payload.DeliveredFiles, isError),
+			Diff:           payload.Diff,
+			DiffAdded:      payload.DiffAdded,
+			DiffRemoved:    payload.DiffRemoved,
+			FileCreated:    payload.FileCreated,
+			FileState:      payload.FileState.Clone(),
+			Duration:       payload.Duration,
+			RecoveryState:  payload.RecoveryState,
 		}
 		if payload.Name == tools.NameGenerateImage {
 			event.Diagnostic = imageToolErrorDiagnostic(payload.Error)
@@ -690,11 +707,16 @@ func (a *MainAgent) handleToolResult(evt Event) {
 	a.queueLSPDiagnosticOverlayFromContext(payload)
 	if !deferToolResultEmission {
 		toolMsg := a.buildToolResultMessage(payload, contextResult, parts, isError, toolProvenanceFromContext(a.ctxMgr, payload.CallID))
+		if payload.deliveryCommit != nil && payload.deliveryCommit.Err == nil {
+			toolMsg = payload.deliveryCommit.Message.Clone()
+		}
 		a.ctxMgr.Append(toolMsg)
 		if payload.Name == tools.NameGenerateImage {
 			a.persistImageResult(a.recoveryManager(), identity.MainAgentID, toolMsg, imageEvent, a.notePersistenceFailure)
 		} else if a.recoveryManager() != nil {
-			a.persistAsync(identity.MainAgentID, toolMsg)
+			if payload.deliveryCommit == nil {
+				a.persistAsync(identity.MainAgentID, toolMsg)
+			}
 		}
 		a.recordEvidenceFromMessage(toolMsg)
 	}
@@ -712,6 +734,19 @@ func (a *MainAgent) handleToolResult(evt Event) {
 
 	if errors.Is(payload.Error, errRequiredQuestionDecisions) {
 		a.turn.questionCompletionBlocked = true
+	}
+	if payload.deliveryCommit != nil {
+		a.turn.deliveryPending.Store(false)
+		if deferred := a.turn.deliveryCancel; deferred != nil {
+			a.turn.deliveryCancel = nil
+			a.handleTurnCancelled(*deferred)
+			return
+		}
+		if payload.deliveryCommit.Err != nil {
+			a.turn.Cancel()
+			a.emitToTUI(ErrorEvent{Err: payload.deliveryCommit.Err})
+			return
+		}
 	}
 	remaining := a.turn.PendingToolCalls.Add(-1)
 	if remaining < 0 {

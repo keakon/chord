@@ -20,7 +20,7 @@ func (m *Model) handleTakeoverKey(msg tea.KeyMsg) tea.Cmd {
 			return m.handleQuestionKey(msg)
 		}
 	case ModeConfirm, ModeStopJobConfirm, ModeJobsOverlay, ModeContext, ModeStatus,
-		ModeContentViewer, ModeImageViewer, ModeUsageStats, ModeErrorPanel, ModeHelp:
+		ModeContentViewer, ModeFileViewer, ModeImageViewer, ModeUsageStats, ModeErrorPanel, ModeHelp:
 		return m.handleModeKey(msg)
 	case ModeInsert, ModeNormal:
 		switch {
@@ -54,7 +54,7 @@ func (m *Model) handleTakeoverKey(msg tea.KeyMsg) tea.Cmd {
 func (m *Model) handleTakeoverMouse(msg tea.MouseMsg) tea.Cmd {
 	switch m.mode {
 	case ModeQuestion, ModeConfirm, ModeStopJobConfirm, ModeJobsOverlay, ModeContext, ModeStatus,
-		ModeContentViewer, ModeImageViewer, ModeUsageStats, ModeErrorPanel, ModeHelp:
+		ModeContentViewer, ModeFileViewer, ModeImageViewer, ModeUsageStats, ModeErrorPanel, ModeHelp:
 		if cmd, handled := m.handleModalMouseMsg(msg); handled {
 			return cmd
 		}

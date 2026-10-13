@@ -161,6 +161,9 @@ func appendBashExpandedResult(result *[]string, b *Block, contentWidth int) {
 }
 
 func (b *Block) renderToolCall(width int, spinnerFrame string) []string {
+	if len(b.DeliveredFiles) > 0 && b.ResultDone && !b.IsError {
+		return b.renderDeliveryCard(width)
+	}
 	b.ToolName = toolNameKey(b.ToolName)
 	metrics := newToolCardMetrics(width)
 	blockStyle := metrics.blockStyle

@@ -5,6 +5,7 @@ import (
 )
 
 const (
+	NamePresent        = toolname.Present
 	NameRead           = toolname.Read
 	NameWrite          = toolname.Write
 	NameEdit           = toolname.Edit

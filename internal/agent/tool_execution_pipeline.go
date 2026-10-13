@@ -469,6 +469,21 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 
+	var approvedDeliveries []message.FileLocator
+	captureDeliveryTargets := func() error {
+		if tc.Name != tools.NamePresent {
+			return nil
+		}
+		args, err := tools.ParsePresentArgs(tc.Args)
+		if err != nil {
+			return err
+		}
+		approvedDeliveries, err = tools.PresentLocators(args, p.effectiveToolBaseDir())
+		return err
+	}
+	if err := captureDeliveryTargets(); err != nil {
+		return execResult, err
+	}
 	if err := p.applyPermission(preparationCtx, &tc, &execResult); err != nil {
 		return execResult, err
 	}
@@ -483,6 +498,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 			}
 			// A hook may rewrite the target, so re-anchor from the binding dir.
 			p = p.withMachineStateBaseDir(tc)
+			if err := captureDeliveryTargets(); err != nil {
+				return execResult, err
+			}
 			if err := p.applyPermission(preparationCtx, &tc, &execResult); err != nil {
 				return execResult, err
 			}
@@ -514,6 +532,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if p.imageAccessGuard != nil {
 		agentCtx = tools.WithImageAccessGuard(agentCtx, p.imageAccessGuard)
 	}
+	deliverySink := &tools.DeliveryCollector{}
+	agentCtx = tools.WithDeliveryCollector(agentCtx, deliverySink)
+	agentCtx = tools.WithApprovedDeliveryTargets(agentCtx, approvedDeliveries)
 	imageSink := &tools.ImageCollector{}
 	agentCtx = tools.WithImageSink(agentCtx, imageSink)
 	readObservationSink := &tools.ReadObservationCollector{}
@@ -598,6 +619,9 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	agentCtx = executiongate.WithLease(agentCtx, executionLease)
 	result, err := p.executeToolForCall(agentCtx, tc, &execResult)
 	execResult.Images = imageSink.Drain()
+	if err == nil {
+		execResult.DeliveredFiles = deliverySink.Drain()
+	}
 	deleteAudit, hasDeleteAudit := deleteAuditSink.Audit()
 	if deleteLocks != nil && hasDeleteAudit {
 		deleteLocks.CommitAudit(deleteAudit)

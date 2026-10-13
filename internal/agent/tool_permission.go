@@ -214,6 +214,36 @@ func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName
 
 	unwrapped := llm.UnwrapToolArgs(args)
 	switch toolName {
+	case tools.NamePresent:
+		parsed, err := tools.ParsePresentArgs(unwrapped)
+		if err != nil {
+			return decision
+		}
+		locators, err := tools.PresentLocators(parsed, scope.Cwd)
+		if err != nil {
+			return decision
+		}
+		items := make([]permissionAggregateItem, 0, len(locators))
+		for _, loc := range locators {
+			var target string
+			var action permission.Action
+			if loc.Workspace != nil {
+				target = loc.Workspace.Path
+				action = ruleset.EvaluatePath(toolName, target, scope)
+			} else {
+				target = loc.Artifact.RelPath
+				action = ruleset.Evaluate(toolName, target)
+			}
+			item := permissionAggregateItem{Argument: target, Action: action}
+			if action == permission.ActionAsk {
+				item.AskList = []string{target}
+			}
+			if action == permission.ActionAllow {
+				item.AllowList = []string{target}
+			}
+			items = append(items, item)
+		}
+		return aggregatePermissionItems(items, permission.ActionAllow, "*")
 	case tools.NameGenerateImage:
 		return evaluateImageGenerationPermission(ruleset, unwrapped, scope, pctx.SessionDir)
 	case tools.NameViewImage:

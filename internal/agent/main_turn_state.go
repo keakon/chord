@@ -15,6 +15,10 @@ import (
 // starts a new turn; starting a new turn cancels any in-flight work from the
 // previous one.
 type Turn struct {
+	deliveryCommitCallID      string // guarded by pendingToolMu; owned by the persistence queue until acknowledgment
+	deliveryPending           atomic.Bool
+	deliveryCancel            *Event
+	deliverySubCancel         atomic.Bool
 	nativeImageFallback       atomic.Bool
 	nativeImageDeadline       atomic.Int64
 	questionCompletionBlocked bool

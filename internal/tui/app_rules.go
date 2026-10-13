@@ -1,12 +1,13 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"image"
-	"os/exec"
-	"runtime"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/desktop"
 
 	"github.com/keakon/bubbles/v2/textinput"
 	tea "github.com/keakon/bubbletea/v2"
@@ -270,23 +271,19 @@ func (m *Model) openCurrentRuleFile() tea.Cmd {
 	if path == "" {
 		return m.enqueueToast("This rule has no backing file", "warn")
 	}
-	if err := openPathInOS(path); err != nil {
-		return m.enqueueToast(fmt.Sprintf("Failed to open rule file: %v", err), "error")
+	if m.desktopService == nil {
+		m.desktopService = desktop.New()
 	}
-	return m.enqueueToast(fmt.Sprintf("Opened rule file: %s", path), "info")
+	service := m.desktopService
+	owner := m.imageViewerOwner()
+	return func() tea.Msg {
+		return ruleFileOpenedMsg{owner: owner, err: service.OpenDefault(context.Background(), path)}
+	}
 }
 
-func openPathInOS(path string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", path)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", path)
-	default:
-		cmd = exec.Command("xdg-open", path)
-	}
-	return cmd.Start()
+type ruleFileOpenedMsg struct {
+	owner imageViewerOwner
+	err   error
 }
 
 // addSessionRule tracks a rule in the local /rules overlay list.

@@ -228,6 +228,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	s.ctxMgr.Append(message.Message{
 		NativeTools:      resp.NativeTools,
 		Role:             "assistant",
+		FileLinkBaseDir:  s.effectiveToolBaseDir(),
 		Content:          resp.Content,
 		ThinkingBlocks:   thinkingBlocks,
 		ResponsesOutput:  responsesOutput,
@@ -240,7 +241,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 
 	// Emit finalized assistant message event for control-plane consumers.
 	ownerAgentID := s.OwnerAgentID()
-	s.parent.emitToTUI(AssistantMessageEvent{
+	s.parent.emitToTUI(AssistantMessageEvent{FileLinkBaseDir: s.effectiveToolBaseDir(),
 		AgentID:       s.instanceID,
 		TaskID:        s.taskID,
 		AgentType:     s.agentDefName,
@@ -253,6 +254,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	persistMsg := message.Message{
 		NativeTools:      resp.NativeTools,
 		Role:             "assistant",
+		FileLinkBaseDir:  s.effectiveToolBaseDir(),
 		Content:          resp.Content,
 		ThinkingBlocks:   thinkingBlocks,
 		ResponsesOutput:  responsesOutput,
@@ -638,6 +640,7 @@ func (s *SubAgent) preserveInterruptedPartial() {
 	}
 	msg := message.Message{
 		Role:            "assistant",
+		FileLinkBaseDir: s.effectiveToolBaseDir(),
 		Content:         partial,
 		StopReason:      "interrupted",
 		ResponsesOutput: interruptedAssistantResponsesOutput(reasoning, partial),

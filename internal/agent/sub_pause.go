@@ -313,7 +313,7 @@ func (s *SubAgent) startPausedToolCalls(turn *Turn, calls []message.ToolCall) {
 }
 
 func pausedSubToolResult(p *ToolResultPayload) *toolResult {
-	return &toolResult{CallID: p.CallID, Name: p.Name, ArgsJSON: p.ArgsJSON, Audit: p.Audit, Result: p.Result, Payload: p.Payload, Notes: p.Notes, Images: p.Images, Error: p.Error, TurnID: p.TurnID, Duration: p.Duration, Diff: p.Diff, DiffAdded: p.DiffAdded, DiffRemoved: p.DiffRemoved, FileCreated: p.FileCreated, LSPReviews: p.LSPReviews, FileState: p.FileState, walltimeTarget: p.walltimeTarget, speculativeHooks: p.speculativeHooks, RecoveryState: p.RecoveryState}
+	return &toolResult{CallID: p.CallID, Name: p.Name, ArgsJSON: p.ArgsJSON, Audit: p.Audit, Result: p.Result, Payload: p.Payload, Notes: p.Notes, Images: p.Images, DeliveredFiles: message.CloneDeliveredFiles(p.DeliveredFiles), Error: p.Error, TurnID: p.TurnID, Duration: p.Duration, Diff: p.Diff, DiffAdded: p.DiffAdded, DiffRemoved: p.DiffRemoved, FileCreated: p.FileCreated, LSPReviews: p.LSPReviews, FileState: p.FileState, walltimeTarget: p.walltimeTarget, speculativeHooks: p.speculativeHooks, RecoveryState: p.RecoveryState}
 }
 
 // handlePausedLLMResponse records the completed request before settling every
@@ -332,7 +332,7 @@ func (s *SubAgent) handlePausedLLMResponse(resp *message.Response) {
 	}
 	msg := message.Message{Role: message.RoleAssistant, Content: resp.Content, ToolCalls: calls, ThinkingBlocks: resp.ThinkingBlocks, ResponsesOutput: resp.ResponsesOutput, GeminiParts: resp.GeminiParts, ReasoningContent: resp.ReasoningContent, NativeTools: resp.NativeTools, StopReason: resp.StopReason, Usage: resp.Usage, Provenance: subAssistantProvenance(s)}
 	s.ctxMgr.Append(msg)
-	s.parent.emitToTUI(AssistantMessageEvent{AgentID: s.instanceID, TaskID: s.taskID, AgentType: s.agentDefName, ParentAgentID: controlPlaneAgentID(s.OwnerAgentID()), Text: resp.Content, ToolCalls: len(calls)})
+	s.parent.emitToTUI(AssistantMessageEvent{FileLinkBaseDir: s.effectiveToolBaseDir(), AgentID: s.instanceID, TaskID: s.taskID, AgentType: s.agentDefName, ParentAgentID: controlPlaneAgentID(s.OwnerAgentID()), Text: resp.Content, ToolCalls: len(calls)})
 	barrier, pending := s.persistMessageBarrier(msg, "assistant message")
 	if resp.Usage != nil {
 		s.ctxMgr.UpdateFromUsage(*resp.Usage)

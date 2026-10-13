@@ -842,6 +842,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	viewImageTool := tools.NewViewImageTool(ac.MainAgent)
 	viewImageTool.BaseDir = ac.WorkDir
 	ac.Registry.Register(viewImageTool)
+	ac.Registry.Register(tools.PresentTool{BaseDir: ac.WorkDir})
 	if err := configureImageGeneration(ac); err != nil {
 		ac.cleanup()
 		return nil, err

@@ -4,6 +4,17 @@
 
 Start from the symptom and find the next command to run. Symptoms are grouped roughly in the order you are likely to hit them: startup and auth first, then request failures, sessions, TUI rendering, and performance.
 
+## Delivered files cannot be previewed or opened
+
+- **Declared version unavailable**: the artifact was overwritten, deleted, or omitted from an imported session. Restore the exact bytes and digest; do not substitute a same-named file.
+- **File changed / content version unverified**: workspace delivery is not a snapshot. Files over 8 MiB record size and modification time without a content digest. Reload or use an external application.
+- **Text or Markdown limit reached**: switch to source or open the complete file. Copy covers loaded content only. PDF and non-UTF-8 files do not have an internal text preview.
+- **Open with unavailable**: Linux needs `gio` to enumerate and select applications. With only `xdg-open`, default opening remains available. SSH and environments without a graphical desktop disable external opening.
+- **System request still processing**: wait for the request to finish before retrying. Closing the viewer does not terminate applications already handed to the system.
+- **Delivery outcome unknown**: session writing or synchronization failed. Check disk space and session-directory access, then restore the session to inspect persisted results. Do not assume the earlier declaration was never written and replay it blindly.
+
+External opening validates the file before dispatch; it cannot lock the bytes a third-party application subsequently reads. An HTML entry digest does not cover its associated resources.
+
 ## Startup failures
 
 Run `chord --version` in a terminal first to check that the command is available and the program starts. Prebuilt binaries do not need Go; only source builds require checking the Go version and source entry point.

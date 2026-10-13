@@ -19,6 +19,14 @@ func (m *Model) normalActivation() tea.Cmd {
 		block = m.viewport.GetBlockAtOffset()
 	}
 	if block != nil {
+		if len(block.DeliveredFiles) > 0 {
+			return m.openDeliveryFiles(block.DeliveredFiles)
+		}
+		if block.Type == BlockAssistant {
+			if links := localFileLinks(block.Content, block.FileLinkBaseDir); len(links) > 0 {
+				return m.openLocalFileLinks(links)
+			}
+		}
 		if block.ToolName == tools.NameDelegate {
 			// An unresolved Delegate is still a task action, not an empty Enter target.
 			if block.LinkedAgentID != "" {

@@ -16,6 +16,11 @@ func (s *SubAgent) cancelCurrentTurnFromLoop() {
 		return
 	}
 	turn := s.turn
+	if turn.deliveryPending.Load() {
+		turn.deliverySubCancel.Store(true)
+		turn.Cancel()
+		return
+	}
 	pending := turn.PendingToolCalls.Load()
 	if turn.activeToolBatchCancel != nil {
 		turn.activeToolBatchCancel()

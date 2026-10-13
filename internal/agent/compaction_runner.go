@@ -571,6 +571,13 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		return mailboxSettleErr
 	}
 	d.NewMessages = a.refreshCompactionFileRevisions(d.NewMessages)
+	for i := range d.NewMessages {
+		if d.NewMessages[i].IsCompactionSummary {
+			snapshot := a.ctxMgr.Snapshot()
+			d.NewMessages[i].CompactionDeliveredFiles = message.CollectDeliveredFiles(snapshot[:min(max(0, headSplit), len(snapshot))])
+			break
+		}
+	}
 	// Stamp the checkpoint message with the request batch of this apply — the
 	// same value lastModelDrivenApplyBatch records below. RequestBatch is
 	// otherwise only stamped on assistant messages, so after a restart whose

@@ -6,6 +6,21 @@ Keep daily TUI work moving: send messages, read tool cards, recover sessions, an
 
 For image generation and explicit reference editing, configure a separate image target; see [Image generation and editing](image-generation.md).
 
+## File delivery and preview
+
+The model uses `present` to declare final reports, images, web pages, and other files. A successful tool card lists the files. Select the card and press Enter, or click it, to choose a file. Declaring files does not launch applications or establish that their contents or tests have been verified.
+
+Use the arrow keys to select a file, Tab to select Preview / Open / Open with / Copy path, and Enter to act. `o` opens with the system default association, `a` selects another associated application, and `p` copies the path. HTML offers source preview; PDF and other binary formats use external applications. Static HTML opens at its original location so relative resources remain reachable. Chord does not build a page or start a development server automatically.
+
+The text viewer supports `j/k` or arrows, PgUp/PgDn, Home/End, horizontal arrows, `w` for wrapping, `m` for Markdown/source, `/` for literal search, `n/N` for the next/previous match, `g` for a source line, `r` to reload, `l` to select local links or images in the document, and `y` to copy loaded source. Esc leaves search or line entry first, then returns to the file list and closes the viewer. Preview does not send model requests or change the input draft. Source references recognize explicit Markdown local links and line fragments such as `#L12`. Relative references in older messages without a recorded working directory are unavailable.
+
+“Current file” stays bound to the original target and may show subsequent edits. Preview, reload, and external opening report changes detected against the delivery. Files larger than 8 MiB are checked by size and modification time only and are marked as having unverified contents. “Declared version” refers to a session artifact whose full digest and size must match before opening. Missing or overwritten versions remain unavailable; Chord does not substitute a same-named file. An HTML entry digest does not cover CSS, scripts, images, or other resources. Delivery metadata survives session restore, compaction, and forks. JSON export carries metadata only; importing it does not restore missing artifact bytes.
+
+Text preview loads at most 1 MiB and 20,000 source lines; rendered output retains at most 10,000 lines. Markdown rendering accepts at most 128 KiB. Limits produce a truncation or source-mode notice. `y` copies only loaded source; use an external application to inspect the complete file.
+
+macOS lists system associations; Windows uses the native Open with chooser; Linux prefers GIO and supports default opening only when just `xdg-open` is available. Selecting an application does not change default associations. SSH, headless desktops, and remote sessions cannot open server files on the local desktop; the original path can still be copied. Programs, scripts, and system shortcuts cannot be launched through these actions.
+
+
 ## How to use this page
 
 You do not need to read this page from top to bottom:

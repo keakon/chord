@@ -6,6 +6,7 @@
 
 ### 新功能
 
+- 通过 `present` 交付文件，恢复会话后仍可找到交付记录；TUI 支持预览文本、Markdown 和图片，也可用系统关联应用打开 HTML、PDF 等文件。
 - HTTP MCP 服务支持 OAuth 登录，可通过 CLI 或 TUI 管理凭证，并用 `chord doctor mcp` 分别检查认证、连接和工具目录状态。Headless 和 gateway 展示状态及宿主机登录指引。
 
 - 快捷键可通过空列表（`[]`）禁用，帮助和输入提示同步显示有效绑定。启动提示与 `chord doctor config` 会定位无效快捷键声明、显示最终绑定及来源，并提示部分确定的按键遮蔽。

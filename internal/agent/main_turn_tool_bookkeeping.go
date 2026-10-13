@@ -55,6 +55,9 @@ func (t *Turn) markToolCallCompleted(callID string) {
 	}
 	t.completedToolCallIDs[callID] = struct{}{}
 	delete(t.PendingToolMeta, callID)
+	if t.deliveryCommitCallID == callID {
+		t.deliveryCommitCallID = ""
+	}
 }
 
 func (t *Turn) filterCompletedToolCalls(calls []PendingToolCall) []PendingToolCall {
@@ -63,11 +66,14 @@ func (t *Turn) filterCompletedToolCalls(calls []PendingToolCall) []PendingToolCa
 	}
 	t.pendingToolMu.Lock()
 	defer t.pendingToolMu.Unlock()
-	if len(t.completedToolCallIDs) == 0 {
+	if len(t.completedToolCallIDs) == 0 && t.deliveryCommitCallID == "" {
 		return calls
 	}
 	out := make([]PendingToolCall, 0, len(calls))
 	for _, call := range calls {
+		if call.CallID == t.deliveryCommitCallID {
+			continue
+		}
 		if _, completed := t.completedToolCallIDs[call.CallID]; completed {
 			continue
 		}

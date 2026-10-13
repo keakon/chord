@@ -691,7 +691,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 							diff = toolExecutionDiff(effectiveCall, execResult)
 						}
-						resultPayload := &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turnID, Duration: toolExecDuration(tc.Name, execResult, completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
+						resultPayload := &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turnID, Duration: toolExecDuration(tc.Name, execResult, completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
 						resultPayload.composedTexts = finalizeToolResultTexts(turn.Ctx, turn, a.fireHook, resultPayload.CallID, resultPayload.Name, resultPayload.ArgsJSON, resultPayload.Result, resultPayload.Error, resultPayload.Audit, resultPayload.FileState)
 						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: resultPayload})
 					}(effective)
@@ -765,6 +765,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				Payload:        execResult.Payload,
 				Notes:          append([]string(nil), execResult.Notes...),
 				Images:         execResult.Images,
+				DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles),
 				Error:          err,
 				TurnID:         turnID,
 				Duration:       toolExecDuration(tc.Name, execResult, completedAt),
@@ -816,6 +817,7 @@ func (a *MainAgent) savePartialAssistantMsgForTurn(turn *Turn) bool {
 	}
 	msg := message.Message{
 		Role:            "assistant",
+		FileLinkBaseDir: a.effectiveToolBaseDir(),
 		Content:         text,
 		StopReason:      "interrupted",
 		ResponsesOutput: interruptedAssistantResponsesOutput(reasoning, text),

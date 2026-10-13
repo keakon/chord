@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
@@ -226,6 +227,9 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	innerWidth := max(boxWidth-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 	contentWidth := min(innerWidth-2, maxProseWidth)
 	label := renderCompactionSummaryLabel(b)
+	if len(b.DeliveredFiles) > 0 {
+		label += fmt.Sprintf(" · %d earlier delivered files (Enter)", len(b.DeliveredFiles))
+	}
 	// Compaction summaries are always fully expanded (see Block.Toggle); the
 	// complete raw content including any [Context compressed] archive section
 	// stays visible, so no [space] hints are rendered.

@@ -119,17 +119,18 @@ type BoundedText struct {
 // its outcome was never persisted, so consumers must check ResultUnknown
 // before reading Status as success or failure.
 type ProjectedToolCall struct {
-	CallID          string      `json:"call_id"`
-	Name            string      `json:"name"`
-	Status          string      `json:"status"`
-	RecoveryState   string      `json:"recovery_state,omitempty"`
-	DurationMs      int64       `json:"duration_ms,omitempty"`
-	Args            BoundedText `json:"args"`
-	ResultDigest    string      `json:"result_digest,omitempty"`
-	Ref             string      `json:"ref"`
-	Rejected        bool        `json:"rejected"`
-	RejectionSource string      `json:"rejection_source"`
-	ResultUnknown   bool        `json:"result_unknown,omitempty"`
+	DeliveredFiles  []message.DeliveredFile `json:"delivered_files,omitempty"`
+	CallID          string                  `json:"call_id"`
+	Name            string                  `json:"name"`
+	Status          string                  `json:"status"`
+	RecoveryState   string                  `json:"recovery_state,omitempty"`
+	DurationMs      int64                   `json:"duration_ms,omitempty"`
+	Args            BoundedText             `json:"args"`
+	ResultDigest    string                  `json:"result_digest,omitempty"`
+	Ref             string                  `json:"ref"`
+	Rejected        bool                    `json:"rejected"`
+	RejectionSource string                  `json:"rejection_source"`
+	ResultUnknown   bool                    `json:"result_unknown,omitempty"`
 	// Origin names who triggered the call when that is observable and not the
 	// model itself. A user-triggered /skill load persists a synthesized call
 	// carrying OriginUser, so consumers can tell it apart from a model call
@@ -161,15 +162,16 @@ type ProjectedProvenance struct {
 // export alone: archive files live beside main.jsonl in the session directory
 // and are unresolvable from ExportedSession.
 type ProjectedTurn struct {
-	TurnIndex          int                   `json:"turn_index"`
-	Trigger            string                `json:"trigger"`
-	UserText           BoundedText           `json:"user_text"`
-	AssistantFinalText BoundedText           `json:"assistant_final_text"`
-	ToolCalls          []ProjectedToolCall   `json:"tool_calls,omitempty"`
-	FileChanges        []ProjectedFileChange `json:"file_changes,omitempty"`
-	CompactionBoundary bool                  `json:"compaction_boundary,omitempty"`
-	ArchiveRef         string                `json:"archive_ref,omitempty"`
-	Provenance         ProjectedProvenance   `json:"provenance"`
+	CompactionDeliveredFiles []message.DeliveredFile `json:"compaction_delivered_files,omitempty"`
+	TurnIndex                int                     `json:"turn_index"`
+	Trigger                  string                  `json:"trigger"`
+	UserText                 BoundedText             `json:"user_text"`
+	AssistantFinalText       BoundedText             `json:"assistant_final_text"`
+	ToolCalls                []ProjectedToolCall     `json:"tool_calls,omitempty"`
+	FileChanges              []ProjectedFileChange   `json:"file_changes,omitempty"`
+	CompactionBoundary       bool                    `json:"compaction_boundary,omitempty"`
+	ArchiveRef               string                  `json:"archive_ref,omitempty"`
+	Provenance               ProjectedProvenance     `json:"provenance"`
 }
 
 // ProjectJSONLWithLimits projects a session and returns the encoded JSONL
@@ -394,6 +396,11 @@ func renderProjectedTurn(exported *ExportedSession, b *projectedTurnBuilder, ses
 			InstanceID:        instanceID,
 		},
 	}
+	for i := b.firstIdx; i <= b.lastIdx && i < len(exported.Messages); i++ {
+		if i >= 0 {
+			turn.CompactionDeliveredFiles = append(turn.CompactionDeliveredFiles, message.CloneDeliveredFiles(exported.Messages[i].CompactionDeliveredFiles)...)
+		}
+	}
 	if b.hasUserText {
 		turn.UserText = boundText(b.userContent, limits.MaxUserTextRunes, textRef(sessionID, b.userMsgIdx, "user"))
 	} else if b.userMsgIdx >= 0 {
@@ -464,6 +471,7 @@ func renderProjectedToolCall(exported *ExportedSession, decl toolDeclRef, result
 	if resultIdx >= 0 && resultIdx < len(exported.Messages) {
 		if rm := exported.Messages[resultIdx]; rm.Role == message.RoleTool && (rm.ToolCallID == decl.callID || decl.callID == "") {
 			call.Status = normalizeToolStatus(rm.ToolStatus)
+			call.DeliveredFiles = message.CloneDeliveredFiles(rm.DeliveredFiles)
 			call.RecoveryState = rm.ToolRecoveryState
 			call.DurationMs = rm.ToolDurationMs
 			call.ResultDigest = resultDigest(rm.Content)

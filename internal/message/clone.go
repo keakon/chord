@@ -11,6 +11,8 @@ import (
 // raw JSON and optional pointer fields being mutated by a caller.
 func (m Message) Clone() Message {
 	cloned := m
+	cloned.DeliveredFiles = CloneDeliveredFiles(m.DeliveredFiles)
+	cloned.CompactionDeliveredFiles = CloneDeliveredFiles(m.CompactionDeliveredFiles)
 	cloned.NativeTools = m.NativeTools.Clone()
 	cloned.Question = append(json.RawMessage(nil), m.Question...)
 	if len(m.Parts) > 0 {

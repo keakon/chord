@@ -14,6 +14,7 @@ import (
 	uv "github.com/keakon/ultraviolet"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/desktop"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -40,10 +41,11 @@ const (
 	ModeUsageStats                       // stats panel overlay ($, /stats)
 	ModeErrorPanel                       // error panel overlay (ctrl+e)
 	ModeHelp                             // full-screen help overlay
-	ModeImageViewer                      // fullscreen image viewer overlay
-	ModeContentViewer                    // fullscreen markdown content viewer overlay
-	ModeRules                            // /rules overlay
-	ModeStopJobConfirm                   // stop-background-job confirmation overlay
+	ModeFileViewer
+	ModeImageViewer    // fullscreen image viewer overlay
+	ModeContentViewer  // fullscreen markdown content viewer overlay
+	ModeRules          // /rules overlay
+	ModeStopJobConfirm // stop-background-job confirmation overlay
 	ModeContext
 	ModeJobsOverlay // background jobs overlay (status-bar pill)
 	ModeSkillSelect // skill selector overlay (/skill)
@@ -145,11 +147,12 @@ const (
 )
 
 type infoPanelSectionHitBox struct {
-	section infoPanelSectionID
-	agentID string
-	jobID   string
-	startY  int
-	endY    int
+	filePath string
+	section  infoPanelSectionID
+	agentID  string
+	jobID    string
+	startY   int
+	endY     int
 	// stopZoneStartX/stopZoneEndX bound the row's stop affordance ("x") in
 	// panel-local columns; both are zero for rows without one.
 	stopZoneStartX int
@@ -183,6 +186,15 @@ type kittyTerminalMetrics struct {
 
 // Model is the top-level Bubble Tea model for the Chord TUI.
 type Model struct {
+	fileActionToken      uint64
+	filePreviewCache     *fileViewerCache
+	fileActionsBusy      map[string]uint64
+	fileViewer           fileViewerState
+	fileViewerGeneration uint64
+	fileViewerBusy       bool
+	fileViewerNext       *fileViewerRequest
+	desktopService       desktop.Service
+
 	agent                       agent.AgentForTUI
 	viewport                    *Viewport
 	input                       Input
@@ -891,6 +903,20 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			cmd = tea.Sequence(m.imageViewerCleanup, cmd)
 			m.imageViewerCleanup = nil
 		}
+		if m.fileViewer.open && ((m.mode != ModeFileViewer && !(m.mode == ModeImageViewer && m.imageViewer.ReturnMode == ModeFileViewer)) || m.fileViewer.owner != m.imageViewerOwner() || m.fileViewer.checkout != m.workingDir || m.fileViewer.checkoutGeneration != m.workingDirGeneration) {
+			if m.fileViewer.cancel != nil {
+				m.fileViewer.cancel()
+			}
+			m.fileViewerNext = nil
+			m.fileViewerGeneration++
+			m.fileViewer = fileViewerState{}
+			if m.mode == ModeFileViewer {
+				cmd = tea.Sequence(cmd, m.switchModeWithIME(ModeNormal))
+			}
+		}
+		if m.fileViewer.open && m.fileViewer.showing && m.fileViewer.theme != m.theme.Name {
+			cmd = tea.Batch(cmd, m.prepareFileViewer())
+		}
 		if m.imageViewer.Open && (m.mode != ModeImageViewer || m.imageViewer.Owner != m.imageViewerOwner()) {
 			cmd = tea.Sequence(m.dismissImageViewer(), cmd)
 			if m.mode == ModeImageViewer {
@@ -1060,6 +1086,22 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	case inlineImagesLoadedMsg:
 		return m, m.handleInlineImagesLoaded(msg)
 
+	case ruleFileOpenedMsg:
+		if msg.owner != m.imageViewerOwner() {
+			return m, nil
+		}
+		if msg.err != nil {
+			return m, m.enqueueToast(fmt.Sprintf("Failed to open rule file: %v", msg.err), "error")
+		}
+		return m, m.enqueueToast("Open request handed to the system", "info")
+	case fileLinksLoadedMsg:
+		return m, m.handleFileLinksLoaded(msg)
+	case fileViewerLoadedMsg:
+		return m, m.handleFileViewerLoaded(msg)
+	case fileDesktopSlowMsg:
+		return m, m.handleFileDesktopSlow(msg)
+	case fileDesktopResult:
+		return m, m.handleFileDesktopResult(msg)
 	case imageViewerLoadedMsg:
 		return m, m.handleImageViewerLoaded(msg)
 
@@ -1138,7 +1180,12 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, m.handleWindowSizeUpdate(msg)
 
 	case applyResizeMsg:
-		return m, tea.Batch(m.handleApplyResize(msg), m.confirmQuestionPresentation())
+		resize := m.handleApplyResize(msg)
+		var preview tea.Cmd
+		if m.fileViewer.open && m.fileViewer.showing {
+			preview = m.prepareFileViewer()
+		}
+		return m, tea.Batch(resize, preview, m.confirmQuestionPresentation())
 
 	// -- agent events ----------------------------------------------------
 	case agentEventBatchMsg:

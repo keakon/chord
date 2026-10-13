@@ -86,6 +86,8 @@ func (m *Model) handleModeKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handleHelpKey(msg)
 	case ModeContentViewer:
 		return m.handleContentViewerKey(msg)
+	case ModeFileViewer:
+		return m.handleFileViewerKey(msg)
 	case ModeImageViewer:
 		return m.handleImageViewerKey(msg)
 	case ModeRules:

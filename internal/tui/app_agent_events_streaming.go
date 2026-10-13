@@ -332,6 +332,12 @@ func (m *Model) markStreamSegmentEnded(agentID string, id streamSegmentIdentity)
 func (m *Model) handleStreamingAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
+	case agent.AssistantMessageEvent:
+		state := m.streamState(evt.AgentID)
+		if state.assistant != nil {
+			state.assistant.FileLinkBaseDir = evt.FileLinkBaseDir
+		}
+		return true, effects
 	case agent.StreamTextEvent:
 		m.touchStreamDelta(evt.AgentID)
 		state := m.streamState(evt.AgentID)

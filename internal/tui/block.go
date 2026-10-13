@@ -54,6 +54,9 @@ const (
 
 // Block represents a single visual element in the conversation.
 type Block struct {
+	deliveryHits     []deliveryCardHit
+	FileLinkBaseDir  string
+	DeliveredFiles   []message.DeliveredFile
 	ID               int
 	DisplaySequence  int // one-based card number within the originating agent transcript
 	Type             BlockType

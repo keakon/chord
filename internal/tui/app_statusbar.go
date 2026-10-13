@@ -419,6 +419,8 @@ func (m *Model) statusBarModeLabel() string {
 		return "HELP"
 	case ModeContentViewer:
 		return "VIEW"
+	case ModeFileViewer:
+		return "FILE"
 	case ModeImageViewer:
 		return "IMAGE"
 	case ModeRules:

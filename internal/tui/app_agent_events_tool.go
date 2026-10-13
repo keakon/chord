@@ -298,6 +298,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			result:         evt.Result,
 			payload:        evt.Payload,
 			notes:          evt.Notes,
+			deliveredFiles: evt.DeliveredFiles,
 			status:         evt.Status,
 			audit:          evt.Audit,
 			diff:           evt.Diff,
