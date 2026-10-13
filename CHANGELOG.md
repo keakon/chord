@@ -14,6 +14,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Fixed Question tool cards showing raw JSON during live updates; receipts and diagnostic notes now match their display after resuming a session.
 - Tool-result images and PDFs stay in the transcript when the current model cannot accept that input, so switching to a model that supports it still sees them; only the request to the incapable model omits them.
 - Tool cards refresh accumulated parameters when another call starts, so short calls no longer stay blank until the whole batch arrives. Interleaved calls remain in the receiving state until their own arguments finish.
+- The permission rule picker offers reusable command-prefix rules for simple `shell` commands, including `rm` and `sudo`. Patterns match the full command text and can cover multiple arguments; press `E` to enter a custom pattern.
 
 ## 0.8.2 - 2026-10-11
 

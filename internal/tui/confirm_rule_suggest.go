@@ -120,9 +120,6 @@ func buildBashCandidates(seed string) []PatternCandidate {
 		})
 	}
 
-	// Check for high-risk commands
-	isHighRisk := isHighRiskBashCommand(trimmed)
-
 	parts := strings.Fields(trimmed)
 	if len(parts) == 0 {
 		return normalizePatternCandidates([]PatternCandidate{
@@ -130,39 +127,40 @@ func buildBashCandidates(seed string) []PatternCandidate {
 		})
 	}
 
+	// No exact-command candidate: every ladder pattern below already matches the
+	// command as written, so the exact text would only repeat the narrowest rule
+	// the user can accept. Rules that can only allow this one command need `E`,
+	// which takes any pattern.
 	var candidates []PatternCandidate
 
-	// Literal
-	candidates = append(candidates, PatternCandidate{
-		Pattern: trimmed,
-		Summary: "literal (this exact command)",
-		Default: isHighRisk, // high risk commands default to literal
-	})
-
-	if !isHighRisk && len(parts) >= 2 {
+	if len(parts) >= 2 {
 		// head2 *: first two words + wildcard
 		head2 := strings.Join(parts[:2], " ") + " *"
 		head2Summary := "same command, any flags"
 		if len(parts) > 2 {
 			head2Summary = "same command prefix, any arguments"
 		}
+		// A flag prefix does not constrain targets (for example rm -rf *).
+		broad := strings.HasPrefix(parts[1], "-")
+		if broad {
+			head2Summary = "same command prefix, any paths or arguments"
+		}
 		candidates = append(candidates, PatternCandidate{
+			Broad:   broad,
 			Pattern: head2,
 			Summary: head2Summary,
-			Default: !isHighRisk && len(parts) >= 2,
+			Default: true,
 		})
 	}
 
-	if !isHighRisk && len(parts) >= 1 {
-		// head1 *: first word + wildcard
-		head1 := parts[0] + " *"
-		candidates = append(candidates, PatternCandidate{
-			Pattern: head1,
-			Summary: "any " + parts[0] + " subcommand",
-			Broad:   true,
-			Default: len(parts) == 1,
-		})
-	}
+	// head1 *: first word + wildcard
+	head1 := parts[0] + " *"
+	candidates = append(candidates, PatternCandidate{
+		Pattern: head1,
+		Summary: "any " + parts[0] + " subcommand",
+		Broad:   true,
+		Default: len(parts) == 1,
+	})
 
 	// Very broad: *
 	candidates = append(candidates, PatternCandidate{
@@ -176,29 +174,6 @@ func buildBashCandidates(seed string) []PatternCandidate {
 
 func shellCommandIsComplex(command string) bool {
 	return strings.ContainsAny(command, "|;&") || strings.Contains(command, "$(") || strings.Contains(command, "`") || strings.Contains(command, "\n") || strings.Contains(command, "<<")
-}
-
-// isHighRiskBashCommand checks if a command contains high-risk patterns.
-func isHighRiskBashCommand(command string) bool {
-	lower := strings.ToLower(command)
-	highRiskPrefixes := []string{
-		"rm ", "rm\t",
-		"sudo ", "sudo\t",
-		"chmod ", "chmod\t",
-		"chown ", "chown\t",
-		"curl ", "curl\t",
-		"wget ", "wget\t",
-	}
-	for _, prefix := range highRiskPrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-	// curl ... | sh patterns
-	if strings.Contains(lower, "| sh") || strings.Contains(lower, "|bash") {
-		return true
-	}
-	return false
 }
 
 // suggestFilePatterns generates pattern candidates for Edit/Write tools.

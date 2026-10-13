@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/keakon/chord/internal/permission"
@@ -19,21 +20,16 @@ func TestSuggestRulePatterns_BashSimple(t *testing.T) {
 		t.Fatal("expected candidates for simple shell command")
 	}
 
-	// First candidate should be literal
-	if candidates[0].Pattern != "git log --oneline" {
-		t.Errorf("expected literal pattern first, got %q", candidates[0].Pattern)
+	// The two-word prefix is the narrowest rule that matches the command as
+	// written, so it leads and is default; no exact-command candidate repeats
+	// it.
+	if candidates[0].Pattern != "git log *" || !candidates[0].Default {
+		t.Errorf("expected default 'git log *' first, got %#v", candidates[0])
 	}
-
-	// Should have head2
-	found := false
 	for _, c := range candidates {
-		if c.Pattern == "git log *" {
-			found = true
-			break
+		if c.Pattern == "git log --oneline" {
+			t.Errorf("unexpected exact-command candidate: %#v", candidates)
 		}
-	}
-	if !found {
-		t.Error("expected 'git log *' candidate")
 	}
 }
 
@@ -42,26 +38,76 @@ func TestSuggestRulePatterns_BashNeedsApproval(t *testing.T) {
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates")
 	}
-	// Should use needsApproval[0] as seed
-	if candidates[0].Pattern != "git status" {
-		t.Errorf("expected literal 'git status' first when needsApproval is set, got %q", candidates[0].Pattern)
+	// The seed subcommand is generalized to its prefix, which is the narrowest
+	// rule that matches it as written.
+	if candidates[0].Pattern != "git status *" || !candidates[0].Default {
+		t.Errorf("expected default 'git status *' first when needsApproval is set, got %#v", candidates[0])
 	}
 }
 
-func TestSuggestRulePatterns_BashHighRisk(t *testing.T) {
+func TestSuggestRulePatterns_BashDestructiveSingleTarget(t *testing.T) {
 	candidates := suggestRulePatternsWithContext("shell", `{"command":"rm -rf /tmp/foo"}`, nil, nil, cwdScope("/home/user/project"))
 	if len(candidates) == 0 {
-		t.Fatal("expected candidates for high-risk command")
+		t.Fatal("expected candidates for a destructive command")
 	}
-	// High risk should default to literal
-	if !candidates[0].Default {
-		t.Error("expected literal to be default for high-risk command")
+	// A destructive command gets the same ladder as any other: the prefix that
+	// matches it as written is default, then the command word and the catch-all.
+	if got := candidates[0].Pattern; got != "rm -rf *" || !candidates[0].Default || !candidates[0].Broad {
+		t.Fatalf("first candidate = %#v, want default rm -rf *", candidates[0])
 	}
-	// Should not have head2/head1 for high-risk
-	for _, c := range candidates {
-		if c.Pattern == "rm *" || c.Pattern == "rm -rf *" {
-			t.Errorf("unexpected broad candidate for high-risk command: %q", c.Pattern)
+	for _, want := range []string{"rm *", "*"} {
+		found := false
+		for _, c := range candidates {
+			if c.Pattern == want {
+				found = true
+				break
+			}
 		}
+		if !found {
+			t.Fatalf("expected %q among %#v", want, candidates)
+		}
+	}
+	for _, c := range candidates {
+		if c.Pattern == "rm -rf /tmp/foo" {
+			t.Fatalf("unexpected exact-command candidate: %#v", candidates)
+		}
+	}
+}
+
+func TestSuggestRulePatterns_BashBatchUsesCommandPrefix(t *testing.T) {
+	for _, command := range []string{"rm -f /tmp/a /tmp/b", "rm -f /tmp/a /var/log/b /var/log/c"} {
+		args, err := json.Marshal(map[string]string{"command": command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidates := suggestRulePatternsWithContext("shell", string(args), nil, nil, cwdScope(""))
+		if len(candidates) != 3 || candidates[0].Pattern != "rm -f *" || !candidates[0].Default {
+			t.Fatalf("command %q: candidates = %#v", command, candidates)
+		}
+		if !candidates[0].Broad || candidates[0].Summary != "same command prefix, any paths or arguments" {
+			t.Fatalf("misleading scope: %#v", candidates[0])
+		}
+		for _, candidate := range candidates {
+			rules := permission.Ruleset{{Permission: "shell", Pattern: candidate.Pattern, Action: permission.ActionAllow}}
+			if rules.Evaluate("shell", command) != permission.ActionAllow {
+				t.Fatalf("candidate %#v does not cover %q", candidate, command)
+			}
+		}
+	}
+}
+
+func TestSuggestRulePatterns_BashQuotedBatchFallsBackToPrefix(t *testing.T) {
+	candidates := suggestRulePatternsWithContext("shell",
+		`{"command":"rm -f \"/tmp/a b.txt\" /tmp/c.txt"}`,
+		nil, nil, cwdScope(""))
+	if len(candidates) == 0 {
+		t.Fatal("expected candidates for quoted path batch")
+	}
+	// Splitting the quoted text with the ordinary whitespace rules would not
+	// spell the command, so no directory rule is derived; the prefix that
+	// matches the command as written leads instead.
+	if got := candidates[0].Pattern; got != "rm -f *" || !candidates[0].Default {
+		t.Fatalf("first candidate = %#v, want default rm -f *", candidates[0])
 	}
 }
 
@@ -340,8 +386,10 @@ func TestSuggestRulePatterns_BashSudo(t *testing.T) {
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for sudo command")
 	}
-	if !candidates[0].Default || candidates[0].Pattern != "sudo apt install foo" {
-		t.Error("sudo should default to literal")
+	// sudo is not withheld from reusable rules: the two-word prefix leads and
+	// is default, matching the command as written.
+	if got := candidates[0].Pattern; got != "sudo apt *" || !candidates[0].Default {
+		t.Errorf("expected default 'sudo apt *' first, got %#v", candidates[0])
 	}
 }
 
@@ -414,19 +462,10 @@ func TestSuggestRulePatterns_BashSingleWord(t *testing.T) {
 	if len(candidates) == 0 {
 		t.Fatal("expected candidates for single-word command")
 	}
-	// Should have literal and *
-	if candidates[0].Pattern != "ls" {
-		t.Errorf("expected literal 'ls' first, got %q", candidates[0].Pattern)
-	}
-	foundHead1Default := false
-	for _, c := range candidates {
-		if c.Pattern == "ls *" && c.Default {
-			foundHead1Default = true
-			break
-		}
-	}
-	if !foundHead1Default {
-		t.Error("expected head1 wildcard to be default for single-word command")
+	// The command word with a wildcard is the narrowest rule that matches the
+	// bare command, so it leads and is default.
+	if candidates[0].Pattern != "ls *" || !candidates[0].Default {
+		t.Errorf("expected default 'ls *' first, got %#v", candidates[0])
 	}
 }
 
