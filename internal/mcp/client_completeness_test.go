@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -124,31 +123,35 @@ func TestClientListToolsRejectsIncompleteDirectory(t *testing.T) {
 
 func TestDiscoveryPaginationCacheAndAllowlist(t *testing.T) {
 	tr := &scriptedMCPTransport{fakeTransport: newFakeTransport()}
-	phase, calls := 0, 0
-	failure := errors.New("page unavailable")
-	tr.send = func(context.Context, JSONRPCRequest) (JSONRPCResponse, error) {
+	calls := 0
+	tr.send = func(_ context.Context, req JSONRPCRequest) (JSONRPCResponse, error) {
+		if req.Method == "initialize" {
+			return JSONRPCResponse{Result: json.RawMessage(`{"protocolVersion":"` + protocolVersion + `"}`)}, nil
+		}
 		calls++
-		if phase == 1 && calls == 2 {
-			return JSONRPCResponse{}, failure
-		}
 		result := `{"tools":[{"name":"ignored"}],"nextCursor":"a"}`
-		if phase == 1 {
-			result = `{"tools":[{"name":"replacement"}],"nextCursor":"a"}`
-		}
 		if calls == 2 {
 			result = `{"tools":[{"name":"kept"}]}`
 		}
 		return JSONRPCResponse{Result: json.RawMessage(result)}, nil
 	}
-	mgr := NewPendingManagerWithClientInfo([]ServerConfig{{Name: "sample", AllowedTools: []string{"kept", "replacement"}}}, testClientInfo)
-	mgr.clients["sample"] = NewClientWithInfo("sample", tr, testClientInfo)
-	for phase = range 2 {
-		calls = 0
+	cfg := ServerConfig{Name: "sample", URL: "https://example.invalid/mcp", AllowedTools: []string{"kept"}}
+	mgr := NewPendingManagerWithClientInfo(testTargets([]ServerConfig{cfg}), testClientInfo, nil)
+	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
+		return NewClientWithInfo("sample", tr, testClientInfo), nil
+	}
+	if err := mgr.ConnectOne(t.Context(), testTarget(cfg)); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
 		discovered, err := DiscoverAllTools(t.Context(), mgr)
 		cache := mgr.CachedToolDefs("sample")
 		if err != nil || len(discovered) != 1 || discovered[0].Name() != RegisteredMCPToolName("sample", "kept") || len(cache) != 1 || cache[0].Name != "kept" {
-			t.Fatalf("phase=%d discovered=%v cache=%v err=%v", phase, discovered, cache, err)
+			t.Fatalf("discovered=%v cache=%v err=%v", discovered, cache, err)
 		}
+	}
+	if calls != 2 {
+		t.Fatalf("snapshot discovery repeated network calls: %d", calls)
 	}
 }
 

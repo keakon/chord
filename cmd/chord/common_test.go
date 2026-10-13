@@ -422,7 +422,7 @@ func TestApplyInitialMCPPromptStateSyncConfiguredInjectsPrompt(t *testing.T) {
 
 func TestApplyInitialMCPPromptStateAsyncConfiguredDefersPromptInjection(t *testing.T) {
 	ac := newTestAppContext(t)
-	ac.MCPConfigs = []mcp.ServerConfig{{Name: "filesystem"}}
+	ac.MCPTargets = testMCPTargets([]mcp.ServerConfig{{Name: "filesystem"}})
 	block := mcp.RenderServersPromptBlock([]mcp.ServerTools{{Name: "filesystem", Tools: []string{"mcp_filesystem_read"}}})
 
 	applyInitialMCPPromptState(ac, true, true, block)
@@ -434,11 +434,11 @@ func TestApplyInitialMCPPromptStateAsyncConfiguredDefersPromptInjection(t *testi
 
 func TestRuntimeMCPControlAggregatesValidationErrors(t *testing.T) {
 	ac := newTestAppContext(t)
-	ac.MCPConfigs = []mcp.ServerConfig{
+	ac.MCPTargets = testMCPTargets([]mcp.ServerConfig{
 		{Name: "manual-empty", Manual: true},
 		{Name: "auto-empty"},
-	}
-	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPConfigs, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	})
+	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPTargets, mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 
 	_, err := controlRuntimeMCP(context.Background(), ac, agent.MCPControlRequest{
 		Action:  agent.MCPControlEnable,

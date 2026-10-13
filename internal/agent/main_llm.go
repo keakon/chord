@@ -21,7 +21,6 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/toolname"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -210,10 +209,11 @@ func (a *MainAgent) ensureSessionBuiltWithoutPreparation(ctx context.Context) er
 	a.mcpServersPromptMu.Unlock()
 
 	if pendingMCPReplace && a.tools != nil {
-		_ = a.tools.UnregisterPrefix(toolname.MCPToolPrefix)
-	}
-	for _, t := range pendingMCPTools {
-		a.tools.Register(t)
+		a.tools.ReplaceMCPTools(pendingMCPTools)
+	} else {
+		for _, t := range pendingMCPTools {
+			a.tools.Register(t)
+		}
 	}
 
 	if !a.surfaceDirty.Load() {
@@ -578,6 +578,9 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	defer finishPreparation()
 	if err := a.ensureMainModelPolicy(); err != nil {
 		return nil, err
+	}
+	if err := a.prepareMCPRequest(preparationCtx); err != nil {
+		return nil, a.preparationError(err)
 	}
 	// Build the session's stable tool/system surface after applying any pending
 	// model policy so edit/patch visibility is based on the model that will run.

@@ -141,6 +141,7 @@ func newDoctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Run configuration and runtime diagnostics",
 	}
+	cmd.AddCommand(newDoctorMCPCmd())
 	cmd.AddCommand(newDoctorModelsCmd())
 	cmd.AddCommand(newDoctorConfigCmd())
 	cmd.AddCommand(newDoctorSkillsCmd())

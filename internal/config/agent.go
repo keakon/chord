@@ -253,6 +253,9 @@ func loadMarkdownAgentConfig(path string, data []byte) (*AgentConfig, error) {
 		return nil, fmt.Errorf("agent config %s: missing frontmatter closing delimiter", path)
 	}
 	frontmatter := before
+	if err := validateMCPConfigYAML(frontmatter); err != nil {
+		return nil, fmt.Errorf("agent config %s: %w", path, err)
+	}
 	if err := yaml.Unmarshal(frontmatter, &cfg); err != nil {
 		return nil, fmt.Errorf("parse agent config frontmatter %s: %w", path, err)
 	}
@@ -270,6 +273,9 @@ func loadMarkdownAgentConfig(path string, data []byte) (*AgentConfig, error) {
 }
 
 func loadYAMLAgentConfig(path string, data []byte) (*AgentConfig, error) {
+	if err := validateMCPConfigYAML(data); err != nil {
+		return nil, fmt.Errorf("agent config %s: %w", path, err)
+	}
 	var cfg AgentConfig
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse agent config yaml %s: %w", path, err)
@@ -525,6 +531,9 @@ func ValidateAgentMCP(agents map[string]*AgentConfig, inherited MCPConfig) error
 		agentCfg := agents[agentName]
 		if agentCfg == nil || len(agentCfg.MCP) == 0 {
 			continue
+		}
+		if err := ValidateMCPAuth(agentCfg.MCP); err != nil {
+			return fmt.Errorf("agent %q: %w", agentName, err)
 		}
 		serverNames := make([]string, 0, len(agentCfg.MCP))
 		for serverName := range agentCfg.MCP {

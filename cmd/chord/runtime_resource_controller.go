@@ -257,7 +257,7 @@ func (c *runtimeResourceController) MCPLoadedNames() map[string]struct{} {
 }
 
 func restoreRuntimeMCP(ac *AppContext, ctrl *runtimeResourceController) func(context.Context) error {
-	if ac == nil || ac.MCPMgr == nil || len(ac.MCPConfigs) == 0 || ac.MainAgent == nil {
+	if ac == nil || ac.MCPMgr == nil || len(ac.MCPTargets) == 0 || ac.MainAgent == nil {
 		return nil
 	}
 	return func(ctx context.Context) error {
@@ -265,7 +265,7 @@ func restoreRuntimeMCP(ac *AppContext, ctrl *runtimeResourceController) func(con
 		defer ac.mcpRestoreRunMu.Unlock()
 		readyGeneration := ac.MainAgent.ResetMCPReady()
 		ac.MainAgent.NotifyEnvStatusUpdated()
-		ac.MCPMgr.ConnectAll(ctx, runtimeMCPReconnectConfigs(ac.MCPConfigs, ctrl.MCPLoadedNames()))
+		ac.MCPMgr.ConnectAll(ctx, runtimeMCPReconnectConfigs(ac.MCPTargets, ctrl.MCPLoadedNames()))
 		if err := restoreMCPIntent(ctx, ac); err != nil {
 			log.Warnf("MCP intent restore failed error=%v", err)
 		}
@@ -279,17 +279,17 @@ func restoreRuntimeMCP(ac *AppContext, ctrl *runtimeResourceController) func(con
 	}
 }
 
-func runtimeMCPReconnectConfigs(configs []mcp.ServerConfig, loaded map[string]struct{}) []mcp.ServerConfig {
+func runtimeMCPReconnectConfigs(configs []mcp.Target, loaded map[string]struct{}) []mcp.Target {
 	if len(configs) == 0 {
 		return nil
 	}
-	out := make([]mcp.ServerConfig, 0, len(configs))
+	out := make([]mcp.Target, 0, len(configs))
 	for _, cfg := range configs {
-		name := cfg.Name
+		name := cfg.Config.Name
 		if name == "" {
 			name = "(unnamed)"
 		}
-		if cfg.Manual {
+		if cfg.Config.Manual {
 			if _, ok := loaded[name]; !ok {
 				continue
 			}

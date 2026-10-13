@@ -45,27 +45,9 @@ func connectedServersListing(ctx context.Context, mgr *Manager) []ServerTools {
 	if len(names) == 0 {
 		return nil
 	}
-	clients := mgr.Clients()
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	servers := make([]ServerTools, 0, len(names))
 	for _, srv := range names {
-		c, ok := clients[srv]
-		if !ok {
-			continue
-		}
 		toolDefs := mgr.CachedToolDefs(srv)
-		if len(toolDefs) == 0 {
-			var err error
-			toolDefs, err = c.ListTools(ctx)
-			if err != nil {
-				servers = append(servers, ServerTools{Name: srv, Note: fmt.Sprintf("(could not list tools: %v)", err)})
-				continue
-			}
-			toolDefs = mgr.filterToolDefs(srv, toolDefs)
-			mgr.setCachedToolDefs(srv, toolDefs)
-		}
 		tn := make([]string, 0, len(toolDefs))
 		for _, t := range toolDefs {
 			if t.Name != "" {

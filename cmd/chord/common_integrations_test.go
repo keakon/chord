@@ -59,14 +59,14 @@ func TestServerDisplayListsAllowNilRuntimeController(t *testing.T) {
 	if rows := lspServerDisplayList(lspMgr, nil); len(rows) != 1 {
 		t.Fatalf("lspServerDisplayList(nil runtime) len = %d, want 1", len(rows))
 	}
-	mcpMgr := mcp.NewPendingManagerWithClientInfo([]mcp.ServerConfig{{Name: "exa", URL: "https://example.com/mcp"}}, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	mcpMgr := mcp.NewPendingManagerWithClientInfo(testMCPTargets([]mcp.ServerConfig{{Name: "exa", URL: "https://example.com/mcp"}}), mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	if rows := mcpServerDisplayList(mcpMgr, nil, nil); len(rows) != 1 {
 		t.Fatalf("mcpServerDisplayList(nil runtime) len = %d, want 1", len(rows))
 	}
 }
 
 func TestMCPServerDisplayListMapsManagerStatuses(t *testing.T) {
-	mgr := mcp.NewPendingManagerWithClientInfo([]mcp.ServerConfig{{Name: "exa", URL: "https://example.com/mcp"}}, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	mgr := mcp.NewPendingManagerWithClientInfo(testMCPTargets([]mcp.ServerConfig{{Name: "exa", URL: "https://example.com/mcp"}}), mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	rows := mcpServerDisplayList(mgr, nil, nil)
 	if len(rows) != 1 {
 		t.Fatalf("mcpServerDisplayList len = %d, want 1", len(rows))
@@ -77,7 +77,7 @@ func TestMCPServerDisplayListMapsManagerStatuses(t *testing.T) {
 }
 
 func TestMCPServerDisplayListMarksIdleUnloadedRows(t *testing.T) {
-	mgr := mcp.NewPendingManagerWithClientInfo([]mcp.ServerConfig{{Name: "exa", URL: "https://example.com/mcp"}}, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	mgr := mcp.NewPendingManagerWithClientInfo(testMCPTargets([]mcp.ServerConfig{{Name: "exa", URL: "https://example.com/mcp"}}), mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	ctrl := &runtimeResourceController{}
 	ctrl.mu.Lock()
 	ctrl.idleUnloaded = true

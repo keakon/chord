@@ -7,7 +7,7 @@ import (
 
 func TestManualDeferredServerRetainsPolicyAfterReconnect(t *testing.T) {
 	cfg := ServerConfig{Name: "manual-sample", URL: "https://example.invalid/mcp", Manual: true, Deferred: true}
-	m := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
+	m := NewPendingManagerWithClientInfo(testTargets([]ServerConfig{cfg}), testClientInfo, nil)
 	m.newClientFactory = func(ctx context.Context, cfg ServerConfig) (*Client, error) {
 		transport := newFakeTransport()
 		transport.onMethod("initialize", initializeResult{ProtocolVersion: protocolVersion})
@@ -17,11 +17,12 @@ func TestManualDeferredServerRetainsPolicyAfterReconnect(t *testing.T) {
 	}
 	defer m.Close()
 	// Runtime reconnect omits manual servers that have not been enabled.
-	m.ConnectAll(t.Context(), []ServerConfig{{Name: "other-manual", Manual: true}})
+	m.ConnectAll(t.Context(), testTargets([]ServerConfig{{Name: "other-manual", Manual: true}}))
 	catalog := NewCatalog(m)
+	catalog.SetDesiredEnabled(cfg.Name, true)
 	for _, deferred := range []bool{true, false} {
 		cfg.Deferred = deferred
-		if err := m.ConnectOne(t.Context(), cfg); err != nil {
+		if err := m.ConnectOne(t.Context(), testTarget(cfg)); err != nil {
 			t.Fatal(err)
 		}
 		tools, err := catalog.DiscoverAllTools(t.Context())

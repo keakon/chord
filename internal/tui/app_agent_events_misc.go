@@ -283,6 +283,20 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		// caches must be dropped for the next frame to pick the new health up.
 		m.invalidateDrawCaches()
 		return true, effects
+	case agent.MCPDetailEvent:
+		m.openMCPDetail(evt.Ref, evt.AgentDefinition)
+		return true, effects
+	case agent.MCPAuthLocalProgressEvent:
+		if m.mode == ModeMCPSelect {
+			m.invalidateDrawCaches()
+		}
+		return true, effects
+	case agent.MCPStatusChangedEvent:
+		if m.mode == ModeMCPSelect {
+			m.refreshMCPSelectItems()
+			m.invalidateDrawCaches()
+		}
+		return true, effects
 	case agent.ToastEvent:
 		effects.addFollowup(m.enqueueToastWithCategory(evt.Message, evt.Level, evt.Category))
 		if m.shouldPriorityFlushToast(evt.Level) {

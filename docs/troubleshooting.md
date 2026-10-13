@@ -172,7 +172,18 @@ Check first:
 - whether the config name is correct
 - whether local mode is simply still initializing MCP asynchronously
 
-Note: a brief gray pending state right after startup does not necessarily indicate an error.
+A brief gray pending state after startup can be normal. Run `chord doctor mcp <server>` for offline checks, then add `--connect` to test the connection and complete tool catalog. The connection check can refresh or durably confirm shared credentials; it does not open a browser or call tools.
+
+- **Login required:** run `chord mcp login <server>` on the host. For a private server, add `--agent <definition>`. With static authentication, check the referenced header environment variables instead.
+- **Credentials saved, verification failed:** the login is retained. Inspect the reported initialize or tools-list stage; do not repeatedly authorize to solve a network or catalog error.
+- **Refresh blocked:** correct the client ID, issuer, authentication method, or secret environment variable, then explicitly retry login or reconnect. Automatic requests do not repeatedly retry the same blocked refresh.
+- **Refresh outcome unknown:** a disconnected token exchange may already have invalidated the previous refresh token. Sign in again; do not assume the old token is reusable.
+- **Missing scope:** sign in again to request the additional access. A failure for one tool does not automatically disable other tools or grant them permission.
+- **Callback unavailable:** port 41937 may be occupied by another authorization. Client metadata requires that fixed port. For SSH, establish a matching loopback port forward before login; `--no-browser` still needs the callback listener.
+- **Network policy or direct-connect failure:** authorization servers must be public HTTPS endpoints. OAuth control requests ignore environment proxies, so confirm the host can reach the server directly even if ordinary MCP requests work through a proxy. Private-network authorization servers are unsupported. The connection report distinguishes network policy, TLS, and protocol failures; it also indicates direct OAuth connections and whether proxy environment variables are present.
+- **Credential file permission error:** check ownership and user-only access under `<config-home>/mcp/oauth/`; Chord does not silently loosen existing permissions or replace damaged credential files. Keep a copy for diagnosis before repairing the files.
+
+Login, logout, and `doctor --connect` do not change a manual server's enablement. Enable it separately when needed. An authentication error from a business tool is returned to that call; Chord does not silently replay it. See [MCP sign-in](./usage.md#mcp-sign-in-and-connection-diagnostics).
 
 ## LSP / MCP rows turn gray after the session is idle
 

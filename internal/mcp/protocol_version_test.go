@@ -58,7 +58,7 @@ func TestHTTPInitializeBindsNegotiatedProtocolHeaders(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	transport := NewHTTPTransport(server.URL, map[string]string{mcpProtocolVersionHeader: "stale"})
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: server.URL, Headers: map[string]string{mcpProtocolVersionHeader: "stale"}})
 	client := NewClientWithInfo("sample", transport, testClientInfo)
 	if err := client.Initialize(context.Background()); err != nil {
 		t.Fatal(err)

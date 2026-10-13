@@ -40,6 +40,7 @@ import (
 // (eventCh) for sequencing work and an output channel (outputCh) that the TUI
 // consumes.
 type MainAgent struct {
+	mcpStatus                   mcpStatusState
 	pause                       sessionPauseRuntime
 	stagedMainInputs            []stagedSessionInput // owned by the event loop
 	requestStarts               atomic.Uint64
@@ -636,8 +637,13 @@ type MainAgent struct {
 	// mcpServerCache maps scoped server keys to connections. Main-agent servers
 	// are registered as sentinels (Mgr==nil); SubAgent-exclusive servers are
 	// isolated by agent definition and shared by instances of that definition.
-	mcpServerCacheMu sync.Mutex
-	mcpServerCache   map[string]*mcpServerEntry
+	mcpServerCacheMu     sync.Mutex
+	mcpServerCache       map[string]*mcpServerEntry
+	mcpRuntimeMain       *mcp.Manager
+	mcpRuntimeAuth       *mcp.AuthService
+	mcpRuntimeTargets    []mcp.Target
+	mcpRuntimeConfigHome string
+	mcpRuntimeGeneration uint64
 
 	// Custom slash commands loaded from MD files / YAML config.
 	customCommandsMu sync.RWMutex
@@ -714,6 +720,13 @@ type MainAgent struct {
 
 	// Optional MCP summary injected into the system prompt (set after MCP init).
 	mcpServersPromptMu  sync.RWMutex
+	mcpAuthMu           sync.Mutex
+	mcpAuthWg           sync.WaitGroup
+	mcpAuthClosed       bool
+	mcpAuthControlFn    func(context.Context, MCPAuthRequest, func(mcp.LoginProgress)) error
+	mcpAuthOperations   map[mcp.ServerRef]*mcpAuthOperation
+	mcpAuthOperationSeq uint64
+	mcpPreparationHook  func(context.Context) error
 	mcpServersPrompt    string
 	mcpRuntimePrompt    string
 	pendingMCPTools     []tools.Tool

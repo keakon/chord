@@ -17,7 +17,7 @@
 //
 // Source of truth stays in docs/. The sync target markdown files are gitignored — never edit them by hand.
 
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -234,7 +234,11 @@ async function clean() {
 // rebuilt from assets/logo/chord-wordmark.svg instead of being checked in.
 async function syncPublicAssets() {
   await rm(websitePublicDir, { recursive: true, force: true });
-  return buildLogoAssets(websitePublicDir);
+  const brandAssets = await buildLogoAssets(websitePublicDir);
+  const oauthDir = path.join(websitePublicDir, 'oauth');
+  await mkdir(oauthDir, { recursive: true });
+  await copyFile(path.join(repoRoot, 'assets', 'oauth', 'client-metadata.json'), path.join(oauthDir, 'client-metadata.json'));
+  return brandAssets;
 }
 
 async function main() {

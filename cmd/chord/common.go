@@ -81,25 +81,29 @@ type AppContext struct {
 	LSPManager       *lsp.Manager
 	MCPMgr           *mcp.Manager
 	MCPCatalog       *mcp.Catalog
-	MCPConfigs       []mcp.ServerConfig
+	MCPTargets       []mcp.Target
+	MCPAuth          *mcp.AuthService
 	RuntimeResources *runtimeResourceController
 	MainAgent        *agent.MainAgent
 	// ACPMode is set when this process serves the Agent Client Protocol.
 	// Question has no client bridge there, so the tool fails instead of waiting.
-	ACPMode           bool
-	LoadedSkills      []*skill.Meta
-	LoadedCommands    []*command.Definition
-	LogWriter         *rotatingLogFile
-	StderrRedirect    *stderrRedirect
-	logCtx            logContext
-	logLevel          golog.Level
-	mcpStartOnce      sync.Once
-	mcpRuntimeStarted atomic.Bool
-	mcpRestoreRunMu   sync.Mutex
-	mcpRestoreStateMu sync.Mutex
-	mcpRestoreCancel  context.CancelFunc
-	mcpRestoreGen     atomic.Uint64
-	skillsLoadOnce    sync.Once
+	ACPMode                bool
+	LoadedSkills           []*skill.Meta
+	LoadedCommands         []*command.Definition
+	LogWriter              *rotatingLogFile
+	StderrRedirect         *stderrRedirect
+	logCtx                 logContext
+	logLevel               golog.Level
+	mcpStartOnce           sync.Once
+	mcpRuntimeStarted      atomic.Bool
+	mcpRestoreRunMu        sync.Mutex
+	mcpPublishedBinding    string
+	mcpPublishedVersion    uint64
+	mcpPublishedGeneration agent.MCPReadyGeneration
+	mcpRestoreStateMu      sync.Mutex
+	mcpRestoreCancel       context.CancelFunc
+	mcpRestoreGen          atomic.Uint64
+	skillsLoadOnce         sync.Once
 	// skillsRefreshGen orders asynchronous project-skill scans. A worktree
 	// switch starts a scan that must not overwrite the catalog a later switch
 	// already installed; see refreshSkillsFromDirs.
@@ -696,21 +700,25 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	ac.Registry.Register(tools.NewWebFetchTool(cfg.WebFetch, cfg.Proxy))
 
 	// MCP servers.
-	mcpConfigs := mcp.ServerConfigsFromConfig(cfg.MCP)
+	mcpTargets, err := mcp.ResolveTargets(ac.Ctx, mcp.ResolveTargetOptions{Main: cfg.MCP, ContentRoot: ac.ContentRoot, ConfigHome: ac.ConfigHome})
+	if err != nil {
+		return nil, fmt.Errorf("resolve MCP targets: %w", err)
+	}
+	ac.MCPAuth = mcp.NewAuthService(mcp.AuthOptions{ConfigHome: ac.ConfigHome, ClientInfo: mcp.ClientInfo{Name: "chord", Version: Version}})
 	syncMCPPromptBlock := ""
-	if len(mcpConfigs) > 0 {
+	if len(mcpTargets) > 0 {
 		if asyncMCP {
-			ac.MCPConfigs = mcpConfigs
-			ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(mcpConfigs, mcp.ClientInfo{Name: "chord", Version: Version})
+			ac.MCPTargets = mcpTargets
+			ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(mcpTargets, mcp.ClientInfo{Name: "chord", Version: Version}, ac.MCPAuth)
 			ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
 		} else {
-			mgr, err := mcp.NewManagerWithClientInfo(ac.Ctx, mcpConfigs, mcp.ClientInfo{Name: "chord", Version: Version})
+			mgr, err := mcp.NewManagerWithClientInfo(ac.Ctx, mcpTargets, mcp.ClientInfo{Name: "chord", Version: Version}, ac.MCPAuth)
 			if err != nil {
 				log.Warnf("MCP initialization failed error=%v", err)
 			} else {
 				ac.MCPMgr = mgr
 				ac.MCPCatalog = mcp.NewCatalog(mgr)
-				ac.MCPConfigs = mcpConfigs
+				ac.MCPTargets = mcpTargets
 			}
 		}
 	}
@@ -914,7 +922,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 	// Custom command loading (synchronous — needed before first input).
 	loadCustomCommands(ac)
 
-	if !asyncMCP && len(mcpConfigs) > 0 {
+	if !asyncMCP && len(mcpTargets) > 0 {
 		result, err := loadSynchronousMCPState(ac.Ctx, ac)
 		if err != nil {
 			log.Warnf("MCP synchronous startup incomplete error=%v", err)
@@ -929,7 +937,7 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 		ac.mcpRuntimeStarted.Store(true)
 		ac.mcpStartOnce.Do(func() {})
 	}
-	applyInitialMCPPromptState(ac, asyncMCP, len(mcpConfigs) > 0, syncMCPPromptBlock)
+	applyInitialMCPPromptState(ac, asyncMCP, len(mcpTargets) > 0, syncMCPPromptBlock)
 
 	return ac, nil
 }
@@ -988,6 +996,9 @@ func (ac *AppContext) Close() {
 	}
 	if ac.MCPMgr != nil {
 		ac.MCPMgr.Close()
+	}
+	if ac.MCPAuth != nil {
+		ac.MCPAuth.Close()
 	}
 
 	if ac.MainAgent != nil {

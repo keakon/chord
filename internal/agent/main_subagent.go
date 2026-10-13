@@ -14,7 +14,6 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
-	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -111,6 +110,16 @@ func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID 
 		Cancel:        cancel,
 		BaseTools:     a.tools,
 		ExtraMCPTools: extraMCPTools,
+		MCPPreparation: func(ctx context.Context, rules permission.Ruleset) (MCPRequestSnapshot, error) {
+			a.stateMu.RLock()
+			current := a.agentConfigs[agentDef.Name]
+			var currentMCP config.MCPConfig
+			if current != nil {
+				currentMCP = current.MCP
+			}
+			a.stateMu.RUnlock()
+			return a.prepareSubAgentMCP(ctx, agentDef.Name, currentMCP, rules)
+		},
 		Ruleset:       a.buildSubAgentRuleset(agentDef),
 		WorkDir:       a.subAgentWorkDir(),
 		VenvPath:      a.cachedVenvPathSnapshot(),
@@ -907,51 +916,6 @@ func backgroundCompletionToastLevel(status string) string {
 		return "error"
 	}
 	return "info"
-}
-
-// getOrCreateAgentMCP returns the private MCP tools declared by one agent
-// definition. Instances of that definition share connections; other agent
-// definitions may use the same local server names independently.
-func (a *MainAgent) getOrCreateAgentMCP(agentName string, mcpCfg config.MCPConfig) ([]tools.Tool, error) {
-	a.mcpServerCacheMu.Lock()
-	defer a.mcpServerCacheMu.Unlock()
-	if a.mcpServerCache == nil {
-		a.mcpServerCache = make(map[string]*mcpServerEntry)
-	}
-	for name := range mcpCfg {
-		if _, inherited := a.mcpServerCache[mainMCPServerCacheKey(name)]; inherited {
-			return nil, fmt.Errorf("agent %q declares MCP server %q, but that name is already defined by project/global MCP config; remove the agent entry to inherit it or rename the agent server", agentName, name)
-		}
-		if mcpCfg[name].Manual {
-			return nil, fmt.Errorf("agent %q MCP server %q sets manual: true, but agent-scoped MCP servers cannot be enabled at runtime; remove manual or configure the server in project/global MCP config", agentName, name)
-		}
-	}
-	connectCtx, connectCancel := context.WithTimeout(a.parentCtx, 30*time.Second)
-	defer connectCancel()
-	var extra []tools.Tool
-	for name, sc := range mcpCfg {
-		key := agentMCPServerCacheKey(agentName, name)
-		if entry, ok := a.mcpServerCache[key]; ok {
-			extra = append(extra, entry.Tools...)
-			continue
-		}
-		cfg := mcp.ServerConfig{Name: name, Command: sc.Command, Args: sc.Args, Env: sc.Env, URL: sc.URL, Headers: sc.Headers, AllowedTools: sc.AllowedTools}
-		mgr, err := mcp.NewManagerWithClientInfo(connectCtx, []mcp.ServerConfig{cfg}, a.mcpClientInfo)
-		if err != nil {
-			log.Warnf("failed to create MCP manager for server server=%v error=%v", name, err)
-			continue
-		}
-		discovered, err := mcp.DiscoverAllTools(connectCtx, mgr)
-		if err != nil {
-			log.Warnf("failed to discover MCP tools for server server=%v error=%v", name, err)
-			mgr.Close()
-			continue
-		}
-		a.mcpServerCache[key] = &mcpServerEntry{Mgr: mgr, Tools: discovered}
-		log.Debugf("subagent MCP server connected server=%v tools=%v", name, len(discovered))
-		extra = append(extra, discovered...)
-	}
-	return extra, nil
 }
 
 func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentRequest) (result tools.TaskHandle, resultErr error) {

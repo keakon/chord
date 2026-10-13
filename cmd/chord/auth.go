@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -1293,29 +1292,6 @@ func exchangeOpenAICodeForTokensWithParams(
 		return nil, fmt.Errorf("token exchange response missing access_token or refresh_token")
 	}
 	return &tokens, nil
-}
-
-func openBrowser(target string) error {
-	name, args := openBrowserCommand(runtime.GOOS, target)
-	cmd := exec.Command(name, args...)
-	if cmd.Stdout == nil {
-		cmd.Stdout = io.Discard
-	}
-	if cmd.Stderr == nil {
-		cmd.Stderr = io.Discard
-	}
-	return cmd.Start()
-}
-
-func openBrowserCommand(goos, target string) (string, []string) {
-	switch goos {
-	case "darwin":
-		return "open", []string{target}
-	case "windows":
-		return "rundll32", []string{"url.dll,FileProtocolHandler", target}
-	default:
-		return "xdg-open", []string{target}
-	}
 }
 
 func startAuthBrowserPrompt(in *os.File) (*authBrowserPrompt, error) {

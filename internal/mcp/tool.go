@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 
 	"github.com/keakon/golog/log"
 
@@ -37,10 +36,7 @@ func (t *MCPTool) IsDeferred() bool {
 	if t == nil || t.handle == nil || t.handle.mgr == nil {
 		return false
 	}
-	m := t.handle.mgr
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.deferred[t.serverName]
+	return t.handle.mgr.IsDeferredServer(t.serverName)
 }
 
 func (t *MCPTool) DiscoveryStatus() string {
@@ -75,7 +71,7 @@ func (t *MCPTool) IsAvailable() bool {
 		return false
 	}
 	if t.handle.mgr != nil {
-		return t.handle.mgr.Client(t.serverName) != nil && t.handle.mgr.ToolAllowed(t.serverName, t.remoteName)
+		return t.handle.mgr.toolAvailable(t.handle.identity, t.remoteName, t.handle.schemaHash)
 	}
 	return t.handle.client != nil
 }
@@ -151,40 +147,11 @@ func discoverAllTools(ctx context.Context, mgr *Manager, catalog *Catalog) ([]to
 	var allTools []tools.Tool
 	seen := make(map[string]struct{})
 
-	clients := mgr.Clients()
-	serverNames := make([]string, 0, len(clients))
-	for serverName := range clients {
-		serverNames = append(serverNames, serverName)
-	}
-	sort.Strings(serverNames)
-	for _, serverName := range serverNames {
-		client := clients[serverName]
-		defs, err := client.ListTools(ctx)
-		if err != nil {
-			defs = mgr.CachedToolDefs(serverName)
-			if len(defs) == 0 {
-				if catalog != nil {
-					cached := catalog.cachedServerTools(serverName)
-					for _, t := range cached {
-						n := t.Name()
-						if _, dup := seen[n]; dup {
-							continue
-						}
-						seen[n] = struct{}{}
-						allTools = append(allTools, t)
-					}
-				}
-				log.Warnf("mcp tool discovery failed for server server=%v error=%v", serverName, err)
-				continue
-			}
-			log.Warnf("mcp tool discovery failed; using cached definitions server=%v error=%v", serverName, err)
-		} else {
-			defs = mgr.filterToolDefs(serverName, defs)
-			mgr.setCachedToolDefs(serverName, defs)
-		}
-		serverTools := wrapToolDefs(serverName, defs, func(srv, remote string) *ExecutionHandle {
-			return &ExecutionHandle{mgr: mgr, catalog: catalog, serverName: srv, remoteName: remote}
-		})
+	connected := make(map[string]bool)
+	for _, surface := range mgr.toolSurfaces() {
+		serverName := surface.name
+		connected[serverName] = true
+		serverTools := mgr.wrapSurface(surface, catalog)
 		if catalog != nil {
 			catalog.rememberServerTools(serverName, serverTools)
 		}
@@ -201,7 +168,7 @@ func discoverAllTools(ctx context.Context, mgr *Manager, catalog *Catalog) ([]to
 	}
 	if catalog != nil {
 		for _, status := range mgr.ServerEndpoints() {
-			if _, connected := clients[status.Name]; connected {
+			if connected[status.Name] {
 				continue
 			}
 			for _, t := range catalog.cachedServerTools(status.Name) {

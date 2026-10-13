@@ -6,11 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
-	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -18,6 +15,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -31,6 +29,7 @@ type MCPToolDef struct {
 	Description  string          `json:"description"`
 	InputSchema  map[string]any  `json:"inputSchema"`
 	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
+	Annotations  map[string]any  `json:"annotations,omitempty"`
 }
 
 // initializeParams are sent in the initialize handshake.
@@ -49,6 +48,8 @@ type clientInfo struct {
 type ClientInfo = clientInfo
 
 const protocolVersion = "2025-06-18"
+
+const missingServerTransportMessage = "must specify either command or url"
 
 var defaultClientInfo = clientInfo{Name: "chord", Version: "dev"}
 
@@ -237,6 +238,8 @@ func (c *Client) ServerName() string {
 //	    api-server:
 //	      url: "http://localhost:8080/mcp"
 type ServerConfig struct {
+	Auth         string
+	OAuth        *config.MCPOAuthConfig
 	Name         string            // server identifier
 	Command      string            // executable path (for stdio transport)
 	Args         []string          // command arguments (for stdio transport)
@@ -274,441 +277,9 @@ var (
 	connectRetryBackoff   = []time.Duration{500 * time.Millisecond, 1500 * time.Millisecond}
 )
 
-// Manager manages connections to multiple MCP servers.
-type Manager struct {
-	deferred         map[string]bool
-	mu               sync.RWMutex
-	clients          map[string]*Client
-	toolDefs         map[string][]MCPToolDef
-	allowedTools     map[string]map[string]struct{}
-	endpointStat     []ServerEndpointStatus // sorted by Name, one row per unique config key (last duplicate wins)
-	newClientFactory func(context.Context, ServerConfig) (*Client, error)
-	clientInfo       clientInfo
-}
-
-// NewPendingManagerWithClientInfo creates a pending manager with explicit
-// application metadata for MCP initialize handshakes.
-func NewPendingManagerWithClientInfo(configs []ServerConfig, info ClientInfo) *Manager {
-	info = normalizeClientInfo(info)
-	m := &Manager{
-		deferred:     make(map[string]bool),
-		clients:      make(map[string]*Client),
-		toolDefs:     make(map[string][]MCPToolDef),
-		allowedTools: makeAllowedToolsByServer(configs),
-		newClientFactory: func(ctx context.Context, cfg ServerConfig) (*Client, error) {
-			return createClient(ctx, cfg, info)
-		},
-		clientInfo: info,
-	}
-	if len(configs) == 0 {
-		return m
-	}
-
-	byName := make(map[string]ServerEndpointStatus)
-	for _, cfg := range configs {
-		name := serverConfigName(cfg)
-		m.deferred[name] = cfg.Deferred
-		if cfg.Command == "" && cfg.URL == "" {
-			byName[name] = ServerEndpointStatus{
-				Name:        name,
-				OK:          false,
-				Pending:     false,
-				Manual:      cfg.Manual,
-				Disabled:    false,
-				Retrying:    false,
-				Attempt:     0,
-				MaxAttempts: defaultConnectAttempts,
-				Error:       "must specify either command or url",
-			}
-			continue
-		}
-		if cfg.Manual {
-			byName[name] = ServerEndpointStatus{
-				Name:        name,
-				OK:          false,
-				Pending:     false,
-				Manual:      cfg.Manual,
-				Disabled:    true,
-				Retrying:    false,
-				Attempt:     0,
-				MaxAttempts: defaultConnectAttempts,
-				Error:       "",
-			}
-			continue
-		}
-		byName[name] = ServerEndpointStatus{
-			Name:        name,
-			OK:          false,
-			Pending:     true,
-			Disabled:    false,
-			Manual:      cfg.Manual,
-			Retrying:    false,
-			Attempt:     0,
-			MaxAttempts: defaultConnectAttempts,
-			Error:       "",
-		}
-	}
-	m.endpointStat = sortedEndpointStatuses(byName)
-	return m
-}
-
-// NewManagerWithClientInfo creates MCP clients with explicit application
-// metadata for initialize handshakes. Failed servers are recorded in
-// [Manager.ServerEndpoints]; the manager is still returned so the UI can show
-// red status for misconfigured or unreachable MCPs.
-func NewManagerWithClientInfo(ctx context.Context, configs []ServerConfig, info ClientInfo) (*Manager, error) {
-	m := NewPendingManagerWithClientInfo(configs, info)
-	if len(configs) == 0 {
-		return m, nil
-	}
-	m.ConnectAll(ctx, configs)
-	return m, nil
-}
-
-// ConnectAll initializes every configured server and updates the manager in
-// place so callers can expose pending state before the connection completes.
-func (m *Manager) ConnectAll(ctx context.Context, configs []ServerConfig) {
-	if m == nil || len(configs) == 0 {
-		return
-	}
-
-	m.mu.Lock()
-	m.allowedTools = makeAllowedToolsByServer(configs)
-	m.deferred = make(map[string]bool, len(configs))
-	for _, cfg := range configs {
-		m.deferred[serverConfigName(cfg)] = cfg.Deferred
-	}
-	m.mu.Unlock()
-
-	for _, cfg := range configs {
-		name := serverConfigName(cfg)
-
-		if cfg.Manual {
-			m.mu.RLock()
-			hasClient := m.clients[name] != nil
-			m.mu.RUnlock()
-			if !hasClient {
-				m.setEndpointStatus(ServerEndpointStatus{
-					Name:        name,
-					OK:          false,
-					Pending:     false,
-					Disabled:    true,
-					Manual:      true,
-					Retrying:    false,
-					Attempt:     0,
-					MaxAttempts: defaultConnectAttempts,
-					Error:       "",
-				})
-			}
-			continue
-		}
-
-		m.mu.Lock()
-		if old := m.clients[name]; old != nil {
-			_ = old.Close()
-			delete(m.clients, name)
-		}
-		delete(m.toolDefs, name)
-		m.mu.Unlock()
-
-		if cfg.Command == "" && cfg.URL == "" {
-			status := ServerEndpointStatus{
-				Name:        name,
-				OK:          false,
-				Pending:     false,
-				Disabled:    false,
-				Manual:      cfg.Manual,
-				Retrying:    false,
-				Attempt:     0,
-				MaxAttempts: defaultConnectAttempts,
-				Error:       "must specify either command or url",
-			}
-			m.setEndpointStatus(status)
-			log.Warnf("mcp server invalid config name=%v error=%v", name, status.Error)
-			continue
-		}
-
-		client, status, err := m.connectServer(ctx, cfg)
-		m.setEndpointStatus(status)
-		if err != nil {
-			if status.Pending {
-				log.Debugf("mcp server initialization canceled name=%v error=%v", name, err)
-			} else {
-				log.Warnf("mcp server initialization failed name=%v attempts=%v error=%v", name, status.Attempt, err)
-			}
-			continue
-		}
-
-		m.mu.Lock()
-		m.clients[name] = client
-		m.mu.Unlock()
-	}
-}
-
-// ConnectOne initializes a single MCP server config without affecting other
-// connected servers. It updates endpoint status for the server name in-place.
-func (m *Manager) ConnectOne(ctx context.Context, cfg ServerConfig) error {
-	if m == nil {
-		return nil
-	}
-	name := serverConfigName(cfg)
-
-	m.mu.Lock()
-	if m.deferred == nil {
-		m.deferred = make(map[string]bool)
-	}
-	m.deferred[name] = cfg.Deferred
-	if m.allowedTools == nil {
-		m.allowedTools = make(map[string]map[string]struct{})
-	}
-	allowed := makeAllowedToolsSet(cfg.AllowedTools)
-	if len(allowed) > 0 {
-		m.allowedTools[name] = allowed
-	} else {
-		delete(m.allowedTools, name)
-	}
-	if old := m.clients[name]; old != nil {
-		_ = old.Close()
-		delete(m.clients, name)
-	}
-	delete(m.toolDefs, name)
-	m.mu.Unlock()
-
-	if cfg.Command == "" && cfg.URL == "" {
-		status := ServerEndpointStatus{
-			Name:        name,
-			OK:          false,
-			Pending:     false,
-			Disabled:    false,
-			Manual:      cfg.Manual,
-			Retrying:    false,
-			Attempt:     0,
-			MaxAttempts: defaultConnectAttempts,
-			Error:       "must specify either command or url",
-		}
-		m.setEndpointStatus(status)
-		return fmt.Errorf("%s", status.Error)
-	}
-
-	client, status, err := m.connectServer(ctx, cfg)
-	status.Disabled = false
-	status.Manual = cfg.Manual
-	m.setEndpointStatus(status)
-	if err != nil {
-		return err
-	}
-
-	m.mu.Lock()
-	m.clients[name] = client
-	m.mu.Unlock()
-	return nil
-}
-
-// Disconnect drops a server connection (if any) and marks it disabled.
-func (m *Manager) Disconnect(name string) {
-	if m == nil {
-		return
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return
-	}
-	m.mu.Lock()
-	if c := m.clients[name]; c != nil {
-		_ = c.Close()
-		delete(m.clients, name)
-	}
-	delete(m.toolDefs, name)
-	m.mu.Unlock()
-
-	m.setEndpointStatus(ServerEndpointStatus{
-		Name:        name,
-		OK:          false,
-		Pending:     false,
-		Disabled:    true,
-		Manual:      true,
-		Retrying:    false,
-		Attempt:     0,
-		MaxAttempts: defaultConnectAttempts,
-		Error:       "",
-	})
-}
-
-func (m *Manager) connectServer(ctx context.Context, cfg ServerConfig) (*Client, ServerEndpointStatus, error) {
-	name := serverConfigName(cfg)
-	maxAttempts := defaultConnectAttempts
-	status := ServerEndpointStatus{
-		Name:        name,
-		OK:          false,
-		Pending:     true,
-		Disabled:    false,
-		Manual:      cfg.Manual,
-		Retrying:    false,
-		Attempt:     0,
-		MaxAttempts: maxAttempts,
-		Error:       "",
-	}
-	m.setEndpointStatus(status)
-
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		status.Attempt = attempt
-		status.Pending = true
-		status.Retrying = attempt > 1
-		status.Error = ""
-		m.setEndpointStatus(status)
-
-		attemptCtx, cancel := context.WithTimeout(ctx, connectAttemptTimeout)
-		client, err := m.newClientBounded(attemptCtx, cfg)
-		if err != nil {
-			cancel()
-			lastErr = err
-			if isContextCanceled(err) || errors.Is(ctx.Err(), context.Canceled) {
-				return nil, ServerEndpointStatus{
-					Name:        name,
-					OK:          false,
-					Pending:     true,
-					Disabled:    false,
-					Manual:      cfg.Manual,
-					Retrying:    false,
-					Attempt:     attempt,
-					MaxAttempts: maxAttempts,
-					Error:       "",
-				}, err
-			}
-			return nil, ServerEndpointStatus{
-				Name:        name,
-				OK:          false,
-				Pending:     false,
-				Manual:      cfg.Manual,
-				Disabled:    false,
-				Retrying:    false,
-				Attempt:     attempt,
-				MaxAttempts: maxAttempts,
-				Error:       err.Error(),
-			}, err
-		}
-
-		initErr := client.Initialize(attemptCtx)
-		cancel()
-		if initErr == nil {
-			return client, ServerEndpointStatus{
-				Name:        name,
-				OK:          true,
-				Pending:     false,
-				Manual:      cfg.Manual,
-				Disabled:    false,
-				Retrying:    false,
-				Attempt:     attempt,
-				MaxAttempts: maxAttempts,
-				Error:       "",
-			}, nil
-		}
-
-		_ = client.Close()
-		lastErr = initErr
-		if isContextCanceled(initErr) || errors.Is(ctx.Err(), context.Canceled) {
-			return nil, ServerEndpointStatus{
-				Name:        name,
-				OK:          false,
-				Pending:     true,
-				Manual:      cfg.Manual,
-				Disabled:    false,
-				Retrying:    false,
-				Attempt:     attempt,
-				MaxAttempts: maxAttempts,
-				Error:       "",
-			}, initErr
-		}
-		if !shouldRetryConnectError(initErr, cfg) || attempt == maxAttempts {
-			return nil, ServerEndpointStatus{
-				Name:        name,
-				OK:          false,
-				Pending:     false,
-				Manual:      cfg.Manual,
-				Disabled:    false,
-				Retrying:    false,
-				Attempt:     attempt,
-				MaxAttempts: maxAttempts,
-				Error:       initErr.Error(),
-			}, initErr
-		}
-		if !sleepWithContext(ctx, connectRetryBackoff[attempt-1]) {
-			return nil, ServerEndpointStatus{
-				Name:        name,
-				OK:          false,
-				Pending:     true,
-				Manual:      cfg.Manual,
-				Disabled:    false,
-				Retrying:    false,
-				Attempt:     attempt,
-				MaxAttempts: maxAttempts,
-				Error:       "",
-			}, context.Canceled
-		}
-	}
-
-	if lastErr == nil {
-		lastErr = fmt.Errorf("mcp server %q: unknown initialization failure", name)
-	}
-	return nil, ServerEndpointStatus{
-		Name:        name,
-		OK:          false,
-		Pending:     false,
-		Retrying:    false,
-		Attempt:     maxAttempts,
-		MaxAttempts: maxAttempts,
-		Error:       lastErr.Error(),
-	}, lastErr
-}
-
-// clientFactoryResult is one client factory call's outcome.
 type clientFactoryResult struct {
 	client *Client
 	err    error
-}
-
-// newClientBounded runs the client factory within the connect attempt and
-// returns what it built.
-//
-// The factory is not handed the attempt context: the process it starts has to
-// outlive the attempt, because the stdio transport spawns it with
-// exec.CommandContext and cancelling the attempt after a successful handshake
-// would kill a server whose command is the server itself (a launcher that keeps
-// its real child alive only loses the launcher). The manager owns that process
-// and terminates it in Client.Close. The attempt therefore bounds the *wait*
-// here: a factory that does not return in time fails the attempt like any other
-// connect error, and a client that shows up after the attempt gave up is closed
-// so that no server process is left behind. A factory that never returns leaves
-// two goroutines parked — the call itself and the drain waiting for whatever it
-// builds — which is the price of an attempt that always returns.
-func (m *Manager) newClientBounded(attemptCtx context.Context, cfg ServerConfig) (*Client, error) {
-	results := make(chan clientFactoryResult, 1)
-	go func() {
-		client, err := m.newClientFactory(context.WithoutCancel(attemptCtx), cfg)
-		results <- clientFactoryResult{client: client, err: err}
-	}()
-
-	select {
-	case res := <-results:
-		return res.client, res.err
-	case <-attemptCtx.Done():
-		// The factory is still running. Drain it in the background: whatever it
-		// returns belongs to no attempt any more.
-		go func() {
-			res := <-results
-			if res.client != nil {
-				_ = res.client.Close()
-			}
-		}()
-		if ctxErr := attemptCtx.Err(); errors.Is(ctxErr, context.Canceled) {
-			// The caller cancelled the whole connect (shutdown); the caller's
-			// classification turns this into the same pending status the
-			// handshake path reports.
-			return nil, fmt.Errorf("mcp server %q: connect aborted: %w", serverConfigName(cfg), ctxErr)
-		}
-		return nil, fmt.Errorf("mcp server %q: starting the server did not finish within %s: %w", serverConfigName(cfg), connectAttemptTimeout, attemptCtx.Err())
-	}
 }
 
 func shouldRetryConnectError(err error, cfg ServerConfig) bool {
@@ -721,46 +292,29 @@ func shouldRetryConnectError(err error, cfg ServerConfig) bool {
 	if cfg.Command != "" {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	if strings.Contains(msg, "must specify either command or url") {
+	if _, ok := errors.AsType[*authFailure](err); ok {
 		return false
 	}
-	if status, ok := extractHTTPStatusFromError(err); ok {
-		switch status {
+	if _, ok := errors.AsType[*CredentialStoreError](err); ok {
+		return false
+	}
+	if _, ok := errors.AsType[*DiscoveryError](err); ok {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, missingServerTransportMessage) {
+		return false
+	}
+	if httpErr, ok := errors.AsType[*HTTPError](err); ok {
+		if httpErr.SendEvidence == SendNotSent || (httpErr.StatusCode == 0 && httpErr.SendEvidence == SendResponseReceived) {
+			return false
+		}
+		switch httpErr.StatusCode {
 		case 400, 401, 403, 404:
 			return false
 		}
 	}
-	if isHTTPClientErrorStatus(msg, 400, 401, 403, 404) {
-		return false
-	}
 	return true
-}
-
-func extractHTTPStatusFromError(err error) (int, bool) {
-	if err == nil {
-		return 0, false
-	}
-	if rpcErr, ok := errors.AsType[*JSONRPCError](err); ok && rpcErr != nil {
-		return rpcErr.Code, true
-	}
-	msg := strings.ToLower(err.Error())
-	for _, status := range []int{400, 401, 403, 404, 429, 500, 502, 503, 504} {
-		needle := fmt.Sprintf("server returned %d", status)
-		if strings.Contains(msg, needle) {
-			return status, true
-		}
-	}
-	return 0, false
-}
-
-func isHTTPClientErrorStatus(msg string, statuses ...int) bool {
-	for _, status := range statuses {
-		if strings.Contains(msg, fmt.Sprintf("server returned %d", status)) {
-			return true
-		}
-	}
-	return false
 }
 
 func isContextCanceled(err error) bool {
@@ -786,25 +340,6 @@ func serverConfigName(cfg ServerConfig) string {
 		return "(unnamed)"
 	}
 	return cfg.Name
-}
-
-func makeAllowedToolsByServer(configs []ServerConfig) map[string]map[string]struct{} {
-	if len(configs) == 0 {
-		return nil
-	}
-	out := make(map[string]map[string]struct{})
-	for _, cfg := range configs {
-		allowed := makeAllowedToolsSet(cfg.AllowedTools)
-		if len(allowed) > 0 {
-			out[serverConfigName(cfg)] = allowed
-		} else {
-			delete(out, serverConfigName(cfg))
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }
 
 func makeAllowedToolsSet(names []string) map[string]struct{} {
@@ -837,50 +372,6 @@ func filterToolDefsByAllowed(defs []MCPToolDef, allowed map[string]struct{}) []M
 	return out
 }
 
-func (m *Manager) filterToolDefs(serverName string, defs []MCPToolDef) []MCPToolDef {
-	if m == nil || len(defs) == 0 {
-		return defs
-	}
-	m.mu.RLock()
-	allowed := m.allowedTools[serverName]
-	m.mu.RUnlock()
-	filtered := filterToolDefsByAllowed(defs, allowed)
-	if len(filtered) == len(defs) {
-		return defs
-	}
-	out := make([]MCPToolDef, len(filtered))
-	copy(out, filtered)
-	return out
-}
-
-func sortedEndpointStatuses(byName map[string]ServerEndpointStatus) []ServerEndpointStatus {
-	names := make([]string, 0, len(byName))
-	for n := range byName {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	out := make([]ServerEndpointStatus, 0, len(names))
-	for _, n := range names {
-		out = append(out, byName[n])
-	}
-	return out
-}
-
-func (m *Manager) setEndpointStatus(status ServerEndpointStatus) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i := range m.endpointStat {
-		if m.endpointStat[i].Name == status.Name {
-			m.endpointStat[i] = status
-			return
-		}
-	}
-	m.endpointStat = append(m.endpointStat, status)
-	sort.Slice(m.endpointStat, func(i, j int) bool {
-		return m.endpointStat[i].Name < m.endpointStat[j].Name
-	})
-}
-
 // createClient builds a Client with the appropriate transport based on config.
 func createClient(ctx context.Context, cfg ServerConfig, info ClientInfo) (*Client, error) {
 	if cfg.Command != "" {
@@ -899,11 +390,11 @@ func createClient(ctx context.Context, cfg ServerConfig, info ClientInfo) (*Clie
 		if err != nil {
 			return nil, err
 		}
-		transport := NewHTTPTransport(cfg.URL, headers)
+		transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: cfg.URL, Headers: headers})
 		return NewClientWithInfo(cfg.Name, transport, info), nil
 	}
 
-	return nil, fmt.Errorf("mcp server %q: must specify either command or url", strings.TrimSpace(cfg.Name))
+	return nil, fmt.Errorf("mcp server %q: %s", strings.TrimSpace(cfg.Name), missingServerTransportMessage)
 }
 
 // expandHeaders validates the configured headers and resolves values that
@@ -947,173 +438,4 @@ func validHeaderName(name string) bool {
 		}
 	}
 	return true
-}
-
-// Clients returns all successfully initialized clients.
-func (m *Manager) Clients() map[string]*Client {
-	if m == nil {
-		return nil
-	}
-	// Return a shallow copy to prevent callers from mutating internal state.
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	result := make(map[string]*Client, len(m.clients))
-	maps.Copy(result, m.clients)
-	return result
-}
-
-// Client returns the currently connected client for a single server, or nil
-// when the server is disconnected. Callers that execute remote tools resolve
-// this per call so a reconnect never leaves a stale, closed transport behind.
-func (m *Manager) Client(name string) *Client {
-	if m == nil {
-		return nil
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.clients[name]
-}
-
-// ToolAllowed reports whether remoteName is within the configured allowlist for
-// serverName. An empty allowlist means every tool is allowed.
-func (m *Manager) ToolAllowed(serverName, remoteName string) bool {
-	if m == nil {
-		return false
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	allowed := m.allowedTools[serverName]
-	if len(allowed) == 0 {
-		return true
-	}
-	_, ok := allowed[remoteName]
-	return ok
-}
-
-// IsManualServer reports whether serverName is configured as a manual server
-// (not auto-connected at startup). It derives from endpoint status so it also
-// works before any connection attempt has completed.
-func (m *Manager) IsManualServer(name string) bool {
-	if m == nil {
-		return false
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	for _, s := range m.endpointStat {
-		if s.Name == name {
-			return s.Manual
-		}
-	}
-	return false
-}
-
-// CachedToolDefs returns the last discovered tool defs for a server.
-func (m *Manager) CachedToolDefs(serverName string) []MCPToolDef {
-	if m == nil {
-		return nil
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	defs := m.toolDefs[serverName]
-	if len(defs) == 0 {
-		return nil
-	}
-	out := make([]MCPToolDef, len(defs))
-	copy(out, defs)
-	return out
-}
-
-// KnownRegisteredToolNames returns registered ids known from discovery or an
-// explicit allowed_tools list. It does not connect a lazy/manual server.
-func (m *Manager) KnownRegisteredToolNames(serverName string) []string {
-	if m == nil {
-		return nil
-	}
-	m.mu.RLock()
-	defs := m.toolDefs[serverName]
-	allowed := m.allowedTools[serverName]
-	if len(defs) == 0 && len(allowed) == 0 {
-		m.mu.RUnlock()
-		return nil
-	}
-	out := make([]string, 0, max(len(defs), len(allowed)))
-	if len(defs) > 0 {
-		for _, def := range defs {
-			if def.Name != "" {
-				out = append(out, RegisteredMCPToolName(serverName, def.Name))
-			}
-		}
-	} else {
-		for name := range allowed {
-			out = append(out, RegisteredMCPToolName(serverName, name))
-		}
-	}
-	m.mu.RUnlock()
-
-	sort.Strings(out)
-	return out
-}
-
-func (m *Manager) setCachedToolDefs(serverName string, defs []MCPToolDef) {
-	if m == nil {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if len(defs) == 0 {
-		delete(m.toolDefs, serverName)
-		return
-	}
-	out := make([]MCPToolDef, len(defs))
-	copy(out, defs)
-	m.toolDefs[serverName] = out
-}
-
-// ServerNames returns sorted config names of successfully connected MCP servers.
-func (m *Manager) ServerNames() []string {
-	if m == nil {
-		return nil
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if len(m.clients) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(m.clients))
-	for name := range m.clients {
-		out = append(out, name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// ServerEndpoints returns per-server reachability (sorted by name). Nil if m is nil.
-func (m *Manager) ServerEndpoints() []ServerEndpointStatus {
-	if m == nil {
-		return nil
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if len(m.endpointStat) == 0 {
-		return nil
-	}
-	out := make([]ServerEndpointStatus, len(m.endpointStat))
-	copy(out, m.endpointStat)
-	return out
-}
-
-// Close shuts down all MCP server connections.
-func (m *Manager) Close() {
-	if m == nil {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for name, c := range m.clients {
-		if err := c.Close(); err != nil {
-			log.Warnf("mcp server close error name=%v error=%v", name, err)
-		}
-	}
-	m.clients = make(map[string]*Client)
-	m.toolDefs = make(map[string][]MCPToolDef)
 }

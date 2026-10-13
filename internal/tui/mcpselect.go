@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/mcp"
 )
 
 // ---------------------------------------------------------------------------
@@ -17,8 +18,10 @@ import (
 // ---------------------------------------------------------------------------
 
 type mcpSelectState struct {
-	selector overlayListSelectorState
-	prevMode Mode
+	detail      *mcp.ServerRef
+	detailAgent string
+	selector    overlayListSelectorState
+	prevMode    Mode
 }
 
 func mcpSelectIdleHint() string {
@@ -28,6 +31,7 @@ func mcpSelectIdleHint() string {
 		hint("Enter", "toggle"),
 		hint("e", "enable"),
 		hint("d", "disable"),
+		hint("D", "details"),
 		hint("Esc", "close"),
 		hintText("(auto servers are read-only)"),
 	)
@@ -40,6 +44,7 @@ func mcpSelectBusyHint() string {
 		hint("Enter", "toggle next request"),
 		hint("e", "enable"),
 		hint("d", "disable"),
+		hint("D", "details"),
 		hint("Esc", "close"),
 	)
 }
@@ -63,7 +68,6 @@ func buildMCPSelectItems(rows []agent.MCPServerDisplay) []OverlayListItem {
 		}
 		item := OverlayListItem{ID: r.Name, Label: fmt.Sprintf("%s — %s", r.Name, state)}
 		if !r.Manual {
-			item.Disabled = true
 			item.Label = fmt.Sprintf("%s — auto", r.Name)
 		}
 		items = append(items, item)
@@ -126,6 +130,9 @@ func (m *Model) mcpSelectMaxVisible() int {
 }
 
 func (m *Model) renderMCPSelectDialog() string {
+	if m.mcpSelect.detail != nil {
+		return m.renderMCPDetailDialog()
+	}
 	if m.mcpSelect.selector.list == nil {
 		return ""
 	}
@@ -195,6 +202,13 @@ func (m *Model) mcpSelectCurrent() (string, bool) {
 }
 
 func (m *Model) handleMCPSelectKey(msg tea.KeyMsg) tea.Cmd {
+	if m.mcpSelect.detail != nil {
+		return m.handleMCPDetailKey(msg)
+	}
+	if msg.String() == "D" {
+		m.openSelectedMCPDetail()
+		return nil
+	}
 	key := msg.String()
 	if keyMatches(key, m.keyMap.InsertEscape) || key == "esc" {
 		return m.closeMCPSelect()
@@ -251,6 +265,23 @@ func (m *Model) mcpSelectDispatch(action agent.MCPControlAction) tea.Cmd {
 	}
 	name := strings.TrimSpace(item.ID)
 	if name == "" {
+		return nil
+	}
+	mp, ok := m.agent.(agent.MCPStateProvider)
+	if !ok {
+		return nil
+	}
+	found := false
+	for _, row := range mp.MCPServerList() {
+		if row.Name == name {
+			if !row.Manual {
+				return m.enqueueToast("Auto-start MCP servers are read-only", "info")
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
 		return nil
 	}
 	m.agent.SendUserMessage(fmt.Sprintf("/mcp %s %s", string(action), name))

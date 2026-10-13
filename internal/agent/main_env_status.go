@@ -28,7 +28,15 @@ func (a *MainAgent) SetMCPKnownToolNamesFunc(toolNames func(string) []string) {
 	a.mcpKnownToolNamesFn = toolNames
 }
 
-func (a *MainAgent) NotifyEnvStatusUpdated() { a.emitToTUI(EnvStatusUpdateEvent{}) }
+func (a *MainAgent) NotifyEnvStatusUpdated() {
+	a.emitToTUI(EnvStatusUpdateEvent{})
+	a.mcpStatus.mu.Lock()
+	active := a.mcpStatus.provider != nil || len(a.mcpStatus.views) > 0
+	a.mcpStatus.mu.Unlock()
+	if active {
+		a.RefreshMCPStatusSnapshot()
+	}
+}
 
 func (a *MainAgent) LSPServerList() []LSPServerDisplay {
 	if a.lspServerListFn == nil {

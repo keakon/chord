@@ -274,6 +274,8 @@ type LSPServerConfig struct {
 // MCPServerConfig defines an MCP server connection.
 // Either Command (stdio transport) or URL (HTTP transport) must be set.
 type MCPServerConfig struct {
+	Auth         string            `json:"auth,omitempty" yaml:"auth,omitempty"`
+	OAuth        *MCPOAuthConfig   `json:"oauth,omitempty" yaml:"oauth,omitempty"`
 	Command      string            `json:"command,omitempty" yaml:"command,omitempty"`             // executable (for stdio transport)
 	Args         []string          `json:"args,omitempty" yaml:"args,omitempty"`                   // command arguments
 	Env          []string          `json:"env,omitempty" yaml:"env,omitempty"`                     // optional environment variables
@@ -1742,6 +1744,9 @@ func MergeProjectConfig(base *Config, path string) (projectCfg *Config, merged *
 // fatal error must prevent startup; field-level errors are logged and the
 // affected fields keep their defaults.
 func decodeStrict(data []byte, cfg *Config) ([]string, error) {
+	if err := validateMCPConfigYAML(data); err != nil {
+		return nil, err
+	}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	err := dec.Decode(cfg)
@@ -2004,6 +2009,12 @@ func loadConfigData(path string, data []byte, withDefaults bool, diagnostics *[]
 	}
 	if err := orchestrationConfigLoadError(cfg); err != nil {
 		return nil, fmt.Errorf("config %s: %w", path, err)
+	}
+	if err := ValidateMCPAuth(cfg.MCP); err != nil {
+		return nil, fmt.Errorf("config %s: %w", path, err)
+	}
+	for name, server := range cfg.MCP {
+		cfg.MCP[name], _ = NormalizeMCPAuth(server)
 	}
 	for _, issue := range collectSemanticIssues(cfg) {
 		log.Warnf("config %s: ignoring invalid value(s): %s", path, issue)

@@ -338,11 +338,51 @@ Chord's optional cross-session project memory (stable preferences, project facts
 
 Press `Ctrl+O` to open the MCP server selector. It lists configured MCP servers, their connection state, and whether manual servers are currently enabled or disabled. Use `j` / `k` to move, `Enter` to toggle the selected manual server, `e` to enable, `d` to disable, and `Esc` to close.
 
-The selector can be opened while the agent is running so you can inspect MCP state without waiting for the current turn to finish. Enable/disable actions are also allowed while running, but they are deferred: the current in-flight request keeps the MCP tool surface and prompt it started with, and the changed MCP state is reflected in the next LLM request. Auto-start MCP servers are always read-only in this selector; only servers configured with `manual: true` can be changed at runtime.
+The selector can be opened while the agent is running so you can inspect MCP state without waiting for the current turn to finish. Enable/disable actions are also allowed while running, but they are deferred: the current in-flight request keeps the MCP tool surface and prompt it started with, and the changed MCP state is reflected in the next LLM request. Only servers configured with `manual: true` can be enabled or disabled; details provide authentication and reconnect actions for automatic servers too.
 
 When you ask the agent which MCP tools it can use, its answer describes the tools visible to its current role, not every connected server. Use the selector or `/mcp status` for connection state.
 
 External files, web pages, command output, images, and MCP descriptions/results are reference data, not authorization to change the task or execute commands. Agent instructions preserve that distinction, including for delegated workers, but they are not a security sandbox: configure tool permissions conservatively and review sensitive operations.
+
+### MCP sign-in and connection diagnostics
+
+HTTP MCP servers can use managed OAuth with authorization code and PKCE. The default `auth: auto` keeps static `Authorization` headers working; otherwise it uses saved credentials when available and starts anonymously when none are saved. `auth: oauth` requires a saved login. `auth: none` disables managed OAuth while retaining configured headers. stdio servers do not use OAuth.
+
+```yaml
+mcp:
+  search:
+    url: https://mcp.example.com/mcp
+    auth: oauth
+    oauth:
+      issuer: https://auth.example.com
+      client_id: sample-client
+      token_endpoint_auth_method: none
+      scopes: [files:read]
+      callback_port: 41937
+```
+
+The `oauth` block is optional. A configured `client_id` requires an `issuer` declared by the server. Pre-registered public clients use `none`; confidential clients use `client_secret_basic` or `client_secret_post` and a `client_secret_env` variable name. The secret's value is read only when needed for token exchange or refresh. Do not combine managed OAuth configuration with a static `Authorization` header. Callback ports must be between 1 and 65535; the default is 41937.
+
+```sh
+chord mcp list
+chord mcp login search
+chord mcp login search --reauth
+chord mcp logout search
+chord doctor mcp search
+chord doctor mcp search --connect --json
+```
+
+Add `--agent explorer` to select servers visible to that role, including its private servers. `list` reports local credential facts without connecting. The default doctor check is also offline: it checks configuration, header environment references, and saved credentials without starting stdio servers or creating credential storage. `--connect` performs initialize and tool discovery on a temporary connection; it may refresh and durably confirm credentials, so it can update shared credential files. It does not register a client, open a browser, or call a business tool. Exit codes are 0 for success, 1 for an unavailable connection or credential problem, and 2 for invalid arguments or configuration.
+
+Login saves credentials before validating the connection and complete tool catalog. A validation failure leaves the saved credentials available for diagnosis; `credential_saved: true` and the validation result are reported separately. `--reauth` starts a new authorization while preserving the existing account until replacement is committed. `--no-browser` prints the authorization URL and still waits for a callback. Login and logout do not change whether a manual server is enabled, and logout does not revoke the remote account's consent.
+
+In the MCP selector, press `D` for details. Authentication, current operations, connection, tool catalog, and required scopes are separate. Details offer login, reauthorization, logout, reconnect, and cancellation. Closing details does not cancel a login; use its cancel action or switch sessions. `/mcp login|logout|reconnect|status <server> [--agent <definition>]` is also available; `status` may omit the server. Automatic servers support authentication and reconnect actions; only manual servers support enable/disable.
+
+Credentials are stored under `<config-home>/mcp/oauth/` in files restricted to the current user. Worktrees of one repository share a login. Aliases with the same owner, endpoint, and OAuth client configuration also share it; logout affects those aliases. Different repositories, private-role owners, issuers, client IDs, authentication methods, or callback configurations use separate slots. There is one current account per slot. Changing scopes or a server's display name does not erase the login. A missing-scope response can be addressed by signing in again; requested scopes are combined with the additional requirement. OAuth does not change Chord's tool permission rules, and failed business calls are not replayed automatically.
+
+For automatic registration, Chord uses client metadata when the authorization server supports it, otherwise dynamic registration when offered. Client metadata requires callback port 41937. If that port is occupied, stop the conflicting login or use a pre-registered client with a configured callback port. For an SSH host, forward the port before logging in, for example `ssh -L 41937:127.0.0.1:41937 host`, then open the printed URL in your local browser. Headless and gateway clients show status and host-side login instructions; they do not open remote authorization flows.
+
+OAuth discovery and token requests require direct access to public HTTPS authorization servers and do not use environment proxies. Private-network authorization servers are unsupported. Only an explicitly configured loopback MCP resource may use HTTP; this exception does not apply to its authorization server. Custom MCP headers are sent only to the MCP endpoint, never to discovery or token endpoints. See [MCP troubleshooting](./troubleshooting.md#mcp-never-becomes-ready).
 
 ### `/export`: export the current session
 

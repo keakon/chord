@@ -32,7 +32,7 @@ func redirectRequests(t *testing.T, from, to string, headers map[string]string) 
 
 func TestHTTPTransportStripsConfiguredHeadersOffOrigin(t *testing.T) {
 	headers := map[string]string{"x-api-key": "secret", "X-Tenant": "acme"}
-	transport := NewHTTPTransport("https://mcp.example.com/rpc", headers)
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: "https://mcp.example.com/rpc", Headers: headers})
 
 	for _, target := range []string{
 		"https://evil.example.net/rpc", // unrelated host
@@ -53,7 +53,7 @@ func TestHTTPTransportStripsConfiguredHeadersOffOrigin(t *testing.T) {
 
 func TestHTTPTransportKeepsConfiguredHeadersOnSameOrigin(t *testing.T) {
 	headers := map[string]string{"x-api-key": "secret"}
-	transport := NewHTTPTransport("https://mcp.example.com/rpc", headers)
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: "https://mcp.example.com/rpc", Headers: headers})
 
 	for _, target := range []string{
 		"https://mcp.example.com/rpc/v2", // same host, different path
@@ -70,7 +70,7 @@ func TestHTTPTransportKeepsConfiguredHeadersOnSameOrigin(t *testing.T) {
 }
 
 func TestHTTPTransportRejectsRedirectLoopAndScheme(t *testing.T) {
-	transport := NewHTTPTransport("https://mcp.example.com/rpc", nil)
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: "https://mcp.example.com/rpc", Headers: nil})
 
 	req, via := redirectRequests(t, "https://mcp.example.com/rpc", "https://mcp.example.com/rpc", nil)
 	for len(via) < mcpMaxRedirects {
@@ -109,7 +109,7 @@ func TestHTTPTransportFollowsSameOriginRedirectWithHeaders(t *testing.T) {
 	}))
 	defer entry.Close()
 
-	transport := NewHTTPTransport(entry.URL, map[string]string{"x-api-key": "secret"})
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: entry.URL, Headers: map[string]string{"x-api-key": "secret"}})
 	if _, err := transport.Send(context.Background(), JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "test"}); err != nil {
 		t.Fatalf("Send across a same-origin redirect: %v", err)
 	}

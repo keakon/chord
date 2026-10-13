@@ -191,6 +191,8 @@ func configureRuntimeStateProviders(ac *AppContext) {
 		return
 	}
 
+	configureRuntimeMCPAuth(ac)
+
 	ac.MainAgent.SetLSPStatusFunc(
 		func() []agent.LSPServerDisplay { return lspServerDisplayList(ac.LSPManager, ac.RuntimeResources) },
 	)
@@ -257,15 +259,15 @@ func controlRuntimeMCP(ctx context.Context, ac *AppContext, req agent.MCPControl
 	}
 	staleSession := strings.TrimSpace(req.SessionDir) != "" && intentSessionDir != strings.TrimSpace(activeSessionDir)
 
-	configsByName := make(map[string]mcp.ServerConfig, len(ac.MCPConfigs))
-	for _, cfg := range ac.MCPConfigs {
-		configsByName[cfg.Name] = cfg
+	configsByName := make(map[string]mcp.Target, len(ac.MCPTargets))
+	for _, cfg := range ac.MCPTargets {
+		configsByName[cfg.Config.Name] = cfg
 	}
 	var targets []string
 	if len(req.Servers) == 0 {
-		for _, cfg := range ac.MCPConfigs {
-			if cfg.Manual {
-				targets = append(targets, cfg.Name)
+		for _, cfg := range ac.MCPTargets {
+			if cfg.Config.Manual {
+				targets = append(targets, cfg.Config.Name)
 			}
 		}
 	} else {
@@ -280,14 +282,14 @@ func controlRuntimeMCP(ctx context.Context, ac *AppContext, req agent.MCPControl
 			errs = append(errs, fmt.Errorf("unknown MCP server %q", name))
 			continue
 		}
-		if !cfg.Manual {
+		if !cfg.Config.Manual {
 			errs = append(errs, fmt.Errorf("MCP server %q is not manual; only manual MCP servers can be enabled/disabled", name))
 		}
 	}
 
 	manualByName := make(map[string]struct{}, len(configsByName))
 	for name, cfg := range configsByName {
-		if cfg.Manual {
+		if cfg.Config.Manual {
 			manualByName[name] = struct{}{}
 		}
 	}
@@ -315,7 +317,7 @@ func controlRuntimeMCP(ctx context.Context, ac *AppContext, req agent.MCPControl
 	case agent.MCPControlEnable:
 		for _, name := range targets {
 			cfg, ok := configsByName[name]
-			if !ok || !cfg.Manual {
+			if !ok || !cfg.Config.Manual {
 				// already captured above
 				continue
 			}
@@ -334,10 +336,10 @@ func controlRuntimeMCP(ctx context.Context, ac *AppContext, req agent.MCPControl
 	case agent.MCPControlDisable:
 		for _, name := range targets {
 			cfg, ok := configsByName[name]
-			if !ok || !cfg.Manual {
+			if !ok || !cfg.Config.Manual {
 				continue
 			}
-			ac.MCPMgr.Disconnect(name)
+			ac.MCPMgr.RetireConnection(name, mcp.RetireDisabled)
 			ac.MCPCatalog.SetDesiredEnabled(name, false)
 			disabledOK = append(disabledOK, name)
 		}
@@ -445,10 +447,10 @@ func restoreMCPIntentForSession(ctx context.Context, ac *AppContext, sessionDir 
 			persisted = meta.MCPEnabledServers
 		}
 	}
-	manualBy := make(map[string]mcp.ServerConfig, len(ac.MCPConfigs))
-	for _, cfg := range ac.MCPConfigs {
-		if cfg.Manual {
-			manualBy[cfg.Name] = cfg
+	manualBy := make(map[string]mcp.Target, len(ac.MCPTargets))
+	for _, cfg := range ac.MCPTargets {
+		if cfg.Config.Manual {
+			manualBy[cfg.Config.Name] = cfg
 		}
 	}
 	want := make(map[string]struct{}, len(persisted))
@@ -461,15 +463,15 @@ func restoreMCPIntentForSession(ctx context.Context, ac *AppContext, sessionDir 
 	}
 
 	// Disconnect manual servers that are currently connected but no longer wanted.
-	for _, cfg := range ac.MCPConfigs {
-		if !cfg.Manual {
+	for _, cfg := range ac.MCPTargets {
+		if !cfg.Config.Manual {
 			continue
 		}
-		if _, ok := want[cfg.Name]; ok {
+		if _, ok := want[cfg.Config.Name]; ok {
 			continue
 		}
-		ac.MCPCatalog.SetDesiredEnabled(cfg.Name, false)
-		ac.MCPMgr.Disconnect(cfg.Name)
+		ac.MCPCatalog.SetDesiredEnabled(cfg.Config.Name, false)
+		ac.MCPMgr.RetireConnection(cfg.Config.Name, mcp.RetireDisabled)
 	}
 
 	// Connect wanted manual servers that are not connected yet, in stable order.
@@ -528,7 +530,14 @@ func runMCPRestoreFlow(ac *AppContext, sessionDir string, readyGeneration agent.
 		return
 	}
 	if connectAll {
-		ac.MCPMgr.ConnectAll(restoreCtx, ac.MCPConfigs)
+		ac.MCPMgr.ConnectAll(restoreCtx, ac.MCPTargets)
+	}
+	if !connectAll {
+		for _, target := range ac.MCPTargets {
+			if !target.Config.Manual && ac.MCPMgr.Client(target.Config.Name) == nil {
+				_ = ac.MCPMgr.ConnectOne(restoreCtx, target)
+			}
+		}
 	}
 	if err := restoreMCPIntentForSession(restoreCtx, ac, sessionDir); err != nil {
 		log.Warnf("MCP intent restore failed error=%v", err)
@@ -550,6 +559,9 @@ func runMCPRestoreFlow(ac *AppContext, sessionDir string, readyGeneration agent.
 // entry points cannot interleave the two counters in opposite orders and
 // deliver an empty surface against the surviving barrier.
 func beginMCPRestore(ac *AppContext) (agent.MCPReadyGeneration, uint64, context.Context) {
+	if ac.MCPMgr != nil {
+		ac.MCPMgr.InvalidateCandidates()
+	}
 	parent := ac.Ctx
 	if parent == nil {
 		parent = context.Background()
@@ -578,7 +590,7 @@ func finishMCPRestore(ac *AppContext, generation uint64) {
 }
 
 func startRuntimeMCP(ac *AppContext) {
-	if ac == nil || ac.MainAgent == nil || ac.Registry == nil || ac.MCPMgr == nil || len(ac.MCPConfigs) == 0 {
+	if ac == nil || ac.MainAgent == nil || ac.Registry == nil || ac.MCPMgr == nil || len(ac.MCPTargets) == 0 {
 		return
 	}
 	ac.mcpStartOnce.Do(func() {
@@ -589,8 +601,8 @@ func startRuntimeMCP(ac *AppContext) {
 		// Register sentinels from configuration before connecting so SubAgents
 		// never race the main runtime to initialize the same server.
 		var mainServerNames []string
-		for _, cfg := range ac.MCPConfigs {
-			mainServerNames = append(mainServerNames, cfg.Name)
+		for _, cfg := range ac.MCPTargets {
+			mainServerNames = append(mainServerNames, cfg.Config.Name)
 		}
 		ac.MainAgent.RegisterMainMCPServers(mainServerNames)
 

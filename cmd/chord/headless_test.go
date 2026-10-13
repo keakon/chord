@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
@@ -329,32 +330,24 @@ func findHeadlessEnvelopeValue(envs []headlessEnvelope, typ string) *headlessEnv
 	return nil
 }
 
-func TestHeadlessSendCommandRejectsBareMCP(t *testing.T) {
+func TestHeadlessSendCommandReturnsBareMCPStatus(t *testing.T) {
 	to := newTestOut()
 	backend := &mockBackend{}
-	state := &headlessState{}
-
-	hcmd := headlessCommand{Type: "send", Content: "/mcp"}
-	handleHeadlessCommand(hcmd, backend, state, to.writer())
-
+	state := &headlessState{mcp: mcp.RuntimeSnapshot{SchemaVersion: mcp.RuntimeSnapshotSchemaVersion, BindingID: "view", Version: 1, Servers: []mcp.ServerView{}}}
+	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/mcp"}, backend, state, to.writer())
 	envs := to.drain()
-	env := findHeadlessEnvelopeValue(envs, "error")
-	if env == nil {
-		t.Fatalf("expected error envelope, got %v", envs)
+	env := findHeadlessEnvelopeValue(envs, "mcp_status_response")
+	if env == nil || findHeadlessEnvelopeValue(envs, "error") != nil {
+		t.Fatalf("expected status response: %v", envs)
 	}
 	payload, _ := env.Payload.(map[string]any)
-	if payload == nil {
-		t.Fatalf("unexpected error payload: %#v", env.Payload)
+	if payload["binding_id"] != "view" {
+		t.Fatalf("wrong MCP view: %#v", payload)
 	}
-	msg, _ := payload["message"].(string)
-	if msg == "" {
-		t.Fatalf("unexpected error payload: %#v", env.Payload)
-	}
-
 	backend.mu.Lock()
 	defer backend.mu.Unlock()
 	if len(backend.sentMessages) != 0 {
-		t.Fatalf("SendUserMessage should not be called, got %v", backend.sentMessages)
+		t.Fatalf("status reached the model: %v", backend.sentMessages)
 	}
 }
 

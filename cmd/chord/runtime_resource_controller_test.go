@@ -185,11 +185,11 @@ func TestRuntimeMCPReconnectConfigsKeepsAutoAndLoadedManualServers(t *testing.T)
 		{Name: "manual-on", Manual: true},
 		{Name: "manual-off", Manual: true},
 	}
-	filtered := runtimeMCPReconnectConfigs(configs, map[string]struct{}{"manual-on": {}})
+	filtered := runtimeMCPReconnectConfigs(testMCPTargets(configs), map[string]struct{}{"manual-on": {}})
 	if len(filtered) != 2 {
 		t.Fatalf("runtimeMCPReconnectConfigs len = %d, want 2", len(filtered))
 	}
-	if filtered[0].Name != "auto" || filtered[1].Name != "manual-on" {
+	if filtered[0].Config.Name != "auto" || filtered[1].Config.Name != "manual-on" {
 		t.Fatalf("runtimeMCPReconnectConfigs = %#v, want auto + loaded manual", filtered)
 	}
 }
@@ -205,7 +205,7 @@ func TestLoadMCPStateNilManager(t *testing.T) {
 }
 
 func TestRestoreRuntimeMCPRequiresCompleteRuntime(t *testing.T) {
-	mgr, err := mcp.NewManagerWithClientInfo(context.Background(), nil, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	mgr, err := mcp.NewManagerWithClientInfo(context.Background(), testMCPTargets(nil), mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestRestoreRuntimeMCPRequiresCompleteRuntime(t *testing.T) {
 		{name: "nil app context"},
 		{name: "empty app context", ac: &AppContext{}},
 		{name: "missing configs", ac: &AppContext{MCPMgr: mgr}},
-		{name: "missing agent", ac: &AppContext{MCPMgr: mgr, MCPConfigs: []mcp.ServerConfig{{Name: "sample"}}}},
+		{name: "missing agent", ac: &AppContext{MCPMgr: mgr, MCPTargets: testMCPTargets([]mcp.ServerConfig{{Name: "sample"}})}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

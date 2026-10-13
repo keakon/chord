@@ -170,7 +170,7 @@ func TestMCPControlWhileBusyDefersToolsAndPromptUntilNextRequest(t *testing.T) {
 	a.tools.Register(tools.GlobTool{})
 	a.SetMCPControlFunc(func(context.Context, MCPControlRequest) (MCPControlResult, error) {
 		return MCPControlResult{
-			Tools:       []tools.Tool{tools.ReadTool{}},
+			Tools:       []tools.Tool{anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"}},
 			PromptBlock: "MCP updated prompt",
 		}, nil
 	})
@@ -188,7 +188,7 @@ func TestMCPControlWhileBusyDefersToolsAndPromptUntilNextRequest(t *testing.T) {
 		readyGen: a.ResetMCPReady(),
 		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual"}},
 		result: MCPControlResult{
-			Tools:       []tools.Tool{tools.ReadTool{}},
+			Tools:       []tools.Tool{anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"}},
 			PromptBlock: "MCP updated prompt",
 		},
 	}})
@@ -199,7 +199,7 @@ func TestMCPControlWhileBusyDefersToolsAndPromptUntilNextRequest(t *testing.T) {
 	if _, ok := a.tools.Get(tools.NameGlob); !ok {
 		t.Fatal("existing tool should remain before rebuild")
 	}
-	if _, ok := a.tools.Get(tools.NameRead); ok {
+	if _, ok := a.tools.Get("mcp_sample_lookup"); ok {
 		t.Fatal("new MCP tool should not register before next request rebuild")
 	}
 	if got := a.installedSysPrompt; got != beforePrompt {
@@ -215,7 +215,7 @@ func TestMCPControlWhileBusyDefersToolsAndPromptUntilNextRequest(t *testing.T) {
 	if err := a.ensureSessionBuilt(context.Background()); err != nil {
 		t.Fatalf("ensureSessionBuilt: %v", err)
 	}
-	if _, ok := a.tools.Get(tools.NameRead); !ok {
+	if _, ok := a.tools.Get("mcp_sample_lookup"); !ok {
 		t.Fatal("new MCP tool should register during next request rebuild")
 	}
 	if !strings.Contains(a.installedSysPrompt, "MCP updated prompt") {
@@ -321,7 +321,7 @@ func TestMCPControlPartialSuccessAppliesSurfaceAndReportsError(t *testing.T) {
 		readyGen: a.ResetMCPReady(),
 		req:      MCPControlRequest{Action: MCPControlEnable, Servers: []string{"manual", "missing"}},
 		result: MCPControlResult{
-			Tools:       []tools.Tool{tools.ReadTool{}},
+			Tools:       []tools.Tool{anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"}},
 			PromptBlock: "MCP updated prompt",
 			Enabled:     []string{"manual"},
 		},
@@ -330,7 +330,7 @@ func TestMCPControlPartialSuccessAppliesSurfaceAndReportsError(t *testing.T) {
 	if err := a.ensureSessionBuilt(context.Background()); err != nil {
 		t.Fatalf("ensureSessionBuilt after partial success: %v", err)
 	}
-	if _, ok := a.tools.Get(tools.NameRead); !ok {
+	if _, ok := a.tools.Get("mcp_sample_lookup"); !ok {
 		t.Fatal("successful MCP subset was not applied")
 	}
 	if got := a.mcpServersPrompt; got != "MCP updated prompt" {

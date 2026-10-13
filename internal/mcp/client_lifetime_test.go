@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"time"
 )
@@ -95,19 +94,19 @@ func TestConnectOneBoundsHangingClientFactory(t *testing.T) {
 
 	t.Run("attempt timeout fails the endpoint", func(t *testing.T) {
 		shortenConnectAttemptTimeout(t, 50*time.Millisecond)
-		mgr := NewPendingManagerWithClientInfo(nil, testClientInfo)
+		mgr := NewPendingManagerWithClientInfo(testTargets(nil), testClientInfo, nil)
 		t.Cleanup(mgr.Close)
 		transport, release := hangingClientFactory(mgr)
 
 		start := time.Now()
-		err := mgr.ConnectOne(context.Background(), cfg)
+		err := mgr.ConnectOne(context.Background(), testTarget(cfg))
 		if err == nil {
 			t.Fatal("ConnectOne returned no error for a client factory that never finished")
 		}
 		if elapsed := time.Since(start); elapsed > 5*time.Second {
 			t.Fatalf("ConnectOne waited %v for a hanging factory, want roughly the connect attempt timeout", elapsed)
 		}
-		if !strings.Contains(err.Error(), "did not finish within") {
+		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("ConnectOne error = %q, want the connect attempt to report the timeout", err)
 		}
 		status := onlyEndpointStatus(t, mgr)
@@ -126,13 +125,13 @@ func TestConnectOneBoundsHangingClientFactory(t *testing.T) {
 	})
 
 	t.Run("caller cancellation stays a pending connect", func(t *testing.T) {
-		mgr := NewPendingManagerWithClientInfo(nil, testClientInfo)
+		mgr := NewPendingManagerWithClientInfo(testTargets([]ServerConfig{cfg}), testClientInfo, nil)
 		t.Cleanup(mgr.Close)
 		transport, release := hangingClientFactory(mgr)
 
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		err := mgr.ConnectOne(ctx, cfg)
+		err := mgr.ConnectOne(ctx, testTarget(cfg))
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("ConnectOne error = %v, want context.Canceled", err)
 		}
@@ -144,9 +143,10 @@ func TestConnectOneBoundsHangingClientFactory(t *testing.T) {
 		close(release)
 		select {
 		case <-transport.closed:
-		case <-time.After(5 * time.Second):
-			t.Fatal("the abandoned client was not closed; its server process would keep running")
+			t.Fatal("already cancelled connect started a client factory")
+		default:
 		}
+
 	})
 }
 
@@ -157,14 +157,16 @@ func TestConnectOneBoundsHangingClientFactory(t *testing.T) {
 // next request (tools/list) failed with a broken pipe.
 func TestConnectOneKeepsStdioServerAlive(t *testing.T) {
 	script := writeMiniMCPServer(t)
-	m := NewPendingManagerWithClientInfo(nil, testClientInfo)
+	m := NewPendingManagerWithClientInfo(testTargets(nil), testClientInfo, nil)
 	t.Cleanup(m.Close)
 
 	// The factory is where the connect attempt context reaches the transport,
 	// and the attempt context is cancelled before ConnectOne returns. The
 	// context handed over must already be detached from that cancellation; this
 	// half of the regression needs no timing.
-	create := m.newClientFactory
+	create := func(ctx context.Context, cfg ServerConfig) (*Client, error) {
+		return createClient(ctx, cfg, testClientInfo)
+	}
 	var handoffCtx context.Context
 	m.newClientFactory = func(ctx context.Context, cfg ServerConfig) (*Client, error) {
 		handoffCtx = ctx
@@ -173,7 +175,7 @@ func TestConnectOneKeepsStdioServerAlive(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := m.ConnectOne(ctx, ServerConfig{Name: "sample", Command: script}); err != nil {
+	if err := m.ConnectOne(ctx, testTarget(ServerConfig{Name: "sample", Command: script})); err != nil {
 		t.Fatalf("ConnectOne: %v", err)
 	}
 	if handoffCtx == nil {

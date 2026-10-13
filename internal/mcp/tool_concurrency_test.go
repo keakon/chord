@@ -18,7 +18,7 @@ func testMCPTool(t *testing.T, mgr *Manager, server, remote string) *MCPTool {
 }
 func testMCPManager(t *testing.T, configs ...ServerConfig) *Manager {
 	t.Helper()
-	return NewPendingManagerWithClientInfo(configs, ClientInfo{Name: "chord-test", Version: "test"})
+	return NewPendingManagerWithClientInfo(testTargets(configs), ClientInfo{Name: "chord-test", Version: "test"}, nil)
 }
 
 func TestMCPToolDefaultConcurrencyPolicy(t *testing.T) {

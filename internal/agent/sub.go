@@ -297,9 +297,11 @@ type SubAgent struct {
 	// while the request path reads it. Mirrors MainAgent.
 	cachedSessionReminderContent atomic.Pointer[string]
 
-	// frozenToolDefs is the SubAgent's tool surface snapshot, computed once at
+	// frozenToolDefs is the SubAgent's tool surface snapshot, refreshed at
 	// construction. Kept stable so the provider request prefix does not drift.
 	frozenToolDefs            []message.ToolDefinition
+	mcpPreparation            func(context.Context, permission.Ruleset) (MCPRequestSnapshot, error)
+	mcpSnapshotVersion        string
 	taskChangesMu             sync.Mutex
 	actualChangedFiles        map[string]struct{}
 	fileAttributionIncomplete bool
@@ -599,6 +601,7 @@ type SubAgentConfig struct {
 	Cancel           context.CancelFunc
 	BaseTools        *tools.Registry // shared base tool registry (Read, Write, Edit, Shell, Grep, Glob, etc.)
 	ExtraMCPTools    []tools.Tool    // agent-specific MCP tools
+	MCPPreparation   func(context.Context, permission.Ruleset) (MCPRequestSnapshot, error)
 	Ruleset          permission.Ruleset
 	WorkDir          string
 	// WorkDirState is the checkout the worker starts in: the worktree a
@@ -695,9 +698,11 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		}
 	}
 
-	// Append agent-specific MCP tools (not filtered; permission Evaluate checks at runtime).
+	// Append only the private MCP tools visible to this instance.
 	for _, t := range cfg.ExtraMCPTools {
-		subTools.Register(t)
+		if !cfg.Ruleset.IsDisabled(t.Name()) {
+			subTools.Register(t)
+		}
 	}
 
 	// Create an EventSender adapter that routes through the SubAgent's
@@ -743,6 +748,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		llmClient:         cfg.LLMClient,
 		ctxMgr:            ctxMgr,
 		tools:             subTools,
+		mcpPreparation:    cfg.MCPPreparation,
 		parent:            cfg.Parent,
 		parentCtx:         cfg.ParentCtx,
 		cancel:            cfg.Cancel,
@@ -987,12 +993,6 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			panic(recoverValue)
 		}
 	}()
-	s.llmMu.RLock()
-	toolDefs := append([]message.ToolDefinition(nil), s.frozenToolDefs...)
-	s.llmMu.RUnlock()
-	if toolDefs == nil || s.HasDeferredTools() {
-		toolDefs = llmToolDefinitionsFromVisibleTools(s.filteredVisibleTools())
-	}
 	messages = s.injectSessionContextReminder(messages)
 	llmClient, modelName := s.llmSnapshot()
 	if llmClient == nil {
@@ -1048,6 +1048,20 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 
 		preparationCtx, stopPreparation := (toolExecutionPipeline{executionGate: s.sessionExecutionGate()}).preparationContext(turn.Ctx)
 		defer stopPreparation()
+		if err := s.prepareMCPRequest(preparationCtx); err != nil {
+			select {
+			case s.llmCh <- &llmResult{err: err, turnID: turn.ID}:
+				resultQueued = true
+			case <-s.parentCtx.Done():
+			}
+			return
+		}
+		s.llmMu.RLock()
+		toolDefs := append([]message.ToolDefinition(nil), s.frozenToolDefs...)
+		s.llmMu.RUnlock()
+		if toolDefs == nil || s.HasDeferredTools() {
+			toolDefs = llmToolDefinitionsFromVisibleTools(s.filteredVisibleTools())
+		}
 		// Hook: on_before_llm_call (mirrors MainAgent.callLLM).
 		hookResult, hookErr := s.fireHook(preparationCtx, hook.OnBeforeLLMCall, turn.ID, map[string]any{
 			"model":         modelName,

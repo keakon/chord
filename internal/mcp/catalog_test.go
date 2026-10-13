@@ -22,7 +22,7 @@ func TestCatalogExecutionBoundary(t *testing.T) {
 
 	ctx := context.Background()
 	cfg := ServerConfig{Name: "manual-srv", URL: "https://mcp.test/mcp", Manual: true}
-	mgr := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets([]ServerConfig{cfg}), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		c := NewClientWithInfo("manual-srv", ft, testClientInfo)
 		return c, c.Initialize(ctx)
@@ -32,7 +32,8 @@ func TestCatalogExecutionBoundary(t *testing.T) {
 		t.Fatal("manual server should default to disabled")
 	}
 
-	if err := mgr.ConnectOne(ctx, cfg); err != nil {
+	cat.SetDesiredEnabled("manual-srv", true)
+	if err := mgr.ConnectOne(ctx, testTarget(cfg)); err != nil {
 		t.Fatalf("ConnectOne: %v", err)
 	}
 	tools, err := cat.DiscoverAllTools(ctx)
@@ -43,6 +44,7 @@ func TestCatalogExecutionBoundary(t *testing.T) {
 		t.Fatalf("discovered %d tools, want 1", len(tools))
 	}
 
+	cat.SetDesiredEnabled("manual-srv", false)
 	before := ft.requestCount()
 	if _, err := tools[0].Execute(ctx, json.RawMessage(`{"msg":"x"}`)); err == nil || !strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("disabled execute error = %v, want disabled error", err)
@@ -52,11 +54,14 @@ func TestCatalogExecutionBoundary(t *testing.T) {
 	}
 
 	cat.SetDesiredEnabled("manual-srv", true)
+	if err := mgr.ConnectOne(ctx, testTarget(cfg)); err != nil {
+		t.Fatal(err)
+	}
 	if got, err := tools[0].Execute(ctx, json.RawMessage(`{"msg":"x"}`)); err != nil || got != "ok" {
 		t.Fatalf("enabled execute = (%q, %v), want (ok, nil)", got, err)
 	}
 
-	mgr.Disconnect("manual-srv")
+	mgr.RetireConnection("manual-srv", RetireReconnect)
 	if _, err := tools[0].Execute(ctx, json.RawMessage(`{"msg":"x"}`)); err == nil || !strings.Contains(err.Error(), "not connected") {
 		t.Fatalf("disconnected execute error = %v, want not connected", err)
 	}
@@ -78,11 +83,11 @@ func TestCatalogExecutionBoundary(t *testing.T) {
 
 // TestCatalogEnabledServerNames tracks only explicitly enabled manual servers.
 func TestCatalogEnabledServerNames(t *testing.T) {
-	mgr := NewPendingManagerWithClientInfo([]ServerConfig{
+	mgr := NewPendingManagerWithClientInfo(testTargets([]ServerConfig{
 		{Name: "auto", URL: "https://mcp.test/mcp"},
 		{Name: "manual-a", URL: "https://mcp.test/mcp", Manual: true},
 		{Name: "manual-b", URL: "https://mcp.test/mcp", Manual: true},
-	}, testClientInfo)
+	}), testClientInfo, nil)
 	cat := NewCatalog(mgr)
 	if got := cat.EnabledServerNames(); len(got) != 0 {
 		t.Fatalf("EnabledServerNames = %v, want empty", got)

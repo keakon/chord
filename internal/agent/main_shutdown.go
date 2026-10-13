@@ -24,6 +24,7 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	// Close startup admission before any cleanup. An already-admitted Run is
 	// waited on below, even when it has not initialized its Question state yet.
 	a.closeRunAdmission()
+	a.stopMCPAuthorizations()
 	log.Infof("agent shutting down instance=%v timeout=%v", a.instanceID, timeout)
 	// Cancel in-flight memory extraction and flush the usage ledger. Shutdown
 	// never starts new extraction and never waits on an in-flight one.
@@ -79,22 +80,23 @@ func (a *MainAgent) Shutdown(timeout time.Duration) error {
 	// shortly after Shutdown's budget expires.
 	defer a.closeSubAgentMCPServersAfterRun()
 
-	compactionDrained := true
+	backgroundDrained := true
 	if wait := remaining(); wait > 0 {
 		done := make(chan struct{})
 		go func() {
+			a.mcpAuthWg.Wait()
 			a.compactionWg.Wait()
 			close(done)
 		}()
 		select {
 		case <-done:
 		case <-time.After(wait):
-			compactionDrained = false
+			backgroundDrained = false
 		}
 	} else {
-		compactionDrained = false
+		backgroundDrained = false
 	}
-	if !compactionDrained {
+	if !backgroundDrained {
 		return a.shutdownTimeoutError(timeout)
 	}
 
@@ -257,14 +259,16 @@ func (a *MainAgent) cancelActiveWork() {
 // explicitly.
 func (a *MainAgent) closeSubAgentMCPServers() {
 	a.mcpServerCacheMu.Lock()
-	defer a.mcpServerCacheMu.Unlock()
-	for name, entry := range a.mcpServerCache {
+	entries := a.mcpServerCache
+	a.mcpServerCache = nil
+	a.mcpRuntimeGeneration++
+	a.mcpServerCacheMu.Unlock()
+	for name, entry := range entries {
 		if entry.Mgr != nil {
 			log.Infof("closing subagent MCP server server=%v", name)
 			entry.Mgr.Close()
 		}
 	}
-	a.mcpServerCache = nil
 }
 
 func (a *MainAgent) closeSubAgentMCPServersAfterRun() {

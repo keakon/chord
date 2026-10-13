@@ -10,8 +10,10 @@ func ServerConfigsFromConfig(mc config.MCPConfig) []ServerConfig {
 	}
 	configs := make([]ServerConfig, 0, len(mc))
 	for name, sc := range mc {
-		configs = append(configs, ServerConfig{
+		configs = append(configs, cloneServerConfig(ServerConfig{
 			Name:         name,
+			Auth:         sc.Auth,
+			OAuth:        sc.OAuth,
 			Command:      sc.Command,
 			Args:         sc.Args,
 			Env:          sc.Env,
@@ -20,7 +22,7 @@ func ServerConfigsFromConfig(mc config.MCPConfig) []ServerConfig {
 			AllowedTools: sc.AllowedTools,
 			Manual:       sc.Manual,
 			Deferred:     sc.Deferred,
-		})
+		}))
 	}
 	return configs
 }

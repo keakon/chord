@@ -20,69 +20,96 @@ import (
 type Catalog struct {
 	mgr *Manager
 
-	mu          sync.RWMutex
+	cacheMu     sync.RWMutex
 	desired     map[string]struct{}
 	serverTools map[string][]tools.Tool
 }
 
 // NewCatalog creates a catalog for the given connection manager.
 func NewCatalog(mgr *Manager) *Catalog {
-	return &Catalog{
-		mgr:         mgr,
-		desired:     make(map[string]struct{}),
-		serverTools: make(map[string][]tools.Tool),
+	if mgr == nil {
+		mgr = NewPendingManagerWithClientInfo(nil, ClientInfo{}, nil)
 	}
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	if mgr.catalog != nil {
+		return mgr.catalog
+	}
+	c := &Catalog{mgr: mgr, desired: make(map[string]struct{}), serverTools: make(map[string][]tools.Tool)}
+	mgr.catalog = c
+	return c
 }
 
-// SetDesiredEnabled records the durable user/resume intent for a manual server.
-// It does not connect or disconnect anything.
+// SetDesiredEnabled changes admission intent and retires the previous
+// connection atomically. An admitted call retains its lease until it finishes.
 func (c *Catalog) SetDesiredEnabled(server string, enabled bool) {
-	server = strings.TrimSpace(server)
-	if server == "" {
+	c.SetDesiredEnabledBatch(map[string]bool{server: enabled})
+}
+
+// SetDesiredEnabledBatch gives a session intent update one admission boundary.
+func (c *Catalog) SetDesiredEnabledBatch(desired map[string]bool) {
+	if c == nil || c.mgr == nil {
 		return
 	}
-	if c.mgr != nil && !c.mgr.IsManualServer(server) {
-		return
+	m := c.mgr
+	m.mu.Lock()
+	var clients []*Client
+	changed := false
+	for server, enabled := range desired {
+		server = strings.TrimSpace(server)
+		entry := m.entries[server]
+		if entry == nil || !entry.target.Config.Manual {
+			continue
+		}
+		_, old := c.desired[server]
+		if old == enabled {
+			continue
+		}
+		if enabled {
+			c.desired[server] = struct{}{}
+		} else {
+			delete(c.desired, server)
+		}
+		reason := RetireReconnect
+		if !enabled {
+			reason = RetireDisabled
+		}
+		if client := m.retireLocked(server, reason); client != nil {
+			clients = append(clients, client)
+		}
+		changed = true
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.desired == nil {
-		c.desired = make(map[string]struct{})
+	if changed {
+		m.version++
 	}
-	if enabled {
-		c.desired[server] = struct{}{}
-	} else {
-		delete(c.desired, server)
+	m.mu.Unlock()
+	for _, client := range clients {
+		closeMCPClient(client)
+	}
+	if changed {
+		m.publish()
 	}
 }
 
-// DesiredEnabled reports whether server should currently be enabled. Manual
-// servers default to disabled until explicitly enabled; automatic servers are
-// always enabled.
 func (c *Catalog) DesiredEnabled(server string) bool {
-	server = strings.TrimSpace(server)
-	if server == "" {
+	if c == nil || c.mgr == nil {
 		return false
 	}
-	c.mu.RLock()
-	_, enabled := c.desired[server]
-	c.mu.RUnlock()
-	if enabled {
-		return true
-	}
-	return c.mgr == nil || !c.mgr.IsManualServer(server)
+	c.mgr.mu.RLock()
+	defer c.mgr.mu.RUnlock()
+	return c.mgr.desiredLocked(strings.TrimSpace(server))
 }
 
-// EnabledServerNames returns the sorted names of manual servers whose desired
-// state is enabled. Automatic servers are intentionally excluded: their intent
-// is config-driven and never persisted.
 func (c *Catalog) EnabledServerNames() []string {
-	c.mu.RLock()
+	if c == nil || c.mgr == nil {
+		return nil
+	}
+	c.mgr.mu.RLock()
 	names := make([]string, 0, len(c.desired))
 	for name := range c.desired {
 		names = append(names, name)
 	}
-	c.mu.RUnlock()
+	c.mgr.mu.RUnlock()
 	sort.Strings(names)
 	return names
 }
@@ -91,20 +118,20 @@ func (c *Catalog) rememberServerTools(server string, serverTools []tools.Tool) {
 	if c == nil || server == "" || len(serverTools) == 0 {
 		return
 	}
-	c.mu.Lock()
+	c.cacheMu.Lock()
 	if c.serverTools == nil {
 		c.serverTools = make(map[string][]tools.Tool)
 	}
 	c.serverTools[server] = append([]tools.Tool(nil), serverTools...)
-	c.mu.Unlock()
+	c.cacheMu.Unlock()
 }
 
 func (c *Catalog) cachedServerTools(server string) []tools.Tool {
 	if c == nil {
 		return nil
 	}
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.cacheMu.RLock()
+	defer c.cacheMu.RUnlock()
 	return append([]tools.Tool(nil), c.serverTools[server]...)
 }
 
@@ -127,6 +154,8 @@ type ExecutionHandle struct {
 	client     *Client  // static client when mgr == nil (direct-client path)
 	serverName string
 	remoteName string
+	identity   HandleIdentity
+	schemaHash string
 }
 
 // Call invokes the remote tool through the current connection, enforcing
@@ -137,20 +166,20 @@ func (h *ExecutionHandle) Call(ctx context.Context, args json.RawMessage) (strin
 	if h == nil {
 		return "", nil, fmt.Errorf("MCP tool: execution handle unavailable")
 	}
-	if h.catalog != nil && !h.catalog.DesiredEnabled(h.serverName) {
-		return "", nil, fmt.Errorf("MCP server %q is disabled", h.serverName)
-	}
-	client := h.client
 	if h.mgr != nil {
-		client = h.mgr.Client(h.serverName)
-		if client == nil {
-			return "", nil, fmt.Errorf("MCP server %q is not connected", h.serverName)
+		lease, err := h.mgr.AcquireTool(h.identity, h.remoteName, h.schemaHash)
+		if err != nil {
+			return "", nil, newTransportFailure(err.Error(), SendNotSent, err)
 		}
-		if !h.mgr.ToolAllowed(h.serverName, h.remoteName) {
-			return "", nil, fmt.Errorf("MCP tool %s/%s is not allowed", h.serverName, h.remoteName)
-		}
-	} else if client == nil {
+		defer lease.Release()
+		callCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(h.mgr.ctx, cancel)
+		defer stop()
+		defer cancel()
+		return lease.Client.CallTool(callCtx, h.remoteName, args)
+	}
+	if h.client == nil {
 		return "", nil, fmt.Errorf("MCP server %q is not connected", h.serverName)
 	}
-	return client.CallTool(ctx, h.remoteName, args)
+	return h.client.CallTool(ctx, h.remoteName, args)
 }

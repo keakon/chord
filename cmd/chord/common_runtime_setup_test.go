@@ -245,12 +245,12 @@ func TestStartRuntimeMCPManualServerMarksDiscoveryReady(t *testing.T) {
 	ac.Cancel = cancel
 	ac.Registry = tools.NewRegistry()
 	ac.Cfg = &config.Config{}
-	mgr, err := mcp.NewManagerWithClientInfo(context.Background(), nil, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	mgr, err := mcp.NewManagerWithClientInfo(context.Background(), testMCPTargets(nil), mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}
 	ac.MCPMgr = mgr
-	ac.MCPConfigs = []mcp.ServerConfig{{Name: "manual", Manual: true}}
+	ac.MCPTargets = testMCPTargets([]mcp.ServerConfig{{Name: "manual", Manual: true}})
 
 	startRuntimeMCP(ac)
 
@@ -336,12 +336,12 @@ func TestRestoreMCPIntentReconcilesManualServers(t *testing.T) {
 	if err := recovery.SetMCPEnabledServers(ac.SessionDir, []string{"manual-a"}); err != nil {
 		t.Fatalf("seed meta: %v", err)
 	}
-	ac.MCPConfigs = []mcp.ServerConfig{
+	ac.MCPTargets = testMCPTargets([]mcp.ServerConfig{
 		{Name: "auto"},
 		{Name: "manual-a", Manual: true},
 		{Name: "manual-b", Manual: true},
-	}
-	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPConfigs, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	})
+	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPTargets, mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
 	// Simulate manual-b already connected/desired from a previous session.
 	ac.MCPCatalog.SetDesiredEnabled("manual-b", true)
@@ -367,8 +367,8 @@ func TestRestoreMCPIntentKeepsIntentOnConnectFailure(t *testing.T) {
 	}
 	// No Command/URL: ConnectOne fails immediately, but the desired intent must
 	// survive so a later retry can succeed.
-	ac.MCPConfigs = []mcp.ServerConfig{{Name: "manual-a", Manual: true}}
-	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPConfigs, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	ac.MCPTargets = testMCPTargets([]mcp.ServerConfig{{Name: "manual-a", Manual: true}})
+	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPTargets, mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
 
 	if err := restoreMCPIntent(context.Background(), ac); err != nil {
@@ -387,8 +387,8 @@ func TestLoadSynchronousMCPStateRestoresManualIntent(t *testing.T) {
 	if err := recovery.SetMCPEnabledServers(ac.SessionDir, []string{"manual-a"}); err != nil {
 		t.Fatalf("seed meta: %v", err)
 	}
-	ac.MCPConfigs = []mcp.ServerConfig{{Name: "manual-a", Manual: true}}
-	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPConfigs, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	ac.MCPTargets = testMCPTargets([]mcp.ServerConfig{{Name: "manual-a", Manual: true}})
+	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPTargets, mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
 
 	result, err := loadSynchronousMCPState(context.Background(), ac)
@@ -408,8 +408,8 @@ func TestRestoreMCPIntentReadFailureKeepsCurrentState(t *testing.T) {
 	if err := recovery.SaveSessionMeta(ac.SessionDir, recovery.SessionMeta{MCPEnabledServers: []string{"manual-a"}}); err != nil {
 		t.Fatalf("seed meta: %v", err)
 	}
-	ac.MCPConfigs = []mcp.ServerConfig{{Name: "manual-a", Manual: true}}
-	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPConfigs, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	ac.MCPTargets = testMCPTargets([]mcp.ServerConfig{{Name: "manual-a", Manual: true}})
+	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPTargets, mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
 	ac.MCPCatalog.SetDesiredEnabled("manual-a", true)
 	if err := os.WriteFile(filepath.Join(ac.SessionDir, "session-meta.json"), []byte("{"), 0o600); err != nil {
@@ -444,11 +444,11 @@ func TestRuntimeMCPControlUsesSessionMetadataInsteadOfSharedCatalog(t *testing.T
 	if err := recovery.SetMCPEnabledServers(ac.SessionDir, []string{"manual-existing"}); err != nil {
 		t.Fatalf("seed session metadata: %v", err)
 	}
-	ac.MCPConfigs = []mcp.ServerConfig{
+	ac.MCPTargets = testMCPTargets([]mcp.ServerConfig{
 		{Name: "manual-existing", Manual: true},
 		{Name: "manual-new", Manual: true},
-	}
-	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPConfigs, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	})
+	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPTargets, mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
 
 	_, err := controlRuntimeMCP(context.Background(), ac, agent.MCPControlRequest{
@@ -476,12 +476,12 @@ func TestRuntimeMCPControlForStaleSessionDoesNotMutateActiveRuntime(t *testing.T
 	if err := recovery.SetMCPEnabledServers(ac.MainAgent.SessionDir(), []string{"manual-active"}); err != nil {
 		t.Fatalf("seed active session metadata: %v", err)
 	}
-	ac.MCPConfigs = []mcp.ServerConfig{
+	ac.MCPTargets = testMCPTargets([]mcp.ServerConfig{
 		{Name: "manual-old", Manual: true},
 		{Name: "manual-new", Manual: true},
 		{Name: "manual-active", Manual: true},
-	}
-	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPConfigs, mcp.ClientInfo{Name: "chord-test", Version: "test"})
+	})
+	ac.MCPMgr = mcp.NewPendingManagerWithClientInfo(ac.MCPTargets, mcp.ClientInfo{Name: "chord-test", Version: "test"}, nil)
 	ac.MCPCatalog = mcp.NewCatalog(ac.MCPMgr)
 
 	result, err := controlRuntimeMCP(context.Background(), ac, agent.MCPControlRequest{

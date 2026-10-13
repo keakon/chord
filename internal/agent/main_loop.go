@@ -76,12 +76,14 @@ func (a *MainAgent) Run(ctx context.Context) error {
 		// 1. Signal interactive senders to stop.
 		a.signalStopping()
 		a.stopQuestionWork()
+		a.stopMCPAuthorizations()
 		a.cancelMemoryOrganization()
 		// 2. Wait for ConfirmFunc/QuestionFunc goroutines to exit.
 		a.toolWg.Wait()
 		// 3. Wait for async TUI producers (for example, main LLM goroutines) to
 		// finish any cancellation/flush work before closing outputCh.
 		a.outputWg.Wait()
+		a.mcpAuthWg.Wait()
 		// 4. Now safe to close outputCh (all producers stopped).
 		a.outputMu.Lock()
 		a.outputClosed.Store(true)
@@ -184,11 +186,18 @@ func (a *MainAgent) dispatch(evt Event) {
 			return
 		}
 		a.cancelMemoryOrganization()
+		a.cancelMCPAuthorizations()
 		a.handleSessionControlEvent(evt)
 	case EventModelPoolSwitch:
 		a.handleModelPoolSwitchEvent(evt)
 	case EventNativeReceipt:
 		a.handleNativeReceipt(evt)
+	case EventMCPAuthControl:
+		a.handleMCPAuthControlEvent(evt)
+	case EventMCPAuthProgress:
+		a.handleMCPAuthProgressEvent(evt)
+	case EventMCPAuthDone:
+		a.handleMCPAuthDoneEvent(evt)
 	case EventMCPControl:
 		a.handleMCPControlEvent(evt)
 	case EventMCPControlDone:

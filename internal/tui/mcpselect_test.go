@@ -135,9 +135,10 @@ func TestMCPSelectDispatchRejectsAutoServerWithoutSendingCommand(t *testing.T) {
 		t.Fatal("expected MCP overlay list")
 	}
 
-	// OverlayList normally keeps the cursor on selectable items; force the
-	// cursor onto an auto/read-only item to verify dispatch itself rejects it.
-	m.mcpSelect.selector.list.cursor = 0
+	// Automatic servers remain selectable for diagnostics, but cannot toggle.
+	if name, ok := m.mcpSelectCurrent(); !ok || name != "alpha" {
+		t.Fatalf("automatic server is not selectable: %q, %v", name, ok)
+	}
 	cmd := m.mcpSelectDispatch(agent.MCPControlEnable)
 	if cmd == nil {
 		t.Fatal("expected read-only MCP selection to return toast command")
@@ -199,8 +200,8 @@ func TestMouseClickMCPSelectReadOnlyItemDoesNotToggleNeighbor(t *testing.T) {
 	if !ok {
 		t.Fatal("expected MCP selection to remain available")
 	}
-	if selected.ID != "beta" {
-		t.Fatalf("selected MCP item after read-only click = %q, want %q", selected.ID, "beta")
+	if selected.ID != "alpha" {
+		t.Fatalf("selected MCP item after read-only click = %q, want %q", selected.ID, "alpha")
 	}
 }
 

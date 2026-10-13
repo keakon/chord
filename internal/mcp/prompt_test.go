@@ -18,12 +18,12 @@ func TestConnectedServersPromptBlockFiltersAllowedTools(t *testing.T) {
 		},
 	})
 	cfgs := []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp", AllowedTools: []string{"alpha_tool", "beta_tool"}}}
-	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets(cfgs), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		client := NewClientWithInfo("search", ft, testClientInfo)
 		return client, client.Initialize(ctx)
 	}
-	mgr.ConnectAll(ctx, cfgs)
+	mgr.ConnectAll(ctx, testTargets(cfgs))
 
 	block := ConnectedServersPromptBlock(ctx, mgr)
 	if !strings.Contains(block, "available in this role") || strings.Contains(block, "servers are connected") {

@@ -336,11 +336,51 @@ Chord 可选的跨会话项目记忆（稳定的偏好、项目事实与可复�
 
 按 `Ctrl+O` 打开 MCP server 选择器。它会列出已配置的 MCP server、连接状态，以及手动 server 当前是否启用/禁用。可用 `j` / `k` 移动，`Enter` 切换当前手动 server，`e` 启用，`d` 禁用，`Esc` 关闭。
 
-Agent 运行中也可以打开选择器查看 MCP 状态，不需要等待当前 turn 结束。启用 / 禁用操作在运行中也允许执行，但会延迟生效：当前正在进行的请求继续使用它启动时的 MCP 工具表面和 prompt，变化后的 MCP 状态会在下一次 LLM 请求中体现。自动启动的 MCP server 在选择器中始终只读；只有配置了 `manual: true` 的 server 才能在运行时切换状态。
+Agent 运行中也可以打开选择器查看 MCP 状态，不需要等待当前 turn 结束。启用 / 禁用操作在运行中也允许执行，但会延迟生效：当前正在进行的请求继续使用它启动时的 MCP 工具表面和 prompt，变化后的 MCP 状态会在下一次 LLM 请求中体现。只有配置了 `manual: true` 的 server 才能切换启用状态；自动启动的服务也可以在详情中执行认证和重连操作。
 
 询问代理能用哪些 MCP 工具时，回答范围是当前角色可见的工具，不代表所有已连接服务器。查看连接状态请用选择器或 `/mcp status`。
 
 外部文件、网页、命令输出、图片以及 MCP 说明和结果只是参考数据，不能自行授权修改任务或执行命令。主代理和子代理的指引都明确了这一点，但提示词不是安全沙箱：仍应谨慎配置工具权限，并审查敏感操作。
+
+### MCP 登录与连接诊断
+
+HTTP MCP 服务支持授权码与 PKCE 登录。默认 `auth: auto` 优先使用静态 `Authorization` 请求头；没有静态认证时，有已保存的凭证就使用凭证，否则先匿名连接。`auth: oauth` 要求先登录；`auth: none` 关闭托管 OAuth，但仍发送配置中的请求头。stdio 服务不使用 OAuth。
+
+```yaml
+mcp:
+  search:
+    url: https://mcp.example.com/mcp
+    auth: oauth
+    oauth:
+      issuer: https://auth.example.com
+      client_id: sample-client
+      token_endpoint_auth_method: none
+      scopes: [files:read]
+      callback_port: 41937
+```
+
+`oauth` 块可以省略。配置 `client_id` 时必须同时配置服务端声明的 `issuer`。预注册的公开客户端使用 `none`；需要客户端密钥时使用 `client_secret_basic` 或 `client_secret_post`，并通过 `client_secret_env` 指定环境变量名。密钥只在交换或刷新令牌时读取。不要将托管 OAuth 配置与静态 `Authorization` 请求头混用。回调端口默认为 41937，显式设置时只能使用 1–65535。
+
+```sh
+chord mcp list
+chord mcp login search
+chord mcp login search --reauth
+chord mcp logout search
+chord doctor mcp search
+chord doctor mcp search --connect --json
+```
+
+加上 `--agent explorer` 可选择该角色可见的服务，包括角色私有服务。`list` 只查看本机凭证，不连接服务。doctor 默认也离线运行：检查配置、请求头的环境变量引用和凭证，不启动 stdio 服务、不创建凭证目录。`--connect` 使用临时连接完成初始化和工具目录检查，必要时刷新并确认凭证落盘，因此可能修改共享凭证文件；它不会注册客户端、打开浏览器或执行业务工具。退出码 0 表示成功，1 表示连接不可用或凭证问题，2 表示参数或配置错误。
+
+登录先保存凭证，再验证连接和完整工具目录。验证失败时保留凭证，并分别报告 `credential_saved: true` 和验证结果。`--reauth` 发起新授权，直到提交替换前仍保留原账号。`--no-browser` 打印登录链接后继续等待回调。登录和退出不会改变手动服务的启用状态；退出只删除本机登录信息，不撤销远端授权。
+
+在 MCP 选择器中按 `D` 打开详情，分别查看认证状态、正在执行的操作、连接、工具目录和所需 scope，并执行登录、重新授权、退出、重连或取消登录。关闭详情不会取消授权；需要取消时使用取消操作，或切换会话。也可输入 `/mcp login|logout|reconnect|status <server> [--agent <definition>]`，其中 `status` 可以省略服务名。自动启动的服务也支持认证和重连，但只有手动服务能切换启用状态。
+
+凭证保存在 `<config-home>/mcp/oauth/`，文件权限限制为当前用户。同一仓库的 worktree 共享登录；owner、endpoint 和 OAuth 客户端配置一致的服务别名也共享登录，退出会影响这些别名。不同仓库、角色私有 owner、issuer、client ID、认证方式或回调配置分别存储，每组只保留一个当前账号。修改 scope 或服务名称不会清除账号。遇到缺少 scope 的提示时可重新登录，授权请求会合并新增的 scope。OAuth 不改变工具权限规则，失败的业务调用也不会自动重放。
+
+自动注册优先使用授权服务器支持的客户端元数据，否则使用服务端提供的动态注册。客户端元数据方式固定使用回调端口 41937；端口被占用时，先结束冲突的登录，或改用预注册客户端并设置其它端口。通过 SSH 登录远程主机时，先转发回调端口，例如 `ssh -L 41937:127.0.0.1:41937 host`，再在本机浏览器打开终端打印的链接。Headless 和 gateway 只展示状态及宿主机登录指引，不在远端消息通道中发起浏览器授权。
+
+OAuth 发现与令牌请求直接访问公网 HTTPS 授权服务器，不使用环境代理；暂不支持私网授权服务器。只有用户直接配置的 loopback MCP 资源可使用 HTTP，此例外不适用于授权服务器。自定义 MCP 请求头只发送到 MCP endpoint，不会发往元数据或令牌端点。排查方法见 [MCP 一直未就绪](./troubleshooting_CN.md#mcp-一直未就绪)。
 
 ### `/export`：导出当前会话
 

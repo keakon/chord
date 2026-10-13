@@ -186,15 +186,15 @@ func applyInitialMCPPromptState(ac *AppContext, asyncMCP bool, mcpConfigured boo
 	if ac == nil || ac.MainAgent == nil {
 		return
 	}
-	if asyncMCP && len(ac.MCPConfigs) > 0 {
+	if asyncMCP && len(ac.MCPTargets) > 0 {
 		return
 	}
 	if mcpConfigured {
 		// Sync path: register main-agent server names as sentinels now that
 		// MainAgent exists, so SubAgents never reconnect them.
 		var names []string
-		for _, cfg := range ac.MCPConfigs {
-			names = append(names, cfg.Name)
+		for _, cfg := range ac.MCPTargets {
+			names = append(names, cfg.Config.Name)
 		}
 		ac.MainAgent.RegisterMainMCPServers(names)
 		ac.MainAgent.SetMCPServersPromptBlock(syncPromptBlock)

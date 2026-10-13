@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -327,25 +328,43 @@ const mcpMaxRedirects = 5
 
 // HTTPTransport communicates with an MCP server over HTTP.
 type HTTPTransport struct {
-	url     string
-	headers map[string]string // extra headers sent with every request
-	client  *http.Client
+	url                  string
+	headers              map[string]string // extra headers sent with every request
+	client               *http.Client
+	auth                 *AuthService
+	target               Target
+	expected             ExpectedIdentity
+	connectionGeneration uint64
+	onAuthResponse       func(context.Context, RequestStamp, error)
 
 	mu              sync.Mutex
 	sessionID       string
 	protocolVersion string
 }
 
-// NewHTTPTransport creates an HTTP-based transport for the given URL.
-// headers are sent with every request; protocol-managed headers
-// (Content-Type, Accept, Mcp-Session-Id, MCP-Protocol-Version) always take precedence.
-func NewHTTPTransport(endpoint string, headers map[string]string) *HTTPTransport {
+// HTTPTransportOptions fixes the connection identity while allowing a newer
+// token revision to be acquired immediately before each send.
+type HTTPTransportOptions struct {
+	Endpoint             string
+	Client               *http.Client
+	Headers              map[string]string
+	AuthService          *AuthService
+	Target               Target
+	ExpectedIdentity     ExpectedIdentity
+	ConnectionGeneration uint64
+}
+
+// NewHTTPTransport creates a connection-owned HTTP transport.
+func NewHTTPTransport(opts HTTPTransportOptions) *HTTPTransport {
 	t := &HTTPTransport{
-		url:     endpoint,
-		headers: headers,
-		client: &http.Client{
-			Timeout: 120 * time.Second,
-		},
+		url: opts.Endpoint, headers: maps.Clone(opts.Headers),
+		auth: opts.AuthService, target: opts.Target.Snapshot(), expected: opts.ExpectedIdentity,
+		connectionGeneration: opts.ConnectionGeneration,
+		client:               &http.Client{Timeout: 120 * time.Second},
+	}
+	if opts.Client != nil {
+		client := *opts.Client
+		t.client = &client
 	}
 	t.client.CheckRedirect = t.checkRedirect
 	return t
@@ -360,6 +379,9 @@ func NewHTTPTransport(endpoint string, headers map[string]string) *HTTPTransport
 // the headers, matching how Go itself scopes Authorization, and a stripped hop
 // fails loudly with the server's own auth error rather than silently.
 func (t *HTTPTransport) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) > 0 && via[0].Header.Get("Authorization") != "" && t.expected.BindingID != "" {
+		return http.ErrUseLastResponse
+	}
 	if len(via) >= mcpMaxRedirects {
 		return fmt.Errorf("mcp http: stopped after %d redirects", mcpMaxRedirects)
 	}
@@ -509,59 +531,71 @@ func readSSERPCResponse(body io.Reader, wantID int) (JSONRPCResponse, error) {
 func (t *HTTPTransport) Send(ctx context.Context, req JSONRPCRequest) (JSONRPCResponse, error) {
 	data, err := sonicjson.ConfigDefault.Marshal(req)
 	if err != nil {
-		return JSONRPCResponse{}, fmt.Errorf("mcp http: marshal request: %w", err)
+		return JSONRPCResponse{}, newTransportFailure("mcp http: cannot encode request", SendNotSent, err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(data))
 	if err != nil {
-		return JSONRPCResponse{}, fmt.Errorf("mcp http: create request: %w", err)
+		return JSONRPCResponse{}, newTransportFailure("mcp http: invalid request", SendNotSent, err)
 	}
-	t.applyHeaders(httpReq.Header)
-	t.applyProtocolHeaders(httpReq.Header)
-	t.applyConnectionHeaders(httpReq.Header)
+	stamp, err := t.prepareRequest(ctx, httpReq)
+	if err != nil {
+		return JSONRPCResponse{}, err
+	}
 
 	httpResp, err := t.client.Do(httpReq)
 	if err != nil {
-		return JSONRPCResponse{}, fmt.Errorf("mcp http: send request: %w", err)
+		evidence := SendOutcomeUnknown
+		if httpResp != nil {
+			evidence = SendResponseReceived
+		}
+		return JSONRPCResponse{}, newTransportFailure("mcp http: request failed", evidence, err)
 	}
 	defer httpResp.Body.Close()
 
-	t.rememberSession(httpResp.Header)
-
 	if httpResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
-		return JSONRPCResponse{}, fmt.Errorf("mcp http: server returned %d: %s", httpResp.StatusCode, string(body))
+		return JSONRPCResponse{}, t.observeResponse(ctx, httpResp, stamp, req.Method, req.Params)
 	}
 
-	return readJSONRPCResponse(httpResp.Body, httpResp.Header.Get("Content-Type"), req.ID)
+	resp, err := readJSONRPCResponse(httpResp.Body, httpResp.Header.Get("Content-Type"), req.ID)
+	if err != nil {
+		return JSONRPCResponse{}, newTransportFailure(httpInvalidProtocolSummary, SendResponseReceived, err)
+	}
+	if resp.Error == nil {
+		t.rememberSession(httpResp.Header)
+	}
+	return resp, nil
 }
 
 // Notify sends a JSON-RPC notification via HTTP POST (fire-and-forget).
 func (t *HTTPTransport) Notify(ctx context.Context, notif JSONRPCNotification) error {
 	data, err := sonicjson.ConfigDefault.Marshal(notif)
 	if err != nil {
-		return fmt.Errorf("mcp http: marshal notification: %w", err)
+		return newTransportFailure("mcp http: cannot encode notification", SendNotSent, err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(data))
 	if err != nil {
-		return fmt.Errorf("mcp http: create notification request: %w", err)
+		return newTransportFailure("mcp http: invalid notification request", SendNotSent, err)
 	}
-	t.applyHeaders(httpReq.Header)
-	t.applyProtocolHeaders(httpReq.Header)
-	t.applyConnectionHeaders(httpReq.Header)
+	stamp, err := t.prepareRequest(ctx, httpReq)
+	if err != nil {
+		return err
+	}
 
 	httpResp, err := t.client.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("mcp http: send notification: %w", err)
+		evidence := SendOutcomeUnknown
+		if httpResp != nil {
+			evidence = SendResponseReceived
+		}
+		return newTransportFailure("mcp http: notification failed", evidence, err)
 	}
 	defer httpResp.Body.Close()
-	t.rememberSession(httpResp.Header)
-
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 2048))
-		return fmt.Errorf("mcp http: notification returned %d: %s", httpResp.StatusCode, string(body))
+		return t.observeResponse(ctx, httpResp, stamp, notif.Method, notif.Params)
 	}
+	t.rememberSession(httpResp.Header)
 	_, _ = io.Copy(io.Discard, io.LimitReader(httpResp.Body, 1<<20))
 	return nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
@@ -102,6 +103,9 @@ const headlessHandoffCancelledReasonSuperseded = "superseded"
 
 // headlessState holds mutex-protected state for the headless protocol.
 type headlessState struct {
+	mcpRole        string
+	mcpSession     string
+	mcp            mcp.RuntimeSnapshot
 	mu             sync.Mutex
 	busy           bool
 	phase          string
@@ -397,33 +401,34 @@ type headlessCommand struct {
 
 // All available push event types that can be subscribed to.
 var headlessEventTypes = map[string]bool{
-	headlessImageResult:  true,
-	"activity":           true,
-	"assistant_message":  true,
-	"idle":               true,
-	"confirm_request":    true,
-	"question_request":   true,
-	"question_resolved":  true,
-	"question_updated":   true,
-	"role_change":        true,
-	"notification":       true,
-	"workdir_changed":    true,
-	"handoff_request":    true,
-	"handoff_cancelled":  true,
-	"error":              true,
-	"agent_started":      true,
-	"agent_notify":       true,
-	"agent_done":         true,
-	"info":               true,
-	"toast":              true,
-	"done_completion":    true,
-	"local_shell_result": true,
-	"assistant_rollback": true,
-	"todos":              true,
-	"compaction_status":  true,
-	"session_switched":   true,
-	"background_result":  true,
-	"context_notice":     true,
+	headlessImageResult:      true,
+	"activity":               true,
+	"assistant_message":      true,
+	"idle":                   true,
+	"confirm_request":        true,
+	"question_request":       true,
+	"question_resolved":      true,
+	"question_updated":       true,
+	"role_change":            true,
+	"notification":           true,
+	"workdir_changed":        true,
+	"handoff_request":        true,
+	"handoff_cancelled":      true,
+	"error":                  true,
+	"agent_started":          true,
+	"agent_notify":           true,
+	"agent_done":             true,
+	"info":                   true,
+	"toast":                  true,
+	"done_completion":        true,
+	"local_shell_result":     true,
+	"assistant_rollback":     true,
+	"todos":                  true,
+	"compaction_status":      true,
+	"session_switched":       true,
+	"background_result":      true,
+	"context_notice":         true,
+	headlessMCPStatusChanged: true,
 }
 
 // filterHeadlessEvent converts an AgentEvent to one or more headlessEnvelopes.
@@ -432,6 +437,15 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	var backend headlessBackend
 	if len(backends) > 0 {
 		backend = backends[0]
+	}
+
+	if status, ok := ev.(agent.MCPStatusChangedEvent); ok {
+		if provider, ok := backend.(headlessRoleBackend); ok && status.Role != "" && status.Role != provider.CurrentRole() {
+			return nil
+		}
+		if current := headlessBackendSessionID(backend); current != "" && status.SessionID != "" && current != status.SessionID {
+			return nil
+		}
 	}
 	// Handoff plan file IO and agent-option lookup stay outside state.mu: both
 	// can block while the event loop and command handlers contend on the lock.
@@ -467,6 +481,16 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 	}
 
 	switch e := ev.(type) {
+	case agent.MCPStatusChangedEvent:
+		if applyHeadlessMCPSnapshotLocked(state, e.Snapshot) {
+			state.mcpRole = e.Role
+			state.mcpSession = e.SessionID
+			touch()
+			if state.isSubscribed(headlessMCPStatusChanged) {
+				out = append(out, &headlessEnvelope{Type: headlessMCPStatusChanged, Payload: state.mcp.Clone()})
+			}
+		}
+
 	case agent.InputResultEvent:
 		// Correlated command replies are always delivered, independent of
 		// optional push subscriptions, and never clear an active turn.
@@ -602,6 +626,9 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		}
 		changed := state.lastBroadcastRole != role
 		touch()
+		if state.mcpRole != "" && state.mcpRole != role {
+			clearHeadlessMCPStateLocked(state)
+		}
 		state.role = role
 		if changed {
 			state.lastBroadcastRole = role
@@ -610,6 +637,9 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			out = append(out, &headlessEnvelope{Type: "role_change", Payload: map[string]string{
 				"role": role,
 			}})
+		}
+		if changed && state.mcpRole == role && state.isSubscribed(headlessMCPStatusChanged) {
+			out = append(out, &headlessEnvelope{Type: headlessMCPStatusChanged, Payload: state.mcp.Clone()})
 		}
 	case agent.NotificationEvent:
 		touch()
@@ -803,12 +833,18 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 			// either way there is nothing new to announce.
 			break
 		}
+		if state.mcpSession != "" && state.mcpSession != sessionID {
+			clearHeadlessMCPStateLocked(state)
+		}
 		state.sessionID = sessionID
 		state.questions = nil
 		if state.isSubscribed("session_switched") {
 			out = append(out, &headlessEnvelope{Type: "session_switched", Payload: map[string]any{
 				"session_id": sessionID, "runtime_id": state.runtimeID, "session_epoch": state.sessionEpoch, "workspace": state.workspace,
 			}})
+		}
+		if state.mcpSession == sessionID && state.isSubscribed(headlessMCPStatusChanged) {
+			out = append(out, &headlessEnvelope{Type: headlessMCPStatusChanged, Payload: state.mcp.Clone()})
 		}
 	case agent.WorkDirChangedEvent:
 		snapshot := headlessWorkDirSnapshot(backend)
@@ -1191,6 +1227,7 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 	go out.run()
 	// Release command admission on transport failure without consuming the
 	// error. Cleanup reads it after draining, including failures during close.
+	disableHeadlessMCPAuthorization(ac.MainAgent)
 	stopOutputCancellation := context.AfterFunc(out.ctx, ac.Cancel)
 	defer stopOutputCancellation()
 
@@ -1210,7 +1247,11 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 		}
 	}
 	sessionID := filepath.Base(ac.SessionDir)
-	state := &headlessState{sessionID: sessionID, workspace: ac.ContentRoot, workDir: headlessWorkDirSnapshot(rt.Backend()), updatedAt: time.Now()}
+	state := &headlessState{mcp: headlessMCPSnapshot(rt.Backend()), sessionID: sessionID, workspace: ac.ContentRoot, workDir: headlessWorkDirSnapshot(rt.Backend()), updatedAt: time.Now()}
+	state.mcpSession = sessionID
+	if ac.MainAgent != nil {
+		state.mcpRole = ac.MainAgent.CurrentRole()
+	}
 	if ac.ProjectLocator != nil {
 		state.workspace = ac.ProjectLocator.CanonicalRoot
 	}
@@ -1670,6 +1711,9 @@ func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend,
 		// dropped by version-comparing clients and never re-announced.
 		out.ordered(func() {
 			state.mu.Lock()
+			if state.mcpRole != "" && state.mcpRole != role {
+				clearHeadlessMCPStateLocked(state)
+			}
 			state.role = role
 			announce := state.lastBroadcastRole != role
 			if announce {
@@ -1689,9 +1733,17 @@ func handleHeadlessRoleCommand(cmd headlessCommand, backend headlessRoleBackend,
 					state.stampHeadlessSeq(true)
 				}
 			}
+			var mcpChange *headlessEnvelope
+			if announce && state.mcpRole == role && state.isSubscribed(headlessMCPStatusChanged) {
+				mcpChange = &headlessEnvelope{Type: headlessMCPStatusChanged, Payload: state.mcp.Clone()}
+				state.stampHeadlessSeq(true, mcpChange)
+			}
 			state.mu.Unlock()
 			if change != nil {
 				out.emit(change)
+			}
+			if mcpChange != nil {
+				out.emit(mcpChange)
 			}
 		})
 	default:
@@ -1747,6 +1799,8 @@ func emitHeadlessLocalShellResult(out *stdoutWriter, command, output string, err
 // handleHeadlessCommand processes a single command from stdin.
 func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *headlessState, out *stdoutWriter) {
 	switch cmd.Type {
+	case "mcp":
+		handleHeadlessMCPCommand(cmd, state, out)
 	case "image_artifact":
 		handleHeadlessImageArtifact(cmd, backend, out)
 	case "subscribe":
@@ -1817,6 +1871,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		updatedAt := state.updatedAt
 		workDir := state.workDir
 		workspace := state.workspace
+		mcpSnapshot := state.mcp.Clone()
 		runtimeID := state.runtimeID
 		sessionEpoch := state.sessionEpoch
 		seq := state.stampHeadlessSeq(workDirChanged)
@@ -1843,6 +1898,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 				"current_role":            currentRole,
 				"updated_at":              updatedAt.Format(time.RFC3339),
 				"workdir":                 headlessWorkDirPayload(workDir),
+				"mcp":                     mcpSnapshot,
 				"running_jobs":            headlessRunningJobs(backend),
 				"paused_inputs":           headlessPausedInputProjection(backend),
 			},
@@ -1861,6 +1917,10 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		emitHeadlessLocalShellResult(out, command, output, err)
 
 	case "send":
+		if isHeadlessMCPCommand(cmd.Content) {
+			handleHeadlessMCPCommand(cmd, state, out)
+			return
+		}
 		content := cmd.Content
 		if strings.TrimSpace(content) == "/models" {
 			content = "/models status"

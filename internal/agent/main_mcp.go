@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/keakon/chord/internal/mcp"
-	"github.com/keakon/chord/internal/tools"
 )
 
 func (a *MainAgent) handleMCPCommand(content string, busy ...bool) {
@@ -42,6 +39,15 @@ func (a *MainAgent) handleMCPCommand(content string, busy ...bool) {
 		return
 	}
 
+	if fields[0] == "login" || fields[0] == "reauth" || fields[0] == "logout" || fields[0] == "reconnect" || fields[0] == "cancel" || (fields[0] == "status" && len(fields) > 1) {
+		if err := a.handleMCPAuthCommand(fields); err != nil {
+			a.emitToTUI(ToastEvent{Level: "error", Message: err.Error()})
+		}
+		if !isBusy {
+			a.setIdleAndDrainPending()
+		}
+		return
+	}
 	switch fields[0] {
 	case "status":
 		a.emitToTUI(InfoEvent{Message: a.mcpStatusText()})
@@ -118,21 +124,4 @@ func (a *MainAgent) mcpStatusText() string {
 		b.WriteString(fmt.Sprintf("- %s: %s\n", r.Name, state))
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-// Keyed by MCP scope and server name. Entries whose Mgr is nil are sentinels
-// for servers inherited from top-level config. Agent-private entries are scoped
-// by agent definition so instances of one agent reuse a connection without
-// conflating same-named servers owned by different agents.
-type mcpServerEntry struct {
-	Mgr   *mcp.Manager // nil for main-agent servers (sentinel)
-	Tools []tools.Tool // nil for sentinel entries
-}
-
-func mainMCPServerCacheKey(serverName string) string {
-	return "main\x00" + serverName
-}
-
-func agentMCPServerCacheKey(agentName, serverName string) string {
-	return "agent\x00" + agentName + "\x00" + serverName
 }

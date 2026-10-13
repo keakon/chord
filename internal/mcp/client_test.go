@@ -40,7 +40,7 @@ type fakeTransport struct {
 
 func newFakeTransport() *fakeTransport {
 	return &fakeTransport{
-		responses: make(map[string]json.RawMessage),
+		responses: map[string]json.RawMessage{"tools/list": json.RawMessage(`{"tools":[]}`)},
 		sendErrs:  make(map[string][]error),
 	}
 }
@@ -335,11 +335,11 @@ func TestMCPTool_Interface(t *testing.T) {
 
 	ctx := context.Background()
 	cfgs := []ServerConfig{{Name: "test-server", URL: "https://mcp.test/mcp"}}
-	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets(cfgs), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		return NewClientWithInfo("test-server", ft, testClientInfo), nil
 	}
-	mgr.ConnectAll(ctx, cfgs)
+	mgr.ConnectAll(ctx, testTargets(cfgs))
 
 	discovered, err := DiscoverAllTools(ctx, mgr)
 	if err != nil {
@@ -382,11 +382,11 @@ func TestMCPTool_Execute(t *testing.T) {
 
 	ctx := context.Background()
 	cfgs := []ServerConfig{{Name: "test", URL: "https://mcp.test/mcp"}}
-	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets(cfgs), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		return NewClientWithInfo("test", ft, testClientInfo), nil
 	}
-	mgr.ConnectAll(ctx, cfgs)
+	mgr.ConnectAll(ctx, testTargets(cfgs))
 
 	discovered, _ := DiscoverAllTools(ctx, mgr)
 	tool := discovered[0]
@@ -412,11 +412,11 @@ func TestDiscoverAllToolsSkipsEmptyName(t *testing.T) {
 
 	ctx := context.Background()
 	cfgs := []ServerConfig{{Name: "test", URL: "https://mcp.test/mcp"}}
-	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets(cfgs), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		return NewClientWithInfo("test", ft, testClientInfo), nil
 	}
-	mgr.ConnectAll(ctx, cfgs)
+	mgr.ConnectAll(ctx, testTargets(cfgs))
 
 	tools, err := DiscoverAllTools(ctx, mgr)
 	if err != nil {
@@ -444,12 +444,12 @@ func TestDiscoverAllToolsFiltersAllowedTools(t *testing.T) {
 
 	ctx := context.Background()
 	cfgs := []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp", AllowedTools: []string{"alpha_tool", "beta_tool"}}}
-	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets(cfgs), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		client := NewClientWithInfo("search", ft, testClientInfo)
 		return client, client.Initialize(ctx)
 	}
-	mgr.ConnectAll(ctx, cfgs)
+	mgr.ConnectAll(ctx, testTargets(cfgs))
 
 	discovered, err := DiscoverAllTools(ctx, mgr)
 	if err != nil {
@@ -476,7 +476,7 @@ func TestDiscoverAllToolsFiltersAllowedTools(t *testing.T) {
 }
 
 func TestKnownRegisteredToolNamesUsesAllowedToolsBeforeDiscovery(t *testing.T) {
-	mgr := NewPendingManagerWithClientInfo([]ServerConfig{{Name: "search_api", Manual: true, AllowedTools: []string{"beta", "alpha"}}}, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets([]ServerConfig{{Name: "search_api", Manual: true, AllowedTools: []string{"beta", "alpha"}}}), testClientInfo, nil)
 	got := mgr.KnownRegisteredToolNames("search_api")
 	want := []string{"mcp_search_api_alpha", "mcp_search_api_beta"}
 	if !reflect.DeepEqual(got, want) {
@@ -496,12 +496,12 @@ func TestDiscoverAllToolsWithoutAllowedToolsKeepsAllTools(t *testing.T) {
 
 	ctx := context.Background()
 	cfgs := []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp"}}
-	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets(cfgs), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		client := NewClientWithInfo("search", ft, testClientInfo)
 		return client, client.Initialize(ctx)
 	}
-	mgr.ConnectAll(ctx, cfgs)
+	mgr.ConnectAll(ctx, testTargets(cfgs))
 
 	discovered, err := DiscoverAllTools(ctx, mgr)
 	if err != nil {
@@ -519,12 +519,12 @@ func TestDiscoverAllToolsUsesCachedDefinitionsOnRefreshFailure(t *testing.T) {
 
 	ctx := context.Background()
 	cfgs := []ServerConfig{{Name: "search", URL: "https://example.invalid/mcp"}}
-	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets(cfgs), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		client := NewClientWithInfo("search", ft, testClientInfo)
 		return client, client.Initialize(ctx)
 	}
-	mgr.ConnectAll(ctx, cfgs)
+	mgr.ConnectAll(ctx, testTargets(cfgs))
 	if tools, err := DiscoverAllTools(ctx, mgr); err != nil || len(tools) != 1 {
 		t.Fatalf("initial discovery = %#v, %v", tools, err)
 	}
@@ -548,12 +548,12 @@ func TestConnectAllRefreshesAllowedTools(t *testing.T) {
 
 	ctx := context.Background()
 	initialCfgs := []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp", AllowedTools: []string{"alpha_tool"}}}
-	mgr := NewPendingManagerWithClientInfo(initialCfgs, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets(initialCfgs), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		client := NewClientWithInfo("search", ft, testClientInfo)
 		return client, client.Initialize(ctx)
 	}
-	mgr.ConnectAll(ctx, []ServerConfig{{Name: "search", URL: "https://mcp.test/mcp", AllowedTools: []string{"beta_tool"}}})
+	mgr.ConnectAll(ctx, testTargets([]ServerConfig{{Name: "search", URL: "https://mcp.test/mcp", AllowedTools: []string{"beta_tool"}}}))
 
 	discovered, err := DiscoverAllTools(ctx, mgr)
 	if err != nil {
@@ -620,7 +620,7 @@ func TestHTTPTransport_Send(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	transport := NewHTTPTransport(server.URL, nil)
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: server.URL, Headers: nil})
 	client := NewClientWithInfo("http-test", transport, testClientInfo)
 	ctx := context.Background()
 
@@ -644,10 +644,10 @@ func TestHTTPTransportRejectsInvalidStringInResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	transport := NewHTTPTransport(server.URL, nil)
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: server.URL, Headers: nil})
 	_, err := transport.Send(context.Background(), JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "test"})
-	if err == nil || !strings.Contains(err.Error(), "decode response") {
-		t.Fatalf("Send error = %v, want decode response error", err)
+	if err == nil || DiagnoseHTTPError(err).ErrorClass != ErrorProtocol {
+		t.Fatalf("Send error = %v, want protocol error", err)
 	}
 }
 
@@ -684,7 +684,7 @@ func TestHTTPTransport_SSE_Stream(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	transport := NewHTTPTransport(server.URL, nil)
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: server.URL, Headers: nil})
 	client := NewClientWithInfo("sse-test", transport, testClientInfo)
 	ctx := context.Background()
 
@@ -721,7 +721,7 @@ func TestHTTPTransport_ContextCancellation(t *testing.T) {
 		server.Close()
 	}()
 
-	transport := NewHTTPTransport(server.URL, nil)
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: server.URL, Headers: nil})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -744,7 +744,7 @@ func TestHTTPTransport_ServerError(t *testing.T) {
 	server := httptest.NewServer(handler)
 	defer server.Close()
 
-	transport := NewHTTPTransport(server.URL, nil)
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: server.URL, Headers: nil})
 	ctx := context.Background()
 
 	_, err := transport.Send(ctx, JSONRPCRequest{
@@ -770,7 +770,7 @@ func TestManagerConnectAll_RetriesTransientInitializeErrorAndRecovers(t *testing
 	shortenConnectRetryBackoff(t)
 
 	cfg := ServerConfig{Name: "remote", URL: "https://mcp.test/mcp"}
-	mgr := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets([]ServerConfig{cfg}), testClientInfo, nil)
 
 	attempts := 0
 	mgr.newClientFactory = func(_ context.Context, cfg ServerConfig) (*Client, error) {
@@ -790,7 +790,7 @@ func TestManagerConnectAll_RetriesTransientInitializeErrorAndRecovers(t *testing
 		return NewClientWithInfo(cfg.Name, ft, testClientInfo), nil
 	}
 
-	mgr.ConnectAll(context.Background(), []ServerConfig{cfg})
+	mgr.ConnectAll(context.Background(), testTargets([]ServerConfig{cfg}))
 
 	if attempts != 2 {
 		fatalfAttempts(t, attempts, 2)
@@ -812,14 +812,14 @@ func TestManagerConnectAll_RetriesTransientInitializeErrorAndRecovers(t *testing
 
 func TestManagerConnectAll_CanceledInitializeStaysPending(t *testing.T) {
 	cfg := ServerConfig{Name: "remote", URL: "https://mcp.test/mcp"}
-	mgr := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets([]ServerConfig{cfg}), testClientInfo, nil)
 	mgr.newClientFactory = func(_ context.Context, cfg ServerConfig) (*Client, error) {
 		ft := newFakeTransport()
 		ft.onSendError("initialize", context.Canceled)
 		return NewClientWithInfo(cfg.Name, ft, testClientInfo), nil
 	}
 
-	mgr.ConnectAll(context.Background(), []ServerConfig{cfg})
+	mgr.ConnectAll(context.Background(), testTargets([]ServerConfig{cfg}))
 
 	if got := mgr.ServerNames(); len(got) != 0 {
 		t.Fatalf("ServerNames() = %v, want none", got)
@@ -840,7 +840,7 @@ func TestManagerConnectAll_FinalFailureStopsRetryingAndSetsError(t *testing.T) {
 	shortenConnectRetryBackoff(t)
 
 	cfg := ServerConfig{Name: "remote", URL: "https://mcp.test/mcp"}
-	mgr := NewPendingManagerWithClientInfo([]ServerConfig{cfg}, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets([]ServerConfig{cfg}), testClientInfo, nil)
 
 	attempts := 0
 	mgr.newClientFactory = func(_ context.Context, cfg ServerConfig) (*Client, error) {
@@ -851,7 +851,7 @@ func TestManagerConnectAll_FinalFailureStopsRetryingAndSetsError(t *testing.T) {
 		return NewClientWithInfo(cfg.Name, ft, testClientInfo), nil
 	}
 
-	mgr.ConnectAll(context.Background(), []ServerConfig{cfg})
+	mgr.ConnectAll(context.Background(), testTargets([]ServerConfig{cfg}))
 
 	if attempts != defaultConnectAttempts {
 		fatalfAttempts(t, attempts, defaultConnectAttempts)
@@ -866,34 +866,26 @@ func TestManagerConnectAll_FinalFailureStopsRetryingAndSetsError(t *testing.T) {
 	if status.Attempt != defaultConnectAttempts || status.MaxAttempts != defaultConnectAttempts {
 		t.Fatalf("attempts = %d/%d, want %d/%d", status.Attempt, status.MaxAttempts, defaultConnectAttempts, defaultConnectAttempts)
 	}
-	if !strings.Contains(status.Error, "TLS handshake timeout") {
-		t.Fatalf("final error = %q, want TLS handshake timeout", status.Error)
+	if status.Error != string(ErrorNetwork) {
+		t.Fatalf("final error = %q, want network class", status.Error)
 	}
 }
 
 func TestShouldRetryConnectErrorSkipsClientHTTPStatuses(t *testing.T) {
 	cfg := ServerConfig{Name: "remote", URL: "https://mcp.test/mcp"}
 	for _, status := range []int{400, 401, 403, 404} {
-		err := fmt.Errorf("mcp http: send request: server returned %d", status)
+		err := fmt.Errorf("connect: %w", &HTTPError{StatusCode: status})
 		if shouldRetryConnectError(err, cfg) {
 			t.Fatalf("shouldRetryConnectError(%d) = true, want false", status)
 		}
 	}
 }
 
-func TestExtractHTTPStatusFromError(t *testing.T) {
-	for _, tc := range []struct {
-		err  error
-		want int
-		ok   bool
-	}{
-		{err: fmt.Errorf("mcp http: send request: server returned 503"), want: 503, ok: true},
-		{err: &JSONRPCError{Code: 404, Message: "not found"}, want: 404, ok: true},
-		{err: fmt.Errorf("tls handshake timeout"), want: 0, ok: false},
-	} {
-		got, ok := extractHTTPStatusFromError(tc.err)
-		if got != tc.want || ok != tc.ok {
-			t.Fatalf("extractHTTPStatusFromError(%v) = (%d, %v), want (%d, %v)", tc.err, got, ok, tc.want, tc.ok)
+func TestShouldRetryConnectErrorDoesNotConfuseRPCWithHTTP(t *testing.T) {
+	cfg := ServerConfig{Name: "remote", URL: "https://example.invalid/mcp"}
+	for _, err := range []error{&JSONRPCError{Code: 401, Message: "denied"}, fmt.Errorf("server returned 401")} {
+		if !shouldRetryConnectError(err, cfg) {
+			t.Fatalf("untyped HTTP status must not suppress retries: %v", err)
 		}
 	}
 }
@@ -1027,12 +1019,12 @@ func TestFullWorkflow_FakeTransport(t *testing.T) {
 	ctx := context.Background()
 	client := NewClientWithInfo("test-server", ft, testClientInfo)
 	cfgs := []ServerConfig{{Name: "test-server", URL: "https://mcp.test/mcp"}}
-	mgr := NewPendingManagerWithClientInfo(cfgs, testClientInfo)
+	mgr := NewPendingManagerWithClientInfo(testTargets(cfgs), testClientInfo, nil)
 	mgr.newClientFactory = func(context.Context, ServerConfig) (*Client, error) {
 		return client, nil
 	}
 	// Step 1: ConnectAll performs the initialize handshake.
-	mgr.ConnectAll(ctx, cfgs)
+	mgr.ConnectAll(ctx, testTargets(cfgs))
 
 	// Step 2: Discover tools through the manager, as production does.
 	discovered, err := DiscoverAllTools(ctx, mgr)
@@ -1087,7 +1079,7 @@ func TestHTTPTransport_SendsCustomHeaders(t *testing.T) {
 	}))
 	defer server.Close()
 
-	transport := NewHTTPTransport(server.URL, map[string]string{"x-api-key": "test-key"})
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: server.URL, Headers: map[string]string{"x-api-key": "test-key"}})
 	if _, err := transport.Send(context.Background(), JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "test"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
@@ -1112,11 +1104,11 @@ func TestHTTPTransport_ProtocolHeadersOverrideUserConfig(t *testing.T) {
 	// A user-configured protocol-managed header must never leak onto the wire:
 	// before the server assigns a session there is no session id, so a stale
 	// user value would otherwise be sent on the initial request.
-	transport := NewHTTPTransport(server.URL, map[string]string{
+	transport := NewHTTPTransport(HTTPTransportOptions{Endpoint: server.URL, Headers: map[string]string{
 		"Mcp-Session-Id": "stale-value",
 		"Content-Type":   "text/plain",
 		"Accept":         "text/html",
-	})
+	}})
 	if _, err := transport.Send(context.Background(), JSONRPCRequest{JSONRPC: "2.0", ID: 1, Method: "test"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
