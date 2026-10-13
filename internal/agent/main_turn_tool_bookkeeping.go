@@ -184,6 +184,7 @@ func (t *Turn) appendStreamingToolCallInput(callID, name, fragment, agentID stri
 	if call.argsFragBuf == nil {
 		call.argsFragBuf = new(strings.Builder)
 	}
+	delete(t.streamingToolArgsReported, callID)
 	call.argsFragBuf.WriteString(fragment)
 	t.streamingToolCalls[callID] = call
 }
@@ -284,6 +285,7 @@ func (t *Turn) appendStreamingToolCallInputText(callID, name, fragment, agentID 
 	if call.inputTextBuf == nil {
 		call.inputTextBuf = new(strings.Builder)
 	}
+	delete(t.streamingToolArgsReported, callID)
 	call.inputTextBuf.WriteString(fragment)
 	call.inputArgsStale = true
 	t.streamingToolCalls[callID] = call
@@ -339,6 +341,7 @@ func (t *Turn) drainStreamingToolCalls() []PendingToolCall {
 	t.streamingToolCalls = nil
 	t.streamingToolOrder = nil
 	t.streamingToolEmitAt = nil
+	t.streamingToolArgsReported = nil
 	return out
 }
 
@@ -353,6 +356,7 @@ func (t *Turn) removeStreamingToolCall(callID string) {
 	}
 	delete(t.streamingToolCalls, callID)
 	delete(t.streamingToolEmitAt, callID)
+	delete(t.streamingToolArgsReported, callID)
 	for i, id := range t.streamingToolOrder {
 		if id == callID {
 			t.streamingToolOrder = append(t.streamingToolOrder[:i], t.streamingToolOrder[i+1:]...)
@@ -423,6 +427,56 @@ func (t *Turn) streamingToolCallsBefore(callID string) []PendingToolCall {
 		}
 	}
 	return out
+}
+
+// takeStreamingToolCallsAwaitingArgsReport returns earlier calls whose current
+// snapshot has not been reported at a call boundary. New fragments invalidate
+// that report; a later start never proves that an earlier call has ended.
+func (t *Turn) takeStreamingToolCallsAwaitingArgsReport(callID string) []PendingToolCall {
+	if t == nil || callID == "" {
+		return nil
+	}
+	t.streamingToolMu.Lock()
+	defer t.streamingToolMu.Unlock()
+	if len(t.streamingToolCalls) == 0 || len(t.streamingToolOrder) == 0 {
+		return nil
+	}
+	var out []PendingToolCall
+	for _, id := range t.streamingToolOrder {
+		if id == callID {
+			break
+		}
+		if _, reported := t.streamingToolArgsReported[id]; reported {
+			continue
+		}
+		call, ok := t.streamingToolCalls[id]
+		if !ok {
+			continue
+		}
+		materializeStreamingToolCallArgsLocked(&call)
+		t.streamingToolCalls[id] = call
+		if t.streamingToolArgsReported == nil {
+			t.streamingToolArgsReported = make(map[string]struct{})
+		}
+		t.streamingToolArgsReported[id] = struct{}{}
+		out = append(out, call)
+	}
+	return out
+}
+
+// markStreamingToolArgsReported records that callID's complete arguments were
+// already delivered to the UI as its args-end update, so a later call's start
+// does not send a duplicate snapshot.
+func (t *Turn) markStreamingToolArgsReported(callID string) {
+	if t == nil || callID == "" {
+		return
+	}
+	t.streamingToolMu.Lock()
+	defer t.streamingToolMu.Unlock()
+	if t.streamingToolArgsReported == nil {
+		t.streamingToolArgsReported = make(map[string]struct{})
+	}
+	t.streamingToolArgsReported[callID] = struct{}{}
 }
 
 // streamTurnID returns t.ID for tagging streamed deltas, tolerating a nil turn

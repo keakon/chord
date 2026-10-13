@@ -755,6 +755,82 @@ func TestStreamToolArgsUpdatesCoalesceToFlushCadence(t *testing.T) {
 	}
 }
 
+func TestStreamToolStartFlushesEarlierSnapshotWithoutCompletion(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	var events []AgentEvent
+	reducer := streamToolDeltaReducer{turn: turn, emit: func(evt AgentEvent) { events = append(events, evt) }}
+	start := func(id string) {
+		reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: id, Name: tools.NameRead}})
+	}
+	delta := func(text string) {
+		reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "first", Name: tools.NameRead, Input: text}})
+	}
+	start("first")
+	delta(`{"path":"`)
+	events = nil
+	start("second")
+	if len(events) != 2 {
+		t.Fatalf("events = %#v", events)
+	}
+	update, ok := events[0].(ToolCallUpdateEvent)
+	if !ok || update.ArgsStreamingDone || update.ArgsJSON != `{"path":"` {
+		t.Fatalf("snapshot = %#v", events[0])
+	}
+	// A resumed stream invalidates the previously flushed snapshot.
+	delta(`sample.txt"}`)
+	events = nil
+	start("third")
+	update, ok = events[0].(ToolCallUpdateEvent)
+	if !ok || update.ArgsStreamingDone || update.ArgsJSON != `{"path":"sample.txt"}` {
+		t.Fatalf("resumed snapshot = %#v", events[0])
+	}
+	events = nil
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: "first", Name: tools.NameRead}})
+	update, ok = events[0].(ToolCallUpdateEvent)
+	if !ok || !update.ArgsStreamingDone || update.ArgsJSON != `{"path":"sample.txt"}` {
+		t.Fatalf("final snapshot = %#v", events[0])
+	}
+}
+
+// A call whose args-end already carried the authoritative snapshot must not be
+// reported a second time by a later call's start.
+func TestStreamToolArgsEndSuppressesLaterReport(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	var events []AgentEvent
+	reducer := streamToolDeltaReducer{turn: turn, emit: func(evt AgentEvent) { events = append(events, evt) }}
+
+	const (
+		firstID   = "call-ended"
+		secondID  = "call-next"
+		firstArgs = `{"path":"internal/config/remote_control.go"}`
+	)
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: firstID, Name: tools.NameRead}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: firstID, Name: tools.NameRead, Input: firstArgs}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseEnd, ToolCall: &message.ToolCallDelta{ID: firstID, Name: tools.NameRead}})
+	reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseStart, ToolCall: &message.ToolCallDelta{ID: secondID, Name: tools.NameRead}})
+
+	secondStartIdx := -1
+	reports := 0
+	for i, evt := range events {
+		switch typed := evt.(type) {
+		case ToolCallStartEvent:
+			if typed.ID == secondID {
+				secondStartIdx = i
+			}
+		case ToolCallUpdateEvent:
+			if typed.ID == firstID && typed.ArgsStreamingDone {
+				reports++
+				if i > secondStartIdx && secondStartIdx >= 0 {
+					t.Fatalf("args-end call %s reported again at %d after %s's start at %d", firstID, i, secondID, secondStartIdx)
+				}
+			}
+		}
+	}
+	if reports != 1 {
+		t.Fatalf("complete-args reports for %s = %d, want only its args-end", firstID, reports)
+	}
+}
+
 // BenchmarkStreamToolArgsReduceLarge guards the fragment accumulation path:// reducing a large streamed tool call must stay linear in the args size, not
 // re-send or re-copy the accumulated args per fragment.
 func BenchmarkStreamToolArgsReduceLarge(b *testing.B) {

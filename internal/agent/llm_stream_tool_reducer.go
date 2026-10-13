@@ -79,6 +79,7 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 		if seed := delta.ToolCall.Input; seed != "" {
 			r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, name, tools.StripZeroWidthFormat(seed), r.agentID)
 		}
+		r.reportEarlierStreamingToolArgs(delta.ToolCall.ID)
 	}
 	if r.emit != nil {
 		r.emit(ToolCallStartEvent{
@@ -89,6 +90,22 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 		})
 	}
 	r.maybeStartEarlySpeculativeTool(delta.ToolCall.ID)
+}
+
+// reportEarlierStreamingToolArgs flushes snapshots before a new call starts.
+// Calls may interleave, so only the provider's args-end marks them complete.
+func (r streamToolDeltaReducer) reportEarlierStreamingToolArgs(callID string) {
+	if r.turn == nil || r.emit == nil || callID == "" {
+		return
+	}
+	for _, call := range r.turn.takeStreamingToolCallsAwaitingArgsReport(callID) {
+		r.emit(ToolCallUpdateEvent{
+			ID:       call.CallID,
+			Name:     tools.NormalizeName(call.Name),
+			ArgsJSON: call.ArgsJSON,
+			AgentID:  r.agentID,
+		})
+	}
 }
 
 func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
@@ -260,6 +277,9 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 			AgentID:           r.agentID,
 		})
 	}
+	// This event is the call's authoritative args snapshot; a later call's start
+	// must not report it a second time.
+	r.turn.markStreamingToolArgsReported(callID)
 }
 
 func (r streamToolDeltaReducer) checkVisibleSpeculativeTool(name string) speculativeExecutionDecision {

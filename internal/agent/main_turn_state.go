@@ -57,6 +57,10 @@ type Turn struct {
 	// per-fragment ToolCallUpdateEvents coalesce to the flush cadence.
 	// Protected by streamingToolMu.
 	streamingToolEmitAt map[string]time.Time
+	// streamingToolArgsReported records snapshots delivered at args-end or a
+	// later call boundary. New fragments invalidate the corresponding entry.
+	// Protected by streamingToolMu.
+	streamingToolArgsReported map[string]struct{}
 	// permissionApprovals caches non-interactive allow decisions recorded by
 	// the speculative-reuse prefilter so the finalize path skips a second
 	// evaluation with identical inputs. Guarded by permissionApprovalsMu;

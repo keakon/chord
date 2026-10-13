@@ -34,7 +34,7 @@ func TestToolCallReceivingUsesStaticReceivingIcon(t *testing.T) {
 	}
 }
 
-func TestNewToolCallStartCompletesEarlierReceivingCard(t *testing.T) {
+func TestNewToolCallStartPreservesEarlierReceivingCard(t *testing.T) {
 	m := NewModelWithSize(nil, 96, 12)
 
 	// First call streams its arguments; the card shows the transient char count.
@@ -52,22 +52,14 @@ func TestNewToolCallStartCompletesEarlierReceivingCard(t *testing.T) {
 		t.Fatalf("expected transient char count on receiving card, got %+v", block1.ToolProgress)
 	}
 
-	// A second call starting streams implies the first call's arguments are
-	// complete (chat-completions deltas arrive in generation order).
+	// A second call may start before the first has received all its arguments.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID: "call-2", Name: "read", AgentID: "main", ArgsJSON: `{"path":"a.go"}`,
 	}})
-	if block1.ToolExecutionState != agent.ToolCallExecutionStateQueued {
-		t.Fatalf("call-1 state = %q, want queued after call-2 starts", block1.ToolExecutionState)
+	if block1.ToolExecutionState != agent.ToolCallExecutionStateReceiving || block1.ToolProgress == nil {
+		t.Fatal("later start completed the earlier argument stream")
 	}
-	if block1.ToolProgress != nil {
-		t.Fatalf("expected char count cleared after args complete, got %+v", block1.ToolProgress)
-	}
-	if joined := stripANSI(strings.Join(block1.Render(96, "●"), "\n")); strings.Contains(joined, "chars received") {
-		t.Fatalf("expected completed args to hide char count, got:\n%s", joined)
-	}
-
-	// The late ArgsStreamingDone update must not downgrade the queued state.
+	// Only the explicit args-end transitions the card to queued.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID: "call-1", Name: "shell", AgentID: "main", ArgsJSON: `{"command":"echo hi"}`, ArgsStreamingDone: true,
 	}})

@@ -13,6 +13,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - `apply_patch` previews show patch text and target paths when a model wraps freeform input in JSON, including while the input is streaming. Execution and history replay use the same unwrapped patch.
 - Fixed Question tool cards showing raw JSON during live updates; receipts and diagnostic notes now match their display after resuming a session.
 - Tool-result images and PDFs stay in the transcript when the current model cannot accept that input, so switching to a model that supports it still sees them; only the request to the incapable model omits them.
+- Tool cards refresh accumulated parameters when another call starts, so short calls no longer stay blank until the whole batch arrives. Interleaved calls remain in the receiving state until their own arguments finish.
 
 ## 0.8.2 - 2026-10-11
 

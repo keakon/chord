@@ -125,11 +125,7 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 	}
 }
 
-// Chat-completions providers emit no per-call args-end event, so a card is
-// completed by inference when a later call starts streaming. Body text must be
-// re-derived from the accumulated arguments then: streaming deltas are
-// throttled, so the card can otherwise stay pinned to its first partial frame.
-func TestInferredArgsCompleteRebuildsContentFromAccumulatedArgs(t *testing.T) {
+func TestLaterToolStartRefreshesArgsWithoutCompletingEarlierCall(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 12)
 
 	const first, full = `{"task":"invest`, `{"task":"investigate the delegate path"}`
@@ -148,7 +144,7 @@ func TestInferredArgsCompleteRebuildsContentFromAccumulatedArgs(t *testing.T) {
 		AgentID:  "",
 		ArgsJSON: full,
 	}})
-	// The next call's start is the only completion signal available.
+	// The next call flushes the preview but does not finish this stream.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID:       "call-inferred-b",
 		Name:     "delegate",
@@ -160,11 +156,11 @@ func TestInferredArgsCompleteRebuildsContentFromAccumulatedArgs(t *testing.T) {
 	if !ok {
 		t.Fatal("expected first delegate tool block")
 	}
-	if block.ToolExecutionState != agent.ToolCallExecutionStateQueued {
-		t.Fatalf("ToolExecutionState = %q, want %q", block.ToolExecutionState, agent.ToolCallExecutionStateQueued)
+	if block.ToolExecutionState != agent.ToolCallExecutionStateReceiving {
+		t.Fatalf("ToolExecutionState = %q, want %q", block.ToolExecutionState, agent.ToolCallExecutionStateReceiving)
 	}
 	if block.ToolQueuedByExecutionEvent {
-		t.Fatal("inferred completion must not earn the execution-queued badge")
+		t.Fatal("a snapshot must not earn the execution-queued badge")
 	}
 	if block.RawArgs != full {
 		t.Fatalf("RawArgs = %q, want %q — throttled deltas must still update RawArgs", block.RawArgs, full)
@@ -172,8 +168,8 @@ func TestInferredArgsCompleteRebuildsContentFromAccumulatedArgs(t *testing.T) {
 	if !strings.Contains(block.Content, "investigate the delegate path") {
 		t.Fatalf("Content = %q, want the completed arguments rather than the throttled first frame", block.Content)
 	}
-	if block.ToolProgress != nil {
-		t.Fatalf("ToolProgress = %+v, want nil once arguments are complete", block.ToolProgress)
+	if !block.toolArgumentsAreReceiving() {
+		t.Fatal("later start completed the earlier stream")
 	}
 }
 

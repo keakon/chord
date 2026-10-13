@@ -143,12 +143,8 @@ func markToolArgsComplete(block *Block) bool {
 		block.ToolQueuedByExecutionEvent = false
 		changed = true
 	}
-	// Re-derive the body from the accumulated arguments. Streaming deltas are
-	// throttled, so a card inferred-complete can still be showing its very first
-	// frame — often a truncated JSON prefix — while RawArgs already holds the
-	// whole argument object. Providers that emit a real args-end event refreshed
-	// Content from those same args just before calling this, so this is a no-op
-	// for them.
+	// Re-derive the body from the accumulated arguments when completion is
+	// explicit; throttled deltas may have left an earlier partial frame.
 	if displayArgs := stableToolDisplayArgs(block.ToolName, block.RawArgs, block.ResultContent); displayArgs != "" && displayArgs != block.Content {
 		block.Content = displayArgs
 		changed = true
@@ -160,31 +156,19 @@ func markToolArgsComplete(block *Block) bool {
 	return changed
 }
 
-// markPriorReceivingToolCallsComplete advances earlier tool cards that are
-// still streaming arguments into the queued state once a newer tool call starts
-// streaming. Chat-completions-style providers emit argument deltas in
-// generation order with no per-call end event, so the start of a later call is
-// the only reliable signal that every earlier call's arguments are fully
-// received. The transition is display-only and drops the transient char-count
-// progress; execution still waits for the finalized response, and late
-// ArgsStreamingDone / execution-state events are idempotent against Queued.
-func (m *Model) markPriorReceivingToolCallsComplete(agentID, newCallID string) {
+// refreshPriorReceivingToolCalls renders snapshots flushed at a call boundary
+// without inferring completion: argument streams can interleave across calls.
+func (m *Model) refreshPriorReceivingToolCalls(agentID, newCallID string) {
 	if m == nil || m.viewport == nil {
 		return
 	}
-	// Candidates sit at the tail — a card is only receiving while its call is
-	// still streaming — so walk backwards to reach them first. The scan still
-	// covers the whole transcript: a card left receiving by a call that never
-	// produced an args-end (a truncated response) has no other way back, and
-	// the next tool call start is what rescues it.
 	for _, block := range slices.Backward(m.viewport.blocks) {
-		if block == nil || block.Type != BlockToolCall || block.ToolID == newCallID {
+		if block == nil || block.Type != BlockToolCall || block.ToolID == newCallID || block.AgentID != agentID || !block.toolArgumentsAreReceiving() {
 			continue
 		}
-		if block.AgentID != agentID || !block.toolArgumentsAreReceiving() {
-			continue
-		}
-		if markToolArgsComplete(block) {
+		content := block.streamedDisplayArgs(block.RawArgs, block.ResultContent)
+		if content != block.Content {
+			block.Content = content
 			block.InvalidateCache()
 			m.updateViewportBlock(block)
 		}
@@ -442,7 +426,7 @@ func (m *Model) handleToolAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				block.StartedAt = time.Time{}
 			}
 			m.recordToolArgRender(evt.ID, evt.ArgsJSON, time.Now())
-			m.markPriorReceivingToolCallsComplete(evt.AgentID, evt.ID)
+			m.refreshPriorReceivingToolCalls(evt.AgentID, evt.ID)
 		}
 		return true, effects
 	case agent.ToolCallUpdateEvent:
