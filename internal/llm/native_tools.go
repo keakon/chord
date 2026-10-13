@@ -94,12 +94,7 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 		if hasPending {
 			return nil, &NativeToolError{Cause: fmt.Errorf("pending native tool authorization is no longer available")}
 		}
-		lease, err := beginCustomProvider(ctx, impl)
-		if err != nil {
-			return nil, err
-		}
-		defer lease.Finish()
-		return impl.CompleteStream(ctx, key, model, system, messages, defs, maxTokens, tuning, cb)
+		return completeObservedProvider(ctx, impl, provider, key, model, system, messages, defs, maxTokens, tuning, cb)
 	}
 	if policy.Begin == nil || policy.Finish == nil {
 		return nil, &NativeToolError{Cause: fmt.Errorf("durable native request journal is unavailable")}
@@ -162,13 +157,7 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 		history.RequestIDs = append(history.RequestIDs, id)
 		started := time.Now()
 		requestCtx, dispatch := WithRequestDispatch(ctx, nil)
-		lease, admissionErr := beginCustomProvider(requestCtx, impl)
-		var resp *message.Response
-		callErr := admissionErr
-		if admissionErr == nil {
-			resp, callErr = impl.CompleteStream(requestCtx, key, model, system, messages, defs, maxTokens, tuning, cb)
-			lease.Finish()
-		}
+		resp, callErr := completeObservedProvider(requestCtx, impl, provider, key, model, system, messages, defs, maxTokens, tuning, cb)
 		if executiongate.IsPaused(callErr) {
 			markRequestPrepared(requestCtx)
 		}
@@ -254,12 +243,7 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 						return nil, &NativeToolError{Cause: fmt.Errorf("local image fallback is unavailable or its decision could not be persisted")}
 					}
 					tuning.nativeTool = nil
-					fallbackLease, admissionErr := beginCustomProvider(ctx, impl)
-					if admissionErr != nil {
-						return nil, &NativeToolError{Cause: admissionErr}
-					}
-					fallbackResp, fallbackErr := impl.CompleteStream(ctx, key, model, system, messages, nativeImageFallbackDefinitions(clientDefs, provider, model, messages), maxTokens, tuning, cb)
-					fallbackLease.Finish()
+					fallbackResp, fallbackErr := completeObservedProvider(ctx, impl, provider, key, model, system, messages, nativeImageFallbackDefinitions(clientDefs, provider, model, messages), maxTokens, tuning, cb)
 					if fallbackErr != nil {
 						return nil, &NativeToolError{Cause: fallbackErr}
 					}

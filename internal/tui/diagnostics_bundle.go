@@ -33,6 +33,7 @@ type diagnosticsBundleMsg struct {
 }
 
 type diagnosticsBundleData struct {
+	contextJSON  []byte
 	bundlePath   string
 	metadata     string
 	tuiDump      string
@@ -63,6 +64,13 @@ func writeDiagnosticsBundleCmd(data diagnosticsBundleData) tea.Cmd {
 		defer f.Close()
 
 		zw := zip.NewWriter(f)
+		if len(data.contextJSON) == 0 {
+			data.contextJSON = exportContextDiagnostics(agent.ContextDiagnosticsView{})
+		}
+		if err := writeDiagnosticsZipFile(zw, "context.json", string(data.contextJSON)); err != nil {
+			_ = zw.Close()
+			return diagnosticsBundleMsg{err: err}
+		}
 		if err := writeDiagnosticsZipFile(zw, "metadata.txt", data.metadata); err != nil {
 			_ = zw.Close()
 			return diagnosticsBundleMsg{err: err}
@@ -147,6 +155,7 @@ func (m *Model) buildDiagnosticsBundle(now time.Time, trigger string) (diagnosti
 	llmTraceName, llmTraceTail := m.collectDiagnosticLLMTrace(projectLocator)
 	meta := m.buildDiagnosticsMetadata(now, trigger, baseDir, bundlePath, logName, llmTraceName)
 	return diagnosticsBundleData{
+		contextJSON:  m.exportFocusedContextDiagnostics(),
 		bundlePath:   bundlePath,
 		metadata:     meta,
 		tuiDump:      tuiDump,

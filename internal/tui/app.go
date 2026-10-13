@@ -44,10 +44,11 @@ const (
 	ModeContentViewer                    // fullscreen markdown content viewer overlay
 	ModeRules                            // /rules overlay
 	ModeStopJobConfirm                   // stop-background-job confirmation overlay
-	ModeJobsOverlay                      // background jobs overlay (status-bar pill)
-	ModeSkillSelect                      // skill selector overlay (/skill)
-	ModeMemoryPanel                      // project memory management overlay
-	ModeStatus                           // full-screen runtime overview (/status)
+	ModeContext
+	ModeJobsOverlay // background jobs overlay (status-bar pill)
+	ModeSkillSelect // skill selector overlay (/skill)
+	ModeMemoryPanel // project memory management overlay
+	ModeStatus      // full-screen runtime overview (/status)
 )
 
 // ---------------------------------------------------------------------------
@@ -398,6 +399,7 @@ type Model struct {
 	jobsSnapshotFrame  uint64
 	// jobsOverlay is the background jobs overlay (opened by clicking the
 	// narrow-layout status pill), stopJobConfirm the operator's stop dialog.
+	contextOverlay contextOverlayState
 	jobsOverlay    jobsOverlayState
 	stopJobConfirm stopJobConfirmState
 	// statusJobs is the clickable region of the narrow-layout activity pill.
@@ -858,6 +860,15 @@ type applyResizeMsg struct{ version int }
 
 // Update is the central message dispatcher.
 func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
+	defer func() {
+		if m.mode == ModeContext && !m.contextOverlay.polling {
+			m.contextOverlay.polling = true
+			m.contextOverlay.generation++
+			m.refreshContextOverlay()
+			cmd = tea.Batch(cmd, m.contextOverlayTick())
+		}
+	}()
+
 	// A bottom-left overlay can go away without anything else on that row
 	// changing (dismissing the slash completion dropdown, leaving insert mode),
 	// and the incremental renderer then never rewrites the stale cell it left
@@ -1174,6 +1185,15 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 
+	case contextOverlayTickMsg:
+		if msg.generation == m.contextOverlay.generation && m.mode != ModeContext {
+			m.contextOverlay.polling = false
+		}
+		if m.mode == ModeContext && msg.generation == m.contextOverlay.generation {
+			m.refreshContextOverlay()
+			return m, m.contextOverlayTick()
+		}
+		return m, nil
 	case keyPoolTickMsg:
 		if msg.gen != m.keyPoolTickGen {
 			return m, nil

@@ -36,18 +36,24 @@ func (c *Client) PromptCacheMessagesForModelRef(ref string, messages []message.M
 	if c == nil {
 		return messages
 	}
-	if c.SupportsAnthropicPromptCache(ref) {
+	c.mu.RLock()
+	target, ok := c.modelPoolTargetForRefLocked(ref)
+	c.mu.RUnlock()
+	if !ok {
+		return messages
+	}
+	return promptCacheMessagesForTarget(providerWireFamily(target.ProviderConfig), target.ModelID, tuningForPoolTarget(target), messages, tailOverlayCount)
+}
+
+func promptCacheMessagesForTarget(family string, model string, tuning RequestTuning, messages []message.Message, tailOverlayCount int) []message.Message {
+	if family == modelcompat.WireFamilyAnthropic && tuning.Anthropic.PromptCacheMode == "explicit" {
 		end := anthropicCacheDurableMessageCount(messages)
 		if tailOverlayCount > 0 && tailOverlayCount < len(messages) {
 			end = min(end, len(messages)-tailOverlayCount)
 		}
 		return messages[:end]
 	}
-	c.mu.RLock()
-	target, ok := c.modelPoolTargetForRefLocked(ref)
-	supported := ok && providerWireFamily(target.ProviderConfig) == modelcompat.WireFamilyOpenAIResponses && modelcompat.SupportsResponsesCacheBreakpoints(target.ModelID)
-	c.mu.RUnlock()
-	if !supported {
+	if family != modelcompat.WireFamilyOpenAIResponses || !modelcompat.SupportsResponsesCacheBreakpoints(model) {
 		return messages
 	}
 	// All durable user/tool input-text endings are marked. A trailing assistant

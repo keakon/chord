@@ -41,7 +41,7 @@ func TestGeneratedImagePreviewProjectionUsedByRequestEntrypoints(t *testing.T) {
 		{Type: message.ContentPartImage, ArtifactID: "sha256-second", ImagePath: "second.png"},
 	}}}
 	main := (&MainAgent{}).prepareMessagesForLLMWithOptions(history, false)
-	worker := (&SubAgent{}).prepareContextForLLM(history)
+	worker := (&SubAgent{}).prepareContextForLLM(llmRequestInput{Messages: history}).Messages
 	retry, _ := filterUnsupportedBinaryPartsForModel(history, nil)
 	for _, request := range [][]message.Message{main, worker, retry} {
 		if len(request[0].Parts) != 1 || request[0].Parts[0].ImagePath != "first.png" {

@@ -531,6 +531,7 @@ func TestHandleNewSessionCommandReleasesOldStartupLock(t *testing.T) {
 	a.MarkSkillsReady()
 	a.markMCPReady()
 
+	defer expectDiagnosticsRetired(t, a, true)()
 	a.handleNewSessionCommand()
 	if a.sessionDir == oldSessionDir {
 		t.Fatal("sessionDir was not switched")
@@ -624,6 +625,7 @@ func TestHandleForkSessionCommandKeepsCurrentSessionWhenCreateFails(t *testing.T
 		t.Fatalf("write sessions file: %v", err)
 	}
 
+	defer expectDiagnosticsRetired(t, a, true)()
 	a.handleForkSessionCommand(2)
 
 	if a.sessionDir != oldSessionDir {

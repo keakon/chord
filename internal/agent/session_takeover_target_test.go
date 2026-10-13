@@ -55,6 +55,7 @@ func TestSessionTakeoverPublicActivationRestoresEmptyPausedCheckpoint(t *testing
 	a, provider := scenarioAgent(t)
 	installTakeoverTestLock(t, a)
 	path, id := createPausedTakeoverTarget(t, a, "paused-target")
+	defer expectDiagnosticsRetired(t, a, true)()
 	oldGate := a.sessionExecutionGate()
 	startMainAgentLoopForTest(t, a)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -132,6 +133,7 @@ func TestSessionTakeoverCurrentWriteFailureKeepsOldOwnership(t *testing.T) {
 	path, id := createPausedTakeoverTarget(t, a, "paused-target")
 	cause := errors.New("transcript append unavailable")
 	a.persist.rememberFailure(persistEntry{recovery: oldManager, agentID: identity.MainAgentID}, cause)
+	defer expectDiagnosticsRetired(t, a, true)()
 	reply := make(chan error, 1)
 	a.handleTakeoverTarget(sessionTakeoverTarget{ctx: t.Context(), sessionID: id.SessionID, identity: id, reply: reply})
 	if err := <-reply; !errors.Is(err, cause) {

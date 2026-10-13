@@ -45,7 +45,7 @@ func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *tes
 	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
 
-	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
+	_, err := a.callLLMForRequest(context.Background(), llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hi"}}}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
 
-	if _, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0); err != nil {
+	if _, err := a.callLLMForRequest(context.Background(), llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hi"}}}, 0); err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestCallLLMDoesNotTranslateStreamingThinkingBlocks(t *testing.T) {
 	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
 
-	if _, err := a.callLLMForRequest(context.Background(), a.GetMessages(), 0); err != nil {
+	if _, err := a.callLLMForRequest(context.Background(), llmRequestInput{Messages: a.GetMessages()}, 0); err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
 	a.outputWg.Wait()
@@ -375,7 +375,7 @@ func TestCallLLMOnlyEmitsOneStreamingActivityWhenStatusAlsoArrives(t *testing.T)
 	client := llm.NewClient(providerCfg, providerImpl, "test-model", 4096, "sys")
 	a.swapLLMClientWithRef(client, "test-model", 128000, "sample/test-model")
 
-	_, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0)
+	_, err := a.callLLMForRequest(context.Background(), llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hi"}}}, 0)
 	if err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}

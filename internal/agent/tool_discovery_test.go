@@ -104,7 +104,7 @@ func TestToolDiscoveryPreservesLoadedToolsAcrossProviderFallback(t *testing.T) {
 					for _, msg := range messages {
 						sub.ctxMgr.Append(msg)
 					}
-					sub.asyncCallLLMWithFlightMarked(sub.turn, messages)
+					sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: messages})
 					select {
 					case result := <-sub.llmCh:
 						err = result.err
@@ -120,7 +120,7 @@ func TestToolDiscoveryPreservesLoadedToolsAcrossProviderFallback(t *testing.T) {
 						a.ctxMgr.Append(msg)
 					}
 					a.swapLLMClientWithRef(client, "test-model", 4000, "sample/test-model")
-					_, err = a.callLLMForRequest(t.Context(), messages, 0)
+					_, err = a.callLLMForRequest(t.Context(), llmRequestInput{Messages: messages}, 0)
 				}
 				wantFallback := int32(0)
 				if rejectPrimary {

@@ -34,6 +34,7 @@ func markRequestSent(ctx context.Context) {
 			d.onSent()
 		}
 	}
+	submitDiagnosticAttempt(ctx)
 }
 
 // WithRequestStarted observes every admitted transport submission in a call.

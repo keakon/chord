@@ -37,6 +37,7 @@ func beginCustomProvider(ctx context.Context, provider Provider) (*executiongate
 	case *OpenAIProvider, *AnthropicProvider, *ResponsesProvider, *GeminiProvider:
 		return nil, executiongate.Check(ctx)
 	default:
+		prepareDiagnosticSubmission(ctx, "custom")
 		lease, err := executiongate.Begin(ctx, executiongate.LLM)
 		if err == nil {
 			markRequestPrepared(ctx)

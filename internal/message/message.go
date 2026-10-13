@@ -299,7 +299,13 @@ const (
 )
 
 // Message represents a conversation message (user, assistant, or tool result).
+const (
+	DiagnosticSourceInstructions = "instructions"
+	DiagnosticSourceMixed        = "mixed"
+)
+
 type Message struct {
+	DiagnosticSource string `json:"-"`
 	// InputID is local recovery metadata and is never a provider wire field.
 	InputID          string                `json:"input_id,omitempty"`
 	NativeTools      *NativeToolHistory    `json:"native_tools,omitempty"`

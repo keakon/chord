@@ -512,7 +512,8 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// usage-driven trigger evaluation below.
 	a.handleManualCompactionIntentAtGate()
 
-	snapshot := a.ctxMgr.Snapshot()
+	input := snapshotLLMRequest(a.ctxMgr)
+	snapshot := input.Messages
 	trigger := a.compactionTriggerForMainLLM()
 	// The context-pressure reminder is sticky (re-queued on every request above
 	// the reminder line until the model calls compact_context or the window
@@ -526,7 +527,7 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	if !trigger.needed() {
 		a.queueContextPressureReminderForNextRequest()
 		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
-		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
+		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, input, agentErrSourceID)
 		return
 	}
 	// Threshold grace period: while compact_context is visible, the first
@@ -540,7 +541,7 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	if trigger.isUsageDriven() && !a.IsCompactionRunning() && a.usageDrivenCompactionGraceDefers(snapshot) {
 		log.Debugf("beginMainLLMAfterPreparation: usage-driven compaction deferred by the threshold grace period turn_id=%v", turnID)
 		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
-		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
+		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, input, agentErrSourceID)
 		return
 	}
 
@@ -576,7 +577,7 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	if a.IsCompactionRunning() {
 		log.Debugf("beginMainLLMAfterPreparation: compaction already running, spawning LLM in parallel turn_id=%v", turnID)
 		a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
-		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
+		a.spawnMainLLMResponseGoroutine(turnCtx, turnID, input, agentErrSourceID)
 		return
 	}
 	a.fireBeforeCompressHook(snapshot, false)
@@ -599,10 +600,10 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// If the call hits oversize, handleCompactionOversizeSuspend will pause
 	// the turn until the compaction draft is applied.
 	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
-	a.spawnMainLLMResponseGoroutine(turnCtx, turnID, snapshot, agentErrSourceID)
+	a.spawnMainLLMResponseGoroutine(turnCtx, turnID, input, agentErrSourceID)
 }
 
-func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnID uint64, messages []message.Message, agentErrSourceID string) {
+func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnID uint64, input llmRequestInput, agentErrSourceID string) {
 	if a.sessionExecutionPaused() {
 		return
 	}
@@ -627,7 +628,7 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 		// this event rather than on a scheduling idle signal that can overtake
 		// that flush (see StreamSegmentEndedEvent).
 		defer a.emitToTUI(StreamSegmentEndedEvent{TurnID: turnID, RequestSeq: requestSeq})
-		resp, err := a.callLLMForRequest(turnCtx, messages, requestSeq)
+		resp, err := a.callLLMForRequest(turnCtx, input, requestSeq)
 		if executiongate.IsPaused(err) {
 			if resp == nil {
 				a.sendEvent(Event{Type: eventSessionLLMPaused, TurnID: turnID})
@@ -1334,7 +1335,7 @@ func (a *MainAgent) resumePendingMainLLMAfterCompaction(pending *pendingMainLLMC
 	// If compaction itself failed for a regular main continuation, do not
 	// immediately retry the same gate; resume the pending continuation directly.
 	a.applyMainLLMRequestTuningOverride(llm.RequestTuning{})
-	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, pending.turnID, a.ctxMgr.Snapshot(), pending.agentErrSourceID)
+	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, pending.turnID, snapshotLLMRequest(a.ctxMgr), pending.agentErrSourceID)
 	return true
 }
 

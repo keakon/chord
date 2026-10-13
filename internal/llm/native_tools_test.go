@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/contextdiag"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
 )
@@ -231,7 +232,8 @@ func TestNativePauseContinuationAndResultBarrier(t *testing.T) {
 				}
 				return nil
 			}}
-			resp, err := client.CompleteStreamWithOptions(t.Context(), []message.Message{{Role: message.RoleUser, Content: "Search"}}, nil, nil, CompleteStreamOptions{NativeTools: policy})
+			collector, store := diagnosticTestCollector()
+			resp, err := client.CompleteStreamWithOptions(t.Context(), []message.Message{{Role: message.RoleUser, Content: "Search"}}, nil, nil, CompleteStreamOptions{NativeTools: policy, Diagnostics: collector.BeginRequest(0)})
 			if failReceipt {
 				if !IsNativeToolError(err) || len(bodies) != 1 {
 					t.Fatalf("requests=%d err=%v", len(bodies), err)
@@ -243,6 +245,10 @@ func TestNativePauseContinuationAndResultBarrier(t *testing.T) {
 			}
 			if len(bodies) != 2 || len(recorded) != 2 || resp.Usage.InputTokens != 10 || resp.Usage.OutputTokens != 5 || recorded[0]+recorded[1] != 20 {
 				t.Fatalf("usage=%+v requests=%d receipts=%v", resp.Usage, len(bodies), recorded)
+			}
+			snapshot, ok := store.Latest()
+			if !ok || snapshot.ID.Attempt != 2 || snapshot.State != contextdiag.Completed || snapshot.Usage.FullInput != 10 || snapshot.Usage.Output != 5 {
+				t.Fatalf("native usage attribution: %+v", snapshot)
 			}
 			if string(bodies[1]["container"]) != `"container-1"` || !strings.Contains(string(bodies[1]["messages"]), "search-1") {
 				t.Fatalf("continuation lost native state: %s", bodies[1])

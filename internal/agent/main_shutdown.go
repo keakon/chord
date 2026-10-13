@@ -18,6 +18,7 @@ const sessionEndHookGrace = 300 * time.Millisecond
 // (up to the given timeout). The caller should cancel the context passed to
 // Run as well.
 func (a *MainAgent) Shutdown(timeout time.Duration) error {
+	a.contextDiagnostics.invalidate()
 	if a.pause.sealed.Load() {
 		return nil
 	}

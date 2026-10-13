@@ -19,7 +19,7 @@ func (m *Model) handleTakeoverKey(msg tea.KeyMsg) tea.Cmd {
 		if key != "ctrl+w" {
 			return m.handleQuestionKey(msg)
 		}
-	case ModeConfirm, ModeStopJobConfirm, ModeJobsOverlay, ModeStatus,
+	case ModeConfirm, ModeStopJobConfirm, ModeJobsOverlay, ModeContext, ModeStatus,
 		ModeContentViewer, ModeImageViewer, ModeUsageStats, ModeErrorPanel, ModeHelp:
 		return m.handleModeKey(msg)
 	case ModeInsert, ModeNormal:
@@ -53,7 +53,7 @@ func (m *Model) handleTakeoverKey(msg tea.KeyMsg) tea.Cmd {
 
 func (m *Model) handleTakeoverMouse(msg tea.MouseMsg) tea.Cmd {
 	switch m.mode {
-	case ModeQuestion, ModeConfirm, ModeStopJobConfirm, ModeJobsOverlay, ModeStatus,
+	case ModeQuestion, ModeConfirm, ModeStopJobConfirm, ModeJobsOverlay, ModeContext, ModeStatus,
 		ModeContentViewer, ModeImageViewer, ModeUsageStats, ModeErrorPanel, ModeHelp:
 		if cmd, handled := m.handleModalMouseMsg(msg); handled {
 			return cmd

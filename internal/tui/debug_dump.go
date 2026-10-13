@@ -576,6 +576,8 @@ func debugModeString(mode Mode) string {
 		return "image-viewer"
 	case ModeStopJobConfirm:
 		return "stop-job-confirm"
+	case ModeContext:
+		return "context"
 	case ModeJobsOverlay:
 		return "jobs-overlay"
 	default:

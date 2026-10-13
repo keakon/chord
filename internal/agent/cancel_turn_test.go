@@ -380,7 +380,7 @@ func TestCancelCurrentTurnStreamSegmentEndFollowsFlushedTail(t *testing.T) {
 
 	a.newTurn()
 	turnID := a.turn.ID
-	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, []message.Message{{Role: "user", Content: "hello"}}, "")
+	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hello"}}}, "")
 	<-provider.started
 
 	if cancelled := a.CancelCurrentTurn(); !cancelled {

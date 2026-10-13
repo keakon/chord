@@ -54,7 +54,7 @@ func TestMainLLMAbortedFallbackAttemptKeepsCursorHeadModelRef(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLMForRequest(ctx, []message.Message{{Role: "user", Content: "hi"}}, 0)
+		_, err := a.callLLMForRequest(ctx, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hi"}}}, 0)
 		done <- err
 	}()
 
@@ -132,7 +132,7 @@ func TestMainLLMAbortedConfirmedFallbackReturnsToCursorHead(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLMForRequest(ctx, []message.Message{{Role: "user", Content: "hi"}}, 0)
+		_, err := a.callLLMForRequest(ctx, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hi"}}}, 0)
 		done <- err
 	}()
 
@@ -213,7 +213,7 @@ func TestMainLLMFailedModelPoolKeepsBudgetOnCursorHead(t *testing.T) {
 	client.SetStreamRetryRounds(1)
 	a.swapLLMClientWithRef(client, "primary-model", 128000, "primary-prov/primary-model")
 
-	if _, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: "user", Content: "hi"}}, 0); err == nil {
+	if _, err := a.callLLMForRequest(context.Background(), llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hi"}}}, 0); err == nil {
 		t.Fatal("callLLM err = nil, want the exhausted pool error")
 	}
 
@@ -284,7 +284,7 @@ func TestMainLLMFallbackDownshiftKeepsCommittedFallbackRef(t *testing.T) {
 	// the loop's decision, so answer them in order until the request unwinds.
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLMForRequest(a.turn.Ctx, a.ctxMgr.Snapshot(), 0)
+		_, err := a.callLLMForRequest(a.turn.Ctx, llmRequestInput{Messages: a.ctxMgr.Snapshot()}, 0)
 		done <- err
 	}()
 
@@ -365,7 +365,7 @@ func TestMainInterruptedPartialKeepsConfirmedProducerProvenance(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLMForRequest(turn.Ctx, []message.Message{{Role: "user", Content: "hi"}}, 0)
+		_, err := a.callLLMForRequest(turn.Ctx, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hi"}}}, 0)
 		done <- err
 	}()
 
@@ -505,7 +505,7 @@ func TestMainTurnCancelledReleasesCommittedFallbackRef(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLMForRequest(turn.Ctx, a.ctxMgr.Snapshot(), 0)
+		_, err := a.callLLMForRequest(turn.Ctx, llmRequestInput{Messages: a.ctxMgr.Snapshot()}, 0)
 		done <- err
 	}()
 

@@ -95,12 +95,13 @@ const inputChanCap = 64
 // external user input is enqueued via InjectUserMessage / InjectUserMessageWithParts.
 // Cross-goroutine lifecycle flags use atomics.
 type SubAgent struct {
-	instanceID      string // immutable, from NextInstanceID()
-	taskID          string // plan task ID or "adhoc-N"
-	agentDefName    string // agent definition name (e.g. "backend-coder")
-	taskDesc        string // task description (from Plan or ad-hoc)
-	planTaskRef     string
-	semanticTaskKey string
+	contextDiagnostics contextDiagnosticsRuntime
+	instanceID         string // immutable, from NextInstanceID()
+	taskID             string // plan task ID or "adhoc-N"
+	agentDefName       string // agent definition name (e.g. "backend-coder")
+	taskDesc           string // task description (from Plan or ad-hoc)
+	planTaskRef        string
+	semanticTaskKey    string
 	// resultSchema is the delegated result contract (runtime map + canonical
 	// bytes). Both are immutable after construction; resultContractMu guards
 	// only the terminal failure diagnostics, which the run loop writes and the
@@ -896,6 +897,7 @@ func (s *SubAgent) installSystemPrompt(prompt string) {
 }
 
 func (s *SubAgent) closeLLMClient() {
+	s.contextDiagnostics.invalidate()
 	if s == nil {
 		return
 	}
@@ -971,7 +973,13 @@ func subAgentToolWithBaseDir(t tools.Tool, workDir string) tools.Tool {
 // LLM interaction
 // ---------------------------------------------------------------------------
 
-func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.Message) {
+func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, input llmRequestInput) {
+	if turn.Ctx.Err() != nil {
+		s.llmRequestInFlight.Store(false)
+		return
+	}
+	messages := input.Messages
+	observer := s.contextDiagnostics.begin(s.sessionDir, s.taskID, input.HistoryGeneration)
 	if s.sessionExecutionPaused() {
 		s.llmRequestInFlight.Store(false)
 		s.signalWake()
@@ -1133,7 +1141,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			}
 			s.signalWake()
 		})
-		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{NativeTools: s.nativeRequestPolicy(turn)})
+		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{NativeTools: s.nativeRequestPolicy(turn), Diagnostics: observer})
 		// Settle the walltime segment before the flush events so the TUI
 		// re-render they trigger sees the updated TIME buckets; finishing at
 		// return would leave the sidebar stale until the next unrelated

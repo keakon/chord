@@ -227,7 +227,7 @@ func TestShutdownWaitsForMainLLMEmittersBeforeClosingOutput(t *testing.T) {
 	// loop state. Calling the dispatcher concurrently with Run violates that
 	// ownership contract and races request projection capture against restore.
 	turnCtx, cancelTurn := context.WithCancel(context.Background())
-	a.spawnMainLLMResponseGoroutine(turnCtx, 1, []message.Message{{Role: "user", Content: "hello"}}, "")
+	a.spawnMainLLMResponseGoroutine(turnCtx, 1, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hello"}}}, "")
 	<-provider.started
 
 	runCtx := t.Context()
@@ -366,6 +366,7 @@ func TestShutdownClosesMainLLMClient(t *testing.T) {
 	client := newTestLLMClient()
 	a.swapLLMClientWithRef(client, "test-model", 128000, "test-provider/test-model")
 
+	defer expectDiagnosticsRetired(t, a, false)()
 	if err := a.Shutdown(2 * time.Second); err != nil {
 		t.Fatalf("Shutdown() error = %v", err)
 	}

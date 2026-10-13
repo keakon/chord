@@ -49,7 +49,7 @@ func TestFocusedModelStateDisplayRefNamesInflightFallback(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := a.callLLMForRequest(ctx, []message.Message{{Role: "user", Content: "hi"}}, 0)
+		_, err := a.callLLMForRequest(ctx, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hi"}}}, 0)
 		done <- err
 	}()
 	// Mirror the main request lifecycle; the display target itself is read

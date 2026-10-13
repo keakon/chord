@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/contextdiag"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
 )
@@ -82,13 +83,29 @@ func TestNativeImageMutualExclusionAndSafeFallback(t *testing.T) {
 				}
 				return nil
 			}, ImageFallback: func() bool { switched++; return scenario != "decision_error" }}
-			resp, err := client.CompleteStreamWithOptions(t.Context(), []message.Message{{Role: message.RoleUser, Content: "Generate a tree"}}, []message.ToolDefinition{{Name: toolname.GenerateImage, InputSchema: map[string]any{"type": "object"}}}, nil, CompleteStreamOptions{NativeTools: policy})
+			collector, store := diagnosticTestCollector()
+			resp, err := client.CompleteStreamWithOptions(t.Context(), []message.Message{{Role: message.RoleUser, Content: "Generate a tree"}}, []message.ToolDefinition{{Name: toolname.GenerateImage, InputSchema: map[string]any{"type": "object"}}}, nil, CompleteStreamOptions{NativeTools: policy, Diagnostics: collector.BeginRequest(0)})
 			want := int32(1)
 			if scenario == "unsupported" || scenario == "quota" || scenario == "fallback_error" {
 				want = 2
 			}
 			if requests.Load() != want {
 				t.Fatalf("requests=%d want=%d err=%v", requests.Load(), want, err)
+			}
+			snapshot, observed := store.Latest()
+			if !observed || snapshot.ID.Attempt != uint64(want) || snapshot.State == contextdiag.Dispatched {
+				t.Fatalf("attempt attribution: %+v", snapshot)
+			}
+			if want == 2 {
+				tools := diagnosticCategory(t, snapshot.Categories, contextdiag.Tools)
+				native, local := false, false
+				for _, source := range tools.Sources {
+					native = native || source.Label == "native"
+					local = local || source.Label == toolname.GenerateImage
+				}
+				if native || !local {
+					t.Fatalf("fallback retained wrong tools: %+v", tools)
+				}
 			}
 			if scenario == "unsupported" || scenario == "quota" {
 				if err != nil || resp == nil || len(resp.ToolCalls) != 1 || resp.NativeTools != nil {

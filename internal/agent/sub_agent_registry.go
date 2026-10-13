@@ -241,6 +241,9 @@ func (r *subAgentRegistry) remove(instanceID string) *SubAgent {
 
 func (r *subAgentRegistry) removeLocked(instanceID string) *SubAgent {
 	sub := r.subAgents[instanceID]
+	if sub != nil {
+		sub.contextDiagnostics.invalidate()
+	}
 	delete(r.subAgents, instanceID)
 	delete(r.stateEnteredTurn, instanceID)
 	return sub

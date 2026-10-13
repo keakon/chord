@@ -14,6 +14,8 @@ func (m *Model) nextEscHint() string {
 		return "close memory"
 	case ModeContentViewer:
 		return "close view"
+	case ModeContext:
+		return "close context"
 	case ModeStatus:
 		return "close status"
 	case ModeHelp:

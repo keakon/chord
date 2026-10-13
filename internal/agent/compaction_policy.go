@@ -144,9 +144,14 @@ func (a *MainAgent) handleRefreshReductionStats() {
 	a.refreshVisibleContextReductionStats(a.ctxMgr.Snapshot())
 }
 
-func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message, rememberPrepared bool) []message.Message {
+func (a *MainAgent) prepareMessagesForLLMWithOptions(messages []message.Message, rememberPrepared bool) (result []message.Message) {
 	messages = projectGeneratedImagePreviews(messages)
 	messages = projectCheckpointRequests(messages)
+	if a != nil && a.ctxMgr != nil && rememberPrepared {
+		ratio := a.ctxMgr.CalibratedRatio()
+		before := messages
+		defer func() { a.freezeDiagnosticReduction(before, result, ratio) }()
+	}
 	if a != nil && rememberPrepared {
 		a.setPreparedStablePrefixLen(0)
 	}

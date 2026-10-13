@@ -176,7 +176,7 @@ func injectMetaUserReminder(messages []message.Message, content string) []messag
 	if content == "" {
 		return messages
 	}
-	reminder := message.Message{Role: "user", Content: content}
+	reminder := message.Message{DiagnosticSource: message.DiagnosticSourceInstructions, Role: "user", Content: content}
 	if len(messages) == 0 {
 		return []message.Message{reminder}
 	}

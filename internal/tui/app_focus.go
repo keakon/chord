@@ -40,6 +40,10 @@ func (m *Model) setFocusedAgent(id string) {
 		}
 		m.viewport.ScrollToBottom()
 	}
+	if m.mode == ModeContext {
+		m.contextOverlay.scroll = 0
+		m.refreshContextOverlay()
+	}
 	m.recalcViewportSize()
 	m.invalidateDrawCaches()
 }

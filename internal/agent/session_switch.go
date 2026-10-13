@@ -157,6 +157,7 @@ func (a *MainAgent) handleNewSessionCommand() {
 }
 
 func (a *MainAgent) prepareSessionSwitch() (*recovery.RecoveryManager, context.Context) {
+	a.contextDiagnostics.invalidate()
 	a.admissionMu.Lock()
 	defer a.admissionMu.Unlock()
 	a.admissionPaused.Store(true)
@@ -213,6 +214,7 @@ func (a *MainAgent) stopCompactionForSessionSwitch() bool {
 }
 
 func (a *MainAgent) finishSessionSwitch() {
+	a.contextDiagnostics.reset()
 	a.admissionPaused.Store(false)
 	a.questions.switching = false
 }
@@ -344,6 +346,7 @@ func (a *MainAgent) resetSessionRuntimeState() {
 }
 
 func (a *MainAgent) installSessionTarget(sessionDir string) {
+	a.contextDiagnostics.reset()
 	a.sessionEpoch++
 	// Session switch invalidates the batch-relative model-driven gates: the
 	// request-batch counter restarts in the new session, so the last apply /

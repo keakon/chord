@@ -280,7 +280,7 @@ func (s *SubAgent) issueLLMSilenceRecovery() {
 	turn := s.newTurn()
 	s.appendPendingUserMessage(pendingUserMessage{Content: instruction})
 	s.llmRequestInFlight.Store(true)
-	s.asyncCallLLMWithFlightMarked(turn, s.prepareContextForLLM(s.ctxMgr.Snapshot()))
+	s.asyncCallLLMWithFlightMarked(turn, s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr)))
 }
 
 // subAgentRecoveryNotePrefix marks runtime recovery instructions sent to a

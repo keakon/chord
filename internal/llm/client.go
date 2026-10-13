@@ -182,6 +182,7 @@ type CallStatus struct {
 // the target's model and context budgets and may return an updated message
 // snapshot for that fallback attempt.
 type CompleteStreamOptions struct {
+	Diagnostics    *RequestDiagnostics
 	NativeTools    *NativeToolPolicy
 	BeforeFallback func(context.Context, []message.Message, FallbackModel) ([]message.Message, error)
 	// MCPDeclarations is the request's currently effective incremental MCP
@@ -1133,6 +1134,9 @@ func (c *Client) CompleteStreamWithOptions(
 ) (*message.Response, error) {
 	if c == nil || c.closed.Load() {
 		return nil, errors.New("llm client is closed")
+	}
+	if options.Diagnostics != nil {
+		ctx = context.WithValue(ctx, diagnosticsContextKey{}, options.Diagnostics)
 	}
 	ctx = c.executionContext(ctx)
 	if err := executiongate.Check(ctx); err != nil {

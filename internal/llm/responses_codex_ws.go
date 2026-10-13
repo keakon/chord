@@ -384,6 +384,10 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 		r.codexWSCloseConnUnlocked("write_deadline")
 		return nil, nil, fmt.Errorf("codex ws write deadline: %w", err)
 	}
+	if env.PreviousResponseID != "" {
+		diagnosticServerContextReuse(ctx)
+	}
+	prepareDiagnosticSubmission(ctx, "websocket")
 	markRequestPrepared(ctx)
 	lease, err := executiongate.Begin(ctx, executiongate.LLM)
 	if err != nil {
@@ -768,7 +772,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			PromptCacheOptions: req.PromptCacheOptions,
 		}
 		prewarmResp, prewarmOutputItems, prewarmErr := r.codexWSExecuteRequestLocked(
-			ctx, apiKey, model, prewarmEnv, nil, false, start, false, opts.TurnState, opts.TurnStateIdentity, freeform,
+			withoutRequestDiagnostics(ctx), apiKey, model, prewarmEnv, nil, false, start, false, opts.TurnState, opts.TurnStateIdentity, freeform,
 		)
 		if prewarmErr != nil {
 			return nil, false, prewarmErr
@@ -820,6 +824,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		ctx, apiKey, model, env, cb, true, start, true, opts.TurnState, opts.TurnStateIdentity, freeform,
 	)
 	if reqErr != nil {
+		finishDiagnosticAttempt(ctx, resp, reqErr)
 		return nil, useIncremental, reqErr
 	}
 

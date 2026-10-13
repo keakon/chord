@@ -18,7 +18,7 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 	s.consumeRestoredPauseInputs()
 	s.appendPendingUserMessage(input)
 
-	messages := s.prepareContextForLLM(s.ctxMgr.Snapshot())
+	messages := s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr))
 	s.asyncCallLLMWithFlightMarked(turn, messages)
 }
 
@@ -99,9 +99,9 @@ func (s *SubAgent) appendPendingUserMessages(pending []pendingUserMessage) {
 	}
 }
 
-func (s *SubAgent) messagesForLLMContinuation() []message.Message {
+func (s *SubAgent) messagesForLLMContinuation() llmRequestInput {
 	if s.sessionExecutionPaused() {
-		return nil
+		return llmRequestInput{}
 	}
 	s.inputQueueMu.Lock()
 	var pending []pendingUserMessage
@@ -111,7 +111,7 @@ func (s *SubAgent) messagesForLLMContinuation() []message.Message {
 	s.llmRequestInFlight.Store(true)
 	s.inputQueueMu.Unlock()
 	s.appendPendingUserMessages(pending)
-	return s.prepareContextForLLM(s.ctxMgr.Snapshot())
+	return s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr))
 }
 
 func (s *SubAgent) continueLLMWithPendingUserMessages() {
@@ -132,7 +132,7 @@ func (s *SubAgent) continueLLMIfPendingUserMessages() bool {
 	s.inputQueueMu.Unlock()
 
 	s.appendPendingUserMessages(pending)
-	s.asyncCallLLMWithFlightMarked(s.turn, s.prepareContextForLLM(s.ctxMgr.Snapshot()))
+	s.asyncCallLLMWithFlightMarked(s.turn, s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr)))
 	return true
 }
 

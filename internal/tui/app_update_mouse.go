@@ -91,6 +91,15 @@ func (m *Model) handleModalMouseMsg(msg tea.MouseMsg) (tea.Cmd, bool) {
 		return nil, true
 	}
 
+	if m.mode == ModeContext {
+		switch mouse.Button {
+		case tea.MouseWheelUp:
+			m.contextOverlay.scroll -= mouseWheelScrollStep
+		case tea.MouseWheelDown:
+			m.contextOverlay.scroll += mouseWheelScrollStep
+		}
+		return nil, true
+	}
 	if m.mode == ModeJobsOverlay {
 		m.clearChordState()
 		switch mouse.Button {

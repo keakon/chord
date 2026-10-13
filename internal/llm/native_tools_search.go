@@ -31,9 +31,10 @@ func nativeWebSearchRequest(cfg *config.NativeWebSearchConfig, provider *Provide
 		return nil, fmt.Errorf("encode native search constraints: %w", err)
 	}
 	return &nativeToolRequest{
-		authorization:    message.NativeToolAuthorization{Tool: toolname.WebSearch, Contract: snapshot.Contract, Constraints: constraints},
-		formatContent:    func(history *message.NativeToolHistory, content string) string { return history.CitedContent(content) },
-		applyDeclaration: func(raw []byte) ([]byte, error) { return addNativeWebSearchDeclaration(raw, &snapshot) },
+		diagnosticDefinitions: func() []map[string]any { return []map[string]any{nativeSearchDeclaration(&snapshot)} },
+		authorization:         message.NativeToolAuthorization{Tool: toolname.WebSearch, Contract: snapshot.Contract, Constraints: constraints},
+		formatContent:         func(history *message.NativeToolHistory, content string) string { return history.CitedContent(content) },
+		applyDeclaration:      func(raw []byte) ([]byte, error) { return addNativeWebSearchDeclaration(raw, &snapshot) },
 	}, nil
 }
 
@@ -51,6 +52,27 @@ func addNativeWebSearchDeclaration(raw []byte, cfg *config.NativeWebSearchConfig
 	if err := json.Unmarshal(body["tools"], &defs); err != nil && len(body["tools"]) > 0 {
 		return nil, err
 	}
+	decl := nativeSearchDeclaration(cfg)
+	if cfg.Contract != config.NativeWebSearchMessages {
+		body["max_tool_calls"], _ = json.Marshal(cfg.MaxUses)
+		var include []string
+		_ = json.Unmarshal(body["include"], &include)
+		include = append(include, "web_search_call.action.sources")
+		body["include"], _ = json.Marshal(include)
+	}
+	encoded, err := json.Marshal(decl)
+	if err != nil {
+		return nil, err
+	}
+	defs = append(defs, encoded)
+	body["tools"], err = json.Marshal(defs)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(body)
+}
+
+func nativeSearchDeclaration(cfg *config.NativeWebSearchConfig) map[string]any {
 	decl := map[string]any{"type": toolname.WebSearch}
 	if cfg.Contract == config.NativeWebSearchMessages {
 		decl["type"] = "web_search_20250305"
@@ -73,20 +95,6 @@ func addNativeWebSearchDeclaration(raw []byte, cfg *config.NativeWebSearchConfig
 		if len(filters) > 0 {
 			decl["filters"] = filters
 		}
-		body["max_tool_calls"], _ = json.Marshal(cfg.MaxUses)
-		var include []string
-		_ = json.Unmarshal(body["include"], &include)
-		include = append(include, "web_search_call.action.sources")
-		body["include"], _ = json.Marshal(include)
 	}
-	encoded, err := json.Marshal(decl)
-	if err != nil {
-		return nil, err
-	}
-	defs = append(defs, encoded)
-	body["tools"], err = json.Marshal(defs)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(body)
+	return decl
 }

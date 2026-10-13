@@ -13,10 +13,11 @@ import (
 // nativeToolRequest can only be constructed by a supported contract adapter.
 // An arbitrary hosted declaration is not evidence of native replay support.
 type nativeToolRequest struct {
-	authorization    message.NativeToolAuthorization
-	additionalTools  []string
-	applyDeclaration func([]byte) ([]byte, error)
-	formatContent    func(*message.NativeToolHistory, string) string
+	diagnosticDefinitions func() []map[string]any
+	authorization         message.NativeToolAuthorization
+	additionalTools       []string
+	applyDeclaration      func([]byte) ([]byte, error)
+	formatContent         func(*message.NativeToolHistory, string) string
 }
 
 func resolveNativeToolRequest(provider *ProviderConfig, model string, tuning RequestTuning, policy *NativeToolPolicy) (*nativeToolRequest, error) {
@@ -66,6 +67,8 @@ func resolveNativeToolRequest(provider *ProviderConfig, model string, tuning Req
 				return json.Marshal(body)
 			}
 			image.additionalTools = []string{toolname.WebSearch}
+			imageDefinitions := image.diagnosticDefinitions
+			image.diagnosticDefinitions = func() []map[string]any { return append(imageDefinitions(), search.diagnosticDefinitions()...) }
 			image.authorization.Constraints, err = json.Marshal(struct{ Image, Search json.RawMessage }{image.authorization.Constraints, search.authorization.Constraints})
 			if err != nil {
 				return nil, err

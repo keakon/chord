@@ -36,6 +36,7 @@ func (a *MainAgent) freezeTakeoverCurrentSession(finishStructural func()) (err e
 	if _, frozen := gate.TryFreeze(1); !frozen {
 		return pauseError("target_not_ready", "current session still has active execution")
 	}
+	a.contextDiagnostics.invalidate()
 	a.pause.inputMu.Lock()
 	wasInputClosed := a.pause.inputClosed
 	a.pause.inputClosed = true
@@ -61,6 +62,7 @@ func (a *MainAgent) freezeTakeoverCurrentSession(finishStructural func()) (err e
 			return
 		}
 		a.pause.inputMu.Lock()
+		a.contextDiagnostics.reset()
 		a.pause.inputClosed = wasInputClosed
 		a.pause.inputMu.Unlock()
 	}()

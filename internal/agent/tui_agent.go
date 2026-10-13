@@ -6,6 +6,8 @@ package agent
 import (
 	"context"
 
+	"github.com/keakon/chord/internal/contextdiag"
+
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
@@ -379,4 +381,14 @@ type MCPServerDisplay struct {
 type MCPStateProvider interface {
 	// MCPServerList returns every configured MCP with connection outcome.
 	MCPServerList() []MCPServerDisplay
+}
+
+// ContextDiagnosticsProvider is optional; remote backends need not implement it.
+type ContextDiagnosticsProvider interface{ FocusedContextDiagnostics() ContextDiagnosticsView }
+type ContextDiagnosticsView struct {
+	Snapshot          contextdiag.Snapshot
+	Available         bool
+	Historical        bool
+	UnavailableReason string
+	AgentName         string
 }

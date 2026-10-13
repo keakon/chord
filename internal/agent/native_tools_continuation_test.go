@@ -87,13 +87,13 @@ func TestSubDefersInputAndContextAppendsDuringNativeContinuation(t *testing.T) {
 	before := sub.ctxMgr.MessageCount()
 	queuedBytes := sub.inputQueueBytes
 	sub.drainContextAppendsBeforeTurn()
-	request := sub.messagesForLLMContinuation()
+	request := sub.messagesForLLMContinuation().Messages
 	if !sub.openToolBatchDefersContextAppends() || len(sub.inputCh) != 1 || sub.inputQueueBytes != queuedBytes || len(request) != before || sub.ctxMgr.MessageCount() != before || len(sub.ctxAppendCh) != 1 {
 		t.Fatal("independent input drained before native turn completion")
 	}
 	appendCompletedNativeTurn(sub.ctxMgr)
 	sub.drainContextAppendsBeforeTurn()
-	request = sub.messagesForLLMContinuation()
+	request = sub.messagesForLLMContinuation().Messages
 	if len(sub.inputCh) != 0 || sub.inputQueueBytes != 0 || len(sub.ctxAppendCh) != 0 || request[len(request)-1].Content != "New request" || sub.ctxMgr.MessageCount() != before+3 {
 		t.Fatal("deferred subagent input did not resume after native completion")
 	}

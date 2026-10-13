@@ -296,6 +296,15 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 			m.slashCompleteSelected = 0
 			return m.openHelp()
 		}
+		if fields := strings.Fields(value); len(fields) > 0 && strings.EqualFold(fields[0], contextCommand) {
+			if len(fields) != 1 {
+				return m.enqueueToast("用法：/context（无参数）", "info")
+			}
+			m.input.AddCurrentToHistory()
+			m.input.Reset()
+			m.slashCompleteSelected = 0
+			return m.openContextOverlay()
+		}
 		if len(m.attachments) == 0 && strings.EqualFold(value, statusCommand) {
 			m.recordTUIDiagnostic("local-command", "%s", value)
 			m.input.AddCurrentToHistory()

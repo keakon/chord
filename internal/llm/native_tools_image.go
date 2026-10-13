@@ -22,7 +22,7 @@ func nativeImageRequest(cfg *config.NativeImageGenerationConfig, provider *Provi
 	if err != nil {
 		return nil, err
 	}
-	return &nativeToolRequest{authorization: message.NativeToolAuthorization{Tool: toolname.GenerateImage, Contract: snapshot.Contract, Constraints: constraints}, applyDeclaration: func(raw []byte) ([]byte, error) {
+	return &nativeToolRequest{diagnosticDefinitions: func() []map[string]any { return []map[string]any{nativeImageDeclaration(&snapshot)} }, authorization: message.NativeToolAuthorization{Tool: toolname.GenerateImage, Contract: snapshot.Contract, Constraints: constraints}, applyDeclaration: func(raw []byte) ([]byte, error) {
 		var body map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &body); err != nil {
 			return nil, err
@@ -33,12 +33,7 @@ func nativeImageRequest(cfg *config.NativeImageGenerationConfig, provider *Provi
 				return nil, err
 			}
 		}
-		decl := map[string]any{"type": "image_generation", "model": snapshot.Model, "partial_images": 0}
-		for k, v := range map[string]string{"size": snapshot.Size, "quality": snapshot.Quality, "background": snapshot.Background, "output_format": snapshot.OutputFormat} {
-			if v != "" {
-				decl[k] = v
-			}
-		}
+		decl := nativeImageDeclaration(&snapshot)
 		encoded, err := json.Marshal(decl)
 		if err != nil {
 			return nil, err
@@ -106,4 +101,15 @@ func nativeImageFallbackDefinitions(defs []message.ToolDefinition, provider *Pro
 		}
 	}
 	return out
+}
+
+func nativeImageDeclaration(snapshot *config.NativeImageGenerationConfig) map[string]any {
+	decl := map[string]any{"type": "image_generation", "model": snapshot.Model, "partial_images": 0}
+	for k, v := range map[string]string{"size": snapshot.Size, "quality": snapshot.Quality, "background": snapshot.Background, "output_format": snapshot.OutputFormat} {
+		if v != "" {
+			decl[k] = v
+		}
+	}
+
+	return decl
 }

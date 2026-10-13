@@ -876,8 +876,12 @@ func (c *Client) completeStreamTarget(
 		hadEarlierAttempt := result.hadRequestAttempt
 		result.hadRequestAttempt = true
 		attemptStartedAt := time.Now()
+		observedCtx := ctx
+		if observer, _ := ctx.Value(diagnosticsContextKey{}).(*RequestDiagnostics); observer != nil {
+			observedCtx = context.WithValue(ctx, diagnosticTargetContextKey{}, modelRef)
+		}
 		resp, err = completeWithNativeTools(
-			ctx,
+			observedCtx,
 			t.impl,
 			t.provider,
 			apiKey,

@@ -570,7 +570,16 @@ func (a *MainAgent) emitKeyStateChange(kind, email, accountID string) {
 // request that produced them; 0 marks a caller without an allocated segment
 // (direct calls in tests). The production path passes the sequence allocated by
 // spawnMainLLMResponseGoroutine.
-func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Message, requestSeq uint64) (*message.Response, error) {
+func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput, requestSeq uint64) (*message.Response, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	messages := input.Messages
+	a.stateMu.RLock()
+	diagnosticSession := a.sessionDir
+	a.stateMu.RUnlock()
+	observer := a.contextDiagnostics.begin(diagnosticSession, identity.MainAgentID, input.HistoryGeneration)
+
 	if a.sessionExecutionPaused() {
 		return nil, &executiongate.ErrSessionPaused{}
 	}
@@ -595,6 +604,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		}
 	}()
 	messages = filterQuestionStateMessages(a.prepareMessagesForLLM(messages))
+	observer.SetReduction(a.diagnosticReduction())
 	if observation, ok := ctx.Value(questionRequestContextKey{}).(*questionRequestObservation); ok {
 		messages = questionRequestContext(observation.projection, messages)
 	}
@@ -791,12 +801,14 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		wallReq.wireStreamReducer(streamReducer)
 	}
 	requestOptions := llm.CompleteStreamOptions{
+		Diagnostics:     observer,
 		NativeTools:     a.nativeRequestPolicy(turn),
 		MCPDeclarations: a.effectiveRuntimeMCPDeclarations(),
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {
 			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback)
 			if err == nil && updatedMessages != nil {
 				messages = updatedMessages
+				observer.SetReduction(a.diagnosticReduction())
 				tailOverlayCount -= trailingTurnOverlayCount(requestMessages) - trailingTurnOverlayCount(updatedMessages)
 			}
 			return updatedMessages, err

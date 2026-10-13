@@ -82,9 +82,9 @@ func TestPendingLoopContinuationReachesNextRequestOnce(t *testing.T) {
 	a.setPendingLoopContinuation(&LoopContinuationNote{Title: "LOOP CONTINUE", Text: "Open TODO items: sample-marker"})
 	a.newTurn()
 	history := []message.Message{{Role: "user", Content: "hello"}}
-	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, a.turn.ID, history, "")
+	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, a.turn.ID, llmRequestInput{Messages: history}, "")
 	a.outputWg.Wait()
-	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, a.turn.ID, history, "")
+	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, a.turn.ID, llmRequestInput{Messages: history}, "")
 	a.outputWg.Wait()
 
 	if got := len(provider.requests); got != 2 {

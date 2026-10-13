@@ -16,6 +16,7 @@ import (
 // token stats, and compression settings.
 type Manager struct {
 	mu                       sync.RWMutex
+	historyGeneration        uint64
 	systemPrompt             message.Message
 	systemPromptBytes        int
 	systemPromptContextBytes int
@@ -307,6 +308,9 @@ func (m *Manager) DropLastMessages(n int) {
 	if len(m.messages) < n {
 		n = len(m.messages)
 	}
+	if n > 0 {
+		m.historyGeneration++
+	}
 	m.payloadBytes -= MessagePayloadBytes(m.messages[len(m.messages)-n:])
 	m.contextBytes -= messageContextBytes(m.messages[len(m.messages)-n:])
 	imagePayloadBytes, imageTokens := imagePartAccounting(m.messages[len(m.messages)-n:])
@@ -325,6 +329,10 @@ func (m *Manager) DropLastMessages(n int) {
 func (m *Manager) Snapshot() []message.Message {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	return m.snapshotLocked()
+}
+
+func (m *Manager) snapshotLocked() []message.Message {
 	out := make([]message.Message, len(m.messages))
 	for i, msg := range m.messages {
 		out[i] = msg.Clone()
@@ -350,6 +358,7 @@ func (m *Manager) RestoreMessages(msgs []message.Message) {
 	}
 	replaced := make([]message.Message, len(repaired))
 	copy(replaced, repaired)
+	m.historyGeneration++
 	m.messages = replaced
 	m.payloadBytes = MessagePayloadBytes(replaced)
 	m.contextBytes = messageContextBytes(replaced)
@@ -376,6 +385,7 @@ func (m *Manager) RepairOrphanToolMessagesInPlace() int {
 	if n == 0 {
 		return 0
 	}
+	m.historyGeneration++
 	m.messages = repaired
 	m.payloadBytes = MessagePayloadBytes(repaired)
 	m.contextBytes = messageContextBytes(repaired)
@@ -1380,6 +1390,7 @@ func (m *Manager) ReplacePrefixAtomic(
 		newMessages = append(newMessages, prefix...)
 		newMessages = append(newMessages, repairedTail...)
 		m.messages = newMessages
+		m.historyGeneration++
 		m.refreshMessageByteStateLocked()
 		return nil
 	}
@@ -1396,6 +1407,7 @@ func (m *Manager) ReplacePrefixAtomic(
 		m.messages = make([]message.Message, len(newMessages))
 		copy(m.messages, newMessages)
 	}
+	m.historyGeneration++
 	m.refreshMessageByteStateLocked()
 
 	return nil

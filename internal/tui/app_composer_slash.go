@@ -173,6 +173,8 @@ func attachmentsFromParts(parts []message.ContentPart) []Attachment {
 }
 
 // slashCommand describes one slash command for autocomplete.
+const contextCommand = "/context"
+
 const statusCommand = "/status"
 
 type slashCommand struct {
@@ -202,6 +204,7 @@ var slashCommands = []slashCommand{
 	{Cmd: agent.MemoryCommand, Desc: "view and manage project memory"},
 	{Cmd: agent.MemoryOrganizeCommand, Desc: "organize all active memories (uses model)"},
 	{Cmd: "/stats", Desc: "usage statistics"},
+	{Cmd: contextCommand, Desc: "context composition, reduction and cache"},
 	{Cmd: statusCommand, Desc: "runtime overview"},
 	{Cmd: takeoverCommand, Desc: "take over an active local session"},
 	{Cmd: "/rename", Desc: "set or clear session title"},

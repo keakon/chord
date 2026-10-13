@@ -20,6 +20,7 @@ Start with the defaults for most sessions. For everyday use, remember:
 
 ## How to use this page
 
+- **Understanding an input or cache observation:** [Explain the latest request](#explain-the-latest-request).
 - **Choosing a layer:** [Quick comparison](#quick-comparison).
 - **Durable summaries and checkpoints:** [Context compaction](#context-compaction).
 - **Request-level trimming:** [Context reduction](#context-reduction).
@@ -33,7 +34,7 @@ Start with the defaults for most sessions. For everyday use, remember:
 | Uses an LLM | ✅ (configurable model pool) | ❌ (heuristic rules only) |
 | When it fires | Threshold is reached and a main-model request is about to start / manual `/compact` / error recovery | Before every LLM request |
 | Typical latency | Seconds to tens of seconds (waits for LLM) | Milliseconds (in-memory rule matching) |
-| User visibility | TUI shows "Compacting context..." progress | Silent (invisible) |
+| User visibility | TUI shows "Compacting context..." progress | Silent; inspect the latest request with `/context` |
 | Loop mode | Enabled; compaction still runs so long sessions can continue | Enabled; loop mode does not change reduction, see [Loop mode](#loop-mode) |
 
 **How they work together**: Reduction is the lightweight first line of defense:
@@ -574,3 +575,21 @@ context:
 - [Usage: `/compact`](./usage.md#local-slash-commands)
 - [Performance](./performance.md)
 - [Troubleshooting](./troubleshooting.md)
+
+## Explain the latest request
+
+Enter `/context` in the TUI to inspect the latest dispatched request for the focused main task or worker. It is a local command: it does not send a message, invoke a model, or consume attached files. The three pages show:
+
+- **Composition (构成):** the estimated system prompt, tool definitions, environment instructions, conversation, tool results, runtime reminders, and attachments, with their main sources. Percentages refer only to the estimated portion.
+- **Reduction (剪裁):** the request's before/after estimates using one frozen calibration, with protection and stable-input reuse reasons. This is request-level trimming, not durable compaction. Workers without this trimming step show it as unavailable. Reduction estimates are also unavailable for opaque native replay or when collection limits are reached.
+- **Cache (缓存):** local system/tool/message-prefix changes alongside cache reads or writes reported by the service. Several changes can appear together, even when the service also reports cache reads.
+
+Use `Tab` / `Shift+Tab` or `1` / `2` / `3` to change pages; arrow keys, `j` / `k`, `PgUp` / `PgDn`, `g` / `G`, and the mouse wheel scroll. `Esc` or `q` returns to the composer. The panel refreshes only while open. `/status` remains the runtime overview.
+
+Composition estimates describe **provider_input**: normalized local input after tool selection, before the protocol adapter. Text uses UTF-8 byte length divided by three, rounded up per fragment. Images, PDFs, opaque native replay, and encrypted reasoning are marked as unestimated; they are not counted as zero-cost input. Protocol wrapping and server-side processing can change the actual input. A partial scan is labeled explicitly.
+
+Each transport attempt has its own input and response usage. Retries and native continuations replace the displayed attempt rather than accumulating their usage onto one input. A failed response can report partial usage. After a history rewrite or model change, the last observation is marked historical; restored sessions start with no observation. Connections without local diagnostics show an unavailable message.
+
+A matching local prefix does not guarantee a cache hit. Zero or missing cache fields mean that no confirmed cache read was reported, not that caching is unsupported or that a particular change caused a miss. A first request can still report a cache read. The panel does not infer cache expiry, money saved, exact hit rates, or causes of billing changes. WebSocket deltas and server-side context reuse do not mean that earlier history stops occupying context.
+
+The diagnostics bundle (`Ctrl+G` by default) includes `context.json` for the focused task. Exporting from the `/context` panel uses the request snapshot currently displayed. Names are anonymized, and the JSON excludes session/task identifiers, credentials, URLs, arguments, message bodies, attachments, and internal fingerprints. This describes the context JSON; the bundle's other files retain their existing diagnostic content and redaction rules.

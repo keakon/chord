@@ -425,6 +425,8 @@ func (m *Model) statusBarModeLabel() string {
 		return "RULES"
 	case ModeStopJobConfirm:
 		return "STOP"
+	case ModeContext:
+		return "CONTEXT"
 	case ModeJobsOverlay:
 		return "JOBS"
 	default:

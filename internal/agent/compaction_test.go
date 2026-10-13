@@ -2205,7 +2205,7 @@ func TestCallLLMLogsPreparedReductionStatsWhenFocusedSubAgentExists(t *testing.T
 		{Role: "user", Content: "u4"},
 	}
 
-	if _, err := a.callLLMForRequest(context.Background(), msgs, 0); err != nil {
+	if _, err := a.callLLMForRequest(context.Background(), llmRequestInput{Messages: msgs}, 0); err != nil {
 		t.Fatalf("callLLM: %v", err)
 	}
 	logOutput := buf.String()

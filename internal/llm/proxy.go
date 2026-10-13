@@ -99,6 +99,7 @@ func providerResponseHeaderTimeout(provider *ProviderConfig) time.Duration {
 // including connection setup and writing the request body. The watchdog is
 // stopped once Do returns so long-lived streaming response bodies remain valid.
 func doRequestUntilHeaders(client *http.Client, req *http.Request, timeout time.Duration) (*http.Response, error) {
+	prepareDiagnosticSubmission(req.Context(), "http")
 	markRequestPrepared(req.Context())
 	lease, err := executiongate.Begin(req.Context(), executiongate.LLM)
 	if err != nil {

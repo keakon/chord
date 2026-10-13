@@ -55,32 +55,33 @@ func (s *SubAgent) recoverFromContextLength(err error) bool {
 	}
 	s.turn.SubAgentContextRecoveryCount++
 	log.Infof("SubAgent context length recovery compressed history agent=%v turn_id=%v before=%v after=%v target_tokens=%v", s.instanceID, s.turn.ID, len(messages), len(compressed), target)
-	s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+	s.asyncCallLLMWithFlightMarked(s.turn, snapshotLLMRequest(s.ctxMgr))
 	return true
 }
 
-func (s *SubAgent) prepareContextForLLM(messages []message.Message) (prepared []message.Message) {
+func (s *SubAgent) prepareContextForLLM(input llmRequestInput) (prepared llmRequestInput) {
+	messages := input.Messages
 	// Compression must consume and persist the full history. Preview selection
 	// happens only on the returned request copy.
-	defer func() { prepared = projectGeneratedImagePreviews(prepared) }()
+	defer func() { prepared.Messages = projectGeneratedImagePreviews(prepared.Messages) }()
 	if s == nil || len(messages) <= 2 {
-		return messages
+		return input
 	}
 	usage := s.applyModelCompactionConfig()
 	if usage <= 0 {
-		return messages
+		return input
 	}
 	budget := s.ctxMgr.GetUsableCompactionBudget()
 	if budget <= 0 {
 		budget = s.ctxMgr.GetMaxTokens()
 	}
 	if budget <= 0 {
-		return messages
+		return input
 	}
 	estimated := estimateMessagesTokens(s.ctxMgr, projectGeneratedImagePreviews(messages))
 	requestBudget := s.ctxMgr.GetUsableInputBudget()
 	if estimated < int(float64(budget)*usage) && (requestBudget <= 0 || estimated < requestBudget) {
-		return messages
+		return input
 	}
 	target := int(float64(budget) * usage * 0.85)
 	if requestBudget > 0 {
@@ -88,9 +89,9 @@ func (s *SubAgent) prepareContextForLLM(messages []message.Message) (prepared []
 	}
 	if compressed, ok := s.compactContextForTarget(messages, target, "proactive context budget protection"); ok {
 		log.Infof("SubAgent proactively compressed context agent=%v turn_id=%v before=%v after=%v estimated_tokens=%v target_tokens=%v", s.instanceID, s.turn.ID, len(messages), len(compressed), estimated, target)
-		return compressed
+		return snapshotLLMRequest(s.ctxMgr)
 	}
-	return messages
+	return input
 }
 
 func (s *SubAgent) compactContextForTarget(messages []message.Message, target int, reason string) ([]message.Message, bool) {

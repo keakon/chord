@@ -89,7 +89,7 @@ func TestMainPreparationFreezeInterruptsHookWithoutCancellingTurn(t *testing.T) 
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		_, err := a.callLLMForRequest(turnCtx, []message.Message{{Role: message.RoleUser, Content: "Sample request"}}, 0)
+		_, err := a.callLLMForRequest(turnCtx, llmRequestInput{Messages: []message.Message{{Role: message.RoleUser, Content: "Sample request"}}}, 0)
 		result <- err
 	}()
 	select {

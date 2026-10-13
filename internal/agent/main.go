@@ -41,6 +41,7 @@ import (
 // consumes.
 type MainAgent struct {
 	mcpStatus                   mcpStatusState
+	contextDiagnostics          contextDiagnosticsRuntime
 	pause                       sessionPauseRuntime
 	stagedMainInputs            []stagedSessionInput // owned by the event loop
 	requestStarts               atomic.Uint64

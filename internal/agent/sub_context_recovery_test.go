@@ -50,7 +50,7 @@ func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
 	}
 	sub.ctxMgr.RestoreMessages(messages)
 	sub.llmRequestInFlight.Store(true)
-	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
 
 	deadline := time.After(3 * time.Second)
 	for sub.turn.SubAgentContextRecoveryCount == 0 {
@@ -136,7 +136,7 @@ func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) 
 	}
 	sub.ctxMgr.RestoreMessages(messages)
 
-	prepared := sub.prepareContextForLLM(messages)
+	prepared := sub.prepareContextForLLM(llmRequestInput{Messages: messages}).Messages
 	if len(prepared) >= len(messages) {
 		t.Fatalf("prepared message count = %d, want less than %d", len(prepared), len(messages))
 	}
@@ -189,7 +189,7 @@ func TestSubAgentCompactionSeparatesFixedThresholdFromRequestSafety(t *testing.T
 			sub.ctxMgr.RestoreMessages(messages)
 			estimated := estimateMessagesTokens(sub.ctxMgr, messages)
 			sub.ctxMgr.SetTokenBudgets(estimated*5, estimated*tc.requestPct/100, estimated*tc.fixedScale, 0)
-			prepared := sub.prepareContextForLLM(messages)
+			prepared := sub.prepareContextForLLM(llmRequestInput{Messages: messages}).Messages
 			if got := len(prepared) < len(messages); got != tc.compact {
 				t.Fatalf("compacted = %v, want %v; messages before/after = %d/%d", got, tc.compact, len(messages), len(prepared))
 			}

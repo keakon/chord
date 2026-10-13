@@ -47,6 +47,11 @@ func (m *Model) handleSessionAgentEvent(event agent.AgentEvent) (bool, agentEven
 		effects.addFollowup(m.openSessionSelect(evt.Sessions, evt.Prefetched))
 		return true, effects
 	case agent.SessionSwitchStartedEvent:
+		if m.mode == ModeContext {
+			m.contextOverlay.view = agent.ContextDiagnosticsView{UnavailableReason: "not_observed"}
+			m.contextOverlay.scroll = 0
+			m.contextOverlay.cacheKey = ""
+		}
 		m.beginSessionSwitch(evt.Kind, evt.SessionID)
 		m.mailboxQueue = nil
 		// Queued and on-screen dialogs belong to the session being replaced;

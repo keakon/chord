@@ -90,7 +90,7 @@ func TestSubAgentCompactionUsesSharedModelThreshold(t *testing.T) {
 			sub.switchModel(client, "worker", mc.Limit.Context)
 			// Discard the system-prompt change to isolate the threshold boundary.
 			sub.ctxMgr.RestoreMessages(messages)
-			prepared := sub.prepareContextForLLM(messages)
+			prepared := sub.prepareContextForLLM(llmRequestInput{Messages: messages}).Messages
 			if got := len(prepared) < len(messages); got != tc.compact {
 				t.Fatalf("compacted = %v, want %v; message counts = %d/%d", got, tc.compact, len(messages), len(prepared))
 			}
@@ -128,11 +128,11 @@ func TestSubAgentCompactionFollowsModelPoolCursorAndReservation(t *testing.T) {
 		if got := sub.applyModelCompactionConfig(); got != tc.threshold {
 			t.Fatalf("cursor %d threshold = %v, want %v", tc.cursor, got, tc.threshold)
 		}
-		sub.prepareContextForLLM([]message.Message{
+		sub.prepareContextForLLM(llmRequestInput{Messages: []message.Message{
 			{Role: message.RoleUser, Content: "task"},
 			{Role: message.RoleAssistant, Content: "working"},
 			{Role: message.RoleUser, Content: "continue"},
-		})
+		}})
 		if got := sub.ctxMgr.GetUsableCompactionBudget(); got != tc.budget {
 			t.Fatalf("cursor %d budget = %d, want %d", tc.cursor, got, tc.budget)
 		}

@@ -92,6 +92,8 @@ func (m *Model) handleModeKey(msg tea.KeyMsg) tea.Cmd {
 		return m.handleRulesKey(msg)
 	case ModeStopJobConfirm:
 		return m.handleStopJobConfirmKey(msg)
+	case ModeContext:
+		return m.handleContextOverlayKey(msg)
 	case ModeJobsOverlay:
 		return m.handleJobsOverlayKey(msg)
 	default:

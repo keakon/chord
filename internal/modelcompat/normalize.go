@@ -631,9 +631,10 @@ func NormalizeForTarget(msgs []message.Message, target TargetModel, opts Normali
 				marker = joinNonEmpty(importedToolResultMarkerPrefix+callID+"]", content)
 			}
 			out[i] = message.Message{
-				Role:       message.RoleAssistant,
-				Content:    marker,
-				Provenance: cloneProvenance(out[i].Provenance),
+				Role:             message.RoleAssistant,
+				Content:          marker,
+				Provenance:       cloneProvenance(out[i].Provenance),
+				DiagnosticSource: out[i].DiagnosticSource,
 			}
 			report.DowngradedToolCalls++
 		}
@@ -905,6 +906,7 @@ func downgradeAssistantToolCallsToText(msg message.Message) message.Message {
 	}
 	return message.Message{
 		Role:             message.RoleAssistant,
+		DiagnosticSource: msg.DiagnosticSource,
 		Content:          strings.TrimSpace(strings.Join(blocks, "\n\n")),
 		ThinkingBlocks:   msg.ThinkingBlocks,
 		ReasoningContent: msg.ReasoningContent,
@@ -1032,6 +1034,9 @@ func compactAdjacentAssistantMessages(msgs []message.Message) []message.Message 
 		}
 		last := &out[len(out)-1]
 		if last.NativeTools == nil && msg.NativeTools == nil && last.Role == message.RoleAssistant && msg.Role == message.RoleAssistant && last.Kind == msg.Kind && len(last.ToolCalls) == 0 && len(msg.ToolCalls) == 0 && len(last.Parts) == 0 && len(msg.Parts) == 0 && len(last.ThinkingBlocks) == 0 && len(msg.ThinkingBlocks) == 0 && len(last.ResponsesOutput) == 0 && len(msg.ResponsesOutput) == 0 && len(last.GeminiParts) == 0 && len(msg.GeminiParts) == 0 && strings.TrimSpace(last.ReasoningContent) == "" && strings.TrimSpace(msg.ReasoningContent) == "" {
+			if last.DiagnosticSource != msg.DiagnosticSource {
+				last.DiagnosticSource = message.DiagnosticSourceMixed
+			}
 			last.Content = joinNonEmpty(last.Content, msg.Content)
 			continue
 		}

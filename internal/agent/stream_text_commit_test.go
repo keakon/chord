@@ -82,7 +82,7 @@ func TestMainAgentEmitsStreamTextCommitBeforeSegmentEnd(t *testing.T) {
 
 	a.newTurn()
 	turnID := a.turn.ID
-	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, []message.Message{{Role: "user", Content: "hello"}}, "")
+	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hello"}}}, "")
 	<-provider.started
 	close(provider.release)
 	a.outputWg.Wait()
@@ -154,7 +154,7 @@ func TestMainAgentCommitsEmptyContent(t *testing.T) {
 
 	a.newTurn()
 	turnID := a.turn.ID
-	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, []message.Message{{Role: "user", Content: "hello"}}, "")
+	a.spawnMainLLMResponseGoroutine(a.turn.Ctx, turnID, llmRequestInput{Messages: []message.Message{{Role: "user", Content: "hello"}}}, "")
 	<-provider.started
 	// A tool-only round: no content, a single tool call. This is the shape that
 	// must still retract any streamed text via an empty commit.
@@ -196,7 +196,7 @@ func TestSubAgentEmitsStreamTextCommitBeforeSegmentEnd(t *testing.T) {
 	sub.llmMu.Unlock()
 	parent.focusedAgent.Store(sub)
 
-	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
 	waitForSubAgentLLMResult(t, sub, 2*time.Second)
 	// The request goroutine reports its segment end in a deferred call, after
 	// it queues the result the wait above consumed: llmWG.Wait is the barrier
@@ -264,7 +264,7 @@ func TestSubAgentStreamTextCommitGatedWhenUnfocused(t *testing.T) {
 	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
 	sub.llmMu.Unlock()
 
-	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
 	waitForSubAgentLLMResult(t, sub, 2*time.Second)
 
 	for _, evt := range drainAgentEvents(parent.Events()) {
@@ -288,7 +288,7 @@ func TestSubAgentCommitsEmptyFinalText(t *testing.T) {
 	sub.llmClient = llm.NewClient(cfg, provider, "model", 1024, "sys")
 	sub.llmMu.Unlock()
 	parent.focusedAgent.Store(sub)
-	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
 	waitForSubAgentLLMResult(t, sub, 2*time.Second)
 	found := false
 	for _, evt := range drainAgentEvents(parent.Events()) {

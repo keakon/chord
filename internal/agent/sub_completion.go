@@ -22,7 +22,7 @@ func (s *SubAgent) finishCompletion(callID string, result *AgentResult) {
 		s.clearPendingCompleteIntent()
 		s.drainContextAppendsBeforeTurn()
 		s.appendPendingUserMessages(pending)
-		s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+		s.asyncCallLLMWithFlightMarked(s.turn, snapshotLLMRequest(s.ctxMgr))
 		return
 	}
 	if outstanding := s.parent.outstandingJoinChildTaskIDs(s.taskID); len(outstanding) > 0 {
@@ -88,7 +88,7 @@ func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error, de
 	if s.completionRecoveryBudgetAvailable() {
 		s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error(), ToolResultStatusError)
 		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with corrected, valid arguments.", cause)})
-		s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+		s.asyncCallLLMWithFlightMarked(s.turn, snapshotLLMRequest(s.ctxMgr))
 		return
 	}
 	if degraded != nil {
@@ -130,7 +130,7 @@ func (s *SubAgent) rejectResultContractViolation(callID string, violation *Resul
 	if s.resultContractRecoveryBudgetAvailable() {
 		s.appendCompleteToolResult(callID, "Completion rejected: "+violation.Error(), ToolResultStatusError)
 		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with a result that satisfies the task's result contract.", violation)})
-		s.asyncCallLLMWithFlightMarked(s.turn, s.ctxMgr.Snapshot())
+		s.asyncCallLLMWithFlightMarked(s.turn, snapshotLLMRequest(s.ctxMgr))
 		return
 	}
 	s.setResultContractFailure(violation.Diagnostics())

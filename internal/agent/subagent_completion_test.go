@@ -32,7 +32,7 @@ func TestSubAgentPersistsThinkingBlocksWithAssistantToolCall(t *testing.T) {
 		Models: map[string]config.ModelConfig{"model": {Limit: config.ModelLimit{Context: 8192, Output: 1024}}},
 	}, []string{"test-key"})
 	sub.llmClient = llm.NewClient(providerCfg, &blockingStreamProvider{calls: []scriptedStreamCall{{resp: response}}}, "model", 1024, "sys")
-	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
 	result := waitForSubAgentLLMResult(t, sub, time.Second)
 	sub.llmWG.Wait()
 	if result.err != nil {
@@ -388,7 +388,7 @@ func TestSubAgentRequestsRequiredToolChoiceWhenProviderSupportsIt(t *testing.T) 
 	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{mustJSONToolCall(t, "complete-1", "complete", map[string]any{"summary": "done"})})}}}}
 	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
 
-	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
 	waitForSubAgentLLMResult(t, sub, time.Second)
 
 	_, seen := provider.snapshot()
@@ -415,7 +415,7 @@ func TestSubAgentRequestCarriesTurnResponsesState(t *testing.T) {
 	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{Content: "done"}}}}
 	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
 
-	sub.asyncCallLLMWithFlightMarked(sub.turn, sub.ctxMgr.Snapshot())
+	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
 	waitForSubAgentLLMResult(t, sub, time.Second)
 
 	seen := provider.turnStatesSnapshot()

@@ -39,7 +39,7 @@ func TestMainResponsesFirstRequestPinsSessionIdentity(t *testing.T) {
 	}
 	// Simulate a freshly installed client whose identity was not initialized.
 	c.SetSessionID("")
-	if _, err := a.callLLMForRequest(context.Background(), []message.Message{{Role: message.RoleUser, Content: "hello"}}, 0); err != nil {
+	if _, err := a.callLLMForRequest(context.Background(), llmRequestInput{Messages: []message.Message{{Role: message.RoleUser, Content: "hello"}}}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if b["prompt_cache_key"] != want {
