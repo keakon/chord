@@ -16,7 +16,9 @@ Start with the behavior you want to change. You do not need to configure every e
 
 Add `AGENTS.md` files when a project needs durable instructions for automated agents, such as coding conventions, verification commands, safety rules, or repository-specific review expectations.
 
-At session start, Chord searches from the working directory up to the project root, then loads `AGENTS.md` files from root to working directory. Starting at the project root loads only its root file. Main and sub-agents receive these rules; they do not override higher-priority instructions.
+At session start, Chord searches from the working directory up to the project root, then loads `AGENTS.md` files from root to working directory. Starting at the project root initially loads its root file. Successful local reads and searches discover rules along the accessed directory chain. Writes, edits, patches, deletes, and shell execution check their target directories first: if rules have not reached the model yet, the operation stays unexecuted and the model reconsiders it after the rules are saved. Chord never automatically replays that operation. Main and sub-agents maintain independent rule snapshots; deeper rules apply within their subtree and do not override higher-priority instructions.
+
+Shell checks cover its working directory only; Chord does not parse paths or `cd` commands inside shell text. External projects, MCP, and provider-native tools are outside automatic directory discovery. Each directory observation stays fixed for the current binding; resume the session or change its working directory to refresh rules. Compaction preserves the exact active rule text. Unreadable or oversized rules block modifications in affected directories; check the reported path and permissions, or use a larger-context model when the input budget is insufficient.
 
 For Python projects, Chord searches the same directories for the nearest valid virtual environment, checking `.venv`, `venv`, then `env` at each level. It asks agents to prefer that interpreter. Working directory, platform, and virtual environment information remain available after compaction, so you do not need to repeat them.
 
@@ -133,8 +135,19 @@ Literal `${CHORD_SKILL_DIR}/<path>` references in the body get the same
 check as an auxiliary hint and warn at most. Bare relative paths in prose
 are not scanned.
 
-The `paths` frontmatter field is parsed but currently has no effect: skills
-are filtered by permissions only, not by file patterns.
+Use `paths` to suggest a skill after a successful local `read` matches a project file:
+
+```yaml
+paths:
+  - "internal/tui/**"
+  - "**/*.go"
+```
+
+Patterns are case-sensitive, checkout-relative globs, combined with OR. Use `/` separators and `dir/**` for a directory; absolute paths, `..`, negation, and malformed patterns disable automatic discovery for that skill. `chord doctor skills` reports these errors. Omitted or empty effective `paths` means an unconditional skill; `**` waits for any project-file read. A nonempty sidecar `paths` list replaces frontmatter patterns; an omitted or empty sidecar list does not.
+
+Conditional skills stay out of the startup catalog. Matching publishes a bounded name-and-description notice after the tool round closes; it does not load instructions, execute a skill, or grant permissions. The model may still call an allowed skill by name before a match, and `/skill` can explicitly load allowed conditional or manual-only skills. The selector distinguishes path matches, recorded notices, available bodies, and skills that need reloading after compaction.
+
+Only successful local text reads trigger discovery, including partial reads. Shell, grep, glob, image/PDF tools, MCP, and provider-native tools do not. Symlinks match their real target inside the current checkout. Discovery is independent for each agent; compaction carries activation metadata and may publish a short reminder, without restoring skill bodies automatically.
 
 ## Diagnose skills
 

@@ -152,3 +152,16 @@ func TestMessagesToBlocksShowsImportedResponsesReasoning(t *testing.T) {
 		t.Fatalf("blocks = %#v, want imported reasoning restored as thinking", blocks)
 	}
 }
+
+func TestMessagesToBlocksDirectoryInstructionControlReason(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleUser, Kind: message.KindDirectoryInstructions, DirectoryInstructions: &message.DirectoryInstructions{}},
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: "write"}}},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "not executed", ToolStatus: "cancelled", ToolControlReason: message.ToolControlReasonDirectoryInstructionsRequired},
+	}
+	next := 0
+	blocks := messagesToBlocks(msgs, &next)
+	if len(blocks) != 1 || blocks[0].ControlReason != message.ToolControlReasonDirectoryInstructionsRequired || string(blocks[0].ResultStatus) != "cancelled" {
+		t.Fatalf("unexpected blocks: %+v", blocks)
+	}
+}

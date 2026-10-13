@@ -346,6 +346,12 @@ func (r *RecoveryManager) PersistMessageDurable(agentID string, msg message.Mess
 }
 
 func (r *RecoveryManager) persistMessage(agentID string, msg message.Message, durable bool) error {
+	if msg.Kind == message.KindDirectoryInstructionProjection {
+		return fmt.Errorf("request-only directory instruction projection cannot be persisted")
+	}
+	if err := message.ValidateDirectoryInstructions(msg); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -641,6 +647,12 @@ func (r *RecoveryManager) Recover() (*SessionSnapshot, error) {
 func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) error {
 	var data bytes.Buffer
 	for _, msg := range msgs {
+		if msg.Kind == message.KindDirectoryInstructionProjection {
+			return fmt.Errorf("request-only directory instruction projection cannot be persisted")
+		}
+		if err := message.ValidateDirectoryInstructions(msg); err != nil {
+			return err
+		}
 		raw, err := json.Marshal(msg)
 		if err != nil {
 			return fmt.Errorf("rewrite log: marshal: %w", err)

@@ -120,6 +120,7 @@ type BoundedText struct {
 // before reading Status as success or failure.
 type ProjectedToolCall struct {
 	DeliveredFiles  []message.DeliveredFile `json:"delivered_files,omitempty"`
+	ControlReason   string                  `json:"control_reason,omitempty"`
 	CallID          string                  `json:"call_id"`
 	Name            string                  `json:"name"`
 	Status          string                  `json:"status"`
@@ -258,7 +259,7 @@ func buildProjectedTurns(exported *ExportedSession, limits ProjectionLimits) []P
 	}
 
 	for i, em := range exported.Messages {
-		if em.Role == message.RoleSystem {
+		if em.Role == message.RoleSystem || em.Kind == message.KindDirectoryInstructions || em.Kind == message.KindSkillDiscovery {
 			continue
 		}
 		if em.Role == message.RoleUser {
@@ -473,6 +474,7 @@ func renderProjectedToolCall(exported *ExportedSession, decl toolDeclRef, result
 			call.Status = normalizeToolStatus(rm.ToolStatus)
 			call.DeliveredFiles = message.CloneDeliveredFiles(rm.DeliveredFiles)
 			call.RecoveryState = rm.ToolRecoveryState
+			call.ControlReason = rm.ToolControlReason
 			call.DurationMs = rm.ToolDurationMs
 			call.ResultDigest = resultDigest(rm.Content)
 			call.Ref = textRef(sessionID, resultIdx, decl.callID)

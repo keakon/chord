@@ -202,8 +202,8 @@ func TestMainAgentAppendUserSkillInvocationManualOnly(t *testing.T) {
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{writeTempSkill(t, projectRoot, "manual-skill", "Manual workflow.", true)})
 
-	if got := a.ListSkills(); len(got) != 0 {
-		t.Fatalf("ListSkills() = %+v, want a manual-only skill hidden from the model", got)
+	if got := a.CallableSkills(); len(got) != 0 {
+		t.Fatalf("CallableSkills() = %+v, want a manual-only skill hidden from the model", got)
 	}
 	if _, err := a.LoadSkill("manual-skill"); err == nil {
 		t.Fatal("the model path must refuse a manual-only skill")

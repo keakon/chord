@@ -101,10 +101,11 @@ func TestToolDiscoveryPreservesLoadedToolsAcrossProviderFallback(t *testing.T) {
 					sub.llmClient = client
 					sub.tools = registry
 					sub.setRuleset(rules)
+					prepareSubRequestDirectoryFixture(t, sub)
 					for _, msg := range messages {
 						sub.ctxMgr.Append(msg)
 					}
-					sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: messages})
+					sub.asyncCallLLMWithFlightMarked(sub.turn)
 					select {
 					case result := <-sub.llmCh:
 						err = result.err

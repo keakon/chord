@@ -346,6 +346,7 @@ func callCompleteStreamWithRetryForTest(
 		generation,
 		changedCh,
 		nil,
+		nil,
 	)
 }
 

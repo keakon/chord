@@ -10,13 +10,13 @@ import (
 )
 
 func TestBuildSessionContextReminder_Empty(t *testing.T) {
-	if got := buildSessionContextReminder(SessionEnvSnapshot{}, ""); got != "" {
+	if got := buildSessionContextReminder(SessionEnvSnapshot{}, nil); got != "" {
 		t.Fatalf("expected empty for empty inputs, got %q", got)
 	}
 }
 
 func TestBuildSessionContextReminder_OnlyDate(t *testing.T) {
-	got := buildSessionContextReminder(SessionEnvSnapshot{Date: "Apr 17 2026"}, "")
+	got := buildSessionContextReminder(SessionEnvSnapshot{Date: "Apr 17 2026"}, nil)
 	if got == "" {
 		t.Fatal("expected non-empty reminder")
 	}
@@ -38,7 +38,7 @@ func TestBuildSessionContextReminder_OnlyDate(t *testing.T) {
 }
 
 func TestBuildSessionContextReminder_IncludesSessionWorkingDirectory(t *testing.T) {
-	got := buildSessionContextReminder(SessionEnvSnapshot{WorkDir: "/repo/session", Platform: "test/os", Date: "Apr 17 2026"}, "")
+	got := buildSessionContextReminder(SessionEnvSnapshot{WorkDir: "/repo/session", Platform: "test/os", Date: "Apr 17 2026"}, nil)
 	if got == "" {
 		t.Fatal("expected non-empty reminder")
 	}
@@ -87,45 +87,15 @@ func TestCallLLMInjectsWorkingDirectoryReminderIntoFirstProviderRequest(t *testi
 }
 
 func TestBuildSessionContextReminder_WithAgentsMD(t *testing.T) {
-	got := buildSessionContextReminder(SessionEnvSnapshot{Date: "Apr 17 2026"}, "project rules body")
-	if got == "" {
-		t.Fatal("expected non-empty reminder")
+	facts := []message.DirectoryInstructionFact{directoryTestFact(".", "project rules body")}
+	got := buildSessionContextReminder(SessionEnvSnapshot{Date: "Apr 17 2026"}, facts)
+	for _, fragment := range []string{"# AGENTS.md instructions", "<INSTRUCTIONS>\nproject rules body\n</INSTRUCTIONS>", "Deeper directory rules override parent rules only within their subtree", "role permissions remain higher priority", "Today's date"} {
+		if !strings.Contains(got, fragment) {
+			t.Fatalf("missing %q in %q", fragment, got)
+		}
 	}
-	if !strings.HasPrefix(got, "# AGENTS.md instructions\n") {
-		t.Errorf("AGENTS.md block must declare its identity on the first line: %q", got)
-	}
-	if !strings.Contains(got, "<INSTRUCTIONS>") || !strings.Contains(got, "</INSTRUCTIONS>") {
-		t.Errorf("missing <INSTRUCTIONS> bounding markers: %q", got)
-	}
-	if !strings.Contains(got, "Each applicable AGENTS.md from the repository root through the current working directory is already loaded here before the first visible user message") {
-		t.Errorf("missing AGENTS.md loaded-state line: %q", got)
-	}
-	if !strings.Contains(got, "root-to-current order") || !strings.Contains(got, "with its path labeled") {
-		t.Errorf("missing AGENTS.md scoped loading details: %q", got)
-	}
-	if !strings.Contains(got, "Treat these loaded sections as mandatory scoped workspace instructions") {
-		t.Errorf("missing mandatory AGENTS.md workspace-instruction guidance: %q", got)
-	}
-	if !strings.Contains(got, "follow every applicable instruction within the instruction priority order") {
-		t.Errorf("missing must-follow AGENTS.md guidance: %q", got)
-	}
-	if !strings.Contains(got, "Do not use file, search, or shell tools to rediscover or reread them") {
-		t.Errorf("missing AGENTS.md no-reread guidance: %q", got)
-	}
-	if !strings.Contains(got, "Read an additional AGENTS.md only when entering a directory whose instructions were not loaded") {
-		t.Errorf("missing AGENTS.md unloaded-scope guidance: %q", got)
-	}
-	if !strings.Contains(got, "inspect only the task-relevant project files needed to understand, modify, or verify the requested work") {
-		t.Errorf("missing task-relevant file inspection guidance: %q", got)
-	}
-	if !strings.Contains(got, "<INSTRUCTIONS>\n") || !strings.Contains(got, "\nproject rules body\n") || !strings.Contains(got, "project rules body\n</INSTRUCTIONS>") {
-		t.Errorf("AGENTS.md body must be bounded inside <INSTRUCTIONS>: %q", got)
-	}
-	if strings.Contains(got, "# currentDate") || strings.Contains(got, "Today's date is") {
-		t.Errorf("should not render duplicate currentDate section: %q", got)
-	}
-	if strings.Contains(got, "may or may not be relevant") {
-		t.Errorf("AGENTS.md reminder should not weaken repository instructions as optional context: %q", got)
+	if strings.Count(got, "# AGENTS.md instructions") != 1 {
+		t.Fatal("duplicate renderer framing")
 	}
 }
 
@@ -158,11 +128,10 @@ func TestCallLLMInjectsAgentsMDReminderIntoFirstProviderRequest(t *testing.T) {
 	if seen[0].Role != "user" || !strings.Contains(seen[0].Content, "# AGENTS.md instructions") || !strings.Contains(seen[0].Content, "<INSTRUCTIONS>") || !strings.Contains(seen[0].Content, "# Repo Rules") {
 		t.Fatalf("first provider message missing AGENTS.md reminder: %#v", seen[0])
 	}
-	if !strings.Contains(seen[0].Content, "Each applicable AGENTS.md from the repository root through the current working directory is already loaded here") ||
-		!strings.Contains(seen[0].Content, "Do not use file, search, or shell tools to rediscover or reread them") ||
-		!strings.Contains(seen[0].Content, "inspect only the task-relevant project files") {
-		t.Fatalf("first provider message should explain loaded AGENTS.md state: %#v", seen[0])
+	if !strings.Contains(seen[0].Content, "Deeper directory rules override parent rules") {
+		t.Fatal("missing scope priority framing")
 	}
+
 	if got := seen[1].Content; !strings.Contains(got, "analyze hardcoded behavior") {
 		t.Fatalf("actual user message = %q, want original content preserved after reminder", got)
 	}

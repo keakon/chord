@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -15,8 +16,13 @@ type skillProviderStub struct {
 	loaded map[string]*skill.Skill
 }
 
-func (s skillProviderStub) ListSkills() []*skill.Meta {
-	return s.list
+func (s skillProviderStub) HasCallableSkills() bool {
+	for _, meta := range s.list {
+		if meta != nil && meta.Discovered && strings.TrimSpace(meta.Name) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s skillProviderStub) LoadSkill(name string) (*skill.Skill, error) {
@@ -61,7 +67,7 @@ func TestSkillToolDescriptionForToolsPointsAtSystemPromptListing(t *testing.T) {
 	desc := tool.DescriptionForTools(nil)
 	for _, want := range []string{
 		"Load a skill's full instructions on demand",
-		"listed in the system prompt's \"Available Skills\" section",
+		"startup catalog",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description missing %q in %q", want, desc)
@@ -115,9 +121,9 @@ func TestSkillToolExecuteSubstitutesSkillPlaceholders(t *testing.T) {
 	}
 }
 
-func TestBuildSkillListingTruncatesLongDescription(t *testing.T) {
+func TestBuildStartupSkillListingTruncatesLongDescription(t *testing.T) {
 	longDesc := strings.Repeat("A", SkillListingMaxDescCharsPerEntry*2)
-	listing := BuildSkillListing([]SkillListingEntry{{Name: "long-skill", Desc: longDesc}}, "## Available Skills\n")
+	listing := BuildStartupSkillListing([]SkillListingEntry{{Name: "long-skill", Desc: longDesc}}, "## Available Skills\n")
 	if !strings.Contains(listing, "long-skill") {
 		t.Fatal("skill name should be present")
 	}
@@ -148,7 +154,7 @@ func TestTruncateSkillDescCountsCharacters(t *testing.T) {
 	}
 }
 
-func TestBuildSkillListingCapsAt32Entries(t *testing.T) {
+func TestBuildStartupSkillListingCapsAt32Entries(t *testing.T) {
 	entries := make([]SkillListingEntry, 40)
 	for i := range entries {
 		entries[i] = SkillListingEntry{
@@ -157,8 +163,8 @@ func TestBuildSkillListingCapsAt32Entries(t *testing.T) {
 		}
 	}
 
-	listing := BuildSkillListing(entries, "## Available Skills\n")
-	if !strings.Contains(listing, "+8 more skills available") {
+	listing := BuildStartupSkillListing(entries, "## Available Skills\n")
+	if !strings.Contains(listing, "8 additional skills") {
 		t.Fatalf("expected overflow summary, got:\n%s", listing)
 	}
 	// The first 32 skills should be shown.
@@ -168,12 +174,12 @@ func TestBuildSkillListingCapsAt32Entries(t *testing.T) {
 	if !strings.Contains(listing, "skill-31") {
 		t.Fatal("32nd skill should be listed")
 	}
-	if strings.Contains(listing, "skill-32") {
-		t.Fatal("33rd skill should NOT be listed")
+	if !strings.Contains(listing, "skill-32") {
+		t.Fatal("omitted skill name must remain discoverable")
 	}
 }
 
-func TestBuildSkillListingRespectsTotalBudget(t *testing.T) {
+func TestBuildStartupSkillListingRespectsTotalBudget(t *testing.T) {
 	// Descriptions at the per-entry cap make the section budget bind well
 	// before the entry cap does.
 	entries := make([]SkillListingEntry, 100)
@@ -184,17 +190,17 @@ func TestBuildSkillListingRespectsTotalBudget(t *testing.T) {
 		}
 	}
 
-	listing := BuildSkillListing(entries, "## Available Skills\n")
+	listing := BuildStartupSkillListing(entries, "## Available Skills\n")
 	if listing == "" {
 		t.Fatal("missing Available Skills listing")
 	}
-	if len(listing) > SkillListingMaxTotalBytes+100 { // small tolerance for the overflow summary
+	if len(strings.Split(listing, "Additional available skill names:")[0]) > SkillListingMaxTotalBytes { // small tolerance for the overflow summary
 		t.Fatalf("listing section too large: %d bytes", len(listing))
 	}
-	if shown := strings.Count(listing, "- **"); shown >= SkillListingMaxEntries {
+	if shown := strings.Count(listing, "- name:"); shown >= SkillListingMaxEntries {
 		t.Fatalf("section budget should cut entries below the %d-entry cap, got %d entries", SkillListingMaxEntries, shown)
 	}
-	if !strings.Contains(listing, "more skills available") {
+	if !strings.Contains(listing, "additional skills") {
 		t.Fatal("expected overflow summary in listing")
 	}
 }
@@ -214,30 +220,38 @@ func TestSkillToolDescriptionDoesNotListSkillNames(t *testing.T) {
 	}
 }
 
-func TestSkillToolDescriptionNoSkillsAvailable(t *testing.T) {
-	tool := NewSkillTool(skillProviderStub{list: nil})
-	desc := tool.DescriptionForTools(nil)
-	if !strings.Contains(desc, "No skills are currently available") {
-		t.Fatal("should report no skills available")
+func TestSkillToolDefinitionIndependentOfCatalog(t *testing.T) {
+	empty := NewSkillTool(skillProviderStub{})
+	full := NewSkillTool(skillProviderStub{list: []*skill.Meta{{Name: "conditional", Discovered: true, Paths: []string{"**"}}}})
+	if empty.DescriptionForTools(nil) != full.DescriptionForTools(nil) {
+		t.Fatal("description depends on catalog")
+	}
+	a, _ := json.Marshal(empty.Parameters())
+	b, _ := json.Marshal(full.Parameters())
+	if string(a) != string(b) || strings.Contains(string(a), "enum") {
+		t.Fatal("schema depends on catalog")
 	}
 }
-
-func TestSkillSchemaIncludesNamesBeyondPromptBudget(t *testing.T) {
-	var list []*skill.Meta
+func TestSkillListingNamesBeyondPromptBudget(t *testing.T) {
 	var entries []SkillListingEntry
 	for i := range SkillListingMaxEntries + 5 {
-		name := fmt.Sprintf("sample-%03d", i)
-		list = append(list, &skill.Meta{Name: name, Discovered: true})
-		entries = append(entries, SkillListingEntry{Name: name})
+		entries = append(entries, SkillListingEntry{Name: fmt.Sprintf("sample-%03d", i)})
 	}
-	list = append(list, &skill.Meta{Name: "hidden", Discovered: false})
-	tool := NewSkillTool(skillProviderStub{list: list})
-	names := tool.Parameters()["properties"].(map[string]any)["name"].(map[string]any)["enum"].([]string)
-	last := entries[len(entries)-1].Name
-	if strings.Contains(BuildSkillListing(entries, ""), last) {
-		t.Fatal("fixture did not truncate")
+	listing := BuildStartupSkillListing(entries, "")
+	if strings.Count(listing, "- name:") != SkillListingMaxEntries {
+		t.Fatal("description entry limit violated")
 	}
-	if len(names) != len(entries) || names[len(names)-1] != last {
-		t.Fatalf("visible enum = %v", names)
+	for _, entry := range entries {
+		if !strings.Contains(listing, entry.Name) {
+			t.Fatalf("lost name %s", entry.Name)
+		}
+	}
+}
+func TestSkillListingOversizedFirstName(t *testing.T) {
+	entries := []SkillListingEntry{{Name: strings.Repeat("X", 9000)}, {Name: "small"}}
+	listing := BuildStartupSkillListing(entries, "")
+	body, _, _ := strings.Cut(listing, "Additional available skill names:")
+	if len(body) > SkillListingMaxTotalBytes || !strings.Contains(body, `"small"`) {
+		t.Fatal("first oversized item bypassed budget or hid later item")
 	}
 }

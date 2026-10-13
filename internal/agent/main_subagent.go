@@ -14,7 +14,6 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
-	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -77,25 +76,6 @@ func (a *MainAgent) writeScopeBaseDir() string {
 	return a.subAgentWorkDir()
 }
 
-// subAgentAgentsMD returns the AGENTS.md a worker starting in workDir follows.
-// A worker that starts in a different checkout than the one its parent works in
-// reads that checkout's instructions: the parent's frozen snapshot describes
-// another tree, so reusing it would leave the worker following the conventions
-// of a branch it is not on. Starting in the parent's own checkout keeps the
-// snapshot, so mid-session edits stay invisible exactly as they do for the
-// parent.
-func (a *MainAgent) subAgentAgentsMD(workDir string) string {
-	contentRoot := a.ContentRoot()
-	workDir = strings.TrimSpace(workDir)
-	if workDir == "" || contentRoot == "" {
-		return a.cachedAgentsMDSnapshot()
-	}
-	if pathutil.CheckoutRoot(workDir, contentRoot) == pathutil.CheckoutRoot(a.subAgentWorkDir(), contentRoot) {
-		return a.cachedAgentsMDSnapshot()
-	}
-	return loadAgentsMDWithWorkDir(contentRoot, workDir)
-}
-
 func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID string, client *llm.Client, parentCtx context.Context, cancel context.CancelFunc, extraMCPTools []tools.Tool) SubAgentConfig {
 	return SubAgentConfig{
 		InstanceID:    instanceID,
@@ -125,7 +105,6 @@ func (a *MainAgent) baseSubAgentConfig(agentDef *config.AgentConfig, instanceID 
 		WorkDir:       a.subAgentWorkDir(),
 		VenvPath:      a.cachedVenvPathSnapshot(),
 		SessionDir:    a.sessionDir,
-		AgentsMD:      a.cachedAgentsMDSnapshot(),
 		Skills:        a.loadedSkillsSnapshot(),
 		ModelName:     a.ModelName(),
 		Orchestration: effectiveOrchestrationConfig(a.globalConfig, a.projectConfig),
@@ -1119,7 +1098,6 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 	}
 	// The instructions follow the checkout the worker starts in, not the
 	// snapshot its parent froze.
-	subCfg.AgentsMD = a.subAgentAgentsMD(subCfg.WorkDir)
 	subCfg.TaskID = taskID
 	subCfg.TaskDesc = description
 	subCfg.PlanTaskRef = planTaskRef

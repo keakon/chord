@@ -34,34 +34,39 @@ type ExportedSession struct {
 // Note: multi-part user attachments (e.g. image ContentParts) are intentionally
 // not embedded in export files; only the plain message Content is exported.
 type ExportedMessage struct {
-	DeliveredFiles            []message.DeliveredFile       `json:"delivered_files,omitempty"`
-	CompactionDeliveredFiles  []message.DeliveredFile       `json:"compaction_delivered_files,omitempty"`
-	FileLinkBaseDir           string                        `json:"file_link_base_dir,omitempty"`
-	Role                      message.Role                  `json:"role"`
-	Content                   string                        `json:"content"`
-	Kind                      string                        `json:"kind,omitempty"`
-	ToolCallID                string                        `json:"tool_call_id,omitempty"`
-	ToolStatus                string                        `json:"tool_status,omitempty"`       // success / error / cancelled outcome of a tool result
-	ToolDiff                  string                        `json:"tool_diff,omitempty"`         // unified diff for Write/Edit results
-	ToolDiffAdded             int                           `json:"tool_diff_added,omitempty"`   // full added-line count before diff truncation
-	ToolDiffRemoved           int                           `json:"tool_diff_removed,omitempty"` // full removed-line count before diff truncation
-	ToolDurationMs            int64                         `json:"tool_duration_ms,omitempty"`
-	LSPReviews                []message.LSPReview           `json:"lsp_reviews,omitempty"`
-	Audit                     *message.ToolArgsAudit        `json:"audit,omitempty"`
-	FileState                 *message.ToolFileState        `json:"file_state,omitempty"`
-	FileAttributionIncomplete bool                          `json:"file_attribution_incomplete,omitempty"`
-	ToolChangedPaths          []string                      `json:"tool_changed_paths,omitempty"`
-	ToolCalls                 []ExportedToolCall            `json:"tool_calls,omitempty"`
-	ThinkingBlocks            []message.ThinkingBlock       `json:"thinking_blocks,omitempty"`
-	ResponsesOutput           []message.ResponsesOutputItem `json:"responses_output,omitempty"`
-	NativeTools               *message.NativeToolHistory    `json:"native_tools,omitempty"`
-	GeminiParts               []message.GeminiReplayPart    `json:"gemini_parts,omitempty"`
-	ReasoningContent          string                        `json:"reasoning_content,omitempty"`
-	IsCompactionSummary       bool                          `json:"is_compaction_summary,omitempty"`
-	CompactionRequestSources  map[string]string             `json:"compaction_request_sources,omitempty"`
-	CompactionFileRevisions   map[string]string             `json:"compaction_file_revisions,omitempty"`
-	Provenance                *message.MessageProvenance    `json:"provenance,omitempty"`
-	Timestamp                 time.Time                     `json:"timestamp"`
+	DeliveredFiles            []message.DeliveredFile        `json:"delivered_files,omitempty"`
+	CompactionDeliveredFiles  []message.DeliveredFile        `json:"compaction_delivered_files,omitempty"`
+	FileLinkBaseDir           string                         `json:"file_link_base_dir,omitempty"`
+	DirectoryInstructions     *message.DirectoryInstructions `json:"directory_instructions,omitempty"`
+	SkillActivation           *message.SkillActivationFact   `json:"skill_activation,omitempty"`
+	SkillDiscovery            *message.SkillDiscoveryRecord  `json:"skill_discovery,omitempty"`
+	CompactionSkillActivation *message.SkillActivationCarry  `json:"compaction_skill_activation,omitempty"`
+	ToolControlReason         string                         `json:"tool_control_reason,omitempty"`
+	Role                      message.Role                   `json:"role"`
+	Content                   string                         `json:"content"`
+	Kind                      string                         `json:"kind,omitempty"`
+	ToolCallID                string                         `json:"tool_call_id,omitempty"`
+	ToolStatus                string                         `json:"tool_status,omitempty"`       // success / error / cancelled outcome of a tool result
+	ToolDiff                  string                         `json:"tool_diff,omitempty"`         // unified diff for Write/Edit results
+	ToolDiffAdded             int                            `json:"tool_diff_added,omitempty"`   // full added-line count before diff truncation
+	ToolDiffRemoved           int                            `json:"tool_diff_removed,omitempty"` // full removed-line count before diff truncation
+	ToolDurationMs            int64                          `json:"tool_duration_ms,omitempty"`
+	LSPReviews                []message.LSPReview            `json:"lsp_reviews,omitempty"`
+	Audit                     *message.ToolArgsAudit         `json:"audit,omitempty"`
+	FileState                 *message.ToolFileState         `json:"file_state,omitempty"`
+	FileAttributionIncomplete bool                           `json:"file_attribution_incomplete,omitempty"`
+	ToolChangedPaths          []string                       `json:"tool_changed_paths,omitempty"`
+	ToolCalls                 []ExportedToolCall             `json:"tool_calls,omitempty"`
+	ThinkingBlocks            []message.ThinkingBlock        `json:"thinking_blocks,omitempty"`
+	ResponsesOutput           []message.ResponsesOutputItem  `json:"responses_output,omitempty"`
+	NativeTools               *message.NativeToolHistory     `json:"native_tools,omitempty"`
+	GeminiParts               []message.GeminiReplayPart     `json:"gemini_parts,omitempty"`
+	ReasoningContent          string                         `json:"reasoning_content,omitempty"`
+	IsCompactionSummary       bool                           `json:"is_compaction_summary,omitempty"`
+	CompactionRequestSources  map[string]string              `json:"compaction_request_sources,omitempty"`
+	CompactionFileRevisions   map[string]string              `json:"compaction_file_revisions,omitempty"`
+	Provenance                *message.MessageProvenance     `json:"provenance,omitempty"`
+	Timestamp                 time.Time                      `json:"timestamp"`
 	// ToolRecoveryState classifies synthetic restore / barrier-failure results
 	// (not_started / outcome_unknown). Ordinary results leave it empty.
 	ToolRecoveryState string `json:"tool_recovery_state,omitempty"`
@@ -157,6 +162,11 @@ func Export(
 			CompactionRequestSources:  cloneStringMap(msg.CompactionRequestSources),
 			Provenance:                provenance,
 			ToolRecoveryState:         msg.ToolRecoveryState,
+			DirectoryInstructions:     msg.Clone().DirectoryInstructions,
+			SkillActivation:           msg.SkillActivation.Clone(),
+			SkillDiscovery:            msg.SkillDiscovery.Clone(),
+			CompactionSkillActivation: msg.CompactionSkillActivation.Clone(),
+			ToolControlReason:         msg.ToolControlReason,
 			// Use incremental timestamps (1µs apart) to preserve ordering
 			// since source messages don't carry original timestamps.
 			Timestamp: now.Add(time.Duration(i) * time.Microsecond),
@@ -269,6 +279,9 @@ func ExportToMarkdown(session *ExportedSession) string {
 
 	var needSep bool
 	for _, em := range session.Messages {
+		if em.Kind == message.KindDirectoryInstructions || em.Kind == message.KindSkillDiscovery {
+			continue
+		}
 		switch em.Role {
 		case "system":
 			continue
@@ -410,6 +423,11 @@ func (es *ExportedSession) ToMessages() []message.Message {
 			CompactionRequestSources:  cloneStringMap(em.CompactionRequestSources),
 			Provenance:                provenance,
 			ToolRecoveryState:         em.ToolRecoveryState,
+			DirectoryInstructions:     (message.Message{DirectoryInstructions: em.DirectoryInstructions}).Clone().DirectoryInstructions,
+			SkillActivation:           em.SkillActivation.Clone(),
+			SkillDiscovery:            em.SkillDiscovery.Clone(),
+			CompactionSkillActivation: em.CompactionSkillActivation.Clone(),
+			ToolControlReason:         em.ToolControlReason,
 		}
 
 		// Restore tool calls.

@@ -2,6 +2,8 @@ package tools
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -10,8 +12,9 @@ import (
 // result. Path is the resolved file path and SHA256 hashes the raw on-disk
 // bytes from that same read.
 type ReadObservation struct {
-	Path   string
-	SHA256 string
+	ActivationPath string
+	Path           string
+	SHA256         string
 }
 
 // ReadObservationSink receives exact-version metadata from ReadTool without
@@ -65,4 +68,22 @@ func readObservationSinkFromContext(ctx context.Context) (ReadObservationSink, b
 	}
 	sink, ok := ctx.Value(readObservationSinkKey).(ReadObservationSink)
 	return sink, ok
+}
+
+// activationReadIdentity captures a canonical target without changing normal
+// read behavior when identity cannot be established.
+func activationReadIdentity(path string) (string, os.FileInfo) {
+	target, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", nil
+	}
+	target, err = filepath.Abs(target)
+	if err != nil {
+		return "", nil
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		return "", nil
+	}
+	return target, info
 }

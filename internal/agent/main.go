@@ -40,8 +40,12 @@ import (
 // (eventCh) for sequencing work and an output channel (outputCh) that the TUI
 // consumes.
 type MainAgent struct {
-	mcpStatus                   mcpStatusState
-	contextDiagnostics          contextDiagnosticsRuntime
+	contextDiagnostics    contextDiagnosticsRuntime
+	mcpStatus             mcpStatusState
+	directoryInstructions atomic.Pointer[directoryInstructionRuntime]
+	directoryPreparation  *directoryInstructionPreparation
+
+	skillPublisher              skillDiscoveryPublisher
 	pause                       sessionPauseRuntime
 	stagedMainInputs            []stagedSessionInput // owned by the event loop
 	requestStarts               atomic.Uint64
@@ -822,9 +826,8 @@ type MainAgent struct {
 
 	// Cached startup values reused in buildSystemPrompt to avoid repeated syscalls/subprocesses.
 	cachedWorkDir   string
-	cachedGitStatus string // populated lazily via gitStatusReady
-	cachedVenvPath  string // absolute path to detected Python virtual environment, or ""
-	cachedAgentsMD  string
+	cachedGitStatus string        // populated lazily via gitStatusReady
+	cachedVenvPath  string        // absolute path to detected Python virtual environment, or ""
 	gitStatusReady  chan struct{} // closed when cachedGitStatus is set
 	// workDirState is the active checkout of this agent. A checkout switch
 	// publishes a whole new state here; cachedWorkDir stays the immutable
@@ -958,6 +961,7 @@ func NewMainAgent(
 	governor := newResourceGovernor(orchestrationCfg)
 
 	a := &MainAgent{
+		skillPublisher:          newSkillDiscoveryPublisher(skillDiscoveryPublisherOptions{}),
 		pause:                   sessionPauseRuntime{inputPrefix: rand.Text()},
 		executionGate:           &executiongate.Gate{},
 		parentCtx:               parentCtx,
@@ -1325,6 +1329,10 @@ func (a *MainAgent) switchRole(roleName string, clearHistory bool) error {
 
 	if clearHistory {
 		// Clear conversation history so the new role starts fresh.
+		if r := a.directoryInstructions.Swap(nil); r != nil {
+			r.cancel()
+		}
+		a.directoryPreparation = nil
 		a.pendingNativeContextAppends = nil
 		a.ctxMgr.RestoreMessages(nil)
 		a.installContextNoticePresence(nil)
@@ -1710,6 +1718,8 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 	if payload == nil {
 		return
 	}
+
+	a.directoryInstructions.Load().clearTurnDiscovery()
 
 	if payload.PauseMailboxDelivery {
 		// Publish the pause on the loop before closeout requeues the batch:

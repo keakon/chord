@@ -392,7 +392,7 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	// records the names before the head goes away. Runtime-owned like the todo
 	// snapshot above: whatever the summarizer wrote is replaced.
 	skillNames, skillsOmitted := collectCheckpointSkillNames(headSnapshot)
-	summaryText = ensureCheckpointSkillsSection(summaryText, skillNames, skillsOmitted, checkpointModelLoadable(a.visibleSkillsSnapshot()))
+	summaryText = ensureCheckpointSkillsSection(summaryText, skillNames, skillsOmitted, checkpointModelLoadable(a.callableSkillsSnapshot()))
 	// The runtime owns the continuation state a weak or fallback summary must
 	// not drop: the authoritative latest request (a Done rejected reason
 	// included) and the tool calls whose results never reached the transcript.
@@ -609,6 +609,13 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 	// waiting inside the callback would stall every Snapshot/Append reader for
 	// the drain duration.
 	a.flushPersist()
+	if err := a.skillPublisher.reconcileAfterFlush(a.persist, a.ctxMgr.Snapshot(), a.ctxMgr.Append); err != nil {
+		return err
+	}
+	if err := a.reconcileDirectoryInstructionsAfterFlush(); err != nil {
+		return err
+	}
+	skillView := a.skillActivationView()
 	var backupPath string
 	questionHistory := a.ctxMgr.Snapshot()
 	err := a.ctxMgr.ReplacePrefixAtomic(headSplit, d.NewMessages, func(tail []message.Message) ([]message.Message, error) {
@@ -622,6 +629,14 @@ func (a *MainAgent) applyCompactionDraftAsync(d *compactionDraft) error {
 		// window, which is the stale reminder the new window must not inherit.
 		newMessages = dropContextNoticeMessages(newMessages)
 		newMessages = retainQuestionFacts(questionHistory, newMessages)
+		newMessages = retainDirectoryInstructionFacts(questionHistory, newMessages)
+		activationHistory := append(append([]message.Message(nil), questionHistory...), tail...)
+		for i := range newMessages {
+			if newMessages[i].IsCompactionSummary {
+				newMessages[i].CompactionSkillActivation = buildSkillActivationCarry(activationHistory, skillView, skillActivationEpoch(activationHistory, skillView.TaskID)+1)
+				break
+			}
+		}
 		compactedMessages = newMessages
 
 		// The target transcript fingerprint is recorded BEFORE the session

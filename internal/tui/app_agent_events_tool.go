@@ -308,6 +308,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			imageParts:     imageParts,
 			resetExecution: true,
 			recoveryState:  evt.RecoveryState,
+			controlReason:  evt.ControlReason,
 		})
 		if toolNameKey(evt.Name) == tools.NameDone {
 			if evt.Status == agent.ToolResultStatusSuccess && !doneResultIsRejected(evt.Result) {
@@ -356,7 +357,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		m.markBlockSettled(block)
 	} else {
 		m.recordToolErrorDiagnostic(evt)
-		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultPayload: evt.Payload, ResultNotes: append([]string(nil), evt.Notes...), ResultStatus: evt.Status, ResultDone: true, Collapsed: !toolCardAlwaysExpanded(evt.Name), AgentID: evt.AgentID, Audit: evt.Audit.Clone(), ImageParts: imagePartsFromContentParts(evt.Parts), RecoveryState: evt.RecoveryState}
+		block := &Block{ID: m.nextBlockID, Type: BlockToolResult, Content: toolExpandedResultContent(evt.Name, evt.Result), RawArgs: evt.ArgsJSON, ToolName: evt.Name, ToolID: evt.CallID, ResultContent: evt.Result, ResultPayload: evt.Payload, ResultNotes: append([]string(nil), evt.Notes...), ResultStatus: evt.Status, ResultDone: true, Collapsed: !toolCardAlwaysExpanded(evt.Name), AgentID: evt.AgentID, Audit: evt.Audit.Clone(), ImageParts: imagePartsFromContentParts(evt.Parts), RecoveryState: evt.RecoveryState, ControlReason: evt.ControlReason}
 		m.nextBlockID++
 		m.appendViewportBlock(block)
 		m.markBlockSettled(block)

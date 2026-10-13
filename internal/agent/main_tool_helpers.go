@@ -324,7 +324,7 @@ func (p toolExecutionPipeline) buildToolExecutionBatches(calls []message.ToolCal
 		class := tools.ConcurrencyClassForInstance(tool, call.Name, args)
 		policy := tools.PolicyForInstance(tool, call.Name, args)
 		batch := toolExecutionBatch{Calls: []message.ToolCall{call}, AbortSiblingsOnError: policy.AbortSiblingsOnError}
-		if !tools.ConcurrencyClassBatchable(class) {
+		if !tools.ConcurrencyClassBatchable(class) || p.directoryInstructionSeparateBatch(call) {
 			batches = append(batches, batch)
 			i++
 			continue
@@ -335,7 +335,7 @@ func (p toolExecutionPipeline) buildToolExecutionBatches(calls []message.ToolCal
 			next := calls[j]
 			nextArgs := llm.UnwrapToolArgs(next.Args)
 			nextTool, _ := p.boundToolForCall(next)
-			if !tools.ConcurrencyClassBatchable(tools.ConcurrencyClassForInstance(nextTool, next.Name, nextArgs)) {
+			if !tools.ConcurrencyClassBatchable(tools.ConcurrencyClassForInstance(nextTool, next.Name, nextArgs)) || p.directoryInstructionSeparateBatch(next) {
 				break
 			}
 			nextPolicy := tools.PolicyForInstance(nextTool, next.Name, nextArgs)
@@ -445,4 +445,16 @@ func contextCancelledError(ctx context.Context) error {
 		return err
 	}
 	return context.Canceled
+}
+
+// toolResultStatusWithControlReason preserves a successful read while marking
+// calls stopped before execution as cancelled rather than ordinary failures.
+func toolResultStatusWithControlReason(isError bool, reason string) ToolResultStatus {
+	if !isError {
+		return ToolResultStatusSuccess
+	}
+	if reason == message.ToolControlReasonDirectoryInstructionsRequired || reason == message.ToolControlReasonDirectoryInstructionsReplan {
+		return ToolResultStatusCancelled
+	}
+	return ToolResultStatusError
 }

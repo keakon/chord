@@ -13,6 +13,13 @@ func (m Message) Clone() Message {
 	cloned := m
 	cloned.DeliveredFiles = CloneDeliveredFiles(m.DeliveredFiles)
 	cloned.CompactionDeliveredFiles = CloneDeliveredFiles(m.CompactionDeliveredFiles)
+	if m.DirectoryInstructions != nil {
+		cloned.DirectoryInstructions = &DirectoryInstructions{Facts: append([]DirectoryInstructionFact(nil), m.DirectoryInstructions.Facts...)}
+	}
+	cloned.DirectoryInstructionRefs = append([]DirectoryInstructionRef(nil), m.DirectoryInstructionRefs...)
+	cloned.SkillActivation = m.SkillActivation.Clone()
+	cloned.SkillDiscovery = m.SkillDiscovery.Clone()
+	cloned.CompactionSkillActivation = m.CompactionSkillActivation.Clone()
 	cloned.NativeTools = m.NativeTools.Clone()
 	cloned.Question = append(json.RawMessage(nil), m.Question...)
 	if len(m.Parts) > 0 {

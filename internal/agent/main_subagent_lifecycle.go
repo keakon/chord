@@ -177,6 +177,7 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 		return false
 	}
 	parkedAt := time.Now()
+	skillSnapshot := sub.parkedSkillSnapshot()
 	a.subs.mu.Lock()
 	if current := a.subs.subAgents[agentID]; current != sub || !sub.canPark() {
 		a.subs.mu.Unlock()
@@ -185,6 +186,7 @@ func (a *MainAgent) parkSubAgent(agentID string) bool {
 	previousRecord := cloneDurableTaskRecord(a.subs.taskRecords[sub.taskID])
 	parkedRecord := buildTaskRecordFromSub(sub, previousRecord, "", a.explicitUserTurnCount.Load(), parkedAt)
 	parkedRecord.RuntimeParked = true
+	parkedRecord.skillSnapshot = skillSnapshot
 	a.subs.mu.Unlock()
 	if err := a.persistSubAgentMeta(sub); err != nil {
 		log.Warnf("refusing to park SubAgent because metadata persistence failed agent_id=%v task_id=%v error=%v", agentID, sub.taskID, err)

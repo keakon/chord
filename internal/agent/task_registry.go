@@ -39,6 +39,8 @@ const (
 )
 
 type DurableTaskRecord struct {
+	// Immutable UI evidence rebuilt from canonical history; never serialized.
+	skillSnapshot        *parkedSkillSnapshot
 	TaskID               string              `json:"task_id"`
 	AgentDefName         string              `json:"agent_def_name,omitempty"`
 	TaskDesc             string              `json:"task_desc,omitempty"`
@@ -682,12 +684,17 @@ func (a *MainAgent) updateTaskRecordFromSub(sub *SubAgent, closedReason string) 
 	}
 	currentTurn := a.explicitUserTurnCount.Load()
 	now := time.Now()
+	var skillSnapshot *parkedSkillSnapshot
+	if isTerminalSubAgentState(sub.State()) && sub.ctxMgr != nil {
+		skillSnapshot = sub.parkedSkillSnapshot()
+	}
 
 	a.subs.mu.Lock()
 	if a.subs.taskRecords == nil {
 		a.subs.taskRecords = make(map[string]*DurableTaskRecord)
 	}
 	rec := buildTaskRecordFromSub(sub, a.subs.taskRecords[taskID], closedReason, currentTurn, now)
+	rec.skillSnapshot = skillSnapshot
 	a.subs.taskRecords[taskID] = rec
 	a.subs.notifyTaskChangeLocked()
 	a.subs.mu.Unlock()
@@ -776,6 +783,7 @@ func buildTaskRecordFromSub(sub *SubAgent, previous *DurableTaskRecord, closedRe
 	rec.LastUpdatedTurn = currentTurn
 	rec.UpdatedAt = now
 	rec.RuntimeParked = false
+	rec.skillSnapshot = nil
 	if strings.TrimSpace(closedReason) != "" {
 		rec.ClosedReason = strings.TrimSpace(closedReason)
 	} else if state == SubAgentStateRunning || state == SubAgentStateWaitingMain || state == SubAgentStateIdle {

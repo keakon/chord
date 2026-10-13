@@ -789,7 +789,6 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	}
 	// A resumed worker reads its checkout's instructions for the same reason a
 	// fresh spawn does: it is not the checkout its parent's snapshot describes.
-	subCfg.AgentsMD = a.subAgentAgentsMD(subCfg.WorkDir)
 	sub = NewSubAgent(subCfg)
 	sub.RestoreMessages(msgs)
 	var restoredInputs []pendingUserMessage

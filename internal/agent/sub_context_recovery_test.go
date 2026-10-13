@@ -50,7 +50,7 @@ func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
 	}
 	sub.ctxMgr.RestoreMessages(messages)
 	sub.llmRequestInFlight.Store(true)
-	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
+	sub.asyncCallLLMWithFlightMarked(sub.turn)
 
 	deadline := time.After(3 * time.Second)
 	for sub.turn.SubAgentContextRecoveryCount == 0 {

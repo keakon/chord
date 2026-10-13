@@ -40,25 +40,28 @@ type llmResult struct {
 
 // toolResult carries a single tool execution result back to the event loop.
 type toolResult struct {
-	deliveryCommit *deliveryCommitAck
-	DeliveredFiles []message.DeliveredFile
-	CallID         string
-	Name           string // tool name, used for empty-args detection
-	ArgsJSON       string // original args JSON string for malformed detection
-	Audit          *message.ToolArgsAudit
-	Result         string
-	Payload        string
-	Notes          []string
-	Images         []message.ContentPart // image parts to inject into model context after the batch completes
-	Error          error
-	TurnID         uint64
-	Duration       time.Duration
-	Diff           string              // unified diff for Write/Edit tools; not sent to LLM
-	DiffAdded      int                 // full added-line count before any diff truncation
-	DiffRemoved    int                 // full removed-line count before any diff truncation
-	FileCreated    bool                // true when Write created a file that did not previously exist
-	LSPReviews     []message.LSPReview // per-file last-review snapshots for directly edited files
-	FileState      *message.ToolFileState
+	deliveryCommit     *deliveryCommitAck
+	DeliveredFiles     []message.DeliveredFile
+	SkillActivation    *skillActivationCandidate
+	DirectoryDiscovery *directoryInstructionDiscovery
+	ControlReason      string
+	CallID             string
+	Name               string // tool name, used for empty-args detection
+	ArgsJSON           string // original args JSON string for malformed detection
+	Audit              *message.ToolArgsAudit
+	Result             string
+	Payload            string
+	Notes              []string
+	Images             []message.ContentPart // image parts to inject into model context after the batch completes
+	Error              error
+	TurnID             uint64
+	Duration           time.Duration
+	Diff               string              // unified diff for Write/Edit tools; not sent to LLM
+	DiffAdded          int                 // full added-line count before any diff truncation
+	DiffRemoved        int                 // full removed-line count before any diff truncation
+	FileCreated        bool                // true when Write created a file that did not previously exist
+	LSPReviews         []message.LSPReview // per-file last-review snapshots for directly edited files
+	FileState          *message.ToolFileState
 	// RecoveryState classifies synthetic results synthesized during session
 	// restore or a failed intent barrier (not_started / outcome_unknown).
 	RecoveryState string
@@ -97,13 +100,19 @@ const inputChanCap = 64
 // external user input is enqueued via InjectUserMessage / InjectUserMessageWithParts.
 // Cross-goroutine lifecycle flags use atomics.
 type SubAgent struct {
-	contextDiagnostics contextDiagnosticsRuntime
-	instanceID         string // immutable, from NextInstanceID()
-	taskID             string // plan task ID or "adhoc-N"
-	agentDefName       string // agent definition name (e.g. "backend-coder")
-	taskDesc           string // task description (from Plan or ad-hoc)
-	planTaskRef        string
-	semanticTaskKey    string
+	contextDiagnostics    contextDiagnosticsRuntime
+	directoryInstructions atomic.Pointer[directoryInstructionRuntime]
+	directoryPreparation  *directoryInstructionPreparation
+	directoryPreparedCh   chan directoryInstructionsPrepared
+
+	skillPublisher  skillDiscoveryPublisher
+	skillPublishCh  chan skillDiscoveryPublishEvent
+	instanceID      string // immutable, from NextInstanceID()
+	taskID          string // plan task ID or "adhoc-N"
+	agentDefName    string // agent definition name (e.g. "backend-coder")
+	taskDesc        string // task description (from Plan or ad-hoc)
+	planTaskRef     string
+	semanticTaskKey string
 	// resultSchema is the delegated result contract (runtime map + canonical
 	// bytes). Both are immutable after construction; resultContractMu guards
 	// only the terminal failure diagnostics, which the run loop writes and the
@@ -280,13 +289,6 @@ type SubAgent struct {
 	modelName     string
 	customPrompt  string // from agent YAML body; replaces built-in role instructions if non-empty
 
-	// agentsMD is the AGENTS.md the worker follows: captured at spawn from the
-	// parent, then reloaded when a worktree switch moves the worker into a
-	// checkout carrying its own instructions. The mutex keeps that reload (a
-	// tool goroutine) from racing the model-switch path, which rebuilds the
-	// system prompt from it.
-	agentsMDMu sync.RWMutex
-	agentsMD   string
 	// workDirState is this SubAgent's active checkout; a checkout switch
 	// publishes a new generation here and never touches the parent's binding.
 	workDirState workDirBinding
@@ -524,6 +526,16 @@ func (s *SubAgent) checkpointTranscript() error {
 		_ = s.parent.persistSubAgentMeta(s)
 		s.parent.updateTaskRecordFromSub(s, "")
 	}
+	if s.parent != nil {
+		s.parent.flushPersist()
+		if err := s.skillPublisher.reconcileAfterFlush(s.parent.persist, s.ctxMgr.Snapshot(), s.ctxMgr.Append); err != nil {
+			s.notePersistenceFailure(err)
+			return err
+		}
+	}
+	if err := s.reconcileDirectoryInstructionsAfterFlush(); err != nil {
+		return err
+	}
 	if err := manager.RewriteLog(s.instanceID, s.ctxMgr.Snapshot()); err != nil {
 		s.notePersistenceFailure(err)
 		return err
@@ -615,7 +627,6 @@ type SubAgentConfig struct {
 	WorkDirState   WorkDirState
 	VenvPath       string // absolute path to detected Python virtual environment, or ""
 	SessionDir     string
-	AgentsMD       string
 	Skills         []*skill.Meta
 	ModelName      string
 	StartupTimeout time.Duration // 0 → DefaultSubAgentStartupTimeout
@@ -732,6 +743,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 	ctxMgr := ctxmgr.NewManager(0, 0)
 
 	s = &SubAgent{
+		skillPublisher:    newSkillDiscoveryPublisher(skillDiscoveryPublisherOptions{}),
 		instanceID:        cfg.InstanceID,
 		done:              make(chan struct{}),
 		taskID:            cfg.TaskID,
@@ -760,8 +772,7 @@ func NewSubAgent(cfg SubAgentConfig) *SubAgent {
 		workDir:           cfg.WorkDir,
 		venvPath:          cfg.VenvPath,
 		sessionDir:        cfg.SessionDir,
-		agentsMD:          cfg.AgentsMD,
-		loadedSkills:      cfg.Skills,
+		loadedSkills:      skill.SnapshotCatalog(cfg.Skills),
 		invokedSkills:     make(map[string]*skill.Meta),
 		modelName:         cfg.ModelName,
 		queueMessageLimit: cfg.Orchestration.EffectiveSubAgentQueueMessages(),
@@ -975,13 +986,14 @@ func subAgentToolWithBaseDir(t tools.Tool, workDir string) tools.Tool {
 // LLM interaction
 // ---------------------------------------------------------------------------
 
-func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, input llmRequestInput) {
+func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 	if turn.Ctx.Err() != nil {
 		s.llmRequestInFlight.Store(false)
 		return
 	}
-	messages := input.Messages
-	observer := s.contextDiagnostics.begin(s.sessionDir, s.taskID, input.HistoryGeneration)
+	if !s.ensureDirectoryInstructionsBeforeRequest(turn) {
+		return
+	}
 	if s.sessionExecutionPaused() {
 		s.llmRequestInFlight.Store(false)
 		s.signalWake()
@@ -997,12 +1009,26 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, input llmRequestInpu
 	// queued input or park it. Callers that must arm earlier — atomically with
 	// draining the input queue under inputQueueMu — still do so themselves.
 	s.llmRequestInFlight.Store(true)
+	s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr))
+	if s.ensureSkillDiscoveryBeforeRequest(turn, func() { s.asyncCallLLMWithFlightMarked(turn) }) != skillDiscoveryReady {
+		return
+	}
+	input := snapshotLLMRequest(s.ctxMgr)
+	observer := s.contextDiagnostics.begin(s.sessionDir, s.taskID, input.HistoryGeneration)
+	messages := projectSkillDiscoveryMessages(input.Messages, s.skillActivationView())
+
 	defer func() {
 		if recoverValue := recover(); recoverValue != nil {
 			s.llmRequestInFlight.Store(false)
 			panic(recoverValue)
 		}
 	}()
+	var projectionErr error
+	messages, projectionErr = projectDirectoryInstructionHistory(messages, s.directoryInstructions.Load())
+	if projectionErr != nil {
+		s.llmCh <- &llmResult{err: projectionErr, turnID: turn.ID}
+		return
+	}
 	messages = s.injectSessionContextReminder(messages)
 	llmClient, modelName := s.llmSnapshot()
 	if llmClient == nil {
@@ -1143,7 +1169,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, input llmRequestInpu
 			}
 			s.signalWake()
 		})
-		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{NativeTools: s.nativeRequestPolicy(turn), Diagnostics: observer})
+		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{NativeTools: s.nativeRequestPolicy(turn), Diagnostics: observer, PrepareAttempt: prepareDirectoryInstructionAttempt(s.directoryInstructions.Load(), requestSeq)})
 		// Settle the walltime segment before the flush events so the TUI
 		// re-render they trigger sees the updated TIME buckets; finishing at
 		// return would leave the sidebar stale until the next unrelated
@@ -1277,6 +1303,7 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		thinkingFlushInterval:        defaultStreamThinkingFlushInterval,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
+		directoryCovered: s.toolExecutionPipeline().directoryInstructionsCovered,
 		agentID:          s.instanceID,
 		syncHookGate:     s.syncToolHooksConfigured,
 		turn:             turn,
@@ -1422,6 +1449,7 @@ func (s *SubAgent) currentTurn() *Turn {
 
 // newTurn cancels any in-flight work and creates a fresh Turn.
 func (s *SubAgent) newTurn() *Turn {
+	s.directoryInstructions.Load().clearTurnDiscovery()
 	if s.parent != nil {
 		s.parent.markRealWorkStarted()
 	}
@@ -1603,7 +1631,7 @@ func (s *SubAgent) buildSystemPrompt() string {
 	}
 	parts = append(parts, taskSection)
 
-	if block := agentsMDReminderFramingPromptBlock(s.agentsMDSnapshot()); block != "" {
+	if block := agentsMDReminderFramingPromptBlock(s.initialDirectoryInstructionsText()); block != "" {
 		parts = append(parts, block)
 	}
 	// AGENTS.md is delivered as a meta user message under a

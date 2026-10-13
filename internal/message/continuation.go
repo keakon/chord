@@ -7,7 +7,7 @@ import "slices"
 // an explicit user action.
 func LastConversationMessageIndex(messages []Message) int {
 	for i, message := range slices.Backward(messages) {
-		if message.Kind == KindQuestionState {
+		if message.Kind == KindQuestionState || message.Kind == KindDirectoryInstructions || message.Kind == KindSkillDiscovery {
 			continue
 		}
 		switch message.Role {

@@ -67,6 +67,7 @@ type loadedSessionState struct {
 }
 
 type loadedSubAgentState struct {
+	skillSnapshot           *parkedSkillSnapshot
 	InstanceID              string
 	TaskID                  string
 	AgentDefName            string
@@ -700,6 +701,11 @@ func (a *MainAgent) loadRestoredSubAgentStates(sessionPath string, rm *recovery.
 		builder.overlayTaskRecord(rec)
 		builder.attachTranscript(msgs)
 		builder.normalize()
+		workDir := ""
+		if meta != nil {
+			workDir = meta.WorkDir
+		}
+		builder.state.skillSnapshot = restoredParkedSkillSnapshot(msgs, workDir, a.ContentRoot())
 		states = append(states, builder.build())
 	}
 	return states
@@ -765,6 +771,10 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.clearReductionCache(true)
 	a.resetLLMModelRun()
 	loaded.Messages = restoreQuestionMessages(loaded.Messages)
+	if r := a.directoryInstructions.Swap(nil); r != nil {
+		r.cancel()
+	}
+	a.directoryPreparation = nil
 	a.ctxMgr.RestoreMessages(append([]message.Message(nil), loaded.Messages...))
 	a.restoreQuestions(loaded.Messages)
 	a.installContextNoticePresence(loaded.Messages)
@@ -1373,6 +1383,7 @@ func (a *MainAgent) restoreLoadedSubAgents(states []loadedSubAgentState) int {
 				restoreSummary = rec.LastSummary
 			}
 			rec.RuntimeParked = true
+			rec.skillSnapshot = state.skillSnapshot
 			rec.LastSummary = restoreSummary
 			rec.Persistence = state.Persistence
 			if state.PendingCompleteIntent && !isTerminalSubAgentState(restoreState) {
@@ -1660,7 +1671,11 @@ func (a *MainAgent) handleResumeCommand(sessionID string) {
 	oldRecovery, _ := a.prepareSessionSwitch()
 	oldLock := a.sessionLock
 	oldSessionDir := a.SessionDir()
-	a.freezeCurrentSession(oldRecovery)
+	if err := a.freezeCurrentSession(oldRecovery); err != nil {
+		_ = newLock.Release()
+		a.emitToTUI(ErrorEvent{Err: err})
+		return
+	}
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
 			log.Warnf("resume: failed to release old session lock error=%v", releaseErr)

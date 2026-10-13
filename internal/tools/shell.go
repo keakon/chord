@@ -402,9 +402,9 @@ func (ShellTool) Parameters() map[string]any {
 func (ShellTool) IsReadOnly() bool { return false }
 
 func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a shellArgs
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	a, err := decodeInstructionArgs[shellArgs](raw)
+	if err != nil {
+		return "", err
 	}
 	if strings.TrimSpace(a.Command) == "" {
 		return "", fmt.Errorf("command is required")

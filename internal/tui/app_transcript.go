@@ -648,6 +648,7 @@ type transcriptToolResult struct {
 	displayArgs    func(toolName, argsJSON, result string) string
 	imageParts     []BlockImagePart
 	resetExecution bool
+	controlReason  string
 	recoveryState  string
 }
 
@@ -720,6 +721,7 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 	}
 	block.ResultStatus = result.status
 	block.RecoveryState = result.recoveryState
+	block.ControlReason = result.controlReason
 	block.ResultDone = true
 	if result.resetExecution {
 		block.ToolExecutionState = ""
@@ -775,7 +777,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 	toolIDToBlock := make(map[string]*Block)
 
 	for msgIdx, msg := range msgs {
-		if msg.Kind == message.KindQuestionState {
+		if msg.Kind == message.KindQuestionState || msg.Kind == message.KindDirectoryInstructions || msg.Kind == message.KindSkillDiscovery {
 			continue
 		}
 		if block := questionTranscriptBlock(msg, *nextID); block != nil {
@@ -998,6 +1000,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 					displayArgs:    stableToolDisplayArgs,
 					resetExecution: true,
 					recoveryState:  msg.ToolRecoveryState,
+					controlReason:  msg.ToolControlReason,
 				})
 			}
 		}

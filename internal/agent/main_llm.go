@@ -426,6 +426,7 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		thinkingFlushInterval:   defaultStreamThinkingFlushInterval,
 	}
 	streamReducer.tool = streamToolDeltaReducer{
+		directoryCovered: a.toolExecutionPipeline().directoryInstructionsCovered,
 		agentID:          "",
 		turn:             turn,
 		registry:         a.tools,
@@ -603,6 +604,12 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 			a.requestBatches.rollback(a.sessionEpoch, requestBatch)
 		}
 	}()
+	messages = projectSkillDiscoveryMessages(messages, a.skillActivationView())
+	var projectionErr error
+	messages, projectionErr = projectDirectoryInstructionHistory(messages, a.directoryInstructions.Load())
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
 	messages = filterQuestionStateMessages(a.prepareMessagesForLLM(messages))
 	observer.SetReduction(a.diagnosticReduction())
 	if observation, ok := ctx.Value(questionRequestContextKey{}).(*questionRequestObservation); ok {
@@ -802,6 +809,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	}
 	requestOptions := llm.CompleteStreamOptions{
 		Diagnostics:     observer,
+		PrepareAttempt:  prepareDirectoryInstructionAttempt(a.directoryInstructions.Load(), requestSeq),
 		NativeTools:     a.nativeRequestPolicy(turn),
 		MCPDeclarations: a.effectiveRuntimeMCPDeclarations(),
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {

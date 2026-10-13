@@ -81,7 +81,7 @@ func subAgentCheckpointSkills(s *SubAgent, messages []message.Message) string {
 // catalog LoadSkill resolves against, so the two cannot disagree about which
 // names a `skill` call can still reach.
 func subAgentNotLoadableSkillNames(s *SubAgent, names []string) []string {
-	modelLoadable := checkpointModelLoadable(s.visibleSkillsSnapshot())
+	modelLoadable := checkpointModelLoadable(s.callableSkillsSnapshot())
 	var notLoadable []string
 	for _, name := range names {
 		if !modelLoadable(name) {

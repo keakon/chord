@@ -15,6 +15,8 @@ func (s *SubAgent) cancelCurrentTurnFromLoop() {
 	if s.turn == nil {
 		return
 	}
+	s.directoryInstructions.Load().clearTurnDiscovery()
+
 	turn := s.turn
 	if turn.deliveryPending.Load() {
 		turn.deliverySubCancel.Store(true)

@@ -167,3 +167,16 @@ func TestGenerateImageACPContentIncludesOriginal(t *testing.T) {
 		t.Fatal("cancelled result published image success")
 	}
 }
+
+func TestDirectoryInstructionControlReasonSurvivesACP(t *testing.T) {
+	for _, status := range []agent.ToolResultStatus{agent.ToolResultStatusSuccess, agent.ToolResultStatusError, agent.ToolResultStatusCancelled} {
+		update := toolCallResult(context.Background(), agent.ToolResultEvent{CallID: "call-1", Name: tools.NameWrite, Status: status, Result: "directory instructions require reconsideration", ControlReason: message.ToolControlReasonDirectoryInstructionsRequired})
+		data, err := json.Marshal(update)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Contains(data, []byte(`"tool_control_reason":"directory_instructions_required"`)) || !bytes.Contains(data, []byte(`"tool_status":"`+string(status)+`"`)) {
+			t.Fatalf("metadata missing: %s", data)
+		}
+	}
+}

@@ -305,10 +305,17 @@ const (
 )
 
 type Message struct {
-	DiagnosticSource         string          `json:"-"`
-	DeliveredFiles           []DeliveredFile `json:"delivered_files,omitempty"`
-	CompactionDeliveredFiles []DeliveredFile `json:"compaction_delivered_files,omitempty"`
-	FileLinkBaseDir          string          `json:"file_link_base_dir,omitempty"`
+	DeliveredFiles             []DeliveredFile           `json:"delivered_files,omitempty"`
+	CompactionDeliveredFiles   []DeliveredFile           `json:"compaction_delivered_files,omitempty"`
+	FileLinkBaseDir            string                    `json:"file_link_base_dir,omitempty"`
+	DiagnosticSource           string                    `json:"-"`
+	DirectoryInstructions      *DirectoryInstructions    `json:"directory_instructions,omitempty"`
+	DirectoryInstructionRefs   []DirectoryInstructionRef `json:"-"`
+	DirectoryInstructionDigest string                    `json:"-"`
+	ToolControlReason          string                    `json:"tool_control_reason,omitempty"`
+	SkillActivation            *SkillActivationFact      `json:"skill_activation,omitempty"`
+	SkillDiscovery             *SkillDiscoveryRecord     `json:"skill_discovery,omitempty"`
+	CompactionSkillActivation  *SkillActivationCarry     `json:"compaction_skill_activation,omitempty"`
 	// InputID is local recovery metadata and is never a provider wire field.
 	InputID          string                `json:"input_id,omitempty"`
 	NativeTools      *NativeToolHistory    `json:"native_tools,omitempty"`
@@ -405,7 +412,7 @@ func IsUserAuthored(msg Message) bool {
 		return false
 	}
 	switch msg.Kind {
-	case KindQuestionState, KindQuestionResult, KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice:
+	case KindDirectoryInstructions, KindDirectoryInstructionProjection, KindSkillDiscovery, KindQuestionState, KindQuestionResult, KindSubAgentMailbox, KindLoopNotice, KindBackgroundResult, KindHookFeedback, KindStreamContinue, KindContextNotice:
 		return false
 	case KindTurnOverlay:
 		// Request-scoped runtime hints ride the request tail as user-role

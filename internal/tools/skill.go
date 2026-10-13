@@ -13,7 +13,7 @@ import (
 
 // SkillProvider exposes discovered skills, invoked skill state, and can load a skill's full content on demand.
 type SkillProvider interface {
-	ListSkills() []*skill.Meta
+	HasCallableSkills() bool
 	InvokedSkills() []*skill.Meta
 	MarkSkillInvoked(meta *skill.Meta)
 	LoadSkill(name string) (*skill.Skill, error)
@@ -57,11 +57,22 @@ const (
 // The budget counts characters and includes the ellipsis, so an overlong
 // description keeps SkillListingMaxDescCharsPerEntry-3 characters.
 func TruncateSkillDesc(desc string) string {
-	if utf8.RuneCountInString(desc) <= SkillListingMaxDescCharsPerEntry {
+	return TruncateSkillDescription(desc, SkillListingMaxDescCharsPerEntry)
+}
+
+// TruncateSkillDescription preserves UTF-8 while bounding Unicode rune count.
+func TruncateSkillDescription(desc string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(desc) <= limit {
 		return desc
 	}
 	runes := []rune(desc)
-	return string(runes[:SkillListingMaxDescCharsPerEntry-3]) + "..."
+	if limit < 3 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-3]) + "..."
 }
 
 // SkillListingEntry is a lightweight name+description pair used by the shared
@@ -70,40 +81,42 @@ type SkillListingEntry struct {
 	Name, Desc string
 }
 
-// BuildSkillListing builds the Available Skills listing section with
+// BuildStartupSkillListing builds the Available Skills listing section with
 // truncation budgets.  The header (e.g. "\n\n## Available Skills\n") is
 // included in the total budget, which is measured in bytes.  Returns empty
 // string when no entries remain.
-func BuildSkillListing(entries []SkillListingEntry, header string) string {
+func BuildStartupSkillListing(entries []SkillListingEntry, header string) string {
 	if len(entries) == 0 {
 		return ""
 	}
-	budget := max(SkillListingMaxTotalBytes-len(header), 0)
-
+	reserve := len(fmt.Sprintf("%d additional skills are listed by name below.\n", len(entries)))
+	var body strings.Builder
+	if len(header)+reserve > SkillListingMaxTotalBytes {
+		header = ""
+	}
+	body.WriteString(header)
+	var omitted []string
 	shown := 0
-	var sb strings.Builder
-	sb.WriteString(header)
-	for i, e := range entries {
-		if shown >= SkillListingMaxEntries {
-			break
+	for _, entry := range entries {
+		name, _ := json.Marshal(entry.Name)
+		desc, _ := json.Marshal(TruncateSkillDesc(entry.Desc))
+		line := fmt.Sprintf("- name: %s; description: %s\n", name, desc)
+		if shown >= SkillListingMaxEntries || body.Len()+len(line)+reserve > SkillListingMaxTotalBytes {
+			omitted = append(omitted, entry.Name)
+			continue
 		}
-		desc := TruncateSkillDesc(e.Desc)
-		line := fmt.Sprintf("- **%s**: %s\n", e.Name, desc)
-		if sb.Len()+len(line)-len(header) > budget && shown > 0 {
-			break
-		}
-		sb.WriteString(line)
-		shown = i + 1
+		body.WriteString(line)
+		shown++
 	}
-	remaining := len(entries) - shown
-	if remaining > 0 {
-		fmt.Fprintf(&sb, "+%d more skills available; see the skill tool name enum for all visible names\n", remaining)
+	if len(omitted) > 0 {
+		fmt.Fprintf(&body, "%d additional skills are listed by name below.\n", len(omitted))
+		slices.Sort(omitted)
+		names, _ := json.Marshal(omitted)
+		body.WriteString("Additional available skill names: ")
+		body.Write(names)
+		body.WriteByte('\n')
 	}
-	return sb.String()
-}
-
-func isListableSkill(sk *skill.Meta) bool {
-	return sk != nil && sk.Discovered && strings.TrimSpace(sk.Name) != ""
+	return body.String()
 }
 
 func (t SkillTool) DescriptionForTools(_ map[string]struct{}) string {
@@ -112,11 +125,7 @@ func (t SkillTool) DescriptionForTools(_ map[string]struct{}) string {
 		"The loaded result includes the skill body plus the skill root directory so relative `scripts/`, `references/`, and `assets/` paths are unambiguous.",
 		"Relative paths mentioned by a skill should be interpreted relative to the reported `<root>` directory.",
 	}
-	if t.provider == nil || len(t.provider.ListSkills()) == 0 {
-		base = append(base, "No skills are currently available.")
-	} else {
-		base = append(base, "The available skills and their descriptions are listed in the system prompt's \"Available Skills\" section.")
-	}
+	base = append(base, "Skill metadata is provided in the startup catalog or in optional path discovery notices.")
 	return strings.Join(base, " ")
 }
 
@@ -125,15 +134,7 @@ func (t SkillTool) Parameters() map[string]any {
 		"type":        "string",
 		"description": "Name of the skill to load.",
 	}
-	// The enum is intentionally complete rather than capped like the prompt
-	// summary: it is what keeps a skill past SkillListingMaxEntries loadable, so
-	// a cap here would turn a long install into silently unreachable skills. The
-	// cost is bounded by the install set, and a name is a few dozen bytes where
-	// the summary would have carried a description.
-	if names := t.visibleSkillNames(); len(names) > 0 {
-		name["enum"] = names
-		name["description"] = "Name of the skill to load. The enum lists all visible names, including entries omitted from the prompt summary."
-	}
+
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -146,22 +147,6 @@ func (t SkillTool) Parameters() map[string]any {
 		"required":             []string{"name"},
 		"additionalProperties": false,
 	}
-}
-
-// visibleSkillNames keeps omitted catalog entries discoverable without repeating
-// their descriptions. The provider already applies the agent's visibility rules.
-func (t SkillTool) visibleSkillNames() []string {
-	if t.provider == nil {
-		return nil
-	}
-	var names []string
-	for _, sk := range t.provider.ListSkills() {
-		if isListableSkill(sk) {
-			names = append(names, sk.Name)
-		}
-	}
-	slices.Sort(names)
-	return slices.Compact(names)
 }
 
 func (SkillTool) IsReadOnly() bool { return true }
@@ -344,7 +329,7 @@ func (t SkillTool) IsAvailable() bool {
 	if t.provider == nil {
 		return false
 	}
-	return slices.ContainsFunc(t.provider.ListSkills(), isListableSkill)
+	return t.provider.HasCallableSkills()
 }
 
 func (t SkillTool) Execute(_ context.Context, raw json.RawMessage) (string, error) {

@@ -165,6 +165,7 @@ func TestHandleLLMResponseDoesNotPromoteReadOnlyShellBehindAskGatedCommit(t *tes
 	a := newReadyTestMainAgent(t)
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.ruleset = permission.Ruleset{
+		{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionAllow},
 		{Permission: tools.NameShell, Pattern: "git commit *", Action: permission.ActionAsk},
 		{Permission: tools.NameShell, Pattern: "git status *", Action: permission.ActionAllow},
 	}

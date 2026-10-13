@@ -35,8 +35,8 @@ type readArgs struct {
 // call. Agent-side retry bookkeeping uses the same argument decoding and path
 // resolution as ReadTool so relative and absolute spellings share one key.
 func ExtractReadPathFromArgsInDir(args json.RawMessage, baseDir string) string {
-	var parsed readArgs
-	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil || strings.TrimSpace(parsed.Path) == "" {
+	parsed, err := decodeInstructionArgs[readArgs](args)
+	if err != nil || strings.TrimSpace(parsed.Path) == "" {
 		return ""
 	}
 	resolved, err := resolveToolPathAbsInDir(parsed.Path, baseDir)
@@ -284,9 +284,9 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var a readArgs
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	a, err := decodeInstructionArgs[readArgs](raw)
+	if err != nil {
+		return "", err
 	}
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")
@@ -303,6 +303,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		return "", fmt.Errorf("file too large (%d bytes, max %d); use offset/limit to read a portion or grep to search", info.Size(), MaxReadFileBytes)
 	}
 
+	activationBefore, identityBefore := activationReadIdentity(resolvedPath)
 	decoded, rawBytes, err := ReadAndDecodeTextFile(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -322,7 +323,11 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		if absPath, absErr := resolveToolPathAbsInDir(a.Path, t.BaseDir); absErr == nil {
 			observedPath = absPath
 		}
-		sink.SetReadObservation(ReadObservation{Path: observedPath, SHA256: hex.EncodeToString(sum[:])})
+		activationPath, identityAfter := activationReadIdentity(resolvedPath)
+		if activationPath != activationBefore || identityBefore == nil || identityAfter == nil || !os.SameFile(identityBefore, identityAfter) {
+			activationPath = ""
+		}
+		sink.SetReadObservation(ReadObservation{Path: observedPath, SHA256: hex.EncodeToString(sum[:]), ActivationPath: activationPath})
 	}
 	lines := splitReadToolLines(decoded.Text)
 	totalLines := len(lines)

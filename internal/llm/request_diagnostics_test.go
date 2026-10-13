@@ -69,6 +69,22 @@ func TestDiagnosticEstimateUniqueCarriersAndSources(t *testing.T) {
 		}
 	}
 }
+func TestDiagnosticDirectoryRulesAndSkillNotices(t *testing.T) {
+	messages := []message.Message{
+		{Role: message.RoleUser, Kind: message.KindDirectoryInstructionProjection, Content: "Follow the module instructions."},
+		{Role: message.RoleUser, Kind: message.KindSkillDiscovery, Content: "The sample skill is available."},
+	}
+	categories, limitations, _ := estimateDiagnosticInput(newDiagnosticBudget(context.Background()), "", messages, nil, RequestTuning{})
+	if slices.Contains(limitations, "source_unspecified") {
+		t.Fatal("known directory and skill sources were not classified")
+	}
+	for _, kind := range []string{contextdiag.Instructions, contextdiag.Runtime} {
+		if category := diagnosticCategory(t, categories, kind); category.Estimate.Tokens == 0 {
+			t.Fatalf("missing source tokens: %+v", category)
+		}
+	}
+}
+
 func TestDiagnosticEstimateLimitsAndSchemas(t *testing.T) {
 	schema := map[string]any{"enum": []any{"a", "b", "c"}}
 	if _, ok := boundedDiagnosticJSON(schema); !ok {

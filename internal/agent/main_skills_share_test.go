@@ -37,5 +37,5 @@ func TestSkillVisibilityWrappersMatchSharedHelpers(t *testing.T) {
 	}
 
 	assertMatches(t, "userVisibleSkillsForRuleset", userVisibleSkillsForRuleset(loaded, ruleset), skill.VisibleForRuleset(loaded, ruleset))
-	assertMatches(t, "modelVisibleSkillsForRuleset", modelVisibleSkillsForRuleset(loaded, ruleset), skill.ModelVisibleForRuleset(loaded, ruleset))
+	assertMatches(t, "modelCallableSkillsForRuleset", modelCallableSkillsForRuleset(loaded, ruleset), skill.ModelCallableForRuleset(loaded, ruleset))
 }

@@ -245,7 +245,7 @@ func TestWorkDirSwitchRefreshesInjectedGitStatus(t *testing.T) {
 	a := newWorktreeTestAgentOn(t, repo, "session-owner")
 	a.waitGitStatus(ctx)
 
-	_, startupStatus, _, startupVenv := a.promptMetaSnapshot()
+	_, startupStatus, startupVenv := a.promptMetaSnapshot()
 	if !strings.Contains(startupStatus, "(branch main,") {
 		t.Fatalf("startup git status = %q, want the startup branch", startupStatus)
 	}
@@ -254,7 +254,7 @@ func TestWorkDirSwitchRefreshesInjectedGitStatus(t *testing.T) {
 	}
 
 	installed := installTestCheckout(t, a, "feat-status")
-	_, inWorktree, _, worktreeVenv := a.promptMetaSnapshot()
+	_, inWorktree, worktreeVenv := a.promptMetaSnapshot()
 	if !strings.Contains(inWorktree, "(branch "+installed.Branch+",") {
 		t.Errorf("git status inside the checkout = %q, want branch %q", inWorktree, installed.Branch)
 	}
@@ -274,7 +274,7 @@ func TestWorkDirSwitchRefreshesInjectedGitStatus(t *testing.T) {
 	if back.Path != installed.Path {
 		t.Fatalf("re-adopted path = %q, want %q", back.Path, installed.Path)
 	}
-	if _, _, _, backVenv := a.promptMetaSnapshot(); backVenv != ownVenv {
+	if _, _, backVenv := a.promptMetaSnapshot(); backVenv != ownVenv {
 		t.Errorf("venv after re-entering the checkout = %q, want its own %q", backVenv, ownVenv)
 	}
 }
@@ -724,7 +724,7 @@ func TestRehydrateTaskRestoresRecordedWorktree(t *testing.T) {
 	}
 	configureNestedDelegationTestRuntime(restoredAgent, 1)
 	restoredAgent.setTaskRecords(map[string]*DurableTaskRecord{record.TaskID: record})
-	restoredAgent.ReloadAgentsMD()
+	restoredAgent.InvalidateDirectoryInstructions()
 
 	restored, _, err := restoredAgent.rehydrateTask(record)
 	if err != nil {
@@ -742,6 +742,7 @@ func TestRehydrateTaskRestoresRecordedWorktree(t *testing.T) {
 	}
 	// The worker resumes in the recorded checkout, so it must read the
 	// instructions of that checkout rather than the parent's snapshot.
+	prepareSubDirectoryInstructionsForTest(t, restored)
 	reminder := subAgentReminderContent(t, restored)
 	assertEnvBlockStatesWorktree(t, reminder, info.Path, info.Name, info.Branch)
 	if !strings.Contains(reminder, "checkout instructions") || strings.Contains(reminder, "root instructions") {

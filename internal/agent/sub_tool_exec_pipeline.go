@@ -33,19 +33,22 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		contentRoot = s.parent.ContentRoot()
 	}
 	return toolExecutionPipeline{
-		executionGate:    s.sessionExecutionGate(),
-		agentID:          s.instanceID,
-		journalAgentID:   s.instanceID,
-		eventAgentID:     s.instanceID,
-		taskID:           s.taskID,
-		sessionDir:       s.sessionDir,
-		registry:         s.tools,
-		governor:         s.parent.governor,
-		fileTrack:        fileTrack,
-		fileBackups:      fileBackups,
-		runtimeStartedAt: runtimeStartedAt,
-		eventSender:      eventSender,
-		emit:             emit,
+		directoryRuntime:  s.directoryInstructions.Load(),
+		skillView:         s.skillActivationView(),
+		skillSessionEpoch: s.sessionEpoch,
+		executionGate:     s.sessionExecutionGate(),
+		agentID:           s.instanceID,
+		journalAgentID:    s.instanceID,
+		eventAgentID:      s.instanceID,
+		taskID:            s.taskID,
+		sessionDir:        s.sessionDir,
+		registry:          s.tools,
+		governor:          s.parent.governor,
+		fileTrack:         fileTrack,
+		fileBackups:       fileBackups,
+		runtimeStartedAt:  runtimeStartedAt,
+		eventSender:       eventSender,
+		emit:              emit,
 		// A SubAgent may reach its own jobs, the main agent's jobs, and jobs
 		// started by its direct owner (the worker-reads-owner's-job case).
 		jobAccess:             tools.JobAccess{OwnerAgentID: s.OwnerAgentID(), MainAgentID: mainAgentID},
@@ -80,6 +83,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		},
 		currentTurnID:         s.currentTurnID,
 		captureWalltimeTarget: s.captureWalltimeTarget,
+		syncHookGate:          s.syncToolHooksConfigured,
 		fireHook:              s.fireHookInDir,
 		updatePending: func(call PendingToolCall) {
 			if turn := s.currentTurn(); turn != nil {

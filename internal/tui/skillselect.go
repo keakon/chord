@@ -44,8 +44,8 @@ func skillSelectIdleHint() string {
 // model-visible skill and whether its instructions are currently loaded. The
 // tool card uses ◌ for "receiving", so UI labels always keep the skill name
 // next to the glyph instead of letting it read as progress.
-func skillVisibilityGlyph(notModelVisible, loaded bool) string {
-	if notModelVisible {
+func skillVisibilityGlyph(notModelCallable, loaded bool) string {
+	if notModelCallable {
 		return "◌"
 	}
 	if loaded {
@@ -115,9 +115,9 @@ func sortSkillSelectStates(states []skill.InvocationState) {
 func skillSelectItemFor(st skill.InvocationState) OverlayListItem {
 	meta := st.Meta
 	name := strings.TrimSpace(meta.Name)
-	// Shape follows ModelVisible rather than frontmatter alone so a
+	// Shape follows ModelCallable rather than frontmatter alone so a
 	// ruleset-denied skill does not render as model-visible.
-	glyph := skillVisibilityGlyph(!st.ModelVisible, st.Loaded)
+	glyph := skillVisibilityGlyph(!st.ModelCallable, st.BodyPresent)
 	label := glyph + " " + name
 	if desc := strings.TrimSpace(meta.Description); desc != "" {
 		label += "  " + desc
@@ -130,10 +130,31 @@ func skillSelectItemFor(st skill.InvocationState) OverlayListItem {
 		item.Label = glyph + " " + name + " — " + skillReasonText(st.Reason)
 		return item
 	}
-	if st.Loaded {
-		item.Label += "  (loaded)"
+	if label := skillInvocationStatusLabel(st); label != "" {
+		item.Label += "  (" + label + ")"
 	}
 	return item
+}
+
+func skillInvocationStatusLabel(st skill.InvocationState) string {
+	switch {
+	case !st.UserLoadable:
+		return skillReasonText(st.Reason)
+	case !st.ModelCallable:
+		return "manual only"
+	case st.BodyPresent:
+		return "loaded"
+	case st.LoadedEarlier:
+		return "reload to use"
+	case st.NoticeRecorded:
+		return "suggested"
+	case st.PathActivated:
+		return "matched; pending notice"
+	case st.PathConditional:
+		return "waiting for path match"
+	default:
+		return ""
+	}
 }
 
 // skillSelectItems groups the catalog into MANUAL and AVAILABLE sections.

@@ -112,6 +112,8 @@ func (s *SubAgent) runLoop() {
 		}
 
 		select {
+		case evt := <-s.skillPublishCh:
+			s.handleSkillDiscoveryPublish(evt)
 		case input := <-inputCh:
 			s.accountDequeuedUserMessage(input)
 			s.handleUserInput(input)
@@ -129,6 +131,8 @@ func (s *SubAgent) runLoop() {
 			// State transitions and queue producers use wakeCh to make this
 			// select rebuild state-gated channels such as inputCh.
 
+		case prepared := <-s.directoryPreparedCh:
+			s.handleDirectoryInstructionsPrepared(prepared)
 		case result := <-s.llmCh:
 			if s.pendingLLMSilenceRecovery != "" || (s.llmSilenceAbandonedTurnID != 0 && result.turnID == s.llmSilenceAbandonedTurnID) {
 				// A result posted by a request this loop already aborted for
@@ -261,6 +265,7 @@ func (s *SubAgent) handleLLMSilenceDeadline(now time.Time) bool {
 	s.llmSilenceRecoveries++
 	turn := s.turn
 	log.Warnf("SubAgent LLM request silent agent=%v turn_id=%v silent_for=%v recovery=%v budget=%v", s.instanceID, turn.ID, silentFor.Round(time.Second), s.llmSilenceRecoveries, s.llmSilenceBudget)
+	s.directoryInstructions.Load().clearTurnDiscovery()
 	turn.Cancel()
 	// Never drop text the request did manage to stream before stalling.
 	s.preserveInterruptedPartial()
@@ -280,7 +285,7 @@ func (s *SubAgent) issueLLMSilenceRecovery() {
 	turn := s.newTurn()
 	s.appendPendingUserMessage(pendingUserMessage{Content: instruction})
 	s.llmRequestInFlight.Store(true)
-	s.asyncCallLLMWithFlightMarked(turn, s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr)))
+	s.asyncCallLLMWithFlightMarked(turn)
 }
 
 // subAgentRecoveryNotePrefix marks runtime recovery instructions sent to a
@@ -308,6 +313,7 @@ func (s *SubAgent) failTurnForLLMSilence(detail string) {
 	s.llmSilenceEscalatedAt = time.Time{}
 	if s.turn != nil {
 		s.llmSilenceAbandonedTurnID = s.turn.ID
+		s.directoryInstructions.Load().clearTurnDiscovery()
 		s.turn.Cancel()
 	}
 	s.llmRequestInFlight.Store(false)

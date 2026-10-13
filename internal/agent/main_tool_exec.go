@@ -18,7 +18,10 @@ import (
 )
 
 type ToolExecutionResult struct {
-	DeliveredFiles []message.DeliveredFile
+	DeliveredFiles     []message.DeliveredFile
+	SkillActivation    *skillActivationCandidate
+	DirectoryDiscovery *directoryInstructionDiscovery
+	ControlReason      string
 	// ExecutionStarted records whether the tool body actually entered Execute.
 	// Gate admission, hooks and journal writes do not establish this fact.
 	ExecutionStarted bool
@@ -104,7 +107,7 @@ func (a *MainAgent) executeToolCallSpeculative(ctx context.Context, tc message.T
 // when the call is created, so a queued entry starts in the checkout its
 // arguments were written for.
 func (a *MainAgent) bindSpeculativeEntry() streamingToolRunFunc {
-	pipeline := a.toolExecutionPipeline()
+	pipeline := a.toolExecutionPipeline().directoryAttemptSnapshot()
 	return func(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
 		return pipeline.executeSpeculative(ctx, tc)
 	}
@@ -119,18 +122,21 @@ func (a *MainAgent) captureMainWalltimeTarget() *walltimeTarget {
 
 func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 	return toolExecutionPipeline{
-		executionGate:    a.sessionExecutionGate(),
-		agentID:          a.instanceID,
-		journalAgentID:   identity.MainAgentID,
-		eventAgentID:     "",
-		sessionDir:       a.sessionDir,
-		registry:         a.tools,
-		governor:         a.governor,
-		fileTrack:        a.fileTrack,
-		fileBackups:      a.fileBackups,
-		runtimeStartedAt: a.runtimeStartedAt,
-		eventSender:      a,
-		emit:             a.emitToTUI,
+		directoryRuntime:  a.directoryInstructions.Load(),
+		skillView:         a.skillActivationView(),
+		skillSessionEpoch: a.sessionEpoch,
+		executionGate:     a.sessionExecutionGate(),
+		agentID:           a.instanceID,
+		journalAgentID:    identity.MainAgentID,
+		eventAgentID:      "",
+		sessionDir:        a.sessionDir,
+		registry:          a.tools,
+		governor:          a.governor,
+		fileTrack:         a.fileTrack,
+		fileBackups:       a.fileBackups,
+		runtimeStartedAt:  a.runtimeStartedAt,
+		eventSender:       a,
+		emit:              a.emitToTUI,
 		// MainAgent owns every job; its own instance id both stamps its jobs and
 		// lets it reach jobs started by any SubAgent.
 		jobAccess:       tools.JobAccess{MainAgentID: a.instanceID},
@@ -151,6 +157,7 @@ func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 		confirm:               a.confirmFn,
 		currentTurnID:         a.currentTurnID,
 		captureWalltimeTarget: a.captureMainWalltimeTarget,
+		syncHookGate:          a.syncToolHooksConfigured,
 		fireHook:              a.fireHookInDir,
 		updatePending: func(call PendingToolCall) {
 			if turn := a.currentTurn(); turn != nil {

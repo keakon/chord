@@ -693,6 +693,7 @@ func (c *Client) completeStreamTarget(
 	abortIfCancelled func() error,
 	oversizeSeen *oversizeRegistry,
 	pendingRollbackIn string,
+	prepareAttempt func(context.Context, RequestAttempt) (context.Context, error),
 ) (result streamTargetAttemptResult, finalLastInputTokens int, outErr error) {
 	result = streamTargetAttemptResult{}
 	// pendingRollback carries the rollback reason while preserved partial
@@ -876,12 +877,30 @@ func (c *Client) completeStreamTarget(
 		hadEarlierAttempt := result.hadRequestAttempt
 		result.hadRequestAttempt = true
 		attemptStartedAt := time.Now()
-		observedCtx := ctx
-		if observer, _ := ctx.Value(diagnosticsContextKey{}).(*RequestDiagnostics); observer != nil {
-			observedCtx = context.WithValue(ctx, diagnosticTargetContextKey{}, modelRef)
+		attemptCtx := ctx
+		if prepareAttempt != nil {
+			inputBudget := t.inputLimit
+			if hasModelCfg {
+				inputBudget = modelCfg.Limit.EffectiveInputBudget(effectiveMaxTokens, DefaultOutputTokenMax)
+			}
+			attemptCtx, err = prepareAttempt(ctx, RequestAttempt{Model: poolTarget, Messages: targetMessages, Tools: tools, SystemPrompt: systemPrompt, InputBudget: inputBudget})
+			if err != nil {
+				if _, budgetError := errors.AsType[*RequestInputBudgetError](err); budgetError {
+					result.setLastErr(t.provider, err)
+					oversizeSeen.mark(t.provider.Name(), t.modelID, t.variant)
+					return result, lastInputTokens, nil
+				}
+				return result, lastInputTokens, err
+			}
+			if attemptCtx == nil {
+				return result, lastInputTokens, fmt.Errorf("prepare request attempt returned nil context")
+			}
+		}
+		if observer, _ := attemptCtx.Value(diagnosticsContextKey{}).(*RequestDiagnostics); observer != nil {
+			attemptCtx = context.WithValue(attemptCtx, diagnosticTargetContextKey{}, modelRef)
 		}
 		resp, err = completeWithNativeTools(
-			observedCtx,
+			attemptCtx,
 			t.impl,
 			t.provider,
 			apiKey,
@@ -1481,6 +1500,7 @@ func (c *Client) completeStreamWithRetry(
 	startRoutingGeneration uint64,
 	routingChangedCh <-chan struct{},
 	beforeFallback func(context.Context, []message.Message, FallbackModel) ([]message.Message, error),
+	prepareAttempt func(context.Context, RequestAttempt) (context.Context, error),
 ) (resp *message.Response, err error) {
 	var lastErr error
 	var lastErrProvider *ProviderConfig
@@ -1689,6 +1709,7 @@ func (c *Client) completeStreamWithRetry(
 				abortIfCancelled,
 				oversizeSeen,
 				pendingRollback,
+				prepareAttempt,
 			); err != nil {
 				// An escalated preserved interruption carries the partial text
 				// forward: the caller saves it as the interrupted assistant

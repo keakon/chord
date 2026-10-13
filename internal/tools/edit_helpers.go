@@ -31,8 +31,8 @@ func ResolveEditPathInDir(path, baseDir string) (string, error) {
 }
 
 func extractEditPathArg(args json.RawMessage) string {
-	var parsed replaceEditArgs
-	if err := json.Unmarshal(unwrapToolArgs(args), &parsed); err != nil {
+	parsed, err := decodeInstructionArgs[replaceEditArgs](args)
+	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(parsed.Path)

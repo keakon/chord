@@ -76,8 +76,8 @@ func (e SessionEnvSnapshot) renderEnvBlock() string {
 //
 // Callers should treat an empty result as "no reminder to inject". When the
 // environment snapshot and agentsMD are both empty, the reminder is skipped.
-func buildSessionContextReminder(env SessionEnvSnapshot, agentsMD string) string {
-	agentsMD = strings.TrimSpace(agentsMD)
+func buildSessionContextReminder(env SessionEnvSnapshot, facts []message.DirectoryInstructionFact) string {
+	agentsMD := strings.TrimSpace(message.RenderDirectoryInstructionFacts(facts))
 	hasAgentsMD := agentsMD != ""
 	hasEnvField := env.hasEnv()
 	if !hasAgentsMD && !hasEnvField {
@@ -86,18 +86,10 @@ func buildSessionContextReminder(env SessionEnvSnapshot, agentsMD string) string
 
 	var sb strings.Builder
 	if hasAgentsMD {
-		// AGENTS.md gets a self-identifying block: the "# AGENTS.md instructions"
-		// header declares its identity on the first line, and <INSTRUCTIONS> markers
-		// bound it so the model (and history filtering) can recognize it without
-		// reading the whole preamble. Modeled on codex's contextual user fragment.
-		sb.WriteString("# AGENTS.md instructions\n")
-		sb.WriteString("<INSTRUCTIONS>\n")
-		sb.WriteString("Each applicable AGENTS.md from the repository root through the current working directory is already loaded here before the first visible user message, in root-to-current order and with its path labeled. ")
-		sb.WriteString(agentsMDInstructionRequirement)
-		sb.WriteString("\n\n")
 		sb.WriteString(agentsMD)
-		sb.WriteString("\n</INSTRUCTIONS>\n")
+		sb.WriteByte('\n')
 	}
+
 	if envBlock := env.renderEnvBlock(); envBlock != "" {
 		if sb.Len() > 0 {
 			sb.WriteByte('\n')
@@ -112,7 +104,7 @@ func buildSessionContextReminder(env SessionEnvSnapshot, agentsMD string) string
 // session-context reminder. The date uses the same "Mon Jan 2 2006" format the
 // system prompt previously embedded.
 func (a *MainAgent) sessionEnvSnapshot() SessionEnvSnapshot {
-	workDir, gitStatus, _, venvPath := a.promptMetaSnapshot()
+	workDir, gitStatus, venvPath := a.promptMetaSnapshot()
 	venvRel := ""
 	if venvPath != "" && workDir != "" {
 		venvRel = displayPathFromWorkDir(workDir, venvPath)
@@ -136,8 +128,7 @@ func (a *MainAgent) sessionEnvSnapshot() SessionEnvSnapshot {
 // with clearHistory=true).
 func (a *MainAgent) refreshSessionContextReminder() {
 	env := a.sessionEnvSnapshot()
-	agentsMD := a.cachedAgentsMDSnapshot()
-	content := buildSessionContextReminder(env, agentsMD)
+	content := buildSessionContextReminder(env, nil)
 	// Memory is appended under its own untrusted wrapper (not inside the
 	// AGENTS.md <INSTRUCTIONS> block). It reuses the same head-refresh /
 	// per-request-inject lifecycle; a background commit lands only once
@@ -201,10 +192,11 @@ func injectMetaUserReminder(messages []message.Message, content string) []messag
 // and never invalidates the prefix; content changes only on refresh.
 func (a *MainAgent) injectSessionContextReminder(messages []message.Message) []message.Message {
 	ptr := a.cachedSessionReminderContent.Load()
-	if ptr == nil {
-		return messages
+	content := ""
+	if ptr != nil {
+		content = *ptr
 	}
-	return injectMetaUserReminder(messages, *ptr)
+	return injectDirectoryInstructionReminder(messages, content, a.directoryInstructions.Load())
 }
 
 // sessionEnvSnapshot is the SubAgent counterpart of MainAgent.sessionEnvSnapshot.
@@ -234,7 +226,7 @@ func (s *SubAgent) sessionEnvSnapshot() SessionEnvSnapshot {
 // rebuilt on that switch too: without it every later request would keep
 // stating the checkout the worker left.
 func (s *SubAgent) refreshSessionContextReminder() {
-	content := buildSessionContextReminder(s.sessionEnvSnapshot(), s.agentsMDSnapshot())
+	content := buildSessionContextReminder(s.sessionEnvSnapshot(), nil)
 	if content == "" {
 		s.cachedSessionReminderContent.Store(nil)
 		return
@@ -242,13 +234,16 @@ func (s *SubAgent) refreshSessionContextReminder() {
 	s.cachedSessionReminderContent.Store(&content)
 }
 
-// agentsMDSnapshot returns the AGENTS.md content currently in force. The
-// switch path reloads it from the checkout the worker entered, so readers must
-// not touch the field directly.
-func (s *SubAgent) agentsMDSnapshot() string {
-	s.agentsMDMu.RLock()
-	defer s.agentsMDMu.RUnlock()
-	return s.agentsMD
+func (s *SubAgent) initialDirectoryInstructionsText() string {
+	return renderInitialDirectoryInstructions(s.directoryInstructions.Load())
+}
+func renderInitialDirectoryInstructions(r *directoryInstructionRuntime) string {
+	if r != nil {
+		if v := r.view.Load(); v != nil {
+			return message.RenderDirectoryInstructionFacts(v.Initial)
+		}
+	}
+	return ""
 }
 
 // injectSessionContextReminder is the SubAgent counterpart: same every-request
@@ -256,8 +251,30 @@ func (s *SubAgent) agentsMDSnapshot() string {
 // construction and on every worktree switch instead of on session-head resets.
 func (s *SubAgent) injectSessionContextReminder(messages []message.Message) []message.Message {
 	ptr := s.cachedSessionReminderContent.Load()
-	if ptr == nil {
-		return messages
+	content := ""
+	if ptr != nil {
+		content = *ptr
 	}
-	return injectMetaUserReminder(messages, *ptr)
+	return injectDirectoryInstructionReminder(messages, content, s.directoryInstructions.Load())
+}
+
+func injectDirectoryInstructionReminder(messages []message.Message, content string, r *directoryInstructionRuntime) []message.Message {
+	if initial := renderInitialDirectoryInstructions(r); initial != "" {
+		content = initial + "\n\n" + content
+	}
+	out := injectMetaUserReminder(messages, content)
+	if r == nil || len(out) == len(messages) {
+		return out
+	}
+	v := r.view.Load()
+	if v == nil {
+		return out
+	}
+	index := max(firstUserMessageIndex(messages), 0)
+	out[index].Kind = message.KindDirectoryInstructionProjection
+	for _, f := range v.Initial {
+		out[index].DirectoryInstructionRefs = append(out[index].DirectoryInstructionRefs, f.Ref())
+	}
+	out[index].DirectoryInstructionDigest = message.DirectoryInstructionBodyHash(out[index].Content)
+	return out
 }

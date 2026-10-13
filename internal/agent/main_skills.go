@@ -14,7 +14,7 @@ import (
 
 func (a *MainAgent) SetSkills(skills []*skill.Meta) {
 	a.skillsMu.Lock()
-	a.loadedSkills = append([]*skill.Meta(nil), skills...)
+	a.loadedSkills = skill.SnapshotCatalog(skills)
 	a.skillsMu.Unlock()
 	a.MarkSkillsReady()
 	// The catalog is part of the LLM surface: the Available Skills block lives
@@ -51,12 +51,10 @@ func (a *MainAgent) SetSkills(skills []*skill.Meta) {
 	a.skillsMu.Unlock()
 }
 
-// visibleSkillsSnapshot returns the model-facing catalog: the discovered skills
-// the role's ruleset allows and whose frontmatter keeps them model-invocable.
-// It is the source for the Available Skills prompt block and the skill tool
-// listing, so a manual-only skill cannot reach the model through either.
-func (a *MainAgent) visibleSkillsSnapshot() []*skill.Meta {
-	return modelVisibleSkillsForRuleset(a.loadedSkillsSnapshot(), a.effectiveRuleset())
+// callableSkillsSnapshot returns the complete model loading set for this agent,
+// independently of startup listing and path activation state.
+func (a *MainAgent) callableSkillsSnapshot() []*skill.Meta {
+	return modelCallableSkillsForRuleset(a.loadedSkillsSnapshot(), a.effectiveRuleset())
 }
 
 // userSkillsSnapshot returns what the user-facing surfaces may show: every
@@ -70,19 +68,13 @@ func (a *MainAgent) userSkillsSnapshot() []*skill.Meta {
 // agent. The catalog is the complete discovered set so the TUI selector can
 // explain a skill the role's ruleset denies instead of silently omitting it.
 func (a *MainAgent) skillInvocationStates() []skill.InvocationState {
-	return skill.InvocationStates(a.loadedSkillsSnapshot(), a.effectiveRuleset(), a.invokedSkillNameSet())
+	return skillInvocationStatesFromHistory(a.ctxMgr.Snapshot(), a.skillActivationView())
 }
 
-func (a *MainAgent) invokedSkillNameSet() map[string]struct{} {
-	a.skillsMu.RLock()
-	defer a.skillsMu.RUnlock()
-	return invokedSkillNameSetFromMap(a.invokedSkills)
-}
-
-func (a *MainAgent) ListSkills() []*skill.Meta { return a.visibleSkillsSnapshot() }
+func (a *MainAgent) CallableSkills() []*skill.Meta { return a.callableSkillsSnapshot() }
 
 // FocusedSkills returns skills visible to the agent currently shown by the TUI.
-// ListSkills remains scoped to MainAgent so the runtime SkillProvider semantics
+// CallableSkills remains scoped to MainAgent so the runtime SkillProvider semantics
 // do not change when the user switches sidebar focus.
 func (a *MainAgent) FocusedSkills() []*skill.Meta {
 	target := a.focusedAgentSnapshot()
@@ -117,14 +109,6 @@ func (a *MainAgent) parkedTaskUserSkills(task *DurableTaskRecord) []*skill.Meta 
 	return userVisibleSkillsForRuleset(catalog, ruleset)
 }
 
-func (a *MainAgent) parkedTaskSkillInvocationStates(task *DurableTaskRecord) []skill.InvocationState {
-	catalog, ruleset := a.parkedTaskCatalogAndRuleset(task)
-	if catalog == nil {
-		return nil
-	}
-	return skill.InvocationStates(catalog, ruleset, skillNameSet(task.InvokedSkillNames))
-}
-
 func (a *MainAgent) parkedTaskCatalogAndRuleset(task *DurableTaskRecord) ([]*skill.Meta, permission.Ruleset) {
 	if task == nil {
 		return nil, nil
@@ -152,25 +136,8 @@ func skillNameSet(names []string) map[string]struct{} {
 	return out
 }
 
-// invokedSkillNameSetFromMap turns the invoked-skills map into the set
-// InvocationStates consumes, skipping nil entries. Callers hold their own
-// skillsMu while reading the map.
-func invokedSkillNameSetFromMap(invoked map[string]*skill.Meta) map[string]struct{} {
-	if len(invoked) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(invoked))
-	for name, meta := range invoked {
-		if meta == nil {
-			continue
-		}
-		out[name] = struct{}{}
-	}
-	return out
-}
-
-func modelVisibleSkillsForRuleset(loaded []*skill.Meta, ruleset permission.Ruleset) []*skill.Meta {
-	return skill.ModelVisibleForRuleset(loaded, ruleset)
+func modelCallableSkillsForRuleset(loaded []*skill.Meta, ruleset permission.Ruleset) []*skill.Meta {
+	return skill.ModelCallableForRuleset(loaded, ruleset)
 }
 
 func userVisibleSkillsForRuleset(loaded []*skill.Meta, ruleset permission.Ruleset) []*skill.Meta {
@@ -267,7 +234,7 @@ func (a *MainAgent) LoadSkill(name string) (*skill.Skill, error) {
 	if name == "" {
 		return nil, fmt.Errorf("skill name is required")
 	}
-	for _, meta := range a.visibleSkillsSnapshot() {
+	for _, meta := range a.callableSkillsSnapshot() {
 		if meta.Name != name {
 			continue
 		}
@@ -310,3 +277,11 @@ func (a *MainAgent) loadedSkillsSnapshot() []*skill.Meta {
 	copy(out, a.loadedSkills)
 	return out
 }
+
+func (a *MainAgent) HasCallableSkills() bool { return len(a.callableSkillsSnapshot()) > 0 }
+
+func (a *MainAgent) startupSkillsSnapshot() []*skill.Meta {
+	return skill.StartupForRuleset(a.callableSkillsSnapshot(), nil)
+}
+
+func (a *MainAgent) UserSkills() []*skill.Meta { return a.userSkillsSnapshot() }

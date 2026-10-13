@@ -1,40 +1,24 @@
 package agent
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/keakon/golog/log"
-
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
-	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
 )
 
-// ReloadAgentsMD reloads project AGENTS.md from disk and marks the startup
-// gate (agentsMDReady) so ensureSessionBuilt can proceed. The content is
-// consumed the next time ensureSessionBuilt rebuilds the session-context
-// reminder (on session-head events). Mid-session edits to AGENTS.md are not
-// picked up until the next /new, /resume, or equivalent reset; AGENTS.md is
-// treated as a session-scope snapshot.
-func (a *MainAgent) ReloadAgentsMD() bool {
-	content := loadAgentsMDWithWorkDir(a.contentRoot, a.workDir())
-
-	a.promptMetaMu.Lock()
-	if content == a.cachedAgentsMD {
-		a.promptMetaMu.Unlock()
-		a.markAgentsMDReady()
-		return false
+// InvalidateDirectoryInstructions ends the previous binding snapshot. The next
+// request's preparation gate resolves rules with that agent's current role.
+func (a *MainAgent) InvalidateDirectoryInstructions() {
+	if r := a.directoryInstructions.Swap(nil); r != nil {
+		r.cancel()
 	}
-	a.cachedAgentsMD = content
-	a.promptMetaMu.Unlock()
 	a.markAgentsMDReady()
-	return true
 }
 
 func (a *MainAgent) refreshSystemPrompt() {
@@ -88,7 +72,7 @@ func (a *MainAgent) installSystemPrompt(prompt string) {
 // via the session-context reminder before the first user message to keep this
 // prefix cache-stable.
 func (a *MainAgent) buildSystemPrompt() string {
-	_, _, agentsMD, _ := a.promptMetaSnapshot()
+	agentsMD := a.initialDirectoryInstructionsText()
 
 	var parts []string
 	parts = append(parts, mainAgentIdentityPrompt)
@@ -199,8 +183,6 @@ func (a *MainAgent) visibleMCPServersPromptBlock() string {
 	}
 	return mcp.RenderServersPromptBlock(filtered)
 }
-
-const agentsMDInstructionRequirement = "Treat these loaded sections as mandatory scoped workspace instructions and follow every applicable instruction within the instruction priority order. Do not use file, search, or shell tools to rediscover or reread them. Read an additional AGENTS.md only when entering a directory whose instructions were not loaded. Beyond that, inspect only the task-relevant project files needed to understand, modify, or verify the requested work."
 
 func agentsMDReminderFramingPromptBlock(agentsMD string) string {
 	if strings.TrimSpace(agentsMD) == "" {
@@ -547,16 +529,14 @@ func (a *MainAgent) shouldUsePlannerPrompt(activeCfg *config.AgentConfig) bool {
 	return activeCfg.ResolvePromptPreset() == config.PromptPresetPlanning
 }
 
-func (a *MainAgent) promptMetaSnapshot() (workDir, gitStatus, agentsMD, venvPath string) {
+func (a *MainAgent) promptMetaSnapshot() (workDir, gitStatus, venvPath string) {
 	a.promptMetaMu.RLock()
 	defer a.promptMetaMu.RUnlock()
-	return a.workDirLocked(), a.cachedGitStatus, a.cachedAgentsMD, a.cachedVenvPath
+	return a.workDirLocked(), a.cachedGitStatus, a.cachedVenvPath
 }
 
-func (a *MainAgent) cachedAgentsMDSnapshot() string {
-	a.promptMetaMu.RLock()
-	defer a.promptMetaMu.RUnlock()
-	return a.cachedAgentsMD
+func (a *MainAgent) initialDirectoryInstructionsText() string {
+	return renderInitialDirectoryInstructions(a.directoryInstructions.Load())
 }
 
 func (a *MainAgent) cachedVenvPathSnapshot() string {
@@ -599,89 +579,6 @@ func (a *MainAgent) refreshWorkDirDerivedMeta() {
 		venv = detectVenvPath(a.contentRoot, a.contentRoot)
 	}
 	a.setCachedVenvPath(venv)
-}
-
-// loadAgentsMDWithWorkDir loads the AGENTS.md instructions that apply to the
-// agent's current checkout, from the checkout root down to workDir.
-//
-// Every level resolves to exactly one file: the checkout's own copy when it
-// exists (a branch may carry its own tracked instructions), otherwise the
-// content root's copy (where gitignored local instructions live, and which the
-// worktree checkout does not contain). Levels are never loaded from both
-// checkouts, so the same instructions are not repeated.
-func loadAgentsMDWithWorkDir(contentRoot, workDir string) string {
-	if contentRoot == "" {
-		return ""
-	}
-
-	absRoot, err := filepath.Abs(contentRoot)
-	if err != nil {
-		return ""
-	}
-	displayBase := absRoot
-	checkoutRoot := absRoot
-	// Level "" is the checkout root; deeper levels follow when workDir sits
-	// below it.
-	levels := []string{""}
-
-	if workDir != "" {
-		if absWork, werr := filepath.Abs(workDir); werr == nil {
-			// Titles stay relative to the checkout the agent works in, even when
-			// that checkout sits outside the content root (a chord-managed
-			// worktree under the state directory).
-			displayBase = absWork
-			// The walk is relative to the checkout workDir sits in: a linked
-			// worktree or submodule nested inside the repository has its own
-			// root, not the content root's.
-			checkoutRoot = pathutil.CheckoutRoot(absWork, absRoot)
-			rel, ok := relativePathWithin(checkoutRoot, absWork)
-			if !ok {
-				rel = "."
-			}
-			if rel != "." {
-				parts := strings.Split(rel, string(filepath.Separator))
-				for i := 1; i <= len(parts); i++ {
-					levels = append(levels, filepath.Join(parts[:i]...))
-				}
-			}
-		}
-	}
-
-	var sections []string
-	for _, rel := range levels {
-		checkoutPath := filepath.Join(checkoutRoot, rel, "AGENTS.md")
-		contentPath := filepath.Join(absRoot, rel, "AGENTS.md")
-		path, data, ok := readAgentsMDLevel(checkoutPath, contentPath)
-		if !ok {
-			continue
-		}
-		log.Debugf("loaded AGENTS.md path=%v size=%v", path, len(data))
-		display := displayPathFromWorkDir(displayBase, path)
-		if display == "" {
-			display = "AGENTS.md"
-		}
-		sections = append(sections, fmt.Sprintf("## %s\n\n%s", display, data))
-	}
-	return strings.Join(sections, "\n\n")
-}
-
-// readAgentsMDLevel reads one AGENTS.md level, preferring the checkout's own
-// copy and falling back to the content root's copy. It returns the file that
-// was read and its trimmed non-empty content.
-func readAgentsMDLevel(checkoutPath, contentPath string) (string, string, bool) {
-	for _, path := range []string{checkoutPath, contentPath} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				log.Warnf("failed to read AGENTS.md path=%v error=%v", path, err)
-			}
-			continue
-		}
-		if trimmed := strings.TrimSpace(string(data)); trimmed != "" {
-			return path, trimmed, true
-		}
-	}
-	return "", "", false
 }
 
 func displayPathFromWorkDir(workDir, path string) string {
@@ -737,11 +634,11 @@ func (a *MainAgent) mainVisibleLLMToolNames() map[string]struct{} {
 }
 
 func (a *MainAgent) availableSkillsPromptBlock() string {
-	loadedSkills := a.visibleSkillsSnapshot()
+	loadedSkills := a.startupSkillsSnapshot()
 	if len(loadedSkills) == 0 {
 		return ""
 	}
-	// visibleSkillsSnapshot already filters through ModelVisibleForRuleset,
+	// callableSkillsSnapshot already filters through ModelCallableForRuleset,
 	// so no second ruleset check here: SubAgent.availableSkillsPromptBlock
 	// uses the same snapshot directly.
 	entries := make([]tools.SkillListingEntry, 0, len(loadedSkills))
@@ -755,7 +652,7 @@ func (a *MainAgent) availableSkillsPromptBlock() string {
 		return ""
 	}
 	header := "## Available Skills\nThe `skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `skill` before proceeding.\n\n"
-	return tools.BuildSkillListing(entries, header)
+	return tools.BuildStartupSkillListing(entries, header)
 }
 
 // getGitStatus checks whether the working directory is inside a git repository

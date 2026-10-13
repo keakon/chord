@@ -46,6 +46,7 @@ func waitForSubAgentConnecting(events <-chan AgentEvent, agentID string, timeout
 func TestSubAgentRoutingInvalidatedRestartsInsteadOfError(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-1")
+	prepareSubRequestDirectoryFixture(t, sub)
 	// The restarted request parks in retry backoff under the stub provider;
 	// cancel the sub-agent so its goroutine unwinds at test end.
 	t.Cleanup(func() {

@@ -24,6 +24,9 @@ import (
 // working: the "[system] SubAgent context checkpoint:" prefix and the
 // "Full pre-checkpoint history: <ref>." trailer carrying the archive address.
 func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, removed int, reason, archiveRef string) string {
+	if s != nil {
+		messages = projectSkillDiscoveryMessages(messages, s.skillActivationView())
+	}
 	var b strings.Builder
 	toolMeta := buildToolCallMeta(messages)
 	fmt.Fprintf(&b, "[system] SubAgent context checkpoint: %d earlier messages were removed for %s.\n", removed, reason)

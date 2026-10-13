@@ -691,7 +691,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 							effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 							diff = toolExecutionDiff(effectiveCall, execResult)
 						}
-						resultPayload := &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turnID, Duration: toolExecDuration(tc.Name, execResult, completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
+						resultPayload := &ToolResultPayload{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turnID, Duration: toolExecDuration(tc.Name, execResult, completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err), SkillActivation: execResult.SkillActivation, DirectoryDiscovery: execResult.DirectoryDiscovery, ControlReason: execResult.ControlReason}
 						resultPayload.composedTexts = finalizeToolResultTexts(turn.Ctx, turn, a.fireHook, resultPayload.CallID, resultPayload.Name, resultPayload.ArgsJSON, resultPayload.Result, resultPayload.Error, resultPayload.Audit, resultPayload.FileState)
 						a.sendEvent(Event{Type: EventToolResult, TurnID: turnID, Payload: resultPayload})
 					}(effective)
@@ -776,7 +776,7 @@ func (a *MainAgent) promoteStreamingToolBatch(turn *Turn, batch toolExecutionBat
 				LSPReviews:     append([]message.LSPReview(nil), execResult.LSPReviews...),
 				FileState:      execResult.FileState.Clone(),
 				walltimeTarget: execResult.walltimeTarget,
-				RecoveryState:  execResult.recoveryState(err),
+				RecoveryState:  execResult.recoveryState(err), SkillActivation: execResult.SkillActivation, DirectoryDiscovery: execResult.DirectoryDiscovery, ControlReason: execResult.ControlReason,
 			}
 			// Hook context is the turn, not the batch: batchCancel above fires
 			// before this line whenever a sibling failed, and a cancelled ctx

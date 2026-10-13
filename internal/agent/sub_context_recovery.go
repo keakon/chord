@@ -55,7 +55,7 @@ func (s *SubAgent) recoverFromContextLength(err error) bool {
 	}
 	s.turn.SubAgentContextRecoveryCount++
 	log.Infof("SubAgent context length recovery compressed history agent=%v turn_id=%v before=%v after=%v target_tokens=%v", s.instanceID, s.turn.ID, len(messages), len(compressed), target)
-	s.asyncCallLLMWithFlightMarked(s.turn, snapshotLLMRequest(s.ctxMgr))
+	s.asyncCallLLMWithFlightMarked(s.turn)
 	return true
 }
 
@@ -95,6 +95,20 @@ func (s *SubAgent) prepareContextForLLM(input llmRequestInput) (prepared llmRequ
 }
 
 func (s *SubAgent) compactContextForTarget(messages []message.Message, target int, reason string) ([]message.Message, bool) {
+	beforeReconcile := s.ctxMgr.MessageCount()
+	if s.parent != nil {
+		s.parent.flushPersist()
+		if err := s.skillPublisher.reconcileAfterFlush(s.parent.persist, s.ctxMgr.Snapshot(), s.ctxMgr.Append); err != nil {
+			return nil, false
+		}
+	}
+	if err := s.reconcileDirectoryInstructionsAfterFlush(); err != nil {
+		return nil, false
+	}
+	if s.ctxMgr.MessageCount() != beforeReconcile {
+		messages = s.ctxMgr.Snapshot()
+	}
+	skillView := s.skillActivationView()
 	compressed := s.ctxMgr.CompressForTarget(messages, target)
 	if s.compactionDropsPendingPauseInputs(messages, compressed) {
 		return nil, false
@@ -113,7 +127,8 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 		// shared IsUserAuthored predicate reports it as user-authored, and the
 		// restore path would take it for the task description. The main agent's
 		// checkpoint carries the same marker.
-		IsCompactionSummary: true,
+		IsCompactionSummary:       true,
+		CompactionSkillActivation: buildSkillActivationCarry(messages, skillView, skillActivationEpoch(messages, skillView.TaskID)+1),
 		Content: buildSubAgentStructuredCheckpoint(
 			s,
 			messages,
@@ -126,6 +141,10 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 		compressed[1] = checkpoint
 	} else {
 		compressed = append(compressed[:1], append([]message.Message{checkpoint}, compressed[1:]...)...)
+	}
+	compressed = retainDirectoryInstructionFacts(messages, compressed)
+	if estimateMessagesTokens(s.ctxMgr, compressed) >= estimateMessagesTokens(s.ctxMgr, messages) {
+		return nil, false
 	}
 	if manager := s.recoveryManager(); manager != nil {
 		if s.parent != nil {

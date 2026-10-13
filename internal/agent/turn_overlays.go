@@ -156,12 +156,7 @@ func (a *MainAgent) buildTurnOverlayMessages() []message.Message {
 	}
 	if a.stageCompletionCandidatePending && !a.stageCompletionCandidatePromptDelivered {
 		a.stageCompletionCandidatePromptDelivered = true
-		reminder := "The TODO list reached a terminal state; this does not establish that the current user request is complete. Check remaining work and verification. "
-		if a.compactContextVisible() {
-			reminder += "If only the final response remains, deliver it without compact_context. Otherwise continue the work; a stage boundary alone is not a reason to checkpoint."
-		} else {
-			reminder += "If only the final response remains, deliver it; otherwise continue the work."
-		}
+		reminder := a.stageCompletionCandidateReminder()
 		overlays = append(overlays, message.Message{Role: "user", Kind: message.KindTurnOverlay, Content: "<system-reminder>\n" + reminder + "\n</system-reminder>"})
 	}
 
@@ -669,4 +664,14 @@ func (a *MainAgent) clearPendingOverlayAppends() {
 	a.pendingOverlayAppends = nil
 	a.pendingOverlayReconcile = false
 	a.pendingOverlayAppendsMu.Unlock()
+}
+
+func (a *MainAgent) stageCompletionCandidateReminder() string {
+	reminder := "The TODO list reached a terminal state; this does not establish that the current user request is complete. Check remaining work and verification. "
+	if a.compactContextVisible() {
+		reminder += "If only the final response remains, deliver it without compact_context. Otherwise continue the work; a stage boundary alone is not a reason to checkpoint."
+	} else {
+		reminder += "If only the final response remains, deliver it; otherwise continue the work."
+	}
+	return reminder
 }

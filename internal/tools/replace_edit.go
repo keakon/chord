@@ -136,9 +136,9 @@ func (EditTool) Parameters() map[string]any {
 func (EditTool) IsReadOnly() bool { return false }
 
 func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a replaceEditArgs
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	a, err := decodeInstructionArgs[replaceEditArgs](raw)
+	if err != nil {
+		return "", err
 	}
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")

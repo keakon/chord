@@ -823,7 +823,7 @@ const agentsMDTruncationMarker = "\n\n[... repository instructions truncated in 
 // head-only cut hides exactly the rules the model needs when judging whether a
 // conclusion is already expressed.
 func (a *MainAgent) boundedAgentsMDSnapshot() string {
-	return boundedAgentsSnapshot(a.cachedAgentsMDSnapshot(), memoryExtractionAgentsBytes, memoryExtractionAgentsTail)
+	return boundedAgentsSnapshot(a.initialDirectoryInstructionsText(), memoryExtractionAgentsBytes, memoryExtractionAgentsTail)
 }
 
 // boundedAgentsSnapshot keeps the first budget-tailReserve bytes and the last

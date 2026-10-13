@@ -328,12 +328,8 @@ func TestMailboxInjectionTextRendersWorktree(t *testing.T) {
 	}
 }
 
-// TestSubAgentInstructionsFollowItsStartingCheckout pins which AGENTS.md a
-// spawned worker follows. A worker starting in the parent's own checkout keeps
-// the parent's snapshot, so mid-session edits stay invisible exactly as they do
-// for the parent. A worker starting in another checkout reads that checkout's
-// file, because the parent's snapshot describes a different tree — the path a
-// rehydrated worker takes.
+// Each worker resolves its own starting checkout and role before its first
+// request, including when its parent already prepared the same directory.
 func TestSubAgentInstructionsFollowItsStartingCheckout(t *testing.T) {
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-agents")
@@ -341,16 +337,16 @@ func TestSubAgentInstructionsFollowItsStartingCheckout(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "AGENTS.md"), []byte("root instructions\n"), 0o644); err != nil {
 		t.Fatalf("write main checkout AGENTS.md: %v", err)
 	}
-	a.ReloadAgentsMD()
+	a.InvalidateDirectoryInstructions()
 
-	// A worker that starts in the parent's own checkout keeps the session
-	// snapshot instead of re-reading the file.
+	// A worker starting in the same checkout prepares its own snapshot.
 	inherited, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "inherited work", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent (inherited): %v", err)
 	}
-	if got := a.subAgentByTaskID(inherited.TaskID).agentsMDSnapshot(); !strings.Contains(got, "root instructions") {
-		t.Fatalf("inherited worker AGENTS.md = %q, want the session snapshot", got)
+	prepareSubDirectoryInstructionsForTest(t, a.subAgentByTaskID(inherited.TaskID))
+	if got := a.subAgentByTaskID(inherited.TaskID).initialDirectoryInstructionsText(); !strings.Contains(got, "root instructions") {
+		t.Fatalf("inherited worker AGENTS.md = %q, want own snapshot; view=%+v", got, a.subAgentByTaskID(inherited.TaskID).directoryInstructions.Load().view.Load())
 	}
 
 	info := createTestWorktree(t, a, "feat-agents")
@@ -359,14 +355,14 @@ func TestSubAgentInstructionsFollowItsStartingCheckout(t *testing.T) {
 	}
 	// The parent is still in the main checkout, so a worker starting in the
 	// checkout must read the checkout's file rather than reuse the snapshot.
-	if got := a.subAgentAgentsMD(info.Path); !strings.Contains(got, "checkout instructions") || strings.Contains(got, "root instructions") {
+	if got := renderDirectoryInstructionsForTest(repo, info.Path); !strings.Contains(got, "checkout instructions") || strings.Contains(got, "root instructions") {
 		t.Fatalf("worker instructions for another checkout = %q, want the checkout's file", got)
 	}
 
 	// Once the parent works in the checkout, a delegated worker inherits it and
-	// keeps the parent's (now checkout-specific) snapshot.
+	// prepares its own checkout-specific snapshot.
 	installed := installTestCheckout(t, a, "feat-agents")
-	a.ReloadAgentsMD()
+	a.InvalidateDirectoryInstructions()
 	own, err := a.CreateSubAgent(ctx, tools.SubAgentRequest{Description: "checkout own", AgentType: "worker"})
 	if err != nil {
 		t.Fatalf("CreateSubAgent (own file): %v", err)
@@ -375,7 +371,8 @@ func TestSubAgentInstructionsFollowItsStartingCheckout(t *testing.T) {
 	if got := child.workDirState.load().Path; got != installed.Path {
 		t.Fatalf("inherited worker checkout = %q, want %q", got, installed.Path)
 	}
-	if got := child.agentsMDSnapshot(); !strings.Contains(got, "checkout instructions") || strings.Contains(got, "root instructions") {
+	prepareSubDirectoryInstructionsForTest(t, child)
+	if got := child.initialDirectoryInstructionsText(); !strings.Contains(got, "checkout instructions") || strings.Contains(got, "root instructions") {
 		t.Fatalf("worker in the parent's checkout = %q, want the checkout's instructions", got)
 	}
 	// The reminder is what the model actually reads on every request, so the

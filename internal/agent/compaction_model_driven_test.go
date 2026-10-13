@@ -482,6 +482,7 @@ func TestModelDrivenSkipKeepsUsageDrivenSafetyNetArmed(t *testing.T) {
 		PlanID:      3,
 		Target:      target,
 	}
+	prepareMainRequestDirectoryFixture(t, a)
 	a.handleCompactionReady(Event{Type: EventCompactionReady, TurnID: turnID, Payload: draft})
 
 	// The skip settles without clearing the usage-driven request...

@@ -1918,7 +1918,7 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 	// so this reset would otherwise leave the model following a workflow it can
 	// no longer see — and unable to tell that it should re-load it.
 	skillNames, skillsOmitted := collectCheckpointSkillNames(headSnapshot)
-	summary = ensureCheckpointSkillsSection(summary, skillNames, skillsOmitted, checkpointModelLoadable(a.visibleSkillsSnapshot()))
+	summary = ensureCheckpointSkillsSection(summary, skillNames, skillsOmitted, checkpointModelLoadable(a.callableSkillsSnapshot()))
 	// Live jobs are the third runtime-owned snapshot: the model submission
 	// cannot know them, and after the reset their handles are gone from the
 	// transcript, so the checkpoint must carry what is still running. The

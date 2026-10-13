@@ -38,11 +38,11 @@ func (s *SubAgent) skillCatalogAndRuleset() ([]*skill.Meta, permission.Ruleset) 
 	return catalog, ruleset
 }
 
-// visibleSkillsSnapshot returns the model-facing catalog for this worker: the
+// callableSkillsSnapshot returns the model-facing catalog for this worker: the
 // ruleset-allowed skills whose frontmatter keeps them model-invocable.
-func (s *SubAgent) visibleSkillsSnapshot() []*skill.Meta {
+func (s *SubAgent) callableSkillsSnapshot() []*skill.Meta {
 	catalog, ruleset := s.skillCatalogAndRuleset()
-	return skill.ModelVisibleForRuleset(catalog, ruleset)
+	return skill.ModelCallableForRuleset(catalog, ruleset)
 }
 
 // userSkillsSnapshot returns what the user-facing surfaces may show for this
@@ -55,21 +55,11 @@ func (s *SubAgent) userSkillsSnapshot() []*skill.Meta {
 // skillInvocationStates returns per-skill visibility and load state for the
 // TUI's focused view of this worker.
 func (s *SubAgent) skillInvocationStates() []skill.InvocationState {
-	catalog, ruleset := s.skillCatalogAndRuleset()
-	return skill.InvocationStates(catalog, ruleset, s.invokedSkillNameSet())
-}
-
-func (s *SubAgent) invokedSkillNameSet() map[string]struct{} {
-	if s == nil {
-		return nil
-	}
-	s.skillsMu.RLock()
-	defer s.skillsMu.RUnlock()
-	return invokedSkillNameSetFromMap(s.invokedSkills)
+	return skillInvocationStatesFromHistory(s.ctxMgr.Snapshot(), s.skillActivationView())
 }
 
 func (s *SubAgent) availableSkillsPromptBlock() string {
-	skills := s.visibleSkillsSnapshot()
+	skills := s.startupSkillsSnapshot()
 	if len(skills) == 0 {
 		return ""
 	}
@@ -84,11 +74,11 @@ func (s *SubAgent) availableSkillsPromptBlock() string {
 		return ""
 	}
 	header := "## Available Skills\nThe `skill` tool can load additional skill instructions on demand. When a task clearly matches one of these skills, call `skill` before proceeding.\n\n"
-	return tools.BuildSkillListing(entries, header)
+	return tools.BuildStartupSkillListing(entries, header)
 }
 
-func (s *SubAgent) ListSkills() []*skill.Meta {
-	return s.visibleSkillsSnapshot()
+func (s *SubAgent) CallableSkills() []*skill.Meta {
+	return s.callableSkillsSnapshot()
 }
 
 func (s *SubAgent) InvokedSkills() []*skill.Meta {
@@ -160,7 +150,7 @@ func (s *SubAgent) LoadSkill(name string) (*skill.Skill, error) {
 	if name == "" {
 		return nil, fmt.Errorf("skill name is required")
 	}
-	for _, meta := range s.visibleSkillsSnapshot() {
+	for _, meta := range s.callableSkillsSnapshot() {
 		if meta == nil || meta.Name != name {
 			continue
 		}
@@ -168,3 +158,11 @@ func (s *SubAgent) LoadSkill(name string) (*skill.Skill, error) {
 	}
 	return nil, fmt.Errorf("skill %q not found", name)
 }
+
+func (s *SubAgent) HasCallableSkills() bool { return len(s.callableSkillsSnapshot()) > 0 }
+
+func (s *SubAgent) startupSkillsSnapshot() []*skill.Meta {
+	return skill.StartupForRuleset(s.callableSkillsSnapshot(), nil)
+}
+
+func (s *SubAgent) UserSkills() []*skill.Meta { return s.userSkillsSnapshot() }

@@ -15,7 +15,7 @@ func TestRenderEnvBlockIncludesWorktreeLine(t *testing.T) {
 		WorktreeBranch: "chord/feat",
 		Platform:       "test/os",
 		Date:           "Apr 17 2026",
-	}, "")
+	}, nil)
 	for _, want := range []string{
 		"Working directory: /state/worktrees/feat",
 		"Worktree: feat (branch chord/feat)",
@@ -28,13 +28,13 @@ func TestRenderEnvBlockIncludesWorktreeLine(t *testing.T) {
 	}
 
 	// A main checkout has no worktree identity to report.
-	plain := buildSessionContextReminder(SessionEnvSnapshot{WorkDir: "/repo", Platform: "test/os", Date: "Apr 17 2026"}, "")
+	plain := buildSessionContextReminder(SessionEnvSnapshot{WorkDir: "/repo", Platform: "test/os", Date: "Apr 17 2026"}, nil)
 	if strings.Contains(plain, "Worktree:") {
 		t.Fatalf("main-checkout env block should not carry a Worktree line: %q", plain)
 	}
 
 	// A named worktree without a branch still renders the name.
-	branchless := buildSessionContextReminder(SessionEnvSnapshot{WorkDir: "/state/worktrees/feat", WorktreeName: "feat", Date: "Apr 17 2026"}, "")
+	branchless := buildSessionContextReminder(SessionEnvSnapshot{WorkDir: "/state/worktrees/feat", WorktreeName: "feat", Date: "Apr 17 2026"}, nil)
 	if !strings.Contains(branchless, "Worktree: feat\n") {
 		t.Fatalf("branchless worktree line = %q, want the bare name", branchless)
 	}
@@ -51,11 +51,11 @@ func TestHasEnvIncludesWorktreeIdentity(t *testing.T) {
 
 func subAgentReminderContent(t *testing.T, s *SubAgent) string {
 	t.Helper()
-	ptr := s.cachedSessionReminderContent.Load()
-	if ptr == nil {
+	msgs := s.injectSessionContextReminder(nil)
+	if len(msgs) == 0 {
 		t.Fatal("SubAgent has no session-context reminder")
 	}
-	return *ptr
+	return msgs[0].Content
 }
 
 func assertEnvBlockStatesWorktree(t *testing.T, content, workDir, name, branch string) {

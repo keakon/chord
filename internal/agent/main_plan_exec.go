@@ -150,7 +150,9 @@ func (a *MainAgent) commitPlanExecution(staging *planExecutionStaging) error {
 	a.emitToTUI(SessionSwitchStartedEvent{Kind: sessionSwitchKindPlanExecution})
 	turnID := a.turn.ID
 	oldLock := a.sessionLock
-	a.freezeCurrentSession(oldRecovery)
+	if err := a.freezeCurrentSession(oldRecovery); err != nil {
+		return err
+	}
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
 			log.Warnf("execution session: failed to release old session lock error=%v", releaseErr)

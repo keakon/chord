@@ -142,6 +142,7 @@ func TestTruncatedLengthRecoveryCarriesQueuedUserMessage(t *testing.T) {
 // request carries the mailbox instead of waiting for idle.
 func TestAutoContinueResumeCarriesMailboxOnlyQueue(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	prepareMainRequestDirectoryFixture(t, a)
 	provider := &gatedMailboxCaptureProvider{started: make(chan struct{}, 1), release: make(chan struct{})}
 	t.Cleanup(func() {
 		select {
@@ -208,6 +209,7 @@ func TestAutoContinueResumeCarriesMailboxOnlyQueue(t *testing.T) {
 // it to idle.
 func TestContinueFromContextStagesMailboxOnlyQueue(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
+	prepareMainRequestDirectoryFixture(t, a)
 	provider := &gatedMailboxCaptureProvider{started: make(chan struct{}, 1), release: make(chan struct{})}
 	t.Cleanup(func() {
 		select {

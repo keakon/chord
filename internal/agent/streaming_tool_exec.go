@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -385,6 +386,11 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 	if entry.state != streamingToolCompleted && entry.state != streamingToolYielded {
 		return nil, false, false
 	}
+	if errors.Is(entry.err, errDirectorySpeculationDeferred) {
+		delete(e.entries, call.ID)
+		e.releaseConflictKeysLocked(entry)
+		return nil, false, false
+	}
 	entry.state = streamingToolYielded
 	delete(e.entries, call.ID)
 	e.releaseConflictKeysLocked(entry)
@@ -394,7 +400,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 		effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
 		diff = toolExecutionDiff(effective, entry.result)
 	}
-	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: toolExecDuration(call.Name, entry.result, entry.completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), RecoveryState: entry.result.recoveryState(entry.err), walltimeTarget: entry.result.walltimeTarget, speculativeHooks: entry.result.speculativeHooks}, true, false
+	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: toolExecDuration(call.Name, entry.result, entry.completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), RecoveryState: entry.result.recoveryState(entry.err), SkillActivation: entry.result.SkillActivation, DirectoryDiscovery: entry.result.DirectoryDiscovery, ControlReason: entry.result.ControlReason, walltimeTarget: entry.result.walltimeTarget, speculativeHooks: entry.result.speculativeHooks}, true, false
 }
 
 func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streamingToolEntry, reason string) StreamingToolDiscardInfo {
@@ -532,6 +538,7 @@ func (e *StreamingToolExecutor) DrainCompletedResults() map[string]*ToolResultPa
 			FileState:        entry.result.FileState.Clone(),
 			walltimeTarget:   entry.result.walltimeTarget,
 			speculativeHooks: entry.result.speculativeHooks,
+			SkillActivation:  entry.result.SkillActivation, DirectoryDiscovery: entry.result.DirectoryDiscovery, ControlReason: entry.result.ControlReason,
 		}
 		results[callID] = payload
 	}

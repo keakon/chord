@@ -263,7 +263,11 @@ func (m *Manager) Append(msg message.Message) {
 	m.trackToolCallIDsLocked(msg)
 	m.messages = append(m.messages, msg)
 	m.payloadBytes += MessagePayloadBytes([]message.Message{msg})
-	m.contextBytes += messageContextBytes([]message.Message{msg})
+	if msg.Kind == message.KindDirectoryInstructions {
+		m.contextBytes = messageContextBytes(m.messages)
+	} else {
+		m.contextBytes += messageContextBytes([]message.Message{msg})
+	}
 	imagePayloadBytes, imageTokens := imagePartAccounting([]message.Message{msg})
 	m.imagePayloadBytes += imagePayloadBytes
 	m.imageEstimateTokens += imageTokens
@@ -312,11 +316,18 @@ func (m *Manager) DropLastMessages(n int) {
 		m.historyGeneration++
 	}
 	m.payloadBytes -= MessagePayloadBytes(m.messages[len(m.messages)-n:])
+	removedDirectoryFacts := false
+	for _, msg := range m.messages[len(m.messages)-n:] {
+		removedDirectoryFacts = removedDirectoryFacts || msg.Kind == message.KindDirectoryInstructions
+	}
 	m.contextBytes -= messageContextBytes(m.messages[len(m.messages)-n:])
 	imagePayloadBytes, imageTokens := imagePartAccounting(m.messages[len(m.messages)-n:])
 	m.imagePayloadBytes -= imagePayloadBytes
 	m.imageEstimateTokens -= imageTokens
 	m.messages = m.messages[:len(m.messages)-n]
+	if removedDirectoryFacts {
+		m.contextBytes = messageContextBytes(m.messages)
+	}
 	// The declared-ID index must track the removal: a dropped assistant message
 	// no longer declares its tool calls, and a stale entry would keep
 	// AnyAssistantDeclaresToolCallID true for a call the history no longer
@@ -820,6 +831,7 @@ func MessagePayloadBytes(messages []message.Message) int {
 }
 
 func messageContextBytes(messages []message.Message) int {
+	messages = message.DirectoryInstructionAccountingMessages(messages)
 	total := 0
 	for _, msg := range messages {
 		if msg.NativeTools != nil && len(msg.NativeTools.Items) > 0 {
@@ -905,6 +917,7 @@ func messageEstimateBytesAndImages(messages []message.Message) (bytes, imageToke
 // EstimateMessagesTokens returns the approximate input-token count for a slice
 // of messages, including multipart text and attachment payloads.
 func EstimateMessagesTokens(messages []message.Message) int {
+	messages = message.DirectoryInstructionAccountingMessages(messages)
 	total := 0
 	for _, msg := range messages {
 		total += EstimateMessageTokens(msg)

@@ -142,6 +142,10 @@ func (a *MainAgent) dispatch(evt Event) {
 		return
 	}
 	switch evt.Type {
+	case EventSkillDiscoveryPublish:
+		if payload, ok := evt.Payload.(skillDiscoveryPublishEvent); ok {
+			a.handleSkillDiscoveryPublish(payload)
+		}
 	case EventMemoryControl:
 		a.handleMemoryControl(evt.Payload.(*memoryControlRequest))
 	case EventMemoryControlDone:
@@ -245,6 +249,8 @@ func (a *MainAgent) dispatch(evt Event) {
 		a.handleHandoffResolveEvent(evt)
 	case EventLoopAssessment:
 		a.handleLoopAssessment(evt)
+	case eventDirectoryInstructionsPrepared:
+		a.handleDirectoryInstructionsPrepared(evt)
 	case EventCompactionReady:
 		a.handleCompactionReady(evt)
 	case EventCompactionFailed:

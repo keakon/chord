@@ -263,8 +263,10 @@ func estimateDiagnosticInput(b *diagnosticBudgetState, system string, msgs []mes
 			}
 		}
 		switch m.Kind {
-		case message.KindTurnOverlay, message.KindContextNotice, message.KindReplayEvidence, message.KindReplayContinuation, message.KindStreamContinue, message.KindLoopNotice, message.KindHookFeedback, message.KindSubAgentMailbox, message.KindQuestionResult:
+		case message.KindTurnOverlay, message.KindContextNotice, message.KindReplayEvidence, message.KindReplayContinuation, message.KindStreamContinue, message.KindLoopNotice, message.KindHookFeedback, message.KindSubAgentMailbox, message.KindQuestionResult, message.KindSkillDiscovery:
 			category, kind, label = contextdiag.Runtime, contextdiag.Runtime, "runtime"
+		case message.KindDirectoryInstructionProjection:
+			category, kind, label = contextdiag.Instructions, contextdiag.Instructions, "instructions"
 		case message.KindBackgroundResult:
 			category, kind, label = contextdiag.ToolResults, contextdiag.Tool, "background"
 		case message.KindQuestionState:

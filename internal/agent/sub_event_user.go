@@ -18,8 +18,7 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 	s.consumeRestoredPauseInputs()
 	s.appendPendingUserMessage(input)
 
-	messages := s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr))
-	s.asyncCallLLMWithFlightMarked(turn, messages)
+	s.asyncCallLLMWithFlightMarked(turn)
 }
 
 func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
@@ -115,7 +114,8 @@ func (s *SubAgent) messagesForLLMContinuation() llmRequestInput {
 }
 
 func (s *SubAgent) continueLLMWithPendingUserMessages() {
-	s.asyncCallLLMWithFlightMarked(s.turn, s.messagesForLLMContinuation())
+	s.messagesForLLMContinuation()
+	s.asyncCallLLMWithFlightMarked(s.turn)
 }
 
 func (s *SubAgent) continueLLMIfPendingUserMessages() bool {
@@ -132,7 +132,7 @@ func (s *SubAgent) continueLLMIfPendingUserMessages() bool {
 	s.inputQueueMu.Unlock()
 
 	s.appendPendingUserMessages(pending)
-	s.asyncCallLLMWithFlightMarked(s.turn, s.prepareContextForLLM(snapshotLLMRequest(s.ctxMgr)))
+	s.asyncCallLLMWithFlightMarked(s.turn)
 	return true
 }
 

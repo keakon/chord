@@ -764,7 +764,7 @@ func TestSupersededSkillScanDoesNotRepublish(t *testing.T) {
 	ac.installScannedSkills(stale, []*skill.Meta{{Name: "stale-skill"}}, nil)
 
 	ids := make([]string, 0, 1)
-	for _, meta := range ac.MainAgent.ListSkills() {
+	for _, meta := range ac.MainAgent.CallableSkills() {
 		ids = append(ids, meta.Name)
 	}
 	if len(ids) != 1 || ids[0] != "current-skill" {

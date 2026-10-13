@@ -25,13 +25,12 @@ func TestLoadAgentsMDWithWorkDir_RootOnly(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "AGENTS.md"), "root instructions")
 
-	got := loadAgentsMDWithWorkDir(dir, "")
-	want := "## AGENTS.md\n\nroot instructions"
-	if got != want {
+	got := renderDirectoryInstructionsForTest(dir, "")
+	if !strings.Contains(got, "<INSTRUCTIONS>\nroot instructions\n</INSTRUCTIONS>") {
 		t.Fatalf("expected root instructions, got %q", got)
 	}
-	if strings.Contains(got, dir) {
-		t.Fatalf("AGENTS.md reminder should avoid absolute paths, got %q", got)
+	if !strings.Contains(got, "Scope: .") || !strings.Contains(got, "Source: ") {
+		t.Fatalf("missing source/scope: %q", got)
 	}
 }
 
@@ -39,8 +38,8 @@ func TestLoadAgentsMDWithWorkDir_WorkDirIsRootUsesPlainAgentsPath(t *testing.T) 
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "AGENTS.md"), "root")
 
-	got := loadAgentsMDWithWorkDir(root, root)
-	if got != "## AGENTS.md\n\nroot" {
+	got := renderDirectoryInstructionsForTest(root, root)
+	if !strings.Contains(got, "<INSTRUCTIONS>\nroot\n</INSTRUCTIONS>") || !strings.Contains(got, "Scope: .") {
 		t.Fatalf("expected root-relative AGENTS.md title when workDir is root, got %q", got)
 	}
 }
@@ -55,17 +54,14 @@ func TestLoadAgentsMDWithWorkDir_Hierarchical(t *testing.T) {
 	writeFile(t, filepath.Join(root, "pkg", "AGENTS.md"), "mid")
 	writeFile(t, filepath.Join(sub, "AGENTS.md"), "deep")
 
-	got := loadAgentsMDWithWorkDir(root, sub)
-	want := strings.Join([]string{
-		"## ../../AGENTS.md\n\nroot",
-		"## ../AGENTS.md\n\nmid",
-		"## AGENTS.md\n\ndeep",
-	}, "\n\n")
-	if got != want {
-		t.Fatalf("unexpected layers: %q", got)
+	got := renderDirectoryInstructionsForTest(root, sub)
+	for _, body := range []string{"root", "mid", "deep"} {
+		if strings.Count(got, "<INSTRUCTIONS>\n"+body+"\n</INSTRUCTIONS>") != 1 {
+			t.Fatalf("missing/duplicate body %q: %s", body, got)
+		}
 	}
-	if strings.Contains(got, root) {
-		t.Fatalf("AGENTS.md reminder should avoid absolute paths, got %q", got)
+	if strings.Index(got, "Scope: .") > strings.Index(got, "Scope: pkg ") || strings.Index(got, "Scope: pkg ") > strings.Index(got, "Scope: pkg/foo ") {
+		t.Fatalf("scope ordering: %s", got)
 	}
 }
 
@@ -78,16 +74,16 @@ func TestLoadAgentsMDWithWorkDir_WorkDirOutsideRootUsesItsOwnCopy(t *testing.T) 
 	// workDir outside the content root is its own checkout root (a
 	// chord-managed worktree lives under the state directory), so the walk is
 	// anchored there instead of at the content root, and its own copy wins.
-	got := loadAgentsMDWithWorkDir(contentRoot, other)
-	if got != "## AGENTS.md\n\nother" {
+	got := renderDirectoryInstructionsForTest(contentRoot, other)
+	if !strings.Contains(got, "<INSTRUCTIONS>\nother\n</INSTRUCTIONS>") || strings.Contains(got, "<INSTRUCTIONS>\nroot\n</INSTRUCTIONS>") {
 		t.Fatalf("expected only the workDir checkout copy, got %q", got)
 	}
 }
 
 func TestLoadAgentsMDWithWorkDir_WorkDirOutsideRootFallsBackToContentRootLevels(t *testing.T) {
-	contentRoot := t.TempDir()
+	contentRoot := newWorktreeTestRepo(t)
 	other := t.TempDir()
-	checkoutWithGitMarker(t, other)
+	runAgentTestGit(t, contentRoot, "worktree", "add", "--detach", other)
 	workDir := filepath.Join(other, "pkg")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -100,7 +96,7 @@ func TestLoadAgentsMDWithWorkDir_WorkDirOutsideRootFallsBackToContentRootLevels(
 	writeFile(t, filepath.Join(contentRoot, "AGENTS.md"), "root instructions")
 	writeFile(t, filepath.Join(contentRoot, "pkg", "AGENTS.md"), "pkg instructions")
 
-	got := loadAgentsMDWithWorkDir(contentRoot, workDir)
+	got := renderDirectoryInstructionsForTest(contentRoot, workDir)
 	for _, want := range []string{"root instructions", "pkg instructions"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected content-root fallback %q in %q", want, got)
@@ -117,8 +113,8 @@ func TestLoadAgentsMDWithWorkDir_MissingFiles(t *testing.T) {
 	// Only root has AGENTS.md; intermediates do not
 	writeFile(t, filepath.Join(root, "AGENTS.md"), "root")
 
-	got := loadAgentsMDWithWorkDir(root, sub)
-	if got != "## ../../AGENTS.md\n\nroot" {
+	got := renderDirectoryInstructionsForTest(root, sub)
+	if !strings.Contains(got, "<INSTRUCTIONS>\nroot\n</INSTRUCTIONS>") || strings.Count(got, "<INSTRUCTIONS>") != 1 {
 		t.Fatalf("expected only root, got %q", got)
 	}
 }
@@ -150,7 +146,7 @@ func TestLoadAgentsMDWithWorkDir_PrefersCheckoutCopyOverContentRoot(t *testing.T
 	writeFile(t, filepath.Join(contentRoot, "pkg", "AGENTS.md"), "content pkg instructions")
 	writeFile(t, filepath.Join(checkout, "pkg", "AGENTS.md"), "checkout pkg instructions")
 
-	got := loadAgentsMDWithWorkDir(contentRoot, workDir)
+	got := renderDirectoryInstructionsForTest(contentRoot, workDir)
 	for _, want := range []string{"checkout root instructions", "checkout pkg instructions"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected checkout copy %q in %q", want, got)
@@ -164,9 +160,9 @@ func TestLoadAgentsMDWithWorkDir_PrefersCheckoutCopyOverContentRoot(t *testing.T
 }
 
 func TestLoadAgentsMDWithWorkDir_FallsBackToContentRootCopies(t *testing.T) {
-	contentRoot := t.TempDir()
+	contentRoot := newWorktreeTestRepo(t)
 	checkout := t.TempDir()
-	checkoutWithGitMarker(t, checkout)
+	runAgentTestGit(t, contentRoot, "worktree", "add", "--detach", checkout)
 	workDir := filepath.Join(checkout, "pkg")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -179,7 +175,7 @@ func TestLoadAgentsMDWithWorkDir_FallsBackToContentRootCopies(t *testing.T) {
 	writeFile(t, filepath.Join(contentRoot, "AGENTS.md"), "content root instructions")
 	writeFile(t, filepath.Join(contentRoot, "pkg", "AGENTS.md"), "content pkg instructions")
 
-	got := loadAgentsMDWithWorkDir(contentRoot, workDir)
+	got := renderDirectoryInstructionsForTest(contentRoot, workDir)
 	for _, want := range []string{"content root instructions", "content pkg instructions"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected content-root fallback %q in %q", want, got)
@@ -188,10 +184,9 @@ func TestLoadAgentsMDWithWorkDir_FallsBackToContentRootCopies(t *testing.T) {
 }
 
 func TestLoadAgentsMDWithWorkDir_AnchorsWalkAtCheckoutRoot(t *testing.T) {
-	contentRoot := t.TempDir()
-	checkoutWithGitMarker(t, contentRoot)
+	contentRoot := newWorktreeTestRepo(t)
 	checkout := filepath.Join(contentRoot, ".chord", "worktrees", "runtime")
-	checkoutWithGitMarker(t, checkout)
+	runAgentTestGit(t, contentRoot, "worktree", "add", "--detach", checkout)
 	workDir := filepath.Join(checkout, "pkg")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -199,7 +194,7 @@ func TestLoadAgentsMDWithWorkDir_AnchorsWalkAtCheckoutRoot(t *testing.T) {
 	writeFile(t, filepath.Join(contentRoot, "AGENTS.md"), "content root instructions")
 	writeFile(t, filepath.Join(contentRoot, ".chord", "AGENTS.md"), "content chord instructions")
 
-	got := loadAgentsMDWithWorkDir(contentRoot, workDir)
+	got := renderDirectoryInstructionsForTest(contentRoot, workDir)
 	if !strings.Contains(got, "content root instructions") {
 		t.Fatalf("expected the content-root fallback for the checkout root level, got %q", got)
 	}
@@ -1060,7 +1055,7 @@ func TestMainLLMToolDefinitionsIncludeSkillToolListing(t *testing.T) {
 	if defs[0].Name != "skill" {
 		t.Fatalf("tool name = %q, want skill", defs[0].Name)
 	}
-	for _, want := range []string{"Load a skill's full instructions on demand", "listed in the system prompt's \"Available Skills\" section"} {
+	for _, want := range []string{"Load a skill's full instructions on demand", "startup catalog"} {
 		if !strings.Contains(defs[0].Description, want) {
 			t.Fatalf("missing %q in Skill description %q", want, defs[0].Description)
 		}
@@ -2103,7 +2098,10 @@ func TestBuildSystemPrompt_OmitsAgentsMDReminderFramingWhenAgentsMDAbsent(t *tes
 }
 
 func TestSubAgentBuildSystemPrompt_IncludesAgentsMDReminderFramingWhenAgentsMDPresent(t *testing.T) {
-	s := &SubAgent{tools: tools.NewRegistry(), agentsMD: "repo rules", workDir: "/tmp/project", taskDesc: "Inspect the parser."}
+	s := &SubAgent{tools: tools.NewRegistry(), workDir: "/tmp/project", taskDesc: "Inspect the parser."}
+	a := &MainAgent{}
+	setCachedAgentsMDForTest(a, "repo rules")
+	s.directoryInstructions.Store(a.directoryInstructions.Load())
 
 	got := s.buildSystemPrompt()
 	for _, want := range []string{
@@ -2426,4 +2424,35 @@ func TestMainAgentRolePromptBlock_PromptAppendLayersOnTopOfBase(t *testing.T) {
 	if got := a.mainAgentRolePromptBlock(); got != extra {
 		t.Fatalf("append-only role block = %q, want %q", got, extra)
 	}
+}
+
+// renderDirectoryInstructionsForTest loads the AGENTS.md instructions that apply to the
+// agent's current checkout, from the checkout root down to workDir.
+//
+// Every level resolves to exactly one file: the checkout's own copy when it
+// exists (a branch may carry its own tracked instructions), otherwise the
+// content root's copy (where gitignored local instructions live, and which the
+// worktree checkout does not contain). Levels are never loaded from both
+// checkouts, so the same instructions are not repeated.
+func renderDirectoryInstructionsForTest(contentRoot, workDir string) string {
+	if contentRoot == "" {
+		return ""
+	}
+	root, err := filepath.Abs(contentRoot)
+	if err != nil {
+		return ""
+	}
+	if workDir == "" {
+		workDir = root
+	}
+	work, err := filepath.Abs(workDir)
+	if err != nil {
+		return ""
+	}
+	r, _, err := prepareDirectoryInstructions(context.Background(), directoryInstructionBinding{ContentRoot: root, WorkDir: work}, nil, nil, "")
+	if err != nil {
+		return ""
+	}
+	defer r.cancel()
+	return message.RenderDirectoryInstructionFacts(r.view.Load().Initial)
 }

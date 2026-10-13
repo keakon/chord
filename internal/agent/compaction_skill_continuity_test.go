@@ -297,8 +297,8 @@ func TestApplyCompactionDraftResetsInvokedSkills(t *testing.T) {
 	}
 	// The archived skill is still discoverable, just no longer loaded: the
 	// listing the model routes on must not shrink.
-	if len(a.ListSkills()) != 2 {
-		t.Fatalf("available skills = %d, want both still listed", len(a.ListSkills()))
+	if len(a.CallableSkills()) != 2 {
+		t.Fatalf("available skills = %d, want both still listed", len(a.CallableSkills()))
 	}
 }
 

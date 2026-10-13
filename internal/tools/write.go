@@ -124,9 +124,9 @@ func writeOpenedFile(f *os.File, data []byte, mode os.FileMode, exact bool) erro
 }
 
 func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
-	var a writeArgs
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	a, err := decodeInstructionArgs[writeArgs](raw)
+	if err != nil {
+		return "", err
 	}
 	if a.Path == "" {
 		return "", fmt.Errorf("path is required")

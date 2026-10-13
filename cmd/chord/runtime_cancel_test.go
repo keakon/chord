@@ -92,7 +92,7 @@ func newBlockingRuntime(t *testing.T) (*Runtime, *agent.MainAgent, chan struct{}
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},
 	)
 	mainAgent.MarkSkillsReady()
-	mainAgent.ReloadAgentsMD()
+	mainAgent.InvalidateDirectoryInstructions()
 	mainAgent.SetMCPServersPromptBlock("")
 
 	acCtx, cancel := context.WithCancel(context.Background())

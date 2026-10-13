@@ -513,6 +513,10 @@ func (s *SubAgent) GetMessages() []message.Message {
 // SubAgent's context manager. Used during session restore to rebuild a
 // SubAgent's conversation without replaying LLM calls.
 func (s *SubAgent) RestoreMessages(msgs []message.Message) {
+	if r := s.directoryInstructions.Swap(nil); r != nil {
+		r.cancel()
+	}
+	s.directoryPreparation = nil
 	s.ctxMgr.RestoreMessages(msgs)
 	s.inputQueueMu.Lock()
 	s.acceptedMailboxIDs = make(map[string]struct{})

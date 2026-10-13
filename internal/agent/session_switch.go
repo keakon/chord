@@ -138,7 +138,11 @@ func (a *MainAgent) handleNewSessionCommand() {
 
 	oldLock := a.sessionLock
 	oldSessionDir := a.SessionDir()
-	a.freezeCurrentSession(oldRecovery)
+	if err := a.freezeCurrentSession(oldRecovery); err != nil {
+		_ = newLock.Release()
+		a.emitToTUI(ErrorEvent{Err: err})
+		return
+	}
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
 			log.Warnf("new session: failed to release old session lock error=%v", releaseErr)
@@ -268,14 +272,22 @@ func (a *MainAgent) terminateSubAgentForSessionSwitch(sub *SubAgent, agentID str
 	a.syncTaskRecordFromSub(sub, reason)
 }
 
-func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) {
+func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) error {
 	if oldRecovery == nil {
-		return
+		return nil
 	}
 	if a.walltime != nil {
 		a.walltime.flush()
 	}
 	a.flushPersist()
+	if a.ctxMgr != nil {
+		if err := a.skillPublisher.reconcileAfterFlush(a.persist, a.ctxMgr.Snapshot(), a.ctxMgr.Append); err != nil {
+			return fmt.Errorf("reconcile skill discovery before session freeze: %w", err)
+		}
+	}
+	if err := a.reconcileDirectoryInstructionsAfterFlush(); err != nil {
+		return err
+	}
 	a.saveRecoverySnapshot()
 	// Unpublish before closing: a sub-agent or tool goroutine that outlives the
 	// switch then resolves nil instead of a manager whose handles are gone, and
@@ -283,9 +295,15 @@ func (a *MainAgent) freezeCurrentSession(oldRecovery *recovery.RecoveryManager) 
 	// the successor session's manager for this session's work.
 	a.clearRecoveryManagerIf(oldRecovery)
 	oldRecovery.Close()
+	return nil
 }
 
 func (a *MainAgent) resetSessionRuntimeState() {
+	a.skillPublisher = newSkillDiscoveryPublisher(skillDiscoveryPublisherOptions{})
+	if r := a.directoryInstructions.Swap(nil); r != nil {
+		r.cancel()
+	}
+	a.directoryPreparation = nil
 	a.pendingNativeContextAppends = nil
 	a.nativeReceipt.Store(nil)
 	a.resetHostedCallers()
@@ -439,6 +457,10 @@ func (a *MainAgent) editTailUserMessageInPlace(prefix []message.Message, forkMsg
 		}
 	}
 
+	if r := a.directoryInstructions.Swap(nil); r != nil {
+		r.cancel()
+	}
+	a.directoryPreparation = nil
 	a.ctxMgr.RestoreMessages(prefix)
 	a.restoreQuestions(prefix)
 	a.installContextNoticePresence(prefix)
@@ -656,7 +678,11 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	oldRecovery, _ := a.prepareSessionSwitch()
 	oldLock := a.sessionLock
 	oldSessionDir := a.SessionDir()
-	a.freezeCurrentSession(oldRecovery)
+	if err := a.freezeCurrentSession(oldRecovery); err != nil {
+		_ = newLock.Release()
+		a.emitToTUI(ErrorEvent{Err: err})
+		return
+	}
 	if oldLock != nil {
 		if releaseErr := oldLock.Release(); releaseErr != nil {
 			log.Warnf("fork session: failed to release old session lock error=%v", releaseErr)
@@ -669,6 +695,10 @@ func (a *MainAgent) handleForkSessionCommand(msgIndex int) {
 	a.llmClient.SetSessionID(filepath.Base(newSessionDir))
 	a.scheduleMemoryExtraction(oldSessionDir)
 
+	if r := a.directoryInstructions.Swap(nil); r != nil {
+		r.cancel()
+	}
+	a.directoryPreparation = nil
 	a.ctxMgr.RestoreMessages(prefix)
 	a.restoreQuestions(prefix)
 	a.installContextNoticePresence(prefix)

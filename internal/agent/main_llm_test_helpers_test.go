@@ -169,6 +169,7 @@ func newReadyTestMainAgent(t *testing.T) *MainAgent {
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
 	a.markMCPReady()
+	prepareMainRequestDirectoryFixture(t, a)
 	return a
 }
 
@@ -181,9 +182,14 @@ func setCachedWorkDirForTest(a *MainAgent, dir string) {
 }
 
 func setCachedAgentsMDForTest(a *MainAgent, content string) {
-	a.promptMetaMu.Lock()
-	a.cachedAgentsMD = content
-	a.promptMetaMu.Unlock()
+	r := newDirectoryInstructionRuntime(context.Background(), directoryInstructionBinding{CheckoutRoot: "/repo", ContentRoot: "/repo", WorkDir: "/repo"})
+	f := directoryTestFact(".", content)
+	if content != "" {
+		r.initial = directoryInstructionSnapshot{Observations: map[string]directoryInstructionObservation{".": {Status: "present", SourcePath: f.SourcePath, Body: f.Body, BodyHash: f.BodyHash}}}
+	}
+	v := buildDirectoryInstructionView(r.initial, nil, r.binding)
+	r.view.Store(&v)
+	a.directoryInstructions.Store(r)
 }
 
 func TestAutoContinuePromptIsInjectedAsOneShotOverlay(t *testing.T) {

@@ -172,7 +172,6 @@ func TestSubAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T)
 		modelName:    "test-model",
 		workDir:      projectRoot,
 		venvPath:     "",
-		agentsMD:     "",
 		loadedSkills: nil,
 	}
 

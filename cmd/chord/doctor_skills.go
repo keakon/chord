@@ -35,6 +35,7 @@ const (
 
 const (
 	doctorSkillReasonParseError        = "parse_error"
+	doctorSkillReasonInvalidPaths      = "invalid_paths"
 	doctorSkillReasonMissingField      = "missing_field"
 	doctorSkillReasonLoadFailed        = "load_failed"
 	doctorSkillReasonDeniedByRuleset   = "denied_by_ruleset"
@@ -273,6 +274,10 @@ func buildDoctorSkillEntry(item skill.DiagnosticItem, projectRoot, configHome st
 		}
 		entry.Detail = item.Err.Error()
 		return entry
+	}
+	if d := skill.BuildPathDescriptor(item.Meta); d.Diagnostic != "" {
+		entry.Reason = doctorSkillReasonInvalidPaths
+		entry.Detail = d.Diagnostic
 	}
 	entry.Name = item.Meta.Name
 	entry.Integrity = doctorSkillIntegrityPassed

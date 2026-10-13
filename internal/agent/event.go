@@ -86,13 +86,16 @@ type LLMResponsePayload struct {
 
 // ToolResultPayload wraps a tool execution result for the internal event bus.
 type ToolResultPayload struct {
-	deliveryCommit *deliveryCommitAck
-	DeliveredFiles []message.DeliveredFile
-	CallID         string
-	Name           string
-	ArgsJSON       string
-	Audit          *message.ToolArgsAudit
-	Result         string
+	deliveryCommit     *deliveryCommitAck
+	DeliveredFiles     []message.DeliveredFile
+	SkillActivation    *skillActivationCandidate
+	DirectoryDiscovery *directoryInstructionDiscovery
+	ControlReason      string
+	CallID             string
+	Name               string
+	ArgsJSON           string
+	Audit              *message.ToolArgsAudit
+	Result             string
 	// Payload is Result before diagnostic notes were appended, and Notes are
 	// those notes. Result stays the model-visible combination; carrying the two
 	// apart lets the UI parse the tool's actual output instead of a string the
@@ -501,6 +504,7 @@ func (ToolProgressEvent) agentEvent() {}
 // ToolResultEvent is emitted after a tool execution completes.
 type ToolResultEvent struct {
 	DeliveredFiles []message.DeliveredFile
+	ControlReason  string
 	// Diagnostic adds a non-fatal error-panel record without emitting an agent-loop error.
 	Diagnostic *ToolErrorDiagnostic
 	CallID     string

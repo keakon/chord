@@ -115,9 +115,9 @@ func (t GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		ctx = context.Background()
 	}
 	startedAt := time.Now()
-	var a globArgs
-	if err := json.Unmarshal(raw, &a); err != nil {
-		return "", fmt.Errorf("invalid arguments: %w", err)
+	a, err := decodeInstructionArgs[globArgs](raw)
+	if err != nil {
+		return "", err
 	}
 	patterns := normalizeStringList(a.Patterns)
 	if len(patterns) == 0 {

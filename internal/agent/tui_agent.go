@@ -326,8 +326,8 @@ type AgentForTUI interface {
 // SkillsStateProvider is implemented by agents that can expose currently
 // available skill metadata to the TUI info panel.
 type SkillsStateProvider interface {
-	// ListSkills returns currently discoverable skills visible to the runtime.
-	ListSkills() []*skill.Meta
+	// UserSkills returns currently discoverable skills visible to the runtime.
+	UserSkills() []*skill.Meta
 }
 
 // FocusedSkillsStateProvider is implemented by TUI backends that can expose

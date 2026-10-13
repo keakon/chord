@@ -22,7 +22,7 @@ func TestModelInvocableRequiresMetaAndFrontmatterOptIn(t *testing.T) {
 	}
 }
 
-func TestModelVisibleForRulesetDropsManualOnlySkills(t *testing.T) {
+func TestModelCallableForRulesetDropsManualOnlySkills(t *testing.T) {
 	catalog := []*Meta{
 		{Name: "visible"},
 		{Name: "manual", DisableModelInvocation: true},
@@ -34,9 +34,9 @@ func TestModelVisibleForRulesetDropsManualOnlySkills(t *testing.T) {
 		{Permission: "skill", Pattern: "denied", Action: permission.ActionDeny},
 	}
 
-	model := ModelVisibleForRuleset(catalog, ruleset)
+	model := ModelCallableForRuleset(catalog, ruleset)
 	if len(model) != 1 || model[0].Name != "visible" {
-		t.Fatalf("ModelVisibleForRuleset = %+v, want only visible", model)
+		t.Fatalf("ModelCallableForRuleset = %+v, want only visible", model)
 	}
 	if !model[0].Discovered {
 		t.Fatal("a returned entry must be marked discovered")
@@ -63,13 +63,13 @@ func TestInvocationStatesReportReasonAndLoad(t *testing.T) {
 	states := InvocationStates(catalog, ruleset, map[string]struct{}{"manual-skill": {}})
 
 	cases := []struct {
-		name             string
-		wantModelVisible bool
-		wantUserLoadable bool
-		wantLoaded       bool
-		wantReason       string
+		name              string
+		wantModelCallable bool
+		wantUserLoadable  bool
+		wantLoaded        bool
+		wantReason        string
 	}{
-		{name: "model-skill", wantModelVisible: true, wantUserLoadable: true},
+		{name: "model-skill", wantModelCallable: true, wantUserLoadable: true},
 		{name: "manual-skill", wantUserLoadable: true, wantLoaded: true, wantReason: ReasonManualOnly},
 		{name: "denied-skill", wantReason: ReasonDeniedByRuleset},
 	}
@@ -81,16 +81,16 @@ func TestInvocationStatesReportReasonAndLoad(t *testing.T) {
 		if st.Meta == nil || st.Meta.Name != tc.name {
 			t.Fatalf("state %d meta = %+v, want %q", i, st.Meta, tc.name)
 		}
-		if st.ModelVisible != tc.wantModelVisible || st.UserLoadable != tc.wantUserLoadable || st.Loaded != tc.wantLoaded || st.Reason != tc.wantReason {
+		if st.ModelCallable != tc.wantModelCallable || st.UserLoadable != tc.wantUserLoadable || st.BodyPresent != tc.wantLoaded || st.Reason != tc.wantReason {
 			t.Fatalf("state %q = %+v, want model=%v user=%v loaded=%v reason=%q",
-				tc.name, st, tc.wantModelVisible, tc.wantUserLoadable, tc.wantLoaded, tc.wantReason)
+				tc.name, st, tc.wantModelCallable, tc.wantUserLoadable, tc.wantLoaded, tc.wantReason)
 		}
 	}
 }
 
 func TestInvocationStateUnavailableForNilMeta(t *testing.T) {
 	st := InvocationStateFor(nil, allowAllRuleset(), nil)
-	if st.Meta != nil || st.UserLoadable || st.ModelVisible || st.Reason != ReasonUnavailable {
+	if st.Meta != nil || st.UserLoadable || st.ModelCallable || st.Reason != ReasonUnavailable {
 		t.Fatalf("nil meta state = %+v, want unavailable", st)
 	}
 }

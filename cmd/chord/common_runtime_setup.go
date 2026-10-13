@@ -626,9 +626,5 @@ func startRuntimeWarmups(ac *AppContext) {
 			log.Warnf("main-agent model policy prewarm failed error=%v", err)
 		}
 	}()
-	go func() {
-		if ac.MainAgent.ReloadAgentsMD() {
-			log.Debug("project AGENTS.md loaded asynchronously")
-		}
-	}()
+	ac.MainAgent.InvalidateDirectoryInstructions()
 }

@@ -460,10 +460,14 @@ func (a *MainAgent) noteModelDrivenDenyDiagnosticOnce() {
 }
 
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
+	if !a.ensureDirectoryInstructionsBeforeRequest(turnCtx, turnID, agentErrSourceID) {
+		return
+	}
 	if a.sessionExecutionPaused() {
 		a.mainLLMRequestInFlight.Store(false)
 		return
 	}
+
 	// A pre-request barrier failure is recoverable once this request is about
 	// to be launched on the live context; do not let a later user message
 	// mistake the now-progressing turn for the original stall.
@@ -511,6 +515,10 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 	// the apply above (which clears a satisfied intent) and before the
 	// usage-driven trigger evaluation below.
 	a.handleManualCompactionIntentAtGate()
+
+	if a.ensureSkillDiscoveryBeforeRequest(a.turn, func() { a.beginMainLLMAfterPreparation(turnCtx, turnID, agentErrSourceID) }) != skillDiscoveryReady {
+		return
+	}
 
 	input := snapshotLLMRequest(a.ctxMgr)
 	snapshot := input.Messages

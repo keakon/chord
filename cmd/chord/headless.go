@@ -801,7 +801,7 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 				report = strings.TrimSpace(e.DoneReport)
 			}
 			if report != "" && state.isSubscribed("done_completion") {
-				out = append(out, &headlessEnvelope{Type: "done_completion", Payload: map[string]any{"call_id": e.CallID, "report": report, "reason": reason, "status": string(e.Status), "agent_id": e.AgentID, "mode": "normal"}})
+				out = append(out, &headlessEnvelope{Type: "done_completion", Payload: map[string]any{"call_id": e.CallID, "report": report, "reason": reason, "status": string(e.Status), "agent_id": e.AgentID, "mode": "normal", "tool_control_reason": e.ControlReason}})
 			}
 		}
 	case agent.StreamRollbackEvent:

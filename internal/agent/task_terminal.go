@@ -169,6 +169,7 @@ func (a *MainAgent) commitTerminalTaskFrom(sub *SubAgent, from, state SubAgentSt
 	a.noteSubAgentStateTransition(sub, state)
 	a.persistSubAgentMeta(sub)
 	now := time.Now()
+	skillSnapshot := sub.parkedSkillSnapshot()
 	a.subs.mu.Lock()
 	current := a.subs.taskRecords[taskID]
 	if current != nil && current.Attempt != 0 && current.Attempt != settlement.Attempt {
@@ -176,6 +177,7 @@ func (a *MainAgent) commitTerminalTaskFrom(sub *SubAgent, from, state SubAgentSt
 		return nil, false, fmt.Errorf("task %s attempt changed during terminal commit", taskID)
 	}
 	rec := buildTaskRecordFromSub(sub, current, closedReason, a.explicitUserTurnCount.Load(), now)
+	rec.skillSnapshot = skillSnapshot
 	rec.Attempt = settlement.Attempt
 	if rec.LifecycleRevision < settlement.TerminalRevision {
 		rec.LifecycleRevision = settlement.TerminalRevision

@@ -127,7 +127,7 @@ func (a *infoPanelAgent) InvokedSkills() []*skill.Meta {
 	return append([]*skill.Meta(nil), a.invokedSkills...)
 }
 
-func (a *infoPanelAgent) ListSkills() []*skill.Meta {
+func (a *infoPanelAgent) UserSkills() []*skill.Meta {
 	return append([]*skill.Meta(nil), a.availableSkills...)
 }
 
@@ -135,7 +135,7 @@ func (a *infoPanelAgent) FocusedSkills() []*skill.Meta {
 	if skills, ok := a.skillsByFocus[a.focused]; ok {
 		return append([]*skill.Meta(nil), skills...)
 	}
-	return a.ListSkills()
+	return a.UserSkills()
 }
 
 func (a *infoPanelAgent) FocusedSkillInvocationStates() []skill.InvocationState {
@@ -379,10 +379,10 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 		style lipgloss.Style
 		label string
 	}{
-		{name: "model-visible loaded", style: invokedStyle, label: "● go-expert"},
+		{name: "model-visible loaded", style: invokedStyle, label: "● go-expert (loaded)"},
 		{name: "model-visible idle", style: InfoPanelDim, label: "○ py-expert"},
-		{name: "manual loaded", style: invokedStyle, label: "◌ manual-live"},
-		{name: "manual idle", style: InfoPanelDim, label: "◌ manual-idle"},
+		{name: "manual loaded", style: invokedStyle, label: "◌ manual-live (manual only)"},
+		{name: "manual idle", style: InfoPanelDim, label: "◌ manual-idle (manual only)"},
 	}
 	for _, tc := range cases {
 		want := tc.style.Render(tc.label)
@@ -424,7 +424,7 @@ func TestRenderInfoPanelSkipsInvokedSkillMissingFromAvailableList(t *testing.T) 
 	if strings.Contains(section, "missing-skill") {
 		t.Fatalf("skills section should omit invoked skills missing from available list, got %q", section)
 	}
-	wantInvoked := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg)).Render("● go-expert")
+	wantInvoked := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg)).Render("● go-expert (loaded)")
 	if !strings.Contains(rendered, wantInvoked) {
 		t.Fatalf("visible invoked skill should remain success-colored; want %q in %q", wantInvoked, rendered)
 	}

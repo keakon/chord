@@ -116,7 +116,7 @@ func takeoverProcessApp(t *testing.T, workspace string, target bool) (*AppContex
 	registry := tools.NewRegistry()
 	main := agent.NewMainAgent(ctx, client, manager, registry, &hook.NoopEngine{}, loc.sessionDir, "test-model", workspace, workspace, &config.Config{}, nil, mcp.ClientInfo{Name: "sample", Version: "test"})
 	main.SetSessionLock(lock)
-	main.ReloadAgentsMD()
+	main.InvalidateDirectoryInstructions()
 	main.MarkSkillsReady()
 	main.SetPendingMCPDiscovery(nil, "")
 	if target {

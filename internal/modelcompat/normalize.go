@@ -1038,6 +1038,7 @@ func compactAdjacentAssistantMessages(msgs []message.Message) []message.Message 
 				last.DiagnosticSource = message.DiagnosticSourceMixed
 			}
 			last.Content = joinNonEmpty(last.Content, msg.Content)
+			last.DirectoryInstructionRefs = append(last.DirectoryInstructionRefs, msg.DirectoryInstructionRefs...)
 			continue
 		}
 		out = append(out, msg)
@@ -1052,6 +1053,7 @@ func deepCopyMessages(msgs []message.Message) []message.Message {
 	out := make([]message.Message, len(msgs))
 	for i, msg := range msgs {
 		out[i] = msg
+		out[i].DirectoryInstructionRefs = append([]message.DirectoryInstructionRef(nil), msg.DirectoryInstructionRefs...)
 		out[i].NativeTools = msg.NativeTools.Clone()
 		if len(msg.Parts) > 0 {
 			parts := make([]message.ContentPart, len(msg.Parts))

@@ -617,6 +617,7 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 	type infoPanelSkillEntry struct {
 		name        string
 		description string
+		status      string
 		invoked     bool
 		manual      bool
 	}
@@ -648,6 +649,18 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 			continue
 		}
 	}
+	if provider, ok := m.agent.(agent.FocusedSkillInvocationStateProvider); ok {
+		for _, state := range provider.FocusedSkillInvocationStates() {
+			if state.Meta == nil {
+				continue
+			}
+			if index, exists := indexByName[strings.TrimSpace(state.Meta.Name)]; exists {
+				entries[index].invoked = state.BodyPresent
+				entries[index].manual = !state.ModelCallable
+				entries[index].status = skillInvocationStatusLabel(state)
+			}
+		}
+	}
 	if len(entries) == 0 {
 		return ""
 	}
@@ -667,6 +680,9 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 		// one a model-visible skill. The name always follows the glyph so a
 		// row never reads as the tool card's "receiving" progress.
 		label := skillVisibilityGlyph(entry.manual, entry.invoked) + " " + entry.name
+		if entry.status != "" {
+			label += " (" + entry.status + ")"
+		}
 		labelWidth := max(lineW-infoPanelCollapsibleContentInset, 1)
 		skillLines = append(skillLines, renderInfoPanelCollapsibleContentLine(lineW, lineStyle.Render(truncateOneLine(label, labelWidth))))
 	}
@@ -678,7 +694,7 @@ func (m *Model) infoPanelSkills() []*skill.Meta {
 		return sp.FocusedSkills()
 	}
 	if sp, ok := m.agent.(agent.SkillsStateProvider); ok {
-		return sp.ListSkills()
+		return sp.UserSkills()
 	}
 	return nil
 }

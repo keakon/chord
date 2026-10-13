@@ -151,6 +151,12 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 		primarySurface := newRequestSurfaceFingerprint(requestSurfacePrimary, payload.primaryModelRef, messages,
 			estimateMessagesTokens(a.ctxMgr, messages), payload.primaryInputLimit)
 		if rebuilt {
+			messages = projectSkillDiscoveryMessages(messages, a.skillActivationView())
+			var projectionErr error
+			messages, projectionErr = projectDirectoryInstructionHistory(messages, a.directoryInstructions.Load())
+			if projectionErr != nil {
+				return nil, projectionErr
+			}
 			messages = a.prepareMessagesForLLMWithOptions(messages, false)
 		}
 		targetSurface := newRequestSurfaceFingerprint(requestSurfaceFallback, payload.fallbackModelRef, messages,

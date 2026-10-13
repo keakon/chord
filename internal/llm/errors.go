@@ -535,6 +535,9 @@ func hasTransientProviderCapacitySignal(apiErr *APIError) bool {
 // that matches provider-specific error codes/messages; ordinary 400 errors
 // must NOT be classified as oversize to avoid infinite retry loops.
 func IsContextLengthExceeded(err error) bool {
+	if _, ok := errors.AsType[*RequestInputBudgetError](err); ok {
+		return true
+	}
 	if IsAllAttemptedCandidatesContextLengthExceeded(err) {
 		return true
 	}

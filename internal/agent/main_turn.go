@@ -543,6 +543,7 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 
 // newTurn cancels any in-flight work and creates a fresh Turn.
 func (a *MainAgent) newTurn() {
+	a.directoryInstructions.Load().clearTurnDiscovery()
 	// Policy roots are re-listed once per turn so a checkout created since the
 	// previous turn (by the user, or by a resume that adopted a recorded
 	// checkout) is in scope for this turn.

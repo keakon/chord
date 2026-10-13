@@ -59,14 +59,14 @@ func TestSetSkillsHydratesRestoredInvokedSkillMetadata(t *testing.T) {
 	}
 }
 
-func TestMainAgentListSkillsFiltersDeniedSkills(t *testing.T) {
+func TestMainAgentCallableSkillsFiltersDeniedSkills(t *testing.T) {
 	a := &MainAgent{}
 	a.loadedSkills = []*skill.Meta{{Name: "go-expert", Description: "Go language development expert"}, {Name: "secret-skill", Description: "Hidden"}}
 	a.ruleset = permission.Ruleset{{Permission: "skill", Pattern: "*", Action: permission.ActionAllow}, {Permission: "skill", Pattern: "secret-*", Action: permission.ActionDeny}}
 
-	got := a.ListSkills()
+	got := a.CallableSkills()
 	if len(got) != 1 {
-		t.Fatalf("len(ListSkills) = %d, want 1", len(got))
+		t.Fatalf("len(CallableSkills) = %d, want 1", len(got))
 	}
 	if got[0].Name != "go-expert" {
 		t.Fatalf("visible skill = %q, want go-expert", got[0].Name)
@@ -84,8 +84,8 @@ func TestMainAgentFocusedSkillsUsesFocusedSubAgentPermissions(t *testing.T) {
 	sub.setRuleset(permission.Ruleset{{Permission: "skill", Pattern: "*", Action: permission.ActionAllow}})
 	a.subs.subAgents[sub.instanceID] = sub
 
-	if got := a.ListSkills(); len(got) != 0 {
-		t.Fatalf("main ListSkills() = %#v, want none while skill is denied", got)
+	if got := a.CallableSkills(); len(got) != 0 {
+		t.Fatalf("main CallableSkills() = %#v, want none while skill is denied", got)
 	}
 	a.SwitchFocus(sub.instanceID)
 	got := a.FocusedSkills()
@@ -153,7 +153,7 @@ func TestSubAgentSkillsUseDynamicWorkspaceCatalogAndIsolatedInvocations(t *testi
 	a.subs.subAgents[sub.instanceID] = sub
 
 	a.SetSkills([]*skill.Meta{{Name: "initial"}, {Name: "later"}, {Name: "denied"}})
-	visible := sub.ListSkills()
+	visible := sub.CallableSkills()
 	if len(visible) != 2 || visible[0].Name != "initial" || visible[1].Name != "later" {
 		t.Fatalf("dynamic subagent skills = %#v, want initial and later", visible)
 	}

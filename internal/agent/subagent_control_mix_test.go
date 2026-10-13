@@ -62,6 +62,7 @@ func newMixedBatchTestSubAgent(t *testing.T) (*MainAgent, *SubAgent) {
 		ModelName:    "test-model",
 	})
 	sub.turn = &Turn{ID: 1, Epoch: 1, Ctx: ctx}
+	prepareSubRequestDirectoryFixture(t, sub)
 	t.Cleanup(func() {
 		// These tests call handlers directly without a run loop, so nothing
 		// else joins LLM continuations started by completion or escalation.

@@ -196,7 +196,7 @@ func TestSubAgentEmitsStreamTextCommitBeforeSegmentEnd(t *testing.T) {
 	sub.llmMu.Unlock()
 	parent.focusedAgent.Store(sub)
 
-	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
+	sub.asyncCallLLMWithFlightMarked(sub.turn)
 	waitForSubAgentLLMResult(t, sub, 2*time.Second)
 	// The request goroutine reports its segment end in a deferred call, after
 	// it queues the result the wait above consumed: llmWG.Wait is the barrier
@@ -264,7 +264,7 @@ func TestSubAgentStreamTextCommitGatedWhenUnfocused(t *testing.T) {
 	sub.llmClient = llm.NewClient(providerCfg, provider, "model", 1024, "sys")
 	sub.llmMu.Unlock()
 
-	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
+	sub.asyncCallLLMWithFlightMarked(sub.turn)
 	waitForSubAgentLLMResult(t, sub, 2*time.Second)
 
 	for _, evt := range drainAgentEvents(parent.Events()) {
@@ -288,7 +288,7 @@ func TestSubAgentCommitsEmptyFinalText(t *testing.T) {
 	sub.llmClient = llm.NewClient(cfg, provider, "model", 1024, "sys")
 	sub.llmMu.Unlock()
 	parent.focusedAgent.Store(sub)
-	sub.asyncCallLLMWithFlightMarked(sub.turn, llmRequestInput{Messages: sub.ctxMgr.Snapshot()})
+	sub.asyncCallLLMWithFlightMarked(sub.turn)
 	waitForSubAgentLLMResult(t, sub, 2*time.Second)
 	found := false
 	for _, evt := range drainAgentEvents(parent.Events()) {

@@ -21,20 +21,21 @@ import (
 
 // Meta represents discovered skill metadata without loading the full body.
 type Meta struct {
-	Name         string   // from frontmatter
-	Description  string   // from frontmatter
-	Location     string   // absolute path to SKILL.md
-	RootDir      string   // absolute path to the skill directory
-	Discovered   bool     // true when present in the current metadata index
-	Invoked      bool     // true when loaded via the Skill tool in the current session
-	WhenToUse    string   // optional: guidance for when to use this skill
-	ArgsHint     string   // optional: hint for skill arguments
-	Context      string   // optional: "inline" (default) or "fork"
-	Model        string   // optional: override model for fork context
-	Effort       string   // optional: effort level for fork context
-	AllowedTools []string // optional: tool allowlist for fork context
-	Paths        []string // optional: conditional activation glob patterns
-	Resources    []string // optional: files relative to the skill root the body depends on
+	pathDescriptor *PathDescriptor // immutable catalog cache, never agent activation state
+	Name           string          // from frontmatter
+	Description    string          // from frontmatter
+	Location       string          // absolute path to SKILL.md
+	RootDir        string          // absolute path to the skill directory
+	Discovered     bool            // true when present in the current metadata index
+	Invoked        bool            // true when loaded via the Skill tool in the current session
+	WhenToUse      string          // optional: guidance for when to use this skill
+	ArgsHint       string          // optional: hint for skill arguments
+	Context        string          // optional: "inline" (default) or "fork"
+	Model          string          // optional: override model for fork context
+	Effort         string          // optional: effort level for fork context
+	AllowedTools   []string        // optional: tool allowlist for fork context
+	Paths          []string        // optional: conditional activation glob patterns
+	Resources      []string        // optional: files relative to the skill root the body depends on
 	// DisableModelInvocation keeps the skill out of the model-facing catalog:
 	// it never enters the Available Skills block or the skill tool listing, and
 	// only the user's explicit /skill request can load it.
@@ -132,6 +133,9 @@ func LoadMeta(path string) (*Meta, error) {
 	if err != nil {
 		absPath = path
 	}
+	if real, err := filepath.EvalSymlinks(absPath); err == nil {
+		absPath = real
+	}
 	rootDir := filepath.Dir(absPath)
 
 	meta := &Meta{
@@ -152,6 +156,8 @@ func LoadMeta(path string) (*Meta, error) {
 
 	// Apply sidecar metadata if present (overrides frontmatter).
 	loadSidecarMeta(rootDir, meta)
+	descriptor := BuildPathDescriptor(meta)
+	meta.pathDescriptor = &descriptor
 
 	return meta, nil
 }

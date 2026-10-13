@@ -1,6 +1,8 @@
 package skill
 
 import (
+	"slices"
+
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/toolname"
 )
@@ -35,22 +37,17 @@ func ModelInvocable(meta *Meta) bool {
 	return meta != nil && !meta.DisableModelInvocation
 }
 
-// ModelVisibleUnderRuleset reports whether one skill enters the model-facing
-// catalog: the frontmatter must keep it model-invocable and the ruleset must
-// allow the skill tool for its name. The tool execution path enforces the same
-// predicate, so a manual-only skill is refused by the model even when its name
-// is guessed.
-func ModelVisibleUnderRuleset(meta *Meta, ruleset permission.Ruleset) bool {
+// ModelCallableUnderRuleset is the single model loading permission predicate.
+// Path activation controls recommendations and never grants loading access.
+func ModelCallableUnderRuleset(meta *Meta, ruleset permission.Ruleset) bool {
 	return ModelInvocable(meta) && VisibleUnderRuleset(meta, ruleset)
 }
 
-// ModelVisibleForRuleset returns the catalog subset the model may see. It is
-// the model-facing counterpart of VisibleForRuleset and the single filter for
-// every model-facing skill surface (the Available Skills prompt block and the
-// skill tool listing), so a manual-only skill cannot leak into either.
-func ModelVisibleForRuleset(loaded []*Meta, ruleset permission.Ruleset) []*Meta {
+// ModelCallableForRuleset returns every model-loadable skill, including skills
+// that have not matched a path and are absent from the startup listing.
+func ModelCallableForRuleset(loaded []*Meta, ruleset permission.Ruleset) []*Meta {
 	return filterVisibleSkills(loaded, func(meta *Meta) bool {
-		return ModelVisibleUnderRuleset(meta, ruleset)
+		return ModelCallableUnderRuleset(meta, ruleset)
 	})
 }
 
@@ -61,6 +58,9 @@ func filterVisibleSkills(loaded []*Meta, allow func(*Meta) bool) []*Meta {
 			continue
 		}
 		copyMeta := *meta
+		copyMeta.Paths = slices.Clone(meta.Paths)
+		copyMeta.AllowedTools = slices.Clone(meta.AllowedTools)
+		copyMeta.Resources = slices.Clone(meta.Resources)
 		copyMeta.Discovered = true
 		out = append(out, &copyMeta)
 	}
@@ -84,26 +84,17 @@ const (
 	ReasonUnavailable = "unavailable"
 )
 
-// InvocationState is one catalog entry's availability for one agent:
-//
-//   - ModelVisible: the model may see and load it (ruleset allows it and the
-//     frontmatter does not limit it to explicit user loads).
-//   - UserLoadable: the user may load it with an explicit /skill request.
-//   - Loaded: its instructions are live in this agent's context, derived from
-//     the skill tool pair still being present; a durable compaction that
-//     archives the pair clears it, exactly like a restart.
-//   - Reason: why the entry is missing from one of the two sets, empty when it
-//     is both model-visible and user-loadable.
-//
-// The same structure backs the TUI sidebar/selector and the user-facing load
-// validation, so a skill cannot look loadable in one surface and be refused in
-// the other.
+// InvocationState separates invocation permission, discovery and body availability.
 type InvocationState struct {
-	Meta         *Meta
-	ModelVisible bool
-	UserLoadable bool
-	Loaded       bool
-	Reason       string
+	Meta            *Meta
+	ModelCallable   bool
+	UserLoadable    bool
+	BodyPresent     bool
+	LoadedEarlier   bool
+	PathConditional bool
+	PathActivated   bool
+	NoticeRecorded  bool
+	Reason          string
 }
 
 // InvocationStateFor builds one entry's state. loaded is the set of skill
@@ -114,18 +105,19 @@ func InvocationStateFor(meta *Meta, ruleset permission.Ruleset, loaded map[strin
 		return InvocationState{Reason: ReasonUnavailable}
 	}
 	state := InvocationState{
-		Meta:         meta,
-		UserLoadable: VisibleUnderRuleset(meta, ruleset),
-		ModelVisible: ModelVisibleUnderRuleset(meta, ruleset),
+		Meta:            meta,
+		PathConditional: BuildPathDescriptor(meta).Conditional,
+		UserLoadable:    VisibleUnderRuleset(meta, ruleset),
+		ModelCallable:   ModelCallableUnderRuleset(meta, ruleset),
 	}
 	switch {
 	case !state.UserLoadable:
 		state.Reason = ReasonDeniedByRuleset
-	case !state.ModelVisible:
+	case !state.ModelCallable:
 		state.Reason = ReasonManualOnly
 	}
 	if _, ok := loaded[meta.Name]; ok {
-		state.Loaded = true
+		state.BodyPresent = true
 	}
 	return state
 }

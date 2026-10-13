@@ -218,7 +218,7 @@ func (a *MainAgent) resolveRestoredWorktree(ctx context.Context, dir string) *wo
 // switch.
 func (a *MainAgent) afterWorkDirSwitch(prev, next WorkDirState, reason string) []string {
 	a.invalidatePathRoots()
-	a.ReloadAgentsMD()
+	a.InvalidateDirectoryInstructions()
 	// The injected git status and virtualenv path describe the working
 	// directory, so they follow the switch for the same reason AGENTS.md does.
 	a.refreshWorkDirDerivedMeta()

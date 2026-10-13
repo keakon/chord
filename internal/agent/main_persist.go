@@ -326,7 +326,7 @@ func (a *MainAgent) persistAsyncForEpoch(sessionEpoch uint64, agentID string, ms
 func requiresDurableMessage(msg message.Message) bool {
 	// Journal acknowledgements must never survive the canonical receipt they
 	// retire, including receipts that record an unknown execution outcome.
-	return len(msg.Question) > 0 || msg.NativeTools != nil
+	return len(msg.Question) > 0 || msg.NativeTools != nil || msg.Kind == message.KindDirectoryInstructions || msg.SkillActivation != nil || msg.SkillDiscovery != nil || msg.CompactionSkillActivation != nil || msg.DirectoryInstructions != nil
 }
 
 // persistAsyncThrough queues one write against an already-resolved manager. A

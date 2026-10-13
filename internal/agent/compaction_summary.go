@@ -182,6 +182,9 @@ func (a *MainAgent) compactionReductionScratch() *MainAgent {
 }
 
 func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, contextLimit int, evidenceItems []evidenceItem, recentTail []message.Message, sessionAnchors compactionAnchors) (*compactionInput, error) {
+	view := a.skillActivationView()
+	head = projectSkillDiscoveryMessages(head, view)
+	recentTail = projectSkillDiscoveryMessages(recentTail, view)
 	pruned, normalized, err := a.prepareCompactionSummaryMessages(head)
 	if err != nil {
 		return nil, fmt.Errorf("prepare compaction transcript: %w", err)

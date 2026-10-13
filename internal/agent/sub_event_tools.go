@@ -117,7 +117,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				FileState:        payload.FileState.Clone(),
 				walltimeTarget:   payload.walltimeTarget,
 				speculativeHooks: payload.speculativeHooks,
-				RecoveryState:    payload.RecoveryState,
+				RecoveryState:    payload.RecoveryState, SkillActivation: payload.SkillActivation, DirectoryDiscovery: payload.DirectoryDiscovery, ControlReason: payload.ControlReason,
 			}
 			if err := s.commitPromotedToolSideEffects(effective, tr); err != nil {
 				tr.Error = fmt.Errorf("commit promoted tool side effects: %w", err)
@@ -165,7 +165,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 							batchCancel()
 						}
 					}
-					tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
+					tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err), SkillActivation: execResult.SkillActivation, DirectoryDiscovery: execResult.DirectoryDiscovery, ControlReason: execResult.ControlReason}
 					tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 					select {
 					case s.toolCh <- tr:
@@ -233,7 +233,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 					batchCancel()
 				}
 			}
-			tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
+			tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, DeliveredFiles: message.CloneDeliveredFiles(execResult.DeliveredFiles), Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err), SkillActivation: execResult.SkillActivation, DirectoryDiscovery: execResult.DirectoryDiscovery, ControlReason: execResult.ControlReason}
 			tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 			select {
 			case s.toolCh <- tr:
@@ -376,8 +376,10 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	// Runs behind the efficiency note so it lands last among the agent-appended
 	// notes.
 	toolBaseDir := s.effectiveToolBaseDir()
-	s.applyPatchRetry.observeResult(result.Name, result.ArgsJSON, toolBaseDir, result.Error)
-	contextResult = appendEditRetryAdvice(&s.editMatchFailStreak, contextResult, result.Name, result.ArgsJSON, toolBaseDir, result.Error, isError)
+	if result.ControlReason == "" {
+		s.applyPatchRetry.observeResult(result.Name, result.ArgsJSON, toolBaseDir, result.Error)
+		contextResult = appendEditRetryAdvice(&s.editMatchFailStreak, contextResult, result.Name, result.ArgsJSON, toolBaseDir, result.Error, isError)
+	}
 
 	s.fireHookBackground(s.turn.Ctx, hook.OnToolResult, s.turn.ID, buildToolResultHookData(
 		result.Name,
@@ -407,10 +409,9 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		Result:         displayResult,
 		Payload:        result.Payload,
 		Notes:          append([]string(nil), result.Notes...),
-		Status:         toolResultStatusFromError(isError),
+		Status:         toolResultStatusWithControlReason(isError, result.ControlReason),
 		AgentID:        s.instanceID,
 		Parts:          parts,
-		DeliveredFiles: successfulDeliveredFiles(result.DeliveredFiles, isError),
 		Diff:           result.Diff,
 		DiffAdded:      result.DiffAdded,
 		DiffRemoved:    result.DiffRemoved,
@@ -418,6 +419,8 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		FileState:      result.FileState.Clone(),
 		Duration:       result.Duration,
 		RecoveryState:  result.RecoveryState,
+		ControlReason:  result.ControlReason,
+		DeliveredFiles: successfulDeliveredFiles(result.DeliveredFiles, isError),
 	}
 	if result.Name == tools.NameGenerateImage {
 		event.Diagnostic = imageToolErrorDiagnostic(result.Error)
@@ -425,6 +428,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		s.parent.emitToTUI(event)
 	}
 
+	s.directoryInstructions.Load().collectDiscovery(result.DirectoryDiscovery)
 	toolMsg := message.Message{
 		Role:                      "tool",
 		DeliveredFiles:            successfulDeliveredFiles(result.DeliveredFiles, isError),
@@ -437,7 +441,7 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		ToolDiffAdded:             result.DiffAdded,
 		ToolDiffRemoved:           result.DiffRemoved,
 		ToolDurationMs:            result.Duration.Milliseconds(),
-		ToolStatus:                string(toolResultStatusFromError(isError)),
+		ToolStatus:                string(toolResultStatusWithControlReason(isError, result.ControlReason)),
 		FileState:                 result.FileState.Clone(),
 		ToolChangedPaths:          append([]string(nil), toolChangedPaths...),
 		FileAttributionIncomplete: fileAttributionIncomplete,
@@ -445,6 +449,8 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 		Audit:                     result.Audit.Clone(),
 		Provenance:                toolProvenanceFromContext(s.ctxMgr, result.CallID),
 		ToolRecoveryState:         result.RecoveryState,
+		ToolControlReason:         result.ControlReason,
+		SkillActivation:           skillActivationForResult(s.ctxMgr.Snapshot, s.skillActivationView, s.sessionEpoch, s.workDirState.load().Generation, result.Name, result.CallID, result.Error, result.SkillActivation),
 	}
 	if result.deliveryCommit != nil && result.deliveryCommit.Err == nil {
 		toolMsg = result.deliveryCommit.Message.Clone()

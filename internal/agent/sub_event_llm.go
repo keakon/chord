@@ -673,7 +673,7 @@ func (s *SubAgent) recoverTerminalResponse(instruction string, cause error) bool
 	s.preserveInterruptedPartial()
 	s.parent.discardSpeculativeStreamToolsAndClearToolTrace(s.turn, "terminal_recovery")
 	s.appendPendingUserMessage(pendingUserMessage{Content: instruction})
-	s.asyncCallLLMWithFlightMarked(s.turn, snapshotLLMRequest(s.ctxMgr))
+	s.asyncCallLLMWithFlightMarked(s.turn)
 	return true
 }
 

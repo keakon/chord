@@ -183,6 +183,7 @@ type CallStatus struct {
 // snapshot for that fallback attempt.
 type CompleteStreamOptions struct {
 	Diagnostics    *RequestDiagnostics
+	PrepareAttempt func(context.Context, RequestAttempt) (context.Context, error)
 	NativeTools    *NativeToolPolicy
 	BeforeFallback func(context.Context, []message.Message, FallbackModel) ([]message.Message, error)
 	// MCPDeclarations is the request's currently effective incremental MCP
@@ -1221,7 +1222,7 @@ func (c *Client) CompleteStreamWithOptions(
 		ctx, start.ProviderConfig, start.ProviderImpl, start.ModelID,
 		start.MaxTokens, requestTuning, start.Variant,
 		wireMessages, tools, options.MCPDeclarations, cb, true, orderedFallbacks, maxAttempts, &status,
-		routingGeneration, routingChangedCh, options.BeforeFallback,
+		routingGeneration, routingChangedCh, options.BeforeFallback, options.PrepareAttempt,
 	)
 
 	c.mu.Lock()

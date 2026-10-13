@@ -14,6 +14,9 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - `prevent_sleep` now supports Linux through local logind/GNOME services and Windows through system power requests, alongside macOS. TUI, headless, and ACP protect the execution host; coverage depends on available services and device power policies, and WSL cannot protect the Windows host.
 - `/context` explains the focused task’s latest request input, trimming, and reported cache usage; diagnostics bundles include anonymized context details.
 - Search saved TUI inputs across sessions with Ctrl+R in Insert mode or `/history`, restore them without sending, and undo the replacement. `/history clear` clears saved inputs across projects. Ctrl+R still switches service tiers in Normal mode.
+- Discover directory-specific `AGENTS.md` rules as files are accessed, and reconsider changes before executing when new rules are found.
+- Suggest conditional skills after successful file reads match their `paths`, with explicit discovery and loading states in the skill selector.
+
 - Take over a live local session between TUI and a gateway on macOS and Linux. Chord waits for already-started work, saves queued inputs, and restores the session paused until you explicitly continue.
 
 ### Improvements
