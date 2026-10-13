@@ -331,10 +331,16 @@ func (a *MainAgent) produceCompactionDraftAsync(ctx context.Context, snapshot []
 	keepAlive := newCompactionKeepAlive(a)
 	defer keepAlive.Stop()
 	summaryText, usedModel, summarizeErr := a.summarizeCompactionHead(ctx, head, pathutil.AbbreviateHome(absHistoryPath), evidenceItems, recentTail, todos, subAgents, backgroundObjects, sessionAnchors)
+	if errors.Is(summarizeErr, errCompactionSummaryProjection) {
+		return nil, fmt.Errorf("preserve history after invalid summary projection: %w", summarizeErr)
+	}
 	if summarizeErr != nil {
 		summaryMode = message.CompactionSummaryModeStructuredFallback
 		modelRef = "fallback"
 		input, inputErr := a.buildCompactionInputWithOptions(head, a.ctxMgr.GetMaxTokens(), evidenceItems, recentTail, sessionAnchors)
+		if errors.Is(inputErr, errCompactionSummaryProjection) {
+			return nil, fmt.Errorf("preserve history after invalid fallback projection: %w", inputErr)
+		}
 		if inputErr == nil {
 			input.EvidenceItems = evidenceItems
 			summaryText = buildStructuredFallbackSummary(pathutil.AbbreviateHome(absHistoryPath), input, summarizeErr, keyFiles, todos, subAgents)

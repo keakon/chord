@@ -49,6 +49,8 @@ reduction settings: a session that raised its retention thresholds also gets a
 durable summary built from the larger retained input. The `history-N.md` archive
 is unaffected and always holds the full, untrimmed original.
 
+Compaction summaries are based on user requests, visible replies, and execution records; independent thinking is excluded from the summary input. Analysis and decision rationale already written in assistant replies remain included. Summaries may omit details; consult the history archive when you need to verify them.
+
 Automatic compaction primarily uses input usage reported by the provider, and falls back to one estimate frozen from recent trusted usage when a response omits it. After the threshold is reached, it normally starts before the next model request, not merely because a response ended. Compaction already in progress can finish and apply its result safely. A request paused for exceeding the context limit resumes after compaction.
 
 ## Context compaction

@@ -182,8 +182,10 @@ func (a *MainAgent) compactionReductionScratch() *MainAgent {
 }
 
 func (a *MainAgent) buildCompactionInputWithOptions(head []message.Message, contextLimit int, evidenceItems []evidenceItem, recentTail []message.Message, sessionAnchors compactionAnchors) (*compactionInput, error) {
-	pruned := a.compactionReductionScratch().prepareMessagesForLLM(head)
-	normalized := normalizeMessagesForSummary(pruned)
+	pruned, normalized, err := a.prepareCompactionSummaryMessages(head)
+	if err != nil {
+		return nil, fmt.Errorf("prepare compaction transcript: %w", err)
+	}
 	budget := compactionInputBudget(contextLimit)
 	trimmed, omittedMessages := trimMessagesToBudget(a.ctxMgr, normalized, budget)
 	if len(trimmed) == 0 {
@@ -262,8 +264,10 @@ func (a *MainAgent) fitCompactionInputToContextLimit(head []message.Message, inp
 	if compactionPromptTokenEstimate(input, historyPath, keyFiles, todos, subAgents, backgroundObjects) <= allowedInput {
 		return input, fullInputs, nil
 	}
-	pruned := a.compactionReductionScratch().prepareMessagesForLLM(head)
-	normalized := normalizeMessagesForSummary(pruned)
+	_, normalized, err := a.prepareCompactionSummaryMessages(head)
+	if err != nil {
+		return nil, nil, fmt.Errorf("prepare compaction transcript during fit: %w", err)
+	}
 	budget := compactionInputBudget(contextLimit)
 	for attempts := range 6 {
 		candidateKeyFiles, candidateTodos, candidateSubAgents, candidateBackground := compactionPromptInputsForAttempt(

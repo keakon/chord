@@ -13,6 +13,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- Compaction summaries exclude independent thinking so the input budget prioritizes user requests, replies, and execution records.
 - Question decision cards keep the original question and answers fully visible without folding, with separate lines for the question, selections, and option descriptions.
 
 ### Fixes
