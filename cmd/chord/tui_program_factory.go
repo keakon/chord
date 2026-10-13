@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
+
+	"github.com/keakon/chord/internal/agent"
 
 	"github.com/charmbracelet/x/term"
 	tea "github.com/keakon/bubbletea/v2"
@@ -104,6 +108,13 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 	tuiModel.ApplyCadenceProfileFromEnv()
 	if ac != nil {
 		tuiModel.SetInstanceID(ac.InstanceID)
+		tuiModel.SetTakeoverHandler(func(ctx context.Context, sid string, timeout *time.Duration) (agent.SessionPauseStatus, error) {
+			loc, err := locateTakeover(ctx, ac.ContentRoot, sid)
+			if err != nil {
+				return agent.SessionPauseStatus{}, err
+			}
+			return startTakeover(ctx, loc, sid, newTakeoverIdentity(), "tui", ac.InstanceID, timeout)
+		})
 	}
 	if ac != nil && ac.Cfg != nil {
 		if len(ac.Cfg.KeyMap) > 0 {

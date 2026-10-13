@@ -24,6 +24,11 @@ import (
 // goroutine, then RoleChangedEvent is posted to the TUI output channel and
 // consumed asynchronously by the TUI/headless event loop.
 func (a *MainAgent) SwitchRole(role string) error {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		return err
+	}
+	defer finish()
 	if cfg, ok := a.agentConfigs[role]; ok && cfg != nil && cfg.IsSubAgent() {
 		return fmt.Errorf("role %q is not available", role)
 	}
@@ -379,6 +384,12 @@ func (a *MainAgent) sendLoopAnchorFromCommand(target string) {
 }
 
 func (a *MainAgent) EnableLoopMode(target string) {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		a.emitToTUI(ErrorEvent{Err: err})
+		return
+	}
+	defer finish()
 	a.loopReductionMu.Lock()
 	a.loopState.enableWithTarget(target)
 	if !a.loopState.MaxIterationsSet && a.loopState.MaxIterations == 0 {

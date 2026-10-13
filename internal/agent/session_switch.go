@@ -83,6 +83,10 @@ func (a *MainAgent) requestSessionControl(kind, sessionID string) {
 }
 
 func (a *MainAgent) handleSessionControlEvent(evt Event) {
+	if a.sessionExecutionPaused() {
+		a.emitToTUI(ToastEvent{Message: "Session is paused; continue it before switching sessions", Level: "warn"})
+		return
+	}
 	payload, ok := evt.Payload.(*sessionControlPayload)
 	if !ok {
 		log.Errorf("handleSessionControlEvent: invalid payload type payload_type=%v", fmt.Sprintf("%T", evt.Payload))
@@ -358,6 +362,8 @@ func (a *MainAgent) installSessionTarget(sessionDir string) {
 	a.stateMu.Lock()
 	a.sessionDir = sessionDir
 	a.stateMu.Unlock()
+	a.installPausedSession(&loadedSessionState{SessionPath: sessionDir})
+	a.ensureLLMSessionID(a.llmClient)
 	// The target directory may have been compacted by another process while
 	// this session was not active; raise the per-directory allocator floor to
 	// the on-disk maximum so freshly allocated history indexes cannot collide

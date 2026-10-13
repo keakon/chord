@@ -388,6 +388,11 @@ func (a *MainAgent) removeSubAgentMailboxState(agentID string) {
 }
 
 func (a *MainAgent) sweepSubAgentLifecycle() {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		return
+	}
+	defer finish()
 	currentTurn := a.explicitUserTurnCount.Load()
 	policy := a.waitingMainExpiryPolicy()
 	now := time.Now()

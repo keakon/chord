@@ -122,7 +122,7 @@ func (a *MainAgent) SendUserMessage(content string) {
 // conversation rather than consulting the current TUI focus.
 func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, content string) {
 	if IsTUILocalOnlySlashCommand(content) {
-		a.sendEvent(Event{Type: EventUserMessage, Payload: content})
+		a.sendSessionInput(content, nil, "")
 		return
 	}
 	target, ok := a.resolveConversationTarget(conversation)
@@ -132,6 +132,12 @@ func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, con
 	}
 	if target.settled {
 		a.emitToTUI(ToastEvent{Message: fmt.Sprintf("Task %s has finished; delegate it again to send it a follow-up", target.task.TaskID), Level: "warn", AgentID: target.task.LatestInstanceID})
+		return
+	}
+	if a.sessionExecutionPaused() && target.task != nil {
+		// The owner loop persists the explicit follow-up with the restored
+		// checkpoint before it reopens admission for the addressed worker.
+		a.sendEvent(Event{Type: EventSubAgentSendMessage, Payload: &SubAgentSendMessagePayload{TaskID: target.task.TaskID, Message: content, Kind: "follow_up"}})
 		return
 	}
 	if focused := target.sub; focused != nil {
@@ -180,10 +186,7 @@ func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, con
 		}
 		return
 	}
-	a.sendEvent(Event{
-		Type:    EventUserMessage,
-		Payload: a.acceptRawUserMessage(content, nil),
-	})
+	a.sendSessionInput(content, nil, "")
 }
 
 // acceptRawUserMessage stamps a main-agent user message with its arrival order.
@@ -191,10 +194,12 @@ func (a *MainAgent) SendUserMessageToTarget(conversation ConversationTarget, con
 // request that samples the counter can tell whether this message was already
 // accepted, and the loop can tell whether a later message outranks it.
 func (a *MainAgent) acceptRawUserMessage(content string, parts []message.ContentPart) acceptedUserMessage {
+	order := a.acceptedRawMessages.Add(1)
 	return acceptedUserMessage{
+		InputID:       fmt.Sprintf("%s:%d", a.pause.inputPrefix, order),
 		Content:       content,
 		Parts:         parts,
-		AcceptedOrder: a.acceptedRawMessages.Add(1),
+		AcceptedOrder: order,
 	}
 }
 
@@ -207,8 +212,15 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 		}
 	}
 	if IsTUILocalOnlySlashCommand(content.String()) {
-		a.sendEvent(Event{Type: EventUserMessage, Payload: parts})
+		a.sendSessionInput(content.String(), parts, "")
 		return
+	}
+	if a.sessionExecutionPaused() {
+		target, ok := a.resolveConversationTarget(a.focusedConversationTarget())
+		if ok && target.task != nil && !target.settled {
+			a.sendEvent(Event{Type: EventSubAgentSendMessage, Payload: &SubAgentSendMessagePayload{TaskID: target.task.TaskID, Message: content.String(), Parts: cloneContentParts(parts), Kind: "follow_up"}})
+			return
+		}
 	}
 	if focused := a.validFocusedSubAgent(); focused != nil {
 		if !a.withRegisteredSubAgent(focused, func(sub *SubAgent) bool {
@@ -243,10 +255,7 @@ func (a *MainAgent) SendUserMessageWithParts(parts []message.ContentPart) {
 		}
 		return
 	}
-	a.sendEvent(Event{
-		Type:    EventUserMessage,
-		Payload: a.acceptRawUserMessage(content.String(), parts),
-	})
+	a.sendSessionInput(content.String(), parts, "")
 }
 
 // QueuePendingUserDraft mirrors a busy local TUI draft into the agent's
@@ -260,11 +269,7 @@ func (a *MainAgent) QueuePendingUserDraft(draftID string, parts []message.Conten
 			return sub.QueuePendingUserDraft(draftID, parts)
 		})
 	}
-	a.sendEvent(Event{
-		Type:    EventPendingDraftUpsert,
-		Payload: pendingUserMessageFromDraft(draftID, parts),
-	})
-	return true
+	return a.sendSessionDraft(draftID, parts, false)
 }
 
 // UpdatePendingUserDraft replaces a queued draft before it is consumed.
@@ -275,11 +280,7 @@ func (a *MainAgent) UpdatePendingUserDraft(draftID string, parts []message.Conte
 	if focused := a.validFocusedSubAgent(); focused != nil && focused.State() == SubAgentStateRunning {
 		return focused.UpdatePendingUserDraft(draftID, parts)
 	}
-	a.sendEvent(Event{
-		Type:    EventPendingDraftUpsert,
-		Payload: pendingUserMessageFromDraft(draftID, parts),
-	})
-	return true
+	return a.sendSessionDraft(draftID, parts, false)
 }
 
 // RemovePendingUserDraft removes a queued draft before it is consumed.
@@ -290,11 +291,7 @@ func (a *MainAgent) RemovePendingUserDraft(draftID string) bool {
 	if focused := a.validFocusedSubAgent(); focused != nil && focused.State() == SubAgentStateRunning {
 		return focused.RemovePendingUserDraft(draftID)
 	}
-	a.sendEvent(Event{
-		Type:    EventPendingDraftRemove,
-		Payload: strings.TrimSpace(draftID),
-	})
-	return true
+	return a.sendSessionDraft(draftID, nil, true)
 }
 
 // AppendContextMessage appends a user-role message to the focused agent's

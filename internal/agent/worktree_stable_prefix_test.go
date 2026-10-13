@@ -169,7 +169,7 @@ func assertShellPwd(t *testing.T, p toolExecutionPipeline, want string) {
 	if err != nil {
 		t.Fatalf("marshal the shell arguments: %v", err)
 	}
-	out, err := p.executeToolForCall(context.Background(), message.ToolCall{ID: "shell-pwd", Name: tools.NameShell, Args: args})
+	out, err := p.executeToolForCall(context.Background(), message.ToolCall{ID: "shell-pwd", Name: tools.NameShell, Args: args}, &ToolExecutionResult{})
 	if err != nil {
 		t.Fatalf("shell pwd in %s: %v (output %q)", want, err, out)
 	}

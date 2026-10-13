@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
 )
@@ -93,6 +94,11 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 		if hasPending {
 			return nil, &NativeToolError{Cause: fmt.Errorf("pending native tool authorization is no longer available")}
 		}
+		lease, err := beginCustomProvider(ctx, impl)
+		if err != nil {
+			return nil, err
+		}
+		defer lease.Finish()
 		return impl.CompleteStream(ctx, key, model, system, messages, defs, maxTokens, tuning, cb)
 	}
 	if policy.Begin == nil || policy.Finish == nil {
@@ -120,7 +126,7 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 	})
 	history := &message.NativeToolHistory{Authorization: authorization, Target: target, Protocol: provider.Type(), APIURL: provider.APIURL()}
 	defer func() {
-		if failure, ok := errors.AsType[*NativeToolError](retErr); ok && len(history.RequestIDs) > 0 {
+		if failure, ok := errors.AsType[*NativeToolError](retErr); ok && len(history.RequestIDs) > 0 && !executiongate.IsPaused(retErr) {
 			history.OutcomeUnknown = true
 			failure.Receipt = history
 			if policy.Failed != nil {
@@ -129,7 +135,15 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 		}
 	}()
 	var text strings.Builder
+	var lastResponse *message.Response
 	for continuation := 0; continuation <= 4; continuation++ {
+		if err := executiongate.Check(ctx); err != nil {
+			if lastResponse != nil {
+				lastResponse.Content = text.String()
+				return lastResponse, &NativeToolError{Cause: err, Receipt: history}
+			}
+			return nil, err
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, &NativeToolError{Cause: err}
 		}
@@ -148,7 +162,16 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 		history.RequestIDs = append(history.RequestIDs, id)
 		started := time.Now()
 		requestCtx, dispatch := WithRequestDispatch(ctx, nil)
-		resp, callErr := impl.CompleteStream(requestCtx, key, model, system, messages, defs, maxTokens, tuning, cb)
+		lease, admissionErr := beginCustomProvider(requestCtx, impl)
+		var resp *message.Response
+		callErr := admissionErr
+		if admissionErr == nil {
+			resp, callErr = impl.CompleteStream(requestCtx, key, model, system, messages, defs, maxTokens, tuning, cb)
+			lease.Finish()
+		}
+		if executiongate.IsPaused(callErr) {
+			markRequestPrepared(requestCtx)
+		}
 		if resp == nil {
 			if callErr == nil {
 				callErr = fmt.Errorf("provider returned no response")
@@ -224,11 +247,19 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 					return nil, &NativeToolError{Cause: callErr}
 				}
 				if authorization.Tool == toolname.GenerateImage && nativeImageFallbackAllowed(callErr) && policy.ImageFallback != nil && slices.ContainsFunc(clientDefs, func(def message.ToolDefinition) bool { return def.Name == toolname.GenerateImage }) && ctx.Err() == nil {
+					if err := executiongate.Check(ctx); err != nil {
+						return nil, &NativeToolError{Cause: err}
+					}
 					if !policy.ImageFallback() {
 						return nil, &NativeToolError{Cause: fmt.Errorf("local image fallback is unavailable or its decision could not be persisted")}
 					}
 					tuning.nativeTool = nil
+					fallbackLease, admissionErr := beginCustomProvider(ctx, impl)
+					if admissionErr != nil {
+						return nil, &NativeToolError{Cause: admissionErr}
+					}
 					fallbackResp, fallbackErr := impl.CompleteStream(ctx, key, model, system, messages, nativeImageFallbackDefinitions(clientDefs, provider, model, messages), maxTokens, tuning, cb)
+					fallbackLease.Finish()
 					if fallbackErr != nil {
 						return nil, &NativeToolError{Cause: fallbackErr}
 					}
@@ -241,6 +272,10 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 			}
 		}
 		if callErr != nil {
+			if executiongate.IsPaused(callErr) && lastResponse != nil {
+				lastResponse.Content = text.String()
+				return lastResponse, &NativeToolError{Cause: callErr, Receipt: history}
+			}
 			return nil, &NativeToolError{Cause: callErr}
 		}
 		if resp.StopReason != "pause_turn" {
@@ -250,6 +285,7 @@ func completeWithNativeTools(ctx context.Context, impl Provider, provider *Provi
 			}
 			return resp, nil
 		}
+		lastResponse = resp
 		receipt := *history
 		receipt.Items = slices.Clone(resp.Hosted.Items)
 		messages = append(slices.Clone(messages), message.Message{Role: message.RoleAssistant, Content: resp.Content, NativeTools: &receipt})

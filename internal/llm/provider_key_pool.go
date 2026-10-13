@@ -10,6 +10,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/ratelimit"
 )
 
@@ -374,7 +375,22 @@ func (p *ProviderConfig) SelectKeyWithContext(ctx context.Context) (string, bool
 	// Rate limiting: wait for a token before proceeding (outside the mutex).
 	// This allows multiple agents/goroutines to queue up without holding the lock.
 	if p.limiter != nil {
-		if err := p.limiter.Wait(ctx); err != nil {
+		waitCtx, cancel := context.WithCancel(ctx)
+		waitDone := make(chan struct{})
+		go func() {
+			select {
+			case <-executiongate.FromContext(ctx).Frozen():
+				cancel()
+			case <-waitDone:
+			}
+		}()
+		err := p.limiter.Wait(waitCtx)
+		close(waitDone)
+		cancel()
+		if paused := executiongate.Check(ctx); paused != nil {
+			return "", false, paused
+		}
+		if err != nil {
 			return "", false, err
 		}
 	}

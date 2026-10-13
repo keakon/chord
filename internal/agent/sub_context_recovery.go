@@ -95,6 +95,9 @@ func (s *SubAgent) prepareContextForLLM(messages []message.Message) (prepared []
 
 func (s *SubAgent) compactContextForTarget(messages []message.Message, target int, reason string) ([]message.Message, bool) {
 	compressed := s.ctxMgr.CompressForTarget(messages, target)
+	if s.compactionDropsPendingPauseInputs(messages, compressed) {
+		return nil, false
+	}
 	if len(compressed) == 0 || len(compressed) >= len(messages) {
 		return nil, false
 	}
@@ -130,6 +133,9 @@ func (s *SubAgent) compactContextForTarget(messages []message.Message, target in
 		if rewriteErr := manager.RewriteLog(s.instanceID, compressed); rewriteErr != nil {
 			log.Warnf("SubAgent context compression could not rewrite durable history agent=%v error=%v", s.instanceID, rewriteErr)
 			return nil, false
+		}
+		if s.parent != nil {
+			s.parent.persist.clearCheckpointFailures(manager, s.instanceID)
 		}
 	}
 	s.ctxMgr.RestoreMessages(compressed)
@@ -174,4 +180,34 @@ func (s *SubAgent) archiveContextRecoveryHistory(messages []message.Message) (st
 		return "unavailable", nil
 	}
 	return filepath.ToSlash(relPath), nil
+}
+
+// A pending checkpoint must retain its transcript identity until input
+// retirement is durable. Otherwise a crash cannot reconcile staged input.
+func (s *SubAgent) compactionDropsPendingPauseInputs(before, after []message.Message) bool {
+	protected := make(map[string]bool)
+	for _, input := range s.stagedPauseInputs {
+		if input.InputID != "" {
+			protected[input.InputID] = true
+		}
+	}
+	if s.parent != nil {
+		for _, input := range s.parent.PendingSessionInputs() {
+			if input.OwnerTaskID == s.taskID {
+				protected[input.InputID] = true
+			}
+		}
+	}
+	kept := make(map[string]bool)
+	for _, msg := range after {
+		if msg.InputID != "" {
+			kept[msg.InputID] = true
+		}
+	}
+	for _, msg := range before {
+		if protected[msg.InputID] && !kept[msg.InputID] {
+			return true
+		}
+	}
+	return false
 }

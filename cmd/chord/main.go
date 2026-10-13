@@ -96,7 +96,7 @@ func shouldPrintCLIError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if exitErr, ok := errors.AsType[cliExitError](err); ok && exitErr.code == 130 {
+	if exitErr, ok := errors.AsType[cliExitError](err); ok && (exitErr.code == 130 || exitErr.code == 0 || exitErr.code == takeoverExitCode) {
 		return false
 	}
 	if errors.Is(err, context.Canceled) {
@@ -163,6 +163,8 @@ func newRootCmd() *cobra.Command {
 		"Sessions root directory (overrides CHORD_SESSIONS_DIR and config.yaml paths.sessions_dir)")
 	rootCmd.PersistentFlags().StringVar(&flagLogsDir, "logs-dir", "",
 		"Logs directory (overrides CHORD_LOGS_DIR and config.yaml paths.logs_dir)")
+	rootCmd.Flags().StringVar(&flagTakeoverSession, "takeover", "", "Take over a session from gateway-managed headless")
+	rootCmd.Flags().DurationVar(&flagTakeoverTimeout, "takeover-timeout", 0, "Observation budget; 0 returns after admission")
 	rootCmd.Flags().BoolVarP(&flagContinueSession, "continue", "c", false,
 		"Continue the latest non-empty session in the current project")
 	rootCmd.Flags().StringVarP(&flagResumeSession, "resume", "r", "",
@@ -178,7 +180,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().BoolVar(&flagWorktreeResetBranch, "reset-branch", false,
 		"Reset an existing branch that no worktree has checked out to HEAD instead of refusing to recreate it (only with --worktree)")
 
-	rootCmd.AddCommand(newAuthCmd(), newConfigCmd(), newHeadlessCmd(), newACPCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd(), newSessionsCmd())
+	rootCmd.AddCommand(newTakeoverCmd(), newAuthCmd(), newConfigCmd(), newHeadlessCmd(), newACPCmd(), newDoctorCmd(), newCleanupCmd(), newWorktreeCmd(), newResumeCmd(), newImportCmd(), newSessionsCmd())
 	return rootCmd
 }
 
@@ -208,6 +210,9 @@ func main() {
 // runRoot is the main execution path for TUI mode. In local mode, the TUI
 // runs in-process with the MainAgent — no IPC, no socket, no server spawn.
 func runRoot(cmd *cobra.Command, _ []string) error {
+	if err := prepareRootTakeover(cmd); err != nil {
+		return err
+	}
 	// --fork-history forks the session named by --resume before any plan or
 	// lock logic runs, then rewrites the resume id to the fresh fork. This is
 	// the root-command complement of `chord resume --fork-history` (which
@@ -264,6 +269,16 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		flagWorktreeStartupMeta = worktreeMetaForInfo(info)
 		flagWorktreeStartupReason = recovery.WorktreeSwitchCreate
 		plan.SessionOptions.NewSessionMeta = flagWorktreeStartupMeta
+	} else if plan.SessionOptions.ExpectedTransfer.TransferID != "" {
+		startup, workDir, err := claimTakeoverStartup(cmd.Context(), plan.SessionOptions)
+		if err != nil {
+			return err
+		}
+		defer startup.SessionLock.Release()
+		plan.SessionOptions.Plan = &startup
+		if err := os.Chdir(workDir); err != nil {
+			return fmt.Errorf("restore_failed: enter saved working directory: %w", err)
+		}
 	} else if id := strings.TrimSpace(plan.SessionOptions.ResumeID); id != "" {
 		// A session remembers the checkout it was working in. Enter that
 		// worktree before initApp so tools, the LSP root, and git status are
@@ -272,7 +287,17 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		if wtCtx == nil {
 			wtCtx = context.Background()
 		}
-		if info := resumeSessionWorktree(wtCtx, id); info != nil {
+		startup, savedWorkDir, paused, err := claimPausedResumeStartup(wtCtx, id)
+		if err != nil {
+			return err
+		}
+		if paused {
+			defer startup.SessionLock.Release()
+			plan.SessionOptions.Plan = &startup
+			if err := os.Chdir(savedWorkDir); err != nil {
+				return fmt.Errorf("restore_failed: enter paused working directory: %w", err)
+			}
+		} else if info := resumeSessionWorktree(wtCtx, id); info != nil {
 			fmt.Fprintf(os.Stderr, "Resuming session %s in worktree %s (%s)\n", id, info.Name, info.Branch)
 			if err := os.Chdir(info.Path); err != nil {
 				return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
@@ -369,6 +394,12 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	tuiModel := programPlan.model
+	endpoint, endpointErr := startRuntimeTakeover(ac, "tui")
+	if endpointErr != nil {
+		log.Warnf("session takeover unavailable error=%v", endpointErr)
+	} else {
+		defer endpoint.close()
+	}
 
 	// Wire up confirmFn, questionFn, QuestionTool, LSP/MCP status, and start the event loop.
 	rt, err = createRuntime(ac)
@@ -385,6 +416,13 @@ func runRoot(cmd *cobra.Command, _ []string) error {
 	_, tuiErr := programPlan.runner.Run()
 	if err := tuiModel.Close(); err != nil {
 		log.Warnf("tui runtime cache cleanup failed error=%v", err)
+	}
+
+	if status, ok := savedTakeoverStatus(ac); ok {
+		if err := ac.MainAgent.ReleasePausedSession(status.TransferID); err != nil {
+			return err
+		}
+		return cliExitError{code: takeoverExitCode}
 	}
 
 	// Graceful shutdown: when Done completed and the agent closed as expected,

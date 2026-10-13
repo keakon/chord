@@ -485,6 +485,7 @@ func (b *hostedBackend) runAttempt(ctx context.Context, caller *hostedCaller, ta
 		},
 	}
 	client := newAuxClientFromPool([]llm.FallbackModel{clientTarget}, 0, hostedToolMaxOutputTokens, b.agent.ServiceTier())
+	b.agent.bindAuxExecutionGate(client)
 	if client == nil {
 		return nil, fmt.Errorf("could not build a client for the target")
 	}

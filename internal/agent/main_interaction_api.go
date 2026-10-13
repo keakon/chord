@@ -295,6 +295,12 @@ func (a *MainAgent) ContinueFromContextForTarget(conversation ConversationTarget
 // handleContinueFromContext starts a new turn and calls LLM without appending
 // any new user message.
 func (a *MainAgent) handleContinueFromContext() {
+	if a.sessionExecutionPaused() {
+		a.pause.resumeContinue = true
+		if !a.resumePausedSessionForUser() {
+			return
+		}
+	}
 	// A turn that has no pending work cannot be moved by any event: settle it
 	// so this continue is not swallowed by the active-turn guard below.
 	a.settleStalledTurn("continue")

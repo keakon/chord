@@ -20,7 +20,7 @@ func TestNativeReceiptPersistenceRequiresDirectorySync(t *testing.T) {
 					t.Fatal(err)
 				}
 				manager := recovery.NewRecoveryManager(dir)
-				t.Cleanup(manager.Close)
+				t.Cleanup(func() { _ = manager.Close() })
 				agentID := "worker-1"
 				if kind == "main" {
 					agentID = identity.MainAgentID

@@ -357,6 +357,11 @@ func (a *MainAgent) memoryWorkerLoop() {
 // job is requeued with a backoff (see recoverMemoryDrainPanic) so the same
 // work is retried without a hot loop.
 func (a *MainAgent) drainMemoryQueueSafely() {
+	defer func() {
+		if a.sessionExecutionPaused() {
+			a.sendEvent(Event{Type: eventSessionPauseWake})
+		}
+	}()
 	defer a.recoverMemoryDrainPanic()
 	a.drainMemoryQueue()
 }
@@ -648,6 +653,9 @@ var errMemorySetupFailed = errors.New("memory extraction setup failed")
 // request time. On the main pool a new turn also cancels the in-flight request
 // and requeues its job (see preemptMemoryExtractionForTurn).
 func (a *MainAgent) memoryAdmission() bool {
+	if a.sessionExecutionPaused() {
+		return false
+	}
 	if a.memoryMgr == nil || !a.memoryExtractEnabled.Load() || a.memoryManual.active.Load() {
 		return false
 	}
@@ -1044,6 +1052,7 @@ func (a *MainAgent) newMemoryExtractionClient(rotation int) (*llm.Client, error)
 		return nil, fmt.Errorf("main model pool has no usable entries")
 	}
 	client := newAuxClientFromPool(pool, selectedIdx+rotation, 0, a.ServiceTier())
+	a.bindAuxExecutionGate(client)
 	client.SetStreamRetryRounds(1)
 	return client, nil
 }

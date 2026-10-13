@@ -6,6 +6,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
 )
 
 func (s *SubAgent) handleUserInput(input pendingUserMessage) {
@@ -14,6 +15,7 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 	}
 	turn := s.newTurn()
 	s.llmRequestInFlight.Store(true)
+	s.consumeRestoredPauseInputs()
 	s.appendPendingUserMessage(input)
 
 	messages := s.prepareContextForLLM(s.ctxMgr.Snapshot())
@@ -23,8 +25,15 @@ func (s *SubAgent) handleUserInput(input pendingUserMessage) {
 func (s *SubAgent) appendPendingUserMessage(input pendingUserMessage) {
 
 	content := pendingUserMessageText(input)
-	msg := message.Message{Role: "user", Content: content, Mailbox: input.Mailbox}
-	if input.Mailbox != nil {
+	msg := message.Message{InputID: input.InputID, Role: "user", Content: content, Mailbox: input.Mailbox, Kind: input.Kind}
+	if input.InputID != "" {
+		input.Stage = recovery.PendingInputStageTranscriptStaged
+		s.stagedPauseInputs = append(s.stagedPauseInputs, clonePauseInput(input))
+	}
+	if input.Stage == recovery.PendingInputStageTranscriptStaged && s.pauseInputAlreadyAppended(input.InputID) {
+		return
+	}
+	if input.Mailbox != nil && msg.Kind == "" {
 		msg.Kind = message.KindSubAgentMailbox
 	}
 	if len(input.Parts) > 0 {
@@ -91,6 +100,9 @@ func (s *SubAgent) appendPendingUserMessages(pending []pendingUserMessage) {
 }
 
 func (s *SubAgent) messagesForLLMContinuation() []message.Message {
+	if s.sessionExecutionPaused() {
+		return nil
+	}
 	s.inputQueueMu.Lock()
 	var pending []pendingUserMessage
 	if !nativeMessagesTurnPending(s.ctxMgr) {
@@ -107,6 +119,9 @@ func (s *SubAgent) continueLLMWithPendingUserMessages() {
 }
 
 func (s *SubAgent) continueLLMIfPendingUserMessages() bool {
+	if s.sessionExecutionPaused() {
+		return false
+	}
 	s.inputQueueMu.Lock()
 	pending := s.takePendingUserMessagesLocked()
 	if len(pending) == 0 {
@@ -122,6 +137,9 @@ func (s *SubAgent) continueLLMIfPendingUserMessages() bool {
 }
 
 func (s *SubAgent) takePendingUserMessagesForContinuation() []pendingUserMessage {
+	if s.sessionExecutionPaused() {
+		return nil
+	}
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
 
@@ -154,6 +172,9 @@ func (s *SubAgent) openToolBatchDefersContextAppends() bool {
 }
 
 func (s *SubAgent) drainContextAppendsBeforeTurn() {
+	if s.sessionExecutionPaused() {
+		return
+	}
 	if nativeMessagesTurnPending(s.ctxMgr) {
 		return
 	}
@@ -177,9 +198,25 @@ func (s *SubAgent) TryEnqueueContextAppend(msg message.Message) bool {
 	}
 	s.ctxAppendQueueMu.Lock()
 	defer s.ctxAppendQueueMu.Unlock()
+	s.inputQueueMu.Lock()
+	input := pendingUserMessage{InputID: msg.InputID}
+	s.assignPauseInputIdentity(&input)
+	if input.AcceptedOrder == 0 {
+		s.inputSequence++
+		input.AcceptedOrder = s.inputSequence
+	}
+	msg.InputID = input.InputID
+	if s.pauseContextSequences == nil {
+		s.pauseContextSequences = make(map[string]int64)
+	}
+	s.pauseContextSequences[msg.InputID] = input.AcceptedOrder
+	s.inputQueueMu.Unlock()
 	msgBytes := messageQueueBytes(msg)
 	messageLimit, byteLimit := s.effectiveQueueLimits()
 	if len(s.ctxAppendCh)+len(s.ctxAppendOverflow) >= messageLimit || s.ctxAppendBytes+msgBytes > byteLimit {
+		s.inputQueueMu.Lock()
+		delete(s.pauseContextSequences, msg.InputID)
+		s.inputQueueMu.Unlock()
 		if s.parent != nil {
 			s.parent.orchestrationMetrics.subAgentQueueRejected.Add(1)
 		}

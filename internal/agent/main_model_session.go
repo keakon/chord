@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 )
 
@@ -16,6 +17,7 @@ func (a *MainAgent) ensureLLMSessionID(client *llm.Client) {
 	}
 	a.stateMu.RLock()
 	defer a.stateMu.RUnlock()
+	client.SetExecutionGate(a.executionGate, identity.MainAgentID)
 	sid := strings.TrimSpace(filepath.Base(a.sessionDir))
 	if sid != "" && sid != "." {
 		client.SetSessionID(sid)

@@ -4,6 +4,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Features
+
+- Take over a live local session between TUI and a gateway on macOS and Linux. Chord waits for already-started work, saves queued inputs, and restores the session paused until you explicitly continue.
+
 ### Improvements
 
 - Question decision cards keep the original question and answers fully visible without folding, with separate lines for the question, selections, and option descriptions.

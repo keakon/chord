@@ -7,6 +7,9 @@ import (
 )
 
 func (m *Model) handleKeyMsg(msg tea.KeyMsg) tea.Cmd {
+	if m.takeoverInputFrozen() {
+		return m.handleTakeoverKey(msg)
+	}
 	if m.interactionSuppressed() {
 		if isCtrlC(msg) {
 			return m.handleCtrlC()

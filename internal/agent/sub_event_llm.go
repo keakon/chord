@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -32,6 +33,16 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	// worker identity with the sticky cursor before any recovery restart: an
 	// attempt that never emitted visible output must not keep defining it.
 	s.syncRunningModelRefToCursorHead()
+	if executiongate.IsPaused(result.err) {
+		if result.resp == nil {
+			s.preserveInterruptedPartial()
+		} else {
+			s.turn.drainPartialText()
+			s.turn.drainPartialResponsesOutput()
+			s.handlePausedLLMResponse(result.resp)
+		}
+		return
+	}
 	if result.err != nil {
 		if llm.IsNativeToolError(result.err) {
 			s.sendEvent(Event{Type: EventAgentError, Payload: result.err})
@@ -80,6 +91,10 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	s.turn.drainPartialResponsesOutput()
 
 	resp := result.resp
+	if s.sessionExecutionPaused() {
+		s.handlePausedLLMResponse(resp)
+		return
+	}
 	if orphans := countOrphanVariationSelectors(resp); len(orphans) > 0 {
 		log.Warnf("SubAgent: orphan variation selectors in response (kept verbatim, report-only): agent=%v turn_id=%v fields=%v", s.instanceID, s.turn.ID, formatInvisibleCounts(orphans))
 	}
@@ -258,6 +273,14 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		s.ctxMgr.NoteMissingUsage()
 	}
 
+	if s.sessionExecutionPaused() {
+		if err := s.waitPersistBarrier(persistBarrier, persistPending); err != nil {
+			s.failIntentBarrier(sanitizedCalls, err)
+			return
+		}
+		s.startPausedToolCalls(s.turn, sanitizedCalls)
+		return
+	}
 	// ---------------------------------------------------------------
 	// Complete/Escalate interception (on valid calls only)
 	// ---------------------------------------------------------------

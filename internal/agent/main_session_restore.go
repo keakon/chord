@@ -32,6 +32,7 @@ type sessionRestoreResult struct {
 }
 
 type loadedSessionState struct {
+	Pause       *recovery.SessionPauseCheckpoint
 	SessionPath string
 	// RecordedWorkDir is the checkout the session was working in when it
 	// stopped, read from its metadata. The zero value means the main checkout.
@@ -324,7 +325,10 @@ func (a *MainAgent) resolveResumeSessionPath(sessionID string) (string, error) {
 	mainPath := filepath.Join(sessionPath, identity.MainSessionLogFilename)
 	info, err := os.Stat(mainPath)
 	if err != nil || info.Size() == 0 {
-		return "", fmt.Errorf("session %s not found or has no messages", sessionID)
+		manager := recovery.NewRecoveryManager(sessionPath)
+		if (err != nil && !os.IsNotExist(err)) || !completePausedSessionWithoutMessages(manager, sessionPath) {
+			return "", fmt.Errorf("session %s not found or has no messages", sessionID)
+		}
 	}
 	return sessionPath, nil
 }
@@ -360,7 +364,10 @@ func (a *MainAgent) loadMainTranscript(tmpRecovery *recovery.RecoveryManager, se
 	mainLoadStarted := time.Now()
 	msgs, err := tmpRecovery.LoadMessages(identity.MainAgentID)
 	mainLoadDuration := time.Since(mainLoadStarted)
-	if err != nil || len(msgs) == 0 {
+	if err != nil {
+		return nil, mainLoadDuration, 0, fmt.Errorf("load session %s transcript: %w", filepath.Base(sessionPath), err)
+	}
+	if len(msgs) == 0 && !completePausedSessionWithoutMessages(tmpRecovery, sessionPath) {
 		return nil, mainLoadDuration, 0, fmt.Errorf("no messages found in session %s", filepath.Base(sessionPath))
 	}
 	normalizeStarted := time.Now()
@@ -420,6 +427,7 @@ func (a *MainAgent) applySessionSnapshot(loaded *loadedSessionState, sessionPath
 	if snapErr != nil {
 		return 0, 0
 	}
+	loaded.Pause = snap.Pause.Clone()
 	loaded.TodoItems = restoreSnapshotTodos(snap.Todos)
 	loaded.ActiveRole = strings.TrimSpace(snap.ActiveRole)
 	loaded.ModelPoolCurrentModelPool = strings.TrimSpace(snap.ModelPoolCurrentModelPool)
@@ -567,6 +575,18 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 	}
 
 	snapshotDuration, subAgentRestoreDuration = a.applySessionSnapshot(loaded, sessionPath, tmpRecovery, started)
+	if loaded.Pause != nil {
+		var err error
+		loaded.Pause.PendingInputs, err = tmpRecovery.RestorePendingInputs(loaded.Pause.PendingInputs)
+		if err != nil {
+			return nil, fmt.Errorf("restore paused input: %w", err)
+		}
+		histories := map[string][]message.Message{identity.MainAgentID: loaded.Messages}
+		for _, state := range loaded.SubAgentStates {
+			histories[state.TaskID] = state.Messages
+		}
+		loaded.Pause.PendingInputs = recovery.ReconcilePendingInputs(loaded.Pause.PendingInputs, histories)
+	}
 	if err := restoreNativeSessionReceipts(loaded, tmpRecovery); err != nil {
 		return nil, fmt.Errorf("restore native request receipts: %w", err)
 	}
@@ -617,6 +637,9 @@ func (a *MainAgent) loadSessionState(sessionPath string) (*loadedSessionState, e
 		todoFallbackDuration = time.Since(todoStarted)
 	}
 
+	if err := a.validatePausedSessionRestore(loaded); err != nil {
+		return nil, err
+	}
 	log.Debugf("session restore load timing session=%v messages=%v subagents=%v usage_events=%v load_main_ms=%v normalize_main_ms=%v build_summary_ms=%v usage_ledger_ms=%v snapshot_ms=%v restore_subagents_ms=%v todos_fallback_ms=%v total_ms=%v", filepath.Base(sessionPath), len(loaded.Messages), len(loaded.SubAgentStates), usageLedgerEventCount, mainLoadDuration.Milliseconds(), normalizeDuration.Milliseconds(), summaryDuration.Milliseconds(), usageLedgerDuration.Milliseconds(), snapshotDuration.Milliseconds(), subAgentRestoreDuration.Milliseconds(), todoFallbackDuration.Milliseconds(), time.Since(loadStarted).Milliseconds())
 
 	return loaded, nil
@@ -832,6 +855,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.stateMu.Lock()
 	a.sessionDir = loaded.SessionPath
 	a.stateMu.Unlock()
+	a.installPausedSession(loaded)
 	// The restored directory may have been compacted by another process since
 	// this snapshot was taken; see installSessionTarget.
 	if err := a.reseedCompactionIndexAllocator(loaded.SessionPath); err != nil {
@@ -842,6 +866,7 @@ func (a *MainAgent) activateLoadedSession(loaded *loadedSessionState) sessionRes
 	a.pruneCompactionIndexAllocators(loaded.SessionPath)
 	cleanupStalePendingCompactions(a.sessionDir, 5*time.Minute)
 	a.installRecoveryManager(recovery.NewRecoveryManager(loaded.SessionPath))
+	a.ensureLLMSessionID(a.llmClient)
 	if a.usageLedger != nil {
 		a.usageLedger.Close()
 	}

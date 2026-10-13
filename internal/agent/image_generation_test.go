@@ -175,7 +175,7 @@ func TestGeneratedSubAgentResultPreservesDeliveryPayload(t *testing.T) {
 	parent, sub := newMixedBatchTestSubAgent(t)
 	rm := recovery.NewRecoveryManager(parent.sessionDir)
 	parent.installRecoveryManager(rm)
-	t.Cleanup(rm.Close)
+	t.Cleanup(func() { _ = rm.Close() })
 	sub.turn.PendingToolCalls.Store(2)
 	summary := `{"operation_id":"sample-operation","state":"saved","images":[],"manifest":"artifact:images/operations/sample.json","billing_state":"unknown"}`
 	sub.handleToolResult(&toolResult{

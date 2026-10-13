@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/ratelimit"
 )
 
@@ -530,6 +531,13 @@ func (p *ProviderConfig) startCodexWarmup(ctx context.Context) (<-chan struct{},
 			p.polledRateLimitAttemptedAt[credIdx] = now
 			p.mu.Unlock()
 
+			lease, admissionErr := executiongate.Begin(ctx, executiongate.LLM)
+			if admissionErr != nil {
+				p.mu.Lock()
+				delete(p.polledRateLimitInFlight, credIdx)
+				p.mu.Unlock()
+				return
+			}
 			snaps, err := FetchCodexUsageSnapshot(ctx, p, key, accountID)
 			p.mu.Lock()
 			if p.polledRateLimitInFlight != nil {
@@ -537,6 +545,7 @@ func (p *ProviderConfig) startCodexWarmup(ctx context.Context) (<-chan struct{},
 			}
 			p.mu.Unlock()
 			if err != nil {
+				lease.Finish()
 				if p.handleCodexWarmupAuthFailure(key, err) {
 					log.Debugf("codex warmup auth failure ignored for key health provider=%v account_id=%v error=%v", providerName, accountID, err)
 				} else {
@@ -559,6 +568,7 @@ func (p *ProviderConfig) startCodexWarmup(ctx context.Context) (<-chan struct{},
 					break
 				}
 			}
+			lease.Finish()
 		}
 	}(p.name, candidates, ctx, lifecycleCtx)
 

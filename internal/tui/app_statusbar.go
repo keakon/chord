@@ -724,6 +724,9 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 	cacheActivity := false
 	rawActivity := agent.AgentActivityEvent{}
 	switch {
+	case m.takeoverStatusText() != "":
+		m.statusBarSyntheticConnectingLogKey = ""
+		activityText = DimStyle.Render(truncateOneLine(m.takeoverStatusText(), availableCenter))
 	case m.sessionSwitch.active():
 		m.statusBarSyntheticConnectingLogKey = ""
 		activityText = m.sessionSwitchStatusText(availableCenter)

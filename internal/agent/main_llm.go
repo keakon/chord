@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/keakon/golog"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
@@ -569,18 +571,23 @@ func (a *MainAgent) emitKeyStateChange(kind, email, accountID string) {
 // (direct calls in tests). The production path passes the sequence allocated by
 // spawnMainLLMResponseGoroutine.
 func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Message, requestSeq uint64) (*message.Response, error) {
+	if a.sessionExecutionPaused() {
+		return nil, &executiongate.ErrSessionPaused{}
+	}
+	preparationCtx, finishPreparation := a.newSessionPreparationContext(ctx)
+	defer finishPreparation()
 	if err := a.ensureMainModelPolicy(); err != nil {
 		return nil, err
 	}
 	// Build the session's stable tool/system surface after applying any pending
 	// model policy so edit/patch visibility is based on the model that will run.
-	if err := a.ensureSessionBuilt(ctx); err != nil {
-		return nil, err
+	if err := a.ensureSessionBuilt(preparationCtx); err != nil {
+		return nil, a.preparationError(err)
 	}
 	requestBatch := a.requestBatches.reserve(a.sessionEpoch, maxRequestBatch(messages))
-	requestStarted := false
+	var requestStarted atomic.Bool
 	defer func() {
-		if !requestStarted {
+		if !requestStarted.Load() {
 			a.requestBatches.rollback(a.sessionEpoch, requestBatch)
 		}
 	}()
@@ -708,7 +715,19 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	// events are emitted through the shared reducer.
 	streamState := &mainLLMStreamState{}
 	streamReducer := a.newMainLLMStreamReducer(llmClient, selectedRef, prevRunningRef, turn, scrubThinkingMarkers, streamState, requestSeq)
-	callback := streamReducer.Handle
+	var confirmDispatch sync.Once
+	confirmClaims := func() {
+		if requestStarted.Load() {
+			confirmDispatch.Do(func() {
+				a.markOverlayClaimsDelivered()
+				a.rememberPressureNoticeRequest(noticeRequestMessages, modelRef)
+			})
+		}
+	}
+	callback := func(delta message.StreamDelta) {
+		confirmClaims()
+		streamReducer.Handle(delta)
+	}
 
 	// Request-context telemetry helps diagnose oversized prompts without changing the request surface.
 	if log.IsEnabledFor(golog.DebugLevel) {
@@ -729,10 +748,13 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	}
 
 	// Hook: on_before_llm_call (before LLM call).
-	hookResult, hookErr := a.fireHook(ctx, hook.OnBeforeLLMCall, turnID, map[string]any{
+	hookResult, hookErr := a.fireHook(preparationCtx, hook.OnBeforeLLMCall, turnID, map[string]any{
 		"model":         modelName,
 		"message_count": len(messages),
 	})
+	if a.sessionExecutionPaused() {
+		return nil, &executiongate.ErrSessionPaused{}
+	}
 	if hookErr != nil {
 		log.Warnf("on_before_llm_call hook error error=%v", hookErr)
 	} else if hookResult != nil {
@@ -748,22 +770,14 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 		}
 	}
 
-	releaseLLM, err := a.governor.acquireLLM(ctx, selectedRef)
+	releaseLLM, err := a.governor.acquireLLM(preparationCtx, selectedRef)
 	if err != nil {
-		return nil, fmt.Errorf("acquire LLM request capacity: %w", err)
+		return nil, a.preparationError(fmt.Errorf("acquire LLM request capacity: %w", err))
 	}
 	defer releaseLLM()
-	requestStarted = true
-	// Dispatch confirmation for the context-pressure overlay claims: the
-	// request has passed the hook and governor gates and is about to reach the
-	// provider, so any reminder/imminent/warning attached by
-	// buildTurnOverlayMessages counts as delivered. Requests that never reach
-	// this point (hook-blocked, governor-rejected, cancelled before dispatch)
-	// leave the claims undelivered so the next request may re-attach (the
-	// undelivered reminder and upper-threshold notice may be re-queued; the
-	// per-generation warning needs the claim to stay spendable for the retry).
-	a.markOverlayClaimsDelivered()
-	a.rememberPressureNoticeRequest(noticeRequestMessages, modelRef)
+	// Transport evidence confirms dispatch. A rejected request keeps its
+	// pressure claims available; governor admission alone sends no request.
+	requestCtx := llm.WithRequestStarted(ctx, func() { requestStarted.Store(true) })
 	// Model/cooldown wall-clock segmentation for the TIME section: the segment
 	// spans acquireLLM success through CompleteStream return (success or
 	// error), so hook-blocked / governor-rejected / zero-delta requests still
@@ -785,7 +799,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 			return updatedMessages, err
 		},
 	}
-	resp, err := llmClient.CompleteStreamWithOptions(llm.WithResponsesTurnState(ctx, a.currentTurnResponsesState()), messages, toolDefs, callback, requestOptions)
+	resp, err := llmClient.CompleteStreamWithOptions(llm.WithResponsesTurnState(requestCtx, a.currentTurnResponsesState()), messages, toolDefs, callback, requestOptions)
 	if err == nil {
 		if observation, ok := ctx.Value(questionRequestContextKey{}).(*questionRequestObservation); ok {
 			for _, id := range questionResultsInMessages(messages) {
@@ -795,6 +809,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 			}
 		}
 	}
+	confirmClaims()
 	completeStreamReturnedAt := time.Now()
 	a.recordToolTraceCallLLMReturned(turn, completeStreamReturnedAt)
 	if err == nil && turn != nil {
@@ -818,6 +833,9 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, messages []message.Me
 	streamReducer.Finish()
 	a.emitToTUI(RequestProgressEvent{AgentID: identity.MainAgentID, Bytes: streamState.requestProgressBytes, Events: streamState.requestProgressEvents, Done: true})
 	if err != nil {
+		if executiongate.IsPaused(err) {
+			return resp, err
+		}
 		if llm.IsNativeToolError(err) {
 			return nil, err
 		}

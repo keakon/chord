@@ -30,13 +30,112 @@ type persistEntry struct {
 // The handler supplies per-entry writes and barriers; MainAgent owns shutdown
 // gating and tool-trace timing.
 type persistencePump struct {
-	ch        chan persistEntry
-	done      chan struct{}
-	admission chan struct{}
-	stopping  chan struct{}
-	stopOnce  sync.Once
-	closed    chan struct{}
-	loopOnce  sync.Once
+	ch            chan persistEntry
+	done          chan struct{}
+	admission     chan struct{}
+	stopping      chan struct{}
+	stopOnce      sync.Once
+	closed        chan struct{}
+	loopOnce      sync.Once
+	failureMu     sync.Mutex
+	failures      []persistFailure
+	pauseCloseErr error
+}
+
+type persistFailure struct {
+	entry persistEntry
+	err   error
+}
+
+func (p *persistencePump) rememberFailure(entry persistEntry, err error) {
+	if p == nil || err == nil {
+		return
+	}
+	p.failureMu.Lock()
+	p.failures = append(p.failures, persistFailure{entry, err})
+	p.failureMu.Unlock()
+}
+
+func (p *persistencePump) strictError(manager *recovery.RecoveryManager) error {
+	if p == nil {
+		return errPersistenceQueueUnavailable
+	}
+	p.failureMu.Lock()
+	defer p.failureMu.Unlock()
+	var errs []error
+	for _, failure := range p.failures {
+		if failure.entry.recovery == nil || failure.entry.recovery == manager {
+			errs = append(errs, failure.err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (p *persistencePump) managerFailed(manager *recovery.RecoveryManager) bool {
+	p.failureMu.Lock()
+	defer p.failureMu.Unlock()
+	for _, failure := range p.failures {
+		if failure.entry.recovery == manager {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *persistencePump) clearCheckpointFailures(manager *recovery.RecoveryManager, agentID string) {
+	if p == nil {
+		return
+	}
+	p.failureMu.Lock()
+	defer p.failureMu.Unlock()
+	retained := p.failures[:0]
+	for _, failure := range p.failures {
+		if failure.entry.recovery != manager || failure.entry.agentID != agentID {
+			retained = append(retained, failure)
+		}
+	}
+	p.failures = retained
+}
+
+func (p *persistencePump) retryFailures(manager *recovery.RecoveryManager) error {
+	p.failureMu.Lock()
+	for _, failure := range p.failures {
+		if failure.entry.recovery == manager {
+			writeErr, ok := errors.AsType[*recovery.PersistWriteError](failure.err)
+			if !ok || !writeErr.RetrySafe {
+				p.failureMu.Unlock()
+				return p.strictError(manager)
+			}
+		}
+	}
+	failures := p.failures
+	p.failures = nil
+	p.failureMu.Unlock()
+	blocked := false
+	for _, failure := range failures {
+		if blocked && failure.entry.recovery == manager {
+			p.rememberFailure(failure.entry, failure.err)
+			continue
+		}
+		if failure.entry.recovery != manager || manager == nil {
+			p.rememberFailure(failure.entry, failure.err)
+			continue
+		}
+		writeErr, ok := errors.AsType[*recovery.PersistWriteError](failure.err)
+		if !ok || !writeErr.RetrySafe {
+			p.rememberFailure(failure.entry, failure.err)
+			continue
+		}
+		write := manager.PersistMessage
+		if failure.entry.durable {
+			write = manager.PersistMessageDurable
+		}
+		if err := write(failure.entry.agentID, failure.entry.msg); err != nil {
+			p.rememberFailure(failure.entry, err)
+			blocked = true
+		}
+	}
+	return p.strictError(manager)
 }
 
 func newPersistencePump(buffer int) *persistencePump {
@@ -167,7 +266,9 @@ func (a *MainAgent) startPersistLoop() {
 		if entry.durable && entry.recovery == nil {
 			persistErr = fmt.Errorf("durable message has no recovery manager")
 		}
-		if entry.recovery != nil {
+		if entry.recovery != nil && a.persist.managerFailed(entry.recovery) {
+			persistErr = &recovery.PersistWriteError{RetrySafe: true, Cause: fmt.Errorf("message append blocked by earlier persistence failure")}
+		} else if entry.recovery != nil {
 			write := entry.recovery.PersistMessage
 			if entry.durable {
 				write = entry.recovery.PersistMessageDurable
@@ -177,6 +278,11 @@ func (a *MainAgent) startPersistLoop() {
 				persistErr = err
 			}
 		}
+		strictErr := persistErr
+		if entry.recovery == nil && strictErr == nil {
+			strictErr = fmt.Errorf("message has no recovery manager")
+		}
+		a.persist.rememberFailure(entry, strictErr)
 		if entry.after != nil {
 			entry.after(persistErr)
 		}
@@ -228,10 +334,13 @@ func requiresDurableMessage(msg message.Message) bool {
 // messages fail closed in the writer when there is no recovery manager.
 func (a *MainAgent) persistAsyncThrough(manager *recovery.RecoveryManager, agentID string, msg message.Message, after func(error)) bool {
 	if a.shuttingDown.Load() {
+		a.persist.rememberFailure(persistEntry{recovery: manager}, errPersistenceQueueUnavailable)
 		return false
 	}
 	start := time.Now()
-	if !a.persist.enqueue(persistEntry{agentID: agentID, msg: msg, recovery: manager, after: after, durable: requiresDurableMessage(msg)}, a.stoppingCh) {
+	entry := persistEntry{agentID: agentID, msg: msg, recovery: manager, after: after, durable: requiresDurableMessage(msg)}
+	if !a.persist.enqueue(entry, a.stoppingCh) {
+		a.persist.rememberFailure(entry, errPersistenceQueueUnavailable)
 		return false
 	}
 	blocked := time.Since(start)
@@ -412,6 +521,7 @@ func (a *MainAgent) tryRecoverPersistenceBeforeTurn() {
 		a.notePersistenceFailure(err)
 		return
 	}
+	a.persist.clearCheckpointFailures(manager, identity.MainAgentID)
 	a.persistenceHealth.markRecovered()
 	log.Infof("main persistence recovered after transcript checkpoint")
 	a.emitPersistenceRecovered()
@@ -441,5 +551,88 @@ func (p *persistencePump) tryEnqueue(entry persistEntry) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// flushSessionPausePersistence proves that every admitted transcript and usage
+// write completed. An ordinary ordering barrier does not repair failed writes.
+func (a *MainAgent) flushSessionPausePersistence() error {
+	manager := a.recoveryManager()
+	if manager == nil {
+		return fmt.Errorf("session pause has no recovery manager")
+	}
+	if err := a.persist.sessionPauseBarrier(); err != nil {
+		return err
+	}
+	errs := []error{a.persist.strictError(manager)}
+	if a.usageLedger != nil {
+		a.usageLedger.Seal()
+		errs = append(errs, a.usageLedger.Sync())
+	}
+	return errors.Join(errs...)
+}
+
+// retrySessionPausePersistence rewrites only records proven not to have been
+// appended. It never reruns a tool or a request, or repeats result callbacks.
+func (a *MainAgent) retrySessionPausePersistence() error {
+	if err := a.persist.sessionPauseCloseError(); err != nil {
+		return err
+	}
+	manager := a.recoveryManager()
+	if manager == nil {
+		return fmt.Errorf("session pause has no recovery manager")
+	}
+	if err := a.persist.sessionPauseBarrier(); err != nil {
+		return err
+	}
+	errs := []error{a.persist.retryFailures(manager), a.retrySessionPauseProducerWrites()}
+	if a.usageLedger != nil {
+		errs = append(errs, a.usageLedger.RetryWrites())
+	}
+	return errors.Join(errs...)
+}
+
+// SessionPauseWriterClosedError preserves a failed close outcome. Reopening
+// writers cannot prove whether the old writers synchronized every record.
+type SessionPauseWriterClosedError struct{ Cause error }
+
+func (e *SessionPauseWriterClosedError) Error() string {
+	return "session writer closed with an unknown persistence outcome; retry-save cannot safely repair it: " + e.Cause.Error()
+}
+func (e *SessionPauseWriterClosedError) Unwrap() error { return e.Cause }
+
+func (p *persistencePump) sessionPauseCloseError() error {
+	if p == nil {
+		return errPersistenceQueueUnavailable
+	}
+	p.failureMu.Lock()
+	defer p.failureMu.Unlock()
+	return p.pauseCloseErr
+}
+
+func (p *persistencePump) rememberSessionPauseCloseFailure(cause error) error {
+	if cause == nil {
+		return nil
+	}
+	p.failureMu.Lock()
+	defer p.failureMu.Unlock()
+	p.pauseCloseErr = &SessionPauseWriterClosedError{Cause: cause}
+	return p.pauseCloseErr
+}
+
+// A completed drain is an ordering barrier even after queue admission closed.
+// This allows safe record repair without restarting producers or the pump.
+func (p *persistencePump) sessionPauseBarrier() error {
+	if err := p.sessionPauseCloseError(); err != nil {
+		return err
+	}
+	if p.flush() {
+		return nil
+	}
+	select {
+	case <-p.done:
+		return nil
+	default:
+		return errPersistenceQueueUnavailable
 	}
 }

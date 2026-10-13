@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
 )
@@ -4713,7 +4714,23 @@ func TestNewClientCodexWarmupProbesMultipleAccounts(t *testing.T) {
 		return nil, nil
 	})
 
-	_ = NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
+	warmupClient := NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
+	if warmupClient.codexWarmupStarted {
+		t.Fatal("constructor started unbound warmup")
+	}
+	var warmupGate executiongate.Gate
+	warmupGate.Freeze()
+	warmupClient.SetExecutionGate(&warmupGate, "test")
+	warmupClient.startCodexWarmup()
+	if warmupClient.codexWarmupStarted {
+		t.Fatal("paused binding started warmup")
+	}
+	if err := warmupGate.Resume(); err != nil {
+		t.Fatal(err)
+	}
+	warmupClient.SetExecutionGate(&warmupGate, "test")
+	warmupClient.startCodexWarmup()
+	defer warmupClient.Close()
 
 	got := map[string]bool{}
 	deadline := time.After(2 * time.Second)
@@ -4774,6 +4791,8 @@ func TestNewClientCodexWarmupCancelsOnInvalidateRouting(t *testing.T) {
 	})
 
 	c := NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
+	c.SetExecutionGate(&executiongate.Gate{}, "test")
+	c.startCodexWarmup()
 	defer c.Close()
 
 	select {
@@ -4824,6 +4843,8 @@ func TestClientCloseCancelsWarmupAndRejectsNewRequests(t *testing.T) {
 	}, "")
 	prov.StartCodexRateLimitPolling(func(string, string) ([]*ratelimit.KeyRateLimitSnapshot, error) { return nil, nil })
 	c := NewClient(prov, noopProvider{}, "gpt-5.5", 1024, "")
+	c.SetExecutionGate(&executiongate.Gate{}, "test")
+	c.startCodexWarmup()
 
 	select {
 	case <-started:

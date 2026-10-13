@@ -264,6 +264,11 @@ func (a *MainAgent) sendMessageToSubAgentNow(callerAgentID, callerTaskID, taskID
 }
 
 func (a *MainAgent) sendMessageToSubAgentWithTrigger(callerAgentID, callerTaskID, taskID, messageText, kind string, trigger taskResumeTrigger) (tools.TaskHandle, error) {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		return tools.TaskHandle{}, err
+	}
+	defer finish()
 	taskID = strings.TrimSpace(taskID)
 	messageText = strings.TrimSpace(messageText)
 	kind = strings.TrimSpace(kind)
@@ -639,6 +644,11 @@ func (a *MainAgent) beginNextTaskAttemptForLiveSub(sub *SubAgent) error {
 }
 
 func (a *MainAgent) getOrRehydrateTask(record *DurableTaskRecord) (*SubAgent, string, bool, error) {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer finish()
 	if record == nil {
 		return nil, "", false, fmt.Errorf("missing task record")
 	}
@@ -674,6 +684,16 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	defer func() {
 		a.subs.completeTaskActivation(taskID, activation, sub, previousAgentID, err)
 	}()
+	a.recoverySnapshotMu.Lock()
+	strictWorkDir := a.pause.checkpoint != nil
+	a.recoverySnapshotMu.Unlock()
+	var savedWorkDir WorkDirState
+	if strictWorkDir {
+		savedWorkDir, err = a.restorePausedTaskWorkDir(a.parentCtx, a.sessionDir, record)
+		if err != nil {
+			return nil, "", false, err
+		}
+	}
 	// The revived worker runs under the record's normalized declared scope.
 	// Delegate admits a task with an empty expected_write_scope only when its
 	// role's permission rules register no file-modifying tools; under that
@@ -744,10 +764,12 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	// in. A chord-managed worktree comes back with its identity so the worker's
 	// environment block and completion report still name it; a plain directory
 	// inside this repository (the main checkout, or a subdirectory of it) comes
-	// back as a directory. Anything else — a removed checkout or a path outside
-	// the repository — falls back to the inherited directory rather than
-	// resolving the restored transcript against a stale or foreign path.
-	if meta, metaErr := loadSubAgentMeta(a.sessionDir, record.LatestInstanceID); metaErr != nil {
+	// back as a directory. Paused sessions require the durable binding checked
+	// above; ordinary history retains best-effort directory recovery.
+	if strictWorkDir {
+		subCfg.WorkDir = savedWorkDir.Path
+		subCfg.WorkDirState = savedWorkDir
+	} else if meta, metaErr := loadSubAgentMeta(a.sessionDir, record.LatestInstanceID); metaErr != nil {
 		log.Warnf("load subagent meta for workdir failed instance=%v error=%v", record.LatestInstanceID, metaErr)
 	} else if meta != nil {
 		if info := a.resolveRestoredWorktree(ctx, meta.WorkDir); info != nil {
@@ -770,6 +792,15 @@ func (a *MainAgent) rehydrateTaskAsActivationLeader(record *DurableTaskRecord, a
 	subCfg.AgentsMD = a.subAgentAgentsMD(subCfg.WorkDir)
 	sub = NewSubAgent(subCfg)
 	sub.RestoreMessages(msgs)
+	var restoredInputs []pendingUserMessage
+	for _, input := range a.PendingSessionInputs() {
+		if input.OwnerTaskID == record.TaskID {
+			restoredInputs = append(restoredInputs, restorePauseInput(input))
+		}
+	}
+	if len(restoredInputs) > 0 {
+		sub.RestorePauseInputs(restoredInputs)
+	}
 	state := SubAgentState(strings.TrimSpace(record.State))
 	if state == "" || state == SubAgentStateRunning || isTerminalSubAgentState(state) {
 		// A terminal record only reaches rehydration through a resume trigger
@@ -1113,11 +1144,15 @@ func (a *MainAgent) handleSubAgentSendMessageEvent(evt Event) {
 		return
 	}
 	if payload.Ctx != nil && payload.Ctx.Err() != nil {
-		respondSubAgentControl(payload.Reply, tools.TaskHandle{}, payload.Ctx.Err())
+		a.respondPausedFollowup(payload, tools.TaskHandle{}, payload.Ctx.Err())
+		return
+	}
+	if a.pause.restored && a.sessionExecutionPaused() {
+		a.queuePausedFollowup(payload)
 		return
 	}
 	handle, err := a.sendMessageToSubAgentNow(payload.CallerAgentID, payload.CallerTaskID, payload.TaskID, payload.Message, payload.Kind)
-	respondSubAgentControl(payload.Reply, handle, err)
+	a.respondPausedFollowup(payload, handle, err)
 }
 
 func (a *MainAgent) handleSubAgentStopEvent(evt Event) {

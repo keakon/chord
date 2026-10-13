@@ -34,7 +34,8 @@ trap cleanup EXIT
 
 rm -f "${coverage_file}"
 
-test_args=(-timeout=2m -coverprofile="${coverage_file}")
+# Match the race gate: full lifecycle and recovery suites can exceed two minutes.
+test_args=(-timeout=10m -coverprofile="${coverage_file}")
 if [[ -n "${test_count}" ]]; then
   test_args=(-count="${test_count}" "${test_args[@]}")
 fi

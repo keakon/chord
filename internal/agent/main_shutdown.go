@@ -18,6 +18,9 @@ const sessionEndHookGrace = 300 * time.Millisecond
 // (up to the given timeout). The caller should cancel the context passed to
 // Run as well.
 func (a *MainAgent) Shutdown(timeout time.Duration) error {
+	if a.pause.sealed.Load() {
+		return nil
+	}
 	// Close startup admission before any cleanup. An already-admitted Run is
 	// waited on below, even when it has not initialized its Question state yet.
 	a.closeRunAdmission()

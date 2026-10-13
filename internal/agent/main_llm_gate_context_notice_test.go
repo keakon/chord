@@ -58,12 +58,17 @@ func TestGateKeepsStickyReminderWhenTheWarningClaimIsSpent(t *testing.T) {
 	a.armUsageDrivenAutoCompactRequest()
 	a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, "")
 	waitForBlockingStreamProviderCalls(t, provider, 1)
+	// Dispatch is observed independently of response handling. Wait until the
+	// request goroutine has published its durable warning before the next
+	// request snapshots the transcript, as the owner loop does in production.
+	a.outputWg.Wait()
 
 	// Second request behind the same armed generation: the spent claim must
 	// not re-attach the warning, the retained warning row keeps replaying,
 	// and the ladder keeps the undelivered reminder quiet.
 	a.beginMainLLMAfterPreparation(a.turn.Ctx, a.turn.ID, "")
 	waitForBlockingStreamProviderCalls(t, provider, 2)
+	a.outputWg.Wait()
 
 	requests, _ := provider.snapshot()
 	if len(requests) < 2 {

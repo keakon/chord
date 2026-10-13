@@ -78,6 +78,14 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		log.Warnf("handleHandoffResolveEvent: no matching pending handoff request_id=%v action=%v", p.RequestID, p.Action)
 		return
 	}
+	if p.Action == handoffResolveApprove {
+		finish, err := a.beginSessionStructural(a.parentCtx, false)
+		if err != nil {
+			a.emitToTUI(ErrorEvent{Err: err})
+			return
+		}
+		defer finish()
+	}
 	pc := a.takePendingHandoff()
 	a.interaction.settleHandoff(pc.RequestID)
 

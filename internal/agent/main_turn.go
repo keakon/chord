@@ -40,6 +40,9 @@ func (a *MainAgent) mergePendingInputsForTurnContinuation() {
 }
 
 func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Message, tailOverlayCount int) []message.Message {
+	if a.sessionExecutionPaused() {
+		return messages
+	}
 	messages = a.flushPendingNativeContextAppends(messages, tailOverlayCount)
 	if len(a.pendingUserMessages) == 0 || nativeMessagesTurnPending(a.ctxMgr) {
 		return messages
@@ -58,6 +61,11 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 	var consumed []consumedPendingDraft
 	manualInputConsumed := false
 	for _, p := range pending {
+		if p.Stage == "transcript_staged" {
+			a.stageSessionInput(p)
+			a.emitPendingDraftConsumed(p.DraftID, message.Message{Role: message.RoleUser, InputID: p.InputID, Content: p.Content, Parts: p.Parts, Kind: p.Kind})
+			continue
+		}
 		content := pendingUserMessageText(p)
 		c := strings.TrimSpace(content)
 		if IsIdleOnlySlashCommand(c) {
@@ -69,6 +77,7 @@ func (a *MainAgent) consumePendingUserMessagesForRequest(messages []message.Mess
 			continue
 		}
 		consumed = append(consumed, consumedPendingDraft{draftID: p.DraftID, msg: m})
+		a.stageSessionInput(p)
 		manualInputConsumed = manualInputConsumed || p.FromUser
 	}
 	// Re-queue /resume* and anything that arrived concurrently (should be rare).
@@ -325,7 +334,7 @@ func (a *MainAgent) pendingUserMessageToConversationMessage(p pendingUserMessage
 	}
 	outC, outP := a.expandSlashCommandForModel(content, p.Parts)
 	outC, outP = a.filterUnsupportedParts(outC, outP)
-	return message.Message{Role: message.RoleUser, Content: outC, Parts: outP, Kind: p.Kind}, true
+	return message.Message{Role: message.RoleUser, InputID: p.InputID, Content: outC, Parts: outP, Kind: p.Kind}, true
 }
 
 func messagePartsForTUI(msg message.Message) []message.ContentPart {
@@ -395,6 +404,9 @@ func (a *MainAgent) suspendPendingUserDrain() {
 // apply again. Called by explicit user actions (new input, Handoff decision,
 // continue) and once the parked queue was injected into a dispatching request.
 func (a *MainAgent) resumePendingUserDrain() {
+	if a.sessionExecutionPaused() {
+		return
+	}
 	a.pendingUserDrainSuspended = false
 }
 
@@ -442,6 +454,9 @@ func upsertPendingDraft(queue []pendingUserMessage, pending pendingUserMessage) 
 	if pending.DraftID != "" {
 		for i := range queue {
 			if queue[i].DraftID == pending.DraftID {
+				pending.InputID = queue[i].InputID
+				pending.AcceptedOrder = queue[i].AcceptedOrder
+				pending.Revision = queue[i].Revision + 1
 				queue[i] = pending
 				return queue
 			}
@@ -568,6 +583,7 @@ func (a *MainAgent) newTurn() {
 	}
 	a.newTurnOversizeRecoveryCount = 0
 	a.turn.streamingToolExec = NewStreamingToolExecutor(a.turn.ID, ctx, a.emitToTUI, a.executeToolCallSpeculative)
+	a.turn.streamingToolExec.SetExecutionGate(a.sessionExecutionGate())
 	a.turn.streamingToolExec.SetEntryBinder(a.bindSpeculativeEntry)
 	a.turn.streamingToolExec.SetWorkDir(a.effectiveToolBaseDir())
 	a.turn.streamingToolExec.SetTraceCallbacks(a.recordToolTraceSpeculativeStart, a.recordToolTraceFirstVisibleResult, a.recordToolTraceSpeculativeDiscard)
@@ -808,6 +824,9 @@ func latestAssistantReplySummary(msgs []message.Message) string {
 // runs slash-command handlers for any that are commands, and sends the rest
 // to the model in one batch (newTurn + append all + single LLM call).
 func (a *MainAgent) drainPendingUserMessages() {
+	if a.sessionExecutionPaused() {
+		return
+	}
 	// A parked queue waits for the next real request / explicit user action, so
 	// the idle drain must not auto-start a turn from it.
 	if a.pendingUserDrainSuspended {
@@ -828,6 +847,10 @@ func (a *MainAgent) drainPendingUserMessages() {
 	var covered []pendingUserMessage
 	manualInputConsumed := false
 	for _, p := range pending {
+		if p.Stage == "transcript_staged" {
+			a.stageSessionInput(p)
+			continue
+		}
 		content := pendingUserMessageText(p)
 		if a.handleLocalOnlySlashCommands(content, p.Parts, false) {
 			continue
@@ -847,6 +870,7 @@ func (a *MainAgent) drainPendingUserMessages() {
 			continue
 		}
 		batch = append(batch, m)
+		a.stageSessionInput(p)
 		consumed = append(consumed, consumedPendingDraft{draftID: p.DraftID, msg: m})
 		manualInputConsumed = manualInputConsumed || p.FromUser
 	}

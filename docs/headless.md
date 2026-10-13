@@ -57,6 +57,37 @@ After configuring a model, start `chord headless` in a terminal:
 
 In an integration, keep the process's stdin open, read stdout line by line, and collect stderr separately. You can defer event filtering: before `subscribe` is sent, all subscribable events are forwarded.
 
+## Gateway-managed session transfers
+
+On macOS and Linux, a gateway that owns the session lifecycle starts a managed process with:
+
+```bash
+chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <workspace>
+```
+
+For an incoming transfer, also pass `--resume <session-id> --gateway-transfer-id <transfer-id>`. Chord claims the session lock, validates the complete paused checkpoint and target binding, and restores to `ready_paused`. Ordinary headless and ACP processes do not expose takeover endpoints.
+
+Managed `ready` and `status_response` payloads include `runtime_id`, `session_epoch`, and the canonical `workspace`. `session_switched` also supplies these identities for the active session. The workspace identifies the repository independently of the process's execution directory, including linked worktrees. A paused target's `ready` also includes `state: "ready_paused"`, `transfer_id`, and `binding_instance_id`. Verify the transfer, session, workspace, and binding identities before opening the target route.
+
+The `paused_inputs` field in `ready` and `status_response` contains `paused`, `pending_input_count`, and `inputs`. Each input has `input_id`, `owner_task_id`, a single-line `preview`, and `attachment_count`. At most 8 inputs are returned, with previews limited to 160 Unicode characters. Attachment paths and contents are excluded. A `null` projection means no valid summary is available; do not treat it as an empty queue. A paused target executes only after an explicit continuation or new request.
+
+Source transfer events bypass `subscribe` filtering:
+
+| Event | Integration action |
+| --- | --- |
+| `session_transfer_preparing` | Persistently block new input and automatic restarts for the binding, settle receipts for earlier `send` commands, then send the technical ACK |
+| `session_transfer_status` | Display the state and blockers while draining, saving, or reporting a save failure |
+| `session_transfer_saved` | Saving completed; continue waiting for lock release |
+| `session_transfer_released` | The source released its session lock and will exit with code `20`; do not restart it as a crashed process |
+
+Correlate these events by transfer identity rather than the ordinary snapshot `seq`. Send the technical ACK in stdin order, copying the identity fields from `session_transfer_preparing.payload`:
+
+```json
+{"type":"session_transfer_prepared","transfer_id":"transfer-1","session_id":"session-1","source_runtime_id":"runtime-1","source_session_epoch":1,"binding_instance_id":"binding-1","accepted":true}
+```
+
+To reject preparation, use `accepted: false` with `error_code` and `message`. The technical ACK has a 5-second budget. Query the original transfer ID to confirm `prepare_failed` under the same source and binding identities before reopening the route. A `preflight` rejection confirms that start was not admitted. If a receipt is lost or the result is unknown, keep the binding blocked. Observation timeouts do not stop source work or release its lock. Coordinate transfers through `chord takeover preflight/start/status/retry-save --json`; see [Usage](./usage.md) for user commands and recovery actions.
+
 ## Commands
 
 You send these on stdin. Unknown command types are answered with an `error` envelope.

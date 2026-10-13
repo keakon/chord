@@ -365,7 +365,6 @@ func (a *AnthropicProvider) CompleteStream(
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("anthropic request aborted: %w", err)
 	}
-	markRequestSent(ctx)
 	httpResp, err := doRequestUntilHeaders(nativeToolHTTPClient(a.client, tuning.nativeTool != nil), req, providerResponseHeaderTimeout(a.provider))
 	if err != nil {
 		callErr := fmt.Errorf("send request: %w", err)

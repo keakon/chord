@@ -129,8 +129,11 @@ type headlessState struct {
 	// without restarting the process. A change is announced with an explicit
 	// session_switched push; the cached value alone never counts as the
 	// gateway having seen the new session.
-	sessionID string
-	workDir   agent.WorkDirSnapshot
+	sessionID    string
+	workspace    string
+	runtimeID    string
+	sessionEpoch uint64
+	workDir      agent.WorkDirSnapshot
 	// seq is a monotonic version counter for emitted state. Genesis is 1, so a
 	// status_response copied before any push still has a nonzero seq on the
 	// wire (uint64 0 would be omitted by json omitempty and look unversioned).
@@ -228,6 +231,10 @@ func (w *stdoutWriter) run() {
 	defer close(w.done)
 	defer close(w.errCh)
 	for msg := range w.ch {
+		if barrier, ok := msg.(stdoutBarrier); ok {
+			close(barrier.done)
+			continue
+		}
 		line, err := json.Marshal(msg)
 		if err == nil && len(line)+1 > headlessMaxEnvelopeBytes {
 			err = fmt.Errorf("encoded envelope exceeds %d bytes", headlessMaxEnvelopeBytes)
@@ -799,8 +806,8 @@ func filterHeadlessEvent(ev agent.AgentEvent, state *headlessState, backends ...
 		state.sessionID = sessionID
 		state.questions = nil
 		if state.isSubscribed("session_switched") {
-			out = append(out, &headlessEnvelope{Type: "session_switched", Payload: map[string]string{
-				"session_id": sessionID,
+			out = append(out, &headlessEnvelope{Type: "session_switched", Payload: map[string]any{
+				"session_id": sessionID, "runtime_id": state.runtimeID, "session_epoch": state.sessionEpoch, "workspace": state.workspace,
 			}})
 		}
 	case agent.WorkDirChangedEvent:
@@ -922,6 +929,15 @@ Main role control commands:
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if (flagGatewayInstance != "" || flagGatewayTransferID != "") && !flagGatewayManaged || flagGatewayManaged && flagGatewayInstance == "" {
+				return fmt.Errorf("invalid_request: gateway-managed requires --gateway-instance")
+			}
+			if flagGatewayTransferID != "" && (flagHeadlessContinue || cmd.Flags().Changed("worktree")) {
+				return fmt.Errorf("invalid_request: incoming transfer cannot use --continue or --worktree")
+			}
+			if flagGatewayTransferID != "" && flagHeadlessResume == "" {
+				return fmt.Errorf("invalid_request: gateway-transfer-id requires --resume")
+			}
 			if flagHeadlessDir != "" {
 				if err := os.Chdir(flagHeadlessDir); err != nil {
 					return fmt.Errorf("change to session-dir %q: %w", flagHeadlessDir, err)
@@ -949,15 +965,37 @@ Main role control commands:
 			if flagContinueSession && flagResumeSession != "" {
 				return fmt.Errorf("--continue and --resume are mutually exclusive")
 			}
+			if flagGatewayTransferID != "" {
+				startup, identity, workDir, err := claimIncomingGatewayStartup(cmd.Context(), flagResumeSession, flagGatewayTransferID, flagGatewayInstance)
+				if err != nil {
+					return err
+				}
+				defer startup.SessionLock.Release()
+				flagStartupPlan = &startup
+				flagTakeoverExpectedIdentity = identity
+				if err := os.Chdir(workDir); err != nil {
+					return fmt.Errorf("restore_failed: enter saved working directory: %w", err)
+				}
+			}
 			// A resumed session remembers the checkout it was working in.
 			// Enter it before initApp so tools, the LSP root and git status
 			// are anchored there; an explicit --worktree stays authoritative.
-			if flagWorktreeStartupInfo == nil && flagResumeSession != "" {
+			if flagGatewayTransferID == "" && flagWorktreeStartupInfo == nil && flagResumeSession != "" {
 				wtCtx := cmd.Context()
 				if wtCtx == nil {
 					wtCtx = context.Background()
 				}
-				if info := resumeSessionWorktree(wtCtx, flagResumeSession); info != nil {
+				startup, workDir, paused, err := claimPausedResumeStartup(wtCtx, flagResumeSession)
+				if err != nil {
+					return err
+				}
+				if paused {
+					defer startup.SessionLock.Release()
+					flagStartupPlan = &startup
+					if err := os.Chdir(workDir); err != nil {
+						return fmt.Errorf("restore_failed: enter saved working directory: %w", err)
+					}
+				} else if info := resumeSessionWorktree(wtCtx, flagResumeSession); info != nil {
 					if err := os.Chdir(info.Path); err != nil {
 						return fmt.Errorf("chdir to worktree %q: %w", info.Name, err)
 					}
@@ -1015,6 +1053,9 @@ Main role control commands:
 		},
 	}
 
+	cmd.Flags().BoolVar(&flagGatewayManaged, "gateway-managed", false, "Enable session takeover for a gateway-owned runtime")
+	cmd.Flags().StringVar(&flagGatewayInstance, "gateway-instance", "", "Gateway binding instance")
+	cmd.Flags().StringVar(&flagGatewayTransferID, "gateway-transfer-id", "", "Expected incoming transfer identity")
 	cmd.Flags().StringVarP(&flagHeadlessDir, "session-dir", "d", "", "Project directory (session directory)")
 	cmd.Flags().BoolVarP(&flagHeadlessContinue, "continue", "c", false, "Continue the latest session")
 	cmd.Flags().StringVarP(&flagHeadlessResume, "resume", "r", "", "Resume a specific session ID")
@@ -1112,13 +1153,23 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 	}
 
 	ac, err := deps.initApp(false, "headless", sessionStartupOptions{
-		ContinueLatest: flagContinueSession,
-		ResumeID:       flagResumeSession,
-		NewSessionMeta: flagWorktreeStartupMeta,
-		Plan:           flagStartupPlan,
+		ContinueLatest:   flagContinueSession,
+		ResumeID:         flagResumeSession,
+		ExpectedTransfer: flagTakeoverExpectedIdentity,
+		NewSessionMeta:   flagWorktreeStartupMeta,
+		Plan:             flagStartupPlan,
 	})
 	if err != nil {
 		return err
+	}
+	if flagGatewayTransferID != "" {
+		paused, ok := pausedStartupStatus(ac)
+		manager := recovery.NewRecoveryManager(ac.SessionDir)
+		snapshot, readErr := manager.Recover()
+		if !ok || readErr != nil || snapshot.Pause == nil || !snapshot.Pause.CheckpointComplete || paused.TransferID != flagGatewayTransferID || paused.TargetKind != "gateway" || paused.TargetInstanceID != flagGatewayInstance {
+			ac.Close()
+			return fmt.Errorf("restore_failed: incoming paused transfer identity mismatch")
+		}
 	}
 	if deps.watchParent {
 		startHeadlessParentWatcher(ac, deps.getppid(), deps.parentCheckInterval, deps.getppid)
@@ -1143,13 +1194,48 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 	stopOutputCancellation := context.AfterFunc(out.ctx, ac.Cancel)
 	defer stopOutputCancellation()
 
+	var endpoint *runtimeTakeover
+	var transferAdapter *headlessTransferAdapter
+	transferReady := make(chan struct{})
+	transferDone := make(chan error, 1)
+	if flagGatewayManaged && ac.MainAgent != nil {
+		transferAdapter = &headlessTransferAdapter{out: out, binding: flagGatewayInstance, ready: transferReady}
+		ac.MainAgent.SetSessionPausePreparer(transferAdapter.prepare)
+		var endpointErr error
+		endpoint, endpointErr = startRuntimeTakeover(ac, "gateway")
+		if endpointErr != nil {
+			log.Warnf("session takeover unavailable error=%v", endpointErr)
+		} else {
+			defer endpoint.close()
+		}
+	}
 	sessionID := filepath.Base(ac.SessionDir)
-	state := &headlessState{sessionID: sessionID, workDir: headlessWorkDirSnapshot(rt.Backend()), updatedAt: time.Now()}
+	state := &headlessState{sessionID: sessionID, workspace: ac.ContentRoot, workDir: headlessWorkDirSnapshot(rt.Backend()), updatedAt: time.Now()}
+	if ac.ProjectLocator != nil {
+		state.workspace = ac.ProjectLocator.CanonicalRoot
+	}
 
+	if endpoint != nil {
+		rec := endpoint.identity()
+		state.runtimeID = rec.RuntimeID
+		state.sessionEpoch = rec.SessionEpoch
+	}
 	// Emit a one-time ready marker so gateways can detect successful init.
 	readyPayload := map[string]any{
-		"session_id": sessionID,
-		"workdir":    headlessWorkDirPayload(state.workDir),
+		"session_id":    sessionID,
+		"workspace":     state.workspace,
+		"workdir":       headlessWorkDirPayload(state.workDir),
+		"paused_inputs": headlessPausedInputProjection(ac.MainAgent),
+	}
+	if endpoint != nil {
+		rec := endpoint.identity()
+		readyPayload["runtime_id"] = rec.RuntimeID
+		readyPayload["session_epoch"] = rec.SessionEpoch
+	}
+	if paused, ok := pausedStartupStatus(ac); ok {
+		readyPayload["state"] = agent.SessionPauseReady
+		readyPayload["transfer_id"] = paused.TransferID
+		readyPayload["binding_instance_id"] = flagGatewayInstance
 	}
 	if len(ac.StartupSkippedLockedSessions) > 0 {
 		readyPayload["skipped_locked_sessions"] = append([]string(nil), ac.StartupSkippedLockedSessions...)
@@ -1166,6 +1252,7 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 		Type:    "ready",
 		Payload: readyPayload,
 	})
+	close(transferReady)
 
 	// Event loop: forward filtered events to stdout. Seq allocation and the
 	// enqueue share one ordered section so event pushes keep wire order
@@ -1176,6 +1263,33 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 	go func() {
 		defer close(eventDone)
 		for ev := range events {
+			if _, ok := ev.(agent.SessionRestoredEvent); ok && endpoint != nil {
+				rec := endpoint.refresh()
+				state.mu.Lock()
+				state.runtimeID = rec.RuntimeID
+				state.sessionEpoch = rec.SessionEpoch
+				state.mu.Unlock()
+			}
+			if e, ok := ev.(agent.SessionTransferEvent); ok {
+				env := transferEnvelope(e.Status, flagGatewayInstance)
+				if !out.emitWithContext(out.ctx, env) {
+					continue
+				}
+				if e.Status.State == agent.SessionPauseSaved {
+					if !out.flush(out.ctx) {
+						continue
+					}
+					err := ac.MainAgent.ReleasePausedSession(e.Status.TransferID)
+					if err == nil {
+						status, _ := ac.MainAgent.SessionPauseStatus(e.Status.TransferID)
+						if !out.emitWithContext(out.ctx, transferEnvelope(status, flagGatewayInstance)) || !out.flush(out.ctx) {
+							err = fmt.Errorf("released transfer output unavailable")
+						}
+					}
+					transferDone <- err
+				}
+				continue
+			}
 			out.orderedWithContext(out.ctx, func() {
 				envs := filterHeadlessEvent(ev, state, backend)
 				for _, env := range envs {
@@ -1222,6 +1336,11 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 
 	for {
 		select {
+		case err := <-transferDone:
+			if err != nil {
+				return err
+			}
+			return cliExitError{code: takeoverExitCode}
 		case <-ac.Ctx.Done():
 			return nil
 		case item, ok := <-stdinLines:
@@ -1258,6 +1377,19 @@ func runHeadlessWithDeps(deps headlessRunDeps) (runErr error) {
 						"message": "invalid JSON command",
 					},
 				})
+				continue
+			}
+			if hcmd.Type == headlessTransferPrepared {
+				var ack transferPreparedAck
+				err := json.Unmarshal(line, &ack)
+				if err == nil && transferAdapter != nil {
+					err = transferAdapter.ack(ack)
+				} else if err == nil {
+					err = fmt.Errorf("wrong_owner_kind: runtime is not gateway-managed")
+				}
+				if err != nil {
+					out.emit(headlessEnvelope{Type: "error", Payload: map[string]string{"message": err.Error()}})
+				}
 				continue
 			}
 			handleHeadlessCommand(hcmd, backend, state, out)
@@ -1684,6 +1816,9 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 		lastOutcome := state.lastOutcome
 		updatedAt := state.updatedAt
 		workDir := state.workDir
+		workspace := state.workspace
+		runtimeID := state.runtimeID
+		sessionEpoch := state.sessionEpoch
 		seq := state.stampHeadlessSeq(workDirChanged)
 		state.mu.Unlock()
 		out.emit(headlessEnvelope{
@@ -1691,6 +1826,9 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 			Seq:  seq,
 			Payload: map[string]any{
 				"session_id":              sid,
+				"workspace":               workspace,
+				"runtime_id":              runtimeID,
+				"session_epoch":           sessionEpoch,
 				"busy":                    busy,
 				"phase":                   phase,
 				"phase_detail":            phaseDetail,
@@ -1706,6 +1844,7 @@ func handleHeadlessCommand(cmd headlessCommand, backend headlessBackend, state *
 				"updated_at":              updatedAt.Format(time.RFC3339),
 				"workdir":                 headlessWorkDirPayload(workDir),
 				"running_jobs":            headlessRunningJobs(backend),
+				"paused_inputs":           headlessPausedInputProjection(backend),
 			},
 		})
 

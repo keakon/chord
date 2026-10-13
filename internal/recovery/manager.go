@@ -66,6 +66,7 @@ type ToolActivityRecord struct {
 // SessionSnapshot captures the recoverable state of a session at a point in
 // time. It is atomically written to snapshot.json for crash recovery.
 type SessionSnapshot struct {
+	Pause                     *SessionPauseCheckpoint  `json:"pause,omitempty"`
 	Todos                     []TodoState              `json:"todos"`
 	ActiveAgents              []AgentSnapshot          `json:"active_agents"`
 	ModelName                 string                   `json:"model_name"`
@@ -194,10 +195,16 @@ type AgentSnapshot struct {
 //
 // All public methods are goroutine-safe.
 type RecoveryManager struct {
-	sessionDir string
-	mu         sync.Mutex
-	handles    map[string]*os.File // agentID → open JSONL file handle
-	closed     bool                // true after Close() is called
+	sessionDir      string
+	mu              sync.Mutex
+	handles         map[string]*os.File // agentID → open JSONL file handle
+	closed          bool                // true after Close() is called
+	closeErr        error
+	messageWrite    func(*os.File, []byte) (int, error)
+	messageSync     func(*os.File) error
+	snapshotWrite   func(string, string, []byte) error
+	snapshotRename  func(string, string) error
+	snapshotSyncDir func(string) error
 
 	// The tool-activity journal is written from tool-execution goroutines, so it
 	// uses its own mutex and file handle instead of sharing r.mu with message
@@ -340,59 +347,60 @@ func (r *RecoveryManager) PersistMessageDurable(agentID string, msg message.Mess
 
 func (r *RecoveryManager) persistMessage(agentID string, msg message.Message, durable bool) error {
 	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return ErrClosed
-	}
-	r.mu.Unlock()
-
-	var err error
-	msg, err = r.persistBinaryParts(msg, durable)
-	if err != nil {
-		log.Warnf("failed to persist binary parts, storing inline error=%v", err)
-	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-
-	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		return ErrClosed
 	}
 
+	var err error
+	msg, err = r.persistBinaryParts(msg, durable)
+	if err != nil {
+		return persistWriteError(fmt.Errorf("persist binary parts: %w", err), true)
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return persistWriteError(err, true)
+	}
+	data = append(data, '\n')
+
 	f, ok := r.handles[agentID]
 	if !ok {
 		path := r.messageLogPath(agentID)
 		if err := repairMessageTail(r.sessionDir, path); err != nil {
-			return fmt.Errorf("repair message log tail: %w", err)
+			return persistWriteError(fmt.Errorf("repair message log tail: %w", err), true)
 		}
 		f, err = privatefs.OpenFile(r.sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 		if err != nil {
-			return err
+			return persistWriteError(err, true)
 		}
 		r.handles[agentID] = f
 	}
 
-	n, err := f.Write(data)
+	write := r.messageWrite
+	if write == nil {
+		write = func(f *os.File, b []byte) (int, error) { return f.Write(b) }
+	}
+	n, err := write(f, data)
 	if err != nil || n != len(data) {
 		_ = f.Close()
 		delete(r.handles, agentID)
 	}
 	if err != nil {
-		return fmt.Errorf("write message: %w", err)
+		return persistWriteError(fmt.Errorf("write message: %w", err), n == 0)
 	}
 	if n != len(data) {
-		return fmt.Errorf("incomplete message write: %w", io.ErrShortWrite)
+		return persistWriteError(fmt.Errorf("incomplete message write: %w", io.ErrShortWrite), n == 0)
 	}
 	if durable {
-		if err := f.Sync(); err != nil {
-			return fmt.Errorf("sync message: %w", err)
+		syncFile := r.messageSync
+		if syncFile == nil {
+			syncFile = (*os.File).Sync
+		}
+		if err := syncFile(f); err != nil {
+			return persistWriteError(fmt.Errorf("sync message: %w", err), false)
 		}
 		if err := privatefs.SyncDir(r.sessionDir); err != nil {
-			return fmt.Errorf("sync message directory: %w", err)
+			return persistWriteError(fmt.Errorf("sync message directory: %w", err), false)
 		}
 	}
 	return nil
@@ -428,8 +436,10 @@ func (r *RecoveryManager) AppendToolActivity(rec ToolActivityRecord) error {
 		return fmt.Errorf("marshal tool-activity record: %w", err)
 	}
 	data = append(data, '\n')
-	if _, err := r.journalHandle.Write(data); err != nil {
+	if n, err := r.journalHandle.Write(data); err != nil {
 		return fmt.Errorf("append tool-activity record: %w", err)
+	} else if n != len(data) {
+		return fmt.Errorf("append tool-activity record: %w", io.ErrShortWrite)
 	}
 	if err := r.journalHandle.Sync(); err != nil {
 		return fmt.Errorf("sync tool-activity record: %w", err)
@@ -563,16 +573,51 @@ func fillMissingBinaryPartSizes(parts []message.ContentPart) {
 // It first writes to a temporary file, then renames it to the final path,
 // ensuring the snapshot file is never in a partially-written state.
 func (r *RecoveryManager) SaveSnapshot(snap *SessionSnapshot) error {
-	data, err := json.Marshal(snap)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return ErrClosed
+	}
+	if snap == nil {
+		return fmt.Errorf("snapshot is nil")
+	}
+	copy := *snap
+	copy.Pause = snap.Pause.Clone()
+	if copy.Pause != nil {
+		pending, err := r.persistPendingInputsLocked(copy.Pause.PendingInputs)
+		if err != nil {
+			return err
+		}
+		copy.Pause.PendingInputs = pending
+	}
+	data, err := json.Marshal(&copy)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal snapshot: %w", err)
 	}
-
 	tmpPath := filepath.Join(r.sessionDir, fmt.Sprintf("snapshot.%d.json.tmp", time.Now().UnixNano()))
-	if err := privatefs.WriteFile(r.sessionDir, tmpPath, data); err != nil {
-		return err
+	defer os.Remove(tmpPath)
+	write := r.snapshotWrite
+	if write == nil {
+		write = privatefs.WriteFileSynced
 	}
-	return os.Rename(tmpPath, filepath.Join(r.sessionDir, "snapshot.json"))
+	if err := write(r.sessionDir, tmpPath, data); err != nil {
+		return fmt.Errorf("write snapshot: %w", err)
+	}
+	rename := r.snapshotRename
+	if rename == nil {
+		rename = os.Rename
+	}
+	if err := rename(tmpPath, filepath.Join(r.sessionDir, "snapshot.json")); err != nil {
+		return fmt.Errorf("rename snapshot: %w", err)
+	}
+	syncDir := r.snapshotSyncDir
+	if syncDir == nil {
+		syncDir = privatefs.SyncDir
+	}
+	if err := syncDir(r.sessionDir); err != nil {
+		return fmt.Errorf("sync snapshot directory: %w", err)
+	}
+	return nil
 }
 
 // Recover loads the session snapshot from snapshot.json. Returns an error if
@@ -590,78 +635,59 @@ func (r *RecoveryManager) Recover() (*SessionSnapshot, error) {
 	return &snap, nil
 }
 
-// Close flushes and closes all open JSONL file handles. This should be called
-// during graceful shutdown. After Close, PersistMessage returns ErrClosed.
-func (r *RecoveryManager) Close() {
-	r.journalMu.Lock()
-	r.journalClosed = true
-	if r.journalHandle != nil {
-		r.journalHandle.Close()
-		r.journalHandle = nil
-	}
-	r.journalMu.Unlock()
-
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, f := range r.handles {
-		f.Close()
-	}
-	r.handles = make(map[string]*os.File)
-	r.closed = true
-}
-
-// RewriteLog replaces the JSONL file for agentID with the given messages.
-// The existing file handle is closed, the file is truncated, and messages
-// are written in order. Used when the last message needs to be surgically
-// removed (e.g. removing an interrupted thinking-only assistant block).
+// RewriteLog atomically replaces the JSONL file for agentID with the given
+// messages. A retained pending checkpoint must keep its transcript identities
+// and original input content until acknowledgement succeeds.
 func (r *RecoveryManager) RewriteLog(agentID string, msgs []message.Message) error {
-	// Marshal outside the write mutex: r.mu serializes every agent's
-	// PersistMessage, so marshaling the full history per message inside the
-	// lock would stall the persistence pump for the whole rewrite.
-	lines := make([][]byte, 0, len(msgs))
+	var data bytes.Buffer
 	for _, msg := range msgs {
-		data, err := json.Marshal(msg)
+		raw, err := json.Marshal(msg)
 		if err != nil {
 			return fmt.Errorf("rewrite log: marshal: %w", err)
 		}
-		lines = append(lines, append(data, '\n'))
+		data.Write(raw)
+		data.WriteByte('\n')
 	}
-
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	if r.closed {
-		return nil
+		return ErrClosed
 	}
-
-	// Close and remove the existing handle.
-	if f, ok := r.handles[agentID]; ok {
-		f.Close()
-		delete(r.handles, agentID)
+	if err := r.guardPendingInputRewriteLocked(agentID, msgs); err != nil {
+		return err
 	}
-
 	path := r.messageLogPath(agentID)
-
-	// Truncate by rewriting.
-	f, err := privatefs.OpenFile(r.sessionDir, path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
-	if err != nil {
-		return fmt.Errorf("rewrite log: create %s: %w", path, err)
+	tmpPath := fmt.Sprintf("%s.%d.tmp", path, time.Now().UnixNano())
+	defer os.Remove(tmpPath)
+	if err := privatefs.WriteFileSynced(r.sessionDir, tmpPath, data.Bytes()); err != nil {
+		return fmt.Errorf("rewrite log: write: %w", err)
 	}
-
-	for _, line := range lines {
-		if _, err := f.Write(line); err != nil {
-			f.Close()
-			return fmt.Errorf("rewrite log: write: %w", err)
+	if info, err := privatefs.Stat(r.sessionDir, path); err == nil {
+		f, err := privatefs.OpenFile(r.sessionDir, tmpPath, os.O_RDWR)
+		if err != nil {
+			return fmt.Errorf("rewrite log: open metadata: %w", err)
+		}
+		modeErr := f.Chmod(info.Mode().Perm())
+		syncErr := f.Sync()
+		closeErr := f.Close()
+		if err := errors.Join(modeErr, syncErr, closeErr); err != nil {
+			return fmt.Errorf("rewrite log: preserve permissions: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("rewrite log: stat: %w", err)
+	}
+	if f, ok := r.handles[agentID]; ok {
+		delete(r.handles, agentID)
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("rewrite log: close: %w", err)
 		}
 	}
-	f.Close()
-
-	// Re-open in append mode for subsequent PersistMessage calls.
-	af, err := privatefs.OpenFile(r.sessionDir, path, os.O_WRONLY|os.O_APPEND)
-	if err != nil {
-		return fmt.Errorf("rewrite log: reopen: %w", err)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rewrite log: rename: %w", err)
 	}
-	r.handles[agentID] = af
+	if err := privatefs.SyncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("rewrite log: sync directory: %w", err)
+	}
 	return nil
 }
 

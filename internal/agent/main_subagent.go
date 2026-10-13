@@ -955,6 +955,11 @@ func (a *MainAgent) getOrCreateAgentMCP(agentName string, mcpCfg config.MCPConfi
 }
 
 func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentRequest) (result tools.TaskHandle, resultErr error) {
+	finish, err := a.beginSessionStructural(ctx, true)
+	if err != nil {
+		return tools.TaskHandle{}, err
+	}
+	defer finish()
 	description := req.Description
 	agentType := req.AgentType
 	planTaskRef := req.PlanTaskRef
@@ -1189,7 +1194,7 @@ func (a *MainAgent) CreateSubAgent(ctx context.Context, req tools.SubAgentReques
 			return tools.TaskHandle{}, fmt.Errorf("delegate owner task is no longer active")
 		}
 	}
-	if !sub.InjectUserMessage(description) {
+	if !sub.InjectAdmittedInitialInput(description) {
 		a.subs.mu.Unlock()
 		a.admissionMu.Unlock()
 		cancel()

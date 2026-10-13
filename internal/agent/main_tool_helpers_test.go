@@ -375,7 +375,7 @@ func TestToolBatchAndLeaseUseExecutionBinding(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, call := range calls {
-				if _, err := pipeline.executeToolForCall(context.Background(), call); err != nil {
+				if _, err := pipeline.executeToolForCall(context.Background(), call, &ToolExecutionResult{}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -418,7 +418,7 @@ func TestConfirmationEditsRebindPermissionAndExecution(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(filepath.Join(expectedBase, edited)), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := pipeline.executeToolForCall(context.Background(), call); err != nil {
+			if _, err := pipeline.executeToolForCall(context.Background(), call, &ToolExecutionResult{}); err != nil {
 				t.Fatal(err)
 			}
 			if policy := pipeline.concurrencyPolicyForCall(call); policy.Resource != "file:"+filepath.Join(expectedBase, edited) {

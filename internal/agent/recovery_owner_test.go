@@ -121,7 +121,7 @@ func TestSubAgentFollowsRecoveryManagerReplacedWithinTheSession(t *testing.T) {
 
 	// Same session, new manager: what compaction's transcript rewrite does.
 	replacement := recovery.NewRecoveryManager(a.SessionDir())
-	t.Cleanup(replacement.Close)
+	t.Cleanup(func() { _ = replacement.Close() })
 	a.clearRecoveryManagerIf(spawnManager)
 	spawnManager.Close()
 	a.installRecoveryManager(replacement)

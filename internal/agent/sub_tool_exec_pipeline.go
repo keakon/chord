@@ -33,6 +33,7 @@ func (s *SubAgent) toolExecutionPipeline() toolExecutionPipeline {
 		contentRoot = s.parent.ContentRoot()
 	}
 	return toolExecutionPipeline{
+		executionGate:    s.sessionExecutionGate(),
 		agentID:          s.instanceID,
 		journalAgentID:   s.instanceID,
 		eventAgentID:     s.instanceID,

@@ -306,6 +306,17 @@ func (a *MainAgent) recordWorkDirBoundary(next WorkDirState, reason string) erro
 // fallback boundary, and the returned notice explains it. Returns "" when the
 // binding was installed or when there was nothing to restore.
 func (a *MainAgent) RestoreWorkDirBinding(ctx context.Context, state WorkDirState, reason string) string {
+	if a != nil && a.started.Load() {
+		finish, err := a.beginSessionStructural(ctx, false)
+		if err != nil {
+			return err.Error()
+		}
+		defer finish()
+	}
+	return a.restoreWorkDirBinding(ctx, state, reason)
+}
+
+func (a *MainAgent) restoreWorkDirBinding(ctx context.Context, state WorkDirState, reason string) string {
 	if a == nil || strings.TrimSpace(state.Path) == "" {
 		return ""
 	}

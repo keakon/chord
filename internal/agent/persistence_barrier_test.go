@@ -148,7 +148,7 @@ func TestToolActivityJournalRequiredFilter(t *testing.T) {
 
 func TestPromotedTodoWritesStartedJournalBeforeCommit(t *testing.T) {
 	rm := recovery.NewRecoveryManager(t.TempDir())
-	t.Cleanup(rm.Close)
+	t.Cleanup(func() { _ = rm.Close() })
 	committed := false
 	a := &MainAgent{recoveryOwner: &recoveryOwnership{manager: rm}}
 	call := message.ToolCall{ID: "todo-1", Name: tools.NameTodoWrite, Args: json.RawMessage(`{"todos":[]}`)}
@@ -694,7 +694,7 @@ func TestIntentBarrierSuccessResetsBarrierFailureRounds(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
 	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
-	t.Cleanup(a.recoveryManager().Close)
+	t.Cleanup(func() { _ = a.recoveryManager().Close() })
 	a.startPersistLoop()
 	t.Cleanup(func() { a.closePersistLoopUntil(nil) })
 	a.newTurn()

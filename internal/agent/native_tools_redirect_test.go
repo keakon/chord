@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -97,11 +98,10 @@ func TestNativeRedirectPreservesEndpointAndJournalBarrier(t *testing.T) {
 				if err != nil || persisted != 1 || len(restored) != 1 {
 					t.Fatalf("restored=%+v persisted=%d err=%v", restored, persisted, err)
 				}
-				// An ordinary request on the same provider retains its redirect
-				// behavior; the native request must not mutate the shared client.
-				_, _ = client.CompleteStream(t.Context(), msgs, nil, nil)
-				if redirected.Load() != 1 || sourceRequests.Load() != 2 {
-					t.Fatalf("ordinary redirect changed: redirected=%d source requests=%d", redirected.Load(), sourceRequests.Load())
+				// Each transport request requires admission, including redirects.
+				_, err = client.CompleteStream(t.Context(), msgs, nil, nil)
+				if _, ok := errors.AsType[*llm.RequestRedirectError](err); !ok || redirected.Load() != 0 || sourceRequests.Load() != 2 {
+					t.Fatalf("ordinary redirect: redirected=%d source requests=%d err=%v", redirected.Load(), sourceRequests.Load(), err)
 				}
 			})
 		}

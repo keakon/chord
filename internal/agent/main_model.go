@@ -348,6 +348,16 @@ func (a *MainAgent) ModelPoolPolicy() *RuntimeModelPoolPolicy {
 // and context manager token budget. Thread-safe: called from the TUI goroutine
 // while the event loop may be reading llmClient.
 func (a *MainAgent) SwapLLMClient(newClient *llm.Client, modelName string, contextLimit int) {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		current, _, _, _ := a.llmSnapshot()
+		if newClient != nil && newClient != current {
+			newClient.Close()
+		}
+		a.emitToTUI(ErrorEvent{Err: err})
+		return
+	}
+	defer finish()
 	a.swapLLMClientWithRef(newClient, modelName, contextLimit, "")
 }
 
@@ -433,6 +443,11 @@ func (a *MainAgent) swapLLMClientWithRefLocked(newClient *llm.Client, modelName 
 // for internal tests and pool-driven client rebuilds; user-facing commands should
 // switch pools via /models rather than choosing provider/model refs directly.
 func (a *MainAgent) SwitchModel(providerModel string) error {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		return err
+	}
+	defer finish()
 	return a.switchModel(providerModel, true)
 }
 
@@ -767,6 +782,11 @@ func (a *MainAgent) switchMainModelForPoolIfNeeded(cfg *config.AgentConfig, pool
 }
 
 func (a *MainAgent) setCurrentModelPool(pool string) error {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		return err
+	}
+	defer finish()
 	if a.modelPoolPolicy == nil {
 		return fmt.Errorf("/models: model pool policy not configured")
 	}
@@ -867,6 +887,11 @@ func (a *MainAgent) switchActiveSubAgentsForPoolIfNeeded(agentName string, cfg *
 }
 
 func (a *MainAgent) setAgentModelPool(agentName, pool string) error {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		return err
+	}
+	defer finish()
 	if a.modelPoolPolicy == nil {
 		return fmt.Errorf("/models: model pool policy not configured")
 	}

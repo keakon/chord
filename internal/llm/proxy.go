@@ -14,6 +14,8 @@ import (
 	"github.com/keakon/golog/log"
 
 	"golang.org/x/net/proxy"
+
+	"github.com/keakon/chord/internal/executiongate"
 )
 
 const (
@@ -97,6 +99,23 @@ func providerResponseHeaderTimeout(provider *ProviderConfig) time.Duration {
 // including connection setup and writing the request body. The watchdog is
 // stopped once Do returns so long-lived streaming response bodies remain valid.
 func doRequestUntilHeaders(client *http.Client, req *http.Request, timeout time.Duration) (*http.Response, error) {
+	markRequestPrepared(req.Context())
+	lease, err := executiongate.Begin(req.Context(), executiongate.LLM)
+	if err != nil {
+		return nil, err
+	}
+	// Redirects can issue a second model request without a new admission.
+	requestClient := *client
+	requestClient.Transport = nonReplayTransport{next: client.Transport}
+	requestClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if client.CheckRedirect != nil {
+			if err := client.CheckRedirect(req, via); err != nil {
+				return err
+			}
+		}
+		return &RequestRedirectError{}
+	}
+	markRequestSent(req.Context())
 	if timeout <= 0 {
 		timeout = defaultHTTPResponseHeaderTimeout
 	}
@@ -116,7 +135,7 @@ func doRequestUntilHeaders(client *http.Client, req *http.Request, timeout time.
 		mu.Unlock()
 	})
 
-	resp, err := client.Do(request)
+	resp, err := requestClient.Do(request)
 	mu.Lock()
 	done = true
 	timer.Stop()
@@ -124,6 +143,7 @@ func doRequestUntilHeaders(client *http.Client, req *http.Request, timeout time.
 	mu.Unlock()
 
 	if requestTimedOut {
+		lease.Finish()
 		if resp != nil && resp.Body != nil {
 			_ = resp.Body.Close()
 		}
@@ -131,12 +151,35 @@ func doRequestUntilHeaders(client *http.Client, req *http.Request, timeout time.
 		return nil, &preResponseTimeoutError{timeout: timeout}
 	}
 	if err != nil {
+		lease.Finish()
 		cancel()
 		return nil, err
 	}
 
-	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel}
+	resp.Body = &cancelOnCloseBody{ReadCloser: resp.Body, cancel: cancel, lease: lease}
 	return resp, nil
+}
+
+// nonReplayTransport prevents net/http from replaying a model POST internally
+// on a reused connection. Client retries re-enter session admission explicitly.
+type nonReplayTransport struct{ next http.RoundTripper }
+
+func (t nonReplayTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	request := req.Clone(req.Context())
+	request.GetBody = nil
+	next := t.next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	return next.RoundTrip(request)
+}
+
+// RequestRedirectError requires configuring the destination explicitly rather
+// than submitting a second model request without a fresh request boundary.
+type RequestRedirectError struct{}
+
+func (*RequestRedirectError) Error() string {
+	return "model request redirect refused: configure the destination endpoint explicitly"
 }
 
 type preResponseTimeoutError struct {
@@ -153,11 +196,13 @@ func (e *preResponseTimeoutError) Timeout() bool { return true }
 type cancelOnCloseBody struct {
 	io.ReadCloser
 	cancel context.CancelFunc
+	lease  *executiongate.Lease
 }
 
 func (b *cancelOnCloseBody) Close() error {
 	err := b.ReadCloser.Close()
 	b.cancel()
+	b.lease.Finish()
 	return err
 }
 

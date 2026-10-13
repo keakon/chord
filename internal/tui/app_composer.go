@@ -107,6 +107,9 @@ func (m *Model) syncQueuedDraft(draft queuedDraft) bool {
 }
 
 func (m Model) queuedDraftsAutoContinue() bool {
+	if m.takeoverInputFrozen() || m.takeover.status.State == agent.SessionPauseReady {
+		return false
+	}
 	agentID := normalizeDraftAgentID(m.focusedAgentID)
 	for _, draft := range m.queuedDrafts {
 		if draft.Mirrored && normalizeDraftAgentID(draft.AgentID) == agentID {
@@ -149,6 +152,9 @@ func (m *Model) loadQueuedDraftIntoComposer(draft queuedDraft) tea.Cmd {
 }
 
 func (m *Model) editQueuedDraftAt(idx int) tea.Cmd {
+	if m.takeoverDraftActionBlocked(idx) {
+		return m.enqueueToast("Pending transfer inputs stay preserved; send a new instruction or Continue", "info")
+	}
 	if idx < 0 || idx >= len(m.queuedDrafts) {
 		return nil
 	}
@@ -164,6 +170,9 @@ func (m *Model) editQueuedDraftAt(idx int) tea.Cmd {
 }
 
 func (m *Model) deleteQueuedDraftAt(idx int) tea.Cmd {
+	if m.takeoverDraftActionBlocked(idx) {
+		return m.enqueueToast("Pending transfer inputs stay preserved; send a new instruction or Continue", "info")
+	}
 	if idx < 0 || idx >= len(m.queuedDrafts) {
 		return nil
 	}

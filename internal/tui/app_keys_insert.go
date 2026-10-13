@@ -256,6 +256,9 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		return cmd
 
 	case keyMatches(key, m.keyMap.InsertSubmit):
+		if m.takeoverInputFrozen() {
+			return m.enqueueToast("Session transfer is in progress; input remains paused", "info")
+		}
 		if m.clipboardAttachmentPending && m.clipboardAttachmentAgentID == m.focusedAgentID {
 			return m.enqueueToast("Reading clipboard attachment; wait for it to finish before sending", "info")
 		}
@@ -282,6 +285,9 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		if value == "" && len(m.attachments) == 0 {
 			return m.tryContinue()
+		}
+		if value == takeoverCommand || strings.HasPrefix(value, takeoverCommand+" ") {
+			return m.startTakeoverCommand(value)
 		}
 		if len(m.attachments) == 0 && strings.EqualFold(value, "/help") {
 			m.recordTUIDiagnostic("local-command", "%s", value)

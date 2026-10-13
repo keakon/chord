@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -38,6 +39,7 @@ type streamingToolEntry struct {
 	result       ToolExecutionResult
 	err          error
 	done         chan struct{}
+	doneOnce     sync.Once
 	discarded    bool
 	discardWhy   string
 	// run captures the request binding at entry creation (see
@@ -61,6 +63,7 @@ type StreamingToolDiscardInfo struct {
 }
 
 type StreamingToolExecutor struct {
+	gate    *executiongate.Gate
 	turnID  uint64
 	ctx     context.Context
 	execute streamingToolRunFunc
@@ -117,6 +120,9 @@ func (e *StreamingToolExecutor) SetWorkDir(workDir string) {
 
 func (e *StreamingToolExecutor) Start(call message.ToolCall) bool {
 	if e == nil || call.ID == "" || e.ctx == nil || e.execute == nil {
+		return false
+	}
+	if e.gate.Snapshot().Paused {
 		return false
 	}
 	call.Name = tools.NormalizeName(call.Name)
@@ -229,9 +235,14 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 	defer e.releaseExecutionSlot()
 
 	e.mu.Lock()
+	if !entry.discarded && e.gate.Snapshot().Paused {
+		e.completePausedEntryLocked(entry)
+		e.mu.Unlock()
+		return
+	}
 	if entry.discarded || e.ctx.Err() != nil {
 		e.mu.Unlock()
-		close(entry.done)
+		entry.doneOnce.Do(func() { close(entry.done) })
 		return
 	}
 	entry.state = streamingToolExecuting
@@ -288,10 +299,10 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 		}
 		e.releaseConflictKeysLocked(entry)
 		e.mu.Unlock()
-		close(entry.done)
+		entry.doneOnce.Do(func() { close(entry.done) })
 		return
 	}
-	close(entry.done)
+	entry.doneOnce.Do(func() { close(entry.done) })
 	if e.emit == nil {
 		return
 	}
@@ -304,6 +315,15 @@ func (e *StreamingToolExecutor) runEntry(entry *streamingToolEntry) {
 
 func (e *StreamingToolExecutor) startDeferredLocked() {
 	for len(e.deferred) > 0 {
+		if e.gate.Snapshot().Paused {
+			for _, entry := range e.deferred {
+				if !entry.discarded {
+					e.completePausedEntryLocked(entry)
+				}
+			}
+			e.deferred = nil
+			return
+		}
 		entry := e.deferred[0]
 		// Try to acquire a shared slot for this deferred speculative call.
 		select {
@@ -317,7 +337,7 @@ func (e *StreamingToolExecutor) startDeferredLocked() {
 				}
 				if entry.state != streamingToolDiscarded {
 					entry.state = streamingToolDiscarded
-					close(entry.done)
+					entry.doneOnce.Do(func() { close(entry.done) })
 				}
 				continue
 			}
@@ -338,10 +358,18 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 		e.mu.Unlock()
 		return nil, false, false
 	}
+	if e.gate.Snapshot().Paused && call.Name == tools.NameTodoWrite {
+		e.discardEntryLocked(call.ID, entry, "session_paused")
+		e.mu.Unlock()
+		return nil, false, false
+	}
 	if entry.argsHash != canonicalArgsHash(call.Args) {
 		e.discardEntryLocked(call.ID, entry, "args_drift")
 		e.mu.Unlock()
 		return nil, false, true
+	}
+	if e.gate.Snapshot().Paused && entry.state == streamingToolQueued {
+		e.completePausedEntryLocked(entry)
 	}
 	done := entry.done
 	e.mu.Unlock()
@@ -366,7 +394,7 @@ func (e *StreamingToolExecutor) Promote(call message.ToolCall) (*ToolResultPaylo
 		effective.Args = json.RawMessage(entry.result.EffectiveArgsJSON)
 		diff = toolExecutionDiff(effective, entry.result)
 	}
-	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: toolExecDuration(call.Name, entry.result, entry.completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), walltimeTarget: entry.result.walltimeTarget, speculativeHooks: entry.result.speculativeHooks}, true, false
+	return &ToolResultPayload{CallID: call.ID, Name: call.Name, ArgsJSON: entry.result.EffectiveArgsJSON, Audit: entry.result.Audit, Result: entry.result.Result, Images: entry.result.Images, Error: entry.err, TurnID: e.turnID, Duration: toolExecDuration(call.Name, entry.result, entry.completedAt), Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: call.Name == tools.NameWrite && !entry.result.PreExisted, LSPReviews: append([]message.LSPReview(nil), entry.result.LSPReviews...), FileState: entry.result.FileState.Clone(), RecoveryState: entry.result.recoveryState(entry.err), walltimeTarget: entry.result.walltimeTarget, speculativeHooks: entry.result.speculativeHooks}, true, false
 }
 
 func (e *StreamingToolExecutor) discardEntryLocked(callID string, entry *streamingToolEntry, reason string) StreamingToolDiscardInfo {
@@ -600,4 +628,47 @@ func logStreamingToolDiscardInfo(reason string, calls []StreamingToolDiscardInfo
 		}
 	}
 	log.Debugf("discarded speculative streaming tools reason=%s count=%d started=%d", reason, len(calls), started)
+}
+
+// SetExecutionGate binds speculative admission to this session. Queued entries
+// are settled at promotion after freeze; running executions retain their context.
+func (e *StreamingToolExecutor) SetExecutionGate(gate *executiongate.Gate) { e.gate = gate }
+
+func (e *StreamingToolExecutor) completePausedEntryLocked(entry *streamingToolEntry) {
+	if entry.state == streamingToolCompleted {
+		return
+	}
+	entry.err = &executiongate.ErrSessionPaused{}
+	entry.result.EffectiveArgsJSON = string(entry.call.Args)
+	entry.state = streamingToolCompleted
+	entry.completedAt = time.Now()
+	entry.doneOnce.Do(func() { close(entry.done) })
+}
+
+// WaitForSessionPause joins speculative work and settles entries not yet begun.
+func (e *StreamingToolExecutor) WaitForSessionPause(ctx context.Context) error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	var pending []<-chan struct{}
+	for _, entry := range e.entries {
+		if entry.discarded && entry.startedAt.IsZero() {
+			entry.doneOnce.Do(func() { close(entry.done) })
+		}
+		if entry.state == streamingToolQueued && !entry.discarded {
+			e.completePausedEntryLocked(entry)
+		}
+		pending = append(pending, entry.done)
+	}
+	e.deferred = nil
+	e.mu.Unlock()
+	for _, done := range pending {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }

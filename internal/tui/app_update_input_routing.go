@@ -332,6 +332,9 @@ func (m *Model) nextInlineImageOrdinal() int {
 }
 
 func (m *Model) handleNonKeyInputMsg(msg tea.Msg) tea.Cmd {
+	if m.takeoverInputFrozen() && m.mode != ModeQuestion && m.mode != ModeConfirm {
+		return nil
+	}
 	switch m.mode {
 	case ModeInsert:
 		// Terminal paste events are text-only. Clipboard attachments use the

@@ -203,6 +203,29 @@ Chord 为当前项目维护持久化会话。
 
 自定义标题会显示在会话选择器和终端标题中，只属于显示元数据；`/rename` 不会改变 session ID、目录、对话记录或恢复命令。
 
+### 接管运行中的会话
+
+在 macOS 和 Linux 上，TUI 可以接管本机网关（gateway）管理的会话，网关也可以接管 TUI 会话。两个进程必须使用同一操作系统用户，且属于同一项目工作区。普通 headless、ACP、两个 TUI 之间或两个网关之间不支持接管。
+
+启动 TUI 时指定要接管的会话：
+
+```bash
+chord --takeover <session-id>
+```
+
+也可以在空闲 TUI 中执行 `/takeover <session-id>`。目标 TUI 不能有执行中的工作、排队输入或未发送草稿。Chord 会等待已经开始的模型请求、工具和后台任务结束，保存结果与排队输入，再交接会话；接管不会取消这些工作。恢复后的会话保持暂停，只有你明确继续或发送新请求才会执行。排队输入保留顺序，仍属于原来的对话。
+
+有排队输入时，TUI 状态栏会显示暂停队列提示；没有排队输入时显示正常空闲状态，恢复本身不会自动调用模型。移交期间仍可回答已出现的问题，也可以主动停止正在执行的工作；后台任务可通过 `Ctrl+J` 查看和停止。
+
+启动命令加 `--takeover-timeout 30s`，或 `/takeover` 加 `--timeout 30s`，可以限制等待时间。等待超时后，源端仍会继续交接；设为 `0` 则在请求接纳后立即返回。使用返回的移交 ID 查询进度，或在保存失败后重试：
+
+```bash
+chord takeover status --session <session-id> --transfer-id <transfer-id> --json
+chord takeover retry-save --session <session-id> --transfer-id <transfer-id> --json
+```
+
+已接纳的交接不能撤销或更换目标。如果等待中的目标端退出，先查询状态，等源端释放会话后再用 `chord --resume <session-id>` 恢复，会话仍会保持暂停。如果会话已经离线，直接使用普通恢复即可。
+
 ### 恢复会话后编辑需要重新读取
 
 恢复会话时，Chord 只会重建允许后续编辑所需的安全状态，不会重新读取文件，也不会把文件内容重新载入对话。如果某个文件自会话结束以来在磁盘上已变化，或它的读取历史没有持久化记录，那么下次对它的 `edit` / `apply_patch` 可能被拦截，agent 会先重新 `read` 再编辑。这是有意为之：避免基于过期文件内容做编辑。
@@ -289,6 +312,7 @@ worktree 命令要求 `PATH` 里有 `git`。找不到 git 时，创建或进入 
 
 - `/new`：新建会话
 - `/resume`：恢复会话
+- `/takeover <session-id> [--timeout <duration>]`：接管网关正在运行的会话
 - `/rename <标题>`：设置当前会话的显示标题；单独执行 `/rename` 会清空标题，但不会改变 session ID
 - `/models`：查看模型池状态或切换当前视图对象的模型池（main 视图 = 当前主角色；SubAgent 视图 = 该 agent）
 - `/models --agent <name> <pool>`：直接设置指定 agent 的模型池

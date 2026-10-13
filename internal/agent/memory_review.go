@@ -130,6 +130,17 @@ func (a *MainAgent) cancelMemoryOrganization() {
 
 func (a *MainAgent) handleMemoryControl(r *memoryControlRequest) {
 	replyError := func(err error) { r.reply <- memoryControlResult{err: err} }
+	finish, structuralErr := a.beginSessionStructural(r.ctx, false)
+	if structuralErr != nil {
+		replyError(structuralErr)
+		return
+	}
+	started := false
+	defer func() {
+		if !started {
+			finish()
+		}
+	}()
 	if err := r.ctx.Err(); err != nil {
 		replyError(err)
 		return
@@ -172,7 +183,9 @@ func (a *MainAgent) handleMemoryControl(r *memoryControlRequest) {
 	mgr := a.memoryMgr
 	epoch := a.sessionEpoch
 	sessionID := filepath.Base(a.SessionDir())
+	started = true
 	a.outputWg.Go(func() {
+		defer finish()
 		defer cancel()
 		defer stop()
 		res := memoryControlResult{request: r, epoch: epoch}
@@ -254,9 +267,11 @@ func (a *MainAgent) generateMemoryOrganization(ctx context.Context, client *llm.
 	client.SetSystemPrompt(memoryOrganizationPrompt)
 	client.SetOutputTokenMax(16000)
 	if a.governor != nil {
-		release, err := a.governor.acquireLLM(ctx, client.PrimaryModelRef())
+		preparationCtx, finishPreparation := a.newSessionPreparationContext(ctx)
+		defer finishPreparation()
+		release, err := a.governor.acquireLLM(preparationCtx, client.PrimaryModelRef())
 		if err != nil {
-			return nil, err
+			return nil, a.preparationError(err)
 		}
 		defer release()
 	}

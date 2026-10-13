@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -594,7 +595,7 @@ func (a *MainAgent) persistTaskRegistry() error {
 	a.subs.mu.RUnlock()
 	archived, err := a.archiveEligibleTerminalTasks(records, sessionDir)
 	if err != nil {
-		log.Warnf("failed to archive terminal task records session=%v error=%v", sessionDir, err)
+		return fmt.Errorf("archive terminal task records: %w", err)
 	} else if len(archived) != len(records) {
 		a.subs.mu.Lock()
 		for taskID, before := range records {

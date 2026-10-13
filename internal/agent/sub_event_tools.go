@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
@@ -30,6 +31,10 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 	}
 	batch := turn.toolExecutionBatches[turn.nextToolBatch]
 	turn.nextToolBatch++
+	if s.sessionExecutionPaused() {
+		s.startPausedToolCalls(turn, batch.Calls)
+		return
+	}
 
 	batchCtx := turn.Ctx
 	var batchCancel context.CancelFunc
@@ -112,6 +117,7 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				FileState:        payload.FileState.Clone(),
 				walltimeTarget:   payload.walltimeTarget,
 				speculativeHooks: payload.speculativeHooks,
+				RecoveryState:    payload.RecoveryState,
 			}
 			if err := s.commitPromotedToolSideEffects(effective, tr); err != nil {
 				tr.Error = fmt.Errorf("commit promoted tool side effects: %w", err)
@@ -154,12 +160,12 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 						effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 						diff = toolExecutionDiff(effectiveCall, execResult)
 					}
-					if err != nil && batch.AbortSiblingsOnError {
+					if err != nil && !executiongate.IsPaused(err) && batch.AbortSiblingsOnError {
 						if batchCancel != nil {
 							batchCancel()
 						}
 					}
-					tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}
+					tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
 					tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 					select {
 					case s.toolCh <- tr:
@@ -222,12 +228,12 @@ func (s *SubAgent) startNextToolBatch(turn *Turn) {
 				effectiveCall.Args = json.RawMessage(execResult.EffectiveArgsJSON)
 				diff = toolExecutionDiff(effectiveCall, execResult)
 			}
-			if err != nil && batch.AbortSiblingsOnError {
+			if err != nil && !executiongate.IsPaused(err) && batch.AbortSiblingsOnError {
 				if batchCancel != nil {
 					batchCancel()
 				}
 			}
-			tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget}
+			tr := &toolResult{CallID: tc.ID, Name: tc.Name, ArgsJSON: execResult.EffectiveArgsJSON, Audit: execResult.Audit, Result: execResult.Result, Payload: execResult.Payload, Notes: append([]string(nil), execResult.Notes...), Images: execResult.Images, Error: err, TurnID: turn.ID, Diff: diff.Text, DiffAdded: diff.Added, DiffRemoved: diff.Removed, FileCreated: tc.Name == tools.NameWrite && !execResult.PreExisted, LSPReviews: append([]message.LSPReview(nil), execResult.LSPReviews...), FileState: execResult.FileState.Clone(), Duration: toolExecDuration(tc.Name, execResult, completedAt), walltimeTarget: execResult.walltimeTarget, RecoveryState: execResult.recoveryState(err)}
 			tr.composed = finalizeToolResultTexts(turn.Ctx, turn, s.fireHook, tr.CallID, tr.Name, tr.ArgsJSON, tr.Result, tr.Error, tr.Audit, tr.FileState)
 			select {
 			case s.toolCh <- tr:
@@ -491,6 +497,9 @@ func (s *SubAgent) handleToolResult(result *toolResult) {
 	}
 	s.turn.malformedInBatch = 0
 
+	if s.sessionExecutionPaused() {
+		return
+	}
 	if s.turn.MalformedCount >= maxMalformedToolCalls {
 		log.Warnf("SubAgent: aborting turn due to repeated malformed tool call args agent=%v count=%v threshold=%v", s.instanceID, s.turn.MalformedCount, maxMalformedToolCalls)
 		s.sendEvent(Event{

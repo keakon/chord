@@ -205,6 +205,29 @@ Usage statistics use the current `usage.jsonl` ledger format. Session restore an
 
 Custom titles are shown in the session picker and terminal title. They are metadata only: `/rename` does not change the session ID, directory, transcript, or resume command.
 
+### Taking over a live session
+
+On macOS and Linux, a TUI can take over a session owned by a local gateway, and a gateway can take over a TUI session. Both processes must run as the same OS user in the same project workspace. Plain headless sessions, ACP sessions, and transfers between two TUIs or two gateways are not supported.
+
+Start a TUI with the session to take over:
+
+```bash
+chord --takeover <session-id>
+```
+
+In an idle TUI, use `/takeover <session-id>`. The target TUI must have no running work, queued inputs, or unsent drafts. Chord waits for model requests, tools, and background jobs that have already started, saves their results and queued inputs, then transfers the session. It does not cancel that work. The restored session stays paused until you explicitly continue or send a new request; pending inputs keep their order and belong to their original conversation.
+
+The TUI shows the paused queue hint when there are pending inputs. With no pending inputs, it shows the normal idle status; restoration never starts model work automatically. During a transfer, you can still answer an existing question or explicitly stop active work, including background jobs through `Ctrl+J`.
+
+Add `--takeover-timeout 30s` to the startup command, or `--timeout 30s` to `/takeover`, to limit how long you wait. A timeout leaves the transfer running at the source. A timeout of `0` returns immediately after acceptance. Use the returned transfer ID to check progress or retry a failed save:
+
+```bash
+chord takeover status --session <session-id> --transfer-id <transfer-id> --json
+chord takeover retry-save --session <session-id> --transfer-id <transfer-id> --json
+```
+
+An accepted transfer cannot be cancelled or redirected. If the waiting target exits, check the status and use `chord --resume <session-id>` after the source releases the session. This also restores the session paused. For a session that is already offline, use ordinary resume directly.
+
 ### Editing after resuming a session
 
 When you resume a session, Chord rebuilds only the safety state needed to allow later edits. It does not re-read files or reload their contents into the conversation. If you edit a file that was changed on disk since the session ended, or whose read history was not durable, the next `edit` / `apply_patch` on that file may be blocked and the agent will re-`read` it first. This is intentional: it keeps edits from being applied against stale file contents.
@@ -291,6 +314,7 @@ These commands are handled by the local runtime and are not sent to the model as
 
 - `/new`: create a new session
 - `/resume`: resume a session
+- `/takeover <session-id> [--timeout <duration>]`: take over a live gateway session
 - `/rename <title>`: set the current session's display title; bare `/rename` clears it without changing the session ID
 - `/models`: view pool status or switch the current view's model pool (`main` view = current main role; `SubAgent` view = that agent)
 - `/models --agent <name> <pool>`: directly set a named agent's pool

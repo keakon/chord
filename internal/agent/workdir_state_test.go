@@ -195,7 +195,7 @@ func writeThroughPipeline(t *testing.T, p toolExecutionPipeline, name string) {
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
 	}
-	if _, err := p.executeToolForCall(context.Background(), message.ToolCall{Name: tools.NameWrite, Args: args}); err != nil {
+	if _, err := p.executeToolForCall(context.Background(), message.ToolCall{Name: tools.NameWrite, Args: args}, &ToolExecutionResult{}); err != nil {
 		t.Fatalf("execute write %s: %v", name, err)
 	}
 }

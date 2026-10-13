@@ -6,7 +6,11 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/keakon/chord/internal/recovery"
 )
+
+var flagTakeoverExpectedIdentity recovery.TransferIdentity
 
 type RootStartupPlan struct {
 	RunSetupWizard  bool
@@ -30,9 +34,10 @@ func planRootStartup(cmd *cobra.Command, continueSession bool, resumeSession str
 	plan := RootStartupPlan{
 		RunSetupWizard: cmd != nil && cmd.Parent() == nil,
 		SessionOptions: sessionStartupOptions{
-			ContinueLatest: continueSession,
-			ResumeID:       resumeID,
-			NewSessionMeta: flagWorktreeStartupMeta,
+			ContinueLatest:   continueSession,
+			ResumeID:         resumeID,
+			NewSessionMeta:   flagWorktreeStartupMeta,
+			ExpectedTransfer: flagTakeoverExpectedIdentity,
 		},
 	}
 	if cmd != nil && cmd.Flags().Changed("worktree") && flagWorktreeStartupInfo == nil {

@@ -46,7 +46,7 @@ func TestNativeSessionRestorePersistsUnknownMainReceipt(t *testing.T) {
 func TestNativeRestoredTaskReceiptUsesDurableIdentity(t *testing.T) {
 	dir := t.TempDir()
 	rm := recovery.NewRecoveryManager(dir)
-	t.Cleanup(rm.Close)
+	t.Cleanup(func() { _ = rm.Close() })
 	j := recovery.NativeRequestJournal{SessionDir: dir, AgentID: "task-1"}
 	if _, err := j.Begin(llm.NativeRequestRecord{Target: "sample/test-model"}, nil); err != nil {
 		t.Fatal(err)

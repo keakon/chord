@@ -93,7 +93,7 @@ func (a *MainAgent) newThinkingTranslator(poolName string) (*thinkingtranslate.L
 }
 
 func (a *MainAgent) maybeTranslateLatestThinkingAfterIdle(turnID uint64) {
-	if a == nil || turnID == 0 {
+	if a == nil || turnID == 0 || a.sessionExecutionPaused() {
 		return
 	}
 	svc := a.thinkingTranslationService()
@@ -123,6 +123,9 @@ func (a *MainAgent) resetThinkingTranslationSeen() {
 	}
 	a.thinkingTranslateMu.Lock()
 	a.thinkingTranslateSeen = nil
+	// A translator retains its model-pool cursor and execution gate. A session
+	// switch installs a new gate, so subsequent translations need a new pool.
+	a.thinkingTranslateSvc = nil
 	a.thinkingTranslateMu.Unlock()
 }
 

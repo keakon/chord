@@ -16,6 +16,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 )
@@ -889,6 +890,13 @@ func (c *Client) completeStreamTarget(
 			t.serviceTier,
 			tracker.Callback,
 		)
+		if executiongate.IsPaused(err) {
+			result.resp = resp
+			return result, lastInputTokens, err
+		}
+		if _, redirected := errors.AsType[*RequestRedirectError](err); redirected {
+			return result, lastInputTokens, err
+		}
 		if tracker.rollbackFired {
 			// The preserved partial left the screen when this attempt's first
 			// visible delta arrived; the card now shows this attempt's output.
@@ -1484,7 +1492,7 @@ func (c *Client) completeStreamWithRetry(
 		if pendingRollback == "" || cb == nil || err == nil || resp != nil {
 			return
 		}
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || executiongate.IsPaused(err) {
 			return
 		}
 		cb(message.StreamDelta{
@@ -1495,6 +1503,9 @@ func (c *Client) completeStreamWithRetry(
 		})
 	}()
 	abortIfCancelled := func() error {
+		if err := executiongate.Check(ctx); err != nil {
+			return err
+		}
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("LLM request aborted: %w", err)
 		}
@@ -1598,6 +1609,8 @@ func (c *Client) completeStreamWithRetry(
 					}
 				case <-ctx.Done():
 					return nil, fmt.Errorf("context cancelled during retry backoff: %w", ctx.Err())
+				case <-executiongate.FromContext(ctx).Frozen():
+					return nil, &executiongate.ErrSessionPaused{}
 				}
 			}
 		}
@@ -1681,6 +1694,9 @@ func (c *Client) completeStreamWithRetry(
 				// text on the way out, so disarm it here.
 				if IsPreservableStreamInterruption(err) {
 					pendingRollback = ""
+				}
+				if executiongate.IsPaused(err) {
+					return targetResult.resp, err
 				}
 				if unknown, ok := errors.AsType[*HostedOutcomeUnknownError](err); ok {
 					return unknown.Response, err

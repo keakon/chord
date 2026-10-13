@@ -97,6 +97,9 @@ func (a *MainAgent) Run(ctx context.Context) error {
 			return err
 		}
 		a.dispatch(evt)
+		if a.pause.sealed.Load() {
+			return nil
+		}
 		a.maybeClearStaleContextNotices()
 	}
 }
@@ -131,7 +134,11 @@ func (a *MainAgent) nextEvent(ctx context.Context) (Event, error) {
 // single event-loop goroutine, so handlers do not need to synchronise access to
 // turn state.
 func (a *MainAgent) dispatch(evt Event) {
+	defer a.advanceSessionPause()
 	defer a.emitGlobalIdleIfReady()
+	if a.dispatchSessionPause(evt) {
+		return
+	}
 	switch evt.Type {
 	case EventMemoryControl:
 		a.handleMemoryControl(evt.Payload.(*memoryControlRequest))
@@ -262,25 +269,8 @@ func (a *MainAgent) sendEventUntil(evt Event, done <-chan struct{}) bool {
 		default:
 		}
 		a.eventMu.Lock()
-		if len(a.deferredEvents) == 0 && len(a.loopEvents) == 0 {
-			if len(a.eventCh) < cap(a.eventCh) {
-				evt = a.sequenceEvent(evt)
-				a.eventCh <- evt
-				a.eventMu.Unlock()
-				return true
-			}
-		}
-		if a.coalesceQueuedEventLocked(a.deferredEvents, evt) {
-			a.eventCoalesced.Add(1)
+		if a.trySendEventLocked(evt) {
 			a.eventMu.Unlock()
-			return true
-		}
-		if len(a.deferredEvents) < a.eventOverflowLimit {
-			evt = a.sequenceEvent(evt)
-			a.deferredEvents = append(a.deferredEvents, evt)
-			a.updateEventOverflowPeakLocked()
-			a.eventMu.Unlock()
-			a.wakeDeferredEvents()
 			return true
 		}
 		a.eventBackpressure.Add(1)
@@ -455,6 +445,9 @@ func (a *MainAgent) EventQueueStats() EventQueueStats {
 }
 
 func (a *MainAgent) emitGlobalIdleIfReady() bool {
+	if a.sessionExecutionPaused() {
+		return false
+	}
 	a.drainRunnableMailboxWork()
 	// Real work is marked when a MainAgent or SubAgent turn starts. Queued
 	// automatic work keeps the agent from going idle but cannot create a
@@ -483,6 +476,9 @@ func (a *MainAgent) emitGlobalIdleIfReady() bool {
 }
 
 func (a *MainAgent) drainRunnableMailboxWork() {
+	if a.sessionExecutionPaused() {
+		return
+	}
 	if a.mailboxDeliveryPaused.Load() {
 		return
 	}
@@ -621,6 +617,10 @@ func (a *MainAgent) hasRunnableMailboxWork() bool {
 
 func reliableOutputEventLog(evt AgentEvent) (string, []any, bool) {
 	switch e := evt.(type) {
+	case SessionTransferEvent:
+		return "TUI output channel full, waiting to deliver session transfer", []any{"transfer_id", e.Status.TransferID, "state", e.Status.State}, true
+	case SessionPendingInputsUpdatedEvent:
+		return "TUI output channel full, waiting to deliver pending input acknowledgement", nil, true
 	case InputResultEvent:
 		return "TUI output channel full, waiting to deliver input result", []any{"request_id", e.RequestID}, true
 	case AgentActivityEvent:

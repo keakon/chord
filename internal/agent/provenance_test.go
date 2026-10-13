@@ -92,7 +92,7 @@ func TestAssistantProvenanceRecordsConfiguredNativeFamily(t *testing.T) {
 	}
 	writer.Close()
 	reader := recovery.NewRecoveryManager(dir)
-	t.Cleanup(reader.Close)
+	t.Cleanup(func() { _ = reader.Close() })
 	restored, err := reader.LoadMessages("main")
 	if err != nil {
 		t.Fatal(err)

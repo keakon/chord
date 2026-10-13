@@ -240,6 +240,16 @@ For a tool whose result was never saved, the repaired card shows one of two mark
 
 Chord writes the tool-call message to disk before running the tool, so an interruption cannot leave side effects that Chord does not know were intended. If the session directory becomes unwritable (for example, the disk is full), Chord pauses tool execution to avoid unrecoverable repeated side effects, shows a status card with the cause, and resumes tools automatically once writing succeeds again.
 
+## A session takeover is still waiting or cannot finish
+
+Query the transfer with `chord takeover status --session <session-id> --transfer-id <transfer-id> --json`. A timeout only stops waiting; the source keeps its lock and continues the transfer. The reported blockers identify requests, tools, jobs, or decisions that still need to finish. A watch process or a tool waiting for input can keep the transfer open indefinitely. Answer its pending decision or use the existing stop controls if you want to cancel that work.
+
+If the status is `save_failed`, correct the reported storage problem, then run `chord takeover retry-save --session <session-id> --transfer-id <transfer-id> --json`. This retries saving under the same transfer ID. Do not start a second transfer: the source stays frozen and retains the session lock until saving succeeds. A `recoverable_action` of `manual-recovery` means a write or writer closure left an unknown persistence outcome and cannot be retried safely. Check storage and session records; if necessary, explicitly stop the source, resume normally, and verify its history. Do not treat this as a successful transfer.
+
+If the source has released the session but the target cannot restore it, use `chord --resume <session-id>` from the same project. The session remains paused until an explicit continue or new request. Queued inputs stay with the conversation that received them; continuing the main conversation does not automatically start every delegated task.
+
+Check that both endpoints run as the same OS user in the same workspace, and that the source is a TUI or gateway-managed headless process. An idle target must have no queued input or unsent drafts. `transfer_busy` means a transfer is already preparing or accepted; query its existing ID instead. Windows does not support local session takeover.
+
 ## A delegated SubAgent appears stuck or an `escalate` card keeps running
 
 Two failure modes can make a delegated SubAgent look stuck; Chord recovers both automatically:

@@ -258,6 +258,7 @@ type Model struct {
 	quit quitState
 
 	composerRuntimeState
+	takeover takeoverRuntimeState
 
 	// Confirmation dialog channels and state
 	confirmCh       chan ConfirmRequest
@@ -629,6 +630,9 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 	m.sidebar.SetWorkingDir(workDirSnap.Path)
 	m.viewport.SetErrorDetailsHint(errorDetailsHint(m.keyMap))
 	if a != nil {
+		if preparer, ok := a.(interface{ UseSessionPauseEventPreparer() }); ok {
+			preparer.UseSessionPauseEventPreparer()
+		}
 		pending, sessionID := a.StartupResumeStatus()
 		if pending {
 			m.startupRestorePending = true
@@ -639,6 +643,9 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 		if !pending && a.FocusedAgentID() == "" && len(a.GetMessages()) > 0 {
 			m.setFocusedAgent("")
 			m.rebuildViewportFromMessagesWithReason(transcriptRestoreReasonModelInit)
+		}
+		if !pending {
+			m.restoreTakeoverPendingInputs()
 		}
 	}
 
@@ -890,6 +897,19 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	}()
 	m.ensureViewportCallbacks()
 	switch msg := msg.(type) {
+	case takeoverPreparedMsg:
+		return m, m.applyTakeoverPrepared(msg)
+	case takeoverResultMsg:
+		if msg.sequence != m.takeover.sequence {
+			return m, nil
+		}
+		m.takeover.waiting = false
+		if msg.err != nil {
+			return m, m.enqueueToast(takeoverFailureMessage(msg.status, msg.err), "warn")
+		}
+		m.restoreTakeoverPendingInputs()
+		m.recalcViewportSize()
+		return m, m.enqueueToast("Session restored paused; send a message or Continue when ready", "info")
 
 	// -- bootstrap cursor blink ------------------------------------------
 	case focusInputMsg:
@@ -897,6 +917,9 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 		return m, cmd
 
 	case focusedContinueActionMsg:
+		if m.takeoverInputFrozen() {
+			return m, nil
+		}
 		if m.agent == nil || m.focusedAgentID != msg.target.AgentID {
 			m.stopActiveAnimationIfIdle()
 			return m, nil
@@ -959,6 +982,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			oldStore, oldHandle, staleErr = m.prepareRuntimeCacheSession(true)
 		}
 		m.rebuildViewportFromMessagesPreservingActivity(msg.reason, msg.preserveRequestActivity)
+		m.restoreTakeoverPendingInputs()
 		m.invalidateJobSnapshot()
 		animationCmd := m.startActiveAnimation()
 		m.finishRuntimeCacheSessionSwap(oldStore, oldHandle)

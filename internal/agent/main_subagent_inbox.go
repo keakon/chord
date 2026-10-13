@@ -261,6 +261,11 @@ func unsettledMailboxOwner(sub *SubAgent) *SubAgent {
 }
 
 func (a *MainAgent) routeOwnedSubAgentMailbox(msg SubAgentMailboxMessage) bool {
+	finish, err := a.beginSessionStructural(a.parentCtx, false)
+	if err != nil {
+		return false
+	}
+	defer finish()
 	route, owner, rec := a.resolveOwnedMailboxRoute(msg)
 	switch route {
 	case ownedMailboxRouteLiveOwner:
@@ -560,7 +565,7 @@ func (a *MainAgent) markSubAgentMailboxSeen(messageID string) bool {
 // outside that lock because it can re-enter delivery (for example forwarding a
 // settled owner's mailbox to the main inbox).
 func (a *MainAgent) drainOwnedSubAgentMailboxes(ownerAgentID string) bool {
-	if a.mailboxDeliveryPaused.Load() {
+	if a.mailboxDeliveryPaused.Load() || a.sessionExecutionPaused() {
 		return false
 	}
 	ownerAgentID = strings.TrimSpace(ownerAgentID)
@@ -1735,7 +1740,7 @@ func (a *MainAgent) prepareSubAgentMailboxBatchForTurnContinuation() bool {
 }
 
 func (a *MainAgent) drainSubAgentInbox() {
-	if a.mailboxDeliveryPaused.Load() {
+	if a.mailboxDeliveryPaused.Load() || a.sessionExecutionPaused() {
 		return
 	}
 	if a.handoffDeliveryHeld() {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 )
@@ -42,6 +43,8 @@ type FallbackModel struct {
 
 // Client is the high-level LLM client that handles retries and key selection.
 type Client struct {
+	executionGate          *executiongate.Gate
+	executionOwner         string
 	mu                     sync.RWMutex
 	provider               *ProviderConfig
 	providerImpl           Provider
@@ -216,7 +219,6 @@ func NewClient(
 		},
 	}
 	c.toolSurfacePrimary = c.PrimaryModelEntry()
-	c.startCodexWarmup()
 	return c
 }
 
@@ -301,6 +303,12 @@ func (c *Client) startCodexWarmup() {
 	ctx, cancel := context.WithCancel(context.Background())
 	c.mu.Lock()
 	if c.closed.Load() || c.codexWarmupStarted || c.provider == nil {
+		c.mu.Unlock()
+		cancel()
+		return
+	}
+	ctx = executiongate.WithContext(ctx, c.executionGate, c.executionOwner)
+	if executiongate.Check(ctx) != nil {
 		c.mu.Unlock()
 		cancel()
 		return
@@ -1126,6 +1134,11 @@ func (c *Client) CompleteStreamWithOptions(
 	if c == nil || c.closed.Load() {
 		return nil, errors.New("llm client is closed")
 	}
+	ctx = c.executionContext(ctx)
+	if err := executiongate.Check(ctx); err != nil {
+		return nil, err
+	}
+	c.startCodexWarmup()
 	if options.NativeTools != nil {
 		ctx = context.WithValue(ctx, nativePolicyContextKey{}, options.NativeTools)
 	}
@@ -1217,7 +1230,7 @@ func (c *Client) CompleteStreamWithOptions(
 		} else {
 			c.poolCursor = startIdx
 		}
-	case errorsIsContextCanceled(err):
+	case errorsIsContextCanceled(err), executiongate.IsPaused(err):
 	// User cancellation should not move the sticky model cursor.
 	case IsPreservableStreamInterruption(err):
 		// The reply was truncated in transport, not refused by the model, and

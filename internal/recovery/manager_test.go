@@ -275,7 +275,7 @@ func TestPersistMessageAfterCloseReturnsErrorWithoutCreatingSessionDir(t *testin
 
 func BenchmarkPersistMessageReusesOpenLog(b *testing.B) {
 	rm := NewRecoveryManager(b.TempDir())
-	b.Cleanup(rm.Close)
+	b.Cleanup(func() { _ = rm.Close() })
 	msg := message.Message{Role: "user", Content: "benchmark"}
 	if err := rm.PersistMessage("main", msg); err != nil {
 		b.Fatal(err)

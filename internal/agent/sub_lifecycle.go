@@ -52,8 +52,10 @@ func (s *SubAgent) QueuePendingUserDraft(draftID string, parts []message.Content
 
 func (s *SubAgent) UpdatePendingUserDraft(draftID string, parts []message.ContentPart) bool {
 	updated := pendingUserMessageFromDraft(draftID, parts)
-	return s.mutatePendingUserDraft(draftID, func(_ pendingUserMessage) (pendingUserMessage, bool) {
-		return updated, true
+	return s.mutatePendingUserDraft(draftID, func(old pendingUserMessage) (pendingUserMessage, bool) {
+		old.Content, old.Parts = updated.Content, updated.Parts
+		old.Revision++
+		return old, true
 	})
 }
 
@@ -69,6 +71,9 @@ func (s *SubAgent) mutatePendingUserDraft(draftID string, mutate func(pendingUse
 	}
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
+	if s.sessionExecutionPaused() {
+		return false
+	}
 
 	queued := make([]pendingUserMessage, 0, len(s.inputCh)+len(s.inputOverflow))
 	for {
@@ -106,11 +111,28 @@ drained:
 }
 
 func (s *SubAgent) enqueueUserMessage(input pendingUserMessage) bool {
+	return s.enqueueUserMessageWithAdmission(input, false)
+}
+
+// InjectAdmittedInitialInput completes the durable registration of a worker
+// whose creation was admitted before freeze, without starting model execution.
+func (s *SubAgent) InjectAdmittedInitialInput(content string) bool {
+	if s == nil || s.started.Load() {
+		return false
+	}
+	return s.enqueueUserMessageWithAdmission(pendingUserMessage{Content: content}, true)
+}
+
+func (s *SubAgent) enqueueUserMessageWithAdmission(input pendingUserMessage, admitted bool) bool {
 	if s == nil {
 		return false
 	}
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
+	if !admitted && s.sessionExecutionPaused() {
+		return false
+	}
+	s.assignPauseInputIdentity(&input)
 	mailboxID := pendingUserMailboxID(input)
 	if mailboxID != "" {
 		if _, accepted := s.acceptedMailboxIDs[mailboxID]; accepted {
@@ -162,6 +184,10 @@ func (s *SubAgent) reserveUserMessage(input pendingUserMessage) *subAgentInputRe
 	}
 	s.inputQueueMu.Lock()
 	defer s.inputQueueMu.Unlock()
+	if s.sessionExecutionPaused() {
+		return nil
+	}
+	s.assignPauseInputIdentity(&input)
 	if mailboxID := pendingUserMailboxID(input); mailboxID != "" {
 		if _, accepted := s.acceptedMailboxIDs[mailboxID]; accepted {
 			return &subAgentInputReservation{sub: s, duplicate: true}
@@ -194,6 +220,7 @@ func (r *subAgentInputReservation) Commit() bool {
 	r.done = true
 	s.inputQueueReservedMessages--
 	s.inputQueueReservedBytes -= r.bytes
+	s.signalWake()
 	if s.parentCtx.Err() != nil {
 		return false
 	}
@@ -232,6 +259,7 @@ func (r *subAgentInputReservation) Cancel() {
 		s.inputQueueReservedMessages--
 	}
 	s.inputQueueReservedBytes -= r.bytes
+	s.signalWake()
 	if s.inputQueueReservedBytes < 0 {
 		s.inputQueueReservedBytes = 0
 	}
@@ -520,6 +548,7 @@ func (s *SubAgent) handleContinue() {
 		s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("prepare SubAgent continuation: %w", err)})
 		return
 	}
+	s.consumeRestoredPauseInputs()
 	s.drainQueuedContextAppendsForContinue()
 	s.newTurn()
 	s.continueLLMWithPendingUserMessages()

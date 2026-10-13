@@ -21,6 +21,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord config add [<provider>/<model>]` | Browse the verified catalog, or add a known model reference, and append it to a pool |
 | `chord config advise`            | Review and apply catalog-based model configuration recommendations |
 | `chord config refresh-catalog`       | Pull the latest tagged catalog snapshot from the upstream data repository |
+| `chord takeover <action>` | Start or query a transfer, or retry saving, with bounded JSON output |
 | `chord headless`                 | Run without TUI; stdio JSON control plane                        |
 | `chord acp`                      | Serve the Agent Client Protocol over stdio for ACP clients       |
 | `chord doctor config`            | Validate global/project config files and model pool references   |
@@ -68,6 +69,8 @@ On the first run, if global `config.yaml` is missing and Chord can get a control
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-c`, `--continue`          | Resume the most recent non-empty session for this project that is not already open elsewhere                                                                                                 |
 | `-r`, `--resume <id>`       | Resume a specific session ID of the repository the current directory belongs to. A session that recorded a chord-managed worktree reopens in that worktree.                                                                |
+| `--takeover <id>` | Take over a gateway-managed session in the same workspace and restore it paused |
+| `--takeover-timeout <duration>` | Observation budget; omitted waits indefinitely, `0` returns after admission |
 | `--fork-history[=N]`        | Fork the session named by `--resume` at a compaction boundary and resume the fork instead: omit N for the latest applied boundary or pass a `history-N` number (e.g. `=2`). Only valid with `--resume`, and the session must belong to the current repository. Forking works while the source session is open elsewhere (see [Resuming sessions](#resuming-sessions)). |
 | `--yolo`                    | Start with YOLO mode enabled: ordinary tools skip their permission checks and confirmations; handoff, delegate, cancel, done, and compact_context keep following their configured rules                                                                                 |
 | `-w`, `--worktree [name]`   | Create or enter a chord-managed git worktree by name (auto-named when no name is given); sessions are shared by every checkout of the repository. Combine with `--continue` / `--resume` to continue the repository's latest session with the worktree as the working directory. |
@@ -166,6 +169,14 @@ Typical use cases:
 chord auth state clean
 ```
 
+## `chord takeover preflight | start | status | retry-save`
+
+Use `--session <id>` and `--transfer-id <id>` to identify the session and transfer, `-d/--session-dir <workspace>` to select its project directory, and `--json` for one JSON status of at most 64 KiB. `preflight` and `start` also require `--target-kind tui|gateway` and `--target-instance <id>`. `start` accepts an optional `--timeout <duration>` observation budget. Read further blockers with `status --blocker-offset <offset>`, using the previous page's `next_offset`.
+
+`preflight` checks the target configuration and source endpoint without starting a transfer or freezing the source. Its successful JSON reply includes the canonical `workspace`, source runtime and session epoch, and target identity. A linked worktree uses its main repository's canonical workspace identity; pass the worktree directory with `-d` to retain its execution directory.
+
+`--takeover` cannot be combined with `--resume`, `--continue`, `--fork-history`, or `--worktree`. A waiting timeout leaves the source transfer running; retry save failures under the original transfer ID. Transfers support TUI and gateway-managed headless processes running as the same OS user in the same workspace on macOS and Linux. See [Usage](./usage.md) for behavior and recovery actions.
+
 ## `chord headless`
 
 Run Chord without a TUI. Input is JSON commands on stdin, output is JSON envelopes on stdout. See [Headless](./headless.md) for the full protocol.
@@ -178,6 +189,9 @@ Run Chord without a TUI. Input is JSON commands on stdin, output is JSON envelop
 | `-c`, `--continue`          | Continue the latest session in the target directory                    |
 | `-r`, `--resume <id>`       | Resume a specific session ID in the target directory                   |
 | `-w`, `--worktree [name]`   | Create or enter a chord-managed worktree before starting               |
+| `--gateway-managed` | Expose takeover for a gateway that owns the session lifecycle |
+| `--gateway-instance <id>` | Managed binding identity, required with gateway management |
+| `--gateway-transfer-id <id>` | Validate an incoming transfer with `--resume` and restore paused |
 
 ### Examples
 

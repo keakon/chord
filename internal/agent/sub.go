@@ -15,6 +15,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -180,7 +181,19 @@ type SubAgent struct {
 	reductionMu                sync.RWMutex
 	reductionStats             ContextReductionStats
 	promotedToolQueue          []*toolResult // event-loop-owned FIFO; avoids sending results back into the active loop
-	pendingContinue            *continueMsg  // event-loop-owned restart deferred until the current LLM request exits
+	pauseCaptures              []*subPauseCaptureRequest
+	pauseStopped               bool
+	pauseSpecStarted           bool
+	pauseSpecDrained           bool
+	pauseInputs                []pendingUserMessage
+	pauseContextAppends        []message.Message
+	stagedPauseInputs          []pendingUserMessage
+	pauseRequestStarted        atomic.Bool
+	inputSequence              int64
+	inputRuntimeID             string
+	pauseContextSequences      map[string]int64
+	restoredPauseInputs        []pendingUserMessage
+	pendingContinue            *continueMsg // event-loop-owned restart deferred until the current LLM request exits
 
 	// editMatchFailStreak counts repeated approximate-match failures per
 	// target path for edit/apply_patch within the current turn, mirroring
@@ -509,6 +522,9 @@ func (s *SubAgent) checkpointTranscript() error {
 	if err := manager.RewriteLog(s.instanceID, s.ctxMgr.Snapshot()); err != nil {
 		s.notePersistenceFailure(err)
 		return err
+	}
+	if s.parent != nil {
+		s.parent.persist.clearCheckpointFailures(manager, s.instanceID)
 	}
 	s.persistenceHealth.markRecovered()
 	if s.parent != nil {
@@ -908,6 +924,9 @@ func (s *SubAgent) sessionCacheKey() string {
 // switches), because the identity lives on the Client, not on the shared
 // provider impl.
 func (s *SubAgent) setSessionID(client *llm.Client) {
+	if s.parent != nil {
+		client.SetExecutionGate(s.parent.sessionExecutionGate(), s.taskID)
+	}
 	if client == nil {
 		return
 	}
@@ -947,6 +966,12 @@ func subAgentToolWithBaseDir(t tools.Tool, workDir string) tools.Tool {
 // ---------------------------------------------------------------------------
 
 func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.Message) {
+	if s.sessionExecutionPaused() {
+		s.llmRequestInFlight.Store(false)
+		s.signalWake()
+		return
+	}
+	s.pauseRequestStarted.Store(false)
 	// Issuing a request is real activity: refresh the coordination heartbeat so
 	// a long single request is not mistaken for a stalled worker.
 	s.markActivity()
@@ -992,6 +1017,12 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 	compatCfg := llmClient.ThinkingToolcallCompat()
 	scrubThinkingMarkers := compatCfg != nil && compatCfg.EnabledValue()
 
+	requestInputIDs := make([]string, 0, len(s.stagedPauseInputs))
+	for _, input := range s.stagedPauseInputs {
+		if input.InputID != "" {
+			requestInputIDs = append(requestInputIDs, input.InputID)
+		}
+	}
 	s.llmRequestSeq++
 	requestSeq := s.llmRequestSeq
 	s.llmWG.Go(func() {
@@ -1015,8 +1046,10 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			}
 		}()
 
+		preparationCtx, stopPreparation := (toolExecutionPipeline{executionGate: s.sessionExecutionGate()}).preparationContext(turn.Ctx)
+		defer stopPreparation()
 		// Hook: on_before_llm_call (mirrors MainAgent.callLLM).
-		hookResult, hookErr := s.fireHook(turn.Ctx, hook.OnBeforeLLMCall, turn.ID, map[string]any{
+		hookResult, hookErr := s.fireHook(preparationCtx, hook.OnBeforeLLMCall, turn.ID, map[string]any{
 			"model":         modelName,
 			"message_count": len(messages),
 		})
@@ -1060,8 +1093,11 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 		callback := streamReducer.Handle
 
 		s.parent.emitActivity(s.instanceID, ActivityConnecting, "")
-		releaseLLM, err := s.parent.governor.acquireLLM(turn.Ctx, llmClient.PrimaryModelRef())
+		releaseLLM, err := s.parent.governor.acquireLLM(preparationCtx, llmClient.PrimaryModelRef())
 		if err != nil {
+			if s.sessionExecutionPaused() {
+				err = &executiongate.ErrSessionPaused{}
+			}
 			select {
 			case s.llmCh <- &llmResult{err: fmt.Errorf("acquire LLM request capacity: %w", err), turnID: turn.ID}:
 				resultQueued = true
@@ -1076,6 +1112,13 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 			wallReq.wireStreamReducer(streamReducer)
 		}
 		requestCtx := llm.WithResponsesTurnState(turn.Ctx, turn.LLMResponsesState)
+		requestCtx = llm.WithRequestStarted(requestCtx, func() {
+			s.pauseRequestStarted.Store(true)
+			if len(requestInputIDs) > 0 {
+				s.parent.NoteSessionInputsDispatched(s.taskID, requestInputIDs)
+			}
+			s.signalWake()
+		})
 		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{NativeTools: s.nativeRequestPolicy(turn)})
 		// Settle the walltime segment before the flush events so the TUI
 		// re-render they trigger sees the updated TIME buckets; finishing at
@@ -1090,7 +1133,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn, messages []message.M
 		// will actually be persisted. This is the normalization boundary for
 		// successful responses. Empty final content retracts
 		// any text streamed earlier; a tool-only round has no card to clear.
-		if err == nil && resp != nil && turn.Ctx.Err() == nil {
+		if (err == nil || executiongate.IsPaused(err)) && resp != nil && turn.Ctx.Err() == nil {
 			resp.Content = message.NormalizeInvisibleText(resp.Content)
 			if counts := sanitizeResponseZeroWidth(resp); len(counts) > 0 {
 				log.Warnf("SubAgent: sanitized zero-width format characters from response agent=%v turn_id=%v fields=%v", s.instanceID, turn.ID, formatInvisibleCounts(counts))
@@ -1401,6 +1444,7 @@ func (s *SubAgent) newTurn() *Turn {
 	}
 	s.turn.streamingToolExec = NewStreamingToolExecutor(s.turn.ID, ctx, s.parent.emitToTUI, s.executeToolCallSpeculative)
 	s.turn.streamingToolExec.SetEntryBinder(s.bindSpeculativeEntry)
+	s.turn.streamingToolExec.SetExecutionGate(s.sessionExecutionGate())
 	s.turn.streamingToolExec.SetWorkDir(s.effectiveToolBaseDir())
 	s.turn.streamingToolExec.SetTraceCallbacks(s.parent.recordToolTraceSpeculativeStart, s.parent.recordToolTraceFirstVisibleResult, s.parent.recordToolTraceSpeculativeDiscard)
 	log.Debugf("SubAgent: new turn created agent=%v turn_id=%v", s.instanceID, s.turn.ID)

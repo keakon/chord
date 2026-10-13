@@ -16,6 +16,7 @@ import (
 	"github.com/keakon/golog/log"
 	"golang.org/x/net/proxy"
 
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
@@ -383,6 +384,13 @@ func (r *ResponsesProvider) codexWSExecuteRequestLocked(
 		r.codexWSCloseConnUnlocked("write_deadline")
 		return nil, nil, fmt.Errorf("codex ws write deadline: %w", err)
 	}
+	markRequestPrepared(ctx)
+	lease, err := executiongate.Begin(ctx, executiongate.LLM)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer lease.Finish()
+	markRequestSent(ctx)
 	if err := r.codexWSConn.WriteMessage(websocket.TextMessage, payload); err != nil {
 		r.codexWSCloseConnUnlocked("write_failed")
 		return nil, nil, fmt.Errorf("codex ws write: %w", err)
@@ -660,6 +668,9 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 ) (*message.Response, bool, error) {
 	r.codexWSMu.Lock()
 	defer r.codexWSMu.Unlock()
+	if err := executiongate.Check(ctx); err != nil {
+		return nil, false, err
+	}
 
 	wsURL, err := responsesHTTPSBaseToWSS(httpsURL)
 	if err != nil {
@@ -699,7 +710,12 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		hdr := http.Header{}
 		applyCodexWebSocketHeaders(hdr, r.provider, apiKey, sess)
 		applyResponsesTurnStateHeader(hdr, opts.TurnState, opts.TurnStateIdentity)
+		dialLease, admissionErr := executiongate.Begin(ctx, executiongate.LLM)
+		if admissionErr != nil {
+			return nil, false, admissionErr
+		}
 		conn, httpResp, dialErr := dialer.DialContext(ctx, wsURL, hdr)
+		dialLease.Finish()
 		if httpResp != nil && httpResp.Body != nil {
 			defer httpResp.Body.Close()
 		}

@@ -21,6 +21,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord config add [<provider>/<model>]` | 浏览已验证目录，或添加已知模型引用，并追加到模型池 |
 | `chord config advise`             | 查看并处理模型目录给出的配置建议                                    |
 | `chord config refresh-catalog`       | 从上游数据仓库拉取最新 tag 的目录快照                             |
+| `chord takeover <action>` | 查询、发起移交或重试保存，支持有界 JSON 输出 |
 | `chord headless`                  | 无 TUI 启动，stdio JSON 控制面                                    |
 | `chord acp`                       | 为 ACP 客户端提供 stdio 版 Agent Client Protocol 服务             |
 | `chord doctor config`             | 校验全局 / 项目配置文件与模型池引用                               |
@@ -68,6 +69,8 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-c`, `--continue`           | 恢复本项目最近一个非空、且未被其它进程占用的会话                                                                                                            |
 | `-r`, `--resume <id>`        | 恢复当前目录所属仓库里指定 session id 的会话。会话记录过 chord 管理 worktree 时，会先切回该 worktree                                                     |
+| `--takeover <id>` | 接管同一工作区中网关管理的会话，恢复后保持暂停 |
+| `--takeover-timeout <duration>` | 接管等待预算；省略时持续等待，`0` 仅等待接纳 |
 | `--fork-history[=N]`         | 先把 `--resume` 指定的会话在某次压缩边界上 fork 出来，再恢复这个 fork：省略 N 表示最近一次已应用边界，或传 `history-N` 序号（如 `=2`）。只能与 `--resume` 一起用，且该会话必须属于当前仓库。源会话即使正被其它进程打开也可以 fork（见下文[恢复会话](#恢复会话)） |
 | `--yolo`                     | 启动时启用 YOLO 模式：普通工具跳过权限检查、不再弹确认；handoff、delegate、cancel、done 和 compact_context 仍按各自配置的规则执行                                                       |
 | `-w`, `--worktree [name]`    | 创建或进入 chord 管理的 git worktree（不传名字时自动命名）；同一仓库的所有 checkout 共享会话。与 `--continue` / `--resume` 配合时，以该 worktree 为工作目录继续仓库里最近的会话 |
@@ -166,6 +169,14 @@ chord auth state list
 chord auth state clean
 ```
 
+## `chord takeover preflight | start | status | retry-save`
+
+使用 `--session <id>`、`--transfer-id <id>` 指定会话和移交；`-d/--session-dir <workspace>` 指定项目目录，`--json` 输出一条不超过 64 KiB 的 JSON 状态。`preflight` 与 `start` 还要求 `--target-kind tui|gateway` 和 `--target-instance <id>`。`start` 可用 `--timeout <duration>` 限制观察时间。`status --blocker-offset <offset>` 读取后续阻塞项，页起点使用上一页的 `next_offset`。
+
+`preflight` 检查目标配置和源端点，不开始移交，也不冻结源端。成功的 JSON 回执包含 canonical `workspace`、源 runtime 和 session epoch，以及目标身份。linked worktree 使用主仓库的 canonical workspace 身份；通过 `-d` 传入 worktree 目录，保留实际执行目录。
+
+`--takeover` 不能与 `--resume`、`--continue`、`--fork-history` 或 `--worktree` 组合。等待超时后源端仍继续交接；保存失败沿用原移交 ID 重试。只支持同一操作系统用户、同一工作区内的 TUI 与网关受管 headless 双向交接，限 macOS、Linux。行为及恢复动作见[使用说明](./usage_CN.md)。
+
 ## `chord headless`
 
 无 TUI 启动 Chord。stdin 接收 JSON 命令，stdout 输出 JSON envelope。完整协议见 [Headless](./headless_CN.md)。
@@ -178,6 +189,9 @@ chord auth state clean
 | `-c`, `--continue`           | 恢复目标目录下最近一个会话                                      |
 | `-r`, `--resume <id>`        | 恢复目标目录下指定 session id 的会话                            |
 | `-w`, `--worktree [name]`    | 启动前创建或进入 chord 管理的 worktree                          |
+| `--gateway-managed` | 为管理会话生命周期的网关开放接管入口 |
+| `--gateway-instance <id>` | 受管绑定的实例身份，须与受管参数一起使用 |
+| `--gateway-transfer-id <id>` | 配合 `--resume` 校验移交目标并暂停恢复 |
 
 ### 示例
 

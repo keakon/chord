@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/ratelimit"
@@ -661,6 +662,9 @@ func (r *ResponsesProvider) CompleteStream(
 			persistLLMTrace(traceWriter, traceCollector, 0, "websocket", start, nil, callErr)
 			return nil, callErr
 		}
+		if executiongate.IsPaused(wsErr) {
+			return nil, wsErr
+		}
 		if isCodexWSChainStateMismatch(wsErr) {
 			log.Warnf("responses: Codex WebSocket chain-state mismatch, retrying full request without previous_response_id error=%v model=%v", wsErr, model)
 			r.resetCodexWebSocketChain("ws_chain_state_mismatch")
@@ -735,6 +739,9 @@ func apiErrorStatusCode(err error) int {
 }
 
 func shouldStopCodexWSHTTPFallback(err error) bool {
+	if executiongate.IsPaused(err) {
+		return true
+	}
 	apiErr, ok := errors.AsType[*APIError](err)
 	if !ok || apiErr == nil {
 		return false
@@ -849,7 +856,6 @@ func (r *ResponsesProvider) sendAndParse(
 	if err := ctx.Err(); err != nil {
 		return nil, 0, fmt.Errorf("responses request aborted: %w", err)
 	}
-	markRequestSent(ctx)
 	httpResp, err := doRequestUntilHeaders(nativeToolHTTPClient(r.client, captureNative), req, providerResponseHeaderTimeout(r.provider))
 	if err != nil {
 		return nil, 0, fmt.Errorf("send request: %w", err)

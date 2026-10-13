@@ -203,6 +203,7 @@ var slashCommands = []slashCommand{
 	{Cmd: agent.MemoryOrganizeCommand, Desc: "organize all active memories (uses model)"},
 	{Cmd: "/stats", Desc: "usage statistics"},
 	{Cmd: statusCommand, Desc: "runtime overview"},
+	{Cmd: takeoverCommand, Desc: "take over an active local session"},
 	{Cmd: "/rename", Desc: "set or clear session title"},
 }
 

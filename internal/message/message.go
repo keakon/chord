@@ -300,6 +300,8 @@ const (
 
 // Message represents a conversation message (user, assistant, or tool result).
 type Message struct {
+	// InputID is local recovery metadata and is never a provider wire field.
+	InputID          string                `json:"input_id,omitempty"`
 	NativeTools      *NativeToolHistory    `json:"native_tools,omitempty"`
 	Question         json.RawMessage       `json:"question,omitempty"`
 	Role             Role                  `json:"role"` // "user", "assistant", "tool"

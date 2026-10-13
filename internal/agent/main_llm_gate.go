@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -459,6 +460,10 @@ func (a *MainAgent) noteModelDrivenDenyDiagnosticOnce() {
 }
 
 func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID uint64, agentErrSourceID string) {
+	if a.sessionExecutionPaused() {
+		a.mainLLMRequestInFlight.Store(false)
+		return
+	}
 	// A pre-request barrier failure is recoverable once this request is about
 	// to be launched on the live context; do not let a later user message
 	// mistake the now-progressing turn for the original stall.
@@ -598,6 +603,13 @@ func (a *MainAgent) beginMainLLMAfterPreparation(turnCtx context.Context, turnID
 }
 
 func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnID uint64, messages []message.Message, agentErrSourceID string) {
+	if a.sessionExecutionPaused() {
+		return
+	}
+	turnCtx = llm.WithRequestStarted(turnCtx, func() {
+		count := a.requestStarts.Add(1)
+		a.sendEvent(Event{Type: eventSessionInputDispatched, Payload: count})
+	})
 	questionObservation := &questionRequestObservation{projection: a.snapshotQuestionRequest()}
 	turnCtx = context.WithValue(turnCtx, questionRequestContextKey{}, questionObservation)
 	if a.turn != nil && a.turn.ID == turnID {
@@ -616,6 +628,13 @@ func (a *MainAgent) spawnMainLLMResponseGoroutine(turnCtx context.Context, turnI
 		// that flush (see StreamSegmentEndedEvent).
 		defer a.emitToTUI(StreamSegmentEndedEvent{TurnID: turnID, RequestSeq: requestSeq})
 		resp, err := a.callLLMForRequest(turnCtx, messages, requestSeq)
+		if executiongate.IsPaused(err) {
+			if resp == nil {
+				a.sendEvent(Event{Type: eventSessionLLMPaused, TurnID: turnID})
+				return
+			}
+			err = nil // settle the already-received response through the normal owner path
+		}
 		if err != nil {
 			if turnCtx.Err() != nil {
 				return

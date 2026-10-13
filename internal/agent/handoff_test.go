@@ -146,7 +146,7 @@ func TestHandoffApproveSettlesResultBeforeSessionSwitch(t *testing.T) {
 		t.Fatalf("execution bootstrap message missing from the new session context: %+v", a.ctxMgr.Snapshot())
 	}
 	oldRecovery := recovery.NewRecoveryManager(plannerSessionDir)
-	t.Cleanup(oldRecovery.Close)
+	t.Cleanup(func() { _ = oldRecovery.Close() })
 	snapshot, err := oldRecovery.Recover()
 	if err != nil {
 		t.Fatalf("recover planner snapshot: %v", err)

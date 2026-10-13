@@ -551,6 +551,14 @@ func headIsCompactionCheckpoint(messages []message.Message) bool {
 }
 
 func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.Message, originalFirstUserHint string) (string, error) {
+	a.recoverySnapshotMu.Lock()
+	protectedInputs := a.pause.checkpoint != nil && len(a.pause.checkpoint.PendingInputs) > 0
+	a.recoverySnapshotMu.Unlock()
+	if manager := a.recoveryManager(); manager != nil && protectedInputs {
+		if err := manager.ValidatePendingInputRewrite(identity.MainAgentID, messages); err != nil {
+			return "", err
+		}
+	}
 	// The caller drains the persistence pump before entering
 	// ReplacePrefixAtomic: the wait can take unbounded time while the pump is
 	// backed up, and it does not touch the ctxmgr lock, so waiting inside the
@@ -587,8 +595,10 @@ func (a *MainAgent) rewriteSessionAfterCompaction(index int, messages []message.
 	// through the ownership rather than caching one, and see nil for the span
 	// where the transcript file is being swapped underneath them.
 	if manager := a.recoveryManager(); manager != nil {
+		if err := manager.Close(); err != nil {
+			return "", fmt.Errorf("close transcript before compaction: %w", err)
+		}
 		a.clearRecoveryManagerIf(manager)
-		manager.Close()
 	}
 
 	if hadMain {
@@ -707,7 +717,11 @@ func (a *MainAgent) persistSnapshotLocked(build func() *recovery.SessionSnapshot
 	if manager == nil {
 		return nil
 	}
-	return manager.SaveSnapshot(build())
+	snapshot := build()
+	if a.pause.checkpoint != nil {
+		snapshot.Pause = a.pause.checkpoint.Clone()
+	}
+	return manager.SaveSnapshot(snapshot)
 }
 
 func (a *MainAgent) saveRecoverySnapshot() {

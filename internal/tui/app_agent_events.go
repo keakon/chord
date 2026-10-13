@@ -148,7 +148,9 @@ func (m *Model) handleAgentEvent(msg agentEventMsg) tea.Cmd {
 		return m.applyUIEffects(effects)
 	}
 
-	if handled, sub := m.handleStreamingAgentEvent(msg.event); handled {
+	if handled, sub := m.handleTakeoverAgentEvent(msg.event); handled {
+		effects.merge(sub)
+	} else if handled, sub := m.handleStreamingAgentEvent(msg.event); handled {
 		effects.merge(sub)
 	} else if handled, sub := m.handleTurnAgentEvent(msg.event); handled {
 		effects.merge(sub)

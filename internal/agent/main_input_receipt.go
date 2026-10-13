@@ -21,9 +21,7 @@ func (InputResultEvent) agentEvent() {}
 // SendUserMessageWithReceipt enqueues a main-agent input without waiting for
 // consumption. False means shutdown prevented admission.
 func (a *MainAgent) SendUserMessageWithReceipt(content, requestID string) bool {
-	p := a.acceptRawUserMessage(content, nil)
-	p.RequestID = requestID
-	return a.sendEvent(Event{Type: EventUserMessage, Payload: p})
+	return a.sendSessionInput(content, nil, requestID)
 }
 
 func (a *MainAgent) emitInputResult(requestID, status, detail string, turnID uint64) {

@@ -15,8 +15,9 @@ import (
 )
 
 type sessionStartupOptions struct {
-	ContinueLatest bool
-	ResumeID       string
+	ContinueLatest   bool
+	ResumeID         string
+	ExpectedTransfer recovery.TransferIdentity
 	// NewSessionMeta is written via recovery.SaveSessionMeta when the
 	// startup creates a fresh session. Resumed/continued sessions keep
 	// their original metadata untouched. Used by the worktree path to
@@ -48,6 +49,14 @@ type sessionStartupPlan struct {
 func planSessionStartup(sessionsDir, stateDir string, opts sessionStartupOptions) (sessionStartupPlan, error) {
 	if opts.Plan != nil {
 		if opts.Plan.SessionDir != "" {
+			if opts.ExpectedTransfer.TransferID != "" {
+				if opts.Plan.SessionLock == nil {
+					return sessionStartupPlan{}, fmt.Errorf("restore_failed: transfer requires an owned session lock")
+				}
+				if _, err := validateTakeoverStartup(opts.Plan.SessionDir, opts.ExpectedTransfer); err != nil {
+					return sessionStartupPlan{}, err
+				}
+			}
 			return *opts.Plan, nil
 		}
 		// --continue was resolved before initApp and could not claim a session;
@@ -58,7 +67,7 @@ func planSessionStartup(sessionsDir, stateDir string, opts sessionStartupOptions
 		sessionDir := filepath.Join(sessionsDir, opts.ResumeID)
 		mainPath := filepath.Join(sessionDir, identity.MainSessionLogFilename)
 		info, err := os.Stat(mainPath)
-		if err != nil || info.Size() == 0 {
+		if (err != nil || info.Size() == 0) && !hasCompletePausedCheckpoint(sessionDir) {
 			return sessionStartupPlan{}, fmt.Errorf("session %s not found or has no messages in the current project", opts.ResumeID)
 		}
 		// --resume names one specific session: silently substituting another
@@ -69,6 +78,12 @@ func planSessionStartup(sessionsDir, stateDir string, opts sessionStartupOptions
 				return sessionStartupPlan{}, fmt.Errorf("%w; close that process, or run chord --continue to pick up the most recent session you can open", lockErr)
 			}
 			return sessionStartupPlan{}, lockErr
+		}
+		if opts.ExpectedTransfer.TransferID != "" {
+			if _, err := validateTakeoverStartup(sessionDir, opts.ExpectedTransfer); err != nil {
+				_ = lock.Release()
+				return sessionStartupPlan{}, err
+			}
 		}
 		return sessionStartupPlan{
 			SessionDir:       sessionDir,

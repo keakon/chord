@@ -55,6 +55,37 @@ CLI flag：`-d/--session-dir`、`-c/--continue`、`-r/--resume`、`-w/--worktree
 
 实际集成中，保持进程 stdin 打开，逐行读取 stdout，并单独收集 stderr。无需先实现事件过滤：未发送 `subscribe` 时会收到所有可订阅事件。
 
+## 网关管理的会话接管
+
+在 macOS 和 Linux 上，管理会话生命周期的网关使用以下参数启动受管进程：
+
+```bash
+chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <workspace>
+```
+
+恢复移交目标时，加上 `--resume <session-id> --gateway-transfer-id <transfer-id>`。Chord 会取得会话锁、校验完整暂停记录及目标绑定，然后恢复到 `ready_paused`。普通 headless 和 ACP 不开放接管入口。
+
+受管进程的 `ready` 与 `status_response` 包含 `runtime_id`、`session_epoch` 和 canonical `workspace`；`session_switched` 也提供当前会话的这些身份。workspace 标识仓库，与进程实际执行目录分开，linked worktree 也使用主仓库身份。暂停恢复后的 `ready` 还带 `state: "ready_paused"`、`transfer_id` 和 `binding_instance_id`。集成方核对移交 ID、会话 ID、workspace 和绑定后才开放目标路由。
+
+`ready` 与 `status_response` 的 `paused_inputs` 包含 `paused`、`pending_input_count` 和 `inputs`。每项包含 `input_id`、`owner_task_id`、单行 `preview` 和 `attachment_count`；最多返回前 8 项，预览最多 160 个 Unicode 字符。附件路径和内容不会出现在摘要中。`paused_inputs: null` 表示无法提供有效摘要，不能当作空队列。暂停目标只有收到明确继续或新请求后才执行。
+
+源端通过不受 `subscribe` 过滤的事件报告交接：
+
+| 事件 | 集成方动作 |
+| --- | --- |
+| `session_transfer_preparing` | 持久阻断当前绑定的新消息与自动重启，等待此前已写入的 `send` 回执，再回复技术 ACK |
+| `session_transfer_status` | 按 `state` 展示等待、保存中或保存失败，以及阻塞项 |
+| `session_transfer_saved` | 保存完成；继续等待锁释放 |
+| `session_transfer_released` | 源端已释放会话锁，随后以退出码 `20` 退出；不要按崩溃自动重启 |
+
+事件使用移交身份关联，不依赖普通状态快照的 `seq`。技术 ACK 按 stdin 顺序发送，身份字段从 `session_transfer_preparing.payload` 原样复制：
+
+```json
+{"type":"session_transfer_prepared","transfer_id":"transfer-1","session_id":"session-1","source_runtime_id":"runtime-1","source_session_epoch":1,"binding_instance_id":"binding-1","accepted":true}
+```
+
+拒绝时使用 `accepted: false`，并带 `error_code` 和 `message`。技术 ACK 等待上限为 5 秒。重新开放路由前，用原移交 ID 查询并核对同一源端和绑定身份，确认状态为 `prepare_failed`。`preflight` 拒绝表示 start 尚未接纳；回执丢失或结果不明时继续保持绑定阻断。等待超时不停止源端工作，也不释放锁。目标端通过 `chord takeover preflight/start/status/retry-save --json` 协调交接；用户入口与恢复动作见[会话使用说明](./usage_CN.md)。
+
 ## 命令
 
 向 stdin 发送以下命令。未知命令会收到 `error` envelope。

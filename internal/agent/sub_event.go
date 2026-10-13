@@ -33,13 +33,17 @@ func (s *SubAgent) runLoop() {
 	}()
 
 	for {
+		if s.pauseStopped {
+			return
+		}
+		s.trySessionPauseCaptures()
 		s.refillInputChannelFromOverflow()
 		s.refillContextAppendChannelFromOverflow()
 		// Issue a queued silence-recovery request as soon as the aborted
 		// request goroutine releases the in-flight gate. Bound the wait by the
 		// watchdog grace window below in case the goroutine ignores
 		// cancellation entirely.
-		if s.pendingLLMSilenceRecovery != "" {
+		if !s.sessionExecutionPaused() && s.pendingLLMSilenceRecovery != "" {
 			if s.parentCtx.Err() != nil {
 				s.pendingLLMSilenceRecovery = ""
 				s.llmSilenceEscalatedAt = time.Time{}
@@ -59,7 +63,7 @@ func (s *SubAgent) runLoop() {
 		// appended user message would land between the assistant tool_calls
 		// message and the tool results that close the batch. They stay queued
 		// and are drained once the batch closes.
-		if !s.openToolBatchDefersContextAppends() {
+		if !s.sessionExecutionPaused() && !s.openToolBatchDefersContextAppends() {
 			if msg, ok := s.tryReceiveContextAppend(); ok {
 				s.appendContextOnly(msg)
 				continue
@@ -87,7 +91,7 @@ func (s *SubAgent) runLoop() {
 			inputCh = s.inputCh
 		}
 		var ctxAppendCh <-chan message.Message
-		if !s.openToolBatchDefersContextAppends() {
+		if !s.sessionExecutionPaused() && !s.openToolBatchDefersContextAppends() {
 			ctxAppendCh = s.ctxAppendCh
 		}
 		// Arm the in-flight LLM silence watchdog for the current deadline; the
@@ -179,7 +183,7 @@ func (s *SubAgent) runLoop() {
 // bounds the wait for the aborted request goroutine to release the in-flight
 // gate, so a provider that ignores context cancellation still terminates.
 func (s *SubAgent) llmSilenceWatchdogDeadline() (time.Time, bool) {
-	if s == nil || s.llmSilenceBudget <= 0 {
+	if s == nil || s.sessionExecutionPaused() || s.llmSilenceBudget <= 0 {
 		return time.Time{}, false
 	}
 	if s.pendingLLMSilenceRecovery != "" {
@@ -223,7 +227,7 @@ func (s *SubAgent) handleLLMSilenceIfDue() bool {
 // the turn with EventAgentError once the recovery budget is exhausted. It
 // reports whether it changed state (so the caller re-evaluates the loop).
 func (s *SubAgent) handleLLMSilenceDeadline(now time.Time) bool {
-	if s == nil || s.parentCtx.Err() != nil || s.llmSilenceBudget <= 0 {
+	if s == nil || s.sessionExecutionPaused() || s.parentCtx.Err() != nil || s.llmSilenceBudget <= 0 {
 		return false
 	}
 	if s.pendingLLMSilenceRecovery != "" {
@@ -348,11 +352,14 @@ func (s *SubAgent) finishLLMRequest() {
 		return
 	}
 	s.llmRequestInFlight.Store(false)
+	if s.pauseRequestStarted.Load() {
+		s.stagedPauseInputs = nil
+	}
 	s.parent.sendEvent(Event{Type: EventSubAgentRequestBoundary, SourceID: s.instanceID})
 }
 
 func (s *SubAgent) canStartUserTurn() bool {
-	if s == nil || s.State() != SubAgentStateRunning || s.llmRequestInFlight.Load() {
+	if s == nil || s.sessionExecutionPaused() || s.State() != SubAgentStateRunning || s.llmRequestInFlight.Load() {
 		return false
 	}
 	if s.turn == nil {
@@ -470,6 +477,9 @@ func (s *SubAgent) tryHandleContinueSignal() bool {
 }
 
 func (s *SubAgent) handleContinueSignal(msg continueMsg) {
+	if s.handleSessionPauseControl(msg) {
+		return
+	}
 	if msg.cancelCurrentTurn {
 		s.pendingContinue = nil
 		s.cancelCurrentTurnFromLoop()
@@ -488,7 +498,7 @@ func (s *SubAgent) handleContinueSignal(msg continueMsg) {
 }
 
 func (s *SubAgent) tryHandlePendingContinue() bool {
-	if s.pendingContinue == nil || s.llmRequestInFlight.Load() {
+	if s.sessionExecutionPaused() || s.pendingContinue == nil || s.llmRequestInFlight.Load() {
 		return false
 	}
 	msg := *s.pendingContinue

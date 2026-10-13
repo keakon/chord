@@ -200,6 +200,10 @@ type PendingToolCall struct {
 // pendingUserMessage holds a single queued user message when the agent is busy.
 // When Parts is non-nil it is a multi-part message (e.g. text + images); otherwise Content is used.
 type pendingUserMessage struct {
+	InputID   string
+	RequestID string
+	Revision  uint64
+	Stage     string
 	// AcceptedOrder is the arrival order of the raw main-agent user message this
 	// entry queued, or 0 for entries that are not raw user messages. A drain
 	// matches it against the cancel watermark so a cancel also covers a message

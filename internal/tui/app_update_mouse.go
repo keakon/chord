@@ -449,6 +449,9 @@ func (m *Model) mouseHitZones(mouse tea.Mouse) mouseHitZones {
 }
 
 func (m *Model) handleMouseMsg(msg tea.MouseMsg) tea.Cmd {
+	if m.takeoverInputFrozen() {
+		return m.handleTakeoverMouse(msg)
+	}
 	if m.interactionSuppressed() {
 		return nil
 	}

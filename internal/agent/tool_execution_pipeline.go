@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
@@ -31,6 +32,7 @@ const (
 )
 
 type toolExecutionPipeline struct {
+	executionGate    *executiongate.Gate
 	agentID          string
 	journalAgentID   string
 	eventAgentID     string
@@ -150,7 +152,7 @@ func (p toolExecutionPipeline) withMachineStateBaseDir(tc message.ToolCall) tool
 // applied per request instead of by mutating that shared instance: a worktree
 // switch takes effect for the calls that bind the new snapshot and never
 // half-updates a call already in flight.
-func (p toolExecutionPipeline) executeToolForCall(ctx context.Context, tc message.ToolCall) (string, error) {
+func (p toolExecutionPipeline) executeToolForCall(ctx context.Context, tc message.ToolCall, execResult *ToolExecutionResult) (string, error) {
 	tool, err := p.boundToolForCall(tc)
 	if err != nil {
 		return "", err
@@ -159,6 +161,7 @@ func (p toolExecutionPipeline) executeToolForCall(ctx context.Context, tc messag
 	if question, ok := tool.(*tools.QuestionTool); ok && p.agentID != identity.MainAgentID && !strings.HasPrefix(p.agentID, "main-") {
 		tool = question.Synchronous()
 	}
+	execResult.ExecutionStarted = true
 	return tool.Execute(tools.WithToolCallID(ctx, tc.ID), args)
 }
 
@@ -433,9 +436,20 @@ func appendUniqueString(values []string, value string) []string {
 	return append(values, value)
 }
 
-func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall, fireHook bool) (ToolExecutionResult, error) {
+func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall, fireHook bool) (execResult ToolExecutionResult, returnedErr error) {
+	executionAdmitted := false
+	preparationCtx, stopPreparation := p.preparationContext(ctx)
+	defer stopPreparation()
+	defer func() {
+		if !executionAdmitted && returnedErr != nil && preparationCtx.Err() != nil && p.executionGate.Snapshot().Paused {
+			returnedErr = &executiongate.ErrSessionPaused{}
+		}
+	}()
 	tc.Name = tools.NormalizeName(tc.Name)
-	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
+	execResult = ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
+	if p.executionGate.Snapshot().Paused {
+		return execResult, &executiongate.ErrSessionPaused{}
+	}
 	if err := normalizeCompatibleToolCallArgs(&tc, &execResult); err != nil {
 		return execResult, err
 	}
@@ -455,11 +469,11 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		return execResult, err
 	}
 
-	if err := p.applyPermission(ctx, &tc, &execResult); err != nil {
+	if err := p.applyPermission(preparationCtx, &tc, &execResult); err != nil {
 		return execResult, err
 	}
 	if fireHook {
-		modified, err := p.applyToolHook(ctx, &tc, &execResult)
+		modified, err := p.applyToolHook(preparationCtx, &tc, &execResult)
 		if err != nil {
 			return execResult, err
 		}
@@ -469,7 +483,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 			}
 			// A hook may rewrite the target, so re-anchor from the binding dir.
 			p = p.withMachineStateBaseDir(tc)
-			if err := p.applyPermission(ctx, &tc, &execResult); err != nil {
+			if err := p.applyPermission(preparationCtx, &tc, &execResult); err != nil {
 				return execResult, err
 			}
 		}
@@ -545,7 +559,7 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	// conflicts serialize on the cheaper file lock first; a blocking tool that
 	// holds a tracked write can then yield its lease slot without deadlocking
 	// against a sibling waiting for the same resource ordering.
-	releaseLease, err := p.acquireWorkspaceLease(ctx, tc)
+	releaseLease, err := p.acquireWorkspaceLease(preparationCtx, tc)
 	if err != nil {
 		return execResult, err
 	}
@@ -570,12 +584,19 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		backupOutcome = p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, deleteLocks)
 	}
 
+	executionLease, err := p.executionGate.TryBegin(executiongate.Tool, p.taskID)
+	if err != nil {
+		return execResult, err
+	}
+	executionAdmitted = true
+	defer executionLease.Finish()
 	// Started journal: see recordToolActivityStarted.
 	if err := p.recordToolActivityStarted(tc); err != nil {
 		return execResult, err
 	}
 
-	result, err := p.executeToolForCall(agentCtx, tc)
+	agentCtx = executiongate.WithLease(agentCtx, executionLease)
+	result, err := p.executeToolForCall(agentCtx, tc, &execResult)
 	execResult.Images = imageSink.Drain()
 	deleteAudit, hasDeleteAudit := deleteAuditSink.Audit()
 	if deleteLocks != nil && hasDeleteAudit {
@@ -667,9 +688,20 @@ func (p toolExecutionPipeline) toolActivityAgentID() string {
 	return p.agentID
 }
 
-func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc message.ToolCall) (execResult ToolExecutionResult, returnedErr error) {
+	executionAdmitted := false
+	preparationCtx, stopPreparation := p.preparationContext(ctx)
+	defer stopPreparation()
+	defer func() {
+		if !executionAdmitted && returnedErr != nil && preparationCtx.Err() != nil && p.executionGate.Snapshot().Paused {
+			returnedErr = &executiongate.ErrSessionPaused{}
+		}
+	}()
+	if p.executionGate.Snapshot().Paused {
+		return ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}, &executiongate.ErrSessionPaused{}
+	}
 	tc.Name = tools.NormalizeName(tc.Name)
-	execResult := ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
+	execResult = ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
 	if err := normalizeCompatibleToolCallArgs(&tc, &execResult); err != nil {
 		return execResult, err
 	}
@@ -700,7 +732,7 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	if p.captureWalltimeTarget != nil {
 		execResult.walltimeTarget = p.captureWalltimeTarget()
 	}
-	releaseLease, err := p.acquireWorkspaceLease(ctx, tc)
+	releaseLease, err := p.acquireWorkspaceLease(preparationCtx, tc)
 	if err != nil {
 		return execResult, err
 	}
@@ -749,6 +781,13 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	} else {
 		backupOutcome = p.backupRiskyPreWriteState(tc, trackedFilePath, staleWrite, execResult.PreContent, execResult.PreExisted, speculativeDeleteLocks(tc.Name, hooks))
 	}
+	executionLease, err := p.executionGate.TryBegin(executiongate.Tool, p.taskID)
+	if err != nil {
+		rollbackSpeculativeToolHooks(execResult)
+		return execResult, err
+	}
+	executionAdmitted = true
+	defer executionLease.Finish()
 	// Started journal: mirror execute() so a crash after a speculative file
 	// mutation is classified outcome_unknown during restore, never not_started
 	// ("safe to retry"). TodoWrite stays promote-journaled — its speculative
@@ -759,7 +798,8 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 			return execResult, err
 		}
 	}
-	result, err := p.executeToolForCall(agentCtx, tc)
+	agentCtx = executiongate.WithLease(agentCtx, executionLease)
+	result, err := p.executeToolForCall(agentCtx, tc, &execResult)
 	execResult.Images = imageSink.Drain()
 	if err != nil && staleWrite && (tc.Name == tools.NameEdit || tc.Name == tools.NameApplyPatch) {
 		err = wrapStaleEditError(err)
@@ -1566,4 +1606,19 @@ func commitPromotedReadToolSideEffects(track *filelock.FileTracker, agentID, too
 	if readResultShowsWholeFile(result) {
 		track.TrackObservedSnapshot(path, agentID, hash)
 	}
+}
+
+// Preparation observes freeze independently from the execution context.
+func (p toolExecutionPipeline) preparationContext(ctx context.Context) (context.Context, func()) {
+	preparation, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-p.executionGate.Frozen():
+			cancel()
+		case <-done:
+		case <-ctx.Done():
+		}
+	}()
+	return preparation, func() { close(done); cancel() }
 }

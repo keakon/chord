@@ -337,9 +337,15 @@ func (m *Model) sendDraft(draft queuedDraft) tea.Cmd {
 }
 
 func (m *Model) drainQueuedDrafts() tea.Cmd {
+	if m.takeoverInputFrozen() || m.takeover.status.State == agent.SessionPauseReady {
+		return nil
+	}
 	agentID := normalizeDraftAgentID(m.focusedAgentID)
 	idx := -1
 	for i, draft := range m.queuedDrafts {
+		if strings.HasPrefix(draft.ID, "restored:") {
+			continue
+		}
 		if normalizeDraftAgentID(draft.AgentID) == agentID {
 			idx = i
 			break
@@ -464,6 +470,9 @@ func lastContinuableMessage(msgs []message.Message) (message.Message, bool) {
 }
 
 func (m *Model) tryContinue() tea.Cmd {
+	if m.takeoverInputFrozen() {
+		return nil
+	}
 	if m.agent == nil || m.continueBlocked() {
 		return nil
 	}

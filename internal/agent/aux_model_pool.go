@@ -123,7 +123,7 @@ func (a *MainAgent) newAuxModelPoolClient(refs []string, timeout time.Duration, 
 		}
 		return nil, fmt.Errorf("model pool has no usable refs")
 	}
-	return newAuxClientFromPool(pool, selectedIdx, outputMax, a.ServiceTier()), nil
+	return a.bindAuxExecutionGate(newAuxClientFromPool(pool, selectedIdx, outputMax, a.ServiceTier())), nil
 }
 
 func newAuxClientFromPool(pool []llm.FallbackModel, selectedIdx int, outputMax int, serviceTier config.ServiceTier) *llm.Client {
@@ -182,5 +182,6 @@ func rebuildClientWithTotalTimeout(client *llm.Client, totalTimeout time.Duratio
 	rebuilt := llm.NewClient(providerCfg, impl, client.ModelID(), client.MaxTokens(), "")
 	rebuilt.SetOutputTokenMax(client.OutputTokenMax())
 	rebuilt.SetVariant(client.Variant())
+	rebuilt.SetExecutionGate(client.ExecutionGate(), "auxiliary")
 	return rebuilt, nil
 }

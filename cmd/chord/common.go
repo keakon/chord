@@ -111,6 +111,7 @@ type AppContext struct {
 	// the MainAgent.
 	StartupSkippedLockedSessions []string
 	InstanceID                   string
+	takeoverRuntime              atomic.Pointer[runtimeTakeover]
 }
 
 // GetOrCreateProvider returns the cached ProviderConfig for provName, or creates
@@ -788,6 +789,9 @@ func initApp(asyncMCP bool, mode string, sessionOpts sessionStartupOptions) (*Ap
 			return
 		}
 		ac.SessionDir = sessionDir
+		if endpoint := ac.takeoverRuntime.Load(); endpoint != nil {
+			go endpoint.refresh()
+		}
 		ac.logCtx.SID = filepath.Base(sessionDir)
 		if ac.LogWriter != nil {
 			logger := newGologLoggerWithContext(ac.LogWriter, ac.logLevel, ac.logCtx)

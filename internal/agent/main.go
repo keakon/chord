@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/keakon/chord/internal/command"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/identity"
@@ -38,6 +40,10 @@ import (
 // (eventCh) for sequencing work and an output channel (outputCh) that the TUI
 // consumes.
 type MainAgent struct {
+	pause                       sessionPauseRuntime
+	stagedMainInputs            []stagedSessionInput // owned by the event loop
+	requestStarts               atomic.Uint64
+	executionGate               *executiongate.Gate // guarded by stateMu; replaced with the session
 	questions                   questionRuntime
 	questionWaiting             atomic.Bool
 	questionCompletionPending   atomic.Int64
@@ -938,6 +944,8 @@ func NewMainAgent(
 	governor := newResourceGovernor(orchestrationCfg)
 
 	a := &MainAgent{
+		pause:                   sessionPauseRuntime{inputPrefix: rand.Text()},
+		executionGate:           &executiongate.Gate{},
 		parentCtx:               parentCtx,
 		cancel:                  cancel,
 		llmClient:               llmClient,
@@ -1412,11 +1420,13 @@ func (a *MainAgent) GetTokenUsage() message.TokenUsage {
 // slash commands are handled immediately; otherwise a new turn is started.
 func (a *MainAgent) handleUserMessage(evt Event) {
 	requestID := ""
+	inputID := ""
 	var content string
 	var parts []message.ContentPart
 	acceptedOrder := int64(0)
 	switch p := evt.Payload.(type) {
 	case acceptedUserMessage:
+		inputID = p.InputID
 		requestID = p.RequestID
 		content = p.Content
 		parts = p.Parts
@@ -1438,6 +1448,9 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	}
 
 	log.Debugf("handling user message content_len=%v", len(content))
+	if a.handlePausedSessionInput(content, parts, inputID, requestID, acceptedOrder) {
+		return
+	}
 
 	// /export, /models, /tier, and /compact are local-only: never queue or send to the model.
 	// Pass busy = (a.turn != nil) so handlers skip setIdleAndDrainPending and
@@ -1482,6 +1495,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 			return
 		}
 		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
+			InputID: inputID, RequestID: requestID,
 			AcceptedOrder: acceptedOrder,
 			Content:       content,
 			Parts:         parts,
@@ -1502,6 +1516,7 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	// only the new message.
 	if a.pendingUserDrainSuspended {
 		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pendingUserMessage{
+			InputID: inputID, RequestID: requestID,
 			AcceptedOrder: acceptedOrder,
 			Content:       content,
 			Parts:         parts,
@@ -1524,11 +1539,13 @@ func (a *MainAgent) handleUserMessage(evt Event) {
 	outC, outP := a.expandSlashCommandForModel(content, parts)
 	outC, outP = a.filterUnsupportedParts(outC, outP)
 	userMsg := message.Message{
+		InputID: inputID,
 		Role:    message.RoleUser,
 		Content: outC,
 		Parts:   outP,
 	}
 	a.recordCommittedUserMessage(userMsg)
+	a.stageSessionInput(pendingUserMessage{InputID: inputID, RequestID: requestID, AcceptedOrder: acceptedOrder, Content: outC, Parts: outP, FromUser: true})
 
 	// A cancel request accepted before this message was dispatched keeps the
 	// message but not the work: the turn exists, so the transcript and recovery
@@ -1556,6 +1573,10 @@ func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 	}
 	pending.Parts = pendingDraftParts(pending)
 	pending.Content = pendingUserMessageText(pending)
+	if a.sessionExecutionPaused() {
+		a.pendingUserMessages = enqueuePendingUserMessage(a.pendingUserMessages, pending)
+		return
+	}
 
 	if a.turn != nil || a.mcpTransitionActive.Load() {
 		if a.turn != nil {
@@ -1599,6 +1620,7 @@ func (a *MainAgent) handlePendingDraftUpsert(evt Event) {
 	// transition), and a later drain would inject the same draft a second time.
 	a.pendingUserMessages, _ = removePendingDraft(a.pendingUserMessages, pending.DraftID)
 	a.recordCommittedUserMessage(userMsg)
+	a.stageSessionInput(pending)
 	a.emitPendingDraftConsumed(pending.DraftID, userMsg)
 	a.beginMainLLMAfterPreparation(turnCtx, turnID, "")
 }

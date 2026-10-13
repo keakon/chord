@@ -148,6 +148,7 @@ type TurnCancelledPayload struct {
 // an earlier cancel request is compared against: a message accepted at or below
 // the cancel's watermark keeps its place in the transcript but not the work.
 type acceptedUserMessage struct {
+	InputID       string
 	RequestID     string
 	Content       string
 	Parts         []message.ContentPart
@@ -217,6 +218,7 @@ type subAgentControlResult struct {
 }
 
 type SubAgentSendMessagePayload struct {
+	Parts         []message.ContentPart
 	Ctx           context.Context
 	CallerAgentID string
 	CallerTaskID  string

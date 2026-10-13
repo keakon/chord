@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -32,6 +34,9 @@ type subAgentPersistDebouncer struct {
 	// debounce window cannot rewrite the previous session's meta files into the
 	// successor's directory.
 	pendingDir string
+	sealed     bool
+	callbacks  sync.WaitGroup
+	failure    error
 }
 
 func newSubAgentPersistDebouncer(fire func(), sessionDir func() string) *subAgentPersistDebouncer {
@@ -48,6 +53,11 @@ func (d *subAgentPersistDebouncer) markSubDirty(sub *SubAgent) {
 		return
 	}
 	d.mu.Lock()
+	if d.sealed {
+		d.failure = errors.Join(d.failure, fmt.Errorf("sub-agent persistence producer is sealed"))
+		d.mu.Unlock()
+		return
+	}
 	d.dirtySubs[sub.instanceID] = sub
 	d.armLocked()
 	d.mu.Unlock()
@@ -59,6 +69,11 @@ func (d *subAgentPersistDebouncer) markRegistryDirty() {
 		return
 	}
 	d.mu.Lock()
+	if d.sealed {
+		d.failure = errors.Join(d.failure, fmt.Errorf("task registry persistence producer is sealed"))
+		d.mu.Unlock()
+		return
+	}
 	d.registryDirty = true
 	d.armLocked()
 	d.mu.Unlock()
@@ -71,11 +86,14 @@ func (d *subAgentPersistDebouncer) armLocked() {
 	if d.timer != nil {
 		return
 	}
+	d.callbacks.Add(1)
 	d.timer = time.AfterFunc(subAgentPersistFlushDelay, func() {
+		defer d.callbacks.Done()
 		d.mu.Lock()
 		d.timer = nil
+		sealed := d.sealed
 		d.mu.Unlock()
-		if d.fire != nil {
+		if !sealed && d.fire != nil {
 			d.fire()
 		}
 	})
@@ -101,19 +119,56 @@ func (d *subAgentPersistDebouncer) takePending() (map[string]*SubAgent, bool, st
 // reset drops everything pending and stops the timer. Session switches call
 // this: a late flush must never write the previous session's meta files into
 // the new session directory.
-func (d *subAgentPersistDebouncer) reset() {
+func (d *subAgentPersistDebouncer) stopAndWait() {
 	if d == nil {
 		return
 	}
 	d.mu.Lock()
-	if d.timer != nil {
-		d.timer.Stop()
+	d.sealed = true
+	if d.timer != nil && d.timer.Stop() {
+		d.callbacks.Done()
 		d.timer = nil
 	}
+	d.mu.Unlock()
+	d.callbacks.Wait()
+}
+
+func (d *subAgentPersistDebouncer) reset() {
+	if d == nil {
+		return
+	}
+	d.stopAndWait()
+	d.mu.Lock()
 	d.dirtySubs = make(map[string]*SubAgent)
 	d.registryDirty = false
 	d.pendingDir = ""
+	d.sealed = false
+	d.failure = nil
 	d.mu.Unlock()
+}
+
+func (d *subAgentPersistDebouncer) rememberError(err error) {
+	if d == nil || err == nil {
+		return
+	}
+	d.mu.Lock()
+	d.failure = errors.Join(d.failure, err)
+	d.mu.Unlock()
+}
+func (d *subAgentPersistDebouncer) strictError() error {
+	if d == nil {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.failure
+}
+func (d *subAgentPersistDebouncer) clearError() {
+	if d != nil {
+		d.mu.Lock()
+		d.failure = nil
+		d.mu.Unlock()
+	}
 }
 
 // syncSubAgentPersists updates the task record in memory and marks the meta
@@ -171,12 +226,48 @@ func (a *MainAgent) flushPendingSubPersists() {
 		err := a.persistSubAgentMetaToSession(sub, sessionDir)
 		a.subAgentMetaPersistMu.Unlock()
 		if err != nil {
+			a.subPersists.rememberError(err)
 			log.Warnf("failed to persist subagent meta agent=%v error=%v", sub.instanceID, err)
 		}
 	}
 	if registryDirty {
 		if err := a.persistTaskRegistry(); err != nil {
+			a.subPersists.rememberError(err)
 			log.Warnf("failed to persist durable task registry session=%v error=%v", sessionDir, err)
 		}
 	}
+}
+
+// sealSessionPauseProducers waits for timer callbacks and writes final task
+// metadata after the corresponding owner loops have stopped.
+func (a *MainAgent) sealSessionPauseProducers() error {
+	a.subPersists.stopAndWait()
+	a.flushPendingSubPersists()
+	errs := []error{a.subPersists.strictError()}
+	for _, sub := range a.subs.snapshotSubAgents() {
+		if err := a.persistSubAgentMeta(sub); err != nil {
+			a.subPersists.rememberError(err)
+			errs = append(errs, err)
+		}
+	}
+	if err := a.persistTaskRegistry(); err != nil {
+		a.subPersists.rememberError(err)
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+func (a *MainAgent) retrySessionPauseProducerWrites() error {
+	a.subPersists.stopAndWait()
+	var errs []error
+	for _, sub := range a.subs.snapshotSubAgents() {
+		errs = append(errs, a.persistSubAgentMeta(sub))
+	}
+	errs = append(errs, a.persistTaskRegistry())
+	if err := errors.Join(errs...); err != nil {
+		a.subPersists.rememberError(err)
+		return err
+	}
+	a.subPersists.clearError()
+	return nil
 }

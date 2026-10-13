@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
@@ -15,7 +18,10 @@ import (
 )
 
 type ToolExecutionResult struct {
-	Result string
+	// ExecutionStarted records whether the tool body actually entered Execute.
+	// Gate admission, hooks and journal writes do not establish this fact.
+	ExecutionStarted bool
+	Result           string
 	// Payload is the tool's raw output before any diagnostic note is appended.
 	// Only set when toolPayloadIsStructured(toolName): for ordinary free-text
 	// output Content already holds everything, so a second copy would just
@@ -47,6 +53,16 @@ type ToolExecutionResult struct {
 	// ExecStartedAt so delayed results cannot leak into another agent/session.
 	walltimeTarget   *walltimeTarget
 	speculativeHooks *speculativeToolHooks
+}
+
+func (r ToolExecutionResult) recoveryState(err error) string {
+	if !r.ExecutionStarted && executiongate.IsPaused(err) {
+		return message.ToolRecoveryStateNotStarted
+	}
+	if _, ok := errors.AsType[*llm.HostedOutcomeUnknownError](err); ok {
+		return message.ToolRecoveryStateOutcomeUnknown
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +118,7 @@ func (a *MainAgent) captureMainWalltimeTarget() *walltimeTarget {
 
 func (a *MainAgent) toolExecutionPipeline() toolExecutionPipeline {
 	return toolExecutionPipeline{
+		executionGate:    a.sessionExecutionGate(),
 		agentID:          a.instanceID,
 		journalAgentID:   identity.MainAgentID,
 		eventAgentID:     "",

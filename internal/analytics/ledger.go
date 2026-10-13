@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -125,7 +127,11 @@ type UsageLedger struct {
 	// restore). Late writers legitimately still reach it — a walltime segment
 	// holds the ledger it started under — so appends keep working, but the
 	// handle is no longer cached: nothing would ever close it again.
-	closed bool
+	closed      bool
+	sealed      bool
+	reconciling bool
+	failures    []ledgerFailure
+	closeErr    error
 }
 
 // NewUsageLedger creates a ledger bound to one session directory.
@@ -483,20 +489,134 @@ func (l *UsageLedger) BuildSessionEvidence() (SessionStats, int64, map[string]Ag
 	return res.stats, res.count, res.refs, res.walltime, nil
 }
 
-// Close releases the cached ledger file handle. The ledger is per-session;
-// the agent drops the old ledger on session switch and restore, so the cached
-// handle must be released there.
-func (l *UsageLedger) Close() {
+// Close releases the cached descriptor and reports synchronization failures.
+func (l *UsageLedger) Close() error {
 	if l == nil {
-		return
+		return nil
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		return l.closeErr
+	}
+	l.closeErr = l.syncLocked()
 	l.closed = true
 	if l.file != nil {
-		l.file.Close()
+		l.closeErr = errors.Join(l.closeErr, l.file.Close())
 		l.file = nil
 	}
+	return l.closeErr
+}
+
+// Seal rejects new producers while allowing failed writes to be reconciled.
+func (l *UsageLedger) Seal() {
+	if l != nil {
+		l.mu.Lock()
+		l.sealed = true
+		l.mu.Unlock()
+	}
+}
+
+// Sync preserves earlier append failures until explicit RetryWrites succeeds.
+func (l *UsageLedger) Sync() error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.syncLocked()
+}
+
+func (l *UsageLedger) syncLocked() error {
+	var errs []error
+	for _, failure := range l.failures {
+		errs = append(errs, failure.err)
+	}
+	if l.file != nil {
+		if err := l.file.Sync(); err != nil {
+			errs = append(errs, fmt.Errorf("sync usage ledger: %w", err))
+		}
+	}
+	for _, path := range []string{l.usagePath(), l.summaryPath()} {
+		f, err := privatefs.OpenFile(l.sessionDir, path, os.O_RDWR)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		errs = append(errs, f.Sync(), f.Close())
+	}
+	if err := privatefs.SyncDir(l.sessionDir); err != nil {
+		errs = append(errs, fmt.Errorf("sync usage directory: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+type ledgerFailure struct {
+	event               UsageEvent
+	err                 error
+	retrySafe, appended bool
+}
+type ledgerWriteError struct {
+	cause               error
+	retrySafe, appended bool
+}
+
+func (e *ledgerWriteError) Error() string { return e.cause.Error() }
+func (e *ledgerWriteError) Unwrap() error { return e.cause }
+
+// RetryWrites only repeats writes proven not to have appended any bytes.
+// Already appended events repair their derived summary without appending again.
+func (l *UsageLedger) RetryWrites() error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return fmt.Errorf("usage ledger is closed")
+	}
+	for _, failure := range l.failures {
+		if !failure.retrySafe {
+			return failure.err
+		}
+	}
+	l.reconciling = true
+	defer func() { l.reconciling = false }()
+	pending := l.failures
+	l.failures = nil
+	blocked := false
+	for _, failure := range pending {
+		if blocked {
+			l.failures = append(l.failures, failure)
+			continue
+		}
+		var err error
+		if failure.appended {
+			l.summary, err = l.rebuildSummaryLocked(l.summary)
+			l.summaryLoaded = err == nil
+			if err != nil {
+				err = &ledgerWriteError{cause: err, retrySafe: true, appended: true}
+			}
+		} else {
+			err = l.appendEventLocked(failure.event)
+		}
+		if err != nil {
+			l.recordFailureLocked(failure.event, err)
+			blocked = true
+		}
+	}
+	return l.syncLocked()
+}
+
+func (l *UsageLedger) recordFailureLocked(event UsageEvent, err error) {
+	failure := ledgerFailure{event: event, err: err}
+	if writeErr, ok := errors.AsType[*ledgerWriteError](err); ok {
+		failure.retrySafe, failure.appended = writeErr.retrySafe, writeErr.appended
+	}
+	l.failures = append(l.failures, failure)
 }
 
 // AppendEvent appends one usage event and refreshes usage-summary.json.
@@ -505,10 +625,27 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 	defer l.mu.Unlock()
 
 	event = l.prepareEventLocked(event)
+	if l.sealed {
+		err := &ledgerWriteError{cause: fmt.Errorf("usage ledger producer is sealed"), retrySafe: true}
+		l.recordFailureLocked(event, err)
+		return err
+	}
+	if len(l.failures) > 0 {
+		err := &ledgerWriteError{cause: fmt.Errorf("usage append blocked by earlier persistence failure"), retrySafe: true}
+		l.recordFailureLocked(event, err)
+		return err
+	}
+	err := l.appendEventLocked(event)
+	if err != nil {
+		l.recordFailureLocked(event, err)
+	}
+	return err
+}
 
+func (l *UsageLedger) appendEventLocked(event UsageEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
-		return fmt.Errorf("marshal usage event: %w", err)
+		return &ledgerWriteError{cause: fmt.Errorf("marshal usage event: %w", err), retrySafe: true}
 	}
 	data = append(data, '\n')
 
@@ -534,7 +671,7 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 		l.summary = nil
 		rebuilt, err := l.rebuildSummaryLocked(summary)
 		if err != nil {
-			return fmt.Errorf("rebuild usage summary: %w", err)
+			return &ledgerWriteError{cause: fmt.Errorf("rebuild usage summary: %w", err), retrySafe: true, appended: true}
 		}
 		l.summary = rebuilt
 		l.summaryLoaded = true
@@ -545,7 +682,7 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 	if err := l.writeSummaryLocked(summary); err != nil {
 		l.summaryLoaded = false
 		l.summary = nil
-		return fmt.Errorf("write usage summary: %w", err)
+		return &ledgerWriteError{cause: fmt.Errorf("write usage summary: %w", err), retrySafe: true, appended: true}
 	}
 	l.summary = summary
 	l.summaryLoaded = true
@@ -559,29 +696,35 @@ func (l *UsageLedger) AppendEvent(event UsageEvent) error {
 // hold l.mu.
 func (l *UsageLedger) appendLedgerLineLocked(data []byte) error {
 	if l.closed {
-		// Released ledger: open, write, close. Caching the handle here would
-		// leak it, since the owner has already run its only Close.
 		f, err := privatefs.OpenFile(l.sessionDir, l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 		if err != nil {
-			return fmt.Errorf("open usage ledger: %w", err)
+			return &ledgerWriteError{cause: err, retrySafe: true}
 		}
-		defer f.Close()
-		if _, err := f.Write(data); err != nil {
-			return fmt.Errorf("append usage ledger: %w", err)
+		n, writeErr := f.Write(data)
+		if writeErr == nil && n != len(data) {
+			writeErr = io.ErrShortWrite
+		}
+		closeErr := f.Close()
+		if err := errors.Join(writeErr, closeErr); err != nil {
+			return &ledgerWriteError{cause: err, retrySafe: n == 0}
 		}
 		return nil
 	}
 	if l.file == nil {
 		f, err := privatefs.OpenFile(l.sessionDir, l.usagePath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 		if err != nil {
-			return fmt.Errorf("open usage ledger: %w", err)
+			return &ledgerWriteError{cause: fmt.Errorf("open usage ledger: %w", err), retrySafe: true}
 		}
 		l.file = f
 	}
-	if _, err := l.file.Write(data); err != nil {
-		l.file.Close()
+	n, err := l.file.Write(data)
+	if err == nil && n != len(data) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		closeErr := l.file.Close()
 		l.file = nil
-		return fmt.Errorf("append usage ledger: %w", err)
+		return &ledgerWriteError{cause: errors.Join(fmt.Errorf("append usage ledger: %w", err), closeErr), retrySafe: n == 0}
 	}
 	return nil
 }
@@ -842,6 +985,9 @@ func (l *UsageLedger) newEmptySummaryLocked() *SessionUsageSummary {
 }
 
 func (l *UsageLedger) writeSummaryLocked(summary *SessionUsageSummary) error {
+	if l.sealed && !l.reconciling {
+		return fmt.Errorf("usage ledger producer is sealed")
+	}
 	if summary == nil {
 		return nil
 	}

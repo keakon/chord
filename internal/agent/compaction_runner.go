@@ -31,6 +31,9 @@ func (a *MainAgent) scheduleCompaction(manual bool) bool {
 // scheduleCompactionPlan starts a compaction and reports the plan id of the
 // worker it started (0 when a compaction was already running).
 func (a *MainAgent) scheduleCompactionPlan(manual bool) (bool, uint64) {
+	if a.sessionExecutionPaused() {
+		return false, 0
+	}
 	if a.IsCompactionRunning() {
 		log.Debugf("context compaction already in progress; skipping duplicate schedule manual=%v", manual)
 		if manual {
@@ -95,6 +98,9 @@ var errCompactionWatchdog = errors.New("compaction draft production timed out (w
 const compactionActivityDetail = "context"
 
 func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Message, planID uint64, target compactionTarget, trigger compactionTrigger, continuation continuationPlan, manual bool) {
+	if a.sessionExecutionPaused() {
+		return
+	}
 	a.recordCompactionLifecycleEvent("started", map[string]string{"trigger": trigger.analyticsName(), "message_count": strconv.Itoa(len(snapshot))})
 	todos := a.GetTodos()
 	subAgents := a.taskInfosForCompaction()
@@ -909,9 +915,11 @@ func (a *MainAgent) callCompactionSummary(ctx context.Context, client *llm.Clien
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
-	releaseLLM, err := a.governor.acquireLLM(ctx, client.PrimaryModelRef())
+	preparationCtx, finishPreparation := a.newSessionPreparationContext(ctx)
+	defer finishPreparation()
+	releaseLLM, err := a.governor.acquireLLM(preparationCtx, client.PrimaryModelRef())
 	if err != nil {
-		return "", fallbackModelRef, fmt.Errorf("acquire compaction LLM request capacity: %w", err)
+		return "", fallbackModelRef, a.preparationError(fmt.Errorf("acquire compaction LLM request capacity: %w", err))
 	}
 	defer releaseLLM()
 	resp, err := client.CompleteStream(
@@ -1258,5 +1266,5 @@ func (a *MainAgent) newCompactionClientFromMainModelPool() *llm.Client {
 	if len(pool) == 0 {
 		return nil
 	}
-	return newAuxClientFromPool(pool, selectedIdx, 0, a.ServiceTier())
+	return a.bindAuxExecutionGate(newAuxClientFromPool(pool, selectedIdx, 0, a.ServiceTier()))
 }
