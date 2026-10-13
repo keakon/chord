@@ -93,6 +93,8 @@ type AgentContextUsage struct {
 // Safe to call from any goroutine.
 func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 	a.subs.mu.RLock()
+	sessionEpoch := a.subs.sessionEpoch
+	reasons := a.pendingOwnerReasonsLocked()
 	infos := make([]SubAgentInfo, 0, len(a.subs.subAgents)+len(a.subs.taskRecords))
 	seenTasks := make(map[string]struct{}, len(a.subs.subAgents))
 	for _, sub := range a.subs.subAgents {
@@ -128,6 +130,7 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 			UrgentInboxCount: a.subAgentUrgentInboxCountLocked(sub.instanceID),
 			LastArtifact:     artifact,
 		})
+		applyAwaitingOwnerReason(&infos[len(infos)-1], a.subs.taskRecords[sub.taskID], reasons)
 		seenTasks[sub.taskID] = struct{}{}
 	}
 	for taskID, rec := range a.subs.taskRecords {
@@ -137,14 +140,26 @@ func (a *MainAgent) GetSubAgents() []SubAgentInfo {
 		if _, ok := seenTasks[taskID]; ok {
 			continue
 		}
-		infos = append(infos, a.parkedSubAgentInfo(rec))
+		info := a.parkedSubAgentInfo(rec)
+		applyAwaitingOwnerReason(&info, rec, reasons)
+		infos = append(infos, info)
 		seenTasks[taskID] = struct{}{}
 	}
 	a.subs.mu.RUnlock()
 	if focused := a.focusedDurableTask(); focused != nil && focused.RuntimeParked {
-		if _, ok := seenTasks[focused.TaskID]; !ok {
-			infos = append(infos, a.parkedSubAgentInfo(focused))
+		a.subs.mu.RLock()
+		rec := a.subs.taskRecords[focused.TaskID]
+		// Archived terminal tasks remain visible while focused, but cannot
+		// supply a pending coordination reason or revive an old active task.
+		if rec == nil && isTerminalSubAgentState(SubAgentState(focused.State)) {
+			rec = focused
 		}
+		if _, ok := seenTasks[focused.TaskID]; !ok && sessionEpoch == a.subs.sessionEpoch && rec != nil && rec.RuntimeParked && strings.TrimSpace(rec.LatestInstanceID) != "" {
+			info := a.parkedSubAgentInfo(rec)
+			applyAwaitingOwnerReason(&info, rec, a.pendingOwnerReasonsLocked())
+			infos = append(infos, info)
+		}
+		a.subs.mu.RUnlock()
 	}
 	return infos
 }

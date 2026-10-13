@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -32,21 +31,22 @@ type FileEdit struct {
 
 // SidebarEntry represents a single agent in the sidebar listing.
 type SidebarEntry struct {
-	ID           string // instance ID (e.g. "agent-1") or "main"
-	TaskID       string
-	OwnerAgentID string
-	OwnerTaskID  string
-	TreeDepth    int
-	AgentDefName string     // SubAgent: agent config name (e.g. reviewer); empty for main
-	TaskDesc     string     // task description (truncated for display)
-	Status       string     // "running", "idle", "done", "error"
-	Color        string     // optional ANSI color code for TUI display
-	SelectedRef  string     // last known primary model ref (SubAgent only; may include @variant)
-	RunningRef   string     // last known effective running ref (SubAgent only)
-	EditedFiles  []FileEdit // recent file changes, oldest first
-	LastSummary  string
-	UrgentCount  int
-	LastArtifact tools.ArtifactRef
+	AwaitingOwnerReason string
+	ID                  string // instance ID (e.g. "agent-1") or "main"
+	TaskID              string
+	OwnerAgentID        string
+	OwnerTaskID         string
+	TreeDepth           int
+	AgentDefName        string     // SubAgent: agent config name (e.g. reviewer); empty for main
+	TaskDesc            string     // task description (truncated for display)
+	Status              string     // "running", "idle", "done", "error"
+	Color               string     // optional ANSI color code for TUI display
+	SelectedRef         string     // last known primary model ref (SubAgent only; may include @variant)
+	RunningRef          string     // last known effective running ref (SubAgent only)
+	EditedFiles         []FileEdit // recent file changes, oldest first
+	LastSummary         string
+	UrgentCount         int
+	LastArtifact        tools.ArtifactRef
 }
 
 // Sidebar displays active SubAgent status in a narrow panel to the left of
@@ -142,26 +142,23 @@ func (s *Sidebar) Update(subAgents []agent.SubAgentInfo, focusedID, mainRole str
 		}
 		status := strings.TrimSpace(info.State)
 		if status == "" {
-			status = "running"
-		}
-		// Look up the current status from the status cache if we have one.
-		if cached, ok := s.findStatus(info.InstanceID); ok {
-			status = cached
+			status, _ = s.findStatus(info.InstanceID)
 		}
 		entry := SidebarEntry{
-			ID:           info.InstanceID,
-			TaskID:       info.TaskID,
-			OwnerAgentID: info.OwnerAgentID,
-			OwnerTaskID:  info.OwnerTaskID,
-			AgentDefName: info.AgentDefName,
-			TaskDesc:     info.TaskDesc,
-			Status:       status,
-			Color:        info.Color,
-			SelectedRef:  info.SelectedRef,
-			RunningRef:   info.RunningRef,
-			LastSummary:  info.LastSummary,
-			UrgentCount:  info.UrgentInboxCount,
-			LastArtifact: info.LastArtifact,
+			ID:                  info.InstanceID,
+			TaskID:              info.TaskID,
+			OwnerAgentID:        info.OwnerAgentID,
+			OwnerTaskID:         info.OwnerTaskID,
+			AgentDefName:        info.AgentDefName,
+			TaskDesc:            info.TaskDesc,
+			Status:              status,
+			Color:               info.Color,
+			SelectedRef:         info.SelectedRef,
+			RunningRef:          info.RunningRef,
+			LastSummary:         info.LastSummary,
+			AwaitingOwnerReason: info.AwaitingOwnerReason,
+			UrgentCount:         info.UrgentInboxCount,
+			LastArtifact:        info.LastArtifact,
 		}
 		if existing, ok := existingByID[info.InstanceID]; ok {
 			entry.EditedFiles = existing.EditedFiles
@@ -539,24 +536,4 @@ func (s *Sidebar) fileEditRevision() uint64 {
 // Agents returns the raw sidebar entries (for fingerprinting without rendering).
 func (s *Sidebar) Agents() []SidebarEntry {
 	return s.agents
-}
-
-// AgentsSummary returns a compact AGENTS header summary in done/total form.
-// The main agent is excluded.
-func (s Sidebar) AgentsSummary() string {
-	var total, done int
-	for _, entry := range s.agents {
-		if entry.ID == "main" {
-			continue
-		}
-		total++
-		switch entry.Status {
-		case "done", "completed", "error", "cancelled":
-			done++
-		}
-	}
-	if total == 0 {
-		return "0/0"
-	}
-	return fmt.Sprintf("%d/%d", done, total)
 }

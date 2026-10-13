@@ -1,10 +1,19 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/keakon/golog"
+	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/logtest"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestEmitToTUIToolResultWaitsForSpaceInsteadOfDropping(t *testing.T) {
@@ -415,5 +424,112 @@ func TestDroppedOutputEventLogIsThrottledByType(t *testing.T) {
 	}
 	if ok, suppressed := a.shouldLogDroppedOutputEvent("agent.RequestProgressEvent", now.Add(500*time.Millisecond)); !ok || suppressed != 0 {
 		t.Fatalf("other event type drop log = (%v, %d), want (true, 0)", ok, suppressed)
+	}
+}
+
+// The warning is emitted after the first send observes a full channel. This
+// gate makes lock and shutdown probes deterministic without timing sleeps.
+type displayOutputGate struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (g *displayOutputGate) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), "waiting to deliver critical event") {
+		g.once.Do(func() { close(g.entered); <-g.release })
+	}
+	return len(p), nil
+}
+
+func TestSubAgentDisplayReliableDeliveryReleasesRequestLocks(t *testing.T) {
+	for _, mode := range []string{"create", "response", "stop"} {
+		t.Run(mode, func(t *testing.T) {
+			a, sub, req := createMainOwnedTestRequest(t)
+			for len(a.outputCh) > 0 {
+				<-a.outputCh
+			}
+			for range cap(a.outputCh) {
+				a.outputCh <- StreamTextEvent{Text: "busy"}
+			}
+			gate := &displayOutputGate{entered: make(chan struct{}), release: make(chan struct{})}
+			log.SetDefaultLogger(logtest.NewLogger(gate, golog.WarnLevel))
+			defer log.SetDefaultLogger(logtest.NewLogger(nil, golog.InfoLevel))
+			defer a.signalStopping()
+			done := make(chan error, 1)
+			go func() {
+				if mode == "response" {
+					// A terminal source publishes cancelled before returning its error.
+					a.subs.mu.Lock()
+					a.subs.taskRecords[sub.taskID].State = string(SubAgentStateCompleted)
+					a.subs.mu.Unlock()
+					_, err := a.NotifySubAgentMessage(context.Background(), tools.AgentResponseRequest{TargetTaskID: sub.taskID, CorrelationID: req.CorrelationID, Message: "answer"})
+					if err == nil {
+						done <- fmt.Errorf("expected terminal source rejection")
+						return
+					}
+				} else {
+					if _, err := a.createAgentRequest(sub, tools.AgentRequestPayload{Reason: "decision"}); err != nil {
+						done <- err
+						return
+					}
+				}
+				done <- nil
+			}()
+			select {
+			case <-gate.entered:
+			case <-time.After(5 * time.Second):
+				close(gate.release)
+				t.Fatal("send did not reach full-channel gate")
+			}
+			locked := make(chan int, 1)
+			go func() {
+				a.agentRequestPersistMu.Lock()
+				a.subs.mu.Lock()
+				count := len(a.subs.agentRequests)
+				a.subs.mu.Unlock()
+				a.agentRequestPersistMu.Unlock()
+				locked <- count
+			}()
+			select {
+			case count := <-locked:
+				if count == 0 {
+					t.Fatal("published requests missing")
+				}
+			case <-time.After(5 * time.Second):
+				close(gate.release)
+				t.Fatal("reliable sender retained request locks")
+			}
+			select {
+			case <-done:
+				t.Fatal("full-channel event was dropped")
+			default:
+			}
+			close(gate.release)
+			if mode == "stop" {
+				a.signalStopping()
+			} else {
+				<-a.outputCh
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("sender did not finish")
+			}
+			if mode != "stop" {
+				found := false
+				for len(a.outputCh) > 0 {
+					if _, ok := (<-a.outputCh).(SubAgentDisplayChangedEvent); ok {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatal("display event lost")
+				}
+			}
+		})
 	}
 }

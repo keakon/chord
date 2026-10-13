@@ -148,6 +148,7 @@ func TestStoppedSubAgentRemainsSwitchableUntilCompletion(t *testing.T) {
 			m.refreshSidebar()
 			m.setFocusedAgent("agent-1")
 
+			backend.subAgents[0].State = status
 			_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentStatusEvent{
 				AgentID: "agent-1",
 				Status:  status,

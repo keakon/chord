@@ -191,29 +191,23 @@ func (s Sidebar) buildInfoPanelRenderedLines(innerWidth int) []sidebarRenderedLi
 	var lines []sidebarRenderedLine
 	for _, entry := range s.agents {
 		isFocused := s.isFocused(entry.ID)
-		indicator := sidebarIndicator(entry.Status, isFocused)
-
-		nameWidth := max(1, innerWidth-4)
-		if isFocused || entry.ID == "main" {
-			nameWidth = max(1, innerWidth-4)
-		}
-		name := sidebarRenderedName(entry, nameWidth)
-
-		var line string
-		if isFocused || entry.ID == "main" {
-			line = fmt.Sprintf("%s %s", indicator, name)
-		} else {
-			line = InfoPanelAgentEntryStyle.Render(fmt.Sprintf("%s %s", indicator, name))
-		}
+		line, reason := sidebarEntryText(entry, isFocused, innerWidth)
 
 		if isFocused {
 			line = infoPanelAgentRowStyle(entry, true).Width(innerWidth).Render(line)
 		} else if entry.ID == "main" {
 			line = infoPanelAgentRowStyle(entry, false).Width(innerWidth).Render(line)
 		} else {
-			line = InfoPanelLineBg.Width(innerWidth).Render(infoPanelAgentRowStyle(entry, false).Render(fmt.Sprintf("%s %s", indicator, name)))
+			line = InfoPanelLineBg.Width(innerWidth).Render(infoPanelAgentRowStyle(entry, false).Render(line))
 		}
 		lines = append(lines, sidebarRenderedLine{Text: line, AgentID: entry.ID})
+		if reason != "" {
+			style := InfoPanelDim
+			if isFocused {
+				style = InfoPanelAgentFocusedStyle.Foreground(InfoPanelDim.GetForeground())
+			}
+			lines = append(lines, sidebarRenderedLine{Text: style.Width(innerWidth).Render(reason), AgentID: entry.ID})
+		}
 	}
 	return lines
 }
@@ -225,20 +219,7 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 	var lines []string
 	for _, entry := range s.agents {
 		isFocused := s.isFocused(entry.ID)
-		indicator := sidebarIndicator(entry.Status, isFocused)
-
-		nameWidth := max(1, innerWidth-4)
-		if isFocused || entry.ID == "main" {
-			nameWidth = max(1, innerWidth-4)
-		}
-		name := sidebarRenderedName(entry, nameWidth)
-
-		var line string
-		if isFocused || entry.ID == "main" {
-			line = fmt.Sprintf("%s %s", indicator, name)
-		} else {
-			line = fmt.Sprintf("%s %s", indicator, name)
-		}
+		line, reason := sidebarEntryText(entry, isFocused, innerWidth)
 
 		if isFocused {
 			line = sidebarEntryStyle(entry, true).Width(innerWidth).Render(line)
@@ -246,6 +227,9 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 			line = sidebarEntryStyle(entry, false).Width(innerWidth).Render(line)
 		}
 		lines = append(lines, line)
+		if reason != "" {
+			lines = append(lines, sidebarEntryStyle(entry, isFocused).Width(innerWidth).Render(reason))
+		}
 
 		files := entry.EditedFiles
 		const maxFiles = 3
@@ -340,6 +324,6 @@ func statusIndicator(status string) string {
 	case "idle":
 		return "…"
 	default:
-		return "○"
+		return "·"
 	}
 }

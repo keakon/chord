@@ -125,6 +125,12 @@ Enter `/status` to open the same live information across the full conversation a
 
 Enter `/context` to inspect the focused task’s latest request: input composition, request-level reduction, and local cache-prefix changes with service-reported cache usage. See [Explain the latest request](context-management.md#explain-the-latest-request).
 
+### `AGENTS` block
+
+Each child task shows its current state: `running`, `awaiting owner` (waiting for its coordinating agent), `awaiting child`, `idle`, `delivered`, `failed`, `cancelled`, or `unknown`. The header counts each category separately and excludes the main agent. `delivered` means that attempt has handed back its result; it does not mean the overall task has passed review.
+
+A task awaiting its owner can show one line from its current coordination request. Click the task or its reason to open that agent's conversation and read the full request. The reason disappears when the request is resolved or the task resumes. Narrow panels omit the row's state label when it cannot fit; the status icon remains visible.
+
 ### `USAGE` block
 
 - `Context` shows the input-side token burden of the most recent model request, as reported by the provider. A `≈` prefix marks the single estimate used when that response omitted usage; a session that has not had a measured response yet shows `0`.

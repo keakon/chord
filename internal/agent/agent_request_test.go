@@ -30,7 +30,7 @@ func TestAgentRequestRoundTripRestoresLedgerAndSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadAgentRequests: %v", err)
 	}
-	if got := loaded[request.CorrelationID]; got == nil || got.SourceTaskID != "adhoc-request" || got.SourceAttempt != 1 || got.State != "pending" {
+	if got := loaded[request.CorrelationID]; got == nil || got.SourceTaskID != "adhoc-request" || got.SourceAttempt != 1 || got.State != agentRequestStatePending {
 		t.Fatalf("loaded request = %#v", got)
 	}
 	a.resetAgentRequests(loaded)
@@ -72,7 +72,7 @@ func TestAgentResponseResumesSourceWithCorrelatedMailboxMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := loaded[request.CorrelationID]; got == nil || got.State != "responded" || got.Response == nil || got.Response.DeliveredAt.IsZero() {
+	if got := loaded[request.CorrelationID]; got == nil || got.State != agentRequestStateResponded || got.Response == nil || got.Response.DeliveredAt.IsZero() {
 		t.Fatalf("persisted response = %#v", got)
 	}
 }
@@ -87,7 +87,7 @@ func TestAgentResponseIsIdempotentAndRejectsConflict(t *testing.T) {
 		t.Fatalf("idempotent response handle=%#v error=%v", handle, err)
 	}
 	response.Message = "option B"
-	if _, err := a.NotifySubAgentMessage(context.Background(), response); err == nil || !strings.Contains(err.Error(), "responded") {
+	if _, err := a.NotifySubAgentMessage(context.Background(), response); err == nil || !strings.Contains(err.Error(), agentRequestStateResponded) {
 		t.Fatalf("conflicting response error = %v", err)
 	}
 }
@@ -180,7 +180,7 @@ func TestRespondedAgentRequestRedeliversWhenDeliveryWasNotDurable(t *testing.T) 
 
 func TestRespondedAgentRequestUsesDurableTranscriptEvidence(t *testing.T) {
 	a, sub, request := createMainOwnedTestRequest(t)
-	request.State = "responded"
+	request.State = agentRequestStateResponded
 	request.Response = &DurableAgentResponse{
 		Message: "option A", ResponseID: "response-" + request.CorrelationID, PersistedAt: time.Now(), DeliveredAt: time.Now(),
 	}
@@ -210,9 +210,9 @@ func TestRetainAgentRequestsKeepsPendingAndNewestClosed(t *testing.T) {
 	records := make(map[string]*DurableAgentRequest, maxRetainedClosedAgentRequests+3)
 	for i := range maxRetainedClosedAgentRequests + 2 {
 		id := fmt.Sprintf("corr-%d", i+1)
-		records[id] = &DurableAgentRequest{CorrelationID: id, State: "responded", CreatedAt: time.Unix(int64(i+1), 0)}
+		records[id] = &DurableAgentRequest{CorrelationID: id, State: agentRequestStateResponded, CreatedAt: time.Unix(int64(i+1), 0)}
 	}
-	records["corr-pending"] = &DurableAgentRequest{CorrelationID: "corr-pending", State: "pending", CreatedAt: time.Unix(1, 0)}
+	records["corr-pending"] = &DurableAgentRequest{CorrelationID: "corr-pending", State: agentRequestStatePending, CreatedAt: time.Unix(1, 0)}
 	retained := retainAgentRequests(records)
 	if len(retained) != maxRetainedClosedAgentRequests+1 {
 		t.Fatalf("retained requests = %d", len(retained))
@@ -235,15 +235,15 @@ func TestPersistAgentRequestStatePrunesMemoryAndDiskTogether(t *testing.T) {
 		id := fmt.Sprintf("corr-%d", i+1)
 		records[id] = &DurableAgentRequest{
 			Version: agentRequestSchemaVersion, CorrelationID: id, RequestMessageID: "msg-" + id,
-			SourceTaskID: "task", SourceAttempt: 1, State: "responded", CreatedAt: time.Unix(int64(i+1), 0),
+			SourceTaskID: "task", SourceAttempt: 1, State: agentRequestStateResponded, CreatedAt: time.Unix(int64(i+1), 0),
 		}
 	}
 	pending := &DurableAgentRequest{
 		Version: agentRequestSchemaVersion, CorrelationID: "corr-pending", RequestMessageID: "msg-pending",
-		SourceTaskID: "task", SourceAttempt: 1, State: "pending", CreatedAt: time.Now(),
+		SourceTaskID: "task", SourceAttempt: 1, State: agentRequestStatePending, CreatedAt: time.Now(),
 	}
 	records[pending.CorrelationID] = pending
-	if err := a.persistAgentRequestStateLocked(records, pending, "cancelled"); err != nil {
+	if err := a.persistAgentRequestStateLocked(records, pending, agentRequestStateCancelled); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := loadAgentRequests(a.sessionDir)
@@ -312,12 +312,12 @@ func TestAgentResponseExpiresAndOrphansChangedSourceAttempt(t *testing.T) {
 			a.subs.mu.Lock()
 			a.subs.taskRecords[request.SourceTaskID].Attempt++
 			a.subs.mu.Unlock()
-		}, want: "no longer current", state: "orphaned"},
+		}, want: "no longer current", state: agentRequestStateOrphaned},
 		{name: "terminal source", setup: func(a *MainAgent, request *DurableAgentRequest) {
 			a.subs.mu.Lock()
 			a.subs.taskRecords[request.SourceTaskID].State = string(SubAgentStateCancelled)
 			a.subs.mu.Unlock()
-		}, want: "source task is terminal", state: "cancelled"},
+		}, want: "source task is terminal", state: agentRequestStateCancelled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, sub, request := createMainOwnedTestRequest(t)
@@ -366,14 +366,14 @@ func TestAgentResponseRejectsUnknownOrWrongTargetAndStaysPending(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "unknown pending request") {
 		t.Fatalf("unknown correlation error = %v, want unknown pending request", err)
 	}
-	requestResponseAssertsRejectedAndUndelivered(t, a, sub, request.CorrelationID, "pending")
+	requestResponseAssertsRejectedAndUndelivered(t, a, sub, request.CorrelationID, agentRequestStatePending)
 	// The record exists, but the caller answers under a different target task.
 	if _, err := a.NotifySubAgentMessage(context.Background(), tools.AgentResponseRequest{
 		TargetTaskID: sub.taskID + "-other", CorrelationID: request.CorrelationID, Message: "answer",
 	}); err == nil || !strings.Contains(err.Error(), "unknown pending request") {
 		t.Fatalf("wrong target error = %v, want unknown pending request", err)
 	}
-	requestResponseAssertsRejectedAndUndelivered(t, a, sub, request.CorrelationID, "pending")
+	requestResponseAssertsRejectedAndUndelivered(t, a, sub, request.CorrelationID, agentRequestStatePending)
 }
 
 // TestAgentResponseRejectsNonOwnerCaller pins the ownership branch: only the
@@ -411,7 +411,7 @@ func TestAgentResponseRejectsNonOwnerCaller(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not owned by caller") {
 		t.Fatalf("non-owner response error = %v, want not owned by caller", err)
 	}
-	requestResponseAssertsRejectedAndUndelivered(t, a, source, request.CorrelationID, "pending")
+	requestResponseAssertsRejectedAndUndelivered(t, a, source, request.CorrelationID, agentRequestStatePending)
 }
 
 // TestAgentResponseRejectsStaleOwnerAttempt pins the owner-attempt branch of a
@@ -448,5 +448,5 @@ func TestAgentResponseRejectsStaleOwnerAttempt(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "owner attempt is no longer current") {
 		t.Fatalf("stale owner attempt error = %v, want owner attempt rejection", err)
 	}
-	requestResponseAssertsRejectedAndUndelivered(t, a, source, request.CorrelationID, "orphaned")
+	requestResponseAssertsRejectedAndUndelivered(t, a, source, request.CorrelationID, agentRequestStateOrphaned)
 }

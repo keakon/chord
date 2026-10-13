@@ -110,6 +110,9 @@ func TestArchiveEligibleTerminalTasksBoundsCompletedTasksAndSupportsLookup(t *te
 	found := false
 	for _, info := range a.GetSubAgents() {
 		if info.TaskID == "completed-000" {
+			if info.AwaitingOwnerReason != "" {
+				t.Fatal("archived terminal task exposed a pending owner reason")
+			}
 			found = true
 			break
 		}

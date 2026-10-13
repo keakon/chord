@@ -23,22 +23,23 @@ import (
 // display (sidebar listing). The fields are snapshot values safe to read from
 // any goroutine.
 type SubAgentInfo struct {
-	InstanceID       string
-	TaskID           string
-	OwnerAgentID     string
-	OwnerTaskID      string
-	Depth            int
-	AgentDefName     string
-	TaskDesc         string
-	ModelName        string
-	Persistence      PersistenceHealth
-	SelectedRef      string
-	RunningRef       string
-	State            string
-	Color            string // optional ANSI color code from agent config
-	LastSummary      string
-	UrgentInboxCount int
-	LastArtifact     tools.ArtifactRef
+	AwaitingOwnerReason string
+	InstanceID          string
+	TaskID              string
+	OwnerAgentID        string
+	OwnerTaskID         string
+	Depth               int
+	AgentDefName        string
+	TaskDesc            string
+	ModelName           string
+	Persistence         PersistenceHealth
+	SelectedRef         string
+	RunningRef          string
+	State               string
+	Color               string // optional ANSI color code from agent config
+	LastSummary         string
+	UrgentInboxCount    int
+	LastArtifact        tools.ArtifactRef
 }
 
 type delegationCaller struct {

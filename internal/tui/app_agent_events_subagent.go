@@ -59,6 +59,9 @@ func newSubAgentMailboxBlock(id int, kind, subtype, agentID, taskID, content, ta
 func (m *Model) handleSubAgentEvent(event agent.AgentEvent) (bool, agentEventEffects) {
 	var effects agentEventEffects
 	switch evt := event.(type) {
+	case agent.SubAgentDisplayChangedEvent:
+		effects.refreshSidebar = true
+		return true, effects
 	case agent.MailboxQueuedEvent:
 		m.upsertQueuedMailbox(evt.Message)
 		return true, effects

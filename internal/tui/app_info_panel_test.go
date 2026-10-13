@@ -304,3 +304,65 @@ func TestClickBlockErrorFocusesForCopy(t *testing.T) {
 		t.Fatal("BlockError should become focused for copy")
 	}
 }
+
+func TestClickInfoPanelOwnerReasonAndCollapse(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.subAgents = []agent.SubAgentInfo{{InstanceID: "worker", State: "waiting_main", TaskDesc: "Migration", AwaitingOwnerReason: "Choose null handling"}}
+	m := NewModelWithSize(backend, 160, 60)
+	m.refreshSidebar()
+	m.layout = m.generateLayout(m.width, m.height)
+	_ = m.renderInfoPanel(m.layout.infoPanel.Dx(), m.viewport.height)
+	var rows []int
+	for _, hit := range m.infoPanelHitBoxes {
+		if hit.agentID == "worker" {
+			rows = append(rows, hit.startY)
+		}
+	}
+	if len(rows) != 2 {
+		t.Fatalf("worker hit rows=%v", rows)
+	}
+	_, _ = m.Update(tea.MouseClickMsg{X: m.layout.infoPanel.Min.X + 1, Y: m.layout.infoPanel.Min.Y + rows[1], Button: tea.MouseLeft})
+	if m.focusedAgentID != "worker" || backend.focused != "worker" {
+		t.Fatal("reason click did not focus worker")
+	}
+	m.infoPanelCollapsedSections[infoPanelSectionAgents] = true
+	_ = m.renderInfoPanel(m.layout.infoPanel.Dx(), m.viewport.height)
+	for _, hit := range m.infoPanelHitBoxes {
+		if hit.agentID == "worker" {
+			t.Fatal("collapsed reason hitbox remains")
+		}
+	}
+}
+
+func TestSubAgentDisplayInvalidationOnlyRefreshesCurrentSnapshot(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	backend.subAgents = []agent.SubAgentInfo{{InstanceID: "old", State: "waiting_main", AwaitingOwnerReason: "old reason"}}
+	m.refreshSidebar()
+	backend.subAgents = []agent.SubAgentInfo{{InstanceID: "current", State: "running"}}
+	beforeBlocks := len(m.viewport.blocks)
+	beforeFocus := m.focusedAgentID
+	handled, effects := m.handleSubAgentEvent(agent.SubAgentDisplayChangedEvent{})
+	if !handled || !effects.refreshSidebar {
+		t.Fatal("missing refresh effect")
+	}
+	m.applyUIEffects(effects)
+	if len(m.viewport.blocks) != beforeBlocks || m.focusedAgentID != beforeFocus {
+		t.Fatal("invalidation changed conversation")
+	}
+	if got := strings.Join(m.sidebar.AgentIDs(), ","); got != "main,current" {
+		t.Fatalf("stale snapshot=%s", got)
+	}
+}
+
+func TestSessionRestoreRefreshesOwnerReasonWithoutRequestEvent(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	backend.subAgents = []agent.SubAgentInfo{{InstanceID: "old", State: "waiting_main", AwaitingOwnerReason: "old reason"}}
+	m.refreshSidebar()
+	backend.subAgents = []agent.SubAgentInfo{{InstanceID: "restored", State: "waiting_main", AwaitingOwnerReason: "restored reason"}}
+	m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
+	if got := stripANSI(m.sidebar.ViewCompact(50)); strings.Contains(got, "old reason") || !strings.Contains(got, "restored reason") {
+		t.Fatalf("restored sidebar=%q", got)
+	}
+}

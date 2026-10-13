@@ -47,6 +47,7 @@ func (a *MainAgent) handleSubAgentStateChangedEvent(evt Event) {
 	default:
 		a.syncSubAgentPersists(sub, "")
 	}
+	a.emitToTUI(SubAgentDisplayChangedEvent{})
 	if strings.TrimSpace(payload.Summary) == "" {
 		return
 	}

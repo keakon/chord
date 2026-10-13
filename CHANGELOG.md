@@ -18,11 +18,15 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- AGENTS shows distinct waiting states and the current coordination request reason, with clickable task and reason rows.
+
 - Compaction summaries exclude independent thinking so the input budget prioritizes user requests, replies, and execution records.
 - The first-run `prevent_sleep` prompt now defaults to No on macOS, Linux, and Windows; existing saved settings are unchanged.
 - Question decision cards keep the original question and answers fully visible without folding, with separate lines for the question, selections, and option descriptions.
 
 ### Fixes
+
+- AGENTS counts failed tasks consistently and separates delivered, failed, and cancelled tasks.
 
 - `apply_patch` previews show patch text and target paths when a model wraps freeform input in JSON, including while the input is streaming. Execution and history replay use the same unwrapped patch.
 - Fixed Question tool cards showing raw JSON during live updates; receipts and diagnostic notes now match their display after resuming a session.

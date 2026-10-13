@@ -19,7 +19,13 @@ import (
 )
 
 const (
-	agentRequestSchemaVersion      = 1
+	agentRequestSchemaVersion  = 1
+	agentRequestStatePending   = "pending"
+	agentRequestStateResponded = "responded"
+	agentRequestStateExpired   = "expired"
+	agentRequestStateCancelled = "cancelled"
+	agentRequestStateOrphaned  = "orphaned"
+
 	maxRetainedClosedAgentRequests = 256
 )
 
@@ -84,7 +90,7 @@ func loadAgentRequests(sessionDir string) (map[string]*DurableAgentRequest, erro
 			return nil, fmt.Errorf("invalid durable agent request")
 		}
 		switch record.State {
-		case "pending", "responded", "expired", "cancelled", "orphaned":
+		case agentRequestStatePending, agentRequestStateResponded, agentRequestStateExpired, agentRequestStateCancelled, agentRequestStateOrphaned:
 		default:
 			return nil, fmt.Errorf("invalid agent request state %q", record.State)
 		}
@@ -117,7 +123,7 @@ func retainAgentRequests(records map[string]*DurableAgentRequest) map[string]*Du
 		if record == nil {
 			continue
 		}
-		if record.State == "pending" {
+		if record.State == agentRequestStatePending {
 			retained[id] = record
 			continue
 		}
@@ -206,6 +212,12 @@ func (a *MainAgent) createAgentRequest(sub *SubAgent, payload tools.AgentRequest
 	if sub == nil {
 		return nil, fmt.Errorf("missing request source")
 	}
+	requestViewChanged := false
+	defer func() {
+		if requestViewChanged {
+			a.emitToTUI(SubAgentDisplayChangedEvent{})
+		}
+	}()
 	a.agentRequestPersistMu.Lock()
 	defer a.agentRequestPersistMu.Unlock()
 	a.subs.mu.RLock()
@@ -233,12 +245,13 @@ func (a *MainAgent) createAgentRequest(sub *SubAgent, payload tools.AgentRequest
 		Version: agentRequestSchemaVersion, CorrelationID: correlationID, RequestMessageID: requestMessageID,
 		SourceTaskID: rec.TaskID, SourceAttempt: rec.Attempt, TargetTaskID: rec.OwnerTaskID, TargetAttempt: targetAttempt,
 		Message: strings.TrimSpace(payload.Reason),
-		State:   "pending", CreatedAt: now,
+		State:   agentRequestStatePending, CreatedAt: now,
 	}
 	records[correlationID] = request
 	if err := a.persistAndPublishAgentRequests(records); err != nil {
 		return nil, err
 	}
+	requestViewChanged = true
 	return cloneDurableAgentRequest(request), nil
 }
 
@@ -256,6 +269,12 @@ func (a *MainAgent) snapshotAgentRequests() map[string]*DurableAgentRequest {
 }
 
 func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.AgentResponseRequest) (tools.TaskHandle, error) {
+	requestViewChanged := false
+	defer func() {
+		if requestViewChanged {
+			a.emitToTUI(SubAgentDisplayChangedEvent{})
+		}
+	}()
 	caller, err := a.delegationCallerFromContext(ctx)
 	if err != nil {
 		return tools.TaskHandle{}, err
@@ -289,20 +308,21 @@ func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.Ag
 	if request.TargetTaskID != "" {
 		owner := a.taskRecordByTaskID(request.TargetTaskID)
 		if owner == nil || owner.Attempt != request.TargetAttempt || !isNonTerminalTaskState(owner.State) {
-			if err := a.persistAgentRequestStateLocked(records, request, "orphaned"); err != nil {
+			if err := a.persistAgentRequestStateLocked(records, request, agentRequestStateOrphaned); err != nil {
 				a.agentRequestPersistMu.Unlock()
 				return tools.TaskHandle{}, err
 			}
+			requestViewChanged = true
 			a.agentRequestPersistMu.Unlock()
 			return tools.TaskHandle{}, fmt.Errorf("request %s owner attempt is no longer current", correlationID)
 		}
 	}
-	if request.State != "pending" {
-		if request.State == "responded" && agentResponseMatches(request.Response, response) && a.agentResponseDeliveryRecorded(request) {
+	if request.State != agentRequestStatePending {
+		if request.State == agentRequestStateResponded && agentResponseMatches(request.Response, response) && a.agentResponseDeliveryRecorded(request) {
 			a.agentRequestPersistMu.Unlock()
 			return tools.TaskHandle{Status: "delivered", TaskID: request.SourceTaskID, Message: "response already recorded"}, nil
 		}
-		if request.State != "responded" || !agentResponseMatches(request.Response, response) {
+		if request.State != agentRequestStateResponded || !agentResponseMatches(request.Response, response) {
 			a.agentRequestPersistMu.Unlock()
 			return tools.TaskHandle{}, fmt.Errorf("request %s is %s", correlationID, request.State)
 		}
@@ -313,18 +333,20 @@ func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.Ag
 	}
 	current := a.taskRecordByTaskID(request.SourceTaskID)
 	if current == nil || current.Attempt != request.SourceAttempt {
-		if err := a.persistAgentRequestStateLocked(records, request, "orphaned"); err != nil {
+		if err := a.persistAgentRequestStateLocked(records, request, agentRequestStateOrphaned); err != nil {
 			a.agentRequestPersistMu.Unlock()
 			return tools.TaskHandle{}, err
 		}
+		requestViewChanged = true
 		a.agentRequestPersistMu.Unlock()
 		return tools.TaskHandle{}, fmt.Errorf("request %s source attempt is no longer current", correlationID)
 	}
 	if !isNonTerminalTaskState(current.State) {
-		if err := a.persistAgentRequestStateLocked(records, request, "cancelled"); err != nil {
+		if err := a.persistAgentRequestStateLocked(records, request, agentRequestStateCancelled); err != nil {
 			a.agentRequestPersistMu.Unlock()
 			return tools.TaskHandle{}, err
 		}
+		requestViewChanged = true
 		a.agentRequestPersistMu.Unlock()
 		return tools.TaskHandle{}, fmt.Errorf("request %s source task is terminal", correlationID)
 	}
@@ -337,6 +359,7 @@ func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.Ag
 			a.agentRequestPersistMu.Unlock()
 			return tools.TaskHandle{}, err
 		}
+		requestViewChanged = true
 	}
 	a.agentRequestPersistMu.Unlock()
 
@@ -387,7 +410,7 @@ func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.Ag
 		a.agentRequestPersistMu.Unlock()
 		return tools.TaskHandle{}, fmt.Errorf("agent response delivery invalidated by request reset")
 	}
-	currentRequest.State = "responded"
+	currentRequest.State = agentRequestStateResponded
 	currentRequest.Response.DeliveredAt = time.Now()
 	records = a.snapshotAgentRequests()
 	records[correlationID] = currentRequest
@@ -396,6 +419,7 @@ func (a *MainAgent) NotifySubAgentMessage(ctx context.Context, response tools.Ag
 	if err != nil {
 		return tools.TaskHandle{}, err
 	}
+	requestViewChanged = true
 	return handle, nil
 }
 

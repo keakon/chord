@@ -1865,14 +1865,14 @@ func TestRenderInfoPanelAgentsPreserveInfoPanelBackground(t *testing.T) {
 	if section[0] != "▸ ○ builder" {
 		t.Fatalf("AGENTS main row = %q, want %q", section[0], "▸ ○ builder")
 	}
-	if section[1] != "○ ship tests" {
-		t.Fatalf("AGENTS sub-agent row = %q, want %q", section[1], "○ ship tests")
+	if section[1] != "· ship tests  unknown" {
+		t.Fatalf("AGENTS sub-agent row = %q, want %q", section[1], "· ship tests  unknown")
 	}
 
 	if !strings.Contains(rendered, InfoPanelAgentFocusedStyle.Render("▸ ○ builder")) {
 		t.Fatalf("AGENTS focused line should use info-panel-aware style; want styled content in output")
 	}
-	entryPrefix := InfoPanelAgentEntryStyle.Render("  ○ ship tests")
+	entryPrefix := InfoPanelAgentEntryStyle.Render("  · ship tests  unknown")
 	if !strings.Contains(rendered, entryPrefix) {
 		t.Fatalf("AGENTS sub-agent line should preserve info-panel background with collapsible content indent; want %q in output", entryPrefix)
 	}
@@ -1909,8 +1909,8 @@ func TestRenderInfoPanelAgentsRefreshWhenFocusChangesWithoutModelChange(t *testi
 	if before[0] != "▸ ○ builder" {
 		t.Fatalf("AGENTS main row before focus switch = %q, want %q", before[0], "▸ ○ builder")
 	}
-	if before[1] != "○ ship tests" {
-		t.Fatalf("AGENTS sub-agent row before focus switch = %q, want %q", before[1], "○ ship tests")
+	if before[1] != "· ship tests  unknown" {
+		t.Fatalf("AGENTS sub-agent row before focus switch = %q, want %q", before[1], "· ship tests  unknown")
 	}
 
 	m.setFocusedAgent("agent-1")
@@ -1921,8 +1921,8 @@ func TestRenderInfoPanelAgentsRefreshWhenFocusChangesWithoutModelChange(t *testi
 	if after[0] != "○ builder" {
 		t.Fatalf("AGENTS main row after focus switch = %q, want %q", after[0], "○ builder")
 	}
-	if after[1] != "▸ ○ ship tests" {
-		t.Fatalf("AGENTS sub-agent row after focus switch = %q, want %q", after[1], "▸ ○ ship tests")
+	if after[1] != "▸ · ship tests  unknown" {
+		t.Fatalf("AGENTS sub-agent row after focus switch = %q, want %q", after[1], "▸ · ship tests  unknown")
 	}
 }
 
@@ -1933,7 +1933,7 @@ func TestRenderInfoPanelCollapsedAgentsShowsHeaderOnly(t *testing.T) {
 	m.infoPanelCollapsedSections[infoPanelSectionAgents] = true
 
 	plain := stripANSI(m.renderInfoPanel(48, 24))
-	if !strings.Contains(plain, "▶ AGENTS") || !strings.Contains(plain, "0/1") {
+	if !strings.Contains(plain, "▶ AGENTS") || !strings.Contains(plain, "1 unknown") {
 		t.Fatalf("collapsed AGENTS header should include compact count, got %q", plain)
 	}
 	section := infoPanelSectionLines(infoPanelPlainLines(plain), "▶ AGENTS")
@@ -1983,7 +1983,7 @@ func TestRenderInfoPanelAgentsApplyConfiguredColorToNonFocusedRows(t *testing.T)
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", Color: "196"}}, "main", "builder")
 
 	rendered := m.renderInfoPanel(48, 24)
-	want := infoPanelAgentRowStyle(SidebarEntry{ID: "agent-1", Color: "196"}, false).Render("  ○ agent-1")
+	want := infoPanelAgentRowStyle(SidebarEntry{ID: "agent-1", Color: "196"}, false).Render("  · agent-1  unknown")
 	if !strings.Contains(rendered, want) {
 		t.Fatalf("AGENTS non-focused row should use configured color; want %q in %q", want, rendered)
 	}
@@ -2770,5 +2770,24 @@ func TestRenderInfoPanelContextColorKeepsBudgetDuringPendingModelSwitch(t *testi
 	line = renderContextLine(0.62)
 	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) || strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
 		t.Fatalf("Context at 62%% should use the committed model's 0.8 threshold: %q", line)
+	}
+}
+
+func TestInfoPanelOwnerReasonInvalidatesCache(t *testing.T) {
+	backend := newInfoPanelAgent()
+	m := NewModel(backend)
+	for _, reason := range []string{"Choose API A", "Choose API B", ""} {
+		previous := m.infoPanelFingerprint(48, 60)
+		m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "worker", State: "waiting_main", AwaitingOwnerReason: reason}}, "worker", "orchestrator")
+		if previous == m.infoPanelFingerprint(48, 60) {
+			t.Fatal("reason change did not invalidate fingerprint")
+		}
+		plain := stripANSI(m.renderInfoPanel(48, 60))
+		if reason != "" && !strings.Contains(plain, reason) {
+			t.Fatalf("missing reason in %q", plain)
+		}
+		if reason == "" && strings.Contains(plain, "Choose API") {
+			t.Fatal("stale reason")
+		}
 	}
 }

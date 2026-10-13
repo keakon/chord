@@ -250,8 +250,8 @@ func TestSidebarCompletedStatusUsesDoneSemantics(t *testing.T) {
 	sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")
 	sidebar.UpdateStatus("agent-1", "completed")
 
-	if got := sidebar.AgentsSummary(); got != "1/1" {
-		t.Fatalf("AgentsSummary() = %q, want %q", got, "1/1")
+	if got := sidebar.AgentsSummary(); got != "1 delivered" {
+		t.Fatalf("AgentsSummary() = %q, want %q", got, "1 delivered")
 	}
 	lines := sidebar.buildLines(32)
 	joined := strings.Join(lines, "\n")
