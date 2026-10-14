@@ -563,7 +563,7 @@ func TestAllDiagnosticsByAbsPathIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T)
 	mgr.clients[clientKey{name: "gopls", root: mgr.projectRootPath()}] = outer
 	mgr.clients[clientKey{name: "gopls", root: filepath.Join(mgr.projectRootPath(), "nested")}] = inner
 
-	got := mgr.allDiagnosticsByAbsPath()[path]
+	got := mgr.diagnosticsByAbsPath(nil)[path]
 	if len(got) != 1 || got[0].Severity != int(protocol.SeverityWarning) || got[0].Message != "fresh inner" {
 		t.Fatalf("diagnostics = %+v, want only owner-root warning", got)
 	}
@@ -583,7 +583,7 @@ func TestAllDiagnosticsByAbsPathKeepsDistinctServerDiagnosticsPerPath(t *testing
 	// Two servers both own the same file, each from its own root. The owner
 	// cache must distinguish them; keying it by path alone reused the first
 	// server's owner roots and silently dropped the second server's diagnostics.
-	got := mgr.allDiagnosticsByAbsPath()[path]
+	got := mgr.diagnosticsByAbsPath(nil)[path]
 	messages := make(map[string]int, len(got))
 	for _, d := range got {
 		messages[d.Message]++

@@ -323,17 +323,17 @@ func TestManagerDidCloseErrClearsDiagnosticsAndNotifiesClients(t *testing.T) {
 	path := normalizeWaiterPath("/tmp/main.go")
 	client := &Client{
 		client:      fake,
-		cwd:         "/tmp",
+		cwd:         normalizeWaiterPath("/tmp"),
 		openFiles:   map[string]int32{path: 1},
 		diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{},
 	}
 	uri := protocol.DocumentURI(client.pathToURI(path))
 	client.diagnostics[uri] = []protocol.Diagnostic{{Message: "boom"}}
 	mgr := &Manager{
-		clients: map[clientKey]*Client{{name: "gopls"}: client},
+		clients: map[clientKey]*Client{{name: "gopls", root: normalizeWaiterPath("/tmp")}: client},
 		waiters: map[string][]chan diagnosticsEvent{normalizeWaiterPath(path): {make(chan diagnosticsEvent, 1)}},
 		diagByServer: map[clientKey]map[string]diagCounts{
-			{name: "gopls"}: {string(uri): {errors: 1}},
+			{name: "gopls", root: normalizeWaiterPath("/tmp")}: {string(uri): {errors: 1}},
 		},
 		touchedPaths: map[string]struct{}{
 			normalizeWaiterPath(path): {},
@@ -351,7 +351,7 @@ func TestManagerDidCloseErrClearsDiagnosticsAndNotifiesClients(t *testing.T) {
 	if _, ok := mgr.waiters[normalizeWaiterPath(path)]; ok {
 		t.Fatal("expected waiters for path removed")
 	}
-	if _, ok := mgr.diagByServer[clientKey{name: "gopls"}]; ok {
+	if _, ok := mgr.diagByServer[clientKey{name: "gopls", root: normalizeWaiterPath("/tmp")}]; ok {
 		t.Fatalf("diagByServer = %#v, want gopls entry removed", mgr.diagByServer)
 	}
 }
@@ -407,46 +407,16 @@ func TestClientDidChangeUnopenedSendsDidOpenWithVersionOne(t *testing.T) {
 	}
 }
 
-func TestClientCloseKillsOnShutdownTimeout(t *testing.T) {
+func TestClientCloseCancelledBeforeShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-
-	fake := &fakePowernapClient{shutdownErr: context.Canceled}
+	fake := &fakePowernapClient{}
 	c := &Client{client: fake}
-
-	err := c.Close(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Close() error = %v, want context.Canceled", err)
+	if err := c.Close(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Close: %v", err)
 	}
-	if fake.shutdowns != 1 {
-		t.Fatalf("shutdowns = %d, want 1", fake.shutdowns)
-	}
-	if fake.kills != 1 {
-		t.Fatalf("kills = %d, want 1", fake.kills)
-	}
-	if fake.exits != 0 {
-		t.Fatalf("exits = %d, want 0", fake.exits)
-	}
-}
-
-func TestClientCloseKillsOnExitTimeout(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	fake := &fakePowernapClient{exitErr: context.Canceled}
-	c := &Client{client: fake}
-	cancel()
-
-	err := c.Close(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("Close() error = %v, want context.Canceled", err)
-	}
-	if fake.shutdowns != 1 {
-		t.Fatalf("shutdowns = %d, want 1", fake.shutdowns)
-	}
-	if fake.exits != 1 {
-		t.Fatalf("exits = %d, want 1", fake.exits)
-	}
-	if fake.kills != 1 {
-		t.Fatalf("kills = %d, want 1", fake.kills)
+	if fake.shutdowns != 0 || fake.exits != 0 || fake.kills != 1 {
+		t.Fatalf("unexpected shutdown=%d exit=%d kill=%d", fake.shutdowns, fake.exits, fake.kills)
 	}
 }
 

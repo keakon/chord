@@ -3,6 +3,8 @@ package lsp
 import (
 	"context"
 	"crypto/sha256"
+	"os"
+	"time"
 
 	"github.com/keakon/x/powernap/pkg/lsp/protocol"
 )
@@ -13,11 +15,16 @@ import (
 func (c *Client) recordSyncedContent(path, content string) {
 	path = normalizeWaiterPath(path)
 	sum := sha256.Sum256([]byte(content))
+	info, _ := os.Stat(path)
 	c.openFilesMu.Lock()
 	if c.syncedDigest == nil {
 		c.syncedDigest = make(map[string][sha256.Size]byte)
 	}
 	c.syncedDigest[path] = sum
+	if c.syncedFiles == nil {
+		c.syncedFiles = make(map[string]syncedFile)
+	}
+	c.syncedFiles[path] = syncedFile{info: info, used: time.Now()}
 	c.openFilesMu.Unlock()
 }
 
@@ -48,10 +55,16 @@ func (c *Client) ResyncFileIfChanged(ctx context.Context, path, content string) 
 	previous, known := c.syncedDigest[path]
 	version, stillOpen := c.openFiles[path]
 	if !stillOpen || (known && previous == sum) {
+		if stillOpen {
+			if state, ok := c.syncedFiles[path]; ok {
+				state.used = time.Now()
+				c.syncedFiles[path] = state
+			}
+		}
 		c.openFilesMu.Unlock()
 		return false, nil
 	}
-	version++
+	version = c.nextDocumentVersionLocked(version)
 	c.openFiles[path] = version
 	c.openFilesMu.Unlock()
 

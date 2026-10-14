@@ -352,7 +352,7 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 	return b.String()
 }
 
-func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
+func (m *Manager) diagnosticsByAbsPath(owners map[clientKey]*Client) map[string][]Diagnostic {
 	m.clientsMu.RLock()
 	defer m.clientsMu.RUnlock()
 	merged := make(map[string][]Diagnostic)
@@ -367,6 +367,9 @@ func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
 	}
 	ownersByPath := make(map[ownerCacheKey]map[string]struct{})
 	for key, c := range m.clients {
+		if owners != nil && owners[key] != c {
+			continue
+		}
 		c.diagnosticsMu.RLock()
 		for uri, diags := range c.diagnostics {
 			p, err := protocol.DocumentURI(uri).Path()
@@ -383,7 +386,7 @@ func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
 			owners := ownersByPath[cacheKey]
 			if owners == nil {
 				owners = make(map[string]struct{})
-				m.forEachClientForPathLocked(absP, func(ownerKey clientKey, _ *Client) {
+				m.forEachClientForCanonicalPathLocked(absP, func(ownerKey clientKey, _ *Client) {
 					if ownerKey.name == key.name {
 						owners[ownerKey.root] = struct{}{}
 					}

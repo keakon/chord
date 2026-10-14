@@ -126,8 +126,9 @@ type Manager struct {
 	// stop aborts and is refused at registration; the next Start creates a
 	// fresh era, which is what lets an idle unload be followed by a normal
 	// cold start. Guarded by clientsMu.
-	startEra       context.Context
-	cancelStartEra context.CancelFunc
+	startEra        context.Context
+	cancelStartEra  context.CancelFunc
+	maintenanceDone chan struct{}
 
 	waiters   map[string][]chan diagnosticsEvent
 	waitersMu sync.Mutex
@@ -256,6 +257,11 @@ func (m *Manager) onDiagnostics(key clientKey, origin *Client) func(uri string, 
 		// not restore entries after a replacement or checkout removal.
 		m.diagMu.Lock()
 		if origin != nil {
+			if !origin.acceptDiagnostics(uriToPath(uri), version) {
+				origin.clearDiagnosticsForPath(uriToPath(uri))
+				m.diagMu.Unlock()
+				return
+			}
 			m.clientsMu.RLock()
 			current := false
 			m.forEachClientForPathLocked(uriToPath(uri), func(owner clientKey, client *Client) {
@@ -411,6 +417,8 @@ func (m *Manager) Start(ctx context.Context, path string) {
 			// A Stop cleared the era; create a fresh one so launches after
 			// the stop run on a live context (idle-unload reload).
 			m.startEra, m.cancelStartEra = context.WithCancel(context.Background())
+			m.maintenanceDone = make(chan struct{})
+			go m.maintainFiles(m.startEra, m.maintenanceDone)
 		}
 		m.starting[key] = true
 		entryCtx, cancel := context.WithCancel(m.startEra)
@@ -710,44 +718,68 @@ func (m *Manager) dropOrphanedDiagnostics(survivors map[string][]*Client) (clear
 	}
 	m.diagMu.Lock()
 	defer m.diagMu.Unlock()
-	for name, live := range survivors {
-		for key := range m.diagByServer {
+	affected := make(map[string]struct{})
+	for name := range survivors {
+		// A replacement may have started while an evicted client was closing.
+		// Decide ownership from the current registry, not the removal snapshot.
+		m.clientsMu.RLock()
+		var live []*Client
+		for key, c := range m.clients {
+			if key.name == name {
+				live = append(live, c)
+			}
+		}
+		m.clientsMu.RUnlock()
+		roots := make(map[string]struct{}, len(live))
+		for _, c := range live {
+			roots[c.cwd] = struct{}{}
+		}
+		for key, byURI := range m.diagByServer {
 			if key.name != name {
 				continue
 			}
-			byURI := m.diagByServer[key]
+			if _, ok := roots[key.root]; ok {
+				continue
+			}
 			for uri := range byURI {
-				path := uriToPath(uri)
-				served := false
-				for _, c := range live {
-					if c.HandlesFile(path) {
-						served = true
-						break
-					}
-				}
-				if served {
-					continue
-				}
-				delete(byURI, uri)
-				m.updateDiagnosticOutputStateLocked(key, normalizeWaiterPath(path), nil)
+				affected[normalizeWaiterPath(uriToPath(uri))] = struct{}{}
 				cleared = append(cleared, clearedDiag{server: name, uri: uri})
-				if byPath := m.reviewByServer[name]; byPath != nil {
-					delete(byPath, normalizeWaiterPath(path))
+			}
+			delete(m.diagByServer, key)
+		}
+		for key, byPath := range m.publishedDiagByServer {
+			if key.name != name {
+				continue
+			}
+			if _, ok := roots[key.root]; ok {
+				continue
+			}
+			for path := range byPath {
+				affected[path] = struct{}{}
+			}
+			delete(m.publishedDiagByServer, key)
+		}
+		for path := range m.reviewByServer[name] {
+			served := false
+			for _, c := range live {
+				if c.HandlesFile(path) {
+					served = true
+					break
 				}
 			}
-			if len(byURI) == 0 {
-				delete(m.diagByServer, key)
+			if !served {
+				delete(m.reviewByServer[name], path)
+				affected[path] = struct{}{}
 			}
 		}
-		// A server whose review entries were all dropped must not leave an empty
-		// map behind: ResetReviews decides whether anything needs clearing from
-		// len(m.reviewByServer), so a leftover empty entry makes it report a
-		// change and refresh the sidebar for nothing. This deliberately sits
-		// outside the diagByServer cleanup above — reviews and diagnostics empty
-		// out independently, and the common case is one orphaned file among
-		// several the server still has diagnostics for.
-		if byPath, ok := m.reviewByServer[name]; ok && len(byPath) == 0 {
+		if len(m.reviewByServer[name]) == 0 {
 			delete(m.reviewByServer, name)
+		}
+	}
+	for path := range affected {
+		if len(m.publishedDiagnosticIdentitiesLocked(path)) == 0 {
+			delete(m.diagState, path)
+			delete(m.reportedByPath, path)
 		}
 	}
 	return cleared
@@ -816,14 +848,19 @@ func pathUnderDir(path, dir string) bool {
 //
 // Caller must hold at least clientsMu.RLock().
 func (m *Manager) forEachClientForPathLocked(path string, fn func(clientKey, *Client)) {
-	path = normalizeWaiterPath(path)
-	boundary := m.workspaceBoundary(path)
+	m.forEachClientForCanonicalPathLocked(normalizeWaiterPath(path), fn)
+}
+
+// File paths reaching this helper already have canonical filesystem identity.
+// Do not resolve symlinks separately for every candidate server.
+func (m *Manager) forEachClientForCanonicalPathLocked(path string, fn func(clientKey, *Client)) {
+	boundary := m.workspaceBoundaryForDir(filepath.Dir(path))
 	if len(m.clients) == 0 {
 		return
 	}
 	var owners []clientKey
 	for key, c := range m.clients {
-		if !c.HandlesFile(path) || (boundary != "" && !pathUnderDir(key.root, boundary)) {
+		if !pathUnderDir(path, key.root) || !matchesFileType(c.cfg, path) || (boundary != "" && !pathUnderDir(key.root, boundary)) {
 			continue
 		}
 		seen := false
@@ -843,7 +880,6 @@ func (m *Manager) forEachClientForPathLocked(path string, fn func(clientKey, *Cl
 	}
 	for _, key := range owners {
 		c := m.clients[key]
-		c.touch(time.Now().UnixNano())
 		fn(key, c)
 	}
 }
@@ -858,6 +894,9 @@ func (m *Manager) clientForPathLocked(path string) (*Client, bool) {
 			found = c
 		}
 	})
+	if found != nil {
+		found.touch(time.Now().UnixNano())
+	}
 	return found, found != nil
 }
 
@@ -950,9 +989,7 @@ func (m *Manager) DidOpen(ctx context.Context, path string, content string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	m.clientsMu.RLock()
-	defer m.clientsMu.RUnlock()
-	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
+	m.forEachClientForPath(path, func(_ clientKey, c *Client) {
 		_, _ = c.DidOpen(ctx, path, content)
 	})
 }
@@ -972,10 +1009,8 @@ func (m *Manager) NotifyWatchedFileChanged(ctx context.Context, path string, cha
 		ctx = context.Background()
 	}
 	path = normalizeWaiterPath(path)
-	m.clientsMu.RLock()
-	defer m.clientsMu.RUnlock()
 	errs := make(map[string]error)
-	m.forEachClientForPathLocked(path, func(key clientKey, c *Client) {
+	m.forEachClientForPath(path, func(key clientKey, c *Client) {
 		if err := c.NotifyWatchedFileChange(ctx, path, changeType); err != nil {
 			errs[key.name] = err
 		}
@@ -993,11 +1028,9 @@ func (m *Manager) DidChangeVersions(ctx context.Context, path string, content st
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	m.clientsMu.RLock()
-	defer m.clientsMu.RUnlock()
 	versions := make(map[string]int32)
 	errs := make(map[string]error)
-	m.forEachClientForPathLocked(path, func(key clientKey, c *Client) {
+	m.forEachClientForPath(path, func(key clientKey, c *Client) {
 		version, err := c.DidChange(ctx, path, content)
 		if err != nil {
 			errs[key.name] = err
@@ -1028,8 +1061,7 @@ func (m *Manager) ResyncFile(ctx context.Context, path, content string) {
 	}
 	path = normalizeWaiterPath(path)
 	disconnected := false
-	m.clientsMu.RLock()
-	m.forEachClientForPathLocked(path, func(_ clientKey, c *Client) {
+	m.forEachClientForPath(path, func(_ clientKey, c *Client) {
 		if _, err := c.ResyncFileIfChanged(ctx, path, content); err != nil {
 			log.Debugf("lsp: resync changed file failed path=%v name=%v error=%v", path, c.name, err)
 			if !c.IsRunning() {
@@ -1037,7 +1069,6 @@ func (m *Manager) ResyncFile(ctx context.Context, path, content string) {
 			}
 		}
 	})
-	m.clientsMu.RUnlock()
 	if disconnected {
 		m.pruneExitedClientsForPath(ctx, path)
 	}
@@ -1051,10 +1082,8 @@ func (m *Manager) NotifyDidSave(ctx context.Context, path string, content string
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	m.clientsMu.RLock()
-	defer m.clientsMu.RUnlock()
 	errs := make(map[string]error)
-	m.forEachClientForPathLocked(path, func(key clientKey, c *Client) {
+	m.forEachClientForPath(path, func(key clientKey, c *Client) {
 		if err := c.NotifyDidSave(ctx, path, content); err != nil {
 			errs[key.name] = err
 		}
@@ -1121,6 +1150,7 @@ func (m *Manager) DidCloseErr(ctx context.Context, path string) error {
 	if changed {
 		m.notifySidebarChanged()
 	}
+	m.clearFileState(path, true)
 	return first
 }
 
@@ -1267,7 +1297,12 @@ func normalizeWaiterPath(p string) string {
 // deadlocks the close against those handlers until the caller's context
 // expires — a checkout switch would pay its whole rebind budget for it.
 func (m *Manager) Stop(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.clientsMu.Lock()
+	maintenanceDone := m.maintenanceDone
+	m.maintenanceDone = nil
 	if m.cancelStartEra != nil {
 		m.cancelStartEra()
 		m.startEra = nil
@@ -1288,9 +1323,25 @@ func (m *Manager) Stop(ctx context.Context) {
 	}
 	m.clientsMu.Unlock()
 
+	if maintenanceDone != nil {
+		select {
+		case <-maintenanceDone:
+		case <-ctx.Done():
+		}
+	}
 	for _, c := range closing {
 		if err := c.client.Close(ctx); err != nil {
 			log.Warnf("lsp: stop client name=%v root=%v error=%v", c.key.name, c.key.root, err)
+		}
+	}
+
+	survivors := make(map[string][]*Client)
+	for _, c := range closing {
+		survivors[c.key.name] = nil
+	}
+	for _, cleared := range m.dropOrphanedDiagnostics(survivors) {
+		if m.broadcast != nil {
+			m.broadcast(TypeLSPDiagnostics, DiagnosticsPayload{URI: cleared.uri, ServerID: cleared.server})
 		}
 	}
 

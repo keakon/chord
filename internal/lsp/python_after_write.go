@@ -198,7 +198,7 @@ func (m *Manager) currentFileDiagnostics(absPath string) []Diagnostic {
 		return nil
 	}
 	path := normalizeWaiterPath(absPath)
-	diags := m.allDiagnosticsByAbsPath()[path]
+	diags := m.diagnosticsForPaths([]string{path})[path]
 	return append([]Diagnostic(nil), diags...)
 }
 

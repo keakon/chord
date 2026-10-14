@@ -67,7 +67,9 @@ type Client struct {
 	// syncedDigest: path (normalized) -> sha256 of the content Chord last sent
 	// for it. External-change resync compares the file's current bytes against
 	// it so an unchanged document is never re-sent. Guarded by openFilesMu.
-	syncedDigest map[string][sha256.Size]byte
+	syncedDigest    map[string][sha256.Size]byte
+	syncedFiles     map[string]syncedFile
+	documentVersion int32
 
 	// diagnostics cache: URI -> diagnostics (updated by publishDiagnostics handler)
 	diagnostics   map[protocol.DocumentURI][]protocol.Diagnostic
@@ -172,8 +174,15 @@ func (c *Client) registerHandlers() {
 		}
 		// Optional the version number of the document the diagnostics are published for.
 		version := par.Version
+		if !c.acceptDiagnostics(uriToPath(string(par.URI)), version) {
+			return
+		}
 		c.diagnosticsMu.Lock()
-		c.diagnostics[par.URI] = par.Diagnostics
+		if len(par.Diagnostics) == 0 {
+			delete(c.diagnostics, par.URI)
+		} else {
+			c.diagnostics[par.URI] = par.Diagnostics
+		}
 		c.diagnosticsMu.Unlock()
 		if c.onDiagnostics != nil {
 			c.onDiagnostics(string(par.URI), c.name, par.Diagnostics, version)
@@ -477,28 +486,59 @@ func (c *Client) Kill() { c.client.Kill() }
 // auxiliary, per-session processes and there is no value in blocking process
 // exit on them.
 func (c *Client) Close(ctx context.Context) error {
-	c.lifecycleMu.Lock()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// A protocol writer may hold lifecycleMu while blocked in transport IO.
+	// Deadline enforcement must start before acquiring that lock and also cover
+	// Exit, whose underlying transport uses the client's lifetime context.
+	var killOnce sync.Once
+	kill := func() { killOnce.Do(func() { c.transportFailed.Store(true); c.client.Kill() }) }
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() { kill(); close(done) })
+	defer func() {
+		if !stop() {
+			<-done
+		}
+	}()
+	if !c.lifecycleMu.TryLock() {
+		tick := time.NewTicker(10 * time.Millisecond)
+		defer tick.Stop()
+		for !c.lifecycleMu.TryLock() {
+			select {
+			case <-ctx.Done():
+				kill()
+				return ctx.Err()
+			case <-tick.C:
+			}
+		}
+	}
 	defer c.lifecycleMu.Unlock()
 	if c.closed {
 		return nil
 	}
+	if ctx.Err() != nil {
+		kill()
+		c.closed = true
+		return ctx.Err()
+	}
 	if c.transportFailed.Load() {
-		c.client.Kill()
+		kill()
 		c.closed = true
 		return nil
 	}
 	if err := c.client.Shutdown(ctx); err != nil {
 		log.Warnf("lsp: shutdown client error=%v", err)
-		if ctx != nil && ctx.Err() != nil {
-			c.client.Kill()
+		if ctx.Err() != nil {
+			kill()
 			c.closed = true
 			return ctx.Err()
 		}
 	}
 	if err := c.client.Exit(); err != nil {
 		log.Warnf("lsp: exit client error=%v", err)
-		if ctx != nil && ctx.Err() != nil {
-			c.client.Kill()
+		if ctx.Err() != nil {
+			kill()
 			c.closed = true
 			return ctx.Err()
 		}
@@ -552,7 +592,7 @@ func (c *Client) DidOpen(ctx context.Context, path string, content string) (int3
 	uri := c.pathToURI(path)
 	c.openFilesMu.Lock()
 	if v, ok := c.openFiles[path]; ok {
-		v++
+		v = c.nextDocumentVersionLocked(v)
 		c.openFiles[path] = v
 		c.openFilesMu.Unlock()
 		changes := []protocol.TextDocumentContentChangeEvent{{Value: protocol.TextDocumentContentChangeWholeDocument{Text: content}}}
@@ -562,18 +602,19 @@ func (c *Client) DidOpen(ctx context.Context, path string, content string) (int3
 		}
 		return v, err
 	}
-	c.openFiles[path] = 1
+	v := c.nextDocumentVersionLocked(0)
+	c.openFiles[path] = v
 	c.openFilesMu.Unlock()
 
 	lang := string(powernap.DetectLanguage(path))
 	if lang == "" {
 		lang = "plaintext"
 	}
-	if err := c.observeTransportError(c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content)); err != nil {
-		return 1, err
+	if err := c.observeTransportError(c.client.NotifyDidOpenTextDocument(ctx, uri, lang, int(v), content)); err != nil {
+		return v, err
 	}
 	c.recordSyncedContent(path, content)
-	return 1, nil
+	return v, nil
 }
 
 // DidChange sends didChange for the file. The returned version is the document
@@ -589,19 +630,20 @@ func (c *Client) DidChange(ctx context.Context, path string, content string) (in
 	c.openFilesMu.Lock()
 	v, ok := c.openFiles[path]
 	if !ok {
-		c.openFiles[path] = 1
+		v := c.nextDocumentVersionLocked(0)
+		c.openFiles[path] = v
 		c.openFilesMu.Unlock()
 		lang := string(powernap.DetectLanguage(path))
 		if lang == "" {
 			lang = "plaintext"
 		}
-		if err := c.observeTransportError(c.client.NotifyDidOpenTextDocument(ctx, uri, lang, 1, content)); err != nil {
-			return 1, err
+		if err := c.observeTransportError(c.client.NotifyDidOpenTextDocument(ctx, uri, lang, int(v), content)); err != nil {
+			return v, err
 		}
 		c.recordSyncedContent(path, content)
-		return 1, nil
+		return v, nil
 	}
-	v++
+	v = c.nextDocumentVersionLocked(v)
 	c.openFiles[path] = v
 	c.openFilesMu.Unlock()
 
@@ -639,6 +681,7 @@ func (c *Client) DidClose(ctx context.Context, path string) error {
 	if ok {
 		delete(c.openFiles, path)
 		delete(c.syncedDigest, path)
+		delete(c.syncedFiles, path)
 	}
 	c.openFilesMu.Unlock()
 	if !ok {
@@ -678,6 +721,7 @@ func (c *Client) CloseAllFiles(ctx context.Context) {
 	}
 	c.openFiles = make(map[string]int32)
 	c.syncedDigest = make(map[string][sha256.Size]byte)
+	clear(c.syncedFiles)
 	c.openFilesMu.Unlock()
 	for _, p := range paths {
 		_ = c.observeTransportError(c.client.NotifyDidCloseTextDocument(ctx, c.pathToURI(p)))

@@ -27,6 +27,10 @@ func (m *Manager) workspaceBoundary(path string) string {
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
 		dir = path
 	}
+	return m.workspaceBoundaryForDir(dir)
+}
+
+func (m *Manager) workspaceBoundaryForDir(dir string) string {
 	key := boundaryKey{dir: dir, base: m.projectRootPath()}
 	now := time.Now()
 	m.boundaryMu.Lock()
@@ -63,14 +67,17 @@ func (m *Manager) settingsBoundary(root string) string {
 	return root
 }
 
-// pruneMissingRoots releases only vanished workspaces. It runs on tool access,
-// never on the UI loop; session idle unloading and the per-server LRU cap also
-// reclaim clients without adding another background watcher.
+// pruneMissingRoots releases vanished workspaces and idle instances without
+// open documents. It runs on tool access and background maintenance, never UI.
 func (m *Manager) pruneMissingRoots(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	var closed []*Client
+	var removedRoots []string
 	survivors := make(map[string][]*Client)
 	m.clientsMu.Lock()
 	for key, entry := range m.launches {
@@ -79,8 +86,16 @@ func (m *Manager) pruneMissingRoots(ctx context.Context) {
 		}
 	}
 	for key, client := range m.clients {
-		if _, err := os.Stat(key.root); !os.IsNotExist(err) {
+		_, err := os.Stat(key.root)
+		missing := os.IsNotExist(err)
+		client.openFilesMu.Lock()
+		idle := len(client.openFiles) == 0 && client.lastUsed.Load() > 0 && time.Since(time.Unix(0, client.lastUsed.Load())) > workspaceIdleTimeout
+		client.openFilesMu.Unlock()
+		if !missing && !idle {
 			continue
+		}
+		if missing {
+			removedRoots = append(removedRoots, key.root)
 		}
 		delete(m.clients, key)
 		closed = append(closed, client)
@@ -99,8 +114,32 @@ func (m *Manager) pruneMissingRoots(ctx context.Context) {
 		}
 	}
 	m.startFailMu.Unlock()
-	for _, client := range closed {
-		_ = client.Close(ctx)
+	for _, root := range removedRoots {
+		for path := range m.touchedSnapshot() {
+			if pathUnderDir(path, root) {
+				m.clearFileState(path, true)
+			}
+		}
+	}
+	m.boundaryMu.Lock()
+	for root := range m.defaultRoots {
+		if root != m.projectRootPath() {
+			if _, err := os.Stat(root); os.IsNotExist(err) {
+				delete(m.defaultRoots, root)
+			}
+		}
+	}
+	if len(removedRoots) > 0 {
+		clear(m.boundaries)
+	}
+	m.boundaryMu.Unlock()
+	if len(closed) > 0 {
+		// One shared budget bounds a batch, even when several servers stall.
+		closeCtx, cancel := context.WithTimeout(ctx, workspaceCloseTimeout)
+		for _, client := range closed {
+			_ = client.Close(closeCtx)
+		}
+		cancel()
 	}
 	for _, cleared := range m.dropOrphanedDiagnostics(survivors) {
 		m.broadcast(TypeLSPDiagnostics, DiagnosticsPayload{URI: cleared.uri, ServerID: cleared.server})
@@ -113,23 +152,11 @@ func (m *Manager) pruneMissingRoots(ctx context.Context) {
 // diagnosticsForPaths limits ancillary diagnostics to the instances owning
 // this edit. Another checkout's errors must not appear as fallout from it.
 func (m *Manager) diagnosticsForPaths(paths []string) map[string][]Diagnostic {
-	byPath := m.allDiagnosticsByAbsPath()
 	owners := make(map[clientKey]*Client)
 	m.clientsMu.RLock()
-	defer m.clientsMu.RUnlock()
 	for _, path := range paths {
 		m.forEachClientForPathLocked(path, func(key clientKey, c *Client) { owners[key] = c })
 	}
-	for path := range byPath {
-		covered := false
-		m.forEachClientForPathLocked(path, func(key clientKey, _ *Client) {
-			if _, ok := owners[key]; ok {
-				covered = true
-			}
-		})
-		if !covered {
-			delete(byPath, path)
-		}
-	}
-	return byPath
+	m.clientsMu.RUnlock()
+	return m.diagnosticsByAbsPath(owners)
 }

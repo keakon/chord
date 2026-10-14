@@ -100,6 +100,10 @@ func TestRetiredClientCannotPublishDiagnostics(t *testing.T) {
 	old, current := &Client{cwd: root}, &Client{cwd: root}
 	manager.clients[key] = current
 	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package sample"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	current.openFiles = map[string]int32{path: 1}
 	uri := string(protocol.URIFromPath(path))
 	publish := manager.onDiagnostics(key, old)
 	publish(uri, "", []protocol.Diagnostic{{Severity: 1, Message: "stale"}}, 1)
