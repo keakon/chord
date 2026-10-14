@@ -1712,9 +1712,9 @@ The full top-level keys of `config.yaml` (both global `~/.config/chord/config.ya
 
 ### Provider field reference
 
-Chord automatically propagates the current Chord session id to OpenAI-family providers as cache/routing affinity metadata: OpenAI Responses requests include `prompt_cache_key`, and OpenAI Chat Completions / Responses HTTP requests include `X-Session-Id` and `session-id` headers when a session id is available.
+Chord automatically supplies a session identity to OpenAI-family providers for cache and routing affinity. When an identity is available, Chat Completions / Responses HTTP requests include `X-Session-Id` and `session-id`; Responses requests also send `prompt_cache_key` when the endpoint accepts it (see `compat.responses.send_prompt_cache_key`). Codex / ChatGPT requests use `session-id`, `thread-id`, and `x-client-request-id`, with the same identity as the body's `prompt_cache_key` when sent. Stable identities help preserve cache affinity; actual hits still depend on the model, request prefix, and server cache state.
 
-The key is per client rather than per provider: the main agent uses the current Chord session id, and each SubAgent derives its own `<session>:sub:<instanceID>` key so one agent's requests never inherit another's cache identity. These fields are not user-configurable; they follow the active Chord session and are cleared or changed on session switch/resume.
+Chord manages the identity per client. The main agent uses the Chord session ID; each SubAgent uses `<session>:sub:<instanceID>`. Restoring the same instance preserves its identity; reactivating a task with a new instance creates a new identity. WebSocket connections reopen when the identity changes so they cannot retain another session's headers.
 
 Anthropic prompt caching is driven by `cache_control` blocks, and Chord also sends JSON-formatted `metadata.user_id` automatically with a stable anonymous `device_id` plus a stable routing `session_id` derived from local/provider identity. These Anthropic metadata fields are not user-configurable.
 
@@ -1808,7 +1808,7 @@ cached-content APIs/usage fields, not from a Chord session id header.
 | `modalities.input`| array  | Subset of `text` / `image` / `pdf`. Defaults to `[text]`; declare `image` / `pdf` explicitly when supported.          |
 | `supported_service_tiers` | list | Provider-level default or model-level override for accepted non-standard tiers, e.g. `[fast, slow]` or `[fast]`. Omit to use preset defaults. |
 
-Service tiers and prompt caching are provider-specific. OpenAI supports priority/flex-style tiering plus `prompt_cache_key` / `prompt_cache_retention`; Anthropic supports `cache_control` with 5m and 1h TTLs and service-tier controls; Gemini uses its own routing / thinking / cached-content mechanisms when available. Chord maps the user-facing tier to the closest supported provider behavior instead of forcing one wire format across all backends.
+Service tiers and prompt caching are provider-specific. OpenAI supports priority/flex-style tiering plus `prompt_cache_key` / `prompt_cache_retention`; Anthropic supports `cache_control` with 5m and 1h TTLs and service-tier controls; Gemini uses its own routing / thinking / cached-content mechanisms when available. Chord maps the user-facing tier to the closest supported provider behavior instead of forcing one wire format across all backends. Of the OpenAI cache fields, Chord sends `prompt_cache_key` when the endpoint accepts it (see `compat.responses.send_prompt_cache_key`) and does not currently send `prompt_cache_retention`.
 
 For a compatible gateway whose usage fields differ from its declared protocol, set the usage semantics explicitly. For example, a Responses-compatible gateway that reports uncached input separately from both cache buckets needs:
 

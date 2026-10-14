@@ -1501,7 +1501,9 @@ chord doctor models --pool thinking
 
 ### Provider 字段参考
 
-Chord 会把当前 Chord session id 自动传给 OpenAI 系 provider，作为缓存 / 路由亲和元数据：OpenAI Responses 请求会包含 `prompt_cache_key`，OpenAI Chat Completions / Responses HTTP 请求会在有 session id 时包含 `X-Session-Id` 和 `session-id` header。该 key 按 client 而非 provider 隔离：main agent 用当前 Chord session id，每个 SubAgent 另行派生 `<session>:sub:<instanceID>` 形式的 key，因此一个 agent 的请求不会继承另一个的缓存身份。这些字段不能手动配置，会随当前 Chord session 自动切换 / 恢复。
+Chord 会自动向 OpenAI 系 provider 传递会话标识，用于缓存和路由亲和性。有会话标识时，Chat Completions / Responses HTTP 请求包含 `X-Session-Id` 和 `session-id` 请求头；Responses 请求在端点接受时还会发送 `prompt_cache_key`（见 `compat.responses.send_prompt_cache_key`）。Codex / ChatGPT 通道使用 `session-id`、`thread-id` 和 `x-client-request-id`，这些请求头与已发送的 `prompt_cache_key` 使用相同身份。稳定标识有助于保持缓存亲和性，实际命中仍取决于模型、请求前缀和服务端缓存状态。
+
+Chord 为每个 client 管理独立身份。主代理使用 Chord 会话 ID，子代理使用 `<session>:sub:<instanceID>`；恢复同一实例时身份不变，任务重新激活并创建新实例时会获得新身份。身份变化时 WebSocket 会重新建连，避免沿用其他会话的请求头。
 
 Anthropic prompt caching 由 `cache_control` block 驱动；Chord 还会自动发送 JSON 格式的 `metadata.user_id`，其中包含稳定匿名的 `device_id`，以及由本地 / provider 身份派生出的稳定路由 `session_id`。这些 Anthropic metadata 字段不能手动配置。在 `explicit` 模式（Anthropic 模型默认）下，Chord 按优先级放置最多 4 个 `cache_control` 断点：最后一个 system block、冻结的已剪裁前缀边界（当渐进式剪裁已冻结稳定前缀时）、最新的持久化消息、最后一条 assistant 消息，使长 agent loop 能复用冻结的历史前缀，而不是每轮重新写入移动的尾部。最新断点会刻意跳过 request-scoped overlay（追加在对话尾部的运行时提示），因为这些内容在下一次请求中就不存在了，写在它们之后的缓存条目永远不可能被读回。
 
@@ -1586,7 +1588,7 @@ Gemini 在 Chord 当前的 `generateContent` transport 中没有简单的逐请�
 | `modalities.input`| array  | `text` / `image` / `pdf` 的子集。默认仅 `[text]`；支持时需显式声明 `image` / `pdf`。                              |
 | `supported_service_tiers` | 列表 | provider-level 默认值或 model-level 覆盖值，用于声明可接收的非 standard tier，例如 `[fast, slow]` 或 `[fast]`。省略时使用 preset 默认值。 |
 
-服务层和 prompt cache 是 provider-specific 的：OpenAI 支持 priority/flex 风格的 tiering 以及 `prompt_cache_key` / `prompt_cache_retention`；Anthropic 支持 `cache_control`，并提供 5 分钟和 1 小时 TTL；Gemini 则使用它自己的路由 / thinking / cached-content 机制。Chord 会把用户侧的 tier 映射到当前 provider 能支持的最接近行为，而不是强行统一成同一种 wire 格式。
+服务层和 prompt cache 是 provider-specific 的：OpenAI 支持 priority/flex 风格的 tiering 以及 `prompt_cache_key` / `prompt_cache_retention`；Anthropic 支持 `cache_control`，并提供 5 分钟和 1 小时 TTL；Gemini 则使用它自己的路由 / thinking / cached-content 机制。Chord 会把用户侧的 tier 映射到当前 provider 能支持的最接近行为，而不是强行统一成同一种 wire 格式。其中 OpenAI 的缓存字段里，Chord 会在端点接受时发送 `prompt_cache_key`（见 `compat.responses.send_prompt_cache_key`），目前不发送 `prompt_cache_retention`。
 
 若兼容网关的 usage 字段与它声明的协议不同，应显式配置语义。例如某个 Responses 兼容网关把普通 input、cache read、cache write 三个桶分开返回：
 

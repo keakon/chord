@@ -88,10 +88,13 @@ func applyProviderAuthHeader(h http.Header, scheme, apiKey string) {
 
 // applyOpenAIOAuthHeaders sets the full set of headers for Codex requests using
 // an OAuth session key.
-func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, apiKey string) {
+//
+// sessionID must be the caller's stable session identity: the Codex backend
+// derives cache affinity from it.
+func applyOpenAIOAuthHeaders(req *http.Request, provider *ProviderConfig, apiKey, sessionID string) {
 	applyProviderAuthHeader(req.Header, config.AuthSchemeBearer, apiKey)
 	applyResponsesStreamingHeaders(req.Header, provider)
-	req.Header.Set(headerSessionID, newOpenAIOAuthSessionID())
+	applyCodexSessionIdentity(req.Header, sessionID)
 
 	if provider == nil {
 		return

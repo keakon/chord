@@ -25,8 +25,9 @@ import (
 const codexResponsesWebsocketsBeta = "responses_websockets=2026-02-06"
 
 const (
-	codexWSIdleTimeout      = 90 * time.Second
-	codexWSHandshakeTimeout = 45 * time.Second
+	codexWSRouteIdentityChanged = "route_identity_changed"
+	codexWSIdleTimeout          = 90 * time.Second
+	codexWSHandshakeTimeout     = 45 * time.Second
 )
 
 var errCodexWSInvalidEventJSON = errors.New("codex ws invalid event json")
@@ -175,8 +176,7 @@ func applyCodexWebSocketHeaders(h http.Header, provider *ProviderConfig, apiKey,
 	h.Set(headerOpenAIBeta, codexResponsesWebsocketsBeta)
 	setProviderLLMUserAgent(h, provider)
 	h.Set("originator", openAICodexOriginator)
-	h.Set(headerSessionID, sessionID)
-	h.Set("x-client-request-id", sessionID)
+	applyCodexSessionIdentity(h, sessionID)
 	if provider != nil {
 		if info := provider.oauthInfoForKey(apiKey); info != nil && info.AccountID != "" {
 			h.Set("ChatGPT-Account-ID", info.AccountID)
@@ -282,30 +282,33 @@ func (r *ResponsesProvider) codexWSClearChainStateLocked() {
 	r.codexWSLastKey = ""
 	r.codexWSLastAPIURL = ""
 	r.codexWSLastModel = ""
+	r.codexWSLastSessionKey = ""
 	r.codexWSLastRespID = ""
 	r.codexWSLastInpLen = 0
 	r.codexWSLastInpSig = ""
 	r.codexWSLastReqSig = ""
 }
 
-func (r *ResponsesProvider) codexWSStoreChainStateLocked(apiKey, apiURL, model, reqSig string, baselineLen int, baselineSig, respID string) {
+func (r *ResponsesProvider) codexWSStoreChainStateLocked(apiKey, apiURL, model, sessionKey, reqSig string, baselineLen int, baselineSig, respID string) {
 	r.codexWSLastKey = apiKey
 	r.codexWSLastAPIURL = apiURL
 	r.codexWSLastModel = model
+	r.codexWSLastSessionKey = sessionKey
 	r.codexWSLastRespID = respID
 	r.codexWSLastInpLen = baselineLen
 	r.codexWSLastInpSig = baselineSig
 	r.codexWSLastReqSig = reqSig
 }
 
-func (r *ResponsesProvider) codexWSRouteIdentityMatchesLocked(apiKey, apiURL, model string) bool {
-	return r.codexWSLastKey == apiKey && r.codexWSLastAPIURL == apiURL && r.codexWSLastModel == model
+func (r *ResponsesProvider) codexWSRouteIdentityMatchesLocked(apiKey, apiURL, model, sessionKey string) bool {
+	return r.codexWSLastKey == apiKey && r.codexWSLastAPIURL == apiURL && r.codexWSLastModel == model && r.codexWSLastSessionKey == sessionKey
 }
 
 func (r *ResponsesProvider) codexWSCanUseIncrementalLocked(
 	apiKey string,
 	apiURL string,
 	model string,
+	sessionKey string,
 	reqSig string,
 	fullInput []responsesInputItem,
 	allowEmptyDelta bool,
@@ -319,8 +322,8 @@ func (r *ResponsesProvider) codexWSCanUseIncrementalLocked(
 	if r.codexWSLastReqSig == "" {
 		return false, 0, "no_previous_request_signature"
 	}
-	if !r.codexWSRouteIdentityMatchesLocked(apiKey, apiURL, model) {
-		return false, 0, "key_model_or_endpoint_changed"
+	if !r.codexWSRouteIdentityMatchesLocked(apiKey, apiURL, model, sessionKey) {
+		return false, 0, codexWSRouteIdentityChanged
 	}
 	if reqSig == "" || reqSig != r.codexWSLastReqSig {
 		return false, 0, "request_signature_changed"
@@ -689,8 +692,11 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		return nil, false, err
 	}
 
-	if r.codexWSConn != nil && !r.codexWSRouteIdentityMatchesLocked(apiKey, httpsURL, model) {
-		r.codexWSCloseConnUnlocked("key_model_or_endpoint_changed")
+	// The handshake identity belongs to the connection, even when the next
+	// request sends a full input instead of extending the incremental chain.
+	sessionKey := strings.TrimSpace(opts.SessionKey)
+	if r.codexWSConn != nil && !r.codexWSRouteIdentityMatchesLocked(apiKey, httpsURL, model, sessionKey) {
+		r.codexWSCloseConnUnlocked(codexWSRouteIdentityChanged)
 		r.codexWSClearChainStateLocked()
 	}
 
@@ -707,12 +713,8 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		if cb != nil {
 			cb(message.StreamDelta{Type: message.StreamDeltaStatus, Status: &message.StatusDelta{Type: message.StatusDeltaConnecting}})
 		}
-		sess := strings.TrimSpace(opts.SessionKey)
-		if sess == "" {
-			sess = newOpenAIOAuthSessionID()
-		}
 		hdr := http.Header{}
-		applyCodexWebSocketHeaders(hdr, r.provider, apiKey, sess)
+		applyCodexWebSocketHeaders(hdr, r.provider, apiKey, sessionKey)
 		applyResponsesTurnStateHeader(hdr, opts.TurnState, opts.TurnStateIdentity)
 		dialLease, admissionErr := executiongate.Begin(ctx, executiongate.LLM)
 		if admissionErr != nil {
@@ -765,7 +767,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 			Generate:           &generate,
 			Stream:             true,
 			Include:            req.Include,
-			PromptCacheKey:     strings.TrimSpace(opts.SessionKey),
+			PromptCacheKey:     sessionKey,
 			Reasoning:          req.Reasoning,
 			Text:               req.Text,
 			ClientMetadata:     req.ClientMetadata,
@@ -782,13 +784,13 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		if prewarmResp != nil {
 			prewarmRespID = prewarmResp.ProviderResponseID
 		}
-		r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, reqSig, baselineLen, baselineSig, prewarmRespID)
+		r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, sessionKey, reqSig, baselineLen, baselineSig, prewarmRespID)
 	}
 
 	useIncremental := false
 	var wireInput []responsesInputItem
 	var prevID string
-	if ok, baselineLen, reason := r.codexWSCanUseIncrementalLocked(apiKey, httpsURL, model, reqSig, fullInput, true); ok {
+	if ok, baselineLen, reason := r.codexWSCanUseIncrementalLocked(apiKey, httpsURL, model, sessionKey, reqSig, fullInput, true); ok {
 		useIncremental = true
 		wireInput = fullInput[baselineLen:]
 		prevID = r.codexWSLastRespID
@@ -809,7 +811,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		Store:              req.Store,
 		Stream:             true,
 		Include:            req.Include,
-		PromptCacheKey:     strings.TrimSpace(opts.SessionKey),
+		PromptCacheKey:     sessionKey,
 		PreviousResponseID: prevID,
 		Reasoning:          req.Reasoning,
 		Text:               req.Text,
@@ -833,7 +835,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 	if resp != nil {
 		respID = resp.ProviderResponseID
 	}
-	r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, reqSig, baselineLen, baselineSig, respID)
+	r.codexWSStoreChainStateLocked(apiKey, httpsURL, model, sessionKey, reqSig, baselineLen, baselineSig, respID)
 	if resp == nil || resp.ProviderResponseID == "" {
 		log.Debugf("responses: codex ws completed without response id; incremental chain not advanced model=%v", model)
 	}

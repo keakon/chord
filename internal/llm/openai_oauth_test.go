@@ -141,7 +141,7 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 		[]message.Message{{Role: "user", Content: "hello"}},
 		[]message.ToolDefinition{{Name: "done", Description: "Finish", InputSchema: map[string]any{"type": "object"}}},
 		128,
-		RequestTuning{OpenAI: OpenAITuning{ReasoningEffort: "xhigh", TextVerbosity: "medium"}},
+		RequestTuning{SessionKey: "session-oauth-1", OpenAI: OpenAITuning{ReasoningEffort: "xhigh", TextVerbosity: "medium"}},
 		func(message.StreamDelta) {},
 	)
 	if err != nil {
@@ -166,8 +166,13 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 	if gotHeaders.Get(headerUserAgent) != defaultLLMUserAgent() {
 		t.Fatalf("unexpected User-Agent header: %q", gotHeaders.Get(headerUserAgent))
 	}
-	if gotHeaders.Get("session_id") == "" {
-		t.Fatal("expected session_id header to be set")
+	for _, name := range []string{"session-id", "thread-id", "x-client-request-id"} {
+		if got := gotHeaders.Get(name); got != "session-oauth-1" {
+			t.Fatalf("%s = %q, want the stable session identity session-oauth-1", name, got)
+		}
+	}
+	if gotBody["prompt_cache_key"] != "session-oauth-1" {
+		t.Fatalf("prompt_cache_key = %#v, want session-oauth-1", gotBody["prompt_cache_key"])
 	}
 	if !strings.Contains(gotHeaders.Get("Accept"), "text/event-stream") {
 		t.Fatalf("unexpected Accept header: %q", gotHeaders.Get("Accept"))
@@ -216,6 +221,48 @@ func TestResponsesProvider_OpenAIOAuthUsesCodexHeadersAndBody(t *testing.T) {
 	}
 	if first["role"] != "user" {
 		t.Fatalf("expected first input role=user, got %#v", first["role"])
+	}
+}
+
+// Consecutive OAuth requests must carry the caller's stable identity.
+func TestResponsesProvider_OpenAIOAuthSessionIdentityStableAcrossRequests(t *testing.T) {
+	var got []http.Header
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Clone())
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	provider, accessToken := newOpenAITestOAuthProvider(t, server.URL+"/v1/responses")
+	r := &ResponsesProvider{provider: provider, client: server.Client()}
+
+	for range 2 {
+		if _, err := r.CompleteStream(
+			context.Background(),
+			accessToken,
+			"gpt-5.5",
+			"system prompt",
+			[]message.Message{{Role: "user", Content: "hello"}},
+			nil,
+			128,
+			RequestTuning{SessionKey: "session-oauth-stable"},
+			func(message.StreamDelta) {},
+		); err != nil {
+			t.Fatalf("CompleteStream returned error: %v", err)
+		}
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("captured %d requests, want 2", len(got))
+	}
+	for _, name := range []string{"session-id", "thread-id", "x-client-request-id"} {
+		first := got[0].Get(name)
+		second := got[1].Get(name)
+		if first != "session-oauth-stable" || second != "session-oauth-stable" {
+			t.Fatalf("%s = %q then %q, want the stable session identity on every request", name, first, second)
+		}
 	}
 }
 

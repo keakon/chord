@@ -161,7 +161,7 @@ Chord 会跳过尚未完成的写操作请求，即使已收到的参数看起�
 
 - **缓存断点**：GPT-5.6 及之后的 Responses 模型按消息边界缓存。Chord 会在可标记的持久文本消息和工具结果上设置显式断点；有临时尾部提醒且存在显式断点时，只写入这些断点，避免缓存一次性提醒。旧模型沿用其隐式缓存规则。可在 LLM dump 的 `request_body` 中检查 `prompt_cache_options` 和 `prompt_cache_breakpoint`，以及端点或请求覆盖配置是否保留了这些字段。
 - **请求变化**：模型、工具定义与顺序、系统提示、reasoning effort、verbosity 或输出格式变化都可能改变服务端前缀。上下文剪裁或持久压缩也可能缩短可复用范围。
-- **缓存身份与有效期**：检查 `prompt_cache_key` 是否稳定，以及是否切换了端点、凭据或模型。长时间空闲、服务端路由变化和缓存淘汰都可能导致未命中。同一用户 turn 内，`client_metadata` 的 turn ID 与开始时间保持一致。
+- **缓存身份与有效期**：检查 `prompt_cache_key` 是否稳定，以及是否切换了端点、凭据或模型。Codex / ChatGPT 通道还使用会话请求头维持缓存亲和性；检查同一 client 的 `session-id`、`thread-id` 和 `x-client-request-id` 是否一致，并与已发送的 `prompt_cache_key` 相同。长时间空闲、服务端路由变化和缓存淘汰都可能导致未命中。同一用户 turn 内，`client_metadata` 的 turn ID 与开始时间保持一致。
 - **统计语义**：兼容网关可能使用与其端点协议不同的 usage 定义，导致同一批缓存 token 被重复计数。按下方步骤核对原始响应，而不要仅凭低百分比判断服务端异常。
 
 Chord 对 `messages` provider 默认把 `input_tokens` 视为未缓存输入，缓存桶单独上报；对 `chat-completions` / `responses` provider 默认把输入总量视为已包含缓存命中部分。如果网关的 `messages` 响应中，`input_tokens` 实际是完整输入，而 `cache_read_input_tokens` 只是其中的命中子集，显示的百分比可能大约被砍半。

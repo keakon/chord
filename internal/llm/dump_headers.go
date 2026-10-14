@@ -11,8 +11,7 @@ func dumpRequestHeaders(headers http.Header) http.Header {
 		switch name {
 		case headerContentType, headerContentEncoding, headerAcceptEncoding,
 			headerUserAgent, headerOpenAIBeta, "Accept", "Originator",
-			"X-Session-Id", "Session-Id", "Thread-Id", "X-Client-Request-Id",
-			http.CanonicalHeaderKey(headerSessionID),
+			headerXSessionID, headerSessionID, headerThreadID, headerClientRequestID,
 			http.CanonicalHeaderKey(responsesClientMetadataInstallationID),
 			http.CanonicalHeaderKey(responsesClientMetadataWindowID),
 			http.CanonicalHeaderKey(responsesClientMetadataTurnMetadata),

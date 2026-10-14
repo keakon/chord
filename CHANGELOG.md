@@ -46,6 +46,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Codex/ChatGPT requests use a stable session identity so conflicting headers and cache keys do not interfere with cache affinity. OAuth HTTP requests omit the extra random `session_id`; WebSocket requests use the upstream `session-id` and `thread-id` headers. When sessions or SubAgents share a provider, an identity change reopens the connection to avoid retaining another session's headers.
+
 - AGENTS counts failed tasks consistently and separates delivered, failed, and cancelled tasks.
 
 - `apply_patch` previews show patch text and target paths when a model wraps freeform input in JSON, including while the input is streaming. Execution and history replay use the same unwrapped patch.

@@ -45,16 +45,17 @@ type ResponsesProvider struct {
 	// uses completeStreamCodexWebSocket directly.
 	codexWSCompleteFn func(context.Context, string, string, string, *responsesRequest, []responsesInputItem, StreamCallback, time.Time, codexWSCompleteOptions) (*message.Response, bool, error)
 
-	codexWSMu         sync.Mutex
-	codexWSConn       *websocket.Conn
-	codexWSLastKey    string
-	codexWSLastAPIURL string
-	codexWSLastModel  string
-	codexWSLastRespID string
-	codexWSLastInpLen int
-	codexWSLastInpSig string
-	codexWSLastReqSig string
-	lastTransportUsed atomic.Value // string: "websocket" | "http"
+	codexWSMu             sync.Mutex
+	codexWSConn           *websocket.Conn
+	codexWSLastKey        string
+	codexWSLastAPIURL     string
+	codexWSLastModel      string
+	codexWSLastSessionKey string
+	codexWSLastRespID     string
+	codexWSLastInpLen     int
+	codexWSLastInpSig     string
+	codexWSLastReqSig     string
+	lastTransportUsed     atomic.Value // string: "websocket" | "http"
 }
 
 // NewResponsesProviderWithClient creates a new ResponsesProvider using a caller-supplied HTTP client.
@@ -816,7 +817,7 @@ func (r *ResponsesProvider) sendAndParse(
 
 	req.Header.Set(headerContentType, headerValueApplicationJSON)
 	if useOpenAIOAuth {
-		applyOpenAIOAuthHeaders(req, r.provider, apiKey)
+		applyOpenAIOAuthHeaders(req, r.provider, apiKey, sessionKey)
 	} else {
 		var scheme string
 		if r.provider != nil {

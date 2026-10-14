@@ -933,6 +933,10 @@ func (s *SubAgent) closeLLMClient() {
 // instance that shares the same provider impl. The model name is deliberately
 // excluded: the key must stay stable across model switches to keep cache
 // affinity, and the model already participates in the request signature.
+//
+// A SubAgent has its own conversation and cache identity. Restoring a saved
+// runtime instance preserves that identity; rehydrating a durable task creates
+// a new instance and therefore a new key.
 func (s *SubAgent) sessionCacheKey() string {
 	base := strings.TrimSpace(filepath.Base(s.sessionDir))
 	if base == "" || base == "." || base == "/" || base == string(filepath.Separator) {

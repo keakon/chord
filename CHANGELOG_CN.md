@@ -46,6 +46,8 @@
 
 ### 修复
 
+- Codex/ChatGPT 请求统一使用稳定的会话标识，避免请求头与缓存 key 不一致干扰缓存亲和性。OAuth HTTP 请求移除了额外的随机 `session_id`，WebSocket 使用上游的 `session-id` 和 `thread-id` 请求头；不同会话或子代理共用 provider 时，身份变化会重新建连，避免沿用其他会话的请求头。
+
 - 修复 AGENTS 失败任务统计不一致，分别统计已交付、失败与取消的任务。
 
 - 模型将 freeform `apply_patch` 输入包成 JSON 时，预览会显示补丁正文和目标路径，流式接收过程中也能逐步展示；执行与历史回放使用同一份解包后的补丁。

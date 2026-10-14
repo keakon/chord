@@ -8,7 +8,10 @@ const (
 	headerContentEncoding      = "Content-Encoding"
 	headerContentType          = "Content-Type"
 	headerOpenAIBeta           = "OpenAI-Beta"
-	headerSessionID            = "session_id"
+	headerSessionID            = "Session-Id"
+	headerThreadID             = "Thread-Id"
+	headerClientRequestID      = "X-Client-Request-Id"
+	headerXSessionID           = "X-Session-Id"
 	headerUserAgent            = "User-Agent"
 	headerValueApplicationJSON = "application/json"
 
