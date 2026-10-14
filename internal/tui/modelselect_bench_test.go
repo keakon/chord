@@ -8,6 +8,7 @@ import (
 func benchmarkModelForPoolSelectDialog(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeModelSelect
 	poolNames := make([]string, 0, 10)
 	for i := range 10 {

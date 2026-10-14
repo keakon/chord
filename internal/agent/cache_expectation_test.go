@@ -1,16 +1,15 @@
 package agent
 
 import (
-	"github.com/keakon/chord/internal/agent/promptcache"
-	"github.com/keakon/chord/internal/tools"
-
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/promptcache"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestObservedCacheHitAcceptsSplitInputUsage(t *testing.T) {

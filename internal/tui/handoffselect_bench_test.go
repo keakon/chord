@@ -9,6 +9,7 @@ import (
 func benchmarkModelForHandoffDialog(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeHandoffSelect
 	options := []handoffOption{
 		{Name: "builder", IsDefault: true},

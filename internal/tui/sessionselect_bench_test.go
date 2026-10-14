@@ -12,6 +12,7 @@ import (
 func benchmarkModelForSessionSelectDialog(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeSessionSelect
 	options := make([]agent.SessionSummary, 0, 18)
 	baseTime := time.Date(2026, 4, 7, 12, 0, 0, 0, time.Local)

@@ -9,6 +9,7 @@ import (
 func benchmarkModelForQuestionDialog(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeQuestion
 	m.question = questionState{
 		request: &QuestionRequest{Item: tools.QuestionItem{

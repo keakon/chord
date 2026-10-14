@@ -5,6 +5,7 @@ import "testing"
 func benchmarkModelForConfirmDialog(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeConfirm
 	m.confirm = confirmState{
 		request: &ConfirmRequest{

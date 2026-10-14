@@ -1,8 +1,6 @@
 package agent
 
 import (
-	"github.com/keakon/chord/internal/tools"
-
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +8,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 func TestCacheExpectationTracksTextBeforeAttachment(t *testing.T) {

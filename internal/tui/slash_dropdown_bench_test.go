@@ -5,6 +5,7 @@ import "testing"
 func benchmarkModelForSlashCompletionDropdown(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeInsert
 	m.slashCompleteSelected = 2
 	return m

@@ -10,6 +10,7 @@ import (
 func benchmarkModelForSessionDeleteConfirmDialog(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeSessionDeleteConfirm
 	baseTime := time.Date(2026, 4, 7, 12, 0, 0, 0, time.Local)
 	session := agent.SessionSummary{

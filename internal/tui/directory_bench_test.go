@@ -10,6 +10,7 @@ import (
 func benchmarkModelForDirectoryView(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeDirectory
 	entries := make([]DirectoryEntry, 0, 32)
 	for i := range 32 {

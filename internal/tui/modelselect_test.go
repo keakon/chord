@@ -14,6 +14,7 @@ import (
 func TestPoolSelectCursorNavigation(t *testing.T) {
 	t.Parallel()
 	m := benchmarkModelForView(t)
+	t.Cleanup(func() { _ = m.Close() })
 	m.modelSelect = modelSelectState{
 		poolNames:  []string{"alpha", "beta", "gamma"},
 		poolCursor: 0,

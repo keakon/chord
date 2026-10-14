@@ -69,11 +69,9 @@ func benchmarkAssistantStreamingBlock() *Block {
 	}
 }
 
-func benchmarkLargeViewport(tb testing.TB, blocks int) *Viewport {
-	tb.Helper()
+// benchmarkLargeViewport returns a viewport that the caller must close.
+func benchmarkLargeViewport(blocks int) *Viewport {
 	v := NewViewport(100, 24)
-	spill := v.spill
-	tb.Cleanup(func() { _ = spill.Close() })
 	content := strings.Repeat("long transcript block ", 40)
 	for i := range blocks {
 		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: content})
@@ -83,14 +81,16 @@ func benchmarkLargeViewport(tb testing.TB, blocks int) *Viewport {
 	return v
 }
 
+// benchmarkModelForView returns a model that the caller must close.
+// Iteration-scoped callers must release it before constructing the next model.
 func benchmarkModelForView(tb testing.TB) Model {
 	tb.Helper()
 	m := NewModel(&sessionControlAgent{providerModelRef: "anthropic/claude-opus-4.7"})
-	tb.Cleanup(func() { _ = m.Close() })
 	m.width = 120
 	m.height = 40
 	m.layout = m.generateLayout(m.width, m.height)
 	if err := m.viewport.Close(); err != nil {
+		_ = m.Close()
 		tb.Fatal(err)
 	}
 	m.viewport = NewViewport(m.layout.main.Dx(), m.layout.main.Dy())
@@ -752,7 +752,8 @@ func BenchmarkAssistantMarkdownSearchLongCommonPrefix(b *testing.B) {
 
 func BenchmarkViewportRenderLargeTranscriptAtBottom(b *testing.B) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkLargeViewport(b, 5000)
+	v := benchmarkLargeViewport(5000)
+	b.Cleanup(func() { _ = v.Close() })
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
@@ -762,7 +763,8 @@ func BenchmarkViewportRenderLargeTranscriptAtBottom(b *testing.B) {
 
 func BenchmarkViewportRenderLargeTranscriptScrollWindow(b *testing.B) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkLargeViewport(b, 5000)
+	v := benchmarkLargeViewport(5000)
+	b.Cleanup(func() { _ = v.Close() })
 	v.offset = 1000
 	_ = v.Render("", nil, -1, -1, "")
 	b.ResetTimer()
@@ -779,6 +781,7 @@ func BenchmarkViewportRenderLargeTranscriptScrollWindow(b *testing.B) {
 func BenchmarkModelViewCached(b *testing.B) {
 	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView(b)
+	b.Cleanup(func() { _ = m.Close() })
 	_ = m.View()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -790,6 +793,7 @@ func BenchmarkModelViewCached(b *testing.B) {
 func BenchmarkModelViewCachedSearchActive(b *testing.B) {
 	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView(b)
+	b.Cleanup(func() { _ = m.Close() })
 	m.search.State.Active = true
 	m.search.State.Query = "render"
 	m.search.State.Matches = []MatchPosition{{BlockID: 1, BlockIndex: 0}}
@@ -805,10 +809,11 @@ func BenchmarkModelViewCachedSearchActive(b *testing.B) {
 func BenchmarkModelViewScrollLargeTranscript(b *testing.B) {
 	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView(b)
+	b.Cleanup(func() { _ = m.Close() })
 	if err := m.viewport.Close(); err != nil {
 		b.Fatal(err)
 	}
-	m.viewport = benchmarkLargeViewport(b, 5000)
+	m.viewport = benchmarkLargeViewport(5000)
 	m.viewport.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	_ = m.View()
 	b.ResetTimer()
@@ -934,6 +939,7 @@ func TestStreamingAssistantCheapPathAllocsGuard(t *testing.T) {
 func TestModelViewCachedAllocsGuard(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView(t)
+	t.Cleanup(func() { _ = m.Close() })
 	_ = m.View()
 	allocs := testing.AllocsPerRun(10, func() {
 		_ = m.View()
@@ -947,6 +953,7 @@ func TestModelViewCachedAllocsGuard(t *testing.T) {
 func TestModelViewCachedContentInvalidatesOnVisibleChange(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView(t)
+	t.Cleanup(func() { _ = m.Close() })
 	before := m.View()
 
 	m.viewport.AppendBlock(&Block{Type: BlockAssistant, Content: "new visible response"})

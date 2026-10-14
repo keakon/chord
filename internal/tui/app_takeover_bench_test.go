@@ -49,34 +49,43 @@ func BenchmarkTakeoverStreamingLongTranscript(b *testing.B) {
 			deltas := repeatedStreamDeltas(128, "alpha beta gamma ")
 			b.ReportAllocs()
 			for b.Loop() {
-				b.StopTimer()
-				m := benchmarkModelForView(b)
-				if err := m.viewport.Close(); err != nil {
-					b.Fatal(err)
-				}
-				m.viewport = benchmarkLargeViewport(b, 5000)
-				m.viewport.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
-				if state == "draining" {
-					m.takeover.status = recovery.SessionPauseStatus{State: recovery.SessionPauseDraining}
-					m.takeover.sourceFrozen = true
-				}
-				_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "seed"}})
-				m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
-				_ = m.View()
-				b.StartTimer()
-				for i, delta := range deltas {
-					_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: delta}})
-					if (i+1)%32 == 0 {
-						m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
-					}
-					_ = m.View()
-				}
-				b.StopTimer()
-				if err := m.Close(); err != nil {
-					b.Fatal(err)
-				}
+				benchmarkTakeoverStreamingIteration(b, state, deltas)
 				b.StartTimer()
 			}
 		})
+	}
+}
+
+// Each iteration owns its model; registering b.Cleanup here would retain every
+// model until the entire benchmark finishes. Setup and cleanup are not timed.
+func benchmarkTakeoverStreamingIteration(b *testing.B, state string, deltas []string) {
+	b.Helper()
+	b.StopTimer()
+	m := benchmarkModelForView(b)
+	defer func() {
+		b.StopTimer()
+		if err := m.Close(); err != nil {
+			b.Error(err)
+		}
+	}()
+	if err := m.viewport.Close(); err != nil {
+		b.Fatal(err)
+	}
+	m.viewport = benchmarkLargeViewport(5000)
+	m.viewport.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
+	if state == "draining" {
+		m.takeover.status = recovery.SessionPauseStatus{State: recovery.SessionPauseDraining}
+		m.takeover.sourceFrozen = true
+	}
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: "seed"}})
+	m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
+	_ = m.View()
+	b.StartTimer()
+	for i, delta := range deltas {
+		_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: delta}})
+		if (i+1)%32 == 0 {
+			m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
+		}
+		_ = m.View()
 	}
 }

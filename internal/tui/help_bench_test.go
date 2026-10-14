@@ -5,6 +5,7 @@ import "testing"
 func benchmarkModelForHelpView(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeHelp
 	m.help = helpState{prevMode: ModeInsert}
 	return m

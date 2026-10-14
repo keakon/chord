@@ -33,6 +33,7 @@ func (a *usageStatsBenchAgent) GetUsageStats() analytics.SessionStats {
 func benchmarkModelForUsageStatsDialog(tb testing.TB) Model {
 	tb.Helper()
 	m := benchmarkModelForView(tb)
+	tb.Cleanup(func() { _ = m.Close() })
 	m.agent = &usageStatsBenchAgent{}
 	m.mode = ModeUsageStats
 	m.usageStats = usageStatsState{

@@ -8,6 +8,7 @@ import (
 
 func BenchmarkModelViewAtMentionPopupOpen(b *testing.B) {
 	m := benchmarkModelForView(b)
+	b.Cleanup(func() { _ = m.Close() })
 	m.mode = ModeInsert
 	m.atMentionOpen = true
 	m.atMentionQuery = "doc"

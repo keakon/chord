@@ -1,12 +1,11 @@
 package agent
 
 import (
-	"github.com/keakon/chord/internal/ctxmgr"
-
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
