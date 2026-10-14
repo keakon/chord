@@ -7,13 +7,15 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestRenderStatusBarShowsRulesMode(t *testing.T) {
 	m := NewModelWithSize(nil, 140, 24)
 	m.mode = ModeRules
 	m.layout = m.generateLayout(m.width, m.height)
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "RULES") {
 		t.Fatalf("status bar should include RULES pill, got %q", plain)
 	}
@@ -25,7 +27,7 @@ func TestRenderStatusBarShowsSessionIDOnRight(t *testing.T) {
 	m.workingDir = "/home/user/projects/myapp"
 	m.layout = m.generateLayout(m.width, m.height)
 
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(got, "SID 1775115074902") {
 		t.Fatalf("status bar should show prefixed session id, got %q", got)
 	}
@@ -39,7 +41,7 @@ func TestRenderStatusBarHidesSessionIDWhenNarrow(t *testing.T) {
 	m := NewModelWithSize(backend, 70, 24)
 	m.layout = m.generateLayout(m.width, m.height)
 
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(got, "1775115074902") {
 		t.Fatalf("status bar should hide session id when narrow, got %q", got)
 	}
@@ -62,12 +64,12 @@ func TestRenderStatusBarUsesForegroundOnlyStatusElements(t *testing.T) {
 		t.Fatal("status path should be rendered")
 	}
 
-	plain := stripANSI(got)
+	plain := terminaltext.StripANSI(got)
 	if !strings.Contains(plain, m.statusPath.display) {
 		t.Fatalf("status bar plain text %q does not contain path %q", plain, m.statusPath.display)
 	}
 
-	pathSegment := StatusBarPathStyle.Render(m.statusPath.display)
+	pathSegment := currentStyles.StatusBarPathStyle.Render(m.statusPath.display)
 	if !strings.Contains(got, pathSegment) {
 		t.Fatalf("status bar should include styled path segment %q; got %q", pathSegment, got)
 	}
@@ -83,7 +85,7 @@ func TestRenderStatusBarCentersActivityAwayFromPath(t *testing.T) {
 	m.workingDir = "/home/user/projects/myapp"
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	path := displayWorkingDir(m.workingDir)
 	found := strings.Contains(got, path)
 	if !found {
@@ -98,7 +100,7 @@ func TestRenderStatusBarOmitsShortHelp(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 140
 
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(got, "esc: normal") || strings.Contains(got, "enter: send/continue") {
 		t.Fatalf("status bar should not render short help hints; got %q", got)
 	}
@@ -126,7 +128,7 @@ func TestNarrowStatusBarOmitsZeroUsageAndBottomLabel(t *testing.T) {
 		t.Fatal("rightPanelVisible should be false at width 80")
 	}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "$0.00") {
 		t.Fatalf("status bar should omit zero cost; got %q", plain)
 	}
@@ -137,7 +139,7 @@ func TestNarrowStatusBarOmitsZeroUsageAndBottomLabel(t *testing.T) {
 	m.viewport.totalLines = 100
 	m.viewport.height = 10
 	m.viewport.offset = 90 // scrolled to bottom
-	plain = stripANSI(m.renderStatusBar())
+	plain = terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "BOT") {
 		t.Fatalf("status bar should omit BOT at bottom; got %q", plain)
 	}
@@ -157,7 +159,7 @@ func TestNarrowStatusBarTokenPillMatchesInfoPanelSemantics(t *testing.T) {
 		t.Fatal("rightPanelVisible should be false at width 80")
 	}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !(strings.Contains(plain, "↑ 29.9M  ↓ 143.1k") || strings.Contains(plain, "↑ 29.9M")) {
 		t.Fatalf("status bar token pill should keep compact client-view formatting and at least the input side visible; got %q", plain)
 	}
@@ -171,14 +173,14 @@ func TestRenderAnimatedInputSeparatorUsesBusyColorsWhenAgentActive(t *testing.T)
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	got := m.renderAnimatedInputSeparator(24)
-	plain := stripANSI(got)
+	plain := terminaltext.StripANSI(got)
 	if plain != strings.Repeat(SectionSeparator, 24) {
 		t.Fatalf("separator plain text = %q, want %q", plain, strings.Repeat(SectionSeparator, 24))
 	}
 	if !strings.Contains(got, "38;5;") && !strings.Contains(got, "38;2;") {
 		t.Fatalf("busy separator should include ANSI foreground styling; got %q", got)
 	}
-	if got == InputSeparatorStyle.Render(strings.Repeat(SectionSeparator, 24)) {
+	if got == currentStyles.InputSeparatorStyle.Render(strings.Repeat(SectionSeparator, 24)) {
 		t.Fatalf("busy separator should differ from static insert separator; got %q", got)
 	}
 }
@@ -188,7 +190,7 @@ func TestRenderAnimatedInputSeparatorUsesDimmedStyleWhenIdle(t *testing.T) {
 	m.mode = ModeNormal
 
 	got := m.renderAnimatedInputSeparator(12)
-	want := InputSeparatorDimmedStyle.Render(strings.Repeat(SectionSeparator, 12))
+	want := currentStyles.InputSeparatorDimmedStyle.Render(strings.Repeat(SectionSeparator, 12))
 	if got != want {
 		t.Fatalf("idle separator = %q, want %q", got, want)
 	}
@@ -197,7 +199,7 @@ func TestRenderAnimatedInputSeparatorUsesDimmedStyleWhenIdle(t *testing.T) {
 func TestRenderAnimatedInputSeparatorSetThemeInvalidatesCache(t *testing.T) {
 	m := NewModel(nil)
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
-	m.theme = DefaultTheme()
+	m.theme = uitheme.Default()
 
 	first := m.renderAnimatedInputSeparator(24)
 	if first == "" {
@@ -212,7 +214,7 @@ func TestRenderAnimatedInputSeparatorSetThemeInvalidatesCache(t *testing.T) {
 
 	// SetTheme must clear the separator cache — this is the single
 	// invalidation hook callers rely on whenever the palette is reloaded.
-	m.SetTheme(DefaultTheme())
+	m.SetTheme(uitheme.Default())
 	if m.cachedSepTheme != "" || m.cachedSepResult != "" || m.cachedSepFrame != 0 {
 		t.Fatalf("SetTheme should clear separator cache, got theme=%q frame=%d result=%q", m.cachedSepTheme, m.cachedSepFrame, m.cachedSepResult)
 	}

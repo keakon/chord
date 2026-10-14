@@ -7,6 +7,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/permission/rulesuggest"
 )
 
 // ConfirmAction represents the user's decision on a tool permission check.
@@ -96,9 +97,9 @@ type confirmState struct {
 	// Rule picker state
 	ruleScroll         dialogScrollState
 	ruleFollowCursor   bool
-	pickingRule        bool               // true while in rule picker sub-mode
-	candidates         []PatternCandidate // suggested patterns
-	patternIdx         int                // selected pattern index
+	pickingRule        bool                    // true while in rule picker sub-mode
+	candidates         []rulesuggest.Candidate // suggested patterns
+	patternIdx         int                     // selected pattern index
 	selectedPatterns   map[int]struct{}
 	scopeIdx           int // selected scope index (0=session, 1=project, 2=user-global)
 	scopes             []permission.RuleScope

@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 // ---------------------------------------------------------------------------
@@ -146,7 +147,7 @@ func (m *Model) openHandoffSelect(planPath, requestID, agentID string, prevMode 
 	} else {
 		m.handoffSelect.planErr = err.Error()
 	}
-	m.handoffSelect.selector.list = NewOverlayList(handoffItems(options), m.handoffSelectMaxVisible())
+	m.handoffSelect.selector.list = overlaylist.New(handoffItems(options), m.handoffSelectMaxVisible())
 	if m.handoffSelect.selector.list != nil {
 		m.handoffSelect.selector.list.SetCursor(cursorIdx)
 	}
@@ -316,11 +317,11 @@ func (m *Model) handoffPlanRenderedLines(width int) []string {
 		width = 10
 	}
 	if strings.TrimSpace(m.handoffSelect.planErr) != "" {
-		return []string{DialogDangerStyle.Render("! Failed to read plan: ") + DimStyle.Render(m.handoffSelect.planErr)}
+		return []string{currentStyles.DialogDangerStyle.Render("! Failed to read plan: ") + currentStyles.DimStyle.Render(m.handoffSelect.planErr)}
 	}
 	content := strings.TrimSpace(m.handoffSelect.planText)
 	if content == "" {
-		return []string{DimStyle.Render("(plan file is empty)")}
+		return []string{currentStyles.DimStyle.Render("(plan file is empty)")}
 	}
 	return renderRichMarkdownContent(content, width, nil)
 }
@@ -358,14 +359,14 @@ func (m *Model) handoffPlanWindow(width int) ([]string, int, int) {
 	return lines[start:end], start, len(lines)
 }
 
-func handoffItems(options []handoffOption) []OverlayListItem {
-	items := make([]OverlayListItem, 0, len(options))
+func handoffItems(options []handoffOption) []overlaylist.Item {
+	items := make([]overlaylist.Item, 0, len(options))
 	for _, opt := range options {
 		label := opt.Name
 		if opt.IsDefault {
 			label += " (default)"
 		}
-		items = append(items, OverlayListItem{ID: opt.Name, Label: label})
+		items = append(items, overlaylist.Item{ID: opt.Name, Label: label})
 	}
 	return items
 }
@@ -392,21 +393,21 @@ func (m *Model) renderHandoffSelectDialog() string {
 	area := image.Rect(0, 0, m.width, m.height)
 	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
 	contentWidth := handoffOverlayContentWidth(m.width)
-	planLine := DimStyle.Render(ansi.Truncate(fmt.Sprintf("Plan: %s", m.handoffSelect.planPath), contentWidth, "…"))
+	planLine := currentStyles.DimStyle.Render(ansi.Truncate(fmt.Sprintf("Plan: %s", m.handoffSelect.planPath), contentWidth, "…"))
 
 	planLines, planStart, planTotal := m.handoffPlanWindow(contentWidth)
 	planBlock := strings.Join(planLines, "\n")
 	if planTotal > len(planLines) {
-		planBlock += "\n" + DimStyle.Render(fmt.Sprintf("Plan lines %d-%d of %d — mouse wheel scrolls", planStart+1, planStart+len(planLines), planTotal))
+		planBlock += "\n" + currentStyles.DimStyle.Render(fmt.Sprintf("Plan lines %d-%d of %d — mouse wheel scrolls", planStart+1, planStart+len(planLines), planTotal))
 	}
 	planPrefix := strings.Join([]string{
 		planLine,
 		"",
-		ConfirmToolStyle.Render("Plan preview:"),
+		currentStyles.ConfirmToolStyle.Render("Plan preview:"),
 		planBlock,
 		"",
 		renderHintChip(hint("V", "View full plan")),
-		ConfirmToolStyle.Render("Select model pool / target agent:"),
+		currentStyles.ConfirmToolStyle.Render("Select model pool / target agent:"),
 	}, "\n")
 
 	if m.handoffSelect.denyingWithReason {

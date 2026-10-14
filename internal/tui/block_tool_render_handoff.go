@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // renderHandoffCall renders the Handoff tool card. The plan path is shown in
@@ -28,7 +30,7 @@ func (b *Block) renderHandoffCall(width int, spinnerFrame string) []string {
 	prefix := b.renderToolPrefix(spinnerFrame)
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if planPath != "" {
-		baseWidth := runewidth.StringWidth(stripANSI(headerLine))
+		baseWidth := runewidth.StringWidth(terminaltext.StripANSI(headerLine))
 		budget := cardWidth - 4 - baseWidth - 1
 		if budget > 0 {
 			headerLine = headerLine + " " + truncateToolHeaderMiddle(planPath, budget)
@@ -52,9 +54,9 @@ func (b *Block) renderHandoffCall(width int, spinnerFrame string) []string {
 		if statusText := handoffRejectedReason(b.ResultContent); statusText != "" {
 			// A rejection is not a schema error, so it keeps its own label -
 			// on the shared "↳ Label:" shape the done card also uses.
-			result = append(result, toolFieldSection(ErrorStyle, "Rejected"))
-			for _, line := range wrapText(sanitizeToolDisplayText(statusText), contentWidth) {
-				result = append(result, ErrorStyle.Render("    "+line))
+			result = append(result, toolFieldSection(currentStyles.ErrorStyle, "Rejected"))
+			for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(statusText), contentWidth) {
+				result = append(result, currentStyles.ErrorStyle.Render("    "+line))
 			}
 		}
 	}

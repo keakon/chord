@@ -7,6 +7,8 @@ import (
 
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/keakon/lipgloss/v2"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestPoolFilterSmallTerminalKeepsSelectionAndMouseTargetVisible(t *testing.T) {
@@ -21,7 +23,7 @@ func TestPoolFilterSmallTerminalKeepsSelectionAndMouseTargetVisible(t *testing.T
 			m.Update(tea.PasteMsg{Content: "beta"})
 			m.handleModelSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 			dialog := m.renderModelSelectDialog()
-			plain := stripANSI(dialog)
+			plain := terminaltext.StripANSI(dialog)
 			if lipgloss.Height(dialog) > size[1] || lipgloss.Width(dialog) > size[0]-1 {
 				t.Fatal("model selector exceeds terminal bounds")
 			}
@@ -68,7 +70,7 @@ func TestPoolFilterEmptyResultsCannotSwitchAndEscClears(t *testing.T) {
 	m.openModelSelect()
 	m.handleModelSelectKey(tea.KeyPressMsg(tea.Key{Code: '/', Text: "/"}))
 	m.handleModelSelectKey(tea.KeyPressMsg(tea.Key{Code: 'z', Text: "z"}))
-	if !strings.Contains(stripANSI(m.renderModelSelectDialog()), "No matching pools") {
+	if !strings.Contains(terminaltext.StripANSI(m.renderModelSelectDialog()), "No matching pools") {
 		t.Fatal("missing empty state")
 	}
 	runCmdTree(m.handleModelSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter})))

@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type inputQueueAction struct {
@@ -371,7 +372,7 @@ func (m *Model) renderInputQueuePanel() string {
 		if i == m.inputQueue.cursor {
 			prefix = "> "
 		}
-		lines = append(lines, truncateOneLine(fmt.Sprintf("%s%d. %s · %s", prefix, i+1, draft.DeliveryStatus, draft.DisplayContent), width))
+		lines = append(lines, terminaltext.TruncateOneLine(fmt.Sprintf("%s%d. %s · %s", prefix, i+1, draft.DeliveryStatus, draft.DisplayContent), width))
 	}
 	if len(drafts) == 0 {
 		lines = append(lines, "No queued inputs")

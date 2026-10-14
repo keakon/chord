@@ -3,6 +3,7 @@ package llm
 import (
 	"fmt"
 
+	"github.com/keakon/chord/internal/llm/mediacache"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -35,7 +36,7 @@ func openAIContentParts(parts []message.ContentPart) []openAIContentBlock {
 			blocks = append(blocks, openAIContentBlock{
 				Type: "image_url",
 				ImageURL: &openAIImageURL{
-					URL: binaryPartDataURL(mime, data),
+					URL: mediacache.DataURL(mime, data),
 				},
 			})
 		case "pdf":
@@ -47,7 +48,7 @@ func openAIContentParts(parts []message.ContentPart) []openAIContentBlock {
 				Type: "file",
 				File: &openAIFile{
 					Filename: defaultPDFFilename(p.FileName),
-					FileData: binaryPartDataURL(defaultPDFMediaType(mime), data),
+					FileData: mediacache.DataURL(defaultPDFMediaType(mime), data),
 				},
 			})
 		default: // "text"

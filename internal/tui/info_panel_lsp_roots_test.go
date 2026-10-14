@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestLSPRowsIdentifyIndependentWorkspaces(t *testing.T) {
@@ -25,9 +26,9 @@ func TestLSPRootChangeInvalidatesPanelCache(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", Root: "frontend", OK: true}}
 	m := NewModel(backend)
-	first := stripANSI(m.renderInfoPanel(60, 24))
+	first := terminaltext.StripANSI(m.renderInfoPanel(60, 24))
 	backend.lspRows[0].Root = "backend"
-	second := stripANSI(m.renderInfoPanel(60, 24))
+	second := terminaltext.StripANSI(m.renderInfoPanel(60, 24))
 	if !strings.Contains(first, "gopls · frontend") || !strings.Contains(second, "gopls · backend") || strings.Contains(second, "gopls · frontend") {
 		t.Fatalf("root change did not refresh: %q -> %q", first, second)
 	}

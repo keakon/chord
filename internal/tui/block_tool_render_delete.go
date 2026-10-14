@@ -6,7 +6,8 @@ import (
 
 	"github.com/keakon/lipgloss/v2"
 
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/textclean"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type deleteDisplaySection struct {
@@ -76,11 +77,11 @@ func (b *Block) renderDeleteCall(width int, spinnerFrame string) []string {
 		result = appendDeleteDisplaySection(result, b, section, contentWidth)
 	}
 	if len(sections) == 0 && strings.TrimSpace(headline) != "" && failureSummary == "" {
-		style := DimStyle
+		style := currentStyles.DimStyle
 		if b.toolResultIsError() {
-			style = ErrorStyle
+			style = currentStyles.ErrorStyle
 		}
-		for _, line := range wrapText(sanitizeToolDisplayText(headline), contentWidth) {
+		for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(headline), contentWidth) {
 			result = append(result, toolFieldMarker(style, line))
 		}
 	}
@@ -100,7 +101,7 @@ func appendDeleteRequestedPaths(result []string, b *Block, paths []string, width
 }
 
 func parseDeleteDisplayResult(content string) (string, []deleteDisplaySection) {
-	content = markdownutil.NormalizeNewlines(content)
+	content = textclean.NormalizeNewlines(content)
 	var headline string
 	var sections []deleteDisplaySection
 	current := -1
@@ -156,9 +157,9 @@ func appendDeleteDisplaySection(result []string, b *Block, section deleteDisplay
 	style := deleteSectionStyle(section.label)
 	if len(section.items) == 1 {
 		text := section.label + " " + b.deleteDisplayItem(section.items[0])
-		for i, line := range wrapText(sanitizeToolDisplayText(text), width) {
+		for i, line := range terminaltext.Wrap(sanitizeToolDisplayText(text), width) {
 			if i == 0 {
-				result = append(result, toolFieldLead+ToolFieldConnectorStyle.Render(toolFieldConnector)+style.Render(line))
+				result = append(result, toolFieldLead+currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector)+style.Render(line))
 				continue
 			}
 			result = append(result, toolFieldBody(style, line))
@@ -167,7 +168,7 @@ func appendDeleteDisplaySection(result []string, b *Block, section deleteDisplay
 	}
 	result = append(result, toolFieldSection(style, fmt.Sprintf("%s (%d)", section.label, len(section.items))))
 	for _, item := range section.items {
-		for i, line := range wrapText(sanitizeToolDisplayText(b.deleteDisplayItem(item)), width-2) {
+		for i, line := range terminaltext.Wrap(sanitizeToolDisplayText(b.deleteDisplayItem(item)), width-2) {
 			prefix := "      "
 			if i == 0 {
 				prefix = "    • "
@@ -181,11 +182,11 @@ func appendDeleteDisplaySection(result []string, b *Block, section deleteDisplay
 func deleteSectionStyle(label string) lipgloss.Style {
 	switch label {
 	case "Blocked", "Failed":
-		return ErrorStyle
+		return currentStyles.ErrorStyle
 	case "Deleted":
-		return ToolResultStyle
+		return currentStyles.ToolResultStyle
 	default:
-		return DimStyle
+		return currentStyles.DimStyle
 	}
 }
 

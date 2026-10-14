@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/lsp"
+	"github.com/keakon/chord/internal/textclean"
+	"github.com/keakon/chord/internal/textfile"
 )
 
 // EditTool performs exact string replacements in files.
@@ -230,7 +232,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 				return "", fmt.Errorf("old_string found %d times under %s matching at lines %s; provide more context or set replace_all to true", altCount, tolerantMatchNote, formatMatchLines(matchLines, altCount))
 			}
 			qc := altNew
-			encodedBytes, err := encodeString(qc, editRead.Decoded.Encoding)
+			encodedBytes, err := textfile.Encode(qc, editRead.Decoded.Encoding)
 			if err != nil {
 				return "", fmt.Errorf("edited text cannot be encoded back to %s: %w", editRead.Decoded.Encoding.Name, err)
 			}
@@ -277,7 +279,7 @@ func (t EditTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		newContent = strings.Replace(content, decodedOld, decodedNew, 1)
 	}
 
-	encodedBytes, err := encodeString(newContent, editRead.Decoded.Encoding)
+	encodedBytes, err := textfile.Encode(newContent, editRead.Decoded.Encoding)
 	if err != nil {
 		return "", fmt.Errorf("edited text cannot be encoded back to %s: %w", editRead.Decoded.Encoding.Name, err)
 	}
@@ -331,7 +333,7 @@ func prepareReplacementText(oldString, newString string) (string, string, string
 	// The search text keeps only the zero-width/variation-selector cleaning it
 	// already had: orphaned combining marks are left for the tolerance matcher
 	// to fold, which is what fires the "punctuation/whitespace-tolerant" note.
-	strippedOldText := StripZeroWidthFormat(StripOrphanVariationSelectors(decodedOld))
+	strippedOldText := textclean.StripZeroWidthFormat(textclean.StripOrphanVariationSelectors(decodedOld))
 	oldInvisible := CountStrippedInvisible(decodedOld, strippedOldText)
 	decodedOld = strippedOldText
 	strippedOld := oldLen - len([]rune(decodedOld))

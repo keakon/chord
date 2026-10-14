@@ -17,6 +17,8 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
@@ -878,7 +880,7 @@ func TestToolErrorCardDisplaysAndCopiesErrorResult(t *testing.T) {
 		Collapsed:     true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	// A short single-line failure already reads fully in its collapsed row, so
 	// the card carries no disclosure marker.
 	for _, want := range []string{"✗ web_fetch", "Error:", "HTTP 404: 404 Not Found"} {
@@ -998,7 +1000,7 @@ func TestHandleNormalKeyYyIgnoresMouseSelectionAndCopiesFocusedImageCard(t *test
 	}
 	defer func() { clipboardWriteAll = origWrite }()
 
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 24)
 	m.mode = ModeNormal
 	block := &Block{
@@ -1263,7 +1265,7 @@ func TestSuperCopyMouseSelectionKeepsLastCharacter(t *testing.T) {
 	target := -1
 	startCol := -1
 	for i, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if before, _, ok := strings.Cut(plain, "app_id/app_secret"); ok {
 			target = i
 			startCol = ansi.StringWidth(before)

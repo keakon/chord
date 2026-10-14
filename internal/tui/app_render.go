@@ -133,11 +133,11 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 			// where "?" would just type a character instead of opening help.
 			welcomeHints := welcomeKeyHints(m.mode, m.keyMap)
 			for i := range welcomeHints {
-				welcomeHints[i] = DimStyle.Render(welcomeHints[i])
+				welcomeHints[i] = currentStyles.DimStyle.Render(welcomeHints[i])
 			}
-			emptyMessage := DimStyle.Render("No messages yet. Start a conversation!")
+			emptyMessage := currentStyles.DimStyle.Render("No messages yet. Start a conversation!")
 			if m.startupRestorePending {
-				emptyMessage = DimStyle.Render("Restoring session...")
+				emptyMessage = currentStyles.DimStyle.Render("Restoring session...")
 			}
 			splashReveal := splashStepCount(viewportWidth, m.viewport.height)
 			if m.splashAnimating {
@@ -147,7 +147,7 @@ func (m *Model) drawMainLayer(scr uv.Screen, layout tuiLayout) {
 			welcomeParts := append(splashLines, splashSwash...)
 			welcomeParts = append(welcomeParts,
 				"",
-				DimStyle.Render(buildinfo.Current().Short()),
+				currentStyles.DimStyle.Render(buildinfo.Current().Short()),
 				"",
 				emptyMessage,
 				"",
@@ -462,7 +462,7 @@ func (m *Model) drawOverlayLayers(scr uv.Screen, area image.Rectangle, layout tu
 		// @ mention file completion popup
 		if m.atMentionOpen && m.atMentionList != nil && m.atMentionList.Len() > 0 {
 			popupWidth := min(50, m.width/2)
-			popup := m.atMentionList.Render(popupWidth)
+			popup := m.atMentionList.Render(popupWidth, currentStyles)
 			popupHeight := lipgloss.Height(popup)
 			x := layout.input.Min.X
 			y := max(layout.input.Min.Y-popupHeight, 0)

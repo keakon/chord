@@ -7,7 +7,8 @@ import (
 	"strings"
 
 	xansi "github.com/keakon/x/ansi"
-	xkitty "github.com/keakon/x/ansi/kitty"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const (
@@ -46,11 +47,11 @@ func imageRenderSize(part BlockImagePart, width int, caps TerminalImageCapabilit
 			cfg = metadata.config
 		}
 	} else {
-		entry, err := imageRuntimeEntryForPart(part)
+		entry, err := imageCache.Lookup(imageSource(part), false)
 		if err != nil {
 			return 0, 0, err
 		}
-		cfg, _, err = entry.decodeConfig(part)
+		cfg, _, err = entry.Config(imageSource(part))
 		if err != nil {
 			return 0, 0, err
 		}
@@ -128,7 +129,7 @@ func renderImageBlock(part *BlockImagePart, width int, cardBG string, caps Termi
 		name = "image"
 	}
 	label := runewidthTruncateLabel("📷 "+name, labelWidth)
-	lines = append(lines, DimStyle.Render("  "+label))
+	lines = append(lines, currentStyles.DimStyle.Render("  "+label))
 	return lines, cols, bodyRows, nil
 }
 
@@ -139,149 +140,17 @@ func renderImageFallback(part BlockImagePart, width int) []string {
 		name = "image"
 	}
 	label := runewidthTruncateLabel("📷 "+name, labelWidth)
-	return []string{DimStyle.Render("  " + label)}
+	return []string{currentStyles.DimStyle.Render("  " + label)}
 }
 
 func runewidthTruncateLabel(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	return truncateOneLine(s, width)
-}
-
-func kittyPlaceholderRow(row, cols int) string {
-	if cols <= 0 {
-		return ""
-	}
-	var sb strings.Builder
-	for col := range cols {
-		sb.WriteRune(xkitty.Placeholder)
-		switch col {
-		case 0:
-			sb.WriteRune(xkitty.Diacritic(row))
-		case 1:
-			sb.WriteRune(xkitty.Diacritic(row))
-			sb.WriteRune(xkitty.Diacritic(col))
-		}
-	}
-	return sb.String()
+	return terminaltext.TruncateOneLine(s, width)
 }
 
 func indexedColor(spec string) color.Color {
 	r, g, b, _ := parseColor(spec)
 	return color.RGBA{R: uint8(r), G: uint8(g), B: uint8(b), A: 0xff}
-}
-
-func encodeKittyTransmit(part BlockImagePart, imageID int) (string, error) {
-	return encodeKittyTransmitVariant(part, imageID, false)
-}
-
-func encodeKittyTransmitVariant(part BlockImagePart, imageID int, preview bool) (string, error) {
-	entry, err := imageRuntimeEntryForVariant(part, preview)
-	if err != nil {
-		return "", err
-	}
-	payload, _, err := entry.base64TransportPNG(part)
-	if err != nil {
-		return "", err
-	}
-	opts := (&xkitty.Options{
-		Action: xkitty.Transmit,
-		Quiet:  2,
-		ID:     imageID,
-		Format: xkitty.PNG,
-		Chunk:  true,
-	}).Options()
-
-	var sb strings.Builder
-	chunk := xkitty.MaxChunkSize
-	sb.Grow(len(payload) + (len(payload)/chunk+1)*128)
-	for start := 0; start < len(payload); start += chunk {
-		end := min(start+chunk, len(payload))
-		chunkOpts := opts
-		if start > 0 {
-			chunkOpts = []string{"q=2"}
-		}
-		if end < len(payload) {
-			chunkOpts = append(chunkOpts, "m=1")
-		} else if start > 0 || len(payload) > chunk {
-			chunkOpts = append(chunkOpts, "m=0")
-		}
-		sb.WriteString("\x1b_G")
-		sb.WriteString(strings.Join(chunkOpts, ","))
-		sb.WriteByte(';')
-		sb.WriteString(payload[start:end])
-		sb.WriteString("\x1b\\")
-	}
-	if len(payload) == 0 {
-		sb.WriteString(xansi.KittyGraphics(nil, opts...))
-	}
-	return sb.String(), nil
-}
-
-func encodeKittyVirtualPlacement(imageID, cols, rows int) string {
-	return xansi.KittyGraphics(nil, (&xkitty.Options{
-		Action:           xkitty.Put,
-		Quiet:            2,
-		ID:               imageID,
-		Columns:          cols,
-		Rows:             rows,
-		VirtualPlacement: true,
-	}).Options()...)
-}
-
-func encodeKittyDisplayPlacement(imageID, placementID, cols, rows, zIndex, offsetX, offsetY int) string {
-	opts := []string{
-		"q=2",
-		fmt.Sprintf("i=%d", imageID),
-		fmt.Sprintf("p=%d", placementID),
-		"C=1",
-		fmt.Sprintf("c=%d", cols),
-		fmt.Sprintf("r=%d", rows),
-		"a=p",
-	}
-	if offsetX > 0 {
-		opts = append(opts, fmt.Sprintf("X=%d", offsetX))
-	}
-	if offsetY > 0 {
-		opts = append(opts, fmt.Sprintf("Y=%d", offsetY))
-	}
-	if zIndex != 0 {
-		opts = append(opts, fmt.Sprintf("z=%d", zIndex))
-	}
-	return xansi.KittyGraphics(nil, opts...)
-}
-
-func encodeKittyDeletePlacement(imageID, placementID int) string {
-	return xansi.KittyGraphics(nil, (&xkitty.Options{
-		Action:          xkitty.Delete,
-		Quiet:           2,
-		ID:              imageID,
-		PlacementID:     placementID,
-		Delete:          xkitty.DeleteID,
-		DeleteResources: true,
-	}).Options()...)
-}
-
-func encodeKittyDeleteImage(imageID int) string {
-	return xansi.KittyGraphics(nil, (&xkitty.Options{
-		Action:          xkitty.Delete,
-		Quiet:           2,
-		ID:              imageID,
-		Delete:          xkitty.DeleteID,
-		DeleteResources: true,
-	}).Options()...)
-}
-
-func fnv32a(data []byte) uint32 {
-	const (
-		offset32 = 2166136261
-		prime32  = 16777619
-	)
-	h := uint32(offset32)
-	for _, b := range data {
-		h ^= uint32(b)
-		h *= prime32
-	}
-	return h
 }

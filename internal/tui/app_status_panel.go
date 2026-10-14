@@ -122,7 +122,7 @@ func (m *Model) highlightStatusSection(lines []string, start int) []string {
 			lines = append([]string(nil), lines...)
 			width := max(m.cachedInfoPanelW-2, 1)
 			text := "▸ " + strings.TrimSpace(ansi.Strip(lines[row]))
-			lines[row] = InfoPanelLineBg.Width(width).Render(InfoPanelValue.Render(ansi.Truncate(text, width, "…")))
+			lines[row] = currentStyles.InfoPanelLineBg.Width(width).Render(currentStyles.InfoPanelValue.Render(ansi.Truncate(text, width, "…")))
 			break
 		}
 	}

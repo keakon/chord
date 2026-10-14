@@ -1,0 +1,36 @@
+package textfile
+
+import (
+	"strings"
+)
+
+// knownTextEncoding maps encoding names to Encoding values for tests that
+// drive the local file encoding pipeline by name.
+var knownTextEncoding = map[string]Encoding{
+	"utf-8":     utf8Encoding,
+	"utf-8-bom": utf8BOMEncoding,
+	"utf-16le":  utf16LEEncoding,
+	"utf-16be":  utf16BEEncoding,
+	"utf-32le":  utf32LEEncoding,
+	"utf-32be":  utf32BEEncoding,
+	"gb18030":   gb18030Encoding,
+	"big5":      big5Encoding,
+	"shift-jis": shiftJISEncoding,
+}
+
+func textEncodingByName(name string) (Encoding, bool) {
+	enc, ok := knownTextEncoding[strings.ToLower(name)]
+	return enc, ok
+}
+
+func mustEncodeForTest(s string, encName string) []byte {
+	enc, ok := textEncodingByName(encName)
+	if !ok {
+		panic("unsupported test encoding: " + encName)
+	}
+	data, err := Encode(s, enc)
+	if err != nil {
+		panic(err)
+	}
+	return data
+}

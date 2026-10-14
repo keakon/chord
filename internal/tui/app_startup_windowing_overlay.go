@@ -5,6 +5,8 @@ import (
 
 	"github.com/keakon/bubbles/v2/textinput"
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 func (m *Model) deferredStartupTranscriptDirectoryEntries() []DirectoryEntry {
@@ -114,7 +116,7 @@ func (m *Model) openDeferredStartupTranscriptDirectory() tea.Cmd {
 	m.clearActiveSearch()
 	entries := m.deferredStartupTranscriptDirectoryEntries()
 	m.dirEntries = entries
-	m.dirList = NewOverlayList(directoryItems(entries), m.directoryMaxVisible())
+	m.dirList = overlaylist.New(directoryItems(entries), m.directoryMaxVisible())
 	m.dirList.SetCursor(directoryCursorForBlockID(entries, m.currentDirectoryAnchorBlockID()))
 	cmd := m.switchModeWithIME(ModeDirectory)
 	m.recalcViewportSize()

@@ -4,10 +4,12 @@ import (
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestViewPropagatesWindowTitle(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 60, 12)
 	m.terminalTitleView = "MyTitle"
 
@@ -18,7 +20,7 @@ func TestViewPropagatesWindowTitle(t *testing.T) {
 }
 
 func TestViewPropagatesWindowTitleForCachedViews(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 60, 12)
 	m.terminalTitleView = "CachedTitle"
 

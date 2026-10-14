@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestQuestionDecisionCardResolvesDuplicateLabels(t *testing.T) {
@@ -77,7 +78,7 @@ func TestQuestionDecisionCardsKeepFieldsVisible(t *testing.T) {
 				if block.canToggleAtWidth(width) || block.ToggleAtWidth(width) {
 					t.Fatalf("decision offers folding at width %d", width)
 				}
-				view := stripANSI(strings.Join(block.Render(width, ""), "\n"))
+				view := terminaltext.StripANSI(strings.Join(block.Render(width, ""), "\n"))
 				if strings.ContainsAny(view, toolDisclosureCollapsed+toolDisclosureExpanded) {
 					t.Fatalf("decision has disclosure marker:\n%s", view)
 				}

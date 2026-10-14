@@ -14,6 +14,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // --- helpers ---------------------------------------------------------------
@@ -123,7 +124,7 @@ func TestInfoPanelJobsShowsRunningJob(t *testing.T) {
 		t.Fatalf("JOBS section lines = %d, want 1\n%v", len(lines), lines)
 	}
 	row := lines[0]
-	plain := stripANSI(row)
+	plain := terminaltext.StripANSI(row)
 	if !strings.HasPrefix(plain, "  ") {
 		t.Fatalf("job row must be indented by 2 columns, got %q", plain)
 	}
@@ -148,7 +149,7 @@ func TestInfoPanelJobsShowsRunningJob(t *testing.T) {
 
 	// The info panel is visible on this width, so the status bar keeps its idle
 	// lane and does not add the redundant jobs/agents pill.
-	status := stripANSI(m.renderStatusBar())
+	status := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(status, statusBarIdleLabel()) {
 		t.Fatalf("wide status bar should keep the idle lane, got %q", status)
 	}
@@ -188,7 +189,7 @@ func TestInfoPanelJobsShowsSubAgentJob(t *testing.T) {
 	m.jobsSnapshotFrame = m.renderFrameGeneration
 
 	lines := jobsSectionRawLines(m, 32, 60)
-	if len(lines) != 1 || !strings.Contains(stripANSI(lines[0]), "child build") {
+	if len(lines) != 1 || !strings.Contains(terminaltext.StripANSI(lines[0]), "child build") {
 		t.Fatalf("a sub-agent job must appear in the JOBS section, got %v", lines)
 	}
 }
@@ -210,7 +211,7 @@ func TestInfoPanelJobsTruncatesLabelButKeepsElapsedAndStop(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("JOBS section lines = %d, want 1\n%v", len(lines), lines)
 	}
-	plain := stripANSI(lines[0])
+	plain := terminaltext.StripANSI(lines[0])
 	if !strings.Contains(plain, "12m03s") {
 		t.Fatalf("narrow panel dropped the elapsed column: %q", plain)
 	}
@@ -233,7 +234,7 @@ func TestInfoPanelJobsKeepsFullLabelWhenElapsedIsShort(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("JOBS section lines = %d, want 1\n%v", len(lines), lines)
 	}
-	plain := stripANSI(lines[0])
+	plain := terminaltext.StripANSI(lines[0])
 	if strings.Contains(plain, "...") {
 		t.Fatalf("label should keep its space when the elapsed is short, got %q", plain)
 	}
@@ -261,7 +262,7 @@ func TestInfoPanelStoppingJobDropsStopAffordance(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("JOBS section lines = %d, want 1\n%v", len(lines), lines)
 	}
-	plain := strings.TrimRight(stripANSI(lines[0]), " ")
+	plain := strings.TrimRight(terminaltext.StripANSI(lines[0]), " ")
 	if strings.HasSuffix(plain, jobStopGlyph) {
 		t.Fatalf("a stopping job must not offer the stop affordance: %q", plain)
 	}
@@ -283,7 +284,7 @@ func TestInfoPanelCollapsedJobsShowsHeaderOnly(t *testing.T) {
 	refreshJobs(m)
 	m.toggleInfoPanelSection(infoPanelSectionJobs)
 
-	rendered := stripANSI(m.renderInfoPanel(32, 60))
+	rendered := terminaltext.StripANSI(m.renderInfoPanel(32, 60))
 	if !strings.Contains(rendered, "▶ JOBS") || !strings.Contains(rendered, "· 1") {
 		t.Fatalf("collapsed JOBS header missing count: %q", rendered)
 	}
@@ -479,7 +480,7 @@ func TestStopJobConfirmDialogRendersFields(t *testing.T) {
 	}
 	m.mode = ModeStopJobConfirm
 
-	dialog := stripANSI(m.renderStopJobConfirmDialog())
+	dialog := terminaltext.StripANSI(m.renderStopJobConfirmDialog())
 	for _, want := range []string{
 		"⚠ Stop job-64?",
 		"Label: Run production build",
@@ -516,7 +517,7 @@ func TestStopJobConfirmDialogNoOutputYet(t *testing.T) {
 		openedAt:  time.Now(),
 	}
 	m.mode = ModeStopJobConfirm
-	dialog := stripANSI(m.renderStopJobConfirmDialog())
+	dialog := terminaltext.StripANSI(m.renderStopJobConfirmDialog())
 	if !strings.Contains(dialog, "Last output: (no output yet)") {
 		t.Fatalf("zero last-output time should read as no output yet:\n%s", dialog)
 	}
@@ -539,7 +540,7 @@ func TestStopJobConfirmDialogDroppedBytesNotice(t *testing.T) {
 		openedAt:     time.Now(),
 	}
 	m.mode = ModeStopJobConfirm
-	dialog := stripANSI(m.renderStopJobConfirmDialog())
+	dialog := terminaltext.StripANSI(m.renderStopJobConfirmDialog())
 	want := "(skipped 4096 bytes of earlier output; recent log: /tmp/job-9.log)"
 	if !strings.Contains(dialog, want) {
 		t.Fatalf("dropped-output notice missing %q:\n%s", want, dialog)
@@ -561,11 +562,11 @@ func TestStopJobConfirmDialogWrapsLongCommandWithinWidth(t *testing.T) {
 	dialog := m.renderStopJobConfirmDialog()
 	for line := range strings.SplitSeq(dialog, "\n") {
 		if w := ansi.StringWidth(line); w > maxWidth {
-			t.Fatalf("dialog line overflows its width (%d > %d): %q", w, maxWidth, stripANSI(line))
+			t.Fatalf("dialog line overflows its width (%d > %d): %q", w, maxWidth, terminaltext.StripANSI(line))
 		}
 	}
-	if !strings.Contains(stripANSI(dialog), "…") {
-		t.Fatalf("an over-long command should end with an ellipsis:\n%s", stripANSI(dialog))
+	if !strings.Contains(terminaltext.StripANSI(dialog), "…") {
+		t.Fatalf("an over-long command should end with an ellipsis:\n%s", terminaltext.StripANSI(dialog))
 	}
 }
 
@@ -578,7 +579,7 @@ func TestStopJobConfirmDialogCapsTailAtTwelveLines(t *testing.T) {
 
 	dialog := m.renderStopJobConfirmDialog()
 	lines := make(map[string]bool)
-	for line := range strings.SplitSeq(stripANSI(dialog), "\n") {
+	for line := range strings.SplitSeq(terminaltext.StripANSI(dialog), "\n") {
 		text := strings.TrimSpace(line)
 		text = strings.TrimSpace(strings.Trim(text, "│"))
 		lines[text] = true
@@ -634,7 +635,7 @@ func TestJobsOverlayOpensFromStatusPill(t *testing.T) {
 	m := newJobsTestModel(t, 100, 40)
 	startTestJob(t, "sleep 60", "pill click")
 	refreshJobs(m)
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if m.statusJobs.display == "" {
 		t.Fatal("narrow layout should render the background-activity pill")
 	}
@@ -695,7 +696,7 @@ func TestJobsOverlayRowStopZoneOpensConfirm(t *testing.T) {
 	dialog := m.renderJobsOverlayDialog()
 	rect := centeredRect(m.ensureLayout().area, dialog)
 	innerWidth := m.jobsOverlayInnerWidth()
-	contentLeft := rect.Min.X + DirectoryBorderStyle.GetBorderLeftSize() + DirectoryBorderStyle.GetPaddingLeft()
+	contentLeft := rect.Min.X + currentStyles.DirectoryBorderStyle.GetBorderLeftSize() + currentStyles.DirectoryBorderStyle.GetPaddingLeft()
 	x := contentLeft + innerWidth - 2
 	y := rect.Min.Y + 3
 
@@ -756,7 +757,7 @@ func TestJobsOverlayPicksUpNewJobs(t *testing.T) {
 // its hint line.
 func overlayContentRows(dialog string) int {
 	rows := 0
-	for line := range strings.SplitSeq(stripANSI(dialog), "\n") {
+	for line := range strings.SplitSeq(terminaltext.StripANSI(dialog), "\n") {
 		if isOverlayJobRow(line) {
 			rows++
 		}
@@ -777,7 +778,7 @@ func isOverlayJobRow(line string) bool {
 func jobOverlayRowLines(dialog string) []string {
 	var rows []string
 	for line := range strings.SplitSeq(dialog, "\n") {
-		if isOverlayJobRow(stripANSI(line)) {
+		if isOverlayJobRow(terminaltext.StripANSI(line)) {
 			rows = append(rows, line)
 		}
 	}
@@ -789,10 +790,10 @@ func jobOverlayRowLines(dialog string) []string {
 // style (whose color the row's own SGR overdraws). Repainting must not move the
 // row: the stop affordance is mapped back from fixed columns.
 func TestJobsOverlaySelectedRowUsesSelectionSurface(t *testing.T) {
-	if currentTheme.SelectedBg == "" || currentTheme.SelectedBg == currentTheme.DialogBg {
+	if currentStyles.Palette.SelectedBg == "" || currentStyles.Palette.SelectedBg == currentStyles.Palette.DialogBg {
 		t.Skip("theme does not draw a distinct selection surface")
 	}
-	want := colorToANSIBgSeq(currentTheme.SelectedBg)
+	want := terminaltext.BackgroundSequence(currentStyles.Palette.SelectedBg)
 	if want == "" {
 		t.Skip("theme selection surface is not expressible as an ANSI background")
 	}
@@ -813,15 +814,15 @@ func TestJobsOverlaySelectedRowUsesSelectionSurface(t *testing.T) {
 	if got := rowCellBackground(rows[1]); got == want {
 		t.Fatalf("unselected row is drawn on the selection surface: %q", rows[1])
 	}
-	plainFirst := stripANSI(rows[0])
+	plainFirst := terminaltext.StripANSI(rows[0])
 
 	m.jobsOverlay.cursor = 1
 	rows = jobOverlayRowLines(m.renderJobsOverlayDialog())
 	if len(rows) != 2 {
 		t.Fatalf("overlay rows = %d, want 2", len(rows))
 	}
-	if stripANSI(rows[0]) != plainFirst {
-		t.Fatalf("selection changed the row layout: %q vs %q", stripANSI(rows[0]), plainFirst)
+	if terminaltext.StripANSI(rows[0]) != plainFirst {
+		t.Fatalf("selection changed the row layout: %q vs %q", terminaltext.StripANSI(rows[0]), plainFirst)
 	}
 	if got := rowCellBackground(rows[0]); got == want {
 		t.Fatalf("row 0 kept the selection surface after the cursor moved: %q", rows[0])
@@ -844,7 +845,7 @@ func rowCellBackground(line string) string {
 	bg := ""
 	for i := 0; i < len(rest); {
 		if rest[i] == '\x1b' {
-			end := skipANSISequence(rest, i)
+			end := terminaltext.SkipANSI(rest, i)
 			if seq, ok := sgrBackground(rest[i:end]); ok {
 				bg = seq
 			}
@@ -1075,10 +1076,10 @@ func TestStopJobConfirmDialogTruncatesLongLogPath(t *testing.T) {
 	dialog := m.renderStopJobConfirmDialog()
 	for line := range strings.SplitSeq(dialog, "\n") {
 		if w := ansi.StringWidth(line); w > maxWidth {
-			t.Fatalf("dialog line overflows its width (%d > %d): %q", w, maxWidth, stripANSI(line))
+			t.Fatalf("dialog line overflows its width (%d > %d): %q", w, maxWidth, terminaltext.StripANSI(line))
 		}
 	}
-	plain := stripANSI(dialog)
+	plain := terminaltext.StripANSI(dialog)
 	if !strings.Contains(plain, "(skipped 4096 bytes of earlier output") {
 		t.Fatalf("expected the dropped-output notice:\n%s", plain)
 	}
@@ -1138,7 +1139,7 @@ func TestJobRowClampsLongElapsedKeepingStopZone(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("JOBS section lines = %d, want 1\n%v", len(lines), lines)
 	}
-	plain := strings.TrimRight(stripANSI(lines[0]), " ")
+	plain := strings.TrimRight(terminaltext.StripANSI(lines[0]), " ")
 	if !strings.HasSuffix(plain, jobStopGlyph) {
 		t.Fatalf("clamped row lost the stop affordance: %q", plain)
 	}
@@ -1180,7 +1181,7 @@ func TestInfoPanelJobsElapsedAdvancesPerSecond(t *testing.T) {
 
 	t0 := time.Now()
 	first := m.infoPanelFingerprint(32, 0)
-	firstRendered := stripANSI(m.renderInfoPanel(32, 60))
+	firstRendered := terminaltext.StripANSI(m.renderInfoPanel(32, 60))
 
 	// Inside one second bucket the key is stable, so the panel is reused instead
 	// of being rebuilt on every frame.
@@ -1201,7 +1202,7 @@ func TestInfoPanelJobsElapsedAdvancesPerSecond(t *testing.T) {
 	if second == first {
 		t.Fatal("JOBS fingerprint should advance across second buckets")
 	}
-	secondRendered := stripANSI(m.renderInfoPanel(32, 60))
+	secondRendered := terminaltext.StripANSI(m.renderInfoPanel(32, 60))
 	if secondRendered == firstRendered {
 		t.Fatalf("panel should re-render the elapsed value once the second advances:\n%s", firstRendered)
 	}

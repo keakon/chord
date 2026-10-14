@@ -546,7 +546,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 		turn.BarrierFailureRounds = 0
 	}
 
-	turn.noteDispatchedToolRound(regularToolCalls, false)
+	turn.Efficiency.Dispatch(regularToolCalls, false)
 	turn.toolExecutionBatches = batches
 	turn.nextToolBatch = 0
 	turn.activeToolBatchCancel = nil

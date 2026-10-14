@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -53,11 +54,11 @@ func newStaleReadArchiveAgent(t *testing.T) (*MainAgent, []message.Message) {
 // canonical reference line, so the path has to be unwrapped from it.
 func archivedPayload(t *testing.T, reduced string) string {
 	t.Helper()
-	refs := tools.ExtractArtifactReferences(reduced)
+	refs := tooloutput.ExtractArtifactReferences(reduced)
 	if len(refs) != 1 {
 		t.Fatalf("expected exactly one artifact reference in %q, got %v", reduced, refs)
 	}
-	path := strings.TrimSuffix(strings.TrimPrefix(refs[0], tools.ArtifactReferencePrefix), ".")
+	path := strings.TrimSuffix(strings.TrimPrefix(refs[0], tooloutput.ArtifactReferencePrefix), ".")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("archived payload unreadable at %q: %v", path, err)
@@ -155,7 +156,7 @@ func TestStaleReadAfterEditIsNotArchived(t *testing.T) {
 	if !strings.Contains(reduced, "truncated="+tools.ReadTruncatedStale) {
 		t.Fatalf("stale read lost its validity marker: %q", reduced)
 	}
-	if refs := tools.ExtractArtifactReferences(reduced); len(refs) != 0 {
+	if refs := tooloutput.ExtractArtifactReferences(reduced); len(refs) != 0 {
 		t.Fatalf("edit-invalidated read must not be archived, got %v", refs)
 	}
 }
@@ -171,7 +172,7 @@ func TestSupersededReadIsNotArchived(t *testing.T) {
 	)
 	setTestRequestBatch(a, msgs, 3)
 	reduced := a.prepareMessagesForLLM(msgs)[2].Content
-	if refs := tools.ExtractArtifactReferences(reduced); len(refs) != 0 {
+	if refs := tooloutput.ExtractArtifactReferences(reduced); len(refs) != 0 {
 		t.Fatalf("superseded read must not be archived, got %v", refs)
 	}
 }

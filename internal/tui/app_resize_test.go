@@ -7,6 +7,9 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/overlaylist"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestWindowSizeMsgShrinkIsDebounced(t *testing.T) {
@@ -383,10 +386,10 @@ func TestDirectoryItemsAreNumberedAndPageNavigationWorks(t *testing.T) {
 	for i := range m.dirEntries {
 		m.dirEntries[i] = DirectoryEntry{BlockIndex: i, Summary: fmt.Sprintf("message-%02d", i+1)}
 	}
-	m.dirList = NewOverlayList(directoryItems(m.dirEntries), 3)
+	m.dirList = overlaylist.New(directoryItems(m.dirEntries), 3)
 	m.viewport.SetSize(80, 7)
 
-	rendered := stripANSI(m.renderDirectory())
+	rendered := terminaltext.StripANSI(m.renderDirectory())
 	if !strings.Contains(rendered, "1. message-01") || !strings.Contains(rendered, "2. message-02") {
 		t.Fatalf("directory rows should be numbered, got:\n%s", rendered)
 	}

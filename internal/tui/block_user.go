@@ -9,11 +9,12 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	const toolName = tools.NameShell
-	style := UserCardStyle
+	style := currentStyles.UserCardStyle
 	// Reserve a column for the conversation rail (foreground-only "│" prepended
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
@@ -53,14 +54,14 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	var bashLines []string
 	addHeader := func() {
 		if isActive {
-			headerLine := "  " + prefix + " " + ToolCallStyle.Render(toolName)
+			headerLine := "  " + prefix + " " + currentStyles.ToolCallStyle.Render(toolName)
 			if mainPart != "" || grayPart != "" {
 				headerLine += " " + mainPart
 				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(grayPart)
+					headerLine += " " + currentStyles.DimStyle.Render(grayPart)
 				}
 			} else if paramSummary != "" {
-				headerLine += " " + DimStyle.Render(paramSummary)
+				headerLine += " " + currentStyles.DimStyle.Render(paramSummary)
 			}
 			bashLines = append(bashLines, headerLine)
 		} else {
@@ -68,12 +69,12 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 			if mainPart != "" || grayPart != "" {
 				headerLine += " " + mainPart
 				if grayPart != "" {
-					headerLine += " " + DimStyle.Render(grayPart)
+					headerLine += " " + currentStyles.DimStyle.Render(grayPart)
 				}
 			} else if paramSummary != "" {
-				headerLine += " " + DimStyle.Render(paramSummary)
+				headerLine += " " + currentStyles.DimStyle.Render(paramSummary)
 			}
-			bashLines = append(bashLines, ToolCallStyle.Render(headerLine))
+			bashLines = append(bashLines, currentStyles.ToolCallStyle.Render(headerLine))
 		}
 	}
 
@@ -84,31 +85,31 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 		addHeader()
 		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, true)
 		if b.UserLocalShellFailed {
-			bashLines = append(bashLines, toolFieldSection(ErrorStyle, "Error"))
+			bashLines = append(bashLines, toolFieldSection(currentStyles.ErrorStyle, "Error"))
 		}
-		for _, line := range wrapText(displayResult, contentWidth) {
-			bashLines = append(bashLines, DimStyle.Render("    "+line))
+		for _, line := range terminaltext.Wrap(displayResult, contentWidth) {
+			bashLines = append(bashLines, currentStyles.DimStyle.Render("    "+line))
 		}
 	default:
 		addHeader()
 		appendBashCommandBlock(&bashLines, b.UserLocalShellCmd, contentWidth, false)
 		if displayResult != "" {
-			summary := truncateOneLine(displayResult, innerWidth-26)
+			summary := terminaltext.TruncateOneLine(displayResult, innerWidth-26)
 			if b.UserLocalShellFailed {
-				bashLines = append(bashLines, toolFieldMarker(ErrorStyle, summary))
+				bashLines = append(bashLines, toolFieldMarker(currentStyles.ErrorStyle, summary))
 			} else {
-				bashLines = append(bashLines, toolFieldMarker(ToolResultStyle, summary))
+				bashLines = append(bashLines, toolFieldMarker(currentStyles.ToolResultStyle, summary))
 			}
 		}
 	}
 
 	var finalLines []string
 	label := "TERMINAL"
-	finalLines = append(finalLines, UserLabelStyle.Render(blockLabelWithID(label, b.displayLabelID())))
+	finalLines = append(finalLines, currentStyles.UserLabelStyle.Render(blockLabelWithID(label, b.displayLabelID())))
 	finalLines = append(finalLines, "")
 	finalLines = append(finalLines, bashLines...)
 
-	cardBg := currentTheme.UserCardBg
+	cardBg := currentStyles.Palette.UserCardBg
 	finalLines = preserveCardBg(finalLines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, finalLines, cardBg, cardRailPrefix("user", b.Focused))
 }
@@ -121,7 +122,7 @@ func (b *Block) renderUser(width int, spinnerFrame string) []string {
 }
 
 func (b *Block) renderUserPlain(width int) []string {
-	style := UserCardStyle
+	style := currentStyles.UserCardStyle
 	// Reserve a column for the conversation rail (foreground-only "│" prepended
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
@@ -137,14 +138,14 @@ func (b *Block) renderUserPlain(width int) []string {
 	if b.LoopAnchor {
 		label = "USER · LOOP"
 	}
-	finalLines = append(finalLines, UserLabelStyle.Render(blockLabelWithID(label, b.displayLabelID())))
+	finalLines = append(finalLines, currentStyles.UserLabelStyle.Render(blockLabelWithID(label, b.displayLabelID())))
 	finalLines = append(finalLines, "")
 	if strings.TrimSpace(b.Content) != "" {
 		for _, l := range renderUserText(b.Content, contentWidth) {
 			finalLines = append(finalLines, "  "+l)
 		}
 	}
-	imagesRendered := b.appendImagePreviewLines(&finalLines, contentWidth, currentTheme.UserCardBg, style.GetPaddingTop(), strings.TrimSpace(b.Content) != "")
+	imagesRendered := b.appendImagePreviewLines(&finalLines, contentWidth, currentStyles.Palette.UserCardBg, style.GetPaddingTop(), strings.TrimSpace(b.Content) != "")
 
 	if b.ImageCount > 0 && !imagesRendered {
 		if strings.TrimSpace(b.Content) != "" {
@@ -154,14 +155,14 @@ func (b *Block) renderUserPlain(width int) []string {
 		if b.ImageCount > 1 {
 			imageLabel = fmt.Sprintf("  📎 %d", b.ImageCount)
 		}
-		finalLines = append(finalLines, DimStyle.Render(imageLabel))
+		finalLines = append(finalLines, currentStyles.DimStyle.Render(imageLabel))
 	}
 	if len(b.PDFNames) > 0 {
 		if strings.TrimSpace(b.Content) != "" || b.ImageCount > 0 || imagesRendered {
 			finalLines = append(finalLines, "")
 		}
 		for _, name := range b.PDFNames {
-			finalLines = append(finalLines, DimStyle.Render("  📄 "+name))
+			finalLines = append(finalLines, currentStyles.DimStyle.Render("  📄 "+name))
 		}
 	}
 	if len(b.FileRefs) > 0 {
@@ -169,11 +170,11 @@ func (b *Block) renderUserPlain(width int) []string {
 			finalLines = append(finalLines, "")
 		}
 		for _, ref := range b.FileRefs {
-			finalLines = append(finalLines, DimStyle.Render("  ⎿  @"+ref))
+			finalLines = append(finalLines, currentStyles.DimStyle.Render("  ⎿  @"+ref))
 		}
 	}
 
-	cardBg := currentTheme.UserCardBg
+	cardBg := currentStyles.Palette.UserCardBg
 	finalLines = preserveCardBg(finalLines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, finalLines, cardBg, cardRailPrefix("user", b.Focused))
 }

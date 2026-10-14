@@ -7,6 +7,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/imagecache"
 )
 
 // Identity includes source content and binding. A renamed/reindexed token or a
@@ -15,7 +16,7 @@ type inputImageClickState struct {
 	Owner      imageViewerOwner
 	Version    uint64
 	Token      composer.Token
-	Attachment imagePartKeyRef
+	Attachment imagecache.Identity
 	Time       time.Time
 	Dragging   bool
 }
@@ -71,7 +72,7 @@ func (m *Model) handleInputImageClick(mouse tea.Mouse, offset int, hit bool) (te
 	}
 	now := time.Now()
 	owner := m.imageViewerOwner()
-	identity := imagePartKeyRefFor(attachmentPreviewPart(att))
+	identity := imagecache.IdentityOf(imageSource(attachmentPreviewPart(att)))
 	previous := m.inputImageClick
 	same := !previous.Dragging && previous.Owner == owner && previous.Version == m.input.Revision().Interaction && previous.Token == token && previous.Attachment == identity && now.Sub(previous.Time) <= doubleClickThreshold
 	m.inputImageClick = inputImageClickState{Owner: owner, Token: token, Attachment: identity, Time: now}

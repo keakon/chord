@@ -9,6 +9,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func runCmdTree(cmd tea.Cmd) []tea.Msg {
@@ -119,7 +120,7 @@ func TestBusyPoolSwitchShowsPoolTransitionOnly(t *testing.T) {
 	backend.currentPoolByFocus[""] = "fast"
 	backend.mainModelPool = "fast"
 
-	plain := stripANSI(m.renderInfoPanel(100, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(100, 20))
 	if !strings.Contains(plain, "Pool: slow -> fast") {
 		t.Fatalf("info panel = %q, want pool transition", plain)
 	}
@@ -151,7 +152,7 @@ func TestBusyPoolSwitchClearsTransitionWhenFallbackReachesTargetPool(t *testing.
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RunningModelChangedEvent{AgentID: "main", ProviderModelRef: "fast-provider/gpt-5.5", RunningModelRef: "fast-provider/gpt-5.5"}})
 
-	plain := stripANSI(m.renderInfoPanel(100, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(100, 20))
 	if !strings.Contains(plain, "Pool: fast") {
 		t.Fatalf("info panel = %q, want current pool after fallback", plain)
 	}
@@ -180,7 +181,7 @@ func TestBusyPoolSwitchBackToOriginBeforeRunningModelMovesClearsTransition(t *te
 	backend.currentPoolByFocus[""] = "fast"
 	backend.mainModelPool = "fast"
 
-	plain := stripANSI(m.renderInfoPanel(100, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(100, 20))
 	if !strings.Contains(plain, "Pool: slow -> fast") {
 		t.Fatalf("info panel = %q, want slow -> fast after first switch", plain)
 	}
@@ -193,7 +194,7 @@ func TestBusyPoolSwitchBackToOriginBeforeRunningModelMovesClearsTransition(t *te
 	backend.currentPoolByFocus[""] = "slow"
 	backend.mainModelPool = "slow"
 
-	plain = stripANSI(m.renderInfoPanel(100, 20))
+	plain = terminaltext.StripANSI(m.renderInfoPanel(100, 20))
 	if !strings.Contains(plain, "Pool: slow") {
 		t.Fatalf("info panel = %q, want Pool: slow", plain)
 	}
@@ -221,7 +222,7 @@ func TestIdlePoolSwitchDoesNotShowPoolTransition(t *testing.T) {
 	backend.currentPoolByFocus[""] = "fast"
 	backend.mainModelPool = "fast"
 
-	plain := stripANSI(m.renderInfoPanel(100, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(100, 20))
 	if !strings.Contains(plain, "Pool: fast") {
 		t.Fatalf("info panel = %q, want selected pool", plain)
 	}

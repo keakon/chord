@@ -5,13 +5,6 @@ import (
 	"testing"
 )
 
-func TestNormalizeNewlines(t *testing.T) {
-	got := NormalizeNewlines("a\r\nb\rc")
-	if got != "a\nb\nc" {
-		t.Fatalf("NormalizeNewlines = %q, want %q", got, "a\nb\nc")
-	}
-}
-
 func TestFirstFenceInfoField(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{in: "go title=example", want: "go"},

@@ -29,7 +29,7 @@ func (m *Model) buildInfoPanelJobsBlock(lineW int) (string, []jobRowHitBox) {
 	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "JOBS", fmt.Sprintf("%d", len(jobs)))}
 	if !expanded {
 		// Collapsed: the header alone, and no elapsed values to keep refreshing.
-		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines)), nil
+		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines)), nil
 	}
 	contentWidth := max(lineW-infoPanelCollapsibleContentInset, 0)
 	styles := infoPanelJobRowStyles()
@@ -47,7 +47,7 @@ func (m *Model) buildInfoPanelJobsBlock(lineW int) (string, []jobRowHitBox) {
 		}
 		hits = append(hits, hit)
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines)), hits
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines)), hits
 }
 
 func (m *Model) recordInfoPanelJobHitBox(jobID string, startY, endY, stopZoneStartX, stopZoneEndX int) {

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	"github.com/keakon/lipgloss/v2"
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/syntax"
 )
 
 func mergeDiffSnippetWindows(windows []diffSnippetWindow) []diffSnippetWindow {
@@ -122,10 +122,10 @@ func joinANSISnippetWindows(rendered string, windows []diffSnippetWindow, lineWi
 	for i, win := range windows {
 		if i == 0 {
 			if win.StartCol > 0 {
-				buf.WriteString(DimStyle.Render("…"))
+				buf.WriteString(currentStyles.DimStyle.Render("…"))
 			}
 		} else {
-			buf.WriteString(DimStyle.Render("…"))
+			buf.WriteString(currentStyles.DimStyle.Render("…"))
 		}
 		startByte, endByte := findColumnByteOffsets(rendered, win.StartCol, win.EndCol)
 		if startByte >= 0 && endByte >= startByte {
@@ -133,7 +133,7 @@ func joinANSISnippetWindows(rendered string, windows []diffSnippetWindow, lineWi
 		}
 	}
 	if windows[len(windows)-1].EndCol < lineWidth {
-		buf.WriteString(DimStyle.Render("…"))
+		buf.WriteString(currentStyles.DimStyle.Render("…"))
 	}
 	return buf.String()
 }
@@ -166,7 +166,7 @@ func renderHighlightedSnippetLine(line string, changeSpans []diffSegmentSpan, di
 		buf.WriteString(renderDiffSnippetEllipsis(bgTerm))
 	}
 	if hidden > 0 {
-		summary := DimStyle.Render(fmt.Sprintf("(+%d)", hidden))
+		summary := currentStyles.DimStyle.Render(fmt.Sprintf("(+%d)", hidden))
 		if ansi.StringWidth(summary) <= diffWidth-defaultSnippetSummaryMinWidth {
 			buf.WriteString(summary)
 		}
@@ -175,7 +175,7 @@ func renderHighlightedSnippetLine(line string, changeSpans []diffSegmentSpan, di
 }
 
 func renderDiffSnippetEllipsis(bgTerm string) string {
-	style := DimStyle
+	style := currentStyles.DimStyle
 	if bgTerm != "" {
 		style = style.Background(lipgloss.Color(bgTerm))
 	}

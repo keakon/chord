@@ -1,6 +1,10 @@
 package markdownutil
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/keakon/chord/internal/textclean"
+)
 
 // Fence describes a Markdown code fence opener.
 type Fence struct {
@@ -8,11 +12,6 @@ type Fence struct {
 	Delimiter byte
 	Length    int
 	Info      string
-}
-
-func NormalizeNewlines(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	return strings.ReplaceAll(s, "\r", "\n")
 }
 
 // NormalizeAdjacentStrong separates adjacent strong spans for renderers that
@@ -357,7 +356,7 @@ func (s *StreamingFrontierScanner) Advance(content string) int {
 }
 
 func RepairForDisplay(content string) string {
-	content = NormalizeNewlines(content)
+	content = textclean.NormalizeNewlines(content)
 	if content == "" {
 		return content
 	}

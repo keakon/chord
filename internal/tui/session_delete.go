@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (m *Model) openSessionDeleteConfirm() tea.Cmd {
@@ -109,20 +111,20 @@ func (m *Model) renderSessionDeleteConfirmDialog() string {
 	const maxDialogWidth = 90
 	maxWidth := min(maxDialogWidth, max(m.width-1, 1))
 	innerWidth := max(dialogContentWidth(maxWidth), 1)
-	previewLines := wrapText(preview, max(10, innerWidth-2))
+	previewLines := terminaltext.Wrap(preview, max(10, innerWidth-2))
 	for i := range previewLines {
-		previewLines[i] = DimStyle.Render(previewLines[i])
+		previewLines[i] = currentStyles.DimStyle.Render(previewLines[i])
 	}
 	lines := []string{
-		DialogWarningStyle.Render("Permanently deletes the selected session directory."),
-		ConfirmToolStyle.Render("Session ID: " + target.ID),
+		currentStyles.DialogWarningStyle.Render("Permanently deletes the selected session directory."),
+		currentStyles.ConfirmToolStyle.Render("Session ID: " + target.ID),
 	}
 	if target.ForkedFrom != "" {
-		lines = append(lines, ConfirmToolStyle.Render("Forked from: "+target.ForkedFrom))
+		lines = append(lines, currentStyles.ConfirmToolStyle.Render("Forked from: "+target.ForkedFrom))
 	}
 	lines = append(lines,
 		"",
-		ConfirmToolStyle.Render("First message preview:"),
+		currentStyles.ConfirmToolStyle.Render("First message preview:"),
 	)
 	lines = append(lines, previewLines...)
 	actions := hintLine(dangerHint("y", "Delete"), hint("n/esc", "Cancel"))

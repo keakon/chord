@@ -42,7 +42,7 @@ func appendToolProgressSuffix(headerLine string, progress *agent.ToolProgressSna
 	if progressText == "" {
 		return headerLine
 	}
-	return appendToolHeaderSuffix(headerLine, DimStyle.Render("  "+progressText), maxWidth)
+	return appendToolHeaderSuffix(headerLine, currentStyles.DimStyle.Render("  "+progressText), maxWidth)
 }
 
 func buildToolHeaderLine(headerLine string, progress *agent.ToolProgressSnapshot, cardWidth int, queuedByExecutionEvent bool, isRunning bool) string {

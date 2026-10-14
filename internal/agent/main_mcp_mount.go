@@ -6,6 +6,7 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/keakon/chord/internal/agent/requestshape"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	toolpkg "github.com/keakon/chord/internal/tools"
@@ -209,7 +210,7 @@ func (a *MainAgent) effectiveRuntimeMCPDeclarations() []message.ToolDefinition {
 }
 
 type mcpMountAnchor struct {
-	window     []stableReductionMessageShape
+	window     []requestshape.Shape
 	occurrence int
 }
 
@@ -228,7 +229,7 @@ type mcpToolMountState struct {
 	// top-level tools array for this session run (enabled before the first
 	// surface build). nil until the first build; never mutated afterwards.
 	topLevelManual map[string]struct{}
-	messageShapes  []stableReductionMessageShape
+	messageShapes  []requestshape.Shape
 	messageSources []message.Message
 }
 
@@ -386,9 +387,9 @@ func (a *MainAgent) mountRuntimeMCPTools(messages []message.Message, mode mcpToo
 
 const mcpMountAnchorWindow = 3
 
-func newMCPMountAnchor(shapes []stableReductionMessageShape) mcpMountAnchor {
+func newMCPMountAnchor(shapes []requestshape.Shape) mcpMountAnchor {
 	windowLen := min(mcpMountAnchorWindow, len(shapes))
-	window := make([]stableReductionMessageShape, windowLen)
+	window := make([]requestshape.Shape, windowLen)
 	copy(window, shapes[len(shapes)-windowLen:])
 	occurrence := 1
 	for start := 0; start+windowLen < len(shapes); start++ {
@@ -399,7 +400,7 @@ func newMCPMountAnchor(shapes []stableReductionMessageShape) mcpMountAnchor {
 	return mcpMountAnchor{window: window, occurrence: occurrence}
 }
 
-func findMCPMountAnchor(shapes []stableReductionMessageShape, anchor mcpMountAnchor) (int, bool) {
+func findMCPMountAnchor(shapes []requestshape.Shape, anchor mcpMountAnchor) (int, bool) {
 	if len(anchor.window) == 0 {
 		return 0, true
 	}
@@ -416,7 +417,7 @@ func findMCPMountAnchor(shapes []stableReductionMessageShape, anchor mcpMountAnc
 	return 0, false
 }
 
-func mcpMountWindowMatches(shapes []stableReductionMessageShape, start int, window []stableReductionMessageShape) bool {
+func mcpMountWindowMatches(shapes []requestshape.Shape, start int, window []requestshape.Shape) bool {
 	for i, want := range window {
 		if shapes[start+i] != want {
 			return false
@@ -425,18 +426,18 @@ func mcpMountWindowMatches(shapes []stableReductionMessageShape, start int, wind
 	return true
 }
 
-func (s *mcpToolMountState) incrementalMessageShapes(messages []message.Message) []stableReductionMessageShape {
+func (s *mcpToolMountState) incrementalMessageShapes(messages []message.Message) []requestshape.Shape {
 	reusable := 0
 	if len(s.messageSources) == len(s.messageShapes) {
-		reusable = reusableMessagePrefixLen(s.messageSources, messages)
+		reusable = requestshape.ReusablePrefixLen(s.messageSources, messages)
 		if reusable == len(messages) && len(s.messageSources) == len(messages) {
 			return s.messageShapes
 		}
 	}
 	s.messageSources = append(s.messageSources[:reusable], messages[reusable:]...)
-	s.messageShapes = append(s.messageShapes[:reusable], make([]stableReductionMessageShape, len(messages)-reusable)...)
+	s.messageShapes = append(s.messageShapes[:reusable], make([]requestshape.Shape, len(messages)-reusable)...)
 	for i := reusable; i < len(messages); i++ {
-		s.messageShapes[i] = stableReductionMessageShapeOf(&messages[i])
+		s.messageShapes[i] = requestshape.ShapeOf(&messages[i])
 	}
 	return s.messageShapes
 }

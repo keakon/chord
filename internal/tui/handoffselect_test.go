@@ -9,6 +9,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/identity"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestHandoffSelectOptionIndexAtUsesListBaseRow(t *testing.T) {
@@ -343,8 +344,8 @@ func TestHandoffDenyReasonRenderedAtOverlayWidthWithoutRewrap(t *testing.T) {
 	// the textarea output must survive the overlay render verbatim: if the
 	// overlay wrapped at a different width, long rows would be re-wrapped and
 	// no longer appear as-is in the rendered dialog.
-	plain := stripANSI(m.renderHandoffSelectDialog())
-	for row := range strings.SplitSeq(stripANSI(m.handoffSelect.denyReasonInput.View()), "\n") {
+	plain := terminaltext.StripANSI(m.renderHandoffSelectDialog())
+	for row := range strings.SplitSeq(terminaltext.StripANSI(m.handoffSelect.denyReasonInput.View()), "\n") {
 		row = strings.TrimRight(row, " ")
 		if row == "" {
 			continue

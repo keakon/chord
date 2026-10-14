@@ -14,7 +14,7 @@ type deliveryCardHit struct {
 }
 
 func (b *Block) renderDeliveryCard(width int) []string {
-	style := DirectoryBorderStyle.Width(max(1, width))
+	style := currentStyles.DirectoryBorderStyle.Width(max(1, width))
 	inner := max(1, width-style.GetHorizontalFrameSize())
 	rows := []string{"Delivered files · Enter or click for actions"}
 	files := b.DeliveredFiles

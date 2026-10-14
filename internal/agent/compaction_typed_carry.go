@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -185,16 +186,13 @@ func typedStateSectionRanges(body string) []typedSectionRange {
 	var out []typedSectionRange
 	search := 0
 	for {
-		rel := findMarkdownHeadingLine(body[search:], message.CompactionTypedStateHeading)
+		rel := checkpointfmt.FindHeading(body[search:], message.CompactionTypedStateHeading)
 		if rel < 0 {
 			return out
 		}
 		headingStart := search + rel
 		contentStart := headingStart + len(message.CompactionTypedStateHeading)
-		contentEnd := len(body)
-		if loc := compactionMarkdownHeadingLineRe.FindStringIndex(body[contentStart:]); loc != nil {
-			contentEnd = contentStart + loc[0]
-		}
+		contentEnd := checkpointfmt.SectionEnd(body, contentStart)
 		out = append(out, typedSectionRange{headingStart: headingStart, contentStart: contentStart, contentEnd: contentEnd})
 		search = contentStart
 	}

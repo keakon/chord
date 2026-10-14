@@ -2,12 +2,11 @@ package agent
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
@@ -402,257 +401,6 @@ func formatCompactionAnchorsForPrompt(input *compactionInput) string {
 	}, "\n\n")
 }
 
-func validateCompactionSummary(summary string) error {
-	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		return fmt.Errorf("compaction model returned empty summary")
-	}
-	if containsThinkingTag(summary) {
-		return fmt.Errorf("compaction summary contains private thinking tags")
-	}
-	if len([]rune(summary)) < compactSummaryMinChars {
-		return fmt.Errorf("compaction summary too short (%d chars)", len([]rune(summary)))
-	}
-	positions := compactionHeadingPositions(summary)
-	if missing := missingCompactionHeadings(summary); len(missing) > 0 {
-		return &compactionSummaryValidationError{Missing: missing, Total: len(compactionRequiredHeadings)}
-	}
-	// compactionHeadingPositions scans headings sequentially, so a short result
-	// means an earlier heading appeared after a later one rather than a missing
-	// section.
-	if len(positions) != len(compactionRequiredHeadings) {
-		return fmt.Errorf("compaction summary sections out of order")
-	}
-	if strings.TrimSpace(summary[:positions[0]]) != "" {
-		return fmt.Errorf("compaction summary has content before first required section")
-	}
-	if err := validateCompactionNextStep(summary, positions[len(positions)-1]); err != nil {
-		return err
-	}
-	if err := validateCompactionTodoState(summary); err != nil {
-		return err
-	}
-	return nil
-}
-
-// compactionSummaryValidationError names the required headings a summary
-// omitted so repair prompts and diagnostics can act on the exact sections
-// instead of only a match ratio.
-type compactionSummaryValidationError struct {
-	Missing []string
-	Total   int
-}
-
-func (e *compactionSummaryValidationError) Error() string {
-	return fmt.Sprintf("compaction summary missing required sections (%d/%d): %s",
-		e.Total-len(e.Missing), e.Total, strings.Join(e.Missing, ", "))
-}
-
-var (
-	compactionMarkdownHeadingLineRe      = regexp.MustCompile(`(?m)^##\s+`)
-	compactionRequiredHeadingLineRegexps = buildCompactionRequiredHeadingLineRegexps()
-	// extraHeadingLineRegexps caches compiled full-line heading patterns for
-	// headings outside compactionRequiredHeadings (for example the typed
-	// checkpoint state section). The pattern is compiled once per heading and
-	// reused, so parsing a typed block does not allocate a fresh regexp on
-	// every checkpoint read.
-	extraHeadingLineRegexpsMu sync.Mutex
-	extraHeadingLineRegexps   = map[string]*regexp.Regexp{}
-)
-
-func buildCompactionRequiredHeadingLineRegexps() map[string]*regexp.Regexp {
-	patterns := make(map[string]*regexp.Regexp, len(compactionRequiredHeadings))
-	for _, heading := range compactionRequiredHeadings {
-		patterns[heading] = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(heading) + `\s*$`)
-	}
-	return patterns
-}
-
-func validateCompactionNextStep(summary string, nextStepPos int) error {
-	if nextStepPos < 0 || nextStepPos >= len(summary) {
-		return fmt.Errorf("compaction summary missing next step")
-	}
-	section := strings.TrimSpace(summary[nextStepPos+len("## Next Step"):])
-	if section == "" {
-		return fmt.Errorf("compaction summary next step is empty")
-	}
-	if isVagueCompactionNextStep(section) {
-		return fmt.Errorf("compaction summary next step is too vague")
-	}
-	return nil
-}
-
-func isVagueCompactionNextStep(section string) bool {
-	normalized := strings.ToLower(strings.TrimSpace(section))
-	for strings.HasPrefix(normalized, "-") {
-		normalized = strings.TrimSpace(strings.TrimPrefix(normalized, "-"))
-	}
-	normalized = strings.Trim(strings.TrimSuffix(normalized, "."), " ")
-	switch normalized {
-	case "continue",
-		"continue working",
-		"continue the task",
-		"keep working",
-		"proceed",
-		"resume",
-		"resume work",
-		"carry on":
-		return true
-	default:
-		return false
-	}
-}
-
-func validateCompactionTodoState(summary string) error {
-	section, ok := markdownSection(summary, "## Todo State")
-	if !ok {
-		return nil
-	}
-	active := todoSubsectionLines(section, "Active/relevant to latest request")
-	completed := todoSubsectionLines(section, "Completed/background")
-	stale := todoSubsectionLines(section, "Stale/superseded")
-	if len(active) == 0 {
-		return nil
-	}
-	inactive := append(completed, stale...)
-	for _, activeLine := range active {
-		activeKey := normalizeTodoStateLine(activeLine)
-		if activeKey == "" || activeKey == "none" {
-			continue
-		}
-		for _, inactiveLine := range inactive {
-			inactiveKey := normalizeTodoStateLine(inactiveLine)
-			if inactiveKey == "" || inactiveKey == "none" {
-				continue
-			}
-			if activeKey == inactiveKey {
-				return fmt.Errorf("compaction summary marks completed or stale todo as active: %s", activeLine)
-			}
-		}
-	}
-	return nil
-}
-
-// markdownSectionBounds locates a summary section's body: start is the offset
-// just past the heading, end is where the next "## " heading begins or the end
-// of the summary. Readers and writers of a section share it so there is one
-// definition of where a section stops.
-func markdownSectionBounds(summary, heading string) (start, end int, ok bool) {
-	pos := findMarkdownHeadingLine(summary, heading)
-	if pos < 0 {
-		return 0, 0, false
-	}
-	start = pos + len(heading)
-	end = len(summary)
-	if loc := compactionMarkdownHeadingLineRe.FindStringIndex(summary[start:]); loc != nil {
-		end = start + loc[0]
-	}
-	return start, end, true
-}
-
-func markdownSection(summary, heading string) (string, bool) {
-	start, end, ok := markdownSectionBounds(summary, heading)
-	if !ok {
-		return "", false
-	}
-	return strings.TrimSpace(summary[start:end]), true
-}
-
-func todoSubsectionLines(section, label string) []string {
-	var lines []string
-	inGroup := false
-	for raw := range strings.SplitSeq(section, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
-		bullet := strings.TrimSpace(strings.TrimPrefix(line, "-"))
-		if strings.HasPrefix(bullet, label+":") {
-			inGroup = true
-			rest := strings.TrimSpace(strings.TrimPrefix(bullet, label+":"))
-			if rest != "" {
-				lines = append(lines, rest)
-			}
-			continue
-		}
-		if strings.HasPrefix(bullet, "Active/relevant to latest request:") || strings.HasPrefix(bullet, "Completed/background:") || strings.HasPrefix(bullet, "Stale/superseded:") {
-			inGroup = false
-			continue
-		}
-		if strings.HasPrefix(line, "#") {
-			inGroup = false
-			continue
-		}
-		if inGroup {
-			lines = append(lines, bullet)
-		}
-	}
-	return lines
-}
-
-func normalizeTodoStateLine(line string) string {
-	line = strings.ToLower(strings.TrimSpace(line))
-	line = strings.TrimPrefix(line, "-")
-	line = strings.TrimSpace(line)
-	line = strings.Trim(line, "`*_ .")
-	line = strings.Trim(line, "()")
-	return line
-}
-
-func containsThinkingTag(summary string) bool {
-	lower := strings.ToLower(summary)
-	return strings.Contains(lower, "<think>") || strings.Contains(lower, "</think>")
-}
-
-func missingCompactionHeadings(summary string) []string {
-	missing := make([]string, 0, len(compactionRequiredHeadings))
-	for _, heading := range compactionRequiredHeadings {
-		if findMarkdownHeadingLine(summary, heading) < 0 {
-			missing = append(missing, heading)
-		}
-	}
-	return missing
-}
-
-func compactionHeadingPositions(summary string) []int {
-	positions := make([]int, 0, len(compactionRequiredHeadings))
-	searchStart := 0
-	for _, heading := range compactionRequiredHeadings {
-		pos := findMarkdownHeadingLine(summary[searchStart:], heading)
-		if pos < 0 {
-			break
-		}
-		absolute := searchStart + pos
-		positions = append(positions, absolute)
-		searchStart = absolute + len(heading)
-	}
-	return positions
-}
-
-func findMarkdownHeadingLine(summary, heading string) int {
-	pattern := compactionRequiredHeadingLineRegexps[heading]
-	if pattern == nil {
-		// A heading outside the required section set (for example the typed
-		// checkpoint state section) matches the same full-line rule: the
-		// heading must start a line at column zero and be the line's entire
-		// content. A mid-prose occurrence of the heading text can therefore
-		// never be mistaken for the section. The pattern is cached, not
-		// recompiled per lookup.
-		extraHeadingLineRegexpsMu.Lock()
-		pattern = extraHeadingLineRegexps[heading]
-		if pattern == nil {
-			pattern = regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(heading) + `\s*$`)
-			extraHeadingLineRegexps[heading] = pattern
-		}
-		extraHeadingLineRegexpsMu.Unlock()
-	}
-	loc := pattern.FindStringIndex(summary)
-	if loc == nil {
-		return -1
-	}
-	return loc[0]
-}
-
 func renderEvidenceItemsForPrompt(items []evidenceItem) string {
 	if len(items) == 0 {
 		return "- (none)"
@@ -819,13 +567,13 @@ func buildStructuredFallbackSummary(historyPath string, input *compactionInput, 
 		{"## Current User Request", fallbackCurrentUserRequestSection(input)},
 		{"## Active Objective", fallbackActiveObjectiveSection(anchor)},
 		{"## Background Goals", "- Earlier goals are background until confirmed relevant to the latest preserved user request."},
-		{checkpointUserConstraintsHeading, renderEvidenceKindForFallback(input, evidenceUserCorrection, "- No preserved user constraints.")},
-		{checkpointProgressHeading, fallbackProgressSection(input)},
-		{checkpointKeyDecisionsHeading, "- Earlier durable decisions should be read from the archived history file if needed.\n- Preserve the recent continuation direction and evidence below."},
+		{checkpointfmt.UserConstraintsHeading, renderEvidenceKindForFallback(input, evidenceUserCorrection, "- No preserved user constraints.")},
+		{checkpointfmt.ProgressHeading, fallbackProgressSection(input)},
+		{checkpointfmt.KeyDecisionsHeading, "- Earlier durable decisions should be read from the archived history file if needed.\n- Preserve the recent continuation direction and evidence below."},
 		{"## Files and Evidence", fallbackFilesAndEvidenceSection(historyPath, input, keyFiles)},
 		{"## Todo State", formatTodosAsRelevanceBullets(todos, anchor)},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
-		{checkpointOpenProblemsHeading, fallbackOpenProblemsSection(input, summarizeErr)},
+		{checkpointfmt.OpenProblemsHeading, fallbackOpenProblemsSection(input, summarizeErr)},
 		{"## Next Step", fallbackNextStepSection(input)},
 	})
 }
@@ -1146,7 +894,7 @@ func ensureCompactionTodoSnapshot(summary string, todos []tools.TodoItem) string
 	if strings.TrimSpace(summary) == "" || len(todos) == 0 {
 		return summary
 	}
-	sectionStart, sectionEnd, ok := markdownSectionBounds(summary, "## Todo State")
+	sectionStart, sectionEnd, ok := checkpointfmt.SectionBounds(summary, "## Todo State")
 	if !ok || strings.Contains(summary[sectionStart:sectionEnd], "### Runtime TODO snapshot") {
 		return summary
 	}
@@ -1366,11 +1114,11 @@ func ensureCompactionSubAgentSnapshot(summary string, subAgents []SubAgentInfo) 
 	if strings.TrimSpace(summary) == "" {
 		return summary
 	}
-	pos := findMarkdownHeadingLine(summary, "## SubAgent State")
+	pos := checkpointfmt.FindHeading(summary, "## SubAgent State")
 	if pos < 0 {
 		return summary
 	}
-	_, end, ok := markdownSectionBounds(summary, "## SubAgent State")
+	_, end, ok := checkpointfmt.SectionBounds(summary, "## SubAgent State")
 	if !ok {
 		return summary
 	}
@@ -1489,13 +1237,13 @@ func buildTruncateOnlySummary(historyPath string, summarizeErr error, keyFiles [
 		{"## Current User Request", "- Latest request was not relevance-filtered because model summarization was unavailable; read the preserved recent context and archived history before acting."},
 		{"## Active Objective", "- Continue from the latest preserved user request; do not assume older todos remain active without checking relevance."},
 		{"## Background Goals", "- Earlier goals are background until confirmed relevant to the latest preserved user request."},
-		{checkpointUserConstraintsHeading, "- Constraints may be incomplete because truncate-only fallback skipped model-generated summarization."},
-		{checkpointProgressHeading, "- Earlier history was compacted in truncate-only mode.\n- Use the archived history and key files below as the durable checkpoint."},
-		{checkpointKeyDecisionsHeading, "- Model-based context summarization was unavailable.\n- Continue from the archived history, key files, and preserved recent context instead of inventing missing decisions."},
+		{checkpointfmt.UserConstraintsHeading, "- Constraints may be incomplete because truncate-only fallback skipped model-generated summarization."},
+		{checkpointfmt.ProgressHeading, "- Earlier history was compacted in truncate-only mode.\n- Use the archived history and key files below as the durable checkpoint."},
+		{checkpointfmt.KeyDecisionsHeading, "- Model-based context summarization was unavailable.\n- Continue from the archived history, key files, and preserved recent context instead of inventing missing decisions."},
 		{"## Files and Evidence", fallbackFilesAndEvidenceSection(historyPath, nil, keyFiles)},
 		{"## Todo State", formatTodosAsRelevanceBullets(todos, fallbackAnchor{})},
 		{"## SubAgent State", formatSubAgentsAsBullets(subAgents)},
-		{checkpointOpenProblemsHeading, fallbackOpenProblemsSection(nil, summarizeErr)},
+		{checkpointfmt.OpenProblemsHeading, fallbackOpenProblemsSection(nil, summarizeErr)},
 		{"## Next Step", "- Continue from the latest preserved user request, archived history, and listed key files."},
 	})
 }

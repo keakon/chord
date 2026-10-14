@@ -15,6 +15,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestWrapConfirmLiteralTextPrefersTokenAndPathBoundaries(t *testing.T) {
@@ -42,7 +43,7 @@ func TestRenderConfirmSummarySoftWrapsLongShellCommandWithoutBreakingPathToken(t
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"mv docs/plans/example-plan.md docs/plans/archive/example-plan.md","workdir":"/tmp/project","timeout_ms":30000}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Command:") {
 		t.Fatalf("expected command label in confirm dialog, got:\n%s", plain)
 	}
@@ -59,7 +60,7 @@ func TestRenderConfirmSummaryShowsStructuredShellFields(t *testing.T) {
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"rm internal/tui/example_obsolete.go","description":"Remove obsolete file","workdir":"/tmp/project","timeout_ms":45000}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Tool: shell") {
 		t.Fatalf("expected tool line in confirm dialog, got:\n%s", plain)
 	}
@@ -91,7 +92,7 @@ func TestRenderConfirmSummaryShowsEffectiveForegroundTimeoutWhenCapped(t *testin
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"sleep 1","timeout_ms":2400000}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Timeout: 10m") {
 		t.Fatalf("expected confirm summary to show effective capped foreground timeout, got:\n%s", plain)
 	}
@@ -128,7 +129,7 @@ func TestRenderConfirmSummaryShowsWebFetchTimeout(t *testing.T) {
 			m.width = 100
 			m.confirm.request = &ConfirmRequest{ToolName: "web_fetch", ArgsJSON: tc.args}
 
-			plain := stripANSI(m.renderConfirmDialog())
+			plain := terminaltext.StripANSI(m.renderConfirmDialog())
 			for _, want := range tc.want {
 				if !strings.Contains(plain, want) {
 					t.Fatalf("expected confirm summary to contain %q, got:\n%s", want, plain)
@@ -143,7 +144,7 @@ func TestRenderConfirmSummaryDoesNotTreatShellAsBackground(t *testing.T) {
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"npm run dev","description":"Frontend dev server","timeout_ms":45000}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if strings.Contains(plain, "Background:") || strings.Contains(plain, "Max runtime:") || strings.Contains(plain, "Mode:") {
 		t.Fatalf("shell confirm summary should not include background fields, got:\n%s", plain)
 	}
@@ -154,7 +155,7 @@ func TestRenderConfirmSummaryUsesBackgroundTimeoutCap(t *testing.T) {
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"npm run dev","run_in_background":true,"timeout_ms":7200000}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Timeout: 2h") {
 		t.Fatalf("expected background timeout to keep the requested hour-scale value, got:\n%s", plain)
 	}
@@ -168,7 +169,7 @@ func TestRenderConfirmSummaryCapsBackgroundTimeoutBeyondSixHours(t *testing.T) {
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"npm run dev","run_in_background":true,"timeout_ms":28800000}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Timeout: 6h") {
 		t.Fatalf("expected confirm summary to show the effective capped background timeout, got:\n%s", plain)
 	}
@@ -182,7 +183,7 @@ func TestRenderConfirmSummaryShowsWriteFilePathAndPreview(t *testing.T) {
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "write", ArgsJSON: `{"path":"internal/tui/confirm_render.go","content":"line 1\nline 2\nline 3\nline 4"}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "File: internal/tui/confirm_render.go") {
 		t.Fatalf("expected file path in summary view, got:\n%s", plain)
 	}
@@ -323,7 +324,7 @@ func TestRenderConfirmSummaryShowsDeleteFilePathAndReason(t *testing.T) {
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: `{"paths":["internal/tui/obsolete.go"],"reason":"remove obsolete file"}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Action: Delete file") {
 		t.Fatalf("expected delete action line, got:\n%s", plain)
 	}
@@ -340,7 +341,7 @@ func TestRenderConfirmSummaryFallsBackToRawPayloadOnMalformedArgs(t *testing.T) 
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"rm"`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Unable to parse arguments") {
 		t.Fatalf("expected malformed-args warning, got:\n%s", plain)
 	}
@@ -360,7 +361,7 @@ func TestRenderDoneConfirmDialogShowsOnlyReportBody(t *testing.T) {
 		DoneReport: "## Completion status\nAll requested work is finished\n\n**Verification**: passed",
 	}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Confirmation Required") {
 		t.Fatalf("expected confirmation badge in Done dialog, got:\n%s", plain)
 	}
@@ -386,7 +387,7 @@ func TestRenderDoneConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	}
 
 	rendered := m.renderConfirmDialog()
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if got, limit := lipgloss.Height(rendered), confirmDialogMaxHeight(m.height); got > limit {
 		t.Fatalf("Done confirm dialog height = %d, want <= %d\n%s", got, limit, plain)
 	}
@@ -394,7 +395,7 @@ func TestRenderDoneConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 		t.Fatalf("expected Done confirm actions to remain visible, got:\n%s", plain)
 	}
 	m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnd}))
-	lastPage := stripANSI(m.renderConfirmDialog())
+	lastPage := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(lastPage, "line 40") || !strings.Contains(lastPage, "[Enter/A] Allow") || !strings.Contains(lastPage, "[Esc/R] Deny+Reason") {
 		t.Fatalf("last report line and decisions must remain reachable:\n%s", lastPage)
 	}
@@ -406,7 +407,7 @@ func TestRenderConfirmDialogEditModeShowsMultilineTextareaAndHint(t *testing.T) 
 	m.confirm.editing = true
 	m.confirm.editInput = newConfirmTextarea(m.width, m.height, m.confirm.request.ArgsJSON)
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "\"a\": 1") || !strings.Contains(plain, "\"b\": 2") {
 		t.Fatalf("expected multiline args to be visible in edit dialog, got:\n%s", plain)
 	}
@@ -472,7 +473,7 @@ func TestHandleConfirmEditKeyRejectsInvalidJSONAndStaysEditing(t *testing.T) {
 		t.Fatalf("editError = %q, want valid JSON guidance", m.confirm.editError)
 	}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "Arguments must be valid JSON before submission.") {
 		t.Fatalf("expected inline validation error in confirm dialog, got:\n%s", plain)
 	}
@@ -487,7 +488,7 @@ func TestRenderConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 	}
 
 	rendered := m.renderConfirmDialog()
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 
 	if got, limit := lipgloss.Height(rendered), confirmDialogMaxHeight(m.height); got > limit {
 		t.Fatalf("confirm dialog height = %d, want <= %d\n%s", got, limit, plain)
@@ -496,7 +497,7 @@ func TestRenderConfirmDialogLimitsHeightAndPreservesActions(t *testing.T) {
 		t.Fatalf("expected confirm actions to remain visible, got:\n%s", plain)
 	}
 	m.handleConfirmKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnd}))
-	lastPage := stripANSI(m.renderConfirmDialog())
+	lastPage := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(lastPage, "/tmp/i") || !strings.Contains(lastPage, "[Enter/A] Allow") || !strings.Contains(lastPage, "[Esc/D] Deny") {
 		t.Fatalf("last approval path and decisions must remain reachable:\n%s", lastPage)
 	}
@@ -507,7 +508,7 @@ func TestRenderConfirmOptionsIncludesDenyReason(t *testing.T) {
 	m.width = 100
 	m.confirm.request = &ConfirmRequest{ToolName: "shell", ArgsJSON: `{"command":"echo hi"}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[R] Deny+Reason") {
 		t.Fatalf("expected [R] Deny+Reason option in confirm dialog, got:\n%s", plain)
 	}
@@ -517,7 +518,7 @@ func TestRenderConfirmOptionsIncludesRememberRuleForDelete(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirm.request = &ConfirmRequest{ToolName: "delete", ArgsJSON: `{"path":"old.txt"}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[M] Remember…") {
 		t.Fatalf("expected [M] Remember option for Delete confirmation, got:\n%s", plain)
 	}
@@ -528,7 +529,7 @@ func TestRenderConfirmDialogRememberRuleKeyShowsRulePickerAfterCachedSummary(t *
 	m.workingDir = "/tmp/project"
 	m.confirm.request = &ConfirmRequest{ToolName: tools.NameEdit, ArgsJSON: `{"path":"internal/tui/confirm_render.go","patch":"@@\n-old\n+new\n"}`}
 
-	summary := stripANSI(m.renderConfirmDialog())
+	summary := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(summary, "[M] Remember…") {
 		t.Fatalf("expected add-rule option in summary dialog, got:\n%s", summary)
 	}
@@ -542,7 +543,7 @@ func TestRenderConfirmDialogRememberRuleKeyShowsRulePickerAfterCachedSummary(t *
 		t.Fatal("expected add-rule key to enter rule picker mode")
 	}
 
-	picker := stripANSI(m.renderConfirmDialog())
+	picker := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(picker, "⚠ Remember rule — edit") {
 		t.Fatalf("expected rule picker title after pressing A, got:\n%s", picker)
 	}
@@ -653,7 +654,7 @@ func TestRenderConfirmDenyReasonModeShowsHint(t *testing.T) {
 	m.confirm.denyingWithReason = true
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(strings.ToLower(plain), "deny with reason") {
 		t.Fatalf("expected 'deny with reason' header in deny-reason dialog, got:\n%s", plain)
 	}
@@ -672,7 +673,7 @@ func TestRenderConfirmDenyReasonInputHasNoPrompt(t *testing.T) {
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 	m.confirm.denyReasonInput.SetValue("first line\nsecond line")
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if strings.Contains(plain, "> first line") {
 		t.Fatalf("deny-reason input should not render a primary prompt, got:\n%s", plain)
 	}
@@ -702,7 +703,7 @@ func TestRenderConfirmDenyReasonInputAfterResizeUsesDialogContentWidth(t *testin
 
 	m.applyTerminalSize(80, 30, false)
 
-	want := confirmDialogWidth(m.width) - DirectoryBorderStyle.GetHorizontalPadding() - DirectoryBorderStyle.GetHorizontalBorderSize()
+	want := confirmDialogWidth(m.width) - currentStyles.DirectoryBorderStyle.GetHorizontalPadding() - currentStyles.DirectoryBorderStyle.GetHorizontalBorderSize()
 	if got := m.confirm.denyReasonInput.Width(); got != want {
 		t.Fatalf("deny-reason input width = %d, want dialog content width %d", got, want)
 	}
@@ -715,7 +716,7 @@ func TestNewConfirmTextareaUsesDialogContentWidth(t *testing.T) {
 	m.confirm.denyReasonInput = newConfirmTextarea(m.width, m.height, "")
 	m.confirm.denyReasonInput.SetValue("The summary is missing the migration risk and the follow-up owner, so this should be revised before it is sent.")
 
-	want := confirmDialogWidth(m.width) - DirectoryBorderStyle.GetHorizontalPadding() - DirectoryBorderStyle.GetHorizontalBorderSize()
+	want := confirmDialogWidth(m.width) - currentStyles.DirectoryBorderStyle.GetHorizontalPadding() - currentStyles.DirectoryBorderStyle.GetHorizontalBorderSize()
 	if got := m.confirm.denyReasonInput.Width(); got != want {
 		t.Fatalf("deny-reason input width = %d, want dialog content width %d", got, want)
 	}
@@ -772,7 +773,7 @@ func TestRenderConfirmDialogForDoneOnlyShowsAllowAndDenyReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/R] Deny+Reason") {
 		t.Fatalf("Done confirm options missing expected actions:\n%s", plain)
 	}
@@ -785,7 +786,7 @@ func TestRenderConfirmDialogForceDenyOnlyShowsDenyReason(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirm.request = &ConfirmRequest{ToolName: "done", ArgsJSON: `{}`, ForceDenyReason: true}
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[Esc/R] Deny+Reason") {
 		t.Fatalf("forced deny confirm options missing required deny action:\n%s", plain)
 	}

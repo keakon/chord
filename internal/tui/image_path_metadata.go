@@ -9,6 +9,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/imagecache"
 )
 
 const imagePathMetadataMaxEntries = 256
@@ -24,18 +26,18 @@ type imagePathMetadata struct {
 }
 
 type imagePathMetadataUpdate struct {
-	ref      imagePartKeyRef
+	ref      imagecache.Identity
 	metadata imagePathMetadata
 }
 
 var imagePathMetadataCache = struct {
 	sync.Mutex
-	entries map[imagePartKeyRef]*list.Element
+	entries map[imagecache.Identity]*list.Element
 	order   list.List
-}{entries: make(map[imagePartKeyRef]*list.Element)}
+}{entries: make(map[imagecache.Identity]*list.Element)}
 
 func imagePathMetadataSnapshot(part BlockImagePart) (imagePathMetadata, bool) {
-	ref := imagePartKeyRefFor(part)
+	ref := imagecache.IdentityOf(imageSource(part))
 	imagePathMetadataCache.Lock()
 	defer imagePathMetadataCache.Unlock()
 	if e := imagePathMetadataCache.entries[ref]; e != nil {
@@ -63,13 +65,13 @@ func publishImagePathMetadata(update imagePathMetadataUpdate) {
 
 func loadImagePathMetadata(part BlockImagePart) imagePathMetadata {
 	metadata := imagePathMetadata{checkedAt: time.Now()}
-	metadata.key, metadata.err = imageRuntimeCacheKey(part)
+	metadata.key, metadata.err = imagecache.FreshKey(imageSource(part))
 	if metadata.err == nil {
 		part.cacheKey = metadata.key
-		var entry *imageRuntimeCacheEntry
-		entry, metadata.err = imageRuntimeEntryForPart(part)
+		var entry *imagecache.Entry
+		entry, metadata.err = imageCache.Lookup(imageSource(part), false)
 		if metadata.err == nil {
-			metadata.config, _, metadata.err = entry.decodeConfig(part)
+			metadata.config, _, metadata.err = entry.Config(imageSource(part))
 		}
 	}
 	return metadata
@@ -88,7 +90,7 @@ func imagePathMetadataChanged(old imagePathMetadata, present bool, next imagePat
 // imageInlineCacheKey never inspects a path on the render or update loop.
 func imageInlineCacheKey(part BlockImagePart) (string, error) {
 	if len(part.Data) > 0 {
-		return imageRuntimeCacheKeyCached(part)
+		return imagecache.Key(imageSource(part))
 	}
 	if strings.TrimSpace(part.ImagePath) == "" {
 		return "", fmt.Errorf("image data unavailable")

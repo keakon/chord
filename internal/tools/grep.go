@@ -20,6 +20,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/bmatcuk/doublestar/v4"
+
+	"github.com/keakon/chord/internal/filefilter"
+	"github.com/keakon/chord/internal/textfile"
+	"github.com/keakon/chord/internal/texttruncate"
 )
 
 // GrepTool searches file contents using a regex pattern.
@@ -567,7 +571,7 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 		if err := ensureRegularFilePath(searchPath, info); err != nil {
 			return grepRootResult{}, err
 		}
-		if IsBinaryExtension(filepath.Base(resolvedSearchPath)) {
+		if filefilter.IsBinaryExtension(filepath.Base(resolvedSearchPath)) {
 			return grepRootResult{scanned: 1}, nil
 		}
 		scan := scanGrepFile(ctx, resolvedSearchPath, baseDir, re, maxMatches, maxBytes, contextLines)
@@ -612,7 +616,7 @@ func grepSearchRoot(ctx context.Context, searchPath, resolvedSearchPath string, 
 			if err != nil || !info.Mode().IsRegular() {
 				continue
 			}
-			if IsBinaryExtension(filepath.Base(file)) {
+			if filefilter.IsBinaryExtension(filepath.Base(file)) {
 				continue
 			}
 			scan := scanGrepFile(ctx, file, baseDir, re, remainingMatches, remainingBytes, contextLines)
@@ -699,7 +703,7 @@ func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re 
 	results := make(chan grepScanResult, workers*2)
 	dispatchSlots := make(chan struct{}, grepScanWindow(workers))
 
-	ignore := newGitIgnoreMatcher(resolvedSearchPath)
+	ignore := filefilter.NewGitIgnoreMatcher(resolvedSearchPath)
 	guard := newBroadSearchGuard("Grep", resolvedSearchPath, "includes", includes)
 
 	walkErrCh := make(chan error, 1)
@@ -714,7 +718,7 @@ func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re 
 			if guard.shouldAbort() {
 				return errGuardAbort
 			}
-			if d.IsDir() && skipDirNames[d.Name()] {
+			if d.IsDir() && filefilter.IsSkippedDirName(d.Name()) {
 				return filepath.SkipDir
 			}
 			if skipDir != "" && d.IsDir() && path == skipDir {
@@ -741,7 +745,7 @@ func grepWalkRootWithScanner(ctx context.Context, resolvedSearchPath string, re 
 					}
 				}
 			}
-			if !d.Type().IsRegular() || IsBinaryExtension(d.Name()) {
+			if !d.Type().IsRegular() || filefilter.IsBinaryExtension(d.Name()) {
 				return nil
 			}
 			guard.candidate()
@@ -930,7 +934,7 @@ type grepScanBuffers struct {
 var grepScanBufPool = sync.Pool{
 	New: func() any {
 		return &grepScanBuffers{
-			head: make([]byte, binarySampleBytes),
+			head: make([]byte, textfile.BinarySampleBytes),
 			scan: make([]byte, 0, 64*1024),
 		}
 	},
@@ -1193,7 +1197,7 @@ func scanGrepFile(ctx context.Context, path, baseDir string, re *regexp.Regexp, 
 	// ratio of control bytes, known binary content-types). Matches ripgrep's
 	// default behavior of skipping binary files.
 	n, _ := io.ReadFull(f, bufs.head)
-	if looksBinary(bufs.head[:n]) {
+	if textfile.LooksBinary(bufs.head[:n]) {
 		return grepFileScan{}
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
@@ -1409,7 +1413,7 @@ func appendBudgetedGrepMatches(dst []string, scan grepFileScan, remainingMatches
 			if available <= 0 {
 				return dst, result(true)
 			}
-			formatted := prefix + truncateStringToValidUTF8Prefix(m.text, available) + "..."
+			formatted := prefix + texttruncate.PrefixBytes(m.text, available) + "..."
 			if len(formatted) > remainingBytes {
 				return dst, result(true)
 			}

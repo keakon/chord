@@ -1,10 +1,5 @@
 package tui
 
-import (
-	"github.com/keakon/chord/internal/filedelivery"
-	"github.com/keakon/chord/internal/message"
-)
-
 // Invalidate both active and queued work before changing the viewed identity.
 func (m *Model) invalidateFilePreview() {
 	v := &m.fileViewer
@@ -31,16 +26,4 @@ func (m *Model) selectFileViewerFile(index int) {
 	m.invalidateFilePreview()
 	v.selected = index
 	v.apps = nil
-}
-func fileVersionNote(declared, current message.DeliveredFile) string {
-	switch filedelivery.CompareVersion(declared, current) {
-	case filedelivery.VersionContentChanged:
-		return "File changed since delivery"
-	case filedelivery.VersionMetadataChanged:
-		return "File metadata changed since delivery · content version not verified"
-	case filedelivery.VersionUnverified:
-		return "Content version not verified"
-	default:
-		return ""
-	}
 }

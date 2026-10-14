@@ -19,25 +19,6 @@ func TestLocalFileLinksRequireExplicitASTAndBoundBase(t *testing.T) {
 		t.Fatalf("old relative link inferred cwd: %#v", old)
 	}
 }
-func TestFileViewerCacheBudgetAndKeys(t *testing.T) {
-	c := &fileViewerCache{}
-	for i := 0; i < 20; i++ {
-		key := string(rune('a' + i))
-		c.put(key, fileViewerLoadedMsg{raw: make([]byte, 1<<20)})
-	}
-	if c.bytes > fileViewerCacheBytes || len(c.entries) >= 20 {
-		t.Fatal("cache budget not enforced")
-	}
-	if _, ok := c.get("a"); ok {
-		t.Fatal("oldest item not evicted")
-	}
-}
-func TestFileViewerRemovesGeneratedHyperlinks(t *testing.T) {
-	got := stripFileHyperlinks("a\x1b]8;;file:///execute\x1b\\label\x1b]8;;\x1b\\b")
-	if got != "alabelb" {
-		t.Fatalf("OSC hyperlink retained: %q", got)
-	}
-}
 
 func TestDeliveryCardNarrowActionsKeepStableFileIdentity(t *testing.T) {
 	block := &Block{DeliveredFiles: []message.DeliveredFile{{ID: "stable-file", DisplayName: "summary.pdf", MIME: "application/pdf", Locator: message.FileLocator{Kind: message.FileLocatorWorkspace, Workspace: &message.WorkspaceFileLocator{Root: "/project", Path: "/project/summary.pdf"}}}}}

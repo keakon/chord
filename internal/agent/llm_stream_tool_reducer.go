@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -78,7 +79,7 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 		// sanitized to match recordStreamingToolCall's hygiene for the
 		// recorded present.
 		if seed := delta.ToolCall.Input; seed != "" {
-			r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, name, tools.StripZeroWidthFormat(seed), r.agentID)
+			r.turn.appendStreamingToolCallInput(delta.ToolCall.ID, name, textclean.StripZeroWidthFormat(seed), r.agentID)
 		}
 		r.reportEarlierStreamingToolArgs(delta.ToolCall.ID)
 	}

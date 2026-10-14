@@ -3,11 +3,11 @@ package tui
 import (
 	"strings"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	"github.com/keakon/lipgloss/v2"
 
-	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/textdiff"
+	"github.com/keakon/chord/internal/tui/syntax"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func diffTextWidthAtCol(s string, startCol int) int {
@@ -15,10 +15,10 @@ func diffTextWidthAtCol(s string, startCol int) int {
 	for s != "" {
 		tab := strings.IndexByte(s, '\t')
 		if tab < 0 {
-			col += tuiStringWidth(s)
+			col += terminaltext.Width(s)
 			break
 		}
-		col += tuiStringWidth(s[:tab])
+		col += terminaltext.Width(s[:tab])
 		col += selectionRuneWidthAtCol('\t', col)
 		s = s[tab+1:]
 	}
@@ -29,7 +29,7 @@ func diffTextWidth(s string) int {
 	return diffTextWidthAtCol(s, 0)
 }
 
-func buildDiffSegmentSpans(segs []tools.InlineSegment) []diffSegmentSpan {
+func buildDiffSegmentSpans(segs []textdiff.Segment) []diffSegmentSpan {
 	spans := make([]diffSegmentSpan, 0, len(segs))
 	col := 0
 	bytePos := 0
@@ -143,7 +143,7 @@ func hasMultiRunWordTokenChange(line string, changeSpans []diffSegmentSpan) bool
 
 // Inline helpers leave unchanged segments background-free; the enclosing tool
 // card restores ToolCallBg, while changeStyle supplies the semantic diff bg.
-func buildInlineContentANSI(segs []tools.InlineSegment, changeKind string, changeStyle lipgloss.Style, hl *syntax.Highlighter) string {
+func buildInlineContentANSI(segs []textdiff.Segment, changeKind string, changeStyle lipgloss.Style, hl *syntax.Highlighter) string {
 	var buf strings.Builder
 	for _, seg := range segs {
 		if seg.Kind == changeKind {
@@ -171,7 +171,7 @@ func buildOneSidedInlineContentANSI(line string, span diffOneSidedSpan, changeSt
 }
 
 func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *syntax.Highlighter) []string {
-	oldSegs, newSegs := tools.InlineDiff(oldLine, newLine)
+	oldSegs, newSegs := textdiff.Inline(oldLine, newLine)
 	oldSpans := buildDiffSegmentSpans(oldSegs)
 	newSpans := buildDiffSegmentSpans(newSegs)
 	deleteSpans := filterDiffSpansByKind(oldSpans, "delete")
@@ -186,7 +186,7 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *syntax.Hig
 	}
 	if len(insertSpans) > 0 && len(deleteSpans) == 0 {
 		if span, ok := oneSidedSpanFromLines(oldLine, newLine); ok {
-			content := buildOneSidedInlineContentANSI(newLine, span, DiffAddInlineStyle, hl)
+			content := buildOneSidedInlineContentANSI(newLine, span, currentStyles.DiffAddInlineStyle, hl)
 			if span.LineWidth+1 <= diffWidth {
 				return []string{"+" + content}
 			}
@@ -199,7 +199,7 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *syntax.Hig
 		if hasMultiRunWordTokenChange(newLine, insertSpans) {
 			return nil
 		}
-		content := buildInlineContentANSI(newSegs, "insert", DiffAddInlineStyle, hl)
+		content := buildInlineContentANSI(newSegs, "insert", currentStyles.DiffAddInlineStyle, hl)
 		if selectionStyledTextWidth(content)+1 <= diffWidth {
 			return []string{"+" + content}
 		}
@@ -211,7 +211,7 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *syntax.Hig
 	}
 	if len(deleteSpans) > 0 && len(insertSpans) == 0 {
 		if span, ok := oneSidedSpanFromLines(oldLine, newLine); ok {
-			content := buildOneSidedInlineContentANSI(oldLine, span, DiffDelInlineStyle, hl)
+			content := buildOneSidedInlineContentANSI(oldLine, span, currentStyles.DiffDelInlineStyle, hl)
 			if span.LineWidth+1 <= diffWidth {
 				return []string{"-" + content}
 			}
@@ -224,7 +224,7 @@ func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *syntax.Hig
 		if hasMultiRunWordTokenChange(oldLine, deleteSpans) {
 			return nil
 		}
-		content := buildInlineContentANSI(oldSegs, "delete", DiffDelInlineStyle, hl)
+		content := buildInlineContentANSI(oldSegs, "delete", currentStyles.DiffDelInlineStyle, hl)
 		if selectionStyledTextWidth(content)+1 <= diffWidth {
 			return []string{"-" + content}
 		}

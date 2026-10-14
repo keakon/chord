@@ -18,11 +18,11 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/texttruncate"
-
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/httpheader"
+	"github.com/keakon/chord/internal/llm/mediacache"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/texttruncate"
 )
 
 // GeminiProvider implements streaming completion against the Google Gemini API.
@@ -607,13 +607,13 @@ func geminiToolFunctionResponse(name string, msg message.Message) *geminiFunctio
 			if !ok {
 				continue
 			}
-			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: mime, DisplayName: p.FileName, Data: encodeBase64Cached(data)}})
+			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: mime, DisplayName: p.FileName, Data: mediacache.EncodeBase64(data)}})
 		case "pdf":
 			data, mime, ok := binaryPartForWire(p)
 			if !ok {
 				continue
 			}
-			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(mime), DisplayName: p.FileName, Data: encodeBase64Cached(data)}})
+			resp.Parts = append(resp.Parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(mime), DisplayName: p.FileName, Data: mediacache.EncodeBase64(data)}})
 		}
 	}
 	return resp
@@ -631,13 +631,13 @@ func geminiUserParts(msg message.Message) []geminiPart {
 			if !ok {
 				continue
 			}
-			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: mime, Data: encodeBase64Cached(data)}})
+			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: mime, Data: mediacache.EncodeBase64(data)}})
 		case "pdf":
 			data, mime, ok := binaryPartForWire(p)
 			if !ok {
 				continue
 			}
-			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(mime), Data: encodeBase64Cached(data)}})
+			parts = append(parts, geminiPart{InlineData: &geminiInlineData{MimeType: defaultPDFMediaType(mime), Data: mediacache.EncodeBase64(data)}})
 		default:
 			// Fold adjacent pure-text parts into a single text part so a
 			// text-only message takes one part. Insert a newline only when

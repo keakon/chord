@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestToolCardKeepsModelArgumentsWhenEffectiveArgumentsDiffer(t *testing.T) {
@@ -76,7 +77,7 @@ func TestToolResultMarksIgnoredArgumentInToolCard(t *testing.T) {
 		t.Fatalf("block.Content = %q, want only effective arguments", block.Content)
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	if plain := stripANSI(rendered); !strings.Contains(plain, "format=json") {
+	if plain := terminaltext.StripANSI(rendered); !strings.Contains(plain, "format=json") {
 		t.Fatalf("ignored argument missing from card:\n%s", plain)
 	}
 	if !strings.Contains(rendered, ";9m") {
@@ -113,7 +114,7 @@ func TestToolCallUpdateEventArgsStreamingDoneMarksQueuedBeforeExecution(t *testi
 	if block.ToolQueuedByExecutionEvent {
 		t.Fatalf("expected speculative queued state (not execution queued)")
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "▖"), "\n"))
 	if !strings.Contains(joined, "⧗ todo_write") {
 		t.Fatalf("expected speculative queued TodoWrite to render a static pending indicator; got:\n%s", joined)
 	}
@@ -215,7 +216,7 @@ func TestAnyToolShowsReceivedCharCountFromStreamingArgs(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tool block")
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "30 chars received") {
 		t.Fatalf("expected generic arg char count progress; got:\n%s", joined)
 	}
@@ -233,7 +234,7 @@ func TestWriteStreamingCardShowsPathBeforeContentCompletes(t *testing.T) {
 	if !ok {
 		t.Fatal("expected write tool block")
 	}
-	partialPlain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	partialPlain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if !strings.Contains(partialPlain, "write src/demo.go") {
 		t.Fatalf("expected partial Write card to show path, got:\n%s", partialPlain)
 	}
@@ -248,7 +249,7 @@ func TestWriteStreamingCardShowsPathBeforeContentCompletes(t *testing.T) {
 		ID: "call-write-streaming-path-1", Name: tools.NameWrite, AgentID: "", ArgsJSON: complete, ArgsStreamingDone: true,
 	}})
 	block.Collapsed = false
-	completePlain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	completePlain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if !strings.Contains(completePlain, "package main") {
 		t.Fatalf("expected completed Write card to show content preview, got:\n%s", completePlain)
 	}
@@ -334,7 +335,7 @@ func TestFileMutationDisplaySurvivesExecutionAndResultEvents(t *testing.T) {
 					t.Fatalf("Content = %q, do not want it to contain %q", block.Content, notWant)
 				}
 			}
-			plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 			if !strings.Contains(plain, tt.wantRendered) {
 				t.Fatalf("expected completed %s display to survive execution and result events, got:\n%s", tt.toolName, plain)
 			}
@@ -451,7 +452,7 @@ func TestToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T) {
 	if block.ToolProgress != nil {
 		t.Fatalf("expected temp char count cleared on tool arg completion, got %+v", *block.ToolProgress)
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "chars received") {
 		t.Fatalf("expected tool to hide temp char count when arg streaming completes; got:\n%s", joined)
 	}
@@ -487,7 +488,7 @@ func TestDoneToolArgStreamingDoneClearsReceivedCharCountImmediately(t *testing.T
 	if block.ToolProgress != nil {
 		t.Fatalf("expected Done temp char count cleared on arg completion, got %+v", *block.ToolProgress)
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "chars received") {
 		t.Fatalf("expected Done to hide temp char count when arg streaming completes; got:\n%s", joined)
 	}
@@ -522,7 +523,7 @@ func TestProseControlToolsShowAndClearReceivedCharCount(t *testing.T) {
 			if block.ToolProgress != nil {
 				t.Fatalf("expected char count cleared after arg streaming, got %+v", block.ToolProgress)
 			}
-			if joined := stripANSI(strings.Join(block.Render(96, "●"), "\n")); strings.Contains(joined, "chars received") {
+			if joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n")); strings.Contains(joined, "chars received") {
 				t.Fatalf("expected completed args to hide char count, got:\n%s", joined)
 			}
 		})
@@ -543,7 +544,7 @@ func TestToolDoesNotShowCharCountWhenNoArgsReceived(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tool block")
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "chars received") {
 		t.Fatalf("did not expect char count when no args have been received; got:\n%s", joined)
 	}
@@ -573,7 +574,7 @@ func TestWriteToolHidesReceivedCharCountWhenExecutionStarts(t *testing.T) {
 	if block.ToolProgress != nil {
 		t.Fatalf("expected write temp char count to be cleared, got %+v", *block.ToolProgress)
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "chars received") {
 		t.Fatalf("expected write tool to hide temp char count after execution starts; got:\n%s", joined)
 	}
@@ -611,7 +612,7 @@ func TestToolUpdateAfterExecutionStartsDoesNotRestoreReceivedCharCount(t *testin
 	if block.ToolProgress != nil {
 		t.Fatalf("expected post-running arg update not to restore temp char count, got %+v", *block.ToolProgress)
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "chars received") {
 		t.Fatalf("expected post-running arg update to keep temp char count hidden; got:\n%s", joined)
 	}
@@ -644,7 +645,7 @@ func TestEditToolHidesReceivedCharCountWhenExecutionStarts(t *testing.T) {
 	if block.ToolProgress != nil {
 		t.Fatalf("expected Edit temp char count to be cleared, got %+v", *block.ToolProgress)
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "chars received") {
 		t.Fatalf("expected Edit tool to hide temp char count after execution starts; got:\n%s", joined)
 	}

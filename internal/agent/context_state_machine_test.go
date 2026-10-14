@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -48,10 +49,10 @@ func assertRequestSurfaceInvariants(t *testing.T, prepared []message.Message, se
 	}
 	for i := range prepared {
 		content := prepared[i].Content
-		for _, ref := range tools.ExtractArtifactReferences(content) {
+		for _, ref := range tooloutput.ExtractArtifactReferences(content) {
 			assertArtifactAddressResolves(t, sessionDir, ref, content)
 		}
-		if address := requesttrim.RetentionDecision(requesttrim.Context{}, requesttrim.Verdict{Class: requesttrim.ReadLike}, "", content).ArtifactRef; address != "" && !strings.HasPrefix(address, tools.ArtifactReferencePrefix) {
+		if address := requesttrim.RetentionDecision(requesttrim.Context{}, requesttrim.Verdict{Class: requesttrim.ReadLike}, "", content).ArtifactRef; address != "" && !strings.HasPrefix(address, tooloutput.ArtifactReferencePrefix) {
 			if _, err := os.Stat(address); err != nil {
 				t.Fatalf("archived output address does not resolve: %v", err)
 			}
@@ -167,7 +168,7 @@ func TestStateMachineReadExternalMutationArchivesPriorContent(t *testing.T) {
 		t.Fatal("a read invalidated by a mutating shell command must not stay presented as current content")
 	}
 	decisionRef := ""
-	if refs := tools.ExtractArtifactReferences(prepared[2].Content); len(refs) > 0 {
+	if refs := tooloutput.ExtractArtifactReferences(prepared[2].Content); len(refs) > 0 {
 		decisionRef = refs[0]
 	}
 	if decisionRef == "" {
@@ -176,7 +177,7 @@ func TestStateMachineReadExternalMutationArchivesPriorContent(t *testing.T) {
 	assertArtifactAddressResolves(t, sessionDir, decisionRef, prepared[2].Content)
 
 	// The archived bytes must be the read output itself, not the summary.
-	path := strings.TrimSuffix(strings.TrimPrefix(decisionRef, tools.ArtifactReferencePrefix), ".")
+	path := strings.TrimSuffix(strings.TrimPrefix(decisionRef, tooloutput.ArtifactReferencePrefix), ".")
 	if idx := strings.Index(path, ". "); idx > 0 {
 		path = path[:idx]
 	}
@@ -193,7 +194,7 @@ func TestStateMachineReadExternalMutationArchivesPriorContent(t *testing.T) {
 	// exists on the request that created it is not a recovery route.
 	msgs = append(msgs, message.Message{Role: message.RoleUser, Content: "and now?"})
 	prepared = a.prepareMessagesForLLM(msgs)
-	if len(tools.ExtractArtifactReferences(prepared[2].Content)) == 0 {
+	if len(tooloutput.ExtractArtifactReferences(prepared[2].Content)) == 0 {
 		t.Fatalf("recovery address was dropped on a later request: %q", requesttrim.TextSnippet(prepared[2].Content, 200))
 	}
 	assertRequestSurfaceInvariants(t, prepared, sessionDir)

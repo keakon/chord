@@ -44,8 +44,8 @@ func (b *Block) renderImageToolCard(width int, spinnerFrame string) []string {
 	}
 	switch {
 	case b.RecoveryState == message.ToolRecoveryStateOutcomeUnknown:
-		body = append(body, toolFieldSection(LSPWarnStyle, "Result unknown"))
-		appendStyledWrappedBody(&body, LSPWarnStyle, "    ", content, metrics.contentWidth)
+		body = append(body, toolFieldSection(currentStyles.LSPWarnStyle, "Result unknown"))
+		appendStyledWrappedBody(&body, currentStyles.LSPWarnStyle, "    ", content, metrics.contentWidth)
 	case b.IsError || b.toolResultIsError():
 		appendToolOutcomeBody(&body, toolOutcomeError, content, metrics.contentWidth, true)
 	case b.toolResultIsCancelled():
@@ -56,17 +56,17 @@ func (b *Block) renderImageToolCard(width int, spinnerFrame string) []string {
 			if json.Unmarshal([]byte(content), &summary) == nil {
 				for _, warning := range summary.Warnings {
 					if strings.TrimSpace(warning) != "" {
-						body = append(body, toolFieldSection(LSPWarnStyle, "Warning"))
-						appendStyledWrappedBody(&body, LSPWarnStyle, "    ", warning, metrics.contentWidth)
+						body = append(body, toolFieldSection(currentStyles.LSPWarnStyle, "Warning"))
+						appendStyledWrappedBody(&body, currentStyles.LSPWarnStyle, "    ", warning, metrics.contentWidth)
 					}
 				}
 			}
 		} else if note := viewImageScalingNote(content); note != "" {
-			appendStyledWrappedBody(&body, DimStyle, "    ", note, metrics.contentWidth)
+			appendStyledWrappedBody(&body, currentStyles.DimStyle, "    ", note, metrics.contentWidth)
 		}
 	}
 	if !b.appendImagePreviewLines(&body, metrics.contentWidth, metrics.toolCardBg, metrics.blockStyle.GetPaddingTop(), true) && b.ResultDone && !b.IsError && !b.toolResultIsError() && !b.toolResultIsCancelled() && b.RecoveryState != message.ToolRecoveryStateOutcomeUnknown {
-		body = append(body, toolFieldStandalone(DimStyle, "Image preview unavailable"))
+		body = append(body, toolFieldStandalone(currentStyles.DimStyle, "Image preview unavailable"))
 	}
 	body = appendToolElapsedToHeader(body, b, metrics.cardWidth)
 	title := "TOOL CALL"

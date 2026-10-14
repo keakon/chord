@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+
+	"github.com/keakon/chord/internal/shellanalysis"
 )
 
 type NonInteractiveRuntimeFinding struct {
@@ -61,7 +63,7 @@ func ClassifyNonInteractiveRuntimeFailure(command string, err error, output stri
 		}
 	}
 
-	if strings.Contains(text, "sudo") && strings.Contains(text, "password") && strings.Contains(text, "required") && !commandHasSudoNonInteractive(command) {
+	if strings.Contains(text, "sudo") && strings.Contains(text, "password") && strings.Contains(text, "required") && !shellanalysis.HasNonInteractiveSudo(command) {
 		return &NonInteractiveRuntimeFinding{Reason: "sudo could not prompt for a password"}
 	}
 	return nil
@@ -96,18 +98,4 @@ func runtimeFailureReason(pattern string) string {
 	default:
 		return "the command attempted terminal interaction"
 	}
-}
-
-func commandHasSudoNonInteractive(command string) bool {
-	tokens := shellTokens(command)
-	commands := splitShellCommandTokens(tokens)
-	for _, cmd := range commands {
-		if len(cmd) == 0 || commandBase(cmd[0]) != "sudo" {
-			continue
-		}
-		if hasOption(cmd[1:], "-n", "") || hasOption(cmd[1:], "", "--non-interactive") {
-			return true
-		}
-	}
-	return false
 }

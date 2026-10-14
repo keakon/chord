@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -18,7 +19,7 @@ func TestApplyCompactionRecoveryStateReplacesSummaryRequest(t *testing.T) {
 	if strings.Contains(got, "stale guess") {
 		t.Fatalf("the summary body must be replaced by the runtime anchor:\n%s", got)
 	}
-	if n := strings.Count(got, checkpointCurrentUserRequestHeading); n != 1 {
+	if n := strings.Count(got, checkpointfmt.CurrentUserRequestHeading); n != 1 {
 		t.Fatalf("heading count = %d, want 1:\n%s", n, got)
 	}
 	if !strings.Contains(got, "- Latest user request: finish the parser") {
@@ -33,7 +34,7 @@ func TestApplyCompactionRecoveryStateInsertsMissingRequestSection(t *testing.T) 
 	got := applyCompactionRecoveryState("## Next Step\n- run the tests", compactionRecoveryState{
 		anchor: fallbackAnchor{Kind: "user_request", Label: "Latest user request", Text: "finish the parser"},
 	})
-	if !strings.HasPrefix(got, checkpointCurrentUserRequestHeading+"\n") {
+	if !strings.HasPrefix(got, checkpointfmt.CurrentUserRequestHeading+"\n") {
 		t.Fatalf("a summary without the section must get it first:\n%s", got)
 	}
 	if !strings.Contains(got, "## Next Step\n- run the tests") {
@@ -132,7 +133,7 @@ func TestStructuredFallbackSummaryCarriesRuntimeRecoveryState(t *testing.T) {
 	if !strings.Contains(got, "- Latest Done rejected reason: redo it") {
 		t.Fatalf("the fallback body must be replaced by the runtime anchor:\n%s", got)
 	}
-	if n := strings.Count(got, checkpointCurrentUserRequestHeading); n != 1 {
+	if n := strings.Count(got, checkpointfmt.CurrentUserRequestHeading); n != 1 {
 		t.Fatalf("heading count = %d, want 1:\n%s", n, got)
 	}
 	if !strings.Contains(got, runtimeRecoveryStateHeading) || !strings.Contains(got, "Bash (call-9)") {
@@ -154,7 +155,7 @@ func TestModelDrivenCheckpointCarriesRuntimeRecoveryState(t *testing.T) {
 	if !strings.Contains(summary, "- Latest user request: next request") {
 		t.Fatalf("checkpoint missing the runtime-resolved request:\n%s", summary)
 	}
-	if n := strings.Count(summary, checkpointCurrentUserRequestHeading); n != 1 {
+	if n := strings.Count(summary, checkpointfmt.CurrentUserRequestHeading); n != 1 {
 		t.Fatalf("heading count = %d, want 1:\n%s", n, summary)
 	}
 	if !strings.Contains(summary, runtimeRecoveryStateHeading) || !strings.Contains(summary, "Bash (call-unsettled)") {

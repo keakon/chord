@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/filecompletion"
 )
 
 type inputSupportProvider interface {
@@ -31,18 +32,6 @@ func attachmentKindForMimeType(mimeType string) message.ContentPartType {
 	}
 	if mimeType == "application/pdf" {
 		return message.ContentPartPDF
-	}
-	return ""
-}
-
-func attachmentKindForPath(path string) message.ContentPartType {
-	ext := strings.ToLower(filepath.Ext(path))
-	if ext == ".pdf" {
-		return message.ContentPartPDF
-	}
-	mimeType := mime.TypeByExtension(ext)
-	if strings.HasPrefix(mimeType, "image/") {
-		return message.ContentPartImage
 	}
 	return ""
 }
@@ -73,7 +62,7 @@ func (m *Model) unsupportedAttachmentWarning(a Attachment) string {
 }
 
 func (m Model) atMentionAttachmentPreviews() []Attachment {
-	refs := dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{m.input.Value()}, m.workingDir), m.workingDir)
+	refs := filecompletion.DedupeRefs(filecompletion.ParseRefs([]string{m.input.Value()}, m.workingDir), m.workingDir)
 	if len(refs) == 0 {
 		return nil
 	}
@@ -89,7 +78,7 @@ func (m Model) atMentionAttachmentPreviews() []Attachment {
 			continue
 		}
 		resolved := m.resolveFileRefPath(ref.Path)
-		if attachmentKindForPath(resolved) == "" {
+		if filecompletion.AttachmentKindForPath(resolved) == "" {
 			continue
 		}
 		clean := filepath.Clean(resolved)
@@ -101,7 +90,7 @@ func (m Model) atMentionAttachmentPreviews() []Attachment {
 			continue
 		}
 		mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(clean)))
-		if attachmentKindForPath(clean) == message.ContentPartPDF {
+		if filecompletion.AttachmentKindForPath(clean) == message.ContentPartPDF {
 			mimeType = "application/pdf"
 		}
 		previews = append(previews, (&m).markAttachmentSupport(Attachment{

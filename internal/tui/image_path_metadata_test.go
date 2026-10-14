@@ -13,6 +13,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/imagecache"
 )
 
 func fileInlineImageTestModel(t *testing.T, backend ImageBackend) (Model, string) {
@@ -52,55 +54,41 @@ func runInlineImageCommands(t *testing.T, m *Model, cmd tea.Cmd) []int {
 func TestPathImageForegroundUsesOnlyAcceptedMetadata(t *testing.T) {
 	for _, backend := range []ImageBackend{ImageBackendKitty, ImageBackendITerm2} {
 		t.Run(backend.String(), func(t *testing.T) {
-			m, _ := fileInlineImageTestModel(t, backend)
+			m, path := fileInlineImageTestModel(t, backend)
 			defer m.Close()
-			stat, open := imageCacheStat, imageCacheOpen
-			foreground := true
-			calls := 0
-			imageCacheStat = func(path string) (os.FileInfo, error) {
-				if foreground {
-					t.Error("file stat ran on foreground")
-				}
-				calls++
-				return stat(path)
-			}
-			imageCacheOpen = func(path string) (*os.File, error) {
-				if foreground {
-					t.Error("file header read ran on foreground")
-				}
-				return open(path)
-			}
-			defer func() { imageCacheStat, imageCacheOpen = stat, open }()
+			part := m.viewport.blocks[0].ImageParts[0]
+			// Cold rendering must leave source inspection to the returned command.
 			_ = m.View()
 			cmd := m.imageProtocolCmd()
-			if cmd == nil || calls != 0 {
-				t.Fatal("cold layout inspected file or skipped preparation")
+			if _, present := imagePathMetadataSnapshot(part); present || cmd == nil {
+				t.Fatal("cold layout published metadata or skipped preparation")
 			}
-			for steps := 0; cmd != nil; steps++ {
-				if steps > 8 {
-					t.Fatal("image never settled")
-				}
-				foreground = false
-				msg := cmd()
-				foreground = true
-				switch result := msg.(type) {
-				case inlineImagesLoadedMsg:
-					cmd = m.handleInlineImagesLoaded(result)
-				case tea.RawMsg:
-					cmd = nil
-				default:
-					t.Fatalf("unexpected command: %T", result)
-				}
+			runInlineImageCommands(t, &m, cmd)
+			accepted, present := imagePathMetadataSnapshot(part)
+			if !present || accepted.err != nil {
+				t.Fatal("background did not publish dimensions")
 			}
-			before := calls
+			beforeKey, err := imageInlineCacheKey(part)
+			if err != nil {
+				t.Fatal(err)
+			}
+			beforeCols, beforeRows, err := imageRenderSize(part, 40, m.imageCaps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			// A missing source is observable only after background metadata acceptance.
+			// Foreground layout and identity still use the accepted version.
 			_ = m.View()
 			_, _ = m.inlineImageRequests()
 			_ = m.visibleKittyImageIDs()
-			if calls != before {
-				t.Fatal("warm layout inspected file")
-			}
-			if calls == 0 {
-				t.Fatal("background never checked file")
+			key, err := imageInlineCacheKey(part)
+			cols, rows, sizeErr := imageRenderSize(part, 40, m.imageCaps)
+			after, present := imagePathMetadataSnapshot(part)
+			if err != nil || sizeErr != nil || key != beforeKey || cols != beforeCols || rows != beforeRows || !present || after.key != accepted.key || after.err != nil {
+				t.Fatal("foreground inspected the changed source instead of accepted metadata")
 			}
 		})
 	}
@@ -127,7 +115,7 @@ func TestPathImageReplacementRefreshesDimensionsAndKittyIdentity(t *testing.T) {
 		t.Fatal("missing accepted metadata")
 	}
 	metadata.checkedAt = time.Now().Add(-imagePathMetadataRefreshInterval)
-	publishImagePathMetadata(imagePathMetadataUpdate{ref: imagePartKeyRefFor(part), metadata: metadata})
+	publishImagePathMetadata(imagePathMetadataUpdate{ref: imagecache.IdentityOf(imageSource(part)), metadata: metadata})
 	ids = runInlineImageCommands(t, &m, m.imageProtocolCmd())
 	metadata, _ = imagePathMetadataSnapshot(part)
 	if metadata.config.Width != 10 || metadata.config.Height != 40 || len(ids) != 1 || ids[0] == old {
@@ -166,7 +154,7 @@ func TestPathImageMetadataRejectsStaleOwnerAndRecoversMissingFile(t *testing.T) 
 		t.Fatal(err)
 	}
 	metadata.checkedAt = time.Now().Add(-imagePathMetadataRefreshInterval)
-	publishImagePathMetadata(imagePathMetadataUpdate{ref: imagePartKeyRefFor(part), metadata: metadata})
+	publishImagePathMetadata(imagePathMetadataUpdate{ref: imagecache.IdentityOf(imageSource(part)), metadata: metadata})
 	ids := runInlineImageCommands(t, &m, m.imageProtocolCmd())
 	if len(ids) != 1 {
 		t.Fatalf("file recovery did not transmit: %v", ids)
@@ -177,7 +165,7 @@ func TestPathImageMetadataCacheIsBounded(t *testing.T) {
 	resetImageRuntimeCache()
 	defer resetImageRuntimeCache()
 	for i := range imagePathMetadataMaxEntries + 1 {
-		publishImagePathMetadata(imagePathMetadataUpdate{ref: imagePartKeyRefFor(BlockImagePart{ImagePath: fmt.Sprintf("/sample/%d", i)}), metadata: imagePathMetadata{key: fmt.Sprint(i)}})
+		publishImagePathMetadata(imagePathMetadataUpdate{ref: imagecache.IdentityOf(imageSource(BlockImagePart{ImagePath: fmt.Sprintf("/sample/%d", i)})), metadata: imagePathMetadata{key: fmt.Sprint(i)}})
 	}
 	imagePathMetadataCache.Lock()
 	defer imagePathMetadataCache.Unlock()
@@ -205,6 +193,6 @@ func TestPathImagePaletteMetadataCanBeRefreshed(t *testing.T) {
 	part := m.viewport.blocks[0].ImageParts[0]
 	metadata, _ := imagePathMetadataSnapshot(part)
 	metadata.checkedAt = time.Now().Add(-imagePathMetadataRefreshInterval)
-	publishImagePathMetadata(imagePathMetadataUpdate{ref: imagePartKeyRefFor(part), metadata: metadata})
+	publishImagePathMetadata(imagePathMetadataUpdate{ref: imagecache.IdentityOf(imageSource(part)), metadata: metadata})
 	runInlineImageCommands(t, &m, m.imageProtocolCmd())
 }

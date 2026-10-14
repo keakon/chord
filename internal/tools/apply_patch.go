@@ -14,6 +14,9 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/patchinput"
+	"github.com/keakon/chord/internal/textclean"
+	"github.com/keakon/chord/internal/textdiff"
+	"github.com/keakon/chord/internal/textfile"
 	"github.com/keakon/chord/internal/toolname"
 )
 
@@ -155,7 +158,7 @@ type PlannedMutation struct {
 	// never on the file's untouched bytes (see cleanApplyPatchAddedLines).
 	// The Execute result note sums these per-mutation counts.
 	StrippedInvisible map[rune]int
-	diffInput         unifiedFileDiff
+	diffInput         textdiff.File
 	diffable          bool
 }
 
@@ -176,7 +179,7 @@ type ApplyPatchChange struct {
 // mutation metadata produced by an ApplyPatchTool execution.
 type ApplyPatchDiffCollector struct {
 	mu      sync.Mutex
-	summary DiffSummary
+	summary textdiff.Summary
 	changes []ApplyPatchChange
 }
 
@@ -199,9 +202,9 @@ func (c *ApplyPatchDiffCollector) set(plan MutationPlan) {
 	c.mu.Unlock()
 }
 
-func (c *ApplyPatchDiffCollector) Summary() DiffSummary {
+func (c *ApplyPatchDiffCollector) Summary() textdiff.Summary {
 	if c == nil {
-		return DiffSummary{}
+		return textdiff.Summary{}
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -294,7 +297,7 @@ func (t ApplyPatchTool) Execute(ctx context.Context, raw json.RawMessage) (strin
 	// be cleaned safely — reject both and route binary content to a shell
 	// command or script.
 	patchLen := len([]rune(args.Patch))
-	strippedPatch := StripZeroWidthFormat(StripOrphanVariationSelectors(args.Patch))
+	strippedPatch := textclean.StripZeroWidthFormat(textclean.StripOrphanVariationSelectors(args.Patch))
 	cleanedCounts := CountStrippedInvisible(args.Patch, strippedPatch)
 	args.Patch = strippedPatch
 	strippedSelectors := patchLen - len([]rune(args.Patch))
@@ -695,8 +698,8 @@ func (t ApplyPatchTool) finishApplyPatch(ctx context.Context, plan MutationPlan)
 		punctuationHunks += mutation.PunctuationHunks
 		fuzzyHunks += mutation.FuzzyHunks
 		lines = append(lines, applyPatchMutationSummary(mutation, t.BaseDir))
-		invalidatePathCache(mutation.SourcePath)
-		invalidatePathCache(mutation.TargetPath)
+		textfile.Invalidate(mutation.SourcePath)
+		textfile.Invalidate(mutation.TargetPath)
 	}
 	sort.Strings(lines)
 	if punctuationHunks > 0 {

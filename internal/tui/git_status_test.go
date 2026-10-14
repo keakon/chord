@@ -8,6 +8,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/gitinspect"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -55,9 +56,9 @@ func TestGitStatusDisablesAfterMissingExecutable(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
 	m.gitStatus.Refreshing = true
 	m.gitStatus.Generation = 1
-	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main"}
+	m.gitStatus.Info = gitinspect.Info{Present: true, Branch: "main"}
 
-	cmd := m.handleGitStatusRefreshed(gitStatusRefreshedMsg{generation: 1, result: gitStatusResult{Disable: true}})
+	cmd := m.handleGitStatusRefreshed(gitStatusRefreshedMsg{generation: 1, result: gitinspect.Result{Disable: true}})
 	if cmd != nil {
 		t.Fatal("missing git executable should not schedule another refresh")
 	}
@@ -75,34 +76,8 @@ func TestGitStatusDisablesAfterMissingExecutable(t *testing.T) {
 	}
 }
 
-func TestParseGitStatusPorcelainV2(t *testing.T) {
-	info := parseGitStatusPorcelainV2("# branch.oid 1234567890abcdef\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +14 -2\n1 M. N... 100644 100644 100644 abc abc staged.go\n1 .M N... 100644 100644 100644 abc abc file.go\n? new.txt\n")
-	if info.Branch != "main" {
-		t.Fatalf("Branch = %q, want main", info.Branch)
-	}
-	if info.Commit != "1234567890ab" {
-		t.Fatalf("Commit = %q, want short oid", info.Commit)
-	}
-	if info.Ahead != 14 || info.Behind != 2 {
-		t.Fatalf("ahead/behind = %d/%d, want 14/2", info.Ahead, info.Behind)
-	}
-	if info.ChangedFiles != 3 {
-		t.Fatalf("ChangedFiles = %d, want 3", info.ChangedFiles)
-	}
-	if info.StagedFiles != 1 {
-		t.Fatalf("StagedFiles = %d, want 1", info.StagedFiles)
-	}
-}
-
-func TestCountGitStashEntries(t *testing.T) {
-	got := countGitStashEntries("stash@{0}\nstash@{1}\n\n")
-	if got != 2 {
-		t.Fatalf("stash entries = %d, want 2", got)
-	}
-}
-
 func TestGitStatusSummaryBudgetedFitsKeepsCanonicalOrder(t *testing.T) {
-	info := gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 3, Behind: 1, ChangedFiles: 2, StagedFiles: 1, Stashes: 4}
+	info := gitinspect.Info{Present: true, Branch: "main", WorktreeName: "fix-ui", Ahead: 3, Behind: 1, ChangedFiles: 2, StagedFiles: 1, Stashes: 4}
 	// Ample width: the composition must be byte-identical to the historical
 	// ref-first summary, so nothing regresses for branches that already fit.
 	got := gitStatusSummaryBudgeted(info, 100)
@@ -112,7 +87,7 @@ func TestGitStatusSummaryBudgetedFitsKeepsCanonicalOrder(t *testing.T) {
 }
 
 func TestGitStatusSummaryBudgetedLongBranchKeepsCounts(t *testing.T) {
-	info := gitStatusInfo{Present: true, Branch: "feature/very-long-branch-name-here", ChangedFiles: 2}
+	info := gitinspect.Info{Present: true, Branch: "feature/very-long-branch-name-here", ChangedFiles: 2}
 	got := gitStatusSummaryBudgeted(info, 22)
 	if !strings.HasSuffix(got, "!2") {
 		t.Fatalf("long branch must not hide the changed-file count, got %q", got)
@@ -129,7 +104,7 @@ func TestGitStatusSummaryBudgetedLongBranchKeepsCounts(t *testing.T) {
 }
 
 func TestGitStatusSummaryBudgetedShortRefKeepsAllCounts(t *testing.T) {
-	info := gitStatusInfo{Present: true, Branch: "ab", Ahead: 123, Behind: 12, StagedFiles: 1, ChangedFiles: 1, Stashes: 5}
+	info := gitinspect.Info{Present: true, Branch: "ab", Ahead: 123, Behind: 12, StagedFiles: 1, ChangedFiles: 1, Stashes: 5}
 	// A short ref already fits, so every count stays visible.
 	got := gitStatusSummaryBudgeted(info, 22)
 	if got != "ab ↑123 ↓12 +1 !1 *5" {
@@ -140,7 +115,7 @@ func TestGitStatusSummaryBudgetedShortRefKeepsAllCounts(t *testing.T) {
 func TestGitStatusSummaryBudgetedDropsLeastUsefulCountsForLongRef(t *testing.T) {
 	original := runewidth.DefaultCondition.EastAsianWidth
 	t.Cleanup(func() { runewidth.DefaultCondition.EastAsianWidth = original })
-	info := gitStatusInfo{Present: true, Branch: "feature/very-long-branch-name-here", Ahead: 123, Behind: 12, StagedFiles: 1, ChangedFiles: 1, Stashes: 5}
+	info := gitinspect.Info{Present: true, Branch: "feature/very-long-branch-name-here", Ahead: 123, Behind: 12, StagedFiles: 1, ChangedFiles: 1, Stashes: 5}
 	for _, testCase := range []struct {
 		name string
 		wide bool

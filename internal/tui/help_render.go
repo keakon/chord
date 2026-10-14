@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/buildinfo"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (m Model) helpLines(width int) []string {
@@ -26,8 +27,8 @@ func (m Model) helpLines(width int) []string {
 		intro = append(intro, fmt.Sprintf("%s completes a visible / command suggestion. Otherwise it sends, queues when busy, or continues when idle with empty input.", keys))
 	}
 	for _, paragraph := range intro {
-		for _, line := range wrapText(paragraph, contentWidth) {
-			lines = append(lines, DimStyle.Render(line))
+		for _, line := range terminaltext.Wrap(paragraph, contentWidth) {
+			lines = append(lines, currentStyles.DimStyle.Render(line))
 		}
 	}
 	lines = append(lines, "")
@@ -90,7 +91,7 @@ func (m *Model) renderHelpView() string {
 	rendered := make([]string, 0, len(visible))
 	for _, line := range visible {
 		line = ansi.Truncate(line, width, "…")
-		line = padLineToDisplayWidth(line, width)
+		line = terminaltext.Pad(line, width)
 		rendered = append(rendered, line)
 	}
 	out := strings.Join(rendered, "\n")

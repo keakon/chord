@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestGradientStopsBasic(t *testing.T) {
@@ -201,7 +204,7 @@ func TestCachedNeonRampDifferentWidths(t *testing.T) {
 
 func TestRenderNeonSeparatorNonEmpty(t *testing.T) {
 	got := renderNeonSeparator(24)
-	plain := stripANSI(got)
+	plain := terminaltext.StripANSI(got)
 	want := strings.Repeat(SectionSeparator, 24)
 	if plain != want {
 		t.Fatalf("neon separator plain = %q, want %q", plain, want)
@@ -215,7 +218,7 @@ func TestRenderNeonSeparatorNonEmpty(t *testing.T) {
 func TestRenderNeonSeparatorWidthStable(t *testing.T) {
 	for _, w := range []int{10, 40, 80, 160} {
 		got := renderNeonSeparator(w)
-		plain := stripANSI(got)
+		plain := terminaltext.StripANSI(got)
 		want := strings.Repeat(SectionSeparator, w)
 		if plain != want {
 			t.Fatalf("neon separator width=%d: plain len=%d, want=%d", w, len(plain), len(want))
@@ -240,10 +243,10 @@ func TestNormalizeSeparatorVariant(t *testing.T) {
 }
 
 func TestRenderAnimatedSeparatorUnknownVariantFallsBackToNeon(t *testing.T) {
-	theme := DefaultTheme()
+	theme := uitheme.Default()
 	unknown := renderAnimatedSeparatorVariant(24, theme, "unknown", true, true)
 	neon := renderAnimatedSeparatorVariant(24, theme, "neon", true, true)
-	if stripANSI(unknown) != stripANSI(neon) {
+	if terminaltext.StripANSI(unknown) != terminaltext.StripANSI(neon) {
 		t.Fatal("unknown separator variant should fall back to neon plain output")
 	}
 }

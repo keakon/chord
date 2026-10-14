@@ -88,18 +88,6 @@ func TestResolveToolPathDoesNotExpandNonLeadingTilde(t *testing.T) {
 	}
 }
 
-func TestNormalizeCachePathExpandsTildeToSameAbsolutePath(t *testing.T) {
-	home := t.TempDir()
-	setHomeEnvForTest(t, home)
-	path := filepath.Join(home, "cache.txt")
-
-	got := normalizeCachePath(tildePathForTest("cache.txt"))
-	want := filepath.Clean(path)
-	if got != want {
-		t.Fatalf("normalizeCachePath = %q, want %q", got, want)
-	}
-}
-
 func TestFileToolConcurrencyPolicyExpandsTilde(t *testing.T) {
 	home := t.TempDir()
 	setHomeEnvForTest(t, home)

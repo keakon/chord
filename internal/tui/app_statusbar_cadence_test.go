@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestStatusBarProgressSamplesSurviveDrawInvalidation(t *testing.T) {
@@ -25,7 +26,7 @@ func TestStatusBarProgressSamplesSurviveDrawInvalidation(t *testing.T) {
 	if got := m.statusBarFingerprint(now.Add(200 * time.Millisecond)); got != fingerprint {
 		t.Fatal("raw progress invalidated the status fingerprint")
 	}
-	got := stripANSI(m.renderActivityAt(a, 80, now.Add(time.Second)))
+	got := terminaltext.StripANSI(m.renderActivityAt(a, 80, now.Add(time.Second)))
 	if !strings.Contains(got, "↓ 128 KB · 42 events · 1s") {
 		t.Fatalf("next second did not show latest progress: %q", got)
 	}
@@ -34,20 +35,20 @@ func TestStatusBarProgressSamplesSurviveDrawInvalidation(t *testing.T) {
 	progress.BaseBytes = 64 * 1024
 	progress.BaseEvents = 10
 	m.requestProgress["main"] = progress
-	got = stripANSI(m.renderActivityAt(a, 80, now.Add(1100*time.Millisecond)))
+	got = terminaltext.StripANSI(m.renderActivityAt(a, 80, now.Add(1100*time.Millisecond)))
 	if !strings.Contains(got, "64 KB · 32 events") {
 		t.Fatalf("new card retained previous card's counter: %q", got)
 	}
 	// A new request of the same type must not inherit the sampled display.
 	m.activityStartTime["main"] = now.Add(1200 * time.Millisecond)
 	m.requestProgress["main"] = requestProgressState{}
-	got = stripANSI(m.renderActivityAt(a, 80, now.Add(1200*time.Millisecond)))
+	got = terminaltext.StripANSI(m.renderActivityAt(a, 80, now.Add(1200*time.Millisecond)))
 	if got != "↓ 0s" {
 		t.Fatalf("new request retained previous sample: %q", got)
 	}
 	a.Type = agent.ActivityCooling
 	a.Deadline = now.Add(5 * time.Second)
-	got = stripANSI(m.renderActivityAt(a, 80, now.Add(1300*time.Millisecond)))
+	got = terminaltext.StripANSI(m.renderActivityAt(a, 80, now.Add(1300*time.Millisecond)))
 	if got != "⏸ 4s" {
 		t.Fatalf("phase transition did not immediately update: %q", got)
 	}
@@ -62,14 +63,14 @@ func TestStatusBarCompactionSamplesProgressButPublishesTerminalImmediately(t *te
 	if got := m.renderCompactionBackgroundPill(now.Add(200 * time.Millisecond)); got != first {
 		t.Fatalf("compaction progress changed inside the second: %q -> %q", first, got)
 	}
-	if got := stripANSI(m.renderCompactionBackgroundPill(now.Add(time.Second))); !strings.Contains(got, "128 KB") {
+	if got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now.Add(time.Second))); !strings.Contains(got, "128 KB") {
 		t.Fatalf("compaction did not publish latest progress: %q", got)
 	}
 	m.compactionBgStatus.Active = false
 	m.compactionBgStatus.Terminal = agent.CompactionStatusSucceeded
 	m.compactionBgStatus.TerminalAt = now.Add(1100 * time.Millisecond)
 	m.compactionBgStatus.Bytes = 256 * 1024
-	if got := stripANSI(m.renderCompactionBackgroundPill(now.Add(1100 * time.Millisecond))); !strings.Contains(got, "✓") || !strings.Contains(got, "256 KB") {
+	if got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now.Add(1100 * time.Millisecond))); !strings.Contains(got, "✓") || !strings.Contains(got, "256 KB") {
 		t.Fatalf("terminal compaction was delayed or lost final progress: %q", got)
 	}
 }

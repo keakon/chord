@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestQuestionToolResultEventPreservesStructuredReceipt(t *testing.T) {
@@ -33,7 +34,7 @@ func TestQuestionToolResultEventPreservesStructuredReceipt(t *testing.T) {
 			if block.ResultPayload != tc.payload || !slices.Equal(block.ResultNotes, notes) {
 				t.Fatalf("receipt lost: payload=%q notes=%v", block.ResultPayload, block.ResultNotes)
 			}
-			view := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+			view := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 			if !strings.Contains(view, tc.want) || strings.Contains(view, `"status"`) || strings.Count(view, notes[0]) != 1 {
 				t.Fatalf("unexpected live result:\n%s", view)
 			}
@@ -46,7 +47,7 @@ func TestQuestionToolResultEventPreservesStructuredReceipt(t *testing.T) {
 			if len(restored) != 1 {
 				t.Fatalf("restored block count=%d", len(restored))
 			}
-			if restoredView := stripANSI(strings.Join(restored[0].Render(100, ""), "\n")); restoredView != view {
+			if restoredView := terminaltext.StripANSI(strings.Join(restored[0].Render(100, ""), "\n")); restoredView != view {
 				t.Fatalf("restored and live views differ:\nlive:\n%s\nrestored:\n%s", view, restoredView)
 			}
 			notes[0] = "Changed source note"
@@ -72,7 +73,7 @@ func TestToolResultEventUpdatesIndependentFieldsWithUnchangedContent(t *testing.
 	if !slices.Equal(block.ResultNotes, event.Notes) {
 		t.Fatal("unchanged combined content suppressed a notes update")
 	}
-	view := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	view := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(view, "1 question still awaiting an answer.") || strings.Count(view, event.Notes[0]) != 1 {
 		t.Fatalf("updated receipt was not rendered:\n%s", view)
 	}

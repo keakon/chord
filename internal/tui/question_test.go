@@ -6,11 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
-
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // questionResolverAgent records what a question dialog submits and reports the
@@ -251,7 +252,7 @@ func TestQuestionTextareaSoftWrapDoesNotIndentContinuation(t *testing.T) {
 	ta.SetWidth(10)
 	ta.SetValue("abcdefghijk")
 
-	plain := stripANSI(strings.TrimSuffix(ta.View(), "\n"))
+	plain := terminaltext.StripANSI(strings.TrimSuffix(ta.View(), "\n"))
 	lines := strings.Split(plain, "\n")
 	if len(lines) != 2 {
 		t.Fatalf("wrapped line count = %d, want 2\n%s", len(lines), plain)
@@ -357,7 +358,7 @@ func TestQuestionDialogWrapsCurrentOptionDescription(t *testing.T) {
 		cursor: 0,
 	}
 
-	plain := stripANSI(m.renderQuestionDialog())
+	plain := terminaltext.StripANSI(m.renderQuestionDialog())
 	if strings.Contains(plain, "Option A  Show the full setup instructions") {
 		t.Fatalf("current option should not keep description on the selected row, got:\n%s", plain)
 	}
@@ -384,7 +385,7 @@ func TestQuestionDialogQuickSelectHintMatchesOptionCount(t *testing.T) {
 		}},
 	}
 
-	plain := stripANSI(m.renderQuestionDialog())
+	plain := terminaltext.StripANSI(m.renderQuestionDialog())
 	if !strings.Contains(plain, "[1-2] quick-select") {
 		t.Fatalf("quick-select hint should reflect 2 options, got:\n%s", plain)
 	}
@@ -398,7 +399,7 @@ func TestQuestionDialogQuickSelectHintMatchesOptionCount(t *testing.T) {
 // textarea's View() emits SGR resets that wiped the DialogBg established by the
 // border box, leaving the answer rows on the terminal default background.
 func TestQuestionDialogCustomInputPreservesDialogBackground(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	m := NewModelWithSize(nil, 120, 40)
 	m.mode = ModeQuestion
@@ -418,7 +419,7 @@ func TestQuestionDialogCustomInputPreservesDialogBackground(t *testing.T) {
 		t.Fatal("expected non-empty question dialog")
 	}
 
-	dialogBg := colorOfTheme(currentTheme.DialogBg)
+	dialogBg := colorOfTheme(currentStyles.Palette.DialogBg)
 
 	// The first answer line and a later line must both sit on the dialog
 	// background, including the cell that abuts the textarea's trailing pad
@@ -427,11 +428,11 @@ func TestQuestionDialogCustomInputPreservesDialogBackground(t *testing.T) {
 	for _, needle := range []string{"y", "w"} {
 		line := findRenderedLineContaining(out, needle)
 		if line == "" {
-			t.Fatalf("missing input line containing %q in dialog: %q", needle, stripANSI(out))
+			t.Fatalf("missing input line containing %q in dialog: %q", needle, terminaltext.StripANSI(out))
 		}
 		cell, ok := findRenderedCell(line, needle)
 		if !ok {
-			t.Fatalf("missing input text cell %q in line: %q", needle, stripANSI(line))
+			t.Fatalf("missing input text cell %q in line: %q", needle, terminaltext.StripANSI(line))
 		}
 		if !colorsEqual(cell.Style.Bg, dialogBg) {
 			t.Fatalf("custom-answer cell %q background = %v, want dialog bg %v", needle, cell.Style.Bg, dialogBg)

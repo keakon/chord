@@ -26,6 +26,9 @@ import (
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/overlaylist"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func modelSelectKey(text string) tea.KeyPressMsg {
@@ -109,7 +112,7 @@ func TestIdleEventFinalizesStreamingAssistantWithoutDuplicateCommittedBlock(t *t
 	if blocks[0].Type != BlockAssistant {
 		t.Fatalf("block type = %v, want assistant", blocks[0].Type)
 	}
-	if plain := strings.TrimSpace(stripANSI(blocks[0].Content)); !strings.Contains(plain, "hello world") {
+	if plain := strings.TrimSpace(terminaltext.StripANSI(blocks[0].Content)); !strings.Contains(plain, "hello world") {
 		t.Fatalf("assistant content = %q, want committed text", plain)
 	}
 }
@@ -137,7 +140,7 @@ func TestTranscriptRebuildReplacesStreamingAssistantInsteadOfDuplicatingIt(t *te
 	if blocks[0].Streaming {
 		t.Fatal("committed assistant block should not remain streaming after rebuild")
 	}
-	if plain := strings.TrimSpace(stripANSI(blocks[0].Content)); !strings.Contains(plain, "partial reply") {
+	if plain := strings.TrimSpace(terminaltext.StripANSI(blocks[0].Content)); !strings.Contains(plain, "partial reply") {
 		t.Fatalf("assistant content = %q, want committed text", plain)
 	}
 }
@@ -166,7 +169,7 @@ func TestStreamRollbackRemovesStreamingAssistantBeforeCommittedRebuild(t *testin
 	if got := len(blocks); got != 1 {
 		t.Fatalf("block count after rollback+rebuild = %d, want 1", got)
 	}
-	if plain := strings.TrimSpace(stripANSI(blocks[0].Content)); !strings.Contains(plain, "final reply") {
+	if plain := strings.TrimSpace(terminaltext.StripANSI(blocks[0].Content)); !strings.Contains(plain, "final reply") {
 		t.Fatalf("assistant content = %q, want final committed text", plain)
 	}
 }
@@ -190,7 +193,7 @@ func TestSessionRestoreRebuildDoesNotDuplicateExistingStreamingAssistant(t *test
 	if blocks[0].Streaming {
 		t.Fatal("restored committed assistant block should not remain streaming")
 	}
-	if plain := strings.TrimSpace(stripANSI(blocks[0].Content)); !strings.Contains(plain, "restored reply") {
+	if plain := strings.TrimSpace(terminaltext.StripANSI(blocks[0].Content)); !strings.Contains(plain, "restored reply") {
 		t.Fatalf("assistant content = %q, want restored committed text", plain)
 	}
 }
@@ -232,8 +235,8 @@ func TestVeryShortAssistantPrefixBeforeToolCallIsDroppedAcrossFinalizeAndRebuild
 		if b.Type != BlockAssistant {
 			continue
 		}
-		if strings.Contains(stripANSI(b.Content), "Okay") {
-			t.Fatalf("unexpected orphan short assistant prefix kept before rebuild: %q", stripANSI(b.Content))
+		if strings.Contains(terminaltext.StripANSI(b.Content), "Okay") {
+			t.Fatalf("unexpected orphan short assistant prefix kept before rebuild: %q", terminaltext.StripANSI(b.Content))
 		}
 	}
 
@@ -247,7 +250,7 @@ func TestVeryShortAssistantPrefixBeforeToolCallIsDroppedAcrossFinalizeAndRebuild
 	if blocks[0].Type != BlockAssistant {
 		t.Fatalf("block type after rebuild = %v, want assistant", blocks[0].Type)
 	}
-	plain := strings.TrimSpace(stripANSI(blocks[0].Content))
+	plain := strings.TrimSpace(terminaltext.StripANSI(blocks[0].Content))
 	if !strings.Contains(plain, "final response") {
 		t.Fatalf("assistant content after rebuild = %q, want committed final response", plain)
 	}
@@ -408,7 +411,7 @@ func TestStartupRestoredDeferredTranscriptUsesUpdatedWorkDirForRelativeToolPath(
 	if block == nil {
 		t.Fatal("expected focused Read block after search reveal")
 	}
-	plain := stripANSI(strings.Join(block.Render(m.viewport.width, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(m.viewport.width, ""), "\n"))
 	if !strings.Contains(plain, "read internal/tui/app.go") {
 		t.Fatalf("expected deferred restored Read header relative to updated project root, got:\n%s", plain)
 	}
@@ -513,11 +516,11 @@ func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.
 	if toolBlock.Collapsed {
 		t.Fatal("search should reveal collapsed Read tool content")
 	}
-	plain := stripANSI(strings.Join(toolBlock.Render(m.viewport.width, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(toolBlock.Render(m.viewport.width, ""), "\n"))
 	if !strings.Contains(plain, "needle line") {
 		t.Fatalf("rendered search match = %q, want visible needle line", plain)
 	}
-	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
+	viewportPlain := terminaltext.StripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
 	if !strings.Contains(viewportPlain, "needle line") {
 		t.Fatalf("viewport render should include revealed search content, got %q", viewportPlain)
 	}
@@ -822,7 +825,7 @@ func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(
 	if block.spillCold {
 		t.Fatal("search reveal should materialize cold matched block")
 	}
-	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
+	viewportPlain := terminaltext.StripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
 	if !strings.Contains(viewportPlain, "needle output") {
 		t.Fatalf("viewport render should include materialized cold compact tool output, got %q", viewportPlain)
 	}
@@ -910,7 +913,7 @@ func TestDeferredStartupTranscriptSearchSkipsDiagnosticArtifactBlocks(t *testing
 	if block.ToolID != "call-real-search-1" {
 		t.Fatalf("focused block tool id = %q, want %q", block.ToolID, "call-real-search-1")
 	}
-	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
+	viewportPlain := terminaltext.StripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
 	if !strings.Contains(viewportPlain, "real find result") {
 		t.Fatalf("viewport render should include non-diagnostic search content, got %q", viewportPlain)
 	}
@@ -950,7 +953,7 @@ func TestDeferredStartupTranscriptSearchRevealExpandsCompactToolOutput(t *testin
 	if !m.maybeScrollToSearchMatch(match, "search_enter") {
 		t.Fatal("maybeScrollToSearchMatch should succeed for compact tool match")
 	}
-	viewportPlain := stripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
+	viewportPlain := terminaltext.StripANSI(m.viewport.Render("", nil, m.searchCurrentBlockIndex(), m.searchCurrentInnerOffset(), m.search.State.Query))
 	if !strings.Contains(viewportPlain, "needle output") {
 		t.Fatalf("viewport render should include compact tool output, got %q", viewportPlain)
 	}
@@ -980,7 +983,7 @@ func TestEscClearsActiveSearchPillInNormalMode(t *testing.T) {
 	m.search.State.Matches = []MatchPosition{{BlockIndex: 0}}
 	m.search.State.Current = 0
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "/grep [1/1]") {
 		t.Fatalf("status bar should show search session before ESC, got %q", plain)
 	}
@@ -1115,15 +1118,15 @@ func TestSearchPillShowsAcrossModesWhileSearchSessionActive(t *testing.T) {
 	m.search.State.Current = 0
 
 	m.mode = ModeNormal
-	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [1/2]") {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [1/2]") {
 		t.Fatalf("normal-mode status bar should show search pill, got %q", plain)
 	}
 	m.mode = ModeInsert
-	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [1/2]") {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [1/2]") {
 		t.Fatalf("insert-mode status bar should show search pill, got %q", plain)
 	}
 	m.mode = ModeSearch
-	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [1/2]") {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [1/2]") {
 		t.Fatalf("search-mode status bar should show search pill, got %q", plain)
 	}
 }
@@ -1236,14 +1239,14 @@ func TestHandleAgentEventLoopNoticeCreatesStatusCard(t *testing.T) {
 	if !blocks[0].Collapsed {
 		t.Fatal("loop notices must start collapsed")
 	}
-	collapsed := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(collapsed, "LOOP") || !strings.Contains(collapsed, "▸") || strings.Contains(collapsed, "Target:") {
 		t.Fatalf("rendered card = %q, want a collapsed LOOP badge with the body hidden", collapsed)
 	}
 	if !blocks[0].ToggleAtWidth(80) || blocks[0].Collapsed {
 		t.Fatal("toggling must expand the notice")
 	}
-	plain := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(plain, "  Target:") || !strings.Contains(plain, "  • Continue and finish all remaining tasks in the current session.") {
 		t.Fatalf("rendered card = %q, want indented LOOP body", plain)
 	}
@@ -1260,7 +1263,7 @@ func TestLoopStateChangedEventRefreshesStatusBarDuringStreaming(t *testing.T) {
 	backend.loopMaxIterations = 10
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.LoopStateChangedEvent{}})
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "LOOP 1/10") {
 		t.Fatalf("status bar = %q, want immediate loop pill while streaming", plain)
 	}
@@ -1293,7 +1296,7 @@ func TestHandleAgentEventLoopContinueStatusCardBodyIsIndented(t *testing.T) {
 	if !card.ToggleAtWidth(80) || card.Collapsed {
 		t.Fatal("toggling must expand the runtime loop notice")
 	}
-	plain := stripANSI(strings.Join(card.Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(card.Render(80, ""), "\n"))
 	for _, want := range []string{"  Unresolved work:", "  • pending verification", "  • remaining subagent"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered card = %q, want %q in the full indented body", plain, want)
@@ -1437,7 +1440,7 @@ func TestRenderStatusBarShowsSessionSwitchProgress(t *testing.T) {
 	m := NewModelWithSize(backend, 120, 24)
 	m.beginSessionSwitch("resume", "123")
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "Resuming 123...") {
 		t.Fatalf("status bar = %q, want resume progress", plain)
 	}
@@ -1450,7 +1453,7 @@ func TestViewShowsSessionSwitchOverlayAfterDelay(t *testing.T) {
 	m.sessionSwitch.startedAt = time.Now().Add(-sessionSwitchOverlayDelay - 10*time.Millisecond)
 	m.layout = m.generateLayout(m.width, m.height)
 
-	plain := stripANSI(m.View().Content)
+	plain := terminaltext.StripANSI(m.View().Content)
 	if !strings.Contains(plain, "Resuming session") {
 		t.Fatalf("View() = %q, want session switch overlay title", plain)
 	}
@@ -1465,7 +1468,7 @@ func TestViewDelaysSessionSwitchOverlayToAvoidFlash(t *testing.T) {
 	m.beginSessionSwitch("resume", "123")
 	m.layout = m.generateLayout(m.width, m.height)
 
-	plain := stripANSI(m.View().Content)
+	plain := terminaltext.StripANSI(m.View().Content)
 	if strings.Contains(plain, "Resuming session") {
 		t.Fatalf("View() = %q, should not show delayed session switch overlay yet", plain)
 	}
@@ -1499,7 +1502,7 @@ func TestSessionSwitchStartedEventUpdatesStatusBarAndRestoredClearsIt(t *testing
 	m := NewModelWithSize(backend, 120, 24)
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.SessionSwitchStartedEvent{Kind: "resume", SessionID: "123"}})
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "Resuming 123...") {
 		t.Fatalf("status bar after start = %q, want resume progress", plain)
 	}
@@ -1509,7 +1512,7 @@ func TestSessionSwitchStartedEventUpdatesStatusBarAndRestoredClearsIt(t *testing
 	if m.sessionSwitch.active() {
 		t.Fatal("session switch indicator should clear after SessionRestoredEvent")
 	}
-	plain = stripANSI(m.renderStatusBar())
+	plain = terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "Resuming 123...") {
 		t.Fatalf("status bar after restore = %q, should not show stale resume progress", plain)
 	}
@@ -1589,7 +1592,7 @@ func TestSessionRestoredEventRebuildsDoneMarkdownAndDelegateLink(t *testing.T) {
 	if delegateBlock == nil {
 		t.Fatal("expected restored Delegate block")
 	}
-	plain := stripANSI(strings.Join(doneBlock.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(doneBlock.Render(100, ""), "\n"))
 	for _, want := range []string{"Summary", "• shipped", "• verified"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected restored Done block to contain %q, got:\n%s", want, plain)
@@ -1793,7 +1796,7 @@ func TestSelectSessionAtCursorStartsStatusIndicator(t *testing.T) {
 	m.sessionSelect = sessionSelectState{
 		options: []agent.SessionSummary{{ID: "123"}, {ID: "456"}},
 	}
-	m.sessionSelect.selector.list = NewOverlayList(nil, 5)
+	m.sessionSelect.selector.list = overlaylist.New(nil, 5)
 	m.rebuildSessionSelectFilteredView(false)
 	m.sessionSelect.selector.list.SetCursor(1)
 
@@ -1834,7 +1837,7 @@ func TestHandleSessionSelectKeyDeleteOpensConfirmOverlay(t *testing.T) {
 	m.sessionSelect = sessionSelectState{
 		options: []agent.SessionSummary{{ID: "123"}, {ID: "456", ForkedFrom: "100"}},
 	}
-	m.sessionSelect.selector.list = NewOverlayList(nil, 5)
+	m.sessionSelect.selector.list = overlaylist.New(nil, 5)
 	m.rebuildSessionSelectFilteredView(false)
 	m.sessionSelect.selector.list.SetCursor(1)
 
@@ -1855,7 +1858,7 @@ func TestHandleSessionDeleteConfirmKeyDeletesSelectedSessionAndUpdatesList(t *te
 	m.sessionSelect = sessionSelectState{
 		options: []agent.SessionSummary{{ID: "123"}, {ID: "456"}},
 	}
-	m.sessionSelect.selector.list = NewOverlayList(nil, 5)
+	m.sessionSelect.selector.list = overlaylist.New(nil, 5)
 	m.rebuildSessionSelectFilteredView(false)
 	m.sessionSelect.selector.list.SetCursor(1)
 	m.sessionDeleteConfirm = sessionDeleteConfirmState{
@@ -1889,7 +1892,7 @@ func TestHandleSessionDeleteConfirmKeyShowsErrorAndKeepsListOnFailure(t *testing
 	m.sessionSelect = sessionSelectState{
 		options: []agent.SessionSummary{{ID: "123"}, {ID: "456"}},
 	}
-	m.sessionSelect.selector.list = NewOverlayList(nil, 5)
+	m.sessionSelect.selector.list = overlaylist.New(nil, 5)
 	m.rebuildSessionSelectFilteredView(false)
 	m.sessionSelect.selector.list.SetCursor(1)
 	m.sessionDeleteConfirm = sessionDeleteConfirmState{
@@ -1913,7 +1916,7 @@ func TestHandleSessionDeleteConfirmKeyShowsErrorAndKeepsListOnFailure(t *testing
 func TestRenderStatusBarHidesForkOriginPill(t *testing.T) {
 	backend := &sessionControlAgent{sessionSummary: &agent.SessionSummary{ID: "2000", ForkedFrom: "1000"}}
 	m := NewModelWithSize(backend, 100, 24)
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "↳ 1000") {
 		t.Fatalf("status bar = %q, want no fork origin pill", plain)
 	}
@@ -2208,7 +2211,7 @@ func TestNewModelShowsStartupResumeStatusAndKeepsInteractionSuppressedUntilResto
 	if !m.sessionSwitch.active() || m.sessionSwitch.kind != "resume" || m.sessionSwitch.sessionID != "123" {
 		t.Fatalf("sessionSwitch = %+v, want active resume/123", m.sessionSwitch)
 	}
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "Resuming 123...") {
 		t.Fatalf("status bar = %q, want startup resume progress", plain)
 	}
@@ -3845,7 +3848,7 @@ func TestDeferredTranscriptPreheatRestartsOnViewportWidthChange(t *testing.T) {
 }
 
 func TestDeferredStartupTranscriptSearchesVisibleAssistantMarkdown(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "visible **needle** phrase"}
 	m := NewModelWithSize(nil, 80, 24)
 	m.startupDeferredTranscript = &startupDeferredTranscriptState{
@@ -3990,7 +3993,7 @@ func TestRebuildViewportFromMessagesRestoresReadCollapsedSummary(t *testing.T) {
 	if !block.Collapsed {
 		t.Fatalf("restored Read block should stay collapsed (summary state), got %#v", block)
 	}
-	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected restored Read header, got:\n%s", plain)
 	}
@@ -4027,7 +4030,7 @@ func TestSessionRestoredEventUpdatesWorkingDirAndShowsRelativeToolPath(t *testin
 	if len(blocks) != 1 {
 		t.Fatalf("len(visibleBlocks()) = %d, want 1", len(blocks))
 	}
-	plain := stripANSI(strings.Join(blocks[0].Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(blocks[0].Render(100, ""), "\n"))
 	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected restored Read header relative to new project root, got:\n%s", plain)
 	}
@@ -4075,7 +4078,7 @@ func TestRebuildViewportFromMessagesDoesNotShowLastForRestoredBlocks(t *testing.
 
 	m.rebuildViewportFromMessages()
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, statusBarIdleLabel()) {
 		t.Fatalf("restored history should not fabricate Last time; got %q", plain)
 	}
@@ -4213,7 +4216,7 @@ func TestRebuildViewportFromMessagesRestoresRejectedDoneIntoSingleToolCard(t *te
 	if !strings.Contains(block.ResultContent, "Done rejected:") {
 		t.Fatalf("ResultContent = %q, want rejected Done content", block.ResultContent)
 	}
-	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(plain, "✗ done") {
 		t.Fatalf("rendered Done card = %q, want rejected Done failure header", plain)
 	}

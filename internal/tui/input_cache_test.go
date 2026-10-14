@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestViewRebuildsInputRenderWhenBangModeChanges(t *testing.T) {
@@ -71,14 +72,14 @@ func TestViewRefreshesSearchInputAfterTyping(t *testing.T) {
 	m.search = NewSearchModel(ModeNormal)
 	m.search.Input.SetWidth(m.width - 4)
 
-	initial := stripANSI(m.View().Content)
+	initial := terminaltext.StripANSI(m.View().Content)
 	if strings.Contains(initial, "needle") {
 		t.Fatalf("initial View() unexpectedly contains future search text: %q", initial)
 	}
 
 	m.search.Input.SetValue("needle")
 
-	updated := stripANSI(m.View().Content)
+	updated := terminaltext.StripANSI(m.View().Content)
 	if !strings.Contains(updated, "/needle") {
 		t.Fatalf("View() should refresh search input after typing, got:\n%s", updated)
 	}

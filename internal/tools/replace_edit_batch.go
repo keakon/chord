@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/keakon/chord/internal/textfile"
 )
 
 type textReplacement struct {
@@ -299,7 +301,7 @@ func (t EditTool) executeBatch(ctx context.Context, path, displayPath string, ed
 		// notification fires.
 		return fmt.Sprintf("No changes: all %d edits have identical old_string and new_string, so there is nothing to write", len(edits)), nil
 	}
-	encoded, err := encodeString(plan.content, file.Decoded.Encoding)
+	encoded, err := textfile.Encode(plan.content, file.Decoded.Encoding)
 	if err != nil {
 		return "", fmt.Errorf("edited text cannot be encoded back to %s: %w", file.Decoded.Encoding.Name, err)
 	}

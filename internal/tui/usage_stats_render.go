@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 func (m *Model) renderUsageStatsDialog() string {
@@ -57,7 +58,7 @@ func (m *Model) usageStatsHint() string {
 }
 
 func (m *Model) renderUsageStatsScopeTabs() string {
-	parts := []string{StatsTabLabelStyle.Render("Scope")}
+	parts := []string{currentStyles.StatsTabLabelStyle.Render("Scope")}
 	for _, scope := range []statsScope{statsScopeSession, statsScopeProject} {
 		parts = append(parts, m.renderUsageStatsTab(scope.label(), scope == m.usageStats.scope))
 	}
@@ -65,7 +66,7 @@ func (m *Model) renderUsageStatsScopeTabs() string {
 }
 
 func (m *Model) renderUsageStatsViewTabs() string {
-	parts := []string{StatsTabLabelStyle.Render("View")}
+	parts := []string{currentStyles.StatsTabLabelStyle.Render("View")}
 	for _, view := range m.currentUsageStatsViews() {
 		parts = append(parts, m.renderUsageStatsTab(view.label(), view == m.usageStats.view))
 	}
@@ -73,7 +74,7 @@ func (m *Model) renderUsageStatsViewTabs() string {
 }
 
 func (m *Model) renderUsageStatsRangeTabs() string {
-	parts := []string{StatsTabLabelStyle.Render("Range")}
+	parts := []string{currentStyles.StatsTabLabelStyle.Render("Range")}
 	for _, r := range []analytics.StatsRange{
 		analytics.StatsRangeAllTime,
 		analytics.StatsRangeLast30D,
@@ -86,16 +87,16 @@ func (m *Model) renderUsageStatsRangeTabs() string {
 
 func (m *Model) renderUsageStatsTab(label string, active bool) string {
 	if active {
-		return TabActiveStyle.Render(label)
+		return currentStyles.TabActiveStyle.Render(label)
 	}
-	return TabStyle.Render(label)
+	return currentStyles.TabStyle.Render(label)
 }
 
-func renderUsageTable(columns []TableColumn, items []OverlayTableItem, width int) []string {
+func renderUsageTable(columns []overlaylist.Column, items []overlaylist.TableItem, width int) []string {
 	if len(items) == 0 {
-		return []string{DimStyle.Render("(no data)")}
+		return []string{currentStyles.DimStyle.Render("(no data)")}
 	}
-	table := NewOverlayTable(columns, items, len(items))
+	table := overlaylist.NewTable(columns, items, len(items))
 	table.SetShowSelection(false)
-	return strings.Split(table.Render(width), "\n")
+	return strings.Split(table.Render(width, currentStyles), "\n")
 }

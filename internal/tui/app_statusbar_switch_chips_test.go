@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // Status bar switches (LOOP / YOLO / MEMORY / PERSIST-FAIL) render as chips:
@@ -30,7 +31,7 @@ func statusBarChipBackgrounds(s string) map[string]bool {
 
 func assertStatusBarSwitchChips(t *testing.T, out string, chips ...statusBarChipSpec) {
 	t.Helper()
-	plain := stripANSI(out)
+	plain := terminaltext.StripANSI(out)
 	wantBgs := map[string]bool{}
 	for _, chip := range chips {
 		if !strings.Contains(plain, chip.padded) {
@@ -61,18 +62,18 @@ func TestStatusBarSwitchChipsCarryGroupingSurface(t *testing.T) {
 		assertStatusBarSwitchChips(t, m.renderStatusBar(),
 			statusBarChipSpec{
 				padded: " LOOP 2/5 ",
-				style:  StatusChipStyle.Render("LOOP 2/5"),
-				bg:     currentTheme.StatusBg,
+				style:  currentStyles.StatusChipStyle.Render("LOOP 2/5"),
+				bg:     currentStyles.Palette.StatusBg,
 			},
 			statusBarChipSpec{
 				padded: " YOLO ",
-				style:  StatusChipWarnStyle.Render("YOLO"),
-				bg:     currentTheme.InfoPanelDiagWarnFg,
+				style:  currentStyles.StatusChipWarnStyle.Render("YOLO"),
+				bg:     currentStyles.Palette.InfoPanelDiagWarnFg,
 			},
 			statusBarChipSpec{
 				padded: " MEMORY ",
-				style:  StatusChipStyle.Render("MEMORY"),
-				bg:     currentTheme.StatusBg,
+				style:  currentStyles.StatusChipStyle.Render("MEMORY"),
+				bg:     currentStyles.Palette.StatusBg,
 			},
 		)
 	})
@@ -88,18 +89,18 @@ func TestStatusBarSwitchChipsCarryGroupingSurface(t *testing.T) {
 		assertStatusBarSwitchChips(t, m.renderStatusBar(),
 			statusBarChipSpec{
 				padded: " YOLO ",
-				style:  StatusChipWarnStyle.Render("YOLO"),
-				bg:     currentTheme.InfoPanelDiagWarnFg,
+				style:  currentStyles.StatusChipWarnStyle.Render("YOLO"),
+				bg:     currentStyles.Palette.InfoPanelDiagWarnFg,
 			},
 			statusBarChipSpec{
 				padded: " MEMORY-FAIL ",
-				style:  StatusChipErrorStyle.Render("MEMORY-FAIL"),
-				bg:     currentTheme.ErrorFg,
+				style:  currentStyles.StatusChipErrorStyle.Render("MEMORY-FAIL"),
+				bg:     currentStyles.Palette.ErrorFg,
 			},
 			statusBarChipSpec{
 				padded: " PERSIST-FAIL ",
-				style:  StatusChipErrorStyle.Render("PERSIST-FAIL"),
-				bg:     currentTheme.ErrorFg,
+				style:  currentStyles.StatusChipErrorStyle.Render("PERSIST-FAIL"),
+				bg:     currentStyles.Palette.ErrorFg,
 			},
 		)
 	})

@@ -1,19 +1,17 @@
 package agent
 
 import (
-	"bytes"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/requestshape"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
@@ -1166,7 +1164,7 @@ func (a *MainAgent) rememberPreparedLLMRequest(turnID uint64, original, prepared
 // state (unchanged history) both return values are the previously stored
 // slices and nothing is hashed or allocated; with an append-only history only
 // the new tail is hashed. Caller must hold loopReductionMu.
-func (a *MainAgent) incrementalMessageShapesLocked(original []message.Message) ([]stableReductionMessageShape, []message.Message) {
+func (a *MainAgent) incrementalMessageShapesLocked(original []message.Message) ([]requestshape.Shape, []message.Message) {
 	if len(original) == 0 {
 		return nil, nil
 	}
@@ -1174,19 +1172,19 @@ func (a *MainAgent) incrementalMessageShapesLocked(original []message.Message) (
 	prevShape := a.lastPreparedLLMRequestShape
 	reusable := 0
 	if len(prevSource) == len(prevShape) {
-		reusable = reusableMessagePrefixLen(prevSource, original)
+		reusable = requestshape.ReusablePrefixLen(prevSource, original)
 	}
 	if reusable == len(original) && len(prevSource) == len(original) {
 		return prevShape, prevSource
 	}
 	source := append([]message.Message(nil), original...)
 	if reusable == 0 {
-		return stableReductionMessageShapes(original), source
+		return requestshape.Shapes(original), source
 	}
-	shapes := make([]stableReductionMessageShape, len(original))
+	shapes := make([]requestshape.Shape, len(original))
 	copy(shapes, prevShape[:reusable])
 	for i := reusable; i < len(original); i++ {
-		shapes[i] = stableReductionMessageShapeOf(&original[i])
+		shapes[i] = requestshape.ShapeOf(&original[i])
 	}
 	return shapes, source
 }
@@ -1229,34 +1227,14 @@ func computeReducedToolResultIndices(original, prepared []message.Message) []boo
 func (a *MainAgent) computeToolDefinitionHash() [sha256.Size]byte {
 	frozen := a.frozenToolDefs.Load()
 	if frozen == nil {
-		return toolDefinitionsHash(a.mainLLMToolDefinitions())
+		return requestshape.ToolDefinitionsHash(a.mainLLMToolDefinitions())
 	}
 	if memo := a.toolDefHashMemo.Load(); memo != nil && memo.defs == frozen {
 		return memo.hash
 	}
-	hash := toolDefinitionsHash(*frozen)
+	hash := requestshape.ToolDefinitionsHash(*frozen)
 	a.toolDefHashMemo.Store(&toolDefHashMemoEntry{defs: frozen, hash: hash})
 	return hash
-}
-
-// toolDefinitionsHash returns a stable hash of a tool surface. Name,
-// description, and input schema all contribute because any of them changes the
-// cacheable tool surface even when the others are unchanged. encoding/json
-// marshals map keys in sorted order, so equal schemas hash to the same bytes
-// across turns.
-func toolDefinitionsHash(defs []message.ToolDefinition) [sha256.Size]byte {
-	h := sha256.New()
-	stableReductionWriteInt(h, len(defs))
-	for _, def := range defs {
-		stableReductionWriteString(h, def.Name)
-		stableReductionWriteString(h, def.Description)
-		schema, err := json.Marshal(def.InputSchema)
-		if err != nil {
-			schema = nil
-		}
-		stableReductionWriteBytes(h, schema)
-	}
-	return stableReductionHashBytes(h.Sum(nil))
 }
 
 // stableReductionSurfacePrefixLen returns the previous request's stable reduced
@@ -1338,7 +1316,7 @@ func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []me
 	a.loopReductionMu.Lock()
 	defer a.loopReductionMu.Unlock()
 	if a.lastPreparedLLMTurnID != turnID || len(a.lastPreparedLLMRequestShape) != len(prepared) {
-		a.lastPreparedLLMRequestShape = stableReductionMessageShapes(prepared)
+		a.lastPreparedLLMRequestShape = requestshape.Shapes(prepared)
 		a.lastPreparedLLMShapeSource = append([]message.Message(nil), prepared...)
 	}
 	a.lastPreparedLLMTurnID = turnID
@@ -1348,7 +1326,7 @@ func (a *MainAgent) updatePreparedLLMRequestSurface(turnID uint64, prepared []me
 
 type stableReductionSurface struct {
 	Messages []message.Message
-	Shape    []stableReductionMessageShape
+	Shape    []requestshape.Shape
 	// ShapeSource holds shallow copies of the original messages Shape was
 	// computed from, when available. It enables direct field-equality
 	// compatibility checks that skip content re-hashing. May be nil (e.g.
@@ -1368,40 +1346,6 @@ type stableReductionSurface struct {
 type toolDefHashMemoEntry struct {
 	defs *[]message.ToolDefinition
 	hash [sha256.Size]byte
-}
-
-type stableReductionMessageShape struct {
-	DeliveryHash          [32]byte
-	Role                  message.Role
-	ContentHash           [sha256.Size]byte
-	PartsHash             [sha256.Size]byte
-	ThinkingHash          [sha256.Size]byte
-	ResponsesOutputHash   [sha256.Size]byte
-	GeminiPartsHash       [sha256.Size]byte
-	ReasoningHash         [sha256.Size]byte
-	CompactionFilesHash   [sha256.Size]byte
-	CompactionSourcesHash [sha256.Size]byte
-	ToolCallsHash         [sha256.Size]byte
-	ToolCallID            string
-	RequestBatch          uint64
-	ToolDiffHash          [sha256.Size]byte
-	ToolDiffAdded         int
-	ToolDiffRemoved       int
-	ToolStatus            string
-	Provenance            stableReductionProvenanceShape
-	IsCompactionSummary   bool
-	Kind                  string
-	ToolRecoveryState     string
-}
-
-type stableReductionProvenanceShape struct {
-	Source     string
-	ProviderID string
-	ModelID    string
-	Variant    string
-	ModelRef   string
-	WireFamily string
-	Imported   bool
 }
 
 // stableReductionSurfaceCandidate returns a read-only borrowed view of the
@@ -1466,307 +1410,9 @@ func reuseStableReductionPrefix(previous stableReductionSurface, current, shapeS
 // back to hashing the current prefix.
 func stableReductionPrefixCompatible(previous stableReductionSurface, currentPrefix []message.Message) bool {
 	if len(previous.ShapeSource) == len(previous.Shape) && len(previous.ShapeSource) == len(currentPrefix) {
-		return stableReductionMessagesEquivalent(previous.ShapeSource, currentPrefix)
+		return requestshape.MessagesEquivalent(previous.ShapeSource, currentPrefix)
 	}
-	return stableReductionShapesCompatible(previous.Shape, currentPrefix)
-}
-
-func stableReductionShapesCompatible(previous []stableReductionMessageShape, current []message.Message) bool {
-	if len(previous) != len(current) {
-		return false
-	}
-	currentShape := stableReductionMessageShapes(current)
-	for i := range previous {
-		if previous[i] != currentShape[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func stableReductionMessageShapes(messages []message.Message) []stableReductionMessageShape {
-	if len(messages) == 0 {
-		return nil
-	}
-	shapes := make([]stableReductionMessageShape, len(messages))
-	for i := range messages {
-		shapes[i] = stableReductionMessageShapeOf(&messages[i])
-	}
-	return shapes
-}
-
-func stableReductionMessageShapeOf(msg *message.Message) stableReductionMessageShape {
-	return stableReductionMessageShape{
-		Role:                  msg.Role,
-		DeliveryHash:          deliveryMetadataHash(*msg),
-		ContentHash:           requesttrim.ContentHash(msg.Content),
-		PartsHash:             stableReductionContentPartsHash(msg.Parts),
-		ThinkingHash:          stableReductionThinkingBlocksHash(msg.ThinkingBlocks),
-		ResponsesOutputHash:   stableReductionResponsesOutputHash(msg.ResponsesOutput),
-		GeminiPartsHash:       stableReductionGeminiPartsHash(msg.GeminiParts),
-		ReasoningHash:         requesttrim.ContentHash(msg.ReasoningContent),
-		CompactionFilesHash:   stableReductionStringMapHash(msg.CompactionFileRevisions),
-		CompactionSourcesHash: stableReductionStringMapHash(msg.CompactionRequestSources),
-		ToolCallsHash:         stableReductionToolCallsHash(msg.ToolCalls),
-		ToolCallID:            msg.ToolCallID,
-		RequestBatch:          msg.RequestBatch,
-		ToolDiffHash:          requesttrim.ContentHash(msg.ToolDiff),
-		ToolDiffAdded:         msg.ToolDiffAdded,
-		ToolDiffRemoved:       msg.ToolDiffRemoved,
-		ToolStatus:            msg.ToolStatus,
-		Provenance:            stableReductionProvenanceShapeFor(msg.Provenance),
-		IsCompactionSummary:   msg.IsCompactionSummary,
-		Kind:                  msg.Kind,
-		ToolRecoveryState:     msg.ToolRecoveryState,
-	}
-}
-
-// stableReductionMessagesEquivalent reports whether every message pair would
-// produce identical stableReductionMessageShape values. It compares exactly
-// the fields the shape hashes cover, using direct equality instead of
-// hashing: string comparison short-circuits on shared backing arrays, so an
-// unchanged (append-only) history costs O(1) per message with no allocation.
-// Field equality implies hash equality, so this is strictly at least as
-// precise as comparing hashes.
-func stableReductionMessagesEquivalent(source, current []message.Message) bool {
-	return len(source) == len(current) && reusableMessagePrefixLen(source, current) == len(source)
-}
-
-func stableReductionMessageEquivalent(a, b *message.Message) bool {
-	if a.Role != b.Role ||
-		a.Content != b.Content ||
-		a.ReasoningContent != b.ReasoningContent ||
-		a.ToolCallID != b.ToolCallID ||
-		a.RequestBatch != b.RequestBatch ||
-		a.ToolDiff != b.ToolDiff ||
-		a.ToolDiffAdded != b.ToolDiffAdded ||
-		a.ToolDiffRemoved != b.ToolDiffRemoved ||
-		a.ToolStatus != b.ToolStatus ||
-		a.IsCompactionSummary != b.IsCompactionSummary ||
-		a.Kind != b.Kind ||
-		a.ToolRecoveryState != b.ToolRecoveryState {
-		return false
-	}
-	if deliveryMetadataHash(*a) != deliveryMetadataHash(*b) {
-		return false
-	}
-	if !maps.Equal(a.CompactionRequestSources, b.CompactionRequestSources) || !maps.Equal(a.CompactionFileRevisions, b.CompactionFileRevisions) {
-		return false
-	}
-	if stableReductionProvenanceShapeFor(a.Provenance) != stableReductionProvenanceShapeFor(b.Provenance) {
-		return false
-	}
-	if len(a.ToolCalls) != len(b.ToolCalls) {
-		return false
-	}
-	for i := range a.ToolCalls {
-		ac, bc := &a.ToolCalls[i], &b.ToolCalls[i]
-		if ac.ID != bc.ID || ac.Name != bc.Name || ac.ThoughtSignature != bc.ThoughtSignature || !bytes.Equal(ac.Args, bc.Args) {
-			return false
-		}
-	}
-	if len(a.ThinkingBlocks) != len(b.ThinkingBlocks) {
-		return false
-	}
-	for i := range a.ThinkingBlocks {
-		if a.ThinkingBlocks[i] != b.ThinkingBlocks[i] {
-			return false
-		}
-	}
-	if !slices.Equal(a.GeminiParts, b.GeminiParts) || !responsesOutputItemsEqual(a.ResponsesOutput, b.ResponsesOutput) {
-		return false
-	}
-	if len(a.Parts) != len(b.Parts) {
-		return false
-	}
-	for i := range a.Parts {
-		ap, bp := &a.Parts[i], &b.Parts[i]
-		if ap.Type != bp.Type ||
-			ap.Text != bp.Text ||
-			ap.DisplayText != bp.DisplayText ||
-			ap.InlineToken != bp.InlineToken ||
-			ap.MimeType != bp.MimeType ||
-			ap.ImagePath != bp.ImagePath ||
-			ap.FileName != bp.FileName ||
-			!bytes.Equal(ap.Data, bp.Data) {
-			return false
-		}
-		// The shape hash folds in DataBytes for a part whose payload is not
-		// inlined, so the equality check has to as well or it would claim
-		// equality the hash denies.
-		if len(ap.Data) == 0 && ap.DataBytes != bp.DataBytes {
-			return false
-		}
-	}
-	return true
-}
-
-func stableReductionProvenanceShapeFor(provenance *message.MessageProvenance) stableReductionProvenanceShape {
-	if provenance == nil {
-		return stableReductionProvenanceShape{}
-	}
-	return stableReductionProvenanceShape{
-		Source:     provenance.Source,
-		ProviderID: provenance.ProviderID,
-		ModelID:    provenance.ModelID,
-		Variant:    provenance.Variant,
-		ModelRef:   provenance.ModelRef,
-		WireFamily: provenance.WireFamily,
-		Imported:   provenance.Imported,
-	}
-}
-
-func stableReductionStringMapHash(values map[string]string) [sha256.Size]byte {
-	if len(values) == 0 {
-		return stableReductionEmptySequenceHash
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
-	h := sha256.New()
-	stableReductionWriteInt(h, len(keys))
-	for _, key := range keys {
-		stableReductionWriteString(h, key)
-		stableReductionWriteString(h, values[key])
-	}
-	return stableReductionHashBytes(h.Sum(nil))
-}
-
-var stableReductionEmptySequenceHash = func() [sha256.Size]byte {
-	h := sha256.New()
-	stableReductionWriteInt(h, 0)
-	return stableReductionHashBytes(h.Sum(nil))
-}()
-
-func stableReductionContentPartsHash(parts []message.ContentPart) [sha256.Size]byte {
-	if len(parts) == 0 {
-		return stableReductionEmptySequenceHash
-	}
-	h := sha256.New()
-	stableReductionWriteInt(h, len(parts))
-	for _, part := range parts {
-		stableReductionWriteString(h, string(part.Type))
-		stableReductionWriteString(h, part.Text)
-		stableReductionWriteString(h, part.DisplayText)
-		stableReductionWriteString(h, part.InlineToken)
-		stableReductionWriteString(h, part.MimeType)
-		stableReductionWriteBytes(h, part.Data)
-		// A restored part keeps Data empty and its size on DataBytes, so the
-		// fingerprint distinguishes it from a part with no payload at all.
-		if len(part.Data) == 0 {
-			stableReductionWriteInt(h, int(part.DataBytes))
-		}
-		stableReductionWriteString(h, part.ImagePath)
-		stableReductionWriteString(h, part.FileName)
-	}
-	return stableReductionHashBytes(h.Sum(nil))
-}
-
-func stableReductionThinkingBlocksHash(blocks []message.ThinkingBlock) [sha256.Size]byte {
-	if len(blocks) == 0 {
-		return stableReductionEmptySequenceHash
-	}
-	h := sha256.New()
-	stableReductionWriteInt(h, len(blocks))
-	for _, block := range blocks {
-		stableReductionWriteString(h, block.Thinking)
-		stableReductionWriteString(h, block.Signature)
-		stableReductionWriteString(h, block.Data)
-	}
-	return stableReductionHashBytes(h.Sum(nil))
-}
-
-func stableReductionToolCallsHash(calls []message.ToolCall) [sha256.Size]byte {
-	if len(calls) == 0 {
-		return stableReductionEmptySequenceHash
-	}
-	h := sha256.New()
-	stableReductionWriteInt(h, len(calls))
-	for _, call := range calls {
-		stableReductionWriteString(h, call.ID)
-		stableReductionWriteString(h, call.Name)
-		stableReductionWriteBytes(h, call.Args)
-		stableReductionWriteString(h, call.ThoughtSignature)
-	}
-	return stableReductionHashBytes(h.Sum(nil))
-}
-
-func stableReductionResponsesOutputHash(items []message.ResponsesOutputItem) [sha256.Size]byte {
-	if len(items) == 0 {
-		return stableReductionEmptySequenceHash
-	}
-	h := sha256.New()
-	stableReductionWriteInt(h, len(items))
-	for _, item := range items {
-		stableReductionWriteString(h, item.Type)
-		stableReductionWriteString(h, item.ID)
-		stableReductionWriteString(h, item.CallID)
-		stableReductionWriteString(h, item.Role)
-		stableReductionWriteString(h, item.Name)
-		stableReductionWriteString(h, item.Arguments)
-		stableReductionWriteString(h, item.Phase)
-		stableReductionWriteString(h, item.EncryptedContent)
-		stableReductionWriteInt(h, len(item.Content))
-		for _, content := range item.Content {
-			stableReductionWriteString(h, content.Type)
-			stableReductionWriteString(h, content.Text)
-			stableReductionWriteString(h, content.Refusal)
-		}
-		stableReductionWriteInt(h, len(item.Summary))
-		for _, summary := range item.Summary {
-			stableReductionWriteString(h, summary.Type)
-			stableReductionWriteString(h, summary.Text)
-		}
-	}
-	return stableReductionHashBytes(h.Sum(nil))
-}
-
-func stableReductionGeminiPartsHash(parts []message.GeminiReplayPart) [sha256.Size]byte {
-	if len(parts) == 0 {
-		return stableReductionEmptySequenceHash
-	}
-	h := sha256.New()
-	stableReductionWriteInt(h, len(parts))
-	for _, part := range parts {
-		stableReductionWriteString(h, part.Type)
-		stableReductionWriteString(h, part.Text)
-		stableReductionWriteString(h, part.ToolCallID)
-		stableReductionWriteString(h, part.ThoughtSignature)
-	}
-	return stableReductionHashBytes(h.Sum(nil))
-}
-
-func responsesOutputItemsEqual(a, b []message.ResponsesOutputItem) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].Type != b[i].Type || a[i].ID != b[i].ID || a[i].CallID != b[i].CallID || a[i].Role != b[i].Role || a[i].Name != b[i].Name || a[i].Arguments != b[i].Arguments || a[i].Phase != b[i].Phase || a[i].EncryptedContent != b[i].EncryptedContent || !slices.Equal(a[i].Content, b[i].Content) || !slices.Equal(a[i].Summary, b[i].Summary) {
-			return false
-		}
-	}
-	return true
-}
-
-func stableReductionHashBytes(value []byte) [sha256.Size]byte {
-	return sha256.Sum256(value)
-}
-
-func stableReductionWriteString(h interface{ Write([]byte) (int, error) }, value string) {
-	stableReductionWriteBytes(h, []byte(value))
-}
-
-func stableReductionWriteBytes(h interface{ Write([]byte) (int, error) }, value []byte) {
-	stableReductionWriteInt(h, len(value))
-	_, _ = h.Write(value)
-}
-
-func stableReductionWriteInt(h interface{ Write([]byte) (int, error) }, value int) {
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], uint64(value))
-	_, _ = h.Write(buf[:])
+	return requestshape.ShapesCompatible(previous.Shape, currentPrefix)
 }
 
 func (a *MainAgent) tryReuseStableReductionSurfaceBeforeFullScan(messages []message.Message, policy requesttrim.Policy, scan *requesttrim.Scan, currentBatch uint64, externalInvalidated map[int]bool) ([]message.Message, ContextReductionStats, bool) {
@@ -2222,7 +1868,7 @@ func cloneMessageSliceForRequestShape(messages []message.Message) []message.Mess
 // (modelcompat.NormalizeForTarget), and every stored-prefix consumer treats it
 // as read-only — so an in-place edit cannot leak into storage.
 //
-// "Field-equal" is stableReductionMessageEquivalent, which compares the
+// "Field-equal" is requestshape.MessageEquivalent, which compares the
 // reduction shape: the role, content, tool calls, provenance and parts the
 // shape hash covers. Bookkeeping fields outside that set — FileState,
 // LSPReviews, ToolPayload, ToolNotes, Usage, StopReason, MCPTools — are not
@@ -2235,7 +1881,7 @@ func cowRequestShapeSlice(previous, prepared []message.Message) []message.Messag
 	}
 	cloned := make([]message.Message, len(prepared))
 	for i := range prepared {
-		if i < len(previous) && stableReductionMessageEquivalent(&previous[i], &prepared[i]) {
+		if i < len(previous) && requestshape.MessageEquivalent(&previous[i], &prepared[i]) {
 			cloned[i] = previous[i]
 			continue
 		}
@@ -2252,15 +1898,4 @@ func countToolResults(messages []message.Message) int {
 		}
 	}
 	return total
-}
-
-func deliveryMetadataHash(m message.Message) [32]byte {
-	if len(m.DeliveredFiles) == 0 && len(m.CompactionDeliveredFiles) == 0 && m.FileLinkBaseDir == "" {
-		return [32]byte{}
-	}
-	raw, _ := json.Marshal(struct {
-		Files, Checkpoint []message.DeliveredFile
-		Base              string
-	}{m.DeliveredFiles, m.CompactionDeliveredFiles, m.FileLinkBaseDir})
-	return requesttrim.ContentHash(string(raw))
 }

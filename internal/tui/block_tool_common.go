@@ -12,9 +12,11 @@ import (
 	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/toolname"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 var (
@@ -22,10 +24,6 @@ var (
 	// The ,count part is omitted by unified diff when the count is 1 (@@ -1 +1 @@),
 	// so both counts are optional and only the start line numbers are captured.
 	diffHunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
-
-	// diffAddBg / diffDelBg: subtle line backgrounds (opencode-style) so syntax highlighting stays readable.
-	diffAddBg = currentTheme.DiffAddLineBg
-	diffDelBg = currentTheme.DiffDelLineBg
 
 	lspDiagLineRe = regexp.MustCompile(`^\s*\d+:\d+`)
 
@@ -97,7 +95,7 @@ func newToolCardMetricsWithContentCap(width, contentCap int) toolCardMetrics {
 }
 
 func newToolCardMetricsForHeaderWidth(width, contentCap int) toolCardMetrics {
-	blockStyle := ToolBlockStyle
+	blockStyle := currentStyles.ToolBlockStyle
 	// Reserve a column for the conversation rail (a foreground-only "│" prepended
 	// outside the card width by wrapLineWithBackgroundAndRail). Without this, a
 	// full-width card (e.g. wide-header read/shell cards, or any card on a narrow
@@ -107,7 +105,7 @@ func newToolCardMetricsForHeaderWidth(width, contentCap int) toolCardMetrics {
 	contentWidth := max(min(cardWidth-4, contentCap), 10)
 	return toolCardMetrics{
 		blockStyle:   blockStyle,
-		toolCardBg:   currentTheme.ToolCallBg,
+		toolCardBg:   currentStyles.Palette.ToolCallBg,
 		cardWidth:    cardWidth,
 		contentWidth: contentWidth,
 	}
@@ -207,7 +205,7 @@ func toolCollapsedSummaryText(s string) string {
 	if trimmed == "" {
 		return ""
 	}
-	trimmed = markdownutil.NormalizeNewlines(trimmed)
+	trimmed = textclean.NormalizeNewlines(trimmed)
 	lines := strings.Split(trimmed, "\n")
 	parts := make([]string, 0, 2)
 	for _, line := range lines {
@@ -236,7 +234,7 @@ func appendCollapsedSummaryLines(result *[]string, summary string, width int, st
 	if trimmed == "" {
 		return
 	}
-	oneLine := truncateOneLine(toolCollapsedSummaryText(trimmed), width)
+	oneLine := terminaltext.TruncateOneLine(toolCollapsedSummaryText(trimmed), width)
 	if oneLine == "" {
 		return
 	}
@@ -257,11 +255,11 @@ func toolExpandedTextLines(s string, width int) []string {
 	if trimmed == "" {
 		return nil
 	}
-	return wrapText(trimmed, width)
+	return terminaltext.Wrap(trimmed, width)
 }
 
 func toolCardTitle(label string, id int) string {
-	return ToolLabelStyle.Render(blockLabelWithID(label, id))
+	return currentStyles.ToolLabelStyle.Render(blockLabelWithID(label, id))
 }
 
 func toolCollapsedVisibleLineCount(s string, width int) int {
@@ -269,7 +267,7 @@ func toolCollapsedVisibleLineCount(s string, width int) int {
 	if trimmed == "" {
 		return 0
 	}
-	return len(wrapText(trimmed, width))
+	return len(terminaltext.Wrap(trimmed, width))
 }
 
 func toolExpandedResultLines(displayResult string, width int, expanded bool) ([]string, int) {
@@ -281,14 +279,14 @@ func toolExpandedResultLines(displayResult string, width int, expanded bool) ([]
 	if expanded {
 		out := make([]string, 0, len(resLines))
 		for _, line := range resLines {
-			out = append(out, wrapText(line, width)...)
+			out = append(out, terminaltext.Wrap(line, width)...)
 		}
 		return out, 0
 	}
 
 	out := make([]string, 0, maxToolCallCompactResultLines)
 	for i, line := range resLines {
-		wrapped := wrapText(line, width)
+		wrapped := terminaltext.Wrap(line, width)
 		remaining := maxToolCallCompactResultLines - len(out)
 		if len(wrapped) <= remaining {
 			out = append(out, wrapped...)
@@ -330,14 +328,14 @@ func toolFieldLabel(style lipgloss.Style, label string) string {
 // toolFieldSection renders a labelled row whose content follows on later
 // lines: "  ↳ Message:".
 func toolFieldSection(style lipgloss.Style, label string) string {
-	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(style, label)
+	return toolFieldLead + currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(style, label)
 }
 
 // toolFieldSectionMarked renders a labelled section row with a leading status
 // mark: "  ↳ ✗ Edit 2:". The mark keeps the status colour and the label the
 // section style, instead of nesting one style's ANSI inside the other.
 func toolFieldSectionMarked(style, markStyle lipgloss.Style, mark, label string) string {
-	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) +
+	return toolFieldLead + currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector) +
 		markStyle.Render(mark) + " " + style.Bold(true).Render(label+":")
 }
 
@@ -348,7 +346,7 @@ func toolFieldInline(style lipgloss.Style, label, value string) string {
 	if value == "" {
 		return toolFieldSection(style, label)
 	}
-	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) +
+	return toolFieldLead + currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector) +
 		toolFieldLabel(style, label) + " " + style.Render(value)
 }
 
@@ -358,9 +356,9 @@ func toolFieldInline(style lipgloss.Style, label, value string) string {
 // along and marks the row as a field rather than as content.
 func toolFieldNestedInline(style lipgloss.Style, label, value string) string {
 	if value == "" {
-		return toolFieldBodyIndent + ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(style, label)
+		return toolFieldBodyIndent + currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(style, label)
 	}
-	return toolFieldBodyIndent + ToolFieldConnectorStyle.Render(toolFieldConnector) +
+	return toolFieldBodyIndent + currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector) +
 		toolFieldLabel(style, label) + " " + style.Render(value)
 }
 
@@ -369,7 +367,7 @@ func toolFieldNestedInline(style lipgloss.Style, label, value string) string {
 // set comes from one place: a marker is not a field, but it still hangs off
 // the header and must not invent a colon to say so.
 func toolFieldMarker(style lipgloss.Style, text string) string {
-	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) + style.Render(text)
+	return toolFieldLead + currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector) + style.Render(text)
 }
 
 // toolFieldStandalone renders a row that is its own content and takes no
@@ -377,7 +375,7 @@ func toolFieldMarker(style lipgloss.Style, text string) string {
 // of a finished call stand alone, so a colon would promise a value that never
 // arrives — see the rule recorded on appendToolOutcomeBody.
 func toolFieldStandalone(style lipgloss.Style, text string) string {
-	return toolFieldLead + ToolFieldConnectorStyle.Render(toolFieldConnector) + style.Bold(true).Render(text)
+	return toolFieldLead + currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector) + style.Bold(true).Render(text)
 }
 
 // toolFieldBody renders one wrapped line of a field row's content, indented
@@ -395,7 +393,7 @@ func toolSummaryLine(line string) string {
 	if line == "" {
 		return ""
 	}
-	return toolFieldInline(ToolResultExpandedStyle, "Status", line)
+	return toolFieldInline(currentStyles.ToolResultExpandedStyle, "Status", line)
 }
 
 func toolCancelledDetailText(result string) string {
@@ -482,9 +480,9 @@ func toolOutcomeFoldable(b *Block, contentWidth int) bool {
 	}
 	if toolOutcomeNonEmptyLineCount(body) < 2 {
 		inlineWidth := max(contentWidth-len(toolFieldConnector+toolOutcomeLabel(kind)+": "), 12)
-		return len(wrapText(body, inlineWidth)) > 1
+		return len(terminaltext.Wrap(body, inlineWidth)) > 1
 	}
-	return len(wrapText(body, max(contentWidth, 1))) > collapsedToolOutcomeMaxLines
+	return len(terminaltext.Wrap(body, max(contentWidth, 1))) > collapsedToolOutcomeMaxLines
 }
 
 // appendToolOutcomeBody renders the one failure/cancellation surface every
@@ -507,10 +505,10 @@ func appendToolOutcomeBody(result *[]string, kind toolOutcomeKind, content strin
 	if kind == toolOutcomeNone {
 		return
 	}
-	style := ErrorStyle
+	style := currentStyles.ErrorStyle
 	label := toolOutcomeLabel(kind)
 	if kind == toolOutcomeCancelled {
-		style = DimStyle
+		style = currentStyles.DimStyle
 	}
 	body := toolOutcomeBodyText(kind, content)
 	if body == "" {
@@ -532,15 +530,15 @@ func appendToolOutcomeBody(result *[]string, kind toolOutcomeKind, content strin
 		// expanded card keeps it too — unless inlining would truncate text the
 		// expansion exists to reveal, in which case the body falls through to
 		// the wrapped section below.
-		if !expanded || len(wrapText(body, width)) <= 1 {
-			if oneLine := truncateOneLine(toolCollapsedSummaryText(body), width); oneLine != "" {
+		if !expanded || len(terminaltext.Wrap(body, width)) <= 1 {
+			if oneLine := terminaltext.TruncateOneLine(toolCollapsedSummaryText(body), width); oneLine != "" {
 				*result = append(*result, toolFieldInline(style, label, oneLine))
 			}
 			return
 		}
 	}
 	*result = append(*result, toolFieldSection(style, label))
-	lines := wrapText(body, contentWidth)
+	lines := terminaltext.Wrap(body, contentWidth)
 	if !expanded {
 		appendBoundedOutcomeLines(result, style, lines, contentWidth)
 		return
@@ -576,7 +574,7 @@ func appendBoundedOutcomeLines(result *[]string, style lipgloss.Style, lines []s
 	}
 	if hidden > 0 {
 		hint := fmt.Sprintf("... %d more lines, press space to expand.", hidden)
-		*result = append(*result, DimStyle.Render("    "+truncateOneLine(hint, max(contentWidth, 12))))
+		*result = append(*result, currentStyles.DimStyle.Render("    "+terminaltext.TruncateOneLine(hint, max(contentWidth, 12))))
 	}
 }
 
@@ -660,10 +658,10 @@ func appendToolHeaderSuffix(headerLine, suffix string, maxWidth int) string {
 	if maxWidth <= 0 {
 		return headerLine + suffix
 	}
-	if runewidth.StringWidth(stripANSI(headerLine+suffix)) <= maxWidth {
+	if runewidth.StringWidth(terminaltext.StripANSI(headerLine+suffix)) <= maxWidth {
 		return headerLine + suffix
 	}
-	suffixWidth := runewidth.StringWidth(stripANSI(suffix))
+	suffixWidth := runewidth.StringWidth(terminaltext.StripANSI(suffix))
 	if suffixWidth >= maxWidth {
 		return headerLine
 	}
@@ -672,7 +670,7 @@ func appendToolHeaderSuffix(headerLine, suffix string, maxWidth int) string {
 		return headerLine
 	}
 	truncatedHeader := ansi.Truncate(headerLine, headerBudget, "…")
-	if runewidth.StringWidth(stripANSI(truncatedHeader+suffix)) <= maxWidth {
+	if runewidth.StringWidth(terminaltext.StripANSI(truncatedHeader+suffix)) <= maxWidth {
 		return truncatedHeader + suffix
 	}
 	return truncateToolHeaderForSuffix(headerLine, suffix, maxWidth, headerBudget)
@@ -690,14 +688,14 @@ func toolElapsedSuffixText(elapsed string) string {
 // appendToolElapsedSuffix appends " · ⏱ <elapsed>" to a header line, truncating
 // the header with "…" when needed so the elapsed stays visible within maxWidth.
 func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
-	return appendToolHeaderSuffix(headerLine, DimStyle.Render(toolElapsedSuffixText(elapsed)), maxWidth)
+	return appendToolHeaderSuffix(headerLine, currentStyles.DimStyle.Render(toolElapsedSuffixText(elapsed)), maxWidth)
 }
 
 // truncateToolHeaderForSuffix shrinks a styled tool header line until
 // line+suffix fits maxWidth, keeping the header's SGR sequences intact.
 //
 // This must stay ANSI-aware. The previous fallback stripped the sequences with
-// stripANSI and returned a plain header, which silently dropped the tool-name
+// terminaltext.StripANSI and returned a plain header, which silently dropped the tool-name
 // colour: only the widest headers reach this branch, and mcp_* names are both
 // the longest and carry the longest inline parameter summary, so they lost
 // their colour while short built-in names kept it — a visible per-tool colour
@@ -708,7 +706,7 @@ func appendToolElapsedSuffix(headerLine, elapsed string, maxWidth int) string {
 func truncateToolHeaderForSuffix(headerLine, suffix string, maxWidth, headerBudget int) string {
 	for budget := headerBudget; budget >= 1; budget-- {
 		truncated := ansi.Truncate(headerLine, budget, "…")
-		if runewidth.StringWidth(stripANSI(truncated+suffix)) <= maxWidth {
+		if runewidth.StringWidth(terminaltext.StripANSI(truncated+suffix)) <= maxWidth {
 			return truncated + suffix
 		}
 	}
@@ -749,7 +747,7 @@ func bashCollapsedOutcomeSummary(b *Block) string {
 		content := strings.TrimSpace(b.stripResultNotes(b.ResultContent))
 		if toolOutcomeNonEmptyLineCount(content) == 1 {
 			if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorText(content))); line != "" {
-				return truncateOneLine(line, 120)
+				return terminaltext.TruncateOneLine(line, 120)
 			}
 		}
 		if timedOut := sanitizeToolDisplayText(bashTimeoutSummary(content)); timedOut != "" {
@@ -759,16 +757,16 @@ func bashCollapsedOutcomeSummary(b *Block) string {
 			return exit
 		}
 		if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(bashErrorText(content))); line != "" {
-			return truncateOneLine(line, 120)
+			return terminaltext.TruncateOneLine(line, 120)
 		}
 		return "failed"
 	}
 	_, stdout := bashSplitResultStreams(b)
 	if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(stdout)); line != "" {
-		return truncateOneLine(line, 120)
+		return terminaltext.TruncateOneLine(line, 120)
 	}
 	if line := bashFirstNonEmptyLine(sanitizeToolDisplayText(strings.TrimSpace(b.stripResultNotes(b.ResultContent)))); line != "" {
-		return truncateOneLine(line, 120)
+		return terminaltext.TruncateOneLine(line, 120)
 	}
 	return "completed"
 }
@@ -882,7 +880,7 @@ func bashErrorText(content string) string {
 // carry the trailing "Error: " marker prefix are stripped first so the exit
 // code inside them is still found.
 func bashExitCodeAnywhere(content string) string {
-	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(content), "\n") {
+	for line := range strings.SplitSeq(textclean.NormalizeNewlines(content), "\n") {
 		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "Error: "))
 		if !strings.HasPrefix(line, "exit code ") {
 			continue
@@ -899,7 +897,7 @@ func bashExitCodeAnywhere(content string) string {
 }
 
 func bashFirstNonEmptyLine(content string) string {
-	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(content), "\n") {
+	for line := range strings.SplitSeq(textclean.NormalizeNewlines(content), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			return line
@@ -1132,7 +1130,7 @@ func renderQueuedToolHeaderBadge(line string, width int) string {
 	const badgeText = "Queued"
 	const rightPadding = 1
 	trimmed := strings.TrimRight(line, " ")
-	badge := DimStyle.Render(badgeText)
+	badge := currentStyles.DimStyle.Render(badgeText)
 	badgeWidth := runewidth.StringWidth(badgeText)
 	lineWidth := ansi.StringWidth(trimmed)
 	if lineWidth == 0 {
@@ -1149,7 +1147,7 @@ func renderQueuedToolHeaderBadge(line string, width int) string {
 }
 
 func sanitizeToolDisplayText(s string) string {
-	return sanitizeDisplayText(s)
+	return terminaltext.Sanitize(s)
 }
 
 func toolErrorDisplayContent(content string) string {
@@ -1207,7 +1205,7 @@ func parseReadDisplayLines(result string, startLine int) ([]readDisplayLine, str
 }
 
 func isReadArtifactFooter(line string) bool {
-	refs := tools.ExtractArtifactReferences(line)
+	refs := tooloutput.ExtractArtifactReferences(line)
 	return len(refs) == 1 && strings.TrimSpace(line) == refs[0]
 }
 
@@ -1297,7 +1295,7 @@ func parseGrepResultMeta(result string) grepResultMeta {
 		meta.EmptyResult = true
 		return meta
 	}
-	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(trimmed), "\n") {
+	for line := range strings.SplitSeq(textclean.NormalizeNewlines(trimmed), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1348,7 +1346,7 @@ func parseGlobResultMeta(result string) globResultMeta {
 	if trimmed == "" {
 		return meta
 	}
-	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(trimmed), "\n") {
+	for line := range strings.SplitSeq(textclean.NormalizeNewlines(trimmed), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
@@ -1381,7 +1379,7 @@ func parseDiffResultMeta(diff string) diffResultMeta {
 		return meta
 	}
 	seenFiles := map[string]struct{}{}
-	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(diff), "\n") {
+	for line := range strings.SplitSeq(textclean.NormalizeNewlines(diff), "\n") {
 		switch {
 		case strings.HasPrefix(line, "--- "):
 			path := strings.TrimSpace(strings.TrimPrefix(line, "--- "))
@@ -1430,24 +1428,24 @@ func renderLSPDiagnosticsLines(content, indent string, width int) []string {
 		if m := lspSeverityRe.FindStringSubmatch(line); len(m) == 2 {
 			switch m[1] {
 			case "E":
-				st = LSPErrorStyle
+				st = currentStyles.LSPErrorStyle
 			case "W":
-				st = LSPWarnStyle
+				st = currentStyles.LSPWarnStyle
 			case "I":
-				st = LSPInfoStyle
+				st = currentStyles.LSPInfoStyle
 			default:
-				st = LSPHintStyle
+				st = currentStyles.LSPHintStyle
 			}
 		} else if lspDiagnosticsOmittedLineRe.MatchString(line) {
-			st = DimStyle
+			st = currentStyles.DimStyle
 		} else if strings.Contains(line, "LSP:") || strings.Contains(line, "LSP errors detected") || strings.Contains(line, "<diagnostics") || lspDiagLineRe.MatchString(strings.TrimSpace(line)) {
-			st = LSPErrorStyle
+			st = currentStyles.LSPErrorStyle
 		} else {
-			st = ToolResultExpandedStyle
+			st = currentStyles.ToolResultExpandedStyle
 		}
 		displayLine := sanitizeToolDisplayText(strings.TrimSuffix(line, "\r"))
-		displayLine = expandTabsForDisplay(displayLine, preformattedTabWidth)
-		for _, w := range wrapText(displayLine, width) {
+		displayLine = terminaltext.ExpandTabs(displayLine, terminaltext.TabWidth)
+		for _, w := range terminaltext.Wrap(displayLine, width) {
 			out = append(out, st.Render(indent+w))
 		}
 	}

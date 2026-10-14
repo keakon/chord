@@ -1,0 +1,223 @@
+package filefilter
+
+import (
+	"bufio"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestSkipDirNames(t *testing.T) {
+	for _, name := range []string{".git", ".svn", ".hg", ".bzr", ".jj", ".sl", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".pyre", ".pytype", ".venv", "venv", "env", "node_modules", "dist", "build", "target", "out", ".cache", ".idea"} {
+		if !skipDirNames[name] {
+			t.Errorf("skipDirNames[%q] = false, want true", name)
+		}
+	}
+	// Non-skipped dot directories should not be in the map.
+	for _, name := range []string{".chord", ".github", ".vscode", ".config"} {
+		if skipDirNames[name] {
+			t.Errorf("skipDirNames[%q] = true, want false", name)
+		}
+	}
+}
+
+// TestGitIgnoreMatcherNeverIgnoresRoot guards against hidden-file patterns
+// like ".*" matching the literal "." for the search root itself, which used
+// to make Grep silently skip the entire tree of any repo whose .gitignore
+// hides dotfiles.
+func TestGitIgnoreMatcherNeverIgnoresRoot(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := `.*
+!.gitignore
+`
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewGitIgnoreMatcher(dir)
+	if m == nil {
+		t.Fatal("expected non-nil matcher")
+	}
+	if m.Match(".", true) {
+		t.Fatal(`Match(".", true) = true; the search root itself must never be ignored`)
+	}
+	if m.Match("", true) {
+		t.Fatal(`Match("", true) = true; empty rel path must never be ignored`)
+	}
+	if !m.Match(".hidden", false) {
+		t.Fatal(`Match(".hidden", false) = false, want true for dotfile pattern`)
+	}
+	if m.Match("main.go", false) {
+		t.Fatal(`Match("main.go", false) = true, want false`)
+	}
+}
+
+func TestGitIgnoreMatcherSimple(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := `.chord/
+node_modules/
+*.log
+!important.log
+build/
+`
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewGitIgnoreMatcher(dir)
+	if m == nil {
+		t.Fatal("expected non-nil matcher")
+	}
+
+	tests := []struct {
+		path  string
+		isDir bool
+		want  bool
+	}{
+		{".chord/sessions/123/main.jsonl", false, true},
+		{".chord", true, true},
+		{"node_modules/react/index.js", false, true},
+		{"node_modules", true, true},
+		{"app.log", false, true},
+		{"important.log", false, false}, // negated
+		{"build/output.js", false, true},
+		{"build", true, true},
+		{"main.go", false, false},
+		{"internal/tools/grep.go", false, false},
+	}
+
+	for _, tt := range tests {
+		got := m.Match(tt.path, tt.isDir)
+		if got != tt.want {
+			t.Errorf("Match(%q, %v) = %v, want %v", tt.path, tt.isDir, got, tt.want)
+		}
+	}
+}
+
+func TestGitIgnoreMatcherDirOnly(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := "docs/\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewGitIgnoreMatcher(dir)
+
+	// "docs/" matches directories but not files named "docs".
+	if !m.Match("docs", true) {
+		t.Error("Match(\"docs\", true) = false, want true")
+	}
+	if m.Match("docs", false) {
+		t.Error("Match(\"docs\", false) = true, want false")
+	}
+}
+
+func TestGitIgnoreMatcherWithSlash(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := "src/generated/\n/docs/\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewGitIgnoreMatcher(dir)
+
+	// "src/generated/" should match "src/generated" as a dir.
+	if !m.Match("src/generated", true) {
+		t.Error("Match(\"src/generated\", true) = false, want true")
+	}
+	// "/docs/" should match "docs" as a dir (anchored to root).
+	if !m.Match("docs", true) {
+		t.Error("Match(\"docs\", true) = false, want true")
+	}
+	// "/docs/" should not match "src/docs" (anchored).
+	if m.Match("src/docs", true) {
+		t.Error("Match(\"src/docs\", true) = true, want false")
+	}
+}
+
+func TestGitIgnoreMatcherDoublestar(t *testing.T) {
+	dir := t.TempDir()
+	gitignore := "src/**/generated/\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewGitIgnoreMatcher(dir)
+
+	if !m.Match("src/generated", true) {
+		t.Error("Match(\"src/generated\", true) = false, want true")
+	}
+	if !m.Match("src/foo/generated", true) {
+		t.Error("Match(\"src/foo/generated\", true) = false, want true")
+	}
+	if !m.Match("src/foo/bar/generated", true) {
+		t.Error("Match(\"src/foo/bar/generated\", true) = false, want true")
+	}
+	if m.Match("generated", true) {
+		t.Error("Match(\"generated\", true) = true, want false")
+	}
+}
+
+func TestGitIgnoreMatcherNoFile(t *testing.T) {
+	dir := t.TempDir()
+	m := NewGitIgnoreMatcher(dir)
+	if m != nil {
+		t.Error("expected nil matcher when no .gitignore exists")
+	}
+}
+
+// TestGitIgnoreMatcherKeepsParsedRulesOnScanError guards against a .gitignore
+// line longer than bufio.MaxScanTokenSize aborting the read: the rules parsed
+// before the oversized line must stay effective instead of the whole matcher
+// being dropped (which silently exposed ignored files to Grep/Glob).
+func TestGitIgnoreMatcherKeepsParsedRulesOnScanError(t *testing.T) {
+	dir := t.TempDir()
+	longLine := "# " + strings.Repeat("x", bufio.MaxScanTokenSize+1)
+	gitignore := "node_modules/\n" + longLine + "\n*.log\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(gitignore), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewGitIgnoreMatcher(dir)
+	if m == nil {
+		t.Fatal("expected non-nil matcher despite oversized line")
+	}
+	if !m.Match("node_modules/react/index.js", false) {
+		t.Error("rule parsed before the oversized line was dropped")
+	}
+	// The rule after the oversized line must be absent: scanning stopped.
+	if m.Match("app.log", false) {
+		t.Error("rule after the oversized line unexpectedly applied")
+	}
+}
+
+func TestIsExcludedPath(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{".git/HEAD", true},
+		{".git", true},
+		{".chord/sessions/123/main.jsonl", false},
+		{".svn/wc.db", true},
+		{".hg/store/00manifest.i", true},
+		{"src/main.go", false},
+		{".github/workflows/ci.yml", false},
+		{".vscode/settings.json", false},
+		{".venv/lib/python3.12/site-packages/requests/__init__.py", true},
+		{"node_modules/react/index.js", true},
+		{"build/output.js", true},
+		{"dist/bundle.min.js", true},
+		{"target/debug/main", true},
+		{"out/bin/app", true},
+		{".cache/go-build/abc", true},
+		{".idea/workspace.xml", true},
+	}
+	for _, tt := range tests {
+		got := IsExcludedPath(tt.path)
+		if got != tt.want {
+			t.Errorf("IsExcludedPath(%q) = %v, want %v", tt.path, got, tt.want)
+		}
+	}
+}

@@ -6,13 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	"github.com/keakon/lipgloss/v2"
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/markdownrender"
+	"github.com/keakon/chord/internal/tui/syntax"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 var osc8Regex = regexp.MustCompile(`\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)`)
@@ -185,16 +187,16 @@ func TestThinkingContentIsPlaceholder(t *testing.T) {
 }
 
 func TestRenderThinkingMarkdown_SectionTitlesOwnParagraph(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	// The first title is glued to the preceding sentence, the second rides a lone
 	// newline; both must end up on their own line instead of merging into the
 	// paragraph before them.
 	in := "First paragraph.**Planning job wait outcomes**\n\nBody one.\n**Clarifying job completion handling**\n\nBody two."
-	lines := renderMarkdownContent(preprocessThinkingMarkdown(in), 200)
+	lines := contentMarkdown.Render(preprocessThinkingMarkdown(in), 200)
 	for _, title := range []string{"Planning job wait outcomes", "Clarifying job completion handling"} {
 		found := false
 		for _, line := range lines {
-			plain := strings.TrimSpace(stripANSI(line))
+			plain := strings.TrimSpace(terminaltext.StripANSI(line))
 			if plain == title {
 				found = true
 				break
@@ -210,7 +212,7 @@ func TestRenderThinkingMarkdown_SectionTitlesOwnParagraph(t *testing.T) {
 }
 
 func TestRenderThinkingHeadingOnlyRendersNothing(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{Type: BlockThinking, Content: "**Planning job quiet duration display**"}
 	if lines := block.Render(80, ""); len(lines) != 0 {
 		t.Fatalf("heading-only thinking should render nothing, got %q", lines)
@@ -235,14 +237,14 @@ func TestStyleRenderedThinkingLines_ParagraphTitles(t *testing.T) {
 }
 
 func TestStyleRenderedThinkingLinesItalicPreservesCJKWidth(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	mdLines := []string{"Thinking...", "Validate the cache next"}
 	out := styleRenderedThinkingLines(mdLines)
 	if len(out) != len(mdLines) {
 		t.Fatalf("len=%d want %d", len(out), len(mdLines))
 	}
 	for i, line := range out {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if !strings.Contains(plain, mdLines[i]) {
 			t.Fatalf("plain line %d = %q, want to contain %q", i, plain, mdLines[i])
 		}
@@ -253,8 +255,8 @@ func TestStyleRenderedThinkingLinesItalicPreservesCJKWidth(t *testing.T) {
 }
 
 func TestStyleRenderedThinkingLinesPreservesBodyItalicAcrossInlineMarkdownResets(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	bodyLines := renderMarkdownContent("Body with **bold** and `code` tail", 80)
+	ApplyTheme(uitheme.Default())
+	bodyLines := contentMarkdown.Render("Body with **bold** and `code` tail", 80)
 	if len(bodyLines) != 1 {
 		t.Fatalf("markdown line count=%d want 1", len(bodyLines))
 	}
@@ -263,7 +265,7 @@ func TestStyleRenderedThinkingLinesPreservesBodyItalicAcrossInlineMarkdownResets
 		t.Fatalf("len=%d want 2", len(styled))
 	}
 
-	buf := newScreenBuffer(ansi.StringWidth(stripANSI(styled[1])), 1)
+	buf := newScreenBuffer(ansi.StringWidth(terminaltext.StripANSI(styled[1])), 1)
 	uv.NewStyledString(styled[1]).Draw(buf, buf.Bounds())
 	line := buf.Line(0)
 
@@ -292,8 +294,8 @@ func TestStyleRenderedThinkingLinesPreservesBodyItalicAcrossInlineMarkdownResets
 }
 
 func TestStyleRenderedThinkingLinesPreservesTitleBoldAcrossInlineMarkdownResets(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	titleLines := renderMarkdownContent("**Planning** `cache`", 80)
+	ApplyTheme(uitheme.Default())
+	titleLines := contentMarkdown.Render("**Planning** `cache`", 80)
 	if len(titleLines) != 1 {
 		t.Fatalf("markdown line count=%d want 1", len(titleLines))
 	}
@@ -302,7 +304,7 @@ func TestStyleRenderedThinkingLinesPreservesTitleBoldAcrossInlineMarkdownResets(
 		t.Fatalf("len=%d want 1", len(styled))
 	}
 
-	buf := newScreenBuffer(ansi.StringWidth(stripANSI(styled[0])), 1)
+	buf := newScreenBuffer(ansi.StringWidth(terminaltext.StripANSI(styled[0])), 1)
 	uv.NewStyledString(styled[0]).Draw(buf, buf.Bounds())
 	line := buf.Line(0)
 
@@ -337,12 +339,12 @@ func TestSplitAssistantMarkdownSegmentsCapturesFenceLanguage(t *testing.T) {
 }
 
 func TestRenderAssistantCodeFenceShowsTextBadgeWithoutHighlight(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	seg := assistantMarkdownSegment{raw: "```text\nAGENTS.md\n```", code: true, fenceLang: "text"}
 	var hl *syntax.Highlighter
 	lines, _, _ := renderAssistantCodeFence(seg, "AGENTS.md", 24, 2, &hl)
 	joinedANSI := strings.Join(lines, "\n")
-	joinedPlain := stripANSI(joinedANSI)
+	joinedPlain := terminaltext.StripANSI(joinedANSI)
 	if !strings.Contains(joinedPlain, "TEXT") {
 		t.Fatalf("expected TEXT badge, got %q", joinedPlain)
 	}
@@ -352,7 +354,7 @@ func TestRenderAssistantCodeFenceShowsTextBadgeWithoutHighlight(t *testing.T) {
 }
 
 func TestRenderAssistantCodeFenceUsesExplicitLanguageLexer(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	// This short prefix does not identify Go through content analysis; the fence
 	// language must reach the highlighter even before a complete statement arrives.
 	const source = "func"
@@ -373,28 +375,28 @@ func TestRenderAssistantCodeFenceUsesExplicitLanguageLexer(t *testing.T) {
 	line := renderedLineContaining(t, lines, source)
 	foreground := renderedCellsForText(t, explicit, source)[0].Style.Fg
 	assertRenderedTextForeground(t, line, source, foreground)
-	joinedPlain := stripANSI(strings.Join(lines, "\n"))
+	joinedPlain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joinedPlain, "GO") {
 		t.Fatalf("expected GO badge, got %q", joinedPlain)
 	}
 }
 
 func TestRenderAssistantCodeFenceAddsHorizontalPadding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	seg := assistantMarkdownSegment{raw: "```text\nhello\n```", code: true, fenceLang: "text"}
 	var hl *syntax.Highlighter
 	lines, synthetic, _ := renderAssistantCodeFence(seg, "hello", 16, 2, &hl)
 	if len(lines) < 5 {
 		t.Fatalf("len=%d want >=5", len(lines))
 	}
-	if strings.TrimSpace(stripANSI(lines[0])) != "" || strings.TrimSpace(stripANSI(lines[len(lines)-1])) != "" {
-		t.Fatalf("top/bottom padding lines should be blank: first=%q last=%q", stripANSI(lines[0]), stripANSI(lines[len(lines)-1]))
+	if strings.TrimSpace(terminaltext.StripANSI(lines[0])) != "" || strings.TrimSpace(terminaltext.StripANSI(lines[len(lines)-1])) != "" {
+		t.Fatalf("top/bottom padding lines should be blank: first=%q last=%q", terminaltext.StripANSI(lines[0]), terminaltext.StripANSI(lines[len(lines)-1]))
 	}
-	plainLabel := stripANSI(lines[1])
+	plainLabel := terminaltext.StripANSI(lines[1])
 	if !strings.HasPrefix(plainLabel, " ") || !strings.HasSuffix(plainLabel, " ") {
 		t.Fatalf("label should have horizontal padding, got %q", plainLabel)
 	}
-	plainBody := stripANSI(lines[3])
+	plainBody := terminaltext.StripANSI(lines[3])
 	if !strings.HasPrefix(plainBody, " hello") {
 		t.Fatalf("body should have left padding, got %q", plainBody)
 	}
@@ -440,7 +442,7 @@ func TestParseAssistantSummaryRecognizesLeadingSummaryBlock(t *testing.T) {
 }
 
 func TestRenderAssistantCodeBlockUsesFullWidthCodeSurface(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	var hl *syntax.Highlighter
 	lines, _, _ := renderAssistantMarkdownContent("```go\nfmt.Println(1)\n```", "fmt.Println(1)", 24, 2, &hl)
 	if len(lines) != 5 {
@@ -449,14 +451,14 @@ func TestRenderAssistantCodeBlockUsesFullWidthCodeSurface(t *testing.T) {
 	if got := ansi.StringWidth(lines[3]); got != 24 {
 		t.Fatalf("code line width = %d, want 24; line=%q", got, lines[3])
 	}
-	joinedPlain := stripANSI(strings.Join(lines, "\n"))
+	joinedPlain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joinedPlain, "GO") || !strings.Contains(joinedPlain, "fmt.Println(1)") {
 		t.Fatalf("plain block = %q, want GO badge and code content", joinedPlain)
 	}
 }
 
 func TestRenderAssistantSanitizesControlCharacters(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := "before map[s:a\x01b] after\n\n```text\ncase a\x01b\n```"
 	block := &Block{Type: BlockAssistant, Content: content}
 	plain := strings.Join(stripANSILines(block.Render(120, "")), "\n")
@@ -478,7 +480,7 @@ func TestRenderAssistantSanitizesControlCharacters(t *testing.T) {
 // escaped to literals before they reach the card ANSI surface; the settled
 // prefix above the frontier is already sanitized by renderAssistantMarkdownContent.
 func TestRenderStreamingAssistantSanitizesControlCharacters(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := "first paragraph\n\nsecond \x00\x17\x07NWNW\x1b[1;1H tail"
 	block := &Block{Type: BlockAssistant, Content: content, Streaming: true}
 	raw := strings.Join(block.Render(120, ""), "\n")
@@ -498,7 +500,7 @@ func TestRenderStreamingAssistantSanitizesControlCharacters(t *testing.T) {
 // thinking tail, which has no settled frontier until a blank line arrives, so
 // the whole part goes through the raw tail path.
 func TestRenderStreamingThinkingSanitizesControlCharacters(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := "thinking \x00\x17\x07\x1b[1;1H tail"
 	block := &Block{Type: BlockThinking, Content: content, Streaming: true}
 	raw := strings.Join(block.Render(120, ""), "\n")
@@ -515,7 +517,7 @@ func TestRenderStreamingThinkingSanitizesControlCharacters(t *testing.T) {
 }
 
 func TestRenderStreamingAssistantScreenBufferHasNoControlCells(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockAssistant,
 		Streaming: true,
@@ -549,7 +551,7 @@ func TestSettledAssistantInvisibleContentRendersNoCard(t *testing.T) {
 }
 
 func TestRenderCompactionSummaryUsesMarkdownPreviewAndBlankLine(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:    BlockCompactionSummary,
 		Content: "## Goal\n- keep markdown\n- show preview\n\n## Progress\n- render markdown",
@@ -557,7 +559,7 @@ func TestRenderCompactionSummaryUsesMarkdownPreviewAndBlankLine(t *testing.T) {
 	lines := block.Render(60, "")
 	plain := make([]string, len(lines))
 	for i, line := range lines {
-		cleaned := strings.TrimLeft(stripANSI(line), " ")
+		cleaned := strings.TrimLeft(terminaltext.StripANSI(line), " ")
 		cleaned = strings.TrimPrefix(cleaned, "│")
 		plain[i] = cleaned
 	}
@@ -589,13 +591,13 @@ func TestRenderCompactionSummaryUsesMarkdownPreviewAndBlankLine(t *testing.T) {
 }
 
 func TestRenderCompactionSummaryHighlightsFencedCode(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:    BlockCompactionSummary,
 		Content: "## Files\n```go\nfmt.Println(1)\n```",
 	}
 	lines := block.Render(60, "")
-	joinedPlain := stripANSI(strings.Join(lines, "\n"))
+	joinedPlain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joinedPlain, "GO") {
 		t.Fatalf("expected fenced code language label, got %q", joinedPlain)
 	}
@@ -609,7 +611,7 @@ func TestRenderCompactionSummaryHighlightsFencedCode(t *testing.T) {
 }
 
 func TestRenderThinkingPartsStreamingUsesSettledMarkdownAndCheapTail(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockAssistant,
 		Streaming: true,
@@ -618,7 +620,7 @@ func TestRenderThinkingPartsStreamingUsesSettledMarkdownAndCheapTail(t *testing.
 		},
 	}
 	lines := block.renderThinkingParts(70)
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "Plan") {
 		t.Fatalf("expected settled heading text, got %q", plain)
 	}
@@ -637,7 +639,7 @@ func TestRenderThinkingPartsStreamingUsesSettledMarkdownAndCheapTail(t *testing.
 }
 
 func TestRenderThinkingPartsStreamingUnclosedFenceKeepsTailVisible(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockAssistant,
 		Streaming: true,
@@ -647,7 +649,7 @@ func TestRenderThinkingPartsStreamingUnclosedFenceKeepsTailVisible(t *testing.T)
 	}
 
 	lines := block.renderThinkingParts(70)
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "Stable") || !strings.Contains(plain, "settled paragraph") {
 		t.Fatalf("expected settled prefix to render, got %q", plain)
 	}
@@ -663,7 +665,7 @@ func TestRenderThinkingPartsStreamingUnclosedFenceKeepsTailVisible(t *testing.T)
 }
 
 func TestRenderThinkingPartsStreamingCachesPartsIndependently(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockAssistant,
 		Streaming: true,
@@ -691,7 +693,7 @@ func TestRenderThinkingPartsStreamingCachesPartsIndependently(t *testing.T) {
 }
 
 func TestRenderThinkingPartsStreamingWidthInvalidatesPartCache(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:          BlockAssistant,
 		Streaming:     true,
@@ -709,14 +711,14 @@ func TestRenderThinkingPartsStreamingWidthInvalidatesPartCache(t *testing.T) {
 }
 
 func TestRenderThinkingPartsIncludesStructuredTranslationMarkdown(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:                 BlockAssistant,
 		ThinkingParts:        []string{"## Plan\n\n- inspect"},
 		ThinkingTranslations: []ThinkingTranslationView{{TargetLang: "zh-Hans", Content: "## 翻译\n\n```go\nfmt.Println(1)\n```"}},
 	}
 	lines := block.renderThinkingParts(70)
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "Translated · zh-Hans") {
 		t.Fatalf("expected translated header, got %q", plain)
 	}
@@ -733,9 +735,9 @@ func TestRenderThinkingPartsIncludesStructuredTranslationMarkdown(t *testing.T) 
 }
 
 func TestRenderThinkingTranslationStripsOpenEnvelopeBeforeMarkdown(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	lines := renderThinkingTranslationLines(ThinkingTranslationView{TargetLang: "zh-Hans", Content: "<TRANSLATION>\n**评估代码路径**\n\n正文"}, 70)
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if strings.Contains(plain, "<TRANSLATION>") {
 		t.Fatalf("translation envelope marker should be stripped, got %q", plain)
 	}
@@ -748,7 +750,7 @@ func TestRenderThinkingTranslationStripsOpenEnvelopeBeforeMarkdown(t *testing.T)
 }
 
 func TestRenderThinkingStreamingContentReusesSettledCache(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockThinking,
 		Streaming: true,
@@ -778,7 +780,7 @@ func TestRenderThinkingStreamingContentReusesSettledCache(t *testing.T) {
 // far must not be split off as a heading and merged back when the next delta
 // continues the sentence, so the settled prefix only ever grows.
 func TestRenderThinkingStreamingHeadingSettledPrefixNeverRegresses(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	deltas := []string{"检查", "**配置**", "文件", "，继续。", "**下一节**", "\n正文", "\n\n结尾"}
 	block := &Block{Type: BlockThinking, Streaming: true}
 	settled := ""
@@ -800,7 +802,7 @@ func TestRenderThinkingStreamingHeadingSettledPrefixNeverRegresses(t *testing.T)
 }
 
 func TestRenderThinkingStreamingSummaryTailUsesMarkdownBeforeThinkingEnd(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                          1,
 		Type:                        BlockThinking,
@@ -808,7 +810,7 @@ func TestRenderThinkingStreamingSummaryTailUsesMarkdownBeforeThinkingEnd(t *test
 		ThinkingMarkdownProvisional: true,
 		Content:                     "**Adjusting commit behavior and updating docs**\n\nThe summary continues here.",
 	}
-	plain := stripANSI(strings.Join(block.renderThinking(120), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderThinking(120), "\n"))
 	if strings.Contains(plain, "**Adjusting") {
 		t.Fatalf("summary tail still exposes markdown markers: %q", plain)
 	}
@@ -847,7 +849,7 @@ func TestCloneBlockForDeferredSourceClearsThinkingStreamCache(t *testing.T) {
 // including the highlighter the lines were rendered with, which the clone must
 // not share with the source.
 func TestCloneBlockForDeferredSourceClearsApplyPatchPreviewMemo(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	patch := "*** Begin Patch\n*** Update File: demo.go\n@@\n+func main() {}\n"
 	block := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch}
 	_ = block.appendApplyPatchPreviewLines(patch, 80, block.applyPatchPreviewHighlighter("demo.go", patch))
@@ -864,10 +866,10 @@ func TestCloneBlockForDeferredSourceClearsApplyPatchPreviewMemo(t *testing.T) {
 }
 
 func TestRenderRichMarkdownContentHighlightsFencedCode(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	var hl *syntax.Highlighter
 	lines := renderRichMarkdownContent("## Example\n\n```go\nfmt.Println(1)\n```", 32, &hl)
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "Example") {
 		t.Fatalf("expected heading text, got %q", plain)
 	}
@@ -880,22 +882,22 @@ func TestRenderRichMarkdownContentHighlightsFencedCode(t *testing.T) {
 }
 
 func TestRenderStatusUsesRichMarkdownFencedCode(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{Type: BlockStatus, StatusTitle: "LOOP", Content: "## Loop\n```go\nfmt.Println(1)\n```"}
 	lines := block.Render(70, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "GO") || !strings.Contains(plain, "fmt.Println(1)") {
 		t.Fatalf("expected status card fenced code to use rich markdown helper, got %q", plain)
 	}
 }
 
 func TestRenderAssistantCodeBlockWrappedContinuationIndented(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{Type: BlockAssistant, Content: "```go\nfunc TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsCancelledToolResult(t *testing.T) {}\n```"}
 	lines := block.Render(60, "")
 	var codeLines []string
 	for _, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		trimmed := strings.TrimSpace(plain)
 		if strings.Contains(trimmed, "CancelCurrentTurnRoutesToFocusedSubAgent") || strings.Contains(trimmed, "sistsCancelledToolResult") || strings.Contains(trimmed, "ersistsCancelledToolResult") {
 			codeLines = append(codeLines, plain)
@@ -904,8 +906,8 @@ func TestRenderAssistantCodeBlockWrappedContinuationIndented(t *testing.T) {
 	if len(codeLines) != 2 {
 		t.Fatalf("expected 2 wrapped code lines, got %d: %#v", len(codeLines), codeLines)
 	}
-	firstIndent := countLeadingWhitespace(codeLines[0])
-	secondIndent := countLeadingWhitespace(codeLines[1])
+	firstIndent := terminaltext.CountIndent(codeLines[0])
+	secondIndent := terminaltext.CountIndent(codeLines[1])
 	if secondIndent <= firstIndent {
 		t.Fatalf("wrapped continuation should be more indented: first=%d second=%d lines=%q", firstIndent, secondIndent, codeLines)
 	}
@@ -917,7 +919,7 @@ func TestRenderAssistantCodeBlockWrappedContinuationIndented(t *testing.T) {
 }
 
 func TestRenderAssistantCodeBlockLongLineDoesNotLeakBackgroundIntoCardPadding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{Type: BlockAssistant, Content: "```text\n" + strings.Repeat("x", 120) + "\n```"}
 	lines := block.Render(140, "")
 	if len(lines) == 0 {
@@ -926,7 +928,7 @@ func TestRenderAssistantCodeBlockLongLineDoesNotLeakBackgroundIntoCardPadding(t 
 
 	var target string
 	for _, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if strings.Contains(plain, strings.Repeat("x", 40)) {
 			target = line
 			break
@@ -943,8 +945,8 @@ func TestRenderAssistantCodeBlockLongLineDoesNotLeakBackgroundIntoCardPadding(t 
 		t.Fatal("expected rendered cells")
 	}
 
-	cardBg := colorOfTheme(currentTheme.AssistantCardBg)
-	codeBg := colorOfTheme(currentTheme.CodeBlockBg)
+	cardBg := colorOfTheme(currentStyles.Palette.AssistantCardBg)
+	codeBg := colorOfTheme(currentStyles.Palette.CodeBlockBg)
 	if colorsEqual(cardBg, codeBg) {
 		t.Fatal("test requires assistant and code block backgrounds to differ")
 	}
@@ -983,7 +985,7 @@ func TestRenderAssistantCodeBlockLongLineDoesNotLeakBackgroundIntoCardPadding(t 
 }
 
 func TestRenderAssistantInlineMarkdownKeepsCardBackgroundOnTrailingPadding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{Type: BlockAssistant, Content: "prefix **bold**"}
 	lines := block.Render(120, "")
 	if len(lines) == 0 {
@@ -992,7 +994,7 @@ func TestRenderAssistantInlineMarkdownKeepsCardBackgroundOnTrailingPadding(t *te
 
 	var target string
 	for _, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if strings.Contains(plain, "prefix") && strings.Contains(plain, "bold") {
 			target = line
 			break
@@ -1002,7 +1004,7 @@ func TestRenderAssistantInlineMarkdownKeepsCardBackgroundOnTrailingPadding(t *te
 		t.Fatalf("failed to locate inline markdown line in render output: %q", strings.Join(lines, "\n"))
 	}
 
-	plain := stripANSI(target)
+	plain := terminaltext.StripANSI(target)
 	trimmed := strings.TrimRight(plain, " ")
 	if trimmed == plain {
 		t.Fatalf("target line has no trailing spaces: %q", plain)
@@ -1019,9 +1021,9 @@ func TestRenderAssistantInlineMarkdownKeepsCardBackgroundOnTrailingPadding(t *te
 		t.Fatal("expected rendered cells")
 	}
 
-	assistantBg := colorOfTheme(currentTheme.AssistantCardBg)
+	assistantBg := colorOfTheme(currentStyles.Palette.AssistantCardBg)
 	trailingSpaces := 0
-	cardEnd := len(cells) - AssistantCardStyle.GetMarginRight()
+	cardEnd := len(cells) - currentStyles.AssistantCardStyle.GetMarginRight()
 	for i := contentEndCol + 1; i < cardEnd; i++ {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
@@ -1038,8 +1040,8 @@ func TestRenderAssistantInlineMarkdownKeepsCardBackgroundOnTrailingPadding(t *te
 }
 
 func TestRenderAssistantTableKeepsEmailLinksInline(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
+	ApplyTheme(uitheme.Default())
+	contentMarkdown = markdownrender.New(currentStyles.Palette)
 	block := &Block{Type: BlockAssistant, Content: `The report shows 5 expired account email entries:
 
 | Account ID | Email | Expiration Date |
@@ -1052,7 +1054,7 @@ These accounts need to sign in again before new tokens can be issued.`}
 	if strings.Contains(joinedANSI, "[1]:") {
 		t.Fatalf("expected assistant table links to stay inline, got footer list:\n%s", joinedANSI)
 	}
-	joinedPlain := stripANSI(stripOSC8(joinedANSI))
+	joinedPlain := terminaltext.StripANSI(stripOSC8(joinedANSI))
 	if !strings.Contains(joinedPlain, "gfwgfwgfwgfw@gmail.com") {
 		t.Fatalf("expected assistant card to keep email inside table, got %q", joinedPlain)
 	}
@@ -1079,14 +1081,14 @@ func TestAssistantMarkdownRenderWidthUsesWiderLimitForTables(t *testing.T) {
 }
 
 func TestRenderAssistantWideTableUsesAvailableCardWidth(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
+	ApplyTheme(uitheme.Default())
+	contentMarkdown = markdownrender.New(currentStyles.Palette)
 	block := &Block{Type: BlockAssistant, Content: `| commit | 分类 | 理由 | 后续 commit 影响 |
 |---|---|---|---|
 | 85c621e show LSP diagnostics for edit | keep（或并入下条） | 修复带 Diagnostics: 的成功 edit 被整段隐藏 | 其测试与断言被 6c41486 重命名并反转 |
 | 89a69dc skip wrap-up guard for queued input | keep | 排队用户输入时跳过保护，依赖既有 hasQueuedUserInputForRecovery，含触发该路径的测试 | 无；changelog 第 15 行已覆盖 wrap-up grace |`}
 
-	joinedPlain := stripANSI(stripOSC8(strings.Join(block.Render(224, ""), "\n")))
+	joinedPlain := terminaltext.StripANSI(stripOSC8(strings.Join(block.Render(224, ""), "\n")))
 	if !strings.Contains(joinedPlain, "其测试与断言") {
 		t.Fatalf("expected wide table to keep follow-up text readable, got:\n%s", joinedPlain)
 	}
@@ -1096,13 +1098,13 @@ func TestRenderAssistantWideTableUsesAvailableCardWidth(t *testing.T) {
 }
 
 func TestRenderAssistantMarkdownCacheInvalidatesOnContentChange(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{Type: BlockAssistant, Content: "first **bold**"}
 	_ = block.Render(100, "")
 	block.Content = "second **bold**"
 	block.InvalidateCache()
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(joined, "first") {
 		t.Fatalf("render reused stale assistant markdown cache: %q", joined)
 	}
@@ -1112,12 +1114,12 @@ func TestRenderAssistantMarkdownCacheInvalidatesOnContentChange(t *testing.T) {
 }
 
 func TestRenderAssistantMarkdownCacheInvalidatesOnThemeChange(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{Type: BlockAssistant, Content: "prefix **bold**"}
 	_ = block.Render(100, "")
 	version := block.mdCacheThemeVersion
 
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block.InvalidateCache()
 	_ = block.Render(100, "")
 	if block.mdCacheThemeVersion == version {
@@ -1224,7 +1226,7 @@ func TestStripAssistantSummary_NoMetaReturnsOriginal(t *testing.T) {
 }
 
 func TestRenderAssistantSummaryLines(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	summary := assistantSummary{
 		TasksCompleted: "Fixed parser",
 		FilesModified:  "parser.go",
@@ -1236,7 +1238,7 @@ func TestRenderAssistantSummaryLines(t *testing.T) {
 	if len(lines) != 4 {
 		t.Fatalf("expected 4 lines, got %d: %#v", len(lines), lines)
 	}
-	plain := stripANSI(strings.Join(lines, ""))
+	plain := terminaltext.StripANSI(strings.Join(lines, ""))
 	if !strings.Contains(plain, "Tasks completed: Fixed parser") {
 		t.Fatalf("missing tasks line: %q", plain)
 	}
@@ -1260,7 +1262,7 @@ func TestRenderAssistantSummaryLines_EmptyFields(t *testing.T) {
 }
 
 func TestRenderAssistant_WithSummaryMeta(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := `Tasks completed: Fixed bug
 Files modified: fix.go
 Summary: One-line fix
@@ -1275,7 +1277,7 @@ Detailed explanation of the fix.`
 	lines := block.Render(80, "")
 	plain := make([]string, len(lines))
 	for i, line := range lines {
-		plain[i] = stripANSI(line)
+		plain[i] = terminaltext.StripANSI(line)
 	}
 	joined := strings.Join(plain, "\n")
 	if !strings.Contains(joined, "ASSISTANT") {
@@ -1290,7 +1292,7 @@ Detailed explanation of the fix.`
 }
 
 func TestRenderAssistant_SummaryMetaStreaming(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := `Tasks completed: X
 Summary: Y
 
@@ -1304,7 +1306,7 @@ Body`
 	lines := block.Render(80, "")
 	plain := make([]string, len(lines))
 	for i, line := range lines {
-		plain[i] = stripANSI(line)
+		plain[i] = terminaltext.StripANSI(line)
 	}
 	joined := strings.Join(plain, "\n")
 	// During streaming, the summary meta rendering is skipped, but the raw content
@@ -1342,7 +1344,7 @@ func TestIsASCIILettersOnly(t *testing.T) {
 // cache: a warm streaming render (head cache populated by previous flushes)
 // must produce byte-identical lines to a cold render of the same content.
 func TestStreamingCardHeadCacheMatchesColdRender(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := strings.Repeat("First settled paragraph with prose.\n\nSecond settled paragraph with **bold** text.\n\n", 6) +
 		"unsettled streaming tail without trailing newline"
 
@@ -1374,7 +1376,7 @@ func TestStreamingCardHeadCacheMatchesColdRender(t *testing.T) {
 }
 
 func TestRenderAssistantThinkingPartsStayWithinViewportWidth(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:            2,
 		Type:          BlockAssistant,
@@ -1386,14 +1388,14 @@ func TestRenderAssistantThinkingPartsStayWithinViewportWidth(t *testing.T) {
 	viewport := NewViewport(width, 20)
 	viewport.AppendBlock(block)
 	for i, line := range strings.Split(viewport.Render("", nil, -1, 0, ""), "\n") {
-		if got := ansi.StringWidth(stripANSI(line)); got > width {
-			t.Fatalf("rendered line %d width = %d, want <= %d; line=%q", i, got, width, stripANSI(line))
+		if got := ansi.StringWidth(terminaltext.StripANSI(line)); got > width {
+			t.Fatalf("rendered line %d width = %d, want <= %d; line=%q", i, got, width, terminaltext.StripANSI(line))
 		}
 	}
 }
 
 func TestRenderThinkingLongLinesKeepRightPadding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:      261,
 		Type:    BlockThinking,
@@ -1405,7 +1407,7 @@ func TestRenderThinkingLongLinesKeepRightPadding(t *testing.T) {
 	viewport.AppendBlock(block)
 	var target string
 	for line := range strings.SplitSeq(viewport.Render("", nil, -1, 0, ""), "\n") {
-		if strings.Contains(stripANSI(line), "xxx") {
+		if strings.Contains(terminaltext.StripANSI(line), "xxx") {
 			target = line
 			break
 		}
@@ -1425,12 +1427,12 @@ func TestRenderThinkingLongLinesKeepRightPadding(t *testing.T) {
 		lastContent = i
 	}
 	if lastContent < 0 {
-		t.Fatalf("failed to locate non-space thinking content in %q", stripANSI(target))
+		t.Fatalf("failed to locate non-space thinking content in %q", terminaltext.StripANSI(target))
 	}
 
-	thinkingBg := colorOfTheme(currentTheme.ThinkingCardBg)
+	thinkingBg := colorOfTheme(currentStyles.Palette.ThinkingCardBg)
 	checked := 0
-	wantPadding := 2 + ThinkingCardStyle.GetPaddingRight()
+	wantPadding := 2 + currentStyles.ThinkingCardStyle.GetPaddingRight()
 	for i := lastContent + 1; i < len(cells) && checked < wantPadding; i++ {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
@@ -1442,6 +1444,6 @@ func TestRenderThinkingLongLinesKeepRightPadding(t *testing.T) {
 		}
 	}
 	if checked < wantPadding {
-		t.Fatalf("right padding spaces after content = %d, want at least %d; line=%q", checked, wantPadding, stripANSI(target))
+		t.Fatalf("right padding spaces after content = %d, want at least %d; line=%q", checked, wantPadding, terminaltext.StripANSI(target))
 	}
 }

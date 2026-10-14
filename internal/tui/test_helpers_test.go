@@ -9,6 +9,8 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/tui/imagecache"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // NewModel creates a fully initialised TUI model at the 80×24 placeholder
@@ -53,17 +55,7 @@ func resetImageRuntimeCache() {
 	clear(imagePathMetadataCache.entries)
 	imagePathMetadataCache.order.Init()
 	imagePathMetadataCache.Unlock()
-	imageRuntimeCache.mu.Lock()
-	imageRuntimeCache.entries = make(map[string]*imageRuntimeCacheEntry)
-	imageRuntimeCache.mu.Unlock()
-}
-
-// transportPNG is the locked accessor for the cached transport PNG; cache tests
-// need to drive ensureTransportPNGUnlocked through the public locking surface.
-func (e *imageRuntimeCacheEntry) transportPNG(part BlockImagePart) ([]byte, int, int, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.ensureTransportPNGUnlocked(part)
+	imageCache = imagecache.New()
 }
 
 // imagePartAtLine maps a block-relative line index to the inline image part
@@ -102,7 +94,7 @@ func imageViewerHintText(caps TerminalImageCapabilities, total int) string {
 func stripANSILines(lines []string) []string {
 	out := make([]string, len(lines))
 	for i, line := range lines {
-		out[i] = stripANSI(line)
+		out[i] = terminaltext.StripANSI(line)
 	}
 	return out
 }

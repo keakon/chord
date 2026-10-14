@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -185,7 +186,7 @@ func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 	// the current issue stands alone and both earlier issues sit behind the
 	// historical label, so a reader cannot mistake a carried entry for a
 	// freshly confirmed blocker.
-	openProblems, ok := markdownSection(body, "## Open Problems")
+	openProblems, ok := checkpointfmt.Section(body, "## Open Problems")
 	if !ok {
 		t.Fatalf("final checkpoint must render ## Open Problems:\n%s", body)
 	}

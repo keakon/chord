@@ -6,6 +6,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/imageprotocol"
 )
 
 func (m *Model) refreshKittyTerminalMetrics() {
@@ -131,7 +133,7 @@ func (m *Model) imageViewerProtocolCmd() tea.Cmd {
 			if v.NeedsRetransmit || !m.kittyImageTransmitted(v.ImageID) {
 				return m.prepareImageViewer()
 			}
-			seq = encodeKittyDisplayPlacement(v.ImageID, placementID, v.Prepared.Cols, v.Prepared.Rows, -1, offsetX, offsetY)
+			seq = imageprotocol.KittyDisplayPlacement(v.ImageID, placementID, v.Prepared.Cols, v.Prepared.Rows, -1, offsetX, offsetY)
 		}
 		v.NeedsRetransmit = false
 		m.markKittyImageTransmitted(v.ImageID)
@@ -145,7 +147,7 @@ func (m *Model) imageViewerProtocolCmd() tea.Cmd {
 		v.lastProtocolAt = time.Now()
 		rect, _ := m.imageViewerOverlayRect()
 		row := max(0, rect.Min.Y+2+imageViewerInnerPadY)
-		col := max(0, rect.Min.X+1+DirectoryBorderStyle.GetPaddingLeft()+imageViewerInnerPadX)
+		col := max(0, rect.Min.X+1+currentStyles.DirectoryBorderStyle.GetPaddingLeft()+imageViewerInnerPadX)
 		// The large payload was encoded in the prepare command. Only these small
 		// cursor wrappers depend on the current overlay position.
 		start := encodeDeferredTerminalSequence(fmt.Sprintf("\x1b7\x1b[%d;%dH", row+1, col+1))

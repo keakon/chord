@@ -5,12 +5,13 @@ import (
 
 	"github.com/keakon/x/ansi"
 
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/textclean"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func firstDisplayLine(s string) string {
 	s = sanitizeToolDisplayText(s)
-	s = markdownutil.NormalizeNewlines(s)
+	s = textclean.NormalizeNewlines(s)
 	if before, _, ok := strings.Cut(s, "\n"); ok {
 		return before
 	}
@@ -19,7 +20,7 @@ func firstDisplayLine(s string) string {
 
 func continuationDisplayLines(s string) []string {
 	s = sanitizeToolDisplayText(s)
-	s = markdownutil.NormalizeNewlines(s)
+	s = textclean.NormalizeNewlines(s)
 	parts := strings.Split(s, "\n")
 	if len(parts) <= 1 {
 		return nil
@@ -65,7 +66,7 @@ func wrapIndentedText(text string, width int) []string {
 			result = append(result, "")
 			continue
 		}
-		indentWidth := countLeadingWhitespace(line)
+		indentWidth := terminaltext.CountIndent(line)
 		indent := line[:indentWidth]
 		rest := line[indentWidth:]
 		available := width - ansi.StringWidth(indent)
@@ -109,12 +110,12 @@ func appendQuestionAnswerLines(dst []string, text, firstPrefix, continuationPref
 			if first && idx == 0 {
 				curPrefix = firstPrefix
 			}
-			dst = append(dst, paramValStyle.Render(curPrefix+line))
+			dst = append(dst, currentStyles.ParamValStyle.Render(curPrefix+line))
 		}
 		first = false
 	}
 	if first {
-		dst = append(dst, paramValStyle.Render(firstPrefix))
+		dst = append(dst, currentStyles.ParamValStyle.Render(firstPrefix))
 	}
 	return dst
 }

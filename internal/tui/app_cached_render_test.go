@@ -9,6 +9,9 @@ import (
 
 	tea "github.com/keakon/bubbletea/v2"
 	uv "github.com/keakon/ultraviolet"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestInvalidateDrawCachesPreservesRuntimeState(t *testing.T) {
@@ -88,7 +91,7 @@ func TestSetThemePreservesDeferredStartupTranscriptRuntimeState(t *testing.T) {
 	m.startupDeferredPreheatGeneration = 23
 	m.viewport.maxHotBytes = startupDeferredTranscriptAggressiveHotBytes
 
-	theme := DefaultTheme()
+	theme := uitheme.Default()
 	theme.Name = "runtime-preserving-test"
 	m.SetTheme(theme)
 
@@ -217,7 +220,7 @@ func TestRenderToCachePreservesAllPlainTextCells(t *testing.T) {
 			if line[i].IsZero() || line[i].Content == "" {
 				continue
 			}
-			sb.WriteString(stripANSI(line[i].Content))
+			sb.WriteString(terminaltext.StripANSI(line[i].Content))
 		}
 		got = append(got, sb.String())
 	}
@@ -247,7 +250,7 @@ func TestEnsureScreenBufferReusesExistingBuffer(t *testing.T) {
 }
 
 func TestStreamingAssistantUsesCheapWrapPath(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{Type: BlockAssistant, Streaming: true, Content: "- bullet one that wraps nicely\n- bullet two that also wraps"}
 	lines := block.Render(50, "")
 	if len(lines) == 0 {

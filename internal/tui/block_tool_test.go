@@ -14,8 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	"github.com/keakon/lipgloss/v2"
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
@@ -24,6 +22,10 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/markdownrender"
+	"github.com/keakon/chord/internal/tui/syntax"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 var osc8RegexToolTest = regexp.MustCompile(`\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)`)
@@ -204,7 +206,7 @@ func TestGenericCardRestylesDiagnosticInPlaceWithoutDuplicating(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if got := strings.Count(plain, "limit=7"); got != 1 {
 		t.Fatalf("header should carry limit=7 exactly once, got %d:\n%s", got, plain)
 	}
@@ -260,7 +262,7 @@ func relativeLuminance(c color.Color) float64 {
 }
 
 func TestHighlightedFileToolsUseExpectedBackgrounds(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := "package main"
 	readArgs, _ := json.Marshal(map[string]any{"path": "main.go", "offset": 15, "limit": 1})
 	writeArgs, _ := json.Marshal(map[string]string{"path": "main.go", "content": content})
@@ -272,12 +274,12 @@ func TestHighlightedFileToolsUseExpectedBackgrounds(t *testing.T) {
 		block          *Block
 		codeBackground string
 	}{
-		{name: tools.NameRead, block: &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameRead, Content: string(readArgs), ResultContent: content, ResultDone: true}, codeBackground: currentTheme.ToolCallBg},
-		{name: tools.NameWrite, block: &Block{ID: 2, Type: BlockToolCall, ToolName: tools.NameWrite, Content: string(writeArgs), ResultDone: true}, codeBackground: currentTheme.ToolCallBg},
-		{name: tools.NameEdit, block: &Block{ID: 3, Type: BlockToolCall, ToolName: tools.NameEdit, Content: string(diffArgs), Diff: diff, ResultDone: true}, codeBackground: currentTheme.DiffAddLineBg},
-		{name: tools.NameApplyPatch, block: &Block{ID: 4, Type: BlockToolCall, ToolName: tools.NameApplyPatch, Content: string(diffArgs), Diff: diff, ResultDone: true}, codeBackground: currentTheme.DiffAddLineBg},
+		{name: tools.NameRead, block: &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameRead, Content: string(readArgs), ResultContent: content, ResultDone: true}, codeBackground: currentStyles.Palette.ToolCallBg},
+		{name: tools.NameWrite, block: &Block{ID: 2, Type: BlockToolCall, ToolName: tools.NameWrite, Content: string(writeArgs), ResultDone: true}, codeBackground: currentStyles.Palette.ToolCallBg},
+		{name: tools.NameEdit, block: &Block{ID: 3, Type: BlockToolCall, ToolName: tools.NameEdit, Content: string(diffArgs), Diff: diff, ResultDone: true}, codeBackground: currentStyles.Palette.DiffAddLineBg},
+		{name: tools.NameApplyPatch, block: &Block{ID: 4, Type: BlockToolCall, ToolName: tools.NameApplyPatch, Content: string(diffArgs), Diff: diff, ResultDone: true}, codeBackground: currentStyles.Palette.DiffAddLineBg},
 	}
-	toolBackground := colorOfTheme(currentTheme.ToolCallBg)
+	toolBackground := colorOfTheme(currentStyles.Palette.ToolCallBg)
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			lines := tt.block.Render(80, "")
@@ -292,7 +294,7 @@ func TestHighlightedFileToolsUseExpectedBackgrounds(t *testing.T) {
 }
 
 func TestReadOffsetTOMLFragmentKeepsErrorTokensReadable(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := "以下职责只属于主控，不得委托 Agent 自行执行"
 	args, _ := json.Marshal(map[string]any{"path": ".codex/config.toml", "offset": 15, "limit": 1})
 	block := &Block{
@@ -306,17 +308,17 @@ func TestReadOffsetTOMLFragmentKeepsErrorTokensReadable(t *testing.T) {
 
 	line := renderedLineContaining(t, block.Render(100, ""), content)
 	assertRenderedTextForeground(t, line, "职", renderedCellsForText(t, syntax.New("sample.toml", "", "").Line(content, ""), "职")[0].Style.Fg)
-	assertRenderedTextBackground(t, line, "职", colorOfTheme(currentTheme.ToolCallBg))
+	assertRenderedTextBackground(t, line, "职", colorOfTheme(currentStyles.Palette.ToolCallBg))
 }
 
 func renderedLineContaining(t *testing.T, lines []string, text string) string {
 	t.Helper()
 	for _, line := range lines {
-		if strings.Contains(stripANSI(line), text) {
+		if strings.Contains(terminaltext.StripANSI(line), text) {
 			return line
 		}
 	}
-	t.Fatalf("rendered output does not contain %q:\n%s", text, stripANSI(strings.Join(lines, "\n")))
+	t.Fatalf("rendered output does not contain %q:\n%s", text, terminaltext.StripANSI(strings.Join(lines, "\n")))
 	return ""
 }
 
@@ -340,7 +342,7 @@ func assertRenderedTextForeground(t *testing.T, line, text string, want color.Co
 
 func renderedCellsForText(t *testing.T, line, text string) []uv.Cell {
 	t.Helper()
-	plain := stripANSI(line)
+	plain := terminaltext.StripANSI(line)
 	byteStart := strings.Index(plain, text)
 	if byteStart < 0 {
 		t.Fatalf("line does not contain %q: %q", text, plain)
@@ -386,10 +388,10 @@ func TestDisplayToolPathRelativizesHomePathUnderWorkingDir(t *testing.T) {
 }
 
 func TestToolHeaderProgressSuffixSurvivesANSITruncateFallback(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	header := "🔧 \x1b[1mVeryLongToolNameWithArguments\x1b[0m /tmp/very/long/path"
 	got := appendToolProgressSuffix(header, &agent.ToolProgressSnapshot{Text: "42 chars received"}, 24)
-	plain := stripANSI(got)
+	plain := terminaltext.StripANSI(got)
 	if !strings.Contains(plain, "42 chars received") {
 		t.Fatalf("progress suffix missing after truncate fallback: %q", plain)
 	}
@@ -434,7 +436,7 @@ func TestReadHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	want := filepath.Join("internal", "tui", "block_tool.go") + " (offset=5, limit=20)"
 	if !strings.Contains(joined, want) {
 		t.Fatalf("expected Read header to show relative path; got:\n%s", joined)
@@ -463,7 +465,7 @@ func TestJobCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "(ignored path=sub)") {
 		t.Fatalf("ignored argument should join the job option group:\n%s", plain)
 	}
@@ -494,7 +496,7 @@ func TestWebFetchCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "https://example.invalid/notes (ignored raw=true)") {
 		t.Fatalf("ignored argument should join the webfetch option group:\n%s", plain)
 	}
@@ -522,7 +524,7 @@ func TestWriteCardJoinsIgnoredArgumentToExtras(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "ignored append=true") {
 		t.Fatalf("ignored argument should join the write extras chain:\n%s", plain)
 	}
@@ -553,7 +555,7 @@ func TestEditCardJoinsIgnoredArgumentToHeaderOptions(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "(ignored create_dirs=true)") {
 		t.Fatalf("ignored argument should join the edit option group:\n%s", plain)
 	}
@@ -584,7 +586,7 @@ func TestTodoCardShowsIgnoredArgumentInOptionGroup(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "(ignored priority=high)") {
 		t.Fatalf("ignored argument should form its own option group:\n%s", plain)
 	}
@@ -619,7 +621,7 @@ func TestShellCardMovesIgnoredArgumentIntoOptionGroup(t *testing.T) {
 		Audit:         shellIgnoredPathAudit(),
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	want := "Check git status and unpushed commits (timeout=2m, ignored path=.chord/memory/records/x.md)"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("ignored argument should join the timeout option group, want %q:\n%s", want, plain)
@@ -646,7 +648,7 @@ func TestShellCardShowsIgnoredArgumentWithoutTimeout(t *testing.T) {
 		Audit:         shellIgnoredPathAudit(),
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	want := "Check git status and unpushed commits (ignored path=.chord/memory/records/x.md)"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("ignored argument should form its own option group, want %q:\n%s", want, plain)
@@ -668,7 +670,7 @@ func TestShellCollapsedCardKeepsIgnoredArgumentInOptionGroup(t *testing.T) {
 		Audit:         shellIgnoredPathAudit(),
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	want := "Check git status and unpushed commits (timeout=2m, ignored path=.chord/memory/records/x.md)"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("collapsed header should keep the ignored option group, want %q:\n%s", want, plain)
@@ -691,26 +693,26 @@ func TestShellCardTruncatesStruckThroughOptionWithoutStyleLeak(t *testing.T) {
 	lines := block.Render(80, "")
 	var header string
 	for _, line := range lines {
-		if strings.Contains(stripANSI(line), "ignored") {
+		if strings.Contains(terminaltext.StripANSI(line), "ignored") {
 			header = line
 			break
 		}
 	}
 	if header == "" {
-		t.Fatalf("header with ignored argument missing:\n%s", stripANSI(strings.Join(lines, "\n")))
+		t.Fatalf("header with ignored argument missing:\n%s", terminaltext.StripANSI(strings.Join(lines, "\n")))
 	}
 	if strings.Contains(header, `\x1b`) {
 		t.Fatalf("escape sequence was neutralized to a literal: %q", header)
 	}
-	plainWidth := runewidth.StringWidth(stripANSI(header))
+	plainWidth := runewidth.StringWidth(terminaltext.StripANSI(header))
 	// 83 matches the pre-existing width of a header whose mainPart alone fills
 	// the appendToolHeaderSummary budget (long description, no diagnostics), so
 	// the struck-through option group must not exceed that baseline.
 	if plainWidth > 83 {
-		t.Fatalf("header width = %d, want <= 83: %q", plainWidth, stripANSI(header))
+		t.Fatalf("header width = %d, want <= 83: %q", plainWidth, terminaltext.StripANSI(header))
 	}
-	if strings.Count(stripANSI(header), "…") == 0 {
-		t.Fatalf("expected the option group to be truncated on a narrow card: %q", stripANSI(header))
+	if strings.Count(terminaltext.StripANSI(header), "…") == 0 {
+		t.Fatalf("expected the option group to be truncated on a narrow card: %q", terminaltext.StripANSI(header))
 	}
 }
 
@@ -733,7 +735,7 @@ func TestReadCardStrikesThroughIgnoredUnrecognizedArgument(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
+	plain := strings.ReplaceAll(terminaltext.StripANSI(rendered), "…", "")
 	plain = strings.ReplaceAll(plain, "\x1b", "")
 	if !strings.Contains(plain, "sample.go (limit=40, ignored format=json)") {
 		t.Fatalf("ignored argument should join the read option group:\n%s", plain)
@@ -768,7 +770,7 @@ func TestGlobCardShowsIgnoredAndMissingArgumentsInline(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
+	plain := strings.ReplaceAll(terminaltext.StripANSI(rendered), "…", "")
 	plain = strings.ReplaceAll(plain, "\x1b", "")
 	if !strings.Contains(plain, `glob <missing>`) {
 		t.Fatalf("missing required argument should occupy the main parameter slot:\n%s", plain)
@@ -794,7 +796,7 @@ func TestGlobCardShowsIgnoredAndMissingArgumentsInline(t *testing.T) {
 	if !strings.Contains(rendered, `;9m`) {
 		t.Fatalf("unrecognized argument is not struck through: %q", rendered)
 	}
-	if !strings.Contains(rendered, "38;5;"+currentTheme.ErrorFg+"m") {
+	if !strings.Contains(rendered, "38;5;"+currentStyles.Palette.ErrorFg+"m") {
 		t.Fatalf("missing required argument is not red: %q", rendered)
 	}
 }
@@ -826,7 +828,7 @@ func TestGrepCardShowsDiagnosticListsLikeNormalHeader(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
+	plain := strings.ReplaceAll(terminaltext.StripANSI(rendered), "…", "")
 	plain = strings.ReplaceAll(plain, "\x1b", "")
 	for _, want := range []string{
 		"grep TODO (ignored .paths=internal,cmd, ignored .includes=**/*.go,**/*.md)",
@@ -873,7 +875,7 @@ func TestGrepCardShowsMissingPatternInMainSlot(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, `grep <missing>`) {
 		t.Fatalf("missing grep pattern should occupy the main parameter slot:\n%s", plain)
 	}
@@ -892,7 +894,7 @@ func TestGrepCardShowsMissingPatternInMainSlot(t *testing.T) {
 	if !strings.Contains(rendered, `;9m`) {
 		t.Fatalf("ignored grep pattern is not struck through: %q", rendered)
 	}
-	if !strings.Contains(rendered, "38;5;"+currentTheme.ErrorFg+"m") {
+	if !strings.Contains(rendered, "38;5;"+currentStyles.Palette.ErrorFg+"m") {
 		t.Fatalf("missing grep pattern is not red: %q", rendered)
 	}
 }
@@ -927,7 +929,7 @@ func TestGrepCardFoldsPluralPatternsIntoOptionGroup(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
-	plain := strings.ReplaceAll(stripANSI(rendered), "…", "")
+	plain := strings.ReplaceAll(terminaltext.StripANSI(rendered), "…", "")
 	plain = strings.ReplaceAll(plain, "\x1b", "")
 	if !strings.Contains(plain, `grep <missing>`) {
 		t.Fatalf("missing grep pattern should occupy the main parameter slot:\n%s", plain)
@@ -953,7 +955,7 @@ func TestGrepCardFoldsPluralPatternsIntoOptionGroup(t *testing.T) {
 	if !strings.Contains(rendered, `;9m`) {
 		t.Fatalf("discarded plural patterns are not struck through: %q", rendered)
 	}
-	if !strings.Contains(rendered, "38;5;"+currentTheme.ErrorFg+"m") {
+	if !strings.Contains(rendered, "38;5;"+currentStyles.Palette.ErrorFg+"m") {
 		t.Fatalf("missing grep pattern is not red: %q", rendered)
 	}
 }
@@ -981,7 +983,7 @@ func TestGrepCardFoldsSingularIncludeIntoOptionGroup(t *testing.T) {
 			}},
 		},
 	}
-	plain := strings.ReplaceAll(stripANSI(strings.Join(block.Render(160, ""), "\n")), "…", "")
+	plain := strings.ReplaceAll(terminaltext.StripANSI(strings.Join(block.Render(160, ""), "\n")), "…", "")
 	if !strings.Contains(plain, "grep TODO (paths=internal/tui, ignored include=*.go) · 1 match · 1 file") {
 		t.Fatalf("dropped singular include should join the option group before the result summary:\n%s", plain)
 	}
@@ -1008,11 +1010,11 @@ func TestReadCardShowsInvalidArgumentInRed(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "limit=forty") {
 		t.Fatalf("invalid argument missing:\n%s", plain)
 	}
-	if !strings.Contains(rendered, "38;5;"+currentTheme.ErrorFg+"m") {
+	if !strings.Contains(rendered, "38;5;"+currentStyles.Palette.ErrorFg+"m") {
 		t.Fatalf("invalid argument is not red: %q", rendered)
 	}
 }
@@ -1030,7 +1032,7 @@ func TestExecutionFailureKeepsValidArgumentsNormal(t *testing.T) {
 	lines := block.Render(120, "")
 	header := renderedLineContaining(t, lines, "**/*.go")
 	for _, cell := range renderedCellsForText(t, header, "**/*.go") {
-		if colorsEqual(cell.Style.Fg, colorOfTheme(currentTheme.ErrorFg)) {
+		if colorsEqual(cell.Style.Fg, colorOfTheme(currentStyles.Palette.ErrorFg)) {
 			t.Fatalf("valid argument cell %q unexpectedly uses error color", cell.Content)
 		}
 	}
@@ -1054,7 +1056,7 @@ func TestReadCardStrikesThroughShadowedDuplicateValues(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(160, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	for _, want := range []string{"second.go (offset=300, limit=40, ", "limit=75", "offset=664", "path=first.go"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered card missing %q:\n%s", want, plain)
@@ -1078,7 +1080,7 @@ func TestToolDisplayResultHidesModelFacingShellDurationNote(t *testing.T) {
 	if got := toolDisplayResultContent(block); got != "done" {
 		t.Fatalf("toolDisplayResultContent() = %q, want %q", got, "done")
 	}
-	rendered := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(rendered, "✓ ▸ shell · ⏱ 12s") {
 		t.Fatalf("expected rendered shell card to show duration clock; got:\n%s", rendered)
 	}
@@ -1118,7 +1120,7 @@ func TestShellCardStripsIgnoredArgNoteFromOutputSection(t *testing.T) {
 			}},
 		},
 	}
-	rendered := stripANSI(strings.Join(block.Render(160, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(160, ""), "\n"))
 	if !strings.Contains(rendered, "⏱ 14s") {
 		t.Fatalf("expected whole-second duration on the header; got:\n%s", rendered)
 	}
@@ -1163,7 +1165,7 @@ func TestFailedShellCardStripsIgnoredArgNoteBeforeErrorTail(t *testing.T) {
 			}},
 		},
 	}
-	rendered := stripANSI(strings.Join(block.Render(160, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(160, ""), "\n"))
 	if !strings.Contains(rendered, "ignored yield_ms=240000") {
 		t.Fatalf("expected the ignored argument on the header; got:\n%s", rendered)
 	}
@@ -1205,7 +1207,7 @@ func TestReadCardStripsIgnoredArgNoteFromFilePreview(t *testing.T) {
 			}},
 		},
 	}
-	rendered := stripANSI(strings.Join(block.Render(160, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(160, ""), "\n"))
 	if !strings.Contains(rendered, "ignored line_limit=10") {
 		t.Fatalf("expected the ignored argument on the header; got:\n%s", rendered)
 	}
@@ -1243,7 +1245,7 @@ func TestGenericToolCardStripsIgnoredArgNoteFromResult(t *testing.T) {
 			}},
 		},
 	}
-	rendered := stripANSI(strings.Join(block.Render(160, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(160, ""), "\n"))
 	if !strings.Contains(rendered, "ignored verbose=true") {
 		t.Fatalf("expected the ignored argument on the header; got:\n%s", rendered)
 	}
@@ -1268,7 +1270,7 @@ func TestDelegateWorkerDropsRuntimeNote(t *testing.T) {
 		ResultNotes:   []string{note},
 		ResultDone:    true,
 	}
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "↳ Task id: adhoc-7") {
 		t.Fatalf("expected the handle fields to render; got:\n%s", plain)
 	}
@@ -1312,7 +1314,7 @@ func TestRestoredShellToolCardShowsPersistedDuration(t *testing.T) {
 	if len(blocks) != 1 {
 		t.Fatalf("messagesToBlocks() returned %d blocks, want 1", len(blocks))
 	}
-	rendered := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(rendered, "⏱ 9s") {
 		t.Fatalf("expected restored shell card to show duration clock; got:\n%s", rendered)
 	}
@@ -1329,7 +1331,7 @@ func TestToolElapsedHiddenBelowOneSecond(t *testing.T) {
 		StartedAt:  time.Unix(0, 0),
 		SettledAt:  time.Unix(0, int64(900*time.Millisecond)),
 	}
-	rendered := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if strings.Contains(rendered, "⏱") {
 		t.Fatalf("expected sub-second tool elapsed to stay hidden; got:\n%s", rendered)
 	}
@@ -1346,7 +1348,7 @@ func TestExpandedShellToolCardKeepsElapsedOnHeader(t *testing.T) {
 		ResultDone:             true,
 		ToolCallDetailExpanded: true,
 	}
-	lines := strings.Split(stripANSI(strings.Join(block.Render(80, ""), "\n")), "\n")
+	lines := strings.Split(terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n")), "\n")
 	header := ""
 	for _, line := range lines {
 		if strings.Contains(line, "shell") {
@@ -1385,7 +1387,7 @@ func TestWriteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(joined, "write demo.txt") {
 		t.Fatalf("expected Write header to show relative path; got:\n%s", joined)
 	}
@@ -1395,7 +1397,7 @@ func TestWriteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 }
 
 func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	wd := filepath.Join(string(os.PathSeparator), "tmp", "workspace")
 	abs := filepath.Join(wd, "demo.go")
 	block := &Block{
@@ -1416,7 +1418,7 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 	}
 
 	raw := strings.Join(block.Render(120, ""), "\n")
-	plain := stripANSI(raw)
+	plain := terminaltext.StripANSI(raw)
 	// The write header carries the counts inline ("66 lines · 1976 bytes") and
 	// the verbatim success line is deduplicated, so the summary must still
 	// appear before the diagnostics section.
@@ -1434,7 +1436,7 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 	if strings.Contains(plain, "Diagnostics:\n\n") {
 		t.Fatalf("expected no blank line after Diagnostics header; got:\n%s", plain)
 	}
-	if !strings.Contains(raw, DimStyle.Render("    ... 13 diagnostics not shown due to output limits; they may still need fixing.")) {
+	if !strings.Contains(raw, currentStyles.DimStyle.Render("    ... 13 diagnostics not shown due to output limits; they may still need fixing.")) {
 		t.Fatalf("expected omitted diagnostics line to use dim style; got:\n%s", raw)
 	}
 	for i, line := range strings.Split(plain, "\n") {
@@ -1449,7 +1451,7 @@ func TestWriteCardMultilineResultDoesNotBypassCardWrapper(t *testing.T) {
 }
 
 func TestWriteCardDiagnosticsSplitBetweenSummaryAndDiagnosticsDetail(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	result := strings.Join([]string{
 		"Successfully wrote 71 lines, 2113 bytes",
 		"",
@@ -1468,7 +1470,7 @@ func TestWriteCardDiagnosticsSplitBetweenSummaryAndDiagnosticsDetail(t *testing.
 		ResultContent: result,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if got := strings.Count(plain, "71 lines · 2113 bytes"); got != 1 {
 		t.Fatalf("Write count summary = %d, want 1; got:\n%s", got, plain)
 	}
@@ -1493,7 +1495,7 @@ func TestWriteCardDiagnosticsSplitBetweenSummaryAndDiagnosticsDetail(t *testing.
 }
 
 func TestWriteCardIsAlwaysExpanded(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
@@ -1504,7 +1506,7 @@ func TestWriteCardIsAlwaysExpanded(t *testing.T) {
 		ResultContent: "Successfully wrote 71 lines, 2113 bytes\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	want := "✓ write internal/tui/sample_write_target.go · 71 lines · 2113 bytes"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("Write header must carry the counts, got:\n%s", plain)
@@ -1540,7 +1542,7 @@ func TestSplitWriteResultRecognizesDiagnosticsWithoutSectionHeading(t *testing.T
 }
 
 func TestEditSuccessWithLSPDiagnosticsRendersDiagnostics(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for _, header := range []string{"Diagnostics:", "Diagnostics summary:"} {
 		block := &Block{
 			ID:         1,
@@ -1558,7 +1560,7 @@ func TestEditSuccessWithLSPDiagnosticsRendersDiagnostics(t *testing.T) {
 			}, "\n"),
 		}
 
-		plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+		plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if !strings.Contains(plain, "↳ Diagnostics:") {
 			t.Fatalf("%s: expected edit diagnostics section to render; got:\n%s", header, plain)
 		}
@@ -1575,7 +1577,7 @@ func TestEditSuccessWithLSPDiagnosticsRendersDiagnostics(t *testing.T) {
 }
 
 func TestWriteCallRendersContentPreviewByDefault(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := strings.Join([]string{
 		"package main",
 		"",
@@ -1606,7 +1608,7 @@ func TestWriteCallRendersContentPreviewByDefault(t *testing.T) {
 		ResultContent: "Successfully wrote 260 lines, 157 bytes",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"✓ write cmd/demo/main.go", "260 lines · 157 bytes", "1  package main", "12  }"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected Write preview to contain %q; got:\n%s", want, plain)
@@ -1626,7 +1628,7 @@ func TestWriteCallRendersContentPreviewByDefault(t *testing.T) {
 }
 
 func TestWriteCallSanitizesPreviewControlCharacters(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args, err := json.Marshal(map[string]string{
 		"path":    "demo.txt",
 		"content": "safe\x1b[31m literal\rnext",
@@ -1644,7 +1646,7 @@ func TestWriteCallSanitizesPreviewControlCharacters(t *testing.T) {
 		ResultContent: "Successfully wrote 1 line, 22 bytes",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(plain, '\x1b') {
 		t.Fatalf("expected rendered Write preview to not contain raw ESC: %q", plain)
 	}
@@ -1654,7 +1656,7 @@ func TestWriteCallSanitizesPreviewControlCharacters(t *testing.T) {
 }
 
 func TestReadCollapsedShowsSummaryAndExpandedShowsAllReturnedLines(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	lines := make([]string, 0, 260)
 	for i := 1; i <= 260; i++ {
 		lines = append(lines, fmt.Sprintf("line %d", i))
@@ -1669,7 +1671,7 @@ func TestReadCollapsedShowsSummaryAndExpandedShowsAllReturnedLines(t *testing.T)
 		ResultContent: "READ_RESULT lines=1-260 total=343\n" + strings.Join(lines, "\n"),
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "✓ ▸ read sample.go (limit=260) · lines 1–260 of 343") {
 		t.Fatalf("expected collapsed read summary, got:\n%s", collapsed)
 	}
@@ -1678,7 +1680,7 @@ func TestReadCollapsedShowsSummaryAndExpandedShowsAllReturnedLines(t *testing.T)
 	}
 
 	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"✓ ▾ read", "1  line 1", "260  line 260"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded read to contain %q, got:\n%s", want, expanded)
@@ -1700,7 +1702,7 @@ func TestReadCardDoesNotTreatSourceAsArtifactMetadata(t *testing.T) {
 			"Full output saved to /session/tool-outputs/read-result.log. Only if the preview is insufficient, use grep first or read with offset/limit for needed ranges; use a script/parser for huge single-line structured output. Do not read the entire output by default.",
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(320, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(320, ""), "\n"))
 	if !strings.Contains(collapsed, "lines 621–622 of 982") {
 		t.Fatalf("expected collapsed read summary to keep the returned line range, got:\n%s", collapsed)
 	}
@@ -1756,7 +1758,7 @@ func TestGrepCollapsedSummaryCountsOnlyMatchesAndExpandedShowsAllDetails(t *test
 		}, "\n"),
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "✓ ▸ grep TODO") || !strings.Contains(collapsed, "2 matches · 2 files") {
 		t.Fatalf("expected grep collapsed summary, got:\n%s", collapsed)
 	}
@@ -1765,7 +1767,7 @@ func TestGrepCollapsedSummaryCountsOnlyMatchesAndExpandedShowsAllDetails(t *test
 	}
 
 	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"✓ ▾ grep TODO", "a.go:1:TODO one", "Note: pattern was invalid regex; searched as literal text.", "grep: skipped path: vendor/blocked"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded grep to contain %q, got:\n%s", want, expanded)
@@ -1789,13 +1791,13 @@ func TestGlobCollapsedSummaryShowsFilesAndArtifact(t *testing.T) {
 		}, "\n"),
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "✓ ▸ glob **/*.go") || !strings.Contains(collapsed, "2 files") {
 		t.Fatalf("expected glob collapsed summary, got:\n%s", collapsed)
 	}
 
 	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"✓ ▾ glob **/*.go", "a.go", "(showing first 2 results"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded glob to contain %q, got:\n%s", want, expanded)
@@ -1814,7 +1816,7 @@ func TestReadHeaderKeepsAbsolutePathOutsideWorkingDir(t *testing.T) {
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, abs) {
 		t.Fatalf("expected Read header to keep absolute path outside working dir; got:\n%s", joined)
 	}
@@ -1845,7 +1847,7 @@ func TestSkillToolDisplaySummaryUsesFullNameAndRelativeDirectoryPath(t *testing.
 		Collapsed:     true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(140, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
 	if !strings.Contains(joined, "skill sample-food-skill (from .agents)") {
 		t.Fatalf("expected skill header to show name with source metadata, got:\n%s", joined)
 	}
@@ -1858,7 +1860,7 @@ func TestSkillToolDisplaySummaryUsesFullNameAndRelativeDirectoryPath(t *testing.
 }
 
 func TestOrdinaryToolResultUsesPlainTextForMarkdownLookingContent(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:                   BlockToolCall,
 		ToolName:               "web_fetch",
@@ -1869,7 +1871,7 @@ func TestOrdinaryToolResultUsesPlainTextForMarkdownLookingContent(t *testing.T) 
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"## Ready", "```go", "fmt.Println(1)", "- item one", "- item two"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected markdown-looking tool result content to remain literal (%q), got:\n%s", want, joined)
@@ -1884,7 +1886,7 @@ func TestOrdinaryToolResultUsesPlainTextForMarkdownLookingContent(t *testing.T) 
 }
 
 func TestExpandedSkillResultUsesPlainTextForMarkdownLookingContent(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -1895,7 +1897,7 @@ func TestExpandedSkillResultUsesPlainTextForMarkdownLookingContent(t *testing.T)
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"# Skill Creator", "- Step one", "- Step two"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected expanded Skill result to keep literal markdown-looking text %q, got:\n%s", want, joined)
@@ -1907,7 +1909,7 @@ func TestExpandedSkillResultUsesPlainTextForMarkdownLookingContent(t *testing.T)
 }
 
 func TestOrdinaryToolResultDoesNotUseRichMarkdownFencedCode(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:                   BlockToolCall,
 		ToolName:               "web_fetch",
@@ -1918,7 +1920,7 @@ func TestOrdinaryToolResultDoesNotUseRichMarkdownFencedCode(t *testing.T) {
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "Ready") || !strings.Contains(joined, "fmt.Println(1)") {
 		t.Fatalf("expected markdown-looking tool result content to remain visible, got:\n%s", joined)
 	}
@@ -1939,7 +1941,7 @@ func TestCollapsedShellToolShowsExpandHintForHiddenOutput(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "✓ ▸ shell show lines") {
 		t.Fatalf("expected collapsed Shell to show its disclosure glyph and description; got:\n%s", joined)
 	}
@@ -1961,7 +1963,7 @@ func TestCollapsedBashDoesNotDuplicateDescriptionInSummary(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	// Description "List temp files" should appear in the header line, not
 	// repeated in the summary line.
 	_, after, ok := strings.Cut(joined, "List temp files")
@@ -2003,7 +2005,7 @@ func TestCollapsedBashLongOutputStillFolds(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "✓ ▸ shell show file") {
 		t.Fatalf("expected collapsed Shell to show the disclosure glyph; got:\n%s", joined)
 	}
@@ -2026,20 +2028,20 @@ func TestToolProgressRendersConsistentlyAcrossCollapsedAndExpandedStates(t *test
 		},
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(44, "●"), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(44, "●"), "\n"))
 	if !strings.Contains(collapsed, "2 / 3 paths") {
 		t.Fatalf("collapsed render should preserve tool progress; got:\n%s", collapsed)
 	}
 
 	block.Collapsed = false
-	expanded := stripANSI(strings.Join(block.Render(44, "●"), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(44, "●"), "\n"))
 	if !strings.Contains(expanded, "2 / 3 paths") {
 		t.Fatalf("expanded render should preserve tool progress; got:\n%s", expanded)
 	}
 }
 
 func TestToolResultWrappedContinuationKeepsCardBackgroundOnTrailingPadding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolResult,
@@ -2057,7 +2059,7 @@ func TestToolResultWrappedContinuationKeepsCardBackgroundOnTrailingPadding(t *te
 
 	var wrapped []string
 	for _, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if strings.Contains(plain, strings.Repeat("x", 20)) {
 			wrapped = append(wrapped, line)
 		}
@@ -2067,7 +2069,7 @@ func TestToolResultWrappedContinuationKeepsCardBackgroundOnTrailingPadding(t *te
 	}
 	target := wrapped[1]
 
-	plain := stripANSI(target)
+	plain := terminaltext.StripANSI(target)
 	trimmed := strings.TrimRight(plain, " ")
 	if trimmed == plain {
 		t.Fatalf("wrapped continuation has no trailing spaces: %q", plain)
@@ -2084,9 +2086,9 @@ func TestToolResultWrappedContinuationKeepsCardBackgroundOnTrailingPadding(t *te
 		t.Fatal("expected rendered cells")
 	}
 
-	toolBg := colorOfTheme(currentTheme.ToolCallBg)
+	toolBg := colorOfTheme(currentStyles.Palette.ToolCallBg)
 	trailingSpaces := 0
-	cardEnd := len(cells) - ToolBlockStyle.GetMarginRight()
+	cardEnd := len(cells) - currentStyles.ToolBlockStyle.GetMarginRight()
 	for i := contentEndCol + 1; i < cardEnd; i++ {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
@@ -2117,7 +2119,7 @@ func TestBashHeaderUsesOnlyFirstCommandLine(t *testing.T) {
 	lines := block.Render(80, "")
 	plain := make([]string, len(lines))
 	for i, line := range lines {
-		plain[i] = stripANSI(line)
+		plain[i] = terminaltext.StripANSI(line)
 	}
 	joined := strings.Join(plain, "\n")
 
@@ -2141,7 +2143,7 @@ func TestCollapsedBashMultilineUsesDescriptionWhenPresent(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(joined, "shell Search existing permission-related tests (timeout=2m)") {
 		t.Fatalf("expected collapsed multiline Shell header to use description; got:\n%s", joined)
 	}
@@ -2161,7 +2163,7 @@ func TestCollapsedBashShowsCappedForegroundTimeoutInHeader(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(joined, "shell sleep 1 (timeout=40m→10m)") {
 		t.Fatalf("expected collapsed Shell header to show requested and effective capped foreground timeout; got:\n%s", joined)
 	}
@@ -2188,7 +2190,7 @@ func TestCollapsedBashBackgroundTimeoutUsesLargerCapInHeader(t *testing.T) {
 				ResultDone:             true,
 				ToolCallDetailExpanded: false,
 			}
-			joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 			if !strings.Contains(joined, tc.want) {
 				t.Fatalf("expected collapsed Shell header to contain %q; got:\n%s", tc.want, joined)
 			}
@@ -2208,7 +2210,7 @@ func TestCollapsedBashMultilineWithoutDescriptionFallsBackToCommand(t *testing.T
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(joined, "shell python3 - <<'PY' (timeout=2m)") {
 		t.Fatalf("expected collapsed multiline Shell header to fall back to command first line; got:\n%s", joined)
 	}
@@ -2226,7 +2228,7 @@ func TestExpandedBashMultilineKeepsCommandHeaderEvenWithDescription(t *testing.T
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(joined, "shell Search existing permission-related tests (timeout=2m)") {
 		t.Fatalf("expected expanded Shell header to use summary description; got:\n%s", joined)
 	}
@@ -2254,7 +2256,7 @@ func TestExpandedBashShowsIndentedContinuationLines(t *testing.T) {
 	lines := block.Render(80, "")
 	var plain []string
 	for _, line := range lines {
-		plain = append(plain, stripANSI(line))
+		plain = append(plain, terminaltext.StripANSI(line))
 	}
 
 	foundContinuation := false
@@ -2301,7 +2303,7 @@ func TestCollapsedBashShowsCommandPreviewAndExpandHint(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(joined, "✓ ▸ shell echo first (timeout=2m)") {
 		t.Fatalf("expected collapsed Shell to show its first-line command summary; got:\n%s", joined)
 	}
@@ -2332,7 +2334,7 @@ func TestCollapsedBashLongCommandWithNoOutputKeepsCommandPreviewCollapsed(t *tes
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "✓ ▸ shell 暂存滚轮修复相关改动 (timeout=30s)") {
 		t.Fatalf("expected collapsed Shell to keep only the description summary; got:\n%s", joined)
 	}
@@ -2355,7 +2357,7 @@ func TestCollapsedBashShowsSingleExpandHintWhenCommandAndOutputBothHidden(t *tes
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(joined, "✓ ▸ shell echo first (timeout=2m)") {
 		t.Fatalf("expected collapsed Shell to show its disclosure glyph; got:\n%s", joined)
 	}
@@ -2379,7 +2381,7 @@ func TestExpandedUserTerminalMatchesBashContinuationFormatting(t *testing.T) {
 	lines := block.Render(80, "")
 	var plain []string
 	for _, line := range lines {
-		plain = append(plain, stripANSI(line))
+		plain = append(plain, terminaltext.StripANSI(line))
 	}
 	joined := strings.Join(plain, "\n")
 
@@ -2410,7 +2412,7 @@ func TestCompleteCardAlwaysRendersItsFullSummaryUnderABareHeader(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(88, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(88, ""), "\n"))
 	if !strings.Contains(joined, "line twelve") {
 		t.Fatalf("expected the Complete card to render its whole summary; got:\n%s", joined)
 	}
@@ -2429,8 +2431,8 @@ func TestCompleteCardAlwaysRendersItsFullSummaryUnderABareHeader(t *testing.T) {
 }
 
 func TestExpandedCompleteRendersSummaryMarkdownAndStructuredDetails(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
+	ApplyTheme(uitheme.Default())
+	contentMarkdown = markdownrender.New(currentStyles.Palette)
 
 	args := `{"summary":"## Result\n\nImplemented **streaming** support.\n\n` + "```go\\nfmt.Println(1)\\n```" + `","files_changed":["internal/tui/block_tool_render_generic.go"]}`
 	block := &Block{
@@ -2445,7 +2447,7 @@ func TestExpandedCompleteRendersSummaryMarkdownAndStructuredDetails(t *testing.T
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	for _, want := range []string{"Result", "Implemented streaming support.", "fmt.Println(1)", "Files changed:", "internal/tui/block_tool_render_generic.go"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected expanded Complete card to contain %q, got:\n%s", want, joined)
@@ -2457,8 +2459,8 @@ func TestExpandedCompleteRendersSummaryMarkdownAndStructuredDetails(t *testing.T
 }
 
 func TestExpandedEscalateRendersReasonMarkdownWithoutRepeatingResult(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
+	ApplyTheme(uitheme.Default())
+	contentMarkdown = markdownrender.New(currentStyles.Palette)
 
 	args := `{"reason":"## Decision needed\n\nChoose **one** migration strategy."}`
 	block := &Block{
@@ -2473,7 +2475,7 @@ func TestExpandedEscalateRendersReasonMarkdownWithoutRepeatingResult(t *testing.
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	for _, want := range []string{"Decision needed", "Choose one migration strategy."} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected expanded Escalate card to contain %q, got:\n%s", want, joined)
@@ -2495,7 +2497,7 @@ func TestProseControlCardFallsBackToContentForRestoredArgs(t *testing.T) {
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(88, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(88, ""), "\n"))
 	if !strings.Contains(joined, "Restored summary") {
 		t.Fatalf("expected restored Complete args to render from Content, got:\n%s", joined)
 	}
@@ -2548,7 +2550,7 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 		ToolQueuedByExecutionEvent: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "⏸ shell command -v benchstat || true") {
 		t.Fatalf("expected queued Shell header; got:\n%s", joined)
 	}
@@ -2567,7 +2569,7 @@ func TestQueuedToolHeaderShowsQueuedLabelWithoutSpinner(t *testing.T) {
 // the badge rule it has to keep: a card queued by the scheduler shows the badge,
 // and a running one does not.
 func TestNotifyCardHeaderFollowsTheSharedQueuedBadgeRule(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                         1,
 		Type:                       BlockToolCall,
@@ -2576,7 +2578,7 @@ func TestNotifyCardHeaderFollowsTheSharedQueuedBadgeRule(t *testing.T) {
 		ToolExecutionState:         agent.ToolCallExecutionStateQueued,
 		ToolQueuedByExecutionEvent: true,
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "Queued") {
 		t.Fatalf("expected the queued notify card to carry the badge; got:\n%s", joined)
 	}
@@ -2584,7 +2586,7 @@ func TestNotifyCardHeaderFollowsTheSharedQueuedBadgeRule(t *testing.T) {
 	block.ToolExecutionState = agent.ToolCallExecutionStateRunning
 	block.ToolQueuedByExecutionEvent = false
 	block.InvalidateCache()
-	running := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	running := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(running, "Queued") {
 		t.Fatalf("a running notify card must not carry the queued badge; got:\n%s", running)
 	}
@@ -2627,7 +2629,7 @@ func TestGenericToolHeaderAndExpandedResultEscapesANSIRichText(t *testing.T) {
 
 	block.ToggleAtWidth(100)
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected generic tool card to not contain raw ESC: %q", joined)
 	}
@@ -2659,7 +2661,7 @@ func TestBashCommandAndCollapsedSummaryEscapeANSIRichText(t *testing.T) {
 		ResultDone: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected shell card to not contain raw ESC: %q", joined)
 	}
@@ -2685,7 +2687,7 @@ func TestCollapsedLargeBashResultDoesNotRenderEntireHiddenOutput(t *testing.T) {
 		ResultDone:    true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "✓ ▸ shell show huge log") {
 		t.Fatalf("expected collapsed Shell to show only its compact header, got:\n%s", joined)
 	}
@@ -2705,7 +2707,7 @@ func TestQuestionStructuredPromptAndAnswerEscapesANSIRichText(t *testing.T) {
 			Content:       `{"questions":[{"header":"\u001b[31mHDR\u001b[0m","question":"Pick \u001b[32mone\u001b[0m","options":[{"id":"a","label":"\u001b[34mA\u001b[0m","description":"\u001b[35mdesc\u001b[0m"}]}]}`,
 			ResultContent: payload, ResultPayload: payload, ResultDone: true,
 		}
-		joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+		joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if strings.ContainsRune(joined, '\x1b') {
 			t.Fatalf("raw ESC: %q", joined)
 		}
@@ -2773,7 +2775,7 @@ func TestDelegateAndControlCardsEscapeStructuredFields(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			joined := stripANSI(strings.Join(tt.block.Render(120, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(tt.block.Render(120, ""), "\n"))
 			if strings.ContainsRune(joined, '\x1b') {
 				t.Fatalf("expected %s card to not contain raw ESC: %q", tt.name, joined)
 			}
@@ -2797,7 +2799,7 @@ func TestActiveToolHeaderKeepsToolNameStableWithoutCallingText(t *testing.T) {
 		ToolExecutionState: agent.ToolCallExecutionStateRunning,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(80, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(80, "●"), "\n"))
 	if strings.Contains(joined, "calling") {
 		t.Fatalf("active tool header should not render calling text; got:\n%s", joined)
 	}
@@ -2808,7 +2810,7 @@ func TestActiveToolHeaderKeepsToolNameStableWithoutCallingText(t *testing.T) {
 
 func TestQueuedToolHeaderBadgeKeepsRightPadding(t *testing.T) {
 	line := renderQueuedToolHeaderBadge("  ▸ Shell", 24)
-	plain := stripANSI(line)
+	plain := terminaltext.StripANSI(line)
 	if got := ansi.StringWidth(plain); got != 24 {
 		t.Fatalf("queued header width = %d, want 24; got %q", got, plain)
 	}
@@ -2819,7 +2821,7 @@ func TestQueuedToolHeaderBadgeKeepsRightPadding(t *testing.T) {
 
 func TestQueuedToolHeaderBadgeHidesWhenWidthIsTooNarrow(t *testing.T) {
 	line := renderQueuedToolHeaderBadge("  ▸ VeryLongToolName", 20)
-	plain := stripANSI(line)
+	plain := terminaltext.StripANSI(line)
 	if strings.Contains(plain, "Queued") {
 		t.Fatalf("expected queued badge to hide when width is too narrow; got %q", plain)
 	}
@@ -2829,17 +2831,17 @@ func TestQueuedToolHeaderBadgeHidesWhenWidthIsTooNarrow(t *testing.T) {
 }
 
 func TestPrewrappedToolCardRestoresCardBackgroundAfterTruncatedANSILine(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	bgSeq := colorToANSIBgSeq(currentTheme.ToolCallBg)
+	ApplyTheme(uitheme.Default())
+	bgSeq := terminaltext.BackgroundSequence(currentStyles.Palette.ToolCallBg)
 	if bgSeq == "" {
 		t.Fatal("default tool card background should produce an ANSI background sequence")
 	}
 
 	innerANSI := "\x1b[48;5;236m" + strings.Repeat("x", 80)
-	lines := renderPrewrappedToolCard(ToolBlockStyle, 24, toolCardTitle("TOOL CALL", 1), []string{innerANSI}, currentTheme.ToolCallBg, cardRailPrefix("tool", false))
+	lines := renderPrewrappedToolCard(currentStyles.ToolBlockStyle, 24, toolCardTitle("TOOL CALL", 1), []string{innerANSI}, currentStyles.Palette.ToolCallBg, cardRailPrefix("tool", false))
 	var body string
 	for _, line := range lines {
-		if strings.Contains(stripANSI(line), strings.Repeat("x", 24)) {
+		if strings.Contains(terminaltext.StripANSI(line), strings.Repeat("x", 24)) {
 			body = line
 			break
 		}
@@ -2848,7 +2850,7 @@ func TestPrewrappedToolCardRestoresCardBackgroundAfterTruncatedANSILine(t *testi
 		t.Fatalf("rendered truncated body line not found in:\n%q", strings.Join(lines, "\n"))
 	}
 
-	paddingAfterTruncatedReset := ansi.ResetStyle + bgSeq + strings.Repeat(" ", ToolBlockStyle.GetPaddingRight()) + ansi.ResetStyle
+	paddingAfterTruncatedReset := ansi.ResetStyle + bgSeq + strings.Repeat(" ", currentStyles.ToolBlockStyle.GetPaddingRight()) + ansi.ResetStyle
 	if !strings.Contains(body, paddingAfterTruncatedReset) {
 		t.Fatalf("truncated ANSI body line did not restore tool card background before right padding; want substring %q in %q", paddingAfterTruncatedReset, body)
 	}
@@ -2865,7 +2867,7 @@ func TestActiveToolHeaderUsesProvidedSpinnerFrame(t *testing.T) {
 		ToolExecutionState: agent.ToolCallExecutionStateRunning,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(80, "◳"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(80, "◳"), "\n"))
 	if !strings.Contains(joined, "◳") {
 		t.Fatalf("expected active tool header to use provided spinner frame; got:\n%s", joined)
 	}
@@ -2917,7 +2919,7 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 				ToolCallDetailExpanded: false,
 			},
 			marker: "✗",
-			ansi:   "\x1b[38;5;" + currentTheme.ErrorFg + "m✗",
+			ansi:   "\x1b[38;5;" + currentStyles.Palette.ErrorFg + "m✗",
 		},
 		{
 			name: "cancelled",
@@ -2937,7 +2939,7 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			joinedANSI := strings.Join(tt.block.Render(80, ""), "\n")
-			joinedPlain := stripANSI(joinedANSI)
+			joinedPlain := terminaltext.StripANSI(joinedANSI)
 			// A card whose body can be folded carries a disclosure marker
 			// between the status glyph and the tool name; the color assertion
 			// below still pins the status glyph itself.
@@ -2968,7 +2970,7 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 
 	lines := block.Render(80, "")
 	joinedANSI := strings.Join(lines, "\n")
-	joinedPlain := stripANSI(joinedANSI)
+	joinedPlain := terminaltext.StripANSI(joinedANSI)
 
 	if !strings.Contains(joinedPlain, "✗ ▸ shell false") {
 		t.Fatalf("expected collapsed Shell error prefix; got:\n%s", joinedPlain)
@@ -2976,7 +2978,7 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 	if !strings.Contains(joinedPlain, "exit code 1") {
 		t.Fatalf("expected collapsed Shell error summary; got:\n%s", joinedPlain)
 	}
-	if !strings.Contains(joinedANSI, "\x1b[1;38;5;"+currentTheme.ErrorFg+"m") && !strings.Contains(joinedANSI, "\x1b[38;5;"+currentTheme.ErrorFg+"m") {
+	if !strings.Contains(joinedANSI, "\x1b[1;38;5;"+currentStyles.Palette.ErrorFg+"m") && !strings.Contains(joinedANSI, "\x1b[38;5;"+currentStyles.Palette.ErrorFg+"m") {
 		t.Fatalf("expected error styling ANSI sequence; got:\n%q", joinedANSI)
 	}
 }
@@ -3020,7 +3022,7 @@ func TestCollapsedBashMultiLineErrorShowsOnlyExitCode(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "exit code 1") {
 		t.Fatalf("expected collapsed multi-line Shell error to keep the exit code; got:\n%s", joined)
 	}
@@ -3044,7 +3046,7 @@ func TestCollapsedBashSingleLineErrorShowsVerbatimLine(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "exit code 127: command not found: sample-tool") {
 		t.Fatalf("expected collapsed single-line Shell error to show the whole line; got:\n%s", joined)
 	}
@@ -3062,7 +3064,7 @@ func TestCollapsedBashTimeoutShowsTimeoutStatus(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "timed out after 600s") {
 		t.Fatalf("expected collapsed Shell timeout to show the timeout status; got:\n%s", joined)
 	}
@@ -3086,7 +3088,7 @@ func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testi
 	lines := block.Render(100, "")
 	target := -1
 	for i, line := range lines {
-		if strings.Contains(stripANSI(line), "starting command: fork/exec /bin/bash: invalid argument") {
+		if strings.Contains(terminaltext.StripANSI(line), "starting command: fork/exec /bin/bash: invalid argument") {
 			target = i
 			break
 		}
@@ -3096,7 +3098,7 @@ func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testi
 	}
 
 	line := lines[target]
-	trimmed := strings.TrimRight(stripANSI(line), " ")
+	trimmed := strings.TrimRight(terminaltext.StripANSI(line), " ")
 	contentEndCol := ansi.StringWidth(trimmed) - 1
 	if contentEndCol < 0 {
 		t.Fatalf("invalid content end col: %d", contentEndCol)
@@ -3109,9 +3111,9 @@ func TestExpandedBashErrorKeepsToolCardBackgroundAcrossWrappedErrorBody(t *testi
 		t.Fatal("expected rendered cells")
 	}
 
-	toolBg := colorOfTheme(currentTheme.ToolCallBg)
+	toolBg := colorOfTheme(currentStyles.Palette.ToolCallBg)
 	checked := 0
-	cardEnd := len(cells) - ToolBlockStyle.GetMarginRight()
+	cardEnd := len(cells) - currentStyles.ToolBlockStyle.GetMarginRight()
 	for i := contentEndCol + 1; i < cardEnd; i++ {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
@@ -3139,7 +3141,7 @@ func TestDeleteHeaderShowsRelativePathInsideWorkingDir(t *testing.T) {
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "delete internal/tui/obsolete.go (remove obsolete file)") ||
 		!strings.Contains(joined, "Deleted internal/tui/obsolete.go") {
 		t.Fatalf("expected the relative path in the header and below; got:\n%s", joined)
@@ -3160,7 +3162,7 @@ func TestDeleteHeaderShowsFilePath(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	// The paths are the subject of a delete, so they lead the header and the
 	// reason joins the option group beside them.
 	if !strings.Contains(joined, "delete internal/tui/obsolete.go (remove obsolete file)") ||
@@ -3194,7 +3196,7 @@ func TestDeleteCardShowsDiagnosticPathsLikeNormalHeader(t *testing.T) {
 		},
 	}
 	rendered := strings.Join(block.Render(120, ""), "\n")
-	joined := stripANSI(rendered)
+	joined := terminaltext.StripANSI(rendered)
 	if !strings.Contains(joined, "delete cleanup generated files (ignored .paths=internal/tui/obsolete.go,cmd/old.go, paths=<missing>)") {
 		t.Fatalf("expected delete diagnostic header to keep the ignored paths beside the reason; got:\n%s", joined)
 	}
@@ -3217,7 +3219,7 @@ func TestDeleteAlwaysShowsAllPartialResultsAndCannotCollapse(t *testing.T) {
 		ResultStatus:  message.ToolStatusError,
 	}
 
-	before := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	before := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{
 		"delete 3 files (remove obsolete generated files)",
 		"Stopped after an execution error",
@@ -3234,7 +3236,7 @@ func TestDeleteAlwaysShowsAllPartialResultsAndCannotCollapse(t *testing.T) {
 	}
 
 	block.ToggleAtWidth(120)
-	after := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	after := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if after != before {
 		t.Fatalf("Delete card should ignore collapse toggles\nbefore:\n%s\nafter:\n%s", before, after)
 	}
@@ -3276,7 +3278,7 @@ func TestWebFetchHeaderShowsURLAndTimeout(t *testing.T) {
 				ResultDone:    true,
 			}
 
-			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if !strings.Contains(joined, tc.want) {
 				t.Fatalf("expected web_fetch header to contain %q; got:\n%s", tc.want, joined)
 			}
@@ -3302,7 +3304,7 @@ func TestTaskCardAlwaysRendersItsBodyUnderABareHeader(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "✓ delegate (reviewer)") {
 		t.Fatalf("expected Delegate header to show the tool name and agent type; got:\n%s", joined)
 	}
@@ -3341,7 +3343,7 @@ func TestCollapsedGenericToolDeduplicatesMatchingParamAndResultPreview(t *testin
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	// The first argument is the card's subject, so it rides the header.
 	if !strings.Contains(joined, "Task [Image #1]") {
 		t.Fatalf("expected the subject on the header, got:\n%s", joined)
@@ -3365,7 +3367,7 @@ func TestCollapsedMCPToolUsesHeaderDisclosureMarker(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "✓ ▸ mcp_exa_web_search_exa") {
 		t.Fatalf("expected collapsed MCP card to show header disclosure glyph; got:\n%s", collapsed)
 	}
@@ -3379,7 +3381,7 @@ func TestCollapsedMCPToolUsesHeaderDisclosureMarker(t *testing.T) {
 	}
 
 	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(expanded, "✓ ▾ mcp_exa_web_search_exa") {
 		t.Fatalf("expected expanded MCP card to show the expanded disclosure glyph; got:\n%s", expanded)
 	}
@@ -3404,7 +3406,7 @@ func TestCollapsedMCPToolWithSingleHiddenLineStaysCollapsed(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "✓ ▸ mcp_chrome_devtools_evaluate_script") {
 		t.Fatalf("expected collapsed MCP card to show the collapsed disclosure glyph; got:\n%s", collapsed)
 	}
@@ -3416,7 +3418,7 @@ func TestCollapsedMCPToolWithSingleHiddenLineStaysCollapsed(t *testing.T) {
 	}
 
 	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(expanded, "✓ ▾ mcp_chrome_devtools_evaluate_script") {
 		t.Fatalf("expected expanded MCP card to show the expanded disclosure glyph; got:\n%s", expanded)
 	}
@@ -3425,7 +3427,7 @@ func TestCollapsedMCPToolWithSingleHiddenLineStaysCollapsed(t *testing.T) {
 	}
 
 	block.ToggleAtWidth(120)
-	recollapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	recollapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(recollapsed, "✓ ▸ mcp_chrome_devtools_evaluate_script") {
 		t.Fatalf("expected second toggle to restore the collapsed glyph; got:\n%s", recollapsed)
 	}
@@ -3443,7 +3445,7 @@ func TestExpandedTaskShowsDescriptionAndWorkerWithTaskID(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "Description:") {
 		t.Fatalf("expected expanded Delegate to show description heading; got:\n%s", joined)
 	}
@@ -3461,7 +3463,7 @@ func TestExpandedTaskShowsDescriptionAndWorkerWithTaskID(t *testing.T) {
 }
 
 func TestExpandedTaskDescriptionUsesPlainTextForMarkdownLookingContent(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	desc := "## Plan\n- item one\n- item two\n\n```go\nfmt.Println(\"ok\")\n```"
 	block := &Block{
 		ID:                     1,
@@ -3473,7 +3475,7 @@ func TestExpandedTaskDescriptionUsesPlainTextForMarkdownLookingContent(t *testin
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(joined, "Description:") {
 		t.Fatalf("expected expanded Delegate to show description heading; got:\n%s", joined)
 	}
@@ -3498,7 +3500,7 @@ func TestGrepHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "grep TODO (paths=internal/tui, includes=*.go)") {
 		t.Fatalf("expected grep header to show relative search path; got:\n%s", joined)
 	}
@@ -3517,7 +3519,7 @@ func TestGrepHeaderHidesCurrentWorkingDirPath(t *testing.T) {
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "grep TODO (includes=*.go)") {
 		t.Fatalf("expected grep header to hide current working directory path; got:\n%s", joined)
 	}
@@ -3537,7 +3539,7 @@ func TestGrepHeaderPrefersPatternAndElidesOptions(t *testing.T) {
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, pattern) {
 		t.Fatalf("expected grep header to keep full pattern before options; got:\n%s", joined)
 	}
@@ -3555,7 +3557,7 @@ func TestGenericToolCardHeaderCanUseWideViewport(t *testing.T) {
 		Content:    fmt.Sprintf(`{"pattern":%q}`, pattern),
 		ResultDone: true,
 	}
-	joined := stripANSI(strings.Join(block.Render(maxTextWidth+100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(maxTextWidth+100, ""), "\n"))
 	if !strings.Contains(joined, strings.Repeat("a", 80)) {
 		t.Fatalf("expected grep header to use wide viewport beyond text cap; got:\n%s", joined)
 	}
@@ -3572,7 +3574,7 @@ func TestGlobHeaderShowsRelativeSearchPathInsideWorkingDir(t *testing.T) {
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "glob **/*.go (path=internal)") {
 		t.Fatalf("expected glob header to show relative search path; got:\n%s", joined)
 	}
@@ -3593,7 +3595,7 @@ func TestSearchHeadersShowMultipleArrayParams(t *testing.T) {
 		ResultDone:        true,
 		displayWorkingDir: wd,
 	}
-	grepJoined := stripANSI(strings.Join(grepBlock.Render(140, ""), "\n"))
+	grepJoined := terminaltext.StripANSI(strings.Join(grepBlock.Render(140, ""), "\n"))
 	if !strings.Contains(grepJoined, "grep TODO (paths=cmd,internal, includes=**/*.go,**/*.md)") {
 		t.Fatalf("expected grep header to show multiple paths/includes; got:\n%s", grepJoined)
 	}
@@ -3608,7 +3610,7 @@ func TestSearchHeadersShowMultipleArrayParams(t *testing.T) {
 		Content:    `{"patterns":["**/*.go","**/*.md"],"path":"."}`,
 		ResultDone: true,
 	}
-	globJoined := stripANSI(strings.Join(globBlock.Render(140, ""), "\n"))
+	globJoined := terminaltext.StripANSI(strings.Join(globBlock.Render(140, ""), "\n"))
 	if !strings.Contains(globJoined, "glob **/*.go,**/*.md") {
 		t.Fatalf("expected glob header to show multiple patterns; got:\n%s", globJoined)
 	}
@@ -3626,7 +3628,7 @@ func TestBashExpandedMetaShowsRelativeWorkdirInsideWorkingDir(t *testing.T) {
 		ToolCallDetailExpanded: true,
 		displayWorkingDir:      wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "workdir: internal/tui") && !strings.Contains(joined, "Workdir: internal/tui") {
 		t.Fatalf("expected shell expanded body to show relative workdir; got:\n%s", joined)
 	}
@@ -3646,7 +3648,7 @@ func TestCollapsedBashShowsResultSummary(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if strings.Contains(joined, "ok") || strings.Contains(joined, "second line") {
 		t.Fatalf("expected shell collapsed card to hide success output body; got:\n%s", joined)
 	}
@@ -3666,7 +3668,7 @@ func TestCollapsedGrepShowsMatchCountSummary(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "2 matches") {
 		t.Fatalf("expected Grep collapsed summary to show match count; got:\n%s", joined)
 	}
@@ -3705,7 +3707,7 @@ func TestCollapsedGrepUsesKeySummaryForLowCounts(t *testing.T) {
 				ToolCallDetailExpanded: false,
 			}
 
-			joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 			if tt.wantPresent != "" && !strings.Contains(joined, tt.wantPresent) {
 				t.Fatalf("expected output to contain %q; got:\n%s", tt.wantPresent, joined)
 			}
@@ -3761,7 +3763,7 @@ func TestExpandedShortGrepAndGlobResultsDoNotDuplicateContent(t *testing.T) {
 				ToolCallDetailExpanded: true,
 			}
 
-			joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 			if got := strings.Count(joined, tt.wantCounted); got != 1 {
 				t.Fatalf("expected %q exactly once in expanded card, got %d occurrences:\n%s", tt.wantCounted, got, joined)
 			}
@@ -3783,7 +3785,7 @@ func TestExpandedGrepCountSummaryStillShowsAllMatches(t *testing.T) {
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "2 matches") {
 		t.Fatalf("expected expanded Grep card to keep the count summary, got:\n%s", joined)
 	}
@@ -3823,7 +3825,7 @@ func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
 			}
 
 			// Collapsed: the count summary must win over any force-expand.
-			collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if !strings.Contains(collapsed, "✓ ▸ "+tt.toolName) {
 				t.Fatalf("expected collapsed card to show the collapsed disclosure glyph, got:\n%s", collapsed)
 			}
@@ -3835,7 +3837,7 @@ func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
 
 			// Space expands...
 			block.ToggleAtWidth(120)
-			expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if !strings.Contains(expanded, "✓ ▾ "+tt.toolName) {
 				t.Fatalf("expected expanded card to show the expanded disclosure glyph, got:\n%s", expanded)
 			}
@@ -3845,7 +3847,7 @@ func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
 
 			// ...and a second Space collapses again.
 			block.ToggleAtWidth(120)
-			recollapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			recollapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if !strings.Contains(recollapsed, "✓ ▸ "+tt.toolName) {
 				t.Fatalf("expected second toggle to restore collapsed glyph, got:\n%s", recollapsed)
 			}
@@ -3898,7 +3900,7 @@ func TestEditAndApplyPatchShowDiagnosticsDetail(t *testing.T) {
 				ResultDone:    true,
 			}
 
-			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if tt.wantDetail == "" {
 				if strings.Contains(strings.ToLower(joined), "diagnostics") {
 					t.Fatalf("expected no diagnostics section for %s, got:\n%s", tt.toolName, joined)
@@ -3939,7 +3941,7 @@ func TestReadCollapsedSummaryDistinguishesTruncationKinds(t *testing.T) {
 				Collapsed:     true,
 			}
 
-			joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if !strings.Contains(joined, tt.wantLabel) {
 				t.Fatalf("expected collapsed read summary to show %q, got:\n%s", tt.wantLabel, joined)
 			}
@@ -3964,7 +3966,7 @@ func TestCancelledWriteCallSuppressesEmptyFilePreviewAndDuplicateCancelledText(t
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "write foo.txt") {
 		t.Fatalf("expected Write header to include file path, got:\n%s", plain)
 	}
@@ -3998,7 +4000,7 @@ func TestEditErrorPreservesExampleBlockIndentation(t *testing.T) {
 		ResultDone:   true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "            for _, fe := range files {") {
 		t.Fatalf("expected first example line indentation to be preserved; got:\n%s", plain)
 	}
@@ -4173,7 +4175,7 @@ func TestEditToolCallCopyShowsOldAndNewStringsInsteadOfDiff(t *testing.T) {
 }
 
 func TestReplaceEditToolCallErrorRenderShowsOldAndNewLines(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -4186,7 +4188,7 @@ func TestReplaceEditToolCallErrorRenderShowsOldAndNewLines(t *testing.T) {
 	}
 
 	lines := block.Render(100, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	for _, want := range []string{
 		"edit foo.txt (replace_all=true)",
 		"- func old() {",
@@ -4205,8 +4207,8 @@ func TestReplaceEditToolCallErrorRenderShowsOldAndNewLines(t *testing.T) {
 			t.Fatalf("rendered replace edit block should not show %q; got:\n%s", unwanted, plain)
 		}
 	}
-	assertRenderedTextBackground(t, renderedLineContaining(t, lines, "func old"), "func", colorOfTheme(currentTheme.DiffDelLineBg))
-	assertRenderedTextBackground(t, renderedLineContaining(t, lines, "func current"), "func", colorOfTheme(currentTheme.DiffAddLineBg))
+	assertRenderedTextBackground(t, renderedLineContaining(t, lines, "func old"), "func", colorOfTheme(currentStyles.Palette.DiffDelLineBg))
+	assertRenderedTextBackground(t, renderedLineContaining(t, lines, "func current"), "func", colorOfTheme(currentStyles.Palette.DiffAddLineBg))
 }
 
 func TestReplaceEditToolCallErrorRenderTruncatesLongLines(t *testing.T) {
@@ -4232,7 +4234,7 @@ func TestReplaceEditToolCallErrorRenderTruncatesLongLines(t *testing.T) {
 
 	const width = 48
 	lines := block.Render(width, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	for _, want := range []string{"- old-prefix-", "+ new-prefix-", "…"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered long replace edit line missing %q; got:\n%s", want, plain)
@@ -4250,7 +4252,7 @@ func TestReplaceEditToolCallErrorRenderTruncatesLongLines(t *testing.T) {
 		maxLineWidth++
 	}
 	for i, line := range lines {
-		if got := tuiStringWidth(line); got > maxLineWidth {
+		if got := terminaltext.Width(line); got > maxLineWidth {
 			t.Fatalf("rendered line %d width = %d, want <= %d: %q", i, got, maxLineWidth, line)
 		}
 	}
@@ -4271,7 +4273,7 @@ func TestReplaceEditToolCallHeaderOmitsDisabledReplaceAll(t *testing.T) {
 			ResultDone:    true,
 		}
 
-		plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+		plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 		if strings.Contains(plain, "replace_all") {
 			t.Fatalf("disabled replace_all should be omitted from Edit card; got:\n%s", plain)
 		}
@@ -4310,7 +4312,7 @@ func TestCancelledEditCallSuppressesDiffPreviewAndDuplicateCancelledText(t *test
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "edit") || !strings.Contains(plain, "foo.txt") {
 		t.Fatalf("expected edit header to include file path, got:\n%s", plain)
 	}
@@ -4339,7 +4341,7 @@ func TestCancelledReadCallOmitsDuplicateCancelledText(t *testing.T) {
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "read foo.txt") {
 		t.Fatalf("expected Read header to include file path, got:\n%s", plain)
 	}
@@ -4366,7 +4368,7 @@ func TestCancelledGenericToolOmitsDuplicateCancelledText(t *testing.T) {
 		ToolCallDetailExpanded: true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "shell echo hi") {
 		t.Fatalf("expected shell header to remain visible, got:\n%s", plain)
 	}
@@ -4392,7 +4394,7 @@ func TestCancelledSpecialToolOmitsDuplicateCancelledText(t *testing.T) {
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(plain, "question") {
 		t.Fatalf("expected question header to remain visible, got:\n%s", plain)
 	}
@@ -4418,7 +4420,7 @@ func TestCollapsedGlobShowsFileCountSummary(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "3 files") {
 		t.Fatalf("expected Glob collapsed summary to show file count; got:\n%s", joined)
 	}
@@ -4457,7 +4459,7 @@ func TestCollapsedGlobUsesKeySummaryForLowCounts(t *testing.T) {
 				ToolCallDetailExpanded: false,
 			}
 
-			joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 			if tt.wantPresent != "" && !strings.Contains(joined, tt.wantPresent) {
 				t.Fatalf("expected output to contain %q; got:\n%s", tt.wantPresent, joined)
 			}
@@ -4469,7 +4471,7 @@ func TestCollapsedGlobUsesKeySummaryForLowCounts(t *testing.T) {
 }
 
 func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	answers := `{"status":"resolved","answers":[{"header":"Messaging platform","selected":["Chat App"],"selected_ids":["chat"],"outcome":"answered"}]}`
 	block := &Block{
@@ -4485,7 +4487,7 @@ func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "✓ 2. Chat App") {
 		t.Fatalf("expected selected option to be marked inline, got:\n%s", plain)
 	}
@@ -4522,7 +4524,7 @@ func TestQuestionCallMarksSelectedOptionInline(t *testing.T) {
 // tool's own output instead of the combined model-visible text, and shows the
 // notes from their own field.
 func TestQuestionCallParsesCleanPayloadAndShowsNotesApart(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	answers := `{"status":"resolved","answers":[{"header":"document layout","selected":["Match the reference layout (recommended)"],"selected_ids":["match"],"outcome":"answered"}]}`
 	note := `Note: ignored earlier duplicate parameter value(s): args.questions[0].header; the last values were used`
@@ -4541,7 +4543,7 @@ func TestQuestionCallParsesCleanPayloadAndShowsNotesApart(t *testing.T) {
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "✓ 1. Match the reference layout (recommended)") {
 		t.Fatalf("expected the selection to be marked inline, got:\n%s", plain)
 	}
@@ -4561,7 +4563,7 @@ func TestQuestionCallParsesCleanPayloadAndShowsNotesApart(t *testing.T) {
 // offending field and the value it rejected. Repeating the argument on the
 // header line adds nothing and puts a second, competing "header" on screen.
 func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	ignored := &Block{
 		ID:            1,
@@ -4580,10 +4582,10 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 		},
 	}
 	ignoredLines := ignored.Render(100, "")
-	if plain := stripANSI(strings.Join(ignoredLines, "\n")); strings.Contains(plain, "questions[0].header=document structure") {
+	if plain := terminaltext.StripANSI(strings.Join(ignoredLines, "\n")); strings.Contains(plain, "questions[0].header=document structure") {
 		t.Fatalf("expected the shadowed header value to stay off the header line, got:\n%s", plain)
 	}
-	if header := stripANSI(renderedLineContaining(t, ignoredLines, "question")); strings.Contains(header, "document structure") {
+	if header := terminaltext.StripANSI(renderedLineContaining(t, ignoredLines, "question")); strings.Contains(header, "document structure") {
 		t.Fatalf("expected the question header line to stay clean, got:\n%s", header)
 	}
 
@@ -4604,7 +4606,7 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 		},
 	}
 	invalidLines := invalid.Render(100, "")
-	header := stripANSI(renderedLineContaining(t, invalidLines, "question"))
+	header := terminaltext.StripANSI(renderedLineContaining(t, invalidLines, "question"))
 	if strings.Contains(header, "questions[0].header") {
 		t.Fatalf("expected an invalid arg to stay off the question header line, got:\n%s", header)
 	}
@@ -4613,7 +4615,7 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 	}
 	// Nothing is lost: the parameters render in the body and the schema
 	// message — which names the field and the rejected value — renders below.
-	plain := stripANSI(strings.Join(invalidLines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(invalidLines, "\n"))
 	if !strings.Contains(plain, "  ↳ H:") {
 		t.Fatalf("expected the question to keep rendering its parameters below the header, got:\n%s", plain)
 	}
@@ -4627,7 +4629,7 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 }
 
 func TestQuestionCallRendersCustomAnswerInline(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	answers := `{"status":"resolved","answers":[{"header":"Project location","selected":["/tmp/sample-project\n/tmp/sample-cache"]}]}`
 	block := &Block{
@@ -4643,7 +4645,7 @@ func TestQuestionCallRendersCustomAnswerInline(t *testing.T) {
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "Custom: /tmp/sample-project") {
 		t.Fatalf("expected inline custom answer, got:\n%s", plain)
 	}
@@ -4656,7 +4658,7 @@ func TestQuestionCallRendersCustomAnswerInline(t *testing.T) {
 }
 
 func TestQuestionCallRendersMultilineAnswerWithContinuationIndent(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	answers := `{"status":"resolved","answers":[{"header":"top output","selected":["line 1\nline 2\nline 3"]}]}`
 	block := &Block{
@@ -4669,7 +4671,7 @@ func TestQuestionCallRendersMultilineAnswerWithContinuationIndent(t *testing.T) 
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(70, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(70, ""), "\n"))
 	if !strings.Contains(plain, "Answer: line 1") {
 		t.Fatalf("expected inline Question answer, got:\n%s", plain)
 	}
@@ -4682,7 +4684,7 @@ func TestQuestionCallRendersMultilineAnswerWithContinuationIndent(t *testing.T) 
 }
 
 func TestQuestionCallRendersSingleObjectPromptAndStructuredAnswer(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	block := &Block{
 		ID:            1,
@@ -4694,7 +4696,7 @@ func TestQuestionCallRendersSingleObjectPromptAndStructuredAnswer(t *testing.T) 
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(70, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(70, ""), "\n"))
 	for _, want := range []string{"log", "paste log", "Answer: first line"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected question card to contain %q, got:\n%s", want, plain)
@@ -4706,7 +4708,7 @@ func TestQuestionCallRendersSingleObjectPromptAndStructuredAnswer(t *testing.T) 
 }
 
 func TestQuestionCallPreservesWhitespaceInMultilineAnswer(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	answers := `{"status":"resolved","answers":[{"header":"top output","selected":["PID  CPU   COMMAND\n1    10%   sample-app"]}]}`
 	block := &Block{
@@ -4719,7 +4721,7 @@ func TestQuestionCallPreservesWhitespaceInMultilineAnswer(t *testing.T) {
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(plain, "Answer: PID  CPU   COMMAND") {
 		t.Fatalf("expected aligned spaces in first line, got:\n%s", plain)
 	}
@@ -4729,7 +4731,7 @@ func TestQuestionCallPreservesWhitespaceInMultilineAnswer(t *testing.T) {
 }
 
 func TestQuestionCallFallbackResultPreservesMultilineText(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	block := &Block{
 		ID:            1,
@@ -4740,7 +4742,7 @@ func TestQuestionCallFallbackResultPreservesMultilineText(t *testing.T) {
 		ResultDone:    true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(70, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(70, ""), "\n"))
 	if !strings.Contains(plain, "↳ ✓") {
 		t.Fatalf("expected fallback success header, got:\n%s", plain)
 	}
@@ -4752,7 +4754,7 @@ func TestQuestionCallFallbackResultPreservesMultilineText(t *testing.T) {
 }
 
 func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	block := &Block{
 		ID:            1,
@@ -4763,7 +4765,7 @@ func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 		ResultContent: "Done rejected: require all checks to pass before exit and include verification results",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(plain, "✗ done") {
 		t.Fatalf("expected rejected Done to use failure icon, got:\n%s", plain)
 	}
@@ -4779,7 +4781,7 @@ func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 }
 
 func TestDoneCallAutoRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	block := &Block{
 		ID:            1,
@@ -4790,7 +4792,7 @@ func TestDoneCallAutoRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 		ResultContent: "Done rejected automatically: loop exit conditions are not satisfied yet: open TODO items remain. Finish the remaining work before calling Done again.",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "✗ done") {
 		t.Fatalf("expected auto-rejected Done to use failure icon, got:\n%s", plain)
 	}
@@ -4807,7 +4809,7 @@ func TestDoneCallAutoRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 }
 
 func TestDoneCallRejectedRendersReportAndSingleReason(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	block := &Block{
 		ID:            1,
@@ -4819,7 +4821,7 @@ func TestDoneCallRejectedRendersReportAndSingleReason(t *testing.T) {
 		DoneReport:    "## Completion status\nReport body stays visible",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(72, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(72, ""), "\n"))
 	for _, want := range []string{"Completion status", "Report body stays visible", "↳ Rejected:", "coverage must be >= 70% before"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected rejected Done render to contain %q, got:\n%s", want, plain)
@@ -4834,7 +4836,7 @@ func TestDoneCallRejectedRendersReportAndSingleReason(t *testing.T) {
 }
 
 func TestDoneCallAcceptedOmitsStatusAndRejectedReason(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	block := &Block{
 		ID:            1,
@@ -4846,7 +4848,7 @@ func TestDoneCallAcceptedOmitsStatusAndRejectedReason(t *testing.T) {
 		DoneReport:    "## Summary\n- shipped\n- verified",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	for _, want := range []string{"✓ done", "Summary", "• shipped", "• verified"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected accepted Done render to contain %q, got:\n%s", want, plain)
@@ -4860,7 +4862,7 @@ func TestDoneCallAcceptedOmitsStatusAndRejectedReason(t *testing.T) {
 }
 
 func TestDoneCallRendersDoneReportMarkdown(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	block := &Block{
 		ID:           1,
@@ -4871,7 +4873,7 @@ func TestDoneCallRendersDoneReportMarkdown(t *testing.T) {
 		DoneReport:   "## Summary\n- shipped\n- verified",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	for _, want := range []string{"Summary", "• shipped", "• verified"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected rendered Done report to contain %q, got:\n%s", want, plain)
@@ -4880,7 +4882,7 @@ func TestDoneCallRendersDoneReportMarkdown(t *testing.T) {
 }
 
 func TestDoneCallHeaderKeepsBareToolLine(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	block := &Block{
 		ID:                1,
@@ -4915,7 +4917,7 @@ func TestDoneCallHeaderKeepsBareToolLine(t *testing.T) {
 }
 
 func TestDoneCallUsesProseWidthForReportCard(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	width := maxProseWidth + 80
 	block := &Block{
@@ -4930,7 +4932,7 @@ func TestDoneCallUsesProseWidthForReportCard(t *testing.T) {
 	lines := block.renderDoneCall(width, "")
 	got := 0
 	for _, line := range stripANSILines(lines) {
-		got = max(got, tuiStringWidth(line))
+		got = max(got, terminaltext.Width(line))
 	}
 
 	metrics := newDoneToolCardMetrics(width)
@@ -4956,8 +4958,8 @@ func TestDoneCallUsesProseWidthForReportCard(t *testing.T) {
 }
 
 func TestDoneReportCodeBlockKeepsTextWidthCap(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
+	ApplyTheme(uitheme.Default())
+	contentMarkdown = markdownrender.New(currentStyles.Palette)
 
 	metrics := newDoneToolCardMetrics(maxProseWidth + 80)
 	var hl *syntax.Highlighter
@@ -4965,7 +4967,7 @@ func TestDoneReportCodeBlockKeepsTextWidthCap(t *testing.T) {
 
 	var codeLine string
 	for _, line := range lines {
-		if strings.Contains(stripANSI(line), "hello") {
+		if strings.Contains(terminaltext.StripANSI(line), "hello") {
 			codeLine = line
 			break
 		}
@@ -4973,7 +4975,7 @@ func TestDoneReportCodeBlockKeepsTextWidthCap(t *testing.T) {
 	if codeLine == "" {
 		t.Fatalf("missing rendered code line in %#v", stripANSILines(lines))
 	}
-	if got := tuiStringWidth(codeLine); got != maxTextWidth {
+	if got := terminaltext.Width(codeLine); got != maxTextWidth {
 		t.Fatalf("done report code block width = %d, want %d; line=%q", got, maxTextWidth, codeLine)
 	}
 }
@@ -4989,7 +4991,7 @@ func TestReadCallRendersSingleBlankLineWithoutPanic(t *testing.T) {
 	}
 
 	lines := block.renderReadCall(80, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "read internal/tui/input.go") {
 		t.Fatalf("expected Read header to remain visible, got:\n%s", plain)
 	}
@@ -5050,7 +5052,7 @@ func TestReadCallDisclosureMatchesToggleableBody(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plain := stripANSI(strings.Join(tt.block.Render(80, ""), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(tt.block.Render(80, ""), "\n"))
 			hasMarker := strings.Contains(plain, toolDisclosureCollapsed) || strings.Contains(plain, toolDisclosureExpanded)
 			if hasMarker != tt.wantMarker {
 				t.Fatalf("marker present = %v, want %v; render:\n%s", hasMarker, tt.wantMarker, plain)
@@ -5073,7 +5075,7 @@ func TestReadCallWideHeaderPreservesOffsetWithLongPath(t *testing.T) {
 		ResultContent: "line 431\nline 432",
 	}
 
-	plain := stripANSI(strings.Join(block.renderReadCall(180, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderReadCall(180, ""), "\n"))
 	if !strings.Contains(plain, "(offset=430, limit=160)") {
 		t.Fatalf("expected read header to preserve full offset/limit params, got:\n%s", plain)
 	}
@@ -5081,7 +5083,7 @@ func TestReadCallWideHeaderPreservesOffsetWithLongPath(t *testing.T) {
 
 func TestReadHeaderUsesEllipsisWhenPathDoesNotFit(t *testing.T) {
 	longPath := "/fictional/workspace/generated/reports/very/deeply/nested/directories/synthetic-review-fixture-00000000000000000001.txt"
-	header := stripANSI(renderReadHeaderLine("✓", "read", longPath, "offset=430, limit=160", "", 80))
+	header := terminaltext.StripANSI(renderReadHeaderLine("✓", "read", longPath, "offset=430, limit=160", "", 80))
 
 	if !strings.Contains(header, "…") {
 		t.Fatalf("expected read header to use ellipsis for long path, got %q", header)
@@ -5102,7 +5104,7 @@ func TestReadCallErrorKeepsInvalidArgsVisible(t *testing.T) {
 		ResultContent: "arguments do not match read schema: args.offset must be an integer, got string \"1.0\"",
 	}
 
-	plain := stripANSI(strings.Join(block.renderReadCall(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderReadCall(120, ""), "\n"))
 	if !strings.Contains(plain, "internal/config/config.go") {
 		t.Fatalf("expected invalid-args Read header to keep the path, got:\n%s", plain)
 	}
@@ -5122,7 +5124,7 @@ func TestReadCallErrorShowsUnexpectedArgKeys(t *testing.T) {
 		ResultContent: "arguments do not match read schema: args.path is required",
 	}
 
-	plain := stripANSI(strings.Join(block.renderReadCall(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderReadCall(120, ""), "\n"))
 	if !strings.Contains(plain, "pat=sample.go") {
 		t.Fatalf("expected Read header to surface the unexpected key, got:\n%s", plain)
 	}
@@ -5142,7 +5144,7 @@ func TestReadCallErrorTruncatesLongArgValues(t *testing.T) {
 		ResultContent: "arguments do not match read schema: args.offset must be an integer",
 	}
 
-	plain := stripANSI(strings.Join(block.renderReadCall(160, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderReadCall(160, ""), "\n"))
 	if strings.Contains(plain, strings.Repeat("x", 150)) {
 		t.Fatalf("expected long arg value to be truncated, got:\n%s", plain)
 	}
@@ -5162,7 +5164,7 @@ func TestWriteCallErrorKeepsInvalidArgsVisible(t *testing.T) {
 		ResultContent: "arguments do not match write schema: args.content must be a string, got number 123",
 	}
 
-	plain := stripANSI(strings.Join(block.renderWriteCall(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderWriteCall(120, ""), "\n"))
 	if !strings.Contains(plain, "docs/notes.md") {
 		t.Fatalf("expected invalid-args Write header to keep the path, got:\n%s", plain)
 	}
@@ -5182,18 +5184,18 @@ func TestWriteCallSuccessHeaderOmitsContent(t *testing.T) {
 	lines := block.renderWriteCall(120, "")
 	header := ""
 	for _, line := range lines {
-		if plain := stripANSI(line); strings.Contains(plain, "docs/notes.md") {
+		if plain := terminaltext.StripANSI(line); strings.Contains(plain, "docs/notes.md") {
 			header = plain
 			break
 		}
 	}
 	if header == "" {
-		t.Fatalf("expected Write header to keep the path, got:\n%s", stripANSI(strings.Join(lines, "\n")))
+		t.Fatalf("expected Write header to keep the path, got:\n%s", terminaltext.StripANSI(strings.Join(lines, "\n")))
 	}
 	if strings.Contains(header, "content=") {
 		t.Fatalf("valid Write args should not repeat the content in the header, got:\n%s", header)
 	}
-	if plain := stripANSI(strings.Join(lines, "\n")); !strings.Contains(plain, "hello world") {
+	if plain := terminaltext.StripANSI(strings.Join(lines, "\n")); !strings.Contains(plain, "hello world") {
 		t.Fatalf("expected the content preview to render the written text, got:\n%s", plain)
 	}
 }
@@ -5209,7 +5211,7 @@ func TestTodoCallErrorKeepsValidEntriesVisible(t *testing.T) {
 		ResultContent: "arguments do not match todo_write schema: args.todos[1].id must be a string, got number 2",
 	}
 
-	plain := stripANSI(strings.Join(block.renderTodoCall(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderTodoCall(120, ""), "\n"))
 	if !strings.Contains(plain, "first task") {
 		t.Fatalf("expected valid todo entry to stay visible next to a malformed one, got:\n%s", plain)
 	}
@@ -5229,7 +5231,7 @@ func TestQuestionCallErrorKeepsValidEntriesVisible(t *testing.T) {
 		ResultContent: "arguments do not match question schema: args.questions[1].header must be a string, got number 7",
 	}
 
-	plain := stripANSI(strings.Join(block.renderQuestionCall(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderQuestionCall(120, ""), "\n"))
 	if !strings.Contains(plain, "Which package should own the helper?") {
 		t.Fatalf("expected valid question to stay visible next to a malformed one, got:\n%s", plain)
 	}
@@ -5252,7 +5254,7 @@ func TestQuestionCardOmitsElapsedWaitTime(t *testing.T) {
 		PersistedDuration: 42 * time.Second,
 	}
 
-	plain := stripANSI(strings.Join(block.renderQuestionCall(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderQuestionCall(120, ""), "\n"))
 	if strings.Contains(plain, "⏱") || strings.Contains(plain, "42s") {
 		t.Fatalf("expected question card to omit the elapsed suffix, got:\n%s", plain)
 	}
@@ -5272,7 +5274,7 @@ func TestEscalateCallKeepsInvalidArgsVisible(t *testing.T) {
 		ResultContent: "arguments do not match escalate schema: args.files_changed must be an array, got string \"src/auth.go\"",
 	}
 
-	plain := stripANSI(strings.Join(block.renderProseControlCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderProseControlCall(140, ""), "\n"))
 	if !strings.Contains(plain, "Need approval to rotate credentials") {
 		t.Fatalf("expected escalate reason to survive a wrongly typed sibling field, got:\n%s", plain)
 	}
@@ -5289,7 +5291,7 @@ func TestTaskCallKeepsInvalidArgsVisible(t *testing.T) {
 		ResultContent: "arguments do not match task schema: args.agent_type must be a string, got number 42",
 	}
 
-	plain := stripANSI(strings.Join(block.renderTaskCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderTaskCall(140, ""), "\n"))
 	if !strings.Contains(plain, "Explore the repo layout") {
 		t.Fatalf("expected delegate description to survive a wrongly typed sibling field, got:\n%s", plain)
 	}
@@ -5306,7 +5308,7 @@ func TestCancelCallKeepsInvalidArgsVisible(t *testing.T) {
 		ResultContent: "arguments do not match cancel schema: args.reason must be a string, got object",
 	}
 
-	plain := stripANSI(strings.Join(block.renderCancelCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCancelCall(140, ""), "\n"))
 	if !strings.Contains(plain, "task-42") {
 		t.Fatalf("expected cancel target to survive a wrongly typed sibling field, got:\n%s", plain)
 	}
@@ -5326,7 +5328,7 @@ func TestNotifyCallKeepsInvalidArgsVisible(t *testing.T) {
 		ResultContent: "arguments do not match notify schema: args.kind must be a string, got number 9",
 	}
 
-	plain := stripANSI(strings.Join(block.renderNotifyCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderNotifyCall(140, ""), "\n"))
 	if !strings.Contains(plain, "ping the worker") {
 		t.Fatalf("expected notify message to survive a wrongly typed sibling field, got:\n%s", plain)
 	}
@@ -5343,7 +5345,7 @@ func TestCompactContextCallRendersStructuredSections(t *testing.T) {
 	}
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
 	// Each section gets its own "↳" header instead of a flat key-value dump.
 	for _, want := range []string{"↳ Objective:", "↳ Completed:", "↳ Decisions:", "↳ Open issues:", "↳ Next:", "↳ State files:"} {
@@ -5385,7 +5387,7 @@ func TestCompactContextCallAlwaysShowsEverySectionUnderABareHeader(t *testing.T)
 		RawArgs:    `{"active_objective":"完成用户的最终汇报","completed":["a","b","c"],"decisions":["d"],"open_issues":["o"],"next_step":"先按输出最终完成报告","state_files":["n.md"]}`,
 		ResultDone: true,
 	}
-	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
 	for _, want := range []string{"↳ Objective:", "↳ Completed:", "↳ Decisions:", "↳ Open issues:", "↳ Next:", "↳ State files:"} {
 		if !strings.Contains(plain, want) {
@@ -5413,7 +5415,7 @@ func TestCompactContextCallStaysBareWhileArgumentsStream(t *testing.T) {
 		ToolName: tools.NameCompactContext,
 		RawArgs:  `{"active_objective":"完成用户的最终`,
 	}
-	plain := stripANSI(strings.Join(streaming.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(streaming.renderCompactContextCall(140, ""), "\n"))
 	if strings.Contains(plain, "↳") {
 		t.Fatalf("expected a bare header while arguments stream, got:\n%s", plain)
 	}
@@ -5424,7 +5426,7 @@ func TestCompactContextCallStaysBareWhileArgumentsStream(t *testing.T) {
 		ToolName: tools.NameCompactContext,
 		RawArgs:  `{"active_objective":"完成用户的最终汇报","completed":["a","b"],"decisions":["d"],"next_step":"输出最终完成报告"}`,
 	}
-	plain = stripANSI(strings.Join(running.renderCompactContextCall(140, ""), "\n"))
+	plain = terminaltext.StripANSI(strings.Join(running.renderCompactContextCall(140, ""), "\n"))
 	for _, sec := range []string{"↳ Objective:", "↳ Completed:", "↳ Decisions:", "↳ Next:"} {
 		if !strings.Contains(plain, sec) {
 			t.Fatalf("expected a running card with decodable args to show %q:\n%s", sec, plain)
@@ -5443,7 +5445,7 @@ func TestCompactContextCallStaysBareWhileArgumentsStream(t *testing.T) {
 		RawArgs:   running.RawArgs,
 		Collapsed: true,
 	}
-	plain = stripANSI(strings.Join(restored.Render(140, ""), "\n"))
+	plain = terminaltext.StripANSI(strings.Join(restored.Render(140, ""), "\n"))
 	if !strings.Contains(plain, "↳ Completed:") {
 		t.Fatalf("expected a restored card to show its sections, got:\n%s", plain)
 	}
@@ -5460,7 +5462,7 @@ func TestCompactContextCallSuccessExpandedShowsResult(t *testing.T) {
 	}
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
 	// The acknowledgement carries the "no reset has occurred yet" caveat, so
 	// an expanded successful card must keep it below the sections.
@@ -5479,7 +5481,7 @@ func TestCompactContextCallSuccessExpandedShowsResult(t *testing.T) {
 	block.Collapsed = true
 	block.ToolCallDetailExpanded = false
 	block.InvalidateCache()
-	collapsed := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 	if !strings.Contains(collapsed, "↳ Result:") || !strings.Contains(collapsed, "No reset has occurred yet") {
 		t.Fatalf("expected the card to keep the acknowledgement regardless of the collapse flags, got:\n%s", collapsed)
 	}
@@ -5501,7 +5503,7 @@ func TestCompactContextCallUnknownFieldsKeepSubmittedArgs(t *testing.T) {
 	}
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
 	if !strings.Contains(plain, "↳ Arguments:") {
 		t.Fatalf("expected the raw-arguments fallback header, got:\n%s", plain)
@@ -5517,7 +5519,7 @@ func TestCompactContextCallUnknownFieldsKeepSubmittedArgs(t *testing.T) {
 	block.Collapsed = true
 	block.ToolCallDetailExpanded = false
 	block.InvalidateCache()
-	collapsed := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 	if !strings.Contains(collapsed, "↳ Arguments:") {
 		t.Fatalf("expected the argument dump to stay visible, got:\n%s", collapsed)
 	}
@@ -5544,7 +5546,7 @@ func TestCompactContextCallRawArgFallbackIsBounded(t *testing.T) {
 	}
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
 	if !strings.Contains(plain, "more lines hidden.") {
 		t.Fatalf("expected the bounded fallback to report hidden lines, got:\n%s", plain)
@@ -5572,7 +5574,7 @@ func TestCompactContextCallRenderDispatchesStructuredCard(t *testing.T) {
 		ResultContent: "Context checkpoint request accepted.",
 	}
 
-	rendered := stripANSI(strings.Join(block.Render(140, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
 	if !strings.Contains(rendered, "↳ Completed:") {
 		t.Fatalf("expected the structured card from Render, got:\n%s", rendered)
 	}
@@ -5582,7 +5584,7 @@ func TestCompactContextCallRenderDispatchesStructuredCard(t *testing.T) {
 	if block.ToggleAtWidth(140) {
 		t.Fatalf("expected the compact_context card to ignore the expand/collapse toggle")
 	}
-	after := stripANSI(strings.Join(block.Render(140, ""), "\n"))
+	after := terminaltext.StripANSI(strings.Join(block.Render(140, ""), "\n"))
 	if after != rendered {
 		t.Fatalf("expected the card to render identically after the toggle:\n%s", after)
 	}
@@ -5616,7 +5618,7 @@ func TestCompactContextCallErrorExpandedShowsArgsAndError(t *testing.T) {
 	}
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
 	// The error envelope closes the body, after the submitted args.
 	if !strings.Contains(plain, "↳ Error:") {
@@ -5665,7 +5667,7 @@ func TestCompactContextCallErrorShowsSections(t *testing.T) {
 	}
 	// The card is always expanded (ToolCallDetailExpanded left false).
 
-	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
 	// The error envelope closes the body, after the submitted args: a
 	// failure is exactly when the six sections matter most.
@@ -5692,7 +5694,7 @@ func TestCompactContextCallErrorDropsDisclosureGlyph(t *testing.T) {
 	}
 	// The card is always expanded (ToolCallDetailExpanded left false).
 
-	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
 	// A failed card shows its submitted args without being opened, so the
 	// header carries no ▸ glyph — only the ✗ status.
@@ -5716,7 +5718,7 @@ func TestEscalateCallErrorDropsDisclosureGlyphAndKeepsReason(t *testing.T) {
 	}
 	// Always expanded: the flags no longer gate the body.
 
-	plain := stripANSI(strings.Join(block.renderProseControlCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderProseControlCall(140, ""), "\n"))
 
 	// A failed Complete/Escalate card shows its report and the envelope
 	// without being opened, so the header carries no ▸ glyph.
@@ -5744,7 +5746,7 @@ func TestCompactContextCallCancelledExpandedShowsArgsAndCancelled(t *testing.T) 
 	}
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderCompactContextCall(140, ""), "\n"))
 
 	cancelledIdx := strings.Index(plain, "↳ Cancelled")
 	if cancelledIdx == -1 {
@@ -5774,7 +5776,7 @@ func TestHandoffHeaderRecoversInvalidPlanPath(t *testing.T) {
 		ResultContent: "arguments do not match handoff schema: args.plan_path must be a string, got number 42",
 	}
 
-	plain := stripANSI(strings.Join(block.renderHandoffCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderHandoffCall(140, ""), "\n"))
 	if !strings.Contains(plain, "42") {
 		t.Fatalf("expected handoff header to show the offending plan_path value, got:\n%s", plain)
 	}
@@ -5807,7 +5809,7 @@ func TestReadCallEscapesANSIRichDumpContent(t *testing.T) {
 		t.Fatalf("sanitized Read row should expose ANSI literally, got %q", rows[0].Content)
 	}
 
-	plain := stripANSI(strings.Join(block.renderReadCall(140, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderReadCall(140, ""), "\n"))
 	for _, want := range []string{
 		`read /tmp/chord-diag/tui-dump.txt`,
 		`\x1b[38;5;61m│\x1b[m\x1b[48;5;235m dump line\x1b[m`,
@@ -5846,7 +5848,7 @@ func TestReadCallStripsTrailingCarriageReturnsFromPersistedOutput(t *testing.T) 
 		t.Fatalf("source sample should not contain raw carriage return: %q", source)
 	}
 
-	plain := stripANSI(strings.Join(block.renderReadCall(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.renderReadCall(80, ""), "\n"))
 	if containsRawCarriageReturnForTest(plain) {
 		t.Fatalf("rendered read card should not contain raw carriage return: %q", plain)
 	}
@@ -5908,7 +5910,7 @@ func TestReadCallAlignsLineNumberGutterAcrossDigitWidths(t *testing.T) {
 		}, "\n"),
 	}
 
-	plainLines := strings.Split(stripANSI(strings.Join(block.renderReadCall(100, ""), "\n")), "\n")
+	plainLines := strings.Split(terminaltext.StripANSI(strings.Join(block.renderReadCall(100, ""), "\n")), "\n")
 	var cols []int
 	for _, line := range plainLines {
 		for _, marker := range []string{"package main", "import \"fmt\"", "func main() {}"} {
@@ -5951,8 +5953,8 @@ func TestReadCallUsesCompactLineNumberGutterForSameDigitWidth(t *testing.T) {
 		}, "\n"),
 	}
 
-	twoDigitLines := strings.Split(stripANSI(strings.Join(twoDigitBlock.renderReadCall(100, ""), "\n")), "\n")
-	threeDigitLines := strings.Split(stripANSI(strings.Join(threeDigitBlock.renderReadCall(100, ""), "\n")), "\n")
+	twoDigitLines := strings.Split(terminaltext.StripANSI(strings.Join(twoDigitBlock.renderReadCall(100, ""), "\n")), "\n")
+	threeDigitLines := strings.Split(terminaltext.StripANSI(strings.Join(threeDigitBlock.renderReadCall(100, ""), "\n")), "\n")
 	twoDigitCol := renderedMarkerColumn(twoDigitLines, "alpha")
 	threeDigitCol := renderedMarkerColumn(threeDigitLines, "alpha")
 	if twoDigitCol < 0 || threeDigitCol < 0 {
@@ -5978,7 +5980,7 @@ func TestReadCallLineNumberGutterIgnoresRowsBeyondRenderLimit(t *testing.T) {
 		ResultContent: strings.Join(lines, "\n"),
 	}
 
-	plainLines := strings.Split(stripANSI(strings.Join(block.renderReadCall(100, ""), "\n")), "\n")
+	plainLines := strings.Split(terminaltext.StripANSI(strings.Join(block.renderReadCall(100, ""), "\n")), "\n")
 	line1Col := renderedMarkerColumn(plainLines, "line 1")
 	line200Col := renderedMarkerColumn(plainLines, "line 200")
 	if line1Col < 0 || line200Col < 0 {
@@ -6015,7 +6017,7 @@ func TestBashResultEscapesANSIRichOutput(t *testing.T) {
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected rendered Shell card to not contain raw ESC: %q", joined)
 	}
@@ -6037,7 +6039,7 @@ func TestQuestionFallbackResultEscapesANSIRichOutput(t *testing.T) {
 		ResultContent: "\x1b[35muser typed answer\x1b[0m",
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected question card to not contain raw ESC: %q", joined)
 	}
@@ -6058,7 +6060,7 @@ func TestNotifyExpandedEscapesANSIRichMessageAndResult(t *testing.T) {
 		ToolCallDetailExpanded: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected notify card to not contain raw ESC: %q", joined)
 	}
@@ -6072,7 +6074,7 @@ func TestNotifyExpandedEscapesANSIRichMessageAndResult(t *testing.T) {
 func TestRenderQuestionDialogEscapesANSIRichPromptAndDescriptions(t *testing.T) {
 	m := NewModel(nil)
 	m.width = 100
-	m.theme = DefaultTheme()
+	m.theme = uitheme.Default()
 	m.question.request = &QuestionRequest{Item: tools.QuestionItem{
 		Header:   "\u001b[31munsafe\u001b[0m",
 		Question: "line1\n\u001b[32mline2\u001b[0m",
@@ -6080,7 +6082,7 @@ func TestRenderQuestionDialogEscapesANSIRichPromptAndDescriptions(t *testing.T) 
 	}}
 	m.question.input = newQuestionTextarea(m.width)
 
-	view := stripANSI(m.renderQuestionDialog())
+	view := terminaltext.StripANSI(m.renderQuestionDialog())
 	if strings.ContainsRune(view, '\x1b') {
 		t.Fatalf("expected question dialog to not contain raw ESC: %q", view)
 	}
@@ -6094,7 +6096,7 @@ func TestRenderQuestionDialogEscapesANSIRichPromptAndDescriptions(t *testing.T) 
 func TestRenderConfirmFieldEscapesANSIRichLiteralValue(t *testing.T) {
 	field := newConfirmLiteralField("Command", "\x1b[31mrm -rf /tmp/demo\x1b[0m", true)
 	lines := renderConfirmField(field, 60)
-	joined := stripANSI(strings.Join(lines, "\n"))
+	joined := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected confirm field to not contain raw ESC: %q", joined)
 	}
@@ -6111,7 +6113,7 @@ func TestTerminalResultEscapesANSIRichOutput(t *testing.T) {
 		UserLocalShellResult: "\x1b[32mok\x1b[0m",
 		Collapsed:            false,
 	}
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.ContainsRune(joined, '\x1b') {
 		t.Fatalf("expected terminal card to not contain raw ESC: %q", joined)
 	}
@@ -6142,8 +6144,8 @@ func TestSanitizeToolDisplayTextPreservesCRLFAsLogicalNewline(t *testing.T) {
 
 func TestCollapsedSummaryEscapesBareCarriageReturnLiterally(t *testing.T) {
 	var lines []string
-	appendCollapsedSummaryLines(&lines, "phase 1\rphase 2", 80, ToolResultStyle)
-	joined := stripANSI(strings.Join(lines, "\n"))
+	appendCollapsedSummaryLines(&lines, "phase 1\rphase 2", 80, currentStyles.ToolResultStyle)
+	joined := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if containsRawCarriageReturnForTest(joined) {
 		t.Fatalf("expected collapsed summary to not contain raw carriage return: %q", joined)
 	}
@@ -6153,7 +6155,7 @@ func TestCollapsedSummaryEscapesBareCarriageReturnLiterally(t *testing.T) {
 }
 
 func TestCancelSubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -6165,7 +6167,7 @@ func TestCancelSubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if strings.Contains(joined, `"status"`) || strings.Contains(joined, `"target_task_id"`) {
 		t.Fatalf("expected cancel collapsed view to not show raw JSON; got:\n%s", joined)
 	}
@@ -6184,7 +6186,7 @@ func TestCancelSubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 }
 
 func TestCancelSubAgentExpandedShowsStructuredDetails(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -6196,7 +6198,7 @@ func TestCancelSubAgentExpandedShowsStructuredDetails(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if strings.Contains(joined, `"status"`) || strings.Contains(joined, `"target_task_id"`) {
 		t.Fatalf("expected cancel expanded view to not show raw JSON; got:\n%s", joined)
 	}
@@ -6228,7 +6230,7 @@ func TestCancelSubAgentExpandedShowsStructuredDetails(t *testing.T) {
 // and the status is reported exactly once — the top-level "↳ Status:"
 // summary is dropped because the nested status field row already carries it.
 func TestCancelExpandedHandleRendersFullTaskIDOnceWithoutDuplicateStatus(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -6240,7 +6242,7 @@ func TestCancelExpandedHandleRendersFullTaskIDOnceWithoutDuplicateStatus(t *test
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if got := strings.Count(joined, "adhoc-9"); got != 1 {
 		t.Fatalf("expected the full task id to appear exactly once (field row), got %d:\n%s", got, joined)
 	}
@@ -6259,7 +6261,7 @@ func TestCancelExpandedHandleRendersFullTaskIDOnceWithoutDuplicateStatus(t *test
 }
 
 func TestCancelSubAgentShowsCancelledSemantic(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -6271,7 +6273,7 @@ func TestCancelSubAgentShowsCancelledSemantic(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "Cancelled") {
 		t.Fatalf("expected cancel to show cancelled semantic; got:\n%s", joined)
 	}
@@ -6282,7 +6284,7 @@ func TestCancelSubAgentShowsCancelledSemantic(t *testing.T) {
 // — so the card is a single line instead of spending a "↳ Stopped" row on a
 // status the folded card never renders a Result section for.
 func TestCollapsedCancelCardInlinesStatusOnHeader(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -6295,7 +6297,7 @@ func TestCollapsedCancelCardInlinesStatusOnHeader(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "cancel #9 · Stopped (workflow changed)") {
 		t.Fatalf("expected the folded cancel header to inline the status, got:\n%s", joined)
 	}
@@ -6308,7 +6310,7 @@ func TestCollapsedCancelCardInlinesStatusOnHeader(t *testing.T) {
 }
 
 func TestNotifySubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -6320,7 +6322,7 @@ func TestNotifySubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if strings.Contains(joined, `"status"`) || strings.Contains(joined, `"target_task_id"`) {
 		t.Fatalf("expected notify collapsed view to not show raw JSON; got:\n%s", joined)
 	}
@@ -6347,7 +6349,7 @@ func TestNotifySubAgentCollapsedDoesNotShowRawJSON(t *testing.T) {
 }
 
 func TestNotifySubAgentExpandedShowsStructuredDetails(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -6359,7 +6361,7 @@ func TestNotifySubAgentExpandedShowsStructuredDetails(t *testing.T) {
 		ToolCallDetailExpanded: false,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if strings.Contains(joined, `"status"`) || strings.Contains(joined, `"target_task_id"`) {
 		t.Fatalf("expected notify expanded view to not show raw JSON; got:\n%s", joined)
 	}
@@ -6375,7 +6377,7 @@ func TestNotifySubAgentExpandedShowsStructuredDetails(t *testing.T) {
 }
 
 func TestNotifySubAgentShowsQueuedSemantic(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                         1,
 		Type:                       BlockToolCall,
@@ -6386,14 +6388,14 @@ func TestNotifySubAgentShowsQueuedSemantic(t *testing.T) {
 		ToolQueuedByExecutionEvent: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "Queued") {
 		t.Fatalf("expected notify queued header badge; got:\n%s", joined)
 	}
 }
 
 func TestCancelToolShowsQueuedHeaderBadge(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                         1,
 		Type:                       BlockToolCall,
@@ -6404,14 +6406,14 @@ func TestCancelToolShowsQueuedHeaderBadge(t *testing.T) {
 		ToolQueuedByExecutionEvent: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "Queued") {
 		t.Fatalf("expected cancel queued header badge; got:\n%s", joined)
 	}
 }
 
 func TestQuestionToolShowsQueuedHeaderBadge(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                         1,
 		Type:                       BlockToolCall,
@@ -6422,14 +6424,14 @@ func TestQuestionToolShowsQueuedHeaderBadge(t *testing.T) {
 		ToolQueuedByExecutionEvent: true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(joined, "Queued") {
 		t.Fatalf("expected question queued header badge; got:\n%s", joined)
 	}
 }
 
 func TestControlToolsCollapsedDoNotExposeAdhocTaskID(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	tests := []struct {
 		name          string
 		toolName      string
@@ -6463,7 +6465,7 @@ func TestControlToolsCollapsedDoNotExposeAdhocTaskID(t *testing.T) {
 				ToolCallDetailExpanded: false,
 			}
 
-			joined := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+			joined := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 			if strings.Contains(joined, "adhoc-") {
 				t.Fatalf("expected %s collapsed view to not expose adhoc- prefix; got:\n%s", tt.toolName, joined)
 			}
@@ -6472,7 +6474,7 @@ func TestControlToolsCollapsedDoNotExposeAdhocTaskID(t *testing.T) {
 }
 
 func TestRenderTodoCall_EmptyList(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
@@ -6485,7 +6487,7 @@ func TestRenderTodoCall_EmptyList(t *testing.T) {
 	lines := block.Render(80, "")
 	plain := make([]string, len(lines))
 	for i, line := range lines {
-		plain[i] = stripANSI(line)
+		plain[i] = terminaltext.StripANSI(line)
 	}
 	joined := strings.Join(plain, "\n")
 	// Empty list should not prominently show "(no items)"
@@ -6499,7 +6501,7 @@ func TestRenderTodoCall_EmptyList(t *testing.T) {
 }
 
 func TestRenderTodoCall_EmptyListCollapsed(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
@@ -6512,7 +6514,7 @@ func TestRenderTodoCall_EmptyListCollapsed(t *testing.T) {
 	lines := block.Render(80, "")
 	plain := make([]string, len(lines))
 	for i, line := range lines {
-		plain[i] = stripANSI(line)
+		plain[i] = terminaltext.StripANSI(line)
 	}
 	joined := strings.Join(plain, "\n")
 	if strings.Contains(joined, "(no items)") {
@@ -6521,7 +6523,7 @@ func TestRenderTodoCall_EmptyListCollapsed(t *testing.T) {
 }
 
 func TestRenderTodoCall_WithItems(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
@@ -6534,7 +6536,7 @@ func TestRenderTodoCall_WithItems(t *testing.T) {
 	lines := block.Render(80, "")
 	plain := make([]string, len(lines))
 	for i, line := range lines {
-		plain[i] = stripANSI(line)
+		plain[i] = terminaltext.StripANSI(line)
 	}
 	joined := strings.Join(plain, "\n")
 	if !strings.Contains(joined, "Task 1") {
@@ -6546,7 +6548,7 @@ func TestRenderTodoCall_WithItems(t *testing.T) {
 }
 
 func TestToolResultTableLikeContentUsesPlainText(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -6558,7 +6560,7 @@ func TestToolResultTableLikeContentUsesPlainText(t *testing.T) {
 		ResultContent:          "The report shows 1 expired account email entry:\n\n| Account ID | Email | Expiration Date |\n|------------|-------|-----------------|\n| a20158b8-... | gfwgfwgfwgfw@gmail.com | 2026-04-02 |\n\nThese accounts need to sign in again.",
 	}
 
-	joinedPlain := stripANSI(stripOSC8ToolTest(strings.Join(block.Render(100, ""), "\n")))
+	joinedPlain := terminaltext.StripANSI(stripOSC8ToolTest(strings.Join(block.Render(100, ""), "\n")))
 	for _, want := range []string{"| Account ID | Email | Expiration Date |", "gfwgfwgfwgfw@gmail.com", "These accounts need to sign in again."} {
 		if !strings.Contains(joinedPlain, want) {
 			t.Fatalf("expected tool result to keep table-like content literal (%q), got %q", want, joinedPlain)
@@ -6567,7 +6569,7 @@ func TestToolResultTableLikeContentUsesPlainText(t *testing.T) {
 }
 
 func TestTaskDoneSummaryUsesPlainTextWhenExpanded(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	doneSummary := "## Findings\n- item one\n- item two\n\n```go\nfmt.Println(\"ok\")\n```"
 	block := &Block{
 		ID:                     1,
@@ -6580,7 +6582,7 @@ func TestTaskDoneSummaryUsesPlainTextWhenExpanded(t *testing.T) {
 		DoneSummary:            doneSummary,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(joined, "Completed:") {
 		t.Fatalf("expected Completed section, got:\n%s", joined)
 	}
@@ -6595,7 +6597,7 @@ func TestTaskDoneSummaryUsesPlainTextWhenExpanded(t *testing.T) {
 }
 
 func TestRenderedCodeTokensKeepContrastOnCurrentTheme(t *testing.T) {
-	theme := DefaultTheme()
+	theme := uitheme.Default()
 	sample := "package main; func sample() { /* comment */ println(123, \"text\") }"
 	for _, bg := range []string{theme.ToolCallBg, theme.DiffAddLineBg, theme.DiffDelLineBg} {
 		rendered := syntax.New("sample.go", sample, "").Line(sample, bg)

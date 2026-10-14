@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/filecompletion"
 )
 
 func localShellUserLine(display string) string {
@@ -433,7 +434,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 			}
 		}
 		fileRefTexts := append([]string{value}, inlinePasteTexts...)
-		fileRefs := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs(fileRefTexts, m.workingDir), m.workingDir))
+		fileRefs := filecompletion.DisplayRefs(filecompletion.DedupeRefs(filecompletion.ParseRefs(fileRefTexts, m.workingDir), m.workingDir))
 		if m.agent != nil && m.focusedAgentID != "" && len(m.attachments) == 0 && !hasInlinePastes && len(fileRefs) == 0 {
 			historyCmd = m.recordSubmittedInput(submitted)
 			m.input.Reset()

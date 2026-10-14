@@ -4,16 +4,19 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // Regression: when a tool header was too wide for the elapsed/progress suffix
-// it fell back to stripANSI + runewidth.Truncate, which silently dropped the
+// it fell back to terminaltext.StripANSI + runewidth.Truncate, which silently dropped the
 // tool-name colour. Only the widest headers reach that branch, and mcp_* names
 // are both the longest and carry the longest inline parameter summary, so they
 // rendered in the terminal default colour while short built-in names kept the
 // theme colour — a per-tool colour split with no styling code behind it.
 func TestToolHeaderKeepsToolNameColourWhenTruncated(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	build := func(name, args string) *Block {
 		return &Block{
@@ -37,7 +40,7 @@ func TestToolHeaderKeepsToolNameColourWhenTruncated(t *testing.T) {
 	// the short built-in header still fits.
 	const width = 120
 	for _, b := range blocks {
-		styled := ToolCallStyle.Render(b.ToolName)
+		styled := currentStyles.ToolCallStyle.Render(b.ToolName)
 		lines := b.Render(width, "")
 		found := false
 		for _, line := range lines {
@@ -56,7 +59,7 @@ func TestToolHeaderKeepsToolNameColourWhenTruncated(t *testing.T) {
 // Both MCP and built-in tool names must render with the same styled sequence at
 // every width, which is the invariant the truncation fallback used to break.
 func TestToolNameColourMatchesAcrossToolKinds(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	newBlock := func(name, args string) *Block {
 		return &Block{
@@ -76,13 +79,13 @@ func TestToolNameColourMatchesAcrossToolKinds(t *testing.T) {
 
 		var mcpLine, fetchLine string
 		for _, line := range mcp.Render(width, "") {
-			if strings.Contains(stripANSI(line), mcp.ToolName) {
+			if strings.Contains(terminaltext.StripANSI(line), mcp.ToolName) {
 				mcpLine = line
 				break
 			}
 		}
 		for _, line := range fetch.Render(width, "") {
-			if strings.Contains(stripANSI(line), fetch.ToolName) {
+			if strings.Contains(terminaltext.StripANSI(line), fetch.ToolName) {
 				fetchLine = line
 				break
 			}
@@ -90,8 +93,8 @@ func TestToolNameColourMatchesAcrossToolKinds(t *testing.T) {
 		if mcpLine == "" || fetchLine == "" {
 			t.Fatalf("width %d: header line not found (mcp=%q fetch=%q)", width, mcpLine, fetchLine)
 		}
-		mcpStyled := ToolCallStyle.Render(mcp.ToolName)
-		fetchStyled := ToolCallStyle.Render(fetch.ToolName)
+		mcpStyled := currentStyles.ToolCallStyle.Render(mcp.ToolName)
+		fetchStyled := currentStyles.ToolCallStyle.Render(fetch.ToolName)
 		if !strings.Contains(mcpLine, mcpStyled) {
 			t.Fatalf("width %d: mcp header missing tool-name colour\n%s", width, strings.ReplaceAll(mcpLine, "\x1b", "ESC"))
 		}

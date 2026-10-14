@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	"github.com/keakon/x/ansi"
 
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/textclean"
+	"github.com/keakon/chord/internal/tui/syntax"
 )
 
 type numberedToolPreviewOptions struct {
@@ -61,10 +60,10 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 			}
 			codeIndex++
 			highlighted = ansi.Truncate(highlighted, codeWidth, "…")
-			result = append(result, "  "+DimStyle.Render(fmt.Sprintf("%*s", gutterWidth, row.LineNo))+"  "+highlighted)
+			result = append(result, "  "+currentStyles.DimStyle.Render(fmt.Sprintf("%*s", gutterWidth, row.LineNo))+"  "+highlighted)
 		} else {
 			wrapped := ansi.Truncate(row.Content, opts.contentWidth, "…")
-			result = append(result, "  "+DimStyle.Render(wrapped))
+			result = append(result, "  "+currentStyles.DimStyle.Render(wrapped))
 		}
 	}
 	return result
@@ -74,7 +73,7 @@ func parsePlainContentPreviewLines(content string) ([]readDisplayLine, string) {
 	if content == "" {
 		return nil, ""
 	}
-	normalized := markdownutil.NormalizeNewlines(content)
+	normalized := textclean.NormalizeNewlines(content)
 	trimmed := strings.TrimSuffix(normalized, "\n")
 	var lines []string
 	if trimmed == "" {

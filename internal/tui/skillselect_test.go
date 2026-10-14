@@ -10,6 +10,8 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/tui/overlaylist"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func newSkillSelectTestModel(t *testing.T) (Model, *infoPanelAgent) {
@@ -23,9 +25,10 @@ func newSkillSelectTestModel(t *testing.T) (Model, *infoPanelAgent) {
 	return NewModelWithSize(backend, 100, 30), backend
 }
 
-func skillSelectRowIDs(list *OverlayList) []string {
+func skillSelectRowIDs(list *overlaylist.List) []string {
 	ids := make([]string, 0, list.Len())
-	for _, item := range list.items {
+	for i := range list.Len() {
+		item, _ := list.Item(i)
 		if item.Header {
 			ids = append(ids, "#"+item.Label)
 			continue
@@ -82,15 +85,16 @@ func TestSkillSelectRowsUseStateIconsNotText(t *testing.T) {
 	// the idle one ○, and the manual-only skill ◌. No row needs a status
 	// suffix because the icon already says what the text would.
 	wantGlyphs := map[string]string{"go-expert": "●", "py-expert": "○", "manual-only": "◌"}
-	for _, item := range list.items {
-		if item.Header {
+	for i := range list.Len() {
+		item, ok := list.Item(i)
+		if !ok || item.Header {
 			continue
 		}
 		want, ok := wantGlyphs[item.ID]
 		if !ok {
 			continue
 		}
-		plain := stripANSI(item.Label)
+		plain := terminaltext.StripANSI(item.Label)
 		if !strings.HasPrefix(plain, want+" ") {
 			t.Fatalf("%s row label = %q, want %q icon prefix", item.ID, plain, want)
 		}
@@ -129,25 +133,25 @@ func TestSkillStateIconCoversEveryState(t *testing.T) {
 			name:      "idle",
 			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true},
 			wantGlyph: skillIconIdle,
-			wantStyle: InfoPanelDim,
+			wantStyle: currentStyles.InfoPanelDim,
 		},
 		{
 			name:      "waiting for path match reads as idle",
 			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, PathConditional: true},
 			wantGlyph: skillIconIdle,
-			wantStyle: InfoPanelDim,
+			wantStyle: currentStyles.InfoPanelDim,
 		},
 		{
 			name:      "matched waiting for the notice",
 			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, PathActivated: true},
 			wantGlyph: skillIconRelevant,
-			wantStyle: InfoPanelDim,
+			wantStyle: currentStyles.InfoPanelDim,
 		},
 		{
 			name:      "notice recorded",
 			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, NoticeRecorded: true},
 			wantGlyph: skillIconRelevant,
-			wantStyle: InfoPanelDim,
+			wantStyle: currentStyles.InfoPanelDim,
 		},
 		{
 			name:      "loaded",
@@ -159,13 +163,13 @@ func TestSkillStateIconCoversEveryState(t *testing.T) {
 			name:      "loaded then compacted",
 			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, LoadedEarlier: true},
 			wantGlyph: skillIconReload,
-			wantStyle: InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg)),
+			wantStyle: currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg)),
 		},
 		{
 			name:      "manual only idle",
 			state:     skill.InvocationState{UserLoadable: true, ModelCallable: false},
 			wantGlyph: skillIconManual,
-			wantStyle: InfoPanelDim,
+			wantStyle: currentStyles.InfoPanelDim,
 		},
 		{
 			name:      "manual only loaded",
@@ -177,7 +181,7 @@ func TestSkillStateIconCoversEveryState(t *testing.T) {
 			name:      "denied by ruleset",
 			state:     skill.InvocationState{UserLoadable: false, ModelCallable: false},
 			wantGlyph: skillIconDenied,
-			wantStyle: InfoPanelDim,
+			wantStyle: currentStyles.InfoPanelDim,
 		},
 		{
 			name:      "loaded outranks the discovery signals",
@@ -249,7 +253,8 @@ func TestSkillSelectDisabledRowExplainsDenial(t *testing.T) {
 		t.Fatal("skill overlay list missing")
 	}
 	deniedIdx := -1
-	for i, item := range list.items {
+	for i := range list.Len() {
+		item, _ := list.Item(i)
 		if item.ID != "closed-skill" {
 			continue
 		}
@@ -257,10 +262,10 @@ func TestSkillSelectDisabledRowExplainsDenial(t *testing.T) {
 		if !item.Disabled {
 			t.Fatalf("ruleset-denied skill should be disabled: %#v", item)
 		}
-		if !strings.HasPrefix(stripANSI(item.Label), "⊘ closed-skill") {
+		if !strings.HasPrefix(terminaltext.StripANSI(item.Label), "⊘ closed-skill") {
 			t.Fatalf("denied row label = %q, want the ⊘ denied icon", item.Label)
 		}
-		if !strings.Contains(stripANSI(item.Label), skillReasonText(skill.ReasonDeniedByRuleset)) {
+		if !strings.Contains(terminaltext.StripANSI(item.Label), skillReasonText(skill.ReasonDeniedByRuleset)) {
 			t.Fatalf("denied row label = %q, want reason %q", item.Label, skillReasonText(skill.ReasonDeniedByRuleset))
 		}
 	}
@@ -268,10 +273,10 @@ func TestSkillSelectDisabledRowExplainsDenial(t *testing.T) {
 		t.Fatal("denied skill missing from the selector catalog")
 	}
 
-	// SetCursor skips unselectable rows, so aim the cursor at the denied row
-	// directly to exercise the refusal branch.
-	list.cursor = deniedIdx
-	m.handleSkillSelectKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	// The list keeps disabled rows unselectable. Exercise the same application
+	// guard directly with the denied catalog item.
+	deniedItem, _ := list.Item(deniedIdx)
+	m.applySkillSelection(deniedItem)
 
 	if m.mode != ModeSkillSelect {
 		t.Fatalf("mode after denied enter = %v, want ModeSkillSelect", m.mode)

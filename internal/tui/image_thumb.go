@@ -78,11 +78,11 @@ func pdfNamesFromContentParts(parts []message.ContentPart) []string {
 }
 
 func thumbnailPreviewData(part BlockImagePart) ([]byte, error) {
-	entry, err := imageRuntimeEntryForPart(part)
+	entry, err := imageCache.Lookup(imageSource(part), false)
 	if err != nil {
 		return nil, err
 	}
-	return entry.raw(part)
+	return entry.Raw(imageSource(part))
 }
 
 func imagePartLineHit(part BlockImagePart, lineInBlock int) bool {
@@ -93,7 +93,7 @@ func imagePartLineHit(part BlockImagePart, lineInBlock int) bool {
 }
 
 func imagePartBodyLeftColumn() int {
-	return UserCardStyle.GetMarginLeft() + UserCardStyle.GetBorderLeftSize() + UserCardStyle.GetPaddingLeft() + imagePlaceholderMargin
+	return currentStyles.UserCardStyle.GetMarginLeft() + currentStyles.UserCardStyle.GetBorderLeftSize() + currentStyles.UserCardStyle.GetPaddingLeft() + imagePlaceholderMargin
 }
 
 func (b *Block) imagePartAtPoint(lineInBlock, viewportCol, width int) (BlockImagePart, bool) {

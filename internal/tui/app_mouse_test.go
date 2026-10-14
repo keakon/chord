@@ -10,6 +10,8 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestStatusSessionDoubleClickCopiesWholeSessionID(t *testing.T) {
@@ -114,7 +116,7 @@ func TestStatusDoubleClickCopiesVisibleTargetBesideCompactionPill(t *testing.T) 
 	}
 
 	m := newModel()
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "SID 1775115074902") || m.statusPath.display == "" || !strings.Contains(plain, m.statusPath.display) {
 		t.Fatalf("compaction pill should leave both copy targets visible, got %q", plain)
 	}
@@ -124,13 +126,13 @@ func TestStatusDoubleClickCopiesVisibleTargetBesideCompactionPill(t *testing.T) 
 	}
 
 	sessionModel := newModel()
-	sessionPlain := stripANSI(sessionModel.renderStatusBar())
+	sessionPlain := terminaltext.StripANSI(sessionModel.renderStatusBar())
 	if got := doubleClickStatusColumn(t, sessionModel, statusColumnOf(t, sessionPlain, "SID ")+2); got != "Session ID copied to clipboard" {
 		t.Fatalf("double click on the visible session id copied %q", got)
 	}
 
 	pathModel := newModel()
-	pathPlain := stripANSI(pathModel.renderStatusBar())
+	pathPlain := terminaltext.StripANSI(pathModel.renderStatusBar())
 	if got := doubleClickStatusColumn(t, pathModel, statusColumnOf(t, pathPlain, pathModel.statusPath.display)+2); got != "Path copied to clipboard" {
 		t.Fatalf("double click on the visible working directory copied %q", got)
 	}
@@ -206,7 +208,7 @@ func TestWriteStatusSessionClipboardCmdUsesSessionMessage(t *testing.T) {
 }
 
 func TestMouseWheelScrollTriggersInlineImageRefresh(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	caps := TerminalImageCapabilities{Backend: ImageBackendITerm2, SupportsInline: true, SupportsFullscreen: true}
 	setCurrentTerminalImageCapabilities(caps)
 	t.Cleanup(func() {
@@ -321,7 +323,7 @@ func TestConfirmNavigationScrollsBodyWithoutMovingConversation(t *testing.T) {
 			if m.confirm.scroll.offset == 0 {
 				t.Fatal("dialog body did not scroll")
 			}
-			plain := stripANSI(m.renderConfirmDialog())
+			plain := terminaltext.StripANSI(m.renderConfirmDialog())
 			if !strings.Contains(plain, "[Enter/A] Allow") || !strings.Contains(plain, "[Esc/R] Deny+Reason") {
 				t.Fatalf("scroll lost decision actions:\n%s", plain)
 			}

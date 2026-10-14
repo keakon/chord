@@ -9,6 +9,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // renderReadCall renders a Read tool call with syntax-highlighted file content.
@@ -134,24 +135,24 @@ func renderReadHeaderLine(prefix, toolName, filePath, optText, resultSummary str
 		return truncateToolHeaderTail(headerLine, maxWidth)
 	}
 
-	baseWidth := runewidth.StringWidth(stripANSI(headerLine))
+	baseWidth := runewidth.StringWidth(terminaltext.StripANSI(headerLine))
 	budget := maxWidth - baseWidth - 1
 	if budget <= 0 {
 		return truncateToolHeaderTail(headerLine, maxWidth)
 	}
 	if filePath == "" {
-		return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(suffix, budget))
+		return headerLine + " " + currentStyles.DimStyle.Render(truncateToolHeaderGray(suffix, budget))
 	}
 	if suffix == "" {
 		return headerLine + " " + truncateToolHeaderMiddle(filePath, budget)
 	}
 
-	optWidth := runewidth.StringWidth(stripANSI(suffix))
+	optWidth := runewidth.StringWidth(terminaltext.StripANSI(suffix))
 	if optWidth+1 >= budget {
-		return headerLine + " " + DimStyle.Render(truncateToolHeaderGray(suffix, budget))
+		return headerLine + " " + currentStyles.DimStyle.Render(truncateToolHeaderGray(suffix, budget))
 	}
 	pathBudget := budget - optWidth - 1
-	return headerLine + " " + truncateToolHeaderMiddle(filePath, pathBudget) + " " + DimStyle.Render(suffix)
+	return headerLine + " " + truncateToolHeaderMiddle(filePath, pathBudget) + " " + currentStyles.DimStyle.Render(suffix)
 }
 
 // readResultOffset extracts the model-facing start line from the call args so a

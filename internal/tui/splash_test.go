@@ -6,6 +6,8 @@ import (
 
 	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // Viewports that select each wordmark variant.
@@ -18,7 +20,7 @@ const (
 func splashPlain(rows []string) []string {
 	out := make([]string, len(rows))
 	for i, row := range rows {
-		out[i] = stripANSI(row)
+		out[i] = terminaltext.StripANSI(row)
 	}
 	return out
 }
@@ -107,7 +109,7 @@ func TestSplashFrameGeometryIsStable(t *testing.T) {
 					t.Fatalf("step %d: %d wordmark lines, want %d", step, len(lines), len(wantLines))
 				}
 				for i, line := range lines {
-					if got, want := ansi.StringWidth(stripANSI(line)), ansi.StringWidth(stripANSI(wantLines[i])); got != want {
+					if got, want := ansi.StringWidth(terminaltext.StripANSI(line)), ansi.StringWidth(terminaltext.StripANSI(wantLines[i])); got != want {
 						t.Fatalf("step %d line %d: width %d, want %d", step, i, got, want)
 					}
 				}
@@ -115,7 +117,7 @@ func TestSplashFrameGeometryIsStable(t *testing.T) {
 					t.Fatalf("step %d: %d swash rows, want %d", step, len(swash), len(wantSwash))
 				}
 				for i, row := range swash {
-					if got, want := ansi.StringWidth(stripANSI(row)), ansi.StringWidth(stripANSI(wantSwash[i])); got != want {
+					if got, want := ansi.StringWidth(terminaltext.StripANSI(row)), ansi.StringWidth(terminaltext.StripANSI(wantSwash[i])); got != want {
 						t.Fatalf("step %d swash row %d: width %d, want %d", step, i, got, want)
 					}
 				}
@@ -147,7 +149,7 @@ func TestSplashRevealOrder(t *testing.T) {
 			prevWord, prevSwash := -1, -1
 			for step := 0; step <= total; step++ {
 				lines, swash := splashFrame(tc.w, tc.h, step)
-				word := len(strings.TrimRight(stripANSI(lines[len(lines)-1]), " "))
+				word := len(strings.TrimRight(terminaltext.StripANSI(lines[len(lines)-1]), " "))
 				inked := splashInk(swash)
 				if word < prevWord || inked < prevSwash {
 					t.Fatalf("step %d reveal went backwards (word %d->%d, swash %d->%d)", step, prevWord, word, prevSwash, inked)
@@ -169,13 +171,13 @@ func TestSplashRevealOrder(t *testing.T) {
 
 func TestSplashCompactMatchesLogoText(t *testing.T) {
 	lines, swash := splashFrame(splashNarrowW, splashNarrowH, splashStepCount(splashNarrowW, splashNarrowH))
-	if len(lines) != 1 || stripANSI(lines[0]) != splashWord+splashNote {
-		t.Fatalf("compact wordmark = %q, want %q", stripANSI(lines[0]), splashWord+splashNote)
+	if len(lines) != 1 || terminaltext.StripANSI(lines[0]) != splashWord+splashNote {
+		t.Fatalf("compact wordmark = %q, want %q", terminaltext.StripANSI(lines[0]), splashWord+splashNote)
 	}
 	if len(swash) != 1 {
 		t.Fatalf("compact swash should be one row, got %d", len(swash))
 	}
-	plain := stripANSI(swash[0])
+	plain := terminaltext.StripANSI(swash[0])
 	if !strings.HasPrefix(plain, splashSwashEnd) || !strings.HasSuffix(plain, splashSwashTip) {
 		t.Fatalf("swash %q should be capped by %q and %q", plain, splashSwashEnd, splashSwashTip)
 	}

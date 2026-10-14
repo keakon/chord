@@ -3,17 +3,20 @@ package tui
 import (
 	"image"
 	"strings"
+
+	"github.com/keakon/chord/internal/tui/overlaylist"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // overlayListSelectorState is a reusable building block for modal selector
-// dialogs that render an OverlayList inside a standard RenderOverlay frame.
+// dialogs that render an overlaylist.List inside a standard RenderOverlay frame.
 //
 // It centralizes:
 //   - overlay wrapper render caching (width/height/theme/maxVisible/list version)
 //   - list base-row calculation for mouse hit-testing (incl. scroll windows)
 //
 // Usage pattern:
-//   - Keep the OverlayList itself as the source of truth for items/cursor.
+//   - Keep the overlaylist.List itself as the source of truth for items/cursor.
 //   - Whenever items change, call list.SetItems(...) yourself.
 //   - Whenever cursor changes, call list.CursorUp/Down/SetCursor(...).
 //   - In Render(), provide an extraKey that captures non-list render inputs
@@ -21,9 +24,9 @@ import (
 //     invoked to allow rebuilding list items/cursor.
 //
 // This avoids the common pitfall where a selector re-builds list items on every
-// cursor move, which defeats OverlayList's internal render cache.
+// cursor move, which defeats overlaylist.List's internal render cache.
 type overlayListSelectorState struct {
-	list *OverlayList
+	list *overlaylist.List
 
 	// listBaseRow is the number of rows from the overlay body start (after the top
 	// border), to the first visible list row.
@@ -42,13 +45,13 @@ type overlayListSelectorState struct {
 
 func (s *overlayListSelectorState) ensureList(maxVisible int) {
 	if s.list == nil {
-		s.list = NewOverlayList(nil, maxVisible)
+		s.list = overlaylist.New(nil, maxVisible)
 		return
 	}
 	s.list.SetMaxVisible(maxVisible)
 }
 
-func (s *overlayListSelectorState) List() *OverlayList { return s.list }
+func (s *overlayListSelectorState) List() *overlaylist.List { return s.list }
 
 // Render builds and caches the selector dialog.
 //
@@ -65,7 +68,7 @@ func (s *overlayListSelectorState) Render(
 	gapBlankLines int,
 	maxVisible int,
 	extraKey string,
-	updateList func(list *OverlayList),
+	updateList func(list *overlaylist.List),
 	area image.Rectangle,
 ) string {
 	if m == nil {
@@ -75,7 +78,7 @@ func (s *overlayListSelectorState) Render(
 	overlayCfg = normalizeOverlayConfig(overlayCfg, area)
 	contentWidth := max(dialogContentWidth(overlayCfg.MaxWidth), 1)
 	prefix = strings.TrimSuffix(prefix, "\n")
-	prefixParts := tuiHardwrap(prefix, contentWidth)
+	prefixParts := terminaltext.Hardwrap(prefix, contentWidth)
 	if prefix == "" {
 		prefixParts = nil
 	}
@@ -128,7 +131,7 @@ func (s *overlayListSelectorState) Render(
 		sepNewlines := max(1+gapBlankLines, 1)
 		contentParts = append(contentParts, strings.Repeat("\n", sepNewlines))
 	}
-	contentParts = append(contentParts, s.list.Render(contentWidth))
+	contentParts = append(contentParts, s.list.Render(contentWidth, currentStyles))
 	content := strings.Join(contentParts, "")
 
 	s.listBaseRow = layoutOverlay(overlayCfg, area).contentBaseRow()

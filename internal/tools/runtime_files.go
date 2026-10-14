@@ -5,10 +5,7 @@ import (
 	"strings"
 )
 
-const (
-	sessionToolOutputsDirName = "tool-outputs"
-	sessionJobLogsDirName     = "job-logs"
-)
+const sessionJobLogsDirName = "job-logs"
 
 func sessionManagedDir(sessionDir, name string) string {
 	sessionDir = strings.TrimSpace(sessionDir)
@@ -16,10 +13,6 @@ func sessionManagedDir(sessionDir, name string) string {
 		return ""
 	}
 	return filepath.Join(sessionDir, name)
-}
-
-func sessionToolOutputsDir(sessionDir string) string {
-	return sessionManagedDir(sessionDir, sessionToolOutputsDirName)
 }
 
 func sessionJobLogsDir(sessionDir string) string {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/memory"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 type memoryPanelState struct {
@@ -20,7 +21,7 @@ type memoryPanelState struct {
 	instructionMode bool
 	instructionAll  bool
 	instruction     string
-	list            *OverlayList
+	list            *overlaylist.List
 	listBaseRow     int
 	selected        map[string]bool
 	detail          bool
@@ -148,7 +149,7 @@ func (m *Model) rebuildMemoryList() {
 			oldID = item.ID
 		}
 	}
-	var items []OverlayListItem
+	var items []overlaylist.Item
 	if p.view != nil {
 		switch p.tab {
 		case 0:
@@ -167,25 +168,25 @@ func (m *Model) rebuildMemoryList() {
 				if p.query != "" && !memoryQueryMatches(p.query, item.Entry.Summary) {
 					label += " · " + memoryMatchSnippet(item.Content, p.query)
 				}
-				items = append(items, OverlayListItem{ID: item.Entry.ID, Label: sanitizeToolDisplayText(label), Value: i})
+				items = append(items, overlaylist.Item{ID: item.Entry.ID, Label: sanitizeToolDisplayText(label), Value: i})
 			}
 			if notes := p.view.Snapshot.Index.UserNotes(); notes != "" && memoryQueryMatches(p.query, notes) {
-				items = append(items, OverlayListItem{ID: "user-notes", Label: "User notes (read only)", Value: -1})
+				items = append(items, overlaylist.Item{ID: "user-notes", Label: "User notes (read only)", Value: -1})
 			}
 		case 1:
 			if p.view.Applied != "" && memoryQueryMatches(p.query, p.view.Applied) {
-				items = append(items, OverlayListItem{ID: "applied", Label: "Actual summary applied to this session"})
+				items = append(items, overlaylist.Item{ID: "applied", Label: "Actual summary applied to this session"})
 			}
 		case 2:
 			for i, item := range p.view.Snapshot.Suggestions {
 				if memoryQueryMatches(p.query, item.Title+" "+item.Content) {
-					items = append(items, OverlayListItem{ID: item.Path, Label: sanitizeToolDisplayText(item.Title), Value: i})
+					items = append(items, overlaylist.Item{ID: item.Path, Label: sanitizeToolDisplayText(item.Title), Value: i})
 				}
 			}
 		}
 	}
 	if p.list == nil {
-		p.list = NewOverlayList(items, max(1, m.height-12))
+		p.list = overlaylist.New(items, max(1, m.height-12))
 	} else {
 		p.list.SetItems(items)
 	}

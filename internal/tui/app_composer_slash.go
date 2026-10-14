@@ -347,17 +347,17 @@ func (m *Model) renderSlashCompletionDropdown(value string) string {
 		}
 
 		if i == sel {
-			styledLine := SelectedStyle.Width(contentWidth).Render(" ▸ " + line)
+			styledLine := currentStyles.SelectedStyle.Width(contentWidth).Render(" ▸ " + line)
 			lines = append(lines, styledLine)
 		} else {
 			lines = append(lines, "   "+line)
 		}
 	}
 
-	frameWidth := DirectoryBorderStyle.GetHorizontalPadding() + DirectoryBorderStyle.GetHorizontalBorderSize()
+	frameWidth := currentStyles.DirectoryBorderStyle.GetHorizontalPadding() + currentStyles.DirectoryBorderStyle.GetHorizontalBorderSize()
 	body := strings.Join(lines, "\n")
 	body = preserveDialogBackground(body)
-	out := DirectoryBorderStyle.Width(contentWidth + frameWidth).Render(body)
+	out := currentStyles.DirectoryBorderStyle.Width(contentWidth + frameWidth).Render(body)
 	m.slashCache = slashRenderCache{
 		width: m.width,
 		theme: m.theme.Name,

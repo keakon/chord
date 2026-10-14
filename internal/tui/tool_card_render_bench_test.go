@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/tools"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // benchmarkBashLargeStdout builds a ~1.66MB shell stdout shaped like a large
@@ -25,7 +26,7 @@ func benchmarkBashLargeStdout() string {
 // restore path: loading a spilled tool block and rendering the visible window
 // after its in-memory render caches have been discarded.
 func BenchmarkViewportRenderLargeExpandedToolAfterSpill(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(100, 44)
 	block := benchmarkBashLargeBlock()
 	v.AppendBlock(block)
@@ -78,7 +79,7 @@ func benchmarkBashLargeBlock() *Block {
 // BenchmarkRenderBashLargeCardCollapsed measures the collapsed default state:
 // only the header and the one-line summary are assembled, never the body.
 func BenchmarkRenderBashLargeCardCollapsed(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkBashLargeBlock()
 	block.ToolCallDetailExpanded = false
 	block.Collapsed = true
@@ -93,7 +94,7 @@ func BenchmarkRenderBashLargeCardCollapsed(b *testing.B) {
 // BenchmarkRenderBashLargeCardExpandedCold measures the one-time cost of
 // expanding (or restoring after spill): the whole body is wrapped and styled.
 func BenchmarkRenderBashLargeCardExpandedCold(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkBashLargeBlock()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -107,7 +108,7 @@ func BenchmarkRenderBashLargeCardExpandedCold(b *testing.B) {
 // path: after the first full render, a visible window must be served from the
 // cached line slice instead of re-assembling the whole card every frame.
 func BenchmarkRenderBashLargeCardExpandedWarmWindow(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkBashLargeBlock()
 	_ = block.LineCount(100) // warm lineCache (Render alone does not populate it)
 	b.ResetTimer()
@@ -125,7 +126,7 @@ func BenchmarkRenderBashLargeCardExpandedWarmWindow(b *testing.B) {
 // already hot in memory. This guards the "per-frame full re-render" regression
 // that a partial-window viewport cache miss used to risk.
 func BenchmarkViewportRenderLargeExpandedToolWindow(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(100, 44)
 	for i := range 260 {
 		v.AppendBlock(&Block{ID: 100 + i, Type: BlockAssistant, Content: strings.Repeat("filler ", 20)})

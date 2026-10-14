@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/shellanalysis"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -36,7 +37,7 @@ func evaluateShellToolPermission(ruleset permission.Ruleset, args json.RawMessag
 		return decision
 	}
 
-	analysis, err := tools.AnalyzeShellCommand(rawCommand)
+	analysis, err := shellanalysis.Analyze(rawCommand)
 	if err != nil || len(analysis.Subcommands) == 0 {
 		match := ruleset.LastEvaluatedMatch(tools.NameShell, rawCommand)
 		decision.Action = permission.ActionDeny

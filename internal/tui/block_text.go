@@ -1,18 +1,13 @@
 package tui
 
 import (
-	"fmt"
 	"image/color"
-	"regexp"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/keakon/lipgloss/v2"
 	"github.com/keakon/x/ansi"
-	"github.com/mattn/go-runewidth"
 
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const (
@@ -31,9 +26,6 @@ const (
 	// maxMarkdownTableWidth lets tables use more of a wide viewport without making
 	// ordinary prose harder to read.
 	maxMarkdownTableWidth = 220
-	// preformattedTabWidth is the visual tab stop used when rendering pasted
-	// user content.
-	preformattedTabWidth = 4
 )
 
 // railWidthToReserve returns how many columns to subtract from the available
@@ -47,112 +39,6 @@ func railWidthToReserve(style lipgloss.Style) int {
 	return max(cardRailWidth-style.GetHorizontalBorderSize(), 0)
 }
 
-// ansiStrip removes ANSI CSI sequences for display-width calculation.
-var ansiStrip = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-
-// tuiWidthMethod is the display-width algorithm used by the viewport cell
-// renderer. All card wrapping, truncation, and padding code must use the same
-// method so emoji/variation-selector graphemes do not shift background fills.
-const tuiWidthMethod = ansi.GraphemeWidth
-
-func tuiStringWidth(s string) int {
-	return tuiWidthMethod.StringWidth(s)
-}
-
-func plainASCIIWidth(s string) (int, bool) {
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c < 0x20 || c >= 0x7f {
-			return 0, false
-		}
-	}
-	return len(s), true
-}
-
-func tuiCut(s string, left, right int) string {
-	return tuiWidthMethod.Cut(s, left, right)
-}
-
-func tuiWrapHeadTail(s string, width int) (string, string) {
-	if width <= 0 || s == "" {
-		return s, ""
-	}
-	totalWidth := tuiStringWidth(s)
-	head := tuiCut(s, 0, width)
-	headWidth := tuiStringWidth(head)
-	for headWidth == 0 && width < totalWidth {
-		width++
-		head = tuiCut(s, 0, width)
-		headWidth = tuiStringWidth(head)
-	}
-	if head != "" {
-		return head, tuiCut(s, headWidth, totalWidth)
-	}
-	cluster, _ := ansi.FirstGraphemeCluster(s, tuiWidthMethod)
-	if cluster == "" {
-		return s, ""
-	}
-	return cluster, s[len(cluster):]
-}
-
-func tuiHardwrap(s string, width int) []string {
-	wrapped := tuiWidthMethod.Hardwrap(s, width, true)
-	parts := strings.Split(wrapped, "\n")
-	if len(parts) > 1 && parts[0] == "" {
-		parts = parts[1:]
-	}
-	return parts
-}
-
-// padLineToDisplayWidth pads line with spaces to exactly width display columns
-// so block backgrounds extend to full width and selection aligns. Uses the same
-// grapheme-aware width method as the viewport so emoji/wide chars match highlight column math.
-func padLineToDisplayWidth(line string, width int) string {
-	w := tuiStringWidth(line)
-	if w >= width {
-		return line
-	}
-	padding := strings.Repeat(" ", width-w)
-	if strings.HasSuffix(line, "\x1b[0m") {
-		return line[:len(line)-4] + padding + "\x1b[0m"
-	}
-	if strings.HasSuffix(line, "\x1b[m") {
-		return line[:len(line)-3] + padding + "\x1b[m"
-	}
-	return line + padding
-}
-
-// padViewportLineToDisplayWidth keeps viewport padding outside a completed
-// ANSI style. Card renderers close their background before the outer margin;
-// inserting the viewport's spare columns before that reset would extend a
-// capped card's background to the viewport edge.
-func padViewportLineToDisplayWidth(line string, width int) string {
-	w := tuiStringWidth(line)
-	if w >= width {
-		return line
-	}
-	padding := strings.Repeat(" ", width-w)
-	if strings.HasSuffix(line, "\x1b[0m") || strings.HasSuffix(line, "\x1b[m") {
-		return line + padding
-	}
-	return padLineToDisplayWidth(line, width)
-}
-
-// ensureStyledLineReset appends a final SGR reset when a styled line still ends
-// with an active style sequence. This is especially important for assistant
-// fenced code lines, where we deliberately re-apply the code-block background
-// after inner resets inside the line; without a final close, outer card padding
-// can inherit the code-block background and visually "leak" to the right.
-func ensureStyledLineReset(line string) string {
-	if line == "" || !strings.Contains(line, "\x1b[") {
-		return line
-	}
-	if strings.HasSuffix(line, "\x1b[0m") || strings.HasSuffix(line, ansi.ResetStyle) {
-		return line
-	}
-	return line + ansi.ResetStyle
-}
-
 // padLineToDisplayWidthWithStyle pads line to width using style.Render(padding) so the
 // padded area keeps the style's background (e.g. MessageContentStyle), avoiding
 // patchy colours when content has ANSI resets and padding would otherwise inherit outer bg.
@@ -162,135 +48,11 @@ func ensureStyledLineReset(line string) string {
 // so the sole trailing reset is the last rune's closing sequence — removing it lets the
 // strike/underline bleed across the pad spaces).
 func padLineToDisplayWidthWithStyle(style lipgloss.Style, line string, width int) string {
-	w := tuiStringWidth(line)
+	w := terminaltext.Width(line)
 	if w >= width {
 		return line
 	}
 	return line + style.Render(strings.Repeat(" ", width-w))
-}
-
-// colorToANSIBgSeq converts a color string to an ANSI SGR background sequence.
-// It handles:
-//   - ANSI 256-color numbers (e.g. "235") → "\x1b[48;5;235m"
-//   - Hex colors (e.g. "#1e3d2e") → "\x1b[48;2;R;G;Bm" (truecolor)
-//   - Empty string → ""
-//
-// This ensures preserveBackground works correctly on terminals that support
-// truecolor profiles (most modern terminals) when theme values use hex.
-func colorToANSIBgSeq(colorStr string) string {
-	if colorStr == "" {
-		return ""
-	}
-	if colorStr[0] == '#' {
-		// Hex color → truecolor (24-bit) ANSI sequence
-		r, g, b, ok := parseHexColor(colorStr)
-		if !ok {
-			return ""
-		}
-		return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b)
-	}
-	// Assume ANSI 256-color palette index
-	return "\x1b[48;5;" + colorStr + "m"
-}
-
-// parseHexColor parses a hex color string like "#rgb", "#rrggbb", "rgb", or "rrggbb".
-// Returns r, g, b components and true on success.
-func parseHexColor(hex string) (r, g, b uint8, ok bool) {
-	if len(hex) == 0 {
-		return 0, 0, 0, false
-	}
-	if hex[0] == '#' {
-		hex = hex[1:]
-	}
-	switch len(hex) {
-	case 3:
-		// #RGB shorthand
-		rv, e1 := parseHexByte(hex[0:1] + hex[0:1])
-		gv, e2 := parseHexByte(hex[1:2] + hex[1:2])
-		bv, e3 := parseHexByte(hex[2:3] + hex[2:3])
-		if e1 != nil || e2 != nil || e3 != nil {
-			return 0, 0, 0, false
-		}
-		return rv, gv, bv, true
-	case 6:
-		rv, e1 := parseHexByte(hex[0:2])
-		gv, e2 := parseHexByte(hex[2:4])
-		bv, e3 := parseHexByte(hex[4:6])
-		if e1 != nil || e2 != nil || e3 != nil {
-			return 0, 0, 0, false
-		}
-		return rv, gv, bv, true
-	default:
-		return 0, 0, 0, false
-	}
-}
-
-func parseHexByte(s string) (uint8, error) {
-	var v byte
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c >= '0' && c <= '9':
-			v = v*16 + (c - '0')
-		case c >= 'a' && c <= 'f':
-			v = v*16 + (c - 'a' + 10)
-		case c >= 'A' && c <= 'F':
-			v = v*16 + (c - 'A' + 10)
-		default:
-			return 0, fmt.Errorf("invalid hex digit: %c", c)
-		}
-	}
-	return v, nil
-}
-
-// preserveBackground re-inserts bgColor after ANSI resets inside a rendered
-// string so an outer container background survives inner Render() calls.
-// Supports both ANSI 256-color palette indices and hex colors via colorToANSIBgSeq.
-func preserveBackground(line, bgColor string) string {
-	if bgColor == "" || line == "" {
-		return line
-	}
-	if !strings.Contains(line, "\x1b[") {
-		return line
-	}
-	bgSeq := colorToANSIBgSeq(bgColor)
-	if bgSeq == "" {
-		return line
-	}
-	// One pass replaces the four ReplaceAll rounds it used to take. Every target
-	// is a reset sequence, so a single scan over the escape sequences can emit
-	// the background sequence in place. Card rendering calls this for every body
-	// line of every frame, and the four passes each rescanned and reallocated
-	// the whole line — the dominant cost of a large streaming apply_patch card.
-	//
-	// A sequence that is not one of the four resets resumes the scan one byte in
-	// rather than past the sequence: a reset can start inside what looks like an
-	// unterminated escape (`ESC [ ESC [ 0 m`), and skipping the outer run whole
-	// would swallow it. That keeps this byte-identical to the plain substring
-	// replacement it replaced.
-	var b strings.Builder
-	b.Grow(len(line) + 4*len(bgSeq))
-	last := 0
-	for i := 0; i < len(line); {
-		if line[i] != '\x1b' {
-			i++
-			continue
-		}
-		end := skipANSISequence(line, i)
-		if seq := line[i:end]; seq == "\x1b[0m" || seq == "\x1b[m" || seq == "\x1b[49m" || seq == "\x1b[39m" {
-			b.WriteString(line[last:end])
-			b.WriteString(bgSeq)
-			last = end
-			i = end
-			continue
-		}
-		i++
-	}
-	if last == 0 {
-		return line
-	}
-	b.WriteString(line[last:])
-	return b.String()
 }
 
 // preserveCardBg re-inserts the card's background ANSI sequence after full
@@ -303,225 +65,9 @@ func preserveCardBg(lines []string, bgColorNum string) []string {
 		if line == "" {
 			continue
 		}
-		lines[i] = preserveBackground(line, bgColorNum)
+		lines[i] = terminaltext.PreserveBackground(line, bgColorNum)
 	}
 	return lines
-}
-
-func sanitizeDisplayText(s string) string {
-	if s == "" {
-		return ""
-	}
-	// One pass detects control characters, the 0xEF lead byte of
-	// U+FE0E/U+FE0F and the 0xF0 lead byte of emoji modifiers, so clean
-	// text — the overwhelming majority — pays a single scan instead of
-	// separate glyph probes. A control character ends the scan early, so a
-	// glyph hiding after it is only covered by also normalizing on
-	// needsSanitization; the normalizers' own probes keep that rare path
-	// honest. Glyph normalization still runs before the control rebuild so
-	// every downstream path (markdown, streaming tail, wrapText fallbacks)
-	// measures width consistently.
-	needsSanitization := false
-	maybeGlyph := false
-	for i := 0; i < len(s); {
-		c := s[i]
-		if c == '\r' || ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7f) {
-			needsSanitization = true
-			break
-		}
-		if c == 0xEF || c == 0xF0 {
-			maybeGlyph = true
-		}
-		if c < utf8.RuneSelf {
-			i++
-			continue
-		}
-		if _, _, ok := c1ControlLiteral(s[i:]); ok {
-			needsSanitization = true
-			break
-		}
-		_, size := utf8.DecodeRuneInString(s[i:])
-		if size <= 0 {
-			size = 1
-		}
-		i += size
-	}
-	if maybeGlyph || needsSanitization {
-		s = normalizeDisplayGlyphs(s)
-	}
-	if !needsSanitization {
-		return s
-	}
-
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); {
-		c := s[i]
-		switch {
-		case c == '\r':
-			if i+1 < len(s) && s[i+1] == '\n' {
-				i++
-				continue
-			}
-			b.WriteString(`\r`)
-			i++
-		case c == '\t' || c == '\n':
-			b.WriteByte(c)
-			i++
-		case c < 0x20 || c == 0x7f:
-			b.WriteString(displayControlLiteral(c))
-			i++
-		default:
-			if c == '\x1b' {
-				b.WriteString(displayControlLiteral(c))
-				i++
-				continue
-			}
-			if c < utf8.RuneSelf {
-				b.WriteByte(c)
-				i++
-				continue
-			}
-			if literal, size, ok := c1ControlLiteral(s[i:]); ok {
-				b.WriteString(literal)
-				i += size
-				continue
-			}
-			_, size := utf8.DecodeRuneInString(s[i:])
-			if size <= 0 {
-				size = 1
-			}
-			b.WriteString(s[i : i+size])
-			i += size
-		}
-	}
-	return b.String()
-}
-
-// c1ControlLiteral recognizes both UTF-8 encoded C1 controls and raw C1
-// bytes in otherwise invalid input. Valid UTF-8 continuation bytes must not be
-// treated as controls individually, so callers invoke this at rune boundaries.
-func c1ControlLiteral(s string) (literal string, size int, ok bool) {
-	if s == "" {
-		return "", 0, false
-	}
-	r, size := utf8.DecodeRuneInString(s)
-	if r == utf8.RuneError && size == 1 && s[0] >= 0x80 && s[0] <= 0x9f {
-		return fmt.Sprintf(`\x%02x`, s[0]), 1, true
-	}
-	if r < 0x80 || r > 0x9f {
-		return "", 0, false
-	}
-	return fmt.Sprintf(`\x%02x`, r), size, true
-}
-
-func displayControlLiteral(c byte) string {
-	switch c {
-	case '\a':
-		return `\a`
-	case '\b':
-		return `\b`
-	case '\f':
-		return `\f`
-	case '\v':
-		return `\v`
-	default:
-		return fmt.Sprintf(`\x%02x`, c)
-	}
-}
-
-// sanitizeDisplayTextKeepingSGR behaves like sanitizeDisplayText but keeps
-// well-formed SGR sequences (ESC [ ... m) intact, so styled header fragments
-// such as struck-through ignored arguments survive header sanitization. Any
-// other escape sequence is still neutralized to its control literal.
-func sanitizeDisplayTextKeepingSGR(s string) string {
-	if s == "" {
-		return ""
-	}
-	if !displayNeedsSGRAwareSanitize(s) {
-		return s
-	}
-
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); {
-		if s[i] == '\x1b' {
-			if j := skipANSISequence(s, i); j > i+1 && s[j-1] == 'm' && s[i+1] == '[' {
-				b.WriteString(s[i:j])
-				i = j
-				continue
-			}
-		}
-		c := s[i]
-		switch {
-		case c == '\r':
-			if i+1 < len(s) && s[i+1] == '\n' {
-				i++
-				continue
-			}
-			b.WriteString(`\r`)
-			i++
-		case c == '\t' || c == '\n':
-			b.WriteByte(c)
-			i++
-		case c < 0x20 || c == 0x7f:
-			b.WriteString(displayControlLiteral(c))
-			i++
-		default:
-			if c == '\x1b' {
-				b.WriteString(displayControlLiteral(c))
-				i++
-				continue
-			}
-			if c < utf8.RuneSelf {
-				b.WriteByte(c)
-				i++
-				continue
-			}
-			if literal, size, ok := c1ControlLiteral(s[i:]); ok {
-				b.WriteString(literal)
-				i += size
-				continue
-			}
-			_, size := utf8.DecodeRuneInString(s[i:])
-			if size <= 0 {
-				size = 1
-			}
-			b.WriteString(s[i : i+size])
-			i += size
-		}
-	}
-	return b.String()
-}
-
-func displayNeedsSGRAwareSanitize(s string) bool {
-	for i := 0; i < len(s); {
-		c := s[i]
-		if c != '\x1b' {
-			if c == '\r' || ((c < 0x20 && c != '\t' && c != '\n') || c == 0x7f) {
-				return true
-			}
-			if c < utf8.RuneSelf {
-				i++
-				continue
-			}
-			if _, _, ok := c1ControlLiteral(s[i:]); ok {
-				return true
-			}
-			_, size := utf8.DecodeRuneInString(s[i:])
-			if size <= 0 {
-				size = 1
-			}
-			i += size
-			continue
-		}
-		j := skipANSISequence(s, i)
-		if j <= i+1 || s[j-1] != 'm' || (i+1 < len(s) && s[i+1] != '[') {
-			return true
-		}
-		i = j
-	}
-	return false
 }
 
 // hasExplicitStyleColor reports whether a lipgloss getter returned a real
@@ -711,7 +257,7 @@ func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, ra
 	}
 	padTop, padRight, padBottom, padLeft := style.GetPadding()
 	marginTop, marginRight, marginBottom, marginLeft := style.GetMargin()
-	bgSeq := colorToANSIBgSeq(bgColorNum)
+	bgSeq := terminaltext.BackgroundSequence(bgColorNum)
 	marginPrefix := strings.Repeat(" ", marginLeft)
 	marginSuffix := strings.Repeat(" ", marginRight)
 	lineWidth := padLeft + innerWidth + padRight
@@ -742,14 +288,14 @@ func newPrewrappedCardFrame(style lipgloss.Style, innerWidth int, bgColorNum, ra
 }
 
 func (f *prewrappedCardFrame) renderBodyLine(line string) string {
-	line = preserveBackground(line, f.bgColorNum)
-	lineDisplayWidth, plainASCII := plainASCIIWidth(line)
+	line = terminaltext.PreserveBackground(line, f.bgColorNum)
+	lineDisplayWidth, plainASCII := terminaltext.ASCIIWidth(line)
 	if !plainASCII {
-		lineDisplayWidth = tuiStringWidth(line)
+		lineDisplayWidth = terminaltext.Width(line)
 	}
 	if lineDisplayWidth > f.innerWidth {
-		line = truncateLineToDisplayWidth(line, f.innerWidth)
-		line = preserveBackground(line, f.bgColorNum)
+		line = terminaltext.Truncate(line, f.innerWidth)
+		line = terminaltext.PreserveBackground(line, f.bgColorNum)
 		return wrapLineWithBackgroundAndRail(f.marginPrefix, f.innerPrefix, line, f.innerSuffix, f.bgSeq, f.marginSuffix, f.railPrefix, 0)
 	}
 	pad := 0
@@ -846,15 +392,15 @@ func cardRailPrefix(kind string, focused bool) string {
 	}
 	switch kind {
 	case "user":
-		return pick(currentTheme.RailUserFg, currentTheme.RailUserFocusedFg)
+		return pick(currentStyles.Palette.RailUserFg, currentStyles.Palette.RailUserFocusedFg)
 	case "assistant":
-		return pick(currentTheme.RailAssistantFg, currentTheme.RailAssistantFocusedFg)
+		return pick(currentStyles.Palette.RailAssistantFg, currentStyles.Palette.RailAssistantFocusedFg)
 	case "tool":
-		return pick(currentTheme.RailToolFg, currentTheme.RailToolFocusedFg)
+		return pick(currentStyles.Palette.RailToolFg, currentStyles.Palette.RailToolFocusedFg)
 	case "thinking":
-		return pick(currentTheme.RailThinkingFg, currentTheme.RailThinkingFocusedFg)
+		return pick(currentStyles.Palette.RailThinkingFg, currentStyles.Palette.RailThinkingFocusedFg)
 	case "error":
-		return pick(currentTheme.RailErrorFg, currentTheme.RailErrorFocusedFg)
+		return pick(currentStyles.Palette.RailErrorFg, currentStyles.Palette.RailErrorFocusedFg)
 	default:
 		return ""
 	}
@@ -862,325 +408,6 @@ func cardRailPrefix(kind string, focused bool) string {
 
 func renderUserText(text string, width int) []string {
 	// Preserve original newlines and indentation; expand tabs; soft-wrap by display width.
-	text = sanitizeDisplayText(text)
-	return wrapPreformattedText(text, width)
-}
-
-func expandTabsForDisplay(s string, tabWidth int) string {
-	if tabWidth <= 0 || !strings.ContainsRune(s, '\t') {
-		return s
-	}
-	var b strings.Builder
-	col := 0
-	for len(s) > 0 {
-		cluster, w := ansi.FirstGraphemeCluster(s, tuiWidthMethod)
-		if cluster == "" {
-			break
-		}
-		if cluster == "\t" {
-			spaces := tabWidth - (col % tabWidth)
-			if spaces <= 0 {
-				spaces = tabWidth
-			}
-			b.WriteString(strings.Repeat(" ", spaces))
-			col += spaces
-			s = s[len(cluster):]
-			continue
-		}
-		b.WriteString(cluster)
-		col += w
-		s = s[len(cluster):]
-	}
-	return b.String()
-}
-
-// expandTabsForDisplayANSI expands literal tab characters in a string that may
-// contain ANSI escape sequences. ANSI sequences are treated as zero-width when
-// calculating tab stops.
-func expandTabsForDisplayANSI(s string, tabWidth int) string {
-	if tabWidth <= 0 || !strings.ContainsRune(s, '\t') {
-		return s
-	}
-	var b strings.Builder
-	col := 0
-	for i := 0; i < len(s); {
-		if s[i] == '\x1b' {
-			end := skipANSISequence(s, i)
-			if end <= i {
-				end = i + 1
-			}
-			b.WriteString(s[i:end])
-			i = end
-			continue
-		}
-		r, size := utf8.DecodeRuneInString(s[i:])
-		if r == utf8.RuneError && size == 0 {
-			break
-		}
-		if r == '\t' {
-			spaces := tabWidth - (col % tabWidth)
-			if spaces <= 0 {
-				spaces = tabWidth
-			}
-			b.WriteString(strings.Repeat(" ", spaces))
-			col += spaces
-			i += size
-			continue
-		}
-		b.WriteRune(r)
-		col += tuiStringWidth(string(r))
-		i += size
-	}
-	return b.String()
-}
-
-func wrapPreformattedText(text string, width int) []string {
-	if width <= 0 {
-		width = 80
-	}
-	if text == "" {
-		return []string{""}
-	}
-	text = markdownutil.NormalizeNewlines(text)
-	var result []string
-	for line := range strings.SplitSeq(text, "\n") {
-		expanded := expandTabsForDisplay(line, preformattedTabWidth)
-		if expanded == "" {
-			result = append(result, "")
-			continue
-		}
-		wrapped := tuiHardwrap(expanded, width)
-		result = append(result, wrapped...)
-	}
-	if len(result) == 0 {
-		return []string{""}
-	}
-	return result
-}
-
-// wrapText word-wraps text to the given column width (in display columns).
-// It splits on existing newlines first, then wraps each paragraph by words.
-// Uses the viewport width method so wrap break points match final cell rendering.
-func wrapText(text string, width int) []string {
-	if width <= 0 {
-		width = 80
-	}
-	if text == "" {
-		return []string{""}
-	}
-	if isPlainASCIIWrapText(text) {
-		return wrapPlainASCIIText(text, width)
-	}
-
-	var result []string
-	for para := range strings.SplitSeq(text, "\n") {
-		if para == "" {
-			result = append(result, "")
-			continue
-		}
-
-		trimmed := strings.TrimLeft(para, " \t")
-		indent := para[:len(para)-len(trimmed)]
-		indentWidth := tuiStringWidth(indent)
-		if trimmed == "" {
-			result = append(result, "")
-			continue
-		}
-
-		var cur strings.Builder
-		cur.WriteString(indent)
-		curWidth := indentWidth
-		for i := 0; i < len(trimmed); {
-			for i < len(trimmed) {
-				r, size := utf8.DecodeRuneInString(trimmed[i:])
-				if !unicode.IsSpace(r) {
-					break
-				}
-				i += size
-			}
-			if i >= len(trimmed) {
-				break
-			}
-
-			wordStart := i
-			for i < len(trimmed) {
-				r, size := utf8.DecodeRuneInString(trimmed[i:])
-				if unicode.IsSpace(r) {
-					break
-				}
-				i += size
-			}
-			word := trimmed[wordStart:i]
-			wordWidth := tuiStringWidth(word)
-			if curWidth == indentWidth {
-				appendWord(&result, &cur, &curWidth, word, wordWidth, width)
-			} else if curWidth+1+wordWidth > width {
-				result = append(result, cur.String())
-				cur.Reset()
-				cur.WriteString(indent)
-				curWidth = indentWidth
-				appendWord(&result, &cur, &curWidth, word, wordWidth, width)
-			} else {
-				cur.WriteByte(' ')
-				cur.WriteString(word)
-				curWidth += 1 + wordWidth
-			}
-		}
-		if cur.Len() > 0 {
-			result = append(result, cur.String())
-		}
-	}
-
-	if len(result) == 0 {
-		result = append(result, "")
-	}
-	return result
-}
-
-func isPlainASCIIWrapText(text string) bool {
-	for i := 0; i < len(text); i++ {
-		c := text[i]
-		if c == '\x1b' || c == '\t' || c >= utf8.RuneSelf {
-			return false
-		}
-	}
-	return true
-}
-
-func wrapPlainASCIIText(text string, width int) []string {
-	var result []string
-	for para := range strings.SplitSeq(text, "\n") {
-		if para == "" {
-			result = append(result, "")
-			continue
-		}
-		trimmed := strings.TrimLeft(para, " ")
-		indent := para[:len(para)-len(trimmed)]
-		indentWidth := len(indent)
-		if trimmed == "" {
-			result = append(result, "")
-			continue
-		}
-		var cur strings.Builder
-		cur.WriteString(indent)
-		curWidth := indentWidth
-		for i := 0; i < len(trimmed); {
-			for i < len(trimmed) && trimmed[i] == ' ' {
-				i++
-			}
-			if i >= len(trimmed) {
-				break
-			}
-			wordStart := i
-			for i < len(trimmed) && trimmed[i] != ' ' {
-				i++
-			}
-			word := trimmed[wordStart:i]
-			wordWidth := len(word)
-			if curWidth == indentWidth {
-				appendASCIIWord(&result, &cur, &curWidth, word, width)
-			} else if curWidth+1+wordWidth > width {
-				result = append(result, cur.String())
-				cur.Reset()
-				cur.WriteString(indent)
-				curWidth = indentWidth
-				appendASCIIWord(&result, &cur, &curWidth, word, width)
-			} else {
-				cur.WriteByte(' ')
-				cur.WriteString(word)
-				curWidth += 1 + wordWidth
-			}
-		}
-		if cur.Len() > 0 {
-			result = append(result, cur.String())
-		}
-	}
-	if len(result) == 0 {
-		return []string{""}
-	}
-	return result
-}
-
-func appendASCIIWord(result *[]string, cur *strings.Builder, curWidth *int, word string, width int) {
-	if len(word) <= width-*curWidth {
-		cur.WriteString(word)
-		*curWidth += len(word)
-		return
-	}
-	for len(word) > 0 {
-		space := width - *curWidth
-		if space <= 0 {
-			*result = append(*result, cur.String())
-			cur.Reset()
-			*curWidth = 0
-			space = width
-		}
-		n := min(space, len(word))
-		cur.WriteString(word[:n])
-		*curWidth += n
-		word = word[n:]
-		if len(word) > 0 {
-			*result = append(*result, cur.String())
-			cur.Reset()
-			*curWidth = 0
-		}
-	}
-}
-
-// appendWord adds a word to the builder, breaking it by runes if its display
-// width exceeds the available line width. Uses the viewport width method so
-// columns match final rendering.
-func appendWord(result *[]string, cur *strings.Builder, curWidth *int, word string, wordWidth, width int) {
-	if wordWidth <= width-*curWidth {
-		cur.WriteString(word)
-		*curWidth += wordWidth
-		return
-	}
-	// Fill the current line first, then hard-wrap the remainder.
-	// Edge case: when the remaining space is 1 column and the next grapheme is
-	// 2 columns wide, tuiWrapHeadTail widens to keep the grapheme intact, so
-	// that line can exceed width by one column. Callers only invoke this with
-	// curWidth at the indent width, so it needs width-indent < 2 to trigger.
-	for word != "" {
-		available := width - *curWidth
-		if available <= 0 {
-			*result = append(*result, cur.String())
-			cur.Reset()
-			*curWidth = 0
-			available = width
-		}
-		part, rest := tuiWrapHeadTail(word, available)
-		if part == "" {
-			return
-		}
-		cur.WriteString(part)
-		*curWidth += tuiStringWidth(part)
-		word = rest
-		if word != "" {
-			*result = append(*result, cur.String())
-			cur.Reset()
-			*curWidth = 0
-		}
-	}
-}
-
-// truncateOneLine returns the first line of s, trimmed and truncated to maxLen
-// display columns (with "..." appended when truncated). CJK characters are
-// correctly counted as 2 columns.
-func truncateOneLine(s string, maxLen int) string {
-	if maxLen <= 0 {
-		maxLen = 20
-	}
-	// Take first line.
-	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
-		s = s[:idx]
-	}
-	s = strings.TrimSpace(s)
-	if runewidth.StringWidth(s) <= maxLen {
-		return s
-	}
-	if maxLen > 3 {
-		return runewidth.Truncate(s, maxLen, "...")
-	}
-	return runewidth.Truncate(s, maxLen, "")
+	text = terminaltext.Sanitize(text)
+	return terminaltext.WrapPreformatted(text, width)
 }

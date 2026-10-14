@@ -10,6 +10,8 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestToolResultSummaryLineShowsTerminalStates(t *testing.T) {
@@ -229,7 +231,7 @@ func TestJobOutputSummaryLine(t *testing.T) {
 // its rows behind the toggle, so the header carries the count instead of leaving
 // the reader with a bare tool name.
 func TestCollapsedJobListCardCountsItsJobs(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const three = "job-1  running  5s  build\njob-2  completed  3s  test\njob-3  completed  1s  lint"
 	tests := []struct {
 		name     string
@@ -249,7 +251,7 @@ func TestCollapsedJobListCardCountsItsJobs(t *testing.T) {
 				Content: `{}`, ResultContent: tt.result, ResultDone: true,
 				ResultStatus: message.ToolStatusSuccess, ToolCallDetailExpanded: tt.expanded,
 			}
-			plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 			if !strings.Contains(plain, tt.want) {
 				t.Fatalf("job_list card missing %q:\n%s", tt.want, plain)
 			}
@@ -262,7 +264,7 @@ func TestCollapsedJobListCardCountsItsJobs(t *testing.T) {
 // read returned — the fresh line count, or the "no new output" that tells the
 // reader (and the model's own next step) there is nothing new to poll for.
 func TestCollapsedJobOutputCardSummarizesItsRead(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	tests := []struct{ name, result, want string }{
 		{"fresh output", "line one\nline two\n[status: running]", "✓ ▸ job_output job-8 · 2 new lines"},
 		{"empty read", "[status: running]", "✓ ▸ job_output job-8 · no new output"},
@@ -275,7 +277,7 @@ func TestCollapsedJobOutputCardSummarizesItsRead(t *testing.T) {
 				Content: `{"job_id":"job-8"}`, ResultContent: tt.result, ResultDone: true,
 				ResultStatus: message.ToolStatusSuccess,
 			}
-			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if !strings.Contains(plain, tt.want) {
 				t.Fatalf("job_output card missing %q:\n%s", tt.want, plain)
 			}
@@ -288,14 +290,14 @@ func TestCollapsedJobOutputCardSummarizesItsRead(t *testing.T) {
 // job_kill call needs, so it must survive a narrow card the way job_kill's id
 // does, while the read summary yields first.
 func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
 		Content: `{"job_id":"job-8"}`, ResultContent: "line one\nline two\n[status: running]",
 		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
 		PersistedDuration: 30 * time.Second,
 	}
-	wide := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	wide := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(wide, "job-8 · 2 new lines") {
 		t.Fatalf("wide card should keep the job id and the read summary:\n%s", wide)
 	}
@@ -303,7 +305,7 @@ func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
 	// summary shows the id too, and a tighter card drops the summary alone.
 	sawIDWithoutSummary := false
 	for width := 30; width <= 60; width += 2 {
-		plain := stripANSI(strings.Join(block.Render(width, ""), "\n"))
+		plain := terminaltext.StripANSI(strings.Join(block.Render(width, ""), "\n"))
 		if strings.Contains(plain, "2 new lines") && !strings.Contains(plain, "job-8") {
 			t.Fatalf("width %d kept the read summary but dropped the job id:\n%s", width, plain)
 		}
@@ -323,7 +325,7 @@ func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
 // width but dropped the read summary several columns before it actually stopped
 // fitting, defeating the priority order this header exists to implement.
 func TestJobOutputHeaderSpendsItsWholeBudget(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
 		Content: `{"job_id":"job-8"}`, ResultContent: "line one\nline two\n[status: running]",
@@ -345,7 +347,7 @@ func TestJobOutputHeaderSpendsItsWholeBudget(t *testing.T) {
 	for width := 36; width <= 80; width++ {
 		header := ""
 		for _, line := range block.Render(width, "") {
-			plain := strings.TrimRight(stripANSI(line), " ")
+			plain := strings.TrimRight(terminaltext.StripANSI(line), " ")
 			if strings.Contains(plain, "job-8") {
 				header = plain
 				break
@@ -362,14 +364,14 @@ func TestJobOutputHeaderSpendsItsWholeBudget(t *testing.T) {
 	// The card keeps a margin the header never sees, so the budget itself is
 	// checked against the width the renderer actually passes down.
 	headerLine := "    ✓ ▸ job_output"
-	grayPart := DimStyle.Render("(path=sub)")
+	grayPart := currentStyles.DimStyle.Render("(path=sub)")
 	const summarySegment = " · 2 new lines"
 	// Both sides of the arithmetic below use the metric the renderer uses:
 	// lipgloss pads the card with ansi.StringWidth, so a runewidth-based
 	// expectation would accept a header that drops a fitting suffix.
 	segmentWidth := ansi.StringWidth(summarySegment)
 	for maxWidth := 24; maxWidth <= 80; maxWidth++ {
-		plain := stripANSI(appendJobOutputHeaderDetails(headerLine, "job-8", grayPart, "2 new lines", "30s", maxWidth))
+		plain := terminaltext.StripANSI(appendJobOutputHeaderDetails(headerLine, "job-8", grayPart, "2 new lines", "30s", maxWidth))
 		used := ansi.StringWidth(plain)
 		if used > maxWidth {
 			t.Fatalf("maxWidth %d overflowed to %d columns: %q", maxWidth, used, plain)
@@ -387,7 +389,7 @@ func TestJobOutputHeaderSpendsItsWholeBudget(t *testing.T) {
 // with a real elapsed time on the header: the read summary yields before the
 // elapsed label, and the id is joined last.
 func TestNarrowJobOutputCardKeepsIDWhenElapsedIsPresent(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
 		Content:           `{"job_id":"job-8"}`,
@@ -396,13 +398,13 @@ func TestNarrowJobOutputCardKeepsIDWhenElapsedIsPresent(t *testing.T) {
 		ResultStatus:      message.ToolStatusSuccess,
 		PersistedDuration: 30 * time.Second,
 	}
-	wide := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	wide := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(wide, "job-8 · 2 new lines · ⏱ 30s") {
 		t.Fatalf("wide card should carry the id, read summary and elapsed label:\n%s", wide)
 	}
 	sawIDWithoutSummary := false
 	for width := 30; width <= 60; width += 2 {
-		plain := stripANSI(strings.Join(block.Render(width, ""), "\n"))
+		plain := terminaltext.StripANSI(strings.Join(block.Render(width, ""), "\n"))
 		if strings.Contains(plain, "2 new lines") && !strings.Contains(plain, "job-8") {
 			t.Fatalf("width %d kept the read summary but dropped the job id:\n%s", width, plain)
 		}
@@ -418,7 +420,7 @@ func TestNarrowJobOutputCardKeepsIDWhenElapsedIsPresent(t *testing.T) {
 // expanding, because it is the argument every later job_output / job_kill call
 // needs.
 func TestCollapsedShellCardNamesItsJobID(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -430,7 +432,7 @@ func TestCollapsedShellCardNamesItsJobID(t *testing.T) {
 		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: false,
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "batch run · job-64") {
 		t.Fatalf("collapsed shell card should name its job id on the header; got:\n%s", plain)
 	}
@@ -448,7 +450,7 @@ func TestCollapsedShellCardNamesItsJobID(t *testing.T) {
 // TestCollapsedShellCardOmitsHandleForForegroundRun guards the other side: a
 // foreground result carries no handle, so no "Background job" row may appear.
 func TestCollapsedShellCardOmitsHandleForForegroundRun(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -459,7 +461,7 @@ func TestCollapsedShellCardOmitsHandleForForegroundRun(t *testing.T) {
 		ResultDone:    true,
 		ResultStatus:  message.ToolStatusSuccess,
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(plain, "Background job") {
 		t.Fatalf("foreground shell card must not claim a background job; got:\n%s", plain)
 	}
@@ -469,7 +471,7 @@ func TestCollapsedShellCardOmitsHandleForForegroundRun(t *testing.T) {
 // is an argument here, so the header already names it and the summary must stay
 // a bare "Stop requested" label instead of echoing it a second time.
 func TestCollapsedJobKillCardKeepsOneID(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -481,7 +483,7 @@ func TestCollapsedJobKillCardKeepsOneID(t *testing.T) {
 		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: false,
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "✓ ▸ job_kill job-64 · Stop requested") {
 		t.Fatalf("collapsed job_kill should inline the stop acknowledgment on its header; got:\n%s", plain)
 	}
@@ -497,7 +499,7 @@ func TestCollapsedJobKillCardKeepsOneID(t *testing.T) {
 }
 
 func TestExpandedShellCardShowsFullResultBody(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -509,7 +511,7 @@ func TestExpandedShellCardShowsFullResultBody(t *testing.T) {
 		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: true,
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	for _, want := range []string{"Command", "step1_local_run.py", "Output", "[background job job-64]", "Exit: 0"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expanded shell card missing %q; got:\n%s", want, plain)
@@ -528,7 +530,7 @@ func TestExpandedToolResultRendersTerminalStateSummary(t *testing.T) {
 		ResultContent:          "job not found",
 		ToolCallDetailExpanded: true,
 	}
-	joined := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	for _, want := range []string{tools.NameJobKill, "✗", "Error:", "job not found"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expanded tool card missing %q; got:\n%s", want, joined)

@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // Every clickable status region must cover exactly the columns its member is
@@ -42,7 +43,7 @@ func TestStatusCopyRegionsMatchDrawnColumns(t *testing.T) {
 						Events:    42,
 					}
 				}
-				plain := stripANSI(m.renderStatusBar())
+				plain := terminaltext.StripANSI(m.renderStatusBar())
 				if compacting && m.statusPath.display != "" && m.statusSession.display != "" {
 					compactingBothVisible = true
 				}
@@ -154,7 +155,7 @@ func TestStatusBarRightPlacementRegionsFollowCutRow(t *testing.T) {
 					}
 				}
 			}
-			if tc.wantPill == "" && strings.Contains(stripANSI(line), pillText) {
+			if tc.wantPill == "" && strings.Contains(terminaltext.StripANSI(line), pillText) {
 				t.Fatalf("row still shows %q although the lane cut the whole pill: %q", pillText, line)
 			}
 		})

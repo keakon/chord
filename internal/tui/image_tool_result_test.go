@@ -13,12 +13,13 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestViewImageResultDisplaysImageAfterTextOnlyPreview(t *testing.T) {
 	for _, backend := range []ImageBackend{ImageBackendKitty, ImageBackendITerm2} {
 		t.Run(fmt.Sprint(backend), func(t *testing.T) {
-			ApplyTheme(DefaultTheme())
+			ApplyTheme(uitheme.Default())
 			caps := TerminalImageCapabilities{Backend: backend, SupportsInline: true, SupportsFullscreen: true}
 			previous := currentImageCapabilities()
 			setCurrentTerminalImageCapabilities(caps)

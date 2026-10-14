@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/requestshape"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -282,7 +283,7 @@ func TestMCPMountIncrementalMessageShapesDetectNestedChange(t *testing.T) {
 		Role:      message.RoleAssistant,
 		ToolCalls: []message.ToolCall{{ID: "call-1", Name: "mcp_sample_lookup", Args: json.RawMessage(`{"value":"first"}`)}},
 	}}
-	first := append([]stableReductionMessageShape(nil), state.incrementalMessageShapes(messages)...)
+	first := append([]requestshape.Shape(nil), state.incrementalMessageShapes(messages)...)
 	messages[0].ToolCalls = []message.ToolCall{{ID: "call-1", Name: "mcp_sample_lookup", Args: json.RawMessage(`{"value":"second"}`)}}
 	second := state.incrementalMessageShapes(messages)
 	if first[0] == second[0] {

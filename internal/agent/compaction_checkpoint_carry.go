@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -254,11 +255,11 @@ func stripPriorCheckpointCarrySection(body string) string {
 // stripCheckpointCurrentUserRequestSection removes the `## Current User
 // Request` section from a checkpoint body.
 func stripCheckpointCurrentUserRequestSection(body string) string {
-	start, end, ok := markdownSectionBounds(body, checkpointCurrentUserRequestHeading)
+	start, end, ok := checkpointfmt.SectionBounds(body, checkpointfmt.CurrentUserRequestHeading)
 	if !ok {
 		return strings.TrimSpace(body)
 	}
-	prefix := strings.TrimSpace(body[:start-len(checkpointCurrentUserRequestHeading)])
+	prefix := strings.TrimSpace(body[:start-len(checkpointfmt.CurrentUserRequestHeading)])
 	suffix := strings.TrimSpace(body[end:])
 	switch {
 	case prefix == "":

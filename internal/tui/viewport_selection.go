@@ -6,6 +6,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // SelectionRange represents a contiguous selection from (BlockID, Line, Col) to end.
@@ -62,7 +64,7 @@ func (v *Viewport) GetLinePlain(blockID, lineInBlock int) (plain string, width i
 		if lineInBlock < 0 || lineInBlock >= len(lines) {
 			return "", 0
 		}
-		plain = stripANSI(lines[lineInBlock])
+		plain = terminaltext.StripANSI(lines[lineInBlock])
 		width = selectionPlainTextWidth(plain)
 		if b.renderSyntheticPrefixWidthsW == v.width && lineInBlock < len(b.renderSyntheticPrefixWidths) {
 			adjust := b.renderSyntheticPrefixWidths[lineInBlock]
@@ -120,7 +122,7 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 				continue
 			}
 			line := lines[lineIdx]
-			plain := stripANSI(line)
+			plain := terminaltext.StripANSI(line)
 			lineWidth := selectionPlainTextWidth(plain)
 			prefixAdjust := min(max(v.selectionLinePrefixWidth(block, lineIdx, plain), 0), lineWidth)
 			absStart := prefixAdjust
@@ -148,7 +150,7 @@ func (v *Viewport) ExtractSelectionText(sel SelectionRange) string {
 			}
 		}
 	}
-	raw := normalizeLineNumberPrefix(joinStandaloneEmojiModifiers(sb.String()))
+	raw := normalizeLineNumberPrefix(terminaltext.RestoreModifiers(sb.String()))
 	text := dedentLines(raw)
 	text = dedentLinesSkipUnindented(text)
 	return strings.TrimSpace(text)
@@ -181,19 +183,19 @@ func (v *Viewport) selectionCardInsetWidth(block *Block) int {
 	}
 	switch block.Type {
 	case BlockUser:
-		return UserCardStyle.GetMarginLeft() + UserCardStyle.GetPaddingLeft()
+		return currentStyles.UserCardStyle.GetMarginLeft() + currentStyles.UserCardStyle.GetPaddingLeft()
 	case BlockAssistant:
-		base := AssistantCardStyle.GetMarginLeft() + AssistantCardStyle.GetPaddingLeft()
-		thinkingInset := ThinkingCardStyle.GetMarginLeft() + ThinkingCardStyle.GetPaddingLeft()
+		base := currentStyles.AssistantCardStyle.GetMarginLeft() + currentStyles.AssistantCardStyle.GetPaddingLeft()
+		thinkingInset := currentStyles.ThinkingCardStyle.GetMarginLeft() + currentStyles.ThinkingCardStyle.GetPaddingLeft()
 		return max(base, thinkingInset)
 	case BlockThinking:
-		return ThinkingCardStyle.GetMarginLeft() + ThinkingCardStyle.GetPaddingLeft()
+		return currentStyles.ThinkingCardStyle.GetMarginLeft() + currentStyles.ThinkingCardStyle.GetPaddingLeft()
 	case BlockToolCall, BlockToolResult:
-		return ToolBlockStyle.GetMarginLeft() + ToolBlockStyle.GetPaddingLeft()
+		return currentStyles.ToolBlockStyle.GetMarginLeft() + currentStyles.ToolBlockStyle.GetPaddingLeft()
 	case BlockError:
-		return ErrorCardStyle.GetMarginLeft() + ErrorCardStyle.GetPaddingLeft()
+		return currentStyles.ErrorCardStyle.GetMarginLeft() + currentStyles.ErrorCardStyle.GetPaddingLeft()
 	case BlockStatus, BlockCompactionSummary:
-		return CompactionSummaryCardStyle.GetMarginLeft() + CompactionSummaryCardStyle.GetPaddingLeft()
+		return currentStyles.CompactionSummaryCardStyle.GetMarginLeft() + currentStyles.CompactionSummaryCardStyle.GetPaddingLeft()
 	default:
 		return 0
 	}
@@ -310,46 +312,6 @@ func applyHighlightToLine(line string, colStart, colEnd int) string {
 	return line[:startByte] + hiOn + highlighted + hiOff + line[endByte:]
 }
 
-func stripANSI(s string) string {
-	return ansi.Strip(s)
-}
-
-func skipANSISequence(s string, i int) int {
-	if i >= len(s) || s[i] != '\x1b' {
-		return i
-	}
-	i++
-	if i >= len(s) {
-		return i
-	}
-	ch := s[i]
-	switch ch {
-	case '[':
-		i++
-		for i < len(s) && (s[i] < 0x40 || s[i] > 0x7e) {
-			i++
-		}
-		if i < len(s) {
-			i++
-		}
-	case ']':
-		i++
-		for i < len(s) && s[i] != '\x07' {
-			if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\' {
-				i += 2
-				break
-			}
-			i++
-		}
-		if i < len(s) && s[i] == '\x07' {
-			i++
-		}
-	default:
-		i++
-	}
-	return i
-}
-
 func decodeUTF8(s string) (rune, int) {
 	r, size := utf8.DecodeRuneInString(s)
 	if r == utf8.RuneError && size == 0 {
@@ -358,77 +320,8 @@ func decodeUTF8(s string) (rune, int) {
 	return r, size
 }
 
-func truncateLineToDisplayWidth(s string, width int) string {
-	if width <= 0 {
-		return s
-	}
-	if tuiStringWidth(s) <= width {
-		return s
-	}
-	out := tuiCut(s, 0, width)
-
-	if len(out) < len(s) && strings.Contains(s, "\x1b[") {
-		baseBg := firstSGRBackgroundSeq(s)
-		out += "\x1b[49m"
-		if baseBg != "" {
-			out += baseBg
-		}
-		out += ansi.ResetStyle
-	}
-	return out
-}
-
-func firstSGRBackgroundSeq(s string) string {
-	for i := 0; i < len(s); {
-		if s[i] != '\x1b' {
-			i++
-			continue
-		}
-		if i+1 < len(s) && s[i+1] == '[' {
-			j := i + 2
-			for j < len(s) && s[j] != 'm' {
-				j++
-			}
-			if j < len(s) && s[j] == 'm' {
-				if sgrSetsBackground(s[i+2 : j]) {
-					return s[i : j+1]
-				}
-				i = j + 1
-				continue
-			}
-		}
-		i = skipANSISequence(s, i)
-	}
-	return ""
-}
-
-func sgrSetsBackground(params string) bool {
-	if params == "" {
-		return false
-	}
-	parts := strings.Split(params, ";")
-	for idx := range parts {
-		if parts[idx] != "48" {
-			continue
-		}
-		if idx+2 >= len(parts) {
-			continue
-		}
-		mode := parts[idx+1]
-		switch mode {
-		case "5":
-			return true
-		case "2":
-			if idx+4 < len(parts) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 func extractPlainByColumns(s string, startCol, endCol int) string {
-	plain := stripANSI(s)
+	plain := terminaltext.StripANSI(s)
 	if startCol < 0 {
 		startCol = 0
 	}

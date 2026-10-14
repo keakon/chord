@@ -12,7 +12,7 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/buildinfo"
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/textclean"
 )
 
 const maxTUIDiagnosticEvents = 128
@@ -99,7 +99,7 @@ func (m *Model) snapshotTUIDiagnosticEvents() []tuiDiagnosticEvent {
 }
 
 func writeDiagnosticDumpSection(sb *strings.Builder, content string) {
-	content = markdownutil.NormalizeNewlines(content)
+	content = textclean.NormalizeNewlines(content)
 	content = strings.TrimRight(content, "\n")
 	if strings.TrimSpace(content) == "" {
 		fmt.Fprintf(sb, "(empty)\n")
@@ -121,7 +121,7 @@ func writeDiagnosticDumpSection(sb *strings.Builder, content string) {
 }
 
 func writeDiagnosticBottomLines(sb *strings.Builder, content string, startRow int) {
-	content = markdownutil.NormalizeNewlines(content)
+	content = textclean.NormalizeNewlines(content)
 	content = strings.TrimRight(content, "\n")
 	if strings.TrimSpace(content) == "" {
 		fmt.Fprintf(sb, "(empty)\n")
@@ -290,7 +290,7 @@ func (m *Model) buildDiagnosticDumpContent(now time.Time, trigger, outputPath st
 	screenRender := ""
 	frameRender := ""
 	if scratch.RenderBuffer != nil {
-		screenRender = markdownutil.NormalizeNewlines(scratch.Render())
+		screenRender = textclean.NormalizeNewlines(scratch.Render())
 		frameRender = screenRender
 	}
 

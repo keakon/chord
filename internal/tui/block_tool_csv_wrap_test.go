@@ -5,12 +5,14 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // TestDoneReportCSVCodeBlockWrapsLongLines verifies that CSV code blocks in
 // Done tool reports wrap long lines instead of overflowing the card boundary.
 func TestDoneReportCSVCodeBlockWrapsLongLines(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	// Simulate a CSV line with many columns that exceeds maxTextWidth (120)
 	longCSVLine := `6,东阿阿胶(复方阿胶浆)的销售分析,resolved,"东阿阿胶(复方阿胶浆) → 集团名称=东阿阿胶, 厂家名称=东阿阿胶股份有限公司, 商品名=东阿阿胶, 品名=复方阿胶浆, 通用名=复方阿胶, 零售分类1=滋补保健类, 零售分类2=补气补血, 零售分类3=气血双补",`
@@ -45,7 +47,7 @@ func TestDoneReportCSVCodeBlockWrapsLongLines(t *testing.T) {
 
 	// Check that no line exceeds the card width (allowing for ANSI sequences)
 	for i, line := range lines {
-		displayWidth := tuiStringWidth(line)
+		displayWidth := terminaltext.Width(line)
 		if displayWidth > maxLineWidth {
 			t.Errorf("line %d exceeds card width: got %d, max %d\nline: %q", i, displayWidth, maxLineWidth, line)
 		}
@@ -63,7 +65,7 @@ func TestDoneReportCSVCodeBlockWrapsLongLines(t *testing.T) {
 	csvBlockLines := 0
 	inCSVBlock := false
 	for _, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if strings.Contains(plain, "CSV") {
 			inCSVBlock = true
 		}
@@ -79,7 +81,7 @@ func TestDoneReportCSVCodeBlockWrapsLongLines(t *testing.T) {
 
 // TestDoneReportGenericCodeBlockWrapsLongLines tests wrapping for non-CSV code blocks
 func TestDoneReportGenericCodeBlockWrapsLongLines(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	// A very long shell command line
 	longCommand := "aws s3 sync s3://my-bucket/path/to/very/long/directory/structure/with/many/subdirectories/ /local/destination/path/that/is/also/very/long/and/exceeds/terminal/width --exclude '*.tmp' --include '*.json' --region us-west-2"
@@ -108,7 +110,7 @@ func TestDoneReportGenericCodeBlockWrapsLongLines(t *testing.T) {
 
 	// Verify no line exceeds card width
 	for i, line := range lines {
-		displayWidth := tuiStringWidth(line)
+		displayWidth := terminaltext.Width(line)
 		if displayWidth > maxLineWidth {
 			t.Errorf("line %d exceeds card width: got %d, max %d", i, displayWidth, maxLineWidth)
 		}
@@ -116,7 +118,7 @@ func TestDoneReportGenericCodeBlockWrapsLongLines(t *testing.T) {
 
 	// Verify the command content is present (wrapped, not truncated)
 	joined := strings.Join(lines, "\n")
-	plain := stripANSI(joined)
+	plain := terminaltext.StripANSI(joined)
 	if !strings.Contains(plain, "aws s3 sync") {
 		t.Error("command content should be present")
 	}

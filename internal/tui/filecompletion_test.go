@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +13,8 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/filecompletion"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 func atMentionKey() tea.KeyPressMsg {
@@ -155,49 +156,6 @@ func TestAtMentionFilesLoadedKeepsBareAtPopupOpen(t *testing.T) {
 	}
 }
 
-func TestLoadAtMentionFilesUsesGitTrackedAndUntracked(t *testing.T) {
-	if _, err := gitCommand(context.Background(), ".", "--version"); err != nil {
-		t.Skipf("git not available: %v", err)
-	}
-	wd := t.TempDir()
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	defer func() { _ = os.Chdir(oldWd) }()
-	if err := os.Chdir(wd); err != nil {
-		t.Fatalf("Chdir(%q) error = %v", wd, err)
-	}
-	if _, err := gitCommand(context.Background(), wd, "init"); err != nil {
-		t.Fatalf("git init error = %v", err)
-	}
-	mustWriteFile(t, filepath.Join(wd, "tracked.go"), "package main")
-	mustWriteFile(t, filepath.Join(wd, "new.md"), "new")
-	mustWriteFile(t, filepath.Join(wd, "ignored.log"), "ignored")
-	mustWriteFile(t, filepath.Join(wd, "deleted.txt"), "deleted")
-	mustWriteFile(t, filepath.Join(wd, ".gitignore"), "*.log\n")
-	if _, err := gitCommand(context.Background(), wd, "add", "tracked.go", "deleted.txt", ".gitignore"); err != nil {
-		t.Fatalf("git add error = %v", err)
-	}
-	if err := os.Remove(filepath.Join(wd, "deleted.txt")); err != nil {
-		t.Fatalf("Remove(deleted.txt) error = %v", err)
-	}
-
-	loaded := loadAtMentionFileListInDir("", atMentionMaxFiles)
-	if !slices.Contains(loaded, "tracked.go") {
-		t.Fatalf("tracked file missing from git preload: %v", loaded)
-	}
-	if !slices.Contains(loaded, "new.md") {
-		t.Fatalf("untracked non-ignored file missing from git preload: %v", loaded)
-	}
-	if slices.Contains(loaded, "ignored.log") {
-		t.Fatalf("ignored file should be excluded from git preload: %v", loaded)
-	}
-	if slices.Contains(loaded, "deleted.txt") {
-		t.Fatalf("deleted tracked file should be excluded from git preload: %v", loaded)
-	}
-}
-
 func TestSubmitPlainAtMentionSendsFileParts(t *testing.T) {
 	wd := t.TempDir()
 	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agent rules\n")
@@ -234,135 +192,6 @@ func TestSubmitPlainAtMentionSendsFileParts(t *testing.T) {
 	}
 	if !message.IsFileRefContent(parts[1].Text) || !strings.Contains(parts[1].Text, `<file path="AGENTS.md">`) || !strings.Contains(parts[1].Text, "agent rules") {
 		t.Fatalf("file part = %q, want injected AGENTS.md content", parts[1].Text)
-	}
-}
-
-func TestLoadAtMentionFilesIncludesAttachableMediaAndExcludesOtherBinary(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "main.go"), "package main")
-	mustWriteFile(t, filepath.Join(wd, "notes.md"), "notes")
-	mustWriteFile(t, filepath.Join(wd, "image.png"), "\x89PNG")
-	mustWriteFile(t, filepath.Join(wd, "paper.pdf"), "%PDF-1.7\n")
-	mustWriteFile(t, filepath.Join(wd, "icon.svg"), "<svg/>")
-	mustWriteFile(t, filepath.Join(wd, "bundle.zip"), "PK")
-	mustWriteFile(t, filepath.Join(wd, "libfoo.so"), "\x7fELF")
-	mustWriteFile(t, filepath.Join(wd, "pkg", "mod.pyc"), "\x00")
-	mustWriteFile(t, filepath.Join(wd, "dist", "app.js"), "console.log(1)")
-	mustWriteFile(t, filepath.Join(wd, "out", "result.txt"), "ok")
-	mustWriteFile(t, filepath.Join(wd, ".gitignore"), "out/\n*.secret\n")
-	mustWriteFile(t, filepath.Join(wd, "keys.secret"), "hunter2")
-
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	defer func() { _ = os.Chdir(oldWd) }()
-	if err := os.Chdir(wd); err != nil {
-		t.Fatalf("Chdir(%q) error = %v", wd, err)
-	}
-
-	msg := loadAtMentionFilesForWorkDir("", 0, atMentionMaxFiles)()
-	loaded, ok := msg.(atMentionFilesLoadedMsg)
-	if !ok {
-		t.Fatalf("loadAtMentionFiles() msg = %T, want atMentionFilesLoadedMsg", msg)
-	}
-
-	wantIn := []string{"main.go", "notes.md", "image.png", "paper.pdf", "icon.svg"}
-	for _, p := range wantIn {
-		if !slices.Contains(loaded.files, p) {
-			t.Errorf("%q should be included; got %v", p, loaded.files)
-		}
-	}
-	wantOut := []string{
-		"bundle.zip", "libfoo.so", "pkg/mod.pyc", // non-attachable binary extensions
-		"dist/app.js",    // hard-coded skipped dir
-		"out/result.txt", // .gitignore dir
-		"keys.secret",    // .gitignore file pattern
-	}
-	for _, p := range wantOut {
-		if slices.Contains(loaded.files, p) {
-			t.Errorf("%q should be excluded; got %v", p, loaded.files)
-		}
-	}
-}
-
-func TestLoadAtMentionFilesIncludesDeeperRepoPaths(t *testing.T) {
-	wd := t.TempDir()
-	deepFile := filepath.Join(wd, "a", "b", "c", "d", "e", "f", "g", "deep.txt")
-	hiddenFile := filepath.Join(wd, ".cursor", "rules.md")
-	mustWriteFile(t, deepFile, "deep")
-	mustWriteFile(t, hiddenFile, "rules")
-
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	defer func() {
-		_ = os.Chdir(oldWd)
-	}()
-	if err := os.Chdir(wd); err != nil {
-		t.Fatalf("Chdir(%q) error = %v", wd, err)
-	}
-
-	msg := loadAtMentionFilesForWorkDir("", 0, atMentionMaxFiles)()
-	loaded, ok := msg.(atMentionFilesLoadedMsg)
-	if !ok {
-		t.Fatalf("loadAtMentionFiles() msg = %T, want atMentionFilesLoadedMsg", msg)
-	}
-
-	if !slices.Contains(loaded.files, "a/b/c/d/e/f/g/deep.txt") {
-		t.Fatalf("deep file missing from preload: %v", loaded.files)
-	}
-	if slices.Contains(loaded.files, ".cursor/rules.md") {
-		t.Fatalf("hidden dot-directory file should be excluded from preload: %v", loaded.files)
-	}
-}
-
-func TestLoadAtMentionFilesKeepsGeneratedRootNames(t *testing.T) {
-	for _, name := range []string{"build", "vendor", "dist"} {
-		t.Run(name, func(t *testing.T) {
-			root := filepath.Join(t.TempDir(), name)
-			mustWriteFile(t, filepath.Join(root, "main.go"), "package main")
-			mustWriteFile(t, filepath.Join(root, "nested", "build", "generated.go"), "package nested")
-
-			files := loadAtMentionFileListInDir(root, atMentionMaxFiles)
-			if !slices.Contains(files, "main.go") {
-				t.Fatalf("explicit root %q was skipped: %v", name, files)
-			}
-			if slices.Contains(files, "nested/build/generated.go") {
-				t.Fatalf("nested generated directory should stay excluded: %v", files)
-			}
-		})
-	}
-}
-
-func TestLoadAtMentionFilesCapsAtNewLimit(t *testing.T) {
-	wd := t.TempDir()
-	for i := range 8 {
-		mustWriteFile(t, filepath.Join(wd, "files", fmt.Sprintf("file-%05d.txt", i)), "x")
-	}
-
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd() error = %v", err)
-	}
-	defer func() {
-		_ = os.Chdir(oldWd)
-	}()
-	if err := os.Chdir(wd); err != nil {
-		t.Fatalf("Chdir(%q) error = %v", wd, err)
-	}
-
-	msg := loadAtMentionFilesForWorkDir("", 0, 3)()
-	loaded, ok := msg.(atMentionFilesLoadedMsg)
-	if !ok {
-		t.Fatalf("loadAtMentionFiles() msg = %T, want atMentionFilesLoadedMsg", msg)
-	}
-	if got := len(loaded.files); got != 3 {
-		t.Fatalf("len(files) = %d, want %d", got, 3)
-	}
-	if slices.Contains(loaded.files, "files/file-00007.txt") {
-		t.Fatalf("expected files beyond limit to be omitted, but found tail entry")
 	}
 }
 
@@ -418,93 +247,6 @@ func TestHandleInsertKeyOpensAtMentionAfterMultibyteSpace(t *testing.T) {
 	}
 }
 
-func TestAtMentionPathMatchesRelativeAbsoluteAndHome(t *testing.T) {
-	wd := t.TempDir()
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	mustWriteFile(t, filepath.Join(wd, "subdir", "nested.txt"), "nested")
-	mustWriteFile(t, filepath.Join(wd, "src", "main.go"), "package main")
-	mustWriteFile(t, filepath.Join(wd, "docs", "architecture", "overview.md"), "overview")
-	mustWriteFile(t, filepath.Join(home, "Workspace", "coding-agents", "chord", "main.go"), "package main")
-
-	rel := atMentionPathMatches("./s", wd)
-	if len(rel) < 2 {
-		t.Fatalf("relative matches = %v, want at least 2", rel)
-	}
-	if rel[0].Path != "./src/" || !rel[0].IsDir {
-		t.Fatalf("relative first match = %+v, want ./src/ directory", rel[0])
-	}
-	if rel[1].Path != "./subdir/" || !rel[1].IsDir {
-		t.Fatalf("relative second match = %+v, want ./subdir/ directory", rel[1])
-	}
-
-	absPrefix := filepath.ToSlash(wd) + "/s"
-	abs := atMentionPathMatches(absPrefix, wd)
-	if len(abs) < 2 {
-		t.Fatalf("absolute matches = %v, want at least 2", abs)
-	}
-	wantFirst := filepath.ToSlash(filepath.Join(wd, "src")) + "/"
-	wantSecond := filepath.ToSlash(filepath.Join(wd, "subdir")) + "/"
-	if abs[0].Path != wantFirst || !abs[0].IsDir {
-		t.Fatalf("absolute first match = %+v, want %s directory", abs[0], wantFirst)
-	}
-	if abs[1].Path != wantSecond || !abs[1].IsDir {
-		t.Fatalf("absolute second match = %+v, want %s directory", abs[1], wantSecond)
-	}
-
-	homeMatches := atMentionPathMatches("~/Wor", wd)
-	if len(homeMatches) != 1 {
-		t.Fatalf("home matches = %v, want 1", homeMatches)
-	}
-	if homeMatches[0].Path != "~/Workspace/" || !homeMatches[0].IsDir {
-		t.Fatalf("home match = %+v, want ~/Workspace/ directory", homeMatches[0])
-	}
-
-	repoRel := atMentionPathMatches("docs/a", wd)
-	if len(repoRel) != 1 {
-		t.Fatalf("repo-relative matches = %v, want 1", repoRel)
-	}
-	if repoRel[0].Path != "docs/architecture/" || !repoRel[0].IsDir {
-		t.Fatalf("repo-relative match = %+v, want docs/architecture/ directory", repoRel[0])
-	}
-}
-
-func TestAtMentionPathMatchesPrefersExactFile(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "docs", "architecture", "file-mentions.md"), "doc")
-	mustWriteFile(t, filepath.Join(wd, "docs", "architecture", "file-other.md"), "other")
-
-	query := "./docs/architecture/file-mentions.md"
-	got := atMentionPathMatches(query, wd)
-	want := []atMentionOption{{Path: query, IsDir: false}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionPathMatches() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionPathMatchesLineRangeSuffix(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "docs", "main.go"), "content")
-
-	got := atMentionPathMatches("docs/main.go:12", wd)
-	want := []atMentionOption{{Path: "docs/main.go"}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionPathMatches() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionPathMatchesPrefersColonFilenameOverLineRangeSuffix(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "docs", "note:12"), "content")
-	mustWriteFile(t, filepath.Join(wd, "docs", "note"), "plain")
-
-	got := atMentionPathMatches("docs/note:12", wd)
-	want := []atMentionOption{{Path: "docs/note:12"}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionPathMatches() = %#v, want %#v", got, want)
-	}
-}
-
 func TestRefreshAtMentionListPrefersExactIndexedMatchOnly(t *testing.T) {
 	m := NewModel(nil)
 	m.atMentionLoaded = true
@@ -528,7 +270,7 @@ func TestRefreshAtMentionListPrefersExactIndexedMatchOnly(t *testing.T) {
 	if !ok {
 		t.Fatal("SelectedItem() ok = false, want true")
 	}
-	match, _ := item.Value.(atMentionOption)
+	match, _ := item.Value.(filecompletion.Option)
 	if match.Path != "docs/file.md" || match.IsDir {
 		t.Fatalf("selected match = %+v, want exact docs/file.md file", match)
 	}
@@ -553,7 +295,7 @@ func TestRefreshAtMentionListAcceptsLineRangeSuffixForIndexedExactMatch(t *testi
 	if !ok {
 		t.Fatal("SelectedItem() ok = false, want true")
 	}
-	match, _ := item.Value.(atMentionOption)
+	match, _ := item.Value.(filecompletion.Option)
 	if match.Path != "docs/file.md" || match.IsDir {
 		t.Fatalf("selected match = %+v, want exact docs/file.md file", match)
 	}
@@ -583,7 +325,7 @@ func TestRefreshAtMentionListPrefersExactFilesystemMatchOutsideCache(t *testing.
 	if !ok {
 		t.Fatal("SelectedItem() ok = false, want true")
 	}
-	match, _ := item.Value.(atMentionOption)
+	match, _ := item.Value.(filecompletion.Option)
 	if match.Path != "new.txt" || match.IsDir {
 		t.Fatalf("selected match = %+v, want exact new.txt file", match)
 	}
@@ -595,7 +337,7 @@ func TestRefreshAtMentionListPrefersExactFilesystemMatchOutsideCache(t *testing.
 	if !ok {
 		t.Fatal("SelectedItem() for directory ok = false, want true")
 	}
-	match, _ = item.Value.(atMentionOption)
+	match, _ = item.Value.(filecompletion.Option)
 	if match.Path != "new-dir/" || !match.IsDir {
 		t.Fatalf("selected directory match = %+v, want exact new-dir/ directory", match)
 	}
@@ -624,7 +366,7 @@ func TestRefreshAtMentionListIncludesIgnoredRootPrefixMatch(t *testing.T) {
 	if !ok {
 		t.Fatal("SelectedItem() ok = false, want true")
 	}
-	match, _ := item.Value.(atMentionOption)
+	match, _ := item.Value.(filecompletion.Option)
 	if match.Path != "AGENTS.md" || match.IsDir {
 		t.Fatalf("selected match = %+v, want AGENTS.md file", match)
 	}
@@ -644,7 +386,7 @@ func TestRefreshAtMentionListIncludesIgnoredRootPrefixMatch(t *testing.T) {
 	if !ok {
 		t.Fatal("SelectedItem() for bare @ ok = false, want true")
 	}
-	match, _ = item.Value.(atMentionOption)
+	match, _ = item.Value.(filecompletion.Option)
 	if match.Path == "AGENTS.md" {
 		t.Fatal("bare @ should not include root filesystem fallback result")
 	}
@@ -671,14 +413,15 @@ func TestRefreshAtMentionListKeepsIndexedOrderBeforeRootFallback(t *testing.T) {
 	if !ok {
 		t.Fatal("SelectedItem() ok = false, want true")
 	}
-	match, _ := item.Value.(atMentionOption)
+	match, _ := item.Value.(filecompletion.Option)
 	if match.Path != "main.go" {
 		t.Fatalf("selected match = %+v, want indexed fuzzy result main.go first", match)
 	}
 	if got := m.atMentionList.Len(); got != 3 {
 		t.Fatalf("atMentionList.Len() = %d, want 3 merged results", got)
 	}
-	if got := m.atMentionList.items[2].Value.(atMentionOption).Path; got != "Makefile" {
+	third, _ := m.atMentionList.Item(2)
+	if got := third.Value.(filecompletion.Option).Path; got != "Makefile" {
 		t.Fatalf("last merged result = %q, want appended root fallback Makefile", got)
 	}
 }
@@ -708,7 +451,8 @@ func TestRefreshAtMentionListKeepsRootFallbackWhenIndexIsFull(t *testing.T) {
 	if got := m.atMentionList.Len(); got != 50 {
 		t.Fatalf("atMentionList.Len() = %d, want capped result list", got)
 	}
-	first := m.atMentionList.items[0].Value.(atMentionOption)
+	firstItem, _ := m.atMentionList.Item(0)
+	first := firstItem.Value.(filecompletion.Option)
 	if first.Path != "AtlasGuide.txt" || first.IsDir {
 		t.Fatalf("first merged result = %+v, want AtlasGuide.txt root fallback", first)
 	}
@@ -736,35 +480,15 @@ func TestRefreshAtMentionListPrefersCaseMatchingRootFallback(t *testing.T) {
 	if !ok {
 		t.Fatal("SelectedItem() ok = false, want true")
 	}
-	match := item.Value.(atMentionOption)
+	match := item.Value.(filecompletion.Option)
 	if match.Path != "AtlasGuide.txt" {
 		t.Fatalf("selected match = %+v, want uppercase prefix root fallback AtlasGuide.txt", match)
 	}
 }
 
-func TestAtMentionRootPrefixMatches(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agents")
-	mustWriteFile(t, filepath.Join(wd, "Alpha", "note.txt"), "note")
-	mustWriteFile(t, filepath.Join(wd, ".env"), "secret")
-	mustWriteFile(t, filepath.Join(wd, "app.png"), "png")
-
-	for _, query := range []string{"", "notes/x", "./A", "~/A", ".env"} {
-		if got := atMentionRootPrefixMatches(query, wd); got != nil {
-			t.Fatalf("atMentionRootPrefixMatches(%q) = %#v, want nil", query, got)
-		}
-	}
-
-	got := atMentionRootPrefixMatches("A", wd)
-	want := []atMentionOption{{Path: "Alpha/", IsDir: true}, {Path: "AGENTS.md", IsDir: false}, {Path: "app.png", IsDir: false}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionRootPrefixMatches(%q) = %#v, want %#v", "A", got, want)
-	}
-}
-
 func TestFilterAtMentionOptionsByInputSupportHidesUnsupportedMedia(t *testing.T) {
 	m := &Model{}
-	options := []atMentionOption{
+	options := []filecompletion.Option{
 		{Path: "docs/", IsDir: true},
 		{Path: "notes.md"},
 		{Path: "shot.png"},
@@ -772,7 +496,7 @@ func TestFilterAtMentionOptionsByInputSupportHidesUnsupportedMedia(t *testing.T)
 	}
 
 	got := m.filterAtMentionOptionsByInputSupport(options)
-	want := []atMentionOption{{Path: "docs/", IsDir: true}, {Path: "notes.md"}}
+	want := []filecompletion.Option{{Path: "docs/", IsDir: true}, {Path: "notes.md"}}
 	if !slices.Equal(got, want) {
 		t.Fatalf("filtered options = %#v, want %#v", got, want)
 	}
@@ -819,161 +543,6 @@ func TestFileRefsFromPartsDisplaysLineRange(t *testing.T) {
 	}
 }
 
-func TestMergeAtMentionOptions(t *testing.T) {
-	primary := []atMentionOption{{Path: "main.go"}, {Path: "misc.md"}}
-	secondary := []atMentionOption{{Path: "misc.md"}, {Path: "Makefile"}}
-	got := mergeAtMentionOptions(primary, secondary, "m")
-	want := []atMentionOption{{Path: "main.go"}, {Path: "misc.md"}, {Path: "Makefile"}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("mergeAtMentionOptions() = %#v, want %#v", got, want)
-	}
-
-	primary = make([]atMentionOption, 0, 49)
-	for i := range 49 {
-		primary = append(primary, atMentionOption{Path: fmt.Sprintf("p-%02d", i)})
-	}
-	secondary = []atMentionOption{{Path: "tail-0"}, {Path: "tail-1"}}
-	got = mergeAtMentionOptions(primary, secondary, "p")
-	if len(got) != 50 {
-		t.Fatalf("len(mergeAtMentionOptions()) = %d, want 50", len(got))
-	}
-	if got[49].Path != "tail-0" {
-		t.Fatalf("mergeAtMentionOptions()[49] = %q, want %q", got[49].Path, "tail-0")
-	}
-
-	primary = []atMentionOption{{Path: "amber-vault/a-00.txt"}, {Path: "brook/amber-note.txt"}}
-	secondary = []atMentionOption{{Path: "amber-map.json"}, {Path: "AtlasGuide.txt"}}
-	got = mergeAtMentionOptions(primary, secondary, "A")
-	want = []atMentionOption{{Path: "AtlasGuide.txt"}, {Path: "amber-vault/a-00.txt"}, {Path: "brook/amber-note.txt"}, {Path: "amber-map.json"}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("case-sensitive mergeAtMentionOptions() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionOptionsMissingFromIndex(t *testing.T) {
-	options := []atMentionOption{{Path: "main.go"}, {Path: "Makefile"}, {Path: "docs/"}}
-	files := []string{"main.go", "misc.md"}
-	got := atMentionOptionsMissingFromIndex(options, files)
-	want := []atMentionOption{{Path: "Makefile"}, {Path: "docs/"}}
-	if !slices.Equal(got, want) {
-		t.Fatalf("atMentionOptionsMissingFromIndex() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionFuzzyMatchesMultiStepPath(t *testing.T) {
-	query := "docs/file.md"
-	matches := atMentionFuzzyMatchesNarrowable([]string{
-		"docs/architecture/file-mentions.md",
-		"docs/other-file.md",
-		"internal/tui/filecompletion.go",
-	}, nil, query, nil)
-	if len(matches) == 0 {
-		t.Fatal("atMentionFuzzyMatchesNarrowable() returned no matches")
-	}
-	if got := matches[0].Path; got != "docs/architecture/file-mentions.md" {
-		t.Fatalf("top fuzzy match = %q, want %q", got, "docs/architecture/file-mentions.md")
-	}
-}
-
-func TestAtMentionFuzzyMatchesKeepsLowScoreMatches(t *testing.T) {
-	matches := atMentionFuzzyMatchesNarrowable([]string{
-		"reports/stage1_stage2_design_doc.md",
-		"docs/other-file.md",
-	}, nil, "s1s2doc", nil)
-	if len(matches) != 1 {
-		t.Fatalf("len(matches) = %d, want 1", len(matches))
-	}
-	if got := matches[0].Path; got != "reports/stage1_stage2_design_doc.md" {
-		t.Fatalf("top fuzzy match = %q, want %q", got, "reports/stage1_stage2_design_doc.md")
-	}
-}
-
-func TestAtMentionFuzzyMatchesPreferShallowerPaths(t *testing.T) {
-	files := make([]string, 0, 62)
-	for i := range 60 {
-		files = append(files, fmt.Sprintf("nebula/ring/%02d/AtlasGuide.txt", i))
-	}
-	files = append(files, "orbit/AtlasGuide.txt", "AtlasGuide.txt")
-
-	matches := atMentionFuzzyMatchesNarrowable(files, nil, "A", nil)
-
-	if len(matches) != 50 {
-		t.Fatalf("len(matches) = %d, want capped result list", len(matches))
-	}
-	if got := matches[0].Path; got != "AtlasGuide.txt" {
-		t.Fatalf("top fuzzy match = %q, want current-folder AtlasGuide.txt", got)
-	}
-	if got := matches[1].Path; got != "orbit/AtlasGuide.txt" {
-		t.Fatalf("second fuzzy match = %q, want one-level orbit/AtlasGuide.txt", got)
-	}
-	for _, match := range matches {
-		if match.Path == "nebula/ring/59/AtlasGuide.txt" {
-			t.Fatalf("deep unrelated path survived top-50 cap: %#v", match)
-		}
-	}
-}
-
-func TestAtMentionFuzzyMatchesHidesHiddenPathsUntilQueryIncludesDotSegment(t *testing.T) {
-	files := []string{
-		".cursor/rules.md",
-		".opencode/config.json",
-		"docs/guide.md",
-		"src/main.go",
-	}
-
-	got := atMentionFuzzyMatchesNarrowable(files, nil, "", nil)
-	if len(got) != 2 {
-		t.Fatalf("len(matches) = %d, want 2 visible non-hidden matches", len(got))
-	}
-	if got[0].Path != "docs/guide.md" || got[1].Path != "src/main.go" {
-		t.Fatalf("bare @ matches = %#v, want only non-hidden paths", got)
-	}
-
-	got = atMentionFuzzyMatchesNarrowable(files, nil, ".c", nil)
-	if len(got) == 0 {
-		t.Fatal("dot-prefixed query returned no hidden matches")
-	}
-	if got[0].Path != ".cursor/rules.md" {
-		t.Fatalf("dot-prefixed top match = %q, want %q", got[0].Path, ".cursor/rules.md")
-	}
-}
-
-func TestAtMentionPathMatchesHideHiddenEntriesUntilPrefixIncludesDot(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, ".env"), "secret")
-	mustWriteFile(t, filepath.Join(wd, ".cursor", "rules.md"), "rules")
-	mustWriteFile(t, filepath.Join(wd, "docs", "guide.md"), "guide")
-
-	got := atMentionPathMatches(".", wd)
-	if len(got) == 0 {
-		t.Fatal(". returned no hidden matches")
-	}
-	if got[0].Path != ".cursor/" || !got[0].IsDir {
-		t.Fatalf(". first match = %#v, want .cursor/", got)
-	}
-
-	got = atMentionPathMatches("./", wd)
-	if len(got) != 1 {
-		t.Fatalf("len(matches) = %d, want 1 visible entry", len(got))
-	}
-	if got[0].Path != "./docs/" || !got[0].IsDir {
-		t.Fatalf("./ matches = %#v, want only ./docs/", got)
-	}
-
-	got = atMentionPathMatches("./.", wd)
-	if len(got) == 0 {
-		t.Fatal("./. returned no hidden matches")
-	}
-	if got[0].Path != "./.cursor/" || !got[0].IsDir {
-		t.Fatalf("./. first match = %#v, want ./.cursor/", got)
-	}
-
-	got = atMentionPathMatches("..", wd)
-	if len(got) != 1 || got[0].Path != "../" || !got[0].IsDir {
-		t.Fatalf(".. matches = %#v, want only ../", got)
-	}
-}
-
 func TestRefreshAtMentionListFindsLowScoreFuzzyMatch(t *testing.T) {
 	m := NewModel(nil)
 	m.atMentionLoaded = true
@@ -996,7 +565,7 @@ func TestRefreshAtMentionListFindsLowScoreFuzzyMatch(t *testing.T) {
 	if !ok {
 		t.Fatal("SelectedItem() ok = false, want true")
 	}
-	match, _ := item.Value.(atMentionOption)
+	match, _ := item.Value.(filecompletion.Option)
 	if got := match.Path; got != "reports/stage1_stage2_design_doc.md" {
 		t.Fatalf("selected match = %q, want %q", got, "reports/stage1_stage2_design_doc.md")
 	}
@@ -1110,9 +679,9 @@ func TestInsertAtMentionSelectionDoesNotClearInlinePastes(t *testing.T) {
 	// Convert byte index to rune col.
 	m.atMentionTriggerCol = len([]rune(s[:atIdx+1]))
 	m.atMentionQuery = "do"
-	m.atMentionList = NewOverlayList([]OverlayListItem{{
+	m.atMentionList = overlaylist.New([]overlaylist.Item{{
 		Label: "docs/ARCHITECTURE.md",
-		Value: atMentionOption{Path: "docs/ARCHITECTURE.md", IsDir: false},
+		Value: filecompletion.Option{Path: "docs/ARCHITECTURE.md", IsDir: false},
 	}}, 10)
 
 	m.insertAtMentionSelection()
@@ -1130,165 +699,6 @@ func TestInsertAtMentionSelectionDoesNotClearInlinePastes(t *testing.T) {
 	}
 	if !foundLargePaste {
 		t.Fatalf("expected a large paste text part with DisplayText, got parts=%#v", parts)
-	}
-}
-
-func TestAtMentionFileRefsHandlesEscapedSpacesAndDedupes(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "dir with space", "a file.txt"), "content")
-	mustWriteFile(t, filepath.Join(wd, "plain.txt"), "plain")
-
-	text := strings.Join([]string{
-		`See @dir\ with\ space/a\ file.txt,`,
-		`again @dir\ with\ space/a\ file.txt!`,
-		`and @plain.txt)`}, " ")
-
-	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{text}, wd), wd))
-	want := []string{`dir with space/a file.txt`, `plain.txt`}
-	if !slices.Equal(got, want) {
-		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionFileRefsParsesLineRanges(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "main.go"), "content")
-
-	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"review @main.go:12 and @main.go:20-25 and @main.go:bad"}, wd), wd))
-	want := []string{"main.go:12", "main.go:20-25", "main.go"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionFileRefsOnlyTreatsNumericColonSuffixAsLineRange(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "main.go"), "content")
-
-	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"review @main.go:abc"}, wd), wd))
-	want := []string{"main.go"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionFileRefsPrefersColonFilenameOverLineRange(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "note:12"), "colon")
-	mustWriteFile(t, filepath.Join(wd, "note"), "plain")
-
-	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"review @note:12"}, wd), wd))
-	want := []string{"note:12"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionFileRefsDedupesByPathAndLineRange(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "main.go"), "content")
-
-	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"@main.go:1 @./main.go:1 @main.go:2 @main.go"}, wd), wd))
-	want := []string{"main.go:1", "main.go:2", "main.go"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionFileRefsFallsBackToLongestProseDelimitedPath(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "AGENTS.md"), "agents")
-	mustWriteFile(t, filepath.Join(wd, "docs", "requirements,first-draft.md"), "doc")
-	mustWriteFile(t, filepath.Join(wd, "docs", "a"), "short")
-	mustWriteFile(t, filepath.Join(wd, "docs", "a,b.md"), "long")
-
-	text := strings.Join([]string{
-		`Review @AGENTS.md, then summarize.`,
-		`Also read @docs/requirements,first-draft.md, then summarize`,
-		`Finally inspect @docs/a,b.md, then analyze`,
-	}, "\n")
-
-	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{text}, wd), wd))
-	want := []string{`AGENTS.md`, `docs/requirements,first-draft.md`, `docs/a,b.md`}
-	if !slices.Equal(got, want) {
-		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionFileRefsPrefersFullCandidateBeforeProseDelimiterFallback(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "docs", "note,analysis"), "full")
-	mustWriteFile(t, filepath.Join(wd, "docs", "note"), "short")
-
-	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{`Review @docs/note,analysis`}, wd), wd))
-	want := []string{`docs/note,analysis`}
-	if !slices.Equal(got, want) {
-		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
-	}
-}
-
-func TestAtMentionFileRefsPunctuationBoundaries(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "notes.md"), "content")
-
-	// Various punctuation marks should all be recognized as valid boundaries
-	cases := []string{
-		"path: @notes.md",       // ASCII colon
-		"文件：@notes.md",          // Full-width colon
-		"另见、@notes.md",          // Full-width comma
-		"详情。@notes.md",          // Full-width period
-		"see, @notes.md",        // ASCII comma
-		"note. @notes.md",       // ASCII period
-		"ref; @notes.md",        // ASCII semicolon
-		"(@notes.md)",           // Parentheses
-		"[@notes.md]",           // Brackets
-		"{@notes.md}",           // Braces
-		"\"@notes.md\"",         // Quotes
-		"'@notes.md'",           // Single quotes
-		"\u201c@notes.md\u201d", // Full-width quotes (as escaped runes)
-		"see @notes.md",         // Space (existing)
-		"\n@notes.md",           // Newline (existing)
-		"\t@notes.md",           // Tab (existing)
-	}
-	for _, text := range cases {
-		got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{text}, wd), wd))
-		want := []string{"notes.md"}
-		if !slices.Equal(got, want) {
-			t.Errorf("displayAtMentionFileRefs(%q) = %#v, want %#v", text, got, want)
-		}
-	}
-}
-
-func TestAtMentionFileRefsRejectsIdentifierPrefix(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "something.txt"), "content")
-	mustWriteFile(t, filepath.Join(wd, "file.md"), "content")
-
-	// @mentions that are part of identifiers should be rejected
-	// even when files with those names exist
-	cases := []string{
-		"user@something.txt",   // email-like
-		"package@file.md",      // version-like
-		"my_var@something.txt", // identifier with underscore
-		"func123@file.md",      // identifier with digits
-	}
-	for _, text := range cases {
-		got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{text}, wd), wd))
-		if len(got) > 0 {
-			t.Errorf("displayAtMentionFileRefs(%q) = %#v, want empty (should reject identifier prefix)", text, got)
-		}
-	}
-}
-
-func TestAtMentionFileRefsSkipsRemovedComposerReference(t *testing.T) {
-	wd := t.TempDir()
-	mustWriteFile(t, filepath.Join(wd, "keep.txt"), "keep")
-	mustWriteFile(t, filepath.Join(wd, "drop.txt"), "drop")
-
-	got := displayAtMentionFileRefs(dedupeAtMentionFileRefs(atMentionStructuredFileRefs([]string{"keep @keep.txt only"}, wd), wd))
-	want := []string{"keep.txt"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("displayAtMentionFileRefs() = %#v, want %#v", got, want)
 	}
 }
 
@@ -1319,9 +729,9 @@ func TestInsertAtMentionSelectionReturnsDirectoryRefreshCommand(t *testing.T) {
 	m.atMentionLine = 0
 	m.atMentionTriggerCol = 1
 	m.atMentionQuery = "docs"
-	m.atMentionList = NewOverlayList([]OverlayListItem{{
+	m.atMentionList = overlaylist.New([]overlaylist.Item{{
 		Label: "docs/",
-		Value: atMentionOption{Path: "docs/", IsDir: true},
+		Value: filecompletion.Option{Path: "docs/", IsDir: true},
 	}}, 10)
 
 	cmd := m.insertAtMentionSelection()
@@ -1345,9 +755,9 @@ func TestInsertAtMentionSelectionPreservesLineRangeSuffix(t *testing.T) {
 	m.atMentionLine = 0
 	m.atMentionTriggerCol = 1
 	m.atMentionQuery = "ma:12"
-	m.atMentionList = NewOverlayList([]OverlayListItem{{
+	m.atMentionList = overlaylist.New([]overlaylist.Item{{
 		Label: "main.go",
-		Value: atMentionOption{Path: "main.go", IsDir: false},
+		Value: filecompletion.Option{Path: "main.go", IsDir: false},
 	}}, 10)
 
 	m.insertAtMentionSelection()
@@ -1373,9 +783,9 @@ func TestInsertAtMentionSelectionKeepsColonFilenameReplacement(t *testing.T) {
 	m.atMentionLine = 0
 	m.atMentionTriggerCol = 1
 	m.atMentionQuery = "note:12"
-	m.atMentionList = NewOverlayList([]OverlayListItem{{
+	m.atMentionList = overlaylist.New([]overlaylist.Item{{
 		Label: "note:12",
-		Value: atMentionOption{Path: "note:12", IsDir: false},
+		Value: filecompletion.Option{Path: "note:12", IsDir: false},
 	}}, 10)
 
 	m.insertAtMentionSelection()
@@ -1397,9 +807,9 @@ func TestInsertAtMentionSelectionKeepsDirectoryBrowsingOpen(t *testing.T) {
 	m.atMentionLine = 0
 	m.atMentionTriggerCol = 1
 	m.atMentionQuery = "~/s"
-	m.atMentionList = NewOverlayList([]OverlayListItem{{
+	m.atMentionList = overlaylist.New([]overlaylist.Item{{
 		Label: "~/src/",
-		Value: atMentionOption{Path: "~/src/", IsDir: true},
+		Value: filecompletion.Option{Path: "~/src/", IsDir: true},
 	}}, 10)
 
 	m.insertAtMentionSelection()
@@ -1422,57 +832,5 @@ func mustWriteFile(t *testing.T, path, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile(%q): %v", path, err)
-	}
-}
-
-// Typing a query character by character must produce exactly the same
-// completion list as scoring every query against the full index: the narrowing
-// cache only skips files the previous query's full match set already excludes,
-// which is sound because subsequence-based scoring shrinks the match set
-// monotonically under query extension.
-func TestAtMentionFuzzyNarrowingMatchesFullScan(t *testing.T) {
-	files := []string{
-		"cmd/chord/headless.go",
-		"internal/agent/main_loop.go",
-		"internal/agent/main_handlers_tools.go",
-		"internal/ctxmgr/manager.go",
-		"internal/llm/responses_convert.go",
-		"internal/tui/filecompletion_paths.go",
-		"internal/tui/filecompletion_ui.go",
-		"internal/tools/truncate.go",
-		"docs/usage.md",
-		"README.md",
-	}
-	lower := buildAtMentionLowerIndex(files)
-	queries := []string{"m", "ma", "mai", "main", "main_", "main_lo", "main_loop", "f", "fi", "file", "filec", "filecompletion", "resp", "respo", "responses", "u", "us", "usa", "usage"}
-
-	var narrow atMentionNarrowCache
-	for _, query := range queries {
-		full := atMentionFuzzyMatchesNarrowable(files, lower, query, nil)
-		narrowed := atMentionFuzzyMatchesNarrowable(files, lower, query, &narrow)
-		if len(full) != len(narrowed) {
-			t.Fatalf("query %q: full scan returned %d matches, narrowed returned %d", query, len(full), len(narrowed))
-		}
-		for i := range full {
-			if full[i].Path != narrowed[i].Path {
-				t.Fatalf("query %q: match %d = %q, want %q", query, i, narrowed[i].Path, full[i].Path)
-			}
-		}
-	}
-
-	// A query that deletes a character (prefix moved backwards) must not reuse
-	// the cached candidate set: widen the query and compare against full scans.
-	var restart atMentionNarrowCache
-	for _, query := range []string{"main_loop", "main_lo", "main", "ma"} {
-		full := atMentionFuzzyMatchesNarrowable(files, lower, query, nil)
-		narrowed := atMentionFuzzyMatchesNarrowable(files, lower, query, &restart)
-		if len(full) != len(narrowed) {
-			t.Fatalf("shrinking query %q: full scan returned %d matches, narrowed returned %d", query, len(full), len(narrowed))
-		}
-		for i := range full {
-			if full[i].Path != narrowed[i].Path {
-				t.Fatalf("shrinking query %q: match %d = %q, want %q", query, i, narrowed[i].Path, full[i].Path)
-			}
-		}
 	}
 }

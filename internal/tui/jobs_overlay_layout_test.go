@@ -64,7 +64,7 @@ func TestJobsOverlayLayoutMouseMatchesDrawnRows(t *testing.T) {
 			m.handleJobsOverlayKey(tea.KeyPressMsg(tea.Key{Text: "G", Code: 'G'}))
 			dialog := m.renderJobsOverlayDialog()
 			rect := m.overlayRect(dialog)
-			x := rect.Min.X + DirectoryBorderStyle.GetBorderLeftSize() + DirectoryBorderStyle.GetPaddingLeft() + m.jobsOverlayInnerWidth() - 1
+			x := rect.Min.X + currentStyles.DirectoryBorderStyle.GetBorderLeftSize() + currentStyles.DirectoryBorderStyle.GetPaddingLeft() + m.jobsOverlayInnerWidth() - 1
 			for row, line := range strings.Split(ansi.Strip(dialog), "\n") {
 				want := ""
 				for i := range 12 {

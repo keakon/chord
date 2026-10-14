@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // overlayLayout uses one height budget for the frame, scrollable content and
@@ -26,7 +28,7 @@ func layoutOverlay(cfg OverlayConfig, area image.Rectangle) overlayLayout {
 		layout.hintLines = wrapHintLines(cfg.Hint, width)
 	}
 	if cfg.Footer != "" {
-		layout.footerLines = tuiHardwrap(strings.TrimSuffix(cfg.Footer, "\n"), width)
+		layout.footerLines = terminaltext.Hardwrap(strings.TrimSuffix(cfg.Footer, "\n"), width)
 	}
 	height := overlayHeight(area)
 	titleRows := 0
@@ -38,7 +40,7 @@ func layoutOverlay(cfg OverlayConfig, area image.Rectangle) overlayLayout {
 	if len(layout.hintLines) > 0 {
 		hintRows = 1
 	}
-	available := height - DirectoryBorderStyle.GetVerticalFrameSize() - titleRows - len(layout.footerLines)
+	available := height - currentStyles.DirectoryBorderStyle.GetVerticalFrameSize() - titleRows - len(layout.footerLines)
 	minContent = min(minContent, max(available-hintRows, 1))
 	gaps := titleRows
 	if hintRows > 0 {

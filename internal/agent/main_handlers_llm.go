@@ -19,6 +19,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -77,7 +78,7 @@ func sanitizeResponseZeroWidth(resp *message.Response) map[string]map[rune]int {
 	}
 	byField := make(map[string]map[rune]int)
 	strip := func(field, original string) string {
-		cleaned := tools.StripZeroWidthFormat(original)
+		cleaned := textclean.StripZeroWidthFormat(original)
 		if cleaned != original {
 			mergeInvisibleCounts(byField, field, tools.CountStrippedInvisible(original, cleaned))
 		}
@@ -92,7 +93,7 @@ func sanitizeResponseZeroWidth(resp *message.Response) map[string]map[rune]int {
 
 	for i := range resp.ThinkingBlocks {
 		block := &resp.ThinkingBlocks[i]
-		cleaned := tools.StripZeroWidthFormat(block.Thinking)
+		cleaned := textclean.StripZeroWidthFormat(block.Thinking)
 		if cleaned != block.Thinking {
 			mergeInvisibleCounts(byField, "thinking", tools.CountStrippedInvisible(block.Thinking, cleaned))
 			block.Thinking = cleaned
@@ -101,7 +102,7 @@ func sanitizeResponseZeroWidth(resp *message.Response) map[string]map[rune]int {
 	for i := range resp.ToolCalls {
 		call := &resp.ToolCalls[i]
 		originalArgs := string(call.Args)
-		cleanedArgs := tools.StripZeroWidthFormat(originalArgs)
+		cleanedArgs := textclean.StripZeroWidthFormat(originalArgs)
 		if cleanedArgs != originalArgs {
 			mergeInvisibleCounts(byField, "tool_call_args", tools.CountStrippedInvisible(originalArgs, cleanedArgs))
 			call.Args = []byte(cleanedArgs)
@@ -133,7 +134,7 @@ func countOrphanVariationSelectors(resp *message.Response) map[string]map[rune]i
 		// into one field, so a second block's orphans must add to the first
 		// rather than replace them (same invariant sanitizeResponseZeroWidth
 		// keeps for its strip counts).
-		if c := tools.CountStrippedInvisible(s, tools.StripOrphanVariationSelectors(s)); len(c) > 0 {
+		if c := tools.CountStrippedInvisible(s, textclean.StripOrphanVariationSelectors(s)); len(c) > 0 {
 			mergeInvisibleCounts(byField, field, c)
 		}
 	}

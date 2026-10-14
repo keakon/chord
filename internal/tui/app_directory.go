@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/keakon/lipgloss/v2"
+
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 // renderDirectory produces the Ctrl+T message directory within the main viewport area.
@@ -18,7 +20,7 @@ func (m Model) renderDirectory() string {
 	}
 	if len(m.dirEntries) == 0 {
 		centred := lipgloss.Place(width, height,
-			lipgloss.Center, lipgloss.Center, DimStyle.Render("(no messages)"))
+			lipgloss.Center, lipgloss.Center, currentStyles.DimStyle.Render("(no messages)"))
 		return centred
 	}
 
@@ -31,10 +33,10 @@ func (m Model) renderDirectory() string {
 		return ""
 	}
 	m.dirList.SetMaxVisible(m.directoryMaxVisible())
-	content := m.dirList.Render(innerWidth)
-	title := DialogTitleStyle.Render("Message Directory")
+	content := m.dirList.Render(innerWidth, currentStyles)
+	title := currentStyles.DialogTitleStyle.Render("Message Directory")
 	body := preserveDialogBackground(title + "\n" + content)
-	box := DirectoryBorderStyle.Width(maxWidth).Render(body)
+	box := currentStyles.DirectoryBorderStyle.Width(maxWidth).Render(body)
 
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, box)
 }
@@ -44,10 +46,10 @@ func (m *Model) directoryMaxVisible() int {
 	return maxVisible
 }
 
-func directoryItems(entries []DirectoryEntry) []OverlayListItem {
-	items := make([]OverlayListItem, 0, len(entries))
+func directoryItems(entries []DirectoryEntry) []overlaylist.Item {
+	items := make([]overlaylist.Item, 0, len(entries))
 	for i, entry := range entries {
-		items = append(items, OverlayListItem{
+		items = append(items, overlaylist.Item{
 			ID:    fmt.Sprintf("%d", entry.BlockIndex),
 			Label: fmt.Sprintf("%d. %s", i+1, entry.Summary),
 		})

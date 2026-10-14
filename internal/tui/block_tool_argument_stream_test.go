@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // Compare every byte prefix with the existing tolerant display parser, including
@@ -196,7 +197,7 @@ func TestStreamingEditPreviewWaitsForCompleteArguments(t *testing.T) {
 	if !b.editArgsIncomplete() {
 		t.Fatal("incomplete edit considered readable")
 	}
-	if got := stripANSI(strings.Join(b.Render(120, ""), "\n")); strings.Contains(got, "replacement") {
+	if got := terminaltext.StripANSI(strings.Join(b.Render(120, ""), "\n")); strings.Contains(got, "replacement") {
 		t.Fatal("unfinished edit preview rendered")
 	}
 	b.RawArgs = raw
@@ -206,7 +207,7 @@ func TestStreamingEditPreviewWaitsForCompleteArguments(t *testing.T) {
 	if b.editArgsIncomplete() {
 		t.Fatal("complete edit preview suppressed")
 	}
-	if got := stripANSI(strings.Join(b.Render(120, ""), "\n")); !strings.Contains(got, "replacement") {
+	if got := terminaltext.StripANSI(strings.Join(b.Render(120, ""), "\n")); !strings.Contains(got, "replacement") {
 		t.Fatalf("complete edit preview missing: %s", got)
 	}
 }

@@ -8,12 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/textdiff"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/syntax"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestEditDiffHeaderRecoversPathFromInvalidArgs(t *testing.T) {
@@ -46,7 +48,7 @@ func TestEditToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 	}
 
 	rendered := strings.Join(block.Render(100, ""), "\n")
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "edit") || !strings.Contains(plain, "src/demo.go") {
 		t.Fatalf("expected edit header to show path, got:\n%s", plain)
 	}
@@ -59,7 +61,7 @@ func TestEditToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 }
 
 func TestApplyPatchToolCardRendersNamePathAndHighlightedPreview(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args, _ := json.Marshal(map[string]string{"patch": strings.Join([]string{
 		"*** Begin Patch",
 		"*** Update File: src/demo.go",
@@ -77,7 +79,7 @@ func TestApplyPatchToolCardRendersNamePathAndHighlightedPreview(t *testing.T) {
 	}
 
 	lines := block.Render(100, "●")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "apply_patch src/demo.go") {
 		t.Fatalf("expected apply_patch header with path, got:\n%s", plain)
 	}
@@ -89,7 +91,7 @@ func TestApplyPatchToolCardRendersNamePathAndHighlightedPreview(t *testing.T) {
 	}
 	added := renderedLineContaining(t, lines, "func main")
 	assertRenderedTextForeground(t, added, "func", renderedCellsForText(t, syntax.New("sample.go", "", "").Line("func sample() {}", ""), "func")[0].Style.Fg)
-	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
+	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentStyles.Palette.DiffAddLineBg))
 }
 
 func TestApplyPatchToolCardSummarizesMultiplePaths(t *testing.T) {
@@ -106,7 +108,7 @@ func TestApplyPatchToolCardSummarizesMultiplePaths(t *testing.T) {
 		"*** End Patch",
 	}, "\n")})
 	block := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch, Content: applyPatchToolDisplayArgs(string(args)), RawArgs: string(args)}
-	plain := stripANSI(strings.Join(block.Render(120, "●"), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, "●"), "\n"))
 	for _, want := range []string{
 		"apply_patch src/old.go → src/new.go +2 files",
 		"↳ Targets:",
@@ -153,7 +155,7 @@ func TestApplyPatchToolCardGroupsMultiFileDiffByFile(t *testing.T) {
 		}, "\n"),
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if strings.Contains(plain, "↳ Targets:") {
 		t.Fatalf("expected per-file diff sections instead of a detached file list, got:\n%s", plain)
 	}
@@ -205,7 +207,7 @@ func TestApplyPatchToolCardSummarizesDeleteAndKeepsMoveUpdateDiff(t *testing.T) 
 		}, "\n"),
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{
 		"↳ R src/old.go → src/new.go",
 		"↳ A docs/new.md",
@@ -232,7 +234,7 @@ func TestApplyPatchToolCardHidesSingleDeleteDiff(t *testing.T) {
 		Diff:          "--- tmp/old.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-obsolete\n-secret\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "apply_patch D tmp/old.txt") {
 		t.Fatalf("expected delete summary in header, got:\n%s", plain)
 	}
@@ -252,7 +254,7 @@ func TestApplyPatchToolCardShowsNoChangesWithoutPatchPreview(t *testing.T) {
 		ResultContent: "Applied patch:\nNo net file changes",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "No changes") {
 		t.Fatalf("expected no-changes indicator, got:\n%s", plain)
 	}
@@ -271,7 +273,7 @@ func TestApplyPatchToolCardHidesPureMoveDiff(t *testing.T) {
 		Diff:          "--- src/old.go\n+++ src/new.go\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "apply_patch src/old.go → src/new.go") {
 		t.Fatalf("expected move path summary in header, got:\n%s", plain)
 	}
@@ -289,7 +291,7 @@ func TestApplyPatchToolCardKeepsMoveWithUpdateDiff(t *testing.T) {
 		Diff: "--- src/old.go\n+++ src/new.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "apply_patch src/old.go → src/new.go") ||
 		!strings.Contains(plain, "-old") || !strings.Contains(plain, "+new") {
 		t.Fatalf("expected move path and content update diff, got:\n%s", plain)
@@ -299,14 +301,14 @@ func TestApplyPatchToolCardKeepsMoveWithUpdateDiff(t *testing.T) {
 func TestLegacyPatchToolCardUsesApplyPatchDisplay(t *testing.T) {
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
 	block := &Block{ID: 1, Type: BlockToolCall, ToolName: "patch", Content: args, RawArgs: args}
-	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if !strings.Contains(plain, "apply_patch src/demo.go") || strings.Contains(plain, " patch ") {
 		t.Fatalf("expected legacy patch card to use apply_patch display, got:\n%s", plain)
 	}
 }
 
 func TestApplyPatchErrorCardKeepsHighlightedPatchPreview(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-func old() {}\n+func main() {}\n*** End Patch"}`
 	block := &Block{
 		ID:            1,
@@ -319,17 +321,17 @@ func TestApplyPatchErrorCardKeepsHighlightedPatchPreview(t *testing.T) {
 		ResultStatus:  message.ToolStatusError,
 	}
 	lines := block.Render(100, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "apply_patch src/demo.go") || !strings.Contains(plain, "↳ Requested patch:") || !strings.Contains(plain, "+func main() {}") || !strings.Contains(plain, "hunk not found") {
 		t.Fatalf("expected error card to preserve path, patch, and error, got:\n%s", plain)
 	}
 	hunkHeader := renderedLineContaining(t, lines, "@@")
-	if !strings.Contains(stripANSI(hunkHeader), "─") {
-		t.Fatalf("expected failed patch preview hunk header to include an inline separator, got %q", stripANSI(hunkHeader))
+	if !strings.Contains(terminaltext.StripANSI(hunkHeader), "─") {
+		t.Fatalf("expected failed patch preview hunk header to include an inline separator, got %q", terminaltext.StripANSI(hunkHeader))
 	}
 	added := renderedLineContaining(t, lines, "func main")
 	assertRenderedTextForeground(t, added, "func", renderedCellsForText(t, syntax.New("sample.go", "", "").Line("func sample() {}", ""), "func")[0].Style.Fg)
-	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
+	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentStyles.Palette.DiffAddLineBg))
 }
 
 func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
@@ -359,7 +361,7 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 		Diff: "--- committed.go\n+++ committed.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	for _, want := range []string{"↳ Applied changes:", "↳ ✓ M committed.go", "✗ failed.go: hunk not found", "+new", "↳ Error:", "Not applied:", "↳ Diagnostics:", "missing field", "informational diagnostic"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected partially applied patch to contain %q, got:\n%s", want, plain)
@@ -373,7 +375,7 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 		}
 	}
 	committedHeader := renderedLineContaining(t, block.Render(80, ""), "↳ ✓ M committed.go")
-	assertRenderedTextForeground(t, committedHeader, "✓", colorOfTheme(currentTheme.InfoPanelSuccessFg))
+	assertRenderedTextForeground(t, committedHeader, "✓", colorOfTheme(currentStyles.Palette.InfoPanelSuccessFg))
 	if strings.Count(plain, "M committed.go") != 1 {
 		t.Fatalf("expected committed target to appear once, got:\n%s", plain)
 	}
@@ -392,9 +394,9 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 		t.Fatalf("expected wrapped failure lines to surface the full tail %q in the rendered card, got:\n%s", longReasonTail, plain)
 	}
 	failureLine := renderedLineContaining(t, block.Render(80, ""), "✗ failed.go: hunk not found")
-	assertRenderedTextForeground(t, failureLine, "✗", colorOfTheme(currentTheme.ErrorFg))
-	if strings.Contains(stripANSI(failureLine), "…") {
-		t.Fatalf("expected long failure line to wrap instead of truncate, got %q", stripANSI(failureLine))
+	assertRenderedTextForeground(t, failureLine, "✗", colorOfTheme(currentStyles.Palette.ErrorFg))
+	if strings.Contains(terminaltext.StripANSI(failureLine), "…") {
+		t.Fatalf("expected long failure line to wrap instead of truncate, got %q", terminaltext.StripANSI(failureLine))
 	}
 	copyContent := toolCallMarkdownContent(block)
 	for _, preserved := range []string{longReasonTail} {
@@ -432,7 +434,7 @@ func TestApplyPatchFullFailureWrapsLongDiagnostic(t *testing.T) {
 
 	for _, width := range []int{80, 120, 160, 200} {
 		t.Run(fmt.Sprintf("width=%d", width), func(t *testing.T) {
-			plain := stripANSI(strings.Join(block.Render(width, ""), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(block.Render(width, ""), "\n"))
 
 			for _, want := range []string{"↳ Error:", "apply_patch failed", "Not applied:"} {
 				if !strings.Contains(plain, want) {
@@ -446,15 +448,15 @@ func TestApplyPatchFullFailureWrapsLongDiagnostic(t *testing.T) {
 			}
 			// No truncation marker on the first wrapped line of the diagnostic.
 			firstWrapped := renderedLineContaining(t, block.Render(width, ""), "hunk not found")
-			if strings.Contains(stripANSI(firstWrapped), "…") {
-				t.Fatalf("expected diagnostic to wrap instead of truncate, got %q", stripANSI(firstWrapped))
+			if strings.Contains(terminaltext.StripANSI(firstWrapped), "…") {
+				t.Fatalf("expected diagnostic to wrap instead of truncate, got %q", terminaltext.StripANSI(firstWrapped))
 			}
 			// The long diagnostic spans multiple wrapped lines at every tested
 			// width (the line is well over any card content budget), proving
 			// wrap occurred instead of single-line truncation.
 			wrappedLines := 0
 			for _, ln := range block.Render(width, "") {
-				p := stripANSI(ln)
+				p := terminaltext.StripANSI(ln)
 				if strings.Contains(p, "hunk not found") || strings.Contains(p, "the file currently") || strings.Contains(p, tail) {
 					wrappedLines++
 				}
@@ -470,7 +472,7 @@ func TestApplyPatchFullFailureWrapsLongDiagnostic(t *testing.T) {
 // not: every diff section is a committed group, so its header carries ✓, and
 // each "Not applied:" entry carries ✗.
 func TestApplyPatchErrorCardMarksCommittedAndFailedFiles(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/first.go\n@@\n-old\n+new\n*** Update File: src/second.go\n@@\n-old\n+new\n*** Update File: src/failed.go\n@@\n-missing\n+replacement\n*** End Patch"}`
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
@@ -490,7 +492,7 @@ func TestApplyPatchErrorCardMarksCommittedAndFailedFiles(t *testing.T) {
 			"--- src/second.go\n+++ src/second.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
 	lines := block.Render(100, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	for _, want := range []string{"↳ ✓ M src/first.go", "↳ ✓ M src/second.go", "✗ src/failed.go: hunk not found (1/1)"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected errored card to contain %q, got:\n%s", want, plain)
@@ -498,16 +500,16 @@ func TestApplyPatchErrorCardMarksCommittedAndFailedFiles(t *testing.T) {
 	}
 	for _, committed := range []string{"↳ ✓ M src/first.go", "↳ ✓ M src/second.go"} {
 		header := renderedLineContaining(t, lines, committed)
-		assertRenderedTextForeground(t, header, "✓", colorOfTheme(currentTheme.InfoPanelSuccessFg))
+		assertRenderedTextForeground(t, header, "✓", colorOfTheme(currentStyles.Palette.InfoPanelSuccessFg))
 	}
 	failed := renderedLineContaining(t, lines, "✗ src/failed.go")
-	assertRenderedTextForeground(t, failed, "✗", colorOfTheme(currentTheme.ErrorFg))
+	assertRenderedTextForeground(t, failed, "✗", colorOfTheme(currentStyles.Palette.ErrorFg))
 }
 
 // Committed groups whose diff is unavailable still have to read as applied, so
 // the "Applied patch:" list in the error body is marked ✓ as well.
 func TestApplyPatchErrorCardMarksAppliedListWithoutDiff(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/first.go\n@@\n-old\n+new\n*** Update File: src/failed.go\n@@\n-missing\n+replacement\n*** End Patch"}`
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
@@ -522,7 +524,7 @@ func TestApplyPatchErrorCardMarksAppliedListWithoutDiff(t *testing.T) {
 			"- src/failed.go: hunk not found (1/1)",
 		}, "\n"),
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	for _, want := range []string{"↳ Applied changes:", "✓ M src/first.go", "✗ src/failed.go: hunk not found (1/1)"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected errored card to contain %q, got:\n%s", want, plain)
@@ -533,7 +535,7 @@ func TestApplyPatchErrorCardMarksAppliedListWithoutDiff(t *testing.T) {
 // A successful card marks no per-file status: everything it shows already
 // landed, so ✓ on each section header would only add noise.
 func TestSuccessfulApplyPatchCardOmitsPerFileStatusMarks(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/first.go\n@@\n-old\n+new\n*** Update File: src/second.go\n@@\n-old\n+new\n*** End Patch"}`
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
@@ -543,7 +545,7 @@ func TestSuccessfulApplyPatchCardOmitsPerFileStatusMarks(t *testing.T) {
 		Diff: "--- src/first.go\n+++ src/first.go\n@@ -1,1 +1,1 @@\n-old\n+new\n" +
 			"--- src/second.go\n+++ src/second.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "↳ M src/first.go") {
 		t.Fatalf("expected the grouped success card to render per-file sections, got:\n%s", plain)
 	}
@@ -579,7 +581,7 @@ func TestEditPatchPreviewLinesFullContent(t *testing.T) {
 }
 
 func TestApplyPatchPreviewTruncatesLongLinesWithoutWrapping(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	longLine := `const message = "` + strings.Repeat("x", 100) + `tail"`
 	args, _ := json.Marshal(map[string]string{"patch": strings.Join([]string{
 		"*** Begin Patch",
@@ -594,19 +596,19 @@ func TestApplyPatchPreviewTruncatesLongLinesWithoutWrapping(t *testing.T) {
 	}
 
 	lines := block.Render(60, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if strings.Count(plain, "const message") != 1 || strings.Contains(plain, "tail") {
 		t.Fatalf("expected long patch line to be truncated once without a continuation, got:\n%s", plain)
 	}
 	line := renderedLineContaining(t, lines, "const message")
-	if !strings.Contains(stripANSI(line), "…") {
-		t.Fatalf("expected truncated patch line to show an ellipsis, got %q", stripANSI(line))
+	if !strings.Contains(terminaltext.StripANSI(line), "…") {
+		t.Fatalf("expected truncated patch line to show an ellipsis, got %q", terminaltext.StripANSI(line))
 	}
-	assertRenderedTextBackground(t, line, "…", colorOfTheme(currentTheme.DiffAddLineBg))
+	assertRenderedTextBackground(t, line, "…", colorOfTheme(currentStyles.Palette.DiffAddLineBg))
 }
 
 func TestEditAndApplyPatchToolCardsKeepAddedAndDeletedLineBackgrounds(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args, _ := json.Marshal(map[string]string{"path": "src/demo.go"})
 	diff := "@@ -1,1 +1,1 @@\n-package old\n+package main\n"
 	for _, toolName := range []string{tools.NameEdit, tools.NameApplyPatch} {
@@ -615,14 +617,14 @@ func TestEditAndApplyPatchToolCardsKeepAddedAndDeletedLineBackgrounds(t *testing
 			lines := block.Render(80, "")
 			deleted := renderedLineContaining(t, lines, "package old")
 			added := renderedLineContaining(t, lines, "package main")
-			assertRenderedTextBackground(t, deleted, "package", colorOfTheme(currentTheme.DiffDelLineBg))
-			assertRenderedTextBackground(t, added, "package", colorOfTheme(currentTheme.DiffAddLineBg))
+			assertRenderedTextBackground(t, deleted, "package", colorOfTheme(currentStyles.Palette.DiffDelLineBg))
+			assertRenderedTextBackground(t, added, "package", colorOfTheme(currentStyles.Palette.DiffAddLineBg))
 		})
 	}
 }
 
 func TestEditAndApplyPatchToolCardsHighlightContextLines(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args, _ := json.Marshal(map[string]string{"path": "src/demo.go"})
 	diff := "@@ -1,5 +1,6 @@\n func demo() error {\n+\tvalue := 1\n if value != 0 {\n\treturn fmt.Errorf(\"bad: %d\", value)\n }\n return nil\n"
 	wantKeyword := renderedCellsForText(t, syntax.New("sample.go", "", "").Line("func sample() {}", ""), "func")[0].Style.Fg
@@ -631,7 +633,7 @@ func TestEditAndApplyPatchToolCardsHighlightContextLines(t *testing.T) {
 			block := &Block{ID: 1, Type: BlockToolCall, ToolName: toolName, Content: string(args), Diff: diff, ResultDone: true}
 			contextLine := renderedLineContaining(t, block.Render(100, ""), "if value")
 			assertRenderedTextForeground(t, contextLine, "if", wantKeyword)
-			assertRenderedTextBackground(t, contextLine, "if", colorOfTheme(currentTheme.ToolCallBg))
+			assertRenderedTextBackground(t, contextLine, "if", colorOfTheme(currentStyles.Palette.ToolCallBg))
 		})
 	}
 }
@@ -653,7 +655,7 @@ func TestEditToolCardRendersDiagnosticsSummaryWithDiff(t *testing.T) {
 		Diff: "--- internal/config/config_project_test.go\n+++ internal/config/config_project_test.go\n@@ -1 +1 @@\n-old\n+new\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "↳ Diagnostics:") {
 		t.Fatalf("expected diagnostics section to render with edit diff, got:\n%s", plain)
 	}
@@ -676,27 +678,27 @@ func TestEditLiveArgsWithoutCompletePathDoNotRenderDot(t *testing.T) {
 		ToolName: tools.NameEdit,
 		Content:  displayArgs,
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(plain, "edit .") {
 		t.Fatalf("expected incomplete Edit args not to render dot path, got:\n%s", plain)
 	}
 }
 
 func TestLexerForFilePathKeepsBackgroundForUnknownExtension(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	backgrounds := []struct {
 		name  string
 		value string
 	}{
-		{name: "tool", value: currentTheme.ToolCallBg},
-		{name: "diff add", value: currentTheme.DiffAddLineBg},
-		{name: "diff delete", value: currentTheme.DiffDelLineBg},
+		{name: "tool", value: currentStyles.Palette.ToolCallBg},
+		{name: "diff add", value: currentStyles.Palette.DiffAddLineBg},
+		{name: "diff delete", value: currentStyles.Palette.DiffDelLineBg},
 	}
 	for _, background := range backgrounds {
 		t.Run(background.name, func(t *testing.T) {
 			hl := syntax.New("notes.unknownext", "package tools\n", "")
 			rendered := hl.Line("package tools", background.value)
-			if plain := stripANSI(rendered); plain != "package tools" {
+			if plain := terminaltext.StripANSI(rendered); plain != "package tools" {
 				t.Fatalf("expected unknown extension background fallback to preserve text, got %q", plain)
 			}
 			wantBg := syntax.ColorSequence(lipgloss.Color(background.value), false)
@@ -707,7 +709,7 @@ func TestLexerForFilePathKeepsBackgroundForUnknownExtension(t *testing.T) {
 				t.Fatalf("expected unknown extension fallback to keep background %q, got %q", wantBg, rendered)
 			}
 			spaceRendered := hl.Line("    ", background.value)
-			if plain := stripANSI(spaceRendered); plain != "    " {
+			if plain := terminaltext.StripANSI(spaceRendered); plain != "    " {
 				t.Fatalf("expected whitespace-only fallback to preserve spaces, got %q", plain)
 			}
 			if !strings.Contains(spaceRendered, wantBg) {
@@ -722,7 +724,7 @@ func TestRenderInlineDiffLineKeepsSingleTokenInsertionSingleLine(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line inline diff, got %d lines: %#v", len(lines), lines)
 	}
-	plain := stripANSI(lines[0])
+	plain := terminaltext.StripANSI(lines[0])
 	if !strings.HasPrefix(plain, "+") {
 		t.Fatalf("expected insertion line, got %q", plain)
 	}
@@ -737,16 +739,16 @@ func TestRenderInlineDiffLineKeepsSyntaxHighlighting(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line inline diff, got %#v", lines)
 	}
-	if !strings.Contains(stripANSI(lines[0]), "+return 10") {
-		t.Fatalf("expected changed line to stay visible, got %q", stripANSI(lines[0]))
+	if !strings.Contains(terminaltext.StripANSI(lines[0]), "+return 10") {
+		t.Fatalf("expected changed line to stay visible, got %q", terminaltext.StripANSI(lines[0]))
 	}
 	keywordColour := renderedCellsForText(t, syntax.New("sample.go", "", "").Line("func sample() {}", ""), "func")[0].Style.Fg
 	assertRenderedTextForeground(t, lines[0], "return", keywordColour)
-	assertRenderedTextBackground(t, lines[0], "0", colorOfTheme(currentTheme.DiffAddInlineBg))
+	assertRenderedTextBackground(t, lines[0], "0", colorOfTheme(currentStyles.Palette.DiffAddInlineBg))
 }
 
 func TestEditToolCardKeepsFinalInlineDiffBackgrounds(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	longPrefix := strings.Repeat("prefix", 12)
 	longSuffix := strings.Repeat("suffix", 12)
 	tests := []struct {
@@ -766,7 +768,7 @@ func TestEditToolCardKeepsFinalInlineDiffBackgrounds(t *testing.T) {
 			lineText:          "+return 10",
 			unchangedText:     "return",
 			changedText:       "0",
-			changedBackground: currentTheme.DiffAddInlineBg,
+			changedBackground: currentStyles.Palette.DiffAddInlineBg,
 		},
 		{
 			name:              "short deletion",
@@ -775,7 +777,7 @@ func TestEditToolCardKeepsFinalInlineDiffBackgrounds(t *testing.T) {
 			lineText:          "-return 10",
 			unchangedText:     "return",
 			changedText:       "0",
-			changedBackground: currentTheme.DiffDelInlineBg,
+			changedBackground: currentStyles.Palette.DiffDelInlineBg,
 		},
 		{
 			name:              "long insertion window",
@@ -784,7 +786,7 @@ func TestEditToolCardKeepsFinalInlineDiffBackgrounds(t *testing.T) {
 			lineText:          "valueHTTP",
 			unchangedText:     "suffix",
 			changedText:       "HTTP",
-			changedBackground: currentTheme.DiffAddInlineBg,
+			changedBackground: currentStyles.Palette.DiffAddInlineBg,
 			wantEllipsis:      true,
 		},
 	}
@@ -801,10 +803,10 @@ func TestEditToolCardKeepsFinalInlineDiffBackgrounds(t *testing.T) {
 				ResultDone: true,
 			}
 			line := renderedLineContaining(t, block.Render(60, ""), tt.lineText)
-			assertRenderedTextBackground(t, line, tt.unchangedText, colorOfTheme(currentTheme.ToolCallBg))
+			assertRenderedTextBackground(t, line, tt.unchangedText, colorOfTheme(currentStyles.Palette.ToolCallBg))
 			assertRenderedTextBackground(t, line, tt.changedText, colorOfTheme(tt.changedBackground))
-			if tt.wantEllipsis && !strings.Contains(stripANSI(line), "…") {
-				t.Fatalf("expected long inline diff to use a snippet window, got %q", stripANSI(line))
+			if tt.wantEllipsis && !strings.Contains(terminaltext.StripANSI(line), "…") {
+				t.Fatalf("expected long inline diff to use a snippet window, got %q", terminaltext.StripANSI(line))
 			}
 		})
 	}
@@ -819,11 +821,11 @@ func TestRenderInlineDiffLineKeepsTabIndentedDeletionAligned(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line inline diff, got %#v", lines)
 	}
-	wantLine := "-" + expandTabsForDisplay(oldLine, preformattedTabWidth)
-	if got := stripANSI(lines[0]); got != wantLine {
+	wantLine := "-" + terminaltext.ExpandTabs(oldLine, terminaltext.TabWidth)
+	if got := terminaltext.StripANSI(lines[0]); got != wantLine {
 		t.Fatalf("rendered line = %q, want %q", got, wantLine)
 	}
-	want := DiffDelInlineStyle.Render(", tools.NameViewImage")
+	want := currentStyles.DiffDelInlineStyle.Render(", tools.NameViewImage")
 	if !strings.Contains(lines[0], want) {
 		t.Fatalf("expected deletion style to cover only %q, got %q", ", tools.NameViewImage", lines[0])
 	}
@@ -838,8 +840,8 @@ func TestDiffTextWidthMatchesGraphemeRendererWithTabs(t *testing.T) {
 		"\t👨‍👩‍👧‍👦",
 		"a\t👍🏽",
 	} {
-		expanded := expandTabsForDisplay(text, preformattedTabWidth)
-		if got, want := diffTextWidth(text), tuiStringWidth(expanded); got != want {
+		expanded := terminaltext.ExpandTabs(text, terminaltext.TabWidth)
+		if got, want := diffTextWidth(text), terminaltext.Width(expanded); got != want {
 			t.Fatalf("diffTextWidth(%q) = %d, want rendered width %d", text, got, want)
 		}
 	}
@@ -849,7 +851,7 @@ func TestRenderInlineDiffLineUsesGraphemeWidthLimit(t *testing.T) {
 	prefix := strings.Repeat("👨‍👩‍👧‍👦", 40)
 	oldLine := prefix
 	newLine := prefix + "x"
-	if got := tuiStringWidth(oldLine); got > singleLineDiffColumnsLimit {
+	if got := terminaltext.Width(oldLine); got > singleLineDiffColumnsLimit {
 		t.Fatalf("fixture rendered width = %d, want <= %d", got, singleLineDiffColumnsLimit)
 	}
 
@@ -857,7 +859,7 @@ func TestRenderInlineDiffLineUsesGraphemeWidthLimit(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("grapheme-width eligible inline diff = %#v, want one line", lines)
 	}
-	if got := stripANSI(lines[0]); got != "+"+newLine {
+	if got := terminaltext.StripANSI(lines[0]); got != "+"+newLine {
 		t.Fatalf("rendered line = %q, want %q", got, "+"+newLine)
 	}
 }
@@ -881,7 +883,7 @@ func TestRenderInlineDiffLineKeepsSingleTokenDeletionSingleLine(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line deletion diff, got %#v", lines)
 	}
-	plain := stripANSI(lines[0])
+	plain := terminaltext.StripANSI(lines[0])
 	if !strings.HasPrefix(plain, "-") {
 		t.Fatalf("expected deletion line, got %q", plain)
 	}
@@ -949,7 +951,7 @@ func TestRenderInlineDiffLineLongLineUsesChangeSnippet(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line snippet diff, got %#v", lines)
 	}
-	plain := stripANSI(lines[0])
+	plain := terminaltext.StripANSI(lines[0])
 	if !strings.Contains(plain, "myHTTPVariable") {
 		t.Fatalf("expected snippet to keep changed region visible, got %q", plain)
 	}
@@ -971,7 +973,7 @@ func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T)
 		ResultStatus:      message.ToolStatusSuccess,
 		displayWorkingDir: wd,
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	want := filepath.Join("internal", "tui", "example.go")
 	if !strings.Contains(joined, "edit") || !strings.Contains(joined, want) {
 		t.Fatalf("expected edit header to show relative path; got:\n%s", joined)
@@ -993,7 +995,7 @@ func TestRenderFileDiffCallInsertionContextUsesNewLineNumbers(t *testing.T) {
 		ResultDone:   true,
 		ResultStatus: message.ToolStatusSuccess,
 	}
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "  10 +        \"added\",") {
 		t.Fatalf("expected inserted line to use new line number 10, got:\n%s", plain)
 	}
@@ -1016,7 +1018,7 @@ func TestRenderFileDiffCallDeletionContextDoesNotDecreaseLineNumbers(t *testing.
 		ResultDone:   true,
 		ResultStatus: message.ToolStatusSuccess,
 	}
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "  10 -        \"removed\",") {
 		t.Fatalf("expected deleted line to use old line number 10, got:\n%s", plain)
 	}
@@ -1028,7 +1030,7 @@ func TestRenderFileDiffCallDeletionContextDoesNotDecreaseLineNumbers(t *testing.
 func TestRenderFileDiffCallGroupedMinusPlusBlockUsesInlineOneSidedPairs(t *testing.T) {
 	old := "\t\t// separator(1) + content(lines) + bottom margin(1) + extra bars\n\t\treturn lines + 2 + extraBars\n"
 	new := "\t\t// separator(1) + content(lines) + bottom margin(1)\n\t\treturn lines + 2\n"
-	diff := tools.GenerateUnifiedDiffSummary(old, new, "example.go").Text
+	diff := textdiff.Unified(old, new, "example.go").Text
 	if diff == "" {
 		t.Fatal("expected non-empty unified diff")
 	}
@@ -1042,7 +1044,7 @@ func TestRenderFileDiffCallGroupedMinusPlusBlockUsesInlineOneSidedPairs(t *testi
 		ResultStatus: message.ToolStatusSuccess,
 	}
 	lines := block.Render(120, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if strings.Contains(plain, "   1 +") || strings.Contains(plain, "   2 +") {
 		t.Fatalf("expected grouped pure deletions to render as inline '-' lines only, got:\n%s", plain)
 	}
@@ -1072,10 +1074,10 @@ func TestRenderFileDiffCallUnequalMinusPlusBlocksUseWholeLineBackground(t *testi
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ApplyTheme(DefaultTheme())
+			ApplyTheme(uitheme.Default())
 			old := strings.Join(tt.oldLines, "\n") + "\n"
 			new := strings.Join(tt.newLines, "\n") + "\n"
-			diff := tools.GenerateUnifiedDiffSummary(old, new, "example.go").Text
+			diff := textdiff.Unified(old, new, "example.go").Text
 			if diff == "" {
 				t.Fatal("expected non-empty unified diff")
 			}
@@ -1089,14 +1091,14 @@ func TestRenderFileDiffCallUnequalMinusPlusBlocksUseWholeLineBackground(t *testi
 			}
 
 			lines := block.Render(120, "")
-			plain := stripANSI(strings.Join(lines, "\n"))
+			plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 			for _, oldLine := range tt.oldLines {
 				deleted := renderedLineContaining(t, lines, oldLine)
-				assertRenderedTextBackground(t, deleted, oldLine, colorOfTheme(currentTheme.DiffDelLineBg))
+				assertRenderedTextBackground(t, deleted, oldLine, colorOfTheme(currentStyles.Palette.DiffDelLineBg))
 			}
 			for _, newLine := range tt.newLines {
 				added := renderedLineContaining(t, lines, newLine)
-				assertRenderedTextBackground(t, added, newLine, colorOfTheme(currentTheme.DiffAddLineBg))
+				assertRenderedTextBackground(t, added, newLine, colorOfTheme(currentStyles.Palette.DiffAddLineBg))
 			}
 			if tt.wantLineNumbers {
 				for _, want := range []string{"  1 -old line", "  1 +new line one", "  2 +new line two"} {
@@ -1110,7 +1112,7 @@ func TestRenderFileDiffCallUnequalMinusPlusBlocksUseWholeLineBackground(t *testi
 }
 
 func TestRenderFileDiffCallExpandedShowsAllLinesPastFormerLimit(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	diffLines := []string{
 		"--- example.go",
 		"+++ example.go",
@@ -1129,7 +1131,7 @@ func TestRenderFileDiffCallExpandedShowsAllLinesPastFormerLimit(t *testing.T) {
 		ResultDone: true,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"old value", "new value", "edit example.go"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected expanded diff to contain %q, got:\n%s", want, plain)
@@ -1153,7 +1155,7 @@ func TestRenderFileDiffCallPureDeletionLongLineUsesSnippets(t *testing.T) {
 		ResultStatus: message.ToolStatusSuccess,
 	}
 	lines := block.Render(46, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "service/internal/api") {
 		t.Fatalf("expected snippet to keep deleted path region visible, got:\n%s", plain)
 	}
@@ -1175,7 +1177,7 @@ func TestRenderFileDiffCallOverHardColumnLimitUsesTwoLines(t *testing.T) {
 		ResultStatus: message.ToolStatusSuccess,
 	}
 	lines := block.Render(120, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "   1 -") {
 		t.Fatalf("expected old line in two-line diff, got:\n%s", plain)
 	}
@@ -1197,7 +1199,7 @@ func TestRenderFileDiffCallMixedLongLinesUseTwoLineSnippets(t *testing.T) {
 		ResultStatus: message.ToolStatusSuccess,
 	}
 	lines := block.Render(38, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "   1 -") || !strings.Contains(plain, "   1 +") {
 		t.Fatalf("expected mixed rewrite to render as two lines, got:\n%s", plain)
 	}
@@ -1220,8 +1222,8 @@ func TestRenderHighlightedSnippetLineShowsHiddenClusterSummary(t *testing.T) {
 		{StartCol: strings.Index(line, "TWO"), EndCol: strings.Index(line, "TWO") + len("TWO")},
 		{StartCol: strings.Index(line, "THREE"), EndCol: strings.Index(line, "THREE") + len("THREE")},
 	}
-	rendered := renderHighlightedSnippetLine(line, spans, 26, hl, currentTheme.ToolCallBg)
-	plain := stripANSI(rendered)
+	rendered := renderHighlightedSnippetLine(line, spans, 26, hl, currentStyles.Palette.ToolCallBg)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "(+1)") {
 		t.Fatalf("expected hidden cluster summary, got %q", plain)
 	}
@@ -1238,8 +1240,8 @@ func TestRenderHighlightedSnippetLineOmitsSummaryWhenTooNarrow(t *testing.T) {
 		{StartCol: strings.Index(line, "TWO"), EndCol: strings.Index(line, "TWO") + len("TWO")},
 		{StartCol: strings.Index(line, "THREE"), EndCol: strings.Index(line, "THREE") + len("THREE")},
 	}
-	rendered := renderHighlightedSnippetLine(line, spans, 12, hl, currentTheme.ToolCallBg)
-	plain := stripANSI(rendered)
+	rendered := renderHighlightedSnippetLine(line, spans, 12, hl, currentStyles.Palette.ToolCallBg)
+	plain := terminaltext.StripANSI(rendered)
 	if strings.Contains(plain, "(+1)") {
 		t.Fatalf("expected hidden cluster summary to be omitted when width is too narrow, got %q", plain)
 	}
@@ -1272,7 +1274,7 @@ func TestEditDiffHeaderPathIsCwdRelative(t *testing.T) {
 	block.ResultDone = true
 	block.ResultStatus = message.ToolStatusSuccess
 	block.Diff = "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n"
-	plain := stripANSI(strings.Join(block.Render(60, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(60, ""), "\n"))
 	if !strings.Contains(plain, "demo.go") {
 		t.Fatalf("expected file name to survive header truncation, got:\n%s", plain)
 	}
@@ -1302,7 +1304,7 @@ func TestRelToProcessWorkingDir(t *testing.T) {
 // into the header instead of a second "↳" body line.
 
 func TestEditCardShowsDiffSummaryAndBodyWithoutFolding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -1314,7 +1316,7 @@ func TestEditCardShowsDiffSummaryAndBodyWithoutFolding(t *testing.T) {
 		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "✓ edit src/demo.go · +1 -1 lines") {
 		t.Fatalf("edit header must carry the diff summary; got:\n%s", plain)
 	}
@@ -1330,7 +1332,7 @@ func TestEditCardShowsDiffSummaryAndBodyWithoutFolding(t *testing.T) {
 }
 
 func TestApplyPatchCardShowsFileAndDiffSummaryWithoutFolding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`
 	block := &Block{
 		ID:            1,
@@ -1344,7 +1346,7 @@ func TestApplyPatchCardShowsFileAndDiffSummaryWithoutFolding(t *testing.T) {
 		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "✓ apply_patch src/demo.go · 1 file · +1 -1 lines") {
 		t.Fatalf("apply_patch header must merge file/diff counts; got:\n%s", plain)
 	}
@@ -1360,7 +1362,7 @@ func TestApplyPatchCardShowsFileAndDiffSummaryWithoutFolding(t *testing.T) {
 }
 
 func TestEditDiffSummaryOmitsZeroDirection(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	cases := []struct {
 		name string
 		diff string
@@ -1394,7 +1396,7 @@ func TestEditDiffSummaryOmitsZeroDirection(t *testing.T) {
 				ResultContent: "Applied patch to src/demo.go",
 				Diff:          tc.diff,
 			}
-			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if !strings.Contains(plain, tc.want) {
 				t.Fatalf("diff summary must omit the zero direction, want %q; got:\n%s", tc.want, plain)
 			}
@@ -1403,7 +1405,7 @@ func TestEditDiffSummaryOmitsZeroDirection(t *testing.T) {
 }
 
 func TestEditCollapsedErrorKeepsErrorBlockWithoutHeaderSummary(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -1416,7 +1418,7 @@ func TestEditCollapsedErrorKeepsErrorBlockWithoutHeaderSummary(t *testing.T) {
 		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "↳ Error:") || !strings.Contains(plain, "hunk not found") {
 		t.Fatalf("expected the error block to render; got:\n%s", plain)
 	}
@@ -1442,7 +1444,7 @@ func TestDiffGutterNumbersCountlessHunkHeader(t *testing.T) {
 		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -12 +12 @@\n-old\n+new\n",
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	for _, want := range []string{"12 -old", "12 +new"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected gutter %q from a countless hunk header, got:\n%s", want, plain)
@@ -1536,7 +1538,7 @@ func TestStreamingApplyPatchDisplayArgsPreferPatchTextOverRawJSON(t *testing.T) 
 }
 
 func TestApplyPatchStreamingPreviewRendersHighlightedWithoutFullParse(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
@@ -1547,18 +1549,18 @@ func TestApplyPatchStreamingPreviewRendersHighlightedWithoutFullParse(t *testing
 		RawArgs: `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-func old() {}\n+func main() {}`,
 	}
 	lines := block.Render(100, "●")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	for _, want := range []string{"*** Begin Patch", "*** Update File: src/demo.go", "-func old() {}", "+func main() {}"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected streaming preview to contain %q, got:\n%s", want, plain)
 		}
 	}
 	hunkHeader := renderedLineContaining(t, lines, "@@")
-	if !strings.Contains(stripANSI(hunkHeader), "─") {
-		t.Fatalf("expected streaming patch preview hunk header to include an inline separator, got %q", stripANSI(hunkHeader))
+	if !strings.Contains(terminaltext.StripANSI(hunkHeader), "─") {
+		t.Fatalf("expected streaming patch preview hunk header to include an inline separator, got %q", terminaltext.StripANSI(hunkHeader))
 	}
 	added := renderedLineContaining(t, lines, "func main")
-	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
+	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentStyles.Palette.DiffAddLineBg))
 }
 
 // TestApplyPatchPreviewIncrementalRenderEqualsCold confirms the line-level
@@ -1567,7 +1569,7 @@ func TestApplyPatchStreamingPreviewRendersHighlightedWithoutFullParse(t *testing
 // patch reuses the rendered prefix instead of diverging. The patch is large
 // enough to engage the adaptive coalesce window.
 func TestApplyPatchPreviewIncrementalRenderEqualsCold(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const width = 100
 	var sb strings.Builder
 	sb.WriteString("*** Begin Patch\n")
@@ -1626,7 +1628,7 @@ func TestApplyPatchPreviewIncrementalRenderEqualsCold(t *testing.T) {
 // preview in two colour schemes for the rest of the stream, with nothing to heal
 // it until the args finished and the memo was cleared.
 func TestApplyPatchPreviewMemoDropsLinesFromAStaleHighlighter(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const width = 80
 
 	firstFile := "*** Begin Patch\n*** Update File: demo.py\n@@\n+def main(value):\n+    return {\"key\": value}\n"

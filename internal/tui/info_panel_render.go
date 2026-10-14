@@ -327,7 +327,7 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 		m.cachedInfoPanelOutValid = false
 
 		lineW := width - 2
-		sep := "\n" + InfoPanelLineBg.Width(lineW).Render("") + "\n"
+		sep := "\n" + currentStyles.InfoPanelLineBg.Width(lineW).Render("") + "\n"
 		m.beginInfoPanelRenderPass()
 		blockParts := make([]string, 0, 7)
 		appendBlock := func(section infoPanelSectionID, block string) {
@@ -404,7 +404,7 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 	}
 
 	finalContent := m.clampAndSliceInfoPanelContent(m.cachedInfoPanelLines, height)
-	out := InfoPanelStyle.
+	out := currentStyles.InfoPanelStyle.
 		Width(width).
 		Height(height).
 		Render(finalContent)

@@ -14,8 +14,9 @@ import (
 	"github.com/keakon/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (b *Block) toolArgsParsed() (keys []string, vals map[string]string) {
@@ -879,7 +880,7 @@ func extractToolParamsWithParsed(keys []string, vals map[string]string, maxWidth
 		if maxWidth > 10 && runewidth.StringWidth(v) > maxWidth {
 			v = runewidth.Truncate(v, maxWidth, "…")
 		}
-		return paramValStyle.Render(v)
+		return currentStyles.ParamValStyle.Render(v)
 	}
 	const sep = "  "
 	const minValWidth = 20
@@ -922,7 +923,7 @@ func extractToolParamsWithParsed(keys []string, vals map[string]string, maxWidth
 	}
 	var parts []string
 	for _, p := range plainParts {
-		parts = append(parts, paramKeyStyle.Render(p.prefix)+paramValStyle.Render(p.val))
+		parts = append(parts, currentStyles.ParamKeyStyle.Render(p.prefix)+currentStyles.ParamValStyle.Render(p.val))
 	}
 	return strings.Join(parts, sep)
 }
@@ -971,7 +972,7 @@ func appendTodoCallItemLines(result *[]string, item todoCallArgItem, contentWidt
 		idDisp += "."
 	}
 	content := strings.TrimSpace(sanitizeToolDisplayText(item.Content))
-	content = markdownutil.NormalizeNewlines(content)
+	content = textclean.NormalizeNewlines(content)
 	content = strings.ReplaceAll(content, "\n", " ")
 	content = strings.TrimSpace(content)
 	prefixCols := runewidth.StringWidth(indent) + runewidth.StringWidth(marker) + 1
@@ -979,22 +980,22 @@ func appendTodoCallItemLines(result *[]string, item todoCallArgItem, contentWidt
 		prefixCols += runewidth.StringWidth(idDisp) + 1
 	}
 	wrapW := max(contentWidth-prefixCols, 8)
-	wrapped := wrapText(content, wrapW)
+	wrapped := terminaltext.Wrap(content, wrapW)
 	if len(wrapped) == 0 {
 		wrapped = []string{""}
 	}
-	bodyStyle := paramValStyle
+	bodyStyle := currentStyles.ParamValStyle
 	switch item.Status {
 	case "in_progress":
-		bodyStyle = paramValStyle.Bold(true)
+		bodyStyle = currentStyles.ParamValStyle.Bold(true)
 	case "cancelled":
-		bodyStyle = DimStyle.Strikethrough(true)
+		bodyStyle = currentStyles.DimStyle.Strikethrough(true)
 	case "completed":
-		bodyStyle = DiffAddStyle
+		bodyStyle = currentStyles.DiffAddStyle
 	}
 	idSeg := ""
 	if idDisp != "" {
-		idSeg = paramKeyStyle.Render(idDisp) + " "
+		idSeg = currentStyles.ParamKeyStyle.Render(idDisp) + " "
 	}
 	firstLine := indent + iconSt.Render(marker) + " " + idSeg
 	firstBody := bodyStyle.Render(wrapped[0])
@@ -1007,8 +1008,8 @@ func appendTodoCallItemLines(result *[]string, item todoCallArgItem, contentWidt
 	if af := strings.TrimSpace(sanitizeToolDisplayText(item.ActiveForm)); af != "" && item.Status == "in_progress" {
 		af = strings.ReplaceAll(strings.ReplaceAll(af, "\r\n", " "), "\n", " ")
 		afPad := strings.Repeat(" ", prefixCols-runewidth.StringWidth(indent))
-		for _, wl := range wrapText(af, wrapW) {
-			*result = append(*result, indent+afPad+ToolFieldConnectorStyle.Render(toolFieldConnector)+DimStyle.Render(wl))
+		for _, wl := range terminaltext.Wrap(af, wrapW) {
+			*result = append(*result, indent+afPad+currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector)+currentStyles.DimStyle.Render(wl))
 		}
 	}
 }
@@ -1023,13 +1024,13 @@ type todoCallArgItem struct {
 func todoCallStatusMarker(status string) (marker string, st lipgloss.Style) {
 	switch status {
 	case "completed":
-		return "✓", lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg))
+		return "✓", lipgloss.NewStyle().Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelSuccessFg))
 	case "in_progress":
-		return "▶", lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
+		return "▶", lipgloss.NewStyle().Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg))
 	case "cancelled":
-		return "✗", DimStyle
+		return "✗", currentStyles.DimStyle
 	default:
-		return "○", lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.InfoPanelPendingFg))
+		return "○", lipgloss.NewStyle().Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelPendingFg))
 	}
 }
 

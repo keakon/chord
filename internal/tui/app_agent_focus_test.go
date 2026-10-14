@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestHandleSwitchRoleInvalidatesCachesImmediately(t *testing.T) {
@@ -82,7 +83,7 @@ func TestHandleSwitchAgentRefreshesInfoPanelModelWithoutEvent(t *testing.T) {
 	m := NewModelWithSize(backend, 100, 24)
 	m.refreshSidebar()
 
-	before := stripANSI(m.renderInfoPanel(40, 20))
+	before := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(before, "huge") || !strings.Contains(before, "Provider: main") {
 		t.Fatalf("initial info panel = %q, want main model", before)
 	}
@@ -95,7 +96,7 @@ func TestHandleSwitchAgentRefreshesInfoPanelModelWithoutEvent(t *testing.T) {
 	if got := backend.focused; got != "agent-1" {
 		t.Fatalf("backend focused = %q, want agent-1", got)
 	}
-	after := stripANSI(m.renderInfoPanel(40, 20))
+	after := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(after, "review@high") || !strings.Contains(after, "Provider: worker") {
 		t.Fatalf("info panel after agent switch = %q, want worker/review@high", after)
 	}
@@ -223,7 +224,7 @@ func TestRoleChangedEventRefreshesCachedStatusBarViewingLabel(t *testing.T) {
 	m := NewModelWithSize(backend, 100, 24)
 	scr := newCountingScreen(100, 24)
 	m.Draw(scr, image.Rect(0, 0, 100, 24))
-	if plain := stripANSI(m.cachedStatusRender.text); !strings.Contains(plain, "builder") {
+	if plain := terminaltext.StripANSI(m.cachedStatusRender.text); !strings.Contains(plain, "builder") {
 		t.Fatalf("initial status bar = %q, want builder", plain)
 	}
 
@@ -232,7 +233,7 @@ func TestRoleChangedEventRefreshesCachedStatusBarViewingLabel(t *testing.T) {
 	scr = newCountingScreen(100, 24)
 	m.Draw(scr, image.Rect(0, 0, 100, 24))
 
-	plain := stripANSI(m.cachedStatusRender.text)
+	plain := terminaltext.StripANSI(m.cachedStatusRender.text)
 	if !strings.Contains(plain, "planner") {
 		t.Fatalf("status bar after role change = %q, want planner", plain)
 	}
@@ -293,7 +294,7 @@ func TestSetFocusedAgentRefreshesCachedStatusBarViewingLabel(t *testing.T) {
 	m.refreshSidebar()
 	scr := newCountingScreen(100, 24)
 	m.Draw(scr, image.Rect(0, 0, 100, 24))
-	if plain := stripANSI(m.cachedStatusRender.text); !strings.Contains(plain, "builder") {
+	if plain := terminaltext.StripANSI(m.cachedStatusRender.text); !strings.Contains(plain, "builder") {
 		t.Fatalf("initial status bar = %q, want builder", plain)
 	}
 
@@ -301,7 +302,7 @@ func TestSetFocusedAgentRefreshesCachedStatusBarViewingLabel(t *testing.T) {
 	scr = newCountingScreen(100, 24)
 	m.Draw(scr, image.Rect(0, 0, 100, 24))
 
-	plain := stripANSI(m.cachedStatusRender.text)
+	plain := terminaltext.StripANSI(m.cachedStatusRender.text)
 	if !strings.Contains(plain, "agent-1") {
 		t.Fatalf("status bar after focus switch = %q, want agent-1", plain)
 	}
@@ -383,7 +384,7 @@ func TestFocusedSubAgentViewHidesMainQueuedDrafts(t *testing.T) {
 		QueuedAt:       time.Now(),
 	}}
 
-	if got := stripANSI(m.renderQueuedDrafts(40, 3)); !strings.Contains(got, "queued main") {
+	if got := terminaltext.StripANSI(m.renderQueuedDrafts(40, 3)); !strings.Contains(got, "queued main") {
 		t.Fatalf("main renderQueuedDrafts = %q, want queued draft text", got)
 	}
 
@@ -392,7 +393,7 @@ func TestFocusedSubAgentViewHidesMainQueuedDrafts(t *testing.T) {
 	if got := len(m.visibleQueuedDrafts()); got != 0 {
 		t.Fatalf("len(visibleQueuedDrafts) in subagent view = %d, want 0", got)
 	}
-	if got := stripANSI(m.renderQueuedDrafts(40, 3)); got != "" {
+	if got := terminaltext.StripANSI(m.renderQueuedDrafts(40, 3)); got != "" {
 		t.Fatalf("subagent renderQueuedDrafts = %q, want empty", got)
 	}
 	if got := m.generateLayout(m.width, m.height).queue.Dy(); got != 0 {
@@ -401,7 +402,7 @@ func TestFocusedSubAgentViewHidesMainQueuedDrafts(t *testing.T) {
 
 	m.setFocusedAgent("")
 
-	if got := stripANSI(m.renderQueuedDrafts(40, 3)); !strings.Contains(got, "queued main") {
+	if got := terminaltext.StripANSI(m.renderQueuedDrafts(40, 3)); !strings.Contains(got, "queued main") {
 		t.Fatalf("main renderQueuedDrafts after restore = %q, want queued draft text", got)
 	}
 }
@@ -505,7 +506,7 @@ func TestRenderStatusBarDoesNotUseSyntheticConnectingForOtherAgentDraft(t *testi
 	}
 	m.inflightDraft = &queuedDraft{ID: "draft-1", Content: "queued", QueuedAt: time.Now()}
 
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(got, "Connecting") {
 		t.Fatalf("status bar should not show synthetic connecting for another agent's inflight draft, got %q", got)
 	}
@@ -621,7 +622,7 @@ func TestAgentDoneEventRefreshesTaskBlockLastTime(t *testing.T) {
 	if !task.SettledAt.After(old) {
 		t.Fatalf("task SettledAt = %v, want > %v", task.SettledAt, old)
 	}
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "Since ") {
 		t.Fatalf("status bar should show last time after task completion; got %q", plain)
 	}

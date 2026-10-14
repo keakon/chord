@@ -16,6 +16,8 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
+	"github.com/keakon/chord/internal/agent/requestshape"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
@@ -1396,7 +1398,7 @@ func (a *MainAgent) produceModelDrivenDraftAsync(ctx context.Context, bundle mod
 // re-scans the whole snapshot as an approximation of the next real request.
 func (a *MainAgent) modelDrivenCurrentSurfaceBaseline(bundle modelDrivenBarrierSnapshot, snapshot []message.Message) ([]message.Message, string) {
 	if bundle.lastPreparedTurnID != 0 && len(bundle.lastPreparedSource) > 0 && len(bundle.lastPreparedPrefix) > 0 {
-		if reusableMessagePrefixLen(bundle.lastPreparedSource, snapshot) == len(bundle.lastPreparedSource) {
+		if requestshape.ReusablePrefixLen(bundle.lastPreparedSource, snapshot) == len(bundle.lastPreparedSource) {
 			out := cloneMessageSliceForRequestShape(bundle.lastPreparedPrefix)
 			out = append(out, snapshot[len(bundle.lastPreparedSource):]...)
 			return out, "last_prepared"
@@ -1890,13 +1892,13 @@ func (a *MainAgent) buildModelDrivenCheckpointSummary(bundle modelDrivenBarrierS
 
 	sections := []fallbackSummarySection{
 		{"## Current User Request", modelDrivenCurrentUserRequestSection(anchor)},
-		{checkpointUserConstraintsHeading, constraints},
+		{checkpointfmt.UserConstraintsHeading, constraints},
 		{"## Active Objective", renderModelState(req.Args.ActiveObjective)},
 		{"## Background Goals", "- Earlier goals and the model-declared Active Objective are subordinate to the Current User Request and User Constraints."},
 		{"## Next Step", renderModelState(req.Args.NextStep)},
-		{checkpointOpenProblemsHeading, openIssues},
-		{checkpointProgressHeading, completed},
-		{checkpointKeyDecisionsHeading, decisions},
+		{checkpointfmt.OpenProblemsHeading, openIssues},
+		{checkpointfmt.ProgressHeading, completed},
+		{checkpointfmt.KeyDecisionsHeading, decisions},
 		{"## Files and Evidence", "- Precise archived history is listed under the checkpoint wrapper's archived history files."},
 		{"## Externalized State", stateFiles},
 		{"## Planned Externalized State", plannedStateFiles},

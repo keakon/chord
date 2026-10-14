@@ -11,11 +11,13 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/permission/rulesuggest"
 	"github.com/keakon/chord/internal/tools"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestDialogActionsKeepFocusAndDangerSeparate(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for _, chip := range []hintChip{hint("Esc", "Cancel"), primaryHint("Enter", "submit"), dangerHint("y", "Delete")} {
 		line := renderHintChip(chip)
 		cells := drawLineCells(t, line)
@@ -30,10 +32,10 @@ func TestDialogActionsKeepFocusAndDangerSeparate(t *testing.T) {
 				t.Fatal("action meaning was weaker than its key")
 			}
 		}
-		if chip.danger && !colorsEqual(action.Style.Fg, colorOfTheme(currentTheme.DialogDangerFg)) {
+		if chip.danger && !colorsEqual(action.Style.Fg, colorOfTheme(currentStyles.Palette.DialogDangerFg)) {
 			t.Fatal("destructive action has no danger color")
 		}
-		if !chip.danger && colorsEqual(action.Style.Fg, colorOfTheme(currentTheme.DialogDangerFg)) {
+		if !chip.danger && colorsEqual(action.Style.Fg, colorOfTheme(currentStyles.Palette.DialogDangerFg)) {
 			t.Fatal("ordinary action has a danger color")
 		}
 	}
@@ -106,7 +108,7 @@ func TestRulePickerKeepsFocusedCandidateAndScopeVisibleAfterResize(t *testing.T)
 	m.confirm.pickingRule = true
 	m.confirm.scopes = []permission.RuleScope{permission.ScopeSession, permission.ScopeProject}
 	for i := range 20 {
-		m.confirm.candidates = append(m.confirm.candidates, PatternCandidate{Pattern: fmt.Sprintf("sample-%02d", i)})
+		m.confirm.candidates = append(m.confirm.candidates, rulesuggest.Candidate{Pattern: fmt.Sprintf("sample-%02d", i)})
 	}
 	m.renderConfirmDialog()
 	for range 19 {

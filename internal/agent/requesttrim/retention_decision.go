@@ -5,6 +5,7 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -95,7 +96,7 @@ func RetentionDecision(ctx Context, verdict Verdict, rule, reduced string) Decis
 	if decision.Reason == "" {
 		decision.Reason = string(verdict.Class)
 	}
-	if refs := tools.ExtractArtifactReferences(reduced); len(refs) > 0 {
+	if refs := tooloutput.ExtractArtifactReferences(reduced); len(refs) > 0 {
 		decision.ArtifactRef = refs[0]
 	} else if address, ok := archivedOutputMarkerAddress(reduced); ok {
 		decision.ArtifactRef = address

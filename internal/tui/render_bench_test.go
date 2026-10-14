@@ -8,6 +8,8 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // ---------------------------------------------------------------------------
@@ -405,7 +407,7 @@ func BenchmarkRenderStatusBarStreamingActivityCacheHit(b *testing.B) {
 // BenchmarkRenderNeonSeparator measures the raw neon separator render
 // (cache-miss path) to catch regressions in the ANSI-write optimisation.
 func BenchmarkRenderNeonSeparator(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
@@ -417,7 +419,7 @@ func BenchmarkRenderNeonSeparator(b *testing.B) {
 // It guards against reintroducing lipgloss Width(...).Render(...) over already
 // wrapped multi-line content.
 func BenchmarkRenderAssistantCard(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkAssistantBlock()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -428,7 +430,7 @@ func BenchmarkRenderAssistantCard(b *testing.B) {
 }
 
 func BenchmarkRenderAssistantCardCachedWarm(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkAssistantBlock()
 	_ = block.Render(100, "")
 	b.ResetTimer()
@@ -441,7 +443,7 @@ func BenchmarkRenderAssistantCardCachedWarm(b *testing.B) {
 // BenchmarkRenderAssistantStreamingCard measures the cheap streaming fallback
 // path, which should stay noticeably lighter than settled glamour rendering.
 func BenchmarkRenderAssistantStreamingCard(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkAssistantStreamingBlock()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -452,7 +454,7 @@ func BenchmarkRenderAssistantStreamingCard(b *testing.B) {
 }
 
 func BenchmarkRenderAssistantStreamingTextCard(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkAssistantStreamingTextBlock()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -463,7 +465,7 @@ func BenchmarkRenderAssistantStreamingTextCard(b *testing.B) {
 }
 
 func BenchmarkRenderAssistantStreamingLongTextCard(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkAssistantStreamingLongTextBlock()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -474,7 +476,7 @@ func BenchmarkRenderAssistantStreamingLongTextCard(b *testing.B) {
 }
 
 func BenchmarkRenderAssistantStreamingLongTextCardCachedWarm(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkAssistantStreamingLongTextBlock()
 	_ = block.Render(100, "")
 	b.ResetTimer()
@@ -508,7 +510,7 @@ func BenchmarkContainsMarkdownTable(b *testing.B) {
 // settled card-head cache this should stay proportional to the unsettled tail
 // (plus per-line bookkeeping), not the full block height.
 func BenchmarkRenderAssistantStreamingSettledCardWarm(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkAssistantStreamingSettledBlock()
 	_ = block.Render(100, "")
 	b.ResetTimer()
@@ -520,7 +522,7 @@ func BenchmarkRenderAssistantStreamingSettledCardWarm(b *testing.B) {
 }
 
 func BenchmarkRenderAssistantStreamingLongTextCardProfile(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkAssistantStreamingLongTextBlock()
 	b.ReportAllocs()
 	for b.Loop() {
@@ -531,7 +533,7 @@ func BenchmarkRenderAssistantStreamingLongTextCardProfile(b *testing.B) {
 
 // BenchmarkRenderToolCallCard measures the hot expanded tool card render path.
 func BenchmarkRenderToolCallCard(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkToolBlock()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -542,7 +544,7 @@ func BenchmarkRenderToolCallCard(b *testing.B) {
 }
 
 func BenchmarkRenderEditDiffSinglePair(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
@@ -560,7 +562,7 @@ func BenchmarkRenderEditDiffSinglePair(b *testing.B) {
 }
 
 func BenchmarkRenderEditDiffUnevenBlock(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:         1,
 		Type:       BlockToolCall,
@@ -578,7 +580,7 @@ func BenchmarkRenderEditDiffUnevenBlock(b *testing.B) {
 }
 
 func BenchmarkRenderEditDiffLargeUnevenBlock(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const (
 		deletedLines = 140
 		addedLines   = 60
@@ -613,7 +615,7 @@ func BenchmarkRenderEditDiffLargeUnevenBlock(b *testing.B) {
 // BenchmarkRenderCompactToolCallCard measures the compact-toggle tool card path
 // where repeated JSON arg parsing previously happened inside a single render.
 func BenchmarkRenderCompactToolCallCard(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkCompactToolBlock()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -632,7 +634,7 @@ func BenchmarkRenderCompactToolCallCard(b *testing.B) {
 // proseControlCall's hot tier so the compaction barrier does not regress
 // scroll latency.
 func BenchmarkRenderCompactContextCall(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkCompactContextBlock()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -645,7 +647,7 @@ func BenchmarkRenderCompactContextCall(b *testing.B) {
 // BenchmarkViewportVisibleWindowBlockIDs ensures spill visible-window
 // computation stays on cached line counts instead of re-rendering every block.
 func BenchmarkViewportVisibleWindowBlockIDs(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "") // warm line-count caches
@@ -669,7 +671,7 @@ func benchmarkSearchBlocks() []*Block {
 // BenchmarkFindMatchesAtWidthCold measures a first search after render caches
 // have been populated but search-specific indexes have not.
 func BenchmarkFindMatchesAtWidthCold(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	blocks := benchmarkSearchBlocks()
 	for _, block := range blocks {
 		block.LineCount(100)
@@ -692,7 +694,7 @@ func BenchmarkFindMatchesAtWidthCold(b *testing.B) {
 // BenchmarkFindMatchesAtWidth ensures repeated search offset computation
 // reuses both line-count and search caches.
 func BenchmarkFindMatchesAtWidth(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	blocks := benchmarkSearchBlocks()
 	for _, block := range blocks {
 		block.LineCount(100)
@@ -706,7 +708,7 @@ func BenchmarkFindMatchesAtWidth(b *testing.B) {
 }
 
 func BenchmarkDeferredStartupTranscriptSearchAllMatches(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for _, blockCount := range []int{1000, 2000, 4000} {
 		b.Run(fmt.Sprintf("blocks=%d", blockCount), func(b *testing.B) {
 			m := NewModelWithSize(nil, 120, 30)
@@ -738,7 +740,7 @@ func BenchmarkAssistantMarkdownSearchLongCommonPrefix(b *testing.B) {
 }
 
 func BenchmarkViewportRenderLargeTranscriptAtBottom(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := benchmarkLargeViewport(5000)
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -748,7 +750,7 @@ func BenchmarkViewportRenderLargeTranscriptAtBottom(b *testing.B) {
 }
 
 func BenchmarkViewportRenderLargeTranscriptScrollWindow(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := benchmarkLargeViewport(5000)
 	v.offset = 1000
 	_ = v.Render("", nil, -1, -1, "")
@@ -764,7 +766,7 @@ func BenchmarkViewportRenderLargeTranscriptScrollWindow(b *testing.B) {
 // This guards the UV parse/draw caches, screen-buffer reuse, and unchanged-frame
 // ANSI serialization fast path.
 func BenchmarkModelViewCached(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView()
 	_ = m.View()
 	b.ResetTimer()
@@ -775,7 +777,7 @@ func BenchmarkModelViewCached(b *testing.B) {
 }
 
 func BenchmarkModelViewCachedSearchActive(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView()
 	m.search.State.Active = true
 	m.search.State.Query = "render"
@@ -790,7 +792,7 @@ func BenchmarkModelViewCachedSearchActive(b *testing.B) {
 }
 
 func BenchmarkModelViewScrollLargeTranscript(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView()
 	m.viewport = benchmarkLargeViewport(5000)
 	m.viewport.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
@@ -863,7 +865,7 @@ func TestSeparatorCacheHitAllocsGuard(t *testing.T) {
 // TestViewportVisibleWindowBlockIDsAllocsGuard verifies visible-window lookup
 // uses cached spans after the first render.
 func TestViewportVisibleWindowBlockIDsAllocsGuard(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
@@ -880,7 +882,7 @@ func TestViewportVisibleWindowBlockIDsAllocsGuard(t *testing.T) {
 // TestFindMatchesAtWidthAllocsGuard verifies search line-offset calculation no
 // longer re-renders blocks on each search pass.
 func TestFindMatchesAtWidthAllocsGuard(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	blocks := []*Block{
 		benchmarkAssistantBlock(),
 		{ID: 2, Type: BlockAssistant, Content: strings.Repeat("needle ", 80)},
@@ -899,9 +901,9 @@ func TestFindMatchesAtWidthAllocsGuard(t *testing.T) {
 }
 
 // TestStreamingAssistantCheapPathAllocsGuard verifies streaming assistant cards
-// stay on the cheap wrapText path instead of glamour.
+// stay on the cheap terminaltext.Wrap path instead of glamour.
 func TestStreamingAssistantCheapPathAllocsGuard(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := benchmarkAssistantStreamingBlock()
 	allocs := testing.AllocsPerRun(20, func() {
 		block.InvalidateCache()
@@ -916,7 +918,7 @@ func TestStreamingAssistantCheapPathAllocsGuard(t *testing.T) {
 // TestModelViewCachedAllocsGuard verifies stable frames reuse UV parse caches
 // instead of re-decoding every ANSI string on each View() call.
 func TestModelViewCachedAllocsGuard(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView()
 	_ = m.View()
 	allocs := testing.AllocsPerRun(10, func() {
@@ -929,7 +931,7 @@ func TestModelViewCachedAllocsGuard(t *testing.T) {
 }
 
 func TestModelViewCachedContentInvalidatesOnVisibleChange(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := benchmarkModelForView()
 	before := m.View()
 
@@ -939,8 +941,8 @@ func TestModelViewCachedContentInvalidatesOnVisibleChange(t *testing.T) {
 	if after.Content == before.Content {
 		t.Fatal("visible transcript change should invalidate cached frame content")
 	}
-	if !strings.Contains(stripANSI(after.Content), "new visible response") {
-		t.Fatalf("updated frame should contain appended response; got %q", stripANSI(after.Content))
+	if !strings.Contains(terminaltext.StripANSI(after.Content), "new visible response") {
+		t.Fatalf("updated frame should contain appended response; got %q", terminaltext.StripANSI(after.Content))
 	}
 }
 
@@ -974,8 +976,8 @@ func TestInfoPanelCacheInvalidatesOnDataChange(t *testing.T) {
 	if before == after {
 		t.Fatal("expected re-render after data change, but got same output")
 	}
-	if !strings.Contains(stripANSI(after), "99") {
-		t.Fatalf("re-rendered panel should contain updated token count; got %q", stripANSI(after))
+	if !strings.Contains(terminaltext.StripANSI(after), "99") {
+		t.Fatalf("re-rendered panel should contain updated token count; got %q", terminaltext.StripANSI(after))
 	}
 }
 
@@ -991,8 +993,8 @@ func TestInfoPanelCacheInvalidatesOnCollapseStateChange(t *testing.T) {
 	if before == after {
 		t.Fatal("expected re-render after collapse state change, but got same output")
 	}
-	if !strings.Contains(stripANSI(after), "▶ TODOS") || !strings.Contains(stripANSI(after), "0/1") {
-		t.Fatalf("collapsed panel should contain collapsed TODOS header with progress; got %q", stripANSI(after))
+	if !strings.Contains(terminaltext.StripANSI(after), "▶ TODOS") || !strings.Contains(terminaltext.StripANSI(after), "0/1") {
+		t.Fatalf("collapsed panel should contain collapsed TODOS header with progress; got %q", terminaltext.StripANSI(after))
 	}
 }
 
@@ -1026,7 +1028,7 @@ func benchmarkThinkingStreamChunks(n int) []string {
 // cost grows with the accumulated content and this benchmark scales
 // quadratically, failing the smoke run loudly.
 func BenchmarkRenderThinkingStreamingIncrementalLarge(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	chunks := benchmarkThinkingStreamChunks(1000)
 	b.ReportAllocs()
 	b.ResetTimer()

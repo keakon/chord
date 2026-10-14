@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/schemaargs"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -74,7 +75,7 @@ func cloneRawJSON(raw json.RawMessage) json.RawMessage {
 // before this error becomes the task's terminal outcome.
 type ResultContractViolationError struct {
 	diagnostics TaskContractDiagnostics
-	violations  []tools.ResultSchemaViolation
+	violations  []schemaargs.Violation
 }
 
 // Diagnostics returns the machine-readable failure record: the violation list
@@ -187,7 +188,7 @@ func (s *SubAgent) validateDeliveredResultAgainstContract(inline json.RawMessage
 		// can still supply, not a store that failed to read back.
 		return s.missingResultContractError()
 	}
-	violations, err := tools.ValidateResultAgainstSchema(payload, s.resultSchema)
+	violations, err := schemaargs.ValidateResult(payload, s.resultSchema)
 	if err != nil {
 		return &ResultContractIntegrityError{cause: err, resultRef: ref}
 	}
@@ -197,7 +198,7 @@ func (s *SubAgent) validateDeliveredResultAgainstContract(inline json.RawMessage
 	return newResultContractViolationError(violations, ref, inline)
 }
 
-func newResultContractViolationError(violations []tools.ResultSchemaViolation, ref *tools.ResultRef, inline json.RawMessage) *ResultContractViolationError {
+func newResultContractViolationError(violations []schemaargs.Violation, ref *tools.ResultRef, inline json.RawMessage) *ResultContractViolationError {
 	diag := TaskContractDiagnostics{
 		Category:   resultContractCategorySchemaFailure,
 		Violations: make([]message.InvalidToolArg, 0, len(violations)),

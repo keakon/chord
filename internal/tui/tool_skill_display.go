@@ -10,8 +10,8 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/convformat"
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
-	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
 var shellDurationNoteRE = regexp.MustCompile(`\n\(command took ([0-9]+(?:\.[0-9]+)?)s\)\s*$`)
@@ -246,7 +246,7 @@ func countLSPDiagnosticLines(result string) int {
 }
 
 func editSuccessDiagnosticsContent(result string) string {
-	lines := strings.Split(markdownutil.NormalizeNewlines(result), "\n")
+	lines := strings.Split(textclean.NormalizeNewlines(result), "\n")
 	for i, line := range lines {
 		switch strings.TrimSpace(line) {
 		case "Diagnostics:", "Diagnostics summary:":

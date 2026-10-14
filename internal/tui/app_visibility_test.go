@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 func TestCurrentCadenceReturnsForegroundWhenFocused(t *testing.T) {
@@ -650,7 +651,7 @@ func TestBackgroundIdleSweepRecognizesPendingDialogAsBusy(t *testing.T) {
 	}
 
 	m.question.request = nil
-	m.handoffSelect.selector.list = NewOverlayList(handoffItems([]handoffOption{{Name: "reviewer"}}), m.handoffSelectMaxVisible())
+	m.handoffSelect.selector.list = overlaylist.New(handoffItems([]handoffOption{{Name: "reviewer"}}), m.handoffSelectMaxVisible())
 	if cmd := m.updateBackgroundIdleSweepState(); cmd != nil {
 		t.Fatal("pending handoff should keep background from becoming idle")
 	}

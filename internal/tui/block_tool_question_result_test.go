@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestQuestionCallFormatsControlReceiptsAndWaitDecisions(t *testing.T) {
@@ -32,7 +33,7 @@ func TestQuestionCallFormatsControlReceiptsAndWaitDecisions(t *testing.T) {
 				t.Fatal(err)
 			}
 			block := &Block{Type: BlockToolCall, ToolName: tools.NameQuestion, Content: tc.args, ResultPayload: string(payload), ResultNotes: []string{"Diagnostic note"}, ResultContent: string(payload) + "\nDiagnostic note", ResultDone: true, ResultStatus: message.ToolStatusSuccess}
-			view := stripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
+			view := terminaltext.StripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
 			for _, want := range append(tc.want, "Diagnostic note") {
 				if !strings.Contains(view, want) {
 					t.Fatalf("view lacks %q:\n%s", want, view)
@@ -53,13 +54,13 @@ func TestQuestionCallFormatsControlReceiptsAndWaitDecisions(t *testing.T) {
 func TestQuestionCallRetainsMalformedResultAndErrors(t *testing.T) {
 	for _, result := range []string{`{"status":`, `{"other":"detail"}`, "Plain error"} {
 		block := &Block{Type: BlockToolCall, ToolName: tools.NameQuestion, Content: `{"wait_for":["q-1"]}`, ResultPayload: result, ResultContent: result}
-		view := stripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
+		view := terminaltext.StripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
 		if !strings.Contains(view, result) {
 			t.Fatalf("unrecognized result lost: %s", view)
 		}
 	}
 	block := &Block{Type: BlockToolCall, ToolName: tools.NameQuestion, Content: `{"wait_for":["q-1"]}`, ResultContent: "Question failed", ResultStatus: message.ToolStatusError}
-	if view := stripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n")); !strings.Contains(view, "Question failed") {
+	if view := terminaltext.StripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n")); !strings.Contains(view, "Question failed") {
 		t.Fatalf("error lost: %s", view)
 	}
 }
@@ -83,13 +84,13 @@ func TestQuestionCallMarksOnlySelectedIDForDuplicateLabels(t *testing.T) {
 		Content:       `{"questions":[{"header":"Destination","question":"Where should files go?","options":[{"id":"first","label":"Use this","description":"First destination"},{"id":"second","label":"Use this","description":"Second destination"}]}]}`,
 		ResultPayload: payload, ResultContent: payload, ResultDone: true,
 	}
-	view := stripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
+	view := terminaltext.StripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
 	if !strings.Contains(view, "✓ 2. Use this") || strings.Contains(view, "✓ 1. Use this") {
 		t.Fatalf("wrong option marked:\n%s", view)
 	}
 	payload = `{"status":"resolved","answers":[{"header":"Destination","selected":["Use this"],"outcome":"answered"}]}`
 	block.ResultPayload, block.ResultContent = payload, payload
-	view = stripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
+	view = terminaltext.StripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
 	if !strings.Contains(view, "Custom: Use this") || strings.Contains(view, "✓ 1. Use this") || strings.Contains(view, "✓ 2. Use this") {
 		t.Fatalf("free text interpreted as selection:\n%s", view)
 	}

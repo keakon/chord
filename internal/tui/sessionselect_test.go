@@ -9,6 +9,9 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/overlaylist"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func sessionSelectRuneKey(text string) tea.KeyPressMsg {
@@ -49,7 +52,7 @@ func newSessionSelectTestModel(options []agent.SessionSummary) Model {
 	m.mode = ModeSessionSelect
 	m.sessionSelect = sessionSelectState{
 		options:      append([]agent.SessionSummary(nil), options...),
-		selector:     overlayListSelectorState{list: NewOverlayList(nil, m.sessionSelectMaxVisible())},
+		selector:     overlayListSelectorState{list: overlaylist.New(nil, m.sessionSelectMaxVisible())},
 		prevMode:     ModeNormal,
 		searchCorpus: buildSessionSearchCorpus(options),
 	}
@@ -244,7 +247,7 @@ func TestSessionSelectDialogReservesNoWorktreeColumn(t *testing.T) {
 	options[0].WorktreeName = "feat-parser"
 	m := newSessionSelectTestModel(options)
 
-	plain := stripANSI(m.renderSessionSelectDialog())
+	plain := terminaltext.StripANSI(m.renderSessionSelectDialog())
 	if strings.Contains(plain, "Worktree") {
 		t.Fatalf("session picker should not reserve a worktree column:\n%s", plain)
 	}
@@ -269,7 +272,7 @@ func TestSessionSelectSearchMatchesWorktreeName(t *testing.T) {
 }
 
 func TestSessionSelectColumnHeader(t *testing.T) {
-	header := stripANSI(sessionSelectColumnHeader())
+	header := terminaltext.StripANSI(sessionSelectColumnHeader())
 	for _, want := range []string{"Modified", "Msgs", "Preview"} {
 		if !strings.Contains(header, want) {
 			t.Fatalf("column header should include %q, got %q", want, header)
@@ -327,7 +330,7 @@ func TestSelectSessionAtCursorUsesFilteredMapping(t *testing.T) {
 	options := testSessionSummaries()
 	m.sessionSelect = sessionSelectState{
 		options:      options,
-		selector:     overlayListSelectorState{list: NewOverlayList(nil, m.sessionSelectMaxVisible())},
+		selector:     overlayListSelectorState{list: overlaylist.New(nil, m.sessionSelectMaxVisible())},
 		prevMode:     ModeNormal,
 		searchCorpus: buildSessionSearchCorpus(options),
 	}
@@ -362,7 +365,7 @@ func TestConfirmSessionDeletionRemovesBySessionID(t *testing.T) {
 	m.mode = ModeSessionDeleteConfirm
 	m.sessionSelect = sessionSelectState{
 		options:      append([]agent.SessionSummary(nil), options...),
-		selector:     overlayListSelectorState{list: NewOverlayList(nil, m.sessionSelectMaxVisible())},
+		selector:     overlayListSelectorState{list: overlaylist.New(nil, m.sessionSelectMaxVisible())},
 		prevMode:     ModeSessionSelect,
 		searchCorpus: buildSessionSearchCorpus(options),
 	}
@@ -388,7 +391,7 @@ func TestRenderSessionSelectDialogShowsFilterHintAndNoMatch(t *testing.T) {
 	m := newSessionSelectTestModel(testSessionSummaries())
 
 	dialog := m.renderSessionSelectDialog()
-	plain := stripANSI(dialog)
+	plain := terminaltext.StripANSI(dialog)
 	if !strings.Contains(plain, "filter: (press / to search)") {
 		t.Fatalf("dialog missing filter hint:\n%s", plain)
 	}
@@ -396,7 +399,7 @@ func TestRenderSessionSelectDialogShowsFilterHintAndNoMatch(t *testing.T) {
 		t.Fatalf("dialog missing filtered count:\n%s", plain)
 	}
 	filterLine := findRenderedLineContaining(dialog, "filter:")
-	plainFilterLine := stripANSI(filterLine)
+	plainFilterLine := terminaltext.StripANSI(filterLine)
 	filterStart := strings.Index(plainFilterLine, "filter:")
 	filterEnd := strings.LastIndex(plainFilterLine, "3/3") + len("3/3")
 	if filterStart < 0 || filterEnd < len("3/3") {
@@ -406,12 +409,12 @@ func TestRenderSessionSelectDialogShowsFilterHintAndNoMatch(t *testing.T) {
 		t,
 		filterLine,
 		plainFilterLine[filterStart:filterEnd],
-		colorOfTheme(currentTheme.DialogBg),
+		colorOfTheme(currentStyles.Palette.DialogBg),
 	)
 
 	m.sessionSelect.filter = "missing"
 	m.rebuildSessionSelectFilteredView(true)
-	plain = stripANSI(m.renderSessionSelectDialog())
+	plain = terminaltext.StripANSI(m.renderSessionSelectDialog())
 	if !strings.Contains(plain, `No sessions match "missing"`) {
 		t.Fatalf("dialog missing no-match text:\n%s", plain)
 	}
@@ -500,7 +503,7 @@ func TestSessionSelectModalMouseClickSelectsFilteredOption(t *testing.T) {
 // A prefetched empty list is a complete answer from the emitter: the picker must
 // render the empty state immediately instead of showing a loading frame.
 func TestOpenSessionSelectPrefetchedEmptyShowsEmptyStateImmediately(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 120, 32)
 
 	m.openSessionSelect(nil, true)
@@ -511,7 +514,7 @@ func TestOpenSessionSelectPrefetchedEmptyShowsEmptyStateImmediately(t *testing.T
 	if m.sessionSelect.loading {
 		t.Fatal("prefetched empty session list is still marked loading")
 	}
-	dialog := stripANSI(m.renderSessionSelectDialog())
+	dialog := terminaltext.StripANSI(m.renderSessionSelectDialog())
 	if strings.Contains(dialog, "Loading sessions...") {
 		t.Fatalf("prefetched empty session list rendered a loading frame:\n%s", dialog)
 	}

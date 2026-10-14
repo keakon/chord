@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -97,7 +98,13 @@ func TestNativeImageMutualExclusionAndSafeFallback(t *testing.T) {
 				t.Fatalf("attempt attribution: %+v", snapshot)
 			}
 			if want == 2 {
-				tools := diagnosticCategory(t, snapshot.Categories, contextdiag.Tools)
+				index := slices.IndexFunc(snapshot.Categories, func(category contextdiag.Category) bool {
+					return category.Kind == contextdiag.Tools
+				})
+				if index < 0 {
+					t.Fatal("missing tools diagnostic category")
+				}
+				tools := snapshot.Categories[index]
 				native, local := false, false
 				for _, source := range tools.Sources {
 					native = native || source.Label == "native"

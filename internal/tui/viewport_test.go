@@ -7,6 +7,8 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // Selection highlight unit tests: validates findColumnByteOffsets, applyHighlightToLine, selectionColRange
@@ -14,7 +16,7 @@ import (
 //   go test ./internal/tui/ -run 'FindColumnByteOffsets|ApplyHighlight|SelectionColRange|SkipANSISequence' -v
 
 // ---------------------------------------------------------------------------
-// skipANSISequence
+// terminaltext.SkipANSI
 // ---------------------------------------------------------------------------
 
 func TestSkipANSISequence(t *testing.T) {
@@ -32,9 +34,9 @@ func TestSkipANSISequence(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := skipANSISequence(tt.s, tt.start)
+			got := terminaltext.SkipANSI(tt.s, tt.start)
 			if got != tt.want {
-				t.Errorf("skipANSISequence(%q, %d) = %d, want %d", tt.s, tt.start, got, tt.want)
+				t.Errorf("terminaltext.SkipANSI(%q, %d) = %d, want %d", tt.s, tt.start, got, tt.want)
 			}
 		})
 	}
@@ -50,7 +52,7 @@ func TestFindColumnByteOffsets(t *testing.T) {
 		s        string
 		colStart int
 		colEnd   int
-		wantSeg  string // expected stripANSI([startByte:endByte]) content ("" means startByte<0)
+		wantSeg  string // expected terminaltext.StripANSI([startByte:endByte]) content ("" means startByte<0)
 	}{
 		{"plain same-line", "hello world", 0, 5, "hello"},
 		{"plain same-line middle", "hello world", 6, 11, "world"},
@@ -68,7 +70,7 @@ func TestFindColumnByteOffsets(t *testing.T) {
 			if tt.wantSeg == "" {
 				if startByte >= 0 && endByte > startByte {
 					seg := tt.s[startByte:endByte]
-					plain := stripANSI(seg)
+					plain := terminaltext.StripANSI(seg)
 					t.Errorf("expected no/invalid range, got [%d:%d] segment %q plain %q", startByte, endByte, seg, plain)
 				}
 				return
@@ -79,16 +81,16 @@ func TestFindColumnByteOffsets(t *testing.T) {
 				return
 			}
 			seg := tt.s[startByte:endByte]
-			plain := stripANSI(seg)
+			plain := terminaltext.StripANSI(seg)
 			if plain != tt.wantSeg {
-				t.Errorf("segment stripANSI(%q) = %q, want %q", seg, plain, tt.wantSeg)
+				t.Errorf("segment terminaltext.StripANSI(%q) = %q, want %q", seg, plain, tt.wantSeg)
 			}
 		})
 	}
 }
 
 func TestUpdateLastBlockDoesNotPopulateLineCache(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(80, 12)
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "hello"}
 	v.AppendBlock(block)
@@ -109,7 +111,7 @@ func TestUpdateLastBlockDoesNotPopulateLineCache(t *testing.T) {
 }
 
 func TestViewportRenderPartialWindowDoesNotCacheSliceAsFullBlock(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(24, 2)
 	block := &Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("slice me ", 40)}
 	v.AppendBlock(block)
@@ -125,7 +127,7 @@ func TestViewportRenderPartialWindowDoesNotCacheSliceAsFullBlock(t *testing.T) {
 }
 
 func TestViewportRenderWithBlockStartsCacheMatchesLinearPath(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(32, 6)
 	for i := range 80 {
 		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("cached render equivalence ", 8)})
@@ -145,7 +147,7 @@ func TestViewportRenderWithBlockStartsCacheMatchesLinearPath(t *testing.T) {
 }
 
 func TestViewportRenderIgnoresStaleBlockPositionCacheVersion(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(18, 3)
 	v.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "short"})
 	v.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: strings.Repeat("target ", 8)})
@@ -170,7 +172,7 @@ func TestViewportRenderIgnoresStaleBlockPositionCacheVersion(t *testing.T) {
 }
 
 func TestToggleBlockBumpsRenderVersion(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(80, 12)
 	block := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameShell, Content: `{"command":"echo first"}`, ResultContent: "first", ResultDone: true, Collapsed: true}
 	v.AppendBlock(block)
@@ -195,7 +197,7 @@ func TestToggleBlockBumpsRenderVersion(t *testing.T) {
 // used. The hot budget must be enforced after the anchored offset settles, so
 // the visible-window set reflects the final position.
 func TestToggleEnforcesHotBudgetAtBothEntryPoints(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	tests := []struct {
 		name   string
 		toggle func(v *Viewport)
@@ -236,7 +238,7 @@ func TestToggleEnforcesHotBudgetAtBothEntryPoints(t *testing.T) {
 }
 
 func TestToggleNoOpDoesNotBumpRenderVersion(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	tests := []struct {
 		name  string
 		block *Block
@@ -280,7 +282,7 @@ func TestToggleNoOpDoesNotBumpRenderVersion(t *testing.T) {
 // span change in a block above the window would otherwise shift the visible
 // content and make the user lose the card they were reading.
 func TestToggleAnchorsOffset(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	bigResult := strings.Repeat("line of content\n", 80)
 	readBlock := func(id int) *Block {
 		return &Block{ID: id, Type: BlockToolCall, ToolName: tools.NameRead, Content: `{"path":"a.txt"}`, ResultContent: bigResult, ResultDone: true}
@@ -417,7 +419,7 @@ func TestVisibleBlocksCacheInvalidatesOnMutationAndFilterChange(t *testing.T) {
 }
 
 func TestRenderRangeUsesLineCacheSlice(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{ID: 1, Type: BlockAssistant, Content: strings.Repeat("slice me ", 40)}
 	full := block.Render(60, "")
 	block.lineCache = full
@@ -435,7 +437,7 @@ func TestRenderRangeUsesLineCacheSlice(t *testing.T) {
 }
 
 func TestAssistantRenderUsesMarkdownCacheHit(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "cached assistant body"}
 	first := strings.Join(stripANSILines(block.Render(80, "")), "\n")
 	if !strings.Contains(first, "cached assistant body") {
@@ -452,7 +454,7 @@ func TestAssistantRenderUsesMarkdownCacheHit(t *testing.T) {
 }
 
 func TestViewportVisibleWindowBlockIDsUsesCachedStartsAndSpans(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
@@ -482,7 +484,7 @@ func TestViewportVisibleWindowBlockIDsUsesCachedStartsAndSpans(t *testing.T) {
 }
 
 func TestViewportVisibleWindowBlockIDsCachedOnlyRejectsStalePositionVersion(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
@@ -497,7 +499,7 @@ func TestViewportVisibleWindowBlockIDsCachedOnlyRejectsStalePositionVersion(t *t
 }
 
 func TestViewportRenderDoesNotUseStaleSpansForColdSpillBlocks(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
@@ -531,7 +533,7 @@ func TestViewportRenderDoesNotUseStaleSpansForColdSpillBlocks(t *testing.T) {
 }
 
 func BenchmarkViewportVisibleWindowBlockIDsCachedOnly(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := benchmarkViewportWithSpill()
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
@@ -555,7 +557,7 @@ func TestApplyHighlightToLine(t *testing.T) {
 		line     string
 		colStart int
 		colEnd   int
-		wantSeg  string // highlighted segment stripANSI result should equal this
+		wantSeg  string // highlighted segment terminaltext.StripANSI result should equal this
 	}{
 		{"plain", "hello world", 0, 5, "hello"},
 		{"plain middle", "hello world", 6, 11, "world"},
@@ -568,7 +570,7 @@ func TestApplyHighlightToLine(t *testing.T) {
 			if !strings.Contains(out, hiOn) || !strings.Contains(out, hiOff) {
 				t.Errorf("output must contain highlight SGR; got %q", out)
 			}
-			// extract highlighted segment: content between hiOn and hiOff, stripANSI should equal wantSeg
+			// extract highlighted segment: content between hiOn and hiOff, terminaltext.StripANSI should equal wantSeg
 			idxOn := strings.Index(out, hiOn)
 			idxOff := strings.Index(out, hiOff)
 			if idxOn < 0 || idxOff <= idxOn {
@@ -576,28 +578,28 @@ func TestApplyHighlightToLine(t *testing.T) {
 				return
 			}
 			seg := out[idxOn+len(hiOn) : idxOff]
-			plain := stripANSI(seg)
+			plain := terminaltext.StripANSI(seg)
 			if plain != tt.wantSeg {
-				t.Errorf("highlighted segment stripANSI(%q) = %q, want %q", seg, plain, tt.wantSeg)
+				t.Errorf("highlighted segment terminaltext.StripANSI(%q) = %q, want %q", seg, plain, tt.wantSeg)
 			}
 		})
 	}
 }
 
 func TestApplySearchMatchToLineUsesThemeStyleInsteadOfReverseVideo(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	line := "plain text"
 	out := applySearchMatchToLine(line, 0, len(line))
 	if strings.Contains(out, "\x1b[7m") || strings.Contains(out, "\x1b[27m") {
 		t.Fatalf("search match highlight should not use reverse video, got %q", out)
 	}
-	if stripANSI(out) != line {
-		t.Fatalf("stripANSI(applySearchMatchToLine()) = %q, want %q", stripANSI(out), line)
+	if terminaltext.StripANSI(out) != line {
+		t.Fatalf("terminaltext.StripANSI(applySearchMatchToLine()) = %q, want %q", terminaltext.StripANSI(out), line)
 	}
 }
 
 func TestViewportRenderHighlightsSearchQueryOnFocusedMatchBlock(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 12)
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "prefix needle suffix"}
 	m.viewport.AppendBlock(block)
@@ -621,12 +623,12 @@ func TestViewportRenderHighlightsSearchQueryOnFocusedMatchBlock(t *testing.T) {
 	}
 	matched := false
 	for i, baseLine := range baseLines {
-		if !strings.Contains(stripANSI(baseLine), "needle") {
+		if !strings.Contains(terminaltext.StripANSI(baseLine), "needle") {
 			continue
 		}
 		colStart, colEnd, ok := searchMatchColumnRangeInLine(baseLine, "needle")
 		if !ok {
-			t.Fatalf("expected baseline line to contain search query, got %q", stripANSI(baseLine))
+			t.Fatalf("expected baseline line to contain search query, got %q", terminaltext.StripANSI(baseLine))
 		}
 		expected := applySearchMatchToLine(baseLine, colStart, colEnd)
 		if renderedLines[i] != expected {
@@ -635,12 +637,12 @@ func TestViewportRenderHighlightsSearchQueryOnFocusedMatchBlock(t *testing.T) {
 		matched = true
 	}
 	if !matched {
-		t.Fatalf("baseline render missing query text, got %q", stripANSI(baseline))
+		t.Fatalf("baseline render missing query text, got %q", terminaltext.StripANSI(baseline))
 	}
 }
 
 func TestViewportRenderHighlightsOnlyCurrentSearchOccurrence(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 12)
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "needle first\n\nneedle second"}
 	m.viewport.AppendBlock(block)
@@ -670,7 +672,7 @@ func TestViewportRenderHighlightsOnlyCurrentSearchOccurrence(t *testing.T) {
 		diffCount++
 		colStart, colEnd, ok := searchMatchColumnRangeInLine(baseLine, "needle")
 		if !ok {
-			t.Fatalf("changed line should contain search query, got %q", stripANSI(baseLine))
+			t.Fatalf("changed line should contain search query, got %q", terminaltext.StripANSI(baseLine))
 		}
 		expected := applySearchMatchToLine(baseLine, colStart, colEnd)
 		if renderedLines[i] != expected {
@@ -690,7 +692,7 @@ func TestApplyHighlightToLineSameLineVsMultiLine(t *testing.T) {
 	if !strings.Contains(out, "\x1b[7m") {
 		t.Error("same-line highlight: output must contain highlight SGR")
 	}
-	plain := stripANSI(out)
+	plain := terminaltext.StripANSI(out)
 	if plain != line {
 		t.Errorf("same-line: full line plain text must be unchanged, got %q", plain)
 	}
@@ -803,7 +805,7 @@ func TestExtractSelectionTextStripsRenderedIndentForReadBlock(t *testing.T) {
 	firstCodeLine := -1
 	lastCodeLine := -1
 	for i, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		trimmedPrefix := strings.TrimLeft(plain, " │")
 		if strings.Contains(plain, "func main() {") || strings.Contains(plain, "return") || strings.Contains(plain, "}") {
 			if strings.HasPrefix(trimmedPrefix, "1 ") || strings.HasPrefix(trimmedPrefix, "2 ") || strings.HasPrefix(trimmedPrefix, "3 ") {
@@ -850,7 +852,7 @@ func TestExtractSelectionTextEditDiffPreservesLineNumAndMarker(t *testing.T) {
 	lines := block.Render(v.width, "")
 	target := -1
 	for i, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if strings.Contains(plain, "added") && strings.Contains(plain, "10") && strings.Contains(plain, "+") {
 			target = i
 			break
@@ -886,7 +888,7 @@ func TestExtractSelectionTextAssistantCodeBlockSkipsDisplayOnlyContinuationInden
 	lines := block.Render(v.width, "")
 	var codeLineIdx []int
 	for i, line := range lines {
-		plain := strings.TrimSpace(stripANSI(line))
+		plain := strings.TrimSpace(terminaltext.StripANSI(line))
 		if strings.Contains(plain, "CancelCurrentTurnRoutesToFocusedSubAgent") || strings.Contains(plain, "sistsCancelledToolResult") || strings.Contains(plain, "ersistsCancelledToolResult") {
 			codeLineIdx = append(codeLineIdx, i)
 		}
@@ -913,8 +915,8 @@ func TestStripANSIRemovesOSC8Hyperlinks(t *testing.T) {
 	styled := ansi.SetHyperlink("https://work.weixin.qq.com/wework_admin/frame", "id=123") +
 		"企业微信后台" +
 		ansi.ResetHyperlink("id=123")
-	if got := stripANSI(styled); got != "企业微信后台" {
-		t.Fatalf("stripANSI() with OSC8\n got %q\nwant %q", got, "企业微信后台")
+	if got := terminaltext.StripANSI(styled); got != "企业微信后台" {
+		t.Fatalf("terminaltext.StripANSI() with OSC8\n got %q\nwant %q", got, "企业微信后台")
 	}
 }
 
@@ -930,7 +932,7 @@ func TestExtractSelectionTextStripsOSC8Hyperlinks(t *testing.T) {
 	lines := block.Render(v.width, "")
 	target := -1
 	for i, line := range lines {
-		if strings.Contains(stripANSI(line), "企业微信后台") {
+		if strings.Contains(terminaltext.StripANSI(line), "企业微信后台") {
 			target = i
 			break
 		}
@@ -965,7 +967,7 @@ func TestExtractSelectionTextMouseInclusiveEndpointKeepsLastCharacter(t *testing
 	target := -1
 	startCol := -1
 	for i, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if before, _, ok := strings.Cut(plain, "app_id/app_secret"); ok {
 			target = i
 			startCol = ansi.StringWidth(before)
@@ -1008,7 +1010,7 @@ func TestExtractSelectionTextHydratesSpilledBlocks(t *testing.T) {
 	lineWithAlpha := -1
 	startCol := -1
 	for i, line := range block.Render(v.width, "") {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if before, _, ok := strings.Cut(plain, "alpha"); ok {
 			lineWithAlpha = i
 			startCol = ansi.StringWidth(before)

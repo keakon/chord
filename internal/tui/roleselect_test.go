@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func findRoleSwitchResult(msgs []tea.Msg) (roleSwitchResultMsg, bool) {
@@ -32,7 +33,7 @@ func TestRoleSelectEventOpensRoleOverlay(t *testing.T) {
 	if m.mode != ModeRoleSelect {
 		t.Fatalf("mode = %v, want ModeRoleSelect", m.mode)
 	}
-	plain := stripANSI(m.renderRoleSelectDialog())
+	plain := terminaltext.StripANSI(m.renderRoleSelectDialog())
 	if !strings.Contains(plain, "builder") || !strings.Contains(plain, "planner") {
 		t.Fatalf("role dialog = %q, want builder and planner entries", plain)
 	}

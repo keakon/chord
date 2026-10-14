@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // sidebarMaxEditedFiles is the single ceiling on how many changed files the
@@ -56,7 +57,7 @@ type Sidebar struct {
 	focusedID   string // instance ID of focused agent ("" or "main" = main agent)
 	workingDir  string // project root used to canonicalize changed-file paths
 	width       int
-	theme       Theme
+	theme       uitheme.Palette
 	fileEditSeq uint64
 }
 
@@ -65,7 +66,7 @@ type Sidebar struct {
 const DefaultSidebarWidth = 25
 
 // NewSidebar creates a Sidebar with default settings.
-func NewSidebar(theme Theme) Sidebar {
+func NewSidebar(theme uitheme.Palette) Sidebar {
 	return Sidebar{
 		width: DefaultSidebarWidth,
 		theme: theme,

@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tooloutput"
 )
 
 func TestReadArtifactPagesAndReportsDigest(t *testing.T) {
@@ -83,14 +85,14 @@ func TestReadArtifactBoundsHugeSingleLine(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(abs, []byte(strings.Repeat("x", MaxOutputBytes*4)), 0o600); err != nil {
+	if err := os.WriteFile(abs, []byte(strings.Repeat("x", tooloutput.MaxOutputBytes*4)), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	out, err := (ReadArtifactTool{}).Execute(WithSessionDir(context.Background(), dir), mustMarshal(t, map[string]any{"path": rel}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out) > MaxOutputBytes+256 || !strings.Contains(out, "truncated=budget") {
+	if len(out) > tooloutput.MaxOutputBytes+256 || !strings.Contains(out, "truncated=budget") {
 		t.Fatalf("bounded output len=%d header=%q", len(out), strings.SplitN(out, "\n", 2)[0])
 	}
 }
@@ -102,7 +104,7 @@ func TestReadArtifactKeepsOversizedRequestedLineBeforeLaterLines(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	firstLine := strings.Repeat("x", MaxOutputBytes*2)
+	firstLine := strings.Repeat("x", tooloutput.MaxOutputBytes*2)
 	if err := os.WriteFile(abs, []byte(firstLine+"\nsecond\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

@@ -5,10 +5,11 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (b *Block) renderError(width int) []string {
-	style := ErrorCardStyle
+	style := currentStyles.ErrorCardStyle
 	// Reserve a column for the conversation rail (foreground-only "│" prepended
 	// outside the card width); otherwise a full-width card overflows the
 	// terminal. v2: Width() sets border-box (excl margin).
@@ -20,24 +21,24 @@ func (b *Block) renderError(width int) []string {
 	// already say this is a failure, so the body carries no extra glyph, and the
 	// body stays fully visible: an error is short and must be readable without
 	// expanding a card.
-	lines := []string{ErrorLabelStyle.Render(blockLabelWithID("ERROR", b.displayLabelID())), ""}
-	wrapped := wrapText(sanitizeDisplayText(b.Content), contentWidth)
+	lines := []string{currentStyles.ErrorLabelStyle.Render(blockLabelWithID("ERROR", b.displayLabelID())), ""}
+	wrapped := terminaltext.Wrap(terminaltext.Sanitize(b.Content), contentWidth)
 	if len(wrapped) == 0 {
 		wrapped = []string{"unknown error"}
 	}
 	for _, line := range wrapped {
-		lines = append(lines, ErrorStyle.Render("  "+line))
+		lines = append(lines, currentStyles.ErrorStyle.Render("  "+line))
 	}
 	if b.errorHint != "" {
 		// The error panel holds the structured details (provider, model, masked
 		// key, status code, retry history) this card intentionally omits.
 		lines = append(lines, "")
-		for _, line := range wrapText(sanitizeDisplayText(b.errorHint), contentWidth) {
-			lines = append(lines, DimStyle.Render("  "+line))
+		for _, line := range terminaltext.Wrap(terminaltext.Sanitize(b.errorHint), contentWidth) {
+			lines = append(lines, currentStyles.DimStyle.Render("  "+line))
 		}
 	}
 
-	cardBg := currentTheme.ErrorCardBg
+	cardBg := currentStyles.Palette.ErrorCardBg
 	lines = preserveCardBg(lines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("error", b.Focused))
 }
@@ -46,17 +47,17 @@ func (b *Block) renderStatus(width int) []string {
 	if b.isBackgroundResultCard() {
 		return b.renderBackgroundResult(width)
 	}
-	style := CompactionSummaryCardStyle
+	style := currentStyles.CompactionSummaryCardStyle
 	innerWidth, _ := statusCardMetrics(width)
 
-	title := strings.TrimSpace(sanitizeDisplayText(b.StatusTitle))
+	title := strings.TrimSpace(terminaltext.Sanitize(b.StatusTitle))
 	if title == "" {
 		// An untitled card used to borrow its first body line as the badge,
 		// which both duplicated that line and left a blank badge whenever the
 		// body was a single line. Name it instead.
 		title = infoCardTitle
 	}
-	label := ThinkingLabelStyle.Render(blockLabelWithID(title, b.displayLabelID()))
+	label := currentStyles.ThinkingLabelStyle.Render(blockLabelWithID(title, b.displayLabelID()))
 
 	// A sub-agent mailbox card names its sender and kind as field rows rather
 	// than flattening them into "[agent] kind: …" inside the prose: the rows
@@ -64,12 +65,12 @@ func (b *Block) renderStatus(width int) []string {
 	// as the message itself. Every other status card leaves both empty.
 	metaLines := make([]string, 0, 2)
 	if b.StatusFrom != "" {
-		metaLines = append(metaLines, toolFieldInline(ToolResultExpandedStyle, "From", sanitizeDisplayText(b.StatusFrom)))
+		metaLines = append(metaLines, toolFieldInline(currentStyles.ToolResultExpandedStyle, "From", terminaltext.Sanitize(b.StatusFrom)))
 	}
 	if b.StatusKind != "" {
 		// The kind is a value, not a key, so it keeps its raw spelling: labels
 		// get humanized, enum values stay greppable.
-		metaLines = append(metaLines, toolFieldInline(ToolResultExpandedStyle, "Kind", sanitizeDisplayText(b.StatusKind)))
+		metaLines = append(metaLines, toolFieldInline(currentStyles.ToolResultExpandedStyle, "Kind", terminaltext.Sanitize(b.StatusKind)))
 	}
 
 	// The From/Kind field rows above the body use a 2-space lead plus a "↳ "
@@ -78,7 +79,7 @@ func (b *Block) renderStatus(width int) []string {
 	// so when the field rows are present it is indented 2 more and rendered
 	// 2 columns narrower. Without the field rows (the info card), the body
 	// keeps the original 2-space indent.
-	cardBg := currentTheme.CompactionSummaryBg
+	cardBg := currentStyles.Palette.CompactionSummaryBg
 	bodyIndent := "  "
 	if len(metaLines) > 0 {
 		bodyIndent = "    "
@@ -91,13 +92,13 @@ func (b *Block) renderStatus(width int) []string {
 		// marker sits on the line that survives the toggle. A self-describing
 		// notice (CONTEXT PRESSURE, LOOP CONTINUE #3, REPLY RESUMED) says what it
 		// is at a glance, and the body stays one keystroke away.
-		line := label + DimStyle.Render(" "+toolDisclosureCollapsed)
+		line := label + currentStyles.DimStyle.Render(" "+toolDisclosureCollapsed)
 		lines := preserveCardBg([]string{line}, cardBg)
 		return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("thinking", b.Focused))
 	}
 	if foldable {
 		// The expanded card marks what Space does next.
-		label += DimStyle.Render(" " + toolDisclosureExpanded)
+		label += currentStyles.DimStyle.Render(" " + toolDisclosureExpanded)
 	}
 	// Cards that hide nothing keep the badge/body shape and carry no marker:
 	// mailbox cards carry the worker model's own message, and a body that
@@ -117,7 +118,7 @@ func (b *Block) renderStatus(width int) []string {
 // card renders at, so renderStatus and the fold gate lay the body out
 // identically.
 func statusCardMetrics(width int) (innerWidth, contentWidth int) {
-	style := CompactionSummaryCardStyle
+	style := currentStyles.CompactionSummaryCardStyle
 	// Reserve a column for the conversation rail (foreground-only "│" prepended
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
@@ -137,7 +138,7 @@ func (b *Block) statusCardBodyLines(width int) []string {
 	if b.QuestionDecision {
 		// Decision fields are plain text: Markdown soft breaks would merge the
 		// question, selected answers and multiline custom input into paragraphs.
-		return wrapText(sanitizeDisplayText(strings.TrimSpace(b.Content)), bodyWidth)
+		return terminaltext.Wrap(terminaltext.Sanitize(strings.TrimSpace(b.Content)), bodyWidth)
 	}
 	bodyLines := renderRichMarkdownContent(strings.TrimSpace(b.Content), bodyWidth, &b.richMarkdownHL)
 	if len(bodyLines) == 0 {
@@ -165,12 +166,12 @@ func (b *Block) renderBoundaryMarker(width int) []string {
 	if content == "" {
 		content = "History truncated"
 	}
-	marker := "··· " + sanitizeDisplayText(content) + " ···"
-	lines := wrapText(marker, width)
+	marker := "··· " + terminaltext.Sanitize(content) + " ···"
+	lines := terminaltext.Wrap(marker, width)
 	for i, line := range lines {
-		styled := DimStyle.Render(line)
+		styled := currentStyles.DimStyle.Render(line)
 		if b.Focused {
-			styled = FocusedCardStyle.Render(line)
+			styled = currentStyles.FocusedCardStyle.Render(line)
 		}
 		lines[i] = styled
 	}
@@ -204,7 +205,7 @@ func renderCompactionSummaryLabel(b *Block) string {
 	mode, degraded := compactionSummaryModeLabel(b.CompactionSummaryMode)
 	switch {
 	case mode == "":
-		return ThinkingLabelStyle.Render(label)
+		return currentStyles.ThinkingLabelStyle.Render(label)
 	case degraded:
 		// A degraded checkpoint (a fallback digest, or no summary at all) is a
 		// warning about the history behind it, so the whole badge borrows the
@@ -212,15 +213,15 @@ func renderCompactionSummaryLabel(b *Block) string {
 		// keeps the separator inset with a space on either side: rendering the
 		// suffix past the badge edge left the separator flush against the
 		// label and dropped the badge background behind it.
-		return CompactionDegradedLabelStyle.Render(label + " · " + mode)
+		return currentStyles.CompactionDegradedLabelStyle.Render(label + " · " + mode)
 	default:
 		// One badge, so the label does not carry two lots of badge padding.
-		return ThinkingLabelStyle.Render(label + " · " + mode)
+		return currentStyles.ThinkingLabelStyle.Render(label + " · " + mode)
 	}
 }
 
 func (b *Block) renderCompactionSummary(width int) []string {
-	style := CompactionSummaryCardStyle
+	style := currentStyles.CompactionSummaryCardStyle
 	// Reserve a column for the conversation rail (foreground-only "│" prepended
 	// outside the card width); otherwise a full-width card overflows the terminal.
 	boxWidth := max((width-railWidthToReserve(style))-style.GetHorizontalMargins(), 10)
@@ -248,7 +249,7 @@ func (b *Block) renderCompactionSummary(width int) []string {
 			bodyLines = append(bodyLines, "")
 		}
 		if section.label != "" {
-			bodyLines = append(bodyLines, CompactionSectionLabelStyle.Render(section.label))
+			bodyLines = append(bodyLines, currentStyles.CompactionSectionLabelStyle.Render(section.label))
 		}
 		body := section.body
 		if section.label == "" {
@@ -268,7 +269,7 @@ func (b *Block) renderCompactionSummary(width int) []string {
 	for _, line := range bodyLines {
 		lines = append(lines, "  "+line)
 	}
-	cardBg := currentTheme.CompactionSummaryBg
+	cardBg := currentStyles.Palette.CompactionSummaryBg
 	lines = preserveCardBg(lines, cardBg)
 	return renderPrewrappedCard(style, innerWidth, lines, cardBg, cardRailPrefix("assistant", b.Focused))
 }

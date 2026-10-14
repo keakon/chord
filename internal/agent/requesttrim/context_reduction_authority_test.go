@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/privatefs"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -295,7 +296,7 @@ func authorityMatrixCases(t *testing.T, sessionDir string) []authorityCase {
 			authority: "session artifact",
 			ctx: Context{
 				ToolName: tools.NameShell, Meta: ToolCall{Name: tools.NameShell, Args: `{"command":"make"}`},
-				Content: shellSuccess + "\n" + tools.ArtifactReferencePrefix + sessionDir + "/tool-outputs/call_1.log. " + tools.ArtifactReadGuidance,
+				Content: shellSuccess + "\n" + tooloutput.ArtifactReferencePrefix + sessionDir + "/tool-outputs/call_1.log. " + tooloutput.ArtifactReadGuidance,
 				Age:     policy.ShellSuccessAgeTurns, Policy: policy, ArchiveDir: sessionDir,
 			},
 			wantClass: requestReductionShellOK, wantLevel: retentionArchived,
@@ -422,7 +423,7 @@ func assertArtifactAddressResolves(t *testing.T, sessionDir, ref, reduced string
 	if ref == "" {
 		t.Fatalf("decision claims an artifact recovery route but carries no reference: %q", firstLine(reduced))
 	}
-	path := strings.TrimSuffix(strings.TrimPrefix(ref, tools.ArtifactReferencePrefix), ".")
+	path := strings.TrimSuffix(strings.TrimPrefix(ref, tooloutput.ArtifactReferencePrefix), ".")
 	if idx := strings.Index(path, ". "); idx > 0 {
 		path = path[:idx]
 	}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestRequestProgressKeepsLatestCumulativeCounters(t *testing.T) {
@@ -93,7 +94,7 @@ func TestRequestProgressResetsPerCardAcrossAssistantToolAssistant(t *testing.T) 
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 	m.activityStartTime["main"] = time.Now().Add(-3 * time.Second)
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 225 * 1024, Events: 93}})
-	plain2 := stripANSI(m.renderStatusBar())
+	plain2 := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain2, "⚙ 3s") {
 		t.Fatalf("status bar should show executing activity with elapsed, got %q", plain2)
 	}
@@ -114,7 +115,7 @@ func TestRenderStatusBarNamesWaitingStates(t *testing.T) {
 	}{{agent.ActivityWaitingHeaders, "◷"}, {agent.ActivityWaitingToken, "◌"}} {
 		m := NewModelWithSize(nil, 180, 24)
 		m.activities["main"] = agent.AgentActivityEvent{Type: tc.activity, AgentID: "main"}
-		plain := stripANSI(m.renderStatusBar())
+		plain := terminaltext.StripANSI(m.renderStatusBar())
 		if !strings.Contains(plain, tc.icon) || strings.Contains(plain, "Waiting for") || strings.Contains(plain, "0 B") {
 			t.Fatalf("waiting status = %q", plain)
 		}
@@ -150,7 +151,7 @@ func TestRenderStatusBarNamesStreamingActivity(t *testing.T) {
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	m.requestProgress["main"] = requestProgressState{VisibleBytes: 128 * 1024, VisibleEvents: 42}
 
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(got, "↓") || !strings.Contains(got, "128 KB") || strings.Contains(got, "Receiving reply") || !strings.Contains(got, "42 events") {
 		t.Fatalf("status bar should use a compact receiving indicator; got %q", got)
 	}
@@ -172,7 +173,7 @@ func TestStreamingActivityRetainsNumericProgressWhenWidthIsTight(t *testing.T) {
 		{7, "↓ 64 KB"},
 		{1, "↓"},
 	} {
-		got := stripANSI(m.renderActivityAt(activity, tc.width, now))
+		got := terminaltext.StripANSI(m.renderActivityAt(activity, tc.width, now))
 		if got != tc.want {
 			t.Fatalf("activity at width %d = %q, want %q", tc.width, got, tc.want)
 		}
@@ -185,7 +186,7 @@ func TestStreamingActivityShowsEventsWithoutBytes(t *testing.T) {
 	activity := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 	m.activityStartTime["main"] = now
 	m.requestProgress["main"] = requestProgressState{VisibleEvents: 1}
-	if got := stripANSI(m.renderActivityAt(activity, 50, now)); got != "↓ 0 B · 1 event · 0s" {
+	if got := terminaltext.StripANSI(m.renderActivityAt(activity, 50, now)); got != "↓ 0 B · 1 event · 0s" {
 		t.Fatalf("events-only progress = %q", got)
 	}
 }
@@ -197,7 +198,7 @@ func TestRequestProgressDoneImmediatelyStopsShowingPreviousRequestLength(t *test
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 128 * 1024, Events: 42}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.RequestProgressEvent{AgentID: "main", Bytes: 128 * 1024, Events: 42, Done: true}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}})
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "128 KB") || strings.Contains(plain, "42 events") {
 		t.Fatalf("status bar should drop finished request length immediately when switching request, got %q", plain)
 	}
@@ -250,7 +251,7 @@ func TestLeavingRequestActivityClearsPreviousRequestProgress(t *testing.T) {
 	if _, ok := m.requestProgress["main"]; !ok {
 		t.Fatal("request progress should be retained during ActivityExecuting until Done event arrives")
 	}
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	// Status bar shows executing icon, not download progress, because activity type is Executing
 	if !strings.Contains(plain, "⚙") {
 		t.Fatalf("status bar should show executing state, got %q", plain)
@@ -272,7 +273,7 @@ func TestRequestDoneThenNextConnectingStartsAtZero(t *testing.T) {
 	if progress := m.requestProgress["main"]; progress.VisibleBytes != 0 || progress.VisibleEvents != 0 {
 		t.Fatalf("next request inherited progress: %+v", progress)
 	}
-	if plain := stripANSI(m.renderStatusBar()); (!strings.Contains(plain, "⠋") && !strings.Contains(plain, "⠹") && !strings.Contains(plain, "⠴") && !strings.Contains(plain, "⠧")) || strings.Contains(plain, "Connecting") {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); (!strings.Contains(plain, "⠋") && !strings.Contains(plain, "⠹") && !strings.Contains(plain, "⠴") && !strings.Contains(plain, "⠧")) || strings.Contains(plain, "Connecting") {
 		t.Fatalf("next request should show the compact connecting indicator: %q", plain)
 	}
 }
@@ -287,7 +288,7 @@ func TestRenderStatusBarShowsLoopStateImmediatelyAfterEnableEvent(t *testing.T) 
 	backend.loopMaxIterations = 10
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.LoopStateChangedEvent{}})
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "LOOP 1/10") {
 		t.Fatalf("status bar = %q, want immediate loop pill after enable event", plain)
 	}
@@ -301,7 +302,7 @@ func TestRenderStatusBarShowsLoopStateAfterRuntimeEnable(t *testing.T) {
 	backend.loopMaxIterations = 10
 	backend.loopState = agent.LoopStateExecuting
 	m := NewModelWithSize(backend, 120, 24)
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "LOOP 1/10") {
 		t.Fatalf("status bar = %q, want loop pill after runtime enable", plain)
 	}
@@ -313,7 +314,7 @@ func TestRenderStatusBarShowsLoopStateForMainAgent(t *testing.T) {
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "LOOP 1/10") {
 		t.Fatalf("status bar = %q, want loop pill with iteration info", plain)
 	}
@@ -328,7 +329,7 @@ func TestRenderStatusBarShowsLoopIterationWithoutLimitWhenUnlimited(t *testing.T
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "LOOP 1") {
 		t.Fatalf("status bar = %q, want loop iteration without limit", plain)
 	}
@@ -343,7 +344,7 @@ func TestRenderStatusBarDoesNotShowLoopWhenDisabled(t *testing.T) {
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "Loop") {
 		t.Fatalf("status bar = %q, should not show loop text when loop is disabled", plain)
 	}
@@ -355,7 +356,7 @@ func TestRenderStatusBarShowsLoopEscHintWithoutSqueezingLoopPill(t *testing.T) {
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "LOOP 1/10") {
 		t.Fatalf("status bar = %q, want LOOP pill visible", plain)
 	}
@@ -371,7 +372,7 @@ func TestRenderStatusBarKeepsLoopTextWhileCompacting(t *testing.T) {
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main"}
 
 	rendered := m.renderStatusBar()
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "LOOP") {
 		t.Fatalf("status bar = %q, want loop pill while compacting", plain)
 	}

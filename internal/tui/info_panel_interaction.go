@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // defaultInfoPanelSectionCollapsed reports whether a section the user has not
@@ -194,7 +195,7 @@ func renderInfoPanelCollapsibleHeaderLeft(expanded bool, title string) string {
 	if expanded {
 		marker = infoPanelCollapsibleMarkerOpen
 	}
-	return InfoPanelTitle.Render(fmt.Sprintf("%s %s", marker, title))
+	return currentStyles.InfoPanelTitle.Render(fmt.Sprintf("%s %s", marker, title))
 }
 
 // infoPanelCollapsibleSummaryBudget returns the max display width left for a
@@ -212,7 +213,7 @@ func infoPanelCollapsibleSummaryBudget(lineW int, expanded bool, title string) i
 func renderInfoPanelCollapsibleHeader(lineW int, expanded bool, title string, summary string) string {
 	left := renderInfoPanelCollapsibleHeaderLeft(expanded, title)
 	if summary == "" {
-		return InfoPanelLineBg.Width(lineW).Render(left)
+		return currentStyles.InfoPanelLineBg.Width(lineW).Render(left)
 	}
 	budget := infoPanelCollapsibleSummaryBudget(lineW, expanded, title)
 	if budget <= 0 {
@@ -220,19 +221,19 @@ func renderInfoPanelCollapsibleHeader(lineW int, expanded bool, title string, su
 		// against the width left after the title.
 		availSummary := lineW - lipgloss.Width(left)
 		if availSummary <= 0 {
-			return InfoPanelLineBg.Width(lineW).Render(left)
+			return currentStyles.InfoPanelLineBg.Width(lineW).Render(left)
 		}
-		return InfoPanelLineBg.Width(lineW).Render(lipgloss.JoinHorizontal(
+		return currentStyles.InfoPanelLineBg.Width(lineW).Render(lipgloss.JoinHorizontal(
 			lipgloss.Left,
 			left,
-			InfoPanelDim.Render(truncateOneLine(summary, availSummary)),
+			currentStyles.InfoPanelDim.Render(terminaltext.TruncateOneLine(summary, availSummary)),
 		))
 	}
 	right := lipgloss.JoinHorizontal(
 		lipgloss.Left,
-		InfoPanelDim.Render(infoPanelCollapsibleSummarySep),
-		InfoPanelDim.Render(truncateOneLine(summary, budget)),
+		currentStyles.InfoPanelDim.Render(infoPanelCollapsibleSummarySep),
+		currentStyles.InfoPanelDim.Render(terminaltext.TruncateOneLine(summary, budget)),
 	)
 	line := lipgloss.JoinHorizontal(lipgloss.Left, left, right)
-	return InfoPanelLineBg.Width(lineW).Render(line)
+	return currentStyles.InfoPanelLineBg.Width(lineW).Render(line)
 }

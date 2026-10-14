@@ -2,23 +2,29 @@ package llm
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/contextdiag"
+	"github.com/keakon/chord/internal/contextdiag/input"
 	"github.com/keakon/chord/internal/message"
+)
+
+const (
+	diagnosticUpstream    = "upstream_route_unobservable"
+	diagnosticServerReuse = "server_context_reuse"
 )
 
 type diagnosticScope struct {
 	request          *RequestDiagnostics
 	provider         *ProviderConfig
 	snapshot         contextdiag.Snapshot
-	baseline         *diagnosticBaseline
+	baseline         *input.Baseline
 	domain           [32]byte
 	prepared         contextdiag.Snapshot
-	preparedBaseline *diagnosticBaseline
+	preparedBaseline *input.Baseline
 	preparedVersion  uint64
 	active           contextdiag.RequestID
 	ended            bool
@@ -29,38 +35,20 @@ type diagnosticScope struct {
 func completeObservedProvider(ctx context.Context, impl Provider, provider *ProviderConfig, key, model, system string, messages []message.Message, defs []message.ToolDefinition, maxTokens int, tuning RequestTuning, cb StreamCallback) (*message.Response, error) {
 	var scope *diagnosticScope
 	if d, _ := ctx.Value(diagnosticsContextKey{}).(*RequestDiagnostics); d != nil {
-		b := newDiagnosticBudget(ctx)
-		categories, limitations, completeness := estimateDiagnosticInput(b, system, messages, defs, tuning)
+		var nativeDefinitions func() []map[string]any
+		if tuning.nativeTool != nil {
+			nativeDefinitions = tuning.nativeTool.diagnosticDefinitions
+		}
+		scan := input.NewScan(ctx, system, messages, defs, input.Options{
+			NativeDefinitions: nativeDefinitions,
+			HostedTool:        tuning.HostedTool != nil,
+			Overrides:         func() bool { return !requestOverridesEmpty(provider.RequestOverrides(model)) },
+		})
 		projected := messages
-		if !b.incomplete && len(messages) <= diagnosticMaxMessages {
+		if scan.CanProject() {
 			projected = promptCacheMessagesForTarget(providerWireFamily(provider), model, tuning, messages, 0)
 		}
-		baseline := buildDiagnosticBaseline(b, system, projected, defs)
-		if tuning.nativeTool != nil {
-			h := sha256.New()
-			h.Write(baseline.tools[:])
-			for _, definition := range tuning.nativeTool.diagnosticDefinitions() {
-				data, ok := boundedDiagnosticJSON(definition)
-				if !ok || !diagnosticHashField(h, b, string(data)) {
-					baseline.toolsOK = false
-					break
-				}
-			}
-			baseline.tools = diagnosticSum(h)
-		}
-		overrides := !requestOverridesEmpty(provider.RequestOverrides(model))
-		if overrides || tuning.HostedTool != nil || tuning.nativeTool != nil {
-			baseline.messagesOK = false
-			baseline.messages = nil
-			limitations = append(limitations, diagnosticProjection)
-		}
-		if overrides {
-			limitations = append(limitations, diagnosticOverrides)
-		}
-		if b.incomplete {
-			completeness = contextdiag.Partial
-			limitations = append(limitationWithoutDuplicate(limitations, diagnosticScanIncomplete), diagnosticProjection)
-		}
+		result := scan.Finish(projected)
 		c := d.collector
 		c.mu.Lock()
 		reduction := contextdiag.CloneReduction(d.reduction)
@@ -70,7 +58,7 @@ func completeObservedProvider(ctx context.Context, impl Provider, provider *Prov
 		if modelRef == "" {
 			modelRef = providerModelRef(provider, model)
 		}
-		scope = &diagnosticScope{request: d, provider: provider, baseline: baseline, snapshot: contextdiag.Snapshot{HistoryGeneration: d.generation, ModelRef: modelRef, WireFamily: string(providerWireFamily(provider)), EstimateScope: contextdiag.ProviderInput, Estimator: contextdiag.UTF8BytesDiv3, Completeness: completeness, Categories: categories, Limitations: append(limitations, diagnosticUpstream), Reduction: reduction, Usage: contextdiag.Usage{State: contextdiag.Missing}}}
+		scope = &diagnosticScope{request: d, provider: provider, baseline: result.Baseline, snapshot: contextdiag.Snapshot{HistoryGeneration: d.generation, ModelRef: modelRef, WireFamily: string(providerWireFamily(provider)), EstimateScope: contextdiag.ProviderInput, Estimator: contextdiag.UTF8BytesDiv3, Completeness: result.Completeness, Categories: result.Categories, Limitations: append(result.Limitations, diagnosticUpstream), Reduction: reduction, Usage: contextdiag.Usage{State: contextdiag.Missing}}}
 		scope.domain = diagnosticDomain(secret[:], fmt.Sprintf("%p", provider), provider.APIURL(), key, modelRef, string(providerWireFamily(provider)), tuning.SessionKey, tuning.Anthropic.PromptCacheMode, tuning.Anthropic.PromptCacheTTL)
 		ctx = context.WithValue(ctx, diagnosticScopeContextKey{}, scope)
 	}
@@ -86,10 +74,8 @@ func completeObservedProvider(ctx context.Context, impl Provider, provider *Prov
 	return resp, err
 }
 func limitationWithoutDuplicate(in []string, s string) []string {
-	for _, v := range in {
-		if v == s {
-			return in
-		}
+	if slices.Contains(in, s) {
+		return in
 	}
 	return append(in, s)
 }
@@ -98,16 +84,15 @@ func (s *diagnosticScope) prepare(transport string) {
 	c.mu.Lock()
 	previous, version := c.baseline, c.version
 	c.mu.Unlock()
-	next := *s.baseline
-	next.domain = diagnosticDomain(s.domain[:], transport)
+	next := s.baseline.ForDomain(diagnosticDomain(s.domain[:], transport))
 	snapshot := contextdiag.Clone(s.snapshot)
 	snapshot.Transport = transport
 	if transport == contextdiag.Custom {
-		next.messagesOK = false
+		next = next.WithoutMessageComparison()
 		snapshot.Limitations = limitationWithoutDuplicate(snapshot.Limitations, "custom_provider")
 	}
-	snapshot.Cache = compareDiagnosticBaseline(previous, &next)
-	s.prepared, s.preparedBaseline, s.preparedVersion = snapshot, &next, version
+	snapshot.Cache = input.Compare(previous, next)
+	s.prepared, s.preparedBaseline, s.preparedVersion = snapshot, next, version
 }
 func (s *diagnosticScope) submit() {
 	c := s.request.collector
@@ -181,7 +166,7 @@ func finishDiagnosticAttempt(ctx context.Context, resp *message.Response, err er
 }
 func diagnosticServerContextReuse(ctx context.Context) {
 	if s := diagnosticsScope(ctx); s != nil {
-		s.baseline.messagesOK = false
+		s.baseline = s.baseline.WithoutMessageComparison()
 		s.snapshot.Limitations = limitationWithoutDuplicate(s.snapshot.Limitations, diagnosticServerReuse)
 	}
 }

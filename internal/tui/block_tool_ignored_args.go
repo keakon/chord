@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (b *Block) renderToolCardWithIgnoredArgs(style lipgloss.Style, cardWidth int, title string, body []string, bgColorNum string, railPrefix string) []string {
@@ -304,10 +305,10 @@ func (b *Block) formatDiagnosticOption(diagnostic *toolArgDiagnostic) string {
 		return ""
 	}
 	if diagnostic.ignored {
-		return DimStyle.Strikethrough(true).Render(text)
+		return currentStyles.DimStyle.Strikethrough(true).Render(text)
 	}
 	if diagnostic.missing {
-		return ErrorStyle.Render(text)
+		return currentStyles.ErrorStyle.Render(text)
 	}
 	return text
 }
@@ -424,7 +425,7 @@ func (b *Block) appendToolArgDiagnostics(body []string, contentWidth int) []stri
 		return body
 	}
 	header := body[0]
-	baseWidth := tuiStringWidth(stripANSI(header))
+	baseWidth := terminaltext.Width(terminaltext.StripANSI(header))
 	remaining := max(contentWidth-baseWidth-1, 0)
 	appended := 0
 	for _, diagnostic := range diagnostics {
@@ -436,7 +437,7 @@ func (b *Block) appendToolArgDiagnostics(body []string, contentWidth int) []stri
 		if text == "" {
 			continue
 		}
-		if !diagnostic.missing && strings.Contains(stripANSI(header), plain) {
+		if !diagnostic.missing && strings.Contains(terminaltext.StripANSI(header), plain) {
 			style := diagnosticOptionStyle(diagnostic)
 			header = strings.Replace(header, plain, style.Render(text), 1)
 			continue
@@ -475,9 +476,9 @@ func (b *Block) appendToolArgDiagnostics(body []string, contentWidth int) []stri
 // neither-ignored-nor-missing diagnostic unstyled; both keep their behavior.
 func diagnosticOptionStyle(diagnostic toolArgDiagnostic) lipgloss.Style {
 	if diagnostic.ignored {
-		return DimStyle.Strikethrough(true)
+		return currentStyles.DimStyle.Strikethrough(true)
 	}
-	return ErrorStyle
+	return currentStyles.ErrorStyle
 }
 
 // diagnosticArgOccupiesHeader reports whether the tool already accounts for

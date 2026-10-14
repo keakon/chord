@@ -5,13 +5,15 @@ import (
 	"testing"
 
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // backgroundOnTrailingSpaces reports the active 256-color background index while
 // emitting any trailing pad spaces (spaces after the final non-space printable
 // character). It returns "" when the background is in the default state.
 func backgroundOnTrailingSpaces(line string) (bg string, ok bool) {
-	plain := stripANSI(line)
+	plain := terminaltext.StripANSI(line)
 	contentEnd := len(strings.TrimRight(plain, " \t"))
 	if contentEnd == 0 {
 		return "", false
@@ -33,7 +35,7 @@ func backgroundOnTrailingSpaces(line string) (bg string, ok bool) {
 				}
 			}
 			// Fallback: skip the whole ANSI sequence.
-			i = skipANSISequence(line, i)
+			i = terminaltext.SkipANSI(line, i)
 			continue
 		}
 		if line[i] == ' ' && plainCol >= contentEnd {
@@ -95,8 +97,8 @@ func TestTruncateLineToDisplayWidthClosesInlineBGAndRestoresBaseBGForPadding(t *
 	// intentionally left unclosed so truncation happens mid-span.
 	input := cardBgSeq + "prefix " + inlineBg + strings.Repeat("X", 20)
 
-	truncated := truncateLineToDisplayWidth(input, 12)
-	padded := padLineToDisplayWidth(truncated, 20)
+	truncated := terminaltext.Truncate(input, 12)
+	padded := terminaltext.Pad(truncated, 20)
 
 	bg, ok := backgroundOnTrailingSpaces(padded)
 	if !ok {
@@ -109,8 +111,8 @@ func TestTruncateLineToDisplayWidthClosesInlineBGAndRestoresBaseBGForPadding(t *
 
 func TestTruncateLineToDisplayWidthLeavesPlainTextUnchanged(t *testing.T) {
 	input := strings.Repeat("A", 20)
-	got := truncateLineToDisplayWidth(input, 5)
+	got := terminaltext.Truncate(input, 5)
 	if got != input[:5] {
-		t.Fatalf("truncateLineToDisplayWidth(plain)=%q, want %q", got, input[:5])
+		t.Fatalf("terminaltext.Truncate(plain)=%q, want %q", got, input[:5])
 	}
 }

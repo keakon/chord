@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -227,12 +228,12 @@ func TestMCPToolEmbeddedImageAndStructuredArtifact(t *testing.T) {
 	if err == nil || text != "" || len(collector.Drain()) != 0 {
 		t.Fatalf("failed call injected an image: text=%q err=%v", text, err)
 	}
-	ft.responses["tools/call"] = json.RawMessage(fmt.Sprintf(`{"content":[],"structuredContent":{"value":%q}}`, strings.Repeat("a", tools.MaxOutputBytes+1)))
+	ft.responses["tools/call"] = json.RawMessage(fmt.Sprintf(`{"content":[],"structuredContent":{"value":%q}}`, strings.Repeat("a", tooloutput.MaxOutputBytes+1)))
 	text, err = wrapped.Execute(t.Context(), json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	truncated := tools.TruncateOutputWithOptions(text, t.TempDir(), tools.TruncateOptions{})
+	truncated := tooloutput.Truncate(text, t.TempDir(), tooloutput.Options{})
 	if !truncated.Truncated || truncated.SavedPath == "" {
 		t.Fatalf("missing artifact: %+v", truncated)
 	}

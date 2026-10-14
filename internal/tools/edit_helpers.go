@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/keakon/chord/internal/textclean"
 )
 
 // tolerantMatchNote is the user-visible marker for edits matched via the
@@ -178,12 +180,12 @@ func isMarkRune(r rune) bool {
 // belong to the variation-selector machinery instead of the orphan-mark fold:
 // the text/emoji presentation selectors U+FE0E/U+FE0F and the enclosing
 // keycap U+20E3 that completes a keycap sequence. They are Unicode combining
-// marks, but StripOrphanVariationSelectors owns them and decides their fate
+// marks, but textclean.StripOrphanVariationSelectors owns them and decides their fate
 // (keeping the full "1\ufe0f\u20e3" keycap emoji, dropping a defective "1"
 // plus bare selector), so the orphan-mark rule — whose verdicts are about
 // diacritics over whitespace or a visible base — must never claim them.
 func isVariationSelectorMark(r rune) bool {
-	return r == '\ufe0e' || r == '\ufe0f' || r == combiningEnclosingKeycap
+	return r == '\ufe0e' || r == '\ufe0f' || r == textclean.CombiningEnclosingKeycap
 }
 
 // isOrphanCombiningMark reports whether rs[i] is a combining mark (Unicode
@@ -204,7 +206,7 @@ func isVariationSelectorMark(r rune) bool {
 // after whitespace are folded as a group.
 //
 // Variation selectors are excluded for the same reason the write path
-// excludes them (see isVariationSelectorMark): StripOrphanVariationSelectors
+// excludes them (see isVariationSelectorMark): textclean.StripOrphanVariationSelectors
 // owns them and has already removed the orphaned ones by the time this rule
 // runs, so a selector still present belongs to a real emoji presentation or
 // keycap sequence. Folding it here would let the match path accept a bare base
@@ -311,7 +313,7 @@ func hasOrphanMarkCandidate(s string) bool {
 // zero-width pass first, then the variation-selector pass, then the orphan
 // combining-mark pass.
 func stripEditInvisible(s string) string {
-	return StripOrphanCombiningMarks(StripZeroWidthFormat(StripOrphanVariationSelectors(s)))
+	return StripOrphanCombiningMarks(textclean.StripZeroWidthFormat(textclean.StripOrphanVariationSelectors(s)))
 }
 
 // CountStrippedInvisible reports, per rune, the invisible characters that the
@@ -355,7 +357,7 @@ func CountStrippedInvisible(original, stripped string) map[rune]int {
 // variation-selector marks are covered by their own branch and excluded here
 // so a keycap or emoji-presentation sequence never shows up as cleaned.
 func isReportedInvisibleRune(r rune) bool {
-	return isZeroWidthFormatRune(r) || r == '\ufe0e' || r == '\ufe0f' ||
+	return textclean.IsZeroWidthFormatRune(r) || r == '\ufe0e' || r == '\ufe0f' ||
 		(isMarkRune(r) && !isVariationSelectorMark(r))
 }
 

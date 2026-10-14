@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/memory"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (m *Model) renderMemoryPanel() string {
@@ -26,13 +27,13 @@ func (m *Model) renderMemoryPanel() string {
 	} else {
 		contentWidth := max(1, dialogContentWidth(cfg.MaxWidth))
 		const gapRows = 1
-		headerLines := tuiHardwrap(m.memoryPanelListHeader(cfg), contentWidth)
+		headerLines := terminaltext.Hardwrap(m.memoryPanelListHeader(cfg), contentWidth)
 		body = strings.Join(headerLines, "\n") + "\n\n"
 		if p.list != nil {
 			p.list.SetMaxVisible(max(1, overlayContentHeight(cfg, area)-(len(headerLines)+gapRows)))
 			p.listBaseRow = layoutOverlay(cfg, area).contentBaseRow() + len(headerLines) + gapRows
 			if p.list.Len() > 0 {
-				body += p.list.Render(contentWidth)
+				body += p.list.Render(contentWidth, currentStyles)
 			} else if p.query != "" {
 				body += "No matching memories."
 			} else {
@@ -52,7 +53,7 @@ func (m *Model) memoryPanelListHeader(cfg OverlayConfig) string {
 	var b strings.Builder
 	tabs := []string{"Project memories", "Session applied", "Suggestions"}
 	if m.width < 60 {
-		fmt.Fprintf(&b, "%s  %s\n", TabActiveStyle.Render(tabs[p.tab]), hintLine(hint("Tab", "views")))
+		fmt.Fprintf(&b, "%s  %s\n", currentStyles.TabActiveStyle.Render(tabs[p.tab]), hintLine(hint("Tab", "views")))
 	} else {
 		fmt.Fprintf(&b, "%s\n", renderTabRow(tabs, p.tab))
 	}
@@ -116,7 +117,7 @@ func (m *Model) memoryPanelOverlayConfig() OverlayConfig {
 		cfg.Footer = "Working…"
 	}
 	if p.err != "" {
-		cfg.Footer = DialogDangerStyle.Render(truncateOneLine(sanitizeToolDisplayText(p.err), max(dialogContentWidth(cfg.MaxWidth), 1)))
+		cfg.Footer = currentStyles.DialogDangerStyle.Render(terminaltext.TruncateOneLine(sanitizeToolDisplayText(p.err), max(dialogContentWidth(cfg.MaxWidth), 1)))
 	}
 	if p.inputFocused {
 		cfg.Hint = hintLine(hint("type", "filter"), hint("Enter", "keep"), hint("Esc", "clear"))

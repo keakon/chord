@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/lsp"
+	"github.com/keakon/chord/internal/textfile"
 )
 
 // DeleteTool removes one or more explicit files or symlinks from disk.
@@ -278,7 +279,7 @@ func (t DeleteTool) executeDelete(ctx context.Context, req DeleteRequest) (delet
 			return result, err
 		}
 
-		invalidatePathCache(path)
+		textfile.Invalidate(path)
 		if err := removeFileOrSymlink(path); err != nil {
 			if os.IsNotExist(err) {
 				result.AlreadyAbsent = append(result.AlreadyAbsent, path)
@@ -293,7 +294,7 @@ func (t DeleteTool) executeDelete(ctx context.Context, req DeleteRequest) (delet
 			reportToolProgress(ctx, ToolProgressSnapshot{Label: "paths", Current: processed, Total: totalPaths})
 			return result, fmt.Errorf("delete stopped after an execution error")
 		}
-		invalidatePathCache(path)
+		textfile.Invalidate(path)
 		result.Deleted = append(result.Deleted, path)
 		t.clearLSPDeleteState(ctx, path, true)
 		processed++

@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
-
 	"github.com/keakon/lipgloss/v2"
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type statusBarPlacedSegment struct {
@@ -268,18 +268,18 @@ func (m *Model) statusBarSnapshot() statusBarAgentSnapshot {
 }
 
 func (m *Model) statusBarModePill(modeText string) string {
-	modeStyle := ModeNormalStyle
+	modeStyle := currentStyles.ModeNormalStyle
 	switch m.mode {
 	case ModeInsert:
-		modeStyle = ModeInsertStyle
+		modeStyle = currentStyles.ModeInsertStyle
 	case ModeConfirm, ModeSessionDeleteConfirm, ModeStopJobConfirm:
-		modeStyle = ModeConfirmStyle
+		modeStyle = currentStyles.ModeConfirmStyle
 	case ModeQuestion:
-		modeStyle = ModeQuestionStyle
+		modeStyle = currentStyles.ModeQuestionStyle
 	case ModeSearch:
-		modeStyle = ModeSearchStyle
+		modeStyle = currentStyles.ModeSearchStyle
 	case ModeModelSelect:
-		modeStyle = ModeModelSelectStyle
+		modeStyle = currentStyles.ModeModelSelectStyle
 	}
 	if m.cachedStatusBarModeKey == modeText {
 		return m.cachedStatusBarModePill
@@ -324,14 +324,14 @@ func (m *Model) appendStatusBarLoopPill(pills []string, inputs statusBarInputs) 
 			}
 		}
 	}
-	return append(pills, StatusChipStyle.Render(label))
+	return append(pills, currentStyles.StatusChipStyle.Render(label))
 }
 
 func (m *Model) appendStatusBarYoloPill(pills []string, inputs statusBarInputs) []string {
 	if !inputs.YoloEnabled {
 		return pills
 	}
-	return append(pills, StatusChipWarnStyle.Render("YOLO"))
+	return append(pills, currentStyles.StatusChipWarnStyle.Render("YOLO"))
 }
 
 func (m *Model) appendStatusBarMemoryPill(pills []string, inputs statusBarInputs) []string {
@@ -342,16 +342,16 @@ func (m *Model) appendStatusBarMemoryPill(pills []string, inputs statusBarInputs
 		// Memory extraction is stalled: setup failed, or the last commit could
 		// not proceed. Say so instead of implying a healthy region; the
 		// already-indexed memory is still injected.
-		return append(pills, StatusChipErrorStyle.Render("MEMORY-FAIL"))
+		return append(pills, currentStyles.StatusChipErrorStyle.Render("MEMORY-FAIL"))
 	}
-	return append(pills, StatusChipStyle.Render("MEMORY"))
+	return append(pills, currentStyles.StatusChipStyle.Render("MEMORY"))
 }
 
 func (m *Model) appendStatusBarPersistencePill(pills []string, inputs statusBarInputs) []string {
 	if !inputs.PersistenceDegraded {
 		return pills
 	}
-	return append(pills, StatusChipErrorStyle.Render("PERSIST-FAIL"))
+	return append(pills, currentStyles.StatusChipErrorStyle.Render("PERSIST-FAIL"))
 }
 
 func (m *Model) buildStatusBarLeadingPills(inputs statusBarInputs) []string {
@@ -372,7 +372,7 @@ func (m *Model) statusBarSearchPill() string {
 	if total == 0 {
 		current = 0
 	}
-	return PillStyle.Render(fmt.Sprintf("/%s [%d/%d]", m.search.State.Query, current, total))
+	return currentStyles.PillStyle.Render(fmt.Sprintf("/%s [%d/%d]", m.search.State.Query, current, total))
 }
 
 func (m *Model) statusBarModeLabel() string {
@@ -595,8 +595,8 @@ func (m *Model) renderStatusBar() string {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
 			leftSide,
-			DimStyle.Render(statusBarActivityPathGap),
-			StatusHintStyle.Render(m.chord.display()),
+			currentStyles.DimStyle.Render(statusBarActivityPathGap),
+			currentStyles.StatusHintStyle.Render(m.chord.display()),
 		)
 		leftWidth = lipgloss.Width(leftSide)
 	}
@@ -604,8 +604,8 @@ func (m *Model) renderStatusBar() string {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
 			leftSide,
-			DimStyle.Render(statusBarActivityPathGap),
-			StatusHintStyle.Render(quitHint),
+			currentStyles.DimStyle.Render(statusBarActivityPathGap),
+			currentStyles.StatusHintStyle.Render(quitHint),
 		)
 		leftWidth = lipgloss.Width(leftSide)
 	}
@@ -630,8 +630,8 @@ func (m *Model) renderStatusBar() string {
 		leftSide = lipgloss.JoinHorizontal(
 			lipgloss.Center,
 			leftSide,
-			DimStyle.Render(statusBarActivityPathGap),
-			DimStyle.Render(hint),
+			currentStyles.DimStyle.Render(statusBarActivityPathGap),
+			currentStyles.DimStyle.Render(hint),
 		)
 		leftWidth = lipgloss.Width(leftSide)
 		activityText, activityWidth = m.renderStatusBarActivityLane(inputs, effectiveWidth, leftWidth)
@@ -688,11 +688,11 @@ func (m *Model) placeStatusBarRightRegions(placement statusBarRightPlacement, of
 // truncates) overlong content, and the wrapped tail would land on a second line.
 func (m *Model) renderStatusBarLine(padded string) string {
 	width := m.drawableLineWidth()
-	return StatusBarStyle.Width(width).Render(ansi.Truncate(padded, width, ""))
+	return currentStyles.StatusBarStyle.Width(width).Render(ansi.Truncate(padded, width, ""))
 }
 
 func statusBarCanFitEscHint(leftWidth, rightStart, activityWidth, effectiveWidth int, hint string) bool {
-	escWidth := statusBarGroupGapWidth() + lipgloss.Width(DimStyle.Render("esc ⇢ "+hint))
+	escWidth := statusBarGroupGapWidth() + lipgloss.Width(currentStyles.DimStyle.Render("esc ⇢ "+hint))
 	leftWithEsc := leftWidth + escWidth
 	if activityWidth == 0 {
 		return leftWithEsc <= rightStart
@@ -734,7 +734,7 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 	switch {
 	case m.takeoverStatusText() != "":
 		m.statusBarSyntheticConnectingLogKey = ""
-		activityText = DimStyle.Render(truncateOneLine(m.takeoverStatusText(), availableCenter))
+		activityText = currentStyles.DimStyle.Render(terminaltext.TruncateOneLine(m.takeoverStatusText(), availableCenter))
 	case m.sessionSwitch.active():
 		m.statusBarSyntheticConnectingLogKey = ""
 		activityText = m.sessionSwitchStatusText(availableCenter)
@@ -784,7 +784,7 @@ func (m *Model) renderStatusBarActivityLane(inputs statusBarInputs, effectiveWid
 		} else {
 			if strings.HasPrefix(activityKey, "idle|") {
 				if ts, ok := m.latestStatusStartWall(statusActiveID); ok {
-					activityText = DimStyle.Render(statusBarIdleLabel() + ts.Format("15:04"))
+					activityText = currentStyles.DimStyle.Render(statusBarIdleLabel() + ts.Format("15:04"))
 				}
 			}
 			activityWidth = lipgloss.Width(activityText)
@@ -878,7 +878,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 			if availableSession >= max(statusBarSessionMinWidth, len(sessionLabel)) {
 				sessionDisplay := truncateMiddleDisplay(sessionLabel, availableSession)
 				if sessionDisplay != "" {
-					sessionText = StatusBarPathStyle.Render(sessionDisplay)
+					sessionText = currentStyles.StatusBarPathStyle.Render(sessionDisplay)
 					m.statusSession.value = sessionValue
 					m.statusSession.display = sessionDisplay
 				}
@@ -892,7 +892,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 			}
 		}
 		if displayPath := path.display(availablePath); displayPath != "" {
-			pathText = StatusBarPathStyle.Render(displayPath)
+			pathText = currentStyles.StatusBarPathStyle.Render(displayPath)
 			m.statusPath.value = path.value
 			m.statusPath.display = displayPath
 		}
@@ -908,7 +908,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 	offset := 0
 	appendPart := func(text string) int {
 		if len(rightParts) > 0 {
-			rightParts = append(rightParts, DimStyle.Render(statusBarActivityPathGap))
+			rightParts = append(rightParts, currentStyles.DimStyle.Render(statusBarActivityPathGap))
 			offset += separatorWidth
 		}
 		start := offset
@@ -927,7 +927,7 @@ func (m *Model) renderStatusBarRightSide(now time.Time, effectiveWidth, leftWidt
 		offsets.session = appendPart(sessionText)
 	}
 	if jobsPillText != "" {
-		offsets.jobs = appendPart(StatusHintStyle.Render(jobsPillText))
+		offsets.jobs = appendPart(currentStyles.StatusHintStyle.Render(jobsPillText))
 		m.statusJobs.display = jobsPillText
 		m.statusJobs.runningJobs = runningJobs
 		m.statusJobs.fallbackAgents = fallbackAgents

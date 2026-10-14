@@ -9,6 +9,8 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/imageutil"
+	"github.com/keakon/chord/internal/tui/imagecache"
+	"github.com/keakon/chord/internal/tui/imageprotocol"
 )
 
 type inlineImageRequest struct {
@@ -137,7 +139,7 @@ func (m *Model) prepareInlineImages(reason string) tea.Cmd {
 			}
 			if len(req.part.Data) == 0 {
 				metadata := loadImagePathMetadata(req.part)
-				result.metadata = append(result.metadata, imagePathMetadataUpdate{ref: imagePartKeyRefFor(req.part), metadata: metadata})
+				result.metadata = append(result.metadata, imagePathMetadataUpdate{ref: imagecache.IdentityOf(imageSource(req.part)), metadata: metadata})
 				if imagePathMetadataChanged(req.metadata, req.metadataPresent, metadata) {
 					result.layoutChanged = true
 					continue
@@ -157,9 +159,9 @@ func (m *Model) prepareInlineImages(reason string) tea.Cmd {
 			}
 			var part string
 			if backend == ImageBackendKitty {
-				part, _, err = kittyInlineSequence(req.part, req.cols, req.rows, false)
+				part, _, err = imageprotocol.KittyInline(imageCache, imageSource(req.part), req.cols, req.rows, false)
 			} else {
-				part, err = iterm2InlineSequence(req.part, req.cols, req.rows)
+				part, err = imageprotocol.ITerm2(imageCache, imageSource(req.part), req.part.FileName, req.cols, req.rows, true)
 			}
 			release()
 			if err != nil || ctx.Err() != nil {
@@ -201,7 +203,7 @@ func (m *Model) handleInlineImagesLoaded(msg inlineImagesLoadedMsg) tea.Cmd {
 			changed := false
 			for _, part := range block.ImageParts {
 				for _, update := range msg.metadata {
-					if imagePartKeyRefFor(part) == update.ref {
+					if imagecache.IdentityOf(imageSource(part)) == update.ref {
 						changed = true
 						break
 					}

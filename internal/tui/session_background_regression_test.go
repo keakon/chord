@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestAssistantPadBackgroundDoesNotStairStep(t *testing.T) {
@@ -14,24 +16,24 @@ func TestAssistantPadBackgroundDoesNotStairStep(t *testing.T) {
 	width := 72
 
 	lines := b.Render(width, "")
-	cardBg := currentTheme.AssistantCardBg
+	cardBg := currentStyles.Palette.AssistantCardBg
 	cardBgSeq := "\x1b[48;5;" + cardBg + "m"
 	checked := 0
 
 	for i, l := range lines {
 		// Simulate viewport line safety pass.
-		line := expandTabsForDisplayANSI(l, preformattedTabWidth)
+		line := terminaltext.ExpandTabsANSI(l, terminaltext.TabWidth)
 		if strings.ContainsRune(line, '\t') {
-			t.Fatalf("line %d still contains tab after expandTabsForDisplay: %q", i, line)
+			t.Fatalf("line %d still contains tab after terminaltext.ExpandTabs: %q", i, line)
 		}
-		line = truncateLineToDisplayWidth(line, width)
-		line = padLineToDisplayWidth(line, width)
+		line = terminaltext.Truncate(line, width)
+		line = terminaltext.Pad(line, width)
 
 		// Only enforce on card lines.
 		if !strings.Contains(line, cardBgSeq) {
 			continue
 		}
-		plain := strings.TrimSpace(stripANSI(line))
+		plain := strings.TrimSpace(terminaltext.StripANSI(line))
 		if plain == "ASSISTANT" {
 			continue
 		}
@@ -41,7 +43,7 @@ func TestAssistantPadBackgroundDoesNotStairStep(t *testing.T) {
 		}
 		checked++
 		if bg != cardBg {
-			t.Fatalf("line %d trailing pad bg=%q want %q\nplain=%q\nansi=%q", i, bg, cardBg, stripANSI(line), line)
+			t.Fatalf("line %d trailing pad bg=%q want %q\nplain=%q\nansi=%q", i, bg, cardBg, terminaltext.StripANSI(line), line)
 		}
 	}
 	if checked == 0 {

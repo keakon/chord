@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestRenderUserTerminalUsesTerminalBadge(t *testing.T) {
@@ -22,7 +24,7 @@ func TestRenderUserTerminalUsesTerminalBadge(t *testing.T) {
 
 	var plain []string
 	for _, line := range lines {
-		plain = append(plain, stripANSI(line))
+		plain = append(plain, terminaltext.StripANSI(line))
 	}
 	joined := strings.Join(plain, "\n")
 	if !strings.Contains(joined, "TERMINAL") {
@@ -43,7 +45,7 @@ func TestRenderUserTerminalShowsExpandHintForCollapsedOutput(t *testing.T) {
 		Collapsed:            true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(joined, "TERMINAL") {
 		t.Fatalf("expected TERMINAL badge, got:\n%s", joined)
 	}
@@ -65,7 +67,7 @@ func TestRenderUserTerminalIgnoresFinalOutputLineTerminator(t *testing.T) {
 		Collapsed:            true,
 	}
 
-	joined := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(joined, "✓ ▸ shell ls 1.json") {
 		t.Fatalf("expected terminal header to show ▸ disclosure marker, got:\n%s", joined)
 	}

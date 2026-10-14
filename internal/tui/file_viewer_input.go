@@ -52,8 +52,8 @@ func (m *Model) handleFileViewerMouse(msg tea.MouseMsg) tea.Cmd {
 	}
 	layout := m.fileViewerLayout()
 	rect := centeredRect(m.ensureLayout().area, layout.render())
-	x := mouse.X - rect.Min.X - DirectoryBorderStyle.GetBorderLeftSize() - DirectoryBorderStyle.GetPaddingLeft()
-	y := mouse.Y - rect.Min.Y - DirectoryBorderStyle.GetBorderTopSize() - DirectoryBorderStyle.GetPaddingTop()
+	x := mouse.X - rect.Min.X - currentStyles.DirectoryBorderStyle.GetBorderLeftSize() - currentStyles.DirectoryBorderStyle.GetPaddingLeft()
+	y := mouse.Y - rect.Min.Y - currentStyles.DirectoryBorderStyle.GetBorderTopSize() - currentStyles.DirectoryBorderStyle.GetPaddingTop()
 	for _, hit := range layout.hits {
 		if y != hit.row || x < hit.start || x >= hit.end {
 			continue

@@ -7,6 +7,8 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestRenderStatusBarShowsServiceTierAfterModelWhenInfoPanelHidden(t *testing.T) {
@@ -15,7 +17,7 @@ func TestRenderStatusBarShowsServiceTierAfterModelWhenInfoPanelHidden(t *testing
 	m.mode = ModeNormal
 	m.rightPanelVisible = false
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	modelIdx := strings.Index(plain, "◇ anthropic/claude-sonnet-4.5")
 	fastIdx := strings.Index(plain, "TIER")
 	if modelIdx < 0 || fastIdx < 0 || fastIdx <= modelIdx {
@@ -42,7 +44,7 @@ func TestRenderStatusBarHidesUnsupportedServiceTier(t *testing.T) {
 	m.mode = ModeNormal
 	m.rightPanelVisible = false
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "TIER") {
 		t.Fatalf("status bar = %q, should hide unsupported tier", plain)
 	}
@@ -56,7 +58,7 @@ func TestRenderInfoPanelMarksUnsupportedFastServiceTier(t *testing.T) {
 	m := NewModelWithSize(backend, 100, 24)
 
 	out := m.renderInfoPanel(40, 20)
-	plain := stripANSI(out)
+	plain := terminaltext.StripANSI(out)
 	if !strings.Contains(plain, "tier: fast") {
 		t.Fatalf("info panel = %q, want unsupported fast tier shown", plain)
 	}
@@ -76,7 +78,7 @@ func TestRenderInfoPanelShowsRunningModelWhileBusy(t *testing.T) {
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
 	out := m.renderInfoPanel(80, 20)
-	plain := stripANSI(out)
+	plain := terminaltext.StripANSI(out)
 	if !strings.Contains(plain, "gpt-5.4") || !strings.Contains(plain, "Provider: openai") {
 		t.Fatalf("info panel = %q, want running model with provider line", plain)
 	}
@@ -97,7 +99,7 @@ func TestRenderInfoPanelShowsRunningModelWhileIdle(t *testing.T) {
 	backend.runningModelRef = "openai/gpt-5.4"
 	m := NewModelWithSize(backend, 100, 24)
 
-	plain := stripANSI(m.renderInfoPanel(80, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(80, 20))
 	if !strings.Contains(plain, "gpt-5.4") || !strings.Contains(plain, "Provider: openai") {
 		t.Fatalf("info panel = %q, want running model with provider line", plain)
 	}
@@ -118,7 +120,7 @@ func TestRenderStatusBarShowsRunningModelWhileIdle(t *testing.T) {
 	m.rightPanelVisible = false
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "prov/running-fallback") {
 		t.Fatalf("status bar = %q, want running model", plain)
 	}
@@ -134,7 +136,7 @@ func TestRenderInfoPanelMarksUnsupportedSlowServiceTier(t *testing.T) {
 	m := NewModelWithSize(backend, 100, 24)
 
 	out := m.renderInfoPanel(40, 20)
-	plain := stripANSI(out)
+	plain := terminaltext.StripANSI(out)
 	if !strings.Contains(plain, "tier: slow") {
 		t.Fatalf("info panel = %q, want unsupported slow tier shown", plain)
 	}
@@ -154,7 +156,7 @@ func TestNarrowStatusBarShowsRunningModelRefVerbatim(t *testing.T) {
 	m.updateRightPanelVisible()
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	want := "sample/gpt-5.5@xhigh"
 	if !strings.Contains(plain, want) {
 		t.Fatalf("status bar should show RunningModelRef verbatim %q; got %q", want, plain)
@@ -174,7 +176,7 @@ func TestNarrowStatusBarDoesNotLeakVariantToFallbackModel(t *testing.T) {
 	m.updateRightPanelVisible()
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "sample/glm-5.1") {
 		t.Fatalf("status bar should show fallback running model; got %q", plain)
 	}
@@ -195,7 +197,7 @@ func TestNarrowStatusBarShowsFallbackModelWithoutVariantWhenPrimaryHasNoVariant(
 	m.updateRightPanelVisible()
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "sample/glm-5.1") {
 		t.Fatalf("status bar should show fallback model name; got %q", plain)
 	}
@@ -218,7 +220,7 @@ func TestStatusBarShowsRunningModelWhileBusy(t *testing.T) {
 	m.rightPanelVisible = false
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "openai/gpt-5.4") {
 		t.Fatalf("status bar should show running model; got %q", plain)
 	}
@@ -243,7 +245,7 @@ func TestNarrowStatusBarShowsFallbackVariantWhenRunningModelRefIncludesVariant(t
 	m.updateRightPanelVisible()
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "sample/glm-5.1@high") {
 		t.Fatalf("status bar should show fallback running model variant; got %q", plain)
 	}
@@ -253,7 +255,7 @@ func TestNarrowStatusBarShowsFallbackVariantWhenRunningModelRefIncludesVariant(t
 }
 
 func TestSidebarSubAgentModelRefs(t *testing.T) {
-	s := NewSidebar(DefaultTheme())
+	s := NewSidebar(uitheme.Default())
 	s.Update([]agent.SubAgentInfo{
 		{InstanceID: "a1", SelectedRef: "p/m@high", RunningRef: "p/m2"},
 	}, "main", "builder")
@@ -312,7 +314,7 @@ func TestNarrowStatusBarModelUsesFocusedSubAgentSnapshot(t *testing.T) {
 		{InstanceID: "worker-1", SelectedRef: "sample/tiny", RunningRef: "sample/tiny"},
 	}, "worker-1", "builder")
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "sample/tiny") {
 		t.Fatalf("status bar should show focused running model %q; got %q", "sample/tiny", plain)
 	}
@@ -338,12 +340,12 @@ func TestRunningModelChangedEventOverridesMainModelDisplayImmediately(t *testing
 		RunningModelRef:  "provider-c/gpt-5.5@xhigh",
 	}})
 
-	status := stripANSI(m.renderStatusBar())
+	status := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(status, "provider-c/gpt-5.5@xhigh") {
 		t.Fatalf("status bar should show event running model immediately; got %q", status)
 	}
 
-	info := stripANSI(m.renderInfoPanel(40, 20))
+	info := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(info, "gpt-5.5@xhigh") || !strings.Contains(info, "Provider: provider-c") {
 		t.Fatalf("info panel should show event running model immediately; got %q", info)
 	}
@@ -362,14 +364,14 @@ func TestInfoPanelFingerprintIncludesTransientRunningModelDisplay(t *testing.T) 
 	m.mode = ModeNormal
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback"}
 
-	first := stripANSI(m.renderInfoPanel(40, 20))
+	first := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(first, "gpt-5.5@xhigh") || !strings.Contains(first, "Provider: provider-b") {
 		t.Fatalf("initial info panel should show backend running model; got %q", first)
 	}
 	cachedOut := m.cachedInfoPanelOut
 
 	m.noteRunningModelDisplay("main", "provider-a/gpt-5.5@xhigh", "provider-c/gpt-5.5@xhigh")
-	second := stripANSI(m.renderInfoPanel(40, 20))
+	second := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(second, "gpt-5.5@xhigh") || !strings.Contains(second, "Provider: provider-c") {
 		t.Fatalf("info panel should include transient running model in fingerprint; got %q", second)
 	}
@@ -399,7 +401,7 @@ func TestRunningModelChangedEventDisplayClearsOnIdle(t *testing.T) {
 
 	m.handleAgentEvent(agentEventMsg{event: agent.AgentActivityEvent{Type: agent.ActivityIdle, AgentID: "main"}})
 
-	status := stripANSI(m.renderStatusBar())
+	status := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(status, "provider-c/gpt-5.5@xhigh") {
 		t.Fatalf("status bar should clear transient event running model on idle; got %q", status)
 	}

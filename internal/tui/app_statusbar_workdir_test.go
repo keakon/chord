@@ -7,6 +7,8 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/gitinspect"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestStatusBarPathFormsDisplay(t *testing.T) {
@@ -60,7 +62,7 @@ func TestWorkDirChangedEventAppliesLatestSnapshot(t *testing.T) {
 	if m.workingDirID != "feat-two" || m.workingDirGeneration != 2 {
 		t.Fatalf("checkout after event = %q gen %d, want feat-two gen 2", m.workingDirID, m.workingDirGeneration)
 	}
-	if got := stripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-two") {
+	if got := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-two") {
 		t.Fatalf("status bar = %q, want the current checkout's identity label", got)
 	}
 	if want := displayWorkingDir(backend.workDir); m.statusPath.value != want {
@@ -77,7 +79,7 @@ func TestWorkDirIdentityClearedSwitchesBackToPath(t *testing.T) {
 	backend.workDirGeneration = 1
 	m := NewModelWithSize(backend, 200, 24)
 	m.layout = m.generateLayout(m.width, m.height)
-	if got := stripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-one") {
+	if got := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-one") {
 		t.Fatalf("status bar = %q, want the worktree identity label", got)
 	}
 
@@ -91,7 +93,7 @@ func TestWorkDirIdentityClearedSwitchesBackToPath(t *testing.T) {
 	if m.workingDir != backend.workDir {
 		t.Fatalf("workingDir = %q, want the unchanged path %q", m.workingDir, backend.workDir)
 	}
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(got, "chord · feat-one") {
 		t.Fatalf("status bar = %q, stale worktree label survived the switch", got)
 	}
@@ -121,7 +123,7 @@ func TestEventBatchReconcilesDroppedWorkDirNotification(t *testing.T) {
 	if m.workingDirID != "feat-two" || m.workingDirGeneration != 2 {
 		t.Fatalf("checkout after an unrelated batch = %q gen %d, want the published release", m.workingDirID, m.workingDirGeneration)
 	}
-	if got := stripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-two") {
+	if got := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-two") {
 		t.Fatalf("status bar = %q, want the reconciled identity label", got)
 	}
 }
@@ -169,7 +171,7 @@ func TestGitStatusResultForPreviousCheckoutDropped(t *testing.T) {
 	cmd := m.handleGitStatusRefreshed(gitStatusRefreshedMsg{
 		generation: 7,
 		dir:        "/repo/other",
-		result:     gitStatusResult{Info: gitStatusInfo{Present: true, Branch: "other"}},
+		result:     gitinspect.Result{Info: gitinspect.Info{Present: true, Branch: "other"}},
 	})
 	if m.gitStatus.Info.Present {
 		t.Fatalf("git info = %+v, want the previous checkout's result dropped", m.gitStatus.Info)
@@ -184,7 +186,7 @@ func TestGitStatusResultForPreviousCheckoutDropped(t *testing.T) {
 	cmd = m.handleGitStatusRefreshed(gitStatusRefreshedMsg{
 		generation: 7,
 		dir:        "/repo/wt",
-		result:     gitStatusResult{Info: gitStatusInfo{Present: true, Branch: "main"}},
+		result:     gitinspect.Result{Info: gitinspect.Info{Present: true, Branch: "main"}},
 	})
 	if !m.gitStatus.Info.Present || m.gitStatus.Info.Branch != "main" {
 		t.Fatalf("git info = %+v, want the current checkout's result applied", m.gitStatus.Info)
@@ -205,7 +207,7 @@ func TestGitStatusResultStampsCheckoutDir(t *testing.T) {
 	m.handleGitStatusRefreshed(gitStatusRefreshedMsg{
 		generation: 4,
 		dir:        "/repo/wt",
-		result:     gitStatusResult{Info: gitStatusInfo{Present: true, Branch: "main", WorktreeName: "wt"}},
+		result:     gitinspect.Result{Info: gitinspect.Info{Present: true, Branch: "main", WorktreeName: "wt"}},
 	})
 	if m.gitStatus.Info.Dir != "/repo/wt" {
 		t.Fatalf("applied snapshot dir = %q, want the checkout it was collected in", m.gitStatus.Info.Dir)
@@ -218,7 +220,7 @@ func TestGitStatusResultStampsCheckoutDir(t *testing.T) {
 func TestInfoPanelHidesWorktreePathForPreviousCheckout(t *testing.T) {
 	backend := &sessionControlAgent{contentRoot: "/repo", workDir: "/state/worktrees/repo-abc/feat-two"}
 	m := NewModelWithSize(backend, 160, 24)
-	m.gitStatus.Info = gitStatusInfo{
+	m.gitStatus.Info = gitinspect.Info{
 		Present:      true,
 		Branch:       "chord/feat-one",
 		WorktreeName: "feat-one",
@@ -274,7 +276,7 @@ func TestSessionRestoreWithUnchangedBindingKeepsWorkDirDisplay(t *testing.T) {
 	backend.workDirGeneration = 3
 	m := NewModelWithSize(backend, 200, 24)
 	m.layout = m.generateLayout(m.width, m.height)
-	if got := stripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-one") {
+	if got := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-one") {
 		t.Fatalf("status bar = %q, want the checkout identity label", got)
 	}
 	beforeValue := m.statusPath.value
@@ -288,7 +290,7 @@ func TestSessionRestoreWithUnchangedBindingKeepsWorkDirDisplay(t *testing.T) {
 	if m.statusPath.value != beforeValue || m.statusPath.display != beforeDisplay {
 		t.Fatalf("path region = %q (copy %q), want the unchanged %q (copy %q)", m.statusPath.display, m.statusPath.value, beforeDisplay, beforeValue)
 	}
-	if got := stripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-one") {
+	if got := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(got, "chord · feat-one") {
 		t.Fatalf("status bar after restore = %q, want the identity label still", got)
 	}
 }

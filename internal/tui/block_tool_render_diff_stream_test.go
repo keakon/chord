@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/syntax"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func streamingApplyPatchTestBlock(lineCount int) *Block {
@@ -137,7 +138,7 @@ func TestStreamingApplyPatchRangeSuppressesMoveAndDeletePreview(t *testing.T) {
 				t.Fatal("expected the block to take the streaming apply_patch range path")
 			}
 			full := newBlock().Render(100, "")
-			if strings.Contains(stripANSI(strings.Join(full, "\n")), "Requested patch") {
+			if strings.Contains(terminaltext.StripANSI(strings.Join(full, "\n")), "Requested patch") {
 				t.Fatal("cold render should suppress the Requested patch preview for move/delete-only targets")
 			}
 			assertBlockRangeMatchesFullRender(t, 100, newBlock)
@@ -260,13 +261,13 @@ func TestStreamingApplyPatchHighlightsMultiFilePatch(t *testing.T) {
 	}
 
 	lines := block.RenderRange(100, "", 0, block.LineCount(100))
-	joined := stripANSI(strings.Join(lines, "\n"))
+	joined := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joined, "internal/tools/jobs_tools.go +1 files") {
 		t.Fatalf("header must keep the display summary:\n%s", joined)
 	}
 	bodyLine := ""
 	for _, line := range lines {
-		if strings.Contains(stripANSI(line), "func demo() int {") {
+		if strings.Contains(terminaltext.StripANSI(line), "func demo() int {") {
 			bodyLine = line
 			break
 		}
@@ -280,11 +281,11 @@ func TestStreamingApplyPatchHighlightsMultiFilePatch(t *testing.T) {
 		t.Fatalf("streaming preview resolved no lexer: highlighter=%v", hl)
 	}
 	code := "func demo() int {"
-	highlighted := hl.Line(code, diffAddBg)
+	highlighted := hl.Line(code, currentStyles.Palette.DiffAddLineBg)
 	if !strings.Contains(highlighted, "\x1b[38;2;") {
 		t.Fatalf("highlighter emitted no syntax colour for %q: %q", code, highlighted)
 	}
-	// preserveBackground re-inserts the card background after every reset, so the
+	// terminaltext.PreserveBackground re-inserts the card background after every reset, so the
 	// highlighted run is not one contiguous substring of the rendered line; every
 	// coloured segment of it must still land in the line.
 	for segment := range strings.SplitSeq(highlighted, "\x1b[m") {

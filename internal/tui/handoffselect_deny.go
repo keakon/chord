@@ -3,6 +3,8 @@ package tui
 import (
 	"image"
 	"strings"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (m *Model) renderHandoffDenyReasonDialog(cfg OverlayConfig, plan string, area image.Rectangle) string {
@@ -13,12 +15,12 @@ func (m *Model) renderHandoffDenyReasonDialog(cfg OverlayConfig, plan string, ar
 	var errorLines []string
 	if errText := strings.TrimSpace(m.handoffSelect.error); errText != "" {
 		// Reserve the title, one preview row, one editor row and one hint row.
-		errorRows := max(overlayHeight(area)-DirectoryBorderStyle.GetVerticalFrameSize()-4, 0)
+		errorRows := max(overlayHeight(area)-currentStyles.DirectoryBorderStyle.GetVerticalFrameSize()-4, 0)
 		if errorRows == 0 {
 			cfg.Title = "Reason required"
 		} else {
-			for _, line := range wrapText(errText, width) {
-				errorLines = append(errorLines, DialogDangerStyle.Render(line))
+			for _, line := range terminaltext.Wrap(errText, width) {
+				errorLines = append(errorLines, currentStyles.DialogDangerStyle.Render(line))
 			}
 			errorLines = errorLines[:min(len(errorLines), errorRows)]
 			cfg.Footer = strings.Join(errorLines, "\n")

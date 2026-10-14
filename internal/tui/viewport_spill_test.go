@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestViewportSpillStoreAppendLoad(t *testing.T) {
@@ -65,7 +68,7 @@ func TestViewportSpillStoreDoesNotUseWorkingDirRuntimeRoot(t *testing.T) {
 }
 
 func TestViewportSpillClearsStreamingRenderCaches(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	store, err := newViewportSpillStore()
 	if err != nil {
 		t.Fatalf("newViewportSpillStore(): %v", err)
@@ -110,7 +113,7 @@ func TestViewportSpillClearsStreamingRenderCaches(t *testing.T) {
 }
 
 func TestEstimatedHotBytesIncludesStreamingTailCache(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockAssistant,
 		Content:   "First paragraph.\n\nSecond still streaming",
@@ -166,7 +169,7 @@ func TestViewportSpillPreservesSearchAndHydration(t *testing.T) {
 }
 
 func TestViewportSpillDropsSearchCaches(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(80, 8)
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "visible **needle** phrase"}
 	v.AppendBlock(block)
@@ -190,7 +193,7 @@ func TestViewportSpillDropsSearchCaches(t *testing.T) {
 }
 
 func TestEstimatedHotBytesIncludesSearchCaches(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{Type: BlockAssistant, Content: "visible needle phrase"}
 	block.LineCount(80)
 	withoutSearch := block.estimatedHotBytes()
@@ -246,7 +249,7 @@ func TestViewportSpillHydratePreservesToolDisplayWorkingDir(t *testing.T) {
 		t.Fatalf("displayWorkingDir lost after hydrate: got %q want %q", tool.displayWorkingDir, v.workingDir)
 	}
 
-	joined := stripANSI(strings.Join(tool.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(tool.Render(120, ""), "\n"))
 	want := filepath.Join("internal", "tui", "block_tool.go") + " (offset=5, limit=20)"
 	if !strings.Contains(joined, want) {
 		t.Fatalf("expected hydrated tool block to keep relative path, got:\n%s", joined)

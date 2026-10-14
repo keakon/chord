@@ -8,13 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/desktop"
 	"github.com/keakon/chord/internal/filedelivery"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/filepreview"
+	"github.com/keakon/chord/internal/tui/markdownrender"
+	"github.com/keakon/chord/internal/tui/syntax"
 )
 
 type fileViewerState struct {
@@ -96,9 +97,9 @@ func (m *Model) prepareFileViewer() tea.Cmd {
 	v.showing = true
 	file := v.files[v.selected]
 	if m.filePreviewCache == nil {
-		m.filePreviewCache = &fileViewerCache{}
+		m.filePreviewCache = &filepreview.Cache{}
 	}
-	req := fileViewerRequest{checkoutGeneration: m.workingDirGeneration, cache: m.filePreviewCache, ctx: ctx, generation: v.generation, owner: v.owner, file: file, session: m.deliverySessionDir(), width: max(1, m.width-10), markdown: v.markdown && strings.HasPrefix(file.MIME, "text/markdown"), style: contentMarkdownStyleConfig(), highlighter: syntax.New(file.DisplayName, "", "")}
+	req := fileViewerRequest{checkoutGeneration: m.workingDirGeneration, cache: m.filePreviewCache, ctx: ctx, generation: v.generation, owner: v.owner, File: file, Session: m.deliverySessionDir(), Width: max(1, m.width-10), Markdown: v.markdown && strings.HasPrefix(file.MIME, "text/markdown"), Style: markdownrender.StyleConfig(currentStyles.Palette), Highlighter: syntax.New(file.DisplayName, "", "")}
 	if m.fileViewerBusy {
 		m.fileViewerNext = &req
 		return nil
@@ -122,28 +123,28 @@ func (m *Model) handleFileViewerLoaded(result fileViewerLoadedMsg) tea.Cmd {
 		return tea.Batch(next, m.handleFileLinksLoaded(*result.links))
 	}
 	v := &m.fileViewer
-	if !v.open || !v.showing || len(v.files) == 0 || result.request.file.ID != v.files[v.selected].ID || result.request.generation != v.generation || result.request.owner != m.imageViewerOwner() || result.request.checkoutGeneration != m.workingDirGeneration {
+	if !v.open || !v.showing || len(v.files) == 0 || result.request.File.ID != v.files[v.selected].ID || result.request.generation != v.generation || result.request.owner != m.imageViewerOwner() || result.request.checkoutGeneration != m.workingDirGeneration {
 		return next
 	}
-	if result.image != nil {
+	if result.Image != nil {
 		v.showing = false
-		open := m.openImageViewerItems([]BlockImagePart{*result.image}, 0, ModeFileViewer)
-		if result.note != "" {
-			return tea.Batch(next, open, m.enqueueToast(result.note, "warn"))
+		open := m.openImageViewerItems([]BlockImagePart{{FileName: result.Image.FileName, MimeType: result.Image.MimeType, Data: result.Image.Data}}, 0, ModeFileViewer)
+		if result.Note != "" {
+			return tea.Batch(next, open, m.enqueueToast(result.Note, "warn"))
 		}
 		return tea.Batch(next, open)
 	}
-	v.note = result.note
-	v.raw = result.raw
-	v.lines = result.lines
-	v.plain = result.plain
+	v.note = result.Note
+	v.raw = result.Raw
+	v.lines = result.Lines
+	v.plain = result.Plain
 	v.offset = 0
 	v.wrapOffset = 0
 	if v.selected < len(v.linkLines) && v.linkLines[v.selected] > 0 {
 		v.offset = min(max(0, len(v.lines)-1), v.linkLines[v.selected]-1)
 	}
-	if result.err != nil {
-		v.note = result.err.Error()
+	if result.Err != nil {
+		v.note = result.Err.Error()
 	}
 	return next
 }
@@ -347,7 +348,7 @@ func (m *Model) fileDesktopAction(action, id string) tea.Cmd {
 			result.err = err
 			return result
 		}
-		result.note = fileVersionNote(f, current)
+		result.note = filepreview.VersionNote(f, current)
 		path := deliveryPath(f, session)
 		switch action {
 		case "open":

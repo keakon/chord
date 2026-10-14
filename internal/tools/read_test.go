@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tooloutput"
 )
 
 func TestReadToolReportsHashFromReturnedBytes(t *testing.T) {
@@ -273,7 +275,7 @@ func TestReadToolExecuteOffsetPastEndSuggestionUsesDefaultLimit(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sample.txt")
 	var content strings.Builder
-	for i := range MaxOutputLines + 3 {
+	for i := range tooloutput.MaxOutputLines + 3 {
 		fmt.Fprintf(&content, "line %d\n", i+1)
 	}
 	if err := os.WriteFile(path, []byte(content.String()), 0o644); err != nil {
@@ -286,9 +288,9 @@ func TestReadToolExecuteOffsetPastEndSuggestionUsesDefaultLimit(t *testing.T) {
 		t.Fatal("ReadTool.Execute err = nil, want offset-exceeds-length error")
 	}
 	for _, want := range []string{
-		fmt.Sprintf("offset 99999 exceeds this file length (%d lines)", MaxOutputLines+3),
+		fmt.Sprintf("offset 99999 exceeds this file length (%d lines)", tooloutput.MaxOutputLines+3),
 		"suggested_offset=4 reads the last 2000 lines with limit=2000",
-		fmt.Sprintf("eof_offset=%d is valid but returns no lines", MaxOutputLines+4),
+		fmt.Sprintf("eof_offset=%d is valid but returns no lines", tooloutput.MaxOutputLines+4),
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("ReadTool.Execute err = %v, want substring %q", err, want)
@@ -438,7 +440,7 @@ func TestReadToolExecuteTruncatesOversizedFormattedOutputByTokenBudget(t *testin
 	if !readOutputFitsBudget(got) {
 		t.Fatalf("truncated read output should fit inline budget: bytes=%d tokens=%d", len(got), estimateReadOutputTokens(got))
 	}
-	artifactPath := filepath.Join(sessionDir, sessionToolOutputsDirName, "read-result.log")
+	artifactPath := filepath.Join(sessionDir, "tool-outputs", "read-result.log")
 	if strings.Contains(got, "Full output saved to ") {
 		t.Fatalf("read output should direct callers to page the original file instead of an artifact, got %q", got)
 	}

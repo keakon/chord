@@ -222,7 +222,7 @@ func splashSwashLines(art *splashArt, cols int) []string {
 				body += splashSwashTip
 			}
 		}
-		return []string{SplashAccentStyle.Render(body) + strings.Repeat(" ", width-shown)}
+		return []string{currentStyles.SplashAccentStyle.Render(body) + strings.Repeat(" ", width-shown)}
 	}
 
 	rows := make([]string, splashSwashRows(art))
@@ -243,7 +243,7 @@ func splashSwashLines(art *splashArt, cols int) []string {
 				b.WriteString(splashSwashLow)
 			}
 		}
-		rows[row] = SplashAccentStyle.Render(b.String())
+		rows[row] = currentStyles.SplashAccentStyle.Render(b.String())
 	}
 	return rows
 }
@@ -256,9 +256,9 @@ func splashCompactLine(shown int) string {
 		case i >= shown:
 			b.WriteString(" ")
 		case r == []rune(splashNote)[0]:
-			b.WriteString(SplashAccentStyle.Render(string(r)))
+			b.WriteString(currentStyles.SplashAccentStyle.Render(string(r)))
 		default:
-			b.WriteString(SplashStyle.Render(string(r)))
+			b.WriteString(currentStyles.SplashStyle.Render(string(r)))
 		}
 	}
 	return b.String()
@@ -311,9 +311,9 @@ func splashCellStyle(fg, bg rune) lipgloss.Style {
 func splashLayerColour(layer rune) string {
 	switch layer {
 	case splashLayerInk:
-		return currentTheme.SplashFg
+		return currentStyles.Palette.SplashFg
 	case splashLayerAccent:
-		return currentTheme.SplashAccentFg
+		return currentStyles.Palette.SplashAccentFg
 	default:
 		return ""
 	}

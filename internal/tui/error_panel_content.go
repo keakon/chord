@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // errorPanelLines builds the wrapped, styled content lines for the error panel,
@@ -21,7 +23,7 @@ func (m *Model) errorPanelLines(innerWidth int) []string {
 	records := m.snapshotAgentErrors()
 	var lines []string
 	if len(records) == 0 {
-		lines = []string{DimStyle.Render("No errors recorded yet.")}
+		lines = []string{currentStyles.DimStyle.Render("No errors recorded yet.")}
 	} else {
 		// Newest first so the most recent failure is visible without scrolling.
 		for i, record := range slices.Backward(records) {
@@ -80,14 +82,14 @@ func errorRecordHeader(rec agentErrorRecord, ts string) string {
 // formatErrorRecordLines renders one error record into styled, width-wrapped
 // display lines: the header followed by the wrapped error message.
 func formatErrorRecordLines(rec agentErrorRecord, width int) []string {
-	out := []string{ErrorStyle.Render(errorRecordHeader(rec, rec.Timestamp.Format("15:04:05")))}
+	out := []string{currentStyles.ErrorStyle.Render(errorRecordHeader(rec, rec.Timestamp.Format("15:04:05")))}
 	msg := strings.TrimSpace(rec.Message)
 	if msg == "" {
 		msg = "(no message)"
 	}
 	// Include the two-column message indent in wrapping. Adding it after
 	// wrapping makes the measured line width differ from the rendered width.
-	return append(out, wrapText("  "+msg, width)...)
+	return append(out, terminaltext.Wrap("  "+msg, width)...)
 }
 
 // plainErrorRecordText renders one record as unstyled, unwrapped text for the

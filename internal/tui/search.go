@@ -12,6 +12,7 @@ import (
 	"github.com/muesli/reflow/truncate"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // ---------------------------------------------------------------------------
@@ -67,8 +68,8 @@ func NewSearchModel(prevMode Mode) SearchModel {
 	ti := textinput.New()
 	ti.Prompt = "/"
 	ti.SetStyles(textinput.Styles{
-		Focused: textinput.StyleState{Prompt: SearchPromptStyle},
-		Blurred: textinput.StyleState{Prompt: SearchPromptStyle},
+		Focused: textinput.StyleState{Prompt: currentStyles.SearchPromptStyle},
+		Blurred: textinput.StyleState{Prompt: currentStyles.SearchPromptStyle},
 	})
 	ti.Placeholder = "search..."
 	ti.CharLimit = 256
@@ -100,7 +101,7 @@ func (sm SearchModel) View(width int) string {
 	if total == 0 {
 		current = 0
 	}
-	counter := DimStyle.Render(fmt.Sprintf(" [%d/%d]", current, total))
+	counter := currentStyles.DimStyle.Render(fmt.Sprintf(" [%d/%d]", current, total))
 	// Truncate input view to leave room for counter (ANSI-aware).
 	maxInput := max(width-len(fmt.Sprintf(" [%d/%d]", current, total))-2, 10)
 	inputView = truncate.String(inputView, uint(maxInput))
@@ -146,7 +147,7 @@ func wrappedSearchMatchLineOffset(textLower, queryLower string, width int) (int,
 		}
 		matchEnd += size
 	}
-	for i, line := range wrapText(textLower[:matchEnd], width) {
+	for i, line := range terminaltext.Wrap(textLower[:matchEnd], width) {
 		if strings.Contains(line, queryLower) {
 			return i, true
 		}
@@ -365,8 +366,8 @@ func (b *Block) searchMatchLineOffsetInCachedRender(query string, width int) (in
 
 func searchMatchLineOffsetInRenderedLines(lines []string, query string, width int) (int, bool) {
 	for i, line := range lines {
-		line = expandTabsForDisplayANSI(line, preformattedTabWidth)
-		line = truncateLineToDisplayWidth(line, width)
+		line = terminaltext.ExpandTabsANSI(line, terminaltext.TabWidth)
+		line = terminaltext.Truncate(line, width)
 		if _, _, ok := searchMatchColumnRangeInLine(line, query); ok {
 			return i, true
 		}

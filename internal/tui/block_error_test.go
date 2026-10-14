@@ -7,10 +7,13 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestBlockLabelsShowOneBasedSequenceForAllCardTypes(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	blocks := []*Block{
 		{ID: 100, DisplaySequence: 1, Type: BlockUser, Content: "hello"},
@@ -25,7 +28,7 @@ func TestBlockLabelsShowOneBasedSequenceForAllCardTypes(t *testing.T) {
 	want := []string{"USER #1", "ASSISTANT #2", "THINKING #3", "TOOL CALL #4", "TOOL RESULT #5", "ERROR #6", "STATUS #7", "CONTEXT SUMMARY #8"}
 
 	for i, block := range blocks {
-		got := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+		got := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 		if !strings.Contains(got, want[i]) {
 			t.Fatalf("block type %v render missing label %q:\n%s", block.Type, want[i], got)
 		}
@@ -33,7 +36,7 @@ func TestBlockLabelsShowOneBasedSequenceForAllCardTypes(t *testing.T) {
 }
 
 func TestRenderErrorCardMessageLineKeepsBackgroundOnTrailingPadding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	msg := "LLM stream failed: all API keys cooling down, retry after 28.363159s"
 	block := &Block{Type: BlockError, Content: msg}
@@ -44,7 +47,7 @@ func TestRenderErrorCardMessageLineKeepsBackgroundOnTrailingPadding(t *testing.T
 
 	var target string
 	for _, line := range lines {
-		if strings.Contains(stripANSI(line), msg) {
+		if strings.Contains(terminaltext.StripANSI(line), msg) {
 			target = line
 			break
 		}
@@ -53,7 +56,7 @@ func TestRenderErrorCardMessageLineKeepsBackgroundOnTrailingPadding(t *testing.T
 		t.Fatalf("failed to locate error message line in render output: %q", strings.Join(lines, "\n"))
 	}
 
-	plain := stripANSI(target)
+	plain := terminaltext.StripANSI(target)
 	start := strings.Index(plain, msg)
 	if start < 0 {
 		t.Fatalf("message %q not found in plain line %q", msg, plain)
@@ -70,9 +73,9 @@ func TestRenderErrorCardMessageLineKeepsBackgroundOnTrailingPadding(t *testing.T
 		t.Fatal("expected rendered cells")
 	}
 
-	errorBg := colorOfTheme(currentTheme.ErrorCardBg)
+	errorBg := colorOfTheme(currentStyles.Palette.ErrorCardBg)
 	trailingSpaces := 0
-	cardEnd := len(cells) - ErrorCardStyle.GetMarginRight()
+	cardEnd := len(cells) - currentStyles.ErrorCardStyle.GetMarginRight()
 	for i := msgEndCol + 1; i < cardEnd; i++ {
 		cell := cells[i]
 		if cell.IsZero() || cell.Content != " " {
@@ -89,7 +92,7 @@ func TestRenderErrorCardMessageLineKeepsBackgroundOnTrailingPadding(t *testing.T
 }
 
 func TestRenderErrorCardSanitizesControlSequences(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockError,
 		Content:   "provider error \x1b[1;1H\x00",
@@ -99,7 +102,7 @@ func TestRenderErrorCardSanitizesControlSequences(t *testing.T) {
 	if strings.Contains(raw, "\x1b[1;1H") || strings.ContainsRune(raw, '\x00') || strings.ContainsRune(raw, '\x9b') {
 		t.Fatalf("error card leaked raw control sequence: %q", raw)
 	}
-	plain := stripANSI(raw)
+	plain := terminaltext.StripANSI(raw)
 	for _, want := range []string{`\x1b[1;1H`, `\x00`, `\x9b31m`} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("error card missing escaped %s in %q", want, plain)
@@ -108,7 +111,7 @@ func TestRenderErrorCardSanitizesControlSequences(t *testing.T) {
 }
 
 func TestRenderStatusCardSanitizesControlSequences(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:        BlockStatus,
 		StatusTitle: "STATUS \x1b[1;1H",
@@ -118,7 +121,7 @@ func TestRenderStatusCardSanitizesControlSequences(t *testing.T) {
 	if strings.Contains(raw, "\x1b[1;1H") || strings.ContainsRune(raw, '\x00') || strings.ContainsRune(raw, '\x9b') {
 		t.Fatalf("status card leaked raw control sequence: %q", raw)
 	}
-	plain := stripANSI(raw)
+	plain := terminaltext.StripANSI(raw)
 	for _, want := range []string{`\x1b[1;1H`, `\x00`, `\x9b31m`} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("status card missing escaped %s in %q", want, plain)
@@ -131,7 +134,7 @@ func TestErrorCardUsesConfiguredNormalModeBinding(t *testing.T) {
 	block := &Block{ID: 1, Type: BlockError, Content: "boom"}
 	m.viewport.AppendBlock(block)
 
-	initial := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	initial := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(initial, "normal mode · ctrl+e: error details") {
 		t.Fatalf("default error card hint missing: %q", initial)
 	}
@@ -139,7 +142,7 @@ func TestErrorCardUsesConfiguredNormalModeBinding(t *testing.T) {
 	km := KeyMapFromConfig(map[string][]string{"error_panel": {"alt+e"}})
 	m.SetKeyMap(km)
 
-	configured := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+	configured := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 	if !strings.Contains(configured, "normal mode · alt+e: error details") || strings.Contains(configured, "ctrl+e: error details") {
 		t.Fatalf("error card hint did not follow configured binding: %q", configured)
 	}

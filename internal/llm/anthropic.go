@@ -22,6 +22,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/httpheader"
+	"github.com/keakon/chord/internal/llm/mediacache"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/texttruncate"
 )
@@ -752,7 +753,7 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 							Source: &anthropicImageSource{
 								Type:      "base64",
 								MediaType: mime,
-								Data:      encodeBase64Cached(data),
+								Data:      mediacache.EncodeBase64(data),
 							},
 						})
 					case "pdf":
@@ -765,7 +766,7 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 							Source: &anthropicImageSource{
 								Type:      "base64",
 								MediaType: defaultPDFMediaType(mime),
-								Data:      encodeBase64Cached(data),
+								Data:      mediacache.EncodeBase64(data),
 							},
 						})
 					default: // "text"
@@ -975,7 +976,7 @@ func anthropicToolResultContent(msg message.Message) any {
 				Source: &anthropicImageSource{
 					Type:      "base64",
 					MediaType: mime,
-					Data:      encodeBase64Cached(data),
+					Data:      mediacache.EncodeBase64(data),
 				},
 			})
 		case "pdf":
@@ -988,7 +989,7 @@ func anthropicToolResultContent(msg message.Message) any {
 				Source: &anthropicImageSource{
 					Type:      "base64",
 					MediaType: defaultPDFMediaType(mime),
-					Data:      encodeBase64Cached(data),
+					Data:      mediacache.EncodeBase64(data),
 				},
 			})
 		default:

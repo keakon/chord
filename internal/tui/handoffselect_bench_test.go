@@ -1,6 +1,10 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/keakon/chord/internal/tui/overlaylist"
+)
 
 func benchmarkModelForHandoffDialog() Model {
 	m := benchmarkModelForView()
@@ -16,7 +20,7 @@ func benchmarkModelForHandoffDialog() Model {
 		planPath: "docs/plans/example.md",
 		prevMode: ModeInsert,
 	}
-	m.handoffSelect.selector.list = NewOverlayList(handoffItems(options), m.handoffSelectMaxVisible())
+	m.handoffSelect.selector.list = overlaylist.New(handoffItems(options), m.handoffSelectMaxVisible())
 	if m.handoffSelect.selector.list != nil {
 		m.handoffSelect.selector.list.SetCursor(0)
 	}

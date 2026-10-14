@@ -38,13 +38,9 @@ const (
 	retainedCheckpointRequestLabel    = "Assistant (context checkpoint request, own reasoning)"
 )
 
-// Checkpoint summary sections and labels shared by the renderers and by the
+// Checkpoint request labels shared by the renderers and by the
 // request-local checkpoint view, which recognizes their rendered form.
 const (
-	checkpointProgressHeading        = "## Progress"
-	checkpointKeyDecisionsHeading    = "## Key Decisions"
-	checkpointOpenProblemsHeading    = "## Open Problems"
-	checkpointUserConstraintsHeading = "## User Constraints"
 	// latestUserRequestLabel labels the Current User Request bullet taken
 	// from a real user message.
 	latestUserRequestLabel = "Latest user request"

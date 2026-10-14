@@ -9,6 +9,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
@@ -31,7 +32,7 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 
 	headerLine := renderToolHeaderLine(prefix, b.ToolName)
 	if subType != "" {
-		headerLine += " " + DimStyle.Render("("+sanitizeToolDisplayText(subType)+")")
+		headerLine += " " + currentStyles.DimStyle.Render("("+sanitizeToolDisplayText(subType)+")")
 	}
 	// The delegation card is always expanded behind a bare tool-name header:
 	// the description it would summarize is the body's own first section.
@@ -40,14 +41,14 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 	result := []string{headerLine}
 	descLines := taskToolExpandedDescriptionLines(b.Content, contentWidth-4)
 	if len(descLines) > 0 {
-		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Description"))
+		result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Description"))
 		for _, line := range descLines {
 			result = append(result, "    "+line)
 		}
 	}
 	handle, rest, handleOK := parseTaskToolHandle(displayResult)
 	if handleOK || (hasResultText && !b.toolResultIsError() && !b.toolResultIsCancelled()) {
-		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Worker"))
+		result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Worker"))
 		switch {
 		case handleOK:
 			appendTaskHandleFieldRows(&result, handle, contentWidth)
@@ -56,20 +57,20 @@ func (b *Block) renderTaskCall(width int, spinnerFrame string) []string {
 			// instance) renders as a trailing dimmed line under the section,
 			// not concatenated back into the structured fields.
 			if rest != "" {
-				for _, line := range wrapText(sanitizeToolDisplayText(rest), contentWidth) {
-					result = append(result, toolFieldBody(DimStyle, line))
+				for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(rest), contentWidth) {
+					result = append(result, toolFieldBody(currentStyles.DimStyle, line))
 				}
 			}
 		default:
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(displayResult)), contentWidth) {
-				result = append(result, toolFieldBody(DimStyle, line))
+			for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(strings.TrimSpace(displayResult)), contentWidth) {
+				result = append(result, toolFieldBody(currentStyles.DimStyle, line))
 			}
 		}
 	} else {
 		appendToolOutcome(&result, b, contentWidth, true)
 	}
 	if strings.TrimSpace(b.DoneSummary) != "" {
-		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Completed"))
+		result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Completed"))
 		for _, line := range toolExpandedTextLines(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
 			result = append(result, "    "+line)
 		}
@@ -102,7 +103,7 @@ func (b *Block) renderTodoCall(width int, spinnerFrame string) []string {
 	// so the card shows what the caller actually passed.
 	if len(todos) > 0 && !b.toolResultIsCancelled() {
 		if len(todos) > 1 {
-			result = append(result, QuestionSeparatorStyle.Render(fmt.Sprintf("  ▸ %d tasks", len(todos))))
+			result = append(result, currentStyles.QuestionSeparatorStyle.Render(fmt.Sprintf("  ▸ %d tasks", len(todos))))
 		}
 		for _, item := range todos {
 			appendTodoCallItemLines(&result, item, contentWidth)
@@ -215,13 +216,13 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		if q.Header != "" {
 			// "↳ Label:" like every other card section: ▸ now means "this card
 			// toggles", so it cannot double as a section separator.
-			result = append(result, toolFieldSection(QuestionSeparatorStyle, sanitizeToolDisplayText(q.Header)))
+			result = append(result, toolFieldSection(currentStyles.QuestionSeparatorStyle, sanitizeToolDisplayText(q.Header)))
 		}
 		if q.Question != "" {
 			qText := sanitizeToolDisplayText(strings.ReplaceAll(q.Question, "<br>", "\n"))
 			for line := range strings.SplitSeq(qText, "\n") {
-				for _, wl := range wrapText("    "+line, contentWidth) {
-					result = append(result, paramValStyle.Render(wl))
+				for _, wl := range terminaltext.Wrap("    "+line, contentWidth) {
+					result = append(result, currentStyles.ParamValStyle.Render(wl))
 				}
 			}
 		}
@@ -232,7 +233,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 			}
 			// The numbered list below is self-evidently the options, so the
 			// mode carries the only label this section needs.
-			result = append(result, DimStyle.Render("    Mode: "+mode))
+			result = append(result, currentStyles.DimStyle.Render("    Mode: "+mode))
 			for i, opt := range q.Options {
 				displayLabel := sanitizeToolDisplayText(opt.Label)
 				isSelected := slices.Contains(answer.SelectedIDs, opt.ID)
@@ -244,15 +245,15 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 				optLine := optPrefix
 				if opt.Description != "" {
 					descWidth := max(contentWidth-runewidth.StringWidth(optPrefix), 0)
-					optLine += " — " + truncateOneLine(sanitizeToolDisplayText(opt.Description), descWidth)
+					optLine += " — " + terminaltext.TruncateOneLine(sanitizeToolDisplayText(opt.Description), descWidth)
 				}
 				// A bare check mark is easy to miss in a long list whose
 				// descriptions wrap, so the picked option is emphasised and the
 				// alternatives dim into the background.
 				if isSelected {
-					optLine = questionSelectedOptionStyle.Render(optLine)
+					optLine = currentStyles.QuestionSelectedOptionStyle.Render(optLine)
 				} else {
-					optLine = DimStyle.Render(optLine)
+					optLine = currentStyles.DimStyle.Render(optLine)
 				}
 				result = append(result, optLine)
 			}
@@ -265,18 +266,18 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		case len(customAnswers) == 1:
 			result = appendQuestionAnswerLines(result, customAnswers[0], "    Custom: ", "            ", contentWidth)
 		case len(customAnswers) > 1:
-			result = append(result, DimStyle.Render("    Custom:"))
+			result = append(result, currentStyles.DimStyle.Render("    Custom:"))
 			for _, sel := range customAnswers {
 				result = appendQuestionAnswerLines(result, sel, "      • ", "        ", contentWidth)
 			}
 		case len(q.Options) > 0 && !hasStructuredAnswers:
-			result = append(result, DimStyle.Render("    Custom: Enabled"))
+			result = append(result, currentStyles.DimStyle.Render("    Custom: Enabled"))
 		}
 		if hasAnswer {
 			// A non-answered question checks no option, so without this line a
 			// declined or expired question looks identical to an unanswered one.
 			if label := questionOutcomeDisplay(answer.Outcome); label != "" {
-				result = append(result, DimStyle.Render("    Outcome: "+label))
+				result = append(result, currentStyles.DimStyle.Render("    Outcome: "+label))
 			}
 		}
 	}
@@ -290,15 +291,15 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		lines := questionResultDisplayLines(questionResult, hasStructuredAnswers)
 		lines = append(lines, resultNotes...)
 		if len(lines) > 0 {
-			result = append(result, toolFieldMarker(ToolResultStyle, "✓"))
+			result = append(result, toolFieldMarker(currentStyles.ToolResultStyle, "✓"))
 			for _, line := range lines {
 				result = appendQuestionAnswerLines(result, line, "    ", "    ", contentWidth)
 			}
 		}
 	case strings.TrimSpace(b.ResultContent) != "":
-		result = append(result, toolFieldMarker(ToolResultStyle, "✓"))
-		for _, line := range wrapText(sanitizeToolDisplayText(b.ResultContent), contentWidth) {
-			result = append(result, ToolResultStyle.Render("    "+line))
+		result = append(result, toolFieldMarker(currentStyles.ToolResultStyle, "✓"))
+		for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(b.ResultContent), contentWidth) {
+			result = append(result, currentStyles.ToolResultStyle.Render("    "+line))
 		}
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
@@ -400,9 +401,9 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 		appendToolOutcome(&result, b, contentWidth, false)
 	} else {
 		if args.Reason != "" {
-			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Reason"))
-			for _, line := range wrapText(sanitizeToolDisplayText(args.Reason), contentWidth) {
-				result = append(result, DimStyle.Render("    "+line))
+			result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Reason"))
+			for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(args.Reason), contentWidth) {
+				result = append(result, currentStyles.DimStyle.Render("    "+line))
 			}
 		}
 		if handleOK {
@@ -410,22 +411,22 @@ func (b *Block) renderCancelCall(width int, spinnerFrame string) []string {
 			// full. The task_id row keeps its internal "adhoc-" prefix — the
 			// readable "#N" form is reserved for the context-title layer (see
 			// the header comment above).
-			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
+			result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Result"))
 			appendTaskHandleFieldRow(&result, "status", handle.Status, contentWidth)
 			appendTaskHandleFieldRow(&result, "task_id", handle.TaskID, contentWidth)
 			appendTaskHandleFieldRow(&result, "agent_id", handle.AgentID, contentWidth)
 			appendTaskHandleFieldRow(&result, "message", handle.Message, contentWidth)
 		} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.stripResultNotes(b.ResultContent))), contentWidth) {
-				result = append(result, DimStyle.Render("    "+line))
+			result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Result"))
+			for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(strings.TrimSpace(b.stripResultNotes(b.ResultContent))), contentWidth) {
+				result = append(result, currentStyles.DimStyle.Render("    "+line))
 			}
 		}
 		appendToolOutcome(&result, b, contentWidth, true)
 		if strings.TrimSpace(b.DoneSummary) != "" {
-			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Completed"))
-			for _, line := range wrapText(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
-				result = append(result, DimStyle.Render("    "+line))
+			result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Completed"))
+			for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
+				result = append(result, currentStyles.DimStyle.Render("    "+line))
 			}
 		}
 	}
@@ -463,15 +464,15 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 	// contract, the same role a Cancel header plays. Raw handle fields
 	// rendered below carry their full machine-readable values.
 	if target != "" {
-		result = append(result, toolFieldInline(ToolResultExpandedStyle, "Target", sanitizeToolDisplayText(target)))
+		result = append(result, toolFieldInline(currentStyles.ToolResultExpandedStyle, "Target", sanitizeToolDisplayText(target)))
 	}
 	if args.Kind != "" {
-		result = append(result, toolFieldInline(ToolResultExpandedStyle, "Kind", sanitizeToolDisplayText(args.Kind)))
+		result = append(result, toolFieldInline(currentStyles.ToolResultExpandedStyle, "Kind", sanitizeToolDisplayText(args.Kind)))
 	}
 	if args.Message != "" {
-		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Message"))
-		for _, line := range wrapText(sanitizeToolDisplayText(args.Message), contentWidth) {
-			result = append(result, toolFieldBody(DimStyle, line))
+		result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Message"))
+		for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(args.Message), contentWidth) {
+			result = append(result, toolFieldBody(currentStyles.DimStyle, line))
 		}
 	}
 	handle, _, handleOK := parseTaskToolHandle(b.ResultContent)
@@ -484,7 +485,7 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 	}
 	if b.ResultContent != "" {
 		if handleOK {
-			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
+			result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Result"))
 			appendTaskHandleFieldRow(&result, "status", handle.Status, contentWidth)
 			// The Target row above already names the task in its readable
 			// short form, so echoing the handle's own task_id under Result
@@ -494,17 +495,17 @@ func (b *Block) renderNotifyCall(width int, spinnerFrame string) []string {
 			appendTaskHandleFieldRow(&result, "agent_id", handle.AgentID, contentWidth)
 			appendTaskHandleFieldRow(&result, "message", handle.Message, contentWidth)
 		} else if !b.toolResultIsError() && !b.toolResultIsCancelled() {
-			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Result"))
-			for _, line := range wrapText(sanitizeToolDisplayText(strings.TrimSpace(b.stripResultNotes(b.ResultContent))), contentWidth) {
-				result = append(result, toolFieldBody(DimStyle, line))
+			result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Result"))
+			for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(strings.TrimSpace(b.stripResultNotes(b.ResultContent))), contentWidth) {
+				result = append(result, toolFieldBody(currentStyles.DimStyle, line))
 			}
 		}
 	}
 	appendToolOutcome(&result, b, contentWidth, true)
 	if strings.TrimSpace(b.DoneSummary) != "" {
-		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Completed"))
-		for _, line := range wrapText(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
-			result = append(result, toolFieldBody(DimStyle, line))
+		result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Completed"))
+		for _, line := range terminaltext.Wrap(sanitizeToolDisplayText(b.DoneSummary), contentWidth) {
+			result = append(result, toolFieldBody(currentStyles.DimStyle, line))
 		}
 	}
 	result = appendToolElapsedToHeader(result, b, cardWidth)
@@ -525,21 +526,21 @@ func appendTaskHandleFieldRow(out *[]string, label, value string, width int) {
 	}
 	labelText := toolArgSectionLabel(label)
 	value = sanitizeToolDisplayText(value)
-	prefixWidth := tuiStringWidth(toolFieldBodyIndent + toolFieldConnector + labelText + ": ")
-	if prefixWidth+tuiStringWidth(value) <= width {
-		*out = append(*out, toolFieldNestedInline(DimStyle, labelText, value))
+	prefixWidth := terminaltext.Width(toolFieldBodyIndent + toolFieldConnector + labelText + ": ")
+	if prefixWidth+terminaltext.Width(value) <= width {
+		*out = append(*out, toolFieldNestedInline(currentStyles.DimStyle, labelText, value))
 		return
 	}
-	prefix := toolFieldBodyIndent + ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(DimStyle, labelText) + " "
+	prefix := toolFieldBodyIndent + currentStyles.ToolFieldConnectorStyle.Render(toolFieldConnector) + toolFieldLabel(currentStyles.DimStyle, labelText) + " "
 	// Hang the wrapped value under its own first column. The available width
 	// keeps every row inside the card content column; 12 columns is the
 	// narrowest fragment worth producing on a very narrow card.
 	available := max(width-prefixWidth, 12)
-	wrapped := wrapText(value, available)
-	*out = append(*out, prefix+DimStyle.Render(wrapped[0]))
+	wrapped := terminaltext.Wrap(value, available)
+	*out = append(*out, prefix+currentStyles.DimStyle.Render(wrapped[0]))
 	continuation := strings.Repeat(" ", prefixWidth+1)
 	for _, line := range wrapped[1:] {
-		*out = append(*out, continuation+DimStyle.Render(line))
+		*out = append(*out, continuation+currentStyles.DimStyle.Render(line))
 	}
 }
 

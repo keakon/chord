@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/permission/rulesuggest"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -50,7 +51,7 @@ func confirmDialogWidth(totalWidth int) int {
 }
 
 func confirmDialogInnerWidth(totalWidth int) int {
-	innerWidth := max(confirmDialogWidth(totalWidth)-DirectoryBorderStyle.GetHorizontalPadding()-DirectoryBorderStyle.GetHorizontalBorderSize(), 1)
+	innerWidth := max(confirmDialogWidth(totalWidth)-currentStyles.DirectoryBorderStyle.GetHorizontalPadding()-currentStyles.DirectoryBorderStyle.GetHorizontalBorderSize(), 1)
 	return innerWidth
 }
 
@@ -192,7 +193,7 @@ func (m *Model) enterRulePicker() {
 		return
 	}
 	req := m.confirm.request
-	candidates := suggestRulePatternsWithContext(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.NeedsApprovalRules, req.PathScope)
+	candidates := rulesuggest.Suggest(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.NeedsApprovalRules, req.PathScope)
 	if len(candidates) == 0 {
 		return
 	}
@@ -354,7 +355,7 @@ func (m *Model) handleConfirmRulePatternEditKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		if len(m.confirm.candidates) == 0 {
-			m.confirm.candidates = []PatternCandidate{{Pattern: pattern, Summary: "custom pattern", Default: true}}
+			m.confirm.candidates = []rulesuggest.Candidate{{Pattern: pattern, Summary: "custom pattern", Default: true}}
 			m.confirm.patternIdx = 0
 		} else {
 			m.confirm.candidates[m.confirm.patternIdx].Pattern = pattern

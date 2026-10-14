@@ -10,6 +10,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -322,7 +323,7 @@ func TestPriorCheckpointCarryStripsMachineSnapshots(t *testing.T) {
 func TestEnsureCheckpointMachineSectionPlacement(t *testing.T) {
 	summary := "## Current User Request\n- do x\n\n## Progress\n- built\n\n## Key Decisions\n- decided"
 	withWorklog := ensureCheckpointWorklogSection(summary, "## Checkpoint Worklog\n- write a.go")
-	progress := strings.Index(withWorklog, checkpointProgressHeading)
+	progress := strings.Index(withWorklog, checkpointfmt.ProgressHeading)
 	worklog := strings.Index(withWorklog, checkpointWorklogHeading)
 	decisions := strings.Index(withWorklog, "## Key Decisions")
 	if progress < 0 || worklog < 0 || decisions < 0 || !(progress < worklog && worklog < decisions) {
@@ -342,7 +343,7 @@ func TestEnsureCheckpointMachineSectionPlacement(t *testing.T) {
 		t.Fatalf("stale worklog body survived the replace:\n%s", replaced)
 	}
 
-	appended := ensureCheckpointMachineSection("## Current User Request\n- x", checkpointWorklogHeading, "## Checkpoint Worklog\n- z", checkpointProgressHeading)
+	appended := ensureCheckpointMachineSection("## Current User Request\n- x", checkpointWorklogHeading, "## Checkpoint Worklog\n- z", checkpointfmt.ProgressHeading)
 	if !strings.HasSuffix(appended, "## Checkpoint Worklog\n- z") {
 		t.Fatalf("missing anchor must append the section:\n%s", appended)
 	}
@@ -377,7 +378,7 @@ func TestApplyCheckpointMachineStateAddsBothSections(t *testing.T) {
 	if !strings.Contains(summary, "- branch: main") {
 		t.Fatalf("repository state missing from the composed summary:\n%s", summary)
 	}
-	if !(strings.Index(summary, checkpointProgressHeading) < strings.Index(summary, checkpointWorklogHeading)) {
+	if !(strings.Index(summary, checkpointfmt.ProgressHeading) < strings.Index(summary, checkpointWorklogHeading)) {
 		t.Fatalf("worklog must follow Progress:\n%s", summary)
 	}
 	if !(strings.Index(summary, checkpointWorklogHeading) < strings.Index(summary, checkpointRepositoryStateHeading)) {

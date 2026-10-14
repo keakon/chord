@@ -8,6 +8,8 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/filecompletion"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 // quitState tracks the two-press exit confirmation: the first q or Ctrl+C sets
@@ -115,8 +117,8 @@ type completionState struct {
 	atMentionFilesLower map[string]string
 	// atMentionNarrow remembers the previous fuzzy match's full candidate set
 	// so appending queries rescore only the previous matches.
-	atMentionNarrow atMentionNarrowCache
-	atMentionList   *OverlayList
+	atMentionNarrow filecompletion.NarrowCache
+	atMentionList   *overlaylist.List
 
 	// Slash command completion (when input starts with "/")
 	slashCompleteSelected int            // index into current completion list

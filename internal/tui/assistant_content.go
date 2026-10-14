@@ -4,17 +4,18 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func assistantContentHasVisibleText(content string) bool {
 	content = removeTrailingCursorGlyph(content)
-	content = stripANSI(content)
+	content = terminaltext.StripANSI(content)
 	return message.HasVisibleText(content)
 }
 
 func visibleAssistantStreamContent(content string) string {
 	content = removeTrailingCursorGlyph(content)
-	content = stripANSI(content)
+	content = terminaltext.StripANSI(content)
 	if !message.HasVisibleText(content) {
 		return ""
 	}
@@ -23,7 +24,7 @@ func visibleAssistantStreamContent(content string) string {
 
 func assistantStreamContentIsPlaceholder(content string) bool {
 	content = removeTrailingCursorGlyph(content)
-	content = stripANSI(content)
+	content = terminaltext.StripANSI(content)
 	if !message.HasVisibleText(content) {
 		return true
 	}

@@ -1,9 +1,8 @@
 package tui
 
 import (
-	"github.com/keakon/lipgloss/v2"
-
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/lipgloss/v2"
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/tools"
@@ -149,8 +148,8 @@ func (m *Model) confirmOptionHitboxes() []confirmOptionHitbox {
 
 	dialog := m.renderConfirmDialog()
 	dialogRect := m.overlayRect(dialog)
-	contentLeft := dialogRect.Min.X + DirectoryBorderStyle.GetBorderLeftSize() + DirectoryBorderStyle.GetPaddingLeft()
-	contentTop := dialogRect.Min.Y + DirectoryBorderStyle.GetBorderTopSize() + DirectoryBorderStyle.GetPaddingTop()
+	contentLeft := dialogRect.Min.X + currentStyles.DirectoryBorderStyle.GetBorderLeftSize() + currentStyles.DirectoryBorderStyle.GetPaddingLeft()
+	contentTop := dialogRect.Min.Y + currentStyles.DirectoryBorderStyle.GetBorderTopSize() + currentStyles.DirectoryBorderStyle.GetPaddingTop()
 	innerWidth := confirmDialogInnerWidth(m.width)
 	// The shared layout may compact away the scroll hint; action rows themselves
 	// are already selected by confirmOptionRows and stay at the end of the frame.
@@ -159,7 +158,7 @@ func (m *Model) confirmOptionHitboxes() []confirmOptionHitbox {
 		cfg.Hint = appendHintChip(cfg.Hint, hint("PgUp/PgDn", "scroll"))
 	}
 	layout := layoutOverlay(cfg, m.confirmDialogArea())
-	optionStart := lipgloss.Height(dialog) - DirectoryBorderStyle.GetVerticalFrameSize() - len(layout.hintLines)
+	optionStart := lipgloss.Height(dialog) - currentStyles.DirectoryBorderStyle.GetVerticalFrameSize() - len(layout.hintLines)
 	hitboxes := make([]confirmOptionHitbox, 0, len(rows)*2)
 	for rowIndex, row := range rows {
 		if rowIndex >= len(layout.hintLines) {

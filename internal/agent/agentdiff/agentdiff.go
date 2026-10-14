@@ -7,6 +7,8 @@ import (
 
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/textdiff"
+	"github.com/keakon/chord/internal/textfile"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -47,7 +49,7 @@ func CapturePreWriteState(tc message.ToolCall, baseDir string) (filePath, conten
 		if err != nil {
 			return
 		}
-		decoded, err := tools.ReadDecodedTextFile(path)
+		decoded, err := textfile.Read(path)
 		if err == nil {
 			return path, decoded.Text, true
 		}
@@ -76,23 +78,23 @@ func GenerateToolDiff(tc message.ToolCall, preContent, preFilePath string, preEx
 		if preFilePath == "" {
 			return Summary{}
 		}
-		decoded, err := tools.ReadDecodedTextFile(preFilePath)
+		decoded, err := textfile.Read(preFilePath)
 		if err != nil {
 			return Summary{}
 		}
-		s := tools.GenerateUnifiedDiffSummary(preContent, decoded.Text, preFilePath)
+		s := textdiff.Unified(preContent, decoded.Text, preFilePath)
 		return Summary{Text: s.Text, Added: s.Added, Removed: s.Removed}
 	case tools.NameWrite:
 		if preFilePath == "" {
 			return Summary{}
 		}
-		decoded, err := tools.ReadDecodedTextFile(preFilePath)
+		decoded, err := textfile.Read(preFilePath)
 		if err != nil {
 			return Summary{}
 		}
 		// If file existed before, compute full diff
 		if preExisted {
-			s := tools.GenerateUnifiedDiffSummary(preContent, decoded.Text, preFilePath)
+			s := textdiff.Unified(preContent, decoded.Text, preFilePath)
 			return Summary{Text: s.Text, Added: s.Added, Removed: s.Removed}
 		}
 		// New file: count all lines as added

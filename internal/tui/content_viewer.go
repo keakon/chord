@@ -6,6 +6,8 @@ import (
 
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type contentViewerState struct {
@@ -111,7 +113,7 @@ func (m *Model) cachedContentViewerLines(width int) []string {
 	}
 	content := strings.TrimSpace(m.contentViewer.content)
 	if content == "" {
-		lines = append(lines, DimStyle.Render("(empty)"))
+		lines = append(lines, currentStyles.DimStyle.Render("(empty)"))
 	} else {
 		lines = append(lines, renderRichMarkdownContent(content, contentWidth, nil)...)
 	}
@@ -253,7 +255,7 @@ func (m *Model) handleContentViewerSelectionClick(mouse tea.Mouse) bool {
 		m.clearContentViewerSelection()
 		return false
 	}
-	plain := stripANSI(lines[line])
+	plain := terminaltext.StripANSI(lines[line])
 
 	if m.clickCount == 2 {
 		sCol, eCol := WordBoundsAtCol(plain, col)
@@ -330,7 +332,7 @@ func (m *Model) selectedContentViewerText() string {
 	}
 	var sb strings.Builder
 	for lineIdx := startLine; lineIdx <= endLine; lineIdx++ {
-		plain := stripANSI(lines[lineIdx])
+		plain := terminaltext.StripANSI(lines[lineIdx])
 		lineWidth := selectionPlainTextWidth(plain)
 		absStart := 0
 		absEnd := lineWidth
@@ -358,7 +360,7 @@ func (m *Model) selectedContentViewerText() string {
 		}
 		sb.WriteString(segment)
 	}
-	return strings.TrimSpace(joinStandaloneEmojiModifiers(sb.String()))
+	return strings.TrimSpace(terminaltext.RestoreModifiers(sb.String()))
 }
 
 func (m *Model) copyContentViewerSelection() tea.Cmd {
@@ -457,10 +459,10 @@ func (m *Model) renderContentViewer() string {
 			line = applyHighlightToLine(line, colStart, colEnd)
 		}
 		line = ansi.Truncate(line, innerWidth, "…")
-		line = padLineToDisplayWidth(line, innerWidth)
+		line = terminaltext.Pad(line, innerWidth)
 		if marginX > 0 && innerWidth < width {
 			line = strings.Repeat(" ", marginX) + line
-			line = padLineToDisplayWidth(line, width)
+			line = terminaltext.Pad(line, width)
 		}
 		rendered = append(rendered, line)
 	}

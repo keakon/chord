@@ -49,7 +49,7 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 		if modelRef != "" {
 			modelStr = modelref.TruncateRunningModelRef(modelRef, modelSlotMax)
 		}
-		modelPill = PillStyle.Render("◇ " + modelStr)
+		modelPill = currentStyles.PillStyle.Render("◇ " + modelStr)
 		m.cachedModelPillRef = modelRef
 		m.cachedModelPillEffW = effectiveWidth
 		m.cachedModelPillLeftW = leftWidth
@@ -58,11 +58,11 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 	pills = append(pills, modelPill)
 	tier := snap.effectiveTier
 	if tier != config.ServiceTierStandard {
-		pills = append(pills, StatusHintStyle.Render("TIER "+string(tier)))
+		pills = append(pills, currentStyles.StatusHintStyle.Render("TIER "+string(tier)))
 	}
 
 	if snap.proxyInUse {
-		pills = append(pills, PillStyle.Render("↗"))
+		pills = append(pills, currentStyles.PillStyle.Render("↗"))
 	}
 
 	usage := snap.tokenUsage
@@ -75,10 +75,10 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 		if usage.OutputTokens != 0 {
 			tokenParts = append(tokenParts, "↓ "+formatTokens(usage.OutputTokens))
 		}
-		pills = append(pills, PillStyle.Render(strings.Join(tokenParts, "  ")))
+		pills = append(pills, currentStyles.PillStyle.Render(strings.Join(tokenParts, "  ")))
 	}
 	if snap.cost != 0 {
-		pills = append(pills, PillStyle.Render(formatCost(snap.cost)))
+		pills = append(pills, currentStyles.PillStyle.Render(formatCost(snap.cost)))
 	}
 
 	ctxStr := formatContextPill(snap.contextCurrent, snap.contextLimit)
@@ -90,9 +90,9 @@ func (m *Model) appendStatusBarModelPills(pills []string, snap statusBarAgentSna
 
 func renderStatusBarViewingPill(label, color string) string {
 	if strings.TrimSpace(color) == "" {
-		return PillStyle.Render("◉ " + label)
+		return currentStyles.PillStyle.Render("◉ " + label)
 	}
-	return PillStyle.Foreground(lipgloss.Color(color)).Render("◉ " + label)
+	return currentStyles.PillStyle.Foreground(lipgloss.Color(color)).Render("◉ " + label)
 }
 
 func formatContextPill(current, limit int) string {
@@ -109,15 +109,15 @@ func formatContextPill(current, limit int) string {
 
 func renderContextPill(text string, current, limit int, reminder, threshold float64) string {
 	if limit <= 0 {
-		return PillStyle.Render(text)
+		return currentStyles.PillStyle.Render(text)
 	}
 	pct := float64(current) / float64(limit)
-	fg := currentTheme.InfoPanelSuccessFg
+	fg := currentStyles.Palette.InfoPanelSuccessFg
 	switch contextUsageSeverityFor(pct, reminder, threshold) {
 	case contextUsageCritical:
-		fg = currentTheme.InfoPanelCriticalFg
+		fg = currentStyles.Palette.InfoPanelCriticalFg
 	case contextUsageWarning:
-		fg = currentTheme.InfoPanelWarningFg
+		fg = currentStyles.Palette.InfoPanelWarningFg
 	}
-	return PillStyle.Foreground(lipgloss.Color(fg)).Render(text)
+	return currentStyles.PillStyle.Foreground(lipgloss.Color(fg)).Render(text)
 }

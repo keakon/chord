@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -18,7 +19,7 @@ func TestCommandOutputPreviewRetainsReusableEvidence(t *testing.T) {
 			// The preview is bounded by the shell budget plus the marker line and
 			// reference it carries, keeps both the leading and the trailing
 			// evidence, and names the artifact holding the full result.
-			if len(got) > shellResultPreviewBytes+4*1024 || !strings.Contains(got, "start marker") || !strings.Contains(got, "final status marker") || !strings.Contains(got, tools.ArtifactReferencePrefix) {
+			if len(got) > shellResultPreviewBytes+4*1024 || !strings.Contains(got, "start marker") || !strings.Contains(got, "final status marker") || !strings.Contains(got, tooloutput.ArtifactReferencePrefix) {
 				t.Fatalf("missing bounded preview, evidence, or artifact: %s", got)
 			}
 			var files []string

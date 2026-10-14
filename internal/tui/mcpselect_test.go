@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func markMCPModelBusy(m *Model) {
@@ -59,7 +60,7 @@ func TestRenderMCPSelectDialogShowsReadOnlyWhenBusy(t *testing.T) {
 	markMCPModelBusy(&m)
 	m.openMCPSelect()
 
-	plain := stripANSI(m.renderMCPSelectDialog())
+	plain := terminaltext.StripANSI(m.renderMCPSelectDialog())
 	if !strings.Contains(plain, "Changes are allowed while running") {
 		t.Fatalf("rendered MCP dialog = %q, want running next-request hint", plain)
 	}
@@ -232,7 +233,7 @@ func TestHandleAgentEventEnvStatusUpdateRefreshesMCPSelectItems(t *testing.T) {
 	if selected.ID != "beta" {
 		t.Fatalf("selected item after refresh = %q, want beta", selected.ID)
 	}
-	plain := stripANSI(m.renderMCPSelectDialog())
+	plain := terminaltext.StripANSI(m.renderMCPSelectDialog())
 	if !strings.Contains(plain, "alpha — connecting") {
 		t.Fatalf("rendered MCP dialog = %q, want updated connecting state", plain)
 	}

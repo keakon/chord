@@ -89,3 +89,32 @@ func LastRunes(s string, n int) string {
 	}
 	return s[start:]
 }
+
+// PrefixBytes returns s unchanged when it fits within n bytes. Otherwise it
+// returns the valid UTF-8 prefix within that budget, stopping at an invalid
+// sequence or an incomplete rune. Unlike Bytes, it validates a truncated prefix.
+func PrefixBytes(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	if n <= 0 {
+		return ""
+	}
+	s = s[:n]
+	// Single forward pass: the original loop re-validated the whole prefix per
+	// trimmed byte, which is quadratic for binary output. The longest valid
+	// UTF-8 prefix ends either at the first invalid sequence or at the start
+	// of a rune the boundary splits.
+	i := 0
+	for i < n {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			return s[:i]
+		}
+		if i+size > n {
+			return s[:i]
+		}
+		i += size
+	}
+	return s[:n]
+}

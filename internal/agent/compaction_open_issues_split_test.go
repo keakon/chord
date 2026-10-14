@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -428,7 +429,7 @@ func TestOpenIssueDemotionSurvivesDurableApplyChain(t *testing.T) {
 	}
 	// The rendered section has to say what the carried entry is: a reader must
 	// not take it for a current blocker.
-	openProblems, ok := markdownSection(compactionSummaryBody(secondCheckpoint.Content), "## Open Problems")
+	openProblems, ok := checkpointfmt.Section(compactionSummaryBody(secondCheckpoint.Content), "## Open Problems")
 	if !ok || !strings.Contains(openProblems, typedStateCarriedIssuesLabel) {
 		t.Fatalf("round-2 ## Open Problems must label the historical block:\n%s", openProblems)
 	}

@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/llm/mediacache"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/patchinput"
 	"github.com/keakon/chord/internal/toolname"
@@ -240,7 +241,7 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 						}
 						content = append(content, responsesContentBlock{
 							Type:     "input_image",
-							ImageURL: binaryPartDataURL(mime, data),
+							ImageURL: mediacache.DataURL(mime, data),
 							Detail:   "auto",
 						})
 					case "pdf":
@@ -251,7 +252,7 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 						content = append(content, responsesContentBlock{
 							Type:     "input_file",
 							Filename: defaultPDFFilename(p.FileName),
-							FileData: binaryPartDataURL(defaultPDFMediaType(mime), data),
+							FileData: mediacache.DataURL(defaultPDFMediaType(mime), data),
 						})
 					default:
 						appendResponsesTextBlock(&content, p.Text)
@@ -526,7 +527,7 @@ func responsesToolOutput(msg message.Message) any {
 			}
 			content = append(content, responsesContentBlock{
 				Type:     "input_image",
-				ImageURL: binaryPartDataURL(mime, data),
+				ImageURL: mediacache.DataURL(mime, data),
 				Detail:   "auto",
 			})
 		case "pdf":
@@ -537,7 +538,7 @@ func responsesToolOutput(msg message.Message) any {
 			content = append(content, responsesContentBlock{
 				Type:     "input_file",
 				Filename: defaultPDFFilename(p.FileName),
-				FileData: binaryPartDataURL(defaultPDFMediaType(mime), data),
+				FileData: mediacache.DataURL(defaultPDFMediaType(mime), data),
 			})
 		default:
 			if p.Text == "" {

@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func renderDialogBox(width int, lines []string) string {
@@ -13,11 +15,11 @@ func renderDialogBox(width int, lines []string) string {
 		bounded[i] = ansi.Truncate(line, contentWidth, "…")
 	}
 	body := strings.Join(styleDialogBodyLines(bounded, contentWidth), "\n")
-	return DirectoryBorderStyle.Width(width).Render(body)
+	return currentStyles.DirectoryBorderStyle.Width(width).Render(body)
 }
 
 func dialogContentWidth(width int) int {
-	innerWidth := width - DirectoryBorderStyle.GetHorizontalPadding() - DirectoryBorderStyle.GetHorizontalBorderSize()
+	innerWidth := width - currentStyles.DirectoryBorderStyle.GetHorizontalPadding() - currentStyles.DirectoryBorderStyle.GetHorizontalBorderSize()
 	if innerWidth < 0 {
 		return 0
 	}
@@ -25,15 +27,15 @@ func dialogContentWidth(width int) int {
 }
 
 func styleDialogBodyLines(lines []string, width int) []string {
-	if currentTheme.DialogBg == "" || width <= 0 {
+	if currentStyles.Palette.DialogBg == "" || width <= 0 {
 		return lines
 	}
 	out := make([]string, len(lines))
 	for i, line := range lines {
-		line = DialogBodyStyle.Render(line)
-		line = preserveBackground(line, currentTheme.DialogBg)
-		line = padLineToDisplayWidthWithStyle(DialogBodyStyle, line, width)
-		out[i] = ensureStyledLineReset(line)
+		line = currentStyles.DialogBodyStyle.Render(line)
+		line = terminaltext.PreserveBackground(line, currentStyles.Palette.DialogBg)
+		line = padLineToDisplayWidthWithStyle(currentStyles.DialogBodyStyle, line, width)
+		out[i] = terminaltext.EnsureReset(line)
 	}
 	return out
 }
@@ -47,7 +49,7 @@ func styleDialogBodyLines(lines []string, width int) []string {
 // textinput/textarea View lines) fall back to DialogBg instead of the
 // terminal default.
 func preserveDialogBackground(body string) string {
-	if currentTheme.DialogBg == "" || body == "" {
+	if currentStyles.Palette.DialogBg == "" || body == "" {
 		return body
 	}
 	lines := strings.Split(body, "\n")
@@ -55,7 +57,7 @@ func preserveDialogBackground(body string) string {
 		if line == "" || !strings.Contains(line, "\x1b[") {
 			continue
 		}
-		lines[i] = ensureStyledLineReset(preserveBackground(line, currentTheme.DialogBg))
+		lines[i] = terminaltext.EnsureReset(terminaltext.PreserveBackground(line, currentStyles.Palette.DialogBg))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -65,7 +67,7 @@ func preserveDialogBackground(body string) string {
 func wrapDialogLines(lines []string, width int) []string {
 	out := make([]string, 0, len(lines))
 	for _, line := range lines {
-		out = append(out, strings.Split(tuiWidthMethod.Wrap(line, max(width, 1), ""), "\n")...)
+		out = append(out, strings.Split(terminaltext.WidthMethod.Wrap(line, max(width, 1), ""), "\n")...)
 	}
 	return out
 }

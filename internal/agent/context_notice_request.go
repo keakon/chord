@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/keakon/chord/internal/agent/requestshape"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -251,7 +252,7 @@ func pressureNoticePrefixChanged(previous, current []message.Message, slot int) 
 		if i == len(previous) || j == len(current) {
 			return i != len(previous) || j != len(current)
 		}
-		if !stableReductionMessageEquivalent(&previous[i], &current[j]) {
+		if !requestshape.MessageEquivalent(&previous[i], &current[j]) {
 			return true
 		}
 		i++

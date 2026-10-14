@@ -33,16 +33,16 @@ func hintText(text string) hintChip { return hintChip{action: text} }
 
 func renderHintChip(c hintChip) string {
 	if c.keys == "" {
-		return DimStyle.Render(c.action)
+		return currentStyles.DimStyle.Render(c.action)
 	}
 	text := "[" + c.keys + "] " + c.action
 	if c.danger {
-		return DialogDangerStyle.Bold(c.primary).Render(text)
+		return currentStyles.DialogDangerStyle.Bold(c.primary).Render(text)
 	}
 	if c.primary {
-		return DialogPrimaryStyle.Render(text)
+		return currentStyles.DialogPrimaryStyle.Render(text)
 	}
-	return KeyHintStyle.Render("["+c.keys+"]") + " " + DimStyle.Render(c.action)
+	return currentStyles.KeyHintStyle.Render("["+c.keys+"]") + " " + currentStyles.DimStyle.Render(c.action)
 }
 
 // hintLine renders one footer line: chips joined by two spaces. Callers build
@@ -115,10 +115,10 @@ func renderTabRow(labels []string, active int) string {
 	parts := make([]string, len(labels))
 	for i, label := range labels {
 		if i == active {
-			parts[i] = TabActiveStyle.Render(label)
+			parts[i] = currentStyles.TabActiveStyle.Render(label)
 			continue
 		}
-		parts[i] = TabStyle.Render(label)
+		parts[i] = currentStyles.TabStyle.Render(label)
 	}
 	return strings.Join(parts, " ")
 }
@@ -141,7 +141,7 @@ func renderFilterLine(query string, focused bool, trailing string, width int) st
 		trailingWidth = ansi.StringWidth(trailing)
 		// Keep the counter only while it leaves room for a readable query.
 		if width >= ansi.StringWidth(label)+trailingWidth+8 {
-			trailingPart = DimStyle.Render(trailing)
+			trailingPart = currentStyles.DimStyle.Render(trailing)
 		} else {
 			trailingWidth = 0
 		}
@@ -150,7 +150,7 @@ func renderFilterLine(query string, focused bool, trailing string, width int) st
 	if idle {
 		placeholder := label + filterPlaceholder
 		if trailingWidth == 0 {
-			return ansi.Truncate(DimStyle.Render(placeholder), width, "…")
+			return ansi.Truncate(currentStyles.DimStyle.Render(placeholder), width, "…")
 		}
 		// The placeholder alone can exceed the row: truncate it so the counter
 		// stays inside the dialog with one separating space.
@@ -158,7 +158,7 @@ func renderFilterLine(query string, focused bool, trailing string, width int) st
 			placeholder = ansi.Truncate(placeholder, room, "…")
 		}
 		pad := max(width-trailingWidth-ansi.StringWidth(placeholder), 1)
-		return DimStyle.Render(placeholder) + strings.Repeat(" ", pad) + trailingPart
+		return currentStyles.DimStyle.Render(placeholder) + strings.Repeat(" ", pad) + trailingPart
 	}
 
 	caret := ""
@@ -177,7 +177,7 @@ func renderFilterLine(query string, focused bool, trailing string, width int) st
 	if queryWidth := min(queryWidth, max(width-ansi.StringWidth(label)-len(caret), 1)); ansi.StringWidth(q) > queryWidth {
 		q = ansi.TruncateLeft(q, ansi.StringWidth(q)-queryWidth+1, "…")
 	}
-	line := DimStyle.Render(label) + q + caret
+	line := currentStyles.DimStyle.Render(label) + q + caret
 	if trailingWidth == 0 {
 		return ansi.Truncate(line, width, "…")
 	}

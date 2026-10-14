@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestClipboardTextPasteShortInsertsIntoComposer(t *testing.T) {
@@ -904,7 +905,7 @@ func TestRenderQueuedDraftsLeavesRightMarginForDeleteToken(t *testing.T) {
 	m := NewModel(nil)
 	m.queuedDrafts = []queuedDraft{{ID: "draft-1", Content: "delete me"}}
 
-	got := stripANSI(m.renderQueuedDrafts(24, 1))
+	got := terminaltext.StripANSI(m.renderQueuedDrafts(24, 1))
 	if !strings.HasSuffix(got, queuedDraftDeleteToken+strings.Repeat(" ", queuedDraftDeleteRightMargin)) {
 		t.Fatalf("renderQueuedDrafts() suffix = %q, want delete token with %d trailing spaces", got, queuedDraftDeleteRightMargin)
 	}

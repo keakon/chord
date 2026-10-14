@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // backgroundResultAppended builds the durable-append event a finished
@@ -65,7 +66,7 @@ func TestBackgroundResultAppendedEventAppendsDurableStatusBlock(t *testing.T) {
 	if !block.Collapsed {
 		t.Fatal("background result card must start collapsed")
 	}
-	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	for _, want := range []string{"JOB RESULT #1", "✓ ▸ job-1 · Run production build"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered background result missing %q:\n%s", want, rendered)
@@ -91,7 +92,7 @@ func TestBackgroundResultAppendedEventRendersFailureInBodyUnderStableLabel(t *te
 	if !block.Collapsed {
 		t.Fatal("background result card must start collapsed")
 	}
-	collapsed := stripANSI(strings.Join(block.Render(110, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(110, ""), "\n"))
 	for _, want := range []string{
 		"JOB RESULT #1",
 		"✗ ▸ job-1 · Start integration service",
@@ -108,7 +109,7 @@ func TestBackgroundResultAppendedEventRendersFailureInBodyUnderStableLabel(t *te
 	if !block.ToggleAtWidth(110) || block.Collapsed {
 		t.Fatal("toggling the failure card must expand it")
 	}
-	rendered := stripANSI(strings.Join(block.Render(110, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(110, ""), "\n"))
 	for _, want := range []string{
 		"JOB RESULT #1",
 		"✗ ▾ job-1 · Start integration service",
@@ -134,7 +135,7 @@ func TestBackgroundResultAppendedEventShowsCompactDurationButCopiesOriginalNote(
 	if !ok {
 		t.Fatal("expected background result block")
 	}
-	rendered := stripANSI(strings.Join(block.Render(110, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(110, ""), "\n"))
 	if !strings.Contains(rendered, "⏱ 17s") {
 		t.Fatalf("card missing compact duration:\n%s", rendered)
 	}
@@ -162,8 +163,8 @@ func TestBackgroundResultAppendedEventHighlightsMarkdownOutputFence(t *testing.T
 		t.Fatal("expected the background result card to expand")
 	}
 	rendered := strings.Join(block.Render(110, ""), "\n")
-	if !strings.Contains(stripANSI(rendered), "DIFF") {
-		t.Fatalf("rendered fenced output missing language label:\n%s", stripANSI(rendered))
+	if !strings.Contains(terminaltext.StripANSI(rendered), "DIFF") {
+		t.Fatalf("rendered fenced output missing language label:\n%s", terminaltext.StripANSI(rendered))
 	}
 	if !strings.Contains(rendered, "\x1b[") {
 		t.Fatalf("rendered fenced output contains no ANSI styling:\n%s", rendered)
@@ -188,7 +189,7 @@ func TestMessagesToBlocksRestoresBackgroundResultCard(t *testing.T) {
 	if !block.Collapsed {
 		t.Fatal("restored background result card must start collapsed")
 	}
-	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(rendered, "✓ ▸ job-9 · Run production build") || strings.Contains(rendered, "[Background job job-9 finished]") {
 		t.Fatalf("restored background result rendered incorrectly:\n%s", rendered)
 	}
@@ -335,7 +336,7 @@ func TestBackgroundResultAppendedEventUsesMessageIDWhenHeadlineCarriesNoJobID(t 
 // the trailing padding the card wrapper adds.
 func foldedBackgroundResultRows(t *testing.T, block *Block, width int) []string {
 	t.Helper()
-	rendered := stripANSI(strings.Join(block.Render(width, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(width, ""), "\n"))
 	var rows []string
 	for line := range strings.SplitSeq(rendered, "\n") {
 		row := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "│"))
@@ -534,7 +535,7 @@ func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
 	if !block.Collapsed {
 		t.Fatal("background result card must start collapsed")
 	}
-	collapsed := stripANSI(strings.Join(block.Render(110, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(110, ""), "\n"))
 	if !strings.Contains(collapsed, "✓ ▸ job-fold · Run folded tests") {
 		t.Fatalf("collapsed card missing the job headline:\n%s", collapsed)
 	}
@@ -550,7 +551,7 @@ func TestBackgroundResultCardFoldsOutputAndExpandsOnToggle(t *testing.T) {
 	if !block.ToggleAtWidth(110) || block.Collapsed {
 		t.Fatal("toggling must expand the card")
 	}
-	expanded := stripANSI(strings.Join(block.Render(110, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(110, ""), "\n"))
 	for _, want := range []string{"✓ ▾ job-fold · Run folded tests", "Relevant output:", "line one", "line two"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded card missing %q:\n%s", want, expanded)
@@ -613,7 +614,7 @@ func TestBackgroundResultHeaderMatchesOnlyTheCurrentFormat(t *testing.T) {
 		t.Fatalf("legacy result must still render as a JOB RESULT card, got %q", block.StatusTitle)
 	}
 
-	folded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	folded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(folded, "Start integration service") {
 		t.Fatalf("folded legacy card lost its description:\n%s", folded)
 	}
@@ -624,7 +625,7 @@ func TestBackgroundResultHeaderMatchesOnlyTheCurrentFormat(t *testing.T) {
 	if !block.ToggleAtWidth(120) || block.Collapsed {
 		t.Fatal("toggling must expand the legacy card")
 	}
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(expanded, "[Background job job-1 completed]") {
 		t.Fatalf("expanded legacy card must keep the unrecognized line as body text:\n%s", expanded)
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestToolCallReceivingUsesStaticReceivingIcon(t *testing.T) {
@@ -24,8 +25,8 @@ func TestToolCallReceivingUsesStaticReceivingIcon(t *testing.T) {
 	if block.ToolExecutionState != agent.ToolCallExecutionStateReceiving {
 		t.Fatalf("tool state = %q, want receiving", block.ToolExecutionState)
 	}
-	frameA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
-	frameB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
+	frameA := terminaltext.StripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	frameB := terminaltext.StripANSI(strings.Join(block.Render(96, "▘"), "\n"))
 	if frameA != frameB {
 		t.Fatalf("receiving tool card should not animate\nframe A:\n%s\n\nframe B:\n%s", frameA, frameB)
 	}

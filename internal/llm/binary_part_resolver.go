@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/imageutil"
+	"github.com/keakon/chord/internal/llm/mediacache"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -102,7 +103,7 @@ func binaryPartForWire(part message.ContentPart) ([]byte, string, bool) {
 // ready form, memoized by the digest of the source bytes so the same history
 // part is not decoded and re-encoded on every request or fallback attempt.
 func normalizeImageForWire(source []byte, mime string, part message.ContentPart) ([]byte, string, bool) {
-	key := partDigest(source)
+	key := mediacache.Digest(source)
 	if entry, ok := imageWireCache.get(key); ok {
 		return entry.data, entry.mime, true
 	}

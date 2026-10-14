@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
+	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
 
-	uv "github.com/keakon/ultraviolet"
+	"github.com/keakon/chord/internal/tui/overlaylist"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // The host keeps whatever the incremental renderer stops rewriting, so these
@@ -34,7 +36,7 @@ func assertLastColumnEmpty(t *testing.T, m *Model) {
 }
 
 func TestStatusBarAndSeparatorLeaveLastColumnEmpty(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 107, 61)
 
 	// A status line that consumes the whole content budget must still stop one
@@ -48,7 +50,7 @@ func TestStatusBarAndSeparatorLeaveLastColumnEmpty(t *testing.T) {
 }
 
 func TestViewKeepsLastColumnEmptyWithSlashCompletion(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 107, 61)
 	m.mode = ModeInsert
 	m.input.SetValue("/resume")
@@ -61,7 +63,7 @@ func TestViewKeepsLastColumnEmptyWithSlashCompletion(t *testing.T) {
 }
 
 func TestViewKeepsLastColumnEmptyOnNarrowEmptySessionSelect(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 107, 61)
 	m.mode = ModeInsert
 
@@ -80,7 +82,7 @@ func TestViewKeepsLastColumnEmptyOnNarrowEmptySessionSelect(t *testing.T) {
 }
 
 func TestViewKeepsLastColumnEmptyOnNarrowWelcome(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	// The welcome hints are wider than a narrow terminal, and the splash art can
 	// be too. The frame must still stop one column short of the edge instead of
 	// truncating onto it, at every size.
@@ -127,7 +129,7 @@ func requestsFullRepaint(t *testing.T, cmd tea.Cmd) bool {
 }
 
 func TestDismissingBottomLeftOverlayRequestsFullRepaint(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	esc := tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})
 	newInsertModel := func() *Model {
 		m := NewModelWithSize(nil, 107, 61)
@@ -157,7 +159,7 @@ func TestDismissingBottomLeftOverlayRequestsFullRepaint(t *testing.T) {
 	t.Run("@ mention list", func(t *testing.T) {
 		m := newInsertModel()
 		m.atMentionOpen = true
-		m.atMentionList = NewOverlayList([]OverlayListItem{{Label: "main.go"}}, 10)
+		m.atMentionList = overlaylist.New([]overlaylist.Item{{Label: "main.go"}}, 10)
 		if !m.bottomLeftOverlayDrawn() {
 			t.Fatal("@ mention list should count as drawn while it is open")
 		}
@@ -196,7 +198,7 @@ func TestDismissingBottomLeftOverlayRequestsFullRepaint(t *testing.T) {
 }
 
 func TestBottomLeftOverlayNotReportedWhenDropdownOutgrowsMainArea(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	// A terminal too short for the dropdown: the renderer skips it entirely, so
 	// the predicate must not claim it covers the bottom-left cell. Reporting it
 	// would force a full clear-screen on dismissal for a layer that was never

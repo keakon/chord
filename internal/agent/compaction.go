@@ -92,20 +92,6 @@ const (
 	compactBudgetRatio = 6
 )
 
-var compactionRequiredHeadings = []string{
-	"## Current User Request",
-	"## Active Objective",
-	"## Background Goals",
-	"## User Constraints",
-	"## Progress",
-	"## Key Decisions",
-	"## Files and Evidence",
-	"## Todo State",
-	"## SubAgent State",
-	"## Open Problems",
-	"## Next Step",
-}
-
 // CompactionBackendGeneric is the durable record label for the built-in
 // compaction backend: Chord calls the model to produce a text summary.
 const CompactionBackendGeneric = "generic"
@@ -1197,5 +1183,3 @@ func (a *MainAgent) addToolEvidenceCandidate(item evidenceItem, msg message.Mess
 	}
 	a.addEvidenceCandidate(item)
 }
-
-const compactSummaryMinChars = 160

@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func compactionCheckpointFixture() string {
@@ -36,7 +38,7 @@ func legacyCheckpointFixture() string {
 // line.
 func TestCompactionCardKeepsProtocolMarkersOffProseLines(t *testing.T) {
 	block := &Block{ID: 0, Type: BlockCompactionSummary, Content: compactionCheckpointFixture()}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 
 	for _, marker := range []string{"[Context Summary]", "[Session Anchors]", "[/Session Anchors]"} {
 		if strings.Contains(plain, marker) {
@@ -154,7 +156,7 @@ func TestCompactionSectionHighlighterCacheSurvivesReRender(t *testing.T) {
 		message.CompactionDisplayHint + "Press toggle-collapse."
 	b := &Block{ID: 0, Type: BlockCompactionSummary, Content: content}
 	b.Render(100, "")
-	slots := b.compactionSectionHL
+	slots := slices.Clone(b.compactionSectionHL)
 	if len(slots) < 2 {
 		t.Fatalf("expected at least two per-section highlighter slots, got %d", len(slots))
 	}
@@ -166,14 +168,22 @@ func TestCompactionSectionHighlighterCacheSurvivesReRender(t *testing.T) {
 	}
 	first := slots[0]
 	firstRendered := first.Snippet("var cacheProbe = 731", "")
-	warmAllocs := testing.AllocsPerRun(5, func() { first.Snippet("var cacheProbe = 731", "") })
-	renderAllocs := testing.AllocsPerRun(5, func() { b.Render(100, "") })
-	rerenderAllocs := testing.AllocsPerRun(5, func() {
+	keys := make([]string, len(slots))
+	for i, slot := range slots {
+		if slot != nil {
+			keys[i] = slot.ContextKey()
+		}
+	}
+	for range 5 {
 		b.Render(100, "")
-		b.compactionSectionHL[0].Snippet("var cacheProbe = 731", "")
-	})
-	if rerenderAllocs > renderAllocs+warmAllocs {
-		t.Fatalf("re-render lost the warm section cache: combined=%v render=%v warm=%v", rerenderAllocs, renderAllocs, warmAllocs)
+		if len(b.compactionSectionHL) != len(slots) {
+			t.Fatal("re-render changed the number of section highlighters")
+		}
+		for i, slot := range b.compactionSectionHL {
+			if slot != slots[i] || (slot != nil && slot.ContextKey() != keys[i]) {
+				t.Fatalf("re-render changed highlighter identity or context for section %d", i)
+			}
+		}
 	}
 
 	b.Render(100, "")
@@ -206,7 +216,7 @@ func TestCompactionCardKeepsExcerptLinesSeparate(t *testing.T) {
 		"```\n" +
 		message.CompactionCompressedTag + "\nEarlier conversation was compacted.\n"
 	block := &Block{ID: 0, Type: BlockCompactionSummary, Content: content, CompactionSummaryMode: message.CompactionSummaryModeModelDriven}
-	rendered := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	lines := strings.Split(rendered, "\n")
 
 	alpha, beta := false, false

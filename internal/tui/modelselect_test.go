@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestPoolSelectCursorNavigation(t *testing.T) {
@@ -65,7 +66,7 @@ func TestOpenModelSelectForAgentShowsTargetTitle(t *testing.T) {
 	if got := m.modelSelect.poolCursor; got != 0 {
 		t.Fatalf("poolCursor = %d, want 0 for current pool", got)
 	}
-	plain := stripANSI(m.renderModelSelectDialog())
+	plain := terminaltext.StripANSI(m.renderModelSelectDialog())
 	if !strings.Contains(plain, "reviewer Model Pool") {
 		t.Fatalf("dialog title missing agent target:\n%s", plain)
 	}
@@ -85,7 +86,7 @@ func TestOpenModelSelectForAgentUsesFirstPoolWhenUnset(t *testing.T) {
 	if got := m.modelSelect.poolCursor; got != 0 {
 		t.Fatalf("poolCursor = %d, want 0 for first/default pool", got)
 	}
-	plain := stripANSI(m.renderModelSelectDialog())
+	plain := terminaltext.StripANSI(m.renderModelSelectDialog())
 	if !strings.Contains(plain, "reviewer Model Pool") {
 		t.Fatalf("dialog title missing agent target:\n%s", plain)
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestThinkingStreamEndsOnStreamThinkingEvent(t *testing.T) {
@@ -68,7 +69,7 @@ func TestSubAgentThinkingStreamEndsOnStreamThinkingEvent(t *testing.T) {
 	if thinkingBlock.Streaming {
 		t.Fatal("expected settled sub-agent thinking block to have Streaming=false")
 	}
-	rendered := stripANSI(strings.Join(thinkingBlock.Render(80, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(thinkingBlock.Render(80, ""), "\n"))
 	if !strings.Contains(rendered, "Planning safe branch update preserving changes") {
 		t.Fatalf("expected rendered sub-agent thinking to keep content; got:\n%s", rendered)
 	}

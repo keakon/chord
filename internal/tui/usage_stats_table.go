@@ -7,9 +7,10 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
-func usageModelItems(models map[string]*analytics.ModelStats) []OverlayTableItem {
+func usageModelItems(models map[string]*analytics.ModelStats) []overlaylist.TableItem {
 	names := make([]string, 0, len(models))
 	for name := range models {
 		names = append(names, name)
@@ -17,13 +18,13 @@ func usageModelItems(models map[string]*analytics.ModelStats) []OverlayTableItem
 	sort.Slice(names, func(i, j int) bool {
 		return lessModelStatsByUsage(names[i], names[j], models[names[i]], models[names[j]])
 	})
-	items := make([]OverlayTableItem, 0, len(names))
+	items := make([]overlaylist.TableItem, 0, len(names))
 	for _, name := range names {
 		stats := models[name]
 		if stats == nil {
 			continue
 		}
-		items = append(items, OverlayTableItem{
+		items = append(items, overlaylist.TableItem{
 			ID: name, Label: name,
 			Cells: []string{
 				name,
@@ -37,7 +38,7 @@ func usageModelItems(models map[string]*analytics.ModelStats) []OverlayTableItem
 	return items
 }
 
-func usageAgentItems(agents map[string]*analytics.AgentStats) []OverlayTableItem {
+func usageAgentItems(agents map[string]*analytics.AgentStats) []overlaylist.TableItem {
 	names := make([]string, 0, len(agents))
 	for name := range agents {
 		names = append(names, name)
@@ -45,7 +46,7 @@ func usageAgentItems(agents map[string]*analytics.AgentStats) []OverlayTableItem
 	sort.Slice(names, func(i, j int) bool {
 		return lessAgentStatsByUsage(names[i], names[j], agents[names[i]], agents[names[j]])
 	})
-	items := make([]OverlayTableItem, 0, len(names))
+	items := make([]overlaylist.TableItem, 0, len(names))
 	for _, name := range names {
 		stats := agents[name]
 		if stats == nil {
@@ -55,7 +56,7 @@ func usageAgentItems(agents map[string]*analytics.AgentStats) []OverlayTableItem
 		if name == "main" {
 			label = "main"
 		}
-		items = append(items, OverlayTableItem{
+		items = append(items, overlaylist.TableItem{
 			ID: name, Label: label,
 			Cells: []string{
 				label,
@@ -144,7 +145,7 @@ func lessUsageAggregateByUsage(keyA, keyB string, a, b *analytics.UsageAggregate
 	return keyA < keyB
 }
 
-func usageRefAggregateItemsByUsage(groups map[string]*analytics.UsageAggregate, labelFn func(string) string) []OverlayTableItem {
+func usageRefAggregateItemsByUsage(groups map[string]*analytics.UsageAggregate, labelFn func(string) string) []overlaylist.TableItem {
 	keys := make([]string, 0, len(groups))
 	for key, agg := range groups {
 		if agg == nil {
@@ -155,7 +156,7 @@ func usageRefAggregateItemsByUsage(groups map[string]*analytics.UsageAggregate, 
 	sort.Slice(keys, func(i, j int) bool {
 		return lessUsageAggregateByUsage(keys[i], keys[j], groups[keys[i]], groups[keys[j]])
 	})
-	items := make([]OverlayTableItem, 0, len(keys))
+	items := make([]overlaylist.TableItem, 0, len(keys))
 	for _, key := range keys {
 		agg := groups[key]
 		if agg == nil {
@@ -165,7 +166,7 @@ func usageRefAggregateItemsByUsage(groups map[string]*analytics.UsageAggregate, 
 		if labelFn != nil {
 			label = labelFn(key)
 		}
-		items = append(items, OverlayTableItem{
+		items = append(items, overlaylist.TableItem{
 			ID: key, Label: label,
 			Cells: []string{
 				label,
@@ -192,7 +193,7 @@ func parseUsageDateKey(key string) (time.Time, bool) {
 }
 
 // usageDateAggregateItems sorts by calendar date descending (newest first); non-YYYY-MM-DD keys sort after valid dates, then lexicographically descending.
-func usageDateAggregateItems(groups map[string]*analytics.UsageAggregate, labelFn func(string) string) []OverlayTableItem {
+func usageDateAggregateItems(groups map[string]*analytics.UsageAggregate, labelFn func(string) string) []overlaylist.TableItem {
 	keys := make([]string, 0, len(groups))
 	for key, agg := range groups {
 		if agg == nil {
@@ -214,7 +215,7 @@ func usageDateAggregateItems(groups map[string]*analytics.UsageAggregate, labelF
 			return keys[i] > keys[j]
 		}
 	})
-	items := make([]OverlayTableItem, 0, len(keys))
+	items := make([]overlaylist.TableItem, 0, len(keys))
 	for _, key := range keys {
 		agg := groups[key]
 		if agg == nil {
@@ -224,7 +225,7 @@ func usageDateAggregateItems(groups map[string]*analytics.UsageAggregate, labelF
 		if labelFn != nil {
 			label = labelFn(key)
 		}
-		items = append(items, OverlayTableItem{
+		items = append(items, overlaylist.TableItem{
 			ID: key, Label: label,
 			Cells: []string{
 				label,

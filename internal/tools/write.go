@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/keakon/chord/internal/lsp"
+	"github.com/keakon/chord/internal/textfile"
 )
 
 // WriteTool writes content to a file, creating parent directories as needed.
@@ -187,11 +188,11 @@ func (t WriteTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 	})
 	_, statErr := os.Lstat(resolvedPath)
 	existed := statErr == nil
-	invalidatePathCache(resolvedPath)
+	textfile.Invalidate(resolvedPath)
 	if err := writeFileNoFollow(resolvedPath, data, 0644); err != nil {
 		return "", fmt.Errorf("writing file: %w", err)
 	}
-	warmDecodedFileCache(resolvedPath, data, decodedText{Text: content, Encoding: utf8Encoding})
+	textfile.Warm(resolvedPath, data, textfile.UTF8(content))
 
 	out := fmt.Sprintf("Successfully wrote %d %s, %d %s", lineCount, lineLabel, len(data), byteLabel)
 	if cleanedSelectors > 0 {

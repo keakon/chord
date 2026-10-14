@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestSlashCompletionTabCompletesWithoutSubmitting(t *testing.T) {
@@ -113,7 +114,7 @@ func TestSlashCompletionRendersCustomCommandScopeInline(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
 	m.SetCustomCommands([]CustomCommand{{Cmd: "/commit", Desc: "Verify, document, and commit.", Scope: "project"}})
 
-	plain := stripANSI(m.renderSlashCompletionDropdown("/com"))
+	plain := terminaltext.StripANSI(m.renderSlashCompletionDropdown("/com"))
 	if !strings.Contains(plain, "/commit  [project] Verify, document, and commit.") {
 		t.Fatalf("slash completion missing inline custom command scope and description:\n%s", plain)
 	}
@@ -204,7 +205,7 @@ func TestServiceTierShortcutKeepsUnsupportedRequestedTierVisibleUntilSwitched(t 
 		supportedServiceTiers: []config.ServiceTier{config.ServiceTierStandard},
 	}
 	m := NewModel(backend)
-	plain := stripANSI(m.renderInfoPanelServiceTierLine(80))
+	plain := terminaltext.StripANSI(m.renderInfoPanelServiceTierLine(80))
 	if !strings.Contains(plain, "tier: fast") {
 		t.Fatalf("service tier line = %q, want unsupported requested fast visible", plain)
 	}
@@ -404,7 +405,7 @@ func TestSlashCompletionShowsLoopOnAfterLoopStops(t *testing.T) {
 
 func TestSlashCompletionHelpUsesKeyChips(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
-	plain := stripANSI(m.renderSlashCompletionDropdown("/"))
+	plain := terminaltext.StripANSI(m.renderSlashCompletionDropdown("/"))
 	if !strings.Contains(plain, "[Tab/Enter] complete") || !strings.Contains(plain, "[↑/↓] select") || !strings.Contains(plain, "[Esc] close") {
 		t.Fatalf("slash completion help should render key chips:\n%s", plain)
 	}
@@ -412,7 +413,7 @@ func TestSlashCompletionHelpUsesKeyChips(t *testing.T) {
 
 func TestSlashCompletionHelpWrapsChipsOnNarrowWidth(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 50, 30)
-	plain := stripANSI(m.renderSlashCompletionDropdown("/"))
+	plain := terminaltext.StripANSI(m.renderSlashCompletionDropdown("/"))
 	for _, want := range []string{"[Tab/Enter] complete", "[Esc] close"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("narrow dropdown lost chip %q:\n%s", want, plain)

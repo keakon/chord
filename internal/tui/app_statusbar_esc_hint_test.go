@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestNextEscHint(t *testing.T) {
@@ -159,7 +160,7 @@ func TestRenderStatusBarShowsBusyEscHint(t *testing.T) {
 	m.mode = ModeNormal
 	m.workingDir = "/repo"
 	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}
-	rendered := stripANSI(m.renderStatusBar())
+	rendered := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(rendered, "esc ⇢ cancel turn") {
 		t.Fatalf("status bar = %q, want busy esc hint", rendered)
 	}
@@ -170,7 +171,7 @@ func TestRenderStatusBarHidesEscHintFirstWhenNarrow(t *testing.T) {
 	m.mode = ModeNormal
 	m.workingDir = "/tmp/" + strings.Repeat("very-long-directory-name/", 8) + "project"
 	m.activities["main"] = agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}
-	rendered := stripANSI(m.renderStatusBar())
+	rendered := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(rendered, "esc ⇢ cancel turn") {
 		t.Fatalf("status bar = %q, did not want narrow esc hint", rendered)
 	}
@@ -183,7 +184,7 @@ func TestRenderStatusBarShowsSearchModeEscHint(t *testing.T) {
 	m := NewModelWithSize(nil, 160, 24)
 	m.mode = ModeSearch
 	m.workingDir = "/repo"
-	rendered := stripANSI(m.renderStatusBar())
+	rendered := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(rendered, "esc ⇢ cancel search") {
 		t.Fatalf("status bar = %q, want search-mode esc hint", rendered)
 	}
@@ -194,7 +195,7 @@ func TestRenderStatusBarChordDoesNotDuplicateEscHint(t *testing.T) {
 	m.mode = ModeNormal
 	m.workingDir = "/repo"
 	m.chord = chordState{count: 3, op: chordG}
-	rendered := stripANSI(m.renderStatusBar())
+	rendered := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(rendered, "3g") {
 		t.Fatalf("status bar = %q, want chord buffer", rendered)
 	}
@@ -218,7 +219,7 @@ func TestStatusBarGroupSeparatorStaysCompact(t *testing.T) {
 	m.workingDir = "/home/user/projects/myapp"
 	m.layout = m.generateLayout(m.width, m.height)
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "  ·  ") {
 		t.Fatalf("status bar still uses the wide group separator, got %q", plain)
 	}

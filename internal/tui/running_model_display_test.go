@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ratelimit"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // attemptRefAgent is the smallest stub that can present a distinct in-flight
@@ -61,7 +62,7 @@ func TestInfoPanelModelRowShowsAttemptTarget(t *testing.T) {
 	backend := newAttemptRefAgent("primary-prov/primary-model", "fallback-prov/fallback-model")
 	m := NewModelWithSize(backend, 100, 24)
 
-	plain := stripANSI(m.renderInfoPanel(80, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(80, 20))
 	if !strings.Contains(plain, "fallback-model") {
 		t.Fatalf("info panel = %q, want the in-flight attempt model", plain)
 	}
@@ -111,8 +112,8 @@ func TestModelSurfacesUseCompleteNextTargetWhileIdleAndPreparing(t *testing.T) {
 			m.activities["main"] = agent.AgentActivityEvent{Type: activity, AgentID: "main"}
 			m.mode = ModeNormal
 			m.rightPanelVisible = false
-			panel := stripANSI(m.renderInfoPanel(80, 25))
-			bar := stripANSI(m.renderStatusBar())
+			panel := terminaltext.StripANSI(m.renderInfoPanel(80, 25))
+			bar := terminaltext.StripANSI(m.renderStatusBar())
 			if strings.Contains(panel, "@high") || strings.Contains(bar, "@high") || !strings.Contains(bar, "sample/model") {
 				t.Fatalf("next target inherited a variant: panel=%q bar=%q", panel, bar)
 			}
@@ -128,15 +129,15 @@ func TestModelSurfacesTierFollowsDisplayTarget(t *testing.T) {
 	m.mode = ModeNormal
 	m.rightPanelVisible = false
 	panel := m.renderInfoPanel(80, 25)
-	if !strings.Contains(stripANSI(panel), "tier: fast") || !strings.Contains(panel, ";9m") {
+	if !strings.Contains(terminaltext.StripANSI(panel), "tier: fast") || !strings.Contains(panel, ";9m") {
 		t.Fatalf("unsupported target tier lacks strikethrough: %q", panel)
 	}
-	if bar := stripANSI(m.renderStatusBar()); strings.Contains(bar, "TIER") {
+	if bar := terminaltext.StripANSI(m.renderStatusBar()); strings.Contains(bar, "TIER") {
 		t.Fatalf("status bar claims unsupported tier: %q", bar)
 	}
 	backend.state.DisplayRef = "provider-c/model-c"
 	backend.state.EffectiveTier = config.ServiceTierFast
-	bar := stripANSI(m.renderStatusBar())
+	bar := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(bar, "provider-c/model-c") || !strings.Contains(bar, "TIER fast") {
 		t.Fatalf("next target did not refresh cached status: %q", bar)
 	}
@@ -163,11 +164,11 @@ func (a *changingModelSnapshotAgent) FocusedModelState() agent.FocusedModelState
 func TestInfoPanelModelDataAndFingerprintShareSnapshot(t *testing.T) {
 	backend := &changingModelSnapshotAgent{infoPanelAgent: newInfoPanelAgent()}
 	m := NewModelWithSize(backend, 180, 40)
-	first := stripANSI(m.renderInfoPanel(80, 35))
+	first := terminaltext.StripANSI(m.renderInfoPanel(80, 35))
 	if backend.reads != 1 || !strings.Contains(first, "model-a") || !strings.Contains(first, "Keys: 2/2") || !strings.Contains(first, "17%") {
 		t.Fatalf("first snapshot reads=%d, panel=%q", backend.reads, first)
 	}
-	second := stripANSI(m.renderInfoPanel(80, 35))
+	second := terminaltext.StripANSI(m.renderInfoPanel(80, 35))
 	if backend.reads != 2 || !strings.Contains(second, "model-b") || !strings.Contains(second, "Keys: 5/5") || !strings.Contains(second, "63%") {
 		t.Fatalf("second snapshot reads=%d, panel=%q", backend.reads, second)
 	}

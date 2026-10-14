@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/keakon/lipgloss/v2"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func isAssistantSummaryFieldLine(line string) bool {
@@ -173,23 +175,23 @@ func renderAssistantSummaryLines(summary assistantSummary, width int) []string {
 	}
 
 	var lines []string
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color(currentTheme.DimFg))
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color(currentStyles.Palette.DimFg))
 
 	if summary.TasksCompleted != "" {
 		line := "Tasks completed: " + summary.TasksCompleted
-		lines = append(lines, style.Render(truncateOneLine(line, width)))
+		lines = append(lines, style.Render(terminaltext.TruncateOneLine(line, width)))
 	}
 	if summary.FilesModified != "" {
 		line := "Files modified: " + summary.FilesModified
-		lines = append(lines, style.Render(truncateOneLine(line, width)))
+		lines = append(lines, style.Render(terminaltext.TruncateOneLine(line, width)))
 	}
 	if summary.Summary != "" {
 		line := "Summary: " + summary.Summary
-		lines = append(lines, style.Render(truncateOneLine(line, width)))
+		lines = append(lines, style.Render(terminaltext.TruncateOneLine(line, width)))
 	}
 	if summary.Issues != "" {
 		line := "Issues: " + summary.Issues
-		lines = append(lines, style.Render(truncateOneLine(line, width)))
+		lines = append(lines, style.Render(terminaltext.TruncateOneLine(line, width)))
 	}
 
 	return lines

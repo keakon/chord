@@ -714,7 +714,7 @@ func TestEditToolPunctuationTolerantInterWordSpace(t *testing.T) {
 }
 
 // Invisible format runes next to a word-boundary space are stripped before
-// matching (StripZeroWidthFormat), so the model's leaked rune never keeps a
+// matching (textclean.StripZeroWidthFormat), so the model's leaked rune never keeps a
 // space significant on the model side while the file's clean text folds it,
 // and never gets spliced into the file. The success message reports the
 // cleaned characters by code point.

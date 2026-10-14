@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestMessagesToBlocksRendersLoopNoticeAsStatusCard(t *testing.T) {
@@ -29,14 +30,14 @@ func TestMessagesToBlocksRendersLoopNoticeAsStatusCard(t *testing.T) {
 	if !blocks[0].Collapsed {
 		t.Fatal("restored loop notices must start collapsed")
 	}
-	collapsed := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(collapsed, "LOOP") || !strings.Contains(collapsed, "▸") || strings.Contains(collapsed, "Target:") {
 		t.Fatalf("rendered status card = %q, want a collapsed LOOP badge with the body hidden", collapsed)
 	}
 	if !blocks[0].ToggleAtWidth(80) || blocks[0].Collapsed {
 		t.Fatal("toggling must expand the restored notice")
 	}
-	plain := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(plain, "  Target:") || !strings.Contains(plain, "  • finish current task") {
 		t.Fatalf("rendered status card = %q, want indented loop body", plain)
 	}
@@ -239,7 +240,7 @@ func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) 
 	if !strings.Contains(block.ResultContent, "# Skill Creator") {
 		t.Fatalf("ResultContent should preserve full skill body, got %q", block.ResultContent)
 	}
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "skill skill-creator") {
 		t.Fatalf("expected collapsed skill card summary to keep full skill name, got:\n%s", collapsed)
 	}
@@ -251,7 +252,7 @@ func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) 
 	}
 
 	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"skill skill-creator", "Skill Creator", "Step one", "Step two"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded skill card missing %q; got:\n%s", want, expanded)
@@ -292,7 +293,7 @@ func TestMessagesToBlocksDoneToolRestoresMarkdownReport(t *testing.T) {
 	if got := block.DoneReport; got != wantReport {
 		t.Fatalf("DoneReport = %q, want %q", got, wantReport)
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	for _, want := range []string{"Completion status", "All requested work is finished", "• shipped", "• verified"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected restored Done card to contain %q, got:\n%s", want, plain)
@@ -364,7 +365,7 @@ func TestMessagesToBlocksRestoresLegacyLocalShellAsTerminal(t *testing.T) {
 	if !block.IsUserLocalShell() || block.UserLocalShellCmd != "ls pd1-10.csv" || block.UserLocalShellResult != "pd1-10.csv" {
 		t.Fatalf("restored block = %#v, want local shell block", block)
 	}
-	if got := stripANSI(strings.Join(block.Render(80, ""), "\n")); !strings.Contains(got, "TERMINAL") || strings.Contains(got, "USER") {
+	if got := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n")); !strings.Contains(got, "TERMINAL") || strings.Contains(got, "USER") {
 		t.Fatalf("restored render = %q, want TERMINAL and no USER label", got)
 	}
 }
@@ -498,7 +499,7 @@ func TestRebuildAfterCompactionResetsVisibleCardNumbers(t *testing.T) {
 	if blocks[0].DisplaySequence != 1 {
 		t.Fatalf("compaction summary display sequence = %d, want 1", blocks[0].DisplaySequence)
 	}
-	joined := stripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
 	if !strings.Contains(joined, "CONTEXT SUMMARY #1") {
 		t.Fatalf("compaction summary header should restart at #1, got:\n%s", joined)
 	}
@@ -568,7 +569,7 @@ func TestMessagesToBlocksRestoredEditWithoutToolDiffFallsBackToArgsPreview(t *te
 		t.Fatalf("restored Edit RawArgs = %q, want complete tool args", block.RawArgs)
 	}
 
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(plain, "↳ Result:") || strings.Contains(plain, "Applied patch") {
 		t.Fatalf("restored Edit without ToolDiff should hide routine success result, got:\n%s", plain)
 	}
@@ -601,7 +602,7 @@ func TestMessagesToBlocksRestoredElidedEditShowsRequestedReplacement(t *testing.
 	if block.Diff != "" {
 		t.Fatalf("elided Edit should carry no applied diff, got %q", block.Diff)
 	}
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"- " + strings.TrimSuffix(oldText, "\n"), "+ " + strings.TrimSuffix(newText, "\n")} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("elided Edit card should preview the requested replacement (missing %q), got:\n%s", want, plain)
@@ -628,12 +629,12 @@ func TestMessagesToBlocksRestoredElidedResultRendersArchiveNote(t *testing.T) {
 	}
 	// A routine successful shell card stays collapsed, so the note is only
 	// visible once the user expands it; the raw marker must never surface.
-	collapsed := stripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
 	if strings.Contains(collapsed, "elided by checkpoint") {
 		t.Fatalf("collapsed restored card leaked the internal elision marker, got:\n%s", collapsed)
 	}
 	blocks[0].ToolCallDetailExpanded = true
-	plain := stripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
 	if strings.Contains(plain, "elided by checkpoint") {
 		t.Fatalf("expanded restored card leaked the internal elision marker, got:\n%s", plain)
 	}
@@ -719,7 +720,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			if block.Collapsed != wantCollapsed {
 				t.Fatalf("restored %s should use live expanded terminal state", tt.toolName)
 			}
-			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			for _, want := range tt.want {
 				if !strings.Contains(plain, want) {
 					t.Fatalf("restored %s render missing %q; got:\n%s", tt.toolName, want, plain)
@@ -773,7 +774,7 @@ func TestLiveEditErrorShowsAttemptedPatchFromRawArgs(t *testing.T) {
 	if strings.Contains(block.Content, "patch") {
 		t.Fatalf("display args should stay compact, got %s", block.Content)
 	}
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"edit foo.txt", "↳ Patch:", "*** Begin Patch", "*** End Patch", "@@", "-old", "+new", "↳ Error:", "hunk not found"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("live Edit error render missing %q; got:\n%s", want, plain)
@@ -813,7 +814,7 @@ func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) 
 	if block == nil {
 		t.Fatal("expected restored Delete tool block")
 	}
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "delete /tmp/obsolete.go (remove obsolete file)") {
 		t.Fatalf("expected restored Delete header to lead with the path; got:\n%s", joined)
 	}
@@ -1142,13 +1143,13 @@ func TestCardDisplaySequencesAreIndependentPerAgent(t *testing.T) {
 	if workerFirst.DisplaySequence != 1 || workerSecond.DisplaySequence != 2 {
 		t.Fatalf("worker sequences = [%d %d], want [1 2]", workerFirst.DisplaySequence, workerSecond.DisplaySequence)
 	}
-	if got := stripANSI(strings.Join(mainFirst.Render(100, ""), "\n")); !strings.Contains(got, "USER #1") {
+	if got := terminaltext.StripANSI(strings.Join(mainFirst.Render(100, ""), "\n")); !strings.Contains(got, "USER #1") {
 		t.Fatalf("main first label = %q, want USER #1", got)
 	}
-	if got := stripANSI(strings.Join(workerFirst.Render(100, ""), "\n")); !strings.Contains(got, "USER #1") {
+	if got := terminaltext.StripANSI(strings.Join(workerFirst.Render(100, ""), "\n")); !strings.Contains(got, "USER #1") {
 		t.Fatalf("worker first label = %q, want USER #1", got)
 	}
-	if got := stripANSI(strings.Join(workerSecond.Render(100, ""), "\n")); !strings.Contains(got, "ASSISTANT #2") {
+	if got := terminaltext.StripANSI(strings.Join(workerSecond.Render(100, ""), "\n")); !strings.Contains(got, "ASSISTANT #2") {
 		t.Fatalf("worker second label = %q, want ASSISTANT #2", got)
 	}
 }
@@ -1306,7 +1307,7 @@ func TestCompactionRebuildPreservesActiveMainRequest(t *testing.T) {
 	if _, ok := m.activities["agent-1"]; ok {
 		t.Fatal("compaction rebuild should not preserve unrelated sub-agent activity")
 	}
-	if plain := stripANSI(m.renderStatusBar()); strings.Contains(plain, "Connecting") || (!strings.Contains(plain, "⠋") && !strings.Contains(plain, "⠹") && !strings.Contains(plain, "⠴") && !strings.Contains(plain, "⠧")) {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); strings.Contains(plain, "Connecting") || (!strings.Contains(plain, "⠋") && !strings.Contains(plain, "⠹") && !strings.Contains(plain, "⠴") && !strings.Contains(plain, "⠧")) {
 		t.Fatalf("status bar after compaction rebuild should show compact request activity, got %q", plain)
 	}
 	blocks := m.viewport.visibleBlocks()

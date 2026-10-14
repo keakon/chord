@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/promptcache"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -165,7 +166,7 @@ func TestCompactionFileReplayBoundsAndCheckpointReset(t *testing.T) {
 func enableTestCheckpointFileReplay(a *MainAgent) {
 	a.providerModelRef = "p/m"
 	a.runningModelRef = "p/m"
-	a.cacheHitTracker = newCacheHitTracker()
+	a.cacheHitTracker = promptcache.NewHitTracker()
 	a.cacheHitTracker.Observe("p/m", 100, 90)
 }
 
@@ -210,7 +211,7 @@ func TestFallbackSnapshotStripLeavesNextRequestTuningUntouched(t *testing.T) {
 	}, []string{"test-key"})
 	a.llmClient = llm.NewClient(providerCfg, provider, "claude", 8192, "sys")
 	a.providerModelRef = "anthropic/claude"
-	a.cacheHitTracker = newCacheHitTracker()
+	a.cacheHitTracker = promptcache.NewHitTracker()
 	snapshot := func(text string) message.Message {
 		return message.Message{Role: message.RoleUser, Kind: message.KindTurnOverlay, Parts: []message.ContentPart{{Type: message.ContentPartText, Text: compactionFileCtxPrefix + text}}}
 	}

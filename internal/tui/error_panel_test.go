@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestRecordAgentErrorExtractsAPIErrorFields(t *testing.T) {
@@ -154,7 +155,7 @@ func TestFormatErrorRecordHeaderModelWithoutProvider(t *testing.T) {
 	if len(lines) == 0 {
 		t.Fatal("no lines rendered")
 	}
-	header := stripANSI(lines[0])
+	header := terminaltext.StripANSI(lines[0])
 	if strings.Contains(header, "/gpt-4.1") {
 		t.Fatalf("header = %q, want model without dangling slash when provider is empty", header)
 	}
@@ -243,7 +244,7 @@ func TestErrorPanelLinesShowStructuredFields(t *testing.T) {
 	m.recordAgentError("", apiErr, "provider", "model-1", "gate...xyz9", "acc-1", "user@example.com", false)
 
 	lines := m.errorPanelLines(m.errorPanelInnerWidth())
-	joined := stripANSI(strings.Join(lines, "\n"))
+	joined := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	for _, want := range []string{"provider/model-1", "key=gate...xyz9", "email=user@example.com", "HTTP 500", "code=server_error", "upstream exploded"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("error panel lines missing %q\n%s", want, joined)
@@ -261,11 +262,11 @@ func TestFormatErrorRecordLinesAccountsForMessageIndent(t *testing.T) {
 	} {
 		lines := formatErrorRecordLines(agentErrorRecord{Timestamp: time.Unix(0, 0), Message: message}, 24)
 		for _, line := range lines[1:] {
-			if got := tuiStringWidth(line); got > 24 {
+			if got := terminaltext.Width(line); got > 24 {
 				t.Fatalf("message line width = %d, want <= 24: %q", got, line)
 			}
 		}
-		if got := stripANSI(strings.Join(lines, "\n")); !strings.Contains(got, "  ") {
+		if got := terminaltext.StripANSI(strings.Join(lines, "\n")); !strings.Contains(got, "  ") {
 			t.Fatalf("message lost its indent: %q", got)
 		}
 	}
@@ -330,7 +331,7 @@ func TestErrorPanelCopyAllWritesPlainText(t *testing.T) {
 	if ts := m.snapshotAgentErrors()[0].Timestamp.Format("2006-01-02 15:04:05"); !strings.Contains(copied, ts) {
 		t.Fatalf("copied text missing full timestamp %q\n%s", ts, copied)
 	}
-	if hint := stripANSI(m.errorPanelHint()); !strings.Contains(hint, "[y] copy") {
+	if hint := terminaltext.StripANSI(m.errorPanelHint()); !strings.Contains(hint, "[y] copy") {
 		t.Fatalf("error panel hint = %q, want y copy", hint)
 	}
 	if cmd := m.handleErrorPanelKey(tea.KeyPressMsg(tea.Key{Text: "Y", Code: 'Y'})); cmd == nil {

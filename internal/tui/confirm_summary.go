@@ -12,8 +12,9 @@ import (
 	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type confirmRiskLevel int
@@ -554,7 +555,7 @@ func appendConfirmField(dst *[]confirmSummaryField, field confirmSummaryField) {
 }
 
 func confirmPreviewText(text string, maxLines int) string {
-	text = markdownutil.NormalizeNewlines(text)
+	text = textclean.NormalizeNewlines(text)
 	if maxLines <= 0 || text == "" {
 		return text
 	}
@@ -656,11 +657,11 @@ func confirmYesNo(value bool) string {
 func confirmRiskStyle(risk confirmRiskLevel) string {
 	switch risk {
 	case confirmRiskLow:
-		return ConfirmToolStyle.Render(risk.String())
+		return currentStyles.ConfirmToolStyle.Render(risk.String())
 	case confirmRiskHigh:
-		return DialogDangerStyle.Render(risk.String())
+		return currentStyles.DialogDangerStyle.Render(risk.String())
 	default:
-		return DialogWarningStyle.Render(risk.String())
+		return currentStyles.DialogWarningStyle.Render(risk.String())
 	}
 }
 
@@ -680,7 +681,7 @@ func renderConfirmField(field confirmSummaryField, width int) []string {
 	label := field.Label
 	combined := label + ": " + firstDisplayLine(value)
 	if !field.Multiline && !strings.Contains(value, "\n") && runewidth.StringWidth(combined) <= width {
-		return []string{DimStyle.Render(label+": ") + ConfirmToolStyle.Render(value)}
+		return []string{currentStyles.DimStyle.Render(label+": ") + currentStyles.ConfirmToolStyle.Render(value)}
 	}
 
 	wrappedWidth := width - 2
@@ -694,12 +695,12 @@ func renderConfirmField(field confirmSummaryField, width int) []string {
 	case field.PreserveWhitespace:
 		wrapped = wrapIndentedText(value, wrappedWidth)
 	default:
-		wrapped = wrapText(value, wrappedWidth)
+		wrapped = terminaltext.Wrap(value, wrappedWidth)
 	}
 
-	lines := []string{DimStyle.Render(label + ":")}
+	lines := []string{currentStyles.DimStyle.Render(label + ":")}
 	for _, line := range wrapped {
-		lines = append(lines, "  "+ConfirmToolStyle.Render(line))
+		lines = append(lines, "  "+currentStyles.ConfirmToolStyle.Render(line))
 	}
 	return lines
 }
@@ -718,7 +719,7 @@ func wrapConfirmLiteralText(text string, width int) []string {
 			result = append(result, "")
 			continue
 		}
-		indentCount := countLeadingWhitespace(rawLine)
+		indentCount := terminaltext.CountIndent(rawLine)
 		indent := rawLine[:indentCount]
 		rest := rawLine[indentCount:]
 		indentWidth := ansi.StringWidth(indent)

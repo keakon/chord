@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 func modelSelectIdleHint() string {
@@ -20,7 +22,7 @@ func selectorFilterHint() string {
 	return hintLine(hint("type", "filter"), hint("Enter", "keep"), hint("Esc", "clear"))
 }
 
-func (s *modelSelectState) filteredItems() []OverlayListItem {
+func (s *modelSelectState) filteredItems() []overlaylist.Item {
 	tokens := strings.Fields(strings.ToLower(s.filter))
 	items := buildModelSelectItems(s.poolNames, s.currentPool)
 	filtered := items[:0]

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/textfile"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -109,7 +110,7 @@ func TestGenerateToolDiffForEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	preContent := "before\nafter\n"
-	if decoded, err := tools.ReadDecodedTextFile(path); err != nil || decoded.Text != "before\nAFTER\n" {
+	if decoded, err := textfile.Read(path); err != nil || decoded.Text != "before\nAFTER\n" {
 		t.Fatalf("ReadDecodedTextFile = %q, %v", decoded.Text, err)
 	}
 	call := toolCall(tools.NameEdit, editArgs(path))

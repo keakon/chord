@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -47,7 +48,7 @@ func TestCheckpointRequestProjectionPreservesEvidenceBoundaries(t *testing.T) {
 	literal := strings.TrimSuffix(block.String(), "\n")
 	msg.Content = strings.Replace(msg.Content, "\n\n## Progress", "\n\n## Active Objective\nInspect this literal example:\n"+literal+"\n\n## Progress", 1)
 	got := projectCheckpointRequests([]message.Message{msg})[0].Content
-	objective, _ := markdownSection(got, "## Active Objective")
+	objective, _ := checkpointfmt.Section(got, "## Active Objective")
 	if !strings.Contains(objective, literal) {
 		t.Fatal("rewrote literal text outside the evidence region")
 	}
@@ -65,7 +66,7 @@ func TestCheckpointRequestProjectionLongAndInheritedSources(t *testing.T) {
 	msg := requestDedupFixture(request, request, request, request)
 	projected := projectCheckpointRequests([]message.Message{msg})[0].Content
 	if strings.Contains(projected, compactAnchorsRequestLabel) || strings.Contains(projected, compactAnchorsConstraintsLabel) ||
-		strings.Contains(projected, checkpointUserConstraintsHeading) || strings.Contains(projected, retainedRecentMessagesHeading) {
+		strings.Contains(projected, checkpointfmt.UserConstraintsHeading) || strings.Contains(projected, retainedRecentMessagesHeading) {
 		t.Fatalf("kept duplicate instruction blocks:\n%s", projected)
 	}
 	if strings.Count(projected, "Preserve the parser output.") != 60 || strings.Count(projected, checkpointSameRequestPointer) != 1 {
@@ -125,7 +126,7 @@ func TestCheckpointRequestProjectionShortRequestDoesNotGrow(t *testing.T) {
 		if len(got) >= len(msg.Content) {
 			t.Fatalf("projection grew for %q: %d >= %d", request, len(got), len(msg.Content))
 		}
-		if strings.Contains(got, checkpointUserConstraintsHeading) || strings.Contains(got, retainedRecentMessagesHeading) {
+		if strings.Contains(got, checkpointfmt.UserConstraintsHeading) || strings.Contains(got, retainedRecentMessagesHeading) {
 			t.Fatalf("kept a redundant instruction section:\n%s", got)
 		}
 	}
@@ -171,7 +172,7 @@ func TestCheckpointRequestSourcesRuntimeBuilders(t *testing.T) {
 	}
 	projected := projectCheckpointRequests([]message.Message{msg})[0].Content
 	if strings.Count(projected, request) != 1 ||
-		strings.Contains(projected, checkpointUserConstraintsHeading) ||
+		strings.Contains(projected, checkpointfmt.UserConstraintsHeading) ||
 		strings.Contains(projected, retainedRecentMessagesHeading) {
 		t.Fatalf("runtime builder produced repeated instruction blocks:\n%s", projected)
 	}

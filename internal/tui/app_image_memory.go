@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/imageprotocol"
 )
 
 const (
@@ -37,7 +39,7 @@ func (m *Model) handleImageMemorySweepTick(msg imageMemorySweepTickMsg) tea.Cmd 
 		return nil
 	}
 	now := time.Now()
-	imageRuntimeCache.releaseIdlePayloads(now)
+	imageCache.ReleaseIdle(now)
 	v := &m.imageViewer
 	// The terminal retains the displayed bitmap. A later redraw rebuilds the
 	// iTerm2 transport asynchronously; Kitty redraws use placement commands.
@@ -64,7 +66,7 @@ func (m *Model) releaseOffScreenKittyImages(now time.Time) tea.Cmd {
 			m.kittyImageCache[id] = now
 		} else if now.Sub(hiddenSince) >= kittyOffScreenGrace {
 			// Uppercase d=I requests deletion of placements AND stored data.
-			seq.WriteString(encodeKittyDeleteImage(id))
+			seq.WriteString(imageprotocol.KittyDeleteImage(id))
 			released = append(released, id)
 			delete(m.kittyImageCache, id)
 			delete(m.kittyPlacementCache, id)
@@ -82,7 +84,7 @@ func (m *Model) releaseOffScreenKittyImages(now time.Time) tea.Cmd {
 func (m *Model) releaseKittyViewerImage(imageID, placementID int) tea.Cmd {
 	delete(m.kittyImageCache, imageID)
 	delete(m.kittyPlacementCache, imageID)
-	return tea.Raw(kittyDeleteSequenceForPlacement(imageID, placementID))
+	return tea.Raw(imageprotocol.KittyDelete(imageID, placementID))
 }
 
 // A user can scroll back while deletion is queued. Reconcile after the RawMsg

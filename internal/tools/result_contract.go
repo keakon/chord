@@ -7,6 +7,8 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"github.com/keakon/chord/internal/schemaargs"
 )
 
 // Accepted size limits for a delegated result contract. The subset below is
@@ -59,7 +61,7 @@ func CompileResultSchema(raw json.RawMessage) (map[string]any, json.RawMessage, 
 	if typeName, _ := schema["type"].(string); typeName != "object" {
 		return nil, nil, fmt.Errorf("result_schema.type must be \"object\": a delegated result is always a JSON object, so a contract for any other top-level type can never be satisfied")
 	}
-	canonical, err := encodeSanitizedArgs(schema)
+	canonical, err := schemaargs.Encode(schema)
 	if err != nil {
 		return nil, nil, fmt.Errorf("canonicalize result_schema: %w", err)
 	}

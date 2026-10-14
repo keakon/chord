@@ -122,8 +122,8 @@ func TestConfirmMouseClickIgnoresDialogBody(t *testing.T) {
 	m := newMouseConfirmModel("shell", `{"command":"git status"}`)
 	dialog := m.renderConfirmDialog()
 	dialogRect := m.overlayRect(dialog)
-	x := dialogRect.Min.X + DirectoryBorderStyle.GetBorderLeftSize()
-	y := dialogRect.Min.Y + DirectoryBorderStyle.GetBorderTopSize()
+	x := dialogRect.Min.X + currentStyles.DirectoryBorderStyle.GetBorderLeftSize()
+	y := dialogRect.Min.Y + currentStyles.DirectoryBorderStyle.GetBorderTopSize()
 
 	if _, ok := m.confirmOptionAt(x, y); ok {
 		t.Fatal("dialog border/body point should not hit an action")

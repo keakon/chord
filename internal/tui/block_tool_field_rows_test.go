@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // Every labelled row in a card is produced by the field-row helpers in
@@ -23,7 +24,7 @@ func TestNotifyCardUsesFieldRowGrammar(t *testing.T) {
 		ResultContent: "Your owner agent has been notified. Continue working.",
 		ResultDone:    true,
 	}
-	plain := stripANSI(strings.Join(b.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(b.Render(100, ""), "\n"))
 
 	// "kind" used to be a lowercase 4-space row with no connector, and the
 	// status word "Sent" used to be a bare colon-less row.
@@ -54,7 +55,7 @@ func TestAgentMessageCardRendersSenderAndKindAsFieldRows(t *testing.T) {
 		StatusKind:  "risk_alert",
 		Content:     "the tree disagrees with the CN copy",
 	}
-	plain := stripANSI(strings.Join(b.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(b.Render(100, ""), "\n"))
 
 	for _, want := range []string{"↳ From: reviewer-4", "↳ Kind: risk_alert"} {
 		if !strings.Contains(plain, want) {
@@ -80,7 +81,7 @@ func TestAgentMessageCardBodyNestsUnderFieldRowLabels(t *testing.T) {
 		StatusKind:  "risk_alert",
 		Content:     "the tree disagrees with the CN copy",
 	}
-	plain := stripANSI(strings.Join(b.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(b.Render(100, ""), "\n"))
 
 	// Compare the *visual* column of the body and the field-row label. The
 	// rail "│" and the connector "↳" are multi-byte UTF-8, so a byte-offset
@@ -123,7 +124,7 @@ func TestDelegateWorkerRendersHandleFieldsAndTrailingNote(t *testing.T) {
 		ResultContent: `{"status":"started","task_id":"adhoc-7","agent_id":"expert-12","message":"running in background","plan_task_ref":"view-switch","semantic_task_key":"tui-view-switch-streaming-card-order","expected_write_scope":{"path_prefix":["internal/tui"]}}` + "\n" + `Note: ignored unrecognized parameter(s): args.expected_write_scope.extra`,
 		ResultDone:    true,
 	}
-	plain := stripANSI(strings.Join(b.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(b.Render(120, ""), "\n"))
 
 	// Every non-empty handle field renders as a "↳ Label: value" row in the
 	// expanded field layer, so the task_id carries the full machine-readable
@@ -222,7 +223,7 @@ func TestDelegateWorkerWrapsLongHandleValues(t *testing.T) {
 		},
 	}
 	for _, width := range []int{120, 70} {
-		plain := stripANSI(strings.Join(b.Render(width, ""), "\n"))
+		plain := terminaltext.StripANSI(strings.Join(b.Render(width, ""), "\n"))
 		for _, want := range tailProbes[width] {
 			if !strings.Contains(plain, want) {
 				t.Fatalf("delegate Worker section lost the tail of a long handle value at width %d: missing %q; got:\n%s", width, want, plain)

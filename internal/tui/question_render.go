@@ -12,6 +12,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const (
@@ -85,8 +86,8 @@ func (m *Model) renderQuestionDialog() string {
 	// Question text — split on <br> and newlines for multi-line display.
 	qRaw := sanitizeToolDisplayText(strings.ReplaceAll(q.Question, "<br>", "\n"))
 	for qLine := range strings.SplitSeq(qRaw, "\n") {
-		for _, wrapped := range wrapText(qLine, max(innerWidth-2, 1)) {
-			lines = append(lines, QuestionTextStyle.Render(wrapped))
+		for _, wrapped := range terminaltext.Wrap(qLine, max(innerWidth-2, 1)) {
+			lines = append(lines, currentStyles.QuestionTextStyle.Render(wrapped))
 		}
 	}
 	lines = append(lines, "")
@@ -114,15 +115,15 @@ func (m *Model) renderQuestionDialog() string {
 			if i != currentOption && opt.Description != "" {
 				maxDescWidth := innerWidth - runewidth.StringWidth(labelText) - 4
 				if maxDescWidth > 10 {
-					desc := truncateOneLine(sanitizeToolDisplayText(opt.Description), maxDescWidth)
-					textPlain += DimStyle.Render("  " + desc)
+					desc := terminaltext.TruncateOneLine(sanitizeToolDisplayText(opt.Description), maxDescWidth)
+					textPlain += currentStyles.DimStyle.Render("  " + desc)
 				}
 			}
 
 			line := " " + textPlain
 			if i == currentOption {
 				focusLine = len(lines)
-				line = QuestionSelectedStyle.MarginLeft(1).Width(innerWidth - 2).Render(labelText)
+				line = currentStyles.QuestionSelectedStyle.MarginLeft(1).Width(innerWidth - 2).Render(labelText)
 			}
 			lines = append(lines, strings.Split(ansi.Hardwrap(line, innerWidth, true), "\n")...)
 			if i == currentOption {
@@ -137,7 +138,7 @@ func (m *Model) renderQuestionDialog() string {
 			line := " " + text
 			if idx == m.question.cursor && !m.question.custom {
 				focusLine = len(lines)
-				line = QuestionSelectedStyle.MarginLeft(1).Width(innerWidth - 2).Render(text)
+				line = currentStyles.QuestionSelectedStyle.MarginLeft(1).Width(innerWidth - 2).Render(text)
 			}
 			lines = append(lines, strings.Split(ansi.Hardwrap(line, innerWidth, true), "\n")...)
 		}
@@ -169,7 +170,7 @@ func (m *Model) renderQuestionDialog() string {
 			if q.ResponsePolicy == tools.QuestionPolicyDefaultAllowed {
 				label = fmt.Sprintf("Auto-select in %ds", secs)
 			}
-			cfg.Footer = QuestionTimeoutStyle.Render(truncateOneLine(label, innerWidth))
+			cfg.Footer = currentStyles.QuestionTimeoutStyle.Render(terminaltext.TruncateOneLine(label, innerWidth))
 		}
 	}
 	if editing {
@@ -177,7 +178,7 @@ func (m *Model) renderQuestionDialog() string {
 		configureDialogTextarea(&m.question.input, questionInputWidth(m.width), 1, editorHeight)
 		inputLines := strings.Split(strings.TrimSuffix(m.question.input.View(), "\n"), "\n")
 		if len(inputLines) > 0 {
-			inputLines[0] = QuestionSelectedStyle.Render("> ") + inputLines[0]
+			inputLines[0] = currentStyles.QuestionSelectedStyle.Render("> ") + inputLines[0]
 		}
 		if cfg.Footer != "" {
 			inputLines = append(inputLines, cfg.Footer)
@@ -234,8 +235,8 @@ func renderCurrentQuestionOptionDescription(description, numKey string, innerWid
 	available := max(wrapWidth-runewidth.StringWidth(prefix), 1)
 	var lines []string
 	for line := range strings.SplitSeq(strings.ReplaceAll(description, "<br>", "\n"), "\n") {
-		for _, wrapped := range wrapText(line, available) {
-			lines = append(lines, DimStyle.Render(prefix+wrapped))
+		for _, wrapped := range terminaltext.Wrap(line, available) {
+			lines = append(lines, currentStyles.DimStyle.Render(prefix+wrapped))
 		}
 	}
 	return lines

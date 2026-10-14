@@ -75,3 +75,16 @@ func TestEnsurePreservesAnchoredStreamingCache(t *testing.T) {
 		t.Fatal("path change retained old lexer or rendered prefix")
 	}
 }
+
+func TestEnsurePreservesUnchangedFenceCache(t *testing.T) {
+	var slot *Highlighter
+	h := Ensure(&slot, "", "package p", "go")
+	h.Snippet("var value = 731", "")
+	before := h.renderCache
+	before[12345] = "sentinel"
+	for range 5 {
+		if got := Ensure(&slot, "", "package p", "go"); got != h || got.renderCache[12345] != "sentinel" {
+			t.Fatal("unchanged fence replaced its highlighter or render cache")
+		}
+	}
+}

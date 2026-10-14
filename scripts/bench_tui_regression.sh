@@ -50,7 +50,8 @@ if [[ "${CHORD_BENCH_SKIP_TESTS:-}" != "1" ]]; then
 fi
 
 printf '\n==> Running image cache and protocol benchmarks\n'
-go test ./internal/tui -run '^$' -bench '^(BenchmarkImageRuntimeCacheLookup|BenchmarkImageProtocolFraming)$' -benchmem -benchtime "${CHORD_IMAGE_BENCH_TIME:-$CHORD_BENCH_TIME}" -count "${CHORD_IMAGE_BENCH_COUNT:-1}" | tee /tmp/chord-image-cache-bench.txt
+go test ./internal/tui/imagecache -run '^$' -bench '^BenchmarkImageRuntimeCacheLookup$' -benchmem -benchtime "${CHORD_IMAGE_BENCH_TIME:-$CHORD_BENCH_TIME}" -count "${CHORD_IMAGE_BENCH_COUNT:-1}" | tee /tmp/chord-image-cache-bench.txt
+go test ./internal/tui/imageprotocol -run '^$' -bench '^BenchmarkImageProtocolFraming$' -benchmem -benchtime "${CHORD_IMAGE_BENCH_TIME:-$CHORD_BENCH_TIME}" -count "${CHORD_IMAGE_BENCH_COUNT:-1}" | tee -a /tmp/chord-image-cache-bench.txt
 
 printf '\n==> Running TUI benchmarks\n'
 bench_args=(-run '^$' -bench "$BENCH_PATTERN" -benchmem)
@@ -58,6 +59,9 @@ if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
   bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
 fi
 go test ./internal/tui "${bench_args[@]}" | tee /tmp/chord-tui-bench.txt
+
+printf '\n==> Running overlay list and table benchmarks\n'
+go test ./internal/tui/overlaylist "${bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
 
 printf '\n==> Running TUI paced benchmarks\n'
 go test ./internal/tui -run '^$' -bench "$PACED_BENCH_PATTERN" -benchmem -benchtime "$PACED_BENCH_TIME" | tee -a /tmp/chord-tui-bench.txt
@@ -68,6 +72,12 @@ if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
   frontier_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
 fi
 go test ./internal/tui/markdownutil "${frontier_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
+
+printf '\n==> Running terminal text benchmarks\n'
+if [[ "${CHORD_BENCH_SKIP_TESTS:-}" != "1" ]]; then
+  go test ./internal/tui/terminaltext -run '^TestWrapTextLongParagraphAllocsGuard$'
+fi
+go test ./internal/tui/terminaltext -run '^$' -bench '^BenchmarkWrapTextLongParagraph$' -benchmem -benchtime "$CHORD_BENCH_TIME" | tee -a /tmp/chord-tui-bench.txt
 
 printf '\n==> Running syntax highlighting benchmarks\n'
 syntax_bench_args=(-run '^$' -bench '^BenchmarkCodeHighlighterPerFileSection$' -benchmem)

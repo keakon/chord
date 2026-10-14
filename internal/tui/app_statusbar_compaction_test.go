@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestCompactionStatusBarRightCacheAdvancesWithTimeFrame(t *testing.T) {
@@ -26,8 +27,8 @@ func TestCompactionStatusBarRightCacheAdvancesWithTimeFrame(t *testing.T) {
 	if first == second {
 		t.Fatalf("compaction right-side rendering did not refresh: first=%q second=%q", first, second)
 	}
-	if !strings.Contains(stripANSI(second), "2s") {
-		t.Fatalf("refreshed compaction pill = %q, want elapsed 2s", stripANSI(second))
+	if !strings.Contains(terminaltext.StripANSI(second), "2s") {
+		t.Fatalf("refreshed compaction pill = %q, want elapsed 2s", terminaltext.StripANSI(second))
 	}
 }
 
@@ -36,7 +37,7 @@ func TestCompactionPillShowsBytesAndEvents(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 
 	m.compactionBgStatus = compactionBackgroundStatus{Active: true, StartedAt: now.Add(-5 * time.Second), Bytes: 1024, Events: 7}
-	if got := stripANSI(m.renderCompactionBackgroundPill(now)); !strings.Contains(got, "↓ 1.0 KB · 7 events") {
+	if got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now)); !strings.Contains(got, "↓ 1.0 KB · 7 events") {
 		t.Fatalf("compaction pill = %q, want bytes and events suffix", got)
 	}
 
@@ -44,7 +45,7 @@ func TestCompactionPillShowsBytesAndEvents(t *testing.T) {
 	// must surface the suffix.
 	m.compactionBgStatus.Bytes = 0
 	m.compactionBgStatus.Events = 3
-	if got := stripANSI(m.renderCompactionBackgroundPill(now.Add(time.Second))); !strings.Contains(got, "3 events") {
+	if got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now.Add(time.Second))); !strings.Contains(got, "3 events") {
 		t.Fatalf("compaction pill = %q, want events-only progress", got)
 	}
 }
@@ -58,7 +59,7 @@ func TestCompactionStatusProgressEventUpdatesPill(t *testing.T) {
 		t.Fatal("compaction pill not armed by started status")
 	}
 	m.handleAgentEvent(agentEventMsg{event: agent.CompactionStatusEvent{Status: agent.CompactionStatusProgress, Bytes: 2048, Events: 5}})
-	got := stripANSI(m.renderCompactionBackgroundPill(now))
+	got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now))
 	if !strings.Contains(got, "2.0 KB · 5 events") {
 		t.Fatalf("compaction pill after progress event = %q, want byte and event counts", got)
 	}
@@ -88,7 +89,7 @@ func TestCompactionSkippedStatusShowsTerminalReason(t *testing.T) {
 	if m.compactionBgStatus.Trigger != "model_driven" {
 		t.Fatalf("compaction trigger after skip = %q, want model_driven", m.compactionBgStatus.Trigger)
 	}
-	got := stripANSI(m.renderCompactionBackgroundPill(time.Now()))
+	got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(time.Now()))
 	if !strings.Contains(got, "skipped") && !strings.Contains(got, "low-gain") {
 		t.Fatalf("compaction pill after skip = %q, want terminal reason", got)
 	}
@@ -124,13 +125,13 @@ func TestCompactionCancelledStatusShowsTerminalReason(t *testing.T) {
 	if m.compactionBgStatus.TerminalAt.IsZero() {
 		t.Fatal("compaction status after cancel has no terminal timestamp")
 	}
-	got := stripANSI(m.renderCompactionBackgroundPill(time.Now()))
+	got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(time.Now()))
 	if !strings.Contains(got, "✕") || !strings.Contains(got, "no longer active") {
 		t.Fatalf("compaction pill after cancel = %q, want void icon and terminal reason", got)
 	}
 	// The terminal flush expires like every other terminal outcome.
 	if pill := m.renderCompactionBackgroundPill(time.Now().Add(compactionStatusTerminalDuration)); pill != "" {
-		t.Fatalf("expired cancelled pill = %q, want empty", stripANSI(pill))
+		t.Fatalf("expired cancelled pill = %q, want empty", terminaltext.StripANSI(pill))
 	}
 }
 
@@ -145,7 +146,7 @@ func TestCompactionModelDrivenStartedShowsLabel(t *testing.T) {
 	if m.compactionBgStatus.Trigger != "model_driven" {
 		t.Fatalf("compaction trigger = %q, want model_driven", m.compactionBgStatus.Trigger)
 	}
-	got := stripANSI(m.renderCompactionBackgroundPill(now))
+	got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now))
 	if !strings.Contains(got, "model checkpoint") {
 		t.Fatalf("compaction pill for model-driven = %q, want model checkpoint label", got)
 	}
@@ -180,7 +181,7 @@ func TestIdleSinceHiddenWhileRequestProgressIsPending(t *testing.T) {
 	if m.focusedAgentCanShowIdleSince() {
 		t.Fatal("idle Since should be hidden while request progress is pending")
 	}
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "Since ") {
 		t.Fatalf("status bar showed idle time with pending request progress: %q", plain)
 	}
@@ -196,7 +197,7 @@ func TestCompactionIndicatorsUseSameAnimationPhase(t *testing.T) {
 	if got := m.buildStatusBarActivityDisplayAt(activity, now).Icon; got != wantIcon {
 		t.Fatalf("foreground compaction icon = %q, want %q", got, wantIcon)
 	}
-	if got := stripANSI(m.renderCompactionBackgroundPill(now)); !strings.HasPrefix(got, wantIcon+" ") {
+	if got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now)); !strings.HasPrefix(got, wantIcon+" ") {
 		t.Fatalf("background compaction pill = %q, want icon %q", got, wantIcon)
 	}
 }
@@ -216,14 +217,14 @@ func TestCompactionTerminalStatusRendersAndExpires(t *testing.T) {
 		TerminalAt: now,
 	}
 
-	if got := stripANSI(m.renderCompactionBackgroundPill(now)); !strings.Contains(got, "✓ 3s") {
+	if got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now)); !strings.Contains(got, "✓ 3s") {
 		t.Fatalf("terminal compaction pill = %q, want success status", got)
 	}
 	if delay := m.statusBarNextRefreshDelayAt(now); delay <= 0 {
 		t.Fatalf("terminal refresh delay = %v, want positive", delay)
 	}
 	if got := m.renderCompactionBackgroundPill(now.Add(compactionStatusTerminalDuration)); got != "" {
-		t.Fatalf("expired terminal compaction pill = %q, want empty", stripANSI(got))
+		t.Fatalf("expired terminal compaction pill = %q, want empty", terminaltext.StripANSI(got))
 	}
 	if delay := m.statusBarNextRefreshDelayAt(now.Add(compactionStatusTerminalDuration)); delay != 0 {
 		t.Fatalf("expired terminal refresh delay = %v, want 0", delay)
@@ -277,7 +278,7 @@ func TestCompactionPillSurvivesBusyActivityLane(t *testing.T) {
 		t.Fatalf("compaction pill collides with the busy activity lane: rightStart=%d centerEnd=%d", rightStart, centerEnd)
 	}
 	line, _ := renderStatusBarPlacedLine("", 0, rightStart, rightSide, "", activityWidth, effectiveWidth)
-	if plain := stripANSI(line); !strings.Contains(plain, "▪") && !strings.Contains(plain, "■") {
+	if plain := terminaltext.StripANSI(line); !strings.Contains(plain, "▪") && !strings.Contains(plain, "■") {
 		t.Fatalf("status bar lost the compaction indicator beside a busy activity lane: %q", plain)
 	}
 }
@@ -334,7 +335,7 @@ func TestCompactionSyntheticSkipShowsOnIdleSlot(t *testing.T) {
 	if m.compactionBgStatus.Terminal != agent.CompactionStatusSkipped {
 		t.Fatalf("idle-slot skip terminal must be shown, got %+v", m.compactionBgStatus)
 	}
-	got := stripANSI(m.renderCompactionBackgroundPill(time.Now()))
+	got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(time.Now()))
 	if !strings.Contains(got, "minimum 3-request-batch interval") {
 		t.Fatalf("idle-slot synthetic skip pill = %q, want the skip reason", got)
 	}
@@ -369,7 +370,7 @@ func TestCompactionLivePillShowsElapsed(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	m.compactionBgStatus = compactionBackgroundStatus{Active: true, StartedAt: now.Add(-3 * time.Second)}
 
-	got := stripANSI(m.renderCompactionBackgroundPill(now))
+	got := terminaltext.StripANSI(m.renderCompactionBackgroundPill(now))
 	if !strings.Contains(got, "3s") {
 		t.Fatalf("live compaction pill = %q, want elapsed 3s", got)
 	}

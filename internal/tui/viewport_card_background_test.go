@@ -8,6 +8,8 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // TestViewportKeepsToolCardBackgroundEdge verifies the viewport render path
@@ -17,7 +19,7 @@ import (
 // background. Rows whose background fills the surface must reach the same
 // right edge as in the raw render.
 func TestViewportKeepsToolCardBackgroundEdge(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const width = 180
 	block := &Block{
 		ID:            1,
@@ -39,7 +41,7 @@ func TestViewportKeepsToolCardBackgroundEdge(t *testing.T) {
 	screen := newScreenBuffer(width, len(rendered))
 	uv.NewStyledString(strings.Join(rendered, "\n")).Draw(screen, screen.Bounds())
 
-	cardBg := colorOfTheme(currentTheme.ToolCallBg)
+	cardBg := colorOfTheme(currentStyles.Palette.ToolCallBg)
 	checked := 0
 	maxEdge := -1
 	for y := range raw {
@@ -85,7 +87,7 @@ func TestViewportKeepsToolCardBackgroundEdge(t *testing.T) {
 // that display-only tab expansion and control-character sanitization cannot
 // leave a right-edge gap or overwrite the card rail.
 func TestViewportDoesNotLetExpandedTabsOrCarriageReturnsCorruptToolCard(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const width = 290
 	patchArgs := `{"patch":"*** Begin Patch\n*** Update File: internal/tui/tool_card_width_test.go\n@@\n \t\r\n*** End Patch"}`
 	block := &Block{
@@ -114,7 +116,7 @@ func TestViewportDoesNotLetExpandedTabsOrCarriageReturnsCorruptToolCard(t *testi
 	screen := newScreenBuffer(width, len(rendered))
 	uv.NewStyledString(strings.Join(rendered, "\n")).Draw(screen, screen.Bounds())
 
-	cardBg := colorOfTheme(currentTheme.ToolCallBg)
+	cardBg := colorOfTheme(currentStyles.Palette.ToolCallBg)
 	filled := 0
 	for y := range raw {
 		rawEdge := -1
@@ -145,9 +147,9 @@ func TestViewportDoesNotLetExpandedTabsOrCarriageReturnsCorruptToolCard(t *testi
 	}
 
 	railRows := 0
-	railFg := colorOfTheme(currentTheme.RailToolFg)
+	railFg := colorOfTheme(currentStyles.Palette.RailToolFg)
 	for y, line := range raw {
-		if !strings.HasPrefix(stripANSI(line), "│") {
+		if !strings.HasPrefix(terminaltext.StripANSI(line), "│") {
 			continue
 		}
 		railRows++

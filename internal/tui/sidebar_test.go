@@ -7,10 +7,12 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestSidebarAddFileEditUsesExplicitStats(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 
 	sidebar.AddFileEdit("", "/tmp/main.go", 2, 1)
@@ -31,7 +33,7 @@ func TestSidebarAddFileEditUsesExplicitStats(t *testing.T) {
 }
 
 func TestSidebarUpdateIgnoresIncompleteSubAgent(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update([]agent.SubAgentInfo{{InstanceID: "", TaskID: "task-1", TaskDesc: "pending"}, {InstanceID: "agent-1", TaskID: "task-2", TaskDesc: "complete"}}, "main", "builder")
 	if len(sidebar.agents) != 2 || sidebar.agents[1].ID != "agent-1" {
 		t.Fatalf("sidebar agents = %+v, want only main and complete SubAgent", sidebar.agents)
@@ -39,7 +41,7 @@ func TestSidebarUpdateIgnoresIncompleteSubAgent(t *testing.T) {
 }
 
 func TestSidebarAddFileDeleteMarksDeletedWithoutFakeLineCount(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 
 	sidebar.AddFileDelete("main", "/tmp/obsolete.go")
@@ -57,7 +59,7 @@ func TestSidebarAddFileDeleteMarksDeletedWithoutFakeLineCount(t *testing.T) {
 }
 
 func TestSidebarAddFileEditAfterDeleteClearsDeletedState(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 
 	sidebar.AddFileDelete("main", "/tmp/obsolete.go")
@@ -76,7 +78,7 @@ func TestSidebarAddFileEditAfterDeleteClearsDeletedState(t *testing.T) {
 }
 
 func TestSidebarAddFileMoveKeepsZeroStatTarget(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 
 	sidebar.AddFileMove("main", "old.go", "new.go", 0, 0)
@@ -94,7 +96,7 @@ func TestSidebarAddFileMoveKeepsZeroStatTarget(t *testing.T) {
 }
 
 func TestSidebarAddFileMoveRevivesPreviouslyDeletedTarget(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 	sidebar.AddFileDelete("main", "new.go")
 
@@ -110,7 +112,7 @@ func TestSidebarAddFileMoveRevivesPreviouslyDeletedTarget(t *testing.T) {
 }
 
 func TestSidebarAddFileEditAccumulatesCounts(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 
 	sidebar.AddFileEdit("main", "/tmp/main.go", 2, 1)
@@ -126,7 +128,7 @@ func TestSidebarAddFileEditAccumulatesCounts(t *testing.T) {
 }
 
 func TestSidebarAddFileEditSkipsEmptyFiles(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 
 	sidebar.AddFileEdit("main", "/tmp/empty.go", 0, 0)
@@ -137,7 +139,7 @@ func TestSidebarAddFileEditSkipsEmptyFiles(t *testing.T) {
 }
 
 func TestSidebarUpdatePreservesEditedFiles(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	subAgents := []agent.SubAgentInfo{{
 		InstanceID: "agent-1",
 		TaskDesc:   "task",
@@ -188,11 +190,11 @@ func TestSidebarEntryDisplayName_UsesUnifiedTaskSummaryPolicy(t *testing.T) {
 }
 
 func TestSidebarBuildLines_UsesTaskDescForSubagents(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "update prompt tests", AgentDefName: "coder"}}, "main", "builder")
 
 	lines := sidebar.buildLines(40)
-	plain := strings.Join([]string{stripANSI(lines[0]), stripANSI(lines[1])}, "\n")
+	plain := strings.Join([]string{terminaltext.StripANSI(lines[0]), terminaltext.StripANSI(lines[1])}, "\n")
 	if !strings.Contains(plain, "builder") {
 		t.Fatalf("sidebar should show main role, got %q", plain)
 	}
@@ -205,13 +207,13 @@ func TestSidebarBuildLines_UsesTaskDescForSubagents(t *testing.T) {
 }
 
 func TestSidebarBuildLinesDeletedFileUsesStrikethroughWithoutStats(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 	sidebar.AddFileDelete("main", "/tmp/obsolete.go")
 
 	lines := sidebar.buildLines(40)
 	joined := strings.Join(lines, "\n")
-	plain := stripANSI(joined)
+	plain := terminaltext.StripANSI(joined)
 	if !strings.Contains(plain, "obsolete.go") {
 		t.Fatalf("deleted file missing from sidebar lines: %q", plain)
 	}
@@ -224,7 +226,7 @@ func TestSidebarBuildLinesDeletedFileUsesStrikethroughWithoutStats(t *testing.T)
 }
 
 func TestSidebarBuildLinesPrioritizesFileStatsWhenNarrow(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 	sidebar.AddFileEdit("main", "/tmp/README_CN.md", 14, 4)
 
@@ -233,11 +235,11 @@ func TestSidebarBuildLinesPrioritizesFileStatsWhenNarrow(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("sidebar lines = %#v, want main row + file row", lines)
 	}
-	fileLine := stripANSI(lines[1])
+	fileLine := terminaltext.StripANSI(lines[1])
 	if !strings.Contains(fileLine, "+14 -4") {
 		t.Fatalf("narrow file row should keep full stats, got %q", fileLine)
 	}
-	if got := tuiStringWidth(fileLine); got > width {
+	if got := terminaltext.Width(fileLine); got > width {
 		t.Fatalf("narrow file row width = %d, want <= %d: %q", got, width, fileLine)
 	}
 	if !strings.HasPrefix(fileLine, "  REA ") {
@@ -246,7 +248,7 @@ func TestSidebarBuildLinesPrioritizesFileStatsWhenNarrow(t *testing.T) {
 }
 
 func TestSidebarCompletedStatusUsesDoneSemantics(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")
 	sidebar.UpdateStatus("agent-1", "completed")
 
@@ -255,13 +257,13 @@ func TestSidebarCompletedStatusUsesDoneSemantics(t *testing.T) {
 	}
 	lines := sidebar.buildLines(32)
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(stripANSI(joined), "✓ ship tests") {
-		t.Fatalf("sidebar should render completed as done semantics, got:\n%s", stripANSI(joined))
+	if !strings.Contains(terminaltext.StripANSI(joined), "✓ ship tests") {
+		t.Fatalf("sidebar should render completed as done semantics, got:\n%s", terminaltext.StripANSI(joined))
 	}
 }
 
 func TestSidebarNormalizesFilePathsForDuplicateDetection(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 
 	// Add the same file with different path representations
@@ -283,7 +285,7 @@ func TestSidebarNormalizesFilePathsForDuplicateDetection(t *testing.T) {
 }
 
 func TestSidebarNormalizesDeletePathToMatchEditPath(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 
 	// Edit with one path form
@@ -305,7 +307,7 @@ func TestSidebarNormalizesDeletePathToMatchEditPath(t *testing.T) {
 }
 
 func TestSidebarNormalizesAbsoluteAndRelativePathsAgainstWorkingDir(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 	workingDir := t.TempDir()
 	relPath := filepath.Join("app", "recall.py")
@@ -332,7 +334,7 @@ func TestSidebarNormalizesAbsoluteAndRelativePathsAgainstWorkingDir(t *testing.T
 }
 
 func TestSidebarRenormalizationPreservesLatestStateAcrossPathForms(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update(nil, "main", "builder")
 	workingDir := t.TempDir()
 	relPath := filepath.Join("app", "recall.py")
@@ -356,7 +358,7 @@ func TestSidebarRenormalizationPreservesLatestStateAcrossPathForms(t *testing.T)
 }
 
 func TestSidebarNormalizesPathsAsChangesArrive(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	workingDir := t.TempDir()
 	sidebar.SetWorkingDir(workingDir)
 	sidebar.Update(nil, "main", "builder")
@@ -382,7 +384,7 @@ func TestSidebarNormalizesPathsAsChangesArrive(t *testing.T) {
 }
 
 func TestSidebarRenormalizesPathsWhenWorkingDirChanges(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	workingDir := t.TempDir()
 	sidebar.SetWorkingDir(filepath.Join(workingDir, "nested"))
 	sidebar.Update(nil, "main", "builder")
@@ -401,7 +403,7 @@ func TestSidebarRenormalizesPathsWhenWorkingDirChanges(t *testing.T) {
 }
 
 func TestSidebarOrdersAndIndentsTaskTree(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update([]agent.SubAgentInfo{
 		{InstanceID: "agent-grandchild", TaskID: "task-grandchild", OwnerTaskID: "task-child", TaskDesc: "grandchild", State: "running"},
 		{InstanceID: "agent-z", TaskID: "task-z", TaskDesc: "independent", State: "running"},
@@ -422,14 +424,14 @@ func TestSidebarOrdersAndIndentsTaskTree(t *testing.T) {
 		t.Fatalf("tree depths = root %d child %d grandchild %d", sidebar.agents[1].TreeDepth, sidebar.agents[2].TreeDepth, sidebar.agents[3].TreeDepth)
 	}
 
-	plain := stripANSI(strings.Join(sidebar.buildLines(40), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(sidebar.buildLines(40), "\n"))
 	if !strings.Contains(plain, "└ child") || !strings.Contains(plain, "  └ grandchild") {
 		t.Fatalf("task tree indentation missing from sidebar:\n%s", plain)
 	}
 }
 
 func TestSidebarTaskTreeKeepsMalformedOwnerGraphVisible(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update([]agent.SubAgentInfo{
 		{InstanceID: "agent-a", TaskID: "task-a", OwnerTaskID: "task-b", TaskDesc: "cycle a", State: "running"},
 		{InstanceID: "agent-b", TaskID: "task-b", OwnerTaskID: "task-a", TaskDesc: "cycle b", State: "running"},
@@ -454,7 +456,7 @@ func TestSidebarTaskTreeKeepsMalformedOwnerGraphVisible(t *testing.T) {
 // the default bucket (below completed) instead of the top. It must sort ahead
 // of waiting and completed agents. The main agent stays first regardless.
 func TestSidebarOrdersRunningAgentBeforeCompleted(t *testing.T) {
-	sidebar := NewSidebar(DefaultTheme())
+	sidebar := NewSidebar(uitheme.Default())
 	sidebar.Update([]agent.SubAgentInfo{
 		{InstanceID: "agent-done", State: "completed"},
 		{InstanceID: "agent-wait", State: "waiting_main"},

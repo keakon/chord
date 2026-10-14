@@ -3,6 +3,9 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // TestErrorCardSharesTheCardShape pins the error card against its siblings: it
@@ -10,7 +13,7 @@ import (
 // bold text instead of a badge, and it prefixed the first body line with "✗"
 // while every other card leaves status signalling to the badge and the rail.
 func TestErrorCardSharesTheCardShape(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:        1,
 		Type:      BlockError,
@@ -18,7 +21,7 @@ func TestErrorCardSharesTheCardShape(t *testing.T) {
 		errorHint: "provider=anthropic status=502 retries=2",
 	}
 	lines := block.Render(90, "")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 
 	// Every card line but the trailing margin row carries the rail.
 	rendered := stripANSILines(lines)
@@ -49,15 +52,15 @@ func TestErrorCardSharesTheCardShape(t *testing.T) {
 // - which printed that line twice, and left a blank badge whenever the body
 // was a single line.
 func TestStatusCardNamesAnUntitledNotice(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{ID: 1, Type: BlockStatus, Content: "session exported to ~/chord-export.md"}
-	plain := stripANSI(strings.Join(block.Render(90, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(90, ""), "\n"))
 	if !strings.Contains(plain, infoCardTitle+" #2") {
 		t.Fatalf("expected the %s badge, got:\n%s", infoCardTitle, plain)
 	}
 
 	multi := &Block{ID: 1, Type: BlockStatus, Content: "first line\nsecond line"}
-	plain = stripANSI(strings.Join(multi.Render(90, ""), "\n"))
+	plain = terminaltext.StripANSI(strings.Join(multi.Render(90, ""), "\n"))
 	if !strings.Contains(plain, infoCardTitle+" #2") {
 		t.Fatalf("expected an untitled multi-line card to keep the %s badge, got:\n%s", infoCardTitle, plain)
 	}

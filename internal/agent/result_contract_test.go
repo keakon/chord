@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/schemaargs"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -376,9 +377,9 @@ func TestResultContractViolationListIsBoundedAndCounted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompileResultSchema: %v", err)
 	}
-	violations, err := tools.ValidateResultAgainstSchema(json.RawMessage(`{}`), schema)
+	violations, err := schemaargs.ValidateResult(json.RawMessage(`{}`), schema)
 	if err != nil {
-		t.Fatalf("ValidateResultAgainstSchema: %v", err)
+		t.Fatalf("ValidateResult: %v", err)
 	}
 	if len(violations) != fieldCount {
 		t.Fatalf("violations = %d, want %d", len(violations), fieldCount)
@@ -411,7 +412,7 @@ func TestResultContractViolationListIsBoundedAndCounted(t *testing.T) {
 
 func TestResultContractDiagnosticValuesAreBounded(t *testing.T) {
 	huge := `{"payload":"` + strings.Repeat("x", 8*1024) + `"}`
-	violationErr := newResultContractViolationError([]tools.ResultSchemaViolation{{
+	violationErr := newResultContractViolationError([]schemaargs.Violation{{
 		Invalid: message.InvalidToolArg{Path: "result.payload", Reason: message.InvalidToolArgReasonInvalid, ValueJSON: huge},
 		Message: `result.payload must be a string, got object with 1 key(s)`,
 	}}, nil, json.RawMessage(`{}`))
@@ -434,7 +435,7 @@ func TestResultContractDiagnosticValuesAreBounded(t *testing.T) {
 		t.Fatalf("path = %q, want the violating path to survive truncation", diag.Violations[0].Path)
 	}
 
-	small := newResultContractViolationError([]tools.ResultSchemaViolation{{
+	small := newResultContractViolationError([]schemaargs.Violation{{
 		Invalid: message.InvalidToolArg{Path: "result.mode", Reason: message.InvalidToolArgReasonInvalid, ValueJSON: `"other"`},
 		Message: `result.mode must be one of fast, slow, got string "other"`,
 	}}, nil, json.RawMessage(`{}`))

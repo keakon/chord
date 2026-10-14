@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/patchinput"
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -137,7 +138,7 @@ func (t *Turn) recordStreamingToolCall(call PendingToolCall) {
 	// runes could otherwise reach speculative or interrupted-turn execution.
 
 	if original := call.ArgsJSON; original != "" {
-		cleaned := tools.StripZeroWidthFormat(original)
+		cleaned := textclean.StripZeroWidthFormat(original)
 		if cleaned != original {
 			call.ArgsJSON = cleaned
 			byField := map[string]map[rune]int{

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const defaultViewportHotBytes int64 = 32 << 20
@@ -321,7 +323,7 @@ func (b *Block) fallbackSummary() string {
 	case b.DoneSummary != "":
 		return b.DoneSummary
 	case b.Content != "":
-		return truncateOneLine(strings.TrimSpace(b.Content), 60)
+		return terminaltext.TruncateOneLine(strings.TrimSpace(b.Content), 60)
 	default:
 		return "(empty block)"
 	}

@@ -17,9 +17,10 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
-	"github.com/keakon/chord/internal/tui/markdownutil"
 	"github.com/keakon/chord/internal/tui/modelref"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const (
@@ -64,8 +65,8 @@ func renderInfoPanelIndentedLine(lineW, inset int, content string) string {
 		inset = 0
 	}
 	prefix := strings.Repeat(" ", inset)
-	line := lipgloss.JoinHorizontal(lipgloss.Left, InfoPanelDim.Render(prefix), content)
-	return InfoPanelLineBg.Width(lineW).Render(line)
+	line := lipgloss.JoinHorizontal(lipgloss.Left, currentStyles.InfoPanelDim.Render(prefix), content)
+	return currentStyles.InfoPanelLineBg.Width(lineW).Render(line)
 }
 
 func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
@@ -74,13 +75,13 @@ func (m *Model) renderInfoPanelServiceTierLine(lineW int) string {
 	if requested == config.ServiceTierStandard {
 		return ""
 	}
-	label := InfoPanelValue.Render("tier: ")
-	valueStyle := InfoPanelValue
+	label := currentStyles.InfoPanelValue.Render("tier: ")
+	valueStyle := currentStyles.InfoPanelValue
 	if requested != state.EffectiveTier {
-		valueStyle = InfoPanelDim.Strikethrough(true)
+		valueStyle = currentStyles.InfoPanelDim.Strikethrough(true)
 	}
 	line := lipgloss.JoinHorizontal(lipgloss.Left, label, valueStyle.Render(string(requested)))
-	return InfoPanelLineBg.Width(lineW).Render(line)
+	return currentStyles.InfoPanelLineBg.Width(lineW).Render(line)
 }
 
 func (m *Model) buildInfoPanelModelBlock(lineW int) string {
@@ -88,38 +89,38 @@ func (m *Model) buildInfoPanelModelBlock(lineW int) string {
 	provider, model, variant := modelref.SplitRunningModelRef(modelState.DisplayRef)
 	modelShown := modelref.FormatModelVariantForDisplay(model, variant, lineW)
 	modelLines := []string{
-		InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("MODEL")),
-		InfoPanelLineBg.Width(lineW).Render(InfoPanelValue.Render(modelShown)),
+		currentStyles.InfoPanelLineBg.Width(lineW).Render(currentStyles.InfoPanelTitle.Render("MODEL")),
+		currentStyles.InfoPanelLineBg.Width(lineW).Render(currentStyles.InfoPanelValue.Render(modelShown)),
 	}
 	if provider != "" {
 		modelLines = append(modelLines,
-			renderInfoPanelKVLine(lineW, "Provider", InfoPanelValue.Render(truncateOneLine(provider, lineW-10))),
+			renderInfoPanelKVLine(lineW, "Provider", currentStyles.InfoPanelValue.Render(terminaltext.TruncateOneLine(provider, lineW-10))),
 		)
 	}
 	keysConfirmed, keysTotal := modelState.KeysConfirmed, modelState.KeysTotal
-	keysStyle := InfoPanelValue
+	keysStyle := currentStyles.InfoPanelValue
 	if keysTotal > 1 {
 		switch keyPoolHealthSeverity(keysConfirmed, keysTotal) {
 		case keyPoolSeverityCritical:
-			keysStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelKeyCriticalFg))
+			keysStyle = currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelKeyCriticalFg))
 		case keyPoolSeverityWarn:
-			keysStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelKeyWarnFg))
+			keysStyle = currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelKeyWarnFg))
 		}
 	}
 	if len(modelState.PoolNames) > 0 {
 		if pool := strings.TrimSpace(modelState.PoolName); pool != "" {
 			pool = m.pendingPoolSwitch.display(pool, m.isFocusedAgentBusy())
-			modelLines = append(modelLines, renderInfoPanelKVLine(lineW, "Pool", InfoPanelValue.Render(pool)))
+			modelLines = append(modelLines, renderInfoPanelKVLine(lineW, "Pool", currentStyles.InfoPanelValue.Render(pool)))
 		}
 	}
 	if keysTotal > 1 {
 		keysStr := fmt.Sprintf("Keys: %d/%d", keysConfirmed, keysTotal)
-		modelLines = append(modelLines, InfoPanelLineBg.Width(lineW).Render(keysStyle.Render(keysStr)))
+		modelLines = append(modelLines, currentStyles.InfoPanelLineBg.Width(lineW).Render(keysStyle.Render(keysStr)))
 	}
 	if tierLine := m.renderInfoPanelServiceTierLine(lineW); tierLine != "" {
 		modelLines = append(modelLines, tierLine)
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(modelLines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(modelLines))
 }
 
 type keyPoolSeverity uint8
@@ -180,7 +181,7 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 	}
 
 	stats := m.agent.GetSidebarUsageStats()
-	usageLines := []string{InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("USAGE"))}
+	usageLines := []string{currentStyles.InfoPanelLineBg.Width(lineW).Render(currentStyles.InfoPanelTitle.Render("USAGE"))}
 	if current > 0 || limit > 0 {
 		gauge := m.renderContextGauge(width-6, percent, reminder, threshold)
 		contextValueStr := fmt.Sprintf("%s (%s)", formatTokens(current), formatPercent(percent))
@@ -189,7 +190,7 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 		}
 		usageLines = append(usageLines,
 			renderInfoPanelKVLine(lineW, "Context", contextValueStyle(percent, reminder, threshold).Render(contextValueStr)),
-			InfoPanelLineBg.Width(lineW).Render(gauge),
+			currentStyles.InfoPanelLineBg.Width(lineW).Render(gauge),
 		)
 		if currentBytes > 0 && msgCount > 0 {
 			bytesValue := bytefmt.Short(int64(currentBytes))
@@ -203,19 +204,19 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 					}
 				}
 			}
-			usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Bytes", InfoPanelValue.Render(bytesValue)))
+			usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Bytes", currentStyles.InfoPanelValue.Render(bytesValue)))
 		}
 		if msgCount >= 0 {
 			messagesValue := formatTokens(msgCount)
-			usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Messages", InfoPanelValue.Render(messagesValue)))
+			usageLines = append(usageLines, renderInfoPanelKVLine(lineW, "Messages", currentStyles.InfoPanelValue.Render(messagesValue)))
 		}
 	}
 
 	if usageSummary := renderUsageSummaryLine(lineW, stats); usageSummary != "" {
 		if len(usageLines) > 1 {
-			usageLines = append(usageLines, InfoPanelLineBg.Width(lineW).Render(""))
+			usageLines = append(usageLines, currentStyles.InfoPanelLineBg.Width(lineW).Render(""))
 		}
-		usageLines = append(usageLines, InfoPanelLineBg.Width(lineW).Render(InfoPanelDim.Render("TOKENS")))
+		usageLines = append(usageLines, currentStyles.InfoPanelLineBg.Width(lineW).Render(currentStyles.InfoPanelDim.Render("TOKENS")))
 		usageLines = append(usageLines, usageSummary)
 		if reasoningLine := renderUsageReasoningLine(lineW, stats); reasoningLine != "" {
 			usageLines = append(usageLines, reasoningLine)
@@ -233,7 +234,7 @@ func (m *Model) buildInfoPanelUsageBlock(width, lineW int) string {
 	if len(usageLines) <= 1 {
 		return ""
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(usageLines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(usageLines))
 }
 
 func (m *Model) buildInfoPanelTimeBlock(lineW int) string {
@@ -242,7 +243,7 @@ func (m *Model) buildInfoPanelTimeBlock(lineW int) string {
 		// No walltime recorded for the focused agent: hide the whole section.
 		return ""
 	}
-	lines := []string{InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("TIME"))}
+	lines := []string{currentStyles.InfoPanelLineBg.Width(lineW).Render(currentStyles.InfoPanelTitle.Render("TIME"))}
 
 	// Buckets below one second are not shown: a sub-second tool call rendered
 	// as "0s (1%)" is misleading, and its share is not worth a percentage.
@@ -299,9 +300,9 @@ func (m *Model) buildInfoPanelTimeBlock(lineW int) string {
 	}
 	for i, row := range rows {
 		value := formatWalltimeValue(lineW, row.key, row.dur, base[i])
-		lines = append(lines, renderInfoPanelKVLine(lineW, row.key, InfoPanelValue.Render(value)))
+		lines = append(lines, renderInfoPanelKVLine(lineW, row.key, currentStyles.InfoPanelValue.Render(value)))
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 }
 
 func formatWalltimeValue(lineW int, key string, duration time.Duration, percent int) string {
@@ -357,9 +358,9 @@ func walltimeDurationVariants(d time.Duration) []string {
 }
 
 func (m *Model) buildInfoPanelLSPBlock(lineW int) string {
-	mcpErrStyle := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg))
-	mcpErrLabelStyle := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg))
-	pendingDotStyle := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelPendingFg))
+	mcpErrStyle := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg))
+	mcpErrLabelStyle := currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg))
+	pendingDotStyle := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelPendingFg))
 
 	var lspRows []agent.LSPServerDisplay
 	if lp, ok := m.agent.(agent.LSPStateProvider); ok {
@@ -372,7 +373,7 @@ func (m *Model) buildInfoPanelLSPBlock(lineW int) string {
 	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionLSP)
 	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "LSP", fmt.Sprintf("%d", len(lspRows)))}
 	if !expanded {
-		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 	}
 	// Note: LSP error details are intentionally hidden in the info panel; see logs for full cause.
 	for _, row := range lspRows {
@@ -380,14 +381,14 @@ func (m *Model) buildInfoPanelLSPBlock(lineW int) string {
 		var labelStyle lipgloss.Style
 		switch {
 		case row.OK:
-			dot = GaugeFull
-			labelStyle = InfoPanelDim
+			dot = currentStyles.GaugeFull
+			labelStyle = currentStyles.InfoPanelDim
 		case row.Idle:
 			dot = pendingDotStyle
-			labelStyle = InfoPanelDim
+			labelStyle = currentStyles.InfoPanelDim
 		case row.Pending:
 			dot = pendingDotStyle
-			labelStyle = InfoPanelDim
+			labelStyle = currentStyles.InfoPanelDim
 		default:
 			dot = mcpErrStyle
 			labelStyle = mcpErrLabelStyle
@@ -407,20 +408,20 @@ func (m *Model) buildInfoPanelLSPBlock(lineW int) string {
 		}
 		line := lipgloss.JoinHorizontal(lipgloss.Left,
 			dot.Render("●"),
-			labelStyle.Render(" "+truncateOneLine(label, availLabel)),
+			labelStyle.Render(" "+terminaltext.TruncateOneLine(label, availLabel)),
 		)
 		if diagSuffix != "" {
-			line = lipgloss.JoinHorizontal(lipgloss.Left, line, InfoPanelDim.Render(" "), renderLSPDiagSummary(diagSuffix))
+			line = lipgloss.JoinHorizontal(lipgloss.Left, line, currentStyles.InfoPanelDim.Render(" "), renderLSPDiagSummary(diagSuffix))
 		}
 		lines = append(lines, renderInfoPanelCollapsibleContentLine(lineW, line))
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 }
 
 func (m *Model) buildInfoPanelMCPBlock(lineW int) string {
-	mcpErrStyle := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg))
-	mcpRetryLabelStyle := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
-	pendingDotStyle := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelPendingFg))
+	mcpErrStyle := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg))
+	mcpRetryLabelStyle := currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg))
+	pendingDotStyle := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelPendingFg))
 
 	var mcpRows []agent.MCPServerDisplay
 	if mp, ok := m.agent.(agent.MCPStateProvider); ok {
@@ -433,43 +434,43 @@ func (m *Model) buildInfoPanelMCPBlock(lineW int) string {
 	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionMCP)
 	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "MCP", fmt.Sprintf("%d", len(mcpRows)))}
 	if !expanded {
-		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 	}
 	for _, row := range mcpRows {
 		var dot lipgloss.Style
 		var labelStyle lipgloss.Style
 		switch {
 		case row.OK:
-			dot = GaugeFull
-			labelStyle = InfoPanelDim
+			dot = currentStyles.GaugeFull
+			labelStyle = currentStyles.InfoPanelDim
 		case row.Idle:
 			// Auto-unloaded while idle: dim gray, not an error.
 			dot = pendingDotStyle
-			labelStyle = InfoPanelDim
+			labelStyle = currentStyles.InfoPanelDim
 		case row.Disabled:
 			// Disabled/manual: dim gray.
 			dot = pendingDotStyle
-			labelStyle = InfoPanelDim
+			labelStyle = currentStyles.InfoPanelDim
 		case row.Pending && row.Retrying:
 			// Retrying: warning/orange.
-			dot = InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
+			dot = currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg))
 			labelStyle = mcpRetryLabelStyle
 		case row.Pending:
 			// Connecting: keep dim label (tests pin this); use a warning-colored dot.
-			dot = InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
-			labelStyle = InfoPanelDim
+			dot = currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg))
+			labelStyle = currentStyles.InfoPanelDim
 		default:
 			dot = mcpErrStyle
-			labelStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg))
+			labelStyle = currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg))
 		}
 		contentWidth := max(lineW-infoPanelCollapsibleContentInset-2, 1)
 		line := lipgloss.JoinHorizontal(lipgloss.Left,
 			dot.Render("●"),
-			labelStyle.Render(" "+truncateOneLine(row.Name, contentWidth)),
+			labelStyle.Render(" "+terminaltext.TruncateOneLine(row.Name, contentWidth)),
 		)
 		lines = append(lines, renderInfoPanelCollapsibleContentLine(lineW, line))
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 }
 
 func (m *Model) buildInfoPanelGitBlock(lineW int) string {
@@ -484,7 +485,7 @@ func (m *Model) buildInfoPanelGitBlock(lineW int) string {
 	}
 	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "GIT", headerSummary)}
 	if !expanded {
-		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 	}
 	ref := info.Branch
 	if ref == "" {
@@ -493,26 +494,26 @@ func (m *Model) buildInfoPanelGitBlock(lineW int) string {
 	if ref == "" {
 		ref = "detached"
 	}
-	lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Branch", InfoPanelValue.Render(truncateOneLine(ref, lineW-8-infoPanelCollapsibleContentInset))))
+	lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Branch", currentStyles.InfoPanelValue.Render(terminaltext.TruncateOneLine(ref, lineW-8-infoPanelCollapsibleContentInset))))
 	if info.WorktreeName != "" {
-		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Worktree", InfoPanelValue.Render(truncateOneLine(info.WorktreeName, lineW-10-infoPanelCollapsibleContentInset))))
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Worktree", currentStyles.InfoPanelValue.Render(terminaltext.TruncateOneLine(info.WorktreeName, lineW-10-infoPanelCollapsibleContentInset))))
 		// The status bar renders the worktree's identity label instead of its
 		// path, so the panel is where that path stays visible — but the name
 		// above comes from the git snapshot, while the path is the live
 		// directory. Only show the path while the snapshot still describes that
 		// directory, so a stale name is never paired with a new checkout.
 		if info.Dir != "" && info.Dir == m.workingDir {
-			lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Worktree Path", InfoPanelValue.Render(truncateOneLine(displayWorkingDir(m.workingDir), lineW-16-infoPanelCollapsibleContentInset))))
+			lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Worktree Path", currentStyles.InfoPanelValue.Render(terminaltext.TruncateOneLine(displayWorkingDir(m.workingDir), lineW-16-infoPanelCollapsibleContentInset))))
 		}
 	}
 	if info.ChangedFiles > 0 {
-		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Changes", InfoPanelValue.Render(fmt.Sprintf("%d files", info.ChangedFiles))))
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Changes", currentStyles.InfoPanelValue.Render(fmt.Sprintf("%d files", info.ChangedFiles))))
 	}
 	if info.StagedFiles > 0 {
-		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Staged", InfoPanelValue.Render(fmt.Sprintf("%d files", info.StagedFiles))))
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Staged", currentStyles.InfoPanelValue.Render(fmt.Sprintf("%d files", info.StagedFiles))))
 	}
 	if info.Stashes > 0 {
-		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Stash", InfoPanelValue.Render(fmt.Sprintf("%d entries", info.Stashes))))
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Stash", currentStyles.InfoPanelValue.Render(fmt.Sprintf("%d entries", info.Stashes))))
 	}
 	syncParts := make([]string, 0, 2)
 	if info.Ahead > 0 {
@@ -522,9 +523,9 @@ func (m *Model) buildInfoPanelGitBlock(lineW int) string {
 		syncParts = append(syncParts, fmt.Sprintf("↓%d", info.Behind))
 	}
 	if len(syncParts) > 0 {
-		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Sync", InfoPanelValue.Render(strings.Join(syncParts, " "))))
+		lines = append(lines, renderInfoPanelIndentedKVLine(lineW, infoPanelCollapsibleContentInset, "Sync", currentStyles.InfoPanelValue.Render(strings.Join(syncParts, " "))))
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 }
 
 func (m *Model) buildInfoPanelTodoBlock(lineW int) string {
@@ -541,23 +542,23 @@ func (m *Model) buildInfoPanelTodoBlock(lineW int) string {
 	}
 	todoLines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "TODOS", fmt.Sprintf("%d/%d", completed, len(todos)))}
 	if !expanded {
-		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(todoLines))
+		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(todoLines))
 	}
 	for _, t := range todos {
 		var icon lipgloss.Style
 		var marker string
 		switch t.Status {
 		case "completed":
-			icon = GaugeFull
+			icon = currentStyles.GaugeFull
 			marker = "✓"
 		case "in_progress":
-			icon = GaugeWarning
+			icon = currentStyles.GaugeWarning
 			marker = "▶"
 		case "cancelled":
-			icon = InfoPanelDim
+			icon = currentStyles.InfoPanelDim
 			marker = "✗"
 		default: // pending
-			icon = InfoPanelDim
+			icon = currentStyles.InfoPanelDim
 			marker = "○"
 		}
 		prefix := marker + " "
@@ -565,11 +566,11 @@ func (m *Model) buildInfoPanelTodoBlock(lineW int) string {
 		content := truncateInfoPanelLine(t.Content, contentWidth)
 		todoLines = append(todoLines,
 			renderInfoPanelCollapsibleContentLine(lineW,
-				icon.Render(prefix)+InfoPanelDim.Render(content),
+				icon.Render(prefix)+currentStyles.InfoPanelDim.Render(content),
 			),
 		)
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(todoLines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(todoLines))
 }
 
 type infoPanelAgentRowHitBox struct {
@@ -590,7 +591,7 @@ func (m *Model) buildInfoPanelAgentListBlockWithHits(lineW int) (string, []infoP
 	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionAgents)
 	blockLines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "AGENTS", m.sidebar.AgentsSummary())}
 	if !expanded {
-		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(blockLines)), nil
+		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(blockLines)), nil
 	}
 
 	// Every agent the sidebar still tracks is rendered: the info panel scrolls,
@@ -610,7 +611,7 @@ func (m *Model) buildInfoPanelAgentListBlockWithHits(lineW int) (string, []infoP
 			})
 		}
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(blockLines)), rowHits
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(blockLines)), rowHits
 }
 
 func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
@@ -666,7 +667,7 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionSkills)
 	skillLines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "SKILLS", fmt.Sprintf("%d", len(entries)))}
 	if !expanded {
-		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))
+		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))
 	}
 	for _, entry := range entries {
 		// The icon is the only status channel: shape carries the state
@@ -676,11 +677,11 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 		// "glyph name" pair, so it counts the glyph instead of eating it.
 		glyph, glyphStyle := skillStateIcon(entry.invocation)
 		labelWidth := max(lineW-infoPanelCollapsibleContentInset, 1)
-		glyphPart, namePart, _ := strings.Cut(truncateOneLine(glyph+" "+entry.name, labelWidth), " ")
-		row := glyphStyle.Render(glyphPart) + " " + InfoPanelDim.Render(namePart)
+		glyphPart, namePart, _ := strings.Cut(terminaltext.TruncateOneLine(glyph+" "+entry.name, labelWidth), " ")
+		row := glyphStyle.Render(glyphPart) + " " + currentStyles.InfoPanelDim.Render(namePart)
 		skillLines = append(skillLines, renderInfoPanelCollapsibleContentLine(lineW, row))
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))
 }
 
 func (m *Model) infoPanelSkills() []*skill.Meta {
@@ -701,7 +702,7 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionFiles)
 	filesLines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "CHANGED FILES", fmt.Sprintf("%d", len(editedFiles)))}
 	if !expanded {
-		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(filesLines))
+		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(filesLines))
 	}
 	// Newest first: the panel answers "what just changed", so the most recent
 	// edits belong at the eye's entry point rather than below the fold. Storage
@@ -720,13 +721,13 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 		var parts string
 		if !fe.Deleted {
 			if fe.Added > 0 {
-				parts += InfoPanelEditAddedStyle.Render(fmt.Sprintf("+%d", fe.Added))
+				parts += currentStyles.InfoPanelEditAddedStyle.Render(fmt.Sprintf("+%d", fe.Added))
 			}
 			if fe.Removed > 0 {
 				if parts != "" {
-					parts += InfoPanelDim.Render(" ")
+					parts += currentStyles.InfoPanelDim.Render(" ")
 				}
-				parts += InfoPanelEditRemovedStyle.Render(fmt.Sprintf("-%d", fe.Removed))
+				parts += currentStyles.InfoPanelEditRemovedStyle.Render(fmt.Sprintf("-%d", fe.Removed))
 			}
 		}
 		statStr := parts
@@ -743,20 +744,20 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 				availName--
 			}
 		}
-		nameStyle := InfoPanelDim
+		nameStyle := currentStyles.InfoPanelDim
 		if fe.Deleted {
 			nameStyle = nameStyle.Strikethrough(true)
 		}
 		namePart := ""
 		if availName > 0 {
-			namePart = nameStyle.Render(truncateOneLine(baseName, availName))
+			namePart = nameStyle.Render(terminaltext.TruncateOneLine(baseName, availName))
 		}
 		var fileLine string
 		if statStr != "" && namePart != "" {
 			fileLine = renderInfoPanelCollapsibleContentLine(lineW,
 				lipgloss.JoinHorizontal(lipgloss.Left,
 					namePart,
-					InfoPanelDim.Render(" "),
+					currentStyles.InfoPanelDim.Render(" "),
 					statStr,
 				),
 			)
@@ -769,10 +770,10 @@ func (m *Model) buildInfoPanelFilesBlock(lineW int) string {
 	}
 	if hidden := len(editedFiles) - len(visibleFiles); hidden > 0 {
 		filesLines = append(filesLines, renderInfoPanelCollapsibleContentLine(lineW,
-			InfoPanelDim.Render(fmt.Sprintf("… and %d more", hidden)),
+			currentStyles.InfoPanelDim.Render(fmt.Sprintf("… and %d more", hidden)),
 		))
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(filesLines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(filesLines))
 }
 
 // Fixed fallback lines for context usage display when the focused agent does
@@ -824,16 +825,16 @@ func contextUsageSeverityFor(percent, reminder, threshold float64) contextUsageS
 func contextValueStyle(percent, reminder, threshold float64) lipgloss.Style {
 	switch contextUsageSeverityFor(percent, reminder, threshold) {
 	case contextUsageCritical:
-		return InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg))
+		return currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg))
 	case contextUsageWarning:
-		return InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
+		return currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg))
 	default:
-		return InfoPanelValue
+		return currentStyles.InfoPanelValue
 	}
 }
 
 func renderInfoPanelIndentedKVLine(lineW, inset int, key, value string) string {
-	prefix := InfoPanelDim.Render(key + ": ")
+	prefix := currentStyles.InfoPanelDim.Render(key + ": ")
 	line := lipgloss.JoinHorizontal(lipgloss.Left, prefix, value)
 	return renderInfoPanelIndentedLine(lineW, inset, line)
 }
@@ -843,24 +844,24 @@ func formatReductionPercentValue(current, percent string) string {
 }
 
 func renderInfoPanelKVLine(lineW int, key, value string) string {
-	prefix := InfoPanelDim.Render(key + ": ")
+	prefix := currentStyles.InfoPanelDim.Render(key + ": ")
 	line := lipgloss.JoinHorizontal(lipgloss.Left, prefix, value)
-	return InfoPanelLineBg.Width(lineW).Render(line)
+	return currentStyles.InfoPanelLineBg.Width(lineW).Render(line)
 }
 
 func renderUsageSummaryLine(lineW int, stats analytics.SessionStats) string {
 	parts := make([]string, 0, 2)
 	fullInputTokens := analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)
 	if fullInputTokens > 0 {
-		parts = append(parts, InfoPanelDim.Render("↑ ")+InfoPanelValue.Render(formatUsageTokens(fullInputTokens)))
+		parts = append(parts, currentStyles.InfoPanelDim.Render("↑ ")+currentStyles.InfoPanelValue.Render(formatUsageTokens(fullInputTokens)))
 	}
 	if stats.OutputTokens > 0 {
-		parts = append(parts, InfoPanelDim.Render("↓ ")+InfoPanelValue.Render(formatUsageTokens(stats.OutputTokens)))
+		parts = append(parts, currentStyles.InfoPanelDim.Render("↓ ")+currentStyles.InfoPanelValue.Render(formatUsageTokens(stats.OutputTokens)))
 	}
 	if len(parts) == 0 {
 		return ""
 	}
-	return InfoPanelLineBg.Width(lineW).Render(strings.Join(parts, InfoPanelDim.Render("  ")))
+	return currentStyles.InfoPanelLineBg.Width(lineW).Render(strings.Join(parts, currentStyles.InfoPanelDim.Render("  ")))
 }
 
 // usageDetailLabelWidth aligns the label column of the usage detail lines:
@@ -871,22 +872,22 @@ func renderUsageCallsLine(lineW int, stats analytics.SessionStats) string {
 	if stats.LLMCalls <= 0 {
 		return ""
 	}
-	return renderUsageCacheDetailLine(lineW, "Calls", ansi.StringWidth(usageDetailLabelWidth), InfoPanelValue.Render(strconv.FormatInt(stats.LLMCalls, 10)))
+	return renderUsageCacheDetailLine(lineW, "Calls", ansi.StringWidth(usageDetailLabelWidth), currentStyles.InfoPanelValue.Render(strconv.FormatInt(stats.LLMCalls, 10)))
 }
 
 func renderUsageCostLine(lineW int, stats analytics.SessionStats) string {
 	if stats.EstimatedCost <= 0 {
 		return ""
 	}
-	line := InfoPanelDim.Render("$ ") + InfoPanelValue.Render(fmt.Sprintf("%.4f", stats.EstimatedCost))
-	return InfoPanelLineBg.Width(lineW).Render(line)
+	line := currentStyles.InfoPanelDim.Render("$ ") + currentStyles.InfoPanelValue.Render(fmt.Sprintf("%.4f", stats.EstimatedCost))
+	return currentStyles.InfoPanelLineBg.Width(lineW).Render(line)
 }
 
 func renderUsageReasoningLine(lineW int, stats analytics.SessionStats) string {
 	if stats.ReasoningTokens <= 0 {
 		return ""
 	}
-	return renderUsageCacheDetailLine(lineW, "Think", ansi.StringWidth(usageDetailLabelWidth), InfoPanelValue.Render(formatUsageTokens(stats.ReasoningTokens)))
+	return renderUsageCacheDetailLine(lineW, "Think", ansi.StringWidth(usageDetailLabelWidth), currentStyles.InfoPanelValue.Render(formatUsageTokens(stats.ReasoningTokens)))
 }
 
 func renderUsageCacheLine(lineW int, stats analytics.SessionStats) string {
@@ -898,7 +899,7 @@ func renderUsageCacheLine(lineW int, stats analytics.SessionStats) string {
 	}
 	if stats.CacheWriteTokens > 0 {
 		rows = append(rows, renderUsageCacheDetailLine(lineW, "Cache W", labelWidth,
-			InfoPanelValue.Render(formatUsageTokens(stats.CacheWriteTokens))))
+			currentStyles.InfoPanelValue.Render(formatUsageTokens(stats.CacheWriteTokens))))
 	}
 	if len(rows) == 0 {
 		return ""
@@ -909,20 +910,20 @@ func renderUsageCacheLine(lineW int, stats analytics.SessionStats) string {
 func renderUsageCacheDetailLine(lineW int, label string, labelWidth int, value string) string {
 	pad := max(labelWidth-ansi.StringWidth(label), 0)
 	line := lipgloss.JoinHorizontal(lipgloss.Left,
-		InfoPanelDim.Render(label),
-		InfoPanelDim.Render(strings.Repeat(" ", pad+2)),
+		currentStyles.InfoPanelDim.Render(label),
+		currentStyles.InfoPanelDim.Render(strings.Repeat(" ", pad+2)),
 		value,
 	)
-	return InfoPanelLineBg.Width(lineW).Render(line)
+	return currentStyles.InfoPanelLineBg.Width(lineW).Render(line)
 }
 
 func formatUsageCacheValue(cacheTokens, promptSideTokens int64) string {
-	text := InfoPanelValue.Render(formatUsageTokens(cacheTokens))
+	text := currentStyles.InfoPanelValue.Render(formatUsageTokens(cacheTokens))
 	if promptSideTokens > 0 {
 		// Hide negligible shares like "(0%)": the absolute token count stays,
 		// only the percent suffix is omitted until it reaches 1%.
 		if ratio := float64(cacheTokens) / float64(promptSideTokens); ratio >= 0.01 {
-			text += InfoPanelDim.Render(" (") + InfoPanelValue.Render(formatPercent(ratio)) + InfoPanelDim.Render(")")
+			text += currentStyles.InfoPanelDim.Render(" (") + currentStyles.InfoPanelValue.Render(formatPercent(ratio)) + currentStyles.InfoPanelDim.Render(")")
 		}
 	}
 	return text
@@ -932,7 +933,7 @@ func truncateInfoPanelLine(s string, width int) string {
 	if width <= 0 {
 		return ""
 	}
-	s = markdownutil.NormalizeNewlines(s)
+	s = textclean.NormalizeNewlines(s)
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\t", " ")
 	s = strings.TrimSpace(s)
@@ -950,14 +951,14 @@ func (m *Model) renderContextGauge(width int, percent, reminder, threshold float
 	fullSize := min(int(float64(innerWidth)*percent), innerWidth)
 	emptySize := innerWidth - fullSize
 
-	style := GaugeFull
+	style := currentStyles.GaugeFull
 	switch contextUsageSeverityFor(percent, reminder, threshold) {
 	case contextUsageCritical:
-		style = GaugeCritical
+		style = currentStyles.GaugeCritical
 	case contextUsageWarning:
-		style = GaugeWarning
+		style = currentStyles.GaugeWarning
 	}
 
-	bracketStyle := GaugeEmpty
-	return bracketStyle.Render("[") + style.Render(strings.Repeat("■", fullSize)) + GaugeEmpty.Render(strings.Repeat("□", emptySize)) + bracketStyle.Render("]")
+	bracketStyle := currentStyles.GaugeEmpty
+	return bracketStyle.Render("[") + style.Render(strings.Repeat("■", fullSize)) + currentStyles.GaugeEmpty.Render(strings.Repeat("□", emptySize)) + bracketStyle.Render("]")
 }

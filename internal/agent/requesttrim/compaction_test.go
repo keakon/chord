@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -40,7 +41,7 @@ func TestSummarizeHeadTailLinesPreservesArtifactReference(t *testing.T) {
 	// Artifact reference lines ("Full output saved to <path>") must reach the
 	// model verbatim: mid-line truncation would clip the artifact path and
 	// leave the model an unreadable path to read.
-	ref := tools.ArtifactReferencePrefix + "/session/tool-outputs/call_" + strings.Repeat("a", 80) + ".log. " + tools.ArtifactReadGuidance
+	ref := tooloutput.ArtifactReferencePrefix + "/session/tool-outputs/call_" + strings.Repeat("a", 80) + ".log. " + tooloutput.ArtifactReadGuidance
 	long := strings.Repeat("x", SummaryLineSnippetChars+100)
 
 	got := summarizeHeadTailLines(strings.Join([]string{

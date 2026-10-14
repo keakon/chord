@@ -7,10 +7,12 @@ import (
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestSidebarStatusCategories(t *testing.T) {
-	s := NewSidebar(DefaultTheme())
+	s := NewSidebar(uitheme.Default())
 	s.Update(nil, "main", "orchestrator")
 	if s.AgentsSummary() != "0 agents" || s.Visible() {
 		t.Fatal("empty child list")
@@ -37,7 +39,7 @@ func TestSidebarStatusCategories(t *testing.T) {
 }
 
 func TestSidebarSnapshotOverridesStatusCache(t *testing.T) {
-	s := NewSidebar(DefaultTheme())
+	s := NewSidebar(uitheme.Default())
 	for _, state := range []string{"running", "completed"} {
 		s.Update([]agent.SubAgentInfo{{InstanceID: "worker", State: state}}, "main", "orchestrator")
 		s.UpdateStatus("worker", subAgentStatusError)
@@ -82,16 +84,16 @@ func TestSidebarReasonLayout(t *testing.T) {
 }
 
 func TestSidebarReasonRowOwnershipAndFocusOrder(t *testing.T) {
-	s := NewSidebar(DefaultTheme())
+	s := NewSidebar(uitheme.Default())
 	s.Update([]agent.SubAgentInfo{{InstanceID: "worker", State: "waiting_main", TaskDesc: "Migration", AwaitingOwnerReason: "Choose null handling"}}, "worker", "orchestrator")
 	lines := s.buildInfoPanelRenderedLines(40)
-	if len(lines) != 3 || lines[1].AgentID != "worker" || lines[2].AgentID != "worker" || !strings.Contains(stripANSI(lines[2].Text), "Choose null handling") {
+	if len(lines) != 3 || lines[1].AgentID != "worker" || lines[2].AgentID != "worker" || !strings.Contains(terminaltext.StripANSI(lines[2].Text), "Choose null handling") {
 		t.Fatalf("rows=%+v", lines)
 	}
 	if strings.Join(s.AgentIDs(), ",") != "main,worker" {
 		t.Fatalf("focus order=%v", s.AgentIDs())
 	}
-	if !strings.Contains(stripANSI(s.ViewCompact(40)), "Choose null handling") {
+	if !strings.Contains(terminaltext.StripANSI(s.ViewCompact(40)), "Choose null handling") {
 		t.Fatal("compact omitted reason")
 	}
 }

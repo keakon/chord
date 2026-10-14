@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 func (m *Model) usageStatsLines(width int) []string {
@@ -45,17 +46,17 @@ func (m *Model) sessionUsageStatsLines(width int) []string {
 	titlePrefix := "Session "
 	if m.agent == nil {
 		return []string{
-			DialogTitleStyle.Render(titlePrefix + m.usageStats.view.label()),
-			DimStyle.Render("Usage statistics unavailable."),
+			currentStyles.DialogTitleStyle.Render(titlePrefix + m.usageStats.view.label()),
+			currentStyles.DimStyle.Render("Usage statistics unavailable."),
 		}
 	}
 
 	stats := m.agent.GetUsageStats()
 	switch m.usageStats.view {
 	case statsViewModels:
-		lines := []string{DialogTitleStyle.Render(titlePrefix + "Models")}
+		lines := []string{currentStyles.DialogTitleStyle.Render(titlePrefix + "Models")}
 		lines = append(lines, renderUsageTable(
-			[]TableColumn{
+			[]overlaylist.Column{
 				{Title: "Model", Width: 0, Align: 0},
 				{Title: "Calls", Width: 6, Align: 1},
 				{Title: "Input", Width: 8, Align: 1},
@@ -67,9 +68,9 @@ func (m *Model) sessionUsageStatsLines(width int) []string {
 		)...)
 		return lines
 	case statsViewAgents:
-		lines := []string{DialogTitleStyle.Render(titlePrefix + "Agents")}
+		lines := []string{currentStyles.DialogTitleStyle.Render(titlePrefix + "Agents")}
 		lines = append(lines, renderUsageTable(
-			[]TableColumn{
+			[]overlaylist.Column{
 				{Title: "Agent", Width: 0, Align: 0},
 				{Title: "Calls", Width: 6, Align: 1},
 				{Title: "Input", Width: 8, Align: 1},
@@ -82,7 +83,7 @@ func (m *Model) sessionUsageStatsLines(width int) []string {
 		return lines
 	default:
 		lines := []string{
-			DialogTitleStyle.Render(titlePrefix + "Overview"),
+			currentStyles.DialogTitleStyle.Render(titlePrefix + "Overview"),
 			fmt.Sprintf("Calls: %d", stats.LLMCalls),
 			fmt.Sprintf("Input: %s    Output: %s", formatUsageTokens(analytics.FullInputTokens(stats.InputTokens, stats.CacheReadTokens, stats.CacheWriteTokens)), formatUsageTokens(stats.OutputTokens)),
 			fmt.Sprintf("Cache R: %s    Cache W: %s", formatUsageTokens(stats.CacheReadTokens), formatUsageTokens(stats.CacheWriteTokens)),
@@ -119,28 +120,28 @@ func (m *Model) projectUsageStatsLines(width int) []string {
 	switch {
 	case m.usageStats.projectLoading:
 		return []string{
-			DialogTitleStyle.Render(titlePrefix + m.usageStats.view.label()),
-			DimStyle.Render("Loading project statistics..."),
+			currentStyles.DialogTitleStyle.Render(titlePrefix + m.usageStats.view.label()),
+			currentStyles.DimStyle.Render("Loading project statistics..."),
 		}
 	case m.usageStats.projectLoadErr != "":
 		return []string{
-			DialogTitleStyle.Render(titlePrefix + m.usageStats.view.label()),
-			ErrorStyle.Render(fmt.Sprintf("Failed to load project statistics: %s", m.usageStats.projectLoadErr)),
-			DimStyle.Render("Press r to retry."),
+			currentStyles.DialogTitleStyle.Render(titlePrefix + m.usageStats.view.label()),
+			currentStyles.ErrorStyle.Render(fmt.Sprintf("Failed to load project statistics: %s", m.usageStats.projectLoadErr)),
+			currentStyles.DimStyle.Render("Press r to retry."),
 		}
 	case m.usageStats.projectReport == nil:
 		return []string{
-			DialogTitleStyle.Render(titlePrefix + m.usageStats.view.label()),
-			DimStyle.Render("Project statistics unavailable."),
+			currentStyles.DialogTitleStyle.Render(titlePrefix + m.usageStats.view.label()),
+			currentStyles.DimStyle.Render("Project statistics unavailable."),
 		}
 	}
 
 	report := m.usageStats.projectReport
 	switch m.usageStats.view {
 	case statsViewModels:
-		lines := []string{DialogTitleStyle.Render(titlePrefix + "Models")}
+		lines := []string{currentStyles.DialogTitleStyle.Render(titlePrefix + "Models")}
 		lines = append(lines, renderUsageTable(
-			[]TableColumn{
+			[]overlaylist.Column{
 				{Title: "Model", Width: 0, Align: 0},
 				{Title: "Calls", Width: 6, Align: 1},
 				{Title: "Input", Width: 8, Align: 1},
@@ -152,9 +153,9 @@ func (m *Model) projectUsageStatsLines(width int) []string {
 		)...)
 		return lines
 	case statsViewAgents:
-		lines := []string{DialogTitleStyle.Render(titlePrefix + "Agents")}
+		lines := []string{currentStyles.DialogTitleStyle.Render(titlePrefix + "Agents")}
 		lines = append(lines, renderUsageTable(
-			[]TableColumn{
+			[]overlaylist.Column{
 				{Title: "Agent", Width: 0, Align: 0},
 				{Title: "Calls", Width: 6, Align: 1},
 				{Title: "Input", Width: 8, Align: 1},
@@ -171,9 +172,9 @@ func (m *Model) projectUsageStatsLines(width int) []string {
 		)...)
 		return lines
 	case statsViewDates:
-		lines := []string{DialogTitleStyle.Render(titlePrefix + "Dates")}
+		lines := []string{currentStyles.DialogTitleStyle.Render(titlePrefix + "Dates")}
 		lines = append(lines, renderUsageTable(
-			[]TableColumn{
+			[]overlaylist.Column{
 				{Title: "Date", Width: 10, Align: 0},
 				{Title: "Calls", Width: 6, Align: 1},
 				{Title: "Input", Width: 8, Align: 1},
@@ -187,12 +188,12 @@ func (m *Model) projectUsageStatsLines(width int) []string {
 	default:
 		if report.SessionCount == 0 {
 			return []string{
-				DialogTitleStyle.Render(titlePrefix + "Overview"),
-				DimStyle.Render(fmt.Sprintf("No project usage found for %s.", report.Range.Label())),
+				currentStyles.DialogTitleStyle.Render(titlePrefix + "Overview"),
+				currentStyles.DimStyle.Render(fmt.Sprintf("No project usage found for %s.", report.Range.Label())),
 			}
 		}
 		return []string{
-			DialogTitleStyle.Render(titlePrefix + "Overview"),
+			currentStyles.DialogTitleStyle.Render(titlePrefix + "Overview"),
 			fmt.Sprintf("Range: %s", report.Range.Label()),
 			fmt.Sprintf("Sessions: %d    Active days: %d", report.SessionCount, report.ActiveDays),
 			fmt.Sprintf("Calls: %d", report.UsageTotal.LLMCalls),
@@ -201,7 +202,7 @@ func (m *Model) projectUsageStatsLines(width int) []string {
 			fmt.Sprintf("Reasoning: %s    Cost: %s", formatUsageTokens(report.UsageTotal.ReasoningTokens), formatCost(report.UsageTotal.TotalCost)),
 			fmt.Sprintf("First active: %s", formatUsageTime(report.FirstEventAt)),
 			fmt.Sprintf("Last active: %s", formatUsageTime(report.LastEventAt)),
-			DimStyle.Render(fmt.Sprintf("Source: %s", usageStatsProjectSourceHint(m.usageStatsContentRoot()))),
+			currentStyles.DimStyle.Render(fmt.Sprintf("Source: %s", usageStatsProjectSourceHint(m.usageStatsContentRoot()))),
 		}
 	}
 }

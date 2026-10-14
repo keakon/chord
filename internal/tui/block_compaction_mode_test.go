@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // TestCompactionSummaryCardNamesTheMode pins that the card says how the
@@ -12,7 +14,7 @@ import (
 // "CONTEXT SUMMARY" card, so a truncate-only checkpoint - which carries no
 // summary at all - was indistinguishable from a model-driven one.
 func TestCompactionSummaryCardNamesTheMode(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	cases := []struct {
 		mode string
 		want string
@@ -31,7 +33,7 @@ func TestCompactionSummaryCardNamesTheMode(t *testing.T) {
 			CompactionSummaryMode: c.mode,
 			MsgIndex:              -1,
 		}
-		plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+		plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 		if !strings.Contains(plain, c.want) {
 			t.Errorf("mode %q: expected label %q, got:\n%s", c.mode, c.want, plain)
 		}
@@ -46,15 +48,15 @@ func TestCompactionSummaryCardNamesTheMode(t *testing.T) {
 // keeps the same inset as the plain modes, and degraded modes only swap the
 // badge surface for the warning colour.
 func TestCompactionSummaryDegradedModeKeepsOneBadge(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	cases := []struct {
 		mode     string
 		wantText string
 		wantBg   interface{ RGBA() (r, g, b, a uint32) }
 	}{
-		{message.CompactionSummaryModeModelSummary, "CONTEXT SUMMARY #2 · AUTO", colorOfTheme(currentTheme.ThinkingLabelBg)},
-		{message.CompactionSummaryModeStructuredFallback, "CONTEXT SUMMARY #2 · FALLBACK", colorOfTheme(currentTheme.InfoPanelDiagWarnFg)},
-		{message.CompactionSummaryModeTruncateOnly, "CONTEXT SUMMARY #2 · TRUNCATED", colorOfTheme(currentTheme.InfoPanelDiagWarnFg)},
+		{message.CompactionSummaryModeModelSummary, "CONTEXT SUMMARY #2 · AUTO", colorOfTheme(currentStyles.Palette.ThinkingLabelBg)},
+		{message.CompactionSummaryModeStructuredFallback, "CONTEXT SUMMARY #2 · FALLBACK", colorOfTheme(currentStyles.Palette.InfoPanelDiagWarnFg)},
+		{message.CompactionSummaryModeTruncateOnly, "CONTEXT SUMMARY #2 · TRUNCATED", colorOfTheme(currentStyles.Palette.InfoPanelDiagWarnFg)},
 	}
 	for _, c := range cases {
 		block := &Block{
@@ -67,7 +69,7 @@ func TestCompactionSummaryDegradedModeKeepsOneBadge(t *testing.T) {
 		}
 		header := ""
 		for _, line := range block.Render(100, "") {
-			if strings.Contains(stripANSI(line), "CONTEXT SUMMARY") {
+			if strings.Contains(terminaltext.StripANSI(line), "CONTEXT SUMMARY") {
 				header = line
 				break
 			}
@@ -84,7 +86,7 @@ func TestCompactionSummaryDegradedModeKeepsOneBadge(t *testing.T) {
 // checkpoint whose mode was never recorded and can no longer be recovered
 // claims nothing instead of guessing a mode.
 func TestCompactionSummaryCardOmitsUnknownMode(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                   1,
 		Type:                 BlockCompactionSummary,
@@ -92,7 +94,7 @@ func TestCompactionSummaryCardOmitsUnknownMode(t *testing.T) {
 		CompactionSummaryRaw: "[Context Summary]\nEarlier work was compacted.",
 		MsgIndex:             -1,
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "CONTEXT SUMMARY #2") {
 		t.Fatalf("expected the plain label, got:\n%s", plain)
 	}

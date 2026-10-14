@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -339,7 +340,7 @@ func buildReadValidityRecord(index int, meta *ToolCall, msg *message.Message) (r
 	start := max(request.Offset, 1)
 	limit := request.Limit
 	if limit <= 0 {
-		limit = tools.MaxOutputLines
+		limit = tooloutput.MaxOutputLines
 	}
 	record.start = start
 	record.end = start + limit - 1

@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/keakon/chord/internal/contextdiag"
+	"github.com/keakon/chord/internal/contextdiag/input"
 )
 
 type diagnosticsContextKey struct{}
@@ -19,7 +20,7 @@ type DiagnosticsCollector struct {
 	store    *contextdiag.Store
 	binding  contextdiag.Binding
 	secret   [32]byte
-	baseline *diagnosticBaseline
+	baseline *input.Baseline
 	version  uint64
 	invalid  bool
 	current  *RequestDiagnostics

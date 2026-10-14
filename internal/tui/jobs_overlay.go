@@ -213,7 +213,7 @@ func (m *Model) renderJobsOverlayDialog() string {
 	now := time.Now()
 	contentLines := make([]string, 0, max(visible, 1))
 	if visible == 0 {
-		contentLines = append(contentLines, DimStyle.Render("(no background jobs)"))
+		contentLines = append(contentLines, currentStyles.DimStyle.Render("(no background jobs)"))
 	}
 	for i, job := range jobs[start : start+visible] {
 		rowStyles := styles
@@ -278,7 +278,7 @@ func (m *Model) jobsOverlayRowAt(x, y int) (jobID string, inStopZone bool, ok bo
 		return job.ID, false, true
 	}
 	innerWidth := m.jobsOverlayInnerWidth()
-	contentLeft := rect.Min.X + DirectoryBorderStyle.GetBorderLeftSize() + DirectoryBorderStyle.GetPaddingLeft()
+	contentLeft := rect.Min.X + currentStyles.DirectoryBorderStyle.GetBorderLeftSize() + currentStyles.DirectoryBorderStyle.GetPaddingLeft()
 	stopStart := contentLeft + max(innerWidth-jobStopZoneCells, 0)
 	stopEnd := contentLeft + innerWidth
 	return job.ID, x >= stopStart && x < stopEnd, true

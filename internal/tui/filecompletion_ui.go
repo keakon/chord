@@ -7,6 +7,8 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/filecompletion"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 // openAtMentionAtCursor uses the position after insertion, including selection
@@ -53,22 +55,22 @@ func (m *Model) syncAtMentionQuery() tea.Cmd {
 }
 
 func (m *Model) refreshAtMentionList() {
-	var matches []atMentionOption
-	if exact, ok := atMentionExactPathMatch(m.atMentionQuery, m.workingDir); ok {
-		matches = []atMentionOption{exact}
-	} else if atMentionShouldUsePathMatches(m.atMentionFiles, m.atMentionQuery) {
-		matches = atMentionPathMatches(m.atMentionQuery, m.workingDir)
+	var matches []filecompletion.Option
+	if exact, ok := filecompletion.ExactPathMatch(m.atMentionQuery, m.workingDir); ok {
+		matches = []filecompletion.Option{exact}
+	} else if filecompletion.ShouldUsePathMatches(m.atMentionFiles, m.atMentionQuery) {
+		matches = filecompletion.PathMatches(m.atMentionQuery, m.workingDir)
 	} else {
-		rootMatches := atMentionRootPrefixMatches(m.atMentionQuery, m.workingDir)
+		rootMatches := filecompletion.RootPrefixMatches(m.atMentionQuery, m.workingDir)
 		if !m.atMentionLoaded || len(m.atMentionFiles) == 0 {
 			matches = rootMatches
 		} else {
-			if exact, ok := atMentionExactIndexedMatch(m.atMentionFiles, m.atMentionQuery); ok {
-				matches = []atMentionOption{exact}
+			if exact, ok := filecompletion.ExactIndexedMatch(m.atMentionFiles, m.atMentionQuery); ok {
+				matches = []filecompletion.Option{exact}
 			} else {
-				matches = atMentionFuzzyMatchesNarrowable(m.atMentionFiles, m.atMentionFilesLower, m.atMentionQuery, &m.atMentionNarrow)
+				matches = filecompletion.FuzzyMatches(m.atMentionFiles, m.atMentionFilesLower, m.atMentionQuery, &m.atMentionNarrow)
 			}
-			matches = mergeAtMentionOptions(matches, atMentionOptionsMissingFromIndex(rootMatches, m.atMentionFiles), m.atMentionQuery)
+			matches = filecompletion.MergeOptions(matches, filecompletion.OptionsMissingFromIndex(rootMatches, m.atMentionFiles), m.atMentionQuery)
 		}
 	}
 
@@ -81,12 +83,12 @@ func (m *Model) refreshAtMentionList() {
 		m.atMentionList = nil
 		return
 	}
-	items := make([]OverlayListItem, len(matches))
+	items := make([]overlaylist.Item, len(matches))
 	for i, match := range matches {
-		items[i] = OverlayListItem{Label: match.Path, Value: match}
+		items[i] = overlaylist.Item{Label: match.Path, Value: match}
 	}
 	if m.atMentionList == nil {
-		m.atMentionList = NewOverlayList(items, 10)
+		m.atMentionList = overlaylist.New(items, 10)
 	} else {
 		m.atMentionList.SetItems(items)
 	}
@@ -107,7 +109,7 @@ func (m *Model) insertAtMentionSelection() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	selection, _ := item.Value.(atMentionOption)
+	selection, _ := item.Value.(filecompletion.Option)
 	if selection.Path == "" {
 		return nil
 	}
@@ -126,9 +128,9 @@ func (m *Model) insertAtMentionSelection() tea.Cmd {
 	lineSuffixRuneLen := 0
 	if !selection.IsDir {
 		query := string(rowRunes[m.atMentionTriggerCol:cursorCol])
-		if _, lineSuffix, ok := splitRawAtMentionLineRangeSuffix(query); ok {
-			normalized := normalizeAtMentionQuery(query)
-			if !atMentionFSPathExists(normalized, m.workingDir) {
+		if _, lineSuffix, ok := filecompletion.SplitLineRangeSuffix(query); ok {
+			normalized := filecompletion.NormalizeQuery(query)
+			if !filecompletion.PathExists(normalized, m.workingDir) {
 				lineSuffixRuneLen = len([]rune(lineSuffix))
 				replaceEndCol -= lineSuffixRuneLen
 			}

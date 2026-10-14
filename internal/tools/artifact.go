@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/privatefs"
+	"github.com/keakon/chord/internal/texttruncate"
+	"github.com/keakon/chord/internal/tooloutput"
 )
 
 // ArtifactRef is a typed reference to a runtime-managed artifact.
@@ -531,7 +533,7 @@ func (ReadArtifactTool) Parameters() map[string]any {
 				"description": "Alias for path.",
 			},
 			"offset":          map[string]any{"type": "integer", "minimum": 0, "description": "1-based line number to start reading from (1 = the first line); 0 or omitted means the first line. Defaults to 1."},
-			"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": MaxOutputLines, "description": "Maximum lines to return. Defaults to 2000."},
+			"limit":           map[string]any{"type": "integer", "minimum": 1, "maximum": tooloutput.MaxOutputLines, "description": "Maximum lines to return. Defaults to 2000."},
 			"expected_sha256": map[string]any{"type": "string", "description": "Optional lowercase SHA-256 digest expected for the complete artifact."},
 		},
 		"additionalProperties": false,
@@ -637,10 +639,10 @@ func readArtifactPage(path string, offsetArg, limitArg *int) (artifactReadResult
 		}
 	}
 	offset := startLine - 1
-	limit := MaxOutputLines
+	limit := tooloutput.MaxOutputLines
 	if limitArg != nil {
-		if *limitArg <= 0 || *limitArg > MaxOutputLines {
-			return artifactReadResult{}, fmt.Errorf("limit must be between 1 and %d", MaxOutputLines)
+		if *limitArg <= 0 || *limitArg > tooloutput.MaxOutputLines {
+			return artifactReadResult{}, fmt.Errorf("limit must be between 1 and %d", tooloutput.MaxOutputLines)
 		}
 		limit = *limitArg
 	}
@@ -668,7 +670,7 @@ func readArtifactPage(path string, offsetArg, limitArg *int) (artifactReadResult
 				// Reserve one byte for buildReadContent's trailing newline so an
 				// oversized requested line still returns a bounded prefix instead
 				// of being dropped in favor of a later line.
-				remaining := MaxOutputBytes - outputBytes - len(line) - 1
+				remaining := tooloutput.MaxOutputBytes - outputBytes - len(line) - 1
 				if remaining > 0 {
 					line = append(line, contentFragment[:min(len(contentFragment), remaining)]...)
 				}
@@ -681,9 +683,9 @@ func readArtifactPage(path string, offsetArg, limitArg *int) (artifactReadResult
 		if lineDone && (len(fragment) > 0 || len(line) > 0) {
 			result.TotalLines++
 			if lineIndex >= offset && lineIndex < offset+limit {
-				candidate := truncateStringToValidUTF8Prefix(string(line), len(line))
+				candidate := texttruncate.PrefixBytes(string(line), len(line))
 				candidateBytes := len(candidate) + 1
-				if outputBytes+candidateBytes <= MaxOutputBytes {
+				if outputBytes+candidateBytes <= tooloutput.MaxOutputBytes {
 					if len(result.Lines) == 0 {
 						result.StartLine = lineIndex + 1
 					}

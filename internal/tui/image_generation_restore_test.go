@@ -12,6 +12,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestSessionRestoredToolImagesRenderAndTransmit(t *testing.T) {
@@ -32,7 +33,7 @@ func TestSessionRestoredToolImagesRenderAndTransmit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stubTUITicks(t)
-			ApplyTheme(DefaultTheme())
+			ApplyTheme(uitheme.Default())
 			caps := TerminalImageCapabilities{Backend: tc.backend, SupportsInline: true, SupportsFullscreen: true}
 			previous := currentImageCapabilities()
 			setCurrentTerminalImageCapabilities(caps)

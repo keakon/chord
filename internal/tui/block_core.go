@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func cloneBlockForDeferredSource(src *Block) *Block {
@@ -177,7 +178,7 @@ func (b *Block) displayLabelID() int {
 // Render produces the styled lines for this block, word-wrapped to width.
 func (b *Block) Render(width int, spinnerFrame string) (lines []string) {
 	if b == nil {
-		return wrapText("[render error: nil block]", width)
+		return terminaltext.Wrap("[render error: nil block]", width)
 	}
 	_ = b.ensureMaterialized()
 	if width <= 0 {
@@ -208,7 +209,7 @@ func (b *Block) Render(width int, spinnerFrame string) (lines []string) {
 	case BlockCompactionSummary:
 		return b.renderCompactionSummary(width)
 	default:
-		return wrapText(b.Content, width)
+		return terminaltext.Wrap(b.Content, width)
 	}
 }
 
@@ -218,18 +219,18 @@ func blockRenderPanicFallback(b *Block, width int, recovered any) []string {
 	}
 	label := fmt.Sprintf("[render error: %v]", recovered)
 	if b == nil {
-		return wrapText(label, width)
+		return terminaltext.Wrap(label, width)
 	}
 	content := b.Content
 	if strings.TrimSpace(content) == "" && b.ResultContent != "" {
 		content = b.ResultContent
 	}
-	content = sanitizeDisplayText(content)
+	content = terminaltext.Sanitize(content)
 	if strings.TrimSpace(content) == "" {
-		return wrapText(label, width)
+		return terminaltext.Wrap(label, width)
 	}
-	lines := wrapText(label, width)
-	lines = append(lines, wrapText(content, width)...)
+	lines := terminaltext.Wrap(label, width)
+	lines = append(lines, terminaltext.Wrap(content, width)...)
 	return lines
 }
 
@@ -501,18 +502,18 @@ func (b *Block) Summary() string {
 	switch b.Type {
 	case BlockUser:
 		if b.UserLocalShellCmd != "" {
-			return "[user] " + truncateOneLine(b.Content, 36) + " (!shell)"
+			return "[user] " + terminaltext.TruncateOneLine(b.Content, 36) + " (!shell)"
 		}
 		summary := strings.TrimSpace(b.Content)
-		return "[user] " + truncateOneLine(summary, 60)
+		return "[user] " + terminaltext.TruncateOneLine(summary, 60)
 	case BlockAssistant:
-		return "[assistant] " + truncateOneLine(b.Content, 55)
+		return "[assistant] " + terminaltext.TruncateOneLine(b.Content, 55)
 	case BlockThinking:
-		return "▸ thinking " + truncateOneLine(b.Content, 55)
+		return "▸ thinking " + terminaltext.TruncateOneLine(b.Content, 55)
 	case BlockToolCall:
 		name := sanitizeToolDisplayText(b.ToolName)
 		if primary := b.toolCallSummaryMainPart(); primary != "" {
-			return "Tool: " + name + " " + truncateOneLine(primary, 46)
+			return "Tool: " + name + " " + terminaltext.TruncateOneLine(primary, 46)
 		}
 		return "Tool: " + name
 	case BlockToolResult:
@@ -520,15 +521,15 @@ func (b *Block) Summary() string {
 		if b.IsError {
 			prefix = "Error: "
 		}
-		return prefix + truncateOneLine(b.Content, 60)
+		return prefix + terminaltext.TruncateOneLine(b.Content, 60)
 	case BlockError:
-		return "✗ " + truncateOneLine(b.Content, 65)
+		return "✗ " + terminaltext.TruncateOneLine(b.Content, 65)
 	case BlockBoundaryMarker:
-		return "··· " + truncateOneLine(strings.TrimSpace(b.Content), 58)
+		return "··· " + terminaltext.TruncateOneLine(strings.TrimSpace(b.Content), 58)
 	case BlockCompactionSummary:
-		return "[context summary] " + truncateOneLine(b.Content, 50)
+		return "[context summary] " + terminaltext.TruncateOneLine(b.Content, 50)
 	default:
-		return truncateOneLine(b.Content, 70)
+		return terminaltext.TruncateOneLine(b.Content, 70)
 	}
 }
 

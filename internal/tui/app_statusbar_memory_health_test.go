@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestMemoryPillSurfacesDegradedHealth(t *testing.T) {
@@ -50,7 +51,7 @@ func TestMemoryHealthEventRepaintsDegradedPill(t *testing.T) {
 	m.mode = ModeNormal
 	m.rightPanelVisible = false
 
-	if plain := stripANSI(m.renderStatusBar()); strings.Contains(plain, "MEMORY-FAIL") {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); strings.Contains(plain, "MEMORY-FAIL") {
 		t.Fatalf("healthy status bar = %q, should not show MEMORY-FAIL", plain)
 	}
 
@@ -60,7 +61,7 @@ func TestMemoryHealthEventRepaintsDegradedPill(t *testing.T) {
 	if !m.renderCacheState.statusBarAgentSnapshotDirty {
 		t.Fatal("memory health event did not invalidate the draw caches")
 	}
-	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "MEMORY-FAIL") {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(plain, "MEMORY-FAIL") {
 		t.Fatalf("degraded status bar = %q, want MEMORY-FAIL", plain)
 	}
 }

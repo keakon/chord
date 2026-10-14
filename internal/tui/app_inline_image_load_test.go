@@ -34,19 +34,18 @@ func inlineImageTestModel(t *testing.T, backend ImageBackend) Model {
 func TestInlineTransportIsAsyncAndRejectsStaleSession(t *testing.T) {
 	m := inlineImageTestModel(t, ImageBackendKitty)
 	defer m.Close()
-	decode := imageCacheDecode
-	defer func() { imageCacheDecode = decode }()
-	called := false
-	imageCacheDecode = func(data []byte) (image.Image, string, error) {
-		called = true
-		return decode(data)
+	part := &m.viewport.blocks[0].ImageParts[0]
+	// Give this source unique bytes even when the suite repeats in one process.
+	part.Data = append(part.Data, []byte(t.TempDir())...)
+	if imageutil.HasVerifiedImage(part.Data) {
+		t.Fatal("fixture already decoded")
 	}
 	cmd := m.imageProtocolCmd()
-	if cmd == nil || called {
+	if cmd == nil || imageutil.HasVerifiedImage(part.Data) {
 		t.Fatal("inline transport was constructed on the main loop")
 	}
 	msg := cmd().(inlineImagesLoadedMsg)
-	if !called || msg.sequence == "" {
+	if !imageutil.HasVerifiedImage(part.Data) || msg.sequence == "" {
 		t.Fatal("background command did not prepare the image")
 	}
 	m.sessionTranscriptEpoch++

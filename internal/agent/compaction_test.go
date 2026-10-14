@@ -3,8 +3,6 @@ package agent
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +19,8 @@ import (
 	"github.com/keakon/golog/log"
 	"gopkg.in/yaml.v3"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
+	"github.com/keakon/chord/internal/agent/requestshape"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
@@ -30,6 +30,7 @@ import (
 	"github.com/keakon/chord/internal/modelcompat"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -1378,7 +1379,7 @@ func TestPrepareMessagesForLLM_ShellSuccessSummaryPrefersSalientLines(t *testing
 func TestPrepareMessagesForLLM_ShellSuccessPreservesArtifactReference(t *testing.T) {
 	a := &MainAgent{}
 	path := "/session/tool-outputs/call_" + strings.Repeat("a", requesttrim.SummaryLineSnippetChars) + ".log"
-	ref := tools.ArtifactReferencePrefix + path + ". " + tools.ArtifactReadGuidance
+	ref := tooloutput.ArtifactReferencePrefix + path + ". " + tooloutput.ArtifactReadGuidance
 	largeOutput := strings.Repeat("completed work item\n", requesttrim.DefaultPolicy().ShellSuccessBytes) + ref
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "request"},
@@ -2204,7 +2205,7 @@ func TestPrepareMessagesForLLM_SearchSummaryPreservesArtifactReference(t *testin
 		}},
 	}
 	path := "/session/tool-outputs/call_" + strings.Repeat("b", requesttrim.SummaryLineSnippetChars) + ".log"
-	ref := tools.ArtifactReferencePrefix + path + ". " + tools.ArtifactReadGuidance
+	ref := tooloutput.ArtifactReferencePrefix + path + ". " + tooloutput.ArtifactReadGuidance
 	content := strings.Repeat("internal/agent/context_reduction.go:700:func reduceRequestToolOutput(...)\n", 40) + ref
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "request"},
@@ -2818,7 +2819,7 @@ func TestContextReductionStatsSnapshotsCloneMaps(t *testing.T) {
 	}
 	a.loopReductionMu.Lock()
 	a.lastPreparedLLMTurnID = turnID
-	a.lastPreparedLLMRequestShape = stableReductionMessageShapes(preparedMessages)
+	a.lastPreparedLLMRequestShape = requestshape.Shapes(preparedMessages)
 	a.lastPreparedLLMRequestPrefix = cloneMessageSliceForRequestShape(preparedMessages)
 	a.lastPreparedReductionStats = cloneContextReductionStats(surfaceStats)
 	a.loopReductionMu.Unlock()
@@ -2921,38 +2922,6 @@ func TestSplitMessagesForCompaction_PreservesRecentRawTailOutsideArchive(t *test
 	}
 }
 
-func TestValidateCompactionSummaryRejectsWeakOneLiner(t *testing.T) {
-	if err := validateCompactionSummary("Keep improving extraction quality."); err == nil {
-		t.Fatal("expected weak one-line summary to be rejected")
-	}
-}
-
-func TestValidateCompactionSummaryRejectsThinkingTags(t *testing.T) {
-	summary := "<think>provider failed to split reasoning</think>\n\n" + validCompactionSummaryForTest("history-1.md")
-	if err := validateCompactionSummary(summary); err == nil {
-		t.Fatal("expected summary with thinking tags to be rejected")
-	}
-}
-
-func TestValidateCompactionSummaryRequiresHeadingLinesInOrder(t *testing.T) {
-	if err := validateCompactionSummary(validCompactionSummaryForTest("history-1.md")); err != nil {
-		t.Fatalf("validCompactionSummaryForTest rejected: %v", err)
-	}
-	outOfOrder := strings.Replace(
-		validCompactionSummaryForTest("history-1.md"),
-		"## Active Objective\n- continue current task\n\n## Background Goals",
-		"## Background Goals\n- none\n\n## Active Objective\n- continue current task",
-		1,
-	)
-	if err := validateCompactionSummary(outOfOrder); err == nil {
-		t.Fatal("expected out-of-order headings to be rejected")
-	}
-	quotedOnly := strings.Replace(validCompactionSummaryForTest("history-1.md"), "## Active Objective", "> ## Active Objective", 1)
-	if err := validateCompactionSummary(quotedOnly); err == nil {
-		t.Fatal("expected non-heading section marker to be rejected")
-	}
-}
-
 // TestModelDrivenSummaryOrderIsDeliberate pins the segment-order contract the
 // model-driven builder intentionally breaks away from: its continuation-first
 // layout (Next Step ahead of Progress, Constraints ahead of Active Objective)
@@ -2967,7 +2936,7 @@ func TestModelDrivenSummaryOrderIsDeliberate(t *testing.T) {
 	}}
 	bundle := modelDrivenBarrierSnapshot{snapshot: []message.Message{{Role: message.RoleUser, Content: "verify parser"}}}
 	summary := agent.buildModelDrivenCheckpointSummary(bundle, bundle.snapshot, len(bundle.snapshot), request)
-	if err := validateCompactionSummary(summary); err == nil {
+	if err := checkpointfmt.ValidateSummary(summary); err == nil {
 		t.Fatal("model-driven summaries use continuation-first order and must stay outside the canonical-order validator")
 	}
 	nextStep := strings.Index(summary, "## Next Step")
@@ -2979,42 +2948,6 @@ func TestModelDrivenSummaryOrderIsDeliberate(t *testing.T) {
 	}
 	if !(constraints < objective && nextStep < progress) {
 		t.Fatal("model-driven summary must keep Constraints before Active Objective and Next Step before Progress")
-	}
-}
-
-func TestValidateCompactionSummaryRejectsVagueNextStep(t *testing.T) {
-	summary := strings.Replace(
-		validCompactionSummaryForTest("history-1.md"),
-		"- Inspect src/current_task.go and continue the current task.",
-		"- continue",
-		1,
-	)
-	if err := validateCompactionSummary(summary); err == nil {
-		t.Fatal("expected vague next step to be rejected")
-	}
-}
-
-func TestValidateCompactionSummaryRejectsCompletedTodoAsActive(t *testing.T) {
-	summary := strings.Replace(
-		validCompactionSummaryForTest("history-1.md"),
-		"- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)",
-		"- Active/relevant to latest request: finish export docs\n- Completed/background: finish export docs\n- Stale/superseded: (none)",
-		1,
-	)
-	if err := validateCompactionSummary(summary); err == nil {
-		t.Fatal("expected completed todo duplicated as active to be rejected")
-	}
-}
-
-func TestValidateCompactionSummaryRejectsStaleTodoAsActive(t *testing.T) {
-	summary := strings.Replace(
-		validCompactionSummaryForTest("history-1.md"),
-		"- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)",
-		"- Active/relevant to latest request: debug old search path\n- Completed/background: (none)\n- Stale/superseded: debug old search path",
-		1,
-	)
-	if err := validateCompactionSummary(summary); err == nil {
-		t.Fatal("expected stale todo duplicated as active to be rejected")
 	}
 }
 
@@ -3032,7 +2965,7 @@ func TestCompactionSummaryFromResponseContentStripsLeadingOrphanThinkClose(t *te
 	if got != summary {
 		t.Fatalf("compactionSummaryFromResponseContent() = %q, want %q", got, summary)
 	}
-	if err := validateCompactionSummary(got); err != nil {
+	if err := checkpointfmt.ValidateSummary(got); err != nil {
 		t.Fatalf("stripped summary should validate, got error: %v", err)
 	}
 }
@@ -3042,10 +2975,10 @@ func TestCompactionSummaryFromResponseContentKeepsLeadingUnclosedThink(t *testin
 	// A leading <think> without a close is ambiguous: everything after it could
 	// be reasoning, so it is left intact for validation to reject and repair.
 	got := compactionSummaryFromResponseContent("<think>reasoning\n\n" + summary)
-	if !containsThinkingTag(got) {
+	if !strings.Contains(got, "<think>") {
 		t.Fatalf("leading unclosed think tag should be preserved for validation, got %q", got)
 	}
-	if err := validateCompactionSummary(got); err == nil {
+	if err := checkpointfmt.ValidateSummary(got); err == nil {
 		t.Fatal("expected leading unclosed think tag to be rejected by validation")
 	}
 }
@@ -3056,7 +2989,7 @@ func TestCompactionSummaryFromResponseContentLeavesInlineThinkForValidation(t *t
 	if got != summary {
 		t.Fatalf("inline thinking tag should remain for validation, got %q", got)
 	}
-	if err := validateCompactionSummary(got); err == nil {
+	if err := checkpointfmt.ValidateSummary(got); err == nil {
 		t.Fatal("expected inline thinking tag to be rejected by validation")
 	}
 }
@@ -3084,7 +3017,7 @@ func TestBuildCompactionRepairPrompt(t *testing.T) {
 func TestBuildCompactionRepairPromptListsRequiredHeadings(t *testing.T) {
 	original := "Archived history file: history-1.md\n\nTranscript:\n- user: fix compaction"
 	prompt := buildCompactionRepairPrompt(original, fmt.Errorf("compaction summary next step is too vague"))
-	for _, heading := range compactionRequiredHeadings {
+	for _, heading := range checkpointfmt.RequiredHeadings() {
 		if !strings.Contains(prompt, "- "+heading) {
 			t.Fatalf("repair prompt missing required heading %q:\n%s", heading, prompt)
 		}
@@ -3100,7 +3033,7 @@ func TestBuildCompactionRepairPromptNamesMissingSections(t *testing.T) {
 	if strings.Contains(broken, "## Progress") {
 		t.Fatalf("test fixture still contains the removed section:\n%s", broken)
 	}
-	validationErr := validateCompactionSummary(broken)
+	validationErr := checkpointfmt.ValidateSummary(broken)
 	if validationErr == nil {
 		t.Fatal("expected a summary without the Progress section to be rejected")
 	}
@@ -3118,55 +3051,6 @@ func TestBuildCompactionRepairPromptNamesMissingSections(t *testing.T) {
 	}
 }
 
-func TestValidateCompactionSummaryRejectsOutOfOrderSections(t *testing.T) {
-	summary := strings.Replace(validCompactionSummaryForTest("history-1.md"),
-		"## Open Problems\n- none\n\n## Next Step\n- Inspect src/current_task.go and continue the current task.",
-		"## Next Step\n- Inspect src/current_task.go and continue the current task.\n\n## Open Problems\n- none", 1)
-	err := validateCompactionSummary(summary)
-	if err == nil {
-		t.Fatal("expected a summary with swapped sections to be rejected")
-	}
-	if err.Error() != "compaction summary sections out of order" {
-		t.Fatalf("validateCompactionSummary() = %v, want out-of-order rejection", err)
-	}
-	if missing := compactionMissingHeadings(err); len(missing) != 0 {
-		t.Fatalf("out-of-order rejection reported missing headings: %v", missing)
-	}
-}
-
-func TestValidateCompactionSummaryRejectsLegacySections(t *testing.T) {
-	summary := `## Goal
-- Continue work with enough detail to pass the minimum summary length requirement for validation.
-
-## User Constraints
-- Keep changes focused and do not accept older compaction section names.
-
-## Progress
-- Legacy summaries are intentionally rejected after upgrading section names.
-
-## Key Decisions
-- Require the active-objective heading set instead of the previous goal heading set.
-
-## Files and Evidence
-- history-1.md
-- internal/agent/compaction.go
-
-## Todo State
-- Existing todo state is preserved from the legacy summary.
-
-## SubAgent State
-- none
-
-## Open Problems
-- none
-
-## Next Step
-- Continue from the legacy checkpoint safely.`
-	if err := validateCompactionSummary(summary); err == nil {
-		t.Fatal("expected legacy summary to be rejected")
-	}
-}
-
 func TestBuildStructuredFallbackSummaryIncludesSections(t *testing.T) {
 	summary := buildStructuredFallbackSummary(
 		"history-1.md",
@@ -3176,7 +3060,7 @@ func TestBuildStructuredFallbackSummaryIncludesSections(t *testing.T) {
 		nil,
 		nil,
 	)
-	for _, heading := range compactionRequiredHeadings {
+	for _, heading := range checkpointfmt.RequiredHeadings() {
 		if !strings.Contains(summary, heading) {
 			t.Fatalf("fallback summary missing heading %q:\n%s", heading, summary)
 		}
@@ -4329,7 +4213,7 @@ func TestEnsureCompactionSubAgentSnapshotRestoresRuntimeWorkers(t *testing.T) {
 	if idx := strings.Index(got, "## SubAgent State"); idx < 0 || idx > strings.Index(got, "## Open Problems") {
 		t.Fatalf("SubAgent State section displaced out of required order:\n%s", got)
 	}
-	if err := validateCompactionSummary(got); err != nil {
+	if err := checkpointfmt.ValidateSummary(got); err != nil {
 		t.Fatalf("ensured summary no longer validates: %v\n%s", err, got)
 	}
 	// An already-authoritative section must pass through unchanged (fallback
@@ -4348,7 +4232,7 @@ func TestEnsureCompactionSubAgentSnapshotNormalizesPhantomRestatements(t *testin
 	if strings.Contains(got, "agent-2") {
 		t.Fatalf("settled worker still described as running in the checkpoint:\n%s", got)
 	}
-	if err := validateCompactionSummary(got); err != nil {
+	if err := checkpointfmt.ValidateSummary(got); err != nil {
 		t.Fatalf("ensured summary no longer validates: %v\n%s", err, got)
 	}
 }
@@ -4459,7 +4343,7 @@ func TestBuildTruncateOnlySummaryIncludesFilesAndEvidenceSection(t *testing.T) {
 		nil,
 		nil,
 	)
-	for _, heading := range compactionRequiredHeadings {
+	for _, heading := range checkpointfmt.RequiredHeadings() {
 		if !strings.Contains(summary, heading) {
 			t.Fatalf("truncate-only summary missing heading %q:\n%s", heading, summary)
 		}
@@ -5469,7 +5353,7 @@ func TestEnsureCompactionTodoSnapshotPreservesEveryRuntimeTodo(t *testing.T) {
 			t.Fatalf("snapshot missing %q:\n%s", want, summary)
 		}
 	}
-	if err := validateCompactionSummary(summary); err != nil {
+	if err := checkpointfmt.ValidateSummary(summary); err != nil {
 		t.Fatalf("summary with runtime todo snapshot rejected: %v", err)
 	}
 }
@@ -6345,83 +6229,6 @@ func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing
 	}
 }
 
-func TestStableReductionEmptySequenceHashMatchesHasher(t *testing.T) {
-	var length [8]byte
-	binary.BigEndian.PutUint64(length[:], 0)
-	inner := sha256.Sum256(length[:])
-	want := sha256.Sum256(inner[:])
-
-	if got := stableReductionContentPartsHash(nil); got != want {
-		t.Fatalf("empty content parts hash = %x, want %x", got, want)
-	}
-	if got := stableReductionThinkingBlocksHash(nil); got != want {
-		t.Fatalf("empty thinking blocks hash = %x, want %x", got, want)
-	}
-	if got := stableReductionToolCallsHash(nil); got != want {
-		t.Fatalf("empty tool calls hash = %x, want %x", got, want)
-	}
-}
-
-func TestStableReductionSequenceHashesMatchStreamingEncoding(t *testing.T) {
-	parts := []message.ContentPart{{
-		Type: message.ContentPartText, Text: "text", DisplayText: "display", InlineToken: "token",
-		MimeType: "text/plain", Data: []byte("data"), ImagePath: "/tmp/image", FileName: "file.txt",
-	}}
-	blocks := []message.ThinkingBlock{{Thinking: "reasoning", Signature: "signature"}}
-	calls := []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"x.go"}`)}}
-
-	assertHash := func(name string, got [sha256.Size]byte, write func(interface{ Write([]byte) (int, error) })) {
-		t.Helper()
-		h := sha256.New()
-		write(h)
-		want := sha256.Sum256(h.Sum(nil))
-		if got != want {
-			t.Fatalf("%s hash = %x, want %x", name, got, want)
-		}
-	}
-	assertHash("content parts", stableReductionContentPartsHash(parts), func(h interface{ Write([]byte) (int, error) }) {
-		stableReductionWriteInt(h, len(parts))
-		for _, part := range parts {
-			stableReductionWriteString(h, string(part.Type))
-			stableReductionWriteString(h, part.Text)
-			stableReductionWriteString(h, part.DisplayText)
-			stableReductionWriteString(h, part.InlineToken)
-			stableReductionWriteString(h, part.MimeType)
-			stableReductionWriteBytes(h, part.Data)
-			stableReductionWriteString(h, part.ImagePath)
-			stableReductionWriteString(h, part.FileName)
-		}
-	})
-	assertHash("thinking blocks", stableReductionThinkingBlocksHash(blocks), func(h interface{ Write([]byte) (int, error) }) {
-		stableReductionWriteInt(h, len(blocks))
-		for _, block := range blocks {
-			stableReductionWriteString(h, block.Thinking)
-			stableReductionWriteString(h, block.Signature)
-			stableReductionWriteString(h, block.Data)
-		}
-	})
-	assertHash("tool calls", stableReductionToolCallsHash(calls), func(h interface{ Write([]byte) (int, error) }) {
-		stableReductionWriteInt(h, len(calls))
-		for _, call := range calls {
-			stableReductionWriteString(h, call.ID)
-			stableReductionWriteString(h, call.Name)
-			stableReductionWriteBytes(h, call.Args)
-			stableReductionWriteString(h, call.ThoughtSignature)
-		}
-	})
-}
-
-func TestStableReductionLargeBinaryPartAllocsGuard(t *testing.T) {
-	parts := []message.ContentPart{{Type: message.ContentPartImage, Data: make([]byte, 4<<20)}}
-	allocs := testing.AllocsPerRun(10, func() {
-		_ = stableReductionContentPartsHash(parts)
-	})
-	const maxAllocs = 20
-	if allocs > maxAllocs {
-		t.Fatalf("large binary content-part hash allocs = %.0f, want ≤%d", allocs, maxAllocs)
-	}
-}
-
 // TestPrepareMessagesForLLM_IncrementalReExaminesNotYetReducedPrefix verifies that
 // a tool result in the prefix that was NOT reduced in the first pass (because its
 // age was below the threshold) gets re-examined and reduced in the second pass
@@ -6550,47 +6357,6 @@ func TestPrepareMessagesForLLM_IncrementalDisabledOnToolDefChange(t *testing.T) 
 		t.Fatalf("expected no frozen_reduced skips when tool defs changed, got %d", stats.SkippedByReason[contextReductionSkipFrozenReduced])
 	}
 	_ = firstMarker // marker may or may not be identical after re-reduction
-}
-
-func TestToolDefinitionsHashDistinguishesInputSchema(t *testing.T) {
-	base := []message.ToolDefinition{{
-		Name:        "shell",
-		Description: "Run a command",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"command": map[string]any{"type": "string"},
-			},
-		},
-	}}
-	same := []message.ToolDefinition{{
-		Name:        "shell",
-		Description: "Run a command",
-		InputSchema: map[string]any{
-			"properties": map[string]any{
-				"command": map[string]any{"type": "string"},
-			},
-			"type": "object",
-		},
-	}}
-	changedSchema := []message.ToolDefinition{{
-		Name:        "shell",
-		Description: "Run a command",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"command": map[string]any{"type": "string"},
-				"timeout": map[string]any{"type": "integer"},
-			},
-		},
-	}}
-
-	if toolDefinitionsHash(base) != toolDefinitionsHash(same) {
-		t.Fatal("toolDefinitionsHash() differs for schemas equal up to map key order")
-	}
-	if toolDefinitionsHash(base) == toolDefinitionsHash(changedSchema) {
-		t.Fatal("toolDefinitionsHash() collides when only InputSchema changed")
-	}
 }
 
 func TestPrepareMessagesForLLM_IncrementalDisabledOnInputSchemaChange(t *testing.T) {

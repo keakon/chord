@@ -19,7 +19,7 @@ import (
 	"github.com/keakon/chord/internal/buildinfo"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/llm"
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/textclean"
 )
 
 const diagnosticLogTailLines = 240
@@ -365,7 +365,7 @@ func readSanitizedLogTail(path, baseDir string, pid int) (string, bool) {
 	if _, err := io.Copy(&buf, f); err != nil {
 		return "", false
 	}
-	lines := strings.Split(markdownutil.NormalizeNewlines(buf.String()), "\n")
+	lines := strings.Split(textclean.NormalizeNewlines(buf.String()), "\n")
 	if len(lines) > diagnosticLogTailLines {
 		lines = lines[len(lines)-diagnosticLogTailLines:]
 	}
@@ -449,7 +449,7 @@ func isLogFieldEnd(line string, pos int) bool {
 }
 
 func sanitizeDiagnosticText(s, baseDir string) string {
-	s = markdownutil.NormalizeNewlines(s)
+	s = textclean.NormalizeNewlines(s)
 	if strings.TrimSpace(baseDir) != "" {
 		s = strings.ReplaceAll(s, filepath.Clean(baseDir), "<project-root>")
 		s = strings.ReplaceAll(s, filepath.ToSlash(filepath.Clean(baseDir)), "<project-root>")

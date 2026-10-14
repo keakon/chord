@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -67,7 +68,7 @@ func TestPrepareMessagesForLLM_SummarizesAgedSkillKeepingAnchors(t *testing.T) {
 		"<root>" + root + "</root>",
 		"Workflow headings:",
 		"- Decide and act",
-		tools.ArtifactReferencePrefix,
+		tooloutput.ArtifactReferencePrefix,
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("prepared skill content lost %q: %q", want, got)

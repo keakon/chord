@@ -19,6 +19,7 @@ import (
 	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
+	"github.com/keakon/chord/internal/reasoningtext"
 )
 
 // Event-specific types for Responses API streaming events.
@@ -994,7 +995,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			// before the text becomes a thinking block. Unlike ReasoningContent,
 			// thinking blocks are also written verbatim by the markdown session
 			// export, which applies no display normalization of its own.
-			state.resp.ThinkingBlocks = append(state.resp.ThinkingBlocks, message.ThinkingBlock{Thinking: NormalizeReasoningSummaryHeadings(done.Text)})
+			state.resp.ThinkingBlocks = append(state.resp.ThinkingBlocks, message.ThinkingBlock{Thinking: reasoningtext.NormalizeHeadings(done.Text)})
 		}
 		return nil, nil, false, nil
 

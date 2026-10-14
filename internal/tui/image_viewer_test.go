@@ -7,10 +7,14 @@ import (
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/imageprotocol"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestOpenImageViewerUsesRequestedImageIndex(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	model := NewModelWithSize(nil, 80, 24)
 	m := model
 	pngData := makeTestPNG(t)
@@ -43,7 +47,7 @@ func TestOpenImageViewerUsesRequestedImageIndex(t *testing.T) {
 }
 
 func TestStepImageViewerUsesSequenceForKittyPhysicalPlacement(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 24)
 	pngData := makeTestPNG(t)
 	block := &Block{
@@ -82,7 +86,7 @@ func TestStepImageViewerUsesSequenceForKittyPhysicalPlacement(t *testing.T) {
 }
 
 func TestCloseImageViewerAvoidsClearScreenBatch(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 24)
 	m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsFullscreen: true}
 	m.imageViewer = imageViewerState{Open: true, ImageID: 11, PlacementID: 22}
@@ -99,7 +103,7 @@ func TestCloseImageViewerAvoidsClearScreenBatch(t *testing.T) {
 	if !ok {
 		t.Fatalf("closeImageViewer() msg = %T, want tea.RawMsg", msg)
 	}
-	if got, want := fmt.Sprint(raw.Msg), kittyDeleteSequenceForPlacement(11, 22); got != want {
+	if got, want := fmt.Sprint(raw.Msg), imageprotocol.KittyDelete(11, 22); got != want {
 		t.Fatalf("closeImageViewer() raw msg = %q, want %q", got, want)
 	}
 	if m.imageViewer.Open {
@@ -108,7 +112,7 @@ func TestCloseImageViewerAvoidsClearScreenBatch(t *testing.T) {
 }
 
 func TestImageViewerOutsideClickClosesWithoutClearScreenSequence(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	model := NewModelWithSize(nil, 80, 24)
 	m := model
 	pngData := makeTestPNG(t)
@@ -145,7 +149,7 @@ func TestImageViewerOutsideClickClosesWithoutClearScreenSequence(t *testing.T) {
 	if !ok {
 		t.Fatalf("outside click close msg = %T, want tea.RawMsg", msg)
 	}
-	if got, want := fmt.Sprint(raw.Msg), kittyDeleteSequenceForPlacement(11, 22); got != want {
+	if got, want := fmt.Sprint(raw.Msg), imageprotocol.KittyDelete(11, 22); got != want {
 		t.Fatalf("outside click close raw msg = %q, want %q", got, want)
 	}
 	if modelPtr.imageViewer.Open {
@@ -154,7 +158,7 @@ func TestImageViewerOutsideClickClosesWithoutClearScreenSequence(t *testing.T) {
 }
 
 func TestToggleCollapseOnFocusedImageReturnsImageProtocolCmd(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 24)
 	pngData := makeTestPNG(t)
 	block := &Block{
@@ -195,7 +199,7 @@ func TestToggleCollapseOnFocusedImageReturnsImageProtocolCmd(t *testing.T) {
 }
 
 func TestSingleImageViewerDoesNotNavigateOrShowSwitchHint(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 24)
 	pngData := makeTestPNG(t)
 	block := &Block{
@@ -223,7 +227,7 @@ func TestSingleImageViewerDoesNotNavigateOrShowSwitchHint(t *testing.T) {
 	if got := imageViewerHintText(m.imageCaps, len(m.imageViewer.Items)); got != imageViewerSingleHint {
 		t.Fatalf("imageViewerHintText(single) = %q, want %q", got, imageViewerSingleHint)
 	}
-	overlay := stripANSI(m.renderImageViewerOverlay())
+	overlay := terminaltext.StripANSI(m.renderImageViewerOverlay())
 	if !strings.Contains(overlay, imageViewerCloseBadge) {
 		t.Fatalf("single-image overlay title should include close badge %q, got %q", imageViewerCloseBadge, overlay)
 	}
@@ -233,7 +237,7 @@ func TestSingleImageViewerDoesNotNavigateOrShowSwitchHint(t *testing.T) {
 }
 
 func TestOpenImageViewerMarksNeedsRetransmit(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 24)
 	pngData := makeTestPNG(t)
 	block := &Block{ID: 21, Type: BlockUser, ImageCount: 1, ImageParts: []BlockImagePart{{FileName: "img.png", MimeType: "image/png", Data: pngData}}}
@@ -249,7 +253,7 @@ func TestOpenImageViewerMarksNeedsRetransmit(t *testing.T) {
 }
 
 func TestImageViewerFitSizeLimitsUpscaleWithKittyMetrics(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 160, 60)
 	pngData := makeTestPNG(t)
 	block := &Block{
@@ -276,7 +280,7 @@ func TestImageViewerFitSizeLimitsUpscaleWithKittyMetrics(t *testing.T) {
 }
 
 func TestImageViewerPhysicalPlacementMatchesOverlayContentGeometry(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 24)
 	pngData := makeTestPNG(t)
 	block := &Block{
@@ -309,11 +313,11 @@ func TestImageViewerPhysicalPlacementMatchesOverlayContentGeometry(t *testing.T)
 		t.Fatalf("placementID = %d, want > 0", placementID)
 	}
 
-	availableCols := rect.Dx() - 2 - DirectoryBorderStyle.GetHorizontalPadding() - 2*imageViewerInnerPadX
+	availableCols := rect.Dx() - 2 - currentStyles.DirectoryBorderStyle.GetHorizontalPadding() - 2*imageViewerInnerPadX
 	if availableCols < fitCols {
 		t.Fatalf("availableCols = %d, want >= fitCols %d", availableCols, fitCols)
 	}
-	expectedCol := rect.Min.X + 1 + DirectoryBorderStyle.GetPaddingLeft() + imageViewerInnerPadX + (availableCols-fitCols)/2
+	expectedCol := rect.Min.X + 1 + currentStyles.DirectoryBorderStyle.GetPaddingLeft() + imageViewerInnerPadX + (availableCols-fitCols)/2
 	if col != expectedCol {
 		t.Fatalf("anchor col = %d, want %d", col, expectedCol)
 	}
@@ -327,7 +331,7 @@ func TestImageViewerPhysicalPlacementMatchesOverlayContentGeometry(t *testing.T)
 }
 
 func TestStepImageViewerDeleteCmdIsImmediateForKittyPhysicalPlacement(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 80, 24)
 	pngData := makeTestPNG(t)
 	block := &Block{
@@ -373,7 +377,7 @@ func TestStepImageViewerDeleteCmdIsImmediateForKittyPhysicalPlacement(t *testing
 	if !ok {
 		t.Fatalf("first sequence msg = %T, want tea.RawMsg", first)
 	}
-	if got, want := fmt.Sprint(raw.Msg), kittyDeleteSequenceForPlacement(123, 456); got != want {
+	if got, want := fmt.Sprint(raw.Msg), imageprotocol.KittyDelete(123, 456); got != want {
 		t.Fatalf("delete raw msg = %q, want %q", got, want)
 	}
 }

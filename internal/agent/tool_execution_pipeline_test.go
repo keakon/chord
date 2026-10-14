@@ -15,6 +15,7 @@ import (
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -34,7 +35,7 @@ func TestWrapStaleEditError(t *testing.T) {
 }
 
 func TestFormatToolExecutionOutputKeepsQuestionResultUntruncated(t *testing.T) {
-	longAnswer := strings.Repeat("长", tools.MaxLineLength+100)
+	longAnswer := strings.Repeat("长", tooloutput.MaxLineLength+100)
 	result := `[{"header":"你怎么教出来","selected":["` + longAnswer + `"]}]`
 
 	got := formatToolExecutionOutput(result, t.TempDir(), "call-question", tools.NameQuestion, nil, "")
@@ -48,7 +49,7 @@ func TestFormatToolExecutionOutputKeepsQuestionResultUntruncated(t *testing.T) {
 }
 
 func TestFormatToolExecutionOutputKeepsLongLineWithinInlineBudget(t *testing.T) {
-	result := strings.Repeat("a", tools.MaxLineLength+100)
+	result := strings.Repeat("a", tooloutput.MaxLineLength+100)
 	sessionDir := t.TempDir()
 
 	got := formatToolExecutionOutput(result, sessionDir, "call-other", tools.NameShell, nil, "")
@@ -64,7 +65,7 @@ func TestFormatToolExecutionOutputKeepsLongLineWithinInlineBudget(t *testing.T) 
 }
 
 func TestFormatToolExecutionOutputKeepsReadResultWithoutArtifact(t *testing.T) {
-	result := "READ_RESULT lines=1-1 total=1\n" + strings.Repeat("a", tools.MaxLineLength+100) + "\n"
+	result := "READ_RESULT lines=1-1 total=1\n" + strings.Repeat("a", tooloutput.MaxLineLength+100) + "\n"
 	sessionDir := t.TempDir()
 
 	got := formatToolExecutionOutput(result, sessionDir, "call-read", tools.NameRead, nil, "unused guidance")

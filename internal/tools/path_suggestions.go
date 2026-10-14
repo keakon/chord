@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/keakon/chord/internal/filefilter"
 )
 
 const (
@@ -140,7 +142,7 @@ func suggestExistingToolPathsWithOptionsInDir(path string, baseDir string, kind 
 	if len(candidates) == 0 {
 		ancestor, ok := pathSuggestionSearchRoot(path, resolved, baseDir)
 		if ok && pathWithinSuggestionRoots(ancestor, roots) && shouldWalkForPathSuggestions(ancestor) {
-			matcher := newGitIgnoreMatcher(ancestor)
+			matcher := filefilter.NewGitIgnoreMatcher(ancestor)
 			_ = filepath.WalkDir(ancestor, func(candidate string, d fs.DirEntry, err error) error {
 				if err != nil {
 					return nil
@@ -163,7 +165,7 @@ func suggestExistingToolPathsWithOptionsInDir(path string, baseDir string, kind 
 					}
 				}
 				if d.IsDir() {
-					if skipDirNames[d.Name()] {
+					if filefilter.IsSkippedDirName(d.Name()) {
 						return filepath.SkipDir
 					}
 					return nil

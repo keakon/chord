@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 func benchmarkModelForSessionSelectDialog() Model {
@@ -25,7 +26,7 @@ func benchmarkModelForSessionSelectDialog() Model {
 		searchCorpus: buildSessionSearchCorpus(options),
 		prevMode:     ModeInsert,
 	}
-	m.sessionSelect.selector.list = NewOverlayList(nil, m.sessionSelectMaxVisible())
+	m.sessionSelect.selector.list = overlaylist.New(nil, m.sessionSelectMaxVisible())
 	m.rebuildSessionSelectFilteredView(false)
 	if m.sessionSelect.selector.list != nil {
 		m.sessionSelect.selector.list.SetCursor(0)

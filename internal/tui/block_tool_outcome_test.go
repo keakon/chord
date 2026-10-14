@@ -7,6 +7,8 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // outcomeCardFixture builds a finished card for one tool in one terminal
@@ -48,10 +50,10 @@ var outcomeCardArgs = map[string]string{
 // result arrives wrapped as "Error: <message>", so a card that prints its own
 // "↳ Error:" header must strip the prefix instead of showing "Error: Error:".
 func TestToolCardsNeverRepeatTheErrorLabel(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for name, args := range outcomeCardArgs {
 		block := outcomeCardFixture(name, args, "Error: the tool refused the call", message.ToolStatusError)
-		plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+		plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if strings.Contains(plain, "Error: Error:") {
 			t.Errorf("%s card repeats the error label:\n%s", name, plain)
 		}
@@ -66,11 +68,11 @@ func TestToolCardsNeverRepeatTheErrorLabel(t *testing.T) {
 // a summary row and an envelope row, and the prose-control and
 // compact_context cards printed "↳ Cancelled:" followed by "Cancelled").
 func TestToolCardsReportCancellationOnce(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for name, args := range outcomeCardArgs {
 		for _, content := range []string{"Cancelled", "cancelled"} {
 			block := outcomeCardFixture(name, args, content, message.ToolStatusCancelled)
-			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if got := strings.Count(strings.ToLower(plain), "cancelled"); got != 1 {
 				t.Errorf("%s card mentions the cancellation %d times (result %q):\n%s", name, got, content, plain)
 			}
@@ -83,10 +85,10 @@ func TestToolCardsReportCancellationOnce(t *testing.T) {
 // envelope is a single "↳ Error: <summary>" row rather than a header plus an
 // indented body.
 func TestCollapsedToolCardsKeepTheOutcomeOnOneLine(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for _, name := range []string{tools.NameShell, tools.NameWebFetch, tools.NameSkill, tools.NameJobOutput} {
 		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: exit code 1", message.ToolStatusError)
-		plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+		plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if !strings.Contains(plain, "↳ Error: exit code 1") {
 			t.Errorf("%s collapsed card does not fold the failure onto one row:\n%s", name, plain)
 		}
@@ -101,13 +103,13 @@ func TestCollapsedToolCardsKeepTheOutcomeOnOneLine(t *testing.T) {
 // game. Shell-style single-line errors still fold to one row (see
 // TestCollapsedToolCardsKeepTheOutcomeOnOneLine).
 func TestCollapsedReadErrorWithSuggestionsShowsFullBody(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := outcomeCardFixture(tools.NameRead, outcomeCardArgs[tools.NameRead],
 		"file not found: internal/tools/ignore.go\nDid you mean:\n- internal/tools/ignore.go",
 		message.ToolStatusError)
 	block.Collapsed = true
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{
 		"↳ Error:",
 		"file not found: internal/tools/ignore.go",
@@ -132,7 +134,7 @@ func TestCollapsedReadErrorWithSuggestionsShowsFullBody(t *testing.T) {
 // multi-line error) and a collapsed card must not be able to grow past a
 // screenful with no way to shrink it.
 func TestCollapsedMultiLineOutcomeIsBounded(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 
 	short := make([]string, 0, collapsedToolOutcomeMaxLines)
 	for i := range collapsedToolOutcomeMaxLines {
@@ -140,7 +142,7 @@ func TestCollapsedMultiLineOutcomeIsBounded(t *testing.T) {
 	}
 	var result []string
 	appendToolOutcomeBody(&result, toolOutcomeError, strings.Join(short, "\n"), 60, false)
-	plain := stripANSI(strings.Join(result, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(result, "\n"))
 	for _, want := range short {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("a body at the cap must render whole, missing %q:\n%s", want, plain)
@@ -156,7 +158,7 @@ func TestCollapsedMultiLineOutcomeIsBounded(t *testing.T) {
 	}
 	result = nil
 	appendToolOutcomeBody(&result, toolOutcomeError, strings.Join(long, "\n"), 60, false)
-	plain = stripANSI(strings.Join(result, "\n"))
+	plain = terminaltext.StripANSI(strings.Join(result, "\n"))
 	// header row + capped body + hint row
 	if got, want := len(result), collapsedToolOutcomeMaxLines+2; got != want {
 		t.Fatalf("collapsed rows = %d, want %d:\n%s", got, want, plain)
@@ -174,7 +176,7 @@ func TestCollapsedMultiLineOutcomeIsBounded(t *testing.T) {
 	// Expanding still shows everything, so the hint is honest.
 	result = nil
 	appendToolOutcomeBody(&result, toolOutcomeError, strings.Join(long, "\n"), 60, true)
-	plain = stripANSI(strings.Join(result, "\n"))
+	plain = terminaltext.StripANSI(strings.Join(result, "\n"))
 	for _, want := range long {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("an expanded card must render the whole body, missing %q:\n%s", want, plain)
@@ -189,7 +191,7 @@ func TestCollapsedMultiLineOutcomeIsBounded(t *testing.T) {
 // the collapsed read card is the one that opted into the in-place body, so it
 // is also the one that could grow unbounded.
 func TestCollapsedReadCardBoundsALongError(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	lines := make([]string, 0, 40)
 	lines = append(lines, "file not found: internal/tools/ignore.go", "Did you mean:")
 	for i := range 38 {
@@ -199,7 +201,7 @@ func TestCollapsedReadCardBoundsALongError(t *testing.T) {
 		strings.Join(lines, "\n"), message.ToolStatusError)
 	block.Collapsed = true
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "file not found: internal/tools/ignore.go") || !strings.Contains(plain, "Did you mean:") {
 		t.Fatalf("the collapsed card dropped the cause:\n%s", plain)
 	}
@@ -215,7 +217,7 @@ func TestCollapsedReadCardBoundsALongError(t *testing.T) {
 
 	block.Collapsed = false
 	block.InvalidateCache()
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(expanded, "candidate37.go") {
 		t.Fatalf("the expanded card must still show the whole body:\n%s", expanded)
 	}
@@ -226,10 +228,10 @@ func TestCollapsedReadCardBoundsALongError(t *testing.T) {
 // carries no ▸ and cannot toggle. Only a shell card keeps folding here, because
 // expanding it reveals the command block and the captured output.
 func TestCollapsedOutcomeCardMarkerRule(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for _, name := range []string{tools.NameWebFetch, tools.NameSkill, tools.NameJobOutput} {
 		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: 404 Not Found", message.ToolStatusError)
-		collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+		collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if !strings.Contains(collapsed, "✗ "+name) {
 			t.Errorf("%s collapsed card header changed shape:\n%s", name, collapsed)
 		}
@@ -246,15 +248,15 @@ func TestCollapsedOutcomeCardMarkerRule(t *testing.T) {
 // card still folds because expanding it reveals the command block and the
 // captured output, so the collapsed card keeps its ▸.
 func TestCollapsedShellCardKeepsDisclosureMarker(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := outcomeCardFixture(tools.NameShell, outcomeCardArgs[tools.NameShell], "Error: 404 Not Found", message.ToolStatusError)
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "✗ ▸ "+tools.NameShell) {
 		t.Errorf("shell collapsed card lost its ▸ marker:\n%s", collapsed)
 	}
 	block.ToolCallDetailExpanded = true
 	block.InvalidateCache()
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(expanded, "✗ ▾ "+tools.NameShell) {
 		t.Errorf("shell expanded card lost its ▾ marker:\n%s", expanded)
 	}
@@ -264,10 +266,10 @@ func TestCollapsedShellCardKeepsDisclosureMarker(t *testing.T) {
 // the outcome fold rule: a single-line failure the collapsed row cannot fit is
 // worth expanding, so it keeps its marker.
 func TestCollapsedOutcomeCardKeepsMarkerForTruncatedBody(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := outcomeCardFixture(tools.NameJobOutput, outcomeCardArgs[tools.NameJobOutput],
 		"Error: "+strings.Repeat("job job-46 not found ", 12), message.ToolStatusError)
-	collapsed := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(collapsed, "✗ ▸ "+tools.NameJobOutput) {
 		t.Fatalf("a truncated single-line failure should keep its marker:\n%s", collapsed)
 	}
@@ -278,12 +280,12 @@ func TestCollapsedOutcomeCardKeepsMarkerForTruncatedBody(t *testing.T) {
 // card knew the exit code, and every failing run's output was labelled
 // "Stderr:" even though the runtime hands the card one merged stream.
 func TestShellCardKeepsExitCodeAndLabelsOutputHonestly(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := outcomeCardFixture(tools.NameShell, outcomeCardArgs[tools.NameShell],
 		"--- FAIL: TestFoo\n\nError: exit code 1", message.ToolStatusError)
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 
 	if !strings.Contains(plain, "↳ Exit: 1") {
 		t.Fatalf("expected the expanded shell card to keep the exit code, got:\n%s", plain)
@@ -304,11 +306,11 @@ func TestShellCardKeepsExitCodeAndLabelsOutputHonestly(t *testing.T) {
 // card still reports a cancelled run: its result body is dropped by the
 // stream split, so only the shared envelope can carry the state.
 func TestShellCancelledCardReportsTheCancellation(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := outcomeCardFixture(tools.NameShell, outcomeCardArgs[tools.NameShell], "Cancelled", message.ToolStatusCancelled)
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 
 	if !strings.Contains(plain, "↳ Cancelled") {
 		t.Fatalf("expected the expanded shell card to report the cancellation, got:\n%s", plain)
@@ -320,7 +322,7 @@ func TestShellCancelledCardReportsTheCancellation(t *testing.T) {
 // belongs on the header line, and the body must not repeat it. Path-shaped
 // subjects go up whole, with their qualifier in the option group beside them.
 func TestCardSubjectsRideTheHeader(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	cases := []struct {
 		name       string
 		tool       string
@@ -346,7 +348,7 @@ func TestCardSubjectsRideTheHeader(t *testing.T) {
 			// subject under its own section, since the header only ever
 			// carries the first sentence of it.
 			block.Collapsed = true
-			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if !strings.Contains(plain, c.wantHeader) {
 				t.Fatalf("expected header %q, got:\n%s", c.wantHeader, plain)
 			}
@@ -362,7 +364,7 @@ func TestCardSubjectsRideTheHeader(t *testing.T) {
 // render the whole prose in their body, so their header is the bare tool name
 // and the subject must not appear twice.
 func TestAlwaysExpandedCardsKeepProseOffTheHeader(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	cases := []struct {
 		name    string
 		tool    string
@@ -401,7 +403,7 @@ func TestAlwaysExpandedCardsKeepProseOffTheHeader(t *testing.T) {
 				block.Collapsed = collapsed
 				block.ToolCallDetailExpanded = !collapsed
 				block.InvalidateCache()
-				plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+				plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 				if strings.Contains(plain, c.tool+" "+c.subject) {
 					t.Fatalf("expected %q off the header (collapsed=%v), got:\n%s", c.subject, collapsed, plain)
 				}
@@ -420,13 +422,13 @@ func TestAlwaysExpandedCardsKeepProseOffTheHeader(t *testing.T) {
 // whose expanded body used to repeat the description and the timeout that its
 // header already carries.
 func TestShellCardKeepsArgumentsOffTheBody(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := outcomeCardFixture(tools.NameShell,
 		`{"command":"go test ./internal/tui/","description":"Run the TUI suite","timeout_ms":120000,"workdir":"/tmp/project"}`,
 		"ok", "")
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 
 	if !strings.Contains(plain, "shell Run the TUI suite (timeout=2m)") {
 		t.Fatalf("expected the description and timeout on the header, got:\n%s", plain)
@@ -449,12 +451,12 @@ func TestShellCardKeepsArgumentsOffTheBody(t *testing.T) {
 // in labelled body sections, and labels its result so it does not read as a
 // continuation of the last section.
 func TestGenericToolCardUsesTheSharedShape(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args := `{"repo":"keakon/chord","title":"unify the cards","body":"first line\nsecond line","labels":["ui","tui"]}`
 	block := outcomeCardFixture("mcp__github__create_issue", args, "issue #42 created", "")
 	block.ToolCallDetailExpanded = true
 
-	plain := stripANSI(strings.Join(block.Render(96, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(96, ""), "\n"))
 
 	if !strings.Contains(plain, "mcp__github__create_issue keakon/chord (title=unify the cards)") {
 		t.Fatalf("expected subject and options on the header, got:\n%s", plain)
@@ -471,7 +473,7 @@ func TestGenericToolCardUsesTheSharedShape(t *testing.T) {
 
 	block.ToolCallDetailExpanded = false
 	block.InvalidateCache()
-	collapsed := stripANSI(strings.Join(block.Render(96, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(96, ""), "\n"))
 	if strings.Contains(collapsed, "↳ Body:") {
 		t.Fatalf("expected a collapsed generic card to hide its argument sections, got:\n%s", collapsed)
 	}
@@ -482,7 +484,7 @@ func TestGenericToolCardUsesTheSharedShape(t *testing.T) {
 // or superseded question would look the same as an unanswered one, and an
 // unopened question cancelled after an earlier refusal would look unanswered too.
 func TestQuestionCardNamesNonAnsweredOutcomes(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	newBlock := func(payload string) *Block {
 		args := `{"questions":[{"header":"Target branch","question":"Which branch?","options":[{"id":"main","label":"main"},{"id":"develop","label":"develop"}]},{"header":"Extra","question":"Anything else?"}]}`
 		return &Block{
@@ -497,21 +499,21 @@ func TestQuestionCardNamesNonAnsweredOutcomes(t *testing.T) {
 		}
 	}
 
-	plain := stripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":[],"outcome":"declined"},{"header":"Extra","selected":[],"outcome":"cancelled"}]}`).Render(96, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":[],"outcome":"declined"},{"header":"Extra","selected":[],"outcome":"cancelled"}]}`).Render(96, ""), "\n"))
 	for _, want := range []string{"Outcome: declined", "Outcome: cancelled"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected %q in the question card, got:\n%s", want, plain)
 		}
 	}
 
-	expired := stripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":[],"outcome":"no_response"},{"header":"Extra","selected":[],"outcome":"superseded"}]}`).Render(96, ""), "\n"))
+	expired := terminaltext.StripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":[],"outcome":"no_response"},{"header":"Extra","selected":[],"outcome":"superseded"}]}`).Render(96, ""), "\n"))
 	for _, want := range []string{"Outcome: closed without an answer (not user consent)", "Outcome: superseded"} {
 		if !strings.Contains(expired, want) {
 			t.Fatalf("expected %q in the question card, got:\n%s", want, expired)
 		}
 	}
 
-	answered := stripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":["main"],"selected_ids":["main"],"outcome":"answered"},{"header":"Extra","selected":["Ship it"],"outcome":"answered"}]}`).Render(96, ""), "\n"))
+	answered := terminaltext.StripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":["main"],"selected_ids":["main"],"outcome":"answered"},{"header":"Extra","selected":["Ship it"],"outcome":"answered"}]}`).Render(96, ""), "\n"))
 	if strings.Contains(answered, "Outcome:") {
 		t.Fatalf("an answered question already shows its selection and needs no outcome line, got:\n%s", answered)
 	}
@@ -523,7 +525,7 @@ func TestQuestionCardNamesNonAnsweredOutcomes(t *testing.T) {
 // section rather than a "▸" separator (which now means "this card toggles"),
 // and the selection stays visible after the answer arrives.
 func TestQuestionCardCarriesItsSectionsUnderABareHeader(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	args := `{"questions":[{"question":"Which branch?","header":"Target branch","options":[{"id":"main","label":"main","description":"trunk"},{"id":"develop","label":"develop","description":"integration"}]}]}`
 	block := &Block{
 		ID:            1,
@@ -536,7 +538,7 @@ func TestQuestionCardCarriesItsSectionsUnderABareHeader(t *testing.T) {
 		ResultContent: `{"status":"resolved","answers":[{"header":"Target branch","selected":["main"],"selected_ids":["main"]}]}`,
 	}
 
-	plain := stripANSI(strings.Join(block.Render(96, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(96, ""), "\n"))
 
 	if !strings.Contains(plain, "✓ question") {
 		t.Fatalf("expected the bare tool-name header, got:\n%s", plain)

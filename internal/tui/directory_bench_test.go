@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"testing"
+
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 func benchmarkModelForDirectoryView() Model {
@@ -13,7 +15,7 @@ func benchmarkModelForDirectoryView() Model {
 		entries = append(entries, DirectoryEntry{BlockIndex: i, Summary: fmt.Sprintf("message summary line %02d", i+1)})
 	}
 	m.dirEntries = entries
-	m.dirList = NewOverlayList(directoryItems(entries), m.directoryMaxVisible())
+	m.dirList = overlaylist.New(directoryItems(entries), m.directoryMaxVisible())
 	if m.dirList != nil {
 		m.dirList.SetCursor(0)
 	}

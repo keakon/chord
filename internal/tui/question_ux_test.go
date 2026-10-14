@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestQuestionDraftSurvivesOptionToggle(t *testing.T) {
@@ -56,7 +57,7 @@ func TestQuestionLayoutKeepsSelectionAndEditorVisible(t *testing.T) {
 			}
 			m.question = questionState{request: &QuestionRequest{Item: tools.QuestionItem{Header: "Choice", Question: strings.Repeat("Read this before choosing. ", 20), Options: options}}, selected: map[int]bool{}, input: newQuestionTextarea(size[0])}
 			m.mode = ModeQuestion
-			if rendered := stripANSI(m.renderQuestionDialog()); !strings.Contains(rendered, "Read this") || m.question.scrollOffset != 0 {
+			if rendered := terminaltext.StripANSI(m.renderQuestionDialog()); !strings.Contains(rendered, "Read this") || m.question.scrollOffset != 0 {
 				t.Fatalf("first view hides the question: %s", rendered)
 			}
 			for range 11 {
@@ -66,21 +67,21 @@ func TestQuestionLayoutKeepsSelectionAndEditorVisible(t *testing.T) {
 			if lipgloss.Width(rendered) >= size[0] || lipgloss.Height(rendered) > size[1] {
 				t.Fatalf("dialog size %dx%d for %v", lipgloss.Width(rendered), lipgloss.Height(rendered), size)
 			}
-			if !strings.Contains(stripANSI(rendered), "Option 11") {
+			if !strings.Contains(terminaltext.StripANSI(rendered), "Option 11") {
 				t.Fatalf("focused option hidden:\n%s", rendered)
 			}
 			m.scrollQuestion(-10000)
-			if !strings.Contains(stripANSI(m.renderQuestionDialog()), "Read this") {
+			if !strings.Contains(terminaltext.StripANSI(m.renderQuestionDialog()), "Read this") {
 				t.Fatal("cannot read the beginning")
 			}
 			m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: '?', Text: "?"}))
-			if !strings.Contains(stripANSI(m.renderQuestionDialog()), "Read this") {
+			if !strings.Contains(terminaltext.StripANSI(m.renderQuestionDialog()), "Read this") {
 				t.Fatal("an unrelated key should not move the reading position")
 			}
 			m.question.custom = true
 			m.question.input.SetValue("My answer")
 			rendered = m.renderQuestionDialog()
-			if !strings.Contains(stripANSI(rendered), "My answer") || lipgloss.Height(rendered) > size[1] {
+			if !strings.Contains(terminaltext.StripANSI(rendered), "My answer") || lipgloss.Height(rendered) > size[1] {
 				t.Fatalf("editor hidden or overflow:\n%s", rendered)
 			}
 			m.width = 40
@@ -114,7 +115,7 @@ func TestQuestionDeadlineAndEditorFitSixRows(t *testing.T) {
 	}
 	m.question.input.SetValue("My answer")
 	rendered := m.renderQuestionDialog()
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if lipgloss.Height(rendered) > 6 || !strings.Contains(plain, "My answer") || !strings.Contains(plain, "Esc") || !strings.Contains(plain, "s · Details") {
 		t.Fatalf("editor, controls or countdown do not fit: %s", plain)
 	}
@@ -131,7 +132,7 @@ func TestQuestionUnicodeAndDeadlineFitShortTerminal(t *testing.T) {
 	if lipgloss.Width(rendered) >= 32 || lipgloss.Height(rendered) > 12 {
 		t.Fatalf("dialog size %dx%d", lipgloss.Width(rendered), lipgloss.Height(rendered))
 	}
-	if !strings.Contains(stripANSI(rendered), "Closes in") || !strings.Contains(stripANSI(rendered), "Esc") {
+	if !strings.Contains(terminaltext.StripANSI(rendered), "Closes in") || !strings.Contains(terminaltext.StripANSI(rendered), "Esc") {
 		t.Fatalf("deadline or escape hint hidden:\n%s", rendered)
 	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // handoffTestBlock builds a handoff tool card with the given args and result.
@@ -24,7 +25,7 @@ func handoffTestBlock(argsJSON, result string, status message.ToolResultStatus, 
 
 func TestHandoffCardShowsPlanPathInHeader(t *testing.T) {
 	block := handoffTestBlock(`{"plan_path":"docs/plans/plan-004.md"}`, "", "", false)
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "handoff") {
 		t.Fatalf("expected handoff tool name in header; got:\n%s", joined)
 	}
@@ -40,7 +41,7 @@ func TestHandoffCardSuccessHidesRawJSON(t *testing.T) {
 		message.ToolStatusSuccess,
 		true,
 	)
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if strings.Contains(joined, "plan_path") || strings.Contains(joined, "/abs/work") {
 		t.Fatalf("handoff success card must not echo the raw JSON result; got:\n%s", joined)
 	}
@@ -59,7 +60,7 @@ func TestHandoffCardRejectedShowsReason(t *testing.T) {
 		message.ToolStatusSuccess,
 		true,
 	)
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "✗") {
 		t.Fatalf("expected rejection marker on rejected handoff; got:\n%s", joined)
 	}
@@ -78,7 +79,7 @@ func TestHandoffCardCancelledShowsCancelled(t *testing.T) {
 		message.ToolStatusCancelled,
 		true,
 	)
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(joined, "◌") && !strings.Contains(joined, "Cancelled") {
 		t.Fatalf("expected cancelled state; got:\n%s", joined)
 	}
@@ -87,7 +88,7 @@ func TestHandoffCardCancelledShowsCancelled(t *testing.T) {
 func TestHandoffCardPendingDoesNotShowSuccessMarker(t *testing.T) {
 	// While the handoff selector is open the card is not yet terminal.
 	block := handoffTestBlock(`{"plan_path":"docs/plans/plan-004.md"}`, "", "", false)
-	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if strings.Contains(joined, "✓") {
 		t.Fatalf("pending handoff must not show the success marker; got:\n%s", joined)
 	}

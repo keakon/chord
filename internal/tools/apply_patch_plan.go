@@ -9,6 +9,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/keakon/chord/internal/textdiff"
+	"github.com/keakon/chord/internal/textfile"
 )
 
 func BuildApplyPatchPlan(ctx context.Context, patch, baseDir string) (MutationPlan, error) {
@@ -398,7 +401,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 			// before the hunks apply. Untouched file content is never
 			// rewritten by the invisible-character clean.
 			hunks, stripped := cleanApplyPatchAddedLines(op.Hunks)
-			decoded, err := decodeTextBytes(state.bytes, source)
+			decoded, err := textfile.Decode(state.bytes, source)
 			if err != nil {
 				return fmt.Errorf("read update source %s: %w", display, err)
 			}
@@ -417,7 +420,7 @@ func applyPatchOperationToVirtualState(ctx context.Context, states map[string]*a
 					state.cleanedInvisible[r] += n
 				}
 			}
-			state.bytes, err = encodeString(after, decoded.Encoding)
+			state.bytes, err = textfile.Encode(after, decoded.Encoding)
 			if err != nil {
 				return fmt.Errorf("encode update %s: %w", display, err)
 			}
@@ -569,15 +572,15 @@ func populateApplyPatchMutationDiff(mutation *PlannedMutation, oldDisplayPath, n
 	if mutation == nil {
 		return
 	}
-	oldText, oldTextOK := decodedText{}, false
+	oldText, oldTextOK := textfile.Decoded{}, false
 	if mutation.BeforeExists {
-		if decoded, err := decodeTextBytes(mutation.BeforeBytes, mutation.SourcePath); err == nil {
+		if decoded, err := textfile.Decode(mutation.BeforeBytes, mutation.SourcePath); err == nil {
 			oldText, oldTextOK = decoded, true
 		}
 	}
-	newText, newTextOK := decodedText{}, false
+	newText, newTextOK := textfile.Decoded{}, false
 	if mutation.Kind != MutationDelete {
-		if decoded, err := decodeTextBytes(mutation.AfterBytes, mutation.TargetPath); err == nil {
+		if decoded, err := textfile.Decode(mutation.AfterBytes, mutation.TargetPath); err == nil {
 			newText, newTextOK = decoded, true
 			mutation.AfterText = decoded.Text
 		}
@@ -586,27 +589,27 @@ func populateApplyPatchMutationDiff(mutation *PlannedMutation, oldDisplayPath, n
 	case MutationAdd:
 		if newTextOK {
 			mutation.Added = lineCountForMutation(newText.Text)
-			mutation.diffInput = unifiedFileDiff{NewContent: newText.Text, OldFilename: oldDisplayPath, NewFilename: newDisplayPath}
+			mutation.diffInput = textdiff.File{NewContent: newText.Text, OldFilename: oldDisplayPath, NewFilename: newDisplayPath}
 			mutation.diffable = true
 		}
 	case MutationDelete:
 		if oldTextOK {
 			mutation.Removed = lineCountForMutation(oldText.Text)
-			mutation.diffInput = unifiedFileDiff{OldContent: oldText.Text, OldFilename: oldDisplayPath, NewFilename: newDisplayPath}
+			mutation.diffInput = textdiff.File{OldContent: oldText.Text, OldFilename: oldDisplayPath, NewFilename: newDisplayPath}
 			mutation.diffable = true
 		}
 	case MutationUpdate, MutationMove:
 		if oldTextOK && newTextOK {
-			diff := GenerateUnifiedDiffSummary(oldText.Text, newText.Text, oldDisplayPath)
+			diff := textdiff.Unified(oldText.Text, newText.Text, oldDisplayPath)
 			mutation.Added, mutation.Removed = diff.Added, diff.Removed
-			mutation.diffInput = unifiedFileDiff{OldContent: oldText.Text, NewContent: newText.Text, OldFilename: oldDisplayPath, NewFilename: newDisplayPath}
+			mutation.diffInput = textdiff.File{OldContent: oldText.Text, NewContent: newText.Text, OldFilename: oldDisplayPath, NewFilename: newDisplayPath}
 			mutation.diffable = true
 		}
 	}
 }
 
-func applyPatchMutationDiffSummary(plan MutationPlan) DiffSummary {
-	files := make([]unifiedFileDiff, 0, len(plan.Mutations))
+func applyPatchMutationDiffSummary(plan MutationPlan) textdiff.Summary {
+	files := make([]textdiff.File, 0, len(plan.Mutations))
 	added := 0
 	removed := 0
 	for _, mutation := range plan.Mutations {
@@ -616,7 +619,7 @@ func applyPatchMutationDiffSummary(plan MutationPlan) DiffSummary {
 			files = append(files, mutation.diffInput)
 		}
 	}
-	summary := generateMultiFileUnifiedDiffSummary(files)
+	summary := textdiff.UnifiedFiles(files)
 	summary.Added = added
 	summary.Removed = removed
 	return summary

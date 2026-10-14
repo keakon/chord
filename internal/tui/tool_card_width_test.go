@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // TestToolCardSurfaceSpansViewport verifies the full-width card behavior: the
@@ -13,9 +15,9 @@ import (
 // reservation, matching every other card kind, while only the wrapped content
 // column is capped (so long lines do not stretch across ultra-wide terminals).
 func TestToolCardSurfaceSpansViewport(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for _, w := range []int{80, 120, 140, 200, 240, 290} {
-		style := ToolBlockStyle
+		style := currentStyles.ToolBlockStyle
 		wantSurface := max((w-railWidthToReserve(style))-style.GetHorizontalMargins()-style.GetHorizontalPadding()-style.GetHorizontalBorderSize(), 10)
 		toolCard := newToolCardMetrics(w)
 		doneCard := newDoneToolCardMetrics(w)
@@ -37,7 +39,7 @@ func TestToolCardSurfaceSpansViewport(t *testing.T) {
 // emit a line wider than the card surface (no horizontal overflow) across a range
 // of viewport widths.
 func TestFileToolsRenderWithoutOverflow(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := "package main"
 	writeArgs, _ := json.Marshal(map[string]string{"path": "main.go", "content": content})
 	diffArgs, _ := json.Marshal(map[string]string{"path": "main.go"})
@@ -58,7 +60,7 @@ func TestFileToolsRenderWithoutOverflow(t *testing.T) {
 			}
 			lines := b.Render(w, "")
 			for i, line := range lines {
-				if dw := tuiStringWidth(line); dw > maxLineWidth {
+				if dw := terminaltext.Width(line); dw > maxLineWidth {
 					t.Errorf("%s @viewport %d: line %d width %d exceeds card width %d: %q", b.ToolName, w, i, dw, maxLineWidth, line)
 				}
 			}
@@ -71,7 +73,7 @@ func TestFileToolsRenderWithoutOverflow(t *testing.T) {
 // the apply_patch preview and the diff body. Diff / file content is
 // column-aligned, so wrapping would break the +/- gutter alignment.
 func TestEditPatchPreviewTruncatesNotWraps(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	long := strings.Repeat("y", 300)
 	args, _ := json.Marshal(map[string]string{
 		"path":  "main.go",
@@ -87,7 +89,7 @@ func TestEditPatchPreviewTruncatesNotWraps(t *testing.T) {
 		t.Fatal("expected edit patch preview lines")
 	}
 	for _, line := range result {
-		if dw := tuiStringWidth(line); dw > metrics.cardWidth {
+		if dw := terminaltext.Width(line); dw > metrics.cardWidth {
 			t.Errorf("edit patch preview line width %d exceeds card width %d: %q", dw, metrics.cardWidth, line)
 		}
 	}

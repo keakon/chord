@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -24,10 +25,6 @@ import (
 // file adds only what no other carrier guaranteed.
 
 const (
-	// checkpointCurrentUserRequestHeading is the summary section whose body the
-	// runtime resolves authoritatively, and the heading a continuation inherits
-	// its latest request from.
-	checkpointCurrentUserRequestHeading = "## Current User Request"
 	// runtimeRecoveryStateHeading is the runtime-owned section for state that
 	// has no summary counterpart. It is rendered only when such state exists.
 	runtimeRecoveryStateHeading = "## Runtime Recovery State"
@@ -125,12 +122,12 @@ func ensureCompactionLatestRequestAnchor(summary string, anchor fallbackAnchor) 
 		return summary
 	}
 	section := modelDrivenCurrentUserRequestSection(anchor)
-	start, end, ok := markdownSectionBounds(summary, checkpointCurrentUserRequestHeading)
+	start, end, ok := checkpointfmt.SectionBounds(summary, checkpointfmt.CurrentUserRequestHeading)
 	if !ok {
 		if strings.TrimSpace(summary) == "" {
-			return checkpointCurrentUserRequestHeading + "\n" + section
+			return checkpointfmt.CurrentUserRequestHeading + "\n" + section
 		}
-		return checkpointCurrentUserRequestHeading + "\n" + section + "\n\n" + strings.TrimSpace(summary)
+		return checkpointfmt.CurrentUserRequestHeading + "\n" + section + "\n\n" + strings.TrimSpace(summary)
 	}
 	out := strings.TrimRight(summary[:start], "\n") + "\n" + section
 	if tail := strings.TrimLeft(summary[end:], "\n"); tail != "" {
@@ -188,10 +185,7 @@ func stripRuntimeRecoveryStateSection(body string) string {
 	if idx < 0 {
 		return strings.TrimSpace(body)
 	}
-	end := len(body)
-	if loc := compactionMarkdownHeadingLineRe.FindStringIndex(body[idx+len(runtimeRecoveryStateHeading):]); loc != nil {
-		end = idx + len(runtimeRecoveryStateHeading) + loc[0]
-	}
+	end := checkpointfmt.SectionEnd(body, idx+len(runtimeRecoveryStateHeading))
 	prefix := strings.TrimSpace(body[:idx])
 	suffix := strings.TrimSpace(body[end:])
 	switch {

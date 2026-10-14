@@ -169,7 +169,7 @@ func (a *MainAgent) settleMainLLMResponse(payload *LLMResponsePayload, validCall
 		a.consumeQuestionResults(payload.QuestionResults)
 	}
 
-	a.turn.noteDispatchedToolRound(validCalls, wasLengthRecovery)
+	a.turn.Efficiency.Dispatch(validCalls, wasLengthRecovery)
 	a.turn.toolExecutionBatches = batches
 	a.turn.nextToolBatch = 0
 	a.turn.activeToolBatchCancel = nil

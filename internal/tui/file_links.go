@@ -15,6 +15,7 @@ import (
 
 	"github.com/keakon/chord/internal/filedelivery"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/filepreview"
 )
 
 type FileOpenRequest struct {
@@ -29,7 +30,7 @@ type localFileLink struct {
 // Only explicit Markdown link nodes are actionable. Code spans, naked paths,
 // terminal hyperlinks, and arbitrary URI schemes are not file references.
 func localFileLinks(source, base string) []localFileLink {
-	if len(source) > fileViewerMarkdownLimit {
+	if len(source) > filepreview.MarkdownLimit {
 		return nil
 	}
 	data := []byte(source)

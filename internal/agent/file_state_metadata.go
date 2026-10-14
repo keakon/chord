@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/textfile"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -46,7 +47,7 @@ func buildLocalizedWriteFileState(path, before string) *message.ToolFileState {
 	if state == nil {
 		return nil
 	}
-	after, err := tools.ReadDecodedTextFile(path)
+	after, err := textfile.Read(path)
 	if err != nil {
 		return &message.ToolFileState{Writes: []message.TrackedFileState{*state}}
 	}

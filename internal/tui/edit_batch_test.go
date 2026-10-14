@@ -6,6 +6,8 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestEditBatchPreviewAndCopyIncludeEveryReplacement(t *testing.T) {
@@ -14,7 +16,7 @@ func TestEditBatchPreviewAndCopyIncludeEveryReplacement(t *testing.T) {
 	if !ok {
 		t.Fatal("batch arguments not recognized")
 	}
-	preview := stripANSI(strings.Join(appendReplaceEditPreview(nil, args, "sample.go", 100, nil), "\n"))
+	preview := terminaltext.StripANSI(strings.Join(appendReplaceEditPreview(nil, args, "sample.go", 100, nil), "\n"))
 	copyText := fileDiffToolCallMarkdownContent(&Block{ToolName: tools.NameEdit, Content: raw})
 	for _, text := range []string{"firstOld", "firstNew", "secondOld", "secondNew"} {
 		if !strings.Contains(preview, text) || !strings.Contains(copyText, text) {
@@ -41,7 +43,7 @@ func TestEditBatchPreviewAndCopyIncludeEveryReplacement(t *testing.T) {
 }
 
 func TestEditBatchHeaderNamesReplaceAllEntries(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for _, tc := range []struct {
 		raw, want string
 	}{
@@ -58,12 +60,12 @@ func TestEditBatchHeaderNamesReplaceAllEntries(t *testing.T) {
 			ResultStatus:  message.ToolStatusError,
 			ResultDone:    true,
 		}
-		plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+		plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 		if !strings.Contains(plain, tc.want) {
 			t.Fatalf("header missing %q; got:\n%s", tc.want, plain)
 		}
 	}
-	plain := stripANSI(strings.Join((&Block{
+	plain := terminaltext.StripANSI(strings.Join((&Block{
 		ID:            1,
 		Type:          BlockToolCall,
 		ToolName:      tools.NameEdit,
@@ -83,7 +85,7 @@ func TestEditBatchHeaderNamesReplaceAllEntries(t *testing.T) {
 // "Edit N" sections, matched-only entries stay unmarked, and no entry reads as
 // applied.
 func TestEditBatchFailureMarksOnlyFailedEntries(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const raw = `{"path":"sample.go","edits":[{"old_string":"firstOld","new_string":"firstNew"},{"old_string":"failedOld","new_string":"failedNew"},{"old_string":"thirdOld","new_string":"thirdNew"}]}`
 	block := &Block{
 		ID:            1,
@@ -95,7 +97,7 @@ func TestEditBatchFailureMarksOnlyFailedEntries(t *testing.T) {
 		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "Not applied: no changes were written") {
 		t.Fatalf("card lacks the not-applied status:\n%s", plain)
 	}
@@ -115,7 +117,7 @@ func TestEditBatchFailureMarksOnlyFailedEntries(t *testing.T) {
 // An error result that is not a batch failure report carries no ✗/not-applied
 // decoration: cards restored from other error shapes keep the plain preview.
 func TestEditBatchUnstructuredErrorKeepsPlainPreview(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -126,7 +128,7 @@ func TestEditBatchUnstructuredErrorKeepsPlainPreview(t *testing.T) {
 		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(plain, "Not applied") || strings.Contains(plain, "✗ Edit") {
 		t.Fatalf("unstructured error gained failure decoration:\n%s", plain)
 	}

@@ -741,7 +741,7 @@ func TestGlobTruncatedResultSavesFullFilteredResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	artifactPath := filepath.Join(sessionDir, sessionToolOutputsDirName, "glob-results.log")
+	artifactPath := filepath.Join(sessionDir, "tool-outputs", "glob-results.log")
 	if !strings.Contains(out, artifactPath) {
 		t.Fatalf("output should mention full results artifact %q:\n%s", artifactPath, out)
 	}

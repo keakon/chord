@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/textdiff"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -42,7 +43,7 @@ type ToolExecutionResult struct {
 	Audit                     *message.ToolArgsAudit
 	LSPReviews                []message.LSPReview
 	FileState                 *message.ToolFileState
-	Diff                      tools.DiffSummary
+	Diff                      textdiff.Summary
 	PreFilePath               string
 	PreContent                string
 	PreExisted                bool

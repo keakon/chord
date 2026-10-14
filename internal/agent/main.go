@@ -12,6 +12,8 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/promptcache"
+	"github.com/keakon/chord/internal/agent/requestshape"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/command"
@@ -228,7 +230,7 @@ type MainAgent struct {
 	// the event loop handles a busy /loop command.
 	loopReductionMu               sync.Mutex
 	lastPreparedLLMTurnID         uint64
-	lastPreparedLLMRequestShape   []stableReductionMessageShape
+	lastPreparedLLMRequestShape   []requestshape.Shape
 	lastPreparedLLMRequestPrefix  []message.Message
 	lastPreparedLLMReducedIndices []bool
 	// lastPreparedLLMDiscardedInputs is session-scoped recall evidence: input
@@ -278,11 +280,8 @@ type MainAgent struct {
 	// loopReductionMu.
 	recalledReductionInputs map[string]struct{}
 
-	// cacheExpectMu protects per-ref request fingerprints used to attribute
-	// prompt-cache misses (chord-side prefix mutation vs provider-side loss).
-	cacheExpectMu     sync.Mutex
-	cacheExpectations map[string]*cacheExpectationRecord
-	cacheHitTracker   *cacheHitTracker
+	cacheExpectations promptcache.Expectations
+	cacheHitTracker   *promptcache.HitTracker
 
 	// toolDefHashMemo caches the tool-definition hash keyed by the frozen
 	// tool-definition snapshot pointer, so per-request surface checks do not
@@ -991,7 +990,7 @@ func NewMainAgent(
 		done:                    make(chan struct{}),
 		stoppingCh:              make(chan struct{}),
 		evidence:                evidenceCandidateTracker{seen: make(map[string]int)},
-		cacheHitTracker:         newCacheHitTracker(),
+		cacheHitTracker:         promptcache.NewHitTracker(),
 		contentRoot:             contentRoot,
 		pathLocator:             pathLocator,
 		subs:                    newSubAgentRegistry(),

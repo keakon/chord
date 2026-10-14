@@ -147,23 +147,3 @@ func TestDeliverySurvivesRepeatedCompactionAndReload(t *testing.T) {
 		a.ctxMgr = fresh
 	}
 }
-
-func TestDeliveryMetadataFingerprintTracksIdentity(t *testing.T) {
-	base := message.Message{DeliveredFiles: []message.DeliveredFile{{ID: "delivery", Locator: message.FileLocator{Kind: message.FileLocatorWorkspace, Workspace: &message.WorkspaceFileLocator{Root: "/project", Path: "/project/report.txt"}}}}}
-	original := deliveryMetadataHash(base)
-	changed := base.Clone()
-	changed.DeliveredFiles[0].Locator.Workspace.Path = "/project/other.txt"
-	if original == deliveryMetadataHash(changed) {
-		t.Fatal("locator change did not invalidate fingerprint")
-	}
-	checkpoint := message.Message{CompactionDeliveredFiles: base.DeliveredFiles}
-	if original == deliveryMetadataHash(checkpoint) {
-		t.Fatal("checkpoint ownership change did not invalidate fingerprint")
-	}
-	if deliveryMetadataHash(message.Message{}) != deliveryMetadataHash(message.Message{DeliveredFiles: []message.DeliveredFile{}}) {
-		t.Fatal("empty metadata representations disagree")
-	}
-	if deliveryMetadataHash(message.Message{}) == deliveryMetadataHash(message.Message{FileLinkBaseDir: "/project"}) {
-		t.Fatal("source binding missing from fingerprint")
-	}
-}

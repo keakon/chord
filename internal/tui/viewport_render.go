@@ -3,6 +3,8 @@ package tui
 import (
 	"sort"
 	"strings"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockIndex int, searchInnerOffset int, searchQuery string) string {
@@ -108,9 +110,9 @@ func (v *Viewport) Render(spinnerFrame string, sel *SelectionRange, searchBlockI
 			blockLines := block.RenderRange(v.width, sFrame, lo, hi)
 			finalLines = make([]string, len(blockLines))
 			for i, l := range blockLines {
-				line := expandTabsForDisplayANSI(l, preformattedTabWidth)
-				line = truncateLineToDisplayWidth(line, v.width)
-				line = padViewportLineToDisplayWidth(line, v.width)
+				line := terminaltext.ExpandTabsANSI(l, terminaltext.TabWidth)
+				line = terminaltext.Truncate(line, v.width)
+				line = terminaltext.PadOutsideStyle(line, v.width)
 				finalLines[i] = line
 			}
 			if lo == 0 && hi == blockCount {

@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // Items are a stable snapshot for both transcript and composer previews.
@@ -161,8 +162,8 @@ func (m *Model) imageViewerPhysicalPlacement() (placementID, row, col, pxOffsetX
 	if err != nil || fitCols <= 0 || fitRows <= 0 {
 		return 0, 0, 0, 0, 0, false
 	}
-	frameInnerLeft := rect.Min.X + 1 + DirectoryBorderStyle.GetPaddingLeft() + imageViewerInnerPadX
-	availableCols := max(1, rect.Dx()-2-2*imageViewerInnerPadX-DirectoryBorderStyle.GetHorizontalPadding())
+	frameInnerLeft := rect.Min.X + 1 + currentStyles.DirectoryBorderStyle.GetPaddingLeft() + imageViewerInnerPadX
+	availableCols := max(1, rect.Dx()-2-2*imageViewerInnerPadX-currentStyles.DirectoryBorderStyle.GetHorizontalPadding())
 	if availableCols < fitCols {
 		fitCols = availableCols
 	}
@@ -200,7 +201,7 @@ func (m *Model) imageViewerContentRect() (cols, rows int) {
 	if rows <= 0 {
 		rows = m.height
 	}
-	cols = max(1, min(cols, m.width-4)-DirectoryBorderStyle.GetHorizontalFrameSize()-2*imageViewerInnerPadX)
+	cols = max(1, min(cols, m.width-4)-currentStyles.DirectoryBorderStyle.GetHorizontalFrameSize()-2*imageViewerInnerPadX)
 	rows -= imageViewerMinReservedLines + 2*imageViewerInnerPadY
 	if rows < 1 {
 		rows = 1
@@ -296,7 +297,7 @@ func (m *Model) imageViewerTitle() string {
 	}
 	label := strings.TrimSpace(m.imageViewer.currentPart().FileName)
 	if label != "" {
-		left += " · " + truncateOneLine(label, 28)
+		left += " · " + terminaltext.TruncateOneLine(label, 28)
 	}
 	return left
 }
@@ -310,7 +311,7 @@ func (m *Model) imageViewerTitleLine(contentWidth int) string {
 	leftW := lipgloss.Width(left)
 	badgeW := lipgloss.Width(badge)
 	if leftW+1+badgeW > contentWidth {
-		left = truncateOneLine(left, max(1, contentWidth-badgeW-1))
+		left = terminaltext.TruncateOneLine(left, max(1, contentWidth-badgeW-1))
 		leftW = lipgloss.Width(left)
 	}
 	gap := max(contentWidth-leftW-badgeW, 1)
@@ -324,31 +325,31 @@ func (m *Model) renderImageViewerOverlay() string {
 	if m.imageViewer.Loading || m.imageViewer.Prepared == nil && m.imageViewer.Error == "" {
 		width := min(max(24, min(m.width-4, 60)), m.width)
 		return renderDialogBox(width, []string{
-			DialogTitleStyle.Render(m.imageViewerTitleLine(width - 4)), "",
-			DimStyle.Render("Loading image…"),
+			currentStyles.DialogTitleStyle.Render(m.imageViewerTitleLine(width - 4)), "",
+			currentStyles.DimStyle.Render("Loading image…"),
 		})
 	}
 	fitCols, fitRows, err := m.imageViewerFitSize()
 	if err != nil {
 		errWidth := min(max(24, min(m.width-4, 60)), m.width)
 		return renderDialogBox(errWidth, []string{
-			DialogTitleStyle.Render(m.imageViewerTitleLine(errWidth - 4)),
+			currentStyles.DialogTitleStyle.Render(m.imageViewerTitleLine(errWidth - 4)),
 			"",
-			ErrorStyle.Render(err.Error()),
+			currentStyles.ErrorStyle.Render(err.Error()),
 			hintLine(hint("Esc", "close"), hint("r", "retry")),
 		})
 	}
 
 	contentWidth := max(24, min(m.width-4, max(fitCols+2*imageViewerInnerPadX+2, 40))) -
-		DirectoryBorderStyle.GetHorizontalBorderSize() - DirectoryBorderStyle.GetHorizontalPadding()
+		currentStyles.DirectoryBorderStyle.GetHorizontalBorderSize() - currentStyles.DirectoryBorderStyle.GetHorizontalPadding()
 	var lines []string
-	lines = append(lines, DialogTitleStyle.Render(m.imageViewerTitleLine(contentWidth)))
+	lines = append(lines, currentStyles.DialogTitleStyle.Render(m.imageViewerTitleLine(contentWidth)))
 	for range imageViewerInnerPadY {
 		lines = append(lines, "")
 	}
 
 	placeholderLine := strings.Repeat(" ", imageViewerInnerPadX) + lipgloss.NewStyle().
-		Background(lipgloss.Color(currentTheme.DialogBg)).
+		Background(lipgloss.Color(currentStyles.Palette.DialogBg)).
 		Render(strings.Repeat(" ", fitCols)) + strings.Repeat(" ", imageViewerInnerPadX)
 
 	for range fitRows {
@@ -359,12 +360,12 @@ func (m *Model) renderImageViewerOverlay() string {
 		lines = append(lines, "")
 	}
 	if len(m.imageViewer.Items) > 1 {
-		lines = append(lines, DimStyle.Render(fmt.Sprintf("%d / %d", m.imageViewer.Index+1, len(m.imageViewer.Items))))
+		lines = append(lines, currentStyles.DimStyle.Render(fmt.Sprintf("%d / %d", m.imageViewer.Index+1, len(m.imageViewer.Items))))
 	}
 	body := strings.Join(lines, "\n")
 	body = preserveDialogBackground(body)
 	width := min(max(24, min(m.width-4, max(fitCols+2*imageViewerInnerPadX+4, 40))), m.width)
-	return DirectoryBorderStyle.Width(width).Render(body)
+	return currentStyles.DirectoryBorderStyle.Width(width).Render(body)
 }
 
 // retireImageViewer is used by synchronous focus/session boundary helpers.

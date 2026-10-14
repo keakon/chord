@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -16,88 +15,8 @@ import (
 	"testing"
 	"time"
 
-	readability "github.com/mackee/go-readability"
-	"golang.org/x/net/html"
-
 	"github.com/keakon/chord/internal/config"
 )
-
-func TestHTMLToMarkdownHandlesTopLevelListItems(t *testing.T) {
-	got := normalizeMarkdownForTest(htmlToMarkdown([]byte(`
-		<!doctype html>
-		<html>
-		<body>
-			<li>Alpha</li>
-			<li>Beta</li>
-		</body>
-		</html>
-	`)))
-
-	const want = "- Alpha\n- Beta"
-	if got != want {
-		t.Fatalf("htmlToMarkdown(top-level li) = %q, want %q", got, want)
-	}
-}
-
-func TestHTMLToMarkdownKeepsNestedListIndentation(t *testing.T) {
-	got := normalizeMarkdownForTest(htmlToMarkdown([]byte(`
-		<!doctype html>
-		<html>
-		<body>
-			<ul>
-				<li>
-					Parent
-					<ul>
-						<li>Child</li>
-					</ul>
-				</li>
-			</ul>
-		</body>
-		</html>
-	`)))
-
-	const want = "- Parent\n  - Child"
-	if got != want {
-		t.Fatalf("htmlToMarkdown(nested li) = %q, want %q", got, want)
-	}
-}
-
-func TestHTMLToMarkdownPrefersMainContentOverNavNoise(t *testing.T) {
-	got := normalizeMarkdownForTest(htmlToMarkdown([]byte(`
-		<!doctype html>
-		<html>
-		<head><title>Example</title></head>
-		<body>
-			<nav>
-				<ul><li>Home</li><li>Pricing</li></ul>
-			</nav>
-			<main>
-				<h1>Article Title</h1>
-				<p>Useful content paragraph.</p>
-			</main>
-			<footer>Footer links</footer>
-		</body>
-		</html>
-	`)))
-	if strings.Contains(got, "Home") || strings.Contains(got, "Pricing") || strings.Contains(got, "Footer links") {
-		t.Fatalf("htmlToMarkdown kept obvious chrome noise: %q", got)
-	}
-	if !strings.Contains(got, "Article Title") || !strings.Contains(got, "Useful content paragraph.") {
-		t.Fatalf("htmlToMarkdown missing main content: %q", got)
-	}
-}
-
-func TestHTMLToMarkdownResolvesRelativeLinks(t *testing.T) {
-	doc := `<!doctype html><html><body><main><a href="/docs/start">Start</a><img alt="logo" src="/img/logo.png"></main></body></html>`
-	parsed := mustParseHTMLDoc(t, doc)
-	got := normalizeMarkdownForTest(htmlDocumentToMarkdownBase(parsed, "https://example.com/base/"))
-	if !strings.Contains(got, "[Start ](https://example.com/docs/start)") {
-		t.Fatalf("expected resolved relative link, got %q", got)
-	}
-	if !strings.Contains(got, "![logo](https://example.com/img/logo.png)") {
-		t.Fatalf("expected resolved relative image src, got %q", got)
-	}
-}
 
 func TestWebFetchRejectsUnsupportedScheme(t *testing.T) {
 	tool := NewWebFetchTool(webFetchTestConfig(), "")
@@ -188,12 +107,6 @@ func TestWebFetchTimeoutMsAppliesToTheRequest(t *testing.T) {
 }
 
 func TestWebFetchMalformedHTMLFallsBackBestEffort(t *testing.T) {
-	origExtract := webFetchReadabilityExtract
-	defer func() { webFetchReadabilityExtract = origExtract }()
-	webFetchReadabilityExtract = func(string, readability.ReadabilityOptions, string) (readability.ReadabilityArticle, error) {
-		return readability.ReadabilityArticle{}, errors.New("force fallback")
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = io.WriteString(w, `<!doctype html><html><head><title>Broken</title></head><body><main><h1>Broken page<p>still readable`)
@@ -420,7 +333,7 @@ func TestWebFetchReturnedBodyIsCappedAndSavesFullOutput(t *testing.T) {
 	mustContain(t, out, "Truncated: output\n")
 	mustContain(t, out, "Output-Limit: "+strconv.Itoa(webFetchTextOutputBytes)+"\n")
 	mustContain(t, out, "...(output truncated)")
-	artifactPath := filepath.Join(sessionDir, sessionToolOutputsDirName, "web-fetch.log")
+	artifactPath := filepath.Join(sessionDir, "tool-outputs", "web-fetch.log")
 	mustContain(t, out, "Full output saved to "+artifactPath+".")
 	data, err := os.ReadFile(artifactPath)
 	if err != nil {
@@ -457,13 +370,6 @@ func TestWebFetchHTMLUsesLargerInputCapThanRawHTML(t *testing.T) {
 }
 
 func TestWebFetchSuspectShellIsReportedWithoutBrowserFallback(t *testing.T) {
-	origExtract := webFetchReadabilityExtract
-	defer func() { webFetchReadabilityExtract = origExtract }()
-
-	webFetchReadabilityExtract = func(string, readability.ReadabilityOptions, string) (readability.ReadabilityArticle, error) {
-		return readability.ReadabilityArticle{}, errors.New("force fallback")
-	}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = io.WriteString(w, `<!doctype html><html><body><div id="app">Loading...</div><script src="/a.js"></script><script src="/b.js"></script><script src="/c.js"></script></body></html>`)
@@ -533,15 +439,6 @@ func TestWebFetchNon2xxReturnsError(t *testing.T) {
 	_, err := executeWebFetchForTestAllowError(t, tool, map[string]any{"url": server.URL})
 	if err == nil || !strings.Contains(err.Error(), "HTTP 404") {
 		t.Fatalf("expected HTTP 404 error, got %v", err)
-	}
-}
-
-func TestAssessHTMLContentQualityMarksThinAndFallback(t *testing.T) {
-	if got := assessHTMLContentQuality("short text", "html-readability", "<html><body>short text</body></html>"); got != "thin" {
-		t.Fatalf("quality = %q, want thin", got)
-	}
-	if got := assessHTMLContentQuality(strings.Repeat("content ", 40), "html-legacy", "<html><body>content</body></html>"); got != "fallback" {
-		t.Fatalf("quality = %q, want fallback", got)
 	}
 }
 
@@ -637,18 +534,6 @@ func executeWebFetchForTestAllowError(t *testing.T, tool WebFetchTool, args map[
 	return tool.Execute(context.Background(), raw)
 }
 
-func normalizeMarkdownForTest(s string) string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		out = append(out, strings.TrimRight(line, " "))
-	}
-	return strings.Join(out, "\n")
-}
-
 func mustContain(t *testing.T, s, want string) {
 	t.Helper()
 	if !strings.Contains(s, want) {
@@ -670,13 +555,4 @@ func parseWebFetchHeaderInt(t *testing.T, out, key string) int {
 	}
 	t.Fatalf("header %q not found in output %q", key, out)
 	return 0
-}
-
-func mustParseHTMLDoc(t *testing.T, body string) *html.Node {
-	t.Helper()
-	doc, err := html.Parse(strings.NewReader(body))
-	if err != nil {
-		t.Fatalf("html.Parse: %v", err)
-	}
-	return doc
 }

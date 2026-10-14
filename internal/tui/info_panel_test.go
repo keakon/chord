@@ -16,11 +16,13 @@ import (
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/gitinspect"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type infoPanelAgent struct {
@@ -195,7 +197,7 @@ func TestUsageUpdatedEventInvalidatesInfoPanelCache(t *testing.T) {
 	backend.usage.InputTokens = 1_000
 	m := NewModel(backend)
 
-	first := stripANSI(m.renderInfoPanel(40, 24))
+	first := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(first, "1.0k") {
 		t.Fatalf("initial info panel should include initial token usage, got %q", first)
 	}
@@ -205,7 +207,7 @@ func TestUsageUpdatedEventInvalidatesInfoPanelCache(t *testing.T) {
 	m.cachedInfoPanelOut = first
 
 	m.handleAgentEvent(agentEventMsg{event: agent.UsageUpdatedEvent{}})
-	second := stripANSI(m.renderInfoPanel(40, 24))
+	second := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(second, "2.0k") {
 		t.Fatalf("info panel should refresh after UsageUpdatedEvent, got %q", second)
 	}
@@ -223,8 +225,8 @@ func TestInfoPanelCacheIncludesRequestReductionSurface(t *testing.T) {
 	first := model.renderInfoPanel(50, 24)
 	backend.contextReduction = agent.ContextReductionStats{Messages: 130, Bytes: 300_500, CurrentBytes: 100_000, CurrentMessages: 80}
 
-	second := stripANSI(model.renderInfoPanel(50, 24))
-	if second == stripANSI(first) {
+	second := terminaltext.StripANSI(model.renderInfoPanel(50, 24))
+	if second == terminaltext.StripANSI(first) {
 		t.Fatalf("info panel reused stale cached output after request reduction surface changed")
 	}
 	if !strings.Contains(second, "Bytes: 97.7 KB (↓75%)") || !strings.Contains(second, "Messages: 80") {
@@ -241,7 +243,7 @@ func TestInfoPanelShowsContextBytesAndReducedRatio(t *testing.T) {
 	backend.contextReduction = agent.ContextReductionStats{Messages: 130, Bytes: 300_500, CurrentBytes: 200_000, CurrentMessages: 130}
 	model := NewModel(backend)
 
-	plain := stripANSI(model.renderInfoPanel(50, 24))
+	plain := terminaltext.StripANSI(model.renderInfoPanel(50, 24))
 	if !strings.Contains(plain, "Context: 42.6k (43%)") {
 		t.Fatalf("info panel missing context summary, got:\n%s", plain)
 	}
@@ -260,7 +262,7 @@ func TestInfoPanelHidesContextBytesWhenNoMessages(t *testing.T) {
 	backend.contextMessageCount = 0
 	model := NewModel(backend)
 
-	plain := stripANSI(model.renderInfoPanel(50, 24))
+	plain := terminaltext.StripANSI(model.renderInfoPanel(50, 24))
 	if strings.Contains(plain, "Bytes:") {
 		t.Fatalf("info panel should not show context bytes before any messages, got:\n%s", plain)
 	}
@@ -278,7 +280,7 @@ func TestInfoPanelShowsReducedRatioWithoutCurrentReductionSurface(t *testing.T) 
 	backend.contextReduction = agent.ContextReductionStats{Messages: 130, Bytes: 300_500}
 	model := NewModel(backend)
 
-	plain := stripANSI(model.renderInfoPanel(50, 24))
+	plain := terminaltext.StripANSI(model.renderInfoPanel(50, 24))
 	if !strings.Contains(plain, "Bytes: 195.3 KB (↓60%)") {
 		t.Fatalf("info panel should show reduced byte ratio without request surface bytes, got:\n%s", plain)
 	}
@@ -297,7 +299,7 @@ func TestInfoPanelUsesSameReductionFormatForSidebarWidths(t *testing.T) {
 	model := NewModel(backend)
 
 	for _, width := range []int{28, 40} {
-		plain := stripANSI(model.renderInfoPanel(width, 24))
+		plain := terminaltext.StripANSI(model.renderInfoPanel(width, 24))
 		if !strings.Contains(plain, "Bytes: 658.6 KB (↓45%)") {
 			t.Fatalf("info panel missing byte reduction at width %d, got:\n%s", width, plain)
 		}
@@ -328,7 +330,7 @@ func TestKeyPoolTickWakesCodexRateLimitPollingWhileAgentActive(t *testing.T) {
 }
 
 func TestRenderInfoPanelCollapsibleHeaderUsesExtraSpaceAfterSummaryDot(t *testing.T) {
-	got := strings.TrimSpace(stripANSI(renderInfoPanelCollapsibleHeader(24, true, "LSP", "3")))
+	got := strings.TrimSpace(terminaltext.StripANSI(renderInfoPanelCollapsibleHeader(24, true, "LSP", "3")))
 	if got != "▼ LSP · 3" {
 		t.Fatalf("collapsible header = %q, want %q", got, "▼ LSP · 3")
 	}
@@ -339,7 +341,7 @@ func TestRenderInfoPanelAgentsUsesTaskSummaryLabelPolicy(t *testing.T) {
 	m := NewModel(backend)
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "update prompt tests", AgentDefName: "coder"}}, "main", "builder")
 
-	plain := stripANSI(m.renderInfoPanel(40, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	section := strings.Join(infoPanelSectionLines(infoPanelPlainLines(plain), "AGENTS"), "\n")
 	if !strings.Contains(section, "builder") {
 		t.Fatalf("info panel AGENTS should show main role, got %q", section)
@@ -367,7 +369,7 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 	m := NewModel(backend)
 
 	rendered := m.renderInfoPanel(40, 40)
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	section := infoPanelSectionLines(infoPanelPlainLines(plain), "▼ SKILLS")
 	joined := strings.Join(section, "\n")
 	if !strings.Contains(plain, "▼ SKILLS") {
@@ -389,12 +391,12 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 		label string
 	}{
 		{name: "model-visible loaded", glyph: "●", style: invokedStyle, label: "go-expert"},
-		{name: "model-visible idle", glyph: "○", style: InfoPanelDim, label: "py-expert"},
+		{name: "model-visible idle", glyph: "○", style: currentStyles.InfoPanelDim, label: "py-expert"},
 		{name: "manual loaded", glyph: "◌", style: invokedStyle, label: "manual-live"},
-		{name: "manual idle", glyph: "◌", style: InfoPanelDim, label: "manual-idle"},
+		{name: "manual idle", glyph: "◌", style: currentStyles.InfoPanelDim, label: "manual-idle"},
 	}
 	for _, tc := range cases {
-		want := tc.style.Render(tc.glyph) + " " + InfoPanelDim.Render(tc.label)
+		want := tc.style.Render(tc.glyph) + " " + currentStyles.InfoPanelDim.Render(tc.label)
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("%s skill row should render %q; want %q in %q", tc.name, tc.label, want, rendered)
 		}
@@ -425,7 +427,7 @@ func TestRenderInfoPanelSkillsUseStateIcons(t *testing.T) {
 	m.infoPanelCollapsedSections[infoPanelSectionSkills] = false
 
 	rendered := m.renderInfoPanel(40, 24)
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	section := strings.Join(infoPanelSectionLines(infoPanelPlainLines(plain), "▼ SKILLS"), "\n")
 	for _, want := range []string{"◎ relevant-skill", "↻ reload-skill", "◌ manual-skill"} {
 		if !strings.Contains(section, want) {
@@ -437,7 +439,7 @@ func TestRenderInfoPanelSkillsUseStateIcons(t *testing.T) {
 	}
 	// The reload state is the only non-dim, non-success accent: amber marks
 	// "load it again", so it has to survive rendering as a colored glyph.
-	reloadGlyph := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg)).Render("↻")
+	reloadGlyph := currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg)).Render("↻")
 	if !strings.Contains(rendered, reloadGlyph) {
 		t.Fatalf("reload row should paint ↻ in the warning color; want %q in %q", reloadGlyph, rendered)
 	}
@@ -451,7 +453,7 @@ func TestRenderInfoPanelShowsSkillsForFocusedSubAgent(t *testing.T) {
 	}
 	m := NewModel(backend)
 
-	mainPlain := stripANSI(m.renderInfoPanel(40, 24))
+	mainPlain := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if strings.Contains(mainPlain, "SKILLS") {
 		t.Fatalf("main info panel should hide denied skills, got %q", mainPlain)
 	}
@@ -460,7 +462,7 @@ func TestRenderInfoPanelShowsSkillsForFocusedSubAgent(t *testing.T) {
 	// The sub-agent's only skill is not loaded, so the section defaults to
 	// folded; expand it explicitly to pin the focused-agent row rendering.
 	m.infoPanelCollapsedSections[infoPanelSectionSkills] = false
-	subPlain := stripANSI(m.renderInfoPanel(40, 24))
+	subPlain := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(subPlain, "▼ SKILLS") || !strings.Contains(subPlain, "go-expert") {
 		t.Fatalf("focused subagent info panel should show its skills, got %q", subPlain)
 	}
@@ -473,12 +475,12 @@ func TestRenderInfoPanelSkipsInvokedSkillMissingFromAvailableList(t *testing.T) 
 	m := NewModel(backend)
 
 	rendered := m.renderInfoPanel(40, 24)
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	section := strings.Join(infoPanelSectionLines(infoPanelPlainLines(plain), "▼ SKILLS"), "\n")
 	if strings.Contains(section, "missing-skill") {
 		t.Fatalf("skills section should omit invoked skills missing from available list, got %q", section)
 	}
-	wantInvoked := skillStateLoadedStyle().Render("●") + " " + InfoPanelDim.Render("go-expert")
+	wantInvoked := skillStateLoadedStyle().Render("●") + " " + currentStyles.InfoPanelDim.Render("go-expert")
 	if !strings.Contains(rendered, wantInvoked) {
 		t.Fatalf("visible invoked skill should keep a success-colored ● icon; want %q in %q", wantInvoked, rendered)
 	}
@@ -491,7 +493,7 @@ func TestRenderInfoPanelShowsKeyPoolConfirmedCount(t *testing.T) {
 	backend.keysTotal = 5
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(plain, "Keys: 3/5") {
 		t.Fatalf("rendered info panel should show confirmed/total; got %q", plain)
 	}
@@ -502,7 +504,7 @@ func TestRenderInfoPanelShowsKeyPoolConfirmedCount(t *testing.T) {
 
 // TestRenderInfoPanelPoolMatchesProviderLabelStyle verifies the Pool line uses
 // the same key/value styling as the Provider line: a dim "Pool:" label with an
-// InfoPanelValue pool name.
+// currentStyles.InfoPanelValue pool name.
 func TestRenderInfoPanelPoolMatchesProviderLabelStyle(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.poolNamesByFocus = map[string][]string{"": {"thinking", "non-thinking"}}
@@ -512,14 +514,14 @@ func TestRenderInfoPanelPoolMatchesProviderLabelStyle(t *testing.T) {
 	m := NewModel(backend)
 
 	rendered := m.renderInfoPanel(40, 20)
-	want := InfoPanelDim.Render("Pool: ") + InfoPanelValue.Render("thinking")
+	want := currentStyles.InfoPanelDim.Render("Pool: ") + currentStyles.InfoPanelValue.Render("thinking")
 	if !strings.Contains(rendered, want) {
-		t.Fatalf("Pool line should use dim label + InfoPanelValue name like Provider; rendered=%q want fragment=%q", rendered, want)
+		t.Fatalf("Pool line should use dim label + currentStyles.InfoPanelValue name like Provider; rendered=%q want fragment=%q", rendered, want)
 	}
-	if strings.Contains(rendered, InfoPanelValue.Render("Pool: thinking")) {
-		t.Fatalf("Pool label must not be bolded like InfoPanelValue; rendered=%q", rendered)
+	if strings.Contains(rendered, currentStyles.InfoPanelValue.Render("Pool: thinking")) {
+		t.Fatalf("Pool label must not be bolded like currentStyles.InfoPanelValue; rendered=%q", rendered)
 	}
-	warn := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelKeyWarnFg)).Render("Pool: thinking")
+	warn := currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelKeyWarnFg)).Render("Pool: thinking")
 	if strings.Contains(rendered, warn) {
 		t.Fatalf("Pool line should not use key warning color; rendered=%q warn fragment=%q", rendered, warn)
 	}
@@ -532,7 +534,7 @@ func TestRenderInfoPanelShowsSingleModelPool(t *testing.T) {
 	backend.currentPoolByFocus = map[string]string{"": "gpt-5.6-sol"}
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(plain, "Pool: gpt-5.6-sol") {
 		t.Fatalf("single Pool should remain visible; got %q", plain)
 	}
@@ -740,7 +742,7 @@ func TestRenderInfoPanelHidesUsageWhenAllZero(t *testing.T) {
 	backend.contextLimit = 0 // both current and limit are zero
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(32, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(32, 20))
 	if strings.Contains(plain, "USAGE") {
 		t.Fatalf("rendered info panel should hide zero USAGE block; got %q", plain)
 	}
@@ -751,7 +753,7 @@ func TestRenderInfoPanelShowsContextWhenOnlyLimitSet(t *testing.T) {
 	// contextCurrent = 0, contextLimit = 200_000 (default)
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 24))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(plain, "USAGE") {
 		t.Fatalf("rendered info panel should show USAGE when context limit > 0; got %q", plain)
 	}
@@ -774,7 +776,7 @@ func TestRenderInfoPanelSubAgentWithoutContextLimit(t *testing.T) {
 	}
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 24))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	// TOKENS sub-section should still render (cumulative usage exists).
 	if !strings.Contains(plain, "USAGE") {
 		t.Fatalf("rendered info panel should show USAGE when tokens exist; got %q", plain)
@@ -796,7 +798,7 @@ func TestRenderInfoPanelSubAgentAfterLLMCallShowsContext(t *testing.T) {
 	backend.contextLimit = 128_000 // set by SetMaxTokens after first LLM call
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 24))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(plain, "Context") {
 		t.Fatalf("rendered info panel should show Context after SubAgent LLM call; got %q", plain)
 	}
@@ -810,7 +812,7 @@ func TestRenderInfoPanelShowsUsageWhenContextNonZero(t *testing.T) {
 	backend.contextCurrent = 2000
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 24))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(plain, "USAGE") {
 		t.Fatalf("rendered info panel should show USAGE when context > 0; got %q", plain)
 	}
@@ -822,7 +824,7 @@ func TestRenderInfoPanelShowsUsageUsesInputBudgetRatherThanTotalContextWindow(t 
 	backend.contextLimit = 100_000
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 24))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(plain, "Context: 50.0k (50%)") {
 		t.Fatalf("rendered info panel should show input-budget percentage; got %q", plain)
 	}
@@ -869,12 +871,12 @@ func TestInfoPanelCacheIncludesUsageState(t *testing.T) {
 	backend.contextUsageState = ctxmgr.ContextUsageEstimated
 	m := NewModel(backend)
 
-	first := stripANSI(m.renderInfoPanel(40, 24))
+	first := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(first, "Context: ≈12.3k") {
 		t.Fatalf("frozen estimate should render the approximate marker, got %q", first)
 	}
 	backend.contextUsageState = ctxmgr.ContextUsageObserved
-	second := stripANSI(m.renderInfoPanel(40, 24))
+	second := terminaltext.StripANSI(m.renderInfoPanel(40, 24))
 	if strings.Contains(second, "≈") {
 		t.Fatalf("info panel reused the approximate marker after the usage state changed, got %q", second)
 	}
@@ -1482,7 +1484,7 @@ func TestRenderInfoPanelCollapsedTodosShowsHeaderOnly(t *testing.T) {
 
 func TestInfoPanelGitBlockHiddenWhenNoRepo(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
-	plain := stripANSI(m.renderInfoPanel(48, 24))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
 	if strings.Contains(plain, "GIT") {
 		t.Fatalf("git block should be hidden when no git info is present, got:\n%s", plain)
 	}
@@ -1490,12 +1492,12 @@ func TestInfoPanelGitBlockHiddenWhenNoRepo(t *testing.T) {
 
 func TestInfoPanelGitBlockCollapsedByDefault(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
-	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", Ahead: 14, ChangedFiles: 2, StagedFiles: 1, Stashes: 3}
+	m.gitStatus.Info = gitinspect.Info{Present: true, Branch: "main", Ahead: 14, ChangedFiles: 2, StagedFiles: 1, Stashes: 3}
 	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▶ GIT")
 	if len(section) != 0 {
 		t.Fatalf("collapsed git section should not render body lines, got %#v", section)
 	}
-	plain := stripANSI(m.renderInfoPanel(48, 24))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
 	if !strings.Contains(plain, "▶ GIT") || !strings.Contains(plain, "main ↑14 +1 !2 *3") {
 		t.Fatalf("git summary missing from collapsed header, got:\n%s", plain)
 	}
@@ -1503,8 +1505,8 @@ func TestInfoPanelGitBlockCollapsedByDefault(t *testing.T) {
 
 func TestInfoPanelGitBlockCollapsedKeepsCountsWithLongBranch(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
-	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "feature/very-long-branch-name-here", ChangedFiles: 2}
-	plain := stripANSI(m.renderInfoPanel(32, 24))
+	m.gitStatus.Info = gitinspect.Info{Present: true, Branch: "feature/very-long-branch-name-here", ChangedFiles: 2}
+	plain := terminaltext.StripANSI(m.renderInfoPanel(32, 24))
 	if !strings.Contains(plain, "... !2") {
 		t.Fatalf("long branch should be truncated without hiding the changed count, got:\n%s", plain)
 	}
@@ -1516,7 +1518,7 @@ func TestInfoPanelGitBlockCollapsedKeepsCountsWithLongBranch(t *testing.T) {
 func TestInfoPanelGitBlockExpanded(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
 	m.workingDir = "/state/worktrees/repo-abc/fix-ui"
-	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", WorktreeName: "fix-ui", Dir: "/state/worktrees/repo-abc/fix-ui", Ahead: 2, Behind: 1, ChangedFiles: 3, StagedFiles: 1, Stashes: 2}
+	m.gitStatus.Info = gitinspect.Info{Present: true, Branch: "main", WorktreeName: "fix-ui", Dir: "/state/worktrees/repo-abc/fix-ui", Ahead: 2, Behind: 1, ChangedFiles: 3, StagedFiles: 1, Stashes: 2}
 	m.toggleInfoPanelSection(infoPanelSectionGit)
 	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▼ GIT")
 	joined := strings.Join(section, "\n")
@@ -1525,7 +1527,7 @@ func TestInfoPanelGitBlockExpanded(t *testing.T) {
 			t.Fatalf("expanded git section missing %q in:\n%s", want, joined)
 		}
 	}
-	plain := stripANSI(m.renderInfoPanel(48, 24))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
 	if strings.Contains(plain, "main@fix-ui ↑2 ↓1 !3") {
 		t.Fatalf("expanded git header should omit summary, got:\n%s", plain)
 	}
@@ -1539,7 +1541,7 @@ func TestInfoPanelGitBlockExpanded(t *testing.T) {
 
 func TestInfoPanelGitBlockExpandedHidesZeroNumericRows(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
-	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", ChangedFiles: 2}
+	m.gitStatus.Info = gitinspect.Info{Present: true, Branch: "main", ChangedFiles: 2}
 	m.toggleInfoPanelSection(infoPanelSectionGit)
 
 	section := infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▼ GIT")
@@ -1558,7 +1560,7 @@ func TestInfoPanelGitBlockExpandedHidesZeroNumericRows(t *testing.T) {
 
 func TestInfoPanelGitBlockExpandedShowsOneSidedSync(t *testing.T) {
 	m := NewModel(newInfoPanelAgent())
-	m.gitStatus.Info = gitStatusInfo{Present: true, Branch: "main", Ahead: 2}
+	m.gitStatus.Info = gitinspect.Info{Present: true, Branch: "main", Ahead: 2}
 	m.toggleInfoPanelSection(infoPanelSectionGit)
 
 	joined := strings.Join(infoPanelSectionLines(infoPanelPlainLines(m.renderInfoPanel(48, 24)), "▼ GIT"), "\n")
@@ -1580,7 +1582,7 @@ func TestRenderInfoPanelCollapsedLSPShowsCountOnly(t *testing.T) {
 	if len(section) != 0 {
 		t.Fatalf("collapsed LSP section should not render body lines, got %#v", section)
 	}
-	plain := stripANSI(m.renderInfoPanel(40, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(plain, "▶ LSP") || !strings.Contains(plain, "2") {
 		t.Fatalf("collapsed LSP header should include count, got %q", plain)
 	}
@@ -1599,7 +1601,7 @@ func TestRenderInfoPanelCollapsedSkillsShowsCountOnly(t *testing.T) {
 	if len(section) != 0 {
 		t.Fatalf("collapsed SKILLS section should not render body lines, got %#v", section)
 	}
-	plain := stripANSI(m.renderInfoPanel(40, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(plain, "▶ SKILLS") || !strings.Contains(plain, "2") {
 		t.Fatalf("collapsed SKILLS header should include count, got %q", plain)
 	}
@@ -1615,7 +1617,7 @@ func TestRenderInfoPanelCollapsedMCPShowsCountOnly(t *testing.T) {
 	if len(section) != 0 {
 		t.Fatalf("collapsed MCP section should not render body lines, got %#v", section)
 	}
-	plain := stripANSI(m.renderInfoPanel(40, 20))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(plain, "▶ MCP") || !strings.Contains(plain, "2") {
 		t.Fatalf("collapsed MCP header should include count, got %q", plain)
 	}
@@ -1632,7 +1634,7 @@ func TestRenderInfoPanelEnvironmentDotsPreserveInfoPanelBackground(t *testing.T)
 	m.infoPanelCollapsedSections[infoPanelSectionLSP] = false
 	rendered := m.renderInfoPanel(32, 20)
 
-	pendingWant := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelPendingFg)).Render("●")
+	pendingWant := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelPendingFg)).Render("●")
 	if !strings.Contains(rendered, pendingWant) {
 		t.Fatalf("pending LSP dot should include info-panel background; want segment %q in %q", pendingWant, rendered)
 	}
@@ -1641,7 +1643,7 @@ func TestRenderInfoPanelEnvironmentDotsPreserveInfoPanelBackground(t *testing.T)
 		t.Fatalf("pending LSP dot should not be rendered without background; got %q in %q", pendingBad, rendered)
 	}
 
-	okWant := GaugeFull.Render("●")
+	okWant := currentStyles.GaugeFull.Render("●")
 	if !strings.Contains(rendered, okWant) {
 		t.Fatalf("OK MCP dot should include info-panel background; want segment %q in %q", okWant, rendered)
 	}
@@ -1664,9 +1666,9 @@ func TestRenderInfoPanelEditedFilesStatsPreserveInfoPanelBackground(t *testing.T
 
 	rendered := m.renderInfoPanel(48, 24)
 
-	wantAdd := InfoPanelEditAddedStyle.Render("+2")
-	wantSep := InfoPanelDim.Render(" ")
-	wantRem := InfoPanelEditRemovedStyle.Render("-1")
+	wantAdd := currentStyles.InfoPanelEditAddedStyle.Render("+2")
+	wantSep := currentStyles.InfoPanelDim.Render(" ")
+	wantRem := currentStyles.InfoPanelEditRemovedStyle.Render("-1")
 	if !strings.Contains(rendered, wantAdd) {
 		t.Fatalf("CHANGED FILES +N should use info-panel background; want segment %q in output", wantAdd)
 	}
@@ -1679,8 +1681,8 @@ func TestRenderInfoPanelEditedFilesStatsPreserveInfoPanelBackground(t *testing.T
 	if !strings.Contains(rendered, wantAdd+wantSep+wantRem) {
 		t.Fatalf("CHANGED FILES +N/-N sequence should preserve panel background across separator; want substring %q in output", wantAdd+wantSep+wantRem)
 	}
-	badAdd := SidebarAddedStyle.Render("+2")
-	badRem := SidebarRemovedStyle.Render("-1")
+	badAdd := currentStyles.SidebarAddedStyle.Render("+2")
+	badRem := currentStyles.SidebarRemovedStyle.Render("-1")
 	if strings.Contains(rendered, badAdd) {
 		t.Fatalf("CHANGED FILES should not use sidebar-only add style (no panel bg); got bare segment %q", badAdd)
 	}
@@ -1700,7 +1702,7 @@ func TestRenderInfoPanelEditedFilesPrioritizesStatsWhenNarrow(t *testing.T) {
 	m.sidebar.Update(nil, "main", "builder")
 	m.sidebar.AddFileEdit("main", "/tmp/app_update_input_row.go", 14, 4)
 
-	block := stripANSI(m.buildInfoPanelFilesBlock(8))
+	block := terminaltext.StripANSI(m.buildInfoPanelFilesBlock(8))
 	if !strings.Contains(block, "+14 -4") {
 		t.Fatalf("narrow CHANGED FILES row should keep full stats, got %q", block)
 	}
@@ -1712,7 +1714,7 @@ func TestRenderInfoPanelEditedFilesStatsDoNotTouchRightEdge(t *testing.T) {
 	m.sidebar.Update(nil, "main", "builder")
 	m.sidebar.AddFileEdit("main", "/tmp/long_fixture_filename_for_stats.go", 12, 34)
 
-	block := stripANSI(m.buildInfoPanelFilesBlock(30))
+	block := terminaltext.StripANSI(m.buildInfoPanelFilesBlock(30))
 	lines := strings.Split(block, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("CHANGED FILES block should include a file row, got %q", block)
@@ -1926,10 +1928,10 @@ func TestRenderInfoPanelAgentsPreserveInfoPanelBackground(t *testing.T) {
 		t.Fatalf("AGENTS sub-agent row = %q, want %q", section[1], "· ship tests  unknown")
 	}
 
-	if !strings.Contains(rendered, InfoPanelAgentFocusedStyle.Render("▸ ○ builder")) {
+	if !strings.Contains(rendered, currentStyles.InfoPanelAgentFocusedStyle.Render("▸ ○ builder")) {
 		t.Fatalf("AGENTS focused line should use info-panel-aware style; want styled content in output")
 	}
-	entryPrefix := InfoPanelAgentEntryStyle.Render("  · ship tests  unknown")
+	entryPrefix := currentStyles.InfoPanelAgentEntryStyle.Render("  · ship tests  unknown")
 	if !strings.Contains(rendered, entryPrefix) {
 		t.Fatalf("AGENTS sub-agent line should preserve info-panel background with collapsible content indent; want %q in output", entryPrefix)
 	}
@@ -1989,7 +1991,7 @@ func TestRenderInfoPanelCollapsedAgentsShowsHeaderOnly(t *testing.T) {
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")
 	m.infoPanelCollapsedSections[infoPanelSectionAgents] = true
 
-	plain := stripANSI(m.renderInfoPanel(48, 24))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
 	if !strings.Contains(plain, "▶ AGENTS") || !strings.Contains(plain, "1 unknown") {
 		t.Fatalf("collapsed AGENTS header should include compact count, got %q", plain)
 	}
@@ -2058,7 +2060,7 @@ func TestRenderInfoPanelAgentsRefreshWhenSelectedRefVariantChanges(t *testing.T)
 		SelectedRef: "openai/gpt-5.5@high",
 	}}, "main", "builder")
 
-	before := stripANSI(m.renderInfoPanel(48, 24))
+	before := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
 	if !strings.Contains(before, "ship tests") {
 		t.Fatalf("info panel before variant change = %q, want ship tests", before)
 	}
@@ -2068,7 +2070,7 @@ func TestRenderInfoPanelAgentsRefreshWhenSelectedRefVariantChanges(t *testing.T)
 		TaskDesc:    "ship tests",
 		SelectedRef: "openai/gpt-5.5@low",
 	}}, "main", "builder")
-	after := stripANSI(m.renderInfoPanel(48, 24))
+	after := terminaltext.StripANSI(m.renderInfoPanel(48, 24))
 	if !strings.Contains(after, "ship tests") {
 		t.Fatalf("info panel after variant change = %q, want ship tests", after)
 	}
@@ -2098,7 +2100,7 @@ func TestRenderInfoPanelEnvironmentDotsUseThemeInfoPanelBackground(t *testing.T)
 	// explicitly to pin the themed dot rendering.
 	m.infoPanelCollapsedSections[infoPanelSectionLSP] = false
 	rendered := m.renderInfoPanel(32, 20)
-	want := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelPendingFg)).Render("●")
+	want := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelPendingFg)).Render("●")
 	if !strings.Contains(rendered, want) {
 		t.Fatalf("pending LSP dot should use themed info-panel background; want %q in %q", want, rendered)
 	}
@@ -2115,14 +2117,14 @@ func TestRenderInfoPanelIdleEnvironmentRowsUseDimNotCriticalStyles(t *testing.T)
 	m.infoPanelCollapsedSections[infoPanelSectionLSP] = false
 	m.infoPanelCollapsedSections[infoPanelSectionMCP] = false
 	rendered := m.renderInfoPanel(40, 20)
-	plain := stripANSI(rendered)
+	plain := terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "gopls") || !strings.Contains(plain, "exa") {
 		t.Fatalf("idle environment rows missing from info panel, got %q", plain)
 	}
-	if strings.Contains(rendered, InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg)).Render(" gopls")) {
+	if strings.Contains(rendered, currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg)).Render(" gopls")) {
 		t.Fatalf("idle LSP row should not use critical label style, got %q", rendered)
 	}
-	if strings.Contains(rendered, InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg)).Render(" exa")) {
+	if strings.Contains(rendered, currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg)).Render(" exa")) {
 		t.Fatalf("idle MCP row should not use critical label style, got %q", rendered)
 	}
 }
@@ -2136,7 +2138,7 @@ func TestRenderInfoPanelLSPErrorHidesRawMessageAndRefreshesWhenStatusChanges(t *
 	// expand it explicitly to pin the error-row rendering on both sides of
 	// the status change.
 	m.infoPanelCollapsedSections[infoPanelSectionLSP] = false
-	before := stripANSI(m.renderInfoPanel(40, 20))
+	before := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(before, "gopls") {
 		t.Fatalf("info panel before LSP error change = %q, want server name", before)
 	}
@@ -2145,7 +2147,7 @@ func TestRenderInfoPanelLSPErrorHidesRawMessageAndRefreshesWhenStatusChanges(t *
 	}
 
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", Err: "context deadline exceeded", OK: false}}
-	after := stripANSI(m.renderInfoPanel(40, 20))
+	after := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(after, "gopls") {
 		t.Fatalf("info panel after LSP error change = %q, want server name", after)
 	}
@@ -2163,7 +2165,7 @@ func TestRenderInfoPanelMCPErrorRefreshesWhenMessageChanges(t *testing.T) {
 	// expand it explicitly to pin the error-row rendering on both sides of
 	// the message change.
 	m.infoPanelCollapsedSections[infoPanelSectionMCP] = false
-	before := stripANSI(m.renderInfoPanel(40, 20))
+	before := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(before, "codex_apps") {
 		t.Fatalf("info panel before MCP error change = %q, want server name", before)
 	}
@@ -2172,7 +2174,7 @@ func TestRenderInfoPanelMCPErrorRefreshesWhenMessageChanges(t *testing.T) {
 	}
 
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "codex_apps", Err: "connection refused", OK: false}}
-	after := stripANSI(m.renderInfoPanel(40, 20))
+	after := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(after, "codex_apps") {
 		t.Fatalf("info panel after MCP error change = %q, want server name", after)
 	}
@@ -2189,17 +2191,17 @@ func TestRenderInfoPanelMCPRetryingUsesWarningLabel(t *testing.T) {
 	// A retrying server has not connected yet, so the section defaults to
 	// folded; expand it explicitly to pin the warning label rendering.
 	m.infoPanelCollapsedSections[infoPanelSectionMCP] = false
-	got := stripANSI(m.renderInfoPanel(40, 20))
+	got := terminaltext.StripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(got, "exa") {
 		t.Fatalf("retrying MCP row = %q, want server name", got)
 	}
 
 	rendered := m.renderInfoPanel(40, 20)
-	wantWarning := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg)).Render(" exa")
+	wantWarning := currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg)).Render(" exa")
 	if !strings.Contains(rendered, wantWarning) {
 		t.Fatalf("retrying MCP row should use warning label style; want %q in %q", wantWarning, rendered)
 	}
-	if strings.Contains(rendered, InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelCriticalFg)).Render(" exa")) {
+	if strings.Contains(rendered, currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg)).Render(" exa")) {
 		t.Fatalf("retrying MCP row should not use critical red label style; got %q", rendered)
 	}
 }
@@ -2213,11 +2215,11 @@ func TestRenderInfoPanelMCPPendingUsesDimLabel(t *testing.T) {
 	// folded; expand it explicitly to pin the dim label rendering.
 	m.infoPanelCollapsedSections[infoPanelSectionMCP] = false
 	rendered := m.renderInfoPanel(40, 20)
-	wantDim := InfoPanelDim.Render(" exa")
+	wantDim := currentStyles.InfoPanelDim.Render(" exa")
 	if !strings.Contains(rendered, wantDim) {
 		t.Fatalf("pending MCP row should use dim label style; want %q in %q", wantDim, rendered)
 	}
-	wantWarning := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg)).Render(" exa")
+	wantWarning := currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg)).Render(" exa")
 	if strings.Contains(rendered, wantWarning) {
 		t.Fatalf("pending MCP row should not use warning label style; got %q", rendered)
 	}
@@ -2225,9 +2227,9 @@ func TestRenderInfoPanelMCPPendingUsesDimLabel(t *testing.T) {
 
 func TestRenderLSPDiagSummaryUsesInfoPanelBackgroundOnAllSegments(t *testing.T) {
 	got := renderLSPDiagSummary("3 E, 1 W")
-	wantError := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelDiagErrorFg)).Render("3 E")
-	wantWarn := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelDiagWarnFg)).Render("1 W")
-	wantSep := InfoPanelDim.Render(", ")
+	wantError := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelDiagErrorFg)).Render("3 E")
+	wantWarn := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelDiagWarnFg)).Render("1 W")
+	wantSep := currentStyles.InfoPanelDim.Render(", ")
 
 	if !strings.Contains(got, wantError) {
 		t.Fatalf("error segment should include info-panel background; want %q in %q", wantError, got)
@@ -2267,7 +2269,7 @@ func TestFormatLSPServerDiagSuffix(t *testing.T) {
 
 func TestRenderLSPDiagSummaryFollowsThemeInfoPanelBackground(t *testing.T) {
 	got := renderLSPDiagSummary("3 E, 1 W")
-	wantError := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelDiagErrorFg)).Render("3 E")
+	wantError := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelDiagErrorFg)).Render("3 E")
 	if !strings.Contains(got, wantError) {
 		t.Fatalf("diagnostic summary should use themed info-panel background; want %q in %q", wantError, got)
 	}
@@ -2531,7 +2533,7 @@ func TestRenderInfoPanelModelLineHidesVariantWhenWidthIsShort(t *testing.T) {
 }
 
 func infoPanelRawLines(rendered string) []string {
-	raw := strings.Split(stripANSI(rendered), "\n")
+	raw := strings.Split(terminaltext.StripANSI(rendered), "\n")
 	for i, line := range raw {
 		raw[i] = strings.TrimRight(line, " ")
 	}
@@ -2707,7 +2709,7 @@ func TestInfoPanelUsesSingleUsageLayoutAcrossWidths(t *testing.T) {
 
 	m := NewModel(backend)
 	for _, width := range []int{23, 30, 32} {
-		plain := stripANSI(m.renderInfoPanel(width, 20))
+		plain := terminaltext.StripANSI(m.renderInfoPanel(width, 20))
 		for _, want := range []string{"Context", "Bytes", "Messages", "TOKENS", "Cache R"} {
 			if !strings.Contains(plain, want) {
 				t.Fatalf("info panel width %d missing %q in single layout, got %q", width, want, plain)
@@ -2797,20 +2799,20 @@ func TestRenderInfoPanelContextColorFollowsPressureLines(t *testing.T) {
 	}
 
 	line := renderContextLine(0.5)
-	if strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) {
+	if strings.Contains(line, contextFGSGR(currentStyles.Palette.InfoPanelWarningFg)) {
 		t.Fatalf("Context at 50%% should be below reminder 0.6 (normal): %q", line)
 	}
 
 	line = renderContextLine(0.7)
-	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) {
+	if !strings.Contains(line, contextFGSGR(currentStyles.Palette.InfoPanelWarningFg)) {
 		t.Fatalf("Context at 70%% should be warning (>= reminder 0.6): %q", line)
 	}
-	if strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+	if strings.Contains(line, contextFGSGR(currentStyles.Palette.InfoPanelCriticalFg)) {
 		t.Fatalf("Context at 70%% should not be critical (below threshold 0.8): %q", line)
 	}
 
 	line = renderContextLine(0.9)
-	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+	if !strings.Contains(line, contextFGSGR(currentStyles.Palette.InfoPanelCriticalFg)) {
 		t.Fatalf("Context at 90%% should be critical (>= threshold 0.8): %q", line)
 	}
 }
@@ -2845,11 +2847,11 @@ func TestRenderInfoPanelContextColorKeepsBudgetDuringPendingModelSwitch(t *testi
 	}
 
 	line := renderContextLine(0.55)
-	if strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) || strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+	if strings.Contains(line, contextFGSGR(currentStyles.Palette.InfoPanelWarningFg)) || strings.Contains(line, contextFGSGR(currentStyles.Palette.InfoPanelCriticalFg)) {
 		t.Fatalf("Context at 55%% should use the committed model's 0.6 reminder: %q", line)
 	}
 	line = renderContextLine(0.62)
-	if !strings.Contains(line, contextFGSGR(currentTheme.InfoPanelWarningFg)) || strings.Contains(line, contextFGSGR(currentTheme.InfoPanelCriticalFg)) {
+	if !strings.Contains(line, contextFGSGR(currentStyles.Palette.InfoPanelWarningFg)) || strings.Contains(line, contextFGSGR(currentStyles.Palette.InfoPanelCriticalFg)) {
 		t.Fatalf("Context at 62%% should use the committed model's 0.8 threshold: %q", line)
 	}
 }
@@ -2863,7 +2865,7 @@ func TestInfoPanelOwnerReasonInvalidatesCache(t *testing.T) {
 		if previous == m.infoPanelFingerprint(48, 60) {
 			t.Fatal("reason change did not invalidate fingerprint")
 		}
-		plain := stripANSI(m.renderInfoPanel(48, 60))
+		plain := terminaltext.StripANSI(m.renderInfoPanel(48, 60))
 		if reason != "" && !strings.Contains(plain, reason) {
 			t.Fatalf("missing reason in %q", plain)
 		}

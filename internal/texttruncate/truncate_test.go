@@ -215,3 +215,27 @@ func TestTruncateStringBytesPreservesUTF8(t *testing.T) {
 		})
 	}
 }
+
+// PrefixBytes preserves already-fitting output and validates only a truncated
+// prefix, including output that contains malformed UTF-8 bytes.
+func TestPrefixBytesMalformedOutput(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		input string
+		limit int
+		want  string
+	}{
+		{"fitting invalid bytes", "a\xffb", 3, "a\xffb"},
+		{"invalid byte in shortened prefix", "a\xffbc", 3, "a"},
+		{"incomplete rune", "aéz", 2, "a"},
+		{"complete rune", "aéz", 3, "aé"},
+		{"replacement rune", "a\ufffdz", 4, "a\ufffd"},
+		{"empty budget", "abc", 0, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := PrefixBytes(tt.input, tt.limit); got != tt.want {
+				t.Fatalf("PrefixBytes(%q, %d) = %q, want %q", tt.input, tt.limit, got, tt.want)
+			}
+		})
+	}
+}

@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestRenderActivityExecutingUsesElapsedStyle(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-12 * time.Second)
-	out := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200, time.Now()))
 	if !strings.Contains(out, "⚙ 12s") {
 		t.Fatalf("renderActivityAt(executing) = %q, want elapsed time", out)
 	}
@@ -22,7 +23,7 @@ func TestRenderActivityExecutingUsesElapsedStyle(t *testing.T) {
 
 func TestRenderActivityExecutingWithoutStartShowsActivityGlyph(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
-	out := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityExecuting}, 200, time.Now()))
 	if out != "⚙" {
 		t.Fatalf("renderActivityAt(executing without start) = %q, want activity glyph without elapsed", out)
 	}
@@ -57,7 +58,7 @@ func TestRequestActivityIconsKeepPhaseSemanticsWithoutLabels(t *testing.T) {
 
 func TestRenderActivityUsesIconOnlyAtOneColumn(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
-	out := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}, 1, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(agent.AgentActivityEvent{AgentID: "main", Type: agent.ActivityConnecting}, 1, time.Now()))
 	if out != "⠋" {
 		t.Fatalf("one-column connecting render = %q, want icon only", out)
 	}
@@ -130,7 +131,7 @@ func TestRenderStatusBarShowsCompactingContextWhenActivityIsCompacting(t *testin
 	m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main", Detail: "context"}
 	// Compaction is now in the background lane
 	m.compactionBgStatus = compactionBackgroundStatus{Active: true, StartedAt: time.Now().Add(-10 * time.Second)}
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "■") && !strings.Contains(plain, "▪") {
 		t.Fatalf("status bar should still show compacting icon in background lane, got %q", plain)
 	}
@@ -145,7 +146,7 @@ func TestRenderStatusBarShowsCompactionProgressInBackgroundLane(t *testing.T) {
 		Bytes:     8 * 1024,
 		Events:    3,
 	}
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "■") && !strings.Contains(plain, "▪") {
 		t.Fatalf("status bar should show compaction icon, got %q", plain)
 	}
@@ -169,7 +170,7 @@ func TestRenderStatusBarDoesNotShowIdleSinceDuringCompaction(t *testing.T) {
 	}
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "previous", StartedAt: time.Now().Add(-2 * time.Minute)})
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "Since ") {
 		t.Fatalf("status bar should not show idle time during compaction; got %q", plain)
 	}
@@ -186,7 +187,7 @@ func TestRenderStatusBarDoesNotShowIdleSinceDuringConcurrentRequest(t *testing.T
 	}
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "previous", StartedAt: time.Now().Add(-2 * time.Minute)})
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "Since ") {
 		t.Fatalf("status bar should not show idle time during a concurrent request; got %q", plain)
 	}
@@ -200,7 +201,7 @@ func TestRenderStatusBarDoesNotShowIdleSinceDuringPendingToolWork(t *testing.T) 
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "previous", StartedAt: time.Now().Add(-2 * time.Minute)})
 	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolID: "call-1", ToolName: "shell", ResultDone: false})
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "Since ") {
 		t.Fatalf("status bar should not show idle time during pending tool work; got %q", plain)
 	}
@@ -215,7 +216,7 @@ func TestRenderStatusBarShowsLastWhenIdleAndSettled(t *testing.T) {
 	b := &Block{ID: 1, Type: BlockAssistant, Content: "hi", AgentID: "", StartedAt: when}
 	m.viewport.AppendBlock(b)
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "Since ") || !strings.Contains(plain, "15:04") {
 		t.Fatalf("status bar should show last time; got %q", plain)
 	}
@@ -232,7 +233,7 @@ func TestRenderStatusBarUsesCompactIdleLabelInNarrowLayout(t *testing.T) {
 	when := time.Date(2024, 6, 15, 15, 4, 12, 0, time.Local)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hi", AgentID: "", StartedAt: when})
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, "Since update ") {
 		t.Fatalf("narrow status bar should not use malformed idle label; got %q", plain)
 	}
@@ -246,7 +247,7 @@ func TestRenderStatusBarShowsTerminalWhenPending(t *testing.T) {
 	startedAt := time.Now().Add(-5 * time.Second)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, AgentID: "", UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "Terminal") {
 		t.Fatalf("status bar should show shell activity; got %q", plain)
 	}
@@ -266,7 +267,7 @@ func TestRenderStatusBarSwitchesLastByFocusedAgentView(t *testing.T) {
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "main", AgentID: "", StartedAt: mainWhen})
 	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockAssistant, Content: "sub", AgentID: "agent-1", StartedAt: subWhen})
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "15:04") {
 		t.Fatalf("main view should show main settle time; got %q", plain)
 	}
@@ -275,7 +276,7 @@ func TestRenderStatusBarSwitchesLastByFocusedAgentView(t *testing.T) {
 	}
 
 	m.setFocusedAgent("agent-1")
-	plain = stripANSI(m.renderStatusBar())
+	plain = terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "15:06") {
 		t.Fatalf("sub-agent view should show sub-agent settle time; got %q", plain)
 	}
@@ -289,7 +290,7 @@ func TestRenderActivityStreamingUsesElapsedWhenNoProgress(t *testing.T) {
 	started := time.Now().Add(-90 * time.Second)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hi", StartedAt: started})
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
-	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "↓") {
 		t.Fatalf("expected streaming icon in %q", out)
 	}
@@ -302,7 +303,7 @@ func TestRenderActivityCompactingUsesUnifiedProgressStyle(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-8 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityCompacting, AgentID: "main", Detail: "context"}
-	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "■") && !strings.Contains(out, "▪") {
 		t.Fatalf("compacting render should still show icon, got %q", out)
 	}
@@ -315,7 +316,7 @@ func TestRenderActivityRetryingKeepsElapsedWithoutDetail(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-17 * time.Second)
 
-	retrying := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 6"}, 200, time.Now()))
+	retrying := terminaltext.StripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 6"}, 200, time.Now()))
 	if !strings.Contains(retrying, "↻") {
 		t.Fatalf("retrying render should still show icon, got %q", retrying)
 	}
@@ -323,7 +324,7 @@ func TestRenderActivityRetryingKeepsElapsedWithoutDetail(t *testing.T) {
 		t.Fatalf("retrying render should keep only the phase timer in the status bar, got %q", retrying)
 	}
 
-	fallback := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback: fallback-model (5xx)"}, 200, time.Now()))
+	fallback := terminaltext.StripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "fallback: fallback-model (5xx)"}, 200, time.Now()))
 	if strings.Contains(fallback, "fallback: fallback-model (5xx)") || !strings.Contains(fallback, "17s") {
 		t.Fatalf("fallback wait render should keep the compact phase timer, got %q", fallback)
 	}
@@ -335,7 +336,7 @@ func TestRenderActivityRetryingCountsDownToNextAttempt(t *testing.T) {
 	m.activityStartTime["main"] = now.Add(-40 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityRetrying, AgentID: "main", Detail: "round 12", Deadline: now.Add(45 * time.Second)}
 
-	out := stripANSI(m.renderActivityAt(a, 200, now))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, now))
 	if strings.Contains(out, "round 12") || !strings.Contains(out, "↻ 45s") {
 		t.Fatalf("retrying render with a deadline should show only the retry icon and countdown, got %q", out)
 	}
@@ -343,16 +344,16 @@ func TestRenderActivityRetryingCountsDownToNextAttempt(t *testing.T) {
 		t.Fatalf("retrying countdown should replace the elapsed phase time, got %q", out)
 	}
 
-	later := stripANSI(m.renderActivityAt(a, 200, now.Add(30*time.Second)))
+	later := terminaltext.StripANSI(m.renderActivityAt(a, 200, now.Add(30*time.Second)))
 	if !strings.Contains(later, "↻ 15s") {
 		t.Fatalf("retrying countdown should shrink as time passes, got %q", later)
 	}
 
-	compact := stripANSI(m.renderActivityAt(a, 16, now))
+	compact := terminaltext.StripANSI(m.renderActivityAt(a, 16, now))
 	if !strings.Contains(compact, "↻ 45s") {
 		t.Fatalf("narrow retrying render should keep the countdown instead of truncating, got %q", compact)
 	}
-	narrow := stripANSI(m.renderActivityAt(a, 12, now))
+	narrow := terminaltext.StripANSI(m.renderActivityAt(a, 12, now))
 	if !strings.Contains(narrow, "45s") || strings.Contains(narrow, "round") {
 		t.Fatalf("12-column retrying render should keep the countdown and drop the round, got %q", narrow)
 	}
@@ -364,12 +365,12 @@ func TestRenderActivityCoolingShowsRemainingCountdown(t *testing.T) {
 	m.activityStartTime["main"] = now.Add(-12 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s", Deadline: now.Add(33 * time.Second)}
 
-	out := stripANSI(m.renderActivityAt(a, 200, now))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, now))
 	if !strings.Contains(out, "⏸ 33s") || strings.Contains(out, "cooling down") {
 		t.Fatalf("cooling render should show the pause icon and remaining wait, got %q", out)
 	}
 
-	later := stripANSI(m.renderActivityAt(a, 200, now.Add(20*time.Second)))
+	later := terminaltext.StripANSI(m.renderActivityAt(a, 200, now.Add(20*time.Second)))
 	if !strings.Contains(later, "⏸ 13s") {
 		t.Fatalf("cooling countdown should shrink as time passes, got %q", later)
 	}
@@ -380,7 +381,7 @@ func TestRenderActivityCoolingDegradesBeforeTruncating(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Deadline: now.Add(33 * time.Second)}
 
-	compact := stripANSI(m.renderActivityAt(a, 20, now))
+	compact := terminaltext.StripANSI(m.renderActivityAt(a, 20, now))
 	if strings.Contains(compact, "cooling down") || !strings.Contains(compact, "⏸ 33s") {
 		t.Fatalf("tight cooling render should keep the pause icon and wait, got %q", compact)
 	}
@@ -388,7 +389,7 @@ func TestRenderActivityCoolingDegradesBeforeTruncating(t *testing.T) {
 		t.Fatalf("tight cooling render should keep the remaining wait, got %q", compact)
 	}
 
-	narrow := stripANSI(m.renderActivityAt(a, 8, now))
+	narrow := terminaltext.StripANSI(m.renderActivityAt(a, 8, now))
 	if strings.Contains(narrow, "left") || strings.Contains(narrow, "…") || !strings.Contains(narrow, "⏸") {
 		t.Fatalf("narrow cooling render should keep the icon without truncating, got %q", narrow)
 	}
@@ -402,7 +403,7 @@ func TestRenderActivityCoolingFallsBackToElapsedWithoutDeadline(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityCooling, AgentID: "main", Detail: "45s"}
 
-	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if strings.Contains(out, "left") {
 		t.Fatalf("cooling without a deadline should not claim a countdown, got %q", out)
 	}
@@ -444,7 +445,7 @@ func TestRenderActivityWaitingUsesExplicitElapsedLabel(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}
-	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, " 7s") {
 		t.Fatalf("waiting render should keep phase timer in parens, got %q", out)
 	}
@@ -454,7 +455,7 @@ func TestRenderActivityWaitingTokenUsesDistinctLabel(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}
-	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, " 7s") {
 		t.Fatalf("waiting_token render should keep phase timer in parens, got %q", out)
 	}
@@ -464,12 +465,12 @@ func TestRenderActivityUsesCompactParenStyleWhenWidthIsTight(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-7 * time.Second)
 
-	waiting := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}, 32, time.Now()))
+	waiting := terminaltext.StripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}, 32, time.Now()))
 	if !strings.Contains(waiting, "◷ 7s") {
 		t.Fatalf("narrow waiting render should use icon+elapsed style, got %q", waiting)
 	}
 
-	waitingToken := stripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}, 64, time.Now()))
+	waitingToken := terminaltext.StripANSI(m.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityWaitingToken, AgentID: "main"}, 64, time.Now()))
 	if !strings.Contains(waitingToken, "◌ 7s") {
 		t.Fatalf("waiting_token render should use icon+elapsed style, got %q", waitingToken)
 	}
@@ -479,7 +480,7 @@ func TestRenderActivityShowsTimeFromZeroSeconds(t *testing.T) {
 	m := NewModelWithSize(nil, 200, 24)
 	m.activityStartTime["main"] = time.Now().Add(-4 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityWaitingHeaders, AgentID: "main"}
-	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, " 4s") {
 		t.Fatalf("phase timer should start from 0s, got %q", out)
 	}
@@ -487,7 +488,7 @@ func TestRenderActivityShowsTimeFromZeroSeconds(t *testing.T) {
 	m2 := NewModelWithSize(nil, 200, 24)
 	started := time.Now().Add(-4 * time.Second)
 	m2.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hi", StartedAt: started})
-	out = stripANSI(m2.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}, 200, time.Now()))
+	out = terminaltext.StripANSI(m2.renderActivityAt(agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}, 200, time.Now()))
 	if !strings.Contains(out, " 4s") && !strings.Contains(out, " 0s") {
 		t.Fatalf("streaming elapsed should be shown immediately, got %q", out)
 	}
@@ -500,7 +501,7 @@ func TestRenderActivityTruncatesToCoreWhenWidthIsTight(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-2 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	wide := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	wide := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(wide, "↓") {
 		t.Fatalf("wide render should include streaming icon; got %q", wide)
 	}
@@ -508,7 +509,7 @@ func TestRenderActivityTruncatesToCoreWhenWidthIsTight(t *testing.T) {
 		t.Fatalf("wide render should show phase timer from 0s; got %q", wide)
 	}
 
-	narrow := stripANSI(m.renderActivityAt(a, 24, time.Now()))
+	narrow := terminaltext.StripANSI(m.renderActivityAt(a, 24, time.Now()))
 	if strings.Contains(narrow, statusBarTotalLabel()) {
 		t.Fatalf("narrow render should drop total label first; got %q", narrow)
 	}
@@ -524,7 +525,7 @@ func TestRenderActivityUsesCompactLastLabelInCompactExtras(t *testing.T) {
 	m.activityStartTime["main"] = time.Now().Add(-2 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	compact := stripANSI(m.renderActivityAt(a, 46, time.Now()))
+	compact := terminaltext.StripANSI(m.renderActivityAt(a, 46, time.Now()))
 	if !strings.Contains(compact, "↓") {
 		t.Fatalf("compact render should keep streaming icon; got %q", compact)
 	}
@@ -537,7 +538,7 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 	m.activityStartTime["main"] = time.Now().Add(-20 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
 
-	full := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	full := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(full, "↓") {
 		t.Fatalf("full render should keep streaming icon, got %q", full)
 	}
@@ -545,7 +546,7 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 		t.Fatalf("full render should keep phase elapsed, got %q", full)
 	}
 
-	noElapsed := stripANSI(m.renderActivityAt(a, 40, time.Now()))
+	noElapsed := terminaltext.StripANSI(m.renderActivityAt(a, 40, time.Now()))
 	if strings.Contains(noElapsed, statusBarTotalLabel()) {
 		t.Fatalf("medium render should hide anchor elapsed first, got %q", noElapsed)
 	}
@@ -553,7 +554,7 @@ func TestRenderActivityOverflowDropsElapsedThenSinceThenPhaseTimer(t *testing.T)
 		t.Fatalf("medium render should retain phase timer, got %q", noElapsed)
 	}
 
-	noSince := stripANSI(m.renderActivityAt(a, 28, time.Now()))
+	noSince := terminaltext.StripANSI(m.renderActivityAt(a, 28, time.Now()))
 	if strings.Contains(noSince, statusBarTotalLabel()) {
 		t.Fatalf("narrower render should not restore total label, got %q", noSince)
 	}
@@ -570,7 +571,7 @@ func TestRenderStatusBarUsesQueuedDraftStartWhenIdle(t *testing.T) {
 	queuedAt := time.Date(2024, 6, 15, 15, 7, 0, 0, time.Local)
 	m.queuedDrafts = []queuedDraft{{ID: "draft-1", Content: "queued", DisplayContent: "queued", QueuedAt: queuedAt}}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "15:07") {
 		t.Fatalf("status bar should show queued draft start time; got %q", plain)
 	}
@@ -657,7 +658,7 @@ func TestRenderActivityUsesQueuedDraftStartForTotal(t *testing.T) {
 	queuedAt := time.Now().Add(-90 * time.Second)
 	m.queuedDrafts = []queuedDraft{{ID: "draft-1", Content: "queued", DisplayContent: "queued", QueuedAt: queuedAt}}
 	a := agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main"}
-	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "↓") {
 		t.Fatalf("expected streaming icon in %q", out)
 	}
@@ -670,7 +671,7 @@ func TestRenderActivityPrefersNewerToolStartOverEarlierSettledBlock(t *testing.T
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "done", SettledAt: older})
 	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockToolCall, ToolName: "shell", StartedAt: newer})
 	a := agent.AgentActivityEvent{Type: agent.ActivityExecuting, AgentID: "main"}
-	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "⚙ 1m30s") {
 		t.Fatalf("expected newer tool start to anchor executing elapsed; got %q", out)
 	}
@@ -682,7 +683,7 @@ func TestRenderActivityShowsUnifiedBusyElapsedStyle(t *testing.T) {
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockAssistant, Content: "hi", StartedAt: started})
 	m.activityStartTime["main"] = time.Now().Add(-20 * time.Second)
 	a := agent.AgentActivityEvent{Type: agent.ActivityConnecting, AgentID: "main"}
-	out := stripANSI(m.renderActivityAt(a, 200, time.Now()))
+	out := terminaltext.StripANSI(m.renderActivityAt(a, 200, time.Now()))
 	if !strings.Contains(out, "⠋ 20s") {
 		t.Fatalf("expected unified busy elapsed style in %q", out)
 	}
@@ -709,7 +710,7 @@ func TestStatusBarIgnoresMainTerminalStartWhenFocusedOnSubAgentWithoutPendingShe
 		t.Fatal("latestStatusStartWall should ignore main-view terminal when focused on sub-agent without pending shell")
 	}
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(plain, statusBarStartedLabel()) {
 		t.Fatalf("status bar should not inherit main-view terminal start time after focus switch, got %q", plain)
 	}
@@ -720,12 +721,12 @@ func TestRenderStatusBarTerminalDropsStartedWhenWidthIsTight(t *testing.T) {
 	startedAt := time.Now().Add(-5 * time.Second)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
 
-	wide := stripANSI(m.renderStatusBarLocalShell(200))
+	wide := terminaltext.StripANSI(m.renderStatusBarLocalShell(200))
 	if !strings.Contains(wide, statusBarStartedLabel()) {
 		t.Fatalf("wide terminal render should include %q; got %q", statusBarStartedLabel(), wide)
 	}
 
-	narrow := stripANSI(m.renderStatusBarLocalShell(22))
+	narrow := terminaltext.StripANSI(m.renderStatusBarLocalShell(22))
 	if strings.Contains(narrow, statusBarStartedLabel()) {
 		t.Fatalf("narrow terminal render should drop started labels; got %q", narrow)
 	}
@@ -739,7 +740,7 @@ func TestRenderStatusBarTerminalUsesCompactStartedLabelInCompactLayout(t *testin
 	startedAt := time.Now().Add(-5 * time.Second)
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, UserLocalShellCmd: "echo hi", UserLocalShellPending: true, StartedAt: startedAt})
 
-	compact := stripANSI(m.renderStatusBarLocalShell(36))
+	compact := terminaltext.StripANSI(m.renderStatusBarLocalShell(36))
 	if !strings.Contains(compact, statusBarStartedLabel()) {
 		t.Fatalf("compact terminal render should use started label; got %q", compact)
 	}
@@ -760,13 +761,13 @@ func TestStatusBarUsesVisiblePendingTerminalStartByFocusedAgentView(t *testing.T
 	m.viewport.AppendBlock(&Block{ID: 1, Type: BlockUser, AgentID: "", UserLocalShellCmd: "echo main", UserLocalShellPending: true, StartedAt: mainStarted})
 	m.viewport.AppendBlock(&Block{ID: 2, Type: BlockUser, AgentID: "agent-1", UserLocalShellCmd: "echo sub", UserLocalShellPending: true, StartedAt: subStarted})
 
-	plain := stripANSI(m.renderStatusBar())
+	plain := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "15:04") || strings.Contains(plain, "15:06") {
 		t.Fatalf("main view should use main pending shell start time, got %q", plain)
 	}
 
 	m.setFocusedAgent("agent-1")
-	plain = stripANSI(m.renderStatusBar())
+	plain = terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(plain, "15:06") || strings.Contains(plain, "15:04") {
 		t.Fatalf("sub-agent view should use sub-agent pending shell start time, got %q", plain)
 	}

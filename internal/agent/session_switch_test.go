@@ -128,7 +128,7 @@ func TestResetSessionRuntimeStateClearsCacheRoutingState(t *testing.T) {
 
 	a.resetSessionRuntimeState()
 
-	if a.refCacheWarm("provider/model", time.Now()) {
+	if a.cacheExpectations.Warm("provider/model", time.Now()) {
 		t.Fatal("new session inherited the previous session's warm cache signal")
 	}
 	if _, ok := a.cacheHitTracker.HitRate("provider/model"); ok {

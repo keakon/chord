@@ -9,6 +9,7 @@ import (
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/ratelimit"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func ceilDuration(d, unit time.Duration) time.Duration {
@@ -93,18 +94,18 @@ func (m *Model) renderRateLimitBlock(snap *ratelimit.KeyRateLimitSnapshot, lineW
 		var valueStyle lipgloss.Style
 		switch {
 		case pct >= 95:
-			valueStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelRateCriticalFg))
+			valueStyle = currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelRateCriticalFg))
 		case pct >= 80:
-			valueStyle = InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelRateWarnFg))
+			valueStyle = currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelRateWarnFg))
 		default:
-			valueStyle = InfoPanelDim
+			valueStyle = currentStyles.InfoPanelDim
 		}
 
 		text := strings.Join(valueParts, " ")
 		if label != "" {
 			text = label + ": " + text
 		}
-		return InfoPanelLineBg.Width(lineW).Render(valueStyle.Render(truncateOneLine(text, lineW-2)))
+		return currentStyles.InfoPanelLineBg.Width(lineW).Render(valueStyle.Render(terminaltext.TruncateOneLine(text, lineW-2)))
 	}
 
 	showPrimary := shouldShowRateLimitWindow(snap.Primary, true)
@@ -114,7 +115,7 @@ func (m *Model) renderRateLimitBlock(snap *ratelimit.KeyRateLimitSnapshot, lineW
 	}
 	showLabels := showPrimary && showSecondary
 
-	lines := []string{InfoPanelLineBg.Width(lineW).Render(InfoPanelTitle.Render("RATE LIMIT"))}
+	lines := []string{currentStyles.InfoPanelLineBg.Width(lineW).Render(currentStyles.InfoPanelTitle.Render("RATE LIMIT"))}
 	if showPrimary {
 		label := ""
 		if showLabels {
@@ -137,7 +138,7 @@ func (m *Model) renderRateLimitBlock(snap *ratelimit.KeyRateLimitSnapshot, lineW
 		// No data to show beyond the title.
 		return ""
 	}
-	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
+	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 }
 
 func formatRateLimitWindowLabel(windowMinutes int64, fallback string) string {
@@ -250,19 +251,19 @@ func formatLSPServerDiagSuffix(errors, warnings int) string {
 // Tokens containing "E" get red, "W" get orange, everything else uses InfoPanelValue.
 func renderLSPDiagSummary(s string) string {
 	if s == "" || s == "—" {
-		return InfoPanelValue.Render(s)
+		return currentStyles.InfoPanelValue.Render(s)
 	}
 	parts := strings.Split(s, ", ")
 	result := make([]string, 0, len(parts))
 	for _, part := range parts {
 		switch {
 		case strings.Contains(part, " E") || strings.HasSuffix(part, "E"):
-			result = append(result, InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelDiagErrorFg)).Render(part))
+			result = append(result, currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelDiagErrorFg)).Render(part))
 		case strings.Contains(part, " W") || strings.HasSuffix(part, "W"):
-			result = append(result, InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelDiagWarnFg)).Render(part))
+			result = append(result, currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelDiagWarnFg)).Render(part))
 		default:
-			result = append(result, InfoPanelValue.Render(part))
+			result = append(result, currentStyles.InfoPanelValue.Render(part))
 		}
 	}
-	return strings.Join(result, InfoPanelDim.Render(", "))
+	return strings.Join(result, currentStyles.InfoPanelDim.Render(", "))
 }

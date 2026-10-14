@@ -7,6 +7,8 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestFindMatchesAtWidthSearchesToolAndResultText(t *testing.T) {
@@ -57,7 +59,7 @@ func TestFindMatchesAtWidthSearchesStructuredVisibleText(t *testing.T) {
 }
 
 func TestFindMatchesAtWidthSkipsTruncatedAttachmentText(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const (
 		query = "hidden-needle"
 		width = 30
@@ -82,7 +84,7 @@ func TestFindMatchesAtWidthSkipsTruncatedAttachmentText(t *testing.T) {
 }
 
 func TestFindMatchesAtWidthKeepsVisibleAttachmentPrefix(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{ID: 1, Type: BlockUser, ImageCount: 1, ImageParts: []BlockImagePart{{FileName: "visible-needle-" + strings.Repeat("a", 80) + ".png"}}}
 
 	matches := FindMatchesAtWidth([]*Block{block}, "visible-needle", 30)
@@ -92,7 +94,7 @@ func TestFindMatchesAtWidthKeepsVisibleAttachmentPrefix(t *testing.T) {
 }
 
 func TestFindMatchesAtWidthUsesVisibleToolArguments(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:       1,
 		Type:     BlockToolCall,
@@ -109,7 +111,7 @@ func TestFindMatchesAtWidthUsesVisibleToolArguments(t *testing.T) {
 }
 
 func TestDeferredStartupTranscriptSearchSkipsTruncatedAttachmentText(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const (
 		query = "hidden-needle"
 		width = 30
@@ -127,7 +129,7 @@ func TestDeferredStartupTranscriptSearchSkipsTruncatedAttachmentText(t *testing.
 }
 
 func TestDeferredStartupTranscriptSearchValidatesSpilledVisibleText(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	const width = 40
 	cases := []struct {
 		name  string
@@ -260,7 +262,7 @@ func TestRevealSearchMatchedBlockExpandsToolContent(t *testing.T) {
 }
 
 func TestFindMatchesAtWidthRevealsWarmCollapsedToolCache(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameRead, Collapsed: true, ResultDone: true, ResultContent: "1\tpreview\n2\tdeep needle"}
 	_ = block.Render(80, "")
 
@@ -300,7 +302,7 @@ func TestWrappedSearchMatchLineOffsetMatchesFullWrapping(t *testing.T) {
 			textLower := strings.ToLower(tt.text)
 			queryLower := strings.ToLower(tt.query)
 			want := -1
-			for i, line := range wrapText(textLower, tt.width) {
+			for i, line := range terminaltext.Wrap(textLower, tt.width) {
 				if strings.Contains(line, queryLower) {
 					want = i
 					break
@@ -335,7 +337,7 @@ func TestRenderedSearchMatchInnerOffsetUsesRenderedToolLayout(t *testing.T) {
 }
 
 func TestFindMatchesAtWidthSearchesVisibleAssistantMarkdown(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "visible **needle** phrase"}
 
 	matches := FindMatchesAtWidth([]*Block{block}, "visible needle", 80)
@@ -352,7 +354,7 @@ func TestFindMatchesAtWidthSearchesVisibleAssistantMarkdown(t *testing.T) {
 }
 
 func TestFindMatchesAtWidthSearchesVisibleAssistantHTMLEntity(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "visible a &amp; b phrase"}
 
 	matches := FindMatchesAtWidth([]*Block{block}, "a & b", 80)
@@ -369,7 +371,7 @@ func TestFindMatchesAtWidthSearchesVisibleAssistantHTMLEntity(t *testing.T) {
 }
 
 func TestFindMatchesAtWidthSkipsHiddenAssistantMarkdown(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{ID: 1, Type: BlockAssistant, Content: "visible <!-- hidden-needle --> phrase"}
 
 	if matches := FindMatchesAtWidth([]*Block{block}, "hidden-needle", 80); len(matches) != 0 {
@@ -408,7 +410,7 @@ func TestAssistantMarkdownMayContainQueryLongCommonPrefix(t *testing.T) {
 }
 
 func TestStructuredDisplaySearchMatchesAreRenderedAndHighlightable(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	cases := []struct {
 		name  string
 		query string
@@ -457,7 +459,7 @@ func TestStructuredDisplaySearchMatchesAreRenderedAndHighlightable(t *testing.T)
 			lines := tc.block.Render(120, "")
 			matchedLine := -1
 			for i, line := range lines {
-				if strings.Contains(strings.ToLower(stripANSI(line)), strings.ToLower(tc.query)) {
+				if strings.Contains(strings.ToLower(terminaltext.StripANSI(line)), strings.ToLower(tc.query)) {
 					matchedLine = i
 					break
 				}
@@ -473,7 +475,7 @@ func TestStructuredDisplaySearchMatchesAreRenderedAndHighlightable(t *testing.T)
 				t.Fatalf("searchMatchColumnRangeInLine() did not find %q", tc.query)
 			}
 			highlighted := applySearchMatchToLine(lines[matchedLine], colStart, colEnd)
-			if highlighted == lines[matchedLine] || stripANSI(highlighted) != stripANSI(lines[matchedLine]) {
+			if highlighted == lines[matchedLine] || terminaltext.StripANSI(highlighted) != terminaltext.StripANSI(lines[matchedLine]) {
 				t.Fatalf("search highlight was not applied without changing visible text")
 			}
 		})
@@ -511,15 +513,15 @@ func TestSearchPillStatusShowsAcrossModesWhileSearchSessionActive(t *testing.T) 
 	m.search.State.Current = 1
 
 	m.mode = ModeNormal
-	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [2/3]") {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [2/3]") {
 		t.Fatalf("normal-mode status bar should show active search session, got %q", plain)
 	}
 	m.mode = ModeInsert
-	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [2/3]") {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [2/3]") {
 		t.Fatalf("insert-mode status bar should show active search session, got %q", plain)
 	}
 	m.mode = ModeSearch
-	if plain := stripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [2/3]") {
+	if plain := terminaltext.StripANSI(m.renderStatusBar()); !strings.Contains(plain, "/grep [2/3]") {
 		t.Fatalf("search-mode status bar should show active search session, got %q", plain)
 	}
 }

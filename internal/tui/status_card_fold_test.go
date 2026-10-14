@@ -7,6 +7,8 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // A runtime notice whose body hides more than one line starts collapsed to the
@@ -43,7 +45,7 @@ func TestRuntimeStatusNoticeCollapsesToBadgeLine(t *testing.T) {
 	if !block.ToggleAtWidth(120) || block.Collapsed {
 		t.Fatal("toggling must expand the notice")
 	}
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"LOOP CONTINUE", "▾", "  Unresolved work:", "  • pending verification", "  • remaining subagent"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded card missing %q:\n%s", want, expanded)
@@ -67,7 +69,7 @@ func TestMultiLineNoticeStartsExpandedAndFolds(t *testing.T) {
 	if block.Type != BlockStatus || block.Collapsed {
 		t.Fatalf("block = %+v, want an expanded NOTICE card", block)
 	}
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"NOTICE", "▾", "Current role: builder", "• planner"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expanded notice missing %q:\n%s", want, expanded)
@@ -76,7 +78,7 @@ func TestMultiLineNoticeStartsExpandedAndFolds(t *testing.T) {
 	if !block.ToggleAtWidth(120) || !block.Collapsed {
 		t.Fatal("toggling must collapse the notice")
 	}
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "▸") || strings.Contains(collapsed, "Current role: builder") {
 		t.Fatalf("collapsed notice = %q, want the badge line alone", collapsed)
 	}
@@ -89,7 +91,7 @@ func TestShortRuntimeStatusNoticeShowsNoDisclosureMarker(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.InfoEvent{Message: "Session persistence recovered"}})
 
 	block := m.viewport.blocks[len(m.viewport.blocks)-1]
-	rendered := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(rendered, "Session persistence recovered") {
 		t.Fatalf("short notice body hidden:\n%s", rendered)
 	}
@@ -116,10 +118,10 @@ func TestStatusCardFoldGateFollowsRenderWidth(t *testing.T) {
 // A sub-agent mailbox card carries the worker model's own message, so it stays
 // fully visible even when the text is long.
 func TestSubAgentMailboxCardStaysExpanded(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := newSubAgentMailboxBlock(1, "progress", "", "worker-1", "task-1", "line one\nline two\nline three\nline four", "")
 
-	rendered := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(rendered, "line four") {
 		t.Fatalf("mailbox card must keep the worker model's full message:\n%s", rendered)
 	}
@@ -141,7 +143,7 @@ func TestErrorCardStaysExpanded(t *testing.T) {
 	if block.Type != BlockError || block.Collapsed {
 		t.Fatalf("block = %+v, want an expanded error card", block)
 	}
-	rendered := stripANSI(strings.Join(block.Render(60, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(60, ""), "\n"))
 	if !strings.Contains(rendered, "fifth") {
 		t.Fatalf("error card must keep its full body:\n%s", rendered)
 	}
@@ -164,7 +166,7 @@ func TestLocalStatusCardFoldsButStartsExpanded(t *testing.T) {
 	if block.Type != BlockStatus || block.Collapsed {
 		t.Fatalf("block = %+v, want an expanded local status card", block)
 	}
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"Diagnostics bundle exported to /tmp/diag", "▾", "remove any sensitive content"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("local status card missing %q:\n%s", want, expanded)
@@ -173,7 +175,7 @@ func TestLocalStatusCardFoldsButStartsExpanded(t *testing.T) {
 	if !block.ToggleAtWidth(120) || !block.Collapsed {
 		t.Fatal("toggling must collapse the local status card")
 	}
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "▸") {
 		t.Fatalf("collapsed local status card = %q, want a ▸ marker", collapsed)
 	}

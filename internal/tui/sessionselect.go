@@ -11,6 +11,8 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/overlaylist"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // ---------------------------------------------------------------------------
@@ -202,8 +204,8 @@ func (m *Model) renderSessionSwitchOverlay(_ image.Rectangle) string {
 	if sessionID := strings.TrimSpace(m.sessionSwitch.sessionID); sessionID != "" {
 		headline = lipgloss.JoinHorizontal(lipgloss.Center,
 			headline,
-			DimStyle.Render(" · "),
-			sessionIDStyle.Render(truncateOneLine(sessionID, 24)),
+			currentStyles.DimStyle.Render(" · "),
+			sessionIDStyle.Render(terminaltext.TruncateOneLine(sessionID, 24)),
 		)
 	}
 	bodyLines := []string{headline}
@@ -269,7 +271,7 @@ func (m *Model) openSessionSelect(prefill []agent.SessionSummary, prefetched boo
 		loading:  loading,
 		loadSeq:  seq,
 	}
-	m.sessionSelect.selector.list = NewOverlayList(nil, m.sessionSelectMaxVisible())
+	m.sessionSelect.selector.list = overlaylist.New(nil, m.sessionSelectMaxVisible())
 	if !loading {
 		m.rebuildSessionSelectFilteredView(false)
 	}
@@ -457,7 +459,7 @@ func sessionSelectPreviewText(s agent.SessionSummary) string {
 // which is what the session is actually identified by.
 const sessionSelectWorktreeNameMaxWidth = 16
 
-func sessionSelectItemFor(s agent.SessionSummary) OverlayListItem {
+func sessionSelectItemFor(s agent.SessionSummary) overlaylist.Item {
 	modStr := s.LastModTime.Format("2006-01-02 15:04")
 	countStr := "-"
 	if s.MessageCount >= 0 {
@@ -474,14 +476,14 @@ func sessionSelectItemFor(s agent.SessionSummary) OverlayListItem {
 	if name := strings.TrimSpace(s.WorktreeName); name != "" {
 		preview = fmt.Sprintf("⎇ %s · %s", runewidth.Truncate(name, sessionSelectWorktreeNameMaxWidth, "…"), preview)
 	}
-	return OverlayListItem{ID: s.ID, Label: fmt.Sprintf("%s  %5s  %s", modStr, countStr, preview)}
+	return overlaylist.Item{ID: s.ID, Label: fmt.Sprintf("%s  %5s  %s", modStr, countStr, preview)}
 }
 
 // sessionSelectColumnHeader builds the dim column-header row for the session
-// picker. The 3-space lead matches OverlayList's cursor gutter and the field
+// picker. The 3-space lead matches overlaylist.List's cursor gutter and the field
 // widths mirror sessionSelectItemFor so the header aligns with the rows.
 func sessionSelectColumnHeader() string {
-	return DimStyle.Render(fmt.Sprintf("   %-16s  %5s  %s", "Modified", "Msgs", "Preview"))
+	return currentStyles.DimStyle.Render(fmt.Sprintf("   %-16s  %5s  %s", "Modified", "Msgs", "Preview"))
 }
 
 func buildSessionSearchCorpus(options []agent.SessionSummary) []string {
@@ -542,12 +544,12 @@ func (m *Model) rebuildSessionSelectFilteredView(resetCursor bool) {
 		m.sessionSelect.searchCorpus = buildSessionSearchCorpus(opts)
 	}
 	m.sessionSelect.filteredIdx = filterSessionOptions(m.sessionSelect.searchCorpus, m.sessionSelect.filter)
-	items := make([]OverlayListItem, 0, len(m.sessionSelect.filteredIdx))
+	items := make([]overlaylist.Item, 0, len(m.sessionSelect.filteredIdx))
 	for _, idx := range m.sessionSelect.filteredIdx {
 		items = append(items, sessionSelectItemFor(opts[idx]))
 	}
 	if m.sessionSelect.selector.list == nil {
-		m.sessionSelect.selector.list = NewOverlayList(items, m.sessionSelectMaxVisible())
+		m.sessionSelect.selector.list = overlaylist.New(items, m.sessionSelectMaxVisible())
 	} else {
 		m.sessionSelect.selector.list.SetItems(items)
 	}
@@ -617,14 +619,14 @@ func (m *Model) renderSessionSelectDialog() string {
 	if m.sessionSelect.loading {
 		overlayCfg.Hint = hintLine(hint("Esc", "cancel"))
 		overlayCfg.CompactHint = overlayCfg.Hint
-		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render("Loading sessions..."), area)
+		dialog, _ := RenderOverlay(overlayCfg, currentStyles.DimStyle.Render("Loading sessions..."), area)
 		return dialog
 	}
 	if m.sessionSelect.loadErr != "" {
 		overlayCfg.Hint = hintLine(hint("Esc", "cancel"))
 		overlayCfg.CompactHint = overlayCfg.Hint
 		errMsg := fmt.Sprintf("Failed to load sessions: %s", m.sessionSelect.loadErr)
-		dialog, _ := RenderOverlay(overlayCfg, ErrorStyle.Render(errMsg), area)
+		dialog, _ := RenderOverlay(overlayCfg, currentStyles.ErrorStyle.Render(errMsg), area)
 		return dialog
 	}
 
@@ -632,7 +634,7 @@ func (m *Model) renderSessionSelectDialog() string {
 		overlayCfg.Hint = hintLine(hint("Esc", "cancel"))
 		overlayCfg.CompactHint = overlayCfg.Hint
 		emptyMsg := "No previous sessions to choose from. Start a conversation to create one."
-		dialog, _ := RenderOverlay(overlayCfg, DimStyle.Render(emptyMsg), area)
+		dialog, _ := RenderOverlay(overlayCfg, currentStyles.DimStyle.Render(emptyMsg), area)
 		return dialog
 	}
 	if m.sessionSelect.selector.list == nil {
@@ -655,7 +657,7 @@ func (m *Model) renderSessionSelectDialog() string {
 		if runewidth.StringWidth(query) > maxQueryWidth {
 			query = runewidth.Truncate(query, maxQueryWidth, "…")
 		}
-		listBody := DimStyle.Render(fmt.Sprintf(`No sessions match %q`, query))
+		listBody := currentStyles.DimStyle.Render(fmt.Sprintf(`No sessions match %q`, query))
 		content := filterLine + "\n\n" + listBody
 		dialog, _ := RenderOverlay(overlayCfg, content, area)
 		return dialog

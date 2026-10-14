@@ -7,6 +7,8 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/imageutil"
+	"github.com/keakon/chord/internal/tui/imagecache"
+	"github.com/keakon/chord/internal/tui/imageprotocol"
 )
 
 type imageViewerOwner struct {
@@ -28,7 +30,7 @@ type imageViewerLoadedMsg struct {
 	Generation uint64
 	Owner      imageViewerOwner
 	Index      int
-	Identity   imagePartKeyRef
+	Identity   imagecache.Identity
 	Prepared   *imageViewerPrepared
 	Err        error
 }
@@ -55,7 +57,7 @@ func (m *Model) prepareImageViewer() tea.Cmd {
 	m.imageViewerGeneration++
 	generation := m.imageViewerGeneration
 	part, owner, index := v.currentPart(), v.Owner, v.Index
-	identity := imagePartKeyRefFor(part)
+	identity := imagecache.IdentityOf(imageSource(part))
 	cols, rows := m.imageViewerContentRect()
 	metrics, backend := m.kittyMetrics, m.imageCaps.Backend
 	load := func() tea.Msg {
@@ -80,11 +82,11 @@ func prepareImageViewerPart(ctx context.Context, part BlockImagePart, cols, rows
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	entry, err := imageRuntimeEntryForPart(part)
+	entry, err := imageCache.Lookup(imageSource(part), false)
 	if err != nil {
 		return nil, err
 	}
-	data, err := entry.raw(part)
+	data, err := entry.Raw(imageSource(part))
 	if err != nil {
 		return nil, err
 	}
@@ -95,11 +97,11 @@ func prepareImageViewerPart(ctx context.Context, part BlockImagePart, cols, rows
 	// composer path-backed so loaded originals do not accumulate outside the cache.
 	part.Data = data
 	part.ImagePath = ""
-	entry, err = imageRuntimeEntryForPart(part)
+	entry, err = imageCache.Lookup(imageSource(part), false)
 	if err != nil {
 		return nil, err
 	}
-	cfg, _, err := entry.decodeConfig(part)
+	cfg, _, err := entry.Config(imageSource(part))
 	if err != nil {
 		return nil, err
 	}
@@ -118,18 +120,16 @@ func prepareImageViewerPart(ctx context.Context, part BlockImagePart, cols, rows
 	defer release()
 	switch backend {
 	case ImageBackendKitty:
-		prepared.Sequence, prepared.ImageID, err = kittyViewerSequence(part, placementID, fitCols, fitRows, -1, 0, 0)
+		prepared.Sequence, prepared.ImageID, err = imageprotocol.KittyViewer(imageCache, imageSource(part), placementID, fitCols, fitRows, -1, 0, 0)
 	case ImageBackendITerm2:
-		prepared.Sequence, err = iterm2ViewerSequence(part, fitCols, fitRows)
+		prepared.Sequence, err = imageprotocol.ITerm2(imageCache, imageSource(part), part.FileName, fitCols, fitRows, false)
 		if err == nil {
 			prepared.Sequence = encodeDeferredTerminalSequence(prepared.Sequence)
 		}
 	default:
 		err = fmt.Errorf("image preview is unavailable in this terminal")
 	}
-	imageRuntimeCache.mu.Lock()
-	imageRuntimeCache.enforceBudgetLocked()
-	imageRuntimeCache.mu.Unlock()
+	imageCache.EnforceBudget()
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func prepareImageViewerPart(ctx context.Context, part BlockImagePart, cols, rows
 
 func (m *Model) handleImageViewerLoaded(msg imageViewerLoadedMsg) tea.Cmd {
 	v := &m.imageViewer
-	if !v.Open || m.mode != ModeImageViewer || msg.Generation != m.imageViewerGeneration || msg.Owner != v.Owner || msg.Owner != m.imageViewerOwner() || msg.Index != v.Index || msg.Identity != imagePartKeyRefFor(v.currentPart()) {
+	if !v.Open || m.mode != ModeImageViewer || msg.Generation != m.imageViewerGeneration || msg.Owner != v.Owner || msg.Owner != m.imageViewerOwner() || msg.Index != v.Index || msg.Identity != imagecache.IdentityOf(imageSource(v.currentPart())) {
 		return nil
 	}
 	v.Loading = false

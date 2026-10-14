@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/skill"
 )
@@ -161,10 +162,7 @@ func checkpointSkillsSection(body string) (string, bool) {
 		return "", false
 	}
 	start := loc[1]
-	end := len(body)
-	if next := compactionMarkdownHeadingLineRe.FindStringIndex(body[start:]); next != nil {
-		end = start + next[0]
-	}
+	end := checkpointfmt.SectionEnd(body, start)
 	return strings.TrimSpace(body[start:end]), true
 }
 
@@ -179,10 +177,7 @@ func stripCheckpointSkillsSection(body string) string {
 		if loc == nil {
 			return strings.TrimSpace(body)
 		}
-		end := len(body)
-		if next := compactionMarkdownHeadingLineRe.FindStringIndex(body[loc[1]:]); next != nil {
-			end = loc[1] + next[0]
-		}
+		end := checkpointfmt.SectionEnd(body, loc[1])
 		prefix := strings.TrimSpace(body[:loc[0]])
 		rest := strings.TrimSpace(body[end:])
 		switch {

@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const (
@@ -189,16 +190,16 @@ func (m *Model) renderStopJobConfirmDialog() string {
 	innerWidth := dialogContentWidth(maxWidth)
 	now := time.Now()
 
-	lines := wrapStyledLines(DialogWarningStyle, "Stopping terminates the process. Captured output is kept.", innerWidth)
+	lines := wrapStyledLines(currentStyles.DialogWarningStyle, "Stopping terminates the process. Captured output is kept.", innerWidth)
 	if s.label != "" {
 		lines = append(lines, stopJobInlineField("Label", s.label, innerWidth))
 	}
-	lines = append(lines, ConfirmToolStyle.Render("Command:"))
+	lines = append(lines, currentStyles.ConfirmToolStyle.Render("Command:"))
 	command := strings.TrimSpace(s.command)
 	if command == "" {
 		command = "(none)"
 	}
-	commandLines := wrapText(command, innerWidth)
+	commandLines := terminaltext.Wrap(command, innerWidth)
 	if len(commandLines) > stopJobCommandMaxLines {
 		commandLines = append(commandLines[:stopJobCommandMaxLines:stopJobCommandMaxLines], "…")
 	}
@@ -209,20 +210,20 @@ func (m *Model) renderStopJobConfirmDialog() string {
 		stopJobInlineField("Elapsed", tools.FormatElapsed(now.Sub(s.startedAt)), innerWidth),
 		stopJobInlineField("Last output", stopJobLastOutputValue(s.lastOutputAt, now), innerWidth),
 		"",
-		ConfirmToolStyle.Render("Recent output (last 12 lines):"),
+		currentStyles.ConfirmToolStyle.Render("Recent output (last 12 lines):"),
 	)
 	if tailLines := stopJobTailPreview(s.tail, innerWidth); len(tailLines) > 0 {
 		lines = append(lines, tailLines...)
 	} else {
-		lines = append(lines, DimStyle.Render("(no output yet)"))
+		lines = append(lines, currentStyles.DimStyle.Render("(no output yet)"))
 	}
 	if notice := stopJobTruncationNotice(s.droppedBytes, s.truncated, s.logFile); notice != "" {
 		// The notice carries a full log path, which can exceed the dialog width;
 		// padLineToDisplayWidthWithStyle only pads, so it must be clamped here.
-		lines = append(lines, DimStyle.Render(truncateOneLine(notice, innerWidth)))
+		lines = append(lines, currentStyles.DimStyle.Render(terminaltext.TruncateOneLine(notice, innerWidth)))
 	}
 	lines = append(lines, "")
-	lines = append(lines, wrapStyledLines(DimStyle, "Stopping sends SIGTERM, then SIGKILL after a grace period. Output captured so far is kept; the owner agent is notified when the job ends.", innerWidth)...)
+	lines = append(lines, wrapStyledLines(currentStyles.DimStyle, "Stopping sends SIGTERM, then SIGKILL after a grace period. Output captured so far is kept; the owner agent is notified when the job ends.", innerWidth)...)
 	actions := hintLine(dangerHint("y", "Stop"), hint("n/esc", "Cancel"))
 	out := renderScrollableDialog(OverlayConfig{
 		Title: "⚠ Stop " + s.jobID + "?", MaxWidth: maxWidth,
@@ -238,8 +239,8 @@ func (m *Model) renderStopJobConfirmDialog() string {
 
 func stopJobInlineField(label, value string, innerWidth int) string {
 	prefix := label + ": "
-	value = truncateOneLine(value, max(innerWidth-ansi.StringWidth(prefix), 1))
-	return ConfirmToolStyle.Render(prefix + value)
+	value = terminaltext.TruncateOneLine(value, max(innerWidth-ansi.StringWidth(prefix), 1))
+	return currentStyles.ConfirmToolStyle.Render(prefix + value)
 }
 
 func stopJobFallback(value, fallback string) string {
@@ -267,7 +268,7 @@ func stopJobTailPreview(tail string, innerWidth int) []string {
 	}
 	lines := make([]string, 0, len(raw))
 	for _, line := range raw {
-		lines = append(lines, DimStyle.Render(ansi.Truncate(line, innerWidth, "…")))
+		lines = append(lines, currentStyles.DimStyle.Render(ansi.Truncate(line, innerWidth, "…")))
 	}
 	return lines
 }
@@ -294,7 +295,7 @@ func stopJobTruncationNotice(droppedBytes int64, truncated bool, logFile string)
 // wrapStyledLines word-wraps text to innerWidth and applies style to each line,
 // keeping every line inside the dialog's content width.
 func wrapStyledLines(style lipgloss.Style, text string, innerWidth int) []string {
-	wrapped := wrapText(text, max(innerWidth, 1))
+	wrapped := terminaltext.Wrap(text, max(innerWidth, 1))
 	lines := make([]string, 0, len(wrapped))
 	for _, line := range wrapped {
 		lines = append(lines, style.Render(line))

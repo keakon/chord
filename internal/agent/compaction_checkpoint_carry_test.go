@@ -5,6 +5,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -476,7 +477,7 @@ func TestCompactionDraftCarryKeepsProgressAfterLongRequest(t *testing.T) {
 		t.Fatalf("second checkpoint carries no previous-checkpoint section:\n%s", second.NewMessages[0].Content)
 	}
 	carried := strings.TrimSpace(strings.Split(after, "[Context compressed]")[0])
-	if strings.Contains(carried, checkpointCurrentUserRequestHeading) {
+	if strings.Contains(carried, checkpointfmt.CurrentUserRequestHeading) {
 		t.Fatalf("carry spent its budget on the rewritten request section:\n%s", carried)
 	}
 	if !strings.Contains(carried, "## Progress") {

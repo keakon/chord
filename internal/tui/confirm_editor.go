@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	"github.com/keakon/bubbles/v2/textarea"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (m *Model) renderConfirmEditor(width int, title string, input *textarea.Model, submit, exit hintChip) string {
@@ -17,7 +19,7 @@ func (m *Model) renderConfirmEditor(width int, title string, input *textarea.Mod
 		Hint: hintLine(full...), CompactHint: hintLine(compact...),
 	}
 	if m.confirm.editError != "" {
-		cfg.Footer = DialogDangerStyle.Render(truncateOneLine(m.confirm.editError, max(dialogContentWidth(width), 1)))
+		cfg.Footer = currentStyles.DialogDangerStyle.Render(terminaltext.TruncateOneLine(m.confirm.editError, max(dialogContentWidth(width), 1)))
 	}
 	area := m.confirmDialogArea()
 	configureDialogTextarea(input, max(dialogContentWidth(width), 1), 1, min(confirmEditHeight(m.height), overlayContentHeight(cfg, area)))

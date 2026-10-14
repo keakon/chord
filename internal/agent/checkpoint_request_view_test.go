@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
@@ -165,7 +166,7 @@ func requestDedupFixture(request, original, constraint, retained string) message
 		"\n\n## Progress\n- parser checked\n" +
 		"\n\n## Key Decisions\n- preserve input\n" +
 		"\n\n## Open Problems\n- add test\n" +
-		"\n\n" + checkpointUserConstraintsHeading + "\n- " + strings.ReplaceAll(constraintExcerpt, "\n", " ") +
+		"\n\n" + checkpointfmt.UserConstraintsHeading + "\n- " + strings.ReplaceAll(constraintExcerpt, "\n", " ") +
 		"\n\n" + retainedRecentMessagesHeading + "\n" + retainedUserLabel + ":\n> " + strings.ReplaceAll(retained, "\n", "\n> ") +
 		"\n\n" + evidence
 	return message.Message{Role: message.RoleUser, Content: body, IsCompactionSummary: true, CompactionSummaryMode: compactionSummaryModeModelDriven, CompactionRequestSources: buildCheckpointRequestSources(body, nil, original, []evidenceItem{item})}

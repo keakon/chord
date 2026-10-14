@@ -8,33 +8,36 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/permission/rulesuggest"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestRenderHintChipStylesKeyAndDimsAction(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	chip := renderHintChip(hint("Enter", "submit"))
 	if got, want := ansi.Strip(chip), "[Enter] submit"; got != want {
 		t.Fatalf("chip plain text = %q, want %q", got, want)
 	}
-	if !strings.Contains(chip, KeyHintStyle.Render("[Enter]")) {
+	if !strings.Contains(chip, currentStyles.KeyHintStyle.Render("[Enter]")) {
 		t.Fatalf("key token should use KeyHintStyle: %q", chip)
 	}
-	if !strings.Contains(chip, DimStyle.Render("submit")) {
+	if !strings.Contains(chip, currentStyles.DimStyle.Render("submit")) {
 		t.Fatalf("action should be dim: %q", chip)
 	}
 }
 
 func TestRenderHintChipProseHasNoKeyToken(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	chip := renderHintChip(hintText("(auto servers are read-only)"))
-	if chip != DimStyle.Render("(auto servers are read-only)") {
+	if chip != currentStyles.DimStyle.Render("(auto servers are read-only)") {
 		t.Fatalf("prose chip = %q, want dim text", chip)
 	}
 }
 
 func TestHintLineJoinsChipsAndAppendsCounter(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	line := hintLine(hint("j/k", "scroll"), hint("Esc", "close"))
 	if got, want := ansi.Strip(line), "[j/k] scroll  [Esc] close"; got != want {
 		t.Fatalf("hintLine = %q, want %q", got, want)
@@ -51,7 +54,7 @@ func TestHintLineJoinsChipsAndAppendsCounter(t *testing.T) {
 }
 
 func TestWrapHintLinesKeepsChipsWhole(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	line := hintLine(hint("j/k", "move"), hint("Enter", "select"), hint("Esc", "close"))
 	lines := wrapHintLines(line, 20)
 	if len(lines) < 2 {
@@ -71,7 +74,7 @@ func TestWrapHintLinesKeepsChipsWhole(t *testing.T) {
 }
 
 func TestWrapHintLinesTruncatesOversizedChip(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	lines := wrapHintLines(hintLine(hint("Shift+Enter/Ctrl+J", "new line")), 6)
 	if len(lines) != 1 {
 		t.Fatalf("lines = %q, want a single truncated chip", lines)
@@ -95,16 +98,16 @@ func TestWrapHintLinesEmptyInput(t *testing.T) {
 }
 
 func TestRenderTabRowHighlightsActiveTab(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	row := renderTabRow([]string{"[Pending]", "[History]"}, 1)
-	want := TabStyle.Render("[Pending]") + " " + TabActiveStyle.Render("[History]")
+	want := currentStyles.TabStyle.Render("[Pending]") + " " + currentStyles.TabActiveStyle.Render("[History]")
 	if row != want {
 		t.Fatalf("tab row = %q, want %q", row, want)
 	}
 }
 
 func TestRenderFilterLineStates(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	idle := ansi.Strip(renderFilterLine("", false, "", 40))
 	if !strings.Contains(idle, "filter: ") || !strings.Contains(idle, filterPlaceholder) {
 		t.Fatalf("idle filter line = %q, want label and placeholder", idle)
@@ -122,7 +125,7 @@ func TestRenderFilterLineStates(t *testing.T) {
 }
 
 func TestRenderFilterLineIdleCounterFitsNarrowWidth(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	line := renderFilterLine("", false, "1/2", 25)
 	if width := ansi.StringWidth(line); width > 25 {
 		t.Fatalf("idle filter width = %d, want <= 25: %q", width, ansi.Strip(line))
@@ -130,7 +133,7 @@ func TestRenderFilterLineIdleCounterFitsNarrowWidth(t *testing.T) {
 }
 
 func TestRenderFilterLineKeepsLongQueryTail(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	line := ansi.Strip(renderFilterLine("abcdefghijklmnopqrstuvwxyz", false, "", 20))
 	if !strings.HasSuffix(line, "vwxyz") {
 		t.Fatalf("long query = %q, want the tail visible next to the caret", line)
@@ -165,17 +168,17 @@ func TestMemoryPanelTabRowShowsViews(t *testing.T) {
 }
 
 func TestRulePickerRendersSharedMarkers(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 100, 30)
 	m.confirm.request = &ConfirmRequest{ToolName: tools.NameEdit, ArgsJSON: `{"path":"sample.go","patch":"@@\n-old\n+new\n"}`}
 	m.confirm.pickingRule = true
-	m.confirm.candidates = []PatternCandidate{{Pattern: "edit:sample.go"}, {Pattern: "edit:*.go"}}
+	m.confirm.candidates = []rulesuggest.Candidate{{Pattern: "edit:sample.go"}, {Pattern: "edit:*.go"}}
 	m.confirm.patternIdx = 1
 	m.confirm.selectedPatterns = map[int]struct{}{1: {}}
 	m.confirm.scopes = []permission.RuleScope{permission.ScopeSession, permission.ScopeProject}
 	m.confirm.scopeIdx = 0
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	if !strings.Contains(plain, "[x] edit:*.go") {
 		t.Fatalf("selected pattern should use the shared check mark:\n%s", plain)
 	}
@@ -186,7 +189,7 @@ func TestRulePickerRendersSharedMarkers(t *testing.T) {
 		t.Fatalf("current scope should be independent of pattern focus:\n%s", plain)
 	}
 	m.handleConfirmRulePickerKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
-	if !strings.Contains(stripANSI(m.renderConfirmDialog()), "Scope: project") {
+	if !strings.Contains(terminaltext.StripANSI(m.renderConfirmDialog()), "Scope: project") {
 		t.Fatal("Tab did not update the visible scope")
 	}
 	if !strings.Contains(plain, "[↑↓] pattern") || !strings.Contains(plain, "[Enter] remember + allow") {

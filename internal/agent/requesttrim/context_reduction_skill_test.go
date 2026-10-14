@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -112,11 +113,11 @@ func TestSkillInstructionSummaryKeepsFullTextRecoverable(t *testing.T) {
 	if !ok || rule != string(requestReductionSkill) {
 		t.Fatalf("reduction = (%q, %q, %v), want rule %q", reduced, rule, ok, requestReductionSkill)
 	}
-	refs := tools.ExtractArtifactReferences(reduced)
+	refs := tooloutput.ExtractArtifactReferences(reduced)
 	if len(refs) == 0 {
 		t.Fatalf("skill summary dropped the only copy without an address: %q", reduced)
 	}
-	path := strings.TrimSuffix(strings.TrimPrefix(refs[0], tools.ArtifactReferencePrefix), ".")
+	path := strings.TrimSuffix(strings.TrimPrefix(refs[0], tooloutput.ArtifactReferencePrefix), ".")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("archived skill text unreadable: %v", err)

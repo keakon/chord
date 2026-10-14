@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/chord/internal/desktop"
-
 	"github.com/keakon/bubbles/v2/textinput"
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/desktop"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type overlayRulesSource interface {
@@ -346,8 +346,8 @@ func (m *Model) renderRulesList() string {
 
 	if len(m.rules.rules) == 0 {
 		lines = append(lines, "")
-		lines = append(lines, DimStyle.Render("  No remembered rules yet."))
-		lines = append(lines, DimStyle.Render("  Press A to add one manually, or use M in a confirmation dialog."))
+		lines = append(lines, currentStyles.DimStyle.Render("  No remembered rules yet."))
+		lines = append(lines, currentStyles.DimStyle.Render("  Press A to add one manually, or use M in a confirmation dialog."))
 	} else {
 		for i, r := range m.rules.rules {
 			prefix := "  "
@@ -358,13 +358,13 @@ func (m *Model) renderRulesList() string {
 			line := fmt.Sprintf("%s[%s] %s %s \"%s\"", prefix, scopeStr, r.Rule.Permission, r.Rule.Action, r.Rule.Pattern)
 			if i == m.rules.cursor {
 				focusLine = len(wrapDialogLines(lines, max(dialogContentWidth(maxWidth), 1)))
-				lines = append(lines, SelectedStyle.Width(dialogContentWidth(maxWidth)).Render(line))
+				lines = append(lines, currentStyles.SelectedStyle.Width(dialogContentWidth(maxWidth)).Render(line))
 			} else {
 				lines = append(lines, line)
 			}
 			if strings.TrimSpace(r.Path) != "" {
 				pathLine := fmt.Sprintf("    -> %s", r.Path)
-				lines = append(lines, DimStyle.Render(pathLine))
+				lines = append(lines, currentStyles.DimStyle.Render(pathLine))
 			}
 		}
 	}
@@ -409,10 +409,10 @@ func (m *Model) renderRulesAdd(maxWidth int) string {
 		patternLine = renderDialogInputField(patternLine, false)
 	}
 	lines = append(lines, toolLine, patternLine, "")
-	lines = append(lines, fmt.Sprintf("Scope: %s", ConfirmToolStyle.Bold(true).Render(scopeLabelStr(rulesAddScopes[m.rules.addScopeIdx]))))
-	lines = append(lines, fmt.Sprintf("Action: %s", ConfirmToolStyle.Bold(true).Render(string(rulesAddActions[m.rules.addActionIdx]))))
+	lines = append(lines, fmt.Sprintf("Scope: %s", currentStyles.ConfirmToolStyle.Bold(true).Render(scopeLabelStr(rulesAddScopes[m.rules.addScopeIdx]))))
+	lines = append(lines, fmt.Sprintf("Action: %s", currentStyles.ConfirmToolStyle.Bold(true).Render(string(rulesAddActions[m.rules.addActionIdx]))))
 	if m.rules.addError != "" {
-		lines = append(lines, "", DialogDangerStyle.Render(m.rules.addError))
+		lines = append(lines, "", currentStyles.DialogDangerStyle.Render(m.rules.addError))
 	}
 	cfg := OverlayConfig{
 		Title: "Add Permission Rule", MaxWidth: maxWidth, MinContentHeight: 2,
@@ -424,7 +424,7 @@ func (m *Model) renderRulesAdd(maxWidth int) string {
 		cfg.Title = fmt.Sprintf("Add rule · %s/%s", scopeLabelStr(rulesAddScopes[m.rules.addScopeIdx]), rulesAddActions[m.rules.addActionIdx])
 		lines = []string{toolLine, patternLine}
 		if m.rules.addError != "" {
-			cfg.Footer = DialogDangerStyle.Render(truncateOneLine(m.rules.addError, width))
+			cfg.Footer = currentStyles.DialogDangerStyle.Render(terminaltext.TruncateOneLine(m.rules.addError, width))
 		}
 		if overlayContentHeight(cfg, area) < 2 {
 			lines = []string{toolLine}

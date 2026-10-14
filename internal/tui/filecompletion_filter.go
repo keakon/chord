@@ -1,6 +1,8 @@
 package tui
 
-func (m *Model) filterAtMentionOptionsByInputSupport(options []atMentionOption) []atMentionOption {
+import "github.com/keakon/chord/internal/tui/filecompletion"
+
+func (m *Model) filterAtMentionOptionsByInputSupport(options []filecompletion.Option) []filecompletion.Option {
 	if len(options) == 0 {
 		return options
 	}
@@ -10,7 +12,7 @@ func (m *Model) filterAtMentionOptionsByInputSupport(options []atMentionOption) 
 			out = append(out, option)
 			continue
 		}
-		kind := attachmentKindForPath(unescapeAtMentionPath(option.Path))
+		kind := filecompletion.AttachmentKindForPath(filecompletion.UnescapePath(option.Path))
 		if kind != "" && !m.supportsAttachmentInput(kind) {
 			continue
 		}

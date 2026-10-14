@@ -1,13 +1,17 @@
 package tui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/keakon/chord/internal/tui/overlaylist"
+)
 
 func BenchmarkModelViewAtMentionPopupOpen(b *testing.B) {
 	m := benchmarkModelForView()
 	m.mode = ModeInsert
 	m.atMentionOpen = true
 	m.atMentionQuery = "doc"
-	m.atMentionList = NewOverlayList([]OverlayListItem{
+	m.atMentionList = overlaylist.New([]overlaylist.Item{
 		{Label: "docs/ARCHITECTURE.md"},
 		{Label: "docs/guides/index.md"},
 		{Label: "docs/pitfalls/tui-performance.md"},

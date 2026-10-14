@@ -7,21 +7,24 @@ import (
 	"unicode"
 
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestSpacingMarkWidthContract(t *testing.T) {
 	for _, text := range []string{"\u092a\u0949", "a\u0a3e", "a\u093e", "a\u093e\u093e", "\u0e19\u0e49\u0e33", "\u0e99\u0eb3"} {
 		t.Run(fmt.Sprintf("%U", []rune(text)), func(t *testing.T) {
-			if got := tuiStringWidth(text); got != 2 {
+			if got := terminaltext.Width(text); got != 2 {
 				t.Fatalf("width of %q = %d, want 2", text, got)
 			}
-			if got := tuiCut(text+"x", 0, 1); got != "" {
+			if got := terminaltext.Cut(text+"x", 0, 1); got != "" {
 				t.Fatalf("one-column cut included a two-column cluster: %q", got)
 			}
-			if got := tuiCut(text+"x", 0, 2); got != text {
+			if got := terminaltext.Cut(text+"x", 0, 2); got != text {
 				t.Fatalf("two-column cut = %q, want intact %q", got, text)
 			}
-			for _, line := range tuiHardwrap(strings.Repeat(text, 4), 5) {
+			for _, line := range terminaltext.Hardwrap(strings.Repeat(text, 4), 5) {
 				if got := spacingFixtureTerminalWidth(line); got > 5 {
 					t.Fatalf("terminal width of wrapped line %q = %d", line, got)
 				}
@@ -57,7 +60,7 @@ func spacingFixtureTerminalWidth(text string) int {
 }
 
 func TestSpacingMarksKeepCodeAndSidebarAligned(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	for _, width := range []int{100, 160, 215, 240} {
 		for _, streaming := range []bool{false, true} {
 			t.Run(fmt.Sprintf("width_%d/streaming_%t", width, streaming), func(t *testing.T) {
@@ -121,12 +124,5 @@ func TestSpacingMarksKeepCodeAndSidebarAligned(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestSpacingMarksKeepTablePaddingAligned(t *testing.T) {
-	const glyph = "a\u0cf3"
-	if got := formatTableCell(glyph, 4, 0); got != glyph+"  " {
-		t.Fatalf("padded cell = %q", got)
 	}
 }

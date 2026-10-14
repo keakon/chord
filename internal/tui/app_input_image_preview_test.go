@@ -10,10 +10,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/imagecache"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func newInputImagePreviewModel(t *testing.T, backend ImageBackend) *Model {
@@ -215,7 +218,7 @@ func TestImageViewerLoadFailurePreservesDraftAndRetry(t *testing.T) {
 		t.Fatal("missing path should fail")
 	}
 	m.handleImageViewerLoaded(result)
-	errorOverlay := stripANSI(m.renderImageViewerOverlay())
+	errorOverlay := terminaltext.StripANSI(m.renderImageViewerOverlay())
 	if !strings.Contains(errorOverlay, "read image file") || m.input.Value() != before || len(m.attachments) != 3 {
 		t.Fatal("load error lost draft or did not display error")
 	}
@@ -248,16 +251,14 @@ func TestImageViewerRenderAndProtocolUsePreparedDataOnly(t *testing.T) {
 			parts, _ := m.inputImageSnapshot(m.input.InlinePastes()[0])
 			m.openImageViewerItems(parts, 0, ModeInsert)
 			finishImageViewerLoad(t, m)
-			read, decode, encode := imageCacheReadFile, imageCacheDecode, imageCacheEncodePNG
-			t.Cleanup(func() { imageCacheReadFile, imageCacheDecode, imageCacheEncodePNG = read, decode, encode })
-			imageCacheReadFile = func(string) ([]byte, error) { t.Fatal("read on UI loop"); return nil, nil }
-			imageCacheDecode = func([]byte) (image.Image, string, error) { t.Fatal("decode on UI loop"); return nil, "", nil }
-			imageCacheEncodePNG = func(io.Writer, image.Image) error { t.Fatal("encode on UI loop"); return nil }
-			imageRuntimeCache.mu.Lock()
-			imageRuntimeCache.entries = make(map[string]*imageRuntimeCacheEntry)
-			imageRuntimeCache.mu.Unlock()
+			imageCache = imagecache.New()
+			// Make reconstruction impossible: prepared rendering must survive both
+			// cache eviction and disappearance of the original source.
+			m.imageViewer.Items[m.imageViewer.Index].Data = nil
+			m.imageViewer.Items[m.imageViewer.Index].ImagePath = filepath.Join(t.TempDir(), "missing.png")
+			prepared := m.imageViewer.Prepared.Sequence
 			m.renderImageViewerOverlay()
-			if m.imageViewerProtocolCmd() == nil {
+			if m.imageViewerProtocolCmd() == nil || m.imageViewer.Prepared.Sequence != prepared {
 				t.Fatal("eviction lost prepared image")
 			}
 			m.width += 20
@@ -353,31 +354,41 @@ func TestImageViewerTranscriptNavigationKeepsOpeningSnapshot(t *testing.T) {
 	}
 }
 
-func TestImageViewerSlowReadDoesNotBlockClose(t *testing.T) {
+func TestImageViewerSlowDecodeDoesNotBlockClose(t *testing.T) {
 	m := newInputImagePreviewModel(t, ImageBackendITerm2)
-	path := filepath.Join(t.TempDir(), "slow.png")
-	if err := os.WriteFile(path, makeTestPNG(t), 0600); err != nil {
-		t.Fatal(err)
-	}
-	original := imageCacheReadFile
+	magic := "test-image:" + t.TempDir()
 	started, release := make(chan struct{}), make(chan struct{})
-	imageCacheReadFile = func(file string) ([]byte, error) {
+	// Exercise the public image decoder boundary rather than exposing cache hooks.
+	image.RegisterFormat("test-image", magic, func(io.Reader) (image.Image, error) {
 		close(started)
 		<-release
-		return original(file)
+		return image.NewRGBA(image.Rect(0, 0, 2, 2)), nil
+	}, func(io.Reader) (image.Config, error) { return image.Config{Width: 2, Height: 2}, nil })
+	path := filepath.Join(t.TempDir(), "sample.png")
+	if err := os.WriteFile(path, []byte(magic), 0600); err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { imageCacheReadFile = original })
 	command := m.openImageViewerItems([]BlockImagePart{{ImagePath: path, MimeType: "image/png"}}, 0, ModeInsert)
 	finished := make(chan tea.Msg, 1)
 	go func() { finished <- command() }()
-	<-started
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("viewer did not reach decode")
+	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.imageViewer.Open || m.mode != ModeInsert {
-		t.Fatal("slow read blocked close")
+		t.Error("slow decode blocked close")
 	}
 	close(release)
-	if msg := <-finished; msg != nil {
-		t.Fatalf("cancelled read returned %T", msg)
+	select {
+	case msg := <-finished:
+		if msg != nil {
+			t.Fatalf("cancelled decode returned %T", msg)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled preparation did not finish")
 	}
 }
 

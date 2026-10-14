@@ -5,20 +5,22 @@ import (
 	"testing"
 
 	"github.com/keakon/lipgloss/v2"
+
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // TestSplitStyleRenderParity verifies that appendStyledWrappedBody's per-line
 // reuse of a precomputed SGR prefix/suffix produces byte-identical output to
 // the per-line style.Render calls it replaces.
 func TestSplitStyleRenderParity(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	styles := []struct {
 		name  string
 		style lipgloss.Style
 	}{
-		{"expanded", ToolResultExpandedStyle},
-		{"error", ErrorStyle},
-		{"dim", DimStyle},
+		{"expanded", currentStyles.ToolResultExpandedStyle},
+		{"error", currentStyles.ErrorStyle},
+		{"dim", currentStyles.DimStyle},
 	}
 	indents := []string{"", "  ", "    "}
 	// Wrapped plain-text lines are the only input the helper receives: no tabs,

@@ -6,9 +6,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/keakon/chord/internal/textfile"
 )
 
 func TestDeleteToolPathsDescriptionWarnsAgainstGuessing(t *testing.T) {
@@ -28,8 +31,43 @@ func TestDeleteToolDeletesFileAndInvalidatesCaches(t *testing.T) {
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	clearEncodingCaches()
-	setPathCache(path, pathCacheEntry{Size: int64(len(content)), ModTime: time.Now().UnixNano(), Hash: cacheKeyForBytes(content)})
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := []byte("other\nbytes\n")
+	writeSameVersion := func(data []byte) {
+		t.Helper()
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Content-cache admission is asynchronous. Observe an actual cached read
+	// before deleting, so a missing Delete invalidation cannot pass on a miss.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		writeSameVersion(content)
+		// This always reads the bytes, even if a previous attempt cached the
+		// replacement, and restores the path mapping to the original hash.
+		if _, _, err := textfile.ReadWithBytes(path); err != nil {
+			t.Fatal(err)
+		}
+		writeSameVersion(replacement)
+		cached, err := textfile.Read(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cached.Text == string(content) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("content cache did not admit the original file")
+		}
+		runtime.Gosched()
+	}
 
 	args := deleteArgsJSON(t, []string{path}, "remove test file")
 	got, err := (DeleteTool{}).Execute(context.Background(), args)
@@ -42,8 +80,10 @@ func TestDeleteToolDeletesFileAndInvalidatesCaches(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected file removed, stat err = %v", err)
 	}
-	if _, ok := getPathCache(path); ok {
-		t.Fatal("expected path cache entry removed")
+	writeSameVersion(replacement)
+	decoded, err := textfile.Read(path)
+	if err != nil || decoded.Text != string(replacement) {
+		t.Fatalf("recreated file = %q, err = %v; want %q", decoded.Text, err, replacement)
 	}
 }
 

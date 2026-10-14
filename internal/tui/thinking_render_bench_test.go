@@ -3,11 +3,13 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // Interleaved cards exercise redraws while several streams remain visible.
 func BenchmarkRenderThinkingStreamingInterleaved(b *testing.B) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := strings.Repeat("**Inspecting**\nA short paragraph with context.\n\n", 200)
 	blocks := []*Block{
 		{Type: BlockThinking, Streaming: true, Content: content + "First pending paragraph"},

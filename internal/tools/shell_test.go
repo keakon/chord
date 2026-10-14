@@ -245,30 +245,6 @@ func TestShellRunInBackgroundReturnsHandle(t *testing.T) {
 	}
 }
 
-func TestShellReadOnlyAllowlistCoversNewCommands(t *testing.T) {
-	allowed := []string{
-		"head -n 5 file", "tail -n 5 file", "wc -l file", "stat file", "file x", "file -b x", "file --mime-type x", "du -sh .", "df -h",
-	}
-	for _, command := range allowed {
-		if v := ClassifyShellReadOnly(command, "bash", false); !v.ReadOnly {
-			t.Errorf("ClassifyShellReadOnly(%q) = false (%s), want true", command, v.Reason)
-		}
-	}
-	denied := []string{
-		"tail -f log", "tail -F log", "tail --follow log", "tail --follow=name log", "tail -fn 100 log", "rm -rf x", "go test ./...", "cat file > out",
-		// file -C/--compile writes magic.mgc, so it is not a read.
-		"file -C", "file --compile", "file -Cm custom.magic", "file --compile --magic custom.magic",
-	}
-	for _, command := range denied {
-		if v := ClassifyShellReadOnly(command, "bash", false); v.ReadOnly {
-			t.Errorf("ClassifyShellReadOnly(%q) = true, want false", command)
-		}
-	}
-	if v := ClassifyShellReadOnly("git status --short", "bash", true); v.ReadOnly {
-		t.Error("ClassifyShellReadOnly(background git status) = true, want false")
-	}
-}
-
 func TestShellExitErrorReportsSignal(t *testing.T) {
 	cmd := exec.Command("sh", "-c", "kill -TERM $$")
 	err := cmd.Run()

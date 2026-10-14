@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func sidebarStatusLabel(status string) string {
@@ -58,7 +59,7 @@ func sidebarEntryText(entry SidebarEntry, focused bool, width int) (line, reason
 	indicator := sidebarIndicator(entry.Status, focused)
 	iw := lipgloss.Width(indicator)
 	if width <= iw {
-		return truncateOneLine(indicator, width), ""
+		return terminaltext.TruncateOneLine(indicator, width), ""
 	}
 	nameWidth := width - iw - 1
 	label := ""
@@ -76,14 +77,14 @@ func sidebarEntryText(entry SidebarEntry, focused bool, width int) (line, reason
 	if entry.ID == "main" || entry.Status != string(agent.SubAgentStateWaitingMain) {
 		return line, ""
 	}
-	text := strings.Join(strings.Fields(sanitizeDisplayText(entry.AwaitingOwnerReason)), " ")
+	text := strings.Join(strings.Fields(terminaltext.Sanitize(entry.AwaitingOwnerReason)), " ")
 	prefixWidth := lipgloss.Width(sidebarTreePrefix(entry))
 	if prefixWidth >= nameWidth {
 		prefixWidth = min(2, nameWidth)
 	}
 	indent := iw + 1 + prefixWidth
 	if text != "" && width > indent {
-		reason = strings.Repeat(" ", indent) + truncateOneLine(text, width-indent)
+		reason = strings.Repeat(" ", indent) + terminaltext.TruncateOneLine(text, width-indent)
 	}
 	return line, reason
 }

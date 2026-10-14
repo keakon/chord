@@ -11,24 +11,26 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func dialogBgColor(t *testing.T) interface {
 	RGBA() (r, g, b, a uint32)
 } {
 	t.Helper()
-	ApplyTheme(DefaultTheme())
-	if currentTheme.DialogBg == "" {
+	ApplyTheme(uitheme.Default())
+	if currentStyles.Palette.DialogBg == "" {
 		t.Skip("theme has no dialog background")
 	}
-	return colorOfTheme(currentTheme.DialogBg)
+	return colorOfTheme(currentStyles.Palette.DialogBg)
 }
 
 func drawLineCells(t *testing.T, line string) uv.Line {
 	t.Helper()
 	width := ansi.StringWidth(line)
 	if width <= 0 {
-		t.Fatalf("line has no visible width: %q", stripANSI(line))
+		t.Fatalf("line has no visible width: %q", terminaltext.StripANSI(line))
 	}
 	buf := newScreenBuffer(width, 1)
 	uv.NewStyledString(line).Draw(buf, buf.Bounds())
@@ -40,7 +42,7 @@ func requireCellBg(t *testing.T, line, needle, wantChar string, wantBg interface
 }) {
 	t.Helper()
 	cells := drawLineCells(t, line)
-	plain := stripANSI(line)
+	plain := terminaltext.StripANSI(line)
 	idx := strings.Index(plain, needle)
 	if idx < 0 {
 		t.Fatalf("line %q does not contain %q", plain, needle)
@@ -64,13 +66,13 @@ func TestPreserveDialogBackgroundKeepsMultiSegmentLine(t *testing.T) {
 	wantBg := dialogBgColor(t)
 	line := lipgloss.JoinHorizontal(lipgloss.Left,
 		renderHintChip(dangerHint("y", "Delete")),
-		DimStyle.Render("  "),
+		currentStyles.DimStyle.Render("  "),
 		renderHintChip(hint("n/esc", "Cancel")),
 	)
 	out := renderDialogBox(60, []string{line})
 	buttonLine := findRenderedLineContaining(out, "[n/esc] Cancel")
 	if buttonLine == "" {
-		t.Fatalf("missing cancel segment after preserve: %q", stripANSI(out))
+		t.Fatalf("missing cancel segment after preserve: %q", terminaltext.StripANSI(out))
 	}
 	// Content cells (including the spacer) must sit on DialogBg; border cells
 	// carry the border style and are intentionally excluded.
@@ -94,7 +96,7 @@ func TestDeleteSessionCancelKeepsDialogBg(t *testing.T) {
 	}
 	line := findRenderedLineContaining(out, "[n/esc] Cancel")
 	if line == "" {
-		t.Fatalf("missing button line: %q", stripANSI(out))
+		t.Fatalf("missing button line: %q", terminaltext.StripANSI(out))
 	}
 	requireCellBg(t, line, "[y] Delete", "D", wantBg)
 	requireCellBg(t, line, "[n/esc] Cancel", "C", wantBg)
@@ -113,13 +115,13 @@ func TestRulesAddKeepsDialogBg(t *testing.T) {
 	}
 	scopeLine := findRenderedLineContaining(out, "Scope:")
 	if scopeLine == "" {
-		t.Fatalf("missing scope line: %q", stripANSI(out))
+		t.Fatalf("missing scope line: %q", terminaltext.StripANSI(out))
 	}
 	requireCellBg(t, scopeLine, "Scope:", "S", wantBg)
 	requireCellBg(t, scopeLine, "Scope: session", "s", wantBg)
 	toolLine := findRenderedLineContaining(out, "shell")
 	if toolLine == "" {
-		t.Fatalf("missing tool input value: %q", stripANSI(out))
+		t.Fatalf("missing tool input value: %q", terminaltext.StripANSI(out))
 	}
 	requireCellBg(t, toolLine, "shell", "s", wantBg)
 }
@@ -140,7 +142,7 @@ func TestHandoffDenyReasonKeepsDialogBg(t *testing.T) {
 	}
 	line := findRenderedLineContaining(out, "use reviewer first")
 	if line == "" {
-		t.Fatalf("missing deny input value: %q", stripANSI(out))
+		t.Fatalf("missing deny input value: %q", terminaltext.StripANSI(out))
 	}
 	requireCellBg(t, line, "use reviewer first", "u", wantBg)
 }
@@ -150,7 +152,7 @@ func TestRenderOverlayPreservesButtons(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 32)
 	content := lipgloss.JoinHorizontal(lipgloss.Left,
 		renderHintChip(hint("Enter/A", "Allow")),
-		DimStyle.Render("  "),
+		currentStyles.DimStyle.Render("  "),
 		renderHintChip(hint("Esc/D", "Deny")),
 	)
 	dialog, _ := RenderOverlay(OverlayConfig{
@@ -161,7 +163,7 @@ func TestRenderOverlayPreservesButtons(t *testing.T) {
 	}, content, image.Rect(0, 0, m.width, m.height))
 	line := findRenderedLineContaining(dialog, "[Esc/D] Deny")
 	if line == "" {
-		t.Fatalf("missing deny button: %q", stripANSI(dialog))
+		t.Fatalf("missing deny button: %q", terminaltext.StripANSI(dialog))
 	}
 	requireCellBg(t, line, "[Esc/D] Deny", "D", wantBg)
 }

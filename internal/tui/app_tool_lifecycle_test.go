@@ -9,6 +9,8 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestToolCallExecutionEventMarksToolQueuedWithoutAnimating(t *testing.T) {
@@ -35,7 +37,7 @@ func TestToolCallExecutionEventMarksToolQueuedWithoutAnimating(t *testing.T) {
 	if block.ToolExecutionState != agent.ToolCallExecutionStateQueued {
 		t.Fatalf("ToolExecutionState = %q, want %q", block.ToolExecutionState, agent.ToolCallExecutionStateQueued)
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "Queued") {
 		t.Fatalf("expected queued header badge; got:\n%s", joined)
 	}
@@ -68,7 +70,7 @@ func TestQueuedExecutionEventRefreshesPendingGlyph(t *testing.T) {
 	if !ok {
 		t.Fatal("expected the waiting tool block")
 	}
-	if frame := stripANSI(m.viewport.Render("▖", nil, -1, -1, "")); !strings.Contains(frame, pendingToolGlyph) {
+	if frame := terminaltext.StripANSI(m.viewport.Render("▖", nil, -1, -1, "")); !strings.Contains(frame, pendingToolGlyph) {
 		t.Fatalf("expected the speculative pending glyph before dispatch, got:\n%s", frame)
 	}
 
@@ -78,7 +80,7 @@ func TestQueuedExecutionEventRefreshesPendingGlyph(t *testing.T) {
 	if !block.ToolQueuedByExecutionEvent {
 		t.Fatal("execution event did not set the queued-by-event badge")
 	}
-	if frame := stripANSI(m.viewport.Render("▖", nil, -1, -1, "")); strings.Contains(frame, pendingToolGlyph) || !strings.Contains(frame, queuedToolGlyph) {
+	if frame := terminaltext.StripANSI(m.viewport.Render("▖", nil, -1, -1, "")); strings.Contains(frame, pendingToolGlyph) || !strings.Contains(frame, queuedToolGlyph) {
 		t.Fatalf("queued card kept its stale pending frame, want %s:\n%s", queuedToolGlyph, frame)
 	}
 }
@@ -167,7 +169,7 @@ func TestFinalWriteUpdateCreatesFullPreviewWithoutStartEvent(t *testing.T) {
 		t.Fatal("expected Write tool block")
 	}
 	block.Collapsed = false
-	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if !strings.Contains(plain, "package main") {
 		t.Fatalf("expected completed Write content preview after start-event recovery, got:\n%s", plain)
 	}
@@ -199,8 +201,8 @@ func TestTodoWriteQueuedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
 		t.Fatalf("expected queued tool state, got %q", block.ToolExecutionState)
 	}
 
-	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
-	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
+	joinedA := terminaltext.StripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	joinedB := terminaltext.StripANSI(strings.Join(block.Render(96, "▘"), "\n"))
 	if joinedA != joinedB {
 		t.Fatalf("expected speculative queued todo card to avoid global spinner animation\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
 	}
@@ -236,8 +238,8 @@ func TestTodoWriteCompletedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
 		t.Fatal("expected todo tool block to be marked done")
 	}
 
-	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
-	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
+	joinedA := terminaltext.StripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	joinedB := terminaltext.StripANSI(strings.Join(block.Render(96, "▘"), "\n"))
 	if joinedA != joinedB {
 		t.Fatalf("completed todo card should not animate with global spinner\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
 	}
@@ -280,7 +282,7 @@ func TestToolCallUpdateEventArgsStreamingDoneDoesNotDowngradeFinishedToolBlock(t
 	if block.ToolExecutionState == agent.ToolCallExecutionStateQueued {
 		t.Fatalf("did not expect finished tool to be downgraded to queued")
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "▖"), "\n"))
 	if strings.Contains(joined, "⏸") {
 		t.Fatalf("did not expect queued glyph in finished tool render; got:\n%s", joined)
 	}
@@ -318,13 +320,13 @@ func TestToolCallRendersStructuredElapsedFooterAfterCompletion(t *testing.T) {
 	}
 	block.StartedAt = time.Now().Add(-6 * time.Second)
 
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "⏱") {
 		t.Fatalf("did not expect elapsed footer while tool still running; got:\n%s", joined)
 	}
 
 	block.StartedAt = time.Now().Add(-4 * time.Second)
-	joined = stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined = terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "⏱") {
 		t.Fatalf("did not expect elapsed footer before completion; got:\n%s", joined)
 	}
@@ -342,7 +344,7 @@ func TestToolCallRendersStructuredElapsedFooterAfterCompletion(t *testing.T) {
 	if block.SettledAt.IsZero() {
 		t.Fatal("finished tool should record SettledAt")
 	}
-	joined = stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined = terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "⏱ 7s") {
 		t.Fatalf("expected structured elapsed footer after completion; got:\n%s", joined)
 	}
@@ -373,7 +375,7 @@ func TestJobOutputCardShowsElapsedOnlyAfterCompletion(t *testing.T) {
 	}
 	block.StartedAt = time.Now().Add(-6 * time.Second)
 
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "job-8") {
 		t.Fatalf("running job_output card should keep the read handle; got:\n%s", joined)
 	}
@@ -390,7 +392,7 @@ func TestJobOutputCardShowsElapsedOnlyAfterCompletion(t *testing.T) {
 		AgentID:  "",
 		Duration: 7 * time.Second,
 	}})
-	joined = stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined = terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "⏱ 7s") {
 		t.Fatalf("finished job_output card should show the total elapsed; got:\n%s", joined)
 	}
@@ -418,7 +420,7 @@ func TestFinishedJobOutputCardHidesSubSecondTotal(t *testing.T) {
 		AgentID:  "",
 		Duration: 400 * time.Millisecond,
 	}})
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "job-9") {
 		t.Fatalf("finished job_output card should keep the read handle; got:\n%s", joined)
 	}
@@ -516,8 +518,8 @@ func TestToolCallUpdateEventArgsStreamingDoneCreatesQueuedNonAnimatingToolBlock(
 	if block.ToolProgress != nil {
 		t.Fatalf("expected no transient arg progress on queued block, got %+v", *block.ToolProgress)
 	}
-	joinedA := stripANSI(strings.Join(block.Render(96, "▖"), "\n"))
-	joinedB := stripANSI(strings.Join(block.Render(96, "▘"), "\n"))
+	joinedA := terminaltext.StripANSI(strings.Join(block.Render(96, "▖"), "\n"))
+	joinedB := terminaltext.StripANSI(strings.Join(block.Render(96, "▘"), "\n"))
 	if joinedA != joinedB {
 		t.Fatalf("expected queued block created from final arg update to avoid global spinner animation\nframe A:\n%s\n\nframe B:\n%s", joinedA, joinedB)
 	}
@@ -576,7 +578,7 @@ func TestToolProgressEventUpdatesRunningToolCard(t *testing.T) {
 	if block.ToolProgress == nil {
 		t.Fatal("expected tool progress on running block")
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "3 / 8 paths") {
 		t.Fatalf("expected tool progress in rendered card; got:\n%s", joined)
 	}
@@ -606,7 +608,7 @@ func TestToolProgressEventPreservesProgressInNarrowWidthByTruncatingHeader(t *te
 	if !ok {
 		t.Fatal("expected running tool block")
 	}
-	joined := stripANSI(strings.Join(block.Render(44, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(44, "●"), "\n"))
 	if !strings.Contains(joined, "3 / 8 paths") {
 		t.Fatalf("expected narrow render to preserve progress; got:\n%s", joined)
 	}
@@ -646,7 +648,7 @@ func TestToolProgressEventDoesNotUpdateQueuedToolCard(t *testing.T) {
 	if block.ToolProgress != nil {
 		t.Fatal("did not expect queued tool to keep progress")
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "1 / 2 paths") {
 		t.Fatalf("queued tool should not render progress; got:\n%s", joined)
 	}
@@ -687,7 +689,7 @@ func TestToolResultEventClearsToolProgress(t *testing.T) {
 	if block.ToolProgress != nil {
 		t.Fatalf("expected ToolProgress to be cleared, got %+v", *block.ToolProgress)
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if strings.Contains(joined, "2 / 3 paths") {
 		t.Fatalf("completed tool should not render stale progress; got:\n%s", joined)
 	}
@@ -914,7 +916,7 @@ func TestToolResultEventShowsEditedBeforeApprovalSummary(t *testing.T) {
 	if block.Audit == nil || !block.Audit.UserModified {
 		t.Fatalf("block.Audit = %#v, want user-modified audit", block.Audit)
 	}
-	joined := stripANSI(strings.Join(block.Render(96, "●"), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(96, "●"), "\n"))
 	if !strings.Contains(joined, "edited before approval") {
 		t.Fatalf("expected edited-before-approval marker, got:\n%s", joined)
 	}
@@ -1125,7 +1127,7 @@ func TestStreamRollbackRemovesSettledStreamingThinkingBlock(t *testing.T) {
 }
 
 func TestStreamTextEventDoesNotTriggerInlineImageRefresh(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	caps := TerminalImageCapabilities{Backend: ImageBackendITerm2, SupportsInline: true, SupportsFullscreen: true}
 	setCurrentTerminalImageCapabilities(caps)
 	t.Cleanup(func() {

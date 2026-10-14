@@ -1,7 +1,4 @@
 package tui
 
-// filecompletion.go keeps the @-mention file completion topic grouped under a stable filename.
-// Implementation is split across:
-// - filecompletion_scan.go
-// - filecompletion_paths.go
-// - filecompletion_ui.go
+// File completion input and asynchronous refresh are coordinated here.
+// Path references, candidate matching and fuzzy state belong to filecompletion.

@@ -206,7 +206,7 @@ func (m Model) renderStatusBarLocalShell(maxWidth int) string {
 	text := "Terminal" + elapsed
 	started := ""
 	if !startedAt.IsZero() {
-		started = DimStyle.Render(" · " + formatStatusBarStartedAt(startedAt))
+		started = currentStyles.DimStyle.Render(" · " + formatStatusBarStartedAt(startedAt))
 	}
 	iconStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.AccentGradientToFg))
 	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.StatusFg))
@@ -462,8 +462,8 @@ func (m *Model) renderCompactionBackgroundPill(now time.Time) string {
 
 	// Handle terminal states (1-2s flush window)
 	if status.Terminal != "" {
-		return StatusHintStyle.Render(strings.Join(pillParts, " "))
+		return currentStyles.StatusHintStyle.Render(strings.Join(pillParts, " "))
 	}
 
-	return StatusHintStyle.Render(strings.Join(pillParts, " "))
+	return currentStyles.StatusHintStyle.Render(strings.Join(pillParts, " "))
 }

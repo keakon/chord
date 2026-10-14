@@ -24,12 +24,13 @@ import (
 	"github.com/keakon/chord/internal/pathutil"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
 const (
-	mainToolOutputGuidance = tools.ArtifactReadGuidance
-	subToolOutputGuidance  = tools.ArtifactReadGuidance
+	mainToolOutputGuidance = tooloutput.ArtifactReadGuidance
+	subToolOutputGuidance  = tooloutput.ArtifactReadGuidance
 )
 
 type toolExecutionPipeline struct {
@@ -1608,13 +1609,13 @@ func formatToolExecutionOutput(result, sessionDir, artifactKey, toolName string,
 	if toolName == tools.NameQuestion || toolName == tools.NameRead {
 		return tools.NormalizeEmptySuccessOutput(toolName, result, execErr)
 	}
-	opts := tools.TruncateOptions{ArtifactKey: artifactKey}
+	opts := tooloutput.Options{ArtifactKey: artifactKey}
 	if toolName == tools.NameShell || toolName == tools.NameJobOutput {
 		opts.MaxBytes = shellResultPreviewBytes
 	}
-	truncated := tools.TruncateOutputWithOptions(result, sessionDir, opts)
+	truncated := tooloutput.Truncate(result, sessionDir, opts)
 	content := tools.NormalizeEmptySuccessOutput(toolName, truncated.Content, execErr)
-	return tools.AppendArtifactGuidance(content, truncated, guidance)
+	return tooloutput.AppendArtifactGuidance(content, truncated, guidance)
 }
 
 func wrapStaleEditError(err error) error {

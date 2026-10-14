@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/buildinfo"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestViewShowsWelcomeVersionOnEmptySession(t *testing.T) {
 	m := NewModelWithSize(nil, 100, 30)
 	m.layout = m.generateLayout(m.width, m.height)
 
-	got := stripANSI(m.View().Content)
+	got := terminaltext.StripANSI(m.View().Content)
 	wantVersion := buildinfo.Current().Short()
 	if !strings.Contains(got, wantVersion) {
 		t.Fatalf("View() should show welcome version %q, got %q", wantVersion, got)
@@ -58,7 +59,7 @@ func TestViewShowsRestoringSessionPlaceholderDuringStartupRestore(t *testing.T) 
 	m.beginSessionSwitch("resume", "123")
 	m.layout = m.generateLayout(m.width, m.height)
 
-	got := stripANSI(m.View().Content)
+	got := terminaltext.StripANSI(m.View().Content)
 	if !strings.Contains(got, "Restoring session...") {
 		t.Fatalf("View() should show restoring placeholder, got %q", got)
 	}
@@ -74,7 +75,7 @@ func TestViewRefreshesComposerAfterInputChanges(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.mode = ModeInsert
 
-	initial := stripANSI(m.View().Content)
+	initial := terminaltext.StripANSI(m.View().Content)
 	if strings.Contains(initial, "hello cache") {
 		t.Fatalf("initial View() unexpectedly contains future composer text: %q", initial)
 	}
@@ -82,7 +83,7 @@ func TestViewRefreshesComposerAfterInputChanges(t *testing.T) {
 	m.input.SetValue("hello cache")
 	m.input.SyncHeight()
 
-	updated := stripANSI(m.View().Content)
+	updated := terminaltext.StripANSI(m.View().Content)
 	if !strings.Contains(updated, "hello cache") {
 		t.Fatalf("View() should refresh composer text after input changes, got:\n%s", updated)
 	}
@@ -110,7 +111,7 @@ func TestViewReadCardWithCRLFResultDoesNotLeakCarriageReturnIntoCanvas(t *testin
 	if containsRawCarriageReturnForTest(view.Content) {
 		t.Fatalf("View().Content should not contain raw carriage returns: %q", view.Content)
 	}
-	plain := stripANSI(view.Content)
+	plain := terminaltext.StripANSI(view.Content)
 	if !strings.Contains(plain, "issue,label") {
 		t.Fatalf("expected View() content to contain first CSV row, got:\n%s", plain)
 	}

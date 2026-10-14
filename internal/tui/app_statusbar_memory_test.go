@@ -5,13 +5,14 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // The MEMORY pill appears in the status bar only while automatic memory
 // extraction is enabled, mirroring the LOOP/YOLO pills.
 func TestStatusBarMemoryPillAppearsWhenEnabled(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{memoryEnabled: true}, 120, 24)
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	if !strings.Contains(got, "MEMORY") {
 		t.Fatalf("status bar missing MEMORY pill, got:\n%s", got)
 	}
@@ -19,7 +20,7 @@ func TestStatusBarMemoryPillAppearsWhenEnabled(t *testing.T) {
 
 func TestStatusBarMemoryPillHiddenWhenDisabled(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 120, 24)
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	if strings.Contains(got, "MEMORY") {
 		t.Fatalf("status bar shows MEMORY pill while disabled, got:\n%s", got)
 	}
@@ -32,7 +33,7 @@ func TestStatusBarMemoryPillHasGapFromLoopPill(t *testing.T) {
 		loopIteration:     1,
 		loopMaxIterations: 10,
 	}, 120, 24)
-	got := stripANSI(m.renderStatusBar())
+	got := terminaltext.StripANSI(m.renderStatusBar())
 	_, after, ok := strings.Cut(got, "LOOP 1/10")
 	if !ok {
 		t.Fatalf("status bar missing LOOP pill, got:\n%s", got)

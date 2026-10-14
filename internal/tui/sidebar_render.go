@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/keakon/lipgloss/v2"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // Visible returns true if the sidebar should be displayed (at least one
@@ -74,8 +76,8 @@ func (s Sidebar) ViewInfoPanelSummaryLine(innerWidth int) string {
 	if !s.Visible() || innerWidth <= 0 {
 		return ""
 	}
-	summary := truncateOneLine(s.AgentsSummary(), innerWidth)
-	return InfoPanelAgentStatusStyle.Render(summary)
+	summary := terminaltext.TruncateOneLine(s.AgentsSummary(), innerWidth)
+	return currentStyles.InfoPanelAgentStatusStyle.Render(summary)
 }
 
 func sidebarEntryDisplayName(entry SidebarEntry) string {
@@ -117,7 +119,7 @@ func sidebarRenderedName(entry SidebarEntry, maxWidth int) string {
 			return "└"
 		}
 	}
-	return prefix + truncateOneLine(sidebarEntryDisplayName(entry), maxWidth-prefixWidth)
+	return prefix + terminaltext.TruncateOneLine(sidebarEntryDisplayName(entry), maxWidth-prefixWidth)
 }
 
 func sidebarEntryStyle(entry SidebarEntry, focused bool) lipgloss.Style {
@@ -137,13 +139,13 @@ func sidebarEntryStyle(entry SidebarEntry, focused bool) lipgloss.Style {
 		}
 	}
 	if focused {
-		style := SidebarFocusedStyle
+		style := currentStyles.SidebarFocusedStyle
 		if color != "" {
 			style = style.Foreground(lipgloss.Color(color))
 		}
 		return style
 	}
-	style := SidebarEntryStyle
+	style := currentStyles.SidebarEntryStyle
 	if color != "" {
 		style = style.Foreground(lipgloss.Color(color))
 	}
@@ -167,13 +169,13 @@ func infoPanelAgentRowStyle(entry SidebarEntry, focused bool) lipgloss.Style {
 		}
 	}
 	if focused {
-		style := InfoPanelAgentFocusedStyle
+		style := currentStyles.InfoPanelAgentFocusedStyle
 		if color != "" {
 			style = style.Foreground(lipgloss.Color(color))
 		}
 		return style
 	}
-	style := InfoPanelAgentEntryStyle
+	style := currentStyles.InfoPanelAgentEntryStyle
 	if color != "" {
 		style = style.Foreground(lipgloss.Color(color))
 	}
@@ -198,13 +200,13 @@ func (s Sidebar) buildInfoPanelRenderedLines(innerWidth int) []sidebarRenderedLi
 		} else if entry.ID == "main" {
 			line = infoPanelAgentRowStyle(entry, false).Width(innerWidth).Render(line)
 		} else {
-			line = InfoPanelLineBg.Width(innerWidth).Render(infoPanelAgentRowStyle(entry, false).Render(line))
+			line = currentStyles.InfoPanelLineBg.Width(innerWidth).Render(infoPanelAgentRowStyle(entry, false).Render(line))
 		}
 		lines = append(lines, sidebarRenderedLine{Text: line, AgentID: entry.ID})
 		if reason != "" {
-			style := InfoPanelDim
+			style := currentStyles.InfoPanelDim
 			if isFocused {
-				style = InfoPanelAgentFocusedStyle.Foreground(InfoPanelDim.GetForeground())
+				style = currentStyles.InfoPanelAgentFocusedStyle.Foreground(currentStyles.InfoPanelDim.GetForeground())
 			}
 			lines = append(lines, sidebarRenderedLine{Text: style.Width(innerWidth).Render(reason), AgentID: entry.ID})
 		}
@@ -243,13 +245,13 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 			var parts string
 			if !fe.Deleted {
 				if fe.Added > 0 {
-					parts += SidebarAddedStyle.Render(fmt.Sprintf("+%d", fe.Added))
+					parts += currentStyles.SidebarAddedStyle.Render(fmt.Sprintf("+%d", fe.Added))
 				}
 				if fe.Removed > 0 {
 					if parts != "" {
 						parts += " "
 					}
-					parts += SidebarRemovedStyle.Render(fmt.Sprintf("-%d", fe.Removed))
+					parts += currentStyles.SidebarRemovedStyle.Render(fmt.Sprintf("-%d", fe.Removed))
 				}
 			}
 			statStr := parts
@@ -266,23 +268,23 @@ func (s Sidebar) buildLines(innerWidth int) []string {
 			if nameW < 0 {
 				nameW = 0
 			}
-			baseName = truncateOneLine(baseName, nameW)
+			baseName = terminaltext.TruncateOneLine(baseName, nameW)
 			namePart := ""
 			if baseName != "" {
-				namePart = SidebarFileStyle.Render(baseName)
+				namePart = currentStyles.SidebarFileStyle.Render(baseName)
 			}
 			if fe.Deleted {
-				namePart = SidebarFileStyle.Strikethrough(true).Render(baseName)
+				namePart = currentStyles.SidebarFileStyle.Strikethrough(true).Render(baseName)
 			}
 			sep := ""
 			if namePart != "" && statStr != "" {
-				sep = SidebarFileStyle.Render(" ")
+				sep = currentStyles.SidebarFileStyle.Render(" ")
 			}
-			fileLine := SidebarFileStyle.Render("  ") + namePart + sep + statStr
+			fileLine := currentStyles.SidebarFileStyle.Render("  ") + namePart + sep + statStr
 			lines = append(lines, fileLine)
 		}
 		if extra > 0 {
-			lines = append(lines, SidebarFileStyle.Render(fmt.Sprintf("  +%d more", extra)))
+			lines = append(lines, currentStyles.SidebarFileStyle.Render(fmt.Sprintf("  +%d more", extra)))
 		}
 	}
 	return lines

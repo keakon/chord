@@ -7,8 +7,9 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/tools"
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const backgroundResultCardTitle = "JOB RESULT"
@@ -111,7 +112,7 @@ func formatSingleBackgroundResult(raw, id, status, command, description string) 
 }
 
 func splitBackgroundResultSections(raw string) []string {
-	raw = markdownutil.NormalizeNewlines(raw)
+	raw = textclean.NormalizeNewlines(raw)
 	lines := strings.Split(strings.TrimSpace(raw), "\n")
 	var sections []string
 	var current []string
@@ -133,7 +134,7 @@ func splitBackgroundResultSections(raw string) []string {
 }
 
 func parseBackgroundResult(raw string) parsedBackgroundResult {
-	raw = markdownutil.NormalizeNewlines(raw)
+	raw = textclean.NormalizeNewlines(raw)
 	var parsed parsedBackgroundResult
 	inOutput := false
 	headerChecked := false
@@ -342,7 +343,7 @@ func (b *Block) renderBackgroundResult(width int) []string {
 	skippingOutput := false
 	headlineIdx := -1
 	headlineTailIdx := -1
-	contentLines := strings.Split(strings.TrimSpace(sanitizeDisplayText(b.Content)), "\n")
+	contentLines := strings.Split(strings.TrimSpace(terminaltext.Sanitize(b.Content)), "\n")
 	for i := range len(contentLines) {
 		line := contentLines[i]
 		trimmed := strings.TrimSpace(line)
@@ -372,11 +373,11 @@ func (b *Block) renderBackgroundResult(width int) []string {
 					if budget := max(wrapWidth-room, 10); runewidth.StringWidth(trimmed) > budget {
 						trimmed = runewidth.Truncate(trimmed, budget, "…")
 					}
-				} else if lines := wrapText(trimmed, wrapWidth); runewidth.StringWidth(lines[len(lines)-1])+room > wrapWidth {
+				} else if lines := terminaltext.Wrap(trimmed, wrapWidth); runewidth.StringWidth(lines[len(lines)-1])+room > wrapWidth {
 					wrapWidth = max(wrapWidth-room, 10)
 				}
 			}
-			wrapped := wrapText(trimmed, wrapWidth)
+			wrapped := terminaltext.Wrap(trimmed, wrapWidth)
 			for i, part := range wrapped {
 				prefix := "    "
 				if i == 0 {
@@ -402,7 +403,7 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			if len(body) > 0 && body[len(body)-1] != "" {
 				body = append(body, "")
 			}
-			body = append(body, toolFieldSection(ToolResultExpandedStyle, "Relevant output"))
+			body = append(body, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Relevant output"))
 			output := strings.Join(contentLines[i+1:], "\n")
 			if backgroundResultHasCodeFence(output) {
 				codeLines, _, _ := renderAssistantMarkdownContent(output, output, metrics.contentWidth, 0, &b.codeHL)
@@ -418,12 +419,12 @@ func (b *Block) renderBackgroundResult(width int) []string {
 					}
 					continue
 				}
-				for j, part := range wrapText(strings.TrimSpace(outputLine), metrics.contentWidth) {
+				for j, part := range terminaltext.Wrap(strings.TrimSpace(outputLine), metrics.contentWidth) {
 					prefix := "    "
 					if j == 0 {
 						prefix = "    "
 					}
-					body = append(body, DimStyle.Render(prefix+part))
+					body = append(body, currentStyles.DimStyle.Render(prefix+part))
 				}
 			}
 			break
@@ -455,11 +456,11 @@ func (b *Block) renderBackgroundResult(width int) []string {
 			continue
 		}
 		expectStatus = false
-		style := ToolResultExpandedStyle
+		style := currentStyles.ToolResultExpandedStyle
 		if strings.HasPrefix(strings.ToLower(trimmed), "error:") {
-			style = ErrorStyle
+			style = currentStyles.ErrorStyle
 		}
-		for i, part := range wrapText(trimmed, metrics.contentWidth) {
+		for i, part := range terminaltext.Wrap(trimmed, metrics.contentWidth) {
 			if i > 0 {
 				body = append(body, toolFieldBody(style, part))
 				continue
@@ -570,11 +571,11 @@ func styleBackgroundResultHeadline(line string, collapsed bool) string {
 	}
 	switch {
 	case strings.HasPrefix(line, "✓"):
-		return ToolStatusSuccessStyle.Render("✓") + " " + marker + line[len("✓"):]
+		return currentStyles.ToolStatusSuccessStyle.Render("✓") + " " + marker + line[len("✓"):]
 	case strings.HasPrefix(line, "✗"):
-		return ToolStatusErrorStyle.Render("✗") + " " + marker + line[len("✗"):]
+		return currentStyles.ToolStatusErrorStyle.Render("✗") + " " + marker + line[len("✗"):]
 	case strings.HasPrefix(line, "•"):
-		return ToolStatusNeutralStyle.Render("•") + " " + marker + line[len("•"):]
+		return currentStyles.ToolStatusNeutralStyle.Render("•") + " " + marker + line[len("•"):]
 	default:
 		return line
 	}

@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/shellanalysis"
 	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/worktree"
@@ -54,7 +56,7 @@ func checkpointRunsGitCommit(command string) bool {
 	if !strings.Contains(command, "git") {
 		return false
 	}
-	analysis, err := tools.AnalyzeShellCommand(command)
+	analysis, err := shellanalysis.Analyze(command)
 	if err != nil {
 		return false
 	}
@@ -312,7 +314,7 @@ func boundedCheckpointWorklog(worklog checkpointWorklog, budget int, estimateTok
 }
 
 func ensureCheckpointWorklogSection(summary, section string) string {
-	return ensureCheckpointMachineSection(summary, checkpointWorklogHeading, section, checkpointProgressHeading)
+	return ensureCheckpointMachineSection(summary, checkpointWorklogHeading, section, checkpointfmt.ProgressHeading)
 }
 
 func ensureCheckpointRepositoryStateSection(summary, section string) string {
@@ -320,8 +322,8 @@ func ensureCheckpointRepositoryStateSection(summary, section string) string {
 	// section still belongs next to the other status-like sections, not at the
 	// end of the checkpoint.
 	anchor := checkpointWorklogHeading
-	if findMarkdownHeadingLine(summary, anchor) < 0 {
-		anchor = checkpointProgressHeading
+	if checkpointfmt.FindHeading(summary, anchor) < 0 {
+		anchor = checkpointfmt.ProgressHeading
 	}
 	return ensureCheckpointMachineSection(summary, checkpointRepositoryStateHeading, section, anchor)
 }
@@ -333,7 +335,7 @@ func ensureCheckpointRepositoryStateSection(summary, section string) string {
 // section removes any existing same-heading section and adds nothing.
 func ensureCheckpointMachineSection(summary, heading, section, anchorHeading string) string {
 	section = strings.TrimSpace(section)
-	start, end, found := markdownSectionBounds(summary, heading)
+	start, end, found := checkpointfmt.SectionBounds(summary, heading)
 	if section == "" {
 		if !found {
 			return summary
@@ -343,7 +345,7 @@ func ensureCheckpointMachineSection(summary, heading, section, anchorHeading str
 	if found {
 		return spliceCheckpointSection(summary, start-len(heading), end, section)
 	}
-	_, anchorEnd, ok := markdownSectionBounds(summary, anchorHeading)
+	_, anchorEnd, ok := checkpointfmt.SectionBounds(summary, anchorHeading)
 	if !ok {
 		anchorEnd = len(summary)
 	}

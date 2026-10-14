@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
+
+	"github.com/keakon/chord/internal/filefilter"
+	"github.com/keakon/chord/internal/tooloutput"
 )
 
 // GlobTool finds files matching a glob pattern with support for ** recursive matching.
@@ -200,7 +203,7 @@ func globWalkMatches(ctx context.Context, resolvedBaseDir string, patterns []str
 		if guard.shouldAbort() {
 			return errGuardAbort
 		}
-		if d.IsDir() && path != "." && skipDirNames[d.Name()] {
+		if d.IsDir() && path != "." && filefilter.IsSkippedDirName(d.Name()) {
 			return fs.SkipDir
 		}
 		if skipRel != "" && d.IsDir() && path == skipRel {
@@ -261,7 +264,7 @@ type globResult struct {
 }
 
 type globMatchAccumulator struct {
-	ignore            *gitIgnoreMatcher
+	ignore            *filefilter.GitIgnoreMatcher
 	filtered          []string
 	fullFiltered      strings.Builder
 	outputBytes       int
@@ -275,7 +278,7 @@ func newGlobMatchAccumulator(resolvedBaseDir string, initialCap int, captureFull
 		initialCap = maxGlobResults
 	}
 	return &globMatchAccumulator{
-		ignore:            newGitIgnoreMatcher(resolvedBaseDir),
+		ignore:            filefilter.NewGitIgnoreMatcher(resolvedBaseDir),
 		filtered:          make([]string, 0, initialCap),
 		captureFullOutput: captureFullOutput,
 	}
@@ -283,7 +286,7 @@ func newGlobMatchAccumulator(resolvedBaseDir string, initialCap int, captureFull
 
 func (a *globMatchAccumulator) addCandidate(m string) {
 	a.candidateCount++
-	if isExcludedPath(m) {
+	if filefilter.IsExcludedPath(m) {
 		return
 	}
 	if a.ignore != nil {
@@ -354,7 +357,7 @@ func formatGlobResult(ctx context.Context, a globArgs, resolvedBaseDir string, p
 		if fullFiltered == "" {
 			fullFiltered = inlineMatches
 		}
-		if savedPath := saveFullOutput(fullFiltered, SessionDirFromContext(ctx), "glob-results"); savedPath != "" {
+		if savedPath := tooloutput.SaveFullOutput(fullFiltered, SessionDirFromContext(ctx), "glob-results"); savedPath != "" {
 			content += fmt.Sprintf("\n\n(showing first %d results within %d KiB; full results saved to %s; refine pattern/path to narrow results)", len(result.filtered), maxGlobOutputBytes/1024, savedPath)
 		} else {
 			content += fmt.Sprintf("\n\n(showing first %d results within %d KiB; refine pattern/path to narrow results)", len(result.filtered), maxGlobOutputBytes/1024)
@@ -369,16 +372,4 @@ func globCoerceNotes(a globArgs) []string {
 		return nil
 	}
 	return []string{"Note: patterns was a single string; treated as one pattern. Prefer patterns: [...] next time."}
-}
-
-// isExcludedPath returns true if the path is inside a skipped directory
-// (VCS or tool data directories) or is one itself.
-func isExcludedPath(p string) bool {
-	parts := strings.SplitSeq(p, "/")
-	for part := range parts {
-		if skipDirNames[part] {
-			return true
-		}
-	}
-	return false
 }

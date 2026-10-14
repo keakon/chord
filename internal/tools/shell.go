@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/shellanalysis"
 )
 
 const maxOutputBytes = 10 * 1024 * 1024 // 10 MB cap
@@ -201,7 +203,7 @@ func autoBackgroundAllowed(command string) bool {
 	if trimmed == "" {
 		return false
 	}
-	analysis, err := AnalyzeShellCommand(trimmed)
+	analysis, err := shellanalysis.Analyze(trimmed)
 	if err != nil {
 		return false
 	}
@@ -419,7 +421,7 @@ func (t ShellTool) Execute(ctx context.Context, raw json.RawMessage) (string, er
 		log.Debugf("shell tool description=%v command=%v", a.Description, a.Command)
 	}
 
-	if finding := DetectInteractiveShellCommand(a.Command); finding != nil {
+	if finding := shellanalysis.DetectInteractive(a.Command); finding != nil {
 		return "", finding.Error()
 	}
 
@@ -688,7 +690,7 @@ func testOutputShowsBuildFailure(output string) bool {
 }
 
 func isTestOrVerificationCommand(command string) bool {
-	analysis, err := AnalyzeShellCommand(command)
+	analysis, err := shellanalysis.Analyze(command)
 	if err != nil {
 		return false
 	}

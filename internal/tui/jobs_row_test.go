@@ -8,10 +8,11 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/tools"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestJobRowFitsAvailableWidth(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	now := time.Now()
 	for _, status := range []string{jobStatusRunning, jobStatusStopping, "completed"} {
 		for _, duration := range []time.Duration{time.Second, time.Hour, 1000 * time.Hour} {
@@ -44,7 +45,7 @@ func TestJobRowFitsAvailableWidth(t *testing.T) {
 }
 
 func TestJobRowQuietColumnResponsive(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	now := time.Now()
 	job := tools.JobState{ID: "job-1", Status: jobStatusRunning, Description: "sample job", StartedAt: now.Add(-time.Hour)}
 	for _, width := range []int{24, 64} {

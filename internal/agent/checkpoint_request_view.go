@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 )
@@ -37,8 +38,8 @@ func projectCheckpointRequests(messages []message.Message) []message.Message {
 
 func checkpointRequestBody(body string, sources map[string]string) string {
 	// Generic or incomplete recovery summaries can carry facts only in JSON.
-	for _, heading := range []string{checkpointProgressHeading, checkpointKeyDecisionsHeading, checkpointOpenProblemsHeading} {
-		if findMarkdownHeadingLine(body, heading) < 0 {
+	for _, heading := range []string{checkpointfmt.ProgressHeading, checkpointfmt.KeyDecisionsHeading, checkpointfmt.OpenProblemsHeading} {
+		if checkpointfmt.FindHeading(body, heading) < 0 {
 			return deduplicateCheckpointRequest(body, sources)
 		}
 	}
@@ -88,7 +89,7 @@ func deduplicateCheckpointRequest(body string, sources map[string]string) string
 }
 
 func checkpointRequestText(body string) (string, bool) {
-	section, ok := markdownSection(body, checkpointCurrentUserRequestHeading)
+	section, ok := checkpointfmt.Section(body, checkpointfmt.CurrentUserRequestHeading)
 	if !ok || strings.Contains(section, "\n"+truncatedRequestNotice) {
 		return "", false
 	}
@@ -111,7 +112,7 @@ func checkpointRequestText(body string) (string, bool) {
 }
 
 func deduplicateRetainedRecentRequest(body, request string) string {
-	start := findMarkdownHeadingLine(body, retainedRecentMessagesHeading)
+	start := checkpointfmt.FindHeading(body, retainedRecentMessagesHeading)
 	if start < 0 {
 		return body
 	}
@@ -177,7 +178,7 @@ func deduplicateAnchoredRequest(body, request, source string, sources map[string
 }
 
 func deduplicateUserConstraintRequest(body, request, source string, sources map[string]string) string {
-	start, end, ok := markdownSectionBounds(body, checkpointUserConstraintsHeading)
+	start, end, ok := checkpointfmt.SectionBounds(body, checkpointfmt.UserConstraintsHeading)
 	if !ok {
 		return body
 	}
@@ -194,7 +195,7 @@ func deduplicateUserConstraintRequest(body, request, source string, sources map[
 	lines = slices.DeleteFunc(lines, func(line string) bool { return strings.TrimSpace(line) == "- "+excerpt })
 	content := strings.Join(lines, "\n")
 	if strings.TrimSpace(content) == "" {
-		start = findMarkdownHeadingLine(body, checkpointUserConstraintsHeading)
+		start = checkpointfmt.FindHeading(body, checkpointfmt.UserConstraintsHeading)
 	}
 	return body[:start] + content + body[end:]
 }

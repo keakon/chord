@@ -17,6 +17,10 @@ import (
 	"github.com/keakon/chord/internal/inputhistory"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/composer"
+	"github.com/keakon/chord/internal/tui/filecompletion"
+	"github.com/keakon/chord/internal/tui/filepreview"
+	"github.com/keakon/chord/internal/tui/overlaylist"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // ---------------------------------------------------------------------------
@@ -191,7 +195,7 @@ type kittyTerminalMetrics struct {
 // Model is the top-level Bubble Tea model for the Chord TUI.
 type Model struct {
 	fileActionToken                                  uint64
-	filePreviewCache                                 *fileViewerCache
+	filePreviewCache                                 *filepreview.Cache
 	fileActionsBusy                                  map[string]uint64
 	fileViewer                                       fileViewerState
 	fileViewerGeneration                             uint64
@@ -213,7 +217,7 @@ type Model struct {
 	height                      int
 	expectedAgentClose          bool
 	completedExpectedAgentClose bool
-	theme                       Theme
+	theme                       uitheme.Palette
 	keyMap                      KeyMap
 	ime                         imeState
 
@@ -223,7 +227,7 @@ type Model struct {
 
 	// Message-directory state (Ctrl+T)
 	dirEntries  []DirectoryEntry
-	dirList     *OverlayList
+	dirList     *overlaylist.List
 	help        helpState
 	statusPanel statusPanelState
 	memoryPanel memoryPanelState
@@ -568,7 +572,7 @@ type toastItem struct {
 // placeholder layout.
 func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 	initStarted := time.Now()
-	theme := DefaultTheme()
+	theme := uitheme.Default()
 	z := newZoneManager()
 	wd, _ := os.Getwd()
 	homeDir, _ := os.UserHomeDir()
@@ -731,7 +735,7 @@ func (m *Model) applyWorkDirSnapshot(snap agent.WorkDirSnapshot) bool {
 	m.atMentionLoadedAt = time.Time{}
 	m.atMentionFiles = nil
 	m.atMentionFilesLower = nil
-	m.atMentionNarrow = atMentionNarrowCache{}
+	m.atMentionNarrow = filecompletion.NarrowCache{}
 	m.atMentionList = nil
 	m.invalidateStatusBarAgentSnapshot()
 	m.invalidateDrawCaches()
@@ -761,7 +765,7 @@ func (m *Model) syncWorkingDirFromAgent() {
 	m.applyWorkDirSnapshot(m.workDirSnapshotFromAgent())
 }
 
-func (m *Model) SetTheme(t Theme) {
+func (m *Model) SetTheme(t uitheme.Palette) {
 	m.theme = t
 	ApplyTheme(t)
 	m.sidebar.theme = t
@@ -1173,10 +1177,10 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			return m, m.syncAtMentionIfOpen()
 		}
 		m.atMentionFiles = msg.files
-		m.atMentionFilesLower = buildAtMentionLowerIndex(msg.files)
+		m.atMentionFilesLower = filecompletion.BuildLowerIndex(msg.files)
 		// The candidate set the narrowing cache remembers belongs to the
 		// previous index; a reload invalidates it.
-		m.atMentionNarrow = atMentionNarrowCache{}
+		m.atMentionNarrow = filecompletion.NarrowCache{}
 		m.atMentionLoaded = true
 		m.atMentionLoadedAt = time.Now()
 		m.atMentionLoading = false

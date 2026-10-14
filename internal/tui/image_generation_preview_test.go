@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/chord/internal/imagegen"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestGeneratedImageResultRendersAllThumbnailsWithoutOpeningViewer(t *testing.T) {
@@ -28,7 +29,7 @@ func TestGeneratedImageResultRendersAllThumbnailsWithoutOpeningViewer(t *testing
 		{"result-only-iterm2", ImageBackendITerm2, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ApplyTheme(DefaultTheme())
+			ApplyTheme(uitheme.Default())
 			caps := TerminalImageCapabilities{Backend: tc.backend, SupportsInline: true, SupportsFullscreen: true}
 			previous := currentImageCapabilities()
 			setCurrentTerminalImageCapabilities(caps)

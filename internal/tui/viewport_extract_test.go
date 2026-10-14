@@ -7,6 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestExtractPlainByColumns(t *testing.T) {
@@ -36,13 +38,13 @@ func TestExtractPlainByColumns(t *testing.T) {
 
 	t.Run("select entire line with ansi", func(t *testing.T) {
 		text := "\x1b[31m-\x1b[0m if test.API(url) || test.Model(param) || other.config == \"value\" {"
-		res := extractPlainByColumns(text, 0, len(stripANSI(text)))
+		res := extractPlainByColumns(text, 0, len(terminaltext.StripANSI(text)))
 		assert.Equal(t, "- if test.API(url) || test.Model(param) || other.config == \"value\" {", res)
 	})
 }
 
 func TestExtractSelectionTextTabExpandedColumnsMatchViewportRender(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(120, 20)
 	block := &Block{
 		ID:      1,
@@ -90,7 +92,7 @@ func TestExtractSelectionTextTabExpandedColumnsMatchViewportRender(t *testing.T)
 	}
 }
 func TestExtractSelectionTextAssistantCodeFenceLineAfterSoftWrappedLine(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(100, 40)
 	longLine := "first_key: " + strings.Repeat("payload_segment_", 12)
 	block := &Block{
@@ -106,7 +108,7 @@ func TestExtractSelectionTextAssistantCodeFenceLineAfterSoftWrappedLine(t *testi
 	endCol := -1
 	want := "second_key"
 	for i, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		before, _, ok := strings.Cut(plain, want)
 		if !ok {
 			continue
@@ -134,7 +136,7 @@ func TestExtractSelectionTextAssistantCodeFenceLineAfterSoftWrappedLine(t *testi
 }
 
 func TestAssistantRenderSyntheticPrefixWidthsAlignWithRenderedLines(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(100, 40)
 	block := &Block{
 		ID:      1,
@@ -149,7 +151,7 @@ func TestAssistantRenderSyntheticPrefixWidthsAlignWithRenderedLines(t *testing.T
 			len(block.renderSyntheticPrefixWidths), len(lines))
 	}
 	for i, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		if strings.TrimSpace(plain) == "" {
 			continue
 		}
@@ -165,7 +167,7 @@ func TestAssistantRenderSyntheticPrefixWidthsAlignWithRenderedLines(t *testing.T
 }
 
 func TestAssistantSyntheticPrefixWidthsStayAlignedWhenCachedLineEmbedsNewline(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	v := NewViewport(100, 40)
 	longLine := "first_key: " + strings.Repeat("payload_segment_", 12)
 	block := &Block{
@@ -178,7 +180,7 @@ func TestAssistantSyntheticPrefixWidthsStayAlignedWhenCachedLineEmbedsNewline(t 
 	_ = block.Render(v.width, "")
 	injected := false
 	for i, line := range block.mdCache {
-		if strings.Contains(stripANSI(line), "intro paragraph") {
+		if strings.Contains(terminaltext.StripANSI(line), "intro paragraph") {
 			block.mdCache[i] = line + "\nsplit-fallback"
 			injected = true
 			break
@@ -199,7 +201,7 @@ func TestAssistantSyntheticPrefixWidthsStayAlignedWhenCachedLineEmbedsNewline(t 
 	endCol := -1
 	want := "first_key"
 	for i, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		before, _, ok := strings.Cut(plain, want)
 		if !ok {
 			continue
@@ -249,7 +251,7 @@ func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 	endCol := -1
 	want := "cardBgStyle2 := lipgloss.NewStyle().Background(blockStyle2.GetBackground())"
 	for i, line := range lines {
-		plain := stripANSI(line)
+		plain := terminaltext.StripANSI(line)
 		before, _, ok := strings.Cut(plain, want)
 		if ok {
 			targetLine = i

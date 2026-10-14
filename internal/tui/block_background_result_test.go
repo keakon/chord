@@ -8,6 +8,8 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestParseBackgroundResultKeepsElapsedAndQuietOutOfResidual(t *testing.T) {
@@ -45,7 +47,7 @@ func TestParseBackgroundResultKeepsElapsedAndQuietOutOfResidual(t *testing.T) {
 func TestBackgroundResultElapsedSuffixWidthMatchesTheAppendedSuffix(t *testing.T) {
 	const elapsed = "17s"
 	want := " · " + elapsedGlyph + " " + elapsed
-	rendered := stripANSI(appendToolElapsedSuffix("✓ ▸ job-1", elapsed, 80))
+	rendered := terminaltext.StripANSI(appendToolElapsedSuffix("✓ ▸ job-1", elapsed, 80))
 	if !strings.HasSuffix(rendered, want) {
 		t.Fatalf("appended suffix = %q, want it to end with %q", rendered, want)
 	}
@@ -76,7 +78,7 @@ func TestOverlayRowShowsQuietDuration(t *testing.T) {
 	m.jobsSnapshotFrame = m.renderFrameGeneration
 	m.openJobsOverlay()
 
-	plain := stripANSI(m.renderJobsOverlayDialog())
+	plain := terminaltext.StripANSI(m.renderJobsOverlayDialog())
 	if !strings.Contains(plain, "quiet 2m30s") {
 		t.Fatalf("overlay row missing the quiet duration:\n%s", plain)
 	}
@@ -84,7 +86,7 @@ func TestOverlayRowShowsQuietDuration(t *testing.T) {
 	// The info panel reserves the row for elapsed and the stop affordance; it
 	// intentionally keeps the quiet field out so a long-running job cannot widen
 	// it past the recorded stop zone.
-	panel := stripANSI(strings.Join(jobsSectionRawLines(m, 32, 60), "\n"))
+	panel := terminaltext.StripANSI(strings.Join(jobsSectionRawLines(m, 32, 60), "\n"))
 	if strings.Contains(panel, "quiet 2m30s") {
 		t.Fatalf("info panel must not duplicate the quiet field:\n%s", panel)
 	}
@@ -94,7 +96,7 @@ func TestOverlayRowShowsQuietDuration(t *testing.T) {
 }
 
 func TestRenderBackgroundResultSanitizesControlSequences(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:        BlockStatus,
 		StatusTitle: backgroundResultCardTitle,
@@ -104,7 +106,7 @@ func TestRenderBackgroundResultSanitizesControlSequences(t *testing.T) {
 	if strings.Contains(raw, "\x1b[1;1H") || strings.ContainsRune(raw, '\x00') || strings.ContainsRune(raw, '\x9b') {
 		t.Fatalf("background result leaked raw control sequence: %q", raw)
 	}
-	plain := stripANSI(raw)
+	plain := terminaltext.StripANSI(raw)
 	for _, want := range []string{`\x1b[1;1H`, `\x00`, `\x9b31m`} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("background result missing escaped %s in %q", want, plain)

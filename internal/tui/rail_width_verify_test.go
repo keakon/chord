@@ -7,6 +7,8 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // TestNoCardOverflowsTerminal is the regression guard for the off-by-one that
@@ -17,7 +19,7 @@ import (
 // the start of the next row (visible as a stray dark block on the right) while
 // the rail column visually broke.
 func TestNoCardOverflowsTerminal(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	patch := "*** Begin Patch\n*** Update File: internal/agent/main_llm_fallback.go\n@@\nimport (\n*** End Patch\n"
 
 	cards := []struct {
@@ -48,7 +50,7 @@ func TestNoCardOverflowsTerminal(t *testing.T) {
 	for _, w := range []int{40, 60, 80, 100, 120, 160, 200, 240, 290} {
 		for _, c := range cards {
 			for i, ln := range c.b.Render(w, "") {
-				if dw := tuiStringWidth(ln); dw > w {
+				if dw := terminaltext.Width(ln); dw > w {
 					t.Errorf("viewport %d: %s line %d renders %d cols (+%d past terminal)",
 						w, c.name, i, dw, dw-w)
 				}
@@ -60,7 +62,7 @@ func TestNoCardOverflowsTerminal(t *testing.T) {
 // TestRailGlyphIsLeftmost pins the rail contract: the "│" glyph is prepended at
 // column 0 of every card line, outside the card background.
 func TestRailGlyphIsLeftmost(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	b := &Block{ID: 5, Type: BlockThinking, Content: "Adjusting add-before context formatting"}
 	if cardRailPrefix("thinking", false) == "" {
 		t.Skip("thinking rail disabled in this theme")
@@ -68,7 +70,7 @@ func TestRailGlyphIsLeftmost(t *testing.T) {
 	lines := b.Render(100, "")
 	found := 0
 	for _, ln := range lines {
-		plain := stripANSI(ln)
+		plain := terminaltext.StripANSI(ln)
 		if plain == "" {
 			continue
 		}

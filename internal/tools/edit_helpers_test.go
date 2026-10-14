@@ -87,7 +87,7 @@ func TestNormalizePunctWithSpaceFoldingFoldsOrphanCombiningMark(t *testing.T) {
 
 // TestIsOrphanCombiningMarkLeavesVariationSelectorsAlone guards the split the
 // two paths agreed on: variation selectors are Unicode combining marks, but
-// StripOrphanVariationSelectors owns them, so the orphan-mark rule must not
+// textclean.StripOrphanVariationSelectors owns them, so the orphan-mark rule must not
 // claim them.
 //
 // Selectors belong to the variation-selector machinery whose bases Unicode
@@ -114,7 +114,7 @@ func TestIsOrphanCombiningMarkLeavesVariationSelectorsAlone(t *testing.T) {
 	for _, tc := range cases {
 		rs := []rune(tc.s)
 		if isOrphanCombiningMark(rs, tc.i) {
-			t.Fatalf("%s: isOrphanCombiningMark(%q, %d) = true, want false (U+%04X belongs to StripOrphanVariationSelectors)", tc.name, tc.s, tc.i, rs[tc.i])
+			t.Fatalf("%s: isOrphanCombiningMark(%q, %d) = true, want false (U+%04X belongs to textclean.StripOrphanVariationSelectors)", tc.name, tc.s, tc.i, rs[tc.i])
 		}
 	}
 }
@@ -658,7 +658,7 @@ func TestStripOrphanCombiningMarks(t *testing.T) {
 		{"\u0645\u0651\u064E", "\u0645\u0651\u064E"},
 		// A keycap emoji ("1\ufe0f\u20e3"): the variation selector and
 		// enclosing keycap are combining marks but owned by
-		// StripOrphanVariationSelectors and must NOT be stripped here.
+		// textclean.StripOrphanVariationSelectors and must NOT be stripped here.
 		{"1\ufe0f\u20e3", "1\ufe0f\u20e3"},
 		// Plain ASCII is untouched.
 		{"package main", "package main"},

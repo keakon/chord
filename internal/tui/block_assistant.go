@@ -6,14 +6,15 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	"github.com/keakon/lipgloss/v2"
 	"github.com/keakon/x/ansi"
 
-	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/reasoningtext"
+	"github.com/keakon/chord/internal/textclean"
 	"github.com/keakon/chord/internal/thinkingtranslate"
 	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/tui/syntax"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // thinkingHeadingOnlyRE matches a thinking part whose entire content is a
@@ -57,14 +58,14 @@ func thinkingContentIsPlaceholder(content string) bool {
 
 // preprocessThinkingMarkdown makes each "**" section header a standalone
 // paragraph by collapsing whatever separator precedes it into a blank line.
-// The break rules live in llm.NormalizeReasoningSummaryHeadings so the live
+// The break rules live in reasoningtext.NormalizeHeadings so the live
 // render of the streamed text and the finalized stored text cannot drift
 // apart.
 func preprocessThinkingMarkdown(s string) string {
 	if s == "" || !strings.Contains(s, "**") {
 		return s
 	}
-	return llm.NormalizeReasoningSummaryHeadings(s)
+	return reasoningtext.NormalizeHeadings(s)
 }
 
 // preprocessStreamingThinkingMarkdown is preprocessThinkingMarkdown for a
@@ -77,7 +78,7 @@ func preprocessStreamingThinkingMarkdown(s string) string {
 	if s == "" || !strings.Contains(s, "**") {
 		return s
 	}
-	return llm.NormalizeStreamingReasoningSummaryHeadings(s)
+	return reasoningtext.NormalizeStreamingHeadings(s)
 }
 
 // styleRenderedThinkingLines applies title styling to the first line of each
@@ -91,7 +92,7 @@ func preprocessStreamingThinkingMarkdown(s string) string {
 // render (whose blank lines carry glamour styles) style blank lines
 // identically.
 func isBlankStyledLine(line string) bool {
-	return strings.TrimSpace(stripANSI(line)) == ""
+	return strings.TrimSpace(terminaltext.StripANSI(line)) == ""
 }
 
 func styleRenderedThinkingLines(mdLines []string) []string {
@@ -103,83 +104,15 @@ func styleRenderedThinkingLines(mdLines []string) []string {
 			paraStart = true
 			continue
 		}
-		style := ThinkingContentStyle
+		style := currentStyles.ThinkingContentStyle
 		if paraStart {
-			style = ThinkingTitleStyle
+			style = currentStyles.ThinkingTitleStyle
 			paraStart = false
 		}
 		line = preserveStyleAfterResets(line, style)
 		raw = append(raw, "  "+style.Render(line))
 	}
 	return raw
-}
-
-func normalizeRenderedMarkdownIndent(lines []string) []string {
-	minIndent := -1
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		n := countLeadingWhitespace(line)
-		if minIndent < 0 || n < minIndent {
-			minIndent = n
-		}
-	}
-	// Only normalize small, renderer-introduced padding. Avoid stripping
-	// meaningful indentation like code blocks (commonly 4 spaces).
-	if minIndent <= 0 || minIndent > 2 {
-		return lines
-	}
-	for i := range lines {
-		lines[i] = trimLeadingWhitespace(lines[i], minIndent)
-	}
-	return lines
-}
-
-func countLeadingWhitespace(s string) int {
-	// Skip rail prefix characters if present (conversation rail uses │)
-	for {
-		if strings.HasPrefix(s, "|") {
-			s = s[1:]
-		} else if strings.HasPrefix(s, cardRailGlyph) || strings.HasPrefix(s, focusedCardRailGlyph) {
-			s = s[len(cardRailGlyph):]
-		} else if strings.HasPrefix(s, "▏") {
-			s = s[len("▏"):]
-		} else {
-			break
-		}
-	}
-	// Skip ANSI reset after rail
-	if strings.HasPrefix(s, "\x1b[0m") {
-		s = s[4:]
-	} else if strings.HasPrefix(s, "\x1b[m") {
-		s = s[3:]
-	}
-	n := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == ' ' || s[i] == '\t' {
-			n++
-			continue
-		}
-		break
-	}
-	return n
-}
-
-func trimLeadingWhitespace(s string, n int) string {
-	if n <= 0 {
-		return s
-	}
-	cut := 0
-	for cut < len(s) && n > 0 {
-		if s[cut] == ' ' || s[cut] == '\t' {
-			cut++
-			n--
-			continue
-		}
-		break
-	}
-	return s[cut:]
 }
 
 func removeTrailingCursorGlyph(s string) string {
@@ -233,7 +166,7 @@ const (
 )
 
 func thinkingMarkdownContentWidth(innerWidth int) int {
-	contentWidth := min(max(innerWidth-thinkingContentIndentWidth-ThinkingCardStyle.GetPaddingRight()-cardRailWidth, 10), maxProseWidth)
+	contentWidth := min(max(innerWidth-thinkingContentIndentWidth-currentStyles.ThinkingCardStyle.GetPaddingRight()-cardRailWidth, 10), maxProseWidth)
 	return contentWidth
 }
 
@@ -313,7 +246,7 @@ func (b *Block) renderStreamingCardLines(kind uint8, style lipgloss.Style, inner
 }
 
 func splitAssistantMarkdownSegments(content string) []assistantMarkdownSegment {
-	content = markdownutil.NormalizeNewlines(content)
+	content = textclean.NormalizeNewlines(content)
 	if content == "" {
 		return nil
 	}
@@ -388,12 +321,12 @@ func wrapStyledLiteralLineWithContinuation(line string, width, continuationExtra
 			prefix = strings.Repeat(" ", continuationExtra)
 			prefixWidth = continuationExtra
 		}
-		if tuiStringWidth(remaining) <= limit {
+		if terminaltext.Width(remaining) <= limit {
 			out = append(out, prefix+remaining)
 			synthetic = append(synthetic, prefixWidth)
 			break
 		}
-		head, tail := tuiWrapHeadTail(remaining, limit)
+		head, tail := terminaltext.WrapHeadTail(remaining, limit)
 		out = append(out, prefix+head)
 		synthetic = append(synthetic, prefixWidth)
 		remaining = tail
@@ -410,7 +343,7 @@ func addAssistantCodeWrapIndent(lines []string, width, continuationExtra int) ([
 	synthetic := make([]int, 0, len(lines))
 	softWraps := make([]bool, 0, len(lines))
 	for _, line := range lines {
-		if strings.TrimSpace(stripANSI(line)) == "" {
+		if strings.TrimSpace(terminaltext.StripANSI(line)) == "" {
 			out = append(out, line)
 			synthetic = append(synthetic, 0)
 			softWraps = append(softWraps, false)
@@ -434,21 +367,21 @@ type codeFenceTheme struct {
 
 func assistantCodeFenceTheme() codeFenceTheme {
 	return codeFenceTheme{
-		bg:      currentTheme.CodeBlockBg,
-		fg:      currentTheme.CodeBlockFg,
-		labelFg: currentTheme.CodeBlockLabelFg,
+		bg:      currentStyles.Palette.CodeBlockBg,
+		fg:      currentStyles.Palette.CodeBlockFg,
+		labelFg: currentStyles.Palette.CodeBlockLabelFg,
 	}
 }
 
 func dialogCodeFenceTheme() codeFenceTheme {
-	bg := currentTheme.DialogCodeBlockBg
+	bg := currentStyles.Palette.DialogCodeBlockBg
 	if bg == "" {
-		bg = currentTheme.CodeBlockBg
+		bg = currentStyles.Palette.CodeBlockBg
 	}
 	return codeFenceTheme{
 		bg:      bg,
-		fg:      currentTheme.CodeBlockFg,
-		labelFg: currentTheme.CodeBlockLabelFg,
+		fg:      currentStyles.Palette.CodeBlockFg,
+		labelFg: currentStyles.Palette.CodeBlockLabelFg,
 	}
 }
 
@@ -478,7 +411,7 @@ func styleCodeBlockLines(lines []string, width int, theme codeFenceTheme) []stri
 	for i, line := range lines {
 		line = reapplyBg(linePrefix + line + lineSuffix)
 		line = padLineToDisplayWidthWithStyle(bgStyle, line, width)
-		out[i] = ensureStyledLineReset(line)
+		out[i] = terminaltext.EnsureReset(line)
 	}
 	return out
 }
@@ -494,7 +427,7 @@ func renderCodeFence(seg assistantMarkdownSegment, codeSample string, width, con
 	)
 	innerWidth := max(width-codeBlockInnerPadX*2, 1)
 
-	code := sanitizeDisplayText(seg.raw)
+	code := terminaltext.Sanitize(seg.raw)
 	fenceDelim := seg.fenceMarker
 	if fenceDelim == 0 {
 		fenceDelim = '`'
@@ -585,7 +518,7 @@ func renderRichMarkdownContentWithCodeFenceTheme(content string, width int, hl *
 	}
 	segments := splitAssistantMarkdownSegments(content)
 	if len(segments) == 0 {
-		return renderMarkdownContent(content, width)
+		return contentMarkdown.Render(content, width)
 	}
 
 	var out []string
@@ -612,7 +545,7 @@ func renderRichMarkdownContentWithCodeFenceTheme(content string, width int, hl *
 			appendSegment(segLines)
 			continue
 		}
-		appendSegment(renderMarkdownContent(seg.raw, width))
+		appendSegment(contentMarkdown.Render(seg.raw, width))
 	}
 	if len(out) == 0 {
 		return []string{""}
@@ -621,11 +554,11 @@ func renderRichMarkdownContentWithCodeFenceTheme(content string, width int, hl *
 }
 
 func renderAssistantMarkdownContent(content, codeSample string, width, continuationExtra int, hl **syntax.Highlighter) ([]string, []int, []bool) {
-	content = sanitizeDisplayText(content)
-	codeSample = sanitizeDisplayText(codeSample)
+	content = terminaltext.Sanitize(content)
+	codeSample = terminaltext.Sanitize(codeSample)
 	segments := splitAssistantMarkdownSegments(content)
 	if len(segments) == 0 {
-		lines := renderMarkdownContent(content, width)
+		lines := contentMarkdown.Render(content, width)
 		return lines, make([]int, len(lines)), make([]bool, len(lines))
 	}
 
@@ -666,7 +599,7 @@ func renderAssistantMarkdownContent(content, codeSample string, width, continuat
 		if seg.code {
 			segLines, segSynthetic, segSoftWraps = renderAssistantCodeFence(seg, codeSample, min(width, maxTextWidth), continuationExtra, hl)
 		} else {
-			segLines = renderMarkdownContent(seg.raw, renderWidth)
+			segLines = contentMarkdown.Render(seg.raw, renderWidth)
 			segSynthetic = make([]int, len(segLines))
 			segSoftWraps = make([]bool, len(segLines))
 		}
@@ -745,7 +678,7 @@ func containsMarkdownTableInText(content string) bool {
 		return false
 	}
 	var previous string
-	for line := range strings.SplitSeq(markdownutil.NormalizeNewlines(content), "\n") {
+	for line := range strings.SplitSeq(textclean.NormalizeNewlines(content), "\n") {
 		if isMarkdownTableDelimiterLine(line) && isMarkdownTableHeaderLine(previous) {
 			return true
 		}
@@ -800,7 +733,7 @@ func markdownTableCells(line string) []string {
 
 func (b *Block) renderAssistant(width int) []string {
 	// (Note: we removed the "[assistant]" string header for a cleaner conversational look)
-	style := AssistantCardStyle
+	style := currentStyles.AssistantCardStyle
 	// v2: Width() sets border-box (excl margin).
 	// Reserve a column for the conversation rail (foreground-only "│" prepended
 	// outside the card width); otherwise a full-width card overflows the terminal.
@@ -826,13 +759,13 @@ func (b *Block) renderAssistant(width int) []string {
 	}
 
 	if hasThinking {
-		tStyle := ThinkingCardStyle
+		tStyle := currentStyles.ThinkingCardStyle
 		// Focus is indicated by the rail; the card surface stays the same.
 		thinkingInnerWidth := max(innerWidth-tStyle.GetHorizontalPadding()+style.GetHorizontalPadding(), 10)
 		tLines := b.renderThinkingParts(thinkingInnerWidth)
 		if len(tLines) > 0 {
 			// Re-insert card background after inner ANSI resets.
-			thinkBg := currentTheme.ThinkingCardBg
+			thinkBg := currentStyles.Palette.ThinkingCardBg
 			tLines = preserveCardBg(tLines, thinkBg)
 			out = append(out, renderPrewrappedCard(tStyle, thinkingInnerWidth, tLines, thinkBg, cardRailPrefix("thinking", b.Focused))...)
 			out = append(out, "") // margin between blocks
@@ -861,7 +794,7 @@ func (b *Block) renderAssistant(width int) []string {
 			if b.Streaming {
 				// Incremental markdown rendering for streaming content:
 				// split into a stable prefix (settled, rendered via glamour once per
-				// frontier advance) and an unstable tail (cheap wrapText path).
+				// frontier advance) and an unstable tail (cheap terminaltext.Wrap path).
 				rawContent := removeTrailingCursorGlyph(b.Content)
 				if b.streamFrontierScanner == nil {
 					b.streamFrontierScanner = &markdownutil.StreamingFrontierScanner{}
@@ -897,13 +830,13 @@ func (b *Block) renderAssistant(width int) []string {
 
 				// tail: content after the settled frontier, always cheap path.
 				// Sanitize like the settled path does (renderAssistantMarkdownContent
-				// runs sanitizeDisplayText): the unsettled tail must not carry
+				// runs terminaltext.Sanitize): the unsettled tail must not carry
 				// provider-returned control sequences (cursor moves, BEL, NUL) into
 				// the card ANSI surface, which would corrupt the screen layout.
 				tailRaw := rawContent[frontier:]
 				if tailRaw != "" {
 					if b.streamTailRaw != tailRaw || b.streamTailWidth != contentWidth {
-						b.streamTailLines = wrapText(sanitizeDisplayText(tailRaw), contentWidth)
+						b.streamTailLines = terminaltext.Wrap(terminaltext.Sanitize(tailRaw), contentWidth)
 						b.streamTailSyntheticPrefixWidths = make([]int, len(b.streamTailLines))
 						b.streamTailSoftWrapContinuations = make([]bool, len(b.streamTailLines))
 						b.streamTailRaw = tailRaw
@@ -937,7 +870,7 @@ func (b *Block) renderAssistant(width int) []string {
 		assistantLines := make([]string, 0, estimatedLines)
 		assistantSynthetic := make([]int, 0, estimatedLines)
 		assistantSoftWraps := make([]bool, 0, estimatedLines)
-		assistantLines = append(assistantLines, AssistantLabelStyle.Render(blockLabelWithID("ASSISTANT", b.displayLabelID())))
+		assistantLines = append(assistantLines, currentStyles.AssistantLabelStyle.Render(blockLabelWithID("ASSISTANT", b.displayLabelID())))
 		assistantSynthetic = append(assistantSynthetic, 0)
 		assistantSoftWraps = append(assistantSoftWraps, false)
 
@@ -960,12 +893,12 @@ func (b *Block) renderAssistant(width int) []string {
 			assistantSoftWraps = append(assistantSoftWraps, false)
 		}
 
-		styleStreamingTail := styleHasTextAttributes(MessageContentStyle)
+		styleStreamingTail := styleHasTextAttributes(currentStyles.MessageContentStyle)
 		appendAssistantSegment := func(lines []string, synthetic []int, softWraps []bool, styleTail bool) {
 			for i, cl := range lines {
 				line := cl
 				if styleTail && styleStreamingTail {
-					line = MessageContentStyle.Render(cl)
+					line = currentStyles.MessageContentStyle.Render(cl)
 				}
 				assistantLines = append(assistantLines, assistantContentPrefix+line)
 				syntheticWidth := 0
@@ -1024,7 +957,7 @@ func (b *Block) renderAssistant(width int) []string {
 		}
 
 		// Re-insert card background after inner ANSI resets.
-		assBg := currentTheme.AssistantCardBg
+		assBg := currentStyles.Palette.AssistantCardBg
 		railPrefix := cardRailPrefix("assistant", b.Focused)
 		var cardLines []string
 		if b.Streaming {
@@ -1087,7 +1020,7 @@ func (b *Block) renderAssistant(width int) []string {
 func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth int) ([]string, int) {
 	part = removeTrailingCursorGlyph(part)
 	if !b.Streaming {
-		return renderMarkdownContent(preprocessThinkingMarkdown(part), contentWidth), 0
+		return contentMarkdown.Render(preprocessThinkingMarkdown(part), contentWidth), 0
 	}
 
 	for len(b.thinkingStreamSettled) <= partIndex {
@@ -1112,7 +1045,7 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 			cache.raw = settledRaw
 			cache.frontier = frontier
 			cache.width = contentWidth
-			cache.lines = renderMarkdownContent(settledRaw, contentWidth)
+			cache.lines = contentMarkdown.Render(settledRaw, contentWidth)
 			cache.styledLines = nil
 			cache.styledUpTo = 0
 			cache.styledThemeVersion = 0
@@ -1124,7 +1057,7 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 			// the full settled text once the boundary blanks are normalized by
 			// appendThinkingRenderedLines. The styled-lines cache is preserved
 			// and extended incrementally by styledStreamingThinkingLines.
-			cache.lines = appendThinkingRenderedLines(cache.lines, renderMarkdownContent(part[cache.frontier:frontier], contentWidth))
+			cache.lines = appendThinkingRenderedLines(cache.lines, contentMarkdown.Render(part[cache.frontier:frontier], contentWidth))
 			cache.raw = settledRaw
 			cache.frontier = frontier
 		}
@@ -1154,13 +1087,13 @@ func (b *Block) renderThinkingMarkdownPart(part string, partIndex, contentWidth 
 			// settled prefix keeps its incremental cache and raw reasoning never
 			// reaches this path.
 			if b.ThinkingMarkdownProvisional {
-				tailLines = renderMarkdownContent(preprocessStreamingThinkingMarkdown(tail), contentWidth)
+				tailLines = contentMarkdown.Render(preprocessStreamingThinkingMarkdown(tail), contentWidth)
 			} else {
 				// Sanitize control sequences like the settled prefix
-				// (renderMarkdownContent runs sanitizeDisplayText) so the
+				// (contentMarkdown.Render runs terminaltext.Sanitize) so the
 				// streaming tail cannot inject cursor moves or other ANSI
 				// commands into the thinking card.
-				tailLines = wrapText(sanitizeDisplayText(tail), contentWidth)
+				tailLines = terminaltext.Wrap(terminaltext.Sanitize(tail), contentWidth)
 			}
 			cache.tailRaw = tail
 			cache.tailWidth = contentWidth
@@ -1189,7 +1122,7 @@ func appendThinkingRenderedLines(out []string, newLines []string) []string {
 	}
 	// glamour renders blank lines as ANSI-styled spaces, so a plain
 	// strings.TrimSpace check cannot recognize them; strip the style first.
-	isBlank := func(s string) bool { return strings.TrimSpace(stripANSI(s)) == "" }
+	isBlank := func(s string) bool { return strings.TrimSpace(terminaltext.StripANSI(s)) == "" }
 	start := 0
 	for len(out) > 0 && start < len(newLines) && isBlank(out[len(out)-1]) && isBlank(newLines[start]) {
 		start++
@@ -1215,9 +1148,9 @@ func styleStreamingThinkingSettledLines(mdLines []string) []string {
 			paraStart = true
 			continue
 		}
-		style := ThinkingContentStyle
+		style := currentStyles.ThinkingContentStyle
 		if paraStart {
-			style = ThinkingTitleStyle
+			style = currentStyles.ThinkingTitleStyle
 			paraStart = false
 		}
 		line = preserveStyleAfterResets(line, style)
@@ -1265,9 +1198,9 @@ func styleStreamingThinkingSettledLinesIncremental(mdLines []string, start, end 
 			paraStart = true
 			continue
 		}
-		style := ThinkingContentStyle
+		style := currentStyles.ThinkingContentStyle
 		if paraStart {
-			style = ThinkingTitleStyle
+			style = currentStyles.ThinkingTitleStyle
 			paraStart = false
 		}
 		line = preserveStyleAfterResets(line, style)
@@ -1317,7 +1250,7 @@ func (b *Block) styledStreamingThinkingLines(mdLines []string, settledLineCount,
 			out = append(out, "")
 			continue
 		}
-		out = append(out, "  "+ThinkingContentStyle.Render(line))
+		out = append(out, "  "+currentStyles.ThinkingContentStyle.Render(line))
 	}
 	return out
 }
@@ -1329,21 +1262,21 @@ func renderThinkingTranslationHeader(targetLang string, width int) string {
 		label += " · " + targetLang
 	}
 	if width < 8 {
-		return ThinkingTranslationStyle.Render(label)
+		return currentStyles.ThinkingTranslationStyle.Render(label)
 	}
 	rawLabelWidth := ansi.StringWidth(label)
 	if rawLabelWidth+2 >= width {
-		return ThinkingTranslationStyle.Render(label)
+		return currentStyles.ThinkingTranslationStyle.Render(label)
 	}
 	ruleWidth := width - rawLabelWidth - 2
 	left := ruleWidth / 2
 	right := ruleWidth - left
 	if left == 0 || right == 0 {
-		return ThinkingTranslationStyle.Render(label)
+		return currentStyles.ThinkingTranslationStyle.Render(label)
 	}
-	rule := ThinkingTranslationRuleStyle.Render(strings.Repeat(SectionSeparator, left))
-	trail := ThinkingTranslationRuleStyle.Render(strings.Repeat(SectionSeparator, right))
-	return rule + " " + ThinkingTranslationStyle.Render(label) + " " + trail
+	rule := currentStyles.ThinkingTranslationRuleStyle.Render(strings.Repeat(SectionSeparator, left))
+	trail := currentStyles.ThinkingTranslationRuleStyle.Render(strings.Repeat(SectionSeparator, right))
+	return rule + " " + currentStyles.ThinkingTranslationStyle.Render(label) + " " + trail
 }
 
 func renderThinkingTranslationLines(translation ThinkingTranslationView, contentWidth int) []string {
@@ -1352,8 +1285,8 @@ func renderThinkingTranslationLines(translation ThinkingTranslationView, content
 		return nil
 	}
 	lines := []string{"", renderThinkingTranslationHeader(translation.TargetLang, contentWidth), ""}
-	for _, line := range renderMarkdownContent(preprocessThinkingMarkdown(removeTrailingCursorGlyph(translated)), contentWidth) {
-		lines = append(lines, "  "+preserveStyleAfterResets(line, ThinkingContentStyle))
+	for _, line := range contentMarkdown.Render(preprocessThinkingMarkdown(removeTrailingCursorGlyph(translated)), contentWidth) {
+		lines = append(lines, "  "+preserveStyleAfterResets(line, currentStyles.ThinkingContentStyle))
 	}
 	return lines
 }
@@ -1383,7 +1316,7 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 	}
 	for i, part := range b.ThinkingParts {
 		if i == 0 {
-			rawLines = append(rawLines, ThinkingLabelStyle.Render(blockLabelWithID("THINKING", b.displayLabelID())))
+			rawLines = append(rawLines, currentStyles.ThinkingLabelStyle.Render(blockLabelWithID("THINKING", b.displayLabelID())))
 			rawLines = append(rawLines, "") // gap
 		} else if i > 0 {
 			rawLines = append(rawLines, "") // small gap between distinct thinking segments
@@ -1406,7 +1339,7 @@ func (b *Block) renderThinkingParts(innerWidth int) []string {
 }
 
 func (b *Block) renderThinking(width int) []string {
-	style := ThinkingCardStyle
+	style := currentStyles.ThinkingCardStyle
 	// v2: Width() sets border-box (excl margin).
 	// Reserve a column for the conversation rail (foreground-only "│" prepended
 	// outside the card width); otherwise a full-width card overflows the terminal.
@@ -1429,7 +1362,7 @@ func (b *Block) renderThinking(width int) []string {
 	mdLines, settledLineCount := b.renderThinkingMarkdownPart(content, 0, contentWidth)
 
 	var rawLines []string
-	rawLines = append(rawLines, ThinkingLabelStyle.Render(blockLabelWithID("THINKING", b.displayLabelID())))
+	rawLines = append(rawLines, currentStyles.ThinkingLabelStyle.Render(blockLabelWithID("THINKING", b.displayLabelID())))
 	rawLines = append(rawLines, "") // internal gap
 
 	if b.Streaming {
@@ -1440,7 +1373,7 @@ func (b *Block) renderThinking(width int) []string {
 	}
 
 	// Re-insert card background after inner ANSI resets.
-	thinkBg2 := currentTheme.ThinkingCardBg
+	thinkBg2 := currentStyles.Palette.ThinkingCardBg
 	railPrefix := cardRailPrefix("thinking", b.Focused)
 	if b.Streaming {
 		return b.renderStreamingCardLines(streamCardKindThinking, style, innerWidth, thinkBg2, railPrefix, rawLines, len(mdLines)-settledLineCount)

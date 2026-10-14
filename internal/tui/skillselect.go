@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 // ---------------------------------------------------------------------------
@@ -73,27 +74,27 @@ const (
 func skillStateIcon(st skill.InvocationState) (string, lipgloss.Style) {
 	switch {
 	case !st.UserLoadable:
-		return skillIconDenied, InfoPanelDim
+		return skillIconDenied, currentStyles.InfoPanelDim
 	case !st.ModelCallable:
 		if st.BodyPresent {
 			return skillIconManual, skillStateLoadedStyle()
 		}
-		return skillIconManual, InfoPanelDim
+		return skillIconManual, currentStyles.InfoPanelDim
 	case st.BodyPresent:
 		return skillIconLoaded, skillStateLoadedStyle()
 	case st.LoadedEarlier:
-		return skillIconReload, InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
+		return skillIconReload, currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg))
 	case st.NoticeRecorded, st.PathActivated:
-		return skillIconRelevant, InfoPanelDim
+		return skillIconRelevant, currentStyles.InfoPanelDim
 	default:
-		return skillIconIdle, InfoPanelDim
+		return skillIconIdle, currentStyles.InfoPanelDim
 	}
 }
 
 // skillStateLoadedStyle is the accent for a body that is live: the only
 // state the panel paints in the success color.
 func skillStateLoadedStyle() lipgloss.Style {
-	return InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg))
+	return currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelSuccessFg))
 }
 
 // skillReasonText renders a machine-readable InvocationState.Reason for the
@@ -154,7 +155,7 @@ func sortSkillSelectStates(states []skill.InvocationState) {
 	})
 }
 
-func skillSelectItemFor(st skill.InvocationState) OverlayListItem {
+func skillSelectItemFor(st skill.InvocationState) overlaylist.Item {
 	meta := st.Meta
 	name := strings.TrimSpace(meta.Name)
 	// The icon shape follows the full invocation state rather than the
@@ -165,7 +166,7 @@ func skillSelectItemFor(st skill.InvocationState) OverlayListItem {
 	if desc := strings.TrimSpace(meta.Description); desc != "" {
 		label += "  " + desc
 	}
-	item := OverlayListItem{ID: name, Label: label}
+	item := overlaylist.Item{ID: name, Label: label}
 	if !st.UserLoadable {
 		// The reason replaces the description: a row the user cannot load is
 		// explained by why, not by what the skill does.
@@ -181,7 +182,7 @@ func skillSelectItemFor(st skill.InvocationState) OverlayListItem {
 // preserves it, so this path never sorts. Group headers carry no ID, so the
 // list's cursor walk skips them and the current-selection helpers never read
 // one as a skill.
-func skillSelectItems(states []skill.InvocationState, corpus []string, filter string) []OverlayListItem {
+func skillSelectItems(states []skill.InvocationState, corpus []string, filter string) []overlaylist.Item {
 	if len(corpus) != len(states) {
 		corpus = buildSkillSelectSearchCorpus(states)
 	}
@@ -201,12 +202,12 @@ func skillSelectItems(states []skill.InvocationState, corpus []string, filter st
 			model = append(model, st)
 		}
 	}
-	items := make([]OverlayListItem, 0, len(states)+2)
+	items := make([]overlaylist.Item, 0, len(states)+2)
 	appendGroup := func(header string, group []skill.InvocationState) {
 		if len(group) == 0 {
 			return
 		}
-		items = append(items, OverlayListItem{Header: true, Label: header})
+		items = append(items, overlaylist.Item{Header: true, Label: header})
 		for _, st := range group {
 			items = append(items, skillSelectItemFor(st))
 		}
@@ -238,7 +239,7 @@ func (m *Model) openSkillSelect() {
 	m.clearChordState()
 	sortSkillSelectStates(states)
 	m.skillSelect = skillSelectState{prevMode: m.mode, states: states, searchCorpus: buildSkillSelectSearchCorpus(states)}
-	m.skillSelect.selector.list = NewOverlayList(skillSelectItems(states, m.skillSelect.searchCorpus, ""), m.skillSelectMaxVisible())
+	m.skillSelect.selector.list = overlaylist.New(skillSelectItems(states, m.skillSelect.searchCorpus, ""), m.skillSelectMaxVisible())
 	m.mode = ModeSkillSelect
 	m.recalcViewportSize()
 }
@@ -257,7 +258,7 @@ func (m *Model) closeSkillSelect() tea.Cmd {
 func (m *Model) rebuildSkillSelectItems(resetCursor bool) {
 	items := skillSelectItems(m.skillSelect.states, m.skillSelect.searchCorpus, m.skillSelect.filter)
 	if m.skillSelect.selector.list == nil {
-		m.skillSelect.selector.list = NewOverlayList(items, m.skillSelectMaxVisible())
+		m.skillSelect.selector.list = overlaylist.New(items, m.skillSelectMaxVisible())
 	} else {
 		m.skillSelect.selector.list.SetItems(items)
 	}
@@ -283,7 +284,14 @@ func (m *Model) skillSelectApplyAtCursor() tea.Cmd {
 		return nil
 	}
 	item, ok := m.skillSelect.selector.list.SelectedItem()
-	if !ok || item.Header {
+	if !ok {
+		return nil
+	}
+	return m.applySkillSelection(item)
+}
+
+func (m *Model) applySkillSelection(item overlaylist.Item) tea.Cmd {
+	if item.Header {
 		return nil
 	}
 	if item.Disabled {

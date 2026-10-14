@@ -6,9 +6,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/keakon/chord/internal/inputhistory"
-
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/inputhistory"
 )
 
 type inputHistoryLayout struct {
@@ -144,8 +144,8 @@ func (m *Model) renderInputHistory() string {
 	}
 	box, rect := RenderOverlay(cfg, strings.Join(lines, "\n"), area)
 	chrome := layoutOverlay(cfg, area)
-	x := rect.Min.X + DirectoryBorderStyle.GetBorderLeftSize() + DirectoryBorderStyle.GetPaddingLeft()
-	y := rect.Min.Y + DirectoryBorderStyle.GetBorderTopSize() + DirectoryBorderStyle.GetPaddingTop() + chrome.contentBaseRow()
+	x := rect.Min.X + currentStyles.DirectoryBorderStyle.GetBorderLeftSize() + currentStyles.DirectoryBorderStyle.GetPaddingLeft()
+	y := rect.Min.Y + currentStyles.DirectoryBorderStyle.GetBorderTopSize() + currentStyles.DirectoryBorderStyle.GetPaddingTop() + chrome.contentBaseRow()
 	s.listBase, s.listRows, s.listStart = y+listIndex, end-start, start
 	s.listRect = image.Rect(x, s.listBase, x+width, s.listBase+s.listRows)
 	s.filterRects = [2]image.Rectangle{}
@@ -179,7 +179,7 @@ func renderHistoryHighlights(text string, ranges []inputhistory.Range) string {
 			return
 		}
 		if highlight {
-			out.WriteString(SearchMatchStyle.Render(run.String()))
+			out.WriteString(currentStyles.SearchMatchStyle.Render(run.String()))
 		} else {
 			out.WriteString(run.String())
 		}

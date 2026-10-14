@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/checkpointfmt"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
@@ -1156,7 +1157,7 @@ func (a *MainAgent) finishCompactionCall(client *llm.Client, fallbackModelRef st
 		modelRef = selectedRef
 	}
 	summary := compactionSummaryFromResponseContent(resp.Content)
-	if err := validateCompactionSummary(summary); err != nil {
+	if err := checkpointfmt.ValidateSummary(summary); err != nil {
 		return summary, modelRef, fmt.Errorf("%w: %w", errInvalidCompactionSummary, err)
 	}
 	return summary, modelRef, nil
@@ -1190,7 +1191,7 @@ func compactionSummaryFromResponseContent(content string) string {
 // compactionMissingHeadings extracts the required headings a rejected summary
 // omitted so repair prompts and diagnostics can name them.
 func compactionMissingHeadings(err error) []string {
-	if validationErr, ok := errors.AsType[*compactionSummaryValidationError](err); ok {
+	if validationErr, ok := errors.AsType[*checkpointfmt.MissingSectionsError](err); ok {
 		return validationErr.Missing
 	}
 	return nil
@@ -1200,8 +1201,9 @@ func compactionMissingHeadings(err error) []string {
 // repair prompt restates the exact section contract instead of asking the
 // model to recall it.
 func renderCompactionRequiredHeadings() string {
-	lines := make([]string, 0, len(compactionRequiredHeadings))
-	for _, heading := range compactionRequiredHeadings {
+	headings := checkpointfmt.RequiredHeadings()
+	lines := make([]string, 0, len(headings))
+	for _, heading := range headings {
 		lines = append(lines, "- "+heading)
 	}
 	return strings.Join(lines, "\n")

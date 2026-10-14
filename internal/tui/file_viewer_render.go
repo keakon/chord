@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/filepreview"
 )
 
 type fileHitKind uint8
@@ -28,13 +29,13 @@ type fileViewerPresentation struct {
 }
 
 func (p fileViewerPresentation) render() string {
-	return DirectoryBorderStyle.Width(p.width + DirectoryBorderStyle.GetHorizontalFrameSize()).Render(strings.Join(p.rows, "\n"))
+	return currentStyles.DirectoryBorderStyle.Width(p.width + currentStyles.DirectoryBorderStyle.GetHorizontalFrameSize()).Render(strings.Join(p.rows, "\n"))
 }
 func fileLabel(s string) string {
-	return strings.NewReplacer("\n", " ", "\t", " ").Replace(safeFileText(s))
+	return strings.NewReplacer("\n", " ", "\t", " ").Replace(filepreview.SafeText(s))
 }
 func (m *Model) fileViewerWidth() int {
-	return max(1, m.width-6-DirectoryBorderStyle.GetHorizontalFrameSize())
+	return max(1, m.width-6-currentStyles.DirectoryBorderStyle.GetHorizontalFrameSize())
 }
 func (m *Model) fileViewerBodyHeight() int {
 	actions, _ := fileActionRows(m.fileViewerWidth(), m.fileViewer.action)
@@ -42,7 +43,7 @@ func (m *Model) fileViewerBodyHeight() int {
 	if m.fileViewer.inputMode != "" || m.fileViewer.showing {
 		extra++
 	}
-	return max(2, m.height-DirectoryBorderStyle.GetVerticalFrameSize()-extra-2)
+	return max(2, m.height-currentStyles.DirectoryBorderStyle.GetVerticalFrameSize()-extra-2)
 }
 func (m *Model) fileViewerPageSize() int { return max(1, m.fileViewerBodyHeight()-1) }
 func (m *Model) fileViewerSourceMode() bool {

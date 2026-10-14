@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestNormalModePageKeysScrollMainViewport(t *testing.T) {
@@ -161,7 +162,7 @@ func TestViewRefreshesStatusBarForCtrlCHintWhileToastActive(t *testing.T) {
 	m.activeToast = &toastItem{Message: "toast", Level: "info"}
 	m.recalcViewportSize()
 
-	initial := stripANSI(m.View().Content)
+	initial := terminaltext.StripANSI(m.View().Content)
 	if strings.Contains(initial, "Press Ctrl+C again to quit") {
 		t.Fatalf("initial View() unexpectedly contains quit hint: %q", initial)
 	}
@@ -169,7 +170,7 @@ func TestViewRefreshesStatusBarForCtrlCHintWhileToastActive(t *testing.T) {
 	m.quit.at = time.Now()
 	m.quit.by = "ctrl+c"
 
-	updated := stripANSI(m.View().Content)
+	updated := terminaltext.StripANSI(m.View().Content)
 	if !strings.Contains(updated, "Press Ctrl+C again to quit") {
 		t.Fatalf("updated View() missing quit hint while toast active: %q", updated)
 	}
@@ -245,9 +246,9 @@ func TestViewRefreshesStatusBarForTransientStateChanges(t *testing.T) {
 			m.rightPanelVisible = false
 			m.layout = m.generateLayout(m.width, m.height)
 
-			initial := stripANSI(m.View().Content)
+			initial := terminaltext.StripANSI(m.View().Content)
 			tc.mutate(&m, backend)
-			updated := stripANSI(m.View().Content)
+			updated := terminaltext.StripANSI(m.View().Content)
 
 			if initial == updated {
 				t.Fatalf("View() did not change after transient state mutation; content=%q", updated)

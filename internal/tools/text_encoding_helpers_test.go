@@ -1,36 +1,30 @@
 package tools
 
 import (
-	"strings"
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/japanese"
+	"golang.org/x/text/encoding/simplifiedchinese"
+	textunicode "golang.org/x/text/encoding/unicode"
+	"golang.org/x/text/transform"
 )
 
-// knownTextEncoding maps encoding names to textEncoding values for tests that
-// drive the local file encoding pipeline by name.
-var knownTextEncoding = map[string]textEncoding{
-	"utf-8":     utf8Encoding,
-	"utf-8-bom": utf8BOMEncoding,
-	"utf-16le":  utf16LEEncoding,
-	"utf-16be":  utf16BEEncoding,
-	"utf-32le":  utf32LEEncoding,
-	"utf-32be":  utf32BEEncoding,
-	"gb18030":   gb18030Encoding,
-	"big5":      big5Encoding,
-	"shift-jis": shiftJISEncoding,
-}
-
-func textEncodingByName(name string) (textEncoding, bool) {
-	enc, ok := knownTextEncoding[strings.ToLower(name)]
-	return enc, ok
-}
-
 func mustEncodeForTest(s string, encName string) []byte {
-	enc, ok := textEncodingByName(encName)
-	if !ok {
+	var enc encoding.Encoding
+	var bom []byte
+	switch encName {
+	case "utf-16le":
+		enc = textunicode.UTF16(textunicode.LittleEndian, textunicode.IgnoreBOM)
+		bom = []byte{0xff, 0xfe}
+	case "gb18030":
+		enc = simplifiedchinese.GB18030
+	case "shift-jis":
+		enc = japanese.ShiftJIS
+	default:
 		panic("unsupported test encoding: " + encName)
 	}
-	data, err := encodeString(s, enc)
+	data, _, err := transform.Bytes(enc.NewEncoder(), []byte(s))
 	if err != nil {
 		panic(err)
 	}
-	return data
+	return append(bom, data...)
 }

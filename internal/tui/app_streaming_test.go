@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestScheduleStreamFlushCoalescesUntilConsumed(t *testing.T) {
@@ -129,13 +130,13 @@ func TestStreamTextDeltasReuseCachedViewUntilFlush(t *testing.T) {
 	if got := pendingStreamingContentForTest(m.currentAssistantBlock); got != "first second" {
 		t.Fatalf("pending assistant stream content = %q, want accumulated text", got)
 	}
-	deferred := stripANSI(m.View().Content)
+	deferred := terminaltext.StripANSI(m.View().Content)
 	if strings.Contains(deferred, "second") {
 		t.Fatalf("View should reuse cached content before stream flush, got:\n%s", deferred)
 	}
 
 	m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
-	flushed := stripANSI(m.View().Content)
+	flushed := terminaltext.StripANSI(m.View().Content)
 	if !strings.Contains(flushed, "first second") {
 		t.Fatalf("View should include accumulated stream text after flush, got:\n%s", flushed)
 	}
@@ -350,13 +351,13 @@ func TestStreamThinkingDeltasStayPendingUntilFlush(t *testing.T) {
 	if got := pendingStreamingContentForTest(m.currentThinkingBlock); got != "first second" {
 		t.Fatalf("pending thinking stream content = %q, want accumulated text", got)
 	}
-	deferred := stripANSI(m.View().Content)
+	deferred := terminaltext.StripANSI(m.View().Content)
 	if strings.Contains(deferred, "second") {
 		t.Fatalf("View should reuse cached thinking content before stream flush, got:\n%s", deferred)
 	}
 
 	m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
-	flushed := stripANSI(m.View().Content)
+	flushed := terminaltext.StripANSI(m.View().Content)
 	if !strings.Contains(flushed, "first second") {
 		t.Fatalf("View should include accumulated thinking text after flush, got:\n%s", flushed)
 	}
@@ -514,7 +515,7 @@ func newStreamTextRenderedModel(tb testing.TB, seed string) *Model {
 	_ = m.View()
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{Text: seed}})
 	m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
-	rendered := stripANSI(m.View().Content)
+	rendered := terminaltext.StripANSI(m.View().Content)
 	if !strings.Contains(rendered, seed) {
 		tb.Fatalf("initial stream text was not rendered, got:\n%s", rendered)
 	}
@@ -527,7 +528,7 @@ func newStreamThinkingRenderedModel(tb testing.TB, seed string) *Model {
 	_ = m.View()
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{Text: seed}})
 	m.handleStreamFlushTick(streamFlushTickMsg{generation: m.streamFlushGeneration})
-	rendered := stripANSI(m.View().Content)
+	rendered := terminaltext.StripANSI(m.View().Content)
 	if !strings.Contains(rendered, seed) {
 		tb.Fatalf("initial thinking stream was not rendered, got:\n%s", rendered)
 	}
@@ -614,7 +615,7 @@ func TestToolCallInsideThinkingBlockKeepsOneThinkingCard(t *testing.T) {
 	if thinkingIdx > toolIdx {
 		t.Fatalf("thinking card at %d should precede the tool card at %d", thinkingIdx, toolIdx)
 	}
-	if rendered := stripANSI(m.View().Content); !strings.Contains(rendered, "preserving the final one.") {
+	if rendered := terminaltext.StripANSI(m.View().Content); !strings.Contains(rendered, "preserving the final one.") {
 		t.Fatalf("view should show the reunited thinking text, got:\n%s", rendered)
 	}
 }

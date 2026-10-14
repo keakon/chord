@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/mcp"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 // ---------------------------------------------------------------------------
@@ -49,11 +50,11 @@ func mcpSelectBusyHint() string {
 	)
 }
 
-func buildMCPSelectItems(rows []agent.MCPServerDisplay) []OverlayListItem {
+func buildMCPSelectItems(rows []agent.MCPServerDisplay) []overlaylist.Item {
 	rowsCopy := append([]agent.MCPServerDisplay(nil), rows...)
 	sort.Slice(rowsCopy, func(i, j int) bool { return rowsCopy[i].Name < rowsCopy[j].Name })
 
-	items := make([]OverlayListItem, 0, len(rowsCopy))
+	items := make([]overlaylist.Item, 0, len(rowsCopy))
 	for _, r := range rowsCopy {
 		state := "error"
 		switch {
@@ -66,7 +67,7 @@ func buildMCPSelectItems(rows []agent.MCPServerDisplay) []OverlayListItem {
 		case r.Pending:
 			state = "connecting"
 		}
-		item := OverlayListItem{ID: r.Name, Label: fmt.Sprintf("%s — %s", r.Name, state)}
+		item := overlaylist.Item{ID: r.Name, Label: fmt.Sprintf("%s — %s", r.Name, state)}
 		if !r.Manual {
 			item.Label = fmt.Sprintf("%s — auto", r.Name)
 		}
@@ -119,7 +120,7 @@ func (m *Model) openMCPSelect() {
 
 	m.clearChordState()
 	m.mcpSelect = mcpSelectState{prevMode: m.mode}
-	m.mcpSelect.selector.list = NewOverlayList(buildMCPSelectItems(rows), m.mcpSelectMaxVisible())
+	m.mcpSelect.selector.list = overlaylist.New(buildMCPSelectItems(rows), m.mcpSelectMaxVisible())
 	m.mode = ModeMCPSelect
 	m.recalcViewportSize()
 }
@@ -160,7 +161,7 @@ func (m *Model) renderMCPSelectDialog() string {
 	if readOnly {
 		prefixText = "Changes are allowed while running and apply on the next request"
 	}
-	prefix := DimStyle.Render(ansi.Truncate(prefixText, contentWidth, "…"))
+	prefix := currentStyles.DimStyle.Render(ansi.Truncate(prefixText, contentWidth, "…"))
 
 	maxVisible := m.mcpSelectMaxVisible()
 	return m.mcpSelect.selector.Render(
@@ -304,10 +305,10 @@ func (m *Model) mcpSelectToggleAtIndex(idx int) tea.Cmd {
 	if !ok || m.mcpSelect.selector.list == nil {
 		return nil
 	}
-	if idx < 0 || idx >= m.mcpSelect.selector.list.Len() {
+	item, found := m.mcpSelect.selector.list.Item(idx)
+	if !found {
 		return nil
 	}
-	item := m.mcpSelect.selector.list.items[idx]
 	if item.Disabled {
 		return m.enqueueToast("Auto-start MCP servers are read-only", "info")
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // The state-driven sections (LSP, MCP, SKILLS) list configured entries even
@@ -21,7 +22,7 @@ func TestInfoPanelLSPSectionDefaultsFoldedUntilAServerLoads(t *testing.T) {
 	}
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 60))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	if !strings.Contains(plain, "▶ LSP") {
 		t.Fatalf("LSP section with no loaded server should default to folded, got %q", plain)
 	}
@@ -35,7 +36,7 @@ func TestInfoPanelLSPSectionDefaultsFoldedUntilAServerLoads(t *testing.T) {
 		{Name: "gopls", Pending: true},
 		{Name: "pyright", OK: true},
 	}
-	plain = stripANSI(m.renderInfoPanel(40, 60))
+	plain = terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	if !strings.Contains(plain, "▼ LSP") {
 		t.Fatalf("LSP section should unfold once a server loads, got %q", plain)
 	}
@@ -54,7 +55,7 @@ func TestInfoPanelMCPSectionDefaultsFoldedUntilAServerConnects(t *testing.T) {
 	}
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 60))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	if !strings.Contains(plain, "▶ MCP") {
 		t.Fatalf("MCP section with no connected server should default to folded, got %q", plain)
 	}
@@ -66,7 +67,7 @@ func TestInfoPanelMCPSectionDefaultsFoldedUntilAServerConnects(t *testing.T) {
 		{Name: "exa", OK: true},
 		{Name: "browser", Disabled: true, Manual: true},
 	}
-	plain = stripANSI(m.renderInfoPanel(40, 60))
+	plain = terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	if !strings.Contains(plain, "▼ MCP") {
 		t.Fatalf("MCP section should unfold once a server connects, got %q", plain)
 	}
@@ -86,7 +87,7 @@ func TestInfoPanelSkillsSectionDefaultsFoldedUntilASkillLoads(t *testing.T) {
 	backend.availableSkills = catalog
 	m := NewModel(backend)
 
-	plain := stripANSI(m.renderInfoPanel(40, 60))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	if !strings.Contains(plain, "▶ SKILLS") {
 		t.Fatalf("SKILLS section with no loaded skill should default to folded, got %q", plain)
 	}
@@ -100,7 +101,7 @@ func TestInfoPanelSkillsSectionDefaultsFoldedUntilASkillLoads(t *testing.T) {
 		{Name: "go-expert", Description: "Go language development expert", Discovered: true, Invoked: true},
 	}
 	rendered := m.renderInfoPanel(40, 60)
-	plain = stripANSI(rendered)
+	plain = terminaltext.StripANSI(rendered)
 	if !strings.Contains(plain, "▼ SKILLS") {
 		t.Fatalf("SKILLS section should unfold once a skill loads, got %q", plain)
 	}
@@ -108,7 +109,7 @@ func TestInfoPanelSkillsSectionDefaultsFoldedUntilASkillLoads(t *testing.T) {
 	if len(body) == 0 {
 		t.Fatalf("expanded SKILLS section should list its skills, got %#v", body)
 	}
-	loaded := skillStateLoadedStyle().Render("●") + " " + InfoPanelDim.Render("go-expert")
+	loaded := skillStateLoadedStyle().Render("●") + " " + currentStyles.InfoPanelDim.Render("go-expert")
 	if !strings.Contains(rendered, loaded) {
 		t.Fatalf("loaded skill should keep its success-colored row; want %q in %q", loaded, rendered)
 	}
@@ -120,7 +121,7 @@ func TestInfoPanelSkillsSectionDefaultsFoldedUntilASkillLoads(t *testing.T) {
 		{Meta: catalog[0], UserLoadable: true, ModelCallable: true, LoadedEarlier: true},
 		{Meta: catalog[1], UserLoadable: true, ModelCallable: true},
 	}
-	plain = stripANSI(m.renderInfoPanel(40, 60))
+	plain = terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	if !strings.Contains(plain, "▶ SKILLS") {
 		t.Fatalf("SKILLS section should fold again once no body is loaded, got %q", plain)
 	}
@@ -135,7 +136,7 @@ func TestInfoPanelContentSectionsStayExpandedByDefault(t *testing.T) {
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")
 	m.sidebar.AddFileEdit("main", "/tmp/foo.go", 2, 1)
 
-	plain := stripANSI(m.renderInfoPanel(40, 60))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	for _, title := range []string{"▼ TODOS", "▼ CHANGED FILES", "▼ AGENTS"} {
 		if !strings.Contains(plain, title) {
 			t.Fatalf("content-driven section %q should stay expanded by default, got %q", title, plain)
@@ -154,14 +155,14 @@ func TestInfoPanelToggleOverridesContentDrivenDefault(t *testing.T) {
 
 	// Folded by default (nothing loaded), expanded by the user: stays expanded.
 	m.toggleInfoPanelSection(infoPanelSectionLSP)
-	plain := stripANSI(m.renderInfoPanel(40, 60))
+	plain := terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	if !strings.Contains(plain, "▼ LSP") {
 		t.Fatalf("user-expanded LSP section should stay expanded, got %q", plain)
 	}
 
 	// Expanded by default (a skill is loaded), folded by the user: stays folded.
 	m.toggleInfoPanelSection(infoPanelSectionSkills)
-	plain = stripANSI(m.renderInfoPanel(40, 60))
+	plain = terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	if !strings.Contains(plain, "▶ SKILLS") {
 		t.Fatalf("user-folded SKILLS section should stay folded, got %q", plain)
 	}

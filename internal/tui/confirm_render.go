@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // renderConfirmDialog produces the confirmation dialog as a bordered overlay
@@ -73,13 +74,13 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 		}
 		return lines
 	}
-	lines = append(lines, ConfirmToolStyle.Render("Tool: "+summary.ToolName))
-	lines = append(lines, ConfirmToolStyle.Render("Action: "+summary.Action))
+	lines = append(lines, currentStyles.ConfirmToolStyle.Render("Tool: "+summary.ToolName))
+	lines = append(lines, currentStyles.ConfirmToolStyle.Render("Action: "+summary.Action))
 	if toolNameKey(summary.ToolName) == tools.NameDelete {
-		lines = append(lines, DimStyle.Render("Risk: ")+confirmRiskStyle(summary.Risk))
+		lines = append(lines, currentStyles.DimStyle.Render("Risk: ")+confirmRiskStyle(summary.Risk))
 		for _, warning := range summary.Warnings {
-			for _, line := range wrapText(warning, max(10, innerWidth-2)) {
-				lines = append(lines, DialogWarningStyle.Render("! ")+DimStyle.Render(line))
+			for _, line := range terminaltext.Wrap(warning, max(10, innerWidth-2)) {
+				lines = append(lines, currentStyles.DialogWarningStyle.Render("! ")+currentStyles.DimStyle.Render(line))
 			}
 		}
 		fields := renderConfirmFields(summary.summaryFields(), innerWidth-1)
@@ -97,11 +98,11 @@ func (m Model) renderConfirmSummary(title string, summary confirmSummary, innerW
 		}
 		return lines
 	}
-	lines = append(lines, DimStyle.Render("Risk: ")+confirmRiskStyle(summary.Risk))
+	lines = append(lines, currentStyles.DimStyle.Render("Risk: ")+confirmRiskStyle(summary.Risk))
 
 	for _, warning := range summary.Warnings {
-		for _, line := range wrapText(warning, max(10, innerWidth-2)) {
-			lines = append(lines, DialogWarningStyle.Render("! ")+DimStyle.Render(line))
+		for _, line := range terminaltext.Wrap(warning, max(10, innerWidth-2)) {
+			lines = append(lines, currentStyles.DialogWarningStyle.Render("! ")+currentStyles.DimStyle.Render(line))
 		}
 	}
 
@@ -117,11 +118,11 @@ func renderConfirmPathSection(title string, paths []string, innerWidth int) []st
 	if len(paths) == 0 {
 		return nil
 	}
-	lines := []string{ConfirmToolStyle.Render(fmt.Sprintf("%s (%d)", title, len(paths)))}
+	lines := []string{currentStyles.ConfirmToolStyle.Render(fmt.Sprintf("%s (%d)", title, len(paths)))}
 	width := max(10, innerWidth-4)
 	for _, path := range paths {
-		for _, wrapped := range wrapText(path, width) {
-			lines = append(lines, DimStyle.Render("- ")+ConfirmToolStyle.Render(wrapped))
+		for _, wrapped := range terminaltext.Wrap(path, width) {
+			lines = append(lines, currentStyles.DimStyle.Render("- ")+currentStyles.ConfirmToolStyle.Render(wrapped))
 		}
 	}
 	return lines
@@ -178,7 +179,7 @@ func (m *Model) renderRulePicker(maxWidth int) string {
 			line += " ⚠ very broad"
 		}
 		if i == m.confirm.patternIdx {
-			line = SelectedStyle.Width(width).Render(line)
+			line = currentStyles.SelectedStyle.Width(width).Render(line)
 		}
 		lines = append(lines, line)
 	}
@@ -193,7 +194,7 @@ func (m *Model) renderRulePicker(maxWidth int) string {
 		cfg.Title = "Remember + allow"
 	}
 	if m.confirm.editError != "" {
-		cfg.Footer = DialogDangerStyle.Render(truncateOneLine(m.confirm.editError, width))
+		cfg.Footer = currentStyles.DialogDangerStyle.Render(terminaltext.TruncateOneLine(m.confirm.editError, width))
 	}
 	area := m.confirmDialogArea()
 	firstRender := m.confirm.ruleScroll.visible == 0

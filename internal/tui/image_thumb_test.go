@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func makeTestPNG(t *testing.T) []byte {
@@ -26,7 +27,7 @@ func makeTestPNG(t *testing.T) []byte {
 }
 
 func TestRenderUserPlainImageRenderRangeIncludesCardPadding(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	setCurrentTerminalImageCapabilities(TerminalImageCapabilities{Backend: ImageBackendNone})
 	pngData := makeTestPNG(t)
 	block := &Block{
@@ -48,11 +49,11 @@ func TestRenderUserPlainImageRenderRangeIncludesCardPadding(t *testing.T) {
 		t.Fatal("expected rendered lines")
 	}
 
-	style := UserCardStyle
+	style := currentStyles.UserCardStyle
 	boxWidth := renderWidth - style.GetHorizontalMargins()
 	innerWidth := boxWidth - style.GetHorizontalPadding() - style.GetHorizontalBorderSize()
 	contentWidth := innerWidth - 2
-	imageLines, _, _, err := renderImageBlock(&block.ImageParts[0], contentWidth, currentTheme.UserCardBg, currentImageCapabilities())
+	imageLines, _, _, err := renderImageBlock(&block.ImageParts[0], contentWidth, currentStyles.Palette.UserCardBg, currentImageCapabilities())
 	if err != nil {
 		t.Fatalf("renderImageBlock: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestImagePartAtLineExcludesLabelRowWhenInlineBodyExists(t *testing.T) {
 }
 
 func TestImagePartAtPointRequiresHorizontalHitWithinImageBody(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type: BlockUser,
 		ImageParts: []BlockImagePart{{
@@ -142,7 +143,7 @@ func TestBlockPlainContentIncludesImagePlaceholderLabels(t *testing.T) {
 }
 
 func TestToolResultImagePreviewRendersAndCopiesPlaceholder(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	setCurrentTerminalImageCapabilities(TerminalImageCapabilities{Backend: ImageBackendNone})
 	pngData := makeTestPNG(t)
 	block := &Block{

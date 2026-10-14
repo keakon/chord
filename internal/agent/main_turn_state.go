@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/toolefficiency"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
@@ -150,8 +151,8 @@ type Turn struct {
 	OversizeRecoveryCount              int
 	// Efficiency tracks per-turn tool usage patterns for one-shot efficiency
 	// notes appended to tool results (see tool_efficiency_advisor.go).
-	// Event-loop-goroutine only, like MalformedCount.
-	Efficiency            toolEfficiencyState
+	// Dispatch and result-finalization access is guarded by the state mutex.
+	Efficiency            toolefficiency.State
 	malformedInBatch      int // abnormal calls in the current LLM-response batch
 	CompletedToolCalls    []any
 	ChangedFiles          []any

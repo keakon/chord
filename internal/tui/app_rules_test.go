@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type rulesAgentStub struct {
@@ -88,7 +89,7 @@ func TestOpenRulesWithNoRulesOpensEmptyOverlay(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no toast command")
 	}
-	plain := stripANSI(m.renderRulesList())
+	plain := terminaltext.StripANSI(m.renderRulesList())
 	if !strings.Contains(plain, "No remembered rules yet") || !strings.Contains(plain, "Press A to add") {
 		t.Fatalf("empty /rules view = %q", plain)
 	}
@@ -170,7 +171,7 @@ func TestResolveRuleScopePathUsesContentRootInsteadOfWorkDir(t *testing.T) {
 	m.enterRulePicker()
 	m.confirm.scopeIdx = 1 // project
 
-	plain := stripANSI(m.renderConfirmDialog())
+	plain := terminaltext.StripANSI(m.renderConfirmDialog())
 	want := filepath.Join("/repo/root", ".chord", "agents", "builder.yaml")
 	if !strings.Contains(plain, want) {
 		t.Fatalf("confirm rule picker project path = %q, want contains %q", plain, want)

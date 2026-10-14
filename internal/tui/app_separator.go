@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/keakon/lipgloss/v2"
+
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // Status bar horizontal margins so content is not flush against edges or covered by scrollbar.
@@ -29,7 +31,7 @@ const statusBarActivityPathGap = " · "
 // statusBarGroupGapWidth is the display width of the rendered group separator;
 // every budget that reserves room for it must use this value.
 func statusBarGroupGapWidth() int {
-	return lipgloss.Width(DimStyle.Render(statusBarActivityPathGap))
+	return lipgloss.Width(currentStyles.DimStyle.Render(statusBarActivityPathGap))
 }
 
 func normalizeSeparatorVariant(variant string) string {
@@ -43,16 +45,16 @@ func normalizeSeparatorVariant(variant string) string {
 	}
 }
 
-func renderAnimatedSeparatorVariant(width int, theme Theme, variant string, busy bool, insertMode bool) string {
+func renderAnimatedSeparatorVariant(width int, theme uitheme.Palette, variant string, busy bool, insertMode bool) string {
 	if width <= 0 {
 		return ""
 	}
 	sep := strings.Repeat(SectionSeparator, width)
 	if !busy {
 		if insertMode {
-			return InputSeparatorStyle.Render(sep)
+			return currentStyles.InputSeparatorStyle.Render(sep)
 		}
-		return InputSeparatorDimmedStyle.Render(sep)
+		return currentStyles.InputSeparatorDimmedStyle.Render(sep)
 	}
 
 	variant = normalizeSeparatorVariant(variant)

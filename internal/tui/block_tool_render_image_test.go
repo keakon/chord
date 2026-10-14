@@ -13,10 +13,12 @@ import (
 	"github.com/keakon/chord/internal/imagegen"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestImageToolCardsShowSingleLinePrompt(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	previous := currentImageCapabilities()
 	setCurrentTerminalImageCapabilities(TerminalImageCapabilities{Backend: ImageBackendNone})
 	t.Cleanup(func() { setCurrentTerminalImageCapabilities(previous) })
@@ -43,7 +45,7 @@ func TestImageToolCardsShowSingleLinePrompt(t *testing.T) {
 						block := &Block{Type: kind, ToolName: tools.NameGenerateImage, Content: string(args), ResultContent: tc.result, ResultStatus: tc.status, ResultDone: tc.done, RecoveryState: tc.recovery}
 						initToolCardFoldState(block, block.ToolName)
 						lines := block.Render(width, "")
-						plain := stripANSI(strings.Join(lines, "\n"))
+						plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 						if strings.Contains(plain, "Prompt:") || strings.Contains(plain, "muted colors") {
 							t.Fatalf("image prompt expanded into the body: %s", plain)
 						}
@@ -52,7 +54,7 @@ func TestImageToolCardsShowSingleLinePrompt(t *testing.T) {
 						}
 						for _, line := range lines {
 							if ansi.StringWidth(line) > width {
-								t.Fatalf("image card exceeds width %d: %q", width, stripANSI(line))
+								t.Fatalf("image card exceeds width %d: %q", width, terminaltext.StripANSI(line))
 							}
 						}
 						if block.Content != string(args) || block.ResultContent != tc.result {
@@ -113,7 +115,7 @@ func TestImageToolCardYankCopiesCompleteArguments(t *testing.T) {
 }
 
 func TestImageToolCardsKeepWarningsAndOutcomesVisible(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	previous := currentImageCapabilities()
 	setCurrentTerminalImageCapabilities(TerminalImageCapabilities{Backend: ImageBackendNone})
 	t.Cleanup(func() { setCurrentTerminalImageCapabilities(previous) })
@@ -133,7 +135,7 @@ func TestImageToolCardsKeepWarningsAndOutcomesVisible(t *testing.T) {
 					if block.ToggleAtWidth(40) {
 						t.Fatal("image card offered a detail toggle")
 					}
-					plain := stripANSI(strings.Join(block.Render(80, ""), "\n"))
+					plain := terminaltext.StripANSI(strings.Join(block.Render(80, ""), "\n"))
 					if !strings.Contains(plain, tc.want) {
 						t.Fatalf("image outcome hidden: %s", plain)
 					}
@@ -153,7 +155,7 @@ func TestImageToolCardsKeepWarningsAndOutcomesVisible(t *testing.T) {
 		t.Run(tc.tool+"/notice", func(t *testing.T) {
 			block := &Block{Type: BlockToolCall, ToolName: tc.tool, ResultDone: true, ResultContent: tc.content, ResultStatus: message.ToolStatusSuccess}
 			initToolCardFoldState(block, tc.tool)
-			plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+			plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 			if !strings.Contains(plain, tc.want) || strings.Contains(plain, tc.hidden) {
 				t.Fatalf("image notice not presented correctly: %s", plain)
 			}

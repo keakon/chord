@@ -49,7 +49,7 @@ func TestSanitizeResponseZeroWidthStripsModelGeneratedText(t *testing.T) {
 		}
 	}
 	// An emoji zygote sequence must keep its ZWJs: strip semantics preserve
-	// real joins (the same rule tools.StripZeroWidthFormat already owns).
+	// real joins (the same rule textclean.StripZeroWidthFormat already owns).
 
 	emojiJSON := `{"path":"` + "\U0001f468\u200d\U0001f469" + `"}`
 	emojiArgs := json.RawMessage(emojiJSON)

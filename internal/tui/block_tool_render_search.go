@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []string {
@@ -60,8 +61,8 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 	if !showInline && !expanded && strings.TrimSpace(summary) != "" {
 		// Short result without a count summary: show the raw lines directly.
 		for line := range strings.SplitSeq(strings.TrimRight(sanitizeToolDisplayText(summary), "\n"), "\n") {
-			for _, wrapped := range wrapText(line, contentWidth) {
-				result = append(result, DimStyle.Render("    "+wrapped))
+			for _, wrapped := range terminaltext.Wrap(line, contentWidth) {
+				result = append(result, currentStyles.DimStyle.Render("    "+wrapped))
 			}
 		}
 		result = appendToolElapsedToHeader(result, b, cardWidth)
@@ -73,8 +74,8 @@ func (b *Block) renderSearchResultToolCall(width int, spinnerFrame string) []str
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			for _, wrapped := range wrapText(line, contentWidth) {
-				result = append(result, DimStyle.Render("    "+wrapped))
+			for _, wrapped := range terminaltext.Wrap(line, contentWidth) {
+				result = append(result, currentStyles.DimStyle.Render("    "+wrapped))
 			}
 		}
 	}

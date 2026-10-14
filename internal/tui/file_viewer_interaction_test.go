@@ -7,45 +7,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/desktop"
 	"github.com/keakon/chord/internal/filedelivery"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/filepreview"
 )
 
-func TestFileViewerSourceRenderBudget(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "sample.go")
-	if err := os.WriteFile(path, []byte(strings.Repeat("var x = 1\n", 15000)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	loc, err := filedelivery.WorkspaceLocator(dir, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := filedelivery.Inspect(context.Background(), loc, "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := loadFileViewer(fileViewerRequest{ctx: context.Background(), file: f, width: 80, highlighter: syntax.New(path, "", "")})
-	if r.err != nil || len(r.lines) > fileViewerRenderLines || !strings.Contains(r.note, "truncated") {
-		t.Fatalf("lines=%d note=%q err=%v", len(r.lines), r.note, r.err)
-	}
-}
 func TestFileViewerLateResultAfterSelection(t *testing.T) {
 	for _, image := range []bool{false, true} {
 		m := Model{}
 		m.fileViewer = fileViewerState{open: true, showing: true, generation: 1, owner: m.imageViewerOwner(), files: []message.DeliveredFile{{ID: "a"}, {ID: "b"}}}
-		req := fileViewerRequest{generation: 1, owner: m.imageViewerOwner(), file: m.fileViewer.files[0]}
+		req := fileViewerRequest{generation: 1, owner: m.imageViewerOwner(), File: m.fileViewer.files[0]}
 		m.handleFileViewerKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 		m.handleFileViewerKey(tea.KeyPressMsg{Code: tea.KeyDown})
-		result := fileViewerLoadedMsg{request: req, raw: []byte("file a"), lines: []string{"file a"}}
+		result := fileViewerLoadedMsg{request: req, Raw: []byte("file a"), Lines: []string{"file a"}}
 		if image {
-			result.image = &BlockImagePart{MimeType: "image/png"}
+			result.Image = &filepreview.Image{MimeType: "image/png"}
 		}
 		cmd := m.handleFileViewerLoaded(result)
 		if cmd != nil || m.fileViewer.selected != 1 || len(m.fileViewer.raw) != 0 || m.imageViewer.Open {
@@ -75,7 +55,7 @@ func TestFileViewerWrappedLineNavigation(t *testing.T) {
 }
 func clickFileViewerRow(m *Model, row, column int) tea.Cmd {
 	rect := centeredRect(m.ensureLayout().area, m.renderFileViewerOverlay())
-	return m.handleFileViewerMouse(tea.MouseClickMsg{X: rect.Min.X + DirectoryBorderStyle.GetBorderLeftSize() + DirectoryBorderStyle.GetPaddingLeft() + column, Y: rect.Min.Y + DirectoryBorderStyle.GetBorderTopSize() + DirectoryBorderStyle.GetPaddingTop() + row, Button: tea.MouseLeft})
+	return m.handleFileViewerMouse(tea.MouseClickMsg{X: rect.Min.X + currentStyles.DirectoryBorderStyle.GetBorderLeftSize() + currentStyles.DirectoryBorderStyle.GetPaddingLeft() + column, Y: rect.Min.Y + currentStyles.DirectoryBorderStyle.GetBorderTopSize() + currentStyles.DirectoryBorderStyle.GetPaddingTop() + row, Button: tea.MouseLeft})
 }
 func TestFileViewerContentNeverCreatesActions(t *testing.T) {
 	for _, label := range fileActions {

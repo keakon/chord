@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 // roleSwitchResultMsg carries the outcome of a role switch chosen from the
@@ -58,7 +60,7 @@ func (m *Model) openRoleSelect() {
 		cursor:   cursor,
 		prevMode: prevMode,
 	}
-	m.roleSelect.selector.list = NewOverlayList(buildRoleSelectItems(roles, current), m.roleSelectMaxVisible())
+	m.roleSelect.selector.list = overlaylist.New(buildRoleSelectItems(roles, current), m.roleSelectMaxVisible())
 	m.roleSelect.selector.list.SetCursor(cursor)
 	if m.mode == ModeInsert {
 		m.input.Blur()
@@ -173,7 +175,7 @@ func (m *Model) renderRoleSelectDialog() string {
 
 			CompactHint: hintLine(hint("Esc", "cancel")),
 			MaxWidth:    60,
-		}, DimStyle.Render("(no roles configured)"), image.Rect(0, 0, m.width, m.height))
+		}, currentStyles.DimStyle.Render("(no roles configured)"), image.Rect(0, 0, m.width, m.height))
 		return dialog
 	}
 
@@ -205,7 +207,7 @@ func (m *Model) renderRoleSelectDialog() string {
 		0,
 		maxVisible,
 		extraKey,
-		func(list *OverlayList) {
+		func(list *overlaylist.List) {
 			list.SetItems(buildRoleSelectItems(m.roleSelect.roles, currentRole))
 			list.SetCursor(m.roleSelect.cursor)
 		},
@@ -230,10 +232,10 @@ func (m *Model) roleSelectIndexAt(x, y int) (int, bool) {
 	return idx, true
 }
 
-func buildRoleSelectItems(roles []string, currentRole string) []OverlayListItem {
-	items := make([]OverlayListItem, 0, len(roles))
+func buildRoleSelectItems(roles []string, currentRole string) []overlaylist.Item {
+	items := make([]overlaylist.Item, 0, len(roles))
 	for _, name := range roles {
-		items = append(items, OverlayListItem{ID: name, Label: name, Selected: name == currentRole})
+		items = append(items, overlaylist.Item{ID: name, Label: name, Selected: name == currentRole})
 	}
 	return items
 }

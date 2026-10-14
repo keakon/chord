@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/privatefs"
-	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tooloutput"
 )
 
 // assertArtifactAddressResolves checks the promise a recovery address makes:
@@ -17,7 +17,7 @@ func assertArtifactAddressResolves(t *testing.T, sessionDir, ref, reduced string
 	if ref == "" {
 		t.Fatalf("decision claims an artifact recovery route but carries no reference: %q", strings.SplitN(reduced, "\n", 2)[0])
 	}
-	path := strings.TrimSuffix(strings.TrimPrefix(ref, tools.ArtifactReferencePrefix), ".")
+	path := strings.TrimSuffix(strings.TrimPrefix(ref, tooloutput.ArtifactReferencePrefix), ".")
 	if idx := strings.Index(path, ". "); idx > 0 {
 		path = path[:idx]
 	}

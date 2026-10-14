@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // Background job lifecycle names as tools.SnapshotJobs reports them. Only these
@@ -166,18 +167,18 @@ type jobRowStyles struct {
 
 func infoPanelJobRowStyles() jobRowStyles {
 	return jobRowStyles{
-		labelStyle:   InfoPanelValue,
-		elapsedStyle: InfoPanelDim,
-		stopStyle:    InfoPanelDim,
-		gapStyle:     InfoPanelDim,
+		labelStyle:   currentStyles.InfoPanelValue,
+		elapsedStyle: currentStyles.InfoPanelDim,
+		stopStyle:    currentStyles.InfoPanelDim,
+		gapStyle:     currentStyles.InfoPanelDim,
 	}
 }
 
 func dialogJobRowStyles() jobRowStyles {
-	base := lipgloss.NewStyle().Background(lipgloss.Color(currentTheme.DialogBg))
-	dim := base.Foreground(lipgloss.Color(currentTheme.DimFg))
+	base := lipgloss.NewStyle().Background(lipgloss.Color(currentStyles.Palette.DialogBg))
+	dim := base.Foreground(lipgloss.Color(currentStyles.Palette.DimFg))
 	return jobRowStyles{
-		labelStyle:   base.Foreground(lipgloss.Color(currentTheme.HeaderFg)).Bold(true),
+		labelStyle:   base.Foreground(lipgloss.Color(currentStyles.Palette.HeaderFg)).Bold(true),
 		elapsedStyle: dim,
 		stopStyle:    dim,
 		gapStyle:     base,
@@ -190,8 +191,8 @@ func dialogJobRowStyles() jobRowStyles {
 // a selected row has to carry the selection colors on each segment.
 func selectedJobRowStyles() jobRowStyles {
 	base := lipgloss.NewStyle().
-		Background(lipgloss.Color(currentTheme.SelectedBg)).
-		Foreground(lipgloss.Color(currentTheme.SelectedFg))
+		Background(lipgloss.Color(currentStyles.Palette.SelectedBg)).
+		Foreground(lipgloss.Color(currentStyles.Palette.SelectedFg))
 	return jobRowStyles{
 		labelStyle:   base.Bold(true),
 		elapsedStyle: base,
@@ -242,12 +243,12 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 	// FormatElapsed is ASCII-only, so len() is its display width: an unbounded
 	// value would widen the row and push the stop affordance out of its hit zone.
 	if len(elapsed) > jobElapsedColumnWidth {
-		elapsed = truncateOneLine(elapsed, jobElapsedColumnWidth)
+		elapsed = terminaltext.TruncateOneLine(elapsed, jobElapsedColumnWidth)
 	}
 	if available := contentWidth - baseWidth; available == 0 {
 		elapsed = ""
 	} else if len(elapsed) > available {
-		elapsed = truncateOneLine(elapsed, available)
+		elapsed = terminaltext.TruncateOneLine(elapsed, available)
 	}
 	elapsedWidth := len(elapsed)
 	quiet := ""
@@ -255,7 +256,7 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 	if includeQuiet {
 		quiet = tools.JobQuietLabel(job, now)
 		if len(quiet) > jobQuietColumnWidth {
-			quiet = truncateOneLine(quiet, jobQuietColumnWidth)
+			quiet = terminaltext.TruncateOneLine(quiet, jobQuietColumnWidth)
 		}
 		quietWidth = len(quiet)
 		if baseWidth+elapsedWidth+quietWidth+1 >= contentWidth {
@@ -276,7 +277,7 @@ func renderJobRow(contentWidth int, job tools.JobState, now time.Time, styles jo
 	}
 	availLabel := max(contentWidth-reserved, 0)
 	if availLabel > 0 {
-		label = truncateOneLine(label, availLabel)
+		label = terminaltext.TruncateOneLine(label, availLabel)
 	} else {
 		label = ""
 	}

@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // TestRenderThinkingStreamingIncrementalMatchesFreshStreaming drives a
@@ -14,7 +16,7 @@ import (
 // correctness contract for the incremental cache: per-flush rendering must
 // converge to exactly what a single render of the final content produces.
 func TestRenderThinkingStreamingIncrementalMatchesFreshStreaming(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	chunks := []string{
 		"## Analysis\n\n",
 		"First paragraph with **bold** and `code`.\n\n",
@@ -53,7 +55,7 @@ func TestRenderThinkingStreamingIncrementalMatchesFreshStreaming(t *testing.T) {
 // byte-identical to the one-shot full glamour render, and that the
 // incremental accumulation reproduces it exactly.
 func TestRenderThinkingStreamingIncrementalMatchesFullRender(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	chunks := []string{
 		"## Analysis\n\n",
 		"First paragraph with **bold** and `code`.\n\n",
@@ -90,7 +92,7 @@ func TestRenderThinkingStreamingIncrementalMatchesFullRender(t *testing.T) {
 // stays at 0 and the whole content is tail) and verifies the full-tail path
 // still matches the one-shot render.
 func TestRenderThinkingStreamingIncrementalMatchesFullRenderLargeParagraphs(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	words := []string{}
 	for i := range 200 {
 		words = append(words, "word"+string(rune('a'+i%26))+string(rune('a'+(i/26)%26)))
@@ -117,7 +119,7 @@ func TestRenderThinkingStreamingIncrementalMatchesFullRenderLargeParagraphs(t *t
 // styled-lines cache (styledUpTo) produces byte-identical output to styling the
 // full settled prefix in one pass, including paragraph title/content transitions.
 func TestRenderThinkingIncrementalStyledMatchesFullStyles(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	part := "## Plan\n\n- stable item\n\nstill arriving"
 
 	fullLines := strings.Split(part, "\n")

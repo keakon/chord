@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestWrapCompactionTypedStateForDisplayWrapsPayload(t *testing.T) {
@@ -121,7 +122,7 @@ func TestCompactionCardRendersStructuredTypedState(t *testing.T) {
 		message.CompactionCompressedTag +
 		"\nEarlier conversation was compacted.\nArchived history files:\n- history-1.md"
 	block := &Block{ID: 0, Type: BlockCompactionSummary, Content: content, CompactionSummaryMode: message.CompactionSummaryModeModelDriven}
-	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 
 	if strings.Contains(plain, payload) {
 		t.Fatalf("typed state payload is still rendered as raw text:\n%s", plain)

@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
 type modelSwitchResultMsg struct {
@@ -143,9 +144,9 @@ func (m *Model) openModelSelectFor(target agent.ModelPoolSelectorTarget) {
 	m.clearActiveSearch()
 	m.clearChordState()
 
-	var list *OverlayList
+	var list *overlaylist.List
 	if len(poolNames) > 0 {
-		list = NewOverlayList(buildModelSelectItems(poolNames, currentPool), m.modelSelectMaxVisible())
+		list = overlaylist.New(buildModelSelectItems(poolNames, currentPool), m.modelSelectMaxVisible())
 		list.SetCursor(poolCursor)
 	}
 
@@ -280,7 +281,7 @@ func (m *Model) renderModelSelectDialog() string {
 			Hint:  hintLine(hint("Esc", "cancel")),
 
 			MaxWidth: 60,
-		}, DimStyle.Render("(no pools configured)"), image.Rect(0, 0, m.width, m.height))
+		}, currentStyles.DimStyle.Render("(no pools configured)"), image.Rect(0, 0, m.width, m.height))
 		return dialog
 	}
 
@@ -334,7 +335,7 @@ func (m *Model) renderModelSelectDialog() string {
 		1,
 		maxVisible,
 		extraKey,
-		func(list *OverlayList) {
+		func(list *overlaylist.List) {
 			list.SetItems(m.modelSelect.filteredItems())
 			list.SetCursor(m.modelSelect.poolCursor)
 		},
@@ -347,10 +348,10 @@ func (m *Model) modelSelectMaxVisible() int {
 	return maxVisible
 }
 
-func buildModelSelectItems(poolNames []string, currentPool string) []OverlayListItem {
-	items := make([]OverlayListItem, 0, len(poolNames))
+func buildModelSelectItems(poolNames []string, currentPool string) []overlaylist.Item {
+	items := make([]overlaylist.Item, 0, len(poolNames))
 	for _, name := range poolNames {
-		items = append(items, OverlayListItem{ID: name, Label: name, Selected: name == currentPool})
+		items = append(items, overlaylist.Item{ID: name, Label: name, Selected: name == currentPool})
 	}
 	return items
 }

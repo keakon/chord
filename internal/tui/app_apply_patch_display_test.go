@@ -10,6 +10,8 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestLegacyPatchEventsUseStableApplyPatchDisplay(t *testing.T) {
@@ -37,7 +39,7 @@ func TestLegacyPatchEventsUseStableApplyPatchDisplay(t *testing.T) {
 	if block.Content != `{"paths":["src/demo.go"]}` {
 		t.Fatalf("Content = %q, want stable path-only display args", block.Content)
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "apply_patch src/demo.go") || !strings.Contains(plain, "+new") {
 		t.Fatalf("expected normalized name, path, and diff, got:\n%s", plain)
 	}
@@ -61,7 +63,7 @@ func TestApplyPatchDeleteUsesDDisplayAndHidesDiff(t *testing.T) {
 	if block.Content != `{"paths":["D tmp/old.txt"]}` {
 		t.Fatalf("Content = %q, want deletion marker", block.Content)
 	}
-	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(plain, "apply_patch D tmp/old.txt") {
 		t.Fatalf("expected deletion marker in header, got:\n%s", plain)
 	}
@@ -247,7 +249,7 @@ func assertFileEdit(t *testing.T, got FileEdit, path string, added, removed int,
 }
 
 func TestApplyPatchStreamingCardShowsLivePatchPreview(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	m := NewModelWithSize(nil, 100, 30)
 	callID := "call-patch-stream-1"
 	partial := `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old`
@@ -270,7 +272,7 @@ func TestApplyPatchStreamingCardShowsLivePatchPreview(t *testing.T) {
 		t.Fatalf("Content = %q, want streamed patch text preview", block.Content)
 	}
 	lines := block.Render(100, "●")
-	plain := stripANSI(strings.Join(lines, "\n"))
+	plain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	for _, want := range []string{"*** Begin Patch", "*** Update File: src/demo.go", "-old"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected live patch preview to contain %q, got:\n%s", want, plain)
@@ -286,14 +288,14 @@ func TestApplyPatchStreamingCardShowsLivePatchPreview(t *testing.T) {
 		t.Fatalf("expected no raw JSON fragment, got:\n%s", plain)
 	}
 	deleted := renderedLineContaining(t, lines, "-old")
-	assertRenderedTextBackground(t, deleted, "old", colorOfTheme(currentTheme.DiffDelLineBg))
+	assertRenderedTextBackground(t, deleted, "old", colorOfTheme(currentStyles.Palette.DiffDelLineBg))
 
 	// The preview grows with the next delta (bypass the arg-render cadence).
 	m.toolArgRenderState[callID] = toolArgRenderState{lastBytes: len(partial), lastAt: time.Now().Add(-200 * time.Millisecond)}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID: callID, Name: tools.NameApplyPatch, AgentID: "", ArgsJSON: complete,
 	}})
-	plain = stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain = terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if !strings.Contains(plain, "+new") {
 		t.Fatalf("expected preview to grow with the new delta, got:\n%s", plain)
 	}
@@ -306,7 +308,7 @@ func TestApplyPatchStreamingCardShowsLivePatchPreview(t *testing.T) {
 	if block.Content != `{"paths":["src/demo.go"]}` {
 		t.Fatalf("Content after streaming done = %q, want stable path display", block.Content)
 	}
-	plain = stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain = terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if !strings.Contains(plain, "↳ Requested patch:") || !strings.Contains(plain, "+new") {
 		t.Fatalf("expected requested-patch preview after args complete, got:\n%s", plain)
 	}
@@ -317,7 +319,7 @@ func TestApplyPatchStreamingCardShowsLivePatchPreview(t *testing.T) {
 		Result: "Applied patch", Status: message.ToolStatusSuccess,
 		Diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
 	}})
-	plain = stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain = terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if !strings.Contains(plain, "apply_patch src/demo.go") || !strings.Contains(plain, "+new") {
 		t.Fatalf("expected final diff after result, got:\n%s", plain)
 	}
@@ -351,7 +353,7 @@ func TestApplyPatchStreamingCardStaysExpandedWhenExecutionQueued(t *testing.T) {
 	if block.Collapsed {
 		t.Fatal("expected queued apply_patch card to stay expanded")
 	}
-	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if !strings.Contains(plain, "↳ Requested patch:") {
 		t.Fatalf("expected queued apply_patch to keep the preview visible, got:\n%s", plain)
 	}
@@ -400,7 +402,7 @@ func TestApplyPatchStreamingCardFreeformInputTextPreview(t *testing.T) {
 		ArgsJSON:  `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n"}`,
 		InputText: "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n",
 	}})
-	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	for _, want := range []string{"*** Begin Patch", "*** Update File: src/demo.go", "-old", "+new"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected freeform preview to contain %q, got:\n%s", want, plain)
@@ -410,7 +412,7 @@ func TestApplyPatchStreamingCardFreeformInputTextPreview(t *testing.T) {
 		t.Fatalf("expected raw text preview without envelope or char count, got:\n%s", plain)
 	}
 	deleted := renderedLineContaining(t, block.Render(100, "●"), "-old")
-	assertRenderedTextBackground(t, deleted, "old", colorOfTheme(currentTheme.DiffDelLineBg))
+	assertRenderedTextBackground(t, deleted, "old", colorOfTheme(currentStyles.Palette.DiffDelLineBg))
 }
 
 func TestApplyPatchStreamingCardEnvelopeInputTextPreview(t *testing.T) {
@@ -429,7 +431,7 @@ func TestApplyPatchStreamingCardEnvelopeInputTextPreview(t *testing.T) {
 			ID: callID, Name: tools.NameApplyPatch, InputText: input,
 		}})
 	}
-	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	for _, want := range []string{"apply_patch src/demo.go", "*** Update File: src/demo.go", "-old", "+new"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("missing %q in streaming preview:\n%s", want, plain)
@@ -445,7 +447,7 @@ func TestApplyPatchStreamingCardEnvelopeInputTextPreview(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
 		ID: callID, Name: tools.NameApplyPatch, ArgsJSON: string(args), ArgsStreamingDone: true,
 	}})
-	if !strings.Contains(stripANSI(strings.Join(block.Render(100, ""), "\n")), "+new") {
+	if !strings.Contains(terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n")), "+new") {
 		t.Fatal("final arguments lost the streamed patch")
 	}
 }
@@ -464,7 +466,7 @@ func TestApplyPatchStreamingCardWithoutPatchTextStaysCompact(t *testing.T) {
 	if block.Content != "" {
 		t.Fatalf("Content = %q, want empty while no patch text has streamed", block.Content)
 	}
-	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if strings.Contains(plain, `{"`) {
 		t.Fatalf("expected no raw JSON fragment, got:\n%s", plain)
 	}
@@ -501,7 +503,7 @@ func TestApplyPatchStreamingCardBypassesArgRenderCadence(t *testing.T) {
 	if block.Content != "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old" {
 		t.Fatalf("Content = %q, want live raw preview despite cadence block", block.Content)
 	}
-	plain := stripANSI(strings.Join(block.Render(100, "●"), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(block.Render(100, "●"), "\n"))
 	if !strings.Contains(plain, "apply_patch src/demo.go") {
 		t.Fatalf("expected streaming header to show the target path, got:\n%s", plain)
 	}
@@ -592,7 +594,7 @@ func TestApplyPatchCompletedCardShowsHeaderElapsedAndPath(t *testing.T) {
 	if !ok {
 		t.Fatal("missing apply_patch block")
 	}
-	lines := strings.Split(stripANSI(strings.Join(block.Render(100, ""), "\n")), "\n")
+	lines := strings.Split(terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n")), "\n")
 	header := ""
 	for _, line := range lines {
 		if strings.Contains(line, "apply_patch") {
@@ -620,7 +622,7 @@ func TestApplyPatchCompletedCardShowsHeaderElapsedAndPath(t *testing.T) {
 // path for freeform custom-tool input: the card must render the patch text and
 // the failure reason, never the raw {"patch":...} envelope.
 func TestFreeformApplyPatchErrorCardShowsPatchNotJSONEnvelope(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	bare := "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"
 	block := &Block{
 		ID:            1,
@@ -632,7 +634,7 @@ func TestFreeformApplyPatchErrorCardShowsPatchNotJSONEnvelope(t *testing.T) {
 		ResultStatus:  message.ToolStatusError,
 		ResultContent: "hunk not found",
 	}
-	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(rendered, `{"patch"`) {
 		t.Fatalf("expected error card to show freeform patch, not the JSON envelope, got:\n%s", rendered)
 	}
@@ -649,7 +651,7 @@ func TestFreeformApplyPatchErrorCardShowsPatchNotJSONEnvelope(t *testing.T) {
 // {"patch":"{\"input\":\"*** Begin Patch...\"}"}. The card must render the
 // inner patch and the target path, never the raw JSON.
 func TestFreeformApplyPatchEnvelopeArgsShowPatchNotJSONEnvelope(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	patch := "*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"
 	envelope, err := json.Marshal(map[string]string{"input": patch})
 	if err != nil {
@@ -668,7 +670,7 @@ func TestFreeformApplyPatchEnvelopeArgsShowPatchNotJSONEnvelope(t *testing.T) {
 		ResultStatus:  message.ToolStatusError,
 		ResultContent: "hunk not found",
 	}
-	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
+	rendered := terminaltext.StripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(rendered, `{"input"`) || strings.Contains(rendered, `{"patch"`) {
 		t.Fatalf("expected error card to show the unwrapped patch, not the JSON envelope, got:\n%s", rendered)
 	}

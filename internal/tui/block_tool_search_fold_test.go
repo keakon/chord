@@ -6,6 +6,8 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 // The grep/glob collapsed state is a single header line like Read: only the
@@ -13,7 +15,7 @@ import (
 // every returned match and diagnostic below.
 
 func TestGrepCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -30,7 +32,7 @@ func TestGrepCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 		}, "\n"),
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "✓ ▸ grep TODO · 2 matches · 2 files") {
 		t.Fatalf("expected collapsed grep summary in header, got:\n%s", collapsed)
 	}
@@ -42,7 +44,7 @@ func TestGrepCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 	}
 
 	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"✓ ▾ grep TODO · 2 matches · 2 files", "a.go:1:TODO one", "Note: pattern was invalid regex; searched as literal text.", "grep: skipped path: vendor/blocked"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded grep to contain %q, got:\n%s", want, expanded)
@@ -54,7 +56,7 @@ func TestGrepCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 // path:line:text hits; only hits count as matches, and files come from hit
 // paths even when a surrounding line's text contains a colon.
 func TestGrepCollapsedSummaryCountsOnlyHitsWithContextLines(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -80,7 +82,7 @@ func TestGrepCollapsedSummaryCountsOnlyHitsWithContextLines(t *testing.T) {
 	if meta.Matches != 3 || meta.Files != 3 || meta.Notes != 1 || !meta.Truncated {
 		t.Fatalf("meta = %+v, want 3 matches in 3 files, 1 note, truncated", meta)
 	}
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "grep TODO · 3 matches · 3 files") {
 		t.Fatalf("expected collapsed grep summary to count only hits, got:\n%s", collapsed)
 	}
@@ -97,7 +99,7 @@ func TestGrepCollapsedSummaryCountsOnlyHitsWithContextLines(t *testing.T) {
 }
 
 func TestGlobCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -112,7 +114,7 @@ func TestGlobCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 		}, "\n"),
 	}
 
-	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "✓ ▸ glob **/*.go · 2 files") {
 		t.Fatalf("expected collapsed glob summary in header, got:\n%s", collapsed)
 	}
@@ -121,7 +123,7 @@ func TestGlobCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 	}
 
 	block.ToggleAtWidth(120)
-	expanded := stripANSI(strings.Join(block.Render(120, ""), "\n"))
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
 	for _, want := range []string{"✓ ▾ glob **/*.go · 2 files", "a.go", "b.go", "full results saved to /tmp/ws/artifacts/glob-results.log"} {
 		if !strings.Contains(expanded, want) {
 			t.Fatalf("expected expanded glob to contain %q, got:\n%s", want, expanded)
@@ -132,24 +134,24 @@ func TestGlobCollapsedSingleLineFoldShowsSummaryInHeader(t *testing.T) {
 func TestGrepCollapsedSummaryKeepsParamsGluedToPattern(t *testing.T) {
 	// Parameters are command invocation: they follow the pattern after a
 	// single space, and only the result summary is separated with " · ".
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
 		ToolName:               tools.NameGrep,
-		Content:                `{"pattern":"sanitizeDisplayText|\\control|control.*stream","includes":["internal/tui/**/*_test.go"]}`,
+		Content:                `{"pattern":"terminaltext.Sanitize|\\control|control.*stream","includes":["internal/tui/**/*_test.go"]}`,
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 		ResultContent:          "a.go:1:todo one\nb.go:2:todo two",
 	}
-	collapsed := stripANSI(strings.Join(block.Render(200, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(200, ""), "\n"))
 	if strings.Contains(collapsed, " · (includes=") {
 		t.Fatalf("grep parameters must follow the pattern with a space, not a separator dot; got:\n%s", collapsed)
 	}
 	if !strings.Contains(collapsed, "(includes=internal/tui/**/*_test.go) · 2 matches · 2 files") {
 		t.Fatalf("expected collapsed grep header to glue params to pattern before the count summary, got:\n%s", collapsed)
 	}
-	if !strings.Contains(collapsed, "grep sanitizeDisplayText|\\control|control.*stream") {
+	if !strings.Contains(collapsed, "grep terminaltext.Sanitize|\\control|control.*stream") {
 		t.Fatalf("expected collapsed grep header to keep the full pattern, got:\n%s", collapsed)
 	}
 }
@@ -166,7 +168,7 @@ func TestCollapsedSearchSummaryKeepsCountAndDropsParamsWhenNarrow(t *testing.T) 
 		ToolCallDetailExpanded: false,
 		ResultContent:          "internal/tui/app.go:1:todo\ninternal/tui/block.go:2:todo",
 	}
-	joined := stripANSI(strings.Join(block.Render(60, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(60, ""), "\n"))
 	if !strings.Contains(joined, "2 matches · 2 files") {
 		t.Fatalf("expected narrow collapsed grep to keep the count summary, got:\n%s", joined)
 	}
@@ -179,7 +181,7 @@ func TestSearchHeaderKeepsPatternWholeAndCompressesParamsWhenNarrow(t *testing.T
 	// The pattern is the primary argument: when the header cannot fit the
 	// full pattern + counts + parameters, the parameters are compressed
 	// (middle-truncated) instead of stealing the pattern's width.
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -189,7 +191,7 @@ func TestSearchHeaderKeepsPatternWholeAndCompressesParamsWhenNarrow(t *testing.T
 		ToolCallDetailExpanded: false,
 		ResultContent:          "internal/tui/app.go:1:match one\ninternal/tui/block.go:2:match two",
 	}
-	joined := stripANSI(strings.Join(block.Render(118, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(118, ""), "\n"))
 	if !strings.Contains(joined, "Audit|EffectiveArgs|AnotherVeryLongAlternation") {
 		t.Fatalf("expected grep header to keep the full pattern before compressing params, got:\n%s", joined)
 	}
@@ -207,7 +209,7 @@ func TestSearchHeaderKeepsPatternWholeAndCompressesParamsWhenNarrow(t *testing.T
 func TestSearchHeaderKeepsPatternWholeWithoutResultSummary(t *testing.T) {
 	// Error and cancelled results have no count summary. Their parameters
 	// must remain secondary instead of taking the summary's priority slot.
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		ID:                     1,
 		Type:                   BlockToolCall,
@@ -218,7 +220,7 @@ func TestSearchHeaderKeepsPatternWholeWithoutResultSummary(t *testing.T) {
 		ToolCallDetailExpanded: false,
 		ResultContent:          "search failed",
 	}
-	joined := stripANSI(strings.Join(block.Render(118, ""), "\n"))
+	joined := terminaltext.StripANSI(strings.Join(block.Render(118, ""), "\n"))
 	if !strings.Contains(joined, "Audit|EffectiveArgs|AnotherVeryLongAlternation") {
 		t.Fatalf("expected error grep header to keep the full pattern before compressing params, got:\n%s", joined)
 	}

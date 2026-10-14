@@ -2,11 +2,13 @@ package tui
 
 import (
 	"strings"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func searchMatchHighlightTokens() (hiOn, hiOff string, ok bool) {
 	const marker = "x"
-	sample := SearchMatchStyle.Render(marker)
+	sample := currentStyles.SearchMatchStyle.Render(marker)
 	before, after, ok0 := strings.Cut(sample, marker)
 	if !ok0 {
 		return "", "", false
@@ -24,7 +26,7 @@ func searchMatchColumnRangeInLine(line, query string) (colStart, colEnd int, ok 
 	if query == "" {
 		return 0, 0, false
 	}
-	plain := stripANSI(line)
+	plain := terminaltext.StripANSI(line)
 	if plain == "" {
 		return 0, 0, false
 	}
@@ -120,7 +122,7 @@ func selectionStyledTextWidth(s string) int {
 	col := 0
 	for i := 0; i < len(s); {
 		if s[i] == '\x1b' {
-			next := skipANSISequence(s, i)
+			next := terminaltext.SkipANSI(s, i)
 			if next <= i {
 				next = i + 1
 			}
@@ -139,13 +141,13 @@ func selectionStyledTextWidth(s string) int {
 
 func selectionRuneWidthAtCol(r rune, col int) int {
 	if r == '\t' {
-		spaces := preformattedTabWidth - (col % preformattedTabWidth)
+		spaces := terminaltext.TabWidth - (col % terminaltext.TabWidth)
 		if spaces <= 0 {
-			spaces = preformattedTabWidth
+			spaces = terminaltext.TabWidth
 		}
 		return spaces
 	}
-	return tuiStringWidth(string(r))
+	return terminaltext.Width(string(r))
 }
 
 func findColumnByteOffsets(s string, colStart, colEnd int) (startByte, endByte int) {
@@ -155,7 +157,7 @@ func findColumnByteOffsets(s string, colStart, colEnd int) (startByte, endByte i
 	i := 0
 	for i < len(s) {
 		if s[i] == '\x1b' {
-			i = skipANSISequence(s, i)
+			i = terminaltext.SkipANSI(s, i)
 			continue
 		}
 		r, size := rune(s[i]), 1
@@ -180,7 +182,7 @@ func findColumnByteOffsets(s string, colStart, colEnd int) (startByte, endByte i
 		i += size
 	}
 	for i < len(s) && s[i] == '\x1b' {
-		endByte = skipANSISequence(s, i)
+		endByte = terminaltext.SkipANSI(s, i)
 		i = endByte
 	}
 	return startByte, endByte

@@ -8,21 +8,22 @@ import (
 	"path/filepath"
 
 	"github.com/keakon/chord/internal/lsp"
+	"github.com/keakon/chord/internal/textfile"
 )
 
 type fileEditRead struct {
-	Decoded decodedText
+	Decoded textfile.Decoded
 	Bytes   []byte
 	Info    os.FileInfo
 }
 
 func readFileForEdit(path, displayPath, baseDir, binaryAction string) (fileEditRead, error) {
-	decodedFile, data, err := ReadAndDecodeTextFile(path)
+	decodedFile, data, err := textfile.ReadWithBytes(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fileEditRead{}, fileNotFoundErrorWithPathSuggestionsInDir(displayPath, baseDir, PathTargetRegularFile)
 		}
-		if errors.Is(err, ErrBinaryFile) {
+		if errors.Is(err, textfile.ErrBinaryFile) {
 			return fileEditRead{}, fmt.Errorf("cannot %s binary file: %s", binaryAction, displayPath)
 		}
 		return fileEditRead{}, fmt.Errorf("reading file: %w", err)
@@ -37,15 +38,15 @@ func readFileForEdit(path, displayPath, baseDir, binaryAction string) (fileEditR
 	return fileEditRead{Decoded: decodedFile, Bytes: data, Info: info}, nil
 }
 
-func writeEncodedEditedFile(ctx context.Context, path string, encodedBytes []byte, decodedFile decodedText, newContent, progressText string, lspMgr *lsp.Manager, baseResult, displayBaseDir string) (string, error) {
+func writeEncodedEditedFile(ctx context.Context, path string, encodedBytes []byte, decodedFile textfile.Decoded, newContent, progressText string, lspMgr *lsp.Manager, baseResult, displayBaseDir string) (string, error) {
 	if progressText != "" {
 		reportToolProgress(ctx, ToolProgressSnapshot{Text: progressText})
 	}
-	invalidatePathCache(path)
+	textfile.Invalidate(path)
 	if err := writeFileNoFollow(path, encodedBytes, 0644); err != nil {
 		return "", fmt.Errorf("writing file: %w", err)
 	}
-	warmDecodedFileCache(path, encodedBytes, decodedText{Text: newContent, Encoding: decodedFile.Encoding})
+	textfile.Warm(path, encodedBytes, textfile.Decoded{Text: newContent, Encoding: decodedFile.Encoding})
 	out := baseResult
 	if lspMgr != nil {
 		absPath, absErr := filepath.Abs(path)

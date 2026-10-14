@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 func TestClickInfoPanelSectionHeaderTogglesCollapse(t *testing.T) {
@@ -39,7 +40,7 @@ func TestClickInfoPanelSectionHeaderTogglesCollapse(t *testing.T) {
 		t.Fatal("clicking TODOS header should collapse section")
 	}
 
-	plain := stripANSI(model.renderInfoPanel(model.layout.infoPanel.Dx(), model.viewport.height))
+	plain := terminaltext.StripANSI(model.renderInfoPanel(model.layout.infoPanel.Dx(), model.viewport.height))
 	if !strings.Contains(plain, "▶ TODOS") || !strings.Contains(plain, "0/1") {
 		t.Fatalf("collapsed info panel should show collapsed TODOS header with progress, got %q", plain)
 	}
@@ -73,7 +74,7 @@ func TestClickInfoPanelLSPHeaderTogglesCollapse(t *testing.T) {
 		t.Fatal("clicking LSP header should collapse section")
 	}
 
-	plain := stripANSI(model.renderInfoPanel(model.layout.infoPanel.Dx(), model.viewport.height))
+	plain := terminaltext.StripANSI(model.renderInfoPanel(model.layout.infoPanel.Dx(), model.viewport.height))
 	if !strings.Contains(plain, "▶ LSP") || !strings.Contains(plain, "2") {
 		t.Fatalf("collapsed info panel should show collapsed LSP header with count, got %q", plain)
 	}
@@ -107,7 +108,7 @@ func TestClickInfoPanelMCPHeaderTogglesCollapse(t *testing.T) {
 		t.Fatal("clicking MCP header should collapse section")
 	}
 
-	plain := stripANSI(model.renderInfoPanel(model.layout.infoPanel.Dx(), model.viewport.height))
+	plain := terminaltext.StripANSI(model.renderInfoPanel(model.layout.infoPanel.Dx(), model.viewport.height))
 	if !strings.Contains(plain, "▶ MCP") || !strings.Contains(plain, "2") {
 		t.Fatalf("collapsed info panel should show collapsed MCP header with count, got %q", plain)
 	}
@@ -362,7 +363,7 @@ func TestSessionRestoreRefreshesOwnerReasonWithoutRequestEvent(t *testing.T) {
 	m.refreshSidebar()
 	backend.subAgents = []agent.SubAgentInfo{{InstanceID: "restored", State: "waiting_main", AwaitingOwnerReason: "restored reason"}}
 	m.handleAgentEvent(agentEventMsg{event: agent.SessionRestoredEvent{}})
-	if got := stripANSI(m.sidebar.ViewCompact(50)); strings.Contains(got, "old reason") || !strings.Contains(got, "restored reason") {
+	if got := terminaltext.StripANSI(m.sidebar.ViewCompact(50)); strings.Contains(got, "old reason") || !strings.Contains(got, "restored reason") {
 		t.Fatalf("restored sidebar=%q", got)
 	}
 }

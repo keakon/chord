@@ -7,6 +7,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // TestSendDraftRecalcsViewportBeforeAppend regresses the bug where sendDraft
@@ -54,7 +56,7 @@ func TestSendDraftRecalcsViewportBeforeAppend(t *testing.T) {
 	if blockLines > m.viewport.height {
 		t.Fatalf("USER block has %d lines but viewport only has %d rows: card would be clipped", blockLines, m.viewport.height)
 	}
-	rendered := stripANSI(m.viewport.Render("", nil, -1, -1, ""))
+	rendered := terminaltext.StripANSI(m.viewport.Render("", nil, -1, -1, ""))
 	if !strings.Contains(rendered, "hello from test") {
 		t.Fatalf("rendered viewport missing body text. Rendered:\n%s", rendered)
 	}
@@ -89,8 +91,8 @@ func TestViewRecalcsViewportHeightFromLayoutBeforeRender(t *testing.T) {
 	if got := m.viewport.height; got != wantHeight {
 		t.Fatalf("viewport.height after View = %d, want %d (must sync with layout.main.Dy())", got, wantHeight)
 	}
-	if !strings.Contains(stripANSI(view.Content), "tail-11") {
-		t.Fatalf("rendered view missing last transcript tail after stale-height self-heal; got:\n%s", stripANSI(view.Content))
+	if !strings.Contains(terminaltext.StripANSI(view.Content), "tail-11") {
+		t.Fatalf("rendered view missing last transcript tail after stale-height self-heal; got:\n%s", terminaltext.StripANSI(view.Content))
 	}
 }
 

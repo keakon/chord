@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/keakon/chord/internal/textfile"
+	"github.com/keakon/chord/internal/tooloutput"
 )
 
 // ReadTool reads file contents with optional offset/limit paging.
@@ -133,8 +136,8 @@ func estimateReadOutputTokens(content string) int {
 
 func maxReadInlineBytes() int {
 	maxBytes := MaxReadOutputTokens * 3
-	if MaxOutputBytes < maxBytes {
-		return MaxOutputBytes
+	if tooloutput.MaxOutputBytes < maxBytes {
+		return tooloutput.MaxOutputBytes
 	}
 	return maxBytes
 }
@@ -267,7 +270,7 @@ func truncateReadContentToBudget(contentLines []string, startLine, totalLines in
 }
 
 func readOffsetPastEndError(startLine, totalLines int, limit *int) error {
-	effectiveLimit := MaxOutputLines
+	effectiveLimit := tooloutput.MaxOutputLines
 	if limit != nil && *limit > 0 {
 		effectiveLimit = *limit
 	}
@@ -304,7 +307,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	activationBefore, identityBefore := activationReadIdentity(resolvedPath)
-	decoded, rawBytes, err := ReadAndDecodeTextFile(resolvedPath)
+	decoded, rawBytes, err := textfile.ReadWithBytes(resolvedPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", fmt.Errorf("file not found: %s", a.Path)
@@ -312,7 +315,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 		if os.IsPermission(err) {
 			return "", fmt.Errorf("permission denied: %s", a.Path)
 		}
-		if errors.Is(err, ErrBinaryFile) {
+		if errors.Is(err, textfile.ErrBinaryFile) {
 			return "", fmt.Errorf("cannot read binary file: %s", a.Path)
 		}
 		return "", fmt.Errorf("reading file: %w", err)
@@ -351,7 +354,7 @@ func (t ReadTool) Execute(ctx context.Context, raw json.RawMessage) (string, err
 	}
 
 	// Determine limit.
-	limit := MaxOutputLines // 2000
+	limit := tooloutput.MaxOutputLines // 2000
 	if a.Limit != nil && *a.Limit > 0 {
 		limit = *a.Limit
 	}

@@ -9,10 +9,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
+	"github.com/keakon/chord/internal/textclean"
+	"github.com/keakon/chord/internal/textdiff"
 	"github.com/keakon/chord/internal/tools"
-	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/tui/syntax"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const (
@@ -66,36 +67,36 @@ func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine stri
 	// orphaned variation selectors or standalone emoji modifiers. Normalize
 	// them before inline-diff spans and width math so the spans stay aligned
 	// with what the terminal paints.
-	oldLine = normalizeDisplayGlyphs(oldLine)
-	newLine = normalizeDisplayGlyphs(newLine)
+	oldLine = terminaltext.NormalizeGlyphs(oldLine)
+	newLine = terminaltext.NormalizeGlyphs(newLine)
 	formatLineNum := func(n int) string { return fmt.Sprintf("%4d ", n) }
 	if lines := renderInlineDiffLine(oldLine, newLine, diffWidth, hl); lines != nil {
 		if strings.HasPrefix(lines[0], "+") {
-			*result = append(*result, "  "+DimStyle.Render(formatLineNum(newLineNum))+lines[0])
+			*result = append(*result, "  "+currentStyles.DimStyle.Render(formatLineNum(newLineNum))+lines[0])
 		} else {
-			*result = append(*result, "  "+DimStyle.Render(formatLineNum(oldLineNum))+lines[0])
+			*result = append(*result, "  "+currentStyles.DimStyle.Render(formatLineNum(oldLineNum))+lines[0])
 		}
 		return
 	}
-	oldSegs, newSegs := tools.InlineDiff(oldLine, newLine)
-	oldCode := renderHighlightedSnippetLine(oldLine, filterDiffSpansByKind(buildDiffSegmentSpans(oldSegs), "delete"), diffWidth-1, hl, diffDelBg)
-	newCode := renderHighlightedSnippetLine(newLine, filterDiffSpansByKind(buildDiffSegmentSpans(newSegs), "insert"), diffWidth-1, hl, diffAddBg)
+	oldSegs, newSegs := textdiff.Inline(oldLine, newLine)
+	oldCode := renderHighlightedSnippetLine(oldLine, filterDiffSpansByKind(buildDiffSegmentSpans(oldSegs), "delete"), diffWidth-1, hl, currentStyles.Palette.DiffDelLineBg)
+	newCode := renderHighlightedSnippetLine(newLine, filterDiffSpansByKind(buildDiffSegmentSpans(newSegs), "insert"), diffWidth-1, hl, currentStyles.Palette.DiffAddLineBg)
 	*result = append(*result,
-		"  "+DimStyle.Render(formatLineNum(oldLineNum))+DiffDelStyle.Render("-")+oldCode,
-		"  "+DimStyle.Render(formatLineNum(newLineNum))+DiffAddStyle.Render("+")+newCode,
+		"  "+currentStyles.DimStyle.Render(formatLineNum(oldLineNum))+currentStyles.DiffDelStyle.Render("-")+oldCode,
+		"  "+currentStyles.DimStyle.Render(formatLineNum(newLineNum))+currentStyles.DiffAddStyle.Render("+")+newCode,
 	)
 }
 
 func appendApplyPatchToolUnifiedDiffLine(result *[]string, body string, lineNum, diffWidth int, hl *syntax.Highlighter, added bool) {
-	body = normalizeDisplayGlyphs(body)
-	bg := diffDelBg
-	marker := DiffDelStyle.Render("-")
+	body = terminaltext.NormalizeGlyphs(body)
+	bg := currentStyles.Palette.DiffDelLineBg
+	marker := currentStyles.DiffDelStyle.Render("-")
 	if added {
-		bg = diffAddBg
-		marker = DiffAddStyle.Render("+")
+		bg = currentStyles.Palette.DiffAddLineBg
+		marker = currentStyles.DiffAddStyle.Render("+")
 	}
 	code := renderHighlightedSnippetLine(body, []diffSegmentSpan{{StartCol: 0, EndCol: diffTextWidth(body)}}, diffWidth-1, hl, bg)
-	*result = append(*result, "  "+DimStyle.Render(fmt.Sprintf("%4d ", lineNum))+marker+code)
+	*result = append(*result, "  "+currentStyles.DimStyle.Render(fmt.Sprintf("%4d ", lineNum))+marker+code)
 }
 
 func nextNonEmptyUnifiedDiffLine(lines []string, index int) int {
@@ -175,7 +176,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 		if headerSummary == "" && strings.TrimSpace(b.ResultContent) != "" {
 			displayResult := sanitizeToolDisplayText(toolCollapsedResultContent(b.ToolName, toolDisplayResultContent(b)))
-			headerSummary = truncateOneLine(displayResult, cardWidth-26)
+			headerSummary = terminaltext.TruncateOneLine(displayResult, cardWidth-26)
 		}
 	}
 	headerLine := appendSearchHeaderSummary(renderToolHeaderLine(prefix, b.ToolName), filePath, mergeHeaderOptions("", headerOpts), headerSummary, cardWidth-4)
@@ -204,10 +205,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			result = appendApplyPatchPreview(result, b, syntaxPath, cardWidth-4)
 		}
 		if applyPatchNoChanges {
-			result = append(result, toolFieldStandalone(DimStyle, "No changes"))
+			result = append(result, toolFieldStandalone(currentStyles.DimStyle, "No changes"))
 		}
 		if strings.TrimSpace(displayDiff) != "" && b.toolResultIsError() {
-			result = append(result, toolFieldSection(ToolResultExpandedStyle, "Applied changes"))
+			result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Applied changes"))
 		}
 	}
 	const diffLineNumWidth = 5
@@ -340,7 +341,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					}
 					filePrefix := "  ↳ " + mark + marker + " "
 					fileLine := truncateApplyPatchDisplayLine(filePrefix+path, cardWidth)
-					result = append(result, applyPatchDiffSectionPrefix(mark, marker)+DimStyle.Render(strings.TrimPrefix(fileLine, filePrefix)))
+					result = append(result, applyPatchDiffSectionPrefix(mark, marker)+currentStyles.DimStyle.Render(strings.TrimPrefix(fileLine, filePrefix)))
 					seenHunk = false
 					oldLineNum, newLineNum = 0, 0
 					hl = syntax.New(syntaxPath, diffSample, "")
@@ -355,10 +356,10 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 				if len(content) > 0 && content[0] == ' ' {
 					content = content[1:]
 				}
-				content = normalizeDisplayGlyphs(content)
+				content = terminaltext.NormalizeGlyphs(content)
 				code := renderHighlightedSnippetLine(content, nil, diffWidth-1, hl, "")
 				displayLineNum := max(newLineNum, oldLineNum)
-				rendered = DimStyle.Render(fmt.Sprintf("%4d ", displayLineNum)) + " " + code
+				rendered = currentStyles.DimStyle.Render(fmt.Sprintf("%4d ", displayLineNum)) + " " + code
 				oldLineNum++
 				newLineNum++
 			}
@@ -366,7 +367,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 		}
 	}
 	if (b.ToolName == tools.NameEdit || b.ToolName == tools.NameApplyPatch) && strings.TrimSpace(b.ResultContent) != "" && !b.toolResultIsError() && !b.toolResultIsCancelled() && !toolShouldHideSuccessfulFileOpResult(b) {
-		result = append(result, toolFieldSection(ToolResultExpandedStyle, "Diagnostics"))
+		result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Diagnostics"))
 		result = append(result, renderLSPDiagnosticsLines(editSuccessDiagnosticsContent(b.stripResultNotes(b.ResultContent)), "    ", textWrap)...)
 	}
 	// A successful edit shows the change it applied. When the diff is missing —
@@ -383,14 +384,14 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			if strings.TrimSpace(displayDiff) == "" {
 				result = appendApplyPatchPreview(result, b, syntaxPath, cardWidth-4)
 				if applyPatchSections.applied != "" {
-					result = append(result, toolFieldSection(ToolResultExpandedStyle, "Applied changes"))
+					result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Applied changes"))
 					result = appendApplyPatchErrorTextLines(result, applyPatchSections.applied, textWrap)
 				}
 			}
-			result = append(result, toolFieldSection(ErrorStyle, "Error"))
+			result = append(result, toolFieldSection(currentStyles.ErrorStyle, "Error"))
 			result = appendApplyPatchErrorTextLines(result, applyPatchSections.failure, textWrap)
 			if applyPatchSections.diagnostics != "" {
-				result = append(result, toolFieldSection(ToolResultExpandedStyle, "Diagnostics"))
+				result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Diagnostics"))
 				result = append(result, renderLSPDiagnosticsLines(applyPatchSections.diagnostics, "    ", textWrap)...)
 			}
 		case tools.NameEdit:
@@ -400,12 +401,12 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 			// not applied either.
 			failed := replaceEditFailedIndexes(b.ResultContent)
 			if len(failed) > 0 {
-				result = append(result, toolFieldInline(ToolStatusErrorStyle, "Not applied", "no changes were written"))
+				result = append(result, toolFieldInline(currentStyles.ToolStatusErrorStyle, "Not applied", "no changes were written"))
 			}
 			if strings.TrimSpace(displayDiff) == "" {
 				result = appendEditArgsPreview(result, b, replaceArgs, hasReplaceArgs, syntaxPath, cardWidth-4, failed)
 			}
-			result = append(result, toolFieldSection(ErrorStyle, "Error"))
+			result = append(result, toolFieldSection(currentStyles.ErrorStyle, "Error"))
 			result = append(result, renderLSPDiagnosticsLines(toolErrorDisplayContent(b.stripResultNotes(b.ResultContent)), "    ", textWrap)...)
 		}
 	} else if b.toolResultIsCancelled() {
@@ -422,7 +423,7 @@ type applyPatchErrorSections struct {
 }
 
 func splitApplyPatchErrorSections(content string) applyPatchErrorSections {
-	content = strings.TrimSpace(markdownutil.NormalizeNewlines(content))
+	content = strings.TrimSpace(textclean.NormalizeNewlines(content))
 	if !strings.HasPrefix(content, "apply_patch partially applied:") {
 		return applyPatchErrorSections{failure: toolErrorDisplayContent(content)}
 	}
@@ -472,7 +473,7 @@ func splitApplyPatchErrorSections(content string) applyPatchErrorSections {
 // failed file group ("- path: reason") is marked ✗, and a committed file from
 // the "Applied patch:" list ("M path") is marked ✓.
 func appendApplyPatchErrorTextLines(result []string, content string, width int) []string {
-	// displayIndent is prepended BEFORE wrapping so wrapText treats it as the
+	// displayIndent is prepended BEFORE wrapping so terminaltext.Wrap treats it as the
 	// paragraph indent and re-applies it to every continuation line; otherwise
 	// wrapped lines would lose alignment with the first line.
 	const displayIndent = "    "
@@ -480,32 +481,32 @@ func appendApplyPatchErrorTextLines(result []string, content string, width int) 
 		displayLine := sanitizeToolDisplayText(strings.TrimSuffix(line, "\r"))
 		// Expand tabs so an indented code snippet inside the diagnostic (e.g.
 		// `\t\tif isFoo(err) {`) aligns to the tab stop and wraps cleanly.
-		displayLine = expandTabsForDisplay(displayLine, preformattedTabWidth)
-		mark, markStyle := "", ToolResultExpandedStyle
+		displayLine = terminaltext.ExpandTabs(displayLine, terminaltext.TabWidth)
+		mark, markStyle := "", currentStyles.ToolResultExpandedStyle
 		switch {
 		case strings.HasPrefix(displayLine, "- "):
-			mark, markStyle = "✗", ToolStatusErrorStyle
+			mark, markStyle = "✗", currentStyles.ToolStatusErrorStyle
 			displayLine = strings.TrimPrefix(displayLine, "- ")
 		case strings.HasPrefix(displayLine, "A "), strings.HasPrefix(displayLine, "M "),
 			strings.HasPrefix(displayLine, "D "), strings.HasPrefix(displayLine, "R "):
-			mark, markStyle = "✓", ToolStatusSuccessStyle
+			mark, markStyle = "✓", currentStyles.ToolStatusSuccessStyle
 		}
 		if mark == "" {
-			for _, wl := range wrapText(displayIndent+displayLine, width) {
-				result = append(result, ToolResultExpandedStyle.Render(wl))
+			for _, wl := range terminaltext.Wrap(displayIndent+displayLine, width) {
+				result = append(result, currentStyles.ToolResultExpandedStyle.Render(wl))
 			}
 			continue
 		}
 		// The mark joins the wrapped text so it consumes display width like any
 		// other rune and continuation lines still align under the body; only the
 		// glyph on the first line is coloured.
-		for i, wl := range wrapText(displayIndent+mark+" "+displayLine, width) {
+		for i, wl := range terminaltext.Wrap(displayIndent+mark+" "+displayLine, width) {
 			after, ok := strings.CutPrefix(wl, displayIndent+mark)
 			if i != 0 || !ok {
-				result = append(result, ToolResultExpandedStyle.Render(wl))
+				result = append(result, currentStyles.ToolResultExpandedStyle.Render(wl))
 				continue
 			}
-			result = append(result, ToolResultExpandedStyle.Render(displayIndent)+markStyle.Render(mark)+ToolResultExpandedStyle.Render(after))
+			result = append(result, currentStyles.ToolResultExpandedStyle.Render(displayIndent)+markStyle.Render(mark)+currentStyles.ToolResultExpandedStyle.Render(after))
 		}
 	}
 	return result
@@ -517,11 +518,11 @@ func appendApplyPatchErrorTextLines(result []string, content string, width int) 
 // colour used by the other ✓/✗ marks.
 func applyPatchDiffSectionPrefix(mark, marker string) string {
 	if mark == "" {
-		return ToolResultExpandedStyle.Render("  ↳ " + marker + " ")
+		return currentStyles.ToolResultExpandedStyle.Render("  ↳ " + marker + " ")
 	}
-	return ToolResultExpandedStyle.Render("  ↳ ") +
-		ToolStatusSuccessStyle.Render(strings.TrimSuffix(mark, " ")) +
-		ToolResultExpandedStyle.Render(" "+marker+" ")
+	return currentStyles.ToolResultExpandedStyle.Render("  ↳ ") +
+		currentStyles.ToolStatusSuccessStyle.Render(strings.TrimSuffix(mark, " ")) +
+		currentStyles.ToolResultExpandedStyle.Render(" "+marker+" ")
 }
 
 func unifiedDiffFileCount(lines []string) int {
@@ -636,11 +637,11 @@ func appendEditArgsPreview(result []string, b *Block, replaceArgs replaceEditArg
 }
 
 func appendEditPatchPreview(result []string, argsJSON string, width int) []string {
-	patch := normalizeDisplayGlyphs(editPatchFromArgs(argsJSON))
+	patch := terminaltext.NormalizeGlyphs(editPatchFromArgs(argsJSON))
 	if patch == "" {
 		return result
 	}
-	result = append(result, toolFieldSection(ToolResultExpandedStyle, "Patch"))
+	result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Patch"))
 	// Truncate (not wrap) each patch line, matching the apply_patch preview and
 	// the diff body. Diffs/file content are column-aligned; wrapping breaks the
 	// +/- gutter alignment and is harder to read than a clipped line.
@@ -744,7 +745,7 @@ func appendApplyPatchPreview(result []string, b *Block, syntaxPath string, width
 		return result
 	}
 	hl := b.applyPatchPreviewHighlighter(syntaxPath, patch)
-	result = append(result, toolFieldSection(ToolResultExpandedStyle, "Requested patch"))
+	result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Requested patch"))
 	result = append(result, b.appendApplyPatchPreviewLines(patch, width, hl)...)
 	return result
 }
@@ -804,26 +805,26 @@ func renderApplyPatchPreviewLine(line string, width int, hl *syntax.Highlighter)
 	switch {
 	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
 		code := line[1:]
-		return "    " + DiffAddStyle.Render("+") + renderHighlightedSnippetLine(code, nil, max(width-1, 1), hl, diffAddBg)
+		return "    " + currentStyles.DiffAddStyle.Render("+") + renderHighlightedSnippetLine(code, nil, max(width-1, 1), hl, currentStyles.Palette.DiffAddLineBg)
 	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
 		code := line[1:]
-		return "    " + DiffDelStyle.Render("-") + renderHighlightedSnippetLine(code, nil, max(width-1, 1), hl, diffDelBg)
+		return "    " + currentStyles.DiffDelStyle.Render("-") + renderHighlightedSnippetLine(code, nil, max(width-1, 1), hl, currentStyles.Palette.DiffDelLineBg)
 	case strings.HasPrefix(line, " "):
 		return "    " + " " + renderHighlightedSnippetLine(line[1:], nil, max(width-1, 1), hl, "")
 	case strings.HasPrefix(line, "@@"):
 		return renderApplyPatchPreviewHunkHeader(line, width)
 	case strings.HasPrefix(line, "***"):
-		return "    " + ToolResultStyle.Render(truncateApplyPatchDisplayLine(line, width))
+		return "    " + currentStyles.ToolResultStyle.Render(truncateApplyPatchDisplayLine(line, width))
 	default:
-		return "    " + DimStyle.Render(truncateApplyPatchDisplayLine(line, width))
+		return "    " + currentStyles.DimStyle.Render(truncateApplyPatchDisplayLine(line, width))
 	}
 }
 
 func renderApplyPatchPreviewHunkHeader(line string, width int) string {
 	header := truncateApplyPatchDisplayLine(line, width)
-	headerWidth := tuiStringWidth(header)
+	headerWidth := terminaltext.Width(header)
 	if headerWidth >= width {
-		return "    " + ToolResultExpandedStyle.Render(header)
+		return "    " + currentStyles.ToolResultExpandedStyle.Render(header)
 	}
 
 	// Keep the hunk separator on the header row so the line-level render memo
@@ -834,24 +835,24 @@ func renderApplyPatchPreviewHunkHeader(line string, width int) string {
 	// visual language.
 	ruleWidth := width - headerWidth
 	rule := strings.Repeat("─", ruleWidth)
-	return "    " + ToolResultExpandedStyle.Render(header) + DimStyle.Render(rule)
+	return "    " + currentStyles.ToolResultExpandedStyle.Render(header) + currentStyles.DimStyle.Render(rule)
 }
 
 // applyPatchDiffSeparator renders a standalone full-width dim rule for applied
 // diff hunk/file boundaries, matching the inline rule in
 // renderApplyPatchPreviewHunkHeader. Width is the content width (cardWidth-4).
 func applyPatchDiffSeparator(width int) string {
-	return "    " + DimStyle.Render(strings.Repeat("─", max(width, 1)))
+	return "    " + currentStyles.DimStyle.Render(strings.Repeat("─", max(width, 1)))
 }
 
 func truncateApplyPatchDisplayLine(line string, width int) string {
-	if width <= 0 || tuiStringWidth(line) <= width {
+	if width <= 0 || terminaltext.Width(line) <= width {
 		return line
 	}
 	if width == 1 {
 		return "…"
 	}
-	return tuiCut(line, 0, width-1) + "…"
+	return terminaltext.Cut(line, 0, width-1) + "…"
 }
 
 func applyPatchCodeSample(patch string) string {
@@ -870,10 +871,10 @@ func appendApplyPatchTargetLines(result []string, targets []tools.ApplyPatchDisp
 	if len(targets) <= 1 {
 		return result
 	}
-	result = append(result, toolFieldSection(ToolResultExpandedStyle, "Targets"))
+	result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, "Targets"))
 	for _, target := range targets {
 		marker, path := applyPatchTargetDisplay(target)
-		result = append(result, "    "+DimStyle.Render(truncateApplyPatchDisplayLine(marker+" "+path, width)))
+		result = append(result, "    "+currentStyles.DimStyle.Render(truncateApplyPatchDisplayLine(marker+" "+path, width)))
 	}
 	return result
 }
@@ -888,7 +889,7 @@ func appendApplyPatchOperationSummaries(result []string, targets []tools.ApplyPa
 			continue
 		}
 		line := truncateApplyPatchDisplayLine(marker+" "+path, width)
-		result = append(result, toolFieldMarker(ToolResultExpandedStyle, marker+" ")+DimStyle.Render(strings.TrimPrefix(line, marker+" ")))
+		result = append(result, toolFieldMarker(currentStyles.ToolResultExpandedStyle, marker+" ")+currentStyles.DimStyle.Render(strings.TrimPrefix(line, marker+" ")))
 	}
 	return result
 }
@@ -988,9 +989,9 @@ func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath st
 				label += " (replace_all=true)"
 			}
 			if failed[i] {
-				result = append(result, toolFieldSectionMarked(ToolResultExpandedStyle, ToolStatusErrorStyle, "✗", label))
+				result = append(result, toolFieldSectionMarked(currentStyles.ToolResultExpandedStyle, currentStyles.ToolStatusErrorStyle, "✗", label))
 			} else {
-				result = append(result, toolFieldSection(ToolResultExpandedStyle, label))
+				result = append(result, toolFieldSection(currentStyles.ToolResultExpandedStyle, label))
 			}
 			edit.Edits = nil
 			result = appendReplaceEditPreview(result, edit, filePath, width, nil)
@@ -999,14 +1000,14 @@ func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath st
 	}
 	// Normalize glyphs before rendering so that width measurement matches
 	// the terminal's advance and the card background fills completely.
-	oldStr := normalizeDisplayGlyphs(args.OldString)
-	newStr := normalizeDisplayGlyphs(args.NewString)
+	oldStr := terminaltext.NormalizeGlyphs(args.OldString)
+	newStr := terminaltext.NormalizeGlyphs(args.NewString)
 	hl := syntax.New(filePath, oldStr+"\n"+newStr, "")
 	for _, line := range replaceEditPreviewLines(oldStr) {
-		result = append(result, "    "+DiffDelStyle.Render("- ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, diffDelBg))
+		result = append(result, "    "+currentStyles.DiffDelStyle.Render("- ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, currentStyles.Palette.DiffDelLineBg))
 	}
 	for _, line := range replaceEditPreviewLines(newStr) {
-		result = append(result, "    "+DiffAddStyle.Render("+ ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, diffAddBg))
+		result = append(result, "    "+currentStyles.DiffAddStyle.Render("+ ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, currentStyles.Palette.DiffAddLineBg))
 	}
 	return result
 }
@@ -1060,18 +1061,18 @@ func (b *Block) editPatchArgsJSON() string {
 
 func renderEditPatchPreviewLine(line string) string {
 	trimmed := strings.TrimLeft(line, " \t")
-	styled := DimStyle.Render(line)
+	styled := currentStyles.DimStyle.Render(line)
 	switch {
 	case strings.HasPrefix(trimmed, "+") && !strings.HasPrefix(trimmed, "+++"):
-		styled = DiffAddStyle.Render(line)
+		styled = currentStyles.DiffAddStyle.Render(line)
 	case strings.HasPrefix(trimmed, "-") && !strings.HasPrefix(trimmed, "---"):
-		styled = DiffDelStyle.Render(line)
+		styled = currentStyles.DiffDelStyle.Render(line)
 	case strings.HasPrefix(trimmed, "@@"):
-		styled = ToolResultExpandedStyle.Render(line)
+		styled = currentStyles.ToolResultExpandedStyle.Render(line)
 	case strings.HasPrefix(trimmed, "***"):
-		styled = ToolResultStyle.Render(line)
+		styled = currentStyles.ToolResultStyle.Render(line)
 	case strings.HasPrefix(trimmed, "..."):
-		styled = DimStyle.Render(line)
+		styled = currentStyles.DimStyle.Render(line)
 	}
 	return "    " + styled
 }

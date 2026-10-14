@@ -4,16 +4,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
 	"github.com/keakon/lipgloss/v2"
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/markdownrender"
+	"github.com/keakon/chord/internal/tui/syntax"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestConfirmDialogDoneMarkdownDoesNotLeakAssistantCardBackground(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
+	ApplyTheme(uitheme.Default())
+	contentMarkdown = markdownrender.New(currentStyles.Palette)
 
 	m := NewModelWithSize(nil, 120, 40)
 	req := &ConfirmRequest{
@@ -26,14 +29,14 @@ func TestConfirmDialogDoneMarkdownDoesNotLeakAssistantCardBackground(t *testing.
 	if out == "" {
 		t.Fatal("expected non-empty confirm dialog")
 	}
-	plain := stripANSI(out)
+	plain := terminaltext.StripANSI(out)
 	if !strings.Contains(plain, "Title") || !strings.Contains(plain, "hello") {
 		t.Fatalf("missing rendered done report text in dialog: %q", plain)
 	}
 
 	summary := buildConfirmSummary(req.ToolName, req.ArgsJSON, req.NeedsApproval, req.AlreadyAllowed, req.DoneReport)
 	lines := m.renderConfirmSummary("title", summary, 118)
-	assistantBgSeq := colorToANSIBgSeq(currentTheme.AssistantCardBg)
+	assistantBgSeq := terminaltext.BackgroundSequence(currentStyles.Palette.AssistantCardBg)
 	if assistantBgSeq == "" {
 		t.Fatal("expected assistant card background ANSI sequence")
 	}
@@ -43,7 +46,7 @@ func TestConfirmDialogDoneMarkdownDoesNotLeakAssistantCardBackground(t *testing.
 		}
 	}
 
-	globalCodeBgSeq := syntax.ColorSequence(lipgloss.Color(currentTheme.CodeBlockBg), false)
+	globalCodeBgSeq := syntax.ColorSequence(lipgloss.Color(currentStyles.Palette.CodeBlockBg), false)
 	if globalCodeBgSeq == "" {
 		t.Fatal("expected global code block background ANSI sequence")
 	}
@@ -51,7 +54,7 @@ func TestConfirmDialogDoneMarkdownDoesNotLeakAssistantCardBackground(t *testing.
 		t.Fatal("Done confirmation markdown should not use assistant card code block background")
 	}
 
-	dialogCodeBgSeq := syntax.ColorSequence(lipgloss.Color(currentTheme.DialogCodeBlockBg), false)
+	dialogCodeBgSeq := syntax.ColorSequence(lipgloss.Color(currentStyles.Palette.DialogCodeBlockBg), false)
 	if dialogCodeBgSeq == "" {
 		t.Fatal("expected dialog code block background ANSI sequence")
 	}
@@ -61,8 +64,8 @@ func TestConfirmDialogDoneMarkdownDoesNotLeakAssistantCardBackground(t *testing.
 }
 
 func TestConfirmDialogDoneMarkdownUsesDialogCellBackgrounds(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
+	ApplyTheme(uitheme.Default())
+	contentMarkdown = markdownrender.New(currentStyles.Palette)
 
 	m := NewModelWithSize(nil, 120, 40)
 	m.confirm.request = &ConfirmRequest{
@@ -74,30 +77,30 @@ func TestConfirmDialogDoneMarkdownUsesDialogCellBackgrounds(t *testing.T) {
 	out := m.renderConfirmDialog()
 	plainLine := findRenderedLineContaining(out, "Plain text before code.")
 	if plainLine == "" {
-		t.Fatalf("missing plain markdown line in dialog: %q", stripANSI(out))
+		t.Fatalf("missing plain markdown line in dialog: %q", terminaltext.StripANSI(out))
 	}
 	codeLine := findRenderedLineContaining(out, "go test ./internal/tui -run")
 	if codeLine == "" {
-		t.Fatalf("missing code line in dialog: %q", stripANSI(out))
+		t.Fatalf("missing code line in dialog: %q", terminaltext.StripANSI(out))
 	}
 
-	dialogBg := colorOfTheme(currentTheme.DialogBg)
+	dialogBg := colorOfTheme(currentStyles.Palette.DialogBg)
 	plainCell, ok := findRenderedCell(plainLine, "P")
 	if !ok {
-		t.Fatalf("missing plain text cell in line: %q", stripANSI(plainLine))
+		t.Fatalf("missing plain text cell in line: %q", terminaltext.StripANSI(plainLine))
 	}
 	if !colorsEqual(plainCell.Style.Bg, dialogBg) {
 		t.Fatalf("plain markdown cell background = %v, want dialog bg %v", plainCell.Style.Bg, dialogBg)
 	}
 
-	dialogCodeBg := colorOfTheme(currentTheme.DialogCodeBlockBg)
-	globalCodeBg := colorOfTheme(currentTheme.CodeBlockBg)
+	dialogCodeBg := colorOfTheme(currentStyles.Palette.DialogCodeBlockBg)
+	globalCodeBg := colorOfTheme(currentStyles.Palette.CodeBlockBg)
 	if colorsEqual(dialogCodeBg, globalCodeBg) {
 		t.Fatal("test requires dialog code block bg to differ from assistant code block bg")
 	}
 	codeCell, ok := findRenderedCell(codeLine, "g")
 	if !ok {
-		t.Fatalf("missing code text cell in line: %q", stripANSI(codeLine))
+		t.Fatalf("missing code text cell in line: %q", terminaltext.StripANSI(codeLine))
 	}
 	if !colorsEqual(codeCell.Style.Bg, dialogCodeBg) {
 		t.Fatalf("dialog code cell background = %v, want dialog code bg %v", codeCell.Style.Bg, dialogCodeBg)
@@ -109,7 +112,7 @@ func TestConfirmDialogDoneMarkdownUsesDialogCellBackgrounds(t *testing.T) {
 
 func findRenderedLineContaining(out, needle string) string {
 	for line := range strings.SplitSeq(out, "\n") {
-		if strings.Contains(stripANSI(line), needle) {
+		if strings.Contains(terminaltext.StripANSI(line), needle) {
 			return line
 		}
 	}

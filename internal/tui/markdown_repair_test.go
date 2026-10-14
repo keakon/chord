@@ -1,16 +1,15 @@
 package tui
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/tui/syntax"
-
-	"github.com/keakon/glamour/v2"
-
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/markdownrender"
 	"github.com/keakon/chord/internal/tui/markdownutil"
+	"github.com/keakon/chord/internal/tui/syntax"
+	"github.com/keakon/chord/internal/tui/terminaltext"
+	uitheme "github.com/keakon/chord/internal/tui/theme"
 )
 
 func TestSplitAssistantMarkdownSegmentsSupportsTildeOuterFence(t *testing.T) {
@@ -98,20 +97,6 @@ func TestNormalizeAdjacentStrongRecoversAfterDanglingBacktick(t *testing.T) {
 	}
 }
 
-func TestRenderMarkdownContentSupportsAdjacentStrong(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
-	lines := renderMarkdownContent("**a****b**", 40)
-	joined := strings.Join(lines, "\n")
-	plain := stripANSI(joined)
-	if strings.Contains(plain, "****") || !strings.Contains(plain, "ab") {
-		t.Fatalf("adjacent strong rendered incorrect text: %q", plain)
-	}
-	if strings.Count(joined, "\x1b[") < 2 {
-		t.Fatalf("expected ANSI styling for both adjacent strong spans: %q", joined)
-	}
-}
-
 func TestRepairMarkdownForDisplayClosesUnterminatedTildeFence(t *testing.T) {
 	input := "## Sample\n\n~~~md\nbody\n"
 	got := markdownutil.RepairForDisplay(input)
@@ -120,40 +105,27 @@ func TestRepairMarkdownForDisplayClosesUnterminatedTildeFence(t *testing.T) {
 	}
 }
 
-func TestRenderMarkdownContentRepairsUnterminatedFence(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
-	lines := renderMarkdownContent("## Sample\n\n```md\nbody\n", 40)
-	joined := stripANSI(strings.Join(lines, "\n"))
-	if !strings.Contains(joined, "Sample") {
-		t.Fatalf("expected heading text, got %q", joined)
-	}
-	if !strings.Contains(joined, "body") {
-		t.Fatalf("expected fenced content text, got %q", joined)
-	}
-}
-
 func TestRenderMarkdownContentInlinesTableEmailLinks(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
+	ApplyTheme(uitheme.Default())
+	contentMarkdown = markdownrender.New(currentStyles.Palette)
 	content := "| Account ID | Email | Expiration Date |\n|------------|-------|-----------------|\n| a20158b8-... | gfwgfwgfwgfw@gmail.com | 2026-04-02 |"
-	lines := renderMarkdownContent(content, 80)
+	lines := contentMarkdown.Render(content, 80)
 	joinedANSI := strings.Join(lines, "\n")
 	if strings.Contains(joinedANSI, "[1]:") {
 		t.Fatalf("expected table links to stay inline, got footer list:\n%s", joinedANSI)
 	}
-	joinedPlain := stripANSI(stripOSC8(joinedANSI))
+	joinedPlain := terminaltext.StripANSI(stripOSC8(joinedANSI))
 	if !strings.Contains(joinedPlain, "gfwgfwgfwgfw@gmail.com") {
 		t.Fatalf("expected email text to remain inside rendered table, got %q", joinedPlain)
 	}
 }
 
 func TestRenderAssistantMarkdownContentKeepsNestedFenceInsideOuterMarkdownExample(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	var hl *syntax.Highlighter
 	content := "````md\nHi!\n\n## Proposed API\n\n```go\nfunc main() {}\n```\n\nAfter.\n````"
 	lines, _, _ := renderAssistantMarkdownContent(content, content, 48, 2, &hl)
-	joinedPlain := stripANSI(strings.Join(lines, "\n"))
+	joinedPlain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joinedPlain, "MD") {
 		t.Fatalf("expected outer markdown block badge, got %q", joinedPlain)
 	}
@@ -166,13 +138,13 @@ func TestRenderAssistantMarkdownContentKeepsNestedFenceInsideOuterMarkdownExampl
 }
 
 func TestRenderCompactionSummaryKeepsNestedFenceInsideMarkdownExample(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:    BlockCompactionSummary,
 		Content: "~~~md\nouter\n```go\nfunc main() {}\n```\nafter inner\n~~~",
 	}
 	lines := block.Render(60, "")
-	joinedPlain := stripANSI(strings.Join(lines, "\n"))
+	joinedPlain := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joinedPlain, "MD") {
 		t.Fatalf("expected outer markdown badge in compaction summary, got %q", joinedPlain)
 	}
@@ -184,78 +156,10 @@ func TestRenderCompactionSummaryKeepsNestedFenceInsideMarkdownExample(t *testing
 	}
 }
 
-func TestRenderMarkdownContentRecoversFromRendererPanic(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
-	originalRender := renderMarkdownWithGlamour
-	renderMarkdownWithGlamour = func(_ *glamour.TermRenderer, _ string) (string, error) {
-		panic("boom")
-	}
-	t.Cleanup(func() {
-		renderMarkdownWithGlamour = originalRender
-		resetMarkdownRenderer()
-	})
-
-	lines := renderMarkdownContent("## Summary\n\nbody", 40)
-	joined := stripANSI(strings.Join(lines, "\n"))
-	if !strings.Contains(joined, "Summary") || !strings.Contains(joined, "body") {
-		t.Fatalf("expected plain markdown fallback content, got %q", joined)
-	}
-
-	renderMarkdownWithGlamour = func(_ *glamour.TermRenderer, _ string) (string, error) {
-		return "ok", nil
-	}
-	lines = renderMarkdownContent("ok", 40)
-	if joined = stripANSI(strings.Join(lines, "\n")); joined != "ok" {
-		t.Fatalf("renderer did not recover after panic fallback, got %q", joined)
-	}
-}
-
-func TestRenderMarkdownContentFallsBackOnRendererError(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
-	originalRender := renderMarkdownWithGlamour
-	renderMarkdownWithGlamour = func(_ *glamour.TermRenderer, _ string) (string, error) {
-		return "", errors.New("render failed")
-	}
-	t.Cleanup(func() {
-		renderMarkdownWithGlamour = originalRender
-		resetMarkdownRenderer()
-	})
-
-	lines := renderMarkdownContent("## Summary\n\nbody", 40)
-	joined := stripANSI(strings.Join(lines, "\n"))
-	if !strings.Contains(joined, "Summary") || !strings.Contains(joined, "body") {
-		t.Fatalf("expected plain markdown fallback content, got %q", joined)
-	}
-}
-
-func TestRenderMarkdownContentFallbackHidesAdjacentStrongMarker(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	resetMarkdownRenderer()
-	originalRender := renderMarkdownWithGlamour
-	renderMarkdownWithGlamour = func(_ *glamour.TermRenderer, _ string) (string, error) {
-		return "", errors.New("render failed")
-	}
-	t.Cleanup(func() {
-		renderMarkdownWithGlamour = originalRender
-		resetMarkdownRenderer()
-	})
-
-	lines := renderMarkdownContent("**a****b**", 40)
-	joined := stripANSI(strings.Join(lines, "\n"))
-	if strings.Contains(joined, "chord-adjacent-strong") {
-		t.Fatalf("fallback leaked the internal marker: %q", joined)
-	}
-	if !strings.Contains(joined, "**a****b**") {
-		t.Fatalf("fallback must show the original text, got %q", joined)
-	}
-}
-
 func TestBlockRenderRecoversFromRenderPanic(t *testing.T) {
 	block := &Block{Type: BlockAssistant, Content: "original content"}
 	lines := blockRenderPanicFallback(block, 40, "boom")
-	joined := stripANSI(strings.Join(lines, "\n"))
+	joined := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joined, "render error: boom") {
 		t.Fatalf("expected render error label, got %q", joined)
 	}
@@ -265,7 +169,7 @@ func TestBlockRenderRecoversFromRenderPanic(t *testing.T) {
 }
 
 func TestToolResultMarkdownRepairsUnterminatedFence(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:                   BlockToolCall,
 		ToolName:               "web_fetch",
@@ -276,7 +180,7 @@ func TestToolResultMarkdownRepairsUnterminatedFence(t *testing.T) {
 		ToolCallDetailExpanded: true,
 	}
 	lines := block.Render(80, "")
-	joined := stripANSI(strings.Join(lines, "\n"))
+	joined := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joined, "Ready") {
 		t.Fatalf("expected heading text in tool result, got:\n%s", joined)
 	}
@@ -286,7 +190,7 @@ func TestToolResultMarkdownRepairsUnterminatedFence(t *testing.T) {
 }
 
 func TestToolResultMarkdownRepairsUnterminatedTildeFence(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:                   BlockToolCall,
 		ToolName:               "web_fetch",
@@ -297,7 +201,7 @@ func TestToolResultMarkdownRepairsUnterminatedTildeFence(t *testing.T) {
 		ToolCallDetailExpanded: true,
 	}
 	lines := block.Render(80, "")
-	joined := stripANSI(strings.Join(lines, "\n"))
+	joined := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joined, "Ready") {
 		t.Fatalf("expected heading text in tool result, got:\n%s", joined)
 	}
@@ -406,7 +310,7 @@ func TestFindStreamingMarkdownSettledFrontier_EmptyContent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestStreamingAssistantBlock_SettledPrefixRenderedAsMarkdown(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	// Content: one fully settled paragraph (separated by \n\n), then a tail.
 	content := "## Hello\n\nstill streaming..."
 	block := &Block{
@@ -415,7 +319,7 @@ func TestStreamingAssistantBlock_SettledPrefixRenderedAsMarkdown(t *testing.T) {
 		Streaming: true,
 	}
 	lines := block.Render(80, "")
-	joined := stripANSI(strings.Join(lines, "\n"))
+	joined := terminaltext.StripANSI(strings.Join(lines, "\n"))
 	// Settled prefix includes the heading — markdown rendering should produce it.
 	if !strings.Contains(joined, "Hello") {
 		t.Fatalf("expected heading text in streaming block, got:\n%s", joined)
@@ -426,7 +330,7 @@ func TestStreamingAssistantBlock_SettledPrefixRenderedAsMarkdown(t *testing.T) {
 }
 
 func TestStreamingAssistantBlock_MetadataLengthConsistent(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := "First paragraph.\n\nSecond still streaming"
 	block := &Block{
 		Type:      BlockAssistant,
@@ -442,14 +346,14 @@ func TestStreamingAssistantBlock_MetadataLengthConsistent(t *testing.T) {
 }
 
 func TestStreamingAssistantBlock_PreservesParagraphSeamBlankLine(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockAssistant,
 		Content:   "First paragraph.\n\nSecond still streaming",
 		Streaming: true,
 	}
 	lines := block.Render(80, "")
-	plainLines := strings.Split(stripANSI(strings.Join(lines, "\n")), "\n")
+	plainLines := strings.Split(terminaltext.StripANSI(strings.Join(lines, "\n")), "\n")
 	first := -1
 	second := -1
 	blankBetween := false
@@ -476,7 +380,7 @@ func TestStreamingAssistantBlock_PreservesParagraphSeamBlankLine(t *testing.T) {
 }
 
 func TestStreamingAssistantBlock_NoFrontierNoMarkdown(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	// Content without any paragraph boundary — no markdown rendering yet.
 	content := "just plain text still coming"
 	block := &Block{
@@ -491,7 +395,7 @@ func TestStreamingAssistantBlock_NoFrontierNoMarkdown(t *testing.T) {
 }
 
 func TestStreamingAssistantBlock_CacheReuseWhenFrontierUnchanged(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := "Settled para.\n\ntail"
 	block := &Block{
 		Type:      BlockAssistant,
@@ -520,7 +424,7 @@ func TestStreamingAssistantBlock_CacheReuseWhenFrontierUnchanged(t *testing.T) {
 }
 
 func TestStreamingAssistantBlock_RebuildsSettledCacheWhenPrefixChangesAtSameFrontier(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockAssistant,
 		Content:   "Alpha\n\ntail",
@@ -549,7 +453,7 @@ func TestStreamingAssistantBlock_RebuildsSettledCacheWhenPrefixChangesAtSameFron
 }
 
 func TestStreamingAssistantBlock_NoExtraEmptyTailLineWhenAllContentSettled(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	block := &Block{
 		Type:      BlockAssistant,
 		Content:   "intro\n\n```go\nfunc main() {}\n```\n",
@@ -568,7 +472,7 @@ func TestStreamingAssistantBlock_NoExtraEmptyTailLineWhenAllContentSettled(t *te
 }
 
 func TestStreamingAssistantBlock_SettledAfterStreamingMatchesFullRender(t *testing.T) {
-	ApplyTheme(DefaultTheme())
+	ApplyTheme(uitheme.Default())
 	content := "## Title\n\nSome body text."
 	// First render in streaming mode.
 	streaming := &Block{
@@ -588,7 +492,7 @@ func TestStreamingAssistantBlock_SettledAfterStreamingMatchesFullRender(t *testi
 
 	// Both should contain the heading text — they may differ in ANSI details
 	// during streaming but both must surface the content.
-	joined := func(lines []string) string { return stripANSI(strings.Join(lines, "\n")) }
+	joined := func(lines []string) string { return terminaltext.StripANSI(strings.Join(lines, "\n")) }
 	if !strings.Contains(joined(streamingLines), "Title") {
 		t.Fatalf("streaming render missing heading: %s", joined(streamingLines))
 	}

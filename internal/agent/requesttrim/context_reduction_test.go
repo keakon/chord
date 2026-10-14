@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -664,11 +665,11 @@ func TestLossySummaryLeavesRecoveryAddress(t *testing.T) {
 	if !ok {
 		t.Fatal("shell success output should reduce")
 	}
-	refs := tools.ExtractArtifactReferences(reduced)
+	refs := tooloutput.ExtractArtifactReferences(reduced)
 	if len(refs) == 0 {
 		t.Fatalf("lossy summary must carry a recovery address, got %q", reduced)
 	}
-	path := strings.TrimSuffix(strings.TrimPrefix(refs[0], tools.ArtifactReferencePrefix), ".")
+	path := strings.TrimSuffix(strings.TrimPrefix(refs[0], tooloutput.ArtifactReferencePrefix), ".")
 	saved, err := os.ReadFile(strings.TrimSpace(path))
 	if err != nil {
 		t.Fatalf("archived payload unreadable: %v", err)
@@ -683,7 +684,7 @@ func TestLossySummaryLeavesRecoveryAddress(t *testing.T) {
 	if !ok {
 		t.Fatal("repeated output should reduce")
 	}
-	repeatedRefs := tools.ExtractArtifactReferences(repeated)
+	repeatedRefs := tooloutput.ExtractArtifactReferences(repeated)
 	if len(repeatedRefs) == 0 || repeatedRefs[0] != refs[0] {
 		t.Fatalf("identical payloads should share one archive, got %v want %v", repeatedRefs, refs)
 	}
@@ -703,7 +704,7 @@ func TestLossySummaryLeavesRecoveryAddress(t *testing.T) {
 	if !ok {
 		t.Fatal("stale read should reduce")
 	}
-	if len(tools.ExtractArtifactReferences(readReduced)) > 0 {
+	if len(tooloutput.ExtractArtifactReferences(readReduced)) > 0 {
 		t.Fatalf("a stale read guides a re-read and must not be archived, got %q", readReduced)
 	}
 
@@ -711,7 +712,7 @@ func TestLossySummaryLeavesRecoveryAddress(t *testing.T) {
 	smallCtx := ctx
 	smallCtx.Content = "ok\n"
 	small, _, ok := Render(requestReductionShellOK, smallCtx)
-	if ok && len(tools.ExtractArtifactReferences(small)) > 0 {
+	if ok && len(tooloutput.ExtractArtifactReferences(small)) > 0 {
 		t.Fatalf("small payload should not be archived, got %q", small)
 	}
 }

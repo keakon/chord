@@ -9,6 +9,8 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/keakon/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const maxQueuedToasts = 10
@@ -22,7 +24,7 @@ func renderDisabledInputArea(content string) string {
 	if body == "" {
 		return content
 	}
-	rendered := InputBoxDimmedStyle.Render(body)
+	rendered := currentStyles.InputBoxDimmedStyle.Render(body)
 	if trailingNewline {
 		rendered += "\n"
 	}
@@ -167,16 +169,16 @@ func (m Model) renderQueuedDrafts(width, maxLines int) string {
 		prefix := fmt.Sprintf("  [%d] ", i+1)
 		deleteWidth := runewidth.StringWidth(queuedDraftDeleteToken)
 		maxTextWidth := max(width-runewidth.StringWidth(prefix)-deleteWidth-queuedDraftDeleteRightMargin-1, 8)
-		line := prefix + truncateOneLine(text, maxTextWidth)
+		line := prefix + terminaltext.TruncateOneLine(text, maxTextWidth)
 		padding := max(width-runewidth.StringWidth(line)-deleteWidth-queuedDraftDeleteRightMargin, 1)
-		lines = append(lines, DimStyle.Render(line+strings.Repeat(" ", padding)+queuedDraftDeleteToken+strings.Repeat(" ", queuedDraftDeleteRightMargin)))
+		lines = append(lines, currentStyles.DimStyle.Render(line+strings.Repeat(" ", padding)+queuedDraftDeleteToken+strings.Repeat(" ", queuedDraftDeleteRightMargin)))
 	}
 	for i := 0; i < len(mailboxes) && len(lines) < maxLines; i++ {
 		item := mailboxes[i]
 		prefix := fmt.Sprintf("  [mailbox %d] ", i+1)
 		suffix := " [waiting]"
 		maxTextWidth := max(width-runewidth.StringWidth(prefix)-runewidth.StringWidth(suffix)-1, 8)
-		lines = append(lines, DimStyle.Render(prefix+truncateOneLine(item.Summary, maxTextWidth)+suffix))
+		lines = append(lines, currentStyles.DimStyle.Render(prefix+terminaltext.TruncateOneLine(item.Summary, maxTextWidth)+suffix))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -217,7 +219,7 @@ func renderAttachmentLine(index int, a Attachment) string {
 	if len(flags) > 0 {
 		suffix = " ⚠ " + strings.Join(flags, ", ")
 	}
-	return DimStyle.Render(fmt.Sprintf("  [%d] %s (%s)%s", index, name, size, suffix))
+	return currentStyles.DimStyle.Render(fmt.Sprintf("  [%d] %s (%s)%s", index, name, size, suffix))
 }
 
 func (m Model) renderToast() string {
@@ -227,11 +229,11 @@ func (m Model) renderToast() string {
 	var style lipgloss.Style
 	switch m.activeToast.Level {
 	case "warn":
-		style = ToastWarnStyle
+		style = currentStyles.ToastWarnStyle
 	case "error":
-		style = ToastErrorStyle
+		style = currentStyles.ToastErrorStyle
 	default:
-		style = ToastInfoStyle
+		style = currentStyles.ToastInfoStyle
 	}
 	return style.Width(m.width).Render(m.activeToast.Message)
 }

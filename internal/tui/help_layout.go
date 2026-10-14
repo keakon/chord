@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/mattn/go-runewidth"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 const (
@@ -49,18 +51,18 @@ func renderHelpGroupLines(group HelpGroup, contentWidth int) []string {
 		keyWidth = max(8, contentWidth-helpWidth-4)
 	}
 
-	lines := []string{DialogTitleStyle.Render(group.Title)}
+	lines := []string{currentStyles.DialogTitleStyle.Render(group.Title)}
 	for _, binding := range group.Bindings {
 		keyLabel := keysDisplay(binding.Keys)
 		if keyLabel == "" || binding.Help == "" {
 			continue
 		}
-		wrapped := wrapText(binding.Help, helpWidth)
+		wrapped := terminaltext.Wrap(binding.Help, helpWidth)
 		if len(wrapped) == 0 {
 			wrapped = []string{""}
 		}
 		lines = append(lines,
-			fmt.Sprintf("  %s  %s", KeyHintStyle.Render(padDisplayRight(keyLabel, keyWidth)), wrapped[0]),
+			fmt.Sprintf("  %s  %s", currentStyles.KeyHintStyle.Render(padDisplayRight(keyLabel, keyWidth)), wrapped[0]),
 		)
 		for _, extra := range wrapped[1:] {
 			lines = append(lines, fmt.Sprintf("  %s  %s", strings.Repeat(" ", keyWidth), extra))
@@ -100,7 +102,7 @@ func flattenHelpBlocks(blocks [][]string) []string {
 func trimTrailingHelpBlankLines(lines []string) []string {
 	end := len(lines)
 	for end > 0 {
-		plain := ansiStrip.ReplaceAllString(lines[end-1], "")
+		plain := terminaltext.StripCSI(lines[end-1])
 		if strings.TrimSpace(plain) != "" {
 			break
 		}
@@ -140,7 +142,7 @@ func layoutHelpBlocks(blocks [][]string, contentWidth int) []string {
 			if row < len(columns[col]) {
 				line = columns[col][row]
 			}
-			parts = append(parts, padLineToDisplayWidth(line, columnWidth))
+			parts = append(parts, terminaltext.Pad(line, columnWidth))
 		}
 		lines = append(lines, strings.Join(parts, gap))
 	}

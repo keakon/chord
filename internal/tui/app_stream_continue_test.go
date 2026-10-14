@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 // streamContinueTestText mirrors the agent's durable KindStreamContinue message
@@ -37,14 +38,14 @@ func TestHandleStreamContinueEventRendersStatusNotice(t *testing.T) {
 	if !blocks[0].Collapsed {
 		t.Fatalf("%q must start collapsed", streamContinueCardTitle)
 	}
-	collapsed := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	collapsed := terminaltext.StripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(collapsed, streamContinueCardTitle) || !strings.Contains(collapsed, "▸") {
 		t.Fatalf("rendered card = %q, want a collapsed %q notice", collapsed, streamContinueCardTitle)
 	}
 	if !blocks[0].ToggleAtWidth(80) || blocks[0].Collapsed {
 		t.Fatalf("toggling must expand the %q notice", streamContinueCardTitle)
 	}
-	plain := stripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(blocks[0].Render(80, ""), "\n"))
 	if !strings.Contains(plain, "continue directly from the interruption point") {
 		t.Fatalf("rendered card = %q, want the continuation message text", plain)
 	}
@@ -74,7 +75,7 @@ func TestHandleStreamContinueEventSettlesInterruptedAssistantCard(t *testing.T) 
 	if blocks[0].Type != BlockAssistant || blocks[0].Streaming {
 		t.Fatalf("first block = type %v streaming=%v, want a settled assistant card", blocks[0].Type, blocks[0].Streaming)
 	}
-	plain := stripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
+	plain := terminaltext.StripANSI(strings.Join(blocks[0].Render(120, ""), "\n"))
 	if !strings.Contains(plain, "partial reply") {
 		t.Fatalf("first card = %q, want the preserved partial text kept on screen", plain)
 	}

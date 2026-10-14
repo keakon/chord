@@ -5,6 +5,8 @@ import (
 	"image"
 
 	"github.com/keakon/x/ansi"
+
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type OverlayConfig struct {
@@ -37,12 +39,12 @@ func RenderOverlay(cfg OverlayConfig, content string, area image.Rectangle) (str
 	width := max(dialogContentWidth(cfg.MaxWidth), 1)
 	lines := make([]string, 0, 8)
 	if cfg.Title != "" {
-		lines = append(lines, DialogTitleStyle.Render(ansi.Truncate(cfg.Title, width, "…")))
+		lines = append(lines, currentStyles.DialogTitleStyle.Render(ansi.Truncate(cfg.Title, width, "…")))
 		for range layout.titleGap {
 			lines = append(lines, "")
 		}
 	}
-	body := tuiHardwrap(content, width)
+	body := terminaltext.Hardwrap(content, width)
 	lines = append(lines, body[:min(len(body), layout.contentHeight)]...)
 	lines = append(lines, layout.footerLines...)
 	for range layout.hintGap {

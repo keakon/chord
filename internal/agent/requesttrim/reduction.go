@@ -17,7 +17,9 @@ import (
 	"github.com/keakon/chord/internal/lsp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
+	"github.com/keakon/chord/internal/shellanalysis"
 	"github.com/keakon/chord/internal/toolname"
+	"github.com/keakon/chord/internal/tooloutput"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -843,7 +845,7 @@ func ensureReducedOutputRecoverable(class Class, rule, reduced string, ctx Conte
 	// payload, so a file that merely mentions an archive address would spoof
 	// the check into dropping the only copy of what the read observed.
 	if !ctx.ReadPriorContentLost &&
-		(len(tools.ExtractArtifactReferences(reduced)) > 0 || strings.Contains(reduced, archivedOutputMarkerFragment)) {
+		(len(tooloutput.ExtractArtifactReferences(reduced)) > 0 || strings.Contains(reduced, archivedOutputMarkerFragment)) {
 		return "", false
 	}
 	path, ok := writeReducedOutputArchive(ctx)
@@ -853,7 +855,7 @@ func ensureReducedOutputRecoverable(class Class, rule, reduced string, ctx Conte
 	// Canonical reference form: the trailing period is what makes this parse
 	// as an artifact reference, so later reductions of this marker carry the
 	// address forward instead of dropping it.
-	return tools.ArtifactReferencePrefix + path + ".", true
+	return tooloutput.ArtifactReferencePrefix + path + ".", true
 }
 
 // writeReducedOutputArchive persists content under a content-addressed name so
@@ -879,7 +881,7 @@ func writeReducedOutputArchive(ctx Context) (string, bool) {
 }
 
 func appendPreservedArtifactReferences(reduced, original string) string {
-	refs := tools.ExtractArtifactReferences(original)
+	refs := tooloutput.ExtractArtifactReferences(original)
 	if len(refs) == 0 {
 		return reduced
 	}
@@ -887,7 +889,7 @@ func appendPreservedArtifactReferences(reduced, original string) string {
 	// against raw containment: an excerpt line can quote an address behind a
 	// list bullet, where the parser no longer recognizes it. A summary of a
 	// summary would then mention an address the model cannot follow.
-	kept := tools.ExtractArtifactReferences(reduced)
+	kept := tooloutput.ExtractArtifactReferences(reduced)
 	for _, ref := range refs {
 		if slices.Contains(kept, ref) {
 			continue
@@ -2000,7 +2002,7 @@ func singleShellInvocationLiteralArgs(argsJSON, program string) ([]string, bool)
 	if !strings.Contains(args.Command, program) {
 		return nil, false
 	}
-	analysis, err := tools.AnalyzeShellCommand(args.Command)
+	analysis, err := shellanalysis.Analyze(args.Command)
 	if err != nil || len(analysis.Subcommands) != 1 {
 		return nil, false
 	}
@@ -2313,7 +2315,7 @@ func summarizeHeadTailLines(content string, limit int) []string {
 // lines ("Full output saved to <path>") stay verbatim: mid-line truncation
 // would clip the artifact path and leave the model an unreadable path.
 func renderSummaryLine(line string) string {
-	if refs := tools.ExtractArtifactReferences(line); len(refs) > 0 {
+	if refs := tooloutput.ExtractArtifactReferences(line); len(refs) > 0 {
 		return "- " + refs[0]
 	}
 	return "- " + strings.ReplaceAll(TextSnippet(line, SummaryLineSnippetChars), "\n", " ")
