@@ -10,8 +10,26 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// Queue tests own only channels and their producers. They do not need a
+// session, a persistence worker, or a model client.
+func newEventQueueTestAgent(t *testing.T) *MainAgent {
+	t.Helper()
+	a := &MainAgent{
+		parentCtx:          t.Context(),
+		eventCh:            make(chan Event, 256),
+		eventWakeCh:        make(chan struct{}, 1),
+		eventSpaceCh:       make(chan struct{}, 1),
+		eventOverflowLimit: defaultEventOverflowLimit,
+		loopEventLimit:     defaultLoopEventLimit,
+		stoppingCh:         make(chan struct{}),
+		subs:               newSubAgentRegistry(),
+	}
+	t.Cleanup(a.signalStopping)
+	return a
+}
+
 func TestEventOverflowPreservesOrderAndRemainsRunnable(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newEventQueueTestAgent(t)
 	a.eventCh = make(chan Event, 1)
 
 	a.sendEvent(Event{Type: "first"})
@@ -43,7 +61,7 @@ func TestEventOverflowPreservesOrderAndRemainsRunnable(t *testing.T) {
 }
 
 func TestEventOverflowBackpressuresUntilCapacityIsReleased(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newEventQueueTestAgent(t)
 	a.eventCh = make(chan Event, 1)
 	a.eventOverflowLimit = 1
 	a.sendEvent(Event{Type: "channel"})
@@ -78,7 +96,7 @@ func TestEventOverflowBackpressuresUntilCapacityIsReleased(t *testing.T) {
 }
 
 func TestEventOverflowCoalescesProgressBySource(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newEventQueueTestAgent(t)
 	a.eventCh = make(chan Event, 1)
 	a.eventOverflowLimit = 1
 	a.sendEvent(Event{Type: "channel"})
@@ -102,7 +120,7 @@ func TestEventOverflowCoalescesProgressBySource(t *testing.T) {
 }
 
 func TestEventOverflowPreservesDistinctAgentLogs(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newEventQueueTestAgent(t)
 	a.eventCh = make(chan Event, 1)
 	a.sendEvent(Event{Type: "channel"})
 	a.sendEvent(Event{Type: EventAgentLog, SourceID: "worker-1", Payload: "first diagnostic"})
@@ -130,7 +148,7 @@ func TestEventOverflowPreservesDistinctAgentLogs(t *testing.T) {
 }
 
 func TestLoopFollowUpReservePreservesCausalEventsPastSoftLimit(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newEventQueueTestAgent(t)
 	a.started.Store(true)
 	a.loopEventLimit = 1
 	a.queueLoopEvent(Event{Type: "first"})
@@ -172,7 +190,7 @@ func TestHandleEscalateQueuesFollowUpWithoutBlockingOnFullExternalQueue(t *testi
 }
 
 func TestEventOverflowCoalescingPreservesInterveningEventOrder(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newEventQueueTestAgent(t)
 	a.eventCh = make(chan Event, 1)
 	a.sendEvent(Event{Type: "channel"})
 	a.sendEvent(Event{Type: EventSubAgentProgressUpdated, SourceID: "worker-1", Payload: &SubAgentProgressUpdatedPayload{Summary: "old"}})
@@ -198,7 +216,7 @@ func TestEventOverflowCoalescingPreservesInterveningEventOrder(t *testing.T) {
 }
 
 func TestEventOverflowKeepsStateChangesAcrossInterveningProgress(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newEventQueueTestAgent(t)
 	a.eventCh = make(chan Event, 1)
 	a.sendEvent(Event{Type: "channel"})
 	a.sendEvent(Event{Type: EventSubAgentStateChanged, SourceID: "worker-1"})
@@ -220,7 +238,7 @@ func TestEventOverflowKeepsStateChangesAcrossInterveningProgress(t *testing.T) {
 }
 
 func TestEventOverflowBackpressureStopsOnShutdown(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newEventQueueTestAgent(t)
 	a.eventCh = make(chan Event, 1)
 	a.eventOverflowLimit = 1
 	a.sendEvent(Event{Type: "channel"})
@@ -279,7 +297,7 @@ func TestShutdownUnblocksReliableOutputFromEventLoop(t *testing.T) {
 }
 
 func TestConcurrentEventOverflowDeliversEveryEvent(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newEventQueueTestAgent(t)
 	a.eventCh = make(chan Event, 1)
 
 	const producers = 32

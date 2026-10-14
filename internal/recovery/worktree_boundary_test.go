@@ -71,7 +71,18 @@ func TestRecordWorktreeBoundaryClearsBindingOnResumeFallback(t *testing.T) {
 
 func TestRecordWorktreeBoundaryTrimsTimeline(t *testing.T) {
 	dir := t.TempDir()
-	for i := range maxWorktreeTimelineEntries + 5 {
+	// Populate the boundary once; the subsequent writes exercise trimming
+	// through the real load/update/save path without rebuilding the prefix.
+	meta := SessionMeta{}
+	for i := range maxWorktreeTimelineEntries {
+		meta.WorktreeTimeline = append(meta.WorktreeTimeline, WorktreeTimelineEntry{
+			Reason: WorktreeSwitchCreate, Generation: uint64(i + 1), At: time.Now().UTC(),
+		})
+	}
+	if err := SaveSessionMeta(dir, meta); err != nil {
+		t.Fatal(err)
+	}
+	for i := maxWorktreeTimelineEntries; i < maxWorktreeTimelineEntries+5; i++ {
 		entry := WorktreeTimelineEntry{Reason: WorktreeSwitchCreate, Generation: uint64(i + 1), At: time.Now().UTC()}
 		if err := RecordWorktreeBoundary(dir, WorktreeBinding{RepoID: "abc", RepoRoot: "/repo", Name: "feat-a", Branch: "chord/feat-a", Path: "/state/wt/feat-a"}, entry); err != nil {
 			t.Fatalf("record %d: %v", i, err)

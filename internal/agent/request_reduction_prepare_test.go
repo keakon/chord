@@ -17,7 +17,7 @@ import (
 )
 
 func TestPrepareMessagesForLLM_DefersUnchangedToolUntilFrontier(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		MinToolResultsPrune:  1,
 		StaleAgeTurns:        2,

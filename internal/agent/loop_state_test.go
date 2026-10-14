@@ -16,8 +16,16 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// Assessment only reads loop policy, the tool surface, and worker state.
+// Keep persistence and worker lifecycle coverage in the integration tests.
+func newLoopAssessmentTestAgent() *MainAgent {
+	registry := tools.NewRegistry()
+	registry.Register(tools.NewDoneTool())
+	return &MainAgent{tools: registry, subs: newSubAgentRegistry(), ctxMgr: ctxmgr.NewManager(8192, 0), outputCh: make(chan AgentEvent, 32)}
+}
+
 func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 	a.loopState.markProgress()
 	a.loopState.markProgress()
@@ -46,7 +54,7 @@ func TestNextLoopAssessmentFromAssistantMarksCompletedOnStop(t *testing.T) {
 }
 
 func TestNextLoopAssessmentFromAssistantRequiresDoneToolWhenEnabled(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 	a.loopState.markProgress()
 	a.tools.Register(tools.NewDoneTool())
@@ -79,7 +87,7 @@ done: allow
 }
 
 func TestNextLoopAssessmentFromAssistantAcceptsDoneToolWhenEnabled(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 	a.loopState.markProgress()
 	a.loopState.markProgress()
@@ -314,7 +322,7 @@ func TestRepeatedToolCallInLoopRejectsApprovalAtIterationLimit(t *testing.T) {
 }
 
 func TestNextLoopAssessmentFromAssistantAllowsDoneToolRequestBeforeCompleted(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
 	a.loopState.markProgress()
@@ -336,7 +344,7 @@ func TestNextLoopAssessmentFromAssistantAllowsDoneToolRequestBeforeCompleted(t *
 }
 
 func TestNextLoopAssessmentFromAssistantRequiresNoActiveSubAgentsBeforeCompleted(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -380,7 +388,7 @@ func TestNextLoopAssessmentFromAssistantRequiresNoActiveSubAgentsBeforeCompleted
 }
 
 func TestNextLoopAssessmentFromAssistantRejectsDoneMixedWithOtherToolCalls(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 	a.loopState.markProgress()
 	a.loopState.markProgress()
@@ -420,7 +428,7 @@ read: allow
 }
 
 func TestNextLoopAssessmentFromAssistantRepeatedSignatureContinues(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 
 	msg := message.Message{Role: "assistant", Content: "same status", StopReason: "interrupted"}
@@ -435,7 +443,7 @@ func TestNextLoopAssessmentFromAssistantRepeatedSignatureContinues(t *testing.T)
 }
 
 func TestNextLoopAssessmentFromAssistantResetsNoProgressAfterObservableProgress(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 
 	msg := message.Message{Role: "assistant", Content: "same status", StopReason: "interrupted"}
@@ -454,7 +462,7 @@ func TestNextLoopAssessmentFromAssistantResetsNoProgressAfterObservableProgress(
 }
 
 func TestStallDetectorSuspectedStallAfterTwoConsecutive(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 
 	msg := message.Message{Role: "assistant", Content: "no change", StopReason: "interrupted"}
@@ -480,7 +488,7 @@ func TestStallDetectorSuspectedStallAfterTwoConsecutive(t *testing.T) {
 }
 
 func TestStallDetectorBudgetExhaustedAfterThreeConsecutive(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 
 	msg := message.Message{Role: "assistant", Content: "no change", StopReason: "interrupted"}
@@ -496,7 +504,7 @@ func TestStallDetectorBudgetExhaustedAfterThreeConsecutive(t *testing.T) {
 }
 
 func TestStallDetectorResetsAfterProgress(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 
 	msg := message.Message{Role: "assistant", Content: "no change", StopReason: "interrupted"}
@@ -524,7 +532,7 @@ func TestStallDetectorResetsAfterProgress(t *testing.T) {
 }
 
 func TestStallDetectorBudgetExhaustedWithTerminalStop(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 
 	msg := message.Message{Role: "assistant", Content: "no change", StopReason: "interrupted"}
@@ -547,7 +555,7 @@ func TestStallDetectorBudgetExhaustedWithTerminalStop(t *testing.T) {
 }
 
 func TestStallDetectorContinuationNoteIncludesSuspectedStall(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enableWithTarget("finish current task")
 
 	note := a.buildLoopContinuationNote(&LoopAssessment{
@@ -566,7 +574,7 @@ func TestStallDetectorContinuationNoteIncludesSuspectedStall(t *testing.T) {
 }
 
 func TestStallDetectorDifferentContentDoesNotReset(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 
 	msg := message.Message{Role: "assistant", Content: "status A", StopReason: "interrupted"}
@@ -593,7 +601,7 @@ func TestStallDetectorDifferentContentDoesNotReset(t *testing.T) {
 }
 
 func TestNextLoopAssessmentFromAssistantRequiresTodoSyncBeforeCompleted(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enable()
 	a.todoItems = []tools.TodoItem{{ID: "1", Content: "ship loop", Status: "in_progress"}}
 	a.loopState.markProgress()
@@ -615,7 +623,7 @@ func TestNextLoopAssessmentFromAssistantRequiresTodoSyncBeforeCompleted(t *testi
 }
 
 func TestNextLoopAssessmentFromAssistantRequiresDoneToolBeforeCompleted(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
 	a.loopState.markProgress()
@@ -645,7 +653,7 @@ done: allow
 }
 
 func TestNextLoopAssessmentFromAssistantReturnsBlockedForBlockedTag(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.markProgress()
 
@@ -797,7 +805,7 @@ func TestHandleAgentErrorStopsLoopAsBlocked(t *testing.T) {
 }
 
 func TestNextLoopAssessmentFromAssistantReturnsNilWhenLoopDisabled(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newLoopAssessmentTestAgent()
 	assessment := a.nextLoopAssessmentFromAssistant(message.Message{Role: "assistant", Content: "done", StopReason: "stop"})
 	if assessment != nil {
 		t.Fatalf("assessment = %#v, want nil when loop is disabled", assessment)

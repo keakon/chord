@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -214,42 +215,56 @@ func TestJobOutputWaitOutputReturnsOnNextWrite(t *testing.T) {
 // that sampled the same quiet generation are both released by the output.
 func TestJobOutputWaitOutputWakesAllReaders(t *testing.T) {
 	resetJobRegistryOnlyForTest(t)
-	t.Cleanup(func() { StopAllJobsForShutdown() })
-	restoreWait := jobOutputWaitMs
-	t.Cleanup(func() { jobOutputWaitMs = restoreWait })
-	jobOutputWaitMs = 5000
-
-	id, err := ExecuteJobForTest(jobTestCtx(), "sleep 1; printf 'shared'; sleep 5", "broadcast output", nil)
-	if err != nil {
-		t.Fatalf("ExecuteJobForTest: %v", err)
-	}
-	mainCtx := WithJobAccess(WithAgentID(context.Background(), "main-9"), JobAccess{MainAgentID: "main-9"})
-	read := func(ctx context.Context) string {
-		t.Helper()
-		out, err := (JobOutputTool{}).Execute(ctx, mustMarshal(t, map[string]any{"job_id": id, "wait": "output"}))
-		if err != nil {
-			t.Errorf("JobOutputTool.Execute: %v", err)
-			return err.Error()
+	synctest.Test(t, func(t *testing.T) {
+		j := &job{
+			ID: "job-broadcast", AgentID: jobTestOwner, status: jobStatusRunning,
+			output: newTailWriter(maxOutputBytes), done: make(chan struct{}),
 		}
-		return out
-	}
-	results := make([]string, 2)
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		results[0] = read(jobTestCtx())
-	}()
-	go func() {
-		defer wg.Done()
-		results[1] = read(mainCtx)
-	}()
-	wg.Wait()
-	for i, out := range results {
-		if !strings.Contains(out, "shared") {
-			t.Fatalf("reader %d reached %q, want the write to have woken it", i, out)
+		globalJobRegistry.jobs[j.ID] = j
+		id := j.ID
+		mainCtx := WithJobAccess(WithAgentID(context.Background(), "main-9"), JobAccess{MainAgentID: "main-9"})
+		read := func(ctx context.Context) string {
+			t.Helper()
+			out, err := (JobOutputTool{}).Execute(ctx, mustMarshal(t, map[string]any{"job_id": id, "wait": "output"}))
+			if err != nil {
+				t.Errorf("JobOutputTool.Execute: %v", err)
+				return err.Error()
+			}
+			return out
 		}
-	}
+		results := make([]string, 2)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			results[0] = read(jobTestCtx())
+		}()
+		go func() {
+			defer wg.Done()
+			results[1] = read(mainCtx)
+		}()
+		// Both readers must be parked on the same empty output generation before
+		// the write, independent of scheduler speed or process startup.
+		synctest.Wait()
+		for i, out := range results {
+			if out != "" {
+				t.Fatalf("reader %d returned before output: %q", i, out)
+			}
+		}
+		writtenAt := time.Now()
+		if _, err := j.output.Write([]byte("shared")); err != nil {
+			t.Fatal(err)
+		}
+		wg.Wait()
+		if !time.Now().Equal(writtenAt) {
+			t.Fatal("output readers waited for a timer instead of waking on the write")
+		}
+		for i, out := range results {
+			if !strings.Contains(out, "shared") {
+				t.Fatalf("reader %d reached %q, want the write to have woken it", i, out)
+			}
+		}
+	})
 }
 
 func TestJobOutputWaitOutputIsBoundedOnAQuietJob(t *testing.T) {

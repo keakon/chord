@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"github.com/keakon/chord/internal/tools"
+
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +13,7 @@ import (
 )
 
 func TestCacheExpectationTracksTextBeforeAttachment(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{tools: tools.NewRegistry()}
 	cfg := llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}}}, nil)
 	a.llmClient = llm.NewClient(cfg, &recordingLoopTuningProvider{}, "gpt-6.1-sol", 4096, "sys")
 	history := []message.Message{

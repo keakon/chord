@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
@@ -303,8 +304,9 @@ func TestInfoPanelFingerprintTracksRunningJobs(t *testing.T) {
 	refreshJobs(m)
 	before := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
 
-	id := startTestJob(t, "sleep 60", "fingerprint job")
-	refreshJobs(m)
+	m.activeJobsSnapshot = []tools.JobState{{ID: "job-1", Status: jobStatusRunning}}
+	m.jobsSnapshotValid = true
+	m.jobsSnapshotFrame = m.renderFrameGeneration
 	bucket := time.Now().Unix()
 	withJob := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
 	if withJob == before {
@@ -314,9 +316,7 @@ func TestInfoPanelFingerprintTracksRunningJobs(t *testing.T) {
 		t.Fatal("fingerprint changed within the same second bucket")
 	}
 
-	tools.StopJobByUser(id, "test")
-	waitForJobStatus(t, id, "killed")
-	refreshJobs(m)
+	m.activeJobsSnapshot = nil
 	killed := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
 	if killed == withJob {
 		t.Fatal("fingerprint did not change when the job was killed")
@@ -1006,14 +1006,13 @@ func TestHasActiveAnimationTracksJobsOnly(t *testing.T) {
 	if m.hasActiveAnimation() {
 		t.Fatal("idle model with no jobs should have no active animation")
 	}
-	id := startTestJob(t, "sleep 60", "animation job")
-	refreshJobs(m)
+	m.activeJobsSnapshot = []tools.JobState{{ID: "job-1", Status: jobStatusRunning}}
+	m.jobsSnapshotValid = true
+	m.jobsSnapshotFrame = m.renderFrameGeneration
 	if !m.hasActiveAnimation() {
 		t.Fatal("a running job should keep the animation active")
 	}
-	tools.StopJobByUser(id, "test")
-	waitForJobStatus(t, id, "killed")
-	refreshJobs(m)
+	m.activeJobsSnapshot = nil
 	if m.hasActiveAnimation() {
 		t.Fatal("animation should stop once the last job finishes")
 	}
@@ -1173,39 +1172,33 @@ func TestOpenStopJobConfirmRejectsFinishedJob(t *testing.T) {
 
 func TestInfoPanelJobsElapsedAdvancesPerSecond(t *testing.T) {
 	m := newJobsTestModel(t, 160, 60)
-	started := time.Now().Add(-90 * time.Second)
-	m.jobsSnapshot = []tools.JobState{{ID: "job-1", Description: "ticking", Status: jobStatusRunning, StartedAt: started}}
-	m.activeJobsSnapshot = []tools.JobState{m.jobsSnapshot[0]}
-	m.jobsSnapshotValid = true
-	m.jobsSnapshotFrame = m.renderFrameGeneration
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now().Add(-90 * time.Second)
+		m.jobsSnapshot = []tools.JobState{{ID: "job-1", Description: "ticking", Status: jobStatusRunning, StartedAt: started}}
+		m.activeJobsSnapshot = []tools.JobState{m.jobsSnapshot[0]}
+		m.jobsSnapshotValid = true
+		m.jobsSnapshotFrame = m.renderFrameGeneration
 
-	t0 := time.Now()
-	first := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
-	firstRendered := terminaltext.StripANSI(m.renderInfoPanel(32, 60))
+		first := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
+		firstRendered := terminaltext.StripANSI(m.renderInfoPanel(32, 60))
 
-	// Inside one second bucket the key is stable, so the panel is reused instead
-	// of being rebuilt on every frame.
-	if again := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations()); again != first && time.Now().Unix() == t0.Unix() {
-		t.Fatal("JOBS fingerprint changed inside one second bucket")
-	}
+		// Inside one second bucket the key is stable, so the panel is reused instead
+		// of being rebuilt on every frame.
+		if again := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations()); again != first {
+			t.Fatal("JOBS fingerprint changed inside one second bucket")
+		}
 
-	// Bounded wait (<1.2s) for the next second bucket; the displayed elapsed
-	// must then advance.
-	deadline := t0.Add(1200 * time.Millisecond)
-	for time.Since(t0) < 1100*time.Millisecond && time.Now().Before(deadline) {
-		time.Sleep(25 * time.Millisecond)
-	}
-	if elapsed := time.Since(t0); elapsed < 1050*time.Millisecond {
-		t.Fatalf("setup: bounded wait only reached %v", elapsed)
-	}
-	second := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
-	if second == first {
-		t.Fatal("JOBS fingerprint should advance across second buckets")
-	}
-	secondRendered := terminaltext.StripANSI(m.renderInfoPanel(32, 60))
-	if secondRendered == firstRendered {
-		t.Fatalf("panel should re-render the elapsed value once the second advances:\n%s", firstRendered)
-	}
+		// Virtual time crosses the elapsed and cache buckets without wall-clock waiting.
+		time.Sleep(1100 * time.Millisecond)
+		second := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
+		if second == first {
+			t.Fatal("JOBS fingerprint should advance across second buckets")
+		}
+		secondRendered := terminaltext.StripANSI(m.renderInfoPanel(32, 60))
+		if secondRendered == firstRendered {
+			t.Fatalf("panel should re-render the elapsed value once the second advances:\n%s", firstRendered)
+		}
+	})
 }
 
 func TestRenderFreezeYieldsToRunningJob(t *testing.T) {
@@ -1217,8 +1210,9 @@ func TestRenderFreezeYieldsToRunningJob(t *testing.T) {
 	m.cachedFullView = tea.View{Content: "frozen"}
 	m.cachedFullViewValid = true
 
-	id := startTestJob(t, "sleep 60", "freeze guard")
-	refreshJobs(m)
+	m.activeJobsSnapshot = []tools.JobState{{ID: "job-1", Status: jobStatusRunning}}
+	m.jobsSnapshotValid = true
+	m.jobsSnapshotFrame = m.renderFrameGeneration
 	m.syncTerminalTitleState()
 	if !m.terminalTitleTickRunning {
 		t.Fatal("a running background job should keep the terminal title ticker running")
@@ -1233,9 +1227,7 @@ func TestRenderFreezeYieldsToRunningJob(t *testing.T) {
 
 	// Once the job ends the freeze guard must release: it only blocks while a
 	// job is alive, it does not disable render freeze.
-	tools.StopJobByUser(id, "test")
-	waitForJobStatus(t, id, "killed")
-	refreshJobs(m)
+	m.activeJobsSnapshot = nil
 	if !m.tryEnterRenderFreeze("test") {
 		t.Fatal("render freeze should be allowed once the job has ended")
 	}
@@ -1297,22 +1289,25 @@ func TestJobsOverlayEnterOpensStopConfirmForCursor(t *testing.T) {
 
 func TestJobsOverlayCursorClampsWhenJobsFinish(t *testing.T) {
 	m := newJobsTestModel(t, 120, 40)
-	first := startTestJob(t, "sleep 60", "first job")
-	second := startTestJob(t, "sleep 61", "second job")
-	refreshJobs(m)
+	m.activeJobsSnapshot = []tools.JobState{
+		{ID: "job-1", Status: jobStatusRunning},
+		{ID: "job-2", Status: jobStatusRunning},
+	}
+	m.jobsSnapshotValid = true
+	m.jobsSnapshotFrame = m.renderFrameGeneration
 	m.openJobsOverlay()
 	m.handleJobsOverlayKey(tea.KeyPressMsg(tea.Key{Text: "j", Code: 'j'}))
-	if got, _ := m.jobsOverlayCursorJobID(); got != second && got != first {
-		t.Fatalf("cursor job = %q, want a running job", got)
+	if got, _ := m.jobsOverlayCursorJobID(); got != "job-2" {
+		t.Fatalf("cursor job = %q, want job-2", got)
 	}
 
-	// Jobs finish on their own; the cursor must not keep pointing past the
-	// end of the list, which would leave Enter acting on nothing.
-	tools.StopJobByUser(second, "test")
-	waitForJobStatus(t, second, "killed")
-	tools.StopJobByUser(first, "test")
-	waitForJobStatus(t, first, "killed")
-	refreshJobs(m)
+	// The selected job finishes first; selection must clamp to the remaining row.
+	m.activeJobsSnapshot = m.activeJobsSnapshot[:1]
+	m.clampJobsOverlayScroll()
+	if got, ok := m.jobsOverlayCursorJobID(); !ok || got != "job-1" {
+		t.Fatalf("cursor job = %q, selected = %v, want job-1", got, ok)
+	}
+	m.activeJobsSnapshot = nil
 	m.clampJobsOverlayScroll()
 	if got, ok := m.jobsOverlayCursorJobID(); ok {
 		t.Fatalf("cursor job = %q, want no selection once every job ended", got)
@@ -1321,12 +1316,12 @@ func TestJobsOverlayCursorClampsWhenJobsFinish(t *testing.T) {
 
 func TestJobsOverlayCursorFollowsWheel(t *testing.T) {
 	m := newJobsTestModel(t, 120, 40)
-	ids := []string{
-		startTestJob(t, "sleep 60", "job one"),
-		startTestJob(t, "sleep 61", "job two"),
-		startTestJob(t, "sleep 62", "job three"),
+	ids := []string{"job-1", "job-2", "job-3"}
+	for _, id := range ids {
+		m.activeJobsSnapshot = append(m.activeJobsSnapshot, tools.JobState{ID: id, Status: jobStatusRunning})
 	}
-	refreshJobs(m)
+	m.jobsSnapshotValid = true
+	m.jobsSnapshotFrame = m.renderFrameGeneration
 	m.openJobsOverlay()
 	// The wheel moves the selection instead of only the window, so the row
 	// Enter acts on is always the row on screen.

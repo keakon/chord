@@ -241,7 +241,7 @@ func TestPrepareMessagesForLLM_NewerDiagnosticsSupersedeOlderBlock(t *testing.T)
 }
 
 func TestPrepareMessagesForLLM_SearchReducerBeatsGenericStaleFallback(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			MinToolResultsPrune:  1,
@@ -290,7 +290,7 @@ func TestPrepareMessagesForLLM_SearchReducerBeatsGenericStaleFallback(t *testing
 }
 
 func TestPrepareMessagesForLLM_SearchSummaryPreservesArtifactReference(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			MinToolResultsPrune:  1,
@@ -325,7 +325,7 @@ func TestPrepareMessagesForLLM_SearchSummaryPreservesArtifactReference(t *testin
 }
 
 func TestPrepareMessagesForLLM_ShellSearchOutputUsesSearchSummary(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			MinToolResultsPrune:  1,
@@ -366,7 +366,7 @@ func TestPrepareMessagesForLLM_ShellSearchOutputUsesSearchSummary(t *testing.T) 
 }
 
 func TestPrepareMessagesForLLM_ShellSearchOutputParsesWindowsAbsolutePaths(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			MinToolResultsPrune:  1,
@@ -408,7 +408,7 @@ func TestPrepareMessagesForLLM_ShellSearchOutputParsesWindowsAbsolutePaths(t *te
 }
 
 func TestPrepareMessagesForLLM_JSONReducerBeatsGenericStaleFallback(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			MinToolResultsPrune:  1,
@@ -445,7 +445,7 @@ func TestPrepareMessagesForLLM_JSONReducerBeatsGenericStaleFallback(t *testing.T
 }
 
 func TestPrepareMessagesForLLM_LongLogReducerBeatsShellSuccessMarker(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			MinToolResultsPrune:  1,
@@ -491,7 +491,7 @@ func TestPrepareMessagesForLLM_LongLogReducerBeatsShellSuccessMarker(t *testing.
 }
 
 func TestPrepareMessagesForLLM_OlderToolErrorKeepsImportantDetails(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ErrorAgeTurns:           1,
@@ -526,7 +526,7 @@ func TestPrepareMessagesForLLM_OlderToolErrorKeepsImportantDetails(t *testing.T)
 }
 
 func TestPrepareMessagesForLLM_GenericStaleKeepsHeadTailExcerpt(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			MinToolResultsPrune:  1,
@@ -557,7 +557,7 @@ func TestPrepareMessagesForLLM_GenericStaleKeepsHeadTailExcerpt(t *testing.T) {
 }
 
 func TestPrepareMessagesForLLM_ShellNumberedSourceKeepsExcerpt(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			MinToolResultsPrune:  1,
@@ -604,7 +604,7 @@ func TestPrepareMessagesForLLM_ShellNumberedSourceKeepsExcerpt(t *testing.T) {
 }
 
 func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			MinToolResultsPrune:  1,

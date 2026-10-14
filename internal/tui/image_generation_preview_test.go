@@ -17,6 +17,7 @@ import (
 )
 
 func TestGeneratedImageResultRendersAllThumbnailsWithoutOpeningViewer(t *testing.T) {
+	stubTUITicks(t)
 	for _, tc := range []struct {
 		name                string
 		backend             ImageBackend

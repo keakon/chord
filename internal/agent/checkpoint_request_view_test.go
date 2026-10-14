@@ -93,7 +93,7 @@ func TestCheckpointRequestProjectionConservativeCases(t *testing.T) {
 
 func TestCheckpointProjectionBeforeReductionAndFallbackPreparation(t *testing.T) {
 	for _, disabled := range []bool{false, true} {
-		a := newTestMainAgent(t, t.TempDir())
+		a := &MainAgent{}
 		if disabled {
 			cfg := &config.Config{}
 			if err := yaml.Unmarshal([]byte("context:\n  reduction: false\n"), cfg); err != nil {

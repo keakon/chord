@@ -74,6 +74,7 @@ make fmt-check
 make deps-check
 make test-cover    # CI requires total coverage >= 80.0%.
 make race
+make stress        # Full lifecycle repetition and resource-leak checks.
 make vet
 make staticcheck
 make gopls-check
@@ -99,6 +100,14 @@ make race PKGS=./internal/tui
 ```
 
 If your changes touch TUI performance-critical paths, also run the checks in [Performance-sensitive changes](#performance-sensitive-changes).
+
+The ordinary takeover tests cover successful saves, retryable failures and resource
+release with a small number of repetitions. `make stress` runs all 200 takeover
+cycles and the high-volume concurrent recovery writes under the race detector,
+using `scripts/check_ci_stress.sh` and the ordinary race gate's output checks.
+Both `make ci` and GitHub Actions include the full stress workload, with Actions
+running it in a separate job. `CHORD_TEST_STRESS=1` also enables the full
+workload when invoking the selected tests directly.
 
 Optional integration tests that require external tools are not part of the default CI run. To run the real Pyright LSP integration test locally, install `pyright-langserver` and run:
 

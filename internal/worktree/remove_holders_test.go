@@ -11,6 +11,7 @@ import (
 // resolver is consulted on the removal path itself rather than only by the
 // caller's earlier check.
 func TestRemoveRefusesWhileAHolderIsReported(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
@@ -44,6 +45,7 @@ func TestRemoveRefusesWhileAHolderIsReported(t *testing.T) {
 // Losing the tree's contents and pulling the directory out from under running
 // work are different consents.
 func TestRemoveHonorsHoldersEvenWhenForced(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
@@ -65,6 +67,7 @@ func TestRemoveHonorsHoldersEvenWhenForced(t *testing.T) {
 // TestRemoveProceedsWhenNothingHoldsTheCheckout is the counterpart: an empty
 // answer is a real "nothing is using it", and the removal goes through.
 func TestRemoveProceedsWhenNothingHoldsTheCheckout(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
@@ -93,6 +96,7 @@ func TestRemoveProceedsWhenNothingHoldsTheCheckout(t *testing.T) {
 // finish path is wired to the same guard: FinishOptions.Holders reaches
 // Remove, so a finish does not delete a checkout that is still in use.
 func TestFinishReclaimRefusesWhileAHolderIsReported(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)

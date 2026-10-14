@@ -170,7 +170,7 @@ func TestCheckpointBodyTypedStateSurvivesGenerationChain(t *testing.T) {
 	// re-renders it, so decisions accumulate up to the cap with the newest
 	// submission always first, and the omission is disclosed on the round
 	// that would overflow.
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	generation := func(prior string, decisions []string) string {
 		snapshot := []message.Message{{Role: message.RoleUser, Content: prior, IsCompactionSummary: true}, {Role: message.RoleUser, Content: "continue"}}
 		req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "continue", NextStep: "go", Decisions: decisions}}
@@ -405,7 +405,7 @@ func TestMergePriorTypedCheckpointStateDisclosesUnreadableCarry(t *testing.T) {
 	}
 
 	// End to end through the render chain: the note must land in the summary.
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	snapshot := []message.Message{
 		{Role: message.RoleUser, Content: prior, IsCompactionSummary: true},
 		{Role: message.RoleUser, Content: "continue"},
@@ -423,7 +423,7 @@ func TestMergePriorTypedCheckpointStateDisclosesUnreadableCarry(t *testing.T) {
 // carry them — classification, evidence association and status — because
 // mergePriorTypedCheckpointState keeps the merged claim set on the request.
 func TestCrossGenerationCarriedClaimsSurviveWithoutRestatement(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	// Round 1: a model declares two claims with kinds + evidence.
 	round1Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
 		ActiveObjective: "continue",
@@ -480,7 +480,7 @@ func TestCrossGenerationCarriedClaimsSurviveWithoutRestatement(t *testing.T) {
 // come back active in round 2 when the model does not restate it. Status
 // travels in the typed block, not as a re-derivation from live evidence.
 func TestCarriedInvalidatedClaimStaysInvalidatedWithoutItsEvidence(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	invalidatedID := evidenceItemID(evidenceItem{Key: "ev-gone"})
 	round1Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
 		ActiveObjective: "continue",
@@ -526,7 +526,7 @@ func TestCarriedInvalidatedClaimStaysInvalidatedWithoutItsEvidence(t *testing.T)
 // Invalidated is the carried claim's state, not a tombstone that blocks a
 // deliberate re-assertion.
 func TestRestatedInvalidatedClaimReadsFreshActive(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	invalidatedID := evidenceItemID(evidenceItem{Key: "ev-gone"})
 	freshID := evidenceItemID(evidenceItem{Key: "ev-new-1"})
 	round1Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
@@ -693,7 +693,7 @@ func TestMergeTypedClaimsBoundsCarriedSetAndDisclosesOmission(t *testing.T) {
 	}
 
 	// The disclosure note reaches the rendered checkpoint.
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	priorBody := "## Key Decisions\n- d-old\n\n## Typed Checkpoint State\n" + renderTypedStateJSON(checkpointTypedState{Claims: prior})
 	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{ActiveObjective: "continue", NextStep: "go", Decisions: []string{"fresh decision"}}}
 	req, _, claimsOmitted, _, _ := mergePriorTypedCheckpointState(req, priorBody)
@@ -721,7 +721,7 @@ func TestMergeTypedClaimsBoundsCarriedSetAndDisclosesOmission(t *testing.T) {
 // carry one instead of silently dropping the first generation's
 // machine-carryable state.
 func TestTypedCarrySurvivesUsageSummaryBetweenModelDrivenCheckpoints(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	evID := evidenceItemID(evidenceItem{Key: "ev-1"})
 	round1Req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
 		ActiveObjective: "continue",
@@ -783,7 +783,7 @@ func TestTypedCarrySurvivesUsageSummaryBetweenModelDrivenCheckpoints(t *testing.
 // parse the raw body — not just the appendix-stripped body — to recover the
 // typed line from the appendix.
 func TestTypedCarryRecoveredFromUsageCheckpointAppendix(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	appendix := "## Key Decisions\n- carried via appendix\n\n## Typed Checkpoint State\n" +
 		renderTypedStateJSON(checkpointTypedState{Decisions: []string{"d1: archived decision"}, StageID: "impl", StageStatus: "candidate", Kind: "provisional"})
 	// Mirrors the usage-driven runner: appendPriorCheckpointCarry appends the
@@ -929,7 +929,7 @@ func TestTypedStateSurvivesTwoRealGenericAppliesIntoModelDriven(t *testing.T) {
 // invalidated — the ref simply cannot be resolved any more, which is
 // functionally the same for the rendered posture.
 func TestRestatedClaimWithArchivedEvidenceIsDemoted(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	archivedID := evidenceItemID(evidenceItem{Key: "ev-archived"})
 	req := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
 		ActiveObjective: "continue",
@@ -1021,7 +1021,7 @@ func TestMarkTypedClaimsInvalidatedResolvesOnlyLiveEvidence(t *testing.T) {
 // parse the prior claims/decisions out of the `## Previous Checkpoint`
 // appendix instead of silently losing them.
 func TestTypedCarrySurvivesOverLimitAppendixThroughUsageSummary(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	// A model-driven checkpoint body whose typed line sits after the rune cap.
 	claims := map[string]checkpointClaim{
 		"feature works": {Kind: "observed", EvidenceRefs: []string{"ev-1"}, Status: typedClaimStatusActive},

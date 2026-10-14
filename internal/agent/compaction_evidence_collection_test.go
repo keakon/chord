@@ -57,8 +57,7 @@ func TestBuildTruncateOnlySummaryIncludesFilesAndEvidenceSection(t *testing.T) {
 }
 
 func TestRecordEvidenceFromMessageCapturesToolErrorAndDiff(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := &MainAgent{}
 	a.recordEvidenceFromMessage(message.Message{Role: "tool", Content: "go test failed\n\nError: exit code 1", ToolDiff: "+ changed\n- old"})
 	if got := a.evidence.len(); got != 2 {
 		t.Fatalf("len(evidenceCandidates) = %d, want 2", got)
@@ -66,8 +65,7 @@ func TestRecordEvidenceFromMessageCapturesToolErrorAndDiff(t *testing.T) {
 }
 
 func TestRecordEvidenceFromMessageCapturesToolStatusErrorWithoutErrorPrefix(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := &MainAgent{}
 	a.recordEvidenceFromMessage(message.Message{
 		Role:       "tool",
 		Content:    "patch makes no changes. No files were modified",
@@ -82,8 +80,7 @@ func TestRecordEvidenceFromMessageCapturesToolStatusErrorWithoutErrorPrefix(t *t
 }
 
 func TestSuccessfulToolOutputContainingErrorIsNotFailureEvidence(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := &MainAgent{}
 	a.recordEvidenceFromMessage(message.Message{
 		Role:       message.RoleTool,
 		Content:    `source contains "Error:" as a string literal`,
@@ -283,8 +280,7 @@ func TestToolFailureSupersededOnlyOnMatchingTargets(t *testing.T) {
 }
 
 func TestEvidenceToolErrorPackSkipsSupersededTrackerCandidate(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := &MainAgent{}
 	a.ctxMgr = ctxmgr.NewManager(100000, 0.5)
 	msgs := []message.Message{
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
@@ -349,7 +345,7 @@ func TestCollectCompactionEvidenceClassifiesTypedMailbox(t *testing.T) {
 // --------------------------------------------------------------------------
 
 func TestEvidenceTrackerSequenceKeepsGrowingAfterSaturation(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	total := maxEvidenceCandidates + 12
 	for i := range total {
 		a.recordEvidenceFromMessage(message.Message{

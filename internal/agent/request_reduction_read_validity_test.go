@@ -15,7 +15,7 @@ import (
 )
 
 func TestPrepareMessagesForLLM_ReducedReadBecomesStaleAfterTailEdit(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		MinToolResultsPrune:  1,
 		ReadLikeAgeTurns:     1,
@@ -55,7 +55,7 @@ func TestPrepareMessagesForLLM_ReducedReadBecomesStaleAfterMutatingShell(t *test
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile initial: %v", err)
 	}
-	a := newTestMainAgent(t, projectRoot)
+	a := newReductionTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		MinToolResultsPrune:  1,
@@ -99,7 +99,7 @@ func TestPrepareMessagesForLLM_ShellInvalidationVerdictMemoizedPerShell(t *testi
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile initial: %v", err)
 	}
-	a := newTestMainAgent(t, projectRoot)
+	a := newReductionTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		MinToolResultsPrune:  1,
@@ -193,7 +193,7 @@ func TestPrepareMessagesForLLM_RestoredReadBecomesStaleAfterMutatingShell(t *tes
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 2\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile changed: %v", err)
 	}
-	a := newTestMainAgent(t, projectRoot)
+	a := newReductionTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		MinToolResultsPrune:  1,
@@ -232,7 +232,7 @@ func TestPrepareMessagesForLLM_RestoredShellOnlyInvalidatesEarlierReads(t *testi
 		t.Fatalf("WriteFile changed A: %v", err)
 	}
 	stateB := readFileStateForTest(pathB)
-	a := newTestMainAgent(t, projectRoot)
+	a := newReductionTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.NewShellTool("bash"))
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		MinToolResultsPrune:  1,

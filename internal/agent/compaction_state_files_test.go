@@ -25,7 +25,7 @@ func TestCompactionStateFilesPrecedeKeyFilesUnderBudget(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectRoot, "source.go"), []byte(strings.Repeat("source body\n", 100)), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	agent := newTestMainAgent(t, projectRoot)
+	agent := newContextPolicyTestAgent(projectRoot)
 	agent.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	summary := "## Files and Evidence\n- source.go\n\n## Externalized State\n- .chord/notes/resume.md\n- source.go\n"
 	paths := agent.compactionContinuationFiles(summary)
@@ -129,7 +129,7 @@ func TestCompactionContinuationFilesLoadsInRootAbsoluteSymlink(t *testing.T) {
 	if err := os.Symlink(real, filepath.Join(projectRoot, "state.md")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	summary := "## Externalized State\n- state.md\n"
@@ -161,7 +161,7 @@ func TestCheckpointReadConfinementRejectsSwappedSymlink(t *testing.T) {
 	if got := extractCompactionStateFiles("## Externalized State\n- state.md\n", projectRoot); !slices.Equal(got, []string{"state.md"}) {
 		t.Fatalf("regular file must pass extraction, got %v", got)
 	}
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 
 	outside := filepath.Join(t.TempDir(), "outside.md")
 	if err := os.WriteFile(outside, []byte("secret"), 0o600); err != nil {
@@ -198,7 +198,7 @@ func TestCompactionContinuationFilesGateStateFilesByReadPermission(t *testing.T)
 		t.Fatalf("write notes: %v", err)
 	}
 
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	a.ctxMgr.SetTokenBudgets(120000, 120000, 120000, 0)
 	summary := "## Externalized State\n- .chord/notes/task.md\n\n## Next Step\n- continue"
@@ -259,7 +259,7 @@ func TestCompactionContinuationFilesRejectedDeclaredPathIsNotReaddedByKeyFiles(t
 		t.Fatalf("write notes: %v", err)
 	}
 
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 	a.ruleset = permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
 		{Permission: tools.NameRead, Pattern: ".chord/notes/*", Action: permission.ActionDeny},
@@ -278,7 +278,7 @@ func TestCompactionContinuationFilesGateKeyFilesByReadPermission(t *testing.T) {
 		t.Fatalf("write key file: %v", err)
 	}
 
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 	a.ruleset = permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
 		{Permission: tools.NameRead, Pattern: "*.go", Action: permission.ActionAsk},
@@ -303,7 +303,7 @@ func TestCompactionContinuationFilesInjectUnderYolo(t *testing.T) {
 		t.Fatalf("write notes: %v", err)
 	}
 
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 	a.SetInitialYoloMode(true)
 	// Deliberately no rules at all: the pre-fix gate evaluated the YOLO-
 	// filtered ruleset, found no read rules, and re-loaded nothing.

@@ -62,7 +62,7 @@ func TestRetentionRequestsCountExactlyOncePerRequest(t *testing.T) {
 	}
 
 	// The real per-request finalization path counts each prepared request once.
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.setContextReductionStats(retentionStatsFixture())
 	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, requesttrim.Policy{})
 	if a.retentionSignals.Requests != 1 {
@@ -111,7 +111,7 @@ func TestAppendWindowRetentionSignalsDiagnostic(t *testing.T) {
 }
 
 func TestRetentionSignalsAccumulateAcrossRequestsAndApply(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	// Each production request prepares once: rememberPreparedLLMRequest is
 	// that single per-request finalization point, so driving the merge through
 	// it mirrors the real request path.
@@ -159,7 +159,7 @@ func TestRetentionSignalsAccumulateAcrossRequestsAndApply(t *testing.T) {
 }
 
 func TestCompactionAppliedEventCarriesWindowRetentionSignals(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	var events []analytics.UsageEvent
 	a.SetUsageEventSink(func(event analytics.UsageEvent) { events = append(events, event) })
 
@@ -202,7 +202,7 @@ func TestCompactionAppliedEventCarriesWindowRetentionSignals(t *testing.T) {
 }
 
 func TestSessionRetentionSignalsResetClearsWindow(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.setContextReductionStats(retentionStatsFixture())
 	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, requesttrim.Policy{})
 

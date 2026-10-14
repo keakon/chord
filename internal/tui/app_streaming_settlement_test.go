@@ -9,6 +9,7 @@ import (
 )
 
 func TestLateStreamTailAfterIdleMergesIntoSettledCard(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 	assistantCards := func() []*Block {
@@ -105,6 +106,7 @@ func TestLateStreamTailAfterIdleMergesIntoSettledCard(t *testing.T) {
 // record the tail opens a second card holding the last fragment of the same
 // reply.
 func TestStreamContinueRecordsSettledSegmentForLateTail(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 
@@ -138,6 +140,7 @@ func TestStreamContinueRecordsSettledSegmentForLateTail(t *testing.T) {
 // already shows what the segment's deltas streamed, so the payload is dropped
 // like any other late event with a settled owner.
 func TestLateThinkingPayloadAfterSettleKeepsOneCard(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 
@@ -171,6 +174,7 @@ func TestLateThinkingPayloadAfterSettleKeepsOneCard(t *testing.T) {
 // second thinking card would render it twice. Late deltas of the same
 // segment already drop on a cold card.
 func TestLateThinkingPayloadAfterSettleKeepsOneCardWhenSpilled(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 
@@ -213,6 +217,7 @@ func TestLateThinkingPayloadAfterSettleKeepsOneCardWhenSpilled(t *testing.T) {
 // The blocks are read from the raw viewport because a SubAgent's cards are
 // filtered out of the focused main transcript.
 func TestLateThinkingPayloadGuardKeepsSecondThinkingBlock(t *testing.T) {
+	stubTUITicks(t)
 	const agentID = "agent-1"
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
@@ -274,6 +279,7 @@ func TestLateThinkingPayloadGuardKeepsSecondThinkingBlock(t *testing.T) {
 // streaming into: settling it detaches the card, so the newer segment's next
 // delta opens a second card holding the rest of the same reasoning.
 func TestLateThinkingEndDoesNotSettleNewerLiveCard(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 
@@ -303,6 +309,7 @@ func TestLateThinkingEndDoesNotSettleNewerLiveCard(t *testing.T) {
 // is still streaming, so its remaining deltas open a card of their own instead of
 // folding into a card the rebuild just dropped (which would lose them).
 func TestPostRebuildDeltaOpensItsOwnCard(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{messages: []message.Message{
 		{Role: message.RoleUser, Content: "hi"},
 		{Role: message.RoleAssistant, Content: "hello world"},
@@ -341,6 +348,7 @@ func TestPostRebuildDeltaOpensItsOwnCard(t *testing.T) {
 // not the turn, is what identifies a streaming segment: a newer request of the
 // same turn must not append its text to the previous request's card.
 func TestStreamSegmentEndSeparatesRequestsOfOneTurn(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 
@@ -389,6 +397,7 @@ func TestStreamSegmentEndSeparatesRequestsOfOneTurn(t *testing.T) {
 // queued user card but must not settle a streaming assistant card whose producer
 // has not reported its segment end.
 func TestPendingDraftCommitKeepsUnendedStreamStreaming(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 
@@ -415,6 +424,7 @@ func TestPendingDraftCommitKeepsUnendedStreamStreaming(t *testing.T) {
 // SubAgent's ActivityIdle, which is emitted before its request goroutine flushes
 // the tail of the cancelled request.
 func TestSubAgentActivityIdleKeepsUnendedStreamStreaming(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 
@@ -444,6 +454,7 @@ func TestSubAgentActivityIdleKeepsUnendedStreamStreaming(t *testing.T) {
 // opening, and the card settles only on the producer's segment end — not on the
 // scheduling idle that follows the cancel.
 func TestStreamingReplySplitMidFenceStaysInOneCard(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 	assistantCards := func() []*Block {
@@ -498,6 +509,7 @@ func TestStreamingReplySplitMidFenceStaysInOneCard(t *testing.T) {
 // the settle authority: the segment end settles a thinking card even when the
 // request produced no assistant text.
 func TestSegmentEndSettlesThinkingCardWithoutAssistant(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 
@@ -524,6 +536,7 @@ func TestSegmentEndSettlesThinkingCardWithoutAssistant(t *testing.T) {
 // that would split the new reply onto a second thinking card once the first
 // delta arrives.
 func TestLateSegmentEndDoesNotSettleNewerThinkingPlaceholder(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 
@@ -566,6 +579,7 @@ func TestLateSegmentEndDoesNotSettleNewerThinkingPlaceholder(t *testing.T) {
 // of the late-text-tail fallback: a delta arriving after its thinking card
 // settled merges back into that card instead of opening a second one.
 func TestLateThinkingTailMergesIntoSettledThinkingCard(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 	thinkingCards := func() []*Block {
@@ -602,6 +616,7 @@ func TestLateThinkingTailMergesIntoSettledThinkingCard(t *testing.T) {
 // a second request of the same turn must still open a card of its own. Turn-level
 // attribution would take its text for a stale tail and drop it.
 func TestSameTurnNextRequestOpensNewCard(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
 

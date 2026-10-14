@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/modelcatalog"
+	"github.com/keakon/chord/internal/testgit"
 )
 
 // sourceFiles are the minimal verified catalog sources for the upstream
@@ -56,40 +57,20 @@ sources:
 // acts as the "remote" for refresh, so the test never touches a network.
 func initUpstreamRepo(t *testing.T, tag string, withCandidates bool) string {
 	t.Helper()
-	dir := t.TempDir()
-	run := func(args ...string) {
-		cmd := exec.Command("git", args...)
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.invalid",
-			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.invalid")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
-		}
-	}
+	files := make(map[string]string, len(sourceFiles)+1)
 	for name, content := range sourceFiles {
-		if name == "catalog.yaml" {
-			// The catalog version follows the tag, so every test's fixture is
-			// as new as its tag claims.
-			content = `version: "` + strings.TrimPrefix(tag, "v") + `"
-`
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		files[name] = content
 	}
+	files["catalog.yaml"] = "version: \"" + strings.TrimPrefix(tag, "v") + "\"\n"
 	if withCandidates {
-		if err := os.MkdirAll(filepath.Join(dir, "candidates"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "candidates", "gpt-6.1-sol-messages.yaml"), []byte(candidateFile), 0o600); err != nil {
-			t.Fatal(err)
-		}
+		files["candidates/gpt-6.1-sol-messages.yaml"] = candidateFile
 	}
-	run("init", "-b", "main")
-	run("add", ".")
-	run("commit", "-m", "fixture catalog")
-	run("tag", tag)
+	dir := testgit.NewRepository(t, files)
+	cmd := exec.Command("git", "tag", tag)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("tag fixture: %v: %s", err, out)
+	}
 	return dir
 }
 

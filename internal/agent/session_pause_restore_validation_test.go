@@ -17,13 +17,15 @@ import (
 func TestPausedSessionRestoreValidatesDependenciesBeforeActivation(t *testing.T) {
 	for _, paused := range []bool{true, false} {
 		t.Run(map[bool]string{true: "paused", false: "pending_before_dispatch"}[paused], func(t *testing.T) {
+			// Rejected restores must leave this live owner untouched. Keep one
+			// owner for the matrix and give every invalid target an isolated path.
+			a := newReadyTestMainAgent(t)
+			installTakeoverTestLock(t, a)
+			oldPath, oldLock, oldGate := a.SessionDir(), a.sessionLock, a.sessionExecutionGate()
 			for _, consumer := range []string{"load", "startup", "takeover"} {
 				for _, dependency := range []string{"main_role", "task_role", "main_role_mode", "task_role_mode", "metadata", "working_directory", "working_directory_file"} {
 					t.Run(consumer+"/"+dependency, func(t *testing.T) {
-						a := newReadyTestMainAgent(t)
-						installTakeoverTestLock(t, a)
-						oldPath, oldLock, oldGate := a.SessionDir(), a.sessionLock, a.sessionExecutionGate()
-						path, id := createPausedTakeoverTarget(t, a, "paused-target")
+						path, id := createPausedTakeoverTarget(t, a, consumer+"-"+dependency)
 						a.agentConfigs = map[string]*config.AgentConfig{
 							"main-sample":   {Name: "main-sample"},
 							"worker-sample": {Name: "worker-sample", Mode: config.AgentModeSubAgent},

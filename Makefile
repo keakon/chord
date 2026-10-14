@@ -15,9 +15,9 @@ GOPLS ?= gopls
 MODERNIZE_VERSION ?= v0.50.0
 MODERNIZE ?= $(GO) run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@$(MODERNIZE_VERSION)
 
-.PHONY: ci fmt fmt-check deps-check test test-cover race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check bench-tui clean
+.PHONY: ci fmt fmt-check deps-check test test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check bench-tui clean
 
-ci: fmt-check deps-check test-cover race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check
+ci: fmt-check deps-check test-cover stress race vet staticcheck gopls-check modernize-check deadcode-check docs-check docs-examples-check
 
 # fmt / fmt-check cover every Go file Git tracks or would add. Ignored private
 # trees (for example .chord/) must never block the gate or get rewritten by it.
@@ -41,6 +41,9 @@ test:
 
 test-cover:
 	CHORD_GO='$(GO)' CHORD_TEST_COUNT=1 ./scripts/check_ci_local.sh $(PKGS)
+
+stress:
+	CHORD_GO='$(GO)' ./scripts/check_ci_stress.sh
 
 race:
 	./scripts/check_ci_race.sh $(PKGS)

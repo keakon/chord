@@ -53,6 +53,34 @@ jobs:
           CHORD_TEST_COUNT: "1"
         run: scripts/check_ci_local.sh
 
+  stress:
+    name: Lifecycle stress with race detector
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Warm Go build cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$(mktemp)"
+          if ! go list -deps -test ./cmd/chord ./internal/recovery >/dev/null 2>"${log}"; then
+            cat "${log}" >&2
+            rm -f "${log}"
+            exit 1
+          fi
+          rm -f "${log}"
+
+      - name: Stress
+        run: scripts/check_ci_stress.sh
+
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-latest

@@ -15,6 +15,7 @@ import (
 	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/testgit"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/worktree"
 )
@@ -57,16 +58,7 @@ func agentTestGitOutput(t *testing.T, dir string, args ...string) string {
 // canonical path, matching the spelling worktree.Create reports.
 func newWorktreeTestRepo(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skipf("git not available: %v", err)
-	}
-	dir := t.TempDir()
-	runAgentTestGit(t, dir, "init", "-q", "--initial-branch=main")
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("seed file: %v", err)
-	}
-	runAgentTestGit(t, dir, "add", "README.md")
-	runAgentTestGit(t, dir, "commit", "-q", "-m", "init")
+	dir := testgit.NewRepository(t, map[string]string{"README.md": "hello\n"})
 	canonical, err := config.CanonicalProjectRoot(dir)
 	if err != nil {
 		t.Fatalf("canonical root: %v", err)

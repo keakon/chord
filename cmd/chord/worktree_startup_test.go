@@ -11,6 +11,7 @@ import (
 
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/testgit"
 	"github.com/keakon/chord/internal/worktree"
 )
 
@@ -58,16 +59,7 @@ func writeStartupTestConfig(t *testing.T, body string) {
 
 func setupStartupRepo(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skipf("git not available: %v", err)
-	}
-	dir := t.TempDir()
-	runStartupGit(t, dir, "init", "-q", "--initial-branch=main")
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hi\n"), 0o644); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	runStartupGit(t, dir, "add", "README.md")
-	runStartupGit(t, dir, "commit", "-q", "-m", "init")
+	dir := testgit.NewRepository(t, map[string]string{"README.md": "hi\n"})
 	canonical, err := config.CanonicalProjectRoot(dir)
 	if err != nil {
 		t.Fatalf("canonical: %v", err)

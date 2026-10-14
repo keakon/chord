@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/config"
+	"github.com/keakon/chord/internal/testgit"
 )
 
 // gitTestEnv silences git's interactive prompts and pins identity so
@@ -58,16 +59,7 @@ func gitRevParse(t *testing.T, dir, rev string) string {
 // single commit on its default branch, returns the canonical repo path.
 func setupTestRepo(t *testing.T) string {
 	t.Helper()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skipf("git not available: %v", err)
-	}
-	dir := t.TempDir()
-	runTestGit(t, dir, "init", "-q", "--initial-branch=main")
-	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello\n"), 0o644); err != nil {
-		t.Fatalf("seed file: %v", err)
-	}
-	runTestGit(t, dir, "add", "README.md")
-	runTestGit(t, dir, "commit", "-q", "-m", "init")
+	dir := testgit.NewRepository(t, map[string]string{"README.md": "hello\n"})
 	canonical, err := config.CanonicalProjectRoot(dir)
 	if err != nil {
 		t.Fatalf("canonical: %v", err)
@@ -134,6 +126,7 @@ func assertPathExists(t *testing.T, path string, want bool) {
 }
 
 func TestCreate_Basic(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -164,6 +157,7 @@ func TestCreate_Basic(t *testing.T) {
 // `git worktree add` semantics) and reports MainDirty=true so callers
 // can warn the user that those changes are NOT visible in the worktree.
 func TestCreate_DirtyMainRepo_ReportsMainDirty(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	if err := os.WriteFile(filepath.Join(repo, "dirty.txt"), []byte("uncommitted\n"), 0o644); err != nil {
@@ -179,6 +173,7 @@ func TestCreate_DirtyMainRepo_ReportsMainDirty(t *testing.T) {
 }
 
 func TestCreate_FastResume(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -202,6 +197,7 @@ func TestCreate_FastResume(t *testing.T) {
 }
 
 func TestCreate_RefusesLeftoverBranchWithoutReset(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -247,6 +243,7 @@ func TestCreate_RefusesLeftoverBranchWithoutReset(t *testing.T) {
 // binding to a directory that is not there, and the stale registration must be
 // dropped so the branch guard owns what happens next.
 func TestCreate_PrunesStaleRegistrationInsteadOfResumingIt(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -288,6 +285,7 @@ func TestCreate_NotAGitRepo(t *testing.T) {
 }
 
 func TestCreate_RejectsNestedWorktree(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -303,6 +301,7 @@ func TestCreate_RejectsNestedWorktree(t *testing.T) {
 }
 
 func TestCreate_FromSubdirectory_FindsMainRoot(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	sub := filepath.Join(repo, "sub")
@@ -319,6 +318,7 @@ func TestCreate_FromSubdirectory_FindsMainRoot(t *testing.T) {
 }
 
 func TestList_FiltersByBranchPrefix(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -351,6 +351,7 @@ func TestList_FiltersByBranchPrefix(t *testing.T) {
 }
 
 func TestGitMainRootResolvesBareRepositoryToItself(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	seed := setupTestRepo(t)
 	bare := filepath.Join(t.TempDir(), "repo.git")
@@ -377,6 +378,7 @@ func TestGitMainRootResolvesBareRepositoryToItself(t *testing.T) {
 }
 
 func TestRemove_PreservesBranchAndSessions(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -410,6 +412,7 @@ func TestRemove_PreservesBranchAndSessions(t *testing.T) {
 }
 
 func TestRemove_DeleteBranch_OnUnmergedRefuses(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -474,6 +477,7 @@ func TestRemove_DeleteBranch_OnUnmergedRefuses(t *testing.T) {
 }
 
 func TestRemove_DeleteBranch_OnMergedDeletesBranch(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -496,6 +500,7 @@ func TestRemove_DeleteBranch_OnMergedDeletesBranch(t *testing.T) {
 }
 
 func TestBranchFullyMergedTracksHead(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -525,6 +530,7 @@ func TestBranchFullyMergedTracksHead(t *testing.T) {
 }
 
 func TestRemove_DirtyRefusedWithoutForce(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -545,6 +551,7 @@ func TestRemove_DirtyRefusedWithoutForce(t *testing.T) {
 }
 
 func TestRemove_ForceRemovesDirtyAndBranch(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -591,6 +598,7 @@ func TestRemove_RefusesCwdSelf(t *testing.T) {
 // be taken back, so a refusal that only arrived at the deletion step would leave
 // the main line already advanced while the checkout survives.
 func TestFinish_RefusesBeforeTouchingTheMainLineWhenHeld(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -632,6 +640,7 @@ func TestFinish_RefusesBeforeTouchingTheMainLineWhenHeld(t *testing.T) {
 }
 
 func TestFinish_Basic_MergesOntoThenSquashesAndReclaims(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -695,6 +704,7 @@ func TestFinish_Basic_MergesOntoThenSquashesAndReclaims(t *testing.T) {
 }
 
 func TestFinish_WhenWorktreeOnlyBehindMain_ReclaimsWithoutSquashCommit(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -740,6 +750,7 @@ func TestFinish_WhenWorktreeOnlyBehindMain_ReclaimsWithoutSquashCommit(t *testin
 }
 
 func TestFinish_UsesCustomSquashMessageWhenProvided(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -765,6 +776,7 @@ func TestFinish_UsesCustomSquashMessageWhenProvided(t *testing.T) {
 }
 
 func TestFinish_RestoresOriginalMainBranchAfterSquashFinish(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -800,6 +812,7 @@ func TestFinish_RestoresOriginalMainBranchAfterSquashFinish(t *testing.T) {
 }
 
 func TestFinish_RefusesExistingRebaseInProgress(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -823,6 +836,7 @@ func TestFinish_RefusesExistingRebaseInProgress(t *testing.T) {
 }
 
 func TestFinish_RefusesExistingMergeInProgress(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -1064,6 +1078,7 @@ func TestFinish_ReportsMissingCommitIdentity_WhenMergeCommitRequiredWithoutTreeD
 }
 
 func TestFinish_NoNetTreeDiff_ReclaimsWithoutChangingMain(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -1085,6 +1100,7 @@ func TestFinish_NoNetTreeDiff_ReclaimsWithoutChangingMain(t *testing.T) {
 }
 
 func TestFinish_RefusesDirtyWorktree(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -1105,6 +1121,7 @@ func TestFinish_RefusesDirtyWorktree(t *testing.T) {
 }
 
 func TestFinish_RefusesDirtyMainRepo(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -1121,6 +1138,7 @@ func TestFinish_RefusesDirtyMainRepo(t *testing.T) {
 }
 
 func TestFinish_RefusesNilPathLocator(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 	if _, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: setupTestLocator(t)}); err != nil {
@@ -1133,6 +1151,7 @@ func TestFinish_RefusesNilPathLocator(t *testing.T) {
 }
 
 func TestFinish_CheckAllowsNilPathLocator(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 	if _, err := Create(ctx, CreateOptions{Name: "feat", RepoRoot: repo, PathLocator: setupTestLocator(t)}); err != nil {
@@ -1145,6 +1164,7 @@ func TestFinish_CheckAllowsNilPathLocator(t *testing.T) {
 }
 
 func TestFinish_MergeConflictError_LeavesWorktreeForResolution(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -1200,6 +1220,7 @@ func TestFinish_MergeConflictError_LeavesWorktreeForResolution(t *testing.T) {
 }
 
 func TestFinish_Check_SucceedsWithoutMutatingRealWorktree(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -1250,6 +1271,7 @@ func TestFinish_Check_SucceedsWithoutMutatingRealWorktree(t *testing.T) {
 }
 
 func TestFinish_NoNetDiff_ReclaimsWithoutChangingMain(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -1287,6 +1309,7 @@ func TestFinish_NoNetDiff_ReclaimsWithoutChangingMain(t *testing.T) {
 }
 
 func TestFinish_Check_ReportsConflictsWithoutLeavingRealWorktreeDirty(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -1340,6 +1363,7 @@ func TestFinish_Check_ReportsConflictsWithoutLeavingRealWorktreeDirty(t *testing
 }
 
 func TestIsInsideLinkedWorktree_MainRepoSubdirIsFalse(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	sub := filepath.Join(repo, "sub")
 	if err := os.MkdirAll(sub, 0o755); err != nil {
@@ -1355,6 +1379,7 @@ func TestIsInsideLinkedWorktree_MainRepoSubdirIsFalse(t *testing.T) {
 }
 
 func TestIsInsideLinkedWorktree_LinkedTrue(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	info, err := Create(context.Background(), CreateOptions{Name: "x", RepoRoot: repo, PathLocator: pl})
@@ -1409,6 +1434,7 @@ func TestNormalizeBranchPrefix(t *testing.T) {
 }
 
 func TestCreate_RespectsCustomBranchPrefix(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()

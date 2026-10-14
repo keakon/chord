@@ -48,7 +48,7 @@ func TestMainContextDiagnosticsRequestAndHistory(t *testing.T) {
 	}
 }
 func TestDiagnosticReductionFrozenRatioAndUnavailableWorker(t *testing.T) {
-	a := newReadyTestMainAgent(t)
+	a := &MainAgent{}
 	before := []message.Message{{Role: message.RoleUser, Content: "sample sample sample"}}
 	after := []message.Message{{Role: message.RoleUser, Content: "sample"}}
 	a.freezeDiagnosticReduction(before, after, 0.5)

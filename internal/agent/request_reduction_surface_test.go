@@ -15,7 +15,7 @@ import (
 )
 
 func TestPrepareMessagesForLLM_StableReuseHonorsDueFrontier(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		MinToolResultsPrune:  1,
 		StaleAgeTurns:        2,
@@ -176,7 +176,7 @@ func TestPrepareMessagesForLLM_SkipsStableReuseWhenToolCallIDIsReusedForDifferen
 }
 
 func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIncrease(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context:   config.ContextConfig{Reduction: config.ContextReductionConfig{MinIncrementalTokens: 4096}},
 		Providers: map[string]config.ProviderConfig{"codex": {Preset: config.ProviderPresetCodex}},
@@ -251,7 +251,7 @@ func TestPrepareMessagesForLLM_ReusesStableReductionSurfaceForSmallLowPressureIn
 // prefix messages and the new tail are re-examined. This keeps the frozen prefix
 // cache-stable across turns within an agent loop.
 func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -348,7 +348,7 @@ func TestPrepareMessagesForLLM_IncrementalFreezesAlreadyReducedPrefix(t *testing
 // age was below the threshold) gets re-examined and reduced in the second pass
 // when its age crosses the threshold. This is the user's "part 2" of the 3-part model.
 func TestPrepareMessagesForLLM_IncrementalReExaminesNotYetReducedPrefix(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     2, // need 2 user turns before reduction
@@ -414,7 +414,7 @@ func TestPrepareMessagesForLLM_IncrementalReExaminesNotYetReducedPrefix(t *testi
 // the tool-definition surface changes, the frozen prefix is invalidated and a full
 // re-reduction occurs (the user's "tool update → full re-reduction" requirement).
 func TestPrepareMessagesForLLM_IncrementalDisabledOnToolDefChange(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -474,7 +474,7 @@ func TestPrepareMessagesForLLM_IncrementalDisabledOnToolDefChange(t *testing.T) 
 }
 
 func TestPrepareMessagesForLLM_IncrementalDisabledOnInputSchemaChange(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,

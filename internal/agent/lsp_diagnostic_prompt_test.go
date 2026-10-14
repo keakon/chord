@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"github.com/keakon/chord/internal/ctxmgr"
+
 	"strings"
 	"testing"
 
@@ -75,7 +77,7 @@ func TestHasEnabledLSPServers_ProjectOverrideCanDisableGlobalServer(t *testing.T
 // appended to a real ctxmgr rather than handed over as a history slice.
 func TestQueueLSPDiagnosticOverlayFromContext_RequiresRelevantChangedDiagnostics(t *testing.T) {
 	newAgent := func() *MainAgent {
-		a := newReadyTestMainAgent(t)
+		a := &MainAgent{ctxMgr: ctxmgr.NewManager(8192, 0), tools: tools.NewRegistry()}
 		a.pendingLSPDiagnosticOverlay = ""
 		return a
 	}
@@ -160,7 +162,7 @@ func TestLSPDiagnosticOverlay_IsInjectedAsOneShotOverlay(t *testing.T) {
 	if !strings.Contains(pendingLSPDiagnosticOverlayText, "file-editing tool calls") {
 		t.Fatalf("generic LSP overlay must cover Edit, Write, and apply_patch: %q", pendingLSPDiagnosticOverlayText)
 	}
-	a := newReadyTestMainAgent(t)
+	a := &MainAgent{ctxMgr: ctxmgr.NewManager(8192, 0), tools: tools.NewRegistry()}
 	a.modelName = "gpt-4" // Ensure ApplyPatchTool is visible
 	a.tools.Register(tools.ApplyPatchTool{})
 	a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
@@ -200,7 +202,7 @@ func TestLSPDiagnosticOverlay_IsInjectedAsOneShotOverlay(t *testing.T) {
 }
 
 func TestLSPDiagnosticOverlay_MultipleQueuedResultsStillProduceSingleGenericReminder(t *testing.T) {
-	a := newReadyTestMainAgent(t)
+	a := &MainAgent{ctxMgr: ctxmgr.NewManager(8192, 0), tools: tools.NewRegistry()}
 	a.modelName = "gpt-4" // Ensure ApplyPatchTool is visible
 	a.tools.Register(tools.WriteTool{})
 	a.tools.Register(tools.ApplyPatchTool{})
@@ -234,7 +236,7 @@ func TestLSPDiagnosticOverlay_MultipleQueuedResultsStillProduceSingleGenericRemi
 
 func TestLSPDiagnosticOverlay_IsDroppedWhenCurrentRoleNoLongerQualifies(t *testing.T) {
 	t.Run("write permission removed", func(t *testing.T) {
-		a := newReadyTestMainAgent(t)
+		a := &MainAgent{ctxMgr: ctxmgr.NewManager(8192, 0), tools: tools.NewRegistry()}
 		a.tools.Register(tools.WriteTool{})
 		a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
 		payload := &ToolResultPayload{
@@ -258,7 +260,7 @@ func TestLSPDiagnosticOverlay_IsDroppedWhenCurrentRoleNoLongerQualifies(t *testi
 	})
 
 	t.Run("LSP disabled", func(t *testing.T) {
-		a := newReadyTestMainAgent(t)
+		a := &MainAgent{ctxMgr: ctxmgr.NewManager(8192, 0), tools: tools.NewRegistry()}
 		a.tools.Register(tools.WriteTool{})
 		a.globalConfig = &config.Config{LSP: config.LSPConfig{"gopls": {Command: "gopls"}}}
 		payload := &ToolResultPayload{
@@ -288,7 +290,7 @@ func TestLSPDiagnosticOverlay_IsDroppedWhenCurrentRoleNoLongerQualifies(t *testi
 // only see "edit". The rendered prompt must always name the edit tool that the
 // current model is actually allowed to use.
 func TestLSPDiagnosticPrompt_UsesLiveVisibleEditToolNameNotFrozenSnapshot(t *testing.T) {
-	a := newReadyTestMainAgent(t)
+	a := &MainAgent{ctxMgr: ctxmgr.NewManager(8192, 0), tools: tools.NewRegistry()}
 	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.EditTool{})
 	a.tools.Register(tools.WriteTool{})

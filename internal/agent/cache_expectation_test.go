@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"github.com/keakon/chord/internal/agent/promptcache"
+	"github.com/keakon/chord/internal/tools"
+
 	"testing"
 	"time"
 
@@ -11,7 +14,7 @@ import (
 )
 
 func TestObservedCacheHitAcceptsSplitInputUsage(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{llmClient: newTestLLMClient(), tools: tools.NewRegistry(), cacheHitTracker: promptcache.NewHitTracker()}
 	a.observedCacheHit("p/m", &message.TokenUsage{InputTokens: 2, CacheReadTokens: 30000})
 	rate, ok := a.cacheHitTracker.HitRate("p/m")
 	if !ok {
@@ -41,7 +44,7 @@ func TestActivateLoadedSessionRestoresHistoricalCacheHitRate(t *testing.T) {
 // cacheable prefix, so replacing them with new durable messages on the next
 // request must read as an append, not as a chord-side prefix rewrite.
 func TestNoteCacheExpectationIgnoresTailOverlayChurn(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{llmClient: newTestLLMClient(), tools: tools.NewRegistry(), cacheHitTracker: promptcache.NewHitTracker()}
 	cfg := llm.NewProviderConfig("p", config.ProviderConfig{Type: config.ProviderTypeResponses, Models: map[string]config.ModelConfig{"gpt-6.1-sol": {}}}, []string{"test-key"})
 	a.llmClient = llm.NewClient(cfg, &recordingLoopTuningProvider{}, "gpt-6.1-sol", 4096, "sys")
 	hash := a.computeToolDefinitionHash()
@@ -95,7 +98,7 @@ func TestCacheExpectationInvalidatesAcrossPromptAndSessionBoundaries(t *testing.
 }
 
 func TestNoteCacheExpectationKeepsOverlayWithoutBoundaryContract(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{llmClient: newTestLLMClient(), tools: tools.NewRegistry(), cacheHitTracker: promptcache.NewHitTracker()}
 	hash := a.computeToolDefinitionHash()
 	first := []message.Message{{Role: message.RoleUser, Content: "request"}, {Role: message.RoleUser, Kind: message.KindTurnOverlay, Content: "hint"}}
 	a.noteCacheExpectation("p/m", first, 1, hash, time.Now(), nil)

@@ -151,7 +151,7 @@ func TestCheckpointRequestSourcesRuntimeBuilders(t *testing.T) {
 	if len(items) != 1 || items[0].RequestSource != checkpointRequestSource(request) {
 		t.Fatal("history evidence lacks full request provenance")
 	}
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.recordEvidenceFromMessage(history[0])
 	runtime := a.evidence.snapshot()
 	if len(runtime) != 1 || runtime[0].RequestSource != items[0].RequestSource || runtime[0].Key != items[0].Key {

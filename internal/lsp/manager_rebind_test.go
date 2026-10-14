@@ -59,6 +59,8 @@ func TestRebindToProjectRootKeepsStateForUnchangedRoot(t *testing.T) {
 // diagnostics and the previous one remains served. gopls is optional, so
 // the test skips when it is not installed.
 func TestRebindToProjectRootRerootsRealGopls(t *testing.T) {
+	// Each test owns its workspace and server processes.
+	t.Parallel()
 	gopls, err := exec.LookPath("gopls")
 	if err != nil {
 		t.Skip("gopls not installed: skipping the real language-server round trip")

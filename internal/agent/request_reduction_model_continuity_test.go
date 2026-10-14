@@ -42,7 +42,7 @@ func TestPrepareMessagesForLLM_WrapUpGraceDoesNotProtectAfterModelSwitch(t *test
 
 func TestPrepareMessagesForLLM_DoesNotProtectWarmPromptCacheSurfaceOnSameModelRun(t *testing.T) {
 	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := newReductionTestMainAgent(t, projectRoot)
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ShellSuccessAgeTurns: 1,
 		ShellSuccessBytes:    10,
@@ -82,7 +82,7 @@ func TestPrepareMessagesForLLM_DoesNotProtectWarmPromptCacheSurfaceOnSameModelRu
 
 func TestPrepareMessagesForLLM_DoesNotProtectWarmPromptCacheSurfaceBeforeThirdSameModelRun(t *testing.T) {
 	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := newReductionTestMainAgent(t, projectRoot)
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ShellSuccessAgeTurns: 1,
 		ShellSuccessBytes:    10,
@@ -224,7 +224,7 @@ func TestPrepareMessagesForLLM_DoesNotReuseFrozenSurfaceAfterModelSwitch(t *test
 func TestApplyAnthropicCacheHintsCountsMetaPrefixAndDurableTail(t *testing.T) {
 	newAnthropicAgent := func(t *testing.T) (*MainAgent, *recordingLoopTuningProvider) {
 		t.Helper()
-		a := newTestMainAgent(t, t.TempDir())
+		a := newReductionTestMainAgent(t, t.TempDir())
 		provider := &recordingLoopTuningProvider{}
 		providerCfg := llm.NewProviderConfig("anthropic", config.ProviderConfig{
 			Type: config.ProviderTypeMessages,
@@ -309,7 +309,7 @@ func TestApplyAnthropicCacheHintsCountsMetaPrefixAndDurableTail(t *testing.T) {
 	})
 
 	t.Run("ignored for non-anthropic provider", func(t *testing.T) {
-		a := newTestMainAgent(t, t.TempDir())
+		a := newReductionTestMainAgent(t, t.TempDir())
 		provider := &recordingLoopTuningProvider{}
 		providerCfg := llm.NewProviderConfig("openai", config.ProviderConfig{
 			Type: config.ProviderTypeChatCompletions,

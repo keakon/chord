@@ -191,14 +191,30 @@ func TestToolActivityRetriesDirectorySyncAfterFailure(t *testing.T) {
 }
 
 func TestToolActivityConcurrentWithMessageWrites(t *testing.T) {
+	testToolActivityConcurrentWithMessageWrites(t, 12)
+}
+
+func TestToolActivityConcurrentWithMessageWritesStress(t *testing.T) {
+	if os.Getenv("CHORD_TEST_STRESS") != "1" {
+		t.Skip("set CHORD_TEST_STRESS=1 to run the full concurrent write workload")
+	}
+	testToolActivityConcurrentWithMessageWrites(t, 200)
+}
+
+func testToolActivityConcurrentWithMessageWrites(t *testing.T, n int) {
+	t.Helper()
 	rm, _ := newTestManager(t)
 	defer rm.Close()
 
-	const n = 200
 	var wg sync.WaitGroup
+	var ready sync.WaitGroup
+	start := make(chan struct{})
 	wg.Add(2)
+	ready.Add(2)
 	go func() {
 		defer wg.Done()
+		ready.Done()
+		<-start
 		for i := range n {
 			rec := ToolActivityRecord{CallID: fmt.Sprintf("call-%d", i), AgentID: "main", Tool: "shell", State: ToolActivityStateStarted}
 			if err := rm.AppendToolActivity(rec); err != nil {
@@ -209,6 +225,8 @@ func TestToolActivityConcurrentWithMessageWrites(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
+		ready.Done()
+		<-start
 		for range n {
 			if err := rm.PersistMessage("main", message.Message{Role: "tool", ToolCallID: "msg-call", Content: "ok"}); err != nil {
 				t.Errorf("PersistMessage: %v", err)
@@ -216,6 +234,8 @@ func TestToolActivityConcurrentWithMessageWrites(t *testing.T) {
 			}
 		}
 	}()
+	ready.Wait()
+	close(start)
 	wg.Wait()
 
 	got, err := rm.LoadToolActivity()

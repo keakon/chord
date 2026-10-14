@@ -11,9 +11,10 @@ if [[ ${#packages[@]} -eq 0 ]]; then
 fi
 stdout_file="$(mktemp)"
 stderr_file="$(mktemp)"
+leaks_file="$(mktemp)"
 
 cleanup() {
-  rm -f "${stdout_file}" "${stderr_file}" /tmp/chord-ci-race-log-leaks.txt
+  rm -f "${stdout_file}" "${stderr_file}" "${leaks_file}"
 }
 trap cleanup EXIT
 
@@ -22,7 +23,7 @@ if ! CI="${CI:-true}" GITHUB_ACTIONS="${GITHUB_ACTIONS:-}" \
   GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-chord-test@example.invalid}" \
   GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Chord Test}" \
   GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-chord-test@example.invalid}" \
-  go test -race -count=1 -timeout=10m "${packages[@]}" \
+  "${CHORD_GO:-go}" test -race -count=1 -timeout=10m "${packages[@]}" \
   >"${stdout_file}" 2>"${stderr_file}"; then
   echo "go test -race failed" >&2
   if [[ -s "${stderr_file}" ]]; then
@@ -43,9 +44,9 @@ if [[ -s "${stderr_file}" ]]; then
 fi
 
 leak_pattern='go: downloading|^\[[DIWE] [0-9]{4}-[0-9]{2}-[0-9]{2} |Created worktree |Entered worktree |Device login URL|user_code:|Complete authorization|Login successful|Credentials written|client_fallback|client_retry|API key permission denied|terminal API error'
-if grep -En "${leak_pattern}" "${stdout_file}" "${stderr_file}" >/tmp/chord-ci-race-log-leaks.txt; then
+if grep -En "${leak_pattern}" "${stdout_file}" "${stderr_file}" >"${leaks_file}"; then
   echo "unexpected CI race test output detected:" >&2
-  cat /tmp/chord-ci-race-log-leaks.txt >&2
+  cat "${leaks_file}" >&2
   exit 1
 fi
 

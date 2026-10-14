@@ -41,15 +41,31 @@ func TestThinkingTranslationsSaveLoadReplacesSlot(t *testing.T) {
 }
 
 func TestThinkingTranslationsConcurrentSavesSameSession(t *testing.T) {
+	testThinkingTranslationsConcurrentSavesSameSession(t, 8)
+}
+
+func TestThinkingTranslationsConcurrentSavesSameSessionStress(t *testing.T) {
+	if os.Getenv("CHORD_TEST_STRESS") != "1" {
+		t.Skip("set CHORD_TEST_STRESS=1 to run the full concurrent save workload")
+	}
+	testThinkingTranslationsConcurrentSavesSameSession(t, 64)
+}
+
+func testThinkingTranslationsConcurrentSavesSameSession(t *testing.T, count int) {
+	t.Helper()
 	dir := t.TempDir()
-	const count = 64
 
 	var wg sync.WaitGroup
+	var ready sync.WaitGroup
+	ready.Add(count)
+	start := make(chan struct{})
 	errs := make(chan error, count)
 	for i := range count {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
+			ready.Done()
+			<-start
 			err := SaveThinkingTranslation(dir, ThinkingTranslationEntry{
 				MessageID:    fmt.Sprintf("msgidx:%d", i),
 				BlockIndex:   i,
@@ -62,6 +78,8 @@ func TestThinkingTranslationsConcurrentSavesSameSession(t *testing.T) {
 			}
 		}(i)
 	}
+	ready.Wait()
+	close(start)
 	wg.Wait()
 	close(errs)
 	for err := range errs {

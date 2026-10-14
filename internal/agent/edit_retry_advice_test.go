@@ -46,7 +46,8 @@ func mustPatchArgs(t *testing.T, patch string) string {
 }
 
 func TestAppendEditRetryAdviceFirstFailureNoNote(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	payload := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
 	out := applyAdvice(a, "Error: old_string not found", payload, true)
 	if strings.Contains(out, "repeated approximate-match") {
@@ -55,7 +56,8 @@ func TestAppendEditRetryAdviceFirstFailureNoNote(t *testing.T) {
 }
 
 func TestAppendEditRetryAdviceSecondFailureAddsNote(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	payload := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
 	first := applyAdvice(a, "Error: old_string not found", payload, true)
 	second := applyAdvice(a, first, payload, true)
@@ -68,7 +70,8 @@ func TestAppendEditRetryAdviceSecondFailureAddsNote(t *testing.T) {
 }
 
 func TestAppendEditRetryAdviceSuccessResetsStreak(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	payload := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
 	success := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, nil)
 	_ = applyAdvice(a, "ok", payload, true)    // streak 1
@@ -81,7 +84,8 @@ func TestAppendEditRetryAdviceSuccessResetsStreak(t *testing.T) {
 }
 
 func TestAppendEditRetryAdviceSuccessfulReadResetsStreak(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	failure := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
 	_ = applyAdvice(a, "err", failure, true)
 	read := editRetryPayload(tools.NameRead, `{"path":"demo.md","offset":1,"limit":20}`, nil)
@@ -93,7 +97,8 @@ func TestAppendEditRetryAdviceSuccessfulReadResetsStreak(t *testing.T) {
 }
 
 func TestAppendEditRetryAdviceIgnoresNonMatchFailure(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	// Ambiguous multi-match needs more context, not a fresh read.
 	payload := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, errors.New("old_string found 2 times, provide more context or set replace_all to true"))
 	out := applyAdvice(a, "Error: ambiguous", payload, true)
@@ -108,7 +113,8 @@ func TestAppendEditRetryAdviceIgnoresNonMatchFailure(t *testing.T) {
 // turn start), not strictly consecutive tool results, so the advisory still
 // fires at the second approximate failure.
 func TestAppendEditRetryAdviceNonMatchFailureBetweenDoesNotResetStreak(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	approx := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
 	ambiguous := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, errors.New("old_string found 2 times, provide more context or set replace_all to true"))
 	out := applyAdvice(a, "Error: old_string not found", approx, true) // streak 1
@@ -120,7 +126,8 @@ func TestAppendEditRetryAdviceNonMatchFailureBetweenDoesNotResetStreak(t *testin
 }
 
 func TestAppendEditRetryAdviceTracksPathsIndependently(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	one := editRetryPayload(tools.NameEdit, `{"path":"a.md"}`, editMatchFailureError())
 	two := editRetryPayload(tools.NameEdit, `{"path":"b.md"}`, editMatchFailureError())
 	out := applyAdvice(a, "err", one, true) // a streak 1
@@ -132,7 +139,8 @@ func TestAppendEditRetryAdviceTracksPathsIndependently(t *testing.T) {
 }
 
 func TestAppendEditRetryAdviceIgnoresOtherTools(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	payload := &ToolResultPayload{
 		Name:     tools.NameWrite,
 		ArgsJSON: `{"path":"demo.md"}`,
@@ -149,7 +157,8 @@ func TestAppendEditRetryAdviceIgnoresOtherTools(t *testing.T) {
 // top-level field; the advisory must parse the patch to track per-path
 // streaks against the production payload shape.
 func TestAppendEditRetryAdviceApplyPatchParsesPatchPath(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	patch := "*** Begin Patch\n" +
 		"*** Update File: demo.md\n" +
 		"@@\n" +
@@ -172,7 +181,8 @@ func TestAppendEditRetryAdviceApplyPatchParsesPatchPath(t *testing.T) {
 // arguments alone, so the advisory is skipped rather than keying on the
 // wrong file.
 func TestAppendEditRetryAdviceApplyPatchMultiFileSkips(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	patch := "*** Begin Patch\n" +
 		"*** Update File: a.md\n" +
 		"@@\n" +
@@ -196,7 +206,8 @@ func TestAppendEditRetryAdviceApplyPatchMultiFileSkips(t *testing.T) {
 }
 
 func TestAppendEditRetryAdviceCapsAfterLimit(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	payload := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
 	// Up to the cap, each failure from the threshold on appends a note.
 	for i := 1; i <= editRetryAdviceCap; i++ {
@@ -222,7 +233,8 @@ func TestAppendEditRetryAdviceCapsAfterLimit(t *testing.T) {
 // whole patch payload) on the hot success path. Regression guard for the
 // `!isError && *streaks == nil` early return.
 func TestAppendEditRetryAdviceNilStreakSuccessNoNote(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	// Success with no prior failures: the map stays nil and the result is
 	// returned unchanged, with no note and no path parsing.
 	if out := applyAdvice(a, "ok", editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, nil), false); out != "ok" {
@@ -435,8 +447,8 @@ func TestApplyPatchRetryAllowsChangedPatchWithoutRead(t *testing.T) {
 // advisory keys on the resolved path, so `demo.md`, `./demo.md` and the
 // absolute path all increment the same counter.
 func TestEditRetryAdviceUnifiesPathSpellings(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
-	root := a.contentRoot
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	rel := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
 	dotRel := editRetryPayload(tools.NameEdit, `{"path":"./demo.md"}`, editMatchFailureError())
 	abs := editRetryPayload(tools.NameEdit, fmt.Sprintf(`{"path":%q}`, filepath.Join(root, "demo.md")), editMatchFailureError())
@@ -455,7 +467,8 @@ func TestEditRetryAdviceUnifiesPathSpellings(t *testing.T) {
 // and string-wrapped JSON args; the advisory must track both spellings as
 // the same target.
 func TestEditRetryAdviceSupportsFileAliasAndWrappedArgs(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	root := t.TempDir()
+	a := &MainAgent{contentRoot: root, cachedWorkDir: root}
 	aliased := editRetryPayload(tools.NameEdit, `{"filePath":"demo.md"}`, editMatchFailureError())
 	wrapped := editRetryPayload(tools.NameEdit, `"{\"path\":\"demo.md\"}"`, editMatchFailureError())
 	canonical := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())

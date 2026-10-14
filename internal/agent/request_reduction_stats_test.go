@@ -185,7 +185,7 @@ func TestPrepareMessagesForLLM_ResetsReductionStatsWhenNothingReduced(t *testing
 }
 
 func TestPrepareMessagesForLLM_RecordsSkipAndOverCompressionStats(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			HighRiskProtectAgeTurns: 4,
@@ -276,7 +276,7 @@ func TestPrepareMessagesForLLM_ClassifiesRereadRevisionStats(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			projectRoot := t.TempDir()
-			a := newTestMainAgent(t, projectRoot)
+			a := newReductionTestMainAgent(t, projectRoot)
 			a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 				MinToolResultsPrune:  1,
 				ReadLikeAgeTurns:     1,
@@ -334,7 +334,7 @@ func TestPrepareMessagesForLLM_ClassifiesRereadRevisionStats(t *testing.T) {
 }
 
 func TestContextReductionStatsSnapshotsCloneMaps(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	turnID := a.currentTurnID()
 	preparedMessages := []message.Message{{Role: "user", Content: "u"}}

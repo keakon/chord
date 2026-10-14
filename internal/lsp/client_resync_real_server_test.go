@@ -17,6 +17,8 @@ import (
 // the new symbol. gopls is optional, so the test skips when it is not
 // installed.
 func TestManagerResyncFileWithRealGopls(t *testing.T) {
+	// Each test owns its workspace and server processes.
+	t.Parallel()
 	gopls, err := exec.LookPath("gopls")
 	if err != nil {
 		t.Skip("gopls not installed: skipping the real language-server round trip")

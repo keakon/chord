@@ -15,6 +15,16 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// Context policy tests need a real message store and tool catalog, but no
+// background workers or durable session. Log-rewrite tests keep the full fixture.
+func newContextPolicyTestAgent(root string) *MainAgent {
+	return &MainAgent{
+		ctxMgr: ctxmgr.NewManager(8192, 0), tools: tools.NewRegistry(),
+		subs: newSubAgentRegistry(), contentRoot: root, cachedWorkDir: root,
+		outputCh: make(chan AgentEvent, 512), globalConfig: &config.Config{},
+	}
+}
+
 func TestContextPressureReminderClaimWindowBinding(t *testing.T) {
 	a := &MainAgent{}
 	// Delivered and ccCalled reset whenever any window component changes.
@@ -101,7 +111,7 @@ func TestCompactionWarningClaimGenerationBinding(t *testing.T) {
 
 func TestQueueContextPressureReminderGates(t *testing.T) {
 	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 
 	// Auto-compact off (threshold 0): never a reminder, even with model-driven
@@ -172,7 +182,7 @@ func TestQueueContextPressureReminderKeepsArmWhenReminderDisabled(t *testing.T) 
 	// A disabled reminder line means there is no pressure line to withdraw
 	// from: the usage-driven arm and grace must keep running so automatic
 	// compaction still starts at the threshold.
-	a := newTestMainAgent(t, t.TempDir())
+	a := newContextPolicyTestAgent(t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 100})
 	enableTestCompactContext(a)
@@ -228,7 +238,7 @@ func TestQueueContextPressureReminderDisabledKeepsThresholdNotices(t *testing.T)
 }
 
 func TestContextPressureBelowReminderLineDisabledLineIsNotBelow(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newContextPolicyTestAgent(t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 100})
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reminder: config.CompactionReminderDisabled}}}
@@ -328,7 +338,7 @@ func TestCompactContextCallArmsAndStopsStickyReminder(t *testing.T) {
 
 func TestQueueContextPressureReminderSkipsWhenReminderAtThreshold(t *testing.T) {
 	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.5)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 4500}) // ≈0.55: above the reminder line
 	a.modelDrivenCompactionEnabled.Store(true)
@@ -353,7 +363,7 @@ func TestQueueContextPressureReminderSkipsWhenReminderAtThreshold(t *testing.T) 
 
 func TestQueueCompactionWarningLifecycle(t *testing.T) {
 	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 
 	// Not armed: no warning.
 	a.queueCompactionWarning()
@@ -434,7 +444,7 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 	// Reminder first (queued on a request below the threshold), then the
 	// warning for the compaction a later crossing starts: the undelivered
 	// reminder yields, so the crossing request carries only the warning.
-	a := newTestMainAgent(t, t.TempDir())
+	a := newContextPolicyTestAgent(t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line (0.54), below the threshold
 	enableTestCompactContext(a)
@@ -454,7 +464,7 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 
 	// Warning first, then the reminder on the next request: the reminder must
 	// not stage on top of it.
-	b := newTestMainAgent(t, t.TempDir())
+	b := newContextPolicyTestAgent(t.TempDir())
 	b.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	b.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(b)
@@ -471,7 +481,7 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 
 	// The warning also supersedes a countdown left armed by a request whose
 	// dispatch never confirmed.
-	c := newTestMainAgent(t, t.TempDir())
+	c := newContextPolicyTestAgent(t.TempDir())
 	c.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	c.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
 	enableTestCompactContext(c)
@@ -495,7 +505,7 @@ func TestPressureNoticeStagingKeepsTwoThresholds(t *testing.T) {
 // fresh notice instead of letting the withdrawal-selected row suppress it,
 // and a live durable row must keep suppressing.
 func TestRecrossBeforeIdleSweepRestagesWithdrawnWarning(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newContextPolicyTestAgent(t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
 	enableTestCompactContext(a)
 	user := message.Message{Role: message.RoleUser, Content: "continue the task"}
@@ -539,7 +549,7 @@ func TestRecrossBeforeIdleSweepRestagesWithdrawnWarning(t *testing.T) {
 // once so the race detector fails if the shared overlayClaims.mu guard on the
 // fields is removed.
 func TestPendingContextNoticeFieldsConcurrentWriters(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newContextPolicyTestAgent(t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
 	enableTestCompactContext(a)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 90000})
@@ -571,7 +581,7 @@ func TestPendingContextNoticeFieldsConcurrentWriters(t *testing.T) {
 
 func TestBuildTurnOverlayMessagesAttachesPressureOverlays(t *testing.T) {
 	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := newContextPolicyTestAgent(projectRoot)
 	a.pendingContextPressureReminder = "test reminder text"
 	a.pendingCompactionWarning = "test warning text"
 
@@ -1048,7 +1058,7 @@ func TestMaybeClearStaleContextNoticesKeepsCcCalledQuiet(t *testing.T) {
 }
 
 func TestOmitStaleContextNoticesFromRequestDropsCopyOnly(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newContextPolicyTestAgent(t.TempDir())
 	notice := message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "stale pressure", NoticeLevel: contextNoticePressure}
 	kept := message.Message{Role: message.RoleUser, Content: "hello"}
 	a.ctxMgr.Append(notice)
@@ -1088,7 +1098,7 @@ func TestMaybeClearStaleContextNoticesNoNoticeResetsDelivered(t *testing.T) {
 }
 
 func TestInstallContextNoticePresenceRebuildsFromTranscript(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newContextPolicyTestAgent(t.TempDir())
 	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
 	a.contextNoticesStale.Store(true)
 	notice := message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "pressure", NoticeLevel: contextNoticePressure}
@@ -1234,7 +1244,7 @@ func TestMaybeClearStaleContextNoticesResetsImminentDeliveryForRecross(t *testin
 // so an aborted request's residual warning cannot be replaced by a stale
 // countdown or reminder.
 func TestStageContextNoticeNeverDowngrades(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newContextPolicyTestAgent(t.TempDir())
 	a.stageContextNotice(contextNoticeWarning, "warning text")
 	a.stageContextNotice(contextNoticeImminent, "imminent text")
 	if a.pendingCompactionWarning != "warning text" {

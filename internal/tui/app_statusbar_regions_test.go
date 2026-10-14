@@ -27,22 +27,24 @@ func TestStatusCopyRegionsMatchDrawnColumns(t *testing.T) {
 	}
 	compactingBothVisible := false
 	droppedWithDisplay := false
-	for width := 30; width <= 200; width++ {
-		for _, detail := range details {
-			for _, compacting := range []bool{false, true} {
-				backend := &sessionControlAgent{sessionSummary: &agent.SessionSummary{ID: "1775115074902"}}
-				m := NewModelWithSize(backend, width, 24)
-				m.workingDir = "/home/user/projects/checkout-name"
-				m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main", Detail: detail}
-				if compacting {
-					m.compactionBgStatus = compactionBackgroundStatus{
-						Active:    true,
-						StartedAt: time.Now().Add(-95 * time.Second),
-						Trigger:   agent.CompactionTriggerModelDriven,
-						Bytes:     1234567,
-						Events:    42,
-					}
+	for _, detail := range details {
+		for _, compacting := range []bool{false, true} {
+			backend := &sessionControlAgent{sessionSummary: &agent.SessionSummary{ID: "1775115074902"}}
+			m := NewModelWithSize(backend, 80, 24)
+			m.workingDir = "/home/user/projects/checkout-name"
+			m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main", Detail: detail}
+			if compacting {
+				m.compactionBgStatus = compactionBackgroundStatus{
+					Active:    true,
+					StartedAt: time.Now().Add(-95 * time.Second),
+					Trigger:   agent.CompactionTriggerModelDriven,
+					Bytes:     1234567,
+					Events:    42,
 				}
+			}
+			for width := 30; width <= 200; width++ {
+				m.width = width
+				m.updateRightPanelVisible()
 				plain := terminaltext.StripANSI(m.renderStatusBar())
 				if compacting && m.statusPath.display != "" && m.statusSession.display != "" {
 					compactingBothVisible = true

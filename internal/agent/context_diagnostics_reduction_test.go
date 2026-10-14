@@ -22,7 +22,7 @@ func TestDiagnosticReductionStartsAfterRequestProjection(t *testing.T) {
 		{"checkpoint", []message.Message{requestViewFixture(), {Role: message.RoleUser, Content: "Continue."}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newReadyTestMainAgent(t)
+			a := &MainAgent{ctxMgr: ctxmgr.NewManager(8192, 0)}
 			original, _ := json.Marshal(tc.messages)
 			projected := projectCheckpointRequests(projectGeneratedImagePreviews(tc.messages))
 			if reflect.DeepEqual(projected, tc.messages) {
@@ -62,7 +62,7 @@ func TestDiagnosticReductionResourceDegradation(t *testing.T) {
 		{"nested_summary", []message.Message{{ResponsesOutput: []message.ResponsesOutputItem{{Summary: make([]message.ResponsesReasoningSummary, contextdiag.MaxFragments+1)}}}}, diagnosticReductionScanIncomplete},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newReadyTestMainAgent(t)
+			a := &MainAgent{}
 			a.freezeDiagnosticReduction([]message.Message{{Content: "sample"}}, nil, 0.5)
 			for _, ratio := range []float64{0, 0.5} {
 				a.freezeDiagnosticReduction(tc.messages, tc.messages, ratio)

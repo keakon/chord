@@ -8,6 +8,7 @@ import (
 // Create refuses to nest a checkout inside a linked worktree: a new worktree is
 // always created from the main repo, never from another checkout.
 func TestCreateRefusesNestedCreation(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -22,6 +23,7 @@ func TestCreateRefusesNestedCreation(t *testing.T) {
 }
 
 func TestHeadCommitResolvesCheckoutHead(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	head, err := HeadCommit(context.Background(), repo)
 	if err != nil {

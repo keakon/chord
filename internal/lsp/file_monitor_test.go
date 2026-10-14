@@ -245,30 +245,31 @@ func TestDocumentIOReleasesManagerRegistryLock(t *testing.T) {
 }
 
 func TestFileMaintenanceEvictsOldestOverlayAtCapacity(t *testing.T) {
-	m, c, _, _ := monitoredTestFile(t)
-	oldest := ""
-	for i := range maxOpenFilesPerClient {
-		path := filepath.Join(c.cwd, fmt.Sprintf("file%03d.go", i))
-		if err := os.WriteFile(path, []byte("package sample\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := c.DidOpen(context.Background(), path, "package sample\n"); err != nil {
-			t.Fatal(err)
-		}
-		if i == 0 {
-			oldest = path
-		}
-	}
+	m, c, _, oldest := monitoredTestFile(t)
+	seedOverlayCapacity(c, oldest)
 	state := c.syncedFiles[oldest]
 	state.used = time.Now().Add(-time.Minute)
 	c.syncedFiles[oldest] = state
 	cursor := 0
-	m.reconcileFiles(context.Background(), make(map[string]os.FileInfo), nil, &cursor, true)
+	m.reconcileFiles(t.Context(), make(map[string]os.FileInfo), map[string]fsnotify.Op{oldest: fsnotify.Write}, &cursor, false)
 	if len(c.openFiles) != maxOpenFilesPerClient {
 		t.Fatalf("open documents=%d", len(c.openFiles))
 	}
 	if _, ok := c.openFiles[oldest]; ok {
 		t.Fatal("oldest overlay was not evicted")
+	}
+}
+
+// Capacity is a property of the open-document set. Only the selected document
+// needs disk contents; the other overlays need no writes or protocol round trips.
+func seedOverlayCapacity(c *Client, source string) {
+	state := c.syncedFiles[source]
+	state.used = time.Now()
+	for i := range maxOpenFilesPerClient {
+		path := filepath.Join(c.cwd, fmt.Sprintf("capacity%03d.go", i))
+		c.openFiles[path] = 1
+		c.syncedFiles[path] = state
+		c.syncedDigest[path] = c.syncedDigest[source]
 	}
 }
 
@@ -319,15 +320,7 @@ func TestFileMaintenanceScopesDiagnosticInvalidation(t *testing.T) {
 			case "capacity":
 				state.used = time.Now().Add(-time.Minute)
 				idle.syncedFiles[path] = state
-				for i := range maxOpenFilesPerClient {
-					other := filepath.Join(idle.cwd, fmt.Sprintf("sample%d.go", i))
-					if err := os.WriteFile(other, []byte("package sample\n"), 0600); err != nil {
-						t.Fatal(err)
-					}
-					if _, err := idle.DidOpen(t.Context(), other, "package sample\n"); err != nil {
-						t.Fatal(err)
-					}
-				}
+				seedOverlayCapacity(idle, path)
 			case "change":
 				if err := os.WriteFile(path, []byte("package changed\n"), 0600); err != nil {
 					t.Fatal(err)

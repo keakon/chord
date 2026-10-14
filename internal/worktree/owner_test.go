@@ -10,6 +10,7 @@ import (
 )
 
 func TestCreateWritesOwnerRecord(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -41,6 +42,7 @@ func TestCreateWritesOwnerRecord(t *testing.T) {
 
 // The CLI creator remains visible without a session identity.
 func TestReadOwnerAcceptsCLIRecord(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()
@@ -63,6 +65,7 @@ func TestReadOwnerAcceptsCLIRecord(t *testing.T) {
 }
 
 func TestReadOwnerRefusesMissingRecord(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	info, err := Create(context.Background(), CreateOptions{Name: "unowned", RepoRoot: repo, PathLocator: pl})
@@ -75,6 +78,7 @@ func TestReadOwnerRefusesMissingRecord(t *testing.T) {
 }
 
 func TestRegisterInIndexCachesOwner(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	ctx := context.Background()

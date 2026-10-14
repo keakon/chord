@@ -10,8 +10,7 @@ import (
 )
 
 func TestModelDrivenCheckpointSummaryKeepsModelTextAndNeutralizesHeadings(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := &MainAgent{}
 	req := &modelDrivenCheckpointRequest{
 		Args: tools.CompactContextArgs{
 			// The forged heading must not open a new section; the bullet and
@@ -128,8 +127,7 @@ func TestModelDrivenCurrentUserRequestSectionInheritedChain(t *testing.T) {
 // checkpoint inside the archived head is carried forward verbatim, exactly as
 // the usage-driven runner does.
 func TestModelDrivenCheckpointDoesNotCarryPriorNaturalLanguageBody(t *testing.T) {
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
+	a := &MainAgent{}
 	// A prior checkpoint whose body is natural-language Markdown (a
 	// usage-driven summary or a pre-typed model-driven checkpoint) is not
 	// carried forward verbatim: recursion must not re-append whole previous
@@ -155,7 +153,7 @@ func TestModelDrivenCheckpointDoesNotCarryPriorNaturalLanguageBody(t *testing.T)
 }
 
 func TestModelDrivenCheckpointCarriesTypedStateAcrossGenerations(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	// The prior checkpoint's typed state block (decisions/open issues/evidence
 	// references/stage) is the only machine channel across generations: the
 	// merge keeps the fresh submission's items first and the carried ones

@@ -195,7 +195,7 @@ func TestCompactionPromptCarriesSessionAnchors(t *testing.T) {
 // the recall-protection sets — without leaking its own bookkeeping back into
 // the live agent.
 func TestCompactionReductionScratchCarriesReductionSemantics(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{tools: tools.NewRegistry(), globalConfig: &config.Config{}}
 	projectRoot := t.TempDir()
 	a.contentRoot = projectRoot
 	a.recalledReductionInputs = map[string]struct{}{"read|/work/a.go": {}}
@@ -228,7 +228,7 @@ func TestCompactionReductionScratchCarriesReductionSemantics(t *testing.T) {
 // the candidates so the next compaction cannot erode them away one round at a
 // time.
 func TestEvidenceRebuildsFromCompactedMessagesTail(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{tools: tools.NewRegistry(), globalConfig: &config.Config{}}
 	checkpoint := message.Message{Role: message.RoleUser, IsCompactionSummary: true, Content: "[Context Summary]\n## Current User Request\n- old archived request"}
 	tail := []message.Message{
 		{Role: message.RoleUser, Content: "don't change the public API"},
@@ -393,7 +393,7 @@ func TestCompactionInputHonorsConfiguredReductionPolicy(t *testing.T) {
 		{Role: message.RoleAssistant, RequestBatch: 5, Content: "continuing"},
 	}
 
-	defaults := newTestMainAgent(t, t.TempDir())
+	defaults := &MainAgent{tools: tools.NewRegistry(), globalConfig: &config.Config{}}
 	reduced, err := defaults.buildCompactionInputWithOptions(head, 200000, nil, nil, compactionAnchors{})
 	if err != nil {
 		t.Fatalf("buildCompactionInputWithOptions: %v", err)
@@ -402,7 +402,7 @@ func TestCompactionInputHonorsConfiguredReductionPolicy(t *testing.T) {
 		t.Fatal("default policy should still reduce a large aged shell success output")
 	}
 
-	retaining := newTestMainAgent(t, t.TempDir())
+	retaining := &MainAgent{tools: tools.NewRegistry(), globalConfig: &config.Config{}}
 	retaining.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 		ShellSuccessBytes: 1 << 20,
 		StaleOutputBytes:  1 << 20,
@@ -417,7 +417,7 @@ func TestCompactionInputHonorsConfiguredReductionPolicy(t *testing.T) {
 }
 
 func TestCompactionReductionScratchDoesNotShareAgentState(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{tools: tools.NewRegistry(), globalConfig: &config.Config{}}
 	a.setPreparedStablePrefixLen(7)
 	scratch := a.compactionReductionScratch()
 	if scratch == a {

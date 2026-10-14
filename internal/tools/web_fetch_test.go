@@ -92,8 +92,12 @@ func TestWebFetchResolvesTimeoutMs(t *testing.T) {
 
 func TestWebFetchTimeoutMsAppliesToTheRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		time.Sleep(500 * time.Millisecond)
-		_, _ = io.WriteString(w, "<html><body>slow</body></html>")
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+			_, _ = io.WriteString(w, "<html><body>slow</body></html>")
+		}
 	}))
 	defer server.Close()
 

@@ -20,6 +20,7 @@ func newResolveWorktree(t *testing.T, repo string, pl *config.PathLocator, name 
 }
 
 func TestResolveByPathMatchesCanonicalSpelling(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
@@ -57,6 +58,7 @@ func TestResolveByPathMatchesCanonicalSpelling(t *testing.T) {
 }
 
 func TestResolveByPathRejectsNonWorktree(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
@@ -77,6 +79,7 @@ func TestResolveByPathRejectsNonWorktree(t *testing.T) {
 }
 
 func TestIsWorktreeOfRequiresLinkedCheckoutOfMain(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
@@ -100,6 +103,7 @@ func TestIsWorktreeOfRequiresLinkedCheckoutOfMain(t *testing.T) {
 }
 
 func TestDiffStatCoversCommittedAndUncommittedChanges(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)

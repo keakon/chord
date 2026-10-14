@@ -705,7 +705,7 @@ func TestGlobSupportsMultiplePatterns(t *testing.T) {
 	}
 }
 
-func TestGlobLargeResultIsBoundedWithRefineHint(t *testing.T) {
+func TestGlobLargeResults(t *testing.T) {
 	dir := t.TempDir()
 	for i := range maxGlobResults + 5 {
 		path := filepath.Join(dir, "f"+strconv.Itoa(i)+".txt")
@@ -713,49 +713,43 @@ func TestGlobLargeResultIsBoundedWithRefineHint(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	raw, _ := json.Marshal(map[string]any{"patterns": []string{"*.txt"}, "path": dir})
-	out, err := GlobTool{}.Execute(context.Background(), raw)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if got := len(lines) - 2; got != maxGlobResults {
-		t.Fatalf("result line count = %d, want %d; output:\n%s", got, maxGlobResults, out)
-	}
-	if !strings.Contains(out, "refine pattern/path") {
-		t.Fatalf("missing refine hint in output:\n%s", out)
-	}
-}
-
-func TestGlobTruncatedResultSavesFullFilteredResults(t *testing.T) {
-	dir := t.TempDir()
-	sessionDir := t.TempDir()
-	for i := range maxGlobResults + 5 {
-		path := filepath.Join(dir, "f"+strconv.Itoa(i)+".txt")
-		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
+	t.Run("refine_hint", func(t *testing.T) {
+		raw, _ := json.Marshal(map[string]any{"patterns": []string{"*.txt"}, "path": dir})
+		out, err := GlobTool{}.Execute(context.Background(), raw)
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
 		}
-	}
-	raw, _ := json.Marshal(map[string]any{"patterns": []string{"*.txt"}, "path": dir})
-	out, err := GlobTool{}.Execute(WithSessionDir(context.Background(), sessionDir), raw)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	artifactPath := filepath.Join(sessionDir, "tool-outputs", "glob-results.log")
-	if !strings.Contains(out, artifactPath) {
-		t.Fatalf("output should mention full results artifact %q:\n%s", artifactPath, out)
-	}
-	data, err := os.ReadFile(artifactPath)
-	if err != nil {
-		t.Fatalf("read artifact: %v", err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != maxGlobResults+5 {
-		t.Fatalf("artifact line count = %d, want %d", len(lines), maxGlobResults+5)
-	}
-	if !strings.Contains(string(data), "f"+strconv.Itoa(maxGlobResults+4)+".txt") {
-		t.Fatalf("artifact missing final match: %q", string(data))
-	}
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		if got := len(lines) - 2; got != maxGlobResults {
+			t.Fatalf("result line count = %d, want %d; output:\n%s", got, maxGlobResults, out)
+		}
+		if !strings.Contains(out, "refine pattern/path") {
+			t.Fatalf("missing refine hint in output:\n%s", out)
+		}
+	})
+	t.Run("full_filtered_artifact", func(t *testing.T) {
+		sessionDir := t.TempDir()
+		raw, _ := json.Marshal(map[string]any{"patterns": []string{"*.txt"}, "path": dir})
+		out, err := GlobTool{}.Execute(WithSessionDir(context.Background(), sessionDir), raw)
+		if err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		artifactPath := filepath.Join(sessionDir, "tool-outputs", "glob-results.log")
+		if !strings.Contains(out, artifactPath) {
+			t.Fatalf("output should mention full results artifact %q:\n%s", artifactPath, out)
+		}
+		data, err := os.ReadFile(artifactPath)
+		if err != nil {
+			t.Fatalf("read artifact: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		if len(lines) != maxGlobResults+5 {
+			t.Fatalf("artifact line count = %d, want %d", len(lines), maxGlobResults+5)
+		}
+		if !strings.Contains(string(data), "f"+strconv.Itoa(maxGlobResults+4)+".txt") {
+			t.Fatalf("artifact missing final match: %q", string(data))
+		}
+	})
 }
 
 func TestGlobAccumulatorOnlyKeepsFullOutputWhenRequested(t *testing.T) {

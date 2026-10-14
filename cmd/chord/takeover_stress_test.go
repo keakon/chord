@@ -47,7 +47,13 @@ func TestTakeoverRepeatedSaveRestoreReclaimsRuntime(t *testing.T) {
 		return 0
 	}
 	beforeFD, beforeWorkers := countFD(), runtime.NumGoroutine()
-	for iteration := range 100 {
+	// Keep both save paths in the ordinary suite. The stress gate repeats
+	// them long enough to expose accumulating descriptors and workers.
+	iterations := 5
+	if os.Getenv("CHORD_TEST_STRESS") == "1" {
+		iterations = 100
+	}
+	for iteration := range iterations {
 		for _, retry := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%03d/retry=%t", iteration, retry), func(t *testing.T) {
 				workspace, err := os.MkdirTemp(root, "workspace-")

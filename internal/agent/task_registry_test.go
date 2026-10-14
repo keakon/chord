@@ -11,6 +11,14 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
+// newTaskRegistryTestAgent exercises coordination predicates without opening a
+// durable session. Persistence ordering is covered by the full-runtime test below.
+func newTaskRegistryTestAgent(t *testing.T) *MainAgent {
+	t.Helper()
+	root := t.TempDir()
+	return &MainAgent{subs: newSubAgentRegistry(), contentRoot: root, cachedWorkDir: root}
+}
+
 // configureNoFileWriteWorkerRole registers a "worker" agent definition whose
 // ruleset denies every file-modifying tool, so its tasks carry empty write
 // scopes and never conflict with other tasks over file paths: the read-only
@@ -101,7 +109,7 @@ func TestWriteScopesOverlapMatchesExactAndNestedPathsOnly(t *testing.T) {
 // classification (see taskScopesConflict). These tests pin the role-aware gate.
 func TestTaskScopesConflictGatesOnRoleFileWriteSurface(t *testing.T) {
 	newRuntime := func(t *testing.T) *MainAgent {
-		a := newTestMainAgent(t, t.TempDir())
+		a := newTaskRegistryTestAgent(t)
 		a.agentConfigs = map[string]*config.AgentConfig{
 			"worker": {
 				Name:       "worker",
@@ -199,7 +207,7 @@ func TestResolveSemanticTaskKeyDerivesFromDescription(t *testing.T) {
 // opening wording no longer get merged automatically; the hint is the merge
 // signal instead.
 func TestFindDuplicateOrConflictingTaskDerivedDescriptionCollisionIsProbableDuplicate(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	configureNoFileWriteWorkerRole(t, a)
 	description := "Add regression coverage for the parser fallback path so the duplicate guard has a stable key"
 	rewordedTail := "Add regression coverage for the parser fallback path so the duplicate guard is exercised end to end"
@@ -245,7 +253,7 @@ func TestFindDuplicateOrConflictingTaskDerivedDescriptionCollisionIsProbableDupl
 // about the deliverable, it must never justify two concurrent writers over one
 // scope.
 func TestFindDuplicateOrConflictingTaskDerivedCollisionKeepsLiveScopeConflict(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	description := "Add regression coverage for the parser fallback path so the duplicate guard has a stable key"
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"adhoc-1": {
@@ -280,7 +288,7 @@ func TestFindDuplicateOrConflictingTaskDerivedCollisionKeepsLiveScopeConflict(t 
 // caller deliberately asserted the identity, so the runtime keeps rejecting the
 // re-delegation with already_exists.
 func TestFindDuplicateOrConflictingTaskExplicitSemanticKeyIsHardDuplicate(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"adhoc-1": {
 			TaskID:          "adhoc-1",
@@ -310,7 +318,7 @@ func TestFindDuplicateOrConflictingTaskExplicitSemanticKeyIsHardDuplicate(t *tes
 // regardless of which record the scan visits first (taskRecords is a map, so
 // iteration order is arbitrary). The finder is therefore exercised repeatedly.
 func TestFindDuplicateOrConflictingTaskExplicitKeyOutranksScopeConflict(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"adhoc-1": {
 			TaskID:             "adhoc-1",
@@ -355,7 +363,7 @@ func TestFindDuplicateOrConflictingTaskExplicitKeyOutranksScopeConflict(t *testi
 // runs under a role that registers no file-modifying tools, so the collision is
 // not a scope conflict either.
 func TestFindDuplicateOrConflictingTaskPlanTaskRefCollisionIsProbableDuplicate(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	configureNoFileWriteWorkerRole(t, a)
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"adhoc-1": {
@@ -391,7 +399,7 @@ func TestFindDuplicateOrConflictingTaskPlanTaskRefCollisionIsProbableDuplicate(t
 // admission is only probable (the caller must start its own task, never block
 // on another admission's handle).
 func TestFindPendingDuplicateClassifiesExplicitKeyAsHard(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.subs.mu.Lock()
 	a.subs.addAdmissionLocked(&subAgentAdmission{
 		taskID:             "adhoc-9",
@@ -412,7 +420,7 @@ func TestFindPendingDuplicateClassifiesExplicitKeyAsHard(t *testing.T) {
 }
 
 func TestFindPendingDuplicateClassifiesDerivedKeyAsProbable(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	configureNoFileWriteWorkerRole(t, a)
 	description := "Audit the report generator output for broken markdown links"
 	a.subs.mu.Lock()
@@ -439,7 +447,7 @@ func TestFindPendingDuplicateClassifiesDerivedKeyAsProbable(t *testing.T) {
 // identical explicit semantic_task_key may be waited on, and a conflict must
 // not hide it regardless of admission iteration order.
 func TestFindPendingDuplicateExplicitKeyOutranksPendingScopeConflict(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.subs.mu.Lock()
 	defer a.subs.mu.Unlock()
 	a.subs.addAdmissionLocked(&subAgentAdmission{
@@ -565,7 +573,7 @@ func TestMergeDurableTaskRecordsPreservesCoordinationIdentity(t *testing.T) {
 }
 
 func TestFindDuplicateOrConflictingTaskAllowsExplicitOnlyTerminalRetry(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	for _, state := range []SubAgentState{SubAgentStateFailed, SubAgentStateCancelled} {
 		t.Run(string(state), func(t *testing.T) {
 			a.setTaskRecords(map[string]*DurableTaskRecord{
@@ -598,7 +606,7 @@ func TestFindDuplicateOrConflictingTaskAllowsExplicitOnlyTerminalRetry(t *testin
 // probable duplicate — a hint on a newly started task, never a redirect to the
 // completed record.
 func TestFindDuplicateOrConflictingTaskKeepsNotifyRehydratableCompletedTaskAsExplicitDuplicate(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"completed-task": {
 			TaskID:          "completed-task",
@@ -629,7 +637,7 @@ func TestFindDuplicateOrConflictingTaskKeepsNotifyRehydratableCompletedTaskAsExp
 // heuristic, so the caller creates a fresh task and lets the model decide
 // whether the deliverable is really the same as the finished one.
 func TestFindDuplicateOrConflictingTaskDerivedCollisionOnCompletedIsProbableDuplicate(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	description := "Investigate the stale-cache failure and its reproduction steps"
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"completed-task": {
@@ -656,7 +664,7 @@ func TestFindDuplicateOrConflictingTaskDerivedCollisionOnCompletedIsProbableDupl
 }
 
 func TestFindDuplicateOrConflictingTaskReleasesCompletedWriteScope(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"completed-task": {
 			TaskID:             "completed-task",
@@ -685,7 +693,7 @@ func TestFindDuplicateOrConflictingTaskReleasesCompletedWriteScope(t *testing.T)
 }
 
 func TestFindDuplicateOrConflictingTaskKeepsNonTerminalWriteScope(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"running-task": {
 			TaskID:             "running-task",
@@ -714,7 +722,7 @@ func TestFindDuplicateOrConflictingTaskKeepsNonTerminalWriteScope(t *testing.T) 
 }
 
 func TestFindDuplicateOrConflictingTaskTreatsUnspecifiedScopeAsExclusive(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"running-task": {
 			TaskID:             "running-task",
@@ -732,7 +740,7 @@ func TestFindDuplicateOrConflictingTaskTreatsUnspecifiedScopeAsExclusive(t *test
 }
 
 func TestFindDuplicateOrConflictingTaskExcludesFullOwnerLineage(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"root-task": {
 			TaskID:             "root-task",
@@ -756,7 +764,7 @@ func TestFindDuplicateOrConflictingTaskExcludesFullOwnerLineage(t *testing.T) {
 }
 
 func TestFindDuplicateOrConflictingTaskAllowsNoFileWriteToolRoleAlongsideUnspecifiedScope(t *testing.T) {
-	a := newTestMainAgent(t, t.TempDir())
+	a := newTaskRegistryTestAgent(t)
 	a.agentConfigs = map[string]*config.AgentConfig{
 		"worker": {Name: "worker", Mode: "subagent"},
 		"auditor": {

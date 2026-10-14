@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
@@ -63,48 +64,50 @@ func TestConfirmRequestForcesPriorityBoundaryFlush(t *testing.T) {
 
 func TestQuestionRequestForcesPriorityBoundaryFlush(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 24)
-	m.displayState = stateForeground
-	m.width, m.height = 80, 24
-	m.cachedFullView = tea.View{Content: "cached"}
-	m.cachedFullViewValid = true
-	m.streamRenderDeferred = true
-	m.streamRenderDeferNext = true
+	synctest.Test(t, func(t *testing.T) {
+		m.displayState = stateForeground
+		m.width, m.height = 80, 24
+		m.cachedFullView = tea.View{Content: "cached"}
+		m.cachedFullViewValid = true
+		m.streamRenderDeferred = true
+		m.streamRenderDeferNext = true
 
-	cmd := m.handleAgentEvent(agentEventMsg{event: questionEventForTest("q-1", "", "continue?", nil, nil, false, time.Time{}, "")})
-	if cmd == nil {
-		t.Fatal("question request should return followup command batch")
-	}
-	msg := cmd()
-	msgs := []tea.Msg{}
-	if batch, ok := msg.(tea.BatchMsg); ok {
-		for _, sub := range batch {
-			if sub == nil {
-				continue
+		cmd := m.handleAgentEvent(agentEventMsg{event: questionEventForTest("q-1", "", "continue?", nil, nil, false, time.Time{}, "")})
+		if cmd == nil {
+			t.Fatal("question request should return followup command batch")
+		}
+		msg := cmd()
+		msgs := []tea.Msg{}
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, sub := range batch {
+				if sub == nil {
+					continue
+				}
+				if subMsg := sub(); subMsg != nil {
+					msgs = append(msgs, subMsg)
+				}
 			}
-			if subMsg := sub(); subMsg != nil {
-				msgs = append(msgs, subMsg)
+		} else if msg != nil {
+			msgs = append(msgs, msg)
+		}
+		for _, subMsg := range msgs {
+			updated, next := m.Update(subMsg)
+			model, ok := updated.(*Model)
+			if !ok {
+				t.Fatalf("Update returned %T, want *Model", updated)
+			}
+			m = *model
+			if next != nil {
+				_ = next()
 			}
 		}
-	} else if msg != nil {
-		msgs = append(msgs, msg)
-	}
-	for _, subMsg := range msgs {
-		updated, next := m.Update(subMsg)
-		model, ok := updated.(*Model)
-		if !ok {
-			t.Fatalf("Update returned %T, want *Model", updated)
+		if !m.streamRenderForceView {
+			t.Fatal("question request should force next live render")
 		}
-		m = *model
-		if next != nil {
-			_ = next()
+		if m.streamRenderDeferred {
+			t.Fatal("question request should clear deferred render state")
 		}
-	}
-	if !m.streamRenderForceView {
-		t.Fatal("question request should force next live render")
-	}
-	if m.streamRenderDeferred {
-		t.Fatal("question request should clear deferred render state")
-	}
+	})
 }
 
 func TestWarnToastForcesPriorityBoundaryFlush(t *testing.T) {

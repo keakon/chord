@@ -52,6 +52,7 @@ func TestReconcileRecoversExternalLoginWithoutClient(t *testing.T) {
 }
 
 func TestReconcileSuppressesSameCredentialFailure(t *testing.T) {
+	shortenConnectRetryBackoff(t)
 	target := refreshTestTarget()
 	target.Config.Name = "sample"
 	target.Ref.ServerName = "sample"

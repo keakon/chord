@@ -77,6 +77,7 @@ func TestWorktreeRoot(t *testing.T) {
 // repository (D2's opt-in root) and checks both the layout and the self-ignoring
 // .gitignore that keeps the main checkout clean.
 func TestCreateConfiguredRootKeepsMainCheckoutClean(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 
@@ -109,6 +110,7 @@ func TestCreateConfiguredRootKeepsMainCheckoutClean(t *testing.T) {
 // TestCreateKeepsUserGitignoreInContainerRoot guards the "never overwrite what
 // the user placed there" rule of the self-ignoring .gitignore.
 func TestCreateKeepsUserGitignoreInContainerRoot(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 	container := filepath.Join(repo, ".chord", "worktrees")
@@ -129,6 +131,7 @@ func TestCreateKeepsUserGitignoreInContainerRoot(t *testing.T) {
 // TestCreateDefaultRootOutsideRepoSkipsGitignore pins that the historical
 // state-dir layout is untouched by the self-ignoring .gitignore.
 func TestCreateDefaultRootOutsideRepoSkipsGitignore(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	pl := setupTestLocator(t)
 
@@ -154,6 +157,7 @@ func TestCreateDefaultRootOutsideRepoSkipsGitignore(t *testing.T) {
 // TestCopyWorktreeIncludeFilesDefaultsToEnv covers the default include set:
 // only gitignored .env* files are copied.
 func TestCopyWorktreeIncludeFilesDefaultsToEnv(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	mustWriteFile(t, filepath.Join(repo, ".gitignore"), ".env*\nsecret.txt\n")
 	mustWriteFile(t, filepath.Join(repo, ".env"), "TOKEN=1\n")
@@ -174,6 +178,7 @@ func TestCopyWorktreeIncludeFilesDefaultsToEnv(t *testing.T) {
 // TestCopyWorktreeIncludeFilesUsesCustomPatterns covers the declared include
 // list replacing the default, including a nested path.
 func TestCopyWorktreeIncludeFilesUsesCustomPatterns(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	mustWriteFile(t, filepath.Join(repo, ".gitignore"), ".env*\nconfig/local.ini\n")
 	mustWriteFile(t, filepath.Join(repo, WorktreeIncludeFile), "# local overrides\nconfig/local.ini\n")
@@ -191,6 +196,7 @@ func TestCopyWorktreeIncludeFilesUsesCustomPatterns(t *testing.T) {
 // TestCopyWorktreeIncludeFilesKeepsTrackedFiles covers the rule that a file
 // tracked in the worktree is never overwritten by its gitignored twin.
 func TestCopyWorktreeIncludeFilesKeepsTrackedFiles(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	mustWriteFile(t, filepath.Join(repo, ".gitignore"), "secret.txt\n")
 	mustWriteFile(t, filepath.Join(repo, WorktreeIncludeFile), "secret.txt\n")
@@ -209,6 +215,7 @@ func TestCopyWorktreeIncludeFilesKeepsTrackedFiles(t *testing.T) {
 // TestCopyWorktreeIncludeFilesMissingFileIsFine pins that a repository without
 // the configured files copies nothing and does not error.
 func TestCopyWorktreeIncludeFilesMissingFileIsFine(t *testing.T) {
+	t.Parallel()
 	repo := setupTestRepo(t)
 	dst := setupTestRepo(t)
 	if err := copyWorktreeIncludeFiles(context.Background(), repo, dst); err != nil {
