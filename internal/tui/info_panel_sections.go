@@ -615,11 +615,8 @@ func (m *Model) buildInfoPanelAgentListBlockWithHits(lineW int) (string, []infoP
 
 func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 	type infoPanelSkillEntry struct {
-		name        string
-		description string
-		status      string
-		invoked     bool
-		manual      bool
+		name       string
+		invocation skill.InvocationState
 	}
 
 	entries := make([]infoPanelSkillEntry, 0)
@@ -630,22 +627,26 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 		}
 		name := strings.TrimSpace(sk.Name)
 		indexByName[name] = len(entries)
+		// Without live invocation states the metadata flags are all there
+		// is: manual-only and invoked are frontmatter-settable, and every
+		// other state falls back to the idle icon. The state provider
+		// below replaces this wholesale whenever it is available.
 		entries = append(entries, infoPanelSkillEntry{
-			name:        name,
-			description: strings.TrimSpace(sk.Description),
-			manual:      sk.DisableModelInvocation,
+			name: name,
+			invocation: skill.InvocationState{
+				Meta:          sk,
+				ModelCallable: !sk.DisableModelInvocation,
+				BodyPresent:   sk.Invoked,
+				UserLoadable:  true,
+			},
 		})
 	}
 	for _, sk := range m.agent.InvokedSkills() {
 		if sk == nil || strings.TrimSpace(sk.Name) == "" {
 			continue
 		}
-		name := strings.TrimSpace(sk.Name)
-		if idx, ok := indexByName[name]; ok {
-			entries[idx].invoked = true
-			if entries[idx].description == "" {
-				entries[idx].description = strings.TrimSpace(sk.Description)
-			}
+		if idx, ok := indexByName[strings.TrimSpace(sk.Name)]; ok {
+			entries[idx].invocation.BodyPresent = true
 			continue
 		}
 	}
@@ -655,9 +656,7 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 				continue
 			}
 			if index, exists := indexByName[strings.TrimSpace(state.Meta.Name)]; exists {
-				entries[index].invoked = state.BodyPresent
-				entries[index].manual = !state.ModelCallable
-				entries[index].status = skillInvocationStatusLabel(state)
+				entries[index].invocation = state
 			}
 		}
 	}
@@ -669,22 +668,17 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 	if !expanded {
 		return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))
 	}
-	invokedStyle := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg))
 	for _, entry := range entries {
-		lineStyle := InfoPanelDim
-		if entry.invoked {
-			lineStyle = invokedStyle
-		}
-		// Shape encodes model visibility, color encodes load state: a dashed
-		// glyph marks a manual-only skill the model never sees, and a solid
-		// one a model-visible skill. The name always follows the glyph so a
-		// row never reads as the tool card's "receiving" progress.
-		label := skillVisibilityGlyph(entry.manual, entry.invoked) + " " + entry.name
-		if entry.status != "" {
-			label += " (" + entry.status + ")"
-		}
+		// The icon is the only status channel: shape carries the state
+		// class, color the accent (green = body live, amber = reload after
+		// compaction). The name stays dim so a row reads as a labeled
+		// status light rather than a shout. Truncation runs on the plain
+		// "glyph name" pair, so it counts the glyph instead of eating it.
+		glyph, glyphStyle := skillStateIcon(entry.invocation)
 		labelWidth := max(lineW-infoPanelCollapsibleContentInset, 1)
-		skillLines = append(skillLines, renderInfoPanelCollapsibleContentLine(lineW, lineStyle.Render(truncateOneLine(label, labelWidth))))
+		glyphPart, namePart, _ := strings.Cut(truncateOneLine(glyph+" "+entry.name, labelWidth), " ")
+		row := glyphStyle.Render(glyphPart) + " " + InfoPanelDim.Render(namePart)
+		skillLines = append(skillLines, renderInfoPanelCollapsibleContentLine(lineW, row))
 	}
 	return InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))
 }

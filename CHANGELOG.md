@@ -26,6 +26,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- The **SKILLS** panel and the `/skill` selector mark skill state with icons instead of text suffixes: `○` idle, `◎` path-matched or notified, `●` loaded, `↻` reload after compaction, `◌` manual-only, and `⊘` denied. Green marks a live body, amber one that needs reloading.
+
 - The embedded model catalog uses [v2026-10-14.1](https://github.com/keakon/chord-models/tree/v2026-10-14.1), adding Gemini 4 Argon with a shared 1M-token window and a 65,536-token streaming binding cap. Long decode continuation is not supported.
 
 - AGENTS shows distinct waiting states and the current coordination request reason, with clickable task and reason rows.

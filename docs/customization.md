@@ -51,7 +51,18 @@ Chord discovers Skills from these directories by default:
 
 At runtime, Chord does not preload every skill body into the system prompt. The model calls the `skill` tool to load matching skill content on demand.
 
-In the TUI, the **SKILLS** panel lists discovered skills. The glyph shape separates model visibility: `○` and `●` are model-invocable, `◌` marks a skill kept for explicit loads. The color is load state, so a skill turns green once its body is live in this agent's context, whether the `skill` tool loaded it or you loaded it with `/skill`. Failed skill loads do not mark the skill as invoked, and unknown (not-discovered) skills are not shown until they are discovered.
+In the TUI, the **SKILLS** panel lists discovered skills, one icon per row and no status text. The icon shape carries the state:
+
+| Icon | Meaning |
+| --- | --- |
+| `○` | idle: model-invocable, body not loaded, no path match yet |
+| `◎` | relevant: a project read matched the skill's `paths` and the model has (or is about to get) the name-and-description notice |
+| `●` | loaded: the body is live in this agent's context, whether the `skill` tool loaded it or you loaded it with `/skill` |
+| `↻` | reload: the body was loaded but compaction archived it; load it again to use it |
+| `◌` | manual-only: the model never sees it, only an explicit `/skill` load brings the body in |
+| `⊘` | denied: the role's ruleset refuses the skill (selector rows only) |
+
+The icon color is the accent: green for a live body, amber for a body that needs reloading; everything else stays dim. Failed skill loads do not mark the skill as invoked, and unknown (not-discovered) skills are not shown until they are discovered.
 
 Each agent can see and load only the skills its permissions allow. Loading state is separate: a skill loaded by the main agent is not automatically marked as loaded by a sub-agent. Restoring a sub-task recovers its loading history and applies current permissions.
 
@@ -145,7 +156,7 @@ paths:
 
 Patterns are case-sensitive, checkout-relative globs, combined with OR. Use `/` separators and `dir/**` for a directory; absolute paths, `..`, negation, and malformed patterns disable automatic discovery for that skill. `chord doctor skills` reports these errors. Omitted or empty effective `paths` means an unconditional skill; `**` waits for any project-file read. A nonempty sidecar `paths` list replaces frontmatter patterns; an omitted or empty sidecar list does not.
 
-Conditional skills stay out of the startup catalog. Matching publishes a bounded name-and-description notice after the tool round closes; it does not load instructions, execute a skill, or grant permissions. The model may still call an allowed skill by name before a match, and `/skill` can explicitly load allowed conditional or manual-only skills. The selector distinguishes path matches, recorded notices, available bodies, and skills that need reloading after compaction.
+Conditional skills stay out of the startup catalog. Matching publishes a bounded name-and-description notice after the tool round closes; it does not load instructions, execute a skill, or grant permissions. The model may still call an allowed skill by name before a match, and `/skill` can explicitly load allowed conditional or manual-only skills. The selector marks states with the same icons as the panel: `◎` for a path match or a recorded notice, `●` for an available body, and `↻` for a body compaction archived.
 
 Only successful local text reads trigger discovery, including partial reads. Shell, grep, glob, image/PDF tools, MCP, and provider-native tools do not. Symlinks match their real target inside the current checkout. Discovery is independent for each agent; compaction carries activation metadata and may publish a short reminder, without restoring skill bodies automatically.
 

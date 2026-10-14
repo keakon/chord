@@ -49,11 +49,15 @@ type infoPanelAgent struct {
 	availableSkills     []*skill.Meta
 	skillsByFocus       map[string][]*skill.Meta
 	invokedSkills       []*skill.Meta
-	skillRuleset        permission.Ruleset
-	keysConfirmed       int
-	keysTotal           int
-	wakeRateLimitCalls  int
-	walltimeStats       analytics.WalltimeStats
+	// skillStates, when non-nil, replaces the derived invocation states so
+	// a test can observe states only session history produces (discovery
+	// notices, bodies archived by compaction).
+	skillStates        []skill.InvocationState
+	skillRuleset       permission.Ruleset
+	keysConfirmed      int
+	keysTotal          int
+	wakeRateLimitCalls int
+	walltimeStats      analytics.WalltimeStats
 }
 
 func newInfoPanelAgent() *infoPanelAgent {
@@ -139,6 +143,9 @@ func (a *infoPanelAgent) FocusedSkills() []*skill.Meta {
 }
 
 func (a *infoPanelAgent) FocusedSkillInvocationStates() []skill.InvocationState {
+	if a.skillStates != nil {
+		return append([]skill.InvocationState(nil), a.skillStates...)
+	}
 	loaded := make(map[string]struct{}, len(a.invokedSkills))
 	for _, meta := range a.invokedSkills {
 		if meta != nil && strings.TrimSpace(meta.Name) != "" {
@@ -371,24 +378,65 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 			t.Fatalf("skills section missing %q in %q", want, joined)
 		}
 	}
-	// Shape encodes model visibility and color encodes load state, so the four
-	// combinations must stay distinguishable.
-	invokedStyle := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg))
+	// The icon is the only status channel: shape carries the state class and
+	// color the accent, so the four combinations stay distinguishable while
+	// every name stays dim.
+	invokedStyle := skillStateLoadedStyle()
 	cases := []struct {
 		name  string
+		glyph string
 		style lipgloss.Style
 		label string
 	}{
-		{name: "model-visible loaded", style: invokedStyle, label: "● go-expert (loaded)"},
-		{name: "model-visible idle", style: InfoPanelDim, label: "○ py-expert"},
-		{name: "manual loaded", style: invokedStyle, label: "◌ manual-live (manual only)"},
-		{name: "manual idle", style: InfoPanelDim, label: "◌ manual-idle (manual only)"},
+		{name: "model-visible loaded", glyph: "●", style: invokedStyle, label: "go-expert"},
+		{name: "model-visible idle", glyph: "○", style: InfoPanelDim, label: "py-expert"},
+		{name: "manual loaded", glyph: "◌", style: invokedStyle, label: "manual-live"},
+		{name: "manual idle", glyph: "◌", style: InfoPanelDim, label: "manual-idle"},
 	}
 	for _, tc := range cases {
-		want := tc.style.Render(tc.label)
+		want := tc.style.Render(tc.glyph) + " " + InfoPanelDim.Render(tc.label)
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("%s skill row should render %q; want %q in %q", tc.name, tc.label, want, rendered)
 		}
+	}
+	// No row may fall back to prose: every state has an icon, and a suffix
+	// would both repeat the shape and truncate early in a narrow sidebar.
+	if strings.ContainsAny(joined, "(") {
+		t.Fatalf("skill rows should carry icon-only status, got %q", joined)
+	}
+}
+
+func TestRenderInfoPanelSkillsUseStateIcons(t *testing.T) {
+	backend := newInfoPanelAgent()
+	catalog := []*skill.Meta{
+		{Name: "relevant-skill", Description: "A project read matched its paths", Discovered: true},
+		{Name: "reload-skill", Description: "Body archived by compaction", Discovered: true},
+		{Name: "manual-skill", Description: "Explicit loads only", Discovered: true, DisableModelInvocation: true},
+	}
+	backend.availableSkills = catalog
+	backend.skillStates = []skill.InvocationState{
+		{Meta: catalog[0], UserLoadable: true, ModelCallable: true, NoticeRecorded: true},
+		{Meta: catalog[1], UserLoadable: true, ModelCallable: true, LoadedEarlier: true},
+		{Meta: catalog[2], UserLoadable: true, ModelCallable: false},
+	}
+	m := NewModel(backend)
+
+	rendered := m.renderInfoPanel(40, 24)
+	plain := stripANSI(rendered)
+	section := strings.Join(infoPanelSectionLines(infoPanelPlainLines(plain), "▼ SKILLS"), "\n")
+	for _, want := range []string{"◎ relevant-skill", "↻ reload-skill", "◌ manual-skill"} {
+		if !strings.Contains(section, want) {
+			t.Fatalf("skills section missing row %q in %q", want, section)
+		}
+	}
+	if strings.ContainsAny(section, "()") {
+		t.Fatalf("skills section should carry icon-only status, got %q", section)
+	}
+	// The reload state is the only non-dim, non-success accent: amber marks
+	// "load it again", so it has to survive rendering as a colored glyph.
+	reloadGlyph := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg)).Render("↻")
+	if !strings.Contains(rendered, reloadGlyph) {
+		t.Fatalf("reload row should paint ↻ in the warning color; want %q in %q", reloadGlyph, rendered)
 	}
 }
 
@@ -424,9 +472,9 @@ func TestRenderInfoPanelSkipsInvokedSkillMissingFromAvailableList(t *testing.T) 
 	if strings.Contains(section, "missing-skill") {
 		t.Fatalf("skills section should omit invoked skills missing from available list, got %q", section)
 	}
-	wantInvoked := InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg)).Render("● go-expert (loaded)")
+	wantInvoked := skillStateLoadedStyle().Render("●") + " " + InfoPanelDim.Render("go-expert")
 	if !strings.Contains(rendered, wantInvoked) {
-		t.Fatalf("visible invoked skill should remain success-colored; want %q in %q", wantInvoked, rendered)
+		t.Fatalf("visible invoked skill should keep a success-colored ● icon; want %q in %q", wantInvoked, rendered)
 	}
 }
 

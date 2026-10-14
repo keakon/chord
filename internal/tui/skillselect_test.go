@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/permission"
@@ -59,6 +60,46 @@ func TestOpenSkillSelectGroupsManualBeforeAvailable(t *testing.T) {
 	}
 }
 
+func TestSkillSelectRowsUseStateIconsNotText(t *testing.T) {
+	backend := newInfoPanelAgent()
+	backend.availableSkills = []*skill.Meta{
+		{Name: "go-expert", Description: "Go language development expert", Discovered: true},
+		{Name: "py-expert", Description: "Python development expert", Discovered: true},
+		{Name: "manual-only", Description: "Manual workflow", Discovered: true, DisableModelInvocation: true},
+	}
+	backend.invokedSkills = []*skill.Meta{
+		{Name: "go-expert", Description: "Go language development expert", Discovered: true, Invoked: true},
+	}
+	m := NewModelWithSize(backend, 100, 30)
+	m.mode = ModeNormal
+
+	m.openSkillSelect()
+	list := m.skillSelect.selector.list
+	if list == nil {
+		t.Fatal("skill overlay list missing")
+	}
+	// Shape carries the state class: the loaded model-visible skill gets ●,
+	// the idle one ○, and the manual-only skill ◌. No row needs a status
+	// suffix because the icon already says what the text would.
+	wantGlyphs := map[string]string{"go-expert": "●", "py-expert": "○", "manual-only": "◌"}
+	for _, item := range list.items {
+		if item.Header {
+			continue
+		}
+		want, ok := wantGlyphs[item.ID]
+		if !ok {
+			continue
+		}
+		plain := stripANSI(item.Label)
+		if !strings.HasPrefix(plain, want+" ") {
+			t.Fatalf("%s row label = %q, want %q icon prefix", item.ID, plain, want)
+		}
+		if strings.ContainsAny(plain, "()") {
+			t.Fatalf("%s row label = %q, want icon-only status without a text suffix", item.ID, plain)
+		}
+	}
+}
+
 func TestOpenSkillSelectWithoutSkillsToasts(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModelWithSize(backend, 100, 30)
@@ -71,6 +112,88 @@ func TestOpenSkillSelectWithoutSkillsToasts(t *testing.T) {
 	}
 	if m.activeToast == nil {
 		t.Fatal("empty catalog should toast instead of opening an empty overlay")
+	}
+}
+
+func TestSkillStateIconCoversEveryState(t *testing.T) {
+	// Every state the sidebar and the selector can observe maps onto exactly
+	// one icon; only two accents exist (success for a live body, warning for
+	// a body that needs reloading).
+	cases := []struct {
+		name      string
+		state     skill.InvocationState
+		wantGlyph string
+		wantStyle lipgloss.Style
+	}{
+		{
+			name:      "idle",
+			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true},
+			wantGlyph: skillIconIdle,
+			wantStyle: InfoPanelDim,
+		},
+		{
+			name:      "waiting for path match reads as idle",
+			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, PathConditional: true},
+			wantGlyph: skillIconIdle,
+			wantStyle: InfoPanelDim,
+		},
+		{
+			name:      "matched waiting for the notice",
+			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, PathActivated: true},
+			wantGlyph: skillIconRelevant,
+			wantStyle: InfoPanelDim,
+		},
+		{
+			name:      "notice recorded",
+			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, NoticeRecorded: true},
+			wantGlyph: skillIconRelevant,
+			wantStyle: InfoPanelDim,
+		},
+		{
+			name:      "loaded",
+			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, BodyPresent: true},
+			wantGlyph: skillIconLoaded,
+			wantStyle: skillStateLoadedStyle(),
+		},
+		{
+			name:      "loaded then compacted",
+			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, LoadedEarlier: true},
+			wantGlyph: skillIconReload,
+			wantStyle: InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg)),
+		},
+		{
+			name:      "manual only idle",
+			state:     skill.InvocationState{UserLoadable: true, ModelCallable: false},
+			wantGlyph: skillIconManual,
+			wantStyle: InfoPanelDim,
+		},
+		{
+			name:      "manual only loaded",
+			state:     skill.InvocationState{UserLoadable: true, ModelCallable: false, BodyPresent: true},
+			wantGlyph: skillIconManual,
+			wantStyle: skillStateLoadedStyle(),
+		},
+		{
+			name:      "denied by ruleset",
+			state:     skill.InvocationState{UserLoadable: false, ModelCallable: false},
+			wantGlyph: skillIconDenied,
+			wantStyle: InfoPanelDim,
+		},
+		{
+			name:      "loaded outranks the discovery signals",
+			state:     skill.InvocationState{UserLoadable: true, ModelCallable: true, BodyPresent: true, NoticeRecorded: true, LoadedEarlier: true},
+			wantGlyph: skillIconLoaded,
+			wantStyle: skillStateLoadedStyle(),
+		},
+	}
+	for _, tc := range cases {
+		glyph, style := skillStateIcon(tc.state)
+		if glyph != tc.wantGlyph {
+			t.Fatalf("%s: glyph = %q, want %q", tc.name, glyph, tc.wantGlyph)
+		}
+		if got := style.Render("x"); got != tc.wantStyle.Render("x") {
+			t.Fatalf("%s: icon style = %q, want %q", tc.name, got, tc.wantStyle.Render("x"))
+		}
 	}
 }
 
@@ -133,6 +256,9 @@ func TestSkillSelectDisabledRowExplainsDenial(t *testing.T) {
 		deniedIdx = i
 		if !item.Disabled {
 			t.Fatalf("ruleset-denied skill should be disabled: %#v", item)
+		}
+		if !strings.HasPrefix(stripANSI(item.Label), "⊘ closed-skill") {
+			t.Fatalf("denied row label = %q, want the ⊘ denied icon", item.Label)
 		}
 		if !strings.Contains(stripANSI(item.Label), skillReasonText(skill.ReasonDeniedByRuleset)) {
 			t.Fatalf("denied row label = %q, want reason %q", item.Label, skillReasonText(skill.ReasonDeniedByRuleset))

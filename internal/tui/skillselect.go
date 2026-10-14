@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/skill"
@@ -38,20 +39,61 @@ func skillSelectIdleHint() string {
 	)
 }
 
-// skillVisibilityGlyph encodes model visibility in the glyph shape and leaves
-// the load color to the caller: dashed ◌ marks a skill the model never sees
-// (manual-only or ruleset-denied), while the solid ○/● pair marks a
-// model-visible skill and whether its instructions are currently loaded. The
-// tool card uses ◌ for "receiving", so UI labels always keep the skill name
-// next to the glyph instead of letting it read as progress.
-func skillVisibilityGlyph(notModelCallable, loaded bool) string {
-	if notModelCallable {
-		return "◌"
+// Skill state icons. Shape carries the state class and color carries the
+// accent, so a skill row never needs a text suffix to say what it means:
+//
+//	○  idle — model-visible, nothing loaded, no discovery signal
+//	◎  relevant — a project read matched the skill's paths and the model
+//	   has (or is about to get) the name-and-description notice
+//	●  loaded — the body is live in this agent's context
+//	↻  reload — the body was loaded but compaction archived it; load it
+//	   again to use it
+//	◌  manual-only — the model never sees it; only an explicit /skill load
+//	   brings the body in
+//	⊘  denied — the role's ruleset refuses the skill
+//
+// The tool card uses ◌ for "receiving", so UI labels always keep the skill
+// name next to the glyph instead of letting it read as progress.
+const (
+	skillIconIdle     = "○"
+	skillIconRelevant = "◎"
+	skillIconLoaded   = "●"
+	skillIconReload   = "↻"
+	skillIconManual   = "◌"
+	skillIconDenied   = "⊘"
+)
+
+// skillStateIcon maps one invocation state onto its icon and icon color.
+// Priority follows the lifecycle: a skill the user cannot load at all is
+// marked denied, a manual-only skill never reaches the model, and the rest
+// is ordered by how close the body is to being live. The "matched, waiting
+// for the notice" and "notice recorded" states collapse into one icon: the
+// notice publishes when the tool round closes, so telling them apart never
+// changed what the user could do.
+func skillStateIcon(st skill.InvocationState) (string, lipgloss.Style) {
+	switch {
+	case !st.UserLoadable:
+		return skillIconDenied, InfoPanelDim
+	case !st.ModelCallable:
+		if st.BodyPresent {
+			return skillIconManual, skillStateLoadedStyle()
+		}
+		return skillIconManual, InfoPanelDim
+	case st.BodyPresent:
+		return skillIconLoaded, skillStateLoadedStyle()
+	case st.LoadedEarlier:
+		return skillIconReload, InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelWarningFg))
+	case st.NoticeRecorded, st.PathActivated:
+		return skillIconRelevant, InfoPanelDim
+	default:
+		return skillIconIdle, InfoPanelDim
 	}
-	if loaded {
-		return "●"
-	}
-	return "○"
+}
+
+// skillStateLoadedStyle is the accent for a body that is live: the only
+// state the panel paints in the success color.
+func skillStateLoadedStyle() lipgloss.Style {
+	return InfoPanelValue.Foreground(lipgloss.Color(currentTheme.InfoPanelSuccessFg))
 }
 
 // skillReasonText renders a machine-readable InvocationState.Reason for the
@@ -115,9 +157,10 @@ func sortSkillSelectStates(states []skill.InvocationState) {
 func skillSelectItemFor(st skill.InvocationState) OverlayListItem {
 	meta := st.Meta
 	name := strings.TrimSpace(meta.Name)
-	// Shape follows ModelCallable rather than frontmatter alone so a
-	// ruleset-denied skill does not render as model-visible.
-	glyph := skillVisibilityGlyph(!st.ModelCallable, st.BodyPresent)
+	// The icon shape follows the full invocation state rather than the
+	// frontmatter alone, so a ruleset-denied skill does not render as
+	// model-visible and no row carries a status suffix.
+	glyph, _ := skillStateIcon(st)
 	label := glyph + " " + name
 	if desc := strings.TrimSpace(meta.Description); desc != "" {
 		label += "  " + desc
@@ -130,31 +173,7 @@ func skillSelectItemFor(st skill.InvocationState) OverlayListItem {
 		item.Label = glyph + " " + name + " — " + skillReasonText(st.Reason)
 		return item
 	}
-	if label := skillInvocationStatusLabel(st); label != "" {
-		item.Label += "  (" + label + ")"
-	}
 	return item
-}
-
-func skillInvocationStatusLabel(st skill.InvocationState) string {
-	switch {
-	case !st.UserLoadable:
-		return skillReasonText(st.Reason)
-	case !st.ModelCallable:
-		return "manual only"
-	case st.BodyPresent:
-		return "loaded"
-	case st.LoadedEarlier:
-		return "reload to use"
-	case st.NoticeRecorded:
-		return "suggested"
-	case st.PathActivated:
-		return "matched; pending notice"
-	case st.PathConditional:
-		return "waiting for path match"
-	default:
-		return ""
-	}
 }
 
 // skillSelectItems groups the catalog into MANUAL and AVAILABLE sections.
