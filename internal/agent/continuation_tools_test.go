@@ -14,6 +14,7 @@ import (
 )
 
 func TestContinuationToolsRespectMainAndSubPersistenceBarriers(t *testing.T) {
+	t.Parallel()
 	for _, subagent := range []bool{false, true} {
 		for _, abandon := range []bool{false, true} {
 			t.Run(fmt.Sprintf("sub=%v/abandon=%v", subagent, abandon), func(t *testing.T) {

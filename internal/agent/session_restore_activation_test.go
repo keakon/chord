@@ -19,6 +19,7 @@ import (
 )
 
 func TestGetContextStatsIncludesCacheWriteTokens(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 1, CacheWriteTokens: 62156})
 
@@ -32,6 +33,7 @@ func TestGetContextStatsIncludesCacheWriteTokens(t *testing.T) {
 }
 
 func TestActivateLoadedSessionUsesLoadedStateWithoutRecomputingMerge(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	loaded := &loadedSessionState{
 		SessionPath:    "/tmp/session-123",
@@ -61,6 +63,7 @@ func TestActivateLoadedSessionUsesLoadedStateWithoutRecomputingMerge(t *testing.
 }
 
 func TestActivateLoadedSessionReportsFilteredTodoCount(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	loaded := &loadedSessionState{
 		SessionPath: "/tmp/session-stale-todos",
@@ -88,6 +91,7 @@ func TestActivateLoadedSessionReportsFilteredTodoCount(t *testing.T) {
 }
 
 func TestActivateLoadedSessionDoesNotReplayThinkingTranslationsAcrossSessions(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.globalConfig = &config.Config{ThinkingTranslation: &config.ThinkingTranslationConfig{TargetLanguage: "zh-Hans"}}
 	loaded := &loadedSessionState{
@@ -108,6 +112,7 @@ func TestActivateLoadedSessionDoesNotReplayThinkingTranslationsAcrossSessions(t 
 }
 
 func TestThinkingTranslationServiceUsesProjectConfigOverride(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.globalConfig = &config.Config{
 		ThinkingTranslation: &config.ThinkingTranslationConfig{TargetLanguage: "ja", ModelPool: "global-pool"},
@@ -141,6 +146,7 @@ func TestThinkingTranslationServiceUsesProjectConfigOverride(t *testing.T) {
 }
 
 func TestNewAuxModelPoolClientFallsBackAcrossRefs(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	calls := make([]string, 0, 2)
 	a.modelSwitchFactory = func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
@@ -171,6 +177,7 @@ func TestNewAuxModelPoolClientFallsBackAcrossRefs(t *testing.T) {
 }
 
 func TestNewAuxModelPoolClientReportsAllErrorsWhenAllRefsFail(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.modelSwitchFactory = func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		return nil, "", 0, fmt.Errorf("failed %s", providerModel)
@@ -186,6 +193,7 @@ func TestNewAuxModelPoolClientReportsAllErrorsWhenAllRefsFail(t *testing.T) {
 }
 
 func TestActivateLoadedSessionKeepsRepairedEmptyHistoryCleared(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	loaded := &loadedSessionState{
 		SessionPath:    "/tmp/session-456",
@@ -210,6 +218,7 @@ func TestActivateLoadedSessionKeepsRepairedEmptyHistoryCleared(t *testing.T) {
 }
 
 func TestThinkingTranslationIgnoresCanceledTurnContext(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	svc, err := thinkingtranslate.NewService()
 	if err != nil {
@@ -270,6 +279,7 @@ func (s agentTestChunkTranslator) TranslateChunk(ctx context.Context, targetLang
 // Persist and reload the display reading through the real snapshot path. The
 // restored manager must never promote any saved reading to trigger authority.
 func TestSessionSnapshotRestoresContextReadingWithoutPressure(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []ctxmgr.ContextUsageState{ctxmgr.ContextUsageObserved, ctxmgr.ContextUsageEstimated, ctxmgr.ContextUsageStale, ctxmgr.ContextUsageUnknown} {
 		t.Run(string(kind), func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())

@@ -9,6 +9,7 @@ import (
 )
 
 func TestInputDeliveryContinuationWithFullEventQueue(t *testing.T) {
+	t.Parallel()
 	for _, settle := range []bool{false, true} {
 		name := "resume"
 		if settle {

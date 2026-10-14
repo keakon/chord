@@ -19,6 +19,7 @@ import (
 // row is retained: the notice content reaches the model only through the
 // durable row the transcript replays.
 func TestGateKeepsStickyReminderWhenTheWarningClaimIsSpent(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)

@@ -256,6 +256,7 @@ func TestAppendEditRetryAdviceNilStreakSuccessNoNote(t *testing.T) {
 // function) must append the advisory to the model-facing context result
 // stored in ctxMgr while the TUI display result stays untouched.
 func TestMainAgentHandleToolResultAppendsAdvisoryToContextOnly(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	turnID := a.turn.ID
@@ -301,6 +302,7 @@ func TestMainAgentHandleToolResultAppendsAdvisoryToContextOnly(t *testing.T) {
 // Integration: SubAgent's real handleToolResult wiring appends the advisory
 // to its own model-facing context result on repeated failures.
 func TestSubAgentHandleToolResultAppendsAdvisoryToContext(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "edit-retry")
 	sub.newTurn()
@@ -339,6 +341,7 @@ func TestSubAgentHandleToolResultAppendsAdvisoryToContext(t *testing.T) {
 // failures before the reset, then two failures after it, each pair produces
 // exactly one advisory at the second failure.
 func TestEditRetryStreakResetsOnNewTurn(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	payload := editRetryPayload(tools.NameEdit, `{"path":"demo.md"}`, editMatchFailureError())
 	firstTurn := applyAdvice(a, "err", payload, true)    // streak 1
@@ -358,6 +361,7 @@ func TestEditRetryStreakResetsOnNewTurn(t *testing.T) {
 }
 
 func TestMainAgentApplyPatchRetryRequiresSuccessfulRead(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("current\n"), 0o644); err != nil {
@@ -510,6 +514,7 @@ func collectToolResultEventResults(t *testing.T, a *MainAgent, callID string) []
 // it can now match the new content, and if it fails again the failure re-arms
 // the guard on the new revision.
 func TestApplyPatchRetryUnblocksAfterTargetRewriteWithoutRead(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "demo.txt")
 	if err := os.WriteFile(path, []byte("current\n"), 0o644); err != nil {

@@ -27,6 +27,7 @@ func hostedRetryTarget(name string, keys []string, impl llm.Provider) llm.Fallba
 }
 
 func TestHostedBackendTransientRetry(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		failure error
@@ -65,6 +66,7 @@ func TestHostedBackendTransientRetry(t *testing.T) {
 }
 
 func TestHostedBackendQuotaDoesNotRetryRounds(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	quota := &llm.APIError{StatusCode: 429, Code: "insufficient_quota", Message: "account quota exhausted"}
 	first := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) { return nil, quota }}
@@ -77,6 +79,7 @@ func TestHostedBackendQuotaDoesNotRetryRounds(t *testing.T) {
 }
 
 func TestHostedBackendBackoffReleasesCapacityAndCancels(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.governor = newResourceGovernor(config.OrchestrationConfig{MaxActiveLLMRequests: 1})
 	started := make(chan struct{})

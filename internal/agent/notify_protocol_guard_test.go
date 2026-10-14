@@ -29,6 +29,7 @@ func notifyCallArgs(t *testing.T, target, messageType, correlationID, kind, mess
 // message/kind in between, all keep counting toward the same target because
 // they belong to the same "no valid response correlation" error family.
 func TestNotifyProtocolStreakCountsAcrossChangingArgs(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	const target = "task-notify-1"
@@ -59,6 +60,7 @@ func TestNotifyProtocolStreakCountsAcrossChangingArgs(t *testing.T) {
 // protocol errors count" rule: IO/network/session and other tool failures, and
 // plain (non-response) notify failures, must never feed the counter.
 func TestNotifyProtocolStreakIgnoresNonProtocolErrors(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	const target = "task-notify-io"
@@ -92,6 +94,7 @@ func TestNotifyProtocolStreakIgnoresNonProtocolErrors(t *testing.T) {
 // successful notify call on the target clears its streak, so a later isolated
 // mistake starts over instead of inheriting stale failures.
 func TestNotifyProtocolStreakResetsOnSuccessAndRecoversWithPlainNotify(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	const target = "task-notify-recover"
@@ -125,6 +128,7 @@ func TestNotifyProtocolStreakResetsOnSuccessAndRecoversWithPlainNotify(t *testin
 // healthy target never inherits another target's failures, and clearing one
 // target does not clear the other.
 func TestNotifyProtocolStreakSeparatesTargets(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	missing := errors.New("correlation_id is required for response: message_type=response answers only a real pending request")
@@ -150,6 +154,7 @@ func TestNotifyProtocolStreakSeparatesTargets(t *testing.T) {
 // and consumeNotifyProtocolPause ends the turn and asks the user for an
 // explicit correction instead of auto-retrying.
 func TestNotifyProtocolPauseIsTurnScopedAndClearedOnConsume(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	firstTurn := a.turn.ID
@@ -185,6 +190,7 @@ func TestNotifyProtocolPauseIsTurnScopedAndClearedOnConsume(t *testing.T) {
 // user-visible notification asking for explicit correction (the owner/user
 // decision point the third failure must reach).
 func TestNotifyProtocolPauseEmitsUserInputRequest(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.turn.notifyProtocolPause = true
@@ -213,6 +219,7 @@ func TestNotifyProtocolPauseEmitsUserInputRequest(t *testing.T) {
 // TestNotifyProtocolGuardIgnoresLoopSwitch pins that the loop enablement does
 // not change this protection (unlike the repeated-tool-call interception).
 func TestNotifyProtocolGuardIgnoresLoopSwitch(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.loopState.Enabled = true

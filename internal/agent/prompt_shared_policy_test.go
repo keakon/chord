@@ -248,6 +248,7 @@ question: allow
 }
 
 func TestLoopCompletionRequirementLines_KeepDoneToolContractEvenWhenQuestionAvailable(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -525,6 +526,7 @@ func TestMainAgentResponseClosurePrompt_RequiresContinueUnlessBlocked(t *testing
 }
 
 func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	joined := strings.Join(a.loopCompletionRequirementLines(), "\n")
 	// The report structure lives in the Done tool description; the loop line
@@ -547,6 +549,7 @@ func TestLoopCompletionRequirementLinesIncludeDoneToolContract(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestLoopCompletionRequirementLinesUsePermissionSpecificConfirmationGuidance(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	lines := a.loopCompletionRequirementLines()
 	joined := strings.Join(lines, "\n")

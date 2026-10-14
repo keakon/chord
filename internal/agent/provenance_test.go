@@ -11,6 +11,7 @@ import (
 )
 
 func TestMainAssistantProvenanceUsesProviderTypeWireFamily(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	providerCfg := llm.NewProviderConfig("deepseek", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -37,6 +38,7 @@ func TestMainAssistantProvenanceUsesProviderTypeWireFamily(t *testing.T) {
 }
 
 func TestMainAssistantProvenanceUsesRunningFallbackWireFamily(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	primaryCfg := llm.NewProviderConfig("chat-primary", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,

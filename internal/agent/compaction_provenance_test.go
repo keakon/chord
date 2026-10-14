@@ -49,6 +49,7 @@ func TestCheckpointSourceRefsValidateGenerationScopedOrdinals(t *testing.T) {
 }
 
 func TestCompactionHistoryReferencesAreAbsolute(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	request := []message.Message{{Role: message.RoleUser, Content: "request"}}
 	absPath, _, _, err := a.exportCompactionHistory(request, request, 2, nil, a.captureCompactionArchiveMeta())
@@ -87,6 +88,7 @@ func TestCompactionHistoryReferencesAreAbsolute(t *testing.T) {
 }
 
 func TestExportCompactionHistoryWritesSourceProvenance(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	messages := []message.Message{
 		{Role: message.RoleUser, Content: "request"},
@@ -133,6 +135,7 @@ func TestExportCompactionHistoryWritesSourceProvenance(t *testing.T) {
 // dropped question-state row would otherwise shorten the ref list below that
 // prefix and fail every apply.
 func TestProduceCompactionDraftRefsCoverUnfilteredPrefix(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.globalConfig.Context.Compaction.Profile = config.CompactionProfileArchival

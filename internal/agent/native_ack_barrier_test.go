@@ -14,6 +14,7 @@ import (
 )
 
 func TestNativeReceiptPreflightWaitsForAcknowledgement(t *testing.T) {
+	t.Parallel()
 	for _, agentKind := range []string{"main", "sub"} {
 		t.Run(agentKind, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -108,6 +109,7 @@ func TestNativeReceiptPreflightWaitsForAcknowledgement(t *testing.T) {
 }
 
 func TestNativeReceiptPreflightFailsClosedOnAcknowledgementError(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.handleLLMResponse(Event{Type: EventLLMResponse, TurnID: a.turn.ID, Payload: &LLMResponsePayload{Content: "Complete", StopReason: "stop", NativeTools: &message.NativeToolHistory{RequestIDs: []string{"missing-request"}}}})

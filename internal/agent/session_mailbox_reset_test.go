@@ -93,6 +93,7 @@ func assertEmptySubAgentMailboxRuntime(t *testing.T, a *MainAgent) {
 // turn, and the old session's durable mailbox rows must survive for its own
 // resume replay.
 func TestNewSessionCommandDropsBusyMailboxRuntimeResidue(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -158,6 +159,7 @@ func TestNewSessionCommandDropsBusyMailboxRuntimeResidue(t *testing.T) {
 // must drop the replaced session's queued mailbox state instead of letting the
 // forked session's first idle drain stage it into a new turn.
 func TestForkSessionCommandDropsBusyMailboxRuntimeResidue(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -193,6 +195,7 @@ func TestForkSessionCommandDropsBusyMailboxRuntimeResidue(t *testing.T) {
 // like the urgent/normal queue entries and the per-owner queue entries do, so
 // repeated delegate/close cycles never inflate memoryBytes.
 func TestRemoveSubAgentMailboxStateReleasesProgressMemory(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	agentID := "worker-progress-1"
 	progress := SubAgentMailboxMessage{

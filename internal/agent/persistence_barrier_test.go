@@ -285,6 +285,7 @@ func TestToolExecutionPipelineJournalFailureBlocksExecute(t *testing.T) {
 }
 
 func TestIntentBarrierPersistsAssistantBeforeToolDispatch(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
 	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
@@ -318,6 +319,7 @@ func TestIntentBarrierPersistsAssistantBeforeToolDispatch(t *testing.T) {
 }
 
 func TestIntentBarrierSuccessRecoversMainPersistenceHealth(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.persistenceHealth.markDegraded(errors.New("temporary persistence error"))
 	a.newTurn("")
@@ -333,6 +335,7 @@ func TestIntentBarrierSuccessRecoversMainPersistenceHealth(t *testing.T) {
 }
 
 func TestMainToolActivityJournalUsesStableMainScope(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	pipeline := a.toolExecutionPipeline()
 	if pipeline.agentID == identity.MainAgentID {
@@ -356,6 +359,7 @@ func newBrokenPathRecoveryManager(t *testing.T) *recovery.RecoveryManager {
 }
 
 func TestAssistantPersistenceFailureWithoutToolsDegradesMainAgent(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
 	a.newTurn("")
@@ -377,6 +381,7 @@ func TestAssistantPersistenceFailureWithoutToolsDegradesMainAgent(t *testing.T) 
 // while skipping only the TUI event, so a failed mailbox-overlay write left the
 // session healthy and tool dispatch ungated.
 func TestMainMailboxOverlayPersistenceFailureDegradesMainAgent(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
 	a.pendingSubAgentMailboxes = []*SubAgentMailboxMessage{{
@@ -402,6 +407,7 @@ func TestMainMailboxOverlayPersistenceFailureDegradesMainAgent(t *testing.T) {
 // once a persistence recovery has made the transcript durable again, so the
 // TUI's waiting row does not linger until the session switches.
 func TestRecoveredPersistenceResendsDeferredMailboxAppendEvent(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
 	a.pendingSubAgentMailboxes = []*SubAgentMailboxMessage{{
@@ -505,6 +511,7 @@ func TestSubAgentPersistMessageBarrierDirectWriteFailClosed(t *testing.T) {
 }
 
 func TestNotePersistenceFailureIgnoresErrClosed(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.notePersistenceFailure(recovery.ErrClosed)
 	if a.persistenceDegraded() {
@@ -518,6 +525,7 @@ func TestNotePersistenceFailureIgnoresErrClosed(t *testing.T) {
 }
 
 func TestWaitPersistBarrierFailClosed(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := a.waitPersistBarrier(make(chan error), false); !errors.Is(err, errPersistenceQueueUnavailable) {
 		t.Fatalf("enqueue-failed barrier error = %v, want errPersistenceQueueUnavailable", err)
@@ -529,6 +537,7 @@ func TestWaitPersistBarrierFailClosed(t *testing.T) {
 }
 
 func TestLoopPausedWhenPersistenceDegraded(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.loopState.Enabled = true
 	a.persistenceHealth.markDegraded(errors.New("disk full"))
@@ -543,6 +552,7 @@ func TestLoopPausedWhenPersistenceDegraded(t *testing.T) {
 }
 
 func TestTryRecoverPersistenceBeforeTurnRecoversAfterCheckpoint(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
 	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
@@ -621,6 +631,7 @@ func awaitSyntheticToolResult(t *testing.T, a *MainAgent) {
 }
 
 func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.installRecoveryManager(newBrokenPathRecoveryManager(t)) // force the intent barrier to fail closed
 	a.newTurn("")
@@ -657,6 +668,7 @@ func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
 }
 
 func TestRepeatedIntentBarrierFailuresAbortTurn(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
 	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))
@@ -691,6 +703,7 @@ func TestRepeatedIntentBarrierFailuresAbortTurn(t *testing.T) {
 }
 
 func TestIntentBarrierSuccessResetsBarrierFailureRounds(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = filepath.Join(t.TempDir(), "session")
 	a.installRecoveryManager(recovery.NewRecoveryManager(a.sessionDir))

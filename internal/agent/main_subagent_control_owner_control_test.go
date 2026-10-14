@@ -12,6 +12,7 @@ import (
 )
 
 func TestReservedInputBlocksParking(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-reserve-park")
 	sub.setState(SubAgentStateIdle, "waiting")
@@ -34,6 +35,7 @@ func TestReservedInputBlocksParking(t *testing.T) {
 }
 
 func TestReservationCommitFailsAfterSubAgentShutdown(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-reserve-shutdown")
 
@@ -60,6 +62,7 @@ func TestReservationCommitFailsAfterSubAgentShutdown(t *testing.T) {
 }
 
 func TestResponseMailboxReservationIsIdempotent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-response-idempotent")
 	input := pendingUserMessage{Content: "decision", Mailbox: &message.MailboxMetadata{
@@ -79,6 +82,7 @@ func TestResponseMailboxReservationIsIdempotent(t *testing.T) {
 }
 
 func TestDirectOwnerOnlyControlAppliesToLiveChildAndCompletedRehydrate(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -124,6 +128,7 @@ func TestDirectOwnerOnlyControlAppliesToLiveChildAndCompletedRehydrate(t *testin
 }
 
 func TestDirectOwnerOnlyStopRejectsAncestorCaller(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -143,6 +148,7 @@ func TestDirectOwnerOnlyStopRejectsAncestorCaller(t *testing.T) {
 }
 
 func TestCancelSubAgentCancelsDirectDescendantsRecursively(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 3)
 
@@ -193,6 +199,7 @@ func TestCancelSubAgentCancelsDirectDescendantsRecursively(t *testing.T) {
 }
 
 func TestCallerTaskIDAllowsRehydratedParentToControlChild(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 
@@ -238,6 +245,7 @@ func TestCallerTaskIDAllowsRehydratedParentToControlChild(t *testing.T) {
 }
 
 func TestCancelSubAgentCancelsPendingToolAndReleasesSlot(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-2")
 	sub.ctxMgr.Append(message.Message{
@@ -286,6 +294,7 @@ func TestCancelSubAgentCancelsPendingToolAndReleasesSlot(t *testing.T) {
 }
 
 func TestCancelSubAgentAdmissionsDuringCreateReleasesSlotOnce(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	entered := make(chan struct{})

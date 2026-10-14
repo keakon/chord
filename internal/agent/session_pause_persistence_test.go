@@ -115,6 +115,7 @@ func TestSubPersistSealWaitsForAlreadyFiredCallback(t *testing.T) {
 }
 
 func TestPausedInputMissingTranscriptIsAppendedOnceAfterRestore(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	path, _ := createPausedTakeoverTarget(t, a, "sample-target")
 	manager := recovery.NewRecoveryManager(path)
@@ -164,6 +165,7 @@ func TestPausedInputMissingTranscriptIsAppendedOnceAfterRestore(t *testing.T) {
 }
 
 func TestInitialPauseRetainsPendingCopyWhenTranscriptPersistenceFails(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	manager := a.recoveryManager()
 	input := recovery.PendingInput{InputID: "input-1", OwnerTaskID: identity.MainAgentID, Content: "Review sample files", Stage: recovery.PendingInputStageTranscriptStaged}

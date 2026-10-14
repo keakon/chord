@@ -20,6 +20,7 @@ func workDirChangedEvents(events []AgentEvent) []WorkDirChangedEvent {
 // unrelated restore event lands, which is what made the path look like it moved
 // at compaction time.
 func TestWorkDirSwitchPublishesWorkDirChangedEvent(t *testing.T) {
+	t.Parallel()
 	a, _ := newWorktreeTestAgent(t, "session-notify")
 	drainAgentEvents(a.outputCh)
 
@@ -66,6 +67,7 @@ func TestPublishWorkDirChangeSkipsUnchangedBinding(t *testing.T) {
 // one release, so a consumer never combines a path from one switch with an
 // identity from another.
 func TestWorkDirSnapshotCarriesOneRelease(t *testing.T) {
+	t.Parallel()
 	a, repo := newWorktreeTestAgent(t, "session-snapshot")
 	initial := a.WorkDirSnapshot()
 	if initial.Path != repo || initial.WorktreeID != "" {

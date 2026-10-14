@@ -15,6 +15,7 @@ import (
 )
 
 func TestPausedSessionRestoreValidatesDependenciesBeforeActivation(t *testing.T) {
+	t.Parallel()
 	for _, paused := range []bool{true, false} {
 		t.Run(map[bool]string{true: "paused", false: "pending_before_dispatch"}[paused], func(t *testing.T) {
 			// Rejected restores must leave this live owner untouched. Keep one
@@ -111,6 +112,7 @@ func TestPausedSessionRestoreValidatesDependenciesBeforeActivation(t *testing.T)
 }
 
 func TestPausedSessionRestoreAllowsAvailableRolesAndTerminalMissingRole(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	path, _ := createPausedTakeoverTarget(t, a, "paused-target")
 	a.agentConfigs = map[string]*config.AgentConfig{
@@ -164,6 +166,7 @@ func writePausedTaskMeta(t *testing.T, path string, meta subAgentMeta) {
 }
 
 func TestPausedTaskRestoreRejectsUnavailableWorkingDirectoryBinding(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"removed", "file", "missing_meta", "invalid_meta", "empty_directory", "wrong_task", "outside_repository"} {
 		t.Run(kind, func(t *testing.T) {
 			a := newReadyTestMainAgent(t)
@@ -211,6 +214,7 @@ func TestPausedTaskRestoreRejectsUnavailableWorkingDirectoryBinding(t *testing.T
 }
 
 func TestPausedTaskReactivationRechecksSavedWorkingDirectory(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{"worker-sample": {Name: "worker-sample", Mode: config.AgentModeSubAgent}})
 	a.SetLLMFactory(func(string, []string, string) *llm.Client { return newTestLLMClient() })
@@ -253,6 +257,7 @@ func TestPausedTaskReactivationRechecksSavedWorkingDirectory(t *testing.T) {
 }
 
 func TestOrdinaryHistoryRestoreKeepsMetadataAndRoleBestEffort(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.agentConfigs = map[string]*config.AgentConfig{}
 	loaded := &loadedSessionState{SessionPath: t.TempDir(), ActiveRole: "unavailable-sample"}
@@ -265,6 +270,7 @@ func TestOrdinaryHistoryRestoreKeepsMetadataAndRoleBestEffort(t *testing.T) {
 }
 
 func TestPausedSessionRestoreRejectsMissingInputOwner(t *testing.T) {
+	t.Parallel()
 	for _, consumer := range []string{"load", "takeover"} {
 		t.Run(consumer, func(t *testing.T) {
 			a := newReadyTestMainAgent(t)

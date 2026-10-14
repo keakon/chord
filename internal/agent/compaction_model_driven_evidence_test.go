@@ -65,6 +65,7 @@ func TestValidateModelDrivenClaimKindsObservedRequiresEvidence(t *testing.T) {
 // resolves, so the model can cite one or reclassify the claim instead of
 // guessing what "observed" required.
 func TestExplainCheckpointRejectionHintsResolvableEvidence(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "resolvable-diff", Excerpt: "diff"})
 	id := evidenceItemID(a.evidence.snapshot()[0])
@@ -91,6 +92,7 @@ func TestExplainCheckpointRejectionLeavesOtherErrorsUnchanged(t *testing.T) {
 }
 
 func TestResolvableEvidenceHintOmitsNegativeAndInvalidated(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "positive", Excerpt: "diff"})
 	a.evidence.add(evidenceItem{Kind: evidenceToolError, Key: "negative", Excerpt: "failed"})
@@ -134,6 +136,7 @@ func TestResolvableEvidenceHintOmitsNegativeAndInvalidatedPackIDs(t *testing.T) 
 }
 
 func TestResolvableEvidenceHintWithoutEvidence(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	hint := a.resolvableEvidenceHint()
 	if !strings.Contains(hint, "no evidence ID is resolvable in this context") {
@@ -145,6 +148,7 @@ func TestResolvableEvidenceHintWithoutEvidence(t *testing.T) {
 // rejection without the resolvable menu left the model to regenerate an
 // ev-<12hex> shape from memory (the reported session's invented-ID failures).
 func TestUnknownEvidenceRefHintListsResolvableEvidence(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "unknown-ref", Excerpt: "diff"})
 	id := evidenceItemID(a.evidence.snapshot()[0])
@@ -177,6 +181,7 @@ func TestUnknownEvidenceRefHintListsPackIDs(t *testing.T) {
 }
 
 func TestUnknownEvidenceRefHintWithoutEvidence(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	hint := a.unknownEvidenceRefHint()
 	if !strings.Contains(hint, "no evidence ID is resolvable in this context") {
@@ -193,6 +198,7 @@ func TestUnknownEvidenceRefHintWithoutEvidence(t *testing.T) {
 // End-to-end through the arm path: the rejection the model sees must be the
 // hinted one, and a rejected request must not arm a pending checkpoint.
 func TestTryArmModelDrivenCheckpointHintsResolvableEvidence(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "arm-hint-diff", Excerpt: "diff"})
@@ -217,6 +223,7 @@ func TestTryArmModelDrivenCheckpointHintsResolvableEvidence(t *testing.T) {
 // carry the resolvable menu, and a rejected request must never arm a pending
 // checkpoint.
 func TestTryArmModelDrivenCheckpointUnknownEvidenceRefHintsResolvable(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.evidence.add(evidenceItem{Kind: evidenceToolDiff, Key: "unknown-arm", Excerpt: "diff"})
@@ -393,6 +400,7 @@ func TestValidateModelDrivenEvidenceRefsResolvesCheckpointPackID(t *testing.T) {
 // must accept those IDs (resolution against the checkpoint in context) instead
 // of starting a rejection chain.
 func TestE2EModelDrivenEvidenceIDSurvivesApplyIntoNextGeneration(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")

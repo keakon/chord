@@ -11,6 +11,7 @@ import (
 // it. A message that waits for the user to write again strands the work it
 // reports, because nothing else in the process can deliver it.
 func TestIdleMailboxDrainWakesWithoutUserInput(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	kinds := []SubAgentMailboxKind{SubAgentMailboxKindBackgroundResult, SubAgentMailboxKindCompleted}
 	const wakes = 6

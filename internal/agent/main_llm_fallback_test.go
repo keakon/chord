@@ -17,6 +17,7 @@ import (
 )
 
 func TestFallbackRequestIncludesQueuedUserInput(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	primaryCfg := llm.NewProviderConfig("primary", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -117,6 +118,7 @@ func requestHasUserText(messages []message.Message, want string) bool {
 }
 
 func TestCallLLMOversizeRequestsEventLoopCompaction(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
 	a.newTurn("")
@@ -184,6 +186,7 @@ func TestCallLLMOversizeRequestsEventLoopCompaction(t *testing.T) {
 }
 
 func TestOversizeCompactionRequestHonorsRetryLimitOnEventLoop(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.newTurn("")
 	a.turn.OversizeRecoveryCount = maxOversizeRecoveryAttempts
@@ -213,6 +216,7 @@ func TestOversizeCompactionRequestHonorsRetryLimitOnEventLoop(t *testing.T) {
 }
 
 func TestCallLLMOversizeStopsWhenAutoCompactionDisabled(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.newTurn("")
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 16000, 0)
@@ -264,6 +268,7 @@ func TestCallLLMOversizeStopsWhenAutoCompactionDisabled(t *testing.T) {
 }
 
 func TestCallLLMMixedFallbackErrorsDoNotStartOversizeCompaction(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Reserved: 16000}}}
 	a.newTurn("")
@@ -317,6 +322,7 @@ func TestCallLLMMixedFallbackErrorsDoNotStartOversizeCompaction(t *testing.T) {
 }
 
 func TestCallLLMFallbackAttemptToastForContextLengthExceeded(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
@@ -395,6 +401,7 @@ func TestCallLLMFallbackAttemptToastForContextLengthExceeded(t *testing.T) {
 }
 
 func TestCallLLMFallbackAttemptToastWhenFallbackNeverStreams(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
@@ -493,6 +500,7 @@ waitDone:
 	}
 }
 func TestCallLLMNoFallbackAttemptToastForSameModelNameDifferentProvider(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	primaryCfg := llm.NewProviderConfig("prov-a", config.ProviderConfig{
@@ -579,6 +587,7 @@ drainLoop:
 // emits the attempt toast as soon as the retry loop starts it, and that
 // confirming the switch does not repeat the same notice.
 func TestCallLLMDifferentModelNamesAnnounceFallbackAttempt(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	primaryCfg := llm.NewProviderConfig("prov-a", config.ProviderConfig{
@@ -665,6 +674,7 @@ func TestCallLLMDifferentModelNamesAnnounceFallbackAttempt(t *testing.T) {
 // for the same target in a later round, and never fires for a same-name model
 // served by a different provider.
 func TestMainLLMFallbackAttemptToastAnnouncedOncePerTarget(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	drainAgentEvents(a.Events()) // clear setup events
 
@@ -717,6 +727,7 @@ func TestMainLLMFallbackAttemptToastAnnouncedOncePerTarget(t *testing.T) {
 // reports FallbackTriggered && FallbackExhausted from a previous round that
 // completed before the cancel took effect.
 func TestCallLLMNoFallbackExhaustedToastOnCancel(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	primaryCfg := llm.NewProviderConfig("primary-prov", config.ProviderConfig{
@@ -804,6 +815,7 @@ func TestCallLLMNoFallbackExhaustedToastOnCancel(t *testing.T) {
 }
 
 func TestCallLLMSurfacesUpstreamStreamFailureActionably(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.SetProviderModelRef("primary-prov/primary-model")
 
@@ -835,6 +847,7 @@ func TestCallLLMSurfacesUpstreamStreamFailureActionably(t *testing.T) {
 }
 
 func TestCallLLMFailedFallbackPersistsLastRunningModel(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.SetProviderModelRef("primary-prov/primary-model")
 
@@ -1100,7 +1113,7 @@ func TestFallbackBoundaryIncludesQueuedMailboxResult(t *testing.T) {
 	a.newTurn("")
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "hi"})
 
-	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-1", "Run production build")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, t.Name()+"-1", "Run production build")})
 	if got := len(a.ctxMgr.Snapshot()); got != 1 {
 		t.Fatalf("ctx snapshot = %d messages, want only the initial user message before the retry", got)
 	}
@@ -1138,7 +1151,7 @@ func TestFallbackBoundaryMergesUserInputBeforeMailboxResult(t *testing.T) {
 	a.newTurn("")
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "hi"})
 
-	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, "job-2", "Upload release bundle")})
+	a.handleJobFinished(Event{Type: EventJobFinished, SourceID: a.instanceID, Payload: backgroundResultPayload(a.instanceID, t.Name()+"-2", "Upload release bundle")})
 	a.handleUserMessage(Event{Payload: "queued user follow-up"})
 
 	messages := []message.Message{

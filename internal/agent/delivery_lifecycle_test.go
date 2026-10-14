@@ -16,6 +16,7 @@ import (
 )
 
 func TestDeliveryAcknowledgmentSettlesCanonicalHistory(t *testing.T) {
+	t.Parallel()
 	for _, worker := range []bool{false, true} {
 		for _, failure := range []bool{false, true} {
 			t.Run(fmt.Sprintf("worker=%t/failure=%t", worker, failure), func(t *testing.T) {
@@ -109,6 +110,7 @@ func TestDeliveryAcknowledgmentSettlesCanonicalHistory(t *testing.T) {
 }
 
 func TestDeliverySurvivesRepeatedCompactionAndReload(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	manager := recovery.NewRecoveryManager(a.sessionDir)
 	a.installRecoveryManager(manager)

@@ -36,6 +36,7 @@ func TestProviderSupportsRequiredToolChoiceUsesKnownFamiliesOnly(t *testing.T) {
 }
 
 func TestDoneRejectedContinuationNoteIncludesRejectReason(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 
@@ -53,6 +54,7 @@ func TestDoneRejectedContinuationNoteIncludesRejectReason(t *testing.T) {
 }
 
 func TestLoopAnchorOmitsTodoRequirementWhenNoOpenTodos(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.sendLoopAnchorFromCommand("finish current task")
 	msgs := a.ctxMgr.Snapshot()
@@ -75,6 +77,7 @@ func TestLoopAnchorOmitsTodoRequirementWhenNoOpenTodos(t *testing.T) {
 }
 
 func TestLoopAnchorIncludesTodoRequirementWhenOpenTodosWithTodoWrite(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.todoItems = []tools.TodoItem{{ID: "1", Content: "ship feature", Status: "pending"}}
@@ -102,6 +105,7 @@ func TestLoopAnchorIncludesTodoRequirementWhenOpenTodosWithTodoWrite(t *testing.
 }
 
 func TestLoopAnchorIncludesTodoRequirementWhenOpenTodosWithoutTodoWrite(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	// No TodoWrite registered — hasTodoWriteAccess() returns false.
 	a.todoItems = []tools.TodoItem{{ID: "1", Content: "ship feature", Status: "pending"}}
@@ -135,6 +139,7 @@ func TestLoopAnchorIncludesTodoRequirementWhenOpenTodosWithoutTodoWrite(t *testi
 }
 
 func TestLoopContinuationOmitsTodoRequirementWhenNoOpenTodos(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"target_active"}})
@@ -150,6 +155,7 @@ func TestLoopContinuationOmitsTodoRequirementWhenNoOpenTodos(t *testing.T) {
 }
 
 func TestLoopContinuationIncludesTodoRequirementWhenOpenTodosWithTodoWrite(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewTodoWriteTool(nil))
 	a.loopState.enableWithTarget("finish current task")
@@ -167,6 +173,7 @@ func TestLoopContinuationIncludesTodoRequirementWhenOpenTodosWithTodoWrite(t *te
 }
 
 func TestLoopContinuationIncludesTodoRequirementWhenOpenTodosWithoutTodoWrite(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	// No TodoWrite registered — hasTodoWriteAccess() returns false.
 	a.loopState.enableWithTarget("finish current task")
@@ -184,6 +191,7 @@ func TestLoopContinuationIncludesTodoRequirementWhenOpenTodosWithoutTodoWrite(t 
 }
 
 func TestLoopAnchorOmitsSubAgentRequirementWhenNoActiveSubAgents(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.sendLoopAnchorFromCommand("finish current task")
 	msgs := a.ctxMgr.Snapshot()
@@ -206,6 +214,7 @@ func TestLoopAnchorOmitsSubAgentRequirementWhenNoActiveSubAgents(t *testing.T) {
 }
 
 func TestLoopAnchorIncludesSubAgentRequirementWhenActiveSubAgents(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -242,6 +251,7 @@ func TestLoopAnchorIncludesSubAgentRequirementWhenActiveSubAgents(t *testing.T) 
 }
 
 func TestLoopContinuationOmitsSubAgentRequirementWhenNoActiveSubAgents(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"target_active"}})
@@ -254,6 +264,7 @@ func TestLoopContinuationOmitsSubAgentRequirementWhenNoActiveSubAgents(t *testin
 }
 
 func TestLoopContinuationIncludesSubAgentRequirementWhenActiveSubAgents(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -280,6 +291,7 @@ func TestLoopContinuationIncludesSubAgentRequirementWhenActiveSubAgents(t *testi
 }
 
 func TestLoopAnchorIncludesIterationBudget(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.sendLoopAnchorFromCommand("finish current task")
 	msgs := a.ctxMgr.Snapshot()
@@ -299,6 +311,7 @@ func TestLoopAnchorIncludesIterationBudget(t *testing.T) {
 }
 
 func TestLoopContinuationIncludesIterationBudget(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.MaxIterations = 100
@@ -316,6 +329,7 @@ func TestLoopContinuationIncludesIterationBudget(t *testing.T) {
 // the budget line used to carry: the auto-reject path records the intercept
 // before it builds the notice, so a counter of 7 must report 7 spent.
 func TestLoopContinuationBudgetCountsTheRejectionThatProducedIt(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.MaxIterations = 10
@@ -332,6 +346,7 @@ func TestLoopContinuationBudgetCountsTheRejectionThatProducedIt(t *testing.T) {
 }
 
 func TestLoopContinuationConvergenceWarningNearBudgetLimit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.MaxIterations = 100
@@ -351,6 +366,7 @@ func TestLoopContinuationConvergenceWarningNearBudgetLimit(t *testing.T) {
 }
 
 func TestLoopContinuationGapLinesConcrete(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("fix the bug")
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"open_todos", "subagents_active"}})
@@ -369,6 +385,7 @@ func TestLoopContinuationGapLinesConcrete(t *testing.T) {
 }
 
 func TestLoopContinuationNoVagueFallbackWhenConcreteReasonsExist(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("fix the bug")
 	note := a.buildLoopContinuationNote(&LoopAssessment{Action: LoopAssessmentActionContinue, Reasons: []string{"open_todos"}})
@@ -382,6 +399,7 @@ func TestLoopContinuationNoVagueFallbackWhenConcreteReasonsExist(t *testing.T) {
 }
 
 func TestLoopContinuationSubAgentStuckInstruction(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -408,6 +426,7 @@ func TestLoopContinuationSubAgentStuckInstruction(t *testing.T) {
 }
 
 func TestCurrentLoopContinuationReasonsUsesHasActiveSubAgents(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	// Add a completed subagent — it should NOT trigger subagents_active.

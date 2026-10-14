@@ -455,7 +455,7 @@ func TestAssistantRenderUsesMarkdownCacheHit(t *testing.T) {
 
 func TestViewportVisibleWindowBlockIDsUsesCachedStartsAndSpans(t *testing.T) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkViewportWithSpill()
+	v := benchmarkViewportWithSpill(t)
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
 	if len(v.blockStartsCache) == 0 || len(v.blockSpansCache) == 0 {
@@ -485,7 +485,7 @@ func TestViewportVisibleWindowBlockIDsUsesCachedStartsAndSpans(t *testing.T) {
 
 func TestViewportVisibleWindowBlockIDsCachedOnlyRejectsStalePositionVersion(t *testing.T) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkViewportWithSpill()
+	v := benchmarkViewportWithSpill(t)
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
 	if len(v.blockStartsCache) == 0 || len(v.blockSpansCache) == 0 {
@@ -500,7 +500,7 @@ func TestViewportVisibleWindowBlockIDsCachedOnlyRejectsStalePositionVersion(t *t
 
 func TestViewportRenderDoesNotUseStaleSpansForColdSpillBlocks(t *testing.T) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkViewportWithSpill()
+	v := benchmarkViewportWithSpill(t)
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
 	if len(v.blockStartsCache) == 0 || len(v.blockSpansCache) == 0 {
@@ -534,7 +534,7 @@ func TestViewportRenderDoesNotUseStaleSpansForColdSpillBlocks(t *testing.T) {
 
 func BenchmarkViewportVisibleWindowBlockIDsCachedOnly(b *testing.B) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkViewportWithSpill()
+	v := benchmarkViewportWithSpill(b)
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
 	b.ResetTimer()

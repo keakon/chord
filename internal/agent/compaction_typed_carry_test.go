@@ -831,6 +831,7 @@ func TestTypedCarryRecoveredFromUsageCheckpointAppendix(t *testing.T) {
 // chain. A generic carry that stripped the appendix before extracting the
 // typed state would silently sever the chain by the second usage round.
 func TestTypedStateSurvivesTwoRealGenericAppliesIntoModelDriven(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")

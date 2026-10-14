@@ -174,6 +174,7 @@ func TestHandleAgentErrorFailsPendingToolCalls(t *testing.T) {
 }
 
 func TestHandleAgentErrorDiscardsCompletedSpeculativeToolWithoutAssistantDeclaration(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -230,6 +231,7 @@ func TestHandleAgentErrorDiscardsCompletedSpeculativeToolWithoutAssistantDeclara
 }
 
 func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -289,6 +291,7 @@ func TestHandleAgentErrorPersistsFailedPendingToolCalls(t *testing.T) {
 // transcript — and every later request — carries exactly the text the model is
 // told to continue with.
 func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.turn.appendPartialText("the second conflict is caused by the next commit touching the same file")
@@ -328,6 +331,7 @@ func TestHandleAgentErrorPreservesPartialAssistantTextAndResumes(t *testing.T) {
 // so the next request simply ends with the preserved reply and the model picks
 // it up where it stopped.
 func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationMessage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.llmClient = newChatCompletionsTestClient()
 	a.newTurn("")
@@ -360,6 +364,7 @@ func TestHandleAgentErrorPrefillCapablePoolSkipsContinuationMessage(t *testing.T
 // cooldowns and rotate keys or fallback models rather than firing
 // back-to-back; the round count itself is not the stop condition.
 func TestHandleAgentErrorAutoContinueIsUnbounded(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 
@@ -379,6 +384,7 @@ func TestHandleAgentErrorAutoContinueIsUnbounded(t *testing.T) {
 }
 
 func TestHandleAgentErrorRollsBackVisiblePartialAssistantText(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 
@@ -397,6 +403,7 @@ func TestHandleAgentErrorRollsBackVisiblePartialAssistantText(t *testing.T) {
 }
 
 func TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsFailedToolResult(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sub := newPersistenceTestSubAgent(a, "agent-1")
@@ -443,6 +450,7 @@ func TestCancelCurrentTurnRoutesToFocusedSubAgentAndPersistsFailedToolResult(t *
 }
 
 func TestHandleAgentErrorPersistsFailedSubAgentPendingToolCalls(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sub := newPersistenceTestSubAgent(a, "agent-2")
@@ -480,6 +488,7 @@ func TestHandleAgentErrorPersistsFailedSubAgentPendingToolCalls(t *testing.T) {
 }
 
 func TestHandleAgentErrorWaitsForFailedToolPersistenceBarrier(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sub := newPersistenceTestSubAgent(a, "agent-barrier")
@@ -547,6 +556,7 @@ func TestHandleAgentErrorWaitsForFailedToolPersistenceBarrier(t *testing.T) {
 }
 
 func TestMainExecuteToolCallPreservesOutputAndError(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	toolName := "OutputErr"
@@ -572,6 +582,7 @@ func TestMainExecuteToolCallPreservesOutputAndError(t *testing.T) {
 }
 
 func TestMainExecuteToolCallRejectsSubAgentOnlyCompleteTool(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(tools.CompleteTool{})
@@ -589,6 +600,7 @@ func TestMainExecuteToolCallRejectsSubAgentOnlyCompleteTool(t *testing.T) {
 }
 
 func TestMainExecuteToolCallSameAgentWriteIsSerialized(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	stub := blockingToolStub{
@@ -812,6 +824,7 @@ func TestSubAgentDrainPendingToolFailureSets(t *testing.T) {
 }
 
 func TestSubAgentCancelDoesNotEmitTerminalResultForCompletedToolCalls(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	s := newPersistenceTestSubAgent(parent, "agent-1")
 	s.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tool-running", Name: "read", Args: json.RawMessage(`{"path":"running"}`)}}})

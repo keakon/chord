@@ -55,6 +55,7 @@ func privateMCPTestServer(t *testing.T, entered, release chan struct{}, calls *a
 }
 
 func TestPrivateMCPPreparationSharedAndCancellationIndependent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	entered, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
@@ -104,6 +105,7 @@ func TestPrivateMCPPreparationSharedAndCancellationIndependent(t *testing.T) {
 }
 
 func TestPrivateMCPDeniedServerDoesNotConnect(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	var calls atomic.Int32
 	server := privateMCPTestServer(t, nil, nil, &calls)
@@ -119,6 +121,7 @@ func TestPrivateMCPDeniedServerDoesNotConnect(t *testing.T) {
 }
 
 func TestSubAgentMCPPreparationUpdatesCompleteFrozenSurface(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "sample-task")
 	current := MCPRequestSnapshot{Version: "first", Tools: []tools.Tool{anchoredManualMCPTool{name: "mcp_sample_first", description: "First tool"}}}
@@ -157,6 +160,7 @@ func TestSubAgentMCPPreparationUpdatesCompleteFrozenSurface(t *testing.T) {
 }
 
 func TestGetOrCreateAgentMCPRejectsInheritedServerName(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.RegisterMainMCPServers([]string{"exa"})
 
@@ -169,6 +173,7 @@ func TestGetOrCreateAgentMCPRejectsInheritedServerName(t *testing.T) {
 }
 
 func TestGetOrCreateAgentMCPRejectsManualServer(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	_, err := a.getOrCreateAgentMCP("explorer", config.MCPConfig{
@@ -183,6 +188,7 @@ func TestGetOrCreateAgentMCPRejectsManualServer(t *testing.T) {
 }
 
 func TestGetOrCreateAgentMCPIsolatesSameNameAcrossAgents(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if _, err := a.getOrCreateAgentMCP("explorer", config.MCPConfig{"search": {URL: "https://explorer.example/mcp"}}); err != nil {
 		t.Fatal(err)
@@ -208,6 +214,7 @@ func TestGetOrCreateAgentMCPIsolatesSameNameAcrossAgents(t *testing.T) {
 }
 
 func TestGetOrCreateAgentMCPReusesManagerWithinAgentDefinition(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	key := agentMCPServerCacheKey("explorer", "search")
 	cfg := config.MCPConfig{"search": {URL: "https://exa.example/mcp"}}

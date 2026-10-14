@@ -3,6 +3,7 @@ package agent
 import "testing"
 
 func TestInputConsumptionReceipts(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, content, status string
 		busy, transition      bool
@@ -38,6 +39,7 @@ func TestInputConsumptionReceipts(t *testing.T) {
 }
 
 func TestInputReceiptCancelAndRecovery(t *testing.T) {
+	t.Parallel()
 	provider := &keyRecordingProvider{}
 	a := newCancelWindowTestAgent(t, provider)
 	if !a.SendUserMessageWithReceipt("first", "input-1") {

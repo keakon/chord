@@ -174,6 +174,7 @@ func TestRestoreInvokedSkillsFromUserSkillPair(t *testing.T) {
 }
 
 func TestMainAgentAppendUserSkillInvocation(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{writeTempSkill(t, projectRoot, "go-expert", "Follow the workflow.", false)})
@@ -198,6 +199,7 @@ func TestMainAgentAppendUserSkillInvocation(t *testing.T) {
 // manual-only skill never enters the model catalog, yet the user's explicit
 // request still appends the same pair.
 func TestMainAgentAppendUserSkillInvocationManualOnly(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{writeTempSkill(t, projectRoot, "manual-skill", "Manual workflow.", true)})
@@ -223,6 +225,7 @@ func TestMainAgentAppendUserSkillInvocationManualOnly(t *testing.T) {
 // an unknown name all fail with the same wording, so the model cannot probe
 // whether a skill it may not load exists.
 func TestMainAgentLoadSkillRefusesHiddenDeniedAndMissingIdentically(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{
@@ -253,6 +256,7 @@ func TestMainAgentLoadSkillRefusesHiddenDeniedAndMissingIdentically(t *testing.T
 }
 
 func TestMainAgentAppendUserSkillInvocationRefusalsAppendNothing(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{writeTempSkill(t, projectRoot, "go-expert", "Follow the workflow.", false)})
@@ -280,6 +284,7 @@ func TestMainAgentAppendUserSkillInvocationRefusalsAppendNothing(t *testing.T) {
 // tool to call at all. The tool's own IsAvailable() reads the model face, so
 // this is a property of the live surface, not of the tool.
 func TestVisibleLLMToolsDropsSkillWhenCatalogIsManualOnly(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	rs := permissionRuleset(t, "\"*\": allow\n")
@@ -306,6 +311,7 @@ func TestVisibleLLMToolsDropsSkillWhenCatalogIsManualOnly(t *testing.T) {
 // args rather than a dedup hit: only the draft-level retry is idempotent.
 // Invoked state stays one entry, overwritten by name.
 func TestMainAgentRepeatSkillInvocationSubstitutesPerCallArgs(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{writeTempSkill(t, projectRoot, "go-expert", "Args were ${CHORD_SKILL_ARGS}.", false)})
@@ -333,6 +339,7 @@ func TestMainAgentRepeatSkillInvocationSubstitutesPerCallArgs(t *testing.T) {
 }
 
 func TestSubAgentAppendUserSkillInvocationIsIsolated(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	root := t.TempDir()
 	meta := writeTempSkill(t, root, "manual-skill", "Manual workflow.", true)
@@ -364,6 +371,7 @@ func TestSubAgentAppendUserSkillInvocationIsIsolated(t *testing.T) {
 // gains exactly one pair, so a message cannot collect a second body by riding
 // both this hook and the queued-input merge.
 func TestRecordCommittedUserMessageInjectsSkillPairOnce(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{writeTempSkill(t, projectRoot, "go-expert", "Workflow for ${CHORD_SKILL_ARGS}.", false)})
@@ -397,6 +405,7 @@ func TestRecordCommittedUserMessageInjectsSkillPairOnce(t *testing.T) {
 // context and the request surface, and a retry that re-enters the boundary
 // reuses that pair instead of appending a second copy.
 func TestConsumePendingUserMessagesInjectsSkillPairOnce(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{writeTempSkill(t, projectRoot, "go-expert", "Workflow for ${CHORD_SKILL_ARGS}.", false)})
@@ -431,6 +440,7 @@ func TestConsumePendingUserMessagesInjectsSkillPairOnce(t *testing.T) {
 // load contract leans on: re-submitting the same draft (retry or duplicate
 // upsert) leaves one queue entry and therefore one body.
 func TestQueuedSkillDraftRetryInjectsOnePair(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{writeTempSkill(t, projectRoot, "go-expert", "Workflow for ${CHORD_SKILL_ARGS}.", false)})
@@ -455,6 +465,7 @@ func TestQueuedSkillDraftRetryInjectsOnePair(t *testing.T) {
 // is committed as typed, no pair is appended, and the refusal reaches the user
 // instead of being silently dropped.
 func TestFailedSkillLineStaysWithoutPair(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{writeTempSkill(t, projectRoot, "go-expert", "Workflow.", false)})

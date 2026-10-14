@@ -18,6 +18,7 @@ import (
 )
 
 func TestSubAgentPersistsThinkingBlocksWithAssistantToolCall(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	blocks := []message.ThinkingBlock{{Thinking: "plan", Signature: "sig"}, {Data: "encrypted"}}
 	response := &message.Response{
@@ -65,6 +66,7 @@ func TestSubAgentPersistsThinkingBlocksWithAssistantToolCall(t *testing.T) {
 }
 
 func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	artifactPath := filepath.Join(sub.sessionDir, "artifacts", "subagents", "worker-1", "report.md")
 	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o700); err != nil {
@@ -120,6 +122,7 @@ func TestStructuredCompleteEnvelopeParsedFromCompleteTool(t *testing.T) {
 }
 
 func TestCompleteSchemaAndParserAcceptTypedResult(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	completeTool, ok := sub.tools.Get(tools.NameComplete)
 	if !ok {
@@ -158,6 +161,7 @@ func TestCompleteSchemaAndParserAcceptTypedResult(t *testing.T) {
 // SaveArtifactTool's result mode must pass Complete's result_ref validation
 // unchanged when the agent hands it back.
 func TestCompleteAcceptsResultRefFromSaveArtifactResultMode(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	ctx := tools.WithSessionDir(context.Background(), sub.sessionDir)
 	out, err := (tools.SaveArtifactTool{}).Execute(ctx, mustMarshalJSON(t, map[string]any{
@@ -197,6 +201,7 @@ func TestCompleteAcceptsResultRefFromSaveArtifactResultMode(t *testing.T) {
 }
 
 func TestSubAgentCompletionMergesObservedFileState(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	changedPath := filepath.Join(sub.workDir, "internal", "observed.go")
 	sub.recordTaskToolChanges(&toolResult{
@@ -228,6 +233,7 @@ func TestSubAgentCompletionMergesObservedFileState(t *testing.T) {
 }
 
 func TestSubAgentCompletionMarksUnobservableMutationIncomplete(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.tools.Register(dummyMutatingTool{name: "OpaqueMutation"})
 	sub.recordTaskToolChanges(&toolResult{Name: "OpaqueMutation", ArgsJSON: `{}`}, false)
@@ -242,6 +248,7 @@ func TestSubAgentCompletionMarksUnobservableMutationIncomplete(t *testing.T) {
 }
 
 func TestSubAgentFailedMutationPreservesObservedPathsAndIncompleteState(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	changedPath := filepath.Join(sub.workDir, "internal", "partial.go")
 	files, incomplete := sub.recordTaskToolChanges(&toolResult{
@@ -273,6 +280,7 @@ func TestSubAgentFailedMutationPreservesObservedPathsAndIncompleteState(t *testi
 }
 
 func TestSubAgentRestoreMessagesRebuildsFileAttribution(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	legacyPath := filepath.Join(sub.workDir, "internal", "legacy.go")
 	sub.RestoreMessages([]message.Message{
@@ -295,6 +303,7 @@ func TestSubAgentRestoreMessagesRebuildsFileAttribution(t *testing.T) {
 }
 
 func TestSubAgentPureTextGetsSingleTerminalRecoveryRequest(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -322,6 +331,7 @@ func TestSubAgentPureTextGetsSingleTerminalRecoveryRequest(t *testing.T) {
 }
 
 func TestSubAgentUnparseableThinkingToolcallGetsTerminalRecoveryRequest(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	enabled := true
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
@@ -378,6 +388,7 @@ func TestSubAgentUnparseableThinkingToolcallGetsTerminalRecoveryRequest(t *testi
 }
 
 func TestSubAgentRequestsRequiredToolChoiceWhenProviderSupportsIt(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -404,6 +415,7 @@ func TestSubAgentRequestsRequiredToolChoiceWhenProviderSupportsIt(t *testing.T) 
 }
 
 func TestSubAgentRequestCarriesTurnResponsesState(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.turn.LLMResponsesState = llm.NewResponsesTurnState()
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
@@ -428,6 +440,7 @@ func TestSubAgentRequestCarriesTurnResponsesState(t *testing.T) {
 }
 
 func TestSubAgentInterruptedStreamGetsSingleTerminalRecoveryRequest(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -462,6 +475,7 @@ func TestSubAgentInterruptedStreamGetsSingleTerminalRecoveryRequest(t *testing.T
 // request's context and its result is silently dropped — or park the sub-agent
 // mid-request.
 func TestSubAgentRecoveryRequestsKeepInFlightGateClosed(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		trigger func(t *testing.T, sub *SubAgent)
@@ -523,6 +537,7 @@ func TestSubAgentRecoveryRequestsKeepInFlightGateClosed(t *testing.T) {
 }
 
 func TestSubAgentTerminalRecoveryIsBounded(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	// Transport interruptions draw on their own budget, so exhaust that one:
 	// the terminal nudge is reserved for a reply that stopped at plain text.
@@ -540,6 +555,7 @@ func TestSubAgentTerminalRecoveryIsBounded(t *testing.T) {
 }
 
 func TestSubAgentSecondPureTextFailsForOwnerNotification(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.turn.SubAgentTerminalRecoveryCount = 1
 	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{Content: "still no coordination tool"}})
@@ -664,6 +680,7 @@ func TestSaveArtifactOverwriteReplacesExistingContent(t *testing.T) {
 }
 
 func TestMailboxArtifactRefsMergeAndDedupe(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.enqueueSubAgentMailbox(SubAgentMailboxMessage{
 		MessageID: "worker-1-1",
@@ -726,6 +743,7 @@ func TestReadArtifactToolRejectsPathEscapeAndReadsSessionArtifact(t *testing.T) 
 }
 
 func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.explicitUserTurnCount.Store(5)
 	a.subs.taskRecords["task-1"] = &DurableTaskRecord{
@@ -756,6 +774,7 @@ func TestCoordinationSnapshotIncludesDurableCompletionAndArtifact(t *testing.T) 
 // reported as an explicit "...N more" hint so the reader knows the list
 // continues past the cap.
 func TestCoordinationSnapshotCapsCompletionLists(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.explicitUserTurnCount.Store(7)
 	a.subs.taskRecords["task-1"] = &DurableTaskRecord{
@@ -794,6 +813,7 @@ func TestCoordinationSnapshotCapsCompletionLists(t *testing.T) {
 // conversation), the snapshot must not list the completion a second time. The
 // mailbox text is the single expression of the fact then.
 func TestCoordinationSnapshotOmitsCompletionDeliveredByInjectedMailbox(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.explicitUserTurnCount.Store(6)
 	a.subs.taskRecords["task-1"] = &DurableTaskRecord{
@@ -821,6 +841,7 @@ func TestCoordinationSnapshotOmitsCompletionDeliveredByInjectedMailbox(t *testin
 }
 
 func TestCoordinationSnapshotMarksRunningWorkerStallButNotWaitingMain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	running := newControllableTestSubAgent(t, a, "task-running")
 	running.semHeld = true
@@ -923,6 +944,7 @@ func TestMailboxTextKeepsDistinctPayload(t *testing.T) {
 // and a later request in the same turn that already carries the durable
 // mailbox message in its conversation must stay deduplicated too.
 func TestMainMailboxAndSnapshotDoNotDoubleBillSameCompletion(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.explicitUserTurnCount.Store(8)
 	summary := "complete refactor alpha"
@@ -1003,6 +1025,7 @@ func assertCompleteCardStatus(t *testing.T, parent *MainAgent, sub *SubAgent, ca
 // and the degraded typed-result delivery, which remain live code.
 
 func TestSubAgentInvalidCompleteGetsRejectedToolResultAndBoundedFollowUp(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		args       any
@@ -1078,6 +1101,7 @@ func TestSubAgentInvalidCompleteGetsRejectedToolResultAndBoundedFollowUp(t *test
 }
 
 func TestSubAgentInvalidCompleteRetryHasOwnBudgetAfterPureTextRecovery(t *testing.T) {
+	t.Parallel()
 	// The pure-text wrap-up nudge and the rejected-Complete follow-up used to
 	// share one budget, so a text-only reply followed by a rejected Complete
 	// failed with a "after retry" error that was actually the first attempt.
@@ -1128,6 +1152,7 @@ func TestSubAgentInvalidCompleteRetryHasOwnBudgetAfterPureTextRecovery(t *testin
 }
 
 func TestSubAgentCoReturnedInvalidCompleteRejectedAfterSiblingsSettle(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
 		Type:   config.ProviderTypeChatCompletions,
@@ -1180,6 +1205,7 @@ func TestSubAgentCoReturnedInvalidCompleteRejectedAfterSiblingsSettle(t *testing
 }
 
 func TestSubAgentRepeatedInvalidCompleteFailsAfterRecoveryBudgetSpent(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.turn.SubAgentCompletionRecoveryCount = 1
 	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{
@@ -1205,6 +1231,7 @@ func TestSubAgentRepeatedInvalidCompleteFailsAfterRecoveryBudgetSpent(t *testing
 // envelope (files, risks, follow-ups) intact on the pending intent until the
 // children settle and delivery resumes.
 func TestSubAgentDeferredCompletionRetainsStructuredEnvelope(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.subs.mu.Lock()
 	parent.subs.taskRecords["child-1"] = &DurableTaskRecord{
@@ -1243,6 +1270,7 @@ func TestSubAgentDeferredCompletionRetainsStructuredEnvelope(t *testing.T) {
 }
 
 func TestCoordinationSnapshotDoesNotDeadlockOnWaitingDescendant(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-parent")
 	sub.instanceID = "worker-parent"
@@ -1276,6 +1304,7 @@ func TestCoordinationSnapshotDoesNotDeadlockOnWaitingDescendant(t *testing.T) {
 // worse outcome than delivering it without the group, so the completion settles
 // with the summary intact and the drop recorded as a limitation.
 func TestUnpairedTypedResultSettlesDegradedAfterRecoveryBudgetSpent(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.turn.SubAgentCompletionRecoveryCount = 1
 	sub.handleLLMResponse(&llmResult{turnID: 1, resp: &message.Response{ToolCalls: convertCalls([]messageToolCall{

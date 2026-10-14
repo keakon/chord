@@ -12,6 +12,7 @@ import (
 )
 
 func TestIntegrationStatusRespectsActiveRolePermissions(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.globalConfig = &config.Config{MCP: config.MCPConfig{
 		"exa": {AllowedTools: []string{"web_search_exa"}},
@@ -52,6 +53,7 @@ func TestIntegrationStatusRespectsActiveRolePermissions(t *testing.T) {
 }
 
 func TestMCPCommandHidesDeniedServers(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.globalConfig = &config.Config{MCP: config.MCPConfig{
 		"exa": {AllowedTools: []string{"web_search_exa"}},
@@ -70,6 +72,7 @@ func TestMCPCommandHidesDeniedServers(t *testing.T) {
 }
 
 func TestMCPPromptFiltersDeniedToolsWithinVisibleServer(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(dummyTool{name: "mcp_exa_search"})
 	a.tools.Register(dummyTool{name: "mcp_exa_admin"})
@@ -114,6 +117,7 @@ func TestMCPPromptPreservesEscapedNamesDuringVisibilityFiltering(t *testing.T) {
 }
 
 func TestLazyMCPServerVisibilityRespectsExactAllow(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetMCPStatusFunc(func() []MCPServerDisplay {
 		return []MCPServerDisplay{{Name: "exa", Manual: true, Disabled: true}}
@@ -129,6 +133,7 @@ func TestLazyMCPServerVisibilityRespectsExactAllow(t *testing.T) {
 }
 
 func TestMCPVisibilityHandlesUnderscoreServerNames(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(dummyMCPTool{name: "mcp_search_api_query", server: "search_api"})
 	a.globalConfig = &config.Config{MCP: config.MCPConfig{"search": {AllowedTools: []string{"admin"}}}}
@@ -144,6 +149,7 @@ func TestMCPVisibilityHandlesUnderscoreServerNames(t *testing.T) {
 }
 
 func TestLazyMCPVisibilityUsesLongestMatchingServerPrefix(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetMCPStatusFunc(func() []MCPServerDisplay {
 		return []MCPServerDisplay{{Name: "search", Manual: true}, {Name: "search_api", Manual: true}}

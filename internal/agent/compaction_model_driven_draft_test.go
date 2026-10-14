@@ -23,6 +23,7 @@ func TestModelDrivenCheckpointWrapperNamesItsMode(t *testing.T) {
 }
 
 func TestModelDrivenDraftCommittedArchiveSurvives(t *testing.T) {
+	t.Parallel()
 	// The deferred archive cleanup only fires for failures: a successful
 	// draft must keep its history file and meta so the apply step can use
 	// them.
@@ -65,6 +66,7 @@ func TestModelDrivenDraftCommittedArchiveSurvives(t *testing.T) {
 }
 
 func TestModelDrivenDraftPreExportCancellationLeavesNoFiles(t *testing.T) {
+	t.Parallel()
 	// Cancelling before the archive is written must return the cancellation
 	// with nothing on disk: the worker's first ctx check fires before export,
 	// so no history/meta files are ever created.
@@ -141,6 +143,7 @@ func TestApplyModelDrivenDraftRejectsChangedRuntimeGeneration(t *testing.T) {
 }
 
 func TestApplyModelDrivenDraftKeepsQueuedUserInputCurrent(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")

@@ -15,6 +15,7 @@ import (
 )
 
 func TestHandleToolResult_DoneInLoopRequestsConfirmationAndDisablesLoopOnApproval(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -119,6 +120,7 @@ done: allow
 }
 
 func TestHandleToolResult_DoneOutsideLoopEntersIdle(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -189,6 +191,7 @@ done: ask
 }
 
 func TestHandleToolResult_DoneOutsideLoopDenyContinuesWork(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -259,6 +262,7 @@ done: allow
 }
 
 func TestHandleToolResult_DoneInLoopEmitsVisibleRejectionWhenExitConditionsFail(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -345,6 +349,7 @@ done: allow
 }
 
 func TestAwaitLoopExitConfirmationEscapesReasonJSON(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -403,6 +408,7 @@ done: ask
 }
 
 func TestHandleToolResult_MultipleDoneCallsRejectEarlierOnesWithActionableReason(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -474,6 +480,7 @@ done: allow
 }
 
 func TestHandleToolResult_DoneInLoopUserDenialDoesNotEmitLoopContinue(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -567,6 +574,7 @@ done: ask
 }
 
 func TestHandleToolResult_DoneInLoopUserDenialPreservesLongReason(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -644,6 +652,7 @@ done: ask
 }
 
 func TestHandleToolResult_DoneInLoopAllowsExitAfterPytestVerification(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -719,6 +728,7 @@ done: allow
 }
 
 func TestHandleToolResult_DoneInLoopUserDenialDoesNotIncrementIteration(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -784,6 +794,7 @@ done: ask
 }
 
 func TestHandleToolResult_DoneInLoopAutoRejectionStopsAtMaxIterations(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -841,6 +852,7 @@ done: allow
 }
 
 func TestLoopExitDecisionRequiredEmitsUserInputNotification(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.MaxIterations = 1
 	a.markLoopExitDecisionRequired()
@@ -857,6 +869,7 @@ func TestLoopExitDecisionRequiredEmitsUserInputNotification(t *testing.T) {
 }
 
 func TestLoopExitRejectionToolResultUsesHumanReadableReasons(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("fix the bug")
 	a.todoItems = []tools.TodoItem{{ID: "1", Content: "ship feature", Status: "in_progress"}}

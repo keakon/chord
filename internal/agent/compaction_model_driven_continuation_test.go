@@ -14,6 +14,7 @@ import (
 // normal batch path: it used to hand-assemble a thin message and silently drop
 // the payload/notes split, diff counters, audit, LSP reviews and provenance.
 func TestAppendDeferredModelDrivenToolResultCarriesFullMessageShape(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.ctxMgr.Append(message.Message{
@@ -73,6 +74,7 @@ func TestAppendDeferredModelDrivenToolResultCarriesFullMessageShape(t *testing.T
 // and no "continue the current task" instruction is appended on top of the
 // fresh input.
 func TestModelDrivenResumeMergesQueuedUserMessageIntoContinuation(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -136,6 +138,7 @@ func TestModelDrivenResumeMergesQueuedUserMessageIntoContinuation(t *testing.T) 
 // the current task" instruction — otherwise the model could read the summary
 // as a finished reply and stop without continuing the task.
 func TestModelDrivenResumeWithEmptyQueueAppendsContinueInstruction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -177,6 +180,7 @@ func TestModelDrivenResumeWithEmptyQueueAppendsContinueInstruction(t *testing.T)
 }
 
 func TestModelDrivenTerminalCandidateContinuesAfterApply(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -211,6 +215,7 @@ func TestModelDrivenTerminalCandidateContinuesAfterApply(t *testing.T) {
 }
 
 func TestModelDrivenTerminalCandidateContinuesForFreshUserInput(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -254,6 +259,7 @@ func TestModelDrivenTerminalCandidateContinuesForFreshUserInput(t *testing.T) {
 // heuristic this guards against used to treat any drained entry as merged
 // user input).
 func TestModelDrivenResumeBackgroundCompletionDoesNotSuppressContinueInstruction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -297,6 +303,7 @@ func TestModelDrivenResumeBackgroundCompletionDoesNotSuppressContinueInstruction
 // is appended, and the "continue the current task" instruction stays so the
 // continuation request is not left to end on the bare summary.
 func TestModelDrivenResumeKeepsIdleOnlySlashQueuedForIdleDrain(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -339,6 +346,7 @@ func TestModelDrivenResumeKeepsIdleOnlySlashQueuedForIdleDrain(t *testing.T) {
 // continuation's reply. The notice explaining why the checkpoint was not
 // applied is still appended on top.
 func TestModelDrivenResumeAfterFailedApplyMergesQueuedUserInput(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -385,6 +393,7 @@ func TestModelDrivenResumeAfterFailedApplyMergesQueuedUserInput(t *testing.T) {
 // failed-apply resume, which merges because nothing user-initiated was
 // aborted there.
 func TestModelDrivenResumeAfterDiscardPreservesQueuedUserInput(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")

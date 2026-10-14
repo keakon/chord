@@ -16,6 +16,7 @@ import (
 )
 
 func TestCreateSubAgentFromSubAgentContextSetsOwnerAndDepth(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -55,6 +56,7 @@ func TestCreateSubAgentFromSubAgentContextSetsOwnerAndDepth(t *testing.T) {
 }
 
 func TestCreateSubAgentRejectsTargetDeniedForCaller(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	a.activeConfig.Permission = parsePermissionNode(t, `
@@ -75,6 +77,7 @@ delegate:
 }
 
 func TestCreateSubAgentReturnsChildLimitReachedForDirectOwner(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -98,6 +101,7 @@ func TestCreateSubAgentReturnsChildLimitReachedForDirectOwner(t *testing.T) {
 }
 
 func TestCreateSubAgentCountsNonTerminalDirectChildrenForLimit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -126,6 +130,7 @@ func TestCreateSubAgentCountsNonTerminalDirectChildrenForLimit(t *testing.T) {
 }
 
 func TestConcurrentCreateSubAgentRespectsDirectChildLimit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -159,6 +164,7 @@ func TestConcurrentCreateSubAgentRespectsDirectChildLimit(t *testing.T) {
 }
 
 func TestCreateSubAgentRejectsBeforeLLMFactoryWhenChildLimitReached(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -189,6 +195,7 @@ func TestCreateSubAgentRejectsBeforeLLMFactoryWhenChildLimitReached(t *testing.T
 }
 
 func TestConcurrentDuplicateCreateSharesAdmissionResult(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	entered := make(chan struct{}, 1)
@@ -254,6 +261,7 @@ func TestConcurrentDuplicateCreateSharesAdmissionResult(t *testing.T) {
 }
 
 func TestCreateSubAgentPersistenceFailureDoesNotStartRuntime(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
@@ -281,6 +289,7 @@ func TestCreateSubAgentPersistenceFailureDoesNotStartRuntime(t *testing.T) {
 }
 
 func TestCreateSubAgentCancellationDuringPersistenceDoesNotStartRuntime(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	entered := make(chan struct{})
@@ -325,6 +334,7 @@ func TestCreateSubAgentCancellationDuringPersistenceDoesNotStartRuntime(t *testi
 }
 
 func TestSubAgentRegistrationMergesWithLatestTaskRegistry(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	sub := newControllableTestSubAgent(t, a, "new-task")
@@ -348,6 +358,7 @@ func TestSubAgentRegistrationMergesWithLatestTaskRegistry(t *testing.T) {
 }
 
 func TestCreateSubAgentInitializesConcurrentlyBeforeAdmission(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	entered := make(chan struct{}, 2)
@@ -387,6 +398,7 @@ func TestCreateSubAgentInitializesConcurrentlyBeforeAdmission(t *testing.T) {
 }
 
 func TestCreateSubAgentDoesNotHoldAdmissionLockDuringReliableOutput(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	for len(a.outputCh) < cap(a.outputCh) {
@@ -435,6 +447,7 @@ func TestCreateSubAgentDoesNotHoldAdmissionLockDuringReliableOutput(t *testing.T
 }
 
 func TestCreateSubAgentRejectsRegistrationAfterSessionSwitch(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	entered := make(chan struct{})
@@ -463,6 +476,7 @@ func TestCreateSubAgentRejectsRegistrationAfterSessionSwitch(t *testing.T) {
 }
 
 func TestCreateSubAgentRejectsWhileSessionTransitionIsPaused(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	a.prepareSessionSwitch()
@@ -481,6 +495,7 @@ func TestCreateSubAgentRejectsWhileSessionTransitionIsPaused(t *testing.T) {
 }
 
 func TestCreateSubAgentRejectsRegistrationAfterOwnerCompletes(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -519,6 +534,7 @@ func TestCreateSubAgentRejectsRegistrationAfterOwnerCompletes(t *testing.T) {
 }
 
 func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -550,6 +566,7 @@ func TestCreateSubAgentCapsActiveChildrenAtTen(t *testing.T) {
 }
 
 func TestCreateSubAgentUsesCachedWorkDir(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
 	wantWorkDir := filepath.Join(a.contentRoot, "workspace")
@@ -569,6 +586,7 @@ func TestCreateSubAgentUsesCachedWorkDir(t *testing.T) {
 }
 
 func TestCreateSubAgentSnapshotPersistFailureDoesNotLeakSlot(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	installSnapshotBlockingRecoveryManager(t, a)
@@ -612,6 +630,7 @@ func TestCreateSubAgentSnapshotPersistFailureDoesNotLeakSlot(t *testing.T) {
 }
 
 func TestCreateSubAgentMCPServerFailureReleasesAdmissionSlot(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	// Agent-scoped MCP servers cannot be enabled at runtime, so a manual entry
@@ -634,6 +653,7 @@ func TestCreateSubAgentMCPServerFailureReleasesAdmissionSlot(t *testing.T) {
 }
 
 func TestCreateSubAgentRejectsUnusableModelPoolAndReleasesAdmission(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
 	a.SetLLMFactory(func(string, []string, string) *llm.Client { return nil })

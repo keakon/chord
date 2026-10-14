@@ -28,6 +28,7 @@ func benchmarkBashLargeStdout() string {
 func BenchmarkViewportRenderLargeExpandedToolAfterSpill(b *testing.B) {
 	ApplyTheme(uitheme.Default())
 	v := NewViewport(100, 44)
+	b.Cleanup(func() { _ = v.Close() })
 	block := benchmarkBashLargeBlock()
 	v.AppendBlock(block)
 	if !v.spillBlock(block) {
@@ -128,6 +129,7 @@ func BenchmarkRenderBashLargeCardExpandedWarmWindow(b *testing.B) {
 func BenchmarkViewportRenderLargeExpandedToolWindow(b *testing.B) {
 	ApplyTheme(uitheme.Default())
 	v := NewViewport(100, 44)
+	b.Cleanup(func() { _ = v.Close() })
 	for i := range 260 {
 		v.AppendBlock(&Block{ID: 100 + i, Type: BlockAssistant, Content: strings.Repeat("filler ", 20)})
 	}

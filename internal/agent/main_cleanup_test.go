@@ -36,6 +36,7 @@ func registerTestMainAgentCleanup(t *testing.T, a *MainAgent) {
 }
 
 func TestRestoreTestAgentCleanupDrainsWorkerWrites(t *testing.T) {
+	t.Parallel()
 	t.Run("started_run_loop", func(t *testing.T) {
 		testRestoreCleanupDrainsWorkerWrites(t, true)
 	})

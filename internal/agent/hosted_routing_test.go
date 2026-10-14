@@ -14,6 +14,7 @@ import (
 )
 
 func TestHostedBackendRemembersSuccessfulRoute(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	primary := &hostedScriptProvider{} // No hosted observation: target fails its contract.
 	fallback := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) { return hostedWebSearchResponse(), nil }}
@@ -54,6 +55,7 @@ func TestHostedBackendRemembersSuccessfulRoute(t *testing.T) {
 }
 
 func TestHostedRouteIsScopedToToolGenerationAndCaller(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	opts := hostedTestTargetOpts{typ: config.ProviderTypeResponses, modelID: "model-1", providerHosted: []string{tools.NameWebSearch}}
 	first := newHostedTestTarget("sample", opts, &hostedScriptProvider{})
@@ -123,6 +125,7 @@ func sameProviderImpl(target llm.FallbackModel, impl llm.Provider) bool {
 // model_pool follows the calling agent's own pool, availability is evaluated
 // per caller view, and stale or dead callers fail closed.
 func TestHostedRoutingFollowsCallerAndView(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	mainImpl := &hostedScriptProvider{}
 	subImpl := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) { return hostedWebSearchResponse(), nil }}
@@ -182,6 +185,7 @@ func TestHostedRoutingFollowsCallerAndView(t *testing.T) {
 }
 
 func TestHostedSubAgentUsageUsesViewCallerWithoutContextAgentID(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	mainImpl := &hostedScriptProvider{}
 	subImpl := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) {
@@ -211,6 +215,7 @@ func TestHostedSubAgentUsageUsesViewCallerWithoutContextAgentID(t *testing.T) {
 // agent pool authorization, compat and family filtering inside the pool, and
 // the startup-fatal unknown pool reference.
 func TestHostedNamedPoolRouting(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	toolImpl := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) { return hostedWebSearchResponse(), nil }}
 	chatImpl := &hostedScriptProvider{}
@@ -262,6 +267,7 @@ func TestHostedNamedPoolRouting(t *testing.T) {
 // named model_pool outside the calling agent's model_pools hides the tool and
 // fails closed, for subagent views and the main view alike.
 func TestHostedNamedPoolAuthorization(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	toolImpl := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) { return hostedWebSearchResponse(), nil }}
 	target := newHostedTestTarget("sample", hostedTestTargetOpts{typ: config.ProviderTypeResponses, modelID: "model-1", providerHosted: []string{tools.NameWebSearch}}, toolImpl)
@@ -301,6 +307,7 @@ func TestHostedNamedPoolAuthorization(t *testing.T) {
 }
 
 func TestHostedNamedPoolUnknownReferenceFailsStartup(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetModelSwitchFactory(func(providerModel string, _ []string, _ string) (*llm.Client, string, int, error) {
 		return nil, "", 0, fmt.Errorf("unexpected model ref %q", providerModel)
@@ -333,6 +340,7 @@ func TestHostedNamedPoolUnknownReferenceFailsStartup(t *testing.T) {
 // partially broken pool keeps its usable targets; a pool whose refs all fail
 // construction hides the tool instead of falling back to the caller's pool.
 func TestHostedNamedPoolRefConstructionFailure(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	toolImpl := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) { return hostedWebSearchResponse(), nil }}
 	good := newHostedTestTarget("sample", hostedTestTargetOpts{typ: config.ProviderTypeResponses, modelID: "model-1", providerHosted: []string{tools.NameWebSearch}}, toolImpl)
@@ -370,6 +378,7 @@ func TestHostedNamedPoolRefConstructionFailure(t *testing.T) {
 }
 
 func TestHostedNamedPoolUsesExplicitEmptyProjectOverride(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.globalConfig.ModelPools = map[string][]string{"tools": {"sample/model"}}
 	a.projectConfig = &config.Config{ModelPools: map[string][]string{"tools": {}}}

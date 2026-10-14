@@ -37,16 +37,26 @@ func (b *synchronizedBuffer) snapshotAndReset() []byte {
 }
 
 type testOut struct {
+	tb  testing.TB
 	buf *synchronizedBuffer
 	out *stdoutWriter
 }
 
-func newTestOut() *testOut {
+func newTestOut(tb testing.TB) *testOut {
+	tb.Helper()
 	buf := &synchronizedBuffer{}
 	ctx := context.Background()
 	out := newStdoutWriter(ctx, buf)
 	go out.run()
+	tb.Cleanup(func() {
+		deadline := time.NewTimer(time.Second)
+		defer deadline.Stop()
+		if !out.closeUntil(deadline.C) {
+			tb.Error("stdout writer did not stop")
+		}
+	})
 	return &testOut{
+		tb:  tb,
 		buf: buf,
 		out: out,
 	}
@@ -57,51 +67,27 @@ func (t *testOut) writer() *stdoutWriter {
 	return t.out
 }
 
-// drain reads all buffered JSONL lines and returns parsed envelopes.
-//
-// stdoutWriter writes asynchronously in another goroutine. We may need multiple
-// snapshot iterations before we observe the flush marker; accumulate envelopes
-// across iterations so we don't lose messages when the flush marker arrives in
-// a later snapshot.
+// drain waits for all previously queued output and returns its parsed envelopes.
 func (t *testOut) drain() []headlessEnvelope {
-	flushAck := make(chan struct{})
-	if !t.out.emit(map[string]any{"type": "__test_flush__", "payload": map[string]any{"ack": true}}) {
-		return nil
+	t.tb.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if !t.out.flush(ctx) {
+		t.tb.Fatal("stdout writer did not flush")
 	}
-	deadline := time.Now().Add(2 * time.Second)
 	var result []headlessEnvelope
-	for {
-		lines := bytes.SplitSeq(t.buf.snapshotAndReset(), []byte{'\n'})
-		for line := range lines {
-			line = bytes.TrimSpace(line)
-			if len(line) == 0 {
-				continue
-			}
-			var env headlessEnvelope
-			if err := json.Unmarshal(line, &env); err != nil {
-				continue
-			}
-			if env.Type == "__test_flush__" {
-				select {
-				case <-flushAck:
-					// already closed
-				default:
-					close(flushAck)
-				}
-				continue
-			}
-			result = append(result, env)
+	for line := range bytes.SplitSeq(t.buf.snapshotAndReset(), []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
 		}
-		select {
-		case <-flushAck:
-			return result
-		default:
+		var env headlessEnvelope
+		if err := json.Unmarshal(line, &env); err != nil {
+			t.tb.Fatalf("decode stdout envelope: %v", err)
 		}
-		if time.Now().After(deadline) {
-			return result
-		}
-		time.Sleep(5 * time.Millisecond)
+		result = append(result, env)
 	}
+	return result
 }
 
 // ---------------------------------------------------------------------------

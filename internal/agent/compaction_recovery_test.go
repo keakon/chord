@@ -144,6 +144,7 @@ func TestStructuredFallbackSummaryCarriesRuntimeRecoveryState(t *testing.T) {
 // The model-driven checkpoint composes the same runtime-owned recovery state
 // through the shared step, without duplicating the section it already renders.
 func TestModelDrivenCheckpointCarriesRuntimeRecoveryState(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	snapshot := []message.Message{
 		{Role: message.RoleUser, Content: "next request"},
@@ -167,6 +168,7 @@ func TestModelDrivenCheckpointCarriesRuntimeRecoveryState(t *testing.T) {
 // summarizer that writes a stale request section (or ignores the unsettled
 // tool results) cannot drop either from the checkpoint.
 func TestProduceCompactionDraftCarriesRuntimeRecoveryState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.globalConfig.Context.Compaction.Profile = config.CompactionProfileArchival

@@ -34,6 +34,7 @@ func waitForResponseHandled(t *testing.T, a *MainAgent) {
 // threshold the crossing already reads as ShouldCompact through the ordinary
 // path, so arming here could only override an explicit disable.
 func TestOversizedSuccessfulResponseDoesNotArmDisabledThreshold(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0}}}
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0)

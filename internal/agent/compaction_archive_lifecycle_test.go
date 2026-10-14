@@ -16,6 +16,7 @@ import (
 )
 
 func TestProduceCompactionDraftCapturesSummaryKeyFileRevision(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectRoot, "src"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -58,6 +59,7 @@ func TestProduceCompactionDraftCapturesSummaryKeyFileRevision(t *testing.T) {
 }
 
 func TestHandleCompactionReadyIgnoresStaleSessionDraft(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(2, compactionTarget{sessionEpoch: 2, turnEpoch: 1}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
@@ -84,6 +86,7 @@ func TestHandleCompactionReadyIgnoresStaleSessionDraft(t *testing.T) {
 }
 
 func TestHandleCompactionReadyIgnoresCurrentPlanFromOldSession(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.sessionEpoch = 1
@@ -106,6 +109,7 @@ func TestHandleCompactionReadyIgnoresCurrentPlanFromOldSession(t *testing.T) {
 }
 
 func TestHandleCompactionFailedIgnoresCurrentPlanFromOldSession(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.sessionEpoch = 1
@@ -125,6 +129,7 @@ func TestHandleCompactionFailedIgnoresCurrentPlanFromOldSession(t *testing.T) {
 }
 
 func TestStopCompactionForSessionSwitchCancelsWorkerWithoutBlocking(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	ctx, cancel := context.WithCancel(t.Context())
 	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, cancel)
@@ -141,6 +146,7 @@ func TestStopCompactionForSessionSwitchCancelsWorkerWithoutBlocking(t *testing.T
 }
 
 func TestStopCompactionForSessionSwitchDiscardsReadyDraft(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 1, nil)
 	a.compactionState.readyDraft = &compactionDraft{PlanID: 1, Target: compactionTarget{sessionEpoch: a.sessionEpoch}}
@@ -154,6 +160,7 @@ func TestStopCompactionForSessionSwitchDiscardsReadyDraft(t *testing.T) {
 }
 
 func TestExportCompactionHistoryMetaPendingThenApplied(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	msgs := []message.Message{{Role: "user", Content: "hello"}}

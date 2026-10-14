@@ -13,6 +13,7 @@ import (
 )
 
 func TestUsageDrivenAutoCompactFailureBreakerSuppressesAfterThreshold(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
@@ -44,6 +45,7 @@ func TestUsageDrivenAutoCompactFailureBreakerSuppressesAfterThreshold(t *testing
 }
 
 func TestArmUsageDrivenAutoCompactRequestReportsNewInstance(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	if !a.armUsageDrivenAutoCompactRequest() {
@@ -66,6 +68,7 @@ func TestArmUsageDrivenAutoCompactRequestReportsNewInstance(t *testing.T) {
 }
 
 func TestUsageDrivenBreakerSuppressesIdleAutoCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.autoCompactRequested.Store(true)
@@ -81,6 +84,7 @@ func TestUsageDrivenBreakerSuppressesIdleAutoCompaction(t *testing.T) {
 }
 
 func TestStopResponseDoesNotStartIdleAutoCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(10000, 0.8)
@@ -99,6 +103,7 @@ func TestStopResponseDoesNotStartIdleAutoCompaction(t *testing.T) {
 }
 
 func TestStopResponseKeepsExistingCompactionRunning(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -112,6 +117,7 @@ func TestStopResponseKeepsExistingCompactionRunning(t *testing.T) {
 }
 
 func TestIdleAutoCompactionClearsStaleRequestBelowCurrentThreshold(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(400000, 272000, 272000, 16000, 0.8)
@@ -136,6 +142,7 @@ func TestIdleAutoCompactionClearsStaleRequestBelowCurrentThreshold(t *testing.T)
 }
 
 func TestAutomaticCompactionIgnoresPromptSizeWithoutUsageSignal(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(1000, 0.5)
@@ -151,6 +158,7 @@ func TestAutomaticCompactionIgnoresPromptSizeWithoutUsageSignal(t *testing.T) {
 }
 
 func TestUsageDrivenBreakerResetsAfterSuccessfulCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(2000, 1200, 1200, 200, 0.8)
@@ -197,6 +205,7 @@ func TestUsageDrivenBreakerResetsAfterSuccessfulCompaction(t *testing.T) {
 }
 
 func TestUsageDrivenBreakerResetsAfterSkipCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(2000, 1200, 1200, 200, 0.8)
@@ -235,6 +244,7 @@ func TestUsageDrivenBreakerResetsAfterSkipCompaction(t *testing.T) {
 }
 
 func TestSessionSwitchResetsUsageDrivenAutoCompactionFailureState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.autoCompactRequested.Store(true)
@@ -319,6 +329,7 @@ func TestClassifyCompactionFailureTransientForWatchdogTimeout(t *testing.T) {
 // as a stale event left IsCompactionRunning() true forever, silently disabling
 // every future automatic compaction in the session.
 func TestCompactionFailureWithDriftedContinuationStillReleasesState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -341,6 +352,7 @@ func TestCompactionFailureWithDriftedContinuationStillReleasesState(t *testing.T
 // A genuinely stale failure event (older planID than the running compaction)
 // must still be ignored without touching the newer compaction's state.
 func TestCompactionFailureFromOlderPlanKeepsRunningState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -361,6 +373,7 @@ func TestCompactionFailureFromOlderPlanKeepsRunningState(t *testing.T) {
 // Treating the drift as stale discarded the produced draft, leaked
 // IsCompactionRunning() forever, and never resumed the suspended LLM call.
 func TestCompactionReadyWithDriftedContinuationStillApplies(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -397,6 +410,7 @@ func TestCompactionReadyWithDriftedContinuationStillApplies(t *testing.T) {
 // must still be discarded without applying its draft or touching the newer
 // compaction's state.
 func TestCompactionReadyFromOlderPlanKeepsRunningState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 

@@ -35,6 +35,7 @@ func skillTestBody() string {
 // address. The unit tests above pin the renderer; this pins the request the
 // model actually gets.
 func TestPrepareMessagesForLLM_SummarizesAgedSkillKeepingAnchors(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{

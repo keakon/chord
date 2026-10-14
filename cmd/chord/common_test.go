@@ -33,11 +33,12 @@ func withTestStateDir(t *testing.T) {
 	t.Helper()
 	prevState, prevCache, prevSessions, prevLogs, prevHome :=
 		flagStateDir, flagCacheDir, flagSessionsDir, flagLogsDir, flagConfigHome
-	state := filepath.Join(t.TempDir(), "state")
-	cache := filepath.Join(t.TempDir(), "cache")
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	cache := filepath.Join(root, "cache")
 	sessions := filepath.Join(state, "sessions")
-	logs := filepath.Join(t.TempDir(), "logs")
-	home := filepath.Join(t.TempDir(), "config")
+	logs := filepath.Join(root, "logs")
+	home := filepath.Join(root, "config")
 	for _, p := range []string{state, cache, sessions, logs, home} {
 		if err := os.MkdirAll(p, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", p, err)

@@ -14,6 +14,7 @@ import (
 )
 
 func TestSessionForkOwnsGeneratedImagesInMemoryAndHistory(t *testing.T) {
+	t.Parallel()
 	for _, native := range []bool{false, true} {
 		name := "local"
 		if native {

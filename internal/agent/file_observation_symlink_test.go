@@ -12,6 +12,7 @@ import (
 // mtime/size would keep reporting "unchanged" after an external edit to the
 // target, leaving a stale read in context marked as current.
 func TestLazyReadValidationFollowsSymlinkTarget(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation is platform-specific")
 	}

@@ -12,6 +12,7 @@ import (
 )
 
 func TestSummarizeCompactionHeadRetriesInvalidSummaryOnce(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetProviderModelRef("sample/compact-model")
@@ -64,6 +65,7 @@ func TestSummarizeCompactionHeadRetriesInvalidSummaryOnce(t *testing.T) {
 }
 
 func TestSummarizeCompactionHeadDoesNotRepairTransportError(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetProviderModelRef("sample/compact-model")
@@ -99,6 +101,7 @@ func TestSummarizeCompactionHeadDoesNotRepairTransportError(t *testing.T) {
 // back to the next pool target, and the successful fallback model is the one
 // recorded on the checkpoint.
 func TestSummarizeCompactionHeadWalksPoolAndKeysAfterFailure(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetProviderModelRef("sample/compact-model")

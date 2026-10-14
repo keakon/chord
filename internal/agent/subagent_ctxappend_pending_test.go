@@ -69,6 +69,7 @@ func (t releaseGatedTool) IsReadOnly() bool { return true }
 // enqueue (FIFO) order, and their mailbox acks only fire once the append is
 // actually applied and persisted — never while the append is still deferred.
 func TestSubAgentCtxAppendDuringPendingToolBatchDeferredToBatchClosure(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	// The mailbox-ack log directory must exist before any consumption ack is
 	// recorded, otherwise markSubAgentMailboxConsumed fails silently.
@@ -249,6 +250,7 @@ func TestSubAgentCtxAppendDuringPendingToolBatchDeferredToBatchClosure(t *testin
 // loop and appended as the trailing user message. This is the behavior a fix
 // must preserve outside the pending-batch window.
 func TestSubAgentCtxAppendWithoutPendingToolCallsAppendsAsTrailingUserMessage(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, parent, "adhoc-ctxappend-idle")
 	sub.startRunLoop()

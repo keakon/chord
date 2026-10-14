@@ -25,6 +25,7 @@ func authControlTestAgent(t *testing.T) (*MainAgent, mcp.ServerRef, *mcp.Manager
 }
 
 func TestMCPAuthWaitingDoesNotChangeReadinessOrManualIntent(t *testing.T) {
+	t.Parallel()
 	a, ref, manager := authControlTestAgent(t)
 	ready := a.ResetMCPReady()
 	a.markMCPReady()
@@ -73,6 +74,7 @@ func TestMCPAuthWaitingDoesNotChangeReadinessOrManualIntent(t *testing.T) {
 }
 
 func TestMCPAuthSessionCancellationDropsLateProgressURL(t *testing.T) {
+	t.Parallel()
 	a, ref, _ := authControlTestAgent(t)
 	started, stopped := make(chan struct{}, 2), make(chan struct{}, 2)
 	a.SetMCPAuthControlFunc(func(ctx context.Context, request MCPAuthRequest, progress func(mcp.LoginProgress)) error {
@@ -122,6 +124,7 @@ func TestMCPAuthSessionCancellationDropsLateProgressURL(t *testing.T) {
 }
 
 func TestMCPAuthExplicitCancelClearsOperationAndRejectsLateEvents(t *testing.T) {
+	t.Parallel()
 	a, ref, _ := authControlTestAgent(t)
 	started, stopped := make(chan struct{}, 2), make(chan struct{}, 2)
 	a.SetMCPAuthControlFunc(func(ctx context.Context, request MCPAuthRequest, progress func(mcp.LoginProgress)) error {

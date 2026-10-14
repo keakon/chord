@@ -38,7 +38,7 @@ func TestHeadlessHandoffEventAndCommand(t *testing.T) {
 		t.Fatalf("unexpected agents: %+v", payload.Agents)
 	}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: payload.RequestID, Action: "accept", Agent: "reviewer", Pool: "smart"}, backend, state, to.writer())
 
 	state.mu.Lock()
@@ -192,7 +192,7 @@ func TestHeadlessHandoffCancelledClearsStatusPendingHandoff(t *testing.T) {
 	filterHeadlessEvent(agent.HandoffEvent{PlanPath: "/tmp/plan.md", RequestID: "handoff-1"}, state, backend)
 	filterHeadlessEvent(agent.HandoffCancelledEvent{RequestID: "handoff-1", Reason: "superseded"}, state)
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
@@ -215,7 +215,7 @@ func TestHeadlessHandoffCancelledClearsStatusPendingHandoff(t *testing.T) {
 func TestHeadlessHandoffDenyContinuesFromContext(t *testing.T) {
 	state := &headlessState{pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-1", PlanPath: "/tmp/plan.md"}}
 	backend := &mockBackend{}
-	to := newTestOut()
+	to := newTestOut(t)
 
 	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "deny", DenyReason: "needs more detail"}, backend, state, to.writer())
 
@@ -236,7 +236,7 @@ func TestHeadlessPendingConfirmClearedAfterConfirm(t *testing.T) {
 			RequestID: "req-1",
 		},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -260,7 +260,7 @@ func TestHeadlessConfirmSupportsRuleIntent(t *testing.T) {
 			RequestID: "req-1",
 		},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -291,7 +291,7 @@ func TestHeadlessConfirmSupportsRuleIntent(t *testing.T) {
 
 func TestHeadlessConfirmRejectsInvalidRuleScope(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -323,7 +323,7 @@ func TestHeadlessQuestionCommandDefersPendingToResolvedEvent(t *testing.T) {
 			RequestID: "req-2",
 		}},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -364,7 +364,7 @@ func TestHeadlessQuestionCommandRejectsInvalidAction(t *testing.T) {
 	state := &headlessState{
 		questions: map[string]*headlessQuestionPayload{"req-2": {ToolName: "Question", RequestID: "req-2"}},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{
@@ -389,7 +389,7 @@ func TestHeadlessQuestionCommandSurfacesCoreRejection(t *testing.T) {
 	state := &headlessState{
 		questions: map[string]*headlessQuestionPayload{"req-2": {ToolName: "Question", RequestID: "req-2"}},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{resolveQuestionFail: true}
 
 	handleHeadlessCommand(headlessCommand{
@@ -416,7 +416,7 @@ func TestHeadlessQuestionCommandReportsLostRaceWithDeadline(t *testing.T) {
 	state := &headlessState{
 		questions: map[string]*headlessQuestionPayload{"req-3": {ToolName: "Question", RequestID: "req-3"}},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{resolveQuestionTerminal: tools.QuestionOutcomeNoResponse}
 
 	handleHeadlessCommand(headlessCommand{
@@ -466,7 +466,7 @@ func TestHeadlessAutoDenyConfirmOnUserMessage(t *testing.T) {
 			RequestID: "req-1",
 		},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -501,7 +501,7 @@ func TestHeadlessRetainsQuestionOnUserMessage(t *testing.T) {
 			RequestID: "req-2",
 		}},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -550,7 +550,7 @@ func TestHeadlessSendRetainsQuestionAndClearsHandoff(t *testing.T) {
 			PlanPath:  "/tmp/plan.md",
 		},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -596,7 +596,7 @@ func TestHeadlessAutoCancelHandoffOnUserMessage(t *testing.T) {
 			PlanPath:  "/tmp/plan.md",
 		},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -637,7 +637,7 @@ func TestHeadlessAutoCancelHandoffOnUserMessageEmitsCancelled(t *testing.T) {
 			PlanPath:  "/tmp/plan.md",
 		},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "send", Content: "revise the plan instead"}, backend, state, to.writer())
@@ -690,7 +690,7 @@ func TestHeadlessAutoCancelHandoffWithoutSubscriptionDoesNotEmit(t *testing.T) {
 			PlanPath:  "/tmp/plan.md",
 		},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "send", Content: "next"}, backend, state, to.writer())
@@ -708,7 +708,7 @@ func TestHeadlessAutoCancelHandoffWithoutSubscriptionDoesNotEmit(t *testing.T) {
 
 func TestHeadlessAutoCancelHandoffWithoutPendingDoesNotEmit(t *testing.T) {
 	state := &headlessState{subscriptions: map[string]bool{"handoff_cancelled": true}}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "send", Content: "hello"}, backend, state, to.writer())
@@ -734,7 +734,7 @@ func TestHeadlessExplicitHandoffCancelDoesNotEmitCancelled(t *testing.T) {
 			PlanPath:  "/tmp/plan.md",
 		},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "cancel"}, backend, state, to.writer())
@@ -761,7 +761,7 @@ func TestHeadlessAutoDenyConfirmAndRetainsQuestionOnUserMessage(t *testing.T) {
 			RequestID: "req-2",
 		}},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -799,7 +799,7 @@ func TestHeadlessAutoDenyConfirmAndRetainsQuestionOnUserMessage(t *testing.T) {
 
 func TestHeadlessNoAutoDenyWhenNoPendingConfirm(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -1007,7 +1007,7 @@ func TestHeadlessConfirmMismatchedRequestID(t *testing.T) {
 			RequestID: "req-1",
 		},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -1032,7 +1032,7 @@ func TestHeadlessQuestionMismatchedRequestID(t *testing.T) {
 			RequestID: "req-2",
 		}},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{
@@ -1085,7 +1085,7 @@ func TestHeadlessHandoffApproveRejectsUnavailableAgent(t *testing.T) {
 		},
 	}}
 	backend := &mockBackend{}
-	to := newTestOut()
+	to := newTestOut(t)
 
 	handleHeadlessCommand(headlessCommand{Type: "handoff", RequestID: "handoff-1", Action: "accept", Agent: "ghost"}, backend, state, to.writer())
 

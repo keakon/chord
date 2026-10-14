@@ -11,6 +11,7 @@ import (
 )
 
 func TestQuestionSnapshotPagesPreservePendingAndRevisions(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	for i := range 75 {
 		id := fmt.Sprintf("closed-%03d", i)
@@ -72,6 +73,7 @@ func TestQuestionSnapshotPagesPreservePendingAndRevisions(t *testing.T) {
 }
 
 func TestQuestionSnapshotUsesEncodedByteBudget(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	item := questionItems("Choice")[0]
 	item.Question = strings.Repeat("\x01", tools.MaxQuestionTextBytes)
@@ -94,6 +96,7 @@ func TestQuestionSnapshotUsesEncodedByteBudget(t *testing.T) {
 }
 
 func TestPendingQuestionTextBudgetReopensAfterResolution(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	item := questionItems("Choice")[0]
 	item.Question = strings.Repeat("\x01", tools.MaxQuestionTextBytes)

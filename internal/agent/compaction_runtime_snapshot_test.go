@@ -181,6 +181,7 @@ func TestEnsureCompactionSubAgentSnapshotNormalizesPhantomRestatements(t *testin
 }
 
 func TestTaskInfosForCompactionCarriesOwnerIdentity(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := &SubAgent{
 		instanceID:   "parent-1",

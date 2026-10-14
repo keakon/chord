@@ -13,6 +13,7 @@ import (
 )
 
 func TestQuestionStalePresentationAndTimerCannotRearm(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.globalConfig.QuestionAutoSelectTimeout = 3600
 	items := questionItems("Choice")
@@ -33,6 +34,7 @@ func TestQuestionStalePresentationAndTimerCannotRearm(t *testing.T) {
 }
 
 func TestQuestionPauseRetainsZeroRemainingAndShutdownCommit(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.globalConfig.QuestionTimeout = 3600
 	items := questionItems("Choice")
@@ -70,6 +72,7 @@ func TestQuestionPauseRetainsZeroRemainingAndShutdownCommit(t *testing.T) {
 }
 
 func TestQuestionRestoreRebuildsCompleteBatchToolResult(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	args := tools.QuestionArgs{Questions: questionItems("First", "Second", "Third")}
 	raw, _ := json.Marshal(args)
@@ -94,6 +97,7 @@ func TestQuestionRestoreRebuildsCompleteBatchToolResult(t *testing.T) {
 }
 
 func TestQuestionResultRequestSnapshotAndRetry(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	before := a.snapshotQuestionRequest()
@@ -117,6 +121,7 @@ func TestQuestionResultRequestSnapshotAndRetry(t *testing.T) {
 }
 
 func TestQuestionTaskCompletionAndIndependentScope(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	required := createTestQuestions(t, a, questionItems("Required"), false).Result.QuestionIDs[0]
 	oldScope := a.questions.scope
@@ -146,6 +151,7 @@ func TestQuestionTaskCompletionAndIndependentScope(t *testing.T) {
 }
 
 func TestWalltimeQuestionAnswerClassifiesAsUserWaitOnly(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	ctx := tools.WithAgentID(tools.WithTaskID(tools.WithTurnID(context.Background(), a.turn.ID), identity.MainAgentID), identity.MainAgentID)
 	done := make(chan error, 1)
@@ -187,6 +193,7 @@ func TestWalltimeQuestionAnswerClassifiesAsUserWaitOnly(t *testing.T) {
 }
 
 func TestQuestionReceiptRetryAfterNewScopeAndRecovery(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	op := QuestionOperation{Operation: QuestionOpAnswer, OperationID: "answer-retry", QuestionID: id, Answers: []string{"no"}}
@@ -201,6 +208,7 @@ func TestQuestionReceiptRetryAfterNewScopeAndRecovery(t *testing.T) {
 }
 
 func TestQuestionUnknownCommitPreventsCompactionRewrite(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.questions.failed = true
 	if err := a.applyCompactionDraftAsync(&compactionDraft{}); err == nil {
@@ -215,6 +223,7 @@ func TestQuestionUnknownCommitPreventsCompactionRewrite(t *testing.T) {
 }
 
 func TestQuestionFollowupCreationReactivatesCompletedScope(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	optional := questionItems("Preference")
 	optional[0].ResponsePolicy = tools.QuestionPolicyOptional
@@ -234,6 +243,7 @@ func TestQuestionFollowupCreationReactivatesCompletedScope(t *testing.T) {
 }
 
 func TestQuestionInFlightRequestCannotAttachToIndependentTask(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.turn.questionRequestScope = a.questions.scope
 	runQuestionCommand(t, a, &questionCommand{operation: QuestionOperation{Operation: QuestionOpNewTask, OperationID: "independent-task", UserText: "Start another task"}})

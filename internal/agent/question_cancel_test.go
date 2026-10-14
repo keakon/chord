@@ -11,6 +11,7 @@ import (
 )
 
 func TestQuestionCancellationDispatchIgnoresUnrelatedEvents(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"stale_turn", "missing_payload", "newer_message", "invalid_request"} {
 		t.Run(name, func(t *testing.T) {
 			a := newQuestionTestAgent(t)
@@ -50,6 +51,7 @@ func TestQuestionCancellationDispatchIgnoresUnrelatedEvents(t *testing.T) {
 }
 
 func TestQuestionCancellationDispatchInterruptsCurrentWait(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	wait := &questionCommand{reply: make(chan QuestionReceipt, 1)}
@@ -96,6 +98,7 @@ func TestQuestionOperationCancellationWhileEventQueueIsFull(t *testing.T) {
 }
 
 func TestQuestionCancelTaskStopsRunningTurn(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	createTestQuestions(t, a, questionItems("Choice"), false)
 	turnCtx := a.turn.Ctx
@@ -111,6 +114,7 @@ func TestQuestionCancelTaskStopsRunningTurn(t *testing.T) {
 }
 
 func TestQuestionWithdrawRequirementKeepsRunningTurn(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	turnCtx := a.turn.Ctx

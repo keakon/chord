@@ -80,6 +80,7 @@ func applyTestQuestion(t *testing.T, a *MainAgent, op QuestionOperation, at time
 	return runQuestionCommand(t, a, &questionCommand{operation: op, received: at})
 }
 func TestQuestionRequiredIgnoresConfiguredTimeouts(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.globalConfig.QuestionTimeout = 60
 	a.globalConfig.QuestionAutoSelectTimeout = 60
@@ -93,6 +94,7 @@ func TestQuestionRequiredIgnoresConfiguredTimeouts(t *testing.T) {
 	}
 }
 func TestQuestionDefaultStartsAfterPresentationAndDoesNotAuthorize(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.globalConfig.QuestionAutoSelectTimeout = 3600
 	items := questionItems("Choice")
@@ -132,6 +134,7 @@ func TestQuestionDefaultStartsAfterPresentationAndDoesNotAuthorize(t *testing.T)
 // The text has to name the question as well, because by the time the answer
 // lands the call that asked it may already be out of the request.
 func TestQuestionAsyncAnswerStaysADecisionNotUserProse(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Push the tag"), false).Result.QuestionIDs[0]
 	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: id, Answers: []string{"yes"}}, time.Time{})
@@ -167,6 +170,7 @@ func TestQuestionAsyncAnswerStaysADecisionNotUserProse(t *testing.T) {
 // every wire converter and the transcript renderer drop, which lost the text
 // the user actually wrote.
 func TestQuestionWithdrawAfterDeadlineKeepsTheUsersWords(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.globalConfig.QuestionTimeout = 60
 	items := questionItems("Choice")
@@ -194,6 +198,7 @@ func TestQuestionWithdrawAfterDeadlineKeepsTheUsersWords(t *testing.T) {
 }
 
 func TestQuestionInterventionPermanentlyDisablesTimer(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.globalConfig.QuestionTimeout = 3600
 	items := questionItems("Choice")
@@ -211,6 +216,7 @@ func TestQuestionInterventionPermanentlyDisablesTimer(t *testing.T) {
 	}
 }
 func TestQuestionBatchCommitRetryReturnsOriginalIDs(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	c := &questionCommand{operation: QuestionOperation{Operation: questionOpCreate, OperationID: "attempt-1"}, call: "call-1", args: tools.QuestionArgs{Questions: questionItems("First", "Second", "Third"), Wait: new(false)}}
 	first := runQuestionCommand(t, a, c)
@@ -229,6 +235,7 @@ func TestQuestionBatchCommitRetryReturnsOriginalIDs(t *testing.T) {
 	}
 }
 func TestQuestionBatchRejectsBeforePublishingAnyItem(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	items := questionItems("First", "Second")
 	items[1].ResponsePolicy = "invalid"
@@ -238,6 +245,7 @@ func TestQuestionBatchRejectsBeforePublishingAnyItem(t *testing.T) {
 	}
 }
 func TestQuestionSyncBatchRestoresOrderAndCancelsUnopenedItems(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	r := createTestQuestions(t, a, questionItems("First", "Second", "Third"), true)
 	ids := r.Result.QuestionIDs
@@ -256,6 +264,7 @@ func TestQuestionSyncBatchRestoresOrderAndCancelsUnopenedItems(t *testing.T) {
 	}
 }
 func TestQuestionDeclineWakesWaitAndReplacementResolvesDependency(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	created := createTestQuestions(t, a, questionItems("First", "Second"), false)
 	ids := created.Result.QuestionIDs
@@ -283,6 +292,7 @@ func TestQuestionDeclineWakesWaitAndReplacementResolvesDependency(t *testing.T) 
 	}
 }
 func TestQuestionOutsideWaitSetInterruptsWithoutClosingQuestions(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	r := createTestQuestions(t, a, questionItems("First", "Second"), false)
 	ids := r.Result.QuestionIDs
@@ -302,6 +312,7 @@ func TestQuestionOutsideWaitSetInterruptsWithoutClosingQuestions(t *testing.T) {
 	}
 }
 func TestQuestionHistoryRevisionWithNewPendingQuestion(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	old := createTestQuestions(t, a, questionItems("First"), false).Result.QuestionIDs[0]
 	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpDecline, QuestionID: old}, time.Time{})
@@ -312,6 +323,7 @@ func TestQuestionHistoryRevisionWithNewPendingQuestion(t *testing.T) {
 	}
 }
 func TestQuestionRecoveryPreservesInterventionAndResultConsumption(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	r := createTestQuestions(t, a, questionItems("Choice"), false)
 	id := r.Result.QuestionIDs[0]
@@ -328,6 +340,7 @@ func TestQuestionRecoveryPreservesInterventionAndResultConsumption(t *testing.T)
 	}
 }
 func TestQuestionPersistenceFailurePublishesNoSuccess(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.recoveryManager().Close()
 	receipt := runQuestionCommand(t, a, &questionCommand{operation: QuestionOperation{Operation: questionOpCreate, OperationID: "create"}, args: tools.QuestionArgs{Questions: questionItems("Choice"), Wait: new(false)}})
@@ -336,6 +349,7 @@ func TestQuestionPersistenceFailurePublishesNoSuccess(t *testing.T) {
 	}
 }
 func TestQuestionCommitVisibleOnlyAfterPersistence(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.persist.admission <- struct{}{}
 	receipt := runQuestionCommand(t, a, &questionCommand{operation: QuestionOperation{Operation: questionOpCreate, OperationID: "create"}, args: tools.QuestionArgs{Questions: questionItems("Choice"), Wait: new(false)}})
@@ -355,6 +369,7 @@ func TestQuestionValidateSelectionsAndCustomText(t *testing.T) {
 	}
 }
 func TestQuestionFactsExcludedFromModelAndPreservedByCompaction(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	createTestQuestions(t, a, questionItems("Choice"), false)
 	msgs := a.ctxMgr.Snapshot()

@@ -793,6 +793,7 @@ func TestFindDuplicateOrConflictingTaskAllowsNoFileWriteToolRoleAlongsideUnspeci
 }
 
 func TestFindDuplicateOrConflictingTaskCanonicalizesScopeAliases(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	a := newTestMainAgent(t, root)
 	a.contentRoot = root
@@ -823,6 +824,7 @@ func TestFindDuplicateOrConflictingTaskCanonicalizesScopeAliases(t *testing.T) {
 }
 
 func TestPersistTaskRegistrySerializesSnapshotOrder(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"adhoc-persist-order": {

@@ -56,6 +56,7 @@ func TestSummarizeMCPControlErrorIgnoresCanceledBranches(t *testing.T) {
 }
 
 func TestMCPControlEnableRejectsServerDeniedByActiveRole(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.globalConfig = &config.Config{MCP: config.MCPConfig{
 		"exa": {AllowedTools: []string{"web_search_exa"}},
@@ -83,6 +84,7 @@ func TestMCPControlEnableRejectsServerDeniedByActiveRole(t *testing.T) {
 }
 
 func TestMCPControlEnableAcceptsExactAllowedLazyServer(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ruleset = permission.Ruleset{
 		{Permission: "*", Pattern: "*", Action: permission.ActionDeny},
@@ -106,6 +108,7 @@ func TestMCPControlEnableAcceptsExactAllowedLazyServer(t *testing.T) {
 }
 
 func TestMCPControlEnableRejectsShorterOverlappingLazyServer(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetMCPStatusFunc(func() []MCPServerDisplay {
 		return []MCPServerDisplay{{Name: "search", Manual: true}, {Name: "search_api", Manual: true}}
@@ -136,6 +139,7 @@ func TestMCPControlEnableRejectsShorterOverlappingLazyServer(t *testing.T) {
 }
 
 func TestMCPControlEnableAcceptsLongerOverlappingLazyServer(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetMCPStatusFunc(func() []MCPServerDisplay {
 		return []MCPServerDisplay{{Name: "search", Manual: true}, {Name: "search_api", Manual: true}}
@@ -162,6 +166,7 @@ func TestMCPControlEnableAcceptsLongerOverlappingLazyServer(t *testing.T) {
 }
 
 func TestMCPControlWhileBusyDefersToolsAndPromptUntilNextRequest(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -224,6 +229,7 @@ func TestMCPControlWhileBusyDefersToolsAndPromptUntilNextRequest(t *testing.T) {
 }
 
 func TestMCPControlReturningToSameSurfaceKeepsFrozenContext(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -268,6 +274,7 @@ func TestMCPControlReturningToSameSurfaceKeepsFrozenContext(t *testing.T) {
 }
 
 func TestMCPControlErrorKeepsExistingSurface(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -308,6 +315,7 @@ func TestMCPControlErrorKeepsExistingSurface(t *testing.T) {
 }
 
 func TestMCPControlPartialSuccessAppliesSurfaceAndReportsError(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
@@ -341,6 +349,7 @@ func TestMCPControlPartialSuccessAppliesSurfaceAndReportsError(t *testing.T) {
 }
 
 func TestMCPControlStaleGenerationReportsPreviousSession(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	stale := a.ResetMCPReady()
 	_ = a.ResetMCPReady()
@@ -359,6 +368,7 @@ func TestMCPControlStaleGenerationReportsPreviousSession(t *testing.T) {
 }
 
 func TestMCPControlDetectsTopLevelBaselineChangesInDynamicMode(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.llmClient = newResponsesAdditionalToolsClient("model-1")
@@ -379,6 +389,7 @@ func TestMCPControlDetectsTopLevelBaselineChangesInDynamicMode(t *testing.T) {
 }
 
 func TestRuntimeMCPDiscoveryGenerationCannotOverwriteNewerRestore(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	stale := a.ResetMCPReady()
 	current := a.ResetMCPReady()
@@ -399,6 +410,7 @@ func TestRuntimeMCPDiscoveryGenerationCannotOverwriteNewerRestore(t *testing.T) 
 }
 
 func TestMCPStatusTextKeepsAutomaticServerStates(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.mcpServerListFn = func() []MCPServerDisplay {
 		return []MCPServerDisplay{
@@ -427,6 +439,7 @@ func TestMCPStatusTextKeepsAutomaticServerStates(t *testing.T) {
 }
 
 func TestMCPControlDoneAfterSessionSwitchDoesNotTouchNewBarrier(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	controlGen := a.ResetMCPReady()
 	// A session switch (or MCP startup) replaces the readiness barrier while
@@ -466,6 +479,7 @@ func TestMCPControlDoneAfterSessionSwitchDoesNotTouchNewBarrier(t *testing.T) {
 }
 
 func TestMCPControlDoneCurrentGenerationAppliesAndReleasesBarrier(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	controlGen := a.ResetMCPReady()
 	a.mcpTransitionActive.Store(true)
@@ -573,6 +587,7 @@ func mcpControlWaitDone(t *testing.T, a *MainAgent) Event {
 // A toggle that rewrites the top-level surface of an already-installed request
 // surface costs the provider cache, and the user has to hear about it.
 func TestMCPControlMidSessionToggleWarnsAboutCache(t *testing.T) {
+	t.Parallel()
 	a := mcpControlAgentWithBuiltSurface(t)
 	mcpControlToggle(t, a)
 	if warns := mcpControlCacheWarns(a); len(warns) != 1 {
@@ -582,6 +597,7 @@ func TestMCPControlMidSessionToggleWarnsAboutCache(t *testing.T) {
 
 // Nothing has been sent in an unbuilt session, so there is no cache to miss.
 func TestMCPControlToggleInUnbuiltSessionSkipsCacheWarning(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
@@ -597,6 +613,7 @@ func TestMCPControlToggleInUnbuiltSessionSkipsCacheWarning(t *testing.T) {
 // a dynamic mount) already rewrote the surface, so the next request misses the
 // cache whether or not MCP changes.
 func TestMCPControlToggleAfterBoundaryRebuildSkipsCacheWarning(t *testing.T) {
+	t.Parallel()
 	a := mcpControlAgentWithBuiltSurface(t)
 	a.markRuntimeSurfaceDirty()
 	mcpControlToggle(t, a)
@@ -608,6 +625,7 @@ func TestMCPControlToggleAfterBoundaryRebuildSkipsCacheWarning(t *testing.T) {
 // The first toggle already rewrote the surface; a second one before any request
 // would repeat a warning about a cache that is already cold.
 func TestMCPControlRepeatedTogglesBeforeRequestWarnOnce(t *testing.T) {
+	t.Parallel()
 	a := mcpControlAgentWithBuiltSurface(t)
 	mcpControlToggle(t, a)
 	if warns := mcpControlCacheWarns(a); len(warns) != 1 {

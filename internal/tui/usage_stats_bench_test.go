@@ -30,8 +30,9 @@ func (a *usageStatsBenchAgent) GetUsageStats() analytics.SessionStats {
 	}
 }
 
-func benchmarkModelForUsageStatsDialog() Model {
-	m := benchmarkModelForView()
+func benchmarkModelForUsageStatsDialog(tb testing.TB) Model {
+	tb.Helper()
+	m := benchmarkModelForView(tb)
 	m.agent = &usageStatsBenchAgent{}
 	m.mode = ModeUsageStats
 	m.usageStats = usageStatsState{
@@ -43,7 +44,7 @@ func benchmarkModelForUsageStatsDialog() Model {
 }
 
 func BenchmarkRenderUsageStatsDialogOpen(b *testing.B) {
-	m := benchmarkModelForUsageStatsDialog()
+	m := benchmarkModelForUsageStatsDialog(b)
 	_ = m.renderUsageStatsDialog()
 	b.ReportAllocs()
 	for b.Loop() {

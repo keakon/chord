@@ -74,6 +74,7 @@ func assertEnvBlockStatesWorktree(t *testing.T, content, workDir, name, branch s
 // owner works inside a worktree and delegates without naming a workdir, so the
 // worker runs in that checkout and its reminder must say so.
 func TestSubAgentSessionReminderNamesInheritedWorktree(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, _ := newWorktreeTestAgent(t, "session-sub-env")
 	configureNestedDelegationTestRuntime(a, 1)

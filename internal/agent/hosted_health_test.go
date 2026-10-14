@@ -14,6 +14,7 @@ import (
 )
 
 func TestHostedProbeFailureDoesNotExtendCapabilityCooldown(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		err  error
@@ -66,6 +67,7 @@ func TestHostedProbeFailureDoesNotExtendCapabilityCooldown(t *testing.T) {
 }
 
 func TestHostedNamedPoolHealthSurvivesSessionReset(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		a := newTestMainAgent(t, t.TempDir())
 		b := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil)).(*hostedBackend)

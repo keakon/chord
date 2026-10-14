@@ -29,6 +29,7 @@ func runDeliveryOperation(t *testing.T, a *MainAgent, op *deliveryOperation) Inp
 }
 
 func TestInputDeliveryDurableSubmitAndEdit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
 	target := a.InputDeliveryTarget()
@@ -69,6 +70,7 @@ func TestInputDeliveryDurableSubmitAndEdit(t *testing.T) {
 }
 
 func TestInputDeliveryRejectsStaleTarget(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	target := a.InputDeliveryTarget()
 	target.SessionID = "other-session"

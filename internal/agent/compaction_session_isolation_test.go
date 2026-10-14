@@ -7,6 +7,7 @@ import (
 )
 
 func TestCompactionHistoryAllocatorUsesCapturedSessionDirectory(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	oldSessionDir := a.sessionDir
 	newSessionDir := filepath.Join(t.TempDir(), "new-session")
@@ -50,6 +51,7 @@ func TestCompactionHistoryAllocatorUsesCapturedSessionDirectory(t *testing.T) {
 // maximum so the next allocation cannot truncate an archive this process never
 // saw.
 func TestInstallSessionTargetReseedsAllocatorAgainstDiskGrowth(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	session := filepath.Join(t.TempDir(), "session")
 	if err := os.MkdirAll(session, 0o755); err != nil {

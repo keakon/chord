@@ -198,6 +198,7 @@ func (p *compactionPromptCaptureProvider) InvalidateRouting(string) {}
 // and the full-lists prompt must then exceed the reserved budget while the
 // sent (degraded) prompt fits it.
 func TestSummarizeCompactionHeadSendsExactlyTheBudgetedInputs(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetProviderModelRef("sample/compact-model")
@@ -286,6 +287,7 @@ func TestSummarizeCompactionHeadSendsExactlyTheBudgetedInputs(t *testing.T) {
 // budget. A caller that ignored the returned inputs and rebuilt the prompt
 // from the original full lists would exceed that budget.
 func TestFitCompactionInputReturnsTheInputsUsedForPromptAssembly(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	head := make([]message.Message, 0, 60)

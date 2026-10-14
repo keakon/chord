@@ -11,6 +11,7 @@ import (
 )
 
 func TestQuestionCompactionPreservesCheckpointCrashRecovery(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	createTestQuestions(t, a, questionItems("Choice"), false)
 	head := message.Message{Role: message.RoleUser, Content: "checkpoint", IsCompactionSummary: true, CompactionSummaryMode: compactionSummaryModeModelDriven, RequestBatch: 7}
@@ -39,6 +40,7 @@ func TestQuestionCompactionPreservesCheckpointCrashRecovery(t *testing.T) {
 }
 
 func TestQuestionCompactionProjectsOnlyUnconsumedDecisions(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: id, Answers: []string{"yes"}}, time.Now())
@@ -78,6 +80,7 @@ func TestQuestionCompactionProjectsOnlyUnconsumedDecisions(t *testing.T) {
 // operation IDs must not move later revisions ahead of the answers they
 // supersede.
 func TestQuestionDecisionsKeepCommittedOrderAfterCompaction(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	for _, op := range []QuestionOperation{

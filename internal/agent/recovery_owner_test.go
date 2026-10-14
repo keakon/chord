@@ -17,6 +17,7 @@ import (
 // a.recovery field fails here; without -race it still pins that a switch racing
 // live writers neither panics nor writes through a retired manager.
 func TestConcurrentPersistenceDuringSessionSwitchIsRaceFree(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	epoch := a.recoverySessionEpoch()
@@ -74,6 +75,7 @@ func TestConcurrentPersistenceDuringSessionSwitchIsRaceFree(t *testing.T) {
 // keeps one session's history out of another: a worker that captured an earlier
 // epoch resolves nil, not the manager of the session that replaced its own.
 func TestFrozenSessionEpochStopsResolvingTheSuccessorManager(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	frozenEpoch := a.recoverySessionEpoch()
@@ -107,6 +109,7 @@ func TestFrozenSessionEpochStopsResolvingTheSuccessorManager(t *testing.T) {
 // ErrClosed — which the health state machine deliberately ignores, so the
 // transcript silently stopped growing. Resolving per write follows the swap.
 func TestSubAgentFollowsRecoveryManagerReplacedWithinTheSession(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	spawnManager := a.recoveryManager()
@@ -150,6 +153,7 @@ func TestSubAgentFollowsRecoveryManagerReplacedWithinTheSession(t *testing.T) {
 // to the successor session's files. Its goroutine is only cancelled, not joined,
 // so a write can still arrive after the swap.
 func TestSubAgentWriteAfterSessionSwitchStaysOutOfTheNewSession(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sub := &SubAgent{instanceID: "agent-1", parent: a, recovery: a.recoveryManager(), sessionEpoch: a.recoverySessionEpoch()}

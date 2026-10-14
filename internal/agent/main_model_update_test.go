@@ -44,6 +44,7 @@ func TestConcurrentRunningModelUpdatesKeepBudgetsAndEventsAligned(t *testing.T) 
 }
 
 func TestModelInstallationSerializesWithCapturedClientUpdate(t *testing.T) {
+	t.Parallel()
 	instance := newReadyTestMainAgent(t)
 	for iteration := range 200 {
 		previous := llm.NewClient(newSidebarTestProviderConfig("sample", "model-a", 64000, 60000), &blockingStreamProvider{}, "model-a", 4096, "sys")
@@ -76,6 +77,7 @@ func TestModelInstallationSerializesWithCapturedClientUpdate(t *testing.T) {
 }
 
 func TestRunningModelReadersRemainAvailableDuringOutputBackpressure(t *testing.T) {
+	t.Parallel()
 	instance := newReadyTestMainAgent(t)
 	instance.outputCh = make(chan AgentEvent, 1)
 	instance.outputCh <- StreamTextEvent{Text: "sample"}

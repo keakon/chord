@@ -32,6 +32,7 @@ func waitForPreparingActivity(t *testing.T, events <-chan AgentEvent) AgentActiv
 // so the agent must surface a preparing activity naming the pending gate —
 // otherwise the status bar looks idle while continues are silently dropped.
 func TestEnsureSessionBuiltEmitsPreparingForPendingGates(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -74,6 +75,7 @@ func TestEnsureSessionBuiltEmitsPreparingForPendingGates(t *testing.T) {
 // With every gate already ready the request must not flash a preparing
 // activity: the emission is reserved for the actually-pending wait.
 func TestEnsureSessionBuiltSkipsPreparingWhenGatesReady(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()

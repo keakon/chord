@@ -30,6 +30,7 @@ func countMailboxLogEntries(t *testing.T, sessionDir string) int {
 // restart replays it as an unconsumed message whose task later settles as a
 // matching expiry, telling the owner about an expiry that never happened.
 func TestParkedExpirySettleBackoffWithdrawsPreparedAlert(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "expiry-backoff")
 	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
@@ -103,6 +104,7 @@ func TestParkedExpirySettleBackoffWithdrawsPreparedAlert(t *testing.T) {
 // byte zero and silently deleting every earlier row. A failed append never
 // means the earlier rows failed too.
 func TestParkedExpiryAppendFailureKeepsExistingMailboxRows(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "expiry-append-failure")
 	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
@@ -178,6 +180,7 @@ func TestParkedExpiryAppendFailureKeepsExistingMailboxRows(t *testing.T) {
 // prepared alert must be withdrawn instead of lingering for a crash restart to
 // replay against the completed task.
 func TestLiveExpiryConflictWithCompletedSettlementWithdrawsPreparedAlert(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
@@ -236,6 +239,7 @@ func TestLiveExpiryConflictWithCompletedSettlementWithdrawsPreparedAlert(t *test
 // skip requests/children/external-event closeout for a task that is already
 // Cancelled), and a later sweep must not commit the same attempt again.
 func TestWaitingMainExpirySweepKeepsCloseoutWhenRegistryWriteDegraded(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {

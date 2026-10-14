@@ -22,6 +22,7 @@ func stageCancelTestMailbox(a *MainAgent) *SubAgentMailboxMessage {
 }
 
 func TestCancelParksMailboxBeforeSubAgentInterruptCompletes(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	stageCancelTestMailbox(a)
@@ -64,6 +65,7 @@ func TestCancelParksMailboxBeforeSubAgentInterruptCompletes(t *testing.T) {
 }
 
 func TestCancelledMailboxResumesWithDraft(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	stageCancelTestMailbox(a)
@@ -84,6 +86,7 @@ func TestCancelledMailboxResumesWithDraft(t *testing.T) {
 }
 
 func TestCancelAcceptedInputParksMailbox(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	stageCancelTestMailbox(a)
 	a.activeSubAgentMailboxAck = false
@@ -110,6 +113,7 @@ func TestCancelAcceptedInputParksMailbox(t *testing.T) {
 }
 
 func TestCancelledMailboxConsumedWithNextUserAction(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"input", "draft", "continue"} {
 		t.Run(action, func(t *testing.T) {
 			provider := &keyRecordingProvider{calls: []scriptedStreamCall{completedReply("Result received")}}
@@ -175,6 +179,7 @@ func TestCancelledMailboxConsumedWithNextUserAction(t *testing.T) {
 }
 
 func TestMailboxPauseIgnoresStaleCancel(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	stale := a.abortTurn(a.turn, true)
@@ -186,6 +191,7 @@ func TestMailboxPauseIgnoresStaleCancel(t *testing.T) {
 }
 
 func TestMailboxPauseUnaffectedBySubAgentOnlyCancel(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newPersistenceTestSubAgent(a, "worker-1")
 	a.subs.subAgents[sub.instanceID] = sub
@@ -199,6 +205,7 @@ func TestMailboxPauseUnaffectedBySubAgentOnlyCancel(t *testing.T) {
 }
 
 func TestMailboxPauseUnaffectedByStalledTurnSettlement(t *testing.T) {
+	t.Parallel()
 	for _, paused := range []bool{false, true} {
 		t.Run(map[bool]string{false: "running", true: "paused"}[paused], func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
@@ -216,6 +223,7 @@ func TestMailboxPauseUnaffectedByStalledTurnSettlement(t *testing.T) {
 }
 
 func TestMailboxResumesForInputAfterCoveredQueue(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	stageCancelTestMailbox(a)
 	a.activeSubAgentMailboxAck = false

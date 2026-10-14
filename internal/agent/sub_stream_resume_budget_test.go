@@ -16,6 +16,7 @@ import (
 // model that refuses to finish, so riding out a flaky gateway must not consume
 // the single wrap-up nudge reserved for a reply that stopped at plain text.
 func TestSubAgentStreamResumesDoNotSpendTheTerminalNudge(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	if sub.turn == nil {
 		t.Fatal("test sub-agent has no live turn")
@@ -44,6 +45,7 @@ func TestSubAgentStreamResumesDoNotSpendTheTerminalNudge(t *testing.T) {
 // ends, but whatever the reply already streamed still belongs in history — the
 // give-up path used to drop it because saving was bundled into the resume.
 func TestSubAgentPreservesPartialWhenResumeBudgetIsSpent(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	if sub.turn == nil {
 		t.Fatal("test sub-agent has no live turn")
@@ -87,6 +89,7 @@ func TestSubAgentPreservesPartialWhenResumeBudgetIsSpent(t *testing.T) {
 // conditions, so a reset mid-reply was preserved on the rounds that resumed and
 // then discarded on the round that gave up.
 func TestSubAgentPreservesPartialOnEveryTransportInterruptionRound(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		cause error

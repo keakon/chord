@@ -12,6 +12,7 @@ import (
 )
 
 func TestDelegationCallerInheritsSubCurrentCheckout(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-caller")
 	sub := newControllableTestSubAgent(t, a, "task-inherit")
@@ -54,6 +55,7 @@ func TestDelegationCallerInheritsSubCurrentCheckout(t *testing.T) {
 }
 
 func TestCreateSubAgentInheritsCallerWorkDirByDefault(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-inherit-delegate")
 	configureNestedDelegationTestRuntime(a, 1)
@@ -79,6 +81,7 @@ func TestCreateSubAgentInheritsCallerWorkDirByDefault(t *testing.T) {
 // working in, identity included, so its relative paths and environment block
 // describe the same tree.
 func TestCreateSubAgentInheritsCallerCheckout(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, _ := newWorktreeTestAgent(t, "session-inherit-checkout")
 	configureNestedDelegationTestRuntime(a, 1)
@@ -106,6 +109,7 @@ func TestCreateSubAgentInheritsCallerCheckout(t *testing.T) {
 }
 
 func TestSessionEnvSnapshotReportsActiveWorktree(t *testing.T) {
+	t.Parallel()
 	a, repo := newWorktreeTestAgent(t, "session-env")
 
 	before := a.sessionEnvSnapshot()
@@ -127,6 +131,7 @@ func TestSessionEnvSnapshotReportsActiveWorktree(t *testing.T) {
 // of an installed checkout: the session metadata names the checkout and the
 // timeline records the HEAD and generation a later resume reasons about.
 func TestRecordWorkDirBoundaryPersistsSwitchTimeline(t *testing.T) {
+	t.Parallel()
 	a, _ := newWorktreeTestAgent(t, "session-timeline")
 
 	installed := installTestCheckout(t, a, "feat-line")
@@ -148,6 +153,7 @@ func TestRecordWorkDirBoundaryPersistsSwitchTimeline(t *testing.T) {
 }
 
 func TestRestoreWorkDirBindingInstallsLiveWorktree(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, _ := newWorktreeTestAgent(t, "session-restore")
 	info := createTestWorktree(t, a, "feat-restore")
@@ -186,6 +192,7 @@ func TestRestoreWorkDirBindingInstallsLiveWorktree(t *testing.T) {
 }
 
 func TestRestoreWorkDirBindingFallsBackWhenWorktreeIsGone(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-restore-gone")
 	missing := filepath.Join(repo, "vanish")
@@ -212,6 +219,7 @@ func TestRestoreWorkDirBindingFallsBackWhenWorktreeIsGone(t *testing.T) {
 }
 
 func TestSubAgentCompletionReportsWorktree(t *testing.T) {
+	t.Parallel()
 	a, _ := newWorktreeTestAgent(t, "session-complete")
 
 	// Outside a checkout there is no tree to report.
@@ -262,6 +270,7 @@ func TestSubAgentCompletionReportsWorktree(t *testing.T) {
 }
 
 func TestSubAgentCompletionWorktreeDiffErrorIsReported(t *testing.T) {
+	t.Parallel()
 	a, _ := newWorktreeTestAgent(t, "session-complete-error")
 	info := createTestWorktree(t, a, "feat-broken")
 	sub := newControllableTestSubAgentWithWorkDir(t, a, "task-complete-error", WorkDirState{
@@ -331,6 +340,7 @@ func TestMailboxInjectionTextRendersWorktree(t *testing.T) {
 // Each worker resolves its own starting checkout and role before its first
 // request, including when its parent already prepared the same directory.
 func TestSubAgentInstructionsFollowItsStartingCheckout(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-agents")
 	configureNestedDelegationTestRuntime(a, 1)

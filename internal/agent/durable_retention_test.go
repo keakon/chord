@@ -12,6 +12,7 @@ import (
 )
 
 func TestArchiveEligibleTerminalTasksPreservesUnsafeRecords(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	now := time.Now()
 	records := make(map[string]*DurableTaskRecord)
@@ -70,6 +71,7 @@ func TestArchiveEligibleTerminalTasksPreservesUnsafeRecords(t *testing.T) {
 }
 
 func TestArchiveEligibleTerminalTasksBoundsCompletedTasksAndSupportsLookup(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	now := time.Now()
 	records := make(map[string]*DurableTaskRecord, maxRetainedTerminalTasks+2)
@@ -206,6 +208,7 @@ func TestCompactSubAgentMailboxLogsPreservesUnconsumedAndLatestProgress(t *testi
 // re-marks it consumed on load, which is what keeps restore from redelivering
 // it. Consumed messages without a matching record age out.
 func TestCompactSubAgentMailboxLogsKeepsTerminalEvidenceForCurrentAttempt(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o700); err != nil {
 		t.Fatalf("mkdir subagents: %v", err)

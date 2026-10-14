@@ -101,6 +101,7 @@ func TestNativeImageStatelessReplayPreservesOriginal(t *testing.T) {
 }
 
 func TestNativeImageFallbackUsesSubAgentPermission(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.ruleset = permissionRuleset(t, "generate_image: deny\n")
 	sub.setRuleset(permissionRuleset(t, "generate_image: allow\n"))

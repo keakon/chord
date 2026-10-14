@@ -83,6 +83,7 @@ func TestWalltimeUserWaitSettlesOnConfirmTimeout(t *testing.T) {
 // Done approval, repeated tool-call interception) and SubAgent contexts keep
 // the sidebar-compatible ids.
 func TestWalltimeUserWaitAttribution(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 

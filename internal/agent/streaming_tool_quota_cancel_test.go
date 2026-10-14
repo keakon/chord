@@ -10,6 +10,7 @@ import (
 )
 
 func TestMainAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -71,6 +72,7 @@ func TestMainAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T
 }
 
 func TestMainAgentAcquireExecutionSlotTurnCancelDoesNotEmitToolResult(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -138,6 +140,7 @@ func TestMainAgentAcquireExecutionSlotTurnCancelDoesNotEmitToolResult(t *testing
 }
 
 func TestSubAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	parent := newTestMainAgent(t, projectRoot)
 
@@ -200,6 +203,7 @@ func TestSubAgentAcquireExecutionSlotCancelledBatchEmitsToolResult(t *testing.T)
 }
 
 func TestSubAgentPromotedBatchLargerThanToolChannelDoesNotBlockScheduler(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	parent := newTestMainAgent(t, projectRoot)
 

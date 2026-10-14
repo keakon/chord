@@ -11,6 +11,7 @@ import (
 )
 
 func TestSessionTakeoverAdmissionRejectsLaterInputInOriginalSession(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	if !a.SendUserMessageWithReceipt("earlier instruction", "request-before") {
 		t.Fatal("earlier input rejected")

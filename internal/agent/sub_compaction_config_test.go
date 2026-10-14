@@ -12,6 +12,7 @@ import (
 )
 
 func TestSubAgentCompactionUsesCatalogAndExplicitOverrides(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		global    string
@@ -50,6 +51,7 @@ func TestSubAgentCompactionUsesCatalogAndExplicitOverrides(t *testing.T) {
 }
 
 func TestSubAgentCompactionUsesSharedModelThreshold(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		global  float64
@@ -99,6 +101,7 @@ func TestSubAgentCompactionUsesSharedModelThreshold(t *testing.T) {
 }
 
 func TestSubAgentCompactionFollowsModelPoolCursorAndReservation(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	cfg := config.DefaultConfig()
 	cfg.Context.Compaction.Reserved = 100

@@ -16,6 +16,7 @@ import (
 )
 
 func TestMainResponsesFirstRequestPinsSessionIdentity(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	var b map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

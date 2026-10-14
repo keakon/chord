@@ -10,6 +10,7 @@ import (
 // gate owes the active turn its next request, so it must continue on the live
 // context instead of parking the turn behind an event that never comes.
 func TestMainLLMGateKeepsTurnRunningWhenCompactionDraftFailsToApply(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.newTurn("")
 	turnID := a.turn.ID
@@ -70,6 +71,7 @@ func TestMainLLMGateKeepsTurnRunningWhenCompactionDraftFailsToApply(t *testing.T
 // real work instead of hitting the active-turn guards, while a turn that is
 // merely busy keeps queueing input.
 func TestStalledTurnSettlesForContinueAndUserInput(t *testing.T) {
+	t.Parallel()
 	t.Run("continue", func(t *testing.T) {
 		a := newReadyTestMainAgent(t)
 		a.newTurn("")
@@ -148,6 +150,7 @@ func waitForQuestionCommitForTest(t *testing.T, a *MainAgent) {
 // pending question to re-present, resume is bookkeeping and the caller keeps
 // its continuation.
 func TestResumeQuestionWorkOnlyClaimsContinuationWithPendingQuestion(t *testing.T) {
+	t.Parallel()
 	for _, foreign := range []string{"scope", "task"} {
 		t.Run("pending in another "+foreign, func(t *testing.T) {
 			a := newQuestionTestAgent(t)

@@ -193,6 +193,7 @@ func setCachedAgentsMDForTest(a *MainAgent, content string) {
 }
 
 func TestAutoContinuePromptIsInjectedAsOneShotOverlay(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.pendingAutoContinuePrompt = autoContinuePrompt()
 	overlays := a.buildTurnOverlayMessages()
@@ -221,6 +222,7 @@ func TestAutoContinuePromptIsInjectedAsOneShotOverlay(t *testing.T) {
 }
 
 func TestAutoContinueReplayPromptIsInjectedAsOneShotOverlay(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.pendingAutoContinueReplayPrompt = autoContinueReplayPrompt("finish the refactor safely")
 	overlays := a.buildTurnOverlayMessages()
@@ -243,6 +245,7 @@ func TestAutoContinueReplayPromptIsInjectedAsOneShotOverlay(t *testing.T) {
 }
 
 func TestApplyPendingCompactionResumeOverlaysForContinueRestoresReplayPrompt(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.setPendingCompactionResume(&recovery.PendingCompactionResume{
 		Kind:       string(compactionResumeAutoContinue),
@@ -264,6 +267,7 @@ func TestApplyPendingCompactionResumeOverlaysForContinueRestoresReplayPrompt(t *
 }
 
 func TestApplyPendingCompactionResumeOverlaysForContinueSyntheticModeSkipsReplay(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.setPendingCompactionResume(&recovery.PendingCompactionResume{
 		Kind:       string(compactionResumeAutoContinue),
@@ -282,6 +286,7 @@ func TestApplyPendingCompactionResumeOverlaysForContinueSyntheticModeSkipsReplay
 }
 
 func TestApplyPendingCompactionResumeOverlaysForContinueRestoresOversizeRetryCountIntoNextTurn(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.setPendingCompactionResume(&recovery.PendingCompactionResume{
 		Kind:               string(compactionResumeAutoContinue),
@@ -302,6 +307,7 @@ func TestApplyPendingCompactionResumeOverlaysForContinueRestoresOversizeRetryCou
 }
 
 func TestChooseCompactionResumeModeUsesSyntheticContinueWhenToolSideEffectsPending(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.newTurn("")
 	a.turn.PendingToolMeta["call-1"] = PendingToolCall{CallID: "call-1", Name: "write"}

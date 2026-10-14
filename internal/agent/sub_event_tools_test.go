@@ -14,6 +14,7 @@ import (
 // instead of re-parsing every patch target, so files whose group failed in a
 // partial apply_patch are not reported as changed to hooks.
 func TestSubAgentPartialPatchChangedFilesComeFromFileState(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	// Keep a second call pending so the batch-completion path stays out of the
 	// way; everything under test happens before the pending counter check.

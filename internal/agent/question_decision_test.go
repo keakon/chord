@@ -31,6 +31,7 @@ func TestQuestionDecisionTextPreservesFreeText(t *testing.T) {
 }
 
 func TestQuestionProjectionPreservesSelectedMeaningAfterCompaction(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	item := tools.QuestionItem{Header: "Destination", Question: "Where should the files go?", Options: []tools.QuestionOption{
 		{ID: "first", Label: "Use this", Description: "First destination"},

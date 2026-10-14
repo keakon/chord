@@ -31,6 +31,7 @@ func TestStatusCopyRegionsMatchDrawnColumns(t *testing.T) {
 		for _, compacting := range []bool{false, true} {
 			backend := &sessionControlAgent{sessionSummary: &agent.SessionSummary{ID: "1775115074902"}}
 			m := NewModelWithSize(backend, 80, 24)
+			t.Cleanup(func() { _ = m.Close() })
 			m.workingDir = "/home/user/projects/checkout-name"
 			m.activities["main"] = agent.AgentActivityEvent{Type: agent.ActivityStreaming, AgentID: "main", Detail: detail}
 			if compacting {

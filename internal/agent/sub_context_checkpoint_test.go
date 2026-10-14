@@ -14,6 +14,7 @@ func newMixedBatchTestSubAgentForCheckpoint(t *testing.T) *SubAgent {
 }
 
 func TestSubAgentStructuredCheckpointExtractsAuthoritativeState(t *testing.T) {
+	t.Parallel()
 	sub := newMixedBatchTestSubAgentForCheckpoint(t)
 	sub.taskDesc = "Refactor the parser and keep the CLI output format unchanged"
 	sub.ownerAgentID = "main"
@@ -54,6 +55,7 @@ func TestSubAgentStructuredCheckpointExtractsAuthoritativeState(t *testing.T) {
 
 // Fields with no derivable source must be marked "unknown", never guessed.
 func TestSubAgentStructuredCheckpointMarksUnknownFields(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.taskDesc = ""
 	sub.runtimeState.set(SubAgentStateRunning, "")
@@ -69,6 +71,7 @@ func TestSubAgentStructuredCheckpointMarksUnknownFields(t *testing.T) {
 // The checkpoint must not propose redoing a failed approach: the explicit
 // failure is surfaced verbatim in Known failures.
 func TestSubAgentStructuredCheckpointDoesNotRepeatFailedApproach(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.taskDesc = "Add pagination"
 	messages := []message.Message{
@@ -84,6 +87,7 @@ func TestSubAgentStructuredCheckpointDoesNotRepeatFailedApproach(t *testing.T) {
 
 // An explicit open blocker from the runtime state must survive compression.
 func TestSubAgentStructuredCheckpointPreservesOpenBlocker(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.runtimeState.set(SubAgentStateWaitingMain, "waiting for owner to approve the write scope change")
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, nil, 4, "proactive", "archives/sub-4.md")
@@ -96,6 +100,7 @@ func TestSubAgentStructuredCheckpointPreservesOpenBlocker(t *testing.T) {
 // Synthetic user-role messages other than mailbox deliveries carry no owner
 // instruction, so the checkpoint must keep scanning past them.
 func TestSubAgentStructuredCheckpointSkipsSyntheticUserMessages(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.taskDesc = "Add pagination"
 	messages := []message.Message{

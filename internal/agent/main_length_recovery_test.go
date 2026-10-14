@@ -87,6 +87,7 @@ func (p *recordingLengthRecoveryProvider) Complete(
 }
 
 func TestHandleLLMResponseTruncatedMalformedStartsLengthRecovery(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -125,6 +126,7 @@ func TestHandleLLMResponseTruncatedMalformedStartsLengthRecovery(t *testing.T) {
 }
 
 func TestHandleLLMResponseTruncatedMalformedAbortMentionsCompactWhenCompactionUnavailable(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -164,6 +166,7 @@ func TestHandleLLMResponseTruncatedMalformedAbortMentionsCompactWhenCompactionUn
 }
 
 func TestHandleLLMResponseTruncatedMalformedSchedulesCompactionBeforeAbort(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -193,6 +196,7 @@ func TestHandleLLMResponseTruncatedMalformedSchedulesCompactionBeforeAbort(t *te
 }
 
 func TestResumePendingMainLLMAfterCompactionLengthRecoveryReinjectsRecoveryPrompt(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	provider := &recordingLengthRecoveryProvider{}
@@ -246,6 +250,7 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryReinjectsRecoveryPromp
 }
 
 func TestBeginMainLLMAfterPreparationLoopToolChoiceMergesWithExistingOverride(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.loopState.Enabled = true
 	provider := &recordingLoopTuningProvider{}
@@ -298,6 +303,7 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceMergesWithExistingOverride(t 
 }
 
 func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToMessagesProvider(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.loopState.Enabled = true
 	provider := &recordingLoopTuningProvider{}
@@ -343,6 +349,7 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToMessagesProvider(t *
 }
 
 func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToGenerateContentProvider(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.loopState.Enabled = true
 	provider := &recordingLoopTuningProvider{}
@@ -385,6 +392,7 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliesToGenerateContentProvi
 }
 
 func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliedWhenCompactionAlreadyRunning(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.loopState.Enabled = true
 	a.newTurn("")
@@ -426,6 +434,7 @@ func TestBeginMainLLMAfterPreparationLoopToolChoiceAppliedWhenCompactionAlreadyR
 }
 
 func TestResumePendingMainLLMAfterCompactionOversizeResumeInjectsReplayOverlay(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newReadyTestMainAgent(t)
 	a.sessionDir = testProjectSessionDir(t, projectRoot, "oversize-overlay")
@@ -502,6 +511,7 @@ func TestResumePendingMainLLMAfterCompactionOversizeResumeInjectsReplayOverlay(t
 }
 
 func TestHandleLLMResponseValidResponseClearsLengthRecoveryState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -530,6 +540,7 @@ func TestHandleLLMResponseValidResponseClearsLengthRecoveryState(t *testing.T) {
 }
 
 func TestHandleLLMResponseLengthRecoveryRejectsMultipleToolCalls(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -580,6 +591,7 @@ func TestHandleLLMResponseLengthRecoveryRejectsMultipleToolCalls(t *testing.T) {
 // that when compaction fails for a length-recovery continuation, the turn is
 // aborted with /compact guidance instead of retrying recovery.
 func TestResumePendingMainLLMAfterCompactionLengthRecoveryFailureAborts(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
@@ -626,6 +638,7 @@ func TestResumePendingMainLLMAfterCompactionLengthRecoveryFailureAborts(t *testi
 }
 
 func TestOversizeCompactionFailureAbortsSuspendedMainContinuation(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
@@ -668,6 +681,7 @@ func TestOversizeCompactionFailureAbortsSuspendedMainContinuation(t *testing.T) 
 // TestScheduleCompactionForLengthRecoveryUsesLengthRecoveryTrigger verifies
 // that scheduleCompactionForLengthRecovery sets the LengthRecovery trigger.
 func TestScheduleCompactionForLengthRecoveryUsesLengthRecoveryTrigger(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -687,6 +701,7 @@ func TestScheduleCompactionForLengthRecoveryUsesLengthRecoveryTrigger(t *testing
 }
 
 func TestScheduleCompactionForLengthRecoveryHandsOffForegroundActivity(t *testing.T) {
+	t.Parallel()
 	for _, activity := range []ActivityType{ActivityStreaming, ActivityExecuting} {
 		t.Run(string(activity), func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
@@ -723,6 +738,7 @@ func TestScheduleCompactionForLengthRecoveryHandsOffForegroundActivity(t *testin
 }
 
 func TestHandleCompactionReadyLengthRecoveryAppliesImmediately(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	provider := &blockingStreamProvider{
 		calls:      []scriptedStreamCall{{resp: &message.Response{Content: "recovered", StopReason: "stop"}, holdAfterStreams: true}},
@@ -792,6 +808,7 @@ func TestHandleCompactionReadyLengthRecoveryAppliesImmediately(t *testing.T) {
 // TestScheduleCompactionForLengthRecoveryOnlyOncePerTurn verifies that the
 // one-shot bit prevents auto compaction from firing more than once per turn.
 func TestScheduleCompactionForLengthRecoveryOnlyOncePerTurn(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -809,6 +826,7 @@ func TestScheduleCompactionForLengthRecoveryOnlyOncePerTurn(t *testing.T) {
 // failed length-recovery compaction does not affect the usage-driven failure
 // counter / suppression state.
 func TestRecoveryCompactionFailureDoesNotAdvanceUsageBreaker(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -854,6 +872,7 @@ func TestRecoveryCompactionFailureDoesNotAdvanceUsageBreaker(t *testing.T) {
 // overlay is consumed (one-shot) by buildTurnOverlayMessages and does not
 // persist across LLM rounds.
 func TestRecoveryPromptNotInCompactionCheckpoint(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -886,6 +905,7 @@ func TestRecoveryPromptNotInCompactionCheckpoint(t *testing.T) {
 }
 
 func TestHandleLLMResponseTruncatedWithNoOutputStartsLengthRecovery(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -927,6 +947,7 @@ func TestHandleLLMResponseTruncatedWithNoOutputStartsLengthRecovery(t *testing.T
 }
 
 func TestHandleLLMResponseTruncatedWithNoOutputAbortsAfterMaxAttempts(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -963,6 +984,7 @@ func TestHandleLLMResponseTruncatedWithNoOutputAbortsAfterMaxAttempts(t *testing
 }
 
 func TestHandleLLMResponseTruncatedWithTextKeepsReplyAndWarns(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -1002,6 +1024,7 @@ func TestHandleLLMResponseTruncatedWithTextKeepsReplyAndWarns(t *testing.T) {
 // A Done rejection is the user's latest feedback, so the compaction replay must
 // anchor to it rather than to the request it rejected.
 func TestLatestRecoverableUserIntentPrefersNewerDoneRejection(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement the parser"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "done-1", Name: tools.NameDone}}})
@@ -1017,6 +1040,7 @@ func TestLatestRecoverableUserIntentPrefersNewerDoneRejection(t *testing.T) {
 }
 
 func TestLatestRecoverableUserIntentIgnoresForgedDoneRejection(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement the parser"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "shell-1", Name: tools.NameShell}}})

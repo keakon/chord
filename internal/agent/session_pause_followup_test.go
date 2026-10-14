@@ -17,6 +17,7 @@ import (
 )
 
 func TestPausedTargetedFollowupSavesBeforeDispatchAndKeepsInputOrder(t *testing.T) {
+	t.Parallel()
 	a, mainProvider := scenarioAgent(t)
 	sub := newControllableTestSubAgent(t, a, "sample-task")
 	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{Content: "Finished.", StopReason: "stop"}}}}

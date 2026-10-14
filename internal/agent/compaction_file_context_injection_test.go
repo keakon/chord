@@ -13,6 +13,7 @@ import (
 )
 
 func TestRefreshCompactionFileRevisionsUsesApplyTimeState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "key.go")
 	if err := os.WriteFile(path, []byte("package key\n"), 0o644); err != nil {
@@ -47,6 +48,7 @@ func TestRefreshCompactionFileRevisionsUsesApplyTimeState(t *testing.T) {
 }
 
 func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectRoot, "internal", "agent"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -108,6 +110,7 @@ func TestInjectCompactionFileContextStablePerRequest(t *testing.T) {
 }
 
 func TestInjectCompactionFileContextDetectsChangeBeforeFirstInjection(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "key.go")
 	if err := os.WriteFile(path, []byte("package key\n"), 0o644); err != nil {
@@ -139,6 +142,7 @@ func TestInjectCompactionFileContextDetectsChangeBeforeFirstInjection(t *testing
 }
 
 func TestInjectCompactionFileContextTreatsLegacyCheckpointAsChanged(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectRoot, "key.go"), []byte("package key\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -160,6 +164,7 @@ func TestInjectCompactionFileContextTreatsLegacyCheckpointAsChanged(t *testing.T
 }
 
 func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectRoot, "pkg"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -217,6 +222,7 @@ func TestInjectCompactionFileContextHonorsByteBudgets(t *testing.T) {
 }
 
 func TestInjectCompactionFileContextSkipsWhenRequestBudgetIsExhausted(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectRoot, "pkg"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)

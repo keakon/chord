@@ -10,6 +10,7 @@ import (
 )
 
 func TestParkedSubAgentFocusedStatsAndPoolDoNotFallBackToMain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.modelPoolPolicy = NewRuntimeModelPoolPolicy()
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -57,6 +58,7 @@ func TestParkedSubAgentFocusedStatsAndPoolDoNotFallBackToMain(t *testing.T) {
 // guarantee TestParkedSubAgentFocusedStatsAndPoolDoNotFallBackToMain gives
 // parked tasks.
 func TestSettledTaskFocusedStatsAndPoolDoNotFallBackToMain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.modelPoolPolicy = NewRuntimeModelPoolPolicy()
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -152,6 +154,7 @@ func TestSettledTaskFocusedStatsAndPoolDoNotFallBackToMain(t *testing.T) {
 // on parking without any work happening. Both sides now read the ledger, which
 // accounts per task.
 func TestFocusedTokenUsageCoversEveryAttemptWhileLive(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"worker": {Name: "worker", Mode: config.AgentModeSubAgent, Models: map[string][]string{"default": {"test/worker"}}},

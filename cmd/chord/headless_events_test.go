@@ -108,7 +108,7 @@ func TestHeadlessPendingOutcomePriority(t *testing.T) {
 
 func TestHeadlessPendingOutcomeCancelled(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	// Simulate cancel command
@@ -509,7 +509,7 @@ func TestHeadlessSubscribeFiltersEvents(t *testing.T) {
 		Type:   "subscribe",
 		Events: []string{"idle", "assistant_message"},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 	handleHeadlessCommand(cmd, backend, state, to.writer())
 
@@ -564,7 +564,7 @@ func TestHeadlessSubscribeUnknownOnlyDoesNotFallBackToAll(t *testing.T) {
 		Type:   "subscribe",
 		Events: []string{"nonexistent_event"},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 	handleHeadlessCommand(cmd, backend, state, to.writer())
 
@@ -640,7 +640,7 @@ func TestHeadlessToolResultEventIsNotForwarded(t *testing.T) {
 
 func TestHeadlessDoneToolResultEmitsDoneCompletion(t *testing.T) {
 	state := &headlessState{}
-	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut().writer())
+	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut(t).writer())
 
 	envs := filterHeadlessEvent(agent.ToolResultEvent{
 		CallID:     "call-done",
@@ -674,7 +674,7 @@ func TestHeadlessDoneToolResultEmitsDoneCompletion(t *testing.T) {
 
 func TestHeadlessDoneToolResultWithoutReportDoesNotNotify(t *testing.T) {
 	state := &headlessState{}
-	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut().writer())
+	handleHeadlessCommand(headlessCommand{Type: "subscribe", Events: []string{"done_completion"}}, &mockBackend{}, state, newTestOut(t).writer())
 
 	envs := filterHeadlessEvent(agent.ToolResultEvent{
 		CallID: "call-done",
@@ -695,7 +695,7 @@ func TestHeadlessSubscribeIgnoresUnknownEventTypes(t *testing.T) {
 		Type:   "subscribe",
 		Events: []string{"idle", "nonexistent_event"},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 	handleHeadlessCommand(cmd, backend, state, to.writer())
 

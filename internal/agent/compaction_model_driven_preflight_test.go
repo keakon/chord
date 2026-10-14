@@ -10,6 +10,7 @@ import (
 )
 
 func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -39,6 +40,7 @@ func TestModelDrivenLowGainPreflightRejectsTinyContext(t *testing.T) {
 }
 
 func TestModelDrivenAppliedDraftCarriesPreflightStats(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -154,6 +156,7 @@ func TestModelDrivenIntervalVerdictStaleAnchorCountsAsSatisfied(t *testing.T) {
 }
 
 func TestModelDrivenPreflightReusesLastPreparedSurface(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -183,6 +186,7 @@ func TestModelDrivenPreflightReusesLastPreparedSurface(t *testing.T) {
 }
 
 func TestModelDrivenPreflightFallsBackToScratchWhenHeadChanged(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -248,6 +252,7 @@ func TestModelDrivenCacheRebuildCostAmortizesProjectedPrefix(t *testing.T) {
 }
 
 func TestModelDrivenPreflightRecordsCacheRebuildCostWithoutSubtracting(t *testing.T) {
+	t.Parallel()
 	// The prompt-cache rebuild charge is telemetry: a cacheable session's
 	// preflight records the amortized cost on the stats while the gate keeps
 	// deciding on raw surface savings, so a charge that would have flipped the
@@ -355,6 +360,7 @@ func TestModelDrivenLowGainCheckComparesRawSavings(t *testing.T) {
 }
 
 func TestModelDrivenApplyRecordsLastApplyBatch(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -401,6 +407,7 @@ func TestModelDrivenApplyRecordsLastApplyBatch(t *testing.T) {
 }
 
 func TestUsageDrivenApplyClearsSkipCooldownAndGrace(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -440,6 +447,7 @@ func TestUsageDrivenApplyClearsSkipCooldownAndGrace(t *testing.T) {
 }
 
 func TestModelDrivenSettleRecordsSkipCooldownState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -465,6 +473,7 @@ func TestModelDrivenSkipDraftCarriesVerdict(t *testing.T) {
 }
 
 func TestEstimatePostResetFixedRequestTokensAtLeastCurrentFixed(t *testing.T) {
+	t.Parallel()
 	// P1-2: the projected side of the low-gain gate must account for the
 	// post-reset full-injection tool surface. forceFullMCPToolInjection drops
 	// cache-friendly mounts after apply, so the projected fixed surface can
@@ -486,6 +495,7 @@ func TestEstimatePostResetFixedRequestTokensAtLeastCurrentFixed(t *testing.T) {
 // skip anchor on a cooldown hit would keep current-last pinned at 1 forever and
 // the low-gain preflight would never run again.
 func TestModelDrivenCooldownExpiresDespitePerBatchRetries(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -527,6 +537,7 @@ func TestModelDrivenCooldownExpiresDespitePerBatchRetries(t *testing.T) {
 // the checkpoint fingerprint — so recording it would only overwrite a live
 // low-gain anchor with a reason nothing consults, cutting that window short.
 func TestModelDrivenDuplicateSkipKeepsLowGainCooldownAnchor(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -580,6 +591,7 @@ func TestModelDrivenCheckpointDuplicateUsesArgsAndRuntimeFingerprint(t *testing.
 // fingerprint asserts the verdict in isolation; this one fails if the apply
 // stops recording it or records a different input.
 func TestModelDrivenApplyRecordsFingerprintForDuplicateSkip(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.requestBatches.reserve(a.sessionEpoch, 0)

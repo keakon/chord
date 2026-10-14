@@ -66,6 +66,7 @@ func (p *requestCaptureProvider) requestText(i int) string {
 // continuation note to the next request as a one-shot overlay; the request
 // goroutine must still see the note when it assembles that overlay.
 func TestPendingLoopContinuationReachesNextRequestOnce(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	providerCfg := llm.NewProviderConfig("sample/test-provider", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,

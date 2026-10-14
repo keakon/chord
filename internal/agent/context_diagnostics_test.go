@@ -12,6 +12,7 @@ import (
 )
 
 func TestMainContextDiagnosticsRequestAndHistory(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	cfg := llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions, Models: map[string]config.ModelConfig{"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}}}}, []string{"sample-key"})
 	p := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{Content: "sample", Usage: &message.TokenUsage{InputTokens: 10}}}}}

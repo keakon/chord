@@ -11,6 +11,7 @@ import (
 )
 
 func TestContinueFromContextDoesNotEnableLoopByDefault(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ContinueFromContext()
 	if a.loopState.Enabled {
@@ -19,6 +20,7 @@ func TestContinueFromContextDoesNotEnableLoopByDefault(t *testing.T) {
 }
 
 func TestHandleUserMessageTreatsLoopOffAsBusyControlCommand(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.EnableLoopMode("finish current task")
 	a.pendingLoopContinuation = &LoopContinuationNote{Title: "LOOP CONTINUE", Text: "Call `done` when complete."}
@@ -43,6 +45,7 @@ func TestHandleUserMessageTreatsLoopOffAsBusyControlCommand(t *testing.T) {
 }
 
 func TestHandleUserMessageTreatsLoopOnAsBusyControlCommand(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 
@@ -59,6 +62,7 @@ func TestHandleUserMessageTreatsLoopOnAsBusyControlCommand(t *testing.T) {
 }
 
 func TestHandleUserMessageBusyLoopOnDefersContinuationPromptInjection(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -94,6 +98,7 @@ done: allow
 }
 
 func TestShouldEmitLoopContinuationForAssessmentRespectsDeferredGate(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.DeferContinuationPromptUntilDone = true
@@ -128,6 +133,7 @@ func TestShouldEmitLoopContinuationForAssessmentRespectsDeferredGate(t *testing.
 }
 
 func TestHandleUserMessageRejectsLoopOnWhenDoneIsDenied(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.tools.Register(tools.ReadTool{})
@@ -154,6 +160,7 @@ done: deny
 // has to allow the loop's internal exit tool: entering loop mode is the
 // authorization for done, so a wildcard-only deny does not reach it.
 func TestHandleUserMessageAllowsLoopOnUnderWildcardOnlyDeny(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.tools.Register(tools.ReadTool{})
@@ -171,6 +178,7 @@ read: allow
 }
 
 func TestHandleUserMessageLoopOnAllowedWhenYoloEnabled(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{
@@ -197,6 +205,7 @@ done: allow
 }
 
 func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.sendLoopAnchorFromCommand("finish current task")
 	msgs := a.ctxMgr.Snapshot()
@@ -228,6 +237,7 @@ func TestSendLoopAnchorFromCommandIncludesCompletionContract(t *testing.T) {
 }
 
 func TestSendLoopAnchorFromCommandPersistsLoopNoticeAsUser(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.sendLoopAnchorFromCommand("finish current task")
 	msgs := a.ctxMgr.Snapshot()
@@ -244,6 +254,7 @@ func TestSendLoopAnchorFromCommandPersistsLoopNoticeAsUser(t *testing.T) {
 }
 
 func TestEnableLoopModeSetsExecutingStateWhenPreviouslyUnset(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.State = ""
 	a.EnableLoopMode("finish current task")
@@ -253,6 +264,7 @@ func TestEnableLoopModeSetsExecutingStateWhenPreviouslyUnset(t *testing.T) {
 }
 
 func TestSendLoopAnchorFromCommandEmitsLoopNoticeEvent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.sendLoopAnchorFromCommand("finish current task")
 	var found bool
@@ -273,6 +285,7 @@ func TestSendLoopAnchorFromCommandEmitsLoopNoticeEvent(t *testing.T) {
 }
 
 func TestSendLoopAnchorFromCommandWaitsForOutputSpace(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	for i := 0; i < cap(a.outputCh); i++ {
 		a.outputCh <- StreamTextEvent{Text: "busy"}
@@ -318,6 +331,7 @@ func TestSendLoopAnchorFromCommandWaitsForOutputSpace(t *testing.T) {
 }
 
 func TestHandleUserMessageBusyLoopOnUpdatesTargetAndMaxIterations(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools.Register(tools.NewDoneTool())
 	a.activeConfig = &config.AgentConfig{Permission: parsePermissionNode(t, `
@@ -347,6 +361,7 @@ done: allow
 }
 
 func TestEnableLoopModeEmitsUnlimitedMessageWhenMaxIterationsZero(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.MaxIterations = 0
 	a.loopState.MaxIterationsSet = true

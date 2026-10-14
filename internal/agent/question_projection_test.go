@@ -15,6 +15,7 @@ import (
 )
 
 func TestQuestionRequestProjectionExcludesConsumedHistory(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	for i := range 1000 {
@@ -64,6 +65,7 @@ func BenchmarkQuestionRequestProjection(b *testing.B) {
 // that reasoning replay and Gemini signature placeholders are keyed on. A
 // request-scoped user overlay is the one shape that avoids both.
 func TestQuestionProjectionUsesADeliveredRequestShape(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 
@@ -99,6 +101,7 @@ func TestQuestionProjectionUsesADeliveredRequestShape(t *testing.T) {
 }
 
 func TestQuestionProjectionIncludesStableIDsForDuplicateQuestionsAndRevisions(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	created := createTestQuestions(t, a, questionItems("Repeated question", "Repeated question"), false)
 	ids := created.Result.QuestionIDs
@@ -146,6 +149,7 @@ func TestQuestionProjectionIncludesStableIDsForDuplicateQuestionsAndRevisions(t 
 // just to find out what it asks. The pending row is re-projected on every
 // request, so this is also the guard that nobody starts truncating it silently.
 func TestQuestionProjectionEchoesQuestionAndAnswerWhole(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	// 300 x 24 bytes = 7200 bytes: a long but valid question, near MaxQuestionTextBytes.
 	long := strings.Repeat("详尽的问题正文。", 300)
@@ -216,6 +220,7 @@ func TestQuestionDecisionTextNamesNonUserOutcomes(t *testing.T) {
 }
 
 func TestQuestionSnapshotsCarryLatestRevision(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	answer := runQuestionCommand(t, a, &questionCommand{operation: QuestionOperation{
@@ -251,6 +256,7 @@ func TestQuestionSnapshotsCarryLatestRevision(t *testing.T) {
 }
 
 func TestQuestionStateProjectionsRetainRevision(t *testing.T) {
+	t.Parallel()
 	for _, operation := range []string{QuestionOpWithdraw, QuestionOpReplace} {
 		for _, restored := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/restored_%v", operation, restored), func(t *testing.T) {

@@ -138,6 +138,7 @@ func TestImageBackendConfigurationAndKeySafety(t *testing.T) {
 }
 
 func TestImageResultPublicationFailsClosedOnCanonicalPersistence(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
 	event := ToolResultEvent{CallID: "image-call", Name: tools.NameGenerateImage, Status: message.ToolStatusSuccess, Result: "saved", Payload: "saved"}
@@ -172,6 +173,7 @@ func TestImageRecoveryFailureProjection(t *testing.T) {
 }
 
 func TestGeneratedSubAgentResultPreservesDeliveryPayload(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	rm := recovery.NewRecoveryManager(parent.sessionDir)
 	parent.installRecoveryManager(rm)

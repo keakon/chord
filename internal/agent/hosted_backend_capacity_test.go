@@ -13,6 +13,7 @@ import (
 )
 
 func TestHostedBackendReleasesLLMCapacity(t *testing.T) {
+	t.Parallel()
 	for _, fail := range []bool{false, true} {
 		name := "success"
 		if fail {
@@ -50,6 +51,7 @@ func TestHostedBackendReleasesLLMCapacity(t *testing.T) {
 }
 
 func TestHostedBackendWaitsForLLMCapacity(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		cfg        config.OrchestrationConfig

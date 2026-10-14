@@ -427,6 +427,7 @@ func TestBuildCheckpointRepositoryStateReportsBuildTimeStatus(t *testing.T) {
 }
 
 func TestModelDrivenCheckpointBuilderIncludesMachineSections(t *testing.T) {
+	t.Parallel()
 	if !worktree.GitAvailable() {
 		t.Skip("git not available")
 	}

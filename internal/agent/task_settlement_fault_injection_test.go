@@ -307,6 +307,7 @@ func (m *settlementFaultModel) injectCorruptLine() {
 }
 
 func TestTaskSettlementFaultInjectionModel(t *testing.T) {
+	t.Parallel()
 	for seed := range int64(6) {
 		t.Run(fmt.Sprintf("seed-%d", seed), func(t *testing.T) {
 			model := newSettlementFaultModel(t, seed)

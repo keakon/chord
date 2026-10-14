@@ -13,6 +13,7 @@ import (
 )
 
 func TestLoadRestoredSubAgentStatesCharacterizationMetaMailboxTaskPriority(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "restore-priority")
 	rm := recovery.NewRecoveryManager(sessionDir)

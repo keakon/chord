@@ -16,6 +16,7 @@ import (
 )
 
 func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
+	t.Parallel()
 	provider := &blockingStreamProvider{calls: []scriptedStreamCall{
 		{err: &llm.APIError{StatusCode: 400, Code: "context_length_exceeded", Message: "input is too long"}},
 		{resp: &message.Response{Content: "recovered", StopReason: "stop"}},
@@ -119,6 +120,7 @@ func TestSubAgentContextLengthRecoveryCompressesAndRetriesOnce(t *testing.T) {
 }
 
 func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.taskDesc = "preserve the task contract"
 	sub.ownerAgentID = "main"
@@ -162,6 +164,7 @@ func TestSubAgentProactiveContextCompressionRecordsReductionStats(t *testing.T) 
 }
 
 func TestSubAgentCompactionSeparatesFixedThresholdFromRequestSafety(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		fixedScale int
@@ -198,6 +201,7 @@ func TestSubAgentCompactionSeparatesFixedThresholdFromRequestSafety(t *testing.T
 }
 
 func TestSubAgentContextLengthRecoveryIsBounded(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.ctxMgr.SetTokenBudgets(12000, 10000, 10000, 0)
 	sub.turn.SubAgentContextRecoveryCount = 1
@@ -220,6 +224,7 @@ func TestSubAgentContextLengthRecoveryIsBounded(t *testing.T) {
 }
 
 func TestSubAgentContextLengthRecoveryPreservesToolPairs(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	ctx, cancel := context.WithCancel(sub.parentCtx)
 	defer cancel()
@@ -249,6 +254,7 @@ func TestSubAgentContextLengthRecoveryPreservesToolPairs(t *testing.T) {
 }
 
 func TestSubAgentRejectsExcessiveToolCalls(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	calls := make([]message.ToolCall, maxToolCallsPerResponse+1)
 	for i := range calls {

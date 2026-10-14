@@ -9,15 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/config"
-	"github.com/keakon/chord/internal/ctxmgr"
-	"github.com/keakon/chord/internal/hook"
 	"github.com/keakon/chord/internal/llm"
-	"github.com/keakon/chord/internal/mcp"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/ratelimit"
-	"github.com/keakon/chord/internal/tools"
 )
 
 // stubProviderImpl is a minimal Provider implementation for testing.
@@ -241,7 +236,7 @@ func TestProviderCacheWritersAttachToExistingModelPoolProviders(t *testing.T) {
 func TestBuildMainClientFactoryWithModelPool(t *testing.T) {
 	t.Parallel()
 
-	// Create test config with multiple models in builder agent
+	// Configure multiple models for a caller-supplied pool.
 	cfg := &config.Config{
 		MaxOutputTokens: 4096,
 		Providers: map[string]config.ProviderConfig{
@@ -260,24 +255,12 @@ func TestBuildMainClientFactoryWithModelPool(t *testing.T) {
 		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
-	// Simulate agent configs with multiple models
-	agentConfigs := map[string]*config.AgentConfig{
-		"builder": {
-			Name:    "builder",
-			Variant: "balanced",
-			Models: map[string][]string{
-				"standard": {"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
-			},
-		},
-	}
-
-	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	ac := newTestFactoryAppContext(cfg, auth)
 	factory := buildMainClientFactory(ac, cfg, auth)
 	poolRefs := []string{"sample/model-alpha", "sample/model-beta", "sample/model-gamma"}
 
 	// The caller resolves the pool snapshot for the role the client will run
-	// under; the factory must attach exactly that chain. Here the snapshot is
-	// builder's (the factory no longer reads the agent's current role).
+	// under; the factory must attach exactly that chain without a running agent.
 	client, modelID, ctxLimit, err := factory("sample/model-alpha@balanced", poolRefs, "balanced")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
@@ -330,17 +313,7 @@ func TestBuildMainClientFactorySelectsCorrectPoolEntry(t *testing.T) {
 		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
-	agentConfigs := map[string]*config.AgentConfig{
-		"builder": {
-			Name:    "builder",
-			Variant: "balanced",
-			Models: map[string][]string{
-				"standard": {"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
-			},
-		},
-	}
-
-	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	ac := newTestFactoryAppContext(cfg, auth)
 	factory := buildMainClientFactory(ac, cfg, auth)
 	poolRefs := []string{"sample/model-alpha", "sample/model-beta", "sample/model-gamma"}
 
@@ -736,17 +709,7 @@ func TestBuildMainClientFactorySingleModelPool(t *testing.T) {
 		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
-	agentConfigs := map[string]*config.AgentConfig{
-		"builder": {
-			Name:    "builder",
-			Variant: "balanced",
-			Models: map[string][]string{
-				"standard": {"sample/model-alpha"}, // single model
-			},
-		},
-	}
-
-	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	ac := newTestFactoryAppContext(cfg, auth)
 	factory := buildMainClientFactory(ac, cfg, auth)
 
 	client, _, _, err := factory("sample/model-alpha", []string{"sample/model-alpha"}, "balanced")
@@ -786,17 +749,7 @@ func TestBuildMainClientFactoryWrapAround(t *testing.T) {
 		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
 
-	agentConfigs := map[string]*config.AgentConfig{
-		"builder": {
-			Name:    "builder",
-			Variant: "balanced",
-			Models: map[string][]string{
-				"standard": {"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
-			},
-		},
-	}
-
-	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	ac := newTestFactoryAppContext(cfg, auth)
 	factory := buildMainClientFactory(ac, cfg, auth)
 	poolRefs := []string{"sample/model-alpha", "sample/model-beta", "sample/model-gamma"}
 
@@ -818,12 +771,9 @@ func TestBuildMainClientFactoryWrapAround(t *testing.T) {
 	t.Logf("Pool wrap-around handled correctly: %s", primary)
 }
 
-// TestBuildMainClientFactoryUsesCallerPoolSnapshotNotActiveRole locks the role
-// switch regression at the production factory: the fallback pool must come from
-// the pool snapshot the caller passes for the target role, never from the role
-// that happens to be active on the agent at call time. Here the snapshot is a
-// deliberately different chain than the active builder role's models.
-func TestBuildMainClientFactoryUsesCallerPoolSnapshotNotActiveRole(t *testing.T) {
+// TestBuildMainClientFactoryUsesCallerPoolSnapshot verifies that the factory
+// attaches the supplied pool without consulting a running agent.
+func TestBuildMainClientFactoryUsesCallerPoolSnapshot(t *testing.T) {
 	t.Parallel()
 
 	cfg := &config.Config{
@@ -842,29 +792,16 @@ func TestBuildMainClientFactoryUsesCallerPoolSnapshotNotActiveRole(t *testing.T)
 	auth := config.AuthConfig{
 		"sample": []config.ProviderCredential{{APIKey: "test-key"}},
 	}
-	// The active role's pool is alpha -> beta -> gamma.
-	agentConfigs := map[string]*config.AgentConfig{
-		"builder": {
-			Name:    "builder",
-			Variant: "balanced",
-			Models: map[string][]string{
-				"standard": {"sample/model-alpha", "sample/model-beta", "sample/model-gamma"},
-			},
-		},
-	}
-
-	ac := newTestAppContextWithBuilder(t, cfg, auth, agentConfigs)
+	ac := newTestFactoryAppContext(cfg, auth)
 	factory := buildMainClientFactory(ac, cfg, auth)
 
-	// The caller (a role switch) hands over the target role's snapshot, which is
-	// not the active role's chain and selects a non-head entry.
+	// The caller supplies a subset of configured models and selects a non-head entry.
 	client, _, _, err := factory("sample/model-beta", []string{"sample/model-gamma", "sample/model-beta"}, "")
 	if err != nil {
 		t.Fatalf("factory failed: %v", err)
 	}
 	// The client keeps its pool cursor-head-first: beta (the selected entry)
-	// leads, followed by the supplied gamma. Reading the active role's chain
-	// instead would have produced alpha -> beta -> gamma.
+	// leads, followed by the supplied gamma. The unrequested alpha stays excluded.
 	pool, selectedIdx := client.ModelPoolSnapshot()
 	if len(pool) != 2 || pool[0].ModelID != "model-beta" || pool[1].ModelID != "model-gamma" {
 		t.Fatalf("pool = %#v, want the caller-supplied beta -> gamma chain (2 entries, no alpha)", pool)
@@ -957,58 +894,11 @@ func TestInitialClientUsesBuilderModelPoolForFirstRequest(t *testing.T) {
 	}
 }
 
-// newTestAppContextWithBuilder creates an AppContext with a MainAgent configured
-// with builder agent configs for testing model pool factory.
-func newTestAppContextWithBuilder(
-	t *testing.T,
-	cfg *config.Config,
-	auth config.AuthConfig,
-	agentConfigs map[string]*config.AgentConfig,
-) *AppContext {
-	t.Helper()
-
-	projectRoot := t.TempDir()
-	sessionDir := projectRoot + "/.chord/sessions/test"
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", sessionDir, err)
-	}
-
+// newTestFactoryAppContext supplies provider resolution without starting an agent.
+func newTestFactoryAppContext(cfg *config.Config, auth config.AuthConfig) *AppContext {
 	providerCfg := llm.NewProviderConfig("sample", cfg.Providers["sample"], []string{"test-key"})
-	llmClient := llm.NewClient(providerCfg, &stubProviderImpl{}, "model-alpha", 4096, "")
-	ctxMgr := ctxmgr.NewManager(128000, 0)
-
-	// Create pool policy
-	poolPolicy := agent.NewRuntimeModelPoolPolicy()
-
-	// Create MainAgent with pool policy
-	mainAgent := agent.NewMainAgent(
-		context.Background(),
-		llmClient,
-		ctxMgr,
-		tools.NewRegistry(),
-		&hook.NoopEngine{},
-		sessionDir,
-		"model-alpha",
-		projectRoot,
-		projectRoot,
-		cfg,
-		nil,
-		mcp.ClientInfo{Name: "chord-test", Version: "test"},
-	)
-	mainAgent.SetModelPoolPolicy(poolPolicy, "")
-
-	// Configure builder agent with its model pool
-	if builderCfg, ok := agentConfigs["builder"]; ok {
-		mainAgent.SetAgentConfigs(map[string]*config.AgentConfig{"builder": builderCfg})
-	}
-
-	ac := &AppContext{
-		Ctx:         context.Background(),
-		ContentRoot: projectRoot,
-		WorkDir:     projectRoot,
-		SessionDir:  sessionDir,
-		CtxMgr:      ctxMgr,
-		MainAgent:   mainAgent,
+	return &AppContext{
+		Ctx: context.Background(),
 		ProviderCache: &providerCache{
 			m:     map[string]*llm.ProviderConfig{"sample": providerCfg},
 			impls: map[string]llm.Provider{"sample": &stubProviderImpl{}},
@@ -1016,18 +906,6 @@ func newTestAppContextWithBuilder(
 			cfg:   cfg,
 		},
 	}
-
-	// Wire up pool policy with agent configs for test
-	for name, agentCfg := range agentConfigs {
-		if len(agentCfg.Models) > 0 {
-			for poolName := range agentCfg.Models {
-				poolPolicy.SetAgentOverride(name, poolName)
-				break // use first pool
-			}
-		}
-	}
-
-	return ac
 }
 
 func TestMainFactoryRejectsInvalidPoolBeforeProviderCreation(t *testing.T) {

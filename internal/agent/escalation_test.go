@@ -43,6 +43,7 @@ func escalateToolCall(t *testing.T, id string, args map[string]any) messageToolC
 }
 
 func TestSubAgentRejectsInvalidEscalateArguments(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		args map[string]any
@@ -78,6 +79,7 @@ func TestSubAgentRejectsInvalidEscalateArguments(t *testing.T) {
 }
 
 func TestSubAgentNeedsRepairEscalateWaitsForOwner(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
@@ -103,6 +105,7 @@ func TestSubAgentNeedsRepairEscalateWaitsForOwner(t *testing.T) {
 }
 
 func TestSubAgentBlockedEscalateClosesAsBlocked(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
@@ -135,6 +138,7 @@ func TestSubAgentBlockedEscalateClosesAsBlocked(t *testing.T) {
 }
 
 func TestSubAgentRefusesEscalateAfterUnansweredBudget(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.subs.mu.Lock()
 	parent.subs.taskRecords[sub.taskID] = &DurableTaskRecord{
@@ -176,6 +180,7 @@ func TestSubAgentRefusesEscalateAfterUnansweredBudget(t *testing.T) {
 }
 
 func TestSubAgentEscalateAllowedBelowBudget(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.subs.mu.Lock()
 	parent.subs.taskRecords[sub.taskID] = &DurableTaskRecord{
@@ -198,6 +203,7 @@ func TestSubAgentEscalateAllowedBelowBudget(t *testing.T) {
 }
 
 func TestRecordSubAgentEscalationPersistsBudget(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-escalation-budget")
 
@@ -225,6 +231,7 @@ func TestRecordSubAgentEscalationPersistsBudget(t *testing.T) {
 }
 
 func TestBuildTaskRecordFromSubResetsEscalationBudgetOnAnsweredEscalation(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name           string
 		replyToMailbox string
@@ -254,6 +261,7 @@ func TestBuildTaskRecordFromSubResetsEscalationBudgetOnAnsweredEscalation(t *tes
 }
 
 func TestHandleEscalateRecordsUnansweredEscalation(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-escalate-record")
 
@@ -277,6 +285,7 @@ func TestHandleEscalateRecordsUnansweredEscalation(t *testing.T) {
 }
 
 func TestSubAgentDefersEscalateRefusalUntilRegularToolsComplete(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.subs.mu.Lock()
 	parent.subs.taskRecords[sub.taskID] = &DurableTaskRecord{TaskID: sub.taskID, EscalationCount: maxUnansweredSubAgentEscalations}
@@ -327,6 +336,7 @@ func TestSubAgentDefersEscalateRefusalUntilRegularToolsComplete(t *testing.T) {
 }
 
 func TestBlockedEscalationClosesTaskThroughFailurePath(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-blocked-escalation")
 

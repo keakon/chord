@@ -20,6 +20,7 @@ func writePathArgs(t *testing.T, path string) json.RawMessage {
 // against, so a targeted relative deny catches the same repository file even
 // when it lives in another checkout.
 func TestEffectivePathScopeUsesResolverRoots(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	a := newTestMainAgent(t, root)
 
@@ -54,6 +55,7 @@ func TestEffectivePathScopeUsesResolverRoots(t *testing.T) {
 // its own root because the container rule derives it from the configured
 // worktree root.
 func TestEffectivePathScopeContainerCoversNewCheckout(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	a := newTestMainAgent(t, root)
 
@@ -81,6 +83,7 @@ func TestEffectivePathScopeContainerCoversNewCheckout(t *testing.T) {
 // merged policy roots make per-checkout limits inexpressible, so a
 // broad allow reaches every checkout of the repository.
 func TestPathScopeAllowsAnotherCheckoutWhenRulesAllow(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	a := newTestMainAgent(t, root)
 

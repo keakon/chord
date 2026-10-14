@@ -13,6 +13,7 @@ import (
 )
 
 func TestParkedSkillStatePreservesDiscoveryAcrossRestore(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.llmFactory = func(string, []string, string) *llm.Client { return newTestLLMClient() }
 	a.SetAgentConfigs(map[string]*config.AgentConfig{"worker": {Name: "worker", Mode: config.AgentModeSubAgent, Permission: parsePermissionNode(t, "skill:\n  '*': allow\n")}})

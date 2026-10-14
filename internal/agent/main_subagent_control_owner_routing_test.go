@@ -12,6 +12,7 @@ import (
 )
 
 func TestSendMessageToWaitingMainWorkerResumesExecution(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-1")
 	sub.setState(SubAgentStateWaitingMain, "need approval")
@@ -81,6 +82,7 @@ func TestSendMessageToWaitingMainWorkerResumesExecution(t *testing.T) {
 }
 
 func TestNotifySubAgentConsumedMessageCarriesMailboxMetadata(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-notify")
 	sub.setState(SubAgentStateWaitingMain, "need approval")
@@ -125,6 +127,7 @@ func TestNotifySubAgentConsumedMessageCarriesMailboxMetadata(t *testing.T) {
 }
 
 func TestNotifySubAgentDoesNotAckMailboxWhenSlotUnavailable(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-slot")
 	sub.setState(SubAgentStateWaitingMain, "need approval")
@@ -157,6 +160,7 @@ func TestNotifySubAgentDoesNotAckMailboxWhenSlotUnavailable(t *testing.T) {
 }
 
 func TestNotifySubAgentQueueRejectionLeavesWaitingWorkerAndMailboxUnchanged(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-queue-reject")
 	sub.setState(SubAgentStateWaitingMain, "need approval")
@@ -196,6 +200,7 @@ func TestNotifySubAgentQueueRejectionLeavesWaitingWorkerAndMailboxUnchanged(t *t
 }
 
 func TestOwnedMailboxQueueRejectionRollsBackReactivation(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	owner := newControllableTestSubAgent(t, a, "adhoc-owner-queue-reject")
 	owner.setState(SubAgentStateWaitingMain, "waiting")
@@ -224,6 +229,7 @@ func TestOwnedMailboxQueueRejectionRollsBackReactivation(t *testing.T) {
 }
 
 func TestManualDeliveryRoutesOwnedMailboxesBeforeManualMessage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-drain-order")
 	a.ownedSubAgentMailboxes = map[string][]SubAgentMailboxMessage{
@@ -280,6 +286,7 @@ func TestManualDeliveryRoutesOwnedMailboxesBeforeManualMessage(t *testing.T) {
 }
 
 func TestRestoreMessagesRebuildsResponseMailboxIdempotency(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-response-restore")
 	sub.RestoreMessages([]message.Message{{Role: "user", Content: "decision", Mailbox: &message.MailboxMetadata{
@@ -294,6 +301,7 @@ func TestRestoreMessagesRebuildsResponseMailboxIdempotency(t *testing.T) {
 }
 
 func TestOwnedCompletedMailboxReactivatesWaitingDescendantParent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
@@ -357,6 +365,7 @@ func TestOwnedCompletedMailboxReactivatesWaitingDescendantParent(t *testing.T) {
 }
 
 func TestOwnedCompletedMailboxQueueRejectionReturnsTransferredSlot(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent-transfer-reject")
 	parent.instanceID = "worker-parent-transfer-reject"
@@ -398,6 +407,7 @@ func TestOwnedCompletedMailboxQueueRejectionReturnsTransferredSlot(t *testing.T)
 }
 
 func TestWaitingDescendantDirectOwnerResumeReacquiresSemaphore(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
@@ -419,6 +429,7 @@ func TestWaitingDescendantDirectOwnerResumeReacquiresSemaphore(t *testing.T) {
 }
 
 func TestOwnerRoutedMailboxIsAckedConsumed(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
@@ -478,6 +489,7 @@ func TestOwnerRoutedMailboxIsAckedConsumed(t *testing.T) {
 // ack only retires the durable row. The event must carry the transcript index
 // the row landed on, taken before the append.
 func TestOwnerRoutedMailboxEmitsTranscriptAppendedEvent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent-event")
 	parent.instanceID = "worker-parent-event"
@@ -533,6 +545,7 @@ func TestOwnerRoutedMailboxEmitsTranscriptAppendedEvent(t *testing.T) {
 }
 
 func TestBusyOwnerMailboxQueuesForNextRequest(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	owner := newControllableTestSubAgent(t, a, "adhoc-parent-busy")
 	owner.instanceID = "worker-parent-busy"
@@ -571,6 +584,7 @@ func TestBusyOwnerMailboxQueuesForNextRequest(t *testing.T) {
 }
 
 func TestOwnerRoutedWakeBypassesSemaphoreWhenOwnerMustResume(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
@@ -619,6 +633,7 @@ func TestOwnerRoutedWakeBypassesSemaphoreWhenOwnerMustResume(t *testing.T) {
 }
 
 func TestCloseSubAgentReleasesWakeBypassWithoutDrainingSemaphore(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.semHeld = true
@@ -640,6 +655,7 @@ func TestCloseSubAgentReleasesWakeBypassWithoutDrainingSemaphore(t *testing.T) {
 }
 
 func TestCloseSubAgentRemovesOwnedPendingMailboxState(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
@@ -671,6 +687,7 @@ func TestCloseSubAgentRemovesOwnedPendingMailboxState(t *testing.T) {
 }
 
 func TestOwnedMailboxNotifyDoesNotInflateUrgentCount(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
@@ -697,6 +714,7 @@ func TestOwnedMailboxNotifyDoesNotInflateUrgentCount(t *testing.T) {
 }
 
 func TestOwnerReactivationSavesFreshSnapshot(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	parent := newControllableTestSubAgent(t, a, "adhoc-parent")
 	parent.instanceID = "worker-parent"
@@ -761,6 +779,7 @@ func TestOwnerReactivationSavesFreshSnapshot(t *testing.T) {
 }
 
 func TestNotifySubAgentUsesEventLoopWhenStarted(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	startMainAgentLoopForTest(t, a)
 	sub := newControllableTestSubAgent(t, a, "adhoc-loop")
@@ -792,6 +811,7 @@ func TestNotifySubAgentUsesEventLoopWhenStarted(t *testing.T) {
 }
 
 func TestSubAgentTerminalErrorQueuesRiskAlertAndWakesMain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-terminal-error")
 
@@ -838,6 +858,7 @@ func TestSubAgentTerminalErrorQueuesRiskAlertAndWakesMain(t *testing.T) {
 }
 
 func TestOwnedProgressMailboxPersistsDurableMetadata(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	owner := newControllableTestSubAgent(t, a, "adhoc-owner")
@@ -876,6 +897,7 @@ func TestOwnedProgressMailboxPersistsDurableMetadata(t *testing.T) {
 // the new "expired" ledger write: a reply to an expired request is refused with
 // an explicit state instead of being treated as pending.
 func TestExpiredAgentRequestRejectsLateNotify(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-expired-notify")
 	request, err := a.createAgentRequest(sub, tools.AgentRequestPayload{Reason: "need a decision"})
@@ -912,6 +934,7 @@ func TestExpiredAgentRequestRejectsLateNotify(t *testing.T) {
 // attempt through resetForAttempt/rehydration instead of a plain Running
 // transition, so dropping here cannot block legitimate follow-up work.
 func TestHandleAgentNotifyIgnoresLateNotifyForTerminalRuntime(t *testing.T) {
+	t.Parallel()
 	for _, terminal := range []SubAgentState{SubAgentStateCancelled, SubAgentStateCompleted, SubAgentStateFailed} {
 		t.Run(string(terminal), func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
@@ -944,6 +967,7 @@ func TestHandleAgentNotifyIgnoresLateNotifyForTerminalRuntime(t *testing.T) {
 // that reports continued progress must still resume to Running and queue its
 // progress mailbox for the main inbox.
 func TestHandleAgentNotifyResumesWaitingForMainRuntime(t *testing.T) {
+	t.Parallel()
 	for _, resumed := range []SubAgentState{SubAgentStateWaitingMain, SubAgentStateIdle} {
 		t.Run(string(resumed), func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())

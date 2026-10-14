@@ -12,6 +12,7 @@ func TestLateStreamTailAfterIdleMergesIntoSettledCard(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 	assistantCards := func() []*Block {
 		var out []*Block
 		for _, b := range m.viewport.visibleBlocks() {
@@ -109,6 +110,7 @@ func TestStreamContinueRecordsSettledSegmentForLateTail(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 3, RequestSeq: 1, Text: "partial reply"}})
 	applyTestCmd(t, &m, cmd)
@@ -143,6 +145,7 @@ func TestLateThinkingPayloadAfterSettleKeepsOneCard(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{TurnID: 9, RequestSeq: 1, Text: "weighing options"}})
 	applyTestCmd(t, &m, cmd)
@@ -177,6 +180,7 @@ func TestLateThinkingPayloadAfterSettleKeepsOneCardWhenSpilled(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{TurnID: 9, RequestSeq: 1, Text: "weighing options"}})
 	applyTestCmd(t, &m, cmd)
@@ -221,6 +225,7 @@ func TestLateThinkingPayloadGuardKeepsSecondThinkingBlock(t *testing.T) {
 	const agentID = "agent-1"
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 	m.focusedAgentID = agentID
 
 	thinkingBlocks := func() []*Block {
@@ -282,6 +287,7 @@ func TestLateThinkingEndDoesNotSettleNewerLiveCard(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{TurnID: 2, RequestSeq: 1}})
 	applyTestCmd(t, &m, cmd)
@@ -315,6 +321,7 @@ func TestPostRebuildDeltaOpensItsOwnCard(t *testing.T) {
 		{Role: message.RoleAssistant, Content: "hello world"},
 	}}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 5, RequestSeq: 1, Text: "hello world"}})
 	applyTestCmd(t, &m, cmd)
@@ -351,6 +358,7 @@ func TestStreamSegmentEndSeparatesRequestsOfOneTurn(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 5, RequestSeq: 1, Text: "first answer"}})
 	applyTestCmd(t, &m, cmd)
@@ -400,6 +408,7 @@ func TestPendingDraftCommitKeepsUnendedStreamStreaming(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 4, RequestSeq: 2, Text: "partial reply"}})
 	applyTestCmd(t, &m, cmd)
@@ -427,6 +436,7 @@ func TestSubAgentActivityIdleKeepsUnendedStreamStreaming(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{AgentID: "agent-1", TurnID: 2, RequestSeq: 1, Text: "worker reply"}})
 	applyTestCmd(t, &m, cmd)
@@ -457,6 +467,7 @@ func TestStreamingReplySplitMidFenceStaysInOneCard(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 	assistantCards := func() []*Block {
 		var out []*Block
 		for _, b := range m.viewport.visibleBlocks() {
@@ -512,6 +523,7 @@ func TestSegmentEndSettlesThinkingCardWithoutAssistant(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamThinkingDeltaEvent{TurnID: 9, RequestSeq: 1, Text: "weighing the options"}})
 	applyTestCmd(t, &m, cmd)
@@ -539,6 +551,7 @@ func TestLateSegmentEndDoesNotSettleNewerThinkingPlaceholder(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ThinkingStartedEvent{TurnID: 2, RequestSeq: 1}})
 	applyTestCmd(t, &m, cmd)
@@ -582,6 +595,7 @@ func TestLateThinkingTailMergesIntoSettledThinkingCard(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 	thinkingCards := func() []*Block {
 		var out []*Block
 		for _, b := range m.viewport.visibleBlocks() {
@@ -619,6 +633,7 @@ func TestSameTurnNextRequestOpensNewCard(t *testing.T) {
 	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
 
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 7, RequestSeq: 1, Text: "first request"}})
 	applyTestCmd(t, &m, cmd)

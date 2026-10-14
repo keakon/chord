@@ -12,6 +12,7 @@ import (
 )
 
 func TestMaybeStartModelDrivenBarrierSkipsWithoutPending(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -21,6 +22,7 @@ func TestMaybeStartModelDrivenBarrierSkipsWithoutPending(t *testing.T) {
 }
 
 func TestMaybeStartModelDrivenBarrierStartsWorker(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -57,6 +59,7 @@ func TestMaybeStartModelDrivenBarrierStartsWorker(t *testing.T) {
 }
 
 func TestMaybeStartModelDrivenBarrierOverridesRunningUsageCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -95,6 +98,7 @@ func TestMaybeStartModelDrivenBarrierOverridesRunningUsageCompaction(t *testing.
 }
 
 func TestMaybeStartModelDrivenBarrierDiscardsReadyUsageDraft(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -133,6 +137,7 @@ func TestMaybeStartModelDrivenBarrierDiscardsReadyUsageDraft(t *testing.T) {
 }
 
 func TestMaybeStartModelDrivenBarrierIntervalSkipKeepsRunningUsageCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -206,6 +211,7 @@ func TestMaybeStartModelDrivenBarrierIntervalSkipKeepsRunningUsageCompaction(t *
 }
 
 func TestMaybeStartModelDrivenBarrierCooldownSkipIsSynchronous(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -273,6 +279,7 @@ func TestMaybeStartModelDrivenBarrierCooldownSkipIsSynchronous(t *testing.T) {
 // behind the checkpoint worker. The slot must be handed over, or the status bar
 // keeps showing the stale executing state for the whole worker run.
 func TestMaybeStartModelDrivenBarrierReleasesStaleForegroundActivity(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -356,6 +363,7 @@ func TestModelDrivenRuntimeStateFingerprintIgnoresSubAgentOrder(t *testing.T) {
 // persisted record and a later restore never report intent that can no longer
 // be applied.
 func TestMaybeStartModelDrivenBarrierTurnNilSettlesProposal(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.modelDrivenProposal = modelDrivenProposalState{

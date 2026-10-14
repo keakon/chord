@@ -167,6 +167,7 @@ func decodeHostedJSON(t *testing.T, name string, raw json.RawMessage) map[string
 }
 
 func TestHostedBackendCapabilityGate(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	backend := newTestHostedBackend(t, a, tools.ResolveHostedToolCatalog(nil))
 	ctx := context.Background()
@@ -216,6 +217,7 @@ func TestHostedBackendCapabilityGate(t *testing.T) {
 }
 
 func TestHostedBackendFallsThroughAndLowersHostedRequest(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	// Transport success without any hosted block: the endpoint ignored the
 	// declaration, so the backend must move on to the next target.
@@ -320,6 +322,7 @@ func TestHostedBackendFallsThroughAndLowersHostedRequest(t *testing.T) {
 }
 
 func TestHostedBackendConfigOnlyCatalogEntry(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	catalog := sampleHostedCatalog()
 	backend := newTestHostedBackend(t, a, catalog)
@@ -376,6 +379,7 @@ func TestHostedBackendConfigOnlyCatalogEntry(t *testing.T) {
 }
 
 func TestHostedBackendInputLevelErrorStopsWalk(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	first := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) {
 		return nil, &llm.APIError{StatusCode: 400, Code: "query_too_long", Message: "query too long"}
@@ -410,6 +414,7 @@ func TestHostedBackendInputLevelErrorStopsWalk(t *testing.T) {
 }
 
 func TestHostedBackendDegradesToHintOnlyAfterRejection(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.governor = newResourceGovernor(config.OrchestrationConfig{MaxActiveLLMRequests: 1})
 	impl := &hostedScriptProvider{respond: func(index int, _ context.Context) (*message.Response, error) {
@@ -458,6 +463,7 @@ func TestHostedBackendDegradesToHintOnlyAfterRejection(t *testing.T) {
 }
 
 func TestHostedBackendUnrelatedRejectionMovesToNextTarget(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	first := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) {
 		return nil, &llm.APIError{StatusCode: 400, Code: "invalid_request_error", Message: "web search is not enabled"}
@@ -495,6 +501,7 @@ func TestHostedBackendUnrelatedRejectionMovesToNextTarget(t *testing.T) {
 }
 
 func TestHostedBackendCancellationPropagates(t *testing.T) {
+	t.Parallel()
 	t.Run("before first target", func(t *testing.T) {
 		a := newTestMainAgent(t, t.TempDir())
 		impl := &hostedScriptProvider{}

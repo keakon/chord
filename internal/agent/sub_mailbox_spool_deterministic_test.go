@@ -87,6 +87,7 @@ func decodeSingleRecord(t *testing.T, label string, raw []byte) SubAgentMailboxM
 // loadSpooledMailbox runs after that refresh, so exercising it against the
 // poisoned index tests the real guard without the races.
 func TestSpooledMailboxStaleIndexRejectsMisalignedEntry(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
 	target := SubAgentMailboxMessage{MessageID: "queued-1", AgentID: "worker-1", TaskID: "task-1", Kind: SubAgentMailboxKindCompleted, Summary: "target payload"}
@@ -170,6 +171,7 @@ func TestSpooledMailboxStaleIndexRejectsMisalignedEntry(t *testing.T) {
 // TestSpooledMailboxReadFailureRetainsQueueForRetry covers requeue-on-error
 // with a plain read failure.
 func TestSpooledMailboxStaleReloadRefusedThenDequeueDeliversOnce(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
 	target := SubAgentMailboxMessage{MessageID: "queued-1", AgentID: "worker-1", TaskID: "task-1", Kind: SubAgentMailboxKindCompleted, Summary: "target payload"}
@@ -230,6 +232,7 @@ func TestSpooledMailboxStaleReloadRefusedThenDequeueDeliversOnce(t *testing.T) {
 // or overlap. A reload returns whatever its span decodes, so this is the
 // property that keeps a reload from returning another message.
 func TestSpooledMailboxIndexSpansDecodeEachRecordExactly(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
 	messages := []SubAgentMailboxMessage{
@@ -315,6 +318,7 @@ func TestSpooledMailboxIndexSpansDecodeEachRecordExactly(t *testing.T) {
 // also runs clean under -race, and the single-record tiling is what a dropped
 // mutex breaks.
 func TestConcurrentSpoolAppendsRecordExactSpans(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	path := filepath.Join(a.sessionDir, "subagents", "mailbox.jsonl")
 	// Create the log up front so every concurrent append opens an existing

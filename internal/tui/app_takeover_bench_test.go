@@ -50,8 +50,11 @@ func BenchmarkTakeoverStreamingLongTranscript(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				b.StopTimer()
-				m := benchmarkModelForView()
-				m.viewport = benchmarkLargeViewport(5000)
+				m := benchmarkModelForView(b)
+				if err := m.viewport.Close(); err != nil {
+					b.Fatal(err)
+				}
+				m.viewport = benchmarkLargeViewport(b, 5000)
 				m.viewport.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 				if state == "draining" {
 					m.takeover.status = recovery.SessionPauseStatus{State: recovery.SessionPauseDraining}
@@ -68,6 +71,11 @@ func BenchmarkTakeoverStreamingLongTranscript(b *testing.B) {
 					}
 					_ = m.View()
 				}
+				b.StopTimer()
+				if err := m.Close(); err != nil {
+					b.Fatal(err)
+				}
+				b.StartTimer()
 			}
 		})
 	}

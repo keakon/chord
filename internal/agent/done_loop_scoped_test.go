@@ -112,6 +112,7 @@ done: `+tc.rule)
 // is mounted right now — done only joins the surface once the loop starts, so
 // asking about present visibility would make loop mode unreachable.
 func TestDoneToolPermittedIsIndependentOfCurrentVisibility(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if !a.doneToolPermitted() {
 		t.Fatal("a registered, unrestricted done must be permitted outside a loop")

@@ -169,6 +169,7 @@ func TestProjectMessagesForCompactionSummaryIsIdempotent(t *testing.T) {
 }
 
 func TestCompactionSummaryReasoningDoesNotConsumeTranscriptBudget(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	rich := []message.Message{{Role: message.RoleUser, Content: "Keep the visible requirement."}, summaryProjectionFixture(), {Role: message.RoleTool, ToolCallID: "call-1", Content: "visible execution result"}}
 	rich[1].NativeTools = nil // Native history has its own authoritative cost surface.
@@ -225,6 +226,7 @@ func TestCompactionSummaryReasoningDoesNotConsumeTranscriptBudget(t *testing.T) 
 }
 
 func TestCompactionSummaryFitUsesProjectedMessages(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	head := []message.Message{{Role: message.RoleUser, Parts: []message.ContentPart{{Type: message.ContentPartText, Text: "Inspect the attachment."}, {Type: message.ContentPartImage, Data: []byte{1, 2, 3}}}}, summaryProjectionFixture(), {Role: message.RoleTool, ToolCallID: "call-1", ToolStatus: message.ToolStatusCancelled, ToolRecoveryState: message.ToolRecoveryStateOutcomeUnknown, Content: "visible outcome unknown"}}
 	snapshots := make([]message.Message, len(head))
@@ -289,6 +291,7 @@ func summaryProjectionClient(t *testing.T, a *MainAgent) *summaryProjectionCaptu
 	return provider
 }
 func TestCompactionSummaryRequestContainsNoIndependentReasoning(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	provider := summaryProjectionClient(t, a)
 	head := []message.Message{{Role: message.RoleUser, Content: "Continue the visible task."}, summaryProjectionFixture(), {Role: message.RoleTool, ToolCallID: "call-1", Content: "visible execution result"}}
@@ -310,6 +313,7 @@ func TestCompactionSummaryRequestContainsNoIndependentReasoning(t *testing.T) {
 }
 
 func TestCompactionSummaryKeepsRawTailAndArchive(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	head := []message.Message{{Role: message.RoleUser, Content: "Continue."}, summaryProjectionFixture()}
 	tail := []message.Message{summaryProjectionFixture()}
@@ -342,6 +346,7 @@ func TestCompactionSummaryKeepsRawTailAndArchive(t *testing.T) {
 }
 
 func TestCompactionSummaryProjectionFailurePreservesHistory(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		msg  message.Message
@@ -415,6 +420,7 @@ func TestCompactionSummaryProjectionFailurePreservesHistory(t *testing.T) {
 }
 
 func TestCompactionSummaryPromptPreservesAuthority(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	prior := checkpointMessageForCarryTest("## Key Decisions\n- Earlier decision with <think>literal prior rationale</think>", nil)
 	head := []message.Message{

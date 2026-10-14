@@ -42,6 +42,7 @@ func TestCheckpointProgressRetirementAcrossGenerations(t *testing.T) {
 }
 
 func TestModelDrivenDerivedEvidenceStillValidatesAtBarrier(t *testing.T) {
+	t.Parallel()
 	for _, valid := range []bool{true, false} {
 		t.Run(fmt.Sprint(valid), func(t *testing.T) {
 			agent := newTestMainAgent(t, t.TempDir())
@@ -99,6 +100,7 @@ func TestCheckpointCompletedCarryIsBounded(t *testing.T) {
 }
 
 func TestCheckpointProgressSurvivesRepeatedDurableApplies(t *testing.T) {
+	t.Parallel()
 	agent := newTestMainAgent(t, t.TempDir())
 	agent.newTurn("")
 	agent.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement and verify the parser"})

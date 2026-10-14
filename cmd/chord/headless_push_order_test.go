@@ -19,7 +19,7 @@ func TestHeadlessStampedPushesReachWireInSeqOrderAcrossPaths(t *testing.T) {
 		role:          "builder",
 		subscriptions: map[string]bool{"role_change": true, "activity": true},
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	writer := to.writer()
 
 	const roleSwitches = 40
@@ -75,7 +75,7 @@ func TestHeadlessStampedPushesReachWireInSeqOrderAcrossPaths(t *testing.T) {
 func TestHeadlessOrderedSectionsExcludeConcurrentStamps(t *testing.T) {
 	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
 	state := &headlessState{role: "builder", subscriptions: map[string]bool{"role_change": true}}
-	to := newTestOut()
+	to := newTestOut(t)
 	writer := to.writer()
 
 	entered := make(chan struct{})

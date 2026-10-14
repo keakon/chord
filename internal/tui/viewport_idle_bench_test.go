@@ -16,6 +16,7 @@ import (
 func BenchmarkViewportDropOffScreenCachesLargeTranscript(b *testing.B) {
 	const blockCount = 400
 	v := NewViewport(120, 40)
+	b.Cleanup(func() { _ = v.Close() })
 	for i := range blockCount {
 		v.AppendBlock(&Block{ID: i, Type: BlockAssistant, Content: strings.Repeat("body line with some text\n", 6)})
 	}

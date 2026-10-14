@@ -20,6 +20,7 @@ import (
 // starts a compaction until fresh usage on the new window crosses its own line;
 // only a hard context-length rejection suspends a round.
 func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
@@ -67,6 +68,7 @@ func TestModelSwitchOntoCrossedLineRunsRequestInParallelWithCompaction(t *testin
 // the same request: the injection ladder stages one pressure notice per
 // request, and the upper level's text subsumes the reminder's action contract.
 func TestPendingUpperThresholdNoticeSuppressesReminder(t *testing.T) {
+	t.Parallel()
 	newAgent := func(t *testing.T) *MainAgent {
 		a := newTestMainAgent(t, t.TempDir())
 		a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
@@ -111,6 +113,7 @@ func TestPendingUpperThresholdNoticeSuppressesReminder(t *testing.T) {
 // A model switch can estimate notices from the previous usage without arming
 // automatic compaction from that retired observation.
 func TestModelSwitchEstimatesPressureNoticesFromPreviousUsage(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)
@@ -184,6 +187,7 @@ func waitForFailedRoundSettled(t *testing.T, a *MainAgent) {
 // the gauge must stay on the reading the switch retired (marked stale) instead
 // of blanking to 0 until the new window reports usage of its own.
 func TestModelSwitchFailedRoundKeepsRetiredGaugeReading(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(100000, 100000, 100000, 0, 0.8)

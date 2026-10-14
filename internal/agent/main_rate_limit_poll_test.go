@@ -11,6 +11,7 @@ import (
 )
 
 func TestCurrentRateLimitSnapshotPrefersPolledSnapshotAfterInlineClear(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.globalConfig = &config.Config{Providers: map[string]config.ProviderConfig{
@@ -68,6 +69,7 @@ func TestCurrentRateLimitSnapshotPrefersPolledSnapshotAfterInlineClear(t *testin
 }
 
 func TestCurrentRateLimitSnapshotPrefersPolledWhenInlineStale(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.globalConfig = &config.Config{Providers: map[string]config.ProviderConfig{
@@ -123,6 +125,7 @@ func TestCurrentRateLimitSnapshotPrefersPolledWhenInlineStale(t *testing.T) {
 }
 
 func TestPolledRateLimitUpdateEmitsEventViaCallback(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.globalConfig = &config.Config{Providers: map[string]config.ProviderConfig{

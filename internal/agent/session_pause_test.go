@@ -70,6 +70,7 @@ func TestSessionPauseAPIsRejectStoppedAgent(t *testing.T) {
 }
 
 func TestSessionPauseNaturalToolCompletionAndOrdinaryResume(t *testing.T) {
+	t.Parallel()
 	a, provider := scenarioAgent(t, scriptedStreamCall{resp: &message.Response{ToolCalls: []message.ToolCall{{ID: "call-1", Name: "sample_tool", Args: json.RawMessage(`{}`)}}, StopReason: "tool_use"}})
 	tool := &pauseBarrierTool{name: "sample_tool", entered: make(chan struct{}), release: make(chan struct{})}
 	a.tools.Register(tool)

@@ -6,8 +6,9 @@ import (
 	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
-func benchmarkModelForHandoffDialog() Model {
-	m := benchmarkModelForView()
+func benchmarkModelForHandoffDialog(tb testing.TB) Model {
+	tb.Helper()
+	m := benchmarkModelForView(tb)
 	m.mode = ModeHandoffSelect
 	options := []handoffOption{
 		{Name: "builder", IsDefault: true},
@@ -28,7 +29,7 @@ func benchmarkModelForHandoffDialog() Model {
 }
 
 func BenchmarkRenderHandoffSelectDialogOpen(b *testing.B) {
-	m := benchmarkModelForHandoffDialog()
+	m := benchmarkModelForHandoffDialog(b)
 	_ = m.renderHandoffSelectDialog()
 	b.ReportAllocs()
 	for b.Loop() {

@@ -365,6 +365,7 @@ func TestPriorCheckpointCarryKeepsRealTypedBlockPastQuotedHeading(t *testing.T) 
 }
 
 func TestCompactionDraftCarriesPriorCheckpointBody(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -429,6 +430,7 @@ func TestCompactionDraftCarriesPriorCheckpointBody(t *testing.T) {
 // checkpoint instead of spending the bounded carry on the request the runtime
 // rewrites anyway.
 func TestCompactionDraftCarryKeepsProgressAfterLongRequest(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 

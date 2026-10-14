@@ -10,6 +10,7 @@ import (
 )
 
 func TestFallbackInputRequiresDurableExecutionPermit(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []string{"success", "cancel", "transcript failure"} {
 		t.Run(outcome, func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
@@ -85,6 +86,7 @@ func TestFallbackInputRequiresDurableExecutionPermit(t *testing.T) {
 }
 
 func TestFallbackInputResumesAfterQueueStorageRecovery(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
 	submitDeliveryForTest(t, a, "correction", recovery.InputDeliveryNextRequest)

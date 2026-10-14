@@ -408,6 +408,7 @@ func TestCheckpointRetainedFailureRecordsStatusVocabulary(t *testing.T) {
 // batch must remain a real record pair in the live transcript and in
 // main.jsonl, directly behind the checkpoint card.
 func TestModelDrivenCheckpointKeepsFailedToolRecordsLive(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")

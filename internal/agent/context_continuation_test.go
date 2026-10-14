@@ -12,6 +12,7 @@ import (
 )
 
 func TestAgentContextContinuationRewritesOnlyItsOwnTranscript(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	mainMessages := []message.Message{
 		{Role: message.RoleUser, Content: "main request"},

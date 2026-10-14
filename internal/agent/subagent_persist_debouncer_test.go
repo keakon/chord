@@ -37,6 +37,7 @@ func TestSubAgentPersistDebouncerTracksArmedSessionDir(t *testing.T) {
 }
 
 func TestFlushPendingSubPersistsWritesArmedSession(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.subPersists.reset()
 	sessionDir := a.SessionDir()
@@ -52,6 +53,7 @@ func TestFlushPendingSubPersistsWritesArmedSession(t *testing.T) {
 // A session switch inside the debounce window must not rewrite the previous
 // session's meta/registry files into the successor's directory.
 func TestFlushPendingSubPersistsDropsBatchFromPreviousSession(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.subPersists.reset()
 	previousDir := a.SessionDir()
@@ -76,6 +78,7 @@ func TestFlushPendingSubPersistsDropsBatchFromPreviousSession(t *testing.T) {
 // Shutdown flushes the pending batch before it marks the agent shutting down,
 // which is what turns the debouncer's flush into a no-op.
 func TestFlushPendingSubPersistsIgnoresShuttingDown(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.subPersists.reset()
 	sessionDir := a.SessionDir()

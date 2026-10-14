@@ -14,6 +14,7 @@ import (
 )
 
 func TestRestoreTerminalNotificationAfterMailboxCompaction(t *testing.T) {
+	t.Parallel()
 	for _, delivered := range []bool{false, true} {
 		t.Run(fmt.Sprintf("current-delivered=%t", delivered), func(t *testing.T) {
 			const taskID, instanceID = "task-resumed", "agent-current"
@@ -108,6 +109,7 @@ func TestRestoreTerminalNotificationAfterMailboxCompaction(t *testing.T) {
 }
 
 func TestRestoreStallAlertDoesNotCoverTaskFailure(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "terminal-notice")
 	restoreFailedRiskAlertFixture(t, projectRoot, sessionDir)
@@ -134,6 +136,7 @@ func TestRestoreStallAlertDoesNotCoverTaskFailure(t *testing.T) {
 }
 
 func TestRestoreDoesNotReplayExpiryWithdrawnByResponse(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "withdrawn-expiry")
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
@@ -194,6 +197,7 @@ func TestRestoreDoesNotReplayExpiryWithdrawnByResponse(t *testing.T) {
 }
 
 func TestExpiryNotificationRequiresItsOwnSettlement(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	msg := a.buildWaitingMainExpiryAlertMailbox(nil, &DurableTaskRecord{
 		TaskID: "task", LatestInstanceID: "agent", Attempt: 2,

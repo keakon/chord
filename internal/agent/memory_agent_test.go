@@ -31,6 +31,7 @@ func writeProjectMemory(t *testing.T, projectRoot, content string) {
 }
 
 func TestMemoryReminderInjectedAndEscapesUntrusted(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	// User notes containing wrapper-like and instruction-like text must never
 	// surface raw inside the injected reminder (JSON-escaped).
@@ -59,6 +60,7 @@ func TestMemoryReminderInjectedAndEscapesUntrusted(t *testing.T) {
 }
 
 func TestMemoryReminderInactiveWithoutFile(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	if a.memoryMgr == nil {
@@ -78,6 +80,7 @@ func TestMemoryReminderInactiveWithoutFile(t *testing.T) {
 }
 
 func TestMemoryStablePromptGuidanceOnlyWhenActive(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n\nNote.\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -96,6 +99,7 @@ func TestMemoryStablePromptGuidanceOnlyWhenActive(t *testing.T) {
 // rebuilt from the cached memory block so the next request carries it, and the
 // stable prompt gains the fixed Memory discipline.
 func TestMemoryRefreshUpdatesRequestReminder(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	if a.memoryMgr == nil {
@@ -134,6 +138,7 @@ func TestMemoryRefreshUpdatesRequestReminder(t *testing.T) {
 // An empty MEMORY.md deactivates the Memory block: there is no index to inject
 // and the stable prompt must not carry the discipline.
 func TestMemoryEmptyFileDeactivates(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n\nNote.\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -153,6 +158,7 @@ func TestMemoryEmptyFileDeactivates(t *testing.T) {
 // A malformed MEMORY.md never flips the activation state: a failed reload keeps
 // whatever the previous refresh established instead of toggling the prompt.
 func TestMemoryMalformedFileKeepsActivation(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n\nNote.\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -178,6 +184,7 @@ func TestMemoryMalformedFileKeepsActivation(t *testing.T) {
 // present) adds the discipline, and auto-extraction config adds only the
 // extraction note. With extraction off, the extraction note must be absent.
 func TestMemoryStablePromptGuidanceByLoadAndExtract(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n\nNote.\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -217,6 +224,7 @@ func TestMemoryStablePromptGuidanceByLoadAndExtract(t *testing.T) {
 // memory.enabled follows the standard merge order: project overrides user,
 // unset everywhere means disabled.
 func TestMemoryExtractEnabledConfigResolution(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	if a.MemoryEnabled() {
@@ -247,6 +255,7 @@ func TestMemoryExtractEnabledConfigResolution(t *testing.T) {
 }
 
 func TestScheduleMemoryExtractionQueuesFrozenSession(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -274,6 +283,7 @@ func TestScheduleMemoryExtractionQueuesFrozenSession(t *testing.T) {
 // neither the main pool's models nor its prompt cache, so it runs during a
 // turn and a new turn leaves it alone.
 func TestMemoryExtractionYieldsToTurnOnlyOnMainPool(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -490,6 +500,7 @@ func TestMemoryStableGuidanceCarriesLookupDiscipline(t *testing.T) {
 }
 
 func TestMemoryInjectManagedSectionPreservesUserNotes(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	notes := "# Project Memory\n\nHand-written notes.\n"
 	writeProjectMemory(t, projectRoot, notes)
@@ -614,6 +625,7 @@ func TestChargeMemoryFailureBudgets(t *testing.T) {
 // so the resample is not drawn from the model that produced it. A single-model
 // pool has nowhere to rotate to, which is the only option there.
 func TestNewMemoryExtractionClientRotatesForOutputRetry(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	refs := []string{"alpha/model-a", "beta/model-b", "gamma/model-c"}
 	pool := make([]llm.FallbackModel, 0, len(refs))
@@ -640,6 +652,7 @@ func TestNewMemoryExtractionClientRotatesForOutputRetry(t *testing.T) {
 // start position; the configured pool path shares the same resample semantics
 // as the main-pool fallback.
 func TestNewMemoryExtractionClientRotatesConfiguredPool(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Memory:     config.MemoryConfig{ModelPool: "memory-extract"},
@@ -666,6 +679,7 @@ func TestNewMemoryExtractionClientRotatesConfiguredPool(t *testing.T) {
 // A configured memory extraction pool whose refs cannot be resolved must fail
 // the client build instead of silently falling back to the main model pool.
 func TestNewMemoryExtractionClientConfiguredPoolFailure(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Memory:     config.MemoryConfig{ModelPool: "memory-extract"},
@@ -684,6 +698,7 @@ func TestNewMemoryExtractionClientConfiguredPoolFailure(t *testing.T) {
 // the pool name, so the stall report names the cause instead of a generic
 // "no model pool available".
 func TestCallMemoryExtractionMissingPoolIsSetupError(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Memory: config.MemoryConfig{ModelPool: "missing-pool"},
@@ -706,6 +721,7 @@ func TestCallMemoryExtractionMissingPoolIsSetupError(t *testing.T) {
 // made every outcome look like a foreground preemption, which silently disabled
 // failure recording, retry accounting, and the post-commit reminder refresh.
 func TestDrainMemoryQueueRecordsFailureInsteadOfRequeueing(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -751,6 +767,7 @@ func TestDrainMemoryQueueRecordsFailureInsteadOfRequeueing(t *testing.T) {
 // boundary picks it up; the preemption misclassification skipped that refresh
 // entirely, deferring every committed memory to the next process start.
 func TestDrainMemoryQueueRefreshesReminderAfterCommit(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -795,6 +812,7 @@ func TestDrainMemoryQueueRefreshesReminderAfterCommit(t *testing.T) {
 // resolves to next — in tests, the next test's temp directory, which then fails
 // its own cleanup.
 func TestShutdownWaitsForMemoryWorkerToStop(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -816,6 +834,7 @@ func TestShutdownWaitsForMemoryWorkerToStop(t *testing.T) {
 // re-bill the whole conversation as uncached input. The session keeps sending
 // the applied summary until a point where its prefix is rebuilt anyway.
 func TestMemoryBackgroundCommitWaitsForCacheBreak(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n\nOriginal notes.\n")
 	a := newTestMainAgent(t, projectRoot)
@@ -852,6 +871,7 @@ func TestMemoryBackgroundCommitWaitsForCacheBreak(t *testing.T) {
 // changes the stable prompt and compact_context visibility: applying it at a
 // cache break marks the surface dirty so the next request reinstalls both.
 func TestMemoryActivationFlipAtCacheBreakRebuildsSurface(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -1014,6 +1034,7 @@ func TestBoundedAgentsSnapshotKeepsHeadAndTail(t *testing.T) {
 // on the request tuning directly; both paths must preserve the configured
 // adaptive-thinking effort.
 func TestMemoryExtractionPreservesReasoningConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, dedicated := range []bool{false, true} {
 		for _, effort := range []string{"", "low", "high", "max"} {
 			t.Run(fmt.Sprintf("dedicated=%v/effort=%s", dedicated, effort), func(t *testing.T) {

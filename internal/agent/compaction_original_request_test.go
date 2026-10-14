@@ -11,6 +11,7 @@ import (
 )
 
 func TestCaptureOriginalFirstUserHintPrefersRecoverableMessageOverPollutedSummary(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	if a.usageLedger == nil {
@@ -37,6 +38,7 @@ func TestCaptureOriginalFirstUserHintPrefersRecoverableMessageOverPollutedSummar
 // message rewrites the head in place; trusting the cache would write the
 // deleted prompt into the checkpoint's "Original request:" anchor.
 func TestCaptureOriginalFirstUserHintPrefersTranscriptHeadOverStalePreview(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -71,6 +73,7 @@ func TestCaptureOriginalFirstUserHintPrefersTranscriptHeadOverStalePreview(t *te
 // anchors outranks the cache — see
 // TestCaptureOriginalFirstUserHintFallsBackToCheckpointAnchor.
 func TestCaptureOriginalFirstUserHintKeepsCachedValueAfterCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -115,6 +118,7 @@ func checkpointWithAnchor(originalRequest string) message.Message {
 // the real head was still observable, and copied forward verbatim ever after —
 // so it has to be consulted before those two steps are reached.
 func TestCaptureOriginalFirstUserHintFallsBackToCheckpointAnchor(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -142,6 +146,7 @@ func TestCaptureOriginalFirstUserHintFallsBackToCheckpointAnchor(t *testing.T) {
 // copy the first compaction made — so the anchor is what keeps the checkpoint's
 // "Original request:" correct when the two disagree.
 func TestCaptureOriginalFirstUserHintPrefersCheckpointAnchorOverCachedPreview(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -175,6 +180,7 @@ func TestCaptureOriginalFirstUserHintPrefersCheckpointAnchorOverCachedPreview(t 
 // into the next checkpoint's "Original request:" anchor, which every later
 // checkpoint then copies forward verbatim — so no answer is better than a guess.
 func TestCaptureOriginalFirstUserHintIgnoresTranscriptBehindCheckpoint(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -202,6 +208,7 @@ func TestCaptureOriginalFirstUserHintIgnoresTranscriptBehindCheckpoint(t *testin
 // carries no anchors. Only a preview the ledger derived by scanning is refused,
 // and a rebuild never promotes a preview to the original on its own.
 func TestCaptureOriginalFirstUserHintKeepsRecordedPreviewWhenCheckpointLostAnchors(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -232,6 +239,7 @@ func TestCaptureOriginalFirstUserHintKeepsRecordedPreviewWhenCheckpointLostAncho
 }
 
 func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	if err := recovery.SaveSessionMeta(a.sessionDir, recovery.SessionMeta{Title: "Custom feature title"}); err != nil {
@@ -293,6 +301,7 @@ func TestRewriteSessionAfterCompactionPreservesOriginalFirstUserMessage(t *testi
 // original request is sticky, so such a value would outlive every later
 // compaction.
 func TestRewriteSessionAfterCompactionNeverAdoptsTailPromptAsOriginal(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -341,6 +350,7 @@ func TestRewriteSessionAfterCompactionNeverAdoptsTailPromptAsOriginal(t *testing
 // prompt still must not fill it. The ledger already refuses that promotion;
 // the in-memory summary is what tail-edit hints and the terminal title read.
 func TestRecordCommittedUserMessageDoesNotFillUnknownOriginal(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 

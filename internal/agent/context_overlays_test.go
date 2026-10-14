@@ -211,6 +211,7 @@ func TestQueueContextPressureReminderKeepsArmWhenReminderDisabled(t *testing.T) 
 // is still live, so a sweep that removes them would delete a notice the runtime
 // just wrote and rewrite it on the next request.
 func TestQueueContextPressureReminderDisabledKeepsThresholdNotices(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 7600})
@@ -252,6 +253,7 @@ func TestContextPressureBelowReminderLineDisabledLineIsNotBelow(t *testing.T) {
 }
 
 func TestQueueContextPressureReminderDeliveredOnceAcrossRequests(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
@@ -309,6 +311,7 @@ func TestQueueContextPressureReminderDeliveredOnceAcrossRequests(t *testing.T) {
 }
 
 func TestCompactContextCallArmsAndStopsStickyReminder(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -654,6 +657,7 @@ func TestArmUsageDrivenAutoCompactRequestGeneration(t *testing.T) {
 }
 
 func TestCompactionStatusEventCarriesPlanID(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -751,6 +755,7 @@ func waitForContextNoticeCleared(t *testing.T, a *MainAgent) {
 }
 
 func TestContextNoticeFirstDeliveryPersistsDurableMessage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	// A durable row belongs to an open pressure cycle: the cycle identity is
 	// stamped on the row so a restore can adopt it instead of duplicating it.
@@ -784,6 +789,7 @@ func TestContextNoticeFirstDeliveryPersistsDurableMessage(t *testing.T) {
 }
 
 func TestContextNoticeRepeatDeliveryDoesNotPersistAgain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.notePressureStage(pressureStageReminded, a.currentOverlayWindowKey())
 	a.stashContextNotice(contextNoticePressure, "first full reminder")
@@ -811,6 +817,7 @@ func TestContextNoticeRepeatDeliveryDoesNotPersistAgain(t *testing.T) {
 }
 
 func TestMaybeClearStaleContextNoticesRemovesHistoryAndRewritesLog(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.installSessionTarget(t.TempDir())
 	manager := a.recoveryManager()
@@ -855,6 +862,7 @@ func TestMaybeClearStaleContextNoticesRemovesHistoryAndRewritesLog(t *testing.T)
 }
 
 func TestMaybeClearStaleContextNoticesWaitsForIdle(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "stale pressure", NoticeLevel: contextNoticeWarning})
 	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
@@ -877,6 +885,7 @@ func TestMaybeClearStaleContextNoticesWaitsForIdle(t *testing.T) {
 }
 
 func TestMaybeClearStaleContextNoticesWaitsForCompaction(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Kind: message.KindContextNotice, Content: "stale pressure", NoticeLevel: contextNoticeWarning})
 	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
@@ -902,6 +911,7 @@ func TestMaybeClearStaleContextNoticesWaitsForCompaction(t *testing.T) {
 }
 
 func TestMaybeClearStaleContextNoticesNoNoticeKeepsHistory(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "hello"})
 	a.contextNoticeWithdrawalScope.Store(contextNoticeWithdrawAll)
@@ -941,6 +951,7 @@ func enableTestCompactContext(a *MainAgent) {
 }
 
 func TestQueueContextPressureReminderKeepsNoticesWhenUsageDrops(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
@@ -965,6 +976,7 @@ func TestQueueContextPressureReminderKeepsNoticesWhenUsageDrops(t *testing.T) {
 }
 
 func TestQueueContextPressureReminderReCrossKeepsDurableNotice(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
@@ -992,6 +1004,7 @@ func TestQueueContextPressureReminderReCrossKeepsDurableNotice(t *testing.T) {
 }
 
 func TestMaybeClearStaleContextNoticesResetsReminderDeliveryForRecross(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.installSessionTarget(t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
@@ -1034,6 +1047,7 @@ func TestMaybeClearStaleContextNoticesResetsReminderDeliveryForRecross(t *testin
 }
 
 func TestMaybeClearStaleContextNoticesKeepsCcCalledQuiet(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
@@ -1082,6 +1096,7 @@ func TestOmitStaleContextNoticesFromRequestDropsCopyOnly(t *testing.T) {
 }
 
 func TestMaybeClearStaleContextNoticesNoNoticeResetsDelivered(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.overlayClaims.mu.Lock()
 	a.overlayClaims.reminder.delivered = true
@@ -1119,6 +1134,7 @@ func TestInstallContextNoticePresenceRebuildsFromTranscript(t *testing.T) {
 }
 
 func TestContextNoticeDeliveryDoesNotCancelPendingWithdrawal(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.contextNoticesPersisted.Store(true)
 	a.armContextNoticeCleanup()
@@ -1153,6 +1169,7 @@ func TestContextNoticeDeliveryDoesNotCancelPendingWithdrawal(t *testing.T) {
 }
 
 func TestQueueContextPressureReminderKeepsThresholdNoticesWhenUsageDrops(t *testing.T) {
+	t.Parallel()
 	// A cycle's rows need not start at the sticky reminder: the grace imminent
 	// notice or the externalization warning can be the first (and only) row a
 	// below-line drop has to withdraw (an explicit reminder line at or above
@@ -1206,6 +1223,7 @@ func TestQueueContextPressureReminderKeepsThresholdNoticesWhenUsageDrops(t *test
 }
 
 func TestMaybeClearStaleContextNoticesResetsImminentDeliveryForRecross(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.installSessionTarget(t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)

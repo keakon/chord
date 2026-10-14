@@ -9,6 +9,7 @@ import (
 )
 
 func TestHandleToolResultMarksSkillInvokedOnlyOnSuccess(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills(nil)
@@ -40,6 +41,7 @@ func TestHandleToolResultMarksSkillInvokedOnlyOnSuccess(t *testing.T) {
 }
 
 func TestHandleToolResultMarksSuccessfulVisibleSkillInvoked(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{{Name: "go-expert", Description: "Go language development expert", Location: "/tmp/go-expert/SKILL.md", RootDir: "/tmp/go-expert"}})

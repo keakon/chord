@@ -12,6 +12,7 @@ import (
 )
 
 func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
@@ -67,6 +68,7 @@ func TestCallLLMPromotesStreamingActivityOnToolUseStartWithoutStatusDelta(t *tes
 }
 
 func TestMainLLMRunningModelMovesOnlyAfterVisibleOutput(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.SetProviderModelRef("sample/gpt-5.5@xhigh")
 
@@ -121,6 +123,7 @@ func TestMainLLMRunningModelMovesOnlyAfterVisibleOutput(t *testing.T) {
 }
 
 func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.newTurn("")
 	if a.turn == nil {
@@ -188,6 +191,7 @@ func TestCallLLMClosesThinkingBeforeFirstText(t *testing.T) {
 	}
 }
 func TestCallLLMDoesNotTranslateStreamingThinkingBlocks(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "hi"})
 	a.newTurn("")
@@ -241,6 +245,7 @@ func TestCallLLMDoesNotTranslateStreamingThinkingBlocks(t *testing.T) {
 }
 
 func TestMaybeTranslateLatestThinkingAllowsMultipleAssistantMessagesInSameTurn(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.newTurn("")
 	if a.turn == nil {
@@ -299,6 +304,7 @@ func TestMaybeTranslateLatestThinkingAllowsMultipleAssistantMessagesInSameTurn(t
 }
 
 func TestHandleLLMResponsePersistsOpenAIChatReasoningWithChatCompletionsProvenance(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	providerCfg := llm.NewProviderConfig("deepseek", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -345,6 +351,7 @@ func TestHandleLLMResponsePersistsOpenAIChatReasoningWithChatCompletionsProvenan
 }
 
 func TestCallLLMOnlyEmitsOneStreamingActivityWhenStatusAlsoArrives(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{

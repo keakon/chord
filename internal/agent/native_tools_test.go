@@ -116,6 +116,7 @@ func TestNativePreflightBlocksOrdinaryRoutes(t *testing.T) {
 }
 
 func TestNativeAuthorizationIndependentOfYolo(t *testing.T) {
+	t.Parallel()
 	for _, action := range []permission.Action{permission.ActionAllow, permission.ActionAsk, permission.ActionDeny} {
 		t.Run(string(action), func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())

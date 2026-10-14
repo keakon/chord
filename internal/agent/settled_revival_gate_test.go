@@ -17,6 +17,7 @@ import (
 // settlement.
 
 func TestManualDeliveryToLiveTerminalWorkerRefusedWithoutNewAttempt(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	configureNestedDelegationTestRuntime(a, 2)
@@ -45,6 +46,7 @@ func TestManualDeliveryToLiveTerminalWorkerRefusedWithoutNewAttempt(t *testing.T
 }
 
 func TestSendUserMessageToCancelledLiveWorkerIsRefused(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	configureNestedDelegationTestRuntime(a, 2)
@@ -72,6 +74,7 @@ func TestSendUserMessageToCancelledLiveWorkerIsRefused(t *testing.T) {
 }
 
 func TestFocusedMessageToLiveCompletedWorkerStartsNewAttempt(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	configureNestedDelegationTestRuntime(a, 2)
@@ -111,6 +114,7 @@ func TestFocusedMessageToLiveCompletedWorkerStartsNewAttempt(t *testing.T) {
 // settle must back off instead of cancelling the freshly resumed attempt and
 // reporting a phantom expiry.
 func TestLiveWaitingMainExpiryBacksOffWhenWorkerReactivatedFirst(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	configureNestedDelegationTestRuntime(a, 2)
@@ -140,6 +144,7 @@ func TestLiveWaitingMainExpiryBacksOffWhenWorkerReactivatedFirst(t *testing.T) {
 // TestLiveWaitingMainExpiryCommittedWhenStillWaiting confirms the same guarded
 // settle still commits when the worker has not been reactivated.
 func TestLiveWaitingMainExpiryCommittedWhenStillWaiting(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	configureNestedDelegationTestRuntime(a, 2)

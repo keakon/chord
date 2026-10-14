@@ -20,6 +20,7 @@ import (
 // shared key/rate-limit resolver must agree with the MODEL row, so it names the
 // attempt target too while the request is in flight.
 func TestFocusedModelStateDisplayRefNamesInflightFallback(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	primaryImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{
@@ -91,6 +92,7 @@ func TestFocusedModelStateDisplayRefNamesInflightFallback(t *testing.T) {
 // through the same field, and the shared key/rate-limit resolver must follow the
 // worker's client rather than the main agent's.
 func TestFocusedModelStateDisplayRefFollowsFocusedSubAgent(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	subPrimary := &blockingStreamProvider{calls: []scriptedStreamCall{{
@@ -156,6 +158,7 @@ func TestFocusedModelStateDisplayRefFollowsFocusedSubAgent(t *testing.T) {
 }
 
 func TestFocusedModelStatePreviewsPoolDuringToolPhase(t *testing.T) {
+	t.Parallel()
 	a := newToolPhaseSwitchTestAgent(t)
 	a.newTurn("")
 	a.mainLLMRequestInFlight.Store(true)
@@ -179,6 +182,7 @@ func TestFocusedModelStatePreviewsPoolDuringToolPhase(t *testing.T) {
 }
 
 func TestFocusedModelStateTierAndKeysFollowInflightTarget(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	primary := llm.NewProviderConfig("provider-a", config.ProviderConfig{
 		Type:                  config.ProviderTypeChatCompletions,
@@ -218,6 +222,7 @@ func TestFocusedModelStateTierAndKeysFollowInflightTarget(t *testing.T) {
 }
 
 func TestFocusedModelStatePreviewsOverlappingPoolAtSelectedModel(t *testing.T) {
+	t.Parallel()
 	a := newToolPhaseSwitchTestAgent(t)
 	a.activeConfig.Models["fast"] = []string{"provider/gpt-5.5", "provider/claude-opus-4"}
 	client := a.llmClient
@@ -243,6 +248,7 @@ func TestFocusedModelStatePreviewsOverlappingPoolAtSelectedModel(t *testing.T) {
 }
 
 func TestPendingPoolTierCapabilitiesAreAvailableBeforeInstallation(t *testing.T) {
+	t.Parallel()
 	a := newToolPhaseSwitchTestAgent(t)
 	a.projectConfig = &config.Config{Providers: map[string]config.ProviderConfig{
 		"provider": {Models: map[string]config.ModelConfig{

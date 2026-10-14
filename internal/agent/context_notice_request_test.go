@@ -19,6 +19,7 @@ func noticeRequestAgent(t *testing.T) *MainAgent {
 }
 
 func TestPressureNoticeModelSwitchUsesPreviousUsage(t *testing.T) {
+	t.Parallel()
 	a := noticeRequestAgent(t)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 70000})
 	a.ctxMgr.InvalidateSizeObservation()
@@ -43,6 +44,7 @@ func TestPressureNoticeModelSwitchUsesPreviousUsage(t *testing.T) {
 }
 
 func TestPressureNoticeReductionUsesBytesInsteadOfUsage(t *testing.T) {
+	t.Parallel()
 	a := noticeRequestAgent(t)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 99000})
 	budget := 100000 + a.effectiveCompactionReservedInput()
@@ -60,6 +62,7 @@ func TestPressureNoticeReductionUsesBytesInsteadOfUsage(t *testing.T) {
 }
 
 func TestPressureNoticeReductionOnlyInvalidatesFollowingNotices(t *testing.T) {
+	t.Parallel()
 	for _, editIndex := range []int{0, 2, 4} {
 		t.Run(string(rune('0'+editIndex)), func(t *testing.T) {
 			a := noticeRequestAgent(t)
@@ -98,6 +101,7 @@ func TestPressureNoticeReductionOnlyInvalidatesFollowingNotices(t *testing.T) {
 }
 
 func TestFallbackFiltersInvalidNoticesUsingPreviousUsage(t *testing.T) {
+	t.Parallel()
 	a := noticeRequestAgent(t)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 70000})
 	a.overlayClaims.noticeModel = "provider/source"
@@ -119,6 +123,7 @@ func TestFallbackFiltersInvalidNoticesUsingPreviousUsage(t *testing.T) {
 }
 
 func TestCancelledNoticePreparationKeepsDispatchBaseline(t *testing.T) {
+	t.Parallel()
 	a := noticeRequestAgent(t)
 	original := []message.Message{{Role: message.RoleUser, Content: "original"}, {Role: message.RoleUser, Kind: message.KindContextNotice, NoticeLevel: contextNoticePressure, Content: "notice"}}
 	a.rememberPressureNoticeRequest(original, "provider/model")
@@ -131,6 +136,7 @@ func TestCancelledNoticePreparationKeepsDispatchBaseline(t *testing.T) {
 }
 
 func TestFallbackAddsOnlyMissingThresholdAndReusesDurableRows(t *testing.T) {
+	t.Parallel()
 	a := noticeRequestAgent(t)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 99000})
 	messages := []message.Message{{Role: message.RoleUser, Content: "continue"}}

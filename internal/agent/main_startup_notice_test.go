@@ -15,6 +15,7 @@ func TestStartupConfigIssuesNotice(t *testing.T) {
 }
 
 func TestStartupConfigIssuesSetAndConsumeOnce(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetStartupConfigIssues([]string{"one", "two"})
 	if got := a.consumeStartupConfigIssues(); len(got) != 2 || got[0] != "one" || got[1] != "two" {

@@ -51,6 +51,7 @@ func TestCompactContextSoleToolCallDetection(t *testing.T) {
 }
 
 func TestTryArmModelDrivenCheckpointAcceptsValidArgs(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -75,6 +76,7 @@ func TestTryArmModelDrivenCheckpointAcceptsValidArgs(t *testing.T) {
 }
 
 func TestTryArmModelDrivenCheckpointRejectsBadArgs(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")

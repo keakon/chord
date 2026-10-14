@@ -38,7 +38,7 @@ func TestHeadlessMCPAuthCommandNeverReachesModel(t *testing.T) {
 	for _, action := range []string{"login", "logout", "reauth", "reconnect", "cancel"} {
 		backend := &mockBackend{}
 		state := &headlessState{}
-		out := newTestOut()
+		out := newTestOut(t)
 		handleHeadlessCommand(headlessCommand{Type: "send", RequestID: "request", Content: "/mcp " + action + " sample"}, backend, state, out.writer())
 		envelopes := out.drain()
 		if len(backend.sentMessages) != 0 {

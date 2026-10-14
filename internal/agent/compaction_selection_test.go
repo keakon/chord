@@ -109,6 +109,7 @@ func TestResolveCompactionProfileAuto(t *testing.T) {
 }
 
 func TestProduceCompactionDraftArchivalProfileOmitsRecentTail(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.globalConfig.Context.Compaction.Profile = config.CompactionProfileArchival
@@ -248,6 +249,7 @@ func TestSplitMessagesForCompaction_FallsBackToLegacyExtractionHelper(t *testing
 }
 
 func TestSplitMessagesForCompaction_UsesRuntimeEvidenceCandidates(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.addEvidenceCandidate(buildEvidenceItem(

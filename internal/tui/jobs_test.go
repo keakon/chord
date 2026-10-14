@@ -66,6 +66,7 @@ func newJobsTestModel(t *testing.T, width, height int) *Model {
 	t.Helper()
 	resetJobsRegistry(t)
 	m := NewModelWithSize(newInfoPanelAgent(), width, height)
+	t.Cleanup(func() { _ = m.Close() })
 	m.updateRightPanelVisible()
 	m.recalcViewportSize()
 	m.layout = m.generateLayout(m.width, m.height)

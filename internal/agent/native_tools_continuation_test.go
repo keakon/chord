@@ -16,6 +16,7 @@ func appendPendingNativeTurn(mgr *ctxmgr.Manager) {
 }
 
 func TestMainDefersContextAppendWithoutExpandingCommands(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	appendPendingNativeTurn(a.ctxMgr)
 	msg := message.Message{Role: message.RoleUser, Content: "/model sample/model", Parts: []message.ContentPart{{Type: message.ContentPartText, Text: "Sample output"}}}
@@ -36,6 +37,7 @@ func TestMainDefersContextAppendWithoutExpandingCommands(t *testing.T) {
 }
 
 func TestMainDeferredNativeContextDoesNotCrossSessionBoundary(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	appendPendingNativeTurn(a.ctxMgr)
 	a.handleAppendContext(Event{Payload: "Sample output"})
@@ -51,6 +53,7 @@ func appendCompletedNativeTurn(mgr *ctxmgr.Manager) {
 }
 
 func TestMainDefersIndependentInputDuringNativeContinuation(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	appendPendingNativeTurn(a.ctxMgr)
 	a.pendingUserMessages = []pendingUserMessage{{Content: "New request", FromUser: true}}
@@ -76,6 +79,7 @@ func TestMainDefersIndependentInputDuringNativeContinuation(t *testing.T) {
 }
 
 func TestSubDefersInputAndContextAppendsDuringNativeContinuation(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, parent, "sample-task")
 	appendPendingNativeTurn(sub.ctxMgr)

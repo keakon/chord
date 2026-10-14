@@ -17,6 +17,7 @@ import (
 )
 
 func TestHostedPoolTriesFallbackBeforeRetry(t *testing.T) {
+	t.Parallel()
 	for _, status := range []int{429, 503} {
 		t.Run(strconv.Itoa(status), func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
@@ -41,6 +42,7 @@ func TestHostedPoolTriesFallbackBeforeRetry(t *testing.T) {
 }
 
 func TestHostedPoolRoundsAndTerminalTargets(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	var order []string
 	makeTarget := func(name string, terminal bool) llm.FallbackModel {
@@ -60,6 +62,7 @@ func TestHostedPoolRoundsAndTerminalTargets(t *testing.T) {
 }
 
 func TestHostedLocalLimitsPreserveFallback(t *testing.T) {
+	t.Parallel()
 	for _, budget := range []bool{false, true} {
 		t.Run(map[bool]string{false: "rate", true: "retry_budget"}[budget], func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
@@ -91,6 +94,7 @@ func TestHostedLocalLimitsPreserveFallback(t *testing.T) {
 }
 
 func TestHostedLocalAdmissionIsNotUnknown(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.governor = newResourceGovernor(config.OrchestrationConfig{ProviderHostedRequestsPerMinute: map[string]int{"sample": 1}})
 	release, err := a.governor.acquireHostedLLM(t.Context(), "sample/model-1", false)
@@ -124,6 +128,7 @@ func TestHostedLocalAdmissionIsNotUnknown(t *testing.T) {
 }
 
 func TestHostedHealthRecoveryAndProbeOwnership(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		a := newTestMainAgent(t, t.TempDir())
 		impl := &hostedScriptProvider{respond: func(i int, _ context.Context) (*message.Response, error) {
@@ -207,6 +212,7 @@ func TestHostedRetryAfterUsesProviderCap(t *testing.T) {
 }
 
 func TestHostedRateWaitPreservesFirstAttemptBudget(t *testing.T) {
+	t.Parallel()
 	synctest.Test(t, func(t *testing.T) {
 		a := newTestMainAgent(t, t.TempDir())
 		a.governor = newResourceGovernor(config.OrchestrationConfig{

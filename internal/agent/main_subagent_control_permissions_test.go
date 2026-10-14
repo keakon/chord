@@ -15,6 +15,7 @@ import (
 )
 
 func TestHandleTierCommandRejectsEmptyTierArgument(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	a.handleTierCommand("/tier", true)
@@ -28,6 +29,7 @@ func TestHandleTierCommandRejectsEmptyTierArgument(t *testing.T) {
 }
 
 func TestHandleTierCommandRejectsUnsupportedTier(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	providerCfg := llm.NewProviderConfig("standard-only", config.ProviderConfig{
@@ -51,6 +53,7 @@ func TestHandleTierCommandRejectsUnsupportedTier(t *testing.T) {
 }
 
 func TestEffectiveAndSupportedServiceTierUseNextRequestModelRef(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	providerA := llm.NewProviderConfig("slow-provider", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -90,6 +93,7 @@ func TestEffectiveAndSupportedServiceTierUseNextRequestModelRef(t *testing.T) {
 }
 
 func TestSyncSubAgentOverlayPreservesSubAgentPermissions(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.activeConfig = &config.AgentConfig{Name: "builder"}
 	a.ruleset = permission.Ruleset{{Permission: tools.NameRead, Pattern: "*", Action: permission.ActionAllow}}
@@ -119,6 +123,7 @@ func TestSyncSubAgentOverlayPreservesSubAgentPermissions(t *testing.T) {
 }
 
 func TestOverlayRuleChangesRefreshRuntimeSurfaces(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.activeConfig = &config.AgentConfig{Name: "builder"}
 	a.initOverlay()
@@ -145,6 +150,7 @@ func TestOverlayRuleChangesRefreshRuntimeSurfaces(t *testing.T) {
 }
 
 func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.activeConfig = &config.AgentConfig{Name: "builder"}
 	a.agentConfigs = map[string]*config.AgentConfig{
@@ -178,6 +184,7 @@ func TestSubAgentRuleIntentRefreshPreservesSubAgentPermissions(t *testing.T) {
 // picker was persisted to the MainAgent's role file instead of the SubAgent's
 // own role file, so it never took effect after reload.
 func TestSubAgentRuleIntentProjectRuleArchivedToSubAgentRole(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.activeConfig = &config.AgentConfig{Name: "builder"}
@@ -221,6 +228,7 @@ func TestSubAgentRuleIntentProjectRuleArchivedToSubAgentRole(t *testing.T) {
 // under the MainAgent's active role; switching the MainAgent role dropped that
 // bucket from the merged ruleset and the SubAgent lost its rule.
 func TestSubAgentRuleIntentSessionRuleSurvivesMainRoleSwitch(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.activeConfig = &config.AgentConfig{Name: "builder"}
 	a.agentConfigs = map[string]*config.AgentConfig{
@@ -255,6 +263,7 @@ func TestSubAgentRuleIntentSessionRuleSurvivesMainRoleSwitch(t *testing.T) {
 }
 
 func TestCreateSubAgentInheritsServiceTier(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
 	client, _, _, _ := a.llmSnapshot()
@@ -293,6 +302,7 @@ func TestCreateSubAgentInheritsServiceTier(t *testing.T) {
 }
 
 func TestHandleTierCommandSyncsExistingSubAgents(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-tier")
 	subClient, _ := sub.llmSnapshot()

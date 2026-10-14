@@ -135,6 +135,7 @@ func TestSkillPublisherEpochChangeReentersGateWithoutReadyPass(t *testing.T) {
 }
 
 func TestSkillPublisherOwnerFailureReleasesFlightAndReportsError(t *testing.T) {
+	t.Parallel()
 	t.Run("main", func(t *testing.T) {
 		a := newReadyTestMainAgent(t)
 		ticket := skillDiscoveryTicket{SessionEpoch: a.sessionEpoch, TaskID: a.skillActivationView().TaskID}

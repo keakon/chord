@@ -94,6 +94,7 @@ func e2eCheckpointAt(t *testing.T, a *MainAgent) message.Message {
 // carried-only issue must stay recoverable without reading as a current
 // blocker, which is what this test's round-2 and round-3 assertions pin.
 func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -221,6 +222,7 @@ func TestE2EModelDrivenThreeRoundChainKeepsTypedState(t *testing.T) {
 // the fresh submission must lead the carried decisions — the old claim is
 // history, not current direction.
 func TestE2EModelDrivenLatestRequestOverridesCheckpointedClaim(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -278,6 +280,7 @@ func TestE2EModelDrivenLatestRequestOverridesCheckpointedClaim(t *testing.T) {
 // the live context reads applied checkpoint summary first, then each fresh
 // user message, and the turn resumes with a single request over that context.
 func TestE2EModelDrivenApplyWithQueuedUserInputMergesIntoContinuation(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -363,6 +366,7 @@ func TestE2EModelDrivenApplyWithQueuedUserInputMergesIntoContinuation(t *testing
 // session into that stage — the next, unrelated task's checkpoint replaces
 // the stage metadata with its own while the earlier decisions stay carried.
 func TestE2EModelDrivenStageSwitchAcrossUnrelatedTasks(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -412,6 +416,7 @@ func TestE2EModelDrivenStageSwitchAcrossUnrelatedTasks(t *testing.T) {
 // out) has to be re-rendered as machine rows or it dies one generation later
 // while the checkpoint still declares it.
 func TestE2EModelDrivenCheckpointRerendersDeclaredEvidenceRefs(t *testing.T) {
+	t.Parallel()
 	sessionDir := t.TempDir()
 	a := newTestMainAgent(t, sessionDir)
 	a.sessionDir = sessionDir
@@ -463,6 +468,7 @@ func TestE2EModelDrivenCheckpointRerendersDeclaredEvidenceRefs(t *testing.T) {
 // answers with the actionable "without classification" rejection — which tells
 // the model to reclassify the claim — instead of an unknown-ID one.
 func TestE2EModelDrivenCheckpointRerendersUnclassifiedCarriedRef(t *testing.T) {
+	t.Parallel()
 	const carriedRef = "ev-0123456789ab"
 	sessionDir := t.TempDir()
 	a := newTestMainAgent(t, sessionDir)

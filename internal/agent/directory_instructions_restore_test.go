@@ -71,6 +71,7 @@ func TestDirectoryInstructionEmptyPermissionsFollowToolDefault(t *testing.T) {
 }
 
 func TestDirectoryInstructionCancelledPersistenceFailureRetainsCandidateForRetry(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	fact := directoryTestFact("pkg", "durable rules")
 	msg := directoryInstructionFactMessage([]message.DirectoryInstructionFact{fact})
@@ -102,6 +103,7 @@ func TestDirectoryInstructionCancelledPersistenceFailureRetainsCandidateForRetry
 }
 
 func TestDirectoryInstructionCancelledAckPublishesRecoveredInitialScope(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	binding := directoryInstructionBinding{CheckoutRoot: "/repo", SessionEpoch: a.sessionEpoch}
 	r := newDirectoryInstructionRuntime(t.Context(), binding)

@@ -33,6 +33,7 @@ func graceTestAgent(t *testing.T, usage float64) *MainAgent {
 }
 
 func TestCompactionGraceDefersTwoBatchesThenExpires(t *testing.T) {
+	t.Parallel()
 	a := graceTestAgent(t, 0.85)
 	snapshot := a.ctxMgr.Snapshot()
 
@@ -112,6 +113,7 @@ func TestCheckpointPressureNoticesSharePreparationContract(t *testing.T) {
 }
 
 func TestCompactionGraceOnlyWhileCompactContextVisible(t *testing.T) {
+	t.Parallel()
 	a := graceTestAgent(t, 0.85)
 	snapshot := a.ctxMgr.Snapshot()
 	a.modelDrivenCompactionEnabled.Store(false)
@@ -124,6 +126,7 @@ func TestCompactionGraceOnlyWhileCompactContextVisible(t *testing.T) {
 }
 
 func TestCompactionGraceHardCeilingBypass(t *testing.T) {
+	t.Parallel()
 	// Usage already at 0.96 of the usable budget on the first crossing: the
 	// grace is skipped outright so the next request cannot ride into an
 	// oversize rejection, and the window counts as spent.
@@ -152,6 +155,7 @@ func TestCompactionGraceHardCeilingBypass(t *testing.T) {
 }
 
 func TestCompactionGraceEndsWhenModelDrivenSettlesWithoutApply(t *testing.T) {
+	t.Parallel()
 	a := graceTestAgent(t, 0.85)
 	snapshot := a.ctxMgr.Snapshot()
 	if !a.usageDrivenCompactionGraceDefers(snapshot) {
@@ -169,6 +173,7 @@ func TestCompactionGraceEndsWhenModelDrivenSettlesWithoutApply(t *testing.T) {
 }
 
 func TestCompactionGraceSurvivesModelDrivenSettleBelowThreshold(t *testing.T) {
+	t.Parallel()
 	// A low-gain skip early in the window — usage below the line, no grace
 	// active, no usage-driven request armed — is not a shot at the safety net:
 	// the grace the window has not granted yet must survive, so the later
@@ -188,6 +193,7 @@ func TestCompactionGraceSurvivesModelDrivenSettleBelowThreshold(t *testing.T) {
 }
 
 func TestCompactionGraceEndsWhenModelDrivenSettlesAfterArmedCrossing(t *testing.T) {
+	t.Parallel()
 	// The crossing was observed on the response (usage-driven request armed)
 	// but the gate has not started the grace yet when the model's checkpoint
 	// settles without applying: that is a shot at the safety net, so the
@@ -208,6 +214,7 @@ func TestCompactionGraceEndsWhenModelDrivenSettlesAfterArmedCrossing(t *testing.
 // "no grace running", or the first crossing would restart the grace on every
 // request and re-record its analytics stage each time.
 func TestCompactionGraceStartsAtBatchZeroWithoutRestarting(t *testing.T) {
+	t.Parallel()
 	a := graceTestAgent(t, 0.85)
 	// Undo the helper's reservation so currentRequestBatch reports 0.
 	a.requestBatches = requestBatchState{}
@@ -243,6 +250,7 @@ func TestCompactionGraceStartsAtBatchZeroWithoutRestarting(t *testing.T) {
 }
 
 func TestCompactionGraceClearedOnModelChangeAndSessionSwitch(t *testing.T) {
+	t.Parallel()
 	a := graceTestAgent(t, 0.85)
 	a.compactionGraceStartBatch = 1
 	a.compactionGraceActive = true
@@ -266,6 +274,7 @@ func TestCompactionGraceClearedOnModelChangeAndSessionSwitch(t *testing.T) {
 }
 
 func TestCompactionImminentClaimAndOverlay(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	// The grace queue arms the notice for every deferred request (optimization
 	// 2.9); attaching consumes the pending text and marks deliveryPending

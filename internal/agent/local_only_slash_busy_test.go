@@ -89,6 +89,7 @@ func installPoolPolicyForTest(t *testing.T, a *MainAgent) {
 }
 
 func TestTUISetCurrentModelPoolRunsOnEventLoopBeforeQueuedUserMessageDrain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	a.ApplyInitialModel("provider/model-a")
@@ -119,6 +120,7 @@ func TestTUISetCurrentModelPoolRunsOnEventLoopBeforeQueuedUserMessageDrain(t *te
 }
 
 func TestInFlightModelPoolSwitchDefersClientSwapUntilRequestBoundary(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
@@ -153,6 +155,7 @@ func TestInFlightModelPoolSwitchDefersClientSwapUntilRequestBoundary(t *testing.
 }
 
 func TestInFlightModelPoolSwitchStaysDeferredAcrossOversizeSuspend(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
@@ -211,6 +214,7 @@ func TestInFlightModelPoolSwitchStaysDeferredAcrossOversizeSuspend(t *testing.T)
 // applyPendingModelPoolSwitchesAtRequestBoundary returns immediately and the
 // restart repeats the old pool.
 func TestRoutingInvalidationAppliesPendingModelPoolSwitchBeforeRestart(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
@@ -243,6 +247,7 @@ func TestRoutingInvalidationAppliesPendingModelPoolSwitchBeforeRestart(t *testin
 }
 
 func TestInFlightModelPoolSwitchRollsBackWhenDeferredClientSwapFails(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
@@ -288,6 +293,7 @@ func TestInFlightModelPoolSwitchRollsBackWhenDeferredClientSwapFails(t *testing.
 }
 
 func TestInFlightModelPoolSwitchRestoresOnlyFailedDeferredSelections(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	if err := a.ApplyInitialModel("provider/model-a"); err != nil {
@@ -376,6 +382,7 @@ func TestInFlightModelPoolSwitchRestoresOnlyFailedDeferredSelections(t *testing.
 }
 
 func TestModelSwitchInvalidatesPreviousClientRetryPlan(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 
@@ -413,6 +420,7 @@ func TestModelSwitchInvalidatesPreviousClientRetryPlan(t *testing.T) {
 }
 
 func TestBusyCurrentModelPoolSwitchInvalidatesPreviousClientRetryPlan(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 
@@ -466,6 +474,7 @@ func TestBusyCurrentModelPoolSwitchInvalidatesPreviousClientRetryPlan(t *testing
 }
 
 func TestSubAgentModelPoolSwitchDefersClientSwapUntilRequestBoundary(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	workerCfg := &config.AgentConfig{
@@ -514,6 +523,7 @@ func TestSubAgentModelPoolSwitchDefersClientSwapUntilRequestBoundary(t *testing.
 }
 
 func TestResumeTurnAfterRoutingInvalidationConsumesQueuedUserDraft(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	a.ApplyInitialModel("provider/model-a")
@@ -553,6 +563,7 @@ func TestResumeTurnAfterRoutingInvalidationConsumesQueuedUserDraft(t *testing.T)
 // setIdleAndDrainPending. Otherwise a.turn is wiped while the retry is still
 // running and esc-cancel becomes a no-op.
 func TestHandleModelsCommandBusyDoesNotClearTurn(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		content   string
@@ -597,6 +608,7 @@ func TestHandleModelsCommandBusyDoesNotClearTurn(t *testing.T) {
 // /models on an idle agent still calls setIdleAndDrainPending, leaving a.turn
 // nil and emitting IdleEvent so any pending drafts can drain.
 func TestHandleModelsCommandIdleClearsTurn(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 
@@ -619,6 +631,7 @@ func TestHandleModelsCommandIdleClearsTurn(t *testing.T) {
 }
 
 func TestHandleUserMessageMCPWhileBusyRunsImmediately(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	controlStarted := make(chan struct{})
 	releaseControl := make(chan struct{})
@@ -652,6 +665,7 @@ func TestHandleUserMessageMCPWhileBusyRunsImmediately(t *testing.T) {
 }
 
 func TestHandleUserMessageMCPDuringTransitionWarnsInsteadOfQueueing(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.mcpTransitionActive.Store(true)
 
@@ -673,6 +687,7 @@ func TestHandleUserMessageMCPDuringTransitionWarnsInsteadOfQueueing(t *testing.T
 // TestHandleExportCommandBusyDoesNotClearTurn mirrors the /models test for
 // /export — same setIdleAndDrainPending pitfall, same fix.
 func TestHandleExportCommandBusyDoesNotClearTurn(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	a.newTurn("")
@@ -704,6 +719,7 @@ func TestHandleExportCommandBusyDoesNotClearTurn(t *testing.T) {
 // /models during retry would once again null out a.turn from the wrong
 // goroutine.
 func TestSendUserMessageRoutesLocalOnlyCommandThroughEventLoop(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 
@@ -783,6 +799,7 @@ func TestIsTUILocalOnlySlashCommand(t *testing.T) {
 }
 
 func TestExecuteLocalOnlySlashCommandBareTierShowsUsage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if !a.executeLocalOnlySlashCommand("/tier", nil, true) {
 		t.Fatal("expected bare /tier to be handled as a local-only command")

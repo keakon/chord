@@ -98,6 +98,7 @@ func TestToolResultHookDataPartialPatchUsesCommittedFileState(t *testing.T) {
 }
 
 func TestAppendHookFeedbackAppendsUserMessage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.appendHookFeedback("automated feedback")
 	msgs := a.ctxMgr.Snapshot()

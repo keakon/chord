@@ -81,6 +81,7 @@ func TestModelDrivenDuplicateAllowsNewWorkWithUnchangedArgs(t *testing.T) {
 }
 
 func TestModelDrivenSummaryPrioritizesRequestAndNextAction(t *testing.T) {
+	t.Parallel()
 	agent := newTestMainAgent(t, t.TempDir())
 	request := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
 		ActiveObjective: "verify parser", Completed: []string{"parser implemented"},
@@ -102,6 +103,7 @@ func TestModelDrivenSummaryPrioritizesRequestAndNextAction(t *testing.T) {
 }
 
 func TestModelDrivenApplyContinuesAfterStageCandidate(t *testing.T) {
+	t.Parallel()
 	for _, background := range []bool{false, true} {
 		name := "remaining work"
 		if background {

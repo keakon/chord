@@ -236,6 +236,7 @@ func TestLLMStreamReducerIgnoresTraceOnlyEventDelta(t *testing.T) {
 }
 
 func TestMainLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	retryErr := errors.New("rate limited")
 	reducer := a.newMainLLMStreamReducer(nil, "provider/model-1", "", nil, false, nil, 0)
@@ -268,6 +269,7 @@ func TestMainLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 }
 
 func TestSubLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	retryErr := errors.New("rate limited")
 	sub := &SubAgent{
@@ -304,6 +306,7 @@ func TestSubLLMStreamReducerEmitsSilentRetryError(t *testing.T) {
 }
 
 func TestSubLLMStreamReducerForwardsKeyInvalidation(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := &SubAgent{
 		instanceID: "agent-1",
@@ -334,6 +337,7 @@ func TestSubLLMStreamReducerForwardsKeyInvalidation(t *testing.T) {
 }
 
 func TestSubLLMStreamReducerEmitsRequestProgress(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := &SubAgent{
 		instanceID: "agent-1",
@@ -362,6 +366,7 @@ func TestSubLLMStreamReducerEmitsRequestProgress(t *testing.T) {
 }
 
 func TestSubLLMStreamReducerBatchesThinkingOnSharedCadence(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := &SubAgent{
 		instanceID: "agent-1",
@@ -456,6 +461,7 @@ func TestStreamContentReducerTagsStreamEventsWithSegmentIdentity(t *testing.T) {
 }
 
 func TestMainLLMStreamReducerForwardsCoolingDeadline(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	deadline := time.Now().Add(45 * time.Second)
 	reducer := a.newMainLLMStreamReducer(nil, "provider/model-1", "", nil, false, nil, 0)

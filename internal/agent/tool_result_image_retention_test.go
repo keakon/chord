@@ -15,6 +15,7 @@ import (
 // time would lose the image for good — including after a later switch back to
 // a vision model. The current model only decides whether the user is warned.
 func TestToolResultImagePartsSurviveTextOnlyModelCommit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	drainAgentEvents(a.Events())
 

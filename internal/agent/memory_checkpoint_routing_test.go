@@ -100,6 +100,7 @@ func promptSection(prompt, marker string) string {
 // the extract flag for its note), the long-session block follows
 // compactContextVisible. No sentence appears only when both are on.
 func TestMemoryCheckpointRoutingMatrix(t *testing.T) {
+	t.Parallel()
 	t.Run("neither", func(t *testing.T) {
 		a := routingAgent(t, false, false)
 		if a.memoryIsActive() || a.compactContextVisible() {
@@ -160,6 +161,7 @@ func TestMemoryCheckpointRoutingMatrix(t *testing.T) {
 // Checkpoint invisibility has three independent causes; each must hide the
 // long-session block through the real compactContextVisible gate.
 func TestCheckpointInvisibleCauses(t *testing.T) {
+	t.Parallel()
 	t.Run("feature disabled", func(t *testing.T) {
 		a := routingAgent(t, false, false)
 		a.tools.Register(tools.NewCompactContextTool(tools.CompactContextValidator{ContinuationStateMaxTokens: CompactContinuationStateMaxTokens}))

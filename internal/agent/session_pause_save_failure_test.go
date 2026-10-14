@@ -39,6 +39,7 @@ func assertFailedPauseKeepsOwnership(t *testing.T, a *MainAgent) {
 }
 
 func TestSessionPauseSnapshotDirectoryFailureCanRetryThroughMainLoop(t *testing.T) {
+	t.Parallel()
 	for _, initial := range []bool{true, false} {
 		name := "final_checkpoint"
 		if initial {
@@ -142,6 +143,7 @@ func TestSessionPauseSnapshotDirectoryFailureCanRetryThroughMainLoop(t *testing.
 }
 
 func TestSessionPauseStickyCloseFailureStaysFrozenThroughMainLoop(t *testing.T) {
+	t.Parallel()
 	a, provider := scenarioAgent(t)
 	lockPauseTestSession(t, a)
 	ledger := analytics.NewUsageLedger(a.SessionDir(), a.ContentRoot())
@@ -192,6 +194,7 @@ func TestSessionPauseStickyCloseFailureStaysFrozenThroughMainLoop(t *testing.T) 
 }
 
 func TestSessionPauseRetryRejectsConcurrentAdmissionAndStaleCompletion(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	id := testPauseIdentity(a)
 	active := &sessionPauseCommand{req: SessionPauseRequest{Identity: id}, result: make(chan error, 1)}

@@ -2,15 +2,16 @@ package tui
 
 import "testing"
 
-func benchmarkModelForSlashCompletionDropdown() Model {
-	m := benchmarkModelForView()
+func benchmarkModelForSlashCompletionDropdown(tb testing.TB) Model {
+	tb.Helper()
+	m := benchmarkModelForView(tb)
 	m.mode = ModeInsert
 	m.slashCompleteSelected = 2
 	return m
 }
 
 func BenchmarkRenderSlashCompletionDropdownOpen(b *testing.B) {
-	m := benchmarkModelForSlashCompletionDropdown()
+	m := benchmarkModelForSlashCompletionDropdown(b)
 	value := "/"
 	_ = m.renderSlashCompletionDropdown(value)
 	b.ReportAllocs()

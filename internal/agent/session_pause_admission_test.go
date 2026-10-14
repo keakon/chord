@@ -16,6 +16,7 @@ import (
 )
 
 func TestSubNativeFreezePreservesCompletedResponse(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	gate := parent.sessionExecutionGate()
 	provider := &hostedScriptProvider{respond: func(_ int, _ context.Context) (*message.Response, error) {
@@ -68,6 +69,7 @@ func TestSubNativeFreezePreservesCompletedResponse(t *testing.T) {
 }
 
 func TestSubStartedHostedToolPreservesUnknownOutcome(t *testing.T) {
+	t.Parallel()
 	for _, speculative := range []bool{false, true} {
 		name := "finalized"
 		if speculative {
@@ -154,6 +156,7 @@ func TestFrozenPipelineReportsUnstartedExecution(t *testing.T) {
 }
 
 func TestMainFrozenToolBatchPersistsNotStarted(t *testing.T) {
+	t.Parallel()
 	a := newGateTestMainAgent(t)
 	a.tools.Register(dummyTool{name: "sample_tool"})
 	a.ruleset = permission.Ruleset{{Permission: "sample_tool", Pattern: "*", Action: permission.ActionAllow}}
@@ -193,6 +196,7 @@ func TestMainFrozenToolBatchPersistsNotStarted(t *testing.T) {
 }
 
 func TestSubPausedNilResponsePreservesInterruptedText(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.sessionExecutionGate().Freeze()
 	sub.turn.appendPartialText("Partial response.")

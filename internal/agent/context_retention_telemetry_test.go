@@ -213,6 +213,7 @@ func TestSessionRetentionSignalsResetClearsWindow(t *testing.T) {
 }
 
 func TestActivateLoadedSessionRestartsRetentionSignals(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	// Session A accumulated signal totals across prepared requests.
 	a.setContextReductionStats(retentionStatsFixture())

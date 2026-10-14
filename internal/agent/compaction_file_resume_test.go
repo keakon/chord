@@ -9,6 +9,7 @@ import (
 // Activating a loaded session is the /resume boundary: checkpoint file
 // snapshots cached for the replaced session must not replay into it.
 func TestActivateLoadedSessionResetsCompactionFileReplay(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.compactionFiles.checkpoint = "previous checkpoint"
 	a.compactionFiles.root = "/previous-root"

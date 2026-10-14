@@ -58,6 +58,7 @@ func toolResultForCall(t *testing.T, sub *SubAgent, callID string) message.Messa
 }
 
 func TestResultContractViolationGetsBoundedRepair(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		result   map[string]any
@@ -133,6 +134,7 @@ func TestResultContractViolationGetsBoundedRepair(t *testing.T) {
 }
 
 func TestResultContractSummaryOnlyGetsRepair(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	setTestResultContract(t, sub, testResultContractSchema)
 	installContractFollowUpLLM(t, sub)
@@ -158,6 +160,7 @@ func TestResultContractSummaryOnlyGetsRepair(t *testing.T) {
 }
 
 func TestResultContractMissingGroupIsViolationNotDegraded(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	setTestResultContract(t, sub, testResultContractSchema)
 	installContractFollowUpLLM(t, sub)
@@ -222,6 +225,7 @@ func TestResultContractMissingGroupIsViolationNotDegraded(t *testing.T) {
 }
 
 func TestResultContractBudgetIsIndependentOfArgumentBudget(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	setTestResultContract(t, sub, testResultContractSchema)
 	installContractFollowUpLLM(t, sub)
@@ -262,6 +266,7 @@ func TestResultContractBudgetIsIndependentOfArgumentBudget(t *testing.T) {
 }
 
 func TestResultContractSpendingDoesNotConsumeArgumentBudget(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	setTestResultContract(t, sub, testResultContractSchema)
 	installContractFollowUpLLM(t, sub)
@@ -286,6 +291,7 @@ func TestResultContractSpendingDoesNotConsumeArgumentBudget(t *testing.T) {
 }
 
 func TestResultContractValidatesRefContent(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	setTestResultContract(t, sub, testResultContractSchema)
 	// Spend the budget so the rejection is terminal and its diagnostics are
@@ -332,6 +338,7 @@ func TestResultContractValidatesRefContent(t *testing.T) {
 }
 
 func TestResultContractAcceptsUndeclaredFieldsWithoutRewriting(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	setTestResultContract(t, sub, testResultContractSchema)
 
@@ -445,6 +452,7 @@ func TestResultContractDiagnosticValuesAreBounded(t *testing.T) {
 }
 
 func TestResultContractIntegrityFailureIsTerminalWithoutBudget(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	setTestResultContract(t, sub, testResultContractSchema)
 
@@ -491,6 +499,7 @@ func TestResultContractIntegrityFailureIsTerminalWithoutBudget(t *testing.T) {
 }
 
 func TestResultContractPersistsToDurableRecord(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-contract-persist")
 	canonical := setTestResultContract(t, sub, testResultContractSchema)
@@ -524,6 +533,7 @@ func TestMergeDurableTaskRecordsKeepsResultSchema(t *testing.T) {
 }
 
 func TestResultContractRehydratesAndRendersPrompt(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setCachedWorkDirForTest(a, a.contentRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -571,6 +581,7 @@ func TestResultContractRehydratesAndRendersPrompt(t *testing.T) {
 }
 
 func TestRehydrateDropsUnreadableResultContract(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setCachedWorkDirForTest(a, a.contentRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -609,6 +620,7 @@ func TestRehydrateDropsUnreadableResultContract(t *testing.T) {
 }
 
 func TestCreateSubAgentRejectsUncompilableResultSchema(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 1)
 

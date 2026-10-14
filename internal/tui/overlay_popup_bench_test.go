@@ -7,7 +7,7 @@ import (
 )
 
 func BenchmarkModelViewAtMentionPopupOpen(b *testing.B) {
-	m := benchmarkModelForView()
+	m := benchmarkModelForView(b)
 	m.mode = ModeInsert
 	m.atMentionOpen = true
 	m.atMentionQuery = "doc"

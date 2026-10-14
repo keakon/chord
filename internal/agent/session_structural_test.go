@@ -14,6 +14,7 @@ import (
 )
 
 func TestSessionStructuralFreezesRuntimeMutations(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.sessionExecutionGate().Freeze()
 	if _, err := a.CreateSubAgent(context.Background(), tools.SubAgentRequest{AgentType: "worker", Description: "Sample task"}); !executiongate.IsPaused(err) {
@@ -40,6 +41,7 @@ func TestSessionStructuralFreezesRuntimeMutations(t *testing.T) {
 }
 
 func TestSessionStructuralExistingToolMayCompleteChildRegistration(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	gate := a.sessionExecutionGate()
 	lease, err := gate.TryBegin(executiongate.Tool, "task-1")
@@ -63,6 +65,7 @@ func TestSessionStructuralExistingToolMayCompleteChildRegistration(t *testing.T)
 }
 
 func TestSessionStructuralPreparationBlocksMutationsBeforeFreeze(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.pause.mu.Lock()
 	a.pause.status.State = recovery.SessionPausePreparing
@@ -79,6 +82,7 @@ func TestSessionStructuralPreparationBlocksMutationsBeforeFreeze(t *testing.T) {
 }
 
 func TestMainPreparationFreezeInterruptsHookWithoutCancellingTurn(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	entered := make(chan struct{})
 	a.SetBusyPreparationHook(func(ctx context.Context) error {
@@ -112,6 +116,7 @@ func TestMainPreparationFreezeInterruptsHookWithoutCancellingTurn(t *testing.T) 
 }
 
 func TestAdmittedChildCreationFinishesDurableRegistrationAcrossFreeze(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 3)
 	factoryEntered := make(chan struct{})

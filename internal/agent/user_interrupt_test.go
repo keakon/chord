@@ -9,6 +9,7 @@ import (
 )
 
 func TestCancelCurrentTurnKeepsPendingInputsQueuedAndFailsToolCalls(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -93,6 +94,7 @@ func TestCancelCurrentTurnKeepsPendingInputsQueuedAndFailsToolCalls(t *testing.T
 }
 
 func TestCancelCurrentTurnInterruptsRunningSubAgents(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sub := newPersistenceTestSubAgent(a, "agent-1")
@@ -149,6 +151,7 @@ func TestCancelCurrentTurnInterruptsRunningSubAgents(t *testing.T) {
 }
 
 func TestCancelCurrentTurnReportsIdleSubAgentCancellationAndSnapshotsState(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-7")
 	sub.setState(SubAgentStateIdle, "restored idle worker")
@@ -206,6 +209,7 @@ func parkedWaitingDescendantSettlement(t *testing.T, a *MainAgent, taskID string
 // record, and only repairRestoredTaskTree — which runs at restore — converged
 // it.
 func TestUserCancelSettlesParkedWaitingDescendantOwner(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"task-owner": {
@@ -263,6 +267,7 @@ func TestUserCancelSettlesParkedWaitingDescendantOwner(t *testing.T) {
 // non-terminal joined child keeps waiting. The cancellation did not resolve
 // its wait, so settling it would abandon work the user never asked to stop.
 func TestUserCancelKeepsWaitingDescendantOwnerWithOutstandingChild(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"task-owner": {
@@ -318,6 +323,7 @@ func TestUserCancelKeepsWaitingDescendantOwnerWithOutstandingChild(t *testing.T)
 // ancestors, and each level's wait is only resolved once its own joined
 // children are terminal.
 func TestUserCancelSettlesParkedAncestorChain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"task-root": {

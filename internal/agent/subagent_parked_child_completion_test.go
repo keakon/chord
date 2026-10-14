@@ -19,6 +19,7 @@ import (
 // owned queue (which used to suppress global idle forever), and it is not
 // forwarded to the main inbox.
 func TestDescendantCompletionWakesParkedWaitingMainOwner(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	// Waking a parked owner rehydrates its durable task record, which needs the
 	// agent definition and an LLM client factory, mirroring the harness used by
@@ -189,6 +190,7 @@ func TestDescendantCompletionWakesParkedWaitingMainOwner(t *testing.T) {
 // parked waiting_main owner holds a completion whose sender is no descendant of
 // it, so routing refuses on every drain; global idle must still fire.
 func TestUnroutableOwnedMailboxDoesNotSuppressGlobalIdle(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	ownerTaskID := "adhoc-unroutable-owner"
@@ -303,6 +305,7 @@ func TestUnroutableOwnedMailboxDoesNotSuppressGlobalIdle(t *testing.T) {
 // descendant message of the parked owner. Routing must refuse it, the owner
 // must stay parked, and the message must remain queued (and unroutable).
 func TestNonDescendantMailboxStaysQueuedForParkedWaitingMainOwner(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	ownerTaskID := "adhoc-foreign-owner"

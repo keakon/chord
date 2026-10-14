@@ -225,7 +225,7 @@ func TestHeadlessStatusSeqOrdersSnapshotAgainstPushes(t *testing.T) {
 	backend := sessionDirBackend{mockBackend: &mockBackend{}, dir: "/tmp/chord/sess-new"}
 
 	// Snapshot taken before the switch: still the old session.
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if stale == nil {
@@ -296,7 +296,7 @@ func TestHeadlessCommandPathRoleChangeSeqOrdersSnapshot(t *testing.T) {
 	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
 	state := &headlessState{role: "builder", subscriptions: map[string]bool{"role_change": true}}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if stale == nil {
@@ -335,7 +335,7 @@ func TestHeadlessCommandPathRoleChangeSeqOrdersSnapshot(t *testing.T) {
 func TestHeadlessStatusSnapshotRoleMatchesSeqAgainstEventLoop(t *testing.T) {
 	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
 	state := &headlessState{role: "builder", subscriptions: map[string]bool{"role_change": true}}
-	to := newTestOut()
+	to := newTestOut(t)
 
 	const goroutines = 6
 	const statusesPer = 24
@@ -397,7 +397,7 @@ func TestHeadlessStatusSnapshotIgnoresStaleRoleBackfill(t *testing.T) {
 		release:     make(chan struct{}),
 	}
 	state := &headlessState{subscriptions: map[string]bool{"role_change": true}}
-	to := newTestOut()
+	to := newTestOut(t)
 
 	done := make(chan struct{})
 	go func() {
@@ -447,7 +447,7 @@ func TestHeadlessCommandPathHandoffCancelledSeqOrdersSnapshot(t *testing.T) {
 		pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-1", PlanPath: "/tmp/plan.md"},
 	}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if stale == nil {
@@ -488,7 +488,7 @@ func TestHeadlessCommandPathAutoDenyConfirmSeqOrdersSnapshot(t *testing.T) {
 		pendingConfirm: &headlessConfirmPayload{RequestID: "confirm-1", ToolName: "shell"},
 	}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if stale == nil {
@@ -525,7 +525,7 @@ func TestHeadlessQuestionResolvedSeqOrdersSnapshot(t *testing.T) {
 		questions: map[string]*headlessQuestionPayload{"question-1": {RequestID: "question-1", Question: "which file?"}},
 	}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if stale == nil {
@@ -561,7 +561,7 @@ func TestHeadlessConfirmCommandSeqOrdersSnapshot(t *testing.T) {
 		pendingConfirm: &headlessConfirmPayload{RequestID: "confirm-2", ToolName: "shell"},
 	}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if stale == nil {
@@ -593,7 +593,7 @@ func TestHeadlessCommandPathAutoCancelHandoffWithoutSubscriptionSeqOrdersSnapsho
 		pendingHandoff: &headlessHandoffPayload{RequestID: "handoff-2", PlanPath: "/tmp/plan.md"},
 	}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if stale == nil {
@@ -621,7 +621,7 @@ func TestHeadlessCommandPathAutoCancelHandoffWithoutSubscriptionSeqOrdersSnapsho
 // status_response reports the tracked session id, falling back to the startup
 // snapshot only before any restore was observed.
 func TestHeadlessStatusReportsTrackedSession(t *testing.T) {
-	to := newTestOut()
+	to := newTestOut(t)
 	state := &headlessState{sessionID: "sess-new"}
 
 	handleHeadlessCommand(headlessCommand{Type: "status"}, &mockBackend{}, state, to.writer())
@@ -719,7 +719,7 @@ func TestHeadlessContextNoticeRespectsSubscription(t *testing.T) {
 // The new push types are part of the subscribable contract: an explicit
 // subscribe listing them forwards them, and unknown names stay ignored.
 func TestHeadlessSubscribeAcceptsNewPushTypes(t *testing.T) {
-	to := newTestOut()
+	to := newTestOut(t)
 	state := &headlessState{}
 
 	handleHeadlessCommand(headlessCommand{
@@ -759,7 +759,7 @@ func TestHeadlessUnsubscribedEventLoopMutationBumpsSeq(t *testing.T) {
 		subscriptions: map[string]bool{"idle": true},
 	}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if stale == nil {
@@ -792,7 +792,7 @@ func TestHeadlessCommandPathRoleChangeWithoutSubscriptionBumpsSeq(t *testing.T) 
 	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
 	state := &headlessState{role: "builder", subscriptions: map[string]bool{"idle": true}}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	stale := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if stale == nil {
@@ -985,7 +985,7 @@ func TestHeadlessStatusReportsRunningJobsForTheActiveSession(t *testing.T) {
 
 	statusJobs := func() any {
 		t.Helper()
-		to := newTestOut()
+		to := newTestOut(t)
 		backend := sessionDirBackend{mockBackend: &mockBackend{}, dir: active}
 		handleHeadlessCommand(headlessCommand{Type: "status"}, backend, &headlessState{sessionID: filepath.Base(active)}, to.writer())
 		env := findHeadlessEnvelopeValue(to.drain(), "status_response")

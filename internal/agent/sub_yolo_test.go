@@ -55,6 +55,7 @@ func subYoloApplyPermission(t *testing.T, sub *SubAgent, toolName string) error 
 // ordinary tools stop prompting the user while the parent YOLO is on and go
 // back to prompting the moment the parent switches it off.
 func TestSubAgentInheritsParentYoloDowngradesAskToAllow(t *testing.T) {
+	t.Parallel()
 	a, sub := newSubAgentWithRoleRules(t, "shell: ask\n")
 	var confirmCalls atomic.Int32
 	a.confirmFn = subYoloConfirmStub(&confirmCalls)
@@ -87,6 +88,7 @@ func TestSubAgentInheritsParentYoloDowngradesAskToAllow(t *testing.T) {
 // relaxes ask only: a configured deny (here a read-only role's Write deny)
 // still blocks the SubAgent.
 func TestSubAgentYoloInheritanceKeepsDenyGuardrail(t *testing.T) {
+	t.Parallel()
 	a, sub := newSubAgentWithRoleRules(t, "write: deny\n")
 	var confirmCalls atomic.Int32
 	a.confirmFn = subYoloConfirmStub(&confirmCalls)
@@ -105,6 +107,7 @@ func TestSubAgentYoloInheritanceKeepsDenyGuardrail(t *testing.T) {
 // agent: a delegate ask stops prompting while the parent YOLO is on and goes
 // back to prompting the moment the parent switches it off.
 func TestSubAgentYoloInheritanceRelaxesMechanismAsk(t *testing.T) {
+	t.Parallel()
 	a, sub := newSubAgentWithRoleRules(t, "delegate: ask\n")
 	var confirmCalls atomic.Int32
 	a.confirmFn = subYoloConfirmStub(&confirmCalls)
@@ -148,6 +151,7 @@ func TestSubAgentYoloInheritanceRelaxesMechanismAsk(t *testing.T) {
 // effectiveRuleset instead of snapshotRuleset, which would silently make every
 // delegated worker writable under YOLO.
 func TestYoloScopeAsymmetryBetweenMainAgentAndDelegatedWorker(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.agentConfigs = map[string]*config.AgentConfig{
 		"planner": {Name: "planner", Permission: parsePermissionNode(t, "write: deny\n")},

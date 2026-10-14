@@ -16,6 +16,7 @@ import (
 )
 
 func TestCompactionFileReplayPreservesPrefixAndLatestVersion(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "notes.md")
 	write := func(text string) {
@@ -89,6 +90,7 @@ func TestCompactionFileReplayPreservesPrefixAndLatestVersion(t *testing.T) {
 }
 
 func TestCompactionFileReplayRevocationAndDeletion(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"deny", "ask", "delete", "escape"} {
 		t.Run(action, func(t *testing.T) {
 			root := t.TempDir()
@@ -171,6 +173,7 @@ func enableTestCheckpointFileReplay(a *MainAgent) {
 }
 
 func TestCheckpointFileReplayRequiresObservedCacheHitsPerModel(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	enableTestCheckpointFileReplay(a)
 	if !a.checkpointFileReplayAllowed("p/m") {
@@ -201,6 +204,7 @@ func TestCheckpointFileReplayRequiresObservedCacheHitsPerModel(t *testing.T) {
 // not queue cache hints: fallback targets rebuild tuning from model config, so
 // the hints would only leak into the next request.
 func TestFallbackSnapshotStripLeavesNextRequestTuningUntouched(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	provider := &recordingLoopTuningProvider{}
 	providerCfg := llm.NewProviderConfig("anthropic", config.ProviderConfig{

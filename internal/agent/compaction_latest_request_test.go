@@ -317,6 +317,7 @@ func TestCompactionPreservesDetailedRequestAcrossCheckpoints(t *testing.T) {
 }
 
 func TestModelDrivenCheckpointPreservesDetailedRequest(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	request := strings.Repeat("Preserve the documented behavior. ", 40) +
 		"Reject duplicate identifiers without changing the stored data. " +

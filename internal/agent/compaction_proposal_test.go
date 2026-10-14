@@ -78,6 +78,7 @@ func TestModelDrivenProposalAppliedIsTerminal(t *testing.T) {
 }
 
 func TestModelDrivenProposalTransitionPersistsSnapshotOnce(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.armModelDrivenProposal("call-1", tools.CompactContextArgs{ActiveObjective: "x"}, `{"active_objective":"x"}`, "accepted by runtime validation")
 	// The transition updates status/reason/updatedAt as one step, and the

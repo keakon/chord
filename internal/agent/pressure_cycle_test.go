@@ -12,6 +12,7 @@ import (
 )
 
 func TestPressureCycleIdentityAndStageTransitions(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	key := a.currentOverlayWindowKey()
@@ -82,6 +83,7 @@ func TestPressureCycleIdentityAndStageTransitions(t *testing.T) {
 }
 
 func TestPressureCycleRecordsOneDurableRowPerLevel(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000}) // above the reminder line, below the threshold
@@ -201,6 +203,7 @@ func TestAdoptedPressureRowRecoversLevels(t *testing.T) {
 // threshold crossing is still a message the model has not received, so the
 // revived cycle writes its card.
 func TestPressureCycleAdoptionKeepsOtherLevelsRecordable(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
@@ -246,6 +249,7 @@ func TestPressureCycleAdoptionKeepsOtherLevelsRecordable(t *testing.T) {
 }
 
 func TestPressureCycleAdoptsRestoredRow(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	a.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: 5000})
@@ -317,6 +321,7 @@ func TestPressureCycleAdoptsRestoredRow(t *testing.T) {
 // otherwise the next crossing would revive an identity the transcript no longer
 // carries and skip the card that documents it.
 func TestPressureCycleStaleRestoredRowReleasesAdoption(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	enableTestCompactContext(a)
@@ -400,6 +405,7 @@ func lastPressureCycleEvent(t *testing.T, events []analytics.UsageEvent) analyti
 // the terminal journal record carries those instants — absent, never empty,
 // when an action did not happen.
 func TestPressureCyclePreparationAuditDatesEachAction(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	var events []analytics.UsageEvent
@@ -479,6 +485,7 @@ func TestPressureCyclePreparationAuditDatesEachAction(t *testing.T) {
 // preparation is audited only while a nudge window is live, the first instant
 // wins, and only agent-owned notes or plans count as externalized state.
 func TestPressurePreparationAuditDropsMarksOutsideACycle(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(8192, 8192, 8192, 0, 0.9)
 	first := time.Unix(1_700_000_000, 0).UTC()

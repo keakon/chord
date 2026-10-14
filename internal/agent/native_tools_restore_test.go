@@ -11,6 +11,7 @@ import (
 )
 
 func TestNativeSessionRestorePersistsUnknownMainReceipt(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dir := testProjectSessionDir(t, root, "native")
 	rm := recovery.NewRecoveryManager(dir)
@@ -65,6 +66,7 @@ func TestNativeRestoredTaskReceiptUsesDurableIdentity(t *testing.T) {
 }
 
 func TestNativeFailureReceiptsAreNotDuplicated(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	receipt := &message.NativeToolHistory{Target: "sample/test-model", OutcomeUnknown: true, RequestIDs: []string{"request-1"}}
 	a.persistNativeFailure(receipt)

@@ -343,6 +343,7 @@ func TestOpenIssueHelpersHandleEmptyInputs(t *testing.T) {
 // still historical, still not a current blocker — because the appendix is the
 // only place the older chain's machine state lives by then.
 func TestCarriedOpenIssueSurvivesUsageSummaryAppendixWithoutUpgrade(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	priorState := checkpointTypedState{
 		Decisions: []string{"d1: archived decision"},
@@ -397,6 +398,7 @@ func TestCarriedOpenIssueSurvivesUsageSummaryAppendixWithoutUpgrade(t *testing.T
 // while unretired, and must leave both buckets once retired — a resume of the
 // chain must not resurrect it.
 func TestOpenIssueDemotionSurvivesDurableApplyChain(t *testing.T) {
+	t.Parallel()
 	agent := newTestMainAgent(t, t.TempDir())
 	agent.newTurn("")
 	agent.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "implement and verify the parser"})

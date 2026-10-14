@@ -120,7 +120,7 @@ func TestHeadlessInputRejectedBeforeInteractions(t *testing.T) {
 		t.Run(content, func(t *testing.T) {
 			backend := &rejectingInputBackend{}
 			state := &headlessState{questions: map[string]*headlessQuestionPayload{"question-1": {RequestID: "question-1"}}}
-			out := newTestOut()
+			out := newTestOut(t)
 			handleHeadlessCommand(headlessCommand{Type: "send", Content: content, RequestID: "input-1"}, backend, state, out.writer())
 			env := findHeadlessEnvelopeValue(out.drain(), "input_result")
 			if env == nil || env.Seq == 0 || env.Payload.(map[string]any)["status"] != agent.InputRejected {

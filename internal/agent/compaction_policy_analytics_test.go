@@ -8,6 +8,7 @@ import (
 )
 
 func TestContextDiagnosticEventsCarryStructuredResults(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	var events []analytics.UsageEvent
 	a.SetUsageEventSink(func(event analytics.UsageEvent) { events = append(events, event) })
@@ -27,6 +28,7 @@ func TestContextDiagnosticEventsCarryStructuredResults(t *testing.T) {
 }
 
 func TestCompactionPolicyAnalyticsEventsRecordedInTrackerAndLedger(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetProviderModelRef("p/current")
@@ -74,6 +76,7 @@ func TestCompactionPolicyAnalyticsEventsRecordedInTrackerAndLedger(t *testing.T)
 }
 
 func TestCompactionFailureAnalyticsEventRecordedInTrackerAndLedger(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetProviderModelRef("sample/gpt-5.5")
@@ -124,6 +127,7 @@ func TestCompactionFailureAnalyticsEventRecordedInTrackerAndLedger(t *testing.T)
 }
 
 func TestOversizeRecoveryAnalyticsEventRecordedInTrackerAndLedger(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetProviderModelRef("sample/gpt-5.5")
@@ -168,6 +172,7 @@ func TestOversizeRecoveryAnalyticsEventRecordedInTrackerAndLedger(t *testing.T) 
 }
 
 func TestCompactionFailureAnalyticsEventMarksLengthRecoveryTrigger(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.compactionState.trigger = compactionTriggerLengthRecovery

@@ -40,6 +40,7 @@ func TestEvidenceItemTopicsExtractsBoundedContentMap(t *testing.T) {
 }
 
 func TestFormatHistoryMapLinesPairsPathWithTopics(t *testing.T) {
+	t.Parallel()
 	sessionDir := t.TempDir()
 	a := newTestMainAgent(t, sessionDir)
 	a.sessionDir = sessionDir
@@ -86,6 +87,7 @@ func TestFormatHistoryMapLinesToleratesMissingMeta(t *testing.T) {
 // checkpoint never advertises an archive that a cancelled worker is about to
 // delete: pending_apply entries are dropped unless they belong to this draft.
 func TestListCheckpointHistoryReferencesSkipsForeignPendingArchives(t *testing.T) {
+	t.Parallel()
 	sessionDir := t.TempDir()
 	a := newTestMainAgent(t, sessionDir)
 	a.sessionDir = sessionDir

@@ -70,6 +70,7 @@ func archivedPayload(t *testing.T, reduced string) string {
 // the new content in its arguments and re-reading returns the new bytes, so the
 // read output is the last record of the old ones and must be archived.
 func TestStaleReadAfterWholeFileWriteIsArchived(t *testing.T) {
+	t.Parallel()
 	a, msgs := newStaleReadArchiveAgent(t)
 	original := msgs[2].Content
 	msgs = append(msgs,
@@ -94,6 +95,7 @@ func TestStaleReadAfterWholeFileWriteIsArchived(t *testing.T) {
 // only record of them. This is the invalidation cause that the two reduction
 // contexts used to reach without an ArchiveDir, so it could not archive at all.
 func TestStaleReadAfterMutatingShellIsArchived(t *testing.T) {
+	t.Parallel()
 	a, msgs := newStaleReadArchiveAgent(t)
 	original := msgs[2].Content
 
@@ -125,6 +127,7 @@ func TestStaleReadAfterMutatingShellIsArchived(t *testing.T) {
 
 // A delete leaves no later revision to re-read at all, so the same rule applies.
 func TestStaleReadAfterDeleteIsArchived(t *testing.T) {
+	t.Parallel()
 	a, msgs := newStaleReadArchiveAgent(t)
 	original := msgs[2].Content
 	msgs = append(msgs,
@@ -142,6 +145,7 @@ func TestStaleReadAfterDeleteIsArchived(t *testing.T) {
 // messages are never reduced, so the pre-edit content stays reachable without
 // an archive. Archiving here would write a file per edited read for nothing.
 func TestStaleReadAfterEditIsNotArchived(t *testing.T) {
+	t.Parallel()
 	a, msgs := newStaleReadArchiveAgent(t)
 	original := msgs[2].Content
 	msgs = append(msgs,
@@ -164,6 +168,7 @@ func TestStaleReadAfterEditIsNotArchived(t *testing.T) {
 // A read superseded by a newer read of the same range is redundant, not lost:
 // the newer copy holds the same bytes, so no archive is needed.
 func TestSupersededReadIsNotArchived(t *testing.T) {
+	t.Parallel()
 	a, msgs := newStaleReadArchiveAgent(t)
 	body := strings.Repeat("const observedRevisionLine = 1\n", 200)
 	msgs = append(msgs,

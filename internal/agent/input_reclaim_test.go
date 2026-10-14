@@ -12,6 +12,7 @@ func submitMainDraftForTest(a *MainAgent, draftID string, parts []message.Conten
 	return a.SubmitUserInput(SubmitInput{OperationID: makeRequestID(), DraftID: draftID, Target: a.InputDeliveryTarget(), DeliveryPolicy: recovery.InputDeliveryNextRequest, Parts: parts})
 }
 func TestInputDeliveryDraftDeletionUsesIdentityAndRevision(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
 	first := submitDeliveryForTest(t, a, "first", recovery.InputDeliveryNextRequest)
@@ -26,6 +27,7 @@ func TestInputDeliveryDraftDeletionUsesIdentityAndRevision(t *testing.T) {
 	}
 }
 func TestInputDeliveryIdleDraftConsumedIdentity(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.handleDeliveryOperation(&deliveryOperation{submit: &SubmitInput{OperationID: "submit", DraftID: "draft", Target: a.InputDeliveryTarget(), Content: "sample"}})
 	for range 20 {

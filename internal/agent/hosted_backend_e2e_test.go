@@ -70,6 +70,7 @@ func codeExecutionSSE() string {
 // configuration, declaration placement, hosted capture, local tool result —
 // without any tool-specific Go code.
 func TestHostedToolConfigOnlyEndToEnd(t *testing.T) {
+	t.Parallel()
 	for _, paused := range []bool{false, true} {
 		t.Run(fmt.Sprintf("pause=%t", paused), func(t *testing.T) { testHostedToolConfigOnlyEndToEnd(t, paused) })
 	}

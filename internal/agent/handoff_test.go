@@ -50,6 +50,7 @@ func setupHandoffTurn(t *testing.T, a *MainAgent, planPath string) string {
 }
 
 func TestHandoffToolResultLeavesAgentIdleForUserSelection(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 
@@ -104,6 +105,7 @@ func prepareExecutableHandoffAgent(t *testing.T, a *MainAgent) {
 // execution session must start from the plan bootstrap message alone: a tool
 // result stranded there without its call breaks strict provider pairing.
 func TestHandoffApproveSettlesResultBeforeSessionSwitch(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	planPath := writePlanFile(t, projectRoot)
 	a := newTestMainAgent(t, projectRoot)
@@ -180,6 +182,7 @@ func TestHandoffApproveSettlesResultBeforeSessionSwitch(t *testing.T) {
 // or the current active role) cannot be executed: the deferred tool result is
 // recorded as an error instead of success, and no plan execution starts.
 func TestHandoffApproveUnavailableTargetFailsWithoutSuccess(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	planPath := writePlanFile(t, projectRoot)
 	a := newTestMainAgent(t, projectRoot)
@@ -226,6 +229,7 @@ func TestHandoffApproveUnavailableTargetFailsWithoutSuccess(t *testing.T) {
 // anything the user typed while the handoff prompt was open until some later
 // idle transition happened to pick it up.
 func TestHandoffApproveUnavailableTargetDrainsQueuedInput(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	planPath := writePlanFile(t, projectRoot)
 	a := newTestMainAgent(t, projectRoot)
@@ -257,6 +261,7 @@ func TestHandoffApproveUnavailableTargetDrainsQueuedInput(t *testing.T) {
 // Staging performs no irreversible mutation first: the planner session keeps
 // its role, history, and the adjacent call/result pair intact.
 func TestHandoffApproveFailedPreparationFailsAsError(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	prepareExecutableHandoffAgent(t, a)
@@ -298,6 +303,7 @@ func TestHandoffApproveFailedPreparationFailsAsError(t *testing.T) {
 }
 
 func TestHandoffApproveModelPreparationFailurePreservesPlannerSession(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	planPath := writePlanFile(t, projectRoot)
 	a := newTestMainAgent(t, projectRoot)
@@ -326,6 +332,7 @@ func TestHandoffApproveModelPreparationFailurePreservesPlannerSession(t *testing
 }
 
 func TestHandoffApproveBusyPreparationFailurePreservesPlannerSession(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	planPath := writePlanFile(t, projectRoot)
 	a := newTestMainAgent(t, projectRoot)
@@ -367,6 +374,7 @@ func assertHandoffErrorResult(t *testing.T, a *MainAgent) {
 // the active role is the only configured main-mode agent the list is empty:
 // handing off to the current role is never offered or silently substituted.
 func TestAvailableAgentsExcludesCurrentRole(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {Name: "builder", Mode: config.AgentModeMain},
@@ -394,6 +402,7 @@ func TestAvailableAgentsExcludesCurrentRole(t *testing.T) {
 }
 
 func TestHandoffDenyEmitsRejectionAndAppendsUserMessage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	reqID := a.pendingHandoff.RequestID
@@ -429,6 +438,7 @@ func TestHandoffDenyEmitsRejectionAndAppendsUserMessage(t *testing.T) {
 }
 
 func TestHandoffCancelEmitsCancelledResult(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	reqID := a.pendingHandoff.RequestID
@@ -461,6 +471,7 @@ func TestHandoffCancelEmitsCancelledResult(t *testing.T) {
 // longer matches the pending handoff (e.g. after a new turn started) is
 // dropped instead of settling a wrong wait or executing the plan.
 func TestHandoffStaleResolutionIgnored(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 
@@ -478,6 +489,7 @@ func TestHandoffStaleResolutionIgnored(t *testing.T) {
 // TestHandoffUserWaitSettled verifies the handoff selector wait is recorded as
 // User wait (not tool time) once the user cancels the handoff.
 func TestHandoffUserWaitSettled(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	reqID := a.pendingHandoff.RequestID
@@ -502,6 +514,7 @@ func TestHandoffUserWaitSettled(t *testing.T) {
 // handoff tool call that would break strict provider pairing on the next
 // request.
 func TestHandoffAbandonEmitsCancelledResult(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 
@@ -527,6 +540,7 @@ func TestHandoffAbandonEmitsCancelledResult(t *testing.T) {
 }
 
 func TestHandoffShutdownSettlesPendingResult(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 

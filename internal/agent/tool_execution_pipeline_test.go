@@ -1014,6 +1014,7 @@ func newToolPipelineConsistencyAgents(t *testing.T) (*MainAgent, *SubAgent) {
 }
 
 func TestMainAndSubToolExecutionPipelineConsistentValidation(t *testing.T) {
+	t.Parallel()
 	mainAgent, subAgent := newToolPipelineConsistencyAgents(t)
 	tests := []struct {
 		name        string
@@ -1075,6 +1076,7 @@ func TestMainAndSubToolExecutionPipelineConsistentValidation(t *testing.T) {
 // is taken after executeToolCall returns. The same anchor must be used by the
 // MainAgent and SubAgent pipelines.
 func TestToolDurationAnchorCoversFullExecution(t *testing.T) {
+	t.Parallel()
 	mainAgent, subAgent := newToolPipelineConsistencyAgents(t)
 	call := message.ToolCall{ID: "call-1", Name: "RequiredValue", Args: json.RawMessage(`{"value":"ok"}`)}
 	for _, exec := range []struct {
@@ -1144,6 +1146,7 @@ func (e fixedToolHookEngine) RunAutomation(context.Context, hook.Envelope) ([]ho
 func (e fixedToolHookEngine) HasSyncHooks(string) bool { return false }
 
 func TestMainAndSubToolExecutionPipelineConsistentPermissionDecisions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		ruleset     permission.Ruleset
@@ -1243,6 +1246,7 @@ func TestToolExecutionPipelineRejectsMalformedOrUnknownToolBeforePermission(t *t
 }
 
 func TestMainAndSubToolExecutionPipelineConsistentHookHandling(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		hookResult  *hook.Result

@@ -14,6 +14,7 @@ import (
 )
 
 func TestSessionRestoredRebuildSchedulesStartupDeferredTranscriptPreheat(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+32)
 	for i := range startupTranscriptWindowMinBlocks + 32 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -33,6 +34,7 @@ func TestSessionRestoredRebuildSchedulesStartupDeferredTranscriptPreheat(t *test
 }
 
 func TestStartupDeferredTranscriptPreheatPopulatesHaloMetadata(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
@@ -78,6 +80,7 @@ func TestStartupDeferredTranscriptPreheatPopulatesHaloMetadata(t *testing.T) {
 }
 
 func TestDeferredWindowSwitchRestartsPreheatForNewHalo(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 24))})
@@ -126,6 +129,7 @@ func TestDeferredWindowSwitchRestartsPreheatForNewHalo(t *testing.T) {
 }
 
 func TestStartupRestoredDeferredTranscriptUsesUpdatedWorkDirForRelativeToolPath(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
 	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
@@ -175,6 +179,7 @@ func TestStartupRestoredDeferredTranscriptUsesUpdatedWorkDirForRelativeToolPath(
 }
 
 func TestApplyStartupDeferredTranscriptWindowPreservesColdBlocksForLaterMaterialization(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
 	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
@@ -238,6 +243,7 @@ func TestApplyStartupDeferredTranscriptWindowPreservesColdBlocksForLaterMaterial
 }
 
 func TestDeferredStartupTranscriptSendDraftExtendsVisibleTailWindow(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
 	for i := range startupTranscriptWindowMinBlocks + 120 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -296,6 +302,7 @@ func TestDeferredStartupTranscriptSendDraftExtendsVisibleTailWindow(t *testing.T
 }
 
 func TestDeferredStartupTranscriptForkKeepsOriginalVisibleMsgIndexAfterSendDraft(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+40)
 	for i := range startupTranscriptWindowMinBlocks + 40 {
 		if i%2 == 0 {
@@ -354,6 +361,7 @@ func TestDeferredStartupTranscriptForkKeepsOriginalVisibleMsgIndexAfterSendDraft
 }
 
 func TestStartupRestoredLargeTranscriptUsesWindowedTailUntilHistoryNeeded(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
 	for i := range startupTranscriptWindowMinBlocks + 24 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -400,6 +408,7 @@ func TestStartupRestoredLargeTranscriptUsesWindowedTailUntilHistoryNeeded(t *tes
 }
 
 func TestDeferredStartupTranscriptLiveAppendOutsideTailKeepsPagingContiguous(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
 	for i := range startupTranscriptWindowMinBlocks + 120 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -460,6 +469,7 @@ func TestDeferredStartupTranscriptLiveAppendOutsideTailKeepsPagingContiguous(t *
 }
 
 func TestDeferredStartupTranscriptWindowSwitchKeepsStreamingAssistantContent(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
 	for i := range startupTranscriptWindowMinBlocks + 24 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -508,6 +518,7 @@ func TestDeferredStartupTranscriptWindowSwitchKeepsStreamingAssistantContent(t *
 }
 
 func TestDeferredStartupTranscriptWindowSwitchKeepsLiveToolResult(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
 	for i := range startupTranscriptWindowMinBlocks + 24 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -572,6 +583,7 @@ func TestDeferredStartupTranscriptWindowSwitchKeepsLiveToolResult(t *testing.T) 
 }
 
 func TestDeferredStartupTranscriptWindowSwitchDoesNotResurrectRolledBackAssistant(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
 	for i := range startupTranscriptWindowMinBlocks + 24 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -609,6 +621,7 @@ func TestDeferredStartupTranscriptWindowSwitchDoesNotResurrectRolledBackAssistan
 }
 
 func TestFocusedAgentSwitchWindowsLargeTranscriptsAfterDeferredStartup(t *testing.T) {
+	stubTUITicks(t)
 	mainMessages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+24)
 	for i := range startupTranscriptWindowMinBlocks + 24 {
 		mainMessages = append(mainMessages, message.Message{Role: "assistant", Content: fmt.Sprintf("main-%03d", i)})
@@ -667,6 +680,7 @@ func TestFocusedAgentSwitchWindowsLargeTranscriptsAfterDeferredStartup(t *testin
 }
 
 func TestDeferredStartupTranscriptRetentionShrinksViewportHotBudgetUntilHydrate(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 64))})
@@ -696,6 +710,7 @@ func TestDeferredStartupTranscriptRetentionShrinksViewportHotBudgetUntilHydrate(
 }
 
 func TestDeferredStartupTranscriptMetadataReferencesArchiveClones(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
@@ -723,6 +738,7 @@ func TestDeferredStartupTranscriptMetadataReferencesArchiveClones(t *testing.T) 
 }
 
 func TestDeferredStartupTranscriptSyncRebindsMetadataToReplacedClone(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
@@ -756,6 +772,7 @@ func TestDeferredStartupTranscriptSyncRebindsMetadataToReplacedClone(t *testing.
 }
 
 func TestStartupDeferredTranscriptPreheatStopsWhenHaloIsWarm(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
@@ -784,6 +801,7 @@ func TestStartupDeferredTranscriptPreheatStopsWhenHaloIsWarm(t *testing.T) {
 }
 
 func TestDeferredTranscriptPreheatRestartsOnViewportWidthChange(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 32))})
@@ -820,6 +838,7 @@ func TestDeferredTranscriptPreheatRestartsOnViewportWidthChange(t *testing.T) {
 // startup restore: windowing only on startup reasons would synchronously
 // render every block of the resumed session before the next frame.
 func TestMidSessionRestoreWindowsDeferredTranscript(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+130)
 	for i := range startupTranscriptWindowMinBlocks + 130 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})

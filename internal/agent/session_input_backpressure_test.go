@@ -7,6 +7,7 @@ import (
 )
 
 func TestSessionInputBackpressureReleasesAdmission(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"resume", "cutoff", "switch"} {
 		closeAdmission := name != "resume"
 		t.Run(name, func(t *testing.T) {

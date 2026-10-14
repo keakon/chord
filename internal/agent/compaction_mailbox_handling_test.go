@@ -136,6 +136,7 @@ func mustApplyCompactionDraft(t *testing.T, a *MainAgent, draft *compactionDraft
 // durably acked before the compaction replace destroys the row, so a later
 // restore neither replays it nor re-synthesizes it.
 func TestCompactionAcksPresentedMailboxRowBeforeDroppingIt(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-presented-mailbox")
 	const messageID = "agent-1-1"
@@ -197,6 +198,7 @@ func TestCompactionAcksPresentedMailboxRowBeforeDroppingIt(t *testing.T) {
 // if the process dies before that dispatch, the next restore still replays it
 // from the unconsumed log record.
 func TestCompactionRequeuesUndeliveredMailboxAfterDroppingItsRow(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-undelivered-mailbox")
 	const messageID = "agent-1-2"
@@ -258,6 +260,7 @@ func TestCompactionRequeuesUndeliveredMailboxAfterDroppingItsRow(t *testing.T) {
 // failure returns an error and leaves the transcript (and the mailbox row)
 // untouched. Neither the notification nor the delivery evidence is lost.
 func TestCompactionAbortsWhenMailboxAckWriteFails(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -302,6 +305,7 @@ func TestCompactionAbortsWhenMailboxAckWriteFails(t *testing.T) {
 // restoreSynthesizeUndeliveredTerminalMailboxes (the log record still covers
 // the settlement).
 func TestCompactionAckedTerminalMailboxIsNeitherReplayedNorSynthesized(t *testing.T) {
+	t.Parallel()
 	const (
 		taskID     = "adhoc-settled-completion"
 		instanceID = "agent-settled-completion"
@@ -426,6 +430,7 @@ func TestCompactionAckedTerminalMailboxIsNeitherReplayedNorSynthesized(t *testin
 // unpresented one; a second crash and restore must not repeat the presented
 // message while the unpresented one is still delivered exactly once.
 func TestCompactionClosesRestoreSkipReplayCascade(t *testing.T) {
+	t.Parallel()
 	const (
 		presentedID   = "agent-1-4"
 		undeliveredID = "agent-1-5"
@@ -490,6 +495,7 @@ func TestCompactionClosesRestoreSkipReplayCascade(t *testing.T) {
 // replace destroys it and never replayed, and a later restore does not
 // re-deliver the message.
 func TestCompactionAcksCrashLeftoverRowFollowedByLaterAssistant(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-cross-round-mailbox")
 	const messageID = "agent-1-6"
@@ -559,6 +565,7 @@ func TestCompactionAcksCrashLeftoverRowFollowedByLaterAssistant(t *testing.T) {
 // enqueued exactly once. Without the guard the compaction replay would
 // double-queue one durable record.
 func TestCompactionRequeueSkipsMailboxAlreadyStagedForDelivery(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
@@ -603,6 +610,7 @@ func TestCompactionRequeueSkipsMailboxAlreadyStagedForDelivery(t *testing.T) {
 // durable and it is now consumed), and a retried compaction settles the
 // already-acked row without a second ack or a replay.
 func TestCompactionKeepsDurableAckWhenReplaceFailsAfterSettlement(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-ack-before-replace-window")
 	const messageID = "agent-1-7"
@@ -739,6 +747,7 @@ func backgroundResultMailboxMessage(messageID, summary string) SubAgentMailboxMe
 // presented, so it is durably acked before the replace destroys the row and a
 // later restore neither replays nor re-synthesizes it.
 func TestCompactionAcksPresentedBackgroundResultBeforeDroppingIt(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-presented-background-result")
 	const messageID = "background-1-1"
@@ -794,6 +803,7 @@ func TestCompactionAcksPresentedBackgroundResultBeforeDroppingIt(t *testing.T) {
 // output after it must not be acked, and after the replace destroys it the
 // result is re-enqueued from the mailbox log so a later dispatch delivers it.
 func TestCompactionRequeuesUndeliveredBackgroundResultAfterDroppingItsRow(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "compaction-undelivered-background-result")
 	const messageID = "background-1-2"

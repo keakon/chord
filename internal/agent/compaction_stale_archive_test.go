@@ -8,6 +8,7 @@ import (
 )
 
 func TestStaleReadyCompactionCleansExportedArchive(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	stale := []message.Message{{Role: message.RoleUser, Content: "stale archive"}}

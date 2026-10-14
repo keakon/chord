@@ -305,6 +305,7 @@ func TestRepeatedBusyPoolSwitchesAllSubmitToAgent(t *testing.T) {
 }
 
 func TestDrainQueuedDraftsDoesNotPerformPoolSwitch(t *testing.T) {
+	stubTUITicks(t)
 	m, backend := newPoolSwitchModel()
 	backend.mainModelPoolNames = []string{"slow", "fast"}
 	backend.mainModelPool = "slow"

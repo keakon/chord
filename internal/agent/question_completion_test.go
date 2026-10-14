@@ -11,6 +11,7 @@ import (
 )
 
 func TestQuestionPausedPresentationDoesNotPublishNewVersions(t *testing.T) {
+	t.Parallel()
 	for _, armed := range []bool{false, true} {
 		a := newQuestionTestAgent(t)
 		a.globalConfig.QuestionTimeout = 3600
@@ -44,6 +45,7 @@ func TestQuestionPausedPresentationDoesNotPublishNewVersions(t *testing.T) {
 }
 
 func TestQuestionCompletionRequiresConsumption(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: id, Answers: []string{"yes"}}, time.Time{})

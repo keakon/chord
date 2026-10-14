@@ -9,6 +9,7 @@ import (
 // pool and agent line must be its own list item: indented plain text would
 // reflow into a single unreadable paragraph.
 func TestModelsStatusTextRendersListItems(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	a.modelPoolPolicy.SetAgentOverride("worker", "fast")

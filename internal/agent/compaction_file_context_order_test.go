@@ -22,6 +22,7 @@ import (
 // a full reduction scan with no deferred-flush cache protection. Keep the
 // mirrored sequence below in sync with callLLM if its assembly order changes.
 func TestStableSurfaceSurvivesKeyFileInjection(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectRoot, "key.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("write key file: %v", err)

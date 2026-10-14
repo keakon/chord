@@ -9,6 +9,7 @@ import (
 )
 
 func TestOverlayRecoveryOverflowReconcilesTranscript(t *testing.T) {
+	t.Parallel()
 	mainAgent := newReadyTestMainAgent(t)
 	drainAgentEvents(mainAgent.outputCh)
 	want := make(map[string]int)
@@ -63,6 +64,7 @@ func TestOverlayRecoveryOverflowReconcilesTranscript(t *testing.T) {
 }
 
 func TestClearOverlayRecoveryClearsReconciliation(t *testing.T) {
+	t.Parallel()
 	mainAgent := newReadyTestMainAgent(t)
 	mainAgent.pendingOverlayReconcile = true
 	mainAgent.clearPendingOverlayAppends()

@@ -25,6 +25,7 @@ func createMainOwnedTestRequest(t *testing.T) (*MainAgent, *SubAgent, *DurableAg
 }
 
 func TestAgentRequestRoundTripRestoresLedgerAndSequence(t *testing.T) {
+	t.Parallel()
 	a, _, request := createMainOwnedTestRequest(t)
 	loaded, err := loadAgentRequests(a.sessionDir)
 	if err != nil {
@@ -40,6 +41,7 @@ func TestAgentRequestRoundTripRestoresLedgerAndSequence(t *testing.T) {
 }
 
 func TestAgentResponseResumesSourceWithCorrelatedMailboxMetadata(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	sub.setState(SubAgentStateWaitingMain, "choose an API")
 
@@ -78,6 +80,7 @@ func TestAgentResponseResumesSourceWithCorrelatedMailboxMetadata(t *testing.T) {
 }
 
 func TestAgentResponseIsIdempotentAndRejectsConflict(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	response := tools.AgentResponseRequest{TargetTaskID: sub.taskID, CorrelationID: request.CorrelationID, Message: "option A"}
 	if _, err := a.NotifySubAgentMessage(context.Background(), response); err != nil {
@@ -93,6 +96,7 @@ func TestAgentResponseIsIdempotentAndRejectsConflict(t *testing.T) {
 }
 
 func TestAgentResponseRetryAfterFinalPersistenceFailureDoesNotRedeliver(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	originalSessionDir := a.sessionDir
 	response := tools.AgentResponseRequest{TargetTaskID: sub.taskID, CorrelationID: request.CorrelationID, Message: "option A"}
@@ -150,6 +154,7 @@ func TestAgentResponseRetryAfterFinalPersistenceFailureDoesNotRedeliver(t *testi
 }
 
 func TestRespondedAgentRequestRedeliversWhenDeliveryWasNotDurable(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	response := tools.AgentResponseRequest{TargetTaskID: sub.taskID, CorrelationID: request.CorrelationID, Message: "option A"}
 	if _, err := a.NotifySubAgentMessage(context.Background(), response); err != nil {
@@ -179,6 +184,7 @@ func TestRespondedAgentRequestRedeliversWhenDeliveryWasNotDurable(t *testing.T) 
 }
 
 func TestRespondedAgentRequestUsesDurableTranscriptEvidence(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	request.State = agentRequestStateResponded
 	request.Response = &DurableAgentResponse{
@@ -229,6 +235,7 @@ func TestRetainAgentRequestsKeepsPendingAndNewestClosed(t *testing.T) {
 }
 
 func TestPersistAgentRequestStatePrunesMemoryAndDiskTogether(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	records := make(map[string]*DurableAgentRequest, maxRetainedClosedAgentRequests+2)
 	for i := range maxRetainedClosedAgentRequests + 1 {
@@ -259,6 +266,7 @@ func TestPersistAgentRequestStatePrunesMemoryAndDiskTogether(t *testing.T) {
 }
 
 func TestAgentResponseDoesNotPersistAcrossSessionChange(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	sub.lifecycleMu.Lock()
 	done := make(chan error, 1)
@@ -302,6 +310,7 @@ func TestAgentResponseDoesNotPersistAcrossSessionChange(t *testing.T) {
 }
 
 func TestAgentResponseExpiresAndOrphansChangedSourceAttempt(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		setup func(*MainAgent, *DurableAgentRequest)
@@ -359,6 +368,7 @@ func requestResponseAssertsRejectedAndUndelivered(t *testing.T, a *MainAgent, su
 // record and for a record whose source task is not the requested target. Both
 // must reject before any delivery and leave the request pending.
 func TestAgentResponseRejectsUnknownOrWrongTargetAndStaysPending(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	// No ledger record at all.
 	if _, err := a.NotifySubAgentMessage(context.Background(), tools.AgentResponseRequest{
@@ -381,6 +391,7 @@ func TestAgentResponseRejectsUnknownOrWrongTargetAndStaysPending(t *testing.T) {
 // main nor the addressed owner must be rejected before any delivery and must
 // not mutate the ledger.
 func TestAgentResponseRejectsNonOwnerCaller(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	// The source worker belongs to an owner agent task.
@@ -418,6 +429,7 @@ func TestAgentResponseRejectsNonOwnerCaller(t *testing.T) {
 // request addressed to a non-main owner: once the owner task moves to a newer
 // attempt, an answer to the stale request is orphaned instead of delivered.
 func TestAgentResponseRejectsStaleOwnerAttempt(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	source := newControllableTestSubAgent(t, a, "task-source-owner-attempt")

@@ -9,8 +9,9 @@ import (
 	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
-func benchmarkModelForSessionSelectDialog() Model {
-	m := benchmarkModelForView()
+func benchmarkModelForSessionSelectDialog(tb testing.TB) Model {
+	tb.Helper()
+	m := benchmarkModelForView(tb)
 	m.mode = ModeSessionSelect
 	options := make([]agent.SessionSummary, 0, 18)
 	baseTime := time.Date(2026, 4, 7, 12, 0, 0, 0, time.Local)
@@ -35,7 +36,7 @@ func benchmarkModelForSessionSelectDialog() Model {
 }
 
 func BenchmarkRenderSessionSelectDialogOpen(b *testing.B) {
-	m := benchmarkModelForSessionSelectDialog()
+	m := benchmarkModelForSessionSelectDialog(b)
 	_ = m.renderSessionSelectDialog()
 	b.ReportAllocs()
 	for b.Loop() {

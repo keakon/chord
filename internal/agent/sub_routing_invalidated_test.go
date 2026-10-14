@@ -44,6 +44,7 @@ func waitForSubAgentConnecting(events <-chan AgentEvent, agentID string, timeout
 // request with the latest client instead of failing the turn with
 // EventAgentError. Mirrors the MainAgent routing-invalidated path.
 func TestSubAgentRoutingInvalidatedRestartsInsteadOfError(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-1")
 	prepareSubRequestDirectoryFixture(t, sub)
@@ -86,6 +87,7 @@ func TestSubAgentRoutingInvalidatedRestartsInsteadOfError(t *testing.T) {
 // switching the main role's model pool (focus on the main agent) leaves every
 // sub-agent's LLM client untouched.
 func TestMainModelPoolSwitchDoesNotAffectSubAgent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	installPoolPolicyForTest(t, a)
 	if err := a.ApplyInitialModel("provider/model-a"); err != nil {

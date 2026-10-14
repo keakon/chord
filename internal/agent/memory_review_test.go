@@ -27,6 +27,7 @@ func seedReviewMemory(t *testing.T, a *MainAgent) {
 }
 
 func TestManualMemoryControlRefreshesAppliedSummaryWithoutTurn(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	seedReviewMemory(t, a)
 	view, err := a.ReviewMemory(context.Background())
@@ -70,6 +71,7 @@ func TestManualMemoryControlRefreshesAppliedSummaryWithoutTurn(t *testing.T) {
 }
 
 func TestManualMemoryControlRejectsBusyOrCanceledRequest(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	seedReviewMemory(t, a)
 	view, err := a.ReviewMemory(context.Background())
@@ -97,6 +99,7 @@ func TestManualMemoryControlRejectsBusyOrCanceledRequest(t *testing.T) {
 }
 
 func TestManualMemoryDoneDoesNotRefreshAnotherSession(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	seedReviewMemory(t, a)
 	original := a.memoryApplied.Load()
@@ -109,6 +112,7 @@ func TestManualMemoryDoneDoesNotRefreshAnotherSession(t *testing.T) {
 }
 
 func TestReviewMemoryReportsDiskPendingSeparately(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	a := newTestMainAgent(t, root)
 	writeProjectMemory(t, root, "A user-owned memory note.")
@@ -125,6 +129,7 @@ func TestReviewMemoryReportsDiskPendingSeparately(t *testing.T) {
 }
 
 func TestGenerateMemoryOrganizationIsReadOnlyAndBudgeted(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	seedReviewMemory(t, a)
 	view, err := a.ReviewMemory(context.Background())
@@ -158,6 +163,7 @@ func TestGenerateMemoryOrganizationIsReadOnlyAndBudgeted(t *testing.T) {
 }
 
 func TestMemoryOrganizationKeepsPoolCursorAndTraversesKeys(t *testing.T) {
+	t.Parallel()
 	var order []string
 	pool := make([]llm.FallbackModel, 3)
 	for i := range pool {
@@ -195,6 +201,7 @@ func TestMemoryOrganizationKeepsPoolCursorAndTraversesKeys(t *testing.T) {
 }
 
 func TestManualOrganizationSingleFlightAndForegroundCancellation(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	seedReviewMemory(t, a)
 	view, err := a.ReviewMemory(t.Context())

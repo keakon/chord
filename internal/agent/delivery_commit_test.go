@@ -65,6 +65,7 @@ func TestDeliveryCommitRejectsNonpersistentSession(t *testing.T) {
 }
 
 func TestDeliveryCancellationWaitsForQueuedAck(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.persist.closeUntil(nil)
 	<-a.persist.done

@@ -189,6 +189,7 @@ func TestYoloBypassesOnlyUnprotectedToolPermissions(t *testing.T) {
 }
 
 func TestYoloBusyToggleDefersPromptAndToolSurfaceUntilNextRequest(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -238,6 +239,7 @@ func TestYoloBusyToggleDefersPromptAndToolSurfaceUntilNextRequest(t *testing.T) 
 }
 
 func TestYoloToggleReturningToSameStateKeepsFrozenContext(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -341,6 +343,7 @@ func TestYoloProtectedPermissionToolNormalizesNames(t *testing.T) {
 // mechanism ask relaxes to an implicit allow while YOLO is on (no shared
 // confirmation dialog) and the dialog returns the moment YOLO switches off.
 func TestYoloMainGateMechanismAskRelaxesAndRestores(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ruleset = permissionRuleset(t, "delegate: ask")
 	a.newTurn("")

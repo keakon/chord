@@ -16,6 +16,7 @@ import (
 )
 
 func TestHandleCompactionReadyRechecksGateAfterQueuedInput(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1024)
@@ -55,6 +56,7 @@ func TestHandleCompactionReadyRechecksGateAfterQueuedInput(t *testing.T) {
 }
 
 func TestHandleCompactCommandSchedulesAsyncCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
@@ -79,6 +81,7 @@ func TestHandleCompactCommandSchedulesAsyncCompaction(t *testing.T) {
 }
 
 func TestHandleCompactCommandSchedulesAsyncCompactionWhileBusy(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
@@ -112,6 +115,7 @@ func TestHandleCompactCommandSchedulesAsyncCompactionWhileBusy(t *testing.T) {
 }
 
 func TestScheduleCompactionSkipsWhenAlreadyRunning(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(7, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeIdle})
@@ -129,6 +133,7 @@ func TestScheduleCompactionSkipsWhenAlreadyRunning(t *testing.T) {
 }
 
 func TestHistoryMutationAllowedOutsideCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	if err := a.historyMutationAllowed(0); err != nil {
@@ -137,6 +142,7 @@ func TestHistoryMutationAllowedOutsideCompaction(t *testing.T) {
 }
 
 func TestHistoryMutationAllowedRejectsFrozenHead(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
@@ -147,6 +153,7 @@ func TestHistoryMutationAllowedRejectsFrozenHead(t *testing.T) {
 }
 
 func TestHistoryMutationAllowedAllowsTail(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
@@ -157,6 +164,7 @@ func TestHistoryMutationAllowedAllowsTail(t *testing.T) {
 }
 
 func TestHandleCompactionReadyAsyncIdleAppliesImmediately(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "one"})
@@ -190,6 +198,7 @@ func TestHandleCompactionReadyAsyncIdleAppliesImmediately(t *testing.T) {
 }
 
 func TestApplyCompactionDraftInvalidatesLLMRouting(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
@@ -224,6 +233,7 @@ func TestApplyCompactionDraftInvalidatesLLMRouting(t *testing.T) {
 }
 
 func TestApplyCompactionDraftOnlyRequestsPortableReplayForNativePayload(t *testing.T) {
+	t.Parallel()
 	portableReplay := modelcompat.ReplayCompatSynthesized
 	for _, tc := range []struct {
 		name             string
@@ -300,6 +310,7 @@ func TestApplyCompactionDraftOnlyRequestsPortableReplayForNativePayload(t *testi
 }
 
 func TestApplyReadyDraftClearsRunningState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
@@ -327,6 +338,7 @@ func TestApplyReadyDraftClearsRunningState(t *testing.T) {
 }
 
 func TestHandleCompactionReadyEmitsIdleActivityOnCompletion(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
@@ -356,6 +368,7 @@ func TestHandleCompactionReadyEmitsIdleActivityOnCompletion(t *testing.T) {
 }
 
 func TestHandleCompactionFailedEmitsIdleActivityOnCompletion(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
@@ -377,6 +390,7 @@ func TestHandleCompactionFailedEmitsIdleActivityOnCompletion(t *testing.T) {
 }
 
 func TestAutoCompactionDrainsPendingUserMessages(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1024)
@@ -413,6 +427,7 @@ func TestAutoCompactionDrainsPendingUserMessages(t *testing.T) {
 // terminal event per plan, so a same-plan failure after Ready can only be the
 // watchdog's synthetic timeout.
 func TestHandleCompactionFailedKeepsParkedReadyDraft(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 1, nil)
 	a.compactionState.readyDraft = &compactionDraft{PlanID: 1, Target: compactionTarget{sessionEpoch: a.sessionEpoch}}
@@ -435,7 +450,8 @@ func TestJobFinishedHandledImmediatelyDuringCompaction(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle})
-	payload := &tools.JobFinishedPayload{BackgroundID: "job-1", AgentID: a.instanceID, Status: "completed (exit code 0)", Message: "[Background job job-1 finished]\n\nStatus: completed (exit code 0)"}
+	jobID := t.Name() + "-1"
+	payload := &tools.JobFinishedPayload{BackgroundID: jobID, AgentID: a.instanceID, Status: "completed (exit code 0)", Message: "[Background job " + jobID + " finished]\n\nStatus: completed (exit code 0)"}
 	a.dispatch(Event{Type: EventJobFinished, SourceID: "main", Payload: payload})
 
 	// Events are no longer queued behind compaction.
@@ -449,6 +465,7 @@ func TestJobFinishedHandledImmediatelyDuringCompaction(t *testing.T) {
 }
 
 func TestApplyReadyDraftAutoContinueFailureEmitsSingleIdleEvent(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.startCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeAutoContinue})

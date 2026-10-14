@@ -17,6 +17,7 @@ import (
 // write files is decided by its role's ruleset, never propagated from the
 // parent task.
 func TestNestedCreateSubAgentDeclaredScopeIsAdvisory(t *testing.T) {
+	t.Parallel()
 	newRuntime := func(t *testing.T, workerPermissionSrc string) *MainAgent {
 		a := newTestMainAgent(t, t.TempDir())
 		configureNestedDelegationTestRuntime(a, 2)
@@ -87,6 +88,7 @@ func TestNestedCreateSubAgentDeclaredScopeIsAdvisory(t *testing.T) {
 // pointing at the first task so the caller can serialize the work, coordinate
 // shared edits via notify, or move one task to its own worktree.
 func TestCreateSubAgentOverlappingSiblingScopeStartsWithConflictHint(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 2)
 	parent := newControllableTestSubAgent(t, a, "task-parent")

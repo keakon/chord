@@ -63,6 +63,7 @@ func newToolPhaseSwitchTestAgent(t *testing.T) *MainAgent {
 // emitted against the producing model's file-tool surface, so the patch call
 // must run before the edit-only model's surface takes effect.
 func TestModelPoolSwitchWaitsForResponseToolPhase(t *testing.T) {
+	t.Parallel()
 	a := newToolPhaseSwitchTestAgent(t)
 	a.newTurn("")
 
@@ -120,6 +121,7 @@ func TestModelPoolSwitchWaitsForResponseToolPhase(t *testing.T) {
 // the same way: the running model and its per-model tools stay unchanged until
 // the tool phase ends and the next request is prepared.
 func TestModelPoolSwitchDuringToolPhaseStaysDeferred(t *testing.T) {
+	t.Parallel()
 	a := newToolPhaseSwitchTestAgent(t)
 	a.newTurn("")
 	a.turn.PendingToolCalls.Store(1)
@@ -153,6 +155,7 @@ func TestModelPoolSwitchDuringToolPhaseStaysDeferred(t *testing.T) {
 // (/models --agent <role> <pool>): it reaches the same main client and must
 // not land while that client's response tool calls are still executing.
 func TestMainRoleAgentModelPoolSwitchDuringToolPhaseStaysDeferred(t *testing.T) {
+	t.Parallel()
 	a := newToolPhaseSwitchTestAgent(t)
 	a.newTurn("")
 	a.turn.PendingToolCalls.Store(1)

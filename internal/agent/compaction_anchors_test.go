@@ -264,6 +264,7 @@ func TestEvidenceRebuildsFromCompactedMessagesTail(t *testing.T) {
 // compacted list, so a draft wired to rebuild from the checkpoint alone (or from
 // the pre-compaction snapshot) is caught here rather than one round later.
 func TestEvidenceRebuildsAfterAppliedCompaction(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "archived opening request"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue fixing the build errors"})
@@ -302,6 +303,7 @@ func TestEvidenceRebuildsAfterAppliedCompaction(t *testing.T) {
 // over that checkpoint must inherit them instead of re-deriving them from a
 // history that now begins with a summary.
 func TestCompactionDraftEmbedsAndInheritsSessionAnchors(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.globalConfig.Context.Compaction.Profile = config.CompactionProfileArchival

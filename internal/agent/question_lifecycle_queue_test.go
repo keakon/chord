@@ -35,6 +35,7 @@ func awaitQuestionSessionSwitch(t *testing.T, a *MainAgent, previous string) {
 }
 
 func TestQuestionSessionSwitchCompletesAfterPersistencePressure(t *testing.T) {
+	t.Parallel()
 	for _, pressure := range []string{"queue", "admission"} {
 		t.Run(pressure, func(t *testing.T) {
 			a := newQuestionTestAgent(t)
@@ -72,6 +73,7 @@ func TestQuestionSessionSwitchCompletesAfterPersistencePressure(t *testing.T) {
 }
 
 func TestQuestionSessionSwitchCompletesWithFullOperationQueue(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
@@ -113,6 +115,7 @@ func TestQuestionSessionSwitchCompletesWithFullOperationQueue(t *testing.T) {
 }
 
 func TestQuestionFailedSessionSwitchReopensOperations(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	id := createTestQuestions(t, a, questionItems("Choice"), false).Result.QuestionIDs[0]
 	previous := a.SessionDir()
@@ -139,6 +142,7 @@ func TestQuestionFailedSessionSwitchReopensOperations(t *testing.T) {
 }
 
 func TestQuestionForkRebuildsCopiedFacts(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
@@ -175,6 +179,7 @@ func TestQuestionForkRebuildsCopiedFacts(t *testing.T) {
 }
 
 func TestQuestionSessionSwitchAfterUncertainCommit(t *testing.T) {
+	t.Parallel()
 	for _, deferred := range []bool{false, true} {
 		for _, kind := range []string{sessionControlNew, sessionControlResumeID, sessionControlFork} {
 			t.Run(fmt.Sprintf("%s/deferred=%v", kind, deferred), func(t *testing.T) {
@@ -249,6 +254,7 @@ func TestQuestionSessionSwitchAfterUncertainCommit(t *testing.T) {
 }
 
 func TestQuestionSwitchPauseRejectionClearsBarrier(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	createTestQuestions(t, a, questionItems("Choice"), false)
 	manager := a.recoveryManager()

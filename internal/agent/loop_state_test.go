@@ -117,6 +117,7 @@ done: allow
 }
 
 func TestRepeatedToolCallInLoopAutoRejectsOnThirdAndFourthAttempt(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.tools.Register(tools.ReadTool{})
@@ -168,6 +169,7 @@ read: allow
 }
 
 func TestRepeatedToolCallInLoopRequiresConfirmationAtIterationLimit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.MaxIterations = 1
@@ -255,6 +257,7 @@ func TestRepeatedToolCallInLoopRequiresConfirmationAtIterationLimit(t *testing.T
 }
 
 func TestRepeatedToolCallInLoopRejectsApprovalAtIterationLimit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.MaxIterations = 1
@@ -747,6 +750,7 @@ func TestChangedFileSummaryMarksObservableProgressSignal(t *testing.T) {
 }
 
 func TestSubAgentTerminalTransitionMarksLoopProgress(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	msg := message.Message{Role: "assistant", Content: "no change", StopReason: "interrupted"}
@@ -776,6 +780,7 @@ func TestSubAgentTerminalTransitionMarksLoopProgress(t *testing.T) {
 }
 
 func TestHandleAgentErrorStopsLoopAsBlocked(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.EnableLoopMode("finish current task")
 	a.newTurn("")
@@ -813,6 +818,7 @@ func TestNextLoopAssessmentFromAssistantReturnsNilWhenLoopDisabled(t *testing.T)
 }
 
 func TestHandleLoopAssessmentContinueDoesNotConsumeAutoExitInterceptionBudget(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopState.enableWithTarget("finish current task")
 	a.loopState.MaxIterations = 1
@@ -834,6 +840,7 @@ func TestHandleLoopAssessmentContinueDoesNotConsumeAutoExitInterceptionBudget(t 
 // loopReductionMu. Without -race this only drives both entry points; with
 // -race an unsynchronized field read fails the test.
 func TestShouldRequireToolCallInLoopReadIsRaceSafe(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	const iterations = 200
 	start := make(chan struct{})

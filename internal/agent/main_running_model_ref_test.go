@@ -29,6 +29,7 @@ func newSidebarTestProviderConfig(name, model string, contextLimit, inputLimit i
 // An unconfirmed fallback attempt does not change the committed budget. After
 // cancellation, the budget identity agrees with the next request's cursor.
 func TestMainLLMAbortedFallbackAttemptKeepsCursorHeadModelRef(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	primaryImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{
@@ -104,6 +105,7 @@ func TestMainLLMAbortedFallbackAttemptKeepsCursorHeadModelRef(t *testing.T) {
 // still ends in cancellation never confirmed it for the next request. The budget
 // identity and context window must return to the cursor head.
 func TestMainLLMAbortedConfirmedFallbackReturnsToCursorHead(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	primaryImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{
@@ -184,6 +186,7 @@ func TestMainLLMAbortedConfirmedFallbackReturnsToCursorHead(t *testing.T) {
 // budget identity must follow the sticky cursor instead of the model that failed
 // last.
 func TestMainLLMFailedModelPoolKeepsBudgetOnCursorHead(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	impls := []*blockingStreamProvider{
@@ -236,6 +239,7 @@ func TestMainLLMFailedModelPoolKeepsBudgetOnCursorHead(t *testing.T) {
 // that request succeeds the committed identity keeps the fallback window for
 // the next compaction decision.
 func TestMainLLMFallbackDownshiftKeepsCommittedFallbackRef(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(128000, 100000, 100000, 0, 0.8)
@@ -337,6 +341,7 @@ fallbackLoop:
 // strips the native reasoning items the producer's wire family vouched for and
 // the reply silently downgrades.
 func TestMainInterruptedPartialKeepsConfirmedProducerProvenance(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	primaryImpl := &blockingStreamProvider{calls: []scriptedStreamCall{{
@@ -414,6 +419,7 @@ func inlineCodexSnapshot(provider string, usedPct float64) *ratelimit.KeyRateLim
 // key rotation inside an unconfirmed fallback: the delta names the attempt
 // target, so only that provider's key snapshots are invalidated.
 func TestKeySwitchedDeltaClearsRotatingProviderSnapshots(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Providers: map[string]config.ProviderConfig{
 		"sidebar-prov":  {Type: config.ProviderTypeResponses, Preset: config.ProviderPresetCodex},
@@ -472,6 +478,7 @@ func TestKeySwitchedDeltaClearsRotatingProviderSnapshots(t *testing.T) {
 // identity and its budgets, and when the user aborts the round before it
 // confirms them, both must return to the cursor the next request starts from.
 func TestMainTurnCancelledReleasesCommittedFallbackRef(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(128000, 100000, 100000, 0, 0.8)
@@ -573,6 +580,7 @@ func TestMainTurnCancelledReleasesCommittedFallbackRef(t *testing.T) {
 // the turn ends the round for good, so the budget identity must drop the suspended
 // target and return to the cursor the next request starts from.
 func TestMainTurnCancelledReleasesOversizeSuspendedFallbackRef(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.globalConfig = &config.Config{Context: config.ContextConfig{Compaction: config.CompactionConfig{Threshold: 0.8}}}
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(128000, 100000, 100000, 0, 0.8)
@@ -631,6 +639,7 @@ func TestMainTurnCancelledReleasesOversizeSuspendedFallbackRef(t *testing.T) {
 // move the budget identity, the first visible output confirms it, and the end
 // of a request realigns the identity to the cursor head.
 func TestSubAgentRunningModelRefFollowsConfirmedSwitchOnly(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	client := llm.NewClient(newSidebarTestProviderConfig("primary-prov", "primary-model", 128000, 100000), stubProvider{}, "primary-model", 4096, "sys")
@@ -681,6 +690,7 @@ func TestSubAgentRunningModelRefFollowsConfirmedSwitchOnly(t *testing.T) {
 // client, so a superseded request's late confirmation or success must not
 // overwrite the switched identity or pair it with the old client's budgets.
 func TestApplyRunningModelRefIfCurrentSkipsSupersededClient(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	installed := llm.NewClient(newSidebarTestProviderConfig("prov-a", "model-a", 128000, 100000), &blockingStreamProvider{}, "model-a", 4096, "sys")

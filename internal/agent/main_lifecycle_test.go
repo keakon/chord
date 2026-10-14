@@ -8,6 +8,7 @@ import (
 )
 
 func TestShutdownBeforeRunRejectsDeferredStartup(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	start := make(chan struct{})
 	result := make(chan error, 1)
@@ -31,6 +32,7 @@ func TestShutdownBeforeRunRejectsDeferredStartup(t *testing.T) {
 }
 
 func TestShutdownWaitsForAdmittedQuestionInitialization(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	// Hold the exact boundary between startup admission and Question restore.
 	if err := a.admitRun(); err != nil {
@@ -64,6 +66,7 @@ func TestShutdownWaitsForAdmittedQuestionInitialization(t *testing.T) {
 }
 
 func TestRunAdmissionRejectsDuplicateLoop(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := a.admitRun(); err != nil {
 		t.Fatal(err)

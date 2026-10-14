@@ -9,6 +9,7 @@ import (
 )
 
 func TestNextCompactionIndexForAgentNeverReusesIndexes(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	first, err := a.nextCompactionIndexForAgent(a.sessionDir)
@@ -28,6 +29,7 @@ func TestNextCompactionIndexForAgentNeverReusesIndexes(t *testing.T) {
 }
 
 func TestNextCompactionIndexForAgentSeedsFromDisk(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	// A pre-existing archive on disk must seed the allocator: the first
@@ -46,6 +48,7 @@ func TestNextCompactionIndexForAgentSeedsFromDisk(t *testing.T) {
 }
 
 func TestNextCompactionIndexForAgentReseedsAfterSessionSwitch(t *testing.T) {
+	t.Parallel()
 	first := t.TempDir()
 	second := t.TempDir()
 	a := newTestMainAgent(t, first)
@@ -71,6 +74,7 @@ func TestNextCompactionIndexForAgentReseedsAfterSessionSwitch(t *testing.T) {
 }
 
 func TestNextCompactionIndexForAgentConcurrentAllocationsAreUnique(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	const workers = 4
@@ -107,6 +111,7 @@ func TestNextCompactionIndexForAgentConcurrentAllocationsAreUnique(t *testing.T)
 // continues above it, and removing that archive later must not re-lower a
 // floor that indexes were already handed out from.
 func TestNextCompactionIndexForAgentReseedRaisesFloorWithoutLowering(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	first, err := a.nextCompactionIndexForAgent(a.sessionDir)
@@ -157,6 +162,7 @@ func TestNextCompactionIndexForAgentReseedRaisesFloorWithoutLowering(t *testing.
 // all on disk, keeps the active one, and keeps an entry whose allocation has
 // not landed yet (a late worker must not be handed the same index twice).
 func TestPruneCompactionIndexAllocatorsDropsSettledDirs(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	settled := t.TempDir()
 	inflight := t.TempDir()

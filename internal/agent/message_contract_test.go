@@ -26,6 +26,7 @@ func TestNormalizeAgentMessageContractFillsDerivedRequestMetadata(t *testing.T) 
 }
 
 func TestHandleAgentNotifyBuildsStructuredNotice(t *testing.T) {
+	t.Parallel()
 	a, sub := newMixedBatchTestSubAgent(t)
 	a.subs.add(sub)
 	a.handleAgentNotify(Event{SourceID: sub.instanceID, Payload: tools.AgentNotifyPayload{
@@ -57,6 +58,7 @@ func TestHandleAgentNotifyBuildsStructuredNotice(t *testing.T) {
 // restore-time card classification, so a kind that vanished on the way to
 // disk would silently reclassify a blocked/risk notice as a progress snapshot.
 func TestHandleAgentNotifyCarriesExplicitKindToDurableRow(t *testing.T) {
+	t.Parallel()
 	a, sub := newMixedBatchTestSubAgent(t)
 	a.subs.add(sub)
 	a.handleAgentNotify(Event{SourceID: sub.instanceID, Payload: tools.AgentNotifyPayload{
@@ -84,6 +86,7 @@ func TestHandleAgentNotifyCarriesExplicitKindToDurableRow(t *testing.T) {
 }
 
 func TestStructuredMessagePayloadArtifactsAboveInlineThreshold(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	msg := &SubAgentMailboxMessage{
 		AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress,
@@ -158,6 +161,7 @@ func TestMailboxMetadataCarriesMessageContract(t *testing.T) {
 // sender's task record to completed (or blocked), and the genuine completion
 // that follows must not conflict with a phantom settlement.
 func TestNotifyForgedKindDoesNotDriveTaskRecordOrJoin(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(subagents): %v", err)
@@ -233,6 +237,7 @@ applied:
 // whose kind claims the worker is blocked must not move the running task's
 // record into waiting_main; only the escalation mailbox (handleEscalate) does.
 func TestNotifyBlockedKindDoesNotParkRecord(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(subagents): %v", err)

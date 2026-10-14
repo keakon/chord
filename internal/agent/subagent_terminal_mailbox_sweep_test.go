@@ -16,6 +16,7 @@ import (
 // (which drains it) instead of stopping, so a silent all-terminal session does
 // not wait for the next user message to route the mailbox.
 func TestLifecycleSweepCandidateStaysAliveForStrandedOwnedTerminalMailbox(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	// Quiet baseline: a session that never delegated must not be a sweep
@@ -62,6 +63,7 @@ func TestLifecycleSweepCandidateStaysAliveForStrandedOwnedTerminalMailbox(t *tes
 // (the conservative terminal-owner mailbox semantic: route to main, never drop
 // or kill), exactly as the existing expiry/stall risk alerts are surfaced.
 func TestLifecycleSweepDrainsStrandedOwnedTerminalMailbox(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(subagents): %v", err)
@@ -111,6 +113,7 @@ func TestLifecycleSweepDrainsStrandedOwnedTerminalMailbox(t *testing.T) {
 // and a dispatched sweep must leave it queued instead of dropping or forcing
 // it onto the main inbox.
 func TestLifecycleSweepLeavesUnroutableOwnedMailboxUntouched(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	ownerTaskID := "parked-idle-owner-task"
 	ownerInstanceID := "parked-idle-owner"
@@ -176,6 +179,7 @@ func TestLifecycleSweepLeavesUnroutableOwnedMailboxUntouched(t *testing.T) {
 // it with deliverSubAgentMailbox (which never writes) must leave exactly one
 // mailbox.jsonl row for its MessageID while still delivering it exactly once.
 func TestForwardToMainSettledOwnerPersistsSingleMailboxRow(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	ownerInstanceID, ownerTaskID := "owner-forward-1", "owner-forward-task-1"
 	childInstanceID, childTaskID := "child-forward-1", "child-forward-task-1"

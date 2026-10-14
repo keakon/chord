@@ -23,6 +23,7 @@ func startPauseStatusTestAgent(t *testing.T) *MainAgent {
 }
 
 func TestSessionPauseRejectedBeforePreparationReturnsPreflight(t *testing.T) {
+	t.Parallel()
 	a := startPauseStatusTestAgent(t)
 	a.admissionPaused.Store(true)
 	status, err := a.BeginSessionPause(t.Context(), SessionPauseRequest{Identity: testPauseIdentity(a)})
@@ -36,6 +37,7 @@ func TestSessionPauseRejectedBeforePreparationReturnsPreflight(t *testing.T) {
 }
 
 func TestSessionPausePreparationFailureConfirmsUnfrozenSource(t *testing.T) {
+	t.Parallel()
 	a := startPauseStatusTestAgent(t)
 	a.SetSessionPausePreparer(func(_ context.Context, _ SessionPauseRequest) error {
 		return errors.New("preparation unavailable")
@@ -56,6 +58,7 @@ func TestSessionPausePreparationFailureConfirmsUnfrozenSource(t *testing.T) {
 }
 
 func TestSessionPausePublishesBlockerChanges(t *testing.T) {
+	t.Parallel()
 	a := startPauseStatusTestAgent(t)
 	gate := a.sessionExecutionGate()
 	first, err := gate.TryBegin(executiongate.Tool, "task-1")

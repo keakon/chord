@@ -9,6 +9,7 @@ import (
 )
 
 func TestInputDeliveryQueueResumeAfterStop(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
 	a.newTurn(work)
@@ -40,6 +41,7 @@ func TestInputDeliveryQueueResumeAfterStop(t *testing.T) {
 }
 
 func TestInputDeliveryResumePreservesNewBlockers(t *testing.T) {
+	t.Parallel()
 	for _, blocker := range []string{"cancel", "session_pause", "write_error"} {
 		t.Run(blocker, func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())

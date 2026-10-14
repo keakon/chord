@@ -100,6 +100,7 @@ func TestBoundaryCacheMissPenaltyRatio(t *testing.T) {
 }
 
 func TestReductionFlushHorizonStopsAtPendingCompaction(t *testing.T) {
+	t.Parallel()
 	a := newBoundaryReductionTestAgent(t, &config.ModelCost{Input: 1, CacheRead: 0.02})
 	for range 200 {
 		a.recordLLMModelRun("p/m")
@@ -119,6 +120,7 @@ func TestReductionFlushHorizonStopsAtPendingCompaction(t *testing.T) {
 }
 
 func TestBoundaryFlushPenaltyRatioFallsBackWithoutPricing(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.runningModelRef = "p/m"
 	if got := a.boundaryFlushPenaltyRatio(a.llmModelContinuitySnapshot(), 1000); got != cacheMissPenaltyRatioFallback {
@@ -127,6 +129,7 @@ func TestBoundaryFlushPenaltyRatioFallsBackWithoutPricing(t *testing.T) {
 }
 
 func TestBoundaryFlushPricingUsesExactProviderAndRequestTTL(t *testing.T) {
+	t.Parallel()
 	cost := &config.ModelCost{Input: 1, CacheRead: 0.1, CacheWrite: 1.25, CacheWrite1h: 2}
 	a := newBoundaryReductionTestAgent(t, cost)
 	for _, tc := range []struct {
@@ -154,6 +157,7 @@ func TestBoundaryFlushPricingUsesExactProviderAndRequestTTL(t *testing.T) {
 }
 
 func TestBoundaryFlushRespectsCheckpointAndCachedTail(t *testing.T) {
+	t.Parallel()
 	for _, pending := range []bool{false, true} {
 		a := newBoundaryReductionTestAgent(t, &config.ModelCost{Input: 1, CacheRead: 0.5})
 		readContent := strings.Repeat("sample result line\n", 300)
@@ -195,6 +199,7 @@ func setTestRequestBatch(a *MainAgent, messages []message.Message, batch uint64)
 // inside the previously sent prefix is deferred (cache-stability wins) while
 // new tail content is still reduced immediately.
 func TestPrepareMessagesDefersBoundaryReductions(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
@@ -248,6 +253,7 @@ func TestPrepareMessagesDefersBoundaryReductions(t *testing.T) {
 }
 
 func TestStableReductionSurfaceSurvivesUserTurnBoundary(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
@@ -292,6 +298,7 @@ func TestStableReductionSurfaceSurvivesUserTurnBoundary(t *testing.T) {
 }
 
 func TestDeferredBoundaryReductionDoesNotReportOverCompression(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
@@ -340,6 +347,7 @@ func TestDeferredBoundaryReductionDoesNotReportOverCompression(t *testing.T) {
 // when the current context manager reports an oversized prompt; compaction owns
 // pressure-driven size control.
 func TestBoundaryReductionIgnoresContextUsage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
@@ -386,6 +394,7 @@ func TestBoundaryReductionIgnoresContextUsage(t *testing.T) {
 // condition: with a warm cache and low pressure, a boundary reduction whose
 // pending savings dominate the re-billed tail is applied instead of deferred.
 func TestBoundaryReductionFlushesWhenSavingsAmortize(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
@@ -437,6 +446,7 @@ func TestBoundaryReductionFlushesWhenSavingsAmortize(t *testing.T) {
 // amortization gate is unsatisfied and a cold cache flushes it. Lazy stat
 // validation detects the out-of-band edit; no tool call names it.
 func TestPrepareMessagesDefersExternalReadInvalidation(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "a.go")
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
@@ -501,6 +511,7 @@ func TestPrepareMessagesDefersExternalReadInvalidation(t *testing.T) {
 // must not be re-rendered when the read flips to superseded, because that
 // rewrites cached bytes without changing what the model can act on.
 func TestPrepareMessagesKeepsFrozenReadMarkerWhenSuperseded(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	path := filepath.Join(projectRoot, "a.go")
 	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
@@ -557,6 +568,7 @@ func TestPrepareMessagesKeepsFrozenReadMarkerWhenSuperseded(t *testing.T) {
 // prefix (or a durable rewrite) would fail compatibility and make every later
 // request in the same window pay a full reduction scan.
 func TestContextNoticeRowKeepsStableSurfaceReusable(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
@@ -608,6 +620,7 @@ func TestContextNoticeRowKeepsStableSurfaceReusable(t *testing.T) {
 // amortizes within the conservative horizon, so a proposal the historical 10:1
 // constant would have flushed stays deferred, including on a long model run.
 func TestBoundaryReductionDefersDeepRewriteAtRelayPricing(t *testing.T) {
+	t.Parallel()
 	a := newBoundaryReductionTestAgent(t, &config.ModelCost{Input: 1, CacheRead: 0.02})
 
 	readContent := strings.Repeat("line content for fetched page\n", 3000)
@@ -660,6 +673,7 @@ func TestBoundaryReductionDefersDeepRewriteAtRelayPricing(t *testing.T) {
 // the pricing range: at a 2:1 cache-read price the rewrite penalty is small, so
 // a proposal the 10:1 constant deferred flushes immediately.
 func TestBoundaryReductionFlushesSoonerUnderTwoToOneCaching(t *testing.T) {
+	t.Parallel()
 	a := newBoundaryReductionTestAgent(t, &config.ModelCost{Input: 1, CacheRead: 0.5})
 
 	readContent := strings.Repeat("line content for fetched page\n", 3000)

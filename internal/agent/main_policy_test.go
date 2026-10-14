@@ -584,7 +584,6 @@ func TestEnsureMainModelPolicyKeepsRateLimitSnapshotWithinSameProvider(t *testin
 
 func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 	t.Helper()
-	isolateChordTestPaths(t, projectRoot)
 	sessionDir := filepath.Join(projectRoot, ".chord", "sessions", "test")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		t.Fatalf("mkdir session dir: %v", err)
@@ -602,6 +601,7 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 		&config.Config{},
 		nil,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},
+		newAgentTestPathLocator(projectRoot),
 	)
 	// done is registered unconditionally in production (wireMainAgentRuntime),
 	// and loop entry depends on it being registered even though it only joins
@@ -614,16 +614,6 @@ func newTestMainAgent(t *testing.T, projectRoot string) *MainAgent {
 	}
 	registerTestMainAgentCleanup(t, a)
 	return a
-}
-
-func isolateChordTestPaths(t *testing.T, projectRoot string) {
-	t.Helper()
-	root := filepath.Join(projectRoot, ".test-chord")
-	t.Setenv("CHORD_CONFIG_HOME", filepath.Join(root, "config"))
-	t.Setenv("CHORD_STATE_DIR", filepath.Join(root, "state"))
-	t.Setenv("CHORD_CACHE_DIR", filepath.Join(root, "cache"))
-	t.Setenv("CHORD_SESSIONS_DIR", filepath.Join(root, "sessions"))
-	t.Setenv("CHORD_LOGS_DIR", filepath.Join(root, "logs"))
 }
 
 func TestCallLLMDropsOrphanToolResultsBeforeRequest(t *testing.T) {

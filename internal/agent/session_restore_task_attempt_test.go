@@ -11,6 +11,7 @@ import (
 )
 
 func TestRestoreSessionPreservesResumedTaskAttempt(t *testing.T) {
+	t.Parallel()
 	for _, previous := range []SubAgentState{SubAgentStateCompleted, SubAgentStateFailed} {
 		for _, current := range []SubAgentState{SubAgentStateRunning, SubAgentStateCompleted, SubAgentStateFailed} {
 			t.Run(string(previous)+"/"+string(current), func(t *testing.T) {

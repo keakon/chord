@@ -11,6 +11,7 @@ import (
 )
 
 func TestPendingOwnerReasons(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		change func(*DurableTaskRecord, *DurableAgentRequest, map[string]*DurableTaskRecord)
@@ -91,6 +92,7 @@ func TestPendingOwnerReasons(t *testing.T) {
 }
 
 func TestOwnerReasonSelectionAndState(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	task := &DurableTaskRecord{TaskID: "task", Attempt: 2, EscalationMailboxID: "request"}
 	a.subs.taskRecords = map[string]*DurableTaskRecord{"task": task}
@@ -119,6 +121,7 @@ func TestOwnerReasonSelectionAndState(t *testing.T) {
 }
 
 func TestOwnerReasonLiveParkedAndRestore(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	sub.setState(SubAgentStateWaitingMain, "unrelated summary")
 	a.recordSubAgentEscalation(sub, request.RequestMessageID)
@@ -157,6 +160,7 @@ func TestOwnerReasonLiveParkedAndRestore(t *testing.T) {
 }
 
 func TestOwnerReasonResponseRefresh(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	sub.setState(SubAgentStateWaitingMain, "")
 	a.recordSubAgentEscalation(sub, request.RequestMessageID)
@@ -182,6 +186,7 @@ func TestOwnerReasonResponseRefresh(t *testing.T) {
 }
 
 func TestSubAgentDisplayEmptySummaryAndStaleAttempt(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task")
 	attempt := a.taskRecordByTaskID(sub.taskID).Attempt
@@ -203,6 +208,7 @@ func TestSubAgentDisplayEmptySummaryAndStaleAttempt(t *testing.T) {
 }
 
 func TestOwnerReasonResponsePersistedButDeliveryRejected(t *testing.T) {
+	t.Parallel()
 	a, sub, request := createMainOwnedTestRequest(t)
 	sub.setState(SubAgentStateWaitingMain, "")
 	a.recordSubAgentEscalation(sub, request.RequestMessageID)

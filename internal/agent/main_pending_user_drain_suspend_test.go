@@ -11,6 +11,7 @@ import (
 // system-generated entry the commit step does not consume), the queue must not
 // suppress global idle and must not auto-start a turn.
 func TestParkedUserQueueReportsGlobalIdleWithoutStartingTurn(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	// A system-generated entry survives the interrupt commit (which only commits
@@ -50,6 +51,7 @@ func TestParkedUserQueueReportsGlobalIdleWithoutStartingTurn(t *testing.T) {
 // dispatched in FIFO order together with the next user message, in that message's
 // own request.
 func TestParkedUserQueueInjectedInArrivalOrderWithNextUserMessage(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	setupHandoffTurn(t, a, writePlanFile(t, projectRoot)) // parks the queue while the user decides
@@ -94,6 +96,7 @@ func TestParkedUserQueueInjectedInArrivalOrderWithNextUserMessage(t *testing.T) 
 // cancelled Handoff keeps the parked message waiting (so global idle is still
 // reportable), and the next user action consumes it into its request.
 func TestHandoffCancelParkedQueueConsumedByNextAction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	setupHandoffTurn(t, a, writePlanFile(t, projectRoot))
@@ -125,6 +128,7 @@ func TestHandoffCancelParkedQueueConsumedByNextAction(t *testing.T) {
 // is parked, then executed exactly once by the idle drain once a user action
 // resumes normal semantics.
 func TestInterruptResidualSlashCommandProcessedAfterResume(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	a.pendingUserMessages = []pendingUserMessage{{Content: "/rename parked-title", FromUser: true}}

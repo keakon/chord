@@ -10,7 +10,7 @@ import (
 )
 
 func TestHeadlessSendCommandReturnsBareMCPStatus(t *testing.T) {
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 	state := &headlessState{mcp: mcp.RuntimeSnapshot{SchemaVersion: mcp.RuntimeSnapshotSchemaVersion, BindingID: "view", Version: 1, Servers: []mcp.ServerView{}}}
 	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/mcp"}, backend, state, to.writer())
@@ -57,7 +57,7 @@ func TestHeadlessUnsupportedRemoteCommand(t *testing.T) {
 }
 
 func TestHeadlessLocalShellCommandEmitsResult(t *testing.T) {
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 	state := &headlessState{}
 
@@ -84,7 +84,7 @@ func TestHeadlessLocalShellCommandEmitsResult(t *testing.T) {
 }
 
 func TestHeadlessLocalShellEmptyCommandEmitsFailure(t *testing.T) {
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 	state := &headlessState{}
 
@@ -124,7 +124,7 @@ func TestHeadlessSendCommandUnsupportedRejection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.content, func(t *testing.T) {
-			to := newTestOut()
+			to := newTestOut(t)
 			backend := &mockBackend{}
 
 			cmd := headlessCommand{Type: "send", Content: tt.content}
@@ -172,7 +172,7 @@ func TestHeadlessStatusCommand(t *testing.T) {
 		lastError: "",
 		updatedAt: time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC),
 	}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	cmd := headlessCommand{Type: "status"}
@@ -250,7 +250,7 @@ func TestHeadlessStatusResponseLastOutcome(t *testing.T) {
 			state := &headlessState{
 				lastOutcome: tt.lastOutcome,
 			}
-			to := newTestOut()
+			to := newTestOut(t)
 			backend := &mockBackend{}
 
 			cmd := headlessCommand{Type: "status"}

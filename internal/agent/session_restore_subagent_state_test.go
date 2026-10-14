@@ -28,6 +28,7 @@ func mustMarshalCompletionEnvelopeForTest(t *testing.T, env *CompletionEnvelope)
 }
 
 func TestLoadSessionUsesCompactedMailboxStateAndPreservesSequence(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "compacted-mailbox-state")
 	rm := recovery.NewRecoveryManager(sessionDir)
@@ -90,6 +91,7 @@ func TestLoadSessionUsesCompactedMailboxStateAndPreservesSequence(t *testing.T) 
 }
 
 func TestLoadSessionQuarantinesCorruptTaskSettlementJournal(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "corrupt-task-settlements")
 	rm := recovery.NewRecoveryManager(sessionDir)
@@ -137,6 +139,7 @@ func TestLoadSessionQuarantinesCorruptTaskSettlementJournal(t *testing.T) {
 }
 
 func TestLoadSessionPreservesValidSettlementPrefixBeforeCorruption(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "corrupt-settlement-prefix")
 	rm := recovery.NewRecoveryManager(sessionDir)
@@ -182,6 +185,7 @@ func TestLoadSessionPreservesValidSettlementPrefixBeforeCorruption(t *testing.T)
 }
 
 func TestLoadSessionDegradesCorruptAgentRequestFile(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "corrupt-agent-requests")
 	rm := recovery.NewRecoveryManager(sessionDir)
@@ -223,6 +227,7 @@ func TestRaiseDegradedSeqFloorDoesNotOverwriteConcurrentProgress(t *testing.T) {
 }
 
 func TestGuardDegradedAgentRequestSeqAvoidsIDReuse(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.guardDegradedAgentRequestSeq(false)
 	if got := a.agentRequestSeq.Load(); got != 0 {
@@ -238,6 +243,7 @@ func TestGuardDegradedAgentRequestSeqAvoidsIDReuse(t *testing.T) {
 }
 
 func TestRestoreLoadedSubAgentsPreservesCompletedTaskState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -278,6 +284,7 @@ func TestRestoreLoadedSubAgentsPreservesCompletedTaskState(t *testing.T) {
 }
 
 func TestRestoredCancelledSubAgentContinueReactivatesWithoutAppendingMessage(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -371,6 +378,7 @@ func TestRestoredCancelledSubAgentContinueReactivatesWithoutAppendingMessage(t *
 }
 
 func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -424,6 +432,7 @@ func TestRestoreLoadedSubAgentsRestoresOwnerDepthAndPendingComplete(t *testing.T
 }
 
 func TestRestoreLoadedSubAgentsKeepsOwnedMailboxQueuedUntilManualContinue(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
@@ -497,6 +506,7 @@ func TestRestoreLoadedSubAgentsKeepsOwnedMailboxQueuedUntilManualContinue(t *tes
 }
 
 func TestRestoredMailboxEventWaitsForManualSubAgentContinue(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-parent")
 	sub.instanceID = "worker-parent"
@@ -538,6 +548,7 @@ func TestRestoredMailboxEventWaitsForManualSubAgentContinue(t *testing.T) {
 }
 
 func TestRestoreSessionAtStartupUsesSnapshotSubAgentState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "snapshot-sub-state")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -697,6 +708,7 @@ func assertRestoredTaskStillCompleted(t *testing.T, a *MainAgent, sessionDir, ta
 // terminal state back to the non-terminal state it derives from the stale
 // snapshot.
 func TestRestoreSessionDurableSettledRecordSurvivesStaleRunningSnapshot(t *testing.T) {
+	t.Parallel()
 	const (
 		taskID     = "adhoc-settled-mirror"
 		instanceID = "agent-settled-mirror"
@@ -739,6 +751,7 @@ func TestRestoreSessionDurableSettledRecordSurvivesStaleRunningSnapshot(t *testi
 // during restore. That repair result must survive the rest of the restore
 // instead of being flipped back to the snapshot-derived state.
 func TestRestoreSessionSettlementRepairSurvivesStaleRunningSnapshotRestore(t *testing.T) {
+	t.Parallel()
 	const (
 		taskID     = "adhoc-settled-repair"
 		instanceID = "agent-settled-repair"
@@ -773,6 +786,7 @@ func TestRestoreSessionSettlementRepairSurvivesStaleRunningSnapshotRestore(t *te
 }
 
 func TestRestoreSessionRebuildsTaskIdentityFromSnapshot(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "snapshot-task-identity")
 	rm := recovery.NewRecoveryManager(sessionDir)
@@ -821,6 +835,7 @@ func TestRestoreSessionRebuildsTaskIdentityFromSnapshot(t *testing.T) {
 }
 
 func TestSubAgentMetaPersistsTaskIdentity(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-meta-identity")
 	sub.planTaskRef = "plan-item-meta"
@@ -841,6 +856,7 @@ func TestSubAgentMetaPersistsTaskIdentity(t *testing.T) {
 }
 
 func TestCancelledSubAgentSnapshotRestoresParkedCancelledTask(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "cancelled-sub-state")
 	a := newTestMainAgentForRestore(t, projectRoot, sessionDir)
@@ -881,6 +897,7 @@ func TestCancelledSubAgentSnapshotRestoresParkedCancelledTask(t *testing.T) {
 }
 
 func TestRestoreSessionAtStartupDoesNotReviveClosedWorkerFromTranscriptOnly(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "closed-sub-transcript")
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -921,6 +938,7 @@ func TestRestoreSessionAtStartupDoesNotReviveClosedWorkerFromTranscriptOnly(t *t
 }
 
 func TestMailboxReplyChainPersistsAcrossResume(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "mailbox-reply-chain")
 	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
@@ -1038,6 +1056,7 @@ func TestMailboxReplyChainPersistsAcrossResume(t *testing.T) {
 }
 
 func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "completed-task-rehydrate")
 	if err := os.MkdirAll(filepath.Join(sessionDir, "subagents"), 0o755); err != nil {
@@ -1122,6 +1141,7 @@ func TestRestoreSessionCompletedTaskCanRehydrateFollowUp(t *testing.T) {
 }
 
 func TestSubAgentMetaJSONWritten(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sub := newControllableTestSubAgent(t, a, "adhoc-11")
@@ -1148,6 +1168,7 @@ func TestSubAgentMetaJSONWritten(t *testing.T) {
 }
 
 func TestMailboxLongPayloadPersistsArtifact(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sub := newControllableTestSubAgent(t, a, "adhoc-12")
@@ -1201,6 +1222,7 @@ func restoredCompletedMailboxesForTask(a *MainAgent, taskID string) []SubAgentMa
 // of the same session must not notify again — both restores must converge on
 // the same physical message ids.
 func TestRestoreSessionSynthesizesCompletionForSettledTaskWithLostMailbox(t *testing.T) {
+	t.Parallel()
 	const (
 		lostTaskID     = "adhoc-lost-completion"
 		lostInstanceID = "agent-lost-completion"
@@ -1434,6 +1456,7 @@ func restoreFailedRiskAlertFixture(t *testing.T, projectRoot, sessionDir string)
 // the synthesized message is itself persisted, so both restores converge on
 // the same physical message id.
 func TestRestoreSessionSynthesizesRiskAlertForFailedTaskWithLostMailbox(t *testing.T) {
+	t.Parallel()
 	const taskID = "adhoc-lost-failure"
 	projectRoot := t.TempDir()
 	sessionDir := testProjectSessionDir(t, projectRoot, "lost-failure-mailbox")
@@ -1498,6 +1521,7 @@ func TestRestoreSessionSynthesizesRiskAlertForFailedTaskWithLostMailbox(t *testi
 // queues a risk_alert before its terminal commit) must not gain a notification
 // from restore.
 func TestRestoreSessionSynthesizesExpiryRiskAlertButNotForUserStop(t *testing.T) {
+	t.Parallel()
 	const (
 		expiredTaskID = "adhoc-expired"
 		stoppedTaskID = "adhoc-stopped"
@@ -1599,6 +1623,7 @@ func TestRestoreSessionSynthesizesExpiryRiskAlertButNotForUserStop(t *testing.T)
 // covering-proof gate must recognize that the retained attempt-1 message does
 // not cover attempt-2 and synthesize the lost completion.
 func TestRestoreSessionSynthesisSurvivesStaleLastMailboxIDFromEarlierAttempt(t *testing.T) {
+	t.Parallel()
 	const (
 		taskID          = "adhoc-stale-attempt"
 		attempt1MsgID   = "agent-stale-completion-1"

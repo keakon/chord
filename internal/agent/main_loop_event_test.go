@@ -165,6 +165,7 @@ func TestLoopFollowUpReservePreservesCausalEventsPastSoftLimit(t *testing.T) {
 }
 
 func TestHandleEscalateQueuesFollowUpWithoutBlockingOnFullExternalQueue(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.started.Store(true)
 	a.eventCh = make(chan Event, 1)
@@ -257,6 +258,7 @@ func TestEventOverflowBackpressureStopsOnShutdown(t *testing.T) {
 }
 
 func TestShutdownUnblocksReliableOutputFromEventLoop(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	for i := 0; i < cap(a.outputCh); i++ {
 		a.outputCh <- StreamTextEvent{Text: "busy"}

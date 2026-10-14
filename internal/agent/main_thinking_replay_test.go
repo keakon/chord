@@ -39,6 +39,7 @@ func newPlainThinkingClient(t *testing.T) *llm.Client {
 }
 
 func TestStashTruncatedThinkingReplayDeepSeek(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
@@ -66,6 +67,7 @@ func TestStashTruncatedThinkingReplayDeepSeek(t *testing.T) {
 }
 
 func TestTakePendingThinkingReplayPrefixDropsOnTurnChange(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
@@ -79,6 +81,7 @@ func TestTakePendingThinkingReplayPrefixDropsOnTurnChange(t *testing.T) {
 }
 
 func TestStashTruncatedThinkingReplaySkipsWhenNoReasoning(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
@@ -95,6 +98,7 @@ func TestStashTruncatedThinkingReplaySkipsWhenNoReasoning(t *testing.T) {
 }
 
 func TestStashTruncatedThinkingReplayIsBoundedToFirstRecovery(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
@@ -109,6 +113,7 @@ func TestStashTruncatedThinkingReplayIsBoundedToFirstRecovery(t *testing.T) {
 }
 
 func TestStashTruncatedThinkingReplaySkipsUnsupportedTarget(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newPlainThinkingClient(t)
@@ -124,6 +129,7 @@ func TestStashTruncatedThinkingReplaySkipsUnsupportedTarget(t *testing.T) {
 }
 
 func TestTakePendingThinkingReplayPrefixRefMatch(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
@@ -144,6 +150,7 @@ func TestTakePendingThinkingReplayPrefixRefMatch(t *testing.T) {
 }
 
 func TestTakePendingThinkingReplayPrefixDropsOnModelSwitch(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
@@ -163,6 +170,7 @@ func TestTakePendingThinkingReplayPrefixDropsOnModelSwitch(t *testing.T) {
 }
 
 func TestTakePendingThinkingReplayPrefixDropsOnCapabilityLost(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
@@ -184,6 +192,7 @@ func TestTakePendingThinkingReplayPrefixDropsOnCapabilityLost(t *testing.T) {
 // reasoning (no visible content, no tool calls) must stash the thinking for a
 // DeepSeek-style target and enter length recovery.
 func TestHandleLLMResponseTruncatedNoOutputStashesThinking(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)
@@ -208,6 +217,7 @@ func TestHandleLLMResponseTruncatedNoOutputStashesThinking(t *testing.T) {
 // TestHandleLLMResponseTruncatedNoOutputPlainModelKeepsDiscard verifies the
 // plain-model path keeps discarding the truncated response (no prefix).
 func TestHandleLLMResponseTruncatedNoOutputPlainModelKeepsDiscard(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newPlainThinkingClient(t)
@@ -230,6 +240,7 @@ func TestHandleLLMResponseTruncatedNoOutputPlainModelKeepsDiscard(t *testing.T) 
 // and verifies the stashed prefix is injected as a wire-only assistant message
 // right before the recovery overlay, and that neither is persisted to ctxMgr.
 func TestCallLLMInjectsThinkingReplayPrefixWireOnly(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.llmClient = newThinkingReplayClient(t)

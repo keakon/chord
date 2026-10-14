@@ -98,6 +98,7 @@ func poolModelIDs(t *testing.T, client *llm.Client) (ids []string, variants []st
 // the old pool, no pool was installed and the switch degraded to a single model
 // with no fallback chain.
 func TestSwitchRoleBuildsTargetPoolWhenHeadAbsentFromOldPool(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	builderRefs := []string{"alpha/model-one", "alpha/model-two"}
@@ -149,6 +150,7 @@ func TestSwitchRoleBuildsTargetPoolWhenHeadAbsentFromOldPool(t *testing.T) {
 // fallback chain and variant: the switch looked successful but kept serving the
 // previous role's model policy.
 func TestSwitchRoleSwapsToTargetPoolWhenHeadInOldPool(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	builderRefs := []string{"alpha/shared-model", "alpha/build-only"}

@@ -15,6 +15,7 @@ import (
 )
 
 func TestSessionPauseMainAndSubPendingInputsRestoreWithoutExecution(t *testing.T) {
+	t.Parallel()
 	a, mainProvider := scenarioAgent(t, scriptedStreamCall{resp: &message.Response{ToolCalls: []message.ToolCall{{ID: "main-call", Name: "sample_tool", Args: json.RawMessage(`{}`)}}, StopReason: "tool_use"}})
 	tool := &pauseBarrierTool{name: "sample_tool", entered: make(chan struct{}), release: make(chan struct{})}
 	a.tools.Register(tool)

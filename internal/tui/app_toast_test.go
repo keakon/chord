@@ -14,6 +14,7 @@ import (
 )
 
 func TestConfirmRequestForcesPriorityBoundaryFlush(t *testing.T) {
+	stubTUITicks(t)
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground
 	m.width, m.height = 80, 24
@@ -191,6 +192,7 @@ func TestToastQueueLimitDropsOldestLowestPriority(t *testing.T) {
 }
 
 func TestToolResultForcesPriorityBoundaryFlush(t *testing.T) {
+	stubTUITicks(t)
 	m := NewModelWithSize(nil, 80, 24)
 	m.displayState = stateForeground
 	m.width, m.height = 80, 24

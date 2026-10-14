@@ -8,6 +8,7 @@ import "testing"
 // forwarded to the main inbox instead of being stranded because the scan
 // pre-filtered by message kind.
 func TestDrainRunnableMailboxWorkDeliversProgressOnlyOwnedQueue(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	const (
 		ownerTaskID     = "adhoc-progress-owner"

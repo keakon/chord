@@ -11,6 +11,7 @@ import (
 )
 
 func TestCheckpointHintMatchesObservedValidation(t *testing.T) {
+	t.Parallel()
 	agent := newTestMainAgent(t, t.TempDir())
 	positive := buildEvidenceItem(evidenceToolDiff, "positive", "needed", "tool", "diff")
 	unclassified := buildEvidenceItem(evidenceToolDiff, "unclassified", "needed", "tool", "unclassified diff")
@@ -43,6 +44,7 @@ func TestCheckpointHintMatchesObservedValidation(t *testing.T) {
 }
 
 func TestCheckpointWorkerUsesCapturedRequestIdentity(t *testing.T) {
+	t.Parallel()
 	agent := newTestMainAgent(t, t.TempDir())
 	agent.newTurn("")
 	request := &modelDrivenCheckpointRequest{ToolCallID: "captured-request"}

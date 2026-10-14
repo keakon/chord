@@ -251,6 +251,7 @@ func TestCheckpointSkillsSectionCapsAndReportsOverflow(t *testing.T) {
 // own name list must not resurrect the flag: it records names, not
 // instructions.
 func TestApplyCompactionDraftResetsInvokedSkills(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.SetSkills([]*skill.Meta{
@@ -306,6 +307,7 @@ func TestApplyCompactionDraftResetsInvokedSkills(t *testing.T) {
 // the same two things: the names in its checkpoint and an honest state
 // afterwards.
 func TestSubAgentCheckpointRecordsLoadedSkills(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	defer sub.cancel()
 	parent.agentConfigs = map[string]*config.AgentConfig{"worker": {Name: "worker"}}
@@ -337,6 +339,7 @@ func TestSubAgentCheckpointRecordsLoadedSkills(t *testing.T) {
 // catalog. The name stays in the record — carry parses the first line — and the
 // not-loadable line carries the actual recovery paths.
 func TestSubAgentCheckpointMarksUnloadableSkills(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	defer sub.cancel()
 	parent.agentConfigs = map[string]*config.AgentConfig{"worker": {Name: "worker"}}
@@ -385,6 +388,7 @@ func TestSubAgentCheckpointMarksUnloadableSkills(t *testing.T) {
 // merging the previous checkpoint's line — and the previous checkpoint itself
 // always falls in the dropped prefix.
 func TestSubAgentCheckpointSkillsSurviveChainedCompression(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	defer sub.cancel()
 
@@ -442,6 +446,7 @@ func countSubAgentCheckpoints(messages []message.Message) int {
 // The omission count has to parse back so an overflow survives the next
 // compression instead of being forgotten one checkpoint at a time.
 func TestSubAgentCheckpointSkillsCarryOverflow(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	defer sub.cancel()
 
@@ -457,6 +462,7 @@ func TestSubAgentCheckpointSkillsCarryOverflow(t *testing.T) {
 }
 
 func TestSubAgentCheckpointSkillsDeduplicatesCarriedOverflow(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	defer sub.cancel()
 
@@ -485,6 +491,7 @@ func TestSubAgentCheckpointSkillsDeduplicatesCarriedOverflow(t *testing.T) {
 }
 
 func TestSubAgentRestoreInvokedSkillsFollowsRemainingMessages(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	defer sub.cancel()
 

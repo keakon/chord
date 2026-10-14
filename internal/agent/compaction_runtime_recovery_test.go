@@ -10,6 +10,7 @@ import (
 )
 
 func TestEnsureOversizeDrivenCompactionStartsMainResumeCompaction(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -48,6 +49,7 @@ func TestEnsureOversizeDrivenCompactionStartsMainResumeCompaction(t *testing.T) 
 }
 
 func TestEnsureOversizeDrivenCompactionStopsAfterRetryLimit(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -62,6 +64,7 @@ func TestEnsureOversizeDrivenCompactionStopsAfterRetryLimit(t *testing.T) {
 }
 
 func TestCompactionFailureDoesNotRetrySameGate(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1000)
@@ -92,6 +95,7 @@ func TestCompactionFailureDoesNotRetrySameGate(t *testing.T) {
 }
 
 func TestUsageDrivenFailureCanRetryAcrossTurnsBeforeBreakerTrips(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
@@ -112,6 +116,7 @@ func TestUsageDrivenFailureCanRetryAcrossTurnsBeforeBreakerTrips(t *testing.T) {
 }
 
 func TestUsageDrivenCompactionEnabledInLoop(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
@@ -127,6 +132,7 @@ func TestUsageDrivenCompactionEnabledInLoop(t *testing.T) {
 }
 
 func TestUsageDrivenFailureStopsRetriyingAfterBreakerTrips(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
@@ -146,6 +152,7 @@ func TestUsageDrivenFailureStopsRetriyingAfterBreakerTrips(t *testing.T) {
 }
 
 func TestLargeTranscriptDoesNotAutoCompactWithoutUsageSignal(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr = ctxmgr.NewManager(1000, 0.5)

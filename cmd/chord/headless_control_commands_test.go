@@ -10,7 +10,7 @@ import (
 
 func TestHeadlessBareModelsSendMapsToStatus(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/models"}, backend, state, to.writer())
@@ -25,7 +25,7 @@ func TestHeadlessBareModelsSendMapsToStatus(t *testing.T) {
 
 func TestHeadlessBareRoleSendMapsToStatus(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "send", Content: "/role"}, backend, state, to.writer())
@@ -40,7 +40,7 @@ func TestHeadlessBareRoleSendMapsToStatus(t *testing.T) {
 
 func TestHeadlessModelsCommandStatus(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "models", Action: "status"}, backend, state, to.writer())
@@ -60,7 +60,7 @@ func TestHeadlessModelsCommandStatus(t *testing.T) {
 
 func TestHeadlessModelsCommandSetCurrentModelPool(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "models", Action: "set_current_model_pool", Pool: "fast"}, backend, state, to.writer())
@@ -116,7 +116,7 @@ func rolePayloadRoles(t *testing.T, env *headlessEnvelope) []map[string]any {
 
 func TestHeadlessRoleListCommand(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer())
@@ -146,7 +146,7 @@ func TestHeadlessRoleListCommand(t *testing.T) {
 
 func TestHeadlessRoleListCommandPreservesBackendOrder(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	backend := &mockBackend{availableRoles: []string{"zeta", "builder"}, currentRole: "zeta"}
 
 	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer())
@@ -176,7 +176,7 @@ func TestHeadlessRoleSetSwitchesRoleAndUpdatesStatus(t *testing.T) {
 	backend := &mockBackend{}
 
 	// role set switches the backend's active role.
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
@@ -202,7 +202,7 @@ func TestHeadlessRoleSetSwitchesRoleAndUpdatesStatus(t *testing.T) {
 	}
 
 	// A later list reports the new active role.
-	to = newTestOut()
+	to = newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer())
 	env = findHeadlessEnvelopeValue(to.drain(), "role_response")
 	payload = env.Payload.(map[string]any)
@@ -212,7 +212,7 @@ func TestHeadlessRoleSetSwitchesRoleAndUpdatesStatus(t *testing.T) {
 
 	// status_response.current_role reflects the backend role before any
 	// RoleChangedEvent has flowed through the event filter.
-	to = newTestOut()
+	to = newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	env = findHeadlessEnvelopeValue(to.drain(), "status_response")
 	payload = env.Payload.(map[string]any)
@@ -228,7 +228,7 @@ func TestHeadlessRoleSetRefreshesWarmRoleCache(t *testing.T) {
 	// of asking the backend again.
 	state := &headlessState{role: "builder"}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
 
 	env := findHeadlessEnvelopeValue(to.drain(), "role_response")
@@ -243,7 +243,7 @@ func TestHeadlessRoleSetRefreshesWarmRoleCache(t *testing.T) {
 	// No RoleChangedEvent has been pumped through the event filter; the cache
 	// write on the set path must make an immediate status report the new role
 	// instead of the stale cached one.
-	to = newTestOut()
+	to = newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	env = findHeadlessEnvelopeValue(to.drain(), "status_response")
 	if env == nil {
@@ -313,7 +313,7 @@ func TestHeadlessRoleSetFailureBranches(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			to := newTestOut()
+			to := newTestOut(t)
 			handleHeadlessCommand(tc.cmd, tc.backend, tc.state, to.writer())
 			env := findHeadlessEnvelopeValue(to.drain(), "role_response")
 			if env == nil {
@@ -378,7 +378,7 @@ func TestHeadlessRoleChangeEventFilteredWithoutSubscriptionButStateUpdated(t *te
 	}
 
 	// A later status query answers current_role from the cached state.
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	payload := env.Payload.(map[string]any)
@@ -401,7 +401,7 @@ func (headlessSendOnlyBackend) SupersedeQuestion(string) bool { return false }
 
 func TestHeadlessRoleCommandRejectedByNonRoleBackend(t *testing.T) {
 	state := &headlessState{}
-	to := newTestOut()
+	to := newTestOut(t)
 	var backend headlessBackend = &headlessSendOnlyBackend{}
 
 	handleHeadlessCommand(headlessCommand{Type: "role", Action: "list"}, backend, state, to.writer())
@@ -425,12 +425,12 @@ func TestHeadlessRoleChangeEventDoesNotRegressRoleCacheAfterRoleSet(t *testing.T
 
 	// Two rapid sets (executor, then planner). Each commits synchronously on the
 	// backend and refreshes the cache on the set path.
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "executor"}, backend, state, to.writer())
 	if env := findHeadlessEnvelopeValue(to.drain(), "role_response"); env == nil {
 		t.Fatal("role_response missing for set executor")
 	}
-	to = newTestOut()
+	to = newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
 	if env := findHeadlessEnvelopeValue(to.drain(), "role_response"); env == nil {
 		t.Fatal("role_response missing for set planner")
@@ -449,7 +449,7 @@ func TestHeadlessRoleChangeEventDoesNotRegressRoleCacheAfterRoleSet(t *testing.T
 	}
 
 	// Status still reports the latest committed role.
-	to = newTestOut()
+	to = newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, to.writer())
 	env := findHeadlessEnvelopeValue(to.drain(), "status_response")
 	payload := env.Payload.(map[string]any)
@@ -468,7 +468,7 @@ func TestHeadlessRoleSetAnnouncesRoleChangeOnceDespiteDelayedEvent(t *testing.T)
 	backend := &mockBackend{availableRoles: []string{"builder", "planner"}, currentRole: "builder"}
 	state := &headlessState{role: "builder", subscriptions: map[string]bool{"role_change": true}}
 
-	to := newTestOut()
+	to := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "role", Action: "set", Role: "planner"}, backend, state, to.writer())
 	envs := to.drain()
 	if findHeadlessEnvelopeValue(envs, "role_response") == nil {

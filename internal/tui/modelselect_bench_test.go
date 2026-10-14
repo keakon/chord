@@ -5,8 +5,9 @@ import (
 	"testing"
 )
 
-func benchmarkModelForPoolSelectDialog() Model {
-	m := benchmarkModelForView()
+func benchmarkModelForPoolSelectDialog(tb testing.TB) Model {
+	tb.Helper()
+	m := benchmarkModelForView(tb)
 	m.mode = ModeModelSelect
 	poolNames := make([]string, 0, 10)
 	for i := range 10 {
@@ -21,7 +22,7 @@ func benchmarkModelForPoolSelectDialog() Model {
 }
 
 func BenchmarkRenderPoolSelectDialogOpen(b *testing.B) {
-	m := benchmarkModelForPoolSelectDialog()
+	m := benchmarkModelForPoolSelectDialog(b)
 	_ = m.renderModelSelectDialog()
 	b.ReportAllocs()
 	for b.Loop() {

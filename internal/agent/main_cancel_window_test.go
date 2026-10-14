@@ -62,6 +62,7 @@ func newCancelWindowTestAgent(t *testing.T, provider *keyRecordingProvider) *Mai
 // without asking the model, then emit consumption and aggregate idle so an
 // ACP prompt settles without inventing a request cycle.
 func TestCancelCurrentTurnCoversMessageAcceptedBeforeItsTurn(t *testing.T) {
+	t.Parallel()
 	provider := &keyRecordingProvider{}
 	a := newCancelWindowTestAgent(t, provider)
 
@@ -103,6 +104,7 @@ func TestCancelCurrentTurnCoversMessageAcceptedBeforeItsTurn(t *testing.T) {
 // the watermark: a message the user sent after the cancel was accepted outranks
 // it and still runs.
 func TestCancelCurrentTurnCoversOnlyMessagesAcceptedBeforeIt(t *testing.T) {
+	t.Parallel()
 	provider := &keyRecordingProvider{}
 	a := newCancelWindowTestAgent(t, provider)
 
@@ -134,6 +136,7 @@ func TestCancelCurrentTurnCoversOnlyMessagesAcceptedBeforeIt(t *testing.T) {
 // cancel stays idle: it reports false and arms nothing that would cancel the
 // next message the user sends.
 func TestCancelCurrentTurnWhileIdleLeavesLaterMessagesAlone(t *testing.T) {
+	t.Parallel()
 	provider := &keyRecordingProvider{}
 	a := newCancelWindowTestAgent(t, provider)
 	startMainAgentLoopForTest(t, a)
@@ -155,6 +158,7 @@ func TestCancelCurrentTurnWhileIdleLeavesLaterMessagesAlone(t *testing.T) {
 // Cancellation covers both the active turn and every input already accepted;
 // a durable queued input must not execute after that cancellation.
 func TestCancelCurrentTurnWithActiveTurnCoversAcceptedInputs(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	a.newTurn("")
@@ -177,6 +181,7 @@ func TestCancelCurrentTurnWithActiveTurnCoversAcceptedInputs(t *testing.T) {
 // first. The turn belongs to a message accepted after the cancel, so the queued
 // request must not abort it.
 func TestCancelRequestOutrankedByTurnOriginDoesNotAbortIt(t *testing.T) {
+	t.Parallel()
 	provider := &keyRecordingProvider{}
 	a := newCancelWindowTestAgent(t, provider)
 
@@ -199,6 +204,7 @@ func TestCancelRequestOutrankedByTurnOriginDoesNotAbortIt(t *testing.T) {
 // the gate: a request that does cover the message which started the turn in
 // front of it still cancels that turn.
 func TestCancelRequestAbortsATurnItsMessageWasAcceptedUnder(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 
 	// The loop already started this turn for a message the cancel covers, which
@@ -222,6 +228,7 @@ func TestCancelRequestAbortsATurnItsMessageWasAcceptedUnder(t *testing.T) {
 // keep it in the transcript without asking the model. Consumption precedes
 // the global idle an ACP prompt settles on.
 func TestCancelCoversQueuedMessageThatNeverStartedATurn(t *testing.T) {
+	t.Parallel()
 	provider := &keyRecordingProvider{}
 	a := newCancelWindowTestAgent(t, provider)
 

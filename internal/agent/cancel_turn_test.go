@@ -33,6 +33,7 @@ func nextNonRequestCycleEvent(t *testing.T, events <-chan AgentEvent) AgentEvent
 }
 
 func TestCancelCurrentTurnWithoutPendingToolsEmitsIdle(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -69,6 +70,7 @@ func TestCancelCurrentTurnWithoutPendingToolsEmitsIdle(t *testing.T) {
 }
 
 func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -129,6 +131,7 @@ func TestCancelCurrentTurnWithPendingToolsPersistsCancelledToolResult(t *testing
 }
 
 func TestCancelCurrentTurnDoesNotCancelCompletedToolCalls(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -191,6 +194,7 @@ func TestCancelCurrentTurnDoesNotCancelCompletedToolCalls(t *testing.T) {
 }
 
 func TestCancelCurrentTurnDiscardsSpeculativeToolCardWithoutPersistingToolMessage(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -252,6 +256,7 @@ func TestCancelCurrentTurnDiscardsSpeculativeToolCardWithoutPersistingToolMessag
 }
 
 func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	providerCfg := llm.NewProviderConfig("test", config.ProviderConfig{
@@ -359,6 +364,7 @@ func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 // a second card holding the rest of the reply (see StreamSegmentEndedEvent).
 // Both kinds of delta carry the segment identity the TUI attributes them by.
 func TestCancelCurrentTurnStreamSegmentEndFollowsFlushedTail(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	providerCfg := llm.NewProviderConfig("sample/test-provider", config.ProviderConfig{
@@ -468,6 +474,7 @@ func TestCancelCurrentTurnStreamSegmentEndFollowsFlushedTail(t *testing.T) {
 }
 
 func TestHandleTurnCancelledIgnoresStaleEventAfterNewTurn(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -521,6 +528,7 @@ func TestHandleTurnCancelledIgnoresStaleEventAfterNewTurn(t *testing.T) {
 // starts a fresh turn by itself and a user cancel reads as inert (Escape looks
 // like it did nothing).
 func TestCancelTurnParksMailboxDeliveryUntilUserAction(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	if a.turn == nil {

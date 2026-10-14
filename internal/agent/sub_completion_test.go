@@ -13,6 +13,7 @@ import (
 )
 
 func TestCompletionDefersForQueuedInputAcrossDeliveryPaths(t *testing.T) {
+	t.Parallel()
 	for _, degraded := range []bool{false, true} {
 		for _, mixed := range []bool{false, true} {
 			for _, joined := range []bool{false, true} {

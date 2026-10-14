@@ -12,6 +12,7 @@ import (
 // sites gate markControlAction behind controlActionCanSetBaseline, and the
 // baseline must not be advanced while subagent work is in flight.
 func TestControlActionBaselineGuardedBySubAgentWork(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 
@@ -56,6 +57,7 @@ func TestControlActionBaselineGuardedBySubAgentWork(t *testing.T) {
 // gate wait alone would otherwise turn the next idle into a completion
 // notification.
 func TestPreparingActivityIsNotRealWork(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.markControlAction()
 	baseline := a.realWorkEpoch.Load()

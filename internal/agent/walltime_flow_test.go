@@ -19,6 +19,7 @@ import (
 // request settles a non-zero Model segment for the main agent, so the TIME
 // sidebar section updates at every response end.
 func TestWalltimeMainLLMCallSettlesModelTime(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
@@ -49,6 +50,7 @@ func TestWalltimeMainLLMCallSettlesModelTime(t *testing.T) {
 // TestWalltimeMainToolResultSettlesToolTime verifies that a completed tool
 // result settles the tool's execution duration for the main agent.
 func TestWalltimeMainToolResultSettlesToolTime(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -118,6 +120,7 @@ func TestWalltimeToolResultKeepsAgentAndSessionAttribution(t *testing.T) {
 // early (before the flush events that trigger a TUI re-render) and then again
 // via defer, without double-counting the segment.
 func TestRequestWallclockFinishIsIdempotent(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	req := a.walltime.startRequestAt(identity.MainAgentID, "", 0)
@@ -140,6 +143,7 @@ func TestRequestWallclockFinishIsIdempotent(t *testing.T) {
 // rejects: the wait settles into UserWait and the tool contributes no Tools
 // time, because the execution anchor is never set for a denied call.
 func TestWalltimeConfirmRejectionClassifiesAsUserWaitOnly(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	reg := tools.NewRegistry()
 	reg.Register(requiredValueTool{})
@@ -221,6 +225,7 @@ func TestWalltimeConfirmRejectionClassifiesAsUserWaitOnly(t *testing.T) {
 }
 
 func TestNewTurnPreservesCompletedSpeculativeResultWithoutWalltimeDeadlock(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	oldTurn := a.turn

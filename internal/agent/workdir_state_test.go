@@ -231,6 +231,7 @@ func writeTestVenv(t *testing.T, dir string) string {
 // the virtualenv path — to the live binding. Leaving either at the startup
 // value tells the model it is on the branch of the checkout it left.
 func TestWorkDirSwitchRefreshesInjectedGitStatus(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	repo := newWorktreeTestRepo(t)
 	writeTestVenv(t, repo)
@@ -276,6 +277,7 @@ func TestWorkDirSwitchRefreshesInjectedGitStatus(t *testing.T) {
 // the checkout it bound — the permission scope and hook working directory
 // included — while a pipeline built afterwards writes the new one.
 func TestWorkDirSwitchKeepsInFlightSnapshot(t *testing.T) {
+	t.Parallel()
 	a, repo := newWorktreeTestAgent(t, "session-owner")
 
 	before := a.toolExecutionPipeline()
@@ -351,6 +353,7 @@ func (e *recordingSyncHookEngine) projectRoots(point string) []string {
 // before the switch keeps firing in the checkout it bound, while a call
 // dispatched after the switch runs in the new checkout.
 func TestWorkDirSwitchKeepsInFlightRequestBinding(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-owner")
 	a.tools.Register(tools.ReadTool{BaseDir: repo})
@@ -393,6 +396,7 @@ func TestWorkDirSwitchKeepsInFlightRequestBinding(t *testing.T) {
 // chord's own state directories, so a relative plan path that resolved against
 // the checkout would be written into a directory `worktree remove` deletes.
 func TestWorkDirBindingAnchorsMachineStateToContentRoot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-owner")
 	a.tools.Register(tools.ReadTool{BaseDir: repo})
@@ -468,6 +472,7 @@ func TestWorkDirBindingAnchorsMachineStateToContentRoot(t *testing.T) {
 // was registered with the startup directory, so a read that ignored the binding
 // would return the main copy.
 func TestWorkDirReadsFollowTheActiveCheckout(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-owner")
 	a.tools.Register(tools.ReadTool{BaseDir: repo})
@@ -543,6 +548,7 @@ func readToolActivityJournal(t *testing.T, path string) map[string]recovery.Tool
 // checkout (and vice versa), which is exactly the "replay into the new cwd"
 // failure the binding generation exists to detect.
 func TestToolActivityJournalCarriesTheActiveCheckout(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-owner")
 	if a.recoveryManager() == nil {
@@ -629,6 +635,7 @@ func TestToolActivityJournalCarriesTheActiveCheckout(t *testing.T) {
 // rollback — an agent that switched but could not reconfigure diagnostics is
 // still better off than one stuck in the previous checkout.
 func TestWorkDirSwitchRebindsLSP(t *testing.T) {
+	t.Parallel()
 	repo := newWorktreeTestRepo(t)
 	a := newTestMainAgent(t, repo)
 	var calls []string
@@ -673,6 +680,7 @@ func TestWorkDirSwitchRebindsLSP(t *testing.T) {
 // must carry the name, branch, and base that the environment reminder and
 // completion report read.
 func TestRehydrateTaskRestoresRecordedWorktree(t *testing.T) {
+	t.Parallel()
 	a, repo := newWorktreeTestAgent(t, "session-restore-worktree")
 	configureNestedDelegationTestRuntime(a, 1)
 
@@ -745,6 +753,7 @@ func TestRehydrateTaskRestoresRecordedWorktree(t *testing.T) {
 // A recorded checkout that is no longer a worktree of this repository must not
 // be resumed as one: the binding falls back to the inherited directory.
 func TestRehydrateTaskIgnoresStaleRecordedWorktree(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, repo := newWorktreeTestAgent(t, "session-restore-stale")
 	configureNestedDelegationTestRuntime(a, 1)
@@ -797,6 +806,7 @@ func TestRehydrateTaskIgnoresStaleRecordedWorktree(t *testing.T) {
 // session lands in the main checkout and replays the transcript's relative
 // paths against a different tree.
 func TestNewSessionRecordsActiveWorktreeCheckout(t *testing.T) {
+	t.Parallel()
 	a, _ := newWorktreeTestAgent(t, "session-new-checkout")
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
@@ -830,6 +840,7 @@ func TestNewSessionRecordsActiveWorktreeCheckout(t *testing.T) {
 // directory; the resumed transcript must be interpreted against the checkout
 // the session recorded, not the one the previous session left.
 func TestResumeAdoptsRecordedWorktreeCheckout(t *testing.T) {
+	t.Parallel()
 	a, repo := newWorktreeTestAgent(t, "session-resume-adopt")
 
 	info := createTestWorktree(t, a, "feat-resume")
@@ -875,6 +886,7 @@ func TestResumeAdoptsRecordedWorktreeCheckout(t *testing.T) {
 // parent's current checkout would reinterpret the worker's transcript against
 // a different tree.
 func TestRehydrateTaskKeepsRecordedMainCheckoutAfterParentSwitches(t *testing.T) {
+	t.Parallel()
 	a, repo := newWorktreeTestAgent(t, "session-restore-maindir")
 	configureNestedDelegationTestRuntime(a, 1)
 
@@ -933,6 +945,7 @@ func TestRehydrateTaskKeepsRecordedMainCheckoutAfterParentSwitches(t *testing.T)
 // the removal's error and surfaced as a warning, and the fresh session record
 // keeps no binding rather than a dead one.
 func TestNewSessionDoesNotClaimACheckoutRemovedUnderIt(t *testing.T) {
+	t.Parallel()
 	a, _ := newWorktreeTestAgent(t, "session-new-gone-checkout")
 	a.markAgentsMDReady()
 	a.MarkSkillsReady()
@@ -961,6 +974,7 @@ func TestNewSessionDoesNotClaimACheckoutRemovedUnderIt(t *testing.T) {
 // republish the claim — but the rest of its record still has to land, or the
 // worker loses its state.
 func TestSubAgentMetaDropsAClaimOnARemovedCheckout(t *testing.T) {
+	t.Parallel()
 	a, _ := newWorktreeTestAgent(t, "session-sub-gone-checkout")
 	sub := newControllableTestSubAgent(t, a, "adhoc-gone-checkout")
 
@@ -994,6 +1008,7 @@ func TestSubAgentMetaDropsAClaimOnARemovedCheckout(t *testing.T) {
 // TestSubAgentBindingIsIndependentOfMainAgent pins the per-agent ownership of
 // the binding: a worker's checkout never moves the session's own.
 func TestSubAgentBindingIsIndependentOfMainAgent(t *testing.T) {
+	t.Parallel()
 	a, repo := newWorktreeTestAgent(t, "session-owner")
 
 	info := createTestWorktree(t, a, "feat-sub")

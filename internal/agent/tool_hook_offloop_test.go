@@ -104,6 +104,7 @@ func gateTestExec(turn *Turn, started chan<- string) *StreamingToolExecutor {
 // speculative result would otherwise be finalized through a hook that can only
 // run on the event loop. Without hooks, speculative execution starts normally.
 func TestSyncToolHookGateDisablesSpeculativeExecution(t *testing.T) {
+	t.Parallel()
 	a := newGateTestMainAgent(t)
 	eng := gateTestHookEngineOf(a)
 	eng.hasHooks = true
@@ -146,6 +147,7 @@ func TestSyncToolHookGateDisablesSpeculativeExecution(t *testing.T) {
 // the event loop; every call goes to the pipeline instead. Without hooks the
 // loop-side finalize hook stays (a no-op fast path).
 func TestSyncToolHookGateSkipsSpeculativeReuseInPromote(t *testing.T) {
+	t.Parallel()
 	a := newGateTestMainAgent(t)
 	eng := gateTestHookEngineOf(a)
 	eng.hasHooks = true
@@ -173,6 +175,7 @@ func TestSyncToolHookGateSkipsSpeculativeReuseInPromote(t *testing.T) {
 // The off-loop finalize applies the hook's modify verdict to the composed
 // texts and books exactly one hook run per result.
 func TestFinalizeToolResultTextsAppliesHookModify(t *testing.T) {
+	t.Parallel()
 	a := newGateTestMainAgent(t)
 	eng := gateTestHookEngineOf(a)
 	eng.modify = func(env hook.Envelope) *hook.Result {
@@ -199,6 +202,7 @@ func TestFinalizeToolResultTextsAppliesHookModify(t *testing.T) {
 // handler must not run the append hook on the event loop: it composes on a
 // goroutine and re-delivers the finished payload.
 func TestSyntheticToolResultComposesAppendHookOffLoop(t *testing.T) {
+	t.Parallel()
 	a := newGateTestMainAgent(t)
 	eng := gateTestHookEngineOf(a)
 	eng.hasHooks = true
@@ -270,6 +274,7 @@ func TestSyntheticToolResultComposesAppendHookOffLoop(t *testing.T) {
 // finalize re-evaluation even though the ruleset denies; any input drift
 // (ruleset replaced, loop-mode pctx, changed args) falls back to evaluating.
 func TestPermissionApprovalCacheSkipsRedundantFinalizeEvaluation(t *testing.T) {
+	t.Parallel()
 	a := newGateTestMainAgent(t)
 	deny := permission.Ruleset{{Permission: "RequiredValue", Pattern: "*", Action: permission.ActionDeny}}
 	a.ruleset = deny

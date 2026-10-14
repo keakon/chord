@@ -10,6 +10,7 @@ import (
 )
 
 func TestSessionPauseRejectsExistingQuestionWaitWithoutChangingIt(t *testing.T) {
+	t.Parallel()
 	for _, owner := range []string{identity.MainAgentID, "sample-worker"} {
 		t.Run(owner, func(t *testing.T) {
 			a := newQuestionTestAgent(t)
@@ -47,6 +48,7 @@ func TestSessionPauseRejectsExistingQuestionWaitWithoutChangingIt(t *testing.T) 
 }
 
 func TestSessionPauseAllowsAsyncQuestionWithoutWaiter(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	createTestQuestions(t, a, questionItems("Choice"), false)
 	if a.hasPauseBlockingInteraction() {

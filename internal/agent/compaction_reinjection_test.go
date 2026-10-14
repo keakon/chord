@@ -39,6 +39,7 @@ func TestCompactionReinjectionQuotaTokens(t *testing.T) {
 }
 
 func TestCompactionReinjectionUsesRemainingInputBudget(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	for _, window := range []int{8192, 120000} {
 		for _, reserved := range []int{500, 3000} {
@@ -53,6 +54,7 @@ func TestCompactionReinjectionUsesRemainingInputBudget(t *testing.T) {
 }
 
 func TestCompactionKeyFilesDoNotCreateUserBoundary(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "key.go"), []byte("package key\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -78,6 +80,7 @@ func TestCompactionKeyFilesDoNotCreateUserBoundary(t *testing.T) {
 // The same request surface re-injects once the window leaves room above the
 // margin, which is what makes this a budget decision and not a file gate.
 func TestInjectCompactionFileContextSkipsWhenPostCompactionMarginIsGone(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectRoot, "key.go"), []byte("package key\n"), 0o644); err != nil {
 		t.Fatalf("write key file: %v", err)
@@ -127,6 +130,7 @@ func TestInjectCompactionFileContextSkipsWhenPostCompactionMarginIsGone(t *testi
 // top of the read-time revision and the invalidation flag, and the overlay
 // states that the body is a fresh read rather than the checkpoint snapshot.
 func TestInjectCompactionFileContextRecordsFileSource(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(projectRoot, ".chord", "notes"), 0o755); err != nil {
 		t.Fatalf("mkdir notes dir: %v", err)
@@ -180,6 +184,7 @@ func TestInjectCompactionFileContextRecordsFileSource(t *testing.T) {
 // provider rejection that follows. The overlay is bounded by a quarter of the
 // window and skipped when even that is below the smallest useful fragment.
 func TestInjectCompactionFileContextBoundsOverlayOnSmallWindow(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	if err := os.WriteFile(filepath.Join(projectRoot, "key.go"), []byte("package key\n"), 0o644); err != nil {
 		t.Fatalf("write key file: %v", err)

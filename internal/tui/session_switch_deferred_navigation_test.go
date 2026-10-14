@@ -60,6 +60,7 @@ func assertDeferredWindowInvariant(t *testing.T, m *Model) {
 }
 
 func TestDeferredStartupTranscriptPageUpSwitchesWindowBeforeExactTopOffset(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+140)
 	for i := range startupTranscriptWindowMinBlocks + 140 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -86,6 +87,7 @@ func TestDeferredStartupTranscriptPageUpSwitchesWindowBeforeExactTopOffset(t *te
 }
 
 func TestDeferredStartupTranscriptScrollUpSwitchesWindowBeforeExactTopOffset(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+140)
 	for i := range startupTranscriptWindowMinBlocks + 140 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -112,6 +114,7 @@ func TestDeferredStartupTranscriptScrollUpSwitchesWindowBeforeExactTopOffset(t *
 }
 
 func TestDeferredStartupTranscriptMouseWheelUpSwitchesWindowBeforeExactTopOffset(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+140)
 	for i := range startupTranscriptWindowMinBlocks + 140 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -151,6 +154,7 @@ func TestDeferredStartupTranscriptMouseWheelUpSwitchesWindowBeforeExactTopOffset
 }
 
 func TestDeferredStartupTranscriptHiddenToolResultDoesNotDuplicateAfterMouseWheelWindowSwitch(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+140)
 	for i := range startupTranscriptWindowMinBlocks + 140 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -238,6 +242,7 @@ func TestDeferredStartupTranscriptHiddenToolResultDoesNotDuplicateAfterMouseWhee
 }
 
 func TestDeferredStartupTranscriptCountedJumpBuildsTargetWindow(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -263,6 +268,7 @@ func TestDeferredStartupTranscriptCountedJumpBuildsTargetWindow(t *testing.T) {
 }
 
 func TestDeferredStartupTranscriptScrollAndPageMoveBetweenWindows(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -300,6 +306,7 @@ func TestDeferredStartupTranscriptScrollAndPageMoveBetweenWindows(t *testing.T) 
 }
 
 func TestDeferredStartupTranscriptScrollWindowSwitchUsesContiguousPaging(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -349,6 +356,7 @@ func TestDeferredStartupTranscriptScrollWindowSwitchUsesContiguousPaging(t *test
 }
 
 func TestDeferredStartupTranscriptPrevBlockAtTopDoesNotJumpToStaleAnchor(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -381,6 +389,7 @@ func TestDeferredStartupTranscriptPrevBlockAtTopDoesNotJumpToStaleAnchor(t *test
 }
 
 func TestDeferredStartupTranscriptNextBlockFocusIsMonotonicAcrossWindows(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -427,6 +436,7 @@ func TestDeferredStartupTranscriptNextBlockFocusIsMonotonicAcrossWindows(t *test
 }
 
 func TestDeferredStartupTranscriptFocusRestoreTailPreventsMouseWheelPagingPastBottom(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
 	for i := range startupTranscriptWindowMinBlocks + 120 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -500,6 +510,7 @@ func TestDeferredStartupTranscriptFocusRestoreTailPreventsMouseWheelPagingPastBo
 }
 
 func TestDeferredStartupTranscriptMouseWheelDownAt197CardTailDoesNotJumpToWindowStart(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, 197)
 	for i := range 197 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
@@ -553,6 +564,7 @@ func TestDeferredStartupTranscriptMouseWheelDownAt197CardTailDoesNotJumpToWindow
 }
 
 func TestDeferredStartupTranscriptCountedNextBlockSaturatesAtLastCard(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+40)
 	for i := range startupTranscriptWindowMinBlocks + 40 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -607,6 +619,7 @@ func TestDeferredStartupTranscriptCountedNextBlockSaturatesAtLastCard(t *testing
 }
 
 func TestDeferredStartupTranscriptCountedPrevNextRemainContiguousAcrossWindows(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -669,6 +682,7 @@ func TestDeferredStartupTranscriptCountedPrevNextRemainContiguousAcrossWindows(t
 }
 
 func TestDeferredStartupTranscriptCountedLineScrollSaturatesAtTail(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+120)
 	for i := range startupTranscriptWindowMinBlocks + 120 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
@@ -704,6 +718,7 @@ func TestDeferredStartupTranscriptCountedLineScrollSaturatesAtTail(t *testing.T)
 }
 
 func TestDeferredStartupTranscriptLiveAppendAndFocusRestoreKeepMouseWheelTailBounded(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
 	for i := range startupTranscriptWindowMinBlocks + 220 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
@@ -782,6 +797,7 @@ func TestDeferredStartupTranscriptLiveAppendAndFocusRestoreKeepMouseWheelTailBou
 }
 
 func TestDeferredStartupTranscriptGScrollsToTailLineWhenLastBlockIsTall(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+80)
 	for i := range startupTranscriptWindowMinBlocks + 79 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -822,6 +838,7 @@ func TestDeferredStartupTranscriptGScrollsToTailLineWhenLastBlockIsTall(t *testi
 }
 
 func TestDeferredStartupTranscriptMouseWheelRoundTripFromTailStaysInTailWindow(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
 	for i := range startupTranscriptWindowMinBlocks + 220 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
@@ -881,6 +898,7 @@ func TestDeferredStartupTranscriptMouseWheelRoundTripFromTailStaysInTailWindow(t
 }
 
 func TestDeferredStartupTranscriptJumpBottomThenPartialScrollUpAndDownStaysInTailWindow(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
 	for i := range startupTranscriptWindowMinBlocks + 220 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 8))})
@@ -946,6 +964,7 @@ func TestDeferredStartupTranscriptJumpBottomThenPartialScrollUpAndDownStaysInTai
 }
 
 func TestDeferredStartupTranscriptRandomCountedNavigationMatchesTheory(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+220)
 	for i := range startupTranscriptWindowMinBlocks + 220 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -998,6 +1017,7 @@ func TestDeferredStartupTranscriptRandomCountedNavigationMatchesTheory(t *testin
 }
 
 func TestDeferredStartupTranscriptCountedNavigationMaintainsWindowInvariant(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+260)
 	for i := range startupTranscriptWindowMinBlocks + 260 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -1030,6 +1050,7 @@ func TestDeferredStartupTranscriptCountedNavigationMaintainsWindowInvariant(t *t
 }
 
 func TestNormalModeCountedBoundaryNavigationSaturatesAtEdges(t *testing.T) {
+	stubTUITicks(t)
 	m := NewModelWithSize(nil, 120, 24)
 	m.mode = ModeNormal
 	for i := range 10 {

@@ -62,6 +62,7 @@ func (p *commitReleaseProvider) Complete(
 // final text is published as StreamTextCommitEvent with the segment identity,
 // and the segment end reports last.
 func TestMainAgentEmitsStreamTextCommitBeforeSegmentEnd(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	providerCfg := llm.NewProviderConfig("sample/test-provider", config.ProviderConfig{
@@ -134,6 +135,7 @@ func TestMainAgentEmitsStreamTextCommitBeforeSegmentEnd(t *testing.T) {
 
 // Even empty successful content is authoritative and retracts prior deltas.
 func TestMainAgentCommitsEmptyContent(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	providerCfg := llm.NewProviderConfig("sample/test-provider", config.ProviderConfig{
@@ -180,6 +182,7 @@ func TestMainAgentCommitsEmptyContent(t *testing.T) {
 // publish its sanitized final text with the SubAgent identity before the
 // segment ends, mirroring the main agent path.
 func TestSubAgentEmitsStreamTextCommitBeforeSegmentEnd(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	providerCfg := llm.NewProviderConfig("sample/test-provider", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -250,6 +253,7 @@ func TestSubAgentEmitsStreamTextCommitBeforeSegmentEnd(t *testing.T) {
 // An unfocused SubAgent is gated out of the TUI output path: the commit is
 // dropped alongside the deltas, and the run loop must not stall.
 func TestSubAgentStreamTextCommitGatedWhenUnfocused(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	providerCfg := llm.NewProviderConfig("sample/test-provider", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
@@ -275,6 +279,7 @@ func TestSubAgentStreamTextCommitGatedWhenUnfocused(t *testing.T) {
 }
 
 func TestSubAgentCommitsEmptyFinalText(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	cfg := llm.NewProviderConfig("sample/test-provider", config.ProviderConfig{
 		Type:   config.ProviderTypeChatCompletions,

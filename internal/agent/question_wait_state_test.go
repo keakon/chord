@@ -10,6 +10,7 @@ import (
 )
 
 func TestQuestionWaitProjectionTracksInstallAndCancellation(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	created := createTestQuestions(t, a, questionItems("Target"), false)
 	id := created.Result.QuestionIDs[0]
@@ -25,6 +26,7 @@ func TestQuestionWaitProjectionTracksInstallAndCancellation(t *testing.T) {
 }
 
 func TestQuestionWaitProjectionDeduplicatesAndClearsInterruptedWaits(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	created := createTestQuestions(t, a, questionItems("Target"), false)
 	id := created.Result.QuestionIDs[0]
@@ -50,6 +52,7 @@ func assertQuestionWaitProjection(t *testing.T, a *MainAgent, want []string) {
 }
 
 func TestQuestionAnsweredBeforeWaitInstallationSettlesImmediately(t *testing.T) {
+	t.Parallel()
 	a := newQuestionTestAgent(t)
 	created := createTestQuestions(t, a, questionItems("Target"), true)
 	id := created.Result.QuestionIDs[0]

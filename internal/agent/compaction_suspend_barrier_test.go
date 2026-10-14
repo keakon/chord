@@ -60,6 +60,7 @@ func parkReadyDraftForTest(a *MainAgent, planID uint64) {
 // the parked draft, nothing ever reaches the draft again: the compaction slot
 // stays claimed, the turn never settles and later user input queues behind it.
 func TestOversizeSuspendAppliesDraftParkedAtBarrier(t *testing.T) {
+	t.Parallel()
 	const planID = uint64(7312)
 	a := newSuspendBarrierTestAgent(t, planID, continuationPlan{kind: compactionResumeAutoContinue})
 	parkReadyDraftForTest(a, planID)

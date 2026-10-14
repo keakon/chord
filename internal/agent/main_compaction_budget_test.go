@@ -10,6 +10,7 @@ import (
 )
 
 func TestRunningModelUsesFixedCompactionBudgetForTriggerAndDisplay(t *testing.T) {
+	t.Parallel()
 	provider := llm.NewProviderConfig("sample", config.ProviderConfig{
 		Type: config.ProviderTypeChatCompletions,
 		Models: map[string]config.ModelConfig{
@@ -37,6 +38,7 @@ func TestRunningModelUsesFixedCompactionBudgetForTriggerAndDisplay(t *testing.T)
 }
 
 func TestPressureNoticeAgreesWithExactFixedCompactionThreshold(t *testing.T) {
+	t.Parallel()
 	instance := noticeRequestAgent(t)
 	instance.globalConfig.Context.Compaction.Threshold = 0.28
 	instance.globalConfig.Context.Compaction.Reminder = 0.2

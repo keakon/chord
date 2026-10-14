@@ -15,6 +15,7 @@ import (
 )
 
 func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
 	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
@@ -72,6 +73,7 @@ func TestDeferredStartupTranscriptSearchRevealExpandsToolCallContent(t *testing.
 }
 
 func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
 	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
@@ -136,6 +138,7 @@ func TestDeferredStartupTranscriptSearchRevealMaterializesColdCompactToolOutput(
 }
 
 func TestDeferredStartupTranscriptSearchSkipsInvisibleThinkingBlocks(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110)
 	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
@@ -174,6 +177,7 @@ func TestDeferredStartupTranscriptSearchSkipsInvisibleThinkingBlocks(t *testing.
 }
 
 func TestDeferredStartupTranscriptSearchSkipsDiagnosticArtifactBlocks(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+4)
 	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
@@ -227,6 +231,7 @@ func TestDeferredStartupTranscriptSearchSkipsDiagnosticArtifactBlocks(t *testing
 }
 
 func TestDeferredStartupTranscriptSearchRevealExpandsCompactToolOutput(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+110+2)
 	for i := range startupTranscriptWindowMinBlocks + 110 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("filler-%03d", i)})
@@ -320,6 +325,7 @@ func TestSearchPillShowsAcrossModesWhileSearchSessionActive(t *testing.T) {
 }
 
 func TestDeferredStartupTranscriptSearchNavigatesWithoutHydrate(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -359,6 +365,7 @@ func TestDeferredStartupTranscriptSearchNavigatesWithoutHydrate(t *testing.T) {
 }
 
 func TestDeferredStartupTranscriptSearchNavigatesToBlockIDZero(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: message.RoleAssistant, Content: fmt.Sprintf("message-%03d", i)})
@@ -402,6 +409,7 @@ func TestDeferredStartupTranscriptSearchNavigatesToBlockIDZero(t *testing.T) {
 }
 
 func TestDeferredStartupTranscriptDirectoryNavigatesWithoutHydrate(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d", i)})
@@ -440,6 +448,7 @@ func TestDeferredStartupTranscriptDirectoryNavigatesWithoutHydrate(t *testing.T)
 }
 
 func TestDeferredStartupTranscriptMetadataSupportsSearchAndDirectoryAfterSpill(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 64))})
@@ -504,6 +513,7 @@ func TestDeferredStartupTranscriptSearchesVisibleAssistantMarkdown(t *testing.T)
 }
 
 func TestDeferredStartupTranscriptSearchAndDirectorySurviveViewportResize(t *testing.T) {
+	stubTUITicks(t)
 	messages := make([]message.Message, 0, startupTranscriptWindowMinBlocks+200)
 	for i := range startupTranscriptWindowMinBlocks + 200 {
 		messages = append(messages, message.Message{Role: "assistant", Content: fmt.Sprintf("message-%03d %s", i, strings.Repeat("payload ", 48))})

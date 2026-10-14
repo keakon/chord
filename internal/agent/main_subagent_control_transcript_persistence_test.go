@@ -8,6 +8,7 @@ import (
 )
 
 func TestSubAgentPersistencePumpPreservesMessageOrder(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-persist-order")
 	for _, content := range []string{"first", "second", "third"} {
@@ -25,6 +26,7 @@ func TestSubAgentPersistencePumpPreservesMessageOrder(t *testing.T) {
 }
 
 func TestSubAgentControlToolPersistenceKeepsResultAfterRestore(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-control-persist")
 	callID := "call-escalate-order"

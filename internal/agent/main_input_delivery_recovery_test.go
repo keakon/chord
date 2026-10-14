@@ -10,6 +10,7 @@ import (
 )
 
 func TestInputDeliveryResumeRetiresUnknownInputs(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	state := &recovery.InputDeliveryState{Revision: 3,
 		Gate:   recovery.FollowupGate{Mode: recovery.FollowupGatePaused, Reason: recovery.FollowupOutcomeUnknown, WaitingWorkID: "work"},
@@ -25,6 +26,7 @@ func TestInputDeliveryResumeRetiresUnknownInputs(t *testing.T) {
 }
 
 func TestInputDeliveryReconciledClaimRequiresStartPermit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
 	a.newTurn(work)
@@ -41,6 +43,7 @@ func TestInputDeliveryReconciledClaimRequiresStartPermit(t *testing.T) {
 }
 
 func TestInputDeliveryPermitRecoveryBeforeDispatch(t *testing.T) {
+	t.Parallel()
 	for _, stage := range []string{recovery.PendingInputStageClaimed, recovery.PendingInputStageStarted} {
 		t.Run(stage, func(t *testing.T) {
 			a, p := scenarioAgent(t, scriptedStreamCall{resp: &message.Response{Content: "sample response", StopReason: "stop"}})
@@ -78,6 +81,7 @@ func TestInputDeliveryPermitRecoveryBeforeDispatch(t *testing.T) {
 }
 
 func TestInputDeliveryCancelledPermitCannotResume(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
 	a.newTurn(work)

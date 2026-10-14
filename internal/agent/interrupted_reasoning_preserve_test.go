@@ -22,6 +22,7 @@ import (
 // wire without its reasoning item is the exact 400 this fix exists to prevent,
 // so the saved message is asserted through NormalizeForTarget as well.
 func TestSavedInterruptedReasoningSurvivesNormalizeForTarget(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	providerCfg := llm.NewProviderConfig("openai", config.ProviderConfig{
 		Type: config.ProviderTypeResponses,

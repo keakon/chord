@@ -1550,12 +1550,7 @@ func assertRestoreToast(t *testing.T, a *MainAgent, sessionID string) {
 
 func testProjectSessionsDir(t *testing.T, projectRoot string) string {
 	t.Helper()
-	stateDir := filepath.Join(projectRoot, ".test-state")
-	t.Setenv("CHORD_STATE_DIR", stateDir)
-	locator, err := config.DefaultPathLocator()
-	if err != nil {
-		t.Fatalf("DefaultPathLocator: %v", err)
-	}
+	locator := newAgentTestPathLocator(projectRoot)
 	pl, err := locator.EnsureProject(projectRoot)
 	if err != nil {
 		t.Fatalf("EnsureProject: %v", err)
@@ -1594,6 +1589,7 @@ func newTestMainAgentForRestore(t *testing.T, projectRoot, sessionDir string) *M
 		&config.Config{},
 		nil,
 		mcp.ClientInfo{Name: "chord-test", Version: "test"},
+		newAgentTestPathLocator(projectRoot),
 	)
 	a.startPersistLoop()
 	registerTestMainAgentCleanup(t, a)

@@ -33,6 +33,7 @@ func drainRoleSlashToasts(events []AgentEvent) (info []ToastEvent, errs []ToastE
 }
 
 func TestRoleSlashBareEmitsRoleSelectEvent(t *testing.T) {
+	t.Parallel()
 	a := newRoleSlashAgent(t)
 
 	if !a.executeLocalOnlySlashCommand("/role", nil, true) {
@@ -53,6 +54,7 @@ func TestRoleSlashBareEmitsRoleSelectEvent(t *testing.T) {
 }
 
 func TestRoleSlashStatusListsCurrentAndAvailableRoles(t *testing.T) {
+	t.Parallel()
 	a := newRoleSlashAgent(t)
 
 	if !a.executeLocalOnlySlashCommand("/role status", nil, true) {
@@ -80,6 +82,7 @@ func TestRoleSlashStatusListsCurrentAndAvailableRoles(t *testing.T) {
 }
 
 func TestRoleSlashSwitchByNameSwitchesAndReports(t *testing.T) {
+	t.Parallel()
 	a := newRoleSlashAgent(t)
 
 	if !a.executeLocalOnlySlashCommand("/role planner", nil, true) {
@@ -108,6 +111,7 @@ func TestRoleSlashSwitchByNameSwitchesAndReports(t *testing.T) {
 }
 
 func TestRoleSlashSameRoleIsNoOpWithInfoToast(t *testing.T) {
+	t.Parallel()
 	a := newRoleSlashAgent(t)
 
 	if !a.executeLocalOnlySlashCommand("/role builder", nil, true) {
@@ -132,6 +136,7 @@ func TestRoleSlashSameRoleIsNoOpWithInfoToast(t *testing.T) {
 }
 
 func TestRoleSlashUnknownRoleReportsError(t *testing.T) {
+	t.Parallel()
 	a := newRoleSlashAgent(t)
 
 	if !a.executeLocalOnlySlashCommand("/role ghost", nil, true) {
@@ -153,6 +158,7 @@ func TestRoleSlashUnknownRoleReportsError(t *testing.T) {
 }
 
 func TestRoleSlashSubAgentOnlyRoleReportsError(t *testing.T) {
+	t.Parallel()
 	a := newRoleSlashAgent(t)
 	a.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {Name: "builder", Mode: config.AgentModeMain},

@@ -12,6 +12,7 @@ import (
 )
 
 func TestExportCompactionHistoryWritesArchiveIndex(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	msgs := []message.Message{

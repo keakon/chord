@@ -103,6 +103,7 @@ func TestSetMemoryDegradedAnnouncesFlipAndReason(t *testing.T) {
 // session that stalled here can be covered by another Chord process, and the
 // stalled pill would otherwise stay red until this process commits or restarts.
 func TestMemoryHealthRecoversFromCheckpointAdvance(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	writeProjectMemory(t, projectRoot, "# Project Memory\n")
 	a := newTestMainAgent(t, projectRoot)

@@ -32,6 +32,7 @@ func manualNoticeRow(cycleID uint64) message.Message {
 }
 
 func TestHandleCompactCommandBusyArmsManualIntent(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 
@@ -51,6 +52,7 @@ func TestHandleCompactCommandBusyArmsManualIntent(t *testing.T) {
 }
 
 func TestHandleCompactCommandIdleDoesNotArm(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 
 	a.handleCompactCommand()
@@ -63,6 +65,7 @@ func TestHandleCompactCommandIdleDoesNotArm(t *testing.T) {
 }
 
 func TestHandleCompactCommandInvisibleToolDoesNotArm(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.modelDrivenCompactionEnabled.Store(false)
 	a.newTurn("")
@@ -77,6 +80,7 @@ func TestHandleCompactCommandInvisibleToolDoesNotArm(t *testing.T) {
 }
 
 func TestHandleCompactCommandWhileWorkerRunningKeepsIntent(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -95,6 +99,7 @@ func TestHandleCompactCommandWhileWorkerRunningKeepsIntent(t *testing.T) {
 }
 
 func TestHandleCompactCommandArmedWithoutWorkerReschedules(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -111,6 +116,7 @@ func TestHandleCompactCommandArmedWithoutWorkerReschedules(t *testing.T) {
 }
 
 func TestManualGateInjectsNoticeOnce(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -156,6 +162,7 @@ func TestManualGateInjectsNoticeOnce(t *testing.T) {
 }
 
 func TestManualGateRestartsWorkerWithoutInjecting(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -179,6 +186,7 @@ func TestManualGateRestartsWorkerWithoutInjecting(t *testing.T) {
 }
 
 func TestManualArmedSuppressesAutoNoticesAndKeepsWarningClaim(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -207,6 +215,7 @@ func TestManualArmedSuppressesAutoNoticesAndKeepsWarningClaim(t *testing.T) {
 }
 
 func TestManualWorkerSkipClearsIntentAndWithdrawsNotice(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -249,6 +258,7 @@ func TestManualWorkerSkipClearsIntentAndWithdrawsNotice(t *testing.T) {
 }
 
 func TestModelSettleKeepsIntentAndWithdrawsNotice(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -272,6 +282,7 @@ func TestModelSettleKeepsIntentAndWithdrawsNotice(t *testing.T) {
 }
 
 func TestSettlePointRestartsArmedWorkerWhenTurnDead(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -295,6 +306,7 @@ func TestSettlePointRestartsArmedWorkerWhenTurnDead(t *testing.T) {
 }
 
 func TestSettlePointSkipsRestartWhenTurnAlive(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -310,6 +322,7 @@ func TestSettlePointSkipsRestartWhenTurnAlive(t *testing.T) {
 }
 
 func TestTurnCancellationClearsIntentButKeepsWorker(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -337,6 +350,7 @@ func TestTurnCancellationClearsIntentButKeepsWorker(t *testing.T) {
 }
 
 func TestSessionSwitchClearsManualIntent(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -351,6 +365,7 @@ func TestSessionSwitchClearsManualIntent(t *testing.T) {
 }
 
 func TestRestoreWithdrawsOrphanManualRow(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	restored := manualNoticeRow(7)
 	messages := []message.Message{{Role: message.RoleUser, Content: "hello"}, restored}
@@ -370,6 +385,7 @@ func TestRestoreWithdrawsOrphanManualRow(t *testing.T) {
 }
 
 func TestReconcileKeepsManualRowWhileArmed(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	row := manualNoticeRow(1)
 	messages := []message.Message{{Role: message.RoleUser, Content: "hello"}, row}
@@ -398,6 +414,7 @@ func TestReconcileKeepsManualRowWhileArmed(t *testing.T) {
 }
 
 func TestAbruptCrossingBypassesGraceAndStacksNoReminder(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	const budget = 1000000
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(budget, budget, budget, 0, 0.8)
@@ -427,6 +444,7 @@ func TestAbruptCrossingBypassesGraceAndStacksNoReminder(t *testing.T) {
 }
 
 func TestAbruptCrossingRequiresUndeliveredReminder(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	const budget = 1000000
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(budget, budget, budget, 0, 0.8)
@@ -445,6 +463,7 @@ func TestAbruptCrossingRequiresUndeliveredReminder(t *testing.T) {
 }
 
 func TestManualNoticeJoinsPressureCycleRecord(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.notePressureStage(pressureStageArmed, a.currentOverlayWindowKey())
 	a.stashContextNotice(contextNoticeManual, manualCompactionNoticeText)
@@ -509,6 +528,7 @@ func TestManualCompactionNoticeTextIsSelfContained(t *testing.T) {
 // the summarize worker's draft is ready before the next gate, the apply
 // consumes the intent and the gate writes no notice row.
 func TestManualGateAfterReadyApplyWritesNoNotice(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -548,6 +568,7 @@ func TestManualGateAfterReadyApplyWritesNoNotice(t *testing.T) {
 // the gate restarts the displaced worker, the restarted worker (fresh plan id)
 // never injects, and its apply clears the armed intent.
 func TestManualRestartWorkerAppliesWithoutNotice(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -585,6 +606,7 @@ func TestManualRestartWorkerAppliesWithoutNotice(t *testing.T) {
 }
 
 func TestManualApplyFailureSettlesIntent(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"barrier", "idle", "model_checkpoint"} {
 		t.Run(path, func(t *testing.T) {
 			a := manualIntentAgent(t)
@@ -652,6 +674,7 @@ func TestManualApplyFailureSettlesIntent(t *testing.T) {
 // TestManualWorkerFailureKeepsBreakerUntouched pins that a manual worker
 // failure is terminal without touching the usage-driven failure breaker.
 func TestManualWorkerFailureKeepsBreakerUntouched(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -678,6 +701,7 @@ func TestManualWorkerFailureKeepsBreakerUntouched(t *testing.T) {
 // edge: an armed intent whose tool surface lost compact_context still restarts
 // nothing new while the worker runs, and injects nothing.
 func TestManualIntentRequiresVisibleToolForInjection(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()
@@ -700,6 +724,7 @@ func TestManualIntentRequiresVisibleToolForInjection(t *testing.T) {
 // the manual intent — only applies, worker terminals, cancellation, and
 // session boundaries do.
 func TestManualArmedSurvivesUsageResets(t *testing.T) {
+	t.Parallel()
 	a := manualIntentAgent(t)
 	a.newTurn("")
 	a.handleCompactCommand()

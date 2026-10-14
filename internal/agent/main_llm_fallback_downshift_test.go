@@ -53,6 +53,7 @@ func askFallbackBoundary(a *MainAgent, payload *llmFallbackBoundaryPayload) llmF
 // window crosses its own line. The compaction starts at a later pre-request gate,
 // so the boundary must neither claim the compaction slot nor hold the reply.
 func TestFallbackBoundaryCommitsSmallerWindowAndArmsCompaction(t *testing.T) {
+	t.Parallel()
 	a := newFallbackDownshiftTestAgent(t)
 
 	result := askFallbackBoundary(a, &llmFallbackBoundaryPayload{
@@ -85,6 +86,7 @@ func TestFallbackBoundaryCommitsSmallerWindowAndArmsCompaction(t *testing.T) {
 // input budget is smaller still commits the new budgets, but under usage-only
 // triggering it must not arm from the stale observation.
 func TestFallbackBoundaryCommitsSmallerInputBudgetOnly(t *testing.T) {
+	t.Parallel()
 	a := newFallbackDownshiftTestAgent(t)
 
 	result := askFallbackBoundary(a, &llmFallbackBoundaryPayload{
@@ -115,6 +117,7 @@ func TestFallbackBoundaryCommitsSmallerInputBudgetOnly(t *testing.T) {
 // the request is admitted against), but nothing is armed until usage actually
 // crosses the new line.
 func TestFallbackBoundaryCommitsWithoutArmingBelowTheNewLine(t *testing.T) {
+	t.Parallel()
 	a := newFallbackDownshiftTestAgent(t)
 	a.ctxMgr = ctxmgr.NewManagerWithTokenBudgets(1000, 1000, 1000, 0, 0.8)
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue the task"})
@@ -149,6 +152,7 @@ func TestFallbackBoundaryCommitsWithoutArmingBelowTheNewLine(t *testing.T) {
 // model may change either — the round is admitted against a budget no smaller
 // than the one it already passed.
 func TestFallbackBoundaryLetsLargerWindowFallbackThrough(t *testing.T) {
+	t.Parallel()
 	a := newFallbackDownshiftTestAgent(t)
 	beforeRef := a.RunningModelRef()
 	beforeWindow := a.ctxMgr.GetMaxTokens()

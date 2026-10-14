@@ -112,6 +112,7 @@ func TestSubAgentRuntimeStateResetForAttemptRequiresTerminalState(t *testing.T) 
 }
 
 func TestSubAgentRejectedStateTransitionIsRecorded(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := &SubAgent{parent: a, instanceID: "agent-1"}
 	sub.setState(SubAgentStateCompleted, "done")

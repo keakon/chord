@@ -96,6 +96,7 @@ func malformedToolCallResponse(stopReason string) *LLMResponsePayload {
 // message queued while the discarded response was in flight must lead the retry
 // request instead of waiting for the next idle drain.
 func TestMalformedToolArgsRetryCarriesQueuedUserMessage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	const queued = "queued follow-up while the model retried"
@@ -118,6 +119,7 @@ func TestMalformedToolArgsRetryCarriesQueuedUserMessage(t *testing.T) {
 // the truncated length-recovery dispatch: beginLengthRecoveryRetry must merge
 // queued user input before the recovery request is assembled.
 func TestTruncatedLengthRecoveryCarriesQueuedUserMessage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	const queued = "queued follow-up while the model truncated"
@@ -141,6 +143,7 @@ func TestTruncatedLengthRecoveryCarriesQueuedUserMessage(t *testing.T) {
 // FromUser message), the fresh resume turn must still stage it so its first
 // request carries the mailbox instead of waiting for idle.
 func TestAutoContinueResumeCarriesMailboxOnlyQueue(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	prepareMainRequestDirectoryFixture(t, a)
 	provider := &gatedMailboxCaptureProvider{started: make(chan struct{}, 1), release: make(chan struct{})}
@@ -208,6 +211,7 @@ func TestAutoContinueResumeCarriesMailboxOnlyQueue(t *testing.T) {
 // still stage it so its request surface carries the mailbox instead of deferring
 // it to idle.
 func TestContinueFromContextStagesMailboxOnlyQueue(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	prepareMainRequestDirectoryFixture(t, a)
 	provider := &gatedMailboxCaptureProvider{started: make(chan struct{}, 1), release: make(chan struct{})}

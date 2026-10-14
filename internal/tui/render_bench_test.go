@@ -40,8 +40,11 @@ func benchmarkAssistantBlock() *Block {
 	}
 }
 
-func benchmarkViewportWithSpill() *Viewport {
+func benchmarkViewportWithSpill(tb testing.TB) *Viewport {
+	tb.Helper()
 	v := NewViewport(100, 12)
+	spill := v.spill
+	tb.Cleanup(func() { _ = spill.Close() })
 	v.maxHotBytes = 1024
 	for i := range 10 {
 		content := strings.Repeat("block ", 180)
@@ -66,8 +69,11 @@ func benchmarkAssistantStreamingBlock() *Block {
 	}
 }
 
-func benchmarkLargeViewport(blocks int) *Viewport {
+func benchmarkLargeViewport(tb testing.TB, blocks int) *Viewport {
+	tb.Helper()
 	v := NewViewport(100, 24)
+	spill := v.spill
+	tb.Cleanup(func() { _ = spill.Close() })
 	content := strings.Repeat("long transcript block ", 40)
 	for i := range blocks {
 		v.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: content})
@@ -77,11 +83,16 @@ func benchmarkLargeViewport(blocks int) *Viewport {
 	return v
 }
 
-func benchmarkModelForView() Model {
+func benchmarkModelForView(tb testing.TB) Model {
+	tb.Helper()
 	m := NewModel(&sessionControlAgent{providerModelRef: "anthropic/claude-opus-4.7"})
+	tb.Cleanup(func() { _ = m.Close() })
 	m.width = 120
 	m.height = 40
 	m.layout = m.generateLayout(m.width, m.height)
+	if err := m.viewport.Close(); err != nil {
+		tb.Fatal(err)
+	}
 	m.viewport = NewViewport(m.layout.main.Dx(), m.layout.main.Dy())
 	for i := range 8 {
 		m.viewport.AppendBlock(&Block{ID: i + 1, Type: BlockAssistant, Content: strings.Repeat("view render block ", 60)})
@@ -648,7 +659,7 @@ func BenchmarkRenderCompactContextCall(b *testing.B) {
 // computation stays on cached line counts instead of re-rendering every block.
 func BenchmarkViewportVisibleWindowBlockIDs(b *testing.B) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkViewportWithSpill()
+	v := benchmarkViewportWithSpill(b)
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "") // warm line-count caches
 	v.hotBudgetDirty = true
@@ -741,7 +752,7 @@ func BenchmarkAssistantMarkdownSearchLongCommonPrefix(b *testing.B) {
 
 func BenchmarkViewportRenderLargeTranscriptAtBottom(b *testing.B) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkLargeViewport(5000)
+	v := benchmarkLargeViewport(b, 5000)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
@@ -751,7 +762,7 @@ func BenchmarkViewportRenderLargeTranscriptAtBottom(b *testing.B) {
 
 func BenchmarkViewportRenderLargeTranscriptScrollWindow(b *testing.B) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkLargeViewport(5000)
+	v := benchmarkLargeViewport(b, 5000)
 	v.offset = 1000
 	_ = v.Render("", nil, -1, -1, "")
 	b.ResetTimer()
@@ -767,7 +778,7 @@ func BenchmarkViewportRenderLargeTranscriptScrollWindow(b *testing.B) {
 // ANSI serialization fast path.
 func BenchmarkModelViewCached(b *testing.B) {
 	ApplyTheme(uitheme.Default())
-	m := benchmarkModelForView()
+	m := benchmarkModelForView(b)
 	_ = m.View()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -778,7 +789,7 @@ func BenchmarkModelViewCached(b *testing.B) {
 
 func BenchmarkModelViewCachedSearchActive(b *testing.B) {
 	ApplyTheme(uitheme.Default())
-	m := benchmarkModelForView()
+	m := benchmarkModelForView(b)
 	m.search.State.Active = true
 	m.search.State.Query = "render"
 	m.search.State.Matches = []MatchPosition{{BlockID: 1, BlockIndex: 0}}
@@ -793,8 +804,11 @@ func BenchmarkModelViewCachedSearchActive(b *testing.B) {
 
 func BenchmarkModelViewScrollLargeTranscript(b *testing.B) {
 	ApplyTheme(uitheme.Default())
-	m := benchmarkModelForView()
-	m.viewport = benchmarkLargeViewport(5000)
+	m := benchmarkModelForView(b)
+	if err := m.viewport.Close(); err != nil {
+		b.Fatal(err)
+	}
+	m.viewport = benchmarkLargeViewport(b, 5000)
 	m.viewport.SetSize(m.layout.main.Dx(), m.layout.main.Dy())
 	_ = m.View()
 	b.ResetTimer()
@@ -866,7 +880,7 @@ func TestSeparatorCacheHitAllocsGuard(t *testing.T) {
 // uses cached spans after the first render.
 func TestViewportVisibleWindowBlockIDsAllocsGuard(t *testing.T) {
 	ApplyTheme(uitheme.Default())
-	v := benchmarkViewportWithSpill()
+	v := benchmarkViewportWithSpill(t)
 	v.ScrollToBottom()
 	_ = v.Render("", nil, -1, -1, "")
 	allocs := testing.AllocsPerRun(30, func() {
@@ -919,7 +933,7 @@ func TestStreamingAssistantCheapPathAllocsGuard(t *testing.T) {
 // instead of re-decoding every ANSI string on each View() call.
 func TestModelViewCachedAllocsGuard(t *testing.T) {
 	ApplyTheme(uitheme.Default())
-	m := benchmarkModelForView()
+	m := benchmarkModelForView(t)
 	_ = m.View()
 	allocs := testing.AllocsPerRun(10, func() {
 		_ = m.View()
@@ -932,7 +946,7 @@ func TestModelViewCachedAllocsGuard(t *testing.T) {
 
 func TestModelViewCachedContentInvalidatesOnVisibleChange(t *testing.T) {
 	ApplyTheme(uitheme.Default())
-	m := benchmarkModelForView()
+	m := benchmarkModelForView(t)
 	before := m.View()
 
 	m.viewport.AppendBlock(&Block{Type: BlockAssistant, Content: "new visible response"})

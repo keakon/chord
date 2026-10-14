@@ -12,6 +12,7 @@ import (
 )
 
 func TestModelDrivenSkipSettlesWithoutClearingUsageState(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -41,6 +42,7 @@ func TestModelDrivenSkipSettlesWithoutClearingUsageState(t *testing.T) {
 }
 
 func TestModelDrivenSettleRecordsLifecycleAndTerminalTrigger(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.newTurn("")
@@ -82,6 +84,7 @@ func TestModelDrivenSettleRecordsLifecycleAndTerminalTrigger(t *testing.T) {
 }
 
 func TestModelDrivenSkipKeepsUsageDrivenSafetyNetArmed(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1024)
@@ -119,6 +122,7 @@ func TestModelDrivenSkipKeepsUsageDrivenSafetyNetArmed(t *testing.T) {
 }
 
 func TestModelDrivenApplyFailureSurfacesRealReason(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.ctxMgr.SetMaxTokens(1024)
@@ -164,6 +168,7 @@ func TestModelDrivenApplyFailureSurfacesRealReason(t *testing.T) {
 }
 
 func TestCancelCompactionForTurnCancellationDiscardsModelDrivenWorker(t *testing.T) {
+	t.Parallel()
 	// P1-1: cancelling the requesting turn must stop an in-flight model-driven
 	// checkpoint so a late ready draft can never rewrite history for abandoned
 	// work. The worker context is parented on parentCtx, not the turn context,
@@ -227,6 +232,7 @@ func TestCancelCompactionForTurnCancellationDiscardsModelDrivenWorker(t *testing
 }
 
 func TestCancelCompactionForTurnCancellationSettlesParkedDraftWithLiveTrigger(t *testing.T) {
+	t.Parallel()
 	// A model-driven draft already parked at the continuation barrier belongs
 	// to the cancelled turn. Cancelling the turn must settle it while the
 	// compaction state is still live — the terminal status event carries the
@@ -290,6 +296,7 @@ func TestCancelCompactionForTurnCancellationSettlesParkedDraftWithLiveTrigger(t 
 }
 
 func TestModelDrivenProposalTransitionUpdatesMetadata(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	before := time.Now()
 	a.transitionModelDrivenProposal(modelDrivenProposalAccepted, " accepted ")

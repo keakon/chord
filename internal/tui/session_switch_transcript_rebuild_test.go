@@ -15,6 +15,7 @@ import (
 )
 
 func TestIdleEventFinalizesStreamingAssistantWithoutDuplicateCommittedBlock(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 80, 24)
 
@@ -42,6 +43,7 @@ func TestIdleEventFinalizesStreamingAssistantWithoutDuplicateCommittedBlock(t *t
 }
 
 func TestTranscriptRebuildReplacesStreamingAssistantInsteadOfDuplicatingIt(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 80, 24)
 
@@ -70,6 +72,7 @@ func TestTranscriptRebuildReplacesStreamingAssistantInsteadOfDuplicatingIt(t *te
 }
 
 func TestStreamRollbackRemovesStreamingAssistantBeforeCommittedRebuild(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 80, 24)
 
@@ -99,6 +102,7 @@ func TestStreamRollbackRemovesStreamingAssistantBeforeCommittedRebuild(t *testin
 }
 
 func TestSessionRestoreRebuildDoesNotDuplicateExistingStreamingAssistant(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 80, 24)
 
@@ -123,6 +127,7 @@ func TestSessionRestoreRebuildDoesNotDuplicateExistingStreamingAssistant(t *test
 }
 
 func TestVeryShortAssistantPrefixBeforeToolCallIsDroppedAcrossFinalizeAndRebuild(t *testing.T) {
+	stubTUITicks(t)
 	backend := &sessionControlAgent{}
 	m := NewModelWithSize(backend, 80, 24)
 

@@ -35,6 +35,7 @@ func submitDeliveryForTest(t *testing.T, a *MainAgent, id string, policy recover
 	return result.InputID
 }
 func TestInputDeliveryOrdinaryRequestExcludesFollowup(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
 	a.newTurn(work)
@@ -66,6 +67,7 @@ func TestInputDeliveryOrdinaryRequestExcludesFollowup(t *testing.T) {
 	}
 }
 func TestInputDeliveryFollowupsRequireDurableCompletion(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
 	a.newTurn(work)
@@ -102,6 +104,7 @@ func TestInputDeliveryFollowupsRequireDurableCompletion(t *testing.T) {
 	}
 }
 func TestInputDeliveryCancelledClaimRetainsUnappendedInput(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn(a.newDeliveryWork(recovery.DeliveryWorkUser))
 	id := submitDeliveryForTest(t, a, "correction", recovery.InputDeliveryNextRequest)
@@ -117,6 +120,7 @@ func TestInputDeliveryCancelledClaimRetainsUnappendedInput(t *testing.T) {
 	}
 }
 func TestInputDeliveryFailurePauseSurvivesOrdinaryCompletion(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
 	a.newTurn(work)
@@ -137,6 +141,7 @@ func TestInputDeliveryFailurePauseSurvivesOrdinaryCompletion(t *testing.T) {
 }
 
 func TestInputDeliveryEndToEndSerialRequests(t *testing.T) {
+	t.Parallel()
 	a, provider := scenarioAgent(t,
 		scriptedStreamCall{holdAfterStreams: true, resp: &message.Response{Content: "initial complete", StopReason: "stop"}},
 		scriptedStreamCall{resp: &message.Response{Content: "correction complete", StopReason: "stop"}},
@@ -240,6 +245,7 @@ func TestInputDeliveryEndToEndSerialRequests(t *testing.T) {
 }
 
 func TestInputDeliveryCoveredBatchPreservesNewerWork(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	work := a.newDeliveryWork(recovery.DeliveryWorkUser)
 	a.newTurn(work)
@@ -264,6 +270,7 @@ func TestInputDeliveryCoveredBatchPreservesNewerWork(t *testing.T) {
 }
 
 func TestInputDeliveryPendingWritePreventsGlobalIdle(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.delivery.inflight = &deliveryOperation{}
 	if a.emitGlobalIdleIfReady() {

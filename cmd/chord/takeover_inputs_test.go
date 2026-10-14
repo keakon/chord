@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/agent"
@@ -94,8 +93,7 @@ func TestHeadlessPausedInputProjectionRejectsInvalidIdentity(t *testing.T) {
 
 func TestHeadlessStatusResponseIncludesCurrentPausedInputs(t *testing.T) {
 	backend := &pausedInputsBackend{status: recovery.SessionPauseStatus{State: recovery.SessionPauseReady}, inputs: []recovery.PendingInput{{InputID: "input-1", OwnerTaskID: "main", Content: "Pending constraint"}}}
-	out := newTestOut()
-	defer out.out.closeUntil(time.After(time.Second))
+	out := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, &headlessState{sessionID: "session-1"}, out.writer())
 	for _, envelope := range out.drain() {
 		if envelope.Type != "status_response" {

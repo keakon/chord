@@ -11,6 +11,7 @@ import (
 )
 
 func TestPausedMainResponsePreservesCompletedOutput(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		payload LLMResponsePayload
@@ -64,6 +65,7 @@ func TestPausedMainResponsePreservesCompletedOutput(t *testing.T) {
 }
 
 func TestPausedMainResponseSettlesStartedSpeculativeTool(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	turn := a.turn

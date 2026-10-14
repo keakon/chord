@@ -194,6 +194,7 @@ func TestPrepareMessagesForLLM_ProtectsRecentShellFailureOutputWithinSingleUserT
 }
 
 func TestPrepareMessagesForLLM_FreshSpecializedOutputIsNotReduced(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{

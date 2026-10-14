@@ -42,6 +42,7 @@ func TestCompactionProgressReporterUsesTransportProgressAndAccumulatesAttempts(t
 }
 
 func TestCompactionProgressReporterForwardsRetryAndKeyDeltas(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	reporter := newCompactionProgressReporter(a)
 
@@ -77,6 +78,7 @@ func TestCompactionProgressReporterForwardsRetryAndKeyDeltas(t *testing.T) {
 }
 
 func TestCompactionSummaryWaitsForLLMGovernor(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.governor = newResourceGovernor(config.OrchestrationConfig{MaxActiveLLMRequests: 1})
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{
@@ -132,6 +134,7 @@ func TestCompactionProgressReporterUsesRequestProgressThrottle(t *testing.T) {
 }
 
 func TestCompactionKeepAliveEmitsActivityAndStops(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, nil)
 	defer a.resetCompactionState()
@@ -170,6 +173,7 @@ func TestCompactionKeepAliveEmitsActivityAndStops(t *testing.T) {
 }
 
 func TestCompactionKeepAliveYieldsToForegroundActivity(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, nil)
 	defer a.resetCompactionState()
@@ -205,6 +209,7 @@ func TestCompactionKeepAliveYieldsToForegroundActivity(t *testing.T) {
 }
 
 func TestIdleHandsMainSlotBackToRunningCompaction(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, nil)
 	defer a.resetCompactionState()
@@ -242,6 +247,7 @@ func TestIdleHandsMainSlotBackToRunningCompaction(t *testing.T) {
 }
 
 func TestCompactionHeartbeatWaitsForResponseHandler(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.beginCompactionState(1, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerManual, continuationPlan{kind: compactionResumeIdle}, 0, nil)
 	defer a.resetCompactionState()
@@ -294,6 +300,7 @@ func TestCompactionProgressReporterInfersAttemptFromTransportReset(t *testing.T)
 }
 
 func TestGenericCompactionEmitsTransportProgress(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	providerCfg := llm.NewProviderConfig("sample", config.ProviderConfig{

@@ -80,7 +80,7 @@ func TestHeadlessStatusUsesCommittedQuestionsBeforePushArrives(t *testing.T) {
 	state := &headlessState{questions: map[string]*headlessQuestionPayload{
 		"resolved": {RequestID: "resolved", Version: 1},
 	}}
-	out := newTestOut()
+	out := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, out.writer())
 	env := findHeadlessEnvelopeValue(out.drain(), "status_response")
 	if env == nil {
@@ -101,7 +101,7 @@ func TestHeadlessStatusCarriesSnapshotRevision(t *testing.T) {
 		Revision: &revision,
 	}}}
 	state := &headlessState{questions: map[string]*headlessQuestionPayload{}}
-	out := newTestOut()
+	out := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status"}, backend, state, out.writer())
 	env := findHeadlessEnvelopeValue(out.drain(), "status_response")
 	if env == nil {
@@ -151,7 +151,7 @@ func TestHeadlessQuestionUpdatesKeepProjectedRevision(t *testing.T) {
 func TestHeadlessStatusPassesQuestionCursorAndReconciliationIDs(t *testing.T) {
 	backend := &questionSnapshotBackend{nextAfterID: "next", questions: []agent.QuestionSnapshot{{ID: "closed", Outcome: tools.QuestionOutcomeAnswered}}}
 	state := &headlessState{questions: map[string]*headlessQuestionPayload{}}
-	out := newTestOut()
+	out := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "status", BindingID: "binding", QuestionsAfterID: "previous", QuestionIDs: []string{"closed"}}, backend, state, out.writer())
 	env := findHeadlessEnvelopeValue(out.drain(), "status_response")
 	if env == nil {

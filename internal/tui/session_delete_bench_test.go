@@ -7,8 +7,9 @@ import (
 	"github.com/keakon/chord/internal/agent"
 )
 
-func benchmarkModelForSessionDeleteConfirmDialog() Model {
-	m := benchmarkModelForView()
+func benchmarkModelForSessionDeleteConfirmDialog(tb testing.TB) Model {
+	tb.Helper()
+	m := benchmarkModelForView(tb)
 	m.mode = ModeSessionDeleteConfirm
 	baseTime := time.Date(2026, 4, 7, 12, 0, 0, 0, time.Local)
 	session := agent.SessionSummary{
@@ -25,7 +26,7 @@ func benchmarkModelForSessionDeleteConfirmDialog() Model {
 }
 
 func BenchmarkRenderSessionDeleteConfirmDialogOpen(b *testing.B) {
-	m := benchmarkModelForSessionDeleteConfirmDialog()
+	m := benchmarkModelForSessionDeleteConfirmDialog(b)
 	_ = m.renderSessionDeleteConfirmDialog()
 	b.ReportAllocs()
 	for b.Loop() {

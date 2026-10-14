@@ -16,6 +16,7 @@ import (
 // the archive with its topics, and the read tool can recover the exact archived
 // content in one call — the model needs no new query tool.
 func TestArchivedHistoryRecoverableViaRead(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	head := []message.Message{

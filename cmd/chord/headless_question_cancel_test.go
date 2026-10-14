@@ -21,7 +21,7 @@ func TestHeadlessQuestionUsesCommandCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	backend := &cancellingQuestionBackend{}
-	out := newTestOut()
+	out := newTestOut(t)
 	w := out.writer()
 	w.commandCtx = ctx
 	handleHeadlessQuestionCommand(headlessCommand{Action: agent.QuestionOpAnswer, OperationID: "answer", RequestID: "choice"}, backend, w)

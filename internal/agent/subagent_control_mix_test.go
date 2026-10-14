@@ -98,6 +98,7 @@ func convertCalls(calls []messageToolCall) []message.ToolCall {
 }
 
 func TestSubAgentRejectsCompleteAndEscalateInSameBatch(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
@@ -117,6 +118,7 @@ func TestSubAgentRejectsCompleteAndEscalateInSameBatch(t *testing.T) {
 }
 
 func TestSubAgentCompleteToolResultUsesRawSummary(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
@@ -145,6 +147,7 @@ func TestSubAgentCompleteToolResultUsesRawSummary(t *testing.T) {
 }
 
 func TestSubAgentDefersEscalateUntilRegularToolsComplete(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
@@ -175,6 +178,7 @@ func TestSubAgentDefersEscalateUntilRegularToolsComplete(t *testing.T) {
 }
 
 func TestSubAgentDefersCompleteUntilRegularToolsComplete(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
@@ -211,6 +215,7 @@ func TestSubAgentDefersCompleteUntilRegularToolsComplete(t *testing.T) {
 }
 
 func TestSubAgentEmitsExecutingActivityWhenRegularToolsStart(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
@@ -239,6 +244,7 @@ func TestSubAgentEmitsExecutingActivityWhenRegularToolsStart(t *testing.T) {
 }
 
 func TestSubAgentClearsNativeTrajectoryAfterFilteringToolCall(t *testing.T) {
+	t.Parallel()
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.handleLLMResponse(&llmResult{
 		turnID: 1,
@@ -271,6 +277,7 @@ func TestSubAgentClearsNativeTrajectoryAfterFilteringToolCall(t *testing.T) {
 }
 
 func TestSubAgentCompleteWithOutstandingJoinChildEntersWaitingDescendant(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	sub.taskID = "adhoc-parent"
 	sub.instanceID = "worker-parent"

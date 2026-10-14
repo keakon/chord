@@ -13,6 +13,7 @@ import (
 )
 
 func TestLoopDoneLateMountAppendsDynamicToolWhenMissingFromFrozenSurface(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(tools.NewDoneTool())
@@ -40,6 +41,7 @@ done: allow
 }
 
 func TestLoopDoneLateMountSkipsWhenDoneAlreadyInFrozenSurface(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(tools.NewDoneTool())
@@ -63,6 +65,7 @@ done: allow
 }
 
 func TestMountDoneForLoopEntryRequiresDynamicCapability(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(tools.NewDoneTool())
@@ -101,6 +104,7 @@ done: allow
 }
 
 func TestMountDoneForLoopEntrySkipsWhenRealFrozenSurfaceAlreadyContainsDone(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(tools.NewDoneTool())
@@ -132,6 +136,7 @@ done: allow
 }
 
 func TestMountLoopDoneLateToolClearsFlagWhenModeIsNotCacheFriendly(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.loopDoneLateMount.Store(true)
 
@@ -169,6 +174,7 @@ func sealEmptyMCPMountBaseline(a *MainAgent) {
 }
 
 func TestRuntimeMCPMountReplaysAnchorAndOnlyAppendsChanges(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	sealEmptyMCPMountBaseline(a)
@@ -229,6 +235,7 @@ func TestRuntimeMCPMountReplaysAnchorAndOnlyAppendsChanges(t *testing.T) {
 }
 
 func TestRuntimeMCPMountFallsBackWhenAnchorCannotBeRebuilt(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	sealEmptyMCPMountBaseline(a)
@@ -255,6 +262,7 @@ func TestRuntimeMCPMountFallsBackWhenAnchorCannotBeRebuilt(t *testing.T) {
 }
 
 func TestRuntimeMCPMountUsesDuplicateAnchorOccurrence(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	sealEmptyMCPMountBaseline(a)
@@ -292,6 +300,7 @@ func TestMCPMountIncrementalMessageShapesDetectNestedChange(t *testing.T) {
 }
 
 func TestRuntimeMCPMountResumeWithHistoricalCallUsesTopLevelTools(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	sealEmptyMCPMountBaseline(a)
@@ -315,6 +324,7 @@ func TestRuntimeMCPMountResumeWithHistoricalCallUsesTopLevelTools(t *testing.T) 
 // something of its own, a re-enabled tool with historical calls must still fall
 // back rather than get its first declaration behind those calls.
 func TestRuntimeMCPMountFallsBackForUndeclaredToolWithHistoricalCallAfterOtherDeclarations(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	sealEmptyMCPMountBaseline(a)
@@ -356,6 +366,7 @@ func newResponsesAdditionalToolsClient(model string) *llm.Client {
 }
 
 func TestForceFullMCPToolInjectionDisablesDynamicMount(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
@@ -384,6 +395,7 @@ func TestForceFullMCPToolInjectionDisablesDynamicMount(t *testing.T) {
 }
 
 func TestModelSwitchRebaselinesManualToolsAndKeepsDynamicMount(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
@@ -413,6 +425,7 @@ func TestModelSwitchRebaselinesManualToolsAndKeepsDynamicMount(t *testing.T) {
 // switch keeps that history, so it must keep the pin until the next session
 // head instead of resuming dynamic mounts.
 func TestModelSwitchAfterResumeKeepsTopLevelInjection(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
@@ -432,6 +445,7 @@ func TestModelSwitchAfterResumeKeepsTopLevelInjection(t *testing.T) {
 }
 
 func TestModelSwitchToTargetWithoutDynamicMountUsesTopLevelTools(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
@@ -450,6 +464,7 @@ func TestModelSwitchToTargetWithoutDynamicMountUsesTopLevelTools(t *testing.T) {
 }
 
 func TestMCPToolMountModeFollowsSelectedTargetInMixedPool(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	responsesProvider := llm.NewProviderConfig("sample", config.ProviderConfig{
@@ -484,6 +499,7 @@ func TestMCPToolMountModeFollowsSelectedTargetInMixedPool(t *testing.T) {
 }
 
 func TestRuntimeMCPMountFallbackStopsReturningDefsOnceSurfaceRebuilt(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	sealEmptyMCPMountBaseline(a)
@@ -544,6 +560,7 @@ func countMCPMounts(messages []message.Message) int {
 }
 
 func TestSessionHeadResetRestoresDynamicMount(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})
@@ -563,6 +580,7 @@ func TestSessionHeadResetRestoresDynamicMount(t *testing.T) {
 }
 
 func TestManualMCPEnabledBeforeFirstRequestRidesTopLevelTools(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.tools = tools.NewRegistry()
 	a.tools.Register(anchoredManualMCPTool{name: "mcp_sample_lookup", description: "lookup"})

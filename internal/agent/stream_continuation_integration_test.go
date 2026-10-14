@@ -174,6 +174,7 @@ func llmResponseFromEvent(t *testing.T, evt Event) *LLMResponsePayload {
 // ran on, the partial reply and its continuation land in durable history, and
 // the agent's own restart runs on the other key and completes the reply.
 func TestPreservedInterruptionResumeRotatesKeysAndCompletes(t *testing.T) {
+	t.Parallel()
 	a, provider, providerCfg := newContinuationTestAgent(t, config.ProviderTypeMessages,
 		[]string{"key-a", "key-b"},
 		truncatedReply("the first half of the answer"),
@@ -246,6 +247,7 @@ func TestPreservedInterruptionResumeRotatesKeysAndCompletes(t *testing.T) {
 // out the cooldown rather than fail fast on AllKeysCoolingError, which is the
 // only backoff available when one key keeps truncating.
 func TestPreservedInterruptionResumeWaitsForTheOnlyKeyToCool(t *testing.T) {
+	t.Parallel()
 	a, provider, providerCfg := newContinuationTestAgent(t, config.ProviderTypeMessages,
 		[]string{"only-key"},
 		truncatedReply("the first half of the answer"),
@@ -291,6 +293,7 @@ func TestPreservedInterruptionResumeWaitsForTheOnlyKeyToCool(t *testing.T) {
 // guards against is a transcript that shows a continuation instruction the
 // request never carried, or the reverse.
 func TestStreamContinuationMatchesWhatAPrefillCapablePoolReceives(t *testing.T) {
+	t.Parallel()
 	a, provider, _ := newContinuationTestAgent(t, config.ProviderTypeChatCompletions,
 		[]string{"key-a", "key-b"},
 		truncatedReply("the first half of the answer"),
@@ -339,6 +342,7 @@ func TestStreamContinuationMatchesWhatAPrefillCapablePoolReceives(t *testing.T) 
 // exactly one continuation — no dropped text, no duplicated instruction — and
 // the final request must carry all of it.
 func TestConsecutiveResumesKeepEveryPartialAndOneContinuationEach(t *testing.T) {
+	t.Parallel()
 	a, provider, providerCfg := newContinuationTestAgent(t, config.ProviderTypeMessages,
 		[]string{"key-a", "key-b"},
 		truncatedReply("part one"),

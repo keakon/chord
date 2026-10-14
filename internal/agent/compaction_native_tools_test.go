@@ -11,6 +11,7 @@ import (
 )
 
 func TestCompactionPreservesNativeSearchEvidence(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	native := &message.NativeToolHistory{Target: "sample/test-model", RequestIDs: []string{"request-1"}, OutcomeUnknown: true, Authorization: message.NativeToolAuthorization{Tool: toolname.WebSearch},
 		Items: []json.RawMessage{json.RawMessage(`{"type":"text","text":"Sample fact","citations":[{"type":"web_search_result_location","url":"https://example.invalid/a","title":"Sample","cited_text":"Source fact"}]}`), json.RawMessage(`{"type":"thinking","signature":"opaque-replay"}`)},

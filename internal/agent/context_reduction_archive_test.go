@@ -13,6 +13,7 @@ import (
 // The full pipeline: a one-shot output routed through prepareMessagesForLLM
 // with an archive dir becomes an archived marker with a readable file.
 func TestPrepareMessagesForLLM_ArchivesIrreducibleJobOutput(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{

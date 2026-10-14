@@ -6,8 +6,9 @@ import (
 	"github.com/keakon/chord/internal/tools"
 )
 
-func benchmarkModelForQuestionDialog() Model {
-	m := benchmarkModelForView()
+func benchmarkModelForQuestionDialog(tb testing.TB) Model {
+	tb.Helper()
+	m := benchmarkModelForView(tb)
 	m.mode = ModeQuestion
 	m.question = questionState{
 		request: &QuestionRequest{Item: tools.QuestionItem{
@@ -27,7 +28,7 @@ func benchmarkModelForQuestionDialog() Model {
 }
 
 func BenchmarkRenderQuestionDialogOpen(b *testing.B) {
-	m := benchmarkModelForQuestionDialog()
+	m := benchmarkModelForQuestionDialog(b)
 	_ = m.renderQuestionDialog()
 	b.ReportAllocs()
 	for b.Loop() {

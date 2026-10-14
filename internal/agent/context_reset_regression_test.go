@@ -10,6 +10,7 @@ import (
 )
 
 func TestUpdateTodosPreservesModelDrivenApplyAnchor(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.lastModelDrivenApplyBatch = 7
 	a.lastModelDrivenCheckpointFingerprint = "checkpoint-fingerprint"
@@ -74,6 +75,7 @@ func TestReminderClaimResetsWhenModelIdentityChangesWithSameBudget(t *testing.T)
 // and clobber it with stale contents. With build + write under one lock, once
 // every writer has finished the final snapshot must equal the live todo list.
 func TestConcurrentSnapshotWritersLeaveSnapshotEqualToLiveState(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	const writers = 4

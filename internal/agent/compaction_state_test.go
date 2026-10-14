@@ -9,6 +9,7 @@ import (
 )
 
 func TestBeginCompactionStateSeedsPendingAndFinishCancels(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	a.beginCompactionState(
@@ -50,6 +51,7 @@ func TestBeginCompactionStateSeedsPendingAndFinishCancels(t *testing.T) {
 }
 
 func TestFinishCompactionStateDropsDiscardedPending(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.beginCompactionState(
 		11,
@@ -71,6 +73,7 @@ func TestFinishCompactionStateDropsDiscardedPending(t *testing.T) {
 }
 
 func TestCancelCompactionQueuesStateMutationOnEventLoop(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
 	a.beginCompactionState(
@@ -106,6 +109,7 @@ func TestCancelCompactionQueuesStateMutationOnEventLoop(t *testing.T) {
 // a compaction with a parked ready draft emits the terminal cancelled event
 // with the compaction trigger, not an empty-trigger event.
 func TestCancelCompactionOnLoopReadyDraftCarriesTrigger(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.startCompactionState(
 		7,
@@ -140,6 +144,7 @@ func TestCancelCompactionOnLoopReadyDraftCarriesTrigger(t *testing.T) {
 // draft on session switch emits the terminal cancelled event with the
 // compaction trigger instead of an empty-trigger event.
 func TestApplyReadyDraftSessionSwitchCarriesTrigger(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.startCompactionState(
 		8,

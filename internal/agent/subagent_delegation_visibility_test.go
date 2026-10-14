@@ -11,6 +11,7 @@ import (
 )
 
 func TestSubAgentHidesDelegationControlToolsFromBaseRegistry(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	parent.SetAgentConfigs(map[string]*config.AgentConfig{
 		"reviewer": {Name: "reviewer", Mode: config.AgentModeSubAgent},
@@ -58,6 +59,7 @@ func TestSubAgentHidesDelegationControlToolsFromBaseRegistry(t *testing.T) {
 }
 
 func TestSubAgentShowsDelegationControlToolsWhenDepthAllows(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	parent.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder": {Name: "builder", Mode: config.AgentModeMain},
@@ -94,6 +96,7 @@ func TestSubAgentShowsDelegationControlToolsWhenDepthAllows(t *testing.T) {
 }
 
 func TestSubAgentDelegateTargetsUseSubAgentRuleset(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	parent.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder":  {Name: "builder", Mode: config.AgentModeMain},
@@ -150,6 +153,7 @@ func TestSubAgentDelegateTargetsUseSubAgentRuleset(t *testing.T) {
 // defers to the surrounding prompt, and this role has no "SubAgent
 // Workflow" section.
 func TestSubAgentSystemPromptIncludesDelegationStrategyWhenNested(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	parent.SetAgentConfigs(map[string]*config.AgentConfig{
 		"builder":  {Name: "builder", Mode: config.AgentModeMain},
@@ -193,6 +197,7 @@ func TestSubAgentSystemPromptIncludesDelegationStrategyWhenNested(t *testing.T) 
 }
 
 func TestSubAgentDisableStarKeepsOnlyCompleteAsInternalControlTool(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewDelegateTool(taskCreatorStub{agents: []tools.AgentInfo{{Name: "builder", Description: "General coding"}}}))
@@ -245,6 +250,7 @@ func TestSubAgentDisableStarKeepsOnlyCompleteAsInternalControlTool(t *testing.T)
 }
 
 func TestSubAgentNotifyTargetingDependsOnDelegatePermission(t *testing.T) {
+	t.Parallel()
 	parent := newTestMainAgent(t, t.TempDir())
 	parent.SetAgentConfigs(map[string]*config.AgentConfig{
 		"reviewer": {Name: "reviewer", Mode: config.AgentModeSubAgent},

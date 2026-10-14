@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
@@ -44,8 +43,7 @@ func TestHeadlessInputDeliveryProjectionRedactsAttachments(t *testing.T) {
 func TestHeadlessInputDeliveryUpdateOmittedBodyPreservesAttachment(t *testing.T) {
 	target := agent.InputTarget{RuntimeID: "runtime", SessionID: "session", SessionEpoch: 1, OwnerTaskID: "main"}
 	backend := &queueTestBackend{snapshot: &agent.InputQueueSnapshot{Target: target, State: &recovery.InputDeliveryState{Revision: 1, Inputs: []recovery.PendingInput{{InputID: "input", Revision: 1, Content: "sample", Parts: []message.ContentPart{{Type: message.ContentPartImage, ImagePath: "/session/attachment.png"}}}}}}}
-	out := newTestOut()
-	defer func() { out.out.closeUntil(time.After(time.Second)) }()
+	out := newTestOut(t)
 	var cmd headlessCommand
 	if err := json.Unmarshal([]byte(`{"type":"input_queue","action":"update","operation_id":"op","input_id":"input","expected_revision":1,"delivery_policy":"after_completion"}`), &cmd); err != nil {
 		t.Fatal(err)
@@ -69,8 +67,7 @@ func TestHeadlessInputDeliveryUpdateOmittedBodyPreservesAttachment(t *testing.T)
 func TestHeadlessInputDeliveryDoesNotDismissCurrentInteraction(t *testing.T) {
 	backend := &queueTestBackend{snapshot: &agent.InputQueueSnapshot{Target: agent.InputTarget{RuntimeID: "runtime", SessionID: "session", OwnerTaskID: "main"}}}
 	state := &headlessState{pendingConfirm: &headlessConfirmPayload{RequestID: "confirm", ToolName: "sample"}}
-	out := newTestOut()
-	defer func() { out.out.closeUntil(time.After(time.Second)) }()
+	out := newTestOut(t)
 	handleHeadlessCommand(headlessCommand{Type: "send", RequestID: "request", Content: "sample", DeliveryPolicy: recovery.InputDeliveryAfterCompletion}, backend, state, out.writer())
 	if len(backend.submitted) != 1 || state.pendingConfirm == nil || len(backend.confirmCalls) != 0 {
 		t.Fatal("after-completion input disturbed current confirmation")

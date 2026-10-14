@@ -98,6 +98,7 @@ func TestStateFilesSectionEmptyFallbackCountsArchivedReferences(t *testing.T) {
 // know about every item, so the filtering has to happen where the footer is
 // rendered.
 func TestCheckpointStateFilesFooterCountsTheArchivedPackNotRawEvidence(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	snapshot := []message.Message{{Role: message.RoleUser, Content: "keep going"}}
 	kept := evidenceItem{Key: "ev-kept", Kind: evidenceToolError, Title: "the build failed"}

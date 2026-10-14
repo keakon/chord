@@ -108,7 +108,10 @@ func TestSetThemePreservesDeferredStartupTranscriptRuntimeState(t *testing.T) {
 
 func BenchmarkApplyWheelScrollDeltaLargeTranscript(b *testing.B) {
 	m := NewModelWithSize(nil, 120, 40)
-	m.viewport = benchmarkLargeViewport(5000)
+	if err := m.viewport.Close(); err != nil {
+		b.Fatal(err)
+	}
+	m.viewport = benchmarkLargeViewport(b, 5000)
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
@@ -119,7 +122,10 @@ func BenchmarkApplyWheelScrollDeltaLargeTranscript(b *testing.B) {
 
 func TestApplyWheelScrollDeltaBulkPathMatchesDirectViewportScroll(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 40)
-	m.viewport = benchmarkLargeViewport(200)
+	if err := m.viewport.Close(); err != nil {
+		t.Fatal(err)
+	}
+	m.viewport = benchmarkLargeViewport(t, 200)
 	m.viewport.offset = 50
 	m.applyWheelScrollDelta(37)
 	if got, want := m.viewport.offset, 87; got != want {

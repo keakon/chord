@@ -164,6 +164,7 @@ func TestApplyConfirmedArgsEditsToleratesUnknownFields(t *testing.T) {
 }
 
 func TestExecuteToolCallAskRequiresConfirmFunc(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.tools.Register(agentValidationTool{

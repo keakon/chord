@@ -26,6 +26,7 @@ func TestObservedCacheHitAcceptsSplitInputUsage(t *testing.T) {
 }
 
 func TestActivateLoadedSessionRestoresHistoricalCacheHitRate(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.activateLoadedSession(&loadedSessionState{
 		SessionPath: t.TempDir(),
@@ -70,6 +71,7 @@ func TestNoteCacheExpectationIgnoresTailOverlayChurn(t *testing.T) {
 }
 
 func TestCacheExpectationInvalidatesAcrossPromptAndSessionBoundaries(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	msgs := []message.Message{{Role: message.RoleUser, Content: "same user message"}}
 	hash := a.computeToolDefinitionHash()

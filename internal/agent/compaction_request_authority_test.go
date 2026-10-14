@@ -10,6 +10,7 @@ import (
 )
 
 func TestLatestRecoverableUserIntentSkipsCompactionSummary(t *testing.T) {
+	t.Parallel()
 	a := newReadyTestMainAgent(t)
 	a.ctxMgr.Append(message.Message{Role: "user", Content: "original request"})
 	a.ctxMgr.Append(message.Message{Role: "assistant", Content: "working"})
@@ -93,6 +94,7 @@ func TestBuildGoalAnchorUsesLatestOrdinaryUserRequest(t *testing.T) {
 }
 
 func TestLatestRecoverableUserIntentSkipsSyntheticUserMessages(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "real user request"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "loop notice", Kind: message.KindLoopNotice})
@@ -183,6 +185,7 @@ func TestCollectEvidenceItemsCapturesToolRejectionReasonAsRequest(t *testing.T) 
 }
 
 func TestRecordEvidenceFromMessageCapturesToolRejectionReasonAsRequest(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.recordEvidenceFromMessage(message.Message{Role: "tool", Content: `Error: tool "Write" rejected by user: 改成只分析，不要写文件`})
@@ -195,6 +198,7 @@ func TestRecordEvidenceFromMessageCapturesToolRejectionReasonAsRequest(t *testin
 }
 
 func TestRecordEvidenceFromMessageCapturesDoneRejected(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.recordEvidenceFromMessage(message.Message{Role: "tool", Content: "Done rejected: 分析应该怎么保留正确的工作目标"})

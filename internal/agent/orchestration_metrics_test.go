@@ -8,6 +8,7 @@ import (
 )
 
 func TestOrchestrationStatsAggregatesRuntimeAndDurableState(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.sem <- struct{}{}
 
@@ -81,6 +82,7 @@ func TestOrchestrationStatsAggregatesRuntimeAndDurableState(t *testing.T) {
 }
 
 func TestOrchestrationMailboxAckRequiresTrackedMessage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.orchestrationMetrics.recordMailboxAck("unknown")
 	stats := a.OrchestrationStats()
@@ -133,6 +135,7 @@ func BenchmarkOrchestrationMailboxTrackingAtCapacity(b *testing.B) {
 // map read/write instead of failing the test, so this must also be run under
 // -race (the CI race check does that centrally).
 func TestOrchestrationDiagnosticsConcurrentWithOwnedMailboxWriters(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	ownerID := "agent-writer-1"
 	a.subs.mu.Lock()

@@ -15,6 +15,7 @@ import (
 // original request is sticky — session lists prefer it and every later
 // checkpoint copies it forward as its "Original request:" anchor.
 func TestFillSessionSummaryDetailsKeepsScannedPreviewOutOfOriginal(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sessionsDir, err := a.projectSessionsDir()
@@ -60,6 +61,7 @@ func TestFillSessionSummaryDetailsKeepsScannedPreviewOutOfOriginal(t *testing.T)
 // every checkout of one repository, so without this the picker cannot tell a
 // session created in a worktree from one in the main checkout.
 func TestListSessionSummariesCarriesWorktreeName(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	sessionsDir, err := a.projectSessionsDir()

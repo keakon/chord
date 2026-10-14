@@ -19,6 +19,7 @@ import (
 )
 
 func TestSummarizeCompactionHeadCodexUsesOrdinaryResponses(t *testing.T) {
+	t.Parallel()
 	wantSummary := validCompactionSummaryForTest("history-1.md")
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +119,7 @@ func (p *compactionPoolTraceProvider) CompleteStream(ctx context.Context, key, m
 }
 
 func TestSummarizeCompactionHeadPreservesPoolCursorAndWalksWholePool(t *testing.T) {
+	t.Parallel()
 	for _, allFail := range []bool{false, true} {
 		t.Run(fmt.Sprintf("all_fail=%t", allFail), func(t *testing.T) {
 			var order []string

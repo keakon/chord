@@ -19,6 +19,7 @@ import (
 )
 
 func TestHostedBackendCursorAndCallerUsage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	first := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) {
@@ -59,6 +60,7 @@ func TestHostedBackendCursorAndCallerUsage(t *testing.T) {
 }
 
 func TestHostedBackendPauseContinuation(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.governor = newResourceGovernor(config.OrchestrationConfig{MaxActiveLLMRequests: 1})
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
@@ -91,6 +93,7 @@ func TestHostedBackendPauseContinuation(t *testing.T) {
 }
 
 func TestHostedBackendUnsafeExecutionNeverReplays(t *testing.T) {
+	t.Parallel()
 	for _, failure := range []string{"transport", "stream_error", "pending", "approval", "pause_limit"} {
 		t.Run(failure, func(t *testing.T) {
 			a := newTestMainAgent(t, t.TempDir())
@@ -134,6 +137,7 @@ func TestHostedBackendUnsafeExecutionNeverReplays(t *testing.T) {
 }
 
 func TestHostedBackendPermissionRevocationStopsContinuation(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.ruleset = permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}}
 	impl := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) {
@@ -150,6 +154,7 @@ func TestHostedBackendPermissionRevocationStopsContinuation(t *testing.T) {
 }
 
 func TestHostedBackendApprovalStopsRetriesOnFailedStream(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	first := &hostedScriptProvider{respond: func(int, context.Context) (*message.Response, error) {
 		return &message.Response{Hosted: &message.HostedObservation{RequiresApproval: true}}, fmt.Errorf("stream interrupted")

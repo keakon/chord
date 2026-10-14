@@ -32,6 +32,7 @@ func newSubtreeTestSubAgent(t *testing.T, parent *MainAgent, instanceID, taskID 
 }
 
 func TestTerminalParentCancelsJoinedDescendants(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 3)
 	parent := newSubtreeTestSubAgent(t, a, "worker-parent", "parent-task")
@@ -58,6 +59,7 @@ func TestTerminalParentCancelsJoinedDescendants(t *testing.T) {
 }
 
 func TestTerminalParentReparentsDetachedChildToMain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 3)
 	parent := newSubtreeTestSubAgent(t, a, "worker-parent", "parent-task")
@@ -83,6 +85,7 @@ func TestTerminalParentReparentsDetachedChildToMain(t *testing.T) {
 }
 
 func TestTerminalParentCloseKeepsSettledOutcomeAndJoinedChild(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	configureNestedDelegationTestRuntime(a, 3)
 	parent := newSubtreeTestSubAgent(t, a, "worker-parent", "parent-task")
@@ -142,6 +145,7 @@ func TestTerminalParentUsesRecordJoinPolicy(t *testing.T) {
 }
 
 func TestCancelTaskTreeInternalTerminatesOnOwnershipCycle(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	now := time.Now()
 	a.subs.mu.Lock()

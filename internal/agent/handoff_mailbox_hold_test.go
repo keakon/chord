@@ -56,6 +56,7 @@ func mailboxStagedIn(a *MainAgent, messageID string) bool {
 // deferred result the model reads as a user cancellation. The message stays
 // queued (no ack, no drop) and rides the post-decision request.
 func TestPendingHandoffHoldsMainInboxMailboxDelivery(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	if a.pendingHandoff == nil || a.turn != nil {
@@ -85,6 +86,7 @@ func TestPendingHandoffHoldsMainInboxMailboxDelivery(t *testing.T) {
 // forwarded into the main inbox and immediately drain into a new turn, which
 // must wait for the handoff decision instead of abandoning it.
 func TestPendingHandoffHoldsSettledOwnerMailboxForward(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 
@@ -119,6 +121,7 @@ func TestPendingHandoffHoldsSettledOwnerMailboxForward(t *testing.T) {
 // the decision clears the wait, the next request boundary delivers the message
 // that was held instead of stranding it.
 func TestHandoffCancelReleasesHeldMailboxDelivery(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	reqID := a.pendingHandoff.RequestID
@@ -156,6 +159,7 @@ func TestHandoffCancelReleasesHeldMailboxDelivery(t *testing.T) {
 // denial continuation stages the mailbox that was held, so the held message
 // rides the continuation request instead of being lost.
 func TestHandoffDenyStagesHeldMailboxIntoContinuation(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	reqID := a.pendingHandoff.RequestID
@@ -188,6 +192,7 @@ func TestHandoffDenyStagesHeldMailboxIntoContinuation(t *testing.T) {
 // durable row must stay unconsumed (no ack without an append) so resuming the
 // planner session replays it.
 func TestHandoffApproveKeepsHeldMailboxOutOfExecutionSession(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	planPath := writePlanFile(t, projectRoot)
 	a := newTestMainAgent(t, projectRoot)
@@ -249,6 +254,7 @@ func TestHandoffApproveKeepsHeldMailboxOutOfExecutionSession(t *testing.T) {
 // block the owner side: a live owner still receives its descendant mailbox
 // while the handoff wait is open, and no main turn starts for it.
 func TestPendingHandoffKeepsLiveOwnerMailboxRouting(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 
@@ -306,6 +312,7 @@ func TestPendingHandoffKeepsLiveOwnerMailboxRouting(t *testing.T) {
 // a descendant completion still wakes a parked owner while the handoff wait is
 // open, so the wake path is not accidentally held with the main-inbox path.
 func TestPendingHandoffKeepsParkedOwnerWakeRouting(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	configureNestedDelegationTestRuntime(a, 2)
@@ -367,6 +374,7 @@ func TestPendingHandoffKeepsParkedOwnerWakeRouting(t *testing.T) {
 // handoff wait that is discarded before the user decides must tell the TUI which
 // selector to close, while still settling the deferred result as cancelled.
 func TestHandoffAbandonEmitsCancelledEvent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	reqID := a.pendingHandoff.RequestID
@@ -410,6 +418,7 @@ func TestHandoffAbandonEmitsCancelledEvent(t *testing.T) {
 // process-exit settlement stays silent: production calls it after the event
 // loop and output channel are gone, so there is no UI left to notify.
 func TestSettlePendingHandoffAtShutdownDoesNotEmitCancelledEvent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	drainAgentEvents(a.outputCh)
@@ -440,6 +449,7 @@ func TestSettlePendingHandoffAtShutdownDoesNotEmitCancelledEvent(t *testing.T) {
 // owner drain that forwards the held completion into the main inbox must also
 // deliver it, instead of leaving it queued for the next lifecycle sweep.
 func TestHandoffCancelDeliversHeldSettledOwnerForwardInSameDrain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	setupHandoffTurn(t, a, "docs/plans/example.md")
 	reqID := a.pendingHandoff.RequestID

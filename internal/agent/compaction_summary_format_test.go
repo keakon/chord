@@ -22,6 +22,7 @@ import (
 // returns to canonical order — or the validator ever exempts model-driven
 // bodies — this test names the place both sides must change together.
 func TestModelDrivenSummaryOrderIsDeliberate(t *testing.T) {
+	t.Parallel()
 	agent := newTestMainAgent(t, t.TempDir())
 	request := &modelDrivenCheckpointRequest{Args: tools.CompactContextArgs{
 		ActiveObjective: "verify parser", NextStep: "run parser tests",

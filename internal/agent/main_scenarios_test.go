@@ -56,6 +56,7 @@ func assertScenarioPersistence(t *testing.T, a *MainAgent) {
 }
 
 func TestScenarioToolChainAndPermissionBoundary(t *testing.T) {
+	t.Parallel()
 	for _, action := range []permission.Action{permission.ActionAllow, permission.ActionAsk} {
 		t.Run(string(action), func(t *testing.T) {
 			a, p := scenarioAgent(t,
@@ -128,6 +129,7 @@ func TestScenarioToolChainAndPermissionBoundary(t *testing.T) {
 }
 
 func TestScenarioCancellationAndResume(t *testing.T) {
+	t.Parallel()
 	a, p := scenarioAgent(t,
 		scriptedStreamCall{holdAfterStreams: true},
 		scriptedStreamCall{resp: &message.Response{Content: "resumed", StopReason: "end_turn"}},

@@ -25,6 +25,7 @@ func TestSubRestoredPauseInputsDeduplicateRepeatedInstall(t *testing.T) {
 }
 
 func TestSubPauseLoopCapturesInputOverflowAndReservation(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.executionGate = &executiongate.Gate{}
 	sub.inputCh = make(chan pendingUserMessage, 1)
@@ -78,6 +79,7 @@ func TestSubPauseLoopCapturesInputOverflowAndReservation(t *testing.T) {
 }
 
 func TestSubPauseKeepsTranscriptStagedInput(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.executionGate = &executiongate.Gate{}
 	input := pendingUserMessage{InputID: "input-1", AcceptedOrder: 1, Content: "pending", Stage: recovery.PendingInputStageTranscriptStaged}
@@ -244,6 +246,7 @@ func TestToolPausePreservesStartedFailure(t *testing.T) {
 }
 
 func TestSubPauseLoopPersistsResponseAndDefersComplete(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.executionGate = &executiongate.Gate{}
 	sub.setState(SubAgentStateRunning, "working")
@@ -283,6 +286,7 @@ func TestSubPauseLoopPersistsResponseAndDefersComplete(t *testing.T) {
 }
 
 func TestSubRestoredInputsWaitForNewFollowupAndShareFirstRequest(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	parent.executionGate = &executiongate.Gate{}
 	provider := &blockingStreamProvider{calls: []scriptedStreamCall{{resp: &message.Response{Content: "response", StopReason: "stop"}, holdAfterStreams: true}}, streamedCh: make(chan struct{}), releaseCh: make(chan struct{})}

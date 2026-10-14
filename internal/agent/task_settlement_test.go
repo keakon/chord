@@ -188,6 +188,7 @@ func TestRepairTaskRecordsUsesJournalContentAtSameRevision(t *testing.T) {
 }
 
 func TestCommitTerminalTaskPublishesDurableSettlement(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-terminal")
 	completion := &CompletionEnvelope{Summary: "done"}
@@ -212,6 +213,7 @@ func TestCommitTerminalTaskPublishesDurableSettlement(t *testing.T) {
 }
 
 func TestGuardedDetachedSettlementRollsBackWhenRecordChanges(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-guard-rollback")
 	a.syncTaskRecordFromSub(sub, "")
@@ -233,6 +235,7 @@ func TestGuardedDetachedSettlementRollsBackWhenRecordChanges(t *testing.T) {
 }
 
 func TestGuardedDetachedSettlementRollbackKeepsCrashTailTruncated(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := appendTaskSettlement(a.sessionDir, &TaskSettlement{
 		TaskID: "task-existing", Attempt: 1, TerminalRevision: 1,
@@ -272,6 +275,7 @@ func TestGuardedDetachedSettlementRollbackKeepsCrashTailTruncated(t *testing.T) 
 }
 
 func TestCommitTerminalTaskIsIdempotent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-terminal")
 	first, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", nil)
@@ -288,6 +292,7 @@ func TestCommitTerminalTaskIsIdempotent(t *testing.T) {
 }
 
 func TestCommitTerminalTaskRejectsConflictingCompletion(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-terminal")
 	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", &CompletionEnvelope{
@@ -305,6 +310,7 @@ func TestCommitTerminalTaskRejectsConflictingCompletion(t *testing.T) {
 }
 
 func TestSettleDetachedTerminalTaskWritesSettlement(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"task-parked": {
@@ -339,6 +345,7 @@ func TestSettleDetachedTerminalTaskWritesSettlement(t *testing.T) {
 }
 
 func TestSettleDetachedTerminalTaskMirrorsUnsettledTerminalRecord(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.setTaskRecords(map[string]*DurableTaskRecord{
 		"task-replayed": {
@@ -381,6 +388,7 @@ func TestSettleDetachedTerminalTaskMirrorsUnsettledTerminalRecord(t *testing.T) 
 }
 
 func TestSettleDetachedTerminalTaskPreservesExistingOutcome(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-done")
 	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", nil); err != nil {
@@ -420,6 +428,7 @@ func TestSettleDetachedTerminalTaskPreservesExistingOutcome(t *testing.T) {
 }
 
 func TestCompletedTaskRehydrateRequiresDurableSettlement(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	blockedRoot := filepath.Join(t.TempDir(), "not-a-directory")
 	if err := os.WriteFile(blockedRoot, []byte("x"), 0o600); err != nil {
@@ -444,6 +453,7 @@ func TestCompletedTaskRehydrateRequiresDurableSettlement(t *testing.T) {
 }
 
 func TestRetryTaskSettlementDurabilityRepairsCheckpoint(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	resultRef := &tools.ResultRef{ID: "sha256-result", ResultType: "type/test", RelPath: "artifacts/results/result.json", SHA256: strings.Repeat("b", 64), SizeBytes: 12}
 	a.setTaskRecords(map[string]*DurableTaskRecord{
@@ -472,6 +482,7 @@ func TestRetryTaskSettlementDurabilityRepairsCheckpoint(t *testing.T) {
 }
 
 func TestPersistTaskRegistryDoesNotArchiveNonDurableSettlement(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	records := make(map[string]*DurableTaskRecord, maxRetainedTerminalTasks+1)
 	for i := 0; i <= maxRetainedTerminalTasks; i++ {
@@ -499,6 +510,7 @@ func TestPersistTaskRegistryDoesNotArchiveNonDurableSettlement(t *testing.T) {
 }
 
 func TestUserCancelSettlesTaskBackedSubAgents(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	newControllableTestSubAgent(t, a, "task-user-cancel")
 
@@ -523,6 +535,7 @@ func TestUserCancelSettlesTaskBackedSubAgents(t *testing.T) {
 }
 
 func TestUserCancelKeepsAlreadySettledOutcome(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-user-done")
 	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", nil); err != nil {
@@ -543,6 +556,7 @@ func TestUserCancelKeepsAlreadySettledOutcome(t *testing.T) {
 }
 
 func TestTerminalStatusAfterCommitMirrorsSettledRecord(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-mirror")
 	if _, _, err := a.commitTerminalTask(sub, SubAgentStateCompleted, "done", "task completed", nil); err != nil {
@@ -601,6 +615,7 @@ func barrierTaskRegistryWrite(t *testing.T, sessionDir string) (restore func()) 
 // runtime never accepted and would make a later genuine completion of the same
 // attempt conflict with it.
 func TestLiveGuardedCommitRollsBackJournalWhenReactivationWins(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-live-cas-rollback")
 	sub.setState(SubAgentStateWaitingMain, "needs main reply")
@@ -653,6 +668,7 @@ func TestLiveGuardedCommitRollsBackJournalWhenReactivationWins(t *testing.T) {
 // and skipped the requests/children/external-event closeout of a task that was
 // already Cancelled.
 func TestLiveExpirySettleStaysCommittedWhenRegistryWriteDegraded(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-live-expiry-degraded")
 	sub.setState(SubAgentStateWaitingMain, "needs main reply")

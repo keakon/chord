@@ -12,6 +12,7 @@ import (
 )
 
 func TestHostedUsageCountsWireAttemptsAndFailedConsumption(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	provider := &hostedScriptProvider{respond: func(i int, _ context.Context) (*message.Response, error) {
 		if i == 0 {

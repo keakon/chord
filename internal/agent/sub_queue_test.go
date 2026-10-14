@@ -100,6 +100,7 @@ func TestSubAgentBusyTurnDefersQueuedUserInput(t *testing.T) {
 }
 
 func TestSubAgentContinuationIncludesQueuedUserInputAfterToolResult(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	provider := &captureMessagesProvider{}
 	sub.llmMu.Lock()
@@ -154,6 +155,7 @@ func TestSubAgentContinuationIncludesQueuedUserInputAfterToolResult(t *testing.T
 }
 
 func TestSubAgentCompleteWaitsForQueuedUserInput(t *testing.T) {
+	t.Parallel()
 	parent, sub := newMixedBatchTestSubAgent(t)
 	provider := &captureMessagesProvider{}
 	sub.llmMu.Lock()
@@ -229,6 +231,7 @@ func waitForCapturedSubAgentMessages(t *testing.T, sub *SubAgent, provider *capt
 }
 
 func TestSubAgentQueuedLLMResultKeepsUserInputBlockedUntilConsumed(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := &SubAgent{
 		instanceID: "agent-1",
@@ -356,6 +359,7 @@ func TestSubAgentContextAppendOverflowPreservesOrder(t *testing.T) {
 }
 
 func TestSubAgentHandleContinueDrainsQueuedContextAppendsFirst(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-1")
 

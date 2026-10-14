@@ -185,6 +185,7 @@ func TestModelDrivenCheckpointCarriesTypedStateAcrossGenerations(t *testing.T) {
 // content, and only the post-export render lists the freshly written archive —
 // exactly once, with its topics.
 func TestModelDrivenCheckpointRenderReusesBuilderAndAddsExportedArchive(t *testing.T) {
+	t.Parallel()
 	sessionDir := t.TempDir()
 	a := newTestMainAgent(t, sessionDir)
 	a.sessionDir = sessionDir

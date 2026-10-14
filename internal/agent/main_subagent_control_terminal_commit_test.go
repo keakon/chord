@@ -19,6 +19,7 @@ import (
 // mailbox delivery event has not been dispatched yet. The later event only
 // delivers the already-durable message and must not write a second copy.
 func TestHandleAgentDonePersistsCompletionMailboxBeforeTerminalCommit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(subagents): %v", err)
@@ -78,6 +79,7 @@ func TestHandleAgentDonePersistsCompletionMailboxBeforeTerminalCommit(t *testing
 // must still succeed — persistence failure never leaves the task stuck in a
 // non-terminal state.
 func TestHandleAgentDoneTerminalCommitSurvivesMailboxPersistFailure(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-best-effort")
 	subagentsDir := filepath.Join(a.sessionDir, "subagents")
@@ -118,6 +120,7 @@ func TestHandleAgentDoneTerminalCommitSurvivesMailboxPersistFailure(t *testing.T
 // already queued by restore is dropped) is pinned by
 // TestRestoredMailboxEventDeduplicatesQueuedMessageID.
 func TestAgentDoneCompletionMailboxEventDeliversExactlyOnceWithoutRewriting(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(subagents): %v", err)
@@ -197,6 +200,7 @@ func TestAgentDoneCompletionMailboxEventDeliversExactlyOnceWithoutRewriting(t *t
 // already terminal Failed, and the queued mailbox delivery event must not
 // write a second copy.
 func TestHandleAgentErrorPersistsRiskAlertMailboxBeforeTerminalCommit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(subagents): %v", err)
@@ -250,6 +254,7 @@ func TestHandleAgentErrorPersistsRiskAlertMailboxBeforeTerminalCommit(t *testing
 // terminal Cancelled commit, so the owner notification cannot be lost to a
 // crash between the commit and the queued mailbox delivery.
 func TestWaitingMainExpiryPersistsRiskAlertMailboxBeforeTerminalCommit(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	if err := os.MkdirAll(filepath.Join(a.sessionDir, "subagents"), 0o755); err != nil {
 		t.Fatalf("MkdirAll(subagents): %v", err)

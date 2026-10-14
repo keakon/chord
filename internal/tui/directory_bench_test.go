@@ -7,8 +7,9 @@ import (
 	"github.com/keakon/chord/internal/tui/overlaylist"
 )
 
-func benchmarkModelForDirectoryView() Model {
-	m := benchmarkModelForView()
+func benchmarkModelForDirectoryView(tb testing.TB) Model {
+	tb.Helper()
+	m := benchmarkModelForView(tb)
 	m.mode = ModeDirectory
 	entries := make([]DirectoryEntry, 0, 32)
 	for i := range 32 {
@@ -23,7 +24,7 @@ func benchmarkModelForDirectoryView() Model {
 }
 
 func BenchmarkRenderDirectoryOpen(b *testing.B) {
-	m := benchmarkModelForDirectoryView()
+	m := benchmarkModelForDirectoryView(b)
 	_ = m.renderDirectory()
 	b.ReportAllocs()
 	for b.Loop() {

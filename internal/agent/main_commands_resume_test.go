@@ -5,6 +5,7 @@ import "testing"
 // /resume lists sessions before emitting the picker event, so the TUI must treat
 // the payload as complete: a nil list means "no sessions", not "still loading".
 func TestResumeSlashCommandEmitsPrefetchedSessionSelect(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 
 	if !a.tryHandleSlashCommand("/resume") {

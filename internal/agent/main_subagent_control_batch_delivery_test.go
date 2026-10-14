@@ -10,6 +10,7 @@ import (
 )
 
 func TestManualMainContinueBatchesCompletedMailboxesIntoSingleTurn(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{
 		{MessageID: "a-1", AgentID: "worker-a", TaskID: "task-a", Kind: SubAgentMailboxKindCompleted, Priority: SubAgentMailboxPriorityUrgent, Summary: "done a"},
@@ -35,6 +36,7 @@ func TestManualMainContinueBatchesCompletedMailboxesIntoSingleTurn(t *testing.T)
 }
 
 func TestManualMainUserMessageStagesMailboxBeforeTurn(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
 		MessageID: "done-1",
@@ -59,6 +61,7 @@ func TestManualMainUserMessageStagesMailboxBeforeTurn(t *testing.T) {
 }
 
 func TestPrepareSubAgentMailboxBatchForTurnContinuationStagesDecisionMailbox(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
 		MessageID:   "wake-1",
@@ -93,6 +96,7 @@ func TestPrepareSubAgentMailboxBatchForTurnContinuationStagesDecisionMailbox(t *
 }
 
 func TestParkedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "adhoc-root")
 	sub.agentDefName = "worker"
@@ -154,6 +158,7 @@ func TestParkedMainOwnedCompletedMailboxStillQueuesForMain(t *testing.T) {
 }
 
 func TestClosedUnknownCompletedMailboxIsDropped(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 
@@ -176,6 +181,7 @@ func TestClosedUnknownCompletedMailboxIsDropped(t *testing.T) {
 }
 
 func TestSetIdleAndDrainPendingConsumesAllActiveCompletedMailboxes(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.activeSubAgentMailboxes = []*SubAgentMailboxMessage{
 		{MessageID: "a-1", AgentID: "worker-a", TaskID: "task-a", Kind: SubAgentMailboxKindCompleted, Priority: SubAgentMailboxPriorityUrgent, Summary: "done a"},
@@ -203,6 +209,7 @@ func TestSetIdleAndDrainPendingConsumesAllActiveCompletedMailboxes(t *testing.T)
 }
 
 func TestTakeOutstandingMailboxForSubPreservesSiblingCompletedMailboxes(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	subA := newControllableTestSubAgent(t, a, "task-a")
 	subA.instanceID = "worker-a"
@@ -245,6 +252,7 @@ func TestTakeOutstandingMailboxForSubPreservesSiblingCompletedMailboxes(t *testi
 // runnable mailbox work, and a single drain stages every snapshot into one
 // batch instead of waking the main once per update.
 func TestMainInboxProgressIsRunnableAndStagesAsOneBatch(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"})
 	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-2", AgentID: "worker-2", TaskID: "task-b", Kind: SubAgentMailboxKindProgress, Summary: "almost done"})
@@ -279,6 +287,7 @@ func TestMainInboxProgressIsRunnableAndStagesAsOneBatch(t *testing.T) {
 // together land in the same staged batch, so the wake handles all routable
 // main-inbox messages at once.
 func TestProgressArrivalMergesIntoQueuedMailboxBatch(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"})
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
@@ -307,6 +316,7 @@ func TestProgressArrivalMergesIntoQueuedMailboxBatch(t *testing.T) {
 // inbox — not only a completed run — so one request carries all of them, with
 // urgent messages ahead of normal ones and FIFO kept inside each class.
 func TestStageNextSubAgentMailboxBatchDrainsEveryQueuedMessage(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{
 		{MessageID: "u-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindDecisionRequired, Priority: SubAgentMailboxPriorityInterrupt, Summary: "needs a decision"},
@@ -375,6 +385,7 @@ func TestStageNextSubAgentMailboxBatchDrainsEveryQueuedMessage(t *testing.T) {
 // request boundary instead (TestTurnContinuationStagingIncludesPendingProgress),
 // so the idle drain must leave both the snapshot and the running turn alone.
 func TestIdleMailboxDrainLeavesActiveTurnAndProgressUntouched(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "update"})
 	a.newTurn("")
@@ -401,6 +412,7 @@ func TestIdleMailboxDrainLeavesActiveTurnAndProgressUntouched(t *testing.T) {
 // with the actionable head staged first, so progress/notice rides the next
 // request instead of waiting for the turn to end.
 func TestTurnContinuationStagingIncludesPendingProgress(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.replaceProgressMailboxWithinBudget(SubAgentMailboxMessage{MessageID: "p-1", AgentID: "worker-1", TaskID: "task-a", Kind: SubAgentMailboxKindProgress, Summary: "still working"})
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
@@ -439,6 +451,7 @@ func TestTurnContinuationStagingIncludesPendingProgress(t *testing.T) {
 // actionable queues) folds into the same staged batch as the completed head
 // instead of being requeued, so it rides the next request too.
 func TestStageNextCompletedBatchFoldsQueueResidentProgress(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
 		MessageID: "c-1",
@@ -481,6 +494,7 @@ func TestStageNextCompletedBatchFoldsQueueResidentProgress(t *testing.T) {
 // subAgentMailboxIDsMu discipline across store/dequeue/takeOutstanding;
 // without it the counter and slice state can tear.
 func TestConcurrentMailboxQueueDeliveryKeepsStateConsistent(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "race-task")
 
@@ -558,6 +572,7 @@ func TestConcurrentMailboxQueueDeliveryKeepsStateConsistent(t *testing.T) {
 // main turn whose teardown is requeueing it, and once more after the claiming
 // manual delivery replies.
 func TestRequeueActiveSubAgentMailboxSkipsClaimedMessages(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	sub := newControllableTestSubAgent(t, a, "task-1") // instance ID worker-1
 	m1 := &SubAgentMailboxMessage{MessageID: "m1", AgentID: "worker-1", TaskID: "task-1", Kind: SubAgentMailboxKindDecisionRequired, Priority: SubAgentMailboxPriorityInterrupt, Summary: "one"}
@@ -592,6 +607,7 @@ func TestRequeueActiveSubAgentMailboxSkipsClaimedMessages(t *testing.T) {
 // the batch so it rides the next request, instead of returning it to the
 // per-agent snapshot map.
 func TestTurnContinuationStagesQueueResidentProgressHead(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.subAgentInbox.urgent = []SubAgentMailboxMessage{{
 		MessageID: "p-1",
@@ -628,6 +644,7 @@ func TestTurnContinuationStagesQueueResidentProgressHead(t *testing.T) {
 // next request's messages and ctxmgr, instead of being blocked by the active
 // batch bookkeeping from the earlier delivery.
 func TestTurnContinuationStagesLaterBatchAfterFirstConsumed(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 
@@ -681,6 +698,7 @@ func TestTurnContinuationStagesLaterBatchAfterFirstConsumed(t *testing.T) {
 // snapshot arriving mid-turn is assembled into the next request's messages and
 // ctxmgr, without interrupting the in-flight request or starting a new turn.
 func TestTurnContinuationStagesProgressSnapshotForNextRequest(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 	turnID := a.currentTurn().ID
@@ -706,6 +724,7 @@ func TestTurnContinuationStagesProgressSnapshotForNextRequest(t *testing.T) {
 // closeout acks both with the turn's reply, leaving neither unconsumed (lost)
 // nor acked twice.
 func TestTurnCloseoutAcksEveryBatchStagedInTurn(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.newTurn("")
 

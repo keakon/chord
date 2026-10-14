@@ -5,6 +5,7 @@ import (
 )
 
 func TestCompactionStatusStartedCarriesPlanID(t *testing.T) {
+	t.Parallel()
 	a := newTestMainAgent(t, t.TempDir())
 	a.startCompactionState(9, compactionTarget{sessionEpoch: a.sessionEpoch}, compactionTriggerUsageDriven, continuationPlan{kind: compactionResumeIdle})
 	defer a.resetCompactionState()

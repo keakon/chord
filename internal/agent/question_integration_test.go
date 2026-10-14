@@ -13,10 +13,12 @@ import (
 )
 
 func TestQuestionAsyncFlowContinuesThenParksWithoutPolling(t *testing.T) {
+	t.Parallel()
 	testQuestionAsyncAnswer(t, false)
 }
 
 func TestQuestionAsyncAnswerDuringRequestResumesBeforeCompletion(t *testing.T) {
+	t.Parallel()
 	testQuestionAsyncAnswer(t, true)
 }
 
