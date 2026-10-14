@@ -5,21 +5,103 @@ import (
 	"strings"
 
 	"github.com/keakon/lipgloss/v2"
+
+	"github.com/keakon/chord/internal/agent"
 )
 
-func defaultInfoPanelSectionCollapsed(section infoPanelSectionID) bool {
-	return section == infoPanelSectionGit
+// defaultInfoPanelSectionCollapsed reports whether a section the user has not
+// toggled starts folded.
+//
+// Folded is the default everywhere: a section only defaults to expanded once
+// it holds content worth showing. That distinction matters most for the
+// state-driven sections, which list every configured entry even while all of
+// them are merely pending, disabled, idle, or unloaded — an LSP server still
+// starting up, an MCP server that has not connected yet, a skill nobody
+// loaded. Those stay folded until at least one entry reaches its active
+// state, so a session opens quiet instead of expanding integrations that are
+// not doing anything, and they unfold on their own the moment something
+// loads.
+//
+// The remaining sections only render once the session has produced their
+// content (a todo, an edit, a sub-agent, a running job), so that content is
+// the trigger and they stay expanded by default. GIT stays folded because its
+// header already carries the branch and sync summary.
+func (m *Model) defaultInfoPanelSectionCollapsed(section infoPanelSectionID) bool {
+	switch section {
+	case infoPanelSectionLSP:
+		return !m.infoPanelAnyLSPServerLoaded()
+	case infoPanelSectionMCP:
+		return !m.infoPanelAnyMCPServerConnected()
+	case infoPanelSectionSkills:
+		return !m.infoPanelAnySkillLoaded()
+	default:
+		return section == infoPanelSectionGit
+	}
 }
 
 func (m *Model) isInfoPanelSectionCollapsed(section infoPanelSectionID) bool {
 	if m.infoPanelCollapsedSections == nil {
-		return defaultInfoPanelSectionCollapsed(section)
+		return m.defaultInfoPanelSectionCollapsed(section)
 	}
 	collapsed, ok := m.infoPanelCollapsedSections[section]
 	if !ok {
-		return defaultInfoPanelSectionCollapsed(section)
+		return m.defaultInfoPanelSectionCollapsed(section)
 	}
 	return collapsed
+}
+
+// infoPanelAnyLSPServerLoaded reports whether at least one language server has
+// finished loading. Servers that are still starting, failed, or auto-unloaded
+// while idle do not count: until a server actually serves diagnostics the LSP
+// section defaults to folded.
+func (m *Model) infoPanelAnyLSPServerLoaded() bool {
+	lp, ok := m.agent.(agent.LSPStateProvider)
+	if !ok {
+		return false
+	}
+	for _, row := range lp.LSPServerList() {
+		if row.OK {
+			return true
+		}
+	}
+	return false
+}
+
+// infoPanelAnyMCPServerConnected reports whether at least one MCP server is
+// connected. Pending, retrying, disabled, idle, and failed servers do not
+// count: until a server is live the MCP section defaults to folded.
+func (m *Model) infoPanelAnyMCPServerConnected() bool {
+	mp, ok := m.agent.(agent.MCPStateProvider)
+	if !ok {
+		return false
+	}
+	for _, row := range mp.MCPServerList() {
+		if row.OK {
+			return true
+		}
+	}
+	return false
+}
+
+// infoPanelAnySkillLoaded reports whether at least one skill has been loaded
+// into the focused agent's context. Available-but-unloaded skills do not
+// count, so the SKILLS section stays folded until something is actually
+// loaded.
+//
+// This reads the same invoked-skill map the section marks its loaded rows
+// from. The history-derived load state those rows also apply can trail the
+// map by a beat, but both sources are resynced from the messages that are
+// actually in context, so the default cannot disagree with the rows for long.
+func (m *Model) infoPanelAnySkillLoaded() bool {
+	if m.agent == nil {
+		return false
+	}
+	for _, sk := range m.agent.InvokedSkills() {
+		if sk != nil && strings.TrimSpace(sk.Name) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) toggleInfoPanelSection(section infoPanelSectionID) {

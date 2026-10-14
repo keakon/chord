@@ -134,6 +134,8 @@ The error panel keeps the most recent 80 errors in a ring buffer (newest first),
 
 The right panel keeps a stable order: agents, background jobs, and todos appear and disappear during a session, so they render after the model, usage, integration, and repository sections and never shift the information above them. A focused agent has a `▸` marker alongside its status icon, so its running, waiting, or failed state remains visible.
 
+Collapsible sections start folded and open on their own once they hold something worth showing: `LSP`, `MCP`, and `SKILLS` wait for a loaded language server, a connected MCP server, or a skill whose body is in context, while `TODOS`, `CHANGED FILES`, `AGENTS`, and `JOBS` open with their first entry. `GIT` stays folded because its header already carries the summary. Click any section header to fold or expand it, and your choice is remembered.
+
 Enter `/status` to open the same live information across the full conversation area, including in narrow terminals. Use `j` / `k` or the arrow keys to scroll, `PgUp` / `PgDn` to page, and `g` / `G` to jump to the top or bottom. `Tab` / `Shift+Tab` selects a section; `Enter` or `Space` folds or expands it. Mouse scrolling and clicks work as in the right panel. `Esc` or `q` returns to the conversation.
 
 Enter `/context` to inspect the focused task’s latest request: input composition, request-level reduction, and local cache-prefix changes with service-reported cache usage. See [Explain the latest request](context-management.md#explain-the-latest-request).

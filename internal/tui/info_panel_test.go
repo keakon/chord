@@ -420,6 +420,9 @@ func TestRenderInfoPanelSkillsUseStateIcons(t *testing.T) {
 		{Meta: catalog[2], UserLoadable: true, ModelCallable: false},
 	}
 	m := NewModel(backend)
+	// None of these states carries a loaded body, so the SKILLS section
+	// defaults to folded; expand it explicitly to pin the row rendering.
+	m.infoPanelCollapsedSections[infoPanelSectionSkills] = false
 
 	rendered := m.renderInfoPanel(40, 24)
 	plain := stripANSI(rendered)
@@ -454,6 +457,9 @@ func TestRenderInfoPanelShowsSkillsForFocusedSubAgent(t *testing.T) {
 	}
 
 	m.setFocusedAgent("agent-1")
+	// The sub-agent's only skill is not loaded, so the section defaults to
+	// folded; expand it explicitly to pin the focused-agent row rendering.
+	m.infoPanelCollapsedSections[infoPanelSectionSkills] = false
 	subPlain := stripANSI(m.renderInfoPanel(40, 24))
 	if !strings.Contains(subPlain, "▼ SKILLS") || !strings.Contains(subPlain, "go-expert") {
 		t.Fatalf("focused subagent info panel should show its skills, got %q", subPlain)
@@ -1621,6 +1627,9 @@ func TestRenderInfoPanelEnvironmentDotsPreserveInfoPanelBackground(t *testing.T)
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", OK: true}}
 
 	m := NewModel(backend)
+	// The LSP row is still pending, so the section defaults to folded; expand
+	// it explicitly to pin the pending row rendering next to the OK row.
+	m.infoPanelCollapsedSections[infoPanelSectionLSP] = false
 	rendered := m.renderInfoPanel(32, 20)
 
 	pendingWant := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelPendingFg)).Render("●")
@@ -2085,6 +2094,9 @@ func TestRenderInfoPanelEnvironmentDotsUseThemeInfoPanelBackground(t *testing.T)
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", Pending: true}}
 
 	m := NewModel(backend)
+	// A pending LSP row no longer auto-expands the section; expand it
+	// explicitly to pin the themed dot rendering.
+	m.infoPanelCollapsedSections[infoPanelSectionLSP] = false
 	rendered := m.renderInfoPanel(32, 20)
 	want := InfoPanelDim.Foreground(lipgloss.Color(currentTheme.InfoPanelPendingFg)).Render("●")
 	if !strings.Contains(rendered, want) {
@@ -2098,6 +2110,10 @@ func TestRenderInfoPanelIdleEnvironmentRowsUseDimNotCriticalStyles(t *testing.T)
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", Idle: true}}
 
 	m := NewModel(backend)
+	// Idle rows are unloaded, so both sections default to folded; expand them
+	// explicitly to pin the dim (not critical) row rendering.
+	m.infoPanelCollapsedSections[infoPanelSectionLSP] = false
+	m.infoPanelCollapsedSections[infoPanelSectionMCP] = false
 	rendered := m.renderInfoPanel(40, 20)
 	plain := stripANSI(rendered)
 	if !strings.Contains(plain, "gopls") || !strings.Contains(plain, "exa") {
@@ -2116,6 +2132,10 @@ func TestRenderInfoPanelLSPErrorHidesRawMessageAndRefreshesWhenStatusChanges(t *
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", Err: "dial tcp", OK: false}}
 
 	m := NewModel(backend)
+	// A failed server is not loaded, so the section defaults to folded;
+	// expand it explicitly to pin the error-row rendering on both sides of
+	// the status change.
+	m.infoPanelCollapsedSections[infoPanelSectionLSP] = false
 	before := stripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(before, "gopls") {
 		t.Fatalf("info panel before LSP error change = %q, want server name", before)
@@ -2139,6 +2159,10 @@ func TestRenderInfoPanelMCPErrorRefreshesWhenMessageChanges(t *testing.T) {
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "codex_apps", Err: "timeout", OK: false}}
 
 	m := NewModel(backend)
+	// A failed server is not connected, so the section defaults to folded;
+	// expand it explicitly to pin the error-row rendering on both sides of
+	// the message change.
+	m.infoPanelCollapsedSections[infoPanelSectionMCP] = false
 	before := stripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(before, "codex_apps") {
 		t.Fatalf("info panel before MCP error change = %q, want server name", before)
@@ -2162,6 +2186,9 @@ func TestRenderInfoPanelMCPRetryingUsesWarningLabel(t *testing.T) {
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", Pending: true, Retrying: true, Attempt: 2, MaxAttempts: 3}}
 
 	m := NewModel(backend)
+	// A retrying server has not connected yet, so the section defaults to
+	// folded; expand it explicitly to pin the warning label rendering.
+	m.infoPanelCollapsedSections[infoPanelSectionMCP] = false
 	got := stripANSI(m.renderInfoPanel(40, 20))
 	if !strings.Contains(got, "exa") {
 		t.Fatalf("retrying MCP row = %q, want server name", got)
@@ -2182,6 +2209,9 @@ func TestRenderInfoPanelMCPPendingUsesDimLabel(t *testing.T) {
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", Pending: true, Retrying: false}}
 
 	m := NewModel(backend)
+	// A pending server has not connected yet, so the section defaults to
+	// folded; expand it explicitly to pin the dim label rendering.
+	m.infoPanelCollapsedSections[infoPanelSectionMCP] = false
 	rendered := m.renderInfoPanel(40, 20)
 	wantDim := InfoPanelDim.Render(" exa")
 	if !strings.Contains(rendered, wantDim) {
@@ -2597,6 +2627,9 @@ func TestRenderInfoPanelCollapsibleSectionsIndentContentNotHeaders(t *testing.T)
 	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", OK: true}}
 	backend.availableSkills = []*skill.Meta{{Name: "go-expert", Discovered: true}}
 	m := NewModel(backend)
+	// The skill is available but not loaded, so the section defaults to
+	// folded; expand it explicitly to pin the content indent.
+	m.infoPanelCollapsedSections[infoPanelSectionSkills] = false
 	m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "agent-1", TaskDesc: "ship tests"}}, "main", "builder")
 	m.sidebar.AddFileEdit("main", "/tmp/foo.go", 2, 1)
 

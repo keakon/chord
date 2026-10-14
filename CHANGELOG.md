@@ -28,6 +28,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - The **SKILLS** panel and the `/skill` selector mark skill state with icons instead of text suffixes: `○` idle, `◎` path-matched or notified, `●` loaded, `↻` reload after compaction, `◌` manual-only, and `⊘` denied. Green marks a live body, amber one that needs reloading.
 
+- The info panel's **LSP**, **MCP**, and **SKILLS** sections now default to folded and only stay open when they hold something loaded: at least one language server that finished loading, at least one connected MCP server, or at least one skill whose body is in context. Previously any configured entry expanded the section, so a session that had not connected or loaded anything yet opened with those blocks taking up the panel. **TODOS**, **CHANGED FILES**, **AGENTS**, and **JOBS** still expand as soon as their content exists, **GIT** stays folded, and a section the user toggled keeps that state either way.
+
 - The embedded model catalog uses [v2026-10-14.1](https://github.com/keakon/chord-models/tree/v2026-10-14.1), adding Gemini 4 Argon with a shared 1M-token window and a 65,536-token streaming binding cap. Long decode continuation is not supported.
 
 - AGENTS shows distinct waiting states and the current coordination request reason, with clickable task and reason rows.
