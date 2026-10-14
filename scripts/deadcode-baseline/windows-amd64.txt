@@ -17,3 +17,8 @@ github.com/keakon/chord/internal/logtest.nopWriteCloser.Close
 # tools.ExecuteJobForTest / ResetJobRegistryForTest: test-helper; cross-package job control for tests.
 github.com/keakon/chord/internal/tools.ExecuteJobForTest
 github.com/keakon/chord/internal/tools.ResetJobRegistryForTest
+
+# testgit: test-support; shared immutable Git seeds for isolated integration tests.
+github.com/keakon/chord/internal/testgit.NewRepository
+github.com/keakon/chord/internal/testgit.build
+github.com/keakon/chord/internal/testgit.environment
