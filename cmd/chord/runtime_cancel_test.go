@@ -132,6 +132,36 @@ func TestWaitIdleOrTimeoutReturnsPromptlyAfterCancelCurrentTurnWithoutTools(t *t
 	}
 }
 
+// TestWaitIdleOrTimeoutIgnoresBufferedStartupIdle covers a stale GlobalIdleEvent
+// left buffered from the agent's startup quiescence: reading that event must not
+// report the busy turn as finished.
+func TestWaitIdleOrTimeoutIgnoresBufferedStartupIdle(t *testing.T) {
+	rt, _, started, cleanup := newBlockingRuntime(t)
+	defer cleanup()
+
+	mainAgent := rt.Agent
+	// Let the agent reach startup quiescence so its GlobalIdleEvent is emitted
+	// and buffered; nothing consumes the output channel in this harness.
+	deadline := time.Now().Add(2 * time.Second)
+	for !mainAgent.IsGlobalIdle() {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for startup global idle")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	mainAgent.SendUserMessage("hello")
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for blocking provider to start")
+	}
+
+	if ok := rt.WaitIdleOrTimeout(100 * time.Millisecond); ok {
+		t.Fatal("WaitIdleOrTimeout() = true, want false while the turn is still busy and only a stale startup idle event is buffered")
+	}
+}
+
 func TestWaitIdleOrTimeoutWouldTimeoutWithoutCancellation(t *testing.T) {
 	rt, _, started, cleanup := newBlockingRuntime(t)
 	defer cleanup()

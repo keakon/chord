@@ -1,5 +1,15 @@
 package agent
 
+// IsGlobalIdle reports the live global-quiescence state: true only while the
+// event loop has no active turn, loop, subagent work, or runnable queued work.
+// Callers that wait for quiescence must consult this live state rather than
+// treating a read GlobalIdleEvent as current, because the output channel can
+// still hold an idle event emitted for an earlier quiescence (for example
+// startup) when work has since resumed.
+func (a *MainAgent) IsGlobalIdle() bool {
+	return a != nil && a.globalIdle.Load()
+}
+
 // markRealWorkStarted records the beginning of work that can later produce a
 // completion notification. It is safe to call from a SubAgent goroutine; the
 // event loop consumes the monotonically increasing epoch when it emits the

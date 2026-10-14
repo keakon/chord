@@ -129,6 +129,15 @@ func (rt *Runtime) WaitIdleOrTimeout(timeout time.Duration) bool {
 		return true
 	}
 
+	// A GlobalIdleEvent buffered before this call (for example the startup
+	// quiescence event) is stale by the time it is read: it describes an earlier
+	// quiescence, not the work the caller is waiting on. The live global-idle
+	// state decides, so a leftover event cannot make the wait return early while
+	// a turn is still running.
+	if rt.Agent.IsGlobalIdle() {
+		return true
+	}
+
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
@@ -138,7 +147,7 @@ func (rt *Runtime) WaitIdleOrTimeout(timeout time.Duration) bool {
 			if !ok {
 				return true
 			}
-			if _, ok := evt.(agent.GlobalIdleEvent); ok {
+			if _, ok := evt.(agent.GlobalIdleEvent); ok && rt.Agent.IsGlobalIdle() {
 				return true
 			}
 		case <-timer.C:
