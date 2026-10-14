@@ -46,6 +46,22 @@ chord config add mygw/claude-gw --keep-current
 chord doctor models --model mygw/claude-gw
 ```
 
+## Gemini 4 Argon
+
+内嵌目录快照 [v2026-10-14.1](https://github.com/keakon/chord-models/tree/v2026-10-14.1) 包含 `google/gemini-4-argon`。已有安装可先刷新目录，再使用 `GEMINI_API_KEY` 接入官方 API：
+
+```bash
+chord config refresh-catalog
+chord config add google/gemini-4-argon --api-key-env GEMINI_API_KEY
+chord doctor models --model google/gemini-4-argon
+```
+
+Argon 的输入、思考和输出共享 1,048,576 token 窗口，没有单独公布的输入上限。目录默认使用 `thinking.level: medium`，也支持 `low` 和 `high`，不支持 `minimal`。模型事实保留长输出容量，官方 `gemini` 绑定将 `limit.output` 设为 65,536，约束当前流式请求的思考与输出总量；实际请求还受全局 `max_output_tokens`（默认 64,000）和剩余窗口限制。
+
+超过单次请求上限需要 [long decode 续传](https://ai.google.dev/gemini-api/docs/generate-content/long-decode)：API 返回 `CONTINUATION` 和 `continuationToken`，客户端携带 token 重发原始请求，继续同一次生成并合并结果。Chord 尚未实现这套续传机制，单纯提高 `limit.output` 或 `max_output_tokens` 无法启用它。普通多轮工具调用仍可使用；65,536 是每次流式请求的上限，不是整个会话的累计额度。
+
+Argon 需要有可用额度的付费 API 账号。免费层额度为 0 时会返回 HTTP 429；Google AI Pro / Ultra 订阅不替代 API 凭据与额度。用上面的 `doctor models` 检查你自己的接入；目录收录不表示账号已获准调用。
+
 ## 自定义端点：借用目录事实
 
 `chord config add ... --catalog <id>` 会在模型下写入 `catalog:` 引用。显式选择优先于 preset 的自动绑定和已保存的目录选择，所选模型必须适用于当前 preset。自定义端点（无 preset）继承限额、模态和上下文压缩建议；与官方使用相同协议时，还会继承模型行为、`compat`、reasoning 变体和 Responses 字段发送规则。provider 的地址、凭据和传输设置由用户自己的配置决定。按模型关闭借用用 `catalog: false`：

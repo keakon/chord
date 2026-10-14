@@ -286,6 +286,8 @@ providers:
 
 Gemini 的 `api_url` 配置为原生 API 版本根，如 `https://generativelanguage.googleapis.com/v1beta/`，供对话和生图共用。Chord 从 `/v1beta`、`/v1alpha` 或 Google 官方 `/v1` 地址识别 `type: generate-content`，可省略 `type`；代理使用 `/v1` 时需显式设置类型。不要附加 `models`、模型名或操作名，Chord 会为对话追加 `/models/{model}:streamGenerateContent?alt=sse`，为生图追加 `/models/{model}:generateContent`。`models` 下的 key（如 `gemini-3.8-flash`）即为发送给 Gemini 的模型 ID。
 
+Gemini 4 Argon 推荐使用 `thinking.level: medium`，也支持 `low`、`high`，不支持 `minimal`；不要同时设置 `thinking.budget` 和 `thinking.level`。它的输入、思考和输出共享 1,048,576 token 窗口，官方 `gemini` 绑定将当前流式请求的 `limit.output` 限制为 65,536。Chord 尚不支持跨请求的 long decode 续传，提高输出上限不会启用该能力。接入命令与目录 tag 见[Gemini 4 Argon](./model-configs_CN.md#gemini-4-argon)。
+
 Gemini 的 thinking 参数与其他 provider 一样统一放在 `thinking` 下（不使用 `gemini_thinking` 之类的专有键）：
 
 - `thinking.budget` → `generationConfig.thinkingConfig.thinkingBudget`

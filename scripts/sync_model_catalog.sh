@@ -54,6 +54,10 @@ if [[ "$repository" != https://* ]]; then
   # Local remotes (paths, ssh) are not a publication URL; record the canonical one.
   repository="$default_repository"
 fi
+if [[ "$repository" == "${default_repository}.git" ]]; then
+  # Match the official source identity used by the default catalog refresh.
+  repository="$default_repository"
+fi
 
 cat >"${data_dir}/snapshot.yaml" <<EOF
 # Records which chord-models revision this snapshot was synced from, written

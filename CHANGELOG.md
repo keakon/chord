@@ -24,6 +24,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- The embedded model catalog uses [v2026-10-14.1](https://github.com/keakon/chord-models/tree/v2026-10-14.1), adding Gemini 4 Argon with a shared 1M-token window and a 65,536-token streaming binding cap. Long decode continuation is not supported.
+
 - AGENTS shows distinct waiting states and the current coordination request reason, with clickable task and reason rows.
 
 - Compaction summaries exclude independent thinking so the input budget prioritizes user requests, replies, and execution records.

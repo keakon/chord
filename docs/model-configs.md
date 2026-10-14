@@ -77,6 +77,22 @@ Verify a model end to end before relying on it:
 chord doctor models --model mygw/claude-gw
 ```
 
+## Gemini 4 Argon
+
+The embedded catalog snapshot, [v2026-10-14.1](https://github.com/keakon/chord-models/tree/v2026-10-14.1), includes `google/gemini-4-argon`. Existing installations can refresh the catalog before connecting to the official API with `GEMINI_API_KEY`:
+
+```bash
+chord config refresh-catalog
+chord config add google/gemini-4-argon --api-key-env GEMINI_API_KEY
+chord doctor models --model google/gemini-4-argon
+```
+
+Input, thinking, and output share a 1,048,576-token window, with no separately documented input cap. The catalog defaults to `thinking.level: medium`; `low` and `high` are also supported, but `minimal` is not. Model facts retain the long-output capacity, while the official `gemini` binding sets `limit.output` to 65,536 for thinking and output combined in the current streaming request. The actual request budget also respects global `max_output_tokens` (64,000 by default) and the remaining context window.
+
+Going beyond the single-request cap requires [long decode continuation](https://ai.google.dev/gemini-api/docs/generate-content/long-decode): the API returns `CONTINUATION` and a `continuationToken`, and the client resends the original request with that token to continue the same generation and combine the results. Chord does not implement this mechanism. Raising `limit.output` or `max_output_tokens` alone does not enable it. Ordinary multi-turn tool use remains available; 65,536 is a per-streaming-request cap, not a cumulative session allowance.
+
+Argon requires a paid API account with available quota. A free-tier quota of zero returns HTTP 429; Google AI Pro / Ultra subscriptions do not replace API credentials and quota. Use `doctor models` above to check your own connection; catalog inclusion does not establish account access.
+
 ## Custom endpoints: borrowing catalog facts
 
 `chord config add ... --catalog <id>` writes a `catalog:` reference under the

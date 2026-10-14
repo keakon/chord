@@ -297,6 +297,8 @@ providers:
 
 For Gemini, set `api_url` to the native API version root, such as `https://generativelanguage.googleapis.com/v1beta/`, shared by chat and image models. Chord detects `type: generate-content` from `/v1beta`, `/v1alpha`, or Google's official `/v1` root; proxies using `/v1` need an explicit type. Do not append `models`, a model name or an operation. Chord appends `/models/{model}:streamGenerateContent?alt=sse` for chat and `/models/{model}:generateContent` for images. The model map key, such as `gemini-3.8-flash`, is the model ID sent to Gemini.
 
+For Gemini 4 Argon, start with `thinking.level: medium`; `low` and `high` are also supported, but `minimal` is not. Do not set both `thinking.budget` and `thinking.level`. Input, thinking, and output share a 1,048,576-token window, while the official `gemini` binding caps `limit.output` at 65,536 for current streaming requests. Chord does not support long decode continuation across requests; raising the output limit does not enable it. See [Gemini 4 Argon](./model-configs.md#gemini-4-argon) for setup commands and the catalog tag.
+
 Gemini thinking options use the same unified `thinking` object as other providers (no separate `gemini_thinking` key):
 
 - `thinking.budget` → `generationConfig.thinkingConfig.thinkingBudget`
