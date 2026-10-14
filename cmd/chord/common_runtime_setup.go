@@ -160,11 +160,8 @@ func ensureRuntimeLSP(ac *AppContext) {
 	ac.Registry.Register(tools.DeleteTool{LSP: ac.LSPManager, BaseDir: ac.WorkDir})
 }
 
-// rebindLSPForWorkDir re-roots the session's language servers after a worktree
-// switch. Open clients are closed so diagnostics from the previous checkout are
-// not attributed to the new one, and later requests start servers rooted in
-// workDir. The error is returned to the caller, which surfaces it as a warning
-// without rolling the working directory back.
+// rebindLSPForWorkDir changes the default LSP directory after a worktree switch.
+// Existing clients and diagnostics remain associated with their own roots.
 func (ac *AppContext) rebindLSPForWorkDir(workDir string) error {
 	if ac == nil || ac.LSPManager == nil {
 		return nil

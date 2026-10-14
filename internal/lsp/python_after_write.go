@@ -83,7 +83,7 @@ func (m *Manager) afterWriteLSPToolResultWithWatchedNotification(ctx context.Con
 				return m.afterWritePythonQuickResult(ctx, absPath, content, pyCfg, selection, fallbackBase, ranges, changeType, false, displayBaseDir)
 			}
 		}
-		base = m.appendTimeoutNote(base, waitTimeout)
+		base = m.appendTimeoutNote(absPath, base, waitTimeout)
 	}
 
 	m.recordReviewSnapshot(absPath)

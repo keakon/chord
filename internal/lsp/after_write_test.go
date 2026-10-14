@@ -24,7 +24,7 @@ func formattedStartFailures(m *Manager, path string) []string {
 // contract: a start-failure note for a path must only name servers that handle
 // that path's file type, not every server configured under the same root.
 func TestStartFailuresForPathSkipsServersForOtherFileTypes(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: map[string]config.LSPServerConfig{
 			"gopls":      {FileTypes: []string{".go"}},
@@ -47,8 +47,8 @@ func TestStartFailuresForPathSkipsServersForOtherFileTypes(t *testing.T) {
 // with multiple roots for the same server, the start-failure note must reflect
 // the record for this path's root, not an arbitrary same-named server.
 func TestStartFailuresForPathUsesMatchingRootRecord(t *testing.T) {
-	root := t.TempDir()
-	otherRoot := t.TempDir()
+	root := resolvedTempDir(t)
+	otherRoot := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: map[string]config.LSPServerConfig{
 			"gopls": {FileTypes: []string{".go"}},
@@ -240,7 +240,7 @@ func TestAfterFileWriteToolResultNotifiesWatchedFileBeforeDidChange(t *testing.T
 }
 
 func TestAfterFileWriteToolResultSkipsDisabledMatchingServer(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"gopls": {
@@ -329,7 +329,7 @@ func TestAfterFileWriteToolResultStartsMatchingServerBeforeWaiting(t *testing.T)
 func newAfterWriteTestManager(t *testing.T) (*Manager, string, *Client) {
 	t.Helper()
 
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"gopls": {

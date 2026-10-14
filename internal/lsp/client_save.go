@@ -42,6 +42,7 @@ func (c *Client) saveOptions(path string) (protocol.SaveOptions, bool) {
 // registration; other servers are never notified. The document text is
 // included only when the server asked for it via SaveOptions.IncludeText.
 func (c *Client) NotifyDidSave(ctx context.Context, path string, content string) error {
+	path = normalizeWaiterPath(path)
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 	if c.closed {

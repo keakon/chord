@@ -20,6 +20,7 @@ func lspServerDisplayList(mgr *lsp.Manager, runtimeCtrl *runtimeResourceControll
 		idle := lspIdle && runtimeCtrl != nil && runtimeCtrl.WasLSPLoaded(row.Name) && !row.OK && row.Pending && row.Error == ""
 		out[i] = agent.LSPServerDisplay{
 			Name:     row.Name,
+			Root:     row.Root,
 			OK:       row.OK,
 			Pending:  row.Pending && !idle,
 			Idle:     idle,

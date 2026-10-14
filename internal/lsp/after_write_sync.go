@@ -106,13 +106,13 @@ func (m *Manager) settleAfterWriteSyncFailure(ctx context.Context, absPath strin
 	noted := make(map[string]struct{}, len(dead)+len(sync.serverErrors))
 	for _, name := range dead {
 		noted[name] = struct{}{}
-		base = appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationExited, name, "connection lost; retrying on the next file write"))
+		base = appendLSPDegradationNote(base, m.noteLSPDegradationForPath(absPath, lspDegradationExited, name, "connection lost; retrying on the next file write"))
 	}
 	for _, name := range slices.Sorted(maps.Keys(sync.serverErrors)) {
 		if _, already := noted[name]; already {
 			continue
 		}
-		base = appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationSync, name, "file synchronization failed"))
+		base = appendLSPDegradationNote(base, m.noteLSPDegradationForPath(absPath, lspDegradationSync, name, "file synchronization failed"))
 	}
 	return base, survived
 }

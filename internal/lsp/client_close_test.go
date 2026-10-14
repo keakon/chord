@@ -156,7 +156,7 @@ func TestClientInitializeRegistersHandlersBeforeInitializeAndSyncsWorkspaceConfi
 }
 
 func TestPrepareWorkspaceSettingsDiscoversPyrightUnixVirtualenv(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	pythonPath := filepath.Join(root, ".venv", "bin", "python")
 	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -172,7 +172,7 @@ func TestPrepareWorkspaceSettingsDiscoversPyrightUnixVirtualenv(t *testing.T) {
 }
 
 func TestPrepareWorkspaceSettingsDoesNotDiscoverWindowsVirtualenvOnUnix(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	pythonPath := filepath.Join(root, ".venv", "Scripts", "python.exe")
 	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -188,7 +188,7 @@ func TestPrepareWorkspaceSettingsDoesNotDiscoverWindowsVirtualenvOnUnix(t *testi
 }
 
 func TestPrepareWorkspaceSettingsDiscoversPyrightWindowsVirtualenv(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	pythonPath := filepath.Join(root, ".venv", "Scripts", "python.exe")
 	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -204,7 +204,7 @@ func TestPrepareWorkspaceSettingsDiscoversPyrightWindowsVirtualenv(t *testing.T)
 }
 
 func TestPrepareWorkspaceSettingsUsesDiscoveredPyrightVirtualenv(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	pythonPath := filepath.Join(root, ".venv", "bin", "python")
 	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -221,7 +221,7 @@ func TestPrepareWorkspaceSettingsUsesDiscoveredPyrightVirtualenv(t *testing.T) {
 }
 
 func TestPrepareWorkspaceSettingsKeepsExplicitInterpreter(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	pythonPath := filepath.Join(root, ".venv", "bin", "python")
 	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -238,7 +238,7 @@ func TestPrepareWorkspaceSettingsKeepsExplicitInterpreter(t *testing.T) {
 }
 
 func TestPrepareWorkspaceSettingsMakesExplicitRelativeInterpreterAbsolute(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	explicit := map[string]any{"python": map[string]any{"pythonPath": ".venv/bin/python"}}
 	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
 	want := map[string]any{"python": map[string]any{"pythonPath": filepath.Join(root, ".venv", "bin", "python")}}
@@ -248,7 +248,7 @@ func TestPrepareWorkspaceSettingsMakesExplicitRelativeInterpreterAbsolute(t *tes
 }
 
 func TestPrepareWorkspaceSettingsMakesExplicitRelativeVenvPathAbsolute(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	explicit := map[string]any{"python": map[string]any{"venvPath": ".venvs", "venv": "py311"}}
 	got := prepareWorkspaceSettingsBounded("pyright", config.LSPServerConfig{Command: "pyright-langserver", Options: explicit}, root, root)
 	want := map[string]any{"python": map[string]any{"venvPath": filepath.Join(root, ".venvs"), "venv": "py311"}}
@@ -262,7 +262,7 @@ func TestPrepareWorkspaceSettingsResolvesExplicitRelativeInterpreterAgainstConfi
 	// must not reinterpret an explicit relative interpreter path: the path is
 	// written against the config root, so it keeps pointing at the
 	// repository-level environment instead of a non-existent nested one.
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	nested := filepath.Join(root, "api")
 	for _, key := range []string{"pythonPath", "defaultInterpreterPath"} {
 		t.Run(key, func(t *testing.T) {
@@ -295,14 +295,14 @@ func TestCloneSettingsDeepCopiesSlices(t *testing.T) {
 
 func TestClientDidCloseClosesTrackedFileAndClearsVersion(t *testing.T) {
 	fake := &fakePowernapClient{}
-	c := &Client{client: fake, openFiles: map[string]int32{"/tmp/main.go": 2}}
+	c := &Client{client: fake, openFiles: map[string]int32{normalizeWaiterPath("/tmp/main.go"): 2}}
 	if err := c.DidClose(context.Background(), "/tmp/main.go"); err != nil {
 		t.Fatalf("DidClose() error = %v", err)
 	}
 	if len(fake.didCloseURIs) != 1 {
 		t.Fatalf("didClose count = %d, want 1", len(fake.didCloseURIs))
 	}
-	if _, ok := c.openFiles["/tmp/main.go"]; ok {
+	if _, ok := c.openFiles[normalizeWaiterPath("/tmp/main.go")]; ok {
 		t.Fatal("expected open file entry removed")
 	}
 }
@@ -320,7 +320,7 @@ func TestClientDidCloseNoOpWhenFileNotOpen(t *testing.T) {
 
 func TestManagerDidCloseErrClearsDiagnosticsAndNotifiesClients(t *testing.T) {
 	fake := &fakePowernapClient{}
-	path := "/tmp/main.go"
+	path := normalizeWaiterPath("/tmp/main.go")
 	client := &Client{
 		client:      fake,
 		cwd:         "/tmp",
@@ -359,7 +359,7 @@ func TestManagerDidCloseErrClearsDiagnosticsAndNotifiesClients(t *testing.T) {
 func TestClientDidOpenAlreadyOpenSendsDidChangeWithBumpedVersion(t *testing.T) {
 	fake := &fakePowernapClient{}
 	c := &Client{client: fake, openFiles: make(map[string]int32)}
-	path := "/tmp/a.go"
+	path := normalizeWaiterPath("/tmp/a.go")
 
 	v1, err := c.DidOpen(context.Background(), path, "one")
 	if err != nil {
@@ -390,7 +390,7 @@ func TestClientDidOpenAlreadyOpenSendsDidChangeWithBumpedVersion(t *testing.T) {
 func TestClientDidChangeUnopenedSendsDidOpenWithVersionOne(t *testing.T) {
 	fake := &fakePowernapClient{}
 	c := &Client{client: fake, openFiles: make(map[string]int32)}
-	path := "/tmp/a.go"
+	path := normalizeWaiterPath("/tmp/a.go")
 
 	v, err := c.DidChange(context.Background(), path, "one")
 	if err != nil {
@@ -451,7 +451,7 @@ func TestClientCloseKillsOnExitTimeout(t *testing.T) {
 }
 
 func TestDiscoverPythonInterpreterWalksUpToNearestEnvironment(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	child := filepath.Join(root, "api", "app")
 	if err := os.MkdirAll(child, 0o755); err != nil {
 		t.Fatal(err)
@@ -469,7 +469,7 @@ func TestDiscoverPythonInterpreterWalksUpToNearestEnvironment(t *testing.T) {
 }
 
 func TestDiscoverPythonInterpreterDoesNotCrossProjectRoot(t *testing.T) {
-	parent := t.TempDir()
+	parent := resolvedTempDir(t)
 	root := filepath.Join(parent, "project")
 	child := filepath.Join(root, "src")
 	if err := os.MkdirAll(child, 0o755); err != nil {
@@ -488,8 +488,8 @@ func TestDiscoverPythonInterpreterDoesNotCrossProjectRoot(t *testing.T) {
 }
 
 func TestDiscoverPythonInterpreterRejectsOutsideWorkspace(t *testing.T) {
-	root := t.TempDir()
-	outside := t.TempDir()
+	root := resolvedTempDir(t)
+	outside := resolvedTempDir(t)
 	pythonPath := filepath.Join(outside, ".venv", "bin", "python")
 	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -506,7 +506,7 @@ func TestDiscoverPythonInterpreterRejectsUnresolvablePaths(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("removing the working directory is unsupported on Windows")
 	}
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	pythonPath := filepath.Join(root, ".venv", "bin", "python")
 	if err := os.MkdirAll(filepath.Dir(pythonPath), 0o755); err != nil {
 		t.Fatal(err)
@@ -514,7 +514,7 @@ func TestDiscoverPythonInterpreterRejectsUnresolvablePaths(t *testing.T) {
 	if err := os.WriteFile(pythonPath, nil, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	workingDir := t.TempDir()
+	workingDir := resolvedTempDir(t)
 	t.Chdir(workingDir)
 	if err := os.Remove(workingDir); err != nil {
 		t.Fatal(err)
@@ -540,7 +540,7 @@ func TestDiscoverPythonInterpreterStopsAtCwdWithoutProjectRoot(t *testing.T) {
 	// workspace root: an environment in the workspace's parent (e.g. a
 	// home-level ~/.venv for a workspace that is not inside the home
 	// directory) would otherwise satisfy a workspace it does not contain.
-	parent := t.TempDir()
+	parent := resolvedTempDir(t)
 	workspace := filepath.Join(parent, "workspace")
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatal(err)
@@ -575,7 +575,7 @@ func TestDiscoverPythonInterpreterStopsAtCwdWithoutProjectRoot(t *testing.T) {
 // already drained. Stop must wait until every launch it observed settles, so
 // when it returns no client can appear later.
 func TestManagerStopWaitsForInFlightStart(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
@@ -631,7 +631,7 @@ func TestManagerStopWaitsForInFlightStart(t *testing.T) {
 // finished client (the caller closes it instead), while a launch on a live era
 // registers normally.
 func TestManagerStopPreventsInFlightStartFromRegistering(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
@@ -678,7 +678,7 @@ func TestManagerStopPreventsInFlightStartFromRegistering(t *testing.T) {
 // stopped manager would otherwise keep a misleading failure entry until the
 // next start of that server.
 func TestManagerStopSuppressesStartFailFromStoppedLaunch(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	key := clientKey{name: "typescript", root: root}
 	broadcastEvents := make(chan string, 8)
 	mgr := NewManager(&config.Config{
@@ -734,7 +734,7 @@ func TestManagerStopSuppressesStartFailFromStoppedLaunch(t *testing.T) {
 // and then requires the manager to settle with no registered client and no
 // lingering launch. Run under -race this exercises the era and launches bookkeeping.
 func TestManagerStopConcurrentWithStartSettles(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	path := filepath.Join(root, "main.ts")
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
@@ -780,7 +780,7 @@ func TestManagerStopConcurrentWithStartSettles(t *testing.T) {
 // an idle unload, not a terminal state — the manager must accept launches
 // afterwards, or language servers would never reload after an idle unload.
 func TestManagerStartAfterStopLaunchesAgain(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	path := filepath.Join(root, "main.ts")
 	key := clientKey{name: "typescript", root: root}
 	mgr := NewManager(&config.Config{

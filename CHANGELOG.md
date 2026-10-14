@@ -26,6 +26,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- File edits in other worktrees and repositories now receive LSP diagnostics using separate workspace instances. Switching directories preserves existing instances, and the sidebar identifies their workspace directories.
+
 - The **SKILLS** panel and the `/skill` selector mark skill state with icons instead of text suffixes: `○` idle, `◎` path-matched or notified, `●` loaded, `↻` reload after compaction, `◌` manual-only, and `⊘` denied. Green marks a live body, amber one that needs reloading.
 
 - The info panel's **LSP**, **MCP**, and **SKILLS** sections now default to folded and only stay open when they hold something loaded: at least one language server that finished loading, at least one connected MCP server, or at least one skill whose body is in context. Previously any configured entry expanded the section, so a session that had not connected or loaded anything yet opened with those blocks taking up the panel. **TODOS**, **CHANGED FILES**, **AGENTS**, and **JOBS** still expand as soon as their content exists, **GIT** stays folded, and a section the user toggled keeps that state either way.

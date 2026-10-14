@@ -393,7 +393,7 @@ func (m *Model) buildInfoPanelLSPBlock(lineW int) string {
 			labelStyle = mcpErrLabelStyle
 		}
 		contentWidth := max(lineW-infoPanelCollapsibleContentInset-2, 1)
-		label := row.Name
+		label := lspWorkspaceLabel(row, lspRows)
 		diagSuffix := ""
 		if row.OK {
 			diagSuffix = formatLSPServerDiagSuffix(row.Errors, row.Warnings)

@@ -165,6 +165,8 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 		for _, r := range lp.LSPServerList() {
 			b.WriteByte('L')
 			b.WriteString(r.Name)
+			appendSep()
+			b.WriteString(r.Root)
 			appendBool(r.OK)
 			appendBool(r.Pending)
 			appendInt(r.Errors)

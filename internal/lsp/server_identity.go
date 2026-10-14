@@ -25,6 +25,9 @@ func effectiveRootMarkers(name string, cfg config.LSPServerConfig) []string {
 	if len(cfg.RootMarkers) > 0 {
 		return cfg.RootMarkers
 	}
+	if matchesServerIdentity(name, cfg.Command, "gopls") {
+		return []string{"go.work", "go.mod"}
+	}
 	if isPyrightServer(name, cfg) {
 		return []string{"pyrightconfig.json", "pyproject.toml", "requirements.txt"}
 	}

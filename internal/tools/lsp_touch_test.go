@@ -16,7 +16,7 @@ import (
 )
 
 func TestWriteToolMarksTouchedFile(t *testing.T) {
-	dir := t.TempDir()
+	dir := lspTestDirectory(t)
 	path := filepath.Join(dir, "new.txt")
 	mgr := lsp.NewManager(&config.Config{}, dir, nil)
 	args, err := json.Marshal(map[string]any{"path": path, "content": "hello\n"})
@@ -33,7 +33,7 @@ func TestWriteToolMarksTouchedFile(t *testing.T) {
 }
 
 func TestApplyPatchToolMarksTouchedFileWithBaseDir(t *testing.T) {
-	dir := t.TempDir()
+	dir := lspTestDirectory(t)
 	path := filepath.Join(dir, "patched.txt")
 	if _, err := (WriteTool{}).Execute(context.Background(), mustJSON(t, map[string]any{"path": path, "content": "before\n"})); err != nil {
 		t.Fatalf("seed WriteTool.Execute: %v", err)
@@ -53,7 +53,7 @@ func TestApplyPatchToolMarksTouchedFileWithBaseDir(t *testing.T) {
 }
 
 func TestApplyPatchPartialFailureMarksOnlyCommittedFiles(t *testing.T) {
-	dir := t.TempDir()
+	dir := lspTestDirectory(t)
 	committed := filepath.Join(dir, "committed.txt")
 	if err := os.WriteFile(committed, []byte("before\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestApplyPatchPartialFailureMarksOnlyCommittedFiles(t *testing.T) {
 }
 
 func TestApplyPatchToolCleansDeletedAndMovedLSPPaths(t *testing.T) {
-	dir := t.TempDir()
+	dir := lspTestDirectory(t)
 	oldPath := filepath.Join(dir, "old.go")
 	deletePath := filepath.Join(dir, "delete.go")
 	if err := os.WriteFile(oldPath, []byte("package old\n"), 0o644); err != nil {
@@ -157,7 +157,7 @@ func TestWriteToolAppendsPyrightDiagnosticsForSyntaxError(t *testing.T) {
 }
 
 func TestDeleteToolUnmarksTouchedFileWhenAlreadyAbsent(t *testing.T) {
-	dir := t.TempDir()
+	dir := lspTestDirectory(t)
 	path := filepath.Join(dir, "absent.txt")
 	mgr := lsp.NewManager(&config.Config{}, dir, nil)
 	mgr.MarkTouched(path)
@@ -205,7 +205,7 @@ func repoRootForTest(t *testing.T) string {
 // A degradation line is reported once per session, so apply_patch must carry
 // the one its writes produced instead of keeping only the diagnostic lines.
 func TestApplyPatchToolKeepsLSPDegradationNote(t *testing.T) {
-	dir := t.TempDir()
+	dir := lspTestDirectory(t)
 	for _, name := range []string{"a.go", "b.go"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("package sample\n"), 0o644); err != nil {
 			t.Fatal(err)
@@ -228,4 +228,13 @@ func TestApplyPatchToolKeepsLSPDegradationNote(t *testing.T) {
 	if len(notes) != 1 || !strings.Contains(notes[0], "sample-lsp") {
 		t.Fatalf("apply_patch result = %q, want exactly one degradation note naming sample-lsp", out)
 	}
+}
+
+func lspTestDirectory(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }

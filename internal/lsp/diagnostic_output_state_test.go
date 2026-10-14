@@ -16,7 +16,7 @@ import (
 
 func newDiagnosticOutputTestManager(t *testing.T) (*Manager, string, string, clientKey, protocol.DocumentURI, *Client) {
 	t.Helper()
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
 		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 	}}, root, nil)
@@ -27,7 +27,7 @@ func newDiagnosticOutputTestManager(t *testing.T) (*Manager, string, string, cli
 	}
 	key := testKey(mgr, "gopls")
 	uri := protocol.DocumentURI("file://" + filepath.ToSlash(other))
-	client := &Client{diagnostics: make(map[protocol.DocumentURI][]protocol.Diagnostic)}
+	client := &Client{cwd: mgr.projectRootPath(), diagnostics: make(map[protocol.DocumentURI][]protocol.Diagnostic)}
 	mgr.clients[key] = client
 	return mgr, edited, other, key, uri, client
 }
@@ -36,7 +36,7 @@ func publishTestDiagnostics(mgr *Manager, key clientKey, uri protocol.DocumentUR
 	client.diagnosticsMu.Lock()
 	client.diagnostics[uri] = append([]protocol.Diagnostic(nil), diags...)
 	client.diagnosticsMu.Unlock()
-	mgr.onDiagnostics(key)(string(uri), "", diags, version)
+	mgr.onDiagnostics(key, nil)(string(uri), "", diags, version)
 }
 
 func testProtocolDiagnostic(message string, line uint32) protocol.Diagnostic {
@@ -86,7 +86,7 @@ func TestResolvedDiagnosticCanReappearWhileAnotherRemains(t *testing.T) {
 func TestCleanPublishFromOneServerDoesNotClearAnotherServer(t *testing.T) {
 	mgr, edited, _, goplsKey, uri, client := newDiagnosticOutputTestManager(t)
 	otherKey := testKey(mgr, "sample-lsp")
-	otherClient := &Client{diagnostics: make(map[protocol.DocumentURI][]protocol.Diagnostic)}
+	otherClient := &Client{cwd: mgr.projectRootPath(), diagnostics: make(map[protocol.DocumentURI][]protocol.Diagnostic)}
 	mgr.clients[otherKey] = otherClient
 	goplsDiag := testProtocolDiagnostic("gopls error", 0)
 	otherDiag := testProtocolDiagnostic("other error", 1)

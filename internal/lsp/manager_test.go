@@ -50,7 +50,7 @@ func TestRelPathEscapesDir(t *testing.T) {
 }
 
 func TestClientHandlesFileAllowsDotDotPrefixWithinRoot(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	path := filepath.Join(root, "..foo.go")
 	client := &Client{cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
 	if !client.HandlesFile(path) {
@@ -59,7 +59,7 @@ func TestClientHandlesFileAllowsDotDotPrefixWithinRoot(t *testing.T) {
 }
 
 func TestClientHandlesFileRejectsOutsideRoot(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	path := filepath.Join(filepath.Dir(root), "outside.go")
 	client := &Client{cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
 	if client.HandlesFile(path) {
@@ -68,7 +68,7 @@ func TestClientHandlesFileRejectsOutsideRoot(t *testing.T) {
 }
 
 func TestNotifyWatchedFileChangedRoutesByFileTypeAcrossLanguages(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, root, nil)
 	goFake := &fakePowernapClient{}
 	tsFake := &fakePowernapClient{}
@@ -99,7 +99,7 @@ func TestNotifyWatchedFileChangedRoutesByFileTypeAcrossLanguages(t *testing.T) {
 }
 
 func TestNotifyWatchedFileChangedSendsDeletedEvent(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, root, nil)
 	fake := &fakePowernapClient{}
 	mgr.clients[testKey(mgr, "rust-analyzer")] = &Client{client: fake, cwd: root, cfg: config.LSPServerConfig{FileTypes: []string{".rs"}}}
@@ -117,7 +117,7 @@ func TestNotifyWatchedFileChangedSendsDeletedEvent(t *testing.T) {
 }
 
 func TestAwaitFreshWaiterIgnoresStaleVersionAndSettlesOnFresh(t *testing.T) {
-	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	mgr := NewManager(&config.Config{}, resolvedTempDir(t), nil)
 	path := filepath.Join(mgr.projectRootPath(), "main.go")
 	ch := mgr.PrepareWaiter(path)
 
@@ -150,7 +150,7 @@ func TestAwaitFreshWaiterIgnoresStaleVersionAndSettlesOnFresh(t *testing.T) {
 }
 
 func TestAwaitFreshWaiterUsesLatestEventDuringSettleWindow(t *testing.T) {
-	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	mgr := NewManager(&config.Config{}, resolvedTempDir(t), nil)
 	path := filepath.Join(mgr.projectRootPath(), "main.go")
 	ch := mgr.PrepareWaiter(path)
 
@@ -173,7 +173,7 @@ func TestAwaitFreshWaiterUsesLatestEventDuringSettleWindow(t *testing.T) {
 }
 
 func TestWaitForClientForPathWaitsForAsyncStartup(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"gopls": {
@@ -210,7 +210,7 @@ func TestWaitForClientForPathWaitsForAsyncStartup(t *testing.T) {
 }
 
 func TestWaitForClientForPathReturnsImmediatelyWhenMatchingServerDisabled(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"gopls": {
@@ -236,7 +236,7 @@ func TestWaitForClientForPathReturnsImmediatelyWhenMatchingServerDisabled(t *tes
 }
 
 func TestWaitForClientForPathReturnsWhenStartupSettles(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"gopls": {
@@ -269,7 +269,7 @@ func TestWaitForClientForPathReturnsWhenStartupSettles(t *testing.T) {
 }
 
 func TestWaitForClientForPathWaitsForNearestRootLaunchOverRunningAncestor(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	frontend := filepath.Join(root, "frontend")
 	if err := os.MkdirAll(filepath.Join(frontend, "src"), 0o755); err != nil {
 		t.Fatal(err)
@@ -327,16 +327,16 @@ func TestSidebarEntriesIncludePerServerReviewedSnapshotsForTouchedFiles(t *testi
 				FileTypes: []string{".py"},
 			},
 		},
-	}, t.TempDir(), nil)
+	}, resolvedTempDir(t), nil)
 	mgr.clients[testKey(mgr, "gopls")] = &Client{}
 	mgr.reviewByServer = map[string]map[string]reviewCounts{
 		"gopls": {
-			normalizeWaiterPath("/a.go"):         {errors: 1, warnings: 2},
-			normalizeWaiterPath("/untouched.go"): {errors: 99, warnings: 99},
+			filepath.Join(mgr.projectRootPath(), "a.go"):         {errors: 1, warnings: 2},
+			filepath.Join(mgr.projectRootPath(), "untouched.go"): {errors: 99, warnings: 99},
 		},
 	}
 	mgr.touchedPaths = map[string]struct{}{
-		normalizeWaiterPath("/a.go"): {},
+		filepath.Join(mgr.projectRootPath(), "a.go"): {},
 	}
 
 	rows := mgr.SidebarEntries()
@@ -388,7 +388,7 @@ func TestRecordReviewSnapshotClearsStaleDiagnosticsForCleanTouchedFile(t *testin
 				FileTypes: []string{".go"},
 			},
 		},
-	}, t.TempDir(), nil)
+	}, resolvedTempDir(t), nil)
 	path := normalizeWaiterPath(filepath.Join(mgr.projectRootPath(), "a.go"))
 	mgr.clients[testKey(mgr, "gopls")] = &Client{}
 	mgr.reviewByServer = map[string]map[string]reviewCounts{
@@ -423,7 +423,7 @@ func TestPublishedDiagnosticsRefreshExistingReviewedSnapshot(t *testing.T) {
 				FileTypes: []string{".go"},
 			},
 		},
-	}, t.TempDir(), nil)
+	}, resolvedTempDir(t), nil)
 	path := normalizeWaiterPath("/a.go")
 	reviewedAt := time.Now().Add(-time.Minute)
 	mgr.clients[testKey(mgr, "gopls")] = &Client{}
@@ -433,7 +433,7 @@ func TestPublishedDiagnosticsRefreshExistingReviewedSnapshot(t *testing.T) {
 		},
 	}
 	mgr.touchedPaths = map[string]struct{}{path: {}}
-	publish := mgr.onDiagnostics(testKey(nil, "gopls"))
+	publish := mgr.onDiagnostics(testKey(nil, "gopls"), nil)
 
 	publish("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityWarning, Message: "warning"}}, 1)
 	got := mgr.reviewByServer["gopls"][path]
@@ -464,7 +464,7 @@ func TestSidebarEntriesTruncateLongErrorOnRuneBoundary(t *testing.T) {
 		LSP: config.LSPConfig{
 			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 		},
-	}, t.TempDir(), nil)
+	}, resolvedTempDir(t), nil)
 
 	// 116 ASCII bytes put the 117-byte budget one byte into "界" (3 bytes).
 	head := strings.Repeat("x", 116)
@@ -492,12 +492,12 @@ func TestPublishedDiagnosticsDoNotAdmitUnreviewedPathToSidebar(t *testing.T) {
 				FileTypes: []string{".go"},
 			},
 		},
-	}, t.TempDir(), nil)
+	}, resolvedTempDir(t), nil)
 	path := normalizeWaiterPath("/a.go")
 	mgr.clients[testKey(mgr, "gopls")] = &Client{}
 	mgr.touchedPaths = map[string]struct{}{path: {}}
 
-	mgr.onDiagnostics(testKey(nil, "gopls"))("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "existing project error"}}, 1)
+	mgr.onDiagnostics(testKey(nil, "gopls"), nil)("file:///a.go", "", []protocol.Diagnostic{{Severity: protocol.SeverityError, Message: "existing project error"}}, 1)
 
 	if byPath := mgr.reviewByServer["gopls"]; len(byPath) != 0 {
 		t.Fatalf("unreviewed publish created sidebar snapshots: %+v", byPath)
@@ -516,7 +516,7 @@ func TestCurrentReviewSnapshotsIncludesCleanConnectedServer(t *testing.T) {
 				FileTypes: []string{".go"},
 			},
 		},
-	}, t.TempDir(), nil)
+	}, resolvedTempDir(t), nil)
 	path := filepath.Join(mgr.projectRootPath(), "a.go")
 	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRootPath(), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
 
@@ -532,7 +532,7 @@ func TestRecordReviewSnapshotIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T) {
 		LSP: config.LSPConfig{
 			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 		},
-	}, t.TempDir(), nil)
+	}, resolvedTempDir(t), nil)
 	path := normalizeWaiterPath(filepath.Join(mgr.projectRootPath(), "nested", "a.go"))
 	mgr.clients[clientKey{name: "gopls", root: mgr.projectRootPath()}] = &Client{cwd: mgr.projectRootPath(), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
 	mgr.clients[clientKey{name: "gopls", root: filepath.Join(mgr.projectRootPath(), "nested")}] = &Client{cwd: filepath.Join(mgr.projectRootPath(), "nested"), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}}
@@ -553,7 +553,7 @@ func TestAllDiagnosticsByAbsPathIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T)
 		LSP: config.LSPConfig{
 			"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 		},
-	}, t.TempDir(), nil)
+	}, resolvedTempDir(t), nil)
 	path := normalizeWaiterPath(filepath.Join(mgr.projectRootPath(), "nested", "a.go"))
 	outer := &Client{cwd: mgr.projectRootPath(), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
 	inner := &Client{cwd: filepath.Join(mgr.projectRootPath(), "nested"), cfg: config.LSPServerConfig{FileTypes: []string{".go"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
@@ -570,7 +570,7 @@ func TestAllDiagnosticsByAbsPathIgnoresDiagnosticsFromNonOwnerRoot(t *testing.T)
 }
 
 func TestAllDiagnosticsByAbsPathKeepsDistinctServerDiagnosticsPerPath(t *testing.T) {
-	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	mgr := NewManager(&config.Config{}, resolvedTempDir(t), nil)
 	path := normalizeWaiterPath(filepath.Join(mgr.projectRootPath(), "pkg", "a.py"))
 	outer := &Client{cwd: mgr.projectRootPath(), cfg: config.LSPServerConfig{FileTypes: []string{".py"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
 	inner := &Client{cwd: filepath.Join(mgr.projectRootPath(), "pkg"), cfg: config.LSPServerConfig{FileTypes: []string{".py"}}, diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{}}
@@ -594,7 +594,7 @@ func TestAllDiagnosticsByAbsPathKeepsDistinctServerDiagnosticsPerPath(t *testing
 }
 
 func TestRebuildTouchedPathsNormalizesAndSorts(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, root, nil)
 	mgr.RebuildTouchedPaths([]string{"bar.go", filepath.Join(root, "foo.go")})
 	got := mgr.TouchedPaths()
@@ -615,7 +615,7 @@ func TestRebuildTouchedPathsNormalizesAndSorts(t *testing.T) {
 // an inverted nested order would deadlock. Regression guard for DidCloseErr
 // taking diagMu while still holding clientsMu.
 func TestConcurrentDiagnosticsAndCloseDoNotDeadlock(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"gopls": {Command: "gopls", FileTypes: []string{".go"}},

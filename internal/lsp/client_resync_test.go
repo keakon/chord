@@ -33,7 +33,7 @@ func newResyncTestClient(fake *fakePowernapClient) *Client {
 func TestClientResyncFileIfChangedSendsOnlyChangedContent(t *testing.T) {
 	fake := &fakePowernapClient{}
 	c := newResyncTestClient(fake)
-	path := "/tmp/main.go"
+	path := normalizeWaiterPath("/tmp/main.go")
 	ctx := context.Background()
 
 	if _, err := c.DidOpen(ctx, path, "one\n"); err != nil {
@@ -74,7 +74,7 @@ func TestClientResyncFileIfChangedSendsOnlyChangedContent(t *testing.T) {
 func TestClientResyncFileIfChangedSkipsUnopenedAndClosedClients(t *testing.T) {
 	fake := &fakePowernapClient{}
 	c := newResyncTestClient(fake)
-	path := "/tmp/main.go"
+	path := normalizeWaiterPath("/tmp/main.go")
 
 	if sent, err := c.ResyncFileIfChanged(context.Background(), path, "one"); err != nil || sent {
 		t.Fatalf("unopened resync = (%v, %v), want (false, nil)", sent, err)
@@ -90,7 +90,7 @@ func TestClientResyncFileIfChangedSkipsUnopenedAndClosedClients(t *testing.T) {
 
 func TestClientResyncFileIfChangedSendsWhenDigestUnknown(t *testing.T) {
 	fake := &fakePowernapClient{}
-	path := "/tmp/main.go"
+	path := normalizeWaiterPath("/tmp/main.go")
 	c := &Client{
 		client:       fake,
 		name:         "gopls",
@@ -110,7 +110,7 @@ func TestClientResyncFileIfChangedSendsWhenDigestUnknown(t *testing.T) {
 func TestClientDidCloseAndCloseAllFilesClearSyncedDigest(t *testing.T) {
 	fake := &fakePowernapClient{}
 	c := newResyncTestClient(fake)
-	path := "/tmp/main.go"
+	path := normalizeWaiterPath("/tmp/main.go")
 
 	if _, err := c.DidOpen(context.Background(), path, "one"); err != nil {
 		t.Fatalf("DidOpen() error = %v", err)
@@ -135,7 +135,7 @@ func TestClientDidCloseAndCloseAllFilesClearSyncedDigest(t *testing.T) {
 }
 
 func TestManagerResyncFileRoutesOnlyToOwningOpenClients(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	goPath := filepath.Join(root, "main.go")
 	tsPath := filepath.Join(root, "app.ts")
 	otherGoPath := filepath.Join(root, "other.go")
@@ -181,7 +181,7 @@ func TestManagerResyncFileRoutesOnlyToOwningOpenClients(t *testing.T) {
 // Reading must never launch a server: ResyncFile only talks to clients that are
 // already running, so a configured server with no instance stays unstarted.
 func TestManagerResyncFileNeverStartsServers(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	path := filepath.Join(root, "main.go")
 	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
 		"gopls": {Command: "gopls", FileTypes: []string{".go"}},

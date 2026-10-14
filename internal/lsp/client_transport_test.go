@@ -102,7 +102,7 @@ func TestClientNotificationErrorsDistinguishTransportFailure(t *testing.T) {
 			t.Run(name+"/"+tc.name, func(t *testing.T) {
 				fake := &fakePowernapClient{saveOptions: &protocol.SaveOptions{}}
 				c := newResyncTestClient(fake)
-				c.openFiles["/tmp/main.go"] = 1
+				c.openFiles[normalizeWaiterPath("/tmp/main.go")] = 1
 				c.client = &failingNotificationClient{fakePowernapClient: fake, notify: func(context.Context) error { return tc.err }}
 				if err := op(c); !errors.Is(err, tc.err) {
 					t.Fatalf("error = %v, want %v", err, tc.err)
@@ -202,7 +202,7 @@ func TestIsTransportFailureRecognizesStdioPipeErrors(t *testing.T) {
 // server name.
 func newAfterWriteServerPair(t *testing.T, goplsNotify, sampleNotify func(context.Context) error) (*Manager, string, map[string]*Client, map[string]*fakePowernapClient) {
 	t.Helper()
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"gopls":     {Command: "gopls", FileTypes: []string{".go"}},
@@ -410,7 +410,7 @@ func TestWaitForServerReadyReturnsTimeoutOutcomeAfterTransportFailure(t *testing
 // generic path: no wait, the disconnected instance reclaimed, no stale
 // diagnostics, and the next write restarting the server.
 func TestPythonSemanticDisconnectSkipsWaitAndRecoversNextOperation(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	srvCfg := config.LSPServerConfig{Command: "pyright-langserver", FileTypes: []string{".py"}}
 	mgr := NewManager(&config.Config{LSP: config.LSPConfig{"pyright": srvCfg}}, root, nil)
 	path := filepath.Join(root, "main.py")

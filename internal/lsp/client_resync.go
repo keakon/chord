@@ -11,6 +11,7 @@ import (
 // runs on the success path of every full-document notification, so a later
 // resync can tell an unchanged document from an externally modified one.
 func (c *Client) recordSyncedContent(path, content string) {
+	path = normalizeWaiterPath(path)
 	sum := sha256.Sum256([]byte(content))
 	c.openFilesMu.Lock()
 	if c.syncedDigest == nil {
@@ -27,6 +28,7 @@ func (c *Client) recordSyncedContent(path, content string) {
 // Chord's own write paths. The bool reports whether a notification was sent;
 // an unchanged document is a silent no-op.
 func (c *Client) ResyncFileIfChanged(ctx context.Context, path, content string) (bool, error) {
+	path = normalizeWaiterPath(path)
 	if c == nil || c.client == nil {
 		return false, nil
 	}

@@ -107,7 +107,7 @@ func newClient(ctx context.Context, name string, cfg config.LSPServerConfig, cwd
 	cfg.Options = prepareWorkspaceSettingsBounded(name, cfg, cwd, projectRoot)
 	c := &Client{
 		name:         name,
-		cwd:          cwd,
+		cwd:          normalizeWaiterPath(cwd),
 		cfg:          cfg,
 		debug:        debug,
 		openFiles:    make(map[string]int32),
@@ -527,7 +527,7 @@ func (c *Client) HandlesFile(path string) bool {
 	if err != nil {
 		return false
 	}
-	rel, err := filepath.Rel(c.cwd, abs)
+	rel, err := filepath.Rel(normalizeWaiterPath(c.cwd), normalizeWaiterPath(abs))
 	if err != nil || relPathEscapesDir(rel) {
 		return false
 	}
@@ -536,14 +536,14 @@ func (c *Client) HandlesFile(path string) bool {
 
 // pathToURI returns file URI for the given path.
 func (c *Client) pathToURI(path string) string {
-	abs, _ := filepath.Abs(path)
-	return string(protocol.URIFromPath(abs))
+	return string(protocol.URIFromPath(normalizeWaiterPath(path)))
 }
 
 // DidOpen sends didOpen for the file; if already open, sends didChange instead.
 // Version is maintained by client. The returned version is the document version
 // used for the LSP notification.
 func (c *Client) DidOpen(ctx context.Context, path string, content string) (int32, error) {
+	path = normalizeWaiterPath(path)
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 	if c.closed {
@@ -579,6 +579,7 @@ func (c *Client) DidOpen(ctx context.Context, path string, content string) (int3
 // DidChange sends didChange for the file. The returned version is the document
 // version used for the LSP notification.
 func (c *Client) DidChange(ctx context.Context, path string, content string) (int32, error) {
+	path = normalizeWaiterPath(path)
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 	if c.closed {
@@ -627,6 +628,7 @@ func (c *Client) NotifyWatchedFileChange(ctx context.Context, path string, chang
 
 // DidClose sends didClose for the file if it is open, then forgets the local open-file version.
 func (c *Client) DidClose(ctx context.Context, path string) error {
+	path = normalizeWaiterPath(path)
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
 	if c.closed {

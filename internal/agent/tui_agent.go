@@ -351,6 +351,7 @@ type FocusedSkillInvocationStateProvider interface {
 
 // LSPServerDisplay is one row in the ENVIRONMENT / LSP sidebar block.
 type LSPServerDisplay struct {
+	Root     string
 	Name     string
 	OK       bool
 	Pending  bool // not connected yet (lazy start)

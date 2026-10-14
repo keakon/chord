@@ -12,29 +12,29 @@ import (
 )
 
 func TestNoteLSPDegradationDedupesPerServerKindAndResets(t *testing.T) {
-	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	mgr := NewManager(&config.Config{}, resolvedTempDir(t), nil)
 
-	first := mgr.noteLSPDegradation(lspDegradationStart, "gopls", "not started")
+	first := mgr.noteLSPDegradationForPath("", lspDegradationStart, "gopls", "not started")
 	if !strings.Contains(first, "gopls") || !strings.Contains(first, "do not treat this edit as verified") {
 		t.Fatalf("first note = %q", first)
 	}
-	if again := mgr.noteLSPDegradation(lspDegradationStart, "gopls", "init timeout"); again != "" {
+	if again := mgr.noteLSPDegradationForPath("", lspDegradationStart, "gopls", "init timeout"); again != "" {
 		t.Fatalf("repeat note = %q, want empty", again)
 	}
-	if other := mgr.noteLSPDegradation(lspDegradationTimeout, "gopls", ""); other == "" {
+	if other := mgr.noteLSPDegradationForPath("", lspDegradationTimeout, "gopls", ""); other == "" {
 		t.Fatal("a timeout is a different kind and must not be deduped into the start failure")
 	}
-	if otherServer := mgr.noteLSPDegradation(lspDegradationStart, "pyright", ""); otherServer == "" {
+	if otherServer := mgr.noteLSPDegradationForPath("", lspDegradationStart, "pyright", ""); otherServer == "" {
 		t.Fatal("notes must not be deduped across servers")
 	}
 
 	mgr.ResetReportedDiagnostics()
-	if got := mgr.noteLSPDegradation(lspDegradationStart, "gopls", ""); got == "" {
+	if got := mgr.noteLSPDegradationForPath("", lspDegradationStart, "gopls", ""); got == "" {
 		t.Fatal("ResetReportedDiagnostics should clear the degradation notes")
 	}
 
 	mgr.RestoreReportedDiagnostics(nil)
-	if got := mgr.noteLSPDegradation(lspDegradationStart, "gopls", ""); got == "" {
+	if got := mgr.noteLSPDegradationForPath("", lspDegradationStart, "gopls", ""); got == "" {
 		t.Fatal("RestoreReportedDiagnostics should clear the degradation notes")
 	}
 }

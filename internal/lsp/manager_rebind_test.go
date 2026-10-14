@@ -9,60 +9,26 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keakon/x/powernap/pkg/lsp/protocol"
-
 	"github.com/keakon/chord/internal/config"
 )
 
-// TestRebindToProjectRootDropsPreviousCheckoutDiagnostics pins the invariant
-// behind RebindToProjectRoot: once the working directory moves to another
-// checkout, nothing recorded for the old one may survive. The sidebar aggregate
-// and the review snapshots are keyed by server name and path, so a surviving
-// entry would present the previous checkout's diagnostics as the new
-// checkout's.
-func TestRebindToProjectRootDropsPreviousCheckoutDiagnostics(t *testing.T) {
-	previous := t.TempDir()
-	next := t.TempDir()
+func TestRebindToProjectRootPreservesReviews(t *testing.T) {
+	previous, next := resolvedTempDir(t), resolvedTempDir(t)
 	path := filepath.Join(previous, "main.go")
-	tracked := normalizeWaiterPath(path)
-	identity := diagnosticIdentity{severity: 1, line: 2, message: "boom"}
-
 	mgr := NewManager(&config.Config{}, previous, nil)
-	mgr.diagByServer[clientKey{name: "gopls", root: previous}] = map[string]diagCounts{
-		string(protocol.URIFromPath(path)): {errors: 2},
-	}
-	mgr.publishedDiagByServer[clientKey{name: "gopls", root: previous}] = map[string]map[diagnosticIdentity]struct{}{
-		tracked: {identity: {}},
-	}
-	mgr.reviewByServer["gopls"] = map[string]reviewCounts{tracked: {errors: 2}}
-	mgr.diagState[tracked] = diagnosticPathState{stale: true}
-	mgr.reportedByPath[tracked] = map[diagnosticIdentity]struct{}{identity: {}}
+	mgr.reviewByServer["gopls"] = map[string]reviewCounts{path: {errors: 2}}
 	mgr.MarkTouched(path)
-
 	if err := mgr.RebindToProjectRoot(context.Background(), next); err != nil {
-		t.Fatalf("RebindToProjectRoot() error = %v", err)
+		t.Fatal(err)
 	}
-
-	if got := mgr.TouchedPaths(); len(got) != 0 {
-		t.Fatalf("TouchedPaths() = %v, want empty after the checkout switched", got)
+	if got := mgr.TouchedPaths(); len(got) != 1 || got[0] != path {
+		t.Fatalf("touched paths = %v", got)
 	}
-	if got := mgr.ReviewedPaths(); len(got) != 0 {
-		t.Fatalf("ReviewedPaths() = %v, want empty after the checkout switched", got)
+	if mgr.reviewByServer["gopls"][path].errors != 2 {
+		t.Fatal("review was cleared")
 	}
-	if got := mgr.CurrentReviewSnapshots(path); len(got) != 0 {
-		t.Fatalf("CurrentReviewSnapshots(previous checkout) = %v, want none", got)
-	}
-	if got := mgr.diagByServer; len(got) != 0 {
-		t.Fatalf("diagByServer = %v, want empty after the checkout switched", got)
-	}
-	if got := mgr.publishedDiagByServer; len(got) != 0 {
-		t.Fatalf("publishedDiagByServer = %v, want empty after the checkout switched", got)
-	}
-	if got := mgr.diagState; len(got) != 0 {
-		t.Fatalf("diagState = %v, want empty after the checkout switched", got)
-	}
-	if got := mgr.reportedByPath; len(got) != 0 {
-		t.Fatalf("reportedByPath = %v, want empty after the checkout switched", got)
+	if got := mgr.CurrentReviewSnapshots(path); len(got) != 1 {
+		t.Fatalf("reviews = %v", got)
 	}
 }
 
@@ -90,7 +56,7 @@ func TestRebindToProjectRootKeepsStateForUnchangedRoot(t *testing.T) {
 
 // TestRebindToProjectRootRerootsRealGopls drives the switch against a real
 // language server: after the working directory moves, the new checkout gets
-// diagnostics and the previous one is no longer served. gopls is optional, so
+// diagnostics and the previous one remains served. gopls is optional, so
 // the test skips when it is not installed.
 func TestRebindToProjectRootRerootsRealGopls(t *testing.T) {
 	gopls, err := exec.LookPath("gopls")
@@ -137,29 +103,28 @@ func TestRebindToProjectRootRerootsRealGopls(t *testing.T) {
 		t.Fatalf("RebindToProjectRoot() error = %v", rebindErr)
 	}
 	if rebindElapsed >= rebindBudget/2 {
-		t.Fatalf("RebindToProjectRoot() took %v of a %v budget, want it to close the old checkout's servers promptly", rebindElapsed, rebindBudget)
+		t.Fatalf("RebindToProjectRoot() took %v of a %v budget, want a switch without restarting servers", rebindElapsed, rebindBudget)
 	}
-	if mgr.HasServerForPath(previousFile) {
-		t.Fatalf("HasServerForPath(%s) = true after the checkout switched", previousFile)
+	if !mgr.HasServerForPath(previousFile) {
+		t.Fatalf("HasServerForPath(%s) = false after the checkout switched", previousFile)
 	}
-	if diags := mgr.Diagnostics(previousFile); len(diags) != 0 {
-		t.Fatalf("Diagnostics(%s) = %v, want none after the checkout switched", previousFile, diags)
+	if diags := mgr.Diagnostics(previousFile); !hasDiagnosticMessage(diags, "missingSymbolInPreviousCheckout") {
+		t.Fatalf("Diagnostics(%s) = %v, want the original checkout diagnostic", previousFile, diags)
 	}
 
 	mgr.MarkTouched(nextFile)
 	if diags := collectDiagnostics(t, secondCtx, mgr, nextFile); !hasDiagnosticMessage(diags, "missingSymbolInNextCheckout") {
 		t.Fatalf("diagnostics for %s = %v, want the undefined symbol", nextFile, diags)
 	}
-	// The sidebar aggregate and the review snapshots must describe the current
-	// checkout only.
-	if got := mgr.TouchedPaths(); len(got) != 1 || got[0] != normalizeWaiterPath(nextFile) {
-		t.Fatalf("TouchedPaths() = %v, want only the new checkout's file", got)
+	// Each checkout retains its independent review snapshot.
+	if got := mgr.TouchedPaths(); len(got) != 2 {
+		t.Fatalf("TouchedPaths() = %v, want both checkout files", got)
 	}
-	if got := mgr.ReviewedPaths(); len(got) != 1 || got[0] != normalizeWaiterPath(nextFile) {
-		t.Fatalf("ReviewedPaths() = %v, want only the new checkout's file", got)
+	if got := mgr.ReviewedPaths(); len(got) != 2 {
+		t.Fatalf("ReviewedPaths() = %v, want both checkout files", got)
 	}
-	if got := mgr.CurrentReviewSnapshots(previousFile); len(got) != 0 {
-		t.Fatalf("CurrentReviewSnapshots(previous checkout) = %v, want none", got)
+	if got := mgr.CurrentReviewSnapshots(previousFile); len(got) != 1 {
+		t.Fatalf("CurrentReviewSnapshots(previous checkout) = %v, want the original review", got)
 	}
 }
 

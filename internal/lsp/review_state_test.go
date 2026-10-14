@@ -196,7 +196,7 @@ func TestRebuildReviewSnapshotsFromMessagesApplyPatchMoveRemovesSource(t *testin
 }
 
 func TestRebuildReviewSnapshotsFromMessagesApplyPatchDeleteRemovesSnapshot(t *testing.T) {
-	absPath := filepath.Join(t.TempDir(), "a.go")
+	absPath := filepath.Join(resolvedTempDir(t), "a.go")
 	msgs := []message.Message{
 		{
 			Role: "assistant",
@@ -220,7 +220,7 @@ func TestRebuildReviewSnapshotsFromMessagesApplyPatchDeleteRemovesSnapshot(t *te
 }
 
 func TestRebuildReviewSnapshotsFromMessagesCanonicalizesReviewToFileStatePath(t *testing.T) {
-	absPath := filepath.Join(t.TempDir(), "pkg", "a.go")
+	absPath := filepath.Join(resolvedTempDir(t), "pkg", "a.go")
 	msgs := []message.Message{
 		{
 			Role:      "assistant",

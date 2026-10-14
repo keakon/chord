@@ -57,10 +57,6 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 		return base
 	}
 	absPath = normalizeWaiterPath(absPath)
-	if !pathUnderDir(absPath, m.projectRootPath()) {
-		m.logLSPServiceNote(absPath, "File is outside project root; language servers were not notified.")
-		return base
-	}
 	if isPythonPath(absPath) && config.DiagnosticsEnabled(m.cfg) {
 		var ranges []EditRange
 		if strings.HasPrefix(base, "Replaced ") {
@@ -105,7 +101,7 @@ func (m *Manager) AfterFileWriteToolResult(ctx context.Context, absPath, content
 		// A timeout is logged every time; the model hears about the first one
 		// per session so an empty result is never mistaken for a clean one.
 		log.Warnf("lsp: diagnostics wait timeout path=%v timeout=%v", absPath, waitTimeout)
-		base = m.appendTimeoutNote(base, waitTimeout)
+		base = m.appendTimeoutNote(absPath, base, waitTimeout)
 	}
 
 	m.recordReviewSnapshot(absPath)
@@ -142,7 +138,7 @@ func (m *Manager) appendStartFailureNotes(ctx context.Context, absPath, base str
 	if len(infos) == 0 {
 		m.logLSPServiceNote(absPath, "No language server connection is available for this file.")
 		if ctx.Err() == nil {
-			base = appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationStart, "", ""))
+			base = appendLSPDegradationNote(base, m.noteLSPDegradationForPath(absPath, lspDegradationStart, "", ""))
 		}
 		return base
 	}
@@ -158,7 +154,7 @@ func (m *Manager) appendStartFailureNotes(ctx context.Context, absPath, base str
 			base = appendLSPDegradationNote(base, formatLSPDegradationNote(info.key.name, info.msg))
 			continue
 		}
-		base = appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationStart, info.key.name, info.msg))
+		base = appendLSPDegradationNote(base, m.noteLSPDegradationForPath(absPath, lspDegradationStart, info.key.name, info.msg))
 	}
 	return base
 }
@@ -172,7 +168,7 @@ func (m *Manager) appendExitedServerNotes(ctx context.Context, absPath, base str
 	for _, name := range exited {
 		log.Warnf("lsp: server exited, restarting name=%v path=%v", name, absPath)
 		if ctx.Err() == nil {
-			base = appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationExited, name, "server exited; restarting"))
+			base = appendLSPDegradationNote(base, m.noteLSPDegradationForPath(absPath, lspDegradationExited, name, "server exited; restarting"))
 		}
 	}
 	return base, exited
@@ -180,9 +176,9 @@ func (m *Manager) appendExitedServerNotes(ctx context.Context, absPath, base str
 
 // appendTimeoutNote reports a diagnostics wait that ran out. The wait covers
 // every server that owns the file, so the line names none of them and is
-// reported once per session regardless of which servers stayed silent.
-func (m *Manager) appendTimeoutNote(base string, waitTimeout time.Duration) string {
-	return appendLSPDegradationNote(base, m.noteLSPDegradation(lspDegradationTimeout, "", fmt.Sprintf("no diagnostics within %s", waitTimeout)))
+// reported once per workspace per session.
+func (m *Manager) appendTimeoutNote(path, base string, waitTimeout time.Duration) string {
+	return appendLSPDegradationNote(base, m.noteLSPDegradationForPath(path, lspDegradationTimeout, "", fmt.Sprintf("no diagnostics within %s", waitTimeout)))
 }
 
 // DegradationNotes returns the degradation lines AfterFileWriteToolResult
@@ -197,11 +193,11 @@ func DegradationNotes(out string) []string {
 	return notes
 }
 
-// noteLSPDegradation returns the model-facing line for a language-server
-// failure, or "" when this (kind, server) pair was already reported in the
+// noteLSPDegradationForPath returns the model-facing line for a language-server
+// failure, or "" when this (kind, server, root) was already reported in the
 // current session. Repeat failures stay in the log: a model that kept working
 // after the first honest line does not need the same sentence on every edit.
-func (m *Manager) noteLSPDegradation(kind, server, detail string) string {
+func (m *Manager) noteLSPDegradationForPath(path, kind, server, detail string) string {
 	if m == nil {
 		return ""
 	}
@@ -218,7 +214,21 @@ func (m *Manager) noteLSPDegradation(kind, server, detail string) string {
 	if m.degradeNotes == nil {
 		m.degradeNotes = make(map[string]struct{})
 	}
-	key := kind + "\x00" + server
+	root := ""
+	if path != "" {
+		root = m.workspaceBoundary(path)
+		if m.cfg != nil {
+			for name, cfg := range m.cfg.LSP {
+				if cfg.Disabled || (server != "language server" && server != name) {
+					continue
+				}
+				if found, covered := m.serverRootForPath(name, cfg, path); covered && (server != "language server" || root == "") {
+					root = found
+				}
+			}
+		}
+	}
+	key := kind + "\x00" + server + "\x00" + root
 	if _, reported := m.degradeNotes[key]; reported {
 		m.degradeMu.Unlock()
 		return ""

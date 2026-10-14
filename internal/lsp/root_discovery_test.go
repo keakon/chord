@@ -19,7 +19,7 @@ import (
 // to the git/project root. This is the fix for monorepos where TypeScript
 // (or other server) dependencies live in a subdirectory such as frontend/.
 func TestDiscoverWorkspaceRootNestedPackage(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	frontend := filepath.Join(root, "frontend")
 	src := filepath.Join(frontend, "src", "composables")
 	if err := os.MkdirAll(src, 0o755); err != nil {
@@ -47,7 +47,7 @@ func TestDiscoverWorkspaceRootNestedPackage(t *testing.T) {
 }
 
 func TestDiscoverWorkspaceRootRootedProject(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	if err := os.WriteFile(filepath.Join(root, "tsconfig.json"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestDiscoverWorkspaceRootRootedProject(t *testing.T) {
 }
 
 func TestDiscoverWorkspaceRootNoMarkerFallsBackToProjectRoot(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	src := filepath.Join(root, "src")
 	if err := os.MkdirAll(src, 0o755); err != nil {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestDiscoverWorkspaceRootNoMarkerFallsBackToProjectRoot(t *testing.T) {
 // TestDiscoverWorkspaceRootStopsAtProjectRoot verifies discovery never walks
 // above the Chord project root even when a marker exists higher up.
 func TestDiscoverWorkspaceRootStopsAtProjectRoot(t *testing.T) {
-	parent := t.TempDir()
+	parent := resolvedTempDir(t)
 	if err := os.WriteFile(filepath.Join(parent, ".git"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestDiscoverWorkspaceRootStopsAtProjectRoot(t *testing.T) {
 // root's parent for this input, so the root was never checked and a marker
 // above the project root was picked as the workspace root.
 func TestDiscoverWorkspaceRootStopsAtProjectRootForPathItself(t *testing.T) {
-	parent := t.TempDir()
+	parent := resolvedTempDir(t)
 	if err := os.WriteFile(filepath.Join(parent, ".git"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestDiscoverWorkspaceRootStopsAtProjectRootForPathItself(t *testing.T) {
 // (server, root), a file inside a nested package resolves to that package's
 // client instead of an arbitrary client for the same server.
 func TestNestedRootsRouteToTheirOwnClient(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	frontend := filepath.Join(root, "frontend")
 	admin := filepath.Join(root, "admin-ui")
 	for _, dir := range []string{frontend, admin} {
@@ -210,7 +210,7 @@ func existingTrivialClient(root string, fileTypes ...string) *Client {
 // published diagnostics for the same URI under the server name "typescript" —
 // the second publish overwrote or cleared the first in diagByServer.
 func TestNotificationsGoOnlyToNearestRootClient(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	frontend := filepath.Join(root, "frontend")
 	if err := os.MkdirAll(filepath.Join(frontend, "src"), 0o755); err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestNotificationsGoOnlyToNearestRootClient(t *testing.T) {
 // .go file) in a repo containing a typescript entry started typescript and
 // failed to find its TypeScript installation at the repo root.
 func TestStartDoesNotLaunchForUnmatchedFileType(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	if err := os.WriteFile(filepath.Join(root, ".git"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func waitForLSPStartDone(t *testing.T, m *Manager, key clientKey) {
 // check only considers servers whose file types cover the path. Regression
 // guard for hasPendingStartForPathLocked losing its file-type filter.
 func TestHasPendingStartForPathLockedFiltersFileTypes(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	if err := os.WriteFile(filepath.Join(root, ".git"), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ func TestHasPendingStartForPathLockedFiltersFileTypes(t *testing.T) {
 // longer reported as handled, so a monorepo sweep cannot leak an unbounded
 // number of language-server processes.
 func TestEvictExcessClientsReclaimsLeastRecentlyUsed(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	m := NewManager(&config.Config{
 		LSP: config.LSPConfig{
 			"typescript": {
@@ -408,7 +408,7 @@ func TestEvictExcessClientsReclaimsLeastRecentlyUsed(t *testing.T) {
 // server actually exceeds maxClientsPerServer; a server at the limit keeps all
 // instances.
 func TestEvictExcessClientsSkipsWithinLimit(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	m := NewManager(&config.Config{}, root, nil)
 
 	m.clientsMu.Lock()
@@ -431,7 +431,7 @@ func TestEvictExcessClientsSkipsWithinLimit(t *testing.T) {
 // sidebar and in tool output with no client remaining that could ever clear it.
 // Entries for roots a surviving instance still handles must stay.
 func TestEvictExcessClientsClearsOrphanedDiagnostics(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	m := NewManager(&config.Config{}, root, nil)
 
 	m.clientsMu.Lock()
@@ -487,24 +487,13 @@ func TestEvictExcessClientsClearsOrphanedDiagnostics(t *testing.T) {
 	}
 }
 
-func TestFailMessageChoosesLexicographicallyFirstRootEvenWithEmptyRoot(t *testing.T) {
-	failMap := map[clientKey]string{
-		{name: "typescript", root: ""}:           "rootless failure",
-		{name: "typescript", root: "/workspace"}: "workspace failure",
-		{name: "gopls", root: "/workspace"}:      "other server failure",
-	}
-	if got := failMessage(failMap, "typescript"); got != "rootless failure" {
-		t.Fatalf("failMessage() = %q, want %q", got, "rootless failure")
-	}
-}
-
 // TestServerRootForPathFallsBackWhenMarkerAbsent is the end-to-end coverage
 // decision behind root_markers: a file_types-matching file outside any marker
 // directory still resolves to the project root instead of being rejected. The
 // contrast with discoverWorkspaceRoot's own fallback test makes the rejection
 // gate in serverRootForPath (the only place that could drop it) observable.
 func TestServerRootForPathFallsBackWhenMarkerAbsent(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	m := newTestManagerWithRoot(root)
 	cfg := config.LSPServerConfig{FileTypes: []string{".ts"}, RootMarkers: []string{"tsconfig.json"}}
 	gotRoot, ok := m.serverRootForPath("sample", cfg, filepath.Join(root, "src", "app.ts"))
@@ -521,7 +510,7 @@ func TestServerRootForPathFallsBackWhenMarkerAbsent(t *testing.T) {
 // exercising the full Start -> serverRootForPath -> discoverWorkspaceRoot
 // path rather than only the internal discovery function.
 func TestStartFallsBackToProjectRootWhenNoMarkerMatches(t *testing.T) {
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	markerDir := filepath.Join(root, "nested")
 	if err := os.MkdirAll(markerDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -570,7 +559,8 @@ func TestEffectiveRootMarkersForCommonServers(t *testing.T) {
 		{name: "windows command", command: "PYRIGHT-LANGSERVER.CMD", want: pythonMarkers},
 		{name: "python wrapper", server: "pyright", command: "python-wrapper", want: pythonMarkers},
 		{name: "typescript wrapper", server: "typescript", command: "tsserver-wrapper", want: typescriptMarkers},
-		{name: "unknown", command: "gopls"},
+		{name: "go", command: "gopls", want: []string{"go.work", "go.mod"}},
+		{name: "unknown", command: "sample-lsp"},
 		{name: "substring", command: "not-pyright-langserver"},
 		{name: "unknown wrapper", command: "typescript-wrapper"},
 		{name: "override", server: "pyright", command: "pyright-langserver", markers: []string{"custom.toml"}, want: []string{"custom.toml"}},
@@ -596,7 +586,7 @@ func TestDiscoverWorkspaceRootIgnoresOtherLanguageMarkers(t *testing.T) {
 		{server: "typescript", command: "tsserver-wrapper", marker: "tsconfig.json", foreignMarker: "requirements.txt", filename: "app.ts"},
 	} {
 		t.Run(test.server, func(t *testing.T) {
-			root := t.TempDir()
+			root := resolvedTempDir(t)
 			project := filepath.Join(root, "package")
 			nested := filepath.Join(project, "nested")
 			if err := os.MkdirAll(nested, 0o755); err != nil {

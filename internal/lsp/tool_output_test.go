@@ -42,8 +42,8 @@ func TestParseToolOutputDiagnostics(t *testing.T) {
 
 func TestAppendLSPDiagnosticsToToolOutputForPathsUsesSharedLimitAndFileLabels(t *testing.T) {
 	mgr := &Manager{}
-	pathA := "/tmp/a.go"
-	pathB := "/tmp/b.go"
+	pathA := filepath.Join(resolvedTempDir(t), "a.go")
+	pathB := filepath.Join(filepath.Dir(pathA), "b.go")
 	mgr.diagByServer = map[clientKey]map[string]diagCounts{}
 	// Feed the batch formatter through its non-LSP extras input so this test
 	// does not require starting a language server.
@@ -58,7 +58,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsUsesSharedLimitAndFileLabels(t 
 }
 
 func TestAppendLSPDiagnosticsToToolOutputForPathsUsesRelativeDisplayPaths(t *testing.T) {
-	baseDir := t.TempDir()
+	baseDir := resolvedTempDir(t)
 	pathA := filepath.Join(baseDir, "pkg", "a.go")
 	pathB := filepath.Join(baseDir, "pkg", "b.go")
 	mgr := &Manager{diagByServer: map[clientKey]map[string]diagCounts{}}
@@ -77,7 +77,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsUsesRelativeDisplayPaths(t *tes
 }
 
 func TestAppendLSPDiagnosticsToToolOutputForPathsUsesSubdirectoryDisplayBase(t *testing.T) {
-	projectRoot := t.TempDir()
+	projectRoot := resolvedTempDir(t)
 	baseDir := filepath.Join(projectRoot, "pkg")
 	inside := filepath.Join(baseDir, "internal", "inside.go")
 	outside := filepath.Join(projectRoot, "shared", "outside.go")
@@ -116,7 +116,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsUsesBatchBudget(t *testing.T) {
 
 func TestAppendLSPDiagnosticsToToolOutputForPathsReportsChangesPerFile(t *testing.T) {
 	mgr := &Manager{}
-	pathA, pathB := "/tmp/a.go", "/tmp/b.go"
+	pathA, pathB := normalizeWaiterPath("/tmp/a.go"), normalizeWaiterPath("/tmp/b.go")
 	key := func(message string) []Diagnostic { return []Diagnostic{{Severity: 1, Line: 0, Message: message}} }
 	baselines := map[string][]Diagnostic{pathA: key("old"), pathB: key("gone")}
 	extras := map[string][]Diagnostic{pathA: key("new"), pathB: nil}
@@ -134,7 +134,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPathsReportsChangesPerFile(t *testin
 
 func TestAppendLSPDiagnosticsToToolOutputForPathsOmitsCountsWithoutBaselines(t *testing.T) {
 	mgr := &Manager{}
-	pathA, pathB := "/tmp/a.go", "/tmp/b.go"
+	pathA, pathB := normalizeWaiterPath("/tmp/a.go"), normalizeWaiterPath("/tmp/b.go")
 	extras := map[string][]Diagnostic{
 		pathA: {{Severity: 1, Line: 0, Message: "a"}},
 		pathB: {{Severity: 1, Line: 0, Message: "b"}},
@@ -258,12 +258,12 @@ func TestFormatDiagnosticsBlockWithoutRangesIncludesInfoAndHintsWhenSlotsAvailab
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_OtherFilesWithoutPrimaryHaveNoBlankLineAfterHeader(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.py")
 	other := filepath.Join(tmp, "other.py")
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "test")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "test")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
 			{Severity: protocol.SeverityInformation, Range: protocol.Range{Start: protocol.Position{Line: 1, Character: 0}}, Message: "other info"},
 		},
@@ -280,12 +280,12 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesWithoutPrimaryHaveNoBlankLin
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_OtherFilesUseRelativeDisplayPaths(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "pkg", "edited.py")
 	other := filepath.Join(tmp, "pkg", "other.py")
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "test")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "test")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
 			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 1, Character: 0}}, Message: "other error"},
 		},
@@ -302,7 +302,7 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesUseRelativeDisplayPaths(t *t
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_LimitsDiagnosticsGlobally(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.py")
 	diagnostics := map[protocol.DocumentURI][]protocol.Diagnostic{
@@ -322,7 +322,7 @@ func TestAppendLSPDiagnosticsToToolOutput_LimitsDiagnosticsGlobally(t *testing.T
 		}
 	}
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "test")] = &Client{diagnostics: diagnostics}
+	mgr.clients[testKey(mgr, "test")] = &Client{cwd: mgr.projectRootPath(), diagnostics: diagnostics}
 	mgr.clientsMu.Unlock()
 
 	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
@@ -351,7 +351,7 @@ func countFormattedDiagnostics(s string) int {
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_OtherFilesIncludeInfoHintsWhenSlotsAvailable(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.py")
 	other := filepath.Join(tmp, "other.py")
@@ -361,7 +361,7 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesIncludeInfoHintsWhenSlotsAva
 	}
 
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "test")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "test")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(edited)): {
 			{Severity: protocol.SeverityWarning, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "edited warning"},
 		},
@@ -416,8 +416,8 @@ func TestFormatDiagnosticsBlockWithoutRangesIncludesOnlyInfoHints(t *testing.T) 
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_OmitsCleanDiagnosticsStatus(t *testing.T) {
-	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
-	edited := filepath.Join(t.TempDir(), "edited.go")
+	mgr := NewManager(&config.Config{}, resolvedTempDir(t), nil)
+	edited := filepath.Join(resolvedTempDir(t), "edited.go")
 	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, false, nil, config.DiagnosticOutputConfig{}, "")
 	if out != "ok" {
 		t.Fatalf("expected unchanged output when diagnostics are clean, got %q", out)
@@ -425,11 +425,11 @@ func TestAppendLSPDiagnosticsToToolOutput_OmitsCleanDiagnosticsStatus(t *testing
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_IncludesOnlyInfoHintsWhenSlotsAvailable(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.py")
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "test")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "test")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(edited)): {
 			{Severity: protocol.SeverityInformation, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "info"},
 			{Severity: protocol.SeverityHint, Range: protocol.Range{Start: protocol.Position{Line: 1, Character: 0}}, Message: "hint"},
@@ -444,12 +444,12 @@ func TestAppendLSPDiagnosticsToToolOutput_IncludesOnlyInfoHintsWhenSlotsAvailabl
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_CurrentFileHintsPrecedeOtherErrors(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.py")
 	other := filepath.Join(tmp, "other.py")
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "test")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "test")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(edited)): {
 			{Severity: protocol.SeverityHint, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "edited hint"},
 		},
@@ -469,7 +469,7 @@ func TestAppendLSPDiagnosticsToToolOutput_CurrentFileHintsPrecedeOtherErrors(t *
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_OtherFilesSortedBySeverity(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.py")
 	// a_hint.py sorts before z_error.py alphabetically, but the error file must
@@ -477,7 +477,7 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesSortedBySeverity(t *testing.
 	hintFile := filepath.Join(tmp, "a_hint.py")
 	errorFile := filepath.Join(tmp, "z_error.py")
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "test")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "test")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(hintFile)): {
 			{Severity: protocol.SeverityHint, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "hint only"},
 		},
@@ -497,7 +497,7 @@ func TestAppendLSPDiagnosticsToToolOutput_OtherFilesSortedBySeverity(t *testing.
 }
 
 func TestAppendLSPDiagnosticsToToolOutput_LimitsOtherFilesAfterSelection(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.py")
 	diagnostics := map[protocol.DocumentURI][]protocol.Diagnostic{}
@@ -508,7 +508,7 @@ func TestAppendLSPDiagnosticsToToolOutput_LimitsOtherFilesAfterSelection(t *test
 		}
 	}
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "test")] = &Client{diagnostics: diagnostics}
+	mgr.clients[testKey(mgr, "test")] = &Client{cwd: mgr.projectRootPath(), diagnostics: diagnostics}
 	mgr.clientsMu.Unlock()
 
 	out := mgr.appendLSPDiagnosticsToToolOutput("ok", edited, true, nil, config.DiagnosticOutputConfig{MaxTotalDiagnostics: 10}, "")
@@ -534,12 +534,12 @@ func TestEditRangesForReplacement(t *testing.T) {
 }
 
 func TestAppendLSPDiagnosticsToToolOutputForPaths_SkipsCachedDiagnosticsWithoutServerCoverage(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{}, tmp, nil)
 	edited := filepath.Join(tmp, "MEMORY.md")
 	other := filepath.Join(tmp, "other.go")
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
 			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
 		},
@@ -556,14 +556,14 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_SkipsCachedDiagnosticsWithoutS
 }
 
 func TestAppendLSPDiagnosticsToToolOutputForPaths_KeepsCachedDiagnosticsWithServerCoverage(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
 		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 	}}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.go")
 	other := filepath.Join(tmp, "other.go")
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
 			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
 		},
@@ -596,14 +596,14 @@ func TestDeduplicateDiagnosticsCollapsesSourcelessRoundTripCopy(t *testing.T) {
 }
 
 func TestAppendLSPDiagnosticsToToolOutputForPaths_OtherFileOutsidePrimaryDirAndUntouchedIsSkipped(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
 		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 	}}, tmp, nil)
 	edited := filepath.Join(tmp, "pkg_a", "edited.go")
 	other := filepath.Join(tmp, "pkg_b", "other.go")
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
 			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "unrelated package error"},
 		},
@@ -620,14 +620,14 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_OtherFileOutsidePrimaryDirAndU
 }
 
 func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsEachDiagnosticOnce(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
 		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 	}}, tmp, nil)
 	edited := filepath.Join(tmp, "edited.go")
 	other := filepath.Join(tmp, "other.go")
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
 			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
 		},
@@ -645,7 +645,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsEachDiagnosticOnce(t *t
 }
 
 func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsAgainAfterCleanRepublish(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
 		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 	}}, tmp, nil)
@@ -656,7 +656,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsAgainAfterCleanRepublis
 	}
 	uri := protocol.DocumentURI("file://" + filepath.ToSlash(other))
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		uri: {
 			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
 		},
@@ -675,7 +675,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsAgainAfterCleanRepublis
 	client.diagnosticsMu.Lock()
 	client.diagnostics[uri] = nil
 	client.diagnosticsMu.Unlock()
-	publish := mgr.onDiagnostics(testKey(mgr, "gopls"))
+	publish := mgr.onDiagnostics(testKey(mgr, "gopls"), nil)
 	publish("file://"+filepath.ToSlash(other), "", nil, 2)
 	reappeared := []protocol.Diagnostic{{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"}}
 	client.diagnosticsMu.Lock()
@@ -689,7 +689,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_ReportsAgainAfterCleanRepublis
 }
 
 func TestAppendLSPDiagnosticsToToolOutputForPaths_SkipsDiagnosticsForFileChangedOnDisk(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := resolvedTempDir(t)
 	mgr := NewManager(&config.Config{LSP: config.LSPConfig{
 		"gopls": {Command: "gopls", FileTypes: []string{".go"}},
 	}}, tmp, nil)
@@ -703,7 +703,7 @@ func TestAppendLSPDiagnosticsToToolOutputForPaths_SkipsDiagnosticsForFileChanged
 	mgr.diagState[other] = diagnosticPathState{mtime: time.Now().Add(-time.Hour)}
 	mgr.diagMu.Unlock()
 	mgr.clientsMu.Lock()
-	mgr.clients[testKey(mgr, "gopls")] = &Client{diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
+	mgr.clients[testKey(mgr, "gopls")] = &Client{cwd: mgr.projectRootPath(), diagnostics: map[protocol.DocumentURI][]protocol.Diagnostic{
 		protocol.DocumentURI("file://" + filepath.ToSlash(other)): {
 			{Severity: protocol.SeverityError, Range: protocol.Range{Start: protocol.Position{Line: 0, Character: 0}}, Message: "cached error"},
 		},

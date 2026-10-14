@@ -53,9 +53,12 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 	if m == nil {
 		return base
 	}
-	byPath := m.allDiagnosticsByAbsPath()
+	baselines = normalizeDiagnosticPathMap(baselines)
+	outputs = normalizeDiagnosticPathMap(outputs)
+	byPath := m.diagnosticsForPaths(editedPaths)
 	for path, diags := range extras {
-		byPath[path] = append(byPath[path], diags...)
+		normalized := normalizeWaiterPath(path)
+		byPath[normalized] = append(byPath[normalized], diags...)
 	}
 	primaryPaths := make([]string, 0, len(editedPaths))
 	seen := make(map[string]struct{}, len(editedPaths))
@@ -64,7 +67,7 @@ func (m *Manager) AppendLSPDiagnosticsToToolOutputForPaths(base string, editedPa
 		if err != nil {
 			abs = filepath.Clean(path)
 		} else {
-			abs = filepath.Clean(abs)
+			abs = normalizeWaiterPath(abs)
 		}
 		if _, ok := seen[abs]; ok {
 			continue
@@ -298,10 +301,10 @@ func (m *Manager) appendLSPDiagnosticsToToolOutput(base, editedPath string, incl
 	if err != nil {
 		edited = filepath.Clean(editedPath)
 	} else {
-		edited = filepath.Clean(edited)
+		edited = normalizeWaiterPath(edited)
 	}
 
-	byPath := m.allDiagnosticsByAbsPath()
+	byPath := m.diagnosticsForPaths([]string{editedPath})
 
 	maxTotal := output.MaxTotalDiagnostics
 	if maxTotal <= 0 {
@@ -374,7 +377,7 @@ func (m *Manager) allDiagnosticsByAbsPath() map[string][]Diagnostic {
 			if err != nil {
 				absP = filepath.Clean(p)
 			} else {
-				absP = filepath.Clean(absP)
+				absP = normalizeWaiterPath(absP)
 			}
 			cacheKey := ownerCacheKey{path: absP, name: key.name}
 			owners := ownersByPath[cacheKey]
@@ -473,7 +476,7 @@ func displayDiagnosticPath(path, baseDir string) string {
 	if baseErr != nil || targetErr != nil {
 		return path
 	}
-	rel, err := filepath.Rel(filepath.Clean(base), filepath.Clean(target))
+	rel, err := filepath.Rel(normalizeWaiterPath(base), normalizeWaiterPath(target))
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return path
 	}
@@ -667,4 +670,17 @@ func formatDiagLine(d Diagnostic) string {
 		msg = fmt.Sprintf("[%s] %s", d.Code, msg)
 	}
 	return fmt.Sprintf("%s %d:%d %s", pfx, d.Line+1, d.Col+1, msg)
+}
+
+// normalizeDiagnosticPathMap aligns batch metadata with canonical file URIs
+// without mutating the tool's maps, which still use its original display paths.
+func normalizeDiagnosticPathMap[T any](input map[string]T) map[string]T {
+	if input == nil {
+		return nil
+	}
+	result := make(map[string]T, len(input))
+	for path, value := range input {
+		result[normalizeWaiterPath(path)] = value
+	}
+	return result
 }

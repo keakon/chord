@@ -258,7 +258,7 @@ func TestPythonQuickDiagnosticsNotifyReadyLSPClientWithoutSemanticSync(t *testin
 		return nil, false
 	}
 
-	root := t.TempDir()
+	root := resolvedTempDir(t)
 	cfg := &config.Config{
 		Diagnostics: config.DefaultDiagnosticsConfig(),
 		LSP: config.LSPConfig{
@@ -303,7 +303,7 @@ func TestPythonQuickBackendAvailableResolvesEveryCall(t *testing.T) {
 		calls++
 		return "/bin/ruff", nil
 	}
-	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	mgr := NewManager(&config.Config{}, resolvedTempDir(t), nil)
 	cfg := config.DefaultDiagnosticsConfig().Python
 	if !mgr.pythonQuickBackendAvailable(cfg) {
 		t.Fatal("expected quick backend available on first check")
@@ -328,7 +328,7 @@ func TestPythonQuickBackendAvailablePicksUpLateInstall(t *testing.T) {
 		}
 		return "", exec.ErrNotFound
 	}
-	mgr := NewManager(&config.Config{}, t.TempDir(), nil)
+	mgr := NewManager(&config.Config{}, resolvedTempDir(t), nil)
 	cfg := config.DefaultDiagnosticsConfig().Python
 	if mgr.pythonQuickBackendAvailable(cfg) {
 		t.Fatal("expected quick backend unavailable before install")
