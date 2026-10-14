@@ -34,6 +34,7 @@ chord [全局 flag] [命令] [命令 flag] [参数]
 | `chord worktree finish <name>`    | 先将目标分支合入真实 worktree，再把结果 squash 回去并删除 worktree |
 | `chord resume <session-id>`       | 按 session id 恢复，自动定位到对应的 worktree                     |
 | `chord import <source> [file]`    | 把外部 agent 会话导入 Chord；可识别工具会在参数能标准化时转换为结构化 Chord 工具卡 |
+| `chord sessions list`           | 只读列出最近会话及占用状态 |
 | `chord sessions project <id>`     | 把已落盘会话投影成每 turn 一行的 JSONL 事实（只读）               |
 | `chord completion <shell>`        | 为 `bash`、`fish`、`powershell` 或 `zsh` 生成 shell completion 脚本 |
 | `chord help [command]`            | 显示命令帮助                                                      |
@@ -623,6 +624,10 @@ chord import claude --id <session-id>
 ```
 
 完整的工具/推理策略、转换告警、provider 安全 wire view 见 [使用指南：导入外部会话](./usage_CN.md#导入外部会话)。
+
+## 会话列表
+
+运行 `chord sessions list --json --limit 10 -d /path/to/project` 可在不启动 Agent 的情况下列出最近会话。Chord 负责解析配置的会话目录及仓库共享关系，包括关联的 worktree；`--state-dir` 和 `--sessions-dir` 正常生效。JSON 包含 `schema_version: 1`、规范化的 `workspace`，以及带有 `id`、`last_active`（RFC 3339）和 `locked` 的 `sessions` 数组。结果按最近活动时间排序，时间相同时按 ID 降序排列。默认返回 10 项，范围为 1–1000。没有结果时返回空数组，查询失败则以非零状态退出；不输出消息正文或凭据。
 
 ## `chord sessions project [<session-id>]`
 

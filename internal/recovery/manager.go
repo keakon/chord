@@ -747,6 +747,16 @@ const (
 // not append to main.jsonl. excludeDir is the full path of a session directory
 // to omit (e.g. current session); pass "" to include all.
 func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) {
+	return listSessions(sessionsDir, excludeDir, true)
+}
+
+// ListSessionActivity lists identities, activity times and ownership without
+// loading message previews or display metadata.
+func ListSessionActivity(sessionsDir string, excludeDir string) ([]SessionInfo, error) {
+	return listSessions(sessionsDir, excludeDir, false)
+}
+
+func listSessions(sessionsDir string, excludeDir string, display bool) ([]SessionInfo, error) {
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -775,43 +785,36 @@ func ListSessions(sessionsDir string, excludeDir string) ([]SessionInfo, error) 
 		if !ok {
 			continue
 		}
-		firstUser, firstUserIsCompactionSummary, originalFirstUser, _ := cachedSessionPreview(sessionPath)
-		if originalFirstUser == "" && !firstUserIsCompactionSummary {
-			originalFirstUser = firstUser
-		}
-		messageCount := UnknownMessageCount
-		if info == nil {
-			messageCount = 0
-		} else if count, ok := cachedMessageCount(mainPath, info); ok {
-			messageCount = count
-		}
 		locked, err := sessionDirLockedByLiveOwner(sessionPath)
 		if err != nil {
 			return nil, fmt.Errorf("check session lock for %s: %w", entry.Name(), err)
 		}
-		forkedFrom := ""
-		title := ""
-		worktreeName := ""
-		if meta, err := LoadSessionMeta(sessionPath); err != nil {
-			return nil, fmt.Errorf("load session meta for %s: %w", entry.Name(), err)
-		} else if meta != nil {
-			forkedFrom = meta.ForkedFrom
-			title = meta.Title
-			worktreeName = meta.WorktreeName
+		item := SessionInfo{ID: entry.Name(), Path: sessionPath, LastModTime: lastModTime, Locked: locked, MessageCount: UnknownMessageCount}
+		if display {
+			firstUser, firstUserIsCompactionSummary, originalFirstUser, _ := cachedSessionPreview(sessionPath)
+			if originalFirstUser == "" && !firstUserIsCompactionSummary {
+				originalFirstUser = firstUser
+			}
+			messageCount := UnknownMessageCount
+			if info == nil {
+				messageCount = 0
+			} else if count, ok := cachedMessageCount(mainPath, info); ok {
+				messageCount = count
+			}
+
+			item.FirstUserMessage = firstUser
+			item.FirstUserMessageIsCompactionSummary = firstUserIsCompactionSummary
+			item.OriginalFirstUserMessage = originalFirstUser
+			item.MessageCount = messageCount
+			if meta, err := LoadSessionMeta(sessionPath); err != nil {
+				return nil, fmt.Errorf("load session meta for %s: %w", entry.Name(), err)
+			} else if meta != nil {
+				item.ForkedFrom = meta.ForkedFrom
+				item.Title = meta.Title
+				item.WorktreeName = meta.WorktreeName
+			}
 		}
-		list = append(list, SessionInfo{
-			ID:                                  entry.Name(),
-			Path:                                sessionPath,
-			Title:                               title,
-			MessageCount:                        messageCount,
-			LastModTime:                         lastModTime,
-			FirstUserMessage:                    firstUser,
-			FirstUserMessageIsCompactionSummary: firstUserIsCompactionSummary,
-			OriginalFirstUserMessage:            originalFirstUser,
-			ForkedFrom:                          forkedFrom,
-			Locked:                              locked,
-			WorktreeName:                        worktreeName,
-		})
+		list = append(list, item)
 	}
 	sort.SliceStable(list, func(i, j int) bool {
 		if !list[i].LastModTime.Equal(list[j].LastModTime) {

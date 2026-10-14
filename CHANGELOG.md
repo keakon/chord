@@ -6,6 +6,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- Added `chord sessions list --json` for recent session metadata, using the configured storage and shared repository session scope without starting an agent.
+
 - Deliver files with `present` and find them again after restoring a session. Preview text, Markdown, and images in the TUI, or open files such as HTML and PDF with system-associated applications.
 - Sign in to HTTP MCP servers with OAuth, manage saved logins from the CLI or TUI, and inspect authentication, connection, and tool catalog status with `chord doctor mcp`. Headless and gateway clients show status and host-side login instructions.
 

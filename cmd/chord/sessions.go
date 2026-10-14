@@ -24,7 +24,7 @@ func newSessionsCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	cmd.AddCommand(newSessionsProjectCmd())
+	cmd.AddCommand(newSessionsProjectCmd(), newSessionsListCmd())
 	return cmd
 }
 

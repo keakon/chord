@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/keakon/chord/internal/privatefs"
@@ -88,8 +87,6 @@ type SessionLock struct {
 	guardFile *os.File // held open for the lifetime of the ownership lock
 	ownerID   string
 }
-
-var sessionGuardProbeMu sync.Mutex
 
 // AcquireSessionLock tries to acquire exclusive ownership of sessionDir.
 // A kernel file lock on session.lock.guard provides the actual cross-process
@@ -240,31 +237,24 @@ func currentSessionLockedError(sessionDir, lockPath string) error {
 }
 
 func sessionDirLockedByLiveOwner(sessionPath string) (bool, error) {
-	guardPath := filepath.Join(sessionPath, sessionGuardFile)
 	lockPath := filepath.Join(sessionPath, sessionLockFile)
 
-	// Serialize local probe attempts so we don't deadlock ourselves by trying to
-	// lock the same guard file from multiple goroutines in one process.
-	sessionGuardProbeMu.Lock()
-	defer sessionGuardProbeMu.Unlock()
-
-	guardFile, err := privatefs.OpenFile(sessionPath, guardPath, os.O_CREATE|os.O_RDWR)
-	if err != nil {
+	// A status query must not create a guard or require write access. An absent
+	// guard is an unlocked snapshot; still inspect any owner metadata below.
+	guardFile, err := openSessionGuardForProbe(sessionPath)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return false, fmt.Errorf("open session guard lock: %w", err)
 	}
-	defer func() {
-		_ = guardFile.Close()
-	}()
-
-	if err := lockSessionGuardFile(guardFile); err != nil {
-		if isWouldBlockError(err) {
-			return true, nil
+	if guardFile != nil {
+		defer func() { _ = guardFile.Close() }()
+		if err := lockSessionGuardForProbe(guardFile); err != nil {
+			if isWouldBlockError(err) {
+				return true, nil
+			}
+			return false, fmt.Errorf("probe session guard lock: %w", err)
 		}
-		return false, fmt.Errorf("probe session guard lock: %w", err)
+		defer func() { _ = unlockSessionGuardFile(guardFile) }()
 	}
-	defer func() {
-		_ = unlockSessionGuardFile(guardFile)
-	}()
 
 	info, err := readLockFile(lockPath)
 	if err != nil {
@@ -277,6 +267,25 @@ func sessionDirLockedByLiveOwner(sessionPath string) (bool, error) {
 		return false, err
 	}
 	return isProcessAlive(info.PID), nil
+}
+
+// openSessionGuardForProbe confines the lookup to the session directory and
+// preserves the private-file rule against symbolic links without creating or
+// changing permissions on any directory or file.
+func openSessionGuardForProbe(sessionPath string) (*os.File, error) {
+	root, err := os.OpenRoot(sessionPath)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	info, err := root.Lstat(sessionGuardFile)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("session guard is not a regular file")
+	}
+	return root.Open(sessionGuardFile)
 }
 
 // SessionLockActive reports whether sessionDir is held by a live owner.

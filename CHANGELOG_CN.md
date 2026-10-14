@@ -6,6 +6,8 @@
 
 ### 新功能
 
+- 新增 `chord sessions list --json`，无需启动 Agent 即可按配置的存储位置及仓库共享范围查询最近会话元数据。
+
 - 通过 `present` 交付文件，恢复会话后仍可找到交付记录；TUI 支持预览文本、Markdown 和图片，也可用系统关联应用打开 HTML、PDF 等文件。
 - HTTP MCP 服务支持 OAuth 登录，可通过 CLI 或 TUI 管理凭证，并用 `chord doctor mcp` 分别检查认证、连接和工具目录状态。Headless 和 gateway 展示状态及宿主机登录指引。
 

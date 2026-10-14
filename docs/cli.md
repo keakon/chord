@@ -34,6 +34,7 @@ Without a command, `chord` runs the local TUI in the current directory.
 | `chord worktree finish <name>`   | Merge the target branch into the real worktree, squash the result back as one commit, then remove the worktree |
 | `chord resume <session-id>`      | Resume a session by ID, auto-locating its worktree               |
 | `chord import <source> [file]`   | Import an external session into Chord's session store and convert recognizable external tools to current Chord tool cards |
+| `chord sessions list`            | List recent sessions and ownership without writing session files |
 | `chord sessions project <id>`    | Project a persisted session into per-turn JSONL facts (read-only) |
 | `chord completion <shell>`       | Generate shell completion scripts for `bash`, `fish`, `powershell`, or `zsh` |
 | `chord help [command]`           | Show command help                                                |
@@ -623,6 +624,10 @@ chord import claude --id <session-id>
 ```
 
 See the [Importing external sessions](./usage.md#importing-external-sessions) section for the full notes on tool/reasoning policy, conversion warnings, and provider-safe wire normalization.
+
+## Session listing
+
+Run `chord sessions list --json --limit 10 -d /path/to/project` to list recent sessions without starting an agent. Chord resolves the configured session directory and repository sharing, including linked worktrees; `--state-dir` and `--sessions-dir` apply normally. The JSON report contains `schema_version: 1`, the canonical `workspace`, and `sessions` entries with `id`, `last_active` (RFC 3339), and `locked`. Entries are ordered by recent activity, with descending IDs breaking ties. The default limit is 10 (range 1–1000). Empty results use an empty array; errors exit unsuccessfully. Message content and credentials are not included.
 
 ## `chord sessions project [<session-id>]`
 
