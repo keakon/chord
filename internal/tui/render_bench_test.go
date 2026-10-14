@@ -820,7 +820,7 @@ func BenchmarkInfoPanelFingerprint(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = m.infoPanelFingerprint(32, 40)
+		_ = m.infoPanelFingerprint(32, 40, m.captureInfoPanelIntegrations())
 	}
 }
 

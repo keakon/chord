@@ -357,21 +357,24 @@ func walltimeDurationVariants(d time.Duration) []string {
 	return variants
 }
 
-func (m *Model) buildInfoPanelLSPBlock(lineW int) string {
+func (m *Model) buildInfoPanelLSPBlock(lineW int, integrations infoPanelIntegrations) string {
 	mcpErrStyle := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg))
 	mcpErrLabelStyle := currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg))
 	pendingDotStyle := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelPendingFg))
 
-	var lspRows []agent.LSPServerDisplay
-	if lp, ok := m.agent.(agent.LSPStateProvider); ok {
-		lspRows = lp.LSPServerList()
-	}
+	lspRows := integrations.lsp
 	if len(lspRows) == 0 {
 		return ""
 	}
 
-	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionLSP)
-	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "LSP", fmt.Sprintf("%d", len(lspRows)))}
+	expanded := !m.infoPanelSectionCollapsed(infoPanelSectionLSP, integrations.collapsed(infoPanelSectionLSP))
+	failed := 0
+	for _, row := range lspRows {
+		if !row.OK && !row.Idle && !row.Pending {
+			failed++
+		}
+	}
+	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "LSP", integrationHeaderSummary(len(lspRows), failed))}
 	if !expanded {
 		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 	}
@@ -418,21 +421,24 @@ func (m *Model) buildInfoPanelLSPBlock(lineW int) string {
 	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 }
 
-func (m *Model) buildInfoPanelMCPBlock(lineW int) string {
+func (m *Model) buildInfoPanelMCPBlock(lineW int, integrations infoPanelIntegrations) string {
 	mcpErrStyle := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelCriticalFg))
 	mcpRetryLabelStyle := currentStyles.InfoPanelValue.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelWarningFg))
 	pendingDotStyle := currentStyles.InfoPanelDim.Foreground(lipgloss.Color(currentStyles.Palette.InfoPanelPendingFg))
 
-	var mcpRows []agent.MCPServerDisplay
-	if mp, ok := m.agent.(agent.MCPStateProvider); ok {
-		mcpRows = mp.MCPServerList()
-	}
+	mcpRows := integrations.mcp
 	if len(mcpRows) == 0 {
 		return ""
 	}
 
-	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionMCP)
-	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "MCP", fmt.Sprintf("%d", len(mcpRows)))}
+	expanded := !m.infoPanelSectionCollapsed(infoPanelSectionMCP, integrations.collapsed(infoPanelSectionMCP))
+	failed := 0
+	for _, row := range mcpRows {
+		if !row.OK && !row.Idle && !row.Pending && !row.Disabled {
+			failed++
+		}
+	}
+	lines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "MCP", integrationHeaderSummary(len(mcpRows), failed))}
 	if !expanded {
 		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(lines))
 	}
@@ -614,7 +620,7 @@ func (m *Model) buildInfoPanelAgentListBlockWithHits(lineW int) (string, []infoP
 	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(blockLines)), rowHits
 }
 
-func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
+func (m *Model) buildInfoPanelSkillsBlock(lineW int, integrations infoPanelIntegrations) string {
 	type infoPanelSkillEntry struct {
 		name       string
 		invocation skill.InvocationState
@@ -622,7 +628,7 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 
 	entries := make([]infoPanelSkillEntry, 0)
 	indexByName := make(map[string]int)
-	for _, sk := range m.infoPanelSkills() {
+	for _, sk := range integrations.skills {
 		if sk == nil || strings.TrimSpace(sk.Name) == "" {
 			continue
 		}
@@ -642,7 +648,7 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 			},
 		})
 	}
-	for _, sk := range m.agent.InvokedSkills() {
+	for _, sk := range integrations.invoked {
 		if sk == nil || strings.TrimSpace(sk.Name) == "" {
 			continue
 		}
@@ -651,20 +657,18 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int) string {
 			continue
 		}
 	}
-	if provider, ok := m.agent.(agent.FocusedSkillInvocationStateProvider); ok {
-		for _, state := range provider.FocusedSkillInvocationStates() {
-			if state.Meta == nil {
-				continue
-			}
-			if index, exists := indexByName[strings.TrimSpace(state.Meta.Name)]; exists {
-				entries[index].invocation = state
-			}
+	for _, state := range integrations.states {
+		if state.Meta == nil {
+			continue
+		}
+		if index, exists := indexByName[strings.TrimSpace(state.Meta.Name)]; exists {
+			entries[index].invocation = state
 		}
 	}
 	if len(entries) == 0 {
 		return ""
 	}
-	expanded := !m.isInfoPanelSectionCollapsed(infoPanelSectionSkills)
+	expanded := !m.infoPanelSectionCollapsed(infoPanelSectionSkills, integrations.collapsed(infoPanelSectionSkills))
 	skillLines := []string{renderInfoPanelCollapsibleHeader(lineW, expanded, "SKILLS", fmt.Sprintf("%d", len(entries)))}
 	if !expanded {
 		return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))

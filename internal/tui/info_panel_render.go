@@ -7,13 +7,11 @@ import (
 	"time"
 
 	"github.com/keakon/lipgloss/v2"
-
-	"github.com/keakon/chord/internal/agent"
 )
 
 // infoPanelFingerprint builds a cheap key over the data used to build the
 // unscrolled info panel content. The scroll offset is applied separately.
-func (m *Model) infoPanelFingerprint(width, height int) string {
+func (m *Model) infoPanelFingerprint(width, height int, integrations infoPanelIntegrations) string {
 	var b strings.Builder
 	appendInt := func(v int) {
 		b.WriteString(strconv.Itoa(v))
@@ -161,38 +159,36 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendSep()
 
 	// LSP rows
-	if lp, ok := m.agent.(agent.LSPStateProvider); ok {
-		for _, r := range lp.LSPServerList() {
-			b.WriteByte('L')
-			b.WriteString(r.Name)
-			appendSep()
-			b.WriteString(r.Root)
-			appendBool(r.OK)
-			appendBool(r.Pending)
-			appendInt(r.Errors)
-			appendInt(r.Warnings)
-			b.WriteString(r.Err)
-			appendSep()
-		}
+	for _, r := range integrations.lsp {
+		b.WriteByte('L')
+		b.WriteString(r.Name)
+		appendSep()
+		b.WriteString(r.Root)
+		appendBool(r.OK)
+		appendBool(r.Pending)
+		appendBool(r.Idle)
+		appendInt(r.Errors)
+		appendInt(r.Warnings)
+		b.WriteString(r.Err)
+		appendSep()
 	}
-	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionLSP))
+	appendBool(m.infoPanelSectionCollapsed(infoPanelSectionLSP, integrations.collapsed(infoPanelSectionLSP)))
 	appendSep()
 	// MCP rows
-	if mp, ok := m.agent.(agent.MCPStateProvider); ok {
-		for _, r := range mp.MCPServerList() {
-			b.WriteByte('M')
-			b.WriteString(r.Name)
-			appendBool(r.OK)
-			appendBool(r.Pending)
-			appendBool(r.Disabled)
-			appendBool(r.Retrying)
-			appendInt(r.Attempt)
-			appendInt(r.MaxAttempts)
-			b.WriteString(r.Err)
-			appendSep()
-		}
+	for _, r := range integrations.mcp {
+		b.WriteByte('M')
+		b.WriteString(r.Name)
+		appendBool(r.OK)
+		appendBool(r.Pending)
+		appendBool(r.Idle)
+		appendBool(r.Disabled)
+		appendBool(r.Retrying)
+		appendInt(r.Attempt)
+		appendInt(r.MaxAttempts)
+		b.WriteString(r.Err)
+		appendSep()
 	}
-	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionMCP))
+	appendBool(m.infoPanelSectionCollapsed(infoPanelSectionMCP, integrations.collapsed(infoPanelSectionMCP)))
 	appendSep()
 
 	// Git status
@@ -228,24 +224,46 @@ func (m *Model) infoPanelFingerprint(width, height int) string {
 	appendSep()
 
 	// Invoked skills
-	for _, sk := range m.infoPanelSkills() {
+	for _, sk := range integrations.skills {
 		if sk == nil {
 			continue
 		}
 		b.WriteByte('K')
 		b.WriteString(sk.Name)
 		b.WriteString(sk.Description)
+		appendBool(sk.Invoked)
+		appendBool(sk.DisableModelInvocation)
 		appendSep()
 	}
-	for _, sk := range m.agent.InvokedSkills() {
+	for _, sk := range integrations.invoked {
+		if sk == nil {
+			continue
+		}
 		b.WriteByte('S')
 		b.WriteString(sk.Name)
 		b.WriteString(sk.Description)
 		appendBool(sk.Discovered)
 		appendSep()
 	}
-	appendBool(m.isInfoPanelSectionCollapsed(infoPanelSectionSkills))
+	appendBool(m.infoPanelSectionCollapsed(infoPanelSectionSkills, integrations.collapsed(infoPanelSectionSkills)))
 	appendSep()
+
+	// Invocation state controls the row icons independently of the catalog.
+	for _, state := range integrations.states {
+		if state.Meta == nil {
+			continue
+		}
+		b.WriteByte('I')
+		b.WriteString(state.Meta.Name)
+		appendSep()
+		appendBool(state.BodyPresent)
+		appendBool(state.LoadedEarlier)
+		appendBool(state.PathActivated)
+		appendBool(state.NoticeRecorded)
+		appendBool(state.ModelCallable)
+		appendBool(state.UserLoadable)
+		appendSep()
+	}
 
 	// Changed files
 	appendUint64(m.sidebar.fileEditRevision())
@@ -314,7 +332,8 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 	// Fingerprint-based cache: skip rebuilding when inputs are unchanged.
 	// Scrolling invalidates only cachedInfoPanelOut, preserving the complete
 	// rendered content for a cheap viewport slice below.
-	fp := m.infoPanelFingerprint(width, 0)
+	integrations := m.captureInfoPanelIntegrations()
+	fp := m.infoPanelFingerprint(width, 0, integrations)
 	contentCached := fp == m.cachedInfoPanelFP &&
 		m.cachedInfoPanelW == width
 	if contentCached && m.cachedInfoPanelOutValid && m.cachedInfoPanelH == height {
@@ -347,9 +366,9 @@ func (m *Model) renderInfoPanel(width int, height int) string {
 		}
 		appendBlock("", m.buildInfoPanelUsageBlock(width, lineW))
 		appendBlock("", m.buildInfoPanelTimeBlock(lineW))
-		appendBlock(infoPanelSectionLSP, m.buildInfoPanelLSPBlock(lineW))
-		appendBlock(infoPanelSectionMCP, m.buildInfoPanelMCPBlock(lineW))
-		appendBlock(infoPanelSectionSkills, m.buildInfoPanelSkillsBlock(lineW))
+		appendBlock(infoPanelSectionLSP, m.buildInfoPanelLSPBlock(lineW, integrations))
+		appendBlock(infoPanelSectionMCP, m.buildInfoPanelMCPBlock(lineW, integrations))
+		appendBlock(infoPanelSectionSkills, m.buildInfoPanelSkillsBlock(lineW, integrations))
 		appendBlock(infoPanelSectionGit, m.buildInfoPanelGitBlock(lineW))
 		fileBaseY := m.infoPanelRenderCursorY
 		appendBlock(infoPanelSectionFiles, m.buildInfoPanelFilesBlock(lineW))

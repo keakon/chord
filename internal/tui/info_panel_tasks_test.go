@@ -420,9 +420,9 @@ func TestInfoPanelOwnerReasonInvalidatesCache(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)
 	for _, reason := range []string{"Choose API A", "Choose API B", ""} {
-		previous := m.infoPanelFingerprint(48, 60)
+		previous := m.infoPanelFingerprint(48, 60, m.captureInfoPanelIntegrations())
 		m.sidebar.Update([]agent.SubAgentInfo{{InstanceID: "worker", State: "waiting_main", AwaitingOwnerReason: reason}}, "worker", "orchestrator")
-		if previous == m.infoPanelFingerprint(48, 60) {
+		if previous == m.infoPanelFingerprint(48, 60, m.captureInfoPanelIntegrations()) {
 			t.Fatal("reason change did not invalidate fingerprint")
 		}
 		plain := terminaltext.StripANSI(m.renderInfoPanel(48, 60))

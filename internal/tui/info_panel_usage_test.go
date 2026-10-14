@@ -25,7 +25,7 @@ func TestUsageUpdatedEventInvalidatesInfoPanelCache(t *testing.T) {
 	}
 	backend.contextCurrent = 2_000
 	backend.usage.InputTokens = 2_000
-	m.cachedInfoPanelFP = m.infoPanelFingerprint(40, 24)
+	m.cachedInfoPanelFP = m.infoPanelFingerprint(40, 24, m.captureInfoPanelIntegrations())
 	m.cachedInfoPanelOut = first
 
 	m.handleAgentEvent(agentEventMsg{event: agent.UsageUpdatedEvent{}})
@@ -639,14 +639,14 @@ func TestRenderInfoPanelTimeBlockHidesZeroBuckets(t *testing.T) {
 func TestInfoPanelFingerprintChangesWhenWalltimeBucketChanges(t *testing.T) {
 	backend := newInfoPanelAgent()
 	m := NewModel(backend)
-	first := m.infoPanelFingerprint(42, 24)
+	first := m.infoPanelFingerprint(42, 24, m.captureInfoPanelIntegrations())
 	backend.walltimeStats = analytics.WalltimeStats{Tool: 3 * time.Second}
-	second := m.infoPanelFingerprint(42, 24)
+	second := m.infoPanelFingerprint(42, 24, m.captureInfoPanelIntegrations())
 	if first == second {
 		t.Fatalf("fingerprint must change when a walltime bucket changes")
 	}
 	backend.walltimeStats = analytics.WalltimeStats{Tool: 3 * time.Second, Cooldown: 1 * time.Second}
-	third := m.infoPanelFingerprint(42, 24)
+	third := m.infoPanelFingerprint(42, 24, m.captureInfoPanelIntegrations())
 	if third == second {
 		t.Fatalf("fingerprint must change when a second bucket appears")
 	}

@@ -301,23 +301,23 @@ func TestInfoPanelCollapsedJobsShowsHeaderOnly(t *testing.T) {
 func TestInfoPanelFingerprintTracksRunningJobs(t *testing.T) {
 	m := newJobsTestModel(t, 160, 60)
 	refreshJobs(m)
-	before := m.infoPanelFingerprint(32, 0)
+	before := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
 
 	id := startTestJob(t, "sleep 60", "fingerprint job")
 	refreshJobs(m)
 	bucket := time.Now().Unix()
-	withJob := m.infoPanelFingerprint(32, 0)
+	withJob := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
 	if withJob == before {
 		t.Fatal("fingerprint did not change when a job started")
 	}
-	if again := m.infoPanelFingerprint(32, 0); again != withJob && time.Now().Unix() == bucket {
+	if again := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations()); again != withJob && time.Now().Unix() == bucket {
 		t.Fatal("fingerprint changed within the same second bucket")
 	}
 
 	tools.StopJobByUser(id, "test")
 	waitForJobStatus(t, id, "killed")
 	refreshJobs(m)
-	killed := m.infoPanelFingerprint(32, 0)
+	killed := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
 	if killed == withJob {
 		t.Fatal("fingerprint did not change when the job was killed")
 	}
@@ -1180,12 +1180,12 @@ func TestInfoPanelJobsElapsedAdvancesPerSecond(t *testing.T) {
 	m.jobsSnapshotFrame = m.renderFrameGeneration
 
 	t0 := time.Now()
-	first := m.infoPanelFingerprint(32, 0)
+	first := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
 	firstRendered := terminaltext.StripANSI(m.renderInfoPanel(32, 60))
 
 	// Inside one second bucket the key is stable, so the panel is reused instead
 	// of being rebuilt on every frame.
-	if again := m.infoPanelFingerprint(32, 0); again != first && time.Now().Unix() == t0.Unix() {
+	if again := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations()); again != first && time.Now().Unix() == t0.Unix() {
 		t.Fatal("JOBS fingerprint changed inside one second bucket")
 	}
 
@@ -1198,7 +1198,7 @@ func TestInfoPanelJobsElapsedAdvancesPerSecond(t *testing.T) {
 	if elapsed := time.Since(t0); elapsed < 1050*time.Millisecond {
 		t.Fatalf("setup: bounded wait only reached %v", elapsed)
 	}
-	second := m.infoPanelFingerprint(32, 0)
+	second := m.infoPanelFingerprint(32, 0, m.captureInfoPanelIntegrations())
 	if second == first {
 		t.Fatal("JOBS fingerprint should advance across second buckets")
 	}
