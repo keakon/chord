@@ -133,12 +133,7 @@ func parseDisplayedReadRange(content string) ReadRange {
 	if standard := ParseReadResultHeaderRange(firstLine); standard.OK {
 		return standard
 	}
-	if strings.HasPrefix(firstLine, "(showing ") {
-		if legacy := parseLegacyDisplayedReadRange(firstLine); legacy.OK {
-			return legacy
-		}
-	}
-	if !hasMore || (!strings.Contains(rest, "READ_RESULT") && !strings.Contains(rest, "(showing ")) {
+	if !hasMore || !strings.Contains(rest, "READ_RESULT") {
 		return ReadRange{}
 	}
 
@@ -149,13 +144,7 @@ func parseDisplayedReadRange(content string) ReadRange {
 			found = standard
 			return false
 		}
-		if !strings.HasPrefix(line, "(showing ") {
-			return true
-		}
-		if legacy := parseLegacyDisplayedReadRange(line); legacy.OK {
-			found = legacy
-			return false
-		}
+
 		return true
 	})
 	return found
@@ -216,20 +205,6 @@ func ParseReadResultHeaderRange(line string) ReadRange {
 	}
 	out.OK = haveRange && haveTotal
 	return out
-}
-
-func parseLegacyDisplayedReadRange(line string) ReadRange {
-	var out ReadRange
-	if n, _ := fmt.Sscanf(line, "(showing lines %d-%d of %d total", &out.Start, &out.End, &out.Total); n == 3 {
-		out.OK = true
-		return out
-	}
-	if n, _ := fmt.Sscanf(line, "(showing line %d of %d total", &out.Start, &out.Total); n == 2 {
-		out.End = out.Start
-		out.OK = true
-		return out
-	}
-	return ReadRange{}
 }
 
 // readReductionTruncatedKind picks the READ_RESULT truncation marker and a

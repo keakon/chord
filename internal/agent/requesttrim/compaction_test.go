@@ -249,23 +249,14 @@ func TestParseDisplayedReadRangeReadResultAllocsGuard(t *testing.T) {
 	}
 }
 
-func TestParseDisplayedReadRangeSupportsLegacyFooter(t *testing.T) {
-	content := strings.Join([]string{
-		"source line 1",
-		"source line 2",
-		"(showing lines 41-42 of 200 total)",
-	}, "\n")
-
-	got := parseDisplayedReadRange(content)
-	if !got.OK || got.Start != 41 || got.End != 42 || got.Total != 200 {
-		t.Fatalf("parseDisplayedReadRange() = %+v, want 41-42/200", got)
-	}
-}
-
-func TestParseDisplayedReadRangeSupportsLegacySingleLineFooter(t *testing.T) {
-	got := parseDisplayedReadRange("source line\n(showing line 7 of 20 total)")
-	if !got.OK || got.Start != 7 || got.End != 7 || got.Total != 20 {
-		t.Fatalf("parseDisplayedReadRange() = %+v, want 7-7/20", got)
+func TestParseDisplayedReadRangeIgnoresUnstructuredText(t *testing.T) {
+	for _, content := range []string{
+		"(showing lines 41-42 of 200 total)\nsource line",
+		"source line\n(showing line 7 of 20 total)",
+	} {
+		if got := parseDisplayedReadRange(content); got.OK {
+			t.Fatalf("unexpected metadata: %+v", got)
+		}
 	}
 }
 

@@ -4,6 +4,10 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ## Unreleased
 
+### Breaking Changes
+
+- Restored sessions no longer interpret unstructured read-output range footers. Read affected files again to restore structured range metadata for request trimming; saved conversation text remains intact.
+
 ### Features
 
 - Native Gemini endpoints support opt-in continuation across requests and recovery with a fixed target. Local tools wait for final confirmation; multi-request billing and context-window observations are tracked separately.
