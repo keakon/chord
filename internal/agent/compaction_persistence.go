@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/compactionarchive"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/privatefs"
@@ -72,7 +73,7 @@ func (a *MainAgent) exportCompactionHistory(archivedHead, sourcePrefix []message
 	// the checkpoint wrapper can tell the model to read the index first and
 	// then only the line ranges it needs (whole-file reads truncate and
 	// re-inflate the context).
-	md := buildCompactionArchiveIndexedMarkdown(session.ExportToMarkdown(exported))
+	md := compactionarchive.WithIndex(session.ExportToMarkdown(exported))
 	if err := privatefs.WriteFile(sessionDir, absPath, []byte(md)); err != nil {
 		return "", nil, "", err
 	}

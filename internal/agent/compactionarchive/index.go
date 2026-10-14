@@ -1,4 +1,6 @@
-package agent
+// Package compactionarchive formats navigable indexes for compaction history.
+// It performs no file I/O and does not modify session or checkpoint state.
+package compactionarchive
 
 import (
 	"strconv"
@@ -48,10 +50,10 @@ type archiveSegment struct {
 	snippet string
 }
 
-// buildCompactionArchiveIndexedMarkdown returns md with a message-segment
+// WithIndex returns md with a message-segment
 // index prepended. Segment start lines in the index reference line numbers in
 // the returned document. Returns md unchanged when no segment is found.
-func buildCompactionArchiveIndexedMarkdown(md string) string {
+func WithIndex(md string) string {
 	segs := scanCompactionArchiveSegments(md)
 	if len(segs) == 0 {
 		return md
