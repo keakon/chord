@@ -83,6 +83,8 @@ make docs-check
 make docs-examples-check
 ```
 
+`make gopls-check` selects production, cgo, internal-test, and external-test files with `go list` for the current `GOOS`/`GOARCH`. It fails on diagnostics even when gopls exits successfully, as well as on package-loading or tool failures. CI checks linux/amd64, darwin/arm64, and windows/amd64; other operating systems are outside this gate. To check another supported target locally, run `GOOS=windows GOARCH=amd64 CGO_ENABLED=0 make gopls-check`. Python 3 is required to read the package metadata. Run `scripts/test_gopls_check.sh` after changing the gate.
+
 `make modernize-check` runs the pinned `golang.org/x/tools/go/analysis/passes/modernize` command across production and test code. Update `MODERNIZE_VERSION` in the Makefile deliberately when adopting a newer analyzer release; do not replace the pinned version with `@latest`, because new releases may add checks and fail the existing baseline.
 
 `make deadcode-check` compares the symbols that are unreachable from the production entry points against the baselines in `scripts/deadcode-baseline/`, one file per analyzed `GOOS/GOARCH`. CI checks every baseline — linux/amd64, windows/amd64, and darwin/arm64 — by pointing `GOOS`/`GOARCH` at each target from one runner; a local run analyzes the host platform unless the environment selects another. A new unreachable symbol fails the gate: remove it, or add it to the matching baseline in a dedicated commit with the platform and a reason. Removing symbols shrinks the baseline, so cleanup commits carry their own baseline updates.

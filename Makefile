@@ -52,7 +52,7 @@ staticcheck:
 	$(STATICCHECK) -checks 'all,-ST1000' $(PKGS)
 
 gopls-check:
-	git ls-files -z '*.go' | xargs -0 $(GOPLS) check
+	CHORD_GO='$(GO)' GOPLS='$(GOPLS)' ./scripts/check_gopls.sh $(PKGS)
 
 modernize-check:
 	$(MODERNIZE) -test $(PKGS)
