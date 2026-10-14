@@ -8,7 +8,6 @@ import (
 	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -23,74 +22,74 @@ func TestToolResultSummaryLineShowsTerminalStates(t *testing.T) {
 			// The shared ↳ Cancelled envelope owns the cancellation, so the
 			// summary line must stay empty instead of printing it twice.
 			name: "cancelled generic",
-			blk:  &Block{ToolName: "write", ResultDone: true, ResultStatus: agent.ToolResultStatusCancelled, ResultContent: "cancelled"},
+			blk:  &Block{ToolName: "write", ResultDone: true, ResultStatus: message.ToolStatusCancelled, ResultContent: "cancelled"},
 			want: "",
 		},
 		{
 			name: "job_kill failed",
-			blk:  &Block{ToolName: tools.NameJobKill, ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
+			blk:  &Block{ToolName: tools.NameJobKill, ResultDone: true, ResultStatus: message.ToolStatusError, ResultContent: "boom"},
 			want: "",
 		},
 		{
 			name: "shell failed",
-			blk:  &Block{ToolName: tools.NameShell, ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
+			blk:  &Block{ToolName: tools.NameShell, ResultDone: true, ResultStatus: message.ToolStatusError, ResultContent: "boom"},
 			want: "",
 		},
 		{
 			name: "job_output failed",
-			blk:  &Block{ToolName: tools.NameJobOutput, ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
+			blk:  &Block{ToolName: tools.NameJobOutput, ResultDone: true, ResultStatus: message.ToolStatusError, ResultContent: "boom"},
 			want: "",
 		},
 		{
 			name: "delegate failed",
-			blk:  &Block{ToolName: "delegate", ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
+			blk:  &Block{ToolName: "delegate", ResultDone: true, ResultStatus: message.ToolStatusError, ResultContent: "boom"},
 			want: "",
 		},
 		{
 			name: "grep failed",
-			blk:  &Block{ToolName: "grep", ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
+			blk:  &Block{ToolName: "grep", ResultDone: true, ResultStatus: message.ToolStatusError, ResultContent: "boom"},
 			want: "",
 		},
 		{
 			name: "glob failed",
-			blk:  &Block{ToolName: "glob", ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
+			blk:  &Block{ToolName: "glob", ResultDone: true, ResultStatus: message.ToolStatusError, ResultContent: "boom"},
 			want: "",
 		},
 		{
 			name: "cancel failed",
-			blk:  &Block{ToolName: "cancel", ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
+			blk:  &Block{ToolName: "cancel", ResultDone: true, ResultStatus: message.ToolStatusError, ResultContent: "boom"},
 			want: "",
 		},
 		{
 			name: "notify failed",
-			blk:  &Block{ToolName: "notify", ResultDone: true, ResultStatus: agent.ToolResultStatusError, ResultContent: "boom"},
+			blk:  &Block{ToolName: "notify", ResultDone: true, ResultStatus: message.ToolStatusError, ResultContent: "boom"},
 			want: "",
 		},
 		{
 			// The shell card owns its own exit/output surface, and the
 			// collapsed card names a background handle instead.
 			name: "shell success has no inline summary",
-			blk:  &Block{ToolName: tools.NameShell, ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, ResultContent: "ok"},
+			blk:  &Block{ToolName: tools.NameShell, ResultDone: true, ResultStatus: message.ToolStatusSuccess, ResultContent: "ok"},
 			want: "",
 		},
 		{
 			name: "job_output success has no inline summary",
-			blk:  &Block{ToolName: tools.NameJobOutput, ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, ResultContent: "out\n[status: completed]"},
+			blk:  &Block{ToolName: tools.NameJobOutput, ResultDone: true, ResultStatus: message.ToolStatusSuccess, ResultContent: "out\n[status: completed]"},
 			want: "",
 		},
 		{
 			name: "job_kill success names the requested stop",
-			blk:  &Block{ToolName: tools.NameJobKill, ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, ResultContent: "job job-64 stopping (cancelled by job_kill)\n[status: stopping]"},
+			blk:  &Block{ToolName: tools.NameJobKill, ResultDone: true, ResultStatus: message.ToolStatusSuccess, ResultContent: "job job-64 stopping (cancelled by job_kill)\n[status: stopping]"},
 			want: "Stop requested",
 		},
 		{
 			name: "delegate done summary",
-			blk:  &Block{ToolName: "delegate", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, DoneSummary: "done"},
+			blk:  &Block{ToolName: "delegate", ResultDone: true, ResultStatus: message.ToolStatusSuccess, DoneSummary: "done"},
 			want: "Done",
 		},
 		{
 			name: "grep count",
-			blk:  &Block{ToolName: "grep", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess, ResultContent: "a.go:1:one\nb.go:2:two"},
+			blk:  &Block{ToolName: "grep", ResultDone: true, ResultStatus: message.ToolStatusSuccess, ResultContent: "a.go:1:one\nb.go:2:two"},
 			want: "2 matches",
 		},
 	}
@@ -248,7 +247,7 @@ func TestCollapsedJobListCardCountsItsJobs(t *testing.T) {
 			block := &Block{
 				ID: 1, Type: BlockToolCall, ToolName: tools.NameJobList,
 				Content: `{}`, ResultContent: tt.result, ResultDone: true,
-				ResultStatus: agent.ToolResultStatusSuccess, ToolCallDetailExpanded: tt.expanded,
+				ResultStatus: message.ToolStatusSuccess, ToolCallDetailExpanded: tt.expanded,
 			}
 			plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 			if !strings.Contains(plain, tt.want) {
@@ -274,7 +273,7 @@ func TestCollapsedJobOutputCardSummarizesItsRead(t *testing.T) {
 			block := &Block{
 				ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
 				Content: `{"job_id":"job-8"}`, ResultContent: tt.result, ResultDone: true,
-				ResultStatus: agent.ToolResultStatusSuccess,
+				ResultStatus: message.ToolStatusSuccess,
 			}
 			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if !strings.Contains(plain, tt.want) {
@@ -293,7 +292,7 @@ func TestNarrowCollapsedJobOutputCardKeepsItsJobID(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
 		Content: `{"job_id":"job-8"}`, ResultContent: "line one\nline two\n[status: running]",
-		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
 		PersistedDuration: 30 * time.Second,
 	}
 	wide := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -328,7 +327,7 @@ func TestJobOutputHeaderSpendsItsWholeBudget(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameJobOutput,
 		Content: `{"job_id":"job-8"}`, ResultContent: "line one\nline two\n[status: running]",
-		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
 		PersistedDuration: 30 * time.Second,
 		// An ignored argument puts the styled option group on the header too,
 		// so the suffix width has to account for the group, the summary and
@@ -394,7 +393,7 @@ func TestNarrowJobOutputCardKeepsIDWhenElapsedIsPresent(t *testing.T) {
 		Content:           `{"job_id":"job-8"}`,
 		ResultContent:     "line one\nline two\n[status: running]",
 		ResultDone:        true,
-		ResultStatus:      agent.ToolResultStatusSuccess,
+		ResultStatus:      message.ToolStatusSuccess,
 		PersistedDuration: 30 * time.Second,
 	}
 	wide := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -428,7 +427,7 @@ func TestCollapsedShellCardNamesItsJobID(t *testing.T) {
 		Content:                `{"command":".venv/bin/python -u step1_local_run.py","description":"batch run"}`,
 		ResultContent:          "[background job job-64] promoted after the foreground budget",
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: false,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
@@ -458,7 +457,7 @@ func TestCollapsedShellCardOmitsHandleForForegroundRun(t *testing.T) {
 		Content:       `{"command":"echo hi","description":"quick"}`,
 		ResultContent: "hi",
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if strings.Contains(plain, "Background job") {
@@ -479,7 +478,7 @@ func TestCollapsedJobKillCardKeepsOneID(t *testing.T) {
 		Content:                `{"job_id":"job-64"}`,
 		ResultContent:          "job job-64 stopping (cancelled by job_kill)\n[status: stopping]",
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: false,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
@@ -507,7 +506,7 @@ func TestExpandedShellCardShowsFullResultBody(t *testing.T) {
 		Content:                `{"command":".venv/bin/python -u step1_local_run.py","description":"batch run"}`,
 		ResultContent:          "[background job job-64] promoted after the foreground budget",
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: true,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
@@ -525,7 +524,7 @@ func TestExpandedToolResultRendersTerminalStateSummary(t *testing.T) {
 		Collapsed:              false,
 		Content:                `{"job_id":"job-64"}`,
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusError,
+		ResultStatus:           message.ToolStatusError,
 		ResultContent:          "job not found",
 		ToolCallDetailExpanded: true,
 	}

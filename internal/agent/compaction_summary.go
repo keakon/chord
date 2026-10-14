@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
@@ -332,7 +333,7 @@ func buildGoalAnchor(messages []message.Message) string {
 		if !isPlainUserRequestForCompaction(text) {
 			continue
 		}
-		return "- " + strings.ReplaceAll(compactTextSnippet(text, 300), "\n", " ")
+		return "- " + strings.ReplaceAll(requesttrim.TextSnippet(text, 300), "\n", " ")
 	}
 	return "- (not confidently recoverable from retained head)"
 }
@@ -349,7 +350,7 @@ func buildDecisionAnchor(messages []message.Message) string {
 		}
 		lower := strings.ToLower(text)
 		if strings.Contains(lower, "decid") || strings.Contains(lower, "plan") || strings.Contains(text, "方案") || strings.Contains(text, "决定") {
-			lines = append(lines, "- "+strings.ReplaceAll(compactTextSnippet(text, 220), "\n", " "))
+			lines = append(lines, "- "+strings.ReplaceAll(requesttrim.TextSnippet(text, 220), "\n", " "))
 			if len(lines) >= 3 {
 				break
 			}
@@ -365,7 +366,7 @@ func buildProgressAnchor(messages []message.Message, items []evidenceItem) strin
 	var lines []string
 	for _, item := range items {
 		if item.Kind == evidenceToolDiff || item.Kind == evidenceToolError || item.Kind == evidenceEscalate || item.Kind == evidenceSubAgentDone {
-			lines = append(lines, "- "+item.Title+": "+strings.ReplaceAll(compactTextSnippet(item.Excerpt, 180), "\n", " "))
+			lines = append(lines, "- "+item.Title+": "+strings.ReplaceAll(requesttrim.TextSnippet(item.Excerpt, 180), "\n", " "))
 		}
 		if len(lines) >= 4 {
 			break
@@ -381,7 +382,7 @@ func buildProgressAnchor(messages []message.Message, items []evidenceItem) strin
 			if text == "" {
 				continue
 			}
-			lines = append(lines, "- "+strings.ReplaceAll(compactTextSnippet(text, 180), "\n", " "))
+			lines = append(lines, "- "+strings.ReplaceAll(requesttrim.TextSnippet(text, 180), "\n", " "))
 		}
 	}
 	if len(lines) == 0 {
@@ -762,7 +763,7 @@ func formatRecentTailAnchor(messages []message.Message) string {
 		if text == "" {
 			continue
 		}
-		fmt.Fprintf(&sb, "- %s: %s\n", msg.Role, compactTextSnippet(text, 220))
+		fmt.Fprintf(&sb, "- %s: %s\n", msg.Role, requesttrim.TextSnippet(text, 220))
 	}
 	out := strings.TrimRight(sb.String(), "\n")
 	if out == "" {
@@ -886,7 +887,7 @@ func fallbackAnchorSnippet(anchor fallbackAnchor) string {
 	if text == "" {
 		return "unknown"
 	}
-	return strings.ReplaceAll(compactTextSnippet(text, 260), "\n", " ")
+	return strings.ReplaceAll(requesttrim.TextSnippet(text, 260), "\n", " ")
 }
 
 func usableFallbackAnchor(anchor string) bool {
@@ -1054,7 +1055,7 @@ func fallbackFilesAndEvidenceSection(historyPath string, input *compactionInput,
 	if input != nil {
 		for _, item := range input.EvidenceItems {
 			if item.Kind == evidenceToolDiff || item.Kind == evidenceToolError {
-				lines = append(lines, "- "+item.Title+": "+strings.ReplaceAll(compactTextSnippet(item.Excerpt, 160), "\n", " "))
+				lines = append(lines, "- "+item.Title+": "+strings.ReplaceAll(requesttrim.TextSnippet(item.Excerpt, 160), "\n", " "))
 			}
 		}
 	}
@@ -1069,7 +1070,7 @@ func fallbackOpenProblemsSection(input *compactionInput, summarizeErr error) str
 	if input != nil {
 		for _, item := range input.EvidenceItems {
 			if item.Kind == evidenceToolError || item.Kind == evidenceEscalate {
-				lines = append(lines, "- "+strings.ReplaceAll(compactTextSnippet(item.Excerpt, 180), "\n", " "))
+				lines = append(lines, "- "+strings.ReplaceAll(requesttrim.TextSnippet(item.Excerpt, 180), "\n", " "))
 			}
 		}
 	}
@@ -1154,10 +1155,10 @@ func ensureCompactionTodoSnapshot(summary string, todos []tools.TodoItem) string
 	snapshot.WriteString("- Complete pre-compaction runtime state; classify against the latest user request and reconcile with ## Progress above before acting:\n")
 	kept, omitted := boundedTodoSnapshotItems(todos)
 	for _, todo := range kept {
-		content := escapeTodoContentLine(compactTextSnippet(todo.Content, compactTodoSnapshotItemChars))
+		content := escapeTodoContentLine(requesttrim.TextSnippet(todo.Content, compactTodoSnapshotItemChars))
 		fmt.Fprintf(&snapshot, "  - [%s] %s: %s", todo.Status, todo.ID, content)
 		if activeForm := strings.TrimSpace(todo.ActiveForm); activeForm != "" {
-			fmt.Fprintf(&snapshot, " | active: %s", escapeTodoContentLine(compactTextSnippet(activeForm, compactTodoSnapshotItemChars)))
+			fmt.Fprintf(&snapshot, " | active: %s", escapeTodoContentLine(requesttrim.TextSnippet(activeForm, compactTodoSnapshotItemChars)))
 		}
 		snapshot.WriteByte('\n')
 	}
@@ -1280,8 +1281,8 @@ func subAgentsForCompactionPrompt(subAgents []SubAgentInfo) (visible []SubAgentI
 			continue
 		}
 		copySub := sub
-		copySub.TaskDesc = strings.ReplaceAll(compactTextSnippet(strings.TrimSpace(copySub.TaskDesc), compactPromptDescMaxChars), "\n", " ")
-		copySub.LastSummary = strings.ReplaceAll(compactTextSnippet(strings.TrimSpace(copySub.LastSummary), compactPromptSummaryMaxChars), "\n", " ")
+		copySub.TaskDesc = strings.ReplaceAll(requesttrim.TextSnippet(strings.TrimSpace(copySub.TaskDesc), compactPromptDescMaxChars), "\n", " ")
+		copySub.LastSummary = strings.ReplaceAll(requesttrim.TextSnippet(strings.TrimSpace(copySub.LastSummary), compactPromptSummaryMaxChars), "\n", " ")
 		visible = append(visible, copySub)
 	}
 	return visible, omittedActive, omittedInactive
@@ -1483,14 +1484,6 @@ func formatTodosForPrompt(todos []tools.TodoItem) string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func blankToDefault(value, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
 func buildTruncateOnlySummary(historyPath string, summarizeErr error, keyFiles []string, todos []tools.TodoItem, subAgents []SubAgentInfo) string {
 	return renderFallbackSummarySections([]fallbackSummarySection{
 		{"## Current User Request", "- Latest request was not relevance-filtered because model summarization was unavailable; read the preserved recent context and archived history before acting."},
@@ -1505,4 +1498,12 @@ func buildTruncateOnlySummary(historyPath string, summarizeErr error, keyFiles [
 		{checkpointOpenProblemsHeading, fallbackOpenProblemsSection(nil, summarizeErr)},
 		{"## Next Step", "- Continue from the latest preserved user request, archived history, and listed key files."},
 	})
+}
+
+func blankToDefault(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
 }

@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/worktree"
 )
@@ -62,7 +63,7 @@ func checkpointRunsGitCommit(command string) bool {
 		if len(args) < 2 || args[0] != "git" {
 			continue
 		}
-		if subcommand, ok := gitSubcommand(args); ok && subcommand == "commit" {
+		if subcommand, ok := requesttrim.GitSubcommand(args); ok && subcommand == "commit" {
 			return true
 		}
 	}
@@ -263,7 +264,7 @@ func renderCheckpointWorklogBlock(title string, rows []string, omitted int) stri
 // and caps its length. A newline inside a path or command could otherwise
 // forge a section heading the checkpoint readers key on.
 func checkpointWorklogItem(text string) string {
-	return llm.TruncateStringRunes(oneLineCheckpointText(text), compactWorklogItemChars, "…")
+	return texttruncate.Runes(oneLineCheckpointText(text), compactWorklogItemChars, "…")
 }
 
 // applyCheckpointMachineState adds the runtime-owned machine sections to a

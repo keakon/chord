@@ -11,6 +11,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -35,7 +36,7 @@ func TestViewImageResultDisplaysImageAfterTextOnlyPreview(t *testing.T) {
 			m := NewModelWithSize(nil, 80, 100)
 			m.imageCaps = caps
 			m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "image-call", Name: tools.NameViewImage, ArgsJSON: string(args)})
-			event := agent.ToolResultEvent{Name: tools.NameViewImage, CallID: "image-call", Result: result, Status: agent.ToolResultStatusSuccess}
+			event := agent.ToolResultEvent{Name: tools.NameViewImage, CallID: "image-call", Result: result, Status: message.ToolStatusSuccess}
 			m.handleAgentEvent(agentEventMsg{event: event})
 			event.Parts = sink.Drain()
 			out := &fakeTerminalImageOut{}

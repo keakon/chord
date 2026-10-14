@@ -10,6 +10,7 @@ import (
 
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 // TestIMESwitchIfTransitionOnlyTriggersForNormalModes verifies that
@@ -406,7 +407,7 @@ func TestMouseClickInputZoneClearsActiveSearchSession(t *testing.T) {
 	m.height = 24
 	m.layout = m.generateLayout(m.width, m.height)
 	_ = m.renderStatusBar()
-	clickX := m.layout.input.Min.X + inputPromptWidth
+	clickX := m.layout.input.Min.X + composer.PromptWidth
 	clickY := m.layout.input.Min.Y + 1
 	updated, _ := m.Update(tea.MouseClickMsg{X: clickX, Y: clickY, Button: tea.MouseLeft})
 	model := updated.(*Model)

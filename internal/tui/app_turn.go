@@ -10,6 +10,7 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 type focusedContinueAction uint8
@@ -610,7 +611,7 @@ func (m *Model) loadLastUserMessageToComposer() tea.Cmd {
 		return nil
 	}
 	m.editingQueuedDraftID = ""
-	text, inlinePastes := displayTextAndInlinePastes(parts, "")
+	text, inlinePastes := composer.DisplayTextAndInlinePastes(parts, "")
 	nextPasteSeq := 0
 	for _, paste := range inlinePastes {
 		if paste.Seq > nextPasteSeq {
@@ -622,8 +623,8 @@ func (m *Model) loadLastUserMessageToComposer() tea.Cmd {
 		text, _ = queuedDraftTextAndImageCount(draft)
 	}
 	m.input.SetDisplayValueAndPastes(text, inlinePastes, nextPasteSeq)
-	m.input.editBoundary++
-	m.input.syncHeight()
+	m.input.BeginDraft()
+	m.input.SyncHeight()
 	m.attachments = attachmentsFromParts(parts)
 	m.recalcViewportSize()
 	return nil

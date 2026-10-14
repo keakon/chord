@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -178,7 +178,7 @@ func TestEditErrorCardPreviewStripsOrphans(t *testing.T) {
 		Content:       string(args),
 		RawArgs:       string(args),
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "Error: old_string not found in file, even after punctuation/whitespace tolerance.",
 	}
 
@@ -211,7 +211,7 @@ func TestApplyPatchErrorCardPreviewStripsOrphans(t *testing.T) {
 		Content:       applyPatchToolDisplayArgs(string(args)),
 		RawArgs:       string(args),
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "Error: hunk failed to apply",
 	}
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -2141,7 +2142,7 @@ func modelDrivenCurrentUserRequestSection(anchor fallbackAnchor) string {
 		// omission separator, off column zero: a line starting with "## "
 		// there would forge a section boundary, and the next inheritance
 		// pass would cut the request tail plus the truncation notice below.
-		snippet := strings.ReplaceAll(compactTextSnippet(text, modelDrivenAnchorMaxRunes), "\n", "\n  ")
+		snippet := strings.ReplaceAll(requesttrim.TextSnippet(text, modelDrivenAnchorMaxRunes), "\n", "\n  ")
 		section := stripColumnZeroHeadings("- " + anchor.Label + ": " + snippet)
 		if utf8.RuneCountInString(text) > modelDrivenAnchorMaxRunes {
 			section += "\n" + truncatedRequestNotice + " Recover the full request from the archived history files before making decisions that depend on omitted requirements; this excerpt is not the complete specification."

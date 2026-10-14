@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/keakon/chord/internal/agent"
-
 	tea "github.com/keakon/bubbletea/v2"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/inputhistory"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 func historyTestModel(t *testing.T) Model {
@@ -49,8 +49,8 @@ func waitHistoryReady(t *testing.T, m *Model) {
 	}
 }
 func TestInputHistoryStructuredRoundTrip(t *testing.T) {
-	entry := inputHistoryEntry{Display: "  [image] ", BangMode: true}
-	entry.InlinePastes = []inlineLargePaste{{Kind: inlineTokenImage, Start: 2, End: 9, DisplayText: "[image]"}}
+	entry := composer.HistoryEntry{Display: "  [image] ", BangMode: true}
+	entry.InlinePastes = []composer.Token{{Kind: composer.TokenImage, Start: 2, End: 9, DisplayText: "[image]"}}
 	parts, err := historyTextParts(entry, 1<<20)
 	if err != nil || len(parts) != 1 || parts[0].Text != "   " {
 		t.Fatal(parts, err)
@@ -66,7 +66,7 @@ func TestInputHistoryStructuredRoundTrip(t *testing.T) {
 	if _, err = historyTextParts(restored, 1<<20); err == nil {
 		t.Fatal("invalid range accepted")
 	}
-	if _, err = historyTextParts(inputHistoryEntry{Display: strings.Repeat("x", 100)}, 10); err != inputhistory.ErrTooLarge {
+	if _, err = historyTextParts(composer.HistoryEntry{Display: strings.Repeat("x", 100)}, 10); err != inputhistory.ErrTooLarge {
 		t.Fatal(err)
 	}
 }
@@ -265,9 +265,9 @@ func TestInputHistoryOpeningPreservesSelection(t *testing.T) {
 	m := historyTestModel(t)
 	m.input.SetValue("sample draft")
 	m.input.SelectRuneRange(0, 6)
-	selection, version := m.input.SelectionState(), m.input.interactionVersion
+	selection, version := m.input.SelectionState(), m.input.Revision().Interaction
 	m.openInputHistory(false)
-	if m.input.interactionVersion != version || m.input.SelectionState() != selection {
+	if m.input.Revision().Interaction != version || m.input.SelectionState() != selection {
 		t.Fatal("opening history changed the composer")
 	}
 	m.closeInputHistory()

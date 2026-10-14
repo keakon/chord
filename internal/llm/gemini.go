@@ -18,6 +18,8 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/texttruncate"
+
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
@@ -1052,7 +1054,7 @@ func parseGeminiHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 		apiErr.Type = errResp.Error.Status
 		return apiErr
 	}
-	msg := TruncateStringRunes(string(body), 200, "...")
+	msg := texttruncate.Runes(string(body), 200, "...")
 	apiErr.Message = msg
 	return apiErr
 }

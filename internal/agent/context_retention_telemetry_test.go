@@ -3,6 +3,7 @@ package agent
 import (
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/message"
 )
@@ -63,7 +64,7 @@ func TestRetentionRequestsCountExactlyOncePerRequest(t *testing.T) {
 	// The real per-request finalization path counts each prepared request once.
 	a := newTestMainAgent(t, t.TempDir())
 	a.setContextReductionStats(retentionStatsFixture())
-	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, requesttrim.Policy{})
 	if a.retentionSignals.Requests != 1 {
 		t.Fatalf("single request window requests = %v, want 1", a.retentionSignals.Requests)
 	}
@@ -116,7 +117,7 @@ func TestRetentionSignalsAccumulateAcrossRequestsAndApply(t *testing.T) {
 	// it mirrors the real request path.
 	first := retentionStatsFixture()
 	a.setContextReductionStats(first)
-	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, requesttrim.Policy{})
 	second := ContextReductionStats{
 		OverCompression: map[string]int{
 			contextReductionOverCompressionRereadChangedRevision: 1,
@@ -124,7 +125,7 @@ func TestRetentionSignalsAccumulateAcrossRequestsAndApply(t *testing.T) {
 		ArchiveReads: 2,
 	}
 	a.setContextReductionStats(second)
-	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, requesttrim.Policy{})
 
 	// The window totals accumulate across requests.
 	if a.retentionSignals.Requests != 2 {
@@ -151,7 +152,7 @@ func TestRetentionSignalsAccumulateAcrossRequestsAndApply(t *testing.T) {
 
 	// A request after the apply starts a fresh window.
 	a.setContextReductionStats(retentionStatsFixture())
-	a.rememberPreparedLLMRequest(3, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.rememberPreparedLLMRequest(3, nil, nil, nil, nil, 0, requesttrim.Policy{})
 	if a.retentionSignals.Requests != 1 {
 		t.Fatalf("post-apply window requests = %v, want 1", a.retentionSignals.Requests)
 	}
@@ -163,9 +164,9 @@ func TestCompactionAppliedEventCarriesWindowRetentionSignals(t *testing.T) {
 	a.SetUsageEventSink(func(event analytics.UsageEvent) { events = append(events, event) })
 
 	a.setContextReductionStats(retentionStatsFixture())
-	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, requesttrim.Policy{})
 	a.setContextReductionStats(retentionStatsFixture())
-	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, requesttrim.Policy{})
 
 	a.recordCompactionAppliedAnalyticsEvent(&compactionDraft{
 		PlanID: 7,
@@ -203,7 +204,7 @@ func TestCompactionAppliedEventCarriesWindowRetentionSignals(t *testing.T) {
 func TestSessionRetentionSignalsResetClearsWindow(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	a.setContextReductionStats(retentionStatsFixture())
-	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, requesttrim.Policy{})
 
 	a.resetSessionRetentionSignals()
 	if a.retentionSignals.Requests != 0 {
@@ -215,9 +216,9 @@ func TestActivateLoadedSessionRestartsRetentionSignals(t *testing.T) {
 	a := newTestMainAgent(t, t.TempDir())
 	// Session A accumulated signal totals across prepared requests.
 	a.setContextReductionStats(retentionStatsFixture())
-	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.rememberPreparedLLMRequest(1, nil, nil, nil, nil, 0, requesttrim.Policy{})
 	a.setContextReductionStats(retentionStatsFixture())
-	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, contextReductionPolicy{})
+	a.rememberPreparedLLMRequest(2, nil, nil, nil, nil, 0, requesttrim.Policy{})
 	if got := a.retentionSignals.Requests; got != 2 {
 		t.Fatalf("window requests before activation = %v, want 2", got)
 	}

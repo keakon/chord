@@ -12,6 +12,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/inputhistory"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 type inputHistoryOwner struct {
@@ -38,7 +39,7 @@ type inputHistorySearchState struct {
 	resetSelection                 bool
 	snapshotContext                context.Context
 	snapshotCancel                 context.CancelFunc
-	prepared                       inputHistoryEntry
+	prepared                       composer.HistoryEntry
 	preparedID                     string
 	preview                        inputhistory.PreviewPage
 	previewRevision                uint64
@@ -71,7 +72,7 @@ type inputHistoryPreviewMsg struct {
 type inputHistoryRestoreReadyMsg struct {
 	token inputHistoryToken
 	id    string
-	entry inputHistoryEntry
+	entry composer.HistoryEntry
 }
 type inputHistoryTickMsg struct{ generation uint64 }
 
@@ -95,7 +96,7 @@ func (m *Model) closeInputHistory() {
 	m.input.Focus()
 	m.invalidateDrawCaches()
 }
-func historyInitialQuery(entry inputHistoryEntry) (string, bool) {
+func historyInitialQuery(entry composer.HistoryEntry) (string, bool) {
 	// Walk structured objects without expanding the complete composer.
 	var b strings.Builder
 	count := 0
@@ -134,7 +135,7 @@ func historyInitialQuery(entry inputHistoryEntry) (string, bool) {
 			byteAt += n
 			runeAt++
 		}
-		if p.Kind == inlineTokenLargePaste {
+		if p.Kind == composer.TokenPaste {
 			visit(p.RawContent)
 		}
 		if done {
@@ -157,17 +158,17 @@ func (m *Model) openInputHistory(empty bool) tea.Cmd {
 	limited := false
 	if !empty {
 		var initial string
-		initial, limited = historyInitialQuery(m.input.historyEntry())
+		initial, limited = historyInitialQuery(m.input.HistoryEntry())
 		q.SetValue(initial)
 	}
 	focus := q.Focus()
 	generation := m.inputHistory.token.generation + 1
-	m.inputHistory = inputHistorySearchState{token: inputHistoryToken{generation: generation, queryRevision: 1, owner: m.inputHistoryOwner()}, interaction: m.input.interactionVersion, query: q, queryLimited: limited, loading: true}
+	m.inputHistory = inputHistorySearchState{token: inputHistoryToken{generation: generation, queryRevision: 1, owner: m.inputHistoryOwner()}, interaction: m.input.Revision().Interaction, query: q, queryLimited: limited, loading: true}
 	m.inputHistory.snapshotContext, m.inputHistory.snapshotCancel = context.WithCancel(m.inputHistoryRuntime.ctx)
 	m.closeAtMention()
 	m.mode = ModeInputHistorySearch
 	// Keep the composer selection and interaction version intact while searching.
-	m.input.textarea.Blur()
+	m.input.Suspend()
 	return tea.Batch(focus, m.requestInputHistorySnapshot(true), m.inputHistoryTick())
 }
 func (m *Model) inputHistoryTick() tea.Cmd {
@@ -284,7 +285,7 @@ func (m *Model) applyInputHistorySelection() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if s.token.owner != m.inputHistoryOwner() || s.interaction != m.input.interactionVersion {
+	if s.token.owner != m.inputHistoryOwner() || s.interaction != m.input.Revision().Interaction {
 		m.closeInputHistory()
 		return m.enqueueToast("The draft changed; search closed to preserve it", "info")
 	}
@@ -304,11 +305,10 @@ func (m *Model) applyInputHistorySelection() tea.Cmd {
 	m.closeAtMention()
 	m.slashCompleteSelected = 0
 	m.input.CursorEnd()
-	m.input.histIdx = len(m.input.history)
-	m.input.draft = inputDraftSnapshot{}
+	m.input.EndHistoryNavigation()
 	finish()
 	m.closeInputHistory()
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	m.recalcViewportSize()
 	if r.AttachmentCount > 0 {
 		return m.enqueueToast("History attachments were not restored; add them again", "info")

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 // openAtMentionAtCursor uses the position after insertion, including selection
@@ -145,8 +147,8 @@ func (m *Model) insertAtMentionSelection() tea.Cmd {
 	// Insert without losing inline large-paste placeholders (which carry the raw
 	// pasted content for submission). Using Input.SetValue would clear inlinePastes
 	// and cause the submitted message to contain only the placeholder text.
-	start := runeOffsetFromRowCol(value, line, m.atMentionTriggerCol)
-	end := runeOffsetFromRowCol(value, line, replaceEndCol)
+	start := composer.RuneOffsetFromRowCol(value, line, m.atMentionTriggerCol)
+	end := composer.RuneOffsetFromRowCol(value, line, replaceEndCol)
 	if !m.input.ReplaceRuneRangePreserveInlinePastes(start, end, replaceText) {
 		// Fallback: keep existing behaviour if we cannot safely update ranges.
 		m.input.SetValue(strings.Join(lines, "\n"))

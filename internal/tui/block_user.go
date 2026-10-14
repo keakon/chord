@@ -7,7 +7,7 @@ import (
 
 	"github.com/mattn/go-runewidth"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -34,12 +34,12 @@ func (b *Block) renderUserLocalShell(width int, spinnerFrame string) []string {
 	pseudo := &Block{
 		ToolName:               toolName,
 		ResultContent:          b.UserLocalShellResult,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ResultDone:             !b.UserLocalShellPending,
 		ToolCallDetailExpanded: !b.UserLocalShellPending && !b.Collapsed,
 	}
 	if b.UserLocalShellFailed {
-		pseudo.ResultStatus = agent.ToolResultStatusError
+		pseudo.ResultStatus = message.ToolStatusError
 	}
 	prefix := pseudo.renderToolPrefix(spinnerFrame)
 	// The disclosure marker advertises toggling; only show it when the card

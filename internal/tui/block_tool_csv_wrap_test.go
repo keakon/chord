@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 )
 
 // TestDoneReportCSVCodeBlockWrapsLongLines verifies that CSV code blocks in
@@ -24,7 +24,7 @@ func TestDoneReportCSVCodeBlockWrapsLongLines(t *testing.T) {
 		ToolName:     "done",
 		DoneReport:   report,
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 	}
 
 	lines := block.Render(width, "")
@@ -93,7 +93,7 @@ func TestDoneReportGenericCodeBlockWrapsLongLines(t *testing.T) {
 		ToolName:     "done",
 		DoneReport:   report,
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 	}
 
 	lines := block.Render(width, "")

@@ -515,7 +515,7 @@ func (a *MainAgent) interruptCurrentTurnForReplacement() {
 	}
 
 	if len(reallyInterrupted) > 0 {
-		persistedResults := finalizeInterruptedToolCalls(a.ctxMgr, a.emitToTUI, a.persistInterruptedToolResults, reallyInterrupted, ToolResultStatusError, context.Canceled)
+		persistedResults := finalizeInterruptedToolCalls(a.ctxMgr, a.emitToTUI, a.persistInterruptedToolResults, reallyInterrupted, message.ToolStatusError, context.Canceled)
 		if persistedResults > 0 {
 			log.Infof("persisted interrupted tool-call results before starting replacement turn turn_id=%v interrupted=%v completed=%v pending_tools=%v", turn.ID, persistedResults, completedCount, pending)
 		}

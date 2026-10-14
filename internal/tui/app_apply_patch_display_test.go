@@ -23,7 +23,7 @@ func TestLegacyPatchEventsUseStableApplyPatchDisplay(t *testing.T) {
 		Name:     "patch",
 		ArgsJSON: args,
 		Result:   "Applied patch",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 		Diff:     "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
 	})
 
@@ -50,7 +50,7 @@ func TestApplyPatchDeleteUsesDDisplayAndHidesDiff(t *testing.T) {
 	m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "call-delete", Name: tools.NameApplyPatch, ArgsJSON: args})
 	m.handleToolAgentEvent(agent.ToolResultEvent{
 		CallID: "call-delete", Name: tools.NameApplyPatch, ArgsJSON: args,
-		Result: "Applied patch:\nD tmp/old.txt", Status: agent.ToolResultStatusSuccess,
+		Result: "Applied patch:\nD tmp/old.txt", Status: message.ToolStatusSuccess,
 		Diff: "--- tmp/old.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-old\n-content\n",
 	})
 
@@ -78,7 +78,7 @@ func TestApplyPatchResultTracksChangedFiles(t *testing.T) {
 	m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args})
 	m.handleToolAgentEvent(agent.ToolResultEvent{
 		CallID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args,
-		Result: "Applied patch", Status: agent.ToolResultStatusSuccess,
+		Result: "Applied patch", Status: message.ToolStatusSuccess,
 	})
 
 	edits := m.sidebar.CurrentAgentFiles()
@@ -100,7 +100,7 @@ func TestFailedApplyPatchResultDoesNotTrackChangedFiles(t *testing.T) {
 	m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args})
 	m.handleToolAgentEvent(agent.ToolResultEvent{
 		CallID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args,
-		Result: "No files were modified", Status: agent.ToolResultStatusError,
+		Result: "No files were modified", Status: message.ToolStatusError,
 	})
 
 	if edits := m.sidebar.CurrentAgentFiles(); len(edits) != 0 {
@@ -119,7 +119,7 @@ func TestPartiallyAppliedPatchTracksOnlyCommittedFileState(t *testing.T) {
 	m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args})
 	m.handleToolAgentEvent(agent.ToolResultEvent{
 		CallID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args,
-		Result: "apply_patch partially applied", Status: agent.ToolResultStatusError,
+		Result: "apply_patch partially applied", Status: message.ToolStatusError,
 		FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{
 			Path: filepath.Join(projectRoot, "committed.go"), Exists: true,
 		}}, Changes: []message.ToolFileChange{{
@@ -142,7 +142,7 @@ func TestCancelledApplyPatchResultDoesNotTrackChangedFiles(t *testing.T) {
 	m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args})
 	m.handleToolAgentEvent(agent.ToolResultEvent{
 		CallID: "call-1", Name: tools.NameApplyPatch, ArgsJSON: args,
-		Result: "Cancelled", Status: agent.ToolResultStatusCancelled,
+		Result: "Cancelled", Status: message.ToolStatusCancelled,
 	})
 
 	if edits := m.sidebar.CurrentAgentFiles(); len(edits) != 0 {
@@ -156,7 +156,7 @@ func TestApplyPatchChangedFilesRestoreFromTranscript(t *testing.T) {
 	args := []byte(`{"patch":"*** Begin Patch\n*** Add File: docs/new.md\n+# New\n*** Delete File: tmp/old.txt\n*** End Patch"}`)
 	m.rebuildSidebarFileEditsFromMessages([]message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameApplyPatch, Args: args}}},
-		{Role: "tool", ToolCallID: "call-1", ToolStatus: string(agent.ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "call-1", ToolStatus: string(message.ToolStatusSuccess)},
 	})
 
 	edits := m.sidebar.CurrentAgentFiles()
@@ -177,7 +177,7 @@ func TestPartiallyAppliedPatchRestoresCommittedFileState(t *testing.T) {
 	m.rebuildSidebarFileEditsFromMessages([]message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameApplyPatch, Args: args}}},
 		{
-			Role: "tool", ToolCallID: "call-1", ToolStatus: string(agent.ToolResultStatusError),
+			Role: "tool", ToolCallID: "call-1", ToolStatus: string(message.ToolStatusError),
 			FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{
 				Path: filepath.Join(projectRoot, "committed.go"), Exists: true,
 			}}, Changes: []message.ToolFileChange{{
@@ -199,7 +199,7 @@ func TestLegacyPatchChangedFilesRestoreFromTranscript(t *testing.T) {
 	args := []byte(`{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`)
 	m.rebuildSidebarFileEditsFromMessages([]message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "call-1", Name: "patch", Args: args}}},
-		{Role: "tool", ToolCallID: "call-1", ToolStatus: string(agent.ToolResultStatusSuccess), ToolDiff: "diff", ToolDiffAdded: 1, ToolDiffRemoved: 1},
+		{Role: "tool", ToolCallID: "call-1", ToolStatus: string(message.ToolStatusSuccess), ToolDiff: "diff", ToolDiffAdded: 1, ToolDiffRemoved: 1},
 	})
 
 	edits := m.sidebar.CurrentAgentFiles()
@@ -213,7 +213,7 @@ func TestElidedEditDiffRestoresSidebarFromCounts(t *testing.T) {
 	m.sidebar.Update(nil, "main", "builder")
 	m.rebuildSidebarFileEditsFromMessages([]message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-1", Name: tools.NameEdit, Args: []byte(`{"path":"src/demo.go","old_string":"old","new_string":"new"}`)}}},
-		{Role: "tool", ToolCallID: "edit-1", ToolStatus: string(agent.ToolResultStatusSuccess), Content: message.FormatToolResultElided(601), ToolDiffAdded: 1, ToolDiffRemoved: 1},
+		{Role: "tool", ToolCallID: "edit-1", ToolStatus: string(message.ToolStatusSuccess), Content: message.FormatToolResultElided(601), ToolDiffAdded: 1, ToolDiffRemoved: 1},
 	})
 
 	edits := m.sidebar.CurrentAgentFiles()
@@ -228,7 +228,7 @@ func TestElidedEditDiffRestoresSidebarFromFileState(t *testing.T) {
 	m.sidebar.Update(nil, "main", "builder")
 	m.rebuildSidebarFileEditsFromMessages([]message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-1", Name: tools.NameEdit, Args: []byte(`{"path":"src/demo.go","old_string":"old","new_string":"new"}`)}}},
-		{Role: "tool", ToolCallID: "edit-1", ToolStatus: string(agent.ToolResultStatusSuccess), Content: message.FormatToolResultElided(601),
+		{Role: "tool", ToolCallID: "edit-1", ToolStatus: string(message.ToolStatusSuccess), Content: message.FormatToolResultElided(601),
 			FileState: &message.ToolFileState{Changes: []message.ToolFileChange{{Path: "src/demo.go", Added: 1, Removed: 1}}}},
 	})
 
@@ -314,7 +314,7 @@ func TestApplyPatchStreamingCardShowsLivePatchPreview(t *testing.T) {
 	// Result: the final diff replaces the preview.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID: callID, Name: tools.NameApplyPatch, ArgsJSON: complete,
-		Result: "Applied patch", Status: agent.ToolResultStatusSuccess,
+		Result: "Applied patch", Status: message.ToolStatusSuccess,
 		Diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
 	}})
 	plain = stripANSI(strings.Join(block.Render(100, "●"), "\n"))
@@ -358,7 +358,7 @@ func TestApplyPatchStreamingCardStaysExpandedWhenExecutionQueued(t *testing.T) {
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID: callID, Name: tools.NameApplyPatch, ArgsJSON: args,
-		Result: "Applied patch", Status: agent.ToolResultStatusSuccess,
+		Result: "Applied patch", Status: message.ToolStatusSuccess,
 		Diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
 	}})
 	if block.Collapsed {
@@ -584,7 +584,7 @@ func TestApplyPatchCompletedCardShowsHeaderElapsedAndPath(t *testing.T) {
 	}})
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID: callID, Name: tools.NameApplyPatch, ArgsJSON: args,
-		Result: "Applied patch", Status: agent.ToolResultStatusSuccess,
+		Result: "Applied patch", Status: message.ToolStatusSuccess,
 		Diff:     "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
 		Duration: 2 * time.Second,
 	}})
@@ -629,7 +629,7 @@ func TestFreeformApplyPatchErrorCardShowsPatchNotJSONEnvelope(t *testing.T) {
 		Content:       bare,
 		RawArgs:       `{"patch":"*** Begin Patch\n*** Update File: src/demo.go\n@@\n-old\n+new\n*** End Patch"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "hunk not found",
 	}
 	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))
@@ -665,7 +665,7 @@ func TestFreeformApplyPatchEnvelopeArgsShowPatchNotJSONEnvelope(t *testing.T) {
 		ToolName:      tools.NameApplyPatch,
 		RawArgs:       string(rawArgs),
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "hunk not found",
 	}
 	rendered := stripANSI(strings.Join(block.Render(100, ""), "\n"))

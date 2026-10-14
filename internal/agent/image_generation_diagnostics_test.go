@@ -15,6 +15,7 @@ import (
 	"github.com/keakon/chord/internal/imagegen"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/logtest"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -80,7 +81,7 @@ func TestImageFailureTerminalCarriesMainAndSubDiagnostics(t *testing.T) {
 			for _, event := range drainAgentEvents(parent.Events()) {
 				if result, ok := event.(ToolResultEvent); ok && result.CallID == "image-call" {
 					found = true
-					if result.Status != ToolResultStatusError || result.Diagnostic == nil || result.Diagnostic.Provider != "sample" || result.Diagnostic.Model != "gpt-image-1.5" {
+					if result.Status != message.ToolStatusError || result.Diagnostic == nil || result.Diagnostic.Provider != "sample" || result.Diagnostic.Model != "gpt-image-1.5" {
 						t.Fatalf("event=%+v", result)
 					}
 				}

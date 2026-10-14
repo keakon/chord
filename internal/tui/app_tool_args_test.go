@@ -25,7 +25,7 @@ func TestToolCardKeepsModelArgumentsWhenEffectiveArgumentsDiffer(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID: "mcp-call-1", Name: "mcp_exa_search", ArgsJSON: effectiveArgs,
 		Audit:  &message.ToolArgsAudit{OriginalArgsJSON: modelArgs, EffectiveArgsJSON: effectiveArgs, UserModified: true},
-		Result: "ok", Status: agent.ToolResultStatusSuccess,
+		Result: "ok", Status: message.ToolStatusSuccess,
 	}})
 
 	block, ok := m.viewport.FindBlockByToolID("mcp-call-1")
@@ -65,7 +65,7 @@ func TestToolResultMarksIgnoredArgumentInToolCard(t *testing.T) {
 				Reason:    message.IgnoredToolArgReasonUnrecognized,
 			}},
 		},
-		Result: "READ_RESULT lines=1-1 total=1\npackage sample", Status: agent.ToolResultStatusSuccess,
+		Result: "READ_RESULT lines=1-1 total=1\npackage sample", Status: message.ToolStatusSuccess,
 	}})
 
 	block, ok := m.viewport.FindBlockByToolID("read-ignored")
@@ -314,7 +314,7 @@ func TestFileMutationDisplaySurvivesExecutionAndResultEvents(t *testing.T) {
 				ID: callID, Name: tt.toolName, AgentID: "", ArgsJSON: tt.completeArgs, State: agent.ToolCallExecutionStateRunning,
 			}})
 			_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
-				CallID: callID, Name: tt.toolName, ArgsJSON: tt.completeArgs, Result: tt.result, Status: agent.ToolResultStatusSuccess, Diff: tt.diff,
+				CallID: callID, Name: tt.toolName, ArgsJSON: tt.completeArgs, Result: tt.result, Status: message.ToolStatusSuccess, Diff: tt.diff,
 			}})
 
 			block, ok := m.viewport.FindBlockByToolID(callID)

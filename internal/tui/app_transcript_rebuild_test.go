@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -34,7 +33,7 @@ func TestCompactionRebuildPreservesTailEditCardState(t *testing.T) {
 	backend.messages = []message.Message{
 		{Role: "user", IsCompactionSummary: true, Content: "[Context Summary]\nsummary\n\n[Context compressed]"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-1", Name: tools.NameEdit, Args: []byte(`{"path":"foo.txt","patch":"@@\n-a\n+b\n"}`)}}},
-		{Role: "tool", ToolCallID: "edit-1", Content: "Applied patch to foo.txt (+1 -1)", ToolStatus: string(agent.ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "edit-1", Content: "Applied patch to foo.txt (+1 -1)", ToolStatus: string(message.ToolStatusSuccess)},
 	}
 	m.rebuildViewportFromMessagesWithReason("session_restored")
 
@@ -61,7 +60,7 @@ func TestCompactionRebuildPreservesGenericToolDetailState(t *testing.T) {
 	backend.messages = []message.Message{
 		{Role: "user", IsCompactionSummary: true, Content: "[Context Summary]\nsummary\n\n[Context compressed]"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "grep-1", Name: tools.NameGrep, Args: []byte(`{"pattern":"needle"}`)}}},
-		{Role: "tool", ToolCallID: "grep-1", Content: "a.go:1:needle", ToolStatus: string(agent.ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "grep-1", Content: "a.go:1:needle", ToolStatus: string(message.ToolStatusSuccess)},
 	}
 	m.rebuildViewportFromMessagesWithReason("session_restored")
 
@@ -155,7 +154,7 @@ func TestCompactionRebuildDoesNotBorrowStateFromUnrelatedCard(t *testing.T) {
 	backend.messages = []message.Message{
 		{Role: "user", IsCompactionSummary: true, Content: "[Context Summary]\nsummary\n\n[Context compressed]"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-new", Name: tools.NameEdit, Args: []byte(`{"path":"new.txt","patch":"@@\n-a\n+b\n"}`)}}},
-		{Role: "tool", ToolCallID: "edit-new", Content: "Applied patch to new.txt (+1 -1)", ToolStatus: string(agent.ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "edit-new", Content: "Applied patch to new.txt (+1 -1)", ToolStatus: string(message.ToolStatusSuccess)},
 	}
 	m.rebuildViewportFromMessagesWithReason("session_restored")
 

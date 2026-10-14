@@ -9,14 +9,14 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/keakon/chord/internal/config"
-
 	"github.com/keakon/lipgloss/v2"
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/analytics"
+	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/ratelimit"
 	"github.com/keakon/chord/internal/skill"
@@ -2277,12 +2277,12 @@ func TestToolResultStatusFromRestoredContent(t *testing.T) {
 	cases := []struct {
 		name    string
 		content string
-		want    agent.ToolResultStatus
+		want    message.ToolResultStatus
 	}{
-		{name: "empty", content: "", want: agent.ToolResultStatusSuccess},
-		{name: "cancelled", content: "Cancelled", want: agent.ToolResultStatusCancelled},
-		{name: "error", content: "Error: exit code 1", want: agent.ToolResultStatusError},
-		{name: "success", content: "written successfully", want: agent.ToolResultStatusSuccess},
+		{name: "empty", content: "", want: message.ToolStatusSuccess},
+		{name: "cancelled", content: "Cancelled", want: message.ToolStatusCancelled},
+		{name: "error", content: "Error: exit code 1", want: message.ToolStatusError},
+		{name: "success", content: "written successfully", want: message.ToolStatusSuccess},
 	}
 
 	for _, tc := range cases {

@@ -10,7 +10,6 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/keakon/x/ansi"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/imagegen"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -30,14 +29,14 @@ func TestImageToolCardsShowSingleLinePrompt(t *testing.T) {
 		for _, kind := range []BlockType{BlockToolCall, BlockToolResult} {
 			for _, tc := range []struct {
 				name, result, recovery string
-				status                 agent.ToolResultStatus
+				status                 message.ToolResultStatus
 				done                   bool
 			}{
 				{name: "running"},
-				{name: "success", result: `{}`, status: agent.ToolResultStatusSuccess, done: true},
-				{name: "error", result: "Image request failed", status: agent.ToolResultStatusError, done: true},
-				{name: "cancelled", result: "Cancelled", status: agent.ToolResultStatusCancelled, done: true},
-				{name: "unknown", result: "Do not replay generation", recovery: message.ToolRecoveryStateOutcomeUnknown, status: agent.ToolResultStatusError, done: true},
+				{name: "success", result: `{}`, status: message.ToolStatusSuccess, done: true},
+				{name: "error", result: "Image request failed", status: message.ToolStatusError, done: true},
+				{name: "cancelled", result: "Cancelled", status: message.ToolStatusCancelled, done: true},
+				{name: "unknown", result: "Do not replay generation", recovery: message.ToolRecoveryStateOutcomeUnknown, status: message.ToolStatusError, done: true},
 			} {
 				for _, width := range []int{40, 100} {
 					t.Run(fmt.Sprintf("%s/%d/%s/%d", operation, kind, tc.name, width), func(t *testing.T) {
@@ -89,7 +88,7 @@ func TestImageToolCardYankCopiesCompleteArguments(t *testing.T) {
 			block := &Block{ID: 1, Type: BlockToolCall, ToolName: tools.NameGenerateImage, Content: string(args), ResultDone: done}
 			if done {
 				block.ResultContent = `{}`
-				block.ResultStatus = agent.ToolResultStatusSuccess
+				block.ResultStatus = message.ToolStatusSuccess
 			}
 			m.viewport.AppendBlock(block)
 			m.focusedBlockID = 1
@@ -122,11 +121,11 @@ func TestImageToolCardsKeepWarningsAndOutcomesVisible(t *testing.T) {
 		for _, kind := range []BlockType{BlockToolCall, BlockToolResult} {
 			for _, tc := range []struct {
 				name, content, recovery, want string
-				status                        agent.ToolResultStatus
+				status                        message.ToolResultStatus
 			}{
-				{"error", "Error: Image could not be loaded.\nTry another file.", "", "Try another file.", agent.ToolResultStatusError},
-				{"cancelled", "Cancelled by user", "", "Cancelled", agent.ToolResultStatusCancelled},
-				{"unknown", "Request interrupted; do not replay generation", message.ToolRecoveryStateOutcomeUnknown, "do not replay generation", agent.ToolResultStatusError},
+				{"error", "Error: Image could not be loaded.\nTry another file.", "", "Try another file.", message.ToolStatusError},
+				{"cancelled", "Cancelled by user", "", "Cancelled", message.ToolStatusCancelled},
+				{"unknown", "Request interrupted; do not replay generation", message.ToolRecoveryStateOutcomeUnknown, "do not replay generation", message.ToolStatusError},
 			} {
 				t.Run(fmt.Sprintf("%s/%d/%s", tool, kind, tc.name), func(t *testing.T) {
 					block := &Block{Type: kind, ToolName: tool, ResultDone: true, ResultContent: tc.content, Content: tc.content, ResultStatus: tc.status, RecoveryState: tc.recovery}
@@ -152,7 +151,7 @@ func TestImageToolCardsKeepWarningsAndOutcomesVisible(t *testing.T) {
 		{tools.NameViewImage, `Loaded image "sample.png" into context (4000x3000 -> 2000x1500 (scaled to 2000px max edge)).`, "4000x3000 -> 2000x1500", "Loaded image"},
 	} {
 		t.Run(tc.tool+"/notice", func(t *testing.T) {
-			block := &Block{Type: BlockToolCall, ToolName: tc.tool, ResultDone: true, ResultContent: tc.content, ResultStatus: agent.ToolResultStatusSuccess}
+			block := &Block{Type: BlockToolCall, ToolName: tc.tool, ResultDone: true, ResultContent: tc.content, ResultStatus: message.ToolStatusSuccess}
 			initToolCardFoldState(block, tc.tool)
 			plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 			if !strings.Contains(plain, tc.want) || strings.Contains(plain, tc.hidden) {

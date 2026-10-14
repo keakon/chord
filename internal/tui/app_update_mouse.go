@@ -581,10 +581,9 @@ func (m *Model) handleInputSelectionClick(mouse tea.Mouse, x, y int) bool {
 		m.inputMouseDown = false
 		return false
 	}
-	row := m.input.selectionDisplayRows()[y+m.input.ScrollYOffset()]
 	_, characterHit := m.input.RunePositionAt(x, y)
 	if m.inputClickCount == 2 && characterHit {
-		start, end := m.input.selectionWordRange(offset, row)
+		start, end := m.input.WordRangeAt(x, y)
 		if start < end {
 			m.input.SelectRuneRange(start, end)
 			m.inputMouseDown = false
@@ -593,8 +592,8 @@ func (m *Model) handleInputSelectionClick(mouse tea.Mouse, x, y int) bool {
 	}
 	if m.inputClickCount >= 3 {
 		m.inputClickCount = 0
-		if row.start < row.end {
-			m.input.SelectRuneRange(row.start, row.end)
+		if start, end := m.input.LineRangeAt(y); start < end {
+			m.input.SelectRuneRange(start, end)
 			m.inputMouseDown = false
 			return true
 		}

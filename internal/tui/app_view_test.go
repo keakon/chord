@@ -80,7 +80,7 @@ func TestViewRefreshesComposerAfterInputChanges(t *testing.T) {
 	}
 
 	m.input.SetValue("hello cache")
-	m.input.syncHeight()
+	m.input.SyncHeight()
 
 	updated := stripANSI(m.View().Content)
 	if !strings.Contains(updated, "hello cache") {

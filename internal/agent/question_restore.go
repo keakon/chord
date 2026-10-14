@@ -92,7 +92,7 @@ func restoreQuestionMessages(msgs []message.Message) []message.Message {
 		}
 		msg.Content = string(data)
 		msg.ToolPayload = string(data)
-		msg.ToolStatus = string(ToolResultStatusSuccess)
+		msg.ToolStatus = message.ToolStatusSuccess
 		msg.ToolRecoveryState = ""
 		restored[i] = msg
 	}

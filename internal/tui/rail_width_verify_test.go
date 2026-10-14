@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -30,7 +30,7 @@ func TestNoCardOverflowsTerminal(t *testing.T) {
 		{"tool:apply_patch", &Block{ID: 677, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 			Content:       fmt.Sprintf(`{"patch":%q}`, patch),
 			ResultContent: "apply_patch failed: no changes were committed.",
-			ResultDone:    true, ResultStatus: agent.ToolResultStatusError}},
+			ResultDone:    true, ResultStatus: message.ToolStatusError}},
 		{"tool:edit", &Block{ID: 7, Type: BlockToolCall, ToolName: tools.NameEdit,
 			Content: `{"path":"a.go"}`, Diff: "@@ -1,2 +1,2 @@\n package a\n-package old\n+package new\n", ResultDone: true}},
 		{"tool:write", &Block{ID: 8, Type: BlockToolCall, ToolName: tools.NameWrite,

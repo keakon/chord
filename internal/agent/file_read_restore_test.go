@@ -42,7 +42,7 @@ func TestRestoreTrackedFileStateUsesDurablePathForRelativeReadArgs(t *testing.T)
 	tracker := filelock.NewFileTracker()
 	msgs := []message.Message{
 		restoreAssistantCall(t, "read", tools.NameRead, map[string]any{"path": "demo.txt"}, nil),
-		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: string(ToolResultStatusSuccess), Content: "READ_RESULT lines=1-1 total=1\nbefore", FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: hash, Exists: true}}}},
+		{Role: message.RoleTool, ToolCallID: "read", ToolStatus: message.ToolStatusSuccess, Content: "READ_RESULT lines=1-1 total=1\nbefore", FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: hash, Exists: true}}}},
 	}
 	result := restoreTrackedFileStateFromMessages(tracker, "main", "", msgs)
 	if result.RestoredUsable != 1 || result.Skipped != 0 {
@@ -77,7 +77,7 @@ func TestRestoreTrackedFileStateFailedReadDoesNotRestoreUsableRead(t *testing.T)
 	a := newRestoreEditTestAgent(t, projectRoot)
 	msgs := []message.Message{
 		restoreAssistantCall(t, "read-1", tools.NameRead, map[string]any{"path": path}, nil),
-		{Role: "tool", ToolCallID: "read-1", ToolStatus: string(ToolResultStatusError), Content: "Error: failed"},
+		{Role: "tool", ToolCallID: "read-1", ToolStatus: message.ToolStatusError, Content: "Error: failed"},
 	}
 	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
 	if result.RestoredUsable != 0 {
@@ -170,7 +170,7 @@ func TestRestoreTrackedFileStateEffectiveArgsWinOverOriginalArgs(t *testing.T) {
 		{
 			Role:       "tool",
 			ToolCallID: "read-1",
-			ToolStatus: string(ToolResultStatusSuccess),
+			ToolStatus: message.ToolStatusSuccess,
 			Content:    "1\treal",
 			Audit: &message.ToolArgsAudit{
 				OriginalArgsJSON:  string(oldArgs),
@@ -221,7 +221,7 @@ func TestRestoreTrackedFileStateReadThenDeleteDoesNotAuthorizeRecreatedPath(t *t
 		message.Message{
 			Role:       "tool",
 			ToolCallID: "delete-1",
-			ToolStatus: string(ToolResultStatusSuccess),
+			ToolStatus: message.ToolStatusSuccess,
 			Content:    "Deleted (1):\n- " + path,
 			FileState:  &message.ToolFileState{Deletes: []message.TrackedFileState{{Path: path, Exists: false}}},
 		},
@@ -250,7 +250,7 @@ func TestRestoreTrackedFileStateReadThenEditUsesPostWriteHash(t *testing.T) {
 		message.Message{
 			Role:       "tool",
 			ToolCallID: "patch-1",
-			ToolStatus: string(ToolResultStatusSuccess),
+			ToolStatus: message.ToolStatusSuccess,
 			Content:    "Updated " + path,
 			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, SHA256: postHash, Exists: true}}},
 		},
@@ -287,7 +287,7 @@ func TestRestoreTrackedFileStateReadThenPatchUsesPostWriteHash(t *testing.T) {
 		message.Message{
 			Role:       "tool",
 			ToolCallID: "patch-1",
-			ToolStatus: string(ToolResultStatusSuccess),
+			ToolStatus: message.ToolStatusSuccess,
 			Content:    "Updated " + path,
 			FileState:  &message.ToolFileState{Writes: []message.TrackedFileState{{Path: path, SHA256: postHash, Exists: true}}},
 		},
@@ -446,7 +446,7 @@ func TestToolMessageFileStateJSONOmitEmpty(t *testing.T) {
 		Role:       "tool",
 		ToolCallID: "x",
 		Content:    "ok",
-		ToolStatus: string(ToolResultStatusSuccess),
+		ToolStatus: message.ToolStatusSuccess,
 		FileState:  &message.ToolFileState{Reads: []message.TrackedFileState{{Path: "demo.txt", SHA256: "abc", Exists: true}}},
 	})
 	if err != nil {
@@ -469,25 +469,25 @@ func TestRestoreTrackedFileStateSkipReasonCounters(t *testing.T) {
 	a := newRestoreEditTestAgent(t, projectRoot)
 	msgs := []message.Message{
 		restoreAssistantCall(t, "imported-read", tools.NameRead, map[string]any{"path": goodPath}, nil),
-		{Role: "tool", ToolCallID: "imported-read", ToolStatus: string(ToolResultStatusSuccess), Content: "ok", Provenance: &message.MessageProvenance{Source: "import:claude", Imported: true}},
+		{Role: "tool", ToolCallID: "imported-read", ToolStatus: message.ToolStatusSuccess, Content: "ok", Provenance: &message.MessageProvenance{Source: "import:claude", Imported: true}},
 
 		restoreAssistantCall(t, "failed-read", tools.NameRead, map[string]any{"path": goodPath}, nil),
-		{Role: "tool", ToolCallID: "failed-read", ToolStatus: string(ToolResultStatusError), Content: "Error: failed"},
+		{Role: "tool", ToolCallID: "failed-read", ToolStatus: message.ToolStatusError, Content: "Error: failed"},
 
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "missing-args-read", Name: tools.NameRead}}},
-		{Role: "tool", ToolCallID: "missing-args-read", ToolStatus: string(ToolResultStatusSuccess), Content: "ok"},
+		{Role: "tool", ToolCallID: "missing-args-read", ToolStatus: message.ToolStatusSuccess, Content: "ok"},
 
 		restoreAssistantCall(t, "invalid-path-read", tools.NameRead, map[string]any{"path": "   "}, nil),
-		{Role: "tool", ToolCallID: "invalid-path-read", ToolStatus: string(ToolResultStatusSuccess), Content: "ok"},
+		{Role: "tool", ToolCallID: "invalid-path-read", ToolStatus: message.ToolStatusSuccess, Content: "ok"},
 
 		restoreAssistantCall(t, "state-mismatch-read", tools.NameRead, map[string]any{"path": badMetaPath}, nil),
-		{Role: "tool", ToolCallID: "state-mismatch-read", ToolStatus: string(ToolResultStatusSuccess), Content: "ok", FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: filepath.Join(projectRoot, "other.txt"), SHA256: "abc", Exists: true}}}},
+		{Role: "tool", ToolCallID: "state-mismatch-read", ToolStatus: message.ToolStatusSuccess, Content: "ok", FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: filepath.Join(projectRoot, "other.txt"), SHA256: "abc", Exists: true}}}},
 
 		restoreAssistantCall(t, "delete-empty", tools.NameDelete, map[string]any{"paths": []string{}, "reason": "cleanup"}, nil),
-		{Role: "tool", ToolCallID: "delete-empty", ToolStatus: string(ToolResultStatusSuccess), Content: "nothing happened"},
+		{Role: "tool", ToolCallID: "delete-empty", ToolStatus: message.ToolStatusSuccess, Content: "nothing happened"},
 
 		restoreAssistantCall(t, "good-read", tools.NameRead, map[string]any{"path": goodPath}, nil),
-		{Role: "tool", ToolCallID: "good-read", ToolStatus: string(ToolResultStatusSuccess), Content: "ok", FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: goodPath, SHA256: goodHash, Exists: true}}}},
+		{Role: "tool", ToolCallID: "good-read", ToolStatus: message.ToolStatusSuccess, Content: "ok", FileState: &message.ToolFileState{Reads: []message.TrackedFileState{{Path: goodPath, SHA256: goodHash, Exists: true}}}},
 	}
 
 	result := restoreTrackedFileStateFromMessages(a.fileTrack, a.instanceID, a.contentRoot, msgs)
@@ -556,7 +556,7 @@ func restoreReadMessages(t *testing.T, callID, path, hash string, prov *message.
 		{
 			Role:       "tool",
 			ToolCallID: callID,
-			ToolStatus: string(ToolResultStatusSuccess),
+			ToolStatus: message.ToolStatusSuccess,
 			Content:    "READ_RESULT lines=1-1 total=1\ncontent\n",
 			Provenance: cloneProvenance(prov),
 			FileState:  &message.ToolFileState{Reads: []message.TrackedFileState{{Path: path, SHA256: hash, Exists: true}}},

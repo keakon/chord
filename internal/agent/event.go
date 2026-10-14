@@ -368,15 +368,6 @@ type StreamRollbackEvent struct {
 
 func (StreamRollbackEvent) agentEvent() {}
 
-// ToolResultStatus is the terminal state of a tool call for UI/protocol purposes.
-type ToolResultStatus string
-
-const (
-	ToolResultStatusSuccess   ToolResultStatus = "success"
-	ToolResultStatusError     ToolResultStatus = "error"
-	ToolResultStatusCancelled ToolResultStatus = "cancelled"
-)
-
 // ToolCallStartEvent is emitted when the LLM begins a tool invocation.
 type ToolCallStartEvent struct {
 	ID       string
@@ -516,7 +507,7 @@ type ToolResultEvent struct {
 	Payload     string
 	Notes       []string
 	DoneReport  string
-	Status      ToolResultStatus
+	Status      message.ToolResultStatus
 	AgentID     string // originating agent ("" = main agent)
 	Parts       []message.ContentPart
 	Diff        string                 // unified diff for Write/Edit tools (not sent to LLM)

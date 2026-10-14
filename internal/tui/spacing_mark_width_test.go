@@ -124,27 +124,6 @@ func TestSpacingMarksKeepCodeAndSidebarAligned(t *testing.T) {
 	}
 }
 
-func TestSpacingMarksKeepInputCursorAndRowsAligned(t *testing.T) {
-	const glyph = "a\u093e\u093e"
-	in := NewInput()
-	in.SetWidth(6) // Two prompt columns and four content columns.
-	in.SetValue(glyph + glyph)
-	in.syncHeight()
-	rows := in.selectionDisplayRows()
-	if len(rows) != 2 || rows[0].text != glyph+glyph || rows[1].text != "" {
-		t.Fatalf("wrapped rows = %#v", rows)
-	}
-	in.SetCursorPosition(0, 3)
-	in.Focus()
-	cursor := in.Cursor()
-	if cursor == nil || cursor.Position.X != inputPromptWidth+2 || cursor.Position.Y != 0 {
-		t.Fatalf("cursor = %#v, want (%d, 0)", cursor, inputPromptWidth+2)
-	}
-	if offset, ok := in.SelectionPositionAt(inputPromptWidth+3, 0); !ok || offset != 3 {
-		t.Fatalf("second cluster hit = %d, %v", offset, ok)
-	}
-}
-
 func TestSpacingMarksKeepTablePaddingAligned(t *testing.T) {
 	const glyph = "a\u0cf3"
 	if got := formatTableCell(glyph, 4, 0); got != glyph+"  " {

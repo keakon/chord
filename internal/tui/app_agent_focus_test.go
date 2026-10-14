@@ -323,7 +323,7 @@ func TestSetFocusedAgentRestoresComposerStatePerAgent(t *testing.T) {
 	}
 	m := NewModelWithSize(backend, 100, 24)
 	m.input.SetValue("main draft")
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	m.attachments = []Attachment{{FileName: "main.png", MimeType: "image/png", Data: []byte{1}}}
 	m.editingQueuedDraftID = "draft-1"
 
@@ -340,7 +340,7 @@ func TestSetFocusedAgentRestoresComposerStatePerAgent(t *testing.T) {
 	}
 
 	m.input.SetValue("worker draft")
-	m.input.syncHeight()
+	m.input.SyncHeight()
 
 	m.setFocusedAgent("")
 

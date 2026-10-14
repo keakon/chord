@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -214,7 +214,7 @@ func TestSearchHeaderKeepsPatternWholeWithoutResultSummary(t *testing.T) {
 		ToolName:               tools.NameGrep,
 		Content:                `{"pattern":"Audit|EffectiveArgs|AnotherVeryLongAlternation","paths":["internal/tui/app_agent_events_tool.go"],"includes":["*.go"]}`,
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusError,
+		ResultStatus:           message.ToolStatusError,
 		ToolCallDetailExpanded: false,
 		ResultContent:          "search failed",
 	}

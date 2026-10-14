@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -78,28 +78,6 @@ const (
 	compactReservedOutput           = 4096
 	compactPreflightBufferMin       = 1024
 	compactPreflightBufferRatio     = 50 // reserve ~2% extra input budget for provider framing / hidden overhead
-	compactConfirmAgeTurns          = 2
-	compactErrorAgeTurns            = 3
-	// Age is currentBatch minus producing batch, so a tool result is already
-	// age 1 at the first request whose response can react to it. Success and
-	// read-like thresholds therefore start at 2: the model must see a fresh
-	// payload in full exactly once before any size-based summary may replace
-	// it (age-1 reduction hid outputs the model had never seen, which it
-	// reported to users as "output truncated").
-	compactBashSuccessAgeTurns     = 2
-	compactShellReadOnlyAgeTurns   = 3
-	compactReadLikeAgeTurns        = 2
-	compactStaleAgeTurns           = 3
-	compactHighRiskProtectAgeTurns = 4
-	compactDiffProtectAgeTurns     = 12
-	compactBashSuccessBytes        = 3000
-	compactReadLikeOutputBytes     = 3000
-	reduceSnippetChars             = 500
-	summaryLineSnippetChars        = 180
-	compactStaleOutputBytes        = 1500
-	compactMinToolResultsPrune     = 6
-	compactMinIncrementalTokens    = 2048
-	compactSummaryMinChars         = 160
 	// maxToolErrorEvidenceItems bounds how many failing tool results the
 	// evidence pack may keep. Failures outrank an ordinary user request, so an
 	// unbounded run of them (one command retried, or one error repeated across
@@ -309,21 +287,6 @@ const (
 	compactionHistoryApplied = "applied"
 )
 
-type toolCallMeta struct {
-	Name              string
-	Args              string
-	readRequest       readRequestSummary
-	readRequestParsed bool
-}
-
-func (m *toolCallMeta) parsedReadRequest() readRequestSummary {
-	if !m.readRequestParsed {
-		m.readRequest = parseReadRequestSummary(m.Args)
-		m.readRequestParsed = true
-	}
-	return m.readRequest
-}
-
 // Excerpt caps shared by the evidence builders and the request-view dedup: a
 // checkpoint section or evidence excerpt counts as a repeat of the latest
 // request only when it matches the builder's rendering exactly, so both sides
@@ -332,23 +295,6 @@ const (
 	compactUserConstraintExcerptChars = 600
 	compactUserRequestExcerptChars    = 700
 )
-
-func compactTextSnippet(s string, maxChars int) string {
-	s = strings.TrimSpace(s)
-	if s == "" || maxChars <= 0 {
-		return ""
-	}
-	keepHead := maxChars * 2 / 3
-	if keepHead < 1 {
-		keepHead = maxChars
-	}
-	sep := "\n...\n"
-	keepTail := max(maxChars-keepHead-len([]rune(sep)), 0)
-	if keepTail == 0 {
-		return strings.TrimSpace(llm.TruncateStringRunes(s, keepHead, ""))
-	}
-	return strings.TrimSpace(llm.TruncateStringHeadTail(s, keepHead, keepTail, sep))
-}
 
 func evidencePriority(kind evidenceKind) int {
 	switch kind {
@@ -405,7 +351,7 @@ func subAgentMailboxEvidence(msg message.Message, source string) (evidenceItem, 
 			"SubAgent completion summary",
 			"The main agent may need this exact completion summary before continuing.",
 			source,
-			compactTextSnippet(text, 700),
+			requesttrim.TextSnippet(text, 700),
 		), true
 	case string(SubAgentMailboxKindBlocked), string(SubAgentMailboxKindDecisionRequired), string(SubAgentMailboxKindRiskAlert), string(SubAgentMailboxKindDirectionChange):
 		return buildEvidenceItem(
@@ -413,7 +359,7 @@ func subAgentMailboxEvidence(msg message.Message, source string) (evidenceItem, 
 			"SubAgent requested main-agent help",
 			"This unresolved intervention request may still determine the next action.",
 			source,
-			compactTextSnippet(text, 700),
+			requesttrim.TextSnippet(text, 700),
 		), true
 	default:
 		return evidenceItem{}, false
@@ -557,7 +503,7 @@ func buildDoneRejectedEvidence(source, reason string) evidenceItem {
 		"Latest Done rejection",
 		"The rejection reason is recent user feedback/request and may supersede older todos.",
 		source,
-		compactTextSnippet(reason, compactUserRequestExcerptChars),
+		requesttrim.TextSnippet(reason, compactUserRequestExcerptChars),
 	)
 }
 
@@ -567,7 +513,7 @@ func buildStatedConstraintEvidence(source, text string) evidenceItem {
 		"Stated constraint",
 		"This declarative compatibility / output-contract / file-scope constraint must survive compaction even though it is not phrased as an imperative correction.",
 		source,
-		compactTextSnippet(text, compactUserConstraintExcerptChars),
+		requesttrim.TextSnippet(text, compactUserConstraintExcerptChars),
 	), text)
 }
 
@@ -577,7 +523,7 @@ func buildLatestUserRequestEvidence(source, text string) evidenceItem {
 		"Latest user request",
 		"This is the latest ordinary user request and should anchor the current objective unless superseded by a later correction or Done rejection.",
 		source,
-		compactTextSnippet(text, compactUserRequestExcerptChars),
+		requesttrim.TextSnippet(text, compactUserRequestExcerptChars),
 	), text)
 }
 
@@ -832,7 +778,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					"SubAgent requested main-agent help",
 					"This unresolved intervention request may still determine the next action.",
 					fmt.Sprintf("message %d (user)", i+1),
-					compactTextSnippet(text, 700),
+					requesttrim.TextSnippet(text, 700),
 				)
 			case isSubAgentDoneMessage(text):
 				item = buildEvidenceItem(
@@ -840,7 +786,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					"SubAgent completion summary",
 					"The main agent may need this exact completion summary before continuing.",
 					fmt.Sprintf("message %d (user)", i+1),
-					compactTextSnippet(text, 700),
+					requesttrim.TextSnippet(text, 700),
 				)
 			case looksLikeUserCorrection(text):
 				item = buildUserCorrectionEvidence(fmt.Sprintf("message %d (user)", i+1), text)
@@ -878,13 +824,13 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 			if text == "" && strings.TrimSpace(msg.ToolDiff) == "" {
 				continue
 			}
-			if isToolResultErrorMessage(msg) {
+			if message.IsToolResultErrorMessage(msg) {
 				item := buildEvidenceItem(
 					evidenceToolError,
 					"Latest failing tool result",
 					"This looks like a current blocker; preserving the exact error helps the next continuation avoid guessing.",
 					fmt.Sprintf("message %d (tool result)", i+1),
-					compactTextSnippet(text, 800),
+					requesttrim.TextSnippet(text, 800),
 				)
 				item.SourceID = msg.ToolCallID
 				item.Sequence = sourceSeq
@@ -899,7 +845,7 @@ func collectEvidenceItems(messages []message.Message) []evidenceItem {
 					"Recent code diff",
 					"The next continuation may depend on the exact recent code change.",
 					fmt.Sprintf("message %d (tool diff)", i+1),
-					compactTextSnippet(msg.ToolDiff, 700),
+					requesttrim.TextSnippet(msg.ToolDiff, 700),
 				)
 				item.Sequence = sourceSeq
 				if !seen[item.Key] {
@@ -1008,9 +954,9 @@ func toolFailureSupersededByLaterSuccess(messages []message.Message) map[string]
 		// history cannot leave stale failures behind while the collector
 		// records fresh ones.
 		switch {
-		case isToolResultSuccessStatus(msg.ToolStatus):
+		case message.IsToolResultSuccessStatus(msg.ToolStatus):
 			successes = append(successes, toolResult{callID: callID, tool: name, index: index, targets: targets})
-		case isToolResultErrorMessage(msg):
+		case message.IsToolResultErrorMessage(msg):
 			failures = append(failures, toolResult{callID: callID, tool: name, index: index, targets: targets})
 		}
 	}
@@ -1077,7 +1023,7 @@ func fileToolTargets(messages []message.Message) map[string]map[string]struct{} 
 		}
 		for _, call := range msg.ToolCalls {
 			callID := strings.TrimSpace(call.ID)
-			if callID == "" || evidenceOperation(call.Name) == "" {
+			if callID == "" || requesttrim.EvidenceOperation(call.Name) == "" {
 				continue
 			}
 			var args struct {
@@ -1088,7 +1034,7 @@ func fileToolTargets(messages []message.Message) map[string]map[string]struct{} 
 				continue
 			}
 			for _, path := range append([]string{args.Path}, args.Paths...) {
-				path = reductionNormalizePath(path)
+				path = requesttrim.NormalizePath(path)
 				if path == "" {
 					continue
 				}
@@ -1207,7 +1153,7 @@ func (a *MainAgent) refreshEvidenceValidity() {
 		return
 	}
 	messages := a.ctxMgr.Snapshot()
-	var scan reductionHistoryScan
+	var scan requesttrim.Scan
 	invalidated := a.externalReadsInvalidatedLazy(messages, &scan)
 	byCallID := make(map[string]struct{})
 	for index := range invalidated {
@@ -1235,41 +1181,6 @@ func (a *MainAgent) refreshEvidenceValidity() {
 	}
 }
 
-func isConfirmationOutput(content string) bool {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" || len(trimmed) > 180 {
-		return false
-	}
-	if strings.Count(trimmed, "\n") > 2 {
-		return false
-	}
-	lower := strings.ToLower(trimmed)
-	for _, phrase := range []string{
-		"applied successfully",
-		"completed successfully",
-		"written successfully",
-		"updated successfully",
-		"created successfully",
-		"removed successfully",
-		"saved successfully",
-		"background task started",
-		"background task completed",
-		"done",
-	} {
-		if strings.Contains(lower, phrase) {
-			return true
-		}
-	}
-	return false
-}
-
-func toolNameOrUnknown(name string) string {
-	if name == "" {
-		return "tool"
-	}
-	return name
-}
-
 func (a *MainAgent) addToolEvidenceCandidate(item evidenceItem, msg message.Message) {
 	item.SourceID = strings.TrimSpace(msg.ToolCallID)
 	item.ToolState = strings.TrimSpace(msg.ToolStatus)
@@ -1286,3 +1197,5 @@ func (a *MainAgent) addToolEvidenceCandidate(item evidenceItem, msg message.Mess
 	}
 	a.addEvidenceCandidate(item)
 }
+
+const compactSummaryMinChars = 160

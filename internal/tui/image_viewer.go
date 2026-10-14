@@ -11,6 +11,8 @@ import (
 
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/keakon/lipgloss/v2"
+
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 // Items are a stable snapshot for both transcript and composer previews.
@@ -70,7 +72,7 @@ func (m *Model) openImageViewer(blockID, imageIndex int) tea.Cmd {
 }
 
 func (m *Model) imageViewerOwner() imageViewerOwner {
-	return imageViewerOwner{AgentID: m.focusedAgentID, Session: m.sessionTranscriptEpoch, Composer: m.input.editBoundary}
+	return imageViewerOwner{AgentID: m.focusedAgentID, Session: m.sessionTranscriptEpoch, Composer: m.input.Revision().Boundary}
 }
 
 func (m *Model) openImageViewerItems(parts []BlockImagePart, index int, returnMode Mode) tea.Cmd {
@@ -83,7 +85,7 @@ func (m *Model) openImageViewerItems(parts []BlockImagePart, index int, returnMo
 	cleanup := m.dismissImageViewer()
 	m.imageViewer = imageViewerState{
 		Open: true, Items: slices.Clone(parts), Index: min(max(index, 0), len(parts)-1),
-		ReturnMode: returnMode, Cursor: runeOffsetFromRowCol(m.input.Value(), m.input.Line(), m.input.Column()),
+		ReturnMode: returnMode, Cursor: composer.RuneOffsetFromRowCol(m.input.Value(), m.input.Line(), m.input.Column()),
 		Owner: m.imageViewerOwner(), NeedsRetransmit: true,
 	}
 	m.input.ClearSelection()
@@ -134,7 +136,7 @@ func (m *Model) closeImageViewer() tea.Cmd {
 	var focus tea.Cmd
 	if target == ModeInsert {
 		m.input.ClearSelection()
-		m.input.setCursorRuneOffset(min(viewer.Cursor, len([]rune(m.input.Value()))))
+		m.input.SetCursorOffset(min(viewer.Cursor, len([]rune(m.input.Value()))))
 		focus = m.input.Focus()
 	}
 	m.recalcViewportSize()

@@ -268,7 +268,7 @@ func TestEvidenceRebuildsAfterAppliedCompaction(t *testing.T) {
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "archived opening request"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleUser, Content: "continue fixing the build errors"})
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "shell1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go build"}`)}}})
-	a.ctxMgr.Append(message.Message{Role: message.RoleTool, ToolCallID: "shell1", Content: "Error: undefined foo", ToolStatus: string(ToolResultStatusError)})
+	a.ctxMgr.Append(message.Message{Role: message.RoleTool, ToolCallID: "shell1", Content: "Error: undefined foo", ToolStatus: message.ToolStatusError})
 
 	checkpoint := buildCompactionCheckpointMessage("## Current User Request\n- continue", []string{"history-1.md: build errors"}, "truncate_only", nil)
 	draft := &compactionDraft{

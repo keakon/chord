@@ -5,8 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -28,7 +29,7 @@ func buildSubAgentStructuredCheckpoint(s *SubAgent, messages []message.Message, 
 		messages = projectSkillDiscoveryMessages(messages, s.skillActivationView())
 	}
 	var b strings.Builder
-	toolMeta := buildToolCallMeta(messages)
+	toolMeta := requesttrim.BuildToolCallMeta(messages)
 	fmt.Fprintf(&b, "[system] SubAgent context checkpoint: %d earlier messages were removed for %s.\n", removed, reason)
 	b.WriteString("- Task: ")
 	b.WriteString(firstLineOrUnknown(strings.TrimSpace(s.taskDesc), 160))
@@ -86,7 +87,7 @@ func firstLineOrUnknown(value string, max int) string {
 	if value == "" {
 		return "unknown"
 	}
-	return llm.TruncateStringRunes(value, max, "…")
+	return texttruncate.Runes(value, max, "…")
 }
 
 // latestOwnerInstructionForCheckpoint finds the newest message the owner
@@ -121,7 +122,7 @@ func latestOwnerInstructionForCheckpoint(messages []message.Message) string {
 		case looksLikeStatedConstraint(text):
 			kind = " (constraint)"
 		}
-		return llm.TruncateStringRunes(text, 200, "…") + kind
+		return texttruncate.Runes(text, 200, "…") + kind
 	}
 	return "unknown"
 }
@@ -177,15 +178,15 @@ func subAgentCheckpointFiles(s *SubAgent, messages []message.Message) string {
 // results (newest first), each as "name: first line", so the model does not
 // re-run work the SubAgent already completed. meta is the shared tool-call
 // metadata map built once per checkpoint.
-func subAgentCheckpointActions(messages []message.Message, meta map[string]toolCallMeta) string {
+func subAgentCheckpointActions(messages []message.Message, meta map[string]requesttrim.ToolCall) string {
 	var lines []string
 	for i := len(messages) - 1; i >= 0 && len(lines) < 3; i-- {
 		msg := &messages[i]
-		if msg.Role != message.RoleTool || !isToolResultSuccessStatus(msg.ToolStatus) {
+		if msg.Role != message.RoleTool || !message.IsToolResultSuccessStatus(msg.ToolStatus) {
 			continue
 		}
 		name := tools.NormalizeName(meta[msg.ToolCallID].Name)
-		lines = append(lines, llm.TruncateStringRunes(name+": "+strings.TrimSpace(msg.Content), 120, "…"))
+		lines = append(lines, texttruncate.Runes(name+": "+strings.TrimSpace(msg.Content), 120, "…"))
 	}
 	if len(lines) == 0 {
 		return "unknown"
@@ -197,15 +198,15 @@ func subAgentCheckpointActions(messages []message.Message, meta map[string]toolC
 // (error status) so the model does not repeat a failed approach after
 // compression. meta is the shared tool-call metadata map built once per
 // checkpoint.
-func subAgentCheckpointFailures(messages []message.Message, meta map[string]toolCallMeta) string {
+func subAgentCheckpointFailures(messages []message.Message, meta map[string]requesttrim.ToolCall) string {
 	var lines []string
 	for i := len(messages) - 1; i >= 0 && len(lines) < 2; i-- {
 		msg := &messages[i]
-		if msg.Role != message.RoleTool || !isToolResultErrorStatus(msg.ToolStatus) {
+		if msg.Role != message.RoleTool || !message.IsToolResultErrorStatus(msg.ToolStatus) {
 			continue
 		}
 		name := tools.NormalizeName(meta[msg.ToolCallID].Name)
-		lines = append(lines, llm.TruncateStringRunes(name+": "+strings.TrimSpace(msg.Content), 120, "…"))
+		lines = append(lines, texttruncate.Runes(name+": "+strings.TrimSpace(msg.Content), 120, "…"))
 	}
 	if len(lines) == 0 {
 		return "unknown"
@@ -224,5 +225,5 @@ func subAgentCheckpointBlocker(s *SubAgent) string {
 	if summary == "" {
 		return string(state)
 	}
-	return string(state) + ": " + llm.TruncateStringRunes(summary, 160, "…")
+	return string(state) + ": " + texttruncate.Runes(summary, 160, "…")
 }

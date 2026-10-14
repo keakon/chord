@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/modelcompat"
@@ -57,7 +58,7 @@ func autoContinueReplayPrompt(userIntent string) string {
 	}
 	quoted := fmt.Sprintf("%q", userIntent)
 	if utf8.RuneCountInString(userIntent) > autoContinueReplayMaxRunes {
-		quoted = fmt.Sprintf("%q (excerpt; the complete text is under Current User Request in the context checkpoint)", compactTextSnippet(userIntent, autoContinueReplayMaxRunes))
+		quoted = fmt.Sprintf("%q (excerpt; the complete text is under Current User Request in the context checkpoint)", requesttrim.TextSnippet(userIntent, autoContinueReplayMaxRunes))
 	}
 	return "After compaction, keep the current task anchored to the latest user intent. The latest user request was: " + quoted + ". Continue that request directly without apology or recap, unless newer queued user input in this turn supersedes it."
 }

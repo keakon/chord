@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -31,7 +31,7 @@ func TestQuestionCallFormatsControlReceiptsAndWaitDecisions(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			block := &Block{Type: BlockToolCall, ToolName: tools.NameQuestion, Content: tc.args, ResultPayload: string(payload), ResultNotes: []string{"Diagnostic note"}, ResultContent: string(payload) + "\nDiagnostic note", ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess}
+			block := &Block{Type: BlockToolCall, ToolName: tools.NameQuestion, Content: tc.args, ResultPayload: string(payload), ResultNotes: []string{"Diagnostic note"}, ResultContent: string(payload) + "\nDiagnostic note", ResultDone: true, ResultStatus: message.ToolStatusSuccess}
 			view := stripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n"))
 			for _, want := range append(tc.want, "Diagnostic note") {
 				if !strings.Contains(view, want) {
@@ -58,7 +58,7 @@ func TestQuestionCallRetainsMalformedResultAndErrors(t *testing.T) {
 			t.Fatalf("unrecognized result lost: %s", view)
 		}
 	}
-	block := &Block{Type: BlockToolCall, ToolName: tools.NameQuestion, Content: `{"wait_for":["q-1"]}`, ResultContent: "Question failed", ResultStatus: agent.ToolResultStatusError}
+	block := &Block{Type: BlockToolCall, ToolName: tools.NameQuestion, Content: `{"wait_for":["q-1"]}`, ResultContent: "Question failed", ResultStatus: message.ToolStatusError}
 	if view := stripANSI(strings.Join(block.renderQuestionCall(100, ""), "\n")); !strings.Contains(view, "Question failed") {
 		t.Fatalf("error lost: %s", view)
 	}

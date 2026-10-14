@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 func newInputImagePreviewModel(t *testing.T, backend ImageBackend) *Model {
@@ -30,7 +32,7 @@ func newInputImagePreviewModel(t *testing.T, backend ImageBackend) *Model {
 	m.input.InsertStringPreserveInlinePastes(" between ")
 	m.input.InsertImagePlaceholderWithDisplay(1, "[sample.png]")
 	m.input.InsertStringPreserveInlinePastes(" after")
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	m.recalcViewportSize()
 	m.ensureLayout()
 	return &m
@@ -113,7 +115,7 @@ func TestInputImagePreviewDoubleClickSameObjectDifferentCharacters(t *testing.T)
 	if m.mode != ModeInsert || !m.input.Focused() || m.input.HasSelection() || len(m.attachments) != 4 || m.input.Value() != current {
 		t.Fatal("close lost current draft or focus")
 	}
-	if got := runeOffsetFromRowCol(m.input.Value(), m.input.Line(), m.input.Column()); got != cursor {
+	if got := composer.RuneOffsetFromRowCol(m.input.Value(), m.input.Line(), m.input.Column()); got != cursor {
 		t.Fatalf("cursor = %d, want %d", got, cursor)
 	}
 	if len(m.composerUndo.entries) != 0 {
@@ -280,19 +282,19 @@ func TestImageViewerCancelledPreparationDoesNotRead(t *testing.T) {
 func TestInputImagePreviewWrappedHitAndDrag(t *testing.T) {
 	m := newInputImagePreviewModel(t, ImageBackendKitty)
 	m.input.SetWidth(8)
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	token := m.input.InlinePastes()[0]
-	rows := m.input.selectionDisplayRows()
 	hitCount := 0
-	for y, row := range rows {
-		for x := 0; x < len([]rune(row.text)); x++ {
-			offset, hit := m.input.RunePositionAt(inputPromptWidth+x, y)
+	for y := 0; y < m.input.Height(); y++ {
+		start, end := m.input.LineRangeAt(y)
+		for x := 0; x < end-start; x++ {
+			offset, hit := m.input.RunePositionAt(composer.PromptWidth+x, y)
 			p, _, found := m.inputImageAt(offset, hit)
 			if found && p == token {
 				hitCount++
 			}
 		}
-		if _, hit := m.input.RunePositionAt(inputPromptWidth+len([]rune(row.text)), y); hit {
+		if _, hit := m.input.RunePositionAt(composer.PromptWidth+end-start, y); hit {
 			t.Fatal("padding was an object character")
 		}
 	}
@@ -310,7 +312,7 @@ func TestInputImagePreviewWrappedHitAndDrag(t *testing.T) {
 func TestInputImagePreviewMouseRoutingConsumesCloseClick(t *testing.T) {
 	m := newInputImagePreviewModel(t, ImageBackendKitty)
 	token := m.input.InlinePastes()[0]
-	click := tea.MouseClickMsg{X: m.layout.input.Min.X + inputPromptWidth + token.Start, Y: m.layout.input.Min.Y + 1, Button: tea.MouseLeft}
+	click := tea.MouseClickMsg{X: m.layout.input.Min.X + composer.PromptWidth + token.Start, Y: m.layout.input.Min.Y + 1, Button: tea.MouseLeft}
 	m.Update(click)
 	click.X += 3
 	_, cmd := m.Update(click)

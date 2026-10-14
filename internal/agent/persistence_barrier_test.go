@@ -651,7 +651,7 @@ func TestFailIntentBarrierSynthesizesNotStartedResults(t *testing.T) {
 	if synth.ToolRecoveryState != message.ToolRecoveryStateNotStarted {
 		t.Fatalf("recovery state = %q, want not_started", synth.ToolRecoveryState)
 	}
-	if synth.ToolStatus != string(ToolResultStatusError) {
+	if synth.ToolStatus != message.ToolStatusError {
 		t.Fatalf("tool status = %q, want error", synth.ToolStatus)
 	}
 }

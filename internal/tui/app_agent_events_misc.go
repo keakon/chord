@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 // streamContinueCardTitle labels the status card rendered for a durable
@@ -310,7 +311,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 		if len(evt.Parts) > 0 {
 			m.clearActiveSearch()
 			m.editingQueuedDraftID = ""
-			text, inlinePastes := displayTextAndInlinePastes(evt.Parts, "")
+			text, inlinePastes := composer.DisplayTextAndInlinePastes(evt.Parts, "")
 			nextPasteSeq := 0
 			for _, paste := range inlinePastes {
 				if paste.Seq > nextPasteSeq {
@@ -322,7 +323,7 @@ func (m *Model) handleMiscAgentEvent(event agent.AgentEvent) (bool, agentEventEf
 				text, _ = queuedDraftTextAndImageCount(draft)
 			}
 			m.input.SetDisplayValueAndPastes(text, inlinePastes, nextPasteSeq)
-			m.input.syncHeight()
+			m.input.SyncHeight()
 			m.attachments = attachmentsFromParts(evt.Parts)
 			if m.pendingSessionRestoreRebuild {
 				m.preserveAttachmentsOnNextRebuild = true

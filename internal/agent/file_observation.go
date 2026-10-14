@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/toolname"
@@ -150,18 +151,18 @@ func (a *MainAgent) trackObservedFileParts(parts []message.ContentPart) {
 // valid, and the pair is not cached so the next pass retries. A file that no
 // longer exists is stale by definition: the read recorded content that cannot
 // be current.
-func (a *MainAgent) externalReadsInvalidatedLazy(messages []message.Message, scan *reductionHistoryScan) map[int]bool {
+func (a *MainAgent) externalReadsInvalidatedLazy(messages []message.Message, scan *requesttrim.Scan) map[int]bool {
 	if a == nil || a.tools == nil || len(messages) == 0 {
 		return nil
 	}
-	callMeta := scan.callMeta()
+	callMeta := scan.CallMeta()
 	// Stat/hash I/O runs outside the memo mutex: holding it across the whole
 	// scan serialized concurrent prepares behind per-file disk I/O. The memo
 	// map is only touched under its lock inside lazyReadStatCheck.
 	var invalidated map[int]bool
 	for i := range messages {
 		msg := &messages[i]
-		if msg.Role != message.RoleTool || msg.FileState == nil || isToolResultUnsuccessfulStatus(msg.ToolStatus) {
+		if msg.Role != message.RoleTool || msg.FileState == nil || message.IsToolResultUnsuccessfulStatus(msg.ToolStatus) {
 			continue
 		}
 		if toolname.Normalize(callMeta[msg.ToolCallID].Name) != tools.NameRead {

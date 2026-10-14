@@ -17,10 +17,7 @@ func (m *Model) saveComposerStateForAgent(agentID string) {
 		m.agentComposerStates = make(map[string]agentComposerState)
 	}
 	state := agentComposerState{
-		draft:                m.input.draftSnapshot(),
-		historyBrowsing:      m.input.histIdx < len(m.input.history),
-		historyIndex:         m.input.histIdx,
-		historyDraft:         m.input.draft,
+		input:                m.input.SaveState(),
 		attachments:          cloneAttachments(m.attachments),
 		editingQueuedDraftID: m.editingQueuedDraftID,
 	}
@@ -37,17 +34,8 @@ func (m *Model) restoreComposerStateForAgent(agentID string) {
 	if !ok {
 		state = agentComposerState{}
 	}
-	m.input.applyDraftSnapshot(state.draft)
-	m.composerUndo = composerUndoState{boundary: m.input.editBoundary}
-	if state.historyBrowsing {
-		histIdx := min(max(state.historyIndex, 0), len(m.input.history))
-		m.input.histIdx = histIdx
-		m.input.draft = state.historyDraft
-	} else {
-		m.input.histIdx = len(m.input.history)
-		m.input.draft = inputDraftSnapshot{}
-	}
-	m.input.syncHeight()
+	m.input.RestoreState(state.input)
+	m.composerUndo = composerUndoState{boundary: m.input.Revision().Boundary}
 	m.attachments = cloneAttachments(state.attachments)
 	m.editingQueuedDraftID = state.editingQueuedDraftID
 }

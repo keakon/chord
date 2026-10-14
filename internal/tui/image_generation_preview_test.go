@@ -52,7 +52,7 @@ func TestGeneratedImageResultRendersAllThumbnailsWithoutOpeningViewer(t *testing
 			if tc.started {
 				m.handleToolAgentEvent(agent.ToolCallStartEvent{ID: "image-call", Name: tools.NameGenerateImage, ArgsJSON: `{"operation":"generate","prompt":"A landscape"}`})
 			}
-			cmd := m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{Name: tools.NameGenerateImage, CallID: "image-call", Status: agent.ToolResultStatusSuccess, Result: `{"status":"saved","details":"Image metadata"}`, Parts: parts}})
+			cmd := m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{Name: tools.NameGenerateImage, CallID: "image-call", Status: message.ToolStatusSuccess, Result: `{"status":"saved","details":"Image metadata"}`, Parts: parts}})
 			blocks := m.viewport.visibleBlocks()
 			if len(blocks) != 1 {
 				t.Fatalf("tool cards=%d, want 1", len(blocks))

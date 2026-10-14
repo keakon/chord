@@ -43,7 +43,7 @@ func TestLooksLikeStatedConstraint(t *testing.T) {
 func TestCollectEvidenceItemsCapturesStatedConstraints(t *testing.T) {
 	messages := []message.Message{
 		{Role: message.RoleUser, Content: "修一下编译错误"},
-		{Role: message.RoleTool, Content: "done", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: message.RoleTool, Content: "done", ToolStatus: message.ToolStatusSuccess},
 		{Role: message.RoleUser, Content: "保持现有 API 行为不变，继续"},
 	}
 	items := collectEvidenceItems(messages)

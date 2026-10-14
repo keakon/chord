@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -184,7 +185,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 			// Debug: log the raw reasoning content for troubleshooting
 			if resp.ReasoningContent != "" {
 				reasoningLen := len(resp.ReasoningContent)
-				preview := llm.TruncateStringRunes(resp.ReasoningContent, 500, "...(truncated)")
+				preview := texttruncate.Runes(resp.ReasoningContent, 500, "...(truncated)")
 				log.Debugf("SubAgent: unparseable reasoning content agent=%v reasoning_len=%v reasoning_preview=%v", s.instanceID, reasoningLen, preview)
 			}
 			s.sendEvent(Event{
@@ -446,7 +447,7 @@ func (s *SubAgent) handleLLMResponse(result *llmResult) {
 	}
 
 	if wakeMainCallID != "" {
-		s.appendControlToolResult(wakeMainCallID, tools.NameEscalate, wakeMainArgsJSON, "Escalation sent: "+wakeMainReason, ToolResultStatusSuccess)
+		s.appendControlToolResult(wakeMainCallID, tools.NameEscalate, wakeMainArgsJSON, "Escalation sent: "+wakeMainReason, message.ToolStatusSuccess)
 	}
 
 	// Collect non-Complete valid tool calls for finalize-time batching.

@@ -6,15 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/chord/internal/recovery"
-
-	"github.com/keakon/chord/internal/agent"
-
 	"github.com/keakon/x/ansi"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 // queuedDraft holds a user message submitted while the agent was busy.
@@ -42,10 +41,7 @@ type queuedDraft struct {
 }
 
 type agentComposerState struct {
-	draft                inputDraftSnapshot
-	historyBrowsing      bool
-	historyIndex         int
-	historyDraft         inputDraftSnapshot
+	input                composer.State
 	attachments          []Attachment
 	editingQueuedDraftID string
 }
@@ -97,7 +93,7 @@ func queuedDraftTextAndImageCount(draft queuedDraft) (string, int) {
 		text = draft.DeliveryStatus + " · " + text
 	}
 	if text == "" {
-		text = displayTextFromParts(draft.Parts, draft.Content)
+		text = composer.DisplayTextFromParts(draft.Parts, draft.Content)
 	}
 	imageCount := 0
 	for _, part := range draft.Parts {
@@ -111,7 +107,7 @@ func queuedDraftTextAndImageCount(draft queuedDraft) (string, int) {
 func queuedDraftFromParts(parts []message.ContentPart) queuedDraft {
 	copied := make([]message.ContentPart, len(parts))
 	copy(copied, parts)
-	display, _ := displayTextAndInlinePastes(copied, "")
+	display, _ := composer.DisplayTextAndInlinePastes(copied, "")
 	return queuedDraft{
 		Parts:          copied,
 		DisplayContent: display,
@@ -151,21 +147,6 @@ type Attachment struct {
 	InlineImagePlaceholder bool
 }
 
-func attachmentExtForMimeType(mimeType string) string {
-	switch mimeType {
-	case "image/jpeg":
-		return ".jpg"
-	case "image/gif":
-		return ".gif"
-	case "image/webp":
-		return ".webp"
-	case "application/pdf":
-		return ".pdf"
-	default:
-		return ".png"
-	}
-}
-
 func attachmentsFromParts(parts []message.ContentPart) []Attachment {
 	attachments := make([]Attachment, 0, len(parts))
 	imageIndex := 0
@@ -174,7 +155,7 @@ func attachmentsFromParts(parts []message.ContentPart) []Attachment {
 			continue
 		}
 		imageIndex++
-		fileName := imagePartDisplayName(part.FileName, part.ImagePath, part.MimeType, imageIndex)
+		fileName := composer.ImagePartDisplayName(part.FileName, part.ImagePath, part.MimeType, imageIndex)
 		attachments = append(attachments, Attachment{
 			FileName:               fileName,
 			MimeType:               part.MimeType,

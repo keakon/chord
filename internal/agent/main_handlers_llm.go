@@ -19,6 +19,7 @@ import (
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -458,7 +459,7 @@ func (a *MainAgent) handleLLMResponse(evt Event) {
 			// Debug: log the raw reasoning content for troubleshooting
 			if payload.ReasoningContent != "" {
 				reasoningLen := len(payload.ReasoningContent)
-				preview := llm.TruncateStringRunes(payload.ReasoningContent, 500, "...(truncated)")
+				preview := texttruncate.Runes(payload.ReasoningContent, 500, "...(truncated)")
 				log.Debugf("unparseable reasoning content reasoning_len=%v reasoning_preview=%v", reasoningLen, preview)
 			}
 			a.emitToTUI(InfoEvent{

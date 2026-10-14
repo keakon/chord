@@ -8,6 +8,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -203,7 +204,7 @@ func TestToolResultForcesPriorityBoundaryFlush(t *testing.T) {
 	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID: "call-boundary-1",
 		Name:   "read",
-		Status: agent.ToolResultStatusSuccess,
+		Status: message.ToolStatusSuccess,
 		Result: "done",
 	}})
 	if cmd == nil {

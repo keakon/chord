@@ -172,14 +172,14 @@ func TestShellCommandMayRunGit(t *testing.T) {
 }
 
 func TestShouldRefreshGitStatusAfterEditResult(t *testing.T) {
-	if !shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameEdit, Status: agent.ToolResultStatusSuccess}) {
+	if !shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameEdit, Status: message.ToolStatusSuccess}) {
 		t.Fatal("successful Edit should refresh git status")
 	}
-	if shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameEdit, Status: agent.ToolResultStatusError}) {
+	if shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{Name: tools.NameEdit, Status: message.ToolStatusError}) {
 		t.Fatal("failed Edit should not refresh git status")
 	}
 	if !shouldRefreshGitStatusAfterToolResult(agent.ToolResultEvent{
-		Name: tools.NameApplyPatch, Status: agent.ToolResultStatusError,
+		Name: tools.NameApplyPatch, Status: message.ToolStatusError,
 		FileState: &message.ToolFileState{Writes: []message.TrackedFileState{{Path: "committed.go", Exists: true}}},
 	}) {
 		t.Fatal("partially applied patch should refresh git status")

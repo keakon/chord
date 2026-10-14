@@ -143,7 +143,7 @@ func TestGenerateImageACPContentIncludesOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := agent.ToolResultEvent{Name: tools.NameGenerateImage, Status: agent.ToolResultStatusSuccess, Payload: string(raw), Parts: []message.ContentPart{{Type: message.ContentPartImage, ImagePath: filepath.Join(dir, ref.RelPath), ArtifactID: ref.ID}}}
+	event := agent.ToolResultEvent{Name: tools.NameGenerateImage, Status: message.ToolStatusSuccess, Payload: string(raw), Parts: []message.ContentPart{{Type: message.ContentPartImage, ImagePath: filepath.Join(dir, ref.RelPath), ArtifactID: ref.ID}}}
 	content := toolResultContent(t.Context(), event)
 	encoded, err := json.Marshal(content)
 	if err != nil {
@@ -162,14 +162,14 @@ func TestGenerateImageACPContentIncludesOriginal(t *testing.T) {
 	if bytes.Contains(cancelledJSON, []byte(base64.StdEncoding.EncodeToString(img.Data))) || !bytes.Contains(cancelledJSON, []byte("context canceled")) {
 		t.Fatal("cancelled delivery published original or lost cancellation")
 	}
-	event.Status = agent.ToolResultStatusCancelled
+	event.Status = message.ToolStatusCancelled
 	if len(toolResultContent(t.Context(), event)) != 1 {
 		t.Fatal("cancelled result published image success")
 	}
 }
 
 func TestDirectoryInstructionControlReasonSurvivesACP(t *testing.T) {
-	for _, status := range []agent.ToolResultStatus{agent.ToolResultStatusSuccess, agent.ToolResultStatusError, agent.ToolResultStatusCancelled} {
+	for _, status := range []message.ToolResultStatus{message.ToolStatusSuccess, message.ToolStatusError, message.ToolStatusCancelled} {
 		update := toolCallResult(context.Background(), agent.ToolResultEvent{CallID: "call-1", Name: tools.NameWrite, Status: status, Result: "directory instructions require reconsideration", ControlReason: message.ToolControlReasonDirectoryInstructionsRequired})
 		data, err := json.Marshal(update)
 		if err != nil {

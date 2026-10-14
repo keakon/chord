@@ -14,6 +14,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/agent/agentdiff"
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/executiongate"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/hook"
@@ -1251,7 +1252,7 @@ func (p toolExecutionPipeline) applySuccessfulFileState(execResult *ToolExecutio
 		if p.fileTrack != nil {
 			if hash := firstReadHashForPath(execResult.FileState, readObservation.Path); hash != "" {
 				p.fileTrack.TrackCommittedSnapshot(readObservation.Path, p.agentID, hash)
-				if readResultShowsWholeFile(execResult.Result) {
+				if requesttrim.ReadResultShowsWholeFile(execResult.Result) {
 					p.fileTrack.TrackObservedSnapshot(readObservation.Path, p.agentID, hash)
 				}
 			}
@@ -1655,7 +1656,7 @@ func commitPromotedReadToolSideEffects(track *filelock.FileTracker, agentID, too
 		return
 	}
 	track.TrackCommittedSnapshot(path, agentID, hash)
-	if readResultShowsWholeFile(result) {
+	if requesttrim.ReadResultShowsWholeFile(result) {
 		track.TrackObservedSnapshot(path, agentID, hash)
 	}
 }

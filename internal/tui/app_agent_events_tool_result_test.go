@@ -27,7 +27,7 @@ func TestQuestionToolResultEventPreservesStructuredReceipt(t *testing.T) {
 			block, _ := m.ensureToolCallBlock("question-call", tools.NameQuestion, tc.args, "", agent.ToolCallExecutionStateRunning, false)
 			notes := []string{"Sample diagnostic"}
 			result := tc.payload + "\n" + notes[0]
-			event := agent.ToolResultEvent{CallID: block.ToolID, Name: tools.NameQuestion, ArgsJSON: tc.args, Result: result, Payload: tc.payload, Notes: notes, Status: agent.ToolResultStatusSuccess}
+			event := agent.ToolResultEvent{CallID: block.ToolID, Name: tools.NameQuestion, ArgsJSON: tc.args, Result: result, Payload: tc.payload, Notes: notes, Status: message.ToolStatusSuccess}
 			m.handleToolResultEvent(event)
 			m.handleToolResultEvent(event)
 			if block.ResultPayload != tc.payload || !slices.Equal(block.ResultNotes, notes) {
@@ -60,7 +60,7 @@ func TestQuestionToolResultEventPreservesStructuredReceipt(t *testing.T) {
 func TestToolResultEventUpdatesIndependentFieldsWithUnchangedContent(t *testing.T) {
 	m := NewModelWithSize(&sessionControlAgent{}, 100, 30)
 	block, _ := m.ensureToolCallBlock("question-call", tools.NameQuestion, `{"wait_for":["question-1"]}`, "", agent.ToolCallExecutionStateRunning, false)
-	event := agent.ToolResultEvent{CallID: block.ToolID, Name: tools.NameQuestion, Result: "Sample result", Payload: `{"status":"resolved"}`, Status: agent.ToolResultStatusSuccess}
+	event := agent.ToolResultEvent{CallID: block.ToolID, Name: tools.NameQuestion, Result: "Sample result", Payload: `{"status":"resolved"}`, Status: message.ToolStatusSuccess}
 	m.handleToolResultEvent(event)
 	event.Payload = `{"status":"wait_interrupted","pending_ids":["question-1"]}`
 	m.handleToolResultEvent(event)

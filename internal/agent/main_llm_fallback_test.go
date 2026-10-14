@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
@@ -955,7 +956,7 @@ func TestFallbackBoundaryDefersReductionToTheCaller(t *testing.T) {
 	}
 	if len(result.messages) != len(messages) || result.messages[2].Content != toolOutput {
 		t.Fatalf("the event-loop handler reduced the surface itself: %q",
-			compactTextSnippet(result.messages[2].Content, 160))
+			requesttrim.TextSnippet(result.messages[2].Content, 160))
 	}
 }
 

@@ -12,11 +12,11 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/keakon/x/ansi"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/clipboardread"
 	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 const tinyPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
@@ -339,10 +339,10 @@ func TestPasteImageAfterPDFUsesNextInlineImageOrdinal(t *testing.T) {
 		t.Fatalf("clipboard image name = %q, want image1.png", got)
 	}
 	pastes := m.input.InlinePastes()
-	if len(pastes) != 1 || pastes[0].RawContent != imagePlaceholder(1) {
+	if len(pastes) != 1 || pastes[0].RawContent != composer.ImagePlaceholder(1) {
 		t.Fatalf("inline image paste = %#v, want image1 placeholder", pastes)
 	}
-	parts := interleaveAttachments([]message.ContentPart{{Type: "text", Text: imagePlaceholder(1), DisplayText: "[image1.png]", InlineToken: inlineImageTokenMarker}}, m.attachments)
+	parts := interleaveAttachments([]message.ContentPart{{Type: "text", Text: composer.ImagePlaceholder(1), DisplayText: "[image1.png]", InlineToken: composer.InlineImageTokenMarker}}, m.attachments)
 	if len(parts) != 2 {
 		t.Fatalf("interleaved parts len = %d, want 2", len(parts))
 	}
@@ -476,11 +476,11 @@ func TestAttachmentReadyMsgErrorRollsBackPendingInlineImagePlaceholder(t *testin
 		t.Fatal("InsertImagePlaceholder(1) = false, want true")
 	}
 	m.insertComposerText(" world")
-	if got := m.input.Value(); got != "hello"+inlineImagePlaceholderDisplay+" world" {
+	if got := m.input.Value(); got != "hello"+composer.InlineImagePlaceholderDisplay+" world" {
 		t.Fatalf("input value after insert = %q", got)
 	}
 
-	updated, _ := m.Update(attachmentReadyMsg{err: errors.New("clipboard failed"), inlineImagePlaceholderRaw: imagePlaceholder(1)})
+	updated, _ := m.Update(attachmentReadyMsg{err: errors.New("clipboard failed"), inlineImagePlaceholderRaw: composer.ImagePlaceholder(1)})
 	model := updated.(*Model)
 	if got := model.input.Value(); got != "hello world" {
 		t.Fatalf("input value after rollback = %q, want %q", got, "hello world")
@@ -505,15 +505,15 @@ func TestAttachmentReadyMsgSizeLimitRollsBackOnlyNewPendingInlineImagePlaceholde
 	if !m.input.InsertImagePlaceholder(2) {
 		t.Fatal("InsertImagePlaceholder(2) = false, want true")
 	}
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay+"tail"+inlineImagePlaceholderDisplay {
+	if got := m.input.Value(); got != composer.InlineImagePlaceholderDisplay+"tail"+composer.InlineImagePlaceholderDisplay {
 		t.Fatalf("input value after second insert = %q", got)
 	}
 
 	oversized := make([]byte, 5*1024*1024+1)
-	updated, _ := m.Update(attachmentReadyMsg{attachment: Attachment{FileName: "image2.png", MimeType: "image/png", Data: oversized}, inlineImagePlaceholderRaw: imagePlaceholder(2)})
+	updated, _ := m.Update(attachmentReadyMsg{attachment: Attachment{FileName: "image2.png", MimeType: "image/png", Data: oversized}, inlineImagePlaceholderRaw: composer.ImagePlaceholder(2)})
 	model := updated.(*Model)
-	if got := model.input.Value(); got != inlineImagePlaceholderDisplay+"tail" {
-		t.Fatalf("input value after rollback = %q, want %q", got, inlineImagePlaceholderDisplay+"tail")
+	if got := model.input.Value(); got != composer.InlineImagePlaceholderDisplay+"tail" {
+		t.Fatalf("input value after rollback = %q, want %q", got, composer.InlineImagePlaceholderDisplay+"tail")
 	}
 	if got := len(model.attachments); got != 1 {
 		t.Fatalf("attachments = %d, want 1", got)
@@ -522,7 +522,7 @@ func TestAttachmentReadyMsgSizeLimitRollsBackOnlyNewPendingInlineImagePlaceholde
 		t.Fatalf("remaining attachment = %q, want image1.png", got)
 	}
 	pastes := model.input.InlinePastes()
-	if len(pastes) != 1 || pastes[0].RawContent != imagePlaceholder(1) {
+	if len(pastes) != 1 || pastes[0].RawContent != composer.ImagePlaceholder(1) {
 		t.Fatalf("inline pastes after rollback = %#v, want only image1 placeholder", pastes)
 	}
 }
@@ -612,10 +612,10 @@ func TestSyncAttachmentsReindexesKeptInlineImagesAfterDroppedMiddleImage(t *test
 		{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")},
 		{FileName: "image3.png", MimeType: "image/png", Data: []byte("c"), InlineImagePlaceholder: true},
 	}
-	text := imagePlaceholder(1) + " keep " + imagePlaceholder(3)
-	pastes := []inlineLargePaste{
-		{Kind: inlineTokenImage, RawContent: imagePlaceholder(1), DisplayText: inlineImagePlaceholderDisplay, Start: 0, End: len([]rune(imagePlaceholder(1)))},
-		{Kind: inlineTokenImage, RawContent: imagePlaceholder(3), DisplayText: inlineImagePlaceholderDisplay, Start: len([]rune(imagePlaceholder(1) + " keep ")), End: len([]rune(text))},
+	text := composer.ImagePlaceholder(1) + " keep " + composer.ImagePlaceholder(3)
+	pastes := []composer.Token{
+		{Kind: composer.TokenImage, RawContent: composer.ImagePlaceholder(1), DisplayText: composer.InlineImagePlaceholderDisplay, Start: 0, End: len([]rune(composer.ImagePlaceholder(1)))},
+		{Kind: composer.TokenImage, RawContent: composer.ImagePlaceholder(3), DisplayText: composer.InlineImagePlaceholderDisplay, Start: len([]rune(composer.ImagePlaceholder(1) + " keep ")), End: len([]rune(text))},
 	}
 	m.input.SetDisplayValueAndPastes(text, pastes, 4)
 
@@ -630,8 +630,8 @@ func TestSyncAttachmentsReindexesKeptInlineImagesAfterDroppedMiddleImage(t *test
 	if got := len(inlinePastes); got != 2 {
 		t.Fatalf("inline pastes after sync = %d, want 2", got)
 	}
-	if inlinePastes[0].RawContent != imagePlaceholder(1) || inlinePastes[1].RawContent != imagePlaceholder(2) {
-		t.Fatalf("inline placeholders after sync = [%q %q], want [%q %q]", inlinePastes[0].RawContent, inlinePastes[1].RawContent, imagePlaceholder(1), imagePlaceholder(2))
+	if inlinePastes[0].RawContent != composer.ImagePlaceholder(1) || inlinePastes[1].RawContent != composer.ImagePlaceholder(2) {
+		t.Fatalf("inline placeholders after sync = [%q %q], want [%q %q]", inlinePastes[0].RawContent, inlinePastes[1].RawContent, composer.ImagePlaceholder(1), composer.ImagePlaceholder(2))
 	}
 }
 
@@ -873,7 +873,7 @@ func TestToolErrorCardDisplaysAndCopiesErrorResult(t *testing.T) {
 		ToolName:      "web_fetch",
 		Content:       `{"raw":false,"timeout_ms":60000,"url":"https://raw.githubusercontent.com/datacurve-ai/pier/main/docs/agents.md"}`,
 		ResultContent: "Error: HTTP 404: 404 Not Found",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 		Collapsed:     true,
 	}
@@ -908,7 +908,7 @@ func TestStandaloneToolResultCopyIncludesErrorContent(t *testing.T) {
 		ToolName:      "web_fetch",
 		Content:       "Error: HTTP 404: 404 Not Found",
 		ResultContent: "Error: HTTP 404: 404 Not Found",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
 

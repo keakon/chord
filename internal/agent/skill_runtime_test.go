@@ -39,7 +39,7 @@ func TestRebuildInvokedSkillsFromMessagesRestoresOnlySuccessfulSkills(t *testing
 func TestRebuildInvokedSkillsFromMessagesSkipsCancelledSkills(t *testing.T) {
 	msgs := []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "skill-1", Name: "skill", Args: mustToolArgs(t, map[string]any{"name": "cancelled-skill"})}}},
-		{Role: "tool", ToolCallID: "skill-1", ToolStatus: string(ToolResultStatusCancelled), Content: "Cancelled"},
+		{Role: "tool", ToolCallID: "skill-1", ToolStatus: message.ToolStatusCancelled, Content: "Cancelled"},
 	}
 	if got := rebuildInvokedSkillsFromMessages(msgs, nil); len(got) != 0 {
 		t.Fatalf("cancelled skill restored as invoked: %#v", got)

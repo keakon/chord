@@ -7,6 +7,7 @@ import (
 	uv "github.com/keakon/ultraviolet"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 // quitState tracks the two-press exit confirmation: the first q or Ctrl+C sets
@@ -189,7 +190,7 @@ type viewCacheState struct {
 	cachedInputLine                    int
 	cachedInputColumn                  int
 	cachedInputScrollY                 int
-	cachedInputSelection               inputSelection
+	cachedInputSelection               composer.Selection
 	cachedInputKey                     string
 	cachedInputAnimKey                 string
 	cachedInputRender                  cachedRenderable

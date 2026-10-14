@@ -60,7 +60,7 @@ func TestSubAgentRejectsInvalidEscalateArguments(t *testing.T) {
 			})
 
 			toolMsg := lastToolMessage(t, sub)
-			if toolMsg.ToolStatus != string(ToolResultStatusError) {
+			if toolMsg.ToolStatus != message.ToolStatusError {
 				t.Fatalf("tool status = %q, want error", toolMsg.ToolStatus)
 			}
 			if !strings.Contains(toolMsg.Content, "Escalation rejected") {
@@ -86,7 +86,7 @@ func TestSubAgentNeedsRepairEscalateWaitsForOwner(t *testing.T) {
 		})},
 	})
 
-	if got := lastToolMessage(t, sub).ToolStatus; got != string(ToolResultStatusSuccess) {
+	if got := lastToolMessage(t, sub).ToolStatus; got != message.ToolStatusSuccess {
 		t.Fatalf("tool status = %q, want success", got)
 	}
 	events := drainLoopEvents(parent)
@@ -111,7 +111,7 @@ func TestSubAgentBlockedEscalateClosesAsBlocked(t *testing.T) {
 		})},
 	})
 
-	if got := lastToolMessage(t, sub).ToolStatus; got != string(ToolResultStatusError) {
+	if got := lastToolMessage(t, sub).ToolStatus; got != message.ToolStatusError {
 		t.Fatalf("tool status = %q, want error", got)
 	}
 	events := drainLoopEvents(parent)
@@ -158,7 +158,7 @@ func TestSubAgentRefusesEscalateAfterUnansweredBudget(t *testing.T) {
 			t.Fatalf("escalate must be refused, got %#v", evt)
 		}
 	}
-	if got := lastToolMessage(t, sub).ToolStatus; got != string(ToolResultStatusError) {
+	if got := lastToolMessage(t, sub).ToolStatus; got != message.ToolStatusError {
 		t.Fatalf("tool status = %q, want error", got)
 	}
 	if sub.State() == SubAgentStateWaitingMain || isTerminalSubAgentState(sub.State()) {
@@ -318,7 +318,7 @@ func TestSubAgentDefersEscalateRefusalUntilRegularToolsComplete(t *testing.T) {
 			statuses[msg.ToolCallID] = msg.ToolStatus
 		}
 	}
-	if statuses["call-1"] != string(ToolResultStatusError) {
+	if statuses["call-1"] != message.ToolStatusError {
 		t.Fatalf("escalate tool status = %q, want error", statuses["call-1"])
 	}
 	if _, ok := statuses["call-2"]; !ok {

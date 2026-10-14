@@ -7,7 +7,7 @@ import (
 
 	"github.com/keakon/glamour/v2"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )
 
@@ -269,7 +269,7 @@ func TestToolResultMarkdownRepairsUnterminatedFence(t *testing.T) {
 		ToolName:               "web_fetch",
 		Content:                `{"url":"https://example.com"}`,
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ResultContent:          "## Ready\n\n```md\nbody\n",
 		ToolCallDetailExpanded: true,
 	}
@@ -290,7 +290,7 @@ func TestToolResultMarkdownRepairsUnterminatedTildeFence(t *testing.T) {
 		ToolName:               "web_fetch",
 		Content:                `{"url":"https://example.com"}`,
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ResultContent:          "## Ready\n\n~~~md\nbody\n",
 		ToolCallDetailExpanded: true,
 	}

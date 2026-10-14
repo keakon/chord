@@ -196,7 +196,7 @@ func (m *Model) ensureToolResultBlock(evt agent.ToolResultEvent) *Block {
 
 func shouldRefreshGitStatusAfterToolResult(evt agent.ToolResultEvent) bool {
 	evt.Name = toolNameKey(evt.Name)
-	if evt.Status == agent.ToolResultStatusError && !evt.FileState.HasChanges() {
+	if evt.Status == message.ToolStatusError && !evt.FileState.HasChanges() {
 		return false
 	}
 	switch evt.Name {
@@ -279,7 +279,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		if block.ResultDone && block.ResultStatus == evt.Status && block.ResultContent == evt.Result && block.ResultPayload == evt.Payload && slices.Equal(block.ResultNotes, evt.Notes) && strings.TrimSpace(block.ToolID) == strings.TrimSpace(evt.CallID) && sameImages {
 			return effects
 		}
-		if block.ResultDone && block.ResultStatus == agent.ToolResultStatusSuccess && evt.Status != agent.ToolResultStatusSuccess {
+		if block.ResultDone && block.ResultStatus == message.ToolStatusSuccess && evt.Status != message.ToolStatusSuccess {
 			return effects
 		}
 		m.recordToolErrorDiagnostic(evt)
@@ -311,7 +311,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 			controlReason:  evt.ControlReason,
 		})
 		if toolNameKey(evt.Name) == tools.NameDone {
-			if evt.Status == agent.ToolResultStatusSuccess && !doneResultIsRejected(evt.Result) {
+			if evt.Status == message.ToolStatusSuccess && !doneResultIsRejected(evt.Result) {
 				m.expectedAgentClose = true
 			}
 		}
@@ -342,7 +342,7 @@ func (m *Model) handleToolResultEvent(evt agent.ToolResultEvent) agentEventEffec
 		if shouldRefreshGitStatusAfterToolResult(evt) {
 			effects.addFollowup(m.requestGitStatusRefresh())
 		}
-		if evt.Name == tools.NameNotify && evt.Status != agent.ToolResultStatusError && evt.Result != "" {
+		if evt.Name == tools.NameNotify && evt.Status != message.ToolStatusError && evt.Result != "" {
 			if handle, _, ok := parseTaskToolHandle(evt.Result); ok && handle.TaskID != "" && handle.AgentID != "" {
 				if taskBlock, ok := m.findBlockByLinkedTask(handle.TaskID); ok {
 					taskBlock.LinkedAgentID = handle.AgentID

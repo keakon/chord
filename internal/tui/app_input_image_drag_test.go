@@ -4,10 +4,12 @@ import (
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 func inputImageMouse(m *Model, offset int) tea.Mouse {
-	return tea.Mouse{X: m.layout.input.Min.X + inputPromptWidth + offset, Y: m.layout.input.Min.Y + 1, Button: tea.MouseLeft}
+	return tea.Mouse{X: m.layout.input.Min.X + composer.PromptWidth + offset, Y: m.layout.input.Min.Y + 1, Button: tea.MouseLeft}
 }
 
 func TestInputImageDragKeepsInitialObject(t *testing.T) {
@@ -39,10 +41,10 @@ func TestInputImageDoubleClickToleratesSmallMotion(t *testing.T) {
 		token := m.input.InlinePastes()[0]
 		mouse := inputImageMouse(m, token.Start+3)
 		m.handleInputZoneMouseClick(mouse, mouseHitZones{inInputZone: true})
-		version := m.input.interactionVersion
+		version := m.input.Revision().Interaction
 		mouse.X += delta
 		m.handleMouseMotion(mouse, mouseHitZones{inInputZone: true})
-		if m.input.interactionVersion != version || m.input.SelectionText() != token.DisplayText {
+		if m.input.Revision().Interaction != version || m.input.SelectionText() != token.DisplayText {
 			t.Fatalf("motion=%d changed object selection", delta)
 		}
 		m.handleMouseRelease(mouse)

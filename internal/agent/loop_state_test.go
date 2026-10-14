@@ -225,8 +225,8 @@ done: allow
 	if restoredTool.Content != "Done approved" {
 		t.Fatalf("persisted Done content = %q, want Done approved", restoredTool.Content)
 	}
-	if restoredTool.ToolStatus != string(ToolResultStatusSuccess) {
-		t.Fatalf("persisted Done status = %q, want %q", restoredTool.ToolStatus, ToolResultStatusSuccess)
+	if restoredTool.ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("persisted Done status = %q, want %q", restoredTool.ToolStatus, message.ToolStatusSuccess)
 	}
 	if a.loopState.Enabled {
 		t.Fatal("loop should be disabled after approving Done confirmation")

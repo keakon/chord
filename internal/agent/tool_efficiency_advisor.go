@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -141,7 +142,7 @@ func (s *toolEfficiencyState) recordPartialRead(toolName, argsJSON, rawResult st
 		return "", 0, 0, false
 	}
 	header, _, _ := strings.Cut(rawResult, "\n")
-	r := parseReadResultHeaderRange(header)
+	r := requesttrim.ParseReadResultHeaderRange(header)
 	if !r.OK || r.Total <= 0 || r.Total > tools.MaxOutputLines {
 		return "", 0, 0, false
 	}

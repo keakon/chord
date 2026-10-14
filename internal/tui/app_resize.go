@@ -41,6 +41,6 @@ func (m *Model) applyTerminalSize(width, height int, refreshKitty bool) {
 		m.refreshKittyTerminalMetrics()
 	}
 	m.resetKittyPlacements()
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	m.recalcViewportSize()
 }

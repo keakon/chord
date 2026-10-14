@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 func (s *SubAgent) cancelCurrentTurnFromLoop() {
@@ -36,7 +38,7 @@ func (s *SubAgent) cancelCurrentTurnFromLoop() {
 	merged := turn.snapshotPendingToolCalls()
 	merged = turn.filterCompletedToolCalls(merged)
 	turn.PendingToolMeta = nil
-	persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, merged, ToolResultStatusCancelled, context.Canceled)
+	persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, merged, message.ToolStatusCancelled, context.Canceled)
 	if persistedResults > 0 {
 		log.Infof("SubAgent: persisted interrupted tool-call results after cancellation agent=%v turn_id=%v count=%v", s.instanceID, turn.ID, persistedResults)
 	}

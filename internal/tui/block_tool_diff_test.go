@@ -11,7 +11,7 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/keakon/lipgloss/v2"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -22,7 +22,7 @@ func TestEditDiffHeaderRecoversPathFromInvalidArgs(t *testing.T) {
 		ToolName:      tools.NameEdit,
 		Content:       `{"path":"src/app.go","old_string":123,"new_string":"b"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match edit schema: args.old_string must be a string, got number 123",
 	}
 	if got := block.diffToolFilePath(); got != "src/app.go" {
@@ -39,7 +39,7 @@ func TestEditToolCardRendersHighlightedDiffWithPath(t *testing.T) {
 		ToolName:      tools.NameEdit,
 		Content:       string(args),
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultContent: "Applied patch to src/demo.go (+1 -1)",
 		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
 	}
@@ -186,7 +186,7 @@ func TestApplyPatchToolCardSummarizesDeleteAndKeepsMoveUpdateDiff(t *testing.T) 
 		Content:      applyPatchToolDisplayArgs(string(args)),
 		RawArgs:      string(args),
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 		Diff: strings.Join([]string{
 			"--- src/old.go",
 			"+++ src/new.go",
@@ -226,7 +226,7 @@ func TestApplyPatchToolCardHidesSingleDeleteDiff(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
-		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
 		ResultContent: "Applied patch:\nD tmp/old.txt",
 		Diff:          "--- tmp/old.txt\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-obsolete\n-secret\n",
 	}
@@ -247,7 +247,7 @@ func TestApplyPatchToolCardShowsNoChangesWithoutPatchPreview(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
-		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
 		ResultContent: "Applied patch:\nNo net file changes",
 	}
 
@@ -265,7 +265,7 @@ func TestApplyPatchToolCardHidesPureMoveDiff(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
-		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
 		ResultContent: "Applied patch:\nR src/old.go -> src/new.go",
 		Diff:          "--- src/old.go\n+++ src/new.go\n",
 	}
@@ -284,7 +284,7 @@ func TestApplyPatchToolCardKeepsMoveWithUpdateDiff(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
-		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
 		Diff: "--- src/old.go\n+++ src/new.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
 
@@ -315,7 +315,7 @@ func TestApplyPatchErrorCardKeepsHighlightedPatchPreview(t *testing.T) {
 		RawArgs:       args,
 		ResultContent: "hunk not found",
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 	}
 	lines := block.Render(100, "")
 	plain := stripANSI(strings.Join(lines, "\n"))
@@ -337,7 +337,7 @@ func TestPartiallyAppliedPatchShowsOnlyAppliedDiff(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
-		ResultDone: true, ResultStatus: agent.ToolResultStatusError,
+		ResultDone: true, ResultStatus: message.ToolStatusError,
 		ResultContent: strings.Join([]string{
 			"apply_patch partially applied: 1 change committed; 1 file group not applied.",
 			"Applied patch:",
@@ -425,7 +425,7 @@ func TestApplyPatchFullFailureWrapsLongDiagnostic(t *testing.T) {
 		Content:       applyPatchToolDisplayArgs(patchArgs),
 		RawArgs:       patchArgs,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: content,
 	}
 
@@ -474,7 +474,7 @@ func TestApplyPatchErrorCardMarksCommittedAndFailedFiles(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
-		ResultDone: true, ResultStatus: agent.ToolResultStatusError,
+		ResultDone: true, ResultStatus: message.ToolStatusError,
 		ResultContent: strings.Join([]string{
 			"apply_patch partially applied: 2 changes committed; 1 file group not applied.",
 			"Applied patch:",
@@ -511,7 +511,7 @@ func TestApplyPatchErrorCardMarksAppliedListWithoutDiff(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
-		ResultDone: true, ResultStatus: agent.ToolResultStatusError,
+		ResultDone: true, ResultStatus: message.ToolStatusError,
 		ResultContent: strings.Join([]string{
 			"apply_patch partially applied: 1 change committed; 1 file group not applied.",
 			"Applied patch:",
@@ -537,7 +537,7 @@ func TestSuccessfulApplyPatchCardOmitsPerFileStatusMarks(t *testing.T) {
 	block := &Block{
 		ID: 1, Type: BlockToolCall, ToolName: tools.NameApplyPatch,
 		Content: applyPatchToolDisplayArgs(args), RawArgs: args,
-		ResultDone: true, ResultStatus: agent.ToolResultStatusSuccess,
+		ResultDone: true, ResultStatus: message.ToolStatusSuccess,
 		ResultContent: "Applied patch:\nM src/first.go\nM src/second.go",
 		Diff: "--- src/first.go\n+++ src/first.go\n@@ -1,1 +1,1 @@\n-old\n+new\n" +
 			"--- src/second.go\n+++ src/second.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
@@ -642,7 +642,7 @@ func TestEditToolCardRendersDiagnosticsSummaryWithDiff(t *testing.T) {
 		ToolName:     tools.NameEdit,
 		Content:      `{"path":"internal/config/config_project_test.go","patch":"@@\n-old\n+new\n"}`,
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 		ResultContent: strings.Join([]string{
 			"Applied patch to internal/config/config_project_test.go (+3 -2)",
 			"",
@@ -1092,7 +1092,7 @@ func TestRenderFileDiffCallHeaderShowsRelativePathInsideWorkingDir(t *testing.T)
 		Content:           fmt.Sprintf(`{"path":"%s","patch":"@@\n-old\n+new\n"}`, filepath.Join("internal", "tui", "example.go")),
 		Diff:              "--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 		ResultDone:        true,
-		ResultStatus:      agent.ToolResultStatusSuccess,
+		ResultStatus:      message.ToolStatusSuccess,
 		displayWorkingDir: wd,
 	}
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -1115,7 +1115,7 @@ func TestRenderFileDiffCallInsertionContextUsesNewLineNumbers(t *testing.T) {
 			"+        \"added\",\n" +
 			"         \"existing\",\n",
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 	}
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "  10 +        \"added\",") {
@@ -1138,7 +1138,7 @@ func TestRenderFileDiffCallDeletionContextDoesNotDecreaseLineNumbers(t *testing.
 			"-        \"removed\",\n" +
 			"         \"existing\",\n",
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 	}
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(plain, "  10 -        \"removed\",") {
@@ -1163,7 +1163,7 @@ func TestRenderFileDiffCallGroupedMinusPlusBlockUsesInlineOneSidedPairs(t *testi
 		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         diff,
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 	}
 	lines := block.Render(120, "")
 	plain := stripANSI(strings.Join(lines, "\n"))
@@ -1274,7 +1274,7 @@ func TestRenderFileDiffCallPureDeletionLongLineUsesSnippets(t *testing.T) {
 		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 	}
 	lines := block.Render(46, "")
 	plain := stripANSI(strings.Join(lines, "\n"))
@@ -1296,7 +1296,7 @@ func TestRenderFileDiffCallOverHardColumnLimitUsesTwoLines(t *testing.T) {
 		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 	}
 	lines := block.Render(120, "")
 	plain := stripANSI(strings.Join(lines, "\n"))
@@ -1318,7 +1318,7 @@ func TestRenderFileDiffCallMixedLongLinesUseTwoLineSnippets(t *testing.T) {
 		Content:      `{"path":"example.go","patch":"@@\n-old\n+new\n"}`,
 		Diff:         fmt.Sprintf("--- example.go\n+++ example.go\n@@ -1,1 +1,1 @@\n-%s\n+%s\n", oldLine, newLine),
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 	}
 	lines := block.Render(38, "")
 	plain := stripANSI(strings.Join(lines, "\n"))
@@ -1394,7 +1394,7 @@ func TestEditDiffHeaderPathIsCwdRelative(t *testing.T) {
 	// The rendered header keeps the file name even at a width far smaller than
 	// the absolute path length.
 	block.ResultDone = true
-	block.ResultStatus = agent.ToolResultStatusSuccess
+	block.ResultStatus = message.ToolStatusSuccess
 	block.Diff = "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n"
 	plain := stripANSI(strings.Join(block.Render(60, ""), "\n"))
 	if !strings.Contains(plain, "demo.go") {
@@ -1433,7 +1433,7 @@ func TestEditCardShowsDiffSummaryAndBodyWithoutFolding(t *testing.T) {
 		ToolName:      tools.NameEdit,
 		Content:       `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultContent: "Applied patch to src/demo.go (+1 -1)",
 		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
@@ -1463,7 +1463,7 @@ func TestApplyPatchCardShowsFileAndDiffSummaryWithoutFolding(t *testing.T) {
 		Content:       applyPatchToolDisplayArgs(args),
 		RawArgs:       args,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultContent: "Applied patch to src/demo.go (+1 -1)",
 		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
@@ -1514,7 +1514,7 @@ func TestEditDiffSummaryOmitsZeroDirection(t *testing.T) {
 				ToolName:      tools.NameEdit,
 				Content:       `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
 				ResultDone:    true,
-				ResultStatus:  agent.ToolResultStatusSuccess,
+				ResultStatus:  message.ToolStatusSuccess,
 				ResultContent: "Applied patch to src/demo.go",
 				Diff:          tc.diff,
 			}
@@ -1535,7 +1535,7 @@ func TestEditCollapsedErrorKeepsErrorBlockWithoutHeaderSummary(t *testing.T) {
 		Content:       `{"path":"src/demo.go","patch":"@@\n-old\n+new\n"}`,
 		Collapsed:     true,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "hunk not found",
 		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -1,1 +1,1 @@\n-old\n+new\n",
 	}
@@ -1561,7 +1561,7 @@ func TestDiffGutterNumbersCountlessHunkHeader(t *testing.T) {
 		ToolName:      tools.NameEdit,
 		Content:       string(args),
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultContent: "Applied patch to src/demo.go (+1 -1)",
 		Diff:          "--- src/demo.go\n+++ src/demo.go\n@@ -12 +12 @@\n-old\n+new\n",
 	}

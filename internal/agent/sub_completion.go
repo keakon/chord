@@ -3,6 +3,8 @@ package agent
 import (
 	"errors"
 	"fmt"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 // maxResultContractRecoveryAttempts bounds how many times a completion may be
@@ -18,7 +20,7 @@ const maxResultContractRecoveryAttempts = 1
 // joins; dropping optional metadata must not bypass it.
 func (s *SubAgent) finishCompletion(callID string, result *AgentResult) {
 	if pending := s.takePendingUserMessagesForContinuation(); len(pending) > 0 {
-		s.appendCompleteToolResult(callID, "Completion deferred: received new user input before completion.", ToolResultStatusSuccess)
+		s.appendCompleteToolResult(callID, "Completion deferred: received new user input before completion.", message.ToolStatusSuccess)
 		s.clearPendingCompleteIntent()
 		s.drainContextAppendsBeforeTurn()
 		s.appendPendingUserMessages(pending)
@@ -26,14 +28,14 @@ func (s *SubAgent) finishCompletion(callID string, result *AgentResult) {
 		return
 	}
 	if outstanding := s.parent.outstandingJoinChildTaskIDs(s.taskID); len(outstanding) > 0 {
-		s.appendCompleteToolResult(callID, deferredCompleteResult(len(outstanding)), ToolResultStatusSuccess)
+		s.appendCompleteToolResult(callID, deferredCompleteResult(len(outstanding)), message.ToolStatusSuccess)
 		s.setPendingCompleteIntent(result)
 		s.enterWaitingDescendant(deferredCompleteResult(len(outstanding)))
 		return
 	}
 	s.clearPendingCompleteIntent()
 	result = s.enrichCompletionResult(result)
-	s.appendCompleteToolResult(callID, result.Summary, ToolResultStatusSuccess)
+	s.appendCompleteToolResult(callID, result.Summary, message.ToolStatusSuccess)
 	s.sendEvent(Event{Type: EventAgentDone, Payload: result})
 }
 
@@ -86,7 +88,7 @@ func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error, de
 		return
 	}
 	if s.completionRecoveryBudgetAvailable() {
-		s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error(), ToolResultStatusError)
+		s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error(), message.ToolStatusError)
 		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with corrected, valid arguments.", cause)})
 		s.asyncCallLLMWithFlightMarked(s.turn)
 		return
@@ -95,7 +97,7 @@ func (s *SubAgent) rejectInvalidCompleteArguments(callID string, cause error, de
 		s.finishCompletion(callID, degraded)
 		return
 	}
-	s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error(), ToolResultStatusError)
+	s.appendCompleteToolResult(callID, "Completion rejected: "+cause.Error(), message.ToolStatusError)
 	s.sendEvent(Event{Type: EventAgentError, Payload: fmt.Errorf("completion was rejected after retry: %w", cause)})
 }
 
@@ -128,13 +130,13 @@ func (s *SubAgent) rejectResultContractViolation(callID string, violation *Resul
 		return
 	}
 	if s.resultContractRecoveryBudgetAvailable() {
-		s.appendCompleteToolResult(callID, "Completion rejected: "+violation.Error(), ToolResultStatusError)
+		s.appendCompleteToolResult(callID, "Completion rejected: "+violation.Error(), message.ToolStatusError)
 		s.appendPendingUserMessage(pendingUserMessage{Content: fmt.Sprintf("Completion was rejected: %v. Call Complete again with a result that satisfies the task's result contract.", violation)})
 		s.asyncCallLLMWithFlightMarked(s.turn)
 		return
 	}
 	s.setResultContractFailure(violation.Diagnostics())
-	s.appendCompleteToolResult(callID, "Completion rejected: "+violation.Error(), ToolResultStatusError)
+	s.appendCompleteToolResult(callID, "Completion rejected: "+violation.Error(), message.ToolStatusError)
 	s.sendEvent(Event{Type: EventAgentError, Payload: violation})
 }
 
@@ -146,6 +148,6 @@ func (s *SubAgent) failResultContractIntegrity(callID string, integrity *ResultC
 		return
 	}
 	s.setResultContractFailure(integrity.Diagnostics())
-	s.appendCompleteToolResult(callID, "Completion rejected: "+integrity.Error(), ToolResultStatusError)
+	s.appendCompleteToolResult(callID, "Completion rejected: "+integrity.Error(), message.ToolStatusError)
 	s.sendEvent(Event{Type: EventAgentError, Payload: integrity})
 }

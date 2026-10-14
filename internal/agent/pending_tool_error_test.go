@@ -823,7 +823,7 @@ func TestSubAgentCancelDoesNotEmitTerminalResultForCompletedToolCalls(t *testing
 	s.cancelCurrentTurnFromLoop()
 
 	events := drainAgentEvents(parent.Events())
-	seen := make(map[string]ToolResultStatus)
+	seen := make(map[string]message.ToolResultStatus)
 	for _, evt := range events {
 		if res, ok := evt.(ToolResultEvent); ok {
 			seen[res.CallID] = res.Status
@@ -832,8 +832,8 @@ func TestSubAgentCancelDoesNotEmitTerminalResultForCompletedToolCalls(t *testing
 	if _, ok := seen["tool-done"]; ok {
 		t.Fatal("completed subagent tool unexpectedly received terminal cancellation result")
 	}
-	if got := seen["tool-running"]; got != ToolResultStatusCancelled {
-		t.Fatalf("tool-running status = %q, want %q", got, ToolResultStatusCancelled)
+	if got := seen["tool-running"]; got != message.ToolStatusCancelled {
+		t.Fatalf("tool-running status = %q, want %q", got, message.ToolStatusCancelled)
 	}
 }
 
@@ -850,8 +850,8 @@ func TestEmitFailedToolResultsMarksErrorStatus(t *testing.T) {
 	if !ok {
 		t.Fatalf("event type = %T, want ToolResultEvent", events[0])
 	}
-	if result.Status != ToolResultStatusError {
-		t.Fatalf("status = %q, want %q", result.Status, ToolResultStatusError)
+	if result.Status != message.ToolStatusError {
+		t.Fatalf("status = %q, want %q", result.Status, message.ToolStatusError)
 	}
 	if result.Result == "" {
 		t.Fatal("expected non-empty failure message")

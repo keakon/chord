@@ -151,7 +151,7 @@ func (a *MainAgent) handleNativeReceipt(evt Event) {
 	}
 	for _, display := range tools.NativeToolDisplays(payload.receipt) {
 		a.emitToTUI(ToolCallStartEvent{ID: display.ID, Name: display.Name, ArgsJSON: display.Args, AgentID: payload.agentID})
-		a.emitToTUI(ToolResultEvent{CallID: display.ID, Name: display.Name, ArgsJSON: display.Args, Result: display.Result, Payload: display.Result, Parts: display.Parts, Status: ToolResultStatus(display.Status), AgentID: payload.agentID})
+		a.emitToTUI(ToolResultEvent{CallID: display.ID, Name: display.Name, ArgsJSON: display.Args, Result: display.Result, Payload: display.Result, Parts: display.Parts, Status: message.ToolResultStatus(display.Status), AgentID: payload.agentID})
 	}
 }
 

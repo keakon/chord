@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -55,7 +55,7 @@ func TestEditBatchHeaderNamesReplaceAllEntries(t *testing.T) {
 			Content:       `{"path":"foo.txt"}`,
 			RawArgs:       tc.raw,
 			ResultContent: "old_string not found in file",
-			ResultStatus:  agent.ToolResultStatusError,
+			ResultStatus:  message.ToolStatusError,
 			ResultDone:    true,
 		}
 		plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
@@ -70,7 +70,7 @@ func TestEditBatchHeaderNamesReplaceAllEntries(t *testing.T) {
 		Content:       `{"path":"foo.txt"}`,
 		RawArgs:       `{"path":"foo.txt","edits":[{"old_string":"a","new_string":"b"}]}`,
 		ResultContent: "old_string not found in file",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}).Render(100, ""), "\n"))
 	if strings.Contains(plain, "replace_all") {
@@ -92,7 +92,7 @@ func TestEditBatchFailureMarksOnlyFailedEntries(t *testing.T) {
 		Content:       `{"path":"sample.go"}`,
 		RawArgs:       raw,
 		ResultContent: "No changes were written (batch edits are atomic).\nedits[1]: old_string not found in the original file\nRemaining entries (edits[0,2]) passed per-entry matching but were not applied.\nFix the failing entries above and resubmit the complete batch.",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))
@@ -123,7 +123,7 @@ func TestEditBatchUnstructuredErrorKeepsPlainPreview(t *testing.T) {
 		Content:       `{"path":"sample.go"}`,
 		RawArgs:       `{"path":"sample.go","edits":[{"old_string":"a","new_string":"b"},{"old_string":"c","new_string":"d"}]}`,
 		ResultContent: "old_string not found in file, even after punctuation/whitespace tolerance.",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
 	plain := stripANSI(strings.Join(block.Render(100, ""), "\n"))

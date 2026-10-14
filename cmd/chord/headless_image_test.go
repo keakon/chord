@@ -85,7 +85,7 @@ func TestHeadlessImageResultCarriesOriginal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	event := agent.ToolResultEvent{Name: tools.NameGenerateImage, CallID: "call-1", Status: agent.ToolResultStatusSuccess, Payload: output, Parts: sink.Drain()}
+	event := agent.ToolResultEvent{Name: tools.NameGenerateImage, CallID: "call-1", Status: message.ToolStatusSuccess, Payload: output, Parts: sink.Drain()}
 	envelopes := collectHeadlessImageResult(t.Context(), event)
 	if len(envelopes) != 2 || envelopes[0].Type != headlessImageResult || envelopes[1].Type != "image_artifact" {
 		t.Fatal("missing original image transfer")
@@ -95,7 +95,7 @@ func TestHeadlessImageResultCarriesOriginal(t *testing.T) {
 	if len(envelopes) != 2 || envelopes[1].Payload.(map[string]any)["delivery_error"] == nil {
 		t.Fatal("missing artifact failure hidden")
 	}
-	event.Status = agent.ToolResultStatusError
+	event.Status = message.ToolStatusError
 	if len(collectHeadlessImageResult(t.Context(), event)) != 1 {
 		t.Fatal("failed result delivered image as success")
 	}

@@ -1006,7 +1006,7 @@ func TestFoldLiveToolCallIntoCommittedBaseRowPreservesRuntimeState(t *testing.T)
 	// The folded card keeps settling through later events like any tool card.
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID: callID, Name: tools.NameApplyPatch, AgentID: "agent-1", ArgsJSON: args,
-		Result: "Applied patch", Status: agent.ToolResultStatusSuccess,
+		Result: "Applied patch", Status: message.ToolStatusSuccess,
 		Diff: "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
 	}})
 	if got, ok := m.viewport.FindBlockByToolID(callID); !ok || !got.ResultDone || got.ResultContent != "Applied patch" {
@@ -1048,7 +1048,7 @@ func TestCompletedBaseToolRowDropsStaleLiveCard(t *testing.T) {
 	backend.messagesByFocus["agent-1"] = []message.Message{
 		{Role: "user", Content: "worker prompt"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: callID, Name: "apply_patch", Args: json.RawMessage(args)}}},
-		{Role: "tool", ToolCallID: callID, ToolStatus: string(agent.ToolResultStatusSuccess), Content: "Applied patch"},
+		{Role: "tool", ToolCallID: callID, ToolStatus: string(message.ToolStatusSuccess), Content: "Applied patch"},
 	}
 	m.setFocusedAgent("agent-1")
 

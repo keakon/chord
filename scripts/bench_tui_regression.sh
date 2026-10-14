@@ -81,7 +81,7 @@ truncate_bench_args=(-run '^$' -bench "$TRUNCATE_BENCH_PATTERN" -benchmem)
 if [[ -n "${CHORD_BENCH_TIME:-}" ]]; then
   truncate_bench_args+=(-benchtime "${CHORD_BENCH_TIME}")
 fi
-go test ./internal/llm "${truncate_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
+go test ./internal/texttruncate "${truncate_bench_args[@]}" | tee -a /tmp/chord-tui-bench.txt
 
 printf '\n==> Running context reduction benchmarks\n'
 context_bench_args=(-run '^$' -bench '^BenchmarkPrepareMessagesForLLM' -benchmem)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 func (m Model) hasComposerContent() bool {
@@ -131,10 +132,10 @@ func (m *Model) dropQueuedDraftFromAgent(draftID string) {
 }
 
 func (m *Model) loadQueuedDraftIntoComposer(draft queuedDraft) tea.Cmd {
-	m.input.editBoundary++
+	m.input.BeginDraft()
 	m.clearActiveSearch()
 	m.editingQueuedDraftID = draft.ID
-	text, inlinePastes := displayTextAndInlinePastes(draft.contentParts(), draft.Content)
+	text, inlinePastes := composer.DisplayTextAndInlinePastes(draft.contentParts(), draft.Content)
 	nextPasteSeq := 0
 	for _, paste := range inlinePastes {
 		if paste.Seq > nextPasteSeq {
@@ -148,7 +149,7 @@ func (m *Model) loadQueuedDraftIntoComposer(draft queuedDraft) tea.Cmd {
 		composerText = text
 	}
 	m.input.SetDisplayValueAndPastes(composerText, inlinePastes, nextPasteSeq)
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	m.attachments = attachmentsFromParts(draft.contentParts())
 	m.switchModeWithIME(ModeInsert)
 	m.recalcViewportSize()
@@ -213,4 +214,11 @@ func (m *Model) queuedDraftActionAt(x, y int) (idx int, remove bool, ok bool) {
 	deleteStart := max(m.layout.queue.Max.X-queuedDraftDeleteRightMargin-deleteWidth, m.layout.queue.Min.X)
 	deleteEnd := deleteStart + deleteWidth
 	return idx, x >= deleteStart && x < deleteEnd, true
+}
+
+// newComposer binds editor presentation and clipboard effects to the TUI.
+func newComposer() composer.Input {
+	return composer.New(newTextareaStyles(), func(text string) tea.Cmd {
+		return writeClipboardCmd(text, "Selection copied to clipboard")
+	})
 }

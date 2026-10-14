@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -47,7 +48,7 @@ func buildUserCorrectionEvidence(source, text string) evidenceItem {
 		"User correction / constraint",
 		"This explicitly constrains the next code change and should be preserved verbatim.",
 		source,
-		compactTextSnippet(text, compactUserConstraintExcerptChars),
+		requesttrim.TextSnippet(text, compactUserConstraintExcerptChars),
 	), text)
 }
 

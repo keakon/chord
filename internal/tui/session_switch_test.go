@@ -25,6 +25,7 @@ import (
 	"github.com/keakon/chord/internal/runtimecache"
 	"github.com/keakon/chord/internal/skill"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 func modelSelectKey(text string) tea.KeyPressMsg {
@@ -211,7 +212,7 @@ func TestVeryShortAssistantPrefixBeforeToolCallIsDroppedAcrossFinalizeAndRebuild
 		Name:     "read",
 		ArgsJSON: `{"file_path":"a.go"}`,
 		Result:   "ok",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 	}})
 	applyTestCmd(t, &m, cmd)
 
@@ -441,7 +442,7 @@ func TestStartupRestoreRenormalizesSidebarFilesForUpdatedWorkDir(t *testing.T) {
 			{
 				Role:            "tool",
 				ToolCallID:      "call-edit-root-1",
-				ToolStatus:      string(agent.ToolResultStatusSuccess),
+				ToolStatus:      string(message.ToolStatusSuccess),
 				ToolDiff:        "diff",
 				ToolDiffAdded:   2,
 				ToolDiffRemoved: 1,
@@ -734,7 +735,7 @@ func TestDeferredStartupTranscriptHiddenToolResultDoesNotDuplicateAfterMouseWhee
 		Name:     "read",
 		ArgsJSON: argsJSON,
 		Result:   "ok",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 	}})
 
 	if got := len(model.viewport.visibleBlocks()); got != visibleBefore {
@@ -2418,7 +2419,7 @@ func TestDeferredStartupTranscriptWindowSwitchKeepsLiveToolResult(t *testing.T) 
 		Name:     "read",
 		ArgsJSON: argsJSON,
 		Result:   "1\talpha line\n2\tbeta line\n3\tgamma line\n4\tomega line",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 	}})
 
 	liveToolID := -1
@@ -4260,10 +4261,10 @@ func TestRebuildViewportFromMessagesMarksRestoredToolErrorsAndCancellationsDone(
 	if errBlock == nil || cancelBlock == nil || pendingBlock == nil {
 		t.Fatalf("expected all tool blocks to be rebuilt, got %#v", blocks)
 	}
-	if !errBlock.ResultDone || errBlock.ResultStatus != agent.ToolResultStatusError {
+	if !errBlock.ResultDone || errBlock.ResultStatus != message.ToolStatusError {
 		t.Fatalf("error block = done:%v status:%q, want done:true status:error", errBlock.ResultDone, errBlock.ResultStatus)
 	}
-	if !cancelBlock.ResultDone || cancelBlock.ResultStatus != agent.ToolResultStatusCancelled {
+	if !cancelBlock.ResultDone || cancelBlock.ResultStatus != message.ToolStatusCancelled {
 		t.Fatalf("cancel block = done:%v status:%q, want done:true status:cancelled", cancelBlock.ResultDone, cancelBlock.ResultStatus)
 	}
 	if pendingBlock.ResultDone {
@@ -4295,10 +4296,10 @@ func TestRebuildBlocksFromFocusedSubAgentMessagesMarksRestoredToolStates(t *test
 	if len(blocks) != 2 {
 		t.Fatalf("len(rebuildBlocksFromAgentMessages()) = %d, want 2", len(blocks))
 	}
-	if !blocks[0].ResultDone || blocks[0].ResultStatus != agent.ToolResultStatusError {
+	if !blocks[0].ResultDone || blocks[0].ResultStatus != message.ToolStatusError {
 		t.Fatalf("first sub-agent block = done:%v status:%q, want done:true status:error", blocks[0].ResultDone, blocks[0].ResultStatus)
 	}
-	if !blocks[1].ResultDone || blocks[1].ResultStatus != agent.ToolResultStatusCancelled {
+	if !blocks[1].ResultDone || blocks[1].ResultStatus != message.ToolStatusCancelled {
 		t.Fatalf("second sub-agent block = done:%v status:%q, want done:true status:cancelled", blocks[1].ResultDone, blocks[1].ResultStatus)
 	}
 	for i, b := range blocks {
@@ -4778,7 +4779,7 @@ func TestForkSessionRebuildPreservesRestoredImageAttachments(t *testing.T) {
 	m.input.InsertImagePlaceholderWithDisplay(2, "[image2.jpg]")
 	m.handleAttachmentReadyMsg(attachmentReadyMsg{
 		attachment:                Attachment{FileName: "image2.jpg", MimeType: "image/jpeg", Data: []byte("b")},
-		inlineImagePlaceholderRaw: imagePlaceholder(2),
+		inlineImagePlaceholderRaw: composer.ImagePlaceholder(2),
 	})
 	if len(m.attachments) != 2 {
 		t.Fatalf("attachments after second image = %+v, want 2 attachments", m.attachments)
@@ -5024,7 +5025,7 @@ func TestForkSessionEventBackfillsImagesOnly(t *testing.T) {
 		t.Fatalf("input value = %q, want two inline image placeholders", got)
 	}
 	pastes := m.input.InlinePastes()
-	if len(pastes) != 2 || pastes[0].Kind != inlineTokenImage || pastes[1].Kind != inlineTokenImage {
+	if len(pastes) != 2 || pastes[0].Kind != composer.TokenImage || pastes[1].Kind != composer.TokenImage {
 		t.Fatalf("inline pastes = %#v, want two image tokens", pastes)
 	}
 }

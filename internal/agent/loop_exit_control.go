@@ -248,7 +248,7 @@ func (a *MainAgent) persistLoopDoneToolResult(callID, result string) {
 	if callID == "" || result == "" {
 		return
 	}
-	toolMsg := message.Message{Role: message.RoleTool, Content: result, ToolCallID: callID, ToolStatus: string(ToolResultStatusSuccess)}
+	toolMsg := message.Message{Role: message.RoleTool, Content: result, ToolCallID: callID, ToolStatus: message.ToolStatusSuccess}
 	a.ctxMgr.Append(toolMsg)
 	if a.recoveryManager() != nil {
 		a.persistAsync(identity.MainAgentID, toolMsg)
@@ -280,7 +280,7 @@ func (a *MainAgent) appendLoopContinuationAndContinue(callID, argsJSON, result s
 		a.setPendingLoopContinuation(note)
 	}
 	a.emitToTUI(ToolCallUpdateEvent{ID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, ArgsStreamingDone: true, AgentID: "main"})
-	a.emitToTUI(ToolResultEvent{CallID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, Result: result, Status: ToolResultStatusSuccess})
+	a.emitToTUI(ToolResultEvent{CallID: callID, Name: tools.NameDone, ArgsJSON: argsJSON, Result: result, Status: message.ToolStatusSuccess})
 }
 
 func (a *MainAgent) shouldAutoInterceptLoopExit() bool {

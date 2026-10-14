@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -144,8 +145,8 @@ func TestStreamingApplyPatchRangeExcludedStatesMatchFullRender(t *testing.T) {
 		mutate func(*Block)
 	}{
 		{"result-done", func(b *Block) { b.ResultDone = true; b.ResultContent = "Done!" }},
-		{"error", func(b *Block) { b.ResultStatus = agent.ToolResultStatusError }},
-		{"cancelled", func(b *Block) { b.ResultStatus = agent.ToolResultStatusCancelled }},
+		{"error", func(b *Block) { b.ResultStatus = message.ToolStatusError }},
+		{"cancelled", func(b *Block) { b.ResultStatus = message.ToolStatusCancelled }},
 		{"collapsed", func(b *Block) { b.Collapsed = true }},
 		{"other-tool", func(b *Block) { b.ToolName = tools.NameRead; b.RawArgs = ""; b.Content = "file contents" }},
 		{"diff-already-available", func(b *Block) { b.Diff = "--- a/src/demo.go\n+++ b/src/demo.go\n" }},

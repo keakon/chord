@@ -225,7 +225,7 @@ func TestHandleAgentEventSkillToolCollapsedSummaryButExpandedBody(t *testing.T) 
 		CallID:   "skill-1",
 		Name:     "skill",
 		ArgsJSON: `{"name":"skill-creator","args":"Create 4 new skills"}`,
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 		Result:   "<skill>\n<name>skill-creator</name>\n<path>/tmp/skills/skill-creator/SKILL.md</path>\n<root>/tmp/skills/skill-creator</root>\n<notes>ignored</notes>\n\n# Skill Creator\n\n- Step one\n- Step two\n</skill>",
 	}})
 
@@ -320,7 +320,7 @@ func TestLiveAndRestoredDoneToolShareStableResultFields(t *testing.T) {
 		Name:       tools.NameDone,
 		ArgsJSON:   args,
 		Result:     result,
-		Status:     agent.ToolResultStatusSuccess,
+		Status:     message.ToolStatusSuccess,
 		DoneReport: "## Completion status\nDone\n\n- verified",
 	}})
 	live, ok := m.viewport.FindBlockByToolID("done-1")
@@ -331,7 +331,7 @@ func TestLiveAndRestoredDoneToolShareStableResultFields(t *testing.T) {
 	nextID := 1
 	restored := messagesToBlocks([]message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "done-1", Name: tools.NameDone, Args: json.RawMessage(args)}}},
-		{Role: "tool", ToolCallID: "done-1", Content: result, ToolStatus: string(agent.ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "done-1", Content: result, ToolStatus: string(message.ToolStatusSuccess)},
 	}, &nextID)
 	if len(restored) != 1 {
 		t.Fatalf("restored len = %d, want 1", len(restored))
@@ -341,7 +341,7 @@ func TestLiveAndRestoredDoneToolShareStableResultFields(t *testing.T) {
 		if block.DoneReport != "## Completion status\nDone\n\n- verified" {
 			t.Fatalf("%s DoneReport = %q", name, block.DoneReport)
 		}
-		if block.ResultContent != result || block.ResultStatus != agent.ToolResultStatusSuccess || !block.ResultDone {
+		if block.ResultContent != result || block.ResultStatus != message.ToolStatusSuccess || !block.ResultDone {
 			t.Fatalf("%s result fields = content %q status %q done %t", name, block.ResultContent, block.ResultStatus, block.ResultDone)
 		}
 		if block.ToolExecutionState != "" || block.ToolProgress != nil {
@@ -540,7 +540,7 @@ func TestMessagesToBlocksRestoredEditWithoutToolDiffFallsBackToArgsPreview(t *te
 	nextID := 1
 	msgs := []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "patch-1", Name: tools.NameEdit, Args: []byte(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`)}}},
-		{Role: "tool", ToolCallID: "patch-1", Content: "Applied patch to foo.txt (+1 -1)", ToolStatus: string(agent.ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "patch-1", Content: "Applied patch to foo.txt (+1 -1)", ToolStatus: string(message.ToolStatusSuccess)},
 	}
 
 	blocks := messagesToBlocks(msgs, &nextID)
@@ -590,7 +590,7 @@ func TestMessagesToBlocksRestoredElidedEditShowsRequestedReplacement(t *testing.
 	}
 	msgs := []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-1", Name: tools.NameEdit, Args: args}}},
-		{Role: "tool", ToolCallID: "edit-1", Content: message.FormatToolResultElided(1219), ToolStatus: string(agent.ToolResultStatusSuccess), ToolDiffAdded: 1, ToolDiffRemoved: 1},
+		{Role: "tool", ToolCallID: "edit-1", Content: message.FormatToolResultElided(1219), ToolStatus: string(message.ToolStatusSuccess), ToolDiffAdded: 1, ToolDiffRemoved: 1},
 	}
 
 	blocks := messagesToBlocks(msgs, &nextID)
@@ -616,7 +616,7 @@ func TestMessagesToBlocksRestoredElidedResultRendersArchiveNote(t *testing.T) {
 	nextID := 1
 	msgs := []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "shell-1", Name: tools.NameShell, Args: []byte(`{"command":"go test ./internal/agent/"}`)}}},
-		{Role: "tool", ToolCallID: "shell-1", Content: message.FormatToolResultElided(4096), ToolStatus: string(agent.ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "shell-1", Content: message.FormatToolResultElided(4096), ToolStatus: string(message.ToolStatusSuccess)},
 	}
 
 	blocks := messagesToBlocks(msgs, &nextID)
@@ -647,7 +647,7 @@ func TestRestoredElidedEditCopyKeepsReplacementAndArchiveNote(t *testing.T) {
 	args := []byte(`{"path":"src/demo.go","old_string":"old\n","new_string":"new\n"}`)
 	msgs := []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "edit-2", Name: tools.NameEdit, Args: args}}},
-		{Role: "tool", ToolCallID: "edit-2", Content: message.FormatToolResultElided(946), ToolStatus: string(agent.ToolResultStatusSuccess), ToolDiffAdded: 1, ToolDiffRemoved: 1},
+		{Role: "tool", ToolCallID: "edit-2", Content: message.FormatToolResultElided(946), ToolStatus: string(message.ToolStatusSuccess), ToolDiffAdded: 1, ToolDiffRemoved: 1},
 	}
 
 	blocks := messagesToBlocks(msgs, &nextID)
@@ -671,7 +671,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 		toolName  string
 		args      json.RawMessage
 		content   string
-		status    agent.ToolResultStatus
+		status    message.ToolResultStatus
 		want      []string
 		wantOrder []string
 	}{
@@ -680,7 +680,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			toolName: tools.NameWrite,
 			args:     json.RawMessage(`{"path":"foo.txt","content":"hello"}`),
 			content:  "Error: writing file: permission denied",
-			status:   agent.ToolResultStatusError,
+			status:   message.ToolStatusError,
 			want:     []string{"↳ Error:", "permission denied"},
 		},
 		{
@@ -688,7 +688,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			toolName:  tools.NameEdit,
 			args:      json.RawMessage(`{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`),
 			content:   "hunk not found; re-read the file before applying the patch",
-			status:    agent.ToolResultStatusError,
+			status:    message.ToolStatusError,
 			want:      []string{"↳ Patch:", "-old", "+new", "↳ Error:", "hunk not found"},
 			wantOrder: []string{"↳ Patch:", "-old", "+new", "↳ Error:", "hunk not found"},
 		},
@@ -697,7 +697,7 @@ func TestMessagesToBlocksRestoredFileMutationResultsUseLiveExpandedState(t *test
 			toolName: tools.NameDelete,
 			args:     json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`),
 			content:  "Deleted (1):\n- /tmp/obsolete.go",
-			status:   agent.ToolResultStatusSuccess,
+			status:   message.ToolStatusSuccess,
 			want:     []string{"delete /tmp/obsolete.go (remove obsolete file)", "Deleted /tmp/obsolete.go"},
 		},
 	}
@@ -754,7 +754,7 @@ func TestLiveEditErrorShowsAttemptedPatchFromRawArgs(t *testing.T) {
 		Name:     tools.NameEdit,
 		ArgsJSON: args,
 		Result:   "Error: hunk not found; re-read the file before applying the patch",
-		Status:   agent.ToolResultStatusError,
+		Status:   message.ToolStatusError,
 	}})
 
 	var block *Block
@@ -798,7 +798,7 @@ func TestLiveEditErrorShowsAttemptedPatchFromRawArgs(t *testing.T) {
 func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "del-1", Name: tools.NameDelete, Args: json.RawMessage(`{"paths":["/tmp/obsolete.go"],"reason":"remove obsolete file"}`)}}},
-		{Role: "tool", ToolCallID: "del-1", Content: "Deleted (1):\n- /tmp/obsolete.go", ToolStatus: string(agent.ToolResultStatusSuccess), ToolDurationMs: 1234},
+		{Role: "tool", ToolCallID: "del-1", Content: "Deleted (1):\n- /tmp/obsolete.go", ToolStatus: string(message.ToolStatusSuccess), ToolDurationMs: 1234},
 	}}
 	m := NewModelWithSize(backend, 120, 24)
 	m.rebuildViewportFromMessagesWithReason("session_restored")
@@ -831,7 +831,7 @@ func TestSessionRestoredDeleteToolShowsReasonAndPersistedDuration(t *testing.T) 
 func TestSessionRestoredToolStatusUsesPersistedStatus(t *testing.T) {
 	backend := &sessionControlAgent{messages: []message.Message{
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "sh-1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"false","description":"verify failure"}`)}}},
-		{Role: "tool", ToolCallID: "sh-1", Content: "plain hook-modified failure", ToolStatus: string(agent.ToolResultStatusError)},
+		{Role: "tool", ToolCallID: "sh-1", Content: "plain hook-modified failure", ToolStatus: string(message.ToolStatusError)},
 	}}
 	m := NewModelWithSize(backend, 120, 24)
 	m.rebuildViewportFromMessagesWithReason("session_restored")
@@ -846,8 +846,8 @@ func TestSessionRestoredToolStatusUsesPersistedStatus(t *testing.T) {
 	if block == nil {
 		t.Fatal("expected restored Shell tool block")
 	}
-	if block.ResultStatus != agent.ToolResultStatusError {
-		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, agent.ToolResultStatusError)
+	if block.ResultStatus != message.ToolStatusError {
+		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, message.ToolStatusError)
 	}
 }
 

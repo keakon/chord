@@ -31,7 +31,7 @@ func (a *MainAgent) persistImageResult(manager *recovery.RecoveryManager, agentI
 	publish := func(err error) {
 		if err != nil {
 			noteFailure(err)
-			event.Status = ToolResultStatusError
+			event.Status = message.ToolStatusError
 			event.RecoveryState = message.ToolRecoveryStateOutcomeUnknown
 			event.Result = fmt.Sprintf("Image execution must not be replayed: canonical result persistence failed: %v. Inspect the saved session image manifest.", err)
 			event.Payload = event.Result

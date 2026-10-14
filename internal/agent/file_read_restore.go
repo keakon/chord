@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/filelock"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
@@ -168,7 +169,7 @@ func restoreTrackedFileStateFromMessages(tracker *filelock.FileTracker, agentID,
 				if previous, exists := candidates[key]; exists {
 					candidate.observedHash = previous.observedHash
 				}
-				if readResultShowsWholeFile(msg.Content) {
+				if requesttrim.ReadResultShowsWholeFile(msg.Content) {
 					candidate.observedHash = hash
 				}
 				candidates[key] = candidate
@@ -324,7 +325,7 @@ func isNativeChordProvenance(prov *message.MessageProvenance) bool {
 }
 
 func restoreToolResultCommitted(msg message.Message) bool {
-	return isToolResultSuccessStatus(msg.ToolStatus) || msg.FileState.HasChanges()
+	return message.IsToolResultSuccessStatus(msg.ToolStatus) || msg.FileState.HasChanges()
 }
 
 func restoreEffectiveArgs(msg message.Message, call restoreToolCall) (json.RawMessage, bool) {
@@ -436,7 +437,7 @@ func restoreStatePathMatchesArgument(statePath, argumentPath string) bool {
 	if filepath.IsAbs(argumentPath) {
 		return restoreNormalizeTrackedPath(statePath) == restoreNormalizeTrackedPath(argumentPath)
 	}
-	return pathSuffixMatch(statePath, argumentPath)
+	return requesttrim.PathSuffixMatch(statePath, argumentPath)
 }
 
 func restoreEditWriteStatePath(state *message.ToolFileState, key string) (string, bool) {

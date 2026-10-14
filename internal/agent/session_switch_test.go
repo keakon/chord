@@ -781,7 +781,7 @@ func TestHandleForkSessionCommandRestoresTrackedReadsFromPrefixOnly(t *testing.T
 		message.Message{
 			Role:       "tool",
 			ToolCallID: "read-beta",
-			ToolStatus: string(ToolResultStatusSuccess),
+			ToolStatus: message.ToolStatusSuccess,
 			Content:    "1\tbeta",
 			FileState:  &message.ToolFileState{Reads: []message.TrackedFileState{{Path: betaPath, SHA256: computeFileHash(betaPath), Exists: true}}},
 		},

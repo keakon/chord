@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -158,7 +159,7 @@ func deduplicateAnchoredRequest(body, request, source string, sources map[string
 		anchors.OriginalRequest = ""
 		changed = true
 	}
-	line := anchorLine(compactTextSnippet(request, compactUserConstraintExcerptChars), compactAnchorsConstraintChars)
+	line := anchorLine(requesttrim.TextSnippet(request, compactUserConstraintExcerptChars), compactAnchorsConstraintChars)
 	anchors.Constraints = slices.DeleteFunc(anchors.Constraints, func(constraint string) bool {
 		if constraint != line || sources[checkpointConstraintSourceKey(constraint)] != source {
 			return false
@@ -185,7 +186,7 @@ func deduplicateUserConstraintRequest(body, request, source string, sources map[
 			end = start + pos
 		}
 	}
-	excerpt := strings.ReplaceAll(compactTextSnippet(request, compactUserConstraintExcerptChars), "\n", " ")
+	excerpt := strings.ReplaceAll(requesttrim.TextSnippet(request, compactUserConstraintExcerptChars), "\n", " ")
 	if sources[checkpointUserConstraintSourceKey(excerpt)] != source {
 		return body
 	}
@@ -207,7 +208,7 @@ func deduplicateEvidenceRequestExcerpt(body, request, source string, sources map
 	}
 	var excerpt strings.Builder
 	excerpt.WriteString("Excerpt:\n")
-	writeEvidenceExcerptBlock(&excerpt, compactTextSnippet(request, compactUserConstraintExcerptChars))
+	writeEvidenceExcerptBlock(&excerpt, requesttrim.TextSnippet(request, compactUserConstraintExcerptChars))
 	rendered := strings.TrimSuffix(excerpt.String(), "\n")
 	region := body[start:]
 	var rows []int

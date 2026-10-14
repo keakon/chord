@@ -12,6 +12,7 @@ import (
 
 	"github.com/keakon/chord/internal/clipboardread"
 	"github.com/keakon/chord/internal/imageutil"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 type clipboardWriteResultMsg struct {
@@ -74,7 +75,7 @@ func attachmentFromImagePath(path string, index int) (Attachment, error) {
 	}
 	fileName := filepath.Base(cleanPath)
 	if fileName == "." || fileName == string(filepath.Separator) || strings.TrimSpace(fileName) == "" {
-		fileName = fmt.Sprintf("attachment%d%s", index, attachmentExtForMimeType(mimeType))
+		fileName = fmt.Sprintf("attachment%d%s", index, composer.AttachmentExtForMimeType(mimeType))
 	}
 	return Attachment{
 		FileName:  fileName,
@@ -148,11 +149,11 @@ func (m *Model) handleClipboardAttachmentReady(msg clipboardAttachmentReadyMsg) 
 	}
 
 	imageOrdinal := m.nextInlineImageOrdinal()
-	attachment.FileName = fmt.Sprintf("image%d%s", imageOrdinal, attachmentExtForMimeType(msg.mimeType))
+	attachment.FileName = fmt.Sprintf("image%d%s", imageOrdinal, composer.AttachmentExtForMimeType(msg.mimeType))
 	m.input.ClearSelection()
-	placeholderRaw := imagePlaceholder(imageOrdinal)
+	placeholderRaw := composer.ImagePlaceholder(imageOrdinal)
 	m.input.InsertImagePlaceholderWithDisplay(imageOrdinal, attachmentReferenceText(attachment))
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	syncCmd := m.syncAtMentionIfOpen()
 	m.recalcViewportSize()
 	return tea.Batch(syncCmd, m.handleAttachmentReadyMsg(attachmentReadyMsg{

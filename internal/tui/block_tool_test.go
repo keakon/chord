@@ -817,7 +817,7 @@ func TestGlobCardShowsIgnoredAndMissingArgumentsInline(t *testing.T) {
 		ToolName:          tools.NameGlob,
 		Content:           `{"path":"/tmp/workspace",".patterns":["MEMORY.md",".chord/memory/records/*.md"]}`,
 		ResultDone:        true,
-		ResultStatus:      agent.ToolResultStatusError,
+		ResultStatus:      message.ToolStatusError,
 		ResultContent:     "arguments do not match glob schema: args.patterns is required",
 		displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace"),
 		Audit: &message.ToolArgsAudit{
@@ -873,7 +873,7 @@ func TestGrepCardShowsDiagnosticListsLikeNormalHeader(t *testing.T) {
 		ToolName:          tools.NameGrep,
 		Content:           `{"pattern":"TODO",".paths":["/tmp/workspace/internal","/tmp/workspace/cmd"],".includes":["**/*.go","**/*.md"]}`,
 		ResultDone:        true,
-		ResultStatus:      agent.ToolResultStatusError,
+		ResultStatus:      message.ToolStatusError,
 		ResultContent:     "arguments do not match grep schema: args.paths is invalid",
 		displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace"),
 		Audit: &message.ToolArgsAudit{
@@ -922,7 +922,7 @@ func TestGrepCardShowsMissingPatternInMainSlot(t *testing.T) {
 		ToolName:          tools.NameGrep,
 		Content:           `{"path":"/tmp/workspace","includes":["**/*.go"],".pattern":"TODO"}`,
 		ResultDone:        true,
-		ResultStatus:      agent.ToolResultStatusError,
+		ResultStatus:      message.ToolStatusError,
 		ResultContent:     "arguments do not match grep schema: args.pattern is required",
 		displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace"),
 		Audit: &message.ToolArgsAudit{
@@ -976,7 +976,7 @@ func TestGrepCardFoldsPluralPatternsIntoOptionGroup(t *testing.T) {
 		ToolName:          tools.NameGrep,
 		Content:           `{"includes":["**/*.go"],"patterns":["ExportToMarkdown\\(","ExportMarkdownToFile\\(","Export\\(messages"]}`,
 		ResultDone:        true,
-		ResultStatus:      agent.ToolResultStatusError,
+		ResultStatus:      message.ToolStatusError,
 		ResultContent:     "arguments do not match grep schema: args.pattern is required",
 		displayWorkingDir: filepath.Join(string(os.PathSeparator), "tmp", "workspace"),
 		Audit: &message.ToolArgsAudit{
@@ -1064,7 +1064,7 @@ func TestReadCardShowsInvalidArgumentInRed(t *testing.T) {
 		ToolName:      tools.NameRead,
 		Content:       `{"path":"sample.go","limit":"forty"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match Read schema: args.limit must be an integer",
 		Audit: &message.ToolArgsAudit{
 			InvalidArgs: []message.InvalidToolArg{{
@@ -1091,7 +1091,7 @@ func TestExecutionFailureKeepsValidArgumentsNormal(t *testing.T) {
 		ToolName:      tools.NameGlob,
 		Content:       `{"patterns":["**/*.go"],"path":"restricted"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "permission denied",
 	}
 	lines := block.Render(120, "")
@@ -1218,7 +1218,7 @@ func TestFailedShellCardStripsIgnoredArgNoteBeforeErrorTail(t *testing.T) {
 		ResultContent:          "out\n" + note + "\n\nError: exit code 1",
 		ResultNotes:            []string{note},
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusError,
+		ResultStatus:           message.ToolStatusError,
 		ToolCallDetailExpanded: true,
 		Audit: &message.ToolArgsAudit{
 			OriginalArgsJSON:  `{"command":"go build ./...","yield_ms":240000}`,
@@ -1374,7 +1374,7 @@ func TestRestoredShellToolCardShowsPersistedDuration(t *testing.T) {
 	nextID := 0
 	blocks := messagesToBlocks([]message.Message{
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "shell-restore", Name: tools.NameShell, Args: []byte(`{"command":"go test ./..."}`)}}},
-		{Role: message.RoleTool, ToolCallID: "shell-restore", Content: "done", ToolStatus: string(agent.ToolResultStatusSuccess), ToolDurationMs: 8700},
+		{Role: message.RoleTool, ToolCallID: "shell-restore", Content: "done", ToolStatus: string(message.ToolStatusSuccess), ToolDurationMs: 8700},
 	}, &nextID)
 	if len(blocks) != 1 {
 		t.Fatalf("messagesToBlocks() returned %d blocks, want 1", len(blocks))
@@ -1932,7 +1932,7 @@ func TestOrdinaryToolResultUsesPlainTextForMarkdownLookingContent(t *testing.T) 
 		Content:                `{"url":"https://example.com"}`,
 		ResultContent:          "## Ready\n\n```go\nfmt.Println(1)\n```\n\n- item one\n- item two",
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: true,
 	}
 
@@ -1981,7 +1981,7 @@ func TestOrdinaryToolResultDoesNotUseRichMarkdownFencedCode(t *testing.T) {
 		Content:                `{"url":"https://example.com"}`,
 		ResultContent:          "## Ready\n\n```go\nfmt.Println(1)\n```",
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: true,
 	}
 
@@ -2047,7 +2047,7 @@ func TestDelegateErrorDoesNotShowDoneSummaryLabel(t *testing.T) {
 		Type:         BlockToolCall,
 		ToolName:     tools.NameDelegate,
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusError,
+		ResultStatus: message.ToolStatusError,
 		DoneSummary:  "done summary",
 	}
 	if got := formatToolResultSummaryLine(block); got != "" {
@@ -2508,7 +2508,7 @@ func TestExpandedCompleteRendersSummaryMarkdownAndStructuredDetails(t *testing.T
 		Content:                args,
 		ResultContent:          "Implemented streaming support.",
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: true,
 	}
 
@@ -2536,7 +2536,7 @@ func TestExpandedEscalateRendersReasonMarkdownWithoutRepeatingResult(t *testing.
 		Content:                args,
 		ResultContent:          "Escalation sent: Choose one migration strategy.",
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: true,
 	}
 
@@ -2558,7 +2558,7 @@ func TestProseControlCardFallsBackToContentForRestoredArgs(t *testing.T) {
 		ToolName:               tools.NameComplete,
 		Content:                `{"summary":"Restored **summary**"}`,
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: true,
 	}
 
@@ -2965,7 +2965,7 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 				ToolName:               "read",
 				Content:                `{"path":"README.md"}`,
 				ResultContent:          "ok",
-				ResultStatus:           agent.ToolResultStatusSuccess,
+				ResultStatus:           message.ToolStatusSuccess,
 				ResultDone:             true,
 				ToolCallDetailExpanded: false,
 			},
@@ -2979,7 +2979,7 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 				ToolName:               "read",
 				Content:                `{"path":"README.md"}`,
 				ResultContent:          "Error: denied",
-				ResultStatus:           agent.ToolResultStatusError,
+				ResultStatus:           message.ToolStatusError,
 				ResultDone:             true,
 				ToolCallDetailExpanded: false,
 			},
@@ -2993,7 +2993,7 @@ func TestToolStatusPrefixesUseSemanticColors(t *testing.T) {
 				ToolName:               "read",
 				Content:                `{"path":"README.md"}`,
 				ResultContent:          "Cancelled",
-				ResultStatus:           agent.ToolResultStatusCancelled,
+				ResultStatus:           message.ToolStatusCancelled,
 				ResultDone:             true,
 				ToolCallDetailExpanded: false,
 			},
@@ -3028,7 +3028,7 @@ func TestCollapsedBashErrorShowsCrossPrefixAndRedOutput(t *testing.T) {
 		ToolName:               "shell",
 		Content:                `{"command":"false"}`,
 		ResultContent:          "stdout\n\nError: exit code 1",
-		ResultStatus:           agent.ToolResultStatusError,
+		ResultStatus:           message.ToolStatusError,
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
@@ -3055,7 +3055,7 @@ func TestCollapsedBashRejectedShowsExpandHintBeforeRejection(t *testing.T) {
 		ToolName:               "shell",
 		Content:                `{"command":"first command line\nsecond command line\nthird command line","timeout_ms":120000}`,
 		ResultContent:          `tool "shell" rejected by user: sample rejection reason`,
-		ResultStatus:           agent.ToolResultStatusError,
+		ResultStatus:           message.ToolStatusError,
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
@@ -3082,7 +3082,7 @@ func TestCollapsedBashMultiLineErrorShowsOnlyExitCode(t *testing.T) {
 		ToolName:               "shell",
 		Content:                `{"command":"go test ./internal/tui"}`,
 		ResultContent:          "--- FAIL: TestFoo (0.00s)\n    app_test.go:12: boom\n\nError: exit code 1. Test or verification command failed. Inspect the first relevant failure; before rerunning a broad test, prefer a focused reproduction for the affected package/test",
-		ResultStatus:           agent.ToolResultStatusError,
+		ResultStatus:           message.ToolStatusError,
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
@@ -3106,7 +3106,7 @@ func TestCollapsedBashSingleLineErrorShowsVerbatimLine(t *testing.T) {
 		ToolName:               "shell",
 		Content:                `{"command":"go build ./..."}`,
 		ResultContent:          "Error: exit code 127: command not found: sample-tool",
-		ResultStatus:           agent.ToolResultStatusError,
+		ResultStatus:           message.ToolStatusError,
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
@@ -3124,7 +3124,7 @@ func TestCollapsedBashTimeoutShowsTimeoutStatus(t *testing.T) {
 		ToolName:               "shell",
 		Content:                `{"command":"go test ./internal/tui"}`,
 		ResultContent:          "some output line\n\ncommand timed out after 600s after output:\nmore output",
-		ResultStatus:           agent.ToolResultStatusError,
+		ResultStatus:           message.ToolStatusError,
 		ResultDone:             true,
 		ToolCallDetailExpanded: false,
 	}
@@ -3244,7 +3244,7 @@ func TestDeleteCardShowsDiagnosticPathsLikeNormalHeader(t *testing.T) {
 		ToolName:          tools.NameDelete,
 		Content:           `{".paths":["/tmp/workspace/internal/tui/obsolete.go","/tmp/workspace/cmd/old.go"],"reason":"cleanup generated files"}`,
 		ResultDone:        true,
-		ResultStatus:      agent.ToolResultStatusError,
+		ResultStatus:      message.ToolStatusError,
 		ResultContent:     "arguments do not match delete schema: args.paths is required",
 		displayWorkingDir: wd,
 		Audit: &message.ToolArgsAudit{
@@ -3281,7 +3281,7 @@ func TestDeleteAlwaysShowsAllPartialResultsAndCannotCollapse(t *testing.T) {
 		Content:       `{"paths":["a.go","b.go","c.go"],"reason":"remove obsolete generated files"}`,
 		ResultContent: "Delete stopped after an execution error.\n\nDeleted (1):\n- a.go\n\nFailed (1):\n- b.go — permission denied\n\nNot attempted (1):\n- c.go",
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 	}
 
 	before := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -4027,7 +4027,7 @@ func TestCancelledWriteCallSuppressesEmptyFilePreviewAndDuplicateCancelledText(t
 		ToolName:      "write",
 		Content:       `{"path":"foo.txt","content":""}`,
 		ResultContent: "Cancelled",
-		ResultStatus:  agent.ToolResultStatusCancelled,
+		ResultStatus:  message.ToolStatusCancelled,
 		ResultDone:    true,
 	}
 
@@ -4061,7 +4061,7 @@ func TestEditErrorPreservesExampleBlockIndentation(t *testing.T) {
 			"\t\t\t\tbaseName := filepath.Base(fe.Path)",
 			"\t\t\t\tvar parts string",
 		}, "\n"),
-		ResultStatus: agent.ToolResultStatusError,
+		ResultStatus: message.ToolStatusError,
 		ResultDone:   true,
 	}
 
@@ -4084,7 +4084,7 @@ func TestEditToolCallCopyIncludesPathAndPatchWhenDiffMissing(t *testing.T) {
 		ToolName:      tools.NameEdit,
 		Content:       `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`,
 		ResultContent: "hunk not found. No files were modified",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
 
@@ -4109,7 +4109,7 @@ func TestApplyPatchToolCallCopyPreservesToolName(t *testing.T) {
 		Content:       `{"path":"foo.txt"}`,
 		RawArgs:       `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`,
 		ResultContent: "Applied patch to foo.txt (+1 -1)",
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultDone:    true,
 	}
 
@@ -4131,7 +4131,7 @@ func TestApplyPatchToolCallCopyOmitsPathAndPlacesDiffBeforeResult(t *testing.T) 
 		RawArgs:       `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`,
 		Diff:          "@@ -1 +1 @@\n-old\n+new",
 		ResultContent: "Applied patch",
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultDone:    true,
 	}
 
@@ -4154,7 +4154,7 @@ func TestReplaceEditToolCallErrorCopyShowsOldAndNewStrings(t *testing.T) {
 		Content:       `{"path":"foo.txt"}`,
 		RawArgs:       `{"path":"foo.txt","old_string":"old line\n","new_string":"new line\n","replace_all":true}`,
 		ResultContent: "old_string not found in file",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
 
@@ -4218,7 +4218,7 @@ func TestEditToolCallCopyShowsOldAndNewStringsInsteadOfDiff(t *testing.T) {
 		Content:       `{"path":"src/demo.go","old_string":"old\n","new_string":"new\n"}`,
 		Diff:          "@@ -1 +1 @@\n-old\n+new",
 		ResultContent: "Diagnostics:\nnone",
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultDone:    true,
 	}
 
@@ -4248,7 +4248,7 @@ func TestReplaceEditToolCallErrorRenderShowsOldAndNewLines(t *testing.T) {
 		Content:       `{"path":"foo.txt"}`,
 		RawArgs:       `{"path":"foo.txt","old_string":"func old() {\n\treturn 1\n}\n","new_string":"func current() {\n\treturn 2\n}\n","replace_all":true}`,
 		ResultContent: "old_string not found in file",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
 
@@ -4293,7 +4293,7 @@ func TestReplaceEditToolCallErrorRenderTruncatesLongLines(t *testing.T) {
 		ToolName:      tools.NameEdit,
 		RawArgs:       string(args),
 		ResultContent: "old_string not found in file",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
 
@@ -4334,7 +4334,7 @@ func TestReplaceEditToolCallHeaderOmitsDisabledReplaceAll(t *testing.T) {
 			ToolName:      tools.NameEdit,
 			RawArgs:       rawArgs,
 			ResultContent: "old_string not found in file",
-			ResultStatus:  agent.ToolResultStatusError,
+			ResultStatus:  message.ToolStatusError,
 			ResultDone:    true,
 		}
 
@@ -4355,7 +4355,7 @@ func TestEditToolCallCopyUsesRawArgsWhenContentTrimmed(t *testing.T) {
 		Content:       `{"path":"foo.txt"}`,
 		RawArgs:       `{"path":"foo.txt","patch":"@@\n-old\n+new\n"}`,
 		ResultContent: "hunk not found. No files were modified",
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultDone:    true,
 	}
 
@@ -4373,7 +4373,7 @@ func TestCancelledEditCallSuppressesDiffPreviewAndDuplicateCancelledText(t *test
 		Content:       `{"path":"foo.txt","patch":"@@\n-a\n+b\n"}`,
 		Diff:          "@@ -1,1 +1,1 @@\n-a\n+b\n",
 		ResultContent: "Cancelled",
-		ResultStatus:  agent.ToolResultStatusCancelled,
+		ResultStatus:  message.ToolStatusCancelled,
 		ResultDone:    true,
 	}
 
@@ -4402,7 +4402,7 @@ func TestCancelledReadCallOmitsDuplicateCancelledText(t *testing.T) {
 		ToolName:      "read",
 		Content:       `{"path":"foo.txt","limit":10}`,
 		ResultContent: "Cancelled",
-		ResultStatus:  agent.ToolResultStatusCancelled,
+		ResultStatus:  message.ToolStatusCancelled,
 		ResultDone:    true,
 	}
 
@@ -4428,7 +4428,7 @@ func TestCancelledGenericToolOmitsDuplicateCancelledText(t *testing.T) {
 		ToolName:               "shell",
 		Content:                `{"command":"echo hi"}`,
 		ResultContent:          "Cancelled",
-		ResultStatus:           agent.ToolResultStatusCancelled,
+		ResultStatus:           message.ToolStatusCancelled,
 		ResultDone:             true,
 		ToolCallDetailExpanded: true,
 	}
@@ -4455,7 +4455,7 @@ func TestCancelledSpecialToolOmitsDuplicateCancelledText(t *testing.T) {
 		ToolName:      "question",
 		Content:       `{"questions":[{"header":"log","question":"paste log"}]}`,
 		ResultContent: "Cancelled",
-		ResultStatus:  agent.ToolResultStatusCancelled,
+		ResultStatus:  message.ToolStatusCancelled,
 		ResultDone:    true,
 	}
 
@@ -4659,7 +4659,7 @@ func TestQuestionCallKeepsArgDiagnosticsOffTheHeader(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      "question",
 		Content:       `{"questions":[{"header":"H","question":"Q"}]}`,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match question schema: args.questions[0].header must be a string, got number 7",
 		ResultDone:    true,
 		Audit: &message.ToolArgsAudit{
@@ -4826,7 +4826,7 @@ func TestDoneCallRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      "done",
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusCancelled,
+		ResultStatus:  message.ToolStatusCancelled,
 		ResultContent: "Done rejected: require all checks to pass before exit and include verification results",
 	}
 
@@ -4853,7 +4853,7 @@ func TestDoneCallAutoRejectedUsesCrossAndSimplifiedReason(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      "done",
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultContent: "Done rejected automatically: loop exit conditions are not satisfied yet: open TODO items remain. Finish the remaining work before calling Done again.",
 	}
 
@@ -4881,7 +4881,7 @@ func TestDoneCallRejectedRendersReportAndSingleReason(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      "done",
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultContent: "Done rejected: coverage must be >= 70% before exiting",
 		DoneReport:    "## Completion status\nReport body stays visible",
 	}
@@ -4908,7 +4908,7 @@ func TestDoneCallAcceptedOmitsStatusAndRejectedReason(t *testing.T) {
 		Type:          BlockToolCall,
 		ToolName:      "done",
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusSuccess,
+		ResultStatus:  message.ToolStatusSuccess,
 		ResultContent: "done",
 		DoneReport:    "## Summary\n- shipped\n- verified",
 	}
@@ -4934,7 +4934,7 @@ func TestDoneCallRendersDoneReportMarkdown(t *testing.T) {
 		Type:         BlockToolCall,
 		ToolName:     "done",
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 		DoneReport:   "## Summary\n- shipped\n- verified",
 	}
 
@@ -4954,7 +4954,7 @@ func TestDoneCallHeaderKeepsBareToolLine(t *testing.T) {
 		Type:              BlockToolCall,
 		ToolName:          "done",
 		ResultDone:        true,
-		ResultStatus:      agent.ToolResultStatusSuccess,
+		ResultStatus:      message.ToolStatusSuccess,
 		ResultContent:     "done",
 		DoneReport:        "## Completion status\n改动已全部提交",
 		PersistedDuration: 19 * time.Second,
@@ -4990,7 +4990,7 @@ func TestDoneCallUsesProseWidthForReportCard(t *testing.T) {
 		Type:         BlockToolCall,
 		ToolName:     "done",
 		ResultDone:   true,
-		ResultStatus: agent.ToolResultStatusSuccess,
+		ResultStatus: message.ToolStatusSuccess,
 		DoneReport:   "## Summary\nAll requested work is complete.",
 	}
 
@@ -5101,7 +5101,7 @@ func TestReadCallDisclosureMatchesToggleableBody(t *testing.T) {
 			block: &Block{
 				ID: 3, Type: BlockToolCall, ToolName: tools.NameRead,
 				Content: `{"path":"a.go"}`, ResultDone: true, Collapsed: true,
-				ResultStatus: agent.ToolResultStatusError, ResultContent: "Error: denied",
+				ResultStatus: message.ToolStatusError, ResultContent: "Error: denied",
 			},
 			wantMarker: false, wantToggleable: false,
 		},
@@ -5110,7 +5110,7 @@ func TestReadCallDisclosureMatchesToggleableBody(t *testing.T) {
 			block: &Block{
 				ID: 4, Type: BlockToolCall, ToolName: tools.NameRead,
 				Content: `{"path":"a.go"}`, ResultDone: true, Collapsed: true,
-				ResultStatus: agent.ToolResultStatusError, ResultContent: "Error: first\nsecond",
+				ResultStatus: message.ToolStatusError, ResultContent: "Error: first\nsecond",
 			},
 			wantMarker: false, wantToggleable: false,
 		},
@@ -5165,7 +5165,7 @@ func TestReadCallErrorKeepsInvalidArgsVisible(t *testing.T) {
 		ToolName:      "read",
 		Content:       `{"path":"internal/config/config.go","offset":"1.0"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match read schema: args.offset must be an integer, got string \"1.0\"",
 	}
 
@@ -5185,7 +5185,7 @@ func TestReadCallErrorShowsUnexpectedArgKeys(t *testing.T) {
 		ToolName:      "read",
 		Content:       `{"pat":"sample.go","limit":5}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match read schema: args.path is required",
 	}
 
@@ -5205,7 +5205,7 @@ func TestReadCallErrorTruncatesLongArgValues(t *testing.T) {
 		ToolName:      "read",
 		Content:       fmt.Sprintf(`{"path":"a.go","offset":%q}`, strings.Repeat("x", 200)),
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match read schema: args.offset must be an integer",
 	}
 
@@ -5225,7 +5225,7 @@ func TestWriteCallErrorKeepsInvalidArgsVisible(t *testing.T) {
 		ToolName:      "write",
 		Content:       `{"path":"docs/notes.md","content":123}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match write schema: args.content must be a string, got number 123",
 	}
 
@@ -5272,7 +5272,7 @@ func TestTodoCallErrorKeepsValidEntriesVisible(t *testing.T) {
 		ToolName:      tools.NameTodoWrite,
 		Content:       `{"todos":[{"id":"1","content":"first task","status":"pending"},{"id":2,"content":"second task","status":"pending"}]}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match todo_write schema: args.todos[1].id must be a string, got number 2",
 	}
 
@@ -5292,7 +5292,7 @@ func TestQuestionCallErrorKeepsValidEntriesVisible(t *testing.T) {
 		ToolName:      tools.NameQuestion,
 		Content:       `{"questions":[{"header":"Scope","question":"Which package should own the helper?","options":[{"label":"internal/tools"},{"label":"internal/tui"}]},{"header":7,"question":"broken"}]}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match question schema: args.questions[1].header must be a string, got number 7",
 	}
 
@@ -5315,7 +5315,7 @@ func TestQuestionCardOmitsElapsedWaitTime(t *testing.T) {
 		Content:           `{"questions":[{"header":"Scope","question":"Which package should own the helper?","options":[{"label":"internal/tools"}]}]}`,
 		ResultPayload:     `[{"selected":["internal/tools"]}]`,
 		ResultDone:        true,
-		ResultStatus:      agent.ToolResultStatusSuccess,
+		ResultStatus:      message.ToolStatusSuccess,
 		PersistedDuration: 42 * time.Second,
 	}
 
@@ -5335,7 +5335,7 @@ func TestEscalateCallKeepsInvalidArgsVisible(t *testing.T) {
 		ToolName:      tools.NameEscalate,
 		Content:       `{"reason":"Need approval to rotate credentials","files_changed":"src/auth.go"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match escalate schema: args.files_changed must be an array, got string \"src/auth.go\"",
 	}
 
@@ -5352,7 +5352,7 @@ func TestTaskCallKeepsInvalidArgsVisible(t *testing.T) {
 		ToolName:      tools.NameDelegate,
 		Content:       `{"description":"Explore the repo layout","agent_type":42}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match task schema: args.agent_type must be a string, got number 42",
 	}
 
@@ -5369,7 +5369,7 @@ func TestCancelCallKeepsInvalidArgsVisible(t *testing.T) {
 		ToolName:      tools.NameCancel,
 		Content:       `{"target_task_id":"task-42","reason":{"because":"stale"}}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match cancel schema: args.reason must be a string, got object",
 	}
 
@@ -5389,7 +5389,7 @@ func TestNotifyCallKeepsInvalidArgsVisible(t *testing.T) {
 		ToolName:      tools.NameNotify,
 		Content:       `{"message":"ping the worker","kind":9}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match notify schema: args.kind must be a string, got number 9",
 	}
 
@@ -5563,7 +5563,7 @@ func TestCompactContextCallUnknownFieldsKeepSubmittedArgs(t *testing.T) {
 		ToolName:      tools.NameCompactContext,
 		RawArgs:       `{"state":{"active_objective":"wrapped under a nested key","next_step":"x"}}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "Error: missing required argument: active_objective",
 	}
 	block.ToolCallDetailExpanded = true
@@ -5606,7 +5606,7 @@ func TestCompactContextCallRawArgFallbackIsBounded(t *testing.T) {
 		ToolName:      tools.NameCompactContext,
 		RawArgs:       sb.String(),
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "Error: missing required argument: active_objective",
 	}
 	block.ToolCallDetailExpanded = true
@@ -5678,7 +5678,7 @@ func TestCompactContextCallErrorExpandedShowsArgsAndError(t *testing.T) {
 		Content:       `{"active_objective":"完成用户的最终汇报","completed":"not-an-array","next_step":"先按输出最终完成报告"}`,
 		RawArgs:       `{"active_objective":"完成用户的最终汇报","completed":"not-an-array","next_step":"先按输出最终完成报告"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "Error: arguments do not match compact_context schema: args.completed must be an array, got string \"not-an-array\"",
 	}
 	block.ToolCallDetailExpanded = true
@@ -5727,7 +5727,7 @@ func TestCompactContextCallErrorShowsSections(t *testing.T) {
 		Content:       `{"active_objective":"完成用户的最终汇报","completed":["a","b","c"],"decisions":["d"],"open_issues":["o"],"next_step":"先按输出最终完成报告","state_files":["n.md"]}`,
 		RawArgs:       `{"active_objective":"完成用户的最终汇报","completed":["a","b","c"],"decisions":["d"],"open_issues":["o"],"next_step":"先按输出最终完成报告","state_files":["n.md"]}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "Error: arguments do not match compact_context schema",
 	}
 	// The card is always expanded (ToolCallDetailExpanded left false).
@@ -5754,7 +5754,7 @@ func TestCompactContextCallErrorDropsDisclosureGlyph(t *testing.T) {
 		Content:       `{"active_objective":"完成用户的最终汇报","next_step":"先按输出最终完成报告"}`,
 		RawArgs:       `{"active_objective":"完成用户的最终汇报","next_step":"先按输出最终完成报告"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "Error: arguments do not match compact_context schema",
 	}
 	// The card is always expanded (ToolCallDetailExpanded left false).
@@ -5778,7 +5778,7 @@ func TestEscalateCallErrorDropsDisclosureGlyphAndKeepsReason(t *testing.T) {
 		ToolName:      tools.NameEscalate,
 		Content:       `{"reason":"Need approval to rotate credentials","files_changed":"src/auth.go"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match escalate schema: args.files_changed must be an array, got string \"src/auth.go\"",
 	}
 	// Always expanded: the flags no longer gate the body.
@@ -5806,7 +5806,7 @@ func TestCompactContextCallCancelledExpandedShowsArgsAndCancelled(t *testing.T) 
 		Content:       `{"active_objective":"完成用户的最终汇报","completed":["a"],"next_step":"先按输出最终完成报告"}`,
 		RawArgs:       `{"active_objective":"完成用户的最终汇报","completed":["a"],"next_step":"先按输出最终完成报告"}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusCancelled,
+		ResultStatus:  message.ToolStatusCancelled,
 		ResultContent: "Cancelled",
 	}
 	block.ToolCallDetailExpanded = true
@@ -5837,7 +5837,7 @@ func TestHandoffHeaderRecoversInvalidPlanPath(t *testing.T) {
 		ToolName:      tools.NameHandoff,
 		Content:       `{"plan_path":42}`,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "arguments do not match handoff schema: args.plan_path must be a string, got number 42",
 	}
 
@@ -6358,7 +6358,7 @@ func TestCollapsedCancelCardInlinesStatusOnHeader(t *testing.T) {
 		Content:                `{"target_task_id":"adhoc-9","reason":"workflow changed"}`,
 		ResultContent:          `{"status":"stopped","task_id":"adhoc-9","agent_id":"reviewer-2"}`,
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: false,
 	}
 
@@ -6620,7 +6620,7 @@ func TestToolResultTableLikeContentUsesPlainText(t *testing.T) {
 		ToolName:               "web_fetch",
 		Content:                `{"url":"https://example.com"}`,
 		ResultDone:             true,
-		ResultStatus:           agent.ToolResultStatusSuccess,
+		ResultStatus:           message.ToolStatusSuccess,
 		ToolCallDetailExpanded: true,
 		ResultContent:          "The report shows 1 expired account email entry:\n\n| Account ID | Email | Expiration Date |\n|------------|-------|-----------------|\n| a20158b8-... | gfwgfwgfwgfw@gmail.com | 2026-04-02 |\n\nThese accounts need to sign in again.",
 	}

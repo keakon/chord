@@ -29,7 +29,7 @@ type inputQueueUI struct {
 }
 
 func (m *Model) nextInputQueueOperation(action inputQueueAction) string {
-	action.generation = m.input.interactionVersion
+	action.generation = m.input.Revision().Interaction
 	action.editing = m.inputQueue.editing
 	m.inputQueue.sequence++
 	id := fmt.Sprintf("tui-input-%d", m.inputQueue.sequence)
@@ -151,7 +151,7 @@ func (m *Model) handleInputQueueResult(result agent.InputQueueOperationResultEve
 					m.queuedDrafts[idx].DeliveryStatus = "Result unknown — check before resending"
 				}
 			}
-			if result.Result != agent.InputQueueUnknown && !m.hasComposerContent() && action.generation == m.input.interactionVersion {
+			if result.Result != agent.InputQueueUnknown && !m.hasComposerContent() && action.generation == m.input.Revision().Interaction {
 				m.inputQueue.editing = action.editing
 				m.loadQueuedDraftIntoComposer(action.draft)
 			}
@@ -163,13 +163,13 @@ func (m *Model) handleInputQueueResult(result agent.InputQueueOperationResultEve
 	case "hold":
 		draft := action.draft
 		draft.Revision = result.ItemRevision
-		if m.hasComposerContent() || action.generation != m.input.interactionVersion {
+		if m.hasComposerContent() || action.generation != m.input.Revision().Interaction {
 			return m.enqueueToast("Input held for editing; your current draft was preserved", "info")
 		}
 		m.inputQueue.editing = &draft
 		return m.loadQueuedDraftIntoComposer(draft)
 	case "withdraw":
-		if m.hasComposerContent() || action.generation != m.input.interactionVersion {
+		if m.hasComposerContent() || action.generation != m.input.Revision().Interaction {
 			draft := action.draft
 			draft = queuedDraft{ID: m.nextDraftID(), AgentID: draft.AgentID, Content: draft.Content, DisplayContent: draft.DisplayContent, Parts: draft.contentParts(), FileRefs: draft.FileRefs, Withdrawn: true, DeliveryStatus: "Withdrawn"}
 			m.queuedDrafts = append(m.queuedDrafts, draft)
@@ -269,7 +269,7 @@ func (m *Model) handleInputQueueCommand(content string) tea.Cmd {
 				id := fmt.Sprintf("tui-input-%d", m.inputQueue.sequence)
 				if pending, ok := m.inputQueue.pending[id]; ok {
 					m.input.Reset()
-					pending.generation = m.input.interactionVersion
+					pending.generation = m.input.Revision().Interaction
 					m.inputQueue.pending[id] = pending
 				}
 			}

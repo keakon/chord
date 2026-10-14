@@ -6,6 +6,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -103,7 +104,7 @@ func (s *SubAgent) rejectInvalidEscalateArguments(callID, argsJSON string, cause
 	if s == nil {
 		return
 	}
-	s.appendControlToolResult(callID, tools.NameEscalate, argsJSON, "Escalation rejected: "+cause.Error(), ToolResultStatusError)
+	s.appendControlToolResult(callID, tools.NameEscalate, argsJSON, "Escalation rejected: "+cause.Error(), message.ToolStatusError)
 	s.sendEvent(Event{Type: EventAgentError, Payload: cause})
 }
 
@@ -113,7 +114,7 @@ func (s *SubAgent) closeAsBlocked(callID, argsJSON, reason string) {
 		return
 	}
 	blocked := newBlockedEscalationError(reason)
-	s.appendControlToolResult(callID, tools.NameEscalate, argsJSON, "Escalation ended the task as blocked: "+blocked.Error(), ToolResultStatusError)
+	s.appendControlToolResult(callID, tools.NameEscalate, argsJSON, "Escalation ended the task as blocked: "+blocked.Error(), message.ToolStatusError)
 	s.sendEvent(Event{Type: EventAgentError, Payload: blocked})
 }
 
@@ -125,7 +126,7 @@ func (s *SubAgent) refuseOverBudgetEscalation(refusal *escalationRefusal) {
 	if s == nil || refusal == nil {
 		return
 	}
-	s.appendControlToolResult(refusal.callID, tools.NameEscalate, refusal.argsJSON, "Escalation rejected: "+refusal.cause.Error(), ToolResultStatusError)
+	s.appendControlToolResult(refusal.callID, tools.NameEscalate, refusal.argsJSON, "Escalation rejected: "+refusal.cause.Error(), message.ToolStatusError)
 	s.appendPendingUserMessage(pendingUserMessage{Content: escalationBudgetExhaustedNotice})
 }
 

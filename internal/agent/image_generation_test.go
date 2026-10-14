@@ -140,14 +140,14 @@ func TestImageBackendConfigurationAndKeySafety(t *testing.T) {
 func TestImageResultPublicationFailsClosedOnCanonicalPersistence(t *testing.T) {
 	a := newReadyTestMainAgent(t)
 	a.installRecoveryManager(newBrokenPathRecoveryManager(t))
-	event := ToolResultEvent{CallID: "image-call", Name: tools.NameGenerateImage, Status: ToolResultStatusSuccess, Result: "saved", Payload: "saved"}
+	event := ToolResultEvent{CallID: "image-call", Name: tools.NameGenerateImage, Status: message.ToolStatusSuccess, Result: "saved", Payload: "saved"}
 	a.persistImageResult(a.recoveryManager(), "main", message.Message{Role: message.RoleTool, ToolCallID: "image-call", Content: "saved"}, event, a.notePersistenceFailure)
 	a.flushPersist()
 	found := false
 	for _, evt := range drainAgentEvents(a.Events()) {
 		if result, ok := evt.(ToolResultEvent); ok && result.CallID == event.CallID {
 			found = true
-			if result.Status == ToolResultStatusSuccess || result.RecoveryState != message.ToolRecoveryStateOutcomeUnknown {
+			if result.Status == message.ToolStatusSuccess || result.RecoveryState != message.ToolRecoveryStateOutcomeUnknown {
 				t.Fatal("failed canonical persistence published success")
 			}
 		}
@@ -188,7 +188,7 @@ func TestGeneratedSubAgentResultPreservesDeliveryPayload(t *testing.T) {
 	for _, evt := range drainAgentEvents(parent.Events()) {
 		if event, ok := evt.(ToolResultEvent); ok && event.CallID == "image-call" {
 			found = true
-			if event.Payload != summary || event.Status != ToolResultStatusSuccess || len(event.Notes) != 1 {
+			if event.Payload != summary || event.Status != message.ToolStatusSuccess || len(event.Notes) != 1 {
 				t.Fatalf("delivery payload lost: %+v", event)
 			}
 		}

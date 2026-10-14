@@ -170,7 +170,7 @@ func TestCancelCurrentTurnDoesNotCancelCompletedToolCalls(t *testing.T) {
 	})
 
 	events := drainAgentEvents(a.Events())
-	failedByCallID := make(map[string]ToolResultStatus)
+	failedByCallID := make(map[string]message.ToolResultStatus)
 	for _, evt := range events {
 		if res, ok := evt.(ToolResultEvent); ok {
 			failedByCallID[res.CallID] = res.Status
@@ -182,11 +182,11 @@ func TestCancelCurrentTurnDoesNotCancelCompletedToolCalls(t *testing.T) {
 	if _, ok := failedByCallID["tool-done-3"]; ok {
 		t.Fatal("completed tool-done-3 unexpectedly received terminal cancellation result")
 	}
-	if got := failedByCallID["tool-running-2"]; got != ToolResultStatusError {
-		t.Fatalf("tool-running-2 status = %q, want %q", got, ToolResultStatusError)
+	if got := failedByCallID["tool-running-2"]; got != message.ToolStatusError {
+		t.Fatalf("tool-running-2 status = %q, want %q", got, message.ToolStatusError)
 	}
-	if got := failedByCallID["tool-queued-4"]; got != ToolResultStatusError {
-		t.Fatalf("tool-queued-4 status = %q, want %q", got, ToolResultStatusError)
+	if got := failedByCallID["tool-queued-4"]; got != message.ToolStatusError {
+		t.Fatalf("tool-queued-4 status = %q, want %q", got, message.ToolStatusError)
 	}
 }
 
@@ -290,7 +290,7 @@ func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 	for _, msg := range msgs {
 		if msg.Role == "tool" && msg.ToolCallID == call.ID {
 			foundTool = true
-			if msg.ToolStatus != string(ToolResultStatusSuccess) {
+			if msg.ToolStatus != message.ToolStatusSuccess {
 				t.Fatalf("tool status=%q, want success", msg.ToolStatus)
 			}
 			if !strings.Contains(msg.Content, "hello") {
@@ -322,7 +322,7 @@ func TestAppendCompletedInterruptedToolResultPersistsPayload(t *testing.T) {
 	for _, msg := range restored {
 		if msg.Role == "tool" && msg.ToolCallID == call.ID {
 			restoredTool = true
-			if msg.ToolStatus != string(ToolResultStatusSuccess) {
+			if msg.ToolStatus != message.ToolStatusSuccess {
 				t.Fatalf("restored tool status=%q, want success", msg.ToolStatus)
 			}
 			if len(msg.Parts) != 3 || msg.Parts[1].Type != "image" || msg.Parts[2].Type != "pdf" {

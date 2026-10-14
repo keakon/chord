@@ -1535,9 +1535,9 @@ func restoreSkillResultSucceeded(msg message.Message) bool {
 	if status == "" {
 		// Older transcripts did not persist terminal status; retain their
 		// successful result semantics while still rejecting explicit error text.
-		return !isToolResultErrorMessage(msg)
+		return !message.IsToolResultErrorMessage(msg)
 	}
-	return isToolResultSuccessStatus(status)
+	return message.IsToolResultSuccessStatus(status)
 }
 
 func filterRestoredTodosByLatestCompactionSummary(messages []message.Message, todos []tools.TodoItem) []tools.TodoItem {

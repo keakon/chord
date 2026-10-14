@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/keakon/chord/internal/message"
+
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/keakon/chord/internal/agent"
@@ -19,7 +21,7 @@ func TestEventMapperMap(t *testing.T) {
 		Name:    "shell",
 		Payload: "tests passed",
 		Result:  "tests passed",
-		Status:  agent.ToolResultStatusSuccess,
+		Status:  message.ToolStatusSuccess,
 		Diff:    "--- a/x.go\n+++ b/x.go\n",
 	}
 
@@ -187,7 +189,7 @@ func TestEventMapperMap(t *testing.T) {
 			ev: agent.ToolResultEvent{
 				CallID: "call_1",
 				Name:   "shell",
-				Status: agent.ToolResultStatusCancelled,
+				Status: message.ToolStatusCancelled,
 			},
 			wantUpdates: []acp.SessionUpdate{acp.UpdateToolCall(
 				acp.ToolCallId("call_1"),
@@ -200,7 +202,7 @@ func TestEventMapperMap(t *testing.T) {
 			ev: agent.ToolResultEvent{
 				CallID:  "call_1",
 				Name:    "shell",
-				Status:  agent.ToolResultStatusSuccess,
+				Status:  message.ToolStatusSuccess,
 				AgentID: "sub-1",
 			},
 		},

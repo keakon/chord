@@ -6,9 +6,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/inputhistory"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
-func historyTextParts(entry inputHistoryEntry, budget int64) ([]inputhistory.TextPart, error) {
+func historyTextParts(entry composer.HistoryEntry, budget int64) ([]inputhistory.TextPart, error) {
 	if !utf8.ValidString(entry.Display) {
 		return nil, fmt.Errorf("invalid composer UTF-8")
 	}
@@ -53,11 +54,11 @@ func historyTextParts(entry inputHistoryEntry, budget int64) ([]inputhistory.Tex
 			return nil, fmt.Errorf("invalid composer object display")
 		}
 		switch p.Kind {
-		case inlineTokenLargePaste:
+		case composer.TokenPaste:
 			if err := add(inputhistory.Paste, p.RawContent); err != nil {
 				return nil, err
 			}
-		case inlineTokenImage:
+		case composer.TokenImage:
 		default:
 			return nil, fmt.Errorf("invalid composer object kind")
 		}
@@ -68,16 +69,16 @@ func historyTextParts(entry inputHistoryEntry, budget int64) ([]inputhistory.Tex
 	}
 	return parts, nil
 }
-func historyRestoreEntry(r inputhistory.Record) inputHistoryEntry {
-	entry := inputHistoryEntry{BangMode: r.Kind == inputhistory.ShellCommand}
+func historyRestoreEntry(r inputhistory.Record) composer.HistoryEntry {
+	entry := composer.HistoryEntry{BangMode: r.Kind == inputhistory.ShellCommand}
 	var b strings.Builder
 	pos := 0
 	for _, p := range r.TextParts {
 		if p.Kind == inputhistory.Paste || len(p.Text) > 8192 || strings.Count(p.Text, "\n") >= 32 {
 			entry.NextPasteSeq++
-			display := formatInlineLargePasteDisplay(entry.NextPasteSeq, textLineCount(p.Text))
+			display := composer.FormatPasteLabel(entry.NextPasteSeq, composer.TextLineCount(p.Text))
 			end := pos + utf8.RuneCountInString(display)
-			entry.InlinePastes = append(entry.InlinePastes, inlineLargePaste{Seq: entry.NextPasteSeq, Kind: inlineTokenLargePaste, RawContent: p.Text, DisplayText: display, Start: pos, End: end})
+			entry.InlinePastes = append(entry.InlinePastes, composer.Token{Seq: entry.NextPasteSeq, Kind: composer.TokenPaste, RawContent: p.Text, DisplayText: display, Start: pos, End: end})
 			b.WriteString(display)
 			pos = end
 		} else {

@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
 // handoffTestBlock builds a handoff tool card with the given args and result.
-func handoffTestBlock(argsJSON, result string, status agent.ToolResultStatus, done bool) *Block {
+func handoffTestBlock(argsJSON, result string, status message.ToolResultStatus, done bool) *Block {
 	return &Block{
 		ID:                1,
 		Type:              BlockToolCall,
@@ -37,7 +37,7 @@ func TestHandoffCardSuccessHidesRawJSON(t *testing.T) {
 	block := handoffTestBlock(
 		`{"plan_path":"docs/plans/plan-004.md"}`,
 		`{"plan_path":"/abs/work/docs/plans/plan-004.md"}`,
-		agent.ToolResultStatusSuccess,
+		message.ToolStatusSuccess,
 		true,
 	)
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -56,7 +56,7 @@ func TestHandoffCardRejectedShowsReason(t *testing.T) {
 	block := handoffTestBlock(
 		`{"plan_path":"docs/plans/plan-004.md"}`,
 		"Handoff rejected: use reviewer first",
-		agent.ToolResultStatusSuccess,
+		message.ToolStatusSuccess,
 		true,
 	)
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -75,7 +75,7 @@ func TestHandoffCardCancelledShowsCancelled(t *testing.T) {
 	block := handoffTestBlock(
 		`{"plan_path":"docs/plans/plan-004.md"}`,
 		"Cancelled",
-		agent.ToolResultStatusCancelled,
+		message.ToolStatusCancelled,
 		true,
 	)
 	joined := stripANSI(strings.Join(block.Render(120, ""), "\n"))

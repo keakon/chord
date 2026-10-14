@@ -6,7 +6,7 @@ import (
 
 	uv "github.com/keakon/ultraviolet"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -26,7 +26,7 @@ func TestViewportKeepsToolCardBackgroundEdge(t *testing.T) {
 		Content:       `{"patch":"*** Begin Patch\n*** End Patch"}`,
 		ResultContent: "short diagnostic",
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 	}
 
 	raw := block.Render(width, "")
@@ -95,7 +95,7 @@ func TestViewportDoesNotLetExpandedTabsOrCarriageReturnsCorruptToolCard(t *testi
 		Content:       applyPatchToolDisplayArgs(patchArgs),
 		RawArgs:       patchArgs,
 		ResultDone:    true,
-		ResultStatus:  agent.ToolResultStatusError,
+		ResultStatus:  message.ToolStatusError,
 		ResultContent: "apply_patch failed: no changes were committed.\n\nNot applied:\n- internal/tui/tool_card_width_test.go: hunk not found (1/1); first expected complete line: `\t\tif isFoo(err) {`; the file currently has a different guard",
 	}
 

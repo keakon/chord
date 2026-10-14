@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/chord/internal/recovery"
-
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 func localShellUserLine(display string) string {
@@ -52,7 +52,7 @@ func (m *Model) applySelectedSlashCompletion(matches []slashCommand) bool {
 	sel := matches[m.slashCompleteSelected]
 	m.input.SetDisplayValueAndPastes(sel.Cmd+" ", nil, 0)
 	m.input.CursorEnd()
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	m.slashCompleteSelected = 0
 	m.recalcViewportSize()
 	return true
@@ -112,7 +112,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 	if keyMatches(key, m.keyMap.InsertUndo) {
 		return m.undoComposerEdit()
 	}
-	defer m.beginComposerEdit(isComposerTextKey(msg) && key != "!" && !m.input.HasSelection())()
+	defer m.beginComposerEdit(composer.IsTextKey(msg) && key != "!" && !m.input.HasSelection())()
 	if cmd := m.maybeExportDiagnosticsShortcut(key); cmd != nil {
 		return cmd
 	}
@@ -133,9 +133,9 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		keyMatches(key, m.keyMap.SwitchAgent) || keyMatches(key, m.keyMap.SwitchModel) ||
 		keyMatches(key, m.keyMap.InsertPageUp) || keyMatches(key, m.keyMap.InsertPageDown)
 	if !composerAction {
-		if cmd, handled := m.input.handleSelectionKey(msg); handled {
+		if cmd, handled := m.input.HandleSelectionKey(msg); handled {
 			m.syncAttachmentsToInlineImagePlaceholders()
-			m.input.syncHeight()
+			m.input.SyncHeight()
 			m.recalcViewportSize()
 			if key == "@" && !m.atMentionOpen {
 				return tea.Batch(cmd, m.openAtMentionAtCursor())
@@ -157,7 +157,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		case key == "tab", keyMatches(key, m.keyMap.InsertSubmit):
 			if m.atMentionList != nil && m.atMentionList.Len() > 0 {
 				cmd := m.insertAtMentionSelection()
-				m.input.syncHeight()
+				m.input.SyncHeight()
 				m.recalcViewportSize()
 				return cmd
 			}
@@ -204,7 +204,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		}
 		if paste, ok := m.input.RemoveInlinePasteAtCursor(); ok {
 			m.removeAttachmentForInlinePaste(paste)
-			m.input.syncHeight()
+			m.input.SyncHeight()
 			m.recalcViewportSize()
 			if m.atMentionOpen {
 				return m.syncAtMentionQuery()
@@ -213,7 +213,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		}
 		cmd := m.input.Update(msg)
 		m.syncAttachmentsToInlineImagePlaceholders()
-		m.input.syncHeight()
+		m.input.SyncHeight()
 		m.recalcViewportSize()
 		if m.atMentionOpen {
 			return tea.Batch(cmd, m.syncAtMentionQuery())
@@ -223,7 +223,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 	case key == "delete" || key == "ctrl+d":
 		if paste, ok := m.input.RemoveInlinePasteForwardAtCursor(); ok {
 			m.removeAttachmentForInlinePaste(paste)
-			m.input.syncHeight()
+			m.input.SyncHeight()
 			m.recalcViewportSize()
 			if m.atMentionOpen {
 				return m.syncAtMentionQuery()
@@ -232,7 +232,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		}
 		cmd := m.input.Update(msg)
 		m.syncAttachmentsToInlineImagePlaceholders()
-		m.input.syncHeight()
+		m.input.SyncHeight()
 		m.recalcViewportSize()
 		if m.atMentionOpen {
 			return tea.Batch(cmd, m.syncAtMentionQuery())
@@ -247,15 +247,15 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		}
 		cmd := m.input.Update(msg)
 		m.syncAttachmentsToInlineImagePlaceholders()
-		m.input.syncHeight()
+		m.input.SyncHeight()
 		m.recalcViewportSize()
 		return cmd
 
 	case keyMatches(key, m.keyMap.InsertNewline):
-		m.input.preExpandHeight()
+		m.input.PrepareNewline()
 		cmd := m.input.Update(msg)
 		m.syncAttachmentsToInlineImagePlaceholders()
-		m.input.syncHeight()
+		m.input.SyncHeight()
 		m.recalcViewportSize()
 		return cmd
 
@@ -575,7 +575,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 	case keyMatches(key, m.keyMap.InsertClearInput):
 		m.cancelClipboardAttachmentPaste()
 		m.input.SetDisplayValueAndPastes("", nil, 0)
-		m.input.syncHeight()
+		m.input.SyncHeight()
 		m.attachments = nil
 		m.closeAtMention()
 		m.recalcViewportSize()
@@ -629,7 +629,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 
 		cmd := m.input.Update(msg)
 		m.syncAttachmentsToInlineImagePlaceholders()
-		m.input.syncHeight()
+		m.input.SyncHeight()
 		m.recalcViewportSize()
 		if m.atMentionOpen {
 			cmd = tea.Batch(cmd, m.syncAtMentionQuery())

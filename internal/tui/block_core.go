@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -95,11 +96,11 @@ func copyMutableBlockViewState(dst, src *Block) {
 }
 
 func (b *Block) toolResultIsError() bool {
-	return b.ResultStatus == agent.ToolResultStatusError
+	return b.ResultStatus == message.ToolStatusError
 }
 
 func (b *Block) toolResultIsCancelled() bool {
-	return b.ResultStatus == agent.ToolResultStatusCancelled
+	return b.ResultStatus == message.ToolStatusCancelled
 }
 
 func (b *Block) toolExecutionIsRunning() bool {

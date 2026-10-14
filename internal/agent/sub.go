@@ -22,6 +22,7 @@ import (
 	"github.com/keakon/chord/internal/permission"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/skill"
+	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -1461,7 +1462,7 @@ func (s *SubAgent) newTurn() *Turn {
 		merged := mergePendingToolCalls(cancelledExec, cancelledStream)
 		merged = s.turn.filterCompletedToolCalls(merged)
 		if len(merged) > 0 {
-			persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, merged, ToolResultStatusCancelled, context.Canceled)
+			persistedResults := finalizeInterruptedToolCalls(s.ctxMgr, s.parent.emitToTUI, s.persistInterruptedToolResults, merged, message.ToolStatusCancelled, context.Canceled)
 			if persistedResults > 0 {
 				log.Infof("SubAgent: persisted interrupted tool-call results before starting new turn agent=%v count=%v", s.instanceID, persistedResults)
 			}
@@ -1685,7 +1686,7 @@ func (s *SubAgent) delegationPromptBlock(visible map[string]struct{}) string {
 // truncateString returns the first n runes of s, appending "..." if
 // truncated. It never splits a multi-byte UTF-8 rune.
 func truncateString(s string, n int) string {
-	return llm.TruncateStringRunes(s, n, "...")
+	return texttruncate.Runes(s, n, "...")
 }
 
 // ---------------------------------------------------------------------------

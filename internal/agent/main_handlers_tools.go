@@ -75,7 +75,7 @@ func (a *MainAgent) failPendingToolCalls(turn *Turn, err error) {
 			log.Warnf("discarding synthetic tool failures for call_ids absent from assistant history dropped=%v", len(undeclared))
 			emitToolCallDiscards(a.emitToTUI, undeclared, "not_in_context")
 		}
-		persistedResults := a.persistInterruptedToolResults(declared, ToolResultStatusError, err)
+		persistedResults := a.persistInterruptedToolResults(declared, message.ToolStatusError, err)
 		if persistedResults > 0 {
 			log.Infof("persisted failed tool-call results after terminal turn error turn_id=%v count=%v", turn.ID, persistedResults)
 		}
@@ -144,9 +144,9 @@ func (a *MainAgent) handleCompletedInterruptedToolResult(call PendingToolCall, p
 func finalizeInterruptedToolCalls(
 	ctxMgr *ctxmgr.Manager,
 	emit func(AgentEvent),
-	persist func(calls []PendingToolCall, status ToolResultStatus, cause error) int,
+	persist func(calls []PendingToolCall, status message.ToolResultStatus, cause error) int,
 	calls []PendingToolCall,
-	status ToolResultStatus,
+	status message.ToolResultStatus,
 	cause error,
 ) int {
 	declared, undeclared := splitPendingCallsByDeclaredTools(ctxMgr, calls)
@@ -167,7 +167,7 @@ func finalizeInterruptedToolCalls(
 func persistInterruptedToolResultsInto(
 	ctxMgr *ctxmgr.Manager,
 	calls []PendingToolCall,
-	status ToolResultStatus,
+	status message.ToolResultStatus,
 	cause error,
 	logSkip func(dropped int),
 	persist func(message.Message) bool,
@@ -184,7 +184,7 @@ func persistInterruptedToolResultsInto(
 		return 0
 	}
 	msgText := toolCallFailureMessage(cause)
-	if status == ToolResultStatusCancelled {
+	if status == message.ToolStatusCancelled {
 		msgText = "Cancelled"
 	}
 
@@ -205,7 +205,7 @@ func persistInterruptedToolResultsInto(
 	return persisted
 }
 
-func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, status ToolResultStatus, cause error) int {
+func (a *MainAgent) persistInterruptedToolResults(calls []PendingToolCall, status message.ToolResultStatus, cause error) int {
 	return persistInterruptedToolResultsInto(a.ctxMgr, calls, status, cause,
 		func(dropped int) {
 			log.Warnf("skipping synthetic tool persistence for call_ids absent from assistant history dropped=%v", dropped)
@@ -869,7 +869,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 					rejection := "Done rejected: only one `done` call can be handled in a batch; keep a single final `done` call after the remaining tool work is complete."
 					a.persistLoopDoneToolResult(skipped.CallID, rejection)
 					a.emitToTUI(ToolCallUpdateEvent{ID: skipped.CallID, Name: tools.NameDone, ArgsJSON: skipped.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-					a.emitToTUI(ToolResultEvent{CallID: skipped.CallID, Name: tools.NameDone, ArgsJSON: skipped.ArgsJSON, Result: rejection, Status: ToolResultStatusSuccess})
+					a.emitToTUI(ToolResultEvent{CallID: skipped.CallID, Name: tools.NameDone, ArgsJSON: skipped.ArgsJSON, Result: rejection, Status: message.ToolStatusSuccess})
 				}
 			}
 			pending := pendingResults[len(pendingResults)-1]
@@ -879,7 +879,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 					if err != nil {
 						log.Warnf("loop exit confirmation failed error=%v", err)
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: ToolResultStatusSuccess})
+						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: message.ToolStatusSuccess})
 						a.markLoopExitDecisionRequired()
 						return
 					} else if resp.Approved {
@@ -893,7 +893,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 						a.closeCompletedQuestions()
 						a.persistLoopDoneToolResult(pending.CallID, "Done approved")
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done approved", DoneReport: report, Status: ToolResultStatusSuccess})
+						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: "Done approved", DoneReport: report, Status: message.ToolStatusSuccess})
 						a.loopState.State = LoopStateCompleted
 						a.emitLoopStateChanged()
 						a.loopState.disable()
@@ -913,7 +913,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				} else {
 					if !a.autoRejectLoopExitAndContinue(pending.CallID, pending.ArgsJSON, a.loopExitRejectionToolResult()) {
 						a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: ToolResultStatusSuccess})
+						a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: a.loopExitInterceptLimitResult(), Status: message.ToolStatusSuccess})
 						a.markLoopExitDecisionRequired()
 						return
 					}
@@ -931,7 +931,7 @@ func (a *MainAgent) handleToolResult(evt Event) {
 				a.closeCompletedQuestions()
 				a.persistLoopDoneToolResult(pending.CallID, report)
 				a.emitToTUI(ToolCallUpdateEvent{ID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, ArgsStreamingDone: true, AgentID: "main"})
-				a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: report, DoneReport: report, Status: ToolResultStatusSuccess})
+				a.emitToTUI(ToolResultEvent{CallID: pending.CallID, Name: tools.NameDone, ArgsJSON: pending.ArgsJSON, Result: report, DoneReport: report, Status: message.ToolStatusSuccess})
 				a.emitActivity("main", ActivityIdle, "")
 				a.settleDeliveryWork(a.turn.DeliveryWorkID, recovery.DeliveryWorkCompleted)
 				a.setIdleAndDrainPending()

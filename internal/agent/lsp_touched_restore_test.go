@@ -59,14 +59,14 @@ func TestRebuildTouchedPathsFromMessagesSkipsNotStartedRecoveryResults(t *testin
 			Role:              "tool",
 			ToolCallID:        "write-1",
 			Content:           errRestoreToolResultNotStarted,
-			ToolStatus:        string(ToolResultStatusError),
+			ToolStatus:        message.ToolStatusError,
 			ToolRecoveryState: message.ToolRecoveryStateNotStarted,
 		},
 		{
 			Role:              "tool",
 			ToolCallID:        "write-2",
 			Content:           errRestoreToolResultOutcomeUnknown,
-			ToolStatus:        string(ToolResultStatusError),
+			ToolStatus:        message.ToolStatusError,
 			ToolRecoveryState: message.ToolRecoveryStateOutcomeUnknown,
 		},
 	}

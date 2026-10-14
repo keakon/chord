@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -33,7 +34,7 @@ func assertRequestSurfaceInvariants(t *testing.T, prepared []message.Message, se
 	t.Helper()
 	for i := range prepared {
 		if prepared[i].Role == message.RoleTool && !testToolResultSupportedByNearestAssistant(prepared, i) {
-			t.Fatalf("tool result at %d lost its call: %q", i, compactTextSnippet(prepared[i].Content, 80))
+			t.Fatalf("tool result at %d lost its call: %q", i, requesttrim.TextSnippet(prepared[i].Content, 80))
 		}
 	}
 	lastUser := -1
@@ -50,29 +51,12 @@ func assertRequestSurfaceInvariants(t *testing.T, prepared []message.Message, se
 		for _, ref := range tools.ExtractArtifactReferences(content) {
 			assertArtifactAddressResolves(t, sessionDir, ref, content)
 		}
-		if address, ok := archivedOutputMarkerAddress(content); ok {
+		if address := requesttrim.RetentionDecision(requesttrim.Context{}, requesttrim.Verdict{Class: requesttrim.ReadLike}, "", content).ArtifactRef; address != "" && !strings.HasPrefix(address, tools.ArtifactReferencePrefix) {
 			if _, err := os.Stat(address); err != nil {
 				t.Fatalf("archived output address does not resolve: %v", err)
 			}
 		}
 	}
-}
-
-func testToolResultSupportedByNearestAssistant(messages []message.Message, toolIdx int) bool {
-	id := messages[toolIdx].ToolCallID
-	for i := toolIdx - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.Role != message.RoleAssistant || len(msg.ToolCalls) == 0 {
-			continue
-		}
-		for _, call := range msg.ToolCalls {
-			if call.ID == id {
-				return true
-			}
-		}
-		return false
-	}
-	return false
 }
 
 func stateMachineReadBody(start, end, total int, line string) string {
@@ -104,7 +88,7 @@ func TestStateMachineReadEditReread(t *testing.T) {
 	// Request 1: the read is the only view of the file and stays complete.
 	prepared := a.prepareMessagesForLLM(msgs)
 	if prepared[2].Content != original {
-		t.Fatalf("a current read must not be reduced: %q", compactTextSnippet(prepared[2].Content, 120))
+		t.Fatalf("a current read must not be reduced: %q", requesttrim.TextSnippet(prepared[2].Content, 120))
 	}
 	assertRequestSurfaceInvariants(t, prepared, sessionDir)
 
@@ -120,7 +104,7 @@ func TestStateMachineReadEditReread(t *testing.T) {
 		t.Fatal("a read invalidated by a later edit must not stay presented as current content")
 	}
 	if !strings.Contains(prepared[2].Content, "truncated=") {
-		t.Fatalf("invalidated read lost its validity note: %q", compactTextSnippet(prepared[2].Content, 160))
+		t.Fatalf("invalidated read lost its validity note: %q", requesttrim.TextSnippet(prepared[2].Content, 160))
 	}
 	assertRequestSurfaceInvariants(t, prepared, sessionDir)
 
@@ -133,7 +117,7 @@ func TestStateMachineReadEditReread(t *testing.T) {
 	)
 	prepared = a.prepareMessagesForLLM(msgs)
 	if prepared[7].Content != msgs[7].Content {
-		t.Fatalf("the newest read must keep full authority: %q", compactTextSnippet(prepared[7].Content, 120))
+		t.Fatalf("the newest read must keep full authority: %q", requesttrim.TextSnippet(prepared[7].Content, 120))
 	}
 	if prepared[2].Content == original {
 		t.Fatal("the superseded read regained current-content presentation on a later request")
@@ -187,7 +171,7 @@ func TestStateMachineReadExternalMutationArchivesPriorContent(t *testing.T) {
 		decisionRef = refs[0]
 	}
 	if decisionRef == "" {
-		t.Fatalf("the only surviving copy of the observed revision was summarized without an address: %q", compactTextSnippet(prepared[2].Content, 200))
+		t.Fatalf("the only surviving copy of the observed revision was summarized without an address: %q", requesttrim.TextSnippet(prepared[2].Content, 200))
 	}
 	assertArtifactAddressResolves(t, sessionDir, decisionRef, prepared[2].Content)
 
@@ -210,7 +194,7 @@ func TestStateMachineReadExternalMutationArchivesPriorContent(t *testing.T) {
 	msgs = append(msgs, message.Message{Role: message.RoleUser, Content: "and now?"})
 	prepared = a.prepareMessagesForLLM(msgs)
 	if len(tools.ExtractArtifactReferences(prepared[2].Content)) == 0 {
-		t.Fatalf("recovery address was dropped on a later request: %q", compactTextSnippet(prepared[2].Content, 200))
+		t.Fatalf("recovery address was dropped on a later request: %q", requesttrim.TextSnippet(prepared[2].Content, 200))
 	}
 	assertRequestSurfaceInvariants(t, prepared, sessionDir)
 }
@@ -234,7 +218,7 @@ func TestStateMachineFailedBuildFixRebuild(t *testing.T) {
 	}
 	prepared := a.prepareMessagesForLLM(msgs)
 	if prepared[2].Content != failure {
-		t.Fatalf("a fresh failure must stay complete: %q", compactTextSnippet(prepared[2].Content, 120))
+		t.Fatalf("a fresh failure must stay complete: %q", requesttrim.TextSnippet(prepared[2].Content, 120))
 	}
 	assertRequestSurfaceInvariants(t, prepared, sessionDir)
 
@@ -256,7 +240,7 @@ func TestStateMachineFailedBuildFixRebuild(t *testing.T) {
 		t.Fatal("an aged failure should have been summarized once the fix landed")
 	}
 	if !strings.Contains(prepared[2].Content, "undefined: helperFn") {
-		t.Fatalf("the summary dropped the failure evidence it exists to preserve: %q", compactTextSnippet(prepared[2].Content, 200))
+		t.Fatalf("the summary dropped the failure evidence it exists to preserve: %q", requesttrim.TextSnippet(prepared[2].Content, 200))
 	}
 	if prepared[7].Content != "ok\n" {
 		t.Fatalf("the successful rebuild must stay verbatim: %q", prepared[7].Content)
@@ -297,9 +281,26 @@ func TestStateMachineReferencedResultKeepsItsEvidence(t *testing.T) {
 		// early here once let a policy change turn this test into a no-op.
 		t.Fatal("the fixture no longer reduces the cited result; the rule it pins is untested")
 	}
-	if !strings.Contains(rendering, citedIdentifier) && !strings.Contains(rendering, reducedArtifactDirName) {
+	if !strings.Contains(rendering, citedIdentifier) && !strings.Contains(rendering, requesttrim.ReducedArtifactDirName) {
 		t.Fatalf("the reasoning still cites %q but the request keeps neither the identifier nor an address for it: %q",
-			citedIdentifier, compactTextSnippet(rendering, 300))
+			citedIdentifier, requesttrim.TextSnippet(rendering, 300))
 	}
 	assertRequestSurfaceInvariants(t, prepared, sessionDir)
+}
+
+func testToolResultSupportedByNearestAssistant(messages []message.Message, toolIdx int) bool {
+	id := messages[toolIdx].ToolCallID
+	for i := toolIdx - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != message.RoleAssistant || len(msg.ToolCalls) == 0 {
+			continue
+		}
+		for _, call := range msg.ToolCalls {
+			if call.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	return false
 }

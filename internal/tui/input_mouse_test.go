@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 func TestInputDoubleClickSelectsWord(t *testing.T) {
@@ -14,7 +16,7 @@ func TestInputDoubleClickSelectsWord(t *testing.T) {
 	m.layout = m.generateLayout(m.width, m.height)
 
 	click := tea.MouseClickMsg{
-		X:      m.layout.input.Min.X + inputPromptWidth + len("alpha ") + 1,
+		X:      m.layout.input.Min.X + composer.PromptWidth + len("alpha ") + 1,
 		Y:      m.layout.input.Min.Y + 1,
 		Button: tea.MouseLeft,
 	}
@@ -37,7 +39,7 @@ func TestInputTripleClickSelectsLine(t *testing.T) {
 	m.layout = m.generateLayout(m.width, m.height)
 
 	click := tea.MouseClickMsg{
-		X:      m.layout.input.Min.X + inputPromptWidth + len("alpha ") + 1,
+		X:      m.layout.input.Min.X + composer.PromptWidth + len("alpha ") + 1,
 		Y:      m.layout.input.Min.Y + 1,
 		Button: tea.MouseLeft,
 	}

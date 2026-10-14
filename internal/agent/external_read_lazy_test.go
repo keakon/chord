@@ -7,13 +7,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
 // readMessageForLazyCheck builds a successful read result whose FileState
 // records the current file hash, plus a scan with matching tool-call metadata.
-func readMessageForLazyCheck(t *testing.T, path string) (message.Message, *reductionHistoryScan) {
+func readMessageForLazyCheck(t *testing.T, path string) (message.Message, *requesttrim.Scan) {
 	t.Helper()
 	hash, exists, _, err := verifiedCurrentFileHash(path)
 	if err != nil {
@@ -28,13 +29,13 @@ func readMessageForLazyCheck(t *testing.T, path string) (message.Message, *reduc
 			Role:       message.RoleTool,
 			ToolCallID: "read-1",
 			Content:    "file content",
-			ToolStatus: string(ToolResultStatusSuccess),
+			ToolStatus: message.ToolStatusSuccess,
 			FileState: &message.ToolFileState{Reads: []message.TrackedFileState{
 				{Path: path, SHA256: hash, Exists: true},
 			}},
 		},
 	}
-	return msgs[1], newReductionHistoryScan(msgs)
+	return msgs[1], requesttrim.NewScan(msgs, nil)
 }
 
 func lazyAgentForTest() *MainAgent {
@@ -118,7 +119,7 @@ func TestLazyExternalReadInvalidationUnverifiableStaysUnknown(t *testing.T) {
 		Role:       message.RoleTool,
 		ToolCallID: "read-1",
 		Content:    "dir",
-		ToolStatus: string(ToolResultStatusSuccess),
+		ToolStatus: message.ToolStatusSuccess,
 		FileState: &message.ToolFileState{Reads: []message.TrackedFileState{
 			{Path: sub, SHA256: "expected-hash", Exists: true},
 		}},
@@ -127,7 +128,7 @@ func TestLazyExternalReadInvalidationUnverifiableStaysUnknown(t *testing.T) {
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "read-1", Name: tools.NameRead}}},
 		msg,
 	}
-	scan := newReductionHistoryScan(msgs)
+	scan := requesttrim.NewScan(msgs, nil)
 	a := lazyAgentForTest()
 	if got := a.externalReadsInvalidatedLazy(msgs, scan); len(got) != 0 {
 		t.Fatalf("unverifiable file must stay unknown (not stale): %v", got)
@@ -168,7 +169,7 @@ func TestLazyExternalReadInvalidationRelativePathResolvesProjectRoot(t *testing.
 		Role:       message.RoleTool,
 		ToolCallID: "read-1",
 		Content:    "file",
-		ToolStatus: string(ToolResultStatusSuccess),
+		ToolStatus: message.ToolStatusSuccess,
 		FileState: &message.ToolFileState{Reads: []message.TrackedFileState{
 			{Path: "rel.go", SHA256: abs, Exists: true},
 		}},
@@ -177,7 +178,7 @@ func TestLazyExternalReadInvalidationRelativePathResolvesProjectRoot(t *testing.
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "read-1", Name: tools.NameRead}}},
 		msg,
 	}
-	scan := newReductionHistoryScan(msgs)
+	scan := requesttrim.NewScan(msgs, nil)
 	a := lazyAgentForTest()
 	a.contentRoot = dir
 	if got := a.externalReadsInvalidatedLazy(msgs, scan); len(got) != 0 {

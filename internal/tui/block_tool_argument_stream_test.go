@@ -11,6 +11,7 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -106,9 +107,9 @@ func TestStreamingArgumentsTerminalEvents(t *testing.T) {
 			case "running":
 				event = agent.ToolCallExecutionEvent{ID: id, Name: tools.NameShell, State: agent.ToolCallExecutionStateRunning}
 			case "result":
-				event = agent.ToolResultEvent{CallID: id, Name: tools.NameShell, Status: agent.ToolResultStatusSuccess, Result: "ok"}
+				event = agent.ToolResultEvent{CallID: id, Name: tools.NameShell, Status: message.ToolStatusSuccess, Result: "ok"}
 			case "cancelled":
-				event = agent.ToolResultEvent{CallID: id, Name: tools.NameShell, Status: agent.ToolResultStatusCancelled}
+				event = agent.ToolResultEvent{CallID: id, Name: tools.NameShell, Status: message.ToolStatusCancelled}
 			}
 			_ = m.handleAgentEvent(agentEventMsg{event: event})
 			if block.streamArgs != nil || block.ToolProgress != nil {

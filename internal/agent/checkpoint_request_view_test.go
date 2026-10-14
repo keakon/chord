@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -152,7 +153,7 @@ func TestCheckpointValidationReportsIndependentRepairsTogether(t *testing.T) {
 // texts makes them independent copies.
 func requestDedupFixture(request, original, constraint, retained string) message.Message {
 	retained = strings.TrimSpace(retained)
-	constraintExcerpt := compactTextSnippet(constraint, compactUserConstraintExcerptChars)
+	constraintExcerpt := requesttrim.TextSnippet(constraint, compactUserConstraintExcerptChars)
 	item := buildUserCorrectionEvidence("message 1 (user)", constraint)
 	evidence := renderEvidenceArtifactContent([]evidenceItem{item, buildEvidenceItem(evidenceToolError, "Latest failing tool result", "Preserve the failure", "message 2 (tool)", "sample tool error output")})
 	body := message.CompactionAnchorsOpenTag +

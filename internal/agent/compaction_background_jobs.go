@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -159,5 +159,5 @@ func activeBackgroundJobSnapshotRow(job recovery.BackgroundObjectState, snapshot
 // singleLineSnapshotText collapses all whitespace and truncates, so one row can
 // never wrap onto a second physical line in the machine block.
 func singleLineSnapshotText(s string, maxChars int) string {
-	return llm.TruncateStringRunes(strings.Join(strings.Fields(s), " "), maxChars, "...(truncated)")
+	return texttruncate.Runes(strings.Join(strings.Fields(s), " "), maxChars, "...(truncated)")
 }

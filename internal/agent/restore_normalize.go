@@ -186,7 +186,7 @@ func syntheticInterruptedToolResult(callID, recoveryState string) message.Messag
 		Role:              "tool",
 		ToolCallID:        callID,
 		Content:           content,
-		ToolStatus:        string(ToolResultStatusError),
+		ToolStatus:        message.ToolStatusError,
 		ToolRecoveryState: recoveryState,
 	}
 }

@@ -104,7 +104,7 @@ func TestPausedMainResponseSettlesStartedSpeculativeTool(t *testing.T) {
 	for _, m := range a.ctxMgr.Snapshot() {
 		if m.ToolCallID == call.ID {
 			found = true
-			if m.Content != "Completed tool result" || m.ToolRecoveryState != "" || m.ToolStatus != string(ToolResultStatusSuccess) {
+			if m.Content != "Completed tool result" || m.ToolRecoveryState != "" || m.ToolStatus != message.ToolStatusSuccess {
 				t.Fatalf("started result lost: %#v", m)
 			}
 		}

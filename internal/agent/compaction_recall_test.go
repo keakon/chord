@@ -21,7 +21,7 @@ func TestArchivedHistoryRecoverableViaRead(t *testing.T) {
 	head := []message.Message{
 		{Role: message.RoleUser, Content: "保持现有 API 行为不变，继续修复 bug"},
 		{Role: message.RoleAssistant, Content: "排查编译错误"},
-		{Role: message.RoleTool, ToolCallID: "tc1", Content: "go build output", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: message.RoleTool, ToolCallID: "tc1", Content: "go build output", ToolStatus: message.ToolStatusSuccess},
 	}
 	index := 1
 	absPath, _, _, err := a.exportCompactionHistory(head, head, index, []string{"保持现有 API 行为不变"}, a.captureCompactionArchiveMeta())

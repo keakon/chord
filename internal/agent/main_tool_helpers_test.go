@@ -131,7 +131,7 @@ func TestFinalizeStreamingToolCardsEmitsDiscardReasonForStartedSpeculativeCall(t
 	if !ok {
 		t.Fatalf("event = %#v, want ToolResultEvent", events[0])
 	}
-	if ev.Status != ToolResultStatusError || ev.AgentID != "agent-1" {
+	if ev.Status != message.ToolStatusError || ev.AgentID != "agent-1" {
 		t.Fatalf("tool result event = %#v", ev)
 	}
 	if !strings.Contains(ev.Result, "Speculative tool execution was discarded") || !strings.Contains(ev.Result, "reason=filtered") {

@@ -230,7 +230,7 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 		m.cachedInputWidth != m.width ||
 		m.cachedInputHeight != layout.input.Dy() ||
 		m.cachedInputSuppressed != inputSuppressed ||
-		m.cachedInputSelectionAlive != !inputSelection.empty() ||
+		m.cachedInputSelectionAlive != m.input.HasSelection() ||
 		m.cachedInputFocused != inputFocused ||
 		m.cachedInputBangMode != inputBangMode ||
 		m.cachedInputValue != inputValue ||
@@ -264,7 +264,7 @@ func (m *Model) drawBaseLayers(scr uv.Screen, layout tuiLayout) {
 		m.cachedInputWidth = m.width
 		m.cachedInputHeight = layout.input.Dy()
 		m.cachedInputSuppressed = inputSuppressed
-		m.cachedInputSelectionAlive = !inputSelection.empty()
+		m.cachedInputSelectionAlive = m.input.HasSelection()
 		m.cachedInputFocused = inputFocused
 		m.cachedInputBangMode = inputBangMode
 		m.cachedInputValue = inputValue

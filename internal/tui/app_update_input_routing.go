@@ -1,21 +1,15 @@
 package tui
 
 import (
-	"fmt"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/composer"
 )
-
-var imagePlaceholderRE = regexp.MustCompile(`\[image(\d+)\]`)
-
-const inlineImagePlaceholderDisplay = "[image]"
 
 func attachmentReferenceText(att Attachment) string {
 	name := strings.TrimSpace(att.FileName)
@@ -25,36 +19,17 @@ func attachmentReferenceText(att Attachment) string {
 	return "[" + name + "]"
 }
 
-func imagePlaceholder(index int) string {
-	if index <= 0 {
-		index = 1
-	}
-	return fmt.Sprintf("[image%d]", index)
-}
-
-func inlineImagePlaceholderIndex(raw string) (int, bool) {
-	m := imagePlaceholderRE.FindStringSubmatch(raw)
-	if len(m) != 2 || m[0] != raw {
-		return 0, false
-	}
-	idx, err := strconv.Atoi(m[1])
-	if err != nil || idx < 1 {
-		return 0, false
-	}
-	return idx, true
-}
-
 func isInlineImagePlaceholderPart(part message.ContentPart) bool {
 	if part.Type != message.ContentPartText {
 		return false
 	}
-	if part.InlineToken != "" && part.InlineToken != inlineImageTokenMarker {
+	if part.InlineToken != "" && part.InlineToken != composer.InlineImageTokenMarker {
 		return false
 	}
 	if part.InlineToken == "" && part.DisplayText == "" {
 		return false
 	}
-	_, ok := inlineImagePlaceholderIndex(part.Text)
+	_, ok := composer.InlineImagePlaceholderIndex(part.Text)
 	return ok
 }
 
@@ -76,7 +51,7 @@ func interleaveAttachmentsInTextPart(part message.ContentPart, attachments []Att
 	if !isInlineImagePlaceholderPart(part) {
 		return interleavePlainImagePlaceholdersInTextPart(part, attachments, used)
 	}
-	imageIndex, ok := inlineImagePlaceholderIndex(part.Text)
+	imageIndex, ok := composer.InlineImagePlaceholderIndex(part.Text)
 	if !ok {
 		return []message.ContentPart{{Type: message.ContentPartText, Text: part.Text}}
 	}
@@ -92,14 +67,14 @@ func interleavePlainImagePlaceholdersInTextPart(part message.ContentPart, attach
 	if out, ok := interleaveAttachmentReferencePlaceholdersInTextPart(part, attachments, used); ok {
 		return out
 	}
-	placeholderCount := strings.Count(part.Text, inlineImagePlaceholderDisplay)
+	placeholderCount := strings.Count(part.Text, composer.InlineImagePlaceholderDisplay)
 	if placeholderCount == 0 {
 		return []message.ContentPart{part}
 	}
 	if placeholderCount != countUnusedInlineImageAttachments(attachments, used) {
 		return []message.ContentPart{part}
 	}
-	segments := strings.Split(part.Text, inlineImagePlaceholderDisplay)
+	segments := strings.Split(part.Text, composer.InlineImagePlaceholderDisplay)
 	out := make([]message.ContentPart, 0, len(segments)*2-1)
 	for i, segment := range segments {
 		if segment != "" {
@@ -110,7 +85,7 @@ func interleavePlainImagePlaceholdersInTextPart(part message.ContentPart, attach
 		}
 		attachmentIndex, ok := nextUnusedImageAttachmentIndex(attachments, used)
 		if !ok {
-			out = append(out, message.ContentPart{Type: message.ContentPartText, Text: inlineImagePlaceholderDisplay})
+			out = append(out, message.ContentPart{Type: message.ContentPartText, Text: composer.InlineImagePlaceholderDisplay})
 			continue
 		}
 		used[attachmentIndex] = true
@@ -236,11 +211,11 @@ func imageAttachmentIndex(attachments []Attachment, imageOrdinal int) (int, bool
 	return 0, false
 }
 
-func (m *Model) removeAttachmentForInlinePaste(paste inlineLargePaste) {
-	if paste.Kind != inlineTokenImage {
+func (m *Model) removeAttachmentForInlinePaste(paste composer.Token) {
+	if paste.Kind != composer.TokenImage {
 		return
 	}
-	imageIndex, ok := inlineImagePlaceholderIndex(paste.RawContent)
+	imageIndex, ok := composer.InlineImagePlaceholderIndex(paste.RawContent)
 	if !ok {
 		return
 	}
@@ -258,10 +233,10 @@ func (m *Model) syncAttachmentsToInlineImagePlaceholders() {
 	}
 	usedImages := make(map[int]bool)
 	for _, paste := range m.input.InlinePastes() {
-		if paste.Kind != inlineTokenImage {
+		if paste.Kind != composer.TokenImage {
 			continue
 		}
-		imageIndex, ok := inlineImagePlaceholderIndex(paste.RawContent)
+		imageIndex, ok := composer.InlineImagePlaceholderIndex(paste.RawContent)
 		if !ok {
 			continue
 		}
@@ -305,7 +280,7 @@ func (m *Model) insertComposerText(text string) tea.Cmd {
 		m.input.InsertStringPreserveInlinePastes(text)
 	}
 	m.syncAttachmentsToInlineImagePlaceholders()
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	cmd := m.syncAtMentionIfOpen()
 	m.recalcViewportSize()
 	return cmd
@@ -315,7 +290,7 @@ func (m *Model) rollbackPendingInlineImagePlaceholder(raw string) tea.Cmd {
 	if raw == "" || !m.input.RemoveInlineImagePlaceholderByRaw(raw) {
 		return nil
 	}
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	cmd := m.syncAtMentionIfOpen()
 	m.recalcViewportSize()
 	return cmd

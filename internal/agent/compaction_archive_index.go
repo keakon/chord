@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/keakon/chord/internal/convformat"
-	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/texttruncate"
 )
 
 // Compaction-archive message index.
@@ -154,7 +154,7 @@ func quoteArchiveSnippet(s string) string {
 	if s == "" {
 		return ""
 	}
-	return `"` + llm.TruncateStringRunes(s, archiveIndexSnippetRunes, "…") + `"`
+	return `"` + texttruncate.Runes(s, archiveIndexSnippetRunes, "…") + `"`
 }
 
 // renderCompactionArchiveIndex composes the index block. Line numbers are the

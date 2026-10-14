@@ -1,9 +1,12 @@
 package tui
 
-import "github.com/keakon/chord/internal/agent"
+import (
+	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
+)
 
 func (m *Model) recordToolErrorDiagnostic(event agent.ToolResultEvent) {
-	if event.Status != agent.ToolResultStatusError || event.Diagnostic == nil {
+	if event.Status != message.ToolStatusError || event.Diagnostic == nil {
 		return
 	}
 	diagnostic := event.Diagnostic

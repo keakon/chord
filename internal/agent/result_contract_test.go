@@ -99,10 +99,10 @@ func TestResultContractViolationGetsBoundedRepair(t *testing.T) {
 			if !strings.HasPrefix(rejected.Content, "Completion rejected:") || !strings.Contains(rejected.Content, tc.wantPath) {
 				t.Fatalf("rejection content = %q, want it to name %q", rejected.Content, tc.wantPath)
 			}
-			if rejected.ToolStatus != string(ToolResultStatusError) {
-				t.Fatalf("rejected Complete ToolStatus = %q, want %q", rejected.ToolStatus, ToolResultStatusError)
+			if rejected.ToolStatus != message.ToolStatusError {
+				t.Fatalf("rejected Complete ToolStatus = %q, want %q", rejected.ToolStatus, message.ToolStatusError)
 			}
-			assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
+			assertCompleteCardStatus(t, parent, sub, "call-1", message.ToolStatusError)
 			seen, _ := provider.snapshot()
 			if len(seen) != 1 {
 				t.Fatalf("provider request count = %d, want 1 bounded follow-up", len(seen))
@@ -213,7 +213,7 @@ func TestResultContractMissingGroupIsViolationNotDegraded(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for the terminal contract violation")
 	}
-	assertCompleteCardStatus(t, parent, sub, "call-2", ToolResultStatusError)
+	assertCompleteCardStatus(t, parent, sub, "call-2", message.ToolStatusError)
 	failure := sub.resultContractFailure()
 	if failure == nil || failure.Category != resultContractCategoryMissingResult {
 		t.Fatalf("recorded contract failure = %#v, want the missing-result diagnostics", failure)
@@ -324,7 +324,7 @@ func TestResultContractValidatesRefContent(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for the terminal contract violation")
 	}
-	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
+	assertCompleteCardStatus(t, parent, sub, "call-1", message.ToolStatusError)
 	if failure := sub.resultContractFailure(); failure == nil || failure.ResultRef == nil || failure.ResultRef.ID != ref.ID {
 		t.Fatalf("recorded contract failure = %#v, want the submitted ref", failure)
 	}
@@ -482,7 +482,7 @@ func TestResultContractIntegrityFailureIsTerminalWithoutBudget(t *testing.T) {
 	if got := classifyAgentError(&ResultContractIntegrityError{cause: errors.New("x")}); got != agentErrorKindContract {
 		t.Fatalf("classifyAgentError = %q, want %q", got, agentErrorKindContract)
 	}
-	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
+	assertCompleteCardStatus(t, parent, sub, "call-1", message.ToolStatusError)
 	failure := sub.resultContractFailure()
 	if failure == nil || failure.ResultRef == nil || failure.ResultRef.ID != missing.ID {
 		t.Fatalf("recorded contract failure = %#v, want the unreadable ref", failure)

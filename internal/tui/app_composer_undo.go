@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 const (
@@ -14,7 +16,7 @@ const (
 )
 
 type composerEditSnapshot struct {
-	draft         inputDraftSnapshot
+	draft         composer.Draft
 	attachments   []Attachment
 	queuedDraftID string
 }
@@ -42,7 +44,7 @@ func (s composerEditSnapshot) size() int {
 }
 
 func (m *Model) composerEditSnapshot() composerEditSnapshot {
-	return composerEditSnapshot{draft: m.input.draftSnapshot(), attachments: cloneAttachments(m.attachments), queuedDraftID: m.editingQueuedDraftID}
+	return composerEditSnapshot{draft: m.input.Snapshot(), attachments: cloneAttachments(m.attachments), queuedDraftID: m.editingQueuedDraftID}
 }
 
 func sameComposerContent(a, b composerEditSnapshot) bool {
@@ -64,8 +66,8 @@ func sameComposerContent(a, b composerEditSnapshot) bool {
 }
 
 func (m *Model) syncComposerUndoBoundary() {
-	if m.composerUndo.boundary != m.input.editBoundary {
-		m.composerUndo = composerUndoState{boundary: m.input.editBoundary}
+	if m.composerUndo.boundary != m.input.Revision().Boundary {
+		m.composerUndo = composerUndoState{boundary: m.input.Revision().Boundary}
 	}
 }
 
@@ -77,11 +79,11 @@ func (m *Model) beginComposerEdit(typing bool) func() {
 	}
 	m.syncComposerUndoBoundary()
 	before := m.composerEditSnapshot()
-	boundary := m.input.editBoundary
+	boundary := m.input.Revision().Boundary
 	m.composerUndo.depth++
 	return func() {
-		if boundary != m.input.editBoundary {
-			m.composerUndo = composerUndoState{boundary: m.input.editBoundary}
+		if boundary != m.input.Revision().Boundary {
+			m.composerUndo = composerUndoState{boundary: m.input.Revision().Boundary}
 			return
 		}
 		m.composerUndo.depth--
@@ -91,9 +93,9 @@ func (m *Model) beginComposerEdit(typing bool) func() {
 			return
 		}
 		// Include attachment-only edits in clipboard request invalidation.
-		m.input.interactionVersion++
+		m.input.ContentChanged()
 		now := time.Now()
-		cursor := runeOffsetFromRowCol(before.draft.Entry.Display, before.draft.Row, before.draft.Col)
+		cursor := composer.RuneOffsetFromRowCol(before.draft.Entry.Display, before.draft.Row, before.draft.Col)
 		merge := typing && m.composerUndo.typing && now.Sub(m.composerUndo.lastEdit) <= composerTypingWindow && cursor == m.composerUndo.lastCursor
 		size := before.size()
 		if size > composerUndoBytes {
@@ -111,7 +113,7 @@ func (m *Model) beginComposerEdit(typing bool) func() {
 		}
 		m.composerUndo.typing = typing
 		m.composerUndo.lastEdit = now
-		m.composerUndo.lastCursor = runeOffsetFromRowCol(after.draft.Entry.Display, after.draft.Row, after.draft.Col)
+		m.composerUndo.lastCursor = composer.RuneOffsetFromRowCol(after.draft.Entry.Display, after.draft.Row, after.draft.Col)
 	}
 }
 
@@ -130,13 +132,13 @@ func (m *Model) undoComposerEdit() tea.Cmd {
 	m.composerUndo.entries[last] = composerEditSnapshot{}
 	m.composerUndo.entries = m.composerUndo.entries[:last]
 	m.composerUndo.typing = false
-	m.input.applyDraftSnapshot(snapshot.draft)
-	m.composerUndo.boundary = m.input.editBoundary
+	m.input.Restore(snapshot.draft)
+	m.composerUndo.boundary = m.input.Revision().Boundary
 	m.attachments = cloneAttachments(snapshot.attachments)
 	m.editingQueuedDraftID = snapshot.queuedDraftID
 	m.closeAtMention()
 	m.slashCompleteSelected = 0
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	m.recalcViewportSize()
 	return nil
 }

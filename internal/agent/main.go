@@ -12,6 +12,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/command"
 	"github.com/keakon/chord/internal/config"
@@ -205,8 +206,8 @@ type MainAgent struct {
 
 	// reductionMemo caches the byte-derived per-call verdicts of the reduction
 	// pass (call metadata, repeat-detection digests and input keys, shell
-	// invocation parses); see reductionToolCallMemo.
-	reductionMemo reductionToolCallMemo
+	// invocation parses); see requesttrim.Memo.
+	reductionMemo requesttrim.Memo
 
 	// binaryPartCache bounds the lazily resolved attachment payloads held for
 	// the wire converter; see binaryPartReadCache.
@@ -237,7 +238,7 @@ type MainAgent struct {
 	lastPreparedLLMDiscardedInputs map[string]string
 	lastPreparedLLMNextReviewAge   []int
 	lastPreparedLLMToolResults     int
-	lastPreparedReductionPolicy    contextReductionPolicy
+	lastPreparedReductionPolicy    requesttrim.Policy
 	lastPreparedReductionStats     ContextReductionStats
 	lastPreparedLLMToolDefHash     [sha256.Size]byte
 	lastPreparedStablePrefixLen    int
@@ -1709,9 +1710,9 @@ func (a *MainAgent) handleTurnCancelled(evt Event) {
 		}
 	}
 
-	status := ToolResultStatusCancelled
+	status := message.ToolResultStatus(message.ToolStatusCancelled)
 	if payload.MarkToolCallsFailed {
-		status = ToolResultStatusError
+		status = message.ToolStatusError
 	}
 
 	if len(reallyCancelled) > 0 {
@@ -1931,7 +1932,7 @@ func (a *MainAgent) handleAgentError(evt Event) {
 		emitCalls, discardCalls = splitPendingCallsByDeclaredTools(sub.ctxMgr, emitCalls)
 	}
 	if len(persistCalls) > 0 && sub != nil {
-		persistedResults := sub.persistInterruptedToolResults(persistCalls, ToolResultStatusError, err)
+		persistedResults := sub.persistInterruptedToolResults(persistCalls, message.ToolStatusError, err)
 		if persistedResults > 0 {
 			// The SubAgent is about to enter its terminal close path. Ensure the
 			// synthetic tool results queued above are durable before restore,

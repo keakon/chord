@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/imagegen"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -38,7 +39,7 @@ func headlessImageResultEnvelope(e agent.ToolResultEvent) *headlessEnvelope {
 }
 
 func emitHeadlessImageOriginals(ctx context.Context, e agent.ToolResultEvent, emit func(*headlessEnvelope) bool) {
-	if e.Status != agent.ToolResultStatusSuccess {
+	if e.Status != message.ToolStatusSuccess {
 		return
 	}
 	stopped := false

@@ -11,6 +11,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/recovery"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 const takeoverCommand = "/takeover"
@@ -61,7 +62,7 @@ func (m *Model) hasOtherComposerDrafts(ignoreCurrentCommand bool) bool {
 		if id == m.focusedAgentID {
 			continue
 		}
-		if state.draft.Entry.Display != "" || len(state.draft.Entry.InlinePastes) > 0 || len(state.attachments) > 0 || state.editingQueuedDraftID != "" {
+		if state.input.HasContent() || len(state.attachments) > 0 || state.editingQueuedDraftID != "" {
 			return true
 		}
 	}
@@ -288,7 +289,7 @@ func (m *Model) restoreTakeoverPendingInputs() {
 				owner = p.OwnerTaskID
 			}
 		}
-		draft := queuedDraft{ID: id, AgentID: owner, Content: p.Content, Parts: p.Parts, Mirrored: true, DisplayContent: displayTextFromParts(p.Parts, p.Content), FileRefs: fileRefsFromParts(p.Parts)}
+		draft := queuedDraft{ID: id, AgentID: owner, Content: p.Content, Parts: p.Parts, Mirrored: true, DisplayContent: composer.DisplayTextFromParts(p.Parts, p.Content), FileRefs: fileRefsFromParts(p.Parts)}
 		m.queuedDrafts = append(m.queuedDrafts, draft)
 	}
 	m.queueSyncEnabled = len(m.queuedDrafts) > 0

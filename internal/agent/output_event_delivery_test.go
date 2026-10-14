@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/logtest"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -26,7 +27,7 @@ func TestEmitToTUIToolResultWaitsForSpaceInsteadOfDropping(t *testing.T) {
 
 	delivered := make(chan struct{})
 	go func() {
-		a.emitToTUI(ToolResultEvent{CallID: "tool-1", Name: "shell", Result: "ok", Status: ToolResultStatusSuccess})
+		a.emitToTUI(ToolResultEvent{CallID: "tool-1", Name: "shell", Result: "ok", Status: message.ToolStatusSuccess})
 		close(delivered)
 	}()
 
@@ -54,7 +55,7 @@ func TestEmitToTUIToolResultWaitsForSpaceInsteadOfDropping(t *testing.T) {
 	if !ok {
 		t.Fatalf("event type = %T, want ToolResultEvent", evt)
 	}
-	if result.CallID != "tool-1" || result.Result != "ok" || result.Status != ToolResultStatusSuccess {
+	if result.CallID != "tool-1" || result.Result != "ok" || result.Status != message.ToolStatusSuccess {
 		t.Fatalf("tool result = %+v, want call_id=tool-1 result=ok status=success", result)
 	}
 }

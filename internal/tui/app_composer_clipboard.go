@@ -18,7 +18,7 @@ type composerClipboardTextMsg struct {
 }
 
 func (m *Model) composerClipboardTarget() composerClipboardTarget {
-	return composerClipboardTarget{m.sessionTranscriptEpoch, m.input.editBoundary, m.input.interactionVersion, m.focusedAgentID}
+	return composerClipboardTarget{m.sessionTranscriptEpoch, m.input.Revision().Boundary, m.input.Revision().Interaction, m.focusedAgentID}
 }
 
 func (m *Model) pasteComposerTextFromClipboard() tea.Cmd {

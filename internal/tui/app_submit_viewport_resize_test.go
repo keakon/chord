@@ -109,7 +109,7 @@ func TestHandleInsertSubmitRestoresViewportHeightInAgentView(t *testing.T) {
 
 	initialHeight := m.viewport.height
 	m.input.SetValue(strings.Join([]string{"a", "b", "c", "d", "e"}, "\n"))
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	m.recalcViewportSize()
 
 	if m.viewport.height >= initialHeight {

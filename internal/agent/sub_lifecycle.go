@@ -464,7 +464,7 @@ func (s *SubAgent) drainPendingToolFailureSets(err error) (emit []PendingToolCal
 	return merged, failedExec
 }
 
-func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status ToolResultStatus, cause error) int {
+func (s *SubAgent) persistInterruptedToolResults(calls []PendingToolCall, status message.ToolResultStatus, cause error) int {
 	return persistInterruptedToolResultsInto(s.ctxMgr, calls, status, cause,
 		func(dropped int) {
 			log.Warnf("SubAgent: skipping synthetic tool persistence for call_ids absent from assistant history agent=%v dropped=%v", s.instanceID, dropped)

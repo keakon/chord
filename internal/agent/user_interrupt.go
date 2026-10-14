@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/keakon/golog/log"
+
+	"github.com/keakon/chord/internal/message"
 )
 
 func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
@@ -29,7 +31,7 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 	cancelled := false
 	cancelledTaskIDs := make([]string, 0, len(subs))
 	for _, sub := range subs {
-		interrupted := sub.interruptCurrentTurnWithStatus(ToolResultStatusError, context.Canceled, true)
+		interrupted := sub.interruptCurrentTurnWithStatus(message.ToolStatusError, context.Canceled, true)
 		state := sub.State()
 		if interrupted || state == SubAgentStateRunning || state == SubAgentStateIdle || state == SubAgentStateWaitingMain || state == SubAgentStateWaitingDescendant {
 			// A task-backed SubAgent must settle its terminal state: collect
@@ -73,7 +75,7 @@ func (a *MainAgent) interruptSubAgentTurnsForUserCancel() bool {
 	return cancelled
 }
 
-func (s *SubAgent) interruptCurrentTurnWithStatus(status ToolResultStatus, cause error, _ bool) bool {
+func (s *SubAgent) interruptCurrentTurnWithStatus(status message.ToolResultStatus, cause error, _ bool) bool {
 	if s == nil || s.turn == nil {
 		return false
 	}

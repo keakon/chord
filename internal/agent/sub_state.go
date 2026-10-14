@@ -153,14 +153,14 @@ func (s *SubAgent) enterWaitingDescendant(reason string) {
 // The status is explicit per call site: a deferred delivery was accepted, a
 // rejected one was not, and the card (live and after restore) must agree with
 // the transcript instead of claiming success for both.
-func (s *SubAgent) appendCompleteToolResult(callID, resultContent string, status ToolResultStatus) {
+func (s *SubAgent) appendCompleteToolResult(callID, resultContent string, status message.ToolResultStatus) {
 	s.appendControlToolResult(callID, tools.NameComplete, "", resultContent, status)
 }
 
 // appendControlToolResult records the engine's answer to a control tool call
 // (complete, escalate): the tool result message, its persisted record, and the
 // card all carry the same explicit status.
-func (s *SubAgent) appendControlToolResult(callID, name, argsJSON, resultContent string, status ToolResultStatus) {
+func (s *SubAgent) appendControlToolResult(callID, name, argsJSON, resultContent string, status message.ToolResultStatus) {
 	if strings.TrimSpace(callID) == "" {
 		return
 	}

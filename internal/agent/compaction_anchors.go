@@ -7,6 +7,7 @@ import (
 
 	"github.com/keakon/golog/log"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -229,7 +230,7 @@ func boundAnchorConstraints(constraints []string) []string {
 // something that re-renders as a real section. The strip is space-tolerant:
 // "- # forged" must not reduce to "# forged".
 func anchorLine(text string, maxChars int) string {
-	text = strings.TrimSpace(strings.ReplaceAll(compactTextSnippet(text, maxChars), "\n", " "))
+	text = strings.TrimSpace(strings.ReplaceAll(requesttrim.TextSnippet(text, maxChars), "\n", " "))
 	text = strings.TrimSpace(text)
 	// Drop a leading list bullet ("-", "*", "+"), then any run of "#" heading
 	// markers. The space between a bullet and a heading must not stop the strip,

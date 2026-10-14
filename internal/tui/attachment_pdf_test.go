@@ -4,16 +4,8 @@ import (
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/composer"
 )
-
-func TestAttachmentExtForMimeType_PDF(t *testing.T) {
-	if got := attachmentExtForMimeType("application/pdf"); got != ".pdf" {
-		t.Fatalf("attachmentExtForMimeType(pdf) = %q, want .pdf", got)
-	}
-	if got := attachmentExtForMimeType("image/png"); got != ".png" {
-		t.Fatalf("attachmentExtForMimeType(png) = %q, want .png", got)
-	}
-}
 
 func TestAttachmentContentPart_TypeFromMime(t *testing.T) {
 	pdf := attachmentContentPart(Attachment{FileName: "a.pdf", MimeType: "application/pdf", Data: []byte("x")})
@@ -74,7 +66,7 @@ func TestInterleaveImageAttachments_AppendsPDF(t *testing.T) {
 }
 
 func TestInterleaveImageAttachments_MapsInlineImagesAfterPDF(t *testing.T) {
-	parts := []message.ContentPart{{Type: "text", Text: imagePlaceholder(1), DisplayText: inlineImagePlaceholderDisplay, InlineToken: inlineImageTokenMarker}}
+	parts := []message.ContentPart{{Type: "text", Text: composer.ImagePlaceholder(1), DisplayText: composer.InlineImagePlaceholderDisplay, InlineToken: composer.InlineImageTokenMarker}}
 	atts := []Attachment{
 		{FileName: "report.pdf", MimeType: "application/pdf", Data: []byte("pdf")},
 		{FileName: "shot.png", MimeType: "image/png", Data: []byte("png"), InlineImagePlaceholder: true},

@@ -320,7 +320,7 @@ func TestSubAgentCompleteWithOutstandingJoinChildEntersWaitingDescendant(t *test
 	if got := msgs[len(msgs)-1].Content; got != deferredCompleteResult(1) {
 		t.Fatalf("deferred Complete tool result = %q, want %q", got, deferredCompleteResult(1))
 	}
-	if got := msgs[len(msgs)-1].ToolStatus; got != string(ToolResultStatusSuccess) {
-		t.Fatalf("deferred Complete ToolStatus = %q, want %q", got, ToolResultStatusSuccess)
+	if got := msgs[len(msgs)-1].ToolStatus; got != message.ToolStatusSuccess {
+		t.Fatalf("deferred Complete ToolStatus = %q, want %q", got, message.ToolStatusSuccess)
 	}
 }

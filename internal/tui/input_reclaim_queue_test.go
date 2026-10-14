@@ -12,6 +12,7 @@ import (
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 func TestClipboardTextPasteShortInsertsIntoComposer(t *testing.T) {
@@ -263,15 +264,15 @@ func TestBackspaceRemovesInlineImagePlaceholderAndAttachmentAsWhole(t *testing.T
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyBackspace}))
 
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
+	if got := m.input.Value(); got != composer.InlineImagePlaceholderDisplay {
 		t.Fatalf("input value = %q, want single image placeholder", got)
 	}
 	pastes := m.input.InlinePastes()
 	if len(pastes) != 1 {
 		t.Fatalf("inline paste count = %d, want 1", len(pastes))
 	}
-	if got := pastes[0].RawContent; got != imagePlaceholder(1) {
-		t.Fatalf("remaining placeholder raw = %q, want %q", got, imagePlaceholder(1))
+	if got := pastes[0].RawContent; got != composer.ImagePlaceholder(1) {
+		t.Fatalf("remaining placeholder raw = %q, want %q", got, composer.ImagePlaceholder(1))
 	}
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments len = %d, want 1", got)
@@ -290,7 +291,7 @@ func TestTypingAfterInlineImagePlaceholderAppendsText(t *testing.T) {
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Text: "a"}))
 
-	if got, want := m.input.Value(), inlineImagePlaceholderDisplay+"a"; got != want {
+	if got, want := m.input.Value(), composer.InlineImagePlaceholderDisplay+"a"; got != want {
 		t.Fatalf("input value = %q, want %q", got, want)
 	}
 }
@@ -306,7 +307,7 @@ func TestTypingInsideInlineImagePlaceholderMovesCursorWithoutSplittingToken(t *t
 
 	_ = m.handleInsertKey(tea.KeyPressMsg(tea.Key{Text: "x"}))
 
-	if got := m.input.Value(); got != inlineImagePlaceholderDisplay {
+	if got := m.input.Value(); got != composer.InlineImagePlaceholderDisplay {
 		t.Fatalf("input value = %q, want unchanged whole image token", got)
 	}
 	if got := m.input.Column(); got != 0 {
@@ -347,11 +348,11 @@ func TestLoadQueuedDraftIntoComposerRestoresInlineImagePlaceholder(t *testing.T)
 		t.Fatalf("input value = %q, want %q", got, "[image1.png]")
 	}
 	pastes := m.input.InlinePastes()
-	if len(pastes) != 1 || pastes[0].Kind != inlineTokenImage {
+	if len(pastes) != 1 || pastes[0].Kind != composer.TokenImage {
 		t.Fatalf("inline pastes = %#v, want one image token", pastes)
 	}
-	if got := pastes[0].RawContent; got != imagePlaceholder(1) {
-		t.Fatalf("inline paste raw = %q, want %q", got, imagePlaceholder(1))
+	if got := pastes[0].RawContent; got != composer.ImagePlaceholder(1) {
+		t.Fatalf("inline paste raw = %q, want %q", got, composer.ImagePlaceholder(1))
 	}
 	if got := len(m.attachments); got != 1 {
 		t.Fatalf("attachments len = %d, want 1", got)

@@ -224,7 +224,7 @@ func TestTodoWriteCompletedCardDoesNotAnimateWithGlobalSpinner(t *testing.T) {
 		Name:     "todo_write",
 		ArgsJSON: args,
 		Result:   "- [x] 1. a\n",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 		AgentID:  "",
 	}})
 
@@ -259,7 +259,7 @@ func TestToolCallUpdateEventArgsStreamingDoneDoesNotDowngradeFinishedToolBlock(t
 		AgentID:  "",
 		ArgsJSON: args,
 		Result:   "ok",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 	}})
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallUpdateEvent{
@@ -335,7 +335,7 @@ func TestToolCallRendersStructuredElapsedFooterAfterCompletion(t *testing.T) {
 		Name:     "shell",
 		ArgsJSON: `{"command":"sleep 10"}`,
 		Result:   "done",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 		AgentID:  "",
 		Duration: 7 * time.Second,
 	}})
@@ -386,7 +386,7 @@ func TestJobOutputCardShowsElapsedOnlyAfterCompletion(t *testing.T) {
 		Name:     "job_output",
 		ArgsJSON: `{"job_id":"job-8"}`,
 		Result:   "line one\nline two\n[status: running]",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 		AgentID:  "",
 		Duration: 7 * time.Second,
 	}})
@@ -414,7 +414,7 @@ func TestFinishedJobOutputCardHidesSubSecondTotal(t *testing.T) {
 		Name:     "job_output",
 		ArgsJSON: `{"job_id":"job-9"}`,
 		Result:   "line one\n[status: running]",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 		AgentID:  "",
 		Duration: 400 * time.Millisecond,
 	}})
@@ -442,14 +442,14 @@ func TestToolResultSuccessIsNotOverwrittenByLateCancellation(t *testing.T) {
 		AgentID:  "",
 		ArgsJSON: `{"path":"README.md"}`,
 		Result:   "success result",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 	}})
 	block, ok := m.viewport.FindBlockByToolID("call-late-cancel")
 	if !ok {
 		t.Fatal("expected tool block after success")
 	}
-	if block.ResultStatus != agent.ToolResultStatusSuccess {
-		t.Fatalf("success ResultStatus = %q, want %q", block.ResultStatus, agent.ToolResultStatusSuccess)
+	if block.ResultStatus != message.ToolStatusSuccess {
+		t.Fatalf("success ResultStatus = %q, want %q", block.ResultStatus, message.ToolStatusSuccess)
 	}
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-late-cancel",
@@ -457,15 +457,15 @@ func TestToolResultSuccessIsNotOverwrittenByLateCancellation(t *testing.T) {
 		AgentID:  "",
 		ArgsJSON: `{"path":"README.md"}`,
 		Result:   "Error:\ncontext canceled",
-		Status:   agent.ToolResultStatusError,
+		Status:   message.ToolStatusError,
 	}})
 
 	block, ok = m.viewport.FindBlockByToolID("call-late-cancel")
 	if !ok {
 		t.Fatal("expected tool block")
 	}
-	if block.ResultStatus != agent.ToolResultStatusSuccess {
-		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, agent.ToolResultStatusSuccess)
+	if block.ResultStatus != message.ToolStatusSuccess {
+		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, message.ToolStatusSuccess)
 	}
 	if block.ResultContent != "success result" {
 		t.Fatalf("ResultContent = %q, want original success result", block.ResultContent)
@@ -676,7 +676,7 @@ func TestToolResultEventClearsToolProgress(t *testing.T) {
 		Name:     "delete",
 		ArgsJSON: `{"paths":["a.txt","b.txt","c.txt"],"reason":"cleanup"}`,
 		Result:   "Deleted (3):\n- a.txt\n- b.txt\n- c.txt",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 		AgentID:  "",
 	}})
 
@@ -718,7 +718,7 @@ func TestQuestionToolResultAdoptsPendingQuestionBlockByName(t *testing.T) {
 		AgentID:  "",
 		ArgsJSON: questionArgs,
 		Result:   `[{"header":"Provider compatibility","selected":["yes"]}]`,
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 	}})
 
 	blocks := m.viewport.visibleBlocks()
@@ -758,7 +758,7 @@ func TestDuplicateToolResultEventIsIgnoredAfterCompletion(t *testing.T) {
 		AgentID:  "",
 		ArgsJSON: `{"path":"internal/tui/app_agent_events.go","limit":1}`,
 		Result:   "ok",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 	}
 	_ = m.handleAgentEvent(agentEventMsg{event: resultEvt})
 	_ = m.handleAgentEvent(agentEventMsg{event: resultEvt})
@@ -835,7 +835,7 @@ func TestToolResultEventDeleteTracksDeletedFileWithoutFakeLineCount(t *testing.T
 		Name:     "delete",
 		ArgsJSON: `{"paths":["obsolete.go"],"reason":"cleanup"}`,
 		Result:   "delete completed.\n\nDeleted (1):\n- obsolete.go",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 	}})
 
 	edits := m.sidebar.CurrentAgentFiles()
@@ -866,7 +866,7 @@ func TestToolResultEventEditTracksEditedFile(t *testing.T) {
 		Name:        tools.NameEdit,
 		ArgsJSON:    string(args),
 		Result:      "Applied patch to src/demo.go (+1 -1)",
-		Status:      agent.ToolResultStatusSuccess,
+		Status:      message.ToolStatusSuccess,
 		Diff:        "--- src/demo.go\n+++ src/demo.go\n@@ -1 +1 @@\n-old\n+new\n",
 		DiffAdded:   1,
 		DiffRemoved: 1,
@@ -898,7 +898,7 @@ func TestToolResultEventShowsEditedBeforeApprovalSummary(t *testing.T) {
 		Name:     "delete",
 		ArgsJSON: `{"paths":["a.txt"],"reason":"cleanup"}`,
 		Result:   "Deleted (1):\n- a.txt",
-		Status:   agent.ToolResultStatusSuccess,
+		Status:   message.ToolStatusSuccess,
 		AgentID:  "",
 		Audit: &message.ToolArgsAudit{
 			OriginalArgsJSON:  `{"paths":["old.txt"],"reason":"cleanup"}`,
@@ -938,7 +938,7 @@ func TestStreamRollbackPreservesCancelledSpeculativeToolCard(t *testing.T) {
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "call-1",
 		Name:     "read",
-		Status:   agent.ToolResultStatusCancelled,
+		Status:   message.ToolStatusCancelled,
 		Result:   "Cancelled",
 		AgentID:  "",
 		ArgsJSON: `{"path":"internal/llm/provider.go"}`,
@@ -952,8 +952,8 @@ func TestStreamRollbackPreservesCancelledSpeculativeToolCard(t *testing.T) {
 	if !block.ResultDone {
 		t.Fatal("expected tool block ResultDone after cancelled result")
 	}
-	if block.ResultStatus != agent.ToolResultStatusCancelled {
-		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, agent.ToolResultStatusCancelled)
+	if block.ResultStatus != message.ToolStatusCancelled {
+		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, message.ToolStatusCancelled)
 	}
 	if m.currentThinkingBlock != nil || m.currentAssistantBlock != nil {
 		t.Fatal("expected rollback to clear only in-flight thinking/assistant blocks")
@@ -980,7 +980,7 @@ func TestStreamRollbackPreservesCancelledSpeculativeWriteToolCard(t *testing.T) 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
 		CallID:   "write-call-1",
 		Name:     "write",
-		Status:   agent.ToolResultStatusCancelled,
+		Status:   message.ToolStatusCancelled,
 		Result:   "Cancelled",
 		AgentID:  "",
 		ArgsJSON: `{"path":".chord/plans/plan-002.md","content":"partial"}`,
@@ -994,8 +994,8 @@ func TestStreamRollbackPreservesCancelledSpeculativeWriteToolCard(t *testing.T) 
 	if !block.ResultDone {
 		t.Fatal("expected Write block ResultDone after cancelled result")
 	}
-	if block.ResultStatus != agent.ToolResultStatusCancelled {
-		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, agent.ToolResultStatusCancelled)
+	if block.ResultStatus != message.ToolStatusCancelled {
+		t.Fatalf("ResultStatus = %q, want %q", block.ResultStatus, message.ToolStatusCancelled)
 	}
 	if block.ResultContent != "Cancelled" {
 		t.Fatalf("ResultContent = %q, want Cancelled", block.ResultContent)

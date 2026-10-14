@@ -533,7 +533,7 @@ func (m *Model) clearInputAndAttachments() tea.Cmd {
 	defer m.beginComposerEdit(false)()
 	m.cancelClipboardAttachmentPaste()
 	m.input.SetDisplayValueAndPastes("", nil, 0)
-	m.input.syncHeight()
+	m.input.SyncHeight()
 	m.attachments = nil
 	m.closeAtMention()
 	m.recalcViewportSize()

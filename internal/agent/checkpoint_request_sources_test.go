@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -15,7 +16,7 @@ func TestCheckpointRequestProjectionPreservesCollidingSources(t *testing.T) {
 	suffix := strings.Repeat(" Preserve all existing output fields.", 15)
 	older := prefix + " Never update the public API. " + suffix
 	current := prefix + " Update the public API now. " + suffix
-	if compactTextSnippet(older, compactUserConstraintExcerptChars) != compactTextSnippet(current, compactUserConstraintExcerptChars) {
+	if requesttrim.TextSnippet(older, compactUserConstraintExcerptChars) != requesttrim.TextSnippet(current, compactUserConstraintExcerptChars) {
 		t.Fatal("fixture must collide after truncation")
 	}
 	msg := requestDedupFixture(current, older, older, "Earlier instruction")

@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/keakon/chord/internal/texttruncate"
+
 	sonicjson "github.com/bytedance/sonic"
 	"github.com/keakon/golog/log"
 
@@ -909,7 +911,7 @@ func parseOpenAIHTTPErrorFromBytes(statusCode int, header http.Header, body []by
 			apiErr.Code = detailResp.Code
 			apiErr.Type = detailResp.Type
 		} else {
-			msg := TruncateStringRunes(string(body), 200, "...")
+			msg := texttruncate.Runes(string(body), 200, "...")
 			apiErr.Message = msg
 		}
 	}

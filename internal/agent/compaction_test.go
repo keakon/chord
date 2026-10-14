@@ -21,6 +21,7 @@ import (
 	"github.com/keakon/golog/log"
 	"gopkg.in/yaml.v3"
 
+	"github.com/keakon/chord/internal/agent/requesttrim"
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/ctxmgr"
 	"github.com/keakon/chord/internal/llm"
@@ -419,68 +420,6 @@ func contextReductionStatsEqual(a, b ContextReductionStats) bool {
 	return true
 }
 
-func TestSummarizeHeadTailLinesKeepsBoundedHeadAndTail(t *testing.T) {
-	got := summarizeHeadTailLines(strings.Join([]string{
-		"line 1",
-		"line 2",
-		"line 3",
-		"line 4",
-		"line 5",
-	}, "\n"), 4)
-	want := []string{
-		"- line 1",
-		"- line 2",
-		"- ... (1 line omitted) ...",
-		"- line 4",
-		"- line 5",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("summarizeHeadTailLines() = %#v, want %#v", got, want)
-	}
-
-	got = summarizeHeadTailLines("line 1\n\nline 2", 4)
-	want = []string{"- line 1", "- line 2"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("summarizeHeadTailLines() without omission = %#v, want %#v", got, want)
-	}
-}
-
-func TestSummarizeHeadTailLinesPreservesArtifactReference(t *testing.T) {
-	// Artifact reference lines ("Full output saved to <path>") must reach the
-	// model verbatim: mid-line truncation would clip the artifact path and
-	// leave the model an unreadable path to read.
-	ref := tools.ArtifactReferencePrefix + "/session/tool-outputs/call_" + strings.Repeat("a", 80) + ".log. " + tools.ArtifactReadGuidance
-	long := strings.Repeat("x", summaryLineSnippetChars+100)
-
-	got := summarizeHeadTailLines(strings.Join([]string{
-		ref,
-		long,
-		"line 3",
-		"line 4",
-		"line 5",
-	}, "\n"), 4)
-	if len(got) != 5 {
-		t.Fatalf("summarizeHeadTailLines() len = %d, want 5: %#v", len(got), got)
-	}
-	if got[0] != "- "+ref {
-		t.Fatalf("artifact reference line not preserved verbatim, got %#v", got[0])
-	}
-	if len(got[1]) >= len(long) {
-		t.Fatalf("plain long line should still be truncated, got %d bytes", len(got[1]))
-	}
-
-	got = summarizeHeadTailLines(strings.Join([]string{
-		"line 1",
-		"line 2",
-		"line 3",
-		"line 4",
-		ref,
-	}, "\n"), 4)
-	if got[len(got)-1] != "- "+ref {
-		t.Fatalf("artifact reference in tail not preserved verbatim, got %#v", got[len(got)-1])
-	}
-}
-
 func validCompactionSummaryForTest(history string) string {
 	return fmt.Sprintf(
 		"## Current User Request\n- continue current task\n\n## Active Objective\n- continue current task\n\n## Background Goals\n- none\n\n## User Constraints\n- none\n\n## Progress\n- progress recorded\n\n## Key Decisions\n- decisions captured\n\n## Files and Evidence\n- Archived history: %s\n- src/current_task.go\n\n## Todo State\n- Active/relevant to latest request: (none)\n- Completed/background: (none)\n- Stale/superseded: (none)\n\n## SubAgent State\n- none active\n\n## Open Problems\n- none\n\n## Next Step\n- Inspect src/current_task.go and continue the current task.",
@@ -511,29 +450,6 @@ func splitMessagesForCompactionForTestWithAgent(a *MainAgent, messages []message
 	recentTail := selectRecentTailMessages(nil, messages, compactRecentTailTurns, recentTailTokenBudget(contextLimit))
 	items := a.evidenceItemsForCompaction(contextLimit)
 	return splitMessagesForCompactionWithSelections(messages, recentTail, items)
-}
-
-func TestRequestBatchesAfterCountsParallelToolsAsOneRequest(t *testing.T) {
-	messages := []message.Message{
-		{Role: message.RoleAssistant, RequestBatch: 7, ToolCalls: []message.ToolCall{{ID: "a"}, {ID: "b"}}},
-		{Role: message.RoleTool, ToolCallID: "a"},
-		{Role: message.RoleTool, ToolCallID: "b"},
-	}
-	ages := requestBatchesAfter(messages, 8)
-	if ages[1] != 1 || ages[2] != 1 {
-		t.Fatalf("parallel tool ages = %v, want both 1", ages)
-	}
-}
-
-func TestRequestBatchesAfterIncludesFailedRequestGaps(t *testing.T) {
-	messages := []message.Message{
-		{Role: message.RoleAssistant, RequestBatch: 4, ToolCalls: []message.ToolCall{{ID: "a"}}},
-		{Role: message.RoleTool, ToolCallID: "a"},
-	}
-	ages := requestBatchesAfter(messages, 7)
-	if ages[1] != 3 {
-		t.Fatalf("tool age = %d, want 3 actual requests", ages[1])
-	}
 }
 
 func TestPrepareMessagesForLLM_DefersUnchangedToolUntilFrontier(t *testing.T) {
@@ -772,11 +688,11 @@ func TestMutatingShellInvalidationSkipsReadOnlyShells(t *testing.T) {
 	// on call ID (production IDs are unique per call), so reusing one would
 	// return the first case's verdict for the second.
 	msgs := messagesFor("shell-rg", "rg --no-config -n value a.go")
-	if got := a.externallyInvalidatedReadsAfterMutatingShell(msgs, newReductionHistoryScan(msgs)); len(got) != 0 {
+	if got := a.externallyInvalidatedReadsAfterMutatingShell(msgs, requesttrim.NewScan(msgs, nil)); len(got) != 0 {
 		t.Fatalf("read-only rg shell invalidated reads %v, want none", got)
 	}
 	msgs = messagesFor("shell-touch", "touch other")
-	if got := a.externallyInvalidatedReadsAfterMutatingShell(msgs, newReductionHistoryScan(msgs)); !got[1] {
+	if got := a.externallyInvalidatedReadsAfterMutatingShell(msgs, requesttrim.NewScan(msgs, nil)); !got[1] {
 		t.Fatalf("mutating shell invalidated reads %v, want index 1", got)
 	}
 }
@@ -1354,7 +1270,7 @@ func TestContextReductionPolicyProjectTrueOverGlobalFalseKeepsCompiledDefaults(t
 	}
 
 	policy := a.contextReductionPolicy()
-	want := defaultContextReductionPolicy()
+	want := requesttrim.DefaultPolicy()
 	if policy != want {
 		t.Fatalf("policy = %+v, want compiled defaults %+v", policy, want)
 	}
@@ -1384,10 +1300,10 @@ func TestPrepareMessagesForLLM_PrunesOldWebFetchOutput(t *testing.T) {
 
 func TestPrepareMessagesForLLM_PrunesStaleToolOutputWithinSingleUserTurn(t *testing.T) {
 	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{}}}}
-	const (
-		largeShellOutputLines = compactBashSuccessBytes
-		largeReadOutputCopies = compactReadLikeOutputBytes
-		fillerRequestBatches  = compactBashSuccessAgeTurns
+	var (
+		largeShellOutputLines = requesttrim.DefaultPolicy().ShellSuccessBytes
+		largeReadOutputCopies = requesttrim.DefaultPolicy().ReadLikeOutputBytes
+		fillerRequestBatches  = requesttrim.DefaultPolicy().ShellSuccessAgeTurns
 	)
 	largeShellOutput := strings.Repeat("test output line\n", largeShellOutputLines)
 	largeReadOutput := strings.Repeat("large read output ", largeReadOutputCopies)
@@ -1430,7 +1346,7 @@ func isShellSuccessSummary(content string) bool {
 
 func TestPrepareMessagesForLLM_ShellSuccessSummaryPrefersSalientLines(t *testing.T) {
 	a := &MainAgent{}
-	largeOutput := strings.Repeat("updated dependency cache\n", compactBashSuccessBytes) + "\nok github.com/example/project 1.23s\ncoverage: 82.1%\n" + strings.Repeat("tail noise line\n", 20)
+	largeOutput := strings.Repeat("updated dependency cache\n", requesttrim.DefaultPolicy().ShellSuccessBytes) + "\nok github.com/example/project 1.23s\ncoverage: 82.1%\n" + strings.Repeat("tail noise line\n", 20)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./..."}`)}}},
@@ -1461,9 +1377,9 @@ func TestPrepareMessagesForLLM_ShellSuccessSummaryPrefersSalientLines(t *testing
 
 func TestPrepareMessagesForLLM_ShellSuccessPreservesArtifactReference(t *testing.T) {
 	a := &MainAgent{}
-	path := "/session/tool-outputs/call_" + strings.Repeat("a", summaryLineSnippetChars) + ".log"
+	path := "/session/tool-outputs/call_" + strings.Repeat("a", requesttrim.SummaryLineSnippetChars) + ".log"
 	ref := tools.ArtifactReferencePrefix + path + ". " + tools.ArtifactReadGuidance
-	largeOutput := strings.Repeat("completed work item\n", compactBashSuccessBytes) + ref
+	largeOutput := strings.Repeat("completed work item\n", requesttrim.DefaultPolicy().ShellSuccessBytes) + ref
 	msgs := []message.Message{
 		{Role: message.RoleUser, Content: "request"},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"sample-command"}`)}}},
@@ -1483,7 +1399,7 @@ func TestPrepareMessagesForLLM_ShellSuccessPreservesArtifactReference(t *testing
 
 func TestPrepareMessagesForLLM_GoTestSummaryCountsPackagesAndCachedResults(t *testing.T) {
 	a := &MainAgent{}
-	largeOutput := strings.Repeat("compile progress line\n", compactBashSuccessBytes) +
+	largeOutput := strings.Repeat("compile progress line\n", requesttrim.DefaultPolicy().ShellSuccessBytes) +
 		"?   \tgithub.com/example/project/cmd\t[no test files]\n" +
 		"ok  \tgithub.com/example/project/internal/a\t(cached)\n" +
 		"ok  \tgithub.com/example/project/internal/b\t1.23s\tcoverage: 84.2% of statements\n"
@@ -1517,7 +1433,7 @@ func TestPrepareMessagesForLLM_GoTestSummaryCountsPackagesAndCachedResults(t *te
 
 func TestPrepareMessagesForLLM_GoTestJSONKeepsExcerptFallback(t *testing.T) {
 	a := &MainAgent{}
-	largeOutput := strings.Repeat(`{"Action":"pass","Package":"github.com/example/project"}`+"\n", compactBashSuccessBytes)
+	largeOutput := strings.Repeat(`{"Action":"pass","Package":"github.com/example/project"}`+"\n", requesttrim.DefaultPolicy().ShellSuccessBytes)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test -json ./..."}`)}}},
@@ -1541,7 +1457,7 @@ func TestPrepareMessagesForLLM_GoTestJSONKeepsExcerptFallback(t *testing.T) {
 
 func TestPrepareMessagesForLLM_CompoundGoTestUsesGenericShellSummary(t *testing.T) {
 	a := &MainAgent{}
-	largeOutput := strings.Repeat("ok github.com/example/project 1.23s\n", compactBashSuccessBytes)
+	largeOutput := strings.Repeat("ok github.com/example/project 1.23s\n", requesttrim.DefaultPolicy().ShellSuccessBytes)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"go test ./... && echo done"}`)}}},
@@ -1559,111 +1475,6 @@ func TestPrepareMessagesForLLM_CompoundGoTestUsesGenericShellSummary(t *testing.
 	}
 }
 
-func TestReduceGoTestSuccessOutputSummaryRejectsFailedOutput(t *testing.T) {
-	ctx := requestReductionContext{
-		Meta:    toolCallMeta{Args: `{"command":"go test ./..."}`},
-		Content: "ok  \tgithub.com/example/project/internal/a\t(cached)\n--- FAIL: TestBroken (0.00s)\nFAIL\tgithub.com/example/project/internal/b\t0.01s\nFAIL\n",
-	}
-	if got, ok := reduceGoTestSuccessOutputSummary(ctx); ok {
-		t.Fatalf("failed go test output must not use success summary, got %q", got)
-	}
-}
-
-func TestReduceGoTestSuccessOutputSummaryRejectsErrorStatus(t *testing.T) {
-	ctx := requestReductionContext{
-		Meta:       toolCallMeta{Args: `{"command":"go test ./..."}`},
-		Content:    "ok  \tgithub.com/example/project/internal/a\t(cached)\n",
-		ToolStatus: string(ToolResultStatusError),
-	}
-	if got, ok := reduceGoTestSuccessOutputSummary(ctx); ok {
-		t.Fatalf("error-status go test output must not use success summary, got %q", got)
-	}
-}
-
-func TestReduceGoTestSuccessOutputSummaryRejectsCancelledStatus(t *testing.T) {
-	ctx := requestReductionContext{
-		Meta:       toolCallMeta{Args: `{"command":"go test ./..."}`},
-		Content:    "ok  \tgithub.com/example/project/internal/a\t(cached)\n",
-		ToolStatus: string(ToolResultStatusCancelled),
-	}
-	if got, ok := reduceGoTestSuccessOutputSummary(ctx); ok {
-		t.Fatalf("cancelled go test output must not use success summary, got %q", got)
-	}
-}
-
-func TestReadRetentionDoesNotProtectCancelledRead(t *testing.T) {
-	ctx := requestReductionContext{
-		ToolName:   tools.NameRead,
-		ToolStatus: string(ToolResultStatusCancelled),
-	}
-	if ctx.readRetentionProtects() {
-		t.Fatal("cancelled read must not be protected as current file context")
-	}
-}
-
-func TestDefaultContextReductionPolicyMatchesDefaultConfig(t *testing.T) {
-	policy := defaultContextReductionPolicy()
-	cfg := config.DefaultConfig().Context.Reduction
-
-	if policy.ConfirmAgeTurns != cfg.ConfirmAgeTurns ||
-		policy.ErrorAgeTurns != cfg.ErrorAgeTurns ||
-		policy.HighRiskProtectAgeTurns != cfg.HighRiskProtectAgeTurns ||
-		policy.DiffProtectAgeTurns != cfg.DiffProtectAgeTurns ||
-		policy.ShellSuccessAgeTurns != cfg.ShellSuccessAgeTurns ||
-		policy.ReadLikeAgeTurns != cfg.ReadLikeAgeTurns ||
-		policy.StaleAgeTurns != cfg.StaleAgeTurns ||
-		policy.ShellSuccessBytes != cfg.ShellSuccessBytes ||
-		policy.ReadLikeOutputBytes != cfg.ReadLikeOutputBytes ||
-		policy.StaleOutputBytes != cfg.StaleOutputBytes ||
-		policy.WrapUpGraceRequests != cfg.WrapUpGraceRequests ||
-		policy.MinToolResultsPrune != cfg.MinToolResultsPrune ||
-		policy.MinIncrementalTokens != cfg.MinIncrementalTokens {
-		t.Fatalf("default context reduction policy = %+v, DefaultConfig reduction = %+v", policy, cfg)
-	}
-}
-
-func isShellSuccessSummaryLine(trimmed string) bool {
-	return isStrongShellSuccessSummaryLine(trimmed) || isWeakShellSuccessSummaryLine(trimmed)
-}
-
-func TestShellSuccessSummaryLineMatcherAvoidsBroadSubstringMatches(t *testing.T) {
-	for _, line := range []string{
-		"book cache warmed",
-		"passive mode enabled",
-		"changedir complete",
-		"successor elected",
-		"unsuccessful attempt",
-	} {
-		if isShellSuccessSummaryLine(line) {
-			t.Fatalf("%q should not be treated as a shell success summary line", line)
-		}
-	}
-	for _, line := range []string{
-		"ok github.com/example/project 1.23s",
-		"PASS ./internal/foo",
-		"coverage: 82.1%",
-		"wrote dist/schema.json",
-		"success: generated assets",
-		"Successfully built abc123",
-		"Successfully installed package",
-	} {
-		if !isShellSuccessSummaryLine(line) {
-			t.Fatalf("%q should be treated as a shell success summary line", line)
-		}
-	}
-}
-
-func TestShellSuccessSummaryDoesNotDuplicateLongFinalSignalLine(t *testing.T) {
-	longOK := "ok github.com/example/project " + strings.Repeat("x", summaryLineSnippetChars+120)
-	got := summarizeShellSuccess("prelude\n"+longOK+"\n", 4).Lines
-	if len(got) != 1 {
-		t.Fatalf("expected long final signal line to appear once, got %d lines: %q", len(got), got)
-	}
-	if !strings.Contains(got[0], "ok github.com/example/project") {
-		t.Fatalf("expected summarized ok line, got %q", got)
-	}
-}
-
 func TestPrepareMessagesForLLM_ProtectsRecentHighRiskOutputWithinSingleUserTurn(t *testing.T) {
 	a := &MainAgent{}
 	largeFailureOutput := "panic: boom\nTraceback (most recent call last):\n  File \"test.py\", line 12, in test_case\nexpected: 1\nactual: 2\n" + strings.Repeat("failure context line\n", 500)
@@ -1672,7 +1483,7 @@ func TestPrepareMessagesForLLM_ProtectsRecentHighRiskOutputWithinSingleUserTurn(
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"pytest"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeFailureOutput},
 	}
-	for i := range compactBashSuccessAgeTurns {
+	for i := range requesttrim.DefaultPolicy().ShellSuccessAgeTurns {
 		id := fmt.Sprintf("tc-filler-%d", i)
 		msgs = append(msgs,
 			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
@@ -1717,13 +1528,13 @@ func TestPrepareMessagesForLLM_ConfiguresHighRiskProtectAgeTurns(t *testing.T) {
 
 func TestPrepareMessagesForLLM_PrunesRecentLowRiskOutputWithinSingleUserTurn(t *testing.T) {
 	a := &MainAgent{}
-	largeOutput := strings.Repeat("install progress line\n", compactBashSuccessBytes)
+	largeOutput := strings.Repeat("install progress line\n", requesttrim.DefaultPolicy().ShellSuccessBytes)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"npm install"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: largeOutput},
 	}
-	for i := range compactBashSuccessAgeTurns {
+	for i := range requesttrim.DefaultPolicy().ShellSuccessAgeTurns {
 		id := fmt.Sprintf("tc-filler-%d", i)
 		msgs = append(msgs,
 			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
@@ -1748,7 +1559,7 @@ func TestPrepareMessagesForLLM_ProtectsRecentDiffOutputWithinSingleUserTurn(t *t
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"git diff"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: diffOutput},
 	}
-	for i := range compactBashSuccessAgeTurns {
+	for i := range requesttrim.DefaultPolicy().ShellSuccessAgeTurns {
 		id := fmt.Sprintf("tc-filler-%d", i)
 		msgs = append(msgs,
 			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
@@ -1774,7 +1585,7 @@ func TestPrepareMessagesForLLM_ProtectsRecentShellFailureOutputWithinSingleUserT
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameShell, Args: json.RawMessage(`{"command":"make build"}`)}}},
 		{Role: "tool", ToolCallID: "tc1", Content: failureOutput},
 	}
-	for i := range compactBashSuccessAgeTurns {
+	for i := range requesttrim.DefaultPolicy().ShellSuccessAgeTurns {
 		id := fmt.Sprintf("tc-filler-%d", i)
 		msgs = append(msgs,
 			message.Message{Role: "assistant", ToolCalls: []message.ToolCall{{ID: id, Name: tools.NameRead, Args: json.RawMessage(`{"path":"b.go"}`)}}},
@@ -1793,7 +1604,7 @@ func TestPrepareMessagesForLLM_ProtectsRecentShellFailureOutputWithinSingleUserT
 
 func TestRefreshVisibleContextReductionStatsDoesNotRememberPreparedRequest(t *testing.T) {
 	a := &MainAgent{projectConfig: &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{}}}}
-	largeReadOutput := strings.Repeat("large read output ", compactReadLikeOutputBytes)
+	largeReadOutput := strings.Repeat("large read output ", requesttrim.DefaultPolicy().ReadLikeOutputBytes)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
@@ -1820,7 +1631,7 @@ func TestActivateLoadedSessionRefreshesVisibleContextReductionStats(t *testing.T
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.projectConfig = &config.Config{Context: config.ContextConfig{Reduction: config.ContextReductionConfig{}}}
-	largeReadOutput := strings.Repeat("large read output ", compactReadLikeOutputBytes)
+	largeReadOutput := strings.Repeat("large read output ", requesttrim.DefaultPolicy().ReadLikeOutputBytes)
 	msgs := []message.Message{
 		{Role: "user", Content: "u1"},
 		{Role: "assistant", ToolCalls: []message.ToolCall{{ID: "tc1", Name: tools.NameWebFetch, Args: json.RawMessage(`{"url":"https://example.com/a.go"}`)}}},
@@ -2392,7 +2203,7 @@ func TestPrepareMessagesForLLM_SearchSummaryPreservesArtifactReference(t *testin
 			MinIncrementalTokens: 1,
 		}},
 	}
-	path := "/session/tool-outputs/call_" + strings.Repeat("b", summaryLineSnippetChars) + ".log"
+	path := "/session/tool-outputs/call_" + strings.Repeat("b", requesttrim.SummaryLineSnippetChars) + ".log"
 	ref := tools.ArtifactReferencePrefix + path + ". " + tools.ArtifactReadGuidance
 	content := strings.Repeat("internal/agent/context_reduction.go:700:func reduceRequestToolOutput(...)\n", 40) + ref
 	msgs := []message.Message{
@@ -2889,87 +2700,6 @@ func TestPrepareMessagesForLLM_EnhancedReadSummaryIncludesRangeDetails(t *testin
 	stats := a.GetContextReductionStats()
 	if stats.Messages == 0 || stats.Bytes == 0 {
 		t.Fatalf("expected read summary to save bytes, stats=%+v", stats)
-	}
-}
-
-func TestParseDisplayedReadRangeSupportsReadResultHeader(t *testing.T) {
-	content := strings.Join([]string{
-		`READ_RESULT lines=41-43 total=200`,
-		"func important() {",
-		"\treturn true",
-		"}",
-	}, "\n")
-
-	got := parseDisplayedReadRange(content)
-	if !got.OK || got.Start != 41 || got.End != 43 || got.Total != 200 {
-		t.Fatalf("parseDisplayedReadRange() = %+v, want 41-43/200", got)
-	}
-}
-
-func TestParseDisplayedReadRangeSupportsReadResultHeaderFieldOrder(t *testing.T) {
-	got := parseDisplayedReadRange("READ_RESULT total=200 truncated=aged lines=41-43\nbody")
-	if !got.OK || got.Start != 41 || got.End != 43 || got.Total != 200 {
-		t.Fatalf("parseDisplayedReadRange() = %+v, want 41-43/200", got)
-	}
-}
-
-func TestParseDisplayedReadRangeRejectsMalformedReadResultHeader(t *testing.T) {
-	for _, content := range []string{
-		"READ_RESULT lines=none total=20\n",
-		"READ_RESULT lines=43-41 total=200\n",
-		"READ_RESULT lines=41-x total=200\n",
-		"READ_RESULT lines=41-43 total=x\n",
-		"READ_RESULTS lines=41-43 total=200\n",
-	} {
-		if got := parseDisplayedReadRange(content); got.OK {
-			t.Fatalf("parseDisplayedReadRange(%q) = %+v, want invalid", content, got)
-		}
-	}
-}
-
-func TestParseDisplayedReadRangeReadResultAllocsGuard(t *testing.T) {
-	content := "READ_RESULT lines=41-43 total=200 truncated=aged\nbody"
-	allocs := testing.AllocsPerRun(100, func() {
-		if got := parseDisplayedReadRange(content); !got.OK {
-			t.Fatalf("parseDisplayedReadRange() = %+v, want valid", got)
-		}
-	})
-	const maxAllocs = 0
-	if allocs > maxAllocs {
-		t.Fatalf("READ_RESULT range parse allocs = %.0f, want %d", allocs, maxAllocs)
-	}
-}
-
-func TestParseDisplayedReadRangeSupportsLegacyFooter(t *testing.T) {
-	content := strings.Join([]string{
-		"source line 1",
-		"source line 2",
-		"(showing lines 41-42 of 200 total)",
-	}, "\n")
-
-	got := parseDisplayedReadRange(content)
-	if !got.OK || got.Start != 41 || got.End != 42 || got.Total != 200 {
-		t.Fatalf("parseDisplayedReadRange() = %+v, want 41-42/200", got)
-	}
-}
-
-func TestParseDisplayedReadRangeSupportsLegacySingleLineFooter(t *testing.T) {
-	got := parseDisplayedReadRange("source line\n(showing line 7 of 20 total)")
-	if !got.OK || got.Start != 7 || got.End != 7 || got.Total != 20 {
-		t.Fatalf("parseDisplayedReadRange() = %+v, want 7-7/20", got)
-	}
-}
-
-func TestParseDisplayedReadRangePlainContentAllocsGuard(t *testing.T) {
-	content := strings.Repeat("ordinary source line\n", 100)
-	allocs := testing.AllocsPerRun(100, func() {
-		if got := parseDisplayedReadRange(content); got.OK {
-			t.Fatalf("parseDisplayedReadRange() = %+v, want no range", got)
-		}
-	})
-	const maxAllocs = 1
-	if allocs > maxAllocs {
-		t.Fatalf("plain read range parse allocs = %.0f, want ≤%d", allocs, maxAllocs)
 	}
 }
 
@@ -5466,7 +5196,7 @@ func TestRecordEvidenceFromMessageCapturesToolStatusErrorWithoutErrorPrefix(t *t
 	a.recordEvidenceFromMessage(message.Message{
 		Role:       "tool",
 		Content:    "patch makes no changes. No files were modified",
-		ToolStatus: string(ToolResultStatusError),
+		ToolStatus: message.ToolStatusError,
 	})
 	if got := a.evidence.len(); got != 1 {
 		t.Fatalf("len(evidenceCandidates) = %d, want 1", got)
@@ -5482,43 +5212,13 @@ func TestSuccessfulToolOutputContainingErrorIsNotFailureEvidence(t *testing.T) {
 	a.recordEvidenceFromMessage(message.Message{
 		Role:       message.RoleTool,
 		Content:    `source contains "Error:" as a string literal`,
-		ToolStatus: string(ToolResultStatusSuccess),
+		ToolStatus: message.ToolStatusSuccess,
 	})
 	if got := a.evidence.len(); got != 0 {
 		t.Fatalf("successful output was recorded as failure evidence: %+v", a.evidence.snapshot())
 	}
-	if isToolResultErrorMessage(message.Message{Role: message.RoleTool, Content: "Error: in documentation", ToolStatus: string(ToolResultStatusSuccess)}) {
+	if message.IsToolResultErrorMessage(message.Message{Role: message.RoleTool, Content: "Error: in documentation", ToolStatus: message.ToolStatusSuccess}) {
 		t.Fatal("explicit success must override an Error: substring")
-	}
-}
-
-func TestLegacyToolErrorFallbackRequiresExplicitErrorBoundary(t *testing.T) {
-	if !isToolResultErrorMessage(message.Message{Role: message.RoleTool, Content: "command output\n\nError: exit code 1"}) {
-		t.Fatal("expected the explicit appended error boundary to be recognized")
-	}
-	if isToolResultErrorMessage(message.Message{Role: message.RoleTool, Content: "command output mentions Error: but succeeded"}) {
-		t.Fatal("an embedded Error: substring must not be treated as a failure")
-	}
-}
-
-// TestToolErrorContentDelegatesToCentralClassifier pins isToolErrorContent to
-// message.ClassifyToolResultContent. A second local copy of the phrase list
-// previously diverged on interrupted calls, classifying them as failures in one
-// package and successes in the other on status-less transcripts.
-func TestToolErrorContentDelegatesToCentralClassifier(t *testing.T) {
-	for _, content := range []string{
-		"Error: boom",
-		"command output" + message.ToolResultAppendedErrorSeparator + "exit code 1",
-		"Model stopped before completing this tool call",
-		"plain success output",
-		"output mentions Error: but succeeded",
-		"cancelled",
-		"",
-	} {
-		want := message.ClassifyToolResultContent(content) == message.ToolResultClassError
-		if got := isToolErrorContent(content); got != want {
-			t.Fatalf("isToolErrorContent(%q) = %v, central classifier says %v", content, got, want)
-		}
 	}
 }
 
@@ -5545,7 +5245,7 @@ func TestEvidenceSelectionLimitsRepeatedToolErrors(t *testing.T) {
 		msgs = append(msgs, message.Message{
 			Role:       message.RoleTool,
 			Content:    fmt.Sprintf("Error: failure %d", i),
-			ToolStatus: string(ToolResultStatusError),
+			ToolStatus: message.ToolStatusError,
 		})
 	}
 	items := selectEvidenceItems(msgs, 4096)
@@ -5563,13 +5263,13 @@ func TestEvidenceSelectionLimitsRepeatedToolErrors(t *testing.T) {
 func TestSelectEvidenceItemsSkipsToolErrorSupersededByLaterSuccess(t *testing.T) {
 	msgs := []message.Message{
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "call-1", Content: "Error: file not found", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "Error: file not found", ToolStatus: message.ToolStatusError},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "call-2", Content: "file contents", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: message.RoleTool, ToolCallID: "call-2", Content: "file contents", ToolStatus: message.ToolStatusSuccess},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-3", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "call-3", Content: "Error: patch failed", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleTool, ToolCallID: "call-3", Content: "Error: patch failed", ToolStatus: message.ToolStatusError},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-4", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/b.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "call-4", Content: "Error: file missing again", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleTool, ToolCallID: "call-4", Content: "Error: file missing again", ToolStatus: message.ToolStatusError},
 	}
 
 	kept := make(map[string]struct{})
@@ -5599,10 +5299,10 @@ func TestToolFailureSupersededOnlyOnMatchingTargets(t *testing.T) {
 		return message.Message{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: id, Name: name, Args: json.RawMessage(args)}}}
 	}
 	failure := func(id string) message.Message {
-		return message.Message{Role: message.RoleTool, ToolCallID: id, Content: "Error: file not found", ToolStatus: string(ToolResultStatusError)}
+		return message.Message{Role: message.RoleTool, ToolCallID: id, Content: "Error: file not found", ToolStatus: message.ToolStatusError}
 	}
 	success := func(id string) message.Message {
-		return message.Message{Role: message.RoleTool, ToolCallID: id, Content: "file contents", ToolStatus: string(ToolResultStatusSuccess)}
+		return message.Message{Role: message.RoleTool, ToolCallID: id, Content: "file contents", ToolStatus: message.ToolStatusSuccess}
 	}
 
 	tests := []struct {
@@ -5713,15 +5413,15 @@ func TestEvidenceToolErrorPackSkipsSupersededTrackerCandidate(t *testing.T) {
 	a.ctxMgr = ctxmgr.NewManager(100000, 0.5)
 	msgs := []message.Message{
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-1", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "call-1", Content: "Error: file not found", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleTool, ToolCallID: "call-1", Content: "Error: file not found", ToolStatus: message.ToolStatusError},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-2", Name: tools.NameRead, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "call-2", Content: "file contents", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: message.RoleTool, ToolCallID: "call-2", Content: "file contents", ToolStatus: message.ToolStatusSuccess},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-3", Name: tools.NameEdit, Args: json.RawMessage(`{"path":"src/a.go"}`)}}},
-		{Role: message.RoleTool, ToolCallID: "call-3", Content: "Error: patch failed", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleTool, ToolCallID: "call-3", Content: "Error: patch failed", ToolStatus: message.ToolStatusError},
 	}
 	a.ctxMgr.RestoreMessages(msgs)
 	for _, msg := range msgs {
-		if msg.Role != message.RoleTool || !isToolResultErrorMessage(msg) {
+		if msg.Role != message.RoleTool || !message.IsToolResultErrorMessage(msg) {
 			continue
 		}
 		a.addToolEvidenceCandidate(buildEvidenceItem(
@@ -5729,7 +5429,7 @@ func TestEvidenceToolErrorPackSkipsSupersededTrackerCandidate(t *testing.T) {
 			"Latest failing tool result",
 			"This looks like a current blocker; preserving the exact error helps the next continuation avoid guessing.",
 			"tool result",
-			compactTextSnippet(strings.TrimSpace(msg.Content), 800),
+			requesttrim.TextSnippet(strings.TrimSpace(msg.Content), 800),
 		), msg)
 	}
 
@@ -5771,18 +5471,6 @@ func TestEnsureCompactionTodoSnapshotPreservesEveryRuntimeTodo(t *testing.T) {
 	}
 	if err := validateCompactionSummary(summary); err != nil {
 		t.Fatalf("summary with runtime todo snapshot rejected: %v", err)
-	}
-}
-
-func TestClassifyRequestReductionToolOutputUsesToolStatusError(t *testing.T) {
-	ctx := requestReductionContext{
-		Content:    "patch makes no changes. No files were modified",
-		ToolStatus: string(ToolResultStatusError),
-		Age:        compactErrorAgeTurns,
-		Policy:     defaultContextReductionPolicy(),
-	}
-	if got := classifyRequestReduction(ctx).Class; got != requestReductionToolError {
-		t.Fatalf("class = %q, want %q", got, requestReductionToolError)
 	}
 }
 
@@ -6987,9 +6675,9 @@ func TestStableSurfaceReviewSkipsAlreadyReducedRepeatedOutputs(t *testing.T) {
 		ReducedIndices: []bool{false, true, false, false},
 		NextReviewAge:  make([]int, boundary),
 		ToolResults:    0,
-		Policy:         defaultContextReductionPolicy(),
+		Policy:         requesttrim.DefaultPolicy(),
 	}
-	scan := newReductionHistoryScan(history)
+	scan := requesttrim.NewScan(history, nil)
 
 	if stableReductionSurfaceNeedsReview(surface, scan, 4, nil) {
 		t.Fatal("surface with the repeated index already reduced must stay reusable")
@@ -7029,9 +6717,9 @@ func TestStableSurfaceReviewToleratesMarkerClassDivergence(t *testing.T) {
 		ReducedIndices: []bool{false, true, false, false, false, false},
 		NextReviewAge:  make([]int, boundary),
 		ToolResults:    0,
-		Policy:         defaultContextReductionPolicy(),
+		Policy:         requesttrim.DefaultPolicy(),
 	}
-	scan := newReductionHistoryScan(history)
+	scan := requesttrim.NewScan(history, nil)
 	if stableReductionSurfaceNeedsReview(surface, scan, 5, nil) {
 		t.Fatal("marker-class divergence on an already-reduced read must not force review")
 	}

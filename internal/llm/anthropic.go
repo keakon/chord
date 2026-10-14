@@ -23,6 +23,7 @@ import (
 	"github.com/keakon/chord/internal/config"
 	"github.com/keakon/chord/internal/httpheader"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/texttruncate"
 )
 
 // AnthropicProvider implements streaming completion against the Anthropic Messages API.
@@ -473,7 +474,7 @@ func parseHTTPErrorFromBytes(statusCode int, header http.Header, body []byte) *A
 		apiErr.Type = errResp.Error.Type
 	} else {
 		// Fallback: use raw body (truncated).
-		msg := TruncateStringRunes(string(body), 200, "...")
+		msg := texttruncate.Runes(string(body), 200, "...")
 		apiErr.Message = msg
 	}
 

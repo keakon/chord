@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "github.com/keakon/bubbletea/v2"
+
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 // Identity includes source content and binding. A renamed/reindexed token or a
@@ -12,42 +14,40 @@ import (
 type inputImageClickState struct {
 	Owner      imageViewerOwner
 	Version    uint64
-	Token      inlineLargePaste
+	Token      composer.Token
 	Attachment imagePartKeyRef
 	Time       time.Time
 	Dragging   bool
 }
 
-func (m *Model) inputImageAt(offset int, hit bool) (inlineLargePaste, Attachment, bool) {
+func (m *Model) inputImageAt(offset int, hit bool) (composer.Token, Attachment, bool) {
 	if !hit {
-		return inlineLargePaste{}, Attachment{}, false
+		return composer.Token{}, Attachment{}, false
 	}
-	for _, token := range m.input.inlinePastes {
-		if token.Kind != inlineTokenImage || offset < token.Start || offset >= token.End {
-			continue
-		}
-		ordinal, ok := inlineImagePlaceholderIndex(token.RawContent)
-		if !ok {
-			break
-		}
-		index, ok := imageAttachmentIndex(m.attachments, ordinal)
-		if !ok {
-			break
-		}
-		att := m.attachments[index]
-		if !strings.HasPrefix(att.MimeType, "image/") {
-			break
-		}
-		return token, att, true
+	token, ok := m.input.TokenAt(offset)
+	if !ok || token.Kind != composer.TokenImage {
+		return composer.Token{}, Attachment{}, false
 	}
-	return inlineLargePaste{}, Attachment{}, false
+	ordinal, ok := composer.InlineImagePlaceholderIndex(token.RawContent)
+	if !ok {
+		return composer.Token{}, Attachment{}, false
+	}
+	index, ok := imageAttachmentIndex(m.attachments, ordinal)
+	if !ok {
+		return composer.Token{}, Attachment{}, false
+	}
+	att := m.attachments[index]
+	if !strings.HasPrefix(att.MimeType, "image/") {
+		return composer.Token{}, Attachment{}, false
+	}
+	return token, att, true
 }
 
 func attachmentPreviewPart(att Attachment) BlockImagePart {
 	return BlockImagePart{FileName: att.FileName, MimeType: att.MimeType, Data: att.Data, ImagePath: att.ImagePath}
 }
 
-func (m *Model) inputImageSnapshot(target inlineLargePaste) ([]BlockImagePart, int) {
+func (m *Model) inputImageSnapshot(target composer.Token) ([]BlockImagePart, int) {
 	parts := make([]BlockImagePart, 0, len(m.attachments))
 	index := -1
 	for _, token := range m.input.InlinePastes() {
@@ -73,16 +73,16 @@ func (m *Model) handleInputImageClick(mouse tea.Mouse, offset int, hit bool) (te
 	owner := m.imageViewerOwner()
 	identity := imagePartKeyRefFor(attachmentPreviewPart(att))
 	previous := m.inputImageClick
-	same := !previous.Dragging && previous.Owner == owner && previous.Version == m.input.interactionVersion && previous.Token == token && previous.Attachment == identity && now.Sub(previous.Time) <= doubleClickThreshold
+	same := !previous.Dragging && previous.Owner == owner && previous.Version == m.input.Revision().Interaction && previous.Token == token && previous.Attachment == identity && now.Sub(previous.Time) <= doubleClickThreshold
 	m.inputImageClick = inputImageClickState{Owner: owner, Token: token, Attachment: identity, Time: now}
 	m.inputClickCount = 0
 	m.inputLastClickTime = time.Time{}
 	m.inputLastClickX, m.inputLastClickY = mouse.X, mouse.Y
 	m.clearMouseSelection()
 	// Restore the caret that existed before object selection when closing preview.
-	cursor := runeOffsetFromRowCol(m.input.Value(), m.input.Line(), m.input.Column())
+	cursor := composer.RuneOffsetFromRowCol(m.input.Value(), m.input.Line(), m.input.Column())
 	m.input.SelectRuneRange(token.Start, token.End)
-	m.inputImageClick.Version = m.input.interactionVersion
+	m.inputImageClick.Version = m.input.Revision().Interaction
 	m.inputMouseDown = true
 	if !same {
 		return nil, true
@@ -106,7 +106,7 @@ func (m *Model) handleInputImageClick(mouse tea.Mouse, offset int, hit bool) (te
 
 func (m *Model) handleInputImageDrag(mouse tea.Mouse, offset int) bool {
 	click := &m.inputImageClick
-	if click.Time.IsZero() || click.Owner != m.imageViewerOwner() || click.Version != m.input.interactionVersion {
+	if click.Time.IsZero() || click.Owner != m.imageViewerOwner() || click.Version != m.input.Revision().Interaction {
 		m.inputImageClick = inputImageClickState{}
 		return false
 	}
@@ -126,6 +126,6 @@ func (m *Model) handleInputImageDrag(mouse tea.Mouse, offset int) bool {
 	default:
 		m.input.SelectRuneRange(click.Token.Start, click.Token.End)
 	}
-	click.Version = m.input.interactionVersion
+	click.Version = m.input.Revision().Interaction
 	return true
 }

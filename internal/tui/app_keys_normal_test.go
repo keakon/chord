@@ -213,7 +213,7 @@ func TestViewRefreshesStatusBarForTransientStateChanges(t *testing.T) {
 			mutate: func(m *Model, backend *sessionControlAgent) {
 				m.mode = ModeInsert
 				m.input.SetValue("first\nsecond")
-				m.input.syncHeight()
+				m.input.SyncHeight()
 			},
 			want: "INSERT 2/2",
 		},

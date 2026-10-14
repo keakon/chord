@@ -26,9 +26,9 @@ func TestSubAgentStructuredCheckpointExtractsAuthoritativeState(t *testing.T) {
 
 	messages := []message.Message{
 		{Role: message.RoleUser, Content: "开始重构"},
-		{Role: message.RoleTool, ToolCallID: "call-e1", Content: "command failed\n\nError: exit code 1", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleTool, ToolCallID: "call-e1", Content: "command failed\n\nError: exit code 1", ToolStatus: message.ToolStatusError},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-e1", Name: tools.NameShell}}},
-		{Role: message.RoleTool, ToolCallID: "call-e2", Content: "edited 3 lines", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: message.RoleTool, ToolCallID: "call-e2", Content: "edited 3 lines", ToolStatus: message.ToolStatusSuccess},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-e2", Name: tools.NameEdit}}},
 		{Role: message.RoleUser, Content: "输出格式保持不变，只调整内部实现"},
 	}
@@ -72,7 +72,7 @@ func TestSubAgentStructuredCheckpointDoesNotRepeatFailedApproach(t *testing.T) {
 	_, sub := newMixedBatchTestSubAgent(t)
 	sub.taskDesc = "Add pagination"
 	messages := []message.Message{
-		{Role: message.RoleTool, ToolCallID: "call-f", Content: "undefined: x\n\nError: exit code 2", ToolStatus: string(ToolResultStatusError)},
+		{Role: message.RoleTool, ToolCallID: "call-f", Content: "undefined: x\n\nError: exit code 2", ToolStatus: message.ToolStatusError},
 		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{{ID: "call-f", Name: tools.NameShell}}},
 	}
 	checkpoint := buildSubAgentStructuredCheckpoint(sub, messages, 3, "proactive", "archives/sub-3.md")

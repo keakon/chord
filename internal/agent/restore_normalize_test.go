@@ -81,13 +81,13 @@ func TestNormalizeRestoredMessages_PreservesPairedToolCalls(t *testing.T) {
 				{ID: "call_1", Name: "read"},
 			},
 		},
-		{Role: "tool", ToolCallID: "call_1", Content: "ok", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "call_1", Content: "ok", ToolStatus: message.ToolStatusSuccess},
 	}
 	got := normalizeRestoredMessages(msgs, nil, "main")
 	if len(got) != 3 {
 		t.Fatalf("expected 3 messages, got %d: %#v", len(got), got)
 	}
-	if got[2].ToolCallID != "call_1" || got[2].ToolStatus != string(ToolResultStatusSuccess) {
+	if got[2].ToolCallID != "call_1" || got[2].ToolStatus != message.ToolStatusSuccess {
 		t.Fatalf("paired tool message altered: %#v", got[2])
 	}
 }
@@ -111,7 +111,7 @@ func TestNormalizeRestoredMessages_SynthesizesOrphanToolResult(t *testing.T) {
 	if synth.Role != "tool" || synth.ToolCallID != "call_orphan" {
 		t.Fatalf("synthesized message not in tool position: %#v", synth)
 	}
-	if synth.ToolStatus != string(ToolResultStatusError) {
+	if synth.ToolStatus != message.ToolStatusError {
 		t.Fatalf("synthesized tool status = %q, want error", synth.ToolStatus)
 	}
 	if !strings.Contains(synth.Content, "session restored") {
@@ -132,14 +132,14 @@ func TestNormalizeRestoredMessages_SynthesizesOrphansAtTail(t *testing.T) {
 				{ID: "call_b", Name: "shell"},
 			},
 		},
-		{Role: "tool", ToolCallID: "call_a", Content: "ok", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "call_a", Content: "ok", ToolStatus: message.ToolStatusSuccess},
 	}
 	got := normalizeRestoredMessages(msgs, nil, "main")
 	if len(got) != 4 {
 		t.Fatalf("expected 4 messages, got %d: %#v", len(got), got)
 	}
 	tail := got[3]
-	if tail.Role != "tool" || tail.ToolCallID != "call_b" || tail.ToolStatus != string(ToolResultStatusError) {
+	if tail.Role != "tool" || tail.ToolCallID != "call_b" || tail.ToolStatus != message.ToolStatusError {
 		t.Fatalf("expected synthesized tail tool error for call_b, got %#v", tail)
 	}
 }
@@ -152,8 +152,8 @@ func TestNormalizeRestoredMessages_DropsDuplicateToolResults(t *testing.T) {
 				{ID: "call_a", Name: "shell"},
 			},
 		},
-		{Role: "tool", ToolCallID: "call_a", Content: "first", ToolStatus: string(ToolResultStatusSuccess)},
-		{Role: "tool", ToolCallID: "call_a", Content: "second", ToolStatus: string(ToolResultStatusSuccess)},
+		{Role: "tool", ToolCallID: "call_a", Content: "first", ToolStatus: message.ToolStatusSuccess},
+		{Role: "tool", ToolCallID: "call_a", Content: "second", ToolStatus: message.ToolStatusSuccess},
 	}
 	got := normalizeRestoredMessages(msgs, nil, "main")
 	if len(got) != 2 {
@@ -176,14 +176,14 @@ func TestNormalizeRestoredMessages_DoesNotMutateToolContentText(t *testing.T) {
 			Role:       "tool",
 			ToolCallID: "call_x",
 			Content:    "permission denied by upstream service",
-			ToolStatus: string(ToolResultStatusSuccess),
+			ToolStatus: message.ToolStatusSuccess,
 		},
 	}
 	got := normalizeRestoredMessages(msgs, nil, "main")
 	if got[1].Content != "permission denied by upstream service" {
 		t.Fatalf("tool content rewritten by heuristics: %q", got[1].Content)
 	}
-	if got[1].ToolStatus != string(ToolResultStatusSuccess) {
+	if got[1].ToolStatus != message.ToolStatusSuccess {
 		t.Fatalf("tool status rewritten: %q", got[1].ToolStatus)
 	}
 }

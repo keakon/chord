@@ -280,9 +280,9 @@ func batchHasRetainedFailure(results []message.Message) bool {
 // error-looking text, because the terminal status takes precedence.
 func retainedFailureResult(msg message.Message) bool {
 	if status := strings.TrimSpace(msg.ToolStatus); status != "" {
-		return isToolResultUnsuccessfulStatus(status)
+		return message.IsToolResultUnsuccessfulStatus(status)
 	}
-	return isToolResultErrorMessage(msg)
+	return message.IsToolResultErrorMessage(msg)
 }
 
 // toolCallBatchComplete reports whether every non-empty tool call of the

@@ -2792,7 +2792,7 @@ func TestHeadlessToolResultEventIsNotForwarded(t *testing.T) {
 	envs := filterHeadlessEvent(agent.ToolResultEvent{
 		CallID: "call-1",
 		Name:   "Shell",
-		Status: agent.ToolResultStatusSuccess,
+		Status: message.ToolStatusSuccess,
 	}, state)
 
 	if len(envs) != 0 {
@@ -2808,7 +2808,7 @@ func TestHeadlessDoneToolResultEmitsDoneCompletion(t *testing.T) {
 		CallID:     "call-done",
 		Name:       "Done",
 		ArgsJSON:   `{"reason":"ready","report":"from args"}`,
-		Status:     agent.ToolResultStatusSuccess,
+		Status:     message.ToolStatusSuccess,
 		DoneReport: "All requested work is complete.",
 		AgentID:    "",
 	}, state)
@@ -2841,7 +2841,7 @@ func TestHeadlessDoneToolResultWithoutReportDoesNotNotify(t *testing.T) {
 	envs := filterHeadlessEvent(agent.ToolResultEvent{
 		CallID: "call-done",
 		Name:   "Done",
-		Status: agent.ToolResultStatusSuccess,
+		Status: message.ToolStatusSuccess,
 	}, state)
 
 	if len(envs) != 0 {

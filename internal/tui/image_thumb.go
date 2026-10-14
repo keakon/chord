@@ -13,6 +13,7 @@ import (
 
 	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 var execExternalImageCommand = exec.Command
@@ -39,7 +40,7 @@ func imagePartsFromContentParts(parts []message.ContentPart) []BlockImagePart {
 		}
 		imageIndex++
 		imageParts = append(imageParts, BlockImagePart{
-			FileName:        imagePartDisplayName(part.FileName, part.ImagePath, part.MimeType, imageIndex),
+			FileName:        composer.ImagePartDisplayName(part.FileName, part.ImagePath, part.MimeType, imageIndex),
 			ImagePath:       part.ImagePath,
 			MimeType:        part.MimeType,
 			Data:            part.Data,
@@ -67,38 +68,13 @@ func pdfNamesFromContentParts(parts []message.ContentPart) []string {
 			continue
 		}
 		pdfIndex++
-		name := imagePartDisplayName(part.FileName, part.ImagePath, part.MimeType, pdfIndex)
+		name := composer.ImagePartDisplayName(part.FileName, part.ImagePath, part.MimeType, pdfIndex)
 		if imageutil.PDFAppearsEncrypted(part.Data) {
 			name += " ⚠ encrypted"
 		}
 		names = append(names, name)
 	}
 	return names
-}
-
-func imagePartDisplayName(fileName, imagePath, mimeType string, imageIndex int) string {
-	name := strings.TrimSpace(fileName)
-	if name != "" {
-		base := strings.TrimSpace(filepath.Base(name))
-		ext := strings.ToLower(filepath.Ext(base))
-		if strings.EqualFold(base, "clipboard.png") || strings.EqualFold(base, "clipboard.jpg") || strings.EqualFold(base, "clipboard.jpeg") || strings.HasPrefix(strings.ToLower(base), "clipboard-") {
-			return fmt.Sprintf("image%d%s", imageIndex, attachmentExtForMimeType(mimeType))
-		}
-		if base != "" && base != "." && base != string(filepath.Separator) {
-			if ext == "" {
-				return base + attachmentExtForMimeType(mimeType)
-			}
-			return base
-		}
-	}
-	base := filepath.Base(strings.TrimSpace(imagePath))
-	if base != "" && base != "." && base != string(filepath.Separator) {
-		if strings.EqualFold(base, "clipboard.png") || strings.EqualFold(base, "clipboard.jpg") || strings.EqualFold(base, "clipboard.jpeg") || strings.HasPrefix(strings.ToLower(base), "clipboard-") {
-			return fmt.Sprintf("image%d%s", imageIndex, attachmentExtForMimeType(mimeType))
-		}
-		return base
-	}
-	return fmt.Sprintf("image%d%s", imageIndex, attachmentExtForMimeType(mimeType))
 }
 
 func thumbnailPreviewData(part BlockImagePart) ([]byte, error) {
@@ -201,7 +177,7 @@ func ensureImageOpenPath(imageOpenDir string, part BlockImagePart) (string, erro
 	ext := filepath.Ext(pattern)
 	base := strings.TrimSuffix(pattern, ext)
 	if ext == "" {
-		ext = attachmentExtForMimeType(part.MimeType)
+		ext = composer.AttachmentExtForMimeType(part.MimeType)
 	}
 	f, err := os.CreateTemp(root, base+"-*"+ext)
 	if err != nil {

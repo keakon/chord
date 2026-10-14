@@ -9,6 +9,7 @@ import (
 
 	"github.com/keakon/chord/internal/analytics"
 	"github.com/keakon/chord/internal/llm"
+	"github.com/keakon/chord/internal/texttruncate"
 )
 
 const (
@@ -283,5 +284,5 @@ func shortCompactionFailureReason(err error) string {
 		reason = strings.TrimSpace(line)
 	}
 	const maxReasonLen = 160
-	return strings.TrimSpace(llm.TruncateStringRunes(reason, maxReasonLen-3, "..."))
+	return strings.TrimSpace(texttruncate.Runes(reason, maxReasonLen-3, "..."))
 }

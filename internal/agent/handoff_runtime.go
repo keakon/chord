@@ -105,7 +105,7 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		if !a.validHandoffTarget(target) {
 			msg := fmt.Sprintf("handoff target %q is not available", target)
 			a.emitToTUI(ErrorEvent{Err: fmt.Errorf("%s", msg)})
-			a.emitDeferredHandoffToolResult(pc, msg, ToolResultStatusError)
+			a.emitDeferredHandoffToolResult(pc, msg, message.ToolStatusError)
 			// The user's decision was consumed but cannot be executed, exactly
 			// like the preparation failures below: return the agent to idle so
 			// queued input drains instead of leaving the turn hanging.
@@ -115,7 +115,7 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		staging, err := a.beginPlanExecution(pc.PlanPath, target)
 		if err != nil {
 			a.emitToTUI(ErrorEvent{Err: err})
-			a.emitDeferredHandoffToolResult(pc, err.Error(), ToolResultStatusError)
+			a.emitDeferredHandoffToolResult(pc, err.Error(), message.ToolStatusError)
 			a.setIdleAndDrainPending()
 			return
 		}
@@ -124,7 +124,7 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		// still active. Crossing the session boundary first would strand the
 		// result in the fresh execution session without its call (strict
 		// providers require tool_use/tool_result pairing).
-		a.emitDeferredHandoffToolResult(pc, pc.Result, ToolResultStatusSuccess)
+		a.emitDeferredHandoffToolResult(pc, pc.Result, message.ToolStatusSuccess)
 		if err := a.commitPlanExecution(staging); err != nil {
 			a.emitToTUI(ErrorEvent{Err: err})
 			a.setIdleAndDrainPending()
@@ -138,7 +138,7 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 			reason = "User rejected the plan."
 		}
 		result := "Handoff rejected: " + reason
-		a.emitDeferredHandoffToolResult(pc, result, ToolResultStatusSuccess)
+		a.emitDeferredHandoffToolResult(pc, result, message.ToolStatusSuccess)
 		// Keep the rejection visible to the model as a user message anchored to
 		// the plan, matching the previous TUI-side rejection flow.
 		msg := message.Message{
@@ -152,7 +152,7 @@ func (a *MainAgent) handleHandoffResolveEvent(evt Event) {
 		}
 		a.handleContinueFromContext(a.delivery.currentWorkID)
 	case handoffResolveCancel:
-		a.emitDeferredHandoffToolResult(pc, "Cancelled", ToolResultStatusCancelled)
+		a.emitDeferredHandoffToolResult(pc, "Cancelled", message.ToolStatusCancelled)
 	default:
 		log.Warnf("handleHandoffResolveEvent: unsupported handoff action=%v request_id=%v", p.Action, p.RequestID)
 	}
@@ -176,7 +176,7 @@ func (a *MainAgent) abandonPendingHandoff() {
 		// decision modal behind the superseding action.
 		a.emitToTUI(HandoffCancelledEvent{RequestID: reqID, Reason: handoffCancelledReasonSuperseded})
 	}
-	a.emitDeferredHandoffToolResult(pc, "Cancelled", ToolResultStatusCancelled)
+	a.emitDeferredHandoffToolResult(pc, "Cancelled", message.ToolStatusCancelled)
 }
 
 // settlePendingHandoffAtShutdown resolves a handoff the user never decided
@@ -202,7 +202,7 @@ func (a *MainAgent) settlePendingHandoffAtShutdown() {
 		Role:           message.RoleTool,
 		Content:        "Cancelled",
 		ToolCallID:     pc.CallID,
-		ToolStatus:     string(ToolResultStatusCancelled),
+		ToolStatus:     message.ToolStatusCancelled,
 		ToolDurationMs: pc.Duration.Milliseconds(),
 	}
 	a.ctxMgr.Append(toolMsg)
@@ -217,7 +217,7 @@ func (a *MainAgent) settlePendingHandoffAtShutdown() {
 // emitDeferredHandoffToolResult delivers the handoff tool call's terminal
 // ToolResultEvent and persists its tool message, replaying the original call
 // metadata (CallID, ArgsJSON, execution duration) captured when the tool ran.
-func (a *MainAgent) emitDeferredHandoffToolResult(pc *HandoffResult, result string, status ToolResultStatus) {
+func (a *MainAgent) emitDeferredHandoffToolResult(pc *HandoffResult, result string, status message.ToolResultStatus) {
 	if pc == nil || pc.CallID == "" {
 		log.Warnf("emitDeferredHandoffToolResult: missing handoff call metadata")
 		return

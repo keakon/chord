@@ -27,8 +27,8 @@ func BenchmarkReductionHistoryScan(b *testing.B) {
 			b.ResetTimer()
 			for b.Loop() {
 				scan := newReductionHistoryScanForAgent(a, messages)
-				scan.callMeta()
-				scan.repeatedOutputs()
+				scan.CallMeta()
+				scan.RepeatedOutputs()
 			}
 		})
 	}
@@ -79,23 +79,5 @@ func TestReductionMemoProducesIdenticalSurface(t *testing.T) {
 		if got[i].Content != want[i].Content {
 			t.Fatalf("message %d content diverges with warm memo:\nwarm: %q\ncold: %q", i, got[i].Content, want[i].Content)
 		}
-	}
-}
-
-// Memo maps are bounded: crossing the cap drops the map wholesale and the
-// next prepare rebuilds it without changing the reduction output.
-func TestReductionMemoCapDropsWholesale(t *testing.T) {
-	a := benchmarkContextReductionAgent()
-	messages := memoEquivalenceMessages()
-	want := benchmarkContextReductionAgent().prepareMessagesForLLM(messages)
-
-	for i := range reductionToolCallMemoMaxEntries {
-		a.reductionMemo.toolResultDigest(fmt.Sprintf("cap-%d", i), "x")
-	}
-	if got := a.prepareMessagesForLLM(messages); len(got) != len(want) {
-		t.Fatalf("prepared length after cap reset = %d, want %d", len(got), len(want))
-	}
-	if len(a.reductionMemo.digests) > reductionToolCallMemoMaxEntries {
-		t.Fatalf("digest memo exceeded cap: %d", len(a.reductionMemo.digests))
 	}
 }

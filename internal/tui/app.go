@@ -8,15 +8,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/keakon/golog/log"
-
 	tea "github.com/keakon/bubbletea/v2"
+	"github.com/keakon/golog/log"
 	uv "github.com/keakon/ultraviolet"
 
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/desktop"
 	"github.com/keakon/chord/internal/inputhistory"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 // ---------------------------------------------------------------------------
@@ -207,7 +207,7 @@ type Model struct {
 
 	agent                       agent.AgentForTUI
 	viewport                    *Viewport
-	input                       Input
+	input                       composer.Input
 	mode                        Mode
 	width                       int
 	height                      int
@@ -595,7 +595,7 @@ func NewModelWithSize(a agent.AgentForTUI, width, height int) Model {
 	m := Model{
 		agent:           a,
 		viewport:        NewViewport(width, height),
-		input:           NewInput(),
+		input:           newComposer(),
 		mode:            ModeInsert,
 		width:           width,
 		height:          height,

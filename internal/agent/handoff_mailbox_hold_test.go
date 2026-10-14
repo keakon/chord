@@ -397,7 +397,7 @@ func TestHandoffAbandonEmitsCancelledEvent(t *testing.T) {
 	}
 	settled := false
 	for _, msg := range a.ctxMgr.Snapshot() {
-		if msg.Role == message.RoleTool && msg.ToolCallID == "handoff-1" && msg.ToolStatus == string(ToolResultStatusCancelled) {
+		if msg.Role == message.RoleTool && msg.ToolCallID == "handoff-1" && msg.ToolStatus == message.ToolStatusCancelled {
 			settled = true
 		}
 	}
@@ -426,7 +426,7 @@ func TestSettlePendingHandoffAtShutdownDoesNotEmitCancelledEvent(t *testing.T) {
 	}
 	settled := false
 	for _, msg := range a.ctxMgr.Snapshot() {
-		if msg.Role == message.RoleTool && msg.ToolCallID == "handoff-1" && msg.ToolStatus == string(ToolResultStatusCancelled) {
+		if msg.Role == message.RoleTool && msg.ToolCallID == "handoff-1" && msg.ToolStatus == message.ToolStatusCancelled {
 			settled = true
 		}
 	}

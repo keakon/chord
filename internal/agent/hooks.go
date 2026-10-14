@@ -13,6 +13,7 @@ import (
 	"github.com/keakon/chord/internal/identity"
 	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/texttruncate"
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -319,7 +320,7 @@ func trimAutomationBody(body string, maxLines int, maxBytes int) string {
 		body = strings.Join(lines, "\n")
 	}
 	if len(body) > maxBytes {
-		body = llm.TruncateStringBytes(body, maxBytes)
+		body = texttruncate.Bytes(body, maxBytes)
 		body = strings.TrimRight(body, "\n") + "\n... (truncated)"
 	}
 	return strings.TrimSpace(body)

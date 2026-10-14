@@ -5,14 +5,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
 
 // outcomeCardFixture builds a finished card for one tool in one terminal
 // state, so the shared-envelope assertions below can sweep the whole card set
 // instead of testing one renderer at a time.
-func outcomeCardFixture(name, args, result string, status agent.ToolResultStatus) *Block {
+func outcomeCardFixture(name, args, result string, status message.ToolResultStatus) *Block {
 	return &Block{
 		ID:            1,
 		Type:          BlockToolCall,
@@ -50,7 +50,7 @@ var outcomeCardArgs = map[string]string{
 func TestToolCardsNeverRepeatTheErrorLabel(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	for name, args := range outcomeCardArgs {
-		block := outcomeCardFixture(name, args, "Error: the tool refused the call", agent.ToolResultStatusError)
+		block := outcomeCardFixture(name, args, "Error: the tool refused the call", message.ToolStatusError)
 		plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if strings.Contains(plain, "Error: Error:") {
 			t.Errorf("%s card repeats the error label:\n%s", name, plain)
@@ -69,7 +69,7 @@ func TestToolCardsReportCancellationOnce(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	for name, args := range outcomeCardArgs {
 		for _, content := range []string{"Cancelled", "cancelled"} {
-			block := outcomeCardFixture(name, args, content, agent.ToolResultStatusCancelled)
+			block := outcomeCardFixture(name, args, content, message.ToolStatusCancelled)
 			plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 			if got := strings.Count(strings.ToLower(plain), "cancelled"); got != 1 {
 				t.Errorf("%s card mentions the cancellation %d times (result %q):\n%s", name, got, content, plain)
@@ -85,7 +85,7 @@ func TestToolCardsReportCancellationOnce(t *testing.T) {
 func TestCollapsedToolCardsKeepTheOutcomeOnOneLine(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	for _, name := range []string{tools.NameShell, tools.NameWebFetch, tools.NameSkill, tools.NameJobOutput} {
-		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: exit code 1", agent.ToolResultStatusError)
+		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: exit code 1", message.ToolStatusError)
 		plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if !strings.Contains(plain, "↳ Error: exit code 1") {
 			t.Errorf("%s collapsed card does not fold the failure onto one row:\n%s", name, plain)
@@ -104,7 +104,7 @@ func TestCollapsedReadErrorWithSuggestionsShowsFullBody(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := outcomeCardFixture(tools.NameRead, outcomeCardArgs[tools.NameRead],
 		"file not found: internal/tools/ignore.go\nDid you mean:\n- internal/tools/ignore.go",
-		agent.ToolResultStatusError)
+		message.ToolStatusError)
 	block.Collapsed = true
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -196,7 +196,7 @@ func TestCollapsedReadCardBoundsALongError(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("- internal/tools/candidate%02d.go", i))
 	}
 	block := outcomeCardFixture(tools.NameRead, outcomeCardArgs[tools.NameRead],
-		strings.Join(lines, "\n"), agent.ToolResultStatusError)
+		strings.Join(lines, "\n"), message.ToolStatusError)
 	block.Collapsed = true
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -228,7 +228,7 @@ func TestCollapsedReadCardBoundsALongError(t *testing.T) {
 func TestCollapsedOutcomeCardMarkerRule(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	for _, name := range []string{tools.NameWebFetch, tools.NameSkill, tools.NameJobOutput} {
-		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: 404 Not Found", agent.ToolResultStatusError)
+		block := outcomeCardFixture(name, outcomeCardArgs[name], "Error: 404 Not Found", message.ToolStatusError)
 		collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 		if !strings.Contains(collapsed, "✗ "+name) {
 			t.Errorf("%s collapsed card header changed shape:\n%s", name, collapsed)
@@ -247,7 +247,7 @@ func TestCollapsedOutcomeCardMarkerRule(t *testing.T) {
 // captured output, so the collapsed card keeps its ▸.
 func TestCollapsedShellCardKeepsDisclosureMarker(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	block := outcomeCardFixture(tools.NameShell, outcomeCardArgs[tools.NameShell], "Error: 404 Not Found", agent.ToolResultStatusError)
+	block := outcomeCardFixture(tools.NameShell, outcomeCardArgs[tools.NameShell], "Error: 404 Not Found", message.ToolStatusError)
 	collapsed := stripANSI(strings.Join(block.Render(120, ""), "\n"))
 	if !strings.Contains(collapsed, "✗ ▸ "+tools.NameShell) {
 		t.Errorf("shell collapsed card lost its ▸ marker:\n%s", collapsed)
@@ -266,7 +266,7 @@ func TestCollapsedShellCardKeepsDisclosureMarker(t *testing.T) {
 func TestCollapsedOutcomeCardKeepsMarkerForTruncatedBody(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := outcomeCardFixture(tools.NameJobOutput, outcomeCardArgs[tools.NameJobOutput],
-		"Error: "+strings.Repeat("job job-46 not found ", 12), agent.ToolResultStatusError)
+		"Error: "+strings.Repeat("job job-46 not found ", 12), message.ToolStatusError)
 	collapsed := stripANSI(strings.Join(block.Render(100, ""), "\n"))
 	if !strings.Contains(collapsed, "✗ ▸ "+tools.NameJobOutput) {
 		t.Fatalf("a truncated single-line failure should keep its marker:\n%s", collapsed)
@@ -280,7 +280,7 @@ func TestCollapsedOutcomeCardKeepsMarkerForTruncatedBody(t *testing.T) {
 func TestShellCardKeepsExitCodeAndLabelsOutputHonestly(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	block := outcomeCardFixture(tools.NameShell, outcomeCardArgs[tools.NameShell],
-		"--- FAIL: TestFoo\n\nError: exit code 1", agent.ToolResultStatusError)
+		"--- FAIL: TestFoo\n\nError: exit code 1", message.ToolStatusError)
 	block.ToolCallDetailExpanded = true
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))
@@ -305,7 +305,7 @@ func TestShellCardKeepsExitCodeAndLabelsOutputHonestly(t *testing.T) {
 // stream split, so only the shared envelope can carry the state.
 func TestShellCancelledCardReportsTheCancellation(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	block := outcomeCardFixture(tools.NameShell, outcomeCardArgs[tools.NameShell], "Cancelled", agent.ToolResultStatusCancelled)
+	block := outcomeCardFixture(tools.NameShell, outcomeCardArgs[tools.NameShell], "Cancelled", message.ToolStatusCancelled)
 	block.ToolCallDetailExpanded = true
 
 	plain := stripANSI(strings.Join(block.Render(120, ""), "\n"))

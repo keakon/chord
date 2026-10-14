@@ -207,7 +207,7 @@ func TestHandoffApproveUnavailableTargetFailsWithoutSuccess(t *testing.T) {
 	if toolMsg == nil {
 		t.Fatal("rejected handoff must still close its tool call")
 	}
-	if string(toolMsg.ToolStatus) != string(ToolResultStatusError) {
+	if string(toolMsg.ToolStatus) != message.ToolStatusError {
 		t.Fatalf("tool message status = %q, want error", toolMsg.ToolStatus)
 	}
 	if !strings.Contains(toolMsg.Content, "not available") {
@@ -289,7 +289,7 @@ func TestHandoffApproveFailedPreparationFailsAsError(t *testing.T) {
 	if callIdx < 0 || resultIdx < 0 || resultIdx != callIdx+1 {
 		t.Fatalf("error terminal must pair with its call in place: call=%d result=%d", callIdx, resultIdx)
 	}
-	if string(msgs[resultIdx].ToolStatus) != string(ToolResultStatusError) {
+	if string(msgs[resultIdx].ToolStatus) != message.ToolStatusError {
 		t.Fatalf("tool message status = %q, want error after failed preparation", msgs[resultIdx].ToolStatus)
 	}
 	if !strings.Contains(msgs[resultIdx].Content, "failed to read plan") {
@@ -354,7 +354,7 @@ func assertHandoffErrorResult(t *testing.T, a *MainAgent) {
 	t.Helper()
 	for _, msg := range a.ctxMgr.Snapshot() {
 		if msg.Role == message.RoleTool && msg.ToolCallID == "handoff-1" {
-			if msg.ToolStatus != string(ToolResultStatusError) {
+			if msg.ToolStatus != message.ToolStatusError {
 				t.Fatalf("handoff result status = %q, want error", msg.ToolStatus)
 			}
 			return
@@ -452,7 +452,7 @@ func TestHandoffCancelEmitsCancelledResult(t *testing.T) {
 	if toolMsg == nil {
 		t.Fatal("handoff cancelled tool message not appended to context")
 	}
-	if string(toolMsg.ToolStatus) != string(ToolResultStatusCancelled) {
+	if string(toolMsg.ToolStatus) != message.ToolStatusCancelled {
 		t.Fatalf("tool message status = %q, want cancelled", toolMsg.ToolStatus)
 	}
 }
@@ -521,7 +521,7 @@ func TestHandoffAbandonEmitsCancelledResult(t *testing.T) {
 	if toolMsg == nil {
 		t.Fatal("handoff cancelled tool message not appended after abandon")
 	}
-	if string(toolMsg.ToolStatus) != string(ToolResultStatusCancelled) {
+	if string(toolMsg.ToolStatus) != message.ToolStatusCancelled {
 		t.Fatalf("tool message status = %q, want cancelled", toolMsg.ToolStatus)
 	}
 }
@@ -548,7 +548,7 @@ func TestHandoffShutdownSettlesPendingResult(t *testing.T) {
 	if toolMsg == nil {
 		t.Fatal("handoff cancelled tool message not appended at shutdown")
 	}
-	if string(toolMsg.ToolStatus) != string(ToolResultStatusCancelled) {
+	if string(toolMsg.ToolStatus) != message.ToolStatusCancelled {
 		t.Fatalf("tool message status = %q, want cancelled", toolMsg.ToolStatus)
 	}
 }

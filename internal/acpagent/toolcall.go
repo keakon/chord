@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/message"
+
 	acp "github.com/coder/acp-go-sdk"
 
 	"github.com/keakon/chord/internal/agent"
@@ -204,7 +206,7 @@ func toolCallResult(ctx context.Context, e agent.ToolResultEvent) acp.SessionUpd
 	// Chord keeps cancellation as a distinct terminal state; ACP only knows
 	// completed and failed, and a cancelled tool produced no valid result.
 	status := acp.ToolCallStatusCompleted
-	if e.Status != agent.ToolResultStatusSuccess {
+	if e.Status != message.ToolStatusSuccess {
 		status = acp.ToolCallStatusFailed
 	}
 	opts := []acp.ToolCallUpdateOpt{acp.WithUpdateStatus(status)}
@@ -239,7 +241,7 @@ func toolResultContent(ctx context.Context, e agent.ToolResultEvent) []acp.ToolC
 	if output != "" {
 		content = append(content, acp.ToolContent(acp.TextBlock(output)))
 	}
-	if e.Name == tools.NameGenerateImage && e.Status == agent.ToolResultStatusSuccess {
+	if e.Name == tools.NameGenerateImage && e.Status == message.ToolStatusSuccess {
 		err := tools.VisitGeneratedOriginals(ctx, output, e.Parts, func(_ tools.GeneratedImage, img imagegen.Image) error {
 			content = append(content, acp.ToolContent(acp.ImageBlock(base64.StdEncoding.EncodeToString(img.Data), img.MIME)))
 			return nil

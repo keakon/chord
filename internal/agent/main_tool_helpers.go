@@ -179,7 +179,7 @@ func emitToolExecutionState(emit func(AgentEvent), calls []PendingToolCall, stat
 
 func emitCancelledToolResults(emit func(AgentEvent), calls []PendingToolCall) {
 	for _, call := range calls {
-		emit(ToolResultEvent{CallID: call.CallID, Name: call.Name, ArgsJSON: call.ArgsJSON, Audit: call.Audit.Clone(), Result: "Cancelled", Status: ToolResultStatusCancelled, AgentID: call.AgentID})
+		emit(ToolResultEvent{CallID: call.CallID, Name: call.Name, ArgsJSON: call.ArgsJSON, Audit: call.Audit.Clone(), Result: "Cancelled", Status: message.ToolStatusCancelled, AgentID: call.AgentID})
 	}
 }
 
@@ -208,7 +208,7 @@ func finalizeStreamingToolCards(emit func(AgentEvent), validCallIDs map[string]s
 		if info.Reason != "" {
 			msg += " reason=" + info.Reason
 		}
-		emit(ToolResultEvent{CallID: c.CallID, Name: c.Name, ArgsJSON: c.ArgsJSON, Audit: c.Audit.Clone(), Result: msg, Status: ToolResultStatusError, AgentID: c.AgentID})
+		emit(ToolResultEvent{CallID: c.CallID, Name: c.Name, ArgsJSON: c.ArgsJSON, Audit: c.Audit.Clone(), Result: msg, Status: message.ToolStatusError, AgentID: c.AgentID})
 	}
 }
 
@@ -221,12 +221,12 @@ func emitToolCallDiscards(emit func(AgentEvent), calls []PendingToolCall, reason
 	}
 }
 
-func emitInterruptedToolResultsOrDiscards(emit func(AgentEvent), declared, undeclared []PendingToolCall, status ToolResultStatus, cause error, discardReason string) {
+func emitInterruptedToolResultsOrDiscards(emit func(AgentEvent), declared, undeclared []PendingToolCall, status message.ToolResultStatus, cause error, discardReason string) {
 	emitToolCallDiscards(emit, undeclared, discardReason)
 	if len(declared) == 0 {
 		return
 	}
-	if status == ToolResultStatusError {
+	if status == message.ToolStatusError {
 		emitFailedToolResults(emit, declared, cause)
 		return
 	}
@@ -234,9 +234,9 @@ func emitInterruptedToolResultsOrDiscards(emit func(AgentEvent), declared, undec
 }
 
 func emitFailedToolResults(emit func(AgentEvent), calls []PendingToolCall, err error) {
-	message := toolCallFailureMessage(err)
+	result := toolCallFailureMessage(err)
 	for _, call := range calls {
-		emit(ToolResultEvent{CallID: call.CallID, Name: call.Name, ArgsJSON: call.ArgsJSON, Audit: call.Audit.Clone(), Result: message, Status: ToolResultStatusError, AgentID: call.AgentID})
+		emit(ToolResultEvent{CallID: call.CallID, Name: call.Name, ArgsJSON: call.ArgsJSON, Audit: call.Audit.Clone(), Result: result, Status: message.ToolStatusError, AgentID: call.AgentID})
 	}
 }
 
@@ -300,11 +300,11 @@ func toolErrorSummary(err error) string {
 	return summary
 }
 
-func toolResultStatusFromError(isError bool) ToolResultStatus {
+func toolResultStatusFromError(isError bool) message.ToolResultStatus {
 	if isError {
-		return ToolResultStatusError
+		return message.ToolStatusError
 	}
-	return ToolResultStatusSuccess
+	return message.ToolStatusSuccess
 }
 
 type toolExecutionBatch struct {
@@ -449,12 +449,12 @@ func contextCancelledError(ctx context.Context) error {
 
 // toolResultStatusWithControlReason preserves a successful read while marking
 // calls stopped before execution as cancelled rather than ordinary failures.
-func toolResultStatusWithControlReason(isError bool, reason string) ToolResultStatus {
+func toolResultStatusWithControlReason(isError bool, reason string) message.ToolResultStatus {
 	if !isError {
-		return ToolResultStatusSuccess
+		return message.ToolStatusSuccess
 	}
 	if reason == message.ToolControlReasonDirectoryInstructionsRequired || reason == message.ToolControlReasonDirectoryInstructionsReplan {
-		return ToolResultStatusCancelled
+		return message.ToolStatusCancelled
 	}
-	return ToolResultStatusError
+	return message.ToolStatusError
 }

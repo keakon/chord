@@ -23,7 +23,7 @@ func skillInvocationMessages(callID, skillName string) []message.Message {
 			Role:       message.RoleTool,
 			ToolCallID: callID,
 			Content:    "<skill>\n<name>" + skillName + "</name>\n\nfull instructions\n</skill>",
-			ToolStatus: string(ToolResultStatusSuccess),
+			ToolStatus: message.ToolStatusSuccess,
 		},
 	}
 }
@@ -145,7 +145,7 @@ func TestCheckpointSkillsSectionIgnoresFailedInvocation(t *testing.T) {
 			Role:       message.RoleTool,
 			ToolCallID: "s1",
 			Content:    `skill "missing-skill" not found`,
-			ToolStatus: string(ToolResultStatusError),
+			ToolStatus: message.ToolStatusError,
 		},
 	}
 	if names, _ := collectCheckpointSkillNames(head); len(names) != 0 {

@@ -9,13 +9,14 @@ import (
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/inputhistory"
+	"github.com/keakon/chord/internal/tui/composer"
 )
 
 const historyCommand = "/history"
 const historyClearCommand = "/history clear"
 
 type submittedInput struct {
-	entry                               inputHistoryEntry
+	entry                               composer.HistoryEntry
 	projectKey, projectLabel, sessionID string
 	attachments                         int
 }
@@ -27,7 +28,7 @@ func (m *Model) SetInputHistory(store *inputhistory.Store, key, label string) {
 	m.inputHistoryRuntime = newHistorySearchRuntime()
 }
 func (m *Model) captureSubmittedInput() submittedInput {
-	return submittedInput{m.input.historyEntry(), m.inputHistoryProjectKey, m.inputHistoryProjectLabel, m.currentSessionID(), len(m.attachments)}
+	return submittedInput{m.input.HistoryEntry(), m.inputHistoryProjectKey, m.inputHistoryProjectLabel, m.currentSessionID(), len(m.attachments)}
 }
 func (m *Model) recordSubmittedInput(s submittedInput) tea.Cmd {
 	m.input.PushHistory(s.entry)

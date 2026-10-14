@@ -11,7 +11,6 @@ import (
 
 	"github.com/keakon/golog/log"
 
-	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/convformat"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
@@ -269,7 +268,7 @@ func (m *Model) rebuildSidebarFileEditsFromMessages(msgs []message.Message) {
 		if !ok {
 			continue
 		}
-		if agent.ToolResultStatus(msg.ToolStatus).IsUnsuccessful() {
+		if message.ToolResultStatus(msg.ToolStatus).IsUnsuccessful() {
 			if msg.FileState.HasChanges() {
 				m.addSidebarFileState("main", msg.FileState)
 			}
@@ -571,25 +570,25 @@ func preserveRebuiltBlockState(src, dst *Block) {
 	}
 }
 
-func toolResultStatusFromRestoredContent(content string) agent.ToolResultStatus {
+func toolResultStatusFromRestoredContent(content string) message.ToolResultStatus {
 	switch message.ClassifyToolResultContent(content) {
 	case message.ToolResultClassCancelled:
-		return agent.ToolResultStatusCancelled
+		return message.ToolStatusCancelled
 	case message.ToolResultClassError:
-		return agent.ToolResultStatusError
+		return message.ToolStatusError
 	default:
-		return agent.ToolResultStatusSuccess
+		return message.ToolStatusSuccess
 	}
 }
 
-func toolResultStatusFromRestoredMessage(msg message.Message) agent.ToolResultStatus {
+func toolResultStatusFromRestoredMessage(msg message.Message) message.ToolResultStatus {
 	switch strings.TrimSpace(msg.ToolStatus) {
-	case string(agent.ToolResultStatusError):
-		return agent.ToolResultStatusError
-	case string(agent.ToolResultStatusCancelled):
-		return agent.ToolResultStatusCancelled
-	case string(agent.ToolResultStatusSuccess):
-		return agent.ToolResultStatusSuccess
+	case string(message.ToolStatusError):
+		return message.ToolStatusError
+	case string(message.ToolStatusCancelled):
+		return message.ToolStatusCancelled
+	case string(message.ToolStatusSuccess):
+		return message.ToolStatusSuccess
 	default:
 		return toolResultStatusFromRestoredContent(msg.Content)
 	}
@@ -640,7 +639,7 @@ type transcriptToolResult struct {
 	// the split, where result holds the combination.
 	payload        string
 	notes          []string
-	status         agent.ToolResultStatus
+	status         message.ToolResultStatus
 	audit          *message.ToolArgsAudit
 	diff           string
 	duration       time.Duration
@@ -738,7 +737,7 @@ func applyStableToolResultToBlock(block *Block, result transcriptToolResult) {
 }
 
 func applyTaskHandleFromResult(block *Block) {
-	if block == nil || block.ToolName != tools.NameDelegate || block.ResultStatus == agent.ToolResultStatusError || strings.TrimSpace(block.ResultContent) == "" {
+	if block == nil || block.ToolName != tools.NameDelegate || block.ResultStatus == message.ToolStatusError || strings.TrimSpace(block.ResultContent) == "" {
 		return
 	}
 	if handle, _, ok := parseTaskToolHandle(block.ResultContent); ok {
@@ -973,7 +972,7 @@ func messagesToBlocksWithThinkingTranslations(msgs []message.Message, nextID *in
 				}
 				b := newTranscriptToolCallBlock(*nextID, message.ToolCall{ID: display.ID, Name: display.Name, Args: json.RawMessage(display.Args)})
 				b.MsgIndex = msgIdx
-				applyStableToolResultToBlock(b, transcriptToolResult{result: display.Result, payload: display.Result, imageParts: imagePartsFromContentParts(display.Parts), status: agent.ToolResultStatus(display.Status), displayArgs: stableToolDisplayArgs, resetExecution: true})
+				applyStableToolResultToBlock(b, transcriptToolResult{result: display.Result, payload: display.Result, imageParts: imagePartsFromContentParts(display.Parts), status: message.ToolResultStatus(display.Status), displayArgs: stableToolDisplayArgs, resetExecution: true})
 				blocks = append(blocks, b)
 				toolIDToBlock[display.ID] = b
 				*nextID++

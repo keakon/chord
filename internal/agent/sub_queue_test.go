@@ -178,8 +178,8 @@ func TestSubAgentCompleteWaitsForQueuedUserInput(t *testing.T) {
 	if completeResult.Role != "tool" || completeResult.ToolCallID != "complete-1" || !strings.Contains(completeResult.Content, "received new user input") {
 		t.Fatalf("completion result = %#v, want deferred Complete result", completeResult)
 	}
-	if completeResult.ToolStatus != string(ToolResultStatusSuccess) {
-		t.Fatalf("deferred Complete ToolStatus = %q, want %q (delivery was accepted, only deferred)", completeResult.ToolStatus, ToolResultStatusSuccess)
+	if completeResult.ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("deferred Complete ToolStatus = %q, want %q (delivery was accepted, only deferred)", completeResult.ToolStatus, message.ToolStatusSuccess)
 	}
 	userMsg := msgs[len(msgs)-1]
 	if userMsg.Role != "user" || userMsg.Content != "check one more thing" {

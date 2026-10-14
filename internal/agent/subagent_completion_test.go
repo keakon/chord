@@ -964,7 +964,7 @@ func TestMainMailboxAndSnapshotDoNotDoubleBillSameCompletion(t *testing.T) {
 // terminal status: the live ToolResultEvent the TUI renders, and the persisted
 // ToolStatus a restored session rebuilds the card from. A rejected Complete
 // that still reports success is the regression this guards.
-func assertCompleteCardStatus(t *testing.T, parent *MainAgent, sub *SubAgent, callID string, want ToolResultStatus) {
+func assertCompleteCardStatus(t *testing.T, parent *MainAgent, sub *SubAgent, callID string, want message.ToolResultStatus) {
 	t.Helper()
 	persisted, found := "", false
 	for _, msg := range sub.ctxMgr.Snapshot() {
@@ -976,7 +976,7 @@ func assertCompleteCardStatus(t *testing.T, parent *MainAgent, sub *SubAgent, ca
 	if !found {
 		t.Fatalf("no persisted tool result for Complete call %q", callID)
 	}
-	if got := ToolResultStatus(persisted); got != want {
+	if got := message.ToolResultStatus(persisted); got != want {
 		t.Fatalf("persisted Complete status = %q, want %q", got, want)
 	}
 	for {
@@ -1062,7 +1062,7 @@ func TestSubAgentInvalidCompleteGetsRejectedToolResultAndBoundedFollowUp(t *test
 			if !foundRejected {
 				t.Fatalf("missing rejected tool result containing %q in %#v", tc.wantReason, msgs)
 			}
-			assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
+			assertCompleteCardStatus(t, parent, sub, "call-1", message.ToolStatusError)
 
 			// The follow-up request carried the fix-it nudge for the model.
 			seen, _ := provider.snapshot()
@@ -1123,8 +1123,8 @@ func TestSubAgentInvalidCompleteRetryHasOwnBudgetAfterPureTextRecovery(t *testin
 	}
 	// The rejected attempt is an error card; the corrected delivery it earned
 	// is a success card.
-	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
-	assertCompleteCardStatus(t, parent, sub, "call-2", ToolResultStatusSuccess)
+	assertCompleteCardStatus(t, parent, sub, "call-1", message.ToolStatusError)
+	assertCompleteCardStatus(t, parent, sub, "call-2", message.ToolStatusSuccess)
 }
 
 func TestSubAgentCoReturnedInvalidCompleteRejectedAfterSiblingsSettle(t *testing.T) {
@@ -1176,7 +1176,7 @@ func TestSubAgentCoReturnedInvalidCompleteRejectedAfterSiblingsSettle(t *testing
 	if !foundRejected {
 		t.Fatalf("missing rejected tool result in %#v", msgs)
 	}
-	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
+	assertCompleteCardStatus(t, parent, sub, "call-1", message.ToolStatusError)
 }
 
 func TestSubAgentRepeatedInvalidCompleteFailsAfterRecoveryBudgetSpent(t *testing.T) {
@@ -1197,7 +1197,7 @@ func TestSubAgentRepeatedInvalidCompleteFailsAfterRecoveryBudgetSpent(t *testing
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for bounded recovery failure")
 	}
-	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusError)
+	assertCompleteCardStatus(t, parent, sub, "call-1", message.ToolStatusError)
 }
 
 // TestSubAgentDeferredCompletionRetainsStructuredEnvelope pins that a
@@ -1239,7 +1239,7 @@ func TestSubAgentDeferredCompletionRetainsStructuredEnvelope(t *testing.T) {
 		t.Fatalf("pending envelope = %#v, want the declared risks and follow-ups preserved", pending.Envelope)
 	}
 	// Delivery was accepted and only deferred, so the card stays a success.
-	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusSuccess)
+	assertCompleteCardStatus(t, parent, sub, "call-1", message.ToolStatusSuccess)
 }
 
 func TestCoordinationSnapshotDoesNotDeadlockOnWaitingDescendant(t *testing.T) {
@@ -1319,5 +1319,5 @@ func TestUnpairedTypedResultSettlesDegradedAfterRecoveryBudgetSpent(t *testing.T
 	}
 	// Degraded delivery is still an accepted completion, so its card is a
 	// success: only a rejected Complete is an error.
-	assertCompleteCardStatus(t, parent, sub, "call-1", ToolResultStatusSuccess)
+	assertCompleteCardStatus(t, parent, sub, "call-1", message.ToolStatusSuccess)
 }
