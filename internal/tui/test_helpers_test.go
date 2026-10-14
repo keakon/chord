@@ -97,13 +97,6 @@ func imageViewerHintText(caps TerminalImageCapabilities, total int) string {
 	}
 }
 
-// newCodeHighlighter is the language-inferring constructor used by syntax
-// tests; production callers go through newCodeHighlighterWithLanguage to
-// honor an explicit language hint.
-func newCodeHighlighter(filePath, sample string) *codeHighlighter {
-	return newCodeHighlighterWithLanguage(filePath, sample, "")
-}
-
 // stripANSILines copies lines with ANSI escapes removed; tests use it to make
 // failure output readable when the viewport returns styled text.
 func stripANSILines(lines []string) []string {

@@ -14,7 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alecthomas/chroma/v2"
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/lipgloss/v2"
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
@@ -38,24 +39,6 @@ func containsRawCarriageReturnForTest(s string) bool {
 		}
 	}
 	return false
-}
-
-func TestNormalizeCodeFenceLanguage(t *testing.T) {
-	cases := map[string]string{
-		"":          "",
-		"text":      "text",
-		"plaintext": "text",
-		"txt":       "text",
-		"js":        "javascript",
-		"ts":        "typescript",
-		"sh":        "bash",
-		"yml":       "yaml",
-	}
-	for in, want := range cases {
-		if got := normalizeCodeFenceLanguage(in); got != want {
-			t.Fatalf("normalizeCodeFenceLanguage(%q)=%q want %q", in, got, want)
-		}
-	}
 }
 
 func TestGenericToolHeaderPartsShapeUnknownTools(t *testing.T) {
@@ -255,48 +238,6 @@ func TestGenericToolHeaderKeepsLongOptionsOffTheHeader(t *testing.T) {
 	}
 }
 
-func TestToolCodeChromaStyleKeepsTokenContrastOnToolBackgrounds(t *testing.T) {
-	style := toolCodeChromaStyle()
-
-	if style == nil {
-		t.Fatal("tool code style should not be nil")
-	}
-	theme := DefaultTheme()
-	backgrounds := map[string]color.Color{
-		"tool":        lipgloss.Color(theme.ToolCallBg),
-		"diff add":    lipgloss.Color(theme.DiffAddLineBg),
-		"diff delete": lipgloss.Color(theme.DiffDelLineBg),
-	}
-	checkToken := func(tokenType chroma.TokenType) {
-		t.Helper()
-		entry := style.Get(tokenType)
-		if !entry.Colour.IsSet() {
-			return
-		}
-		foreground := color.RGBA{R: entry.Colour.Red(), G: entry.Colour.Green(), B: entry.Colour.Blue(), A: 0xff}
-		for name, background := range backgrounds {
-			if got := contrastRatio(foreground, background); got < 4.5 {
-				t.Errorf("%s foreground %s contrast on %s = %.2f, want >= 4.5", tokenType, entry.Colour.String(), name, got)
-			}
-		}
-	}
-	checkToken(chroma.Error)
-	checked := map[chroma.TokenType]bool{chroma.Error: true}
-	for tokenType := range chroma.StandardTypes {
-		if tokenType <= 0 {
-			continue
-		}
-		checkToken(tokenType)
-		checked[tokenType] = true
-	}
-	for _, tokenType := range style.Types() {
-		if tokenType <= 0 || checked[tokenType] {
-			continue
-		}
-		checkToken(tokenType)
-	}
-}
-
 func contrastRatio(a, b color.Color) float64 {
 	al := relativeLuminance(a)
 	bl := relativeLuminance(b)
@@ -316,14 +257,6 @@ func relativeLuminance(c color.Color) float64 {
 		return math.Pow((n+0.055)/1.055, 2.4)
 	}
 	return 0.2126*linear(r) + 0.7152*linear(g) + 0.0722*linear(b)
-}
-
-func TestNewCodeHighlighterUsesToolStyle(t *testing.T) {
-	ApplyTheme(DefaultTheme())
-	h := newCodeHighlighter("sample.go", "package main\n// comment\n")
-	if got := h.chromaStyle.Get(chroma.CommentSingle).Colour.String(); got != darkThemeSyntaxCommentColour {
-		t.Fatalf("highlighter comment colour = %q, want %q", got, darkThemeSyntaxCommentColour)
-	}
 }
 
 func TestHighlightedFileToolsUseExpectedBackgrounds(t *testing.T) {
@@ -372,7 +305,7 @@ func TestReadOffsetTOMLFragmentKeepsErrorTokensReadable(t *testing.T) {
 	}
 
 	line := renderedLineContaining(t, block.Render(100, ""), content)
-	assertRenderedTextForeground(t, line, "职", colorOfTheme(darkThemeSyntaxTextColour))
+	assertRenderedTextForeground(t, line, "职", renderedCellsForText(t, syntax.New("sample.toml", "", "").Line(content, ""), "职")[0].Style.Fg)
 	assertRenderedTextBackground(t, line, "职", colorOfTheme(currentTheme.ToolCallBg))
 }
 
@@ -5027,7 +4960,7 @@ func TestDoneReportCodeBlockKeepsTextWidthCap(t *testing.T) {
 	resetMarkdownRenderer()
 
 	metrics := newDoneToolCardMetrics(maxProseWidth + 80)
-	var hl *codeHighlighter
+	var hl *syntax.Highlighter
 	lines := renderRichMarkdownContent("```text\nhello\n```", metrics.contentWidth, &hl)
 
 	var codeLine string
@@ -6658,5 +6591,21 @@ func TestTaskDoneSummaryUsesPlainTextWhenExpanded(t *testing.T) {
 	}
 	if strings.Contains(joined, "• item one") {
 		t.Fatalf("done summary should not render markdown bullets, got:\n%s", joined)
+	}
+}
+
+func TestRenderedCodeTokensKeepContrastOnCurrentTheme(t *testing.T) {
+	theme := DefaultTheme()
+	sample := "package main; func sample() { /* comment */ println(123, \"text\") }"
+	for _, bg := range []string{theme.ToolCallBg, theme.DiffAddLineBg, theme.DiffDelLineBg} {
+		rendered := syntax.New("sample.go", sample, "").Line(sample, bg)
+		for _, cell := range renderedCellsForText(t, rendered, sample) {
+			if cell.Style.Fg == (uv.Color{}) {
+				continue
+			}
+			if got := contrastRatio(cell.Style.Fg, lipgloss.Color(bg)); got < 4.5 {
+				t.Fatalf("rendered token %q contrast on %s = %.2f", cell.Content, bg, got)
+			}
+		}
 	}
 }

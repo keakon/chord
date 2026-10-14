@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/tools"
@@ -141,7 +143,7 @@ func hasMultiRunWordTokenChange(line string, changeSpans []diffSegmentSpan) bool
 
 // Inline helpers leave unchanged segments background-free; the enclosing tool
 // card restores ToolCallBg, while changeStyle supplies the semantic diff bg.
-func buildInlineContentANSI(segs []tools.InlineSegment, changeKind string, changeStyle lipgloss.Style, hl *codeHighlighter) string {
+func buildInlineContentANSI(segs []tools.InlineSegment, changeKind string, changeStyle lipgloss.Style, hl *syntax.Highlighter) string {
 	var buf strings.Builder
 	for _, seg := range segs {
 		if seg.Kind == changeKind {
@@ -149,7 +151,7 @@ func buildInlineContentANSI(segs []tools.InlineSegment, changeKind string, chang
 			continue
 		}
 		if hl != nil {
-			buf.WriteString(hl.highlightLine(seg.Text, ""))
+			buf.WriteString(hl.Line(seg.Text, ""))
 		} else {
 			buf.WriteString(seg.Text)
 		}
@@ -157,18 +159,18 @@ func buildInlineContentANSI(segs []tools.InlineSegment, changeKind string, chang
 	return buf.String()
 }
 
-func buildOneSidedInlineContentANSI(line string, span diffOneSidedSpan, changeStyle lipgloss.Style, hl *codeHighlighter) string {
+func buildOneSidedInlineContentANSI(line string, span diffOneSidedSpan, changeStyle lipgloss.Style, hl *syntax.Highlighter) string {
 	if hl == nil {
 		return span.Prefix + changeStyle.Render(span.Change) + span.Suffix
 	}
 	startByte, endByte := findColumnByteOffsets(line, span.StartCol, span.EndCol)
 	if startByte < 0 || endByte < startByte {
-		return hl.highlightLine(line, "")
+		return hl.Line(line, "")
 	}
-	return hl.highlightLine(line[:startByte], "") + changeStyle.Render(line[startByte:endByte]) + hl.highlightLine(line[endByte:], "")
+	return hl.Line(line[:startByte], "") + changeStyle.Render(line[startByte:endByte]) + hl.Line(line[endByte:], "")
 }
 
-func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *codeHighlighter) []string {
+func renderInlineDiffLine(oldLine, newLine string, diffWidth int, hl *syntax.Highlighter) []string {
 	oldSegs, newSegs := tools.InlineDiff(oldLine, newLine)
 	oldSpans := buildDiffSegmentSpans(oldSegs)
 	newSpans := buildDiffSegmentSpans(newSegs)

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/lipgloss/v2"
 	"github.com/keakon/x/ansi"
 
@@ -326,7 +328,7 @@ func splitAssistantMarkdownSegments(content string) []assistantMarkdownSegment {
 		}
 		seg := assistantMarkdownSegment{raw: buf.String(), code: code}
 		if code {
-			seg.fenceLang = normalizeCodeFenceLanguage(markdownutil.FirstFenceInfoField(currentFence.Info))
+			seg.fenceLang = syntax.NormalizeLanguage(markdownutil.FirstFenceInfoField(currentFence.Info))
 			seg.fenceMarker = currentFence.Delimiter
 			seg.fenceLen = currentFence.Length
 		}
@@ -460,8 +462,8 @@ func styleCodeBlockLines(lines []string, width int, theme codeFenceTheme) []stri
 		return lines
 	}
 	bgStyle := lipgloss.NewStyle().Background(lipgloss.Color(bg)).Foreground(lipgloss.Color(fg))
-	bgSeq := ansiSeqForColor(lipgloss.Color(bg), false)
-	fgSeq := ansiSeqForColor(lipgloss.Color(fg), true)
+	bgSeq := syntax.ColorSequence(lipgloss.Color(bg), false)
+	fgSeq := syntax.ColorSequence(lipgloss.Color(fg), true)
 	if bgSeq == "" {
 		return lines
 	}
@@ -481,11 +483,11 @@ func styleCodeBlockLines(lines []string, width int, theme codeFenceTheme) []stri
 	return out
 }
 
-func renderAssistantCodeFence(seg assistantMarkdownSegment, codeSample string, width, continuationExtra int, hl **codeHighlighter) ([]string, []int, []bool) {
+func renderAssistantCodeFence(seg assistantMarkdownSegment, codeSample string, width, continuationExtra int, hl **syntax.Highlighter) ([]string, []int, []bool) {
 	return renderCodeFence(seg, codeSample, width, continuationExtra, hl, assistantCodeFenceTheme())
 }
 
-func renderCodeFence(seg assistantMarkdownSegment, codeSample string, width, continuationExtra int, hl **codeHighlighter, theme codeFenceTheme) ([]string, []int, []bool) {
+func renderCodeFence(seg assistantMarkdownSegment, codeSample string, width, continuationExtra int, hl **syntax.Highlighter, theme codeFenceTheme) ([]string, []int, []bool) {
 	const (
 		codeBlockInnerPadX = 1
 		codeBlockInnerPadY = 1
@@ -512,7 +514,7 @@ func renderCodeFence(seg assistantMarkdownSegment, codeSample string, width, con
 	}
 	code = strings.TrimSuffix(code, "\n")
 
-	lang := normalizeCodeFenceLanguage(seg.fenceLang)
+	lang := syntax.NormalizeLanguage(seg.fenceLang)
 	label := strings.ToUpper(lang)
 	if label == "" {
 		label = "TEXT"
@@ -530,8 +532,8 @@ func renderCodeFence(seg assistantMarkdownSegment, codeSample string, width, con
 			bodyLines[i] = lipgloss.NewStyle().Foreground(lipgloss.Color(theme.fg)).Render(bodyLines[i])
 		}
 	} else {
-		h := ensureCodeHighlighterWithLanguage(hl, "", codeSample, lang)
-		bodyLines = highlightCodeLines(h, strings.Split(code, "\n"), theme.bg)
+		h := syntax.Ensure(hl, "", codeSample, lang)
+		bodyLines = syntax.Lines(h, strings.Split(code, "\n"), theme.bg)
 		if len(bodyLines) == 0 {
 			bodyLines = []string{""}
 		}
@@ -568,7 +570,7 @@ func renderCodeFence(seg assistantMarkdownSegment, codeSample string, width, con
 	return lines, syntheticOut, softWrapsOut
 }
 
-func renderRichMarkdownContent(content string, width int, hl **codeHighlighter) []string {
+func renderRichMarkdownContent(content string, width int, hl **syntax.Highlighter) []string {
 	return renderRichMarkdownContentWithCodeFenceTheme(content, width, hl, assistantCodeFenceTheme())
 }
 
@@ -576,8 +578,8 @@ func renderDialogMarkdownContent(content string, width int) []string {
 	return renderRichMarkdownContentWithCodeFenceTheme(content, width, nil, dialogCodeFenceTheme())
 }
 
-func renderRichMarkdownContentWithCodeFenceTheme(content string, width int, hl **codeHighlighter, theme codeFenceTheme) []string {
-	var localHL *codeHighlighter
+func renderRichMarkdownContentWithCodeFenceTheme(content string, width int, hl **syntax.Highlighter, theme codeFenceTheme) []string {
+	var localHL *syntax.Highlighter
 	if hl == nil {
 		hl = &localHL
 	}
@@ -618,7 +620,7 @@ func renderRichMarkdownContentWithCodeFenceTheme(content string, width int, hl *
 	return out
 }
 
-func renderAssistantMarkdownContent(content, codeSample string, width, continuationExtra int, hl **codeHighlighter) ([]string, []int, []bool) {
+func renderAssistantMarkdownContent(content, codeSample string, width, continuationExtra int, hl **syntax.Highlighter) ([]string, []int, []bool) {
 	content = sanitizeDisplayText(content)
 	codeSample = sanitizeDisplayText(codeSample)
 	segments := splitAssistantMarkdownSegments(content)

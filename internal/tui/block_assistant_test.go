@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/lipgloss/v2"
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
@@ -337,7 +339,7 @@ func TestSplitAssistantMarkdownSegmentsCapturesFenceLanguage(t *testing.T) {
 func TestRenderAssistantCodeFenceShowsTextBadgeWithoutHighlight(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	seg := assistantMarkdownSegment{raw: "```text\nAGENTS.md\n```", code: true, fenceLang: "text"}
-	var hl *codeHighlighter
+	var hl *syntax.Highlighter
 	lines, _, _ := renderAssistantCodeFence(seg, "AGENTS.md", 24, 2, &hl)
 	joinedANSI := strings.Join(lines, "\n")
 	joinedPlain := stripANSI(joinedANSI)
@@ -351,15 +353,26 @@ func TestRenderAssistantCodeFenceShowsTextBadgeWithoutHighlight(t *testing.T) {
 
 func TestRenderAssistantCodeFenceUsesExplicitLanguageLexer(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	seg := assistantMarkdownSegment{raw: "```go\nfunc main() {}\n```", code: true, fenceLang: "go"}
-	var hl *codeHighlighter
-	lines, _, _ := renderAssistantCodeFence(seg, "func main() {}", 32, 2, &hl)
+	// This short prefix does not identify Go through content analysis; the fence
+	// language must reach the highlighter even before a complete statement arrives.
+	const source = "func"
+	seg := assistantMarkdownSegment{raw: "```go\nfunc\n```", code: true, fenceLang: "go"}
+	var hl *syntax.Highlighter
+	lines, _, _ := renderAssistantCodeFence(seg, source, 32, 2, &hl)
 	if hl == nil {
 		t.Fatal("expected code highlighter")
 	}
-	if got := hl.language; got != "go" {
-		t.Fatalf("language=%q want go", got)
+	explicit := syntax.New("", source, "go").Line(source, "")
+	inferred := syntax.New("", source, "").Line(source, "")
+	if explicit == inferred {
+		t.Fatal("fixture does not distinguish explicit language from content analysis")
 	}
+	if got := hl.Line(source, ""); got != explicit {
+		t.Fatalf("fence highlighter = %q, want explicit Go %q", got, explicit)
+	}
+	line := renderedLineContaining(t, lines, source)
+	foreground := renderedCellsForText(t, explicit, source)[0].Style.Fg
+	assertRenderedTextForeground(t, line, source, foreground)
 	joinedPlain := stripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(joinedPlain, "GO") {
 		t.Fatalf("expected GO badge, got %q", joinedPlain)
@@ -369,7 +382,7 @@ func TestRenderAssistantCodeFenceUsesExplicitLanguageLexer(t *testing.T) {
 func TestRenderAssistantCodeFenceAddsHorizontalPadding(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	seg := assistantMarkdownSegment{raw: "```text\nhello\n```", code: true, fenceLang: "text"}
-	var hl *codeHighlighter
+	var hl *syntax.Highlighter
 	lines, synthetic, _ := renderAssistantCodeFence(seg, "hello", 16, 2, &hl)
 	if len(lines) < 5 {
 		t.Fatalf("len=%d want >=5", len(lines))
@@ -428,7 +441,7 @@ func TestParseAssistantSummaryRecognizesLeadingSummaryBlock(t *testing.T) {
 
 func TestRenderAssistantCodeBlockUsesFullWidthCodeSurface(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	var hl *codeHighlighter
+	var hl *syntax.Highlighter
 	lines, _, _ := renderAssistantMarkdownContent("```go\nfmt.Println(1)\n```", "fmt.Println(1)", 24, 2, &hl)
 	if len(lines) != 5 {
 		t.Fatalf("len=%d want 5, lines=%#v", len(lines), lines)
@@ -852,7 +865,7 @@ func TestCloneBlockForDeferredSourceClearsApplyPatchPreviewMemo(t *testing.T) {
 
 func TestRenderRichMarkdownContentHighlightsFencedCode(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	var hl *codeHighlighter
+	var hl *syntax.Highlighter
 	lines := renderRichMarkdownContent("## Example\n\n```go\nfmt.Println(1)\n```", 32, &hl)
 	plain := stripANSI(strings.Join(lines, "\n"))
 	if !strings.Contains(plain, "Example") {

@@ -9,6 +9,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	glamansi "github.com/keakon/glamour/v2/ansi"
 	"github.com/keakon/x/ansi"
 	"github.com/yuin/goldmark"
@@ -36,7 +38,7 @@ type fileViewerRequest struct {
 	width              int
 	markdown           bool
 	style              glamansi.StyleConfig
-	highlighter        *codeHighlighter
+	highlighter        *syntax.Highlighter
 }
 type fileViewerLoadedMsg struct {
 	links        *fileLinksLoadedMsg
@@ -185,17 +187,7 @@ func loadFileViewer(req fileViewerRequest) fileViewerLoadedMsg {
 		md.SetRenderer(renderer.NewRenderer(renderer.WithNodeRenderers(util.Prioritized(glamansi.NewRenderer(glamansi.Options{WordWrap: min(req.width, fileViewerMaxWidth), Styles: req.style}), 1000))))
 		err = md.Renderer().Render(&output, []byte(safe), root)
 	} else {
-		lexer := req.highlighter.getLexer(safe)
-		if lexer == nil {
-			_, err = output.Write([]byte(safe))
-		} else {
-			it, e := lexer.Tokenise(nil, safe)
-			if e != nil {
-				_, err = output.Write([]byte(safe))
-			} else {
-				err = (bgFormatter{}).Format(&output, req.highlighter.chromaStyle, it)
-			}
-		}
+		err = req.highlighter.Write(&output, safe)
 	}
 	if err != nil && !output.truncated {
 		result.err = fmt.Errorf("preview: %w", err)

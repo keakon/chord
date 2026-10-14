@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/chord/internal/tools"
 )
 
@@ -22,7 +24,7 @@ type streamingApplyPatchCardLayout struct {
 	syntaxPath  string
 	patchStart  int
 	totalLines  int
-	highlighter *codeHighlighter
+	highlighter *syntax.Highlighter
 }
 
 func (b *Block) streamingApplyPatchRangeEligible() bool {

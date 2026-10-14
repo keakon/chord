@@ -1,4 +1,8 @@
-package tui
+// Package syntax renders terminal-safe source code with bounded lexer and render caches.
+// Each Highlighter belongs to one caller and is not safe for concurrent use.
+// Lexer lookup and the immutable fixed token palette are shared across instances.
+// Callers supply container backgrounds; theme state and layout stay outside this package.
+package syntax
 
 import (
 	"bytes"
@@ -271,7 +275,7 @@ func lexerForSpecialFilename(base string) chroma.Lexer {
 }
 
 func lexerForExplicitLanguage(language string) chroma.Lexer {
-	language = normalizeCodeFenceLanguage(language)
+	language = NormalizeLanguage(language)
 	if language == "" || language == "text" {
 		return nil
 	}
@@ -296,11 +300,11 @@ func lexerForExplicitLanguage(language string) chroma.Lexer {
 	return nil
 }
 
-// codeHighlighter is a stateful syntax highlighter for code rendering.
+// Highlighter is a stateful syntax highlighter for code rendering.
 // It caches the chroma lexer (expensive file-path lookup / optional content
 // analysis when no file path exists) and highlighted render results across all
 // lines/snippets of a single block.
-type codeHighlighter struct {
+type Highlighter struct {
 	filePath      string
 	sample        string
 	language      string
@@ -314,11 +318,12 @@ type codeHighlighter struct {
 	renderCacheBytes int
 }
 
-func newCodeHighlighterWithLanguage(filePath, sample, language string) *codeHighlighter {
-	return &codeHighlighter{
+// New creates a highlighter with lazy lexer resolution and an empty render cache.
+func New(filePath, sample, language string) *Highlighter {
+	return &Highlighter{
 		filePath:    filePath,
 		sample:      sample,
-		language:    normalizeCodeFenceLanguage(language),
+		language:    NormalizeLanguage(language),
 		chromaStyle: toolCodeChromaStyle(),
 		renderCache: make(map[uint64]string),
 	}
@@ -378,7 +383,8 @@ func buildToolCodeChromaStyle() *chroma.Style {
 	return styled
 }
 
-func normalizeCodeFenceLanguage(language string) string {
+// NormalizeLanguage canonicalizes code-fence language aliases.
+func NormalizeLanguage(language string) string {
 	language = strings.TrimSpace(strings.ToLower(language))
 	switch language {
 	case "":
@@ -403,7 +409,7 @@ func normalizeCodeFenceLanguage(language string) string {
 // updateContext refreshes file/sample detection inputs and clears the cached
 // lexer and render results when the resolved lexer may no longer apply. A
 // sample that only grew keeps them: see the append-only case below.
-func (h *codeHighlighter) updateContext(filePath, sample string) {
+func (h *Highlighter) updateContext(filePath, sample string) {
 	pathChanged := h.filePath != filePath
 	sampleChanged := sample != "" && h.sample != sample
 	if !pathChanged && !sampleChanged {
@@ -433,19 +439,19 @@ func (h *codeHighlighter) updateContext(filePath, sample string) {
 	h.resetLexer()
 }
 
-func (h *codeHighlighter) resetLexer() {
+func (h *Highlighter) resetLexer() {
 	h.cachedLexer = nil
 	h.lexerResolved = false
 	h.clearRenderCache()
 }
 
-func (h *codeHighlighter) clearRenderCache() {
+func (h *Highlighter) clearRenderCache() {
 	h.renderCache = make(map[uint64]string)
 	h.renderCacheBytes = 0
 }
 
-func (h *codeHighlighter) updateLanguage(language string) {
-	language = normalizeCodeFenceLanguage(language)
+func (h *Highlighter) updateLanguage(language string) {
+	language = NormalizeLanguage(language)
 	if h.language == language {
 		return
 	}
@@ -460,7 +466,7 @@ func (h *codeHighlighter) updateLanguage(language string) {
 //   - file path matching an allowlisted special basename (eg Dockerfile.prod)
 //   - content analysis, but only when there is no file path and no explicit language
 //   - plaintext fallback for content-only snippets
-func (h *codeHighlighter) getLexer(source string) chroma.Lexer {
+func (h *Highlighter) getLexer(source string) chroma.Lexer {
 	if h.lexerResolved {
 		return h.cachedLexer
 	}
@@ -490,21 +496,21 @@ func (h *codeHighlighter) getLexer(source string) chroma.Lexer {
 	return h.cachedLexer
 }
 
-// highlightLine syntax-highlights a single source line with the given terminal
+// Line syntax-highlights a single source line with the given terminal
 // 256-colour background (e.g. "22" for dark green, "52" for dark red).
-func (h *codeHighlighter) highlightLine(source, bgTerm string) string {
+func (h *Highlighter) Line(source, bgTerm string) string {
 	return strings.TrimRight(h.highlightRendered(source, bgTerm), "\n")
 }
 
-// highlightSnippet syntax-highlights a full source snippet while preserving
+// Snippet syntax-highlights a full source snippet while preserving
 // its original newline structure.
-func (h *codeHighlighter) highlightSnippet(source, bgTerm string) string {
+func (h *Highlighter) Snippet(source, bgTerm string) string {
 	return h.highlightRendered(source, bgTerm)
 }
 
 // highlightRendered syntax-highlights the given source and preserves its
 // original newline structure.
-func (h *codeHighlighter) highlightRendered(source, bgTerm string) string {
+func (h *Highlighter) highlightRendered(source, bgTerm string) string {
 	var bg color.Color
 	if bgTerm != "" {
 		bg = lipgloss.Color(bgTerm)
@@ -550,7 +556,7 @@ const (
 	renderCacheEntryOverhead = 96
 )
 
-func (h *codeHighlighter) cacheRendered(key uint64, result string) string {
+func (h *Highlighter) cacheRendered(key uint64, result string) string {
 	if h.renderCache == nil {
 		h.renderCache = make(map[uint64]string)
 	}
@@ -575,7 +581,7 @@ func (h *codeHighlighter) cacheRendered(key uint64, result string) string {
 // instead would make a snippet with more lines than the cache holds miss on
 // every line of every frame, which is the pathological case for a large
 // streaming apply_patch preview.
-func (h *codeHighlighter) evictRenderCache() {
+func (h *Highlighter) evictRenderCache() {
 	target := h.renderCacheBytes / 2
 	for key, value := range h.renderCache {
 		delete(h.renderCache, key)
@@ -590,7 +596,7 @@ func (h *codeHighlighter) evictRenderCache() {
 }
 
 func renderPlainWithBackground(source string, bg color.Color) string {
-	bgSeq := ansiSeqForColor(bg, false)
+	bgSeq := ColorSequence(bg, false)
 	if bgSeq == "" {
 		return source
 	}
@@ -605,7 +611,7 @@ func renderPlainWithBackground(source string, bg color.Color) string {
 // and a fixed terminal background color on every token.
 // bg is an arbitrary color.Color (including lipgloss.Color, which accepts both
 // ANSI 256-colour index strings like "22" and hex RGB strings like "#005f00").
-// ansiSeqForColor always emits a 24-bit RGB sequence (\x1b[48;2;R;G;Bm) so
+// ColorSequence always emits a 24-bit RGB sequence (\x1b[48;2;R;G;Bm) so
 // that fg and bg are never merged into a single SGR param — some layers in the
 // bubbletea/ultraviolet render pipeline do not handle merged params correctly,
 // causing garbled output.
@@ -681,7 +687,7 @@ func (f bgFormatter) Format(w io.Writer, style *chroma.Style, it chroma.Iterator
 	// "38;2;R;G;B;48;5;N" params in a single SGR — some layers in the
 	// bubbletea/ultraviolet render pipeline do not handle merged params
 	// correctly, causing garbled output.
-	bgSeq := ansiSeqForColor(f.bg, false)
+	bgSeq := ColorSequence(f.bg, false)
 	for token := it(); token != chroma.EOF; token = it() {
 		if token.Value == "" {
 			continue
@@ -689,7 +695,7 @@ func (f bgFormatter) Format(w io.Writer, style *chroma.Style, it chroma.Iterator
 		entry := style.Get(token.Type)
 
 		// Build a text-decoration sequence only when needed (Bold/Italic/Underline).
-		// fg and bg colours are handled separately via ansiSeqForColor below.
+		// fg and bg colours are handled separately via ColorSequence below.
 		var seq strings.Builder
 		if entry.Bold == chroma.Yes || entry.Italic == chroma.Yes || entry.Underline == chroma.Yes {
 			seq.WriteString("\x1b[")
@@ -716,7 +722,7 @@ func (f bgFormatter) Format(w io.Writer, style *chroma.Style, it chroma.Iterator
 		// Emit fg and bg as separate sequences to avoid combined SGR params.
 		prefix := ""
 		if entry.Colour.IsSet() {
-			prefix += ansiSeqForColor(lipgloss.Color(entry.Colour.String()), true)
+			prefix += ColorSequence(lipgloss.Color(entry.Colour.String()), true)
 		}
 		if bgSeq != "" {
 			prefix += bgSeq
@@ -731,10 +737,10 @@ func (f bgFormatter) Format(w io.Writer, style *chroma.Style, it chroma.Iterator
 	return nil
 }
 
-// ansiSeqForColor converts a color.Color to an ANSI SGR sequence.
+// ColorSequence converts a color.Color to an ANSI SGR sequence.
 // If fg is true, generates a foreground sequence; otherwise background.
 // Returns an empty string if c is nil.
-func ansiSeqForColor(c color.Color, fg bool) string {
+func ColorSequence(c color.Color, fg bool) string {
 	if c == nil {
 		return ""
 	}
@@ -745,4 +751,40 @@ func ansiSeqForColor(c color.Color, fg bool) string {
 		return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r8, g8, b8)
 	}
 	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r8, g8, b8)
+}
+
+// Ensure creates or updates a caller-owned highlighter, preserving append-only
+// caches when the lexer remains anchored by the file path or explicit language.
+func Ensure(slot **Highlighter, filePath, sample, language string) *Highlighter {
+	if *slot == nil {
+		*slot = New(filePath, sample, language)
+		return *slot
+	}
+	(*slot).updateContext(filePath, sample)
+	(*slot).updateLanguage(language)
+	return *slot
+}
+
+// Lines highlights a complete source-line sequence before splitting it back
+// into rows, preserving multiline lexer context and the input row count.
+func Lines(h *Highlighter, lines []string, bgTerm string) []string {
+	if len(lines) == 0 {
+		return nil
+	}
+	source := strings.Join(lines, "\n")
+	if source != "" {
+		source += "\n"
+	}
+	highlighted := h.Snippet(source, bgTerm)
+	highlighted = strings.TrimSuffix(highlighted, "\n")
+	highlightedLines := strings.Split(highlighted, "\n")
+	if len(highlightedLines) == len(lines) {
+		return highlightedLines
+	}
+
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		out = append(out, h.Line(line, bgTerm))
+	}
+	return out
 }

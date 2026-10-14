@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/keakon/x/ansi"
 
@@ -29,7 +31,7 @@ func TestFileViewerSourceRenderBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := loadFileViewer(fileViewerRequest{ctx: context.Background(), file: f, width: 80, highlighter: newCodeHighlighterWithLanguage(path, "", "")})
+	r := loadFileViewer(fileViewerRequest{ctx: context.Background(), file: f, width: 80, highlighter: syntax.New(path, "", "")})
 	if r.err != nil || len(r.lines) > fileViewerRenderLines || !strings.Contains(r.note, "truncated") {
 		t.Fatalf("lines=%d note=%q err=%v", len(r.lines), r.note, r.err)
 	}

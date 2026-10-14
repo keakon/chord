@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/tui/syntax"
 )
 
 // Regression test for a long-session drift class:
@@ -68,7 +70,7 @@ func TestViewportDropOffScreenCachesReleasesDerivedCaches(t *testing.T) {
 
 	visible.mdCache = []string{"kept"}
 	offscreen.mdCache = []string{"dropped"}
-	offscreen.codeHL = newCodeHighlighterWithLanguage("", "", "go")
+	offscreen.codeHL = syntax.New("", "", "go")
 
 	v.DropOffScreenCaches()
 

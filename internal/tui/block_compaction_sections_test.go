@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 
@@ -165,14 +164,23 @@ func TestCompactionSectionHighlighterCacheSurvivesReRender(t *testing.T) {
 	if slots[0] == slots[1] {
 		t.Fatal("sections share one highlighter slot")
 	}
-	first := reflect.ValueOf(slots[0].renderCache).Pointer()
-	if first == 0 {
-		t.Fatal("anchors highlighter cache not initialized after first render")
+	first := slots[0]
+	firstRendered := first.Snippet("var cacheProbe = 731", "")
+	warmAllocs := testing.AllocsPerRun(5, func() { first.Snippet("var cacheProbe = 731", "") })
+	renderAllocs := testing.AllocsPerRun(5, func() { b.Render(100, "") })
+	rerenderAllocs := testing.AllocsPerRun(5, func() {
+		b.Render(100, "")
+		b.compactionSectionHL[0].Snippet("var cacheProbe = 731", "")
+	})
+	if rerenderAllocs > renderAllocs+warmAllocs {
+		t.Fatalf("re-render lost the warm section cache: combined=%v render=%v warm=%v", rerenderAllocs, renderAllocs, warmAllocs)
 	}
+
 	b.Render(100, "")
-	if again := reflect.ValueOf(b.compactionSectionHL[0].renderCache).Pointer(); again != first {
-		t.Fatal("re-render reset the anchors highlighter cache; sections must hold disjointslots")
+	if again := b.compactionSectionHL[0]; again != first || again.Snippet("var cacheProbe = 731", "") != firstRendered {
+		t.Fatal("re-render replaced the anchors highlighter or changed its output")
 	}
+
 }
 
 // A preserved excerpt keeps its own line structure in the card: the checkpoint

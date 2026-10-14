@@ -1148,42 +1148,6 @@ func renderQueuedToolHeaderBadge(line string, width int) string {
 	return trimmed + strings.Repeat(" ", availableGap) + badge + strings.Repeat(" ", rightPadding)
 }
 
-func ensureCodeHighlighter(slot **codeHighlighter, filePath, sample string) *codeHighlighter {
-	return ensureCodeHighlighterWithLanguage(slot, filePath, sample, "")
-}
-
-func ensureCodeHighlighterWithLanguage(slot **codeHighlighter, filePath, sample, language string) *codeHighlighter {
-	if *slot == nil {
-		*slot = newCodeHighlighterWithLanguage(filePath, sample, language)
-		return *slot
-	}
-	(*slot).updateContext(filePath, sample)
-	(*slot).updateLanguage(language)
-	return *slot
-}
-
-func highlightCodeLines(h *codeHighlighter, lines []string, bgTerm string) []string {
-	if len(lines) == 0 {
-		return nil
-	}
-	source := strings.Join(lines, "\n")
-	if source != "" {
-		source += "\n"
-	}
-	highlighted := h.highlightSnippet(source, bgTerm)
-	highlighted = strings.TrimSuffix(highlighted, "\n")
-	highlightedLines := strings.Split(highlighted, "\n")
-	if len(highlightedLines) == len(lines) {
-		return highlightedLines
-	}
-
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		out = append(out, h.highlightLine(line, bgTerm))
-	}
-	return out
-}
-
 func sanitizeToolDisplayText(s string) string {
 	return sanitizeDisplayText(s)
 }

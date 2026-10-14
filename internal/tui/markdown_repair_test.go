@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/glamour/v2"
 
 	"github.com/keakon/chord/internal/message"
@@ -148,7 +150,7 @@ func TestRenderMarkdownContentInlinesTableEmailLinks(t *testing.T) {
 
 func TestRenderAssistantMarkdownContentKeepsNestedFenceInsideOuterMarkdownExample(t *testing.T) {
 	ApplyTheme(DefaultTheme())
-	var hl *codeHighlighter
+	var hl *syntax.Highlighter
 	content := "````md\nHi!\n\n## Proposed API\n\n```go\nfunc main() {}\n```\n\nAfter.\n````"
 	lines, _, _ := renderAssistantMarkdownContent(content, content, 48, 2, &hl)
 	joinedPlain := stripANSI(strings.Join(lines, "\n"))

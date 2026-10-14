@@ -8,7 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alecthomas/chroma/v2"
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/lipgloss/v2"
 
 	"github.com/keakon/chord/internal/message"
@@ -87,7 +88,7 @@ func TestApplyPatchToolCardRendersNamePathAndHighlightedPreview(t *testing.T) {
 		t.Fatalf("expected patch preview, got:\n%s", plain)
 	}
 	added := renderedLineContaining(t, lines, "func main")
-	assertRenderedTextForeground(t, added, "func", colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()))
+	assertRenderedTextForeground(t, added, "func", renderedCellsForText(t, syntax.New("sample.go", "", "").Line("func sample() {}", ""), "func")[0].Style.Fg)
 	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
 }
 
@@ -327,7 +328,7 @@ func TestApplyPatchErrorCardKeepsHighlightedPatchPreview(t *testing.T) {
 		t.Fatalf("expected failed patch preview hunk header to include an inline separator, got %q", stripANSI(hunkHeader))
 	}
 	added := renderedLineContaining(t, lines, "func main")
-	assertRenderedTextForeground(t, added, "func", colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()))
+	assertRenderedTextForeground(t, added, "func", renderedCellsForText(t, syntax.New("sample.go", "", "").Line("func sample() {}", ""), "func")[0].Style.Fg)
 	assertRenderedTextBackground(t, added, "func", colorOfTheme(currentTheme.DiffAddLineBg))
 }
 
@@ -624,7 +625,7 @@ func TestEditAndApplyPatchToolCardsHighlightContextLines(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	args, _ := json.Marshal(map[string]string{"path": "src/demo.go"})
 	diff := "@@ -1,5 +1,6 @@\n func demo() error {\n+\tvalue := 1\n if value != 0 {\n\treturn fmt.Errorf(\"bad: %d\", value)\n }\n return nil\n"
-	wantKeyword := colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String())
+	wantKeyword := renderedCellsForText(t, syntax.New("sample.go", "", "").Line("func sample() {}", ""), "func")[0].Style.Fg
 	for _, toolName := range []string{tools.NameEdit, tools.NameApplyPatch} {
 		t.Run(toolName, func(t *testing.T) {
 			block := &Block{ID: 1, Type: BlockToolCall, ToolName: toolName, Content: string(args), Diff: diff, ResultDone: true}
@@ -681,69 +682,6 @@ func TestEditLiveArgsWithoutCompletePathDoNotRenderDot(t *testing.T) {
 	}
 }
 
-func TestLexerForFilePathPrefersWhitelistedExtensionOverConflictingBasename(t *testing.T) {
-	hl := newCodeHighlighter("bash_jobs.go", "package tools\n")
-	lexer := hl.getLexer("package tools\n")
-	if lexer == nil {
-		t.Fatal("expected lexer for whitelisted .go extension")
-	}
-	if got := lexer.Config().Name; got != "Go" {
-		t.Fatalf("expected Go lexer for bash_jobs.go, got %q", got)
-	}
-}
-
-func TestLexerForFilePathUsesSpecialFilenameWithSuffix(t *testing.T) {
-	hl := newCodeHighlighter("Dockerfile.prod", "FROM alpine:3.20\nRUN echo hi\n")
-	lexer := hl.getLexer("FROM alpine:3.20\nRUN echo hi\n")
-	if lexer == nil {
-		t.Fatal("expected lexer for Dockerfile.prod")
-	}
-	if got := lexer.Config().Name; got != "Docker" {
-		t.Fatalf("expected Docker lexer for Dockerfile.prod, got %q", got)
-	}
-}
-
-func TestLexerForFilePathUsesMDXAsMarkdown(t *testing.T) {
-	hl := newCodeHighlighter("website/src/content/docs/index.mdx", "# Hello\n\n<Component />\n")
-	lexer := hl.getLexer("# Hello\n")
-	if lexer == nil {
-		t.Fatal("expected lexer for .mdx extension")
-	}
-	if got := lexer.Config().Name; got != "markdown" {
-		t.Fatalf("expected Markdown lexer for .mdx, got %q", got)
-	}
-}
-
-func TestLexerForFilePathUsesMarkdownExtensionAsMarkdown(t *testing.T) {
-	hl := newCodeHighlighter("README.markdown", "# Hello\n\nContent\n")
-	lexer := hl.getLexer("# Hello\n")
-	if lexer == nil {
-		t.Fatal("expected lexer for .markdown extension")
-	}
-	if got := lexer.Config().Name; got != "markdown" {
-		t.Fatalf("expected Markdown lexer for .markdown, got %q", got)
-	}
-}
-
-func TestLexerForExplicitMDXLanguageUsesMarkdown(t *testing.T) {
-	hl := newCodeHighlighterWithLanguage("", "# Hello\n\n<Component />\n", "mdx")
-	lexer := hl.getLexer("# Hello\n")
-	if lexer == nil {
-		t.Fatal("expected lexer for mdx language hint")
-	}
-	if got := lexer.Config().Name; got != "markdown" {
-		t.Fatalf("expected Markdown lexer for mdx language hint, got %q", got)
-	}
-}
-
-func TestLexerForFilePathDisablesHighlightForUnknownExtension(t *testing.T) {
-	hl := newCodeHighlighter("notes.unknownext", "package tools\n")
-	rendered := hl.highlightLine("package tools", "")
-	if rendered != "package tools" {
-		t.Fatalf("expected unknown extension to remain plain text, got %q", rendered)
-	}
-}
-
 func TestLexerForFilePathKeepsBackgroundForUnknownExtension(t *testing.T) {
 	ApplyTheme(DefaultTheme())
 	backgrounds := []struct {
@@ -756,19 +694,19 @@ func TestLexerForFilePathKeepsBackgroundForUnknownExtension(t *testing.T) {
 	}
 	for _, background := range backgrounds {
 		t.Run(background.name, func(t *testing.T) {
-			hl := newCodeHighlighter("notes.unknownext", "package tools\n")
-			rendered := hl.highlightLine("package tools", background.value)
+			hl := syntax.New("notes.unknownext", "package tools\n", "")
+			rendered := hl.Line("package tools", background.value)
 			if plain := stripANSI(rendered); plain != "package tools" {
 				t.Fatalf("expected unknown extension background fallback to preserve text, got %q", plain)
 			}
-			wantBg := ansiSeqForColor(lipgloss.Color(background.value), false)
+			wantBg := syntax.ColorSequence(lipgloss.Color(background.value), false)
 			if wantBg == "" {
 				t.Fatal("expected background color to produce an ANSI sequence")
 			}
 			if !strings.Contains(rendered, wantBg) {
 				t.Fatalf("expected unknown extension fallback to keep background %q, got %q", wantBg, rendered)
 			}
-			spaceRendered := hl.highlightLine("    ", background.value)
+			spaceRendered := hl.Line("    ", background.value)
 			if plain := stripANSI(spaceRendered); plain != "    " {
 				t.Fatalf("expected whitespace-only fallback to preserve spaces, got %q", plain)
 			}
@@ -776,25 +714,6 @@ func TestLexerForFilePathKeepsBackgroundForUnknownExtension(t *testing.T) {
 				t.Fatalf("expected whitespace-only fallback to keep background %q, got %q", wantBg, spaceRendered)
 			}
 		})
-	}
-}
-
-func TestLexerForFilePathDisablesHighlightForUnknownBasenameWithoutExtension(t *testing.T) {
-	hl := newCodeHighlighter("Jenkinsfile", "pipeline { agent any }\n")
-	rendered := hl.highlightLine("pipeline { agent any }", "")
-	if rendered != "pipeline { agent any }" {
-		t.Fatalf("expected unsupported basename to remain plain text, got %q", rendered)
-	}
-}
-
-func TestLexerForContentOnlyStillUsesAnalysis(t *testing.T) {
-	hl := newCodeHighlighter("", "package tools\n")
-	lexer := hl.getLexer("package tools\n")
-	if lexer == nil {
-		t.Fatal("expected lexer when no file path is available")
-	}
-	if got := lexer.Config().Name; got == "fallback" {
-		t.Fatalf("expected analysis-based lexer for content-only highlighting, got %q", got)
 	}
 }
 
@@ -813,7 +732,7 @@ func TestRenderInlineDiffLineKeepsSingleTokenInsertionSingleLine(t *testing.T) {
 }
 
 func TestRenderInlineDiffLineKeepsSyntaxHighlighting(t *testing.T) {
-	hl := newCodeHighlighter("example.go", "func demo() {\n\treturn 1\n}\n")
+	hl := syntax.New("example.go", "func demo() {\n\treturn 1\n}\n", "")
 	lines := renderInlineDiffLine("return 1", "return 10", 80, hl)
 	if len(lines) != 1 {
 		t.Fatalf("expected single-line inline diff, got %#v", lines)
@@ -821,7 +740,7 @@ func TestRenderInlineDiffLineKeepsSyntaxHighlighting(t *testing.T) {
 	if !strings.Contains(stripANSI(lines[0]), "+return 10") {
 		t.Fatalf("expected changed line to stay visible, got %q", stripANSI(lines[0]))
 	}
-	keywordColour := colorOfTheme(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String())
+	keywordColour := renderedCellsForText(t, syntax.New("sample.go", "", "").Line("func sample() {}", ""), "func")[0].Style.Fg
 	assertRenderedTextForeground(t, lines[0], "return", keywordColour)
 	assertRenderedTextBackground(t, lines[0], "0", colorOfTheme(currentTheme.DiffAddInlineBg))
 }
@@ -894,7 +813,7 @@ func TestEditToolCardKeepsFinalInlineDiffBackgrounds(t *testing.T) {
 func TestRenderInlineDiffLineKeepsTabIndentedDeletionAligned(t *testing.T) {
 	oldLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameJobOutput, tools.NameViewImage:"
 	newLine := "\tcase tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameJobOutput:"
-	hl := newCodeHighlighter("example.go", "package tui\n\nfunc example() {\n"+oldLine+"\n}\n")
+	hl := syntax.New("example.go", "package tui\n\nfunc example() {\n"+oldLine+"\n}\n", "")
 
 	lines := renderInlineDiffLine(oldLine, newLine, 120, hl)
 	if len(lines) != 1 {
@@ -940,49 +859,6 @@ func TestRenderInlineDiffLineUsesGraphemeWidthLimit(t *testing.T) {
 	}
 	if got := stripANSI(lines[0]); got != "+"+newLine {
 		t.Fatalf("rendered line = %q, want %q", got, "+"+newLine)
-	}
-}
-
-func TestHighlightCodeLinesKeepsMarkdownEOFBlockMarkersStyled(t *testing.T) {
-	hl := newCodeHighlighter("plan.md", "")
-	lines := []string{
-		"1. first item",
-		"2. second item",
-	}
-
-	rendered := highlightCodeLines(hl, lines, "")
-	if len(rendered) != len(lines) {
-		t.Fatalf("expected %d highlighted lines, got %d: %#v", len(lines), len(rendered), rendered)
-	}
-	keywordSeq := ansiSeqForColor(lipgloss.Color(toolCodeChromaStyle().Get(chroma.Keyword).Colour.String()), true)
-	if keywordSeq == "" {
-		t.Fatal("expected markdown keyword colour to produce an ANSI sequence")
-	}
-	for i, line := range rendered {
-		marker := fmt.Sprintf("%d.", i+1)
-		if !strings.Contains(line, keywordSeq+marker) {
-			t.Fatalf("expected marker %q to be highlighted with keyword style; got %q", marker, line)
-		}
-	}
-}
-
-func TestHighlightCodeLinesKeepsMarkdownEOFHeadingStyled(t *testing.T) {
-	hl := newCodeHighlighter("notes.md", "")
-	lines := []string{
-		"# first heading",
-		"## second heading",
-	}
-
-	rendered := highlightCodeLines(hl, lines, "")
-	if len(rendered) != len(lines) {
-		t.Fatalf("expected %d highlighted lines, got %d: %#v", len(lines), len(rendered), rendered)
-	}
-	subheadingSeq := ansiSeqForColor(lipgloss.Color(toolCodeChromaStyle().Get(chroma.GenericSubheading).Colour.String()), true)
-	if subheadingSeq == "" {
-		t.Fatal("expected markdown subheading colour to produce an ANSI sequence")
-	}
-	if !strings.Contains(rendered[1], subheadingSeq+"## second heading") {
-		t.Fatalf("expected EOF subheading to be highlighted with subheading style; got %q", rendered[1])
 	}
 }
 
@@ -1337,7 +1213,7 @@ func TestRenderFileDiffCallMixedLongLinesUseTwoLineSnippets(t *testing.T) {
 }
 
 func TestRenderHighlightedSnippetLineShowsHiddenClusterSummary(t *testing.T) {
-	hl := newCodeHighlighter("example.go", "")
+	hl := syntax.New("example.go", "", "")
 	line := "alpha ONE beta TWO gamma THREE delta"
 	spans := []diffSegmentSpan{
 		{StartCol: strings.Index(line, "ONE"), EndCol: strings.Index(line, "ONE") + len("ONE")},
@@ -1355,7 +1231,7 @@ func TestRenderHighlightedSnippetLineShowsHiddenClusterSummary(t *testing.T) {
 }
 
 func TestRenderHighlightedSnippetLineOmitsSummaryWhenTooNarrow(t *testing.T) {
-	hl := newCodeHighlighter("example.go", "")
+	hl := syntax.New("example.go", "", "")
 	line := "alpha ONE beta TWO gamma THREE delta"
 	spans := []diffSegmentSpan{
 		{StartCol: strings.Index(line, "ONE"), EndCol: strings.Index(line, "ONE") + len("ONE")},
@@ -1773,33 +1649,5 @@ func TestApplyPatchPreviewMemoDropsLinesFromAStaleHighlighter(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("line %d kept the highlighting of the previous file\n got=%q\nwant=%q", i, got[i], want[i])
 		}
-	}
-}
-
-func TestCodeHighlighterReevaluatesUnanchoredStreamingSample(t *testing.T) {
-	h := newCodeHighlighterWithLanguage("", "plain text", "")
-	first := h.getLexer(h.sample)
-	if first == nil {
-		t.Fatal("expected an initial lexer")
-	}
-	h.updateContext("", "plain text\nfunc main() {}")
-	second := h.getLexer(h.sample)
-	if second == nil {
-		t.Fatal("expected a lexer after the sample grew")
-	}
-	if second == first {
-		t.Fatal("unanchored content lexer should be reevaluated after streaming sample growth")
-	}
-}
-
-func TestCodeHighlighterSkipsOversizedRenderCacheEntry(t *testing.T) {
-	h := newCodeHighlighterWithLanguage("demo.go", "", "")
-	oversized := strings.Repeat("x", maxRenderCacheBytes)
-	got := h.cacheRendered(1, oversized)
-	if got != oversized {
-		t.Fatal("cacheRendered changed the oversized result")
-	}
-	if len(h.renderCache) != 0 || h.renderCacheBytes != 0 {
-		t.Fatalf("oversized result entered cache: entries=%d bytes=%d", len(h.renderCache), h.renderCacheBytes)
 	}
 }

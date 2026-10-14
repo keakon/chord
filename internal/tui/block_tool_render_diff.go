@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/chord/internal/tools"
 	"github.com/keakon/chord/internal/tui/markdownutil"
 )
@@ -59,7 +61,7 @@ type diffOneSidedSpan struct {
 	LineWidth int
 }
 
-func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *codeHighlighter) {
+func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine string, oldLineNum, newLineNum, diffWidth int, hl *syntax.Highlighter) {
 	// Diff bodies come from file contents, which can legitimately carry
 	// orphaned variation selectors or standalone emoji modifiers. Normalize
 	// them before inline-diff spans and width math so the spans stay aligned
@@ -84,7 +86,7 @@ func appendApplyPatchToolUnifiedDiffPair(result *[]string, oldLine, newLine stri
 	)
 }
 
-func appendApplyPatchToolUnifiedDiffLine(result *[]string, body string, lineNum, diffWidth int, hl *codeHighlighter, added bool) {
+func appendApplyPatchToolUnifiedDiffLine(result *[]string, body string, lineNum, diffWidth int, hl *syntax.Highlighter, added bool) {
 	body = normalizeDisplayGlyphs(body)
 	bg := diffDelBg
 	marker := DiffDelStyle.Render("-")
@@ -213,7 +215,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 	// Sample the diff content once; the initial highlighter and every per-file
 	// section highlighter of a multi-file patch share the same sample.
 	diffSample := diffContentSample(displayDiff)
-	hl := ensureCodeHighlighter(&b.codeHL, syntaxPath, diffSample)
+	hl := syntax.Ensure(&b.codeHL, syntaxPath, diffSample, "")
 	seenHunk := false
 	renderedDiffFileCount := 0
 	var oldLineNum, newLineNum int
@@ -341,7 +343,7 @@ func (b *Block) renderFileDiffCall(width int, spinnerFrame string) []string {
 					result = append(result, applyPatchDiffSectionPrefix(mark, marker)+DimStyle.Render(strings.TrimPrefix(fileLine, filePrefix)))
 					seenHunk = false
 					oldLineNum, newLineNum = 0, 0
-					hl = newCodeHighlighterWithLanguage(syntaxPath, diffSample, "")
+					hl = syntax.New(syntaxPath, diffSample, "")
 					renderedDiffFileCount++
 					i++
 				}
@@ -752,11 +754,11 @@ func appendApplyPatchPreview(result []string, b *Block, syntaxPath string, width
 // it. The sample is a linear function of the patch and the preview is rebuilt
 // on every coalesced stream step, so skipping it once the lexer is resolved
 // keeps each step's cost proportional to the newly streamed text.
-func (b *Block) applyPatchPreviewHighlighter(filePath, patch string) *codeHighlighter {
-	if h := b.previewHL; h != nil && h.lexerResolved && h.filePath == filePath {
+func (b *Block) applyPatchPreviewHighlighter(filePath, patch string) *syntax.Highlighter {
+	if h := b.previewHL; h.ReadyForPath(filePath) {
 		return h
 	}
-	return ensureCodeHighlighterWithLanguage(&b.previewHL, filePath, applyPatchCodeSample(patch), "")
+	return syntax.Ensure(&b.previewHL, filePath, applyPatchCodeSample(patch), "")
 }
 
 // appendApplyPatchPreviewLines renders the patch preview lines, reusing the
@@ -770,11 +772,11 @@ func (b *Block) applyPatchPreviewHighlighter(filePath, patch string) *codeHighli
 // the previous lexer would leave the preview in two colour schemes for the rest
 // of the stream. Dropping the memo re-renders every line once with the new
 // lexer instead.
-func (b *Block) appendApplyPatchPreviewLines(patch string, width int, hl *codeHighlighter) []string {
+func (b *Block) appendApplyPatchPreviewLines(patch string, width int, hl *syntax.Highlighter) []string {
 	lines := editPatchPreviewLines(patch)
 	hlPath := ""
 	if hl != nil {
-		hlPath = hl.filePath
+		hlPath = hl.ContextKey()
 	}
 	reuse := 0
 	if b.previewRenderedWidth == width && b.previewRenderedPatch != "" &&
@@ -798,7 +800,7 @@ func (b *Block) appendApplyPatchPreviewLines(patch string, width int, hl *codeHi
 	return out
 }
 
-func renderApplyPatchPreviewLine(line string, width int, hl *codeHighlighter) string {
+func renderApplyPatchPreviewLine(line string, width int, hl *syntax.Highlighter) string {
 	switch {
 	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
 		code := line[1:]
@@ -999,7 +1001,7 @@ func appendReplaceEditPreview(result []string, args replaceEditArgs, filePath st
 	// the terminal's advance and the card background fills completely.
 	oldStr := normalizeDisplayGlyphs(args.OldString)
 	newStr := normalizeDisplayGlyphs(args.NewString)
-	hl := newCodeHighlighterWithLanguage(filePath, oldStr+"\n"+newStr, "")
+	hl := syntax.New(filePath, oldStr+"\n"+newStr, "")
 	for _, line := range replaceEditPreviewLines(oldStr) {
 		result = append(result, "    "+DiffDelStyle.Render("- ")+renderHighlightedSnippetLine(line, nil, max(width-2, 1), hl, diffDelBg))
 	}

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -231,7 +233,7 @@ func TestApplyPatchErrorCardPreviewStripsOrphans(t *testing.T) {
 // orphaned selectors left by editors or earlier tool runs. Both the one-sided
 // and paired diff line renderers must strip them before width math.
 func TestUnifiedDiffLineStripsOrphanSelectors(t *testing.T) {
-	hl := newCodeHighlighterWithLanguage("src/sample.go", "count is 42", "")
+	hl := syntax.New("src/sample.go", "count is 42", "")
 	var out []string
 	appendApplyPatchToolUnifiedDiffLine(&out, "count is \ufe0f42", 1, 60, hl, false)
 	appendApplyPatchToolUnifiedDiffPair(&out, "old value \ufe0f1", "new value 1", 1, 2, 60, hl)

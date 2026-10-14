@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/x/ansi"
 
 	"github.com/keakon/chord/internal/tui/markdownutil"
@@ -14,7 +16,7 @@ type numberedToolPreviewOptions struct {
 	rows         []readDisplayLine
 	sourceSample string
 	contentWidth int
-	highlighter  **codeHighlighter
+	highlighter  **syntax.Highlighter
 }
 
 func numberedToolPreviewWidth(cardWidth int) int {
@@ -47,7 +49,7 @@ func renderNumberedToolPreview(opts numberedToolPreviewOptions) []string {
 	if len(codeLines) > 0 && opts.highlighter != nil {
 		// The card frame restores ToolCallBg after inner ANSI resets; previews
 		// only need to emit syntax foregrounds here.
-		highlightedCodeLines = highlightCodeLines(ensureCodeHighlighter(opts.highlighter, opts.filePath, opts.sourceSample), codeLines, "")
+		highlightedCodeLines = syntax.Lines(syntax.Ensure(opts.highlighter, opts.filePath, opts.sourceSample, ""), codeLines, "")
 	}
 
 	result := make([]string, 0, len(visibleRows))

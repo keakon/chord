@@ -4,6 +4,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tui/markdownutil"
@@ -141,12 +143,12 @@ type Block struct {
 	// codeHL is a lazily-initialised syntax highlighter shared by code-like
 	// tool renderers (Read/Write/Edit) and assistant markdown code blocks. It
 	// caches lexer detection and rendered snippets across renders of the same block.
-	codeHL *codeHighlighter
+	codeHL *syntax.Highlighter
 
 	// previewHL is the syntax highlighter for the live apply_patch patch
 	// preview. It is separate from codeHL because the two render different
 	// samples of the same block during streaming.
-	previewHL *codeHighlighter
+	previewHL *syntax.Highlighter
 
 	// patchPreview caches the live apply_patch streaming preview keyed by the
 	// streamed args length (see cachedApplyPatchStreamingArgs): extracting the
@@ -169,7 +171,7 @@ type Block struct {
 	// quadratic over the stream.
 	previewRenderedPatch  string
 	previewRenderedWidth  int
-	previewRenderedHL     *codeHighlighter
+	previewRenderedHL     *syntax.Highlighter
 	previewRenderedHLPath string
 	previewRenderedLines  []string
 
@@ -303,12 +305,12 @@ type Block struct {
 	CompactionSummaryMode string
 	// richMarkdownHL caches lexer detection and rendered snippets for Chord-owned
 	// markdown cards that share assistant fenced-code rendering.
-	richMarkdownHL *codeHighlighter
+	richMarkdownHL *syntax.Highlighter
 	// compactionSectionHL holds one highlighter slot per checkpoint section. The
 	// section split is deterministic for a given card content, so a slot's
 	// sample stays stable across re-renders; sharing one slot across sections would
 	// reset the lexer cache once per section on every render.
-	compactionSectionHL []*codeHighlighter
+	compactionSectionHL []*syntax.Highlighter
 
 	// Render caches - invalidated when content or width changes
 	mdCache                      []string

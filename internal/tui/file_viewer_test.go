@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/chord/internal/filedelivery"
 )
 
@@ -22,7 +24,7 @@ func TestFileViewerSourceSafetyAndRawCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := loadFileViewer(fileViewerRequest{ctx: context.Background(), file: file, width: 80, highlighter: newCodeHighlighterWithLanguage(path, "", "")})
+	result := loadFileViewer(fileViewerRequest{ctx: context.Background(), file: file, width: 80, highlighter: syntax.New(path, "", "")})
 	if result.err != nil {
 		t.Fatal(result.err)
 	}
@@ -73,7 +75,7 @@ func TestFileViewerCacheDoesNotRetainDeclarationWarning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := fileViewerRequest{ctx: context.Background(), cache: &fileViewerCache{}, file: file, width: 80, highlighter: newCodeHighlighterWithLanguage(path, "", "")}
+	req := fileViewerRequest{ctx: context.Background(), cache: &fileViewerCache{}, file: file, width: 80, highlighter: syntax.New(path, "", "")}
 	req.file.SHA256 = "old"
 	first := loadFileViewer(req)
 	if first.err != nil || !strings.Contains(first.note, "changed") {

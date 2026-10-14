@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/lipgloss/v2"
 	uv "github.com/keakon/ultraviolet"
 	"github.com/keakon/x/ansi"
@@ -41,7 +43,7 @@ func TestConfirmDialogDoneMarkdownDoesNotLeakAssistantCardBackground(t *testing.
 		}
 	}
 
-	globalCodeBgSeq := ansiSeqForColor(lipgloss.Color(currentTheme.CodeBlockBg), false)
+	globalCodeBgSeq := syntax.ColorSequence(lipgloss.Color(currentTheme.CodeBlockBg), false)
 	if globalCodeBgSeq == "" {
 		t.Fatal("expected global code block background ANSI sequence")
 	}
@@ -49,7 +51,7 @@ func TestConfirmDialogDoneMarkdownDoesNotLeakAssistantCardBackground(t *testing.
 		t.Fatal("Done confirmation markdown should not use assistant card code block background")
 	}
 
-	dialogCodeBgSeq := ansiSeqForColor(lipgloss.Color(currentTheme.DialogCodeBlockBg), false)
+	dialogCodeBgSeq := syntax.ColorSequence(lipgloss.Color(currentTheme.DialogCodeBlockBg), false)
 	if dialogCodeBgSeq == "" {
 		t.Fatal("expected dialog code block background ANSI sequence")
 	}

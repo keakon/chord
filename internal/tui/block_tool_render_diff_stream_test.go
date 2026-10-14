@@ -8,6 +8,7 @@ import (
 	"github.com/keakon/chord/internal/agent"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
+	"github.com/keakon/chord/internal/tui/syntax"
 )
 
 func streamingApplyPatchTestBlock(lineCount int) *Block {
@@ -87,10 +88,27 @@ func TestStreamingApplyPatchRangeMatchesFullRender(t *testing.T) {
 	if partial.previewHL != nil {
 		t.Fatal("line count should not initialize the preview highlighter")
 	}
-	partial.RenderRange(100, "", 700, 735)
-	if partial.previewHL == nil || len(partial.previewHL.renderCache) >= 1800 {
-		t.Fatalf("range render highlighted the whole patch: highlighter=%v cached=%d", partial.previewHL != nil, len(partial.previewHL.renderCache))
+	visible := partial.RenderRange(100, "", 700, 735)
+	if partial.previewHL == nil {
+		t.Fatal("range render did not create its highlighter")
 	}
+	if strings.Join(visible, "\n") != strings.Join(full[700:735], "\n") {
+		t.Fatal("partial streaming render differs from the same full-render window")
+	}
+	// Rendering a small window must not spend the allocations of highlighting
+	// the entire patch, independent of the highlighter's internal cache layout.
+	partialAllocs := testing.AllocsPerRun(1, func() {
+		b := streamingApplyPatchTestBlock(1800)
+		b.RenderRange(100, "", 700, 735)
+	})
+	fullAllocs := testing.AllocsPerRun(1, func() {
+		b := streamingApplyPatchTestBlock(1800)
+		b.Render(100, "")
+	})
+	if partialAllocs >= fullAllocs/2 {
+		t.Fatalf("window rendering allocates like a full patch: partial=%v full=%v", partialAllocs, fullAllocs)
+	}
+
 }
 
 // TestStreamingApplyPatchRangeSuppressesMoveAndDeletePreview covers the cold
@@ -258,11 +276,11 @@ func TestStreamingApplyPatchHighlightsMultiFilePatch(t *testing.T) {
 	}
 
 	hl := block.previewHL
-	if hl == nil || hl.cachedLexer == nil {
+	if hl == nil {
 		t.Fatalf("streaming preview resolved no lexer: highlighter=%v", hl)
 	}
 	code := "func demo() int {"
-	highlighted := hl.highlightLine(code, diffAddBg)
+	highlighted := hl.Line(code, diffAddBg)
 	if !strings.Contains(highlighted, "\x1b[38;2;") {
 		t.Fatalf("highlighter emitted no syntax colour for %q: %q", code, highlighted)
 	}
@@ -286,17 +304,17 @@ func TestDiffToolPathsSeparateDisplaySummaryFromLexerSeed(t *testing.T) {
 		"@@\n-c\n+d\n" +
 		"*** End Patch"
 	block := applyPatchStreamingTestBlock(multi)
-	display, syntax := block.diffToolPathsWithTargets(block.applyPatchTargets())
+	display, syntaxPath := block.diffToolPathsWithTargets(block.applyPatchTargets())
 	if want := "src/demo.go +1 files"; display != want {
 		t.Fatalf("display path = %q, want %q", display, want)
 	}
-	if want := "src/demo.go"; syntax != want {
-		t.Fatalf("syntax path = %q, want %q", syntax, want)
+	if want := "src/demo.go"; syntaxPath != want {
+		t.Fatalf("syntax path = %q, want %q", syntaxPath, want)
 	}
-	if lexerForFilePath(display) != nil {
+	if syntax.New(display, "", "").Line("package main", "") != "package main" {
 		t.Fatal("a decorated display summary must not resolve to a lexer")
 	}
-	if lexerForFilePath(syntax) == nil {
+	if syntax.New(syntaxPath, "", "").Line("package main", "") == "package main" {
 		t.Fatal("syntax path must resolve to a lexer")
 	}
 

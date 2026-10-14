@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	tea "github.com/keakon/bubbletea/v2"
 
 	"github.com/keakon/chord/internal/desktop"
@@ -96,7 +98,7 @@ func (m *Model) prepareFileViewer() tea.Cmd {
 	if m.filePreviewCache == nil {
 		m.filePreviewCache = &fileViewerCache{}
 	}
-	req := fileViewerRequest{checkoutGeneration: m.workingDirGeneration, cache: m.filePreviewCache, ctx: ctx, generation: v.generation, owner: v.owner, file: file, session: m.deliverySessionDir(), width: max(1, m.width-10), markdown: v.markdown && strings.HasPrefix(file.MIME, "text/markdown"), style: contentMarkdownStyleConfig(), highlighter: newCodeHighlighterWithLanguage(file.DisplayName, "", "")}
+	req := fileViewerRequest{checkoutGeneration: m.workingDirGeneration, cache: m.filePreviewCache, ctx: ctx, generation: v.generation, owner: v.owner, file: file, session: m.deliverySessionDir(), width: max(1, m.width-10), markdown: v.markdown && strings.HasPrefix(file.MIME, "text/markdown"), style: contentMarkdownStyleConfig(), highlighter: syntax.New(file.DisplayName, "", "")}
 	if m.fileViewerBusy {
 		m.fileViewerNext = &req
 		return nil

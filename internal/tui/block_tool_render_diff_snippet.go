@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/keakon/chord/internal/tui/syntax"
+
 	"github.com/keakon/lipgloss/v2"
 	"github.com/keakon/x/ansi"
 )
@@ -136,17 +138,17 @@ func joinANSISnippetWindows(rendered string, windows []diffSnippetWindow, lineWi
 	return buf.String()
 }
 
-func renderHighlightedSnippetLine(line string, changeSpans []diffSegmentSpan, diffWidth int, hl *codeHighlighter, bgTerm string) string {
+func renderHighlightedSnippetLine(line string, changeSpans []diffSegmentSpan, diffWidth int, hl *syntax.Highlighter, bgTerm string) string {
 	if diffWidth <= 0 {
 		return ""
 	}
 	lineWidth := diffTextWidth(line)
 	if lineWidth <= diffWidth {
-		return hl.highlightLine(line, bgTerm)
+		return hl.Line(line, bgTerm)
 	}
 	windows, hidden, ok := fitSnippetWindows(lineWidth, changeSpans, diffWidth, maxTwoLineSnippetClusters)
 	if !ok {
-		return ansi.Truncate(hl.highlightLine(line, bgTerm), diffWidth, "…")
+		return ansi.Truncate(hl.Line(line, bgTerm), diffWidth, "…")
 	}
 	var buf strings.Builder
 	for i, win := range windows {
@@ -158,7 +160,7 @@ func renderHighlightedSnippetLine(line string, changeSpans []diffSegmentSpan, di
 			buf.WriteString(renderDiffSnippetEllipsis(bgTerm))
 		}
 		piece := extractPlainByColumns(line, win.StartCol, win.EndCol)
-		buf.WriteString(hl.highlightLine(piece, bgTerm))
+		buf.WriteString(hl.Line(piece, bgTerm))
 	}
 	if windows[len(windows)-1].EndCol < lineWidth {
 		buf.WriteString(renderDiffSnippetEllipsis(bgTerm))
