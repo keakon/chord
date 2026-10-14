@@ -117,9 +117,7 @@ func TestUsageDrivenFailureCanRetryAcrossTurnsBeforeBreakerTrips(t *testing.T) {
 
 func TestUsageDrivenCompactionEnabledInLoop(t *testing.T) {
 	t.Parallel()
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(10000, 0.9)
+	a := &MainAgent{ctxMgr: ctxmgr.NewManager(10000, 0.9)}
 	a.loopState.Enabled = true
 	a.autoCompactRequested.Store(true)
 
@@ -153,9 +151,7 @@ func TestUsageDrivenFailureStopsRetriyingAfterBreakerTrips(t *testing.T) {
 
 func TestLargeTranscriptDoesNotAutoCompactWithoutUsageSignal(t *testing.T) {
 	t.Parallel()
-	projectRoot := t.TempDir()
-	a := newTestMainAgent(t, projectRoot)
-	a.ctxMgr = ctxmgr.NewManager(1000, 0.5)
+	a := &MainAgent{ctxMgr: ctxmgr.NewManager(1000, 0.5)}
 	a.ctxMgr.RestoreMessages([]message.Message{
 		{Role: "user", Content: strings.Repeat("large prompt ", 400)},
 		{Role: "assistant", Content: strings.Repeat("large answer ", 400)},

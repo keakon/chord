@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"os"
-	"os/exec"
 	"testing"
 	"time"
 
@@ -13,10 +12,7 @@ import (
 func TestFileMaintenanceRealGopls(t *testing.T) {
 	// Each test owns its workspace and server processes.
 	t.Parallel()
-	gopls, err := exec.LookPath("gopls")
-	if err != nil {
-		t.Skip("gopls unavailable")
-	}
+	gopls := requireRealGopls(t)
 	root := resolvedTempDir(t)
 	path := writeBrokenGoCheckout(t, root, "example.com/monitor", "missingBeforeChange")
 	m := NewManager(&config.Config{LSP: config.LSPConfig{"gopls": {Command: gopls, FileTypes: []string{"go"}}}}, root, nil)

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/keakon/chord/internal/message"
 )
@@ -17,7 +17,6 @@ func TestStreamingToolExecutor_DrainCompletedResults(t *testing.T) {
 
 	// Mock execute function that succeeds
 	execute := func(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
-		time.Sleep(10 * time.Millisecond) // Simulate work
 		return ToolExecutionResult{
 			Result:            "test result for " + tc.Name,
 			EffectiveArgsJSON: string(tc.Args),
@@ -81,53 +80,35 @@ func TestStreamingToolExecutor_DrainCompletedResults(t *testing.T) {
 }
 
 func TestStreamingToolExecutor_DrainCompletedResults_IgnoresIncomplete(t *testing.T) {
-	ctx := context.Background()
-	turnID := uint64(1)
-	emitCh := make(chan AgentEvent, 10)
-	emit := func(evt AgentEvent) { emitCh <- evt }
-
-	// Mock execute function that takes a long time
-	execute := func(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
-		time.Sleep(200 * time.Millisecond) // Long running
-		return ToolExecutionResult{
-			Result:            "test result",
-			EffectiveArgsJSON: string(tc.Args),
-		}, nil
-	}
-
-	exec := NewStreamingToolExecutor(turnID, ctx, emit, execute)
-
-	// Start speculative execution
-	call := message.ToolCall{
-		ID:   "call_slow",
-		Name: "read",
-		Args: json.RawMessage(`{"path":"file.txt"}`),
-	}
-
-	started := exec.Start(call)
-	if !started {
-		t.Fatal("Failed to start speculative execution")
-	}
-
-	// Observe that the slow execution has started (entry tracked) instead of
-	// guessing a fixed window; draining must then see no completed result.
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		exec.mu.Lock()
-		_, tracked := exec.entries[call.ID]
-		exec.mu.Unlock()
-		if tracked {
-			break
+	synctest.Test(t, func(t *testing.T) {
+		started := make(chan struct{})
+		release := make(chan struct{})
+		defer func() {
+			close(release)
+			// Join execution and result publication even when an assertion fails.
+			synctest.Wait()
+		}()
+		execute := func(ctx context.Context, tc message.ToolCall) (ToolExecutionResult, error) {
+			close(started)
+			<-release
+			return ToolExecutionResult{
+				Result:            "test result",
+				EffectiveArgsJSON: string(tc.Args),
+			}, nil
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for slow speculative execution to start")
+		exec := NewStreamingToolExecutor(1, t.Context(), nil, execute)
+		call := message.ToolCall{
+			ID:   "call_slow",
+			Name: "read",
+			Args: json.RawMessage(`{"path":"file.txt"}`),
 		}
-		time.Sleep(time.Millisecond)
-	}
-	results := exec.DrainCompletedResults()
-
-	// Should not include the still-running tool
-	if len(results) != 0 {
-		t.Errorf("Expected 0 completed results (tool still running), got %d", len(results))
-	}
+		if !exec.Start(call) {
+			t.Fatal("failed to start speculative execution")
+		}
+		<-started
+		synctest.Wait()
+		if results := exec.DrainCompletedResults(); len(results) != 0 {
+			t.Errorf("expected no completed results while execution is blocked, got %d", len(results))
+		}
+	})
 }

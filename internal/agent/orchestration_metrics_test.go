@@ -83,7 +83,7 @@ func TestOrchestrationStatsAggregatesRuntimeAndDurableState(t *testing.T) {
 
 func TestOrchestrationMailboxAckRequiresTrackedMessage(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{subs: newSubAgentRegistry()}
 	a.orchestrationMetrics.recordMailboxAck("unknown")
 	stats := a.OrchestrationStats()
 	if stats.MailboxAcks != 0 || stats.MailboxAckLatencyTotal != 0 {

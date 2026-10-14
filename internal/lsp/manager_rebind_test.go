@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,10 +60,7 @@ func TestRebindToProjectRootKeepsStateForUnchangedRoot(t *testing.T) {
 func TestRebindToProjectRootRerootsRealGopls(t *testing.T) {
 	// Each test owns its workspace and server processes.
 	t.Parallel()
-	gopls, err := exec.LookPath("gopls")
-	if err != nil {
-		t.Skip("gopls not installed: skipping the real language-server round trip")
-	}
+	gopls := requireRealGopls(t)
 	previous := resolvedTempDir(t)
 	next := resolvedTempDir(t)
 	previousFile := writeBrokenGoCheckout(t, previous, "example.com/checkout-previous", "missingSymbolInPreviousCheckout")

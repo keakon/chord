@@ -371,7 +371,13 @@ func TestServerListenerStartStopDoesNotLeakDescriptors(t *testing.T) {
 		return 0
 	}
 	before := countFD()
-	for range 100 {
+	// Ordinary runs catch per-cycle leaks; the stress gate also checks for
+	// resources that accumulate only after sustained listener churn.
+	iterations := 5
+	if os.Getenv("CHORD_TEST_STRESS") == "1" {
+		iterations = 100
+	}
+	for range iterations {
 		record := client.Record
 		record.RuntimeID = rand.Text()
 		record.SocketPath = ""

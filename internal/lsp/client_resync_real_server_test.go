@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -19,10 +18,7 @@ import (
 func TestManagerResyncFileWithRealGopls(t *testing.T) {
 	// Each test owns its workspace and server processes.
 	t.Parallel()
-	gopls, err := exec.LookPath("gopls")
-	if err != nil {
-		t.Skip("gopls not installed: skipping the real language-server round trip")
-	}
+	gopls := requireRealGopls(t)
 	root := resolvedTempDir(t)
 	path := writeBrokenGoCheckout(t, root, "example.com/resync", "missingSymbolBeforeResync")
 	content, err := os.ReadFile(path)

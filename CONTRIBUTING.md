@@ -103,13 +103,20 @@ If your changes touch TUI performance-critical paths, also run the checks in [Pe
 
 The ordinary takeover tests cover successful saves, retryable failures and resource
 release with a small number of repetitions. `make stress` runs all 200 takeover
-cycles and the high-volume concurrent recovery writes under the race detector,
-using `scripts/check_ci_stress.sh` and the ordinary race gate's output checks.
+cycles, 100 listener start/stop cycles, and the high-volume concurrent recovery
+writes under the race detector, using `scripts/check_ci_stress.sh` and the ordinary
+race gate's output checks.
 Both `make ci` and GitHub Actions include the full stress workload, with Actions
 running it in a separate job. `CHORD_TEST_STRESS=1` also enables the full
 workload when invoking the selected tests directly.
 
-Optional integration tests that require external tools are not part of the default CI run. To run the real Pyright LSP integration test locally, install `pyright-langserver` and run:
+The LSP package runs real gopls round trips when `gopls` is installed. For a
+focused check without starting language servers, use `go test -short ./internal/lsp`.
+The ordinary test and CI commands keep these checks enabled; short mode is not
+a substitute for complete verification before submitting changes.
+
+The Pyright and upstream model catalog integration tests require explicit opt-in.
+To run the real Pyright LSP integration test locally, install `pyright-langserver` and run:
 
 ```bash
 CHORD_RUN_REAL_PYRIGHT_TESTS=1 go test ./internal/tools -run Pyright

@@ -158,10 +158,7 @@ func TestWorkspaceDiagnosticsAndFailuresStaySeparate(t *testing.T) {
 func TestExternalCheckoutsRealGopls(t *testing.T) {
 	// Each test owns its workspace and server processes.
 	t.Parallel()
-	gopls, err := exec.LookPath("gopls")
-	if err != nil {
-		t.Skip("gopls unavailable")
-	}
+	gopls := requireRealGopls(t)
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git unavailable")
 	}

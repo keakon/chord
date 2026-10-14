@@ -228,7 +228,7 @@ func TestRaiseDegradedSeqFloorDoesNotOverwriteConcurrentProgress(t *testing.T) {
 
 func TestGuardDegradedAgentRequestSeqAvoidsIDReuse(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := &MainAgent{}
 	a.guardDegradedAgentRequestSeq(false)
 	if got := a.agentRequestSeq.Load(); got != 0 {
 		t.Fatalf("a healthy restore must keep the loaded sequence, got %d", got)

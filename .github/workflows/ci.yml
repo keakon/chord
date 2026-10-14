@@ -71,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           log="$(mktemp)"
-          if ! go list -deps -test ./cmd/chord ./internal/recovery >/dev/null 2>"${log}"; then
+          if ! go list -deps -test ./cmd/chord ./internal/recovery ./internal/takeover >/dev/null 2>"${log}"; then
             cat "${log}" >&2
             rm -f "${log}"
             exit 1

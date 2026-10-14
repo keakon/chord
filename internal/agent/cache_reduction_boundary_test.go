@@ -20,7 +20,7 @@ import (
 // resolves pricing instead of falling back to the fixed ratio.
 func newBoundaryReductionTestAgent(t *testing.T, cost *config.ModelCost) *MainAgent {
 	t.Helper()
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -121,7 +121,7 @@ func TestReductionFlushHorizonStopsAtPendingCompaction(t *testing.T) {
 
 func TestBoundaryFlushPenaltyRatioFallsBackWithoutPricing(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.runningModelRef = "p/m"
 	if got := a.boundaryFlushPenaltyRatio(a.llmModelContinuitySnapshot(), 1000); got != cacheMissPenaltyRatioFallback {
 		t.Fatalf("penalty ratio without pricing = %v, want fallback %v", got, cacheMissPenaltyRatioFallback)
@@ -200,7 +200,7 @@ func setTestRequestBatch(a *MainAgent, messages []message.Message, batch uint64)
 // new tail content is still reduced immediately.
 func TestPrepareMessagesDefersBoundaryReductions(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -254,7 +254,7 @@ func TestPrepareMessagesDefersBoundaryReductions(t *testing.T) {
 
 func TestStableReductionSurfaceSurvivesUserTurnBoundary(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -299,7 +299,7 @@ func TestStableReductionSurfaceSurvivesUserTurnBoundary(t *testing.T) {
 
 func TestDeferredBoundaryReductionDoesNotReportOverCompression(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -348,7 +348,7 @@ func TestDeferredBoundaryReductionDoesNotReportOverCompression(t *testing.T) {
 // pressure-driven size control.
 func TestBoundaryReductionIgnoresContextUsage(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -395,7 +395,7 @@ func TestBoundaryReductionIgnoresContextUsage(t *testing.T) {
 // pending savings dominate the re-billed tail is applied instead of deferred.
 func TestBoundaryReductionFlushesWhenSavingsAmortize(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -452,7 +452,7 @@ func TestPrepareMessagesDefersExternalReadInvalidation(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package main\n\nconst value = 1\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	a := newTestMainAgent(t, projectRoot)
+	a := newReductionTestMainAgent(t, projectRoot)
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -517,7 +517,7 @@ func TestPrepareMessagesKeepsFrozenReadMarkerWhenSuperseded(t *testing.T) {
 	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	a := newTestMainAgent(t, projectRoot)
+	a := newReductionTestMainAgent(t, projectRoot)
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
@@ -569,7 +569,7 @@ func TestPrepareMessagesKeepsFrozenReadMarkerWhenSuperseded(t *testing.T) {
 // request in the same window pay a full reduction scan.
 func TestContextNoticeRowKeepsStableSurfaceReusable(t *testing.T) {
 	t.Parallel()
-	a := newTestMainAgent(t, t.TempDir())
+	a := newReductionTestMainAgent(t, t.TempDir())
 	a.projectConfig = &config.Config{
 		Context: config.ContextConfig{Reduction: config.ContextReductionConfig{
 			ReadLikeAgeTurns:     1,
