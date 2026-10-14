@@ -58,7 +58,34 @@ chord doctor models --model google/gemini-4-argon
 
 Argon 的输入、思考和输出共享 1,048,576 token 窗口，没有单独公布的输入上限。目录默认使用 `thinking.level: medium`，也支持 `low` 和 `high`，不支持 `minimal`。模型事实保留长输出容量，官方 `gemini` 绑定将 `limit.output` 设为 65,536，约束当前流式请求的思考与输出总量；实际请求还受全局 `max_output_tokens`（默认 64,000）和剩余窗口限制。
 
-超过单次请求上限需要 [long decode 续传](https://ai.google.dev/gemini-api/docs/generate-content/long-decode)：API 返回 `CONTINUATION` 和 `continuationToken`，客户端携带 token 重发原始请求，继续同一次生成并合并结果。Chord 尚未实现这套续传机制，单纯提高 `limit.output` 或 `max_output_tokens` 无法启用它。普通多轮工具调用仍可使用；65,536 是每次流式请求的上限，不是整个会话的累计额度。
+启用 `compat.generate_content.automatic_continuation: true` 后，Chord 会携带服务端 checkpoint 继续同一次生成，连接中断时也优先在同一模型、端点和凭据上恢复。恢复失败后，备用模型从生成开始前的可靠历史重新求解，无法继承原来的思考。此能力只作用于原生 `generate-content` 协议，不适用于 OpenAI 兼容接口或 Code Assist。普通多轮工具调用与一次生成跨 HTTP 请求续传是两种不同流程。
+
+当前内嵌目录仍采用单请求上限。需要原生续传时，可显式配置：
+
+```yaml
+max_output_tokens: 262144
+providers:
+  gemini:
+    type: generate-content
+    api_url: https://generativelanguage.googleapis.com/v1beta
+    response_header_timeout: 1200
+    stream_idle_timeout: 1200
+    models:
+      gemini-4-argon:
+        compat:
+          generate_content:
+            automatic_continuation: true
+            single_request_output_limit: 65536
+        limit:
+          context: 1048576
+          output: 1048576
+        thinking:
+          level: medium
+```
+
+两个 compat 字段分别继承，优先级为模型配置 > provider 配置 > 目录默认。显式 `false` 关闭续传，此时 `single_request_output_limit` 限制单次输出预算；`null` 或空对象不等于关闭。开关未设置时默认关闭，不按模型名称推断。网关必须支持 token 透传才能启用，Chat Completions 的 `native_thinking` 设置不能代替此开关。
+
+全局默认预算仍为 64,000；只有提高 `max_output_tokens` 才会增加总思考与输出预算，实际值仍受模型上限和剩余窗口限制。最终达到 `MAX_TOKENS` 后不会自动增加预算。多跳会重复计费输入，Context 显示的窗口大小与累计计费输入分开计算。本地工具等待最终响应确认并保存后执行。checkpoint 只在当前进程的请求期间有效，重启后不能续传原生思考。
 
 Argon 需要有可用额度的付费 API 账号。免费层额度为 0 时会返回 HTTP 429；Google AI Pro / Ultra 订阅不替代 API 凭据与额度。用上面的 `doctor models` 检查你自己的接入；目录收录不表示账号已获准调用。
 
@@ -88,7 +115,7 @@ providers:
 
 Chord 的 `thinking.*` 键与 wire 无关，但把 `/v1/chat/completions` 翻译成原生 API 的网关只按自己认识到的形状读取 thinking 配置。`compat.chat_completions.native_thinking` 决定 Chord 写进 chat 请求体的形状：`gemini` / `gemini-3`（`extra_body.google.thinking_config`）、`anthropic`（`thinking: {type, budget_tokens}`）、`thinking`（DeepSeek、GLM、Kimi K2.x、Doubao 使用的原生 `thinking: {type}` 对象）、`qwen`（`enable_thinking`）；`claude`、`kimi` 等家族名选择相同形状。只有 DeepSeek 路由不需要选择器就会带上 `thinking` 对象。
 
-选择器同时也是 Chord 识别网关模型是 Gemini 还是 Claude 的唯一信号，与模型 ID 叫什么无关：没有它，Chord 不会回写 Gemini 的 thought signature，Gemini 3 会以 HTTP 400 拒绝每次工具调用之后的下一个请求。所以网关后面的每个 Gemini 3 模型都要钉上 `native_thinking: gemini-3`，哪怕它没配 thinking 块。`chord doctor config` 会对缺选择器的 Gemini 3 模型和 thinking 块会被丢弃的网关模型给出警告。
+选择器同时也是 Chord 识别网关模型是 Gemini 还是 Claude 的唯一信号，与模型 ID 叫什么无关：没有它，Chord 不会回写 Gemini 的 thought signature，Gemini 3/4 会以 HTTP 400 拒绝每次工具调用之后的下一个请求。所以网关后面的每个 Gemini 3/4 模型都要钉上 `native_thinking: gemini-3`，哪怕它没配 thinking 块。`chord doctor config` 会对缺选择器的 Gemini 3/4 模型和 thinking 块会被丢弃的网关模型给出警告。
 
 ### 跨协议的 reasoning 连续性
 

@@ -728,6 +728,7 @@ func (m *ModelConfig) SupportedServiceTierSet(providerPreset string, providerTie
 // All options are opt-in and default to disabled unless explicitly enabled.
 // Model-level wire fields override provider-level defaults when both exist.
 type ModelCompatConfig struct {
+	GenerateContent     *GenerateContentCompatConfig     `json:"generate_content,omitempty" yaml:"generate_content,omitempty"`
 	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
 	ForcedToolChoice    *ForcedToolChoiceCompatConfig    `json:"forced_tool_choice,omitempty" yaml:"forced_tool_choice,omitempty"`
@@ -742,6 +743,7 @@ type ModelCompatConfig struct {
 // behavior compat belongs under ModelCompatConfig; transport-layer compat lives
 // here so the schema reflects the runtime semantics.
 type ProviderCompatConfig struct {
+	GenerateContent     *GenerateContentCompatConfig     `json:"generate_content,omitempty" yaml:"generate_content,omitempty"`
 	ThinkingToolcall    *ThinkingToolcallCompatConfig    `json:"thinking_toolcall,omitempty" yaml:"thinking_toolcall,omitempty"`
 	ReasoningContinuity *ReasoningContinuityCompatConfig `json:"reasoning_continuity,omitempty" yaml:"reasoning_continuity,omitempty"`
 	ForcedToolChoice    *ForcedToolChoiceCompatConfig    `json:"forced_tool_choice,omitempty" yaml:"forced_tool_choice,omitempty"`
@@ -976,8 +978,8 @@ type ReasoningContinuityCompatConfig struct {
 	// wires for an alias whose model name does not identify it; a model ID
 	// recognized as DeepSeek by modelcompat.ModelNativeFamily selects the same
 	// contract automatically. "gemini-3" enables missing thought-signature repair on the native generate-content endpoint, where
-	// a model ID whose final component starts with "gemini-3" (see
-	// IsGemini3ModelID) selects it automatically; a Chat Completions gateway
+	// a model ID whose final component starts with "gemini-3" or "gemini-4" (see
+	// RequiresGeminiThoughtSignature) selects it automatically; a Chat Completions gateway
 	// opts in through native_thinking: gemini-3 instead. "none" opts a route out
 	// of both inferences, e.g. a deepseek-named third-party route that serves
 	// another backend, on the Messages wire as well as Chat Completions.
@@ -2041,6 +2043,9 @@ func loadConfigData(path string, data []byte, withDefaults bool, diagnostics *[]
 // native-thinking, and reasoning-continuity problems for one provider config.
 func collectProviderIssues(providerName string, cfg *ProviderConfig) []string {
 	var issues []string
+	if err := ValidateProviderGenerateContentCompat(providerName, *cfg); err != nil {
+		issues = append(issues, err.Error())
+	}
 	if err := ValidateProviderRetry(providerName, *cfg); err != nil {
 		issues = append(issues, err.Error())
 	}
@@ -2081,7 +2086,7 @@ func resetInvalidProviderFields(cfg ProviderConfig) ProviderConfig {
 	if !validRequestCompression(cfg.Compress) {
 		cfg.Compress = ""
 	}
-	return resetInvalidReasoningContinuity(resetInvalidNativeThinking(cfg))
+	return resetInvalidGenerateContentCompat(resetInvalidReasoningContinuity(resetInvalidNativeThinking(cfg)))
 }
 
 // stripTypeInvalidOverride removes override leaves whose values cannot be

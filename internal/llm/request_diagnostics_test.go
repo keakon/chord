@@ -335,7 +335,7 @@ func TestDiagnosticWebSocketPrewarmAndIncremental(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope.finish(ctx, resp, err)
+	scope.finish(ctx, resp, err, "")
 	snapshot, ok := store.Latest()
 	if !ok || snapshot.ID.Attempt != 1 || snapshot.Transport != contextdiag.WebSocket {
 		t.Fatalf("prewarm became attempt: %+v", snapshot)

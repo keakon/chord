@@ -845,3 +845,42 @@ func BenchmarkStreamToolArgsReduceLarge(b *testing.B) {
 		reducer.Handle(message.StreamDelta{Type: message.StreamDeltaToolUseDelta, ToolCall: &message.ToolCallDelta{ID: "call-1", Name: tools.NameWrite, Input: fragment}})
 	}
 }
+
+func TestStreamToolDeltaReducerRequestRollbackClearsSubText(t *testing.T) {
+	for _, scope := range []string{"", message.RollbackScopeRequest} {
+		turn := newStreamToolReducerTestTurn()
+		turn.appendPartialText("pending")
+		reducer := streamToolDeltaReducer{turn: turn, drainPartialOnRollback: false}
+		reducer.Handle(message.StreamDelta{Type: message.StreamDeltaRollback, Rollback: &message.RollbackDelta{Scope: scope}})
+		want := "pending"
+		if scope == message.RollbackScopeRequest {
+			want = ""
+		}
+		if got := turn.drainPartialText(); got != want {
+			t.Fatalf("scope=%q got=%q", scope, got)
+		}
+	}
+}
+
+func TestStreamToolDeltaReducerDeferredToolsNeverSpeculate(t *testing.T) {
+	turn := newStreamToolReducerTestTurn()
+	registry := tools.NewRegistry()
+	registry.Register(tools.ReadTool{})
+	turn.streamingToolExec = NewStreamingToolExecutor(turn.ID, context.Background(), nil, func(context.Context, message.ToolCall) (ToolExecutionResult, error) {
+		t.Error("deferred tool executed")
+		return ToolExecutionResult{}, nil
+	})
+	reducer := streamToolDeltaReducer{turn: turn, registry: registry}
+	for _, kind := range []string{message.StreamDeltaToolUseStart, message.StreamDeltaToolUseDelta, message.StreamDeltaToolUseEnd} {
+		input := ""
+		if kind == message.StreamDeltaToolUseStart {
+			input = `{"path":"sample.txt"}`
+		}
+		reducer.Handle(message.StreamDelta{Type: kind, ToolCall: &message.ToolCallDelta{ID: "call", Name: tools.NameRead, Input: input, DeferExecution: true}})
+	}
+	turn.streamingToolExec.mu.Lock()
+	defer turn.streamingToolExec.mu.Unlock()
+	if len(turn.streamingToolExec.entries) != 0 {
+		t.Fatal("deferred call scheduled")
+	}
+}

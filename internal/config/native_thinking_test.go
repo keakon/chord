@@ -118,17 +118,20 @@ func TestLoadConfigFromPathResetsInvalidNativeThinking(t *testing.T) {
 	}
 }
 
-func TestIsGemini3ModelID(t *testing.T) {
+func TestRequiresGeminiThoughtSignature(t *testing.T) {
 	for id, want := range map[string]bool{
 		"gemini-3-pro-preview":        true,
 		"models/gemini-3.1-flash":     true,
 		"google/Gemini-3-Flash":       true,
 		"gemini-2.5-pro":              false,
+		"gemini-4-argon":              true,
+		"models/Gemini-4-Argon":       true,
+		"vendor/gemini-4-argon":       true,
 		"vendor/model-gemini-3-proxy": false,
 		"":                            false,
 	} {
-		if got := IsGemini3ModelID(id); got != want {
-			t.Errorf("IsGemini3ModelID(%q) = %v, want %v", id, got, want)
+		if got := RequiresGeminiThoughtSignature(id); got != want {
+			t.Errorf("RequiresGeminiThoughtSignature(%q) = %v, want %v", id, got, want)
 		}
 	}
 }
@@ -139,6 +142,8 @@ func TestGeminiFamilySelectorAdvisory(t *testing.T) {
 		want                      bool
 	}{
 		{"gemini-3-pro", NativeThinkingGemini, "", true},
+		{"gemini-4-argon", NativeThinkingGemini, "", true},
+		{"gemini-4-argon", NativeThinkingGemini3, "", false},
 		{"gemini-3-pro", "vertex", "", true},
 		{"gemini-3-pro", " Gemini ", "", true},
 		{"gemini-2.5-pro", NativeThinkingGemini, "", false},

@@ -808,10 +808,11 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 		wallReq.wireStreamReducer(streamReducer)
 	}
 	requestOptions := llm.CompleteStreamOptions{
-		Diagnostics:     observer,
-		PrepareAttempt:  prepareDirectoryInstructionAttempt(a.directoryInstructions.Load(), requestSeq),
-		NativeTools:     a.nativeRequestPolicy(turn),
-		MCPDeclarations: a.effectiveRuntimeMCPDeclarations(),
+		OnContinuationUsage: a.continuationUsageObserver(llmClient, requestUsageTarget(wallReq), "main", a.currentAgentName(), "chat", selectedRef, turnID),
+		Diagnostics:         observer,
+		PrepareAttempt:      prepareDirectoryInstructionAttempt(a.directoryInstructions.Load(), requestSeq),
+		NativeTools:         a.nativeRequestPolicy(turn),
+		MCPDeclarations:     a.effectiveRuntimeMCPDeclarations(),
 		BeforeFallback: func(fallbackCtx context.Context, requestMessages []message.Message, fallback llm.FallbackModel) ([]message.Message, error) {
 			updatedMessages, err := a.updateMainLLMRequestBeforeFallback(fallbackCtx, turnID, requestMessages, tailOverlayCount, fallback)
 			if err == nil && updatedMessages != nil {
@@ -970,7 +971,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	// fullPromptTokens (cache reads are already inside input on most wires;
 	// adding them again double-counts).
 	if resp.Usage != nil && decision.UsableInputBudget > 0 {
-		if fullPrompt := ctxmgr.FullPromptTokens(*resp.Usage); fullPrompt > decision.UsableInputBudget {
+		if fullPrompt, known := ctxmgr.ContextPromptTokens(*resp.Usage); known && fullPrompt > decision.UsableInputBudget {
 			log.Debugf("successful response exceeded local input budget full_prompt_tokens=%v usable_input_budget=%v %v", fullPrompt, decision.UsableInputBudget, decisionFields)
 		}
 	}
@@ -998,15 +999,20 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	if requestSentAt.IsZero() {
 		requestSentAt = time.Now()
 	}
-	cacheDiag := a.noteCacheExpectation(callStatus.RunningModelRef, messages, tailOverlayCount, a.computeToolDefinitionHash(), requestSentAt, resp.Usage)
+	var cacheDiag map[string]string
+	if resp.Usage == nil || resp.Usage.Context == nil {
+		cacheDiag = a.noteCacheExpectation(callStatus.RunningModelRef, messages, tailOverlayCount, a.computeToolDefinitionHash(), requestSentAt, resp.Usage)
+		a.observedCacheHit(callStatus.RunningModelRef, resp.Usage)
+	} else {
+		cacheDiag = map[string]string{"native_continuation": "true"}
+	}
 	if reductionDiag := a.contextReductionDiagnosticForTurn(turnID); reductionDiag != nil {
 		if cacheDiag == nil {
 			cacheDiag = make(map[string]string)
 		}
 		maps.Copy(cacheDiag, reductionDiag)
 	}
-	a.observedCacheHit(callStatus.RunningModelRef, resp.Usage)
-	if resp.NativeTools == nil {
+	if resp.NativeTools == nil && !resp.UsageReported {
 		a.recordUsage("main", "main", a.currentAgentName(), "chat", selectedRef, callStatus.RunningModelRef, turnID, resp.Usage, callStatus.ServiceTier, cacheDiag)
 	}
 

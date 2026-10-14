@@ -89,7 +89,34 @@ chord doctor models --model google/gemini-4-argon
 
 Input, thinking, and output share a 1,048,576-token window, with no separately documented input cap. The catalog defaults to `thinking.level: medium`; `low` and `high` are also supported, but `minimal` is not. Model facts retain the long-output capacity, while the official `gemini` binding sets `limit.output` to 65,536 for thinking and output combined in the current streaming request. The actual request budget also respects global `max_output_tokens` (64,000 by default) and the remaining context window.
 
-Going beyond the single-request cap requires [long decode continuation](https://ai.google.dev/gemini-api/docs/generate-content/long-decode): the API returns `CONTINUATION` and a `continuationToken`, and the client resends the original request with that token to continue the same generation and combine the results. Chord does not implement this mechanism. Raising `limit.output` or `max_output_tokens` alone does not enable it. Ordinary multi-turn tool use remains available; 65,536 is a per-streaming-request cap, not a cumulative session allowance.
+With `compat.generate_content.automatic_continuation: true`, Chord resumes the same generation using the server checkpoint, including recovery from interrupted connections with the same model, endpoint, and credentials. If recovery fails, a fallback model starts again from the reliable history preceding the generation; it cannot inherit the original thinking. This setting applies only to native `generate-content`, not OpenAI-compatible endpoints or Code Assist. Ordinary multi-turn tool use is distinct from continuing one generation across HTTP requests.
+
+The embedded catalog retains its single-request limit. To enable native continuation explicitly:
+
+```yaml
+max_output_tokens: 262144
+providers:
+  gemini:
+    type: generate-content
+    api_url: https://generativelanguage.googleapis.com/v1beta
+    response_header_timeout: 1200
+    stream_idle_timeout: 1200
+    models:
+      gemini-4-argon:
+        compat:
+          generate_content:
+            automatic_continuation: true
+            single_request_output_limit: 65536
+        limit:
+          context: 1048576
+          output: 1048576
+        thinking:
+          level: medium
+```
+
+Each compat field inherits independently: model configuration > provider configuration > catalog defaults. Explicit `false` disables continuation; `single_request_output_limit` then caps the request budget. `null` or an empty object does not disable inherited settings. The default is off, with no model-name inference. A gateway must forward continuation tokens to support this feature; Chat Completions `native_thinking` does not enable it.
+
+The global default remains 64,000 tokens. Increasing `max_output_tokens` grants a larger total thinking/output budget, still constrained by model limits and remaining context. A final `MAX_TOKENS` never increases that budget automatically. Multiple requests incur repeated input charges; the Context reading is separate from cumulative billing input. Local tools wait for the final response to be confirmed and persisted. Checkpoints exist only during the current in-process request; restarting cannot resume native thinking.
 
 Argon requires a paid API account with available quota. A free-tier quota of zero returns HTTP 429; Google AI Pro / Ultra subscriptions do not replace API credentials and quota. Use `doctor models` above to check your own connection; catalog inclusion does not establish account access.
 
@@ -150,10 +177,10 @@ selector.
 
 The selector is also the only signal that a gateway model is Gemini or
 Claude, whatever its model ID says: without it Chord does not write Gemini
-thought signatures back, and Gemini 3 rejects the request that follows each
-tool call (HTTP 400). Pin `native_thinking: gemini-3` on every Gemini 3
+thought signatures back, and Gemini 3/4 rejects the request that follows each
+tool call (HTTP 400). Pin `native_thinking: gemini-3` on every Gemini 3/4
 model behind a gateway, even one without a thinking block.
-`chord doctor config` warns about a Gemini 3 model without the selector and
+`chord doctor config` warns about a Gemini 3/4 model without the selector and
 about a gateway model whose thinking block would be dropped.
 
 ### Reasoning continuity across protocols

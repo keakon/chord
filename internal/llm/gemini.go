@@ -16,7 +16,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	sonicjson "github.com/bytedance/sonic"
 	"github.com/keakon/golog/log"
 
 	"github.com/keakon/chord/internal/config"
@@ -72,6 +71,7 @@ func (g *GeminiProvider) SetTraceWriter(w *TraceWriter) {
 }
 
 type geminiRequest struct {
+	ContinuationToken string                  `json:"continuationToken,omitempty"`
 	Contents          []geminiContent         `json:"contents"`
 	SystemInstruction *geminiContent          `json:"system_instruction,omitempty"`
 	Tools             []geminiTool            `json:"tools,omitempty"`
@@ -207,16 +207,11 @@ type geminiStreamChunk struct {
 		Status  string `json:"status"`
 	} `json:"error,omitempty"`
 	Candidates []struct {
-		Content      geminiContent `json:"content"`
-		FinishReason string        `json:"finishReason"`
+		Content           geminiContent `json:"content"`
+		FinishReason      string        `json:"finishReason"`
+		ContinuationToken string        `json:"continuationToken,omitempty"`
 	} `json:"candidates"`
-	UsageMetadata *struct {
-		PromptTokenCount        int `json:"promptTokenCount"`
-		CandidatesTokenCount    int `json:"candidatesTokenCount"`
-		CachedContentTokenCount int `json:"cachedContentTokenCount"`
-		TotalTokenCount         int `json:"totalTokenCount"`
-		ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
-	} `json:"usageMetadata,omitempty"`
+	UsageMetadata *geminiUsageMetadata `json:"usageMetadata,omitempty"`
 }
 
 type geminiErrorResponse struct {
@@ -238,6 +233,11 @@ func (g *GeminiProvider) CompleteStream(
 	tuning RequestTuning,
 	cb StreamCallback,
 ) (*message.Response, error) {
+	compat := g.provider.GenerateContentCompat(model)
+	if maxTokens <= 0 {
+		maxTokens = DefaultOutputTokenMax
+	}
+	maxTokens = constrainGenerateContentOutputBudget(maxTokens, compat)
 	dumpWriter := g.dumpWriter.Load()
 	traceWriter := g.traceWriter.Load()
 	// The trace collector only books diagnostics; without a trace writer it
@@ -245,6 +245,9 @@ func (g *GeminiProvider) CompleteStream(
 	// record nobody persists, so the raw callback is wired straight through.
 	var traceCollector *llmTraceCollector
 	traceCB := cb
+	if traceCB == nil {
+		traceCB = func(message.StreamDelta) {}
+	}
 	if traceWriter != nil {
 		traceCollector = newLLMTraceCollector("gemini", model, cb)
 		traceCB = traceCollector.Callback
@@ -256,7 +259,7 @@ func (g *GeminiProvider) CompleteStream(
 	// re-converting and re-marshaling the full history on every attempt.
 	bodyBytes, err := g.bodyReuse.body(requestBodyIdentityFor(systemPrompt, messages, tools, maxTokens, strings.TrimSpace(tuning.SessionKey)), func() ([]byte, error) {
 		contents := convertMessagesToGemini(messages)
-		if gemini3Target(g.provider, model) {
+		if geminiRequiresThoughtSignature(g.provider, model) {
 			ensureGeminiActiveLoopSignatures(contents)
 		}
 		// Tool config is only valid while tools are declared (Gemini rejects
@@ -303,6 +306,12 @@ func (g *GeminiProvider) CompleteStream(
 	})
 	if err != nil {
 		return nil, err
+	}
+	if err := validateGeminiContinuationBody(bodyBytes, maxTokens, automaticGeminiContinuation(compat)); err != nil {
+		return nil, err
+	}
+	if automaticGeminiContinuation(compat) {
+		return g.completeStreamWithContinuation(ctx, freezeGeminiRequest(g, model, apiKey, bodyBytes), cb)
 	}
 	var dumpRequestBody []byte
 	if dumpWriter != nil {
@@ -551,15 +560,11 @@ func ensureGeminiActiveLoopSignatures(contents []geminiContent) {
 	}
 }
 
-// gemini3Target reports whether a native Gemini request follows the Gemini 3
-// thought-signature contract. Only the native generateContent provider asks:
-// on that wire the model ID is the backend's own ID, so a "gemini-3" model
-// selects the contract automatically, the same way a DeepSeek model ID selects
-// DeepSeek's. An explicit compat.reasoning_continuity.contract always wins:
-// "none" opts such a model out, and "gemini-3" opts in a model whose ID does
-// not carry the version. A Chat Completions gateway never reaches this check;
-// it opts in through its native_thinking selector.
-func gemini3Target(provider *ProviderConfig, model string) bool {
+// geminiRequiresThoughtSignature selects missing-signature repair on the native
+// generateContent wire. Gemini 3 and 4 require the same signature contract;
+// explicit none opts out, and the gemini-3 contract also enables aliases.
+// Chat Completions routes select their wire shape through native_thinking.
+func geminiRequiresThoughtSignature(provider *ProviderConfig, model string) bool {
 	if provider == nil {
 		return false
 	}
@@ -574,7 +579,7 @@ func gemini3Target(provider *ProviderConfig, model string) bool {
 			return false
 		}
 	}
-	return config.IsGemini3ModelID(model)
+	return config.RequiresGeminiThoughtSignature(model)
 }
 
 func appendGeminiUserContent(result []geminiContent, parts []geminiPart) []geminiContent {
@@ -797,6 +802,7 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 	var inThinking bool
 	var toolCalls = make(map[int]*openAIToolAccumulator)
 	var nextToolIndex int
+	var continuationToken string
 	var sawDataLine bool
 	var gotData bool
 	var progressBytes int64
@@ -832,14 +838,14 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 			cb(message.StreamDelta{Progress: &message.StreamProgressDelta{Bytes: progressBytes, Events: progressEvents}})
 		}
 		if collector != nil {
-			collector.Add(string(data))
+			collector.Add(redactGeminiChunk(data))
 		}
 		if len(data) == 0 {
 			continue
 		}
 
-		var chunk geminiStreamChunk
-		if err := sonicjson.ConfigDefault.Unmarshal(data, &chunk); err != nil {
+		chunk, err := decodeGeminiStreamChunk(data, false)
+		if err != nil {
 			return nil, fmt.Errorf("parse Gemini stream chunk: %w", err)
 		}
 		if chunk.Error != nil {
@@ -847,13 +853,25 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				Origin:  APIErrorOriginSSEEvent,
 				Code:    strconv.Itoa(chunk.Error.Code),
 				Type:    chunk.Error.Status,
-				Message: chunk.Error.Message,
+				Message: redactGeminiErrorMessage(chunk.Error.Message, continuationToken),
 			}
 		}
 		if cb != nil {
 			cb(message.StreamDelta{Event: &message.StreamEventDelta{Type: "gemini.chunk"}})
 		}
 
+		for _, candidate := range chunk.Candidates {
+			if candidate.ContinuationToken != "" {
+				continuationToken = candidate.ContinuationToken
+			}
+			if candidate.FinishReason == geminiContinuationFinish {
+				if cb != nil {
+					cb(message.StreamDelta{Type: message.StreamDeltaRollback, Rollback: &message.RollbackDelta{Scope: message.RollbackScopeRequest}})
+				}
+				return nil, &GeminiContinuationError{Reason: "continuation_disabled"}
+			}
+
+		}
 		for _, candidate := range chunk.Candidates {
 			for _, part := range candidate.Content.Parts {
 				if part.FunctionCall == nil {
@@ -908,21 +926,8 @@ func parseGeminiSSEStream(reader io.Reader, cb StreamCallback, collector *SSECol
 				finalizeGeminiToolCalls(toolCalls, &resp, cb, candidate.FinishReason == "MAX_TOKENS")
 			}
 		}
-		if chunk.UsageMetadata != nil {
-			if resp.Usage == nil {
-				resp.Usage = &message.TokenUsage{}
-			}
-			resp.Usage.InputTokens = chunk.UsageMetadata.PromptTokenCount
-			// Google reports candidatesTokenCount without thoughts, but bills
-			// thoughts at the output rate. Fold them into OutputTokens so the
-			// cross-provider "reasoning is a subset of output" convention and
-			// cost accounting both hold; ReasoningTokens stays the subset.
-			resp.Usage.OutputTokens = chunk.UsageMetadata.CandidatesTokenCount + chunk.UsageMetadata.ThoughtsTokenCount
-			resp.Usage.CacheReadTokens = chunk.UsageMetadata.CachedContentTokenCount
-			resp.Usage.ReasoningTokens = chunk.UsageMetadata.ThoughtsTokenCount
-			resp.Usage.InputSemanticsKnown = true
-			resp.Usage.InputIncludesCacheRead = true
-			resp.Usage.InputIncludesCacheWrite = false
+		if usage := geminiChunkUsage(chunk); usage != nil {
+			resp.Usage = usage.tokens()
 		}
 	}
 	if err := scanner.Err(); err != nil {

@@ -27,7 +27,7 @@ Gemini 用 `extra_body.google.thinking_config`，Claude 用
 `thinking: {type}`，Qwen 用 `enable_thinking`。形状由
 `compat.chat_completions.native_thinking` 指定，只有 DeepSeek 路由（DeepSeek
 模型 ID 或 `compat.reasoning_continuity.contract: deepseek`）才会自动选到。网关后面的模型是不是 Gemini 或 Claude 也靠这个选择器识别：没配时 Gemini 的
-思考签名不会写回请求，Gemini 3 会拒绝每次工具调用之后的请求（HTTP 400）。见
+思考签名不会写回请求，Gemini 3/4 会拒绝每次工具调用之后的请求（HTTP 400）。见
 [走 Chat Completions 网关的 thinking](./model-configs_CN.md#chat-completions-网关背后的-thinking)。
 
 ## DeepSeek 的思考与历史回放
@@ -85,9 +85,9 @@ API 模型名、后端却不是 DeepSeek 时，用 `compat.reasoning_continuity.
    和缓存更好，去掉每次请求更省。
 4. **Responses、Messages、Gemini**：原生 continuity 自动生效：Chord 会保存
    明文或带签名 / 加密的状态，并在目标线路允许时回放，无需配置。Gemini 原生
-   端点上，模型 ID 以 `gemini-3` 开头时还会自动开启缺失思考签名的
+   端点上，模型 ID 以 `gemini-3` 或 `gemini-4` 开头时还会自动开启缺失思考签名的
    修复。走 Chat Completions 网关时，要等 `compat.chat_completions.native_thinking`
-   指明家族（Gemini 3 用 `gemini-3`），Chord 才会回放 Gemini 和 Claude 的状态。
+   指明家族（Gemini 3/4 用 `gemini-3`），Chord 才会回放 Gemini 和 Claude 的状态。
 
 `reasoning_replay: all` 会让已完成轮次的思考在每次请求中重复回放，后端按
 输入计费。默认的 `current_turn` 会剥离已完成轮次，第 3 条不适用时用默认即可。

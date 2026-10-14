@@ -90,7 +90,9 @@ func (r streamToolDeltaReducer) handleToolUseStart(delta message.StreamDelta) {
 			AgentID:  r.agentID,
 		})
 	}
-	r.maybeStartEarlySpeculativeTool(delta.ToolCall.ID)
+	if !delta.ToolCall.DeferExecution {
+		r.maybeStartEarlySpeculativeTool(delta.ToolCall.ID)
+	}
 }
 
 // reportEarlierStreamingToolArgs flushes snapshots before a new call starts.
@@ -171,7 +173,9 @@ func (r streamToolDeltaReducer) handleToolUseDelta(delta message.StreamDelta) {
 			AgentID:  r.agentID,
 		})
 	}
-	r.maybeStartEarlySpeculativeToolCall(delta.ToolCall.ID, call)
+	if !delta.ToolCall.DeferExecution {
+		r.maybeStartEarlySpeculativeToolCall(delta.ToolCall.ID, call)
+	}
 }
 
 func (r streamToolDeltaReducer) maybeStartEarlySpeculativeTool(callID string) {
@@ -269,7 +273,7 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 		decision = rejectSpeculativeExecution("directory_instructions_unknown")
 	}
 	logSpeculativeExecutionDecision(callID, callName, decision)
-	if decision.Allowed && r.turn.streamingToolExec != nil {
+	if decision.Allowed && !delta.ToolCall.DeferExecution && r.turn.streamingToolExec != nil {
 		r.turn.streamingToolExec.Start(message.ToolCall{ID: callID, Name: callName, Args: json.RawMessage(argsJSON)})
 	}
 	if r.recordToolUseEnd != nil {
@@ -307,7 +311,7 @@ func (r streamToolDeltaReducer) handleRollback(delta message.StreamDelta) {
 		// it would pair the replacement message with items from a response the
 		// backend abandoned — a rejected replay, not merely stale prose.
 		r.turn.drainPartialResponsesOutput()
-		if r.drainPartialOnRollback {
+		if r.drainPartialOnRollback || (delta.Rollback != nil && delta.Rollback.Scope == message.RollbackScopeRequest) {
 			r.turn.drainPartialText()
 		}
 		if r.discardSpeculativeOnRollback != nil {

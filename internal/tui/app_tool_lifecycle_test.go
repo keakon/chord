@@ -1155,3 +1155,23 @@ func TestStreamTextEventDoesNotTriggerInlineImageRefresh(t *testing.T) {
 		t.Fatalf("assistant block content = %#v, want hello", m.currentAssistantBlock)
 	}
 }
+
+func TestContinuationRollbackReplaysConfirmedPrefix(t *testing.T) {
+	m := NewModelWithSize(nil, 80, 12)
+	for _, event := range []agent.AgentEvent{
+		agent.StreamTextEvent{Text: "A"}, agent.StreamTextEvent{Text: "discard"},
+		agent.StreamRollbackEvent{}, agent.StreamTextEvent{Text: "A"}, agent.StreamTextEvent{Text: "BC"},
+	} {
+		_ = m.handleAgentEvent(agentEventMsg{event: event})
+	}
+	if m.currentAssistantBlock == nil {
+		t.Fatal("missing final assistant block")
+	}
+	flushPendingStreamForTest(&m)
+	if m.currentAssistantBlock.Content != "ABC" {
+		t.Fatalf("text=%q", m.currentAssistantBlock.Content)
+	}
+	if got := len(m.viewport.visibleBlocks()); got != 1 {
+		t.Fatalf("blocks=%d", got)
+	}
+}

@@ -261,13 +261,15 @@ func OAuthKeySetupSlotKey(slot int, key string) string {
 //     We only fetch usage for the currently selected OAuth credential (codex-rs style on-demand), and
 //     we debounce refreshes to avoid noisy background polling.
 type ProviderConfig struct {
-	mu           sync.Mutex
-	name         string
-	typeName     string
-	apiURL       string
-	oauthProfile string
-	authScheme   string // resolved request auth scheme; set once at construction, then read-only
-	keyStates    []*KeyState
+	generateContentCompat        map[string]*config.GenerateContentCompatConfig
+	defaultGenerateContentCompat *config.GenerateContentCompatConfig
+	mu                           sync.Mutex
+	name                         string
+	typeName                     string
+	apiURL                       string
+	oauthProfile                 string
+	authScheme                   string // resolved request auth scheme; set once at construction, then read-only
+	keyStates                    []*KeyState
 	// keylessCooldownEnd/keylessCooldownCount back the same cooldown pacing for
 	// providers configured without any API key (local gateways, public
 	// endpoints). Those providers have no KeyState to carry the wait, so a
@@ -345,6 +347,10 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 		models = make(map[string]config.ModelConfig)
 	}
 
+	generateContentCompat := make(map[string]*config.GenerateContentCompatConfig, len(models))
+	for id, model := range models {
+		generateContentCompat[id] = config.ResolveGenerateContentCompat(cfg.Compat, model)
+	}
 	responsesCompat := make(map[string]*config.ResponsesCompatConfig, len(models))
 	for name, model := range models {
 		responsesCompat[name], _ = config.ResolveResponsesCompat(cfg.Preset, name, model, cfg.Compat)
@@ -401,43 +407,45 @@ func NewProviderConfig(name string, cfg config.ProviderConfig, keys []string) *P
 	codexLifecycleCtx, codexLifecycleCancel := context.WithCancel(context.Background())
 
 	return &ProviderConfig{
-		name:                       name,
-		typeName:                   cfg.Type,
-		apiURL:                     apiURL,
-		authScheme:                 config.EffectiveAuthScheme(cfg.Preset, cfg.Type, apiURL, cfg.AuthScheme),
-		oauthProfile:               oauthProfile,
-		keyStates:                  keyStates,
-		models:                     models,
-		responsesCompat:            responsesCompat,
-		defaultResponsesCompat:     defaultResponsesCompat,
-		compat:                     cfg.Compat,
-		store:                      cfg.Store,
-		parallelToolCalls:          cfg.ParallelToolCalls,
-		trustHTTP400:               cfg.TrustHTTP400,
-		retryAfterMax:              resolveRetryAfterMax(cfg),
-		supportedServiceTiers:      append([]config.ServiceTier(nil), cfg.SupportedServiceTiers...),
-		preset:                     strings.TrimSpace(cfg.Preset),
-		responsesWebsocket:         cfg.ResponsesWebsocket,
-		responseHeaderTimeout:      durationFromPositiveSecondsClamped(int64(cfg.ResponseHeaderTimeout), 0),
-		streamIdleTimeout:          durationFromPositiveSecondsClamped(int64(cfg.StreamIdleTimeout), 0),
-		streamTotalTimeout:         durationFromPositiveSecondsClamped(int64(cfg.StreamTotalTimeout), 0),
-		websocketHandshakeTimeout:  durationFromPositiveSecondsClamped(int64(cfg.WebSocketHandshakeTimeout), 0),
-		keyRotation:                keyRotation,
-		keyOrder:                   keyOrder,
-		retryBackoff:               retryBackoff,
-		retryPacingExplicit:        retryPacingExplicit,
-		retryDelay:                 retryDelay,
-		stickyIdx:                  stickyIdx,
-		lastSelectedSlot:           -1,
-		effectiveProxyURL:          "",
-		userAgent:                  strings.TrimSpace(cfg.UserAgent),
-		requestCompression:         strings.TrimSpace(cfg.Compress),
-		polledRateLimitByCredIdx:   polledRateLimitByCredIdx,
-		polledRateLimitAttemptedAt: polledRateLimitAttemptedAt,
-		polledRateLimitSucceededAt: polledRateLimitSucceededAt,
-		polledRateLimitInFlight:    polledRateLimitInFlight,
-		codexLifecycleCtx:          codexLifecycleCtx,
-		codexLifecycleCancel:       codexLifecycleCancel,
+		name:                         name,
+		typeName:                     cfg.Type,
+		apiURL:                       apiURL,
+		authScheme:                   config.EffectiveAuthScheme(cfg.Preset, cfg.Type, apiURL, cfg.AuthScheme),
+		oauthProfile:                 oauthProfile,
+		keyStates:                    keyStates,
+		models:                       models,
+		responsesCompat:              responsesCompat,
+		generateContentCompat:        generateContentCompat,
+		defaultGenerateContentCompat: config.ResolveGenerateContentCompat(cfg.Compat, config.ModelConfig{}),
+		defaultResponsesCompat:       defaultResponsesCompat,
+		compat:                       cfg.Compat,
+		store:                        cfg.Store,
+		parallelToolCalls:            cfg.ParallelToolCalls,
+		trustHTTP400:                 cfg.TrustHTTP400,
+		retryAfterMax:                resolveRetryAfterMax(cfg),
+		supportedServiceTiers:        append([]config.ServiceTier(nil), cfg.SupportedServiceTiers...),
+		preset:                       strings.TrimSpace(cfg.Preset),
+		responsesWebsocket:           cfg.ResponsesWebsocket,
+		responseHeaderTimeout:        durationFromPositiveSecondsClamped(int64(cfg.ResponseHeaderTimeout), 0),
+		streamIdleTimeout:            durationFromPositiveSecondsClamped(int64(cfg.StreamIdleTimeout), 0),
+		streamTotalTimeout:           durationFromPositiveSecondsClamped(int64(cfg.StreamTotalTimeout), 0),
+		websocketHandshakeTimeout:    durationFromPositiveSecondsClamped(int64(cfg.WebSocketHandshakeTimeout), 0),
+		keyRotation:                  keyRotation,
+		keyOrder:                     keyOrder,
+		retryBackoff:                 retryBackoff,
+		retryPacingExplicit:          retryPacingExplicit,
+		retryDelay:                   retryDelay,
+		stickyIdx:                    stickyIdx,
+		lastSelectedSlot:             -1,
+		effectiveProxyURL:            "",
+		userAgent:                    strings.TrimSpace(cfg.UserAgent),
+		requestCompression:           strings.TrimSpace(cfg.Compress),
+		polledRateLimitByCredIdx:     polledRateLimitByCredIdx,
+		polledRateLimitAttemptedAt:   polledRateLimitAttemptedAt,
+		polledRateLimitSucceededAt:   polledRateLimitSucceededAt,
+		polledRateLimitInFlight:      polledRateLimitInFlight,
+		codexLifecycleCtx:            codexLifecycleCtx,
+		codexLifecycleCancel:         codexLifecycleCancel,
 	}
 }
 

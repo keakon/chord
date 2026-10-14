@@ -647,9 +647,8 @@ func TestGeminiCompleteStreamOmitsThinkingBudgetWhenLevelSet(t *testing.T) {
 }
 
 // TestGeminiActiveLoopSignatureContract covers the native Gemini wire: the
-// documented placeholder is filled only for a route that declares the gemini-3
-// contract, so a model name alone never opts a request into version-specific
-// repair.
+// documented placeholder repairs current-turn calls for native Gemini 3/4
+// model IDs or an explicitly selected signature contract.
 func TestGeminiActiveLoopSignatureContract(t *testing.T) {
 	capture := func(t *testing.T, model, contract string) geminiRequest {
 		t.Helper()
@@ -718,6 +717,9 @@ func TestGeminiActiveLoopSignatureContract(t *testing.T) {
 		contract string
 		want     string
 	}{
+		{name: "Gemini 4 selects the signature contract", model: "gemini-4-argon", want: geminiSkipThoughtSignatureValidator},
+		{name: "Gemini 4 resource ID selects the signature contract", model: "models/Gemini-4-Argon", want: geminiSkipThoughtSignatureValidator},
+		{name: "explicit none opts Gemini 4 out", model: "gemini-4-argon", contract: config.ReasoningContractNone},
 		{name: "gemini-3 model ID selects the contract", model: "gemini-3.8-flash", want: geminiSkipThoughtSignatureValidator},
 		{name: "resource-form gemini-3 model ID selects the contract", model: "models/Gemini-3-pro-preview", want: geminiSkipThoughtSignatureValidator},
 		{name: "explicit none opts a gemini-3 model out", model: "gemini-3.8-flash", contract: config.ReasoningContractNone},

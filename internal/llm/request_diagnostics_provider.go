@@ -21,6 +21,7 @@ type diagnosticScope struct {
 	preparedBaseline *diagnosticBaseline
 	preparedVersion  uint64
 	active           contextdiag.RequestID
+	ended            bool
 }
 
 // completeObservedProvider preserves admission and provider arguments, and
@@ -80,7 +81,7 @@ func completeObservedProvider(ctx context.Context, impl Provider, provider *Prov
 	defer lease.Finish()
 	resp, err := impl.CompleteStream(ctx, key, model, system, messages, defs, maxTokens, tuning, cb)
 	if scope != nil {
-		scope.finish(ctx, resp, err)
+		scope.finish(ctx, resp, err, "")
 	}
 	return resp, err
 }
@@ -115,7 +116,7 @@ func (s *diagnosticScope) submit() {
 	if c.invalid || c.current != s.request || s.preparedBaseline == nil {
 		return
 	}
-	if s.active.Attempt > 0 {
+	if s.active.Attempt > 0 && !s.ended {
 		c.store.Finish(s.active, contextdiag.Superseded, contextdiag.Usage{State: contextdiag.Missing})
 	}
 	s.request.attempt++
@@ -132,9 +133,14 @@ func (s *diagnosticScope) submit() {
 		c.baseline = s.preparedBaseline
 		c.version++
 		s.active = id
+		s.ended = false
 	}
 }
-func (s *diagnosticScope) finish(ctx context.Context, resp *message.Response, err error) {
+func (s *diagnosticScope) finish(ctx context.Context, resp *message.Response, err error, usageState string) {
+	if s.ended {
+		return
+	}
+	s.ended = true
 	state := contextdiag.Completed
 	if ctx.Err() != nil {
 		state = contextdiag.Cancelled
@@ -142,6 +148,9 @@ func (s *diagnosticScope) finish(ctx context.Context, resp *message.Response, er
 		state = contextdiag.Failed
 	}
 	usage := diagnosticUsage(s.provider, resp, err != nil || ctx.Err() != nil)
+	if usageState != "" {
+		usage.State = usageState
+	}
 	s.request.collector.store.Finish(s.active, state, usage)
 }
 func diagnosticUsage(provider *ProviderConfig, resp *message.Response, partial bool) contextdiag.Usage {
@@ -165,9 +174,9 @@ func diagnosticUsage(provider *ProviderConfig, resp *message.Response, partial b
 	}
 	return out
 }
-func finishDiagnosticAttempt(ctx context.Context, resp *message.Response, err error) {
+func finishDiagnosticAttempt(ctx context.Context, resp *message.Response, err error, usageState string) {
 	if s := diagnosticsScope(ctx); s != nil {
-		s.finish(ctx, resp, err)
+		s.finish(ctx, resp, err, usageState)
 	}
 }
 func diagnosticServerContextReuse(ctx context.Context) {

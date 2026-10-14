@@ -584,32 +584,42 @@ type StreamEventDelta struct {
 
 // ToolCallDelta represents incremental tool call data during streaming.
 type ToolCallDelta struct {
-	ID    string
-	Name  string
-	Input string // partial JSON
+	DeferExecution bool
+	ID             string
+	Name           string
+	Input          string // partial JSON
 	// InputText carries a freeform tool input as bare text (Responses custom
 	// tool deltas, e.g. apply_patch patch text). It is mutually exclusive with
 	// Input: consumers accumulate it verbatim instead of treating it as JSON.
 	InputText string
 }
 
-// RollbackDelta indicates that the current streamed assistant output should be
-// discarded (e.g. incremental chain validation failed and provider will retry
-// with a full-input request).
+// RollbackScopeRequest discards the current request's partial text for every agent.
+const RollbackScopeRequest = "request"
+
+// RollbackDelta indicates that the current streamed assistant output is discarded.
 type RollbackDelta struct {
+	Scope  string
 	Reason string
 }
 
-// TokenUsage records token usage from a single API response.
-// InputTokens = prompt size (total input); OutputTokens = total generated (content + reasoning if reported together).
-// CacheReadTokens/CacheWriteTokens = cache read/write; CacheWrite1hTokens is the 1-hour TTL subset of CacheWriteTokens when reported separately; ReasoningTokens = thinking/reasoning output when reported separately.
+// ContextTokenUsage describes the logical window independently of billable requests.
+type ContextTokenUsage struct {
+	Known        bool `json:"known"`
+	PromptTokens int  `json:"prompt_tokens"`
+	OutputTokens int  `json:"output_tokens"`
+}
+
+// TokenUsage records billable usage and an optional logical context observation.
+// OutputTokens includes reasoning; cache and reasoning fields are subsets where indicated.
 type TokenUsage struct {
-	InputTokens        int `json:"input_tokens"`
-	OutputTokens       int `json:"output_tokens"`
-	CacheReadTokens    int `json:"cache_read_input_tokens"`
-	CacheWriteTokens   int `json:"cache_creation_input_tokens"`
-	CacheWrite1hTokens int `json:"cache_creation_1h_input_tokens,omitempty"`
-	ReasoningTokens    int `json:"reasoning_tokens"`
+	Context            *ContextTokenUsage `json:"context,omitempty"`
+	InputTokens        int                `json:"input_tokens"`
+	OutputTokens       int                `json:"output_tokens"`
+	CacheReadTokens    int                `json:"cache_read_input_tokens"`
+	CacheWriteTokens   int                `json:"cache_creation_input_tokens"`
+	CacheWrite1hTokens int                `json:"cache_creation_1h_input_tokens,omitempty"`
+	ReasoningTokens    int                `json:"reasoning_tokens"`
 
 	// Transient raw-provider semantics. The LLM client normalizes successful
 	// responses to InputTokens including cache reads and excluding cache writes
@@ -743,6 +753,7 @@ const (
 
 // Response represents a complete LLM response.
 type Response struct {
+	UsageReported         bool
 	NativeRequestDuration time.Duration
 	NativeTools           *NativeToolHistory
 	Content               string

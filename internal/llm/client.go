@@ -182,10 +182,11 @@ type CallStatus struct {
 // the target's model and context budgets and may return an updated message
 // snapshot for that fallback attempt.
 type CompleteStreamOptions struct {
-	Diagnostics    *RequestDiagnostics
-	PrepareAttempt func(context.Context, RequestAttempt) (context.Context, error)
-	NativeTools    *NativeToolPolicy
-	BeforeFallback func(context.Context, []message.Message, FallbackModel) ([]message.Message, error)
+	OnContinuationUsage func(ContinuationUsage)
+	Diagnostics         *RequestDiagnostics
+	PrepareAttempt      func(context.Context, RequestAttempt) (context.Context, error)
+	NativeTools         *NativeToolPolicy
+	BeforeFallback      func(context.Context, []message.Message, FallbackModel) ([]message.Message, error)
 	// MCPDeclarations is the request's currently effective incremental MCP
 	// tool set. A target that cannot accept the dynamic declaration shape
 	// inlines exactly this set into its top-level tools instead of replaying
@@ -1135,6 +1136,9 @@ func (c *Client) CompleteStreamWithOptions(
 ) (*message.Response, error) {
 	if c == nil || c.closed.Load() {
 		return nil, errors.New("llm client is closed")
+	}
+	if options.OnContinuationUsage != nil {
+		ctx = context.WithValue(ctx, continuationObserverKey{}, options.OnContinuationUsage)
 	}
 	if options.Diagnostics != nil {
 		ctx = context.WithValue(ctx, diagnosticsContextKey{}, options.Diagnostics)

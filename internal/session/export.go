@@ -34,6 +34,7 @@ type ExportedSession struct {
 // Note: multi-part user attachments (e.g. image ContentParts) are intentionally
 // not embedded in export files; only the plain message Content is exported.
 type ExportedMessage struct {
+	Usage                     *message.TokenUsage            `json:"usage,omitempty"`
 	DeliveredFiles            []message.DeliveredFile        `json:"delivered_files,omitempty"`
 	CompactionDeliveredFiles  []message.DeliveredFile        `json:"compaction_delivered_files,omitempty"`
 	FileLinkBaseDir           string                         `json:"file_link_base_dir,omitempty"`
@@ -154,6 +155,7 @@ func Export(
 			GeminiParts:               append([]message.GeminiReplayPart(nil), msg.GeminiParts...),
 			NativeTools:               msg.NativeTools.Clone(),
 			ReasoningContent:          msg.ReasoningContent,
+			Usage:                     msg.Usage.Clone(),
 			IsCompactionSummary:       msg.IsCompactionSummary,
 			DeliveredFiles:            message.CloneDeliveredFiles(msg.DeliveredFiles),
 			CompactionDeliveredFiles:  message.CloneDeliveredFiles(msg.CompactionDeliveredFiles),
@@ -415,6 +417,7 @@ func (es *ExportedSession) ToMessages() []message.Message {
 			GeminiParts:               append([]message.GeminiReplayPart(nil), em.GeminiParts...),
 			NativeTools:               em.NativeTools.Clone(),
 			ReasoningContent:          em.ReasoningContent,
+			Usage:                     em.Usage.Clone(),
 			IsCompactionSummary:       em.IsCompactionSummary,
 			DeliveredFiles:            message.CloneDeliveredFiles(em.DeliveredFiles),
 			CompactionDeliveredFiles:  message.CloneDeliveredFiles(em.CompactionDeliveredFiles),

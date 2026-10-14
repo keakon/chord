@@ -1169,7 +1169,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 			}
 			s.signalWake()
 		})
-		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{NativeTools: s.nativeRequestPolicy(turn), Diagnostics: observer, PrepareAttempt: prepareDirectoryInstructionAttempt(s.directoryInstructions.Load(), requestSeq)})
+		resp, err := llmClient.CompleteStreamWithOptions(requestCtx, messages, toolDefs, callback, llm.CompleteStreamOptions{OnContinuationUsage: s.parent.continuationUsageObserver(llmClient, requestUsageTarget(wallReq), "sub", s.agentDefName, "chat", llmClient.PrimaryModelRef(), turn.ID), NativeTools: s.nativeRequestPolicy(turn), Diagnostics: observer, PrepareAttempt: prepareDirectoryInstructionAttempt(s.directoryInstructions.Load(), requestSeq)})
 		// Settle the walltime segment before the flush events so the TUI
 		// re-render they trigger sees the updated TIME buckets; finishing at
 		// return would leave the sidebar stale until the next unrelated
@@ -1210,7 +1210,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 					s.ctxMgr.SetTokenBudgets(lim, llmClient.InputLimitForModelRef(runningRef), llmClient.CompactionBudgetForModelRef(runningRef), s.parent.effectiveCompactionReservedInput())
 				}
 			}
-			if resp.NativeTools == nil {
+			if resp.NativeTools == nil && !resp.UsageReported {
 				s.parent.recordUsage(s.instanceID, "sub", s.agentDefName, "chat", selectedRef, runningRef, turn.ID, resp.Usage, callStatus.ServiceTier, nil)
 			}
 

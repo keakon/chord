@@ -631,13 +631,14 @@ func updateSuccessfulCallStatus(status *CallStatus, target streamRetryTarget) {
 }
 
 type streamTargetAttemptResult struct {
-	resp                *message.Response
-	lastErr             error
-	lastErrProvider     *ProviderConfig
-	pendingRoundWait    roundCoolingWait
-	hadRequestAttempt   bool
-	roundHadUsableReply bool
-	skipProvider        bool
+	continuationExhausted bool
+	resp                  *message.Response
+	lastErr               error
+	lastErrProvider       *ProviderConfig
+	pendingRoundWait      roundCoolingWait
+	hadRequestAttempt     bool
+	roundHadUsableReply   bool
+	skipProvider          bool
 	// pendingRollbackReason is non-empty when partial streamed output is still
 	// rendered and its rollback is deferred until the retry regenerates
 	// content or the attempt chain ends; the value is the rollback reason.
@@ -780,6 +781,9 @@ func (c *Client) completeStreamTarget(
 			lastInputTokens,
 		)
 	}
+	if t.provider.Type() == config.ProviderTypeGenerateContent {
+		effectiveMaxTokens = constrainGenerateContentOutputBudget(effectiveMaxTokens, t.provider.GenerateContentCompat(t.modelID))
+	}
 	if !inputFits {
 		// The estimated request input already fills the context window, so no
 		// positive output budget is left: the provider would reject the request
@@ -899,6 +903,7 @@ func (c *Client) completeStreamTarget(
 		if observer, _ := attemptCtx.Value(diagnosticsContextKey{}).(*RequestDiagnostics); observer != nil {
 			attemptCtx = context.WithValue(attemptCtx, diagnosticTargetContextKey{}, modelRef)
 		}
+		attemptCtx = context.WithValue(attemptCtx, continuationTargetKey{}, continuationTarget{ref: modelRef, tier: t.serviceTier})
 		resp, err = completeWithNativeTools(
 			attemptCtx,
 			t.impl,
@@ -919,6 +924,21 @@ func (c *Client) completeStreamTarget(
 		}
 		if _, redirected := errors.AsType[*RequestRedirectError](err); redirected {
 			return result, lastInputTokens, err
+		}
+		if continuationErr, exhausted := errors.AsType[*GeminiContinuationError](err); exhausted {
+			if ctx.Err() != nil {
+				return result, lastInputTokens, ctx.Err()
+			}
+			if apiErr, ok := errors.AsType[*APIError](continuationErr.Cause); ok && (apiErr.StatusCode == 401 || apiErr.StatusCode == 403 || apiErr.StatusCode == 429) {
+				emitKeyCooldownDeltas(cb, markKeyCooldown(ctx, t.provider, apiKey, t.modelID, continuationErr.Cause))
+			}
+			result.continuationExhausted = true
+			result.setLastErr(t.provider, err)
+			if status != nil && status.FallbackReason == "" {
+				status.FallbackReason = "native_continuation_failed"
+			}
+			emitRetryErrorForKey(cb, err, t.provider, t.modelID, apiKey)
+			return result, lastInputTokens, nil
 		}
 		if tracker.rollbackFired {
 			// The preserved partial left the screen when this attempt's first
@@ -998,8 +1018,8 @@ func (c *Client) completeStreamTarget(
 			if resp.Usage != nil {
 				inputTok = resp.Usage.InputTokens
 				outputTok = resp.Usage.OutputTokens
-				lastInputTokens = resp.Usage.InputTokens
-				c.setLastInputTokens(resp.Usage.InputTokens)
+				lastInputTokens, _ = ctxmgr.ContextPromptTokens(*resp.Usage)
+				c.setLastInputTokens(lastInputTokens)
 			}
 			log.Debugf("LLM request completed provider=%v model=%v input_tokens=%v output_tokens=%v stop_reason=%v", t.provider.Name(), t.modelID, inputTok, outputTok, resp.StopReason)
 			updateSuccessfulCallStatus(status, t)
@@ -1560,6 +1580,7 @@ func (c *Client) completeStreamWithRetry(
 
 	retryCount := 0
 	replayEchoRejectedTargets := make(map[replayEchoTarget]struct{})
+	continuationExhaustedTargets := make(map[replayEchoTarget]struct{})
 
 	// Public CompleteStream defaults to unlimited full-round retries. Callers can
 	// pass a positive maxAttempts for the historical soft cap (cooling /
@@ -1667,6 +1688,9 @@ func (c *Client) completeStreamWithRetry(
 			}
 			t := targets[ti]
 			replayTarget := replayEchoTarget{provider: t.provider, modelID: t.modelID, variant: t.variant}
+			if _, exhausted := continuationExhaustedTargets[replayTarget]; exhausted {
+				continue
+			}
 			if _, rejected := replayEchoRejectedTargets[replayTarget]; rejected {
 				log.Infof("skipping model: target repeated replay evidence in this request provider=%v model=%v variant=%v", t.provider.Name(), t.modelID, t.variant)
 				continue
@@ -1731,6 +1755,9 @@ func (c *Client) completeStreamWithRetry(
 				if _, repeatedEcho := errors.AsType[*ReplayEvidenceEchoError](targetResult.lastErr); repeatedEcho {
 					replayEchoRejectedTargets[replayTarget] = struct{}{}
 				}
+				if targetResult.continuationExhausted {
+					continuationExhaustedTargets[replayTarget] = struct{}{}
+				}
 				lastInputTokens = updatedLastInputTokens
 				lastErr = targetResult.lastErr
 				lastErrProvider = targetResult.lastErrProvider
@@ -1751,6 +1778,23 @@ func (c *Client) completeStreamWithRetry(
 				}
 			}
 		} // end targets loop
+		allExhausted := len(targets) > 0
+		for _, target := range targets {
+			key := replayEchoTarget{provider: target.provider, modelID: target.modelID, variant: target.variant}
+			_, exhausted := continuationExhaustedTargets[key]
+			_, rejected := replayEchoRejectedTargets[key]
+			if !exhausted && !rejected {
+				allExhausted = false
+				break
+			}
+		}
+		if allExhausted {
+			if fallbackEnabled && status != nil && status.FallbackTriggered {
+				status.FallbackExhausted = true
+			}
+			return nil, lastErr
+		}
+
 		// Track that the full model pool was tried and all failed.
 		if fallbackEnabled && status != nil && status.FallbackTriggered {
 			status.FallbackExhausted = true

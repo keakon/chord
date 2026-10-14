@@ -29,7 +29,7 @@ DeepSeek / GLM / Kimi K2.x / Doubao as `thinking: {type}`, and Qwen as
 `compat.chat_completions.native_thinking`, and only a DeepSeek route (a DeepSeek
 model ID or `compat.reasoning_continuity.contract: deepseek`) selects it on its
 own. The selector is also what identifies a gateway model as Gemini or
-Claude: without it Gemini thought signatures are not written back, and Gemini 3
+Claude: without it Gemini thought signatures are not written back, and Gemini 3/4
 rejects the request that follows each tool call (HTTP 400). See
 [Thinking behind a Chat Completions gateway](./model-configs.md#thinking-behind-a-chat-completions-gateway).
 
@@ -101,10 +101,10 @@ For targets other than the DeepSeek Chat/Messages paths above, the answer depend
 4. **Responses, Messages, and Gemini**: native continuity is automatic. Chord
    captures the plaintext or signed/encrypted state and replays it where the
    wire allows; nothing to configure. On the native Gemini endpoint, a model ID
-   starting with `gemini-3` also turns on the missing thought-signature repair.
+   starting with `gemini-3` or `gemini-4` also turns on the missing thought-signature repair.
    Behind a Chat Completions gateway, Gemini and Claude state is only replayed
    once `compat.chat_completions.native_thinking` names the family (`gemini-3`
-   for Gemini 3).
+   for Gemini 3/4).
 
 `reasoning_replay: all` replays completed-turn thinking on every request, which
 the backend bills as input. The default (`current_turn`) strips completed turns

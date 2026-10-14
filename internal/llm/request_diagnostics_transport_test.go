@@ -120,7 +120,7 @@ func TestDiagnosticWebSocketWriteFailure(t *testing.T) {
 	ctx := context.WithValue(t.Context(), diagnosticScopeContextKey{}, scope)
 	provider := &ResponsesProvider{codexWSConn: conn}
 	_, _, err = provider.codexWSExecuteRequestLocked(ctx, "sample-key", "test-model", codexWSResponseCreate{Type: "response.create", Model: "test-model"}, nil, false, time.Now(), true, nil, "", false)
-	scope.finish(ctx, nil, err)
+	scope.finish(ctx, nil, err, "")
 	snapshot, ok := store.Latest()
 	if err == nil || !ok || snapshot.State != contextdiag.Failed || snapshot.ID.Attempt != 1 || snapshot.Usage.State != contextdiag.Missing {
 		t.Fatalf("write failure=%v snapshot=%+v", err, snapshot)

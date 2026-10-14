@@ -309,3 +309,21 @@ func TestEventMapperPublishesOnlyFinalizedText(t *testing.T) {
 		})
 	}
 }
+
+func TestEventMapperContinuationRollbackPublishesFinalBodyOnce(t *testing.T) {
+	mapper := &eventMapper{}
+	var got []acp.SessionUpdate
+	for _, event := range []agent.AgentEvent{
+		agent.StreamTextEvent{Text: "A"}, agent.StreamTextEvent{Text: "pending"},
+		agent.StreamRollbackEvent{}, agent.StreamTextEvent{Text: "A"}, agent.StreamTextEvent{Text: "BC"},
+		agent.StreamTextCommitEvent{Text: "ABC"}, agent.StreamSegmentEndedEvent{},
+		agent.AssistantMessageEvent{Text: "ABC"},
+	} {
+		updates, _ := mapper.Map(t.Context(), event)
+		got = append(got, updates...)
+	}
+	want := []acp.SessionUpdate{acp.UpdateAgentMessageText("ABC")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("updates=%+v", got)
+	}
+}

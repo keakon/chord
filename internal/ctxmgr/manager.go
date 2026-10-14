@@ -606,7 +606,7 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 	m.stats.CacheReadTokens += usage.CacheReadTokens
 	m.stats.CacheWriteTokens += usage.CacheWriteTokens
 	m.stats.ReasoningTokens += usage.ReasoningTokens
-	if !hasUsageReport(usage) {
+	if _, known := ContextPromptTokens(usage); !known {
 		frozen := m.computeFrozenEstimateLocked()
 		m.lastInputTokens = 0
 		m.lastTotalContextTokens = 0
@@ -624,9 +624,13 @@ func (m *Manager) UpdateFromUsage(usage message.TokenUsage) {
 		m.mu.Unlock()
 		return
 	}
-	fullPrompt := fullPromptTokens(usage)
+	fullPrompt, _ := ContextPromptTokens(usage)
+	output := usage.OutputTokens
+	if usage.Context != nil {
+		output = usage.Context.OutputTokens
+	}
 	m.lastInputTokens = fullPrompt
-	m.lastTotalContextTokens = fullPrompt + usage.OutputTokens
+	m.lastTotalContextTokens = fullPrompt + output
 	m.observedValid = true
 	m.observationStale = false
 	m.frozenEstimateTokens = 0

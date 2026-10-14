@@ -1163,6 +1163,7 @@ func (a *MainAgent) startModelDrivenCompactionAsync(bundle modelDrivenBarrierSna
 	}
 	if a.walltime != nil {
 		a.walltime.startCompactionAt(planID, a.currentAgentName(), target.turnID)
+		ctx = withCompactionUsageTarget(ctx, a.walltime, planID)
 	}
 
 	// The barrier freezes this turn's next request until the checkpoint

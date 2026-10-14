@@ -163,10 +163,10 @@ func nativeThinkingSelectorAdvisories(providerName string, cfg ProviderConfig) [
 			selector = compat.NativeThinkingValue()
 		}
 		// A family selector preserves real signatures, but does not repair
-		// missing signatures required by Gemini 3 tool-call history.
+		// missing signatures required by Gemini 3/4 tool-call history.
 		shape, _ := NormalizeNativeThinking(selector)
-		if shape == NativeThinkingGemini && IsGemini3ModelID(modelID) {
-			advisories = append(advisories, fmt.Sprintf("provider %q model %q uses native_thinking: %s: real thought signatures are preserved, but missing-signature repair is disabled; select native_thinking: %s for Gemini 3", providerName, modelID, NativeThinkingGemini, NativeThinkingGemini3))
+		if shape == NativeThinkingGemini && RequiresGeminiThoughtSignature(modelID) {
+			advisories = append(advisories, fmt.Sprintf("provider %q model %q uses native_thinking: %s: real thought signatures are preserved, but missing-signature repair is disabled; select native_thinking: %s for Gemini 3/4", providerName, modelID, NativeThinkingGemini, NativeThinkingGemini3))
 		}
 		// Other set selectors are either valid or already reported as invalid.
 		if strings.TrimSpace(selector) != "" {
@@ -180,8 +180,8 @@ func nativeThinkingSelectorAdvisories(providerName string, cfg ProviderConfig) [
 		}
 		where := fmt.Sprintf("provider %q model %q is on a chat-completions route without compat.chat_completions.native_thinking", providerName, modelID)
 		switch {
-		case IsGemini3ModelID(modelID):
-			advisories = append(advisories, fmt.Sprintf("%s: Gemini 3 thought signatures are not written back, so the gateway rejects follow-up tool calls (HTTP 400); set native_thinking: %s",
+		case RequiresGeminiThoughtSignature(modelID):
+			advisories = append(advisories, fmt.Sprintf("%s: Gemini 3/4 thought signatures are not written back, so the gateway rejects follow-up tool calls (HTTP 400); set native_thinking: %s",
 				where, NativeThinkingGemini3))
 		case !modelRequestsThinking(model):
 		case family == modelcompat.NativeFamilyGemini:
@@ -198,19 +198,15 @@ func nativeThinkingSelectorAdvisories(providerName string, cfg ProviderConfig) [
 	return advisories
 }
 
-// gemini3ModelIDPrefix starts every Gemini 3 model ID ("gemini-3-pro-preview",
-// "gemini-3.1-flash", ...).
-const gemini3ModelIDPrefix = "gemini-3"
-
-// IsGemini3ModelID reports whether a model ID names a Gemini 3 model: its final
-// "/" component (which also covers the native "models/<id>" resource form and
-// gateway vendor prefixes) starts with "gemini-3".
-func IsGemini3ModelID(modelID string) bool {
+// RequiresGeminiThoughtSignature reports whether the model requires a thought
+// signature on the first function call in each step of the current turn.
+// Resource-form IDs and gateway vendor prefixes use the final path component.
+func RequiresGeminiThoughtSignature(modelID string) bool {
 	base := strings.ToLower(strings.TrimSpace(modelID))
 	if slash := strings.LastIndex(base, "/"); slash >= 0 {
 		base = base[slash+1:]
 	}
-	return strings.HasPrefix(base, gemini3ModelIDPrefix)
+	return strings.HasPrefix(base, "gemini-3") || strings.HasPrefix(base, "gemini-4")
 }
 
 // modelRequestsThinking reports whether the model or one of its variants

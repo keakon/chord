@@ -6,6 +6,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Features
 
+- Native Gemini endpoints support opt-in continuation across requests and recovery with a fixed target. Local tools wait for final confirmation; multi-request billing and context-window observations are tracked separately.
+
 - Added `chord sessions list --json` for recent session metadata, using the configured storage and shared repository session scope without starting an agent.
 
 - Deliver files with `present` and find them again after restoring a session. Preview text, Markdown, and images in the TUI, or open files such as HTML and PDF with system-associated applications.

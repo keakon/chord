@@ -75,8 +75,7 @@ func (m Message) Clone() Message {
 		cloned.Provenance = &provenance
 	}
 	if m.Usage != nil {
-		usage := *m.Usage
-		cloned.Usage = &usage
+		cloned.Usage = m.Usage.Clone()
 	}
 	if m.Mailbox != nil {
 		mailbox := *m.Mailbox
@@ -127,4 +126,16 @@ func cloneJSONValue(value any) any {
 	default:
 		return value
 	}
+}
+
+// Clone returns an independent usage report, including its context observation.
+func (u *TokenUsage) Clone() *TokenUsage {
+	if u == nil {
+		return nil
+	}
+	result := *u
+	if u.Context != nil {
+		result.Context = new(*u.Context)
+	}
+	return &result
 }

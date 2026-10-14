@@ -134,6 +134,7 @@ func (a *MainAgent) startCompactionAsyncWithContinuation(snapshot []message.Mess
 	}
 	if a.walltime != nil {
 		a.walltime.startCompactionAt(planID, a.currentAgentName(), target.turnID)
+		ctx = withCompactionUsageTarget(ctx, a.walltime, planID)
 	}
 
 	a.emitCompactionSlotActivity()
@@ -950,11 +951,13 @@ func (a *MainAgent) callCompactionSummary(ctx context.Context, client *llm.Clien
 		return "", fallbackModelRef, a.preparationError(fmt.Errorf("acquire compaction LLM request capacity: %w", err))
 	}
 	defer releaseLLM()
-	resp, err := client.CompleteStream(
+	usageTarget, _ := ctx.Value(continuationWalltimeKey{}).(*walltimeTarget)
+	resp, err := client.CompleteStreamWithOptions(
 		ctx,
 		[]message.Message{{Role: "user", Content: prompt}},
 		nil,
 		progress.Callback(),
+		llm.CompleteStreamOptions{OnContinuationUsage: a.continuationUsageObserver(client, usageTarget, "main", "", "compaction", client.PrimaryModelRef(), 0)},
 	)
 	if err != nil {
 		return "", fallbackModelRef, err
@@ -1143,7 +1146,9 @@ func (a *MainAgent) finishCompactionCall(client *llm.Client, fallbackModelRef st
 	if serviceTier == "" {
 		serviceTier = client.EffectiveServiceTierForModelRef(runningRef)
 	}
-	a.recordUsage("main", "main", a.currentAgentName(), "compaction", selectedRef, runningRef, 0, resp.Usage, serviceTier, nil)
+	if !resp.UsageReported {
+		a.recordUsage("main", "main", a.currentAgentName(), "compaction", selectedRef, runningRef, 0, resp.Usage, serviceTier, nil)
+	}
 	modelRef := fallbackModelRef
 	if strings.TrimSpace(runningRef) != "" {
 		modelRef = runningRef

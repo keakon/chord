@@ -18,13 +18,13 @@ const (
 	ReasoningContractDeepSeek = "deepseek"
 	// ReasoningContractGemini3 enables missing thought-signature repair on the
 	// native generate-content endpoint. When the contract is unset there, a
-	// model ID whose final component starts with "gemini-3" (case-insensitive,
-	// "models/" prefix allowed; see IsGemini3ModelID) selects it automatically.
+	// model ID whose final component starts with "gemini-3" or "gemini-4" (case-insensitive,
+	// "models/" prefix allowed; see RequiresGeminiThoughtSignature) selects it automatically.
 	// A Chat Completions gateway only follows native_thinking: gemini-3.
 	ReasoningContractGemini3 = "gemini-3"
 	// ReasoningContractNone explicitly opts a route out of every endpoint
 	// contract, including the ones inferred from a DeepSeek model name or a
-	// Gemini 3 model ID on the native endpoint.
+	// Gemini 3/4 model ID on the native endpoint.
 	ReasoningContractNone = "none"
 	// ReasoningContinuityModeNone replays no provider-specific reasoning state.
 	ReasoningContinuityModeNone = "none"

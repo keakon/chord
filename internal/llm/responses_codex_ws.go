@@ -824,7 +824,7 @@ func (r *ResponsesProvider) completeStreamCodexWebSocket(
 		ctx, apiKey, model, env, cb, true, start, true, opts.TurnState, opts.TurnStateIdentity, freeform,
 	)
 	if reqErr != nil {
-		finishDiagnosticAttempt(ctx, resp, reqErr)
+		finishDiagnosticAttempt(ctx, resp, reqErr, "")
 		return nil, useIncremental, reqErr
 	}
 
