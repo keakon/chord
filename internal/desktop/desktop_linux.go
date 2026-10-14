@@ -41,7 +41,7 @@ func (s *System) queryAssociations(ctx context.Context, path string) (Associatio
 	var ids []string
 	defaultID := ""
 	seen := map[string]bool{}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if strings.HasPrefix(line, "Default application for ") {
 			if i := strings.LastIndex(line, ": "); i >= 0 {
 				defaultID = strings.TrimSpace(line[i+2:])

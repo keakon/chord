@@ -78,6 +78,7 @@ allowed_pseudo = {
     "golang.org/x/telemetry": "Transitive dependency of the go.mod-pinned deadcode analyzer that the unreachable-code gate runs.",
 }
 allowed_forks = {
+    "github.com/keakon/dbus/v5": "Linux sleep-inhibition backend needs caller-owned Unix connections, received descriptor tracking before decoding, and reader shutdown synchronization.",
     "github.com/keakon/displaywidth": "Grapheme width fork accounting for spacing components and upstream VS16 eligibility fixes.",
     "github.com/keakon/x/ansi": "ANSI wrapping and cutting fork using the corrected grapheme width while sharing palette types with colorprofile.",
     "github.com/keakon/lipgloss/v2": "Lipgloss fork sharing the corrected ANSI width and Chord's Ultraviolet renderer.",
@@ -116,7 +117,8 @@ root_edges = sum(1 for line in graph if line.startswith(module + " "))
 graph_edges = len(graph)
 # The width fork retains upstream ANSI palette types for colorprofile; its
 # original width dependency adds one edge without adding another renderer.
-max_root_edges = int(os.environ.get("CHORD_MAX_ROOT_REQUIRE_EDGES", "75"))
+# Linux sleep inhibition adds the D-Bus fork for descriptor-safe lease cleanup.
+max_root_edges = int(os.environ.get("CHORD_MAX_ROOT_REQUIRE_EDGES", "76"))
 max_graph_edges = int(os.environ.get("CHORD_MAX_MOD_GRAPH_EDGES", "650"))
 if root_edges > max_root_edges:
     errors.append(f"root dependency edges {root_edges} exceed CHORD_MAX_ROOT_REQUIRE_EDGES={max_root_edges}")

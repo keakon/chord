@@ -11,15 +11,18 @@ import (
 )
 
 func TestPresentPermissionAggregatesEveryTarget(t *testing.T) {
-	root := t.TempDir()
+	// Present resolves symlinks, so use the same canonical root for path rules.
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"allow.md", "deny.md"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte("text"), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	target, _ := filepath.EvalSymlinks(filepath.Join(root, "deny.md"))
 	args := json.RawMessage(`{"files":[{"path":"allow.md"},{"path":"deny.md"}]}`)
-	rules := permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}, {Permission: tools.NamePresent, Pattern: target, Action: permission.ActionDeny}}
+	rules := permission.Ruleset{{Permission: "*", Pattern: "*", Action: permission.ActionAllow}, {Permission: tools.NamePresent, Pattern: "deny.md", Action: permission.ActionDeny}}
 	result := evaluateToolPermissionInDir(rules, tools.NamePresent, args, permission.PathScope{Cwd: root})
 	if result.Action != permission.ActionDeny {
 		t.Fatalf("partial denial ignored: %#v", result)

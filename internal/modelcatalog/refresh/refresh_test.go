@@ -2,6 +2,7 @@ package refresh
 
 import (
 	"context"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,9 +59,7 @@ sources:
 func initUpstreamRepo(t *testing.T, tag string, withCandidates bool) string {
 	t.Helper()
 	files := make(map[string]string, len(sourceFiles)+1)
-	for name, content := range sourceFiles {
-		files[name] = content
-	}
+	maps.Copy(files, sourceFiles)
 	files["catalog.yaml"] = "version: \"" + strings.TrimPrefix(tag, "v") + "\"\n"
 	if withCandidates {
 		files["candidates/gpt-6.1-sol-messages.yaml"] = candidateFile

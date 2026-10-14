@@ -40,13 +40,13 @@ const (
 // Only local Unix stream sockets are accepted. PathUnescape preserves literal '+'.
 func parseBusAddresses(address string) ([]string, error) {
 	var paths []string
-	for _, entry := range strings.Split(address, ";") {
+	for entry := range strings.SplitSeq(address, ";") {
 		transport, options, ok := strings.Cut(entry, ":")
 		if !ok || transport != "unix" {
 			return nil, fmt.Errorf("unsupported D-Bus address transport %q", transport)
 		}
 		fields := make(map[string]string)
-		for _, option := range strings.Split(options, ",") {
+		for option := range strings.SplitSeq(options, ",") {
 			key, value, ok := strings.Cut(option, "=")
 			if !ok {
 				return nil, errors.New("invalid D-Bus address option")
