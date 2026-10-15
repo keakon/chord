@@ -137,6 +137,122 @@ func TestStreamContinueRecordsSettledSegmentForLateTail(t *testing.T) {
 	}
 }
 
+// TestTextTailAfterToolStartMergesIntoPrefix pins that a tool_call start
+// spliced between two content chunks of one message does not split the reply in
+// two. Some providers emit the start of a tool call before the message's final
+// text chunks, so the same segment can flush text after the tool card's
+// boundary; that tail must fold back into the prefix card rather than open a
+// second card holding the rest of the same sentence.
+func TestTextTailAfterToolStartMergesIntoPrefix(t *testing.T) {
+	stubTUITicks(t)
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
+	assistantCards := func() []*Block {
+		var out []*Block
+		for _, b := range m.viewport.visibleBlocks() {
+			if b.Type == BlockAssistant {
+				out = append(out, b)
+			}
+		}
+		return out
+	}
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 4, RequestSeq: 1, Text: "Let me continue verifying the rest and record"}})
+	applyTestCmd(t, &m, cmd)
+
+	// Interleaved tool_call start: the argument-streaming card appears before the
+	// remainder of the message's text.
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{ID: "call-1", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`}})
+	applyTestCmd(t, &m, cmd)
+
+	// The same segment's remaining text arrives after the tool card.
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 4, RequestSeq: 1, Text: " notes."}})
+	applyTestCmd(t, &m, cmd)
+
+	cards := assistantCards()
+	if len(cards) != 1 {
+		t.Fatalf("assistant cards = %d, want the reply rendered once", len(cards))
+	}
+	if got := cards[0].streamAccumulatedContent(); got != "Let me continue verifying the rest and record notes." {
+		t.Fatalf("card content = %q, want the tail merged into its own card", got)
+	}
+}
+
+// TestTextTailsBetweenMultipleToolStartsKeepOneCard pins the multi-tool form of
+// the same interleaving: several tool_call starts are spliced between the text
+// chunks of one message. Every tail of the segment must keep folding into the
+// one prefix card, not just the first.
+func TestTextTailsBetweenMultipleToolStartsKeepOneCard(t *testing.T) {
+	stubTUITicks(t)
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
+
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 6, RequestSeq: 1, Text: "I will check"}})
+	applyTestCmd(t, &m, cmd)
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{ID: "call-a", Name: tools.NameRead, ArgsJSON: `{"path":"a"}`}})
+	applyTestCmd(t, &m, cmd)
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 6, RequestSeq: 1, Text: " the config"}})
+	applyTestCmd(t, &m, cmd)
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{ID: "call-b", Name: tools.NameRead, ArgsJSON: `{"path":"b"}`}})
+	applyTestCmd(t, &m, cmd)
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 6, RequestSeq: 1, Text: " and the docs."}})
+	applyTestCmd(t, &m, cmd)
+
+	var cards []*Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant {
+			cards = append(cards, b)
+		}
+	}
+	if len(cards) != 1 {
+		t.Fatalf("assistant cards = %d, want the reply rendered once", len(cards))
+	}
+	if got := cards[0].streamAccumulatedContent(); got != "I will check the config and the docs." {
+		t.Fatalf("card content = %q, want every tail merged into one card", got)
+	}
+}
+
+// TestTextTailAfterToolStartDiscardedPrefixStillRenders pins that the tail still
+// renders when the tool boundary discarded a too-short prefix (an orphan
+// fragment like "Okay"): the segment must not be recorded as settled against a
+// card that no longer exists, or the tail would drop instead of opening its own
+// card.
+func TestTextTailAfterToolStartDiscardedPrefixStillRenders(t *testing.T) {
+	stubTUITicks(t)
+	backend := &sessionControlAgent{}
+	m := NewModelWithSize(backend, 120, 40)
+	t.Cleanup(func() { _ = m.Close() })
+
+	// Seed a completed tool card so a following short prefix is treated as an
+	// orphan fragment and discarded.
+	cmd := m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{ID: "seed", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`}})
+	applyTestCmd(t, &m, cmd)
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{CallID: "seed", Name: tools.NameRead, Result: "ok", Status: message.ToolStatusSuccess}})
+	applyTestCmd(t, &m, cmd)
+
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 5, RequestSeq: 1, Text: "Okay"}})
+	applyTestCmd(t, &m, cmd)
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{ID: "call-2", Name: tools.NameRead, ArgsJSON: `{"path":"README.md"}`}})
+	applyTestCmd(t, &m, cmd)
+	cmd = m.handleAgentEvent(agentEventMsg{event: agent.StreamTextEvent{TurnID: 5, RequestSeq: 1, Text: " the real answer"}})
+	applyTestCmd(t, &m, cmd)
+
+	var cards []*Block
+	for _, b := range m.viewport.visibleBlocks() {
+		if b.Type == BlockAssistant {
+			cards = append(cards, b)
+		}
+	}
+	if len(cards) != 1 {
+		t.Fatalf("assistant cards = %d, want the tail to open its own card", len(cards))
+	}
+	if got := cards[0].streamAccumulatedContent(); got != " the real answer" {
+		t.Fatalf("card content = %q, want the unstripped tail", got)
+	}
+}
+
 // TestLateThinkingPayloadAfterSettleKeepsOneCard pins that a thinking_end whose
 // segment already settled does not open a second thinking card. The settled card
 // already shows what the segment's deltas streamed, so the payload is dropped

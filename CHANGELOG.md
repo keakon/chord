@@ -62,6 +62,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Tool cards refresh accumulated parameters when another call starts, so short calls no longer stay blank until the whole batch arrives. Interleaved calls remain in the receiving state until their own arguments finish.
 - The permission rule picker offers reusable command-prefix rules for simple `shell` commands, including `rm` and `sudo`. Patterns match the full command text and can cover multiple arguments; press `E` to enter a custom pattern.
 - Local exit waits for the current turn to actually finish instead of returning early on a stale idle signal left over from startup.
+- A single assistant message no longer renders as two cards when a provider interleaves a tool call's start between the message's text chunks. The trailing text merges back into the same card instead of continuing in a second card after the tool card.
 
 ## 0.8.2 - 2026-10-11
 

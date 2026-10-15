@@ -177,6 +177,32 @@ func (m *Model) finalizeAgentStreamSettled(agentID string) {
 	m.finalizeAgentStream(agentID)
 }
 
+// settleAssistantStreamBeforeToolCard ends agentID's live assistant prefix at a
+// tool-call boundary and records its segment as settled before detaching the
+// card. A provider may splice a tool_call start between two content chunks of
+// one message, so the same segment can flush more text after the boundary;
+// recording the segment lets that tail fold back into the prefix card (via
+// mergeStaleStreamTail) instead of opening a second card split mid-sentence.
+//
+// The thinking card is kept attached when its wire block has not closed, unlike
+// finalizeAgentStreamSettled: some gateways splice a tool_use block into the
+// middle of one thinking block, and settling it there would split the reasoning
+// across two cards. An untagged card (no segment identity) is left unrecorded,
+// preserving the legacy behavior of settling on any terminal event.
+func (m *Model) settleAssistantStreamBeforeToolCard(agentID string) {
+	prefix := m.streamState(agentID).assistant
+	id := blockStreamSegmentIdentity(prefix)
+	m.finalizeAgentStreamForCard(agentID, true)
+	// Record the segment only when its prefix card survived the finalize. A card
+	// the short-prefix heuristic discarded (or one that never became visible) has
+	// nothing to fold a tail into, and recording it would make the tail delta
+	// drop instead of opening its own card. A still-loaded settled card keeps
+	// mergeStaleStreamTail's contract: the same segment's tail merges back in.
+	if prefix != nil && m.streamCardForSegment(agentID, BlockAssistant, id) != nil {
+		m.markStreamSegmentSettled(agentID, id)
+	}
+}
+
 // finalizeAgentStreamForCard settles the in-flight streaming blocks for
 // agentID before another card is appended to the transcript.
 //
