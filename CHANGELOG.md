@@ -50,6 +50,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- The retry-error panel no longer corrupts the dialog layout when a provider returns a raw error body. Provider messages can carry CRLF line endings (an HTML 500 page, for example); the panel now neutralizes control characters before display, so the frame, message rows, and clipboard copy stay intact instead of the row being overwritten from the left.
+
 - Copying or double-clicking text in the transcript no longer drops characters. The assistant badge and its summary lines recorded a wider indent than the content before them, so copying `ASSISTANT` yielded `SSISTANT` and `Tasks` yielded `sks`; a soft-wrapped code line was measured in a different column space than the click handler used, so a double click selected a neighbouring word and a triple click cut the line's tail.
 
 - Mouse selection in the transcript now lands on the cell the pointer is over. Hit testing treated the terminal's zero-based column as one-based, so double-clicking a word's first character selected its neighbour, its last character fell outside the word, and image clicks and delivered-file buttons were shifted one cell.

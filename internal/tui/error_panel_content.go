@@ -82,23 +82,31 @@ func errorRecordHeader(rec agentErrorRecord, ts string) string {
 // formatErrorRecordLines renders one error record into styled, width-wrapped
 // display lines: the header followed by the wrapped error message.
 func formatErrorRecordLines(rec agentErrorRecord, width int) []string {
-	out := []string{currentStyles.ErrorStyle.Render(errorRecordHeader(rec, rec.Timestamp.Format("15:04:05")))}
+	header := errorRecordHeader(rec, rec.Timestamp.Format("15:04:05"))
+	out := []string{currentStyles.ErrorStyle.Render(terminaltext.Sanitize(header))}
 	msg := strings.TrimSpace(rec.Message)
 	if msg == "" {
 		msg = "(no message)"
 	}
+	// Sanitize before wrapping: provider messages can carry raw control
+	// characters (CRLF line endings in an HTML error page, stray ESC bytes).
+	// A literal \r survives the ASCII wrap path and, when the dialog line is
+	// rasterized, rewinds the cursor to column 0 so the trailing padding
+	// repaints the row from the left, shredding the panel.
 	// Include the two-column message indent in wrapping. Adding it after
 	// wrapping makes the measured line width differ from the rendered width.
-	return append(out, terminaltext.Wrap("  "+msg, width)...)
+	return append(out, terminaltext.Wrap(terminaltext.Sanitize("  "+msg), width)...)
 }
 
 // plainErrorRecordText renders one record as unstyled, unwrapped text for the
 // clipboard: the shared header fields with a full date, then the complete
 // message on its own line.
 func plainErrorRecordText(rec agentErrorRecord) string {
-	msg := strings.TrimSpace(rec.Message)
+	msg := strings.TrimSpace(terminaltext.Sanitize(rec.Message))
 	if msg == "" {
 		msg = "(no message)"
 	}
-	return errorRecordHeader(rec, rec.Timestamp.Format("2006-01-02 15:04:05")) + "\n" + msg
+	header := terminaltext.Sanitize(errorRecordHeader(rec, rec.Timestamp.Format("2006-01-02 15:04:05")))
+	// Display sanitization inserts cluster breaks that do not belong in copied text.
+	return terminaltext.RestoreModifiers(header + "\n" + msg)
 }

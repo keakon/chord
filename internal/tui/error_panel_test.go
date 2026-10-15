@@ -272,6 +272,108 @@ func TestFormatErrorRecordLinesAccountsForMessageIndent(t *testing.T) {
 	}
 }
 
+func TestFormatErrorRecordLinesSanitizesControlChars(t *testing.T) {
+	// A provider HTML error page with CRLF line endings: a literal \r must
+	// not survive into the wrapped panel lines, where rasterization would
+	// rewind the cursor to column 0 and shred the dialog row.
+	rec := agentErrorRecord{Timestamp: time.Unix(0, 0), StatusCode: 500, Message: "<html>\r\n<center>500 Internal Server Error</center>\r\n</html>\r\n"}
+	lines := formatErrorRecordLines(rec, 60)
+	joined := strings.Join(lines, "\n")
+	if strings.Contains(joined, "\r") {
+		t.Fatalf("panel lines contain a literal \\r: %q", joined)
+	}
+	if got := terminaltext.StripANSI(joined); !strings.Contains(got, "</html>") {
+		t.Fatalf("panel lines lost the message body: %q", got)
+	}
+	// Stray escape bytes become visible control literals instead of style
+	// injections into the dialog.
+	lines = formatErrorRecordLines(agentErrorRecord{Timestamp: time.Unix(0, 0), Message: "boom\x1b[41mtail"}, 60)
+	if strings.Contains(lines[1], "\x1b") {
+		t.Fatalf("panel lines contain a raw escape byte: %q", lines[1])
+	}
+	if !strings.Contains(terminaltext.StripANSI(lines[1]), `\x1b[41mtail`) {
+		t.Fatalf("escaped control literal missing: %q", terminaltext.StripANSI(lines[1]))
+	}
+}
+
+// TestErrorPanelDialogRowsKeepLeftBorder guards the rasterization symptom of
+// unsanitized provider messages: a \r in a dialog line rewinds the cursor to
+// column 0 while the line is rendered into the draw cache, so the trailing
+// padding overwrites the row and the left border disappears.
+func TestErrorPanelDialogRowsKeepLeftBorder(t *testing.T) {
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+	m.recordAgentError("", &llm.APIError{StatusCode: 500, Message: "<html>\r\n<head><title>500</title></head>\r\n<body></body>\r\n</html>\r\n"}, "sample", "model-1", "sk-...xyz9", "", "", false)
+	m.openErrorPanel()
+
+	dialog := m.renderErrorPanelDialog()
+	if dialog == "" {
+		t.Fatal("dialog is empty")
+	}
+	var cache cachedRenderable
+	m.renderToCache(&cache, dialog)
+	for row, line := range cache.lines {
+		if len(line) == 0 {
+			continue
+		}
+		switch got := line[0].Content; got {
+		case "╭", "│", "╰":
+			// Box frame intact.
+		default:
+			t.Fatalf("dialog row %d lost its left border: first cell = %q", row, got)
+		}
+	}
+}
+
+func TestErrorPanelCopyAllSanitizesControlChars(t *testing.T) {
+	origWrite := clipboardWriteAll
+	var copied string
+	clipboardWriteAll = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { clipboardWriteAll = origWrite }()
+
+	m := NewModelWithSize(&sessionControlAgent{}, 120, 40)
+	m.openErrorPanel()
+	m.recordAgentError("", &llm.APIError{StatusCode: 500, Message: "<html>\r\n</html>\r\n\x1b[41mboom"}, "sample", "model-1", "sk-...xyz9", "", "", false)
+
+	cmd := m.handleErrorPanelKey(tea.KeyPressMsg(tea.Key{Text: "y", Code: 'y'}))
+	if cmd == nil {
+		t.Fatal("y should return a clipboard command")
+	}
+	if result := errorPanelClipboardResult(t, cmd); result.err != nil {
+		t.Fatalf("clipboard write err = %v", result.err)
+	}
+	if strings.ContainsAny(copied, "\r\x1b") {
+		t.Fatalf("copied text contains raw control bytes: %q", copied)
+	}
+	if !strings.Contains(copied, "</html>") {
+		t.Fatalf("copied text lost the message body: %q", copied)
+	}
+}
+
+func TestPlainErrorRecordTextPreservesEmojiModifiers(t *testing.T) {
+	for _, text := range []string{
+		"a\U0001F3FF",
+		"a \U0001F3FF",
+		"\U0001F3FB\U0001F3FF",
+		"\U0001F44B\U0001F3FF",
+	} {
+		t.Run(text, func(t *testing.T) {
+			rec := agentErrorRecord{
+				Timestamp: time.Unix(0, 0),
+				ErrorCode: text,
+				Message:   text + "\r\n\x1b[41mfailed",
+			}
+			want := rec.Timestamp.Format("2006-01-02 15:04:05") +
+				"  code=" + text + "\n" + text + "\n" + `\x1b[41mfailed`
+			if got := plainErrorRecordText(rec); got != want {
+				t.Fatalf("clipboard text = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 // errorPanelClipboardResult runs the writeClipboardCmd sequence returned by a
 // panel copy action and returns its result message.
 func errorPanelClipboardResult(t *testing.T, cmd tea.Cmd) clipboardWriteResultMsg {
