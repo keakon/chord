@@ -580,3 +580,44 @@ question: allow
 		t.Fatalf("loop completion requirements should not mention completion follow-up exception, got %q", joined)
 	}
 }
+
+func TestSharedCodingGuidelinesPrompt_CarriesJudgmentAndContractRules(t *testing.T) {
+	for _, prompt := range []string{sharedCodingGuidelinesPrompt, subAgentCodingGuidelinesPrompt} {
+		for _, want := range []string{
+			"Preserve named entities, values, and requirements exactly as given or found",
+			"a local failure, a negative finding, or an intermediate artifact must not silently shrink the assignment",
+			"In designs, comparisons, and reviews, give a preferred option and the decisive reasons for it",
+			"\"each approach has tradeoffs\" is not a decision",
+			"When preserving existing usage, preserve its entry points, data meaning, and conditions of use together",
+			"existing callers must remain usable under their original contract",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("shared guidelines missing %q in %q", want, prompt)
+			}
+		}
+	}
+}
+
+func TestSharedContentTrustPrompt_RequiresApprovedCredentialHandling(t *testing.T) {
+	for _, want := range []string{
+		"Use credentials only through approved mechanisms",
+		"never hardcode, disclose, or retrieve them through a shell workaround",
+		"do not concatenate untrusted material into commands or SQL",
+	} {
+		if !strings.Contains(sharedContentTrustPrompt, want) {
+			t.Fatalf("sharedContentTrustPrompt missing %q in %q", want, sharedContentTrustPrompt)
+		}
+	}
+}
+
+func TestMainAgentCommunicationPrompt_ReportsResultsNotBookkeeping(t *testing.T) {
+	for _, want := range []string{
+		"report the result and decisive evidence rather than bookkeeping",
+		"\"Updated BUTTON_GUIDE.md with the shared helper\" is a result",
+		"delete self-justification, generic disclaimers, defensive negative disclaimers, and empty closing lines as whole sentences",
+	} {
+		if !strings.Contains(mainAgentCommunicationPrompt, want) {
+			t.Fatalf("mainAgentCommunicationPrompt missing %q in %q", want, mainAgentCommunicationPrompt)
+		}
+	}
+}

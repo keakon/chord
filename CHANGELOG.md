@@ -32,6 +32,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- The system prompt now asks the agent to preserve identifiers and contract details exactly, give a preferred option with decisive reasons in designs and reviews, and keep existing callers usable under their original contract. It also asks replies and handoffs to lead with results and evidence, and limits credential use to approved mechanisms.
+
 - File edits in other worktrees and repositories now receive LSP diagnostics using separate workspace instances. Switching directories preserves existing instances, and the sidebar identifies their workspace directories. Background monitoring refreshes externally changed files, clears deleted-file diagnostics, and releases idle documents and instances.
 
 - The **SKILLS** panel and the `/skill` selector mark skill state with icons instead of text suffixes: `○` idle, `◎` path-matched or notified, `●` loaded, `↻` reload after compaction, `◌` manual-only, and `⊘` denied. Green marks a live body, amber one that needs reloading.

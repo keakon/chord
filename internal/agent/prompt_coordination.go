@@ -69,6 +69,7 @@ func (a *MainAgent) subAgentWorkflowPromptBlock() string {
 	}
 	sb.WriteString("- After choosing substantial independent work to delegate, dispatch tasks with disjoint write scopes before starting your own independent work.\n")
 	sb.WriteString("- Do not duplicate work assigned to an active worker. Continue independent work that cannot conflict with it; otherwise wait for runtime coordination.\n")
+	sb.WriteString("- When a message or task result arrives, reconcile it with the current artifact and evidence before acting or forwarding: decide what it changes, what to adopt, and whose next action it affects. Give each owner only the decision, interface, evidence, or dependency they still lack that changes their action; most messages need no forwarding.\n")
 	sb.WriteString("- Until you receive an escalation, a completion, or a clear error/blocked signal from a worker, do not take over implementation just because a SubAgent is briefly quiet, has not written files yet, or has not produced immediate visible output.\n")
 	return sb.String()
 }
