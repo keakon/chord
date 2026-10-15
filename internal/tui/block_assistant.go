@@ -784,6 +784,12 @@ func (b *Block) renderAssistant(width int) []string {
 	if hasContent || b.Streaming || !hasThinking {
 		assistantContentPrefix := "  "
 		continuationExtra := 2
+		// The badge line is not wrapped in the body content prefix the way body,
+		// summary and meta lines are: it carries only its own label padding.
+		// Selection must record that as the line's synthetic prefix, otherwise the
+		// content prefix is mistaken for indent and the first character(s) are
+		// dropped when the badge is copied.
+		assistantLabelInset := currentStyles.AssistantLabelStyle.GetMarginLeft() + currentStyles.AssistantLabelStyle.GetPaddingLeft()
 		var contentLines []string
 		var contentSynthetic []int
 		var contentSoftWraps []bool
@@ -871,7 +877,7 @@ func (b *Block) renderAssistant(width int) []string {
 		assistantSynthetic := make([]int, 0, estimatedLines)
 		assistantSoftWraps := make([]bool, 0, estimatedLines)
 		assistantLines = append(assistantLines, currentStyles.AssistantLabelStyle.Render(blockLabelWithID("ASSISTANT", b.displayLabelID())))
-		assistantSynthetic = append(assistantSynthetic, 0)
+		assistantSynthetic = append(assistantSynthetic, assistantLabelInset)
 		assistantSoftWraps = append(assistantSoftWraps, false)
 
 		// Render weakened meta section under the label (if summary exists and not streaming)
@@ -978,7 +984,12 @@ func (b *Block) renderAssistant(width int) []string {
 			out = append(out, cardLines...)
 		}
 
-		leftInset := style.GetMarginLeft() + style.GetPaddingLeft() + ansi.StringWidth(assistantContentPrefix)
+		// Per-line synthetic prefix = card inset (margin + padding) plus whatever
+		// prefix the line itself carries. Body, summary and gap lines carry the
+		// content prefix in assistantSynthetic; the badge line carries only its own
+		// label padding. Recording the actual per-line prefix keeps the selection
+		// clamp from mistaking the content prefix for indent on the badge.
+		cardInset := style.GetMarginLeft() + style.GetPaddingLeft()
 		b.renderSyntheticPrefixWidths = make([]int, 0, len(out))
 		b.renderSoftWrapContinuations = make([]bool, 0, len(out))
 		for range bodyOffset {
@@ -986,7 +997,7 @@ func (b *Block) renderAssistant(width int) []string {
 			b.renderSoftWrapContinuations = append(b.renderSoftWrapContinuations, false)
 		}
 		for i := range assistantLines {
-			prefixWidth := leftInset
+			prefixWidth := cardInset
 			if i < len(assistantSynthetic) {
 				prefixWidth += assistantSynthetic[i]
 			}

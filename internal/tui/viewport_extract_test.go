@@ -3,7 +3,9 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
+	tea "github.com/keakon/bubbletea/v2"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/keakon/chord/internal/tools"
@@ -275,4 +277,138 @@ func TestExtractSelectionTextEditToolKeepsRenderedColumnsAligned(t *testing.T) {
 	if got != want {
 		t.Fatalf("ExtractSelectionText() Edit tool line\n got %q\nwant %q", got, want)
 	}
+}
+
+// copyWordAtColumn runs the real double-click path on a rendered line at the
+// display column of want, then returns the extracted selection text.
+func copyWordAtColumn(t *testing.T, m *Model, block *Block, line int, want string) string {
+	t.Helper()
+	plain, _ := m.viewport.GetLinePlain(block.ID, line)
+	before, _, ok := strings.Cut(plain, want)
+	if !ok {
+		t.Fatalf("line %d does not contain %q: %q", line, want, plain)
+	}
+	// The word's own first cell, in the same zero-based column space the click
+	// handler and ExtractSelectionText use.
+	col := selectionPlainTextWidth(before)
+	m.clickCount = 1
+	m.lastClickTime = time.Now()
+	m.lastClickX, m.lastClickY = col, 0
+	m.handleViewportSelectionClick(tea.Mouse{X: col, Y: 0, Button: tea.MouseLeft}, block, line, col)
+	if !m.hasMouseSelection() {
+		t.Fatalf("double click on %q at line %d line selected nothing", want, line)
+	}
+	return m.viewport.ExtractSelectionText(m.mouseSelectionRange())
+}
+
+// The assistant role badge and the summary meta lines carry no body content
+// prefix, so word-copying them must not drop their leading characters: the
+// selection clamp is driven by per-line synthetic prefix widths, and treating
+// the body prefix as indent cut the badge's first letter (ASSISTANT ->
+// SSISTANT) and the meta rows' first two (Tasks -> sks).
+func TestExtractSelectionTextKeepsAssistantBadgeAndMetaPrefix(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	m := NewModelWithSize(nil, 100, 40)
+	m.mode = ModeNormal
+	block := &Block{
+		ID:      1,
+		Type:    BlockAssistant,
+		Content: "Tasks completed: alpha\nFiles modified: beta\nbody line",
+	}
+	m.viewport.AppendBlock(block)
+	_ = block.Render(m.viewport.width, "")
+	_ = m.viewport.Render("", nil, -1, -1, "")
+
+	for _, tc := range []struct {
+		want string
+	}{
+		{want: "ASSISTANT"},
+		{want: "Tasks"},
+		{want: "Files"},
+		{want: "alpha"},
+		{want: "body"},
+	} {
+		found := false
+		for line := range len(block.renderSyntheticPrefixWidths) {
+			plain, _ := m.viewport.GetLinePlain(block.ID, line)
+			if !strings.Contains(plain, tc.want) {
+				continue
+			}
+			found = true
+			if got := copyWordAtColumn(t, &m, block, line, tc.want); got != tc.want {
+				t.Fatalf("word copy of %q on line %d = %q, want %q", tc.want, line, got, tc.want)
+			}
+			break
+		}
+		if !found {
+			t.Fatalf("word %q not found on any rendered line", tc.want)
+		}
+	}
+}
+
+// A soft-wrapped continuation line inside an assistant code fence carries a
+// continuation indent. GetLinePlain must return the same display columns the
+// click handler sees, or word selection reads a neighbour word; selecting the
+// whole line must not truncate its tail either.
+func TestExtractSelectionTextSoftWrapContinuationColumnsAlign(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	tokens := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima", "mike"}
+	block := &Block{ID: 1, Type: BlockAssistant, Content: "```text\n" + strings.Join(tokens, " ") + "\n```\n"}
+	m := NewModelWithSize(nil, 50, 40)
+	m.mode = ModeNormal
+	m.viewport.AppendBlock(block)
+	_ = block.Render(m.viewport.width, "")
+	_ = m.viewport.Render("", nil, -1, -1, "")
+
+	continuation := -1
+	for i := range block.renderSoftWrapContinuations {
+		if block.renderSoftWrapContinuations[i] {
+			continuation = i
+			break
+		}
+	}
+	if continuation < 0 {
+		t.Fatal("setup produced no soft-wrap continuation line")
+	}
+
+	plain, _ := m.viewport.GetLinePlain(block.ID, continuation)
+	checked := 0
+	for _, tok := range tokens {
+		if !strings.Contains(plain, tok) {
+			continue
+		}
+		checked++
+		if got := copyWordAtColumn(t, &m, block, continuation, tok); got != tok {
+			t.Fatalf("word copy of %q on continuation line %d = %q, want %q", tok, continuation, got, tok)
+		}
+	}
+	if checked == 0 {
+		t.Fatalf("continuation line %d contains none of the sample tokens: %q", continuation, plain)
+	}
+
+	// Triple-click selects the whole visible line; on a continuation line the
+	// copied text must equal the rendered (stripped) line, not a prefix of it.
+	m.clickCount = 3
+	m.lastClickTime = time.Now()
+	m.lastClickX, m.lastClickY = 1, 0
+	m.handleViewportSelectionClick(tea.Mouse{X: 1, Y: 0, Button: tea.MouseLeft}, block, continuation, 1)
+	if !m.hasMouseSelection() {
+		t.Fatal("triple click selected nothing on the continuation line")
+	}
+	got := m.viewport.ExtractSelectionText(m.mouseSelectionRange())
+	want := strings.TrimRight(extractPlainByColumns(plain, firstContentColumn(plain), selectionPlainTextWidth(plain)), " ")
+	if got != want {
+		t.Fatalf("triple-click on continuation line %d = %q, want %q", continuation, got, want)
+	}
+}
+
+func firstContentColumn(plain string) int {
+	col := 0
+	for _, r := range plain {
+		if r != ' ' && r != '│' && r != '┃' {
+			return col
+		}
+		col += selectionRuneWidthAtCol(r, col)
+	}
+	return 0
 }

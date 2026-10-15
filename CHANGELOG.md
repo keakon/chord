@@ -48,6 +48,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Copying or double-clicking text in the transcript no longer drops characters. The assistant badge and its summary lines recorded a wider indent than the content before them, so copying `ASSISTANT` yielded `SSISTANT` and `Tasks` yielded `sks`; a soft-wrapped code line was measured in a different column space than the click handler used, so a double click selected a neighbouring word and a triple click cut the line's tail.
+
 - Codex/ChatGPT requests use a stable session identity so conflicting headers and cache keys do not interfere with cache affinity. OAuth HTTP requests omit the extra random `session_id`; WebSocket requests use the upstream `session-id` and `thread-id` headers. When sessions or SubAgents share a provider, an identity change reopens the connection to avoid retaining another session's headers.
 
 - AGENTS counts failed tasks consistently and separates delivered, failed, and cancelled tasks.

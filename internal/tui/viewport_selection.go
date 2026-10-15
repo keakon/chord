@@ -66,16 +66,6 @@ func (v *Viewport) GetLinePlain(blockID, lineInBlock int) (plain string, width i
 		}
 		plain = terminaltext.StripANSI(lines[lineInBlock])
 		width = selectionPlainTextWidth(plain)
-		if b.renderSyntheticPrefixWidthsW == v.width && lineInBlock < len(b.renderSyntheticPrefixWidths) {
-			adjust := b.renderSyntheticPrefixWidths[lineInBlock]
-			if b.renderSoftWrapContinuations != nil && lineInBlock < len(b.renderSoftWrapContinuations) && !b.renderSoftWrapContinuations[lineInBlock] {
-				adjust = 0
-			}
-			if adjust > 0 && adjust <= width {
-				plain = extractPlainByColumns(plain, adjust, width)
-				width -= adjust
-			}
-		}
 		return plain, width
 	}
 	return "", 0
