@@ -49,7 +49,23 @@ func (m *Model) deliverySessionDir() string {
 	}
 	return ""
 }
+
+// openDeliveryFiles opens the file view over files. A single file goes straight
+// to its preview: the list layer exists to choose between files, and with one
+// entry it only spends a keystroke to show the same name the card just showed
+// plus an absolute path, which reads as a dead end rather than a choice.
+// Callers that mean "open the picker" use openDeliveryFileList.
 func (m *Model) openDeliveryFiles(files []message.DeliveredFile) tea.Cmd {
+	return m.openDeliveryFilesWith(files, len(files) == 1)
+}
+
+// openDeliveryFileList opens the view on the file list without previewing, so a
+// caller with more than one choice can show it first.
+func (m *Model) openDeliveryFileList(files []message.DeliveredFile) tea.Cmd {
+	return m.openDeliveryFilesWith(files, false)
+}
+
+func (m *Model) openDeliveryFilesWith(files []message.DeliveredFile, preview bool) tea.Cmd {
 	if len(files) == 0 {
 		return nil
 	}
@@ -62,7 +78,13 @@ func (m *Model) openDeliveryFiles(files []message.DeliveredFile) tea.Cmd {
 	}
 	m.fileViewerGeneration++
 	m.fileViewer = fileViewerState{generation: m.fileViewerGeneration, theme: m.theme.Name, checkout: m.workingDir, checkoutGeneration: m.workingDirGeneration, open: true, owner: m.imageViewerOwner(), prevMode: previous, files: message.CloneDeliveredFiles(files), markdown: true}
-	return m.switchModeWithIME(ModeFileViewer)
+	if !preview {
+		return m.switchModeWithIME(ModeFileViewer)
+	}
+	// The preview load must be issued after the mode switch is queued, so the
+	// reader sees the viewer frame while the content is still loading instead of
+	// a flash of the list it never asked for.
+	return tea.Batch(m.switchModeWithIME(ModeFileViewer), m.prepareFileViewer())
 }
 func (m *Model) closeFileViewer() tea.Cmd {
 	previous := m.fileViewer.prevMode
@@ -204,7 +226,11 @@ func (m *Model) handleFileViewerKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	switch key {
 	case "esc":
-		if v.showing {
+		// Esc leaves the view, it does not step back through it. A single file
+		// has no list worth returning to, so backing out would strand the reader
+		// on a one-row menu showing an absolute path instead of the conversation
+		// they came from — two presses to close what one press opened.
+		if v.showing && len(v.files) > 1 {
 			m.invalidateFilePreview()
 			v.showing = false
 			return nil

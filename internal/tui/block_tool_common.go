@@ -150,13 +150,20 @@ func toolUsesCompactDetailToggle(toolName string) bool {
 // state a card is built with and whether ToggleAtWidth may change it. Keep them
 // on one predicate — a card that starts expanded but can still be folded (or the
 // reverse) has no coherent rendering.
+//
+// present belongs here because its body is the delivery manifest — a filename,
+// its version and its location — and Enter already claims that key to open the
+// file view. Reporting it as foldable made canToggleAtWidth disagree with both
+// the absent disclosure marker and the Enter route, which is what left the
+// folded branch in renderDeliveryCard unreachable.
 func toolCardAlwaysExpanded(toolName string) bool {
 	switch toolName {
 	case tools.NameDone, tools.NameComplete, tools.NameEscalate,
 		tools.NameCompactContext, tools.NameDelegate, tools.NameQuestion,
 		tools.NameNotify, tools.NameWrite, tools.NameEdit,
 		tools.NameApplyPatch, tools.NameTodoWrite, tools.NameHandoff,
-		tools.NameDelete, tools.NameGenerateImage, tools.NameViewImage:
+		tools.NameDelete, tools.NameGenerateImage, tools.NameViewImage,
+		tools.NamePresent:
 		return true
 	}
 	return false

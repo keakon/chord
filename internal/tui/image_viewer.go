@@ -133,7 +133,13 @@ func (m *Model) closeImageViewer() tea.Cmd {
 	if viewer.Owner == m.imageViewerOwner() {
 		target = viewer.ReturnMode
 	}
-	imeCmd := m.switchModeWithIME(target)
+	var imeCmd tea.Cmd
+	if target == ModeFileViewer && m.fileViewer.open && len(m.fileViewer.files) == 1 {
+		target = m.fileViewer.prevMode
+		imeCmd = m.closeFileViewer()
+	} else {
+		imeCmd = m.switchModeWithIME(target)
+	}
 	var focus tea.Cmd
 	if target == ModeInsert {
 		m.input.ClearSelection()

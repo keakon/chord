@@ -15,7 +15,7 @@ func (m *Model) nextEscHint() string {
 	case ModeMemoryPanel:
 		return "close memory"
 	case ModeFileViewer:
-		return "back / close file view"
+		return m.fileViewerEscHint()
 	case ModeContentViewer:
 		return "close view"
 	case ModeContext:
@@ -49,5 +49,23 @@ func (m *Model) nextEscHint() string {
 		return "cancel turn"
 	default:
 		return ""
+	}
+}
+
+// fileViewerEscHint names the single thing Esc will do. It must match
+// handleFileViewerKey's routing exactly: offering "back / close" taught readers
+// that Esc might only step back one layer, which is why a preview of a single
+// delivery looked like it refused to close.
+func (m *Model) fileViewerEscHint() string {
+	v := &m.fileViewer
+	switch {
+	case v.inputMode != "":
+		return "cancel input"
+	case len(v.apps) > 0:
+		return "close app list"
+	case v.showing && len(v.files) > 1:
+		return "back to file list"
+	default:
+		return "close file view"
 	}
 }

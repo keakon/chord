@@ -36,6 +36,49 @@ func TestFileViewerLateResultAfterSelection(t *testing.T) {
 		}
 	}
 }
+
+func TestDeliveryImageEscapeReturnsToConversationOrFileList(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		count    int
+		previous Mode
+	}{
+		{"single_normal", 1, ModeNormal},
+		{"single_insert", 1, ModeInsert},
+		{"multiple", 2, ModeNormal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModelWithSize(nil, 80, 30)
+			m.mode = tc.previous
+			m.imageCaps = TerminalImageCapabilities{Backend: ImageBackendKitty, SupportsFullscreen: true}
+			files := []message.DeliveredFile{{ID: "a", DisplayName: "sample.png", MIME: "image/png"}}
+			if tc.count > 1 {
+				files = append(files, message.DeliveredFile{ID: "b", DisplayName: "other.txt"})
+			}
+			m.openDeliveryFiles(files)
+			if tc.count > 1 {
+				m.prepareFileViewer()
+			}
+			req := fileViewerRequest{generation: m.fileViewer.generation, owner: m.imageViewerOwner(), File: files[0]}
+			m.handleFileViewerLoaded(fileViewerLoadedMsg{request: req, Image: &filepreview.Image{FileName: "sample.png", MimeType: "image/png"}})
+			if !m.imageViewer.Open || m.mode != ModeImageViewer {
+				t.Fatal("delivered image did not reach its viewer")
+			}
+			m.handleKeyMsg(tea.KeyPressMsg{Code: tea.KeyEscape})
+			if m.imageViewer.Open {
+				t.Fatal("Esc left the image viewer open")
+			}
+			wantMode := tc.previous
+			if tc.count > 1 {
+				wantMode = ModeFileViewer
+			}
+			if m.mode != wantMode || m.fileViewer.open != (tc.count > 1) || m.fileViewer.showing {
+				t.Fatalf("mode=%v file view=%+v", m.mode, m.fileViewer)
+			}
+		})
+	}
+}
+
 func TestFileViewerWrappedLineNavigation(t *testing.T) {
 	m := Model{width: 40, height: 20}
 	m.fileViewer = fileViewerState{open: true, showing: true, wrap: true, files: []message.DeliveredFile{{DisplayName: "sample.txt"}}, lines: []string{strings.Repeat("x", 1000) + "END_MARK"}}

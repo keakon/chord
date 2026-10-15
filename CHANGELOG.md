@@ -16,7 +16,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Added `chord sessions list --json` for recent session metadata, using the configured storage and shared repository session scope without starting an agent.
 
-- Deliver files with `present` and find them again after restoring a session. Preview text, Markdown, and images in the TUI, or open files such as HTML and PDF with system-associated applications.
+- Deliver files with `present` and find them again after restoring a session. The card lists each file's name, version, type, and path; `Enter` or a click previews a single file directly and opens the list when there are several, and the card's buttons preview, open, or copy the path. Preview text, Markdown, and images in the TUI, or open files such as HTML and PDF with system-associated applications.
 - Sign in to HTTP MCP servers with OAuth, manage saved logins from the CLI or TUI, and inspect authentication, connection, and tool catalog status with `chord doctor mcp`. Headless and gateway clients show status and host-side login instructions.
 
 - Configurable shortcuts can be disabled with an empty list (`[]`), with help and input hints reflecting the effective bindings. Startup notices and `chord doctor config` identify invalid shortcut declarations, show the binding and source that apply, and warn about some definite cases where an earlier action handles the same key.

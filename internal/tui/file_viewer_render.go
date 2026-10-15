@@ -133,9 +133,12 @@ func (m *Model) fileViewerLayout() fileViewerPresentation {
 			}
 			p.hits = append(p.hits, fileViewerHit{kind: fileHitEntry, row: len(p.rows), end: width, index: i})
 			p.rows = append(p.rows, prefix+fileLabel(f.DisplayName)+" · "+fileLabel(f.MIME))
-			if len(p.rows) < height {
+			// The card body shows the working-directory-relative path, so the
+			// list must not contradict it with an absolute one. Copy path and
+			// the external-open actions still resolve the absolute path.
+			if path := deliveryDisplayPath(f, m.workingDir); path != "" && len(p.rows) < height {
 				p.hits = append(p.hits, fileViewerHit{kind: fileHitEntry, row: len(p.rows), end: width, index: i})
-				p.rows = append(p.rows, "  "+fileLabel(deliveryPath(f, m.deliverySessionDir())))
+				p.rows = append(p.rows, "  "+fileLabel(path))
 			}
 		}
 	} else if len(v.files) > 0 {
