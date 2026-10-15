@@ -11,11 +11,12 @@ import (
 // One render owns this snapshot. Fingerprinting, folding and rows must observe
 // the same state; no long-lived cache or invalidation protocol is needed.
 type infoPanelIntegrations struct {
-	lsp     []agent.LSPServerDisplay
-	mcp     []agent.MCPServerDisplay
-	skills  []*skill.Meta
-	invoked []*skill.Meta
-	states  []skill.InvocationState
+	lsp           []agent.LSPServerDisplay
+	mcp           []agent.MCPServerDisplay
+	skills        []*skill.Meta
+	invoked       []*skill.Meta
+	states        []skill.InvocationState
+	statesPresent bool
 }
 
 func (m *Model) captureInfoPanelIntegrations() infoPanelIntegrations {
@@ -33,6 +34,7 @@ func (m *Model) captureInfoPanelIntegrations() infoPanelIntegrations {
 	snapshot.invoked = m.agent.InvokedSkills()
 	if provider, ok := m.agent.(agent.FocusedSkillInvocationStateProvider); ok {
 		snapshot.states = provider.FocusedSkillInvocationStates()
+		snapshot.statesPresent = true
 	}
 	return snapshot
 }
@@ -46,12 +48,23 @@ func (s infoPanelIntegrations) collapsed(section infoPanelSectionID) bool {
 			}
 		}
 	case infoPanelSectionMCP:
+		// Only a green (connected and healthy) server keeps the section open.
+		// Connecting-but-not-ready and failed servers stay collapsed so the
+		// panel does not pin itself open on transient states, matching LSP.
 		for _, row := range s.mcp {
 			if row.OK {
 				return false
 			}
 		}
 	case infoPanelSectionSkills:
+		if s.statesPresent {
+			for _, state := range s.states {
+				if state.Meta != nil && state.BodyPresent {
+					return false
+				}
+			}
+			return true
+		}
 		for _, sk := range s.invoked {
 			if sk != nil && strings.TrimSpace(sk.Name) != "" {
 				return false

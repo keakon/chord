@@ -400,7 +400,7 @@ func TestRenderInfoPanelCollapsibleSectionsIndentContentNotHeaders(t *testing.T)
 	backend := newInfoPanelAgent()
 	backend.todos = []tools.TodoItem{{ID: "1", Content: "Investigate spacing", Status: "in_progress"}}
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", OK: true}}
-	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", OK: true}}
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", OK: true, Enabled: true}}
 	backend.availableSkills = []*skill.Meta{{Name: "go-expert", Discovered: true}}
 	m := NewModel(backend)
 	// The skill is available but not loaded, so the section defaults to

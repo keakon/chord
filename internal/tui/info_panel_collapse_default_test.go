@@ -12,7 +12,9 @@ import (
 
 // The state-driven sections (LSP, MCP, SKILLS) list configured entries even
 // while every row is merely pending, disabled, idle, or unloaded, so they must
-// default to folded and only unfold once an entry reaches its active state.
+// default to folded and only unfold once an LSP process, a connected (OK) MCP
+// server, or a loaded skill body makes the section active. A connecting-but-not
+// ready MCP server stays folded, matching the LSP rule.
 
 func TestInfoPanelLSPSectionDefaultsFoldedUntilAServerLoads(t *testing.T) {
 	backend := newInfoPanelAgent()
@@ -50,7 +52,7 @@ func TestInfoPanelLSPSectionDefaultsFoldedUntilAServerLoads(t *testing.T) {
 func TestInfoPanelMCPSectionDefaultsFoldedUntilAServerConnects(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.mcpRows = []agent.MCPServerDisplay{
-		{Name: "exa", Pending: true},
+		{Name: "exa", Pending: true, Enabled: false},
 		{Name: "browser", Disabled: true, Manual: true},
 	}
 	m := NewModel(backend)
@@ -63,13 +65,25 @@ func TestInfoPanelMCPSectionDefaultsFoldedUntilAServerConnects(t *testing.T) {
 		t.Fatalf("folded MCP section should render no body lines, got %#v", body)
 	}
 
+	// An enabled server that is still connecting (not yet OK) must NOT unfold
+	// the section: only a green/healthy server keeps it open.
+	backend.mcpRows = []agent.MCPServerDisplay{
+		{Name: "exa", Pending: true, Enabled: true},
+		{Name: "browser", Disabled: true, Manual: true},
+	}
+	plain = terminaltext.StripANSI(m.renderInfoPanel(40, 60))
+	if !strings.Contains(plain, "▶ MCP") {
+		t.Fatalf("MCP section should stay folded while a server is connecting, got %q", plain)
+	}
+
+	// A connected (OK) server unfolds the section on its own.
 	backend.mcpRows = []agent.MCPServerDisplay{
 		{Name: "exa", OK: true},
 		{Name: "browser", Disabled: true, Manual: true},
 	}
 	plain = terminaltext.StripANSI(m.renderInfoPanel(40, 60))
 	if !strings.Contains(plain, "▼ MCP") {
-		t.Fatalf("MCP section should unfold once a server connects, got %q", plain)
+		t.Fatalf("MCP section should unfold once a server is connected, got %q", plain)
 	}
 	body := infoPanelSectionLines(infoPanelPlainLines(plain), "▼ MCP")
 	joined := strings.Join(body, "\n")

@@ -82,7 +82,7 @@ func TestClickInfoPanelLSPHeaderTogglesCollapse(t *testing.T) {
 
 func TestClickInfoPanelMCPHeaderTogglesCollapse(t *testing.T) {
 	backend := newInfoPanelAgent()
-	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", OK: true}, {Name: "browser", Pending: true}}
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", OK: true, Enabled: true}, {Name: "browser", Pending: true}}
 	m := NewModelWithSize(backend, 140, 24)
 	m.layout = m.generateLayout(m.width, m.height)
 	_ = m.renderInfoPanel(m.layout.infoPanel.Dx(), m.viewport.height)

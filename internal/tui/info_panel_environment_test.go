@@ -136,7 +136,7 @@ func TestRenderInfoPanelCollapsedMCPShowsCountOnly(t *testing.T) {
 func TestRenderInfoPanelEnvironmentDotsPreserveInfoPanelBackground(t *testing.T) {
 	backend := newInfoPanelAgent()
 	backend.lspRows = []agent.LSPServerDisplay{{Name: "gopls", Pending: true}}
-	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", OK: true}}
+	backend.mcpRows = []agent.MCPServerDisplay{{Name: "exa", OK: true, Enabled: true}}
 
 	m := NewModel(backend)
 	// The LSP row is still pending, so the section defaults to folded; expand
