@@ -679,10 +679,17 @@ func (m *Model) buildInfoPanelSkillsBlock(lineW int, integrations infoPanelInteg
 		// compaction). The name stays dim so a row reads as a labeled
 		// status light rather than a shout. Truncation runs on the plain
 		// "glyph name" pair, so it counts the glyph instead of eating it.
+		//
+		// The separator lives inside the name's fragment rather than between
+		// the two: a rendered fragment ends with a reset, and the panel's own
+		// background is written once for the whole line, so a bare separator
+		// would carry no background and show as a one-cell stripe on the
+		// terminal's own background. Every other row in the panel keeps its
+		// separators inside a styled fragment for the same reason.
 		glyph, glyphStyle := skillStateIcon(entry.invocation)
 		labelWidth := max(lineW-infoPanelCollapsibleContentInset, 1)
 		glyphPart, namePart, _ := strings.Cut(terminaltext.TruncateOneLine(glyph+" "+entry.name, labelWidth), " ")
-		row := glyphStyle.Render(glyphPart) + " " + currentStyles.InfoPanelDim.Render(namePart)
+		row := glyphStyle.Render(glyphPart) + currentStyles.InfoPanelDim.Render(" "+namePart)
 		skillLines = append(skillLines, renderInfoPanelCollapsibleContentLine(lineW, row))
 	}
 	return currentStyles.InfoPanelBlock.Width(lineW).Render(joinInfoPanelBlockLines(skillLines))

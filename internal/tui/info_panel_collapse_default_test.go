@@ -123,10 +123,14 @@ func TestInfoPanelSkillsSectionDefaultsFoldedUntilASkillLoads(t *testing.T) {
 	if len(body) == 0 {
 		t.Fatalf("expanded SKILLS section should list its skills, got %#v", body)
 	}
-	loaded := skillStateLoadedStyle().Render("●") + " " + currentStyles.InfoPanelDim.Render("go-expert")
-	if !strings.Contains(rendered, loaded) {
-		t.Fatalf("loaded skill should keep its success-colored row; want %q in %q", loaded, rendered)
+	// Assert the glyph's color and the row's surface separately rather than
+	// re-building the concatenation the renderer assembles: the previous form
+	// mirrored the implementation, so it also pinned the buggy bare separator
+	// between the glyph and the name as expected output.
+	if want := skillStateLoadedStyle().Render("●"); !strings.Contains(rendered, want) {
+		t.Fatalf("loaded skill should keep its success-colored ●; want %q in %q", want, rendered)
 	}
+	assertInfoPanelRowPainted(t, rendered, "● go-expert", "loaded skill row")
 
 	// A body that compaction archived is a reload hint, not a load: it must
 	// not keep the section unfolded on its own.

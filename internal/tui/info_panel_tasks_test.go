@@ -74,11 +74,15 @@ func TestRenderInfoPanelShowsInvokedSkills(t *testing.T) {
 		{name: "manual loaded", glyph: "◌", style: invokedStyle, label: "manual-live"},
 		{name: "manual idle", glyph: "◌", style: currentStyles.InfoPanelDim, label: "manual-idle"},
 	}
+	// Assert the two halves of the row separately instead of re-building the
+	// concatenation the renderer assembles: the previous form mirrored the
+	// implementation, so it kept passing while the row's separator fell outside
+	// every styled fragment and left a one-cell hole in the panel surface.
 	for _, tc := range cases {
-		want := tc.style.Render(tc.glyph) + " " + currentStyles.InfoPanelDim.Render(tc.label)
-		if !strings.Contains(rendered, want) {
-			t.Fatalf("%s skill row should render %q; want %q in %q", tc.name, tc.label, want, rendered)
+		if want := tc.style.Render(tc.glyph); !strings.Contains(rendered, want) {
+			t.Fatalf("%s skill row should paint its glyph with the state style; want %q in %q", tc.name, want, rendered)
 		}
+		assertInfoPanelRowPainted(t, rendered, tc.glyph+" "+tc.label, tc.name+" skill row")
 	}
 	// No row may fall back to prose: every state has an icon, and a suffix
 	// would both repeat the shape and truncate early in a narrow sidebar.
@@ -159,10 +163,14 @@ func TestRenderInfoPanelSkipsInvokedSkillMissingFromAvailableList(t *testing.T) 
 	if strings.Contains(section, "missing-skill") {
 		t.Fatalf("skills section should omit invoked skills missing from available list, got %q", section)
 	}
-	wantInvoked := skillStateLoadedStyle().Render("●") + " " + currentStyles.InfoPanelDim.Render("go-expert")
-	if !strings.Contains(rendered, wantInvoked) {
-		t.Fatalf("visible invoked skill should keep a success-colored ● icon; want %q in %q", wantInvoked, rendered)
+	// Assert the glyph's color and the row's surface separately rather than
+	// re-building the concatenation the renderer assembles: the previous form
+	// mirrored the implementation, so it also pinned the buggy bare separator
+	// between the glyph and the name as expected output.
+	if want := skillStateLoadedStyle().Render("●"); !strings.Contains(rendered, want) {
+		t.Fatalf("visible invoked skill should keep a success-colored ● icon; want %q in %q", want, rendered)
 	}
+	assertInfoPanelRowPainted(t, rendered, "● go-expert", "visible invoked skill row")
 }
 
 func TestRenderInfoPanelTodosUseSingleLineEllipsis(t *testing.T) {
