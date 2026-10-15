@@ -436,7 +436,12 @@ func (m *Model) mouseHitZones(mouse tea.Mouse) mouseHitZones {
 	viewportLineRaw := mouse.Y
 	viewportColRaw := mouse.X
 	viewportLine := viewportLineRaw
-	viewportCol := viewportColRaw + 1
+	// mouse.X is the terminal's zero-based column, and the viewport renders
+	// from column 0, so the hit-testing column must stay zero-based. An earlier
+	// +1 shifted every viewport click one cell right, so a click on a word's
+	// first cell selected its right neighbour and a click on its last cell fell
+	// outside the word.
+	viewportCol := viewportColRaw
 	if viewportLine < 0 {
 		viewportLine = 0
 	}

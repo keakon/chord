@@ -366,3 +366,54 @@ func TestHandleStatusCopyClickIgnoresNonStatusPoint(t *testing.T) {
 		t.Fatalf("non-status click handled/cmd = %v/%#v, want false/nil", handled, cmd)
 	}
 }
+
+// Mouse columns are zero-based (bubbletea documents mouse.X as the terminal's
+// zero-based column). The viewport used to add one, shifting every click one
+// cell right: double-clicking the cell that shows a word's first character
+// selected the next word, and its last character fell outside the word. A
+// double click on the first cell of each word must select that word.
+func TestViewportDoubleClickSelectsWordUnderZeroBasedColumn(t *testing.T) {
+	ApplyTheme(uitheme.Default())
+	content := "I agree xx"
+
+	for _, want := range []string{"I", "agree", "xx"} {
+		// A fresh model per word keeps the double-click counter from bleeding
+		// across words.
+		m := NewModelWithSize(nil, 60, 20)
+		m.mode = ModeNormal
+		block := &Block{ID: 1, Type: BlockAssistant, Content: content}
+		m.viewport.AppendBlock(block)
+		m.layout = m.generateLayout(m.width, m.height)
+		lines := block.Render(m.viewport.width, "")
+		_ = m.viewport.Render("", nil, -1, -1, "")
+
+		line := -1
+		for i, l := range lines {
+			if strings.Contains(terminaltext.StripANSI(l), content) {
+				line = i
+				break
+			}
+		}
+		if line < 0 {
+			t.Fatalf("content line not found in %#v", lines)
+		}
+		plain, _ := m.viewport.GetLinePlain(block.ID, line)
+		idx := strings.Index(plain, want)
+		if idx < 0 {
+			t.Fatalf("line %q does not contain %q", plain, want)
+		}
+		// The word's first cell, in zero-based screen columns.
+		col := selectionPlainTextWidth(plain[:idx])
+		globalLine := m.viewport.offset + line
+
+		click := tea.MouseClickMsg{X: col, Y: globalLine, Button: tea.MouseLeft}
+		m.Update(click)
+		m.Update(click)
+		if !m.hasMouseSelection() {
+			t.Fatalf("double click on %q at column %d selected nothing", want, col)
+		}
+		if got := m.viewport.ExtractSelectionText(m.mouseSelectionRange()); got != want {
+			t.Fatalf("double click on %q at its zero-based column %d selected %q", want, col, got)
+		}
+	}
+}
