@@ -116,6 +116,13 @@ func (f tuiProgramFactory) build(ac *AppContext) (tuiProgramPlan, error) {
 			}
 			return startTakeover(ctx, loc, sid, newTakeoverIdentity(), "tui", ac.InstanceID, timeout)
 		})
+		tuiModel.SetTakeoverStatusHandler(func(ctx context.Context, sid, transferID string) (recovery.SessionPauseStatus, error) {
+			loc, err := locateTakeover(ctx, ac.ContentRoot, sid)
+			if err != nil {
+				return recovery.SessionPauseStatus{}, err
+			}
+			return queryTakeover(ctx, loc, sid, transferID)
+		})
 	}
 	if ac != nil && ac.Cfg != nil {
 		if len(ac.Cfg.KeyMap) > 0 {

@@ -135,6 +135,9 @@ func (m *Model) handleClipboardAttachmentReady(msg clipboardAttachmentReadyMsg) 
 	}
 	m.clipboardAttachmentPending = false
 	m.clipboardAttachmentAgentID = ""
+	if m.takeoverInputFrozen() {
+		return m.enqueueToast("Attachment was not added while a session transfer is active", "warn")
+	}
 	if msg.agentID != m.focusedAgentID {
 		return m.enqueueToast("Clipboard attachment was not added because the active composer changed", "warn")
 	}

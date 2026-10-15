@@ -57,6 +57,14 @@ func (m *Model) statusBarNextRefreshDelayAt(now time.Time) time.Duration {
 		return 0
 	}
 	var delay time.Duration
+	// A live transfer reports elapsed seconds, so it needs a per-second repaint
+	// or the counter would appear frozen. Without this the lane is never
+	// refreshed, because a transfer deliberately leaves the focused agent idle.
+	if m.takeover.waiting || m.takeover.observing {
+		if candidate := nextTimeBucketTransition(now, time.Second); delay == 0 || candidate < delay {
+			delay = candidate
+		}
+	}
 	if m.isFocusedAgentBusy() || (m.viewport != nil && m.viewport.HasUserLocalShellPending()) {
 		unit := time.Second
 		activity := m.activityForAgent(m.focusedAgentIDOrMain())

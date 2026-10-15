@@ -11,6 +11,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/keakon/chord/internal/agent"
+	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tui/overlaylist"
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
@@ -86,6 +87,12 @@ func sessionSwitchLabel(kind, sessionID string) string {
 }
 
 func (m *Model) beginSessionSwitch(kind, sessionID string) {
+	// The activation's own restore must keep its context alive until the
+	// receipt arrives. Any other switch invalidates queued queries and resumes.
+	if !m.takeover.activating || kind != "resume" || sessionID != m.takeover.status.SessionID {
+		m.cancelTargetTakeover()
+		m.takeover.status = recovery.SessionPauseStatus{}
+	}
 	m.closeInputHistory()
 	if m.memoryPanel.cancel != nil {
 		m.memoryPanel.cancel()

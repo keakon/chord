@@ -254,9 +254,9 @@ Start a TUI with the session to take over:
 chord --takeover <session-id>
 ```
 
-In an idle TUI, use `/takeover <session-id>`. The target TUI must have no running work, queued inputs, or unsent drafts. Chord waits for model requests, tools, and background jobs that have already started, saves their results and queued inputs, then transfers the session. It does not cancel that work. The restored session stays paused until you explicitly continue or send a new request; pending inputs keep their order and belong to their original conversation.
+In an idle TUI, use `/takeover <session-id>`. The target TUI must have no running work, queued inputs, or unsent drafts. Chord waits for model requests, tools, and background jobs that have already started, saves their results and queued inputs, then transfers the session. It does not cancel that work. The status bar reports how long the wait has been running, and after the budget ends it keeps reporting that the source is still handing off. The restored session stays paused until you explicitly continue or send a new request; pending inputs keep their order and belong to their original conversation.
 
-The TUI shows the paused queue hint when there are pending inputs. With no pending inputs, it shows the normal idle status; restoration never starts model work automatically. During a transfer, you can still answer an existing question or explicitly stop active work, including background jobs through `Ctrl+J`.
+The TUI shows the paused queue hint when there are pending inputs. With no pending inputs, it shows the normal idle status; restoration never starts model work automatically. The target composer stays locked while waiting for release and restoring, including after the wait budget ends. During a transfer, you can still answer an existing question or explicitly stop active work, including background jobs through `Ctrl+J`.
 
 Add `--takeover-timeout 30s` to the startup command, or `--timeout 30s` to `/takeover`, to limit how long you wait. A timeout leaves the transfer running at the source. A timeout of `0` returns immediately after acceptance. Use the returned transfer ID to check progress or retry a failed save:
 

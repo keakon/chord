@@ -960,17 +960,12 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 	switch msg := msg.(type) {
 	case takeoverPreparedMsg:
 		return m, m.applyTakeoverPrepared(msg)
+	case takeoverWaitMsg:
+		return m, m.applyTakeoverWait(msg)
 	case takeoverResultMsg:
-		if msg.sequence != m.takeover.sequence {
-			return m, nil
-		}
-		m.takeover.waiting = false
-		if msg.err != nil {
-			return m, m.enqueueToast(takeoverFailureMessage(msg.status, msg.err), "warn")
-		}
-		m.restoreTakeoverPendingInputs()
-		m.recalcViewportSize()
-		return m, m.enqueueToast("Session restored paused; send a message or Continue when ready", "info")
+		return m, m.applyTakeoverResult(msg)
+	case takeoverObserveMsg:
+		return m, m.applyTakeoverObservation(msg)
 
 	// -- bootstrap cursor blink ------------------------------------------
 	case focusInputMsg:
@@ -1299,7 +1294,7 @@ func (m *Model) Update(msg tea.Msg) (model tea.Model, cmd tea.Cmd) {
 			return m, nil
 		}
 		m.statusBarTickScheduled = false
-		return m, m.scheduleStatusBarTick()
+		return m, tea.Batch(m.scheduleStatusBarTick(), m.pollTakeoverObservation(time.Now()))
 
 	case gitStatusRefreshedMsg:
 		return m, m.handleGitStatusRefreshed(msg)

@@ -525,6 +525,12 @@ func (m *Model) statusBarFingerprint(now time.Time) string {
 		b.WriteByte('|')
 		b.WriteString(compactionBackgroundStatusFrameKey(now))
 	}
+	// The takeover lane carries its own elapsed seconds, so it doubles as its
+	// per-second repaint key while a transfer is active and contributes nothing
+	// when idle. Nothing else here may read m.takeover, or the lane would stay
+	// frozen behind a cache hit.
+	b.WriteByte('|')
+	b.WriteString(m.takeoverStatusTextAt(now))
 	return b.String()
 }
 

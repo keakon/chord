@@ -139,7 +139,11 @@ func TestTakeoverCommandWaitsForValidatedActivation(t *testing.T) {
 			if m.input.Value() != "" {
 				t.Fatal("waiting admitted new input")
 			}
-			m.Update(cmd())
+			_, activation := m.Update(cmd())
+			if activation == nil || !m.takeover.activating || !m.takeoverInputFrozen() || backend.resumeCount != 0 {
+				t.Fatal("wait result did not schedule a frozen activation")
+			}
+			m.Update(activation())
 			if backend.resumeCount != 1 || backend.resumeIdentity != id || m.takeover.waiting {
 				t.Fatal("activation receipt was not applied")
 			}

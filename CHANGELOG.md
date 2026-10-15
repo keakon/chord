@@ -28,7 +28,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Suggest conditional skills after successful file reads match their `paths`, with explicit discovery and loading states in the skill selector.
 - MainAgent supports persistent after-completion inputs with Alt+Enter, a `/queue` editor and explicit pause/resume, plus headless queue snapshots and revision-checked controls.
 
-- Take over a live local session between TUI and a gateway on macOS and Linux. Chord waits for already-started work, saves queued inputs, and restores the session paused until you explicitly continue.
+- Take over a live local session between TUI and a gateway on macOS and Linux. Chord waits for already-started work with the status bar reporting how long the wait has run; when a wait budget ends before the source releases, the status bar keeps confirming the hand-off and completes the restore on its own. Queued inputs are saved, and the session is restored paused until you explicitly continue.
 
 ### Improvements
 

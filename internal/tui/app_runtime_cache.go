@@ -155,6 +155,7 @@ func (m *Model) Close() error {
 	if m == nil {
 		return nil
 	}
+	m.cancelTargetTakeover()
 	m.cancelInlineImages()
 	m.imageMemorySweepGeneration++
 	if m.imageViewer.cancel != nil {
