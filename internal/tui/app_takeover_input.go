@@ -5,7 +5,8 @@ import tea "github.com/keakon/bubbletea/v2"
 // Transfer admission blocks new work, not answers or an explicit user stop.
 // Keep these routes separate from composer and configuration shortcuts.
 func (m *Model) handleTakeoverKey(msg tea.KeyMsg) tea.Cmd {
-	if isCtrlC(msg) {
+	// Inside a question Ctrl+C acts as Esc, so it shares the cancel gate below.
+	if isCtrlC(msg) && m.mode != ModeQuestion {
 		return m.handleCtrlC()
 	}
 	if isSuperC(msg) {
@@ -14,9 +15,10 @@ func (m *Model) handleTakeoverKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 	switch m.mode {
 	case ModeQuestion:
-		// Withdrawal adds a new user requirement; answer/decline only settle
-		// the already running interaction.
-		if key != "ctrl+w" {
+		// Answering settles the already running interaction; cancelling the
+		// question withdraws its requirement, which is new user work and stays
+		// blocked while a transfer is in progress.
+		if key != "esc" && !isCtrlC(msg) {
 			return m.handleQuestionKey(msg)
 		}
 	case ModeConfirm, ModeStopJobConfirm, ModeJobsOverlay, ModeContext, ModeStatus,

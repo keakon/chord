@@ -43,8 +43,8 @@ func TestQuestionLayoutFitsAndFollowsEveryOption(t *testing.T) {
 				if !strings.Contains(ansi.Strip(dialog), fmt.Sprintf("Choice %d", i+1)) {
 					t.Fatalf("focused choice %d is not visible", i+1)
 				}
-				if !strings.Contains(strings.ToLower(ansi.Strip(dialog)), "decline") {
-					t.Fatal("decline action is not visible")
+				if !strings.Contains(strings.ToLower(ansi.Strip(dialog)), "cancel") {
+					t.Fatal("cancel action is not visible")
 				}
 			}
 		})

@@ -131,7 +131,7 @@ func (m *Model) handleQuestionOperation(msg questionOperationMsg) tea.Cmd {
 			m.question.interacting = false
 			m.question.deadline = time.Time{}
 			m.question.renderCacheText = ""
-		case agent.QuestionOpAnswer, agent.QuestionOpDecline, agent.QuestionOpWithdraw:
+		case agent.QuestionOpAnswer, agent.QuestionOpWithdraw:
 			return m.handleQuestionResolved(msg.id)
 		}
 	}

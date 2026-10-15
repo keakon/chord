@@ -184,7 +184,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 {"type": "send", "request_id": "input-1", "content": "请总结一下项目结构。"}
 ```
 
-普通 `send` 保留待答问题与必要决策，只中断当前等待，让 agent 处理新要求。权限确认仍会自动拒绝；Handoff 仍会关闭并推送 `handoff_cancelled`。问题通过指定 ID 的 `answer`、`decline`、撤回或替代操作处理。
+普通 `send` 保留待答问题与必要决策，只中断当前等待，让 agent 处理新要求。权限确认仍会自动拒绝；Handoff 仍会关闭并推送 `handoff_cancelled`。问题通过指定 ID 的 `answer` 或取消（撤回、替代）操作处理。
 
 可选的 `request_id` 关联一条 `input_result` 消费回执。回执始终发送，不受 `subscribe` 过滤；不带 ID 的输入没有关联回执。
 
@@ -290,7 +290,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 | --- | --- |
 | `presented` | 确认回答入口与默认提示可用；必须带当前 `version`、`binding_id` 和 `supports_interaction`。不能检测用户开始操作的答题端先传 `false`，等成功停用计时后再开放入口。 |
 | `interact` | 永久取消本题计时，不提交答案。 |
-| `answer` / `decline` | 回答 pending 题 / 拒绝回答；拒绝不能携带答案。 |
+| `answer` | 回答 pending 题。不回答时必须用 `withdraw_requirement` 取消；不存在 "declined" 状态。 |
 | `revise` | 为历史题追加修正，保留原终态与任务归属；即使有其它新题也可使用。 |
 | `withdraw_requirement` / `replace_requirement` | 带 `user_text` 明确撤回要求 / 用同任务的 `replacement_id` 替代，不能由模型默默解除门禁。 |
 | `cancel_task` / `new_task` | 用 `user_text` 明确取消当前任务 / 创建独立任务范围。 |
@@ -379,7 +379,7 @@ chord headless --gateway-managed --gateway-instance <binding-instance-id> -d <wo
 | `confirm_request`    | 某个工具需要显式确认                         | `request_id`、`agent_id`、`tool_name`、`args_json`、`needs_approval`、`already_allowed`、`needs_approval_rules`、`already_allowed_rules`、`timeout_ms` |
 | `question_request` | 题目可供回答 | `request_id`、`binding_id`、`task_id`、`request_scope_id`、`version`、`header`、`question`、`options`、`option_ids`、`option_details`、`multiple`、`response_policy`、`default_option_id`、`timer`、`duration_seconds`，可选 `deadline` |
 | `question_updated` | 计时、介入、要求处置或历史补答发生变化 | 完整题目快照；历史补答附带含独立 `result_id` 的 `revision_result` |
-| `question_resolved` | 题目进入终态 | 完整快照；`reason` 为 `answered`、`defaulted`、`declined`、`no_response`、`superseded`、`cancelled` 或 `error` |
+| `question_resolved` | 题目进入终态 | 完整快照；`reason` 为 `answered`、`defaulted`、`no_response`、`superseded`、`cancelled` 或 `error` |
 | `notification`       | agent 需要用户注意，但等待点不是标准 modal 请求 | `reason`、`message` |
 | `handoff_request`    | planner 已保存 handoff plan，需要 client 批准或拒绝执行 | `request_id`、`plan_path`、`plan_text`、`plan_error`、`agents[]`，元素包含 `{name, default, model_pools, current_model_pool}`；没有合法目标时 `agents` 为空列表 |
 | `handoff_cancelled`  | 待决 handoff 在 client 决策前被丢弃——更新的回合、会话切换或 `send` 自动关闭接管了它 | `request_id`、`reason`（`superseded`） |

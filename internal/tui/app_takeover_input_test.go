@@ -29,6 +29,23 @@ func TestTakeoverExistingQuestionCanStillBeAnswered(t *testing.T) {
 	}
 }
 
+func TestTakeoverQuestionCancelKeysStayBlocked(t *testing.T) {
+	for _, key := range []tea.Key{{Code: tea.KeyEscape}, {Code: 'c', Mod: tea.ModCtrl}} {
+		backend := &questionResolverAgent{accepted: true}
+		m := NewModelWithSize(backend, 100, 30)
+		m.mode = ModeQuestion
+		m.question = questionState{
+			request:   &QuestionRequest{Item: tools.QuestionItem{Header: "Choice", Question: "Choose a value"}},
+			requestID: "question-1", input: newQuestionTextarea(100),
+		}
+		m.takeover.sourceFrozen = true
+		m.handleKeyMsg(tea.KeyPressMsg(key))
+		if m.question.submitting || m.mode != ModeQuestion || m.question.request == nil {
+			t.Fatalf("%s cancelled the question during transfer", tea.KeyPressMsg(key).String())
+		}
+	}
+}
+
 func TestTakeoverStopAndNewInputHaveSeparateAdmission(t *testing.T) {
 	m, backend := newTakeoverTestModel()
 	m.takeover.sourceFrozen = true

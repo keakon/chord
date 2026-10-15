@@ -267,7 +267,7 @@ func TestResolveQuestionRestoresInsertModeWithIMERestore(t *testing.T) {
 	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
-	runQuestionCmd(&m, m.resolveQuestion(nil, true))
+	runQuestionCmd(&m, m.resolveQuestion([]string{"x"}))
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}

@@ -275,7 +275,7 @@ func (b *Block) renderQuestionCall(width int, spinnerFrame string) []string {
 		}
 		if hasAnswer {
 			// A non-answered question checks no option, so without this line a
-			// declined or expired question looks identical to an unanswered one.
+			// cancelled or expired question looks identical to an unanswered one.
 			if label := questionOutcomeDisplay(answer.Outcome); label != "" {
 				result = append(result, currentStyles.DimStyle.Render("    Outcome: "+label))
 			}
@@ -328,8 +328,6 @@ func questionOutcomeDisplay(outcome string) string {
 		return "default adopted by system (not user consent)"
 	case tools.QuestionOutcomeNoResponse:
 		return "closed without an answer (not user consent)"
-	case tools.QuestionOutcomeDeclined:
-		return "declined"
 	case tools.QuestionOutcomeCancelled:
 		return "cancelled"
 	case tools.QuestionOutcomeSuperseded:

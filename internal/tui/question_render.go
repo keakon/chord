@@ -159,7 +159,7 @@ func (m *Model) renderQuestionDialog() string {
 		secondary = hintLine(hint("Space", "toggle"), hint("Tab", "custom"))
 	}
 	cfg.CompactHint = hintLine(
-		primaryHint("Enter", action), hint("Esc", "decline"), hint("Ctrl+W", "withdraw"),
+		primaryHint("Enter", action), hint("Esc", "cancel"),
 	) + "\n" + secondary
 	if !m.question.deadline.IsZero() {
 		secs := int(ceilDuration(max(time.Until(m.question.deadline), 0), time.Second) / time.Second)
@@ -189,8 +189,11 @@ func (m *Model) renderQuestionDialog() string {
 		cfg.Hint = appendHintChip(cfg.Hint, hint("PgUp/PgDn", "scroll"))
 	}
 	if m.question.submitting {
-		cfg.Hint = hintLine(hint("Ctrl+W", "withdraw"))
-		cfg.CompactHint = cfg.Hint
+		// Nothing cancels an in-flight submission, and the body already reports
+		// the pending state, so drop the answer/cancel hints rather than
+		// advertising a key that is intentionally inert here.
+		cfg.Hint = ""
+		cfg.CompactHint = ""
 	}
 	bodyHeight := overlayContentHeight(cfg, area)
 	m.question.bodyHeight, m.question.visibleBodyHeight = len(lines), bodyHeight
@@ -247,8 +250,7 @@ func questionHint(q tools.QuestionItem, customMode bool) string {
 		return hintLine(
 			primaryHint("Enter", "submit"),
 			hint("Shift+Enter/Ctrl+J", "new line"),
-			hint("Esc", "decline"),
-			hint("Ctrl+W", "withdraw"),
+			hint("Esc", "cancel"),
 		)
 	}
 	if customMode {
@@ -256,12 +258,11 @@ func questionHint(q tools.QuestionItem, customMode bool) string {
 			primaryHint("Enter", "submit"),
 			hint("Shift+Enter/Ctrl+J", "new line"),
 			hint("Tab", "options"),
-			hint("Esc", "decline"),
-			hint("Ctrl+W", "withdraw"),
+			hint("Esc", "cancel"),
 		)
 	}
 
-	chips := make([]hintChip, 0, 6)
+	chips := make([]hintChip, 0, 5)
 	if q.Multiple {
 		chips = append(chips, hint("Space", "toggle"), primaryHint("Enter", "submit"))
 	} else {
@@ -269,8 +270,7 @@ func questionHint(q tools.QuestionItem, customMode bool) string {
 	}
 	chips = append(chips,
 		hint("Tab", "custom"),
-		hint("Esc", "decline"),
-		hint("Ctrl+W", "withdraw"),
+		hint("Esc", "cancel"),
 	)
 	if maxNum := min(len(q.Options), 9); maxNum == 1 {
 		chips = append(chips, hint("1", "quick-select"))

@@ -35,8 +35,6 @@ func questionDecisionCardTitle(fact agent.QuestionFact) string {
 		return questionDecisionCardBadge + " REVISED"
 	case outcome == tools.QuestionOutcomeAnswered:
 		return questionDecisionCardBadge + " ANSWERED"
-	case outcome == tools.QuestionOutcomeDeclined:
-		return questionDecisionCardBadge + " DECLINED"
 	case outcome == tools.QuestionOutcomeDefaulted:
 		return questionDecisionCardBadge + " DEFAULTED BY SYSTEM"
 	case outcome == tools.QuestionOutcomeNoResponse:

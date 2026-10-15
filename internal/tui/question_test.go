@@ -30,17 +30,19 @@ type questionResolveCall struct {
 	answers   []string
 	reason    string
 	requestID string
+	op        string
+	userText  string
 }
 
 func (a *questionResolverAgent) ApplyQuestionOperation(_ context.Context, op agent.QuestionOperation) (agent.QuestionReceipt, error) {
 	reason := tools.QuestionOutcomeAnswered
-	if op.Operation == agent.QuestionOpDecline {
-		reason = tools.QuestionOutcomeDeclined
+	if op.Operation == agent.QuestionOpWithdraw {
+		reason = tools.QuestionOutcomeCancelled
 	}
 	if op.Operation == agent.QuestionOpInteract || op.Operation == agent.QuestionOpPresented {
 		return agent.QuestionReceipt{Accepted: true}, nil
 	}
-	a.calls = append(a.calls, questionResolveCall{answers: op.Answers, reason: reason, requestID: op.QuestionID})
+	a.calls = append(a.calls, questionResolveCall{answers: op.Answers, reason: reason, requestID: op.QuestionID, op: op.Operation, userText: op.UserText})
 	receipt := agent.QuestionReceipt{Accepted: a.accepted, Status: reason, Error: "response was not accepted"}
 	if a.terminal != "" {
 		receipt.Accepted = false
@@ -201,19 +203,56 @@ func TestQuestionSubmitReportsTheWinningTerminalReason(t *testing.T) {
 	}
 }
 
-func TestQuestionTextInputEscDeclines(t *testing.T) {
+// A question can only be answered or cancelled — there is no "declined" state.
+// Esc cancels: it withdraws the question's requirement and closes the dialog,
+// so a required question is never left parked with no way to resolve it. The
+// withdrawal carries an explicit user-facing sentence naming the question, so
+// the transcript reads like any other cancelled tool call.
+func TestQuestionEscCancels(t *testing.T) {
 	backend := &questionResolverAgent{accepted: true}
 	m := NewModelWithSize(backend, 80, 24)
+	snap := questionEventForTest("q-1", "Choice", "Choose", []string{"one"}, nil, false, time.Time{}, "main").Question
 	m.mode = ModeInsert
-	m.handleQuestionState(questionEventForTest("q-1", "Choice", "Choose", []string{"one"}, nil, false, time.Time{}, "main").Question)
+	m.handleQuestionState(snap)
 	m.question.custom = true
 	m.question.input.SetValue("draft")
 	runQuestionCmd(&m, m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape})))
-	if len(backend.calls) != 1 || backend.calls[0].reason != tools.QuestionOutcomeDeclined {
-		t.Fatalf("Esc must decline, calls = %+v", backend.calls)
+	if len(backend.calls) != 1 || backend.calls[0].op != agent.QuestionOpWithdraw {
+		t.Fatalf("Esc must cancel (withdraw), calls = %+v", backend.calls)
+	}
+	if got := backend.calls[0].userText; !strings.Contains(got, "Cancelled this question") || !strings.Contains(got, "Choice") {
+		t.Fatalf("withdrawal text = %q, want an explicit prompt naming the question", got)
+	}
+	if strings.Contains(backend.calls[0].userText, "q-1") {
+		t.Fatalf("withdrawal text = %q, want no raw question ID", backend.calls[0].userText)
 	}
 	if m.mode != ModeInsert || m.question.request != nil {
-		t.Fatal("a declined question must close the dialog")
+		t.Fatal("cancelling must close the dialog")
+	}
+}
+
+// Ctrl+W carries no special meaning in the question dialog: it stays the
+// ordinary word-deletion key every other Chord input binds, and it never
+// resolves the question. A terminal that intercepts the key closes the window
+// before the app ever sees it, so removing the binding here would only disable
+// editing in the terminals that do deliver the key.
+func TestQuestionCtrlWEditsTheDraftWithoutResolving(t *testing.T) {
+	backend := &questionResolverAgent{accepted: true}
+	m := NewModelWithSize(backend, 80, 24)
+	snap := questionEventForTest("q-2", "Choice", "Pick", []string{"a", "b"}, nil, false, time.Time{}, "main").Question
+	m.mode = ModeInsert
+	m.handleQuestionState(snap)
+	m.question.custom = true
+	m.question.input.SetValue("alpha beta")
+	runQuestionCmd(&m, m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: 'w', Mod: tea.ModCtrl})))
+	if len(backend.calls) != 0 {
+		t.Fatalf("Ctrl+W must not resolve the question, calls = %+v", backend.calls)
+	}
+	if m.question.request == nil {
+		t.Fatal("Ctrl+W must leave the dialog open")
+	}
+	if got := m.question.input.Value(); got != "alpha " {
+		t.Fatalf("Ctrl+W draft = %q, want the word before the cursor deleted", got)
 	}
 }
 
@@ -333,7 +372,7 @@ func TestResolveQuestionRestoresInsertModeWithTextareaState(t *testing.T) {
 	m.ime.beforeNormal = "zh-orig"
 	preventIMEApplyInTests(&m)
 
-	runQuestionCmd(&m, m.resolveQuestion(nil, true))
+	runQuestionCmd(&m, m.resolveQuestion([]string{"x"}))
 	if m.mode != ModeInsert {
 		t.Fatalf("mode = %v, want ModeInsert", m.mode)
 	}

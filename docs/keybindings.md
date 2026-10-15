@@ -40,7 +40,7 @@ Undo keeps at most 64 edits within an 8 MiB budget, including attachment bytes. 
 | ------------------ | ----------------------------------------------- |
 | `i`                | Return to Insert mode                           |
 | `q`                | Press twice within ~2s to quit                  |
-| `Ctrl+C`           | Press twice within ~2s to quit; inside an overlay or dialog it performs the same back, close, or decline action as `Esc` |
+| `Ctrl+C`           | Press twice within ~2s to quit; inside an overlay or dialog it performs the same back, close, or cancel action as `Esc` |
 | `?`                | Toggle the in-app help / cheatsheet overlay     |
 | `Esc`              | (when agent is running) Cancel the current turn |
 | `Shift+Tab` | Cycle the focused agent view without changing the role. |
@@ -142,7 +142,7 @@ Handoff plan views include the plan path at the top so it can be selected and co
 
 Questions open automatically and share a queue with permission, completion, and Handoff dialogs. Automatic display keeps the timer running. Editing or navigating a question requests permanent timer cancellation; cancellation takes effect after acknowledgment.
 
-`Tab` switches between custom input and options and keeps the draft. `Enter` submits; `Shift+Enter` / `Ctrl+J` inserts a newline. Numbers submit single choices or toggle multiple choices; Space also toggles. `Esc` declines and `Ctrl+W` withdraws the requirement; the question stays on screen until you submit it or use one of them. Declining alone leaves a required decision unresolved. Use `PgUp` / `PgDown` or the wheel for long questions; once the question cannot scroll further they move the conversation behind it, and the wheel follows the pointer.
+`Tab` switches between custom input and options and keeps the draft. `Enter` submits; `Shift+Enter` / `Ctrl+J` inserts a newline. Numbers submit single choices or toggle multiple choices; Space also toggles. `Esc` cancels the question; the question stays on screen until you submit it or cancel it. A question can only be answered or cancelled — there is no "declined" state that leaves the required decision unresolved. Use `PgUp` / `PgDown` or the wheel for long questions; once the question cannot scroll further they move the conversation behind it, and the wheel follows the pointer.
 
 In the model-pool selector, press `/` to edit a filter, then `Enter` to switch to the highlighted pool. While editing a filter, `Esc` clears it and returns to the list; in the list, `Esc` closes the selector. In the skill selector, `Enter` fills the composer with a command. The skill loads only after you add any arguments and send it.
 

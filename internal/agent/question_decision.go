@@ -34,8 +34,6 @@ func questionDecisionText(fact QuestionFact) string {
 		} else {
 			fmt.Fprintf(&b, "Question answered: %s", header)
 		}
-	case tools.QuestionOutcomeDeclined:
-		fmt.Fprintf(&b, "Question declined: %s", header)
 	case tools.QuestionOutcomeDefaulted:
 		fmt.Fprintf(&b, "Question defaulted by system: %s", header)
 	case tools.QuestionOutcomeNoResponse:

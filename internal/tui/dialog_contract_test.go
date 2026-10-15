@@ -212,12 +212,12 @@ func TestSubmittingQuestionDropsCachedSubmitHint(t *testing.T) {
 	if !strings.Contains(before, "[Enter] submit") {
 		t.Fatalf("initial submit hint missing:\n%s", before)
 	}
-	if !strings.Contains(before, "[Esc] decline") || strings.Contains(before, "hide") || strings.Contains(before, "[Ctrl+D]") {
-		t.Fatalf("question hints do not match current refusal bindings:\n%s", before)
+	if !strings.Contains(before, "[Esc] cancel") || strings.Contains(before, "hide") || strings.Contains(before, "[Ctrl+D]") {
+		t.Fatalf("question hints do not match current cancellation bindings:\n%s", before)
 	}
-	m.resolveQuestion([]string{"plain"}, false)
+	m.resolveQuestion([]string{"plain"})
 	during := ansi.Strip(m.renderQuestionDialog())
-	if !strings.Contains(during, "Submitting") || !strings.Contains(during, "[Ctrl+W] withdraw") || strings.Contains(during, "[Enter]") || strings.Contains(during, "[Esc]") {
+	if !strings.Contains(during, "Submitting") || strings.Contains(during, "[Ctrl+W]") || strings.Contains(during, "[Enter]") || strings.Contains(during, "[Esc]") {
 		t.Fatalf("submitting question retained stale actions:\n%s", during)
 	}
 	m.handleQuestionKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyEscape}))

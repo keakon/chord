@@ -56,7 +56,6 @@ func TestQuestionDecisionCardsKeepFieldsVisible(t *testing.T) {
 		{name: "revised", operation: agent.QuestionOpRevise, answer: tools.QuestionAnswer{Outcome: tools.QuestionOutcomeAnswered, SelectedIDs: []string{"shared"}}, want: []string{"Selected: Save a shared copy"}},
 		{name: "system default", answer: tools.QuestionAnswer{Outcome: tools.QuestionOutcomeDefaulted, SelectedIDs: []string{"local"}}, want: []string{"Selected: Save locally"}},
 		{name: "no answer", answer: tools.QuestionAnswer{Outcome: tools.QuestionOutcomeNoResponse}},
-		{name: "declined", answer: tools.QuestionAnswer{Outcome: tools.QuestionOutcomeDeclined}},
 		{name: "cancelled", answer: tools.QuestionAnswer{Outcome: tools.QuestionOutcomeCancelled}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

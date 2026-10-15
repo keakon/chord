@@ -198,13 +198,13 @@ func (m *mockBackend) ApplyQuestionOperation(_ context.Context, op agent.Questio
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	switch op.Operation {
-	case agent.QuestionOpAnswer, agent.QuestionOpDecline, agent.QuestionOpInteract, agent.QuestionOpPresented, agent.QuestionOpRevise, agent.QuestionOpWithdraw, agent.QuestionOpReplace, agent.QuestionOpNewTask:
+	case agent.QuestionOpAnswer, agent.QuestionOpInteract, agent.QuestionOpPresented, agent.QuestionOpRevise, agent.QuestionOpWithdraw, agent.QuestionOpReplace, agent.QuestionOpNewTask:
 	default:
 		return agent.QuestionReceipt{Error: "invalid operation"}, nil
 	}
 	reason := tools.QuestionOutcomeAnswered
-	if op.Operation == agent.QuestionOpDecline {
-		reason = tools.QuestionOutcomeDeclined
+	if op.Operation == agent.QuestionOpWithdraw {
+		reason = tools.QuestionOutcomeCancelled
 	}
 	m.questionCalls = append(m.questionCalls, questionCall{answers: op.Answers, reason: reason, requestID: op.QuestionID})
 	if m.resolveQuestionFail {

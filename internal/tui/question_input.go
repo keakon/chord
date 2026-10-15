@@ -15,7 +15,7 @@ func (m *Model) handleQuestionKey(msg tea.KeyMsg) tea.Cmd {
 	var interact tea.Cmd
 	// Selection keys can submit directly. Only send an interaction operation
 	// when this key leaves the dialog open, avoiding concurrent state commits.
-	if msg.String() != "esc" && msg.String() != "ctrl+w" && !m.question.submitting {
+	if msg.String() != "esc" && !m.question.submitting {
 		interact = m.beginQuestionInteraction()
 	}
 	return tea.Batch(interact, cmd)
@@ -26,12 +26,7 @@ func (m *Model) handleQuestionKeyInput(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	if msg.String() == "esc" {
-		return m.declineQuestion()
-	}
-	if msg.String() == "ctrl+w" {
-		id := m.question.requestID
-		m.question.submitting = true
-		return m.questionOperation(agent.QuestionOperation{Operation: agent.QuestionOpWithdraw, OperationID: questionOperationID(id, agent.QuestionOpWithdraw), QuestionID: id, UserText: "Withdraw the requirement associated with question " + id})
+		return m.cancelQuestion()
 	}
 	if m.question.submitting {
 		return nil
@@ -146,9 +141,9 @@ func (m *Model) handleQuestionOptionKey(msg tea.KeyMsg, q tools.QuestionItem) te
 		m.recalcViewportSize()
 		return textareaBlinkCmd()
 
-	// Decline
+	// Cancel
 	case msg.Key().Code == tea.KeyEscape:
-		return m.declineQuestion()
+		return m.cancelQuestion()
 	}
 
 	return nil
@@ -162,10 +157,10 @@ func (m *Model) handleQuestionTextKey(msg tea.KeyMsg, q tools.QuestionItem) tea.
 		if strings.TrimSpace(text) == "" {
 			return nil // ignore empty submit
 		}
-		return m.resolveQuestion([]string{text}, false)
+		return m.resolveQuestion([]string{text})
 
 	case msg.Key().Code == tea.KeyEscape:
-		return m.declineQuestion()
+		return m.cancelQuestion()
 
 	case msg.Key().Code == tea.KeyTab:
 		if len(q.Options) > 0 {
@@ -196,27 +191,51 @@ func (m *Model) submitCurrentQuestion(q tools.QuestionItem) tea.Cmd {
 	if len(selected) == 0 {
 		return nil // nothing selected, no-op
 	}
-	return m.resolveQuestion(selected, false)
+	return m.resolveQuestion(selected)
 }
 
-// declineQuestion dismisses the dialog with an explicit declined outcome, so
-// the model can tell a refusal apart from an unanswered timeout.
-func (m *Model) declineQuestion() tea.Cmd {
-	return m.resolveQuestion(nil, true)
-}
-
-// resolveQuestion submits an explicit answer or refusal. The dialog closes
-// after Core acknowledgment; failed submissions keep the dialog for retry.
-func (m *Model) resolveQuestion(answers []string, declined bool) tea.Cmd {
+// submitQuestionOperation guards against a missing or already-submitting
+// question, derives the operation ID from the current question, and dispatches
+// the operation. Callers supply only the operation and its payload.
+func (m *Model) submitQuestionOperation(op agent.QuestionOperation) tea.Cmd {
 	if m.question.request == nil || m.question.submitting {
 		return nil
 	}
-	op := agent.QuestionOpAnswer
-	if declined {
-		op = agent.QuestionOpDecline
-	}
+	op.OperationID = questionOperationID(m.question.requestID, op.Operation)
 	m.question.submitting = true
-	return m.questionOperation(agent.QuestionOperation{Operation: op, OperationID: questionOperationID(m.question.requestID, op), QuestionID: m.question.requestID, Answers: answers, Custom: m.question.custom || len(m.question.request.Item.Options) == 0})
+	return m.questionOperation(op)
+}
+
+// cancelQuestion withdraws the question's requirement. A question can only be
+// answered or cancelled — there is no "declined" state that keeps the
+// requirement pending while hiding the dialog — so Esc cancels it outright, and
+// it is the only binding that does. The withdrawal carries an explicit
+// user-facing sentence naming the question, so the transcript reads like any
+// other cancelled tool call instead of a raw question ID. Every other key,
+// Ctrl+W included, stays an ordinary editing key: a terminal that intercepts it
+// never delivers it here, so app-side removal would only disable word deletion
+// where the binding does work.
+func (m *Model) cancelQuestion() tea.Cmd {
+	userText := "Cancelled this question"
+	if header := strings.TrimSpace(m.question.request.Item.Header); header != "" {
+		userText += ": " + header
+	}
+	return m.submitQuestionOperation(agent.QuestionOperation{
+		Operation:  agent.QuestionOpWithdraw,
+		QuestionID: m.question.requestID,
+		UserText:   userText,
+	})
+}
+
+// resolveQuestion submits an explicit answer. The dialog closes after Core
+// acknowledgment; failed submissions keep the dialog for retry.
+func (m *Model) resolveQuestion(answers []string) tea.Cmd {
+	return m.submitQuestionOperation(agent.QuestionOperation{
+		Operation:  agent.QuestionOpAnswer,
+		QuestionID: m.question.requestID,
+		Answers:    answers,
+		Custom:     m.question.custom || len(m.question.request.Item.Options) == 0,
+	})
 }
 
 func textareaBlinkCmd() tea.Cmd {

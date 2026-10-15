@@ -23,7 +23,6 @@ const (
 	QuestionOpPresented         = "presented"
 	QuestionOpInteract          = "interact"
 	QuestionOpAnswer            = "answer"
-	QuestionOpDecline           = "decline"
 	QuestionOpRevise            = "revise"
 	QuestionOpWithdraw          = "withdraw_requirement"
 	QuestionOpReplace           = "replace_requirement"
@@ -254,7 +253,7 @@ func (a *MainAgent) ApplyQuestionOperation(ctx context.Context, op QuestionOpera
 		return QuestionReceipt{}, fmt.Errorf("operation_id is required")
 	}
 	switch op.Operation {
-	case QuestionOpPresented, QuestionOpInteract, QuestionOpAnswer, QuestionOpDecline, QuestionOpRevise, QuestionOpWithdraw, QuestionOpReplace, QuestionOpNewTask, QuestionOpCancelTask:
+	case QuestionOpPresented, QuestionOpInteract, QuestionOpAnswer, QuestionOpRevise, QuestionOpWithdraw, QuestionOpReplace, QuestionOpNewTask, QuestionOpCancelTask:
 	default:
 		return QuestionReceipt{}, fmt.Errorf("invalid question operation")
 	}
@@ -555,26 +554,19 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 				}
 				q.Timer = QuestionTimerCancelled
 				q.Deadline = time.Time{}
-			case QuestionOpAnswer, QuestionOpDecline:
+			case QuestionOpAnswer:
 				if !q.pending() {
 					return fact, msg, receipt, fmt.Errorf("question is already %s", q.Outcome)
 				}
-				if op.Operation == QuestionOpDecline {
-					if len(op.Answers) > 0 {
-						return fact, msg, receipt, fmt.Errorf("decline cannot carry answers")
-					}
-					q.Outcome = tools.QuestionOutcomeDeclined
-				} else {
-					answer, ids, err := validateQuestionAnswer(q.Item, op.Answers, op.Custom)
-					if err != nil {
-						return fact, msg, receipt, err
-					}
-					q.Outcome = tools.QuestionOutcomeAnswered
-					q.Selected = answer
-					q.SelectedIDs = ids
-					if q.Dependency == QuestionDependencyPending {
-						q.Dependency = QuestionDependencyReceived
-					}
+				answer, ids, err := validateQuestionAnswer(q.Item, op.Answers, op.Custom)
+				if err != nil {
+					return fact, msg, receipt, err
+				}
+				q.Outcome = tools.QuestionOutcomeAnswered
+				q.Selected = answer
+				q.SelectedIDs = ids
+				if q.Dependency == QuestionDependencyPending {
+					q.Dependency = QuestionDependencyReceived
 				}
 				q.ResultID = makeRequestID()
 				q.Timer = QuestionTimerDisabled
@@ -605,6 +597,11 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 					next, exists := r.records[op.ReplacementID]
 					if !exists || next.ID == q.ID || next.TaskID != q.TaskID || next.ScopeID != q.ScopeID {
 						return fact, msg, receipt, fmt.Errorf("replacement must reference another question in the same task")
+					}
+					if next.pending() && !next.Visible {
+						next.Visible = true
+						next.Version++
+						fact.Updates = append(fact.Updates, next)
 					}
 					q.Dependency = QuestionDependencyReplaced
 					q.ReplacedBy = next.ID
@@ -638,7 +635,9 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 		if q.Outcome != "" && !q.Async {
 			batch := a.questionBatch(q.BatchID)
 			for _, next := range batch {
-				if next.ID == q.ID || !next.pending() || next.Visible {
+				// The replacement is published in this transaction and must
+				// survive cancellation of the unopened companions.
+				if next.ID == q.ID || next.ID == op.ReplacementID || !next.pending() || next.Visible {
 					continue
 				}
 				next.Version++
@@ -651,12 +650,21 @@ func (a *MainAgent) prepareQuestionTransaction(c *questionCommand) (QuestionFact
 				next.Reason = "batch_stopped"
 				next.ResultID = makeRequestID()
 				next.Timer = QuestionTimerDisabled
+				// Withdrawing or replacing one item cancels the rest of the
+				// batch the user never saw; leaving their requirements pending
+				// would hold the completion gate with no dialog left to resolve
+				// it. The replacement survives the stop (skipped above), so only
+				// genuine companions need their requirement released here.
+				if (op.Operation == QuestionOpWithdraw || op.Operation == QuestionOpReplace) && next.Dependency == QuestionDependencyPending {
+					next.Dependency = QuestionDependencyWithdrawn
+					next.UserSourceID = fact.SourceID
+				}
 				fact.Updates = append(fact.Updates, next)
 			}
 		}
 		receipt.Status = q.Outcome
 		receipt.Version = q.Version
-		if op.Operation == QuestionOpAnswer || op.Operation == QuestionOpDecline || op.Operation == QuestionOpRevise || op.Operation == QuestionOpWithdraw || op.Operation == QuestionOpReplace {
+		if op.Operation == QuestionOpAnswer || op.Operation == QuestionOpRevise || op.Operation == QuestionOpWithdraw || op.Operation == QuestionOpReplace {
 			if expired {
 				receipt.Accepted = false
 				receipt.Error = "question deadline decided the outcome"

@@ -480,9 +480,9 @@ func TestGenericToolCardUsesTheSharedShape(t *testing.T) {
 }
 
 // TestQuestionCardNamesNonAnsweredOutcomes covers the outcomes that leave no
-// trace in the option list: without the explicit line a declined, timed-out,
+// trace in the option list: without the explicit line an errored, timed-out,
 // or superseded question would look the same as an unanswered one, and an
-// unopened question cancelled after an earlier refusal would look unanswered too.
+// unopened question cancelled after an earlier answer would look unanswered too.
 func TestQuestionCardNamesNonAnsweredOutcomes(t *testing.T) {
 	ApplyTheme(uitheme.Default())
 	newBlock := func(payload string) *Block {
@@ -499,8 +499,8 @@ func TestQuestionCardNamesNonAnsweredOutcomes(t *testing.T) {
 		}
 	}
 
-	plain := terminaltext.StripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":[],"outcome":"declined"},{"header":"Extra","selected":[],"outcome":"cancelled"}]}`).Render(96, ""), "\n"))
-	for _, want := range []string{"Outcome: declined", "Outcome: cancelled"} {
+	plain := terminaltext.StripANSI(strings.Join(newBlock(`{"status":"resolved","answers":[{"header":"Target branch","selected":[],"outcome":"error"},{"header":"Extra","selected":[],"outcome":"cancelled"}]}`).Render(96, ""), "\n"))
+	for _, want := range []string{"Outcome: error", "Outcome: cancelled"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("expected %q in the question card, got:\n%s", want, plain)
 		}

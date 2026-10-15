@@ -200,7 +200,6 @@ func assertDeliveredProjectionRow(t *testing.T, msg message.Message) {
 func TestQuestionDecisionTextNamesNonUserOutcomes(t *testing.T) {
 	for _, tc := range []struct{ outcome, want string }{
 		{tools.QuestionOutcomeAnswered, "Question answered: Header"},
-		{tools.QuestionOutcomeDeclined, "Question declined: Header"},
 		{tools.QuestionOutcomeDefaulted, "not user consent or authorization"},
 		{tools.QuestionOutcomeNoResponse, "not user consent or authorization"},
 	} {

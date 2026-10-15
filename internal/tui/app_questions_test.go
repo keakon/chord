@@ -105,7 +105,6 @@ func TestQuestionDecisionCardTitlesFollowTheStatusCardVocabulary(t *testing.T) {
 	}{
 		{name: "answered", outcome: tools.QuestionOutcomeAnswered, want: "QUESTION ANSWERED"},
 		{name: "revised", operation: agent.QuestionOpRevise, outcome: tools.QuestionOutcomeAnswered, want: "QUESTION REVISED"},
-		{name: "declined", outcome: tools.QuestionOutcomeDeclined, want: "QUESTION DECLINED"},
 		{name: "defaulted", outcome: tools.QuestionOutcomeDefaulted, want: "QUESTION DEFAULTED BY SYSTEM"},
 		{name: "no response", outcome: tools.QuestionOutcomeNoResponse, want: "QUESTION NO RESPONSE"},
 		{name: "superseded", outcome: tools.QuestionOutcomeSuperseded, want: "QUESTION SUPERSEDED"},

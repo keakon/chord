@@ -13,7 +13,6 @@ const (
 	QuestionPolicyOptional        = "optional"
 	QuestionOutcomeAnswered       = "answered"
 	QuestionOutcomeDefaulted      = "defaulted"
-	QuestionOutcomeDeclined       = "declined"
 	QuestionOutcomeNoResponse     = "no_response"
 	QuestionOutcomeSuperseded     = "superseded"
 	QuestionOutcomeCancelled      = "cancelled"

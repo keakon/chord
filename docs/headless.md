@@ -186,7 +186,7 @@ Send a user message to the agent. Slash commands work the same as in the TUI; ba
 {"type": "send", "request_id": "input-1", "content": "Please summarize the project structure."}
 ```
 
-A regular `send` retains questions and required decisions, interrupting the current wait so the agent can process new instructions. Pending confirmations are still auto-denied, and handoffs close with `handoff_cancelled`. Resolve questions through targeted answer, decline, withdrawal, or replacement operations.
+A regular `send` retains questions and required decisions, interrupting the current wait so the agent can process new instructions. Pending confirmations are still auto-denied, and handoffs close with `handoff_cancelled`. Resolve questions through targeted answer or cancellation (withdrawal or replacement) operations.
 
 An optional `request_id` correlates one `input_result` consumption reply. Replies are always emitted regardless of `subscribe`; inputs without an ID have no correlated reply.
 
@@ -292,7 +292,7 @@ Operate on a stable question ID. Selections use IDs from `option_ids`; free text
 | --- | --- |
 | `presented` | Confirm that the answer entry and default notice are available; include current `version`, `binding_id`, and `supports_interaction`. Channels unable to detect interaction send `false` and wait for timer cancellation before opening their answer entry. |
 | `interact` | Permanently cancel this timer without answering. |
-| `answer` / `decline` | Answer a pending question / decline without an answer. |
+| `answer` | Answer a pending question. A question that is not answered must be cancelled with `withdraw_requirement`; there is no "declined" state. |
 | `revise` | Append a historical revision, retaining the original outcome and task even when another question is pending. |
 | `withdraw_requirement` / `replace_requirement` | Explicitly withdraw using `user_text`, or replace with `replacement_id` in the same task. Models cannot silently remove requirements. |
 | `cancel_task` / `new_task` | Explicitly cancel the current task / start an independent task scope using `user_text`. |
@@ -381,7 +381,7 @@ You receive these on stdout. The list below covers what is emitted by default pl
 | `confirm_request`       | A tool needs explicit confirmation                                                                | `request_id`, `agent_id`, `tool_name`, `args_json`, `needs_approval`, `already_allowed`, `needs_approval_rules`, `already_allowed_rules`, `timeout_ms` |
 | `question_request` | A question becomes available | `request_id`, `binding_id`, `task_id`, `request_scope_id`, `version`, `header`, `question`, `options`, `option_ids`, `option_details`, `multiple`, `response_policy`, `default_option_id`, `timer`, `duration_seconds`, optional `deadline` |
 | `question_updated` | Timing, interaction, requirement disposition, or historical revision changes | Full question snapshot; historical replies add `revision_result` with a distinct `result_id` |
-| `question_resolved` | A question reaches a terminal outcome | Full snapshot; `reason` is `answered`, `defaulted`, `declined`, `no_response`, `superseded`, `cancelled`, or `error` |
+| `question_resolved` | A question reaches a terminal outcome | Full snapshot; `reason` is `answered`, `defaulted`, `no_response`, `superseded`, `cancelled`, or `error` |
 | `notification`          | A user-facing reminder for an explicit wait that is not a modal request                       | `reason`, `message` |
 | `handoff_request`       | A planner saved a handoff plan and needs the client to approve or reject execution                 | `request_id`, `plan_path`, `plan_text`, `plan_error`, `agents[]` with `{name, default, model_pools, current_model_pool}`; `agents` is empty when no eligible target exists |
 | `handoff_cancelled`     | A pending handoff was discarded before the client decided — a newer turn, a session switch, or an auto-dismissing `send` superseded it | `request_id`, `reason` (`superseded`)                                                                        |

@@ -253,42 +253,81 @@ func TestQuestionSyncBatchRestoresOrderAndCancelsUnopenedItems(t *testing.T) {
 	if !a.questions.records[ids[1]].Visible || a.questions.records[ids[2]].Visible {
 		t.Fatal("incorrect sequential progress")
 	}
-	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpDecline, QuestionID: ids[1]}, time.Time{})
-	if q := a.questions.records[ids[2]]; q.Outcome != tools.QuestionOutcomeCancelled || q.Reason != "batch_stopped" {
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpWithdraw, QuestionID: ids[1], UserText: "Cancel the second question"}, time.Time{})
+	if q := a.questions.records[ids[2]]; q.Outcome != tools.QuestionOutcomeCancelled || q.Reason != "batch_stopped" || q.Dependency != QuestionDependencyWithdrawn {
 		t.Fatalf("unopened item: %+v", q)
+	}
+	if ids := a.requiredQuestionIDs(); len(ids) != 0 {
+		t.Fatalf("cancelled batch left requirements pending: %v", ids)
 	}
 	saved := a.ctxMgr.Snapshot()
 	a.restoreQuestions(saved)
-	if a.questions.records[ids[0]].Outcome != tools.QuestionOutcomeAnswered || a.questions.records[ids[2]].Outcome != tools.QuestionOutcomeCancelled {
+	if a.questions.records[ids[0]].Outcome != tools.QuestionOutcomeAnswered || a.questions.records[ids[2]].Outcome != tools.QuestionOutcomeCancelled || len(a.requiredQuestionIDs()) != 0 {
 		t.Fatal("batch progress lost")
 	}
 }
-func TestQuestionDeclineWakesWaitAndReplacementResolvesDependency(t *testing.T) {
+
+// TestQuestionSyncBatchReplaceReleasesCompanionDependencies pins the fix for a
+// deadlock: replacing a pending question must release the requirements of the
+// other unopened companions (otherwise the completion gate hangs with no dialog
+// left to resolve them) and must never cancel the replacement question that
+// takes over the requirement.
+func TestQuestionSyncBatchReplaceReleasesCompanionDependencies(t *testing.T) {
+	t.Parallel()
+	a := newQuestionTestAgent(t)
+	r := createTestQuestions(t, a, questionItems("First", "Second", "Third"), true)
+	ids := r.Result.QuestionIDs
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpReplace, QuestionID: ids[0], ReplacementID: ids[1], UserText: "Update the requirement"}, time.Time{})
+	if q := a.questions.records[ids[0]]; q.Outcome != tools.QuestionOutcomeSuperseded || q.Dependency != QuestionDependencyReplaced {
+		t.Fatalf("replaced question: %+v", q)
+	}
+	if q := a.questions.records[ids[1]]; q.Outcome != "" || q.Dependency != QuestionDependencyPending || !q.Visible {
+		t.Fatalf("replacement has no pending answer entry: %+v", q)
+	}
+	// The remaining unopened companion is cancelled and its requirement released.
+	if q := a.questions.records[ids[2]]; q.Outcome != tools.QuestionOutcomeCancelled || q.Reason != "batch_stopped" || q.Dependency != QuestionDependencyWithdrawn {
+		t.Fatalf("unopened companion: %+v", q)
+	}
+	if req := a.requiredQuestionIDs(); len(req) != 1 || req[0] != ids[1] {
+		t.Fatalf("replace left the wrong requirement set: %v", req)
+	}
+	a.restoreQuestions(a.ctxMgr.Snapshot())
+	if q := a.questions.records[ids[1]]; !q.pending() || !q.Visible {
+		t.Fatalf("restored replacement has no answer entry: %+v", q)
+	}
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpPresented, QuestionID: ids[1], SupportsInteraction: true}, time.Now())
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: ids[1], Answers: []string{"yes"}}, time.Time{})
+	if req := a.requiredQuestionIDs(); len(req) != 0 {
+		t.Fatalf("replacement answer left requirements pending: %v", req)
+	}
+}
+
+func TestQuestionCancelWakesWaitAndResolvesDependency(t *testing.T) {
 	t.Parallel()
 	a := newQuestionTestAgent(t)
 	created := createTestQuestions(t, a, questionItems("First", "Second"), false)
 	ids := created.Result.QuestionIDs
 	wait := &questionCommand{operation: QuestionOperation{Operation: questionOpWait, OperationID: "wait"}, args: tools.QuestionArgs{WaitFor: ids}, owner: identity.MainAgentID, task: identity.MainAgentID, scope: a.questions.scope, reply: make(chan QuestionReceipt, 1)}
 	a.installQuestionWait(wait)
-	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpDecline, QuestionID: ids[0]}, time.Time{})
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpWithdraw, QuestionID: ids[0], UserText: "Cancel the first question"}, time.Time{})
 	select {
 	case receipt := <-wait.reply:
 		if receipt.Result.Status != tools.QuestionStatusResolved {
 			t.Fatal("wrong wait status")
 		}
 	default:
-		t.Fatal("decline did not wake waiter")
+		t.Fatal("cancel did not wake waiter")
 	}
-	if len(a.requiredQuestionIDs()) != 2 {
-		t.Fatal("decline removed requirements")
+	// Cancelling withdraws the requirement, so only the second one stays open.
+	if len(a.requiredQuestionIDs()) != 1 {
+		t.Fatalf("cancel left the wrong requirement count: %d", len(a.requiredQuestionIDs()))
 	}
-	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpReplace, QuestionID: ids[0], ReplacementID: ids[1], UserText: "Use the alternative decision instead"}, time.Time{})
 	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: ids[1], Answers: []string{"no"}}, time.Time{})
 	if len(a.requiredQuestionIDs()) != 0 {
-		t.Fatal("replacement left an impossible completion gate")
+		t.Fatal("answer left an impossible completion gate")
 	}
-	if a.questions.records[ids[0]].Outcome != tools.QuestionOutcomeDeclined {
-		t.Fatal("replacement rewrote old terminal")
+	if q := a.questions.records[ids[0]]; q.Outcome != tools.QuestionOutcomeCancelled || q.Dependency != QuestionDependencyWithdrawn {
+		t.Fatalf("cancel did not mark the question withdrawn: %+v", q)
 	}
 }
 func TestQuestionOutsideWaitSetInterruptsWithoutClosingQuestions(t *testing.T) {
@@ -315,10 +354,10 @@ func TestQuestionHistoryRevisionWithNewPendingQuestion(t *testing.T) {
 	t.Parallel()
 	a := newQuestionTestAgent(t)
 	old := createTestQuestions(t, a, questionItems("First"), false).Result.QuestionIDs[0]
-	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpDecline, QuestionID: old}, time.Time{})
+	applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpAnswer, QuestionID: old, Answers: []string{"yes"}}, time.Time{})
 	next := createTestQuestions(t, a, questionItems("Second"), false).Result.QuestionIDs[0]
 	receipt := applyTestQuestion(t, a, QuestionOperation{Operation: QuestionOpRevise, QuestionID: old, Answers: []string{"yes"}}, time.Time{})
-	if !receipt.Accepted || !a.questions.records[next].pending() || a.questions.records[old].Outcome != tools.QuestionOutcomeDeclined || a.questions.records[old].Dependency != QuestionDependencyReceived {
+	if !receipt.Accepted || !a.questions.records[next].pending() || a.questions.records[old].Outcome != tools.QuestionOutcomeAnswered || a.questions.records[old].Dependency != QuestionDependencyReceived {
 		t.Fatal("historical reply routed to new question or changed terminal")
 	}
 }
