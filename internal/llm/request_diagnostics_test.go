@@ -50,7 +50,7 @@ func TestDiagnosticCustomSubmissionAndNoninterference(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		opts := CompleteStreamOptions{}
 		if enabled {
-			opts.Diagnostics = collector.BeginRequest(7)
+			opts.Diagnostics = collector.BeginRequest(7, 0)
 		}
 		dispatched, started := 0, 0
 		ctx, _ := WithRequestDispatch(context.Background(), func() { dispatched++ })
@@ -76,7 +76,7 @@ func TestDiagnosticCustomSubmissionAndNoninterference(t *testing.T) {
 		prepareDiagnosticSubmission(ctx, contextdiag.WebSocket)
 		markRequestSent(ctx)
 	}
-	_, err := client.CompleteStreamWithOptions(context.Background(), msgs, nil, nil, CompleteStreamOptions{Diagnostics: collector.BeginRequest(8)})
+	_, err := client.CompleteStreamWithOptions(context.Background(), msgs, nil, nil, CompleteStreamOptions{Diagnostics: collector.BeginRequest(8, 0)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestDiagnosticAdmissionAndStaleCallbacks(t *testing.T) {
 	collector, store := diagnosticTestCollector()
 	cfg := diagnosticProviderConfig(config.ProviderTypeChatCompletions)
 	p := &diagnosticRecordingProvider{response: &message.Response{Content: "sample"}}
-	d := collector.BeginRequest(0)
+	d := collector.BeginRequest(0, 0)
 	ctx := context.WithValue(context.Background(), diagnosticsContextKey{}, d)
 	gate := &executiongate.Gate{}
 	gate.Freeze()
@@ -109,7 +109,7 @@ func TestDiagnosticAdmissionAndStaleCallbacks(t *testing.T) {
 	}
 	scope.submit()
 	id := scope.active
-	d2 := collector.BeginRequest(0)
+	d2 := collector.BeginRequest(0, 0)
 	_ = d2
 	scope.prepare(contextdiag.HTTP)
 	scope.submit()
@@ -152,7 +152,7 @@ func TestDiagnosticHTTPConnectionFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	collector, store := diagnosticTestCollector()
-	ctx := context.WithValue(context.Background(), diagnosticsContextKey{}, collector.BeginRequest(0))
+	ctx := context.WithValue(context.Background(), diagnosticsContextKey{}, collector.BeginRequest(0, 0))
 	_, err = completeObservedProvider(ctx, impl, cfg, "sample-key", "test-model", "", []message.Message{{Role: message.RoleUser, Content: "sample"}}, nil, 10, RequestTuning{}, func(message.StreamDelta) {})
 	snapshot, ok := store.Latest()
 	if err == nil || !ok || snapshot.State != contextdiag.Failed || snapshot.Transport != contextdiag.HTTP || snapshot.Usage.State != contextdiag.Missing {
@@ -163,7 +163,7 @@ func TestDiagnosticFailedUsageAndCancellation(t *testing.T) {
 	cfg := diagnosticProviderConfig(config.ProviderTypeChatCompletions)
 	collector, store := diagnosticTestCollector()
 	p := &diagnosticRecordingProvider{response: &message.Response{Usage: &message.TokenUsage{InputTokens: 10}}, err: errors.New("sample")}
-	ctx := context.WithValue(context.Background(), diagnosticsContextKey{}, collector.BeginRequest(0))
+	ctx := context.WithValue(context.Background(), diagnosticsContextKey{}, collector.BeginRequest(0, 0))
 	_, _ = completeObservedProvider(ctx, p, cfg, "key", "test-model", "", nil, nil, 10, RequestTuning{}, nil)
 	snapshot, _ := store.Latest()
 	if snapshot.State != contextdiag.Failed || snapshot.Usage.State != contextdiag.Partial {
@@ -171,7 +171,7 @@ func TestDiagnosticFailedUsageAndCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	p.inspect = func(context.Context, []message.Message, []message.ToolDefinition) { cancel() }
-	ctx = context.WithValue(ctx, diagnosticsContextKey{}, collector.BeginRequest(0))
+	ctx = context.WithValue(ctx, diagnosticsContextKey{}, collector.BeginRequest(0, 0))
 	_, _ = completeObservedProvider(ctx, p, cfg, "key", "test-model", "", nil, nil, 10, RequestTuning{}, nil)
 	snapshot, _ = store.Latest()
 	if snapshot.State != contextdiag.Cancelled {
@@ -184,7 +184,7 @@ func TestDiagnosticWebSocketPrewarmAndIncremental(t *testing.T) {
 	defer srv.Close()
 	cfg := diagnosticProviderConfig(config.ProviderTypeResponses)
 	collector, store := diagnosticTestCollector()
-	d := collector.BeginRequest(0)
+	d := collector.BeginRequest(0, 0)
 	scope := &diagnosticScope{request: d, provider: cfg, baseline: diagnosticEmptyBaseline(), snapshot: contextdiag.Snapshot{Usage: contextdiag.Usage{State: contextdiag.Missing}}}
 	ctx := context.WithValue(context.Background(), diagnosticScopeContextKey{}, scope)
 	r := &ResponsesProvider{}
@@ -210,7 +210,7 @@ func TestDiagnosticDomainsRebuildRatherThanRememberModels(t *testing.T) {
 	cfg := diagnosticProviderConfig(config.ProviderTypeChatCompletions)
 	p := &diagnosticRecordingProvider{response: &message.Response{Content: "sample", Usage: &message.TokenUsage{CacheReadTokens: 3}}}
 	for i, key := range []string{"key-a", "key-a", "key-b", "key-a"} {
-		ctx := context.WithValue(context.Background(), diagnosticsContextKey{}, collector.BeginRequest(0))
+		ctx := context.WithValue(context.Background(), diagnosticsContextKey{}, collector.BeginRequest(0, 0))
 		_, err := completeObservedProvider(ctx, p, cfg, key, "test-model", "sample", nil, nil, 10, RequestTuning{}, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -241,7 +241,7 @@ func TestDiagnosticRetryKeysFallbackAndFrozenReduction(t *testing.T) {
 			collector, store := diagnosticTestCollector()
 			opts := CompleteStreamOptions{}
 			if enabled {
-				opts.Diagnostics = collector.BeginRequest(0)
+				opts.Diagnostics = collector.BeginRequest(0, 0)
 				opts.Diagnostics.SetReduction(contextdiag.Reduction{State: contextdiag.Observed, Before: 20, After: 10})
 			}
 			opts.BeforeFallback = func(_ context.Context, msgs []message.Message, _ FallbackModel) ([]message.Message, error) {
@@ -261,6 +261,54 @@ func TestDiagnosticRetryKeysFallbackAndFrozenReduction(t *testing.T) {
 			}
 			if !enabled && ok {
 				t.Fatal("disabled diagnostics collected")
+			}
+		})
+	}
+}
+
+func TestDiagnosticWindowFollowsAttemptModel(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		limit    config.ModelLimit
+		reserved int64
+	}{
+		{"context_output", config.ModelLimit{Context: 64000, Output: 4096}, 512},
+		{"explicit_input", config.ModelLimit{Context: 64000, Input: 48000, Output: 4096}, 1024},
+		{"shared_window", config.ModelLimit{Context: 64000, Output: 64000}, 256},
+		{"reserved_exhausted", config.ModelLimit{Context: 64000, Input: 48000, Output: 4096}, 48001},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := func(name string, limit config.ModelLimit) *ProviderConfig {
+				return NewProviderConfig(name, config.ProviderConfig{
+					Type:   config.ProviderTypeChatCompletions,
+					APIURL: "https://example.invalid/v1",
+					Models: map[string]config.ModelConfig{"test-model": {Limit: limit}},
+				}, []string{"sample-key"})
+			}
+			primaryLimit := config.ModelLimit{Context: 128000, Output: 4096}
+			primary := cfg("primary", primaryLimit)
+			fallback := cfg("fallback", tc.limit)
+			var windows []int64
+			inspect := func(ctx context.Context, _ []message.Message, _ []message.ToolDefinition) {
+				windows = append(windows, diagnosticsScope(ctx).snapshot.WindowLimit)
+			}
+			p := &diagnosticRecordingProvider{err: &APIError{StatusCode: 503, Message: "unavailable"}, inspect: inspect}
+			f := &diagnosticRecordingProvider{response: &message.Response{Content: "sample"}, inspect: inspect}
+			client := NewClient(primary, p, "test-model", 100, "")
+			defer client.Close()
+			client.SetFallbackModels([]FallbackModel{{ProviderConfig: fallback, ProviderImpl: f, ModelID: "test-model", MaxTokens: 100, ContextLimit: tc.limit.Context}})
+			collector, store := diagnosticTestCollector()
+			_, err := client.CompleteStreamWithOptions(t.Context(), []message.Message{{Role: message.RoleUser, Content: "sample"}}, nil, nil, CompleteStreamOptions{Diagnostics: collector.BeginRequest(1, tc.reserved)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := max(int64(tc.limit.CompactionBudget())-tc.reserved, 0)
+			if !reflect.DeepEqual(windows, []int64{max(int64(primaryLimit.CompactionBudget())-tc.reserved, 0), want}) {
+				t.Fatalf("attempt windows=%v", windows)
+			}
+			snapshot, ok := store.Latest()
+			if !ok || snapshot.WindowLimit != want || snapshot.ModelRef != "fallback/test-model" {
+				t.Fatalf("fallback snapshot=%+v", snapshot)
 			}
 		})
 	}

@@ -35,7 +35,7 @@ func expectDiagnosticsRetired(t *testing.T, a *MainAgent, clear bool) func() {
 			t.Fatal("new binding retained old observation")
 		}
 		if clear {
-			d := a.contextDiagnostics.begin(a.SessionDir(), identity.MainAgentID, a.ctxMgr.HistoryGeneration())
+			d := a.contextDiagnostics.begin(a.SessionDir(), identity.MainAgentID, a.ctxMgr.HistoryGeneration(), int64(a.effectiveCompactionReservedInput()))
 			if d == nil || a.contextDiagnostics.store == store {
 				t.Fatal("new binding cannot observe requests")
 			}

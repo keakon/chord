@@ -209,7 +209,7 @@ func TestNativePauseContinuationAndResultBarrier(t *testing.T) {
 				_, _ = io.WriteString(w, fixture)
 			}))
 			defer srv.Close()
-			provider := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL, Models: map[string]config.ModelConfig{"test-model": {NativeWebSearch: &config.NativeWebSearchConfig{Contract: config.NativeWebSearchMessages, APIURL: srv.URL, Preauthorized: true}}}}, []string{"key"})
+			provider := NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeMessages, APIURL: srv.URL, Models: map[string]config.ModelConfig{"test-model": {Limit: config.ModelLimit{Context: 128000, Output: 4096}, NativeWebSearch: &config.NativeWebSearchConfig{Contract: config.NativeWebSearchMessages, APIURL: srv.URL, Preauthorized: true}}}}, []string{"key"})
 			impl, err := NewAnthropicProvider(provider, "")
 			if err != nil {
 				t.Fatal(err)
@@ -233,7 +233,7 @@ func TestNativePauseContinuationAndResultBarrier(t *testing.T) {
 				return nil
 			}}
 			collector, store := diagnosticTestCollector()
-			resp, err := client.CompleteStreamWithOptions(t.Context(), []message.Message{{Role: message.RoleUser, Content: "Search"}}, nil, nil, CompleteStreamOptions{NativeTools: policy, Diagnostics: collector.BeginRequest(0)})
+			resp, err := client.CompleteStreamWithOptions(t.Context(), []message.Message{{Role: message.RoleUser, Content: "Search"}}, nil, nil, CompleteStreamOptions{NativeTools: policy, Diagnostics: collector.BeginRequest(0, 512)})
 			if failReceipt {
 				if !IsNativeToolError(err) || len(bodies) != 1 {
 					t.Fatalf("requests=%d err=%v", len(bodies), err)
@@ -247,7 +247,7 @@ func TestNativePauseContinuationAndResultBarrier(t *testing.T) {
 				t.Fatalf("usage=%+v requests=%d receipts=%v", resp.Usage, len(bodies), recorded)
 			}
 			snapshot, ok := store.Latest()
-			if !ok || snapshot.ID.Attempt != 2 || snapshot.State != contextdiag.Completed || snapshot.Usage.FullInput != 10 || snapshot.Usage.Output != 5 {
+			if !ok || snapshot.ID.Attempt != 2 || snapshot.State != contextdiag.Completed || snapshot.Usage.FullInput != 10 || snapshot.Usage.Output != 5 || snapshot.WindowLimit != 123392 {
 				t.Fatalf("native usage attribution: %+v", snapshot)
 			}
 			if string(bodies[1]["container"]) != `"container-1"` || !strings.Contains(string(bodies[1]["messages"]), "search-1") {

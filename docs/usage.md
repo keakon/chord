@@ -155,6 +155,7 @@ A task awaiting its owner can show one line from its current coordination reques
 - When `Cache R` shows a percentage, it is cache-read tokens divided by input-side prompt tokens plus separately reported cache-write tokens. Output tokens are excluded because prompt caching applies only to the input side.
 - `Think` appears only when the provider reports reasoning/thinking tokens. These tokens are already included in output-token billing; the line is a visibility breakdown, not an additional token bucket.
 - `Calls` counts the real LLM requests issued by the focused agent (main agent, running SubAgent, or parked task). It comes from the persisted usage ledger, so it survives session restore and is not reset by context compaction.
+- The sidebar rows are per-agent cumulative or per-request readings; `/context` describes only the latest single request. A cumulative `Cache R` total can therefore be much larger than one request's input, and its percentage describes that running total rather than the context window. `/context` states this scope explicitly and anchors its window percentages to the same budget this block's gauge uses.
 
 ### `TIME` block
 

@@ -579,7 +579,7 @@ func (a *MainAgent) callLLMForRequest(ctx context.Context, input llmRequestInput
 	a.stateMu.RLock()
 	diagnosticSession := a.sessionDir
 	a.stateMu.RUnlock()
-	observer := a.contextDiagnostics.begin(diagnosticSession, identity.MainAgentID, input.HistoryGeneration)
+	observer := a.contextDiagnostics.begin(diagnosticSession, identity.MainAgentID, input.HistoryGeneration, int64(a.effectiveCompactionReservedInput()))
 
 	if a.sessionExecutionPaused() {
 		return nil, &executiongate.ErrSessionPaused{}

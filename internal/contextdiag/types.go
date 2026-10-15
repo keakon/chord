@@ -79,4 +79,9 @@ type Snapshot struct {
 	Reduction         Reduction  `json:"reduction"`
 	Usage             Usage      `json:"usage"`
 	Cache             Cache      `json:"cache"`
+	// WindowLimit is the usable input budget the request was dispatched
+	// against. Shares of the window must divide by this value: reading a
+	// historical snapshot against the current model's budget misstates how
+	// full the window was whenever the model changed between requests.
+	WindowLimit int64 `json:"window_limit"`
 }

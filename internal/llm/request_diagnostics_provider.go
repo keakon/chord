@@ -54,12 +54,15 @@ func completeObservedProvider(ctx context.Context, impl Provider, provider *Prov
 		reduction := contextdiag.CloneReduction(d.reduction)
 		secret := c.secret
 		c.mu.Unlock()
-		modelRef, _ := ctx.Value(diagnosticTargetContextKey{}).(string)
-		if modelRef == "" {
-			modelRef = providerModelRef(provider, model)
+		target, ok := ctx.Value(diagnosticTargetContextKey{}).(diagnosticTarget)
+		if !ok {
+			target = diagnosticTarget{
+				modelRef:    providerModelRef(provider, model),
+				windowLimit: max(int64((FallbackModel{ProviderConfig: provider, ModelID: model}).CompactionBudget())-d.reservedInput, 0),
+			}
 		}
-		scope = &diagnosticScope{request: d, provider: provider, baseline: result.Baseline, snapshot: contextdiag.Snapshot{HistoryGeneration: d.generation, ModelRef: modelRef, WireFamily: string(providerWireFamily(provider)), EstimateScope: contextdiag.ProviderInput, Estimator: contextdiag.UTF8BytesDiv3, Completeness: result.Completeness, Categories: result.Categories, Limitations: append(result.Limitations, diagnosticUpstream), Reduction: reduction, Usage: contextdiag.Usage{State: contextdiag.Missing}}}
-		scope.domain = diagnosticDomain(secret[:], fmt.Sprintf("%p", provider), provider.APIURL(), key, modelRef, string(providerWireFamily(provider)), tuning.SessionKey, tuning.Anthropic.PromptCacheMode, tuning.Anthropic.PromptCacheTTL)
+		scope = &diagnosticScope{request: d, provider: provider, baseline: result.Baseline, snapshot: contextdiag.Snapshot{HistoryGeneration: d.generation, ModelRef: target.modelRef, WindowLimit: target.windowLimit, WireFamily: string(providerWireFamily(provider)), EstimateScope: contextdiag.ProviderInput, Estimator: contextdiag.UTF8BytesDiv3, Completeness: result.Completeness, Categories: result.Categories, Limitations: append(result.Limitations, diagnosticUpstream), Reduction: reduction, Usage: contextdiag.Usage{State: contextdiag.Missing}}}
+		scope.domain = diagnosticDomain(secret[:], fmt.Sprintf("%p", provider), provider.APIURL(), key, target.modelRef, string(providerWireFamily(provider)), tuning.SessionKey, tuning.Anthropic.PromptCacheMode, tuning.Anthropic.PromptCacheTTL)
 		ctx = context.WithValue(ctx, diagnosticScopeContextKey{}, scope)
 	}
 	lease, err := beginCustomProvider(ctx, impl)

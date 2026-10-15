@@ -31,7 +31,7 @@ type contextDiagnosticsRuntime struct {
 	reduction contextdiag.Reduction
 }
 
-func (d *contextDiagnosticsRuntime) begin(session, task string, generation uint64) *llm.RequestDiagnostics {
+func (d *contextDiagnosticsRuntime) begin(session, task string, generation uint64, reservedInput int64) *llm.RequestDiagnostics {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.retired {
@@ -41,7 +41,7 @@ func (d *contextDiagnosticsRuntime) begin(session, task string, generation uint6
 		d.store = &contextdiag.Store{}
 		d.collector = llm.NewDiagnosticsCollector(contextdiag.Binding{SessionID: session, TaskID: task, Epoch: diagnosticsEpoch.Add(1)}, d.store)
 	}
-	return d.collector.BeginRequest(generation)
+	return d.collector.BeginRequest(generation, reservedInput)
 }
 func (d *contextDiagnosticsRuntime) invalidate() {
 	d.mu.Lock()
@@ -73,6 +73,21 @@ func (d *contextDiagnosticsRuntime) snapshot(name, model string, m *ctxmgr.Manag
 		v.UnavailableReason = ""
 		v.Historical = m == nil || v.Snapshot.HistoryGeneration != m.HistoryGeneration() || model != "" && v.Snapshot.ModelRef != model
 	}
+	if m != nil {
+		v.WindowLimit = m.GetUsableCompactionBudget()
+	}
+	return v
+}
+
+// attachSessionTotals fills the cumulative reference points from the usage
+// ledger. They are separate from the snapshot on purpose: the snapshot describes
+// one request, the sidebar rows accumulate every call this task has made.
+// Routing matches GetSidebarUsageStats so both surfaces describe the same agent.
+func (a *MainAgent) attachSessionTotals(v ContextDiagnosticsView) ContextDiagnosticsView {
+	stats := a.GetSidebarUsageStats()
+	v.SessionCacheRead = stats.CacheReadTokens
+	v.SessionCacheWrite = stats.CacheWriteTokens
+	v.SessionCalls = stats.LLMCalls
 	return v
 }
 func (a *MainAgent) contextDiagnosticsSnapshot() ContextDiagnosticsView {
@@ -81,7 +96,7 @@ func (a *MainAgent) contextDiagnosticsSnapshot() ContextDiagnosticsView {
 	if client != nil {
 		model = client.NextRequestModelRef()
 	}
-	return a.contextDiagnostics.snapshot(a.currentAgentName(), model, a.ctxMgr)
+	return a.attachSessionTotals(a.contextDiagnostics.snapshot(a.currentAgentName(), model, a.ctxMgr))
 }
 func (s *SubAgent) contextDiagnosticsSnapshot() ContextDiagnosticsView {
 	client, _ := s.llmSnapshot()
@@ -93,13 +108,16 @@ func (s *SubAgent) contextDiagnosticsSnapshot() ContextDiagnosticsView {
 }
 func (a *MainAgent) FocusedContextDiagnostics() ContextDiagnosticsView {
 	if s := a.focusedAgent.Load(); s != nil {
-		return s.contextDiagnosticsSnapshot()
+		return a.attachSessionTotals(s.contextDiagnosticsSnapshot())
 	}
 	a.focusedTaskMu.RLock()
 	task := a.focusedTaskID
 	a.focusedTaskMu.RUnlock()
 	if task != "" && task != identity.MainAgentID {
-		return ContextDiagnosticsView{AgentName: "worker", UnavailableReason: "not_observed"}
+		// A parked or settled task has no live context manager, so it has no
+		// window to anchor percentages against and no live request to describe.
+		// The durable record still knows the task's cumulative totals.
+		return a.attachSessionTotals(ContextDiagnosticsView{AgentName: "worker", UnavailableReason: "not_observed"})
 	}
 	return a.contextDiagnosticsSnapshot()
 }

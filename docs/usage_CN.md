@@ -155,6 +155,7 @@ Chord 在后台运行时，当前聚焦的 Agent 从 busy 变为 idle 后，终�
 - `↑` 显示完整 prompt input，即未缓存输入、cache-read 和 cache-write token 的总和。存在缓存桶时，下面会分别显示 `Uncached`、`Cache R` 和 `Cache W`；`Cache R` 的百分比分母是完整输入侧 prompt tokens。输出 token 不参与计算，因为 prompt cache 只作用于输入侧。
 - `Think` 行只在 provider 上报 reasoning/thinking tokens 时显示。这些 token 已包含在输出 token 计费中；该行只是可见性拆解，不是额外的 token 计费桶。
 - `Calls` 显示当前聚焦 agent（主 agent、运行中的 SubAgent 或挂起的 task）发起的真实 LLM 请求次数。该数字来自持久化的 usage 账本，会话恢复后依然保留，上下文压缩不会清零。
+- 侧边栏各行是当前 agent 的累计值或单次读数，而 `/context` 只描述最近一次请求。因此累计 `Cache R` 可能远大于单次请求的输入，其百分比描述的是这个累计量而非上下文窗口。`/context` 会明确标注这一口径，并把窗口占比对齐到本区仪表使用的同一预算。
 
 ### `TIME` 区
 

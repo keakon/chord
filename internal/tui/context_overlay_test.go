@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	tea "github.com/keakon/bubbletea/v2"
 	"github.com/keakon/x/ansi"
@@ -128,8 +129,222 @@ func TestContextDiagnosticUnknownAndExport(t *testing.T) {
 		}
 	}
 	text := strings.Join(contextDiagnosticLines(v, 2, 100), "\n")
-	if !strings.Contains(text, "原因未知") {
+	if !strings.Contains(text, "No cache read was confirmed for this request") {
 		t.Fatal("zero cache presented as cache miss")
+	}
+}
+
+// The panel and the sidebar must not read as the same measurement: the panel
+// reports one request at a time, the sidebar's cache rows accumulate every
+// call.
+func TestContextCachePageDisambiguatesRequestFromSessionTotals(t *testing.T) {
+	v := agent.ContextDiagnosticsView{
+		Available: true, AgentName: "sample", WindowLimit: 200_000,
+		SessionCalls: 44, SessionCacheRead: 3_700_000, SessionCacheWrite: 12_000,
+		Snapshot: contextdiag.Snapshot{
+			ID: contextdiag.RequestID{Binding: contextdiag.Binding{TaskID: "main", Epoch: 1}}, Revision: 3,
+			State: contextdiag.Completed, ModelRef: "sample/test-model", WindowLimit: 200_000, Completeness: contextdiag.Estimated,
+			Usage: contextdiag.Usage{State: contextdiag.Reported, FullInput: 136_600, CacheRead: 100_000},
+			Cache: contextdiag.Cache{BaselineState: contextdiag.Comparable, PrefixState: contextdiag.Append, ExpectedPrefix: 265_468, ExpectedUsable: true, Explanation: contextdiag.ReadObserved},
+		},
+	}
+	// The panel hard-wraps to the dialog width, so compare on collapsed
+	// whitespace rather than on rendered line breaks.
+	text := strings.Join(strings.Fields(strings.Join(contextDiagnosticLines(v, 2, 100), " ")), " ")
+	for _, want := range []string{
+		"Service reported 100000 cache-read tokens for this request",
+		"cumulative across all 44 calls",
+		"Cumulative cache read so far: 3.7M tokens",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("cache page missing %q in:\n%s", want, text)
+		}
+	}
+	// The panel must not present a per-request figure under the sidebar's
+	// cumulative row label. The scope note names that row on purpose, so only
+	// the data lines are checked.
+	for _, line := range contextDiagnosticLines(v, 2, 100) {
+		if strings.HasPrefix(strings.TrimSpace(line), "Cache R") {
+			t.Fatalf("panel adopted the sidebar's cumulative row label: %q", line)
+		}
+	}
+
+	// A session with no recorded usage carries no scope note, so an untouched
+	// task is not annotated with zeroes.
+	fresh := v
+	fresh.SessionCalls, fresh.SessionCacheRead, fresh.SessionCacheWrite = 0, 0, 0
+	if note := contextSessionScopeNote(fresh); note != nil {
+		t.Fatal("scope note invented for an empty session", note)
+	}
+}
+
+// Percentages in the panel must divide by the same window the sidebar gauge
+// uses, otherwise the two numbers invite a comparison that cannot hold.
+func TestContextCompositionAnchorsEstimatesToTheWindow(t *testing.T) {
+	v := agent.ContextDiagnosticsView{
+		Available: true, AgentName: "sample", WindowLimit: 200_000,
+		Snapshot: contextdiag.Snapshot{
+			ID: contextdiag.RequestID{Binding: contextdiag.Binding{TaskID: "main", Epoch: 1}}, Revision: 1,
+			State: contextdiag.Completed, ModelRef: "sample/test-model", WindowLimit: 200_000, Completeness: contextdiag.Estimated,
+			Usage: contextdiag.Usage{State: contextdiag.Reported, FullInput: 100_000},
+			Categories: []contextdiag.Category{
+				{Kind: contextdiag.Conversation, Estimate: contextdiag.Estimate{Tokens: 150_000}},
+				{Kind: contextdiag.Tools, Estimate: contextdiag.Estimate{Tokens: 50_000}},
+			},
+		},
+	}
+	text := strings.Join(contextDiagnosticLines(v, 0, 110), "\n")
+	if !strings.Contains(text, "of the "+formatTokens(v.WindowLimit)+" window") {
+		t.Fatalf("no window anchor in:\n%s", text)
+	}
+	// The share of the estimate stays a share of the estimate.
+	if !strings.Contains(text, "75.0% of the estimate") {
+		t.Fatalf("category share lost its denominator in:\n%s", text)
+	}
+	// A target with no live context manager has no window to divide by.
+	noWindow := v
+	noWindow.WindowLimit = 0
+	noWindow.Snapshot.WindowLimit = 0
+	if share := contextWindowShare(150_000, contextWindowLimit(noWindow)); share != "" {
+		t.Fatal("share rendered without a window", share)
+	}
+}
+
+// A historical request keeps the window it was dispatched against. Dividing an
+// old request by the currently focused model's budget misstates how full the
+// window was: 180k tokens are 90% of a 200k window but a comfortable 18% of a
+// 1M one, and the near-capacity finding must fire on the former.
+func TestContextCompositionAnchorsHistoricalSnapshotToItsOwnWindow(t *testing.T) {
+	v := agent.ContextDiagnosticsView{
+		Available: true, AgentName: "sample", WindowLimit: 1_000_000, Historical: true,
+		Snapshot: contextdiag.Snapshot{
+			ID: contextdiag.RequestID{Binding: contextdiag.Binding{TaskID: "main", Epoch: 1}}, Revision: 1,
+			ModelRef: "sample/small-model", WindowLimit: 200_000,
+			State: contextdiag.Completed, Completeness: contextdiag.Estimated,
+			Usage: contextdiag.Usage{State: contextdiag.Reported, FullInput: 180_000},
+			Categories: []contextdiag.Category{
+				{Kind: contextdiag.Conversation, Estimate: contextdiag.Estimate{Tokens: 150_000}},
+				{Kind: contextdiag.Tools, Estimate: contextdiag.Estimate{Tokens: 30_000}},
+			},
+		},
+	}
+	text := strings.Join(contextDiagnosticLines(v, 0, 110), "\n")
+	if !strings.Contains(text, "of the "+formatTokens(200_000)+" window") {
+		t.Fatalf("historical snapshot anchored to the current window:\n%s", text)
+	}
+	if strings.Contains(text, "of the "+formatTokens(1_000_000)+" window") {
+		t.Fatalf("historical snapshot adopted the current model's window:\n%s", text)
+	}
+	suggestions := contextSuggestions(v, v.Snapshot)
+	if len(suggestions) == 0 || suggestions[0].severity != "warning" || !strings.HasPrefix(suggestions[0].title, "Context is ") {
+		t.Fatalf("near-capacity finding missing for a historical request: %+v", suggestions)
+	}
+	if got := contextWindowLimit(v); got != 200_000 {
+		t.Fatalf("window limit = %d, want the request-time budget", got)
+	}
+}
+
+// contextCollapseForCompare strips whitespace so assertions survive the
+// dialog's hard wrapping, which breaks lines at arbitrary character offsets.
+func contextCollapseForCompare(lines []string) string {
+	var b strings.Builder
+	for _, line := range lines {
+		for _, r := range line {
+			if !unicode.IsSpace(r) {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
+func TestContextSuggestionsAreActionableAndWindowRelative(t *testing.T) {
+	base := contextdiag.Snapshot{
+		ID: contextdiag.RequestID{Binding: contextdiag.Binding{TaskID: "main", Epoch: 1}}, Revision: 1,
+		State: contextdiag.Completed, ModelRef: "sample/test-model", WindowLimit: 200_000, Completeness: contextdiag.Estimated,
+		Usage: contextdiag.Usage{State: contextdiag.Reported, FullInput: 180_000},
+		Categories: []contextdiag.Category{
+			{Kind: contextdiag.Conversation, Estimate: contextdiag.Estimate{Tokens: 40_000}},
+			{Kind: contextdiag.ToolResults, Estimate: contextdiag.Estimate{Tokens: 120_000}},
+			{Kind: contextdiag.Instructions, Estimate: contextdiag.Estimate{Tokens: 8_000}},
+		},
+	}
+	v := agent.ContextDiagnosticsView{Available: true, AgentName: "sample", WindowLimit: 200_000, Snapshot: base}
+	suggestions := contextSuggestions(v, base)
+	if len(suggestions) < 3 {
+		t.Fatalf("expected several findings, got %d", len(suggestions))
+	}
+	// The near-capacity finding leads even though it carries no savings of its
+	// own: it states the emergency the other findings explain.
+	if suggestions[0].severity != "warning" || !strings.HasPrefix(suggestions[0].title, "Context is ") {
+		t.Fatal("near-capacity warning not first", suggestions[0])
+	}
+	if !strings.Contains(suggestions[0].detail, "Run /compact to request compaction now.") {
+		t.Fatal("near-capacity action does not describe manual compaction", suggestions[0])
+	}
+	found := map[string]bool{}
+	for _, sug := range suggestions {
+		if sug.title == "" || sug.detail == "" {
+			t.Fatal("finding without an action", sug)
+		}
+		word, _, _ := strings.Cut(sug.title, " ")
+		found[word] = true
+	}
+	// Every finding must reach the reader with both its claim and its action,
+	// not just exist in the slice. The dialog hard-wraps mid-word, so compare
+	// with all whitespace removed rather than on rendered line breaks.
+	rendered := contextCollapseForCompare(contextDiagnosticLines(v, 0, 110))
+	for _, sug := range suggestions {
+		if !strings.Contains(rendered, contextCollapseForCompare([]string{sug.title})) ||
+			!strings.Contains(rendered, contextCollapseForCompare([]string{sug.detail})) {
+			t.Fatalf("finding not rendered with its action: %+v\n%s", sug, rendered)
+		}
+	}
+	if !found["Context"] {
+		t.Fatal("near-capacity finding missing")
+	}
+	if !found["Tool"] {
+		t.Fatal("tool-result finding missing")
+	}
+	// Without a window there is nothing to be a share of, so the panel says so
+	// instead of reporting a small share of a window that does not exist.
+	noWindowSnapshot := base
+	noWindowSnapshot.WindowLimit = 0
+	noWindow := agent.ContextDiagnosticsView{Available: true, AgentName: "sample", Snapshot: noWindowSnapshot}
+	if got := contextSuggestions(noWindow, base); got != nil {
+		t.Fatal("suggestions produced without a window", got)
+	}
+	if lines := contextSuggestionLines(noWindow, base); len(lines) != 1 || !strings.Contains(lines[0], "no context window") {
+		t.Fatalf("suggestion section without a window = %q", lines)
+	}
+	// A small request against a large window produces no findings at all.
+	small := base
+	small.Usage.FullInput = 1_000
+	small.Categories = []contextdiag.Category{{Kind: contextdiag.Conversation, Estimate: contextdiag.Estimate{Tokens: 900}}}
+	if got := contextSuggestions(agent.ContextDiagnosticsView{WindowLimit: 200_000, Snapshot: small}, small); len(got) != 0 {
+		t.Fatal("small request produced findings", got)
+	}
+}
+
+func TestContextSuggestionsDoNotInferSmallInputFromUnknownData(t *testing.T) {
+	s := contextdiag.Snapshot{
+		Completeness: contextdiag.Partial,
+		Usage:        contextdiag.Usage{State: contextdiag.Missing},
+		Categories:   []contextdiag.Category{{Kind: contextdiag.Attachments, Estimate: contextdiag.Estimate{UnknownItems: 1}}},
+	}
+	lines := contextSuggestionLines(agent.ContextDiagnosticsView{WindowLimit: 200_000}, s)
+	if len(lines) != 1 || strings.Contains(lines[0], "small share") || !strings.Contains(lines[0], "available data") {
+		t.Fatalf("unknown input produced an unsupported conclusion: %q", lines)
+	}
+}
+
+func TestContextZeroSnapshotBudgetDoesNotBorrowCurrentWindow(t *testing.T) {
+	v := agent.ContextDiagnosticsView{
+		Available: true, WindowLimit: 200_000,
+		Snapshot: contextdiag.Snapshot{WindowLimit: 0},
+	}
+	if got := contextWindowLimit(v); got != 0 {
+		t.Fatalf("zero request budget replaced by current window: %d", got)
 	}
 }
 

@@ -26,6 +26,11 @@ func TestMainContextDiagnosticsRequestAndHistory(t *testing.T) {
 	if !v.Available || v.Historical || v.Snapshot.State != contextdiag.Completed || v.Snapshot.Usage.FullInput != 10 {
 		t.Fatalf("snapshot %+v", v)
 	}
+	// The snapshot carries the budget the request was dispatched against, so a
+	// later model switch does not restate this request against a new window.
+	if want := int64(a.ctxMgr.GetUsableCompactionBudget()); v.Snapshot.WindowLimit != want || want <= 0 {
+		t.Fatalf("snapshot window limit = %d, want the request-time budget %d", v.Snapshot.WindowLimit, want)
+	}
 	a.ctxMgr.Append(message.Message{Role: message.RoleAssistant, Content: "sample"})
 	if a.FocusedContextDiagnostics().Historical {
 		t.Fatal("append invalidated snapshot")
@@ -40,7 +45,7 @@ func TestMainContextDiagnosticsRequestAndHistory(t *testing.T) {
 	if a.FocusedContextDiagnostics().Available {
 		t.Fatal("new binding inherited snapshot")
 	}
-	d := a.contextDiagnostics.begin("sample", "main", 0)
+	d := a.contextDiagnostics.begin("sample", "main", 0, int64(a.effectiveCompactionReservedInput()))
 	if d == nil {
 		t.Fatal("new binding unavailable")
 	}
@@ -58,12 +63,12 @@ func TestDiagnosticReductionFrozenRatioAndUnavailableWorker(t *testing.T) {
 		t.Fatalf("ratio mismatch %+v", r)
 	}
 	var runtime contextDiagnosticsRuntime
-	observer := runtime.begin("sample", "worker", 0)
+	observer := runtime.begin("sample", "worker", 0, 0)
 	if observer == nil {
 		t.Fatal("no worker observer")
 	}
 	runtime.invalidate()
-	if runtime.begin("sample", "worker", 0) != nil {
+	if runtime.begin("sample", "worker", 0, 0) != nil {
 		t.Fatal("retired runtime resurrected")
 	}
 }

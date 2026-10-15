@@ -78,7 +78,7 @@ func TestDiagnosticWebSocketRetryThenHTTP(t *testing.T) {
 	defer cancel()
 	messages := []message.Message{{Role: message.RoleUser, Content: "First request"}}
 	for i := range 2 {
-		requestCtx := context.WithValue(ctx, diagnosticsContextKey{}, collector.BeginRequest(0))
+		requestCtx := context.WithValue(ctx, diagnosticsContextKey{}, collector.BeginRequest(0, 0))
 		resp, err := completeObservedProvider(requestCtx, impl, cfg, "sample-key", "test-model", "system", messages, nil, 128, RequestTuning{SessionKey: "sample-session"}, nil)
 		if err != nil {
 			t.Fatalf("request failed: %v; WS=%d HTTP=%d", err, wsCalls.Load(), httpCalls.Load())
@@ -116,7 +116,7 @@ func TestDiagnosticWebSocketWriteFailure(t *testing.T) {
 	defer conn.Close()
 	cfg := diagnosticProviderConfig(config.ProviderTypeResponses)
 	collector, store := diagnosticTestCollector()
-	scope := &diagnosticScope{request: collector.BeginRequest(0), provider: cfg, baseline: diagnosticEmptyBaseline(), snapshot: contextdiag.Snapshot{Usage: contextdiag.Usage{State: contextdiag.Missing}}}
+	scope := &diagnosticScope{request: collector.BeginRequest(0, 0), provider: cfg, baseline: diagnosticEmptyBaseline(), snapshot: contextdiag.Snapshot{Usage: contextdiag.Usage{State: contextdiag.Missing}}}
 	ctx := context.WithValue(t.Context(), diagnosticScopeContextKey{}, scope)
 	provider := &ResponsesProvider{codexWSConn: conn}
 	_, _, err = provider.codexWSExecuteRequestLocked(ctx, "sample-key", "test-model", codexWSResponseCreate{Type: "response.create", Model: "test-model"}, nil, false, time.Now(), true, nil, "", false)

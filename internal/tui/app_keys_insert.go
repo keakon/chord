@@ -321,7 +321,7 @@ func (m *Model) handleInsertKey(msg tea.KeyMsg) (result tea.Cmd) {
 		}
 		if fields := strings.Fields(value); len(fields) > 0 && strings.EqualFold(fields[0], contextCommand) {
 			if len(fields) != 1 {
-				return m.enqueueToast("用法：/context（无参数）", "info")
+				return m.enqueueToast("/context takes no arguments", "info")
 			}
 			m.input.AddCurrentToHistory()
 			m.input.Reset()

@@ -392,10 +392,25 @@ type MCPStateProvider interface {
 
 // ContextDiagnosticsProvider is optional; remote backends need not implement it.
 type ContextDiagnosticsProvider interface{ FocusedContextDiagnostics() ContextDiagnosticsView }
+
+// ContextDiagnosticsView is the focused agent's latest-request snapshot plus the
+// two reference points a reader needs to place it: the context budget the
+// sidebar gauge divides by, and the session totals the sidebar's cache rows
+// accumulate. Both are zero when the focused target has no live context manager
+// (a parked or settled task).
 type ContextDiagnosticsView struct {
 	Snapshot          contextdiag.Snapshot
 	Available         bool
 	Historical        bool
 	UnavailableReason string
 	AgentName         string
+	// WindowLimit is the usable input budget behind the sidebar's context
+	// gauge, so percentages in this panel share the sidebar's denominator.
+	WindowLimit int
+	// SessionCacheRead, SessionCacheWrite and SessionCalls are cumulative
+	// across every call this task has made. They are what the sidebar's Cache
+	// R / Cache W rows show, and they are never per-request.
+	SessionCacheRead  int64
+	SessionCacheWrite int64
+	SessionCalls      int64
 }

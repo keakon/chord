@@ -48,7 +48,7 @@ func BenchmarkRequestDiagnostics(b *testing.B) {
 							if cold {
 								collector, _ = diagnosticTestCollector()
 							}
-							opts.Diagnostics = collector.BeginRequest(0)
+							opts.Diagnostics = collector.BeginRequest(0, 0)
 						}
 						if _, err := client.CompleteStreamWithOptions(context.Background(), msgs, defs, nil, opts); err != nil {
 							b.Fatal(err)

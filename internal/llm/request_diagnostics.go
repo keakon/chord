@@ -13,6 +13,11 @@ type diagnosticsContextKey struct{}
 type diagnosticTargetContextKey struct{}
 type diagnosticScopeContextKey struct{}
 
+type diagnosticTarget struct {
+	modelRef    string
+	windowLimit int64
+}
+
 // DiagnosticsCollector belongs to one runtime binding, never to the shared Client.
 // Lock order is collector -> Store. Baselines contain hashes only.
 type DiagnosticsCollector struct {
@@ -31,10 +36,13 @@ func NewDiagnosticsCollector(binding contextdiag.Binding, store *contextdiag.Sto
 	rand.Read(c.secret[:])
 	return c
 }
-func (c *DiagnosticsCollector) BeginRequest(generation uint64) *RequestDiagnostics {
+
+// BeginRequest freezes reserved headroom; each dispatched attempt supplies its
+// own model's compaction budget, including retries and native continuations.
+func (c *DiagnosticsCollector) BeginRequest(generation uint64, reservedInput int64) *RequestDiagnostics {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	d := &RequestDiagnostics{collector: c, id: c.store.BeginRequest(c.binding, generation), generation: generation, reduction: contextdiag.Reduction{State: contextdiag.Unavailable}}
+	d := &RequestDiagnostics{collector: c, id: c.store.BeginRequest(c.binding, generation), generation: generation, reduction: contextdiag.Reduction{State: contextdiag.Unavailable}, reservedInput: reservedInput}
 	c.current = d
 	return d
 }
@@ -51,11 +59,12 @@ func (c *DiagnosticsCollector) Invalidate() {
 }
 
 type RequestDiagnostics struct {
-	collector  *DiagnosticsCollector
-	id         contextdiag.RequestID
-	generation uint64
-	reduction  contextdiag.Reduction
-	attempt    uint64
+	collector     *DiagnosticsCollector
+	id            contextdiag.RequestID
+	generation    uint64
+	reduction     contextdiag.Reduction
+	reservedInput int64
+	attempt       uint64
 }
 
 func (d *RequestDiagnostics) SetReduction(r contextdiag.Reduction) {

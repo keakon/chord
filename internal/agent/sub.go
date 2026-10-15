@@ -1019,7 +1019,7 @@ func (s *SubAgent) asyncCallLLMWithFlightMarked(turn *Turn) {
 		return
 	}
 	input := snapshotLLMRequest(s.ctxMgr)
-	observer := s.contextDiagnostics.begin(s.sessionDir, s.taskID, input.HistoryGeneration)
+	observer := s.contextDiagnostics.begin(s.sessionDir, s.taskID, input.HistoryGeneration, int64(s.parent.effectiveCompactionReservedInput()))
 	messages := projectSkillDiscoveryMessages(input.Messages, s.skillActivationView())
 
 	defer func() {

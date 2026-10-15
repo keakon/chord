@@ -85,7 +85,7 @@ func TestNativeImageMutualExclusionAndSafeFallback(t *testing.T) {
 				return nil
 			}, ImageFallback: func() bool { switched++; return scenario != "decision_error" }}
 			collector, store := diagnosticTestCollector()
-			resp, err := client.CompleteStreamWithOptions(t.Context(), []message.Message{{Role: message.RoleUser, Content: "Generate a tree"}}, []message.ToolDefinition{{Name: toolname.GenerateImage, InputSchema: map[string]any{"type": "object"}}}, nil, CompleteStreamOptions{NativeTools: policy, Diagnostics: collector.BeginRequest(0)})
+			resp, err := client.CompleteStreamWithOptions(t.Context(), []message.Message{{Role: message.RoleUser, Content: "Generate a tree"}}, []message.ToolDefinition{{Name: toolname.GenerateImage, InputSchema: map[string]any{"type": "object"}}}, nil, CompleteStreamOptions{NativeTools: policy, Diagnostics: collector.BeginRequest(0, 0)})
 			want := int32(1)
 			if scenario == "unsupported" || scenario == "quota" || scenario == "fallback_error" {
 				want = 2

@@ -106,7 +106,7 @@ func (m *Model) handleContextOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 func (m *Model) contextOverlayConfig() OverlayConfig {
-	return OverlayConfig{Title: "Context · 上下文诊断", MaxWidth: max(min(m.width-4, 110), 1), Hint: "Tab / 1·2·3 切页 · ↑↓ 滚动 · Esc 关闭"}
+	return OverlayConfig{Title: "Context · latest request", MaxWidth: max(min(m.width-4, 110), 1), Hint: "Tab / 1·2·3 pages · ↑↓ scroll · Esc close"}
 }
 func (m *Model) renderContextOverlayDialog() string {
 	o := &m.contextOverlay

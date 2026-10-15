@@ -34,7 +34,7 @@ func TestGeminiContinuationUsageCompleteness(t *testing.T) {
 			var receipts []ContinuationUsage
 			ctx := context.WithValue(t.Context(), continuationObserverKey{}, func(u ContinuationUsage) { receipts = append(receipts, u) })
 			collector, store := diagnosticTestCollector()
-			ctx = context.WithValue(ctx, diagnosticsContextKey{}, collector.BeginRequest(1))
+			ctx = context.WithValue(ctx, diagnosticsContextKey{}, collector.BeginRequest(1, 0))
 			resp, err := completeObservedProvider(ctx, p, cfg, "test-key", "model-alias", "", nil, nil, 100, RequestTuning{}, nil)
 			if snapshot, ok := store.Latest(); !ok || snapshot.Usage.State != tc.state || snapshot.Usage.FullInput != int64(tc.input) || snapshot.Usage.Output != int64(tc.output) {
 				t.Fatalf("diagnostics=%+v", snapshot)

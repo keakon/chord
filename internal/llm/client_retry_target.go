@@ -266,7 +266,10 @@ func (c *Client) completeStreamTarget(
 			}
 		}
 		if observer, _ := attemptCtx.Value(diagnosticsContextKey{}).(*RequestDiagnostics); observer != nil {
-			attemptCtx = context.WithValue(attemptCtx, diagnosticTargetContextKey{}, modelRef)
+			attemptCtx = context.WithValue(attemptCtx, diagnosticTargetContextKey{}, diagnosticTarget{
+				modelRef:    modelRef,
+				windowLimit: max(int64(c.CompactionBudgetForModelRef(modelRef))-observer.reservedInput, 0),
+			})
 		}
 		attemptCtx = context.WithValue(attemptCtx, continuationTargetKey{}, continuationTarget{ref: modelRef, tier: t.serviceTier})
 		resp, err = completeWithNativeTools(
