@@ -9,6 +9,21 @@ import (
 	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
+// infoPanelSectionAutoCollapsed reports the state a section takes with no
+// manual override: state-driven sections follow live integration state, GIT
+// stays folded because its header already carries the summary, and
+// content-driven sections open as soon as their first entry renders.
+func (m *Model) infoPanelSectionAutoCollapsed(section infoPanelSectionID) bool {
+	switch section {
+	case infoPanelSectionLSP, infoPanelSectionMCP, infoPanelSectionSkills:
+		return m.captureInfoPanelIntegrations().collapsed(section)
+	case infoPanelSectionGit:
+		return true
+	default:
+		return false
+	}
+}
+
 // User choices override the default derived from current integration state.
 func (m *Model) infoPanelSectionCollapsed(section infoPanelSectionID, defaultCollapsed bool) bool {
 	if collapsed, ok := m.infoPanelCollapsedSections[section]; ok {
@@ -18,22 +33,24 @@ func (m *Model) infoPanelSectionCollapsed(section infoPanelSectionID, defaultCol
 }
 
 func (m *Model) isInfoPanelSectionCollapsed(section infoPanelSectionID) bool {
-	if collapsed, ok := m.infoPanelCollapsedSections[section]; ok {
-		return collapsed
-	}
-	switch section {
-	case infoPanelSectionLSP, infoPanelSectionMCP, infoPanelSectionSkills:
-		return m.infoPanelSectionCollapsed(section, m.captureInfoPanelIntegrations().collapsed(section))
-	default:
-		return m.infoPanelSectionCollapsed(section, section == infoPanelSectionGit)
-	}
+	return m.infoPanelSectionCollapsed(section, m.infoPanelSectionAutoCollapsed(section))
 }
 
+// toggleInfoPanelSection flips a section between folded and expanded. A manual
+// choice sticks across content changes, but clicking the section back onto the
+// state the automatic rules already chose releases the override, so the
+// section follows its content again from the next change on.
 func (m *Model) toggleInfoPanelSection(section infoPanelSectionID) {
 	if m.infoPanelCollapsedSections == nil {
 		m.infoPanelCollapsedSections = make(map[infoPanelSectionID]bool)
 	}
-	m.infoPanelCollapsedSections[section] = !m.isInfoPanelSectionCollapsed(section)
+	auto := m.infoPanelSectionAutoCollapsed(section)
+	next := !m.infoPanelSectionCollapsed(section, auto)
+	if next == auto {
+		delete(m.infoPanelCollapsedSections, section)
+	} else {
+		m.infoPanelCollapsedSections[section] = next
+	}
 	m.clearInfoPanelRenderCache()
 	m.infoPanelHitBoxes = nil
 }
