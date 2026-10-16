@@ -10,6 +10,7 @@ import (
 	"io"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/keakon/chord/internal/filedelivery"
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/pathutil"
+	"github.com/keakon/chord/internal/permission"
 )
 
 type PresentArtifact struct {
@@ -85,17 +88,59 @@ func PresentLocators(args PresentArgs, base string) ([]message.FileLocator, erro
 	return out, nil
 }
 
+// IsChordInternalDeliveryTarget reports whether a resolved present locator
+// lands in a .chord directory of the checkout it belongs to. Such files are
+// private working state (notes, plans, memory, skills, config) rather than
+// user-facing final files, so the permission layer denies them by default; an
+// explicit present-specific rule still wins. Artifact locators are
+// session-scoped and never count as internal.
+//
+// A path inside a known checkout is judged by its spelling under that
+// checkout's root, not under the delivering agent's: a linked worktree can
+// itself live under a .chord directory (worktree.root: .chord/worktrees), and
+// the main agent delivering the worktree's ordinary file must not see the
+// .chord segment of the worktree's own location. A target no checkout root
+// contains is judged by the locator's own root and path, so another
+// workspace's working state stays protected even when that workspace happens
+// to sit beside this one.
+func IsChordInternalDeliveryTarget(loc message.FileLocator, scope permission.PathScope) bool {
+	if loc.Workspace == nil || loc.Workspace.Root == "" {
+		return false
+	}
+	if rel, ok := scope.RelativizePath(loc.Workspace.Path); ok {
+		return hasChordInternalSegment(rel)
+	}
+	root := filepath.Clean(loc.Workspace.Root)
+	if rel, inside := pathutil.RelToBase(loc.Workspace.Path, root); inside {
+		return hasChordInternalSegment(rel)
+	}
+	// A locator stores a symlink-resolved Path next to the working directory as
+	// it was given, so a root reached through a symlink compares as if the file
+	// were outside it. Resolving the root before falling back keeps a worktree
+	// checkout under .chord from condemning the ordinary files it delivers.
+	if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+		if rel, inside := pathutil.RelToBase(loc.Workspace.Path, resolved); inside {
+			return hasChordInternalSegment(rel)
+		}
+	}
+	return hasChordInternalSegment(loc.Workspace.Path)
+}
+
+func hasChordInternalSegment(path string) bool {
+	return slices.Contains(strings.Split(filepath.ToSlash(path), "/"), ".chord")
+}
+
 type PresentTool struct{ BaseDir string }
 
 func (t PresentTool) Name() string                 { return NamePresent }
 func (t PresentTool) IsReadOnly() bool             { return false }
 func (t PresentTool) WithBaseDir(base string) Tool { t.BaseDir = base; return t }
 func (t PresentTool) Description() string {
-	return "Declare final files for the user through durable delivery cards. Does not create files, open applications, or prove tests passed. Ordinary source references do not need present. Direct tool calls only."
+	return "Declare final files for the user through durable delivery cards. Does not create files, open applications, or prove tests passed. Ordinary source references do not need present. Files under .chord/ are private working state, not deliverables. Direct tool calls only."
 }
 func (t PresentTool) Parameters() map[string]any {
 	return map[string]any{"type": "object", "additionalProperties": false, "required": []string{"files"}, "properties": map[string]any{"files": map[string]any{"type": "array", "minItems": 1, "maxItems": 16, "description": "Final files to deliver; all entries must validate.", "items": map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{
-		"path":        map[string]any{"type": "string", "description": "Workspace file path, relative to this agent's working directory or absolute. Mutually exclusive with artifact."},
+		"path":        map[string]any{"type": "string", "description": "Workspace file path, relative to this agent's working directory or absolute. Mutually exclusive with artifact. Files under .chord/ are private working state and are rejected as delivery targets."},
 		"description": map[string]any{"type": "string", "maxLength": 1024, "description": "Optional short explanation of the file's purpose."},
 		"artifact":    map[string]any{"type": "object", "additionalProperties": false, "description": "Existing session artifact with an exact declared digest and size.", "required": []string{"rel_path", "sha256", "size_bytes"}, "properties": map[string]any{"rel_path": map[string]any{"type": "string", "description": "Session-relative path under artifacts/ or images/."}, "sha256": map[string]any{"type": "string", "description": "64 lowercase hexadecimal SHA-256 characters."}, "size_bytes": map[string]any{"type": "integer", "minimum": 0, "description": "Exact file size in bytes, including zero."}}},
 	}}}}}

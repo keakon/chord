@@ -16,7 +16,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - Added `chord sessions list --json` for recent session metadata, using the configured storage and shared repository session scope without starting an agent.
 
-- Deliver files with `present` and find them again after restoring a session. The card lists each file's name, version, type, and path; `Enter` or a click previews a single file directly and opens the list when there are several, and the card's buttons preview, open, or copy the path. Preview text, Markdown, and images in the TUI, or open files such as HTML and PDF with system-associated applications.
+- Deliver files with `present` and find them again after restoring a session. The card lists each file's name, version, type, and path; `Enter` or a click previews a single file directly and opens the list when there are several, and the card's buttons preview, open, or copy the path. Preview text, Markdown, and images in the TUI, or open files such as HTML and PDF with system-associated applications. Files under `.chord/` are private working state and are not delivered by default; one is delivered only when explicitly asked for and its path is named in a `present` permission rule.
 - Sign in to HTTP MCP servers with OAuth, manage saved logins from the CLI or TUI, and inspect authentication, connection, and tool catalog status with `chord doctor mcp`. Headless and gateway clients show status and host-side login instructions.
 
 - Configurable shortcuts can be disabled with an empty list (`[]`), with help and input hints reflecting the effective bindings. Startup notices and `chord doctor config` identify invalid shortcut declarations, show the binding and source that apply, and warn about some definite cases where an earlier action handles the same key.
@@ -68,6 +68,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - Local exit waits for the current turn to actually finish instead of returning early on a stale idle signal left over from startup.
 - A single assistant message no longer renders as two cards when a provider interleaves a tool call's start between the message's text chunks. The trailing text merges back into the same card instead of continuing in a second card after the tool card.
 - File preview no longer scrolls past the last page into blank filler, and Markdown previews keep the dialog background behind styled text instead of showing the content and the filler in two different background colors.
+- `present` no longer delivers files under `.chord/` as user-facing files by default: task notes and plan documents are shared through the plan summary or handoff. A `.chord/` file is delivered only when explicitly asked for and its path is named in a `present`-specific permission rule.
 
 ## 0.8.2 - 2026-10-11
 

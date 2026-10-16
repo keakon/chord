@@ -126,6 +126,16 @@ web_fetch:
 
 - `edit` 和 `apply_patch` 属于同一个文件编辑工具族，只是面向模型暴露的编辑格式不同（`patch` 作为 `apply_patch` 的旧别名仍被接受）。另一个编辑器没有同名显式规则时，一个编辑器的规则会作用到另一个编辑器。这也包括 `deny`：`*: allow` 后面配置 `edit: deny` 会同时禁用 `edit` 和 `apply_patch`，因为 `apply_patch` 继承了编辑工具族的拒绝规则。如果需要两个格式有不同行为，请同时配置 `edit` 和 `apply_patch`。例如 `edit: allow` 加 `apply_patch: deny` 会禁用 `apply_patch` 但保留 `edit`，GPT/o 系列模型会退回使用 `edit`；反过来，`apply_patch: allow` 加 `edit: deny` 会让默认偏好 `edit` 的非 GPT 模型退回使用 `apply_patch`。
 - `apply_patch` 还会对同一个补丁内的路径同时考虑 `write` 与 `delete`：新增或修改的文件额外与指名 `write` 的规则比对，删除的文件和移动的源路径额外与指名 `delete` 的规则比对。这些规则只能让判定更严格（`deny` > `ask` > `allow`），`"*": allow` 这类通配默认值不参与；因此 `delete: deny` 不会被「用补丁删文件」绕过。
+- `present` 不交付文件所属 checkout 中 `.chord/` 目录下的文件。这棵树是私有工作状态——任务笔记、计划、记忆记录、skills、项目配置——通配 `allow` 不应把它们变成面向用户的交付卡片。位于某个已知 checkout 内的文件按它在那个 checkout 根下的路径判定，而不是按发起交付的 Agent 的工作目录：自身位于 `.chord` 之下的链接 worktree（`worktree.root: .chord/worktrees`）照常交付普通文件——主 Agent 代为交付时也一样——而它自己的 `.chord` 和其他工作区的 `.chord` 仍然受保护。如果确实要交付其中某个文件，需要在 `present` 规则里点名它的路径：只由通配符和分隔符组成的模式（`"*"`、`"./*"`、`"**/*"`）没有点名任何路径，无法解除这个默认拒绝，正如工具名为 `"*"` 的模式会被跳过一样。多条 `present` 规则都能匹配时，最后一条生效：
+
+  ```yaml
+  permission:
+    "*": allow
+    present:
+      ".chord/plans/*": allow
+  ```
+
+  这条放行只覆盖它匹配到的路径，因此可以只放行计划目录，而不会连带交付任务笔记。该检查按 `.chord` 段名大小写敏感匹配，是意图门禁而非保密边界。
 - `handoff` 和 `done` 会被当作控制 gate。设为 `deny` 会隐藏或禁用对应工作流；设为 `allow` 或 `ask` 都会让工作流可用，真正交接 / 完成时 Chord 仍可能显示本地确认（例如 loop 的 `done` 确认）。也就是说，`ask` 不是这两个工具的「更强工作流模式」，它主要表示工具保持可见 / 可用，同时保留 Chord 内建确认 gate。这个取舍可以避免模型看到一个可用控制工具却最终无法完成，同时仍防止静默切换角色或过早退出 loop。
 - `done` 是 loop 工作流的退出信号：Chord **只在 loop 运行期间**挂载它；规则拒绝 `done` 时 `/loop on` 会被拒绝并给出 toast，因此 `done: deny` 等于把 loop 的终止权保留给用户。详见[使用指南：持续执行模式](./usage_CN.md#loop持续执行模式)。
 - `delegate` 会匹配调用参数中的 `agent_type`，因此每个角色都可以只允许委派给指定的 SubAgent 定义。例如，下面按声明顺序先拒绝所有目标，再允许 `reviewer`，并要求委派给 `tester` 前进行确认：

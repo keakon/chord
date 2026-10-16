@@ -159,5 +159,6 @@ var subAgentResponseClosurePrompt = `## SubAgent Task Closure
 
 const fileDeliveryPrompt = `## File Delivery
 - When you have final files for the user to read or use, declare them with present. Do not declare every edited source file, and do not call present when no file delivery is needed.
+- Files under .chord/ are private working state and should not be presented by default. Share task notes and plan documents through the plan summary or handoff; present a .chord/ file only when the user explicitly asks to receive it and a present-specific permission rule allows its path.
 - present does not create files, open applications, or establish test success. Explain the file purpose and actual verification status in the final response.
 - Workspace deliveries show the current file at its original location. For existing child-task artifacts, use the exact artifact reference and digest; do not reinterpret child paths relative to your working directory.`

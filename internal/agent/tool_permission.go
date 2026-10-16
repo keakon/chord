@@ -230,6 +230,20 @@ func evaluateToolPermissionInDirWithContext(ruleset permission.Ruleset, toolName
 			if loc.Workspace != nil {
 				target = loc.Workspace.Path
 				action = ruleset.EvaluatePath(toolName, target, scope)
+				if tools.IsChordInternalDeliveryTarget(loc, scope) {
+					// The checkout's .chord/ tree is private working state
+					// (notes, plans, memory, skills, config), not user-facing
+					// final files. Deny it by default so a wildcard allow does
+					// not turn internal notes into delivery cards. Only a rule
+					// that names present and a concrete path lifts this: the
+					// "*" tool pattern and the universal "*" path pattern both
+					// never count, so a blanket `present: allow` cannot lift it.
+					// A file the user explicitly asked to receive is delivered
+					// by naming its path in a present rule.
+					if spec := ruleset.LastNamedPathMatch(toolName, target, scope); !spec.Found {
+						action = permission.ActionDeny
+					}
+				}
 			} else {
 				target = loc.Artifact.RelPath
 				action = ruleset.Evaluate(toolName, target)

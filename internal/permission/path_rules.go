@@ -69,6 +69,58 @@ func (rs Ruleset) LastSpecificToolMatchPath(permission, pattern string, scope Pa
 	return MatchResult{}
 }
 
+// LastNamedPathMatch returns the last rule that names permission (a "*" tool
+// pattern is skipped, as in LastSpecificToolMatchPath) and matches the path
+// with a pattern that names a path rather than every path. Path gates use it
+// to ask whether the user explicitly listed this file, so a blanket
+// `present: allow` — tool-specific but path-universal — does not lift a
+// path-level default denial.
+func (rs Ruleset) LastNamedPathMatch(permission, pattern string, scope PathScope) MatchResult {
+	if scope.degenerate() {
+		return rs.lastNamedPathMatch(permission, pattern)
+	}
+	permission = toolname.Normalize(permission)
+	normalized := normalizePathInput(pattern, scope)
+	for _, r := range slices.Backward(rs) {
+		normRulePerm := toolname.Normalize(r.Permission)
+		if normRulePerm == "*" || !pathRuleNamesPath(r.Pattern) {
+			continue
+		}
+		if globMatch(permission, normRulePerm) && pathRuleMatches(r.Pattern, normalized) {
+			return MatchResult{Rule: r, Found: true}
+		}
+	}
+	return MatchResult{}
+}
+
+func (rs Ruleset) lastNamedPathMatch(permission, pattern string) MatchResult {
+	permission = toolname.Normalize(permission)
+	for _, r := range slices.Backward(rs) {
+		normRulePerm := toolname.Normalize(r.Permission)
+		if normRulePerm == "*" || !pathRuleNamesPath(r.Pattern) {
+			continue
+		}
+		if globMatch(permission, normRulePerm) && globMatch(pattern, r.Pattern) {
+			return MatchResult{Rule: r, Found: true}
+		}
+	}
+	return MatchResult{}
+}
+
+// pathRuleNamesPath reports whether a rule pattern names paths instead of
+// covering only wildcard-and-separator spellings. The literal "*" is
+// universal by kind; beyond that, a pattern with no literal name at all —
+// a bare run of "*", its "./*" spelling, or "**/*" — matches paths at every
+// directory level because the glob crosses separators, so it cannot stand
+// for a file the user named.
+func pathRuleNamesPath(pattern string) bool {
+	kind, normalized := classifyPathRule(pattern)
+	if kind == pathRuleAny {
+		return false
+	}
+	return strings.Trim(normalized, "*/") != ""
+}
+
 func (rs Ruleset) lastMatchPath(permission, pattern string, scope PathScope) MatchResult {
 	permission = toolname.Normalize(permission)
 	normalized := normalizePathInput(pattern, scope)

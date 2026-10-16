@@ -170,6 +170,32 @@ func TestLastSpecificToolMatchPath(t *testing.T) {
 	}
 }
 
+func TestLastNamedPathMatchSkipsUniversalPatterns(t *testing.T) {
+	path := ".chord/notes/task.md"
+	for _, pattern := range []string{"*", "./*", "**", "*/*", "**/*", "**/**"} {
+		rs := Ruleset{
+			{Permission: "*", Pattern: "*", Action: ActionAllow},
+			{Permission: "present", Pattern: pattern, Action: ActionAllow},
+		}
+		if match := rs.LastNamedPathMatch("present", path, testScope); match.Found {
+			t.Errorf("pattern %q lifted the path gate: %+v", pattern, match)
+		}
+	}
+	rs := Ruleset{
+		{Permission: "*", Pattern: "*", Action: ActionAllow},
+		{Permission: "present", Pattern: ".chord/plans/*", Action: ActionAllow},
+	}
+	if match := rs.LastNamedPathMatch("present", ".chord/plans/20260101-slug.md", testScope); !match.Found {
+		t.Fatal("a named plan path did not match")
+	}
+	if match := rs.LastNamedPathMatch("present", ".chord/notes/task.md", testScope); match.Found {
+		t.Fatalf("a plans-only rule matched a note: %+v", match)
+	}
+	if match := rs.LastNamedPathMatch("present", "./.chord/plans/20260101-slug.md", testScope); !match.Found {
+		t.Fatal("a ./-spelled plan path did not match")
+	}
+}
+
 func TestEvaluatePathRelativeSubdirRuleScope(t *testing.T) {
 	rs := Ruleset{
 		{Permission: "*", Pattern: "*", Action: ActionDeny},

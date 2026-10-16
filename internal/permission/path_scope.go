@@ -78,6 +78,17 @@ func normalizePathInput(input string, scope PathScope) string {
 	return filepath.ToSlash(resolved)
 }
 
+// RelativizePath spells an absolute path relative to the checkout root that
+// contains it, using the same normalization path rules use (scope roots first,
+// longest match wins, then a worktree container's checkout child). ok is false
+// when no root contains the path, so callers keep their own fallback.
+func (s PathScope) RelativizePath(path string) (string, bool) {
+	if s.degenerate() {
+		return "", false
+	}
+	return s.relativize(path)
+}
+
 // relativize maps an absolute path onto the longest matching scope root and
 // returns it in "/"-separated relative form. The bool is false when no root
 // contains the path.
