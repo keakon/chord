@@ -164,6 +164,7 @@ func (m *Model) handleFileViewerLoaded(result fileViewerLoadedMsg) tea.Cmd {
 	v.wrapOffset = 0
 	if v.selected < len(v.linkLines) && v.linkLines[v.selected] > 0 {
 		v.offset = min(max(0, len(v.lines)-1), v.linkLines[v.selected]-1)
+		m.clampFileViewerTail()
 	}
 	if result.Err != nil {
 		v.note = result.Err.Error()
@@ -190,6 +191,7 @@ func (m *Model) handleFileViewerKey(msg tea.KeyMsg) tea.Cmd {
 			} else if n, e := strconv.Atoi(v.input); e == nil && n > 0 && n <= len(v.lines) && !(v.markdown && strings.HasPrefix(v.files[v.selected].MIME, "text/markdown")) {
 				v.offset = n - 1
 				v.wrapOffset = 0
+				m.clampFileViewerTail()
 			} else {
 				v.note = "Source line is outside the loaded range, or source mode is required"
 			}
@@ -264,6 +266,7 @@ func (m *Model) handleFileViewerKey(msg tea.KeyMsg) tea.Cmd {
 	case "w":
 		v.wrap = !v.wrap
 		v.wrapOffset = 0
+		m.clampFileViewerTail()
 	case "l":
 		if v.showing {
 			return m.openLocalFileLinks(localFileLinks(string(v.raw), filepath.Dir(deliveryPath(v.files[v.selected], m.deliverySessionDir()))))
@@ -314,6 +317,7 @@ func (m *Model) searchFileViewer(delta int) {
 			v.offset = i
 			v.wrapOffset = 0
 			v.note = "Search covers loaded text in the current mode"
+			m.clampFileViewerTail()
 			return
 		}
 	}

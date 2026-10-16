@@ -67,6 +67,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The permission rule picker offers reusable command-prefix rules for simple `shell` commands, including `rm` and `sudo`. Patterns match the full command text and can cover multiple arguments; press `E` to enter a custom pattern.
 - Local exit waits for the current turn to actually finish instead of returning early on a stale idle signal left over from startup.
 - A single assistant message no longer renders as two cards when a provider interleaves a tool call's start between the message's text chunks. The trailing text merges back into the same card instead of continuing in a second card after the tool card.
+- File preview no longer scrolls past the last page into blank filler, and Markdown previews keep the dialog background behind styled text instead of showing the content and the filler in two different background colors.
 
 ## 0.8.2 - 2026-10-11
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tui/filepreview"
+	"github.com/keakon/chord/internal/tui/terminaltext"
 )
 
 type fileHitKind uint8
@@ -88,6 +89,69 @@ func (m *Model) scrollFileViewer(delta int) {
 		v.offset--
 		v.wrapOffset = len(m.fileViewerVisualLines(v.offset)) - 1
 		delta++
+	}
+	m.clampFileViewerTail()
+}
+
+// clampFileViewerTail keeps the last page full: when the remaining visual
+// lines from the current position cannot fill the body, it moves the start
+// back just enough (or to the top for short files) so scrolling cannot strand
+// the reader on a mostly-blank page. It walks at most one page of visual
+// lines, so wrap-mode Hardwrap cost stays bounded.
+func (m *Model) clampFileViewerTail() {
+	v := &m.fileViewer
+	if !v.showing || len(v.lines) == 0 {
+		return
+	}
+	page := m.fileViewerPageSize()
+	if v.offset < 0 {
+		v.offset = 0
+	}
+	if v.offset >= len(v.lines) {
+		v.offset = len(v.lines) - 1
+	}
+	if cur := m.fileViewerVisualLines(v.offset); len(cur) > 0 {
+		if v.wrapOffset < 0 {
+			v.wrapOffset = 0
+		}
+		if v.wrapOffset >= len(cur) {
+			v.wrapOffset = len(cur) - 1
+		}
+	} else {
+		v.wrapOffset = 0
+	}
+	remaining := 0
+	for i := v.offset; i < len(v.lines) && remaining < page; i++ {
+		lines := m.fileViewerVisualLines(i)
+		start := 0
+		if i == v.offset {
+			start = v.wrapOffset
+		}
+		if start < len(lines) {
+			remaining += len(lines) - start
+		}
+	}
+	if remaining >= page {
+		return
+	}
+	need := page - remaining
+	for need > 0 && (v.offset > 0 || v.wrapOffset > 0) {
+		if v.wrapOffset > 0 {
+			step := min(need, v.wrapOffset)
+			v.wrapOffset -= step
+			need -= step
+		} else {
+			if v.offset == 0 {
+				break
+			}
+			v.offset--
+			if l := len(m.fileViewerVisualLines(v.offset)); l > 0 {
+				v.wrapOffset = l - 1
+			} else {
+				v.wrapOffset = 0
+			}
+			need--
+		}
 	}
 }
 func (m *Model) fileViewerEnd() {
@@ -177,6 +241,18 @@ func (m *Model) fileViewerLayout() fileViewerPresentation {
 	}
 	for i := range p.rows {
 		p.rows[i] = ansi.Truncate(p.rows[i], width, "")
+	}
+	// Glamour markdown rows carry per-span resets that would clear the outer
+	// DirectoryBorderStyle background for the rest of the line, leaving content
+	// on the terminal default while blank padding keeps DialogBg. Re-insert the
+	// dialog background like other overlay paths do.
+	if bg := currentStyles.Palette.DialogBg; bg != "" {
+		for i, row := range p.rows {
+			if row == "" || !strings.Contains(row, "\x1b[") {
+				continue
+			}
+			p.rows[i] = terminaltext.EnsureReset(terminaltext.PreserveBackground(row, bg))
+		}
 	}
 	return p
 }
