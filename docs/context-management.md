@@ -122,6 +122,18 @@ reminder, orange/yellow from the reminder up to the threshold, red at the
 threshold. The request-side reminder and warning overlays, by contrast, are
 only injected while `model_driven` is enabled (see below).
 
+The context size behind both decisions is measured, never precomputed from the
+request surface. It comes only from provider-reported usage: the latest
+response's usage when it carries one; otherwise the single frozen estimate
+calibrated from the most recent usage sample (a model switch or a restored
+session reuses that reading as an estimate against the new budget). A session
+with no usable sample at all — a first request that has not answered yet, or
+one that failed before reporting usage — reads 0, crosses no line, and
+triggers neither a reminder nor an automatic compaction, no matter how large
+the pasted or assembled request is. The one exception is a real
+context-length error from the provider, which forces compaction regardless of
+any local measurement.
+
 Set the global lines under `context.compaction` and tune per model on the model
 definition itself (`ModelConfig.compaction`). Model templates make this
 reusable: define a template that carries both `limit` and `compaction`, then
@@ -162,7 +174,7 @@ While model-driven compaction is enabled (`compact_context` visible), the first 
 
 Pressure notifications have two thresholds: the reminder line and the automatic-compaction line. Each threshold adds one persistent notice, retained in the conversation and displayed as a card. Grace and compaction startup share the upper-threshold notice; later requests reuse the history without adding reminders or countdowns. One request never stacks two pressure notices: the highest applicable level is injected (manual `/compact` instruction, then the threshold warning, then the grace countdown, then the reminder), while notices already delivered keep replaying from the conversation until their own invalidation.
 
-Request reduction only permits reconsidering a notice when it changes the prefix before that notice. Chord then estimates the reduced request from its byte size; changes after a notice leave it in place. On a model switch, Chord uses the previous model's usage as an estimate against the new model's budget and thresholds, falling back to a byte estimate when usage is unavailable. Applicable notices stay in place, invalid ones are withdrawn, and newly reached thresholds can be notified. These estimates select notifications only; they do not trigger automatic compaction.
+Request reduction only permits reconsidering a notice when it changes the prefix before that notice. Chord then re-derives the notice levels from the current usage reading; changes after a notice leave it in place. On a model switch, Chord reuses the previous reading as an estimate against the new model's budget and thresholds; with no usable reading the size reads 0, so no notice is justified. Applicable notices stay in place, invalid ones are withdrawn, and newly reached thresholds can be notified. These estimates select notifications only; they do not trigger automatic compaction.
 
 The grace is skipped or cut short once usage reaches 95% of the usable input budget (a single batch that pulled in large tool output cannot ride the grace into a provider oversize rejection) and ends as soon as a model-driven request settles without applying (skip / failure / cancel) after the crossing: the model already took its shot, so the safety net takes over on the next gate. A request that settled while usage was still below the threshold does not spend the grace. The grace is spent once per window; any durable apply, session switch, restore, or model change starts a fresh window.
 

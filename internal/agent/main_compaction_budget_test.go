@@ -46,7 +46,7 @@ func TestPressureNoticeAgreesWithExactFixedCompactionThreshold(t *testing.T) {
 	instance.ctxMgr.SetThreshold(0.28)
 	for _, tokens := range []int{258159, 258160} {
 		instance.ctxMgr.UpdateFromUsage(message.TokenUsage{InputTokens: tokens})
-		pressure, compaction := instance.pressureNoticeValidity(nil, "provider/model", 922000, true)
+		pressure, compaction := instance.pressureNoticeValidity("provider/model", 922000)
 		if !pressure || compaction != (tokens == 258160) || compaction != instance.ctxMgr.ShouldAutoCompact() {
 			t.Fatalf("tokens %d: pressure/compaction = %v/%v, decision = %+v", tokens, pressure, compaction, instance.ctxMgr.AutoCompactDecision())
 		}

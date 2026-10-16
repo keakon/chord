@@ -122,7 +122,7 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 	if !a.started.Load() {
 		// The pending queue is event-loop owned. A direct call without a running
 		// event loop cannot safely consume it, so leave it for the normal drain.
-		return a.reconcileFallbackPressureNotices(messages, fallbackModelDisplayRef(fallback), fallback.CompactionBudget(), true), nil
+		return a.reconcileFallbackPressureNotices(messages, fallbackModelDisplayRef(fallback), fallback.CompactionBudget()), nil
 	}
 
 	payload := &llmFallbackBoundaryPayload{
@@ -164,7 +164,7 @@ func (a *MainAgent) updateMainLLMRequestBeforeFallback(ctx context.Context, turn
 			estimateMessagesTokens(a.ctxMgr, messages), payload.fallbackInputLimit)
 		a.noteFallbackSurfaceDecision(rebuilt)
 		log.Debugf("LLM fallback %s", describeSurfaceDecision(primarySurface, targetSurface, rebuilt))
-		return a.reconcileFallbackPressureNotices(messages, payload.fallbackModelRef, fallback.CompactionBudget(), !rebuilt), nil
+		return a.reconcileFallbackPressureNotices(messages, payload.fallbackModelRef, fallback.CompactionBudget()), nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("fallback request update cancelled: %w", ctx.Err())
 	case <-a.parentCtx.Done():

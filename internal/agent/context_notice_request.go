@@ -2,7 +2,6 @@ package agent
 
 import (
 	"github.com/keakon/chord/internal/agent/requestshape"
-	"github.com/keakon/chord/internal/llm"
 	"github.com/keakon/chord/internal/message"
 )
 
@@ -36,6 +35,8 @@ func (a *MainAgent) hasDurablePressureNotice(level string) bool {
 
 // Re-evaluate notices only across a model switch or a changed prefix before
 // an existing notice. Changes after a notice cannot invalidate its cache.
+// Validity itself is reading-based (pressureNoticeValidity): the prefix only
+// decides which slots are re-derived here.
 func (a *MainAgent) reconcilePressureNoticesForModel(messages, prepared []message.Message, modelRef string, compactionBudget int) []message.Message {
 	if a == nil || a.ctxMgr == nil || modelRef == "" || compactionBudget <= 0 {
 		return a.omitStaleContextNoticesFromRequest(messages)
@@ -45,32 +46,36 @@ func (a *MainAgent) reconcilePressureNoticesForModel(messages, prepared []messag
 	previousPrefix := a.overlayClaims.noticePrefixSource
 	prefixKnown := a.overlayClaims.noticePrefixesKnown
 	a.overlayClaims.mu.Unlock()
-	changedPrefix := false
-	var changedSlots [pressureNoticeSlotCount]bool
-	if prefixKnown {
+	// Only the same-model path consumes the slot scan: it decides both the
+	// early return below and which retained rows are force-kept later. A model
+	// switch re-derives every level from its own reading, so scanning prefixes
+	// there would do work the branch never reads.
+	changedSlots := [pressureNoticeSlotCount]bool{}
+	if previous == modelRef && prefixKnown {
 		for _, msg := range prepared {
 			slot := pressureNoticeSlot(msg.NoticeLevel)
 			if msg.Kind == message.KindContextNotice && slot >= 0 && pressureNoticePrefixChanged(previousPrefix, prepared, slot) {
-				changedPrefix = true
 				changedSlots[slot] = true
 			}
 		}
 	}
-	if previous == modelRef && !changedPrefix {
+	if previous == modelRef && !anyChangedSlot(changedSlots) {
 		return a.omitStaleContextNoticesFromRequest(messages)
 	}
 	if previous == "" && !containsContextNotice(messages) && a.ctxMgr.LastTotalContextTokens() == 0 {
 		return messages
 	}
-	// Reduction makes the previous usage obsolete. A model switch alone can
-	// reuse that observation as an estimate against the target model's budget.
-	pressure, compaction := a.pressureNoticeValidity(messages, modelRef, compactionBudget, !changedPrefix)
+	// The reading justifies the levels the usage crosses; a slot whose own
+	// prefix changed is not force-kept by this pass, while an unchanged
+	// prefix keeps its row justified without touching the cacheable prefix.
+	pressure, compaction := a.pressureNoticeValidity(modelRef, compactionBudget)
 	// The manual dimension is armed-driven, not usage-driven: the notice stays
 	// justified while the intent is armed and is withdrawn once it is not.
 	manual := a.manualNoticeActive()
 	if previous == modelRef {
-		// A reduction between the two notices may retire the upper one, but must
-		// not rewrite the lower notice whose prefix is still cacheable.
+		// A slot whose prefix changed is re-derived from the reading above;
+		// an unchanged prefix keeps its row justified without disturbing the
+		// cacheable prefix the next request rebuilds on.
 		for _, msg := range messages {
 			if msg.Kind != message.KindContextNotice {
 				continue
@@ -115,38 +120,51 @@ func (a *MainAgent) reconcilePressureNoticesForModel(messages, prepared []messag
 	return messages
 }
 
-func (a *MainAgent) pressureNoticeValidity(messages []message.Message, modelRef string, compactionBudget int, preferUsage bool) (pressure, compaction bool) {
+// pressureNoticeValidity reports which notice levels the current context size
+// justifies against the target model's budget. The size is usage-only: the
+// observed baseline of the latest response, the single frozen estimate when
+// that response missed usage, or a retained reading reused as an estimate
+// after a model switch or restore. A byte-based request-surface estimate
+// never stands in for a missing sample: with no usable reading the context
+// size reads 0, which crosses no line, so no notice is justified. Forced
+// compaction after a real provider context-length error is a separate,
+// error-driven path (length recovery / oversize suspend).
+func (a *MainAgent) pressureNoticeValidity(modelRef string, compactionBudget int) (pressure, compaction bool) {
 	threshold := a.effectiveCompactionThreshold(modelRef)
 	reminder := a.effectiveReminderPctForModelRef(modelRef, threshold)
 	usable := max(compactionBudget-a.effectiveCompactionReservedInput(), 0)
 	if !a.compactContextVisible() || threshold <= 0 || usable <= 0 {
 		return false, false
 	}
-	a.llmMu.RLock()
-	prompt := a.installedSysPrompt
-	a.llmMu.RUnlock()
-	tokens := 0
-	if preferUsage {
-		tokens = a.ctxMgr.LastTotalContextTokens()
-	}
+	tokens := a.ctxMgr.EffectiveContextTokens()
 	if tokens <= 0 {
-		tokens = llm.EstimateRequestInputTokens(prompt, messages, a.mainLLMToolDefinitions())
+		return false, false
 	}
 	usage := float64(tokens) / float64(usable)
 	return reminder > 0 && reminder < threshold && usage >= reminder,
 		usage >= threshold
 }
 
+func anyChangedSlot(slots [pressureNoticeSlotCount]bool) bool {
+	for _, changed := range slots {
+		if changed {
+			return true
+		}
+	}
+	return false
+}
+
 // A fallback is still the same in-flight round: filter invalid signals before
 // the target sees them, without changing compaction's durable source boundary.
 // Missing applicable notices are appended for the target, reusing durable rows
 // when available and persisting newly crossed thresholds through the same
-// dispatch path as the primary request.
-func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message, modelRef string, compactionBudget int, preferUsage bool) []message.Message {
+// dispatch path as the primary request. The size judgment is usage-only: a
+// fallback boundary with no observed or frozen reading justifies no notice.
+func (a *MainAgent) reconcileFallbackPressureNotices(messages []message.Message, modelRef string, compactionBudget int) []message.Message {
 	if a == nil || a.ctxMgr == nil || compactionBudget <= 0 {
 		return messages
 	}
-	pressure, compaction := a.pressureNoticeValidity(messages, modelRef, compactionBudget, preferUsage)
+	pressure, compaction := a.pressureNoticeValidity(modelRef, compactionBudget)
 	manual := a.manualNoticeActive()
 	a.setPressureNoticeValidity(pressure, compaction, manual)
 	var out []message.Message
