@@ -14,7 +14,8 @@ import (
 //  2. Build intermediate representation (IR) with turn reconstruction
 //     and source-precedence decisions
 //  3. Linearize IR into Chord messages with structured tool imports where
-//     safe, and readable fallback blocks where not
+//     safe, source tool calls where no mapping exists, and readable fallback
+//     blocks for records that cannot be paired
 func convertCodexRollout(data []byte, reasoningMode string, report *ImportReport) ([]message.Message, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {

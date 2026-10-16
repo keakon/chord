@@ -116,8 +116,8 @@ func printImportSummary(w io.Writer, source string, res *sessionimport.ImportRes
 			structuredToolResults = r.Claude.StructuredToolResults
 		}
 	}
-	fmt.Fprintf(w, "Tools: structured %d calls / %d results, downgraded %d calls / %d results\n",
-		structuredToolCalls, structuredToolResults, r.UnsupportedToolCalls, r.UnsupportedToolResults)
+	fmt.Fprintf(w, "Tools: structured %d calls / %d results, kept as source calls %d\n",
+		structuredToolCalls, structuredToolResults, r.UnsupportedToolCalls)
 	fmt.Fprintf(w, "Skipped: %d entries, %d status events, %d duplicates\n",
 		r.SkippedEntries, r.SkippedStatusEvents, r.SkippedDuplicates+r.DuplicateSourceConflicts)
 	if source == "claude" && r.Claude != nil {

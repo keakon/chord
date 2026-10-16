@@ -70,11 +70,22 @@ type codexReasoningEntry struct {
 }
 
 // codexToolCall holds a structured tool call from a function_call
-// response_item.
+// response_item, or a freeform call from a custom_tool_call one.
 type codexToolCall struct {
-	CallID       string
-	Name         string
-	Arguments    json.RawMessage // raw arguments JSON string from rollout
+	CallID string
+	Name   string
+	// Namespace is the response_item's tool namespace, for example
+	// "collaboration" for Codex's multi-agent tools. Chord has no equivalent
+	// for a namespaced tool, so it can never be replayed as a real call.
+	Namespace string
+	Arguments json.RawMessage // raw arguments JSON string from rollout
+
+	// ExecInput is the raw freeform `exec` input: JavaScript source text, not
+	// JSON. ExecScript is that source analyzed down to the single nested call
+	// it provably makes, or nil when the script is not provably one call.
+	ExecInput  string
+	ExecScript *codexExecScript
+
 	TurnID       string
 	SourceOrder  int
 	StatusEvents []codexEvent

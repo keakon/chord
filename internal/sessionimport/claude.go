@@ -178,7 +178,7 @@ func convertClaudeTranscript(data []byte, reasoningMode string, report *ImportRe
 
 	var out []message.Message
 	for _, node := range chain {
-		msg, skipped, toolRendered, reasoningSkipped, warns, err := convertClaudeNode(node, reasoningMode)
+		msg, skipped, toolRendered, reasoningSkipped, warns, unsupportedToolCalls, err := convertClaudeNode(node, reasoningMode)
 		for _, w := range warns {
 			report.warnf("claude line %d: %s", node.Index, w)
 			report.Claude.Diagnostics = append(report.Claude.Diagnostics, fmt.Sprintf("line %d: %s", node.Index, w))
@@ -200,16 +200,14 @@ func convertClaudeTranscript(data []byte, reasoningMode string, report *ImportRe
 			report.SkippedEntries++
 			continue
 		}
+		// A call with no Chord mapping is still replayed as a tool call, so it
+		// is counted apart from the mapped ones but stays in the trajectory.
+		report.UnsupportedToolCalls += unsupportedToolCalls
 		for _, m := range msg {
 			if m.Role == claudeRoleAssistant {
-				for _, tc := range m.ToolCalls {
-					if claudeToolCallHasUnsupportedMetadata(tc.Args) {
-						report.UnsupportedToolCalls++
-						continue
-					}
-					report.StructuredToolCalls++
-					report.Claude.StructuredToolCalls++
-				}
+				structured := len(m.ToolCalls) - unsupportedToolCalls
+				report.StructuredToolCalls += structured
+				report.Claude.StructuredToolCalls += structured
 			}
 			if m.Role == claudeRoleTool {
 				report.StructuredToolResults++
@@ -636,18 +634,18 @@ func countClaudeToolUseBlocks(raw json.RawMessage) int {
 	return count
 }
 
-func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Message, skipped bool, toolRendered bool, reasoningSkipped bool, warns []string, err error) {
+func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Message, skipped bool, toolRendered bool, reasoningSkipped bool, warns []string, unsupportedToolCalls int, err error) {
 	var cm claudeMessage
 	if err := json.Unmarshal(node.Envelope.Message, &cm); err != nil {
-		return nil, false, false, false, nil, fmt.Errorf("parse message: %w", err)
+		return nil, false, false, false, nil, 0, fmt.Errorf("parse message: %w", err)
 	}
 	role := strings.ToLower(strings.TrimSpace(cm.Role))
 	if role != claudeRoleAssistant && role != claudeRoleUser {
 		fallback := renderClaudeUnsupportedMessage(node.Envelope, role)
 		if strings.TrimSpace(fallback.Content) == "" {
-			return nil, true, false, false, []string{"skipped unsupported role=" + role}, nil
+			return nil, true, false, false, []string{"skipped unsupported role=" + role}, 0, nil
 		}
-		return []message.Message{fallback}, false, false, false, []string{"unsupported role=" + role + "; imported as readable fallback"}, nil
+		return []message.Message{fallback}, false, false, false, []string{"unsupported role=" + role + "; imported as readable fallback"}, 0, nil
 	}
 
 	switch role {
@@ -687,6 +685,7 @@ func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Me
 				}
 				toolCall, unsupported := convertClaudeToolCall(block)
 				if unsupported {
+					unsupportedToolCalls++
 					warns = append(warns, "unsupported tool_use name="+strings.TrimSpace(block.Name)+"; imported as tool card")
 				}
 				assistant.ToolCalls = append(assistant.ToolCalls, toolCall)
@@ -696,9 +695,9 @@ func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Me
 			}
 		}
 		if strings.TrimSpace(assistant.Content) == "" && len(assistant.ToolCalls) == 0 && len(assistant.ThinkingBlocks) == 0 {
-			return nil, true, toolRendered, reasoningSkipped, warns, nil
+			return nil, true, toolRendered, reasoningSkipped, warns, 0, nil
 		}
-		return []message.Message{assistant}, false, toolRendered, reasoningSkipped, warns, nil
+		return []message.Message{assistant}, false, toolRendered, reasoningSkipped, warns, unsupportedToolCalls, nil
 
 	case claudeRoleUser:
 		user := message.Message{Role: message.RoleUser, Provenance: importedClaudeProvenance()}
@@ -729,17 +728,16 @@ func convertClaudeNode(node claudeNode, reasoningMode string) (msgs []message.Me
 		}
 		msgs = append(msgs, toolMsgs...)
 		if len(msgs) == 0 {
-			return nil, true, toolRendered, reasoningSkipped, warns, nil
+			return nil, true, toolRendered, reasoningSkipped, warns, 0, nil
 		}
-		return msgs, false, toolRendered, reasoningSkipped, warns, nil
+		return msgs, false, toolRendered, reasoningSkipped, warns, 0, nil
 	}
 
-	return nil, true, false, false, nil, nil
+	return nil, true, false, false, nil, 0, nil
 }
 
 func convertClaudeToolCall(block claudeContentBlock) (message.ToolCall, bool) {
 	name := strings.TrimSpace(block.Name)
-	args := append(json.RawMessage(nil), block.Input...)
 	switch name {
 	case "Bash", "Shell", tools.NameShell:
 		if norm := normalizeClaudeBashArgs(block.Input); norm != nil {
@@ -765,21 +763,15 @@ func convertClaudeToolCall(block claudeContentBlock) (message.ToolCall, bool) {
 	if name == "" {
 		name = "unknown"
 	}
-	unsupportedArgs := map[string]any{
-		"unsupported": true,
-		"source":      "claude",
-		"reason":      "no safe Chord mapping",
+	// No Chord tool performs this work, but the call really ran in the source
+	// session, so it stays in the trajectory under the name and arguments the
+	// source agent used. Wrapping them in importer metadata would show
+	// bookkeeping instead of the original call, and dropping the call would
+	// erase an action the model should see as history.
+	if len(block.Input) == 0 {
+		return message.ToolCall{ID: block.ID, Name: name, Args: json.RawMessage(`{}`)}, true
 	}
-	if len(args) > 0 {
-		var v any
-		if json.Unmarshal(args, &v) == nil {
-			unsupportedArgs["arguments"] = v
-		} else {
-			unsupportedArgs["arguments"] = string(args)
-		}
-	}
-	b, _ := json.Marshal(unsupportedArgs)
-	return message.ToolCall{ID: block.ID, Name: name, Args: b}, true
+	return message.ToolCall{ID: block.ID, Name: name, Args: block.Input}, true
 }
 
 func normalizeClaudeBashArgs(raw json.RawMessage) json.RawMessage {
@@ -792,10 +784,12 @@ func normalizeClaudeBashArgs(raw json.RawMessage) json.RawMessage {
 		return nil
 	}
 	result := map[string]any{"command": command}
+	// Claude's Bash records its own description, the only subject the call
+	// ever had, so it carries over verbatim. Without one the Chord header
+	// shows the command's first line like a live call; a synthesized
+	// placeholder would read as import bookkeeping to user and model alike.
 	if description := claudePickString(args, "description"); description != "" {
 		result["description"] = description
-	} else {
-		result["description"] = "Imported Claude Bash command"
 	}
 	b, _ := json.Marshal(result)
 	return b
@@ -819,14 +813,6 @@ func normalizeClaudeReadArgs(raw json.RawMessage) json.RawMessage {
 	}
 	b, _ := json.Marshal(result)
 	return b
-}
-
-func claudeToolCallHasUnsupportedMetadata(raw json.RawMessage) bool {
-	var args struct {
-		Unsupported bool   `json:"unsupported"`
-		Source      string `json:"source"`
-	}
-	return json.Unmarshal(raw, &args) == nil && args.Unsupported && args.Source == "claude"
 }
 
 func claudePickString(m map[string]any, keys ...string) string {

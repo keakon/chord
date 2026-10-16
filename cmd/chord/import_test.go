@@ -77,7 +77,7 @@ func TestNewImportCmd_PrintsClaudeImportSummary(t *testing.T) {
 		t.Fatalf("RunE: %v", err)
 	}
 	for _, want := range []string{
-		"Tools: structured 1 calls / 1 results, downgraded 0 calls / 0 results",
+		"Tools: structured 1 calls / 1 results, kept as source calls 0",
 		"Claude: selected 3/3 main messages, skipped 1 sidechain messages",
 		"Claude selection:",
 		"Detected 1 sub-agent messages",
@@ -110,7 +110,7 @@ func TestNewImportCmd_PrintsImportSummaryAndLimitsWarnings(t *testing.T) {
 		t.Fatalf("RunE: %v", err)
 	}
 	for _, want := range []string{
-		"Tools: structured 1 calls / 1 results, downgraded 0 calls / 0 results",
+		"Tools: structured 1 calls / 1 results, kept as source calls 0",
 		"Skipped: 0 entries, 0 status events, 0 duplicates",
 		"Report:",
 	} {

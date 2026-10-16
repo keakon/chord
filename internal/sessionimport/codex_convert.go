@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
@@ -29,6 +30,15 @@ const (
 	codexResponseItemTypeCustomToolCall       = "custom_tool_call"
 	codexResponseItemTypeCustomToolCallOutput = "custom_tool_call_output"
 	codexResponseItemTypeReasoning            = "reasoning"
+
+	// codexExecToolName is Codex's freeform code-mode tool. It is the only
+	// top-level tool the current CLI exposes: the real work happens in nested
+	// `tools.<name>(...)` calls inside the JavaScript input, so the name alone
+	// says nothing about which Chord tool ran.
+	codexExecToolName = "exec"
+	// codexCollaborationNamespace marks Codex's multi-agent tools
+	// (spawn_agent, wait_agent, send_message, list_agents).
+	codexCollaborationNamespace = "collaboration"
 )
 
 var errEmptyInput = fmt.Errorf("codex import: empty input")
@@ -274,16 +284,18 @@ func codexProcessResponseItem(
 	report *ImportReport,
 ) error {
 	var item struct {
-		Type    string          `json:"type"`
-		Role    string          `json:"role"`
-		TurnID  string          `json:"turn_id"`
-		TurnID2 string          `json:"turnId"`
-		Content json.RawMessage `json:"content"`
-		Name    string          `json:"name"`
-		CallID  string          `json:"call_id"`
-		Args    string          `json:"arguments"`
-		Output  json.RawMessage `json:"output"`
-		Status  string          `json:"status"`
+		Type      string          `json:"type"`
+		Role      string          `json:"role"`
+		TurnID    string          `json:"turn_id"`
+		TurnID2   string          `json:"turnId"`
+		Content   json.RawMessage `json:"content"`
+		Name      string          `json:"name"`
+		Namespace string          `json:"namespace"`
+		CallID    string          `json:"call_id"`
+		Args      string          `json:"arguments"`
+		Input     json.RawMessage `json:"input"`
+		Output    json.RawMessage `json:"output"`
+		Status    string          `json:"status"`
 	}
 	if err := json.Unmarshal(payload, &item); err != nil {
 		return err
@@ -355,6 +367,7 @@ func codexProcessResponseItem(
 		turn.ToolCalls[callID] = &codexToolCall{
 			CallID:      callID,
 			Name:        item.Name,
+			Namespace:   strings.TrimSpace(item.Namespace),
 			Arguments:   json.RawMessage(item.Args),
 			TurnID:      turnID,
 			SourceOrder: *sourceOrder,
@@ -388,22 +401,29 @@ func codexProcessResponseItem(
 			report.SkippedEntries++
 			return nil
 		}
-		var inputStr string
-		if err := json.Unmarshal(payload, &struct {
-			Input *string `json:"input"`
-		}{Input: &inputStr}); err != nil {
-			inputStr = ""
-		}
-		argsJSON, _ := json.Marshal(map[string]string{
-			"input": inputStr,
-		})
-		turn.ToolCalls[callID] = &codexToolCall{
+		inputStr := codexRawString(item.Input)
+		call := &codexToolCall{
 			CallID:      callID,
 			Name:        item.Name,
-			Arguments:   argsJSON,
 			TurnID:      turnID,
 			SourceOrder: *sourceOrder,
 		}
+		if codexIsExecToolName(item.Name) {
+			// Codex's code-mode `exec` input is raw JavaScript, so it needs
+			// analysis rather than argument parsing. Keep the source verbatim
+			// for an unmapped call's record and parse it for the mapping.
+			call.ExecInput = inputStr
+			if script, ok := parseCodexExecScript(inputStr); ok {
+				call.ExecScript = &script
+				report.CodexExecScripts++
+			}
+		} else {
+			// Legacy freeform custom tools (apply_patch) carry their input as
+			// the tool's own string parameter.
+			argsJSON, _ := json.Marshal(map[string]string{"input": inputStr})
+			call.Arguments = argsJSON
+		}
+		turn.ToolCalls[callID] = call
 		callOwners[callID] = turnID
 
 	case codexResponseItemTypeCustomToolCallOutput:
@@ -416,7 +436,7 @@ func codexProcessResponseItem(
 			turnID = owner
 			turn = getOrCreateTurn(turnID)
 		}
-		outputText := codexExtractOutputText(item.Output)
+		outputText := codexExtractCustomToolOutputText(item.Output)
 		turn.ToolResults[callID] = &codexToolResult{
 			CallID:      callID,
 			Output:      outputText,
@@ -729,6 +749,50 @@ func codexExtractContentText(content json.RawMessage) string {
 	return strings.Join(out, "\n\n")
 }
 
+// codexRawString reads a JSON string field, tolerating an absent, null, or
+// non-string value.
+func codexRawString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return ""
+	}
+	return s
+}
+
+// codexIsExecToolName reports whether a Codex tool name is the code-mode `exec`
+// tool.
+func codexIsExecToolName(name string) bool {
+	return strings.EqualFold(strings.TrimSpace(name), codexExecToolName)
+}
+
+// codexExtractCustomToolOutputText extracts text from a
+// custom_tool_call_output's output field.
+//
+// Codex builds these by appending: the first content item is the result header
+// ("Script completed\nWall time …\nOutput:\n", which already ends in a newline)
+// and the rest are the script's own output, so the items concatenate. Joining
+// them as separate blocks would insert a blank line into every result body.
+func codexExtractCustomToolOutputText(output json.RawMessage) string {
+	if len(output) == 0 {
+		return ""
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(output, &parts); err != nil {
+		return codexExtractOutputText(output)
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteString(p.Text)
+	}
+	return b.String()
+}
+
 // codexExtractOutputText extracts text from a function_call_output's output field.
 // The output can be either a plain string or an array of content items.
 func codexExtractOutputText(output json.RawMessage) string {
@@ -864,34 +928,31 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 				tc := turn.ToolCalls[item.callID]
 				tr := turn.ToolResults[item.callID]
 
-				chordName, ok := codexToolMapping[tc.Name]
-				if !ok {
-					out = append(out, codexUnsupportedToolCallCard(tc, "no safe Chord mapping", reasoningText, usage))
-					reasoningText = ""
-					reasoningAttached = false
-					usage = nil
-					report.UnsupportedToolCalls++
-					if tr != nil {
-						out = append(out, codexToolResultMessage(tr))
-						report.UnsupportedToolResults++
-						delete(turn.ToolResults, item.callID)
+				chordName, normArgs, reason := codexResolveChordTool(tc)
+				keep := reason == ""
+				if tr != nil {
+					if res, ok := parseCodexExecResult(tr.Output); ok && res.yielded() {
+						// A yielded exec has no outcome: its cell keeps running in
+						// the source session and a later `wait` call holds the
+						// continuation. Mapping the yielded record to a finished
+						// Chord tool would invent a result that never happened, so
+						// the whole record stays verbatim, cell id included.
+						keep = false
 					}
-					continue
 				}
-
-				normArgs := codexNormalizeToolArgs(tc.Name, chordName, tc.Arguments)
-				if normArgs == nil {
-					out = append(out, codexUnsupportedToolCallCard(tc, "argument normalization failed", reasoningText, usage))
-					reasoningText = ""
-					reasoningAttached = false
-					usage = nil
+				if !keep {
+					// No Chord tool performs this work, but the trajectory is
+					// still real history: keep the call under the name and
+					// arguments the source agent used, and its result, exactly
+					// as they were issued. Rewriting the call into text would
+					// drop an action that ran, and folding the arguments into
+					// importer metadata would show bookkeeping instead of the
+					// original call. The model reads the preserved form as the
+					// action it was — completed or still running.
+					chordName, normArgs = codexImportedToolCall(tc)
 					report.UnsupportedToolCalls++
-					if tr != nil {
-						out = append(out, codexToolResultMessage(tr))
-						report.UnsupportedToolResults++
-						delete(turn.ToolResults, item.callID)
-					}
-					continue
+				} else {
+					report.StructuredToolCalls++
 				}
 
 				out = append(out, message.Message{
@@ -912,17 +973,29 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 				if usage != nil {
 					usage = nil
 				}
-				report.StructuredToolCalls++
 
 				if tr != nil {
 					status := message.ToolStatusSuccess
 					if tr.Status != "" {
 						status = tr.Status
 					}
+					content := tr.Output
+					// Codex prefixes every result with "Script completed\nWall
+					// time N seconds\nOutput:\n". Strip it so an imported shell
+					// result is the command's output, like a live one, and let a
+					// failed or terminated script surface as an error result. A
+					// yielded script is excluded from the mapping above, so its
+					// envelope stays verbatim here.
+					if res, ok := parseCodexExecResult(content); ok && !res.yielded() {
+						content = res.Output
+						if !res.succeeded() {
+							status = message.ToolStatusError
+						}
+					}
 					out = append(out, message.Message{
 						Role:       message.RoleTool,
 						ToolCallID: tr.CallID,
-						Content:    tr.Output,
+						Content:    content,
 						ToolStatus: status,
 						Provenance: importedCodexProvenance(),
 					})
@@ -964,7 +1037,7 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 		}
 	}
 	report.ToolEntriesRendered = report.StructuredToolCalls + report.StructuredToolResults +
-		report.UnsupportedToolCalls + report.UnsupportedToolResults + report.MissingToolDeclarations
+		report.UnsupportedToolCalls + report.MissingToolDeclarations
 
 	return filtered
 }
@@ -1005,7 +1078,8 @@ func validateImportedCodexMessages(msgs []message.Message, report *ImportReport)
 
 // codexToolMapping maps Codex tool names to Chord tool names.
 // Only tools with high-confidence argument mapping are included.
-// Tools not in this map will be downgraded to text fallback.
+// Tools not in this map stay as the source tool call under its own name
+// and arguments.
 var codexToolMapping = map[string]string{
 	"exec_command": tools.NameShell,
 	"shell":        tools.NameShell,
@@ -1022,6 +1096,91 @@ var codexToolMapping = map[string]string{
 	"search":       tools.NameGrep,
 	"glob":         tools.NameGlob,
 	"list_files":   tools.NameGlob,
+}
+
+// codexResolveChordTool maps a Codex tool call onto a real Chord tool and its
+// normalized arguments, returning a non-empty reason when it cannot.
+//
+// A Codex tool call is not directly replayable: the current CLI emits one
+// freeform `exec` tool that orchestrates the real work as nested calls, so the
+// mapping has to come from the analyzed script (tc.ExecScript), and Codex's
+// multi-agent tools live in a namespace Chord does not have. Anything that does
+// not resolve to exactly one known Chord tool stays an imported note rather than
+// a fabricated call the provider never declared.
+func codexResolveChordTool(tc *codexToolCall) (chordName string, args json.RawMessage, reason string) {
+	if codexIsExecToolName(tc.Name) {
+		return codexResolveExecTool(tc)
+	}
+	if strings.EqualFold(strings.TrimSpace(tc.Namespace), codexCollaborationNamespace) {
+		return "", nil, "codex collaboration tool has no Chord equivalent"
+	}
+	mapped, ok := codexToolMapping[tc.Name]
+	if !ok {
+		return "", nil, "no safe Chord mapping"
+	}
+	normalized := codexNormalizeToolArgs(tc.Name, mapped, tc.Arguments)
+	if normalized == nil {
+		return "", nil, "argument normalization failed"
+	}
+	return mapped, normalized, ""
+}
+
+// codexResolveExecTool maps the single nested call of an `exec` script onto the
+// Chord tool that performed the same work.
+func codexResolveExecTool(tc *codexToolCall) (string, json.RawMessage, string) {
+	if tc.ExecScript == nil {
+		return "", nil, "codex exec script is not a single known nested call"
+	}
+	switch tc.ExecScript.Nested {
+	case codexNestedExecCommand:
+		args := codexNormalizeExecCommandArgs(tc.ExecScript.Args)
+		if args == nil {
+			return "", nil, "codex exec_command arguments are incomplete"
+		}
+		return tools.NameShell, args, ""
+	case codexNestedApplyPatch:
+		args := codexNormalizeEditArgs(map[string]any{"input": tc.ExecScript.Input})
+		if args == nil {
+			return "", nil, "codex apply_patch input is not a patch envelope"
+		}
+		return tools.NameApplyPatch, args, ""
+	default:
+		// write_stdin drives an interactive session Chord does not keep, and any
+		// other nested tool is not one Chord declares.
+		return "", nil, "codex exec nested tool has no Chord equivalent"
+	}
+}
+
+// codexNormalizeExecCommandArgs maps a nested `exec_command` argument object
+// onto Chord's shell schema.
+//
+// Codex's remaining knobs describe how the host ran the command rather than
+// what it was — `shell`, `login`, `tty`, `sandbox_permissions`,
+// `additional_permissions`, `justification`, `prefix_rule` — and
+// `yield_time_ms` is a host yield window with a different default in Chord, so
+// none of them carry over. A description carries over only when the source
+// recorded one: a synthesized placeholder would sit where a live call shows
+// the command's first line, marking the call as imported for a reader — user
+// or model — that has no use for that fact.
+func codexNormalizeExecCommandArgs(args map[string]any) json.RawMessage {
+	cmd := codexPickString(args, "cmd", "command")
+	if cmd == "" {
+		return nil
+	}
+	result := map[string]any{
+		"command": cmd,
+	}
+	if desc := codexPickString(args, "description"); desc != "" {
+		result["description"] = desc
+	}
+	if wd := codexPickString(args, "workdir", "cwd"); wd != "" {
+		result["workdir"] = wd
+	}
+	if ms := codexPickFloat(args, "timeout_ms"); ms > 0 {
+		result["timeout_ms"] = int(ms)
+	}
+	b, _ := json.Marshal(result)
+	return b
 }
 
 // codexNormalizeToolArgs converts Codex tool arguments into the shape
@@ -1111,9 +1270,12 @@ func codexNormalizeShellArgs(args map[string]any) json.RawMessage {
 	if cmd == "" {
 		return nil
 	}
-	result := map[string]any{
-		"command":     cmd,
-		"description": "Imported Codex shell command",
+	result := map[string]any{"command": cmd}
+	// A description the source recorded (OpenCode's bash tool carries one) is
+	// the call's own subject and survives verbatim; without it the Chord
+	// header falls back to the command's first line, exactly like a live call.
+	if desc := codexPickString(args, "description"); desc != "" {
+		result["description"] = desc
 	}
 	if wd := codexPickString(args, "workdir", "cwd"); wd != "" {
 		result["workdir"] = wd
@@ -1303,64 +1465,72 @@ func writePatchLines(b *strings.Builder, prefix, text string) {
 }
 
 // ---------------------------------------------------------------------------
-// Fallback rendering for unsupported tools
+// Unmapped tool calls and orphaned results
 // ---------------------------------------------------------------------------
 
-func codexUnsupportedToolCallCard(tc *codexToolCall, reason string, reasoningText string, usage *message.TokenUsage) message.Message {
+// codexImportedToolCall returns a Codex tool call that has no Chord mapping
+// exactly as the rollout recorded it: the source tool name and its own
+// arguments.
+//
+// The name and arguments are preserved rather than rewritten because the call
+// really ran in the source session, so it is history the model should see as
+// the action it was. Replacing it with a text note would drop the action from
+// the trajectory, and wrapping the arguments in importer metadata would show
+// bookkeeping instead of the original call.
+func codexImportedToolCall(tc *codexToolCall) (string, json.RawMessage) {
 	name := strings.TrimSpace(tc.Name)
 	if name == "" {
 		name = "unknown"
 	}
-	args := map[string]any{
-		"unsupported": true,
-		"source":      "codex",
-		"reason":      reason,
-	}
 	if len(tc.Arguments) > 0 {
-		var v any
-		if json.Unmarshal(tc.Arguments, &v) == nil {
-			args["arguments"] = v
-		} else {
-			args["arguments"] = string(tc.Arguments)
+		// A function_call carries its own argument object. A truncated or
+		// malformed arguments string must not reach json.Marshal as an
+		// invalid json.RawMessage (it would fail the whole import), so wrap
+		// it into a legal JSON object that preserves the original text.
+		if json.Valid(tc.Arguments) {
+			return name, tc.Arguments
+		}
+		wrapped, err := json.Marshal(map[string]string{"input": string(tc.Arguments)})
+		if err == nil {
+			return name, wrapped
+		}
+		// Fall through to the safe default below.
+	}
+	if tc.ExecInput != "" {
+		// A freeform custom tool carries its whole program as one string
+		// parameter, which is the shape the source sent. ExecScript, when it
+		// exists, is analyzed from this same input, so there is nothing left
+		// to fall back to here.
+		args, err := json.Marshal(map[string]string{"input": tc.ExecInput})
+		if err == nil {
+			return name, args
 		}
 	}
-	argsJSON, _ := json.Marshal(args)
-	return message.Message{
-		Role: message.RoleAssistant,
-		ToolCalls: []message.ToolCall{{
-			ID:   tc.CallID,
-			Name: name,
-			Args: argsJSON,
-		}},
-		ReasoningContent: reasoningText,
-		Usage:            usage,
-		Provenance:       importedCodexProvenance(),
-	}
+	return name, json.RawMessage(`{}`)
 }
 
-func codexToolResultMessage(tr *codexToolResult) message.Message {
-	status := message.ToolStatusSuccess
-	if tr.Status != "" {
-		status = tr.Status
+// codexImportedNoteMaxBytes bounds an imported fallback field so one record
+// cannot dominate the transcript.
+const codexImportedNoteMaxBytes = 4000
+
+// codexTruncateImportedText cuts text to a byte budget without splitting a
+// UTF-8 rune, so an imported fallback never carries an invalid byte sequence.
+func codexTruncateImportedText(s string, limit int) string {
+	if len(s) <= limit {
+		return s
 	}
-	return message.Message{
-		Role:       message.RoleTool,
-		ToolCallID: tr.CallID,
-		Content:    tr.Output,
-		ToolStatus: status,
-		Provenance: importedCodexProvenance(),
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
 	}
+	return s[:cut] + "\n...[truncated]"
 }
 
 func codexOrphanedToolResultFallback(tr *codexToolResult) message.Message {
-	output := tr.Output
-	if len(output) > 4000 {
-		output = output[:4000] + "\n...[truncated]"
-	}
 	return message.Message{
 		Role: message.RoleAssistant,
 		Content: fmt.Sprintf("[Imported orphaned tool result]\nCall ID: %s\nOutput:\n%s",
-			tr.CallID, output),
+			tr.CallID, codexTruncateImportedText(tr.Output, codexImportedNoteMaxBytes)),
 		Provenance: importedCodexProvenance(),
 	}
 }

@@ -22,9 +22,14 @@ type ImportReport struct {
 	StructuredToolCalls   int `json:"structured_tool_calls,omitempty"`
 	StructuredToolResults int `json:"structured_tool_results,omitempty"`
 
-	// Downgrade/fallback statistics.
+	// Codex code-mode diagnostics: how many freeform `exec` inputs were
+	// analyzed down to a single known nested call.
+	CodexExecScripts int `json:"codex_exec_scripts,omitempty"`
+
+	// Downgrade/fallback statistics. A tool call with no Chord mapping is kept
+	// under its source name and arguments instead of being downgraded, so only
+	// the call side has a counter: there is no separate downgraded-result count.
 	UnsupportedToolCalls    int `json:"unsupported_tool_calls,omitempty"`
-	UnsupportedToolResults  int `json:"unsupported_tool_results,omitempty"`
 	MissingToolDeclarations int `json:"missing_tool_declarations,omitempty"`
 	MissingToolCallIDs      int `json:"missing_tool_call_ids,omitempty"`
 

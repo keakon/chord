@@ -4,19 +4,26 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/keakon/chord/internal/message"
 )
 
-func assertClaudeUnsupportedToolArgs(t *testing.T, raw []byte) {
+// assertClaudeUnsupportedToolCall asserts that a Claude tool call with no Chord
+// mapping stayed a tool call under the source name, with the source arguments
+// verbatim and no importer metadata folded in.
+func assertClaudeUnsupportedToolCall(t *testing.T, msg message.Message, wantName string, wantArgs string) {
 	t.Helper()
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		t.Fatalf("unmarshal unsupported args: %v", err)
+	if msg.Role != message.RoleAssistant {
+		t.Fatalf("role=%q, want assistant", msg.Role)
 	}
-	if args["unsupported"] != true || args["source"] != "claude" || strings.TrimSpace(args["reason"].(string)) == "" {
-		t.Fatalf("unsupported metadata missing: %#v", args)
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("tool calls=%+v, want the source call preserved", msg.ToolCalls)
 	}
-	if _, ok := args["arguments"]; !ok {
-		t.Fatalf("original arguments missing: %#v", args)
+	if msg.ToolCalls[0].Name != wantName {
+		t.Fatalf("tool name=%q, want %q", msg.ToolCalls[0].Name, wantName)
+	}
+	if got := strings.TrimSpace(string(msg.ToolCalls[0].Args)); got != wantArgs {
+		t.Fatalf("tool args=%s, want the source arguments verbatim %s", got, wantArgs)
 	}
 }
 
@@ -122,22 +129,74 @@ func TestConvertClaudeTranscript_MapsBashAndReadTools(t *testing.T) {
 	}
 }
 
-func TestConvertClaudeTranscript_UnsupportedToolPreservesMetadata(t *testing.T) {
+// A mapped Bash call must look like a live Chord shell call: the source
+// description survives, and a call without one stays without one so the card
+// header shows the command's first line instead of an import marker.
+func TestNormalizeClaudeBashArgsOmitsSynthesizedDescription(t *testing.T) {
+	raw := normalizeClaudeBashArgs(json.RawMessage(`{"command":"pwd"}`))
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatalf("unmarshal bash args: %v", err)
+	}
+	if _, ok := args["description"]; ok {
+		t.Fatalf("synthesized a description the source never had: %#v", args)
+	}
+	if args["command"] != "pwd" {
+		t.Fatalf("command lost: %#v", args)
+	}
+
+	withDesc := normalizeClaudeBashArgs(json.RawMessage(`{"command":"pwd","description":"print cwd"}`))
+	var descArgs map[string]any
+	if err := json.Unmarshal(withDesc, &descArgs); err != nil {
+		t.Fatalf("unmarshal bash args: %v", err)
+	}
+	if descArgs["description"] != "print cwd" {
+		t.Fatalf("source description dropped: %#v", descArgs)
+	}
+}
+
+// TestConvertClaudeTranscript_UnsupportedToolKeepsSourceCall pins that a Claude
+// tool with no Chord mapping stays a tool call under its own name with its own
+// arguments: the action ran in the source session, so it is history the model
+// should read as-is rather than a rewritten or dropped record.
+func TestConvertClaudeTranscript_UnsupportedToolKeepsSourceCall(t *testing.T) {
 	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"search"}]}}
 {"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_unknown","name":"WebSearch","input":{"query":"golang"}}]}}
+{"uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_unknown","content":"12 hits"}]}}
 `)
 	var report ImportReport
 	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
 	if err != nil {
 		t.Fatalf("convertClaudeTranscript: %v", err)
 	}
-	if len(msgs) != 2 || len(msgs[1].ToolCalls) != 1 {
-		t.Fatalf("msgs=%+v, want unsupported tool card", msgs)
+	if len(msgs) != 3 {
+		t.Fatalf("msgs=%+v, want user + tool card + result", msgs)
 	}
-	if msgs[1].ToolCalls[0].Name != "WebSearch" {
-		t.Fatalf("tool name=%q, want WebSearch", msgs[1].ToolCalls[0].Name)
+	assertClaudeUnsupportedToolCall(t, msgs[1], "WebSearch", `{"query":"golang"}`)
+	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "toolu_unknown" || msgs[2].Content != "12 hits" {
+		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}
-	assertClaudeUnsupportedToolArgs(t, msgs[1].ToolCalls[0].Args)
+	if report.UnsupportedToolCalls != 1 || report.StructuredToolCalls != 0 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
+// TestConvertClaudeTranscript_UnsupportedToolWithoutInputKeepsCall makes sure a
+// source call that carried no arguments is still replayed as a call rather than
+// dropped.
+func TestConvertClaudeTranscript_UnsupportedToolWithoutInputKeepsCall(t *testing.T) {
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"plan"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_todo","name":"TodoWrite"}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("msgs=%+v, want user + tool card", msgs)
+	}
+	assertClaudeUnsupportedToolCall(t, msgs[1], "TodoWrite", "{}")
 	if report.UnsupportedToolCalls != 1 || report.StructuredToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}

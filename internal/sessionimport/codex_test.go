@@ -7,24 +7,53 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/recovery"
 	"github.com/keakon/chord/internal/tools"
 )
 
-func assertCodexUnsupportedToolArgs(t *testing.T, raw json.RawMessage) {
+func TestCodexTruncateImportedText(t *testing.T) {
+	if got := codexTruncateImportedText("abc", codexImportedNoteMaxBytes); got != "abc" {
+		t.Fatalf("short text changed: %q", got)
+	}
+	long := strings.Repeat("a", codexImportedNoteMaxBytes) + "\u4e2d\u6587tail"
+	got := codexTruncateImportedText(long, codexImportedNoteMaxBytes)
+	if !strings.HasSuffix(got, "\n...[truncated]") {
+		t.Fatalf("truncation marker missing: %q", got[len(got)-40:])
+	}
+	if len(got) != codexImportedNoteMaxBytes+len("\n...[truncated]") {
+		t.Fatalf("truncated len=%d, want %d", len(got), codexImportedNoteMaxBytes+len("\n...[truncated]"))
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("truncation split a UTF-8 rune")
+	}
+	// A multibyte rune straddling the limit must not be split either.
+	straddle := strings.Repeat("\u4e2d", codexImportedNoteMaxBytes)
+	if got := codexTruncateImportedText(straddle, codexImportedNoteMaxBytes); !utf8.ValidString(got) {
+		t.Fatal("truncation split a straddling rune")
+	}
+}
+
+// assertCodexImportedToolCall asserts that a Codex tool call with no Chord
+// mapping stayed a tool call under the source name with the source arguments.
+// The call really ran in the source session, so it belongs in the trajectory
+// as-is: rewriting it into text would drop the action, and wrapping the
+// arguments in importer metadata would show bookkeeping instead of the call.
+func assertCodexImportedToolCall(t *testing.T, msg message.Message, wantName string, wantArgs string) {
 	t.Helper()
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		t.Fatalf("unmarshal unsupported args: %v", err)
+	if msg.Role != message.RoleAssistant {
+		t.Fatalf("role=%q, want assistant: %+v", msg.Role, msg)
 	}
-	reason, _ := args["reason"].(string)
-	if args["unsupported"] != true || args["source"] != "codex" || strings.TrimSpace(reason) == "" {
-		t.Fatalf("unsupported metadata missing: %#v", args)
+	if len(msg.ToolCalls) != 1 {
+		t.Fatalf("tool calls=%+v, want the source call preserved", msg.ToolCalls)
 	}
-	if _, ok := args["arguments"]; !ok {
-		t.Fatalf("original arguments missing: %#v", args)
+	if msg.ToolCalls[0].Name != wantName {
+		t.Fatalf("tool name=%q, want %q", msg.ToolCalls[0].Name, wantName)
+	}
+	if got := strings.TrimSpace(string(msg.ToolCalls[0].Args)); got != wantArgs {
+		t.Fatalf("tool args=%s, want the source arguments %s", got, wantArgs)
 	}
 }
 
@@ -185,7 +214,7 @@ func TestConvertCodexRollout_StructuredShellTool(t *testing.T) {
 	}
 }
 
-func TestConvertCodexRollout_UnsupportedToolDowngrade(t *testing.T) {
+func TestConvertCodexRollout_UnsupportedToolKeepsSourceCall(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"test-session"}}
 {"timestamp":"2026-05-09T04:43:49Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"do something"}]}}
 {"timestamp":"2026-05-09T04:43:52Z","type":"response_item","payload":{"type":"function_call","name":"unknown_tool","arguments":"{\"foo\":\"bar\"}","call_id":"call_un"}}
@@ -198,28 +227,63 @@ func TestConvertCodexRollout_UnsupportedToolDowngrade(t *testing.T) {
 		t.Fatalf("convertCodexRollout: %v", err)
 	}
 
-	// Expected: user, unsupported original-name tool card, linked tool result
+	// Expected: user, the source tool call, its result.
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
 	if msgs[0].Role != "user" {
 		t.Fatalf("msg0 role=%q, want user", msgs[0].Role)
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "unknown_tool" {
-		t.Fatalf("msg1 should be unknown_tool card: %+v", msgs[1])
-	}
-	assertCodexUnsupportedToolArgs(t, msgs[1].ToolCalls[0].Args)
-	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_un" || !strings.Contains(msgs[2].Content, "some result") {
-		t.Fatalf("msg2 should be linked tool result: %+v", msgs[2])
+	assertCodexImportedToolCall(t, msgs[1], "unknown_tool", `{"foo":"bar"}`)
+	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_un" || msgs[2].Content != "some result" {
+		t.Fatalf("paired tool result lost: %+v", msgs[2])
 	}
 	if report.UnsupportedToolCalls != 1 {
 		t.Fatalf("UnsupportedToolCalls=%d, want 1", report.UnsupportedToolCalls)
 	}
-	if report.UnsupportedToolResults != 1 {
-		t.Fatalf("UnsupportedToolResults=%d, want 1", report.UnsupportedToolResults)
-	}
 	if report.ToolEntriesRendered != 2 {
 		t.Fatalf("ToolEntriesRendered=%d, want 2", report.ToolEntriesRendered)
+	}
+}
+
+func TestConvertCodexRollout_MalformedArgumentsWrapToValidJSON(t *testing.T) {
+	// A truncated or malformed arguments string in the rollout must not fail
+	// the whole import: the call is wrapped into a legal JSON object that
+	// preserves the original text under "input".
+	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"session_meta","payload":{"id":"test-session"}}
+{"timestamp":"2026-05-09T04:43:49Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"do something"}]}}
+{"timestamp":"2026-05-09T04:43:52Z","type":"response_item","payload":{"type":"function_call","name":"unknown_tool","arguments":"{\"foo\":\"bar","call_id":"call_malformed"}}
+{"timestamp":"2026-05-09T04:43:53Z","type":"response_item","payload":{"type":"function_call_output","output":"some result","call_id":"call_malformed"}}
+`)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3", len(msgs))
+	}
+	if msgs[1].Role != message.RoleAssistant || len(msgs[1].ToolCalls) != 1 {
+		t.Fatalf("assistant tool call lost: %+v", msgs[1])
+	}
+	tc := msgs[1].ToolCalls[0]
+	if tc.Name != "unknown_tool" {
+		t.Fatalf("tool name=%q, want unknown_tool", tc.Name)
+	}
+	// The wrapped arguments must be valid JSON and contain the original text.
+	var wrapped map[string]string
+	if err := json.Unmarshal(tc.Args, &wrapped); err != nil {
+		t.Fatalf("wrapped args are not valid JSON: %v, raw=%s", err, tc.Args)
+	}
+	if wrapped["input"] != `{"foo":"bar` {
+		t.Fatalf("wrapped input=%q, want original malformed text", wrapped["input"])
+	}
+	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_malformed" || msgs[2].Content != "some result" {
+		t.Fatalf("paired tool result lost: %+v", msgs[2])
+	}
+	if report.UnsupportedToolCalls != 1 {
+		t.Fatalf("UnsupportedToolCalls=%d, want 1", report.UnsupportedToolCalls)
 	}
 }
 
@@ -375,7 +439,7 @@ func TestConvertCodexRollout_PairsToolResultByCallOwnerAcrossTurnContextAdvance(
 	}
 }
 
-func TestConvertCodexRollout_StructuresMappedAndDowngradesUnknown(t *testing.T) {
+func TestConvertCodexRollout_MapsKnownToolAndKeepsUnknownSourceCall(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"turn_context","payload":{"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"inspect files"}],"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":\"pwd\"}","call_id":"call_shell","turn_id":"turn-1"}}
@@ -398,14 +462,11 @@ func TestConvertCodexRollout_StructuresMappedAndDowngradesUnknown(t *testing.T) 
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_shell" {
 		t.Fatalf("mapped auto tool result not linked: %+v", msgs[2])
 	}
-	if msgs[3].Role != "assistant" || len(msgs[3].ToolCalls) != 1 || msgs[3].ToolCalls[0].Name != "dynamic_tool" {
-		t.Fatalf("unknown auto tool not restored as original-name card: %+v", msgs[3])
+	assertCodexImportedToolCall(t, msgs[3], "dynamic_tool", `{"foo":"bar"}`)
+	if msgs[4].Role != message.RoleTool || msgs[4].ToolCallID != "call_dynamic" || msgs[4].Content != "dynamic result" {
+		t.Fatalf("unmapped tool result not linked: %+v", msgs[4])
 	}
-	assertCodexUnsupportedToolArgs(t, msgs[3].ToolCalls[0].Args)
-	if msgs[4].Role != "tool" || msgs[4].ToolCallID != "call_dynamic" || !strings.Contains(msgs[4].Content, "dynamic result") {
-		t.Fatalf("unknown auto result not linked: %+v", msgs[4])
-	}
-	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 1 || report.UnsupportedToolResults != 1 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 2 || report.UnsupportedToolCalls != 1 {
 		t.Fatalf("report=%+v", report)
 	}
 }
@@ -437,7 +498,7 @@ func TestConvertCodexRollout_RealisticFixtureReportAndLineage(t *testing.T) {
 	if report.SourceSessionID != "realistic-session" {
 		t.Fatalf("SourceSessionID=%q", report.SourceSessionID)
 	}
-	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 1 || report.UnsupportedToolResults != 1 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 2 || report.UnsupportedToolCalls != 1 {
 		t.Fatalf("tool stats=%+v", report)
 	}
 	if report.SkippedStatusEvents != 1 || report.SkippedDuplicates != 2 {
@@ -549,12 +610,238 @@ func TestConvertCodexRollout_ApplyPatchCustomToolConvertsToEdit(t *testing.T) {
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_patch" || !strings.Contains(msgs[2].Content, "Success") {
 		t.Fatalf("tool result not linked: %+v", msgs[2])
 	}
-	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 0 || report.UnsupportedToolResults != 0 {
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 0 {
 		t.Fatalf("report=%+v", report)
 	}
 }
 
-func TestConvertCodexRollout_WebSearchEndRestoresAsUnsupportedToolCard(t *testing.T) {
+// codexExecRollout builds a one-turn rollout whose only tool call is a freeform
+// `exec` with the given JavaScript input and result content items. The lines are
+// marshalled rather than hand-written so the JavaScript (which is full of quotes
+// and newlines) survives without escaping mistakes.
+func codexExecRollout(t *testing.T, input string, outputItems ...string) []byte {
+	t.Helper()
+	items := make([]map[string]string, 0, len(outputItems))
+	for _, text := range outputItems {
+		items = append(items, map[string]string{"type": "input_text", "text": text})
+	}
+	lines := []any{
+		map[string]any{"timestamp": "2026-05-09T04:43:46Z", "type": "turn_context", "payload": map[string]any{"turn_id": "turn-1"}},
+		map[string]any{"timestamp": "2026-05-09T04:43:47Z", "type": "response_item", "payload": map[string]any{
+			"type": "message", "role": "user", "turn_id": "turn-1",
+			"content": []map[string]string{{"type": "input_text", "text": "go"}},
+		}},
+		map[string]any{"timestamp": "2026-05-09T04:43:48Z", "type": "response_item", "payload": map[string]any{
+			"type": "custom_tool_call", "name": "exec", "input": input, "call_id": "call_exec", "turn_id": "turn-1",
+		}},
+		map[string]any{"timestamp": "2026-05-09T04:43:49Z", "type": "response_item", "payload": map[string]any{
+			"type": "custom_tool_call_output", "output": items, "call_id": "call_exec", "turn_id": "turn-1",
+		}},
+	}
+	var b strings.Builder
+	for _, line := range lines {
+		encoded, err := json.Marshal(line)
+		if err != nil {
+			t.Fatalf("marshal fixture line: %v", err)
+		}
+		b.Write(encoded)
+		b.WriteByte('\n')
+	}
+	return []byte(b.String())
+}
+
+func TestConvertCodexRollout_ExecCommandConvertsToShell(t *testing.T) {
+	// A verbatim `exec` input from a Codex rollout: one nested exec_command call.
+	input := "const r = await tools.exec_command({cmd:\"git status --short\",\"workdir\":\"/tmp/project\",\"yield_time_ms\":10000,\"max_output_tokens\":12000});\ntext(r.output);"
+	data := codexExecRollout(t, input,
+		"Script completed\nWall time 0.1 seconds\nOutput:\n",
+		"## main\n",
+	)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	if msgs[1].Role != message.RoleAssistant || len(msgs[1].ToolCalls) != 1 {
+		t.Fatalf("exec not mapped to a tool call: %+v", msgs[1])
+	}
+	call := msgs[1].ToolCalls[0]
+	if call.Name != tools.NameShell || call.ID != "call_exec" {
+		t.Fatalf("tool call=%+v, want shell call_exec", call)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(call.Args, &args); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	if args["command"] != "git status --short" || args["workdir"] != "/tmp/project" {
+		t.Fatalf("args=%#v", args)
+	}
+	// The mapped call must look like a live Chord call: no synthesized
+	// description, so the card header shows the command's first line.
+	if _, ok := args["description"]; ok {
+		t.Fatalf("imported shell call carries a synthesized description: %#v", args)
+	}
+	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_exec" {
+		t.Fatalf("tool result not linked: %+v", msgs[2])
+	}
+	if msgs[2].Content != "## main\n" {
+		t.Fatalf("result envelope not stripped: %q", msgs[2].Content)
+	}
+	if msgs[2].ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("tool status=%q, want success", msgs[2].ToolStatus)
+	}
+	if report.StructuredToolCalls != 1 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 0 {
+		t.Fatalf("report=%+v", report)
+	}
+	if report.CodexExecScripts != 1 {
+		t.Fatalf("CodexExecScripts=%d, want 1", report.CodexExecScripts)
+	}
+}
+
+func TestConvertCodexRollout_ExecFailureMarksResultError(t *testing.T) {
+	input := "const r = await tools.exec_command({cmd:\"false\"});"
+	data := codexExecRollout(t, input,
+		"Script failed\nWall time 0.0 seconds\nOutput:\nScript error:\nError: exit status 1",
+	)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	if msgs[2].ToolStatus != message.ToolStatusError {
+		t.Fatalf("tool status=%q, want error", msgs[2].ToolStatus)
+	}
+	if !strings.HasPrefix(msgs[2].Content, "Script error:") {
+		t.Fatalf("failure body=%q", msgs[2].Content)
+	}
+}
+
+func TestConvertCodexRollout_ExecApplyPatchConvertsToApplyPatch(t *testing.T) {
+	input := "const patch = \"*** Begin Patch\\n*** Update File: a.txt\\n@@\\n-old\\n+new\\n*** End Patch\";\ntext(await tools.apply_patch(patch));"
+	data := codexExecRollout(t, input,
+		"Script completed\nWall time 0.0 seconds\nOutput:\n",
+		"Success. Updated the following files:\nM a.txt",
+	)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	call := msgs[1].ToolCalls[0]
+	if call.Name != tools.NameApplyPatch || call.ID != "call_exec" {
+		t.Fatalf("tool call=%+v, want apply_patch", call)
+	}
+	var args map[string]any
+	if err := json.Unmarshal(call.Args, &args); err != nil {
+		t.Fatalf("unmarshal args: %v", err)
+	}
+	patch, _ := args["patch"].(string)
+	if !strings.Contains(patch, "*** Update File: a.txt") || !strings.Contains(patch, "-old") || !strings.Contains(patch, "+new") {
+		t.Fatalf("patch not preserved: %q", patch)
+	}
+	if !strings.Contains(msgs[2].Content, "Success") {
+		t.Fatalf("tool result=%q", msgs[2].Content)
+	}
+}
+
+func TestConvertCodexRollout_ExecUnmappableNestedToolKeepsSourceCall(t *testing.T) {
+	// write_stdin drives an interactive session Chord does not keep, so the call
+	// has no mapping — but it still ran, so the source `exec` call and its result
+	// stay in the trajectory.
+	input := "const r = await tools.write_stdin({session_id:35265,yield_time_ms:1000,max_output_tokens:12000,chars:\"\"});\ntext(JSON.stringify(r));"
+	data := codexExecRollout(t, input,
+		"Script completed\nWall time 1.0 seconds\nOutput:\n",
+		"{\"session_id\":35265,\"output\":\"more\"}",
+	)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	wantArgs, _ := json.Marshal(map[string]string{"input": input})
+	assertCodexImportedToolCall(t, msgs[1], "exec", string(wantArgs))
+	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_exec" || msgs[2].Content != "{\"session_id\":35265,\"output\":\"more\"}" {
+		t.Fatalf("paired tool result lost: %+v", msgs[2])
+	}
+	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+	if report.CodexExecScripts != 1 {
+		t.Fatalf("CodexExecScripts=%d, want 1", report.CodexExecScripts)
+	}
+}
+
+func TestConvertCodexRollout_ExecWithMultipleNestedCallsKeepsSourceCall(t *testing.T) {
+	// The isolate may issue several calls; the mapping must refuse instead of
+	// picking the first, and the unanalyzable script stays the source call.
+	input := "const a = await tools.exec_command({cmd:\"pwd\"});\nconst b = await tools.exec_command({cmd:\"ls\"});\ntext(a.output + b.output);"
+	data := codexExecRollout(t, input,
+		"Script completed\nWall time 0.0 seconds\nOutput:\n",
+		"/tmp\nfile.go\n",
+	)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	wantArgs, _ := json.Marshal(map[string]string{"input": input})
+	assertCodexImportedToolCall(t, msgs[1], "exec", string(wantArgs))
+	if msgs[2].Role != message.RoleTool || msgs[2].Content != "/tmp\nfile.go\n" {
+		t.Fatalf("paired tool result lost: %+v", msgs[2])
+	}
+	if report.StructuredToolCalls != 0 || report.UnsupportedToolCalls != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+	if report.CodexExecScripts != 0 {
+		t.Fatalf("CodexExecScripts=%d, want 0", report.CodexExecScripts)
+	}
+}
+
+func TestConvertCodexRollout_CollaborationToolKeepsSourceCall(t *testing.T) {
+	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"turn_context","payload":{"turn_id":"turn-1"}}
+{"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"review it"}],"turn_id":"turn-1"}}
+{"timestamp":"2026-05-09T04:43:48Z","type":"response_item","payload":{"type":"function_call","name":"wait_agent","namespace":"collaboration","arguments":"{\"timeout_ms\":1000}","call_id":"call_agent","turn_id":"turn-1"}}
+{"timestamp":"2026-05-09T04:43:49Z","type":"response_item","payload":{"type":"function_call_output","output":"agent finished","call_id":"call_agent","turn_id":"turn-1"}}
+`)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	assertCodexImportedToolCall(t, msgs[1], "wait_agent", `{"timeout_ms":1000}`)
+	if msgs[2].Role != message.RoleTool || msgs[2].ToolCallID != "call_agent" || msgs[2].Content != "agent finished" {
+		t.Fatalf("paired tool result lost: %+v", msgs[2])
+	}
+	if report.StructuredToolCalls != 0 || report.StructuredToolResults != 1 || report.UnsupportedToolCalls != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
+func TestConvertCodexRollout_WebSearchEndRestoresAsToolCall(t *testing.T) {
 	data := []byte(`{"timestamp":"2026-05-09T04:43:46Z","type":"turn_context","payload":{"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:47Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"search it"}],"turn_id":"turn-1"}}
 {"timestamp":"2026-05-09T04:43:48Z","type":"event_msg","payload":{"type":"web_search_begin","call_id":"ws_1","turn_id":"turn-1"}}
@@ -570,17 +857,10 @@ func TestConvertCodexRollout_WebSearchEndRestoresAsUnsupportedToolCard(t *testin
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "web_search" {
-		t.Fatalf("web_search not restored as tool card: %+v", msgs[1])
-	}
-	assertCodexUnsupportedToolArgs(t, msgs[1].ToolCalls[0].Args)
-	var args map[string]any
-	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &args); err != nil {
-		t.Fatalf("unmarshal args: %v", err)
-	}
-	arguments, ok := args["arguments"].(map[string]any)
-	if !ok || arguments["query"] != "golang json rawmessage" {
-		t.Fatalf("web_search arguments not preserved: %#v", args)
+	assertCodexImportedToolCall(t, msgs[1], "web_search",
+		`{"action":{"query":"golang json rawmessage","type":"search"},"query":"golang json rawmessage"}`)
+	if msgs[2].Role != "assistant" || msgs[2].Content != "done" {
+		t.Fatalf("trailing assistant message lost: %+v", msgs[2])
 	}
 	if report.StructuredToolCalls != 0 || report.UnsupportedToolCalls != 1 || report.SkippedStatusEvents != 1 {
 		t.Fatalf("report=%+v", report)
@@ -623,6 +903,50 @@ func TestCodexNormalizeSearchArgsUseCurrentToolSchema(t *testing.T) {
 	patterns, _ := globArgs["patterns"].([]any)
 	if len(patterns) != 1 || patterns[0] != "**/*.go" || globArgs["path"] != "." {
 		t.Fatalf("glob args=%#v", globArgs)
+	}
+}
+
+// A mapped shell call must carry only what the source recorded: a description
+// survives when the origin had one (OpenCode's bash tool), and is absent
+// otherwise so the Chord card header shows the command's first line — the same
+// view a live call produces, with no import marker for user or model.
+func TestCodexNormalizeShellArgsOmitsSynthesizedDescription(t *testing.T) {
+	raw := codexNormalizeShellArgs(map[string]any{"command": "ls -la"})
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatalf("unmarshal shell args: %v", err)
+	}
+	if _, ok := args["description"]; ok {
+		t.Fatalf("synthesized a description the source never had: %#v", args)
+	}
+	if args["command"] != "ls -la" {
+		t.Fatalf("command lost: %#v", args)
+	}
+
+	withDesc := codexNormalizeShellArgs(map[string]any{"command": "ls -la", "description": "list files"})
+	var descArgs map[string]any
+	if err := json.Unmarshal(withDesc, &descArgs); err != nil {
+		t.Fatalf("unmarshal shell args: %v", err)
+	}
+	if descArgs["description"] != "list files" {
+		t.Fatalf("source description dropped: %#v", descArgs)
+	}
+}
+
+func TestCodexNormalizeExecCommandArgsOmitsSynthesizedDescription(t *testing.T) {
+	raw := codexNormalizeExecCommandArgs(map[string]any{"cmd": "git status", "workdir": "/tmp/project", "yield_time_ms": 10000, "max_output_tokens": 12000})
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatalf("unmarshal exec_command args: %v", err)
+	}
+	if _, ok := args["description"]; ok {
+		t.Fatalf("synthesized a description the source never had: %#v", args)
+	}
+	if args["command"] != "git status" || args["workdir"] != "/tmp/project" {
+		t.Fatalf("command or workdir lost: %#v", args)
+	}
+	if _, ok := args["timeout_ms"]; ok {
+		t.Fatalf("host-only knobs leaked into chord args: %#v", args)
 	}
 }
 
