@@ -2,10 +2,14 @@ package sessionimport
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"path/filepath"
 	"strings"
 
+	"github.com/keakon/chord/internal/imageutil"
 	"github.com/keakon/chord/internal/message"
 	"github.com/keakon/chord/internal/tools"
 )
@@ -23,6 +27,8 @@ const (
 	openCodePartTypeThinking       = "thinking"
 	openCodePartTypeStepStart      = "step-start"
 	openCodePartTypeStepFinish     = "step-finish"
+	openCodePartTypeFile           = "file"
+	openCodePartTypePatch          = "patch"
 
 	openCodeRoleUser      = "user"
 	openCodeRoleHuman     = "human"
@@ -54,8 +60,10 @@ const (
 
 // convertOpenCodeExport converts an OpenCode `opencode export <sessionID>` JSON
 // file into a Chord main transcript. Recognized tool parts are split into
-// Chord tool-call/result messages; unrecognized parts stay as readable fallback
-// text so their source payload is not lost.
+// Chord tool-call/result messages; a tool part with no Chord mapping stays a
+// tool call under the name and arguments the source agent used, so the actions
+// that ran survive the import. Only a part too malformed to name or pair a call
+// stays as readable fallback text.
 func convertOpenCodeExport(data []byte, reasoningMode string, report *ImportReport) ([]message.Message, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) == 0 {
@@ -338,12 +346,16 @@ func convertOpenCodePartsOrdered(raw json.RawMessage, role message.Role, reasoni
 		return nil, 0, 0, 0, 0, false, nil, fmt.Errorf("parse parts array: %w", err)
 	}
 	var rendered []string
+	var attachments []message.ContentPart
 	flushText := func() {
 		content := strings.TrimSpace(strings.Join(rendered, "\n\n"))
-		if content != "" {
-			msgs = append(msgs, message.Message{Role: role, Content: content, Provenance: importedOpenCodeProvenance()})
-		}
 		rendered = nil
+		pending := attachments
+		attachments = nil
+		if content == "" && len(pending) == 0 {
+			return
+		}
+		msgs = append(msgs, message.Message{Role: role, Content: content, Parts: pending, Provenance: importedOpenCodeProvenance()})
 	}
 	for _, part := range parts {
 		typ, _ := part["type"].(string)
@@ -355,11 +367,18 @@ func convertOpenCodePartsOrdered(raw json.RawMessage, role message.Role, reasoni
 			}
 		case openCodePartTypeTool, openCodePartTypeToolInvocation:
 			toolCount++
-			callMsg, resultMsg, ok := openCodeStructuredToolMessages(part)
+			callMsg, resultMsg, ok, mapped := openCodeStructuredToolMessages(part)
 			if ok {
 				flushText()
 				msgs = append(msgs, callMsg)
-				structuredToolCalls++
+				if mapped {
+					structuredToolCalls++
+				} else {
+					// No Chord tool performs this work, so the part is kept
+					// verbatim under the name the source agent used; the call
+					// still ran, and only its mapping is missing.
+					unsupportedToolCount++
+				}
 				if resultMsg != nil {
 					msgs = append(msgs, *resultMsg)
 					structuredToolResults++
@@ -370,16 +389,13 @@ func convertOpenCodePartsOrdered(raw json.RawMessage, role message.Role, reasoni
 			// Report the first reason openCodeStructuredToolMessages gave up,
 			// mirroring its check order, so the warning names the actual cause.
 			name := strings.TrimSpace(openCodeToolName(part))
-			_, mapped := openCodeToolMapping[strings.ToLower(name)]
 			switch {
 			case name == "":
 				warns = append(warns, "tool part missing name; imported as text")
 			case strings.TrimSpace(openCodeToolCallID(part)) == "":
 				warns = append(warns, "tool part missing call id; imported as text")
-			case !mapped:
-				warns = append(warns, "unsupported tool "+name+"; imported as text")
 			default:
-				warns = append(warns, "tool arguments could not be normalized; imported as text")
+				warns = append(warns, "tool arguments could not be encoded; imported as text")
 			}
 			unsupportedToolCount++
 			rendered = append(rendered, renderedTool)
@@ -396,6 +412,23 @@ func convertOpenCodePartsOrdered(raw json.RawMessage, role message.Role, reasoni
 			}
 		case openCodePartTypeStepStart, openCodePartTypeStepFinish:
 			// OpenCode step markers are UI-only and intentionally skipped.
+		case openCodePartTypePatch:
+			// A patch part is OpenCode's own ledger of the files an edit
+			// touched (a hash and a path list); the edit itself is already the
+			// tool call beside it, so importing the ledger only restates it.
+		case openCodePartTypeFile:
+			// An attached file carries its bytes inline as a data URL, so the
+			// payload is the attachment the model received and becomes a Chord
+			// image/PDF part rather than megabytes of base64 in the text.
+			attach, marker := openCodeFilePartAttachment(part)
+			if attach != nil {
+				flushText()
+				attachments = append(attachments, *attach)
+				continue
+			}
+			if marker != "" {
+				rendered = append(rendered, marker)
+			}
 		case "":
 			warns = append(warns, "part missing type; skipped")
 		default:
@@ -423,44 +456,86 @@ func extractReasoningText(obj map[string]json.RawMessage, contentTypes []string)
 	return "", nil, nil
 }
 
-func openCodeStructuredToolMessages(part map[string]any) (message.Message, *message.Message, bool) {
+// openCodeStructuredToolMessages turns a tool part into a Chord tool-call
+// message plus its result. A part whose tool maps onto a Chord tool keeps the
+// mapping and the tool's own argument shape — the closest tool is picked by
+// what the arguments recorded, so a replacement imports as the replacement it
+// was instead of being repackaged as another tool's input. A part no candidate
+// reads stays a real call under the name and arguments the source agent used:
+// it ran, so the history keeps the action instead of rewriting it into text or
+// wrapping it in importer metadata. The model reads the preserved form as the
+// completed action it was.
+//
+// The returned mapped flag tells the caller which of the two happened, so it can
+// count the call as structured or as an unmapped-but-kept one.
+func openCodeStructuredToolMessages(part map[string]any) (call message.Message, result *message.Message, ok bool, mapped bool) {
 	name := openCodeToolName(part)
 	if strings.TrimSpace(name) == "" {
-		return message.Message{}, nil, false
+		return message.Message{}, nil, false, false
 	}
 	callID := openCodeToolCallID(part)
 	if strings.TrimSpace(callID) == "" {
-		return message.Message{}, nil, false
+		return message.Message{}, nil, false, false
 	}
 	args := openCodeToolArgs(part)
-	if chordName, ok := openCodeToolMapping[strings.ToLower(name)]; ok {
-		rawArgs, _ := json.Marshal(args)
-		if norm := codexNormalizeToolArgs(name, chordName, rawArgs); norm != nil {
-			call := message.Message{
-				Role: message.RoleAssistant,
-				ToolCalls: []message.ToolCall{{
-					ID:   callID,
-					Name: chordName,
-					Args: norm,
-				}},
-				Provenance: importedOpenCodeProvenance(),
-			}
-			output, hasOutput := openCodeToolOutputValue(part)
-			status := openCodeToolStatus(part, hasOutput)
-			if !hasOutput && status == "" {
-				return call, nil, true
-			}
-			result := message.Message{
-				Role:       message.RoleTool,
-				ToolCallID: callID,
-				Content:    output,
-				ToolStatus: status,
-				Provenance: importedOpenCodeProvenance(),
-			}
-			return call, &result, true
-		}
+	if importedToolClosestIs(name, tools.NameShell) {
+		args = openCodeShellArgsToSeconds(args)
 	}
-	return message.Message{}, nil, false
+	rawArgs, err := json.Marshal(args)
+	if err != nil {
+		return message.Message{}, nil, false, false
+	}
+	if chordName, norm, found := resolveImportedTool(name, rawArgs); found {
+		callMsg, resultMsg := openCodeToolMessages(chordName, callID, norm, part)
+		return callMsg, resultMsg, true, true
+	}
+	// No candidate could read the arguments, so the source name and arguments
+	// are the pair that belong together and both are kept as they were issued
+	// rather than mixing one with the other.
+	callMsg, resultMsg := openCodeToolMessages(name, callID, rawArgs, part)
+	return callMsg, resultMsg, true, false
+}
+
+// openCodeShellArgsToSeconds rewrites the millisecond timeout OpenCode records
+// into the seconds the shared argument normalizer expects. Feeding the source
+// value straight through would multiply it by a thousand again and leave the
+// imported call carrying a deadline it never ran with.
+func openCodeShellArgsToSeconds(args map[string]any) map[string]any {
+	ms := codexPickFloat(args, "timeout")
+	if ms <= 0 {
+		return args
+	}
+	out := make(map[string]any, len(args))
+	maps.Copy(out, args)
+	out["timeout"] = ms / 1000
+	return out
+}
+
+func openCodeToolMessages(name, callID string, args json.RawMessage, part map[string]any) (message.Message, *message.Message) {
+	call := message.Message{
+		Role: message.RoleAssistant,
+		ToolCalls: []message.ToolCall{{
+			ID:   callID,
+			Name: name,
+			Args: args,
+		}},
+		Provenance: importedOpenCodeProvenance(),
+	}
+	output, hasOutput := openCodeToolOutputValue(part)
+	status := openCodeToolStatus(part, hasOutput)
+	if !hasOutput && status == "" {
+		// A call the source never finished (streaming or still running) has no
+		// result to pair with it.
+		return call, nil
+	}
+	result := message.Message{
+		Role:       message.RoleTool,
+		ToolCallID: callID,
+		Content:    output,
+		ToolStatus: status,
+		Provenance: importedOpenCodeProvenance(),
+	}
+	return call, &result
 }
 
 func renderOpenCodeUnsupportedToolPart(part map[string]any) string {
@@ -477,42 +552,159 @@ func renderOpenCodeUnsupportedToolPart(part map[string]any) string {
 	return b.String()
 }
 
-var openCodeToolMapping = map[string]string{
-	"bash":         tools.NameShell,
-	"shell":        tools.NameShell,
-	"exec":         tools.NameShell,
-	"exec_command": tools.NameShell,
-	"read":         tools.NameRead,
-	"read_file":    tools.NameRead,
-	"file_read":    tools.NameRead,
-	"write":        tools.NameWrite,
-	"write_file":   tools.NameWrite,
-	"file_write":   tools.NameWrite,
-	"edit":         tools.NameEdit,
-	"edit_file":    tools.NameEdit,
-	"apply_patch":  tools.NameEdit,
-	"update":       tools.NameEdit,
-	"delete":       tools.NameDelete,
-	"remove":       tools.NameDelete,
-	"delete_file":  tools.NameDelete,
-	"file_delete":  tools.NameDelete,
-	"grep":         tools.NameGrep,
-	"search":       tools.NameGrep,
-	"glob":         tools.NameGlob,
-	"list_files":   tools.NameGlob,
+// openCodeFilePartAttachment reads an OpenCode file part into a Chord binary
+// content part. The export carries the bytes inline as a data URL, so decoding
+// them keeps the attachment the model actually received. A part with no
+// decodable inline bytes — a path or remote URL the import cannot resolve —
+// returns a short marker instead, so a payload is never inlined as text.
+func openCodeFilePartAttachment(part map[string]any) (*message.ContentPart, string) {
+	mime, _ := firstString(part, "mime", "mimeType", "mediaType")
+	url, _ := firstString(part, "url", "data", "uri", "src")
+	name, _ := firstString(part, "filename", "name", "path")
+	payload, dataMime, ok := decodeOpenCodeDataURL(url)
+	if mime == "" {
+		mime = dataMime
+	}
+	partType := openCodeAttachmentPartType(mime)
+	if ok && partType != "" {
+		if limit := openCodeAttachmentLimit(mime); len(payload) > limit {
+			// An inline payload is not bounded by anything on the producer
+			// side, so cap it with the limits Chord already applies to a
+			// pasted image or PDF rather than writing an attachment the
+			// preview path would refuse to read back.
+			return nil, openCodeAttachmentMarker(name, mime, url) + oversizeAttachmentSuffix(len(payload), limit)
+		}
+		return &message.ContentPart{
+			Type:     partType,
+			MimeType: mime,
+			Data:     payload,
+			FileName: openCodeAttachmentFileName(name, mime),
+		}, ""
+	}
+	return nil, openCodeAttachmentMarker(name, mime, url)
+}
+
+// openCodeAttachmentLimit bounds the inline payload an import carries, using
+// the same limits the clipboard reader enforces, so an imported attachment is
+// never larger than one a user could have pasted.
+func openCodeAttachmentLimit(mime string) int {
+	if mime == "application/pdf" {
+		return imageutil.MaxPDFBytes
+	}
+	return imageutil.MaxImageSourceBytes
+}
+
+// oversizeAttachmentSuffix explains why an inline payload was not carried, so
+// the marker names the limit that dropped it instead of only the file.
+func oversizeAttachmentSuffix(size, limit int) string {
+	return fmt.Sprintf("\n[dropped: %d bytes over the %d-byte import limit]", size, limit)
+}
+
+// decodeOpenCodeDataURL splits an inline `data:` payload into its bytes and
+// declared media type. Only base64 data URLs carry an attachment; anything else
+// is left to the caller.
+func decodeOpenCodeDataURL(url string) ([]byte, string, bool) {
+	const prefix = "data:"
+	if !strings.HasPrefix(url, prefix) {
+		return nil, "", false
+	}
+	meta, payload, found := strings.Cut(strings.TrimPrefix(url, prefix), ",")
+	if !found || !strings.Contains(meta, ";base64") {
+		return nil, "", false
+	}
+	data, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil || len(data) == 0 {
+		return nil, "", false
+	}
+	mime, _, _ := strings.Cut(meta, ";")
+	return data, strings.ToLower(strings.TrimSpace(mime)), true
+}
+
+func openCodeAttachmentPartType(mime string) message.ContentPartType {
+	switch {
+	case strings.HasPrefix(mime, "image/"):
+		return message.ContentPartImage
+	case mime == "application/pdf":
+		return message.ContentPartPDF
+	}
+	return ""
+}
+
+// openCodeAttachmentFileName keeps the name the source recorded, adding the
+// extension its media type implies when the name has none, so a persisted
+// attachment file is recognizable without inspecting its bytes.
+func openCodeAttachmentFileName(name, mime string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if filepath.Ext(name) == "" {
+		return name + openCodeAttachmentExt(mime)
+	}
+	return name
+}
+
+func openCodeAttachmentExt(mime string) string {
+	switch mime {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "application/pdf":
+		return ".pdf"
+	default:
+		return ".png"
+	}
+}
+
+// openCodeAttachmentMarker names an attachment whose bytes the import cannot
+// carry inline. A path or remote URL is kept so the reference stays resolvable;
+// an inline payload is dropped because it has no standalone location.
+func openCodeAttachmentMarker(name, mime, url string) string {
+	var b strings.Builder
+	b.WriteString("[attachment]")
+	if name != "" {
+		b.WriteString(" ")
+		b.WriteString(name)
+	}
+	if mime != "" {
+		b.WriteString(" (")
+		b.WriteString(mime)
+		b.WriteString(")")
+	}
+	if url != "" && !strings.HasPrefix(url, "data:") {
+		b.WriteString("\n")
+		b.WriteString(url)
+	}
+	return b.String()
 }
 
 func openCodeToolArgs(part map[string]any) map[string]any {
+	// state.input is the current schema; it is an object for completed calls.
+	// For unfinished calls the runtime may store a string or array instead;
+	// wrap those so the arguments stay a valid JSON object rather than
+	// silently becoming {}.
 	if state, ok := part["state"].(map[string]any); ok {
-		if input, ok := state["input"].(map[string]any); ok {
-			return input
+		if input, ok := state["input"]; ok {
+			if obj, ok := input.(map[string]any); ok {
+				return obj
+			}
+			return map[string]any{"input": input}
 		}
 	}
-	if input, ok := part["input"].(map[string]any); ok {
-		return input
+	if input, ok := part["input"]; ok {
+		if obj, ok := input.(map[string]any); ok {
+			return obj
+		}
+		return map[string]any{"input": input}
 	}
-	if args, ok := part["args"].(map[string]any); ok {
-		return args
+	if args, ok := part["args"]; ok {
+		if obj, ok := args.(map[string]any); ok {
+			return obj
+		}
+		return map[string]any{"input": args}
 	}
 	return map[string]any{}
 }
@@ -531,14 +723,84 @@ func openCodeToolOutputValue(part map[string]any) (string, bool) {
 		if s, ok := state["output"].(string); ok {
 			return s, true
 		}
-		if result, ok := state["result"].(string); ok {
-			return result, true
+		if s, ok := state["result"].(string); ok {
+			return s, true
+		}
+		// Current exports carry the result as a Tool.Content array, and a
+		// failed tool as a structured error, instead of a plain output string.
+		if s, ok := openCodeToolStateText(state["content"]); ok {
+			return s, true
+		}
+		if s, ok := openCodeToolStateError(state["error"]); ok {
+			return s, true
 		}
 	}
 	if s, ok := part["output"].(string); ok {
 		return s, true
 	}
 	if s, ok := part["result"].(string); ok {
+		return s, true
+	}
+	if s, ok := openCodeToolStateText(part["content"]); ok {
+		return s, true
+	}
+	if s, ok := openCodeToolStateError(part["error"]); ok {
+		return s, true
+	}
+	return "", false
+}
+
+// openCodeToolStateText joins a Tool.Content array — {"type":"text","text"} or
+// {"type":"file","uri","name"} — into the flat text a Chord tool result holds.
+func openCodeToolStateText(v any) (string, bool) {
+	items, ok := v.([]any)
+	if !ok || len(items) == 0 {
+		return "", false
+	}
+	var parts []string
+	for _, item := range items {
+		block, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch block["type"] {
+		case "text":
+			if s, ok := block["text"].(string); ok && strings.TrimSpace(s) != "" {
+				parts = append(parts, s)
+			}
+		case "file":
+			// uri is the payload's required location; name is an optional
+			// display label, so keeping one never replaces the other. An
+			// imported result is flat text, so both facts survive together
+			// instead of the attachment silently losing where the file is.
+			name, _ := block["name"].(string)
+			name = strings.TrimSpace(name)
+			uri, _ := block["uri"].(string)
+			uri = strings.TrimSpace(uri)
+			switch {
+			case name != "" && uri != "":
+				parts = append(parts, fmt.Sprintf("%s (%s)", name, uri))
+			case name != "":
+				parts = append(parts, name)
+			case uri != "":
+				parts = append(parts, uri)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return "", false
+	}
+	return strings.Join(parts, "\n"), true
+}
+
+// openCodeToolStateError reads the structured error a failed tool carries, so
+// the failure reaches the transcript instead of only its status.
+func openCodeToolStateError(v any) (string, bool) {
+	err, ok := v.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	if s, ok := err["message"].(string); ok && strings.TrimSpace(s) != "" {
 		return s, true
 	}
 	return "", false

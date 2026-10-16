@@ -755,9 +755,20 @@ func convertClaudeToolCall(block claudeContentBlock) (message.ToolCall, bool) {
 		if norm := normalizeClaudeDeleteArgs(block.Input); norm != nil {
 			return message.ToolCall{ID: block.ID, Name: tools.NameDelete, Args: norm}, false
 		}
-	case "Edit", "MultiEdit", "Update", tools.NameEdit:
-		if norm := normalizeClaudeEditArgs(name, block.Input); norm != nil {
-			return message.ToolCall{ID: block.ID, Name: tools.NameEdit, Args: norm}, false
+	case "AskUserQuestion", tools.NameQuestion:
+		// Claude asks with the same questions Chord does, so the call imports
+		// as the question it was whenever its choices can be read; otherwise it
+		// stays the source call (see normalizeImportedQuestionArgs).
+		if chordName, norm, ok := resolveImportedTool(name, block.Input); ok {
+			return message.ToolCall{ID: block.ID, Name: chordName, Args: norm}, false
+		}
+	case "Edit", "MultiEdit", "Update", tools.NameEdit, tools.NameApplyPatch:
+		// Claude's edit family is decided by what the call recorded: a
+		// before/after pair (or MultiEdit's batch) is Chord's own replacement,
+		// while an Update carrying a patch envelope becomes apply_patch rather
+		// than a replacement tool forced to take patch arguments.
+		if chordName, norm, ok := resolveImportedTool(name, block.Input); ok {
+			return message.ToolCall{ID: block.ID, Name: chordName, Args: norm}, false
 		}
 	}
 	if name == "" {
@@ -916,58 +927,6 @@ func normalizeClaudeDeleteArgs(raw json.RawMessage) json.RawMessage {
 	result := map[string]any{"paths": paths, "reason": reason}
 	b, _ := json.Marshal(result)
 	return b
-}
-
-func normalizeClaudeEditArgs(name string, raw json.RawMessage) json.RawMessage {
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return nil
-	}
-	if strings.EqualFold(name, "Update") {
-		if patch := claudePickString(args, "patch", "input"); patch != "" {
-			path, body, ok := splitImportedEditEnvelope(patch)
-			if !ok {
-				return nil
-			}
-			b, _ := json.Marshal(map[string]any{"path": path, "patch": body})
-			return b
-		}
-	}
-	path := claudePickString(args, "path", "file_path", "file")
-	if path == "" {
-		return nil
-	}
-	if strings.EqualFold(name, "MultiEdit") {
-		edits, ok := args["edits"].([]any)
-		if !ok || len(edits) == 0 {
-			return nil
-		}
-		var b strings.Builder
-		for _, rawEdit := range edits {
-			edit, ok := rawEdit.(map[string]any)
-			if !ok {
-				return nil
-			}
-			oldText := claudePickString(edit, "old_string", "old", "old_text")
-			newText := claudePickString(edit, "new_string", "new", "new_text")
-			if oldText == "" {
-				return nil
-			}
-			b.WriteString("@@\n")
-			writePatchLines(&b, "-", oldText)
-			writePatchLines(&b, "+", newText)
-		}
-		out, _ := json.Marshal(map[string]any{"path": path, "patch": b.String()})
-		return out
-	}
-	oldText := claudePickString(args, "old_string", "old", "old_text")
-	newText := claudePickString(args, "new_string", "new", "new_text")
-	if oldText == "" {
-		return nil
-	}
-	patch := buildSingleUpdatePatch(oldText, newText)
-	out, _ := json.Marshal(map[string]any{"path": path, "patch": patch})
-	return out
 }
 
 func rawContentString(raw json.RawMessage) string {

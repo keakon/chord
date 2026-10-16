@@ -1076,28 +1076,6 @@ func validateImportedCodexMessages(msgs []message.Message, report *ImportReport)
 // Tool mapping table
 // ---------------------------------------------------------------------------
 
-// codexToolMapping maps Codex tool names to Chord tool names.
-// Only tools with high-confidence argument mapping are included.
-// Tools not in this map stay as the source tool call under its own name
-// and arguments.
-var codexToolMapping = map[string]string{
-	"exec_command": tools.NameShell,
-	"shell":        tools.NameShell,
-	"apply_patch":  tools.NameApplyPatch,
-	"read_file":    tools.NameRead,
-	"file_read":    tools.NameRead,
-	"write_file":   tools.NameWrite,
-	"file_write":   tools.NameWrite,
-	"edit_file":    tools.NameApplyPatch,
-	"delete_file":  tools.NameDelete,
-	"file_delete":  tools.NameDelete,
-	"remove_file":  tools.NameDelete,
-	"grep":         tools.NameGrep,
-	"search":       tools.NameGrep,
-	"glob":         tools.NameGlob,
-	"list_files":   tools.NameGlob,
-}
-
 // codexResolveChordTool maps a Codex tool call onto a real Chord tool and its
 // normalized arguments, returning a non-empty reason when it cannot.
 //
@@ -1114,15 +1092,11 @@ func codexResolveChordTool(tc *codexToolCall) (chordName string, args json.RawMe
 	if strings.EqualFold(strings.TrimSpace(tc.Namespace), codexCollaborationNamespace) {
 		return "", nil, "codex collaboration tool has no Chord equivalent"
 	}
-	mapped, ok := codexToolMapping[tc.Name]
+	resolved, normalized, ok := resolveImportedTool(tc.Name, tc.Arguments)
 	if !ok {
-		return "", nil, "no safe Chord mapping"
+		return "", nil, "no Chord tool takes these arguments"
 	}
-	normalized := codexNormalizeToolArgs(tc.Name, mapped, tc.Arguments)
-	if normalized == nil {
-		return "", nil, "argument normalization failed"
-	}
-	return mapped, normalized, ""
+	return resolved, normalized, ""
 }
 
 // codexResolveExecTool maps the single nested call of an `exec` script onto the
@@ -1139,7 +1113,7 @@ func codexResolveExecTool(tc *codexToolCall) (string, json.RawMessage, string) {
 		}
 		return tools.NameShell, args, ""
 	case codexNestedApplyPatch:
-		args := codexNormalizeEditArgs(map[string]any{"input": tc.ExecScript.Input})
+		args := normalizeApplyPatchArgs(map[string]any{"input": tc.ExecScript.Input})
 		if args == nil {
 			return "", nil, "codex apply_patch input is not a patch envelope"
 		}
@@ -1183,84 +1157,6 @@ func codexNormalizeExecCommandArgs(args map[string]any) json.RawMessage {
 	return b
 }
 
-// codexNormalizeToolArgs converts Codex tool arguments into the shape
-// expected by Chord tools. Returns nil if normalization fails.
-func codexNormalizeToolArgs(codexName string, chordName string, rawArgs json.RawMessage) json.RawMessage {
-	if len(rawArgs) == 0 {
-		return nil
-	}
-
-	// Parse raw arguments.
-	var args map[string]any
-	if err := json.Unmarshal(rawArgs, &args); err != nil {
-		// Try as a string (the Codex responses API sends arguments as a JSON string).
-		var s string
-		if err := json.Unmarshal(rawArgs, &s); err == nil {
-			if err := json.Unmarshal([]byte(s), &args); err != nil {
-				return nil
-			}
-		} else {
-			return nil
-		}
-	}
-
-	switch chordName {
-	case tools.NameApplyPatch, tools.NameEdit:
-		// Imported Codex edit_file/apply_patch records are normalized as Chord patch-style
-		// calls to preserve historical session replay; replace-edit sessions use their own schema.
-		if strings.EqualFold(codexName, "edit_file") {
-			return codexNormalizeEditFileArgs(args)
-		}
-		return codexNormalizeEditArgs(args)
-	case tools.NameShell:
-		return codexNormalizeShellArgs(args)
-	case tools.NameRead:
-		return codexNormalizeReadArgs(args)
-	case tools.NameWrite:
-		return codexNormalizeWriteArgs(args)
-	case tools.NameDelete:
-		return codexNormalizeDeleteArgs(args)
-	case tools.NameGrep:
-		return codexNormalizeGrepArgs(args)
-	case tools.NameGlob:
-		return codexNormalizeGlobArgs(args)
-	default:
-		return nil
-	}
-}
-
-func codexNormalizeEditArgs(args map[string]any) json.RawMessage {
-	patch := codexPickString(args, "patch", "input")
-	if patch == "" {
-		return nil
-	}
-	if strings.HasPrefix(strings.TrimSpace(patch), "*** Begin Patch") {
-		result := map[string]any{"patch": patch}
-		b, _ := json.Marshal(result)
-		return b
-	}
-	path := codexPickString(args, "path", "file_path", "file")
-	if path == "" {
-		return nil
-	}
-	result := map[string]any{"patch": buildImportedApplyPatchEnvelope(path, patch)}
-	b, _ := json.Marshal(result)
-	return b
-}
-
-func codexNormalizeEditFileArgs(args map[string]any) json.RawMessage {
-	path := codexPickString(args, "path", "file_path", "file")
-	oldText := codexPickString(args, "old_string", "old", "old_text")
-	newText := codexPickString(args, "new_string", "new", "new_text")
-	if path == "" || oldText == "" {
-		return nil
-	}
-	patch := buildImportedApplyPatchEnvelope(path, buildSingleUpdatePatch(oldText, newText))
-	result := map[string]any{"patch": patch}
-	b, _ := json.Marshal(result)
-	return b
-}
-
 func buildImportedApplyPatchEnvelope(path, patch string) string {
 	return "*** Begin Patch\n*** Update File: " + path + "\n" + strings.TrimRight(patch, "\r\n") + "\n*** End Patch"
 }
@@ -1290,7 +1186,7 @@ func codexNormalizeShellArgs(args map[string]any) json.RawMessage {
 }
 
 func codexNormalizeReadArgs(args map[string]any) json.RawMessage {
-	path := codexPickString(args, "path", "file_path", "file")
+	path := codexPickString(args, "path", "file_path", "filePath", "file")
 	if path == "" {
 		return nil
 	}
@@ -1306,7 +1202,7 @@ func codexNormalizeReadArgs(args map[string]any) json.RawMessage {
 }
 
 func codexNormalizeWriteArgs(args map[string]any) json.RawMessage {
-	path := codexPickString(args, "path", "file_path", "file")
+	path := codexPickString(args, "path", "file_path", "filePath", "file")
 	content := codexPickString(args, "content", "data", "text")
 	if path == "" || content == "" {
 		return nil
@@ -1414,54 +1310,6 @@ func codexPickStringList(m map[string]any, keys ...string) []string {
 		}
 	}
 	return nil
-}
-
-func buildSingleUpdatePatch(oldText, newText string) string {
-	var b strings.Builder
-	b.WriteString("@@\n")
-	writePatchLines(&b, "-", oldText)
-	writePatchLines(&b, "+", newText)
-	return b.String()
-}
-
-func splitImportedEditEnvelope(patch string) (string, string, bool) {
-	lines := strings.Split(strings.ReplaceAll(patch, "\r\n", "\n"), "\n")
-	if len(lines) < 4 || strings.TrimSpace(lines[0]) != "*** Begin Patch" {
-		return "", "", false
-	}
-	path, ok := strings.CutPrefix(strings.TrimSpace(lines[1]), "*** Update File:")
-	if !ok || strings.TrimSpace(path) == "" {
-		return "", "", false
-	}
-	end := len(lines)
-	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
-		end--
-	}
-	if end <= 2 || strings.TrimSpace(lines[end-1]) != "*** End Patch" {
-		return "", "", false
-	}
-	body := strings.Join(lines[2:end-1], "\n")
-	if body != "" {
-		body += "\n"
-	}
-	return strings.TrimSpace(path), body, true
-}
-
-func writePatchLines(b *strings.Builder, prefix, text string) {
-	if text == "" {
-		return
-	}
-	lines := strings.SplitAfter(text, "\n")
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-		line = strings.TrimSuffix(line, "\n")
-		line = strings.TrimSuffix(line, "\r")
-		b.WriteString(prefix)
-		b.WriteString(line)
-		b.WriteString("\n")
-	}
 }
 
 // ---------------------------------------------------------------------------

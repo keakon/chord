@@ -54,6 +54,12 @@
 
 - 导入 Claude 会话现在保留未映射工具调用的原始参数，不再包一层导入器元数据，卡片显示的是源头发起的调用本身——`WebSearch` 带着它的 query，而不是 `{unsupported, source, reason, arguments}` 记账字段。有 Chord 映射的工具名（`Bash`、`Read`、`Write`、`Edit`、`MultiEdit`、`Update` 等）仍转换为对应的 Chord 工具。
 
+- 导入 OpenCode 会话现在把没有 Chord 映射的工具调用——`webfetch`、`websearch`、`patch`、`task`、MCP 工具——保留为真实的工具调用，用源头的名称和参数，并带上它的结果，而不是一段 `[Imported unsupported tool: …]` JSON 文本。工具结果现在也会从当前导出结构里读取——输出是 `state.content` 数组，失败的工具带 `state.error`——导入的调用因此保留它当时产出的输出；文件结果同时保留文件名和所在位置。无法命名或配对调用的部件（没有名称、没有调用 ID）仍按文本导入。
+
+- 导入 OpenCode 会话现在把附件当附件、按工具自己的参数名读取：剪贴板截图落成真实图片附件，而不是把 base64 全文塞进正文；`edit` 用源头的 `filePath`/`oldString`/`newString` 也能映射到 Chord 的 edit，卡片正常渲染 diff，不再是一张没有内容、无法展开的空卡；`read`/`write` 保留它们的路径；`bash` 的毫秒 `timeout` 保留调用当时实际使用的时限。OpenCode 每次编辑后附加的 `patch` 台账（hash + 文件列表，只是重复旁边那次编辑）不再作为文本导入。
+
+- 导入会话里的工具调用现在按**记录的参数**映射到最接近的 Chord 工具，而不是按源头的工具名：记成「原文 → 新文」的那次编辑——OpenCode `edit` 的 `filePath`/`oldString`/`newString`、Codex `edit_file`、Claude 的 `Edit` 与 `MultiEdit`——导入为 `edit`，参数是 Chord 自己的 `old_string`/`new_string`，卡片渲染出替换本身的 diff；真正记录为 `*** Begin Patch` 信封的调用落到 `apply_patch`，补丁原文照搬；替换对和补丁都没有的记录——拿不到这次编辑发生在哪——保留为源头的工具调用，不再伪造成一次 Chord 调用。此前每次替换都会被重组成补丁信封、却仍挂在 `edit` 名下，而 `edit` 的 schema 并不接受 `patch` 字段（required `path` 且 `additionalProperties: false`）：卡片只能显示信封而不是编辑的位置，导入看似命中工具却带着工具不接受的参数形状，模型照抄会得到被工具拒绝的调用。
+
 - 修复重试错误面板在 provider 返回原始错误正文时打乱对话框布局的问题。provider 错误消息可能带 CRLF 行尾（例如 HTML 500 错误页）；面板现在先中和控制字符再显示，边框、消息行和剪贴板复制保持完整，不再出现整行被从左侧覆盖的情况。
 
 - 复制或双击会话记录中的文本不再丢字符。助手徽标和摘要行记录的缩进比其前方内容更宽，复制 `ASSISTANT` 会得到 `SSISTANT`、`Tasks` 会得到 `sks`；软换行的代码续行与点击处理使用的是不同列空间，双击会选中相邻单词，三击会截掉行尾。
@@ -74,6 +80,8 @@
 - 文件预览不再滚过最后一页进入空白填充，Markdown 预览在样式文本后面保留对话框背景，内容区与填充区不再显示成两种底色。
 - `present` 默认不再把 `.chord/` 下的文件作为面向用户的交付文件:任务笔记与计划文档通过计划摘要或交接共享;只有明确要求、且路径被 `present` 专属权限规则点名时才会交付。
 - 当前模型下被隐藏的文件工具不再直接拒绝调用:隐藏的同类工具仍会执行,并在结果中附带一句提示,下次改用可见工具。权限规则仍决定调用本身:拒绝会在执行前拦截,`ask` 规则仍会弹出确认。
+
+- 导入会话中能映射为 Chord 工具的调用,现在只携带源头记录的参数,卡片与 live 调用完全一致:Codex `exec_command`、Claude `Bash`、OpenCode `bash` 映射到 `shell` 后不再附带合成出来的 description(“Imported Codex exec_command” 之类),标题行回到命令首行;源头自己记了 description 的照搬。
 
 ## 0.8.2 - 2026-10-11
 

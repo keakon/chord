@@ -304,7 +304,7 @@ chord import claude --id <session-id> [--root ~/.claude/projects]
 
 Notes:
 
-- Recognized external tool calls become readable Chord tool cards. Unsupported records remain visible as fallback text instead of being silently dropped.
+- Recognized external tool calls become readable Chord tool cards. A call with no usable mapping keeps the source tool's name and arguments as a real tool call, paired with its result; only a record too malformed to name or pair (no name, no call id, or arguments that cannot be encoded) falls back to readable text instead of being silently dropped or left as raw JSON.
 - Imported tool cards represent history only. Re-run `read` before editing a file when you need current contents and stale-change protection.
 - Signed Anthropic thinking is preserved. Other reasoning is omitted by default; use `--reasoning visible` to import it as plain text.
 - Claude sidechain/sub-agent entries are excluded from the main session. Import warnings, skipped records, and conversion statistics are written to `import-report.json`.

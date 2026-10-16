@@ -558,16 +558,18 @@ func TestConvertCodexRollout_EditToolConvertsToEdit(t *testing.T) {
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3", len(msgs))
 	}
-	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != tools.NameApplyPatch {
+	if msgs[1].Role != "assistant" || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != tools.NameEdit {
 		t.Fatalf("msg1=%+v", msgs[1])
 	}
 	var args map[string]any
 	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &args); err != nil {
 		t.Fatalf("unmarshal args: %v", err)
 	}
-	patch, _ := args["patch"].(string)
-	if _, exists := args["path"]; exists || !strings.Contains(patch, "*** Update File: notes.txt") || !strings.Contains(patch, "-hello") || !strings.Contains(patch, "+hi") {
-		t.Fatalf("patch=%q", patch)
+	// edit_file records a before/after pair, so the closest Chord tool is the
+	// replacement: the pair carries over instead of being repackaged as a
+	// patch envelope the source never issued.
+	if args["path"] != "notes.txt" || args["old_string"] != "hello" || args["new_string"] != "hi" || args["replace_all"] != true {
+		t.Fatalf("args=%#v", args)
 	}
 	if msgs[2].Role != "tool" || msgs[2].ToolCallID != "call_e" || !strings.Contains(msgs[2].Content, "ok") {
 		t.Fatalf("msg2=%+v", msgs[2])

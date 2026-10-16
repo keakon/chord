@@ -2,10 +2,12 @@ package sessionimport
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
+	"github.com/keakon/chord/internal/tools"
 )
 
 // assertClaudeUnsupportedToolCall asserts that a Claude tool call with no Chord
@@ -155,6 +157,78 @@ func TestNormalizeClaudeBashArgsOmitsSynthesizedDescription(t *testing.T) {
 	}
 }
 
+// TestConvertClaudeTranscript_MapsAskUserQuestionToQuestion pins that Claude's
+// question imports as Chord's own question: the recorded text, header, flag and
+// choices carry over, and an option is named by the label the user was shown
+// rather than by an ID the importer invented.
+func TestConvertClaudeTranscript_MapsAskUserQuestionToQuestion(t *testing.T) {
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"pick"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":{"questions":[{"question":"Which branch?","header":"Branch","multiSelect":true,"options":[{"label":"main","description":"trunk"},{"label":"develop","description":"integration"}]}]}}]}}
+{"uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"User answered: main"}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs=%+v, want user + question card + result", msgs)
+	}
+	if len(msgs[1].ToolCalls) != 1 {
+		t.Fatalf("tool calls=%+v, want the question", msgs[1].ToolCalls)
+	}
+	call := msgs[1].ToolCalls[0]
+	if call.Name != tools.NameQuestion {
+		t.Fatalf("tool name=%q, want %q", call.Name, tools.NameQuestion)
+	}
+	args, err := tools.DecodeQuestionArgs(call.Args)
+	if err != nil {
+		t.Fatalf("imported question args are not a valid question call: %v (%s)", err, call.Args)
+	}
+	if len(args.Questions) != 1 {
+		t.Fatalf("questions=%+v, want one", args.Questions)
+	}
+	want := tools.QuestionItem{
+		Question: "Which branch?",
+		Header:   "Branch",
+		Multiple: true,
+		Options: []tools.QuestionOption{
+			{ID: "main", Label: "main", Description: "trunk"},
+			{ID: "develop", Label: "develop", Description: "integration"},
+		},
+	}
+	if !reflect.DeepEqual(args.Questions[0], want) {
+		t.Fatalf("question=%+v, want %+v", args.Questions[0], want)
+	}
+	if report.UnsupportedToolCalls != 0 || report.StructuredToolCalls != 1 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
+// TestConvertClaudeTranscript_KeepsAskUserQuestionWhenLabelsCannotIdentifyOptions
+// pins the fallback of that mapping: choices Chord cannot tell apart under their
+// labels have no faithful reading, so the call stays the source call with the
+// source arguments instead of being given IDs the source never recorded.
+func TestConvertClaudeTranscript_KeepsAskUserQuestionWhenLabelsCannotIdentifyOptions(t *testing.T) {
+	input := `{"questions":[{"question":"Which one?","header":"Pick","options":[{"label":"same"},{"label":"same"}]}]}`
+	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"pick"}]}}
+{"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"AskUserQuestion","input":` + input + `}]}}
+{"uuid":"u2","parentUuid":"a1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"User answered: same"}]}}
+`)
+	var report ImportReport
+	msgs, err := convertClaudeTranscript(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertClaudeTranscript: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs=%+v, want user + tool card + result", msgs)
+	}
+	assertClaudeUnsupportedToolCall(t, msgs[1], "AskUserQuestion", input)
+	if report.UnsupportedToolCalls != 1 || report.StructuredToolCalls != 0 {
+		t.Fatalf("report=%+v", report)
+	}
+}
+
 // TestConvertClaudeTranscript_UnsupportedToolKeepsSourceCall pins that a Claude
 // tool with no Chord mapping stays a tool call under its own name with its own
 // arguments: the action ran in the source session, so it is history the model
@@ -218,7 +292,7 @@ func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing
 	if len(msgs[1].ToolCalls) != 4 {
 		t.Fatalf("tool calls=%+v, want 4", msgs[1].ToolCalls)
 	}
-	wantNames := []string{"edit", "edit", "write", "edit"}
+	wantNames := []string{"edit", "edit", "write", "apply_patch"}
 	for i, call := range msgs[1].ToolCalls {
 		if call.Name != wantNames[i] {
 			t.Fatalf("tool call %d name=%q, want %q", i, call.Name, wantNames[i])
@@ -228,11 +302,23 @@ func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing
 	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &editArgs); err != nil {
 		t.Fatalf("unmarshal edit args: %v", err)
 	}
-	if editArgs["path"] != "a.txt" {
+	// A before/after pair imports as the replacement it was: the same values
+	// under Chord's names, not a rewritten patch body.
+	if editArgs["path"] != "a.txt" || editArgs["old_string"] != "old" || editArgs["new_string"] != "new" {
 		t.Fatalf("edit args=%#v", editArgs)
 	}
-	if patch, _ := editArgs["patch"].(string); !strings.Contains(patch, "-old") || !strings.Contains(patch, "+new") {
-		t.Fatalf("edit patch=%q", patch)
+	var multiArgs struct {
+		Path  string `json:"path"`
+		Edits []struct {
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		} `json:"edits"`
+	}
+	if err := json.Unmarshal(msgs[1].ToolCalls[1].Args, &multiArgs); err != nil {
+		t.Fatalf("unmarshal MultiEdit args: %v", err)
+	}
+	if multiArgs.Path != "b.txt" || len(multiArgs.Edits) != 1 || multiArgs.Edits[0].OldString != "x" || multiArgs.Edits[0].NewString != "y" {
+		t.Fatalf("MultiEdit args=%#v", multiArgs)
 	}
 	var writeArgs map[string]any
 	if err := json.Unmarshal(msgs[1].ToolCalls[2].Args, &writeArgs); err != nil {
@@ -245,8 +331,11 @@ func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing
 	if err := json.Unmarshal(msgs[1].ToolCalls[3].Args, &updateArgs); err != nil {
 		t.Fatalf("unmarshal update args: %v", err)
 	}
+	// An Update that really spoke in patches becomes apply_patch and keeps the
+	// envelope it was issued with, rather than a replacement tool taking patch
+	// arguments.
 	updatePatch, _ := updateArgs["patch"].(string)
-	if updateArgs["path"] != "d.txt" || strings.Contains(updatePatch, "*** Update File") || !strings.Contains(updatePatch, "-old") || !strings.Contains(updatePatch, "+new") {
+	if _, exists := updateArgs["path"]; exists || !strings.Contains(updatePatch, "*** Update File:d.txt") || !strings.Contains(updatePatch, "-old") || !strings.Contains(updatePatch, "+new") {
 		t.Fatalf("update args=%#v", updateArgs)
 	}
 	if report.StructuredToolCalls != 4 || report.UnsupportedToolCalls != 0 || report.Claude == nil || report.Claude.StructuredToolCalls != 4 {
@@ -254,7 +343,7 @@ func TestConvertClaudeTranscript_FileMutationToolsConvertWhenPossible(t *testing
 	}
 }
 
-func TestConvertClaudeTranscript_MultiEditEmptyReplacementConvertsToDeletionPatch(t *testing.T) {
+func TestConvertClaudeTranscript_MultiEditEmptyReplacementConvertsToDeletionBatch(t *testing.T) {
 	data := []byte(`{"uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"delete text"}]}}
 {"uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_multi","name":"MultiEdit","input":{"file_path":"b.txt","edits":[{"old_string":"remove me\n","new_string":""}]}}]}}
 `)
@@ -266,13 +355,20 @@ func TestConvertClaudeTranscript_MultiEditEmptyReplacementConvertsToDeletionPatc
 	if len(msgs) != 2 || len(msgs[1].ToolCalls) != 1 || msgs[1].ToolCalls[0].Name != "edit" {
 		t.Fatalf("msgs=%+v, want edit tool card", msgs)
 	}
-	var args map[string]any
+	var args struct {
+		Path  string `json:"path"`
+		Edits []struct {
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		} `json:"edits"`
+	}
 	if err := json.Unmarshal(msgs[1].ToolCalls[0].Args, &args); err != nil {
 		t.Fatalf("unmarshal args: %v", err)
 	}
-	patch, _ := args["patch"].(string)
-	if args["path"] != "b.txt" || !strings.Contains(patch, "-remove me") || strings.Contains(patch, "+remove me") {
-		t.Fatalf("patch=%q", patch)
+	// The batch keeps the empty replacement: dropping it would turn an edit
+	// that deleted text into one that changed nothing.
+	if args.Path != "b.txt" || len(args.Edits) != 1 || !strings.Contains(args.Edits[0].OldString, "remove me") || args.Edits[0].NewString != "" {
+		t.Fatalf("args=%#v", args)
 	}
 	if report.StructuredToolCalls != 1 || report.UnsupportedToolCalls != 0 {
 		t.Fatalf("report=%+v", report)

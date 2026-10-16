@@ -587,7 +587,7 @@ chord resume 20260428064910975 --fork-history=2    # fork 第 2 次已应用的�
 
 Claude Code 导入会尽力重建**非 sidechain 的主会话**，而不是盲目导入最新的原始叶子节点。compact 边界会用于重建，但不会渲染为可见 transcript 消息。sidechain/sub-agent 条目默认会从主导入 session 中排除；检测到时，CLI 输出会报告跳过数量，`import-report.json` 会记录 Claude 专属诊断信息，并在存在 sidechain agent ID 时一并记录。
 
-可识别的导入工具会始终在参数能标准化时转换成最接近的当前 Chord 工具卡（结构化的工具调用与对应结果），包括把文件修改显示为 `edit`、`apply_patch`、`write` 或 `delete`。只有无法识别的记录（没有 Chord 映射、缺少 call id、或参数无法标准化）才会保留为可读的 fallback 文本，而不是原始 JSON。转换后的导入工具不会恢复 Chord FileTracker snapshot；如果编辑导入会话涉及的文件前需要最新文件上下文或 stale-change 风险提示，请重新 `read`。
+可识别的导入工具会在参数能标准化时转换成最接近的当前 Chord 工具卡（结构化的工具调用与对应结果），包括把文件修改显示为 `edit`、`apply_patch`、`write` 或 `delete`。没有可用映射的记录不会改写成其他形式：它保留源工具的名字和参数，作为真实的工具调用与结果成对出现在轨迹里，因为这是源会话里确实发生过的动作。只有残缺到无法命名或配对的记录（缺少名称或 call id、参数无法编码）才会降级为可读文本，而不是原始 JSON。转换后的导入工具不会恢复 Chord FileTracker snapshot；如果编辑导入会话涉及的文件前需要最新文件上下文或 stale-change 风险提示，请重新 `read`。
 
 ### Flag
 
