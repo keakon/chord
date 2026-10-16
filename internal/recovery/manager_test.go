@@ -979,12 +979,16 @@ func TestListSessions_OrdersAndCounts(t *testing.T) {
 	writeMsg(s2, message.RoleUser, "Second session first message")
 	// Make the lower-numbered session the most recently active one, so the
 	// expected order is the opposite of the removed descending-ID sort: the
-	// assertion below fails if ordering silently falls back to the ID.
+	// assertion below fails if ordering silently falls back to the ID. The gap
+	// between the stamps stays far larger than any filesystem write-timestamp
+	// granularity, so the append below lands ahead of session 1000 even where
+	// write timestamps are coarse (a coarse clock can stamp them at, or
+	// marginally behind, the wall clock captured here).
 	now := time.Now()
-	if err := os.Chtimes(filepath.Join(s1, "main.jsonl"), now, now); err != nil {
+	if err := os.Chtimes(filepath.Join(s1, "main.jsonl"), now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chtimes(filepath.Join(s2, "main.jsonl"), now.Add(-time.Minute), now.Add(-time.Minute)); err != nil {
+	if err := os.Chtimes(filepath.Join(s2, "main.jsonl"), now.Add(-2*time.Minute), now.Add(-2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if err := SaveSessionMeta(s2, SessionMeta{ForkedFrom: "1000"}); err != nil {
@@ -1031,7 +1035,8 @@ func TestListSessions_OrdersAndCounts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListSessions after append: %v", err)
 	}
-	// The append also makes 2000 the most recently active session again.
+	// The append also makes 2000 the most recently active session again, so it
+	// must jump ahead of session 1000's older stamp.
 	if list[0].ID != "2000" {
 		t.Fatalf("order after append: got %q first, want 2000", list[0].ID)
 	}
