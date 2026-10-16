@@ -172,6 +172,10 @@ func TestExternalCheckoutsRealGopls(t *testing.T) {
 		}
 	}
 	git("init", "-q")
+	// The checkout is created here rather than by testgit, so it must opt out of
+	// the developer's global core.hooksPath itself; a hook that needs a review
+	// remote fails every commit made inside it.
+	git("config", "core.hooksPath", "")
 	git("add", "go.mod", "main.go")
 	git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "initial")
 	linked := filepath.Join(resolvedTempDir(t), "linked")

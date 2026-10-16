@@ -83,6 +83,14 @@ func build(contents map[string]string) ([]file, error) {
 		{"-c", "init.templateDir=", "init", "-q", "--initial-branch=main"},
 		{"add", "."},
 		{"-c", "commit.gpgsign=false", "-c", "core.hooksPath=", "commit", "-q", "--allow-empty", "-m", "fixture"},
+		// The fixture outlives this build, so the isolation has to be part of
+		// its configuration: every later commit — by a test helper or by the
+		// code under test — must ignore the developer's global hook and signing
+		// policy. A developer-global core.hooksPath would otherwise run inside
+		// each of those commits (a hook that needs a review remote fails them
+		// all). An empty core.hooksPath disables hook lookup.
+		{"config", "core.hooksPath", ""},
+		{"config", "commit.gpgsign", "false"},
 	} {
 		// No detached maintenance may mutate the repository while its files
 		// are captured below or outlive the temporary seed directory.

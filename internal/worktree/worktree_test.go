@@ -356,6 +356,11 @@ func TestGitMainRootResolvesBareRepositoryToItself(t *testing.T) {
 	seed := setupTestRepo(t)
 	bare := filepath.Join(t.TempDir(), "repo.git")
 	runTestGit(t, seed, "clone", "-q", "--bare", seed, bare)
+	// The clone does not inherit the seed fixture's empty core.hooksPath, and
+	// every later command inside it — the worktree add below included — would
+	// otherwise run the developer's global hooks. Opt out in the bare
+	// repository itself, like the seed fixture does.
+	runTestGit(t, bare, "config", "core.hooksPath", "")
 	canonicalBare, err := config.CanonicalProjectRoot(bare)
 	if err != nil {
 		t.Fatalf("canonical bare: %v", err)

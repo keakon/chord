@@ -24,6 +24,13 @@ func TestSessionsListStorageAndWorktreeScope(t *testing.T) {
 		}
 	}
 	git("init", "-q")
+	// The repository is created here rather than by testgit, so it must opt out
+	// of the developer's global core.hooksPath itself; a hook that needs a
+	// review remote fails every commit made inside it.
+	git("config", "core.hooksPath", "")
+	// The developer's global commit.gpgsign can also make every commit fail
+	// (missing signing key), so the test repository opts out of that too.
+	git("config", "commit.gpgsign", "false")
 	git("-c", "user.name=Sample", "-c", "user.email=sample@example.invalid", "commit", "--allow-empty", "-qm", "initial")
 	linked := filepath.Join(t.TempDir(), "linked")
 	git("worktree", "add", "--detach", linked)
