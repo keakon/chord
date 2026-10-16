@@ -329,10 +329,11 @@ func TestExpandedGrepCountSummaryStillShowsAllMatches(t *testing.T) {
 	}
 }
 
-func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
-	// 11 result lines is exactly the case where the generic "one hidden line"
-	// heuristic used to force the card expanded, which also made Space unable
-	// to collapse it again (the toggle guard treats force-expanded as pinned).
+func TestGrepGlobManyResultLinesStayCollapsible(t *testing.T) {
+	// 11 result lines is one more than the folded preview, so the fold hides
+	// exactly one line. The card must stay collapsible: the toggle guard
+	// treats force-expanded as pinned, so a force-expand here would leave
+	// Space dead.
 	tests := []struct {
 		name     string
 		toolName string
@@ -382,6 +383,63 @@ func TestGrepGlobForceExpandedHeuristicDoesNotBlockCollapse(t *testing.T) {
 				t.Fatalf("expected second toggle to restore collapsed glyph, got:\n%s", recollapsed)
 			}
 		})
+	}
+}
+
+func TestUnknownToolCardWithOneHiddenLineStaysCollapsible(t *testing.T) {
+	// A tool call kept under its source name — an imported codex `exec`, an
+	// unmapped claude/opencode call — carries one long single-line result. When
+	// that line wraps to exactly maxToolCallCompactResultLines+1 the folded card
+	// hides exactly one line. Same boundary as
+	// TestGrepGlobManyResultLinesStayCollapsible, reached through an unknown
+	// tool name instead of grep/glob: the card must stay collapsible, since the
+	// toggle guard treats force-expanded as pinned and the marker is withheld.
+	width := 120
+	block := &Block{
+		ID:                     1,
+		Type:                   BlockToolCall,
+		ToolName:               "exec",
+		Content:                `{"input":"const results = await Promise.all([\n  tools.exec_command({cmd:\"ls\",workdir:\"/repo\"}),\n]);"}`,
+		ResultContent:          strings.TrimSpace(strings.Repeat("token ", 184)),
+		ResultDone:             true,
+		ToolCallDetailExpanded: false,
+	}
+	if hidden := compactToolHiddenResultLines(block, compactToolContentWidthForRenderWidth(width)); hidden != 1 {
+		t.Fatalf("setup: folded card should hide exactly one line, hid %d", hidden)
+	}
+
+	// Collapsed by default, with the collapsed disclosure glyph.
+	collapsed := terminaltext.StripANSI(strings.Join(block.Render(width, ""), "\n"))
+	if !strings.Contains(collapsed, "✓ ▸ exec") {
+		t.Fatalf("expected collapsed card to show the collapsed disclosure glyph, got:\n%s", collapsed)
+	}
+	if strings.Contains(collapsed, "↳ Result:") {
+		t.Fatalf("expected collapsed card to hide the result body, got:\n%s", collapsed)
+	}
+
+	// Space expands...
+	if !block.ToggleAtWidth(width) {
+		t.Fatal("Space must toggle a card that hides one line")
+	}
+	expanded := terminaltext.StripANSI(strings.Join(block.Render(width, ""), "\n"))
+	if !strings.Contains(expanded, "✓ ▾ exec") {
+		t.Fatalf("expected expanded card to show the expanded disclosure glyph, got:\n%s", expanded)
+	}
+	if !strings.Contains(expanded, "↳ Result:") {
+		t.Fatalf("expected expanded card to reveal the result body, got:\n%s", expanded)
+	}
+	if expandedLines, collapsedLines := strings.Count(expanded, "\n"), strings.Count(collapsed, "\n"); expandedLines <= collapsedLines {
+		t.Fatalf("expanding must add lines: expanded=%d collapsed=%d", expandedLines, collapsedLines)
+	}
+
+	// ...and a second Space collapses again.
+	block.ToggleAtWidth(width)
+	recollapsed := terminaltext.StripANSI(strings.Join(block.Render(width, ""), "\n"))
+	if !strings.Contains(recollapsed, "✓ ▸ exec") {
+		t.Fatalf("expected second toggle to restore collapsed glyph, got:\n%s", recollapsed)
+	}
+	if strings.Contains(recollapsed, "↳ Result:") {
+		t.Fatalf("expected re-collapsed card to hide the result body again, got:\n%s", recollapsed)
 	}
 }
 

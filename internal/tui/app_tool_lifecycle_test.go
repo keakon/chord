@@ -784,45 +784,6 @@ func TestDuplicateToolResultEventIsIgnoredAfterCompletion(t *testing.T) {
 	}
 }
 
-func TestSingleHiddenLineGenericCompactToolCannotBeCollapsedByToggleAtWidth(t *testing.T) {
-	// Grep/glob are intentionally not part of this heuristic: their count-based
-	// summaries must stay collapsible (see TestGrepGlobForceExpandedHeuristic-
-	// DoesNotBlockCollapse).
-	tests := []struct {
-		name     string
-		toolName string
-		content  string
-		result   string
-	}{
-		{
-			name:     "delete",
-			toolName: "delete",
-			content:  `{"paths":["examples/compression-config.yaml"],"reason":"remove obsolete example"}`,
-			result:   "delete completed.\n\nDeleted (1):\n- examples/compression-config.yaml",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			block := &Block{
-				ID:                     1,
-				Type:                   BlockToolCall,
-				ToolName:               tt.toolName,
-				Content:                tt.content,
-				ResultContent:          tt.result,
-				ResultDone:             true,
-				ToolCallDetailExpanded: true,
-			}
-
-			block.ToggleAtWidth(120)
-
-			if !block.ToolCallDetailExpanded {
-				t.Fatal("single hidden line compact tool should remain expanded after toggle")
-			}
-		})
-	}
-}
-
 func TestToolResultEventDeleteTracksDeletedFileWithoutFakeLineCount(t *testing.T) {
 	m := NewModelWithSize(nil, 80, 12)
 	m.sidebar.Update(nil, "main", "builder")

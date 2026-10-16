@@ -863,15 +863,20 @@ func compactToolHiddenDetailLines(b *Block, keys []string, vals map[string]strin
 	return hidden
 }
 
+// compactToolResultForceExpanded reports whether a compact card must render
+// expanded regardless of ToolCallDetailExpanded. A force-expanded card is
+// pinned: canToggleAtWidth refuses every collapse and the disclosure marker is
+// withheld, so the decision and the fold must agree — only outcome cards
+// qualify, where the folded body already carries the whole card.
 func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 	if b == nil {
 		return false
 	}
 	switch b.ToolName {
 	case tools.NameGrep, tools.NameGlob, tools.NameShell:
-		// Search cards have their own count-based summaries; the generic
-		// "only one hidden line" heuristic must not force them expanded, or
-		// Space could never collapse them again (the toggle guard below).
+		// Search cards have their own count-based summaries and fold from the
+		// start; an error or cancelled search card keeps its outcome in the
+		// folded body and stays collapsible.
 		return false
 	}
 	if isMCPToolName(b.ToolName) {
@@ -881,20 +886,17 @@ func (b *Block) compactToolResultForceExpanded(contentWidth int) bool {
 		// expansion.
 		return false
 	}
-	keys, vals := b.toolArgsParsed()
-	_, mainPart, _, _, _, _, _ := b.toolHeaderMeta()
-	hidden := compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
-	if hidden == 1 {
-		return true
-	}
 	// An error/cancelled card renders its outcome in the collapsed body too, so
 	// when no other line is hidden and the envelope has nothing left to reveal
 	// the toggle would only restructure the same text. Keep the compact row and
 	// deny the marker.
-	if toolOutcomeKindOf(b) != toolOutcomeNone {
-		return hidden == 0 && !toolOutcomeFoldable(b, contentWidth)
+	if toolOutcomeKindOf(b) == toolOutcomeNone {
+		return false
 	}
-	return false
+	keys, vals := b.toolArgsParsed()
+	_, mainPart, _, _, _, _, _ := b.toolHeaderMeta()
+	hidden := compactToolHiddenDetailLines(b, keys, vals, mainPart, contentWidth, false)
+	return hidden == 0 && !toolOutcomeFoldable(b, contentWidth)
 }
 
 func compactToolContentWidthForRenderWidth(width int) int {
