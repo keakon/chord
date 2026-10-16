@@ -357,7 +357,7 @@ A: By default, unrecognized models use the `edit` (replace) tool. gpt-5-and-late
 A: Yes. Both work with any text file (detected encoding: UTF-8, UTF-16, GB18030, etc.). Binary files are rejected.
 
 **Q: Can I use both tools in the same conversation?**
-A: Only one tool is visible at a time, based on the active model. You won't see both simultaneously.
+A: Only one tool is advertised at a time, based on the active model. If the model emits the hidden sibling (usually primed by conversation history across a model switch), the call still executes, with a one-line note redirecting it to the visible tool next time. Permission rules still decide the call before anything runs: a `deny` rejects it, and an `ask` rule still prompts for confirmation. `write`/`delete` hidden for patch-native models behave the same way.
 
 ## See Also
 

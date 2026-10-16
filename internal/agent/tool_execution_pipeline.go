@@ -459,6 +459,14 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 	if p.executionGate.Snapshot().Paused {
 		return execResult, &executiongate.ErrSessionPaused{}
 	}
+	// Visibility is advisory only: hidden file-tool siblings still execute,
+	// steered by the nudge installed before arg normalization (so even a
+	// malformed envelope that fails normalize still carries the redirect).
+	// Manual disables stay hard — the permission layer below rejects them
+	// before anything runs.
+	if cleanup := p.deferredHiddenSiblingNudge(&execResult, tc.Name, tc.Args); cleanup != nil {
+		defer cleanup()
+	}
 	if err := normalizeCompatibleToolCallArgs(&tc, &execResult); err != nil {
 		return execResult, err
 	}
@@ -469,11 +477,6 @@ func (p toolExecutionPipeline) execute(ctx context.Context, tc message.ToolCall,
 		}
 	}
 
-	if p.visibleToolNames != nil {
-		if err := p.checkVisible(tc.Name); err != nil {
-			return execResult, err
-		}
-	}
 	if err := p.validateKnownTool(tc.Name); err != nil {
 		return execResult, err
 	}
@@ -746,15 +749,15 @@ func (p toolExecutionPipeline) executeSpeculative(ctx context.Context, tc messag
 	}
 	tc.Name = tools.NormalizeName(tc.Name)
 	execResult = ToolExecutionResult{EffectiveArgsJSON: string(tc.Args)}
+	// Mirror execute(): visibility stays advisory on the speculative path as
+	// well; manual disables are enforced by permission (Allow-only start).
+	if cleanup := p.deferredHiddenSiblingNudge(&execResult, tc.Name, tc.Args); cleanup != nil {
+		defer cleanup()
+	}
 	if err := normalizeCompatibleToolCallArgs(&tc, &execResult); err != nil {
 		return execResult, err
 	}
 	p = p.withMachineStateBaseDir(tc)
-	if p.visibleToolNames != nil {
-		if err := p.checkVisible(tc.Name); err != nil {
-			return execResult, err
-		}
-	}
 	if err := p.validateKnownTool(tc.Name); err != nil {
 		return execResult, err
 	}
@@ -1030,47 +1033,139 @@ func staleWritePathCount(trackedFilePath string, deleteLocks *deleteLockSet) int
 	return 0
 }
 
-// checkVisible rejects tool calls for per-model filtered file tools (patch ↔
-// edit, and write/delete hidden for patch-native models) that are not in the
-// current model-appropriate visible set. This enforces the per-model file tool
-// filter at execution time so a model cannot circumvent the declared tool
-// surface by calling a hidden sibling tool name from conversation history.
-// Other tools are governed by the existing permission/registry flow and do not
-// need a secondary visibility gate.
-func (p toolExecutionPipeline) checkVisible(name string) error {
+// hiddenFileToolName normalizes name and reports which member of the per-model
+// file-tool family it is, or "" for every other tool. Membership is settled
+// before the visible set is consulted: building that set walks the whole tool
+// registry, and almost every tool call is not a file mutation at all.
+func hiddenFileToolName(name string) string {
+	switch n := tools.NormalizeName(name); n {
+	case tools.NameApplyPatch, tools.NameEdit, tools.NameWrite, tools.NameDelete:
+		return n
+	default:
+		return ""
+	}
+}
+
+// hiddenSiblingNudge reports a one-line redirect when name is hidden by the
+// per-model file-tool selection but still executes: the visible surface only
+// decides what is advertised, never what may run. Empty when the call is on
+// the visible surface, outside the file-tool family, or names no useful
+// redirect (e.g. every sibling is hidden too, in which case the permission
+// layer owns the rejection).
+//
+// Manual disables stay hard: a permission deny still rejects the call at
+// applyPermission time, before anything runs — the edit/patch fallback
+// inheritance (permission.evaluateWithEditPatchFallback) and the write/delete
+// operation thresholds inside the envelope evaluation
+// (evaluateApplyPatchPermissionInDir) both apply to hidden-sibling calls. The
+// wording stays short on purpose: it names the alternative once and claims
+// nothing about whether the call ran, so the same line fits success and
+// failure results.
+func (p toolExecutionPipeline) hiddenSiblingNudge(name string, args json.RawMessage) string {
+	hidden := hiddenFileToolName(name)
+	if hidden == "" || p.visibleToolNames == nil {
+		return ""
+	}
 	visible := p.visibleToolNames()
 	if visible == nil {
-		return nil
+		return ""
 	}
-	n := tools.NormalizeName(name)
-	switch n {
-	case tools.NameApplyPatch, tools.NameEdit, tools.NameWrite, tools.NameDelete:
-	default:
-		return nil
+	if _, ok := visible[hidden]; ok {
+		return ""
 	}
-	if _, ok := visible[n]; ok {
-		return nil
-	}
-	_, patchVisible := visible[tools.NameApplyPatch]
-	switch n {
+	switch hidden {
 	case tools.NameApplyPatch:
-		if _, ok := visible[tools.NameEdit]; ok {
-			return fmt.Errorf("tool %q is not available for the current model. Use %q instead (the %q file-modification tool)", tools.NameApplyPatch, tools.NameEdit, tools.NameEdit)
+		if target := patchRedirectTarget(visible, args); target != "" {
+			return fmt.Sprintf("Note: %q is hidden for the current model; use %s next time.", tools.NameApplyPatch, target)
 		}
 	case tools.NameEdit:
-		if patchVisible {
-			return fmt.Errorf("tool %q is not available for the current model. Use %q instead (the %q file-modification tool)", tools.NameEdit, tools.NameApplyPatch, tools.NameApplyPatch)
+		if _, ok := visible[tools.NameApplyPatch]; ok {
+			return fmt.Sprintf("Note: %q is hidden for the current model; use %q (`*** Update File:`) next time.", tools.NameEdit, tools.NameApplyPatch)
 		}
 	case tools.NameWrite:
-		if patchVisible {
-			return fmt.Errorf("tool %q is not available for the current model. Use %q instead: create a file with `*** Add File:` or replace an existing file's contents with `*** Update File:` hunks", tools.NameWrite, tools.NameApplyPatch)
+		if _, ok := visible[tools.NameApplyPatch]; ok {
+			return fmt.Sprintf("Note: %q is hidden for the current model; use %q (`*** Add File:` to create, `*** Update File:` to rewrite) next time.", tools.NameWrite, tools.NameApplyPatch)
 		}
 	case tools.NameDelete:
-		if patchVisible {
-			return fmt.Errorf("tool %q is not available for the current model. Use %q instead: remove files with `*** Delete File:`", tools.NameDelete, tools.NameApplyPatch)
+		if _, ok := visible[tools.NameApplyPatch]; ok {
+			return fmt.Sprintf("Note: %q is hidden for the current model; use %q (`*** Delete File:`) next time.", tools.NameDelete, tools.NameApplyPatch)
 		}
 	}
-	return fmt.Errorf("tool %q is not available for the current model", name)
+	return ""
+}
+
+// deferredHiddenSiblingNudge returns the deferred attach for a hidden
+// file-tool sibling call, or nil when the call needs no redirect. Callers
+// install it before arg normalization so even a malformed hidden-sibling
+// envelope (which fails normalize) still carries the redirect; the deferred
+// attach then covers every later exit, including validation, permission, and
+// execution failures.
+func (p toolExecutionPipeline) deferredHiddenSiblingNudge(execResult *ToolExecutionResult, name string, args json.RawMessage) func() {
+	nudge := p.hiddenSiblingNudge(name, args)
+	if nudge == "" {
+		return nil
+	}
+	return func() {
+		attachHiddenSiblingNudge(execResult, nudge)
+	}
+}
+
+// patchRedirectTarget picks the visible file tool(s) a hidden apply_patch
+// call maps to, from the envelope's operations: updates to edit, additions
+// to write, deletions to delete. Only visible names are reported, and an
+// envelope that mixes operations names every tool it needs, because no single
+// one covers add, update, and delete. Empty when none of the needed tools is
+// visible (the permission layer then owns the rejection). An unparsable patch
+// falls back to the edit counterpart.
+//
+// The envelope is parsed here and parsed again when apply_patch executes:
+// execution owns its own normalization, this lookahead only needs the
+// operation kinds, and the path only runs while apply_patch is hidden, so the
+// two parses stay local rather than sharing parse state across the tool
+// boundary.
+func patchRedirectTarget(visible map[string]struct{}, args json.RawMessage) string {
+	needed := map[string]bool{tools.NameEdit: true}
+	if targets, err := tools.ApplyPatchDisplayTargets(args); err == nil {
+		needed = make(map[string]bool, 3)
+		for _, target := range targets {
+			switch target.Kind {
+			case tools.MutationAdd:
+				needed[tools.NameWrite] = true
+			case tools.MutationDelete:
+				needed[tools.NameDelete] = true
+			default:
+				needed[tools.NameEdit] = true
+			}
+			// A move rewrites the destination, so it needs the update tool too.
+			if target.TargetPath != "" && target.TargetPath != target.SourcePath {
+				needed[tools.NameEdit] = true
+			}
+		}
+	}
+	kept := make([]string, 0, len(needed))
+	for _, name := range []string{tools.NameEdit, tools.NameWrite, tools.NameDelete} {
+		if _, ok := visible[name]; ok && needed[name] {
+			kept = append(kept, fmt.Sprintf("%q", name))
+		}
+	}
+	return strings.Join(kept, "/")
+}
+
+// attachHiddenSiblingNudge records the redirect both beside the payload
+// (Notes, for the UI/persisted split) and inside the model-visible result
+// text. execResult is the named return of the execute/executeSpeculative
+// paths, so a deferred call covers every exit after the visibility gate,
+// including validation, permission, and execution failures.
+func attachHiddenSiblingNudge(execResult *ToolExecutionResult, nudge string) {
+	if execResult == nil || strings.TrimSpace(nudge) == "" {
+		return
+	}
+	execResult.Notes = append(execResult.Notes, nudge)
+	if strings.TrimSpace(execResult.Result) == "" {
+		execResult.Result = nudge
+		return
+	}
+	execResult.Result = appendNotes(execResult.Result, []string{nudge})
 }
 
 func (p toolExecutionPipeline) validateKnownTool(name string) error {

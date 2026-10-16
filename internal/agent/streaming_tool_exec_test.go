@@ -84,7 +84,7 @@ func TestSpeculativeExecutionAbortsMutationWhenJournalAppendFails(t *testing.T) 
 	}
 }
 
-func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t *testing.T) {
+func TestSpeculativeExecutionHiddenSiblingStillExecutesWithNudge(t *testing.T) {
 	projectRoot := t.TempDir()
 	targetPath := filepath.Join(projectRoot, "target.txt")
 	if err := os.WriteFile(targetPath, []byte("old line\n"), 0o644); err != nil {
@@ -102,19 +102,19 @@ func TestSpeculativeExecutionRejectsInvisibleEditFamilyToolBeforeFileMutation(t 
 	}
 
 	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: ` + targetPath + `\n@@\n-old line\n+new line\n*** End Patch"}`)}
-	_, err := pipeline.executeSpeculative(t.Context(), call)
-	if err == nil {
-		t.Fatal("executeSpeculative patch on edit-only surface succeeded; want rejection")
-	}
-	if !strings.Contains(err.Error(), "not available for the current model") || !strings.Contains(err.Error(), tools.NameEdit) {
-		t.Fatalf("err = %q, want hidden tool error mentioning edit alternative", err.Error())
+	execResult, err := pipeline.executeSpeculative(t.Context(), call)
+	if err != nil {
+		t.Fatalf("executeSpeculative hidden patch: %v", err)
 	}
 	got, readErr := os.ReadFile(targetPath)
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
-	if string(got) != "old line\n" {
-		t.Fatalf("file changed after rejected speculative patch = %q", got)
+	if string(got) != "new line\n" {
+		t.Fatalf("file after speculative hidden patch = %q; want new line", got)
+	}
+	if !strings.Contains(execResult.Result, `"apply_patch" is hidden`) {
+		t.Fatalf("result = %q; want redirect nudge", execResult.Result)
 	}
 }
 

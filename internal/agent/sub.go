@@ -1315,7 +1315,6 @@ func (s *SubAgent) newSubLLMStreamReducer(turn *Turn, promoteStreamingActivity f
 		registry:         s.tools,
 		ruleset:          func() permission.Ruleset { return s.currentRuleset() },
 		pathScope:        s.effectivePathScope(),
-		visibleToolNames: s.visibleToolNames,
 		emit:             s.parent.emitToTUI,
 		flushBeforeTool: func() {
 			streamReducer.content.flushThinkingDelta()

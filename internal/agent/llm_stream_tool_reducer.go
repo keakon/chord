@@ -18,7 +18,6 @@ type streamToolDeltaReducer struct {
 	registry                     *tools.Registry
 	ruleset                      func() permission.Ruleset
 	pathScope                    permission.PathScope
-	visibleToolNames             func() map[string]struct{}
 	emit                         func(AgentEvent)
 	flushBeforeTool              func()
 	promoteStreamingActivity     func(source string)
@@ -226,9 +225,6 @@ func (r streamToolDeltaReducer) maybeStartEarlySpeculativeToolCall(callID string
 	if r.syncHookGate == nil || !r.syncHookGate() {
 		decision = evaluateSpeculativeExecutionPolicyWithPrefix(r.registry, ruleset, callName, json.RawMessage(call.ArgsJSON), r.turn.streamingToolCallsBefore(callID), r.pathScope)
 	}
-	if decision.Allowed {
-		decision = r.checkVisibleSpeculativeTool(callName)
-	}
 	if decision.Allowed && !r.directorySpeculativePrefixCovered(callID, callName, call.ArgsJSON) {
 		decision = rejectSpeculativeExecution("directory_instructions_unknown")
 	}
@@ -267,9 +263,6 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 			}
 		}
 	}
-	if decision.Allowed {
-		decision = r.checkVisibleSpeculativeTool(callName)
-	}
 	if decision.Allowed && !r.directorySpeculativePrefixCovered(callID, callName, argsJSON) {
 		decision = rejectSpeculativeExecution("directory_instructions_unknown")
 	}
@@ -292,17 +285,6 @@ func (r streamToolDeltaReducer) handleToolUseEnd(delta message.StreamDelta) {
 	// This event is the call's authoritative args snapshot; a later call's start
 	// must not report it a second time.
 	r.turn.markStreamingToolArgsReported(callID)
-}
-
-func (r streamToolDeltaReducer) checkVisibleSpeculativeTool(name string) speculativeExecutionDecision {
-	if r.visibleToolNames == nil {
-		return speculativeExecutionDecision{Allowed: true}
-	}
-	err := (toolExecutionPipeline{visibleToolNames: r.visibleToolNames}).checkVisible(name)
-	if err == nil {
-		return speculativeExecutionDecision{Allowed: true}
-	}
-	return rejectSpeculativeExecution("hidden_tool:" + tools.NormalizeName(name))
 }
 
 func (r streamToolDeltaReducer) handleRollback(delta message.StreamDelta) {

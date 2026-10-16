@@ -1419,3 +1419,117 @@ func TestAppendIgnoredArgsNoteSeparatesNullOptionals(t *testing.T) {
 		t.Fatalf("note should keep unrecognized parameters separate, got %q", note)
 	}
 }
+
+// A hidden file-tool sibling names the visible tool the call actually maps to,
+// so the redirect stays actionable: additions point at write, deletions at
+// delete, updates at edit, and a mixed envelope names every tool it needs. A
+// surface that keeps none of them yields nothing, leaving the permission layer
+// as the only thing that can reject the call.
+func TestPatchRedirectTargetPicksTheVisibleCounterpart(t *testing.T) {
+	// The two surfaces the per-model filter actually produces: an edit-native
+	// model keeps write/delete alongside edit, a patch-native model keeps only
+	// the envelope.
+	editSurface := map[string]struct{}{tools.NameEdit: {}, tools.NameWrite: {}, tools.NameDelete: {}}
+	editOnly := map[string]struct{}{tools.NameEdit: {}}
+	for _, tc := range []struct {
+		name    string
+		visible map[string]struct{}
+		patch   string
+		want    string
+	}{
+		{"update only", editSurface, "*** Update File: a.txt\n@@\n-old\n+new", `"edit"`},
+		{"add only", editSurface, "*** Add File: b.txt\n+hello", `"write"`},
+		{"delete only", editSurface, "*** Delete File: c.txt", `"delete"`},
+		{"mixed", editSurface, "*** Update File: a.txt\n@@\n-old\n+new\n*** Delete File: c.txt", `"edit"/"delete"`},
+		{"add and delete", editSurface, "*** Add File: b.txt\n+hello\n*** Delete File: c.txt", `"write"/"delete"`},
+		{"move counts as update", editSurface, "*** Update File: a.txt\n*** Move to: d.txt\n@@\n-old\n+new", `"edit"`},
+		{"empty surface", map[string]struct{}{}, "*** Update File: a.txt\n@@\n-old\n+new", ""},
+		{"mapped tool not visible", editOnly, "*** Add File: b.txt\n+hello", ""},
+		{"unparsable patch falls back to edit", editSurface, "not a patch at all", `"edit"`},
+	} {
+		args := json.RawMessage(`{"patch":` + mustJSONString(t, "*** Begin Patch\n"+tc.patch+"\n*** End Patch") + `}`)
+		if got := patchRedirectTarget(tc.visible, args); got != tc.want {
+			t.Errorf("%s: patchRedirectTarget() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// The nudge is only for hidden file tools: a call outside that family, a call
+// on the visible surface, and a call whose whole family is hidden all stay
+// silent, so no advisory line ever competes with a real permission decision.
+func TestHiddenSiblingNudgeOnlyRedirectsHiddenFileTools(t *testing.T) {
+	surface := func(names ...string) toolExecutionPipeline {
+		return toolExecutionPipeline{visibleToolNames: func() map[string]struct{} {
+			visible := make(map[string]struct{}, len(names))
+			for _, name := range names {
+				visible[name] = struct{}{}
+			}
+			return visible
+		}}
+	}
+	editSurface := surface(tools.NameEdit, tools.NameWrite, tools.NameDelete, tools.NameRead)
+	patchSurface := surface(tools.NameApplyPatch, tools.NameRead)
+	addEnvelope := json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: b.txt\n+hello\n*** End Patch"}`)
+
+	for _, tc := range []struct {
+		name      string
+		pipeline  toolExecutionPipeline
+		tool      string
+		args      json.RawMessage
+		wantEmpty bool
+		contains  []string
+	}{
+		{name: "hidden edit on a patch surface", pipeline: patchSurface, tool: tools.NameEdit, args: json.RawMessage(`{}`), contains: []string{`"edit" is hidden`, tools.NameApplyPatch}},
+		{name: "legacy alias normalizes", pipeline: editSurface, tool: "patch", args: json.RawMessage(`{}`), contains: []string{`"apply_patch" is hidden`}},
+		{name: "hidden write on a patch surface", pipeline: patchSurface, tool: tools.NameWrite, args: json.RawMessage(`{}`), contains: []string{`"write" is hidden`, "*** Add File:"}},
+		{name: "hidden delete on a patch surface", pipeline: patchSurface, tool: tools.NameDelete, args: json.RawMessage(`{}`), contains: []string{`"delete" is hidden`, "*** Delete File:"}},
+		{name: "hidden patch names the added file's tool", pipeline: editSurface, tool: tools.NameApplyPatch, args: addEnvelope, contains: []string{`"apply_patch" is hidden`, `"write"`}},
+		{name: "visible tool stays silent", pipeline: editSurface, tool: tools.NameEdit, args: json.RawMessage(`{}`), wantEmpty: true},
+		{name: "visible alias stays silent", pipeline: patchSurface, tool: "patch", args: json.RawMessage(`{}`), wantEmpty: true},
+		{name: "other tools stay silent", pipeline: editSurface, tool: tools.NameRead, args: json.RawMessage(`{}`), wantEmpty: true},
+		{name: "whole family hidden stays silent", pipeline: surface(tools.NameRead), tool: tools.NameEdit, args: json.RawMessage(`{}`), wantEmpty: true},
+		{name: "no visible set stays silent", pipeline: toolExecutionPipeline{}, tool: tools.NameEdit, args: json.RawMessage(`{}`), wantEmpty: true},
+	} {
+		nudge := tc.pipeline.hiddenSiblingNudge(tc.tool, tc.args)
+		if tc.wantEmpty {
+			if nudge != "" {
+				t.Errorf("%s: nudge = %q, want none", tc.name, nudge)
+			}
+			continue
+		}
+		for _, want := range tc.contains {
+			if !strings.Contains(nudge, want) {
+				t.Errorf("%s: nudge = %q, want it to mention %q", tc.name, nudge, want)
+			}
+		}
+	}
+}
+
+// The redirect is installed before argument normalization, so a hidden
+// sibling whose envelope never normalizes still teaches the visible tool
+// instead of reporting a bare argument error.
+func TestHiddenSiblingNudgeSurvivesMalformedEnvelope(t *testing.T) {
+	projectRoot := t.TempDir()
+	registry := tools.NewRegistry()
+	registry.Register(tools.ApplyPatchTool{BaseDir: projectRoot})
+	registry.Register(tools.EditTool{BaseDir: projectRoot})
+	pipeline := toolExecutionPipeline{
+		registry:    registry,
+		toolBaseDir: projectRoot,
+		visibleToolNames: func() map[string]struct{} {
+			return map[string]struct{}{tools.NameEdit: {}}
+		},
+	}
+	call := message.ToolCall{ID: "patch-1", Name: tools.NameApplyPatch, Args: json.RawMessage(`{"input":"*** Begin Patch\n*** End Patch"}`)}
+
+	execResult, err := pipeline.execute(context.Background(), call, false)
+	if err == nil {
+		t.Fatal("malformed hidden envelope executed")
+	}
+	if !strings.Contains(execResult.Result, `"apply_patch" is hidden`) || !strings.Contains(execResult.Result, tools.NameEdit) {
+		t.Fatalf("result = %q; want the redirect alongside the argument error", execResult.Result)
+	}
+	if len(execResult.Notes) != 1 || !strings.Contains(execResult.Notes[0], `"apply_patch" is hidden`) {
+		t.Fatalf("notes = %#v; want the redirect recorded once", execResult.Notes)
+	}
+}

@@ -522,12 +522,11 @@ func TestFilterEditToolsByModel_ExplicitPatchAllowBeatsEditDeny(t *testing.T) {
 	}
 }
 
-// TestExecuteToolCall_RejectsInvisibleEditFamilyTool is a regression test for a
-// bug where a model that was only told about the "edit" tool could still execute
-// "patch" (learned from conversation history) because the execution pipeline
-// consulted the global registry instead of the model-appropriate visible set.
-// The invisible sibling must be rejected with a hint pointing to the visible
-// counterpart. The visible tool must still execute normally.
+// Visibility is advisory: a model that was only told about the "edit" tool
+// can still execute "patch" (learned from conversation history) because the
+// execution pipeline runs hidden file-tool siblings with a redirect nudge
+// instead of rejecting them. Manual disables stay hard at the permission
+// layer. The visible tool must still execute normally and carry no nudge.
 func TestFilterEditToolsByModel_CompatOverride(t *testing.T) {
 	allTools := []tools.Tool{tools.ApplyPatchTool{}, tools.EditTool{}, tools.WriteTool{}, tools.DeleteTool{}, tools.ReadTool{}}
 	ruleset := permission.Ruleset{} // all allowed
@@ -579,7 +578,7 @@ func TestFilterEditToolsByModel_CompatOverride(t *testing.T) {
 	})
 }
 
-func TestExecuteToolCall_RejectsInvisibleEditFamilyTool(t *testing.T) {
+func TestExecuteToolCall_HiddenSiblingStillExecutesWithNudge(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -601,32 +600,68 @@ func TestExecuteToolCall_RejectsInvisibleEditFamilyTool(t *testing.T) {
 	a.modelName = "claude-opus-4"
 	a.llmMu.Unlock()
 
-	// Calling the invisible "patch" must be rejected and point to "edit".
+	// The hidden "patch" call still executes, with a redirect nudge.
 	patchCall := message.ToolCall{
 		ID:   "patch-1",
 		Name: tools.NameApplyPatch,
 		Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Update File: ` + targetPath + `\n@@\n-old line\n+new line\n*** End Patch"}`),
 	}
-	_, err := a.executeToolCallWithHook(context.Background(), patchCall, false)
-	if err == nil {
-		t.Fatal("execute patch on edit-only model succeeded; want rejection of invisible tool")
+	execResult, err := a.executeToolCallWithHook(context.Background(), patchCall, false)
+	if err != nil {
+		t.Fatalf("execute hidden patch on edit-only model failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not available for the current model") || !strings.Contains(err.Error(), tools.NameEdit) {
-		t.Fatalf("patch rejection err = %q; want error mentioning unavailability and the edit alternative", err.Error())
+	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "new line\n" {
+		t.Fatalf("file after hidden patch call = %q; want new line", got)
 	}
-	// The file must be untouched by the rejected call.
-	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "old line\n" {
-		t.Fatalf("file changed after rejected patch call = %q; want old line", got)
+	if !strings.Contains(execResult.Result, `"apply_patch" is hidden`) || !strings.Contains(execResult.Result, `"edit"`) {
+		t.Fatalf("hidden patch result = %q; want redirect nudge toward edit", execResult.Result)
 	}
 
-	// The visible "edit" tool must still work normally.
+	// The visible "edit" tool works normally and carries no nudge.
+	writeFile(t, targetPath, "old line\n")
 	editCall := message.ToolCall{
 		ID:   "edit-1",
 		Name: tools.NameEdit,
 		Args: json.RawMessage(`{"path":"` + targetPath + `","old_string":"old line","new_string":"new line"}`),
 	}
-	if _, err := a.executeToolCallWithHook(context.Background(), editCall, false); err != nil {
+	execResult, err = a.executeToolCallWithHook(context.Background(), editCall, false)
+	if err != nil {
 		t.Fatalf("execute edit on edit-only model failed: %v", err)
+	}
+	for _, note := range execResult.Notes {
+		if strings.Contains(note, "is hidden for the current model") {
+			t.Fatalf("visible edit result carries unexpected nudge: %q", note)
+		}
+	}
+
+	// A manually disabled sibling still cannot run: deny wins at permission.
+	a.ruleset = permission.Ruleset{
+		{Permission: tools.NameApplyPatch, Pattern: "*", Action: permission.ActionDeny},
+		{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionAllow},
+	}
+	writeFile(t, targetPath, "old line\n")
+	if _, err := a.executeToolCallWithHook(context.Background(), patchCall, false); err == nil {
+		t.Fatal("execute patch denied by permission succeeded; want rejection")
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "old line\n" {
+		t.Fatalf("file changed after denied patch call = %q; want old line", got)
+	}
+
+	// An envelope cannot bypass a write deny via *** Add File:.
+	a.ruleset = permission.Ruleset{
+		{Permission: tools.NameEdit, Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameWrite, Pattern: "*", Action: permission.ActionDeny},
+	}
+	addCall := message.ToolCall{
+		ID:   "patch-add-1",
+		Name: tools.NameApplyPatch,
+		Args: json.RawMessage(`{"patch":"*** Begin Patch\n*** Add File: ` + projectRoot + `/created.txt\n+hello\n*** End Patch"}`),
+	}
+	if _, err := a.executeToolCallWithHook(context.Background(), addCall, false); err == nil {
+		t.Fatal("envelope Add File with write denied succeeded; want rejection")
+	}
+	if _, statErr := os.Stat(projectRoot + "/created.txt"); !os.IsNotExist(statErr) {
+		t.Fatalf("created.txt exists after denied envelope add (statErr=%v)", statErr)
 	}
 }
 
@@ -686,10 +721,11 @@ func TestFilterEditToolsByModel_FallbacksKeepWriteDelete(t *testing.T) {
 	}
 }
 
-// A patch-native model calling the hidden write/delete tools (learned from
-// history or prior sessions) must be rejected with guidance that names the
-// concrete apply_patch operation, and the filesystem must stay untouched.
-func TestExecuteToolCall_RejectsHiddenWriteDeleteWithPatchGuidance(t *testing.T) {
+// A patch-native model calling hidden write/delete/edit (learned from
+// history or prior sessions) still gets its call executed, with a redirect
+// nudge naming the concrete apply_patch operation. A manually disabled tool
+// still cannot run.
+func TestExecuteToolCall_HiddenWriteDeleteStillExecutesWithNudge(t *testing.T) {
 	projectRoot := t.TempDir()
 	a := newTestMainAgent(t, projectRoot)
 	a.markAgentsMDReady()
@@ -697,6 +733,8 @@ func TestExecuteToolCall_RejectsHiddenWriteDeleteWithPatchGuidance(t *testing.T)
 	a.markMCPReady()
 	targetPath := projectRoot + "/target.txt"
 	writeFile(t, targetPath, "old line\n")
+	deletePath := projectRoot + "/gone.txt"
+	writeFile(t, deletePath, "bye\n")
 	a.tools.Register(tools.ApplyPatchTool{})
 	a.tools.Register(tools.EditTool{})
 	a.tools.Register(tools.WriteTool{})
@@ -708,41 +746,73 @@ func TestExecuteToolCall_RejectsHiddenWriteDeleteWithPatchGuidance(t *testing.T)
 	a.modelName = "gpt-5.5"
 	a.llmMu.Unlock()
 	// The tool surface resolves from the client-bound primary model; bind a
-	// gpt-5.5 client so the patch-native surface hides write/delete.
+	// gpt-5.5 client so the patch-native surface hides write/delete/edit.
 	a.llmClient = llm.NewClient(
 		llm.NewProviderConfig("sample", config.ProviderConfig{Type: config.ProviderTypeChatCompletions}, []string{"test-key"}),
 		stubProvider{}, "gpt-5.5", 2048, "",
 	)
 
+	// Hidden write still executes, nudged toward the envelope.
 	writeCall := message.ToolCall{
 		ID:   "write-1",
 		Name: tools.NameWrite,
 		Args: json.RawMessage(`{"path":"` + targetPath + `","content":"overwritten\n"}`),
 	}
-	_, err := a.executeToolCallWithHook(context.Background(), writeCall, false)
-	if err == nil {
-		t.Fatal("execute write on patch-native model succeeded; want rejection of hidden tool")
+	execResult, err := a.executeToolCallWithHook(context.Background(), writeCall, false)
+	if err != nil {
+		t.Fatalf("execute hidden write on patch-native model failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not available for the current model") || !strings.Contains(err.Error(), "*** Add File:") {
-		t.Fatalf("write rejection err = %q; want error mentioning unavailability and the Add File operation", err.Error())
+	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "overwritten\n" {
+		t.Fatalf("file after hidden write call = %q; want overwritten", got)
 	}
-	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "old line\n" {
-		t.Fatalf("file changed after rejected write call = %q; want old line", got)
+	if !strings.Contains(execResult.Result, `"write" is hidden`) || !strings.Contains(execResult.Result, "*** Add File:") {
+		t.Fatalf("hidden write result = %q; want redirect nudge naming the envelope operation", execResult.Result)
 	}
 
+	// Hidden edit still executes, nudged toward the envelope.
+	editCall := message.ToolCall{
+		ID:   "edit-1",
+		Name: tools.NameEdit,
+		Args: json.RawMessage(`{"path":"` + targetPath + `","old_string":"overwritten\n","new_string":"edited\n"}`),
+	}
+	execResult, err = a.executeToolCallWithHook(context.Background(), editCall, false)
+	if err != nil {
+		t.Fatalf("execute hidden edit on patch-native model failed: %v", err)
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "edited\n" {
+		t.Fatalf("file after hidden edit call = %q; want edited", got)
+	}
+	if !strings.Contains(execResult.Result, `"edit" is hidden`) || !strings.Contains(execResult.Result, "*** Update File:") {
+		t.Fatalf("hidden edit result = %q; want redirect nudge naming the envelope operation", execResult.Result)
+	}
+
+	// Hidden delete still executes, nudged toward the envelope.
 	deleteCall := message.ToolCall{
 		ID:   "delete-1",
 		Name: tools.NameDelete,
-		Args: json.RawMessage(`{"paths":["` + targetPath + `"],"reason":"cleanup"}`),
+		Args: json.RawMessage(`{"paths":["` + deletePath + `"],"reason":"cleanup"}`),
 	}
-	_, err = a.executeToolCallWithHook(context.Background(), deleteCall, false)
-	if err == nil {
-		t.Fatal("execute delete on patch-native model succeeded; want rejection of hidden tool")
+	execResult, err = a.executeToolCallWithHook(context.Background(), deleteCall, false)
+	if err != nil {
+		t.Fatalf("execute hidden delete on patch-native model failed: %v", err)
 	}
-	if !strings.Contains(err.Error(), "not available for the current model") || !strings.Contains(err.Error(), "*** Delete File:") {
-		t.Fatalf("delete rejection err = %q; want error mentioning unavailability and the Delete File operation", err.Error())
+	if _, statErr := os.Stat(deletePath); !os.IsNotExist(statErr) {
+		t.Fatalf("file still exists after hidden delete call (statErr=%v)", statErr)
 	}
-	if _, statErr := os.Stat(targetPath); statErr != nil {
-		t.Fatalf("file missing after rejected delete call: %v", statErr)
+	if !strings.Contains(execResult.Result, `"delete" is hidden`) || !strings.Contains(execResult.Result, "*** Delete File:") {
+		t.Fatalf("hidden delete result = %q; want redirect nudge naming the envelope operation", execResult.Result)
+	}
+
+	// A manually disabled write still cannot run.
+	a.ruleset = permission.Ruleset{
+		{Permission: "*", Pattern: "*", Action: permission.ActionAllow},
+		{Permission: tools.NameWrite, Pattern: "*", Action: permission.ActionDeny},
+	}
+	writeFile(t, targetPath, "old line\n")
+	if _, err := a.executeToolCallWithHook(context.Background(), writeCall, false); err == nil {
+		t.Fatal("execute write denied by permission succeeded; want rejection")
+	}
+	if got, err := os.ReadFile(targetPath); err != nil || string(got) != "old line\n" {
+		t.Fatalf("file changed after denied write call = %q; want old line", got)
 	}
 }

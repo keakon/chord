@@ -69,6 +69,7 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - A single assistant message no longer renders as two cards when a provider interleaves a tool call's start between the message's text chunks. The trailing text merges back into the same card instead of continuing in a second card after the tool card.
 - File preview no longer scrolls past the last page into blank filler, and Markdown previews keep the dialog background behind styled text instead of showing the content and the filler in two different background colors.
 - `present` no longer delivers files under `.chord/` as user-facing files by default: task notes and plan documents are shared through the plan summary or handoff. A `.chord/` file is delivered only when explicitly asked for and its path is named in a `present`-specific permission rule.
+- File tools hidden for the current model no longer reject the call: a hidden sibling still executes, with a one-line note redirecting it to the visible tool next time. Permission rules still decide the call: a deny rejects it before anything runs, and an ask rule still prompts.
 
 ## 0.8.2 - 2026-10-11
 

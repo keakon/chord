@@ -433,7 +433,6 @@ func (a *MainAgent) newMainLLMStreamReducer(llmClient *llm.Client, selectedRef, 
 		ruleset:          a.effectiveRuleset,
 		syncHookGate:     a.syncToolHooksConfigured,
 		pathScope:        a.effectivePathScope(),
-		visibleToolNames: a.mainVisibleLLMToolNames,
 		emit:             a.emitToTUI,
 		flushBeforeTool: func() {
 			streamReducer.content.flushThinkingDelta()
