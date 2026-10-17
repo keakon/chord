@@ -40,7 +40,7 @@ Cost follows the token mix rather than the token total: cache reads cost 50× le
 
 Notes:
 
-- All six runs used deepseek-v4.1-flash.
+- All six runs used `deepseek-flash`, now served by DeepSeek-V4.1-Flash-1017.
 - Cost is estimated from each run's token totals at that model's listed prices per 1M tokens: $0.15 input, $0.60 output, $0.003 cache read. Multipliers are computed from the unrounded estimates, so they can differ slightly from dividing the rounded costs shown above.
 - Time excludes environment setup and final wrap-up, but includes model interaction, code changes, and test execution.
 

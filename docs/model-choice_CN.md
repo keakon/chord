@@ -28,7 +28,7 @@ Chord 只接受 API key，或 Codex OAuth（`chord auth codex`）。订阅如果
 适合定位文件和调用方、固定规则的重命名、配置调整，以及按已确定接口补测试。
 
 1. GPT-6 Luna：结构化提取、机械执行和已确定计划的调度。
-2. DeepSeek V4.1 Flash：仓库探索、重复读取和明确规格的代码工作。
+2. DeepSeek V4.1 Flash 1017：仓库探索、重复读取和明确规格的代码工作。
 3. Gemini 3.8 Flash：包含 PDF、图表或截图的资料任务优先考虑它。
 
 协调者使用这一档时，目标、依赖和验收应已确定。需要重新拆解需求、选择行为或解决设计分歧时，转交更强模型。根因分析和安全敏感判断不按机械任务处理。
@@ -91,7 +91,7 @@ Chord 自带 `builder` 和 `planner`。下面的角色来自可选的[团队方�
 
 [团队示例](./examples/examples-team_CN.md)采用复杂开发配方。只有 Codex 时，从账号目录中选择 Sol 承担协调、实现和审查，Luna 承担探索及机械任务；Astra 在可用时用于攻坚。只有 Anthropic API 时，可以让 Sonnet 承担日常实现和探索，Opus 承担复杂判断。API key 不要求订阅该厂商的聊天应用。
 
-按任务将探索模型替换为 DeepSeek V4.1 Flash 或 Gemini 3.8 Flash。只使用其他渠道时，也按同样职责筛选，先让候选模型完成本项目的代表性任务，再决定是否承担协调或终审。
+按任务将探索模型替换为 DeepSeek V4.1 Flash 1017 或 Gemini 3.8 Flash。只使用其他渠道时，也按同样职责筛选，先让候选模型完成本项目的代表性任务，再决定是否承担协调或终审。
 
 模型池中的多个条目提供请求失败时的回退，不会按难度自动选模，也不会因为答案错误而自动升级。需要换档时，明确选择对应角色或模型池。不要把三个候选全部放入一个池，就把它当作任务路由器。
 
@@ -106,7 +106,7 @@ Chord 自带 `builder` 和 `planner`。下面的角色来自可选的[团队方�
 
 ## 资料与适用范围
 
-型号与接入能力以 [OpenAI 模型文档](https://developers.openai.com/api/docs/models)、[Anthropic 模型文档](https://platform.claude.com/docs/en/models/overview)、[Gemini 3.8 Flash 模型卡](https://deepmind.google/models/model-cards/gemini-3-8-flash/)和 [DeepSeek V4.1 Flash 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash)为准。[Artificial Analysis](https://artificialanalysis.ai/models)可用于比较通用能力、速度和成本，其分数不直接代表 Chord 的协调成功率。
+型号与接入能力以 [OpenAI 模型文档](https://developers.openai.com/api/docs/models)、[Anthropic 模型文档](https://platform.claude.com/docs/en/models/overview)、[Gemini 3.8 Flash 模型卡](https://deepmind.google/models/model-cards/gemini-3-8-flash/)和 [DeepSeek V4.1 Flash 1017 模型卡](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017)为准。[Artificial Analysis](https://artificialanalysis.ai/models)可用于比较通用能力、速度和成本，其分数不直接代表 Chord 的协调成功率。
 
 2026 年的公开经验支持按职责分配模型，但没有给出适用于所有任务的协调者门槛：
 

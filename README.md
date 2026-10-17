@@ -91,7 +91,7 @@ For manual provider/model setup and the `limit` fields, see [Quickstart](./docs/
 
 ## Measured results
 
-Six agent harnesses ran the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): adding streaming JSON iteration to `httpx`. All six runs used deepseek-v4.1-flash. Chord 0.8.1 finished first and cheapest: 6m37s and $0.052, using 54.5K input tokens, 2.96M cache-read tokens, and 58.6K output tokens. The next-best run took 1.49× as long and cost 1.51× as much.
+Six agent harnesses ran the same [DeepSWE v1.1 task](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration): adding streaming JSON iteration to `httpx`. All six runs used `deepseek-flash`, now served by DeepSeek-V4.1-Flash-1017. Chord 0.8.1 finished first and cheapest: 6m37s and $0.052, using 54.5K input tokens, 2.96M cache-read tokens, and 58.6K output tokens. The next-best run took 1.49× as long and cost 1.51× as much.
 
 ### Real-world coding task
 

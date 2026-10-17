@@ -79,7 +79,7 @@ chord doctor models --model mygw/claude-gw
 
 ## Gemini 4 Argon
 
-The embedded catalog snapshot, [v2026-10-14.1](https://github.com/keakon/chord-models/tree/v2026-10-14.1), includes `google/gemini-4-argon`. Existing installations can refresh the catalog before connecting to the official API with `GEMINI_API_KEY`:
+The embedded catalog snapshot, [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2), includes `google/gemini-4-argon`. Existing installations can refresh the catalog before connecting to the official API with `GEMINI_API_KEY`:
 
 ```bash
 chord config refresh-catalog

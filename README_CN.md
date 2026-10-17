@@ -91,7 +91,7 @@ chord
 
 ## 实测数据
 
-六款同类编码 agent 用同一个模型（deepseek-v4.1-flash）跑同一个 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)：给 `httpx` 加上流式 JSON 迭代接口。Chord 0.8.1 用时最短、成本最低：6m37s、￥0.348，输入 54.5K token、缓存读取 2.96M token、输出 58.6K token。第二名的耗时是它的 1.49 倍、成本是 1.51 倍。
+六款同类编码 agent 用同一个模型（`deepseek-flash`，现由 DeepSeek-V4.1-Flash-1017 提供服务）跑同一个 [DeepSWE v1.1 任务](https://deepswe.datacurve.ai/data/v1.1/tasks/httpx-streaming-json-iteration)：给 `httpx` 加上流式 JSON 迭代接口。Chord 0.8.1 用时最短、成本最低：6m37s、￥0.348，输入 54.5K token、缓存读取 2.96M token、输出 58.6K token。第二名的耗时是它的 1.49 倍、成本是 1.51 倍。
 
 ### 真实编码任务
 

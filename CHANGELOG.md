@@ -32,6 +32,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Improvements
 
+- The embedded model catalog uses [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2), which adds Gemini 4 Argon with a shared 1M-token window and a default 65,536-token streaming binding cap, and records the DeepSeek-V4.1-Flash-1017 release on the existing `deepseek/deepseek-flash` route. Long decode continuation requires explicit configuration.
+
 - The system prompt now asks the agent to preserve identifiers and contract details exactly, give a preferred option with decisive reasons in designs and reviews, and keep existing callers usable under their original contract. It also asks replies and handoffs to lead with results and evidence, and limits credential use to approved mechanisms.
 
 - File edits in other worktrees and repositories now receive LSP diagnostics using separate workspace instances. Switching directories preserves existing instances, and the sidebar identifies their workspace directories. Background monitoring refreshes externally changed files, clears deleted-file diagnostics, and releases idle documents and instances.
@@ -39,8 +41,6 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 - The **SKILLS** panel and the `/skill` selector mark skill state with icons instead of text suffixes: `○` idle, `◎` path-matched or notified, `●` loaded, `↻` reload after compaction, `◌` manual-only, and `⊘` denied. Green marks a live body, amber one that needs reloading.
 
 - The info panel's **LSP**, **MCP**, and **SKILLS** sections now default to folded and open when they have an active language-server process, a connected MCP server, or a skill whose body is in context. Previously any configured entry expanded the section, so a session that had not connected or loaded anything yet opened with those blocks taking up the panel. **TODOS**, **CHANGED FILES**, **AGENTS**, and **JOBS** still expand as soon as their content exists, **GIT** stays folded, and a manual fold or expand sticks until the header is clicked back to the state the section would take on its own, after which it follows its content again.
-
-- The embedded model catalog uses [v2026-10-14.1](https://github.com/keakon/chord-models/tree/v2026-10-14.1), adding Gemini 4 Argon with a shared 1M-token window and a default 65,536-token streaming binding cap. Long decode continuation requires explicit configuration.
 
 - AGENTS shows distinct waiting states and the current coordination request reason, with clickable task and reason rows.
 

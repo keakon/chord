@@ -48,7 +48,7 @@ chord doctor models --model mygw/claude-gw
 
 ## Gemini 4 Argon
 
-内嵌目录快照 [v2026-10-14.1](https://github.com/keakon/chord-models/tree/v2026-10-14.1) 包含 `google/gemini-4-argon`。已有安装可先刷新目录，再使用 `GEMINI_API_KEY` 接入官方 API：
+内嵌目录快照 [v2026-10-17.2](https://github.com/keakon/chord-models/tree/v2026-10-17.2) 包含 `google/gemini-4-argon`。已有安装可先刷新目录，再使用 `GEMINI_API_KEY` 接入官方 API：
 
 ```bash
 chord config refresh-catalog

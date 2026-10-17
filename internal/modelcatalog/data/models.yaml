@@ -798,35 +798,44 @@ models:
         notes: DeepSeek reasoning continuity keeps the full provider history; compact before long sessions approach the limit.
       sources:
         - url: https://api-docs.deepseek.com/quick_start/pricing/
-          checked: "2026-10-05"
+          checked: "2026-10-17"
+    # The deepseek-flash wire ID now serves DeepSeek-V4.1-Flash-1017; the legacy
+    # V4-Flash names route here at the Flash price.
+    released: '2026-10-17'
     connection:
       request_url: https://api.deepseek.com/chat/completions
       wire_model_id: deepseek-flash
       env_var: DEEPSEEK_API_KEY
       sources:
       - url: https://api-docs.deepseek.com/
-        checked: '2026-10-04'
+        checked: '2026-10-17'
     context: 1000000
     output: 393216
     input_modalities: [text, image]
     coding_sources:
     - url: https://api-docs.deepseek.com/news/news260910
-      checked: "2026-10-08"
+      checked: "2026-10-17"
+    - url: https://api-docs.deepseek.com/news/news261017
+      checked: "2026-10-17"
+    - url: https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017
+      checked: "2026-10-17"
     cost:
       input_per_million: 0.3
       output_per_million: 1.2
       currency: USD
-      checked: "2026-10-09"
+      checked: "2026-10-17"
       source:
         url: https://api-docs.deepseek.com/quick_start/pricing/
-        checked: "2026-10-09"
+        checked: "2026-10-17"
       notes: Peak, uncached USD API rates. Off-peak prices are half; cache hits are priced
         separately.
     sources:
       - url: https://api-docs.deepseek.com/quick_start/pricing/
-        checked: "2026-10-09"
+        checked: "2026-10-17"
       - url: https://api-docs.deepseek.com/news/news260910
-        checked: "2026-10-04"
+        checked: "2026-10-17"
+      - url: https://api-docs.deepseek.com/news/news261017
+        checked: "2026-10-17"
 
   - id: xai/grok-4.7
     config_profile:

@@ -1,8 +1,8 @@
 {
-  "version": "2026-10-14.1",
+  "version": "2026-10-17.2",
   "source": {
     "repository": "https://github.com/keakon/chord-models",
-    "revision": "v2026-10-14.1"
+    "revision": "v2026-10-17.2"
   },
   "endpoints": [
     {
@@ -623,10 +623,19 @@
     },
     {
       "id": "deepseek/deepseek-flash",
+      "released": "2026-10-17",
       "coding_sources": [
         {
           "url": "https://api-docs.deepseek.com/news/news260910",
-          "checked": "2026-10-08"
+          "checked": "2026-10-17"
+        },
+        {
+          "url": "https://api-docs.deepseek.com/news/news261017",
+          "checked": "2026-10-17"
+        },
+        {
+          "url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017",
+          "checked": "2026-10-17"
         }
       ],
       "connection": {
@@ -636,7 +645,7 @@
         "sources": [
           {
             "url": "https://api-docs.deepseek.com/",
-            "checked": "2026-10-04"
+            "checked": "2026-10-17"
           }
         ]
       },
@@ -650,21 +659,25 @@
         "input_per_million": 0.3,
         "output_per_million": 1.2,
         "currency": "USD",
-        "checked": "2026-10-09",
+        "checked": "2026-10-17",
         "source": {
           "url": "https://api-docs.deepseek.com/quick_start/pricing/",
-          "checked": "2026-10-09"
+          "checked": "2026-10-17"
         },
         "notes": "Peak, uncached USD API rates. Off-peak prices are half; cache hits are priced separately."
       },
       "sources": [
         {
           "url": "https://api-docs.deepseek.com/quick_start/pricing/",
-          "checked": "2026-10-09"
+          "checked": "2026-10-17"
         },
         {
           "url": "https://api-docs.deepseek.com/news/news260910",
-          "checked": "2026-10-04"
+          "checked": "2026-10-17"
+        },
+        {
+          "url": "https://api-docs.deepseek.com/news/news261017",
+          "checked": "2026-10-17"
         }
       ],
       "config_profile": {
@@ -685,7 +698,7 @@
         "sources": [
           {
             "url": "https://api-docs.deepseek.com/quick_start/pricing/",
-            "checked": "2026-10-05"
+            "checked": "2026-10-17"
           }
         ]
       }

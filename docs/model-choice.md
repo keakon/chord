@@ -28,7 +28,7 @@ These tiers are configuration recommendations. Chord does not switch between the
 Use this tier to locate files and callers, apply fixed renaming rules, adjust configuration, or add tests against a settled interface.
 
 1. GPT-6 Luna: structured extraction, mechanical execution, and dispatch against a settled plan.
-2. DeepSeek V4.1 Flash: repository discovery, repeated reads, and code work with explicit specifications.
+2. DeepSeek V4.1 Flash 1017: repository discovery, repeated reads, and code work with explicit specifications.
 3. Gemini 3.8 Flash: move it first for material containing PDFs, charts, or screenshots.
 
 A coordinator in this tier needs a settled goal, dependencies, and acceptance criteria. Escalate when it must decompose the requirement again, choose behavior, or resolve design disagreements. Root-cause analysis and security-sensitive decisions are not mechanical work.
@@ -91,7 +91,7 @@ Having an expert does not remove the coordinator's judgment work. The expert nee
 
 The [team example](./examples/examples-team.md) uses the complex-development recipe. With Codex alone, choose Sol from the account catalog for coordination, implementation, and review, and Luna for discovery and mechanical work; use Astra for intensive work when available. With only an Anthropic API key, Sonnet can cover everyday implementation and discovery while Opus handles difficult decisions. API keys do not require a subscription to the vendor's chat app.
 
-Replace the discovery model with DeepSeek V4.1 Flash or Gemini 3.8 Flash when the task suits it. For other providers, apply the same role criteria and run representative project tasks before assigning coordination or final review.
+Replace the discovery model with DeepSeek V4.1 Flash 1017 or Gemini 3.8 Flash when the task suits it. For other providers, apply the same role criteria and run representative project tasks before assigning coordination or final review.
 
 Multiple entries in a model pool provide fallback on request failures. They do not select by task difficulty or escalate because an answer is wrong. Choose the appropriate role or pool explicitly when changing tiers; a pool containing all three candidates is not a task router.
 
@@ -106,7 +106,7 @@ Multiple entries in a model pool provide fallback on request failures. They do n
 
 ## Sources and limits
 
-Use the [OpenAI model docs](https://developers.openai.com/api/docs/models), [Anthropic model docs](https://platform.claude.com/docs/en/models/overview), [Gemini 3.8 Flash model card](https://deepmind.google/models/model-cards/gemini-3-8-flash/), and [DeepSeek V4.1 Flash model card](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash) for model identity and API capabilities. [Artificial Analysis](https://artificialanalysis.ai/models) compares general capability, speed, and cost; its scores do not directly measure Chord coordination success.
+Use the [OpenAI model docs](https://developers.openai.com/api/docs/models), [Anthropic model docs](https://platform.claude.com/docs/en/models/overview), [Gemini 3.8 Flash model card](https://deepmind.google/models/model-cards/gemini-3-8-flash/), and [DeepSeek V4.1 Flash 1017 model card](https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017) for model identity and API capabilities. [Artificial Analysis](https://artificialanalysis.ai/models) compares general capability, speed, and cost; its scores do not directly measure Chord coordination success.
 
 Public work from 2026 supports allocating models by responsibility, without establishing a universal coordinator threshold:
 
