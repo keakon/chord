@@ -375,7 +375,7 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 					Type:      "function_call",
 					Name:      tc.Name,
 					CallID:    tc.ID,
-					Arguments: string(tc.Args),
+					Arguments: string(sanitizeHistoryToolArgs("Responses", tc.Name, tc.ID, tc.Args)),
 				}, freeform))
 				if out, ok := outputs[tc.ID]; ok {
 					result = append(result, toMatchingResponsesToolOutput(out, tc.Name == toolname.ApplyPatch, freeform, cacheThisMessage))
@@ -503,7 +503,7 @@ func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID 
 		if strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
 			return responsesInputItem{}, false
 		}
-		converted.Arguments = string(toolArgumentsFallback(item.Name, json.RawMessage(item.Arguments)))
+		converted.Arguments = string(sanitizeReplayedToolArgs(item.Name, item.CallID, json.RawMessage(item.Arguments)))
 		// Freeform-targeted requests replay apply_patch history in the custom
 		// tool shape so the model sees the same wire form it is asked to emit.
 		converted = toCustomApplyPatchCallItem(converted, freeform)
@@ -641,7 +641,7 @@ func responsesToolCallsToInputItems(calls []message.ToolCall, freeform bool) []r
 			Type:      "function_call",
 			Name:      tc.Name,
 			CallID:    tc.ID,
-			Arguments: string(tc.Args),
+			Arguments: string(sanitizeHistoryToolArgs("Responses", tc.Name, tc.ID, tc.Args)),
 		}
 		items = append(items, toCustomApplyPatchCallItem(converted, freeform))
 	}

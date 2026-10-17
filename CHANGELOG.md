@@ -50,6 +50,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 ### Fixes
 
+- Replayed tool-call arguments no longer reach OpenAI Responses endpoints raw when they are malformed or empty. History conversion now applies the same sanitized placeholder the other providers use, so a history entry with corrupt arguments — for example an imported call whose source rollout recorded a truncated arguments string — cannot fail the whole request on resume.
+
 - Tool call arguments and reasoning text no longer show up as assistant prose on OpenAI Responses endpoints. Event routing follows the event type inside the stream payload and only falls back to the SSE frame label when the payload carries no type, so a gateway that relabels a frame cannot divert tool arguments or thinking into the message text; a text delta addressed to a tool-call item is dropped. Tool calls themselves are unaffected, and the mismatch is reported in the log once per request.
 
 - Context-pressure notices are no longer derived from a byte-based estimate of the request surface. The context size behind the reminder, the warning, and their withdrawal comes only from provider-reported usage: the latest response's usage, or — when that response carried no usage — one frozen estimate calibrated from the most recent usage sample (reused across a model switch or restore as an estimate against the new budget). A session with no usable sample reads 0 and crosses no line, so a large pasted first message no longer triggers a pressure card before any usage exists; forced compaction after a real provider context-length error is unchanged.

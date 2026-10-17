@@ -797,11 +797,7 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 				// before sending to the API. Malformed args (e.g. from a
 				// truncated model response) would cause a 400 error from
 				// the API server when it tries to parse the arguments field.
-				args := tc.Args
-				if len(args) == 0 || !json.Valid(args) {
-					log.Warnf("sanitizing invalid tool call args in conversation history tool=%v id=%v raw_args=%v", tc.Name, tc.ID, string(args))
-					args = json.RawMessage(MalformedArgsSentinel)
-				}
+				args := sanitizeHistoryToolArgs("Chat Completions", tc.Name, tc.ID, tc.Args)
 				// The OpenAI Chat Completions API requires function.arguments
 				// to be a JSON *string* (e.g. "{\"path\":\"README.md\"}"),
 				// not a raw JSON object.  tc.Args is json.RawMessage holding

@@ -30,6 +30,19 @@ func toolArgumentsFallback(toolName string, raw json.RawMessage) json.RawMessage
 	return json.RawMessage(`{}`)
 }
 
+// sanitizeReplayedToolArgs guards the arguments of a stored or replayed
+// Responses function call. A malformed value — an imported call whose source
+// rollout recorded a truncated arguments string — becomes the malformed
+// sentinel instead of reaching the provider raw, matching the history-replay
+// guard. An absent value keeps the required-field fallback: an argument-less
+// call is legitimate, while the sentinel would claim corruption.
+func sanitizeReplayedToolArgs(name, id string, raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return toolArgumentsFallback(name, raw)
+	}
+	return sanitizeHistoryToolArgs("Responses", name, id, raw)
+}
+
 // canonicalApplyPatchArgs converts freeform custom_tool_call input into the
 // canonical {"patch": "..."} arguments object every downstream consumer sees
 // (finalize, replay, audit, execution). Complete patch/input envelopes are
@@ -183,7 +196,7 @@ func collectResponsesOutput(resp *message.Response, output []responsesOutputEntr
 					}
 				}
 			}
-			item.Arguments = string(toolArgumentsFallback(item.Name, json.RawMessage(item.Arguments)))
+			item.Arguments = string(sanitizeReplayedToolArgs(item.Name, item.CallID, json.RawMessage(item.Arguments)))
 			if strings.TrimSpace(item.CallID) == "" || strings.TrimSpace(item.Name) == "" {
 				continue
 			}

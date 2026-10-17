@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/keakon/golog/log"
+
 	"github.com/keakon/chord/internal/modelcompat"
 )
 
@@ -19,6 +21,20 @@ import (
 // LLM produces invalid JSON (unparseable streaming output). It is used as a
 // sentinel value to detect and handle malformed tool calls gracefully.
 const MalformedArgsSentinel = `{"error":"malformed tool call arguments from model"}`
+
+// sanitizeHistoryToolArgs guards a replayed tool call's arguments the way every
+// wire converter must: a malformed or empty arguments value stored in history —
+// an imported call whose source rollout recorded a truncated arguments string,
+// or hand-built input — would otherwise reach the provider as-is and fail the
+// whole request instead of just that entry. wire names the request builder so a
+// corrupt entry can be traced back to where it was replayed.
+func sanitizeHistoryToolArgs(wire string, name, id string, args json.RawMessage) json.RawMessage {
+	if len(args) == 0 || !json.Valid(args) {
+		log.Warnf("sanitizing invalid tool call args in %s conversation history tool=%v id=%v raw_args=%v", wire, name, id, string(args))
+		return json.RawMessage(MalformedArgsSentinel)
+	}
+	return args
+}
 
 // IsMalformedArgs reports whether raw JSON args contain the malformed sentinel.
 // It checks both exact match (the sentinel itself) and the "error" field value.

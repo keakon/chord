@@ -894,14 +894,10 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 					log.Warnf("skipping tool_use with empty id or name in history tool=%v id=%v", tc.Name, tc.ID)
 					continue
 				}
-				args := tc.Args
 				// Sanitize tool call arguments: ensure valid JSON before
 				// sending to the API. Malformed args from a truncated model
 				// response would cause the API to reject the request.
-				if len(args) == 0 || !json.Valid(args) {
-					log.Warnf("sanitizing invalid tool call args in Anthropic conversation history tool=%v id=%v raw_args=%v", tc.Name, tc.ID, string(args))
-					args = json.RawMessage(MalformedArgsSentinel)
-				}
+				args := sanitizeHistoryToolArgs("Anthropic", tc.Name, tc.ID, tc.Args)
 				content = append(content, anthropicContent{
 					Type:  "tool_use",
 					ID:    tc.ID,

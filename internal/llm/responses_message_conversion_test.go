@@ -756,3 +756,72 @@ func TestConvertMessagesToResponses_InterleavesNativeResponsesOutput(t *testing.
 		}
 	}
 }
+
+// History tool-call arguments that arrive malformed or empty — an imported
+// call whose source rollout recorded corrupt arguments, or a nil-args call —
+// are replaced with the malformed sentinel instead of reaching the request
+// raw, matching the guard the other wire converters apply.
+func TestConvertMessagesToResponses_SanitizesMalformedToolArgs(t *testing.T) {
+	msgs := []message.Message{
+		{Role: message.RoleAssistant, ToolCalls: []message.ToolCall{
+			{ID: "call_1", Name: "shell", Args: json.RawMessage(`{invalid`)},
+			{ID: "call_2", Name: "shell"},
+		}},
+		{Role: message.RoleTool, ToolCallID: "call_1", Content: "ok", ToolStatus: message.ToolStatusSuccess},
+		{Role: message.RoleTool, ToolCallID: "call_2", Content: "ok", ToolStatus: message.ToolStatusSuccess},
+	}
+	items := convertMessagesToResponsesWithItemIDs("", msgs, false, false, false)
+	var got []string
+	for _, item := range items {
+		if item.Type == "function_call" {
+			got = append(got, item.Arguments)
+		}
+	}
+	want := []string{MalformedArgsSentinel, MalformedArgsSentinel}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("function_call arguments = %q, want %q", got, want)
+	}
+}
+
+// The continuation path (a previous Response's tool calls replayed as input
+// items) applies the same guard.
+func TestResponsesToolCallsToInputItems_SanitizesMalformedArgs(t *testing.T) {
+	items := responsesToolCallsToInputItems([]message.ToolCall{
+		{ID: "call_1", Name: "shell", Args: json.RawMessage(`not json`)},
+	}, false)
+	if len(items) != 1 || items[0].Arguments != MalformedArgsSentinel {
+		t.Fatalf("arguments = %q, want the sentinel", items[0].Arguments)
+	}
+}
+
+// A stored Responses output item whose own arguments are malformed — a
+// restored session, or an accumulated payload that recorded a truncated
+// arguments string — is guarded on replay the same way ToolCalls are. An item
+// with no arguments keeps the required-field fallback instead.
+func TestResponsesOutputToInputItems_SanitizesMalformedArgs(t *testing.T) {
+	items := responsesOutputToInputItems([]responsesOutputEntry{
+		{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "shell", Arguments: `{"cmd":`},
+		{Type: "function_call", ID: "fc_2", CallID: "call_2", Name: "shell"},
+	}, false)
+	if len(items) != 2 {
+		t.Fatalf("items = %+v, want both calls", items)
+	}
+	if items[0].Arguments != MalformedArgsSentinel {
+		t.Fatalf("malformed arguments = %q, want the sentinel", items[0].Arguments)
+	}
+	if items[1].Arguments != "{}" {
+		t.Fatalf("empty arguments = %q, want the fallback object", items[1].Arguments)
+	}
+}
+
+// A completed function_call collected into ResponsesOutput carries the same
+// guard, so a restored session does not replay the corrupt string raw.
+func TestCollectResponsesOutput_SanitizesMalformedArgs(t *testing.T) {
+	resp := &message.Response{}
+	collectResponsesOutput(resp, []responsesOutputEntry{
+		{Type: "function_call", ID: "fc_1", CallID: "call_1", Name: "shell", Status: "completed", Arguments: `not json`},
+	})
+	if len(resp.ResponsesOutput) != 1 || resp.ResponsesOutput[0].Arguments != MalformedArgsSentinel {
+		t.Fatalf("ResponsesOutput = %+v, want the sentinel", resp.ResponsesOutput)
+	}
+}

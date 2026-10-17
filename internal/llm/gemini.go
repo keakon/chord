@@ -515,11 +515,7 @@ func geminiAssistantParts(msg message.Message, toolNamesByID map[string]string) 
 }
 
 func geminiFunctionCallPart(tc message.ToolCall, signature string) geminiPart {
-	args := tc.Args
-	if len(args) == 0 || !json.Valid(args) {
-		log.Warnf("sanitizing invalid tool call args in Gemini conversation history tool=%v id=%v raw_args=%v", tc.Name, tc.ID, string(args))
-		args = json.RawMessage(MalformedArgsSentinel)
-	}
+	args := sanitizeHistoryToolArgs("Gemini", tc.Name, tc.ID, tc.Args)
 	return geminiPart{FunctionCall: &geminiFunctionCall{Name: tc.Name, Args: args}, ThoughtSignature: signature}
 }
 
