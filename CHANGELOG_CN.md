@@ -58,6 +58,8 @@
 
 - 导入 Claude 会话现在保留未映射工具调用的原始参数，不再包一层导入器元数据，卡片显示的是源头发起的调用本身——`WebSearch` 带着它的 query，而不是 `{unsupported, source, reason, arguments}` 记账字段。有 Chord 映射的工具名（`Bash`、`Read`、`Write`、`Edit`、`MultiEdit`、`Update` 等）仍转换为对应的 Chord 工具。
 
+- OpenAI Responses 接口不再把工具调用参数和思考文本当成 assistant 正文展示。事件路由改为以流 payload 里的事件类型为准，仅在 payload 没有类型时才回退到 SSE 帧标签，因此中转网关改写帧标签也不会把工具参数或思考内容挪进消息正文；指向工具调用条目的文本增量会被丢弃。工具调用本身不受影响，帧标签与 payload 不一致的情况每次请求会在日志里报告一次。
+
 - 导入 OpenCode 会话现在把没有 Chord 映射的工具调用——`webfetch`、`websearch`、`patch`、`task`、MCP 工具——保留为真实的工具调用，用源头的名称和参数，并带上它的结果，而不是一段 `[Imported unsupported tool: …]` JSON 文本。工具结果现在也会从当前导出结构里读取——输出是 `state.content` 数组，失败的工具带 `state.error`——导入的调用因此保留它当时产出的输出；文件结果同时保留文件名和所在位置。无法命名或配对调用的部件（没有名称、没有调用 ID）仍按文本导入。
 
 - 导入 OpenCode 会话现在把附件当附件、按工具自己的参数名读取：剪贴板截图落成真实图片附件，而不是把 base64 全文塞进正文；`edit` 用源头的 `filePath`/`oldString`/`newString` 也能映射到 Chord 的 edit，卡片正常渲染 diff，不再是一张没有内容、无法展开的空卡；`read`/`write` 保留它们的路径；`bash` 的毫秒 `timeout` 保留调用当时实际使用的时限。OpenCode 每次编辑后附加的 `patch` 台账（hash + 文件列表，只是重复旁边那次编辑）不再作为文本导入。

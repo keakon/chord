@@ -1,6 +1,8 @@
 package llm
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/keakon/chord/internal/message"
@@ -351,5 +353,197 @@ func TestParseResponsesSSERefusalBackfillSurvivesFlush(t *testing.T) {
 	}
 	if resp.Content != "cannot help with that" {
 		t.Fatalf("Content = %q, want refusal backfill preserved", resp.Content)
+	}
+}
+
+// A relay may relabel an SSE frame while leaving the payload untouched. The
+// payload "type" is the protocol's discriminator, so tool-call argument deltas
+// and reasoning deltas must not be routed into the text channel just because
+// the frame says response.output_text.delta — otherwise the raw arguments are
+// persisted as assistant content.
+type labeledSSEFrame struct {
+	label string
+	data  string
+}
+
+func buildLabeledSSEStream(frames []labeledSSEFrame) *bytes.Reader {
+	var b strings.Builder
+	for _, f := range frames {
+		if f.label != "" {
+			b.WriteString("event: ")
+			b.WriteString(f.label)
+			b.WriteByte('\n')
+		}
+		b.WriteString("data: ")
+		b.WriteString(f.data)
+		b.WriteString("\n\n")
+	}
+	return bytes.NewReader([]byte(b.String()))
+}
+
+func TestParseResponsesSSEMislabeledFrameKeepsToolArgsOutOfContent(t *testing.T) {
+	args := `{"path":"internal/llm/anthropic.go","offset":750,"limit":90}`
+	stream := buildLabeledSSEStream([]labeledSSEFrame{
+		{label: "response.created", data: `{"type":"response.created","response":{"id":"resp_1"}}`},
+		{label: "response.output_item.added", data: `{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","arguments":""}}`},
+		{label: "response.output_text.delta", data: `{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"path\":\"internal/llm/anthropic.go\",\"offset\":750,\"limit\":90}"}`},
+		{label: "response.output_item.done", data: `{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","status":"completed","arguments":"{\"path\":\"internal/llm/anthropic.go\",\"offset\":750,\"limit\":90}"}}`},
+		{label: "response.completed", data: `{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","status":"completed","arguments":"{\"path\":\"internal/llm/anthropic.go\",\"offset\":750,\"limit\":90}"}]}}`},
+	})
+	var streamed []string
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, func(d message.StreamDelta) {
+		if d.Type == message.StreamDeltaText {
+			streamed = append(streamed, d.Text)
+		}
+	}, nil, nil, "", false, false, false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "" {
+		t.Fatalf("Content = %q, want empty: tool arguments must not become assistant text", resp.Content)
+	}
+	if len(streamed) != 0 {
+		t.Fatalf("streamed text = %q, want no text delta for tool arguments", streamed)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("ToolCalls = %d, want 1", len(resp.ToolCalls))
+	}
+	if got := string(resp.ToolCalls[0].Args); got != args {
+		t.Fatalf("ToolCalls[0].Args = %s, want %s", got, args)
+	}
+}
+
+func TestParseResponsesSSEMislabeledFrameKeepsReasoningOutOfContent(t *testing.T) {
+	stream := buildLabeledSSEStream([]labeledSSEFrame{
+		{label: "response.output_item.added", data: `{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}`},
+		{label: "response.output_text.delta", data: `{"type":"response.reasoning_text.delta","item_id":"rs_1","output_index":0,"delta":"private reasoning"}`},
+		{label: "response.output_item.done", data: `{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","status":"completed"}}`},
+		{label: "response.completed", data: `{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"reasoning","id":"rs_1","status":"completed","summary":[]}]}}`},
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "" {
+		t.Fatalf("Content = %q, want empty: reasoning must stay out of assistant text", resp.Content)
+	}
+	if resp.ReasoningContent != "private reasoning" {
+		t.Fatalf("ReasoningContent = %q, want the reasoning delta", resp.ReasoningContent)
+	}
+}
+
+func TestParseResponsesSSEEventLineRoutesWhenPayloadHasNoType(t *testing.T) {
+	stream := buildLabeledSSEStream([]labeledSSEFrame{
+		{label: "response.output_item.added", data: `{"item":{"type":"message","id":"msg_1","role":"assistant"},"output_index":0}`},
+		{label: "response.output_text.delta", data: `{"item_id":"msg_1","output_index":0,"content_index":0,"delta":"hello"}`},
+		{label: "response.completed", data: `{"response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}}`},
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "hello" {
+		t.Fatalf("Content = %q, want the frame label to route payloads without a type", resp.Content)
+	}
+}
+
+func TestParseResponsesSSEEnvelopeDataUnwrapsWithFrameLabel(t *testing.T) {
+	stream := buildLabeledSSEStream([]labeledSSEFrame{
+		{label: "response.output_item.added", data: `{"type":"response.output_item.added","data":{"item":{"type":"message","id":"msg_1","role":"assistant"},"output_index":0}}`},
+		{label: "response.output_text.delta", data: `{"type":"response.output_text.delta","data":{"item_id":"msg_1","output_index":0,"content_index":0,"delta":"wrapped"}}`},
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "wrapped" {
+		t.Fatalf("Content = %q, want the envelope data payload to be unwrapped", resp.Content)
+	}
+}
+
+// Even a correctly typed text delta is dropped when it addresses a tool-call
+// item: arguments and reasoning are not assistant prose.
+func TestParseResponsesSSEDropsTextDeltaForToolCallItem(t *testing.T) {
+	stream := buildLabeledSSEStream([]labeledSSEFrame{
+		{label: "response.output_item.added", data: `{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","arguments":""}}`},
+		{label: "response.output_text.delta", data: `{"type":"response.output_text.delta","item_id":"fc_1","output_index":1,"content_index":0,"delta":"{\"path\":\"a.go\"}"}`},
+		{label: "response.output_item.done", data: `{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","status":"completed","arguments":"{\"path\":\"a.go\"}"}}`},
+		{label: "response.completed", data: `{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","status":"completed","arguments":"{\"path\":\"a.go\"}"}]}}`},
+	})
+	var streamed []string
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, func(d message.StreamDelta) {
+		if d.Type == message.StreamDeltaText {
+			streamed = append(streamed, d.Text)
+		}
+	}, nil, nil, "", false, false, false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "" {
+		t.Fatalf("Content = %q, want empty for a text delta addressed to a tool call", resp.Content)
+	}
+	if len(streamed) != 0 {
+		t.Fatalf("streamed text = %q, want none", streamed)
+	}
+	if len(resp.ToolCalls) != 1 || string(resp.ToolCalls[0].Args) != `{"path":"a.go"}` {
+		t.Fatalf("ToolCalls = %+v, want the call to survive with its arguments", resp.ToolCalls)
+	}
+}
+
+// A text delta that names its own message item must be kept even when the
+// upstream omitted output_index (leaving it at 0) and a tool call happens to
+// occupy index 0: item_id is the identity, the index is not.
+func TestParseResponsesSSEKeepsTextDeltaIdentifiedByItemID(t *testing.T) {
+	stream := buildLabeledSSEStream([]labeledSSEFrame{
+		{label: "response.output_item.added", data: `{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","arguments":""}}`},
+		{label: "response.output_text.delta", data: `{"type":"response.output_text.delta","item_id":"msg_1","delta":"hello"}`},
+		{label: "response.completed", data: `{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}}`},
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "hello" {
+		t.Fatalf("Content = %q, want the identified message text kept", resp.Content)
+	}
+}
+
+// A response.output_text.done addressed to a tool-call item is the same
+// routing defect as a misaddressed delta: its text is tool arguments, not a
+// message part, and confirming it would put that content into the response.
+func TestParseResponsesSSEDropsTextDoneForToolCallItem(t *testing.T) {
+	stream := buildLabeledSSEStream([]labeledSSEFrame{
+		{label: "response.output_item.added", data: `{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","arguments":""}}`},
+		{label: "response.output_text.done", data: `{"type":"response.output_text.done","item_id":"fc_1","output_index":0,"content_index":0,"text":"{\"path\":\"a.go\"}"}`},
+		{label: "response.output_item.done", data: `{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","status":"completed","arguments":"{\"path\":\"a.go\"}"}}`},
+		{label: "response.completed", data: `{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","status":"completed","arguments":"{\"path\":\"a.go\"}"}]}}`},
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "" {
+		t.Fatalf("Content = %q, want empty for a done event addressed to a tool call", resp.Content)
+	}
+	if len(resp.ToolCalls) != 1 || string(resp.ToolCalls[0].Args) != `{"path":"a.go"}` {
+		t.Fatalf("ToolCalls = %+v, want the call intact", resp.ToolCalls)
+	}
+}
+
+// A done event that names its message item keeps working when the index is
+// absent: the identity decides, not index 0.
+func TestParseResponsesSSEKeepsTextDoneIdentifiedByItemID(t *testing.T) {
+	stream := buildLabeledSSEStream([]labeledSSEFrame{
+		{label: "response.output_item.added", data: `{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"read","arguments":""}}`},
+		{label: "response.output_text.delta", data: `{"type":"response.output_text.delta","item_id":"msg_1","delta":"damaged"}`},
+		{label: "response.output_text.done", data: `{"type":"response.output_text.done","item_id":"msg_1","text":"clean"}`},
+		{label: "response.completed", data: `{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","content":[{"type":"output_text","text":"clean"}]}]}}`},
+	})
+	resp, _, err := parseResponsesSSEWithOutputItemsAndTurnState(stream, nil, nil, nil, "", false, false, false)
+	if err != nil {
+		t.Fatalf("parseResponsesSSEWithOutputItemsAndTurnState: %v", err)
+	}
+	if resp.Content != "clean" {
+		t.Fatalf("Content = %q, want the identified part's done text", resp.Content)
 	}
 }

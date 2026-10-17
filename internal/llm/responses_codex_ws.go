@@ -494,6 +494,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 		}
 		resp.Content = joined
 	}
+	streamDiag := &responsesStreamDiagnostics{}
 	for {
 		select {
 		case <-streamCtx.Done():
@@ -579,7 +580,7 @@ func (r *ResponsesProvider) codexWSReadResponseLocked(
 			}
 			continue
 		}
-		eventType, eventData, err := parseResponsesEvent(msg, "")
+		eventType, eventData, err := parseResponsesEvent(msg, "", streamDiag)
 		if err != nil {
 			return nil, nil, fmt.Errorf("parse event: %w", err)
 		}

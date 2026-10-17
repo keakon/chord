@@ -36,6 +36,7 @@ type responseOutputTextDelta struct {
 	Index        int    `json:"index"`
 	ContentIndex int    `json:"content_index"`
 	OutputIndex  int    `json:"output_index"`
+	ItemID       string `json:"item_id"`
 	Delta        string `json:"delta"`
 }
 
@@ -335,6 +336,67 @@ type responsesEventEnvelope struct {
 	Data json.RawMessage `json:"data"`
 }
 
+// responsesStreamDiagnostics carries the per-stream warn-once counters for
+// upstream framing defects, so a relay that mislabels every event is reported
+// once per stream instead of once per event.
+type responsesStreamDiagnostics struct {
+	eventTypeConflicts  int
+	misroutedTextDeltas int
+}
+
+func (d *responsesStreamDiagnostics) noteEventTypeConflict(frameLabel, payloadType string) {
+	if d == nil {
+		return
+	}
+	d.eventTypeConflicts++
+	if d.eventTypeConflicts > 1 {
+		return
+	}
+	log.Warnf("responses: SSE event label conflicts with payload type, routing by payload label=%v payload=%v", frameLabel, payloadType)
+}
+
+// noteMisroutedTextEvent reports a text event that belongs to a tool-call
+// output item. Only the first occurrence per stream is logged.
+func (d *responsesStreamDiagnostics) noteMisroutedTextEvent(itemID string, index int) {
+	if d == nil {
+		return
+	}
+	d.misroutedTextDeltas++
+	if d.misroutedTextDeltas > 1 {
+		return
+	}
+	log.Warnf("responses: dropping output_text event that belongs to a tool-call item item_id=%v output_index=%v", itemID, index)
+}
+
+// responsesTextEventMisrouted reports whether a text delta or part-done event
+// addresses a tool-call output item instead of a message item. Tool arguments
+// and reasoning never belong to the text channel; a relay that routes them
+// here would otherwise persist them as assistant content.
+//
+// A non-empty item_id is an identity: it names a tracked tool item or it does
+// not, and the index must not be consulted — a relay that omits output_index
+// leaves it at 0, where a tool call may legitimately sit, and index-matching a
+// properly identified message would drop legitimate text. Only an event with
+// no item_id falls back to the output index.
+func responsesTextEventMisrouted(itemID string, index int, toolCalls map[int]*responsesToolAccumulator, customItemToIndex map[string]int) bool {
+	if itemID != "" {
+		if _, ok := customItemToIndex[itemID]; ok {
+			return true
+		}
+		for _, acc := range toolCalls {
+			if acc == nil {
+				continue
+			}
+			if itemID == acc.itemID || itemID == acc.id || itemID == acc.streamID {
+				return true
+			}
+		}
+		return false
+	}
+	_, misrouted := toolCalls[index]
+	return misrouted
+}
+
 var responsesTerminalSSEEvents = map[string]struct{}{
 	"response.completed":  {},
 	"response.incomplete": {},
@@ -396,6 +458,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 	// compatibility target exposes as visible reasoning, so the part boundary
 	// can project them into a durable thinking block.
 	var pendingVisibleReasoning strings.Builder
+	streamDiag := &responsesStreamDiagnostics{}
 	if visibleReasoningText {
 		defer projectVisibleReasoningText(&resp, &pendingVisibleReasoning, "")
 	}
@@ -449,7 +512,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 		}
 
 		// Resolve event type and payload: combined {"type","data"} or use last event + raw data.
-		eventType, eventData, err := parseResponsesEvent(data, eventTypeHint)
+		eventType, eventData, err := parseResponsesEvent(data, eventTypeHint, streamDiag)
 		if err != nil {
 			if readErr != nil {
 				logResponsesSSETruncatedEvent(reader, dataChunkIndex, eventTypeHint, data, readErr)
@@ -481,6 +544,7 @@ func parseResponsesSSEWithOutputItemsAndTurnState(reader io.Reader, cb StreamCal
 			freeform:                freeform,
 			visibleReasoningText:    visibleReasoningText,
 			pendingVisibleReasoning: &pendingVisibleReasoning,
+			diag:                    streamDiag,
 		}
 		outResp, outItems, done, err := processResponsesEventPayload(state, eventType, eventData, flushContent)
 		if err != nil {
@@ -684,6 +748,10 @@ type responsesEventState struct {
 	// pendingVisibleReasoning accumulates visible reasoning_text deltas until
 	// the part's done event projects them into a thinking block.
 	pendingVisibleReasoning *strings.Builder
+	// diag holds the per-stream warn-once counters for upstream framing
+	// defects (a mislabeled SSE frame, a text delta addressed to a tool-call
+	// item). Shared by pointer because the state itself is passed per event.
+	diag *responsesStreamDiagnostics
 }
 
 func responsesVisibleReasoningText(provider *ProviderConfig, model string) bool {
@@ -818,12 +886,20 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		if err := responsesSSEUnmarshal(eventData, &delta); err != nil {
 			return nil, nil, false, fmt.Errorf("parse output_text.delta: %w", err)
 		}
-		if delta.Delta != "" && state.cb != nil {
-			state.cb(message.StreamDelta{Type: message.StreamDeltaText, Text: delta.Delta})
-		}
 		deltaIdx := delta.OutputIndex
 		if deltaIdx == 0 && delta.Index != 0 {
 			deltaIdx = delta.Index
+		}
+		// A text delta addressed to a tool-call item is a routing defect, not
+		// assistant prose: accepting it would append raw tool arguments (or
+		// reasoning) to the response content. The terminal payload still
+		// carries the authoritative text for the message items.
+		if responsesTextEventMisrouted(delta.ItemID, deltaIdx, state.toolCalls, state.customItemToIndex) {
+			state.diag.noteMisroutedTextEvent(delta.ItemID, deltaIdx)
+			return nil, nil, false, nil
+		}
+		if delta.Delta != "" && state.cb != nil {
+			state.cb(message.StreamDelta{Type: message.StreamDeltaText, Text: delta.Delta})
 		}
 		state.textItems.appendDelta(deltaIdx, delta.ContentIndex, delta.Delta)
 		return nil, nil, false, nil
@@ -833,6 +909,7 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 			Index        int     `json:"index"`
 			OutputIndex  int     `json:"output_index"`
 			ContentIndex int     `json:"content_index"`
+			ItemID       string  `json:"item_id"`
 			Text         *string `json:"text"`
 		}
 		if err := responsesSSEUnmarshal(eventData, &done); err != nil {
@@ -841,6 +918,14 @@ func processResponsesEventPayload(state responsesEventState, eventType string, e
 		index := done.OutputIndex
 		if index == 0 && done.Index != 0 {
 			index = done.Index
+		}
+		// A done event addressed to a tool-call item is the same routing defect
+		// as a misaddressed delta: its text is tool arguments or reasoning, and
+		// confirming it as a message part would put that content into the
+		// response. The identity check decides before the part is marked done.
+		if responsesTextEventMisrouted(done.ItemID, index, state.toolCalls, state.customItemToIndex) {
+			state.diag.noteMisroutedTextEvent(done.ItemID, index)
+			return nil, nil, false, nil
 		}
 		if done.Text != nil {
 			state.textItems.markPartDone(index, done.ContentIndex, *done.Text)
@@ -1343,10 +1428,14 @@ func joinSSEDataParts(parts [][]byte) []byte {
 // Supports: (1) {"type":"event.name","data":{...}} — payload in "data";
 // (2) {"type":"event.name","item":...,"output_index":0} — official format, payload siblings of "type" (no "data" key);
 // (3) standard SSE: data line is payload only, type from preceding "event:" line.
-func parseResponsesEvent(data []byte, eventTypeFromLine string) (eventType string, eventData json.RawMessage, err error) {
-	if eventTypeFromLine != "" {
-		return eventTypeFromLine, json.RawMessage(data), nil
-	}
+//
+// The payload's "type" is authoritative whenever it is present: the "event:"
+// line is the SSE frame label, which relays are free to (and do) rewrite. A
+// relay that labels a tool-call argument or reasoning delta as
+// "response.output_text.delta" would otherwise route that payload into the
+// text channel and persist tool arguments as assistant content. The frame
+// label only decides events whose payload carries no type of its own.
+func parseResponsesEvent(data []byte, eventTypeFromLine string, diag *responsesStreamDiagnostics) (eventType string, eventData json.RawMessage, err error) {
 	if len(data) == 0 || data[0] != '{' {
 		return eventTypeFromLine, json.RawMessage(data), nil
 	}
@@ -1354,13 +1443,16 @@ func parseResponsesEvent(data []byte, eventTypeFromLine string) (eventType strin
 	if err := responsesSSEUnmarshal(data, &raw); err != nil {
 		return "", nil, err
 	}
-	if raw.Type != "" {
-		if len(raw.Data) == 0 {
-			return raw.Type, json.RawMessage(data), nil
-		}
-		return raw.Type, raw.Data, nil
+	if raw.Type == "" {
+		return eventTypeFromLine, json.RawMessage(data), nil
 	}
-	return eventTypeFromLine, json.RawMessage(data), nil
+	if eventTypeFromLine != "" && eventTypeFromLine != raw.Type {
+		diag.noteEventTypeConflict(eventTypeFromLine, raw.Type)
+	}
+	if len(raw.Data) == 0 {
+		return raw.Type, json.RawMessage(data), nil
+	}
+	return raw.Type, raw.Data, nil
 }
 
 func logResponsesSSEDecodeFailure(reader io.Reader, chunkIndex int, eventType string, data []byte, err error) {
