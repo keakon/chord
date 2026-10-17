@@ -100,9 +100,17 @@ const (
 	claudeBlockTypeRedactedThinking = "redacted_thinking"
 	claudeBlockTypeToolUse          = "tool_use"
 	claudeBlockTypeToolResult       = "tool_result"
-
-	claudeUnsupportedTranscriptHeader = "[Imported Claude transcript entry]"
 )
+
+// claudeUnsupportedTranscriptHeader names a transcript entry that carries no
+// safe Chord mapping by the role it was written under, so the fallback reads as
+// a structural fact about the conversation rather than as an import artifact.
+func claudeUnsupportedTranscriptHeader(role string) string {
+	if role == "" {
+		return "[transcript entry]"
+	}
+	return "[" + role + " entry]"
+}
 
 type claudeEntry struct {
 	Node                claudeNode
@@ -889,11 +897,10 @@ func renderClaudeUnsupportedMessage(env claudeTranscriptEnvelope, role string) m
 	if subtype := strings.TrimSpace(env.Subtype); subtype != "" {
 		fields = append(fields, "Subtype: "+subtype)
 	}
-	fields = append(fields, "Reason: no safe Chord mapping")
 	if content != "" {
 		fields = append(fields, "Content:", content)
 	}
-	return message.Message{Role: message.RoleAssistant, Content: renderImportedFallbackBlock(claudeUnsupportedTranscriptHeader, fields...), Provenance: importedClaudeProvenance()}
+	return message.Message{Role: message.RoleAssistant, Content: renderImportedFallbackBlock(claudeUnsupportedTranscriptHeader(role), fields...), Provenance: importedClaudeProvenance()}
 }
 
 func normalizeClaudeWriteArgs(raw json.RawMessage) json.RawMessage {
@@ -922,7 +929,7 @@ func normalizeClaudeDeleteArgs(raw json.RawMessage) json.RawMessage {
 	}
 	reason := claudePickString(args, "reason")
 	if reason == "" {
-		reason = "Imported Claude file deletion"
+		reason = deleteReasonFallback
 	}
 	result := map[string]any{"paths": paths, "reason": reason}
 	b, _ := json.Marshal(result)

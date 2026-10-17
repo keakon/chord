@@ -1219,7 +1219,7 @@ func codexNormalizeDeleteArgs(args map[string]any) json.RawMessage {
 	}
 	reason := codexPickString(args, "reason")
 	if reason == "" {
-		reason = "Imported Codex file deletion"
+		reason = deleteReasonFallback
 	}
 	result := map[string]any{"paths": paths, "reason": reason}
 	b, _ := json.Marshal(result)
@@ -1377,7 +1377,7 @@ func codexTruncateImportedText(s string, limit int) string {
 func codexOrphanedToolResultFallback(tr *codexToolResult) message.Message {
 	return message.Message{
 		Role: message.RoleAssistant,
-		Content: fmt.Sprintf("[Imported orphaned tool result]\nCall ID: %s\nOutput:\n%s",
+		Content: fmt.Sprintf("[unpaired tool result]\nCall ID: %s\nOutput:\n%s",
 			tr.CallID, codexTruncateImportedText(tr.Output, codexImportedNoteMaxBytes)),
 		Provenance: importedCodexProvenance(),
 	}

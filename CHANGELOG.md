@@ -93,6 +93,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - An imported call that maps onto a Chord tool now carries only the arguments the source recorded, so its card is indistinguishable from a live call: Codex `exec_command`, Claude `Bash`, and OpenCode `bash` calls mapped to `shell` no longer arrive with a synthesized description (the “Imported Codex exec_command” kind), and the header falls back to the command’s first line; a description the source did record is kept verbatim. What the user sees is what the model sees — import markers appear on neither side.
 
+- The remaining import markers are gone from imported sessions. A record that could not be structured — an unpaired tool call or result, a reasoning block, a non-text content block, an unrecognized OpenCode part, or a transcript entry with no safe mapping — still imports as readable text, but its label now names the structure (`[tool call]`, `[tool result]`, `[reasoning]`, `[system entry]`) instead of announcing that the record was imported, and a mapped `delete` call whose source recorded no reason reads “no reason recorded” rather than naming the source application. The replayed transcript carries the same text, so what the user sees is what the model sees.
+
 ## 0.8.2 - 2026-10-11
 
 ### Highlights

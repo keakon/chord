@@ -54,8 +54,8 @@ const (
 	openCodeStatusCancelled = "cancelled"
 	openCodeStatusCanceled  = "canceled"
 
-	openCodeUnsupportedToolHeaderPrefix = "[Imported unsupported tool"
-	openCodeToolFallbackHeader          = "[Imported tool]"
+	openCodeUnsupportedToolHeaderPrefix = "[tool call"
+	openCodeToolFallbackHeader          = "[tool]"
 )
 
 // convertOpenCodeExport converts an OpenCode `opencode export <sessionID>` JSON
@@ -299,7 +299,7 @@ func extractOpenCodeContent(obj map[string]json.RawMessage) (text string, conten
 					}
 					// Non-text block: keep a short marker so ordering isn't lost.
 					pretty, _ := json.Marshal(v)
-					b.WriteString("[Imported non-text content block]\n")
+					b.WriteString("[non-text content block]\n")
 					b.Write(pretty)
 					b.WriteString("\n")
 					warns = append(warns, "content contained non-text block; rendered as JSON")
@@ -433,7 +433,7 @@ func convertOpenCodePartsOrdered(raw json.RawMessage, role message.Role, reasoni
 			warns = append(warns, "part missing type; skipped")
 		default:
 			payload, _ := json.MarshalIndent(part, "", "  ")
-			rendered = append(rendered, "[Imported OpenCode "+typ+" part]\n"+string(payload))
+			rendered = append(rendered, "["+typ+" part]\n"+string(payload))
 			warns = append(warns, "unsupported part type "+typ+"; imported as text")
 		}
 	}
@@ -842,7 +842,7 @@ func extractToolishText(obj map[string]json.RawMessage, contentTypes []string) (
 	}
 	if raw, ok := obj["shell"]; ok && len(bytes.TrimSpace(raw)) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		pretty := indentJSON(raw)
-		return joinNonEmpty("[Imported shell]", pretty), warns
+		return joinNonEmpty("[shell]", pretty), warns
 	}
 	// If content includes tool blocks, extract via a second pass by looking for raw "content" and scanning for type=tool.
 	if raw, ok := obj["content"]; ok {

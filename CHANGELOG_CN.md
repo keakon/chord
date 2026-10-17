@@ -93,6 +93,8 @@
 
 - 导入会话中能映射为 Chord 工具的调用,现在只携带源头记录的参数,卡片与 live 调用完全一致:Codex `exec_command`、Claude `Bash`、OpenCode `bash` 映射到 `shell` 后不再附带合成出来的 description(“Imported Codex exec_command” 之类),标题行回到命令首行;源头自己记了 description 的照搬。用户看到的就是模型看到的,导入标记不再出现在任何一侧。
 
+- 导入会话里剩下的导入标记也清掉了。无法结构化的记录——配不上对的工具调用或结果、推理块、非文本内容块、无法识别的 OpenCode part、没有安全映射的 transcript 条目——仍会作为可读文本导入,但标签只说明结构(`[tool call]`、`[tool result]`、`[reasoning]`、`[system entry]`),不再声明这条记录是导入来的;源头没记 reason 的 `delete` 调用现在显示“no reason recorded”,而不是点名源头应用。重放给模型的转录是同一份文本,用户看到的就是模型看到的。
+
 ## 0.8.2 - 2026-10-11
 
 ### 亮点

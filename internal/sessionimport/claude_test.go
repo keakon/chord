@@ -157,6 +157,32 @@ func TestNormalizeClaudeBashArgsOmitsSynthesizedDescription(t *testing.T) {
 	}
 }
 
+// A mapped delete call must satisfy Chord's schema even when the source
+// recorded no reason: the stand-in names the gap rather than the import, so
+// the card header reads as a structural fact and carries no provenance.
+func TestNormalizeClaudeDeleteArgsUsesNeutralReasonFallback(t *testing.T) {
+	raw := normalizeClaudeDeleteArgs(json.RawMessage(`{"path":"a.txt"}`))
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatalf("unmarshal delete args: %v", err)
+	}
+	if args["reason"] != deleteReasonFallback {
+		t.Fatalf("reason=%v, want the neutral stand-in %q", args["reason"], deleteReasonFallback)
+	}
+	if strings.Contains(args["reason"].(string), "Imported") {
+		t.Fatalf("reason leaked import provenance: %#v", args)
+	}
+
+	withReason := normalizeClaudeDeleteArgs(json.RawMessage(`{"path":"a.txt","reason":"stale artifact"}`))
+	var reasonArgs map[string]any
+	if err := json.Unmarshal(withReason, &reasonArgs); err != nil {
+		t.Fatalf("unmarshal delete args: %v", err)
+	}
+	if reasonArgs["reason"] != "stale artifact" {
+		t.Fatalf("source reason dropped: %#v", reasonArgs)
+	}
+}
+
 // TestConvertClaudeTranscript_MapsAskUserQuestionToQuestion pins that Claude's
 // question imports as Chord's own question: the recorded text, header, flag and
 // choices carry over, and an option is named by the label the user was shown
@@ -546,8 +572,11 @@ func TestConvertClaudeTranscript_UnsupportedVisibleRoleFallsBackToReadableMessag
 	if len(msgs) != 1 {
 		t.Fatalf("msgs len=%d, want 1", len(msgs))
 	}
-	if msgs[0].Role != "assistant" || !strings.Contains(msgs[0].Content, "[Imported Claude transcript entry]") || !strings.Contains(msgs[0].Content, "Subtype: tool_use_summary") {
+	if msgs[0].Role != "assistant" || !strings.Contains(msgs[0].Content, "[system entry]") || !strings.Contains(msgs[0].Content, "Subtype: tool_use_summary") {
 		t.Fatalf("unexpected fallback msg=%+v", msgs[0])
+	}
+	if strings.Contains(msgs[0].Content, "Reason:") {
+		t.Fatalf("fallback keeps import bookkeeping: %+v", msgs[0])
 	}
 }
 
@@ -629,7 +658,7 @@ func TestConvertClaudeTranscript_MixedUnsupportedVisibleEntryFallsBackInChain(t 
 	if len(msgs) != 3 {
 		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
 	}
-	if msgs[0].Content != "start" || !strings.Contains(msgs[1].Content, "[Imported Claude transcript entry]") || msgs[2].Content != "done" {
+	if msgs[0].Content != "start" || !strings.Contains(msgs[1].Content, "[system entry]") || msgs[2].Content != "done" {
 		t.Fatalf("unexpected messages: %+v", msgs)
 	}
 	if report.Claude == nil || report.Claude.DowngradedVisibleEntries != 1 {

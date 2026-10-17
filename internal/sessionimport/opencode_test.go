@@ -274,7 +274,7 @@ func TestConvertOpenCodeExport_ToolPartMissingNameStaysText(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("msgs len=%d, want 1: %+v", len(msgs), msgs)
 	}
-	if len(msgs[0].ToolCalls) != 0 || !strings.Contains(msgs[0].Content, "[Imported unsupported tool") {
+	if len(msgs[0].ToolCalls) != 0 || !strings.Contains(msgs[0].Content, "[tool call") {
 		t.Fatalf("a part without a name cannot name a call: %+v", msgs[0])
 	}
 	if !hasWarning(report.Warnings, "tool part missing name; imported as text") {

@@ -935,6 +935,32 @@ func TestCodexNormalizeShellArgsOmitsSynthesizedDescription(t *testing.T) {
 	}
 }
 
+// A mapped delete call must satisfy Chord's schema even when the source
+// recorded no reason: the stand-in names the gap rather than the import, so
+// the card header reads as a structural fact and carries no provenance.
+func TestCodexNormalizeDeleteArgsUsesNeutralReasonFallback(t *testing.T) {
+	raw := codexNormalizeDeleteArgs(map[string]any{"paths": []any{"a.txt"}})
+	var args map[string]any
+	if err := json.Unmarshal(raw, &args); err != nil {
+		t.Fatalf("unmarshal delete args: %v", err)
+	}
+	if args["reason"] != deleteReasonFallback {
+		t.Fatalf("reason=%v, want the neutral stand-in %q", args["reason"], deleteReasonFallback)
+	}
+	if strings.Contains(args["reason"].(string), "Imported") {
+		t.Fatalf("reason leaked import provenance: %#v", args)
+	}
+
+	withReason := codexNormalizeDeleteArgs(map[string]any{"paths": []any{"a.txt"}, "reason": "stale artifact"})
+	var reasonArgs map[string]any
+	if err := json.Unmarshal(withReason, &reasonArgs); err != nil {
+		t.Fatalf("unmarshal delete args: %v", err)
+	}
+	if reasonArgs["reason"] != "stale artifact" {
+		t.Fatalf("source reason dropped: %#v", reasonArgs)
+	}
+}
+
 func TestCodexNormalizeExecCommandArgsOmitsSynthesizedDescription(t *testing.T) {
 	raw := codexNormalizeExecCommandArgs(map[string]any{"cmd": "git status", "workdir": "/tmp/project", "yield_time_ms": 10000, "max_output_tokens": 12000})
 	var args map[string]any
