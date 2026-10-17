@@ -105,6 +105,10 @@ func Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
 		return nil, fmt.Errorf("import: unsupported source %q (supported in this build: claude, opencode, codex)", source)
 	}
 
+	if filled := normalizeImportedMessages(msgs); filled > 0 {
+		report.warnf("%d tool result(s) carried no output text and were filled with the text a live call leaves for the same outcome", filled)
+	}
+
 	report.ImportedMessages = len(msgs)
 	if len(msgs) == 0 {
 		return nil, fmt.Errorf("import: no messages were imported")

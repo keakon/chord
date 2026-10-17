@@ -786,12 +786,12 @@ func convertMessagesWithMap(msgs []message.Message) ([]anthropicMessage, []anthr
 					}
 				}
 				if len(blocks) == 0 {
-					blocks = append(blocks, anthropicContent{Type: "text", Text: ""})
+					blocks = append(blocks, anthropicContent{Type: "text", Text: emptyWireTextPlaceholder})
 				}
 				result, messageMap[sourceIndex] = appendAnthropicUserMessage(result, blocks)
 			} else {
 				// Plain text user message.
-				result, messageMap[sourceIndex] = appendAnthropicUserMessage(result, []anthropicContent{{Type: "text", Text: msg.Content}})
+				result, messageMap[sourceIndex] = appendAnthropicUserMessage(result, []anthropicContent{{Type: "text", Text: wireText(msg.Content)}})
 			}
 			i++
 

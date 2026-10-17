@@ -552,10 +552,10 @@ func TestGeminiUserParts_MergeKeepsImagePart(t *testing.T) {
 	}
 }
 
-func TestGeminiUserParts_AddsEmptyTextPartForEmptyTextOnlyMessage(t *testing.T) {
+func TestGeminiUserParts_LabelsEmptyTextOnlyMessage(t *testing.T) {
 	got := geminiUserParts(message.Message{Parts: []message.ContentPart{{Type: "text", Text: ""}, {Type: "text", Text: ""}}})
-	if len(got) != 1 || got[0].Text != "" || got[0].InlineData != nil {
-		t.Fatalf("parts = %#v, want one empty text part", got)
+	if len(got) != 1 || got[0].Text != emptyWireTextPlaceholder || got[0].InlineData != nil {
+		t.Fatalf("parts = %#v, want one labeled text part", got)
 	}
 }
 

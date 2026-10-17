@@ -259,10 +259,10 @@ func convertMessagesToResponsesWithItemIDs(systemPrompt string, msgs []message.M
 					}
 				}
 				if len(content) == 0 {
-					content = append(content, responsesContentBlock{Type: "input_text", Text: ""})
+					content = append(content, responsesContentBlock{Type: "input_text", Text: emptyWireTextPlaceholder})
 				}
 			} else {
-				content = append(content, responsesContentBlock{Type: "input_text", Text: msg.Content})
+				content = append(content, responsesContentBlock{Type: "input_text", Text: wireText(msg.Content)})
 			}
 			var wireContent any = content
 			if cacheThisMessage {
@@ -465,7 +465,9 @@ func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID 
 	case "reasoning":
 		content := make([]responsesReasoningContentBlock, 0, len(item.Content))
 		for _, entry := range item.Content {
-			if entry.Type == "reasoning_text" {
+			// A stored reasoning_text block that lost its text cannot be
+			// replayed: the provider rejects a text block without text.
+			if entry.Type == "reasoning_text" && entry.Text != "" {
 				content = append(content, responsesReasoningContentBlock{Type: entry.Type, Text: entry.Text})
 			}
 		}
@@ -477,12 +479,20 @@ func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID 
 		}
 		summary := make([]responsesReasoningSummaryPayload, 0, len(item.Summary))
 		for _, entry := range item.Summary {
+			if entry.Text == "" {
+				continue
+			}
 			summary = append(summary, responsesReasoningSummaryPayload{Type: entry.Type, Text: entry.Text})
 		}
 		converted.Summary = &summary
 	case "message":
 		content := make([]responsesContentBlock, 0, len(item.Content))
 		for _, entry := range item.Content {
+			// An entry that carries neither text nor a refusal has nothing to
+			// send; a refusal block legitimately has no text.
+			if entry.Text == "" && entry.Refusal == "" {
+				continue
+			}
 			content = append(content, responsesContentBlock{Type: entry.Type, Text: entry.Text, Refusal: entry.Refusal})
 		}
 		if len(content) == 0 {
@@ -515,7 +525,7 @@ func convertResponsesOutputItem(item message.ResponsesOutputItem, includeItemID 
 
 func responsesToolOutput(msg message.Message) any {
 	if len(msg.Parts) == 0 {
-		return msg.Content
+		return wireText(msg.Content)
 	}
 	content := make([]responsesContentBlock, 0, len(msg.Parts))
 	for _, p := range msg.Parts {
@@ -548,7 +558,7 @@ func responsesToolOutput(msg message.Message) any {
 		}
 	}
 	if len(content) == 0 {
-		return msg.Content
+		return wireText(msg.Content)
 	}
 	return content
 }

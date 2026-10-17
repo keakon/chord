@@ -311,14 +311,25 @@ func TestConvertMessages_MergeKeepsImageBlock(t *testing.T) {
 	}
 }
 
-func TestConvertMessages_AddsEmptyTextBlockForEmptyTextOnlyParts(t *testing.T) {
+func TestConvertMessages_LabelsEmptyTextOnlyParts(t *testing.T) {
 	msgs := []message.Message{{
 		Role:  "user",
 		Parts: []message.ContentPart{{Type: "text", Text: ""}, {Type: "text", Text: ""}},
 	}}
 	got, _ := convertMessagesWithMap(msgs)
 	blocks, ok := got[0].Content.([]anthropicContent)
-	if !ok || len(blocks) != 1 || blocks[0].Type != "text" || blocks[0].Text != "" {
-		t.Fatalf("anthropic blocks = %#v, want one empty text block", got[0].Content)
+	if !ok || len(blocks) != 1 || blocks[0].Type != "text" || blocks[0].Text != emptyWireTextPlaceholder {
+		t.Fatalf("anthropic blocks = %#v, want one labeled text block", got[0].Content)
+	}
+}
+
+// The plain-text user branch carries the same placeholder the other converters
+// label an empty message with: a text-less history entry must not reach the
+// provider as a block with no text.
+func TestConvertMessagesToOpenAI_LabelsEmptyPlainTextUserMessage(t *testing.T) {
+	msgs := []message.Message{{Role: message.RoleUser, Content: ""}}
+	out := convertMessagesToOpenAIWithOptions("", modelcompat.WireFamilyOpenAIChat, modelcompat.ReasoningContinuityNone, msgs, openAIConvertOptions{})
+	if len(out) != 1 || out[0].Content != emptyWireTextPlaceholder {
+		t.Fatalf("openai content = %#v, want one labeled text message", out[0].Content)
 	}
 }

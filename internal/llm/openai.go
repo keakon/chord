@@ -740,13 +740,17 @@ func convertMessagesToOpenAIWithOptions(systemPrompt, targetWireFamily, continui
 				// Multi-part message (may include images).
 				blocks := openAIContentParts(msg.Parts)
 				if len(blocks) == 0 {
-					blocks = append(blocks, openAIContentBlock{Type: "text", Text: ""})
+					blocks = append(blocks, openAIContentBlock{Type: "text", Text: emptyWireTextPlaceholder})
 				}
 				result = append(result, openAIMessage{Role: "user", Content: blocks, Transient: msg.Kind == message.KindTurnOverlay})
 			} else {
+				// An empty plain-text user message (no parts, nothing to
+				// preview) carries no text for the wire shape, and the same
+				// placeholder Anthropic and Gemini already label it with keeps
+				// the block sendable instead of rejected.
 				result = append(result, openAIMessage{
 					Role:      "user",
-					Content:   msg.Content,
+					Content:   wireText(msg.Content),
 					Transient: msg.Kind == message.KindTurnOverlay,
 				})
 			}

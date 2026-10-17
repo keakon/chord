@@ -54,6 +54,8 @@
 
 - 导入 Codex 会话现在会显示真正执行的工具，而不是一张转义后的脚本文本卡。导入器会把每条代码模式 `exec` 输入（原始 JavaScript）解析到它可证明只发起的唯一一次 `tools.exec_command(...)` 或 `tools.apply_patch(...)` 嵌套调用，映射为 `shell` 或 `apply_patch`，并保留命令、工作目录与补丁正文；控制流、非 const 绑定或表达式初值（拼接、`?:` 三元、相邻字符串）以及首行 `// @exec:` pragma 不合法的输入都无法通过这个证明。无法映射的调用——`write_stdin`、`collaboration` 命名空间、一次发起多个调用的脚本、会话结束时仍在运行的脚本单元——保持为源头的工具调用，用原名和原参数，轨迹里仍然记着实际发生过的事。`Script completed` 结果信封会被剥掉，脚本失败则记为错误结果。
 
+- 恢复会话时，历史中只要有一条没有文本的消息，就不会再报 `Missing required parameter: '…output[…].text'`。工具没有输出是合法历史——导入的 Codex `exec` 脚本、Claude 工具结果、OpenCode 工具输出都可能没有输出——但这类消息以空文本块发出去会被 provider 拒绝，导致模型池里每个模型都起不来这一轮。现在导入的空结果会保留为和 live 调用相同的“无输出”文本——按配对调用的工具名与结果状态生成：成功的 shell 调用读作 `(shell completed with no output)`，失败沿用 live 路径的通用错误行,取消沿用它的 `Cancelled` 行——空 assistant 文本块在发送前被标注，一条空结果不再拖垮整轮请求。
+
 - 导入 Claude 会话现在保留未映射工具调用的原始参数，不再包一层导入器元数据，卡片显示的是源头发起的调用本身——`WebSearch` 带着它的 query，而不是 `{unsupported, source, reason, arguments}` 记账字段。有 Chord 映射的工具名（`Bash`、`Read`、`Write`、`Edit`、`MultiEdit`、`Update` 等）仍转换为对应的 Chord 工具。
 
 - 导入 OpenCode 会话现在把没有 Chord 映射的工具调用——`webfetch`、`websearch`、`patch`、`task`、MCP 工具——保留为真实的工具调用，用源头的名称和参数，并带上它的结果，而不是一段 `[Imported unsupported tool: …]` JSON 文本。工具结果现在也会从当前导出结构里读取——输出是 `state.content` 数组，失败的工具带 `state.error`——导入的调用因此保留它当时产出的输出；文件结果同时保留文件名和所在位置。无法命名或配对调用的部件（没有名称、没有调用 ID）仍按文本导入。
@@ -85,7 +87,7 @@
 - `present` 默认不再把 `.chord/` 下的文件作为面向用户的交付文件:任务笔记与计划文档通过计划摘要或交接共享;只有明确要求、且路径被 `present` 专属权限规则点名时才会交付。
 - 当前模型下被隐藏的文件工具不再直接拒绝调用:隐藏的同类工具仍会执行,并在结果中附带一句提示,下次改用可见工具。权限规则仍决定调用本身:拒绝会在执行前拦截,`ask` 规则仍会弹出确认。
 
-- 导入会话中能映射为 Chord 工具的调用,现在只携带源头记录的参数,卡片与 live 调用完全一致:Codex `exec_command`、Claude `Bash`、OpenCode `bash` 映射到 `shell` 后不再附带合成出来的 description(“Imported Codex exec_command” 之类),标题行回到命令首行;源头自己记了 description 的照搬。
+- 导入会话中能映射为 Chord 工具的调用,现在只携带源头记录的参数,卡片与 live 调用完全一致:Codex `exec_command`、Claude `Bash`、OpenCode `bash` 映射到 `shell` 后不再附带合成出来的 description(“Imported Codex exec_command” 之类),标题行回到命令首行;源头自己记了 description 的照搬。用户看到的就是模型看到的,导入标记不再出现在任何一侧。
 
 ## 0.8.2 - 2026-10-11
 

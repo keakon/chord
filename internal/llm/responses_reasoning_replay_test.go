@@ -213,7 +213,7 @@ func TestConvertMessagesLeavesOrphanToolResultForToolBranchAfterNativeReplay(t *
 	}
 }
 
-func TestConvertMessagesToResponsesAddsEmptyTextBlockForEmptyUserParts(t *testing.T) {
+func TestConvertMessagesToResponsesLabelsEmptyUserParts(t *testing.T) {
 	msgs := []message.Message{{
 		Role: message.RoleUser,
 		Parts: []message.ContentPart{
@@ -226,8 +226,8 @@ func TestConvertMessagesToResponsesAddsEmptyTextBlockForEmptyUserParts(t *testin
 		t.Fatalf("item count = %d, want 1", len(items))
 	}
 	content, ok := items[0].Content.([]responsesContentBlock)
-	if !ok || len(content) != 1 || content[0].Type != "input_text" || content[0].Text != "" {
-		t.Fatalf("responses content = %#v, want one empty input_text block", items[0].Content)
+	if !ok || len(content) != 1 || content[0].Type != "input_text" || content[0].Text != emptyWireTextPlaceholder {
+		t.Fatalf("responses content = %#v, want one labeled input_text block", items[0].Content)
 	}
 }
 

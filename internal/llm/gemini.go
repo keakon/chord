@@ -621,7 +621,7 @@ func geminiToolFunctionResponse(name string, msg message.Message) *geminiFunctio
 
 func geminiUserParts(msg message.Message) []geminiPart {
 	if len(msg.Parts) == 0 {
-		return markGeminiOverlayParts(msg, []geminiPart{{Text: msg.Content}})
+		return markGeminiOverlayParts(msg, []geminiPart{{Text: wireText(msg.Content)}})
 	}
 	parts := make([]geminiPart, 0, len(msg.Parts))
 	for _, p := range msg.Parts {
@@ -655,7 +655,7 @@ func geminiUserParts(msg message.Message) []geminiPart {
 		}
 	}
 	if len(parts) == 0 {
-		parts = []geminiPart{{Text: ""}}
+		parts = []geminiPart{{Text: emptyWireTextPlaceholder}}
 	}
 	return markGeminiOverlayParts(msg, parts)
 }
