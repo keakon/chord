@@ -47,6 +47,37 @@ func TestToolCardKeepsModelArgumentsWhenEffectiveArgumentsDiffer(t *testing.T) {
 	}
 }
 
+func TestUnrecognizedToolCardPreviewsScriptFirstLineWhenCollapsed(t *testing.T) {
+	// An imported exec call is an unknown tool whose only argument is a
+	// multi-line script. Its folded card must say what the call did — the
+	// script's opening line on the header, exactly the way a shell card
+	// previews a multi-line command — instead of a bare tool name.
+	m := NewModelWithSize(nil, 120, 16)
+	args := `{"input":"const r = await tools.write_stdin({session_id:14922,chars:\"\",yield_time_ms:1000,max_output_tokens:12000}); text(r.output);\n"}`
+
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
+		ID: "exec-call-1", Name: "exec", ArgsJSON: args,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallExecutionEvent{
+		ID: "exec-call-1", Name: "exec", ArgsJSON: args, State: agent.ToolCallExecutionStateRunning,
+	}})
+	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolResultEvent{
+		CallID: "exec-call-1", Name: "exec", ArgsJSON: args, Result: "ok", Status: message.ToolStatusSuccess,
+	}})
+
+	block, ok := m.viewport.FindBlockByToolID("exec-call-1")
+	if !ok {
+		t.Fatal("expected exec tool block")
+	}
+	plain := terminaltext.StripANSI(strings.Join(block.Render(120, ""), "\n"))
+	if !strings.Contains(plain, "exec") {
+		t.Fatalf("tool name missing from card:\n%s", plain)
+	}
+	if !strings.Contains(plain, "const r = await tools.write_stdin") {
+		t.Fatalf("collapsed card omitted the argument preview:\n%s", plain)
+	}
+}
+
 func TestToolResultMarksIgnoredArgumentInToolCard(t *testing.T) {
 	m := NewModelWithSize(nil, 120, 16)
 	requested := `{"path":"sample.go","limit":40,"format":"json"}`

@@ -95,6 +95,8 @@ This project follows Semantic Versioning-style releases. Before 1.0, releases ma
 
 - The remaining import markers are gone from imported sessions. A record that could not be structured — an unpaired tool call or result, a reasoning block, a non-text content block, an unrecognized OpenCode part, or a transcript entry with no safe mapping — still imports as readable text, but its label now names the structure (`[tool call]`, `[tool result]`, `[reasoning]`, `[system entry]`) instead of announcing that the record was imported, and a mapped `delete` call whose source recorded no reason reads “no reason recorded” rather than naming the source application. The replayed transcript carries the same text, so what the user sees is what the model sees.
 
+- A tool card with no dedicated card entry no longer folds down to a bare tool name. An imported Codex `exec` script or an MCP tool whose arguments are all content-sized — a multi-line script, a JSON object — shows the first argument’s opening line on the folded header, the way a shell card previews a multi-line command; expanding the card still shows every argument in full under its own label.
+
 ## 0.8.2 - 2026-10-11
 
 ### Highlights

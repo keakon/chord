@@ -87,6 +87,58 @@ func TestGenericToolHeaderKeepsLongOptionsOffTheHeader(t *testing.T) {
 	}
 }
 
+func TestGenericToolHeaderPreviewsFirstBodyArgumentWhenNoSubjectMatches(t *testing.T) {
+	// An imported Codex exec call arrives as an unknown tool whose only
+	// argument is a multi-line script: no subject key matches, so the script's
+	// opening line leads the header the way a shell card previews a multi-line
+	// command. The key stays in bodyKeys so an expanded card still shows the
+	// script in full.
+	keys, vals := parseToolArgs(`{"input":"const r = await tools.write_stdin({session_id:14922});\ntext(r.output);\n"}`)
+	mainPart, grayPart, bodyKeys := genericToolHeaderParts(keys, vals)
+	if mainPart != "const r = await tools.write_stdin({session_id:14922});" {
+		t.Fatalf("mainPart = %q", mainPart)
+	}
+	if grayPart != "" {
+		t.Fatalf("grayPart = %q", grayPart)
+	}
+	if want := []string{"input"}; !slices.Equal(bodyKeys, want) {
+		t.Fatalf("bodyKeys = %v, want %v", bodyKeys, want)
+	}
+}
+
+func TestGenericToolHeaderSubjectKeyStillWinsOverBodyPreview(t *testing.T) {
+	// A conventional subject key outranks the body preview: the multi-line
+	// value stays in the body instead of competing for the header.
+	keys, vals := parseToolArgs(`{"query":"search","input":"line one\nline two\n"}`)
+	mainPart, grayPart, bodyKeys := genericToolHeaderParts(keys, vals)
+	if mainPart != "search" {
+		t.Fatalf("mainPart = %q, want the subject", mainPart)
+	}
+	if grayPart != "" {
+		t.Fatalf("grayPart = %q", grayPart)
+	}
+	if want := []string{"input"}; !slices.Equal(bodyKeys, want) {
+		t.Fatalf("bodyKeys = %v, want %v", bodyKeys, want)
+	}
+}
+
+func TestGenericToolHeaderPreviewsFirstBodyArgumentInOrder(t *testing.T) {
+	// With several body-bound arguments and no subject key, the first one in
+	// argument order leads the header; the rest keep their body sections so an
+	// expanded card still shows every value in full.
+	keys, vals := parseToolArgs(`{"input":"line one\nline two\n","patch":"*** Begin Patch\n*** End Patch"}`)
+	mainPart, grayPart, bodyKeys := genericToolHeaderParts(keys, vals)
+	if mainPart != "line one" {
+		t.Fatalf("mainPart = %q", mainPart)
+	}
+	if grayPart != "" {
+		t.Fatalf("grayPart = %q", grayPart)
+	}
+	if want := []string{"input", "patch"}; !slices.Equal(bodyKeys, want) {
+		t.Fatalf("bodyKeys = %v, want %v", bodyKeys, want)
+	}
+}
+
 func contrastRatio(a, b color.Color) float64 {
 	al := relativeLuminance(a)
 	bl := relativeLuminance(b)

@@ -757,9 +757,13 @@ const genericToolHeaderOptionMaxRunes = 48
 // genericToolHeaderParts gives a tool with no dedicated header entry the same
 // shape as the ones that have one: the first header-sized scalar becomes the
 // subject, the remaining header-sized scalars become the "(k=v, …)" option
-// group, and long or structured values are left for the body. New tools (and
-// MCP tools, whose names the TUI never sees ahead of time) therefore get a
-// readable card without a per-tool table entry.
+// group, and long or structured values are left for the body. When no
+// conventional subject key matches at all, the first body-bound argument
+// still leads the header with its opening line — the way a shell card shows
+// the first line of a multi-line command — while its key stays in bodyKeys so
+// the expanded card shows the value in full. New tools (and MCP tools, whose
+// names the TUI never sees ahead of time) therefore get a readable card
+// without a per-tool table entry.
 func genericToolHeaderParts(keys []string, vals map[string]string) (mainPart, grayPart string, bodyKeys []string) {
 	subjectKey := ""
 	for _, k := range keys {
@@ -790,6 +794,22 @@ func genericToolHeaderParts(keys []string, vals map[string]string) (mainPart, gr
 			continue
 		}
 		opts = append(opts, sanitizeToolDisplayText(k)+"="+sanitizeToolDisplayText(value))
+	}
+	if subjectKey == "" && mainPart == "" {
+		// A card whose header carries only the tool name says nothing about
+		// what the call did, so the first content-sized argument previews
+		// itself: its opening line leads the header (a JSON value previews
+		// whole, since the parser keeps it on one line), and the header
+		// truncates whatever does not fit. The key keeps its body section,
+		// so nothing the model sent is hidden from an expanded card.
+		for _, k := range bodyKeys {
+			preview := firstDisplayLine(strings.TrimSpace(vals[k]))
+			if preview == "" {
+				continue
+			}
+			mainPart = preview
+			break
+		}
 	}
 	if len(opts) > 0 {
 		grayPart = "(" + strings.Join(opts, ", ") + ")"
