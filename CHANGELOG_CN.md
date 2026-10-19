@@ -105,6 +105,8 @@
 
 - 压缩检查点不再把会话的首个请求重复三份。当这条消息本身是约束时，逐字保留的 Original request anchor 就是唯一副本：Standing constraints 与 User Constraints 不再重画截断副本，证据行也改为指向该 anchor，而不是再重复一段 excerpt。已经写下的检查点在请求面同样折叠证据行。
 
+- 用容忍别名代替 schema 拼写发起的 `grep` / `glob` 调用，卡片不再丢掉它的 pattern。标题行改用工具自己的解码器读取参数：写成复数 `patterns` 列表的 `grep` 调用会显示它实际搜索的正则交替，单数的 `path`/`glob`（grep）与 `pattern`（glob）拼写也会进入选项组——此前结果一到，卡片就只剩下 “4 matches · 1 file”，尽管这次调用确实跑过。审计已判定为丢弃或缺失的参数仍由诊断渲染负责（`ignored patterns=…`、`<missing>`）；没有主参数的搜索标题行也不再随空的 pattern 槽一起丢掉选项组，而会把搜索范围排在计数摘要之前。与 canonical 字段同时出现的容忍别名也会被丢弃，扫描范围只显示一次。`edit` 容忍的 `filePath` 拼写也按同样方式读取，流式预览在参数还在传输时就能显示路径，而不是等到参数完整后才出现。
+
 ## 0.8.2 - 2026-10-11
 
 ### 亮点

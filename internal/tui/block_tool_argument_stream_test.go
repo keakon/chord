@@ -229,3 +229,25 @@ func TestStreamingArgumentMetadataUpdateKeepsPayload(t *testing.T) {
 		t.Fatal("blank replacement retained stale display")
 	}
 }
+
+// Edit tolerates the "filePath" spelling for "path" at execution; the streaming
+// preview must read it under the same key, or an edit written that way shows no
+// path until the arguments complete.
+func TestStreamingEditPreviewReadsToleratedFilePathAlias(t *testing.T) {
+	const raw = `{"filePath":"dir/sample.txt","old_string":"source","new_string":"replacement"}`
+	b := &Block{Type: BlockToolCall, ToolName: tools.NameEdit, ToolExecutionState: agent.ToolCallExecutionStateReceiving}
+	if got := b.streamedDisplayArgs(raw[:len(`{"filePath":"dir/sa`)], ""); got != "" {
+		t.Fatalf("premature path: %s", got)
+	}
+	if got := b.streamedDisplayArgs(raw, ""); got != `{"path":"dir/sample.txt"}` {
+		t.Fatalf("aliased path preview = %s", got)
+	}
+	// A rewrite that starts over with the canonical field must not keep the
+	// aliased value.
+	if got := b.streamedDisplayArgs(`{"path":"other.txt","new_string":"x"}`, ""); got != `{"path":"other.txt"}` {
+		t.Fatalf("replacement kept the stale aliased path: %s", got)
+	}
+	if got := stableToolDisplayArgs(tools.NameEdit, raw, ""); !strings.Contains(got, "sample.txt") {
+		t.Fatalf("stable display lost the aliased path: %s", got)
+	}
+}

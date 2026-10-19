@@ -42,6 +42,28 @@ func TestValidateGlobArgsAcceptsLegacyPatternField(t *testing.T) {
 	}
 }
 
+func TestGlobEffectiveArgsAppliesToleratedAlias(t *testing.T) {
+	patterns, ok := GlobEffectiveArgs(json.RawMessage(`{"pattern":"**/*.go","path":"internal"}`))
+	if !ok {
+		t.Fatal("GlobEffectiveArgs declined the legacy singular pattern field")
+	}
+	if len(patterns) != 1 || patterns[0] != "**/*.go" {
+		t.Fatalf("patterns = %v, want [**/*.go]", patterns)
+	}
+
+	// The canonical field keeps precedence when both spellings are present.
+	patterns, ok = GlobEffectiveArgs(json.RawMessage(`{"patterns":["a*"],"pattern":"b*"}`))
+	if !ok || len(patterns) != 1 || patterns[0] != "a*" {
+		t.Fatalf("patterns = %v (ok=%t), want the canonical field", patterns, ok)
+	}
+
+	for _, raw := range []string{``, `{"patterns":7}`, `not json`} {
+		if _, ok := GlobEffectiveArgs(json.RawMessage(raw)); ok {
+			t.Fatalf("GlobEffectiveArgs(%q) reported ok, want a raw-field fallback", raw)
+		}
+	}
+}
+
 func TestGlobExecutesWithLegacyPatternField(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "a.go"), []byte("x"), 0o644); err != nil {

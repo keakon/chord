@@ -333,6 +333,21 @@ func (GrepTool) shapeAliasArgument(aliasKey string, value any) (any, bool) {
 	return combined, true
 }
 
+// GrepEffectiveArgs returns the arguments the executor decodes from a grep
+// call after the tolerated aliases (patterns, path, glob) are applied: the
+// effective pattern plus the coerced paths and includes. Display code uses it
+// so a call written with an alias renders like its canonical spelling instead
+// of losing its primary argument. ok is false when the document cannot be
+// decoded as grep arguments; callers then keep whatever they read from the raw
+// fields.
+func GrepEffectiveArgs(args json.RawMessage) (pattern string, paths, includes []string, ok bool) {
+	decoded, err := decodeInstructionArgs[grepArgs](args)
+	if err != nil {
+		return "", nil, nil, false
+	}
+	return decoded.Pattern, decoded.Paths, decoded.Includes, true
+}
+
 func (t GrepTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err

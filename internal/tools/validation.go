@@ -166,3 +166,34 @@ func applyArgumentAliases(value any, aliases map[string]string) any {
 	}
 	return obj
 }
+
+// ToleratedArgAliases returns the non-canonical argument spellings the named
+// tool accepts, mapped to the canonical field each one stands for. It exposes
+// the same maps validation renames through, so code that reads arguments before
+// execution (the TUI's streaming preview) recognizes a tolerated spelling
+// without re-declaring it. Tools without tolerance return nil.
+//
+// Maintenance: the switch below lists the built-in tools that tolerate aliases,
+// so a new one must be added there. Two tests keep it honest together:
+// TestArgumentAliaserImplementationsAreEnumerated parses this package's sources
+// for argumentAliases declarations and requires every declaring type to be in
+// the test's built-in list, and TestToleratedArgAliasesCoversEveryAliaser
+// requires each listed tool to be reachable here with its own map.
+func ToleratedArgAliases(toolName string) map[string]string {
+	var tool Tool
+	switch NormalizeName(toolName) {
+	case NameGrep:
+		tool = GrepTool{}
+	case NameGlob:
+		tool = GlobTool{}
+	case NameEdit:
+		tool = EditTool{}
+	default:
+		return nil
+	}
+	aliaser, ok := tool.(argumentAliaser)
+	if !ok {
+		return nil
+	}
+	return aliaser.argumentAliases()
+}

@@ -1361,6 +1361,9 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 	grayPart = terminaltext.SanitizeSGR(grayPart)
 
 	const minGrayCols = 8
+	const sep = " · "
+	sepWidth := ansi.StringWidth(sep)
+	suffixW := ansi.StringWidth(summary)
 	if summary == "" {
 		if mainPart == "" {
 			if grayPart == "" {
@@ -1382,6 +1385,15 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 		return headerLine + " " + mainPart + " " + currentStyles.DimStyle.Render(grayPart)
 	}
 	if mainPart == "" {
+		// No subject to hang the option group on, but the group still names
+		// what the call searched (paths/includes) or which arguments were
+		// discarded, so it stays ahead of the count summary when it fits.
+		// Unlike the branch below, nothing sits between the group and the
+		// separator, so the whole space the summary leaves is the group's.
+		remaining := budget - suffixW - sepWidth
+		if grayPart != "" && remaining >= minGrayCols {
+			return headerLine + " " + currentStyles.DimStyle.Render(truncateToolHeaderGray(grayPart, remaining)) + sep + currentStyles.DimStyle.Render(summary)
+		}
 		return headerLine + " " + currentStyles.DimStyle.Render(truncateToolHeaderGray(summary, budget))
 	}
 
@@ -1390,9 +1402,6 @@ func appendSearchHeaderSummary(headerLine, mainPart, grayPart, summary string, m
 	// intact pattern + summary pair and are compressed or dropped before the
 	// pattern is ever middle-truncated.
 	const minPatternCols = 8
-	const sep = " · "
-	sepWidth := ansi.StringWidth(sep)
-	suffixW := ansi.StringWidth(summary)
 	patternBudget := budget - suffixW - sepWidth
 	if patternBudget < minPatternCols {
 		patternBudget = minPatternCols

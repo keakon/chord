@@ -26,8 +26,15 @@ const (
 // streamingToolArguments reads complete top-level fields for display only.
 // The execution payload remains RawArgs; replacements reset all parsed state.
 type streamingToolArguments struct {
-	raw               string
-	readFields        bool
+	raw        string
+	readFields bool
+	// aliases maps a tolerated field spelling (edit's "filePath") to the
+	// canonical key, so a preview stores the value under the name the card and
+	// the executor read. It is consulted only when readFields is true
+	// (edit/write/shell): grep and glob never read streamed fields here, so
+	// their aliases are handled at the header layer instead. The map is still
+	// built for every tool because streamingArguments reuses a single decoder.
+	aliases           map[string]string
 	offset, start     int
 	phase             argumentStreamPhase
 	key               string
@@ -45,7 +52,7 @@ func (s *streamingToolArguments) update(raw string) {
 		return
 	}
 	if !strings.HasPrefix(raw, s.raw) {
-		*s = streamingToolArguments{readFields: s.readFields}
+		*s = streamingToolArguments{readFields: s.readFields, aliases: s.aliases}
 	}
 	if s.provisional {
 		if s.previous == nil {
@@ -103,6 +110,9 @@ func (s *streamingToolArguments) update(raw string) {
 				if json.Unmarshal([]byte(raw[s.start:s.offset+1]), &s.key) != nil {
 					s.phase = argumentStreamInvalid
 					continue
+				}
+				if canonical, ok := s.aliases[s.key]; ok {
+					s.key = canonical
 				}
 				s.phase = argumentStreamColon
 			}
@@ -273,7 +283,10 @@ func (s *streamingToolArguments) count() int {
 func (b *Block) streamingArguments(raw string) *streamingToolArguments {
 	if b.streamArgs == nil {
 		name := toolNameKey(b.ToolName)
-		b.streamArgs = &streamingToolArguments{readFields: name == tools.NameWrite || name == tools.NameEdit || name == tools.NameShell}
+		b.streamArgs = &streamingToolArguments{
+			readFields: name == tools.NameWrite || name == tools.NameEdit || name == tools.NameShell,
+			aliases:    tools.ToleratedArgAliases(name),
+		}
 	}
 	b.streamArgs.update(raw)
 	return b.streamArgs

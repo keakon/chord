@@ -514,6 +514,13 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 		}
 		return fmt.Sprintf("%d files", len(filePaths)), gray
 	case tools.NameGrep, tools.NameGlob, tools.NameShell, tools.NameWebFetch, tools.NameSkill:
+		// Only grep and glob have a tolerated spelling today. The call is
+		// narrowed here so the shared case does not read as though every tool
+		// recovers aliases; searchHeaderValsWithToleratedAliases keeps its own
+		// guard as well, so a future caller cannot recover by accident.
+		if b.ToolName == tools.NameGrep || b.ToolName == tools.NameGlob {
+			vals = b.searchHeaderValsWithToleratedAliases(vals)
+		}
 		mainPart, grayPart := formatToolHeaderPartsWithParsed(b.ToolName, keys, cloneToolValsWithDisplayDirs(b, vals))
 		if b.ToolName == tools.NameGrep {
 			// grepDiagnosticHeaderParts rebuilds the whole option group from the
@@ -552,6 +559,155 @@ func (b *Block) formatToolHeaderPartsWithParsed(keys []string, vals map[string]s
 	default:
 		return formatToolHeaderPartsWithParsed(b.ToolName, keys, vals)
 	}
+}
+
+// searchHeaderValsWithToleratedAliases fills the canonical argument keys of a
+// search tool from the tolerated aliases a model may write instead of the
+// schema spelling (grep: patterns/path/glob, glob: pattern), so an aliased call
+// renders the same header as its canonical spelling. The values come from the
+// tool's own decoder — the single source of truth for what an alias means (a
+// plural patterns list is the executor's alternation) — because deriving them
+// again here would let the header drift from what actually ran.
+//
+// A key the argument audit already reports as discarded or missing is left
+// absent: the diagnostic renderer owns that spelling ("ignored patterns=…",
+// "<missing>"), while a consumed alias never produces such a diagnostic. An
+// alias never survives beside the canonical key it renames to either: when the
+// model wrote both spellings the header shows the canonical value the executor
+// used, so the option group cannot name the same scope twice.
+func (b *Block) searchHeaderValsWithToleratedAliases(vals map[string]string) map[string]string {
+	if b == nil {
+		return vals
+	}
+	name := tools.NormalizeName(b.ToolName)
+	if name != tools.NameGrep && name != tools.NameGlob {
+		return vals
+	}
+	// The display document is the one the executor saw (effective args when the
+	// runtime rewrote them), so decoding it keeps the header on what ran rather
+	// than on what the model first wrote.
+	argsJSON := strings.TrimSpace(b.Content)
+	if argsJSON == "" {
+		argsJSON = strings.TrimSpace(b.RawArgs)
+	}
+	if argsJSON == "" {
+		return vals
+	}
+	claimed := b.claimedHeaderAliasPaths()
+	// Each recovered value also names the alias spelling it replaces: the
+	// executor renamed that field, so the header must not show the same scope
+	// twice (paths=… beside the raw path=… the diagnostic group would add).
+	type headerArgFill struct {
+		alias     string
+		canonical string
+		value     string
+	}
+	var fills []headerArgFill
+	switch name {
+	case tools.NameGrep:
+		pattern, paths, includes, ok := tools.GrepEffectiveArgs(json.RawMessage(argsJSON))
+		if !ok {
+			return vals
+		}
+		if pattern != "" && !claimed["pattern"] && !claimed["patterns"] {
+			fills = append(fills, headerArgFill{"patterns", "pattern", sanitizeToolDisplayText(pattern)})
+		}
+		if len(paths) > 0 && !claimed["paths"] && !claimed["path"] {
+			fills = append(fills, headerArgFill{"path", "paths", marshalStringListArg(paths)})
+		}
+		if len(includes) > 0 && !claimed["includes"] && !claimed["glob"] {
+			fills = append(fills, headerArgFill{"glob", "includes", marshalStringListArg(includes)})
+		}
+	case tools.NameGlob:
+		patterns, ok := tools.GlobEffectiveArgs(json.RawMessage(argsJSON))
+		if !ok {
+			return vals
+		}
+		if len(patterns) > 0 && !claimed["patterns"] && !claimed["pattern"] {
+			fills = append(fills, headerArgFill{"pattern", "patterns", marshalStringListArg(patterns)})
+		}
+	}
+	// The copy is lazy: a canonical call has nothing to recover, so the common
+	// path allocates nothing and returns the caller's map untouched. vals may
+	// come from a different document than the one decoded here (the decoded
+	// doc falls back to RawArgs when Content is empty), so recovery keys off
+	// the canonical value, not on the alias being present in vals.
+	out := vals
+	copied := false
+	for _, fill := range fills {
+		_, aliasPresent := vals[fill.alias]
+		canonicalSet := strings.TrimSpace(vals[fill.canonical]) != ""
+		switch {
+		case canonicalSet:
+			// The value the model wrote under the canonical key keeps its own
+			// spelling, but the redundant alias still goes: the executor renamed
+			// that field away, so the option group must not name the same scope
+			// twice (paths=... beside the raw path=...).
+			if !aliasPresent {
+				continue
+			}
+		case fill.value == "":
+			// An empty recovered value would read as a missing one, so the
+			// alias the model wrote stays.
+			continue
+		}
+		if !copied {
+			copied = true
+			out = make(map[string]string, len(vals))
+			maps.Copy(out, vals)
+		}
+		if !canonicalSet {
+			out[fill.canonical] = fill.value
+		}
+		delete(out, fill.alias)
+	}
+	if !copied {
+		return vals
+	}
+	return out
+}
+
+// claimedHeaderAliasPaths reports the argument paths the audit already accounts
+// for, by canonical name. Such a value must not be recovered from a tolerated
+// alias: it either never reached the tool (ignored) or is missing, and both
+// spellings belong to the diagnostic renderer.
+func (b *Block) claimedHeaderAliasPaths() map[string]bool {
+	if b == nil || b.Audit == nil {
+		return nil
+	}
+	claimed := make(map[string]bool, len(b.Audit.IgnoredArgs)+len(b.Audit.InvalidArgs))
+	for _, item := range b.Audit.IgnoredArgs {
+		if path := canonicalDiagnosticPath(item.Path); path != "" {
+			claimed[path] = true
+		}
+	}
+	for _, item := range b.Audit.InvalidArgs {
+		if path := canonicalDiagnosticPath(item.Path); path != "" {
+			claimed[path] = true
+		}
+	}
+	return claimed
+}
+
+// marshalStringListArg renders decoded list arguments the way parseToolArgs
+// stores model-written ones (JSON text), so the option group's list formatting
+// and the display-directory rewrite treat recovered values like their
+// canonical neighbors.
+func marshalStringListArg(values []string) string {
+	sanitized := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = sanitizeToolDisplayText(value); value != "" {
+			sanitized = append(sanitized, value)
+		}
+	}
+	if len(sanitized) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(sanitized)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 // toolCallSummaryMainPart returns the primary argument to show next to the tool

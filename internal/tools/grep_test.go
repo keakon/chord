@@ -263,6 +263,49 @@ func TestGrepPluralPatternsShapeMatchesDecoding(t *testing.T) {
 	}
 }
 
+func TestGrepEffectiveArgsAppliesToleratedAliases(t *testing.T) {
+	t.Run("plural patterns becomes the alternation", func(t *testing.T) {
+		pattern, paths, includes, ok := GrepEffectiveArgs(json.RawMessage(`{"patterns":["alpha|beta","gamma"],"paths":["docs"]}`))
+		if !ok {
+			t.Fatal("GrepEffectiveArgs declined a tolerated plural patterns call")
+		}
+		if pattern != "(?:alpha|beta)|(?:gamma)" {
+			t.Fatalf("pattern = %q, want the decoded alternation", pattern)
+		}
+		if len(paths) != 1 || paths[0] != "docs" || len(includes) != 0 {
+			t.Fatalf("paths = %v, includes = %v, want [docs] and none", paths, includes)
+		}
+	})
+
+	t.Run("canonical pattern wins beside the alias", func(t *testing.T) {
+		pattern, _, _, ok := GrepEffectiveArgs(json.RawMessage(`{"pattern":"alpha","patterns":["beta"]}`))
+		if !ok || pattern != "alpha" {
+			t.Fatalf("pattern = %q (ok=%t), want the canonical field", pattern, ok)
+		}
+	})
+
+	t.Run("singular path and glob aliases decode", func(t *testing.T) {
+		_, paths, includes, ok := GrepEffectiveArgs(json.RawMessage(`{"pattern":"alpha","path":"internal","glob":"**/*.go"}`))
+		if !ok {
+			t.Fatal("GrepEffectiveArgs declined the singular aliases")
+		}
+		if len(paths) != 1 || paths[0] != "internal" {
+			t.Fatalf("paths = %v, want [internal]", paths)
+		}
+		if len(includes) != 1 || includes[0] != "**/*.go" {
+			t.Fatalf("includes = %v, want [**/*.go]", includes)
+		}
+	})
+
+	t.Run("undecodable documents report not ok", func(t *testing.T) {
+		for _, raw := range []string{``, `{"patterns":7}`, `{"patterns":[1,2]}`, `not json`} {
+			if _, _, _, ok := GrepEffectiveArgs(json.RawMessage(raw)); ok {
+				t.Fatalf("GrepEffectiveArgs(%q) reported ok, want a raw-field fallback", raw)
+			}
+		}
+	})
+}
+
 func TestGrepPathsParameterDescribesMultiplePaths(t *testing.T) {
 	params := GrepTool{}.Parameters()
 	props, ok := params["properties"].(map[string]any)

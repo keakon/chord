@@ -113,6 +113,20 @@ func (GlobTool) argumentAliases() map[string]string {
 	return map[string]string{"pattern": "patterns"}
 }
 
+// GlobEffectiveArgs returns the patterns the executor decodes from a glob call
+// after the tolerated singular "pattern" alias is applied, coercion included.
+// Display code uses it so an aliased call renders like its canonical spelling
+// instead of losing its primary argument. ok is false when the document cannot
+// be decoded as glob arguments; callers then keep whatever they read from the
+// raw fields.
+func GlobEffectiveArgs(args json.RawMessage) (patterns []string, ok bool) {
+	decoded, err := decodeInstructionArgs[globArgs](args)
+	if err != nil {
+		return nil, false
+	}
+	return decoded.Patterns, true
+}
+
 func (t GlobTool) Execute(ctx context.Context, raw json.RawMessage) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()

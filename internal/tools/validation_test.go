@@ -3,6 +3,10 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -686,4 +690,139 @@ func resultContractTestSchema() map[string]any {
 			},
 		},
 	}
+}
+
+// The TUI's streaming preview reads arguments before execution, so every tool
+// that tolerates an alias must expose the same map validation renames through.
+func TestToleratedArgAliasesExposeToleratedSpellings(t *testing.T) {
+	for name, want := range map[string]map[string]string{
+		NameGrep: {"path": "paths", "glob": "includes", "patterns": "pattern"},
+		NameGlob: {"pattern": "patterns"},
+		NameEdit: {"filePath": "path"},
+	} {
+		if got := ToleratedArgAliases(name); !reflect.DeepEqual(got, want) {
+			t.Fatalf("ToleratedArgAliases(%s) = %v, want %v", name, got, want)
+		}
+	}
+	for _, name := range []string{NameRead, NameWrite, NameShell, NameApplyPatch, NameWebFetch, NameDelete, NameQuestion, "unknown_tool"} {
+		if got := ToleratedArgAliases(name); got != nil {
+			t.Fatalf("ToleratedArgAliases(%s) = %v, want nil", name, got)
+		}
+	}
+}
+
+// builtinToolsForAliasContract enumerates every built-in tool's zero value. It
+// is the single list the alias contract is checked against, so a tool that is
+// added to the package but not to this list is reported by
+// TestArgumentAliaserImplementationsAreEnumerated instead of going unnoticed.
+var builtinToolsForAliasContract = []Tool{
+	SaveArtifactTool{}, ReadArtifactTool{}, DeleteTool{},
+	&DelegateTool{}, &GenerateImageTool{}, SkillTool{}, DoneTool{}, ShellTool{},
+	&TodoWriteTool{}, ToolSearchTool{}, EditTool{}, PresentTool{},
+	&QuestionTool{}, &NotifyTool{}, GrepTool{}, HandoffTool{},
+	WebFetchTool{}, ReadTool{}, GlobTool{}, CompactContextTool{},
+	JobOutputTool{}, JobListTool{}, JobKillTool{}, &EscalateTool{},
+	&CancelTool{}, CompleteTool{}, WriteTool{}, ApplyPatchTool{},
+	HostedTool{}, &ViewImageTool{},
+}
+
+// builtinToolTypeName reports the struct name behind a tool value, so the
+// source scan can match a receiver type to its entry in the list above
+// regardless of whether the list stores a value or a pointer.
+func builtinToolTypeName(tool Tool) string {
+	t := reflect.TypeOf(tool)
+	for t != nil && t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	if t == nil {
+		return ""
+	}
+	return t.Name()
+}
+
+// Every built-in tool that tolerates argument aliases must be reachable through
+// ToleratedArgAliases, and the returned map must be exactly the tool's own
+// argumentAliases(). This catches a tool that implements argumentAliaser but is
+// missing from the switch in ToleratedArgAliases — without it such a tool would
+// silently lose its alias rendering in the TUI's streaming preview.
+func TestToleratedArgAliasesCoversEveryAliaser(t *testing.T) {
+	for _, tool := range builtinToolsForAliasContract {
+		name := tool.Name()
+		got := ToleratedArgAliases(name)
+		aliaser, isAliaser := tool.(argumentAliaser)
+		if !isAliaser {
+			if got != nil {
+				t.Fatalf("ToleratedArgAliases(%s) = %v, want nil for a tool without aliases", name, got)
+			}
+			continue
+		}
+		if got == nil {
+			t.Fatalf("ToleratedArgAliases(%s) = nil, but %s implements argumentAliaser; register it in ToleratedArgAliases", name, name)
+		}
+		if want := aliaser.argumentAliases(); !reflect.DeepEqual(got, want) {
+			t.Fatalf("ToleratedArgAliases(%s) = %v, want the tool's own argumentAliases %v", name, got, want)
+		}
+	}
+}
+
+// TestArgumentAliaserImplementationsAreEnumerated closes the hole
+// TestToleratedArgAliasesCoversEveryAliaser cannot: that test only walks the
+// tools it lists, so a tool that starts tolerating aliases without being added
+// to the list is never visited. This one parses the package's own sources for
+// argumentAliases methods and requires every receiver type to be in the list,
+// which turns "added the alias tolerance but forgot the wiring" into a failure.
+func TestArgumentAliaserImplementationsAreEnumerated(t *testing.T) {
+	enumerated := make(map[string]bool, len(builtinToolsForAliasContract))
+	for _, tool := range builtinToolsForAliasContract {
+		if typeName := builtinToolTypeName(tool); typeName != "" {
+			enumerated[typeName] = true
+		}
+	}
+	implementations := argumentAliaserReceiverTypes(t)
+	for typeName := range implementations {
+		if !enumerated[typeName] {
+			t.Fatalf("%s implements argumentAliases but is not in builtinToolsForAliasContract; add it there (and to ToleratedArgAliases if it tolerates aliases)", typeName)
+		}
+	}
+	if len(implementations) == 0 {
+		t.Fatal("found no argumentAliases implementations: the source scan is broken")
+	}
+}
+
+// argumentAliaserReceiverTypes parses the package's non-test sources and
+// returns the receiver type names that declare argumentAliases. Test files are
+// skipped so a stub in a test cannot satisfy the contract.
+func argumentAliaserReceiverTypes(t *testing.T) map[string]bool {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package directory: %v", err)
+	}
+	found := map[string]bool{}
+	fset := token.NewFileSet()
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || len(fn.Recv.List) == 0 || fn.Name.Name != "argumentAliases" {
+				continue
+			}
+			switch recv := fn.Recv.List[0].Type.(type) {
+			case *ast.Ident:
+				found[recv.Name] = true
+			case *ast.StarExpr:
+				if ident, ok := recv.X.(*ast.Ident); ok {
+					found[ident.Name] = true
+				}
+			}
+		}
+	}
+	return found
 }
