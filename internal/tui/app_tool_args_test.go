@@ -53,7 +53,7 @@ func TestUnrecognizedToolCardPreviewsScriptFirstLineWhenCollapsed(t *testing.T) 
 	// script's opening line on the header, exactly the way a shell card
 	// previews a multi-line command — instead of a bare tool name.
 	m := NewModelWithSize(nil, 120, 16)
-	args := `{"input":"const r = await tools.write_stdin({session_id:14922,chars:\"\",yield_time_ms:1000,max_output_tokens:12000}); text(r.output);\n"}`
+	args := `{"input":"const r = await tools.write_stdin({session_id:481,chars:\"\",yield_time_ms:2500,max_output_tokens:8000}); text(r.output);\n"}`
 
 	_ = m.handleAgentEvent(agentEventMsg{event: agent.ToolCallStartEvent{
 		ID: "exec-call-1", Name: "exec", ArgsJSON: args,

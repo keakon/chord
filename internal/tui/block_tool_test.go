@@ -93,9 +93,9 @@ func TestGenericToolHeaderPreviewsFirstBodyArgumentWhenNoSubjectMatches(t *testi
 	// opening line leads the header the way a shell card previews a multi-line
 	// command. The key stays in bodyKeys so an expanded card still shows the
 	// script in full.
-	keys, vals := parseToolArgs(`{"input":"const r = await tools.write_stdin({session_id:14922});\ntext(r.output);\n"}`)
+	keys, vals := parseToolArgs(`{"input":"const r = await tools.write_stdin({session_id:481});\ntext(r.output);\n"}`)
 	mainPart, grayPart, bodyKeys := genericToolHeaderParts(keys, vals)
-	if mainPart != "const r = await tools.write_stdin({session_id:14922});" {
+	if mainPart != "const r = await tools.write_stdin({session_id:481});" {
 		t.Fatalf("mainPart = %q", mainPart)
 	}
 	if grayPart != "" {

@@ -5,20 +5,21 @@ import (
 	"testing"
 )
 
-// Real `exec` inputs copied from a Codex rollout. Codex emits raw JavaScript,
-// so these fixtures are the contract this parser exists to satisfy: if one of
-// them stops parsing, the importer silently loses a tool call.
+// `exec` inputs shaped like the ones a Codex rollout records. Codex emits raw
+// JavaScript, so these fixtures are the contract this parser exists to satisfy:
+// if one of them stops parsing, the importer silently loses a tool call. The
+// session ids and yield budgets are placeholders, not a collected rollout.
 const (
-	realExecCommandScript = `const r = await tools.exec_command({cmd:"git status --short --branch && git log --oneline @{u}..HEAD","workdir":"/repo","yield_time_ms":10000,"max_output_tokens":12000});
+	sampleExecCommandScript = `const r = await tools.exec_command({cmd:"git status --short --branch && git log --oneline @{u}..HEAD","workdir":"/repo","yield_time_ms":2500,"max_output_tokens":8000});
 text(r.output);`
 
-	realExecCommandEscapedQuotesScript = `const r = await tools.exec_command({cmd:"rg -n \"type Service|\\.Notes|Payload\" src | head -200","workdir":"/repo","yield_time_ms":10000,"max_output_tokens":30000});
+	sampleExecCommandEscapedQuotesScript = `const r = await tools.exec_command({cmd:"rg -n \"type Service|\\.Notes|Payload\" src | head -200","workdir":"/repo","yield_time_ms":2500,"max_output_tokens":8000});
 text(r.output);`
 
-	realWriteStdinScript = `const r = await tools.write_stdin({session_id:35265,yield_time_ms:1000,max_output_tokens:12000,chars:""});
+	sampleWriteStdinScript = `const r = await tools.write_stdin({session_id:481,yield_time_ms:2500,max_output_tokens:8000,chars:""});
 text(JSON.stringify(r));`
 
-	realApplyPatchScript = `const patch = "*** Begin Patch\n*** Update File: /repo/README.md\n@@\n-old\n+new\n*** End Patch";
+	sampleApplyPatchScript = `const patch = "*** Begin Patch\n*** Update File: /repo/README.md\n@@\n-old\n+new\n*** End Patch";
 text(await tools.apply_patch(patch));`
 )
 
@@ -32,7 +33,7 @@ func TestParseCodexExecScript(t *testing.T) {
 	}{
 		{
 			name:   "exec_command",
-			input:  realExecCommandScript,
+			input:  sampleExecCommandScript,
 			wantOK: true,
 			checker: func(t *testing.T, got codexExecScript) {
 				t.Helper()
@@ -45,14 +46,14 @@ func TestParseCodexExecScript(t *testing.T) {
 				if got.Args["workdir"] != "/repo" {
 					t.Fatalf("workdir=%#v", got.Args["workdir"])
 				}
-				if got.Args["yield_time_ms"] != float64(10000) || got.Args["max_output_tokens"] != float64(12000) {
+				if got.Args["yield_time_ms"] != float64(2500) || got.Args["max_output_tokens"] != float64(8000) {
 					t.Fatalf("numbers=%#v", got.Args)
 				}
 			},
 		},
 		{
 			name:   "exec_command with escaped quotes",
-			input:  realExecCommandEscapedQuotesScript,
+			input:  sampleExecCommandEscapedQuotesScript,
 			wantOK: true,
 			checker: func(t *testing.T, got codexExecScript) {
 				t.Helper()
@@ -64,21 +65,21 @@ func TestParseCodexExecScript(t *testing.T) {
 		},
 		{
 			name:   "write_stdin",
-			input:  realWriteStdinScript,
+			input:  sampleWriteStdinScript,
 			wantOK: true,
 			checker: func(t *testing.T, got codexExecScript) {
 				t.Helper()
 				if got.Nested != codexNestedWriteStdin {
 					t.Fatalf("Nested=%q", got.Nested)
 				}
-				if got.Args["session_id"] != float64(35265) || got.Args["chars"] != "" {
+				if got.Args["session_id"] != float64(481) || got.Args["chars"] != "" {
 					t.Fatalf("Args=%#v", got.Args)
 				}
 			},
 		},
 		{
 			name:   "apply_patch through a const binding",
-			input:  realApplyPatchScript,
+			input:  sampleApplyPatchScript,
 			wantOK: true,
 			checker: func(t *testing.T, got codexExecScript) {
 				t.Helper()
