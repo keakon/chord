@@ -132,8 +132,10 @@ func (a *MainAgent) mainVisibleCatalogTools() []toolpkg.Tool {
 	}
 	visible := visibleLLMTools(a.tools, a.effectiveRuleset(), isInternalControlTool, a.toolPermissionContext())
 	filtered := filterVisibleTools(visible, isMainAgentReservedTool)
-	// Apply per-model edit tool selection
-	return filterEditToolsByModel(filtered, a.modelName, a.effectiveRuleset(), a.applyPatchSurfacePolicy())
+	// Apply per-model edit tool selection. modelName is swapped under llmMu by
+	// model switches, so read it through the synchronized accessor: this chain
+	// runs on tool-execution goroutines that do not hold llmMu.
+	return filterEditToolsByModel(filtered, a.ModelName(), a.effectiveRuleset(), a.applyPatchSurfacePolicy())
 }
 
 // MainToolVisible reports whether the named tool is part of the MainAgent's
