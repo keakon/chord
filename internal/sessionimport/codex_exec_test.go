@@ -519,6 +519,11 @@ const b = await tools.exec_command({cmd:"ls"});`
 			wantCommands: []string{"go build ./...", "go test ./internal/sessionimport"},
 		},
 		{
+			name:         "const string array batch with a wrapped call",
+			input:        "const cmds = [\"go build ./...\"];\nconst rs = await Promise.all(\n  cmds.map(cmd => tools.exec_command({cmd})));",
+			wantCommands: []string{"go build ./..."},
+		},
+		{
 			name:         "promise all literal",
 			input:        parallel,
 			wantCommands: []string{"git status", "git log"},
@@ -565,6 +570,37 @@ const b = await tools.exec_command({cmd:"ls"});`
 		{
 			name:  "guarded promise all",
 			input: `flag && Promise.all([tools.exec_command({cmd:"pwd"})]);`,
+		},
+		{
+			name:  "guarded command array map",
+			input: "const cmds = [\"go build ./...\", \"go vet ./...\"];\nflag && cmds.map(cmd => tools.exec_command({cmd}));",
+		},
+		{
+			name:  "ternary guarded command array map",
+			input: "const cmds = [\"go build ./...\"];\nconst rs = ready ? cmds.map(cmd => tools.exec_command({cmd})) : null;",
+		},
+		{
+			// The guarded site here is the wrapper, not the array name: the
+			// Promise.all path already refuses this shape, so the const-array
+			// path has to agree instead of naming commands that may not run.
+			name:  "guarded wrapper over a command array map",
+			input: "const cmds = [\"go build ./...\", \"go vet ./...\"];\nconst rs = ready ? await Promise.all(cmds.map(cmd => tools.exec_command({cmd}))) : null;",
+		},
+		{
+			name:  "guarded wrapper over a wrapped command array map",
+			input: "const cmds = [\"go build ./...\"];\nconst rs = ready ? await Promise.all(\n  cmds.map(cmd => tools.exec_command({cmd}))) : null;",
+		},
+		{
+			name:  "guarded wrapper with a line break before its argument list",
+			input: "const cmds = [\"go build ./...\"];\nconst rs = ready ? await Promise.all\n  (cmds.map(cmd => tools.exec_command({cmd}))) : null;",
+		},
+		{
+			name:  "guarded parenthesized command array map",
+			input: "const cmds = [\"go build ./...\"];\nconst rs = ready ? (cmds.map(cmd => tools.exec_command({cmd}))) : null;",
+		},
+		{
+			name:  "guarded awaited parenthesized command array map",
+			input: "const cmds = [\"go build ./...\"];\nconst rs = ready ? await\n  (cmds.map(cmd => tools.exec_command({cmd}))) : null;",
 		},
 		{
 			name:  "branching sequential commands",

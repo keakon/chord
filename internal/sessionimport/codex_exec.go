@@ -298,8 +298,12 @@ func codexConstStringArray(scan codexExecScan, nameEnd int) ([]string, bool) {
 
 // codexIdentConsumedAsCommands reports whether the declared array variable is
 // actually used as the command source: mapped (`.map(`), iterated (`of`/`in`),
-// or indexed into a `cmd:` property. A string array that never reaches
-// exec_command is not a command list, and the list leaves the cell raw.
+// or indexed into a `cmd:` property. A `.map` use guarded by a conditional
+// operator does not count — the map expression may never evaluate, so the array
+// is not proof the commands ran. Statement-level conditionals stay beyond this
+// heuristic; the source text on the card remains the record of what ran. A
+// string array that never reaches exec_command is not a command list, and the
+// list leaves the cell raw.
 func codexIdentConsumedAsCommands(skeleton, name string) bool {
 	for offset := 0; offset < len(skeleton); {
 		idx := strings.Index(skeleton[offset:], name)
@@ -317,7 +321,11 @@ func codexIdentConsumedAsCommands(skeleton, name string) bool {
 		rest := strings.TrimLeft(skeleton[offset:], " \t\r\n")
 		if strings.HasPrefix(rest, ".map") {
 			after := strings.TrimLeft(rest[len(".map"):], " \t\r\n")
-			if strings.HasPrefix(after, "(") {
+			// Only the .map form can carry a conditional operator between the
+			// guard and the name: the of/in and cmd: matches below require their
+			// keyword or property to sit immediately before the name, which a
+			// conditional operator would break.
+			if strings.HasPrefix(after, "(") && !codexSiteGuarded(skeleton, idx) && !codexWrapperGuarded(skeleton, idx) {
 				return true
 			}
 		}
@@ -613,7 +621,13 @@ func tokenIsCodeWord(skeleton, word string) bool {
 // evaluate. A line break does not end the operator's expression: `flag &&\n
 // tools.exec_command(...)` still calls conditionally.
 func codexSiteGuarded(skeleton string, siteStart int) bool {
-	i := siteStart
+	i := codexSkipJSBack(skeleton, siteStart)
+	return i > 0 && strings.IndexByte("&|?:,", skeleton[i-1]) >= 0
+}
+
+// codexSkipJSBack steps back over JavaScript whitespace and any `await`
+// keywords, returning the offset where the preceding token ends.
+func codexSkipJSBack(skeleton string, i int) int {
 	for i > 0 {
 		for i > 0 && isJSSpace(skeleton[i-1]) {
 			i--
@@ -624,7 +638,49 @@ func codexSiteGuarded(skeleton string, siteStart int) bool {
 		}
 		break
 	}
-	return i > 0 && strings.IndexByte("&|?:,", skeleton[i-1]) >= 0
+	return i
+}
+
+// codexWrapperGuarded reports whether the use at idx is the sole argument of a
+// call that a conditional operator guards. `Promise.all(cmds.map(...))` is the
+// shape that matters: the guarded site there is the wrapper, not the array
+// name, so a guard read at the name cannot see it, and without this check the
+// const-array path would name commands for a conditional batch that the
+// Promise.all path — which owns the same shape — already refuses to name.
+// Statement-level conditionals around a use stay beyond this heuristic; a
+// parenthesized map expression carries no callee, so its guard is read at the
+// opening parenthesis instead.
+func codexWrapperGuarded(skeleton string, idx int) bool {
+	i := codexSkipJSBack(skeleton, idx)
+	if i == 0 || skeleton[i-1] != '(' {
+		return false
+	}
+	open := i - 1
+	if start, ok := codexCalleeStart(skeleton, open); ok {
+		return codexSiteGuarded(skeleton, start)
+	}
+	return codexSiteGuarded(skeleton, open)
+}
+
+// codexCalleeStart reports where the callee of the argument list opening at
+// open begins, dotted names included: the head of `Promise.all(` is the only
+// place a guard on the whole call is visible.
+func codexCalleeStart(skeleton string, open int) (int, bool) {
+	i := open
+	for i > 0 && isJSSpace(skeleton[i-1]) {
+		i--
+	}
+	if i == 0 || !isJSIdentPart(skeleton[i-1]) {
+		return 0, false
+	}
+	start := i - 1
+	for start > 0 && (isJSIdentPart(skeleton[start-1]) || skeleton[start-1] == '.') {
+		start--
+	}
+	for start < i && skeleton[start] == '.' {
+		start++
+	}
+	return start, true
 }
 
 // codexSiteNested reports whether the call site sits inside a construct whose
