@@ -1011,6 +1011,17 @@ func linearizeCodexTurns(turns []*codexTurn, report *ImportReport) []message.Mes
 							}
 						}
 					}
+					// A payload-wrapped result keeps its exit status inside the
+					// payload, so read it there too; the text it wraps is what
+					// the command printed or the patch reported.
+					if codexRecordsResultPayload(tc.Name) {
+						if payload, ok := parseCodexResultPayload(content); ok {
+							content = payload.Output
+							if payload.ExitCode != 0 {
+								status = message.ToolStatusError
+							}
+						}
+					}
 					out = append(out, message.Message{
 						Role:       message.RoleTool,
 						ToolCallID: tr.CallID,

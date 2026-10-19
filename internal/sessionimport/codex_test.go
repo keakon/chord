@@ -652,6 +652,33 @@ func codexExecRollout(t *testing.T, input string, outputItems ...string) []byte 
 	return []byte(b.String())
 }
 
+// codexOneCallRollout builds a one-turn rollout whose only tool call and result
+// are the given response_item payloads. The payload values are marshalled by
+// encoding/json, so a result that is itself JSON — a recorded payload, or a
+// header above one — needs no hand-written escaping.
+func codexOneCallRollout(t *testing.T, call, result map[string]any) []byte {
+	t.Helper()
+	lines := []any{
+		map[string]any{"timestamp": "2026-05-09T04:43:46Z", "type": "turn_context", "payload": map[string]any{"turn_id": "turn-1"}},
+		map[string]any{"timestamp": "2026-05-09T04:43:47Z", "type": "response_item", "payload": map[string]any{
+			"type": "message", "role": "user", "turn_id": "turn-1",
+			"content": []map[string]string{{"type": "input_text", "text": "go"}},
+		}},
+		map[string]any{"timestamp": "2026-05-09T04:43:48Z", "type": "response_item", "payload": call},
+		map[string]any{"timestamp": "2026-05-09T04:43:49Z", "type": "response_item", "payload": result},
+	}
+	var b strings.Builder
+	for _, line := range lines {
+		encoded, err := json.Marshal(line)
+		if err != nil {
+			t.Fatalf("marshal fixture line: %v", err)
+		}
+		b.Write(encoded)
+		b.WriteByte('\n')
+	}
+	return []byte(b.String())
+}
+
 func TestConvertCodexRollout_ExecCommandConvertsToShell(t *testing.T) {
 	// A verbatim `exec` input from a Codex rollout: one nested exec_command call.
 	input := "const r = await tools.exec_command({cmd:\"git status --short\",\"workdir\":\"/tmp/project\",\"yield_time_ms\":10000,\"max_output_tokens\":12000});\ntext(r.output);"
@@ -820,6 +847,96 @@ func TestConvertCodexRollout_FileContentIsNotDecodedAsShellEnvelope(t *testing.T
 	}
 	if msgs[2].Content != content {
 		t.Fatalf("result=%q, want the file's own text", msgs[2].Content)
+	}
+}
+
+func TestConvertCodexRollout_PayloadWrappedShellFailureMarksResultError(t *testing.T) {
+	// An older Codex recorded the result payload itself as a JSON string. Its
+	// output is the command's own text and its exit status is the outcome, so
+	// leaving it wrapped would import a failed command as a success.
+	data := codexOneCallRollout(t,
+		map[string]any{"type": "function_call", "name": "shell", "arguments": `{"command":"go test ./..."}`, "call_id": "call_1", "turn_id": "turn-1"},
+		map[string]any{"type": "function_call_output", "output": `{"output":"FAIL\n","metadata":{"exit_code":1,"duration_seconds":0.1}}`, "call_id": "call_1", "turn_id": "turn-1"},
+	)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	if msgs[2].ToolStatus != message.ToolStatusError {
+		t.Fatalf("tool status=%q, want error", msgs[2].ToolStatus)
+	}
+	if msgs[2].Content != "FAIL\n" {
+		t.Fatalf("result payload not unwrapped: %q", msgs[2].Content)
+	}
+}
+
+func TestConvertCodexRollout_PayloadWrappedApplyPatchKeepsItsSummary(t *testing.T) {
+	data := codexOneCallRollout(t,
+		map[string]any{"type": "custom_tool_call", "name": "apply_patch", "input": "*** Begin Patch\n*** Update File: a.txt\n@@\n-old\n+new\n*** End Patch", "call_id": "call_1", "turn_id": "turn-1"},
+		map[string]any{"type": "custom_tool_call_output", "output": `{"output":"Success. Updated the following files:\nM a.txt\n","metadata":{"exit_code":0,"duration_seconds":0.0}}`, "call_id": "call_1", "turn_id": "turn-1"},
+	)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("msgs len=%d, want 3: %+v", len(msgs), msgs)
+	}
+	if name := msgs[1].ToolCalls[0].Name; name != tools.NameApplyPatch {
+		t.Fatalf("tool name=%q, want apply_patch", name)
+	}
+	if msgs[2].ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("tool status=%q, want success", msgs[2].ToolStatus)
+	}
+	if msgs[2].Content != "Success. Updated the following files:\nM a.txt\n" {
+		t.Fatalf("result=%q, want the patch summary", msgs[2].Content)
+	}
+}
+
+func TestConvertCodexRollout_HeaderAbovePayloadIsStrippedAndUnwrapped(t *testing.T) {
+	// A later version wrote the shell header and the payload together: the
+	// header comes off first, then the payload inside it.
+	data := codexOneCallRollout(t,
+		map[string]any{"type": "function_call", "name": "exec_command", "arguments": `{"cmd":"ls"}`, "call_id": "call_1", "turn_id": "turn-1"},
+		map[string]any{"type": "function_call_output", "output": "Wall time: 0.0000 seconds\nOutput:\n{\"output\":\"a.go\\n\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":0.0}}", "call_id": "call_1", "turn_id": "turn-1"},
+	)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if msgs[2].ToolStatus != message.ToolStatusSuccess {
+		t.Fatalf("tool status=%q, want success", msgs[2].ToolStatus)
+	}
+	if msgs[2].Content != "a.go\n" {
+		t.Fatalf("result=%q, want the command's output", msgs[2].Content)
+	}
+}
+
+func TestConvertCodexRollout_PayloadShapedFileContentIsKept(t *testing.T) {
+	// A file whose text happens to be that JSON is file content, not a result
+	// payload, so reading it must keep the bytes.
+	const fileContent = `{"output":"ok\n","metadata":{"exit_code":0}}`
+	data := codexOneCallRollout(t,
+		map[string]any{"type": "function_call", "name": "read_file", "arguments": `{"path":"payload.json"}`, "call_id": "call_1", "turn_id": "turn-1"},
+		map[string]any{"type": "function_call_output", "output": fileContent, "call_id": "call_1", "turn_id": "turn-1"},
+	)
+
+	var report ImportReport
+	msgs, err := convertCodexRollout(data, ReasoningStrict, &report)
+	if err != nil {
+		t.Fatalf("convertCodexRollout: %v", err)
+	}
+	if msgs[2].Content != fileContent {
+		t.Fatalf("result=%q, want the file's own bytes", msgs[2].Content)
 	}
 }
 
